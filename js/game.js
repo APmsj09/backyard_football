@@ -3,11 +3,52 @@ import { firstNames, lastNames, nicknames, teamNames, positions, divisionNames, 
 
 let game = null;
 
+/**
+ * Calculates a player's overall rating (1-99) for a specific position slot.
+ * @param {object} player - The player object.
+ * @param {string} positionSlot - The position slot (e.g., 'QB', 'ATH1', 'LINE2').
+ * @returns {number} The player's overall rating for that position.
+ */
+export function calculateOverall(player, positionSlot) {
+    const attrs = player.attributes;
+    const weights = {
+        QB: { throwingAccuracy: 0.4, playbookIQ: 0.3, consistency: 0.1, clutch: 0.1, speed: 0.05, agility: 0.05 },
+        ATH: { speed: 0.25, agility: 0.25, catchingHands: 0.2, stamina: 0.1, tackling: 0.1, clutch: 0.1 },
+        LINE: { strength: 0.3, blocking: 0.25, tackling: 0.25, weight: 0.1, playbookIQ: 0.1 }
+    };
+
+    let positionType = positionSlot.replace(/\d/g, ''); // 'ATH1' -> 'ATH'
+    if (!weights[positionType]) positionType = 'ATH'; // Default for safety
+
+    const relevantWeights = weights[positionType];
+    let score = 0;
+
+    for (const category in attrs) {
+        for (const attr in attrs[category]) {
+            if (relevantWeights[attr]) {
+                let value = attrs[category][attr];
+                // Normalize weight to be on a similar scale to other attributes
+                if (attr === 'weight') value = value / 2.5; 
+                score += value * relevantWeights[attr];
+            }
+        }
+    }
+    
+    return Math.min(99, Math.max(1, Math.round(score)));
+}
+
+
+/**
+ * Generates a single player with detailed, position-specific attributes.
+ * @param {number} [minAge=8] - The minimum age for the player.
+ * @param {number} [maxAge=17] - The maximum age for the player.
+ * @returns {object} The complete player object.
+ */
 function generatePlayer(minAge = 8, maxAge = 17) {
     const firstName = getRandom(firstNames);
     const lastName = Math.random() < 0.4 ? getRandom(nicknames) : getRandom(lastNames);
     const age = getRandomInt(minAge, maxAge);
-    const position = getRandom(positions);
+    const favoritePosition = getRandom(positions);
 
     const ageProgress = (age - 8) / (17 - 8);
     let baseHeight = 53 + (ageProgress * 16);
@@ -16,7 +57,8 @@ function generatePlayer(minAge = 8, maxAge = 17) {
     baseHeight += getRandomInt(-2, 2);
     baseWeight += getRandomInt(-10, 10);
 
-    switch (position) {
+    // Positional adjustments for height and weight
+    switch (favoritePosition) {
         case 'QB': baseHeight += getRandomInt(1, 3); break;
         case 'LINE': baseHeight -= getRandomInt(0, 2); baseWeight += getRandomInt(20, 40); break;
         case 'ATH': baseHeight += getRandomInt(-1, 2); baseWeight += getRandomInt(-5, 10); break;
@@ -28,7 +70,16 @@ function generatePlayer(minAge = 8, maxAge = 17) {
         technical: { throwingAccuracy: getRandomInt(20, 50), catchingHands: getRandomInt(30, 60), tackling: getRandomInt(30, 60), blocking: getRandomInt(30, 60) }
     };
 
-    switch (position) {
+    // Physical skills are influenced by height and weight
+    const weightModifier = (attributes.physical.weight - 125) / 50; // Approx -1 to 1
+    attributes.physical.strength += Math.round(weightModifier * 10);
+    attributes.physical.speed -= Math.round(weightModifier * 8);
+    attributes.physical.agility -= Math.round(weightModifier * 5);
+
+
+    // Positional specialization boosts - This determines their best position
+    const bestPosition = getRandom(positions); // Their skills might not match their favorite position
+     switch (bestPosition) {
         case 'QB': 
             attributes.technical.throwingAccuracy = getRandomInt(65, 95); 
             attributes.mental.playbookIQ = getRandomInt(60, 95); 
@@ -48,8 +99,18 @@ function generatePlayer(minAge = 8, maxAge = 17) {
             break;
     }
 
+    // Clamp all attributes between 1 and 99
+    for (const category in attributes) {
+        for (const attr in attributes[category]) {
+            if (typeof attributes[category][attr] === 'number' && !['height', 'weight'].includes(attr)) {
+                attributes[category][attr] = Math.max(1, Math.min(99, attributes[category][attr]));
+            }
+        }
+    }
+
+
     return {
-        id: crypto.randomUUID(), name: `${firstName} ${lastName}`, age, position, attributes, teamId: null,
+        id: crypto.randomUUID(), name: `${firstName} ${lastName}`, age, favoritePosition, attributes, teamId: null,
         gameStats: { receptions: 0, recYards: 0, passYards: 0, rushYards: 0, touchdowns: 0, tackles: 0 },
         seasonStats: { receptions: 0, recYards: 0, passYards: 0, rushYards: 0, touchdowns: 0, tackles: 0 },
         careerStats: { receptions: 0, recYards: 0, passYards: 0, rushYards: 0, touchdowns: 0, tackles: 0, seasonsPlayed: 0 }
@@ -282,6 +343,48 @@ export function aiManageRoster(team) {
     }
 }
 
+/**
+ * Applies attribute growth to a single player based on their age.
+ * @param {object} player - The player to develop.
+ */
+function developPlayer(player) {
+    // Attribute skill growth
+    let potential;
+    if (player.age < 12) potential = getRandomInt(4, 8); // High potential
+    else if (player.age < 16) potential = getRandomInt(1, 5); // Medium potential
+    else potential = getRandomInt(0, 2); // Low potential
+
+    const attributesToImprove = ['speed', 'strength', 'agility', 'throwingAccuracy', 'catchingHands', 'tackling', 'blocking', 'playbookIQ'];
+    for (let i = 0; i < potential; i++) {
+        const attrToBoost = getRandom(attributesToImprove);
+        for (const category in player.attributes) {
+            if (player.attributes[category][attrToBoost] && player.attributes[category][attrToBoost] < 99) {
+                player.attributes[category][attrToBoost]++;
+                break;
+            }
+        }
+    }
+
+    // Physical growth (Height & Weight)
+    let heightGain = 0;
+    let weightGain = 0;
+
+    if (player.age <= 12) { // Prime growth spurt
+        heightGain = getRandomInt(1, 3);
+        weightGain = getRandomInt(5, 15);
+    } else if (player.age <= 15) { // Maturing
+        heightGain = getRandomInt(0, 2);
+        weightGain = getRandomInt(3, 10);
+    } else { // Topping out
+        heightGain = getRandomInt(0, 1);
+        weightGain = getRandomInt(1, 5);
+    }
+
+    player.attributes.physical.height += heightGain;
+    player.attributes.physical.weight += weightGain;
+}
+
+
 export function advanceToOffseason() {
     game.year++;
     let retiredCount = 0;
@@ -289,11 +392,13 @@ export function advanceToOffseason() {
     game.players.forEach(p => {
         p.age++;
         p.careerStats.seasonsPlayed++;
+        
+        developPlayer(p);
+
         if (p.age < 18) {
             p.seasonStats = { receptions: 0, recYards: 0, passYards: 0, rushYards: 0, touchdowns: 0, tackles: 0 };
             remainingPlayers.push(p);
         } else {
-            // Hall of Fame Check
             if (p.careerStats.touchdowns > 20 || p.careerStats.passYards > 5000 || p.careerStats.tackles > 200) {
                 game.hallOfFame.push(p);
             }
@@ -306,8 +411,9 @@ export function advanceToOffseason() {
         team.roster = []; 
         team.wins = 0; 
         team.losses = 0;
-        // Reset depth chart, but could be smarter in future
-        Object.keys(team.depthChart).forEach(pos => team.depthChart[pos] = null);
+        if (team.depthChart) {
+             Object.keys(team.depthChart).forEach(pos => team.depthChart[pos] = null);
+        }
     });
     game.players.forEach(p => p.teamId = null);
     for (let i = 0; i < retiredCount; i++) game.players.push(generatePlayer(8, 10));
@@ -315,12 +421,9 @@ export function advanceToOffseason() {
 
 export function updateDepthChart(playerId, newPositionSlot) {
     const team = game.playerTeam;
-    // Find the old slot of the player being moved
     const oldSlot = Object.keys(team.depthChart).find(key => team.depthChart[key] === playerId);
-    // Find the player currently in the new slot, if any
     const displacedPlayerId = team.depthChart[newPositionSlot];
 
-    // Swap the players
     team.depthChart[newPositionSlot] = playerId;
     if(oldSlot) {
         team.depthChart[oldSlot] = displacedPlayerId;
