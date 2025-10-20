@@ -1,5 +1,3 @@
-// js/data.js - Contains all the raw data for the game.
-
 export const firstNames = [
     "Alex", "Ben", "Casey", "Dakota", "Eli", "Frankie", "Gabby", "Hayden", "Izzy", "Jordan", 
     "Kai", "Leo", "Morgan", "Nico", "Olive", "Pat", "Quinn", "Riley", "Sam", "Taylor", "Vic", 
@@ -11,7 +9,11 @@ export const firstNames = [
     "Sidney", "Aubrey", "Lynn", "Kris", "Robbie", "Jackie", "Kerry", "Alexis", "Dana", "Gale",
     "Ash", "Blair", "Corey", "Dale", "Erin", "Gael", "Harley", "Jody", "Lane", "Marlowe",
     "Orion", "Paxton", "Remy", "Rory", "Shae", "Tate", "August", "Billie", "Denver", "Ellis",
-    "Indigo", "Jules", "Lennon", "Milan", "Phoenix", "Sterling", "Arden", "Caelan", "Finley", "Justice"
+    "Indigo", "Jules", "Lennon", "Milan", "Phoenix", "Sterling", "Arden", "Caelan", "Finley", "Justice",
+    "Chris", "Pat", "Shawn", "Jean", "Kelly", "Lindsay", "Joan", "Neil", "Glen", "Brett", "Kirk",
+    "Leigh", "Merle", "Robin", "Stacy", "Tony", "Claude", "Daryl", "Jaden", "Jan", "Jimmie", "Johnny",
+    "Ray", "Rene", "Stevie", "Willie", "Frankie", "Jessie", "Miguel", "Luis", "Carlos", "Jose",
+    "Juan", "David", "Jesus", "Antonio", "Javier", "Daniel", "Manuel", "Francisco", "Ricardo", "Fernando"
 ];
 
 export const lastNames = [
@@ -25,7 +27,12 @@ export const lastNames = [
     "Ward", "Torres", "Peterson", "Gray", "Ramirez", "James", "Watson", "Brooks", "Kelly", "Sanders",
     "Price", "Bennett", "Wood", "Barnes", "Ross", "Henderson", "Coleman", "Jenkins", "Perry", "Powell",
     "Long", "Patterson", "Hughes", "Flores", "Washington", "Butler", "Simmons", "Foster", "Gonzales", "Bryant",
-    "Alexander", "Russell", "Griffin", "Diaz", "Hayes", "Myers"
+    "Alexander", "Russell", "Griffin", "Diaz", "Hayes", "Myers", "Ford", "Hamilton", "Graham", "Sullivan",
+    "Wallace", "Woods", "Cole", "West", "Jordan", "Owens", "Reynolds", "Fisher", "Ellis", "Harrison", "Gibson",
+    "Mcdonald", "Cruz", "Marshall", "Ortiz", "Gomez", "Murray", "Freeman", "Wells", "Webb", "Simpson", "Stevens",
+    "Tucker", "Porter", "Hunter", "Hicks", "Crawford", "Henry", "Boyd", "Mason", "Morales", "Kennedy", "Warren",
+    "Dixon", "Ramos", "Reyes", "Burns", "Gordon", "Shaw", "Sato", "Suzuki", "Takahashi", "Tanaka", "Watanabe",
+    "Ito", "Yamamoto", "Nakamura", "Kobayashi", "Kato"
 ];
 
 export const nicknames = [
@@ -39,15 +46,20 @@ export const nicknames = [
     "'Avalanche'", "'Bolt'", "'Captain'", "'Dynamo'", "'Edge'", "'Fury'", "'Goliath'", "'Hawk'",
     "'Ironhide'", "'Juggernaut'", "'Kingpin'", "'Legend'", "'Maverick'", "'Ninja'", "'Outlaw'", "'Prowler'",
     "'Rampage'", "'Slinger'", "'T-Bone'", "'Ultimate'", "'Vandal'", "'Warrior'", "'Yeti'", "'Zeus'",
-    "'Aftershock'", "'Bruiser'", "'Cyclone'", "'Dragon'", "'Enigma'", "'Grizzly'"
+    "'Aftershock'", "'Bruiser'", "'Cyclone'", "'Dragon'", "'Enigma'", "'Grizzly'", "'Hotshot'", "'Jolt'",
+    "'Knuckles'", "'Maniac'", "'Nightmare'", "'Overdrive'", "'Phantom'", "'Raptor'", "'Spike'", "'Titan'",
+    "'Volt'", "'Wolf'", "'Zapper'", "'Bandit'", "'Crusher'", "'Demon'", "'Fireball'", "'Grinder'",
+    "'Hound'", "'Iceman'", "'Jackal'", "'Lightning'", "'Mad Dog'", "'Gator'", "'Terminator'", "'Showtime'"
 ];
 
 export const teamNames = [
-    "The Comets", "The Jets", "The Rockets", "The Sharks", "The Tigers", "The Lions", "The Bears", "The Eagles", 
-    "The Hornets", "The Bulldogs", "The Panthers", "The Giants", "The Wolves", "The Vipers", "The Pythons", "The Cobras",
-    "The Scorpions", "The Spartans", "The Cyclones", "The Gladiators", "The Raptors", "The Hawks", "The Falcons", "The Rebels"
+    "Comets", "Jets", "Rockets", "Sharks", "Tigers", "Lions", "Bears", "Eagles", 
+    "Hornets", "Bulldogs", "Panthers", "Giants", "Wolves", "Vipers", "Pythons", "Cobras",
+    "Scorpions", "Spartans", "Cyclones", "Gladiators", "Raptors", "Hawks", "Falcons", "Rebels"
 ];
-export const positions = ["QB", "RB", "WR", "TE", "DL", "LB", "DB"];
+
+// Simplified positions for 8v8 "play both ways" football
+export const positions = ["QB", "ATH", "LINE"]; // QB, Athlete, Lineman
 
 export const divisionNames = ["North", "South"];
 
