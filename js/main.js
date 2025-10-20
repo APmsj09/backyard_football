@@ -13,20 +13,64 @@ async function startNewGame() {
         await new Promise(resolve => setTimeout(resolve, 50)); 
         
         await Game.initializeLeague(UI.updateLoadingProgress);
+        Game.setupDraft();
         
         const game = Game.getGameState();
         UI.showScreen('draft');
         UI.renderDraftPool(game.players.filter(p => !p.teamId));
         UI.updateRoster(game.playerTeam);
-        UI.updateDraftUI(game); // Pass game state to the UI function
+        
+        runNextDraftPick();
+
     } catch (error) {
         console.error("Error starting game:", error);
-        // In a real app, you might show a user-friendly error message here.
     }
 }
 
 /**
- * Handles the click event for drafting a player.
+ * Controls the flow of the draft, turn by turn.
+ */
+async function runNextDraftPick() {
+    const game = Game.getGameState();
+    const currentPickNumber = game.currentPick;
+    
+    // Check if draft is over
+    if (currentPickNumber >= game.draftOrder.length) {
+        console.log("Draft is complete!");
+        Game.generateSchedule();
+        startSeasonPhase();
+        return;
+    }
+
+    const currentTeam = game.draftOrder[currentPickNumber];
+    UI.updateDraftClock(currentTeam, currentPickNumber + 1);
+
+    if (currentTeam.id === game.playerTeam.id) {
+        // Player's turn
+        UI.setDraftButtonState(true);
+        console.log("Player is on the clock.");
+    } else {
+        // AI's turn
+        UI.setDraftButtonState(false);
+        console.log(`${currentTeam.name} is on the clock.`);
+        
+        // Add a delay for suspense
+        await new Promise(resolve => setTimeout(resolve, 1500)); 
+
+        const pickedPlayer = Game.simulateAIPick(currentTeam);
+        if (pickedPlayer) {
+            UI.addPickToLog(currentTeam, pickedPlayer, currentPickNumber + 1);
+            UI.removePlayerCard(pickedPlayer.id);
+        }
+        
+        game.currentPick++;
+        runNextDraftPick(); // Proceed to the next pick
+    }
+}
+
+
+/**
+ * Handles the click event for the player drafting a player.
  */
 function handleDraftClick() {
     const game = Game.getGameState();
@@ -35,17 +79,20 @@ function handleDraftClick() {
     
     if (selectedCard) {
         const player = game.players.find(p => p.id === selectedCard.dataset.playerId);
+        
         if (Game.addPlayerToTeam(player, game.playerTeam)) {
             UI.updateRoster(game.playerTeam);
             UI.removePlayerCard(player.id);
-            UI.updateDraftUI(game); // Pass game state to the UI function
-            if (game.playerTeam.roster.length >= 10) {
-                Game.generateSchedule();
-                startSeasonPhase();
-            }
+            UI.addPickToLog(game.playerTeam, player, game.currentPick + 1);
+            
+            game.currentPick++;
+            runNextDraftPick(); // Proceed to next pick
         }
+    } else {
+        alert("Please select a player to draft!");
     }
 }
+
 
 /**
  * Transitions the game from draft/off-season to the regular season.
@@ -94,8 +141,6 @@ function handleFreeAgentSignClick(event) {
         if (game.playerTeam.roster.length < 10) {
             Game.addPlayerToTeam(player, game.playerTeam);
         } else {
-            // In a real game, you would ask the user if they want to drop a player.
-            // For now, we'll just alert them.
             alert("Your roster is full! You need to drop a player to sign a friend.");
         }
     } else {
@@ -119,13 +164,14 @@ async function startNextSeason() {
     await Game.yieldToMain();
     
     const game = Game.getGameState();
+    Game.setupDraft(); // Set up the new draft order
     UI.updateLoadingProgress(1, "Done!");
     await new Promise(res => setTimeout(res, 500));
     
     UI.showScreen('draft');
     UI.renderDraftPool(game.players.filter(p => !p.teamId));
     UI.updateRoster(game.playerTeam);
-    UI.updateDraftUI(game); // Pass game state to the UI function
+    runNextDraftPick();
 }
 
 // --- INITIALIZATION ---
