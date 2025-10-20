@@ -10,11 +10,13 @@ let dragPlayerId = null;
 export function setupElements() {
     elements = {
         // Screens
-        startScreen: document.getElementById('start-screen'),
-        loadingScreen: document.getElementById('loading-screen'),
-        teamCreationScreen: document.getElementById('team-creation-screen'),
-        draftScreen: document.getElementById('draft-screen'),
-        dashboardScreen: document.getElementById('dashboard-screen'),
+        screens: {
+            startScreen: document.getElementById('start-screen'),
+            loadingScreen: document.getElementById('loading-screen'),
+            teamCreationScreen: document.getElementById('team-creation-screen'),
+            draftScreen: document.getElementById('draft-screen'),
+            dashboardScreen: document.getElementById('dashboard-screen'),
+        },
 
         // Loading
         loadingProgress: document.getElementById('loading-progress'),
