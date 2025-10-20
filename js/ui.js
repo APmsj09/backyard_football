@@ -20,7 +20,10 @@ export function setupElements() {
         loadingMessage: document.getElementById('loading-message'),
         playerPool: document.getElementById('player-pool'),
         teamRoster: document.getElementById('team-roster'),
-        draftStatus: document.getElementById('draft-status'),
+        draftClockPick: document.getElementById('draft-clock-pick'),
+        draftClockTeam: document.getElementById('draft-clock-team'),
+        draftLog: document.getElementById('draft-log'),
+        draftPlayerBtn: document.getElementById('draft-player-btn'),
         seasonHeader: document.getElementById('season-header'),
         standingsContainer: document.getElementById('standings-container'),
         scheduleContainer: document.getElementById('schedule-container'),
@@ -59,7 +62,7 @@ export function updateLoadingProgress(progress, message = 'Generating players...
 }
 
 /**
- * Creates an HTML element for a single player card.
+ * Creates an HTML element for a single player card with detailed attributes.
  * @param {object} player - The player object.
  * @returns {HTMLElement} The created player card element.
  */
@@ -67,27 +70,51 @@ function createPlayerCard(player) {
     const card = document.createElement('div');
     card.className = 'player-card bg-white rounded-lg p-3 shadow-md border border-gray-200 cursor-pointer';
     card.dataset.playerId = player.id;
+    
+    // Convert inches to feet and inches
+    const feet = Math.floor(player.attributes.physical.height / 12);
+    const inches = player.attributes.physical.height % 12;
+
+    const keyTechStat = {
+        'QB': `ACC: ${player.attributes.technical.throwingAccuracy}`,
+        'WR': `HND: ${player.attributes.technical.catchingHands}`,
+        'RB': `AGI: ${player.attributes.physical.agility}`,
+        'TE': `BLK: ${player.attributes.technical.blocking}`,
+        'DL': `TKL: ${player.attributes.technical.tackling}`,
+        'LB': `TKL: ${player.attributes.technical.tackling}`,
+        'DB': `SPD: ${player.attributes.physical.speed}`,
+    }[player.position] || '';
+
 
     card.innerHTML = `
-        <div class="flex justify-between items-center">
-            <h3 class="font-bold text-lg text-gray-800">${player.name}</h3>
+        <div class="flex justify-between items-start">
+            <div>
+                <h3 class="font-bold text-base leading-tight text-gray-800">${player.name}</h3>
+                <p class="text-xs text-gray-500">Age: ${player.age} | ${feet}' ${inches}" | ${player.attributes.physical.weight} lbs</p>
+            </div>
             <span class="text-sm font-semibold bg-gray-200 text-gray-700 px-2 py-1 rounded-full">${player.position}</span>
         </div>
-        <p class="text-sm text-gray-500">Age: ${player.age}</p>
-        <div class="mt-2 grid grid-cols-3 gap-2 text-center text-xs">
-            <div title="Speed"><span class="font-bold">SPD</span> ${player.attributes.physical.speed}</div>
-            <div title="Strength"><span class="font-bold">STR</span> ${player.attributes.physical.strength}</div>
-            <div title="Agility"><span class="font-bold">AGI</span> ${player.attributes.physical.agility}</div>
+        <div class="mt-2 grid grid-cols-3 gap-1 text-center text-xs border-t pt-2">
+            <div><span class="font-bold text-gray-500">SPD</span> ${player.attributes.physical.speed}</div>
+            <div><span class="font-bold text-gray-500">STR</span> ${player.attributes.physical.strength}</div>
+            <div><span class="font-bold text-gray-500">IQ</span> ${player.attributes.mental.playbookIQ}</div>
+            <div class="col-span-3 mt-1 text-amber-600 font-semibold">${keyTechStat}</div>
         </div>
     `;
 
     card.addEventListener('click', () => {
-        document.querySelectorAll('#player-pool .player-card.selected').forEach(c => c.classList.remove('selected'));
+        // Deselect any other selected card in the pool
+        const currentlySelected = elements.playerPool.querySelector('.player-card.selected');
+        if (currentlySelected) {
+            currentlySelected.classList.remove('selected');
+        }
+        // Select the new card
         card.classList.add('selected');
     });
 
     return card;
 }
+
 
 /**
  * Renders the list of available players for the draft.
@@ -110,24 +137,48 @@ export function updateRoster(team) {
     elements.teamRoster.innerHTML = '';
     team.roster.forEach(player => {
         const li = document.createElement('li');
-        li.className = 'flex justify-between items-center p-2 border-b';
+        li.className = 'flex justify-between items-center p-2 border-b text-sm';
         li.innerHTML = `
-            <span>${player.name} (${player.position})</span>
-            <span class="text-gray-500">Age: ${player.age}</span>
+            <span>${player.name}</span>
+            <span class="font-bold text-gray-600">${player.position}</span>
         `;
         elements.teamRoster.appendChild(li);
     });
 }
 
 /**
- * Updates the draft status text (e.g., "Pick 1 of 10").
- * @param {object} game - The main game state object.
+ * Updates the draft clock UI.
+ * @param {object} team - The team currently on the clock.
+ * @param {number} pickNumber - The overall pick number (1-based).
  */
-export function updateDraftUI(game) {
-    if (elements.draftStatus && game && game.playerTeam) {
-        elements.draftStatus.textContent = `Pick ${game.playerTeam.roster.length + 1} of 10`;
+export function updateDraftClock(team, pickNumber) {
+    if (elements.draftClockTeam) {
+        elements.draftClockTeam.textContent = `${team.name} are on the clock!`;
+    }
+    if (elements.draftClockPick) {
+        const round = Math.floor((pickNumber - 1) / 20) + 1;
+        const pickInRound = ((pickNumber - 1) % 20) + 1;
+        elements.draftClockPick.textContent = `Round ${round}, Pick ${pickInRound}`;
     }
 }
+
+/**
+ * Adds a new entry to the draft log.
+ * @param {object} team - The team that made the pick.
+ * @param {object} player - The player who was picked.
+ * @param {number} pickNumber - The overall pick number (1-based).
+ */
+export function addPickToLog(team, player, pickNumber) {
+    if (!elements.draftLog) return;
+    const li = document.createElement('li');
+    li.className = 'p-2 bg-gray-50 rounded-md';
+    li.innerHTML = `
+        <span class="font-bold">${pickNumber}. ${team.name}</span> select <span class="font-semibold">${player.name} (${player.position})</span>
+    `;
+    // Add to the top of the list
+    elements.draftLog.prepend(li);
+}
+
 
 /**
  * Removes a player card from the draft pool after they've been drafted.
@@ -137,6 +188,17 @@ export function removePlayerCard(playerId) {
     const card = elements.playerPool.querySelector(`[data-player-id="${playerId}"]`);
     if (card) card.remove();
 }
+
+/**
+ * Enables or disables the player's draft button.
+ * @param {boolean} enabled - True to enable, false to disable.
+ */
+export function setDraftButtonState(enabled) {
+    if (elements.draftPlayerBtn) {
+        elements.draftPlayerBtn.disabled = !enabled;
+    }
+}
+
 
 /**
  * Renders the standings tables for each division.
