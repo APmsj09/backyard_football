@@ -9,7 +9,7 @@ let dragPlayerId = null;
  */
 export function setupElements() {
     elements = {
-        // Screens
+        // Screens are now nested in their own object
         screens: {
             startScreen: document.getElementById('start-screen'),
             loadingScreen: document.getElementById('loading-screen'),
@@ -77,7 +77,9 @@ export function setupElements() {
  * @param {string} screenId - The ID of the screen to show.
  */
 export function showScreen(screenId) {
-    Object.values(elements.screens).forEach(screen => screen.classList.add('hidden'));
+    Object.values(elements.screens).forEach(screen => {
+        if (screen) screen.classList.add('hidden');
+    });
     if (elements.screens[screenId]) {
         elements.screens[screenId].classList.remove('hidden');
     }
