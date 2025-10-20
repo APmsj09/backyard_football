@@ -65,7 +65,7 @@ export function yieldToMain() {
 }
 
 /**
- * Initializes the entire league structure, including players and teams.
+ * Initializes the entire league structure, including players and AI teams.
  * @param {function} onProgress - A callback function to report loading progress.
  */
 export async function initializeLeague(onProgress) {
@@ -101,7 +101,8 @@ export async function initializeLeague(onProgress) {
     }
     console.log(`Generated ${game.players.length} players.`);
 
-    for (let i = 0; i < 20; i++) {
+    // Create 19 AI teams
+    for (let i = 0; i < 19; i++) {
         const teamNameIndex = getRandomInt(0, availableTeamNames.length - 1);
         const teamName = availableTeamNames.splice(teamNameIndex, 1)[0];
         const division = availableDivisions[i % availableDivisions.length];
@@ -117,11 +118,30 @@ export async function initializeLeague(onProgress) {
         game.teams.push(team);
         game.divisions[division].push(team.id);
     }
-    console.log(`Generated ${game.teams.length} teams.`);
-
-    game.playerTeam = getRandom(game.teams);
-    console.log(`Player team set to: ${game.playerTeam.name}`);
+    console.log(`Generated ${game.teams.length} AI teams.`);
 }
+
+/**
+ * Creates the player's team and adds it to the league.
+ * @param {string} teamName - The chosen name for the player's team.
+ */
+export function createPlayerTeam(teamName) {
+    const division = game.teams.length % 2 === 0 ? divisionNames[0] : divisionNames[1];
+    const playerTeam = {
+        id: crypto.randomUUID(),
+        name: teamName,
+        roster: [],
+        coach: getRandom(coachPersonalities), // Or a default 'player' coach
+        division: division,
+        wins: 0,
+        losses: 0
+    };
+    game.teams.push(playerTeam);
+    game.divisions[division].push(playerTeam.id);
+    game.playerTeam = playerTeam;
+    console.log(`Player team "${teamName}" created and added to the league.`);
+}
+
 
 /**
  * Calculates a score for a player based on a coach's preferences.
@@ -151,7 +171,8 @@ function getPlayerScore(player, coach) {
 export function setupDraft() {
     game.draftOrder = [];
     game.currentPick = 0;
-    const teams = [...game.teams];
+    // Shuffle teams for initial draft order randomness
+    const teams = [...game.teams].sort(() => Math.random() - 0.5);
 
     for (let i = 0; i < 10; i++) { // 10 rounds
         if (i % 2 === 0) { // Even rounds (0, 2, ...) go in normal order
@@ -405,7 +426,7 @@ export function advanceToOffseason() {
         if (p.age < 18) {
             // Reset season stats for the new year
             p.seasonStats = { receptions: 0, recYards: 0, passYards: 0, rushYards: 0, touchdowns: 0, tackles: 0 };
-            remainingPlayers.push(p);
+            remainingPlayer.push(p);
         } else {
             retiredCount++;
         }
