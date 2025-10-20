@@ -1,5 +1,8 @@
 import * as Game from './game.js';
 import * as UI from './ui.js';
+import { teamNames } from './data.js';
+
+let currentlySelectedPlayerId = null;
 
 // --- MAIN APPLICATION FLOW & EVENT HANDLERS ---
 
@@ -9,23 +12,61 @@ import * as UI from './ui.js';
 async function startNewGame() {
     try {
         UI.showScreen('loading');
-        // This tiny delay forces the browser to render the loading screen before starting heavy work.
         await new Promise(resolve => setTimeout(resolve, 50)); 
         
         await Game.initializeLeague(UI.updateLoadingProgress);
-        Game.setupDraft();
         
-        const game = Game.getGameState();
-        UI.showScreen('draft');
-        UI.renderDraftPool(game.players.filter(p => !p.teamId));
-        UI.updateRoster(game.playerTeam);
-        
-        runNextDraftPick();
+        UI.renderTeamCreation(teamNames, handlePremadeTeamClick);
+        UI.showScreen('teamCreation');
 
     } catch (error) {
         console.error("Error starting game:", error);
     }
 }
+
+/**
+ * Handles the click on a premade team name button.
+ * @param {string} name - The name of the team that was clicked.
+ */
+function handlePremadeTeamClick(name) {
+    const input = document.getElementById('team-name-input');
+    if (input) {
+        input.value = name;
+    }
+}
+
+/**
+ * Confirms the team name and moves to the draft screen.
+ */
+function handleConfirmTeamClick() {
+    const input = document.getElementById('team-name-input');
+    const teamName = input.value.trim();
+    if (!teamName) {
+        alert("Please enter or select a team name!");
+        return;
+    }
+
+    Game.createPlayerTeam(teamName);
+    Game.setupDraft();
+    
+    const game = Game.getGameState();
+    UI.showScreen('draft');
+    UI.renderDraftPool(game.players.filter(p => !p.teamId), handlePlayerCardClick);
+    UI.updateRoster(game.playerTeam);
+    
+    runNextDraftPick();
+}
+
+/**
+ * Handles a click on a player card in the draft pool.
+ * @param {object} player - The player object associated with the clicked card.
+ */
+function handlePlayerCardClick(player) {
+    currentlySelectedPlayerId = player.id;
+    UI.renderPlayerDetailCard(player);
+    UI.selectPlayerCard(player.id);
+}
+
 
 /**
  * Controls the flow of the draft, turn by turn.
@@ -54,8 +95,8 @@ async function runNextDraftPick() {
         UI.setDraftButtonState(false);
         console.log(`${currentTeam.name} is on the clock.`);
         
-        // Add a delay for suspense
-        await new Promise(resolve => setTimeout(resolve, 1500)); 
+        // AI picks much faster now
+        await new Promise(resolve => setTimeout(resolve, 200)); 
 
         const pickedPlayer = Game.simulateAIPick(currentTeam);
         if (pickedPlayer) {
@@ -73,23 +114,23 @@ async function runNextDraftPick() {
  * Handles the click event for the player drafting a player.
  */
 function handleDraftClick() {
-    const game = Game.getGameState();
-    const playerPoolContainer = document.getElementById('player-pool');
-    const selectedCard = playerPoolContainer.querySelector('.player-card.selected');
-    
-    if (selectedCard) {
-        const player = game.players.find(p => p.id === selectedCard.dataset.playerId);
-        
-        if (Game.addPlayerToTeam(player, game.playerTeam)) {
-            UI.updateRoster(game.playerTeam);
-            UI.removePlayerCard(player.id);
-            UI.addPickToLog(game.playerTeam, player, game.currentPick + 1);
-            
-            game.currentPick++;
-            runNextDraftPick(); // Proceed to next pick
-        }
-    } else {
+    if (!currentlySelectedPlayerId) {
         alert("Please select a player to draft!");
+        return;
+    }
+    
+    const game = Game.getGameState();
+    const player = game.players.find(p => p.id === currentlySelectedPlayerId);
+    
+    if (player && Game.addPlayerToTeam(player, game.playerTeam)) {
+        UI.updateRoster(game.playerTeam);
+        UI.removePlayerCard(player.id);
+        UI.addPickToLog(game.playerTeam, player, game.currentPick + 1);
+        
+        currentlySelectedPlayerId = null; // Reset selection
+        
+        game.currentPick++;
+        runNextDraftPick(); // Proceed to next pick
     }
 }
 
@@ -168,8 +209,9 @@ async function startNextSeason() {
     UI.updateLoadingProgress(1, "Done!");
     await new Promise(res => setTimeout(res, 500));
     
+    currentlySelectedPlayerId = null; // Reset selection for new draft
     UI.showScreen('draft');
-    UI.renderDraftPool(game.players.filter(p => !p.teamId));
+    UI.renderDraftPool(game.players.filter(p => !p.teamId), handlePlayerCardClick);
     UI.updateRoster(game.playerTeam);
     runNextDraftPick();
 }
@@ -184,20 +226,16 @@ function main() {
     
     // Correctly get and assign event listeners
     const startGameBtn = document.getElementById('start-game-btn');
+    const confirmTeamBtn = document.getElementById('confirm-team-btn');
     const draftBtn = document.getElementById('draft-player-btn');
     const simWeekBtn = document.getElementById('sim-week-btn');
     const nextSeasonBtn = document.getElementById('next-season-btn');
 
-    if (startGameBtn) {
-        startGameBtn.addEventListener('click', startNewGame);
-    } else {
-        console.error("Fatal Error: Start button with ID 'start-game-btn' not found on page load.");
-        return;
-    }
-    
-    if(draftBtn) draftBtn.addEventListener('click', handleDraftClick);
-    if(simWeekBtn) simWeekBtn.addEventListener('click', handleSimWeekClick);
-    if(nextSeasonBtn) nextSeasonBtn.addEventListener('click', startNextSeason);
+    if (startGameBtn) startGameBtn.addEventListener('click', startNewGame);
+    if (confirmTeamBtn) confirmTeamBtn.addEventListener('click', handleConfirmTeamClick);
+    if (draftBtn) draftBtn.addEventListener('click', handleDraftClick);
+    if (simWeekBtn) simWeekBtn.addEventListener('click', handleSimWeekClick);
+    if (nextSeasonBtn) nextSeasonBtn.addEventListener('click', startNextSeason);
     
     UI.showScreen('start');
 }
