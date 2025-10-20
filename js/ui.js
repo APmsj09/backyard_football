@@ -1,409 +1,506 @@
-// This file contains all functions related to updating the User Interface.
+import { calculateOverall } from './game.js';
 
-// An object to hold references to all the DOM elements we'll need.
 let elements = {};
+let selectedPlayerId = null;
+let dragPlayerId = null;
 
 /**
- * Grabs all necessary DOM elements and stores them for easy access.
+ * Finds and stores references to all necessary DOM elements.
  */
 export function setupElements() {
     elements = {
-        screens: {
-            start: document.getElementById('start-screen'),
-            loading: document.getElementById('loading-screen'),
-            teamCreation: document.getElementById('team-creation-screen'),
-            draft: document.getElementById('draft-screen'),
-            season: document.getElementById('season-screen'),
-            endSeason: document.getElementById('end-season-screen')
-        },
-        tabButtons: document.querySelectorAll('.tab-btn'),
-        tabContents: document.querySelectorAll('.tab-content'),
-        loadingBar: document.getElementById('loading-bar'),
-        loadingMessage: document.getElementById('loading-message'),
-        premadeTeamsGrid: document.getElementById('premade-teams-grid'),
-        teamNameInput: document.getElementById('team-name-input'),
-        playerPool: document.getElementById('player-pool'),
-        teamRoster: document.getElementById('team-roster'),
-        draftClockPick: document.getElementById('draft-clock-pick'),
-        draftClockTeam: document.getElementById('draft-clock-team'),
-        draftLog: document.getElementById('draft-log'),
+        // Screens
+        startScreen: document.getElementById('start-screen'),
+        loadingScreen: document.getElementById('loading-screen'),
+        teamCreationScreen: document.getElementById('team-creation-screen'),
+        draftScreen: document.getElementById('draft-screen'),
+        dashboardScreen: document.getElementById('dashboard-screen'),
+
+        // Loading
+        loadingProgress: document.getElementById('loading-progress'),
+
+        // Team Creation
+        teamNameSuggestions: document.getElementById('team-name-suggestions'),
+        customTeamName: document.getElementById('custom-team-name'),
+        confirmTeamBtn: document.getElementById('confirm-team-btn'),
+
+        // Draft
+        draftHeader: document.getElementById('draft-header'),
+        draftYear: document.getElementById('draft-year'),
+        draftPickNumber: document.getElementById('draft-pick-number'),
+        draftPickingTeam: document.getElementById('draft-picking-team'),
+        draftPoolTbody: document.getElementById('draft-pool-tbody'),
+        selectedPlayerCard: document.getElementById('selected-player-card'),
         draftPlayerBtn: document.getElementById('draft-player-btn'),
-        seasonHeader: document.getElementById('season-header'),
-        
-        // Tab Content Containers
+        rosterCount: document.getElementById('roster-count'),
+        draftRosterList: document.getElementById('draft-roster-list'),
+        draftSearch: document.getElementById('draft-search'),
+        draftFilterPos: document.getElementById('draft-filter-pos'),
+        draftSort: document.getElementById('draft-sort'),
+
+
+        // Dashboard
+        dashboardTeamName: document.getElementById('dashboard-team-name'),
+        dashboardRecord: document.getElementById('dashboard-record'),
+        dashboardYear: document.getElementById('dashboard-year'),
+        dashboardWeek: document.getElementById('dashboard-week'),
+        dashboardTabs: document.getElementById('dashboard-tabs'),
+        dashboardContent: document.getElementById('dashboard-content'),
+        advanceWeekBtn: document.getElementById('advance-week-btn'),
+
+        // Tab Panes
         myTeamContent: document.getElementById('tab-content-my-team'),
-        rosterContent: document.getElementById('tab-content-roster'),
         depthChartContent: document.getElementById('tab-content-depth-chart'),
         freeAgencyContent: document.getElementById('tab-content-free-agency'),
         scheduleContent: document.getElementById('tab-content-schedule'),
         standingsContent: document.getElementById('tab-content-standings'),
         playerStatsContent: document.getElementById('tab-content-player-stats'),
         hallOfFameContent: document.getElementById('tab-content-hall-of-fame'),
-        
-        endSeasonHeader: document.getElementById('end-season-header'),
+
+        // Specific Content Areas
+        myTeamRoster: document.getElementById('my-team-roster'),
+        depthChartSlots: document.getElementById('depth-chart-slots'),
+        depthChartRoster: document.getElementById('depth-chart-roster'),
+        freeAgencyList: document.getElementById('free-agency-list'),
+        scheduleList: document.getElementById('schedule-list'),
+        standingsContainer: document.getElementById('standings-container'),
+        playerStatsContainer: document.getElementById('player-stats-container'),
+        hallOfFameList: document.getElementById('hall-of-fame-list'),
     };
     console.log("UI Elements have been successfully set up.");
 }
 
 /**
- * Shows a specific screen and hides all others.
- * @param {string} screenName - The name of the screen to show.
+ * Hides all screens and shows the one with the specified ID.
+ * @param {string} screenId - The ID of the screen to show.
  */
-export function showScreen(screenName) {
-    for (const key in elements.screens) {
-        if (elements.screens[key]) {
-            elements.screens[key].classList.toggle('hidden', key !== screenName);
-        }
+export function showScreen(screenId) {
+    Object.values(elements.screens).forEach(screen => screen.classList.add('hidden'));
+    if (elements.screens[screenId]) {
+        elements.screens[screenId].classList.remove('hidden');
     }
 }
 
 /**
- * Handles tab switching functionality.
- * @param {string} tabId - The data-tab attribute of the clicked button.
+ * Updates the loading progress bar.
+ * @param {number} progress - A value from 0 to 1 representing the progress.
  */
-export function setActiveTab(tabId) {
-    elements.tabButtons.forEach(button => {
-        const isActive = button.dataset.tab === tabId;
-        button.classList.toggle('bg-amber-500', isActive);
-        button.classList.toggle('text-white', isActive);
-        button.classList.toggle('hover:bg-gray-200', !isActive);
-    });
-    elements.tabContents.forEach(content => {
-        content.classList.toggle('hidden', content.id !== `tab-content-${tabId}`);
-    });
+export function updateLoadingProgress(progress) {
+    elements.loadingProgress.style.width = `${progress * 100}%`;
 }
 
-/**
- * Updates the loading progress bar and message.
- * @param {number} progress - A value from 0 to 1.
- * @param {string} [message] - An optional message to display.
- */
-export function updateLoadingProgress(progress, message = 'Generating players...') {
-    if (elements.loadingBar) elements.loadingBar.style.width = `${progress * 100}%`;
-    if (elements.loadingMessage) elements.loadingMessage.textContent = message;
-}
 
 /**
- * Populates the team creation screen with premade team names.
- * @param {string[]} teamNames - An array of team names.
- * @param {Function} clickHandler - The function to call when a premade name is clicked.
+ * Populates the team name suggestion buttons.
+ * @param {string[]} names - An array of team names.
+ * @param {function} onSelect - The callback function to run when a name is selected.
  */
-export function renderTeamCreation(teamNames, clickHandler) {
-    if (!elements.premadeTeamsGrid) return;
-    elements.premadeTeamsGrid.innerHTML = '';
-    teamNames.forEach(name => {
+export function renderTeamNameSuggestions(names, onSelect) {
+    elements.teamNameSuggestions.innerHTML = '';
+    names.forEach(name => {
         const button = document.createElement('button');
-        button.className = 'p-3 bg-gray-200 text-gray-700 rounded-md hover:bg-amber-500 hover:text-white transition';
+        button.className = 'bg-gray-200 hover:bg-amber-500 hover:text-white text-gray-700 font-semibold py-2 px-4 rounded-lg transition';
         button.textContent = name;
-        button.addEventListener('click', () => clickHandler(name));
-        elements.premadeTeamsGrid.appendChild(button);
+        button.onclick = () => onSelect(name);
+        elements.teamNameSuggestions.appendChild(button);
     });
 }
 
 /**
- * Renders the list of available players for the draft in a spreadsheet format.
- * @param {Array<object>} players - The array of undrafted players.
- * @param {Function} rowClickHandler - Function to handle a click on a player row.
+ * Updates the draft UI with the current state.
+ * @param {object} gameState - The current state of the game.
+ * @param {function} onPlayerSelect - Callback for when a player row is clicked.
  */
-export function renderDraftPool(players, rowClickHandler) {
-    if (!elements.playerPool) return;
-    elements.playerPool.innerHTML = '';
+export function renderDraftScreen(gameState, onPlayerSelect) {
+    const { year, draftOrder, currentPick, teams } = gameState;
+    const pickingTeam = draftOrder[currentPick];
 
-    const table = document.createElement('table');
-    table.className = 'w-full text-left text-sm';
-    
-    table.innerHTML = `
-        <thead class="bg-gray-200 sticky top-0">
-            <tr>
-                <th class="p-2">Name</th><th class="p-2">Pos</th><th class="p-2">Age</th>
-                <th class="p-2 hidden md:table-cell">Ht</th><th class="p-2 hidden md:table-cell">Wt</th>
-                <th class="p-2 text-center">Spd</th><th class="p-2 text-center">Str</th><th class="p-2 text-center">Agil</th>
-                <th class="p-2 text-center hidden lg:table-cell">IQ</th><th class="p-2 text-center hidden lg:table-cell">Thr</th>
-                <th class="p-2 text-center hidden lg:table-cell">Hnd</th><th class="p-2 text-center hidden lg:table-cell">Tkl</th>
-                <th class="p-2 text-center hidden lg:table-cell">Blk</th>
-            </tr>
-        </thead>
-        <tbody></tbody>
-    `;
+    elements.draftYear.textContent = year;
+    elements.draftPickNumber.textContent = currentPick + 1;
+    elements.draftPickingTeam.textContent = pickingTeam.name;
 
-    const tbody = table.querySelector('tbody');
-    players.forEach(player => {
-        const row = document.createElement('tr');
-        row.className = 'border-b cursor-pointer hover:bg-amber-100';
-        row.dataset.playerId = player.id;
-        
-        const feet = Math.floor(player.attributes.physical.height / 12);
-        const inches = player.attributes.physical.height % 12;
+    renderDraftPool(gameState, onPlayerSelect);
+    renderPlayerRoster(gameState.playerTeam);
 
-        row.innerHTML = `
-            <td class="p-2 font-semibold">${player.name}</td>
-            <td class="p-2 font-bold">${player.position}</td>
-            <td class="p-2">${player.age}</td>
-            <td class="p-2 hidden md:table-cell">${feet}'${inches}"</td>
-            <td class="p-2 hidden md:table-cell">${player.attributes.physical.weight}</td>
-            <td class="p-2 text-center">${player.attributes.physical.speed}</td>
-            <td class="p-2 text-center">${player.attributes.physical.strength}</td>
-            <td class="p-2 text-center">${player.attributes.physical.agility}</td>
-            <td class="p-2 text-center hidden lg:table-cell">${player.attributes.mental.playbookIQ}</td>
-            <td class="p-2 text-center hidden lg:table-cell">${player.attributes.technical.throwingAccuracy}</td>
-            <td class="p-2 text-center hidden lg:table-cell">${player.attributes.technical.catchingHands}</td>
-            <td class="p-2 text-center hidden lg:table-cell">${player.attributes.technical.tackling}</td>
-            <td class="p-2 text-center hidden lg:table-cell">${player.attributes.technical.blocking}</td>
-        `;
-        row.addEventListener('click', () => rowClickHandler(player.id));
-        tbody.appendChild(row);
-    });
-
-    elements.playerPool.appendChild(table);
-}
-
-export function selectPlayerRow(playerId) {
-    const currentlySelected = elements.playerPool.querySelector('tr.selected');
-    if (currentlySelected) currentlySelected.classList.remove('selected');
-    const rowToSelect = elements.playerPool.querySelector(`tr[data-player-id="${playerId}"]`);
-    if (rowToSelect) rowToSelect.classList.add('selected');
-}
-
-export function updateDraftRoster(team) {
-     if (!elements.teamRoster) return;
-    elements.teamRoster.innerHTML = '';
-    team.roster.forEach(player => {
-        const li = document.createElement('li');
-        li.className = 'flex justify-between items-center p-2 border-b text-sm';
-        li.innerHTML = `<span>${player.name}</span><span class="font-bold text-gray-600">${player.position}</span>`;
-        elements.teamRoster.appendChild(li);
-    });
-}
-
-export function updateDraftClock(team, pickNumber) {
-    if (elements.draftClockTeam) elements.draftClockTeam.textContent = `${team.name} are on the clock!`;
-    if (elements.draftClockPick) {
-        const round = Math.floor((pickNumber - 1) / 20) + 1;
-        const pickInRound = ((pickNumber - 1) % 20) + 1;
-        elements.draftClockPick.textContent = `Round ${round}, Pick ${pickInRound}`;
+    if (pickingTeam.id !== gameState.playerTeam.id) {
+        elements.draftPlayerBtn.disabled = true;
+        elements.draftPlayerBtn.textContent = `Waiting for ${pickingTeam.name}...`;
+    } else {
+        elements.draftPlayerBtn.disabled = selectedPlayerId === null;
+        elements.draftPlayerBtn.textContent = 'Draft Player';
     }
 }
 
-export function addPickToLog(team, player, pickNumber) {
-    if (!elements.draftLog) return;
-    const li = document.createElement('li');
-    li.className = 'p-2 bg-gray-50 rounded-md';
-    li.innerHTML = `<span class="font-bold">${pickNumber}. ${team.name}</span> select <span class="font-semibold">${player.name} (${player.position})</span>`;
-    elements.draftLog.prepend(li);
-}
-
-export function removePlayerRow(playerId) {
-    const row = elements.playerPool.querySelector(`tr[data-player-id="${playerId}"]`);
-    if (row) row.remove();
-}
-
-export function setDraftButtonState(enabled) {
-    if (elements.draftPlayerBtn) elements.draftPlayerBtn.disabled = !enabled;
-}
-
-// --- NEW & UPDATED SEASON SCREEN RENDERERS ---
-
-export function renderMyTeam(team, schedule, currentWeek, year) {
-    if (!elements.myTeamContent) return;
-    const weeklyGames = schedule.slice(currentWeek * 10, (currentWeek + 1) * 10);
-    const nextOpponent = weeklyGames.find(g => g.home.id === team.id || g.away.id === team.id);
-    const opponent = nextOpponent ? (nextOpponent.home.id === team.id ? nextOpponent.away : nextOpponent.home) : { name: 'BYE WEEK' };
+/**
+ * Renders the table of undrafted players.
+ * @param {object} gameState - The current state of the game.
+ * @param {function} onPlayerSelect - Callback for when a player row is clicked.
+ */
+export function renderDraftPool(gameState, onPlayerSelect) {
+    const undraftedPlayers = gameState.players.filter(p => !p.teamId);
     
-    elements.myTeamContent.innerHTML = `
-        <h2 class="text-2xl font-bold mb-4">${team.name}</h2>
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 text-center">
-            <div class="bg-gray-100 p-4 rounded-lg">
-                <p class="text-sm text-gray-500">Record</p>
-                <p class="text-3xl font-bold">${team.wins} - ${team.losses}</p>
+    // Filtering
+    const searchTerm = elements.draftSearch.value.toLowerCase();
+    const posFilter = elements.draftFilterPos.value;
+    let filteredPlayers = undraftedPlayers.filter(p => {
+        const nameMatch = p.name.toLowerCase().includes(searchTerm);
+        const posMatch = !posFilter || p.favoriteOffensivePosition === posFilter || p.favoriteDefensivePosition === posFilter;
+        return nameMatch && posMatch;
+    });
+
+    // Sorting
+    const sortMethod = elements.draftSort.value;
+    if (sortMethod === 'age-asc') filteredPlayers.sort((a, b) => a.age - b.age);
+    else if (sortMethod === 'age-desc') filteredPlayers.sort((a, b) => b.age - a.age);
+    // Add more sorting if needed
+
+    elements.draftPoolTbody.innerHTML = '';
+    filteredPlayers.forEach(player => {
+        const row = document.createElement('tr');
+        row.className = `cursor-pointer hover:bg-amber-100 ${player.id === selectedPlayerId ? 'bg-amber-200' : ''}`;
+        row.dataset.playerId = player.id;
+        row.innerHTML = `
+            <td class="py-2 px-3 font-semibold">${player.name}</td>
+            <td class="text-center py-2 px-3">${player.age}</td>
+            <td class="text-center py-2 px-3">${player.favoriteOffensivePosition}/${player.favoriteDefensivePosition}</td>
+            <td class="text-center py-2 px-3">${player.attributes.physical.height}"</td>
+            <td class="text-center py-2 px-3">${player.attributes.physical.weight}lbs</td>
+            <td class="text-center py-2 px-3">${player.attributes.physical.speed}</td>
+            <td class="text-center py-2 px-3">${player.attributes.physical.strength}</td>
+            <td class="text-center py-2 px-3">${player.attributes.physical.agility}</td>
+            <td class="text-center py-2 px-3">${player.attributes.technical.throwingAccuracy}</td>
+            <td class="text-center py-2 px-3">${player.attributes.technical.catchingHands}</td>
+            <td class="text-center py-2 px-3">${player.attributes.technical.blocking}</td>
+            <td class="text-center py-2 px-3">${player.attributes.technical.tackling}</td>
+        `;
+        row.onclick = () => onPlayerSelect(player.id);
+        elements.draftPoolTbody.appendChild(row);
+    });
+}
+
+/**
+ * Renders the detailed card for the currently selected player.
+ * @param {object|null} player - The selected player object, or null.
+ */
+export function renderSelectedPlayerCard(player) {
+    if (!player) {
+        elements.selectedPlayerCard.innerHTML = `<p class="text-gray-500">Select a player to see their details</p>`;
+        selectedPlayerId = null;
+    } else {
+        selectedPlayerId = player.id;
+        const ovrQB = calculateOverall(player, 'QB');
+        const ovrATH = calculateOverall(player, 'ATH');
+        const ovrLINE = calculateOverall(player, 'LINE');
+
+        elements.selectedPlayerCard.innerHTML = `
+            <h4 class="font-bold text-lg">${player.name}</h4>
+            <p class="text-sm text-gray-600">Age: ${player.age} | ${player.attributes.physical.height}" | ${player.attributes.physical.weight} lbs</p>
+            <div class="mt-2 grid grid-cols-3 gap-2 text-center">
+                <div class="bg-gray-200 p-2 rounded">
+                    <p class="font-semibold text-xs">QB OVR</p>
+                    <p class="font-bold text-xl">${ovrQB}</p>
+                </div>
+                <div class="bg-gray-200 p-2 rounded">
+                    <p class="font-semibold text-xs">ATH OVR</p>
+                    <p class="font-bold text-xl">${ovrATH}</p>
+                </div>
+                 <div class="bg-gray-200 p-2 rounded">
+                    <p class="font-semibold text-xs">LINE OVR</p>
+                    <p class="font-bold text-xl">${ovrLINE}</p>
+                </div>
             </div>
-            <div class="bg-gray-100 p-4 rounded-lg">
-                <p class="text-sm text-gray-500">Next Opponent</p>
-                <p class="text-3xl font-bold">${opponent.name}</p>
+        `;
+    }
+    // Update button state based on selection
+    elements.draftPlayerBtn.disabled = !player;
+}
+
+/**
+ * Renders the list of players on the player's team roster during the draft.
+ * @param {object} playerTeam - The player's team object.
+ */
+export function renderPlayerRoster(playerTeam) {
+    elements.rosterCount.textContent = playerTeam.roster.length;
+    elements.draftRosterList.innerHTML = '';
+    playerTeam.roster.forEach(player => {
+        const li = document.createElement('li');
+        li.className = 'p-2';
+        li.textContent = `${player.name} (${player.favoriteOffensivePosition}/${player.favoriteDefensivePosition})`;
+        elements.draftRosterList.appendChild(li);
+    });
+}
+
+
+/**
+ * Sets up the main dashboard with team info and renders the default tab.
+ * @param {object} gameState - The current game state.
+ */
+export function renderDashboard(gameState) {
+    const { playerTeam, year, currentWeek } = gameState;
+    elements.dashboardTeamName.textContent = playerTeam.name;
+    elements.dashboardRecord.textContent = `Record: ${playerTeam.wins} - ${playerTeam.losses}`;
+    elements.dashboardYear.textContent = year;
+    elements.dashboardWeek.textContent = currentWeek < 9 ? `Week ${currentWeek + 1}` : 'Offseason';
+    
+    // Initially render the 'My Team' tab
+    renderMyTeamTab(gameState);
+}
+
+/**
+ * Handles switching between dashboard tabs.
+ * @param {string} tabId - The ID of the tab to switch to.
+ * @param {object} gameState - The current game state.
+ */
+export function switchTab(tabId, gameState) {
+    // Hide all tab panes
+    elements.dashboardContent.querySelectorAll('.tab-pane').forEach(pane => {
+        pane.classList.add('hidden');
+    });
+    // Deactivate all tab buttons
+    elements.dashboardTabs.querySelectorAll('.tab-button').forEach(button => {
+        button.classList.remove('active');
+    });
+
+    // Show the selected tab pane and activate its button
+    const activePane = document.getElementById(`tab-content-${tabId}`);
+    const activeButton = document.querySelector(`[data-tab="${tabId}"]`);
+    if (activePane && activeButton) {
+        activePane.classList.remove('hidden');
+        activeButton.classList.add('active');
+    }
+
+    // Render content for the selected tab
+    switch (tabId) {
+        case 'my-team': renderMyTeamTab(gameState); break;
+        case 'depth-chart': renderDepthChartTab(gameState); break;
+        case 'free-agency': renderFreeAgencyTab(gameState); break;
+        case 'schedule': renderScheduleTab(gameState); break;
+        case 'standings': renderStandingsTab(gameState); break;
+        case 'player-stats': renderPlayerStatsTab(gameState); break;
+        case 'hall-of-fame': renderHallOfFameTab(gameState); break;
+    }
+}
+
+// --- TAB RENDERING FUNCTIONS ---
+
+function renderMyTeamTab(gameState) {
+    const roster = gameState.playerTeam.roster;
+    let tableHtml = `
+        <table class="min-w-full bg-white text-sm">
+            <thead class="bg-gray-800 text-white">
+                <tr>
+                    <th class="text-left py-2 px-3">Name</th>
+                    <th class="py-2 px-3">Age</th>
+                    <th class="py-2 px-3">Status</th>
+                    <th class="py-2 px-3">QB Ovr</th>
+                    <th class="py-2 px-3">ATH Ovr</th>
+                    <th class="py-2 px-3">LINE Ovr</th>
+                </tr>
+            </thead>
+            <tbody class="divide-y">`;
+    roster.forEach(player => {
+        tableHtml += `
+            <tr>
+                <td class="py-2 px-3 font-semibold">${player.name}</td>
+                <td class="text-center py-2 px-3">${player.age}</td>
+                <td class="text-center py-2 px-3 ${player.status.type !== 'healthy' ? 'text-red-500 font-semibold' : ''}">${player.status.description || 'Healthy'}</td>
+                <td class="text-center py-2 px-3">${calculateOverall(player, 'QB')}</td>
+                <td class="text-center py-2 px-3">${calculateOverall(player, 'ATH')}</td>
+                <td class="text-center py-2 px-3">${calculateOverall(player, 'LINE')}</td>
+            </tr>
+        `;
+    });
+    tableHtml += `</tbody></table>`;
+    elements.myTeamRoster.innerHTML = tableHtml;
+}
+
+function renderDepthChartTab(gameState) {
+    const { roster, depthChart } = gameState.playerTeam;
+    elements.depthChartSlots.innerHTML = '';
+    elements.depthChartRoster.innerHTML = '';
+
+    // Render positioned players
+    for (const positionSlot in depthChart) {
+        const playerId = depthChart[positionSlot];
+        const player = roster.find(p => p.id === playerId);
+        const overall = player ? calculateOverall(player, positionSlot) : '---';
+
+        const slotEl = document.createElement('div');
+        slotEl.className = 'depth-chart-slot bg-gray-200 p-2 rounded flex items-center justify-between';
+        slotEl.dataset.positionSlot = positionSlot;
+        slotEl.innerHTML = `
+            <span class="font-bold w-1/4">${positionSlot}</span>
+            <div class="player-details-grid w-3/4">
+                <span>${player ? player.name : 'Empty'}</span>
+                <span class="font-bold text-amber-600">${overall}</span>
+                <span>${player ? player.attributes.physical.speed : '-'}</span>
+                <span>${player ? player.attributes.physical.strength : '-'}</span>
+                <span>${player ? player.attributes.physical.agility : '-'}</span>
+                <span>${player ? player.attributes.technical.throwingAccuracy : '-'}</span>
+                <span>${player ? player.attributes.technical.catchingHands : '-'}</span>
             </div>
-            <div class="bg-gray-100 p-4 rounded-lg">
-                <p class="text-sm text-gray-500">Year</p>
-                <p class="text-3xl font-bold">${year}</p>
-            </div>
+        `;
+        elements.depthChartSlots.appendChild(slotEl);
+    }
+    
+    // Create header for the slots
+    const headerEl = document.createElement('div');
+    headerEl.className = 'depth-chart-slot flex items-center justify-between font-bold text-xs text-gray-500 px-2';
+    headerEl.innerHTML = `
+        <span class="w-1/4">POS</span>
+        <div class="player-details-grid w-3/4">
+            <span>NAME</span>
+            <span>OVR</span>
+            <span>SPD</span>
+            <span>STR</span>
+            <span>AGI</span>
+            <span>THR</span>
+            <span>CAT</span>
         </div>
     `;
+    elements.depthChartSlots.prepend(headerEl);
+
+
+    // Render un-positioned players in the roster list
+    const positionedPlayerIds = Object.values(depthChart);
+    const availablePlayers = roster.filter(p => !positionedPlayerIds.includes(p.id));
+
+    availablePlayers.forEach(player => {
+        const playerEl = document.createElement('div');
+        playerEl.className = 'draggable-player bg-white p-2 rounded border cursor-grab';
+        playerEl.draggable = true;
+        playerEl.dataset.playerId = player.id;
+        playerEl.textContent = player.name;
+        elements.depthChartRoster.appendChild(playerEl);
+    });
 }
 
-export function renderRoster(team) {
-    if (!elements.rosterContent) return;
-    const tableHTML = `
-        <h2 class="text-2xl font-bold mb-4">Team Roster</h2>
-        <div class="overflow-x-auto max-h-[60vh]">
-            <table class="w-full text-left text-sm">
-                <thead class="bg-gray-100 sticky top-0">
+
+function renderFreeAgencyTab(gameState) {
+    const freeAgents = gameState.freeAgents;
+    if (freeAgents.length === 0) {
+        elements.freeAgencyList.innerHTML = '<p>No free agents available this week.</p>';
+        return;
+    }
+    // Implementation for displaying free agents
+    elements.freeAgencyList.innerHTML = 'Free agency list goes here.';
+}
+
+function renderScheduleTab(gameState) {
+    let scheduleHtml = '';
+    for (let i = 0; i < 9; i++) {
+        const weekGames = gameState.schedule.slice(i * 10, (i + 1) * 10);
+        const isCurrentWeek = i === gameState.currentWeek;
+        scheduleHtml += `
+            <div class="p-4 rounded ${isCurrentWeek ? 'bg-amber-100 border-2 border-amber-500' : 'bg-gray-100'}">
+                <h4 class="font-bold text-lg mb-2">Week ${i + 1}</h4>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm">
+        `;
+        weekGames.forEach(game => {
+             scheduleHtml += `
+                <div class="bg-white p-2 rounded shadow-sm flex justify-center items-center">
+                    <span>${game.away.name}</span>
+                    <span class="mx-2 font-bold text-gray-400">@</span>
+                    <span>${game.home.name}</span>
+                </div>
+            `;
+        });
+        scheduleHtml += `</div></div>`;
+    }
+    elements.scheduleList.innerHTML = scheduleHtml;
+}
+
+function renderStandingsTab(gameState) {
+     elements.standingsContainer.innerHTML = '';
+    for (const divName in gameState.divisions) {
+        const divisionEl = document.createElement('div');
+        let tableHtml = `<h4 class="text-xl font-bold mb-2">${divName} Division</h4>
+            <table class="min-w-full bg-white text-sm">
+                <thead class="bg-gray-800 text-white">
                     <tr>
-                        <th class="p-2">Name</th><th class="p-2">Pos</th><th class="p-2">Age</th><th class="p-2">Yds</th><th class="p-2">TD</th><th class="p-2">Tkl</th>
+                        <th class="text-left py-2 px-3">Team</th>
+                        <th class="py-2 px-3">Wins</th>
+                        <th class="py-2 px-3">Losses</th>
                     </tr>
                 </thead>
-                <tbody>
-                ${team.roster.map(p => {
-                    const totalYards = p.seasonStats.passYards + p.seasonStats.rushYards + p.seasonStats.recYards;
-                    return `<tr class="border-b"><td class="p-2 font-semibold">${p.name}</td><td class="p-2">${p.position}</td><td class="p-2">${p.age}</td><td class="p-2">${totalYards}</td><td class="p-2">${p.seasonStats.touchdowns}</td><td class="p-2">${p.seasonStats.tackles}</td></tr>`;
-                }).join('')}
-                </tbody>
-            </table>
-        </div>
-    `;
-    elements.rosterContent.innerHTML = tableHTML;
+                <tbody class="divide-y">`;
+        
+        const divisionTeams = gameState.teams
+            .filter(t => t.division === divName)
+            .sort((a,b) => b.wins - a.wins);
+
+        divisionTeams.forEach(team => {
+            tableHtml += `
+                <tr class="${team.id === gameState.playerTeam.id ? 'bg-amber-100' : ''}">
+                    <td class="py-2 px-3 font-semibold">${team.name}</td>
+                    <td class="text-center py-2 px-3">${team.wins}</td>
+                    <td class="text-center py-2 px-3">${team.losses}</td>
+                </tr>
+            `;
+        });
+        tableHtml += `</tbody></table>`;
+        divisionEl.innerHTML = tableHtml;
+        elements.standingsContainer.appendChild(divisionEl);
+    }
 }
 
-export function renderDepthChart(team, players, dragHandlers) {
-    if (!elements.depthChartContent) return;
-    const { dragStart, dragOver, drop } = dragHandlers;
+function renderPlayerStatsTab(gameState) {
+    // Basic implementation
+    elements.playerStatsContainer.innerHTML = 'League player stats table goes here.';
+}
 
-    let benchPlayers = team.roster.filter(p => !Object.values(team.depthChart).includes(p.id));
-    
-    const benchHTML = benchPlayers.map(p => `<div class="depth-chart-player bg-white p-2 rounded shadow-sm border" draggable="true" data-player-id="${p.id}">${p.name} (${p.position})</div>`).join('');
+function renderHallOfFameTab(gameState) {
+    const inductees = gameState.hallOfFame;
+    if (inductees.length === 0) {
+        elements.hallOfFameList.innerHTML = '<p>The Hall of Fame is currently empty. Legends will be made!</p>';
+        return;
+    }
+    // Basic implementation
+    elements.hallOfFameList.innerHTML = 'Hall of Fame list goes here.';
+}
 
-    const slotsHTML = Object.keys(team.depthChart).map(slot => {
-        const playerId = team.depthChart[slot];
-        const player = playerId ? players.find(p => p.id === playerId) : null;
-        const playerHTML = player ? `<div class="depth-chart-player bg-white p-2 rounded shadow-sm border" draggable="true" data-player-id="${player.id}">${player.name} (${player.position})</div>` : '';
-        return `
-            <div>
-                <h4 class="font-semibold mb-2">${slot}</h4>
-                <div class="depth-chart-slot p-2 rounded-lg" data-slot-id="${slot}">${playerHTML}</div>
-            </div>
-        `;
-    }).join('');
 
-    elements.depthChartContent.innerHTML = `
-        <h2 class="text-2xl font-bold mb-4">Depth Chart</h2>
-        <p class="text-sm text-gray-500 mb-4">Drag and drop players to set your lineup.</p>
-        <div class="grid grid-cols-1 md:grid-cols-5 gap-4">
-            <div class="md:col-span-4 grid grid-cols-4 gap-4">
-                ${slotsHTML}
-            </div>
-            <div class="md:col-span-1">
-                <h4 class="font-semibold mb-2">Bench</h4>
-                <div class="depth-chart-slot p-2 rounded-lg space-y-2" data-slot-id="BENCH">${benchHTML}</div>
-            </div>
-        </div>
-    `;
-    
-    // Add event listeners after rendering
-    elements.depthChartContent.querySelectorAll('[draggable="true"]').forEach(el => el.addEventListener('dragstart', dragStart));
-    elements.depthChartContent.querySelectorAll('.depth-chart-slot').forEach(el => {
-        el.addEventListener('dragover', dragOver);
-        el.addEventListener('drop', drop);
+// --- DRAG AND DROP LOGIC ---
+
+export function setupDragAndDrop(onDrop) {
+    // Set up listeners on the roster container
+    elements.depthChartRoster.addEventListener('dragstart', e => {
+        if (e.target.classList.contains('draggable-player')) {
+            dragPlayerId = e.target.dataset.playerId;
+            e.target.classList.add('opacity-50');
+        }
     });
-}
 
+    elements.depthChartRoster.addEventListener('dragend', e => {
+        if (e.target.classList.contains('draggable-player')) {
+            dragPlayerId = null;
+            e.target.classList.remove('opacity-50');
+        }
+    });
 
-export function renderFreeAgency(freeAgents, clickHandler) {
-    if (!elements.freeAgencyContent) return;
-    let content = `<h2 class="text-2xl font-bold mb-4">Weekly Free Agents</h2>`;
-    if (freeAgents.length === 0) {
-        content += "<p>No friends available this week.</p>";
-    } else {
-        content += `
-            <div class="max-h-[60vh] overflow-y-auto">
-        ` +
-        freeAgents.map(fa => `
-            <div class="flex justify-between items-center p-3 border-b">
-                <div>
-                    <p class="font-semibold">${fa.name} (${fa.position})</p>
-                    <p class="text-sm text-gray-500">${fa.friendship}</p>
-                </div>
-                <button data-player-id="${fa.id}" class="sign-fa-btn bg-green-500 text-white px-3 py-1 rounded-md text-sm hover:bg-green-600">Sign</button>
-            </div>
-        `).join('') + `</div>`;
-    }
-    elements.freeAgencyContent.innerHTML = content;
-    elements.freeAgencyContent.querySelectorAll('.sign-fa-btn').forEach(btn => btn.addEventListener('click', () => clickHandler(btn.dataset.playerId)));
-}
+    // Set up listeners on the slots container
+    elements.depthChartSlots.addEventListener('dragover', e => {
+        e.preventDefault(); // Necessary to allow dropping
+        const slot = e.target.closest('.depth-chart-slot');
+        if (slot && slot.dataset.positionSlot) {
+            slot.classList.add('bg-amber-200');
+        }
+    });
 
-export function renderSchedule(schedule, currentWeek) {
-    if (!elements.scheduleContent) return;
-    let content = `<h2 class="text-2xl font-bold mb-4">Full Season Schedule</h2>`;
+    elements.depthChartSlots.addEventListener('dragleave', e => {
+        const slot = e.target.closest('.depth-chart-slot');
+        if (slot && slot.dataset.positionSlot) {
+            slot.classList.remove('bg-amber-200');
+        }
+    });
     
-    content += '<div class="max-h-[60vh] overflow-y-auto space-y-6">';
-
-    for(let i = 0; i < 9; i++) {
-        const weeklyGames = schedule.slice(i * 10, (i + 1) * 10);
-        const weekHeaderClass = i === currentWeek ? 'font-bold text-amber-600' : 'font-bold';
-        content += `
-            <div>
-                <h3 class="${weekHeaderClass} mb-2">Week ${i + 1}</h3>
-                <div class="space-y-1 text-sm text-gray-700">
-                    ${weeklyGames.map(g => `<p>${g.away.name} @ ${g.home.name}</p>`).join('')}
-                </div>
-            </div>
-        `;
-    }
-    content += '</div>';
-    elements.scheduleContent.innerHTML = content;
-}
-
-export function renderStandings(teams, divisions) {
-    if (!elements.standingsContent) return;
-    let content = `<h2 class="text-2xl font-bold mb-4">League Standings</h2>`;
-    for (const divName in divisions) {
-        content += `<h3 class="text-xl font-bold mt-4 mb-2">${divName} Division</h3>`;
-        const divisionTeams = teams.filter(t => t.division === divName).sort((a, b) => b.wins - a.wins);
-        content += `
-            <div class="overflow-x-auto">
-                <table class="w-full text-left bg-white rounded-lg shadow-md">
-                    <thead class="bg-gray-100"><tr><th class="p-2">Team</th><th class="p-2 text-center">W</th><th class="p-2 text-center">L</th></tr></thead>
-                    <tbody>
-                    ${divisionTeams.map(t => `<tr class="border-b"><td class="p-2">${t.name}</td><td class="p-2 text-center">${t.wins}</td><td class="p-2 text-center">${t.losses}</td></tr>`).join('')}
-                    </tbody>
-                </table>
-            </div>
-        `;
-    }
-    elements.standingsContent.innerHTML = content;
-}
-
-export function renderPlayerStats(players, teams) {
-    if (!elements.playerStatsContent) return;
-     const sortedPlayers = [...players].sort((a,b) => (b.seasonStats.passYards + b.seasonStats.rushYards + b.seasonStats.recYards) - (a.seasonStats.passYards + a.seasonStats.rushYards + a.seasonStats.recYards));
-    elements.playerStatsContent.innerHTML = `
-        <h2 class="text-2xl font-bold mb-4">League Player Stats</h2>
-        <div class="max-h-[60vh] overflow-y-auto">
-            <table class="w-full text-left text-sm">
-                <thead class="bg-gray-100 sticky top-0"><tr><th class="p-2">Name</th><th class="p-2">Team</th><th class="p-2">Pass Yds</th><th class="p-2">Rush Yds</th><th class="p-2">Rec Yds</th><th class="p-2">TDs</th><th class="p-2">Tkls</th></tr></thead>
-                <tbody>
-                ${sortedPlayers.map(p => {
-                    const team = teams.find(t => t.id === p.teamId);
-                    return `<tr class="border-b">
-                        <td class="p-2 font-semibold">${p.name}</td><td class="p-2">${team ? team.name : 'FA'}</td>
-                        <td class="p-2">${p.seasonStats.passYards}</td><td class="p-2">${p.seasonStats.rushYards}</td>
-                        <td class="p-2">${p.seasonStats.recYards}</td><td class="p-2">${p.seasonStats.touchdowns}</td><td class="p-2">${p.seasonStats.tackles}</td>
-                    </tr>`
-                }).join('')}
-                </tbody>
-            </table>
-        </div>
-    `;
-}
-
-export function renderHallOfFame(hallOfFamers) {
-    if (!elements.hallOfFameContent) return;
-    let content = `<h2 class="text-2xl font-bold mb-4">Hall of Fame</h2>`;
-    if (hallOfFamers.length === 0) {
-        content += `<p>No players have been inducted yet.</p>`;
-    } else {
-         content += `<div class="max-h-[60vh] overflow-y-auto">` + 
-         hallOfFamers
-            .sort((a,b) => (b.careerStats.touchdowns - a.careerStats.touchdowns))
-            .map(p => `
-            <div class="p-3 border-b">
-                <p class="font-bold text-lg">${p.name} <span class="text-sm font-normal text-gray-500">(${p.position})</span></p>
-                <p class="text-xs">Seasons: ${p.careerStats.seasonsPlayed} | TDs: ${p.careerStats.touchdowns} | Total Yards: ${p.careerStats.passYards + p.careerStats.rushYards + p.careerStats.recYards} | Tackles: ${p.careerStats.tackles}</p>
-            </div>
-        `).join('') + `</div>`;
-    }
-    elements.hallOfFameContent.innerHTML = content;
-}
-
-export function updateEndSeasonUI(year) {
-    if (elements.endSeasonHeader) {
-        elements.endSeasonHeader.textContent = `End of Year ${year}`;
-    }
+    elements.depthChartSlots.addEventListener('drop', e => {
+        e.preventDefault();
+        const slot = e.target.closest('.depth-chart-slot');
+        if (slot && slot.dataset.positionSlot && dragPlayerId) {
+            slot.classList.remove('bg-amber-200');
+            onDrop(dragPlayerId, slot.dataset.positionSlot);
+        }
+    });
 }
 
