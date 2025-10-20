@@ -5,7 +5,6 @@ let elements = {};
 
 /**
  * Grabs all necessary DOM elements and stores them for easy access.
- * This should be called once when the application starts.
  */
 export function setupElements() {
     elements = {
@@ -27,7 +26,6 @@ export function setupElements() {
         draftClockTeam: document.getElementById('draft-clock-team'),
         draftLog: document.getElementById('draft-log'),
         draftPlayerBtn: document.getElementById('draft-player-btn'),
-        draftPlayerDetail: document.getElementById('draft-player-detail'),
         seasonHeader: document.getElementById('season-header'),
         standingsContainer: document.getElementById('standings-container'),
         scheduleContainer: document.getElementById('schedule-container'),
@@ -41,7 +39,7 @@ export function setupElements() {
 
 /**
  * Shows a specific screen and hides all others.
- * @param {string} screenName - The name of the screen to show (e.g., 'start', 'draft').
+ * @param {string} screenName - The name of the screen to show.
  */
 export function showScreen(screenName) {
     for (const key in elements.screens) {
@@ -57,12 +55,8 @@ export function showScreen(screenName) {
  * @param {string} [message] - An optional message to display.
  */
 export function updateLoadingProgress(progress, message = 'Generating players...') {
-    if (elements.loadingBar) {
-        elements.loadingBar.style.width = `${progress * 100}%`;
-    }
-    if (elements.loadingMessage) {
-        elements.loadingMessage.textContent = message;
-    }
+    if (elements.loadingBar) elements.loadingBar.style.width = `${progress * 100}%`;
+    if (elements.loadingMessage) elements.loadingMessage.textContent = message;
 }
 
 /**
@@ -83,119 +77,85 @@ export function renderTeamCreation(teamNames, clickHandler) {
 }
 
 /**
- * Creates an HTML element for a single player card with detailed attributes.
- * @param {object} player - The player object.
- * @param {Function} clickHandler - The function to call when the card is clicked.
- * @returns {HTMLElement} The created player card element.
+ * Renders the list of available players for the draft in a spreadsheet format.
+ * @param {Array<object>} players - The array of undrafted players.
+ * @param {Function} rowClickHandler - Function to handle a click on a player row.
  */
-function createPlayerCard(player, clickHandler) {
-    const card = document.createElement('div');
-    card.className = 'player-card bg-white rounded-lg p-3 shadow-md border border-gray-200 cursor-pointer';
-    card.dataset.playerId = player.id;
+export function renderDraftPool(players, rowClickHandler) {
+    if (!elements.playerPool) return;
+    elements.playerPool.innerHTML = '';
+
+    const table = document.createElement('table');
+    table.className = 'w-full text-left text-sm';
     
-    const feet = Math.floor(player.attributes.physical.height / 12);
-    const inches = player.attributes.physical.height % 12;
-
-    const keyTechStat = {
-        'QB': `ACC: ${player.attributes.technical.throwingAccuracy}`, 'WR': `HND: ${player.attributes.technical.catchingHands}`,
-        'RB': `AGI: ${player.attributes.physical.agility}`, 'TE': `BLK: ${player.attributes.technical.blocking}`,
-        'DL': `TKL: ${player.attributes.technical.tackling}`, 'LB': `TKL: ${player.attributes.technical.tackling}`,
-        'DB': `SPD: ${player.attributes.physical.speed}`,
-    }[player.position] || '';
-
-    card.innerHTML = `
-        <div class="flex justify-between items-start">
-            <div>
-                <h3 class="font-bold text-base leading-tight text-gray-800">${player.name}</h3>
-                <p class="text-xs text-gray-500">Age: ${player.age} | ${feet}'${inches}" | ${player.attributes.physical.weight}lbs</p>
-            </div>
-            <span class="text-sm font-semibold bg-gray-200 text-gray-700 px-2 py-1 rounded-full">${player.position}</span>
-        </div>
-        <div class="mt-2 grid grid-cols-3 gap-1 text-center text-xs border-t pt-2">
-            <div><span class="font-bold text-gray-500">SPD</span> ${player.attributes.physical.speed}</div>
-            <div><span class="font-bold text-gray-500">STR</span> ${player.attributes.physical.strength}</div>
-            <div><span class="font-bold text-gray-500">IQ</span> ${player.attributes.mental.playbookIQ}</div>
-            <div class="col-span-3 mt-1 text-amber-600 font-semibold">${keyTechStat}</div>
-        </div>
+    // Create Table Header
+    table.innerHTML = `
+        <thead class="bg-gray-200 sticky top-0">
+            <tr>
+                <th class="p-2">Name</th>
+                <th class="p-2">Pos</th>
+                <th class="p-2">Age</th>
+                <th class="p-2 hidden md:table-cell">Ht</th>
+                <th class="p-2 hidden md:table-cell">Wt</th>
+                <th class="p-2 text-center">Spd</th>
+                <th class="p-2 text-center">Str</th>
+                <th class="p-2 text-center">Agil</th>
+                <th class="p-2 text-center hidden lg:table-cell">IQ</th>
+                <th class="p-2 text-center hidden lg:table-cell">Thr</th>
+                <th class="p-2 text-center hidden lg:table-cell">Hnd</th>
+                <th class="p-2 text-center hidden lg:table-cell">Tkl</th>
+                <th class="p-2 text-center hidden lg:table-cell">Blk</th>
+            </tr>
+        </thead>
+        <tbody>
+        </tbody>
     `;
 
-    card.addEventListener('click', () => clickHandler(player));
-    return card;
+    const tbody = table.querySelector('tbody');
+    players.forEach(player => {
+        const row = document.createElement('tr');
+        row.className = 'border-b cursor-pointer hover:bg-amber-100';
+        row.dataset.playerId = player.id;
+        
+        const feet = Math.floor(player.attributes.physical.height / 12);
+        const inches = player.attributes.physical.height % 12;
+
+        row.innerHTML = `
+            <td class="p-2 font-semibold">${player.name}</td>
+            <td class="p-2 font-bold">${player.position}</td>
+            <td class="p-2">${player.age}</td>
+            <td class="p-2 hidden md:table-cell">${feet}'${inches}"</td>
+            <td class="p-2 hidden md:table-cell">${player.attributes.physical.weight}</td>
+            <td class="p-2 text-center">${player.attributes.physical.speed}</td>
+            <td class="p-2 text-center">${player.attributes.physical.strength}</td>
+            <td class="p-2 text-center">${player.attributes.physical.agility}</td>
+            <td class="p-2 text-center hidden lg:table-cell">${player.attributes.mental.playbookIQ}</td>
+            <td class="p-2 text-center hidden lg:table-cell">${player.attributes.technical.throwingAccuracy}</td>
+            <td class="p-2 text-center hidden lg:table-cell">${player.attributes.technical.catchingHands}</td>
+            <td class="p-2 text-center hidden lg:table-cell">${player.attributes.technical.tackling}</td>
+            <td class="p-2 text-center hidden lg:table-cell">${player.attributes.technical.blocking}</td>
+        `;
+        row.addEventListener('click', () => rowClickHandler(player.id));
+        tbody.appendChild(row);
+    });
+
+    elements.playerPool.appendChild(table);
 }
 
-/**
- * Renders the detailed player card view in the draft screen.
- * @param {object} player - The player to display.
- */
-export function renderPlayerDetailCard(player) {
-    if (!elements.draftPlayerDetail || !player) return;
-    
-    const feet = Math.floor(player.attributes.physical.height / 12);
-    const inches = player.attributes.physical.height % 12;
-
-    let detailHTML = `
-        <div class="p-2">
-            <h3 class="font-bold text-lg text-center">${player.name}</h3>
-            <p class="text-sm text-gray-500 text-center">${player.position} | Age: ${player.age} | ${feet}'${inches}" | ${player.attributes.physical.weight}lbs</p>
-            
-            <div class="mt-4">
-                <h4 class="font-bold text-sm mb-1 text-gray-600">Physical</h4>
-                <div class="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
-                    <span>Speed:</span><span class="font-semibold text-right">${player.attributes.physical.speed}</span>
-                    <span>Strength:</span><span class="font-semibold text-right">${player.attributes.physical.strength}</span>
-                    <span>Agility:</span><span class="font-semibold text-right">${player.attributes.physical.agility}</span>
-                    <span>Stamina:</span><span class="font-semibold text-right">${player.attributes.physical.stamina}</span>
-                </div>
-            </div>
-            <div class="mt-3">
-                <h4 class="font-bold text-sm mb-1 text-gray-600">Mental</h4>
-                <div class="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
-                    <span>Playbook IQ:</span><span class="font-semibold text-right">${player.attributes.mental.playbookIQ}</span>
-                    <span>Clutch:</span><span class="font-semibold text-right">${player.attributes.mental.clutch}</span>
-                    <span>Consistency:</span><span class="font-semibold text-right">${player.attributes.mental.consistency}</span>
-                </div>
-            </div>
-            <div class="mt-3">
-                <h4 class="font-bold text-sm mb-1 text-gray-600">Technical</h4>
-                <div class="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
-                    <span>Throwing Acc:</span><span class="font-semibold text-right">${player.attributes.technical.throwingAccuracy}</span>
-                    <span>Catching:</span><span class="font-semibold text-right">${player.attributes.technical.catchingHands}</span>
-                    <span>Tackling:</span><span class="font-semibold text-right">${player.attributes.technical.tackling}</span>
-                    <span>Blocking:</span><span class="font-semibold text-right">${player.attributes.technical.blocking}</span>
-                </div>
-            </div>
-        </div>
-    `;
-    elements.draftPlayerDetail.innerHTML = detailHTML;
-}
 
 /**
- * Highlights a player card in the pool.
+ * Highlights a player row in the draft pool spreadsheet.
  * @param {string} playerId - The ID of the player to highlight.
  */
-export function selectPlayerCard(playerId) {
-    const currentlySelected = elements.playerPool.querySelector('.player-card.selected');
+export function selectPlayerRow(playerId) {
+    const currentlySelected = elements.playerPool.querySelector('tr.selected');
     if (currentlySelected) {
         currentlySelected.classList.remove('selected');
     }
-    const cardToSelect = elements.playerPool.querySelector(`[data-player-id="${playerId}"]`);
-    if (cardToSelect) {
-        cardToSelect.classList.add('selected');
+    const rowToSelect = elements.playerPool.querySelector(`tr[data-player-id="${playerId}"]`);
+    if (rowToSelect) {
+        rowToSelect.classList.add('selected');
     }
-}
-
-
-/**
- * Renders the list of available players for the draft.
- * @param {Array<object>} players - The array of undrafted players.
- * @param {Function} cardClickHandler - Function to handle a click on a player card.
- */
-export function renderDraftPool(players, cardClickHandler) {
-    if (!elements.playerPool) return;
-    elements.playerPool.innerHTML = '';
-    players.forEach(player => {
-        elements.playerPool.appendChild(createPlayerCard(player, cardClickHandler));
-    });
 }
 
 /**
@@ -245,18 +205,16 @@ export function addPickToLog(team, player, pickNumber) {
     li.innerHTML = `
         <span class="font-bold">${pickNumber}. ${team.name}</span> select <span class="font-semibold">${player.name} (${player.position})</span>
     `;
-    // Add to the top of the list
     elements.draftLog.prepend(li);
 }
 
-
 /**
- * Removes a player card from the draft pool after they've been drafted.
+ * Removes a player row from the draft pool after they've been drafted.
  * @param {string} playerId - The ID of the player to remove.
  */
-export function removePlayerCard(playerId) {
-    const card = elements.playerPool.querySelector(`[data-player-id="${playerId}"]`);
-    if (card) card.remove();
+export function removePlayerRow(playerId) {
+    const row = elements.playerPool.querySelector(`tr[data-player-id="${playerId}"]`);
+    if (row) row.remove();
 }
 
 /**
@@ -268,7 +226,6 @@ export function setDraftButtonState(enabled) {
         elements.draftPlayerBtn.disabled = !enabled;
     }
 }
-
 
 /**
  * Renders the standings tables for each division.
@@ -289,9 +246,7 @@ export function renderStandings(teams, divisions) {
         table.className = 'w-full text-left bg-white rounded-lg shadow-md';
         table.innerHTML = `
             <thead class="bg-gray-100">
-                <tr class="border-b">
-                    <th class="p-2">Team</th><th class="p-2 text-center">W</th><th class="p-2 text-center">L</th>
-                </tr>
+                <tr class="border-b"><th class="p-2">Team</th><th class="p-2 text-center">W</th><th class="p-2 text-center">L</th></tr>
             </thead>
             <tbody></tbody>
         `;
@@ -334,7 +289,7 @@ export function updateYourRoster(team) {
     if (!elements.yourRosterContainer) return;
     elements.yourRosterContainer.innerHTML = '';
     const table = document.createElement('table');
-    table.className = 'w-full text-left';
+    table.className = 'w-full text-left text-sm';
     table.innerHTML = `
         <thead class="bg-gray-100"><tr class="border-b"><th class="p-2">Player</th><th class="p-2">POS</th><th class="p-2">YDS</th><th class="p-2">TD</th><th class="p-2">TKL</th></tr></thead>
         <tbody></tbody>
@@ -373,13 +328,13 @@ export function renderFreeAgents(freeAgents, clickHandler) {
         elements.freeAgentsContainer.textContent = "No friends available this week.";
         return;
     }
+    // Note: This still uses player cards, could be converted to a spreadsheet as well
     freeAgents.forEach(fa => {
-        const card = createPlayerCard(fa, () => {}); // Empty handler for now on FA cards
-        const friendship = document.createElement('p');
-        friendship.className = 'text-xs text-blue-600 mt-1';
-        friendship.textContent = fa.friendship;
-        card.appendChild(friendship);
-        card.addEventListener('click', clickHandler);
+        const card = document.createElement('div');
+        card.className = 'player-card bg-white rounded-lg p-3 shadow-md border border-gray-200 cursor-pointer';
+        card.dataset.playerId = fa.id;
+        card.innerHTML = `<h3 class="font-bold">${fa.name}</h3><p class="text-xs">${fa.position} | ${fa.friendship}</p>`;
+        card.addEventListener('click', () => clickHandler(fa.id));
         elements.freeAgentsContainer.appendChild(card);
     });
 }
