@@ -161,11 +161,11 @@ async function startNextSeason() {
 function main() {
     console.log("Game starting... Document loaded.");
     // More direct event listener setup for key buttons
-    const startGameBtn = document.getElementById('generate-league-btn');
+    const startGameBtn = document.getElementById('start-game-btn');
     if (startGameBtn) {
         startGameBtn.addEventListener('click', handleStartClick);
     } else {
-        console.error("#generate-league-btn not found!");
+        console.error("#start-game-btn not found!");
     }
 
     const startSeasonBtn = document.getElementById('start-season-btn');
