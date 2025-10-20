@@ -1,0 +1,24 @@
+body {
+    font-family: 'Inter', sans-serif;
+}
+
+.font-bangers {
+    font-family: 'Bangers', cursive;
+}
+
+.player-card {
+    transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+}
+
+.player-card:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.player-card.selected {
+    transform: translateY(-4px);
+    border-width: 2px;
+    border-color: #f59e0b; /* amber-500 */
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
