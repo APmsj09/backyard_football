@@ -16,6 +16,8 @@ export function setupElements() {
             season: document.getElementById('season-screen'),
             endSeason: document.getElementById('end-season-screen')
         },
+        tabButtons: document.querySelectorAll('.tab-btn'),
+        tabContents: document.querySelectorAll('.tab-content'),
         loadingBar: document.getElementById('loading-bar'),
         loadingMessage: document.getElementById('loading-message'),
         premadeTeamsGrid: document.getElementById('premade-teams-grid'),
@@ -27,11 +29,17 @@ export function setupElements() {
         draftLog: document.getElementById('draft-log'),
         draftPlayerBtn: document.getElementById('draft-player-btn'),
         seasonHeader: document.getElementById('season-header'),
-        standingsContainer: document.getElementById('standings-container'),
-        scheduleContainer: document.getElementById('schedule-container'),
-        yourRosterContainer: document.getElementById('your-roster'),
-        freeAgentsContainer: document.getElementById('free-agents-container'),
-        resultsContainer: document.getElementById('weekly-results-container'),
+        
+        // Tab Content Containers
+        myTeamContent: document.getElementById('tab-content-my-team'),
+        rosterContent: document.getElementById('tab-content-roster'),
+        depthChartContent: document.getElementById('tab-content-depth-chart'),
+        freeAgencyContent: document.getElementById('tab-content-free-agency'),
+        scheduleContent: document.getElementById('tab-content-schedule'),
+        standingsContent: document.getElementById('tab-content-standings'),
+        playerStatsContent: document.getElementById('tab-content-player-stats'),
+        hallOfFameContent: document.getElementById('tab-content-hall-of-fame'),
+        
         endSeasonHeader: document.getElementById('end-season-header'),
     };
     console.log("UI Elements have been successfully set up.");
@@ -47,6 +55,22 @@ export function showScreen(screenName) {
             elements.screens[key].classList.toggle('hidden', key !== screenName);
         }
     }
+}
+
+/**
+ * Handles tab switching functionality.
+ * @param {string} tabId - The data-tab attribute of the clicked button.
+ */
+export function setActiveTab(tabId) {
+    elements.tabButtons.forEach(button => {
+        const isActive = button.dataset.tab === tabId;
+        button.classList.toggle('bg-amber-500', isActive);
+        button.classList.toggle('text-white', isActive);
+        button.classList.toggle('hover:bg-gray-200', !isActive);
+    });
+    elements.tabContents.forEach(content => {
+        content.classList.toggle('hidden', content.id !== `tab-content-${tabId}`);
+    });
 }
 
 /**
@@ -88,27 +112,18 @@ export function renderDraftPool(players, rowClickHandler) {
     const table = document.createElement('table');
     table.className = 'w-full text-left text-sm';
     
-    // Create Table Header
     table.innerHTML = `
         <thead class="bg-gray-200 sticky top-0">
             <tr>
-                <th class="p-2">Name</th>
-                <th class="p-2">Pos</th>
-                <th class="p-2">Age</th>
-                <th class="p-2 hidden md:table-cell">Ht</th>
-                <th class="p-2 hidden md:table-cell">Wt</th>
-                <th class="p-2 text-center">Spd</th>
-                <th class="p-2 text-center">Str</th>
-                <th class="p-2 text-center">Agil</th>
-                <th class="p-2 text-center hidden lg:table-cell">IQ</th>
-                <th class="p-2 text-center hidden lg:table-cell">Thr</th>
-                <th class="p-2 text-center hidden lg:table-cell">Hnd</th>
-                <th class="p-2 text-center hidden lg:table-cell">Tkl</th>
+                <th class="p-2">Name</th><th class="p-2">Pos</th><th class="p-2">Age</th>
+                <th class="p-2 hidden md:table-cell">Ht</th><th class="p-2 hidden md:table-cell">Wt</th>
+                <th class="p-2 text-center">Spd</th><th class="p-2 text-center">Str</th><th class="p-2 text-center">Agil</th>
+                <th class="p-2 text-center hidden lg:table-cell">IQ</th><th class="p-2 text-center hidden lg:table-cell">Thr</th>
+                <th class="p-2 text-center hidden lg:table-cell">Hnd</th><th class="p-2 text-center hidden lg:table-cell">Tkl</th>
                 <th class="p-2 text-center hidden lg:table-cell">Blk</th>
             </tr>
         </thead>
-        <tbody>
-        </tbody>
+        <tbody></tbody>
     `;
 
     const tbody = table.querySelector('tbody');
@@ -142,49 +157,26 @@ export function renderDraftPool(players, rowClickHandler) {
     elements.playerPool.appendChild(table);
 }
 
-
-/**
- * Highlights a player row in the draft pool spreadsheet.
- * @param {string} playerId - The ID of the player to highlight.
- */
 export function selectPlayerRow(playerId) {
     const currentlySelected = elements.playerPool.querySelector('tr.selected');
-    if (currentlySelected) {
-        currentlySelected.classList.remove('selected');
-    }
+    if (currentlySelected) currentlySelected.classList.remove('selected');
     const rowToSelect = elements.playerPool.querySelector(`tr[data-player-id="${playerId}"]`);
-    if (rowToSelect) {
-        rowToSelect.classList.add('selected');
-    }
+    if (rowToSelect) rowToSelect.classList.add('selected');
 }
 
-/**
- * Updates the player's team roster display in the draft screen.
- * @param {object} team - The player's team object.
- */
-export function updateRoster(team) {
+export function updateDraftRoster(team) {
      if (!elements.teamRoster) return;
     elements.teamRoster.innerHTML = '';
     team.roster.forEach(player => {
         const li = document.createElement('li');
         li.className = 'flex justify-between items-center p-2 border-b text-sm';
-        li.innerHTML = `
-            <span>${player.name}</span>
-            <span class="font-bold text-gray-600">${player.position}</span>
-        `;
+        li.innerHTML = `<span>${player.name}</span><span class="font-bold text-gray-600">${player.position}</span>`;
         elements.teamRoster.appendChild(li);
     });
 }
 
-/**
- * Updates the draft clock UI.
- * @param {object} team - The team currently on the clock.
- * @param {number} pickNumber - The overall pick number (1-based).
- */
 export function updateDraftClock(team, pickNumber) {
-    if (elements.draftClockTeam) {
-        elements.draftClockTeam.textContent = `${team.name} are on the clock!`;
-    }
+    if (elements.draftClockTeam) elements.draftClockTeam.textContent = `${team.name} are on the clock!`;
     if (elements.draftClockPick) {
         const round = Math.floor((pickNumber - 1) / 20) + 1;
         const pickInRound = ((pickNumber - 1) % 20) + 1;
@@ -192,178 +184,206 @@ export function updateDraftClock(team, pickNumber) {
     }
 }
 
-/**
- * Adds a new entry to the draft log.
- * @param {object} team - The team that made the pick.
- * @param {object} player - The player who was picked.
- * @param {number} pickNumber - The overall pick number (1-based).
- */
 export function addPickToLog(team, player, pickNumber) {
     if (!elements.draftLog) return;
     const li = document.createElement('li');
     li.className = 'p-2 bg-gray-50 rounded-md';
-    li.innerHTML = `
-        <span class="font-bold">${pickNumber}. ${team.name}</span> select <span class="font-semibold">${player.name} (${player.position})</span>
-    `;
+    li.innerHTML = `<span class="font-bold">${pickNumber}. ${team.name}</span> select <span class="font-semibold">${player.name} (${player.position})</span>`;
     elements.draftLog.prepend(li);
 }
 
-/**
- * Removes a player row from the draft pool after they've been drafted.
- * @param {string} playerId - The ID of the player to remove.
- */
 export function removePlayerRow(playerId) {
     const row = elements.playerPool.querySelector(`tr[data-player-id="${playerId}"]`);
     if (row) row.remove();
 }
 
-/**
- * Enables or disables the player's draft button.
- * @param {boolean} enabled - True to enable, false to disable.
- */
 export function setDraftButtonState(enabled) {
-    if (elements.draftPlayerBtn) {
-        elements.draftPlayerBtn.disabled = !enabled;
-    }
+    if (elements.draftPlayerBtn) elements.draftPlayerBtn.disabled = !enabled;
 }
 
-/**
- * Renders the standings tables for each division.
- * @param {Array<object>} teams - All teams in the league.
- * @param {object} divisions - The division structure.
- */
-export function renderStandings(teams, divisions) {
-    if (!elements.standingsContainer) return;
-    elements.standingsContainer.innerHTML = '';
+// --- NEW & UPDATED SEASON SCREEN RENDERERS ---
+
+export function renderMyTeam(team, schedule, currentWeek) {
+    if (!elements.myTeamContent) return;
+    const weeklyGames = schedule.slice(currentWeek * 10, (currentWeek + 1) * 10);
+    const nextOpponent = weeklyGames.find(g => g.home.id === team.id || g.away.id === team.id);
+    const opponent = nextOpponent ? (nextOpponent.home.id === team.id ? nextOpponent.away : nextOpponent.home) : { name: 'BYE WEEK' };
     
-    for (const divName in divisions) {
-        const header = document.createElement('h3');
-        header.className = 'text-xl font-bold mt-4 mb-2';
-        header.textContent = `${divName} Division`;
-        elements.standingsContainer.appendChild(header);
-
-        const table = document.createElement('table');
-        table.className = 'w-full text-left bg-white rounded-lg shadow-md';
-        table.innerHTML = `
-            <thead class="bg-gray-100">
-                <tr class="border-b"><th class="p-2">Team</th><th class="p-2 text-center">W</th><th class="p-2 text-center">L</th></tr>
-            </thead>
-            <tbody></tbody>
-        `;
-        const tbody = table.querySelector('tbody');
-        
-        const divisionTeams = teams.filter(t => t.division === divName).sort((a, b) => b.wins - a.wins);
-
-        divisionTeams.forEach(team => {
-            const row = document.createElement('tr');
-            row.className = 'border-b last:border-b-0';
-            row.innerHTML = `<td class="p-2">${team.name}</td><td class="p-2 text-center">${team.wins}</td><td class="p-2 text-center">${team.losses}</td>`;
-            tbody.appendChild(row);
-        });
-        elements.standingsContainer.appendChild(table);
-    }
-}
-
-/**
- * Renders the weekly schedule.
- * @param {Array<object>} schedule - The full season schedule.
- * @param {number} currentWeek - The current week index.
- */
-export function renderSchedule(schedule, currentWeek) {
-     if (!elements.scheduleContainer) return;
-     elements.scheduleContainer.innerHTML = '';
-     const weeklyGames = schedule.slice(currentWeek * 10, (currentWeek + 1) * 10);
-     weeklyGames.forEach(match => {
-        const p = document.createElement('p');
-        p.className = 'text-sm';
-        p.textContent = `${match.away.name} @ ${match.home.name}`;
-        elements.scheduleContainer.appendChild(p);
-     });
-}
-
-/**
- * Updates the detailed roster view on the season screen.
- * @param {object} team - The player's team object.
- */
-export function updateYourRoster(team) {
-    if (!elements.yourRosterContainer) return;
-    elements.yourRosterContainer.innerHTML = '';
-    const table = document.createElement('table');
-    table.className = 'w-full text-left text-sm';
-    table.innerHTML = `
-        <thead class="bg-gray-100"><tr class="border-b"><th class="p-2">Player</th><th class="p-2">POS</th><th class="p-2">YDS</th><th class="p-2">TD</th><th class="p-2">TKL</th></tr></thead>
-        <tbody></tbody>
+    elements.myTeamContent.innerHTML = `
+        <h2 class="text-2xl font-bold mb-4">${team.name}</h2>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 text-center">
+            <div class="bg-gray-100 p-4 rounded-lg">
+                <p class="text-sm text-gray-500">Record</p>
+                <p class="text-3xl font-bold">${team.wins} - ${team.losses}</p>
+            </div>
+            <div class="bg-gray-100 p-4 rounded-lg">
+                <p class="text-sm text-gray-500">Next Opponent</p>
+                <p class="text-3xl font-bold">${opponent.name}</p>
+            </div>
+            <div class="bg-gray-100 p-4 rounded-lg">
+                <p class="text-sm text-gray-500">Year</p>
+                <p class="text-3xl font-bold">${game.year}</p>
+            </div>
+        </div>
     `;
-    const tbody = table.querySelector('tbody');
-    team.roster.sort((a,b) => a.name.localeCompare(b.name)).forEach(player => {
-        const totalYards = player.seasonStats.passYards + player.seasonStats.rushYards + player.seasonStats.recYards;
-        const row = document.createElement('tr');
-        row.className = 'border-b last:border-b-0';
-        row.innerHTML = `<td class="p-2">${player.name}</td><td class="p-2">${player.position}</td><td class="p-2">${totalYards}</td><td class="p-2">${player.seasonStats.touchdowns}</td><td class="p-2">${player.seasonStats.tackles}</td>`;
-        tbody.appendChild(row);
-    });
-    elements.yourRosterContainer.appendChild(table);
 }
 
-/**
- * Updates the main header on the season screen.
- * @param {number} currentWeek - The current week index.
- * @param {number} year - The current season year.
- */
-export function updateSeasonHeader(currentWeek, year) {
-    if (elements.seasonHeader) {
-        elements.seasonHeader.textContent = `Year ${year} - Week ${currentWeek + 1}`;
-    }
+export function renderRoster(team) {
+    if (!elements.rosterContent) return;
+    const tableHTML = `
+        <h2 class="text-2xl font-bold mb-4">Team Roster</h2>
+        <div class="overflow-x-auto">
+            <table class="w-full text-left text-sm">
+                <thead class="bg-gray-100">
+                    <tr>
+                        <th class="p-2">Name</th><th class="p-2">Pos</th><th class="p-2">Age</th><th class="p-2">Yds</th><th class="p-2">TD</th><th class="p-2">Tkl</th>
+                    </tr>
+                </thead>
+                <tbody>
+                ${team.roster.map(p => {
+                    const totalYards = p.seasonStats.passYards + p.seasonStats.rushYards + p.seasonStats.recYards;
+                    return `<tr class="border-b"><td class="p-2 font-semibold">${p.name}</td><td class="p-2">${p.position}</td><td class="p-2">${p.age}</td><td class="p-2">${totalYards}</td><td class="p-2">${p.seasonStats.touchdowns}</td><td class="p-2">${p.seasonStats.tackles}</td></tr>`;
+                }).join('')}
+                </tbody>
+            </table>
+        </div>
+    `;
+    elements.rosterContent.innerHTML = tableHTML;
 }
 
-/**
- * Renders the available free agents for the week.
- * @param {Array<object>} freeAgents - The array of available friends.
- * @param {Function} clickHandler - The function to call when a card is clicked.
- */
-export function renderFreeAgents(freeAgents, clickHandler) {
-    if (!elements.freeAgentsContainer) return;
-    elements.freeAgentsContainer.innerHTML = '';
-    if (freeAgents.length === 0) {
-        elements.freeAgentsContainer.textContent = "No friends available this week.";
-        return;
-    }
-    // Note: This still uses player cards, could be converted to a spreadsheet as well
-    freeAgents.forEach(fa => {
-        const card = document.createElement('div');
-        card.className = 'player-card bg-white rounded-lg p-3 shadow-md border border-gray-200 cursor-pointer';
-        card.dataset.playerId = fa.id;
-        card.innerHTML = `<h3 class="font-bold">${fa.name}</h3><p class="text-xs">${fa.position} | ${fa.friendship}</p>`;
-        card.addEventListener('click', () => clickHandler(fa.id));
-        elements.freeAgentsContainer.appendChild(card);
-    });
-}
+export function renderDepthChart(team, players, dragHandlers) {
+    if (!elements.depthChartContent) return;
+    const { dragStart, dragOver, drop } = dragHandlers;
 
-/**
- * Displays the results of the simulated week.
- * @param {Array<object>} results - The game results for the week.
- * @param {number} week - The week number.
- */
-export function renderWeeklyResults(results, week) {
-     if (!elements.resultsContainer) return;
-    elements.resultsContainer.innerHTML = '';
-    const header = document.createElement('h3');
-    header.className = 'text-lg font-bold mb-2';
-    header.textContent = `Week ${week} Results`;
-    elements.resultsContainer.appendChild(header);
+    let benchPlayers = team.roster.filter(p => !Object.values(team.depthChart).includes(p.id));
     
-    results.forEach(result => {
-        const p = document.createElement('p');
-        p.className = 'text-sm mb-1';
-        p.textContent = `${result.awayTeam.name} ${result.awayScore} @ ${result.homeTeam.name} ${result.homeScore}`;
-        elements.resultsContainer.appendChild(p);
+    const benchHTML = benchPlayers.map(p => `<div class="depth-chart-player bg-white p-2 rounded shadow-sm border" draggable="true" data-player-id="${p.id}">${p.name} (${p.position})</div>`).join('');
+
+    const slotsHTML = Object.keys(team.depthChart).map(slot => {
+        const playerId = team.depthChart[slot];
+        const player = playerId ? players.find(p => p.id === playerId) : null;
+        const playerHTML = player ? `<div class="depth-chart-player bg-white p-2 rounded shadow-sm border" draggable="true" data-player-id="${player.id}">${player.name} (${player.position})</div>` : '';
+        return `
+            <div>
+                <h4 class="font-semibold mb-2">${slot}</h4>
+                <div class="depth-chart-slot p-2 rounded-lg" data-slot-id="${slot}">${playerHTML}</div>
+            </div>
+        `;
+    }).join('');
+
+    elements.depthChartContent.innerHTML = `
+        <h2 class="text-2xl font-bold mb-4">Depth Chart</h2>
+        <p class="text-sm text-gray-500 mb-4">Drag and drop players to set your lineup.</p>
+        <div class="grid grid-cols-1 md:grid-cols-5 gap-4">
+            <div class="md:col-span-4 grid grid-cols-4 gap-4">
+                ${slotsHTML}
+            </div>
+            <div class="md:col-span-1">
+                <h4 class="font-semibold mb-2">Bench</h4>
+                <div class="depth-chart-slot p-2 rounded-lg space-y-2" data-slot-id="BENCH">${benchHTML}</div>
+            </div>
+        </div>
+    `;
+    
+    // Add event listeners after rendering
+    elements.depthChartContent.querySelectorAll('[draggable="true"]').forEach(el => el.addEventListener('dragstart', dragStart));
+    elements.depthChartContent.querySelectorAll('.depth-chart-slot').forEach(el => {
+        el.addEventListener('dragover', dragOver);
+        el.addEventListener('drop', drop);
     });
 }
 
-/**
- * Updates the header on the end-of-season screen.
- * @param {number} year - The year that just ended.
- */
+
+export function renderFreeAgency(freeAgents, clickHandler) {
+    if (!elements.freeAgencyContent) return;
+    let content = `<h2 class="text-2xl font-bold mb-4">Weekly Free Agents</h2>`;
+    if (freeAgents.length === 0) {
+        content += "<p>No friends available this week.</p>";
+    } else {
+        content += freeAgents.map(fa => `
+            <div class="flex justify-between items-center p-3 border-b">
+                <div>
+                    <p class="font-semibold">${fa.name} (${fa.position})</p>
+                    <p class="text-sm text-gray-500">${fa.friendship}</p>
+                </div>
+                <button data-player-id="${fa.id}" class="sign-fa-btn bg-green-500 text-white px-3 py-1 rounded-md text-sm hover:bg-green-600">Sign</button>
+            </div>
+        `).join('');
+    }
+    elements.freeAgencyContent.innerHTML = content;
+    elements.freeAgencyContent.querySelectorAll('.sign-fa-btn').forEach(btn => btn.addEventListener('click', () => clickHandler(btn.dataset.playerId)));
+}
+
+export function renderSchedule(schedule, currentWeek) {
+    if (!elements.scheduleContent) return;
+    let content = `<h2 class="text-2xl font-bold mb-4">Season Schedule</h2>`;
+    const weeklyGames = schedule.slice(currentWeek * 10, (currentWeek + 1) * 10);
+    content += `
+        <h3 class="text-lg font-bold mb-2">Week ${currentWeek + 1}</h3>
+        <div class="space-y-2">
+            ${weeklyGames.map(g => `<p>${g.away.name} @ ${g.home.name}</p>`).join('')}
+        </div>
+    `;
+    elements.scheduleContent.innerHTML = content;
+}
+
+export function renderStandings(teams, divisions) {
+    if (!elements.standingsContent) return;
+    let content = `<h2 class="text-2xl font-bold mb-4">League Standings</h2>`;
+    for (const divName in divisions) {
+        content += `<h3 class="text-xl font-bold mt-4 mb-2">${divName} Division</h3>`;
+        const divisionTeams = teams.filter(t => t.division === divName).sort((a, b) => b.wins - a.wins);
+        content += `
+            <table class="w-full text-left bg-white rounded-lg shadow-md">
+                <thead class="bg-gray-100"><tr><th class="p-2">Team</th><th class="p-2 text-center">W</th><th class="p-2 text-center">L</th></tr></thead>
+                <tbody>
+                ${divisionTeams.map(t => `<tr class="border-b"><td class="p-2">${t.name}</td><td class="p-2 text-center">${t.wins}</td><td class="p-2 text-center">${t.losses}</td></tr>`).join('')}
+                </tbody>
+            </table>
+        `;
+    }
+    elements.standingsContent.innerHTML = content;
+}
+
+export function renderPlayerStats(players) {
+    if (!elements.playerStatsContent) return;
+     const sortedPlayers = [...players].sort((a,b) => (b.seasonStats.passYards + b.seasonStats.rushYards + b.seasonStats.recYards) - (a.seasonStats.passYards + a.seasonStats.rushYards + a.seasonStats.recYards));
+    elements.playerStatsContent.innerHTML = `
+        <h2 class="text-2xl font-bold mb-4">League Player Stats</h2>
+        <div class="max-h-[60vh] overflow-y-auto">
+            <table class="w-full text-left text-sm">
+                <thead class="bg-gray-100 sticky top-0"><tr><th class="p-2">Name</th><th class="p-2">Team</th><th class="p-2">Pass Yds</th><th class="p-2">Rush Yds</th><th class="p-2">Rec Yds</th><th class="p-2">TDs</th><th class="p-2">Tkls</th></tr></thead>
+                <tbody>
+                ${sortedPlayers.map(p => {
+                    const team = game.teams.find(t => t.id === p.teamId);
+                    return `<tr class="border-b">
+                        <td class="p-2 font-semibold">${p.name}</td><td class="p-2">${team ? team.name : 'FA'}</td>
+                        <td class="p-2">${p.seasonStats.passYards}</td><td class="p-2">${p.seasonStats.rushYards}</td>
+                        <td class="p-2">${p.seasonStats.recYards}</td><td class="p-2">${p.seasonStats.touchdowns}</td><td class="p-2">${p.seasonStats.tackles}</td>
+                    </tr>`
+                }).join('')}
+                </tbody>
+            </table>
+        </div>
+    `;
+}
+
+export function renderHallOfFame(hallOfFamers) {
+    if (!elements.hallOfFameContent) return;
+    let content = `<h2 class="text-2xl font-bold mb-4">Hall of Fame</h2>`;
+    if (hallOfFamers.length === 0) {
+        content += `<p>No players have been inducted yet.</p>`;
+    } else {
+         content += hallOfFamers.map(p => `
+            <div class="p-3 border-b">
+                <p class="font-bold text-lg">${p.name} <span class="text-sm font-normal text-gray-500">(${p.position})</span></p>
+                <p class="text-xs">Seasons: ${p.careerStats.seasonsPlayed} | TDs: ${p.careerStats.touchdowns} | Total Yards: ${p.careerStats.passYards + p.careerStats.rushYards + p.careerStats.recYards} | Tackles: ${p.careerStats.tackles}</p>
+            </div>
+        `).join('');
+    }
+    elements.hallOfFameContent.innerHTML = content;
+}
+
 export function updateEndSeasonUI(year) {
     if (elements.endSeasonHeader) {
         elements.endSeasonHeader.textContent = `End of Year ${year}`;
