@@ -7,122 +7,92 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Bangers&family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Bangers&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="css/style.css">
 </head>
 <body class="bg-gray-100 font-sans text-gray-800">
 
-    <!-- Notification Area -->
-    <div id="notification" class="hidden fixed top-5 right-5 bg-green-500 text-white py-3 px-5 rounded-lg shadow-lg z-50 transition-transform transform translate-x-full">
-        <p id="notification-message"></p>
-    </div>
+    <div id="game-container" class="max-w-7xl mx-auto p-4 sm:p-6 lg:p-8">
 
-
-    <!-- Loading Screen -->
-    <div id="loading-screen" class="hidden fixed inset-0 bg-gray-900 bg-opacity-75 flex items-center justify-center z-50">
-        <div class="bg-white p-8 rounded-lg shadow-2xl text-center w-full max-w-md">
-            <h2 class="text-2xl font-bold mb-4">Generating League...</h2>
-            <p class="text-gray-600 mb-4" id="loading-status">Creating players...</p>
-            <div class="w-full bg-gray-200 rounded-full h-4">
-                <div id="progress-bar" class="bg-green-500 h-4 rounded-full transition-all duration-150" style="width: 0%"></div>
+        <!-- Start Screen -->
+        <div id="start-screen" class="text-center">
+            <h1 class="font-bangers text-6xl md:text-8xl text-amber-500" style="text-shadow: 2px 2px #000;">Backyard Football</h1>
+            <p class="mt-4 text-lg text-gray-600">The biggest little league in the city!</p>
+            <div class="mt-8">
+                <button id="start-game-btn" class="font-bangers text-3xl bg-amber-500 text-white py-3 px-8 rounded-lg shadow-lg hover:bg-amber-600 transition-transform transform hover:scale-105">Start a New Season</button>
             </div>
         </div>
-    </div>
 
-    <!-- Start Screen -->
-    <div id="start-screen" class="min-h-screen flex items-center justify-center p-4">
-        <div class="text-center">
-            <h1 class="text-8xl font-bold text-yellow-400 title-shadow" style="font-family: 'Bangers', cursive;">Backyard Football</h1>
-            <p class="text-2xl text-gray-600 mb-8">The ultimate kids league manager!</p>
-            <button id="generate-league-btn" class="bg-green-600 text-white font-bold py-4 px-8 rounded-lg shadow-lg hover:bg-green-700 transition transform hover:scale-105">
-                Start a New Season
-            </button>
-        </div>
-    </div>
-
-    <!-- Draft Screen -->
-    <div id="draft-screen" class="hidden p-4 md:p-8 max-w-7xl mx-auto">
-        <div class="text-center mb-8">
-            <h1 class="text-5xl font-bold" style="font-family: 'Bangers', cursive;">Draft Day!</h1>
-            <p class="text-xl">Pick your team, coach! You've got <span id="total-picks" class="font-bold">10</span> picks. Good luck!</p>
-        </div>
-        <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
-            <div class="lg:col-span-2">
-                <h2 class="text-3xl font-bold mb-4">Available Players</h2>
-                <div id="draft-pool" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 h-[60vh] overflow-y-auto p-2 bg-gray-200 rounded-lg">
-                    <!-- Player cards will be generated here -->
+        <!-- Loading Screen -->
+        <div id="loading-screen" class="hidden text-center">
+             <div class="bg-white p-8 rounded-lg shadow-lg max-w-md mx-auto">
+                <h2 class="text-2xl font-bold mb-4">Building The League...</h2>
+                <p id="loading-message" class="text-gray-600 mb-4">Generating players...</p>
+                <div class="w-full bg-gray-200 rounded-full h-4">
+                    <div id="loading-bar" class="bg-amber-500 h-4 rounded-full transition-all duration-500" style="width: 0%"></div>
                 </div>
             </div>
-            <div>
-                <h2 class="text-3xl font-bold mb-4">Your Team: <span id="player-team-name" class="text-green-700"></span></h2>
-                <div class="bg-white p-4 rounded-lg shadow h-[60vh] flex flex-col">
-                    <div id="roster" class="space-y-2 flex-grow overflow-y-auto">
-                        <!-- Roster will be generated here -->
+        </div>
+
+        <!-- Draft Screen -->
+        <div id="draft-screen" class="hidden">
+            <h2 class="font-bangers text-4xl text-center mb-6">Team Draft</h2>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div class="md:col-span-2 bg-white p-4 rounded-lg shadow-md">
+                    <h3 class="text-xl font-bold mb-4">Available Players</h3>
+                    <div id="player-pool" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 max-h-[60vh] overflow-y-auto p-2">
+                        <!-- Player cards will be inserted here by JS -->
+                    </div>
+                </div>
+                <div class="bg-white p-4 rounded-lg shadow-md">
+                    <h3 class="text-xl font-bold mb-2">Your Roster</h3>
+                    <p id="draft-status" class="text-sm text-gray-500 mb-4">Pick 1 of 10</p>
+                    <ul id="team-roster" class="space-y-2">
+                        <!-- Roster list items will be inserted here by JS -->
+                    </ul>
+                    <div class="mt-6">
+                        <button id="draft-player-btn" class="w-full bg-green-500 text-white font-bold py-2 px-4 rounded-lg hover:bg-green-600 transition">Draft Selected Player</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Season Screen -->
+        <div id="season-screen" class="hidden">
+            <h2 id="season-header" class="font-bangers text-4xl text-center mb-6">Season Underway!</h2>
+            <div class="grid grid-cols-1 lg:grid-cols-4 gap-6">
+                <div class="lg:col-span-1 bg-white p-4 rounded-lg shadow-md">
+                    <h3 class="text-xl font-bold mb-4">Schedule</h3>
+                    <div id="schedule-container" class="space-y-2"></div>
+                     <button id="sim-week-btn" class="w-full mt-4 bg-blue-500 text-white font-bold py-2 px-4 rounded-lg hover:bg-blue-600 transition">Simulate Week</button>
+                     <div id="weekly-results-container" class="mt-4"></div>
+                </div>
+                <div class="lg:col-span-2 bg-white p-4 rounded-lg shadow-md">
+                    <h3 class="text-xl font-bold mb-4">League Standings</h3>
+                    <div id="standings-container"></div>
+                </div>
+                <div class="lg:col-span-1 bg-white p-4 rounded-lg shadow-md">
+                    <div>
+                        <h3 class="text-xl font-bold mb-4">Your Roster</h3>
+                        <div id="your-roster" class="max-h-48 overflow-y-auto"></div>
                     </div>
                     <div class="mt-4">
-                        <p class="text-center text-lg mb-2">Pick <span id="current-pick" class="font-bold">1</span>/<span id="total-picks-display">10</span></p>
-                        <button id="draft-player-btn" class="w-full bg-green-600 text-white font-bold py-3 px-6 rounded-lg shadow hover:bg-green-700 transition disabled:bg-gray-400 disabled:cursor-not-allowed" disabled>
-                            Draft Selected Player
-                        </button>
+                        <h3 class="text-xl font-bold mb-4">Available Friends</h3>
+                        <div id="free-agents-container" class="space-y-2"></div>
                     </div>
                 </div>
             </div>
         </div>
-    </div>
 
-    <!-- Final Team Review Screen -->
-    <div id="team-screen" class="hidden min-h-screen flex items-center justify-center p-4">
-        <div class="bg-white p-8 rounded-lg shadow-xl text-center w-full max-w-2xl">
-            <h1 class="text-4xl font-bold mb-2">Team Assembled!</h1>
-            <p class="text-gray-600 mb-6">Here's your final roster for the <span id="final-team-name" class="font-bold"></span></p>
-            <div id="final-roster" class="grid grid-cols-2 md:grid-cols-3 gap-4 mb-8 max-h-64 overflow-y-auto">
-                <!-- Final roster cards -->
-            </div>
-            <button id="start-season-btn" class="bg-blue-600 text-white font-bold py-3 px-8 rounded-lg shadow hover:bg-blue-700 transition">
-                Start The Season!
-            </button>
-        </div>
-    </div>
-
-    <!-- Season Screen -->
-    <div id="season-screen" class="hidden p-4 md:p-8 max-w-7xl mx-auto">
-        <div id="season-header" class="text-center mb-8">
-            <!-- Season header content -->
-        </div>
-        <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
-            <div class="lg:col-span-1">
-                <h2 class="text-3xl font-bold mb-4">Standings</h2>
-                <div id="standings-table" class="bg-white p-4 rounded-lg shadow">
-                    <!-- Standings table will be rendered here -->
-                </div>
-            </div>
-            <div class="lg:col-span-2">
-                <div class="flex justify-between items-center mb-4">
-                    <h2 class="text-3xl font-bold">Schedule</h2>
-                    <button id="simulate-week-btn" class="bg-green-600 text-white font-bold py-2 px-6 rounded-lg shadow hover:bg-green-700 transition">
-                        Simulate Next Week
-                    </button>
-                </div>
-                <div id="schedule-view" class="space-y-4 max-h-[70vh] overflow-y-auto p-2">
-                    <!-- Schedule will be rendered here -->
-                </div>
-                 <div id="season-end-message" class="hidden text-center mt-6 bg-yellow-200 p-6 rounded-lg">
-                    <h3 class="text-3xl font-bold text-yellow-800">Season Over!</h3>
-                    <p id="champion-announcement" class="text-xl mt-2"></p>
-                    <button id="new-season-btn" class="mt-4 bg-blue-600 text-white font-bold py-3 px-8 rounded-lg shadow hover:bg-blue-700 transition">
-                        Start Next Season
-                    </button>
-                </div>
-            </div>
-        </div>
-        <div class="mt-8">
-            <h2 class="text-3xl font-bold mb-4">Your Roster & Season Stats</h2>
-            <div id="roster-stats-view" class="bg-white p-4 rounded-lg shadow overflow-x-auto">
-                <!-- Roster with stats will be rendered here -->
+        <!-- End Season Screen -->
+        <div id="end-season-screen" class="hidden text-center">
+             <div class="bg-white p-8 rounded-lg shadow-lg max-w-md mx-auto">
+                <h2 id="end-season-header" class="font-bangers text-4xl mb-4">End of Season</h2>
+                <p class="text-gray-600 mb-6">The season is over! Time to prepare for next year.</p>
+                <button id="next-season-btn" class="w-full bg-amber-500 text-white font-bold py-3 px-4 rounded-lg hover:bg-amber-600 transition text-xl">Start Next Season's Draft</button>
             </div>
         </div>
     </div>
-
 
     <script type="module" src="js/main.js"></script>
 </body>
