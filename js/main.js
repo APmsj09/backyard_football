@@ -18,7 +18,7 @@ async function startNewGame() {
         UI.showScreen('draft');
         UI.renderDraftPool(game.players.filter(p => !p.teamId));
         UI.updateRoster(game.playerTeam);
-        UI.updateDraftUI();
+        UI.updateDraftUI(game); // Pass game state to the UI function
     } catch (error) {
         console.error("Error starting game:", error);
         // In a real app, you might show a user-friendly error message here.
@@ -38,7 +38,7 @@ function handleDraftClick() {
         if (Game.addPlayerToTeam(player, game.playerTeam)) {
             UI.updateRoster(game.playerTeam);
             UI.removePlayerCard(player.id);
-            UI.updateDraftUI();
+            UI.updateDraftUI(game); // Pass game state to the UI function
             if (game.playerTeam.roster.length >= 10) {
                 Game.generateSchedule();
                 startSeasonPhase();
@@ -125,7 +125,7 @@ async function startNextSeason() {
     UI.showScreen('draft');
     UI.renderDraftPool(game.players.filter(p => !p.teamId));
     UI.updateRoster(game.playerTeam);
-    UI.updateDraftUI();
+    UI.updateDraftUI(game); // Pass game state to the UI function
 }
 
 // --- INITIALIZATION ---
