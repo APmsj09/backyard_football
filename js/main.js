@@ -1,194 +1,161 @@
-// js/main.js - The entry point of the application. Handles UI events and game flow.
-
 import * as Game from './game.js';
 import * as UI from './ui.js';
 
-// --- Event Handlers ---
+// --- MAIN APPLICATION FLOW & EVENT HANDLERS ---
 
-function handleStartClick() {
-    console.log("Start new game button clicked.");
-    startNewGame();
+/**
+ * Starts the entire game flow from the beginning.
+ */
+async function startNewGame() {
+    try {
+        UI.showScreen('loading');
+        // This tiny delay forces the browser to render the loading screen before starting heavy work.
+        await new Promise(resolve => setTimeout(resolve, 50)); 
+        
+        await Game.initializeLeague(UI.updateLoadingProgress);
+        
+        const game = Game.getGameState();
+        UI.showScreen('draft');
+        UI.renderDraftPool(game.players.filter(p => !p.teamId));
+        UI.updateRoster(game.playerTeam);
+        UI.updateDraftUI();
+    } catch (error) {
+        console.error("Error starting game:", error);
+        // In a real app, you might show a user-friendly error message here.
+    }
 }
 
-function handleDraftClick(event) {
-    console.log("Draft button clicked.");
-    const selectedPlayerCard = document.querySelector('.player-card.selected');
-    if (selectedPlayerCard) {
-        const playerId = selectedPlayerCard.dataset.playerId;
-        const player = Game.getGameState().players.find(p => p.id === playerId);
-        const playerTeam = Game.getGameState().playerTeam;
-
-        const success = Game.addPlayerToTeam(player, playerTeam);
-        if (success) {
-            UI.updateRoster(playerTeam);
-            UI.removePlayerCard(playerId);
+/**
+ * Handles the click event for drafting a player.
+ */
+function handleDraftClick() {
+    const game = Game.getGameState();
+    const playerPoolContainer = document.getElementById('player-pool');
+    const selectedCard = playerPoolContainer.querySelector('.player-card.selected');
+    
+    if (selectedCard) {
+        const player = game.players.find(p => p.id === selectedCard.dataset.playerId);
+        if (Game.addPlayerToTeam(player, game.playerTeam)) {
+            UI.updateRoster(game.playerTeam);
+            UI.removePlayerCard(player.id);
             UI.updateDraftUI();
-
-            // Check if player's draft is complete
-            if (playerTeam.roster.length >= 10) {
-                 console.log("Player draft complete. Starting season.");
-                 // This was changed to go to the team review screen first.
-                 UI.showScreen('team-screen');
-                 UI.renderFinalTeam(playerTeam);
+            if (game.playerTeam.roster.length >= 10) {
+                Game.generateSchedule();
+                startSeasonPhase();
             }
-        } else {
-            // Handle roster full case if needed
-            console.log("Roster is full.");
         }
     }
 }
 
+/**
+ * Transitions the game from draft/off-season to the regular season.
+ */
+function startSeasonPhase() {
+    const game = Game.getGameState();
+    Game.generateWeeklyFreeAgents();
+    UI.showScreen('season');
+    UI.renderStandings(game.teams, game.divisions);
+    UI.renderSchedule(game.schedule, game.currentWeek);
+    UI.updateYourRoster(game.playerTeam);
+    UI.updateSeasonHeader(game.currentWeek, game.year);
+    game.teams.filter(t => t.id !== game.playerTeam.id).forEach(Game.aiManageRoster);
+    UI.renderFreeAgents(game.freeAgents, handleFreeAgentSignClick);
+}
+
+/**
+ * Handles the click event for simulating a week.
+ */
 function handleSimWeekClick() {
-    console.log("Simulate week button clicked.");
+    const game = Game.getGameState();
     const results = Game.simulateWeek();
     if (results) {
-        UI.renderWeeklyResults(results, Game.getGameState().currentWeek);
-        UI.renderStandings(Game.getGameState().teams, Game.getGameState().divisions);
-        UI.updateYourRoster(Game.getGameState().playerTeam); // Update roster to show new stats
+        UI.renderWeeklyResults(results, game.currentWeek);
+        UI.renderStandings(game.teams, game.divisions);
+        UI.updateYourRoster(game.playerTeam);
     } else {
-        console.log("Season is over.");
-        // This logic is now handled by the UI rendering.
-        UI.showSeasonEnd(Game.getGameState().teams);
+        UI.showScreen('endSeason');
+        UI.updateEndSeasonUI(game.year);
     }
 }
 
-
+/**
+ * Handles the click event for signing a free agent.
+ * @param {Event} event - The click event from the free agent card.
+ */
 function handleFreeAgentSignClick(event) {
+    const game = Game.getGameState();
     const playerCard = event.target.closest('.player-card');
     if (!playerCard) return;
 
-    const playerId = playerCard.dataset.playerId;
-    const player = Game.getGameState().freeAgents.find(p => p.id === playerId);
-    const playerTeam = Game.getGameState().playerTeam;
-
-    // Friendship logic
-    const friendshipChances = {
-        'Close Friend': 0.9,
-        'Friend': 0.6,
-        'Acquaintance': 0.3
-    };
-
-    if (Math.random() < friendshipChances[player.friendship]) {
-        if (playerTeam.roster.length < 10) {
-            Game.addPlayerToTeam(player, playerTeam);
-            console.log(`Successfully signed ${player.name}`);
-            UI.showNotification(`${player.name} joined for the week!`);
-            startSeasonPhase(); // Move to the next phase
+    const player = game.freeAgents.find(p => p.id === playerCard.dataset.playerId);
+    const chances = { 'Close Friend': 0.9, 'Friend': 0.6, 'Acquaintance': 0.3 };
+    
+    if (Math.random() < chances[player.friendship]) {
+        if (game.playerTeam.roster.length < 10) {
+            Game.addPlayerToTeam(player, game.playerTeam);
         } else {
-            // In a real game, you'd show a "roster full" message or allow cuts.
-            console.log("Roster full, can't sign player.");
-            alert("Your roster is full! You need to cut a player first."); // Simple alert for now
+            // In a real game, you would ask the user if they want to drop a player.
+            // For now, we'll just alert them.
+            alert("Your roster is full! You need to drop a player to sign a friend.");
         }
     } else {
-        console.log(`${player.name} was busy and couldn't play.`);
-        UI.showNotification(`${player.name} was busy and couldn't make it.`, 'error');
-        startSeasonPhase(); // Move to the next phase even if signing fails
+        alert(`${player.name} couldn't make it this week!`);
     }
-}
-
-function handleStartSeasonClick() {
-    console.log("Start The Season button clicked.");
-    Game.generateSchedule();
+    // Refresh the season phase to update UI after the transaction
     startSeasonPhase();
 }
 
-function handleNextSeasonClick() {
-    console.log("Starting next season...");
-    startNextSeason();
-}
-
-
-// --- Game Flow Functions ---
-
-async function startNewGame() {
-    try {
-        UI.showScreen('loading-screen');
-        await Game.initializeLeague(UI.updateLoadingProgress);
-
-        const gameState = Game.getGameState();
-        if (!gameState) {
-            throw new Error("Game state failed to initialize.");
-        }
-
-        UI.showScreen('draft-screen');
-        UI.renderDraftPool(gameState.players.filter(p => !p.teamId));
-        UI.updateRoster(gameState.playerTeam);
-        UI.updateDraftUI(gameState.playerTeam);
-    } catch (error) {
-        console.error("CRITICAL ERROR starting game:", error);
-        alert("A critical error occurred. Please check the console (F12) for details and ensure you are running this on a local server.");
-    }
-}
-
-function startSeasonPhase() {
-    Game.generateWeeklyFreeAgents();
-    UI.showScreen('season-screen');
-    UI.renderStandings(Game.getGameState().teams, Game.getGameState().divisions);
-    UI.renderSchedule(Game.getGameState().schedule, Game.getGameState().currentWeek);
-    UI.updateYourRoster(Game.getGameState().playerTeam);
-    UI.updateSeasonHeader(Game.getGameState().currentWeek, Game.getGameState().year);
-
-    // AI teams manage their rosters automatically
-    const aiTeams = Game.getGameState().teams.filter(t => t.id !== Game.getGameState().playerTeam.id);
-    aiTeams.forEach(team => Game.aiManageRoster(team));
-
-    // After AI moves, refresh the free agent pool for the player
-    UI.renderFreeAgents(Game.getGameState().freeAgents, handleFreeAgentSignClick);
-}
-
+/**
+ * Initiates the off-season and prepares for the next draft.
+ */
 async function startNextSeason() {
-    UI.showScreen('loading-screen');
-    // A simplified progress for the offseason
+    UI.showScreen('loading');
     UI.updateLoadingProgress(0.25, "Aging players...");
-    await new Promise(res => setTimeout(res, 200));
+    await Game.yieldToMain();
+    
     Game.advanceToOffseason();
+    
     UI.updateLoadingProgress(0.75, "Generating rookies...");
-    await new Promise(res => setTimeout(res, 200));
-
+    await Game.yieldToMain();
+    
+    const game = Game.getGameState();
     UI.updateLoadingProgress(1, "Done!");
     await new Promise(res => setTimeout(res, 500));
     
-    // Go to the draft for the new season
-    UI.showScreen('draft-screen');
-    UI.renderDraftPool(Game.getGameState().players.filter(p => !p.teamId));
-    UI.updateRoster(Game.getGameState().playerTeam);
-    UI.updateDraftUI(Game.getGameState().playerTeam);
+    UI.showScreen('draft');
+    UI.renderDraftPool(game.players.filter(p => !p.teamId));
+    UI.updateRoster(game.playerTeam);
+    UI.updateDraftUI();
 }
 
-
-// --- Initialization ---
-
+// --- INITIALIZATION ---
+/**
+ * Main function to set up the application once the DOM is ready.
+ */
 function main() {
     console.log("Game starting... Document loaded.");
-    // More direct event listener setup for key buttons
+    UI.setupElements();
+    
+    // Correctly get and assign event listeners
     const startGameBtn = document.getElementById('start-game-btn');
+    const draftBtn = document.getElementById('draft-player-btn');
+    const simWeekBtn = document.getElementById('sim-week-btn');
+    const nextSeasonBtn = document.getElementById('next-season-btn');
+
     if (startGameBtn) {
-        startGameBtn.addEventListener('click', handleStartClick);
+        startGameBtn.addEventListener('click', startNewGame);
     } else {
-        console.error("#start-game-btn not found!");
+        console.error("Fatal Error: Start button with ID 'start-game-btn' not found on page load.");
+        return;
     }
-
-    const startSeasonBtn = document.getElementById('start-season-btn');
-     if (startSeasonBtn) {
-        startSeasonBtn.addEventListener('click', handleStartSeasonClick);
-    } else {
-        console.error("#start-season-btn not found!");
-    }
-
-
-    // Defensive check to ensure UI is ready
-    if (!UI.isReady()) {
-         console.error("UI elements not found. Make sure your HTML IDs match the ones in ui.js.");
-         return;
-    }
-    UI.setupEventListeners({
-        onDraftClick: handleDraftClick,
-        onSimWeekClick: handleSimWeekClick,
-        onNextSeasonClick: handleNextSeasonClick
-    });
-    UI.showScreen('start-screen');
+    
+    if(draftBtn) draftBtn.addEventListener('click', handleDraftClick);
+    if(simWeekBtn) simWeekBtn.addEventListener('click', handleSimWeekClick);
+    if(nextSeasonBtn) nextSeasonBtn.addEventListener('click', startNextSeason);
+    
+    UI.showScreen('start');
 }
 
-// Start the game when the DOM is ready
+// Start the game when the DOM is fully loaded and ready
 document.addEventListener('DOMContentLoaded', main);
 
