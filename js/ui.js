@@ -203,7 +203,7 @@ export function setDraftButtonState(enabled) {
 
 // --- NEW & UPDATED SEASON SCREEN RENDERERS ---
 
-export function renderMyTeam(team, schedule, currentWeek) {
+export function renderMyTeam(team, schedule, currentWeek, year) {
     if (!elements.myTeamContent) return;
     const weeklyGames = schedule.slice(currentWeek * 10, (currentWeek + 1) * 10);
     const nextOpponent = weeklyGames.find(g => g.home.id === team.id || g.away.id === team.id);
@@ -222,7 +222,7 @@ export function renderMyTeam(team, schedule, currentWeek) {
             </div>
             <div class="bg-gray-100 p-4 rounded-lg">
                 <p class="text-sm text-gray-500">Year</p>
-                <p class="text-3xl font-bold">${game.year}</p>
+                <p class="text-3xl font-bold">${year}</p>
             </div>
         </div>
     `;
@@ -232,9 +232,9 @@ export function renderRoster(team) {
     if (!elements.rosterContent) return;
     const tableHTML = `
         <h2 class="text-2xl font-bold mb-4">Team Roster</h2>
-        <div class="overflow-x-auto">
+        <div class="overflow-x-auto max-h-[60vh]">
             <table class="w-full text-left text-sm">
-                <thead class="bg-gray-100">
+                <thead class="bg-gray-100 sticky top-0">
                     <tr>
                         <th class="p-2">Name</th><th class="p-2">Pos</th><th class="p-2">Age</th><th class="p-2">Yds</th><th class="p-2">TD</th><th class="p-2">Tkl</th>
                     </tr>
@@ -300,7 +300,10 @@ export function renderFreeAgency(freeAgents, clickHandler) {
     if (freeAgents.length === 0) {
         content += "<p>No friends available this week.</p>";
     } else {
-        content += freeAgents.map(fa => `
+        content += `
+            <div class="max-h-[60vh] overflow-y-auto">
+        ` +
+        freeAgents.map(fa => `
             <div class="flex justify-between items-center p-3 border-b">
                 <div>
                     <p class="font-semibold">${fa.name} (${fa.position})</p>
@@ -308,7 +311,7 @@ export function renderFreeAgency(freeAgents, clickHandler) {
                 </div>
                 <button data-player-id="${fa.id}" class="sign-fa-btn bg-green-500 text-white px-3 py-1 rounded-md text-sm hover:bg-green-600">Sign</button>
             </div>
-        `).join('');
+        `).join('') + `</div>`;
     }
     elements.freeAgencyContent.innerHTML = content;
     elements.freeAgencyContent.querySelectorAll('.sign-fa-btn').forEach(btn => btn.addEventListener('click', () => clickHandler(btn.dataset.playerId)));
@@ -316,14 +319,23 @@ export function renderFreeAgency(freeAgents, clickHandler) {
 
 export function renderSchedule(schedule, currentWeek) {
     if (!elements.scheduleContent) return;
-    let content = `<h2 class="text-2xl font-bold mb-4">Season Schedule</h2>`;
-    const weeklyGames = schedule.slice(currentWeek * 10, (currentWeek + 1) * 10);
-    content += `
-        <h3 class="text-lg font-bold mb-2">Week ${currentWeek + 1}</h3>
-        <div class="space-y-2">
-            ${weeklyGames.map(g => `<p>${g.away.name} @ ${g.home.name}</p>`).join('')}
-        </div>
-    `;
+    let content = `<h2 class="text-2xl font-bold mb-4">Full Season Schedule</h2>`;
+    
+    content += '<div class="max-h-[60vh] overflow-y-auto space-y-6">';
+
+    for(let i = 0; i < 9; i++) {
+        const weeklyGames = schedule.slice(i * 10, (i + 1) * 10);
+        const weekHeaderClass = i === currentWeek ? 'font-bold text-amber-600' : 'font-bold';
+        content += `
+            <div>
+                <h3 class="${weekHeaderClass} mb-2">Week ${i + 1}</h3>
+                <div class="space-y-1 text-sm text-gray-700">
+                    ${weeklyGames.map(g => `<p>${g.away.name} @ ${g.home.name}</p>`).join('')}
+                </div>
+            </div>
+        `;
+    }
+    content += '</div>';
     elements.scheduleContent.innerHTML = content;
 }
 
@@ -334,18 +346,20 @@ export function renderStandings(teams, divisions) {
         content += `<h3 class="text-xl font-bold mt-4 mb-2">${divName} Division</h3>`;
         const divisionTeams = teams.filter(t => t.division === divName).sort((a, b) => b.wins - a.wins);
         content += `
-            <table class="w-full text-left bg-white rounded-lg shadow-md">
-                <thead class="bg-gray-100"><tr><th class="p-2">Team</th><th class="p-2 text-center">W</th><th class="p-2 text-center">L</th></tr></thead>
-                <tbody>
-                ${divisionTeams.map(t => `<tr class="border-b"><td class="p-2">${t.name}</td><td class="p-2 text-center">${t.wins}</td><td class="p-2 text-center">${t.losses}</td></tr>`).join('')}
-                </tbody>
-            </table>
+            <div class="overflow-x-auto">
+                <table class="w-full text-left bg-white rounded-lg shadow-md">
+                    <thead class="bg-gray-100"><tr><th class="p-2">Team</th><th class="p-2 text-center">W</th><th class="p-2 text-center">L</th></tr></thead>
+                    <tbody>
+                    ${divisionTeams.map(t => `<tr class="border-b"><td class="p-2">${t.name}</td><td class="p-2 text-center">${t.wins}</td><td class="p-2 text-center">${t.losses}</td></tr>`).join('')}
+                    </tbody>
+                </table>
+            </div>
         `;
     }
     elements.standingsContent.innerHTML = content;
 }
 
-export function renderPlayerStats(players) {
+export function renderPlayerStats(players, teams) {
     if (!elements.playerStatsContent) return;
      const sortedPlayers = [...players].sort((a,b) => (b.seasonStats.passYards + b.seasonStats.rushYards + b.seasonStats.recYards) - (a.seasonStats.passYards + a.seasonStats.rushYards + a.seasonStats.recYards));
     elements.playerStatsContent.innerHTML = `
@@ -355,7 +369,7 @@ export function renderPlayerStats(players) {
                 <thead class="bg-gray-100 sticky top-0"><tr><th class="p-2">Name</th><th class="p-2">Team</th><th class="p-2">Pass Yds</th><th class="p-2">Rush Yds</th><th class="p-2">Rec Yds</th><th class="p-2">TDs</th><th class="p-2">Tkls</th></tr></thead>
                 <tbody>
                 ${sortedPlayers.map(p => {
-                    const team = game.teams.find(t => t.id === p.teamId);
+                    const team = teams.find(t => t.id === p.teamId);
                     return `<tr class="border-b">
                         <td class="p-2 font-semibold">${p.name}</td><td class="p-2">${team ? team.name : 'FA'}</td>
                         <td class="p-2">${p.seasonStats.passYards}</td><td class="p-2">${p.seasonStats.rushYards}</td>
@@ -374,12 +388,15 @@ export function renderHallOfFame(hallOfFamers) {
     if (hallOfFamers.length === 0) {
         content += `<p>No players have been inducted yet.</p>`;
     } else {
-         content += hallOfFamers.map(p => `
+         content += `<div class="max-h-[60vh] overflow-y-auto">` + 
+         hallOfFamers
+            .sort((a,b) => (b.careerStats.touchdowns - a.careerStats.touchdowns))
+            .map(p => `
             <div class="p-3 border-b">
                 <p class="font-bold text-lg">${p.name} <span class="text-sm font-normal text-gray-500">(${p.position})</span></p>
                 <p class="text-xs">Seasons: ${p.careerStats.seasonsPlayed} | TDs: ${p.careerStats.touchdowns} | Total Yards: ${p.careerStats.passYards + p.careerStats.rushYards + p.careerStats.recYards} | Tackles: ${p.careerStats.tackles}</p>
             </div>
-        `).join('');
+        `).join('') + `</div>`;
     }
     elements.hallOfFameContent.innerHTML = content;
 }
