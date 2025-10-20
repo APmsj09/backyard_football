@@ -12,13 +12,33 @@ body {
 
 .player-card:hover {
     transform: translateY(-4px);
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.1);
 }
 
 .player-card.selected {
     transform: translateY(-4px);
-    border-width: 2px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.1);
     border-color: #f59e0b; /* amber-500 */
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    border-width: 2px;
+}
+
+tr.selected {
+    background-color: #fef3c7; /* amber-100 */
+}
+
+/* Depth Chart Drag and Drop Styles */
+.depth-chart-slot {
+    min-height: 60px; /* Ensure drop zones are always visible */
+    border: 2px dashed #d1d5db; /* gray-300 */
+    background-color: #f9fafb; /* gray-50 */
+}
+.depth-chart-player {
+    cursor: grab;
+}
+.depth-chart-player:active {
+    cursor: grabbing;
+}
+.dragging {
+    opacity: 0.5;
 }
 
