@@ -3,6 +3,19 @@ import { firstNames, lastNames, nicknames, teamNames, positions, divisionNames, 
 
 let game = null;
 
+// Define specific offensive and defensive positions for preference
+const offensivePositions = ['QB', 'ATH'];
+const defensivePositions = ['LINE', 'ATH'];
+
+// Define possible random events
+const weeklyEvents = [
+    { type: 'injured', description: 'Sprained Ankle', minDuration: 1, maxDuration: 2, chance: 0.01 },
+    { type: 'injured', description: 'Jammed Finger', minDuration: 1, maxDuration: 1, chance: 0.015 },
+    { type: 'busy', description: 'Grounded by Parents', minDuration: 1, maxDuration: 1, chance: 0.02 },
+    { type: 'busy', description: 'Big School Project', minDuration: 1, maxDuration: 1, chance: 0.02 },
+    { type: 'busy', description: 'Family Vacation', minDuration: 1, maxDuration: 1, chance: 0.005 }
+];
+
 /**
  * Calculates a player's overall rating (1-99) for a specific position slot.
  * @param {object} player - The player object.
@@ -48,7 +61,8 @@ function generatePlayer(minAge = 8, maxAge = 17) {
     const firstName = getRandom(firstNames);
     const lastName = Math.random() < 0.4 ? getRandom(nicknames) : getRandom(lastNames);
     const age = getRandomInt(minAge, maxAge);
-    const favoritePosition = getRandom(positions);
+    const favoriteOffensivePosition = getRandom(offensivePositions);
+    const favoriteDefensivePosition = getRandom(defensivePositions);
 
     const ageProgress = (age - 8) / (17 - 8);
     let baseHeight = 53 + (ageProgress * 16);
@@ -57,10 +71,9 @@ function generatePlayer(minAge = 8, maxAge = 17) {
     baseHeight += getRandomInt(-2, 2);
     baseWeight += getRandomInt(-10, 10);
 
-    // Positional adjustments for height and weight
-    switch (favoritePosition) {
+    // Positional adjustments for height and weight based on offensive preference
+    switch (favoriteOffensivePosition) {
         case 'QB': baseHeight += getRandomInt(1, 3); break;
-        case 'LINE': baseHeight -= getRandomInt(0, 2); baseWeight += getRandomInt(20, 40); break;
         case 'ATH': baseHeight += getRandomInt(-1, 2); baseWeight += getRandomInt(-5, 10); break;
     }
 
@@ -70,15 +83,12 @@ function generatePlayer(minAge = 8, maxAge = 17) {
         technical: { throwingAccuracy: getRandomInt(20, 50), catchingHands: getRandomInt(30, 60), tackling: getRandomInt(30, 60), blocking: getRandomInt(30, 60) }
     };
 
-    // Physical skills are influenced by height and weight
-    const weightModifier = (attributes.physical.weight - 125) / 50; // Approx -1 to 1
+    const weightModifier = (attributes.physical.weight - 125) / 50; 
     attributes.physical.strength += Math.round(weightModifier * 10);
     attributes.physical.speed -= Math.round(weightModifier * 8);
     attributes.physical.agility -= Math.round(weightModifier * 5);
 
-
-    // Positional specialization boosts - This determines their best position
-    const bestPosition = getRandom(positions); // Their skills might not match their favorite position
+    const bestPosition = getRandom(positions); 
      switch (bestPosition) {
         case 'QB': 
             attributes.technical.throwingAccuracy = getRandomInt(65, 95); 
@@ -99,7 +109,6 @@ function generatePlayer(minAge = 8, maxAge = 17) {
             break;
     }
 
-    // Clamp all attributes between 1 and 99
     for (const category in attributes) {
         for (const attr in attributes[category]) {
             if (typeof attributes[category][attr] === 'number' && !['height', 'weight'].includes(attr)) {
@@ -108,9 +117,9 @@ function generatePlayer(minAge = 8, maxAge = 17) {
         }
     }
 
-
     return {
-        id: crypto.randomUUID(), name: `${firstName} ${lastName}`, age, favoritePosition, attributes, teamId: null,
+        id: crypto.randomUUID(), name: `${firstName} ${lastName}`, age, favoriteOffensivePosition, favoriteDefensivePosition, attributes, teamId: null,
+        status: { type: 'healthy', description: '', duration: 0 },
         gameStats: { receptions: 0, recYards: 0, passYards: 0, rushYards: 0, touchdowns: 0, tackles: 0 },
         seasonStats: { receptions: 0, recYards: 0, passYards: 0, rushYards: 0, touchdowns: 0, tackles: 0 },
         careerStats: { receptions: 0, recYards: 0, passYards: 0, rushYards: 0, touchdowns: 0, tackles: 0, seasonsPlayed: 0 }
@@ -216,7 +225,6 @@ export function addPlayerToTeam(player, team) {
     if (team.roster.length < 8) {
         player.teamId = team.id;
         team.roster.push(player);
-        // Auto-assign to first open depth chart spot
         if (team.id === game.playerTeam.id) {
             for (const pos in team.depthChart) {
                 if (team.depthChart[pos] === null) {
@@ -251,7 +259,7 @@ function resetGameStats() {
 }
 
 function getTeamRatings(team) {
-    const roster = team.roster;
+    const roster = team.roster.filter(p => p.status.type === 'healthy'); // Only use healthy players
     if (roster.length < 8) return { offense: 0, defense: 0, passOff: 0, rushOff: 0, passDef: 0, rushDef: 0 };
     
     const byThrowing = [...roster].sort((a,b) => b.attributes.technical.throwingAccuracy - a.attributes.technical.throwingAccuracy);
@@ -282,8 +290,9 @@ function simulateGame(homeTeam, awayTeam) {
 
     [homeTeam, awayTeam].forEach((team, isHome) => {
         const score = isHome ? homeScore : awayScore;
-        if (score === 0 || team.roster.length === 0) return;
-        const players = team.roster;
+        const players = team.roster.filter(p => p.status.type === 'healthy');
+        if (score === 0 || players.length === 0) return;
+        
         const qb = players.sort((a,b) => b.attributes.technical.throwingAccuracy - a.attributes.technical.throwingAccuracy)[0];
         if(qb) qb.gameStats.passYards = getRandomInt(score * 4, score * 8);
         for(let i = 0; i < Math.floor(score / 7); i++) {
@@ -308,8 +317,46 @@ function simulateGame(homeTeam, awayTeam) {
     return { homeTeam, awayTeam, homeScore, awayScore };
 }
 
+/**
+ * Updates all player statuses, decrementing event durations.
+ */
+function updatePlayerStatuses() {
+    for (const player of game.players) {
+        if (player.status.duration > 0) {
+            player.status.duration--;
+            if (player.status.duration === 0) {
+                player.status.type = 'healthy';
+                player.status.description = '';
+            }
+        }
+    }
+}
+
+/**
+ * Generates random weekly events like injuries or other unavailability.
+ */
+function generateWeeklyEvents() {
+    for (const player of game.players) {
+        if (player.status.type === 'healthy') {
+            for (const event of weeklyEvents) {
+                if (Math.random() < event.chance) {
+                    player.status.type = event.type;
+                    player.status.description = event.description;
+                    player.status.duration = getRandomInt(event.minDuration, event.maxDuration);
+                    break; // Player can only have one new event per week
+                }
+            }
+        }
+    }
+}
+
+
 export function simulateWeek() {
     if (game.currentWeek >= 9) return null;
+    
+    updatePlayerStatuses();
+    generateWeeklyEvents();
+
     const weeklyGames = game.schedule.slice(game.currentWeek * 10, (game.currentWeek + 1) * 10);
     const results = weeklyGames.map(match => simulateGame(match.home, match.away));
     game.currentWeek++;
@@ -331,10 +378,15 @@ export function generateWeeklyFreeAgents() {
 
 export function aiManageRoster(team) {
     if (game.freeAgents.length === 0 || team.roster.length === 0) return;
+    const healthyRoster = team.roster.filter(p => p.status.type === 'healthy');
+    if(healthyRoster.length >= 8) return; // Don't sign FAs if roster is full and healthy
+
     let worstPlayer = team.roster[0], worstScore = getPlayerScore(worstPlayer, team.coach);
     team.roster.forEach(p => { const s = getPlayerScore(p, team.coach); if (s < worstScore) { worstScore = s; worstPlayer = p; } });
+    
     let bestFA = game.freeAgents[0], bestFAScore = getPlayerScore(bestFA, team.coach);
     game.freeAgents.forEach(fa => { const s = getPlayerScore(fa, team.coach); if (s > bestFAScore) { bestFAScore = s; bestFA = fa; } });
+    
     if (bestFAScore > worstScore * 1.2 && team.roster.length >= 8) {
         worstPlayer.teamId = null;
         team.roster.splice(team.roster.findIndex(p => p.id === worstPlayer.id), 1);
@@ -343,16 +395,11 @@ export function aiManageRoster(team) {
     }
 }
 
-/**
- * Applies attribute growth to a single player based on their age.
- * @param {object} player - The player to develop.
- */
 function developPlayer(player) {
-    // Attribute skill growth
     let potential;
-    if (player.age < 12) potential = getRandomInt(4, 8); // High potential
-    else if (player.age < 16) potential = getRandomInt(1, 5); // Medium potential
-    else potential = getRandomInt(0, 2); // Low potential
+    if (player.age < 12) potential = getRandomInt(4, 8); 
+    else if (player.age < 16) potential = getRandomInt(1, 5);
+    else potential = getRandomInt(0, 2);
 
     const attributesToImprove = ['speed', 'strength', 'agility', 'throwingAccuracy', 'catchingHands', 'tackling', 'blocking', 'playbookIQ'];
     for (let i = 0; i < potential; i++) {
@@ -365,17 +412,16 @@ function developPlayer(player) {
         }
     }
 
-    // Physical growth (Height & Weight)
     let heightGain = 0;
     let weightGain = 0;
 
-    if (player.age <= 12) { // Prime growth spurt
+    if (player.age <= 12) {
         heightGain = getRandomInt(1, 3);
         weightGain = getRandomInt(5, 15);
-    } else if (player.age <= 15) { // Maturing
+    } else if (player.age <= 15) {
         heightGain = getRandomInt(0, 2);
         weightGain = getRandomInt(3, 10);
-    } else { // Topping out
+    } else {
         heightGain = getRandomInt(0, 1);
         weightGain = getRandomInt(1, 5);
     }
@@ -397,6 +443,7 @@ export function advanceToOffseason() {
 
         if (p.age < 18) {
             p.seasonStats = { receptions: 0, recYards: 0, passYards: 0, rushYards: 0, touchdowns: 0, tackles: 0 };
+            p.status = { type: 'healthy', description: '', duration: 0 }; // Reset status for new season
             remainingPlayers.push(p);
         } else {
             if (p.careerStats.touchdowns > 20 || p.careerStats.passYards > 5000 || p.careerStats.tackles > 200) {
