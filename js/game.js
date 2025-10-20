@@ -73,8 +73,21 @@ function generatePlayer(minAge = 8, maxAge = 17) {
 
     // Positional adjustments for height and weight based on offensive preference
     switch (favoriteOffensivePosition) {
-        case 'QB': baseHeight += getRandomInt(1, 3); break;
-        case 'ATH': baseHeight += getRandomInt(-1, 2); baseWeight += getRandomInt(-5, 10); break;
+        case 'QB': 
+            baseHeight += getRandomInt(1, 3); 
+            break;
+        case 'WR': 
+            baseHeight += getRandomInt(1, 4); 
+            baseWeight += getRandomInt(-10, 0);
+            break;
+        case 'RB': 
+            baseHeight += getRandomInt(-2, 1); 
+            baseWeight += getRandomInt(5, 15); 
+            break;
+        case 'OL': 
+            baseHeight += getRandomInt(0, 2); 
+            baseWeight += getRandomInt(20, 40); 
+            break;
     }
 
     let attributes = {
