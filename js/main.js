@@ -51,20 +51,19 @@ function handleConfirmTeamClick() {
     
     const game = Game.getGameState();
     UI.showScreen('draft');
-    UI.renderDraftPool(game.players.filter(p => !p.teamId), handlePlayerCardClick);
+    UI.renderDraftPool(game.players.filter(p => !p.teamId), handlePlayerRowClick);
     UI.updateRoster(game.playerTeam);
     
     runNextDraftPick();
 }
 
 /**
- * Handles a click on a player card in the draft pool.
- * @param {object} player - The player object associated with the clicked card.
+ * Handles a click on a player row in the draft pool.
+ * @param {string} playerId - The ID of the player associated with the clicked row.
  */
-function handlePlayerCardClick(player) {
-    currentlySelectedPlayerId = player.id;
-    UI.renderPlayerDetailCard(player);
-    UI.selectPlayerCard(player.id);
+function handlePlayerRowClick(playerId) {
+    currentlySelectedPlayerId = playerId;
+    UI.selectPlayerRow(playerId);
 }
 
 
@@ -75,7 +74,6 @@ async function runNextDraftPick() {
     const game = Game.getGameState();
     const currentPickNumber = game.currentPick;
     
-    // Check if draft is over
     if (currentPickNumber >= game.draftOrder.length) {
         console.log("Draft is complete!");
         Game.generateSchedule();
@@ -87,25 +85,17 @@ async function runNextDraftPick() {
     UI.updateDraftClock(currentTeam, currentPickNumber + 1);
 
     if (currentTeam.id === game.playerTeam.id) {
-        // Player's turn
         UI.setDraftButtonState(true);
-        console.log("Player is on the clock.");
     } else {
-        // AI's turn
         UI.setDraftButtonState(false);
-        console.log(`${currentTeam.name} is on the clock.`);
-        
-        // AI picks much faster now
-        await new Promise(resolve => setTimeout(resolve, 200)); 
-
+        await new Promise(resolve => setTimeout(resolve, 100)); // Faster AI picks
         const pickedPlayer = Game.simulateAIPick(currentTeam);
         if (pickedPlayer) {
             UI.addPickToLog(currentTeam, pickedPlayer, currentPickNumber + 1);
-            UI.removePlayerCard(pickedPlayer.id);
+            UI.removePlayerRow(pickedPlayer.id);
         }
-        
         game.currentPick++;
-        runNextDraftPick(); // Proceed to the next pick
+        runNextDraftPick();
     }
 }
 
@@ -124,13 +114,13 @@ function handleDraftClick() {
     
     if (player && Game.addPlayerToTeam(player, game.playerTeam)) {
         UI.updateRoster(game.playerTeam);
-        UI.removePlayerCard(player.id);
+        UI.removePlayerRow(player.id);
         UI.addPickToLog(game.playerTeam, player, game.currentPick + 1);
         
-        currentlySelectedPlayerId = null; // Reset selection
+        currentlySelectedPlayerId = null;
         
         game.currentPick++;
-        runNextDraftPick(); // Proceed to next pick
+        runNextDraftPick();
     }
 }
 
@@ -168,18 +158,17 @@ function handleSimWeekClick() {
 
 /**
  * Handles the click event for signing a free agent.
- * @param {Event} event - The click event from the free agent card.
+ * @param {string} playerId - The ID of the player to sign.
  */
-function handleFreeAgentSignClick(event) {
+function handleFreeAgentSignClick(playerId) {
     const game = Game.getGameState();
-    const playerCard = event.target.closest('.player-card');
-    if (!playerCard) return;
+    const player = game.freeAgents.find(p => p.id === playerId);
+    if (!player) return;
 
-    const player = game.freeAgents.find(p => p.id === playerCard.dataset.playerId);
     const chances = { 'Close Friend': 0.9, 'Friend': 0.6, 'Acquaintance': 0.3 };
     
     if (Math.random() < chances[player.friendship]) {
-        if (game.playerTeam.roster.length < 10) {
+        if (game.playerTeam.roster.length < 8) {
             Game.addPlayerToTeam(player, game.playerTeam);
         } else {
             alert("Your roster is full! You need to drop a player to sign a friend.");
@@ -187,8 +176,7 @@ function handleFreeAgentSignClick(event) {
     } else {
         alert(`${player.name} couldn't make it this week!`);
     }
-    // Refresh the season phase to update UI after the transaction
-    startSeasonPhase();
+    startSeasonPhase(); // Refresh UI
 }
 
 /**
@@ -205,26 +193,22 @@ async function startNextSeason() {
     await Game.yieldToMain();
     
     const game = Game.getGameState();
-    Game.setupDraft(); // Set up the new draft order
+    Game.setupDraft();
     UI.updateLoadingProgress(1, "Done!");
     await new Promise(res => setTimeout(res, 500));
     
-    currentlySelectedPlayerId = null; // Reset selection for new draft
+    currentlySelectedPlayerId = null;
     UI.showScreen('draft');
-    UI.renderDraftPool(game.players.filter(p => !p.teamId), handlePlayerCardClick);
+    UI.renderDraftPool(game.players.filter(p => !p.teamId), handlePlayerRowClick);
     UI.updateRoster(game.playerTeam);
     runNextDraftPick();
 }
 
 // --- INITIALIZATION ---
-/**
- * Main function to set up the application once the DOM is ready.
- */
 function main() {
     console.log("Game starting... Document loaded.");
     UI.setupElements();
     
-    // Correctly get and assign event listeners
     const startGameBtn = document.getElementById('start-game-btn');
     const confirmTeamBtn = document.getElementById('confirm-team-btn');
     const draftBtn = document.getElementById('draft-player-btn');
@@ -240,6 +224,5 @@ function main() {
     UI.showScreen('start');
 }
 
-// Start the game when the DOM is fully loaded and ready
 document.addEventListener('DOMContentLoaded', main);
 
