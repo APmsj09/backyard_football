@@ -43,27 +43,19 @@
                     <input type="text" id="team-name-input" class="w-full p-2 border border-gray-300 rounded-md" placeholder="e.g., The Backyard Ballers">
                 </div>
                 <p class="text-center text-gray-500 mb-4">...or choose a name below</p>
-                <div id="premade-teams-grid" class="grid grid-cols-2 md:grid-cols-3 gap-4 mb-6">
-                    <!-- Premade team names will be inserted here -->
-                </div>
+                <div id="premade-teams-grid" class="grid grid-cols-2 md:grid-cols-3 gap-4 mb-6"></div>
                 <button id="confirm-team-btn" class="w-full bg-green-500 text-white font-bold py-3 px-4 rounded-lg hover:bg-green-600 transition text-xl">Confirm Team & Start Draft</button>
             </div>
         </div>
-
 
         <!-- Draft Screen -->
         <div id="draft-screen" class="hidden">
             <h2 class="font-bangers text-4xl text-center mb-6">League Draft</h2>
             <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                <!-- Player Spreadsheet -->
                 <div class="lg:col-span-2 bg-white p-4 rounded-lg shadow-md">
                     <h3 class="text-xl font-bold mb-4">Available Players</h3>
-                    <div id="player-pool" class="max-h-[75vh] overflow-y-auto">
-                        <!-- Spreadsheet will be inserted here by JS -->
-                    </div>
+                    <div id="player-pool" class="max-h-[75vh] overflow-y-auto"></div>
                 </div>
-
-                <!-- Draft Info & Roster -->
                 <div class="lg:col-span-1 bg-white p-4 rounded-lg shadow-md flex flex-col">
                     <div class="text-center p-4 border-b mb-4">
                         <p id="draft-clock-pick" class="text-sm text-gray-500">Round 1, Pick 1</p>
@@ -72,7 +64,6 @@
                     <div class="flex-grow">
                         <h4 class="font-bold mb-2">Draft Log</h4>
                         <ul id="draft-log" class="space-y-2 max-h-[25vh] overflow-y-auto text-sm mb-4"></ul>
-                        
                         <h4 class="font-bold mb-2">Your Roster</h4>
                         <ul id="team-roster" class="space-y-2 max-h-[25vh] overflow-y-auto"></ul>
                     </div>
@@ -86,29 +77,36 @@
         <!-- Season Screen -->
         <div id="season-screen" class="hidden">
             <h2 id="season-header" class="font-bangers text-4xl text-center mb-6">Season Underway!</h2>
-            <div class="grid grid-cols-1 lg:grid-cols-4 gap-6">
-                <div class="lg:col-span-1 bg-white p-4 rounded-lg shadow-md">
-                    <h3 class="text-xl font-bold mb-4">Schedule</h3>
-                    <div id="schedule-container" class="space-y-2"></div>
-                     <button id="sim-week-btn" class="w-full mt-4 bg-blue-500 text-white font-bold py-2 px-4 rounded-lg hover:bg-blue-600 transition">Simulate Week</button>
-                     <div id="weekly-results-container" class="mt-4"></div>
-                </div>
-                <div class="lg:col-span-2 bg-white p-4 rounded-lg shadow-md">
-                    <h3 class="text-xl font-bold mb-4">League Standings</h3>
-                    <div id="standings-container"></div>
-                </div>
-                <div class="lg:col-span-1 bg-white p-4 rounded-lg shadow-md">
-                    <div>
-                        <h3 class="text-xl font-bold mb-4">Your Roster (8 Players)</h3>
-                        <div id="your-roster" class="max-h-48 overflow-y-auto"></div>
-                    </div>
-                    <div class="mt-4">
-                        <h3 class="text-xl font-bold mb-4">Available Friends</h3>
-                        <div id="free-agents-container" class="space-y-2"></div>
-                    </div>
-                </div>
+            <div class="flex flex-col md:flex-row gap-6">
+                <!-- Tabs Navigation -->
+                <nav class="md:w-1/5">
+                    <ul class="space-y-2">
+                        <li><button data-tab="my-team" class="tab-btn w-full text-left p-3 rounded-md font-semibold bg-amber-500 text-white">My Team</button></li>
+                        <li><button data-tab="roster" class="tab-btn w-full text-left p-3 rounded-md font-semibold hover:bg-gray-200">Roster</button></li>
+                        <li><button data-tab="depth-chart" class="tab-btn w-full text-left p-3 rounded-md font-semibold hover:bg-gray-200">Depth Chart</button></li>
+                        <li><button data-tab="free-agency" class="tab-btn w-full text-left p-3 rounded-md font-semibold hover:bg-gray-200">Free Agency</button></li>
+                        <li><button data-tab="schedule" class="tab-btn w-full text-left p-3 rounded-md font-semibold hover:bg-gray-200">Schedule</button></li>
+                        <li><button data-tab="standings" class="tab-btn w-full text-left p-3 rounded-md font-semibold hover:bg-gray-200">Standings</button></li>
+                        <li><button data-tab="player-stats" class="tab-btn w-full text-left p-3 rounded-md font-semibold hover:bg-gray-200">Player Stats</button></li>
+                        <li><button data-tab="hall-of-fame" class="tab-btn w-full text-left p-3 rounded-md font-semibold hover:bg-gray-200">Hall of Fame</button></li>
+                    </ul>
+                     <button id="sim-week-btn" class="w-full mt-6 bg-blue-500 text-white font-bold py-3 px-4 rounded-lg hover:bg-blue-600 transition">Simulate Week</button>
+                </nav>
+
+                <!-- Tab Content -->
+                <main class="md:w-4/5 bg-white p-6 rounded-lg shadow-md min-h-[70vh]">
+                    <div id="tab-content-my-team" class="tab-content"></div>
+                    <div id="tab-content-roster" class="tab-content hidden"></div>
+                    <div id="tab-content-depth-chart" class="tab-content hidden"></div>
+                    <div id="tab-content-free-agency" class="tab-content hidden"></div>
+                    <div id="tab-content-schedule" class="tab-content hidden"></div>
+                    <div id="tab-content-standings" class="tab-content hidden"></div>
+                    <div id="tab-content-player-stats" class="tab-content hidden"></div>
+                    <div id="tab-content-hall-of-fame" class="tab-content hidden"></div>
+                </main>
             </div>
         </div>
+
 
         <!-- End Season Screen -->
         <div id="end-season-screen" class="hidden text-center">
