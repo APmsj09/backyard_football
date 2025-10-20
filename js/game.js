@@ -4,8 +4,8 @@ import { firstNames, lastNames, nicknames, teamNames, positions, divisionNames, 
 let game = null;
 
 // Define specific offensive and defensive positions for preference
-const offensivePositions = ['QB', 'ATH'];
-const defensivePositions = ['LINE', 'ATH'];
+const offensivePositions = ['QB', 'WR', 'RB', 'OL'];
+const defensivePositions = ['DL', 'DB', 'LB'];
 
 // Define possible random events
 const weeklyEvents = [
