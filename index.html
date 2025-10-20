@@ -10,112 +10,202 @@
     <link href="https://fonts.googleapis.com/css2?family=Bangers&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="css/style.css">
 </head>
-<body class="bg-gray-100 font-sans text-gray-800">
+<body class="bg-gray-100 text-gray-800 font-sans antialiased">
 
-    <div id="game-container" class="max-w-7xl mx-auto p-4 sm:p-6 lg:p-8">
+    <div id="game-container" class="max-w-7xl mx-auto p-4">
 
         <!-- Start Screen -->
-        <div id="start-screen" class="text-center">
-            <h1 class="font-bangers text-6xl md:text-8xl text-amber-500" style="text-shadow: 2px 2px #000;">Backyard Football</h1>
+        <div id="start-screen" class="text-center p-8 bg-white rounded-lg shadow-lg">
+            <h1 class="font-bangers text-6xl text-amber-500 tracking-wider">Backyard Football League</h1>
             <p class="mt-4 text-lg text-gray-600">The biggest little league in the city!</p>
-            <div class="mt-8">
-                <button id="start-game-btn" class="font-bangers text-3xl bg-amber-500 text-white py-3 px-8 rounded-lg shadow-lg hover:bg-amber-600 transition-transform transform hover:scale-105">Start a New Season</button>
-            </div>
+            <button id="start-game-btn" class="mt-8 bg-amber-500 text-white font-bold py-3 px-8 rounded-lg shadow-md hover:bg-amber-600 transition-transform transform hover:scale-105">
+                Start a New Season
+            </button>
         </div>
 
         <!-- Loading Screen -->
-        <div id="loading-screen" class="hidden text-center">
-             <div class="bg-white p-8 rounded-lg shadow-lg max-w-md mx-auto">
-                <h2 class="text-2xl font-bold mb-4">Building The League...</h2>
-                <p id="loading-message" class="text-gray-600 mb-4">Generating players...</p>
+        <div id="loading-screen" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div class="bg-white p-8 rounded-lg shadow-2xl text-center w-full max-w-md">
+                <h2 class="text-2xl font-bold mb-4">Generating The League...</h2>
+                <p class="text-gray-600 mb-4">Scouting the neighborhood for the best talent!</p>
                 <div class="w-full bg-gray-200 rounded-full h-4">
-                    <div id="loading-bar" class="bg-amber-500 h-4 rounded-full transition-all duration-500" style="width: 0%"></div>
+                    <div id="loading-progress" class="bg-amber-500 h-4 rounded-full transition-all duration-300" style="width: 0%"></div>
                 </div>
             </div>
         </div>
         
         <!-- Team Creation Screen -->
-        <div id="team-creation-screen" class="hidden">
-            <div class="bg-white p-8 rounded-lg shadow-lg max-w-2xl mx-auto">
-                <h2 class="font-bangers text-4xl text-center mb-6">Create Your Team</h2>
-                <div class="mb-6">
-                    <label for="team-name-input" class="block text-sm font-medium text-gray-700 mb-2">Enter your team name:</label>
-                    <input type="text" id="team-name-input" class="w-full p-2 border border-gray-300 rounded-md" placeholder="e.g., The Backyard Ballers">
+        <div id="team-creation-screen" class="hidden p-8 bg-white rounded-lg shadow-lg">
+            <h2 class="text-3xl font-bold text-center mb-6">Create Your Team</h2>
+            <div class="max-w-lg mx-auto">
+                <p class="text-center text-gray-600 mb-4">Choose a pre-made name or enter your own!</p>
+                <div id="team-name-suggestions" class="flex flex-wrap gap-2 justify-center mb-4">
+                    <!-- Buttons will be injected here by JS -->
                 </div>
-                <p class="text-center text-gray-500 mb-4">...or choose a name below</p>
-                <div id="premade-teams-grid" class="grid grid-cols-2 md:grid-cols-3 gap-4 mb-6"></div>
-                <button id="confirm-team-btn" class="w-full bg-green-500 text-white font-bold py-3 px-4 rounded-lg hover:bg-green-600 transition text-xl">Confirm Team & Start Draft</button>
+                <input type="text" id="custom-team-name" placeholder="Enter custom team name..." class="w-full p-3 border border-gray-300 rounded-lg mb-4 focus:ring-2 focus:ring-amber-500 focus:border-transparent">
+                <button id="confirm-team-btn" class="w-full bg-amber-500 text-white font-bold py-3 px-8 rounded-lg shadow-md hover:bg-amber-600 transition-transform transform hover:scale-105">
+                    Found My Team!
+                </button>
             </div>
         </div>
 
+
         <!-- Draft Screen -->
-        <div id="draft-screen" class="hidden">
-            <h2 class="font-bangers text-4xl text-center mb-6">League Draft</h2>
-            <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                <div class="lg:col-span-2 bg-white p-4 rounded-lg shadow-md">
-                    <h3 class="text-xl font-bold mb-4">Available Players</h3>
-                    <div id="player-pool" class="max-h-[75vh] overflow-y-auto"></div>
+        <div id="draft-screen" class="hidden bg-white rounded-lg shadow-lg p-6">
+            <div id="draft-header" class="text-center mb-4 pb-4 border-b">
+                <h2 class="text-3xl font-bold">Season <span id="draft-year">1</span> Draft</h2>
+                <p class="text-lg text-gray-600">Pick: <span id="draft-pick-number" class="font-semibold">1</span> | Team: <span id="draft-picking-team" class="font-semibold">Your Team</span></p>
+            </div>
+            <div class="flex flex-col lg:flex-row gap-6">
+                <!-- Draft Pool -->
+                <div class="w-full lg:w-2/3">
+                    <div class="flex items-center justify-between mb-2">
+                        <h3 class="text-xl font-bold">Available Players</h3>
+                        <div class="flex gap-2">
+                            <input type="text" id="draft-search" placeholder="Search by name..." class="p-2 border rounded">
+                             <select id="draft-filter-pos" class="p-2 border rounded">
+                                <option value="">All Positions</option>
+                                <option value="QB">QB</option>
+                                <option value="ATH">ATH</option>
+                                <option value="LINE">LINE</option>
+                            </select>
+                            <select id="draft-sort" class="p-2 border rounded">
+                                <option value="best-available">Best Available</option>
+                                <option value="age-asc">Age (Youngest)</option>
+                                <option value="age-desc">Age (Oldest)</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="overflow-x-auto h-[60vh]">
+                        <table class="min-w-full bg-white text-sm">
+                            <thead class="bg-gray-800 text-white sticky top-0">
+                                <tr>
+                                    <th class="text-left py-2 px-3">Name</th>
+                                    <th class="py-2 px-3">Age</th>
+                                    <th class="py-2 px-3">Fav Pos</th>
+                                    <th class="py-2 px-3">Hgt</th>
+                                    <th class="py-2 px-3">Wgt</th>
+                                    <th class="py-2 px-3">Spd</th>
+                                    <th class="py-2 px-3">Str</th>
+                                    <th class="py-2 px-3">Agi</th>
+                                    <th class="py-2 px-3">Throw</th>
+                                    <th class="py-2 px-3">Catch</th>
+                                    <th class="py-2 px-3">Block</th>
+                                    <th class="py-2 px-3">Tackle</th>
+                                </tr>
+                            </thead>
+                            <tbody id="draft-pool-tbody" class="divide-y">
+                                <!-- Player rows will be injected here -->
+                            </tbody>
+                        </table>
+                    </div>
                 </div>
-                <div class="lg:col-span-1 bg-white p-4 rounded-lg shadow-md flex flex-col">
-                    <div class="text-center p-4 border-b mb-4">
-                        <p id="draft-clock-pick" class="text-sm text-gray-500">Round 1, Pick 1</p>
-                        <h3 id="draft-clock-team" class="text-xl font-bold">Team on the Clock</h3>
+
+                <!-- Selected Player & Roster -->
+                <div class="w-full lg:w-1/3">
+                    <div id="selected-player-card" class="bg-gray-50 p-4 rounded-lg border text-center mb-4 min-h-[150px]">
+                        <p class="text-gray-500">Select a player to see their details</p>
                     </div>
-                    <div class="flex-grow">
-                        <h4 class="font-bold mb-2">Draft Log</h4>
-                        <ul id="draft-log" class="space-y-2 max-h-[25vh] overflow-y-auto text-sm mb-4"></ul>
-                        <h4 class="font-bold mb-2">Your Roster</h4>
-                        <ul id="team-roster" class="space-y-2 max-h-[25vh] overflow-y-auto"></ul>
-                    </div>
-                    <div class="mt-6">
-                        <button id="draft-player-btn" class="w-full bg-green-500 text-white font-bold py-2 px-4 rounded-lg hover:bg-green-600 transition disabled:bg-gray-400">Draft Selected Player</button>
-                    </div>
+                    <button id="draft-player-btn" class="w-full bg-green-600 text-white font-bold py-3 px-6 rounded-lg shadow-md hover:bg-green-700 disabled:bg-gray-400">
+                        Draft Player
+                    </button>
+                    <h3 class="text-xl font-bold mt-4 mb-2">Your Roster (<span id="roster-count">0</span>/8)</h3>
+                    <ul id="draft-roster-list" class="divide-y bg-gray-50 p-2 rounded border h-48 overflow-y-auto">
+                        <!-- Roster players will be injected here -->
+                    </ul>
                 </div>
             </div>
         </div>
         
-        <!-- Season Screen -->
-        <div id="season-screen" class="hidden">
-            <h2 id="season-header" class="font-bangers text-4xl text-center mb-6">Season Underway!</h2>
-            <div class="flex flex-col md:flex-row gap-6">
-                <!-- Tabs Navigation -->
-                <nav class="md:w-1/5">
-                    <ul class="space-y-2">
-                        <li><button data-tab="my-team" class="tab-btn w-full text-left p-3 rounded-md font-semibold bg-amber-500 text-white">My Team</button></li>
-                        <li><button data-tab="roster" class="tab-btn w-full text-left p-3 rounded-md font-semibold hover:bg-gray-200">Roster</button></li>
-                        <li><button data-tab="depth-chart" class="tab-btn w-full text-left p-3 rounded-md font-semibold hover:bg-gray-200">Depth Chart</button></li>
-                        <li><button data-tab="free-agency" class="tab-btn w-full text-left p-3 rounded-md font-semibold hover:bg-gray-200">Free Agency</button></li>
-                        <li><button data-tab="schedule" class="tab-btn w-full text-left p-3 rounded-md font-semibold hover:bg-gray-200">Schedule</button></li>
-                        <li><button data-tab="standings" class="tab-btn w-full text-left p-3 rounded-md font-semibold hover:bg-gray-200">Standings</button></li>
-                        <li><button data-tab="player-stats" class="tab-btn w-full text-left p-3 rounded-md font-semibold hover:bg-gray-200">Player Stats</button></li>
-                        <li><button data-tab="hall-of-fame" class="tab-btn w-full text-left p-3 rounded-md font-semibold hover:bg-gray-200">Hall of Fame</button></li>
-                    </ul>
-                     <button id="sim-week-btn" class="w-full mt-6 bg-blue-500 text-white font-bold py-3 px-4 rounded-lg hover:bg-blue-600 transition">Simulate Week</button>
-                </nav>
+        <!-- Main Dashboard Screen -->
+        <div id="dashboard-screen" class="hidden">
+            <header class="bg-white rounded-lg shadow p-4 mb-4">
+                <div class="flex justify-between items-center">
+                    <div>
+                        <h2 id="dashboard-team-name" class="text-2xl font-bold text-amber-600"></h2>
+                        <p id="dashboard-record" class="text-gray-600"></p>
+                    </div>
+                    <div>
+                        <h3 class="text-xl font-bold">Season <span id="dashboard-year"></span></h3>
+                        <p id="dashboard-week" class="text-gray-600 text-right"></p>
+                    </div>
+                </div>
+            </header>
 
+            <div class="flex gap-6">
+                <!-- Tabs Navigation -->
+                <aside class="w-1/5">
+                    <nav id="dashboard-tabs" class="flex flex-col gap-1">
+                        <button data-tab="my-team" class="tab-button active">My Team</button>
+                        <button data-tab="depth-chart" class="tab-button">Depth Chart</button>
+                        <button data-tab="free-agency" class="tab-button">Free Agency</button>
+                        <button data-tab="schedule" class="tab-button">Schedule</button>
+                        <button data-tab="standings" class="tab-button">Standings</button>
+                        <button data-tab="player-stats" class="tab-button">Player Stats</button>
+                        <button data-tab="hall-of-fame" class="tab-button">Hall of Fame</button>
+                    </nav>
+                     <button id="advance-week-btn" class="w-full mt-4 bg-amber-500 text-white font-bold py-3 px-6 rounded-lg shadow-md hover:bg-amber-600">
+                        Advance Week
+                    </button>
+                </aside>
+                
                 <!-- Tab Content -->
-                <main class="md:w-4/5 bg-white p-6 rounded-lg shadow-md min-h-[70vh]">
-                    <div id="tab-content-my-team" class="tab-content"></div>
-                    <div id="tab-content-roster" class="tab-content hidden"></div>
-                    <div id="tab-content-depth-chart" class="tab-content hidden"></div>
-                    <div id="tab-content-free-agency" class="tab-content hidden"></div>
-                    <div id="tab-content-schedule" class="tab-content hidden"></div>
-                    <div id="tab-content-standings" class="tab-content hidden"></div>
-                    <div id="tab-content-player-stats" class="tab-content hidden"></div>
-                    <div id="tab-content-hall-of-fame" class="tab-content hidden"></div>
+                <main id="dashboard-content" class="w-4/5 bg-white rounded-lg shadow p-6">
+                    <!-- My Team -->
+                    <div id="tab-content-my-team" class="tab-pane active">
+                        <h3 class="text-2xl font-bold mb-4">My Team Overview</h3>
+                        <div id="my-team-roster" class="overflow-x-auto">
+                            <!-- Roster table will be generated here -->
+                        </div>
+                    </div>
+                    <!-- Depth Chart -->
+                    <div id="tab-content-depth-chart" class="tab-pane hidden">
+                        <h3 class="text-2xl font-bold mb-4">Set Your Depth Chart</h3>
+                        <p class="text-sm text-gray-500 mb-4">Drag players from the roster to assign them to a position. Players can only be in one spot at a time.</p>
+                        <div class="flex gap-6">
+                             <div class="w-2/3">
+                                <h4 class="font-bold mb-2">Positions</h4>
+                                <div id="depth-chart-slots" class="space-y-2">
+                                    <!-- Depth chart slots will be generated here -->
+                                </div>
+                            </div>
+                            <div class="w-1/3">
+                                <h4 class="font-bold mb-2">Available Players</h4>
+                                <div id="depth-chart-roster" class="bg-gray-100 p-2 rounded min-h-[200px] space-y-2">
+                                    <!-- Draggable roster players will be generated here -->
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <!-- Free Agency -->
+                    <div id="tab-content-free-agency" class="tab-pane hidden">
+                         <h3 class="text-2xl font-bold mb-4">Weekly Free Agents</h3>
+                        <div id="free-agency-list"></div>
+                    </div>
+                    <!-- Schedule -->
+                    <div id="tab-content-schedule" class="tab-pane hidden">
+                         <h3 class="text-2xl font-bold mb-4">Season Schedule</h3>
+                        <div id="schedule-list" class="space-y-4"></div>
+                    </div>
+                    <!-- Standings -->
+                    <div id="tab-content-standings" class="tab-pane hidden">
+                         <h3 class="text-2xl font-bold mb-4">League Standings</h3>
+                        <div id="standings-container" class="space-y-6"></div>
+                    </div>
+                    <!-- Player Stats -->
+                    <div id="tab-content-player-stats" class="tab-pane hidden">
+                        <h3 class="text-2xl font-bold mb-4">League Player Stats</h3>
+                        <div id="player-stats-container"></div>
+                    </div>
+                    <!-- Hall of Fame -->
+                    <div id="tab-content-hall-of-fame" class="tab-pane hidden">
+                         <h3 class="text-2xl font-bold mb-4">Hall of Fame</h3>
+                        <div id="hall-of-fame-list"></div>
+                    </div>
                 </main>
             </div>
         </div>
 
-
-        <!-- End Season Screen -->
-        <div id="end-season-screen" class="hidden text-center">
-             <div class="bg-white p-8 rounded-lg shadow-lg max-w-md mx-auto">
-                <h2 id="end-season-header" class="font-bangers text-4xl mb-4">End of Season</h2>
-                <p class="text-gray-600 mb-6">The season is over! Time to prepare for next year.</p>
-                <button id="next-season-btn" class="w-full bg-amber-500 text-white font-bold py-3 px-4 rounded-lg hover:bg-amber-600 transition text-xl">Start Next Season's Draft</button>
-            </div>
-        </div>
     </div>
 
     <script type="module" src="js/main.js"></script>
