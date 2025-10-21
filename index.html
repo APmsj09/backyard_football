@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale-1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Backyard Football League</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -159,14 +159,28 @@
                                 <button data-sub-tab="defense" class="depth-chart-tab">Defense</button>
                             </div>
                             <div id="depth-chart-offense-pane" class="depth-chart-sub-pane">
+                                <div class="flex justify-between items-center mb-2">
+                                    <h4 class="text-lg font-bold">Offense Starters</h4>
+                                    <div class="flex items-center gap-2">
+                                        <label for="offense-formation-select" class="text-sm font-semibold">Formation:</label>
+                                        <select id="offense-formation-select" class="p-1 border rounded text-sm"></select>
+                                    </div>
+                                </div>
                                 <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-                                    <div class="md:col-span-2"><h4 class="text-lg font-bold mb-2">Offense Starters</h4><div id="offense-depth-chart-slots" class="space-y-2"></div></div>
+                                    <div class="md:col-span-2"><div id="offense-depth-chart-slots" class="space-y-2"></div></div>
                                     <div><h4 class="text-lg font-bold mb-2">Available Players</h4><div id="offense-depth-chart-roster" class="roster-list"></div></div>
                                 </div>
                             </div>
                             <div id="depth-chart-defense-pane" class="depth-chart-sub-pane hidden">
+                                 <div class="flex justify-between items-center mb-2">
+                                    <h4 class="text-lg font-bold">Defense Starters</h4>
+                                    <div class="flex items-center gap-2">
+                                        <label for="defense-formation-select" class="text-sm font-semibold">Formation:</label>
+                                        <select id="defense-formation-select" class="p-1 border rounded text-sm"></select>
+                                    </div>
+                                </div>
                                 <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-                                    <div class="md:col-span-2"><h4 class="text-lg font-bold mb-2">Defense Starters</h4><div id="defense-depth-chart-slots" class="space-y-2"></div></div>
+                                    <div class="md:col-span-2"><div id="defense-depth-chart-slots" class="space-y-2"></div></div>
                                     <div><h4 class="text-lg font-bold mb-2">Available Players</h4><div id="defense-depth-chart-roster" class="roster-list"></div></div>
                                 </div>
                             </div>
