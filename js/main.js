@@ -66,40 +66,28 @@ function handleDraftPlayer() {
     }
 }
 
-/**
- * A robust function to manage the draft flow. It simulates AI picks until it is
- * the player's turn or the draft has concluded.
- */
 async function runAIDraftPicks() {
-    // A single function to check and end the draft if necessary.
     const checkDraftEnd = () => {
         if (gameState.currentPick >= gameState.draftOrder.length) {
             handleDraftEnd();
-            return true; // The draft is over
+            return true;
         }
-        return false; // The draft continues
+        return false;
     };
 
-    // Initial check before doing anything
     if (checkDraftEnd()) return;
     
-    // Loop through AI picks as long as it's not the player's turn and the draft is not over.
     while (gameState.draftOrder[gameState.currentPick].id !== gameState.playerTeam.id) {
         UI.renderDraftScreen(gameState, handlePlayerSelectInDraft);
-        
-        // Short delay to make AI picks feel more natural and not instant
         await new Promise(resolve => setTimeout(resolve, 100));
 
         const currentPickingTeam = gameState.draftOrder[gameState.currentPick];
         Game.simulateAIPick(currentPickingTeam);
         gameState.currentPick++;
 
-        // Check if the draft ended after that AI pick
         if (checkDraftEnd()) return;
     }
 
-    // If the loop finishes, it's now the player's turn (or the draft is over).
-    // The final render ensures the UI is up-to-date for the player's pick.
     UI.renderDraftScreen(gameState, handlePlayerSelectInDraft);
 }
 
@@ -143,17 +131,26 @@ async function handleAdvanceWeek() {
 
     if (results) {
         const playerGame = results.find(r => r.homeTeam.id === gameState.playerTeam.id || r.awayTeam.id === gameState.playerTeam.id);
-        
+        const playerTeamResult = playerGame ? (playerGame.homeTeam.id === gameState.playerTeam.id ? (playerGame.homeScore > playerGame.awayScore ? 'W' : 'L') : (playerGame.awayScore > playerGame.homeScore ? 'W' : 'L')) : '';
+        const breakthroughs = Game.getBreakthroughs();
+
         let resultsHtml = '';
         if (playerGame) {
             resultsHtml += `<div class="text-center mb-4">
-                <p class="text-2xl font-bold">${playerGame.awayTeam.name} ${playerGame.awayScore} @ ${playerGame.homeTeam.name} ${playerGame.homeScore}</p>
+                <p class="text-2xl font-bold">${playerGame.awayTeam.name} ${playerGame.awayScore} @ ${playerGame.homeTeam.name} ${playerGame.homeScore} <span class="text-${playerTeamResult === 'W' ? 'green' : 'red'}-500">(${playerTeamResult})</span></p>
             </div>
             <h4 class="font-bold mb-2">Game Log</h4>
             <div class="game-log bg-gray-100 p-2 rounded h-48 overflow-y-auto text-sm">
                 ${playerGame.gameLog.join('<br>')}
             </div>
             `;
+        }
+        if (breakthroughs.length > 0) {
+            resultsHtml += `<h4 class="font-bold mt-4 mb-2">Player Breakthroughs!</h4><div class="space-y-1 text-sm">`;
+            breakthroughs.forEach(b => {
+                 resultsHtml += `<p><strong>${b.player.name}</strong> had a great game and improved their <strong>${b.attr}</strong>!</p>`;
+            });
+            resultsHtml += `</div>`;
         }
         
         UI.showModal(`Week ${gameState.currentWeek} Results`, resultsHtml);
@@ -166,18 +163,22 @@ async function handleAdvanceWeek() {
         const activeTab = document.querySelector('.tab-button.active').dataset.tab;
         UI.switchTab(activeTab, gameState);
     } else {
-        UI.showModal("Season Over", "<p>The regular season has concluded. Advancing to the offseason!</p>");
-        Game.advanceToOffseason();
-        gameState = Game.getGameState();
-
-        Game.setupDraft();
-        gameState = Game.getGameState();
-        selectedPlayerId = null;
-        UI.renderSelectedPlayerCard(null);
-        UI.renderDraftScreen(gameState, handlePlayerSelectInDraft);
-        UI.showScreen('draftScreen');
-        runAIDraftPicks();
+        // Season is over, advance to offseason screen
+        gameState = Game.getGameState(); // Ensure latest state before processing
+        const offseasonReport = Game.advanceToOffseason();
+        UI.renderOffseasonScreen(offseasonReport, gameState.year);
+        UI.showScreen('offseasonScreen');
     }
+}
+
+function handleGoToNextDraft() {
+    Game.setupDraft();
+    gameState = Game.getGameState();
+    selectedPlayerId = null;
+    UI.renderSelectedPlayerCard(null);
+    UI.renderDraftScreen(gameState, handlePlayerSelectInDraft);
+    UI.showScreen('draftScreen');
+    runAIDraftPicks();
 }
 
 function handleDashboardClicks(e) {
@@ -193,7 +194,7 @@ function handleDashboardClicks(e) {
 }
 
 function handleStatsChange() {
-    UI.renderPlayerStatsTab(gameState);
+    UI.switchTab('player-stats', gameState);
 }
 
 function main() {
@@ -206,7 +207,7 @@ function main() {
         document.getElementById('draft-player-btn')?.addEventListener('click', handleDraftPlayer);
         document.getElementById('dashboard-tabs')?.addEventListener('click', handleTabSwitch);
         document.getElementById('advance-week-btn')?.addEventListener('click', handleAdvanceWeek);
-        document.getElementById('modal-close-btn')?.addEventListener('click', UI.hideModal);
+        document.getElementById('go-to-next-draft-btn')?.addEventListener('click', handleGoToNextDraft);
         document.getElementById('dashboard-content')?.addEventListener('click', handleDashboardClicks);
 
         document.getElementById('draft-search')?.addEventListener('input', () => UI.renderDraftPool(gameState, handlePlayerSelectInDraft));
@@ -216,10 +217,8 @@ function main() {
         document.getElementById('offense-formation-select')?.addEventListener('change', handleFormationChange);
         document.getElementById('defense-formation-select')?.addEventListener('change', handleFormationChange);
         
-        // Stats Tab Event Listeners (NEW)
-        document.getElementById('stats-sort-by')?.addEventListener('change', handleStatsChange);
-        document.getElementById('stats-filter-pos')?.addEventListener('change', handleStatsChange);
         document.getElementById('stats-filter-team')?.addEventListener('change', handleStatsChange);
+        document.getElementById('stats-sort')?.addEventListener('change', handleStatsChange);
 
 
         UI.setupDragAndDrop(handleDepthChartDrop);
@@ -232,3 +231,4 @@ function main() {
 }
 
 document.addEventListener('DOMContentLoaded', main);
+
