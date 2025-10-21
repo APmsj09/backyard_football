@@ -19,11 +19,3 @@ export function getRandomInt(min, max) {
     return Math.floor(Math.random() * (max - min + 1)) + min;
 }
 
-/**
- * Pauses execution for a moment to allow the browser to render UI updates.
- * @returns {Promise<void>}
- */
-export function yieldToMain() { 
-    return new Promise(resolve => setTimeout(resolve, 0)); 
-}
-
