@@ -1,12 +1,9 @@
-import { calculateOverall } from './game.js';
+import { calculateOverall, positionOverallWeights } from './game.js';
 
 let elements = {};
 let selectedPlayerId = null;
 let dragPlayerId = null;
 
-/**
- * Finds and stores references to all necessary DOM elements.
- */
 export function setupElements() {
     elements = {
         screens: {
@@ -43,8 +40,6 @@ export function setupElements() {
         standingsContainer: document.getElementById('standings-container'),
         playerStatsContainer: document.getElementById('player-stats-container'),
         hallOfFameList: document.getElementById('hall-of-fame-list'),
-        
-        // Depth Chart Specific
         depthChartSubTabs: document.getElementById('depth-chart-sub-tabs'),
         offenseDepthChartPane: document.getElementById('depth-chart-offense-pane'),
         defenseDepthChartPane: document.getElementById('depth-chart-defense-pane'),
@@ -97,11 +92,7 @@ export function renderDraftPool(gameState, onPlayerSelect) {
     const undraftedPlayers = gameState.players.filter(p => !p.teamId);
     const searchTerm = elements.draftSearch.value.toLowerCase();
     const posFilter = elements.draftFilterPos.value;
-    let filteredPlayers = undraftedPlayers.filter(p => {
-        const nameMatch = p.name.toLowerCase().includes(searchTerm);
-        const posMatch = !posFilter || p.favoriteOffensivePosition === posFilter || p.favoriteDefensivePosition === posFilter;
-        return nameMatch && posMatch;
-    });
+    let filteredPlayers = undraftedPlayers.filter(p => p.name.toLowerCase().includes(searchTerm) && (!posFilter || p.favoriteOffensivePosition === posFilter || p.favoriteDefensivePosition === posFilter));
     const sortMethod = elements.draftSort.value;
     if (sortMethod === 'age-asc') filteredPlayers.sort((a, b) => a.age - b.age);
     else if (sortMethod === 'age-desc') filteredPlayers.sort((a, b) => b.age - a.age);
@@ -110,7 +101,7 @@ export function renderDraftPool(gameState, onPlayerSelect) {
         const row = document.createElement('tr');
         row.className = `cursor-pointer hover:bg-amber-100 ${player.id === selectedPlayerId ? 'bg-amber-200' : ''}`;
         row.dataset.playerId = player.id;
-        row.innerHTML = `<td class="py-2 px-3 font-semibold">${player.name}</td><td class="text-center py-2 px-3">${player.age}</td><td class="text-center py-2 px-3">${player.favoriteOffensivePosition}/${player.favoriteDefensivePosition}</td><td class="text-center py-2 px-3">${player.attributes.physical.height}"</td><td class="text-center py-2 px-3">${player.attributes.physical.weight}lbs</td><td class="text-center py-2 px-3">${player.attributes.physical.speed}</td><td class="text-center py-2 px-3">${player.attributes.physical.strength}</td><td class="text-center py-2 px-3">${player.attributes.physical.agility}</td><td class="text-center py-2 px-3">${player.attributes.technical.throwingAccuracy}</td><td class="text-center py-2 px-3">${player.attributes.technical.catchingHands}</td><td class="text-center py-2 px-3">${player.attributes.technical.blocking}</td><td class="text-center py-2 px-3">${player.attributes.technical.tackling}</td>`;
+        row.innerHTML = `<td class="py-2 px-3 font-semibold">${player.name}</td><td class="text-center py-2 px-3">${player.age}</td><td class="text-center py-2 px-3">${player.favoriteOffensivePosition}/${player.favoriteDefensivePosition}</td><td class="text-center py-2 px-3">${player.attributes.physical.height}"</td><td class="text-center py-2 px-3">${player.attributes.physical.weight}lbs</td><td class="text-center py-2 px-3">${player.attributes.physical.speed}</td><td class="text-center py-2 px-3">${player.attributes.physical.strength}</td><td class="text-center py-2 px-3">${player.attributes.physical.agility}</td><td class="text-center py-2 px-3">${player.attributes.technical.throwingAccuracy}</td><td class="text-center py-2 px-3">${player.attributes.technical.catchingHands}</td><td class="text-center py-2 px-3">${player.attributes.technical.blocking}</td><td class="text-center py-2 px-3">${player.attributes.technical.tackling}</td><td class="text-center py-2 px-3">${player.attributes.technical.blockShedding}</td>`;
         row.onclick = () => onPlayerSelect(player.id);
         elements.draftPoolTbody.appendChild(row);
     });
@@ -122,7 +113,7 @@ export function renderSelectedPlayerCard(player) {
         selectedPlayerId = null;
     } else {
         selectedPlayerId = player.id;
-        elements.selectedPlayerCard.innerHTML = `<h4 class="font-bold text-lg">${player.name}</h4><p class="text-sm text-gray-600">Age: ${player.age} | ${player.attributes.physical.height}" | ${player.attributes.physical.weight} lbs</p><div class="mt-2 grid grid-cols-3 gap-2 text-center"><div class="bg-gray-200 p-2 rounded"><p class="font-semibold text-xs">QB OVR</p><p class="font-bold text-xl">${calculateOverall(player, 'QB')}</p></div><div class="bg-gray-200 p-2 rounded"><p class="font-semibold text-xs">ATH OVR</p><p class="font-bold text-xl">${calculateOverall(player, 'ATH')}</p></div><div class="bg-gray-200 p-2 rounded"><p class="font-semibold text-xs">LINE OVR</p><p class="font-bold text-xl">${calculateOverall(player, 'LINE')}</p></div></div>`;
+        elements.selectedPlayerCard.innerHTML = `<h4 class="font-bold text-lg">${player.name}</h4><p class="text-sm text-gray-600">Age: ${player.age} | ${player.attributes.physical.height}" | ${player.attributes.physical.weight} lbs</p><div class="mt-2 grid grid-cols-3 gap-2 text-center"><div class="bg-gray-200 p-2 rounded"><p class="font-semibold text-xs">QB OVR</p><p class="font-bold text-xl">${calculateOverall(player, 'QB')}</p></div><div class="bg-gray-200 p-2 rounded"><p class="font-semibold text-xs">RB OVR</p><p class="font-bold text-xl">${calculateOverall(player, 'RB')}</p></div><div class="bg-gray-200 p-2 rounded"><p class="font-semibold text-xs">WR OVR</p><p class="font-bold text-xl">${calculateOverall(player, 'WR')}</p></div><div class="bg-gray-200 p-2 rounded"><p class="font-semibold text-xs">OL OVR</p><p class="font-bold text-xl">${calculateOverall(player, 'OL')}</p></div><div class="bg-gray-200 p-2 rounded"><p class="font-semibold text-xs">DL OVR</p><p class="font-bold text-xl">${calculateOverall(player, 'DL')}</p></div><div class="bg-gray-200 p-2 rounded"><p class="font-semibold text-xs">LB OVR</p><p class="font-bold text-xl">${calculateOverall(player, 'LB')}</p></div></div>`;
     }
     elements.draftPlayerBtn.disabled = !player;
 }
@@ -150,12 +141,8 @@ export function renderDashboard(gameState) {
 export function switchTab(tabId, gameState) {
     elements.dashboardContent.querySelectorAll('.tab-pane').forEach(p => p.classList.add('hidden'));
     elements.dashboardTabs.querySelectorAll('.tab-button').forEach(b => b.classList.remove('active'));
-    const activePane = document.getElementById(`tab-content-${tabId}`);
-    const activeButton = document.querySelector(`[data-tab="${tabId}"]`);
-    if (activePane && activeButton) {
-        activePane.classList.remove('hidden');
-        activeButton.classList.add('active');
-    }
+    document.getElementById(`tab-content-${tabId}`)?.classList.remove('hidden');
+    document.querySelector(`[data-tab="${tabId}"]`)?.classList.add('active');
     switch (tabId) {
         case 'my-team': renderMyTeamTab(gameState); break;
         case 'depth-chart': renderDepthChartTab(gameState); break;
@@ -166,58 +153,52 @@ export function switchTab(tabId, gameState) {
 
 function renderMyTeamTab(gameState) {
     const { roster } = gameState.playerTeam;
-    let tableHtml = `<table class="min-w-full bg-white text-sm"><thead class="bg-gray-800 text-white"><tr><th class="text-left py-2 px-3">Name</th><th class="py-2 px-3">Age</th><th class="py-2 px-3">Status</th><th class="py-2 px-3">QB Ovr</th><th class="py-2 px-3">ATH Ovr</th><th class="py-2 px-3">LINE Ovr</th></tr></thead><tbody class="divide-y">`;
+    let tableHtml = `<table class="min-w-full bg-white text-sm"><thead class="bg-gray-800 text-white"><tr><th class="text-left py-2 px-3">Name</th><th class="py-2 px-3">Age</th><th class="py-2 px-3">Status</th><th class="py-2 px-3">Best Pos Ovr</th></tr></thead><tbody class="divide-y">`;
     roster.forEach(p => {
-        tableHtml += `<tr><td class="py-2 px-3 font-semibold">${p.name}</td><td class="text-center py-2 px-3">${p.age}</td><td class="text-center py-2 px-3 ${p.status.type !== 'healthy' ? 'text-red-500 font-semibold' : ''}">${p.status.description || 'Healthy'}</td><td class="text-center py-2 px-3">${calculateOverall(p, 'QB')}</td><td class="text-center py-2 px-3">${calculateOverall(p, 'ATH')}</td><td class="text-center py-2 px-3">${calculateOverall(p, 'LINE')}</td></tr>`;
+        const overalls = Object.keys(positionOverallWeights).map(pos => calculateOverall(p, pos));
+        tableHtml += `<tr><td class="py-2 px-3 font-semibold">${p.name}</td><td class="text-center py-2 px-3">${p.age}</td><td class="text-center py-2 px-3 ${p.status.type !== 'healthy' ? 'text-red-500 font-semibold' : ''}">${p.status.description || 'Healthy'}</td><td class="text-center py-2 px-3 font-bold">${Math.max(...overalls)}</td></tr>`;
     });
     elements.myTeamRoster.innerHTML = tableHtml + `</tbody></table>`;
 }
 
 function renderDepthChartTab(gameState) {
     renderPositionalOveralls(gameState.playerTeam.roster);
-    renderOffenseDepthChart(gameState);
-    renderDefenseDepthChart(gameState);
+    const offenseSlots = ['QB', 'RB', 'WR1', 'WR2'];
+    const defenseSlots = ['DL1', 'DL2', 'LB', 'DB'];
+    renderDepthChartSide('offense', offenseSlots, gameState, elements.offenseDepthChartSlots, elements.offenseDepthChartRoster);
+    renderDepthChartSide('defense', defenseSlots, gameState, elements.defenseDepthChartSlots, elements.defenseDepthChartRoster);
 }
 
 function renderPositionalOveralls(roster) {
-    let table = `<table class="min-w-full text-sm text-left"><thead class="bg-gray-100"><tr><th class="p-2 font-semibold">Player</th><th class="p-2 font-semibold text-center">QB</th><th class="p-2 font-semibold text-center">ATH</th><th class="p-2 font-semibold text-center">LINE</th></tr></thead><tbody>`;
+    const positions = Object.keys(positionOverallWeights);
+    let table = `<table class="min-w-full text-sm text-left"><thead class="bg-gray-100"><tr><th class="p-2 font-semibold">Player</th>${positions.map(p => `<th class="p-2 font-semibold text-center">${p}</th>`).join('')}</tr></thead><tbody>`;
     roster.forEach(player => {
-        table += `<tr class="border-b"><td class="p-2 font-bold">${player.name}</td><td class="p-2 text-center">${calculateOverall(player, 'QB')}</td><td class="p-2 text-center">${calculateOverall(player, 'ATH')}</td><td class="p-2 text-center">${calculateOverall(player, 'LINE')}</td></tr>`;
+        table += `<tr class="border-b"><td class="p-2 font-bold">${player.name}</td>${positions.map(p => `<td class="p-2 text-center">${calculateOverall(player, p)}</td>`).join('')}</tr>`;
     });
     elements.positionalOverallsContainer.innerHTML = table + '</tbody></table>';
 }
 
-function renderOffenseDepthChart(gameState) {
+function renderDepthChartSide(side, slots, gameState, slotsContainer, rosterContainer) {
     const { roster, depthChart } = gameState.playerTeam;
-    elements.offenseDepthChartSlots.innerHTML = '';
-    const offenseSlots = Object.keys(depthChart).filter(s => s.includes('QB') || s.includes('ATH'));
-    offenseSlots.forEach(slot => renderSlot(slot, roster, depthChart, elements.offenseDepthChartSlots));
+    slotsContainer.innerHTML = '';
+    const header = document.createElement('div');
+    header.className = 'depth-chart-slot flex items-center justify-between font-bold text-xs text-gray-500 px-2';
+    header.innerHTML = `<span class="w-1/4">POS</span><div class="player-details-grid w-3/4"><span>NAME</span><span>OVR</span><span>SPD</span><span>STR</span><span>AGI</span><span>THR</span><span>CAT</span></div>`;
+    slotsContainer.appendChild(header);
+    slots.forEach(slot => renderSlot(slot, roster, depthChart, slotsContainer));
     const positionedIds = Object.values(depthChart);
     const availablePlayers = roster.filter(p => !positionedIds.includes(p.id));
-    renderAvailablePlayerList(availablePlayers, elements.offenseDepthChartRoster);
-}
-
-function renderDefenseDepthChart(gameState) {
-    const { roster, depthChart } = gameState.playerTeam;
-    elements.defenseDepthChartSlots.innerHTML = '';
-    const defenseSlots = Object.keys(depthChart).filter(s => s.includes('LINE'));
-    defenseSlots.forEach(slot => renderSlot(slot, roster, depthChart, elements.defenseDepthChartSlots));
-    const positionedIds = Object.values(depthChart);
-    const availablePlayers = roster.filter(p => !positionedIds.includes(p.id));
-    renderAvailablePlayerList(availablePlayers, elements.defenseDepthChartRoster);
+    renderAvailablePlayerList(availablePlayers, rosterContainer);
 }
 
 function renderSlot(positionSlot, roster, depthChart, container) {
     const playerId = depthChart[positionSlot];
     const player = roster.find(p => p.id === playerId);
-    const overall = player ? calculateOverall(player, positionSlot) : '---';
+    const overall = player ? calculateOverall(player, positionSlot.replace(/\d/g, '')) : '---';
     const slotEl = document.createElement('div');
     slotEl.className = 'depth-chart-slot bg-gray-200 p-2 rounded flex items-center justify-between';
     slotEl.dataset.positionSlot = positionSlot;
-    if (player) {
-        slotEl.draggable = true;
-        slotEl.dataset.playerId = player.id;
-    }
+    if (player) { slotEl.draggable = true; slotEl.dataset.playerId = player.id; }
     slotEl.innerHTML = `<span class="font-bold w-1/4">${positionSlot}</span><div class="player-details-grid w-3/4"><span>${player ? player.name : 'Empty'}</span><span class="font-bold text-amber-600">${overall}</span><span>${player ? player.attributes.physical.speed : '-'}</span><span>${player ? player.attributes.physical.strength : '-'}</span><span>${player ? player.attributes.physical.agility : '-'}</span><span>${player ? player.attributes.technical.throwingAccuracy : '-'}</span><span>${player ? player.attributes.technical.catchingHands : '-'}</span></div>`;
     container.appendChild(slotEl);
 }
@@ -248,44 +229,54 @@ function renderScheduleTab(gameState) {
 function renderStandingsTab(gameState) {
     elements.standingsContainer.innerHTML = '';
     for (const divName in gameState.divisions) {
-        const divisionEl = document.createElement('div');
+        const divEl = document.createElement('div');
         let tableHtml = `<h4 class="text-xl font-bold mb-2">${divName} Division</h4><table class="min-w-full bg-white text-sm"><thead class="bg-gray-800 text-white"><tr><th class="text-left py-2 px-3">Team</th><th class="py-2 px-3">Wins</th><th class="py-2 px-3">Losses</th></tr></thead><tbody class="divide-y">`;
-        const divisionTeams = gameState.teams.filter(t => t.division === divName).sort((a, b) => b.wins - a.wins);
-        divisionTeams.forEach(t => { tableHtml += `<tr class="${t.id === gameState.playerTeam.id ? 'bg-amber-100' : ''}"><td class="py-2 px-3 font-semibold">${t.name}</td><td class="text-center py-2 px-3">${t.wins}</td><td class="text-center py-2 px-3">${t.losses}</td></tr>`; });
-        tableHtml += `</tbody></table>`;
-        divisionEl.innerHTML = tableHtml;
-        elements.standingsContainer.appendChild(divisionEl);
+        const divTeams = gameState.teams.filter(t => t.division === divName).sort((a, b) => b.wins - a.wins);
+        divTeams.forEach(t => { tableHtml += `<tr class="${t.id === gameState.playerTeam.id ? 'bg-amber-100' : ''}"><td class="py-2 px-3 font-semibold">${t.name}</td><td class="text-center py-2 px-3">${t.wins}</td><td class="text-center py-2 px-3">${t.losses}</td></tr>`; });
+        divEl.innerHTML = tableHtml + `</tbody></table>`;
+        elements.standingsContainer.appendChild(divEl);
     }
 }
 
 export function setupDragAndDrop(onDrop) {
-    const containers = [elements.offenseDepthChartSlots, elements.defenseDepthChartSlots, elements.offenseDepthChartRoster, elements.defenseDepthChartRoster];
+    const containers = [document.body]; 
+    let draggedEl = null;
+
     containers.forEach(container => {
         container.addEventListener('dragstart', e => {
             if (e.target.matches('.draggable-player, .depth-chart-slot[draggable="true"]')) {
+                draggedEl = e.target;
                 dragPlayerId = e.target.dataset.playerId;
-                e.target.classList.add('dragging');
+                setTimeout(() => e.target.classList.add('dragging'), 0);
             }
         });
+
         container.addEventListener('dragend', e => {
-            if (e.target.matches('.draggable-player, .depth-chart-slot')) {
+            if(draggedEl) {
+                draggedEl.classList.remove('dragging');
+                draggedEl = null;
                 dragPlayerId = null;
-                e.target.classList.remove('dragging');
             }
         });
+
         container.addEventListener('dragover', e => {
             e.preventDefault();
             const slot = e.target.closest('.depth-chart-slot');
-            if (slot) slot.classList.add('drag-over');
+            if (slot) {
+                document.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over'));
+                slot.classList.add('drag-over');
+            }
         });
+        
         container.addEventListener('dragleave', e => {
             const slot = e.target.closest('.depth-chart-slot');
-            if (slot) slot.classList.remove('drag-over');
+             if (slot) slot.classList.remove('drag-over');
         });
+
         container.addEventListener('drop', e => {
             e.preventDefault();
+            document.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over'));
             const slot = e.target.closest('.depth-chart-slot');
-            if (slot) slot.classList.remove('drag-over');
             if (slot && slot.dataset.positionSlot && dragPlayerId) {
                 onDrop(dragPlayerId, slot.dataset.positionSlot);
             }
@@ -299,14 +290,8 @@ export function setupDepthChartTabs() {
             const subTab = e.target.dataset.subTab;
             elements.depthChartSubTabs.querySelectorAll('.depth-chart-tab').forEach(t => t.classList.remove('active'));
             e.target.classList.add('active');
-
-            if (subTab === 'offense') {
-                elements.offenseDepthChartPane.classList.remove('hidden');
-                elements.defenseDepthChartPane.classList.add('hidden');
-            } else {
-                elements.offenseDepthChartPane.classList.add('hidden');
-                elements.defenseDepthChartPane.classList.remove('hidden');
-            }
+            elements.offenseDepthChartPane.classList.toggle('hidden', subTab !== 'offense');
+            elements.defenseDepthChartPane.classList.toggle('hidden', subTab === 'offense');
         }
     });
 }
