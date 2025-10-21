@@ -1,8 +1,10 @@
 import { calculateOverall, positionOverallWeights } from './game.js';
+import { offenseFormations, defenseFormations } from './data.js';
 
 let elements = {};
 let selectedPlayerId = null;
 let dragPlayerId = null;
+let dragSide = null; // 'offense' or 'defense'
 
 export function setupElements() {
     elements = {
@@ -48,6 +50,8 @@ export function setupElements() {
         playerStatsContainer: document.getElementById('player-stats-container'),
         hallOfFameList: document.getElementById('hall-of-fame-list'),
         depthChartSubTabs: document.getElementById('depth-chart-sub-tabs'),
+        offenseFormationSelect: document.getElementById('offense-formation-select'),
+        defenseFormationSelect: document.getElementById('defense-formation-select'),
         offenseDepthChartPane: document.getElementById('depth-chart-offense-pane'),
         defenseDepthChartPane: document.getElementById('depth-chart-defense-pane'),
         offenseDepthChartSlots: document.getElementById('offense-depth-chart-slots'),
@@ -70,9 +74,36 @@ export function showScreen(screenId) {
     }
 }
 
-export function showModal(title, bodyHtml) {
+export function showModal(title, bodyHtml, onConfirm = null) {
     elements.modalTitle.textContent = title;
     elements.modalBody.innerHTML = bodyHtml;
+    
+    const oldActions = document.getElementById('modal-actions');
+    if (oldActions) oldActions.remove();
+
+    const actionsDiv = document.createElement('div');
+    actionsDiv.id = 'modal-actions';
+    actionsDiv.className = 'mt-6 text-right space-x-2';
+
+    if (onConfirm) {
+        const confirmBtn = document.createElement('button');
+        confirmBtn.textContent = 'Confirm';
+        confirmBtn.className = 'bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-6 rounded-lg';
+        confirmBtn.onclick = () => {
+            onConfirm();
+            hideModal();
+        };
+        actionsDiv.appendChild(confirmBtn);
+    }
+    
+    const closeBtn = document.createElement('button');
+    closeBtn.textContent = 'Close';
+    closeBtn.className = 'bg-gray-500 hover:bg-gray-600 text-white font-bold py-2 px-6 rounded-lg';
+    closeBtn.onclick = hideModal;
+    actionsDiv.appendChild(closeBtn);
+
+    elements.modal.querySelector('#modal-content').appendChild(actionsDiv);
+    
     elements.modal.classList.remove('hidden');
 }
 
@@ -196,7 +227,6 @@ function renderRosterSummary(playerTeam) {
     let summaryHtml = '<h5 class="font-bold text-sm mb-1">Team Average Overalls</h5><div class="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">';
 
     positions.forEach(pos => {
-        // For each position, calculate the average overall of ALL players on the roster.
         const totalOvr = roster.reduce((sum, player) => {
             return sum + calculateOverall(player, pos);
         }, 0);
@@ -254,11 +284,19 @@ function renderMyTeamTab(gameState) {
 
 function renderDepthChartTab(gameState) {
     renderPositionalOveralls(gameState.playerTeam.roster);
-    const offenseSlots = ['QB', 'RB', 'WR1', 'WR2'];
-    const defenseSlots = ['DL', 'LB', 'DB'];
-    renderDepthChartSide('offense', offenseSlots, gameState, elements.offenseDepthChartSlots, elements.offenseDepthChartRoster);
-    renderDepthChartSide('defense', defenseSlots, gameState, elements.defenseDepthChartSlots, elements.defenseDepthChartRoster);
+    
+    renderFormationDropdown('offense', Object.values(offenseFormations), gameState.playerTeam.formations.offense);
+    renderDepthChartSide('offense', gameState, elements.offenseDepthChartSlots, elements.offenseDepthChartRoster);
+
+    renderFormationDropdown('defense', Object.values(defenseFormations), gameState.playerTeam.formations.defense);
+    renderDepthChartSide('defense', gameState, elements.defenseDepthChartSlots, elements.defenseDepthChartRoster);
 }
+
+function renderFormationDropdown(side, formations, currentFormationName) {
+    const selectEl = elements[`${side}FormationSelect`];
+    selectEl.innerHTML = formations.map(f => `<option value="${f.name}" ${f.name === currentFormationName ? 'selected' : ''}>${f.name}</option>`).join('');
+}
+
 
 function renderPositionalOveralls(roster) {
     const positions = Object.keys(positionOverallWeights);
@@ -269,38 +307,40 @@ function renderPositionalOveralls(roster) {
     elements.positionalOverallsContainer.innerHTML = table + '</tbody></table>';
 }
 
-function renderDepthChartSide(side, slots, gameState, slotsContainer, rosterContainer) {
+function renderDepthChartSide(side, gameState, slotsContainer, rosterContainer) {
     const { roster, depthChart } = gameState.playerTeam;
+    const slots = Object.keys(depthChart[side]);
+
     slotsContainer.innerHTML = '';
     const header = document.createElement('div');
     header.className = 'depth-chart-slot flex items-center justify-between font-bold text-xs text-gray-500 px-2';
     header.innerHTML = `<span class="w-1/4">POS</span><div class="player-details-grid w-3/4"><span>NAME</span><span>OVR</span><span>SPD</span><span>STR</span><span>AGI</span><span>THR</span><span>CAT</span></div>`;
     slotsContainer.appendChild(header);
-    slots.forEach(slot => renderSlot(slot, roster, depthChart, slotsContainer));
-    const positionedIds = Object.values(depthChart).filter(id => id !== null);
-    const availablePlayers = roster.filter(p => !positionedIds.includes(p.id));
-    renderAvailablePlayerList(availablePlayers, rosterContainer);
+    slots.forEach(slot => renderSlot(slot, roster, depthChart[side], slotsContainer, side));
+    renderAvailablePlayerList(roster, rosterContainer, side);
 }
 
-function renderSlot(positionSlot, roster, depthChart, container) {
-    const playerId = depthChart[positionSlot];
+function renderSlot(positionSlot, roster, chart, container, side) {
+    const playerId = chart[positionSlot];
     const player = roster.find(p => p.id === playerId);
     const overall = player ? calculateOverall(player, positionSlot.replace(/\d/g, '')) : '---';
     const slotEl = document.createElement('div');
     slotEl.className = 'depth-chart-slot bg-gray-200 p-2 rounded flex items-center justify-between';
     slotEl.dataset.positionSlot = positionSlot;
+    slotEl.dataset.side = side;
     if (player) { slotEl.draggable = true; slotEl.dataset.playerId = player.id; }
     slotEl.innerHTML = `<span class="font-bold w-1/4">${positionSlot}</span><div class="player-details-grid w-3/4"><span>${player ? player.name : 'Empty'}</span><span class="font-bold text-amber-600">${overall}</span><span>${player ? player.attributes.physical.speed : '-'}</span><span>${player ? player.attributes.physical.strength : '-'}</span><span>${player ? player.attributes.physical.agility : '-'}</span><span>${player ? player.attributes.technical.throwingAccuracy : '-'}</span><span>${player ? player.attributes.technical.catchingHands : '-'}</span></div>`;
     container.appendChild(slotEl);
 }
 
-function renderAvailablePlayerList(players, container) {
+function renderAvailablePlayerList(players, container, side) {
     container.innerHTML = '';
     players.forEach(player => {
         const playerEl = document.createElement('div');
         playerEl.className = 'draggable-player';
         playerEl.draggable = true;
         playerEl.dataset.playerId = player.id;
+        playerEl.dataset.side = side;
         playerEl.textContent = player.name;
         container.appendChild(playerEl);
     });
@@ -393,48 +433,60 @@ function renderHallOfFameTab(gameState) {
 
 
 export function setupDragAndDrop(onDrop) {
-    const containers = [document.body];
+    const container = document.getElementById('dashboard-content');
     let draggedEl = null;
 
-    containers.forEach(container => {
-        container.addEventListener('dragstart', e => {
-            if (e.target.matches('.draggable-player, .depth-chart-slot[draggable="true"]')) {
-                draggedEl = e.target;
-                dragPlayerId = e.target.dataset.playerId;
-                setTimeout(() => e.target.classList.add('dragging'), 0);
+    container.addEventListener('dragstart', e => {
+        if (e.target.matches('.draggable-player, .depth-chart-slot[draggable="true"]')) {
+            draggedEl = e.target;
+            dragPlayerId = e.target.dataset.playerId;
+            // Determine side from the parent pane of the dragged element
+            const pane = e.target.closest('.depth-chart-sub-pane');
+            if (pane) {
+                dragSide = pane.id.includes('offense') ? 'offense' : 'defense';
+            } else if (e.target.matches('.draggable-player')){
+                 const rosterList = e.target.closest('.roster-list');
+                 if(rosterList) {
+                    dragSide = rosterList.id.includes('offense') ? 'offense' : 'defense';
+                 }
             }
-        });
+            
+            setTimeout(() => e.target.classList.add('dragging'), 0);
+        }
+    });
 
-        container.addEventListener('dragend', e => {
-            if (draggedEl) {
-                draggedEl.classList.remove('dragging');
-                draggedEl = null;
-                dragPlayerId = null;
-            }
-        });
+    container.addEventListener('dragend', e => {
+        if (draggedEl) {
+            draggedEl.classList.remove('dragging');
+            draggedEl = null;
+            dragPlayerId = null;
+            dragSide = null;
+        }
+    });
 
-        container.addEventListener('dragover', e => {
-            e.preventDefault();
-            const slot = e.target.closest('.depth-chart-slot');
-            if (slot) {
-                document.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over'));
-                slot.classList.add('drag-over');
-            }
-        });
-
-        container.addEventListener('dragleave', e => {
-            const slot = e.target.closest('.depth-chart-slot');
-            if (slot) slot.classList.remove('drag-over');
-        });
-
-        container.addEventListener('drop', e => {
-            e.preventDefault();
+    container.addEventListener('dragover', e => {
+        e.preventDefault();
+        const slot = e.target.closest('.depth-chart-slot');
+        if (slot) {
             document.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over'));
-            const slot = e.target.closest('.depth-chart-slot');
-            if (slot && slot.dataset.positionSlot && dragPlayerId) {
-                onDrop(dragPlayerId, slot.dataset.positionSlot);
-            }
-        });
+            slot.classList.add('drag-over');
+        }
+    });
+
+    container.addEventListener('dragleave', e => {
+        const slot = e.target.closest('.depth-chart-slot');
+        if (slot) slot.classList.remove('drag-over');
+    });
+
+    container.addEventListener('drop', e => {
+        e.preventDefault();
+        document.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over'));
+        const slot = e.target.closest('.depth-chart-slot');
+        const dropSide = slot?.dataset.side;
+
+        if (slot && slot.dataset.positionSlot && dragPlayerId && dropSide) {
+            onDrop(dragPlayerId, slot.dataset.positionSlot, dropSide);
+        }
     });
 }
 
