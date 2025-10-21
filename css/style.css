@@ -1,3 +1,4 @@
+/* --- Global & Fonts --- */
 body {
     font-family: 'Inter', sans-serif;
 }
@@ -6,58 +7,98 @@ body {
     font-family: 'Bangers', cursive;
 }
 
-/* Main Dashboard Tabs */
+/* --- Player Card & Interactivity --- */
+.player-card {
+    transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+}
+
+.player-card:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+}
+
+.player-card.selected {
+    transform: translateY(-5px);
+    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+    border: 2px solid #f59e0b; /* amber-500 */
+}
+
+/* --- Dashboard Tabs --- */
 .tab-button {
-    @apply w-full text-left px-4 py-2 rounded-md text-gray-700 hover:bg-amber-100 hover:text-amber-700 transition;
+    padding: 0.75rem 1rem;
+    border-radius: 0.5rem;
+    font-weight: 600;
+    color: #4b5563; /* gray-600 */
+    text-align: left;
+    transition: background-color 0.2s, color 0.2s;
+}
+
+.tab-button:hover {
+    background-color: #f3f4f6; /* gray-100 */
 }
 
 .tab-button.active {
-    @apply bg-amber-500 text-white font-semibold;
+    background-color: #fbbf24; /* amber-400 */
+    color: white;
 }
 
-/* Depth Chart Sub-tabs */
+/* --- Depth Chart --- */
 .depth-chart-tab {
-    @apply py-2 px-4 font-semibold text-gray-500 border-b-2 border-transparent;
+    padding: 0.5rem 1.5rem;
+    font-weight: 600;
+    color: #4b5563; /* gray-600 */
+    border-bottom: 3px solid transparent;
 }
+
 .depth-chart-tab.active {
-    @apply border-amber-500 text-amber-600;
-}
-
-
-/* Depth Chart Drag and Drop Styles */
-.depth-chart-slot {
-    min-height: 50px; /* Ensure empty slots are droppable */
-    transition: background-color 0.2s;
+    color: #d97706; /* amber-600 */
+    border-bottom-color: #d97706;
 }
 
 .roster-list {
-    @apply space-y-2 p-2 bg-gray-100 rounded h-96 overflow-y-auto;
+    min-height: 200px;
+    background-color: #f9fafb; /* gray-50 */
+    border-radius: 0.5rem;
+    padding: 0.5rem;
+    border: 2px dashed #d1d5db; /* gray-300 */
 }
 
 .draggable-player {
-    @apply bg-white p-2 rounded border cursor-grab;
-    transition: opacity 0.2s;
+    background-color: white;
+    padding: 0.5rem;
+    margin-bottom: 0.5rem;
+    border-radius: 0.25rem;
+    border: 1px solid #e5e7eb; /* gray-200 */
+    cursor: grab;
+    transition: background-color 0.2s;
 }
 
-.draggable-player.dragging {
-    @apply opacity-50;
+.draggable-player:hover {
+    background-color: #fef3c7; /* amber-100 */
 }
 
-.depth-chart-slot.drag-over {
-    @apply ring-2 ring-amber-500 ring-offset-2;
+.depth-chart-slot {
+    border: 1px solid #e5e7eb; /* gray-200 */
+    transition: background-color 0.2s;
 }
 
-/* Custom grid for player details in depth chart */
 .player-details-grid {
     display: grid;
-    grid-template-columns: 2fr repeat(6, 1fr);
+    grid-template-columns: repeat(7, 1fr);
+    text-align: center;
     gap: 0.5rem;
     align-items: center;
-    text-align: center;
-    font-size: 0.875rem; /* text-sm */
 }
-.player-details-grid span:first-child {
-    text-align: left;
-    font-weight: 600; /* font-semibold */
+
+
+/* --- Drag and Drop States --- */
+.dragging {
+    opacity: 0.5;
+    cursor: grabbing;
+}
+
+.drag-over {
+    background-color: #fef3c7 !important; /* amber-100 */
+    border-style: dashed !important;
 }
 
