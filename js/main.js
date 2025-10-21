@@ -94,9 +94,7 @@ async function runAIDraftPicks() {
 
 function handleDraftEnd() {
     gameState.teams.forEach(team => {
-        if (team.id !== gameState.playerTeam.id) {
-            Game.aiSetDepthChart(team);
-        }
+        Game.aiSetDepthChart(team);
     });
 
     UI.showModal("Draft Complete!", "<p>The draft has concluded. Get ready for the season!</p>");
@@ -172,26 +170,10 @@ async function handleAdvanceWeek() {
 
 function handleDashboardClicks(e) {
     const target = e.target;
-    if (target.matches('.cut-player-btn')) {
+    if (target.matches('.call-friend-btn')) {
         const playerId = target.dataset.playerId;
-        const player = gameState.playerTeam.roster.find(p => p.id === playerId);
-        UI.showModal(
-            `Cut ${player.name}?`,
-            `<p>Are you sure you want to cut ${player.name}? This cannot be undone.</p>`,
-            () => {
-                 Game.playerCut(playerId);
-                 gameState = Game.getGameState();
-                 const activeTab = document.querySelector('.tab-button.active').dataset.tab;
-                 UI.switchTab(activeTab, gameState);
-                 UI.hideModal();
-            }
-        );
-    } else if (target.matches('.sign-player-btn')) {
-        const playerId = target.dataset.playerId;
-        const result = Game.playerSignFreeAgent(playerId);
-        if (!result.success) {
-            UI.showModal("Roster Management", `<p>${result.message}</p>`);
-        }
+        const result = Game.callFriend(playerId);
+        UI.showModal("Calling a Friend...", `<p>${result.message}</p>`);
         gameState = Game.getGameState();
         UI.switchTab('free-agency', gameState);
         UI.switchTab('my-team', gameState);
@@ -208,7 +190,6 @@ function main() {
         document.getElementById('draft-player-btn')?.addEventListener('click', handleDraftPlayer);
         document.getElementById('dashboard-tabs')?.addEventListener('click', handleTabSwitch);
         document.getElementById('advance-week-btn')?.addEventListener('click', handleAdvanceWeek);
-        document.getElementById('modal-close-btn')?.addEventListener('click', UI.hideModal);
         document.getElementById('dashboard-content')?.addEventListener('click', handleDashboardClicks);
 
         document.getElementById('draft-search')?.addEventListener('input', () => UI.renderDraftPool(gameState, handlePlayerSelectInDraft));
