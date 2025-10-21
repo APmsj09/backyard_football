@@ -166,7 +166,8 @@ export function setupDraft() {
     game.draftOrder = [];
     game.currentPick = 0;
     const teams = [...game.teams].sort(() => Math.random() - 0.5);
-    for (let i = 0; i < 10; i++) {
+    // 10 rounds for 10-player rosters
+    for (let i = 0; i < 10; i++) { 
         game.draftOrder.push(...(i % 2 === 0 ? teams : [...teams].reverse()));
     }
 }
@@ -185,6 +186,7 @@ export function aiSetDepthChart(team) {
                 });
 
                 team.depthChart[side][slot] = bestPlayerForSlot.id;
+                // A player can only be in one slot per side
                 availablePlayers = availablePlayers.filter(p => p.id !== bestPlayerForSlot.id);
             }
         });
@@ -255,6 +257,7 @@ function simulateGame(homeTeam, awayTeam) {
 
     const getInitialYardLine = (kickingTeam) => {
         const qb = kickingTeam.roster.find(p => p.id === kickingTeam.depthChart.offense[Object.keys(kickingTeam.depthChart.offense).find(s => s.startsWith('QB'))]);
+        if (!qb) return 10; // Default if no QB
         const kickPower = (qb.attributes.technical.throwingAccuracy + qb.attributes.physical.strength) / 2;
         return Math.max(5, 25 - Math.round(kickPower / 5)); // Start between the 5 and 25 yard line
     };
@@ -354,11 +357,15 @@ function simulateGame(homeTeam, awayTeam) {
 
 function simulatePlay(driveState) {
     const offense = driveState.team;
-    const defense = game.teams.find(t => t.id !== offense.id); // This is a simplification
+    const defense = game.teams.find(t => t.id !== offense.id); 
     
-    const oStarters = Object.values(offense.depthChart.offense).map(id => offense.roster.find(p => p.id === id));
-    const dStarters = Object.values(defense.depthChart.defense).map(id => defense.roster.find(p => p.id === id));
+    const oStarters = Object.values(offense.depthChart.offense).map(id => offense.roster.find(p => p.id === id && p.status.type === 'healthy')).filter(Boolean);
+    const dStarters = Object.values(defense.depthChart.defense).map(id => defense.roster.find(p => p.id === id && p.status.type === 'healthy')).filter(Boolean);
     
+    if (oStarters.length < 7 || dStarters.length < 7) {
+        return { type: 'turnover', yards: 0, log: `${offense.name} forfeits the down due to lack of players.` };
+    }
+
     const qb = oStarters.find(p => calculateOverall(p, 'QB') > 40);
     const rb = oStarters.find(p => calculateOverall(p, 'RB') > 40);
     const wrs = oStarters.filter(p => calculateOverall(p, 'WR') > 40);
@@ -384,7 +391,7 @@ function simulatePlay(driveState) {
             
             if (driveState.yardLine + yards >= 50) {
                  log += ' <strong>TOUCHDOWN!</strong>';
-                 playerStats[receiver.id].touchdowns = 1;
+                 playerStats[receiver.id].touchdowns = (playerStats[receiver.id].touchdowns || 0) + 1;
                  return { type: 'touchdown', yards, log, playerStats };
             }
             return { type: 'success', yards, log, playerStats };
@@ -392,7 +399,7 @@ function simulatePlay(driveState) {
             log += ` Incomplete pass.`;
             return { type: 'incomplete', yards: 0, log };
         }
-    } else if (rb) { // Run play
+    } else if (rb && ol.length > 0 && dl.length > 0 && lbs.length > 0) { // Run play
         const runPower = calculateOverall(rb, 'RB') + ol.reduce((s,p) => s + calculateOverall(p, 'OL'), 0) / ol.length;
         const runDefense = dl.reduce((s,p) => s + calculateOverall(p, 'DL'), 0) + lbs.reduce((s,p) => s + calculateOverall(p, 'LB'), 0);
 
@@ -402,7 +409,7 @@ function simulatePlay(driveState) {
         
         if (driveState.yardLine + yards >= 50) {
             log += ' <strong>TOUCHDOWN!</strong>';
-            playerStats[rb.id].touchdowns = 1;
+            playerStats[rb.id].touchdowns = (playerStats[rb.id].touchdowns || 0) + 1;
             return { type: 'touchdown', yards, log, playerStats };
         }
         return { type: 'success', yards, log, playerStats };
@@ -588,7 +595,8 @@ export function changeFormation(side, formationName) {
             });
 
             newChart[newSlot] = bestPlayerForSlot.id;
-            playerPool = playerPool.filter(p => p.id !== bestPlayerForSlot.id);
+            // A player can only be in one slot on each side of the ball.
+            // This logic allows a player to start on both Offense and Defense.
         }
     }
 
