@@ -105,6 +105,13 @@ async function runAIDraftPicks() {
 
 
 function handleDraftEnd() {
+    // Have all AI teams set their initial depth charts
+    gameState.teams.forEach(team => {
+        if (team.id !== gameState.playerTeam.id) {
+            Game.aiSetDepthChart(team);
+        }
+    });
+
     UI.showModal("Draft Complete!", "<p>The draft has concluded. Get ready for the season!</p>");
     Game.generateSchedule();
     gameState = Game.getGameState();
@@ -120,8 +127,16 @@ function handleTabSwitch(e) {
     }
 }
 
-function handleDepthChartDrop(playerId, newPositionSlot) {
-    Game.updateDepthChart(playerId, newPositionSlot);
+function handleDepthChartDrop(playerId, newPositionSlot, side) {
+    Game.updateDepthChart(playerId, newPositionSlot, side);
+    gameState = Game.getGameState();
+    UI.switchTab('depth-chart', gameState);
+}
+
+function handleFormationChange(e) {
+    const side = e.target.id.includes('offense') ? 'offense' : 'defense';
+    const formationName = e.target.value;
+    Game.changeFormation(side, formationName);
     gameState = Game.getGameState();
     UI.switchTab('depth-chart', gameState);
 }
@@ -139,7 +154,7 @@ async function handleAdvanceWeek() {
             resultsHtml += `<p>${r.awayTeam.name} ${r.awayScore} @ ${r.homeTeam.name} ${r.homeScore}</p>`;
         });
         resultsHtml += '</div>';
-        UI.showModal(`Week ${gameState.currentWeek} Results`, resultsHtml);
+        UI.showModal(`Week ${gameState.currentPick} Results`, resultsHtml);
 
         gameState.teams.filter(t => t.id !== gameState.playerTeam.id).forEach(Game.aiManageRoster);
         Game.generateWeeklyFreeAgents();
@@ -168,12 +183,18 @@ function handleDashboardClicks(e) {
     if (target.matches('.cut-player-btn')) {
         const playerId = target.dataset.playerId;
         const player = gameState.playerTeam.roster.find(p => p.id === playerId);
-        if (confirm(`Are you sure you want to cut ${player.name}? This cannot be undone.`)) {
-            Game.playerCut(playerId);
-            gameState = Game.getGameState();
-            const activeTab = document.querySelector('.tab-button.active').dataset.tab;
-            UI.switchTab(activeTab, gameState);
-        }
+        // Use custom modal instead of confirm
+        UI.showModal(
+            `Cut ${player.name}?`,
+            `<p>Are you sure you want to cut ${player.name}? This cannot be undone.</p>`,
+            () => {
+                 Game.playerCut(playerId);
+                 gameState = Game.getGameState();
+                 const activeTab = document.querySelector('.tab-button.active').dataset.tab;
+                 UI.switchTab(activeTab, gameState);
+                 UI.hideModal();
+            }
+        );
     } else if (target.matches('.sign-player-btn')) {
         const playerId = target.dataset.playerId;
         const result = Game.playerSignFreeAgent(playerId);
@@ -202,6 +223,10 @@ function main() {
         document.getElementById('draft-search')?.addEventListener('input', () => UI.renderDraftPool(gameState, handlePlayerSelectInDraft));
         document.getElementById('draft-filter-pos')?.addEventListener('change', () => UI.renderDraftPool(gameState, handlePlayerSelectInDraft));
         document.getElementById('draft-sort')?.addEventListener('change', () => UI.renderDraftPool(gameState, handlePlayerSelectInDraft));
+        
+        document.getElementById('offense-formation-select')?.addEventListener('change', handleFormationChange);
+        document.getElementById('defense-formation-select')?.addEventListener('change', handleFormationChange);
+
 
         UI.setupDragAndDrop(handleDepthChartDrop);
         UI.setupDepthChartTabs();
