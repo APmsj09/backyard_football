@@ -271,11 +271,17 @@ export function switchTab(tabId, gameState) {
 
 function renderMyTeamTab(gameState) {
     const { roster } = gameState.playerTeam;
-    let tableHtml = `<table class="min-w-full bg-white text-sm"><thead class="bg-gray-800 text-white"><tr><th class="text-left py-2 px-3">Name</th><th class="py-2 px-3">Age</th><th class="py-2 px-3">Status</th><th class="py-2 px-3">Best Pos Ovr</th></tr></thead><tbody class="divide-y">`;
+    let tableHtml = `<table class="min-w-full bg-white text-sm"><thead class="bg-gray-800 text-white"><tr><th class="text-left py-2 px-3">Name</th><th class="py-2 px-3">Age</th><th class="py-2 px-3">Status</th><th class="py-2 px-3">Toughness</th><th class="py-2 px-3">Best Pos Ovr</th></tr></thead><tbody class="divide-y">`;
     roster.forEach(p => {
         if (p.status.type === 'temporary') return;
         const overalls = Object.keys(positionOverallWeights).map(pos => calculateOverall(p, pos));
-        tableHtml += `<tr><td class="py-2 px-3 font-semibold">${p.name}</td><td class="text-center py-2 px-3">${p.age}</td><td class="text-center py-2 px-3 ${p.status.duration > 0 ? 'text-red-500 font-semibold' : ''}">${p.status.description || 'Healthy'}</td><td class="text-center py-2 px-3 font-bold">${Math.max(...overalls)}</td></tr>`;
+        tableHtml += `<tr>
+            <td class="py-2 px-3 font-semibold">${p.name}</td>
+            <td class="text-center py-2 px-3">${p.age}</td>
+            <td class="text-center py-2 px-3 ${p.status.duration > 0 ? 'text-red-500 font-semibold' : ''}">${p.status.description || 'Healthy'}</td>
+            <td class="text-center py-2 px-3">${p.attributes.mental.toughness}</td>
+            <td class="text-center py-2 px-3 font-bold">${Math.max(...overalls)}</td>
+        </tr>`;
     });
     elements.myTeamRoster.innerHTML = tableHtml + `</tbody></table>`;
 }
@@ -302,7 +308,7 @@ function renderPositionalOveralls(roster) {
     roster.forEach(player => {
         table += `<tr class="border-b"><td class="p-2 font-bold">${player.name}</td>${positions.map(p => `<td class="p-2 text-center">${calculateOverall(player, p)}</td>`).join('')}</tr>`;
     });
-    elements.positionalOverallsContainer.innerHTML = table + '</tbody></table>';
+    elements.positionalOverallsContainer.innerHTML = table + `</tbody></table>`;
 }
 
 function renderDepthChartSide(side, gameState, slotsContainer, rosterContainer) {
@@ -316,8 +322,8 @@ function renderDepthChartSide(side, gameState, slotsContainer, rosterContainer) 
     slotsContainer.appendChild(header);
     slots.forEach(slot => renderSlot(slot, roster, depthChart[side], slotsContainer, side));
     
-    const positionedPlayerIds = Object.values(depthChart.offense).concat(Object.values(depthChart.defense)).filter(Boolean);
-    const availablePlayers = roster.filter(p => !positionedPlayerIds.includes(p.id) && p.status.type !== 'temporary');
+    const positionedOnThisSide = Object.values(depthChart[side]).filter(Boolean);
+    const availablePlayers = roster.filter(p => !positionedOnThisSide.includes(p.id) && p.status.type !== 'temporary');
     
     renderAvailablePlayerList(availablePlayers, rosterContainer, side);
 }
