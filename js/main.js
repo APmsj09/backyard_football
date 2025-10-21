@@ -6,14 +6,10 @@ let selectedPlayerId = null;
 
 // --- Event Handlers ---
 
-/**
- * Starts the entire game flow. Shows loading screen, initializes league.
- */
 async function startNewGame() {
     try {
         UI.showScreen('loadingScreen');
-        // A small delay to ensure the UI updates before the heavy lifting begins.
-        await new Promise(resolve => setTimeout(resolve, 50)); 
+        await new Promise(resolve => setTimeout(resolve, 50));
         await Game.initializeLeague(UI.updateLoadingProgress);
         gameState = Game.getGameState();
         UI.renderTeamNameSuggestions(['Jets', 'Sharks', 'Tigers', 'Bulldogs', 'Panthers', 'Giants'], handleTeamNameSelection);
@@ -23,19 +19,17 @@ async function startNewGame() {
     }
 }
 
-/**
- * Handles the selection of a suggested team name.
- * @param {string} name - The selected team name.
- */
 function handleTeamNameSelection(name) {
-    UI.elements.customTeamName.value = name;
+    const customNameInput = document.getElementById('custom-team-name');
+    if (customNameInput) {
+        customNameInput.value = name;
+    }
 }
 
-/**
- * Finalizes team creation and moves to the draft.
- */
 function handleConfirmTeam() {
-    const customName = UI.elements.customTeamName.value.trim();
+    const customNameInput = document.getElementById('custom-team-name');
+    const customName = customNameInput ? customNameInput.value.trim() : '';
+    
     if (customName) {
         Game.createPlayerTeam(customName);
         Game.setupDraft();
@@ -43,27 +37,20 @@ function handleConfirmTeam() {
         UI.renderSelectedPlayerCard(null);
         UI.renderDraftScreen(gameState, handlePlayerSelectInDraft);
         UI.showScreen('draftScreen');
-        runAIDraftPicks(); 
+        runAIDraftPicks();
     } else {
-        alert("Please enter or select a team name.");
+        UI.showModal("Team Name Required", "<p>Please enter or select a team name to continue.</p>");
     }
 }
 
-/**
- * Handles a player being selected from the draft pool table.
- * @param {string} playerId - The ID of the selected player.
- */
+
 function handlePlayerSelectInDraft(playerId) {
     selectedPlayerId = playerId;
     const player = gameState.players.find(p => p.id === playerId);
     UI.updateSelectedPlayerRow(playerId);
     UI.renderSelectedPlayerCard(player);
-    UI.elements.draftPlayerBtn.disabled = false;
 }
 
-/**
- * Handles the player clicking the "Draft Player" button.
- */
 function handleDraftPlayer() {
     if (selectedPlayerId) {
         const player = gameState.players.find(p => p.id === selectedPlayerId);
@@ -72,18 +59,16 @@ function handleDraftPlayer() {
             selectedPlayerId = null;
             gameState.currentPick++;
             UI.renderSelectedPlayerCard(null);
-            UI.renderDraftScreen(gameState, handlePlayerSelectInDraft);
-            runAIDraftPicks();
+            runAIDraftPicks(); // This will re-render the draft screen
         } else {
-            alert("Your roster is full!");
+            UI.showModal("Roster Full", "<p>Your roster is full! You cannot draft more players.</p>");
         }
     }
 }
 
-/**
- * Manages the draft flow, simulating AI picks until it's the player's turn.
- */
 async function runAIDraftPicks() {
+    UI.renderDraftScreen(gameState, handlePlayerSelectInDraft);
+
     if (gameState.currentPick >= gameState.draftOrder.length) {
         handleDraftEnd();
         return;
@@ -91,11 +76,12 @@ async function runAIDraftPicks() {
 
     let currentPickingTeam = gameState.draftOrder[gameState.currentPick];
     while (currentPickingTeam.id !== gameState.playerTeam.id) {
-        UI.renderDraftScreen(gameState, handlePlayerSelectInDraft);
-        await new Promise(resolve => setTimeout(resolve, 200)); // Short delay for effect
+        await new Promise(resolve => setTimeout(resolve, 200));
 
         Game.simulateAIPick(currentPickingTeam);
         gameState.currentPick++;
+        UI.renderDraftScreen(gameState, handlePlayerSelectInDraft);
+
 
         if (gameState.currentPick >= gameState.draftOrder.length) {
             handleDraftEnd();
@@ -103,26 +89,17 @@ async function runAIDraftPicks() {
         }
         currentPickingTeam = gameState.draftOrder[gameState.currentPick];
     }
-    // It's now the player's turn
-    UI.renderDraftScreen(gameState, handlePlayerSelectInDraft);
 }
 
-/**
- * Finalizes the draft and moves to the main dashboard.
- */
 function handleDraftEnd() {
-    alert("The draft is complete!");
+    UI.showModal("Draft Complete!", "<p>The draft has concluded. Get ready for the season!</p>");
     Game.generateSchedule();
     gameState = Game.getGameState();
     UI.renderDashboard(gameState);
+    UI.switchTab('my-team', gameState); // Start on my-team tab
     UI.showScreen('dashboardScreen');
 }
 
-
-/**
- * Handles clicks on the main dashboard tabs.
- * @param {Event} e - The click event.
- */
 function handleTabSwitch(e) {
     if (e.target.matches('.tab-button')) {
         const tabId = e.target.dataset.tab;
@@ -130,37 +107,93 @@ function handleTabSwitch(e) {
     }
 }
 
-/**
- * Handles dropping a player onto a depth chart slot.
- * @param {string} playerId - The ID of the player being dropped.
- * @param {string} newPositionSlot - The position slot they are dropped onto.
- */
 function handleDepthChartDrop(playerId, newPositionSlot) {
     Game.updateDepthChart(playerId, newPositionSlot);
     gameState = Game.getGameState();
-    UI.switchTab('depth-chart', gameState); // Re-render the depth chart
+    UI.switchTab('depth-chart', gameState);
 }
 
-// --- Initialization ---
+async function handleAdvanceWeek() {
+    const results = Game.simulateWeek();
+    
+    if (results) {
+        // Show weekly results in a modal
+        let resultsHtml = '<div class="space-y-2">';
+        const playerGame = results.find(r => r.homeTeam.id === gameState.playerTeam.id || r.awayTeam.id === gameState.playerTeam.id);
+        if(playerGame) {
+             resultsHtml += `<p class="text-lg font-bold text-center">${playerGame.awayTeam.name} ${playerGame.awayScore} @ ${playerGame.homeTeam.name} ${playerGame.homeScore}</p><hr class="my-2">`;
+        }
+        results.forEach(r => {
+            resultsHtml += `<p>${r.awayTeam.name} ${r.awayScore} @ ${r.homeTeam.name} ${r.homeScore}</p>`;
+        });
+        resultsHtml += '</div>';
+        UI.showModal(`Week ${gameState.currentWeek} Results`, resultsHtml);
 
-/**
- * The main function to set up the application.
- */
+        // Update AI rosters after the week is simulated
+        gameState.teams.filter(t => t.id !== gameState.playerTeam.id).forEach(Game.aiManageRoster);
+        Game.generateWeeklyFreeAgents();
+
+        // Update dashboard
+        gameState = Game.getGameState();
+        UI.renderDashboard(gameState);
+        const activeTab = document.querySelector('.tab-button.active').dataset.tab;
+        UI.switchTab(activeTab, gameState); // Re-render current tab
+    } else {
+        // Season is over, advance to offseason
+        UI.showModal("Season Over", "<p>The regular season has concluded. Advancing to the offseason!</p>");
+        Game.advanceToOffseason();
+        gameState = Game.getGameState();
+
+        // Go to next year's draft
+        Game.setupDraft();
+        gameState = Game.getGameState();
+        selectedPlayerId = null;
+        UI.renderSelectedPlayerCard(null);
+        UI.renderDraftScreen(gameState, handlePlayerSelectInDraft);
+        UI.showScreen('draftScreen');
+        runAIDraftPicks();
+    }
+}
+
+function handleDashboardClicks(e) {
+    const target = e.target;
+    if(target.matches('.cut-player-btn')) {
+        const playerId = target.dataset.playerId;
+        const player = gameState.playerTeam.roster.find(p => p.id === playerId);
+        if(confirm(`Are you sure you want to cut ${player.name}? This cannot be undone.`)){
+            Game.playerCut(playerId);
+            gameState = Game.getGameState();
+            const activeTab = document.querySelector('.tab-button.active').dataset.tab;
+            UI.switchTab(activeTab, gameState);
+        }
+    } else if(target.matches('.sign-player-btn')) {
+        const playerId = target.dataset.playerId;
+        const result = Game.playerSignFreeAgent(playerId);
+        if(!result.success) {
+            UI.showModal("Roster Management", `<p>${result.message}</p>`);
+        }
+        gameState = Game.getGameState();
+        UI.switchTab('free-agency', gameState);
+        UI.switchTab('my-team', gameState); // Also refresh my-team
+    }
+}
+
 function main() {
     console.log("Game starting... Document loaded.");
     try {
         UI.setupElements();
         
-        // Setup initial event listeners
         document.getElementById('start-game-btn')?.addEventListener('click', startNewGame);
-        UI.elements.confirmTeamBtn?.addEventListener('click', handleConfirmTeam);
-        UI.elements.draftPlayerBtn?.addEventListener('click', handleDraftPlayer);
-        UI.elements.dashboardTabs?.addEventListener('click', handleTabSwitch);
+        document.getElementById('confirm-team-btn')?.addEventListener('click', handleConfirmTeam);
+        document.getElementById('draft-player-btn')?.addEventListener('click', handleDraftPlayer);
+        document.getElementById('dashboard-tabs')?.addEventListener('click', handleTabSwitch);
+        document.getElementById('advance-week-btn')?.addEventListener('click', handleAdvanceWeek);
+        document.getElementById('modal-close-btn')?.addEventListener('click', UI.hideModal);
+        document.getElementById('dashboard-content')?.addEventListener('click', handleDashboardClicks);
 
-        // Draft filtering/sorting listeners
-        UI.elements.draftSearch?.addEventListener('input', () => UI.renderDraftPool(gameState, handlePlayerSelectInDraft));
-        UI.elements.draftFilterPos?.addEventListener('change', () => UI.renderDraftPool(gameState, handlePlayerSelectInDraft));
-        UI.elements.draftSort?.addEventListener('change', () => UI.renderDraftPool(gameState, handlePlayerSelectInDraft));
+        document.getElementById('draft-search')?.addEventListener('input', () => UI.renderDraftPool(gameState, handlePlayerSelectInDraft));
+        document.getElementById('draft-filter-pos')?.addEventListener('change', () => UI.renderDraftPool(gameState, handlePlayerSelectInDraft));
+        document.getElementById('draft-sort')?.addEventListener('change', () => UI.renderDraftPool(gameState, handlePlayerSelectInDraft));
 
         UI.setupDragAndDrop(handleDepthChartDrop);
         UI.setupDepthChartTabs();
@@ -171,6 +204,5 @@ function main() {
     }
 }
 
-// Start the game when the DOM is ready
 document.addEventListener('DOMContentLoaded', main);
 
