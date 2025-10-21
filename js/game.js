@@ -213,43 +213,48 @@ export function addPlayerToTeam(player, team) {
     return false;
 }
 
+/**
+ * Generates a balanced 9-week schedule for a 10-team division using the round-robin circle method.
+ */
 export function generateSchedule() {
     game.schedule = [];
     game.currentWeek = 0;
-    const allWeeklyGames = Array(9).fill(null).map(() => []);
+    
+    // 10 teams need 9 weeks of play (9 rounds)
+    const numWeeks = 9;
+    // 10 teams / 2 = 5 games per division per week
+    const gamesPerDivisionWeek = 5; 
+    
+    // An array of 9 empty arrays, one for each week
+    const weeklyGamesByDivision = Array(numWeeks).fill(0).map(() => []);
 
     for (const divisionName in game.divisions) {
         let teams = [...game.teams.filter(t => t.division === divisionName)];
-        if (teams.length % 2 !== 0 || teams.length < 2) {
-            console.error(`Cannot generate schedule for division ${divisionName} with ${teams.length} teams.`);
+        if (teams.length !== 10) { 
+            console.error(`ERROR: Division ${divisionName} does not have 10 teams. Schedule will be incomplete.`);
             continue;
         }
 
-        const numRounds = teams.length - 1;
         const numTeams = teams.length;
         
-        const schedule = [];
-        for (let i = 0; i < numRounds; i++) {
-            schedule.push([]);
-        }
-
-        for (let round = 0; round < numRounds; round++) {
-            for (let match = 0; match < numTeams / 2; match++) {
+        // Round-robin scheduling logic (Circle Method)
+        for (let round = 0; round < numWeeks; round++) {
+            for (let match = 0; match < gamesPerDivisionWeek; match++) {
                 const home = teams[match];
                 const away = teams[numTeams - 1 - match];
-                 if (home && away) {
-                    const matchup = match % 2 === 1 ? { home, away } : { home: away, away: home };
-                    schedule[round].push(matchup);
-                }
+                
+                // Ensures all teams play 9 games total and swaps home/away for balance
+                const matchup = match % 2 === 1 ? { home, away } : { home: away, away: home };
+                weeklyGamesByDivision[round].push(matchup);
             }
+            // Rotate teams (keep first team fixed)
             teams.splice(1, 0, teams.pop());
         }
-        
-        for(let week = 0; week < schedule.length; week++) {
-            allWeeklyGames[week].push(...schedule[week]);
-        }
     }
-    game.schedule = allWeeklyGames.flat();
+    
+    // Combine games from all 9 weeks and both divisions into one flat schedule array (90 total games)
+    game.schedule = weeklyGamesByDivision.flat();
+    console.log(`Schedule successfully generated: 9 weeks, 10 games per week (${game.schedule.length} total games).`);
 }
 
 
@@ -274,36 +279,93 @@ function checkInGameInjury(player, gameLog) {
 }
 
 /**
- * NEW: A more detailed play-by-play simulation engine focusing on individual matchups.
+ * Helper function to find the best available sub for a position.
  */
+function getBestSub(team, position, usedPlayerIds) {
+    const healthyRoster = team.roster.filter(p => p.status.duration === 0);
+    // Find players who are healthy AND NOT currently used in another slot on this play
+    const availableSubs = healthyRoster.filter(p => !usedPlayerIds.has(p.id));
+    
+    if (availableSubs.length === 0) return null;
+
+    // Find the best available sub based on the target position's overall rating
+    const bestSub = availableSubs.reduce((best, current) => {
+        const currentOvr = calculateOverall(current, position);
+        return currentOvr > best.ovr ? { player: current, ovr: currentOvr } : best;
+    }, { player: null, ovr: -1 });
+
+    return bestSub.player;
+}
+
+/**
+ * Gets a list of active players for a position group, substituting injured starters with the best available bench player.
+ * @param {object} team - The team object.
+ * @param {string} side - 'offense' or 'defense'.
+ * @param {string} slotPrefix - The position prefix (e.g., 'QB', 'WR', 'DL').
+ * @param {Set<string>} usedPlayerIds - A Set of player IDs already assigned to a slot this play.
+ * @returns {Array<object>} List of active player objects.
+ */
+function getPlayersForSlots(team, side, slotPrefix, usedPlayerIds) {
+    const chart = team.depthChart[side];
+    const slots = Object.keys(chart).filter(s => s.startsWith(slotPrefix));
+    const position = slotPrefix.replace(/\d/g, '');
+    
+    const activePlayers = [];
+
+    slots.forEach(slot => {
+        let player = team.roster.find(p => p.id === chart[slot]);
+        
+        // 1. Check if the starter is injured or already used
+        if (!player || player.status.duration > 0 || usedPlayerIds.has(player.id)) {
+            // Find a suitable sub
+            player = getBestSub(team, position, usedPlayerIds);
+        }
+        
+        // 2. The player must be healthy and not already used
+        if (player && player.status.duration === 0 && !usedPlayerIds.has(player.id)) {
+            activePlayers.push(player);
+            usedPlayerIds.add(player.id); // Mark player as used for this play
+        }
+    });
+
+    return activePlayers;
+}
+
+
 function resolvePlay(offense, defense, playType, gameState) {
     const { gameLog } = gameState;
+    const usedPlayerIds = new Set(); // Tracks players used in ANY slot for this play
 
-    const getPlayersForSlots = (team, side, slotPrefix) => 
-        Object.keys(team.depthChart[side])
-            .filter(s => s.startsWith(slotPrefix))
-            .map(s => team.roster.find(p => p.id === team.depthChart[side][s] && p.status.duration === 0))
-            .filter(Boolean);
+    // Get active players for the play (substitutions included)
+    const qbArray = getPlayersForSlots(offense, 'offense', 'QB', usedPlayerIds);
+    const rbs = getPlayersForSlots(offense, 'offense', 'RB', usedPlayerIds);
+    const wrs = getPlayersForSlots(offense, 'offense', 'WR', usedPlayerIds);
+    const ols = getPlayersForSlots(offense, 'offense', 'OL', usedPlayerIds);
+    
+    const dls = getPlayersForSlots(defense, 'defense', 'DL', usedPlayerIds);
+    const lbs = getPlayersForSlots(defense, 'defense', 'LB', usedPlayerIds);
+    const dbs = getPlayersForSlots(defense, 'defense', 'DB', usedPlayerIds);
+    
+    const qb = qbArray[0];
 
-    const qb = getPlayersForSlots(offense, 'offense', 'QB')[0];
-    const rbs = getPlayersForSlots(offense, 'offense', 'RB');
-    const wrs = getPlayersForSlots(offense, 'offense', 'WR');
-    const ols = getPlayersForSlots(offense, 'offense', 'OL');
-    const dls = getPlayersForSlots(defense, 'defense', 'DL');
-    const lbs = getPlayersForSlots(defense, 'defense', 'LB');
-    const dbs = getPlayersForSlots(defense, 'defense', 'DB');
+    const allOffense = [qb, ...rbs, ...wrs, ...ols].filter(Boolean);
+    const allDefense = [...dls, ...lbs, ...dbs].filter(Boolean);
 
-    if ([qb, ...rbs, ...wrs, ...ols].filter(Boolean).length < 7 || [...dls, ...lbs, ...dbs].filter(Boolean).length < 7) {
-        gameLog.push('Not enough players to continue.');
+    // Check if the formation requirements are met by the active players
+    const requiredOffense = Object.keys(offenseFormations[offense.formations.offense].slots).length;
+    const requiredDefense = Object.keys(defenseFormations[defense.formations.defense].slots).length;
+
+    if (allOffense.length < requiredOffense || allDefense.length < requiredDefense) {
+        gameLog.push(`FIELD SHORTAGE: ${offense.name} fielded ${allOffense.length}/${requiredOffense} players, ${defense.name} fielded ${allDefense.length}/${requiredDefense}. Play broken.`);
         return { yards: 0, turnover: true };
     }
 
     if (playType === 'pass') {
-        if (!qb) { gameLog.push('No healthy QB!'); return { yards: 0, turnover: true }; }
+        if (!qb) { gameLog.push('No healthy QB to pass!'); return { yards: 0, turnover: true }; }
         
         const passRusher = getRandom(dls.concat(lbs));
         const blocker = getRandom(ols);
-        if (!passRusher || !blocker) { gameLog.push("Formation mismatch, broken play."); return { yards: 0 }; }
+        if (!passRusher || !blocker) { gameLog.push("Formation mismatch, broken pass play."); return { yards: 0 }; }
         
         checkInGameInjury(passRusher, gameLog); checkInGameInjury(blocker, gameLog);
 
@@ -416,25 +478,30 @@ function simulateGame(homeTeam, awayTeam) {
     let homeScore = 0;
     let awayScore = 0;
     
-    const homeHealthy = homeTeam.roster.filter(p => p.status.duration === 0).length;
-    const awayHealthy = awayTeam.roster.filter(p => p.status.duration === 0).length;
-
-    if (homeHealthy < 7) {
-        awayScore = 21; homeScore = 0; awayTeam.wins++; homeTeam.losses++;
-        gameLog.push(`${homeTeam.name} does not have enough healthy players and forfeits.`);
-        return { homeTeam, awayTeam, homeScore, awayScore, gameLog };
-    }
-    if (awayHealthy < 7) {
-        homeScore = 21; awayScore = 0; homeTeam.wins++; awayTeam.losses++;
-        gameLog.push(`${awayTeam.name} does not have enough healthy players and forfeits.`);
-        return { homeTeam, awayTeam, homeScore, awayScore, gameLog };
-    }
-
     for (let i = 0; i < 2; i++) {
         let possession = i === 0 ? homeTeam : awayTeam;
         let driveCount = 0;
+        let gameForfeited = false;
         
         while (driveCount < 5) {
+            
+            // FORFEIT CHECK: Check if both teams can still field 7 healthy players at the start of the drive
+            const currentHomeHealthy = homeTeam.roster.filter(p => p.status.duration === 0).length;
+            const currentAwayHealthy = awayTeam.roster.filter(p => p.status.duration === 0).length;
+
+            if (currentHomeHealthy < 7) {
+                awayScore = 21; homeScore = 0; awayTeam.wins++; homeTeam.losses++;
+                gameLog.push(`${homeTeam.name} dropped below 7 healthy players and forfeits the game.`);
+                gameForfeited = true;
+                break; 
+            }
+            if (currentAwayHealthy < 7) {
+                homeScore = 21; awayScore = 0; homeTeam.wins++; awayTeam.losses++;
+                gameLog.push(`${awayTeam.name} dropped below 7 healthy players and forfeits the game.`);
+                gameForfeited = true;
+                break;
+            }
+            
             let ballOn = 20;
             let down = 1;
             let yardsToGo = 10;
@@ -487,6 +554,7 @@ function simulateGame(homeTeam, awayTeam) {
             driveCount++;
             possession = possession.id === homeTeam.id ? awayTeam : homeTeam;
         }
+        if (gameForfeited) break;
     }
 
     if (homeScore > awayScore) { homeTeam.wins++; awayTeam.losses++; }
@@ -687,4 +755,3 @@ export function changeFormation(side, formationName) {
 
 
 export function getGameState() { return game; }
-
