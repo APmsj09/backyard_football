@@ -121,15 +121,17 @@
         <!-- Main Dashboard Screen -->
         <div id="dashboard-screen" class="hidden">
             <header class="bg-white p-4 rounded-lg shadow-md mb-4 flex justify-between items-center">
-                <div>
-                    <h2 id="dashboard-team-name" class="text-2xl font-bold"></h2>
-                    <p id="dashboard-record" class="text-gray-600"></p>
+                <div class="flex items-center gap-4">
+                    <h2 id="dashboard-team-name" class="text-2xl font-bold text-amber-600"></h2>
+                    <div class="px-3 py-1 text-sm rounded-full font-semibold border-2 border-gray-300 bg-gray-100">Record: <span id="dashboard-record"></span></div>
                 </div>
-                <div class="text-right">
-                    <p class="font-bold">Season <span id="dashboard-year"></span></p>
-                    <p class="text-gray-600" id="dashboard-week"></p>
+                <div class="text-right flex items-center gap-4">
+                    <div class="text-sm">
+                        <p class="font-bold">Season <span id="dashboard-year"></span></p>
+                        <p class="text-gray-600" id="dashboard-week"></p>
+                    </div>
+                    <button id="advance-week-btn" class="bg-amber-500 hover:bg-amber-600 text-white font-bold py-2 px-4 rounded-lg transition-transform hover:scale-105">Advance Week</button>
                 </div>
-                <button id="advance-week-btn" class="bg-amber-500 hover:bg-amber-600 text-white font-bold py-2 px-4 rounded-lg transition">Advance Week</button>
             </header>
             
             <div class="flex gap-6">
@@ -160,7 +162,7 @@
                             </div>
                             <div id="depth-chart-offense-pane" class="depth-chart-sub-pane">
                                 <div class="flex justify-between items-center mb-2">
-                                    <h4 class="text-lg font-bold">Offense Starters</h4>
+                                    <h4 class="text-lg font-bold">Offense Starters (7 Players)</h4>
                                     <div class="flex items-center gap-2">
                                         <label for="offense-formation-select" class="text-sm font-semibold">Formation:</label>
                                         <select id="offense-formation-select" class="p-1 border rounded text-sm"></select>
@@ -173,7 +175,7 @@
                             </div>
                             <div id="depth-chart-defense-pane" class="depth-chart-sub-pane hidden">
                                  <div class="flex justify-between items-center mb-2">
-                                    <h4 class="text-lg font-bold">Defense Starters</h4>
+                                    <h4 class="text-lg font-bold">Defense Starters (7 Players)</h4>
                                     <div class="flex items-center gap-2">
                                         <label for="defense-formation-select" class="text-sm font-semibold">Formation:</label>
                                         <select id="defense-formation-select" class="p-1 border rounded text-sm"></select>
@@ -204,6 +206,26 @@
                     </div>
                     <div id="tab-content-player-stats" class="tab-pane hidden">
                         <h3 class="text-xl font-bold mb-4">League Player Stats</h3>
+                        <div class="flex gap-4 mb-4">
+                             <select id="stats-sort-by" class="p-2 border rounded">
+                                <option value="touchdowns">Touchdowns</option>
+                                <option value="passYards">Passing Yards</option>
+                                <option value="rushYards">Rushing Yards</option>
+                                <option value="recYards">Receiving Yards</option>
+                                <option value="receptions">Receptions</option>
+                                <option value="tackles">Tackles</option>
+                            </select>
+                            <select id="stats-filter-pos" class="p-2 border rounded">
+                                <option value="">All Players</option>
+                                <option value="QB">QB</option>
+                                <option value="RB">RB</option>
+                                <option value="WR">WR</option>
+                                <option value="OL">OL</option>
+                                <option value="DL">DL</option>
+                                <option value="LB">LB</option>
+                                <option value="DB">DB</option>
+                            </select>
+                        </div>
                         <div id="player-stats-container"></div>
                     </div>
                     <div id="tab-content-hall-of-fame" class="tab-pane hidden">
@@ -232,4 +254,3 @@
     <script type="module" src="js/main.js"></script>
 </body>
 </html>
-
