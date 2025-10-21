@@ -64,10 +64,25 @@ export const positions = ["QB", "RB", "WR", "OL", "DL", "LB", "DB"];
 
 export const divisionNames = ["North", "South"];
 
+export const offenseFormations = {
+    'Balanced': { name: 'Balanced', slots: ['QB', 'RB', 'WR1', 'WR2', 'OL1', 'OL2', 'OL3'] },
+    'Spread': { name: 'Spread', slots: ['QB', 'RB', 'WR1', 'WR2', 'WR3', 'OL1', 'OL2'] },
+    'Power I': { name: 'Power I', slots: ['QB', 'RB1', 'RB2', 'WR1', 'OL1', 'OL2', 'OL3'] }
+};
+
+export const defenseFormations = {
+    '3-3-1': { name: '3-3-1', slots: ['DL1', 'DL2', 'DL3', 'LB1', 'LB2', 'LB3', 'DB1'] },
+    '4-2-1': { name: '4-2-1', slots: ['DL1', 'DL2', 'DL3', 'DL4', 'LB1', 'LB2', 'DB1'] },
+    'Nickel': { name: 'Nickel', slots: ['DL1', 'DL2', 'LB1', 'LB2', 'DB1', 'DB2', 'DB3'] }
+};
+
+
 export const coachPersonalities = [
     {
         type: 'West Coast Offense',
         description: 'Prefers accurate passers and agile receivers.',
+        preferredOffense: 'Spread',
+        preferredDefense: 'Nickel',
         attributePreferences: {
             physical: { speed: 1.4, strength: 0.7, agility: 1.5, stamina: 1.0, height: 1.2, weight: 0.8 },
             mental: { playbookIQ: 1.6, clutch: 1.2, consistency: 1.1 },
@@ -77,6 +92,8 @@ export const coachPersonalities = [
     {
         type: 'Ground and Pound',
         description: 'Builds a tough team that runs the ball and plays strong defense.',
+        preferredOffense: 'Power I',
+        preferredDefense: '4-2-1',
         attributePreferences: {
             physical: { speed: 1.1, strength: 1.8, agility: 1.2, stamina: 1.4, height: 1.0, weight: 1.6 },
             mental: { playbookIQ: 1.0, clutch: 1.0, consistency: 1.5 },
@@ -86,6 +103,8 @@ export const coachPersonalities = [
     {
         type: 'Blitz-Happy Defense',
         description: 'Wants fast, aggressive defenders to wreak havoc.',
+        preferredOffense: 'Balanced',
+        preferredDefense: 'Nickel',
         attributePreferences: {
             physical: { speed: 1.6, strength: 1.3, agility: 1.7, stamina: 1.2, height: 1.1, weight: 1.3 },
             mental: { playbookIQ: 1.2, clutch: 1.4, consistency: 0.9 },
@@ -95,6 +114,8 @@ export const coachPersonalities = [
     {
         type: 'Balanced',
         description: 'Prefers well-rounded players and a versatile team.',
+        preferredOffense: 'Balanced',
+        preferredDefense: '3-3-1',
         attributePreferences: {
             physical: { speed: 1.2, strength: 1.2, agility: 1.2, stamina: 1.2, height: 1.1, weight: 1.1 },
             mental: { playbookIQ: 1.2, clutch: 1.2, consistency: 1.2 },
@@ -104,6 +125,8 @@ export const coachPersonalities = [
     {
         type: 'The Moneyballer',
         description: 'Focuses on undervalued mental and technical stats.',
+        preferredOffense: 'Spread',
+        preferredDefense: '3-3-1',
         attributePreferences: {
             physical: { speed: 0.8, strength: 0.8, agility: 1.2, stamina: 1.4, height: 1.0, weight: 1.0 },
             mental: { playbookIQ: 1.8, clutch: 1.3, consistency: 1.9 },
@@ -113,6 +136,8 @@ export const coachPersonalities = [
     {
         type: 'Youth Scout',
         description: 'Always drafts for the future, preferring younger players with high physical potential.',
+        preferredOffense: 'Balanced',
+        preferredDefense: '4-2-1',
         attributePreferences: {
             physical: { speed: 1.5, strength: 1.4, agility: 1.5, stamina: 1.3, height: 1.3, weight: 1.0 },
             mental: { playbookIQ: 0.9, clutch: 1.0, consistency: 0.8 },
