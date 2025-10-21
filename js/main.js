@@ -115,6 +115,9 @@ function setupEventListeners() {
         Game.updateDepthChart(playerId, newPositionSlot);
         UI.switchTab('depth-chart', Game.getGameState()); // Re-render the tab
     });
+    
+    // Set up listeners for the new Offense/Defense tabs
+    UI.setupDepthChartTabs();
 }
 
 
