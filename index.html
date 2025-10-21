@@ -12,7 +12,7 @@
 </head>
 <body class="bg-gray-100 font-sans">
 
-    <div id="game-container" class="container mx-auto p-4 max-w-7xl relative">
+    <div id="game-container" class="container mx-auto p-4 max-w-7xl">
 
         <!-- Start Screen -->
         <div id="start-screen" class="text-center p-8 bg-white rounded-lg shadow-lg">
@@ -110,9 +110,7 @@
                         <ul id="draft-roster-list" class="mt-2 bg-gray-50 rounded-lg divide-y h-64 overflow-y-auto">
                             <!-- Roster players will be injected here -->
                         </ul>
-                         <div id="roster-summary" class="mt-4 p-2 bg-gray-100 rounded">
-                            <!-- Roster summary will be injected here -->
-                         </div>
+                        <div id="roster-summary" class="mt-2 p-2 bg-gray-100 rounded"></div>
                     </div>
                 </div>
             </div>
@@ -121,17 +119,15 @@
         <!-- Main Dashboard Screen -->
         <div id="dashboard-screen" class="hidden">
             <header class="bg-white p-4 rounded-lg shadow-md mb-4 flex justify-between items-center">
-                <div class="flex items-center gap-4">
-                    <h2 id="dashboard-team-name" class="text-2xl font-bold text-amber-600"></h2>
-                    <div class="px-3 py-1 text-sm rounded-full font-semibold border-2 border-gray-300 bg-gray-100">Record: <span id="dashboard-record"></span></div>
+                <div>
+                    <h2 id="dashboard-team-name" class="text-2xl font-bold"></h2>
+                    <p id="dashboard-record" class="text-gray-600"></p>
                 </div>
-                <div class="text-right flex items-center gap-4">
-                    <div class="text-sm">
-                        <p class="font-bold">Season <span id="dashboard-year"></span></p>
-                        <p class="text-gray-600" id="dashboard-week"></p>
-                    </div>
-                    <button id="advance-week-btn" class="bg-amber-500 hover:bg-amber-600 text-white font-bold py-2 px-4 rounded-lg transition-transform hover:scale-105">Advance Week</button>
+                <div class="text-right">
+                    <p class="font-bold">Season <span id="dashboard-year"></span></p>
+                    <p class="text-gray-600" id="dashboard-week"></p>
                 </div>
+                <button id="advance-week-btn" class="bg-amber-500 hover:bg-amber-600 text-white font-bold py-2 px-4 rounded-lg transition">Advance Week</button>
             </header>
             
             <div class="flex gap-6">
@@ -149,43 +145,55 @@
                 </aside>
 
                 <!-- Right Side Content -->
-                <main id="dashboard-content" class="w-4/5 bg-white p-6 rounded-lg shadow-md min-h-[600px]">
+                <main id="dashboard-content" class="w-4/5 bg-white p-6 rounded-lg shadow-md">
                     <div id="tab-content-my-team" class="tab-pane">
                         <h3 class="text-xl font-bold mb-4">Team Roster</h3>
                         <div id="my-team-roster"></div>
                     </div>
                     <div id="tab-content-depth-chart" class="tab-pane hidden">
+                        <!-- Depth Chart with sub-tabs -->
                         <div>
+                            <!-- Depth Chart Sub-tabs -->
                             <div id="depth-chart-sub-tabs" class="flex border-b mb-4">
                                 <button data-sub-tab="offense" class="depth-chart-tab active">Offense</button>
                                 <button data-sub-tab="defense" class="depth-chart-tab">Defense</button>
                             </div>
+
+                            <!-- Sub-tab Panes -->
                             <div id="depth-chart-offense-pane" class="depth-chart-sub-pane">
-                                <div class="flex justify-between items-center mb-2">
-                                    <h4 class="text-lg font-bold">Offense Starters (7 Players)</h4>
-                                    <div class="flex items-center gap-2">
-                                        <label for="offense-formation-select" class="text-sm font-semibold">Formation:</label>
-                                        <select id="offense-formation-select" class="p-1 border rounded text-sm"></select>
-                                    </div>
+                                <div class="mb-4">
+                                    <label for="offense-formation-select" class="font-bold">Formation:</label>
+                                    <select id="offense-formation-select" class="p-2 border rounded ml-2"></select>
                                 </div>
                                 <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-                                    <div class="md:col-span-2"><div id="offense-depth-chart-slots" class="space-y-2"></div></div>
-                                    <div><h4 class="text-lg font-bold mb-2">Available Players</h4><div id="offense-depth-chart-roster" class="roster-list"></div></div>
+                                    <div class="md:col-span-2">
+                                        <h4 class="text-lg font-bold mb-2">Offense Starters</h4>
+                                        <div id="offense-depth-chart-slots" class="space-y-2"></div>
+                                    </div>
+                                    <div>
+                                        <h4 class="text-lg font-bold mb-2">Available Players</h4>
+                                        <div id="offense-depth-chart-roster" class="roster-list"></div>
+                                    </div>
                                 </div>
                             </div>
                             <div id="depth-chart-defense-pane" class="depth-chart-sub-pane hidden">
-                                 <div class="flex justify-between items-center mb-2">
-                                    <h4 class="text-lg font-bold">Defense Starters (7 Players)</h4>
-                                    <div class="flex items-center gap-2">
-                                        <label for="defense-formation-select" class="text-sm font-semibold">Formation:</label>
-                                        <select id="defense-formation-select" class="p-1 border rounded text-sm"></select>
-                                    </div>
+                                 <div class="mb-4">
+                                    <label for="defense-formation-select" class="font-bold">Formation:</label>
+                                    <select id="defense-formation-select" class="p-2 border rounded ml-2"></select>
                                 </div>
                                 <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-                                    <div class="md:col-span-2"><div id="defense-depth-chart-slots" class="space-y-2"></div></div>
-                                    <div><h4 class="text-lg font-bold mb-2">Available Players</h4><div id="defense-depth-chart-roster" class="roster-list"></div></div>
+                                    <div class="md:col-span-2">
+                                        <h4 class="text-lg font-bold mb-2">Defense Starters</h4>
+                                        <div id="defense-depth-chart-slots" class="space-y-2"></div>
+                                    </div>
+                                    <div>
+                                        <h4 class="text-lg font-bold mb-2">Available Players</h4>
+                                        <div id="defense-depth-chart-roster" class="roster-list"></div>
+                                    </div>
                                 </div>
                             </div>
+
+                            <!-- Positional Overalls Spreadsheet -->
                             <div class="mt-8">
                                 <h3 class="text-xl font-bold mb-4">Positional Overalls</h3>
                                 <div id="positional-overalls-container" class="overflow-x-auto"></div>
@@ -193,7 +201,7 @@
                         </div>
                     </div>
                     <div id="tab-content-free-agency" class="tab-pane hidden">
-                        <h3 class="text-xl font-bold mb-4">Weekly Free Agents</h3>
+                        <h3 class="text-xl font-bold mb-4">Call a Friend</h3>
                         <div id="free-agency-list"></div>
                     </div>
                     <div id="tab-content-schedule" class="tab-pane hidden">
@@ -205,32 +213,20 @@
                         <div id="standings-container" class="space-y-6"></div>
                     </div>
                     <div id="tab-content-player-stats" class="tab-pane hidden">
-                        <h3 class="text-xl font-bold mb-4">League Player Stats</h3>
-                        <div class="flex gap-4 mb-4">
-                             <select id="stats-sort-by" class="p-2 border rounded">
-                                <option value="touchdowns">Touchdowns</option>
-                                <option value="passYards">Passing Yards</option>
-                                <option value="rushYards">Rushing Yards</option>
-                                <option value="recYards">Receiving Yards</option>
-                                <option value="receptions">Receptions</option>
-                                <option value="tackles">Tackles</option>
-                            </select>
-                            <select id="stats-filter-pos" class="p-2 border rounded">
-                                <option value="">All Positions</option>
-                                <option value="QB">QB</option>
-                                <option value="RB">RB</option>
-                                <option value="WR">WR</option>
-                                <option value="OL">OL</option>
-                                <option value="DL">DL</option>
-                                <option value="LB">LB</option>
-                                <option value="DB">DB</option>
-                            </select>
-                            <!-- NEW TEAM FILTER -->
-                            <select id="stats-filter-team" class="p-2 border rounded">
-                                <option value="all">All Teams</option>
-                                <option value="mine">My Team</option>
-                                <option value="others">Other Teams</option>
-                            </select>
+                        <div class="flex justify-between items-center mb-4">
+                            <h3 class="text-xl font-bold">League Player Stats</h3>
+                            <div class="flex items-center gap-4">
+                                <select id="stats-filter-team" class="p-2 border rounded">
+                                    <option value="">All Teams</option>
+                                </select>
+                                <select id="stats-sort" class="p-2 border rounded">
+                                    <option value="touchdowns">Touchdowns</option>
+                                    <option value="passYards">Pass Yards</option>
+                                    <option value="rushYards">Rush Yards</option>
+                                    <option value="recYards">Receiving Yards</option>
+                                    <option value="tackles">Tackles</option>
+                                </select>
+                            </div>
                         </div>
                         <div id="player-stats-container"></div>
                     </div>
@@ -242,21 +238,53 @@
             </div>
         </div>
 
+        <!-- Off-Season Screen -->
+        <div id="offseason-screen" class="hidden bg-white p-6 rounded-lg shadow-lg">
+            <h2 class="text-3xl font-bold text-center mb-6">Off-Season Report: Year <span id="offseason-year"></span></h2>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+                <div>
+                    <h3 class="text-xl font-bold mb-2">Player Development</h3>
+                    <div id="player-development-container" class="space-y-2 h-96 overflow-y-auto"></div>
+                </div>
+                <div>
+                    <h3 class="text-xl font-bold mb-2">League News</h3>
+                    <div class="space-y-4">
+                        <div>
+                            <h4 class="font-semibold">Retirements</h4>
+                            <ul id="retirements-list" class="list-disc list-inside text-sm text-gray-700"></ul>
+                        </div>
+                         <div>
+                            <h4 class="font-semibold">Hall of Fame Inductees</h4>
+                            <ul id="hof-inductees-list" class="list-disc list-inside text-sm text-amber-700"></ul>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="text-center mt-8">
+                <button id="go-to-next-draft-btn" class="bg-amber-500 hover:bg-amber-600 text-white font-bold py-3 px-8 rounded-lg text-lg">
+                    Proceed to Next Season's Draft
+                </button>
+            </div>
+        </div>
+
+
     </div>
 
     <!-- Modal -->
     <div id="modal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-        <div id="modal-content" class="bg-white rounded-lg shadow-xl p-6 max-w-lg w-full">
+        <div id="modal-content" class="bg-white rounded-lg shadow-2xl p-6 w-full max-w-lg relative">
             <h3 id="modal-title" class="text-2xl font-bold mb-4">Modal Title</h3>
             <div id="modal-body">
-                <p>Modal body content goes here.</p>
+                <p>Modal content goes here.</p>
             </div>
-            <div class="mt-6 text-right">
-                <button id="modal-close-btn" class="bg-amber-500 hover:bg-amber-600 text-white font-bold py-2 px-6 rounded-lg">Close</button>
+            <div id="modal-actions" class="mt-6 text-right">
+                 <button id="modal-close-btn" class="bg-gray-500 hover:bg-gray-600 text-white font-bold py-2 px-6 rounded-lg">Close</button>
             </div>
         </div>
     </div>
 
+
     <script type="module" src="js/main.js"></script>
 </body>
 </html>
+
