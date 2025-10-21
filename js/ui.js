@@ -59,6 +59,9 @@ export function setupElements() {
         defenseDepthChartSlots: document.getElementById('defense-depth-chart-slots'),
         defenseDepthChartRoster: document.getElementById('defense-depth-chart-roster'),
         positionalOverallsContainer: document.getElementById('positional-overalls-container'),
+        // New Stats elements
+        statsSortBy: document.getElementById('stats-sort-by'),
+        statsFilterPos: document.getElementById('stats-filter-pos'),
     };
     console.log("UI Elements have been successfully set up.");
 }
@@ -97,7 +100,7 @@ export function showModal(title, bodyHtml, onConfirm = null) {
     }
     
     const closeBtn = document.createElement('button');
-    closeBtn.id = 'modal-close-btn'; // Ensure it has the ID for the main listener
+    closeBtn.id = 'modal-close-btn';
     closeBtn.textContent = 'Close';
     closeBtn.className = 'bg-gray-500 hover:bg-gray-600 text-white font-bold py-2 px-6 rounded-lg';
     closeBtn.onclick = hideModal;
@@ -246,7 +249,7 @@ function renderRosterSummary(playerTeam) {
 export function renderDashboard(gameState) {
     const { playerTeam, year, currentWeek } = gameState;
     elements.dashboardTeamName.textContent = playerTeam.name;
-    elements.dashboardRecord.textContent = `Record: ${playerTeam.wins} - ${playerTeam.losses}`;
+    elements.dashboardRecord.textContent = `${playerTeam.wins} - ${playerTeam.losses}`;
     elements.dashboardYear.textContent = year;
     elements.dashboardWeek.textContent = currentWeek < 9 ? `Week ${currentWeek + 1}` : 'Offseason';
     elements.advanceWeekBtn.textContent = currentWeek < 9 ? 'Advance Week' : 'Go to Offseason';
@@ -275,10 +278,20 @@ function renderMyTeamTab(gameState) {
     roster.forEach(p => {
         if (p.status.type === 'temporary') return;
         const overalls = Object.keys(positionOverallWeights).map(pos => calculateOverall(p, pos));
+        
+        let statusClass = '';
+        if (p.status.type === 'injured') {
+            statusClass = 'text-red-600 bg-red-100 font-semibold rounded-full px-2 py-0.5';
+        } else if (p.status.type === 'busy') {
+            statusClass = 'text-amber-600 bg-amber-100 font-semibold rounded-full px-2 py-0.5';
+        } else {
+             statusClass = 'text-green-600';
+        }
+
         tableHtml += `<tr>
             <td class="py-2 px-3 font-semibold">${p.name}</td>
             <td class="text-center py-2 px-3">${p.age}</td>
-            <td class="text-center py-2 px-3 ${p.status.duration > 0 ? 'text-red-500 font-semibold' : ''}">${p.status.description || 'Healthy'}</td>
+            <td class="text-center py-2 px-3"><span class="${statusClass}">${p.status.description || 'Healthy'}</span></td>
             <td class="text-center py-2 px-3">${p.attributes.mental.toughness}</td>
             <td class="text-center py-2 px-3 font-bold">${Math.max(...overalls)}</td>
         </tr>`;
@@ -287,7 +300,7 @@ function renderMyTeamTab(gameState) {
 }
 
 function renderDepthChartTab(gameState) {
-    renderPositionalOveralls(gameState.playerTeam.roster);
+    renderPositionalOveralls(gameState.playerTeam.roster.filter(p => p.status.type !== 'temporary'));
     
     renderFormationDropdown('offense', Object.values(offenseFormations), gameState.playerTeam.formations.offense);
     renderDepthChartSide('offense', gameState, elements.offenseDepthChartSlots, elements.offenseDepthChartRoster);
@@ -308,7 +321,7 @@ function renderPositionalOveralls(roster) {
     roster.forEach(player => {
         table += `<tr class="border-b"><td class="p-2 font-bold">${player.name}</td>${positions.map(p => `<td class="p-2 text-center">${calculateOverall(player, p)}</td>`).join('')}</tr>`;
     });
-    elements.positionalOverallsContainer.innerHTML = table + `</tbody></table>`;
+    elements.positionalOverallsContainer.innerHTML = table + '</tbody></table>';
 }
 
 function renderDepthChartSide(side, gameState, slotsContainer, rosterContainer) {
@@ -373,9 +386,15 @@ function renderFreeAgencyTab(gameState) {
     freeAgents.forEach(p => {
         const overalls = Object.entries(positionOverallWeights).map(([pos, _]) => ({ pos, ovr: calculateOverall(p, pos) }));
         const best = overalls.reduce((a, b) => a.ovr > b.ovr ? a : b);
+        
+        let relationshipClass = 'text-gray-700';
+        if (p.relationship === 'Best Friend') relationshipClass = 'text-green-600 font-bold';
+        else if (p.relationship === 'Good Friend') relationshipClass = 'text-blue-600';
+        else if (p.relationship === 'Acquaintance') relationshipClass = 'text-amber-600';
+
         tableHtml += `<tr>
             <td class="py-2 px-3 font-semibold">${p.name}</td>
-            <td class="text-center py-2 px-3">${p.relationship}</td>
+            <td class="text-center py-2 px-3 ${relationshipClass}">${p.relationship}</td>
             <td class="text-center py-2 px-3">${best.pos}</td>
             <td class="text-center py-2 px-3 font-bold">${best.ovr}</td>
             <td class="py-2 px-3 text-center"><button data-player-id="${p.id}" class="call-friend-btn bg-green-500 hover:bg-green-600 text-white px-3 py-1 text-xs rounded font-semibold">CALL</button></td>
@@ -388,12 +407,41 @@ function renderFreeAgencyTab(gameState) {
 
 function renderScheduleTab(gameState) {
     let html = '';
-    const gamesPerWeek = gameState.teams.length / 2;
+    const gamesPerWeek = gameState.teams.length / 2; 
     for (let i = 0; i < 9; i++) {
         const weekGames = gameState.schedule.slice(i * gamesPerWeek, (i + 1) * gamesPerWeek);
-        html += `<div class="p-4 rounded ${i === gameState.currentWeek ? 'bg-amber-100 border-2 border-amber-500' : 'bg-gray-100'}"><h4 class="font-bold text-lg mb-2">Week ${i + 1}</h4><div class="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm">`;
+        
+        // Determine player's game result for visual feedback
+        let playerGameResult = null;
+        const playerGame = weekGames.find(g => g.home.id === gameState.playerTeam.id || g.away.id === gameState.playerTeam.id);
+        if (playerGame && playerGame.homeScore !== undefined) {
+             const isHome = playerGame.home.id === gameState.playerTeam.id;
+             const score = isHome ? playerGame.homeScore : playerGame.awayScore;
+             const oppScore = isHome ? playerGame.awayScore : playerGame.homeScore;
+             playerGameResult = score > oppScore ? 'win' : score < oppScore ? 'loss' : 'tie';
+        }
+        
+        let weekClass = '';
+        if (i < gameState.currentWeek) {
+            weekClass = playerGameResult === 'win' ? 'bg-green-100 border-green-500' : 'bg-red-100 border-red-500';
+        } else if (i === gameState.currentWeek) {
+            weekClass = 'bg-amber-100 border-2 border-amber-500';
+        } else {
+            weekClass = 'bg-gray-100';
+        }
+
+        html += `<div class="p-4 rounded border ${weekClass}"><h4 class="font-bold text-lg mb-2">Week ${i + 1}</h4><div class="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm">`;
         if(weekGames) {
-            weekGames.forEach(g => { html += `<div class="bg-white p-2 rounded shadow-sm flex justify-center items-center"><span>${g.away.name}</span><span class="mx-2 font-bold text-gray-400">@</span><span>${g.home.name}</span></div>`; });
+            weekGames.forEach(g => { 
+                const isPlayerGame = g.home.id === gameState.playerTeam.id || g.away.id === gameState.playerTeam.id;
+                let gameClass = isPlayerGame ? 'bg-amber-50 font-semibold' : 'bg-white';
+                let scoreText = '';
+                if (g.homeScore !== undefined) {
+                    scoreText = `(${g.awayScore} - ${g.homeScore})`;
+                }
+
+                html += `<div class="p-2 rounded shadow-sm flex justify-between items-center ${gameClass}"><span>${g.away.name} @ ${g.home.name}</span><span class="text-gray-600 ml-2">${scoreText}</span></div>`; 
+            });
         }
         html += `</div></div>`;
     }
@@ -404,22 +452,38 @@ function renderStandingsTab(gameState) {
     elements.standingsContainer.innerHTML = '';
     for (const divName in gameState.divisions) {
         const divEl = document.createElement('div');
-        let tableHtml = `<h4 class="text-xl font-bold mb-2">${divName} Division</h4><table class="min-w-full bg-white text-sm"><thead class="bg-gray-800 text-white"><tr><th class="text-left py-2 px-3">Team</th><th class="py-2 px-3">Wins</th><th class="py-2 px-3">Losses</th></tr></thead><tbody class="divide-y">`;
+        let tableHtml = `<h4 class="text-xl font-bold mb-2">${divName} Division</h4><table class="min-w-full bg-white text-sm"><thead class="bg-gray-800 text-white"><tr><th class="text-left py-2 px-3">Team</th><th class="py-2 px-3">Wins</th><th class="py-2 px-3">Losses</th><th class="py-2 px-3">PCT</th></tr></thead><tbody class="divide-y">`;
         const divTeams = gameState.teams.filter(t => t.division === divName).sort((a, b) => b.wins - a.wins);
-        divTeams.forEach(t => { tableHtml += `<tr class="${t.id === gameState.playerTeam.id ? 'bg-amber-100' : ''}"><td class="py-2 px-3 font-semibold">${t.name}</td><td class="text-center py-2 px-3">${t.wins}</td><td class="text-center py-2 px-3">${t.losses}</td></tr>`; });
+        divTeams.forEach(t => { 
+            const totalGames = t.wins + t.losses;
+            const pct = totalGames > 0 ? (t.wins / totalGames).toFixed(3).substring(1) : '.000';
+            tableHtml += `<tr class="${t.id === gameState.playerTeam.id ? 'bg-amber-100 font-semibold' : ''}"><td class="py-2 px-3">${t.name}</td><td class="text-center py-2 px-3">${t.wins}</td><td class="text-center py-2 px-3">${t.losses}</td><td class="text-center py-2 px-3">${pct}</td></tr>`; 
+        });
         divEl.innerHTML = tableHtml + `</tbody></table>`;
         elements.standingsContainer.appendChild(divEl);
     }
 }
 
 function renderPlayerStatsTab(gameState) {
+    const sortBy = elements.statsSortBy.value;
+    const filterPos = elements.statsFilterPos.value;
     const stats = ['passYards', 'rushYards', 'recYards', 'receptions', 'touchdowns', 'tackles'];
-    let tableHtml = `<table class="min-w-full bg-white text-sm"><thead class="bg-gray-800 text-white"><tr><th class="text-left py-2 px-3">Name</th>${stats.map(s => `<th class="py-2 px-3">${s.replace(/([A-Z])/g, ' $1').toUpperCase()}</th>`).join('')}</tr></thead><tbody class="divide-y">`;
+    
+    // 1. Filtering
+    let filteredPlayers = gameState.players.filter(p => p.teamId); // Only include drafted players
+    if (filterPos) {
+        filteredPlayers = filteredPlayers.filter(p => p.favoriteOffensivePosition === filterPos || p.favoriteDefensivePosition === filterPos);
+    }
 
-    const sortedPlayers = [...gameState.players].sort((a, b) => (b.seasonStats.touchdowns || 0) - (a.seasonStats.touchdowns || 0));
+    // 2. Sorting
+    filteredPlayers.sort((a, b) => (b.seasonStats[sortBy] || 0) - (a.seasonStats[sortBy] || 0));
 
-    sortedPlayers.forEach(p => {
-        tableHtml += `<tr class="${p.teamId === gameState.playerTeam.id ? 'bg-amber-50' : ''}"><td class="py-2 px-3 font-semibold">${p.name}</td>${stats.map(s => `<td class="text-center py-2 px-3">${p.seasonStats[s] || 0}</td>`).join('')}</tr>`;
+    // 3. Rendering
+    let tableHtml = `<table class="min-w-full bg-white text-sm"><thead class="bg-gray-800 text-white"><tr><th class="text-left py-2 px-3">Rank</th><th class="text-left py-2 px-3">Name (Team)</th>${stats.map(s => `<th class="py-2 px-3">${s.replace(/([A-Z])/g, ' $1').toUpperCase()}</th>`).join('')}</tr></thead><tbody class="divide-y">`;
+
+    filteredPlayers.forEach((p, index) => {
+        const teamName = gameState.teams.find(t => t.id === p.teamId)?.name.replace('The ', '') || 'FA';
+        tableHtml += `<tr class="${p.teamId === gameState.playerTeam.id ? 'bg-amber-50 font-semibold' : ''}"><td class="text-center py-2 px-3">${index + 1}</td><td class="py-2 px-3">${p.name} <span class="text-gray-500 text-xs">(${teamName})</span></td>${stats.map(s => `<td class="text-center py-2 px-3">${p.seasonStats[s] || 0}</td>`).join('')}</tr>`;
     });
 
     elements.playerStatsContainer.innerHTML = tableHtml + `</tbody></table>`;
@@ -514,4 +578,3 @@ export function setupDepthChartTabs() {
         }
     });
 }
-
