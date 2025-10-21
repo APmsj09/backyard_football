@@ -76,7 +76,7 @@ async function runAIDraftPicks() {
         UI.renderDraftScreen(gameState, handlePlayerSelectInDraft);
 
         // A short delay to make the AI picks feel more natural
-        await new Promise(resolve => setTimeout(resolve, 100));
+        await new Promise(resolve => setTimeout(resolve, 200));
 
         const currentPickingTeam = gameState.draftOrder[gameState.currentPick];
         Game.simulateAIPick(currentPickingTeam);
