@@ -1,3 +1,5 @@
+import { getRandomInt } from './utils.js';
+
 export const firstNames = [
     "Alex", "Ben", "Casey", "Dakota", "Eli", "Frankie", "Gabby", "Hayden", "Izzy", "Jordan", 
     "Kai", "Leo", "Morgan", "Nico", "Olive", "Pat", "Quinn", "Riley", "Sam", "Taylor", "Vic", 
@@ -12,8 +14,7 @@ export const firstNames = [
     "Indigo", "Jules", "Lennon", "Milan", "Phoenix", "Sterling", "Arden", "Caelan", "Finley", "Justice",
     "Chris", "Pat", "Shawn", "Jean", "Kelly", "Lindsay", "Joan", "Neil", "Glen", "Brett", "Kirk",
     "Leigh", "Merle", "Robin", "Stacy", "Tony", "Claude", "Daryl", "Jaden", "Jan", "Jimmie", "Johnny",
-    "Ray", "Rene", "Stevie", "Willie", "Frankie", "Jessie", "Miguel", "Luis", "Carlos", "Jose",
-    "Juan", "David", "Jesus", "Antonio", "Javier", "Daniel", "Manuel", "Francisco", "Ricardo", "Fernando"
+    "Ray", "Rene", "Stevie", "Willie", "Frankie", "Jessie"
 ];
 
 export const lastNames = [
@@ -31,8 +32,7 @@ export const lastNames = [
     "Wallace", "Woods", "Cole", "West", "Jordan", "Owens", "Reynolds", "Fisher", "Ellis", "Harrison", "Gibson",
     "Mcdonald", "Cruz", "Marshall", "Ortiz", "Gomez", "Murray", "Freeman", "Wells", "Webb", "Simpson", "Stevens",
     "Tucker", "Porter", "Hunter", "Hicks", "Crawford", "Henry", "Boyd", "Mason", "Morales", "Kennedy", "Warren",
-    "Dixon", "Ramos", "Reyes", "Burns", "Gordon", "Shaw", "Sato", "Suzuki", "Takahashi", "Tanaka", "Watanabe",
-    "Ito", "Yamamoto", "Nakamura", "Kobayashi", "Kato"
+    "Dixon", "Ramos", "Reyes", "Burns", "Gordon", "Shaw"
 ];
 
 export const nicknames = [
@@ -49,7 +49,7 @@ export const nicknames = [
     "'Aftershock'", "'Bruiser'", "'Cyclone'", "'Dragon'", "'Enigma'", "'Grizzly'", "'Hotshot'", "'Jolt'",
     "'Knuckles'", "'Maniac'", "'Nightmare'", "'Overdrive'", "'Phantom'", "'Raptor'", "'Spike'", "'Titan'",
     "'Volt'", "'Wolf'", "'Zapper'", "'Bandit'", "'Crusher'", "'Demon'", "'Fireball'", "'Grinder'",
-    "'Hound'", "'Iceman'", "'Jackal'", "'Lightning'", "'Mad Dog'", "'Gator'", "'Terminator'", "'Showtime'"
+    "'Hound'", "'Iceman'", "'Jackal'", "'Lightning'", "'Mad Dog'"
 ];
 
 export const teamNames = [
@@ -58,8 +58,7 @@ export const teamNames = [
     "Scorpions", "Spartans", "Cyclones", "Gladiators", "Raptors", "Hawks", "Falcons", "Rebels"
 ];
 
-// Simplified positions for 8v8 "play both ways" football
-export const positions = ["QB", "ATH", "LINE"]; // QB, Athlete, Lineman
+export const positions = ["QB", "RB", "WR", "OL", "DL", "LB", "DB"];
 
 export const divisionNames = ["North", "South"];
 
@@ -70,7 +69,7 @@ export const coachPersonalities = [
         attributePreferences: {
             physical: { speed: 1.4, strength: 0.7, agility: 1.5, stamina: 1.0, height: 1.2, weight: 0.8 },
             mental: { playbookIQ: 1.6, clutch: 1.2, consistency: 1.1 },
-            technical: { throwingAccuracy: 1.8, catchingHands: 1.6, tackling: 0.4, blocking: 0.6 }
+            technical: { throwingAccuracy: 1.8, catchingHands: 1.6, tackling: 0.4, blocking: 0.6, blockShedding: 0.3 }
         } 
     },
     { 
@@ -79,7 +78,7 @@ export const coachPersonalities = [
         attributePreferences: {
             physical: { speed: 1.1, strength: 1.8, agility: 1.2, stamina: 1.4, height: 1.0, weight: 1.6 },
             mental: { playbookIQ: 1.0, clutch: 1.0, consistency: 1.5 },
-            technical: { throwingAccuracy: 0.7, catchingHands: 0.9, tackling: 1.6, blocking: 1.8 }
+            technical: { throwingAccuracy: 0.7, catchingHands: 0.9, tackling: 1.6, blocking: 1.8, blockShedding: 1.4 }
         } 
     },
     { 
@@ -88,7 +87,7 @@ export const coachPersonalities = [
         attributePreferences: {
             physical: { speed: 1.6, strength: 1.3, agility: 1.7, stamina: 1.2, height: 1.1, weight: 1.3 },
             mental: { playbookIQ: 1.2, clutch: 1.4, consistency: 0.9 },
-            technical: { throwingAccuracy: 0.5, catchingHands: 0.8, tackling: 1.8, blocking: 1.0 }
+            technical: { throwingAccuracy: 0.5, catchingHands: 0.8, tackling: 1.8, blocking: 1.0, blockShedding: 1.7 }
         } 
     },
     { 
@@ -97,7 +96,7 @@ export const coachPersonalities = [
         attributePreferences: {
             physical: { speed: 1.2, strength: 1.2, agility: 1.2, stamina: 1.2, height: 1.1, weight: 1.1 },
             mental: { playbookIQ: 1.2, clutch: 1.2, consistency: 1.2 },
-            technical: { throwingAccuracy: 1.2, catchingHands: 1.2, tackling: 1.2, blocking: 1.2 }
+            technical: { throwingAccuracy: 1.2, catchingHands: 1.2, tackling: 1.2, blocking: 1.2, blockShedding: 1.2 }
         } 
     },
     { 
@@ -106,7 +105,7 @@ export const coachPersonalities = [
         attributePreferences: {
             physical: { speed: 0.8, strength: 0.8, agility: 1.2, stamina: 1.4, height: 1.0, weight: 1.0 },
             mental: { playbookIQ: 1.8, clutch: 1.3, consistency: 1.9 },
-            technical: { throwingAccuracy: 1.0, catchingHands: 1.5, tackling: 1.5, blocking: 1.3 }
+            technical: { throwingAccuracy: 1.0, catchingHands: 1.5, tackling: 1.5, blocking: 1.3, blockShedding: 1.6 }
         } 
     },
     { 
@@ -115,7 +114,7 @@ export const coachPersonalities = [
         attributePreferences: {
             physical: { speed: 1.5, strength: 1.4, agility: 1.5, stamina: 1.3, height: 1.3, weight: 1.0 },
             mental: { playbookIQ: 0.9, clutch: 1.0, consistency: 0.8 },
-            technical: { throwingAccuracy: 1.1, catchingHands: 1.1, tackling: 1.1, blocking: 1.1 }
+            technical: { throwingAccuracy: 1.1, catchingHands: 1.1, tackling: 1.1, blocking: 1.1, blockShedding: 1.1 }
         } 
     },
 ];
