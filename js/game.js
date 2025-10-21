@@ -270,7 +270,8 @@ function getBestSub(team, position, usedPlayerIds) {
     const availableSubs = team.roster.filter(p => p.status.duration === 0 && !usedPlayerIds.has(p.id));
     if (availableSubs.length === 0) return null;
     return availableSubs.reduce((best, current) => 
-        (calculateOverall(current, position) > calculateOverall(best, position)) ? current : best
+        (calculateOverall(current, position) > calculateOverall(best, position)) ? current : best,
+        availableSubs[0] // Add a default value for reduce
     );
 }
 
@@ -297,6 +298,11 @@ function determinePlayCall(offense, defense, down, yardsToGo, ballOn, scoreDiff,
     const offenseFormation = offenseFormations[offense.formations.offense];
     const defenseFormation = defenseFormations[defense.formations.defense];
     
+    if (!offenseFormation || !offenseFormation.personnel || !defenseFormation || !defenseFormation.personnel) {
+        console.error(`CRITICAL ERROR: Formation data is missing for ${offense.name} or ${defense.name}.`);
+        return 'run';
+    }
+
     const usedIds = new Set();
     const qb = getPlayersForSlots(offense, 'offense', 'QB', usedIds)[0];
     const rb = getPlayersForSlots(offense, 'offense', 'RB', usedIds)[0];
@@ -342,7 +348,8 @@ function resolvePlay(offense, defense, playCall, gameState) {
         const available = offense.roster.filter(p => p.status.duration === 0 && !usedPlayerIds.has(p.id));
         if (available.length === 0) return null;
         const bestPlayer = available.reduce((best, current) => 
-            calculateOverall(current, position) > calculateOverall(best, position) ? current : best
+            calculateOverall(current, position) > calculateOverall(best, position) ? current : best,
+            available[0]
         );
         gameLog.push(`EMERGENCY: ${bestPlayer.name} has to fill in at ${position}!`);
         return bestPlayer;
@@ -416,7 +423,8 @@ function resolvePlay(offense, defense, playCall, gameState) {
         if (weather === 'Rain') catchContest -= 10;
         if (isDoubleCovered && target.id === reads[0].id) catchContest -= 15;
 
-        if (catchContest > getRandomInt(30, 70)) {
+        // BALANCING: Lowered the random range to make catches more likely
+        if (catchContest > getRandomInt(20, 60)) {
             const base_yards = playCall === 'deep_pass' ? getRandomInt(15, 40) : getRandomInt(3, 12);
             target.gameStats.receptions++;
             gameLog.push(`PASS from ${qb.name} to ${target.name} for ${base_yards} yards.`);
@@ -451,7 +459,8 @@ function resolvePlay(offense, defense, playCall, gameState) {
 
             return { yards: totalYards };
         } else {
-            if ((coverage.attributes.technical.catchingHands / 100) > Math.random() * 0.95) {
+            // BALANCING: Drastically reduced interception chance
+            if ((coverage.attributes.technical.catchingHands / 100) > Math.random() * 1.5) {
                 gameLog.push(`INTERCEPTION! ${coverage.name} jumps the route!`);
                 coverage.gameStats.interceptions++;
                 return { yards: 0, turnover: true };
@@ -494,7 +503,8 @@ function resolvePlay(offense, defense, playCall, gameState) {
             checkInGameInjury(tackler, gameLog);
             const grappleCheck = (tackler.attributes.technical.tackling + tackler.attributes.physical.agility) > (rb.attributes.physical.agility * getFatigueModifier(rb));
             if(grappleCheck) {
-                const bringDownCheck = (tackler.attributes.physical.strength > rb.attributes.physical.strength * getFatigueModifier(rb) + getRandomInt(-20, 20));
+                // BALANCING: Gave the RB a better chance to win the strength battle
+                const bringDownCheck = (tackler.attributes.physical.strength > rb.attributes.physical.strength * getFatigueModifier(rb) + getRandomInt(-30, 30));
                 if(bringDownCheck) {
                     gameLog.push(`Tackled by ${tackler.name}.`);
                     tackler.gameStats.tackles++;
@@ -539,65 +549,59 @@ function simulateGame(homeTeam, awayTeam) {
 
     const breakthroughs = [];
     
-    for (let i = 0; i < 2; i++) { 
-        let possession = i === 0 ? homeTeam : awayTeam;
-        let driveCount = 0;
-        
-        while (driveCount < 5) {
-             if (homeTeam.roster.filter(p => p.status.duration === 0).length < 7) {
-                awayScore = 21; homeScore = 0;
-                gameLog.push(`${homeTeam.name} forfeits due to injuries.`);
-                break; 
-            }
-            if (awayTeam.roster.filter(p => p.status.duration === 0).length < 7) {
-                homeScore = 21; awayScore = 0;
-                gameLog.push(`${awayTeam.name} forfeits due to injuries.`);
-                break;
-            }
+    // A single loop for 10 total drives, alternating possession.
+    for (let driveNum = 0; driveNum < 10; driveNum++) { 
+        const possession = driveNum % 2 === 0 ? homeTeam : awayTeam;
+        const defense = driveNum % 2 === 0 ? awayTeam : homeTeam;
+
+        // Pre-drive forfeit check
+        if (possession.roster.filter(p => p.status.duration === 0).length < 7) {
+            if (possession.id === homeTeam.id) { homeScore = 0; awayScore = 21; } 
+            else { homeScore = 21; awayScore = 0; }
+            gameLog.push(`${possession.name} forfeits due to injuries.`);
+            break; 
+        }
             
-            let ballOn = 20;
-            let down = 1;
-            let yardsToGo = 10;
-            let driveActive = true;
+        let ballOn = 20;
+        let down = 1;
+        let yardsToGo = 10;
+        let driveActive = true;
             
-            gameLog.push(`-- ${possession.name} starts drive at their 20 --`);
+        gameLog.push(`-- Drive ${driveNum + 1}: ${possession.name} starts at their 20 --`);
 
-            while(driveActive && down <= 4) {
-                const penaltyChance = 0.05;
-                if (Math.random() < penaltyChance) {
-                    const penaltyYards = getRandom([5, 10]);
-                    gameLog.push(`PENALTY! False Start. ${penaltyYards} yard penalty.`);
-                    ballOn -= penaltyYards;
-                }
+        while(driveActive && down <= 4) {
+            const penaltyChance = 0.05;
+            if (Math.random() < penaltyChance) {
+                const penaltyYards = getRandom([5, 10]);
+                gameLog.push(`PENALTY! False Start. ${penaltyYards} yard penalty.`);
+                ballOn -= penaltyYards;
+            }
 
-                const scoreDiff = possession.id === homeTeam.id ? homeScore - awayScore : awayScore - homeScore;
-                const playCall = determinePlayCall(possession, possession.id === homeTeam.id ? awayTeam : homeTeam, down, yardsToGo, ballOn, scoreDiff, gameLog);
-                const result = resolvePlay(possession, possession.id === homeTeam.id ? awayTeam : homeTeam, playCall, { gameLog, weather });
+            const scoreDiff = possession.id === homeTeam.id ? homeScore - awayScore : awayScore - homeScore;
+            const playCall = determinePlayCall(possession, defense, down, yardsToGo, ballOn, scoreDiff, gameLog);
+            const result = resolvePlay(possession, defense, playCall, { gameLog, weather });
 
-                ballOn += result.yards;
+            ballOn += result.yards;
                 
-                if (result.turnover) { driveActive = false; break; }
-                if (ballOn >= 100) {
-                    gameLog.push(`TOUCHDOWN ${possession.name}!`);
-                    const goesForTwo = Math.random() > 0.5;
-                    const conversionSuccess = Math.random() > (goesForTwo ? 0.5 : 0.1);
-                    if (conversionSuccess) {
-                        gameLog.push(`${goesForTwo ? 2 : 1}-point conversion GOOD!`);
-                        if (possession.id === homeTeam.id) homeScore += goesForTwo ? 8 : 7; else awayScore += goesForTwo ? 8 : 7;
-                    } else {
-                        gameLog.push(`Conversion FAILED!`);
-                        if (possession.id === homeTeam.id) homeScore += 6; else awayScore += 6;
-                    }
-                    driveActive = false; break;
+            if (result.turnover) { driveActive = false; }
+            else if (ballOn >= 100) {
+                gameLog.push(`TOUCHDOWN ${possession.name}!`);
+                const goesForTwo = Math.random() > 0.5;
+                const conversionSuccess = Math.random() > (goesForTwo ? 0.5 : 0.1);
+                if (conversionSuccess) {
+                    gameLog.push(`${goesForTwo ? 2 : 1}-point conversion GOOD!`);
+                    if (possession.id === homeTeam.id) homeScore += goesForTwo ? 8 : 7; else awayScore += goesForTwo ? 8 : 7;
+                } else {
+                    gameLog.push(`Conversion FAILED!`);
+                    if (possession.id === homeTeam.id) homeScore += 6; else awayScore += 6;
                 }
-                
+                driveActive = false;
+            } else {
                 yardsToGo -= result.yards;
                 if(yardsToGo <= 0) { down = 1; yardsToGo = 10; gameLog.push(`First down!`); } 
                 else { down++; }
                 if(down > 4) { gameLog.push(`Turnover on downs!`); driveActive = false; }
             }
-            driveCount++;
-            possession = possession.id === homeTeam.id ? awayTeam : homeTeam;
         }
     }
 
@@ -676,6 +680,8 @@ export function simulateWeek() {
     const startIndex = game.currentWeek * gamesPerWeek;
     const endIndex = startIndex + gamesPerWeek;
     
+    console.log(`Simulating Week ${game.currentWeek + 1}: Slicing schedule from index ${startIndex} to ${endIndex}. Total schedule length: ${game.schedule.length}`);
+
     const weeklyGames = game.schedule.slice(startIndex, endIndex);
     
     if (!weeklyGames || weeklyGames.length === 0) {
@@ -683,6 +689,8 @@ export function simulateWeek() {
         return [];
     }
     
+    console.log(`Found ${weeklyGames.length} games to simulate.`);
+
     const results = weeklyGames.map(match => {
         const result = simulateGame(match.home, match.away);
         if(result.breakthroughs) game.breakthroughs.push(...result.breakthroughs);
@@ -691,6 +699,7 @@ export function simulateWeek() {
     
     game.gameResults.push(...results);
     game.currentWeek++;
+    console.log(`Simulation complete. Advancing to week ${game.currentWeek + 1}.`);
     return results;
 }
 
