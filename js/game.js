@@ -215,32 +215,36 @@ export function addPlayerToTeam(player, team) {
 export function generateSchedule() {
     game.schedule = [];
     game.currentWeek = 0;
+    const allWeeklyGames = Array(9).fill(null).map(() => []);
 
     for (const divisionName in game.divisions) {
-        const teamsInDivision = game.teams.filter(t => t.division === divisionName);
-        if (teamsInDivision.length < 2) continue;
+        let teams = [...game.teams.filter(t => t.division === divisionName)];
+        if (teams.length !== 10) continue;
 
-        const matchups = [];
-        for (let i = 0; i < teamsInDivision.length; i++) {
-            for (let j = i + 1; j < teamsInDivision.length; j++) {
-                matchups.push( Math.random() > 0.5 ? 
-                    { home: teamsInDivision[i], away: teamsInDivision[j] } :
-                    { home: teamsInDivision[j], away: teamsInDivision[i] }
-                );
+        const numRounds = 9;
+        const numTeams = teams.length;
+        let rotatingTeams = teams.slice(1);
+
+        for (let round = 0; round < numRounds; round++) {
+            const weekMatchups = [];
+            
+            const team1 = teams[0];
+            const team2 = rotatingTeams[0];
+            const match1 = round % 2 === 0 ? { home: team1, away: team2 } : { home: team2, away: team1 };
+            weekMatchups.push(match1);
+
+            for (let i = 1; i < numTeams / 2; i++) {
+                const teamA = rotatingTeams[i];
+                const teamB = rotatingTeams[numTeams - 1 - i];
+                const match = Math.random() > 0.5 ? { home: teamA, away: teamB } : { home: teamB, away: teamA };
+                weekMatchups.push(match);
             }
-        }
-        
-        // Distribute matchups across the 9 weeks
-        for(let i=0; i < matchups.length; i++) {
-            const weekIndex = i % 9;
-            if(!game.schedule[weekIndex]) {
-                game.schedule[weekIndex] = [];
-            }
-            game.schedule[weekIndex].push(matchups[i]);
+
+            allWeeklyGames[round].push(...weekMatchups);
+            rotatingTeams.unshift(rotatingTeams.pop());
         }
     }
-    // Flatten and finalize the schedule
-    game.schedule = game.schedule.flat();
+    game.schedule = allWeeklyGames.flat();
 }
 
 
@@ -436,11 +440,12 @@ function generateWeeklyEvents() {
 export function simulateWeek() {
     if (game.currentWeek >= 9) return null;
     
-    endOfWeekCleanup(); // Clean up temporary players from last week
+    endOfWeekCleanup();
     updatePlayerStatuses();
     generateWeeklyEvents();
 
-    const weeklyGames = game.schedule.slice(game.currentWeek * 5, (game.currentWeek + 1) * 5); // 5 games per week in a 10-team division
+    const gamesPerWeek = game.teams.length / 2;
+    const weeklyGames = game.schedule.slice(game.currentWeek * gamesPerWeek, (game.currentWeek + 1) * gamesPerWeek);
     const results = weeklyGames.map(match => simulateGame(match.home, match.away));
     
     game.currentWeek++;
@@ -491,6 +496,8 @@ export function aiManageRoster(team) {
     const result = callFriend(bestFA.id, team);
     if(result.success) {
         console.log(`${team.name} successfully called in friend ${bestFA.name} for the week.`);
+        // Remove from the main pool so other AI can't call them
+        game.freeAgents = game.freeAgents.filter(p => p.id !== bestFA.id);
     }
 }
 
