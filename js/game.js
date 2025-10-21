@@ -108,7 +108,7 @@ export async function initializeLeague(onProgress) {
         if (i % 10 === 0) { onProgress(i / totalPlayers); await yieldToMain(); }
     }
     const availableTeamNames = [...teamNames];
-    
+
     for (let i = 0; i < 19; i++) {
         const teamName = `The ${availableTeamNames.splice(getRandomInt(0, availableTeamNames.length - 1), 1)[0]}`;
         const division = divisionNames[i % divisionNames.length];
@@ -132,7 +132,7 @@ export async function initializeLeague(onProgress) {
 export function createPlayerTeam(teamName) {
     const finalTeamName = teamName.toLowerCase().startsWith("the ") ? teamName : `The ${teamName}`;
     const division = game.teams.length % 2 === 0 ? divisionNames[0] : divisionNames[1];
-    
+
     const defaultOffense = 'Balanced';
     const defaultDefense = '3-3-1';
     const defaultOffenseSlots = offenseFormations[defaultOffense].slots;
@@ -166,8 +166,7 @@ export function setupDraft() {
     game.draftOrder = [];
     game.currentPick = 0;
     const teams = [...game.teams].sort(() => Math.random() - 0.5);
-    // 10 rounds for 10-player rosters
-    for (let i = 0; i < 10; i++) { 
+    for (let i = 0; i < 10; i++) {
         game.draftOrder.push(...(i % 2 === 0 ? teams : [...teams].reverse()));
     }
 }
@@ -177,17 +176,15 @@ export function aiSetDepthChart(team) {
     for (const side in depthChart) {
         const slots = Object.keys(depthChart[side]);
         let availablePlayers = [...roster];
-        
+
         slots.forEach(slot => {
             const position = slot.replace(/\d/g, '');
             if (availablePlayers.length > 0) {
-                // Find the best player for the slot from the remaining pool
                 const bestPlayerForSlot = availablePlayers.reduce((best, current) => {
                     return calculateOverall(current, position) > calculateOverall(best, position) ? current : best;
                 });
-                
+
                 team.depthChart[side][slot] = bestPlayerForSlot.id;
-                // A player can only be in one slot per side
                 availablePlayers = availablePlayers.filter(p => p.id !== bestPlayerForSlot.id);
             }
         });
@@ -235,92 +232,114 @@ function resetGameStats() {
     });
 }
 
-function getTeamRatings(team) {
-    const { roster, depthChart } = team;
+// --- NEW PLAY-BY-PLAY SIMULATION ENGINE ---
 
-    const getStarters = (side) => Object.values(depthChart[side])
-        .map(playerId => roster.find(p => p.id === playerId && p.status.type === 'healthy'))
-        .filter(Boolean); // filter out nulls if a spot is empty
-
-    const offenseStarters = getStarters('offense');
-    const defenseStarters = getStarters('defense');
-
-    if (offenseStarters.length < 7 || defenseStarters.length < 7) {
-        return { offense: 0, defense: 0 };
-    }
-
-    const offenseRating = offenseStarters.reduce((total, player, i) => {
-        const position = Object.keys(depthChart.offense)[i].replace(/\d/g, '');
-        return total + calculateOverall(player, position);
-    }, 0);
-
-    const defenseRating = defenseStarters.reduce((total, player, i) => {
-        const position = Object.keys(depthChart.defense)[i].replace(/\d/g, '');
-        return total + calculateOverall(player, position);
-    }, 0);
-
-    return {
-        offense: offenseRating / 7,
-        defense: defenseRating / 7
-    };
-}
-
-
+/**
+ * Simulates a full game play-by-play.
+ * @param {object} homeTeam - The home team object.
+ * @param {object} awayTeam - The away team object.
+ * @returns {object} The game result, including scores and a play-by-play log.
+ */
 function simulateGame(homeTeam, awayTeam) {
     resetGameStats();
-    aiSetDepthChart(homeTeam); // Ensure AI depth charts are set before sim
+    aiSetDepthChart(homeTeam);
     aiSetDepthChart(awayTeam);
 
-    const homeRatings = getTeamRatings(homeTeam);
-    const awayRatings = getTeamRatings(awayTeam);
+    let homeScore = 0;
+    let awayScore = 0;
+    let playLog = [`<strong>Game Start: ${awayTeam.name} @ ${homeTeam.name}</strong>`];
+    let possession = Math.random() > 0.5 ? homeTeam : awayTeam;
+    let possessionsPerTeam = 4;
+    let homePossessions = 0;
+    let awayPossessions = 0;
 
-    const homeScorePotential = (homeRatings.offense / awayRatings.defense) * 21 * 1.05; // Home field advantage
-    const awayScorePotential = (awayRatings.offense / homeRatings.defense) * 21;
+    const getInitialYardLine = (kickingTeam) => {
+        const qb = kickingTeam.roster.find(p => p.id === kickingTeam.depthChart.offense[Object.keys(kickingTeam.depthChart.offense).find(s => s.startsWith('QB'))]);
+        const kickPower = (qb.attributes.technical.throwingAccuracy + qb.attributes.physical.strength) / 2;
+        return Math.max(5, 25 - Math.round(kickPower / 5)); // Start between the 5 and 25 yard line
+    };
+    
+    let currentDrive = {
+        team: possession,
+        yardLine: getInitialYardLine(possession === homeTeam ? awayTeam : homeTeam),
+        down: 1,
+        distance: 10
+    };
 
-    let homeScore = Math.round(Math.random() * homeScorePotential);
-    let awayScore = Math.round(Math.random() * awayScorePotential);
-
-    [homeTeam, awayTeam].forEach((team, isHome) => {
-        const score = isHome ? homeScore : awayScore;
-        const starters = {
-            offense: Object.values(team.depthChart.offense).map(id => team.roster.find(p => p.id === id)),
-            defense: Object.values(team.depthChart.defense).map(id => team.roster.find(p => p.id === id))
-        };
+    while (homePossessions < possessionsPerTeam || awayPossessions < possessionsPerTeam) {
+        if(currentDrive.team.id === homeTeam.id) homePossessions++;
+        else awayPossessions++;
         
-        if (score === 0 || !starters.offense.every(p=>p) || !starters.defense.every(p=>p)) return;
+        playLog.push(`<hr><strong>${currentDrive.team.name} take over at their ${currentDrive.yardLine} yard line.</strong>`);
+        
+        let driveActive = true;
+        while(driveActive) {
+            const playResult = simulatePlay(currentDrive);
+            playLog.push(playResult.log);
+            
+            // Update stats
+            if(playResult.playerStats) {
+                 for(const pId in playResult.playerStats) {
+                     const player = game.players.find(p => p.id === pId);
+                     if(player) {
+                        for(const stat in playResult.playerStats[pId]) {
+                            player.gameStats[stat] = (player.gameStats[stat] || 0) + playResult.playerStats[pId][stat];
+                        }
+                     }
+                 }
+            }
 
-        const qb = starters.offense.find(p => calculateOverall(p, 'QB') > 40);
-        const rbs = starters.offense.filter(p => calculateOverall(p, 'RB') > 40);
-        const wrs = starters.offense.filter(p => calculateOverall(p, 'WR') > 40);
+            if (playResult.type === 'touchdown') {
+                if (currentDrive.team.id === homeTeam.id) homeScore += 6;
+                else awayScore += 6;
+                
+                // Conversion Attempt
+                const goForTwo = (homeScore < awayScore); // Simple AI
+                const conversionYardLine = goForTwo ? 5 : 2;
+                const conversionPlay = simulatePlay({...currentDrive, yardLine: 50 - conversionYardLine, distance: conversionYardLine, down: 1});
+                if(conversionPlay.type === 'touchdown') {
+                     if (currentDrive.team.id === homeTeam.id) homeScore += goForTwo ? 2 : 1;
+                     else awayScore += goForTwo ? 2 : 1;
+                     playLog.push(`Conversion good! (${goForTwo ? 2 : 1}pt)`);
+                } else {
+                    playLog.push('Conversion failed.');
+                }
+                
+                driveActive = false;
+            } else if (playResult.type === 'turnover') {
+                driveActive = false;
+            } else {
+                currentDrive.yardLine += playResult.yards;
+                currentDrive.distance -= playResult.yards;
 
-        const touchdowns = Math.floor(score / 7);
-        let passYards = 0;
-        let rushYards = 0;
+                if (currentDrive.distance <= 0) {
+                    currentDrive.down = 1;
+                    currentDrive.distance = 10;
+                } else {
+                    currentDrive.down++;
+                }
 
-        for (let i = 0; i < touchdowns; i++) {
-            const scorer = getRandom(starters.offense);
-            scorer.gameStats.touchdowns++;
-            if (Math.random() > 0.4 && wrs.length > 0) {
-                const receiver = getRandom(wrs);
-                const yards = getRandomInt(10, 40);
-                passYards += yards;
-                receiver.gameStats.receptions++;
-                receiver.gameStats.recYards += yards;
-            } else if (rbs.length > 0) {
-                const runner = getRandom(rbs);
-                const yards = getRandomInt(5, 25);
-                rushYards += yards;
-                runner.gameStats.rushYards += yards;
+                if (currentDrive.down > 4) {
+                    playLog.push(`Turnover on downs!`);
+                    driveActive = false;
+                }
             }
         }
-        if(qb) qb.gameStats.passYards = passYards;
-        if(rbs.length > 0) getRandom(rbs).gameStats.rushYards += Math.max(0, getRandomInt(20, 80) - awayRatings.defense / 10);
+        
+        // Switch possession
+        possession = possession.id === homeTeam.id ? awayTeam : homeTeam;
+        currentDrive = {
+            team: possession,
+            yardLine: getInitialYardLine(possession === homeTeam ? awayTeam : homeTeam),
+            down: 1,
+            distance: 10
+        };
+    }
 
-        starters.defense.forEach((d) => {
-            d.gameStats.tackles = getRandomInt(1, 8);
-        });
-    });
-
+    if (homeScore > awayScore) { homeTeam.wins++; awayTeam.losses++; }
+    else if (awayScore > homeScore) { awayTeam.wins++; homeTeam.losses++; }
+    
+    // Aggregate game stats into season/career stats
     [...homeTeam.roster, ...awayTeam.roster].forEach(p => {
         for (const stat in p.gameStats) {
             p.seasonStats[stat] = (p.seasonStats[stat] || 0) + p.gameStats[stat];
@@ -328,10 +347,69 @@ function simulateGame(homeTeam, awayTeam) {
         }
     });
 
-    if (homeScore > awayScore) { homeTeam.wins++; awayTeam.losses++; }
-    else { awayTeam.wins++; homeTeam.losses++; }
+    playLog.push(`<hr><strong>Final Score: ${awayTeam.name} ${awayScore} - ${homeTeam.name} ${homeScore}</strong>`);
+    return { homeTeam, awayTeam, homeScore, awayScore, playLog };
+}
 
-    return { homeTeam, awayTeam, homeScore, awayScore };
+
+function simulatePlay(driveState) {
+    const offense = driveState.team;
+    const defense = game.teams.find(t => t.id !== offense.id); // This is a simplification
+    
+    const oStarters = Object.values(offense.depthChart.offense).map(id => offense.roster.find(p => p.id === id));
+    const dStarters = Object.values(defense.depthChart.defense).map(id => defense.roster.find(p => p.id === id));
+    
+    const qb = oStarters.find(p => calculateOverall(p, 'QB') > 40);
+    const rb = oStarters.find(p => calculateOverall(p, 'RB') > 40);
+    const wrs = oStarters.filter(p => calculateOverall(p, 'WR') > 40);
+    const ol = oStarters.filter(p => calculateOverall(p, 'OL') > 40);
+    const dl = dStarters.filter(p => calculateOverall(p, 'DL') > 40);
+    const lbs = dStarters.filter(p => calculateOverall(p, 'LB') > 40);
+    const dbs = dStarters.filter(p => calculateOverall(p, 'DB') > 40);
+
+    const playCall = Math.random() > 0.5 ? 'pass' : 'run'; // Simple 50/50 playcall
+    let log = `${driveState.down}${['st','nd','rd','th'][driveState.down-1]} & ${driveState.distance} from the ${driveState.yardLine}.`;
+    let playerStats = {};
+
+    if (playCall === 'pass' && qb && wrs.length > 0) {
+        const passPower = calculateOverall(qb, 'QB') + qb.attributes.mental.clutch;
+        const passCoverage = dbs.reduce((sum, p) => sum + calculateOverall(p, 'DB'), 0) + lbs.reduce((sum, p) => sum + calculateOverall(p, 'LB'), 0);
+        
+        if (passPower * Math.random() > passCoverage * Math.random() * 0.7) {
+            const receiver = getRandom(wrs);
+            const yards = getRandomInt(3, 15) + Math.round(receiver.attributes.physical.speed / 10);
+            log += ` Pass to ${receiver.name} for ${yards} yards.`;
+            playerStats[qb.id] = { passYards: yards };
+            playerStats[receiver.id] = { receptions: 1, recYards: yards };
+            
+            if (driveState.yardLine + yards >= 50) {
+                 log += ' <strong>TOUCHDOWN!</strong>';
+                 playerStats[receiver.id].touchdowns = 1;
+                 return { type: 'touchdown', yards, log, playerStats };
+            }
+            return { type: 'success', yards, log, playerStats };
+        } else {
+            log += ` Incomplete pass.`;
+            return { type: 'incomplete', yards: 0, log };
+        }
+    } else if (rb) { // Run play
+        const runPower = calculateOverall(rb, 'RB') + ol.reduce((s,p) => s + calculateOverall(p, 'OL'), 0) / ol.length;
+        const runDefense = dl.reduce((s,p) => s + calculateOverall(p, 'DL'), 0) + lbs.reduce((s,p) => s + calculateOverall(p, 'LB'), 0);
+
+        const yards = Math.max(-2, Math.round((runPower / runDefense) * getRandomInt(3, 10) - 3));
+        log += ` Run by ${rb.name} for ${yards} yards.`;
+        playerStats[rb.id] = { rushYards: yards };
+        
+        if (driveState.yardLine + yards >= 50) {
+            log += ' <strong>TOUCHDOWN!</strong>';
+            playerStats[rb.id].touchdowns = 1;
+            return { type: 'touchdown', yards, log, playerStats };
+        }
+        return { type: 'success', yards, log, playerStats };
+    }
+    
+    log += ' Scramble for no gain.';
+    return { type: 'incomplete', yards: 0, log }; // Default fail-safe
 }
 
 
@@ -399,7 +477,7 @@ export function aiManageRoster(team) {
         addPlayerToTeam(bestFA, team);
         game.freeAgents = game.freeAgents.filter(p => p.id !== bestFA.id);
     }
-     aiSetDepthChart(team);
+    aiSetDepthChart(team);
 }
 
 export function playerSignFreeAgent(playerId, team = game.playerTeam) {
@@ -465,13 +543,14 @@ export function advanceToOffseason() {
         }
     });
     game.players = remainingPlayers;
-    game.teams.forEach(t => { t.roster = []; t.wins = 0; t.losses = 0; if (t.depthChart) {
-        // Reset depth chart based on preferred formations
-        const offenseSlots = offenseFormations[t.formations.offense].slots;
-        const defenseSlots = defenseFormations[t.formations.defense].slots;
-        t.depthChart.offense = Object.fromEntries(offenseSlots.map(slot => [slot, null]));
-        t.depthChart.defense = Object.fromEntries(defenseSlots.map(slot => [slot, null]));
-    }});
+    game.teams.forEach(t => {
+        t.roster = []; t.wins = 0; t.losses = 0; if (t.depthChart) {
+            const offenseSlots = offenseFormations[t.formations.offense].slots;
+            const defenseSlots = defenseFormations[t.formations.defense].slots;
+            t.depthChart.offense = Object.fromEntries(offenseSlots.map(slot => [slot, null]));
+            t.depthChart.defense = Object.fromEntries(defenseSlots.map(slot => [slot, null]));
+        }
+    });
     game.players.forEach(p => p.teamId = null);
     for (let i = 0; i < retiredCount; i++) game.players.push(generatePlayer(8, 10));
 }
@@ -479,24 +558,13 @@ export function advanceToOffseason() {
 export function updateDepthChart(playerId, newPositionSlot, side) {
     const team = game.playerTeam;
     const chart = team.depthChart[side];
-    
-    // Find if the dropped player was already in a slot on this side
+
     const oldSlot = Object.keys(chart).find(key => chart[key] === playerId);
-    
-    // Find if the target slot is already occupied
     const displacedPlayerId = chart[newPositionSlot];
-    
-    // Place the dropped player in the new slot
+
     chart[newPositionSlot] = playerId;
 
-    // If the dropped player came from another slot on this side, that slot is now empty
     if (oldSlot) {
-        chart[oldSlot] = null;
-    }
-    
-    // If the target slot was occupied, the displaced player needs a home.
-    // If the dropped player came from a slot, put the displaced player there.
-    if (displacedPlayerId && oldSlot) {
         chart[oldSlot] = displacedPlayerId;
     }
 }
@@ -509,24 +577,21 @@ export function changeFormation(side, formationName) {
 
     team.formations[side] = formationName;
     const newChart = Object.fromEntries(formation.slots.map(slot => [slot, null]));
-    
+
     let playerPool = [...team.roster];
-    
-    // Intelligently fill the new formation slots
-    for(const newSlot of formation.slots) {
+
+    for (const newSlot of formation.slots) {
         const position = newSlot.replace(/\d/g, '');
-        if(playerPool.length > 0) {
-            // Find the best available player for this slot
+        if (playerPool.length > 0) {
             const bestPlayerForSlot = playerPool.reduce((best, current) => {
                 return calculateOverall(current, position) > calculateOverall(best, position) ? current : best;
             });
-            
+
             newChart[newSlot] = bestPlayerForSlot.id;
-            // A player can only be in one slot per side, so remove them from the pool
             playerPool = playerPool.filter(p => p.id !== bestPlayerForSlot.id);
         }
     }
-    
+
     team.depthChart[side] = newChart;
 }
 
