@@ -6,12 +6,13 @@ let game = null;
 const offensivePositions = ['QB', 'RB', 'WR', 'OL'];
 const defensivePositions = ['DL', 'LB', 'DB'];
 
+// Lowered base chance of random off-field events
 const weeklyEvents = [
-    { type: 'injured', description: 'Sprained Ankle', minDuration: 1, maxDuration: 2, chance: 0.01 },
-    { type: 'injured', description: 'Jammed Finger', minDuration: 1, maxDuration: 1, chance: 0.015 },
-    { type: 'busy', description: 'Grounded by Parents', minDuration: 1, maxDuration: 3, chance: 0.02 },
-    { type: 'busy', description: 'Big School Project', minDuration: 1, maxDuration: 1, chance: 0.02 },
-    { type: 'busy', description: 'Family Vacation', minDuration: 1, maxDuration: 2, chance: 0.005 }
+    { type: 'injured', description: 'Sprained Ankle', minDuration: 1, maxDuration: 2, chance: 0.005 },
+    { type: 'injured', description: 'Jammed Finger', minDuration: 1, maxDuration: 1, chance: 0.008 },
+    { type: 'busy', description: 'Grounded', minDuration: 1, maxDuration: 2, chance: 0.01 },
+    { type: 'busy', description: 'School Project', minDuration: 1, maxDuration: 1, chance: 0.015 },
+    { type: 'busy', description: 'Family Vacation', minDuration: 1, maxDuration: 1, chance: 0.003 }
 ];
 
 export const positionOverallWeights = {
@@ -66,7 +67,7 @@ function generatePlayer(minAge = 8, maxAge = 17) {
 
     let attributes = {
         physical: { speed: getRandomInt(40, 70), strength: getRandomInt(40, 70), agility: getRandomInt(40, 70), stamina: getRandomInt(50, 80), height: Math.round(baseHeight), weight: Math.round(baseWeight) },
-        mental: { playbookIQ: getRandomInt(30, 70), clutch: getRandomInt(20, 90), consistency: getRandomInt(40, 80) },
+        mental: { playbookIQ: getRandomInt(30, 70), clutch: getRandomInt(20, 90), consistency: getRandomInt(40, 80), toughness: getRandomInt(50, 95) },
         technical: { throwingAccuracy: getRandomInt(20, 50), catchingHands: getRandomInt(30, 60), tackling: getRandomInt(30, 60), blocking: getRandomInt(30, 60), blockShedding: getRandomInt(30, 60) }
     };
 
@@ -212,10 +213,6 @@ export function addPlayerToTeam(player, team) {
     return false;
 }
 
-/**
- * Generates a balanced 9-week, round-robin schedule for the entire league.
- * Each team within a division plays every other team in that division exactly once.
- */
 export function generateSchedule() {
     game.schedule = [];
     game.currentWeek = 0;
@@ -231,7 +228,6 @@ export function generateSchedule() {
         const numRounds = teams.length - 1;
         const numTeams = teams.length;
         
-        // Use a placeholder for bye weeks if needed, though 10 teams is perfect.
         const schedule = [];
         for (let i = 0; i < numRounds; i++) {
             schedule.push([]);
@@ -242,16 +238,13 @@ export function generateSchedule() {
                 const home = teams[match];
                 const away = teams[numTeams - 1 - match];
                  if (home && away) {
-                    // Alternate home/away based on match index to spread it out
                     const matchup = match % 2 === 1 ? { home, away } : { home: away, away: home };
                     schedule[round].push(matchup);
                 }
             }
-            // Rotate teams for the next round, keeping the first team fixed.
             teams.splice(1, 0, teams.pop());
         }
         
-        // Add division games to the main league schedule weeks
         for(let week = 0; week < schedule.length; week++) {
             allWeeklyGames[week].push(...schedule[week]);
         }
@@ -264,6 +257,25 @@ function resetGameStats() {
     game.players.forEach(player => {
         player.gameStats = { receptions: 0, recYards: 0, passYards: 0, rushYards: 0, touchdowns: 0, tackles: 0 };
     });
+}
+
+/**
+ * Checks if a player gets injured during a play.
+ * @param {object} player - The player object.
+ * @param {object} gameLog - The game log array.
+ */
+function checkInGameInjury(player, gameLog) {
+    if (player.status.duration > 0) return; // Already injured
+    const injuryChance = 0.008; // Base chance of injury per play involvement
+    const toughnessModifier = (100 - player.attributes.mental.toughness) / 100; // 90 toughness = 0.1 modifier
+    
+    if (Math.random() < injuryChance * toughnessModifier) {
+        const duration = getRandomInt(1, 3); // In-game injuries are typically short-term
+        player.status.type = 'injured';
+        player.status.description = 'Minor Injury';
+        player.status.duration = duration;
+        gameLog.push(`INJURY: ${player.name} has suffered a minor injury and will be out for ${duration} week(s).`);
+    }
 }
 
 function resolvePlay(offense, defense, playType, gameState) {
@@ -285,9 +297,16 @@ function resolvePlay(offense, defense, playType, gameState) {
         const wrs = offStarters.filter(p => ['WR', 'RB'].includes(p.favoriteOffensivePosition));
         const dbs = defStarters.filter(p => ['DB', 'LB'].includes(p.favoriteDefensivePosition));
 
-        const passRush = defStarters.reduce((s, p) => s + calculateOverall(p, 'DL'), 0);
-        const passBlock = offStarters.reduce((s, p) => s + calculateOverall(p, 'OL'), 0);
+        const passRushers = defStarters.filter(p => ['DL', 'LB'].includes(p.favoriteDefensivePosition));
+        const passBlockers = offStarters.filter(p => ['OL', 'RB'].includes(p.favoriteOffensivePosition));
+
+        const passRush = passRushers.reduce((s, p) => s + calculateOverall(p, 'DL'), 0);
+        const passBlock = passBlockers.reduce((s, p) => s + calculateOverall(p, 'OL'), 0);
         
+        checkInGameInjury(qb, gameLog);
+        passRushers.forEach(p => checkInGameInjury(p, gameLog));
+        passBlockers.forEach(p => checkInGameInjury(p, gameLog));
+
         if ((passRush / passBlock) * 100 > getRandomInt(50, 150)) {
             const sackYards = getRandomInt(5, 12);
             gameLog.push(`SACK! ${qb.name} is brought down for a loss of ${sackYards} yards.`);
@@ -298,6 +317,9 @@ function resolvePlay(offense, defense, playType, gameState) {
         const coverage = getRandom(dbs.length > 0 ? dbs : defStarters);
         const throwPower = qb.attributes.technical.throwingAccuracy + (qb.attributes.mental.clutch / 10);
         const coveragePower = (coverage.attributes.physical.speed + coverage.attributes.physical.agility) / 2 + (coverage.attributes.mental.playbookIQ / 10);
+        
+        checkInGameInjury(target, gameLog);
+        checkInGameInjury(coverage, gameLog);
         
         if (throwPower > coveragePower + getRandomInt(-20, 20)) {
             const yards = Math.round(target.attributes.physical.speed / 5) + getRandomInt(1, 15);
@@ -324,6 +346,10 @@ function resolvePlay(offense, defense, playType, gameState) {
         const runBlock = ol.reduce((s, p) => s + calculateOverall(p, 'OL'), 0);
         const runDefense = frontSeven.reduce((s, p) => s + calculateOverall(p, 'DL') + calculateOverall(p, 'LB'), 0) / 2;
 
+        checkInGameInjury(rb, gameLog);
+        ol.forEach(p => checkInGameInjury(p, gameLog));
+        frontSeven.forEach(p => checkInGameInjury(p, gameLog));
+
         const contest = (runBlock / runDefense) * (rb.attributes.physical.speed + rb.attributes.physical.strength);
         const yards = Math.round(contest / 20) + getRandomInt(-2, 8);
         rb.gameStats.rushYards += yards;
@@ -342,6 +368,23 @@ function simulateGame(homeTeam, awayTeam) {
     let homeScore = 0;
     let awayScore = 0;
     
+    // Forfeit check
+    const homeHealthy = homeTeam.roster.filter(p => p.status.duration === 0).length;
+    const awayHealthy = awayTeam.roster.filter(p => p.status.duration === 0).length;
+
+    if (homeHealthy < 7) {
+        awayScore = 21; homeScore = 0;
+        awayTeam.wins++; homeTeam.losses++;
+        gameLog.push(`${homeTeam.name} does not have enough healthy players and forfeits.`);
+        return { homeTeam, awayTeam, homeScore, awayScore, gameLog };
+    }
+    if (awayHealthy < 7) {
+        homeScore = 21; awayScore = 0;
+        homeTeam.wins++; awayTeam.losses++;
+        gameLog.push(`${awayTeam.name} does not have enough healthy players and forfeits.`);
+        return { homeTeam, awayTeam, homeScore, awayScore, gameLog };
+    }
+
     for (let i = 0; i < 2; i++) {
         let possession = i === 0 ? homeTeam : awayTeam;
         let driveCount = 0;
@@ -494,28 +537,30 @@ export function callFriend(playerId, team = game.playerTeam) {
         game.freeAgents = game.freeAgents.filter(p => p.id !== playerId);
         return { success: true, message: `${player.name} agreed to play for you this week!` };
     } else {
+        game.freeAgents = game.freeAgents.filter(p => p.id !== playerId); // They were called, so they are unavailable now
         return { success: false, message: `${player.name} couldn't make it this week.` };
     }
 }
 
 
 export function aiManageRoster(team) {
-    const hasUnavailablePlayer = team.roster.some(p => p.status.duration > 0);
-    if (!hasUnavailablePlayer || game.freeAgents.length === 0) return;
+    const healthyCount = team.roster.filter(p => p.status.duration === 0).length;
     
-    const bestFA = game.freeAgents.reduce((best, p) => getPlayerScore(p, team.coach) > getPlayerScore(best, team.coach) ? p : best);
-    
-    const result = callFriend(bestFA.id, team);
-    if(result.success) {
-        console.log(`${team.name} successfully called in friend ${bestFA.name} for the week.`);
-        // Remove from the main pool so other AI can't call them
-        game.freeAgents = game.freeAgents.filter(p => p.id !== bestFA.id);
+    // AI will try to get a temp player if they are at risk of forfeiting
+    if (healthyCount < 7 && game.freeAgents.length > 0) {
+        const bestFA = game.freeAgents.reduce((best, p) => getPlayerScore(p, team.coach) > getPlayerScore(best, team.coach) ? p : best);
+        
+        const result = callFriend(bestFA.id, team);
+        if(result.success) {
+            console.log(`${team.name} successfully called in friend ${bestFA.name} to avoid a forfeit.`);
+            game.freeAgents = game.freeAgents.filter(p => p.id !== bestFA.id);
+        }
     }
 }
 
 function developPlayer(player) {
     let potential = player.age < 12 ? getRandomInt(4, 8) : player.age < 16 ? getRandomInt(1, 5) : getRandomInt(0, 2);
-    const attributesToImprove = ['speed', 'strength', 'agility', 'throwingAccuracy', 'catchingHands', 'tackling', 'blocking', 'playbookIQ', 'blockShedding'];
+    const attributesToImprove = ['speed', 'strength', 'agility', 'throwingAccuracy', 'catchingHands', 'tackling', 'blocking', 'playbookIQ', 'blockShedding', 'toughness'];
     for (let i = 0; i < potential; i++) {
         const attrToBoost = getRandom(attributesToImprove);
         for (const category in player.attributes) {
@@ -559,11 +604,16 @@ export function updateDepthChart(playerId, newPositionSlot, side) {
     const team = game.playerTeam;
     const chart = team.depthChart[side];
     
+    // Find if the player is already starting somewhere on THIS side of the ball
     const oldSlot = Object.keys(chart).find(key => chart[key] === playerId);
+    
+    // Find if another player is in the target slot
     const displacedPlayerId = chart[newPositionSlot];
     
+    // Place the new player
     chart[newPositionSlot] = playerId;
 
+    // If the player was moved from another slot on this side, that slot is now empty or gets the displaced player
     if (oldSlot) {
         chart[oldSlot] = displacedPlayerId || null;
     }
@@ -577,7 +627,11 @@ export function changeFormation(side, formationName) {
 
     team.formations[side] = formationName;
     const newChart = Object.fromEntries(formation.slots.map(slot => [slot, null]));
-    let playerPool = [...team.roster];
+    
+    // Get a pool of players NOT starting on the OTHER side of the ball
+    const otherSide = side === 'offense' ? 'defense' : 'offense';
+    const otherSideStarters = Object.values(team.depthChart[otherSide]).filter(Boolean);
+    let playerPool = team.roster.filter(p => !otherSideStarters.includes(p.id));
     
     for (const newSlot of formation.slots) {
         const position = newSlot.replace(/\d/g, '');
