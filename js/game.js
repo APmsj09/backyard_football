@@ -166,8 +166,7 @@ export function setupDraft() {
     game.draftOrder = [];
     game.currentPick = 0;
     const teams = [...game.teams].sort(() => Math.random() - 0.5);
-    // 10 rounds for 10-player rosters
-    for (let i = 0; i < 10; i++) { 
+    for (let i = 0; i < 10; i++) {
         game.draftOrder.push(...(i % 2 === 0 ? teams : [...teams].reverse()));
     }
 }
@@ -181,13 +180,11 @@ export function aiSetDepthChart(team) {
         slots.forEach(slot => {
             const position = slot.replace(/\d/g, '');
             if (availablePlayers.length > 0) {
-                // Find the best player for the slot from the remaining pool
                 const bestPlayerForSlot = availablePlayers.reduce((best, current) => {
                     return calculateOverall(current, position) > calculateOverall(best, position) ? current : best;
                 });
                 
                 team.depthChart[side][slot] = bestPlayerForSlot.id;
-                // A player can only be in one slot per side
                 availablePlayers = availablePlayers.filter(p => p.id !== bestPlayerForSlot.id);
             }
         });
@@ -217,17 +214,35 @@ export function addPlayerToTeam(player, team) {
 
 export function generateSchedule() {
     game.schedule = [];
+    game.currentWeek = 0;
+
     for (const divisionName in game.divisions) {
-        const divisionTeams = game.teams.filter(t => t.division === divisionName);
-        for (let i = 0; i < divisionTeams.length; i++) {
-            for (let j = i + 1; j < divisionTeams.length; j++) {
-                game.schedule.push({ home: divisionTeams[i], away: divisionTeams[j] });
+        const teamsInDivision = game.teams.filter(t => t.division === divisionName);
+        if (teamsInDivision.length < 2) continue;
+
+        const matchups = [];
+        for (let i = 0; i < teamsInDivision.length; i++) {
+            for (let j = i + 1; j < teamsInDivision.length; j++) {
+                matchups.push( Math.random() > 0.5 ? 
+                    { home: teamsInDivision[i], away: teamsInDivision[j] } :
+                    { home: teamsInDivision[j], away: teamsInDivision[i] }
+                );
             }
         }
+        
+        // Distribute matchups across the 9 weeks
+        for(let i=0; i < matchups.length; i++) {
+            const weekIndex = i % 9;
+            if(!game.schedule[weekIndex]) {
+                game.schedule[weekIndex] = [];
+            }
+            game.schedule[weekIndex].push(matchups[i]);
+        }
     }
-    game.schedule.sort(() => Math.random() - 0.5);
-    game.currentWeek = 0;
+    // Flatten and finalize the schedule
+    game.schedule = game.schedule.flat();
 }
+
 
 function resetGameStats() {
     game.players.forEach(player => {
@@ -235,15 +250,17 @@ function resetGameStats() {
     });
 }
 
-// --- NEW PLAY-BY-PLAY SIMULATION ENGINE ---
-
 function resolvePlay(offense, defense, playType, gameState) {
-    const { ballOn, down, yardsToGo, gameLog } = gameState;
-    const offStarters = Object.values(offense.depthChart.offense).map(id => offense.roster.find(p => p.id === id && p.status.type === 'healthy')).filter(Boolean);
-    const defStarters = Object.values(defense.depthChart.defense).map(id => defense.roster.find(p => p.id === id && p.status.type === 'healthy')).filter(Boolean);
+    const { ballOn, gameLog } = gameState;
+    const getStarters = (team, side) => Object.values(team.depthChart[side])
+        .map(id => team.roster.find(p => p.id === id && p.status.duration === 0))
+        .filter(Boolean);
+
+    const offStarters = getStarters(offense, 'offense');
+    const defStarters = getStarters(defense, 'defense');
 
     if (offStarters.length < 7 || defStarters.length < 7) {
-        gameLog.push('Not enough healthy players to continue.');
+        gameLog.push('Not enough players to continue.');
         return { yards: 0, turnover: true, scoringPlay: false };
     }
 
@@ -266,14 +283,14 @@ function resolvePlay(offense, defense, playType, gameState) {
         const throwPower = qb.attributes.technical.throwingAccuracy + (qb.attributes.mental.clutch / 10);
         const coveragePower = (coverage.attributes.physical.speed + coverage.attributes.physical.agility) / 2 + (coverage.attributes.mental.playbookIQ / 10);
         
-        if (throwPower > coveragePower + getRandomInt(-20, 20)) { // Completed pass
+        if (throwPower > coveragePower + getRandomInt(-20, 20)) {
             const yards = Math.round(target.attributes.physical.speed / 5) + getRandomInt(1, 15);
             target.gameStats.receptions++;
             target.gameStats.recYards += yards;
             qb.gameStats.passYards += yards;
             gameLog.push(`PASS to ${target.name} for ${yards} yards.`);
             return { yards, turnover: false, scoringPlay: yards + ballOn >= 100 };
-        } else { // Incomplete or Interception
+        } else {
             if ((coverage.attributes.technical.catchingHands / 100) > Math.random() * 0.8) {
                 gameLog.push(`INTERCEPTION! Picked off by ${coverage.name}!`);
                 return { yards: 0, turnover: true, scoringPlay: false };
@@ -302,18 +319,18 @@ function resolvePlay(offense, defense, playType, gameState) {
 
 function simulateGame(homeTeam, awayTeam) {
     resetGameStats();
-    aiSetDepthChart(homeTeam); // Ensure AI depth charts are set before sim
+    aiSetDepthChart(homeTeam);
     aiSetDepthChart(awayTeam);
 
     const gameLog = [];
     let homeScore = 0;
     let awayScore = 0;
     
-    for (let i = 0; i < 2; i++) { // Two halves
+    for (let i = 0; i < 2; i++) {
         let possession = i === 0 ? homeTeam : awayTeam;
         let driveCount = 0;
         
-        while (driveCount < 5) { // 5 drives per half
+        while (driveCount < 5) {
             let ballOn = 20;
             let down = 1;
             let yardsToGo = 10;
@@ -323,7 +340,7 @@ function simulateGame(homeTeam, awayTeam) {
 
             while(driveActive && down <= 4) {
                 const playType = (down >= 3 && yardsToGo > 5) || (possession.coach.type === 'West Coast Offense') ? 'pass' : 'run';
-                const result = resolvePlay(possession, possession.id === homeTeam.id ? awayTeam : homeTeam, playType, { ballOn, down, yardsToGo, gameLog });
+                const result = resolvePlay(possession, possession.id === homeTeam.id ? awayTeam : homeTeam, playType, { ballOn, gameLog });
 
                 ballOn += result.yards;
                 
@@ -334,7 +351,7 @@ function simulateGame(homeTeam, awayTeam) {
 
                 if (result.scoringPlay) {
                     gameLog.push(`TOUCHDOWN ${possession.name}!`);
-                    const goesForTwo = Math.random() > 0.5; // Simple 50/50 for conversion
+                    const goesForTwo = Math.random() > 0.5;
                     if(goesForTwo && Math.random() > 0.5) {
                         gameLog.push(`2-point conversion is GOOD!`);
                         if (possession.id === homeTeam.id) homeScore += 8; else awayScore += 8;
@@ -364,7 +381,7 @@ function simulateGame(homeTeam, awayTeam) {
                 }
             }
             driveCount++;
-            possession = possession.id === homeTeam.id ? awayTeam : homeTeam; // Switch possession for next drive
+            possession = possession.id === homeTeam.id ? awayTeam : homeTeam;
         }
     }
 
@@ -394,6 +411,13 @@ function updatePlayerStatuses() {
     }
 }
 
+function endOfWeekCleanup() {
+    game.teams.forEach(team => {
+        team.roster = team.roster.filter(p => p.status.type !== 'temporary');
+    });
+}
+
+
 function generateWeeklyEvents() {
     for (const player of game.players) {
         if (player.status.type === 'healthy') {
@@ -411,10 +435,14 @@ function generateWeeklyEvents() {
 
 export function simulateWeek() {
     if (game.currentWeek >= 9) return null;
+    
+    endOfWeekCleanup(); // Clean up temporary players from last week
     updatePlayerStatuses();
     generateWeeklyEvents();
-    const weeklyGames = game.schedule.slice(game.currentWeek * 10, (game.currentWeek + 1) * 10);
+
+    const weeklyGames = game.schedule.slice(game.currentWeek * 5, (game.currentWeek + 1) * 5); // 5 games per week in a 10-team division
     const results = weeklyGames.map(match => simulateGame(match.home, match.away));
+    
     game.currentWeek++;
     return results;
 }
@@ -426,59 +454,45 @@ export function generateWeeklyFreeAgents() {
         if (undraftedPlayers.length > 0) {
             const faIndex = getRandomInt(0, undraftedPlayers.length - 1);
             const fa = undraftedPlayers.splice(faIndex, 1)[0];
+            fa.relationship = getRandom(['Best Friend', 'Good Friend', 'Acquaintance']);
             game.freeAgents.push(fa);
         }
     }
 }
 
-export function aiManageRoster(team) {
-    const healthyRoster = team.roster.filter(p => p.status.type === 'healthy');
-    if (healthyRoster.length >= 10 || game.freeAgents.length === 0) return;
-
-    let worstPlayer = team.roster.length > 0 ? team.roster.reduce((worst, p) => getPlayerScore(p, team.coach) < getPlayerScore(worst, team.coach) ? p : worst) : null;
-    let bestFA = game.freeAgents.reduce((best, p) => getPlayerScore(p, team.coach) > getPlayerScore(best, team.coach) ? p : best);
-
-    if (team.roster.length < 10) {
-        addPlayerToTeam(bestFA, team);
-        game.freeAgents = game.freeAgents.filter(p => p.id !== bestFA.id);
-    } else if (worstPlayer && getPlayerScore(bestFA, team.coach) > getPlayerScore(worstPlayer, team.coach) * 1.1) {
-        playerCut(worstPlayer.id, team);
-        addPlayerToTeam(bestFA, team);
-        game.freeAgents = game.freeAgents.filter(p => p.id !== bestFA.id);
+export function callFriend(playerId, team = game.playerTeam) {
+    if (!team.roster.some(p => p.status.duration > 0)) {
+        return { success: false, message: "You can only call a friend if a player on your team is injured or busy." };
     }
-     aiSetDepthChart(team);
-}
 
-export function playerSignFreeAgent(playerId, team = game.playerTeam) {
-    if (team.roster.length >= 10) {
-        return { success: false, message: "Roster is full. You must cut a player first." };
-    }
     const player = game.freeAgents.find(p => p.id === playerId);
-    if (player) {
+    if (!player) return { success: false, message: "That player is no longer available." };
+
+    const successRates = { 'Best Friend': 0.9, 'Good Friend': 0.6, 'Acquaintance': 0.3 };
+    const successChance = successRates[player.relationship] || 0.3;
+
+    if (Math.random() < successChance) {
+        player.status = { type: 'temporary', description: 'Helping Out', duration: 1 };
+        team.roster.push(player);
         game.freeAgents = game.freeAgents.filter(p => p.id !== playerId);
-        addPlayerToTeam(player, team);
-        return { success: true };
+        return { success: true, message: `${player.name} agreed to play for you this week!` };
+    } else {
+        return { success: false, message: `${player.name} couldn't make it this week.` };
     }
-    return { success: false, message: "Player not found." };
 }
 
-export function playerCut(playerId, team = game.playerTeam) {
-    const playerIndex = team.roster.findIndex(p => p.id === playerId);
-    if (playerIndex > -1) {
-        const [player] = team.roster.splice(playerIndex, 1);
-        player.teamId = null;
-        for (const side in team.depthChart) {
-            for (const pos in team.depthChart[side]) {
-                if (team.depthChart[side][pos] === playerId) {
-                    team.depthChart[side][pos] = null;
-                }
-            }
-        }
-        return { success: true };
-    }
-    return { success: false, message: "Player not found on your team." };
-}
 
+export function aiManageRoster(team) {
+    const hasUnavailablePlayer = team.roster.some(p => p.status.duration > 0);
+    if (!hasUnavailablePlayer || game.freeAgents.length === 0) return;
+    
+    const bestFA = game.freeAgents.reduce((best, p) => getPlayerScore(p, team.coach) > getPlayerScore(best, team.coach) ? p : best);
+    
+    const result = callFriend(bestFA.id, team);
+    if(result.success) {
+        console.log(`${team.name} successfully called in friend ${bestFA.name} for the week.`);
+    }
+}
 
 function developPlayer(player) {
     let potential = player.age < 12 ? getRandomInt(4, 8) : player.age < 16 ? getRandomInt(1, 5) : getRandomInt(0, 2);
@@ -526,24 +540,13 @@ export function updateDepthChart(playerId, newPositionSlot, side) {
     const team = game.playerTeam;
     const chart = team.depthChart[side];
     
-    // Find if the dropped player was already in a slot on this side OR the other side
     const oldSlot = Object.keys(chart).find(key => chart[key] === playerId);
-    
-    // Find if the target slot is already occupied
     const displacedPlayerId = chart[newPositionSlot];
     
-    // Place the dropped player in the new slot
     chart[newPositionSlot] = playerId;
 
-    // If the dropped player came from another slot on this side, that slot is now empty
     if (oldSlot) {
-        chart[oldSlot] = null;
-    }
-    
-    // If the target slot was occupied, the displaced player needs a home.
-    // If the dropped player came from a slot, put the displaced player there.
-    if (displacedPlayerId && oldSlot) {
-        chart[oldSlot] = displacedPlayerId;
+        chart[oldSlot] = displacedPlayerId || null;
     }
 }
 
@@ -557,21 +560,17 @@ export function changeFormation(side, formationName) {
     const newChart = Object.fromEntries(formation.slots.map(slot => [slot, null]));
     let playerPool = [...team.roster];
     
-    // Intelligently fill the new formation slots
-    for(const newSlot of formation.slots) {
+    for (const newSlot of formation.slots) {
         const position = newSlot.replace(/\d/g, '');
-        if(playerPool.length > 0) {
-            // Find the best available player for this slot
+        if (playerPool.length > 0) {
             const bestPlayerForSlot = playerPool.reduce((best, current) => {
                 return calculateOverall(current, position) > calculateOverall(best, position) ? current : best;
             });
             
             newChart[newSlot] = bestPlayerForSlot.id;
-            // A player can only be in one slot per side, so remove them from the pool
             playerPool = playerPool.filter(p => p.id !== bestPlayerForSlot.id);
         }
     }
-    
     team.depthChart[side] = newChart;
 }
 
