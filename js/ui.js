@@ -271,10 +271,13 @@ export function switchTab(tabId, gameState) {
 
 function renderMyTeamTab(gameState) {
     const { roster } = gameState.playerTeam;
-    let tableHtml = `<table class="min-w-full bg-white text-sm"><thead class="bg-gray-800 text-white"><tr><th class="text-left py-2 px-3">Name</th><th class="py-2 px-3">Age</th><th class="py-2 px-3">Status</th><th class="py-2 px-3">Best Pos Ovr</th><th></th></tr></thead><tbody class="divide-y">`;
+    let tableHtml = `<table class="min-w-full bg-white text-sm"><thead class="bg-gray-800 text-white"><tr><th class="text-left py-2 px-3">Name</th><th class="py-2 px-3">Age</th><th class="py-2 px-3">Status</th><th class="py-2 px-3">Best Pos Ovr</th></tr></thead><tbody class="divide-y">`;
     roster.forEach(p => {
+        // Do not show temporary players on the main roster page
+        if (p.status.type === 'temporary') return;
+
         const overalls = Object.keys(positionOverallWeights).map(pos => calculateOverall(p, pos));
-        tableHtml += `<tr><td class="py-2 px-3 font-semibold">${p.name}</td><td class="text-center py-2 px-3">${p.age}</td><td class="text-center py-2 px-3 ${p.status.type !== 'healthy' ? 'text-red-500 font-semibold' : ''}">${p.status.description || 'Healthy'}</td><td class="text-center py-2 px-3 font-bold">${Math.max(...overalls)}</td><td class="py-2 px-3 text-center"><button data-player-id="${p.id}" class="cut-player-btn text-red-500 hover:text-red-700 text-xs font-semibold">CUT</button></td></tr>`;
+        tableHtml += `<tr><td class="py-2 px-3 font-semibold">${p.name}</td><td class="text-center py-2 px-3">${p.age}</td><td class="text-center py-2 px-3 ${p.status.duration > 0 ? 'text-red-500 font-semibold' : ''}">${p.status.description || 'Healthy'}</td><td class="text-center py-2 px-3 font-bold">${Math.max(...overalls)}</td></tr>`;
     });
     elements.myTeamRoster.innerHTML = tableHtml + `</tbody></table>`;
 }
@@ -316,7 +319,7 @@ function renderDepthChartSide(side, gameState, slotsContainer, rosterContainer) 
     slots.forEach(slot => renderSlot(slot, roster, depthChart[side], slotsContainer, side));
     
     const positionedPlayerIds = Object.values(depthChart.offense).concat(Object.values(depthChart.defense)).filter(Boolean);
-    const availablePlayers = roster.filter(p => !positionedPlayerIds.includes(p.id));
+    const availablePlayers = roster.filter(p => !positionedPlayerIds.includes(p.id) && p.status.type !== 'temporary');
     
     renderAvailablePlayerList(availablePlayers, rosterContainer, side);
 }
@@ -349,33 +352,45 @@ function renderAvailablePlayerList(players, container, side) {
 
 function renderFreeAgencyTab(gameState) {
     const { freeAgents, playerTeam } = gameState;
-    const rosterFull = playerTeam.roster.length >= 10;
-    if (freeAgents.length === 0) {
-        elements.freeAgencyList.innerHTML = '<p class="text-gray-500">No free agents available this week.</p>';
+    const hasUnavailablePlayer = playerTeam.roster.some(p => p.status.duration > 0);
+
+    if (!hasUnavailablePlayer) {
+        elements.freeAgencyList.innerHTML = '<p class="text-gray-500">You can only call a friend if one of your players is injured or busy.</p>';
         return;
     }
-
-    let tableHtml = `<table class="min-w-full bg-white text-sm"><thead class="bg-gray-800 text-white"><tr><th class="text-left py-2 px-3">Name</th><th class="py-2 px-3">Age</th><th class="py-2 px-3">Best Pos</th><th class="py-2 px-3">Best Ovr</th><th></th></tr></thead><tbody class="divide-y">`;
+    
+    if (freeAgents.length === 0) {
+        elements.freeAgencyList.innerHTML = '<p class="text-gray-500">No friends are available to call this week.</p>';
+        return;
+    }
+    
+    let tableHtml = `<table class="min-w-full bg-white text-sm"><thead class="bg-gray-800 text-white"><tr><th class="text-left py-2 px-3">Name</th><th class="py-2 px-3">Relationship</th><th class="py-2 px-3">Best Pos</th><th class="py-2 px-3">Best Ovr</th><th></th></tr></thead><tbody class="divide-y">`;
 
     freeAgents.forEach(p => {
         const overalls = Object.entries(positionOverallWeights).map(([pos, _]) => ({ pos, ovr: calculateOverall(p, pos) }));
         const best = overalls.reduce((a, b) => a.ovr > b.ovr ? a : b);
-        tableHtml += `<tr><td class="py-2 px-3 font-semibold">${p.name}</td><td class="text-center py-2 px-3">${p.age}</td><td class="text-center py-2 px-3">${best.pos}</td><td class="text-center py-2 px-3 font-bold">${best.ovr}</td><td class="py-2 px-3 text-center"><button data-player-id="${p.id}" class="sign-player-btn bg-green-500 hover:bg-green-600 text-white px-3 py-1 text-xs rounded font-semibold disabled:bg-gray-400" ${rosterFull ? 'disabled' : ''}>SIGN</button></td></tr>`;
+        tableHtml += `<tr>
+            <td class="py-2 px-3 font-semibold">${p.name}</td>
+            <td class="text-center py-2 px-3">${p.relationship}</td>
+            <td class="text-center py-2 px-3">${best.pos}</td>
+            <td class="text-center py-2 px-3 font-bold">${best.ovr}</td>
+            <td class="py-2 px-3 text-center"><button data-player-id="${p.id}" class="call-friend-btn bg-green-500 hover:bg-green-600 text-white px-3 py-1 text-xs rounded font-semibold">CALL</button></td>
+        </tr>`;
     });
 
     elements.freeAgencyList.innerHTML = tableHtml + `</tbody></table>`;
-    if (rosterFull) {
-        elements.freeAgencyList.insertAdjacentHTML('afterbegin', '<p class="text-sm text-red-600 mb-2">Your roster is full. Cut a player to sign a free agent.</p>');
-    }
 }
 
 
 function renderScheduleTab(gameState) {
     let html = '';
+    const gamesPerWeek = gameState.teams.length / 2;
     for (let i = 0; i < 9; i++) {
-        const weekGames = gameState.schedule.slice(i * 10, (i + 1) * 10);
+        const weekGames = gameState.schedule.slice(i * gamesPerWeek, (i + 1) * gamesPerWeek);
         html += `<div class="p-4 rounded ${i === gameState.currentWeek ? 'bg-amber-100 border-2 border-amber-500' : 'bg-gray-100'}"><h4 class="font-bold text-lg mb-2">Week ${i + 1}</h4><div class="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm">`;
-        weekGames.forEach(g => { html += `<div class="bg-white p-2 rounded shadow-sm flex justify-center items-center"><span>${g.away.name}</span><span class="mx-2 font-bold text-gray-400">@</span><span>${g.home.name}</span></div>`; });
+        if(weekGames) {
+            weekGames.forEach(g => { html += `<div class="bg-white p-2 rounded shadow-sm flex justify-center items-center"><span>${g.away.name}</span><span class="mx-2 font-bold text-gray-400">@</span><span>${g.home.name}</span></div>`; });
+        }
         html += `</div></div>`;
     }
     elements.scheduleList.innerHTML = html;
