@@ -66,28 +66,40 @@ function handleDraftPlayer() {
     }
 }
 
+/**
+ * A robust function to manage the draft flow. It simulates AI picks until it is
+ * the player's turn or the draft has concluded.
+ */
 async function runAIDraftPicks() {
+    // A single function to check and end the draft if necessary.
     const checkDraftEnd = () => {
         if (gameState.currentPick >= gameState.draftOrder.length) {
             handleDraftEnd();
-            return true;
+            return true; // The draft is over
         }
-        return false;
+        return false; // The draft continues
     };
 
+    // Initial check before doing anything
     if (checkDraftEnd()) return;
     
+    // Loop through AI picks as long as it's not the player's turn and the draft is not over.
     while (gameState.draftOrder[gameState.currentPick].id !== gameState.playerTeam.id) {
         UI.renderDraftScreen(gameState, handlePlayerSelectInDraft);
+        
+        // Short delay to make AI picks feel more natural and not instant
         await new Promise(resolve => setTimeout(resolve, 100));
 
         const currentPickingTeam = gameState.draftOrder[gameState.currentPick];
         Game.simulateAIPick(currentPickingTeam);
         gameState.currentPick++;
 
+        // Check if the draft ended after that AI pick
         if (checkDraftEnd()) return;
     }
 
+    // If the loop finishes, it's now the player's turn (or the draft is over).
+    // The final render ensures the UI is up-to-date for the player's pick.
     UI.renderDraftScreen(gameState, handlePlayerSelectInDraft);
 }
 
@@ -180,6 +192,10 @@ function handleDashboardClicks(e) {
     }
 }
 
+function handleStatsChange() {
+    UI.renderPlayerStatsTab(gameState);
+}
+
 function main() {
     console.log("Game starting... Document loaded.");
     try {
@@ -190,6 +206,7 @@ function main() {
         document.getElementById('draft-player-btn')?.addEventListener('click', handleDraftPlayer);
         document.getElementById('dashboard-tabs')?.addEventListener('click', handleTabSwitch);
         document.getElementById('advance-week-btn')?.addEventListener('click', handleAdvanceWeek);
+        document.getElementById('modal-close-btn')?.addEventListener('click', UI.hideModal);
         document.getElementById('dashboard-content')?.addEventListener('click', handleDashboardClicks);
 
         document.getElementById('draft-search')?.addEventListener('input', () => UI.renderDraftPool(gameState, handlePlayerSelectInDraft));
@@ -198,6 +215,11 @@ function main() {
         
         document.getElementById('offense-formation-select')?.addEventListener('change', handleFormationChange);
         document.getElementById('defense-formation-select')?.addEventListener('change', handleFormationChange);
+        
+        // Stats Tab Event Listeners (NEW)
+        document.getElementById('stats-sort-by')?.addEventListener('change', handleStatsChange);
+        document.getElementById('stats-filter-pos')?.addEventListener('change', handleStatsChange);
+        document.getElementById('stats-filter-team')?.addEventListener('change', handleStatsChange);
 
 
         UI.setupDragAndDrop(handleDepthChartDrop);
@@ -210,4 +232,3 @@ function main() {
 }
 
 document.addEventListener('DOMContentLoaded', main);
-
