@@ -6,39 +6,58 @@ body {
     font-family: 'Bangers', cursive;
 }
 
-.player-card {
-    transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+/* Main Dashboard Tabs */
+.tab-button {
+    @apply w-full text-left px-4 py-2 rounded-md text-gray-700 hover:bg-amber-100 hover:text-amber-700 transition;
 }
 
-.player-card:hover {
-    transform: translateY(-4px);
-    box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+.tab-button.active {
+    @apply bg-amber-500 text-white font-semibold;
 }
 
-.player-card.selected {
-    transform: translateY(-4px);
-    box-shadow: 0 4px 12px rgba(0,0,0,0.1);
-    border-color: #f59e0b; /* amber-500 */
-    border-width: 2px;
+/* Depth Chart Sub-tabs */
+.depth-chart-tab {
+    @apply py-2 px-4 font-semibold text-gray-500 border-b-2 border-transparent;
+}
+.depth-chart-tab.active {
+    @apply border-amber-500 text-amber-600;
 }
 
-tr.selected {
-    background-color: #fef3c7; /* amber-100 */
-}
 
 /* Depth Chart Drag and Drop Styles */
 .depth-chart-slot {
-    min-height: 60px; /* Ensure drop zones are always visible */
-    border: 2px dashed #d1d5db; /* gray-300 */
-    background-color: #f9fafb; /* gray-50 */
+    min-height: 50px; /* Ensure empty slots are droppable */
+    transition: background-color 0.2s;
 }
-.depth-chart-player {
-    cursor: grab;
+
+.roster-list {
+    @apply space-y-2 p-2 bg-gray-100 rounded h-96 overflow-y-auto;
 }
-.depth-chart-player:active {
-    cursor: grabbing;
+
+.draggable-player {
+    @apply bg-white p-2 rounded border cursor-grab;
+    transition: opacity 0.2s;
 }
-.dragging {
-    opacity: 0.5;
+
+.draggable-player.dragging {
+    @apply opacity-50;
+}
+
+.depth-chart-slot.drag-over {
+    @apply ring-2 ring-amber-500 ring-offset-2;
+}
+
+/* Custom grid for player details in depth chart */
+.player-details-grid {
+    display: grid;
+    grid-template-columns: 2fr repeat(6, 1fr);
+    gap: 0.5rem;
+    align-items: center;
+    text-align: center;
+    font-size: 0.875rem; /* text-sm */
+}
+.player-details-grid span:first-child {
+    text-align: left;
+    font-weight: 600; /* font-semibold */
 }
 
