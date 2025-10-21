@@ -67,29 +67,40 @@ function handleDraftPlayer() {
 }
 
 async function runAIDraftPicks() {
-    UI.renderDraftScreen(gameState, handlePlayerSelectInDraft);
-
+    // Initial check to see if the draft is over before doing anything.
     if (gameState.currentPick >= gameState.draftOrder.length) {
         handleDraftEnd();
         return;
     }
 
+    UI.renderDraftScreen(gameState, handlePlayerSelectInDraft);
+
     let currentPickingTeam = gameState.draftOrder[gameState.currentPick];
+    // This loop runs as long as it's an AI's turn
     while (currentPickingTeam.id !== gameState.playerTeam.id) {
+        // Safeguard: Double-check if the draft ended during the loop.
+        if (gameState.currentPick >= gameState.draftOrder.length) {
+            handleDraftEnd();
+            return;
+        }
+
         await new Promise(resolve => setTimeout(resolve, 200));
 
         Game.simulateAIPick(currentPickingTeam);
         gameState.currentPick++;
         UI.renderDraftScreen(gameState, handlePlayerSelectInDraft);
 
-
+        // Check again after the pick, in case that was the last one.
         if (gameState.currentPick >= gameState.draftOrder.length) {
             handleDraftEnd();
             return;
         }
         currentPickingTeam = gameState.draftOrder[gameState.currentPick];
     }
+    // Loop ends, it's the player's turn again.
+    UI.renderDraftScreen(gameState, handlePlayerSelectInDraft);
 }
+
 
 function handleDraftEnd() {
     UI.showModal("Draft Complete!", "<p>The draft has concluded. Get ready for the season!</p>");
