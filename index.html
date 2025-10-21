@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale-1.0">
     <title>Backyard Football League</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -12,7 +12,7 @@
 </head>
 <body class="bg-gray-100 font-sans">
 
-    <div id="game-container" class="container mx-auto p-4 max-w-7xl">
+    <div id="game-container" class="container mx-auto p-4 max-w-7xl relative">
 
         <!-- Start Screen -->
         <div id="start-screen" class="text-center p-8 bg-white rounded-lg shadow-lg">
@@ -147,47 +147,29 @@
                 </aside>
 
                 <!-- Right Side Content -->
-                <main id="dashboard-content" class="w-4/5 bg-white p-6 rounded-lg shadow-md">
+                <main id="dashboard-content" class="w-4/5 bg-white p-6 rounded-lg shadow-md min-h-[600px]">
                     <div id="tab-content-my-team" class="tab-pane">
                         <h3 class="text-xl font-bold mb-4">Team Roster</h3>
                         <div id="my-team-roster"></div>
                     </div>
                     <div id="tab-content-depth-chart" class="tab-pane hidden">
-                        <!-- Depth Chart with sub-tabs -->
                         <div>
-                            <!-- Depth Chart Sub-tabs -->
                             <div id="depth-chart-sub-tabs" class="flex border-b mb-4">
                                 <button data-sub-tab="offense" class="depth-chart-tab active">Offense</button>
                                 <button data-sub-tab="defense" class="depth-chart-tab">Defense</button>
                             </div>
-
-                            <!-- Sub-tab Panes -->
                             <div id="depth-chart-offense-pane" class="depth-chart-sub-pane">
                                 <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-                                    <div class="md:col-span-2">
-                                        <h4 class="text-lg font-bold mb-2">Offense Starters</h4>
-                                        <div id="offense-depth-chart-slots" class="space-y-2"></div>
-                                    </div>
-                                    <div>
-                                        <h4 class="text-lg font-bold mb-2">Available Players</h4>
-                                        <div id="offense-depth-chart-roster" class="roster-list"></div>
-                                    </div>
+                                    <div class="md:col-span-2"><h4 class="text-lg font-bold mb-2">Offense Starters</h4><div id="offense-depth-chart-slots" class="space-y-2"></div></div>
+                                    <div><h4 class="text-lg font-bold mb-2">Available Players</h4><div id="offense-depth-chart-roster" class="roster-list"></div></div>
                                 </div>
                             </div>
                             <div id="depth-chart-defense-pane" class="depth-chart-sub-pane hidden">
                                 <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-                                    <div class="md:col-span-2">
-                                        <h4 class="text-lg font-bold mb-2">Defense Starters</h4>
-                                        <div id="defense-depth-chart-slots" class="space-y-2"></div>
-                                    </div>
-                                    <div>
-                                        <h4 class="text-lg font-bold mb-2">Available Players</h4>
-                                        <div id="defense-depth-chart-roster" class="roster-list"></div>
-                                    </div>
+                                    <div class="md:col-span-2"><h4 class="text-lg font-bold mb-2">Defense Starters</h4><div id="defense-depth-chart-slots" class="space-y-2"></div></div>
+                                    <div><h4 class="text-lg font-bold mb-2">Available Players</h4><div id="defense-depth-chart-roster" class="roster-list"></div></div>
                                 </div>
                             </div>
-
-                            <!-- Positional Overalls Spreadsheet -->
                             <div class="mt-8">
                                 <h3 class="text-xl font-bold mb-4">Positional Overalls</h3>
                                 <div id="positional-overalls-container" class="overflow-x-auto"></div>
@@ -218,6 +200,19 @@
             </div>
         </div>
 
+    </div>
+
+    <!-- Modal -->
+    <div id="modal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+        <div id="modal-content" class="bg-white rounded-lg shadow-xl p-6 max-w-lg w-full">
+            <h3 id="modal-title" class="text-2xl font-bold mb-4">Modal Title</h3>
+            <div id="modal-body">
+                <p>Modal body content goes here.</p>
+            </div>
+            <div class="mt-6 text-right">
+                <button id="modal-close-btn" class="bg-amber-500 hover:bg-amber-600 text-white font-bold py-2 px-6 rounded-lg">Close</button>
+            </div>
+        </div>
     </div>
 
     <script type="module" src="js/main.js"></script>
