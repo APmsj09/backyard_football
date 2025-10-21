@@ -90,8 +90,10 @@ function generatePlayer(minAge = 8, maxAge = 17) {
             attributes[cat][attr] = Math.max(1, Math.min(99, attributes[cat][attr]));
         }
     }));
+    
+    const initialStats = { receptions: 0, recYards: 0, passYards: 0, rushYards: 0, touchdowns: 0, tackles: 0 };
 
-    return { id: crypto.randomUUID(), name: `${firstName} ${lastName}`, age, favoriteOffensivePosition, favoriteDefensivePosition, attributes, teamId: null, status: { type: 'healthy', description: '', duration: 0 }, gameStats: {}, seasonStats: {}, careerStats: { seasonsPlayed: 0 } };
+    return { id: crypto.randomUUID(), name: `${firstName} ${lastName}`, age, favoriteOffensivePosition, favoriteDefensivePosition, attributes, teamId: null, status: { type: 'healthy', description: '', duration: 0 }, gameStats: {...initialStats}, seasonStats: {...initialStats}, careerStats: { ...initialStats, seasonsPlayed: 0 } };
 }
 
 export function yieldToMain() { return new Promise(resolve => setTimeout(resolve, 0)); }
@@ -141,7 +143,7 @@ export function setupDraft() {
     game.draftOrder = [];
     game.currentPick = 0;
     const teams = [...game.teams].sort(() => Math.random() - 0.5);
-    for (let i = 0; i < 10; i++) { // 10 rounds for 10 players
+    for (let i = 0; i < 10; i++) {
         game.draftOrder.push(...(i % 2 === 0 ? teams : [...teams].reverse()));
     }
 }
@@ -158,7 +160,7 @@ export function simulateAIPick(team) {
 }
 
 export function addPlayerToTeam(player, team) {
-    if (team.roster.length < 10) { // Roster size is now 10
+    if (team.roster.length < 10) {
         player.teamId = team.id; team.roster.push(player);
         if (team.id === game.playerTeam.id) {
             for (const pos in team.depthChart) {
@@ -192,12 +194,11 @@ function resetGameStats() {
 
 function getTeamRatings(team) {
     const roster = team.roster.filter(p => p.status.type === 'healthy');
-    if (roster.length < 7) return { offense: 0, defense: 0 }; // 7 players needed
+    if (roster.length < 7) return { offense: 0, defense: 0 };
 
     const qb = roster.sort((a,b) => calculateOverall(b, 'QB') - calculateOverall(a, 'QB'))[0];
     const rb = roster.sort((a,b) => calculateOverall(b, 'RB') - calculateOverall(a, 'RB'))[0];
     const wrs = roster.sort((a,b) => calculateOverall(b, 'WR') - calculateOverall(a, 'WR')).slice(0, 2);
-    // OL is implicit in 7v7 backyard
     const dl = roster.sort((a,b) => calculateOverall(b, 'DL') - calculateOverall(a, 'DL'))[0];
     const lb = roster.sort((a,b) => calculateOverall(b, 'LB') - calculateOverall(a, 'LB'))[0];
     const db = roster.sort((a,b) => calculateOverall(b, 'DB') - calculateOverall(a, 'DB'))[0];
@@ -207,10 +208,7 @@ function getTeamRatings(team) {
     const passDefense = calculateOverall(db, 'DB') + calculateOverall(lb, 'LB');
     const rushDefense = calculateOverall(dl, 'DL') + calculateOverall(lb, 'LB');
 
-    return { 
-        offense: (passOffense + rushOffense), 
-        defense: (passDefense + rushDefense) 
-    };
+    return { offense: passOffense + rushOffense, defense: passDefense + rushDefense };
 }
 
 function simulateGame(homeTeam, awayTeam) {
@@ -221,17 +219,50 @@ function simulateGame(homeTeam, awayTeam) {
     const homeScorePotential = (homeRatings.offense / awayRatings.defense) * 21 * 1.05;
     const awayScorePotential = (awayRatings.offense / homeRatings.defense) * 21;
 
-    let homeScore = Math.max(0, Math.round(Math.random() * homeScorePotential));
-    let awayScore = Math.max(0, Math.round(Math.random() * awayScorePotential));
+    let homeScore = Math.round(Math.random() * homeScorePotential);
+    let awayScore = Math.round(Math.random() * awayScorePotential);
 
     [homeTeam, awayTeam].forEach((team, isHome) => {
         const score = isHome ? homeScore : awayScore;
         const players = team.roster.filter(p => p.status.type === 'healthy');
-        if (score === 0 || players.length === 0) return;
+        if (score === 0 || players.length < 7) return;
 
-        for (let i = 0; i < Math.floor(score / 7); i++) {
+        const qb = players.sort((a,b) => calculateOverall(b, 'QB') - calculateOverall(a, 'QB'))[0];
+        const rb = players.sort((a,b) => calculateOverall(b, 'RB') - calculateOverall(a, 'RB'))[0];
+        const wrs = players.sort((a,b) => calculateOverall(b, 'WR') - calculateOverall(a, 'WR'));
+        const defenders = players.sort((a,b) => calculateOverall(b, 'LB') + calculateOverall(b, 'DL') - (calculateOverall(a, 'LB') + calculateOverall(a, 'DL')));
+
+        const touchdowns = Math.floor(score / 7);
+        let passYards = 0;
+        let rushYards = 0;
+
+        for (let i = 0; i < touchdowns; i++) {
             const scorer = getRandom(players);
-            scorer.gameStats.touchdowns = (scorer.gameStats.touchdowns || 0) + 1;
+            scorer.gameStats.touchdowns++;
+            if (Math.random() > 0.4) { // Passing TD
+                const receiver = getRandom(wrs.slice(0,3));
+                const yards = getRandomInt(10, 40);
+                passYards += yards;
+                receiver.gameStats.receptions++;
+                receiver.gameStats.recYards += yards;
+            } else { // Rushing TD
+                const yards = getRandomInt(5, 25);
+                rushYards += yards;
+                rb.gameStats.rushYards += yards;
+            }
+        }
+        qb.gameStats.passYards = passYards;
+        rb.gameStats.rushYards += Math.max(0, getRandomInt(20, 80) - awayRatings.defense / 10);
+        
+        defenders.forEach((d, i) => {
+            d.gameStats.tackles = getRandomInt(1, 5) + (i < 3 ? getRandomInt(1,3) : 0);
+        });
+    });
+
+    [...homeTeam.roster, ...awayTeam.roster].forEach(p => {
+        for(const stat in p.gameStats) {
+            p.seasonStats[stat] = (p.seasonStats[stat] || 0) + p.gameStats[stat];
+            p.careerStats[stat] = (p.careerStats[stat] || 0) + p.gameStats[stat];
         }
     });
 
@@ -240,6 +271,7 @@ function simulateGame(homeTeam, awayTeam) {
 
     return { homeTeam, awayTeam, homeScore, awayScore };
 }
+
 
 function updatePlayerStatuses() {
     for (const player of game.players) {
@@ -292,7 +324,7 @@ export function generateWeeklyFreeAgents() {
 
 export function aiManageRoster(team) {
     const healthyRoster = team.roster.filter(p => p.status.type === 'healthy');
-    if (healthyRoster.length >= 10 || game.freeAgents.length === 0) return; // 10 player roster
+    if (healthyRoster.length >= 10 || game.freeAgents.length === 0) return;
 
     let worstPlayer = team.roster.length > 0 ? team.roster.reduce((worst, p) => getPlayerScore(p, team.coach) < getPlayerScore(worst, team.coach) ? p : worst) : null;
     let bestFA = game.freeAgents.reduce((best, p) => getPlayerScore(p, team.coach) > getPlayerScore(best, team.coach) ? p : best);
@@ -301,12 +333,40 @@ export function aiManageRoster(team) {
         addPlayerToTeam(bestFA, team);
         game.freeAgents = game.freeAgents.filter(p => p.id !== bestFA.id);
     } else if (worstPlayer && getPlayerScore(bestFA, team.coach) > getPlayerScore(worstPlayer, team.coach) * 1.1) {
-        worstPlayer.teamId = null;
-        team.roster = team.roster.filter(p => p.id !== worstPlayer.id);
-        addPlayerToTeam(bestFA, team);
-        game.freeAgents = game.freeAgents.filter(p => p.id !== bestFA.id);
+        playerCut(worstPlayer.id, team);
+        playerSignFreeAgent(bestFA.id, team);
     }
 }
+
+export function playerSignFreeAgent(playerId, team = game.playerTeam) {
+    if (team.roster.length >= 10) {
+        return { success: false, message: "Roster is full. You must cut a player first." };
+    }
+    const player = game.freeAgents.find(p => p.id === playerId);
+    if(player) {
+        game.freeAgents = game.freeAgents.filter(p => p.id !== playerId);
+        addPlayerToTeam(player, team);
+        return { success: true };
+    }
+    return { success: false, message: "Player not found."};
+}
+
+export function playerCut(playerId, team = game.playerTeam) {
+    const playerIndex = team.roster.findIndex(p => p.id === playerId);
+    if(playerIndex > -1) {
+        const [player] = team.roster.splice(playerIndex, 1);
+        player.teamId = null;
+        // Remove from depth chart
+        for(const pos in team.depthChart) {
+            if(team.depthChart[pos] === playerId) {
+                team.depthChart[pos] = null;
+            }
+        }
+        return { success: true };
+    }
+    return { success: false, message: "Player not found on your team." };
+}
+
 
 function developPlayer(player) {
     let potential = player.age < 12 ? getRandomInt(4, 8) : player.age < 16 ? getRandomInt(1, 5) : getRandomInt(0, 2);
@@ -329,10 +389,13 @@ export function advanceToOffseason() {
     game.players.forEach(p => {
         p.age++; p.careerStats.seasonsPlayed++; developPlayer(p);
         if (p.age < 18) {
-            p.seasonStats = {}; p.status = { type: 'healthy', description: '', duration: 0 };
+            p.seasonStats = { receptions: 0, recYards: 0, passYards: 0, rushYards: 0, touchdowns: 0, tackles: 0 };
+            p.status = { type: 'healthy', description: '', duration: 0 };
             remainingPlayers.push(p);
         } else {
-            if (p.careerStats.touchdowns > 20 || p.careerStats.passYards > 5000) game.hallOfFame.push(p);
+            if (p.careerStats.touchdowns > 20 || p.careerStats.passYards > 5000 || p.careerStats.tackles > 200) {
+                 game.hallOfFame.push(p);
+            }
             retiredCount++;
         }
     });
