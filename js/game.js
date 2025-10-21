@@ -9,9 +9,9 @@ const defensivePositions = ['DL', 'LB', 'DB'];
 const weeklyEvents = [
     { type: 'injured', description: 'Sprained Ankle', minDuration: 1, maxDuration: 2, chance: 0.01 },
     { type: 'injured', description: 'Jammed Finger', minDuration: 1, maxDuration: 1, chance: 0.015 },
-    { type: 'busy', description: 'Grounded by Parents', minDuration: 1, maxDuration: 1, chance: 0.02 },
+    { type: 'busy', description: 'Grounded by Parents', minDuration: 1, maxDuration: 3, chance: 0.02 },
     { type: 'busy', description: 'Big School Project', minDuration: 1, maxDuration: 1, chance: 0.02 },
-    { type: 'busy', description: 'Family Vacation', minDuration: 1, maxDuration: 1, chance: 0.005 }
+    { type: 'busy', description: 'Family Vacation', minDuration: 1, maxDuration: 2, chance: 0.005 }
 ];
 
 export const positionOverallWeights = {
@@ -119,7 +119,7 @@ export function createPlayerTeam(teamName) {
     const division = game.teams.length % 2 === 0 ? divisionNames[0] : divisionNames[1];
     const playerTeam = {
         id: crypto.randomUUID(), name: finalTeamName, roster: [], coach: getRandom(coachPersonalities), division, wins: 0, losses: 0,
-        depthChart: { QB: null, RB: null, WR1: null, WR2: null, DL1: null, DL2: null, LB: null, DB: null }
+        depthChart: { QB: null, RB: null, WR1: null, WR2: null, DL: null, LB: null, DB: null }
     };
     game.teams.push(playerTeam);
     game.divisions[division].push(playerTeam.id);
@@ -141,7 +141,7 @@ export function setupDraft() {
     game.draftOrder = [];
     game.currentPick = 0;
     const teams = [...game.teams].sort(() => Math.random() - 0.5);
-    for (let i = 0; i < 8; i++) {
+    for (let i = 0; i < 10; i++) { // 10 rounds for 10 players
         game.draftOrder.push(...(i % 2 === 0 ? teams : [...teams].reverse()));
     }
 }
@@ -158,7 +158,7 @@ export function simulateAIPick(team) {
 }
 
 export function addPlayerToTeam(player, team) {
-    if (team.roster.length < 8) {
+    if (team.roster.length < 10) { // Roster size is now 10
         player.teamId = team.id; team.roster.push(player);
         if (team.id === game.playerTeam.id) {
             for (const pos in team.depthChart) {
@@ -192,24 +192,24 @@ function resetGameStats() {
 
 function getTeamRatings(team) {
     const roster = team.roster.filter(p => p.status.type === 'healthy');
-    if (roster.length < 8) return { offense: 0, defense: 0 };
+    if (roster.length < 7) return { offense: 0, defense: 0 }; // 7 players needed
 
     const qb = roster.sort((a,b) => calculateOverall(b, 'QB') - calculateOverall(a, 'QB'))[0];
     const rb = roster.sort((a,b) => calculateOverall(b, 'RB') - calculateOverall(a, 'RB'))[0];
     const wrs = roster.sort((a,b) => calculateOverall(b, 'WR') - calculateOverall(a, 'WR')).slice(0, 2);
-    const ol = roster.sort((a,b) => calculateOverall(b, 'OL') - calculateOverall(a, 'OL')).slice(0, 2);
-    const dl = roster.sort((a,b) => calculateOverall(b, 'DL') - calculateOverall(a, 'DL')).slice(0, 2);
+    // OL is implicit in 7v7 backyard
+    const dl = roster.sort((a,b) => calculateOverall(b, 'DL') - calculateOverall(a, 'DL'))[0];
     const lb = roster.sort((a,b) => calculateOverall(b, 'LB') - calculateOverall(a, 'LB'))[0];
     const db = roster.sort((a,b) => calculateOverall(b, 'DB') - calculateOverall(a, 'DB'))[0];
 
-    const passOffense = calculateOverall(qb, 'QB') * 1.5 + wrs.reduce((sum, p) => sum + calculateOverall(p, 'WR'), 0);
-    const rushOffense = calculateOverall(rb, 'RB') * 1.5 + ol.reduce((sum, p) => sum + calculateOverall(p, 'OL'), 0);
-    const passDefense = calculateOverall(db, 'DB') * 1.5 + calculateOverall(lb, 'LB');
-    const rushDefense = dl.reduce((sum, p) => sum + calculateOverall(p, 'DL'), 0) + calculateOverall(lb, 'LB') * 1.5;
+    const passOffense = calculateOverall(qb, 'QB') + wrs.reduce((sum, p) => sum + calculateOverall(p, 'WR'), 0);
+    const rushOffense = calculateOverall(rb, 'RB');
+    const passDefense = calculateOverall(db, 'DB') + calculateOverall(lb, 'LB');
+    const rushDefense = calculateOverall(dl, 'DL') + calculateOverall(lb, 'LB');
 
     return { 
-        offense: (passOffense + rushOffense) / 2, 
-        defense: (passDefense + rushDefense) / 2 
+        offense: (passOffense + rushOffense), 
+        defense: (passDefense + rushDefense) 
     };
 }
 
@@ -292,12 +292,12 @@ export function generateWeeklyFreeAgents() {
 
 export function aiManageRoster(team) {
     const healthyRoster = team.roster.filter(p => p.status.type === 'healthy');
-    if (healthyRoster.length >= 8 || game.freeAgents.length === 0) return;
+    if (healthyRoster.length >= 10 || game.freeAgents.length === 0) return; // 10 player roster
 
     let worstPlayer = team.roster.length > 0 ? team.roster.reduce((worst, p) => getPlayerScore(p, team.coach) < getPlayerScore(worst, team.coach) ? p : worst) : null;
     let bestFA = game.freeAgents.reduce((best, p) => getPlayerScore(p, team.coach) > getPlayerScore(best, team.coach) ? p : best);
     
-    if (team.roster.length < 8) {
+    if (team.roster.length < 10) {
         addPlayerToTeam(bestFA, team);
         game.freeAgents = game.freeAgents.filter(p => p.id !== bestFA.id);
     } else if (worstPlayer && getPlayerScore(bestFA, team.coach) > getPlayerScore(worstPlayer, team.coach) * 1.1) {
