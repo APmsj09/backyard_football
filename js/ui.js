@@ -59,9 +59,10 @@ export function setupElements() {
         defenseDepthChartSlots: document.getElementById('defense-depth-chart-slots'),
         defenseDepthChartRoster: document.getElementById('defense-depth-chart-roster'),
         positionalOverallsContainer: document.getElementById('positional-overalls-container'),
-        // New Stats elements
+        // Stats filter elements
         statsSortBy: document.getElementById('stats-sort-by'),
         statsFilterPos: document.getElementById('stats-filter-pos'),
+        statsFilterTeam: document.getElementById('stats-filter-team'), // NEW
     };
     console.log("UI Elements have been successfully set up.");
 }
@@ -276,20 +277,26 @@ function renderMyTeamTab(gameState) {
     const { roster } = gameState.playerTeam;
     let tableHtml = `<table class="min-w-full bg-white text-sm"><thead class="bg-gray-800 text-white"><tr><th class="text-left py-2 px-3">Name</th><th class="py-2 px-3">Age</th><th class="py-2 px-3">Status</th><th class="py-2 px-3">Toughness</th><th class="py-2 px-3">Best Pos Ovr</th></tr></thead><tbody class="divide-y">`;
     roster.forEach(p => {
-        if (p.status.type === 'temporary') return;
         const overalls = Object.keys(positionOverallWeights).map(pos => calculateOverall(p, pos));
         
         let statusClass = '';
-        if (p.status.type === 'injured') {
-            statusClass = 'text-red-600 bg-red-100 font-semibold rounded-full px-2 py-0.5';
+        let namePrefix = '';
+
+        if (p.status.type === 'temporary') {
+             statusClass = 'bg-green-200 text-green-800 font-semibold rounded-full px-2 py-0.5';
+             namePrefix = '<span class="font-bangers text-sm text-green-700 mr-1">TEMP</span>';
+        } else if (p.status.type === 'injured') {
+            statusClass = 'bg-red-100 text-red-600 font-semibold rounded-full px-2 py-0.5';
         } else if (p.status.type === 'busy') {
-            statusClass = 'text-amber-600 bg-amber-100 font-semibold rounded-full px-2 py-0.5';
+            statusClass = 'bg-amber-100 text-amber-600 font-semibold rounded-full px-2 py-0.5';
         } else {
              statusClass = 'text-green-600';
         }
+        
+        const rowClass = p.status.type === 'temporary' ? 'bg-green-50' : '';
 
-        tableHtml += `<tr>
-            <td class="py-2 px-3 font-semibold">${p.name}</td>
+        tableHtml += `<tr class="${rowClass}">
+            <td class="py-2 px-3 font-semibold flex items-center">${namePrefix}${p.name}</td>
             <td class="text-center py-2 px-3">${p.age}</td>
             <td class="text-center py-2 px-3"><span class="${statusClass}">${p.status.description || 'Healthy'}</span></td>
             <td class="text-center py-2 px-3">${p.attributes.mental.toughness}</td>
@@ -350,7 +357,16 @@ function renderSlot(positionSlot, roster, chart, container, side) {
     slotEl.dataset.positionSlot = positionSlot;
     slotEl.dataset.side = side;
     if (player) { slotEl.draggable = true; slotEl.dataset.playerId = player.id; }
-    slotEl.innerHTML = `<span class="font-bold w-1/4">${positionSlot}</span><div class="player-details-grid w-3/4"><span>${player ? player.name : 'Empty'}</span><span class="font-bold text-amber-600">${overall}</span><span>${player ? player.attributes.physical.speed : '-'}</span><span>${player ? player.attributes.physical.strength : '-'}</span><span>${player ? player.attributes.physical.agility : '-'}</span><span>${player ? player.attributes.technical.throwingAccuracy : '-'}</span><span>${player ? player.attributes.technical.catchingHands : '-'}</span></div>`;
+
+    let namePrefix = '';
+    if (player && player.status.type === 'temporary') {
+        namePrefix = '<span class="font-bangers text-sm text-green-700 mr-1">TEMP</span>';
+    }
+
+    const slotClass = player && player.status.type === 'temporary' ? 'bg-green-100' : 'bg-gray-200';
+
+    slotEl.innerHTML = `<span class="font-bold w-1/4">${positionSlot}</span><div class="player-details-grid w-3/4"><span>${player ? namePrefix + player.name : 'Empty'}</span><span class="font-bold text-amber-600">${overall}</span><span>${player ? player.attributes.physical.speed : '-'}</span><span>${player ? player.attributes.physical.strength : '-'}</span><span>${player ? player.attributes.physical.agility : '-'}</span><span>${player ? player.attributes.technical.throwingAccuracy : '-'}</span><span>${player ? player.attributes.technical.catchingHands : '-'}</span></div>`;
+    slotEl.classList.add(slotClass);
     container.appendChild(slotEl);
 }
 
@@ -362,14 +378,23 @@ function renderAvailablePlayerList(players, container, side) {
         playerEl.draggable = true;
         playerEl.dataset.playerId = player.id;
         playerEl.dataset.side = side;
-        playerEl.textContent = player.name;
+        
+        let playerName = player.name;
+        if (player.status.type === 'temporary') {
+            playerName = `<span class="text-green-700 font-bangers text-sm mr-1">[TEMP]</span> ${playerName}`;
+            playerEl.classList.add('bg-green-50', 'border-green-300');
+        } else {
+             playerEl.classList.add('bg-white', 'border-gray-200');
+        }
+        
+        playerEl.innerHTML = playerName;
         container.appendChild(playerEl);
     });
 }
 
 function renderFreeAgencyTab(gameState) {
     const { freeAgents, playerTeam } = gameState;
-    const hasUnavailablePlayer = playerTeam.roster.some(p => p.status.duration > 0);
+    const hasUnavailablePlayer = playerTeam.roster.some(p => p.status.duration > 0 && p.status.type !== 'temporary');
 
     if (!hasUnavailablePlayer) {
         elements.freeAgencyList.innerHTML = '<p class="text-gray-500">You can only call a friend if one of your players is injured or busy.</p>';
@@ -411,7 +436,6 @@ function renderScheduleTab(gameState) {
     for (let i = 0; i < 9; i++) {
         const weekGames = gameState.schedule.slice(i * gamesPerWeek, (i + 1) * gamesPerWeek);
         
-        // Determine player's game result for visual feedback
         let playerGameResult = null;
         const playerGame = weekGames.find(g => g.home.id === gameState.playerTeam.id || g.away.id === gameState.playerTeam.id);
         if (playerGame && playerGame.homeScore !== undefined) {
@@ -467,12 +491,20 @@ function renderStandingsTab(gameState) {
 function renderPlayerStatsTab(gameState) {
     const sortBy = elements.statsSortBy.value;
     const filterPos = elements.statsFilterPos.value;
+    const filterTeam = elements.statsFilterTeam.value;
     const stats = ['passYards', 'rushYards', 'recYards', 'receptions', 'touchdowns', 'tackles'];
     
     // 1. Filtering
-    let filteredPlayers = gameState.players.filter(p => p.teamId); // Only include drafted players
+    let filteredPlayers = gameState.players.filter(p => p.teamId);
+    
     if (filterPos) {
         filteredPlayers = filteredPlayers.filter(p => p.favoriteOffensivePosition === filterPos || p.favoriteDefensivePosition === filterPos);
+    }
+    
+    if (filterTeam === 'mine') {
+        filteredPlayers = filteredPlayers.filter(p => p.teamId === gameState.playerTeam.id);
+    } else if (filterTeam === 'others') {
+        filteredPlayers = filteredPlayers.filter(p => p.teamId !== gameState.playerTeam.id);
     }
 
     // 2. Sorting
