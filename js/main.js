@@ -66,46 +66,33 @@ function handleDraftPlayer() {
     }
 }
 
-/**
- * A robust function to manage the draft flow. It simulates AI picks until it is
- * the player's turn or the draft has concluded.
- */
 async function runAIDraftPicks() {
-    // A single function to check and end the draft if necessary.
     const checkDraftEnd = () => {
         if (gameState.currentPick >= gameState.draftOrder.length) {
             handleDraftEnd();
-            return true; // The draft is over
+            return true;
         }
-        return false; // The draft continues
+        return false;
     };
 
-    // Initial check before doing anything
     if (checkDraftEnd()) return;
     
-    // Loop through AI picks as long as it's not the player's turn and the draft is not over.
     while (gameState.draftOrder[gameState.currentPick].id !== gameState.playerTeam.id) {
         UI.renderDraftScreen(gameState, handlePlayerSelectInDraft);
-        
-        // Short delay to make AI picks feel more natural and not instant
         await new Promise(resolve => setTimeout(resolve, 100));
 
         const currentPickingTeam = gameState.draftOrder[gameState.currentPick];
         Game.simulateAIPick(currentPickingTeam);
         gameState.currentPick++;
 
-        // Check if the draft ended after that AI pick
         if (checkDraftEnd()) return;
     }
 
-    // If the loop finishes, it's now the player's turn (or the draft is over).
-    // The final render ensures the UI is up-to-date for the player's pick.
     UI.renderDraftScreen(gameState, handlePlayerSelectInDraft);
 }
 
 
 function handleDraftEnd() {
-    // Have all AI teams set their initial depth charts
     gameState.teams.forEach(team => {
         if (team.id !== gameState.playerTeam.id) {
             Game.aiSetDepthChart(team);
@@ -145,16 +132,21 @@ async function handleAdvanceWeek() {
     const results = Game.simulateWeek();
 
     if (results) {
-        let resultsHtml = '<div class="space-y-2">';
         const playerGame = results.find(r => r.homeTeam.id === gameState.playerTeam.id || r.awayTeam.id === gameState.playerTeam.id);
+        
+        let resultsHtml = '';
         if (playerGame) {
-            resultsHtml += `<p class="text-lg font-bold text-center">${playerGame.awayTeam.name} ${playerGame.awayScore} @ ${playerGame.homeTeam.name} ${playerGame.homeScore}</p><hr class="my-2">`;
+            resultsHtml += `<div class="text-center mb-4">
+                <p class="text-2xl font-bold">${playerGame.awayTeam.name} ${playerGame.awayScore} @ ${playerGame.homeTeam.name} ${playerGame.homeScore}</p>
+            </div>
+            <h4 class="font-bold mb-2">Game Log</h4>
+            <div class="game-log bg-gray-100 p-2 rounded h-48 overflow-y-auto text-sm">
+                ${playerGame.gameLog.join('<br>')}
+            </div>
+            `;
         }
-        results.forEach(r => {
-            resultsHtml += `<p>${r.awayTeam.name} ${r.awayScore} @ ${r.homeTeam.name} ${r.homeScore}</p>`;
-        });
-        resultsHtml += '</div>';
-        UI.showModal(`Week ${gameState.currentPick} Results`, resultsHtml);
+        
+        UI.showModal(`Week ${gameState.currentWeek} Results`, resultsHtml);
 
         gameState.teams.filter(t => t.id !== gameState.playerTeam.id).forEach(Game.aiManageRoster);
         Game.generateWeeklyFreeAgents();
@@ -183,7 +175,6 @@ function handleDashboardClicks(e) {
     if (target.matches('.cut-player-btn')) {
         const playerId = target.dataset.playerId;
         const player = gameState.playerTeam.roster.find(p => p.id === playerId);
-        // Use custom modal instead of confirm
         UI.showModal(
             `Cut ${player.name}?`,
             `<p>Are you sure you want to cut ${player.name}? This cannot be undone.</p>`,
