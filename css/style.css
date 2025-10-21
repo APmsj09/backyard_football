@@ -102,3 +102,8 @@ body {
     border-style: dashed !important;
 }
 
+/* Modal Game Log */
+.game-log {
+    font-family: 'Courier New', Courier, monospace;
+}
+
