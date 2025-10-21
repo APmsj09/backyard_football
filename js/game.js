@@ -94,7 +94,7 @@ function generatePlayer(minAge = 8, maxAge = 17) {
 
     const initialStats = { receptions: 0, recYards: 0, passYards: 0, rushYards: 0, touchdowns: 0, tackles: 0, sacks: 0, interceptions: 0 };
 
-    return { id: crypto.randomUUID(), name: `${firstName} ${lastName}`, age, favoriteOffensivePosition, favoriteDefensivePosition, attributes, teamId: null, status: { type: 'healthy', description: '', duration: 0 }, gameStats: { ...initialStats }, seasonStats: { ...initialStats }, careerStats: { ...initialStats, seasonsPlayed: 0 } };
+    return { id: crypto.randomUUID(), name: `${firstName} ${lastName}`, age, favoriteOffensivePosition, favoriteDefensivePosition, attributes, teamId: null, status: { type: 'healthy', description: '', duration: 0 }, fatigue: 0, gameStats: { ...initialStats }, seasonStats: { ...initialStats }, careerStats: { ...initialStats, seasonsPlayed: 0 } };
 }
 
 export function yieldToMain() { return new Promise(resolve => setTimeout(resolve, 0)); }
@@ -248,6 +248,7 @@ export function generateSchedule() {
 
 function resetGameStats() {
     game.players.forEach(player => {
+        player.fatigue = 0;
         player.gameStats = { receptions: 0, recYards: 0, passYards: 0, rushYards: 0, touchdowns: 0, tackles: 0, sacks: 0, interceptions: 0 };
     });
 }
@@ -291,34 +292,38 @@ function getPlayersForSlots(team, side, slotPrefix, usedPlayerIds) {
     return activePlayers;
 }
 
-function determinePlayCall(team, down, yardsToGo, ballOn, scoreDiff) {
-    const { coach } = team;
-    let passChance = 0.4; // Base pass chance
-
-    if (down === 3 && yardsToGo > 6) passChance += 0.4;
-    if (down === 4 && yardsToGo > 3) passChance = 0.9;
-    if (ballOn > 80) passChance += 0.1; 
-    if (scoreDiff < -7) passChance += 0.2; 
-
-    if (coach.type === 'West Coast Offense') passChance += 0.2;
-    if (coach.type === 'Ground and Pound') passChance -= 0.3;
-
-    const usedIds = new Set();
-    const qb = getPlayersForSlots(team, 'offense', 'QB', usedIds)[0];
-    const rb = getPlayersForSlots(team, 'offense', 'RB', usedIds)[0];
-    if (qb && rb) {
-        const passStrength = calculateOverall(qb, 'QB');
-        const runStrength = calculateOverall(rb, 'RB');
-        if (passStrength > runStrength + 10) passChance += 0.1;
-        if (runStrength > passStrength + 10) passChance -= 0.1;
-    }
+function determinePlayCall(offense, defense, down, yardsToGo, ballOn, scoreDiff) {
+    const { coach } = offense;
     
-    if (Math.random() < passChance) {
-        const deepPassChance = (yardsToGo > 10 || (ballOn < 50 && scoreDiff < 0)) ? 0.4 : 0.2;
-        return Math.random() < deepPassChance ? 'deep_pass' : 'short_pass';
-    } else {
-        return 'run';
+    // Pre-snap read / Audible logic
+    const offenseFormation = offenseFormations[offense.formations.offense];
+    const defenseFormation = defenseFormations[defense.formations.defense];
+    const qb = getPlayersForSlots(offense, 'offense', 'QB', new Set())[0];
+
+    let basePlay = 'run';
+    if (offenseFormation.personnel.WR > defenseFormation.personnel.DB) basePlay = 'pass';
+    if (offenseFormation.personnel.RB + offenseFormation.personnel.OL > defenseFormation.personnel.DL + defenseFormation.personnel.LB) basePlay = 'run';
+    
+    let playCall = basePlay === 'run' ? 'run' : 'short_pass';
+    
+    // Situational adjustments
+    if (down >= 3 && yardsToGo > 6) playCall = 'short_pass';
+    if (yardsToGo > 15) playCall = 'deep_pass';
+    if (down === 4 && yardsToGo > 4) playCall = 'deep_pass';
+    if (ballOn > 85 && yardsToGo < 10) playCall = 'run';
+    if (scoreDiff < -10) playCall = 'deep_pass';
+
+    // Coach override
+    if(coach.type === 'Ground and Pound') playCall = 'run';
+    if(coach.type === 'West Coast Offense' && playCall !== 'deep_pass') playCall = 'short_pass';
+
+    // QB IQ check for audible
+    if (qb && qb.attributes.mental.playbookIQ > 75 && Math.random() < 0.5) {
+        if (basePlay === 'run' && (playCall === 'short_pass' || playCall === 'deep_pass')) gameLog.push(`${qb.name} audibles to a pass!`);
+        if (basePlay === 'pass' && playCall === 'run') gameLog.push(`${qb.name} audibles to a run!`);
     }
+
+    return playCall;
 }
 
 
@@ -333,6 +338,11 @@ function resolvePlay(offense, defense, playCall, gameState) {
     const lbs = getPlayersForSlots(defense, 'defense', 'LB', usedPlayerIds);
     const dbs = getPlayersForSlots(defense, 'defense', 'DB', usedPlayerIds);
 
+    // Apply fatigue
+    [qb, ...rbs, ...wrs, ...ols, ...dls, ...lbs, ...dbs].forEach(p => { if (p) p.fatigue = Math.min(100, p.fatigue + 5); });
+
+    const getFatigueModifier = (p) => (1 - (p.fatigue / (p.attributes.physical.stamina * 2)));
+
     if (playCall === 'short_pass' || playCall === 'deep_pass') {
         if (!qb) { gameLog.push('No healthy QB!'); return { yards: 0, turnover: true }; }
         const passRusher = getRandom(dls.concat(lbs));
@@ -340,10 +350,17 @@ function resolvePlay(offense, defense, playCall, gameState) {
         if (!passRusher || !blocker) { return { yards: 0 }; }
         checkInGameInjury(passRusher, gameLog); checkInGameInjury(blocker, gameLog);
         
-        let qbAccuracy = qb.attributes.technical.throwingAccuracy;
+        const rushPower = (passRusher.attributes.physical.strength + passRusher.attributes.technical.blockShedding) * getFatigueModifier(passRusher);
+        const blockPower = (blocker.attributes.physical.strength + blocker.attributes.technical.blocking) * getFatigueModifier(blocker);
+
+        if (rushPower > blockPower) {
+            gameLog.push(`PANCAKE! ${blocker.name} is flattened by ${passRusher.name}!`);
+        }
+
+        let qbAccuracy = qb.attributes.technical.throwingAccuracy * getFatigueModifier(qb);
         if (weather === 'Windy' && playCall === 'deep_pass') qbAccuracy -= 15;
 
-        if ((passRusher.attributes.physical.strength + passRusher.attributes.technical.blockShedding) > (blocker.attributes.physical.strength + blocker.attributes.technical.blocking) + getRandomInt(-25, 25)) {
+        if (rushPower > blockPower + getRandomInt(-25, 25)) {
             qbAccuracy -= playCall === 'deep_pass' ? 20 : 10;
             gameLog.push(`${passRusher.name} gets pressure!`);
             if (Math.random() > 0.7) {
@@ -362,32 +379,50 @@ function resolvePlay(offense, defense, playCall, gameState) {
         const coveragePlayers = [...dbs, ...lbs].filter(Boolean);
         if(coveragePlayers.length === 0) return { yards: 10 };
         
-        const target = playCall === 'deep_pass' ? targets.reduce((a, b) => (b.attributes.physical.speed > a.attributes.physical.speed ? b : a)) : targets.reduce((a, b) => (b.attributes.technical.catchingHands > a.attributes.technical.catchingHands ? b : a));
-        const coverage = getRandom(coveragePlayers);
+        // QB Progression Read
+        let target, coverage;
+        const reads = targets.sort((a,b) => calculateOverall(b, 'WR') - calculateOverall(a, 'WR'));
+        for(let i = 0; i < reads.length; i++) {
+            target = reads[i];
+            coverage = getRandom(coveragePlayers);
+            const openFactor = (target.attributes.physical.speed * getFatigueModifier(target)) - (coverage.attributes.physical.agility * getFatigueModifier(coverage));
+            if(openFactor + (qb.attributes.mental.playbookIQ / 5) > getRandomInt(0, 30) || i === reads.length -1) {
+                break; // Found an open receiver or it's the last read
+            }
+            gameLog.push(`${qb.name} looks off the primary read.`);
+        }
+        
         checkInGameInjury(target, gameLog); checkInGameInjury(coverage, gameLog);
 
         let catchChance = (target.attributes.technical.catchingHands + target.attributes.physical.speed) - (coverage.attributes.physical.agility + coverage.attributes.physical.speed);
         if (weather === 'Rain') catchChance -= 10;
         
-        if (catchChance > getRandomInt(playCall === 'deep_pass' ? -10 : -30, playCall === 'deep_pass' ? 10 : 30)) {
-            const yards = playCall === 'deep_pass' ? getRandomInt(15, 40) : getRandomInt(3, 12);
-            target.gameStats.receptions++; target.gameStats.recYards += yards; qb.gameStats.passYards += yards;
-            gameLog.push(`PASS from ${qb.name} to ${target.name} for ${yards} yards.`);
-            if (target.attributes.physical.agility > coverage.attributes.physical.agility + getRandomInt(0, 30)) {
-                const extraYards = getRandomInt(5, 20);
-                gameLog.push(`${target.name} jukes past ${coverage.name} for an extra ${extraYards} yards!`);
-                target.gameStats.recYards += extraYards; qb.gameStats.passYards += extraYards;
-                return { yards: yards + extraYards };
+        if (catchChance > getRandomInt(-30, 30)) {
+            const base_yards = playCall === 'deep_pass' ? getRandomInt(15, 40) : getRandomInt(3, 12);
+            target.gameStats.receptions++;
+            gameLog.push(`PASS from ${qb.name} to ${target.name} for ${base_yards} yards.`);
+
+            // YAC Battle
+            const yacPower = (target.attributes.physical.agility + target.attributes.physical.strength) * getFatigueModifier(target);
+            const tacklePower = (coverage.attributes.technical.tackling + coverage.attributes.physical.strength) * getFatigueModifier(coverage);
+            let extraYards = 0;
+            if (yacPower > tacklePower + getRandomInt(-25, 25)) {
+                extraYards = getRandomInt(5, 20);
+                gameLog.push(`${target.name} breaks the tackle for an extra ${extraYards} yards!`);
+            } else {
+                 coverage.gameStats.tackles++;
             }
-            coverage.gameStats.tackles++;
-            return { yards };
+            const totalYards = base_yards + extraYards;
+            target.gameStats.recYards += totalYards; qb.gameStats.passYards += totalYards;
+
+            return { yards: totalYards };
         } else {
             if ((coverage.attributes.technical.catchingHands / 100) > Math.random() * 0.95) {
                 gameLog.push(`INTERCEPTION! ${coverage.name} picks it off!`);
                 coverage.gameStats.interceptions++;
                 return { yards: 0, turnover: true };
             }
-            gameLog.push(`INCOMPLETE pass to ${target.name}, defended by ${coverage.name}.`);
+            gameLog.push(`INCOMPLETE to ${target.name}, defended by ${coverage.name}.`);
             return { yards: 0 };
         }
     }
@@ -396,27 +431,46 @@ function resolvePlay(offense, defense, playCall, gameState) {
         const rb = rbs[0];
         if (!rb) { gameLog.push('No healthy RB!'); return { yards: 0, turnover: true }; }
 
-        const runBlockPower = ols.reduce((s, p) => s + p.attributes.technical.blocking + p.attributes.physical.strength, 0);
-        const runDefensePower = dls.concat(lbs).reduce((s, p) => s + p.attributes.technical.tackling + p.attributes.technical.blockShedding, 0);
+        const ol = getRandom(ols);
+        const dl = getRandom(dls);
+        if(!ol || !dl) return { yards: 0 };
 
-        checkInGameInjury(rb, gameLog); ols.forEach(p => checkInGameInjury(p, gameLog)); dls.concat(lbs).forEach(p => checkInGameInjury(p, gameLog));
+        checkInGameInjury(rb, gameLog); checkInGameInjury(ol, gameLog); checkInGameInjury(dl, gameLog);
 
-        let yards = (runBlockPower > runDefensePower + getRandomInt(-50, 50)) ? getRandomInt(2, 6) : getRandomInt(-2, 1);
+        const blockPower = (ol.attributes.technical.blocking + ol.attributes.physical.strength) * getFatigueModifier(ol);
+        const shedPower = (dl.attributes.technical.blockShedding + dl.attributes.physical.strength) * getFatigueModifier(dl);
+
+        let yards = 0;
+        if(blockPower > shedPower + getRandomInt(-30, 30)) {
+            yards = getRandomInt(2, 6);
+            if(blockPower > shedPower + 40) {
+                gameLog.push(`PANCAKE! ${ol.name} flattens ${dl.name}, opening a huge hole!`);
+                yards += getRandomInt(3, 7);
+            }
+        } else {
+             yards = getRandomInt(-2, 1);
+             dl.gameStats.tackles++;
+        }
         
+        // Break Tackle Battle
         const tackler = getRandom([...lbs, ...dbs].filter(Boolean));
         if (tackler) {
             checkInGameInjury(tackler, gameLog);
-            if ((rb.attributes.physical.agility + rb.attributes.physical.strength) > (tackler.attributes.technical.tackling + tackler.attributes.physical.agility) + getRandomInt(-20, 20)) {
-                yards += getRandomInt(5, 15);
-                gameLog.push(`${rb.name} breaks a tackle from ${tackler.name}!`);
+            const breakTacklePower = (rb.attributes.physical.agility + rb.attributes.physical.strength) * getFatigueModifier(rb);
+            const tacklePower = (tackler.attributes.technical.tackling + tackler.attributes.physical.strength) * getFatigueModifier(tackler);
+
+            if (breakTacklePower > tacklePower + getRandomInt(-25, 25)) {
+                const extraYards = getRandomInt(5, 15);
+                gameLog.push(`${rb.name} breaks a tackle from ${tackler.name} and picks up an extra ${extraYards} yards!`);
+                yards += extraYards;
             } else {
-                gameLog.push(`Tackled by ${tackler.name}.`);
+                gameLog.push(`Tackled at the second level by ${tackler.name}.`);
                 tackler.gameStats.tackles++;
             }
             
             let fumbleChance = 0.03;
             if (weather === 'Rain') fumbleChance *= 2;
-            if (Math.random() < fumbleChance && rb.attributes.technical.catchingHands < tackler.attributes.physical.strength) {
+            if (Math.random() < fumbleChance && (rb.attributes.technical.catchingHands * getFatigueModifier(rb)) < tackler.attributes.physical.strength) {
                 gameLog.push(`FUMBLE! ${tackler.name} forces the ball out!`);
                 return { yards, turnover: true };
             }
@@ -470,12 +524,12 @@ function simulateGame(homeTeam, awayTeam) {
                 const penaltyChance = 0.05;
                 if (Math.random() < penaltyChance) {
                     const penaltyYards = getRandom([5, 10]);
-                    gameLog.push(`PENALTY! ${penaltyYards} yard penalty.`);
-                    if(Math.random() > 0.5) ballOn -= penaltyYards; else yardsToGo -= penaltyYards;
+                    gameLog.push(`PENALTY! False Start. ${penaltyYards} yard penalty.`);
+                    ballOn -= penaltyYards;
                 }
 
                 const scoreDiff = possession.id === homeTeam.id ? homeScore - awayScore : awayScore - homeScore;
-                const playCall = determinePlayCall(possession, down, yardsToGo, ballOn, scoreDiff);
+                const playCall = determinePlayCall(possession, possession.id === homeTeam.id ? awayTeam : homeTeam, down, yardsToGo, ballOn, scoreDiff);
                 const result = resolvePlay(possession, possession.id === homeTeam.id ? awayTeam : homeTeam, playCall, { gameLog, weather });
 
                 ballOn += result.yards;
