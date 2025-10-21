@@ -273,9 +273,7 @@ function renderMyTeamTab(gameState) {
     const { roster } = gameState.playerTeam;
     let tableHtml = `<table class="min-w-full bg-white text-sm"><thead class="bg-gray-800 text-white"><tr><th class="text-left py-2 px-3">Name</th><th class="py-2 px-3">Age</th><th class="py-2 px-3">Status</th><th class="py-2 px-3">Best Pos Ovr</th></tr></thead><tbody class="divide-y">`;
     roster.forEach(p => {
-        // Do not show temporary players on the main roster page
         if (p.status.type === 'temporary') return;
-
         const overalls = Object.keys(positionOverallWeights).map(pos => calculateOverall(p, pos));
         tableHtml += `<tr><td class="py-2 px-3 font-semibold">${p.name}</td><td class="text-center py-2 px-3">${p.age}</td><td class="text-center py-2 px-3 ${p.status.duration > 0 ? 'text-red-500 font-semibold' : ''}">${p.status.description || 'Healthy'}</td><td class="text-center py-2 px-3 font-bold">${Math.max(...overalls)}</td></tr>`;
     });
