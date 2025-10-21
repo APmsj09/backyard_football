@@ -78,10 +78,10 @@ export function showModal(title, bodyHtml, onConfirm = null) {
     elements.modalTitle.textContent = title;
     elements.modalBody.innerHTML = bodyHtml;
     
-    const oldActions = document.getElementById('modal-actions');
-    if (oldActions) oldActions.remove();
+    let actionsDiv = elements.modal.querySelector('#modal-actions');
+    if (actionsDiv) actionsDiv.remove();
 
-    const actionsDiv = document.createElement('div');
+    actionsDiv = document.createElement('div');
     actionsDiv.id = 'modal-actions';
     actionsDiv.className = 'mt-6 text-right space-x-2';
 
@@ -97,6 +97,7 @@ export function showModal(title, bodyHtml, onConfirm = null) {
     }
     
     const closeBtn = document.createElement('button');
+    closeBtn.id = 'modal-close-btn'; // Ensure it has the ID for the main listener
     closeBtn.textContent = 'Close';
     closeBtn.className = 'bg-gray-500 hover:bg-gray-600 text-white font-bold py-2 px-6 rounded-lg';
     closeBtn.onclick = hideModal;
@@ -211,10 +212,6 @@ export function renderPlayerRoster(playerTeam) {
     renderRosterSummary(playerTeam);
 }
 
-/**
- * Renders the positional summary, showing the team's average overall for each position.
- * @param {object} playerTeam - The player's team object.
- */
 function renderRosterSummary(playerTeam) {
     const { roster } = playerTeam;
     const positions = Object.keys(positionOverallWeights);
@@ -317,7 +314,11 @@ function renderDepthChartSide(side, gameState, slotsContainer, rosterContainer) 
     header.innerHTML = `<span class="w-1/4">POS</span><div class="player-details-grid w-3/4"><span>NAME</span><span>OVR</span><span>SPD</span><span>STR</span><span>AGI</span><span>THR</span><span>CAT</span></div>`;
     slotsContainer.appendChild(header);
     slots.forEach(slot => renderSlot(slot, roster, depthChart[side], slotsContainer, side));
-    renderAvailablePlayerList(roster, rosterContainer, side);
+    
+    const positionedPlayerIds = Object.values(depthChart.offense).concat(Object.values(depthChart.defense)).filter(Boolean);
+    const availablePlayers = roster.filter(p => !positionedPlayerIds.includes(p.id));
+    
+    renderAvailablePlayerList(availablePlayers, rosterContainer, side);
 }
 
 function renderSlot(positionSlot, roster, chart, container, side) {
@@ -440,17 +441,10 @@ export function setupDragAndDrop(onDrop) {
         if (e.target.matches('.draggable-player, .depth-chart-slot[draggable="true"]')) {
             draggedEl = e.target;
             dragPlayerId = e.target.dataset.playerId;
-            // Determine side from the parent pane of the dragged element
-            const pane = e.target.closest('.depth-chart-sub-pane');
-            if (pane) {
-                dragSide = pane.id.includes('offense') ? 'offense' : 'defense';
-            } else if (e.target.matches('.draggable-player')){
-                 const rosterList = e.target.closest('.roster-list');
-                 if(rosterList) {
-                    dragSide = rosterList.id.includes('offense') ? 'offense' : 'defense';
-                 }
+            dragSide = e.target.closest('.depth-chart-sub-pane')?.id.includes('offense') ? 'offense' : 'defense';
+            if (!dragSide && e.target.matches('.draggable-player')) {
+                dragSide = e.target.closest('.roster-list')?.id.includes('offense') ? 'offense' : 'defense';
             }
-            
             setTimeout(() => e.target.classList.add('dragging'), 0);
         }
     });
@@ -484,7 +478,7 @@ export function setupDragAndDrop(onDrop) {
         const slot = e.target.closest('.depth-chart-slot');
         const dropSide = slot?.dataset.side;
 
-        if (slot && slot.dataset.positionSlot && dragPlayerId && dropSide) {
+        if (slot && slot.dataset.positionSlot && dragPlayerId && dropSide === dragSide) {
             onDrop(dragPlayerId, slot.dataset.positionSlot, dropSide);
         }
     });
