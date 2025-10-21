@@ -212,6 +212,10 @@ export function addPlayerToTeam(player, team) {
     return false;
 }
 
+/**
+ * Generates a balanced 9-week, round-robin schedule for the entire league.
+ * Each team within a division plays every other team in that division exactly once.
+ */
 export function generateSchedule() {
     game.schedule = [];
     game.currentWeek = 0;
@@ -219,29 +223,37 @@ export function generateSchedule() {
 
     for (const divisionName in game.divisions) {
         let teams = [...game.teams.filter(t => t.division === divisionName)];
-        if (teams.length !== 10) continue;
+        if (teams.length % 2 !== 0 || teams.length < 2) {
+            console.error(`Cannot generate schedule for division ${divisionName} with ${teams.length} teams.`);
+            continue;
+        }
 
-        const numRounds = 9;
+        const numRounds = teams.length - 1;
         const numTeams = teams.length;
-        let rotatingTeams = teams.slice(1);
+        
+        // Use a placeholder for bye weeks if needed, though 10 teams is perfect.
+        const schedule = [];
+        for (let i = 0; i < numRounds; i++) {
+            schedule.push([]);
+        }
 
         for (let round = 0; round < numRounds; round++) {
-            const weekMatchups = [];
-            
-            const team1 = teams[0];
-            const team2 = rotatingTeams[0];
-            const match1 = round % 2 === 0 ? { home: team1, away: team2 } : { home: team2, away: team1 };
-            weekMatchups.push(match1);
-
-            for (let i = 1; i < numTeams / 2; i++) {
-                const teamA = rotatingTeams[i];
-                const teamB = rotatingTeams[numTeams - 1 - i];
-                const match = Math.random() > 0.5 ? { home: teamA, away: teamB } : { home: teamB, away: teamA };
-                weekMatchups.push(match);
+            for (let match = 0; match < numTeams / 2; match++) {
+                const home = teams[match];
+                const away = teams[numTeams - 1 - match];
+                 if (home && away) {
+                    // Alternate home/away based on match index to spread it out
+                    const matchup = match % 2 === 1 ? { home, away } : { home: away, away: home };
+                    schedule[round].push(matchup);
+                }
             }
-
-            allWeeklyGames[round].push(...weekMatchups);
-            rotatingTeams.unshift(rotatingTeams.pop());
+            // Rotate teams for the next round, keeping the first team fixed.
+            teams.splice(1, 0, teams.pop());
+        }
+        
+        // Add division games to the main league schedule weeks
+        for(let week = 0; week < schedule.length; week++) {
+            allWeeklyGames[week].push(...schedule[week]);
         }
     }
     game.schedule = allWeeklyGames.flat();
