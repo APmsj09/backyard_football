@@ -25,6 +25,7 @@ export function setupElements() {
         draftPlayerBtn: document.getElementById('draft-player-btn'),
         rosterCount: document.getElementById('roster-count'),
         draftRosterList: document.getElementById('draft-roster-list'),
+        rosterSummary: document.getElementById('roster-summary'),
         draftSearch: document.getElementById('draft-search'),
         draftFilterPos: document.getElementById('draft-filter-pos'),
         draftSort: document.getElementById('draft-sort'),
@@ -53,11 +54,13 @@ export function setupElements() {
 }
 
 export function showScreen(screenId) {
-    Object.values(elements.screens).forEach(screen => {
-        if (screen) screen.classList.add('hidden');
-    });
-    if (elements.screens[screenId]) {
-        elements.screens[screenId].classList.remove('hidden');
+    if (elements.screens) {
+        Object.values(elements.screens).forEach(screen => {
+            if (screen) screen.classList.add('hidden');
+        });
+        if (elements.screens[screenId]) {
+            elements.screens[screenId].classList.remove('hidden');
+        }
     }
 }
 
@@ -99,7 +102,7 @@ export function renderDraftPool(gameState, onPlayerSelect) {
     elements.draftPoolTbody.innerHTML = '';
     filteredPlayers.forEach(player => {
         const row = document.createElement('tr');
-        row.className = `cursor-pointer hover:bg-amber-100 ${player.id === selectedPlayerId ? 'bg-amber-200' : ''}`;
+        row.className = `cursor-pointer hover:bg-amber-100 draft-player-row`;
         row.dataset.playerId = player.id;
         row.innerHTML = `<td class="py-2 px-3 font-semibold">${player.name}</td><td class="text-center py-2 px-3">${player.age}</td><td class="text-center py-2 px-3">${player.favoriteOffensivePosition}/${player.favoriteDefensivePosition}</td><td class="text-center py-2 px-3">${player.attributes.physical.height}"</td><td class="text-center py-2 px-3">${player.attributes.physical.weight}lbs</td><td class="text-center py-2 px-3">${player.attributes.physical.speed}</td><td class="text-center py-2 px-3">${player.attributes.physical.strength}</td><td class="text-center py-2 px-3">${player.attributes.physical.agility}</td><td class="text-center py-2 px-3">${player.attributes.technical.throwingAccuracy}</td><td class="text-center py-2 px-3">${player.attributes.technical.catchingHands}</td><td class="text-center py-2 px-3">${player.attributes.technical.blocking}</td><td class="text-center py-2 px-3">${player.attributes.technical.tackling}</td><td class="text-center py-2 px-3">${player.attributes.technical.blockShedding}</td>`;
         row.onclick = () => onPlayerSelect(player.id);
@@ -107,19 +110,41 @@ export function renderDraftPool(gameState, onPlayerSelect) {
     });
 }
 
+export function updateSelectedPlayerRow(newSelectedId) {
+    selectedPlayerId = newSelectedId;
+    document.querySelectorAll('.draft-player-row').forEach(row => {
+        row.classList.toggle('bg-amber-200', row.dataset.playerId === selectedPlayerId);
+    });
+}
+
+
 export function renderSelectedPlayerCard(player) {
     if (!player) {
         elements.selectedPlayerCard.innerHTML = `<p class="text-gray-500">Select a player to see their details</p>`;
-        selectedPlayerId = null;
     } else {
-        selectedPlayerId = player.id;
-        elements.selectedPlayerCard.innerHTML = `<h4 class="font-bold text-lg">${player.name}</h4><p class="text-sm text-gray-600">Age: ${player.age} | ${player.attributes.physical.height}" | ${player.attributes.physical.weight} lbs</p><div class="mt-2 grid grid-cols-3 gap-2 text-center"><div class="bg-gray-200 p-2 rounded"><p class="font-semibold text-xs">QB OVR</p><p class="font-bold text-xl">${calculateOverall(player, 'QB')}</p></div><div class="bg-gray-200 p-2 rounded"><p class="font-semibold text-xs">RB OVR</p><p class="font-bold text-xl">${calculateOverall(player, 'RB')}</p></div><div class="bg-gray-200 p-2 rounded"><p class="font-semibold text-xs">WR OVR</p><p class="font-bold text-xl">${calculateOverall(player, 'WR')}</p></div><div class="bg-gray-200 p-2 rounded"><p class="font-semibold text-xs">OL OVR</p><p class="font-bold text-xl">${calculateOverall(player, 'OL')}</p></div><div class="bg-gray-200 p-2 rounded"><p class="font-semibold text-xs">DL OVR</p><p class="font-bold text-xl">${calculateOverall(player, 'DL')}</p></div><div class="bg-gray-200 p-2 rounded"><p class="font-semibold text-xs">LB OVR</p><p class="font-bold text-xl">${calculateOverall(player, 'LB')}</p></div></div>`;
+        const positions = Object.keys(positionOverallWeights);
+        let overallsHtml = '<div class="mt-2 grid grid-cols-4 gap-2 text-center">';
+        positions.forEach(pos => {
+            overallsHtml += `
+                <div class="bg-gray-200 p-2 rounded">
+                    <p class="font-semibold text-xs">${pos} OVR</p>
+                    <p class="font-bold text-xl">${calculateOverall(player, pos)}</p>
+                </div>
+            `;
+        });
+        overallsHtml += '</div>';
+
+        elements.selectedPlayerCard.innerHTML = `
+            <h4 class="font-bold text-lg">${player.name}</h4>
+            <p class="text-sm text-gray-600">Age: ${player.age} | ${player.attributes.physical.height}" | ${player.attributes.physical.weight} lbs</p>
+            ${overallsHtml}
+        `;
     }
     elements.draftPlayerBtn.disabled = !player;
 }
 
 export function renderPlayerRoster(playerTeam) {
-    elements.rosterCount.textContent = playerTeam.roster.length;
+    elements.rosterCount.textContent = `${playerTeam.roster.length}/10`;
     elements.draftRosterList.innerHTML = '';
     playerTeam.roster.forEach(player => {
         const li = document.createElement('li');
@@ -127,7 +152,36 @@ export function renderPlayerRoster(playerTeam) {
         li.textContent = `${player.name} (${player.favoriteOffensivePosition}/${player.favoriteDefensivePosition})`;
         elements.draftRosterList.appendChild(li);
     });
+    renderRosterSummary(playerTeam);
 }
+
+function renderRosterSummary(playerTeam) {
+    const summary = {};
+    const positions = Object.keys(positionOverallWeights);
+    positions.forEach(pos => summary[pos] = { count: 0, totalOvr: 0 });
+
+    playerTeam.roster.forEach(player => {
+        const bestPosition = positions.reduce((best, current) => {
+            return calculateOverall(player, current) > calculateOverall(player, best) ? current : best;
+        });
+        summary[bestPosition].count++;
+        summary[bestPosition].totalOvr += calculateOverall(player, bestPosition);
+    });
+
+    let summaryHtml = '<h5 class="font-bold text-sm mb-1">Positional Summary</h5><div class="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">';
+    for (const pos in summary) {
+        const avgOvr = summary[pos].count > 0 ? Math.round(summary[pos].totalOvr / summary[pos].count) : '---';
+        summaryHtml += `
+            <div class="flex justify-between">
+                <span class="font-semibold">${pos}:</span>
+                <span>${summary[pos].count} (Avg ${avgOvr})</span>
+            </div>
+        `;
+    }
+    summaryHtml += '</div>';
+    elements.rosterSummary.innerHTML = summaryHtml;
+}
+
 
 export function renderDashboard(gameState) {
     const { playerTeam, year, currentWeek } = gameState;
@@ -164,7 +218,7 @@ function renderMyTeamTab(gameState) {
 function renderDepthChartTab(gameState) {
     renderPositionalOveralls(gameState.playerTeam.roster);
     const offenseSlots = ['QB', 'RB', 'WR1', 'WR2'];
-    const defenseSlots = ['DL1', 'DL2', 'LB', 'DB'];
+    const defenseSlots = ['DL', 'LB', 'DB'];
     renderDepthChartSide('offense', offenseSlots, gameState, elements.offenseDepthChartSlots, elements.offenseDepthChartRoster);
     renderDepthChartSide('defense', defenseSlots, gameState, elements.defenseDepthChartSlots, elements.defenseDepthChartRoster);
 }
@@ -186,7 +240,7 @@ function renderDepthChartSide(side, slots, gameState, slotsContainer, rosterCont
     header.innerHTML = `<span class="w-1/4">POS</span><div class="player-details-grid w-3/4"><span>NAME</span><span>OVR</span><span>SPD</span><span>STR</span><span>AGI</span><span>THR</span><span>CAT</span></div>`;
     slotsContainer.appendChild(header);
     slots.forEach(slot => renderSlot(slot, roster, depthChart, slotsContainer));
-    const positionedIds = Object.values(depthChart);
+    const positionedIds = Object.values(depthChart).filter(id => id !== null);
     const availablePlayers = roster.filter(p => !positionedIds.includes(p.id));
     renderAvailablePlayerList(availablePlayers, rosterContainer);
 }
