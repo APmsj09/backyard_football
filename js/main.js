@@ -1,136 +1,174 @@
 import * as Game from './game.js';
 import * as UI from './ui.js';
 
-// --- State ---
+let gameState = null;
 let selectedPlayerId = null;
-
-// --- Game Flow Functions ---
-
-async function startNewGame() {
-    try {
-        UI.showScreen('loadingScreen');
-        // Add a tiny delay to ensure the browser renders the loading screen
-        await new Promise(resolve => setTimeout(resolve, 50));
-        
-        await Game.initializeLeague(UI.updateLoadingProgress);
-        
-        const suggestions = ['Rockets', 'Sharks', 'Tigers', 'Comets', 'Jets'];
-        UI.renderTeamNameSuggestions(suggestions, (name) => {
-            document.getElementById('custom-team-name').value = name;
-        });
-
-        UI.showScreen('teamCreationScreen');
-    } catch (error) {
-        console.error("Error starting new game:", error);
-    }
-}
-
-function handleTeamCreation() {
-    const customName = document.getElementById('custom-team-name').value;
-    if (customName.trim() === '') {
-        alert("Please enter a team name.");
-        return;
-    }
-    Game.createPlayerTeam(customName);
-    Game.setupDraft();
-    startDraft();
-}
-
-function startDraft() {
-    const gameState = Game.getGameState();
-    if (gameState.currentPick >= gameState.draftOrder.length) {
-        finishDraft();
-        return;
-    }
-
-    UI.showScreen('draftScreen');
-    UI.renderDraftScreen(gameState, handlePlayerSelect);
-
-    const pickingTeam = gameState.draftOrder[gameState.currentPick];
-    if (pickingTeam.id !== gameState.playerTeam.id) {
-        // AI's turn
-        setTimeout(() => {
-            Game.simulateAIPick(pickingTeam);
-            gameState.currentPick++;
-            startDraft(); // Move to the next pick
-        }, 1000); // 1-second delay for AI picks
-    }
-    // If it's the player's turn, we wait for their action.
-}
-
-function handlePlayerSelect(playerId) {
-    selectedPlayerId = playerId;
-    const player = Game.getGameState().players.find(p => p.id === playerId);
-    UI.renderSelectedPlayerCard(player);
-    UI.renderDraftPool(Game.getGameState(), handlePlayerSelect); // Re-render to show selection
-}
-
-function handleDraftPlayer() {
-    const gameState = Game.getGameState();
-    const pickingTeam = gameState.draftOrder[gameState.currentPick];
-
-    if (selectedPlayerId && pickingTeam.id === gameState.playerTeam.id) {
-        const player = gameState.players.find(p => p.id === selectedPlayerId);
-        Game.addPlayerToTeam(player, gameState.playerTeam);
-        selectedPlayerId = null;
-        UI.renderSelectedPlayerCard(null);
-        gameState.currentPick++;
-        startDraft();
-    }
-}
-
-function finishDraft() {
-    Game.generateSchedule();
-    const gameState = Game.getGameState();
-    UI.showScreen('dashboardScreen');
-    UI.renderDashboard(gameState);
-    UI.switchTab('my-team', gameState);
-}
-
 
 // --- Event Handlers ---
 
-function setupEventListeners() {
-    // Start Screen
-    document.getElementById('start-game-btn').addEventListener('click', startNewGame);
-    
-    // Team Creation Screen
-    document.getElementById('confirm-team-btn').addEventListener('click', handleTeamCreation);
+/**
+ * Starts the entire game flow. Shows loading screen, initializes league.
+ */
+async function startNewGame() {
+    try {
+        UI.showScreen('loadingScreen');
+        // A small delay to ensure the UI updates before the heavy lifting begins.
+        await new Promise(resolve => setTimeout(resolve, 50)); 
+        await Game.initializeLeague(UI.updateLoadingProgress);
+        gameState = Game.getGameState();
+        UI.renderTeamNameSuggestions(['Jets', 'Sharks', 'Tigers', 'Bulldogs', 'Panthers', 'Giants'], handleTeamNameSelection);
+        UI.showScreen('teamCreationScreen');
+    } catch (error) {
+        console.error("Error starting game:", error);
+    }
+}
 
-    // Draft Screen
-    document.getElementById('draft-player-btn').addEventListener('click', handleDraftPlayer);
-    document.getElementById('draft-search').addEventListener('input', () => UI.renderDraftPool(Game.getGameState(), handlePlayerSelect));
-    document.getElementById('draft-filter-pos').addEventListener('change', () => UI.renderDraftPool(Game.getGameState(), handlePlayerSelect));
-    document.getElementById('draft-sort').addEventListener('change', () => UI.renderDraftPool(Game.getGameState(), handlePlayerSelect));
+/**
+ * Handles the selection of a suggested team name.
+ * @param {string} name - The selected team name.
+ */
+function handleTeamNameSelection(name) {
+    UI.elements.customTeamName.value = name;
+}
 
+/**
+ * Finalizes team creation and moves to the draft.
+ */
+function handleConfirmTeam() {
+    const customName = UI.elements.customTeamName.value.trim();
+    if (customName) {
+        Game.createPlayerTeam(customName);
+        Game.setupDraft();
+        gameState = Game.getGameState();
+        UI.renderSelectedPlayerCard(null);
+        UI.renderDraftScreen(gameState, handlePlayerSelectInDraft);
+        UI.showScreen('draftScreen');
+        runAIDraftPicks(); 
+    } else {
+        alert("Please enter or select a team name.");
+    }
+}
 
-    // Dashboard
-    document.getElementById('dashboard-tabs').addEventListener('click', (e) => {
-        if (e.target.matches('.tab-button')) {
-            UI.switchTab(e.target.dataset.tab, Game.getGameState());
+/**
+ * Handles a player being selected from the draft pool table.
+ * @param {string} playerId - The ID of the selected player.
+ */
+function handlePlayerSelectInDraft(playerId) {
+    selectedPlayerId = playerId;
+    const player = gameState.players.find(p => p.id === playerId);
+    UI.updateSelectedPlayerRow(playerId);
+    UI.renderSelectedPlayerCard(player);
+    UI.elements.draftPlayerBtn.disabled = false;
+}
+
+/**
+ * Handles the player clicking the "Draft Player" button.
+ */
+function handleDraftPlayer() {
+    if (selectedPlayerId) {
+        const player = gameState.players.find(p => p.id === selectedPlayerId);
+        const team = Game.getGameState().playerTeam;
+        if (Game.addPlayerToTeam(player, team)) {
+            selectedPlayerId = null;
+            gameState.currentPick++;
+            UI.renderSelectedPlayerCard(null);
+            UI.renderDraftScreen(gameState, handlePlayerSelectInDraft);
+            runAIDraftPicks();
+        } else {
+            alert("Your roster is full!");
         }
-    });
+    }
+}
 
-    UI.setupDragAndDrop((playerId, newPositionSlot) => {
-        Game.updateDepthChart(playerId, newPositionSlot);
-        UI.switchTab('depth-chart', Game.getGameState()); // Re-render the tab
-    });
-    
-    // Set up listeners for the new Offense/Defense tabs
-    UI.setupDepthChartTabs();
+/**
+ * Manages the draft flow, simulating AI picks until it's the player's turn.
+ */
+async function runAIDraftPicks() {
+    if (gameState.currentPick >= gameState.draftOrder.length) {
+        handleDraftEnd();
+        return;
+    }
+
+    let currentPickingTeam = gameState.draftOrder[gameState.currentPick];
+    while (currentPickingTeam.id !== gameState.playerTeam.id) {
+        UI.renderDraftScreen(gameState, handlePlayerSelectInDraft);
+        await new Promise(resolve => setTimeout(resolve, 200)); // Short delay for effect
+
+        Game.simulateAIPick(currentPickingTeam);
+        gameState.currentPick++;
+
+        if (gameState.currentPick >= gameState.draftOrder.length) {
+            handleDraftEnd();
+            return;
+        }
+        currentPickingTeam = gameState.draftOrder[gameState.currentPick];
+    }
+    // It's now the player's turn
+    UI.renderDraftScreen(gameState, handlePlayerSelectInDraft);
+}
+
+/**
+ * Finalizes the draft and moves to the main dashboard.
+ */
+function handleDraftEnd() {
+    alert("The draft is complete!");
+    Game.generateSchedule();
+    gameState = Game.getGameState();
+    UI.renderDashboard(gameState);
+    UI.showScreen('dashboardScreen');
 }
 
 
+/**
+ * Handles clicks on the main dashboard tabs.
+ * @param {Event} e - The click event.
+ */
+function handleTabSwitch(e) {
+    if (e.target.matches('.tab-button')) {
+        const tabId = e.target.dataset.tab;
+        UI.switchTab(tabId, gameState);
+    }
+}
+
+/**
+ * Handles dropping a player onto a depth chart slot.
+ * @param {string} playerId - The ID of the player being dropped.
+ * @param {string} newPositionSlot - The position slot they are dropped onto.
+ */
+function handleDepthChartDrop(playerId, newPositionSlot) {
+    Game.updateDepthChart(playerId, newPositionSlot);
+    gameState = Game.getGameState();
+    UI.switchTab('depth-chart', gameState); // Re-render the depth chart
+}
+
 // --- Initialization ---
 
+/**
+ * The main function to set up the application.
+ */
 function main() {
     console.log("Game starting... Document loaded.");
-    // This is the critical change: setupElements() MUST be called before any other UI function.
-    UI.setupElements();
-    
-    // Now that elements are ready, we can set up listeners and show the first screen.
-    setupEventListeners();
-    UI.showScreen('startScreen');
+    try {
+        UI.setupElements();
+        
+        // Setup initial event listeners
+        document.getElementById('start-game-btn')?.addEventListener('click', startNewGame);
+        UI.elements.confirmTeamBtn?.addEventListener('click', handleConfirmTeam);
+        UI.elements.draftPlayerBtn?.addEventListener('click', handleDraftPlayer);
+        UI.elements.dashboardTabs?.addEventListener('click', handleTabSwitch);
+
+        // Draft filtering/sorting listeners
+        UI.elements.draftSearch?.addEventListener('input', () => UI.renderDraftPool(gameState, handlePlayerSelectInDraft));
+        UI.elements.draftFilterPos?.addEventListener('change', () => UI.renderDraftPool(gameState, handlePlayerSelectInDraft));
+        UI.elements.draftSort?.addEventListener('change', () => UI.renderDraftPool(gameState, handlePlayerSelectInDraft));
+
+        UI.setupDragAndDrop(handleDepthChartDrop);
+        UI.setupDepthChartTabs();
+
+        UI.showScreen('startScreen');
+    } catch (error) {
+        console.error("Fatal error during initialization:", error);
+    }
 }
 
 // Start the game when the DOM is ready
