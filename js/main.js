@@ -34,6 +34,7 @@ function handleConfirmTeam() {
     if (customName) {
         Game.createPlayerTeam(customName);
         gameState = Game.getGameState();
+        // Set initial draft needs based on empty roster (10 players)
         gameState.teams.forEach(t => t.draftNeeds = 10);
         Game.setupDraft();
         gameState = Game.getGameState(); 
@@ -71,6 +72,7 @@ function handleDraftPlayer() {
             UI.renderDraftPool(gameState, handlePlayerSelectInDraft, selectedPlayerId); 
             runAIDraftPicks(); // Proceed to next pick
         } else {
+            // This case should ideally not happen due to the check above, but as failsafe:
             UI.showModal("Error", "<p>Could not draft player.</p>");
         }
     } else if (team.roster.length >= 10) {
@@ -86,12 +88,14 @@ async function runAIDraftPicks() {
     let undraftedPlayersCount = gameState.players.filter(p => !p.teamId).length; // Use let for count
     const maxPicksPossible = gameState.draftOrder.length; 
 
+    // Loop continues as long as there are picks left in the order AND players available
     while (gameState.currentPick < maxPicksPossible && undraftedPlayersCount > 0) {
         
+        // Check if draft should end (e.g., all teams full)
         const needsMorePlayers = gameState.teams.some(t => t.roster.length < 10);
         if (!needsMorePlayers && undraftedPlayersCount > 0) {
              console.log("All teams have full rosters. Ending draft early.");
-             break; 
+             break; // Exit loop if all rosters are full
         }
 
         // Ensure currentPick is valid before accessing draftOrder
@@ -102,9 +106,10 @@ async function runAIDraftPicks() {
         const currentPickingTeam = gameState.draftOrder[gameState.currentPick];
 
         if (currentPickingTeam.id !== gameState.playerTeam.id) {
+            // AI's turn
              // Pass current selectedPlayerId (though AI doesn't use it, keep consistent)
              UI.renderDraftScreen(gameState, handlePlayerSelectInDraft, selectedPlayerId); 
-            await new Promise(resolve => setTimeout(resolve, 100)); 
+            await new Promise(resolve => setTimeout(resolve, 100)); // Short delay
 
             if (currentPickingTeam.roster.length < 10) {
                 Game.simulateAIPick(currentPickingTeam);
@@ -114,17 +119,19 @@ async function runAIDraftPicks() {
             gameState.currentPick++;
             undraftedPlayersCount = gameState.players.filter(p => !p.teamId).length; // Update count
         } else {
+            // Player's turn
             if (gameState.playerTeam.roster.length < 10) {
                  // Pass current selectedPlayerId
                  UI.renderDraftScreen(gameState, handlePlayerSelectInDraft, selectedPlayerId); 
                 return; // Wait for player input
             } else {
                  console.log("Player roster full, skipping pick.");
-                 gameState.currentPick++; 
+                 gameState.currentPick++; // Skip player pick if roster is full
             }
         }
     }
 
+    // If the loop finishes, the draft is over
     handleDraftEnd();
 }
 
@@ -132,7 +139,7 @@ async function runAIDraftPicks() {
 function handleDraftEnd() {
     UI.showModal("Draft Complete!", "<p>The draft has concluded. Finalizing rosters and generating schedule!</p>");
     gameState.teams.forEach(team => {
-        Game.aiSetDepthChart(team); 
+        Game.aiSetDepthChart(team); // Set initial depth charts
     });
     Game.generateSchedule();
     gameState = Game.getGameState();
@@ -152,7 +159,7 @@ function handleTabSwitch(e) {
 function handleDepthChartDrop(playerId, newPositionSlot, side) {
     Game.updateDepthChart(playerId, newPositionSlot, side);
     gameState = Game.getGameState();
-    UI.switchTab('depth-chart', gameState); 
+    UI.switchTab('depth-chart', gameState); // Re-render depth chart
 }
 
 function handleFormationChange(e) {
@@ -160,7 +167,7 @@ function handleFormationChange(e) {
     const formationName = e.target.value;
     Game.changeFormation(side, formationName);
     gameState = Game.getGameState();
-    UI.switchTab('depth-chart', gameState); 
+    UI.switchTab('depth-chart', gameState); // Re-render depth chart
 }
 
 async function handleAdvanceWeek() {
@@ -192,22 +199,37 @@ async function handleAdvanceWeek() {
         
         UI.showModal(`Week ${gameState.currentWeek} Results`, resultsHtml);
 
-        // Check for injuries *after* showing results, trigger Call Friend modal if needed
-        gameState = Game.getGameState(); // Update state after sim
-        const injuredPlayers = gameState.playerTeam.roster.filter(p => p.status.duration > 0 && p.status.isNew); // Only new injuries this week
-        if (injuredPlayers.length > 0 && gameState.playerTeam.roster.filter(p => p.status.duration === 0).length < 7) {
-             // Only pop up if they might forfeit next week
-             setTimeout(() => { // Delay slightly after the results modal closes
-                 UI.showModal("Call a Friend?", `<p>Looks like you have some injuries (${injuredPlayers.map(p=>p.name).join(', ')}). Want to call a friend to help out next week?</p>`, () => {
-                     // If confirmed, switch to messages tab where they can see who is available (simpler than full FA tab)
-                     UI.switchTab('messages', gameState);
-                 });
-             }, 500);
+        // Update state *after* sim, before AI roster management
+        gameState = Game.getGameState(); 
+
+        // AI Roster Management and Free Agency Generation
+        gameState.teams.filter(t => t.id !== gameState.playerTeam.id).forEach(Game.aiManageRoster);
+        Game.generateWeeklyFreeAgents(); 
+
+        // Update state again after AI actions/FA generation
+        gameState = Game.getGameState(); 
+
+        // Check for player injuries *after* state updates
+        const newlyInjuredPlayers = gameState.playerTeam.roster.filter(p => p.status.isNew && p.status.duration > 0); 
+        const healthyPlayerCount = gameState.playerTeam.roster.filter(p => p.status.duration === 0).length;
+
+        if (newlyInjuredPlayers.length > 0 && healthyPlayerCount < 7) {
+             // Use setTimeout to show modal *after* the results modal closes
+             setTimeout(() => { 
+                const availableFriends = gameState.freeAgents;
+                let modalBody = `<p>Looks like ${newlyInjuredPlayers.map(p=>p.name).join(', ')} got injured. You might not have enough players for next week!</p>`;
+                if (availableFriends.length > 0) {
+                     modalBody += `<p class="mt-2">Want to check your messages to see if any friends can help out?</p>`;
+                      UI.showModal("Call a Friend?", modalBody, () => {
+                          UI.switchTab('messages', gameState); // Go to messages to see available friends
+                     });
+                } else {
+                    modalBody += `<p class="mt-2 text-red-600">Unfortunately, no friends are available to call this week.</p>`;
+                     UI.showModal("Roster Alert!", modalBody);
+                }
+             }, 500); // 500ms delay
         }
 
-
-        gameState.teams.filter(t => t.id !== gameState.playerTeam.id).forEach(Game.aiManageRoster);
-        Game.generateWeeklyFreeAgents(); // Generate *after* AI might use them
 
         UI.renderDashboard(gameState);
         const activeTab = document.querySelector('.tab-button.active')?.dataset.tab || 'my-team';
@@ -236,21 +258,56 @@ function handleGoToNextDraft() {
 
 function handleDashboardClicks(e) {
     const target = e.target;
-    // Removed .call-friend-btn listener - now handled by modal confirmation/messages tab
+    // Removed .call-friend-btn listener - now handled via messages/modal confirmation
 }
 
 function handleStatsChange() {
-    UI.switchTab('player-stats', gameState); 
+    UI.switchTab('player-stats', gameState); // Just re-render the stats tab
 }
 
 function handleMessageClick(messageId) {
     const message = gameState.messages.find(m => m.id === messageId);
     if(message) {
-        UI.showModal(message.subject, `<p>${message.body}</p>`);
+        // Check if it's a "Call Friend" message generated by an injury alert
+        if (message.subject === "Need Help?") { 
+            const availableFriends = Game.getGameState().freeAgents;
+            if (availableFriends.length > 0) {
+                 let friendListHtml = '<p>Some friends might be able to fill in:</p><ul class="list-disc list-inside mt-2">';
+                 availableFriends.forEach(f => {
+                     friendListHtml += `<li>${f.name} (${f.relationship}) - Best at ${Object.keys(positionOverallWeights).reduce((best, pos) => calculateOverall(f, pos) > calculateOverall(f, best) ? pos : best)} <button data-player-id="${f.id}" class="call-friend-action-btn ml-2 bg-green-500 hover:bg-green-600 text-white px-2 py-0.5 text-xs rounded">CALL</button></li>`;
+                 });
+                 friendListHtml += '</ul>';
+                  UI.showModal(message.subject, friendListHtml);
+            } else {
+                 UI.showModal(message.subject, "<p>Unfortunately, no friends are available to call this week.</p>");
+            }
+        } else {
+             // Standard message display
+            UI.showModal(message.subject, `<p>${message.body}</p>`);
+        }
         Game.markMessageAsRead(messageId);
         UI.updateMessagesNotification(gameState.messages);
         // Re-render message list to show read status immediately
         UI.renderMessagesTab(gameState, handleMessageClick);
+    }
+}
+
+// Separate handler for actions *within* the modal (like Call Friend)
+function handleModalActions(e) {
+    const target = e.target;
+    if (target.matches('.call-friend-action-btn')) {
+        const playerId = target.dataset.playerId;
+        const result = Game.callFriend(playerId);
+        // Show result in a *new* modal or update current? New is simpler.
+        UI.hideModal(); // Close the friend list modal
+        setTimeout(() => { // Short delay
+             UI.showModal("Calling Friend...", `<p>${result.message}</p>`);
+        }, 300);
+        gameState = Game.getGameState(); // Update state
+        // Refresh relevant tabs
+        const activeTab = document.querySelector('.tab-button.active')?.dataset.tab || 'my-team';
+        UI.switchTab(activeTab, gameState);
+        checkForNewMessages();
     }
 }
 
@@ -277,17 +334,16 @@ function main() {
         // --- Tab Navigation ---
         document.getElementById('dashboard-tabs')?.addEventListener('click', handleTabSwitch);
 
-        // --- Dynamic Content Interactions ---
-        // Removed dashboard click handler as Call Friend button is gone
-        // document.getElementById('dashboard-content')?.addEventListener('click', handleDashboardClicks);
-
-         // Add listener specifically for messages list clicks
+        // --- Listeners for dynamically added content ---
+        // Listener for messages list clicks
         document.getElementById('messages-list')?.addEventListener('click', (e) => {
             const messageItem = e.target.closest('.message-item');
             if (messageItem && messageItem.dataset.messageId) {
                 handleMessageClick(messageItem.dataset.messageId);
             }
         });
+        // Listener for actions inside the modal (including dynamically added Call Friend buttons)
+        document.getElementById('modal')?.addEventListener('click', handleModalActions);
 
 
         // --- Filter/Sort Listeners ---
