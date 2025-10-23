@@ -10,7 +10,7 @@ async function startNewGame() {
     try {
         UI.showScreen('loadingScreen');
         await new Promise(resolve => setTimeout(resolve, 50));
-        await Game.initializeLeague(UI.updateLoadingProgress);
+        await Game.initializeLeague(UI.updateLaoadingProgress);
         gameState = Game.getGameState();
         UI.renderTeamNameSuggestions(['Jets', 'Sharks', 'Tigers', 'Bulldogs', 'Panthers', 'Giants'], handleTeamNameSelection);
         UI.showScreen('teamCreationScreen');
