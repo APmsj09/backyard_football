@@ -77,7 +77,7 @@ export const offenseFormations = {
         slots: ['QB1', 'RB1', 'RB2', 'WR1', 'OL1', 'OL2', 'OL3'],
         personnel: { QB: 1, RB: 2, WR: 1, OL: 3, DL: 0, LB: 0, DB: 0 }
     },
-     'Empty': { // Added Empty formation
+     'Empty': { 
         name: 'Empty',
         slots: ['QB1', 'WR1', 'WR2', 'WR3', 'WR4', 'OL1', 'OL2'],
         personnel: { QB: 1, RB: 0, WR: 4, OL: 2, DL: 0, LB: 0, DB: 0 }
@@ -100,7 +100,7 @@ export const defenseFormations = {
         slots: ['DL1', 'DL2', 'LB1', 'LB2', 'LB3', 'DB1', 'DB2'],
         personnel: { QB: 0, RB: 0, WR: 0, OL: 0, DL: 2, LB: 3, DB: 2 }
     },
-    'Dime': { // Added Dime defense
+    'Dime': { 
         name: 'Dime',
         slots: ['DL1', 'DL2', 'LB1', 'DB1', 'DB2', 'DB3', 'DB4'],
         personnel: { QB: 0, RB: 0, WR: 0, OL: 0, DL: 2, LB: 1, DB: 4 }
@@ -174,7 +174,7 @@ export const coachPersonalities = [
             technical: { throwingAccuracy: 1.1, catchingHands: 1.1, tackling: 1.1, blocking: 1.1, blockShedding: 1.0 }
         } 
     },
-    { // New Personality
+    { 
         type: 'Air Raid Offense',
         description: 'Loves to throw the ball deep and often.',
         preferredOffense: 'Empty',
@@ -185,7 +185,7 @@ export const coachPersonalities = [
             technical: { throwingAccuracy: 1.9, catchingHands: 1.7, tackling: 0.3, blocking: 0.4, blockShedding: 0.4 }
         }
     },
-    { // New Personality
+    { 
         type: 'Bend Don\'t Break Defense',
         description: 'Focuses on preventing big plays and relies on turnovers.',
         preferredOffense: 'Balanced',
