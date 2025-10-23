@@ -4,6 +4,7 @@
  * @returns {*} A random element from the array.
  */
 export function getRandom(arr) {
+    if (!arr || arr.length === 0) return undefined;
     return arr[Math.floor(Math.random() * arr.length)];
 }
 
@@ -16,6 +17,10 @@ export function getRandom(arr) {
 export function getRandomInt(min, max) {
     min = Math.ceil(min);
     max = Math.floor(max);
+    // Ensure min is not greater than max after flooring/ceiling
+    if (min > max) {
+      [min, max] = [max, min]; // Swap if necessary
+    }
     return Math.floor(Math.random() * (max - min + 1)) + min;
 }
 
