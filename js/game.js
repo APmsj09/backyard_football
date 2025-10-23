@@ -98,9 +98,15 @@ function generatePlayer(minAge = 8, maxAge = 17) {
 
 export function yieldToMain() { return new Promise(resolve => setTimeout(resolve, 0)); }
 
+function addMessage(subject, body) {
+    game.messages.unshift({ id: crypto.randomUUID(), subject, body, isRead: false });
+}
+
 export async function initializeLeague(onProgress) {
     console.log("Initializing league...");
-    game = { year: 1, teams: [], players: [], freeAgents: [], playerTeam: null, schedule: [], currentWeek: 0, divisions: {}, draftOrder: [], currentPick: 0, hallOfFame: [], gameResults: [] };
+    game = { year: 1, teams: [], players: [], freeAgents: [], playerTeam: null, schedule: [], currentWeek: 0, divisions: {}, draftOrder: [], currentPick: 0, hallOfFame: [], gameResults: [], messages: [] };
+    addMessage("Welcome to the League!", "Your new season is about to begin. Get ready to draft your team and make a run for the championship!");
+
     game.divisions[divisionNames[0]] = []; game.divisions[divisionNames[1]] = [];
     const totalPlayers = 300;
     for (let i = 0; i < totalPlayers; i++) {
@@ -149,6 +155,7 @@ export function createPlayerTeam(teamName) {
     game.teams.push(playerTeam);
     game.divisions[division].push(playerTeam.id);
     game.playerTeam = playerTeam;
+    addMessage("Team Created!", `Welcome to the league, ${finalTeamName}! It's time to build your team in the draft.`);
 }
 
 function getPlayerScore(player, coach) {
@@ -262,6 +269,7 @@ function checkInGameInjury(player, gameLog) {
         player.status.type = 'injured';
         player.status.description = 'Minor Injury';
         player.status.duration = duration;
+        player.status.isNew = true;
         gameLog.push(`INJURY: ${player.name} has suffered a minor injury and will be out for ${duration} week(s).`);
     }
 }
@@ -271,7 +279,7 @@ function getBestSub(team, position, usedPlayerIds) {
     if (availableSubs.length === 0) return null;
     return availableSubs.reduce((best, current) => 
         (calculateOverall(current, position) > calculateOverall(best, position)) ? current : best,
-        availableSubs[0] // Add a default value for reduce
+        availableSubs[0] 
     );
 }
 
@@ -317,7 +325,7 @@ function determinePlayCall(offense, defense, down, yardsToGo, ballOn, scoreDiff,
 
     if (qbStrength < 50) {
         passChance -= 0.25;
-        gameLog.push(`${offense.name} may rely on the run with a backup QB.`);
+        if(gameLog) gameLog.push(`${offense.name} may rely on the run with a backup QB.`);
     }
     if (rbStrength < 50) passChance += 0.15;
     if(qbStrength > rbStrength + 15) passChance += 0.1;
@@ -351,13 +359,13 @@ function resolvePlay(offense, defense, playCall, gameState) {
             calculateOverall(current, position) > calculateOverall(best, position) ? current : best,
             available[0]
         );
-        gameLog.push(`EMERGENCY: ${bestPlayer.name} has to fill in at ${position}!`);
+        if(gameLog) gameLog.push(`EMERGENCY: ${bestPlayer.name} has to fill in at ${position}!`);
         return bestPlayer;
     };
 
     if (playCall === 'short_pass' || playCall === 'deep_pass') {
         let qb = getPlayersForSlots(offense, 'offense', 'QB', usedPlayerIds)[0] || findEmergencyPlayer('QB');
-        if (!qb) { gameLog.push('No one could step in at QB! Broken play.'); return { yards: 0, turnover: true }; }
+        if (!qb) { if(gameLog) gameLog.push('No one could step in at QB! Broken play.'); return { yards: 0, turnover: true }; }
         usedPlayerIds.add(qb.id);
 
         const ols = getPlayersForSlots(offense, 'offense', 'OL', usedPlayerIds);
@@ -384,17 +392,17 @@ function resolvePlay(offense, defense, playCall, gameState) {
 
         if (rushPower > blockPower + getRandomInt(-25, 25)) {
             qbAccuracy -= playCall === 'deep_pass' ? 20 : 10;
-            gameLog.push(`${passRusher.name} gets pressure!`);
+            if(gameLog) gameLog.push(`${passRusher.name} gets pressure!`);
             if (rushPower > blockPower + 30) {
                 const sackYards = getRandomInt(5, 12);
-                gameLog.push(`SACK! ${passRusher.name} flattens ${qb.name} for a loss of ${sackYards}.`);
+                if(gameLog) gameLog.push(`SACK! ${passRusher.name} flattens ${qb.name} for a loss of ${sackYards}.`);
                 passRusher.gameStats.sacks++; passRusher.gameStats.tackles++;
                 return { yards: -sackYards };
             }
         }
 
         checkInGameInjury(qb, gameLog);
-        if (qbAccuracy < getRandomInt(5, 95)) { gameLog.push(`INCOMPLETE. Bad throw by ${qb.name}.`); return { yards: 0 }; }
+        if (qbAccuracy < getRandomInt(5, 95)) { if(gameLog) gameLog.push(`INCOMPLETE. Bad throw by ${qb.name}.`); return { yards: 0 }; }
 
         const targets = [...wrs, ...rbs].filter(Boolean);
         if (targets.length === 0) return { yards: 0 };
@@ -409,11 +417,11 @@ function resolvePlay(offense, defense, playCall, gameState) {
             target = reads[i];
             coverage = getRandom(coveragePlayers);
             const openFactor = (target.attributes.physical.speed * getFatigueModifier(target)) - (coverage.attributes.physical.agility * getFatigueModifier(coverage));
-            if(isDoubleCovered && i === 0) gameLog.push(`Defense is keying on ${target.name}!`);
+            if(isDoubleCovered && i === 0) if(gameLog) gameLog.push(`Defense is keying on ${target.name}!`);
             const effectiveOpenFactor = isDoubleCovered && i === 0 ? openFactor - 20 : openFactor;
             
             if(effectiveOpenFactor + (qb.attributes.mental.playbookIQ / 5) > getRandomInt(0, 30) || i === reads.length -1) { break; }
-            if (i < reads.length -1) gameLog.push(`${qb.name} looks off his first read.`);
+            if (i < reads.length -1 && gameLog) gameLog.push(`${qb.name} looks off his first read.`);
         }
         
         checkInGameInjury(target, gameLog); checkInGameInjury(coverage, gameLog);
@@ -423,11 +431,10 @@ function resolvePlay(offense, defense, playCall, gameState) {
         if (weather === 'Rain') catchContest -= 10;
         if (isDoubleCovered && target.id === reads[0].id) catchContest -= 15;
 
-        // BALANCING: Lowered the random range to make catches more likely
         if (catchContest > getRandomInt(20, 60)) {
             const base_yards = playCall === 'deep_pass' ? getRandomInt(15, 40) : getRandomInt(3, 12);
             target.gameStats.receptions++;
-            gameLog.push(`PASS from ${qb.name} to ${target.name} for ${base_yards} yards.`);
+            if(gameLog) gameLog.push(`PASS from ${qb.name} to ${target.name} for ${base_yards} yards.`);
 
             const jukePower = target.attributes.physical.agility * getFatigueModifier(target) * (separation > 10 ? 1.2 : 0.8);
             const grapplePower = coverage.attributes.technical.tackling + coverage.attributes.physical.agility;
@@ -435,21 +442,21 @@ function resolvePlay(offense, defense, playCall, gameState) {
             if (jukePower > grapplePower + getRandomInt(-25, 25)) {
                 const bringDownPower = (coverage.attributes.technical.tackling + coverage.attributes.physical.strength) * getFatigueModifier(coverage);
                 const breakPower = target.attributes.physical.strength * getFatigueModifier(target);
-                if(bringDownPower < breakPower + getRandomInt(-20, 20)) {
+                if(bringDownPower < breakPower + getRandomInt(-30, 30)) {
                     extraYards = getRandomInt(5, 20);
-                    gameLog.push(`${target.name} breaks the tackle for an extra ${extraYards} yards!`);
+                    if(gameLog) gameLog.push(`${target.name} breaks the tackle for an extra ${extraYards} yards!`);
                 } else {
-                    gameLog.push(`${coverage.name} hangs on for the tackle!`);
+                    if(gameLog) gameLog.push(`${coverage.name} hangs on for the tackle!`);
                 }
             } else {
-                 gameLog.push(`${coverage.name} wraps up ${target.name}.`);
+                 if(gameLog) gameLog.push(`${coverage.name} wraps up ${target.name}.`);
                  coverage.gameStats.tackles++;
             }
 
             if (playCall === 'deep_pass' && extraYards === 0) {
                 const safety = dbs.filter(p => p.id !== coverage.id)[0] || lbs[0];
                 if(safety) {
-                     gameLog.push(`...and is brought down by the safety, ${safety.name}!`);
+                     if(gameLog) gameLog.push(`...and is brought down by the safety, ${safety.name}!`);
                      safety.gameStats.tackles++;
                 }
             }
@@ -459,20 +466,19 @@ function resolvePlay(offense, defense, playCall, gameState) {
 
             return { yards: totalYards };
         } else {
-            // BALANCING: Drastically reduced interception chance
             if ((coverage.attributes.technical.catchingHands / 100) > Math.random() * 1.5) {
-                gameLog.push(`INTERCEPTION! ${coverage.name} jumps the route!`);
+                if(gameLog) gameLog.push(`INTERCEPTION! ${coverage.name} jumps the route!`);
                 coverage.gameStats.interceptions++;
                 return { yards: 0, turnover: true };
             }
-            gameLog.push(`INCOMPLETE to ${target.name}, defended by ${coverage.name}.`);
+            if(gameLog) gameLog.push(`INCOMPLETE to ${target.name}, defended by ${coverage.name}.`);
             return { yards: 0 };
         }
     }
 
     if (playCall === 'run') {
         let rb = getPlayersForSlots(offense, 'offense', 'RB', usedPlayerIds)[0] || findEmergencyPlayer('RB');
-        if (!rb) { gameLog.push('No healthy RB available! Broken play.'); return { yards: 0, turnover: true }; }
+        if (!rb) { if(gameLog) gameLog.push('No healthy RB available! Broken play.'); return { yards: 0, turnover: true }; }
         usedPlayerIds.add(rb.id);
 
         const ols = getPlayersForSlots(offense, 'offense', 'OL', usedPlayerIds);
@@ -490,7 +496,7 @@ function resolvePlay(offense, defense, playCall, gameState) {
         if((ol.attributes.technical.blocking + ol.attributes.physical.strength) * getFatigueModifier(ol) > (dl.attributes.technical.blockShedding + dl.attributes.physical.strength) * getFatigueModifier(dl) + getRandomInt(-30, 30)) {
             yards = getRandomInt(2, 6);
             if ((ol.attributes.physical.strength > dl.attributes.physical.strength + 20)) {
-                gameLog.push(`PANCAKE! ${ol.name} flattens ${dl.name}!`);
+                if(gameLog) gameLog.push(`PANCAKE! ${ol.name} flattens ${dl.name}!`);
                 yards += getRandomInt(3, 7);
             }
         } else {
@@ -503,33 +509,32 @@ function resolvePlay(offense, defense, playCall, gameState) {
             checkInGameInjury(tackler, gameLog);
             const grappleCheck = (tackler.attributes.technical.tackling + tackler.attributes.physical.agility) > (rb.attributes.physical.agility * getFatigueModifier(rb));
             if(grappleCheck) {
-                // BALANCING: Gave the RB a better chance to win the strength battle
                 const bringDownCheck = (tackler.attributes.physical.strength > rb.attributes.physical.strength * getFatigueModifier(rb) + getRandomInt(-30, 30));
                 if(bringDownCheck) {
-                    gameLog.push(`Tackled by ${tackler.name}.`);
+                    if(gameLog) gameLog.push(`Tackled by ${tackler.name}.`);
                     tackler.gameStats.tackles++;
                 } else {
                     const dragYards = getRandomInt(1, 4);
                     yards += dragYards;
-                    gameLog.push(`${rb.name} is wrapped up but drags ${tackler.name} for ${dragYards} extra yards!`);
+                    if(gameLog) gameLog.push(`${rb.name} is wrapped up but drags ${tackler.name} for ${dragYards} extra yards!`);
                     tackler.gameStats.tackles++;
                 }
             } else {
                 const extraYards = getRandomInt(5, 15);
-                gameLog.push(`${rb.name} jukes past ${tackler.name} and picks up an extra ${extraYards} yards!`);
+                if(gameLog) gameLog.push(`${rb.name} jukes past ${tackler.name} and picks up an extra ${extraYards} yards!`);
                 yards += extraYards;
             }
 
             let fumbleChance = 0.03;
             if (weather === 'Rain') fumbleChance *= 2;
             if (Math.random() < fumbleChance && (rb.attributes.technical.catchingHands * getFatigueModifier(rb)) < tackler.attributes.physical.strength) {
-                gameLog.push(`FUMBLE! ${tackler.name} forces the ball out!`);
+                if(gameLog) gameLog.push(`FUMBLE! ${tackler.name} forces the ball out!`);
                 return { yards, turnover: true };
             }
         }
         
         rb.gameStats.rushYards += yards;
-        gameLog.push(`RUN by ${rb.name} for ${yards} yards.`);
+        if(gameLog) gameLog.push(`RUN by ${rb.name} for ${yards} yards.`);
         return { yards };
     }
     return { yards: 0 };
@@ -615,6 +620,7 @@ function simulateGame(homeTeam, awayTeam) {
             for(const cat in p.attributes) {
                 if(p.attributes[cat][attr] && p.attributes[cat][attr] < 99) {
                     p.attributes[cat][attr]++;
+                    p.breakthroughAttr = attr; // Mark the attribute that improved
                     breakthroughs.push({ player: p, attr });
                     break;
                 }
@@ -640,6 +646,12 @@ function updatePlayerStatuses() {
                 player.status.description = '';
             }
         }
+        if (player.breakthroughAttr) {
+            delete player.breakthroughAttr;
+        }
+        if (player.status.isNew) {
+            player.status.isNew = false;
+        }
     }
 }
 
@@ -658,6 +670,10 @@ function generateWeeklyEvents() {
                     player.status.type = event.type;
                     player.status.description = event.description;
                     player.status.duration = getRandomInt(event.minDuration, event.maxDuration);
+                    player.status.isNew = true;
+                    if (player.teamId === game.playerTeam.id) {
+                        addMessage('Player Status Update', `${player.name} will be unavailable for ${player.status.duration} week(s): ${player.status.description}`);
+                    }
                     break;
                 }
             }
@@ -680,8 +696,6 @@ export function simulateWeek() {
     const startIndex = game.currentWeek * gamesPerWeek;
     const endIndex = startIndex + gamesPerWeek;
     
-    console.log(`Simulating Week ${game.currentWeek + 1}: Slicing schedule from index ${startIndex} to ${endIndex}. Total schedule length: ${game.schedule.length}`);
-
     const weeklyGames = game.schedule.slice(startIndex, endIndex);
     
     if (!weeklyGames || weeklyGames.length === 0) {
@@ -689,17 +703,21 @@ export function simulateWeek() {
         return [];
     }
     
-    console.log(`Found ${weeklyGames.length} games to simulate.`);
-
     const results = weeklyGames.map(match => {
         const result = simulateGame(match.home, match.away);
-        if(result.breakthroughs) game.breakthroughs.push(...result.breakthroughs);
+        if(result.breakthroughs) {
+            result.breakthroughs.forEach(b => {
+                if (b.player.teamId === game.playerTeam.id) {
+                    addMessage("Player Breakthrough!", `${b.player.name} had a great game and improved their ${b.attr}!`);
+                }
+            });
+            game.breakthroughs.push(...result.breakthroughs);
+        }
         return result;
     });
     
     game.gameResults.push(...results);
     game.currentWeek++;
-    console.log(`Simulation complete. Advancing to week ${game.currentWeek + 1}.`);
     return results;
 }
 
@@ -716,7 +734,8 @@ export function generateWeeklyFreeAgents() {
     }
 }
 
-export function callFriend(playerId, team = game.playerTeam) {
+export function callFriend(playerId) {
+    const team = game.playerTeam;
     if (!team.roster.some(p => p.status.duration > 0)) {
         return { success: false, message: "You can only call a friend if a player on your team is injured or busy." };
     }
@@ -731,10 +750,14 @@ export function callFriend(playerId, team = game.playerTeam) {
         player.status = { type: 'temporary', description: 'Helping Out', duration: 1 };
         team.roster.push(player);
         game.freeAgents = game.freeAgents.filter(p => p.id !== playerId);
-        return { success: true, message: `${player.name} agreed to play for you this week!` };
+        const message = `${player.name} agreed to play for you this week!`;
+        addMessage("Roster Update", message);
+        return { success: true, message };
     } else {
         game.freeAgents = game.freeAgents.filter(p => p.id !== playerId);
-        return { success: false, message: `${player.name} couldn't make it this week.` };
+        const message = `${player.name} couldn't make it this week. They are now unavailable.`;
+        addMessage("Roster Update", message);
+        return { success: false, message };
     }
 }
 
@@ -745,17 +768,21 @@ export function aiManageRoster(team) {
     if (healthyCount < 7 && game.freeAgents.length > 0) {
         const bestFA = game.freeAgents.reduce((best, p) => getPlayerScore(p, team.coach) > getPlayerScore(best, team.coach) ? p : best);
         
-        const result = callFriend(bestFA.id, team);
-        if(result.success) {
-            console.log(`${team.name} successfully called in friend ${bestFA.name} to avoid a forfeit.`);
+        const successRates = { 'Best Friend': 0.9, 'Good Friend': 0.6, 'Acquaintance': 0.3 };
+        const successChance = successRates[bestFA.relationship] || 0.3;
+        if (Math.random() < successChance) {
+            bestFA.status = { type: 'temporary', description: 'Helping Out', duration: 1 };
+            team.roster.push(bestFA);
             game.freeAgents = game.freeAgents.filter(p => p.id !== bestFA.id);
+            console.log(`${team.name} successfully called in friend ${bestFA.name} to avoid a forfeit.`);
         }
     }
 }
 
 function developPlayer(player) {
     const developmentReport = { player, improvements: [] };
-    let potential = player.age < 12 ? getRandomInt(4, 8) : player.age < 16 ? getRandomInt(1, 5) : getRandomInt(0, 2);
+    // BALANCING: Toned down offseason progression
+    let potential = player.age < 12 ? getRandomInt(2, 5) : player.age < 16 ? getRandomInt(1, 3) : getRandomInt(0, 1);
     const attributesToImprove = ['speed', 'strength', 'agility', 'throwingAccuracy', 'catchingHands', 'tackling', 'blocking', 'playbookIQ', 'blockShedding', 'toughness'];
     
     for (let i = 0; i < potential; i++) {
@@ -807,9 +834,15 @@ export function advanceToOffseason() {
             remainingPlayers.push(p);
         } else {
             retiredPlayers.push(p);
+            if (p.teamId === game.playerTeam.id) {
+                addMessage("Player Retires", `${p.name} has graduated from the league.`);
+            }
             if (p.careerStats.touchdowns > 20 || p.careerStats.passYards > 5000 || p.careerStats.tackles > 200) {
                 game.hallOfFame.push(p);
                 hofInductees.push(p);
+                if (p.teamId === game.playerTeam.id) {
+                     addMessage("Hall of Fame", `${p.name} has been inducted into the Hall of Fame!`);
+                }
             }
         }
     });
@@ -824,6 +857,7 @@ export function advanceToOffseason() {
     game.players.forEach(p => p.teamId = null);
     
     const rookieCount = retiredPlayers.length;
+    addMessage("Offseason", `${rookieCount} new players have joined the league for the upcoming draft.`);
     for (let i = 0; i < rookieCount; i++) game.players.push(generatePlayer(8, 10));
 
     return { retiredPlayers, hofInductees, developmentResults };
@@ -872,4 +906,11 @@ export function changeFormation(side, formationName) {
 export function getGameState() { return game; }
 
 export function getBreakthroughs() { return game.breakthroughs || []; }
+
+export function markMessageAsRead(messageId) {
+    const message = game.messages.find(m => m.id === messageId);
+    if(message) {
+        message.isRead = true;
+    }
+}
 
