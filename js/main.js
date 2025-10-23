@@ -33,13 +33,14 @@ function handleConfirmTeam() {
 
     if (customName) {
         Game.createPlayerTeam(customName);
-        // Draft needs are set during offseason, initialize to 10 for first draft
         gameState = Game.getGameState();
         gameState.teams.forEach(t => t.draftNeeds = 10);
         Game.setupDraft();
-        gameState = Game.getGameState(); // Get state again after setup
+        gameState = Game.getGameState(); 
+        selectedPlayerId = null; // Reset selection for the new draft
         UI.renderSelectedPlayerCard(null);
-        UI.renderDraftScreen(gameState, handlePlayerSelectInDraft);
+        // Pass the initial null selectedPlayerId
+        UI.renderDraftScreen(gameState, handlePlayerSelectInDraft, selectedPlayerId); 
         UI.showScreen('draftScreen');
         runAIDraftPicks();
     } else {
@@ -49,10 +50,12 @@ function handleConfirmTeam() {
 
 
 function handlePlayerSelectInDraft(playerId) {
-    selectedPlayerId = playerId;
+    selectedPlayerId = playerId; // Update state in main.js
     const player = gameState.players.find(p => p.id === playerId);
-    UI.updateSelectedPlayerRow(playerId);
-    UI.renderSelectedPlayerCard(player);
+    UI.updateSelectedPlayerRow(playerId); // Just handles highlighting
+    UI.renderSelectedPlayerCard(player); // Renders the details card
+    // *** Update the draft screen (specifically the button state) after selection ***
+    UI.renderDraftScreen(gameState, handlePlayerSelectInDraft, selectedPlayerId);
 }
 
 function handleDraftPlayer() {
@@ -60,12 +63,14 @@ function handleDraftPlayer() {
     if (selectedPlayerId && team.roster.length < 10) {
         const player = gameState.players.find(p => p.id === selectedPlayerId);
         if (Game.addPlayerToTeam(player, team)) {
-            selectedPlayerId = null;
+            const previouslySelected = selectedPlayerId; // Store before resetting
+            selectedPlayerId = null; // Reset selection
             gameState.currentPick++;
-            UI.renderSelectedPlayerCard(null);
+            UI.renderSelectedPlayerCard(null); // Clear card
+            // Important: Update the draft pool *before* running AI picks to remove the drafted player visually
+            UI.renderDraftPool(gameState, handlePlayerSelectInDraft, selectedPlayerId); 
             runAIDraftPicks(); // Proceed to next pick
         } else {
-            // This case should ideally not happen due to the check above, but as failsafe:
             UI.showModal("Error", "<p>Could not draft player.</p>");
         }
     } else if (team.roster.length >= 10) {
@@ -77,26 +82,29 @@ function handleDraftPlayer() {
  * Manages the draft flow, handling AI picks and player picks.
  */
 async function runAIDraftPicks() {
-    gameState = Game.getGameState(); // Ensure we have the latest state
-    const undraftedPlayers = gameState.players.filter(p => !p.teamId);
-    const maxPicksPossible = gameState.draftOrder.length; // Total slots in the draft order
+    gameState = Game.getGameState(); 
+    let undraftedPlayersCount = gameState.players.filter(p => !p.teamId).length; // Use let for count
+    const maxPicksPossible = gameState.draftOrder.length; 
 
-    // Loop continues as long as there are picks left in the order AND players available
-    while (gameState.currentPick < maxPicksPossible && undraftedPlayers.length > 0) {
+    while (gameState.currentPick < maxPicksPossible && undraftedPlayersCount > 0) {
         
-        // Check if draft should end (e.g., all teams full) - More robust check might be needed
         const needsMorePlayers = gameState.teams.some(t => t.roster.length < 10);
-        if (!needsMorePlayers && undraftedPlayers.length > 0) {
+        if (!needsMorePlayers && undraftedPlayersCount > 0) {
              console.log("All teams have full rosters. Ending draft early.");
-             break; // Exit loop if all rosters are full
+             break; 
         }
 
+        // Ensure currentPick is valid before accessing draftOrder
+        if (gameState.currentPick >= gameState.draftOrder.length) {
+             console.error("Draft Error: currentPick went out of bounds unexpectedly.");
+             break;
+        }
         const currentPickingTeam = gameState.draftOrder[gameState.currentPick];
 
         if (currentPickingTeam.id !== gameState.playerTeam.id) {
-            // AI's turn
-             UI.renderDraftScreen(gameState, handlePlayerSelectInDraft); // Update UI to show who's picking
-            await new Promise(resolve => setTimeout(resolve, 100)); // Short delay
+             // Pass current selectedPlayerId (though AI doesn't use it, keep consistent)
+             UI.renderDraftScreen(gameState, handlePlayerSelectInDraft, selectedPlayerId); 
+            await new Promise(resolve => setTimeout(resolve, 100)); 
 
             if (currentPickingTeam.roster.length < 10) {
                 Game.simulateAIPick(currentPickingTeam);
@@ -104,21 +112,19 @@ async function runAIDraftPicks() {
                  console.log(`${currentPickingTeam.name} skips pick (roster full).`);
             }
             gameState.currentPick++;
-            // Re-fetch undrafted players count for the loop condition
-            undraftedPlayers.length = gameState.players.filter(p => !p.teamId).length;
+            undraftedPlayersCount = gameState.players.filter(p => !p.teamId).length; // Update count
         } else {
-            // Player's turn
             if (gameState.playerTeam.roster.length < 10) {
-                 UI.renderDraftScreen(gameState, handlePlayerSelectInDraft); // Update UI for player pick
+                 // Pass current selectedPlayerId
+                 UI.renderDraftScreen(gameState, handlePlayerSelectInDraft, selectedPlayerId); 
                 return; // Wait for player input
             } else {
                  console.log("Player roster full, skipping pick.");
-                 gameState.currentPick++; // Skip player pick if roster is full
+                 gameState.currentPick++; 
             }
         }
     }
 
-    // If the loop finishes, the draft is over
     handleDraftEnd();
 }
 
@@ -126,7 +132,7 @@ async function runAIDraftPicks() {
 function handleDraftEnd() {
     UI.showModal("Draft Complete!", "<p>The draft has concluded. Finalizing rosters and generating schedule!</p>");
     gameState.teams.forEach(team => {
-        Game.aiSetDepthChart(team); // Set initial depth charts
+        Game.aiSetDepthChart(team); 
     });
     Game.generateSchedule();
     gameState = Game.getGameState();
@@ -146,7 +152,7 @@ function handleTabSwitch(e) {
 function handleDepthChartDrop(playerId, newPositionSlot, side) {
     Game.updateDepthChart(playerId, newPositionSlot, side);
     gameState = Game.getGameState();
-    UI.switchTab('depth-chart', gameState); // Re-render depth chart
+    UI.switchTab('depth-chart', gameState); 
 }
 
 function handleFormationChange(e) {
@@ -154,7 +160,7 @@ function handleFormationChange(e) {
     const formationName = e.target.value;
     Game.changeFormation(side, formationName);
     gameState = Game.getGameState();
-    UI.switchTab('depth-chart', gameState); // Re-render depth chart
+    UI.switchTab('depth-chart', gameState); 
 }
 
 async function handleAdvanceWeek() {
@@ -186,21 +192,34 @@ async function handleAdvanceWeek() {
         
         UI.showModal(`Week ${gameState.currentWeek} Results`, resultsHtml);
 
-        gameState.teams.filter(t => t.id !== gameState.playerTeam.id).forEach(Game.aiManageRoster);
-        Game.generateWeeklyFreeAgents();
+        // Check for injuries *after* showing results, trigger Call Friend modal if needed
+        gameState = Game.getGameState(); // Update state after sim
+        const injuredPlayers = gameState.playerTeam.roster.filter(p => p.status.duration > 0 && p.status.isNew); // Only new injuries this week
+        if (injuredPlayers.length > 0 && gameState.playerTeam.roster.filter(p => p.status.duration === 0).length < 7) {
+             // Only pop up if they might forfeit next week
+             setTimeout(() => { // Delay slightly after the results modal closes
+                 UI.showModal("Call a Friend?", `<p>Looks like you have some injuries (${injuredPlayers.map(p=>p.name).join(', ')}). Want to call a friend to help out next week?</p>`, () => {
+                     // If confirmed, switch to messages tab where they can see who is available (simpler than full FA tab)
+                     UI.switchTab('messages', gameState);
+                 });
+             }, 500);
+        }
 
-        gameState = Game.getGameState();
+
+        gameState.teams.filter(t => t.id !== gameState.playerTeam.id).forEach(Game.aiManageRoster);
+        Game.generateWeeklyFreeAgents(); // Generate *after* AI might use them
+
         UI.renderDashboard(gameState);
         const activeTab = document.querySelector('.tab-button.active')?.dataset.tab || 'my-team';
         UI.switchTab(activeTab, gameState);
-        checkForNewMessages(); // Check for messages (injuries etc.)
+        checkForNewMessages(); 
     } else {
-        // Season is over, advance to offseason screen
+        // Season is over
         gameState = Game.getGameState(); 
         const offseasonReport = Game.advanceToOffseason();
         UI.renderOffseasonScreen(offseasonReport, gameState.year);
         UI.showScreen('offseasonScreen');
-        checkForNewMessages(); // Check for offseason messages
+        checkForNewMessages(); 
     }
 }
 
@@ -209,36 +228,35 @@ function handleGoToNextDraft() {
     gameState = Game.getGameState();
     selectedPlayerId = null;
     UI.renderSelectedPlayerCard(null);
-    UI.renderDraftScreen(gameState, handlePlayerSelectInDraft);
+     // Pass initial null selectedPlayerId
+    UI.renderDraftScreen(gameState, handlePlayerSelectInDraft, selectedPlayerId);
     UI.showScreen('draftScreen');
     runAIDraftPicks();
 }
 
 function handleDashboardClicks(e) {
     const target = e.target;
-    if (target.matches('.call-friend-btn')) {
-        const playerId = target.dataset.playerId;
-        const result = Game.callFriend(playerId);
-        UI.showModal("Calling a Friend...", `<p>${result.message}</p>`);
-        gameState = Game.getGameState();
-        // Refresh relevant tabs
-        const activeTab = document.querySelector('.tab-button.active')?.dataset.tab || 'my-team';
-        if (activeTab === 'my-team') {
-            UI.switchTab('my-team', gameState);
-        } else {
-             UI.switchTab(activeTab, gameState); // Refresh current
-             // Potentially force refresh My Team in background if needed later
-        }
-         checkForNewMessages();
-    }
+    // Removed .call-friend-btn listener - now handled by modal confirmation/messages tab
 }
 
 function handleStatsChange() {
-    UI.switchTab('player-stats', gameState); // Just re-render the stats tab
+    UI.switchTab('player-stats', gameState); 
 }
 
+function handleMessageClick(messageId) {
+    const message = gameState.messages.find(m => m.id === messageId);
+    if(message) {
+        UI.showModal(message.subject, `<p>${message.body}</p>`);
+        Game.markMessageAsRead(messageId);
+        UI.updateMessagesNotification(gameState.messages);
+        // Re-render message list to show read status immediately
+        UI.renderMessagesTab(gameState, handleMessageClick);
+    }
+}
+
+
 function checkForNewMessages() {
-    gameState = Game.getGameState(); // Ensure latest state
+    gameState = Game.getGameState(); 
     if (gameState.messages.some(msg => !msg.isRead)) {
         UI.updateMessagesNotification(gameState.messages);
     }
@@ -260,12 +278,22 @@ function main() {
         document.getElementById('dashboard-tabs')?.addEventListener('click', handleTabSwitch);
 
         // --- Dynamic Content Interactions ---
-        document.getElementById('dashboard-content')?.addEventListener('click', handleDashboardClicks); // Handles call friend etc.
+        // Removed dashboard click handler as Call Friend button is gone
+        // document.getElementById('dashboard-content')?.addEventListener('click', handleDashboardClicks);
+
+         // Add listener specifically for messages list clicks
+        document.getElementById('messages-list')?.addEventListener('click', (e) => {
+            const messageItem = e.target.closest('.message-item');
+            if (messageItem && messageItem.dataset.messageId) {
+                handleMessageClick(messageItem.dataset.messageId);
+            }
+        });
+
 
         // --- Filter/Sort Listeners ---
-        document.getElementById('draft-search')?.addEventListener('input', () => UI.renderDraftPool(gameState, handlePlayerSelectInDraft));
-        document.getElementById('draft-filter-pos')?.addEventListener('change', () => UI.renderDraftPool(gameState, handlePlayerSelectInDraft));
-        document.getElementById('draft-sort')?.addEventListener('change', () => UI.renderDraftPool(gameState, handlePlayerSelectInDraft));
+        document.getElementById('draft-search')?.addEventListener('input', () => UI.renderDraftPool(gameState, handlePlayerSelectInDraft, selectedPlayerId));
+        document.getElementById('draft-filter-pos')?.addEventListener('change', () => UI.renderDraftPool(gameState, handlePlayerSelectInDraft, selectedPlayerId));
+        document.getElementById('draft-sort')?.addEventListener('change', () => UI.renderDraftPool(gameState, handlePlayerSelectInDraft, selectedPlayerId));
         document.getElementById('stats-filter-team')?.addEventListener('change', handleStatsChange);
         document.getElementById('stats-sort')?.addEventListener('change', handleStatsChange);
         
@@ -285,6 +313,5 @@ function main() {
     }
 }
 
-// Start the game when the DOM is fully loaded
 document.addEventListener('DOMContentLoaded', main);
 
