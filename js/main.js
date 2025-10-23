@@ -16,6 +16,7 @@ async function startNewGame() {
         UI.showScreen('teamCreationScreen');
     } catch (error) {
         console.error("Error starting game:", error);
+        // Maybe show an error message to the user
     }
 }
 
@@ -32,8 +33,11 @@ function handleConfirmTeam() {
 
     if (customName) {
         Game.createPlayerTeam(customName);
-        Game.setupDraft();
+        // Draft needs are set during offseason, initialize to 10 for first draft
         gameState = Game.getGameState();
+        gameState.teams.forEach(t => t.draftNeeds = 10);
+        Game.setupDraft();
+        gameState = Game.getGameState(); // Get state again after setup
         UI.renderSelectedPlayerCard(null);
         UI.renderDraftScreen(gameState, handlePlayerSelectInDraft);
         UI.showScreen('draftScreen');
@@ -52,57 +56,84 @@ function handlePlayerSelectInDraft(playerId) {
 }
 
 function handleDraftPlayer() {
-    if (selectedPlayerId) {
+    const team = Game.getGameState().playerTeam;
+    if (selectedPlayerId && team.roster.length < 10) {
         const player = gameState.players.find(p => p.id === selectedPlayerId);
-        const team = Game.getGameState().playerTeam;
         if (Game.addPlayerToTeam(player, team)) {
             selectedPlayerId = null;
             gameState.currentPick++;
             UI.renderSelectedPlayerCard(null);
-            runAIDraftPicks();
+            runAIDraftPicks(); // Proceed to next pick
         } else {
-            UI.showModal("Roster Full", "<p>Your roster is full! You cannot draft more players.</p>");
+            // This case should ideally not happen due to the check above, but as failsafe:
+            UI.showModal("Error", "<p>Could not draft player.</p>");
         }
+    } else if (team.roster.length >= 10) {
+         UI.showModal("Roster Full", "<p>Your roster is full! You cannot draft more players.</p>");
     }
 }
 
+/**
+ * Manages the draft flow, handling AI picks and player picks.
+ */
 async function runAIDraftPicks() {
-    const checkDraftEnd = () => {
-        if (gameState.currentPick >= gameState.draftOrder.length) {
-            handleDraftEnd();
-            return true;
-        }
-        return false;
-    };
+    gameState = Game.getGameState(); // Ensure we have the latest state
+    const undraftedPlayers = gameState.players.filter(p => !p.teamId);
+    const maxPicksPossible = gameState.draftOrder.length; // Total slots in the draft order
 
-    if (checkDraftEnd()) return;
-    
-    while (gameState.draftOrder[gameState.currentPick].id !== gameState.playerTeam.id) {
-        UI.renderDraftScreen(gameState, handlePlayerSelectInDraft);
-        await new Promise(resolve => setTimeout(resolve, 100));
+    // Loop continues as long as there are picks left in the order AND players available
+    while (gameState.currentPick < maxPicksPossible && undraftedPlayers.length > 0) {
+        
+        // Check if draft should end (e.g., all teams full) - More robust check might be needed
+        const needsMorePlayers = gameState.teams.some(t => t.roster.length < 10);
+        if (!needsMorePlayers && undraftedPlayers.length > 0) {
+             console.log("All teams have full rosters. Ending draft early.");
+             break; // Exit loop if all rosters are full
+        }
 
         const currentPickingTeam = gameState.draftOrder[gameState.currentPick];
-        Game.simulateAIPick(currentPickingTeam);
-        gameState.currentPick++;
 
-        if (checkDraftEnd()) return;
+        if (currentPickingTeam.id !== gameState.playerTeam.id) {
+            // AI's turn
+             UI.renderDraftScreen(gameState, handlePlayerSelectInDraft); // Update UI to show who's picking
+            await new Promise(resolve => setTimeout(resolve, 100)); // Short delay
+
+            if (currentPickingTeam.roster.length < 10) {
+                Game.simulateAIPick(currentPickingTeam);
+            } else {
+                 console.log(`${currentPickingTeam.name} skips pick (roster full).`);
+            }
+            gameState.currentPick++;
+            // Re-fetch undrafted players count for the loop condition
+            undraftedPlayers.length = gameState.players.filter(p => !p.teamId).length;
+        } else {
+            // Player's turn
+            if (gameState.playerTeam.roster.length < 10) {
+                 UI.renderDraftScreen(gameState, handlePlayerSelectInDraft); // Update UI for player pick
+                return; // Wait for player input
+            } else {
+                 console.log("Player roster full, skipping pick.");
+                 gameState.currentPick++; // Skip player pick if roster is full
+            }
+        }
     }
 
-    UI.renderDraftScreen(gameState, handlePlayerSelectInDraft);
+    // If the loop finishes, the draft is over
+    handleDraftEnd();
 }
 
 
 function handleDraftEnd() {
+    UI.showModal("Draft Complete!", "<p>The draft has concluded. Finalizing rosters and generating schedule!</p>");
     gameState.teams.forEach(team => {
-        Game.aiSetDepthChart(team);
+        Game.aiSetDepthChart(team); // Set initial depth charts
     });
-
-    UI.showModal("Draft Complete!", "<p>The draft has concluded. Get ready for the season!</p>");
     Game.generateSchedule();
     gameState = Game.getGameState();
     UI.renderDashboard(gameState);
     UI.switchTab('my-team', gameState);
     UI.showScreen('dashboardScreen');
+    checkForNewMessages();
 }
 
 function handleTabSwitch(e) {
@@ -115,7 +146,7 @@ function handleTabSwitch(e) {
 function handleDepthChartDrop(playerId, newPositionSlot, side) {
     Game.updateDepthChart(playerId, newPositionSlot, side);
     gameState = Game.getGameState();
-    UI.switchTab('depth-chart', gameState);
+    UI.switchTab('depth-chart', gameState); // Re-render depth chart
 }
 
 function handleFormationChange(e) {
@@ -123,7 +154,7 @@ function handleFormationChange(e) {
     const formationName = e.target.value;
     Game.changeFormation(side, formationName);
     gameState = Game.getGameState();
-    UI.switchTab('depth-chart', gameState);
+    UI.switchTab('depth-chart', gameState); // Re-render depth chart
 }
 
 async function handleAdvanceWeek() {
@@ -160,14 +191,16 @@ async function handleAdvanceWeek() {
 
         gameState = Game.getGameState();
         UI.renderDashboard(gameState);
-        const activeTab = document.querySelector('.tab-button.active').dataset.tab;
+        const activeTab = document.querySelector('.tab-button.active')?.dataset.tab || 'my-team';
         UI.switchTab(activeTab, gameState);
+        checkForNewMessages(); // Check for messages (injuries etc.)
     } else {
         // Season is over, advance to offseason screen
-        gameState = Game.getGameState(); // Ensure latest state before processing
+        gameState = Game.getGameState(); 
         const offseasonReport = Game.advanceToOffseason();
         UI.renderOffseasonScreen(offseasonReport, gameState.year);
         UI.showScreen('offseasonScreen');
+        checkForNewMessages(); // Check for offseason messages
     }
 }
 
@@ -188,13 +221,27 @@ function handleDashboardClicks(e) {
         const result = Game.callFriend(playerId);
         UI.showModal("Calling a Friend...", `<p>${result.message}</p>`);
         gameState = Game.getGameState();
-        UI.switchTab('free-agency', gameState);
-        UI.switchTab('my-team', gameState);
+        // Refresh relevant tabs
+        const activeTab = document.querySelector('.tab-button.active')?.dataset.tab || 'my-team';
+        if (activeTab === 'my-team') {
+            UI.switchTab('my-team', gameState);
+        } else {
+             UI.switchTab(activeTab, gameState); // Refresh current
+             // Potentially force refresh My Team in background if needed later
+        }
+         checkForNewMessages();
     }
 }
 
 function handleStatsChange() {
-    UI.switchTab('player-stats', gameState);
+    UI.switchTab('player-stats', gameState); // Just re-render the stats tab
+}
+
+function checkForNewMessages() {
+    gameState = Game.getGameState(); // Ensure latest state
+    if (gameState.messages.some(msg => !msg.isRead)) {
+        UI.updateMessagesNotification(gameState.messages);
+    }
 }
 
 function main() {
@@ -202,33 +249,42 @@ function main() {
     try {
         UI.setupElements();
 
+        // --- Core Button Listeners ---
         document.getElementById('start-game-btn')?.addEventListener('click', startNewGame);
         document.getElementById('confirm-team-btn')?.addEventListener('click', handleConfirmTeam);
         document.getElementById('draft-player-btn')?.addEventListener('click', handleDraftPlayer);
-        document.getElementById('dashboard-tabs')?.addEventListener('click', handleTabSwitch);
         document.getElementById('advance-week-btn')?.addEventListener('click', handleAdvanceWeek);
         document.getElementById('go-to-next-draft-btn')?.addEventListener('click', handleGoToNextDraft);
-        document.getElementById('dashboard-content')?.addEventListener('click', handleDashboardClicks);
+        
+        // --- Tab Navigation ---
+        document.getElementById('dashboard-tabs')?.addEventListener('click', handleTabSwitch);
 
+        // --- Dynamic Content Interactions ---
+        document.getElementById('dashboard-content')?.addEventListener('click', handleDashboardClicks); // Handles call friend etc.
+
+        // --- Filter/Sort Listeners ---
         document.getElementById('draft-search')?.addEventListener('input', () => UI.renderDraftPool(gameState, handlePlayerSelectInDraft));
         document.getElementById('draft-filter-pos')?.addEventListener('change', () => UI.renderDraftPool(gameState, handlePlayerSelectInDraft));
         document.getElementById('draft-sort')?.addEventListener('change', () => UI.renderDraftPool(gameState, handlePlayerSelectInDraft));
-        
-        document.getElementById('offense-formation-select')?.addEventListener('change', handleFormationChange);
-        document.getElementById('defense-formation-select')?.addEventListener('change', handleFormationChange);
-        
         document.getElementById('stats-filter-team')?.addEventListener('change', handleStatsChange);
         document.getElementById('stats-sort')?.addEventListener('change', handleStatsChange);
+        
+        // --- Formation Selection ---
+        document.getElementById('offense-formation-select')?.addEventListener('change', handleFormationChange);
+        document.getElementById('defense-formation-select')?.addEventListener('change', handleFormationChange);
 
-
+        // --- Drag & Drop ---
         UI.setupDragAndDrop(handleDepthChartDrop);
         UI.setupDepthChartTabs();
 
+        // --- Initial Screen ---
         UI.showScreen('startScreen');
     } catch (error) {
         console.error("Fatal error during initialization:", error);
+        alert("A critical error occurred during startup. Please check the console (F12) for details.");
     }
 }
 
+// Start the game when the DOM is fully loaded
 document.addEventListener('DOMContentLoaded', main);
 
