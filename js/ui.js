@@ -19,7 +19,7 @@ export function setupElements() {
         modal: document.getElementById('modal'),
         modalTitle: document.getElementById('modal-title'),
         modalBody: document.getElementById('modal-body'),
-        modalCloseBtn: document.getElementById('modal-close-btn'),
+        // modalCloseBtn is now dynamically added
         loadingProgress: document.getElementById('loading-progress'),
         teamNameSuggestions: document.getElementById('team-name-suggestions'),
         customTeamName: document.getElementById('custom-team-name'),
@@ -45,7 +45,8 @@ export function setupElements() {
         dashboardContent: document.getElementById('dashboard-content'),
         advanceWeekBtn: document.getElementById('advance-week-btn'),
         myTeamRoster: document.getElementById('my-team-roster'),
-        freeAgencyList: document.getElementById('free-agency-list'),
+        messagesList: document.getElementById('messages-list'),
+        messagesNotificationDot: document.getElementById('messages-notification-dot'),
         scheduleList: document.getElementById('schedule-list'),
         standingsContainer: document.getElementById('standings-container'),
         playerStatsContainer: document.getElementById('player-stats-container'),
@@ -66,6 +67,7 @@ export function setupElements() {
         playerDevelopmentContainer: document.getElementById('player-development-container'),
         retirementsList: document.getElementById('retirements-list'),
         hofInducteesList: document.getElementById('hof-inductees-list'),
+        leavingPlayersList: document.getElementById('leaving-players-list'), // Added for offseason events
         goToNextDraftBtn: document.getElementById('go-to-next-draft-btn'),
     };
     console.log("UI Elements have been successfully set up.");
@@ -87,7 +89,7 @@ export function showModal(title, bodyHtml, onConfirm = null) {
     elements.modalBody.innerHTML = bodyHtml;
     
     let actionsDiv = elements.modal.querySelector('#modal-actions');
-    if (actionsDiv) actionsDiv.remove();
+    if (actionsDiv) actionsDiv.remove(); 
 
     actionsDiv = document.createElement('div');
     actionsDiv.id = 'modal-actions';
@@ -105,10 +107,10 @@ export function showModal(title, bodyHtml, onConfirm = null) {
     }
     
     const closeBtn = document.createElement('button');
-    closeBtn.id = 'modal-close-btn';
+    closeBtn.id = 'modal-close-btn-dynamic'; 
     closeBtn.textContent = 'Close';
     closeBtn.className = 'bg-gray-500 hover:bg-gray-600 text-white font-bold py-2 px-6 rounded-lg';
-    closeBtn.onclick = hideModal;
+    closeBtn.onclick = hideModal; 
     actionsDiv.appendChild(closeBtn);
 
     elements.modal.querySelector('#modal-content').appendChild(actionsDiv);
@@ -139,23 +141,35 @@ export function renderTeamNameSuggestions(names, onSelect) {
 }
 
 export function renderDraftScreen(gameState, onPlayerSelect) {
-    const { year, draftOrder, currentPick } = gameState;
+    const { year, draftOrder, currentPick, playerTeam } = gameState;
+    const maxPicks = gameState.teams.reduce((max, t) => Math.max(max, t.draftNeeds), 0) * gameState.teams.length;
 
-    if (currentPick >= draftOrder.length) {
-        elements.draftHeader.innerHTML = `<h2 class="text-3xl font-bold">Season ${year} Draft Complete</h2>`;
+
+    if (currentPick >= maxPicks || gameState.players.filter(p => !p.teamId).length === 0) {
+         elements.draftHeader.innerHTML = `<h2 class="text-3xl font-bold">Season ${year} Draft Complete</h2><p>All teams have filled their rosters or the player pool is empty.</p>`;
         elements.draftPlayerBtn.disabled = true;
         elements.draftPlayerBtn.textContent = 'Draft Complete';
+        // Add a button to proceed to the season maybe?
         return;
     }
 
+    // Ensure currentPick is valid before accessing draftOrder
+    if (currentPick >= draftOrder.length) {
+         console.error("Draft Error: currentPick is out of bounds for draftOrder array.");
+         elements.draftHeader.innerHTML = `<h2 class="text-3xl font-bold text-red-500">Draft Error Occurred</h2>`;
+         return;
+    }
+
     const pickingTeam = draftOrder[currentPick];
+    const playerNeedsPick = pickingTeam.id === playerTeam.id && playerTeam.roster.length < 10;
+
     elements.draftYear.textContent = year;
     elements.draftPickNumber.textContent = currentPick + 1;
     elements.draftPickingTeam.textContent = pickingTeam.name;
     renderDraftPool(gameState, onPlayerSelect);
     renderPlayerRoster(gameState.playerTeam);
-    elements.draftPlayerBtn.disabled = pickingTeam.id !== gameState.playerTeam.id || selectedPlayerId === null;
-    elements.draftPlayerBtn.textContent = pickingTeam.id === gameState.playerTeam.id ? 'Draft Player' : `Waiting for ${pickingTeam.name}...`;
+    elements.draftPlayerBtn.disabled = !playerNeedsPick || selectedPlayerId === null;
+    elements.draftPlayerBtn.textContent = playerNeedsPick ? 'Draft Player' : `Waiting for ${pickingTeam.name}...`;
 }
 
 export function renderDraftPool(gameState, onPlayerSelect) {
@@ -166,6 +180,8 @@ export function renderDraftPool(gameState, onPlayerSelect) {
     const sortMethod = elements.draftSort.value;
     if (sortMethod === 'age-asc') filteredPlayers.sort((a, b) => a.age - b.age);
     else if (sortMethod === 'age-desc') filteredPlayers.sort((a, b) => b.age - a.age);
+    // Add sorting by overall?
+    
     elements.draftPoolTbody.innerHTML = '';
     filteredPlayers.forEach(player => {
         const row = document.createElement('tr');
@@ -207,7 +223,7 @@ export function renderSelectedPlayerCard(player) {
             ${overallsHtml}
         `;
     }
-    elements.draftPlayerBtn.disabled = !player;
+    // Button state is handled in renderDraftScreen based on whose pick it is
 }
 
 export function renderPlayerRoster(playerTeam) {
@@ -254,19 +270,20 @@ function renderRosterSummary(playerTeam) {
 
 
 export function renderDashboard(gameState) {
-    const { playerTeam, year, currentWeek } = gameState;
+    const { playerTeam, year, currentWeek, messages } = gameState;
     elements.dashboardTeamName.textContent = playerTeam.name;
     elements.dashboardRecord.textContent = `Record: ${playerTeam.wins} - ${playerTeam.losses}`;
     elements.dashboardYear.textContent = year;
     elements.dashboardWeek.textContent = currentWeek < 9 ? `Week ${currentWeek + 1}` : 'Offseason';
     elements.advanceWeekBtn.textContent = currentWeek < 9 ? 'Advance Week' : 'Go to Offseason';
     
-    // Populate team filter on stats page
     let teamOptions = '<option value="">All Teams</option>';
-    gameState.teams.forEach(t => teamOptions += `<option value="${t.id}">${t.name}</option>`);
+    gameState.teams.sort((a,b) => a.name.localeCompare(b.name)).forEach(t => teamOptions += `<option value="${t.id}">${t.name}</option>`);
     elements.statsFilterTeam.innerHTML = teamOptions;
     
-    renderMyTeamTab(gameState);
+    updateMessagesNotification(messages);
+
+    renderMyTeamTab(gameState); // Render the default tab
 }
 
 export function switchTab(tabId, gameState) {
@@ -277,31 +294,70 @@ export function switchTab(tabId, gameState) {
     switch (tabId) {
         case 'my-team': renderMyTeamTab(gameState); break;
         case 'depth-chart': renderDepthChartTab(gameState); break;
-        case 'free-agency': renderFreeAgencyTab(gameState); break;
+        case 'messages': renderMessagesTab(gameState); break; // Pass gameState
         case 'schedule': renderScheduleTab(gameState); break;
         case 'standings': renderStandingsTab(gameState); break;
         case 'player-stats': renderPlayerStatsTab(gameState); break;
         case 'hall-of-fame': renderHallOfFameTab(gameState); break;
     }
+     // Mark messages as read if switching to the messages tab
+    if (tabId === 'messages') {
+        gameState.messages.forEach(msg => msg.isRead = true);
+        updateMessagesNotification(gameState.messages);
+    }
 }
 
 function renderMyTeamTab(gameState) {
     const { roster } = gameState.playerTeam;
-    let tableHtml = `<table class="min-w-full bg-white text-sm"><thead class="bg-gray-800 text-white"><tr><th class="text-left py-2 px-3">Name</th><th class="py-2 px-3">Type</th><th class="py-2 px-3">Age</th><th class="py-2 px-3">Status</th><th class="py-2 px-3">Toughness</th><th class="py-2 px-3">Best Pos Ovr</th></tr></thead><tbody class="divide-y">`;
+    const physicalAttrs = ['Hgt', 'Wgt', 'Spd', 'Str', 'Agi', 'Stm'];
+    const mentalAttrs = ['IQ', 'Clu', 'Cns', 'Tgh'];
+    const technicalAttrs = ['Thr', 'Cat', 'Blk', 'Tck', 'BlS'];
+    const headers = ['Name', 'Type', 'Age', 'Status', ...physicalAttrs, ...mentalAttrs, ...technicalAttrs];
+
+    let tableHtml = `<div class="overflow-x-auto"><table class="min-w-full bg-white text-sm"><thead class="bg-gray-800 text-white sticky top-0 z-10"><tr>${headers.map(h => `<th class="py-2 px-1 text-xs">${h}</th>`).join('')}</tr></thead><tbody class="divide-y">`;
+    
     roster.forEach(p => {
-        const overalls = Object.keys(positionOverallWeights).map(pos => calculateOverall(p, pos));
         const statusClass = p.status.duration > 0 ? 'text-red-500 font-semibold' : 'text-green-600';
         const typeTag = p.status.type === 'temporary' ? '<span class="status-tag temporary">[TEMP]</span>' : '<span class="status-tag permanent">[PERM]</span>';
+        
         tableHtml += `<tr>
-            <td class="py-2 px-3 font-semibold">${p.name}</td>
-            <td class="text-center py-2 px-3">${typeTag}</td>
-            <td class="text-center py-2 px-3">${p.age}</td>
-            <td class="text-center py-2 px-3 ${statusClass}">${p.status.description || 'Healthy'}</td>
-            <td class="text-center py-2 px-3">${p.attributes.mental.toughness}</td>
-            <td class="text-center py-2 px-3 font-bold">${Math.max(...overalls)}</td>
-        </tr>`;
+            <td class="py-2 px-2 font-semibold whitespace-nowrap">${p.name}</td>
+            <td class="text-center py-2 px-1">${typeTag}</td>
+            <td class="text-center py-2 px-1">${p.age}</td>
+            <td class="text-center py-2 px-1 ${statusClass}">${p.status.description || 'Healthy'}</td>`;
+        
+        const attrs = p.attributes;
+        const breakthrough = p.breakthroughAttr; 
+        const renderAttr = (val, attrName, cat) => {
+            let displayVal = val;
+            if(attrName === 'height') displayVal = `${val}"`;
+            if(attrName === 'weight') displayVal = `${val}lbs`;
+             // Simplified mapping for display
+            const shortMap = { playbookIQ: 'IQ', clutch: 'Clu', consistency: 'Cns', toughness: 'Tgh', throwingAccuracy: 'Thr', catchingHands: 'Cat', blocking: 'Blk', tackling: 'Tck', blockShedding: 'BlS', height: 'Hgt', weight: 'Wgt', speed: 'Spd', strength: 'Str', agility: 'Agi', stamina: 'Stm'};
+            return `<td class="text-center py-2 px-1">${displayVal}${breakthrough === attrName ? ' <span class="text-green-500 font-bold">(+)</span>' : ''}</td>`;
+        }
+        
+        tableHtml += renderAttr(attrs.physical.height, 'height', 'physical');
+        tableHtml += renderAttr(attrs.physical.weight, 'weight', 'physical');
+        tableHtml += renderAttr(attrs.physical.speed, 'speed', 'physical');
+        tableHtml += renderAttr(attrs.physical.strength, 'strength', 'physical');
+        tableHtml += renderAttr(attrs.physical.agility, 'agility', 'physical');
+        tableHtml += renderAttr(attrs.physical.stamina, 'stamina', 'physical');
+
+        tableHtml += renderAttr(attrs.mental.playbookIQ, 'playbookIQ', 'mental');
+        tableHtml += renderAttr(attrs.mental.clutch, 'clutch', 'mental');
+        tableHtml += renderAttr(attrs.mental.consistency, 'consistency', 'mental');
+        tableHtml += renderAttr(attrs.mental.toughness, 'toughness', 'mental');
+        
+        tableHtml += renderAttr(attrs.technical.throwingAccuracy, 'throwingAccuracy', 'technical');
+        tableHtml += renderAttr(attrs.technical.catchingHands, 'catchingHands', 'technical');
+        tableHtml += renderAttr(attrs.technical.blocking, 'blocking', 'technical');
+        tableHtml += renderAttr(attrs.technical.tackling, 'tackling', 'technical');
+        tableHtml += renderAttr(attrs.technical.blockShedding, 'blockShedding', 'technical');
+
+        tableHtml += `</tr>`;
     });
-    elements.myTeamRoster.innerHTML = tableHtml + `</tbody></table>`;
+    elements.myTeamRoster.innerHTML = tableHtml + `</tbody></table></div>`;
 }
 
 function renderDepthChartTab(gameState) {
@@ -326,7 +382,7 @@ function renderPositionalOveralls(roster) {
     roster.forEach(player => {
         table += `<tr class="border-b"><td class="p-2 font-bold">${player.name}</td>${positions.map(p => `<td class="p-2 text-center">${calculateOverall(player, p)}</td>`).join('')}</tr>`;
     });
-    elements.positionalOverallsContainer.innerHTML = table + `</tbody></table>`;
+    elements.positionalOverallsContainer.innerHTML = table + '</tbody></table>';
 }
 
 function renderDepthChartSide(side, gameState, slotsContainer, rosterContainer) {
@@ -340,8 +396,10 @@ function renderDepthChartSide(side, gameState, slotsContainer, rosterContainer) 
     slotsContainer.appendChild(header);
     slots.forEach(slot => renderSlot(slot, roster, depthChart[side], slotsContainer, side));
     
-    const positionedOnThisSide = Object.values(depthChart[side]).filter(Boolean);
-    const availablePlayers = roster.filter(p => !positionedOnThisSide.includes(p.id));
+    const offenseStarters = Object.values(depthChart.offense).filter(Boolean);
+    const defenseStarters = Object.values(depthChart.defense).filter(Boolean);
+    const allStarters = new Set([...offenseStarters, ...defenseStarters]);
+    const availablePlayers = roster.filter(p => !allStarters.has(p.id) && p.status.type !== 'temporary');
     
     renderAvailablePlayerList(availablePlayers, rosterContainer, side);
 }
@@ -368,41 +426,45 @@ function renderAvailablePlayerList(players, container, side) {
         playerEl.className = 'draggable-player';
         playerEl.draggable = true;
         playerEl.dataset.playerId = player.id;
-        playerEl.dataset.side = side;
+        playerEl.dataset.side = side; 
         playerEl.innerHTML = `${typeTag}${player.name}`;
         container.appendChild(playerEl);
     });
 }
 
-function renderFreeAgencyTab(gameState) {
-    const { freeAgents, playerTeam } = gameState;
-    const hasUnavailablePlayer = playerTeam.roster.some(p => p.status.duration > 0);
-
-    if (!hasUnavailablePlayer) {
-        elements.freeAgencyList.innerHTML = '<p class="text-gray-500">You can only call a friend if one of your players is injured or busy.</p>';
+function renderMessagesTab(gameState, onMessageClick) {
+    const { messages } = gameState;
+    if (!messages || messages.length === 0) {
+        elements.messagesList.innerHTML = `<p class="text-gray-500">No messages yet.</p>`;
         return;
     }
-    
-    if (freeAgents.length === 0) {
-        elements.freeAgencyList.innerHTML = '<p class="text-gray-500">No friends are available to call this week.</p>';
-        return;
-    }
-    
-    let tableHtml = `<table class="min-w-full bg-white text-sm"><thead class="bg-gray-800 text-white"><tr><th class="text-left py-2 px-3">Name</th><th class="py-2 px-3">Relationship</th><th class="py-2 px-3">Best Pos</th><th class="py-2 px-3">Best Ovr</th><th></th></tr></thead><tbody class="divide-y">`;
-
-    freeAgents.forEach(p => {
-        const overalls = Object.entries(positionOverallWeights).map(([pos, _]) => ({ pos, ovr: calculateOverall(p, pos) }));
-        const best = overalls.reduce((a, b) => a.ovr > b.ovr ? a : b);
-        tableHtml += `<tr>
-            <td class="py-2 px-3 font-semibold">${p.name}</td>
-            <td class="text-center py-2 px-3">${p.relationship}</td>
-            <td class="text-center py-2 px-3">${best.pos}</td>
-            <td class="text-center py-2 px-3 font-bold">${best.ovr}</td>
-            <td class="py-2 px-3 text-center"><button data-player-id="${p.id}" class="call-friend-btn bg-green-500 hover:bg-green-600 text-white px-3 py-1 text-xs rounded font-semibold">CALL</button></td>
-        </tr>`;
+    let messagesHtml = '';
+    messages.forEach(msg => {
+        messagesHtml += `
+            <div data-message-id="${msg.id}" class="message-item p-3 rounded-lg cursor-pointer border ${msg.isRead ? 'bg-gray-100 text-gray-600' : 'bg-amber-100 font-semibold border-amber-300'} hover:bg-amber-200 transition">
+                <p>${msg.subject}</p>
+            </div>
+        `;
     });
+    elements.messagesList.innerHTML = messagesHtml;
+    elements.messagesList.querySelectorAll('.message-item').forEach(item => {
+        item.onclick = () => {
+             const message = gameState.messages.find(m => m.id === item.dataset.messageId);
+             if (message) {
+                 showModal(message.subject, `<p>${message.body}</p>`);
+                 message.isRead = true; // Mark as read when clicked
+                 item.classList.remove('bg-amber-100', 'font-semibold', 'border-amber-300');
+                 item.classList.add('bg-gray-100', 'text-gray-600');
+                 updateMessagesNotification(messages);
+             }
+        };
+    });
+    updateMessagesNotification(messages);
+}
 
-    elements.freeAgencyList.innerHTML = tableHtml + `</tbody></table>`;
+function updateMessagesNotification(messages) {
+     const hasUnread = messages.some(m => !m.isRead);
+    elements.messagesNotificationDot.classList.toggle('hidden', !hasUnread);
 }
 
 
@@ -417,16 +479,19 @@ function renderScheduleTab(gameState) {
         
         if (weekGames) {
             weekGames.forEach(g => {
-                let playerTeamResult = '';
-                if (isPastWeek) {
-                    const result = gameState.gameResults.find(r => r.homeTeam.id === g.home.id && r.awayTeam.id === g.away.id);
-                    if (result) {
-                        if (result.homeTeam.id === gameState.playerTeam.id) playerTeamResult = result.homeScore > result.awayScore ? 'win' : 'loss';
-                        else if (result.awayTeam.id === gameState.playerTeam.id) playerTeamResult = result.awayScore > result.homeScore ? 'win' : 'loss';
-                    }
+                let content;
+                const result = isPastWeek ? gameState.gameResults.find(r => r.homeTeam.id === g.home.id && r.awayTeam.id === g.away.id) : null;
+                
+                let resultClass = '';
+                if (result) {
+                    content = `<span>${g.away.name} <strong>${result.awayScore}</strong></span><span class="mx-2 font-bold text-gray-400">@</span><span>${g.home.name} <strong>${result.homeScore}</strong></span>`;
+                    if (result.homeTeam.id === gameState.playerTeam.id) resultClass = result.homeScore > result.awayScore ? 'player-win' : (result.homeScore < result.awayScore ? 'player-loss' : '');
+                    else if (result.awayTeam.id === gameState.playerTeam.id) resultClass = result.awayScore > result.homeScore ? 'player-win' : (result.awayScore < result.homeScore ? 'player-loss' : '');
+                } else {
+                    content = `<span>${g.away.name}</span><span class="mx-2 font-bold text-gray-400">@</span><span>${g.home.name}</span>`;
                 }
-                const resultClass = playerTeamResult === 'win' ? 'player-win' : (playerTeamResult === 'loss' ? 'player-loss' : '');
-                weekHtml += `<div class="bg-white p-2 rounded shadow-sm flex justify-center items-center ${resultClass}"><span>${g.away.name}</span><span class="mx-2 font-bold text-gray-400">@</span><span>${g.home.name}</span></div>`;
+
+                weekHtml += `<div class="bg-white p-2 rounded shadow-sm flex justify-center items-center gap-2 ${resultClass}">${content}</div>`;
             });
         }
         weekHtml += `</div></div>`;
@@ -456,13 +521,13 @@ function renderPlayerStatsTab(gameState) {
     playersToShow.sort((a,b) => (b.seasonStats[sortStat] || 0) - (a.seasonStats[sortStat] || 0));
 
     const stats = ['passYards', 'rushYards', 'recYards', 'receptions', 'touchdowns', 'tackles', 'sacks', 'interceptions'];
-    let tableHtml = `<table class="min-w-full bg-white text-sm"><thead class="bg-gray-800 text-white"><tr><th class="text-left py-2 px-3">Name</th>${stats.map(s => `<th class="py-2 px-3">${s.replace(/([A-Z])/g, ' $1').toUpperCase()}</th>`).join('')}</tr></thead><tbody class="divide-y">`;
+    let tableHtml = `<div class="overflow-x-auto"><table class="min-w-full bg-white text-sm"><thead class="bg-gray-800 text-white sticky top-0 z-10"><tr><th class="text-left py-2 px-3">Name</th>${stats.map(s => `<th class="py-2 px-3">${s.replace(/([A-Z])/g, ' $1').toUpperCase()}</th>`).join('')}</tr></thead><tbody class="divide-y">`;
     
     playersToShow.forEach(p => {
         tableHtml += `<tr class="${p.teamId === gameState.playerTeam.id ? 'bg-amber-50' : ''}"><td class="py-2 px-3 font-semibold">${p.name}</td>${stats.map(s => `<td class="text-center py-2 px-3">${p.seasonStats[s] || 0}</td>`).join('')}</tr>`;
     });
 
-    elements.playerStatsContainer.innerHTML = tableHtml + `</tbody></table>`;
+    elements.playerStatsContainer.innerHTML = tableHtml + `</tbody></table></div>`;
 }
 
 function renderHallOfFameTab(gameState) {
@@ -492,13 +557,12 @@ function renderHallOfFameTab(gameState) {
 }
 
 export function renderOffseasonScreen(offseasonReport, year) {
-    const { retiredPlayers, hofInductees, developmentResults } = offseasonReport;
+    const { retiredPlayers, hofInductees, developmentResults, leavingPlayers } = offseasonReport;
     elements.offseasonYear.textContent = year;
 
-    // Player Development
     let devHtml = '';
     developmentResults.forEach(res => {
-        devHtml += `<div class="p-2 bg-gray-100 rounded text-sm"><p class="font-bold">${res.player.name} (${res.player.age})</p><div class="flex flex-wrap gap-x-2">`;
+        devHtml += `<div class="p-2 bg-gray-100 rounded text-sm mb-2"><p class="font-bold">${res.player.name} (${res.player.age})</p><div class="flex flex-wrap gap-x-2">`;
         res.improvements.forEach(imp => {
             devHtml += `<span class="text-green-600">${imp.attr} +${imp.increase}</span>`;
         });
@@ -506,10 +570,11 @@ export function renderOffseasonScreen(offseasonReport, year) {
     });
     elements.playerDevelopmentContainer.innerHTML = devHtml;
 
-    // Retirements
-    elements.retirementsList.innerHTML = retiredPlayers.length > 0 ? retiredPlayers.map(p => `<li>${p.name}</li>`).join('') : '<li>None</li>';
+    elements.retirementsList.innerHTML = retiredPlayers.length > 0 ? retiredPlayers.map(p => `<li>${p.name} (Graduated)</li>`).join('') : '<li>None</li>';
+    
+    // Display other leaving players
+    elements.leavingPlayersList.innerHTML = leavingPlayers.length > 0 ? leavingPlayers.map(l => `<li>${l.player.name} (${l.reason})</li>`).join('') : '<li>None</li>';
 
-    // HOF Inductees
     elements.hofInducteesList.innerHTML = hofInductees.length > 0 ? hofInductees.map(p => `<li>${p.name}</li>`).join('') : '<li>None</li>';
 }
 
