@@ -1101,4 +1101,3 @@ export function markMessageAsRead(messageId) {
         message.isRead = true;
     }
 }
-
