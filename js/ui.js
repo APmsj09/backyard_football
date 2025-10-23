@@ -436,7 +436,7 @@ function renderAvailablePlayerList(players, container, side) {
     });
 }
 
-// *** REMOVED renderFreeAgencyTab function - it's handled by modal now ***
+// *** REMOVED renderFreeAgencyTab function - it's handled by messages/modal now ***
 
 function renderScheduleTab(gameState) {
     let html = '';
@@ -450,11 +450,13 @@ function renderScheduleTab(gameState) {
         if (weekGames) {
             weekGames.forEach(g => {
                 let content;
+                // Find result specifically for THIS game matchup in the past results
                 const result = isPastWeek ? gameState.gameResults.find(r => r.homeTeam.id === g.home.id && r.awayTeam.id === g.away.id) : null;
                 
                 let resultClass = '';
                 if (result) {
                     content = `<span>${g.away.name} <strong>${result.awayScore}</strong></span><span class="mx-2 font-bold text-gray-400">@</span><span>${g.home.name} <strong>${result.homeScore}</strong></span>`;
+                    // Determine win/loss based on the found result
                     if (result.homeTeam.id === gameState.playerTeam.id) resultClass = result.homeScore > result.awayScore ? 'player-win' : (result.homeScore < result.awayScore ? 'player-loss' : '');
                     else if (result.awayTeam.id === gameState.playerTeam.id) resultClass = result.awayScore > result.homeScore ? 'player-win' : (result.awayScore < result.homeScore ? 'player-loss' : '');
                 } else {
