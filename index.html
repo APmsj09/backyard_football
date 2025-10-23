@@ -145,7 +145,7 @@
                 <main id="dashboard-content" class="w-4/5 bg-white p-6 rounded-lg shadow-md min-h-[600px]">
                     <div id="tab-content-my-team" class="tab-pane">
                          <h3 class="text-xl font-bold mb-4">Team Roster</h3>
-                         <div id="my-team-roster"></div>
+                         <div id="my-team-roster"></div> <!-- Table injected by JS -->
                     </div>
                     <div id="tab-content-depth-chart" class="tab-pane hidden">
                         <div>
@@ -154,12 +154,24 @@
                                 <button data-sub-tab="defense" class="depth-chart-tab">Defense</button>
                             </div>
                             <div id="depth-chart-offense-pane" class="depth-chart-sub-pane">
-                                <div class="mb-4"><label for="offense-formation-select" class="mr-2 font-semibold">Formation:</label><select id="offense-formation-select" class="p-2 border rounded"></select></div>
-                                <div class="grid grid-cols-1 md:grid-cols-3 gap-6"><div class="md:col-span-2"><h4 class="text-lg font-bold mb-2">Offense Starters</h4><div id="offense-depth-chart-slots" class="space-y-2"></div></div><div><h4 class="text-lg font-bold mb-2">Available Players</h4><div id="offense-depth-chart-roster" class="roster-list"></div></div></div>
+                                <div class="mb-4 flex items-center gap-4">
+                                    <label for="offense-formation-select" class="mr-2 font-semibold">Formation:</label>
+                                    <select id="offense-formation-select" class="p-2 border rounded"></select>
+                                </div>
+                                <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                                    <div class="md:col-span-2"><h4 class="text-lg font-bold mb-2">Offense Starters</h4><div id="offense-depth-chart-slots" class="space-y-2"></div></div>
+                                    <div><h4 class="text-lg font-bold mb-2">Available Players</h4><div id="offense-depth-chart-roster" class="roster-list"></div></div>
+                                </div>
                             </div>
                             <div id="depth-chart-defense-pane" class="depth-chart-sub-pane hidden">
-                                <div class="mb-4"><label for="defense-formation-select" class="mr-2 font-semibold">Formation:</label><select id="defense-formation-select" class="p-2 border rounded"></select></div>
-                                <div class="grid grid-cols-1 md:grid-cols-3 gap-6"><div class="md:col-span-2"><h4 class="text-lg font-bold mb-2">Defense Starters</h4><div id="defense-depth-chart-slots" class="space-y-2"></div></div><div><h4 class="text-lg font-bold mb-2">Available Players</h4><div id="defense-depth-chart-roster" class="roster-list"></div></div></div>
+                                 <div class="mb-4 flex items-center gap-4">
+                                    <label for="defense-formation-select" class="mr-2 font-semibold">Formation:</label>
+                                    <select id="defense-formation-select" class="p-2 border rounded"></select>
+                                </div>
+                                <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                                    <div class="md:col-span-2"><h4 class="text-lg font-bold mb-2">Defense Starters</h4><div id="defense-depth-chart-slots" class="space-y-2"></div></div>
+                                    <div><h4 class="text-lg font-bold mb-2">Available Players</h4><div id="defense-depth-chart-roster" class="roster-list"></div></div>
+                                </div>
                             </div>
                             <div class="mt-8"><h3 class="text-xl font-bold mb-4">Positional Overalls</h3><div id="positional-overalls-container" class="overflow-x-auto"></div></div>
                         </div>
@@ -206,7 +218,7 @@
                     <h3 class="text-xl font-bold mb-2 border-b pb-2">Graduating Players</h3>
                     <ul id="retirements-list" class="list-disc list-inside space-y-1"></ul>
                      <h3 class="text-xl font-bold mb-2 border-b pb-2 mt-4">Other Leaving Players</h3>
-                     <ul id="leaving-players-list" class="list-disc list-inside space-y-1"></ul>
+                     <ul id="leaving-players-list" class="list-disc list-inside space-y-1"></ul> <!-- ID added -->
                 </div>
                 <div>
                     <h3 class="text-xl font-bold mb-2 border-b pb-2">Hall of Fame Inductees</h3>
