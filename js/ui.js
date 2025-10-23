@@ -2,7 +2,8 @@ import { calculateOverall, positionOverallWeights } from './game.js';
 import { offenseFormations, defenseFormations } from './data.js';
 
 let elements = {};
-let selectedPlayerId = null;
+// Removed redundant selectedPlayerId from UI module
+// let selectedPlayerId = null;
 let dragPlayerId = null;
 let dragSide = null; // 'offense' or 'defense'
 
@@ -67,7 +68,7 @@ export function setupElements() {
         playerDevelopmentContainer: document.getElementById('player-development-container'),
         retirementsList: document.getElementById('retirements-list'),
         hofInducteesList: document.getElementById('hof-inductees-list'),
-        leavingPlayersList: document.getElementById('leaving-players-list'), // Added for offseason events
+        leavingPlayersList: document.getElementById('leaving-players-list'), 
         goToNextDraftBtn: document.getElementById('go-to-next-draft-btn'),
     };
     console.log("UI Elements have been successfully set up.");
@@ -89,7 +90,7 @@ export function showModal(title, bodyHtml, onConfirm = null) {
     elements.modalBody.innerHTML = bodyHtml;
     
     let actionsDiv = elements.modal.querySelector('#modal-actions');
-    if (actionsDiv) actionsDiv.remove(); 
+    if (actionsDiv) actionsDiv.remove();
 
     actionsDiv = document.createElement('div');
     actionsDiv.id = 'modal-actions';
@@ -107,10 +108,11 @@ export function showModal(title, bodyHtml, onConfirm = null) {
     }
     
     const closeBtn = document.createElement('button');
+    // Use a specific ID that won't conflict if the static one exists in HTML
     closeBtn.id = 'modal-close-btn-dynamic'; 
     closeBtn.textContent = 'Close';
     closeBtn.className = 'bg-gray-500 hover:bg-gray-600 text-white font-bold py-2 px-6 rounded-lg';
-    closeBtn.onclick = hideModal; 
+    closeBtn.onclick = hideModal;
     actionsDiv.appendChild(closeBtn);
 
     elements.modal.querySelector('#modal-content').appendChild(actionsDiv);
@@ -140,20 +142,21 @@ export function renderTeamNameSuggestions(names, onSelect) {
     });
 }
 
-export function renderDraftScreen(gameState, onPlayerSelect) {
+// Pass selectedPlayerId from main.js into this function
+export function renderDraftScreen(gameState, onPlayerSelect, currentSelectedPlayerId) {
     const { year, draftOrder, currentPick, playerTeam } = gameState;
-    const maxPicks = gameState.teams.reduce((max, t) => Math.max(max, t.draftNeeds), 0) * gameState.teams.length;
+    const maxPicksPossible = gameState.draftOrder.length; 
+    const undraftedPlayersCount = gameState.players.filter(p => !p.teamId).length;
 
-
-    if (currentPick >= maxPicks || gameState.players.filter(p => !p.teamId).length === 0) {
+    if (currentPick >= maxPicksPossible || undraftedPlayersCount === 0 || !gameState.teams.some(t => t.roster.length < 10)) {
          elements.draftHeader.innerHTML = `<h2 class="text-3xl font-bold">Season ${year} Draft Complete</h2><p>All teams have filled their rosters or the player pool is empty.</p>`;
         elements.draftPlayerBtn.disabled = true;
         elements.draftPlayerBtn.textContent = 'Draft Complete';
-        // Add a button to proceed to the season maybe?
+        // Optionally add a "Proceed to Season" button here if needed
         return;
     }
 
-    // Ensure currentPick is valid before accessing draftOrder
+    // This check might still be necessary if maxPicksPossible calculation is complex
     if (currentPick >= draftOrder.length) {
          console.error("Draft Error: currentPick is out of bounds for draftOrder array.");
          elements.draftHeader.innerHTML = `<h2 class="text-3xl font-bold text-red-500">Draft Error Occurred</h2>`;
@@ -166,13 +169,16 @@ export function renderDraftScreen(gameState, onPlayerSelect) {
     elements.draftYear.textContent = year;
     elements.draftPickNumber.textContent = currentPick + 1;
     elements.draftPickingTeam.textContent = pickingTeam.name;
-    renderDraftPool(gameState, onPlayerSelect);
+    renderDraftPool(gameState, onPlayerSelect, currentSelectedPlayerId); 
     renderPlayerRoster(gameState.playerTeam);
-    elements.draftPlayerBtn.disabled = !playerNeedsPick || selectedPlayerId === null;
+
+    // Set button state based on whether it's the player's turn AND they need a player AND they have selected someone
+    elements.draftPlayerBtn.disabled = !playerNeedsPick || currentSelectedPlayerId === null;
     elements.draftPlayerBtn.textContent = playerNeedsPick ? 'Draft Player' : `Waiting for ${pickingTeam.name}...`;
 }
 
-export function renderDraftPool(gameState, onPlayerSelect) {
+// Pass selectedPlayerId down
+export function renderDraftPool(gameState, onPlayerSelect, currentSelectedPlayerId) {
     const undraftedPlayers = gameState.players.filter(p => !p.teamId);
     const searchTerm = elements.draftSearch.value.toLowerCase();
     const posFilter = elements.draftFilterPos.value;
@@ -180,12 +186,12 @@ export function renderDraftPool(gameState, onPlayerSelect) {
     const sortMethod = elements.draftSort.value;
     if (sortMethod === 'age-asc') filteredPlayers.sort((a, b) => a.age - b.age);
     else if (sortMethod === 'age-desc') filteredPlayers.sort((a, b) => b.age - a.age);
-    // Add sorting by overall?
     
     elements.draftPoolTbody.innerHTML = '';
     filteredPlayers.forEach(player => {
         const row = document.createElement('tr');
-        row.className = `cursor-pointer hover:bg-amber-100 draft-player-row`;
+        // Use currentSelectedPlayerId passed from main.js for highlighting
+        row.className = `cursor-pointer hover:bg-amber-100 draft-player-row ${player.id === currentSelectedPlayerId ? 'bg-amber-200' : ''}`;
         row.dataset.playerId = player.id;
         row.innerHTML = `<td class="py-2 px-3 font-semibold">${player.name}</td><td class="text-center py-2 px-3">${player.age}</td><td class="text-center py-2 px-3">${player.favoriteOffensivePosition}/${player.favoriteDefensivePosition}</td><td class="text-center py-2 px-3">${player.attributes.physical.height}"</td><td class="text-center py-2 px-3">${player.attributes.physical.weight}lbs</td><td class="text-center py-2 px-3">${player.attributes.physical.speed}</td><td class="text-center py-2 px-3">${player.attributes.physical.strength}</td><td class="text-center py-2 px-3">${player.attributes.physical.agility}</td><td class="text-center py-2 px-3">${player.attributes.technical.throwingAccuracy}</td><td class="text-center py-2 px-3">${player.attributes.technical.catchingHands}</td><td class="text-center py-2 px-3">${player.attributes.technical.blocking}</td><td class="text-center py-2 px-3">${player.attributes.technical.tackling}</td><td class="text-center py-2 px-3">${player.attributes.technical.blockShedding}</td>`;
         row.onclick = () => onPlayerSelect(player.id);
@@ -193,10 +199,10 @@ export function renderDraftPool(gameState, onPlayerSelect) {
     });
 }
 
+// This function now ONLY highlights the row, doesn't manage state
 export function updateSelectedPlayerRow(newSelectedId) {
-    selectedPlayerId = newSelectedId;
     document.querySelectorAll('.draft-player-row').forEach(row => {
-        row.classList.toggle('bg-amber-200', row.dataset.playerId === selectedPlayerId);
+        row.classList.toggle('bg-amber-200', row.dataset.playerId === newSelectedId);
     });
 }
 
@@ -223,7 +229,7 @@ export function renderSelectedPlayerCard(player) {
             ${overallsHtml}
         `;
     }
-    // Button state is handled in renderDraftScreen based on whose pick it is
+    // Button state is now handled solely in renderDraftScreen
 }
 
 export function renderPlayerRoster(playerTeam) {
@@ -294,7 +300,7 @@ export function switchTab(tabId, gameState) {
     switch (tabId) {
         case 'my-team': renderMyTeamTab(gameState); break;
         case 'depth-chart': renderDepthChartTab(gameState); break;
-        case 'messages': renderMessagesTab(gameState); break; // Pass gameState
+        case 'messages': renderMessagesTab(gameState); break; 
         case 'schedule': renderScheduleTab(gameState); break;
         case 'standings': renderStandingsTab(gameState); break;
         case 'player-stats': renderPlayerStatsTab(gameState); break;
@@ -332,8 +338,6 @@ function renderMyTeamTab(gameState) {
             let displayVal = val;
             if(attrName === 'height') displayVal = `${val}"`;
             if(attrName === 'weight') displayVal = `${val}lbs`;
-             // Simplified mapping for display
-            const shortMap = { playbookIQ: 'IQ', clutch: 'Clu', consistency: 'Cns', toughness: 'Tgh', throwingAccuracy: 'Thr', catchingHands: 'Cat', blocking: 'Blk', tackling: 'Tck', blockShedding: 'BlS', height: 'Hgt', weight: 'Wgt', speed: 'Spd', strength: 'Str', agility: 'Agi', stamina: 'Stm'};
             return `<td class="text-center py-2 px-1">${displayVal}${breakthrough === attrName ? ' <span class="text-green-500 font-bold">(+)</span>' : ''}</td>`;
         }
         
@@ -432,41 +436,7 @@ function renderAvailablePlayerList(players, container, side) {
     });
 }
 
-function renderMessagesTab(gameState, onMessageClick) {
-    const { messages } = gameState;
-    if (!messages || messages.length === 0) {
-        elements.messagesList.innerHTML = `<p class="text-gray-500">No messages yet.</p>`;
-        return;
-    }
-    let messagesHtml = '';
-    messages.forEach(msg => {
-        messagesHtml += `
-            <div data-message-id="${msg.id}" class="message-item p-3 rounded-lg cursor-pointer border ${msg.isRead ? 'bg-gray-100 text-gray-600' : 'bg-amber-100 font-semibold border-amber-300'} hover:bg-amber-200 transition">
-                <p>${msg.subject}</p>
-            </div>
-        `;
-    });
-    elements.messagesList.innerHTML = messagesHtml;
-    elements.messagesList.querySelectorAll('.message-item').forEach(item => {
-        item.onclick = () => {
-             const message = gameState.messages.find(m => m.id === item.dataset.messageId);
-             if (message) {
-                 showModal(message.subject, `<p>${message.body}</p>`);
-                 message.isRead = true; // Mark as read when clicked
-                 item.classList.remove('bg-amber-100', 'font-semibold', 'border-amber-300');
-                 item.classList.add('bg-gray-100', 'text-gray-600');
-                 updateMessagesNotification(messages);
-             }
-        };
-    });
-    updateMessagesNotification(messages);
-}
-
-function updateMessagesNotification(messages) {
-     const hasUnread = messages.some(m => !m.isRead);
-    elements.messagesNotificationDot.classList.toggle('hidden', !hasUnread);
-}
-
+// *** REMOVED renderFreeAgencyTab function - it's handled by modal now ***
 
 function renderScheduleTab(gameState) {
     let html = '';
@@ -576,6 +546,30 @@ export function renderOffseasonScreen(offseasonReport, year) {
     elements.leavingPlayersList.innerHTML = leavingPlayers.length > 0 ? leavingPlayers.map(l => `<li>${l.player.name} (${l.reason})</li>`).join('') : '<li>None</li>';
 
     elements.hofInducteesList.innerHTML = hofInductees.length > 0 ? hofInductees.map(p => `<li>${p.name}</li>`).join('') : '<li>None</li>';
+}
+
+function renderMessagesTab(gameState, onMessageClick) {
+    const { messages } = gameState;
+    if (!messages || messages.length === 0) {
+        elements.messagesList.innerHTML = `<p class="text-gray-500">No messages yet.</p>`;
+        return;
+    }
+    let messagesHtml = '';
+    messages.forEach(msg => {
+        messagesHtml += `
+            <div data-message-id="${msg.id}" class="message-item p-3 rounded-lg cursor-pointer border ${msg.isRead ? 'bg-gray-100 text-gray-600' : 'bg-amber-100 font-semibold border-amber-300'} hover:bg-amber-200 transition">
+                <p>${msg.subject}</p>
+            </div>
+        `;
+    });
+    elements.messagesList.innerHTML = messagesHtml;
+    // NOTE: Event listener is now attached once in main.js, no need to re-attach here
+    updateMessagesNotification(messages);
+}
+
+export function updateMessagesNotification(messages) {
+     const hasUnread = messages.some(m => !m.isRead);
+    elements.messagesNotificationDot.classList.toggle('hidden', !hasUnread);
 }
 
 
