@@ -14,14 +14,13 @@ const weeklyEvents = [
     { type: 'busy', description: 'Family Vacation', minDuration: 1, maxDuration: 1, chance: 0.003 }
 ];
 
-// NEW: Offseason events causing players to leave
 const offseasonDepartureEvents = [
     { reason: 'Moved Away', chance: 0.03 },
     { reason: 'Focusing on another sport', chance: 0.02 },
     { reason: 'Decided to quit', chance: 0.01 }
 ];
-const transferEventChance = 0.02; // Chance a player asks to leave player team
-const joinRequestChance = 0.03; // Chance an undrafted player asks to join player team
+const transferEventChance = 0.02;
+const joinRequestChance = 0.03;
 
 export const positionOverallWeights = {
     QB: { throwingAccuracy: 0.4, playbookIQ: 0.3, consistency: 0.1, clutch: 0.1, speed: 0.05, agility: 0.05 },
@@ -242,20 +241,26 @@ export function setupDraft() {
 }
 
 
+/**
+ * UPDATED: AI sets depth chart prioritizing slot-specific attributes.
+ */
 export function aiSetDepthChart(team) {
     const { roster, depthChart } = team;
     if (!roster || roster.length === 0) return; 
 
+    // Reset depth chart to ensure no lingering players
      for (const side in depthChart) {
          for (const slot in depthChart[side]) {
              depthChart[side][slot] = null;
          }
      }
     
+    // This allows players to play on both offense and defense
     for (const side in depthChart) {
         const slots = Object.keys(depthChart[side]);
         let availablePlayers = [...roster]; 
         
+        // Sort slots to prioritize key positions (QB, RB, WR1) first
         slots.sort((a, b) => {
             if(a.startsWith('QB')) return -1; if(b.startsWith('QB')) return 1;
             if(a.startsWith('RB')) return -1; if(b.startsWith('RB')) return 1;
@@ -265,19 +270,24 @@ export function aiSetDepthChart(team) {
 
         slots.forEach(slot => {
             if (availablePlayers.length > 0) {
+                // Find the player with the highest suitability for *this specific slot*
                 const bestPlayerForSlot = availablePlayers.reduce((best, current) => {
+                    // Use new slot-specific suitability calculator
                     const bestSuitability = calculateSlotSuitability(best, slot, side, team);
                     const currentSuitability = calculateSlotSuitability(current, slot, side, team);
+
+                    // Check if they are *already* starting on the *other* side in a *critical* role (QB/RB)
                     const otherSide = side === 'offense' ? 'defense' : 'offense';
-                    
+                    // Check if slots exist before accessing
                     const isStartingCriticalOtherSideBest = (team.depthChart[otherSide]['QB1'] && team.depthChart[otherSide]['QB1'] === best.id) || 
                                                               (team.depthChart[otherSide]['RB1'] && team.depthChart[otherSide]['RB1'] === best.id);
                     const isStartingCriticalOtherSideCurrent = (team.depthChart[otherSide]['QB1'] && team.depthChart[otherSide]['QB1'] === current.id) || 
                                                                  (team.depthChart[otherSide]['RB1'] && team.depthChart[otherSide]['RB1'] === current.id);
                     
-                    if (isStartingCriticalOtherSideBest && !isStartingCriticalOtherSideCurrent) return current; 
+                    if (isStartingCriticalOtherSideBest && !isStartingCriticalOtherSideCurrent) return current; // Prefer player not starting in critical role
                     if (!isStartingCriticalOtherSideBest && isStartingCriticalOtherSideCurrent) return best;
                     
+                    // If both or neither start in a critical role, pick the most suitable
                     return currentSuitability > bestSuitability ? current : best;
                 });
 
@@ -444,15 +454,13 @@ function determinePlayCall(offense, defense, down, yardsToGo, ballOn, scoreDiff,
     const formationPlays = Object.keys(offensivePlaybook).filter(key => key.startsWith(offenseFormationName));
     
     if (yardsToGo <= 1 && qbStrength > 60 && Math.random() < 0.6) {
-        // Find a QB sneak play if available, otherwise default to inside run
-        // NOTE: QB Sneak is not a standard play, so we just call 'run_inside' and handle in resolvePlay
+        // QB Sneak is not a real play, so we just return a run play
         return getRandom(formationPlays.filter(p => p.includes('InsideRun') || p.includes('Dive'))) || formationPlays[0];
     }
     
     let desiredPlayType = (Math.random() < passChance) ? 'pass' : 'run';
     let possiblePlays = formationPlays.filter(key => offensivePlaybook[key].type === desiredPlayType);
 
-    // Failsafe: if no plays match, switch play type
     if (possiblePlays.length === 0) {
         desiredPlayType = desiredPlayType === 'pass' ? 'run' : 'pass';
         possiblePlays = formationPlays.filter(key => offensivePlaybook[key].type === desiredPlayType);
@@ -462,7 +470,6 @@ function determinePlayCall(offense, defense, down, yardsToGo, ballOn, scoreDiff,
         }
     }
     
-    // --- Select a specific play from the filtered list ---
     if (desiredPlayType === 'pass') {
         const deep = (yardsToGo > 15 || (ballOn < 50 && scoreDiff < -7 && drivesRemaining < 5));
         const screen = (down <= 2 && yardsToGo < 7 && qbStrength < 70);
@@ -473,15 +480,12 @@ function determinePlayCall(offense, defense, down, yardsToGo, ballOn, scoreDiff,
         if (deep && possiblePlays.some(p => p.includes('Deep') || p.includes('Verts'))) {
             return getRandom(possiblePlays.filter(p => p.includes('Deep') || p.includes('Verts')));
         }
-        // Default to any remaining pass play (likely short/medium)
         return getRandom(possiblePlays.filter(p => p.includes('Short') || p.includes('Slant') || p.includes('Curl'))) || getRandom(possiblePlays);
     } else {
-        // --- RUN PLAY ---
         const outside = (rb && rb.attributes.physical.speed > 75);
         if (outside && Math.random() < 0.4 && possiblePlays.some(p => p.includes('Outside') || p.includes('Sweep'))) {
             return getRandom(possiblePlays.filter(p => p.includes('Outside') || p.includes('Sweep')));
         }
-        // Default to inside run
         return getRandom(possiblePlays.filter(p => p.includes('Inside') || p.includes('Dive'))) || getRandom(possiblePlays);
     }
 }
@@ -494,7 +498,8 @@ function determinePlayCall(offense, defense, down, yardsToGo, ballOn, scoreDiff,
 function resolvePlay(offense, defense, playKey, gameState) {
     const { gameLog, weather, ballOn } = gameState;
     
-    const play = offensivePlaybook[playKey];
+    // FIX: Check if playKey is valid, if not, use a failsafe
+    let play = offensivePlaybook[playKey];
     if (!play) {
         console.error(`Play key "${playKey}" not found in offensivePlaybook! Defaulting to Inside Run.`);
         playKey = 'Balanced_InsideRun'; // Failsafe
@@ -503,7 +508,7 @@ function resolvePlay(offense, defense, playKey, gameState) {
 
     const { type, zone, playAction, assignments } = play;
     const usedPlayerIds_O = new Set();
-    const usedPlayerIds_D = new Set();
+    const usedPlayerIds_D = new Set(); // <<< FIX: Defined at top
     const getFatigueModifier = (p) => (p ? (1 - (p.fatigue / (p.attributes.physical.stamina * 3))) : 1);
     const DRAW_THRESHOLD = 5;
 
@@ -532,18 +537,21 @@ function resolvePlay(offense, defense, playKey, gameState) {
         return null;
     };
     
-    // --- Apply Fatigue ---
-    [...offense.roster, ...defense.roster].forEach(p => { if(p) p.fatigue = Math.min(100, p.fatigue + 5); });
-
     // --- Get Defensive Players ---
-    const defenseFormationData = defenseFormations[defense.formations.defense];
     const dls = getPlayersForSlots(defense, 'defense', 'DL', usedPlayerIds_D).map(p => p.player);
     const lbs = getPlayersForSlots(defense, 'defense', 'LB', usedPlayerIds_D).map(p => p.player);
     const dbs = getPlayersForSlots(defense, 'defense', 'DB', usedPlayerIds_D).map(p => p.player);
+    [...dls, ...lbs, ...dbs].forEach(p => { if (p) p.fatigue = Math.min(100, p.fatigue + 5); });
     
     // --- Get Offensive Players ---
     let qb = getPlayerBySlot(offense, 'offense', 'QB1');
     if (!qb) qb = findEmergencyPlayer('QB', offense, 'offense', usedPlayerIds_O)?.player;
+
+    const rbs = getPlayersForSlots(offense, 'offense', 'RB', usedPlayerIds_O).map(p => p.player);
+    const wrs = getPlayersForSlots(offense, 'offense', 'WR', usedPlayerIds_O).map(p => p.player);
+    const ols = getPlayersForSlots(offense, 'offense', 'OL', usedPlayerIds_O).map(p => p.player);
+    [qb, ...rbs, ...wrs, ...ols].forEach(p => { if (p) p.fatigue = Math.min(100, p.fatigue + 5); });
+
 
     // --- QB Sneak ---
     if (zone === ZONES.SNEAK) { 
@@ -568,15 +576,12 @@ function resolvePlay(offense, defense, playKey, gameState) {
 
     // --- Run Plays ---
     if (type === 'run') {
-        let rb = (getPlayersForSlots(offense, 'offense', 'RB', usedPlayerIds_O)[0] || {}).player || findEmergencyPlayer('RB', offense, 'offense', usedPlayerIds_O)?.player;
+        let rb = rbs[0] || findEmergencyPlayer('RB', offense, 'offense', usedPlayerIds_O)?.player;
         if (!rb) { if(gameLog) gameLog.push('No healthy RB available! Broken play.'); return { yards: 0, turnover: true }; }
         
-        const ols = getPlayersForSlots(offense, 'offense', 'OL', usedPlayerIds_O).map(p => p.player);
-        const wrs = getPlayersForSlots(offense, 'offense', 'WR', usedPlayerIds_O).map(p => p.player);
-
         let blockers = [...ols];
         if (zone === ZONES.RUN_L || zone === ZONES.RUN_R) {
-            blockers.push(...wrs); // WRs block on outside runs
+            blockers.push(...wrs); 
         }
         
         let defenders = [...dls, ...lbs];
@@ -602,14 +607,14 @@ function resolvePlay(offense, defense, playKey, gameState) {
         } else if (blockDiff < -DRAW_THRESHOLD - 10) { 
              yards = getRandomInt(-2, 1);
              const tackler = getRandom(defenders);
-             if(gameLog) gameLog.push(`${tackler.name} blows up the play in the backfield!`);
+             if(gameLog && tackler) gameLog.push(`${tackler.name} blows up the play in the backfield!`);
              if (tackler) tackler.gameStats.tackles++; 
         } else { 
              yards = getRandomInt(0, 2);
              if(gameLog) gameLog.push(`Stalemate at the line.`);
         }
         
-        const tackler = getRandom(dbs.concat(lbs).filter(p => !defenseUsedIds.has(p?.id))) || findEmergencyPlayer('LB', defense, 'defense', defenseUsedIds)?.player;
+        const tackler = getRandom(dbs.concat(lbs).filter(p => !usedPlayerIds_D.has(p?.id))) || findEmergencyPlayer('LB', defense, 'defense', usedPlayerIds_D)?.player;
         if (tackler && yards > -1) { 
             checkInGameInjury(rb, gameLog); checkInGameInjury(tackler, gameLog);
             const grapplePower = (tackler.attributes.technical.tackling + tackler.attributes.physical.agility) * getFatigueModifier(tackler);
@@ -659,19 +664,16 @@ function resolvePlay(offense, defense, playKey, gameState) {
         if (!qb) { if(gameLog) gameLog.push('No one could step in at QB! Broken play.'); return { yards: 0, turnover: true }; }
         
         const offenseFormationData = offenseFormations[offense.formations.offense];
-
-        const ols = getPlayersForSlots(offense, 'offense', 'OL', usedPlayerIds_O).map(p => p.player);
-        const rbs = getPlayersForSlots(offense, 'offense', 'RB', usedPlayerIds_O).map(p => p.player);
-        const wrs = getPlayersForSlots(offense, 'offense', 'WR', usedPlayerIds_O).map(p => p.player);
+        const defenseFormationData = defenseFormations[defense.formations.defense];
 
         const passRushers = dls.concat(lbs.filter(p => {
             const slot = Object.keys(defense.depthChart.defense).find(s => defense.depthChart.defense[s] === p.id);
             return slot && defenseFormationData.routes[slot] && !defenseFormationData.routes[slot].some(r => r.includes('cover'));
         })).filter(Boolean);
+        
         const blockers = ols.concat(rbs.filter(r => {
              const slot = Object.keys(offense.depthChart.offense).find(s => offense.depthChart.offense[s] === r.id);
-             // Use .find() on routes array
-             return slot && offenseFormationData.routes[slot] && offenseFormationData.routes[slot].find(rt => rt === 'block_pass');
+             return slot && offenseFormationData.routes[slot] && offenseFormationData.routes[slot].includes('block_pass');
         })).filter(Boolean);
         
         if (blockers.length === 0) { return { yards: 0, turnover: true, incomplete: true }; } 
@@ -772,6 +774,7 @@ function resolvePlay(offense, defense, playKey, gameState) {
         const allReceivers = Object.keys(play.assignments)
             .filter(slot => slot.startsWith('WR') || slot.startsWith('RB'))
             .map(slot => {
+                // FIX: Need to use the *original* usedPlayerIds_O set, not create a new one
                 const player = (getPlayersForSlots(offense, 'offense', slot.substring(0,2), usedPlayerIds_O).find(p => p.slot === slot) || {}).player;
                 return { 
                     player: player, 
@@ -779,7 +782,7 @@ function resolvePlay(offense, defense, playKey, gameState) {
                     route: play.assignments[slot].replace('run_route:', '') 
                 }
             })
-            .filter(r => r.player && r.route !== 'block_pass' && r.route !== 'block_run'); // Filter out blockers
+            .filter(r => r.player && r.route !== 'block_pass' && r.route !== 'block_run'); 
 
         if (allReceivers.length === 0) { if(gameLog) gameLog.push('No eligible receivers on the play!'); return { yards: 0 }; }
 
@@ -796,9 +799,10 @@ function resolvePlay(offense, defense, playKey, gameState) {
             const targetZone = routeInfo.zones[0]; 
 
             const coverageSlots = Object.keys(defenseFormationData.zoneAssignments).filter(s => routeInfo.zones.includes(defenseFormationData.zoneAssignments[s]));
+            // FIX: Need to use the *original* usedPlayerIds_D set
             const defendersInZone = coverageSlots.map(s => getPlayerBySlot(defense, 'defense', s)).filter(Boolean);
 
-            let primaryDefender = defendersInZone[0] || getRandom([...dbs, ...lbs].filter(p => p && !defenseUsedIds.has(p.id))) || findEmergencyPlayer('DB', defense, 'defense', defenseUsedIds)?.player;
+            let primaryDefender = defendersInZone[0] || getRandom([...dbs, ...lbs].filter(p => p && !usedPlayerIds_D.has(p.id))) || findEmergencyPlayer('DB', defense, 'defense', usedPlayerIds_D)?.player;
             if (!primaryDefender) { 
                 chosenTarget = receiver;
                 coverage = [];
@@ -807,11 +811,11 @@ function resolvePlay(offense, defense, playKey, gameState) {
             }
 
             coverage = [primaryDefender];
-            defenseUsedIds.add(primaryDefender.id);
+            usedPlayerIds_D.add(primaryDefender.id);
             let doubleCovered = false;
             
             if ((targetZone.includes('DEEP') || (i === 0 && Math.random() < 0.4))) {
-                 const safety = (getPlayersForSlots(defense, 'defense', 'DB', defenseUsedIds).find(d => {
+                 const safety = (getPlayersForSlots(defense, 'defense', 'DB', usedPlayerIds_D).find(d => {
                      const dSlot = Object.keys(defense.depthChart.defense).find(s => defense.depthChart.defense[s] === d.player.id);
                      return dSlot && defenseFormationData.zoneAssignments[dSlot]?.includes('DEEP_C');
                  }) || {}).player;
