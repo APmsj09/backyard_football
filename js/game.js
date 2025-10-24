@@ -454,8 +454,10 @@ function determinePlayCall(offense, defense, down, yardsToGo, ballOn, scoreDiff,
     const formationPlays = Object.keys(offensivePlaybook).filter(key => key.startsWith(offenseFormationName));
     
     if (yardsToGo <= 1 && qbStrength > 60 && Math.random() < 0.6) {
-        // QB Sneak is not a real play, so we just return a run play
-        return getRandom(formationPlays.filter(p => p.includes('InsideRun') || p.includes('Dive'))) || formationPlays[0];
+        // Find a QB sneak play if available, otherwise default to inside run
+        return getRandom(formationPlays.filter(p => offensivePlaybook[p].zone === ZONES.SNEAK)) || 
+               getRandom(formationPlays.filter(p => p.includes('InsideRun') || p.includes('Dive'))) || 
+               formationPlays[0];
     }
     
     let desiredPlayType = (Math.random() < passChance) ? 'pass' : 'run';
@@ -673,6 +675,7 @@ function resolvePlay(offense, defense, playKey, gameState) {
         
         const blockers = ols.concat(rbs.filter(r => {
              const slot = Object.keys(offense.depthChart.offense).find(s => offense.depthChart.offense[s] === r.id);
+             // FIX: Check if route exists for the slot before trying to find 'block_pass'
              return slot && offenseFormationData.routes[slot] && offenseFormationData.routes[slot].includes('block_pass');
         })).filter(Boolean);
         
@@ -774,10 +777,9 @@ function resolvePlay(offense, defense, playKey, gameState) {
         const allReceivers = Object.keys(play.assignments)
             .filter(slot => slot.startsWith('WR') || slot.startsWith('RB'))
             .map(slot => {
-                // FIX: Need to use the *original* usedPlayerIds_O set, not create a new one
-                const player = (getPlayersForSlots(offense, 'offense', slot.substring(0,2), usedPlayerIds_O).find(p => p.slot === slot) || {}).player;
+                const playerObj = getPlayersForSlots(offense, 'offense', slot.substring(0,2), usedPlayerIds_O).find(p => p.slot === slot);
                 return { 
-                    player: player, 
+                    player: playerObj ? playerObj.player : null, 
                     slot, 
                     route: play.assignments[slot].replace('run_route:', '') 
                 }
@@ -799,7 +801,6 @@ function resolvePlay(offense, defense, playKey, gameState) {
             const targetZone = routeInfo.zones[0]; 
 
             const coverageSlots = Object.keys(defenseFormationData.zoneAssignments).filter(s => routeInfo.zones.includes(defenseFormationData.zoneAssignments[s]));
-            // FIX: Need to use the *original* usedPlayerIds_D set
             const defendersInZone = coverageSlots.map(s => getPlayerBySlot(defense, 'defense', s)).filter(Boolean);
 
             let primaryDefender = defendersInZone[0] || getRandom([...dbs, ...lbs].filter(p => p && !usedPlayerIds_D.has(p.id))) || findEmergencyPlayer('DB', defense, 'defense', usedPlayerIds_D)?.player;
