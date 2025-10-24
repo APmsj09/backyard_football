@@ -412,7 +412,6 @@ function getPlayersForSlots(team, side, slotPrefix, usedPlayerIdsThisPlay) {
  * This function now selects a valid play key from the offensivePlaybook.
  */
 function determinePlayCall(offense, defense, down, yardsToGo, ballOn, scoreDiff, gameLog, drivesRemaining) {
-    // ... (This function is unchanged from your provided version) ...
     const { coach } = offense;
     const offenseFormationName = offense.formations.offense;
     const defenseFormationName = defense.formations.defense;
@@ -456,9 +455,10 @@ function determinePlayCall(offense, defense, down, yardsToGo, ballOn, scoreDiff,
     
     if (yardsToGo <= 1 && qbStrength > 60 && Math.random() < 0.6) {
         // Find a QB sneak play if available, otherwise default to inside run
-        return getRandom(formationPlays.filter(p => offensivePlaybook[p].zone === ZONES.SNEAK)) || 
-               getRandom(formationPlays.filter(p => p.includes('InsideRun') || p.includes('Dive'))) || 
-               formationPlays[0];
+        // FIX: QB Sneak is a 'run' type
+        const sneakPlay = formationPlays.find(p => offensivePlaybook[p].zone === ZONES.SNEAK);
+        if (sneakPlay) return sneakPlay;
+        return getRandom(formationPlays.filter(p => p.includes('InsideRun') || p.includes('Dive'))) || formationPlays[0];
     }
     
     let desiredPlayType = (Math.random() < passChance) ? 'pass' : 'run';
@@ -504,9 +504,15 @@ function resolvePlay(offense, defense, playKey, gameState) {
     // FIX: Check if playKey is valid, if not, use a failsafe
     let play = offensivePlaybook[playKey];
     if (!play) {
-        console.error(`Play key "${playKey}" not found in offensivePlaybook! Defaulting to Inside Run.`);
+        console.error(`Play key "${playKey}" not in playbook! Defaulting to Inside Run.`);
         playKey = 'Balanced_InsideRun'; // Failsafe
-        play = offensivePlaybook[playKey];
+        if (offensivePlaybook[playKey]) {
+            play = offensivePlaybook[playKey];
+        } else {
+            // Absolute failsafe if even Balanced_InsideRun is missing
+            gameLog.push("CRITICAL ERROR: Default play missing.");
+            return { yards: 0 };
+        }
     }
 
     const { type, zone, playAction, assignments } = play;
