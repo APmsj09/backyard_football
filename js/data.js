@@ -62,34 +62,30 @@ export const positions = ["QB", "RB", "WR", "OL", "DL", "LB", "DB"];
 export const divisionNames = ["North", "South"];
 
 // --- Field Zones (Conceptual) ---
-// Used for targeting and player assignment logic
 export const ZONES = {
-    // Passing Zones
     DEEP_L: 'Deep Left', DEEP_C: 'Deep Center', DEEP_R: 'Deep Right',
     MED_L: 'Medium Left', MED_C: 'Medium Center', MED_R: 'Medium Right',
     SHORT_L: 'Short Left', SHORT_C: 'Short Center', SHORT_R: 'Short Right',
     SCREEN_L: 'Screen Left', SCREEN_R: 'Screen Right',
-    // Running Zones (Point of Attack)
     RUN_L: 'Outside Left', RUN_C: 'Inside', RUN_R: 'Outside Right',
-    SNEAK: 'QB Sneak', // Center
-    // General Areas
-    BACKFIELD: 'Backfield',
-    LINE_OF_SCRIMMAGE: 'Line of Scrimmage'
+    SNEAK: 'QB Sneak',
+    BACKFIELD_L: 'Backfield Left', BACKFIELD_C: 'Backfield Center', BACKFIELD_R: 'Backfield Right',
+    LOS_L: 'Line of Scrimmage Left', LOS_C: 'Line of Scrimmage Center', LOS_R: 'Line of Scrimmage Right'
 };
 
 // --- Playbook Data ---
 
 // Defines the properties of each route
 export const routeTree = {
-    'Flat': { zones: [ZONES.SHORT_L, ZONES.SHORT_R], baseYards: [2, 6] },
-    'Slant': { zones: [ZONES.SHORT_C], baseYards: [5, 9] },
-    'Curl': { zones: [ZONES.MED_C], baseYards: [8, 12] },
-    'Out': { zones: [ZONES.MED_L, ZONES.MED_R], baseYards: [10, 15] },
-    'Post': { zones: [ZONES.DEEP_C], baseYards: [15, 30] },
-    'Fly': { zones: [ZONES.DEEP_L, ZONES.DEEP_R], baseYards: [20, 40] },
-    'Screen': { zones: [ZONES.SCREEN_L, ZONES.SCREEN_R], baseYards: [-3, 5] },
-    'BlockRun': { zones: [], baseYards: [0, 0] },
-    'BlockPass': { zones: [], baseYards: [0, 0] },
+    'Flat': { zones: [ZONES.SHORT_L, ZONES.SHORT_R], baseYards: [2, 6], time: 2 }, // Quick
+    'Slant': { zones: [ZONES.SHORT_C], baseYards: [5, 9], time: 3 },
+    'Curl': { zones: [ZONES.MED_C], baseYards: [8, 12], time: 5 },
+    'Out': { zones: [ZONES.MED_L, ZONES.MED_R], baseYards: [10, 15], time: 6 },
+    'Post': { zones: [ZONES.DEEP_C], baseYards: [15, 30], time: 8 },
+    'Fly': { zones: [ZONES.DEEP_L, ZONES.DEEP_R], baseYards: [20, 40], time: 9 },
+    'Screen': { zones: [ZONES.SCREEN_L, ZONES.SCREEN_R], baseYards: [-3, 5], time: 3 },
+    'BlockRun': { zones: [], baseYards: [0, 0], time: 0 }, // WR blocking on run
+    'BlockPass': { zones: [], baseYards: [0, 0], time: 0 }, // RB staying in to block
 };
 
 // Defines the available plays for each formation
@@ -112,11 +108,46 @@ export const offensivePlaybook = {
 
 // Defines defensive play calls (concepts)
 export const defensivePlaybook = {
-    'Cover 1': { concept: 'Man', blitz: false, zones: { DL: 'rush', LB: 'rush_or_spy', DB: 'man_deep' } },
-    'Cover 2 Zone': { concept: 'Zone', blitz: false, zones: { DL: 'rush', LB: 'zone_short', DB: 'zone_deep_half' } },
-    'Man Blitz': { concept: 'Man', blitz: true, zones: { DL: 'rush', LB: 'blitz', DB: 'man_press' } },
-    'Zone Blitz': { concept: 'Zone', blitz: true, zones: { DL: 'rush', LB: 'blitz', DB: 'zone_short' } },
-    'Run Stop': { concept: 'Man', blitz: true, zones: { DL: 'run_stop', LB: 'run_stop', DB: 'man_press' } },
+    'Cover_1': { 
+        name: 'Cover 1', 
+        concept: 'Man', 
+        blitz: false, 
+        assignments: { // Maps slot to an assignment *type*
+            'DL1': 'rush_pass', 'DL2': 'rush_pass', 'DL3': 'rush_pass_contain',
+            'LB1': 'man_cover_RB', 'LB2': 'spy_QB', 'LB3': 'man_cover_WR2',
+            'DB1': 'man_cover_WR1'
+        } 
+    },
+    'Cover_2_Zone': { 
+        name: 'Cover 2 Zone', 
+        concept: 'Zone', 
+        blitz: false, 
+        assignments: {
+            'DL1': 'rush_pass', 'DL2': 'rush_pass',
+            'LB1': 'zone_short_left', 'LB2': 'zone_short_middle', 'LB3': 'zone_short_right',
+            'DB1': 'zone_deep_half_left', 'DB2': 'zone_deep_half_right'
+        } 
+    },
+    'Man_Blitz': { 
+        name: 'Man Blitz', 
+        concept: 'Man', 
+        blitz: true, 
+        assignments: {
+            'DL1': 'blitz_gap', 'DL2': 'blitz_gap', 'DL3': 'blitz_edge',
+            'LB1': 'blitz_gap', 'LB2': 'man_cover_RB',
+            'DB1': 'man_press_WR1', 'DB2': 'man_press_WR2'
+        } 
+    },
+    'Run_Stop': { 
+        name: 'Run Stop', 
+        concept: 'Man', 
+        blitz: true, 
+        assignments: {
+            'DL1': 'run_stop_gap', 'DL2': 'run_stop_gap', 'DL3': 'run_stop_gap', 'DL4': 'run_stop_edge',
+            'LB1': 'run_stop_fill', 'LB2': 'run_stop_fill',
+            'DB1': 'run_support'
+        } 
+    },
 };
 
 // --- Formations with Zone Assignments and Slot Priorities ---
@@ -125,11 +156,15 @@ export const offenseFormations = {
         name: 'Balanced',
         slots: ['QB1', 'RB1', 'WR1', 'WR2', 'OL1', 'OL2', 'OL3'],
         personnel: { QB: 1, RB: 1, WR: 2, OL: 3, DL: 0, LB: 0, DB: 0 },
-        // Maps slots to their assignments in the playbook
         routes: {
             'QB1': ['pass', 'sneak'], 'RB1': ['run_inside', 'run_outside', 'Screen', 'Flat', 'block_pass'],
             'WR1': ['Fly', 'Post', 'Slant', 'block_run'], 'WR2': ['Fly', 'Post', 'Curl', 'block_run'],
             'OL1': ['block_pass', 'block_run'], 'OL2': ['block_pass', 'block_run'], 'OL3': ['block_pass', 'block_run']
+        },
+        zoneAssignments: {
+            QB1: ZONES.BACKFIELD_C, RB1: ZONES.BACKFIELD_C,
+            WR1: ZONES.SHORT_L, WR2: ZONES.SHORT_R,
+            OL1: ZONES.LOS_L, OL2: ZONES.LOS_C, OL3: ZONES.LOS_R
         },
         slotPriorities: { 
             QB1: { throwingAccuracy: 1.5, playbookIQ: 1.2 }, RB1: { speed: 1.3, agility: 1.1 },
@@ -146,6 +181,11 @@ export const offenseFormations = {
             'WR1': ['Fly', 'Post', 'Slant', 'block_run'], 'WR2': ['Fly', 'Out', 'Slant', 'block_run'], 'WR3': ['Curl', 'Slant', 'Out', 'block_run'],
             'OL1': ['block_pass'], 'OL2': ['block_pass']
         },
+        zoneAssignments: {
+            QB1: ZONES.BACKFIELD_C, RB1: ZONES.BACKFIELD_R,
+            WR1: ZONES.MED_L, WR2: ZONES.MED_R, WR3: ZONES.SHORT_C,
+            OL1: ZONES.LOS_L, OL2: ZONES.LOS_R
+        },
         slotPriorities: {
             QB1: { throwingAccuracy: 1.6, playbookIQ: 1.1 }, RB1: { catchingHands: 1.3, speed: 1.1 },
             WR1: { speed: 1.5, catchingHands: 1.1 }, WR2: { speed: 1.5, catchingHands: 1.1 }, WR3: { agility: 1.4, catchingHands: 1.2 },
@@ -161,6 +201,11 @@ export const offenseFormations = {
             'WR1': ['Post', 'Slant', 'block_run'],
             'OL1': ['block_pass', 'block_run'], 'OL2': ['block_pass', 'block_run'], 'OL3': ['block_pass', 'block_run']
         },
+        zoneAssignments: {
+            QB1: ZONES.BACKFIELD_C, RB1: ZONES.BACKFIELD_R, RB2: ZONES.BACKFIELD_L, // RB2 often lead blocker
+            WR1: ZONES.SHORT_R,
+            OL1: ZONES.LOS_L, OL2: ZONES.LOS_C, OL3: ZONES.LOS_R
+        },
         slotPriorities: {
             QB1: { playbookIQ: 1.3 }, RB1: { strength: 1.4, speed: 1.2 }, RB2: { blocking: 1.5, strength: 1.2 }, // RB2 as blocker
             WR1: { blocking: 1.3, catchingHands: 1.0 }, // WR needs to block
@@ -174,10 +219,10 @@ export const defenseFormations = {
         name: '3-3-1', 
         slots: ['DL1', 'DL2', 'DL3', 'LB1', 'LB2', 'LB3', 'DB1'],
         personnel: { DL: 3, LB: 3, DB: 1 },
-        zoneAssignments: { // Maps slot to their primary zone responsibility
-            DL1: ZONES.LINE_OF_SCRIMMAGE, DL2: ZONES.LINE_OF_SCRIMMAGE, DL3: ZONES.LINE_OF_SCRIMMAGE,
+        zoneAssignments: { 
+            DL1: ZONES.LOS_L, DL2: ZONES.LOS_C, DL3: ZONES.LOS_R,
             LB1: ZONES.SHORT_L, LB2: ZONES.SHORT_C, LB3: ZONES.SHORT_R,
-            DB1: ZONES.DEEP_C // Single high safety
+            DB1: ZONES.DEEP_C 
         },
         routes: { // Defensive "playbook" / assignments
             'DL1': ['rush_pass', 'run_stop_left'], 'DL2': ['rush_pass', 'run_stop_center'], 'DL3': ['rush_pass', 'run_stop_right'],
@@ -195,7 +240,7 @@ export const defenseFormations = {
         slots: ['DL1', 'DL2', 'DL3', 'DL4', 'LB1', 'LB2', 'DB1'],
         personnel: { DL: 4, LB: 2, DB: 1 },
          zoneAssignments: {
-            DL1: ZONES.LINE_OF_SCRIMMAGE, DL2: ZONES.LINE_OF_SCRIMMAGE, DL3: ZONES.LINE_OF_SCRIMMAGE, DL4: ZONES.LINE_OF_SCRIMMAGE,
+            DL1: ZONES.LOS_L, DL2: ZONES.LOS_C, DL3: ZONES.LOS_C, DL4: ZONES.LOS_R,
             LB1: ZONES.SHORT_L, LB2: ZONES.SHORT_R, 
             DB1: ZONES.DEEP_C 
         },
@@ -215,7 +260,7 @@ export const defenseFormations = {
         slots: ['DL1', 'DL2', 'LB1', 'LB2', 'LB3', 'DB1', 'DB2'],
         personnel: { DL: 2, LB: 3, DB: 2 },
          zoneAssignments: {
-            DL1: ZONES.LINE_OF_SCRIMMAGE, DL2: ZONES.LINE_OF_SCRIMMAGE, 
+            DL1: ZONES.LOS_L, DL2: ZONES.LOS_R, 
             LB1: ZONES.SHORT_L, LB2: ZONES.SHORT_C, LB3: ZONES.SHORT_R, 
             DB1: ZONES.DEEP_L, DB2: ZONES.DEEP_R 
         },
@@ -310,7 +355,6 @@ coachPersonalities.forEach(coach => {
             mental: { playbookIQ: 1, clutch: 1, consistency: 1, toughness: 1 },
             technical: { throwingAccuracy: 1, catchingHands: 1, tackling: 1, blocking: 1, blockShedding: 1 }
         };
-        // Apply some default variation based on type for safety
         if (coach.type.includes('Offense')) coach.attributePreferences.technical.throwingAccuracy = 1.2;
         if (coach.type.includes('Defense')) coach.attributePreferences.technical.tackling = 1.2;
         if (coach.type.includes('Ground')) coach.attributePreferences.physical.strength = 1.2;
