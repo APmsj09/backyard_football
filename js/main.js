@@ -10,13 +10,13 @@ async function startNewGame() {
     try {
         UI.showScreen('loadingScreen');
         await new Promise(resolve => setTimeout(resolve, 50));
-        await Game.initializeLeague(UI.updateLaoadingProgress);
+        // FIXED TYPO: Changed updateLaoadingProgress to updateLoadingProgress
+        await Game.initializeLeague(UI.updateLoadingProgress); 
         gameState = Game.getGameState();
         UI.renderTeamNameSuggestions(['Jets', 'Sharks', 'Tigers', 'Bulldogs', 'Panthers', 'Giants'], handleTeamNameSelection);
         UI.showScreen('teamCreationScreen');
     } catch (error) {
         console.error("Error starting game:", error);
-        // Maybe show an error message to the user
     }
 }
 
@@ -370,4 +370,5 @@ function main() {
 }
 
 document.addEventListener('DOMContentLoaded', main);
+
 
