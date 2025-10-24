@@ -454,7 +454,6 @@ function determinePlayCall(offense, defense, down, yardsToGo, ballOn, scoreDiff,
     const formationPlays = Object.keys(offensivePlaybook).filter(key => key.startsWith(offenseFormationName));
     
     if (yardsToGo <= 1 && qbStrength > 60 && Math.random() < 0.6) {
-        // Find a QB sneak play if available, otherwise default to inside run
         // FIX: QB Sneak is a 'run' type
         const sneakPlay = formationPlays.find(p => offensivePlaybook[p].zone === ZONES.SNEAK);
         if (sneakPlay) return sneakPlay;
@@ -678,6 +677,7 @@ function resolvePlay(offense, defense, playKey, gameState) {
 
         const passRushers = dls.concat(lbs.filter(p => {
             const slot = Object.keys(defense.depthChart.defense).find(s => defense.depthChart.defense[s] === p.id);
+            // FIX: Check if route exists for the slot before trying to find 'cover'
             return slot && defenseFormationData.routes[slot] && !defenseFormationData.routes[slot].some(r => r.includes('cover'));
         })).filter(Boolean);
         
@@ -785,9 +785,12 @@ function resolvePlay(offense, defense, playKey, gameState) {
         const allReceivers = Object.keys(play.assignments)
             .filter(slot => slot.startsWith('WR') || slot.startsWith('RB'))
             .map(slot => {
-                const playerObj = getPlayersForSlots(offense, 'offense', slot.substring(0,2), usedPlayerIds_O).find(p => p.slot === slot);
+                const playerObj = (slot.startsWith('WR') ? wrs : rbs).find(p => {
+                    const pSlot = Object.keys(offense.depthChart.offense).find(s => offense.depthChart.offense[s] === p.id);
+                    return pSlot === slot;
+                });
                 return { 
-                    player: playerObj ? playerObj.player : null, 
+                    player: playerObj, 
                     slot, 
                     route: play.assignments[slot].replace('run_route:', '') 
                 }
