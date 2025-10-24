@@ -1,5 +1,5 @@
 import { getRandom, getRandomInt } from './utils.js';
-import { firstNames, lastNames, nicknames, teamNames, positions, divisionNames, coachPersonalities, offenseFormations, defenseFormations, ZONES } from './data.js';
+import { firstNames, lastNames, nicknames, teamNames, positions, divisionNames, coachPersonalities, offenseFormations, defenseFormations, ZONES } from './data.js'; // Import ZONES
 
 let game = null;
 
@@ -14,14 +14,13 @@ const weeklyEvents = [
     { type: 'busy', description: 'Family Vacation', minDuration: 1, maxDuration: 1, chance: 0.003 }
 ];
 
-// NEW: Offseason events causing players to leave
 const offseasonDepartureEvents = [
     { reason: 'Moved Away', chance: 0.03 },
     { reason: 'Focusing on another sport', chance: 0.02 },
     { reason: 'Decided to quit', chance: 0.01 }
 ];
-const transferEventChance = 0.02; // Chance a player asks to leave player team
-const joinRequestChance = 0.03; // Chance an undrafted player asks to join player team
+const transferEventChance = 0.02;
+const joinRequestChance = 0.03;
 
 export const positionOverallWeights = {
     QB: { throwingAccuracy: 0.4, playbookIQ: 0.3, consistency: 0.1, clutch: 0.1, speed: 0.05, agility: 0.05 },
@@ -54,12 +53,14 @@ export function calculateOverall(player, position) {
     return Math.min(99, Math.max(1, Math.round(score)));
 }
 
-// NEW: Calculate a player's suitability for a *specific* formation slot
+/**
+ * NEW: Calculate a player's suitability for a *specific* formation slot based on priorities in data.js.
+ */
 function calculateSlotSuitability(player, slot, side, team) {
     const formationName = team.formations[side];
     const formationData = side === 'offense' ? offenseFormations[formationName] : defenseFormations[formationName];
+    // Fallback if slot-specific priorities aren't defined
     if (!formationData || !formationData.slotPriorities || !formationData.slotPriorities[slot]) {
-        // Fallback to general position overall if slot priorities aren't defined
         return calculateOverall(player, slot.replace(/\d/g, ''));
     }
 
@@ -67,6 +68,7 @@ function calculateSlotSuitability(player, slot, side, team) {
     let score = 0;
     let totalWeight = 0;
 
+    // Calculate score based on weighted priorities for this slot
     for (const attr in priorities) {
         let found = false;
         for (const category in player.attributes) {
@@ -292,7 +294,6 @@ export function aiSetDepthChart(team) {
 
 export function simulateAIPick(team) {
     if (team.roster.length >= 10) {
-        // console.log(`${team.name} roster full, skipping pick.`); 
         return null; 
     }
 
@@ -306,7 +307,6 @@ export function simulateAIPick(team) {
     
     if (bestPlayer) {
         addPlayerToTeam(bestPlayer, team);
-        // console.log(`${team.name} drafts ${bestPlayer.name}`); 
     }
     return bestPlayer;
 }
@@ -382,6 +382,9 @@ function getBestSub(team, position, usedPlayerIds) {
     );
 }
 
+/**
+ * Gets players, ensures they haven't been used on *this specific play* yet.
+ */
 function getPlayersForSlots(team, side, slotPrefix, usedPlayerIdsThisPlay) {
     const slots = Object.keys(team.depthChart[side]).filter(s => s.startsWith(slotPrefix));
     const position = slotPrefix.replace(/\d/g, '');
@@ -525,7 +528,7 @@ function resolvePlay(offense, defense, playCall, gameState) {
         let blockers = [...ols];
         let defenders = [...dls, ...lbs];
         let yards = 0;
-        let blockWinBonus = (zone === ZONES.RUN_C) ? 10 : -10; // Bonus for inside, penalty for outside
+        let blockWinBonus = (zone === ZONES.RUN_C) ? 10 : -10; 
 
         // --- Line Battle (Team-based) ---
         let totalBlockPower = blockers.reduce((sum, p) => sum + (p.attributes.technical.blocking + p.attributes.physical.strength) * getFatigueModifier(p), 0);
@@ -533,14 +536,14 @@ function resolvePlay(offense, defense, playCall, gameState) {
 
         // Check for double team
         if (blockers.length > defenders.length) {
-            totalBlockPower *= 1.25; // 25% bonus for numerical advantage
+            totalBlockPower *= 1.25; 
             if (gameLog && Math.random() < 0.3) gameLog.push("Offense gets a good push with the double team!");
         }
 
-        const blockDiff = totalBlockPower - (totalShedPower + getRandomInt(-20, 30) - blockWinBonus); // Tuned for offense
+        const blockDiff = totalBlockPower - (totalShedPower + getRandomInt(-20, 30) - blockWinBonus); // Tuned for offense slightly more
 
         if(blockDiff > DRAW_THRESHOLD + 10) { // Clear win for offense
-            yards = (zone === ZONES.RUN_C) ? getRandomInt(3, 7) : getRandomInt(4, 9); // Increased base yards
+            yards = (zone === ZONES.RUN_C) ? getRandomInt(3, 7) : getRandomInt(4, 9); 
             if (gameLog && Math.random() < 0.5) gameLog.push(`A huge hole opens up!`);
         } else if (blockDiff < -DRAW_THRESHOLD - 10) { // Clear win for defense
              yards = getRandomInt(-2, 1);
@@ -554,7 +557,7 @@ function resolvePlay(offense, defense, playCall, gameState) {
         
         // --- Second Level Tackle ---
         const tackler = getRandom(dbs.concat(lbs).filter(p => !defenseUsedIds.has(p?.id))) || findEmergencyPlayer('LB', defense);
-        if (tackler && yards > -1) { // Only check second level if not tackled for loss
+        if (tackler && yards > -1) { 
             checkInGameInjury(rb, gameLog); checkInGameInjury(tackler, gameLog);
             const grapplePower = (tackler.attributes.technical.tackling + tackler.attributes.physical.agility) * getFatigueModifier(tackler);
             const jukePower = rb.attributes.physical.agility * getFatigueModifier(rb) * (zone !== ZONES.RUN_C ? 1.1 : 0.9);
@@ -563,7 +566,6 @@ function resolvePlay(offense, defense, playCall, gameState) {
             if(grappleDiff > DRAW_THRESHOLD) { // Grapple succeeds
                 const bringDownPower = (tackler.attributes.physical.strength + tackler.attributes.technical.tackling) * getFatigueModifier(tackler);
                 const breakPower = rb.attributes.physical.strength * getFatigueModifier(rb);
-                // BALANCING: Made tackle breaking slightly easier for RB
                 const tackleDiff = bringDownPower - (breakPower + getRandomInt(-30, 25)); 
 
                 if(tackleDiff > DRAW_THRESHOLD) { // Tackler wins
@@ -657,7 +659,7 @@ function resolvePlay(offense, defense, playCall, gameState) {
                 checkInGameInjury(rusher, gameLog); checkInGameInjury(blocker, gameLog);
                 const rushPower = (rusher.attributes.physical.strength + rusher.attributes.technical.blockShedding) * getFatigueModifier(rusher) * (playActionSuccess ? 0.8 : 1);
                 // BALANCING: Adjusted pass block check
-                const blockDiff = blockPower - (rushPower + getRandomInt(-15, 45)); // Tuned for offense
+                const blockDiff = blockPower - (rushPower + getRandomInt(-20, 45)); // Tuned for offense
 
                 if (blockDiff < -DRAW_THRESHOLD) { // Rusher wins
                     pressure = true; rusherWhoWon = rusher; break; // One rusher won, stop loop
