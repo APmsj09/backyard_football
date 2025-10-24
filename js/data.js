@@ -91,19 +91,19 @@ export const routeTree = {
 // Defines the available plays for each formation
 export const offensivePlaybook = {
     // Balanced Plays
-    'Balanced_InsideRun': { type: 'run', zone: ZONES.RUN_C, assignments: { 'RB1': 'run_inside', 'WR1': 'block_run', 'WR2': 'block_run' } },
-    'Balanced_OutsideRun': { type: 'run', zone: ZONES.RUN_L, assignments: { 'RB1': 'run_outside', 'WR1': 'block_run', 'WR2': 'block_run' } },
-    'Balanced_ShortPass': { type: 'pass', playAction: false, assignments: { 'RB1': 'Flat', 'WR1': 'Slant', 'WR2': 'Curl' } },
-    'Balanced_DeepPass': { type: 'pass', playAction: true, assignments: { 'RB1': 'block_pass', 'WR1': 'Fly', 'WR2': 'Post' } },
+    'Balanced_InsideRun': { type: 'run', zone: ZONES.RUN_C, tags: ['run', 'inside'], assignments: { 'RB1': 'run_inside', 'WR1': 'block_run', 'WR2': 'block_run' } },
+    'Balanced_OutsideRun': { type: 'run', zone: ZONES.RUN_L, tags: ['run', 'outside'], assignments: { 'RB1': 'run_outside', 'WR1': 'block_run', 'WR2': 'block_run' } },
+    'Balanced_ShortPass': { type: 'pass', playAction: false, tags: ['pass', 'short'], assignments: { 'RB1': 'Flat', 'WR1': 'Slant', 'WR2': 'Curl' } },
+    'Balanced_DeepPass': { type: 'pass', playAction: true, tags: ['pass', 'deep', 'pa'], assignments: { 'RB1': 'block_pass', 'WR1': 'Fly', 'WR2': 'Post' } },
     // Spread Plays
-    'Spread_InsideRun': { type: 'run', zone: ZONES.RUN_C, assignments: { 'RB1': 'run_inside', 'WR1': 'block_run', 'WR2': 'block_run', 'WR3': 'block_run' } },
-    'Spread_QuickSlants': { type: 'pass', playAction: false, assignments: { 'RB1': 'Flat', 'WR1': 'Slant', 'WR2': 'Slant', 'WR3': 'Slant' } },
-    'Spread_FourVerts': { type: 'pass', playAction: false, assignments: { 'RB1': 'Flat', 'WR1': 'Fly', 'WR2': 'Fly', 'WR3': 'Post' } },
-    'Spread_Screen': { type: 'pass', zone: ZONES.SCREEN_L, assignments: { 'RB1': 'Screen', 'WR1': 'block_pass', 'WR2': 'block_pass', 'WR3': 'block_pass' } },
+    'Spread_InsideRun': { type: 'run', zone: ZONES.RUN_C, tags: ['run', 'inside'], assignments: { 'RB1': 'run_inside', 'WR1': 'block_run', 'WR2': 'block_run', 'WR3': 'block_run' } },
+    'Spread_QuickSlants': { type: 'pass', playAction: false, tags: ['pass', 'short', 'quick'], assignments: { 'RB1': 'Flat', 'WR1': 'Slant', 'WR2': 'Slant', 'WR3': 'Slant' } },
+    'Spread_FourVerts': { type: 'pass', playAction: false, tags: ['pass', 'deep'], assignments: { 'RB1': 'Flat', 'WR1': 'Fly', 'WR2': 'Fly', 'WR3': 'Post' } },
+    'Spread_Screen': { type: 'pass', zone: ZONES.SCREEN_L, tags: ['pass', 'screen'], assignments: { 'RB1': 'Screen', 'WR1': 'block_pass', 'WR2': 'block_pass', 'WR3': 'block_pass' } },
     // Power Plays
-    'Power_Dive': { type: 'run', zone: ZONES.RUN_C, assignments: { 'RB1': 'run_inside', 'RB2': 'block_run', 'WR1': 'block_run' } },
-    'Power_Sweep': { type: 'run', zone: ZONES.RUN_R, assignments: { 'RB1': 'run_outside', 'RB2': 'block_run', 'WR1': 'block_run' } },
-    'Power_PA_Bootleg': { type: 'pass', playAction: true, assignments: { 'RB1': 'block_pass', 'RB2': 'Flat', 'WR1': 'Post' } },
+    'Power_Dive': { type: 'run', zone: ZONES.RUN_C, tags: ['run', 'inside', 'power'], assignments: { 'RB1': 'run_inside', 'RB2': 'block_run', 'WR1': 'block_run' } },
+    'Power_Sweep': { type: 'run', zone: ZONES.RUN_R, tags: ['run', 'outside', 'power'], assignments: { 'RB1': 'run_outside', 'RB2': 'block_run', 'WR1': 'block_run' } },
+    'Power_PA_Bootleg': { type: 'pass', playAction: true, tags: ['pass', 'deep', 'pa'], assignments: { 'RB1': 'block_pass', 'RB2': 'Flat', 'WR1': 'Post' } },
 };
 
 // Defines defensive play calls (concepts)
