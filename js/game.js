@@ -412,6 +412,7 @@ function getPlayersForSlots(team, side, slotPrefix, usedPlayerIdsThisPlay) {
  * This function now selects a valid play key from the offensivePlaybook.
  */
 function determinePlayCall(offense, defense, down, yardsToGo, ballOn, scoreDiff, gameLog, drivesRemaining) {
+    // ... (This function is unchanged from your provided version) ...
     const { coach } = offense;
     const offenseFormationName = offense.formations.offense;
     const defenseFormationName = defense.formations.defense;
@@ -616,7 +617,8 @@ function resolvePlay(offense, defense, playKey, gameState) {
              if(gameLog) gameLog.push(`Stalemate at the line.`);
         }
         
-        const tackler = getRandom(dbs.concat(lbs).filter(p => !usedPlayerIds_D.has(p?.id))) || findEmergencyPlayer('LB', defense, 'defense', usedPlayerIds_D)?.player;
+        // <<< FIX WAS HERE: Correctly filter using the globally scoped defenseUsedIds
+        const tackler = getRandom(dbs.concat(lbs).filter(p => p && !usedPlayerIds_D.has(p.id))) || findEmergencyPlayer('LB', defense, 'defense', usedPlayerIds_D)?.player;
         if (tackler && yards > -1) { 
             checkInGameInjury(rb, gameLog); checkInGameInjury(tackler, gameLog);
             const grapplePower = (tackler.attributes.technical.tackling + tackler.attributes.physical.agility) * getFatigueModifier(tackler);
@@ -1007,6 +1009,8 @@ export function simulateGame(homeTeam, awayTeam) {
             if (result.turnover) { driveActive = false; }
             else if (result.touchdown || ballOn >= 100) { 
                 gameLog.push(`TOUCHDOWN ${possession.name}!`);
+                
+                // TD stat is now recorded in resolvePlay
                 
                 const goesForTwo = Math.random() > 0.5;
                 const conversionSuccess = Math.random() > (goesForTwo ? 0.5 : 0.1);
