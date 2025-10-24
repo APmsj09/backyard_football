@@ -77,18 +77,61 @@ export const ZONES = {
     LINE_OF_SCRIMMAGE: 'Line of Scrimmage'
 };
 
+// --- Playbook Data ---
+
+// Defines the properties of each route
+export const routeTree = {
+    'Flat': { zones: [ZONES.SHORT_L, ZONES.SHORT_R], baseYards: [2, 6] },
+    'Slant': { zones: [ZONES.SHORT_C], baseYards: [5, 9] },
+    'Curl': { zones: [ZONES.MED_C], baseYards: [8, 12] },
+    'Out': { zones: [ZONES.MED_L, ZONES.MED_R], baseYards: [10, 15] },
+    'Post': { zones: [ZONES.DEEP_C], baseYards: [15, 30] },
+    'Fly': { zones: [ZONES.DEEP_L, ZONES.DEEP_R], baseYards: [20, 40] },
+    'Screen': { zones: [ZONES.SCREEN_L, ZONES.SCREEN_R], baseYards: [-3, 5] },
+    'BlockRun': { zones: [], baseYards: [0, 0] },
+    'BlockPass': { zones: [], baseYards: [0, 0] },
+};
+
+// Defines the available plays for each formation
+export const offensivePlaybook = {
+    // Balanced Plays
+    'Balanced_InsideRun': { type: 'run', zone: ZONES.RUN_C, assignments: { 'RB1': 'run_inside', 'WR1': 'block_run', 'WR2': 'block_run' } },
+    'Balanced_OutsideRun': { type: 'run', zone: ZONES.RUN_L, assignments: { 'RB1': 'run_outside', 'WR1': 'block_run', 'WR2': 'block_run' } },
+    'Balanced_ShortPass': { type: 'pass', playAction: false, assignments: { 'RB1': 'Flat', 'WR1': 'Slant', 'WR2': 'Curl' } },
+    'Balanced_DeepPass': { type: 'pass', playAction: true, assignments: { 'RB1': 'block_pass', 'WR1': 'Fly', 'WR2': 'Post' } },
+    // Spread Plays
+    'Spread_InsideRun': { type: 'run', zone: ZONES.RUN_C, assignments: { 'RB1': 'run_inside', 'WR1': 'block_run', 'WR2': 'block_run', 'WR3': 'block_run' } },
+    'Spread_QuickSlants': { type: 'pass', playAction: false, assignments: { 'RB1': 'Flat', 'WR1': 'Slant', 'WR2': 'Slant', 'WR3': 'Slant' } },
+    'Spread_FourVerts': { type: 'pass', playAction: false, assignments: { 'RB1': 'Flat', 'WR1': 'Fly', 'WR2': 'Fly', 'WR3': 'Post' } },
+    'Spread_Screen': { type: 'pass', zone: ZONES.SCREEN_L, assignments: { 'RB1': 'Screen', 'WR1': 'block_pass', 'WR2': 'block_pass', 'WR3': 'block_pass' } },
+    // Power Plays
+    'Power_Dive': { type: 'run', zone: ZONES.RUN_C, assignments: { 'RB1': 'run_inside', 'RB2': 'block_run', 'WR1': 'block_run' } },
+    'Power_Sweep': { type: 'run', zone: ZONES.RUN_R, assignments: { 'RB1': 'run_outside', 'RB2': 'block_run', 'WR1': 'block_run' } },
+    'Power_PA_Bootleg': { type: 'pass', playAction: true, assignments: { 'RB1': 'block_pass', 'RB2': 'Flat', 'WR1': 'Post' } },
+};
+
+// Defines defensive play calls (concepts)
+export const defensivePlaybook = {
+    'Cover 1': { concept: 'Man', blitz: false, zones: { DL: 'rush', LB: 'rush_or_spy', DB: 'man_deep' } },
+    'Cover 2 Zone': { concept: 'Zone', blitz: false, zones: { DL: 'rush', LB: 'zone_short', DB: 'zone_deep_half' } },
+    'Man Blitz': { concept: 'Man', blitz: true, zones: { DL: 'rush', LB: 'blitz', DB: 'man_press' } },
+    'Zone Blitz': { concept: 'Zone', blitz: true, zones: { DL: 'rush', LB: 'blitz', DB: 'zone_short' } },
+    'Run Stop': { concept: 'Man', blitz: true, zones: { DL: 'run_stop', LB: 'run_stop', DB: 'man_press' } },
+};
+
 // --- Formations with Zone Assignments and Slot Priorities ---
 export const offenseFormations = {
     'Balanced': {
         name: 'Balanced',
         slots: ['QB1', 'RB1', 'WR1', 'WR2', 'OL1', 'OL2', 'OL3'],
-        personnel: { QB: 1, RB: 1, WR: 2, OL: 3 },
-        zoneAssignments: {
-            QB1: ZONES.BACKFIELD, RB1: ZONES.BACKFIELD,
-            WR1: ZONES.MED_L, WR2: ZONES.MED_R,
-            OL1: ZONES.LINE_OF_SCRIMMAGE, OL2: ZONES.LINE_OF_SCRIMMAGE, OL3: ZONES.LINE_OF_SCRIMMAGE
+        personnel: { QB: 1, RB: 1, WR: 2, OL: 3, DL: 0, LB: 0, DB: 0 },
+        // Maps slots to their assignments in the playbook
+        routes: {
+            'QB1': ['pass', 'sneak'], 'RB1': ['run_inside', 'run_outside', 'Screen', 'Flat', 'block_pass'],
+            'WR1': ['Fly', 'Post', 'Slant', 'block_run'], 'WR2': ['Fly', 'Post', 'Curl', 'block_run'],
+            'OL1': ['block_pass', 'block_run'], 'OL2': ['block_pass', 'block_run'], 'OL3': ['block_pass', 'block_run']
         },
-        slotPriorities: { // Higher weight = more important for this specific slot
+        slotPriorities: { 
             QB1: { throwingAccuracy: 1.5, playbookIQ: 1.2 }, RB1: { speed: 1.3, agility: 1.1 },
             WR1: { speed: 1.2, catchingHands: 1.2 }, WR2: { catchingHands: 1.3, agility: 1.1 },
             OL1: { strength: 1.5, blocking: 1.3 }, OL2: { blocking: 1.4, strength: 1.2 }, OL3: { strength: 1.4, blocking: 1.2 }
@@ -97,11 +140,11 @@ export const offenseFormations = {
     'Spread': {
         name: 'Spread',
         slots: ['QB1', 'RB1', 'WR1', 'WR2', 'WR3', 'OL1', 'OL2'],
-        personnel: { QB: 1, RB: 1, WR: 3, OL: 2 },
-        zoneAssignments: {
-            QB1: ZONES.BACKFIELD, RB1: ZONES.BACKFIELD,
-            WR1: ZONES.DEEP_L, WR2: ZONES.DEEP_R, WR3: ZONES.SHORT_C,
-            OL1: ZONES.LINE_OF_SCRIMMAGE, OL2: ZONES.LINE_OF_SCRIMMAGE
+        personnel: { QB: 1, RB: 1, WR: 3, OL: 2, DL: 0, LB: 0, DB: 0 },
+        routes: {
+            'QB1': ['pass', 'sneak'], 'RB1': ['run_inside', 'Screen', 'Flat', 'block_pass'],
+            'WR1': ['Fly', 'Post', 'Slant', 'block_run'], 'WR2': ['Fly', 'Out', 'Slant', 'block_run'], 'WR3': ['Curl', 'Slant', 'Out', 'block_run'],
+            'OL1': ['block_pass'], 'OL2': ['block_pass']
         },
         slotPriorities: {
             QB1: { throwingAccuracy: 1.6, playbookIQ: 1.1 }, RB1: { catchingHands: 1.3, speed: 1.1 },
@@ -112,11 +155,11 @@ export const offenseFormations = {
     'Power': {
         name: 'Power',
         slots: ['QB1', 'RB1', 'RB2', 'WR1', 'OL1', 'OL2', 'OL3'],
-        personnel: { QB: 1, RB: 2, WR: 1, OL: 3 },
-        zoneAssignments: {
-            QB1: ZONES.BACKFIELD, RB1: ZONES.BACKFIELD, RB2: ZONES.BACKFIELD, // RB2 often lead blocker
-            WR1: ZONES.SHORT_R,
-            OL1: ZONES.LINE_OF_SCRIMMAGE, OL2: ZONES.LINE_OF_SCRIMMAGE, OL3: ZONES.LINE_OF_SCRIMMAGE
+        personnel: { QB: 1, RB: 2, WR: 1, OL: 3, DL: 0, LB: 0, DB: 0 },
+        routes: {
+            'QB1': ['pass', 'sneak'], 'RB1': ['run_inside', 'run_outside'], 'RB2': ['block_run', 'block_pass', 'Flat'],
+            'WR1': ['Post', 'Slant', 'block_run'],
+            'OL1': ['block_pass', 'block_run'], 'OL2': ['block_pass', 'block_run'], 'OL3': ['block_pass', 'block_run']
         },
         slotPriorities: {
             QB1: { playbookIQ: 1.3 }, RB1: { strength: 1.4, speed: 1.2 }, RB2: { blocking: 1.5, strength: 1.2 }, // RB2 as blocker
@@ -127,14 +170,19 @@ export const offenseFormations = {
 };
 
 export const defenseFormations = {
-    '3-3-1': { // Balanced vs Run/Pass
-        name: '3-3-1',
+    '3-3-1': { 
+        name: '3-3-1', 
         slots: ['DL1', 'DL2', 'DL3', 'LB1', 'LB2', 'LB3', 'DB1'],
         personnel: { DL: 3, LB: 3, DB: 1 },
-        zoneAssignments: { // Approximate zones covered
+        zoneAssignments: { // Maps slot to their primary zone responsibility
             DL1: ZONES.LINE_OF_SCRIMMAGE, DL2: ZONES.LINE_OF_SCRIMMAGE, DL3: ZONES.LINE_OF_SCRIMMAGE,
             LB1: ZONES.SHORT_L, LB2: ZONES.SHORT_C, LB3: ZONES.SHORT_R,
             DB1: ZONES.DEEP_C // Single high safety
+        },
+        routes: { // Defensive "playbook" / assignments
+            'DL1': ['rush_pass', 'run_stop_left'], 'DL2': ['rush_pass', 'run_stop_center'], 'DL3': ['rush_pass', 'run_stop_right'],
+            'LB1': ['cover_flat_left', 'blitz_outside', 'run_stop_left'], 'LB2': ['cover_short_middle', 'blitz_middle', 'run_stop_center'], 'LB3': ['cover_flat_right', 'blitz_outside', 'run_stop_right'],
+            'DB1': ['cover_deep_middle', 'cover_deep_half_left', 'cover_deep_half_right']
         },
         slotPriorities: {
             DL1: { strength: 1.4, blockShedding: 1.2 }, DL2: { strength: 1.5, tackling: 1.1 }, DL3: { strength: 1.4, blockShedding: 1.2 },
@@ -142,14 +190,19 @@ export const defenseFormations = {
             DB1: { speed: 1.5, playbookIQ: 1.3, catchingHands: 1.1 } // Safety
         }
     },
-    '4-2-1': { // Strong vs Run
-        name: '4-2-1',
+    '4-2-1': { 
+        name: '4-2-1', 
         slots: ['DL1', 'DL2', 'DL3', 'DL4', 'LB1', 'LB2', 'DB1'],
         personnel: { DL: 4, LB: 2, DB: 1 },
          zoneAssignments: {
             DL1: ZONES.LINE_OF_SCRIMMAGE, DL2: ZONES.LINE_OF_SCRIMMAGE, DL3: ZONES.LINE_OF_SCRIMMAGE, DL4: ZONES.LINE_OF_SCRIMMAGE,
-            LB1: ZONES.SHORT_C, LB2: ZONES.SHORT_C, // Inside LBs
-            DB1: ZONES.DEEP_C // Single high safety
+            LB1: ZONES.SHORT_L, LB2: ZONES.SHORT_R, 
+            DB1: ZONES.DEEP_C 
+        },
+         routes: {
+            'DL1': ['run_stop_left', 'rush_pass'], 'DL2': ['run_stop_center', 'rush_pass'], 'DL3': ['run_stop_center', 'rush_pass'], 'DL4': ['run_stop_right', 'rush_pass'],
+            'LB1': ['run_stop_center', 'blitz_middle', 'cover_short_middle'], 'LB2': ['run_stop_center', 'blitz_middle', 'cover_short_middle'],
+            'DB1': ['cover_deep_middle', 'run_support']
         },
         slotPriorities: {
             DL1: { strength: 1.6, blockShedding: 1.3 }, DL2: { strength: 1.6, tackling: 1.2 }, DL3: { strength: 1.6, tackling: 1.2 }, DL4: { strength: 1.6, blockShedding: 1.3 }, // Run stuffing focus
@@ -157,15 +210,20 @@ export const defenseFormations = {
             DB1: { speed: 1.4, tackling: 1.2, playbookIQ: 1.1 } // Needs to help vs run too
         }
     },
-    '2-3-2': { // Strong vs Pass (Dime-like)
-        name: '2-3-2',
+    '2-3-2': { 
+        name: '2-3-2', 
         slots: ['DL1', 'DL2', 'LB1', 'LB2', 'LB3', 'DB1', 'DB2'],
         personnel: { DL: 2, LB: 3, DB: 2 },
          zoneAssignments: {
-            DL1: ZONES.LINE_OF_SCRIMMAGE, DL2: ZONES.LINE_OF_SCRIMMAGE, // Interior rush/stuff
-            LB1: ZONES.SHORT_L, LB2: ZONES.SHORT_C, LB3: ZONES.SHORT_R, // Zone coverage / blitz
-            DB1: ZONES.DEEP_L, DB2: ZONES.DEEP_R // Two deep safeties/corners
+            DL1: ZONES.LINE_OF_SCRIMMAGE, DL2: ZONES.LINE_OF_SCRIMMAGE, 
+            LB1: ZONES.SHORT_L, LB2: ZONES.SHORT_C, LB3: ZONES.SHORT_R, 
+            DB1: ZONES.DEEP_L, DB2: ZONES.DEEP_R 
         },
+         routes: {
+             'DL1': ['rush_pass', 'run_stop_center'], 'DL2': ['rush_pass', 'run_stop_center'],
+             'LB1': ['cover_flat_left', 'blitz_outside'], 'LB2': ['cover_short_middle', 'blitz_middle'], 'LB3': ['cover_flat_right', 'blitz_outside'],
+             'DB1': ['cover_deep_half_left', 'man_cover_wr1'], 'DB2': ['cover_deep_half_right', 'man_cover_wr2']
+         },
         slotPriorities: {
             DL1: { speed: 1.3, blockShedding: 1.3 }, DL2: { speed: 1.3, blockShedding: 1.3 }, // Pass rush
             LB1: { speed: 1.4, playbookIQ: 1.2 }, LB2: { tackling: 1.3, playbookIQ: 1.3 }, LB3: { speed: 1.4, playbookIQ: 1.2 }, // Coverage LBs
@@ -181,42 +239,66 @@ export const coachPersonalities = [
         description: 'Prefers accurate passers and agile receivers.',
         preferredOffense: 'Spread',
         preferredDefense: '2-3-2',
-        attributePreferences: { /* ... same as before ... */ }
+        attributePreferences: {
+            physical: { speed: 1.4, strength: 0.7, agility: 1.5, stamina: 1.0, height: 1.2, weight: 0.8 },
+            mental: { playbookIQ: 1.6, clutch: 1.2, consistency: 1.1, toughness: 0.9 },
+            technical: { throwingAccuracy: 1.8, catchingHands: 1.6, tackling: 0.4, blocking: 0.6, blockShedding: 0.5 }
+        } 
     },
     {
         type: 'Ground and Pound',
         description: 'Builds a tough team that runs the ball and plays strong defense.',
         preferredOffense: 'Power',
         preferredDefense: '4-2-1',
-        attributePreferences: { /* ... same as before ... */ }
+        attributePreferences: {
+            physical: { speed: 1.1, strength: 1.8, agility: 1.2, stamina: 1.4, height: 1.0, weight: 1.6 },
+            mental: { playbookIQ: 1.0, clutch: 1.0, consistency: 1.5, toughness: 1.5 },
+            technical: { throwingAccuracy: 0.7, catchingHands: 0.9, tackling: 1.6, blocking: 1.8, blockShedding: 1.3 }
+        } 
     },
     {
         type: 'Blitz-Happy Defense',
         description: 'Wants fast, aggressive defenders to wreak havoc.',
         preferredOffense: 'Balanced',
-        preferredDefense: '4-2-1', // Often uses run-stopping formations to free up blitzers
-        attributePreferences: { /* ... same as before ... */ }
+        preferredDefense: '4-2-1', 
+        attributePreferences: {
+            physical: { speed: 1.6, strength: 1.3, agility: 1.7, stamina: 1.2, height: 1.1, weight: 1.3 },
+            mental: { playbookIQ: 1.2, clutch: 1.4, consistency: 0.9, toughness: 1.2 },
+            technical: { throwingAccuracy: 0.5, catchingHands: 0.8, tackling: 1.8, blocking: 1.0, blockShedding: 1.6 }
+        } 
     },
     {
         type: 'Balanced',
         description: 'Prefers well-rounded players and a versatile team.',
         preferredOffense: 'Balanced',
         preferredDefense: '3-3-1',
-        attributePreferences: { /* ... same as before ... */ }
+        attributePreferences: {
+            physical: { speed: 1.2, strength: 1.2, agility: 1.2, stamina: 1.2, height: 1.1, weight: 1.1 },
+            mental: { playbookIQ: 1.2, clutch: 1.2, consistency: 1.2, toughness: 1.1 },
+            technical: { throwingAccuracy: 1.2, catchingHands: 1.2, tackling: 1.2, blocking: 1.2, blockShedding: 1.2 }
+        } 
     },
     {
         type: 'The Moneyballer',
         description: 'Focuses on undervalued mental and technical stats.',
         preferredOffense: 'Balanced',
         preferredDefense: '3-3-1',
-        attributePreferences: { /* ... same as before ... */ }
+        attributePreferences: {
+            physical: { speed: 0.8, strength: 0.8, agility: 1.2, stamina: 1.4, height: 1.0, weight: 1.0 },
+            mental: { playbookIQ: 1.8, clutch: 1.3, consistency: 1.9, toughness: 1.3 },
+            technical: { throwingAccuracy: 1.0, catchingHands: 1.5, tackling: 1.5, blocking: 1.3, blockShedding: 1.4 }
+        } 
     },
     {
         type: 'Youth Scout',
         description: 'Always drafts for the future, preferring younger players with high physical potential.',
         preferredOffense: 'Spread',
         preferredDefense: '2-3-2',
-        attributePreferences: { /* ... same as before ... */ }
+        attributePreferences: {
+            physical: { speed: 1.5, strength: 1.4, agility: 1.5, stamina: 1.3, height: 1.3, weight: 1.0 },
+            mental: { playbookIQ: 0.9, clutch: 1.0, consistency: 0.8, toughness: 0.9 },
+            technical: { throwingAccuracy: 1.1, catchingHands: 1.1, tackling: 1.1, blocking: 1.1, blockShedding: 1.0 }
+        } 
     },
 ];
 
