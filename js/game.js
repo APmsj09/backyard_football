@@ -205,11 +205,25 @@ function getPlayerScore(player, coach) {
 }
 
 export function setupDraft() {
-    // ... (This function is unchanged from your provided version)
     game.draftOrder = [];
     game.currentPick = 0;
-    const sortedTeams = [...game.teams].sort((a, b) => a.wins - b.wins || b.losses - a.losses);
-    const maxNeeds = Math.max(0, ...game.teams.map(t => t.draftNeeds));
+    
+    // Sort teams by record (worst first) to determine draft order base
+    const sortedTeams = [...game.teams].sort((a, b) => a.wins - b.wins || b.losses - a.losses); 
+    
+    // *** NEW FIX ***
+    // If it's the first season, draft needs haven't been calculated by offseason.
+    // Manually set draft needs to 10 (full roster) for all teams.
+    if (game.year === 1) {
+        console.log("First season: Setting draft needs to 10 for all teams.");
+        game.teams.forEach(team => team.draftNeeds = 10);
+    }
+    // *** END FIX ***
+    
+    // Determine the maximum number of picks needed by any team
+    const maxNeeds = Math.max(0, ...game.teams.map(t => t.draftNeeds)); 
+    
+    // Create serpentine draft order for the required number of rounds
     for (let i = 0; i < maxNeeds; i++) {
         game.draftOrder.push(...(i % 2 === 0 ? sortedTeams : [...sortedTeams].reverse()));
     }
@@ -377,42 +391,7 @@ function determinePlayCall(offense, defense, down, yardsToGo, ballOn, scoreDiff,
 }
 
 /**
- * NEW: resolveBattle helper function
- * This function resolves a single 1-on-1 battle for one tick.
- * @returns {object} The updated battleState.
- */
-function resolveBattle(powerA, powerB, battleState, log, logPrefix) {
-    const DOMINANT_WIN = 20;
-    const SLIGHT_WIN = 5;
-    const diff = (powerA + getRandomInt(-5, 5)) - (powerB + getRandomInt(-5, 5));
-
-    if (diff > DOMINANT_WIN) { // Dominant Win for A
-        battleState.status = 'win_A';
-        if(log && Math.random() < 0.5) log.push(`${logPrefix} DOMINANT WIN`);
-    } else if (diff > SLIGHT_WIN) { // Slight Win for A
-        battleState.streakA++;
-        battleState.streakB = 0;
-        if(log && Math.random() < 0.2) log.push(`${logPrefix} slight win A (streak ${battleState.streakA})`);
-        if (battleState.streakA >= 2) battleState.status = 'win_A';
-    } else if (diff < -DOMINANT_WIN) { // Dominant Win for B
-        battleState.status = 'win_B';
-        if(log && Math.random() < 0.5) log.push(`${logPrefix} DOMINANT WIN B`);
-    } else if (diff < -SLIGHT_WIN) { // Slight Win for B
-        battleState.streakB++;
-        battleState.streakA = 0;
-        if(log && Math.random() < 0.2) log.push(`${logPrefix} slight win B (streak ${battleState.streakB})`);
-        if (battleState.streakB >= 2) battleState.status = 'win_B';
-    } else { // Draw
-        battleState.streakA = 0;
-        battleState.streakB = 0;
-        if(log && Math.random() < 0.1) log.push(`${logPrefix} draw`);
-    }
-    return battleState;
-}
-
-
-/**
- * NEW: Tick-based play simulation
+ * NEW: Overhauled resolvePlay with zone assignments, movement, and draws.
  */
 function resolvePlay(offense, defense, playCall, gameState) {
     const { gameLog, weather, ballOn } = gameState;
@@ -449,26 +428,26 @@ function resolvePlay(offense, defense, playCall, gameState) {
     // --- Apply Fatigue ---
     [...offense.roster, ...defense.roster].forEach(p => { if(p) p.fatigue = Math.min(100, p.fatigue + 5); });
 
-    // --- QB SNEAK (Instant resolve, not tick-based) ---
+    // --- QB Sneak ---
     if (zone === ZONES.SNEAK) { 
-        let qb = getPlayerBySlot(offense, 'offense', 'QB1') || findEmergencyPlayer('QB', offense, 'offense', usedPlayerIds_O)?.player;
-        if (!qb) return { yards: 0, turnover: true };
-        checkInGameInjury(qb, gameLog);
-        const qbPower = (qb.attributes.physical.strength + qb.attributes.physical.weight / 5) * getFatigueModifier(qb);
-        const dlStopper = getPlayerBySlot(defense, 'defense', 'DL2') || getPlayerBySlot(defense, 'defense', 'DL1') || findEmergencyPlayer('DL', defense, 'defense', usedPlayerIds_D)?.player;
-        if (!dlStopper) return { yards: 1, touchdown: ballOn + 1 >= 100 };
-        checkInGameInjury(dlStopper, gameLog);
-        const dlPower = (dlStopper.attributes.physical.strength + dlStopper.attributes.technical.blockShedding) * getFatigueModifier(dlStopper);
-        const diff = qbPower - (dlPower + getRandomInt(-10, 10));
-        let yards = 0;
-        if (diff > 5) yards = getRandomInt(1, 3);
-        else if (diff < -5) yards = 0;
-        else yards = getRandomInt(0, 1);
-        if (yards > 0) gameLog.push(`QB Sneak by ${qb.name} for ${yards} yards!`);
-        else { gameLog.push(`QB Sneak stuffed by ${dlStopper.name}!`); dlStopper.gameStats.tackles++; }
-        const touchdown = ballOn + yards >= 100;
-        if (touchdown) qb.gameStats.touchdowns++;
-        return { yards, touchdown };
+         let qb = getPlayerBySlot(offense, 'offense', 'QB1') || findEmergencyPlayer('QB', offense, 'offense', usedPlayerIds_O)?.player;
+         if (!qb) return { yards: 0, turnover: true };
+         checkInGameInjury(qb, gameLog);
+         const qbPower = (qb.attributes.physical.strength + qb.attributes.physical.weight / 5) * getFatigueModifier(qb);
+         const dlStopper = getPlayerBySlot(defense, 'defense', 'DL2') || getPlayerBySlot(defense, 'defense', 'DL1') || findEmergencyPlayer('DL', defense, 'defense', usedPlayerIds_D)?.player;
+         if (!dlStopper) return { yards: 1, touchdown: ballOn + 1 >= 100 };
+         checkInGameInjury(dlStopper, gameLog);
+         const dlPower = (dlStopper.attributes.physical.strength + dlStopper.attributes.technical.blockShedding) * getFatigueModifier(dlStopper);
+         const diff = qbPower - (dlPower + getRandomInt(-10, 10));
+         let yards = 0;
+         if (diff > 5) yards = getRandomInt(1, 3);
+         else if (diff < -5) yards = 0;
+         else yards = getRandomInt(0, 1);
+         if (yards > 0) gameLog.push(`QB Sneak by ${qb.name} for ${yards} yards!`);
+         else { gameLog.push(`QB Sneak stuffed by ${dlStopper.name}!`); dlStopper.gameStats.tackles++; }
+         const touchdown = ballOn + yards >= 100;
+         if (touchdown) qb.gameStats.touchdowns++;
+         return { yards, touchdown };
     }
 
     // --- Initialize Play ---
@@ -489,14 +468,20 @@ function resolvePlay(offense, defense, playCall, gameState) {
     };
     
     // 1. Setup Pass Rush Battles
-    const passRushers = dls.concat(lbs.filter(p => {
-        const slot = Object.keys(defense.depthChart.defense).find(s => defense.depthChart.defense[s] === p.id);
-        return slot && defenseFormationData.routes[slot] && !defenseFormationData.routes[slot].some(r => r.includes('cover'));
-    })).filter(Boolean);
-    const blockers = ols.concat(rbs.filter(r => {
-         const slot = Object.keys(offense.depthChart.offense).find(s => offense.depthChart.offense[s] === r.id);
-         return slot && offenseFormationData.routes[slot] && offenseFormationData.routes[slot].includes('block_pass');
-    })).filter(Boolean);
+    const passRushers = (getPlayersForSlots(defense, 'defense', 'DL', usedPlayerIds_D).map(p => p.player)).concat(
+                        getPlayersForSlots(defense, 'defense', 'LB', usedPlayerIds_D).map(p => p.player)
+                        .filter(p => {
+                            const slot = Object.keys(defense.depthChart.defense).find(s => defense.depthChart.defense[s] === p.id);
+                            return slot && defenseFormationData.routes[slot] && !defenseFormationData.routes[slot].some(r => r.includes('cover'));
+                        })
+    ).filter(Boolean);
+    const blockers = (getPlayersForSlots(offense, 'offense', 'OL', usedPlayerIds_O).map(p => p.player)).concat(
+                     getPlayersForSlots(offense, 'offense', 'RB', usedPlayerIds_O).map(p => p.player)
+                     .filter(r => {
+                         const slot = Object.keys(offense.depthChart.offense).find(s => offense.depthChart.offense[s] === r.id);
+                         return slot && offenseFormationData.routes[slot] && offenseFormationData.routes[slot].includes('block_pass');
+                     })
+    ).filter(Boolean);
     
     let availableBlockers = [...blockers];
     let unblockedRusher = null;
@@ -532,7 +517,7 @@ function resolvePlay(offense, defense, playCall, gameState) {
         const coverageSlots = Object.keys(defenseFormationData.zoneAssignments).filter(s => routeInfo.zones.includes(defenseFormationData.zoneAssignments[s]));
         const defendersInZone = coverageSlots.map(s => getPlayerBySlot(defense, 'defense', s)).filter(Boolean);
 
-        let primaryDefender = defendersInZone[0] || getRandom(dbs.concat(lbs).filter(p => p && !defenseUsedIds.has(p.id))) || findEmergencyPlayer('DB', defense, 'defense', defenseUsedIds);
+        let primaryDefender = defendersInZone[0] || getRandom([...dbs, ...lbs].filter(p => p && !defenseUsedIds.has(p.id))) || findEmergencyPlayer('DB', defense, 'defense', defenseUsedIds);
         if (!primaryDefender) {
             battleStates.coverage.push({ receiver, defender: null, status: 'open', separation: 5, streakA: 2, streakB: 0, route: routeInfo });
             return;
@@ -544,16 +529,23 @@ function resolvePlay(offense, defense, playCall, gameState) {
 
     // 3. Setup Run Block Battles
     if(type === 'run') {
-        const olsAtPOA = ols.filter(ol => offenseFormationData.zoneAssignments[ol.slot]?.includes(zone.split(' ')[1])); // L, C, R
-        const dlsAtPOA = dls.filter(dl => defenseFormationData.zoneAssignments[dl.slot]?.includes(zone.split(' ')[1]));
-        const blockers = olsAtPOA.length > 0 ? olsAtPOA : ols;
-        const defenders = dlsAtPOA.length > 0 ? dlsAtPOA : dls;
+        const olsAtPOA = ols.filter(ol => {
+            const slot = Object.keys(offense.depthChart.offense).find(s => offense.depthChart.offense[s] === ol.id);
+            return slot && offenseFormationData.zoneAssignments[slot]?.includes(zone.split(' ')[1]); // L, C, R
+        });
+        const dlsAtPOA = dls.filter(dl => {
+            const slot = Object.keys(defense.depthChart.defense).find(s => defense.depthChart.defense[s] === dl.id);
+            return slot && defenseFormationData.zoneAssignments[slot]?.includes(zone.split(' ')[1]);
+        });
         
-        blockers.forEach(blocker => {
-            const defender = getRandom(defenders);
+        const runBlockers = olsAtPOA.length > 0 ? olsAtPOA : ols;
+        const runDefenders = dlsAtPOA.length > 0 ? dlsAtPOA : dls;
+        
+        runBlockers.forEach(blocker => {
+            const defender = getRandom(runDefenders);
             if(defender) {
                 battleStates.runBlock.push({ blocker, defender, status: 'ongoing', streakA: 0, streakB: 0 });
-                defenders.splice(defenders.indexOf(defender), 1); // Remove defender from pool
+                runDefenders.splice(runDefenders.indexOf(defender), 1); // Remove defender from pool
             }
         });
     }
@@ -565,13 +557,23 @@ function resolvePlay(offense, defense, playCall, gameState) {
     let yards = 0;
     let touchdown = false;
     let turnover = false;
+    const DRAW_WIN_THRESHOLD = 20; // How much to beat opponent by for Dominant Win
+    const DRAW_SLIGHT_WIN_THRESHOLD = 5; // How much to beat opponent by for Slight Win
 
     for (let tick = 1; tick <= maxTicks; tick++) {
         if (playCall.type === 'pass') {
             // -- 1. Update Pass Rush --
             if (unblockedRusher) {
                 pressure = true;
-                if(tick > 1) { sack = true; gameLog.push(`SACK! Unblocked rusher ${unblockedRusher.name} gets the QB!`); rusherWhoWon.gameStats.sacks++; rusherWhoWon.gameStats.tackles++; yards = -getRandomInt(5,10); }
+                if(tick > 1) { 
+                    sack = true; 
+                    gameLog.push(`SACK! Unblocked rusher ${unblockedRusher.name} gets the QB!`); 
+                    if(unblockedRusher.gameStats) {
+                        unblockedRusher.gameStats.sacks = (unblockedRusher.gameStats.sacks || 0) + 1;
+                        unblockedRusher.gameStats.tackles = (unblockedRusher.gameStats.tackles || 0) + 1;
+                    }
+                    yards = -getRandomInt(5,10); 
+                }
                 else gameLog.push(`Blitz! ${unblockedRusher.name} is coming free!`);
             } else {
                 battleStates.passRush.forEach(battle => {
@@ -580,12 +582,25 @@ function resolvePlay(offense, defense, playCall, gameState) {
                         if (battle.isDoubleTeam) blockPower *= 1.5; // Double team bonus
                         let rushPower = (battle.rusher.attributes.physical.strength + battle.rusher.attributes.technical.blockShedding) * getFatigueModifier(battle.rusher);
                         
-                        battle = resolveBattle(blockPower, rushPower, battle, gameLog, `Block (${battle.blockers[0].name}) vs Rush (${battle.rusher.name})`);
-                        
-                        if (battle.status === 'win_B') {
-                            pressure = true;
-                            rusherWhoWon = battle.rusher;
-                            gameLog.push(`${rusherWhoWon.name} beats ${battle.blockers[0].name}!`);
+                        // Pass rush battle logic with tiers
+                        const diff = blockPower - (rushPower + getRandomInt(-20, 40)); // Tuned for offense
+                        if (diff < -DRAW_WIN_THRESHOLD) { // Dominant win for rusher
+                            battle.status = 'win_B';
+                            pressure = true; rusherWhoWon = battle.rusher;
+                            gameLog.push(`${battle.rusher.name} DOMINATES ${battle.blockers[0].name}!`);
+                        } else if (diff < -DRAW_SLIGHT_WIN_THRESHOLD) { // Slight win for rusher
+                            battle.streakB++; battle.streakA = 0;
+                            if (battle.streakB >= 2) {
+                                battle.status = 'win_B'; pressure = true; rusherWhoWon = battle.rusher;
+                                gameLog.push(`${battle.rusher.name} beats ${battle.blockers[0].name}!`);
+                            }
+                        } else if (diff > DRAW_WIN_THRESHOLD) { // Dominant win for blocker
+                            battle.status = 'win_A';
+                        } else if (diff > DRAW_SLIGHT_WIN_THRESHOLD) { // Slight win for blocker
+                            battle.streakA++; battle.streakB = 0;
+                            if(battle.streakA >= 2) battle.status = 'win_A';
+                        } else { // Draw
+                            battle.streakA = 0; battle.streakB = 0;
                         }
                     }
                 });
@@ -598,14 +613,26 @@ function resolvePlay(offense, defense, playCall, gameState) {
                     let defPower = (battle.defender.attributes.physical.speed + battle.defender.attributes.physical.agility) * getFatigueModifier(battle.defender);
                     if(battle.route.zones[0].includes('Short')) recPower += 10; // Advantage on short routes
                     
-                    battle = resolveBattle(recPower, defPower, battle, null, '');
-                    
-                    if (battle.status === 'win_A') {
-                         battle.separation = (battle.streakA * 2) + getRandomInt(1, 3); // 2 slight wins = 5 separation
-                         gameLog.push(`${battle.receiver.name} starts to get open!`);
-                    } else if (battle.status === 'win_B') {
-                        battle.separation = -3;
-                        gameLog.push(`${battle.defender.name} is blanketing ${battle.receiver.name}!`);
+                    const diff = recPower - (defPower + getRandomInt(-10, 10));
+                    if (diff > DRAW_WIN_THRESHOLD) {
+                        battle.status = 'open'; battle.separation = 5;
+                        gameLog.push(`${battle.receiver.name} gets wide open!`);
+                    } else if (diff > DRAW_SLIGHT_WIN_THRESHOLD) {
+                        battle.streakA++; battle.streakB = 0;
+                        if(battle.streakA >= 2) {
+                             battle.status = 'open'; battle.separation = battle.streakA;
+                             gameLog.push(`${battle.receiver.name} creates separation from ${battle.defender.name}.`);
+                        }
+                    } else if (diff < -DRAW_WIN_THRESHOLD) {
+                        battle.status = 'covered'; battle.separation = -5;
+                        gameLog.push(`${battle.defender.name} has ${battle.receiver.name} locked down!`);
+                    } else if (diff < -DRAW_SLIGHT_WIN_THRESHOLD) {
+                        battle.streakB++; battle.streakA = 0;
+                        if(battle.streakB >= 2) {
+                            battle.status = 'covered'; battle.separation = -battle.streakB;
+                        }
+                    } else {
+                         battle.streakA = 0; battle.streakB = 0; battle.separation = 0;
                     }
                 }
             });
@@ -638,8 +665,7 @@ function resolvePlay(offense, defense, playCall, gameState) {
 
             if(sack) return { yards };
 
-            // Check if QB throws
-            const openReceivers = battleStates.coverage.filter(b => b.status === 'open' || b.separation > 3);
+            const openReceivers = battleStates.coverage.filter(b => b.status === 'open' || b.separation > 0);
             const throwTime = (qb.attributes.mental.playbookIQ / 30); // 90 IQ = 3 ticks to read
             
             if (pressure || tick > throwTime || (openReceivers.length > 0 && Math.random() < 0.5) || tick === maxTicks) {
@@ -656,6 +682,7 @@ function resolvePlay(offense, defense, playCall, gameState) {
                  let qbAccuracy = qb.attributes.technical.throwingAccuracy * getFatigueModifier(qb);
                  if(pressure === 'stalemate') qbAccuracy -= 10;
                  if(pressure === true) qbAccuracy -= 20;
+                 if (weather === 'Windy' && (zone.includes('DEEP') || zone.includes('MED'))) qbAccuracy -= 12;
 
                  if (getRandomInt(1, 100) > qbAccuracy) { gameLog.push(`INCOMPLETE. Bad throw by ${qb.name}.`); return { yards: 0 }; }
 
