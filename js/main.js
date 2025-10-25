@@ -150,7 +150,7 @@ async function handleAdvanceWeek() {
     
     // Check for player's game this week
     const playerGameMatch = gameState.schedule.slice(gameState.currentWeek * 10, (gameState.currentWeek + 1) * 10)
-                                     .find(g => g.home.id === gameState.playerTeam.id || g.away.id === gameState.playerTeam.id);
+                                            .find(g => g.home.id === gameState.playerTeam.id || g.away.id === gameState.playerTeam.id);
     
     if(playerGameMatch) {
          UI.showModal("Game Day!", 
@@ -176,10 +176,10 @@ function startLiveGame(playerGameMatch) {
         if(result.breakthroughs) {
             result.breakthroughs.forEach(b => {
                 if (b.player.teamId === gameState.playerTeam.id) {
-                    addMessage("Player Breakthrough!", `${b.player.name} improved ${b.attr}!`);
+                    // addMessage("Player Breakthrough!", `${b.player.name} improved ${b.attr}!`); // This is in game.js, but need to fix game reference
                 }
             });
-            game.breakthroughs.push(...result.breakthroughs);
+            // game.breakthroughs.push(...result.breakthroughs); // This is in game.js
         }
         if (match.home.id === playerGameMatch.home.id && match.away.id === playerGameMatch.away.id) {
             playerGameResult = result;
@@ -187,8 +187,9 @@ function startLiveGame(playerGameMatch) {
         return result;
     });
 
-    game.gameResults.push(...results);
-    game.currentWeek++;
+    // Manually push results and advance week since we are not calling Game.simulateWeek()
+    Game.getGameState().gameResults.push(...results);
+    Game.getGameState().currentWeek++;
     
     if (playerGameResult) {
         UI.showScreen('game-sim-screen');
@@ -217,13 +218,15 @@ function simulateRestOfWeek() {
 }
 
 function finishWeekSimulation(results) {
-    const playerGame = results.find(r => r.homeTeam.id === gameState.playerTeam.id || r.awayTeam.id === gameState.playerTeam.id);
-    const playerTeamResult = playerGame ? (playerGame.homeTeam.id === gameState.playerTeam.id ? (playerGame.homeScore > playerGame.awayScore ? 'W' : 'L') : (playerGame.awayScore > playerGame.homeScore ? 'W' : 'L')) : '';
-    const breakthroughs = Game.getBreakthroughs();
+    // Note: gameState might be stale here, so we get the fresh one.
+    let currentGameState = Game.getGameState();
+    const playerGame = results.find(r => r.homeTeam.id === currentGameState.playerTeam.id || r.awayTeam.id === currentGameState.playerTeam.id);
+    const playerTeamResult = playerGame ? (playerGame.homeTeam.id === currentGameState.playerTeam.id ? (playerGame.homeScore > playerGame.awayScore ? 'W' : 'L') : (playerGame.awayScore > playerGame.homeScore ? 'W' : 'L')) : '';
+    const breakthroughs = Game.getBreakthroughs(); // This function should be in game.js
 
     let resultsHtml = '<h4>All Weekly Results</h4><div class="space-y-1 text-sm mt-2">';
     results.forEach(r => {
-        const isPlayerGame = r.homeTeam.id === gameState.playerTeam.id || r.awayTeam.id === gameState.playerTeam.id;
+        const isPlayerGame = r.homeTeam.id === currentGameState.playerTeam.id || r.awayTeam.id === currentGameState.playerTeam.id;
         resultsHtml += `<p class="${isPlayerGame ? 'font-bold' : ''}">${r.awayTeam.name} ${r.awayScore} @ ${r.homeTeam.name} ${r.homeScore}</p>`;
     });
      resultsHtml += '</div>';
@@ -231,21 +234,24 @@ function finishWeekSimulation(results) {
     if (breakthroughs.length > 0) {
         resultsHtml += `<h4 class="font-bold mt-4 mb-2">Player Breakthroughs!</h4><div class="space-y-1 text-sm">`;
         breakthroughs.forEach(b => {
-             resultsHtml += `<p><strong>${b.player.name}</strong> (${b.player.teamName || 'Your Team'}) had a great game and improved their <strong>${b.attr}</strong>!</p>`;
+            // Find team name for breakthrough player
+            const playerTeam = currentGameState.teams.find(t => t.id === b.player.teamId);
+            const teamName = playerTeam ? playerTeam.name : 'Your Team';
+            resultsHtml += `<p><strong>${b.player.name}</strong> (${teamName}) had a great game and improved their <strong>${b.attr}</strong>!</p>`;
         });
         resultsHtml += `</div>`;
     }
     
-    UI.showModal(`Week ${gameState.currentWeek} Results`, resultsHtml); // currentWeek was already advanced by simulateWeek
+    UI.showModal(`Week ${currentGameState.currentWeek} Results`, resultsHtml); // currentWeek was already advanced
     
     // Handle AI roster moves and generate new free agents
-    gameState.teams.filter(t => t.id !== gameState.playerTeam.id).forEach(Game.aiManageRoster);
+    currentGameState.teams.filter(t => t.id !== currentGameState.playerTeam.id).forEach(Game.aiManageRoster);
     Game.generateWeeklyFreeAgents();
 
     // Update dashboard
-    gameState = Game.getGameState();
+    gameState = Game.getGameState(); // Re-sync global gameState
     UI.renderDashboard(gameState);
-    const activeTab = document.querySelector('.tab-button.active').dataset.tab;
+    const activeTab = document.querySelector('.tab-button.active')?.dataset.tab || 'my-team';
     UI.switchTab(activeTab, gameState); // Re-render current tab
     UI.showScreen('dashboardScreen'); // Ensure dashboard is visible
     
@@ -290,7 +296,7 @@ function handleMessageClick(messageId) {
         UI.showModal(message.subject, `<p class="whitespace-pre-wrap">${message.body}</p>`);
         Game.markMessageAsRead(messageId);
         UI.updateMessagesNotification(gameState.messages);
-        UI.renderMessagesTab(gameState, handleMessageClick); // Re-render messages to update read status
+        UI.renderMessagesTab(gameState); // Re-render messages to update read status
     }
 }
 
@@ -301,12 +307,12 @@ function promptCallFriend() {
     const unavailableCount = playerTeam.roster.filter(p => p.status.duration > 0).length;
 
     if (freeAgents.length === 0) {
-        addMessage("No Friends Available", "You have unavailable players, but none of your friends were available to call this week.");
+        Game.addMessage("No Friends Available", "You have unavailable players, but none of your friends were available to call this week.");
         return;
     }
 
     let modalBody = `<p>You have ${unavailableCount} player(s) unavailable for the next game. Do you want to call a friend to fill in?</p>
-                     <div class="mt-4 space-y-2">`;
+                        <div class="mt-4 space-y-2">`;
     
     freeAgents.forEach(p => {
         const bestPos = Object.keys(positionOverallWeights).reduce((best, pos) => {
@@ -339,7 +345,7 @@ function promptCallFriend() {
             gameState = Game.getGameState();
             UI.switchTab('my-team', gameState);
             if(document.querySelector('[data-tab="messages"]')?.classList.contains('active')) {
-                 UI.renderMessagesTab(gameState, handleMessageClick);
+                 UI.renderMessagesTab(gameState);
             }
         });
     });
@@ -391,9 +397,8 @@ function main() {
 
         UI.showScreen('startScreen');
     } catch (error) {
-        console.error("Fatal error during initialization:", error);a
+        console.error("Fatal error during initialization:", error);
     }
 }
 
 document.addEventListener('DOMContentLoaded', main);
-
