@@ -136,6 +136,11 @@ export function setupElements() {
  */
 export function showScreen(screenId) {
     if (elements.screens) {
+        // <<< ADDED DIAGNOSTIC LOG >>>
+        console.log(`showScreen called for: ${screenId}. Current elements.screens keys:`, Object.keys(elements.screens));
+        if (!elements.screens[screenId]) {
+            console.warn(`Element elements.screens['${screenId}'] is missing!`);
+        }
         Object.values(elements.screens).forEach(screen => {
             // Check if screen element actually exists before trying to add class
             if (screen && screen.classList) {
