@@ -717,6 +717,7 @@ export function startLiveGameSim(gameResult, onComplete) {
     let down = 1;
     let toGo = 10;
     let possessionTeam = null;
+    let driveActive = false; // <<< FIX: Define driveActive here
 
     elements.simPlayLog.innerHTML = '';
     
@@ -752,6 +753,7 @@ export function startLiveGameSim(gameResult, onComplete) {
             down = 1;
             toGo = 10;
             possessionTeam = entry.includes(homeTeam.name) ? homeTeam : awayTeam;
+            driveActive = true; // <<< FIX: Set drive to active
             p.className = 'font-bold text-amber-400 mt-2';
         } else if (entry.startsWith('First down!')) {
             down = 1;
@@ -772,6 +774,7 @@ export function startLiveGameSim(gameResult, onComplete) {
              }
         } else if (entry.startsWith('TOUCHDOWN')) {
             ballOn = 100;
+            driveActive = false; // <<< FIX: Drive ends
         } else if (entry.includes('conversion GOOD!')) {
             if(possessionTeam.id === homeTeam.id) currentHomeScore = homeScore;
             else currentAwayScore = awayScore;
@@ -781,15 +784,19 @@ export function startLiveGameSim(gameResult, onComplete) {
         } else if (entry.startsWith('Turnover') || entry.startsWith('INTERCEPTION') || entry.startsWith('FUMBLE')) {
             down = 1;
             toGo = 10;
+            driveActive = false; // <<< FIX: Drive ends
         } else if (entry.startsWith('==== FINAL')) {
              p.className = 'font-bold text-amber-400 mt-4 text-lg';
+             driveActive = false; // <<< FIX: Drive ends
+        } else if (entry.startsWith('==== HALFTIME')) { // <<< FIX: Added halftime check
+            driveActive = false; // <<< FIX: Drive ends
         }
 
 
         // Update UI
         elements.simAwayScore.textContent = currentAwayScore;
         elements.simHomeScore.textContent = currentHomeScore;
-        elements.simGameDrive.textContent = entry.startsWith('-- Drive') ? entry.match(/(Drive \d+ \(H\d+\))/)[0] : elements.simGameDrive.textContent;
+        elements.simGameDrive.textContent = entry.startsWith('-- Drive') ? (entry.match(/(Drive \d+ \(H\d+\))/) ? entry.match(/(Drive \d+ \(H\d+\))/)[0] : elements.simGameDrive.textContent) : elements.simGameDrive.textContent;
         elements.simGameDown.textContent = (down <= 4 && driveActive) ? `${down} & ${toGo <= 0 ? 'Goal' : toGo}` : 'Change of Possession';
         elements.simPossession.textContent = possessionTeam ? `${possessionTeam.name} Ball` : '';
         updateField(ballOn, possessionTeam ? possessionTeam.name : '');
