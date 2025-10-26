@@ -26,6 +26,7 @@ function debounce(func, delay) {
  * Grabs references to all necessary DOM elements.
  */
 export function setupElements() {
+    console.log("Running setupElements..."); // Log start
     elements = {
         screens: {
             startScreen: document.getElementById('start-screen'),
@@ -103,6 +104,17 @@ export function setupElements() {
         simSpeedBtns: document.querySelectorAll('.sim-speed-btn'),
         simSkipBtn: document.getElementById('sim-skip-btn'),
     };
+
+    // <<< START ADDED CHECK >>>
+    // Explicitly check if the gameSimScreen element was found
+    if (!elements.screens.gameSimScreen) {
+        console.error(`CRITICAL: Element with ID 'game-sim-screen' NOT FOUND during setupElements! Check HTML.`);
+    } else {
+        console.log("Element 'game-sim-screen' found successfully during setup.");
+    }
+    // <<< END ADDED CHECK >>>
+
+
     // Add new sort options to the dropdown
     if (elements.draftSort) {
         const sortOptions = `
@@ -115,7 +127,7 @@ export function setupElements() {
         `;
         elements.draftSort.innerHTML = sortOptions;
     }
-    console.log("UI Elements have been successfully set up and sort options added.");
+    console.log("UI Elements setup check complete.");
 }
 
 /**
@@ -125,15 +137,21 @@ export function setupElements() {
 export function showScreen(screenId) {
     if (elements.screens) {
         Object.values(elements.screens).forEach(screen => {
-            if (screen) screen.classList.add('hidden');
+            // Check if screen element actually exists before trying to add class
+            if (screen && screen.classList) {
+                 screen.classList.add('hidden');
+            } else if (screen !== elements.screens[screenId]) { // Don't warn about the target screen if it's the one missing
+                // console.warn(`Attempted to hide a non-existent screen element during showScreen.`);
+            }
         });
         if (elements.screens[screenId]) {
             elements.screens[screenId].classList.remove('hidden');
         } else {
-            console.warn(`Screen with ID "${screenId}" not found.`);
+            // Log specifically which screen failed to show
+            console.error(`Error in showScreen: Screen element with ID "${screenId}" not found in elements.screens object. Was setupElements successful?`);
         }
     } else {
-        console.error("Screen elements not initialized.");
+        console.error("Screen elements not initialized when showScreen was called.");
     }
 }
 
@@ -1394,7 +1412,7 @@ export function startLiveGameSim(gameResult, onComplete) {
 
         // Check for turnover on downs after potential down increment
         if (down > 4 && driveActive) {
-             gameLog.push(`Turnover on downs logged implicitly.`); // Add implicit log for clarity if needed
+             // gameLog.push(`Turnover on downs logged implicitly.`); // Add implicit log for clarity if needed
             driveActive = false; // Turnover on downs
         }
         // --- End State Update ---
