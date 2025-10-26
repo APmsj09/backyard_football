@@ -8,7 +8,6 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Bangers&family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
-    <!-- This file is referenced but not provided yet. -->
     <link rel="stylesheet" href="css/style.css">
 </head>
 <body class="bg-gray-100 font-sans">
@@ -32,7 +31,7 @@
                 <div id="loading-progress" class="bg-amber-500 h-4 rounded-full transition-all duration-300" style="width: 0%"></div>
             </div>
         </div>
-        
+
         <!-- Team Creation Screen -->
         <div id="team-creation-screen" class="hidden p-8 bg-white rounded-lg shadow-lg">
             <h2 class="text-3xl font-bold text-gray-800 text-center">Create Your Team</h2>
@@ -49,178 +48,181 @@
         <!-- Draft Screen -->
         <div id="draft-screen" class="hidden bg-white p-6 rounded-lg shadow-lg">
              <div id="draft-header" class="text-center mb-4">
-                  <h2 class="text-3xl font-bold">Season <span id="draft-year">1</span> Draft</h2>
-                  <p class="text-lg text-gray-600">Pick <span id="draft-pick-number" class="font-bold">1</span> - <span id="draft-picking-team" class="font-bold">Team Name</span> is on the clock!</p>
+                 <h2 class="text-3xl font-bold">Season <span id="draft-year">1</span> Draft</h2>
+                 <p class="text-lg text-gray-600">Pick <span id="draft-pick-number" class="font-bold">1</span> - <span id="draft-picking-team" class="font-bold">Team Name</span> is on the clock!</p>
              </div>
              <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                  <div class="lg:col-span-2">
-                       <div class="flex items-center gap-4 mb-2">
-                           <input type="text" id="draft-search" placeholder="Search players..." class="flex-grow p-2 border rounded">
-                           <select id="draft-filter-pos" class="p-2 border rounded">
-                               <option value="">All Positions</option>
-                               <option value="QB">QB</option>
-                               <option value="RB">RB</option>
-                               <option value="WR">WR</option>
-                               <option value="OL">OL</option>
-                               <option value="DL">DL</option>
-                               <option value="LB">LB</option>
-                               <option value="DB">DB</option>
-                           </select>
-                           <select id="draft-sort" class="p-2 border rounded">
-                               <option value="default">Default</option>
-                               <option value="age-asc">Age (Youngest)</option>
-                               <option value="age-desc">Age (Oldest)</option>
-                           </select>
-                       </div>
-                       <div class="overflow-auto h-[600px]">
-                           <table class="min-w-full text-sm">
-                               <thead class="bg-gray-800 text-white sticky top-0 z-10">
-                                   <tr>
-                                       <th class="py-2 px-3 text-left">Name</th>
-                                       <th class="py-2 px-3">Age</th>
-                                       <th class="py-2 px-3">Pref Pos</th>
-                                       <th class="py-2 px-3">Hgt</th>
-                                       <th class="py-2 px-3">Wgt</th>
-                                       <th class="py-2 px-3">Spd</th>
-                                       <th class="py-2 px-3">Str</th>
-                                       <th class="py-2 px-3">Agi</th>
-                                       <th class="py-2 px-3">Thr</th>
-                                       <th class="py-2 px-3">Cat</th>
-                                       <th class="py-2 px-3">Blk</th>
-                                       <th class="py-2 px-3">Tck</th>
-                                       <th class="py-2 px-3">BlS</th>
-                                   </tr>
-                               </thead>
-                               <tbody id="draft-pool-tbody" class="divide-y"></tbody>
-                           </table>
-                       </div>
-                  </div>
-                  <div class="border-l pl-6">
-                       <div id="selected-player-card" class="bg-gray-50 p-4 rounded-lg mb-4 min-h-[140px]">
-                           <p class="text-gray-500">Select a player to see their details</p>
-                       </div>
-                       <button id="draft-player-btn" class="w-full bg-amber-500 text-white font-bold py-3 rounded-lg disabled:bg-gray-400">Draft Player</button>
-                       <div class="mt-4">
-                           <h4 class="font-bold text-lg">Your Roster (<span id="roster-count">0</span>/10)</h4>
-                           <ul id="draft-roster-list" class="mt-2 bg-gray-50 rounded-lg divide-y h-72 overflow-y-auto"></ul>
-                           <div id="roster-summary" class="mt-2 p-2 bg-blue-50 rounded-lg">
-                               <p class="text-xs text-gray-500">Roster summary appears here.</p>
-                           </div>
-                       </div>
-                  </div>
-             </div>
-        </div>
-        
-        <!-- Main Dashboard Screen -->
-        <div id="dashboard-screen" class="hidden">
-             <header class="bg-white p-4 rounded-lg shadow-md mb-4 flex justify-between items-center">
-                  <div>
-                       <h2 id="dashboard-team-name" class="text-2xl font-bold text-gray-800">Team Name</h2>
-                       <p id="dashboard-record" class="text-gray-600 font-semibold">Record: 0 - 0</p>
-                  </div>
-                  <div class="text-right">
-                       <p class="font-bold text-lg">Season <span id="dashboard-year">1</span></p>
-                       <p class="text-gray-600" id="dashboard-week">Week 1</p>
-                  </div>
-                  <button id="advance-week-btn" class="bg-amber-500 hover:bg-amber-600 text-white font-bold py-2 px-6 rounded-lg transition text-lg">Advance Week</button>
-             </header>
-             <div class="flex gap-6">
-                  <aside id="dashboard-tabs" class="w-1/5">
-                       <nav class="flex flex-col space-y-1">
-                           <button data-tab="my-team" class="tab-button active">My Team</button>
-                           <button data-tab="depth-chart" class="tab-button">Depth Chart</button>
-                           <button data-tab="messages" class="tab-button relative">
-                               Text Messages
-                               <span id="messages-notification-dot" class="notification-dot hidden"></span>
-                           </button>
-                           <button data-tab="schedule" class="tab-button">Schedule</button>
-                           <button data-tab="standings" class="tab-button">Standings</button>
-                           <button data-tab="player-stats" class="tab-button">Player Stats</button>
-                           <button data-tab="hall-of-fame" class="tab-button">Hall of Fame</button>
-                       </nav>
-                  </aside>
-                  <main id="dashboard-content" class="w-4/5 bg-white p-6 rounded-lg shadow-md min-h-[600px]">
-                       <div id="tab-content-my-team" class="tab-pane">
-                           <h3 class="text-xl font-bold mb-4">Team Roster</h3>
-                           <div id="my-team-roster"><!-- Roster table/content injected by JS --></div>
-                       </div>
-                       <div id="tab-content-depth-chart" class="tab-pane hidden">
-                            <div>
-                                <div id="depth-chart-sub-tabs" class="flex border-b mb-4">
-                                    <button data-sub-tab="offense" class="depth-chart-tab active">Offense</button>
-                                    <button data-sub-tab="defense" class="depth-chart-tab">Defense</button>
-                                </div>
-                                <div id="depth-chart-offense-pane" class="depth-chart-sub-pane">
-                                    <div class="mb-4"><label for="offense-formation-select" class="mr-2 font-semibold">Formation:</label><select id="offense-formation-select" class="p-2 border rounded bg-white"></select></div>
-                                    <div class="grid grid-cols-1 md:grid-cols-3 gap-6"><div class="md:col-span-2"><h4 class="text-lg font-bold mb-2">Offense Starters</h4><div id="offense-depth-chart-slots" class="space-y-2"></div></div><div><h4 class="text-lg font-bold mb-2">Available Players</h4><div id="offense-depth-chart-roster" class="roster-list"></div></div></div>
-                                </div>
-                                <div id="depth-chart-defense-pane" class="depth-chart-sub-pane hidden">
-                                    <div class="mb-4"><label for="defense-formation-select" class="mr-2 font-semibold">Formation:</label><select id="defense-formation-select" class="p-2 border rounded bg-white"></select></div>
-                                    <div class="grid grid-cols-1 md:grid-cols-3 gap-6"><div class="md:col-span-2"><h4 class="text-lg font-bold mb-2">Defense Starters</h4><div id="defense-depth-chart-slots" class="space-y-2"></div></div><div><h4 class="text-lg font-bold mb-2">Available Players</h4><div id="defense-depth-chart-roster" class="roster-list"></div></div></div>
-                                </div>
-                                <div class="mt-8"><h3 class="text-xl font-bold mb-4">Positional Overalls</h3><div id="positional-overalls-container" class="overflow-x-auto"></div></div>
-                           </div>
-                       </div>
-                        <div id="tab-content-messages" class="tab-pane hidden"><h3 class="text-xl font-bold mb-4">Text Messages</h3><div id="messages-list" class="space-y-2 max-h-[500px] overflow-y-auto"></div></div>
-                       <div id="tab-content-schedule" class="tab-pane hidden"><h3 class="text-xl font-bold mb-4">Season Schedule</h3><div id="schedule-list" class="space-y-4"></div></div>
-                       <div id="tab-content-standings" class="tab-pane hidden"><h3 class="text-xl font-bold mb-4">League Standings</h3><div id="standings-container" class="space-y-6"></div></div>
-                       <div id="tab-content-player-stats" class="tab-pane hidden">
-                           <h3 class="text-xl font-bold mb-4">League Player Stats</h3>
-                           <div class="flex items-center gap-4 mb-4">
-                               <select id="stats-filter-team" class="p-2 border rounded bg-white"></select>
-                               <select id="stats-sort" class="p-2 border rounded bg-white">
-                                   <option value="touchdowns">Sort by TDs</option>
-                                   <option value="passYards">Sort by Pass Yds</option>
-                                   <option value="rushYards">Sort by Rush Yds</option>
-                                   <option value="recYards">Sort by Rec Yds</option>
-                                   <option value="receptions">Sort by Receptions</option>
-                                   <option value="tackles">Sort by Tackles</option>
-                                   <option value="sacks">Sort by Sacks</option>
-                                   <option value="interceptions">Sort by INTs</option>
-                               </select>
-                           </div>
-                           <div id="player-stats-container"></div>
-                       </div>
-                       <div id="tab-content-hall-of-fame" class="tab-pane hidden"><h3 class="text-xl font-bold mb-4">Hall of Fame</h3><div id="hall-of-fame-list"></div></div>
-                  </main>
+                 <div class="lg:col-span-2">
+                     <div class="flex items-center gap-4 mb-2">
+                         <input type="text" id="draft-search" placeholder="Search players..." class="flex-grow p-2 border rounded">
+                         <select id="draft-filter-pos" class="p-2 border rounded">
+                             <option value="">All Positions</option>
+                             <option value="QB">QB</option>
+                             <option value="RB">RB</option>
+                             <option value="WR">WR</option>
+                             <option value="OL">OL</option>
+                             <option value="DL">DL</option>
+                             <option value="LB">LB</option>
+                             <option value="DB">DB</option>
+                         </select>
+                         <select id="draft-sort" class="p-2 border rounded">
+                             <!-- Options populated by JS -->
+                         </select>
+                     </div>
+                     <div class="overflow-auto h-[600px]">
+                         <table class="min-w-full text-sm">
+                             <thead class="bg-gray-800 text-white sticky top-0 z-10">
+                                 <tr>
+                                     <th class="py-2 px-3 text-left">Name</th>
+                                     <th class="py-2 px-3">Age</th>
+                                     <th class="py-2 px-3">Pref Pos</th>
+                                     <th class="py-2 px-3">Hgt</th>
+                                     <th class="py-2 px-3">Wgt</th>
+                                     <th class="py-2 px-3">Spd</th>
+                                     <th class="py-2 px-3">Str</th>
+                                     <th class="py-2 px-3">Agi</th>
+                                     <th class="py-2 px-3">Thr</th>
+                                     <th class="py-2 px-3">Cat</th>
+                                     <th class="py-2 px-3">Blk</th>
+                                     <th class="py-2 px-3">Tck</th>
+                                     <th class="py-2 px-3">BlS</th>
+                                 </tr>
+                             </thead>
+                             <tbody id="draft-pool-tbody" class="divide-y"></tbody>
+                         </table>
+                     </div>
+                 </div>
+                 <div class="border-l pl-6">
+                     <div id="selected-player-card" class="bg-gray-50 p-4 rounded-lg mb-4 min-h-[140px]">
+                         <p class="text-gray-500">Select a player to see their details</p>
+                     </div>
+                     <button id="draft-player-btn" class="w-full bg-amber-500 text-white font-bold py-3 rounded-lg disabled:bg-gray-400">Draft Player</button>
+                     <div class="mt-4">
+                         <h4 class="font-bold text-lg">Your Roster (<span id="roster-count">0</span>/10)</h4>
+                         <ul id="draft-roster-list" class="mt-2 bg-gray-50 rounded-lg divide-y h-72 overflow-y-auto"></ul>
+                         <div id="roster-summary" class="mt-2 p-2 bg-blue-50 rounded-lg">
+                             <p class="text-xs text-gray-500">Roster summary appears here.</p>
+                         </div>
+                     </div>
+                 </div>
              </div>
         </div>
 
-         <!-- Game Simulation Screen -->
-        <div id="game-sim-screen" class="hidden bg-gray-800 text-white p-6 rounded-lg shadow-lg">
-            <div id="sim-scoreboard" class="flex justify-between items-center mb-4 bg-gray-700 p-3 rounded">
-                <div class="text-center w-1/3"><p id="sim-away-team" class="text-xl font-bold"></p><p id="sim-away-score" class="text-4xl font-bangers"></p></div>
-                 <div class="text-center w-1/3"><p id="sim-game-drive" class="text-sm"></p><p id="sim-game-down" class="text-sm"></p><p id="sim-possession" class="text-xs mt-1"></p></div>
-                <div class="text-center w-1/3"><p id="sim-home-team" class="text-xl font-bold"></p><p id="sim-home-score" class="text-4xl font-bangers"></p></div>
-            </div>
-            <div id="sim-field-visualization" class="bg-green-700 p-2 rounded mb-4 text-center font-mono text-sm border-4 border-gray-400"><pre id="field-display" class="text-white whitespace-pre"></pre></div>
-            <h4 class="font-bold text-lg mb-2 text-amber-400">Play-by-Play</h4>
-            <div id="sim-play-log" class="bg-gray-700 p-3 rounded h-64 overflow-y-auto text-sm mb-4"></div>
-            <div class="flex justify-center items-center gap-4">
-                 <span class="text-sm font-semibold">Speed:</span>
-                 <button id="sim-speed-play" class="sim-speed-btn active bg-blue-500 hover:bg-blue-600 text-white font-bold py-1 px-3 rounded text-xs">Play</button>
-                 <button id="sim-speed-fast" class="sim-speed-btn bg-gray-500 hover:bg-gray-600 text-white font-bold py-1 px-3 rounded text-xs">Fast</button>
-                 <button id="sim-speed-faster" class="sim-speed-btn bg-gray-500 hover:bg-gray-600 text-white font-bold py-1 px-3 rounded text-xs">Faster</button>
-                 <button id="sim-skip-btn" class="bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-4 rounded-lg transition ml-auto">Skip to Result</button>
-            </div>
+        <!-- Main Dashboard Screen -->
+        <div id="dashboard-screen" class="hidden">
+             <header class="bg-white p-4 rounded-lg shadow-md mb-4 flex justify-between items-center">
+                 <div>
+                     <h2 id="dashboard-team-name" class="text-2xl font-bold text-gray-800">Team Name</h2>
+                     <p id="dashboard-record" class="text-gray-600 font-semibold">Record: 0 - 0</p>
+                 </div>
+                 <div class="text-right">
+                     <p class="font-bold text-lg">Season <span id="dashboard-year">1</span></p>
+                     <p class="text-gray-600" id="dashboard-week">Week 1</p>
+                 </div>
+                 <button id="advance-week-btn" class="bg-amber-500 hover:bg-amber-600 text-white font-bold py-2 px-6 rounded-lg transition text-lg">Advance Week</button>
+             </header>
+             <div class="flex gap-6">
+                 <aside id="dashboard-tabs" class="w-1/5">
+                     <nav class="flex flex-col space-y-1">
+                         <button data-tab="my-team" class="tab-button active">My Team</button>
+                         <button data-tab="depth-chart" class="tab-button">Depth Chart</button>
+                         <button data-tab="messages" class="tab-button relative">
+                             Text Messages
+                             <span id="messages-notification-dot" class="notification-dot hidden"></span>
+                         </button>
+                         <button data-tab="schedule" class="tab-button">Schedule</button>
+                         <button data-tab="standings" class="tab-button">Standings</button>
+                         <button data-tab="player-stats" class="tab-button">Player Stats</button>
+                         <button data-tab="hall-of-fame" class="tab-button">Hall of Fame</button>
+                     </nav>
+                 </aside>
+                 <main id="dashboard-content" class="w-4/5 bg-white p-6 rounded-lg shadow-md min-h-[600px]">
+                     <div id="tab-content-my-team" class="tab-pane">
+                         <h3 class="text-xl font-bold mb-4">Team Roster</h3>
+                         <div id="my-team-roster"><!-- Roster table/content injected by JS --></div>
+                     </div>
+                     <div id="tab-content-depth-chart" class="tab-pane hidden">
+                          <div>
+                              <div id="depth-chart-sub-tabs" class="flex border-b mb-4">
+                                  <button data-sub-tab="offense" class="depth-chart-tab active">Offense</button>
+                                  <button data-sub-tab="defense" class="depth-chart-tab">Defense</button>
+                              </div>
+                              <div id="depth-chart-offense-pane" class="depth-chart-sub-pane">
+                                  <div class="mb-4"><label for="offense-formation-select" class="mr-2 font-semibold">Formation:</label><select id="offense-formation-select" class="p-2 border rounded bg-white"></select></div>
+                                  <div class="grid grid-cols-1 md:grid-cols-3 gap-6"><div class="md:col-span-2"><h4 class="text-lg font-bold mb-2">Offense Starters</h4><div id="offense-depth-chart-slots" class="space-y-2"></div></div><div><h4 class="text-lg font-bold mb-2">Available Players</h4><div id="offense-depth-chart-roster" class="roster-list"></div></div></div>
+                              </div>
+                              <div id="depth-chart-defense-pane" class="depth-chart-sub-pane hidden">
+                                  <div class="mb-4"><label for="defense-formation-select" class="mr-2 font-semibold">Formation:</label><select id="defense-formation-select" class="p-2 border rounded bg-white"></select></div>
+                                  <div class="grid grid-cols-1 md:grid-cols-3 gap-6"><div class="md:col-span-2"><h4 class="text-lg font-bold mb-2">Defense Starters</h4><div id="defense-depth-chart-slots" class="space-y-2"></div></div><div><h4 class="text-lg font-bold mb-2">Available Players</h4><div id="defense-depth-chart-roster" class="roster-list"></div></div></div>
+                              </div>
+                              <div class="mt-8"><h3 class="text-xl font-bold mb-4">Positional Overalls</h3><div id="positional-overalls-container" class="overflow-x-auto"></div></div>
+                          </div>
+                     </div>
+                      <div id="tab-content-messages" class="tab-pane hidden"><h3 class="text-xl font-bold mb-4">Text Messages</h3><div id="messages-list" class="space-y-2 max-h-[500px] overflow-y-auto"></div></div>
+                     <div id="tab-content-schedule" class="tab-pane hidden"><h3 class="text-xl font-bold mb-4">Season Schedule</h3><div id="schedule-list" class="space-y-4"></div></div>
+                     <div id="tab-content-standings" class="tab-pane hidden"><h3 class="text-xl font-bold mb-4">League Standings</h3><div id="standings-container" class="space-y-6"></div></div>
+                     <div id="tab-content-player-stats" class="tab-pane hidden">
+                         <h3 class="text-xl font-bold mb-4">League Player Stats</h3>
+                         <div class="flex items-center gap-4 mb-4">
+                             <select id="stats-filter-team" class="p-2 border rounded bg-white"></select>
+                             <select id="stats-sort" class="p-2 border rounded bg-white">
+                                 <option value="touchdowns">Sort by TDs</option>
+                                 <option value="passYards">Sort by Pass Yds</option>
+                                 <option value="rushYards">Sort by Rush Yds</option>
+                                 <option value="recYards">Sort by Rec Yds</option>
+                                 <option value="receptions">Sort by Receptions</option>
+                                 <option value="tackles">Sort by Tackles</option>
+                                 <option value="sacks">Sort by Sacks</option>
+                                 <option value="interceptions">Sort by INTs</option>
+                             </select>
+                         </div>
+                         <div id="player-stats-container"></div>
+                     </div>
+                     <div id="tab-content-hall-of-fame" class="tab-pane hidden"><h3 class="text-xl font-bold mb-4">Hall of Fame</h3><div id="hall-of-fame-list"></div></div>
+                 </main>
+             </div>
         </div>
+
+         <!-- Live Game Simulation Screen -->
+         <!-- <<< UPDATED SECTION START >>> -->
+         <div id="game-sim-screen" class="screen hidden bg-gray-800 text-white p-6 rounded-lg shadow-lg">
+             <h2 class="text-xl font-bold mb-2 text-center text-amber-400">Live Game Simulation</h2>
+             <div id="sim-scoreboard" class="flex justify-between items-center mb-4 bg-gray-700 p-3 rounded">
+                 <div class="text-center w-1/3"><p id="sim-away-team" class="text-lg font-bold"></p><p id="sim-away-score" class="text-4xl font-bangers"></p></div>
+                 <div class="text-center w-1/3"><p id="sim-game-drive" class="text-sm"></p><p id="sim-game-down" class="text-sm"></p><p id="sim-possession" class="text-xs mt-1"></p></div>
+                 <div class="text-center w-1/3"><p id="sim-home-team" class="text-lg font-bold"></p><p id="sim-home-score" class="text-4xl font-bangers"></p></div>
+             </div>
+             <div id="sim-field-visualization" class="bg-green-700 p-2 rounded mb-4 text-center font-mono text-sm border-4 border-gray-400"><pre id="field-display" class="text-white whitespace-pre"></pre></div>
+             <h4 class="font-bold text-lg mb-2 text-amber-400">Play-by-Play</h4>
+             <div id="sim-play-log" class="bg-gray-700 p-3 rounded h-64 overflow-y-auto text-sm mb-4">
+                 <!-- Game events (plays, scores, highlights) will appear here -->
+             </div>
+             <div class="mt-4 flex justify-center items-center gap-4">
+                 <span class="text-sm font-semibold">Speed:</span>
+                 <button id="sim-speed-play" class="sim-speed-btn btn bg-blue-500 hover:bg-blue-600 text-white font-bold py-1 px-3 rounded text-xs active">Play</button>
+                 <button id="sim-speed-fast" class="sim-speed-btn btn bg-gray-500 hover:bg-gray-600 text-white font-bold py-1 px-3 rounded text-xs">Fast</button>
+                 <button id="sim-speed-faster" class="sim-speed-btn btn bg-gray-500 hover:bg-gray-600 text-white font-bold py-1 px-3 rounded text-xs">Faster</button>
+                 <button id="sim-skip-btn" class="btn bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-4 rounded-lg transition ml-auto">Skip to Result</button>
+             </div>
+         </div>
+         <!-- <<< UPDATED SECTION END >>> -->
 
 
         <!-- Offseason Screen -->
         <div id="offseason-screen" class="hidden bg-white p-8 rounded-lg shadow-lg">
              <h2 class="text-3xl font-bold text-center">Offseason Report: End of Season <span id="offseason-year"></span></h2>
              <div class="grid grid-cols-1 md:grid-cols-3 gap-8 mt-6">
-                  <div><h3 class="text-xl font-bold mb-2 border-b pb-2">Player Development</h3><div id="player-development-container" class="space-y-2 max-h-96 overflow-y-auto"></div></div>
-                  <div>
-                       <h3 class="text-xl font-bold mb-2 border-b pb-2">Graduating Players</h3>
-                       <ul id="retirements-list" class="list-disc list-inside space-y-1"><li>None</li></ul>
-                       <h3 class="text-xl font-bold mb-2 border-b pb-2 mt-4">Other Leaving Players</h3>
-                       <ul id="leaving-players-list" class="list-disc list-inside space-y-1"><li>None</li></ul>
-                  </div>
-                  <div><h3 class="text-xl font-bold mb-2 border-b pb-2">Hall of Fame Inductees</h3><ul id="hof-inductees-list" class="list-disc list-inside space-y-1"><li>None</li></ul></div>
+                 <div><h3 class="text-xl font-bold mb-2 border-b pb-2">Player Development</h3><div id="player-development-container" class="space-y-2 max-h-96 overflow-y-auto"></div></div>
+                 <div>
+                     <h3 class="text-xl font-bold mb-2 border-b pb-2">Graduating Players</h3>
+                     <ul id="retirements-list" class="list-disc list-inside space-y-1"><li>None</li></ul>
+                     <h3 class="text-xl font-bold mb-2 border-b pb-2 mt-4">Other Leaving Players</h3>
+                     <ul id="leaving-players-list" class="list-disc list-inside space-y-1"><li>None</li></ul>
+                 </div>
+                 <div><h3 class="text-xl font-bold mb-2 border-b pb-2">Hall of Fame Inductees</h3><ul id="hof-inductees-list" class="list-disc list-inside space-y-1"><li>None</li></ul></div>
              </div>
              <div class="text-center mt-8">
-                  <button id="go-to-next-draft-btn" class="bg-amber-500 hover:bg-amber-600 text-white font-bold py-3 px-8 rounded-lg text-lg transition">Proceed to Next Season's Draft</button>
+                 <button id="go-to-next-draft-btn" class="bg-amber-500 hover:bg-amber-600 text-white font-bold py-3 px-8 rounded-lg text-lg transition">Proceed to Next Season's Draft</button>
              </div>
         </div>
     </div>
@@ -233,12 +235,8 @@
              <!-- Modal actions (like Close/Confirm buttons) are added dynamically by JS -->
         </div>
     </div>
- 
-     <!-- 
-       All module scripts are loaded here.
-       'main.js' will orchestrate everything.
-     -->
-    <script src="./js/main.js" type="module"></script>
- </body>
- </html>
+
+    <script type="module" src="main.js"></script>
+</body>
+</html>
 
