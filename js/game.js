@@ -2130,6 +2130,139 @@ function resolvePlay(offense, defense, playKey, gameState) {
  * @param {Array} gameLog - The game log array.
  * @returns {string} The key of the chosen defensive play (e.g., 'Cover_2_Zone').
  */
+/**
+ * Determines the offensive play call based on situation, personnel, and coach tendencies.
+ * @param {object} offense - The offensive team object.
+ * @param {object} defense - The defensive team object.
+ * @param {number} down - Current down (1-4).
+ * @param {number} yardsToGo - Yards needed for a first down.
+ * @param {number} ballOn - Current yard line (0-100 territory).
+ * @param {number} scoreDiff - Offense score minus defense score.
+ * @param {Array} gameLog - The game log array.
+ * @param {number} drivesRemaining - Approx drives left in game.
+ * @returns {string} The key of the chosen offensive play (e.g., 'Balanced_InsideRun').
+ */
+function determinePlayCall(offense, defense, down, yardsToGo, ballOn, scoreDiff, gameLog, drivesRemaining) {
+    if (!offense || !defense || !offense.formations || !defense.formations || !offense.coach) {
+        console.error("determinePlayCall: Invalid team data."); return 'Balanced_InsideRun';
+    }
+    const { coach } = offense;
+    const offenseFormationName = offense.formations.offense;
+    const defenseFormationName = defense.formations.defense;
+    const offenseFormation = offenseFormations[offenseFormationName];
+    const defenseFormation = defenseFormations[defenseFormationName];
+
+    // Failsafe if formation data is missing
+    if (!offenseFormation?.personnel || !defenseFormation?.personnel) {
+        console.error(`CRITICAL ERROR: Formation data missing for ${offense.name} (${offenseFormationName}) or ${defense.name} (${defenseFormationName}).`);
+        return 'Balanced_InsideRun'; // Absolute failsafe play
+    }
+
+    // Get key offensive players
+    const usedIds = new Set();
+    const qb = getPlayerBySlot(offense, 'offense', 'QB1', usedIds) || findEmergencyPlayer('QB', offense, 'offense', usedIds)?.player;
+    const rb = getPlayerBySlot(offense, 'offense', 'RB1', usedIds) || findEmergencyPlayer('RB', offense, 'offense', usedIds)?.player;
+    const qbStrength = qb ? calculateOverall(qb, 'QB') : 0;
+    const rbStrength = rb ? calculateOverall(rb, 'RB') : 0;
+
+    // --- Base Pass Chance & Adjustments ---
+    let passChance = 0.45; // Default baseline
+
+    // Opponent Formation Awareness
+    if (defenseFormation) {
+        const defPersonnel = defenseFormation.personnel;
+        if (defPersonnel.DL >= 4 || (defPersonnel.DL === 3 && defPersonnel.LB >= 3)) { // Heavy box
+            passChance += 0.15; // More likely to pass vs run stop
+        }
+        if (defPersonnel.DB >= 2 || (defPersonnel.DB === 1 && defPersonnel.LB >= 3)) { // More DBs/LBs in coverage
+            passChance -= 0.10; // Slightly more likely to run
+        }
+    }
+    // Personnel Mismatches
+    if (offenseFormation.personnel.WR > defenseFormation.personnel.DB + 1) passChance += 0.2;
+    if (offenseFormation.personnel.RB + offenseFormation.personnel.OL > defenseFormation.personnel.DL + defenseFormation.personnel.LB + 1) passChance -= 0.2;
+    // Player Strengths
+    if (qbStrength < 50 && rbStrength > 50) passChance -= 0.25;
+    if (rbStrength < 50 && qbStrength > 50) passChance += 0.15;
+    if (qbStrength > rbStrength + 15) passChance += 0.1;
+    if (rbStrength > qbStrength + 15) passChance -= 0.1;
+
+    // Game Situation (Refined)
+    const totalDrivesPerHalf = 8; // Approx (needs to match simulateGame)
+    const isLateGame = drivesRemaining <= 2;
+    const isEndOfHalf = (drivesRemaining % totalDrivesPerHalf === 1 || drivesRemaining % totalDrivesPerHalf === 0) && drivesRemaining <= totalDrivesPerHalf;
+
+    if (down === 3 && yardsToGo > 6) passChance += 0.4;
+    else if (down === 4 && yardsToGo > 3) passChance = 0.95;
+    else if (yardsToGo <= 2) passChance -= 0.4;
+
+    if (ballOn > 80 && ballOn < 98) passChance += 0.1; // Red zone (not goal line)
+    else if (ballOn >= 98) passChance -= 0.2; // Goal line run bias
+
+    if (scoreDiff < -10) passChance += (isLateGame ? 0.3 : 0.2); // Trailing
+    if (scoreDiff > 14 && (isLateGame || isEndOfHalf)) passChance -= 0.4; // Leading late
+    else if (scoreDiff > 7 && (isLateGame || isEndOfHalf)) passChance -= 0.2;
+
+    // Coach Tendencies
+    if (coach.type === 'Ground and Pound') passChance -= 0.3;
+    if (coach.type === 'West Coast Offense') passChance += 0.2;
+    if (coach.type === 'Spread') passChance += 0.25;
+
+    // Clamp passChance
+    passChance = Math.max(0.05, Math.min(0.95, passChance));
+
+    // --- Play Selection ---
+    const formationPlays = Object.keys(offensivePlaybook).filter(key => key.startsWith(offenseFormationName));
+    if (formationPlays.length === 0) {
+        console.error(`CRITICAL: No plays found for formation ${offenseFormationName}!`);
+        return 'Balanced_InsideRun';
+    }
+
+    // QB Sneak (if defined in playbook for formation)
+    if (yardsToGo <= 1 && qbStrength > 60 && Math.random() < 0.6) {
+        const sneakPlay = formationPlays.find(p => offensivePlaybook[p]?.zone === ZONES.SNEAK);
+        if (sneakPlay) return sneakPlay;
+        // Fallback to inside run
+    }
+
+    let desiredPlayType = (Math.random() < passChance) ? 'pass' : 'run';
+    let possiblePlays = formationPlays.filter(key => offensivePlaybook[key]?.type === desiredPlayType);
+
+    // If no plays of desired type, switch type
+    if (possiblePlays.length === 0) {
+        desiredPlayType = desiredPlayType === 'pass' ? 'run' : 'pass';
+        possiblePlays = formationPlays.filter(key => offensivePlaybook[key]?.type === desiredPlayType);
+        if (possiblePlays.length === 0) return formationPlays[0]; // Absolute failsafe
+    }
+
+    // --- Sub-selection based on tags ---
+    let chosenPlay = null;
+    if (desiredPlayType === 'pass') {
+        const deepPlays = possiblePlays.filter(p => offensivePlaybook[p]?.tags?.includes('deep'));
+        const shortPlays = possiblePlays.filter(p => offensivePlaybook[p]?.tags?.includes('short') || offensivePlaybook[p]?.tags?.includes('screen'));
+        const mediumPlays = possiblePlays.filter(p => !offensivePlaybook[p]?.tags?.includes('deep') && !offensivePlaybook[p]?.tags?.includes('short'));
+
+        if (down >= 3 && yardsToGo >= 8 && deepPlays.length > 0) chosenPlay = getRandom(deepPlays);
+        else if (down <= 2 && yardsToGo <= 5 && shortPlays.length > 0) chosenPlay = getRandom(shortPlays);
+        else if (mediumPlays.length > 0) chosenPlay = getRandom(mediumPlays);
+        else chosenPlay = getRandom([...shortPlays, ...deepPlays]); // Fallback
+
+    } else { // Run
+        const insidePlays = possiblePlays.filter(p => offensivePlaybook[p]?.tags?.includes('inside'));
+        const outsidePlays = possiblePlays.filter(p => offensivePlaybook[p]?.tags?.includes('outside'));
+        const powerPlays = possiblePlays.filter(p => offensivePlaybook[p]?.tags?.includes('power'));
+
+        if (yardsToGo <= 2 && powerPlays.length > 0) chosenPlay = getRandom(powerPlays);
+        else if (yardsToGo <= 3 && insidePlays.length > 0) chosenPlay = getRandom(insidePlays);
+        else if (rbStrength > qbStrength + 10 && Math.random() < 0.6 && outsidePlays.length > 0) chosenPlay = getRandom(outsidePlays);
+        else if (insidePlays.length > 0) chosenPlay = getRandom(insidePlays);
+        else chosenPlay = getRandom([...outsidePlays, ...powerPlays]); // Fallback
+    }
+
+    chosenPlay = chosenPlay || getRandom(possiblePlays) || formationPlays[0]; // Final failsafe
+    // gameLog.push(`AI Play Call: ${chosenPlay}`); // Optional log
+    return chosenPlay;
+}
 function determineDefensivePlayCall(defense, offense, down, yardsToGo, ballOn, gameLog) {
     // --- 1. Get Available Plays ---
     const defenseFormationName = defense.formations?.defense || '3-3-1'; // Failsafe
