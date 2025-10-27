@@ -1913,10 +1913,10 @@ function finalizeStats(playState, offense, defense) {
 /**
  * Simulates a single play using a coordinate-based tick system.
  */
-function resolvePlay(offense, defense, playKey, gameState) {
+function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameState) {
     const { gameLog = [], weather, ballOn } = gameState;
 
-    const play = offensivePlaybook[playKey];
+    const play = offensivePlaybook[offensivePlayKey];
     if (!play) { /* ... failsafe ... */ }
     const { type, assignments } = play;
 
@@ -2267,7 +2267,7 @@ function determineDefensivePlayCall(defense, offense, down, yardsToGo, ballOn, g
     // --- 1. Get Available Plays ---
     const defenseFormationName = defense.formations?.defense || '3-3-1'; // Failsafe
     // Get all play keys available for this formation
-    const formationPlays = Object.keys(defensivePlaybook).filter(key => key.startsWith(defenseFormationName));
+    const formationPlays = Object.keys(defensivePlaybook);
 
     if (formationPlays.length === 0) {
         console.error(`No defensive plays found for formation ${defenseFormationName}!`);
