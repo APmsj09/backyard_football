@@ -94,8 +94,8 @@ function handleDraftPlayer() {
         const player = gameState.players.find(p => p.id === selectedPlayerId);
         const team = gameState.playerTeam;
         if (team.roster.length >= ROSTER_LIMIT) {
-             UI.showModal("Roster Full", `<p>Your roster is full (${ROSTER_LIMIT} players)! You cannot draft more players.</p>`);
-             return;
+            UI.showModal("Roster Full", `<p>Your roster is full (${ROSTER_LIMIT} players)! You cannot draft more players.</p>`);
+            return;
         }
 
         if (player && Game.addPlayerToTeam(player, team)) {
@@ -104,11 +104,11 @@ function handleDraftPlayer() {
             UI.renderSelectedPlayerCard(null, gameState); // Clear card, pass state
             runAIDraftPicks(); // Continue draft
         } else {
-             console.error(`Failed to add player ${selectedPlayerId} to team or player not found.`);
-             UI.showModal("Draft Error", "Could not draft the selected player. Please check the console.", null,'',null,'Close');
+            console.error(`Failed to add player ${selectedPlayerId} to team or player not found.`);
+            UI.showModal("Draft Error", "Could not draft the selected player. Please check the console.", null, '', null, 'Close');
         }
     } else {
-         console.warn("Draft Player button clicked but no player selected.");
+        console.warn("Draft Player button clicked but no player selected.");
     }
 }
 
@@ -131,13 +131,13 @@ async function runAIDraftPicks() {
 
         // Condition 3: All teams have either filled their roster or met their specific draft needs for this draft
         const allNeedsMetOrFull = gameState.teams.every(t => {
-                if (!t || !t.roster) return true; // Skip invalid team
-                const needs = t.draftNeeds || 0;
-                // Count how many picks this team has *actually* made so far in the draft order
-                const picksMade = gameState.draftOrder.slice(0, gameState.currentPick).filter(teamInOrder => teamInOrder?.id === t.id).length; // Safe access id
-                // Team is satisfied if roster full OR they've made enough picks to meet initial need
-                return t.roster.length >= ROSTER_LIMIT || picksMade >= needs;
-            });
+            if (!t || !t.roster) return true; // Skip invalid team
+            const needs = t.draftNeeds || 0;
+            // Count how many picks this team has *actually* made so far in the draft order
+            const picksMade = gameState.draftOrder.slice(0, gameState.currentPick).filter(teamInOrder => teamInOrder?.id === t.id).length; // Safe access id
+            // Team is satisfied if roster full OR they've made enough picks to meet initial need
+            return t.roster.length >= ROSTER_LIMIT || picksMade >= needs;
+        });
 
         // Draft ends if any of these conditions are true
         return pickLimitReached || noPlayersLeft || allNeedsMetOrFull;
@@ -176,9 +176,9 @@ async function runAIDraftPicks() {
             gameState.currentPick++;
             // Check if skipping ended the draft (Fix for loop)
             if (checkDraftEnd()) {
-                 handleDraftEnd();
+                handleDraftEnd();
             } else {
-                 runAIDraftPicks(); // Go back to simulating AI picks ONLY if draft isn't over
+                runAIDraftPicks(); // Go back to simulating AI picks ONLY if draft isn't over
             }
         } else { // Render for player input
             UI.renderDraftScreen(gameState, handlePlayerSelectInDraft, selectedPlayerId); // Pass gameState for scouting in UI
@@ -197,12 +197,12 @@ function handleDraftEnd() {
     if (!gameState || !gameState.teams) {
         console.error("Cannot end draft: Game state invalid.");
         return;
-     }
+    }
     // Set initial depth charts
     gameState.teams.forEach(team => {
         if (!team) return; // Skip invalid team entries
         try { Game.aiSetDepthChart(team); }
-        catch(error) { console.error(`Error setting depth chart for ${team.name}:`, error); }
+        catch (error) { console.error(`Error setting depth chart for ${team.name}:`, error); }
     });
 
     UI.showModal("Draft Complete!", "<p>The draft has concluded. Get ready for the season!</p>", () => {
@@ -215,8 +215,8 @@ function handleDraftEnd() {
             UI.switchTab('my-team', gameState);
             UI.showScreen('dashboardScreen');
         } catch (error) {
-             console.error("Error transitioning to dashboard after draft:", error);
-             UI.showModal("Error", `Could not proceed to season: ${error.message}.`, null, '', null, 'Close');
+            console.error("Error transitioning to dashboard after draft:", error);
+            UI.showModal("Error", `Could not proceed to season: ${error.message}.`, null, '', null, 'Close');
         }
     }, "Start Season");
 }
@@ -228,8 +228,8 @@ function handleTabSwitch(e) {
     if (e.target.matches('.tab-button')) {
         const tabId = e.target.dataset.tab;
         if (!gameState) {
-             console.error("Cannot switch tab: Game state not available.");
-             return;
+            console.error("Cannot switch tab: Game state not available.");
+            return;
         }
         UI.switchTab(tabId, gameState); // Pass gameState for rendering tab content
     }
@@ -240,8 +240,8 @@ function handleTabSwitch(e) {
  */
 function handleDepthChartDrop(playerId, newPositionSlot, side) {
     if (!gameState) {
-         console.error("Cannot update depth chart: Game state not available.");
-         return;
+        console.error("Cannot update depth chart: Game state not available.");
+        return;
     }
     Game.updateDepthChart(playerId, newPositionSlot, side);
     gameState = Game.getGameState();
@@ -253,8 +253,8 @@ function handleDepthChartDrop(playerId, newPositionSlot, side) {
  */
 function handleFormationChange(e) {
     if (!gameState) {
-         console.error("Cannot change formation: Game state not available.");
-         return;
+        console.error("Cannot change formation: Game state not available.");
+        return;
     }
     const side = e.target.id.includes('offense') ? 'offense' : 'defense';
     const formationName = e.target.value;
@@ -269,7 +269,7 @@ function handleFormationChange(e) {
 async function handleAdvanceWeek() {
     if (!gameState || !gameState.schedule || !gameState.teams || !gameState.playerTeam) {
         console.error("Cannot advance week: Game state invalid.");
-        UI.showModal("Error", "Cannot advance week due to invalid game state.", null,'',null,'Close');
+        UI.showModal("Error", "Cannot advance week due to invalid game state.", null, '', null, 'Close');
         return;
     }
     if (gameState.currentWeek >= WEEKS_IN_SEASON) { handleSeasonEnd(); return; }
@@ -279,7 +279,7 @@ async function handleAdvanceWeek() {
     const weekStartIndex = gameState.currentWeek * gamesPerWeek;
     const weekEndIndex = weekStartIndex + gamesPerWeek;
     const playerGameMatch = gameState.schedule.slice(weekStartIndex, weekEndIndex)
-                                            .find(g => g && g.home && g.away && (g.home.id === gameState.playerTeam.id || g.away.id === gameState.playerTeam.id)); // Added safety checks
+        .find(g => g && g.home && g.away && (g.home.id === gameState.playerTeam.id || g.away.id === gameState.playerTeam.id)); // Added safety checks
 
     if (playerGameMatch) { // Game day
         UI.showModal("Game Day!",
@@ -311,8 +311,8 @@ function startLiveGame(playerGameMatch) {
     allGames.forEach(match => {
         try {
             if (!match || !match.home || !match.away) { // Added !match check
-                 console.error("Skipping simulation due to invalid match data:", match);
-                 return;
+                console.error("Skipping simulation due to invalid match data:", match);
+                return;
             }
             const result = Game.simulateGame(match.home, match.away);
             if (!result) throw new Error("simulateGame returned null or undefined."); // Check result validity
@@ -322,10 +322,10 @@ function startLiveGame(playerGameMatch) {
             if (result.breakthroughs && Array.isArray(result.breakthroughs)) { // Check breakthroughs is array
                 result.breakthroughs.forEach(b => {
                     if (b && b.player && b.player.teamId === gameState.playerTeam?.id) { // Added checks for b and b.player
-                         // Use Game.addMessage if available
-                         if (typeof Game.addMessage === 'function') { // Check type explicitly
-                             Game.addMessage("Player Breakthrough!", `${b.player.name} improved ${b.attr}!`);
-                         } else { console.log(`Player Breakthrough: ${b.player.name} improved ${b.attr}! (addMessage not found/exported)`); }
+                        // Use Game.addMessage if available
+                        if (typeof Game.addMessage === 'function') { // Check type explicitly
+                            Game.addMessage("Player Breakthrough!", `${b.player.name} improved ${b.attr}!`);
+                        } else { console.log(`Player Breakthrough: ${b.player.name} improved ${b.attr}! (addMessage not found/exported)`); }
                     }
                 });
             }
@@ -333,8 +333,8 @@ function startLiveGame(playerGameMatch) {
             if (match.home.id === playerGameMatch.home.id && match.away.id === playerGameMatch.away.id) {
                 currentLiveSimResult = result;
             }
-        } catch(error) {
-             console.error(`Error simulating game during live sim week (${match?.away?.name || '?'} @ ${match?.home?.name || '?'}):`, error);
+        } catch (error) {
+            console.error(`Error simulating game during live sim week (${match?.away?.name || '?'} @ ${match?.home?.name || '?'}):`, error);
         }
     });
 
@@ -351,8 +351,8 @@ function startLiveGame(playerGameMatch) {
             currentLiveSimResult = null; // Clear after use
         });
     } else {
-         console.error("Player game result not found or failed simulation. Proceeding without live view.");
-         finishWeekSimulation(allResults.filter(Boolean)); // Process valid results
+        console.error("Player game result not found or failed simulation. Proceeding without live view.");
+        finishWeekSimulation(allResults.filter(Boolean)); // Process valid results
     }
 }
 
@@ -365,9 +365,9 @@ function simulateRestOfWeek() {
     let results = null;
     try {
         if (!gameState || gameState.currentWeek >= WEEKS_IN_SEASON) {
-             console.log("Attempted to simulate week, but season is already over or state invalid.");
-             if (gameState) handleSeasonEnd(); // Only call if gameState exists
-             return;
+            console.log("Attempted to simulate week, but season is already over or state invalid.");
+            if (gameState) handleSeasonEnd(); // Only call if gameState exists
+            return;
         }
         results = Game.simulateWeek(); // Simulates all games AND advances week
     } catch (error) {
@@ -378,17 +378,17 @@ function simulateRestOfWeek() {
     }
 
     if (results !== null) { // simulateWeek returns null if season ended BEFORE sim
-         finishWeekSimulation(results);
+        finishWeekSimulation(results);
     } else if (gameState && gameState.currentWeek >= WEEKS_IN_SEASON) { // Season ended AFTER sim attempt
         handleSeasonEnd();
     } else { // simulateWeek returned null unexpectedly or critical error
         console.error("simulateWeek finished unexpectedly or errored mid-season.");
         gameState = Game.getGameState(); // Attempt to refresh state
         if (gameState) {
-             UI.renderDashboard(gameState);
-             UI.showScreen('dashboardScreen');
+            UI.renderDashboard(gameState);
+            UI.showScreen('dashboardScreen');
         } else {
-             UI.showModal("Critical Error", "Game state lost after simulation error. Please refresh.", null,'',null,'OK');
+            UI.showModal("Critical Error", "Game state lost after simulation error. Please refresh.", null, '', null, 'OK');
         }
     }
 }
@@ -422,14 +422,14 @@ function buildResultsModalHtml(results) {
     if (breakthroughs.length > 0) {
         html += `<h4 class="font-bold mt-4 mb-2">Player Breakthroughs!</h4><div class="space-y-1 text-sm">`;
         breakthroughs.forEach(b => {
-             if (!b || !b.player) return;
+            if (!b || !b.player) return;
             const isUserPlayer = b.player.teamId === gameState.playerTeam?.id;
             html += `<p class=${isUserPlayer ? '"font-semibold"' : ''}><strong>${b.player.name}</strong> (${b.teamName || 'Your Team'}) improved their <strong>${b.attr}</strong>!</p>`;
         });
         html += `</div>`;
     }
     return html;
- }
+}
 
 /** Processes results, updates UI, triggers AI actions, prompts call friend. */
 function finishWeekSimulation(results) {
@@ -437,7 +437,7 @@ function finishWeekSimulation(results) {
         console.error("Cannot finish week simulation: Game state invalid.");
         gameState = Game.getGameState();
         if (gameState) { UI.renderDashboard(gameState); UI.showScreen('dashboardScreen'); }
-        else { UI.showModal("Critical Error", "Game state lost. Please refresh.", null,'',null,'OK'); }
+        else { UI.showModal("Critical Error", "Game state lost. Please refresh.", null, '', null, 'OK'); }
         return;
     }
     // Show results modal
@@ -451,13 +451,13 @@ function finishWeekSimulation(results) {
 
     // Post-Results Logic
     gameState.teams.filter(t => t && t.id !== gameState.playerTeam.id).forEach(team => {
-        try { Game.aiManageRoster(team); } catch(e) { console.error(`Error during AI roster management for ${team.name}:`, e)}
+        try { Game.aiManageRoster(team); } catch (e) { console.error(`Error during AI roster management for ${team.name}:`, e) }
     });
     Game.generateWeeklyFreeAgents();
 
     // Refresh state and UI
     gameState = Game.getGameState();
-    if (!gameState) { UI.showModal("Critical Error", "Game state lost after AI management. Please refresh.", null,'',null,'OK'); return; }
+    if (!gameState) { UI.showModal("Critical Error", "Game state lost after AI management. Please refresh.", null, '', null, 'OK'); return; }
 
     UI.renderDashboard(gameState);
     const activeTabEl = document.querySelector('#dashboard-tabs .tab-button.active');
@@ -483,9 +483,9 @@ function handleSeasonEnd() {
         if (!gameState) throw new Error("Game state lost after advancing to offseason.");
         UI.renderOffseasonScreen(offseasonReport, gameState.year);
         UI.showScreen('offseasonScreen');
-    } catch(error) {
+    } catch (error) {
         console.error("Error during offseason processing:", error);
-        UI.showModal("Offseason Error", `Could not process offseason: ${error.message}. Check console.`, null,'',null,'Close');
+        UI.showModal("Offseason Error", `Could not process offseason: ${error.message}. Check console.`, null, '', null, 'Close');
     }
 }
 
@@ -502,7 +502,7 @@ function handleGoToNextDraft() {
         runAIDraftPicks(); // Start the AI draft picks simulation
     } catch (error) {
         console.error("Error proceeding to next draft:", error);
-        UI.showModal("Draft Setup Error", `Could not start next draft: ${error.message}. Please check console.`, null,'',null,'Close');
+        UI.showModal("Draft Setup Error", `Could not start next draft: ${error.message}. Please check console.`, null, '', null, 'Close');
     }
 }
 
@@ -575,11 +575,11 @@ function handleStatsChange() {
 
 /** Handles clicking a message - shows modal and marks as read. */
 function handleMessageClick(messageId) {
-     if (!gameState || !gameState.messages) {
-         console.error("Cannot handle message click: Game state or messages not available.");
-         UI.showModal("Error", "Could not load message details.", null, '', null, 'Close');
-         return;
-     }
+    if (!gameState || !gameState.messages) {
+        console.error("Cannot handle message click: Game state or messages not available.");
+        UI.showModal("Error", "Could not load message details.", null, '', null, 'Close');
+        return;
+    }
     const message = gameState.messages.find(m => m && m.id === messageId); // Added m check
     if (message) {
         UI.showModal(message.subject, `<p class="whitespace-pre-wrap">${message.body}</p>`);
@@ -622,16 +622,16 @@ function buildCallFriendModalHtml(freeAgents) {
     });
     html += `</div>`;
     return html;
- }
+}
 
 /** Displays Call Friend modal and sets up event listeners for the CALL buttons. */
 function promptCallFriend() {
     gameState = Game.getGameState(); // Refresh state
-     if (!gameState || !gameState.playerTeam || !gameState.playerTeam.roster) {
-         console.error("Cannot prompt call friend: Invalid game state or missing player team/roster.");
-         UI.showModal("Error", "Cannot display call friend options due to game state error.", null, '', null, 'Close');
-         return;
-       }
+    if (!gameState || !gameState.playerTeam || !gameState.playerTeam.roster) {
+        console.error("Cannot prompt call friend: Invalid game state or missing player team/roster.");
+        UI.showModal("Error", "Cannot display call friend options due to game state error.", null, '', null, 'Close');
+        return;
+    }
 
     const { freeAgents, playerTeam } = gameState;
     const unavailableCount = playerTeam.roster.filter(p => p && p.status?.duration > 0).length;
@@ -639,9 +639,9 @@ function promptCallFriend() {
 
     // Exit if not needed or no FAs
     if (healthyCount >= MIN_HEALTHY_PLAYERS || !Array.isArray(freeAgents) || freeAgents.length === 0) {
-         if (healthyCount < MIN_HEALTHY_PLAYERS && (!Array.isArray(freeAgents) || freeAgents.length === 0)) {
-             console.log("Roster short, but no free agents available to call.");
-         }
+        if (healthyCount < MIN_HEALTHY_PLAYERS && (!Array.isArray(freeAgents) || freeAgents.length === 0)) {
+            console.log("Roster short, but no free agents available to call.");
+        }
         return; // Don't show modal
     }
 
@@ -651,11 +651,11 @@ function promptCallFriend() {
     const freeAgentsWithRel = freeAgents.map(p => {
         if (!p) return null;
         const maxLevel = playerTeam.roster.reduce(
-             (max, rp) => Math.max(max, Game.getRelationshipLevel(rp?.id, p.id)), // Safe access rp.id
-             relationshipLevels.STRANGER.level
-         );
-         const relInfo = Object.values(relationshipLevels).find(rl => rl.level === maxLevel) || relationshipLevels.STRANGER;
-         return {...p, relationshipName: relInfo.name };
+            (max, rp) => Math.max(max, Game.getRelationshipLevel(rp?.id, p.id)), // Safe access rp.id
+            relationshipLevels.STRANGER.level
+        );
+        const relInfo = Object.values(relationshipLevels).find(rl => rl.level === maxLevel) || relationshipLevels.STRANGER;
+        return { ...p, relationshipName: relInfo.name };
     }).filter(Boolean); // Remove nulls
 
     const friendListHtml = buildCallFriendModalHtml(freeAgentsWithRel);
@@ -665,7 +665,7 @@ function promptCallFriend() {
 
     // Add event listener using delegation
     const modalBodyElement = document.getElementById('modal-body');
-    if(!modalBodyElement) return;
+    if (!modalBodyElement) return;
 
     const callButtonDelegationHandler = (e) => {
         if (e.target.matches('.call-friend-btn')) {
@@ -709,7 +709,7 @@ function main() {
 
         // Live Sim Controls
         document.getElementById('sim-skip-btn')?.addEventListener('click', () => {
-             UI.skipLiveGameSim(currentLiveSimResult); // Pass stored result
+            UI.skipLiveGameSim(currentLiveSimResult); // Pass stored result
         });
         document.getElementById('sim-speed-play')?.addEventListener('click', () => UI.setSimSpeed(1000));
         document.getElementById('sim-speed-fast')?.addEventListener('click', () => UI.setSimSpeed(400));
@@ -720,16 +720,16 @@ function main() {
         document.getElementById('dashboard-content')?.addEventListener('click', handleDashboardClicks);
         // Messages List (Event Delegation)
         document.getElementById('messages-list')?.addEventListener('click', (e) => {
-             const messageItem = e.target.closest('.message-item');
-             if (messageItem?.dataset.messageId) { // Safe access
-                 handleMessageClick(messageItem.dataset.messageId);
-             }
+            const messageItem = e.target.closest('.message-item');
+            if (messageItem?.dataset.messageId) { // Safe access
+                handleMessageClick(messageItem.dataset.messageId);
+            }
         });
 
         // Draft Filters/Sorting
-        document.getElementById('draft-search')?.addEventListener('input', () => { if(gameState) UI.debouncedRenderDraftPool(gameState, handlePlayerSelectInDraft); });
-        document.getElementById('draft-filter-pos')?.addEventListener('change', () => { if(gameState) UI.renderDraftPool(gameState, handlePlayerSelectInDraft); });
-        document.getElementById('draft-sort')?.addEventListener('change', () => { if(gameState) UI.renderDraftPool(gameState, handlePlayerSelectInDraft); });
+        document.getElementById('draft-search')?.addEventListener('input', () => { if (gameState) UI.debouncedRenderDraftPool(gameState, handlePlayerSelectInDraft); });
+        document.getElementById('draft-filter-pos')?.addEventListener('change', () => { if (gameState) UI.renderDraftPool(gameState, handlePlayerSelectInDraft); });
+        document.getElementById('draft-sort')?.addEventListener('change', () => { if (gameState) UI.renderDraftPool(gameState, handlePlayerSelectInDraft); });
 
         // Depth Chart Formation Changes
         document.getElementById('offense-formation-select')?.addEventListener('change', handleFormationChange);
@@ -749,16 +749,16 @@ function main() {
     } catch (error) {
         // --- Graceful Initialization Error Handling ---
         console.error("Fatal error during initialization:", error);
-         const body = document.body;
-         if (body) {
-             body.innerHTML = `<div style="padding: 20px; color: #b91c1c; background-color: #fef2f2; border: 1px solid #fecaca; border-radius: 8px; font-family: sans-serif;">
+        const body = document.body;
+        if (body) {
+            body.innerHTML = `<div style="padding: 20px; color: #b91c1c; background-color: #fef2f2; border: 1px solid #fecaca; border-radius: 8px; font-family: sans-serif;">
                                  <h1 style="font-size: 1.5em; margin-bottom: 10px; color: #991b1b;">Initialization Error</h1>
                                  <p>We're sorry, but the game couldn't start due to an unexpected error.</p>
                                  <p>Please try refreshing the page. If the problem persists, check the browser console (usually by pressing F12) for more technical details.</p>
                                  <pre style="margin-top: 15px; padding: 10px; background-color: #fee2e2; border-radius: 4px; font-size: 0.9em; overflow-x: auto; white-space: pre-wrap; word-wrap: break-word;">${error.stack || error.message}</pre>
                                </div>`;
-         }
-         // --- End Graceful Error Handling ---
+        }
+        // --- End Graceful Error Handling ---
     }
 }
 
