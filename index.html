@@ -14,7 +14,6 @@
 
     <div id="game-container" class="container mx-auto p-4 max-w-7xl">
 
-        <!-- Start Screen -->
         <div id="start-screen" class="text-center p-8 bg-white rounded-lg shadow-lg">
             <h1 class="font-bangers text-6xl text-amber-500 tracking-wider">Backyard Football</h1>
             <p class="text-gray-600 mt-2 text-xl">The greatest league on the block!</p>
@@ -23,16 +22,14 @@
             </button>
         </div>
 
-        <!-- Loading Screen -->
         <div id="loading-screen" class="hidden text-center p-8 bg-white rounded-lg shadow-lg">
             <h2 class="text-2xl font-bold text-gray-800">Generating League...</h2>
             <p class="text-gray-500 mt-2">Creating the next generation of backyard legends.</p>
-            <div class="w-full bg-gray-200 rounded-full h-4 mt-4 overflow-hidden">
+            <div class="w-full bg-gray-200 rounded-full h-4 mt-4 overflow-hidden" role="progressbar" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">
                 <div id="loading-progress" class="bg-amber-500 h-4 rounded-full transition-all duration-300" style="width: 0%"></div>
             </div>
         </div>
 
-        <!-- Team Creation Screen -->
         <div id="team-creation-screen" class="hidden p-8 bg-white rounded-lg shadow-lg">
             <h2 class="text-3xl font-bold text-gray-800 text-center">Create Your Team</h2>
             <div class="mt-6 max-w-lg mx-auto">
@@ -45,7 +42,6 @@
             </div>
         </div>
 
-        <!-- Draft Screen -->
         <div id="draft-screen" class="hidden bg-white p-6 rounded-lg shadow-lg">
              <div id="draft-header" class="text-center mb-4">
                  <h2 class="text-3xl font-bold">Season <span id="draft-year">1</span> Draft</h2>
@@ -66,26 +62,25 @@
                              <option value="DB">DB</option>
                          </select>
                          <select id="draft-sort" class="p-2 border rounded">
-                             <!-- Options populated by JS -->
-                         </select>
+                             </select>
                      </div>
                      <div class="overflow-auto h-[600px]">
                          <table class="min-w-full text-sm">
                              <thead class="bg-gray-800 text-white sticky top-0 z-10">
                                  <tr>
-                                     <th class="py-2 px-3 text-left">Name</th>
-                                     <th class="py-2 px-3">Age</th>
-                                     <th class="py-2 px-3">Pref Pos</th>
-                                     <th class="py-2 px-3">Hgt</th>
-                                     <th class="py-2 px-3">Wgt</th>
-                                     <th class="py-2 px-3">Spd</th>
-                                     <th class="py-2 px-3">Str</th>
-                                     <th class="py-2 px-3">Agi</th>
-                                     <th class="py-2 px-3">Thr</th>
-                                     <th class="py-2 px-3">Cat</th>
-                                     <th class="py-2 px-3">Blk</th>
-                                     <th class="py-2 px-3">Tck</th>
-                                     <th class="py-2 px-3">BlS</th>
+                                     <th scope="col" class="py-2 px-3 text-left">Name</th>
+                                     <th scope="col" class="py-2 px-3">Age</th>
+                                     <th scope="col" class="py-2 px-3">Pot</th> <th scope="col" class="py-2 px-3">Rel</th> <th scope="col" class="py-2 px-3">Pref Pos</th>
+                                     <th scope="col" class="py-2 px-3">Hgt</th>
+                                     <th scope="col" class="py-2 px-3">Wgt</th>
+                                     <th scope="col" class="py-2 px-3">Spd</th>
+                                     <th scope="col" class="py-2 px-3">Str</th>
+                                     <th scope="col" class="py-2 px-3">Agi</th>
+                                     <th scope="col" class="py-2 px-3">Thr</th>
+                                     <th scope="col" class="py-2 px-3">Cat</th>
+                                     <th scope="col" class="py-2 px-3">Blk</th>
+                                     <th scope="col" class="py-2 px-3">Tck</th>
+                                     <th scope="col" class="py-2 px-3">BlS</th>
                                  </tr>
                              </thead>
                              <tbody id="draft-pool-tbody" class="divide-y"></tbody>
@@ -95,7 +90,7 @@
                  <div class="border-l pl-6">
                      <div id="selected-player-card" class="bg-gray-50 p-4 rounded-lg mb-4 min-h-[140px]">
                          <p class="text-gray-500">Select a player to see their details</p>
-                     </div>
+                         </div>
                      <button id="draft-player-btn" class="w-full bg-amber-500 text-white font-bold py-3 rounded-lg disabled:bg-gray-400">Draft Player</button>
                      <div class="mt-4">
                          <h4 class="font-bold text-lg">Your Roster (<span id="roster-count">0</span>/10)</h4>
@@ -108,7 +103,6 @@
              </div>
         </div>
 
-        <!-- Main Dashboard Screen -->
         <div id="dashboard-screen" class="hidden">
              <header class="bg-white p-4 rounded-lg shadow-md mb-4 flex justify-between items-center">
                  <div>
@@ -134,12 +128,12 @@
                          <button data-tab="standings" class="tab-button">Standings</button>
                          <button data-tab="player-stats" class="tab-button">Player Stats</button>
                          <button data-tab="hall-of-fame" class="tab-button">Hall of Fame</button>
-                     </nav>
+                         </nav>
                  </aside>
                  <main id="dashboard-content" class="w-4/5 bg-white p-6 rounded-lg shadow-md min-h-[600px]">
                      <div id="tab-content-my-team" class="tab-pane">
                          <h3 class="text-xl font-bold mb-4">Team Roster</h3>
-                         <div id="my-team-roster"><!-- Roster table/content injected by JS --></div>
+                         <div id="my-team-roster"></div>
                      </div>
                      <div id="tab-content-depth-chart" class="tab-pane hidden">
                           <div>
@@ -179,12 +173,10 @@
                          <div id="player-stats-container"></div>
                      </div>
                      <div id="tab-content-hall-of-fame" class="tab-pane hidden"><h3 class="text-xl font-bold mb-4">Hall of Fame</h3><div id="hall-of-fame-list"></div></div>
-                 </main>
+                     </main>
              </div>
         </div>
 
-         <!-- Live Game Simulation Screen -->
-         <!-- <<< UPDATED SECTION START >>> -->
          <div id="game-sim-screen" class="screen hidden bg-gray-800 text-white p-6 rounded-lg shadow-lg">
              <h2 class="text-xl font-bold mb-2 text-center text-amber-400">Live Game Simulation</h2>
              <div id="sim-scoreboard" class="flex justify-between items-center mb-4 bg-gray-700 p-3 rounded">
@@ -195,8 +187,7 @@
              <div id="sim-field-visualization" class="bg-green-700 p-2 rounded mb-4 text-center font-mono text-sm border-4 border-gray-400"><pre id="field-display" class="text-white whitespace-pre"></pre></div>
              <h4 class="font-bold text-lg mb-2 text-amber-400">Play-by-Play</h4>
              <div id="sim-play-log" class="bg-gray-700 p-3 rounded h-64 overflow-y-auto text-sm mb-4">
-                 <!-- Game events (plays, scores, highlights) will appear here -->
-             </div>
+                 </div>
              <div class="mt-4 flex justify-center items-center gap-4">
                  <span class="text-sm font-semibold">Speed:</span>
                  <button id="sim-speed-play" class="sim-speed-btn btn bg-blue-500 hover:bg-blue-600 text-white font-bold py-1 px-3 rounded text-xs active">Play</button>
@@ -204,11 +195,16 @@
                  <button id="sim-speed-faster" class="sim-speed-btn btn bg-gray-500 hover:bg-gray-600 text-white font-bold py-1 px-3 rounded text-xs">Faster</button>
                  <button id="sim-skip-btn" class="btn bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-4 rounded-lg transition ml-auto">Skip to Result</button>
              </div>
+             <div class="mt-4 border-t border-gray-600 pt-4">
+                <h4 class="font-bold text-lg mb-2 text-amber-400 text-center">Key Player Stats (Game)</h4>
+                <div id="sim-live-stats" class="grid grid-cols-2 gap-4 text-xs">
+                    <div id="sim-stats-away"></div>
+                    <div id="sim-stats-home"></div>
+                </div>
+            </div>
          </div>
-         <!-- <<< UPDATED SECTION END >>> -->
 
 
-        <!-- Offseason Screen -->
         <div id="offseason-screen" class="hidden bg-white p-8 rounded-lg shadow-lg">
              <h2 class="text-3xl font-bold text-center">Offseason Report: End of Season <span id="offseason-year"></span></h2>
              <div class="grid grid-cols-1 md:grid-cols-3 gap-8 mt-6">
@@ -227,16 +223,13 @@
         </div>
     </div>
 
-    <!-- Universal Modal -->
     <div id="modal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
         <div id="modal-content" class="bg-white rounded-lg shadow-2xl p-6 w-full max-w-lg max-h-[90vh]">
             <h3 id="modal-title" class="text-2xl font-bold mb-4"></h3>
             <div id="modal-body" class="max-h-[60vh] overflow-y-auto"></div>
-             <!-- Modal actions (like Close/Confirm buttons) are added dynamically by JS -->
-        </div>
+             </div>
     </div>
 
     <script type="module" src="js/main.js"></script>
 </body>
 </html>
-
