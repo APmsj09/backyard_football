@@ -184,7 +184,15 @@ async function runAIDraftPicks() {
             // Optionally add a message to the player's inbox
             // Game.addMessage("Draft Pick Skipped", "Your roster was full, so your draft pick was skipped.");
             gameState.currentPick++;
-            runAIDraftPicks(); // Go back to simulating AI picks
+
+            // --- FIX: Check if skipping ended the draft ---
+            if (checkDraftEnd()) {
+                 handleDraftEnd();
+            } else {
+                 runAIDraftPicks(); // Go back to simulating AI picks ONLY if draft isn't over
+            }
+            // --- End FIX ---
+
         } else {
             // Render the draft screen for the player's input
             UI.renderDraftScreen(gameState, handlePlayerSelectInDraft, selectedPlayerId);
@@ -299,17 +307,17 @@ async function handleAdvanceWeek() {
     const weekStartIndex = gameState.currentWeek * gamesPerWeek;
     const weekEndIndex = weekStartIndex + gamesPerWeek;
     const playerGameMatch = gameState.schedule.slice(weekStartIndex, weekEndIndex)
-                                     .find(g => g.home.id === gameState.playerTeam.id || g.away.id === gameState.playerTeam.id);
+                                            .find(g => g.home.id === gameState.playerTeam.id || g.away.id === gameState.playerTeam.id);
 
     if (playerGameMatch) {
         // Game day! Show modal with options to watch live or simulate the week.
          UI.showModal("Game Day!",
-           `<p>It's Week ${gameState.currentWeek + 1}! Your opponent is <strong>${playerGameMatch.home.id === gameState.playerTeam.id ? playerGameMatch.away.name : playerGameMatch.home.name}</strong>.</p>`,
-           () => startLiveGame(playerGameMatch), // onConfirm -> Watch Game
-           "Watch Game Live",
-           () => simulateRestOfWeek(), // onCancel -> Sim Week
-           "Sim Week" // Explicitly set cancel button text
-         );
+            `<p>It's Week ${gameState.currentWeek + 1}! Your opponent is <strong>${playerGameMatch.home.id === gameState.playerTeam.id ? playerGameMatch.away.name : playerGameMatch.home.name}</strong>.</p>`,
+            () => startLiveGame(playerGameMatch), // onConfirm -> Watch Game
+            "Watch Game Live",
+            () => simulateRestOfWeek(), // onCancel -> Sim Week
+            "Sim Week" // Explicitly set cancel button text
+          );
     } else {
         // This case should ideally not happen with round-robin in divisions.
         console.warn(`No game found for player team in Week ${gameState.currentWeek + 1}. Simulating week anyway.`);
@@ -333,7 +341,7 @@ function startLiveGame(playerGameMatch) {
     let allResults = []; // Store results for finishWeekSimulation
 
     // Simulate all games instantly, storing the player's game result separately
-     allGames.forEach(match => {
+      allGames.forEach(match => {
         try {
             // Ensure teams exist before simulating
             if (!match.home || !match.away) {
@@ -350,7 +358,7 @@ function startLiveGame(playerGameMatch) {
                          if (Game.addMessage) { // Check if function exists
                              Game.addMessage("Player Breakthrough!", `${b.player.name} improved ${b.attr}!`);
                          } else {
-                            console.log(`Player Breakthrough: ${b.player.name} improved ${b.attr}! (AddMessage not exported)`);
+                           console.log(`Player Breakthrough: ${b.player.name} improved ${b.attr}! (AddMessage not exported)`);
                          }
                     }
                 });
@@ -592,9 +600,9 @@ function handleStatsChange() {
  */
 function handleMessageClick(messageId) {
      if (!gameState || !gameState.messages) {
-        console.error("Cannot handle message click: Game state or messages not available.");
-        return;
-    }
+         console.error("Cannot handle message click: Game state or messages not available.");
+         return;
+     }
     const message = gameState.messages.find(m => m.id === messageId);
     if (message) {
         UI.showModal(message.subject, `<p class="whitespace-pre-wrap">${message.body}</p>`);
@@ -641,16 +649,16 @@ function buildCallFriendModalHtml(freeAgents) {
 function promptCallFriend() {
     gameState = Game.getGameState(); // Ensure state is fresh
      if (!gameState || !gameState.playerTeam || !gameState.playerTeam.roster) {
-        console.error("Cannot prompt call friend: Invalid game state.");
-        return;
-     }
+         console.error("Cannot prompt call friend: Invalid game state.");
+         return;
+       }
 
     const { freeAgents, playerTeam } = gameState;
     const unavailableCount = playerTeam.roster.filter(p => p.status.duration > 0).length;
     const healthyCount = playerTeam.roster.length - unavailableCount;
 
     // Exit if not needed or no free agents available
-     if (healthyCount >= MIN_HEALTHY_PLAYERS || !freeAgents || freeAgents.length === 0) {
+      if (healthyCount >= MIN_HEALTHY_PLAYERS || !freeAgents || freeAgents.length === 0) {
         if (healthyCount < MIN_HEALTHY_PLAYERS && (!freeAgents || freeAgents.length === 0)) {
             console.log("Roster short, but no free agents available to call.");
             // Optionally add a game message if Game.addMessage is exported
@@ -697,19 +705,19 @@ function promptCallFriend() {
     // Attach the handler to each button using event delegation on the modal body for robustness
     // This avoids issues with cloning/replacing nodes inside the modal body
     const modalBodyElement = document.getElementById('modal-body');
-     if(modalBodyElement) {
-         // Remove previous listener if exists (safer for potential re-calls)
-         modalBodyElement.removeEventListener('click', callButtonDelegationHandler);
-         modalBodyElement.addEventListener('click', callButtonDelegationHandler);
-     }
+      if(modalBodyElement) {
+          // Remove previous listener if exists (safer for potential re-calls)
+          modalBodyElement.removeEventListener('click', callButtonDelegationHandler);
+          modalBodyElement.addEventListener('click', callButtonDelegationHandler);
+      }
 
-     function callButtonDelegationHandler(e) {
+      function callButtonDelegationHandler(e) {
           if (e.target.matches('.call-friend-btn')) {
-               callButtonClickHandler(e);
-               // Once handled, remove the listener to prevent memory leaks
-                modalBodyElement.removeEventListener('click', callButtonDelegationHandler);
+              callButtonClickHandler(e);
+              // Once handled, remove the listener to prevent memory leaks
+               modalBodyElement.removeEventListener('click', callButtonDelegationHandler);
           }
-     }
+      }
 }
 
 
@@ -733,7 +741,7 @@ function main() {
         document.getElementById('sim-skip-btn')?.addEventListener('click', () => {
              // Pass the stored game result for the *current* live sim to the skip function
              if (currentLiveSimResult) {
-                UI.skipLiveGameSim(currentLiveSimResult); // Pass the result for final score display
+                 UI.skipLiveGameSim(currentLiveSimResult); // Pass the result for final score display
              } else {
                  console.warn("Skip button clicked, but no live sim result available.");
                  UI.skipLiveGameSim(); // Call skip without result
@@ -779,12 +787,12 @@ function main() {
         console.error("Fatal error during initialization:", error);
          const body = document.body;
          if (body) {
-            body.innerHTML = `<div style="padding: 20px; color: #b91c1c; background-color: #fef2f2; border: 1px solid #fecaca; border-radius: 8px; font-family: sans-serif;">
-                                <h1 style="font-size: 1.5em; margin-bottom: 10px; color: #991b1b;">Initialization Error</h1>
-                                <p>We're sorry, but the game couldn't start due to an unexpected error.</p>
-                                <p>Please try refreshing the page. If the problem persists, check the browser console (usually by pressing F12) for more technical details.</p>
-                                <pre style="margin-top: 15px; padding: 10px; background-color: #fee2e2; border-radius: 4px; font-size: 0.9em; overflow-x: auto; white-space: pre-wrap; word-wrap: break-word;">${error.stack || error.message}</pre>
-                             </div>`;
+             body.innerHTML = `<div style="padding: 20px; color: #b91c1c; background-color: #fef2f2; border: 1px solid #fecaca; border-radius: 8px; font-family: sans-serif;">
+                                 <h1 style="font-size: 1.5em; margin-bottom: 10px; color: #991b1b;">Initialization Error</h1>
+                                 <p>We're sorry, but the game couldn't start due to an unexpected error.</p>
+                                 <p>Please try refreshing the page. If the problem persists, check the browser console (usually by pressing F12) for more technical details.</p>
+                                 <pre style="margin-top: 15px; padding: 10px; background-color: #fee2e2; border-radius: 4px; font-size: 0.9em; overflow-x: auto; white-space: pre-wrap; word-wrap: break-word;">${error.stack || error.message}</pre>
+                               </div>`;
          }
          // --- End Graceful Error Handling ---
     }
@@ -792,4 +800,3 @@ function main() {
 
 // Start the application once the DOM is fully loaded
 document.addEventListener('DOMContentLoaded', main);
-
