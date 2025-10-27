@@ -2445,56 +2445,6 @@ export function simulateGame(homeTeam, awayTeam) {
     return { homeTeam, awayTeam, homeScore, awayScore, gameLog, breakthroughs };
 }
 
-    // --- Post-Game ---
-    gameLog.push(`==== FINAL SCORE ==== ${awayTeam.name} ${awayScore} - ${homeTeam.name} ${homeScore}`);
-
-    // Assign Wins/Losses (handle forfeits correctly)
-    if (!gameForfeited) {
-        if (homeScore > awayScore) { homeTeam.wins = (homeTeam.wins || 0) + 1; awayTeam.losses = (awayTeam.losses || 0) + 1; }
-        else if (awayScore > homeScore) { awayTeam.wins = (awayTeam.wins || 0) + 1; homeTeam.losses = (homeTeam.losses || 0) + 1; }
-        // Ties currently don't update W/L
-    } else {
-         // Scores already set during forfeit logic, ensure W/L reflect that
-         if (homeScore > awayScore) { homeTeam.wins = (homeTeam.wins || 0) + 1; awayTeam.losses = (awayTeam.losses || 0) + 1; }
-         else if (awayScore > homeScore) { awayTeam.wins = (awayTeam.wins || 0) + 1; homeTeam.losses = (homeTeam.losses || 0) + 1; }
-    }
-
-
-    // Post-Game Player Progression & Stat Aggregation
-    [...(homeTeam.roster || []), ...(awayTeam.roster || [])].forEach(p => {
-        if (!p || !p.gameStats || !p.attributes) return; // Safety checks
-
-        // Simple breakthrough chance (same logic as before)
-        const perfThreshold = p.gameStats.touchdowns >= 1 || p.gameStats.passYards > 100 || p.gameStats.recYards > 50 || p.gameStats.rushYards > 50 || p.gameStats.tackles > 4 || p.gameStats.sacks >= 1 || p.gameStats.interceptions >= 1;
-        if (p.age < 14 && perfThreshold && Math.random() < 0.15) { // Adjusted chance slightly
-            const attributesToImprove = ['speed', 'strength', 'agility', 'throwingAccuracy', 'catchingHands', 'tackling', 'blocking', 'playbookIQ', 'blockShedding', 'toughness', 'consistency'];
-            const attr = getRandom(attributesToImprove);
-            let improved = false;
-            for (const cat in p.attributes) {
-                if (p.attributes[cat]?.[attr] !== undefined && p.attributes[cat][attr] < 99) {
-                    p.attributes[cat][attr]++;
-                    p.breakthroughAttr = attr; // Flag for UI
-                    breakthroughs.push({ player: p, attr, teamName: p.teamId === homeTeam.id ? homeTeam.name : awayTeam.name });
-                    improved = true;
-                    break;
-                }
-            }
-        }
-
-        // Aggregate game stats into season/career totals (safe access)
-        if(!p.seasonStats) p.seasonStats = {};
-        if(!p.careerStats) p.careerStats = { seasonsPlayed: p.careerStats?.seasonsPlayed || 0};
-        for (const stat in p.gameStats) {
-            if (typeof p.gameStats[stat] === 'number') { // Ensure it's a number
-                 p.seasonStats[stat] = (p.seasonStats[stat] || 0) + p.gameStats[stat];
-                 p.careerStats[stat] = (p.careerStats[stat] || 0) + p.gameStats[stat];
-            }
-        }
-    });
-
-    return { homeTeam, awayTeam, homeScore, awayScore, gameLog, breakthroughs };
-}
-
 
 // =============================================================
 // --- WEEKLY/OFFSEASON PROCESSING ---
