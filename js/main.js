@@ -1,6 +1,8 @@
+// main.js
 import * as Game from './game.js';
 import * as UI from './ui.js';
-import { positionOverallWeights, relationshipLevels } from './game.js'; // Added relationshipLevels import
+import { positionOverallWeights } from './game.js'; // Changed this line
+import { relationshipLevels } from './data.js'; // Added this line
 
 let gameState = null;
 let selectedPlayerId = null;
