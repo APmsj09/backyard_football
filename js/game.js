@@ -1398,25 +1398,6 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
 // --- Add near constants or helpers ---
 // Define basic zone boundaries relative to LoS and field center/width
 // Example zones (adjust coordinates as needed)
-const zoneBoundaries = {
-    // Deep Zones (Y >= LoS + 15)
-    'zone_deep_half_left':  { minX: 0, maxX: CENTER_X, minY: 15, maxY: 60 },
-    'zone_deep_half_right': { minX: CENTER_X, maxX: FIELD_WIDTH, minY: 15, maxY: 60 },
-    'zone_deep_middle':     { minX: HASH_LEFT_X - 2, maxX: HASH_RIGHT_X + 2, minY: 15, maxY: 60 }, // Cover 3 middle safety
-    // Underneath Zones (Y < LoS + 15)
-    'zone_flat_left':   { minX: 0, maxX: HASH_LEFT_X - 3, minY: -2, maxY: 8 }, // Curl/Flat area
-    'zone_flat_right':  { minX: HASH_RIGHT_X + 3, maxX: FIELD_WIDTH, minY: -2, maxY: 8 },
-    'zone_hook_left':   { minX: HASH_LEFT_X - 3, maxX: CENTER_X - 2, minY: 5, maxY: 14 }, // Hook/Curl zone
-    'zone_hook_right':  { minX: CENTER_X + 2, maxX: HASH_RIGHT_X + 3, minY: 5, maxY: 14 },
-    'zone_short_middle':{ minX: CENTER_X - 7, maxX: CENTER_X + 7, minY: 0, maxY: 12 }, // Middle linebacker area / Hole
-    // Simplified Run Fits / Gaps (Target points relative to Ball X, LoS Y)
-    'run_gap_A_left':   { xOffset: -2, yOffset: 0.5 }, // A-Gap Left
-    'run_gap_A_right':  { xOffset: 2, yOffset: 0.5 },  // A-Gap Right
-    'run_gap_B_left':   { xOffset: -5, yOffset: 0.5 }, // B-Gap Left
-    'run_gap_B_right':  { xOffset: 5, yOffset: 0.5 },  // B-Gap Right
-    'run_edge_left':    { xOffset: -10, yOffset: 1.0}, // Contain Edge Left
-    'run_edge_right':   { xOffset: 10, yOffset: 1.0}, // Contain Edge Right
-};
 
 // Helper to check if a player is roughly within a zone's boundaries (absolute coords)
 function isPlayerInZone(playerState, zoneAssignment, lineOfScrimmage) {
