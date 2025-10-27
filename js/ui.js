@@ -6,12 +6,13 @@ let selectedPlayerId = null;
 let dragPlayerId = null;
 let dragSide = null; // 'offense' or 'defense'
 let debounceTimeout = null; // For debouncing input
-// State for live game sim interval
+// State for live game sim
 let liveGameInterval = null; // Holds interval ID
 let liveGameSpeed = 1000; // Default speed (ms)
 let liveGameCurrentIndex = 0; // Track current play index
 let liveGameLog = []; // Store the log for the current sim
 let liveGameCallback = null; // Callback for when sim finishes
+let currentLiveGameResult = null; // --- FIX: Store the result for access during speed change ---
 
 
 /**
@@ -151,8 +152,8 @@ export function setupElements() {
 export function showScreen(screenId) {
     // Ensure the 'elements' object and 'screens' property exist
     if (!elements || !elements.screens) {
-         console.error("Screen elements object (elements.screens) not initialized when showScreen was called.");
-         return;
+        console.error("Screen elements object (elements.screens) not initialized when showScreen was called.");
+        return;
     }
 
     // Log the attempt and current state
@@ -548,8 +549,8 @@ function renderRosterSummary(playerTeam) {
         // Filter out potentially invalid player entries before reducing
         const validPlayers = roster.filter(p => p && p.attributes);
         if (validPlayers.length === 0) { // Handle case where roster has entries but they are invalid
-             summaryHtml += `<div class="flex justify-between"><span class="font-semibold">${pos}:</span><span class="font-bold">N/A</span></div>`;
-             return; // Skip calculation for this position
+            summaryHtml += `<div class="flex justify-between"><span class="font-semibold">${pos}:</span><span class="font-bold">N/A</span></div>`;
+            return; // Skip calculation for this position
         }
         const totalOvr = validPlayers.reduce((sum, player) => sum + calculateOverall(player, pos), 0);
         const avgOvr = Math.round(totalOvr / validPlayers.length);
@@ -665,10 +666,10 @@ export function switchTab(tabId, gameState) {
 function renderMyTeamTab(gameState) {
      // Check for required elements and data structure
      if (!elements.myTeamRoster || !gameState?.playerTeam?.roster || !Array.isArray(gameState.playerTeam.roster)) {
-        console.error("Cannot render My Team tab: Missing elements or invalid roster data.");
-        if(elements.myTeamRoster) elements.myTeamRoster.innerHTML = '<p class="text-red-500">Error loading roster data.</p>';
-        return;
-    }
+         console.error("Cannot render My Team tab: Missing elements or invalid roster data.");
+         if(elements.myTeamRoster) elements.myTeamRoster.innerHTML = '<p class="text-red-500">Error loading roster data.</p>';
+         return;
+     }
 
      const roster = gameState.playerTeam.roster;
      // Define attribute groups for table columns
@@ -686,34 +687,34 @@ function renderMyTeamTab(gameState) {
     </tr></thead><tbody class="divide-y">`;
 
      if (roster.length === 0) {
-        tableHtml += '<tr><td colspan="15" class="p-4 text-center text-gray-500">Your roster is empty.</td></tr>';
+         tableHtml += '<tr><td colspan="15" class="p-4 text-center text-gray-500">Your roster is empty.</td></tr>';
      } else {
-        // Iterate through roster, adding a row for each valid player
-        roster.forEach(p => {
+         // Iterate through roster, adding a row for each valid player
+         roster.forEach(p => {
              if (!p || !p.attributes || !p.status) return; // Skip invalid player entries
-            const statusClass = p.status.duration > 0 ? 'text-red-500 font-semibold' : 'text-green-600';
-            const statusText = p.status.description || 'Healthy';
-            const typeTag = p.status.type === 'temporary' ? '<span class="status-tag temporary" title="Temporary Friend">[T]</span>' : '<span class="status-tag permanent" title="Permanent Roster">[P]</span>';
+             const statusClass = p.status.duration > 0 ? 'text-red-500 font-semibold' : 'text-green-600';
+             const statusText = p.status.description || 'Healthy';
+             const typeTag = p.status.type === 'temporary' ? '<span class="status-tag temporary" title="Temporary Friend">[T]</span>' : '<span class="status-tag permanent" title="Permanent Roster">[P]</span>';
 
-            // Use row header for name (accessibility)
-            tableHtml += `<tr>
-                <th scope="row" class="py-2 px-3 font-semibold sticky left-0 bg-white z-10">${p.name}</th>
-                <td class="text-center py-2 px-3">${typeTag}</td> <td class="text-center py-2 px-3">${p.age}</td>
-                <td class="text-center py-2 px-3 ${statusClass}" title="${statusText}">${statusText} ${p.status.duration > 0 ? `(${p.status.duration}w)` : ''}</td>`;
+             // Use row header for name (accessibility)
+             tableHtml += `<tr>
+                 <th scope="row" class="py-2 px-3 font-semibold sticky left-0 bg-white z-10">${p.name}</th>
+                 <td class="text-center py-2 px-3">${typeTag}</td> <td class="text-center py-2 px-3">${p.age}</td>
+                 <td class="text-center py-2 px-3 ${statusClass}" title="${statusText}">${statusText} ${p.status.duration > 0 ? `(${p.status.duration}w)` : ''}</td>`;
 
-            // Helper to render attribute cells safely
-            const renderAttr = (val, attrName) => {
-                const breakthroughClass = p.breakthroughAttr === attrName ? ' breakthrough font-bold text-green-600' : '';
-                return `<td class="text-center py-2 px-3${breakthroughClass}" title="${attrName}">${val ?? '?'}</td>`;
-            };
+             // Helper to render attribute cells safely
+             const renderAttr = (val, attrName) => {
+                 const breakthroughClass = p.breakthroughAttr === attrName ? ' breakthrough font-bold text-green-600' : '';
+                 return `<td class="text-center py-2 px-3${breakthroughClass}" title="${attrName}">${val ?? '?'}</td>`;
+             };
 
-            physicalAttrs.forEach(attr => tableHtml += renderAttr(p.attributes.physical?.[attr], attr));
-            mentalAttrs.forEach(attr => tableHtml += renderAttr(p.attributes.mental?.[attr], attr));
-            technicalAttrs.forEach(attr => tableHtml += renderAttr(p.attributes.technical?.[attr], attr));
+             physicalAttrs.forEach(attr => tableHtml += renderAttr(p.attributes.physical?.[attr], attr));
+             mentalAttrs.forEach(attr => tableHtml += renderAttr(p.attributes.mental?.[attr], attr));
+             technicalAttrs.forEach(attr => tableHtml += renderAttr(p.attributes.technical?.[attr], attr));
 
-            tableHtml += `</tr>`;
-        });
-    }
+             tableHtml += `</tr>`;
+         });
+     }
 
      elements.myTeamRoster.innerHTML = tableHtml + `</tbody></table></div>`; // Update DOM
  }
@@ -725,13 +726,13 @@ function renderMyTeamTab(gameState) {
 function renderDepthChartTab(gameState) {
     // Check for essential game state and player team data
     if (!gameState || !gameState.playerTeam || !gameState.playerTeam.roster || !gameState.playerTeam.formations || !gameState.playerTeam.depthChart) {
-         console.error("Cannot render depth chart: Invalid game state or missing required properties.");
-         // Optionally clear the relevant UI areas or display an error
-         if(elements.positionalOverallsContainer) elements.positionalOverallsContainer.innerHTML = '<p class="text-red-500">Error loading depth chart data.</p>';
-         if(elements.offenseDepthChartPane) elements.offenseDepthChartPane.innerHTML = '<p class="text-red-500">Error loading offense data.</p>';
-         if(elements.defenseDepthChartPane) elements.defenseDepthChartPane.innerHTML = '<p class="text-red-500">Error loading defense data.</p>';
-         return;
-     }
+        console.error("Cannot render depth chart: Invalid game state or missing required properties.");
+        // Optionally clear the relevant UI areas or display an error
+        if(elements.positionalOverallsContainer) elements.positionalOverallsContainer.innerHTML = '<p class="text-red-500">Error loading depth chart data.</p>';
+        if(elements.offenseDepthChartPane) elements.offenseDepthChartPane.innerHTML = '<p class="text-red-500">Error loading offense data.</p>';
+        if(elements.defenseDepthChartPane) elements.defenseDepthChartPane.innerHTML = '<p class="text-red-500">Error loading defense data.</p>';
+        return;
+    }
 
     // Filter roster safely for positional overalls table
     const permanentRoster = gameState.playerTeam.roster.filter(p => p && p.status?.type !== 'temporary');
@@ -806,11 +807,11 @@ function renderPositionalOveralls(roster) {
 function renderDepthChartSide(side, gameState, slotsContainer, rosterContainer) {
     // Check essential elements and gameState properties
     if (!slotsContainer || !rosterContainer || !gameState?.playerTeam?.roster || !gameState?.playerTeam?.depthChart) {
-         console.error(`Cannot render depth chart side "${side}": Missing elements or game state.`);
-         if(slotsContainer) slotsContainer.innerHTML = '<p class="text-red-500">Error</p>'; // Indicate error in UI
-         if(rosterContainer) rosterContainer.innerHTML = '<p class="text-red-500">Error</p>';
-         return;
-     }
+        console.error(`Cannot render depth chart side "${side}": Missing elements or game state.`);
+        if(slotsContainer) slotsContainer.innerHTML = '<p class="text-red-500">Error</p>'; // Indicate error in UI
+        if(rosterContainer) rosterContainer.innerHTML = '<p class="text-red-500">Error</p>';
+        return;
+    }
 
     const { roster, depthChart } = gameState.playerTeam;
     // Safely get the chart for the side, defaulting to empty object if missing
@@ -1231,13 +1232,17 @@ export function startLiveGameSim(gameResult, onComplete) {
 
     if (liveGameInterval) clearInterval(liveGameInterval); // Clear previous interval
     ticker.innerHTML = ''; // Clear log
-    liveGameCurrentIndex = 0; liveGameLog = gameResult.gameLog; liveGameCallback = onComplete;
+    liveGameCurrentIndex = 0;
+    liveGameLog = gameResult.gameLog;
+    liveGameCallback = onComplete;
+    currentLiveGameResult = gameResult; // --- FIX: Store the result ---
+
     // Initialize simulation state variables
     let currentHomeScore = 0; let currentAwayScore = 0; let ballOn = 20; let down = 1; let toGo = 10; let possessionTeamName = null; let currentDriveText = 'Pre-Game'; let driveActive = false;
 
     // --- Initialize UI state ---
-     elements.simAwayScore.textContent = '0'; elements.simHomeScore.textContent = '0'; elements.simGameDrive.textContent = currentDriveText; elements.simGameDown.textContent = ''; elements.simPossession.textContent = '';
-     updateField(ballOn, null, gameResult.homeTeam.name);
+      elements.simAwayScore.textContent = '0'; elements.simHomeScore.textContent = '0'; elements.simGameDrive.textContent = currentDriveText; elements.simGameDown.textContent = ''; elements.simPossession.textContent = '';
+      updateField(ballOn, null, gameResult.homeTeam.name);
     // --- End Initial UI ---
 
     // --- Function to process the next log entry ---
@@ -1246,6 +1251,7 @@ export function startLiveGameSim(gameResult, onComplete) {
             clearInterval(liveGameInterval); liveGameInterval = null;
             // Ensure Final Score is Correct
             elements.simAwayScore.textContent = gameResult.awayScore; elements.simHomeScore.textContent = gameResult.homeScore; elements.simGameDown.textContent = "FINAL"; elements.simPossession.textContent = "";
+            currentLiveGameResult = null; // --- FIX: Clear stored result ---
             if (liveGameCallback) { const cb = liveGameCallback; liveGameCallback = null; cb(); } // Clear callback after calling
             return;
         }
@@ -1330,24 +1336,25 @@ export function skipLiveGameSim(gameResult) {
         const p = document.createElement('p'); p.className = 'italic text-gray-400 mt-2'; p.textContent = '--- Simulation skipped ---'; ticker.appendChild(p); ticker.scrollTop = ticker.scrollHeight;
     }
 
-     // --- Ensure Final Score and Status are Displayed ---
-     if (gameResult) { // Use provided final result data
-         if (elements.simAwayScore) elements.simAwayScore.textContent = gameResult.awayScore;
-         if (elements.simHomeScore) elements.simHomeScore.textContent = gameResult.homeScore;
-         if (elements.simGameDown) elements.simGameDown.textContent = "FINAL";
-         if (elements.simPossession) elements.simPossession.textContent = "";
-         // Optionally update field to final state or clear it
-         // updateField(100, null, gameResult.homeTeam.name); // Example: Clear field
-     } else {
-          console.warn("skipLiveGameSim called without gameResult, final score might be inaccurate.");
-     }
-     // --- End Final Score Update ---
+      // --- Ensure Final Score and Status are Displayed ---
+      if (gameResult) { // Use provided final result data
+          if (elements.simAwayScore) elements.simAwayScore.textContent = gameResult.awayScore;
+          if (elements.simHomeScore) elements.simHomeScore.textContent = gameResult.homeScore;
+          if (elements.simGameDown) elements.simGameDown.textContent = "FINAL";
+          if (elements.simPossession) elements.simPossession.textContent = "";
+          // Optionally update field to final state or clear it
+          // updateField(100, null, gameResult.homeTeam.name); // Example: Clear field
+      } else {
+           console.warn("skipLiveGameSim called without gameResult, final score might be inaccurate.");
+      }
+      // --- End Final Score Update ---
 
-     // Trigger the completion callback if it exists
-     if (liveGameCallback) {
+      currentLiveGameResult = null; // --- FIX: Clear stored result ---
+      // Trigger the completion callback if it exists
+      if (liveGameCallback) {
           const cb = liveGameCallback; liveGameCallback = null; // Clear callback reference
           cb(); // Execute the callback
-     }
+      }
 }
 
 /**
@@ -1374,42 +1381,50 @@ export function setSimSpeed(speed) {
         // This avoids complex scoping issues or needing to pass 'nextEntry' around.
         // It reuses the globally scoped liveGameLog, liveGameCurrentIndex, etc.
         function nextEntryForRestart() {
-             if (liveGameCurrentIndex >= liveGameLog.length) { // End condition
-                 clearInterval(liveGameInterval); liveGameInterval = null;
-                 // Try to get final result to display accurately on completion
-                 const finalGameResult = game?.gameResults?.[game.gameResults.length-1]; // Access global game cautiously
-                 if(finalGameResult) {
-                     if (elements.simAwayScore) elements.simAwayScore.textContent = finalGameResult.awayScore;
-                     if (elements.simHomeScore) elements.simHomeScore.textContent = finalGameResult.homeScore;
-                     if (elements.simGameDown) elements.simGameDown.textContent = "FINAL";
-                     if (elements.simPossession) elements.simPossession.textContent = "";
-                 } else { console.warn("Could not get final game result after speed change completion."); }
-                 if (liveGameCallback) { const cb = liveGameCallback; liveGameCallback = null; cb(); } // Call and clear callback
-                 return;
-             }
+            if (liveGameCurrentIndex >= liveGameLog.length) { // End condition
+                clearInterval(liveGameInterval); liveGameInterval = null;
 
-             // --- Logic identical to the main nextEntry function ---
-             const play = liveGameLog[liveGameCurrentIndex];
-             const p = document.createElement('p');
-             // Apply styling
-             if (play.startsWith('-- Drive') || play.startsWith('====')) { p.className = 'font-bold text-amber-400 mt-2'; if (play.startsWith('==== FINAL')) p.classList.add('text-lg'); }
-             else if (play.startsWith('TOUCHDOWN') || play.includes('GOOD!')) { p.className = 'font-semibold text-green-400'; }
-             else if (play.startsWith('Turnover') || play.startsWith('INTERCEPTION') || play.startsWith('FUMBLE') || play.includes('FAILED!')) { p.className = 'font-semibold text-red-400'; }
-             else if (play.startsWith('SACK')) { p.className = 'text-orange-400'; }
-             else if (play.startsWith('INJURY')) { p.className = 'text-purple-400 italic'; }
-             p.textContent = play;
-             if (elements.simPlayLog) { // Check element exists before appending
-                 elements.simPlayLog.appendChild(p);
-                 elements.simPlayLog.scrollTop = elements.simPlayLog.scrollHeight;
-             }
-             // NOTE: This simplified sim doesn't re-parse the state dynamically on speed change.
-             // It just continues adding log lines at the new speed. Scoreboard updates might lag/jump.
-             liveGameCurrentIndex++;
-             // --- End identical logic ---
+                // --- FIX: Use the stored currentLiveGameResult for final display ---
+                if(currentLiveGameResult) {
+                    if (elements.simAwayScore) elements.simAwayScore.textContent = currentLiveGameResult.awayScore;
+                    if (elements.simHomeScore) elements.simHomeScore.textContent = currentLiveGameResult.homeScore;
+                    if (elements.simGameDown) elements.simGameDown.textContent = "FINAL";
+                    if (elements.simPossession) elements.simPossession.textContent = "";
+                } else {
+                    console.warn("Could not get final game result after speed change completion.");
+                    // Attempt fallback (might show intermediate score)
+                    if (elements.simGameDown) elements.simGameDown.textContent = "FINAL";
+                    if (elements.simPossession) elements.simPossession.textContent = "";
+                }
+                currentLiveGameResult = null; // --- FIX: Clear stored result ---
+                // --- End FIX ---
+
+                if (liveGameCallback) { const cb = liveGameCallback; liveGameCallback = null; cb(); } // Call and clear callback
+                return;
+            }
+
+            // --- Logic identical to the main nextEntry function ---
+            const play = liveGameLog[liveGameCurrentIndex];
+            const p = document.createElement('p');
+            // Apply styling
+            if (play.startsWith('-- Drive') || play.startsWith('====')) { p.className = 'font-bold text-amber-400 mt-2'; if (play.startsWith('==== FINAL')) p.classList.add('text-lg'); }
+            else if (play.startsWith('TOUCHDOWN') || play.includes('GOOD!')) { p.className = 'font-semibold text-green-400'; }
+            else if (play.startsWith('Turnover') || play.startsWith('INTERCEPTION') || play.startsWith('FUMBLE') || play.includes('FAILED!')) { p.className = 'font-semibold text-red-400'; }
+            else if (play.startsWith('SACK')) { p.className = 'text-orange-400'; }
+            else if (play.startsWith('INJURY')) { p.className = 'text-purple-400 italic'; }
+            p.textContent = play;
+            if (elements.simPlayLog) { // Check element exists before appending
+                elements.simPlayLog.appendChild(p);
+                elements.simPlayLog.scrollTop = elements.simPlayLog.scrollHeight;
+            }
+            // NOTE: This simplified sim doesn't re-parse the state dynamically on speed change.
+            // It just continues adding log lines at the new speed. Scoreboard updates might lag/jump if state parsing isn't also run.
+            // For now, we only update the final score accurately at the very end.
+            liveGameCurrentIndex++;
+            // --- End identical logic ---
         }
 
         // Restart the interval with the *new* speed
         liveGameInterval = setInterval(nextEntryForRestart, liveGameSpeed);
     }
 }
-
