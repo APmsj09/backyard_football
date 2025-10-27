@@ -181,27 +181,28 @@ async function runAIDraftPicks() {
         // If player's team roster is full, automatically skip their pick
         if (gameState.playerTeam.roster.length >= ROSTER_LIMIT) {
             console.log("Player roster full, skipping pick.");
-            // Optionally add a message to the player's inbox
-            // Game.addMessage("Draft Pick Skipped", "Your roster was full, so your draft pick was skipped.");
             gameState.currentPick++;
 
-            // --- FIX: Check if skipping ended the draft ---
+            // Check if skipping ended the draft
             if (checkDraftEnd()) {
                  handleDraftEnd();
             } else {
                  runAIDraftPicks(); // Go back to simulating AI picks ONLY if draft isn't over
             }
-            // --- End FIX ---
 
         } else {
             // Render the draft screen for the player's input
             UI.renderDraftScreen(gameState, handlePlayerSelectInDraft, selectedPlayerId);
         }
     } else if (gameState.currentPick < gameState.draftOrder.length) {
-         // Draft ended but technically wasn't player's turn yet (e.g., another team filled up)
+         // Draft ended but technically wasn't player's turn yet (e.g., another team filled up before player)
          handleDraftEnd();
+    } else { // --- ADD THIS ELSE BLOCK ---
+        // This handles the case where checkDraftEnd() is true because the pick limit was reached
+        // (e.g., currentPick is now >= draftOrder.length), often after the last AI pick.
+        handleDraftEnd();
     }
-}
+} // --- End of runAIDraftPicks function ---
 
 
 /**
