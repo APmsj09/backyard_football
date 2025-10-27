@@ -84,81 +84,145 @@ export const ZONES = {
 
 // --- Playbook Data ---
 
-// Defines the properties of each route
+// Defines the properties and coordinate paths of each route
+// Paths are relative to the player's starting [x, y]
+// Example: {x: 5, y: 10} means "move 5 yards right and 10 yards downfield from start"
 export const routeTree = {
-    'Flat': { zones: [ZONES.SHORT_L, ZONES.SHORT_R], baseYards: [2, 6], time: 2 }, // Quick
-    'Slant': { zones: [ZONES.SHORT_C], baseYards: [5, 9], time: 3 },
-    'Curl': { zones: [ZONES.MED_C], baseYards: [8, 12], time: 5 },
-    'Out': { zones: [ZONES.MED_L, ZONES.MED_R], baseYards: [10, 15], time: 6 },
-    'Post': { zones: [ZONES.DEEP_C], baseYards: [15, 30], time: 8 },
-    'Fly': { zones: [ZONES.DEEP_L, ZONES.DEEP_R], baseYards: [20, 40], time: 9 },
-    'Screen': { zones: [ZONES.SCREEN_L, ZONES.SCREEN_R], baseYards: [-3, 5], time: 3 },
-    'BlockRun': { zones: [], baseYards: [0, 0], time: 0 }, // WR blocking on run
-    'BlockPass': { zones: [], baseYards: [0, 0], time: 0 }, // RB staying in to block
+    // Basic Routes
+    'Flat':     { zones: [ZONES.SHORT_L, ZONES.SHORT_R], baseYards: [2, 6], time: 2,
+                    path: [ {x: 6, y: 2} ] }, // Path for a right flat, mirror X for left
+    'Slant':    { zones: [ZONES.SHORT_C], baseYards: [5, 9], time: 3,
+                    path: [ {x: 3, y: 4} ] }, // Path for a right slant, mirror X for left
+    'Curl':     { zones: [ZONES.MED_C], baseYards: [8, 12], time: 5,
+                    path: [ {x: 0, y: 10}, {x: 0, y: 8} ] }, // Go 10, come back 2
+    'Out':      { zones: [ZONES.MED_L, ZONES.MED_R], baseYards: [10, 15], time: 6,
+                    path: [ {x: 0, y: 10}, {x: 5, y: 10} ] }, // Go 10, break out 5
+    'Post':     { zones: [ZONES.DEEP_C], baseYards: [15, 30], time: 8,
+                    path: [ {x: 0, y: 15}, {x: -4, y: 20} ] }, // Go 15, break in (Post)
+    'Fly':      { zones: [ZONES.DEEP_L, ZONES.DEEP_R], baseYards: [20, 40], time: 9,
+                    path: [ {x: 0, y: 40} ] }, // Go deep
+    'Screen':   { zones: [ZONES.SCREEN_L, ZONES.SCREEN_R], baseYards: [-3, 5], time: 3,
+                    path: [ {x: -4, y: -1} ] }, // Step back and left for screen
+    
+    // New Routes
+    'In':       { zones: [ZONES.MED_C], baseYards: [10, 15], time: 6,
+                    path: [ {x: 0, y: 12}, {x: -6, y: 12} ] }, // Go 12, break in 6 (In/Dig)
+    'Corner':   { zones: [ZONES.DEEP_L, ZONES.DEEP_R], baseYards: [15, 30], time: 8,
+                    path: [ {x: 0, y: 15}, {x: 6, y: 20} ] }, // Go 15, break out (Corner/Flag)
+    'Drag':     { zones: [ZONES.SHORT_C], baseYards: [4, 8], time: 4,
+                    path: [ {x: 10, y: 4} ] }, // Shallow cross, mirror X for other side
+    'Wheel':    { zones: [ZONES.DEEP_L, ZONES.DEEP_R], baseYards: [15, 35], time: 8,
+                    path: [ {x: 3, y: 1}, {x: 5, y: 8}, {x: 5, y: 25} ] }, // RB wheel route
+                    
+    // Blocking Assignments (paths are irrelevant, but defined for consistency)
+    'BlockRun': { zones: [], baseYards: [0, 0], time: 0, path: [{x: 0, y: 1}] }, // Engage block
+    'BlockPass':{ zones: [], baseYards: [0, 0], time: 0, path: [{x: 0, y: -0.5}] }, // Step back to block
 };
 
 // Defines the available plays for each formation
 export const offensivePlaybook = {
-    // Balanced Plays
-    'Balanced_InsideRun': { type: 'run', zone: ZONES.RUN_C, tags: ['run', 'inside'], assignments: { 'RB1': 'run_inside', 'WR1': 'block_run', 'WR2': 'block_run' } },
-    'Balanced_OutsideRun': { type: 'run', zone: ZONES.RUN_L, tags: ['run', 'outside'], assignments: { 'RB1': 'run_outside', 'WR1': 'block_run', 'WR2': 'block_run' } },
-    'Balanced_ShortPass': { type: 'pass', playAction: false, tags: ['pass', 'short'], assignments: { 'RB1': 'Flat', 'WR1': 'Slant', 'WR2': 'Curl' } },
-    'Balanced_DeepPass': { type: 'pass', playAction: true, tags: ['pass', 'deep', 'pa'], assignments: { 'RB1': 'block_pass', 'WR1': 'Fly', 'WR2': 'Post' } },
-    // Spread Plays
-    'Spread_InsideRun': { type: 'run', zone: ZONES.RUN_C, tags: ['run', 'inside'], assignments: { 'RB1': 'run_inside', 'WR1': 'block_run', 'WR2': 'block_run', 'WR3': 'block_run' } },
-    'Spread_QuickSlants': { type: 'pass', playAction: false, tags: ['pass', 'short', 'quick'], assignments: { 'RB1': 'Flat', 'WR1': 'Slant', 'WR2': 'Slant', 'WR3': 'Slant' } },
-    'Spread_FourVerts': { type: 'pass', playAction: false, tags: ['pass', 'deep'], assignments: { 'RB1': 'Flat', 'WR1': 'Fly', 'WR2': 'Fly', 'WR3': 'Post' } },
-    'Spread_Screen': { type: 'pass', zone: ZONES.SCREEN_L, tags: ['pass', 'screen'], assignments: { 'RB1': 'Screen', 'WR1': 'block_pass', 'WR2': 'block_pass', 'WR3': 'block_pass' } },
-    // Power Plays
-    'Power_Dive': { type: 'run', zone: ZONES.RUN_C, tags: ['run', 'inside', 'power'], assignments: { 'RB1': 'run_inside', 'RB2': 'block_run', 'WR1': 'block_run' } },
-    'Power_Sweep': { type: 'run', zone: ZONES.RUN_R, tags: ['run', 'outside', 'power'], assignments: { 'RB1': 'run_outside', 'RB2': 'block_run', 'WR1': 'block_run' } },
-    'Power_PA_Bootleg': { type: 'pass', playAction: true, tags: ['pass', 'deep', 'pa'], assignments: { 'RB1': 'block_pass', 'RB2': 'Flat', 'WR1': 'Post' } },
+    // --- Balanced Formation ---
+    'Balanced_InsideRun':   { type: 'run',  zone: ZONES.RUN_C, tags: ['run', 'inside'],
+                              assignments: { 'RB1': 'run_inside', 'WR1': 'BlockRun', 'WR2': 'BlockRun' } },
+    'Balanced_OutsideRun':  { type: 'run',  zone: ZONES.RUN_L, tags: ['run', 'outside'],
+                              assignments: { 'RB1': 'run_outside', 'WR1': 'BlockRun', 'WR2': 'BlockRun' } },
+    'Balanced_ShortPass':   { type: 'pass', playAction: false, tags: ['pass', 'short'],
+                              assignments: { 'RB1': 'Flat', 'WR1': 'Slant', 'WR2': 'Curl' } },
+    'Balanced_DeepPass':    { type: 'pass', playAction: true, tags: ['pass', 'deep', 'pa'],
+                              assignments: { 'RB1': 'BlockPass', 'WR1': 'Fly', 'WR2': 'Post' } },
+    'Balanced_PA_Cross':    { type: 'pass', playAction: true, tags: ['pass', 'medium', 'pa'],
+                              assignments: { 'RB1': 'BlockPass', 'WR1': 'In', 'WR2': 'Drag' } }, // NEW
+
+    // --- Spread Formation ---
+    'Spread_InsideRun':     { type: 'run',  zone: ZONES.RUN_C, tags: ['run', 'inside'],
+                              assignments: { 'RB1': 'run_inside', 'WR1': 'BlockRun', 'WR2': 'BlockRun', 'WR3': 'BlockRun' } },
+    'Spread_QuickSlants':   { type: 'pass', playAction: false, tags: ['pass', 'short', 'quick'],
+                              assignments: { 'RB1': 'Flat', 'WR1': 'Slant', 'WR2': 'Slant', 'WR3': 'Slant' } },
+    'Spread_FourVerts':     { type: 'pass', playAction: false, tags: ['pass', 'deep'],
+                              assignments: { 'RB1': 'Flat', 'WR1': 'Fly', 'WR2': 'Fly', 'WR3': 'Post' } },
+    'Spread_WR_Screen':     { type: 'pass', zone: ZONES.SCREEN_L, tags: ['pass', 'screen'],
+                              assignments: { 'WR3': 'Screen', 'RB1': 'BlockPass', 'WR1': 'BlockRun', 'WR2': 'BlockRun' } }, // Changed to WR screen
+    'Spread_Mesh':          { type: 'pass', playAction: false, tags: ['pass', 'short', 'timing'],
+                              assignments: { 'RB1': 'Wheel', 'WR1': 'Drag', 'WR2': 'Drag', 'WR3': 'In' } }, // NEW
+
+    // --- Power Formation ---
+    'Power_Dive':           { type: 'run',  zone: ZONES.RUN_C, tags: ['run', 'inside', 'power'],
+                              assignments: { 'RB1': 'run_inside', 'RB2': 'BlockRun', 'WR1': 'BlockRun' } },
+    'Power_Sweep':          { type: 'run',  zone: ZONES.RUN_R, tags: ['run', 'outside', 'power'],
+                              assignments: { 'RB1': 'run_outside', 'RB2': 'BlockRun', 'WR1': 'BlockRun' } },
+    'Power_PA_Bootleg':     { type: 'pass', playAction: true, tags: ['pass', 'deep', 'pa'],
+                              assignments: { 'RB1': 'BlockPass', 'RB2': 'Flat', 'WR1': 'Corner' } }, // Changed to Corner
+    'Power_RB_Screen':      { type: 'pass', zone: ZONES.SCREEN_R, tags: ['pass', 'screen'],
+                              assignments: { 'RB1': 'Screen', 'RB2': 'BlockPass', 'WR1': 'BlockRun' } }, // NEW
 };
 
 // Defines defensive play calls (concepts)
 export const defensivePlaybook = {
-    'Cover_1': { 
-        name: 'Cover 1', 
-        concept: 'Man', 
-        blitz: false, 
-        assignments: { // Maps slot to an assignment *type*
-            'DL1': 'rush_pass', 'DL2': 'rush_pass', 'DL3': 'rush_pass_contain',
-            'LB1': 'man_cover_RB', 'LB2': 'spy_QB', 'LB3': 'man_cover_WR2',
-            'DB1': 'man_cover_WR1'
-        } 
-    },
-    'Cover_2_Zone': { 
-        name: 'Cover 2 Zone', 
-        concept: 'Zone', 
-        blitz: false, 
+    'Cover_1':          {
+        name: 'Cover 1 Man',
+        concept: 'Man',
+        blitz: false,
+        // Assignments map slot (e.g., 'DB1') to an assignment key (e.g., 'man_cover_WR1')
         assignments: {
-            'DL1': 'rush_pass', 'DL2': 'rush_pass',
-            'LB1': 'zone_short_left', 'LB2': 'zone_short_middle', 'LB3': 'zone_short_right',
-            'DB1': 'zone_deep_half_left', 'DB2': 'zone_deep_half_right'
-        } 
+            'DL1': 'pass_rush', 'DL2': 'pass_rush', 'DL3': 'pass_rush',
+            'LB1': 'man_cover_RB1', 'LB2': 'spy_QB', // QB Spy
+            'DB1': 'man_cover_WR1', 'DB2': 'man_cover_WR2' // Assuming DBs match WRs 1-on-1
+        }
     },
-    'Man_Blitz': { 
-        name: 'Man Blitz', 
-        concept: 'Man', 
-        blitz: true, 
+    'Cover_2_Zone':     {
+        name: 'Cover 2 Zone',
+        concept: 'Zone',
+        blitz: false,
+        assignments: {
+            'DL1': 'pass_rush', 'DL2': 'pass_rush',
+            'LB1': 'zone_flat_left', 'LB2': 'zone_short_middle', 'LB3': 'zone_flat_right', // Underneath coverage
+            'DB1': 'zone_deep_half_left', 'DB2': 'zone_deep_half_right' // Deep safeties
+        }
+    },
+    'Man_Blitz':        {
+        name: 'Man Blitz (Cover 0)',
+        concept: 'Man',
+        blitz: true,
         assignments: {
             'DL1': 'blitz_gap', 'DL2': 'blitz_gap', 'DL3': 'blitz_edge',
-            'LB1': 'blitz_gap', 'LB2': 'man_cover_RB',
-            'DB1': 'man_press_WR1', 'DB2': 'man_press_WR2'
-        } 
+            'LB1': 'blitz_gap', 'LB2': 'man_cover_RB1', // One LB blitzes, one covers RB
+            'DB1': 'man_cover_WR1', 'DB2': 'man_cover_WR2' // No safety help
+        }
     },
-    'Run_Stop': { 
-        name: 'Run Stop', 
-        concept: 'Man', 
-        blitz: true, 
+    'Run_Stop_4-2-1':   { // Specific to 4-2-1 formation, but logic is generic
+        name: 'Run Stop (4-2-1)',
+        concept: 'Man', // Or 'Run'
+        blitz: true,
         assignments: {
-            'DL1': 'run_stop_gap', 'DL2': 'run_stop_gap', 'DL3': 'run_stop_gap', 'DL4': 'run_stop_edge',
-            'LB1': 'run_stop_fill', 'LB2': 'run_stop_fill',
-            'DB1': 'run_support'
-        } 
+            'DL1': 'run_edge_left', 'DL2': 'run_gap_B_left', 'DL3': 'run_gap_B_right', 'DL4': 'run_edge_right',
+            'LB1': 'run_gap_A_left', 'LB2': 'run_gap_A_right',
+            'DB1': 'run_support' // Safety comes down hard
+        }
     },
+    'Cover_3_Zone':     { // NEW
+        name: 'Cover 3 Zone',
+        concept: 'Zone',
+        blitz: false,
+        assignments: {
+            'DL1': 'pass_rush', 'DL2': 'pass_rush', 'DL3': 'pass_rush',
+            'LB1': 'zone_flat_left', 'LB2': 'zone_hook_left', // Or short_middle
+            'LB3': 'zone_flat_right',
+            'DB1': 'zone_deep_middle' // Centerfield safety
+            // Note: This 3-3-1 doesn't have corners for deep 1/3s. DB1 takes middle 1/3.
+            // This is a limitation of 7-on-7 simulation.
+        }
+    },
+    'Zone_Blitz':       { // NEW
+        name: 'Zone Blitz',
+        concept: 'Zone',
+        blitz: true,
+        assignments: {
+            'DL1': 'pass_rush', 'DL2': 'zone_short_middle', // DL drops into coverage!
+            'LB1': 'blitz_edge', 'LB2': 'zone_hook_left', 'LB3': 'blitz_gap',
+            'DB1': 'zone_deep_half_left', 'DB2': 'zone_deep_half_right'
+        }
+    }
 };
-
 // --- Formations with Coordinates ---
 export const offenseFormations = {
     'Balanced': {
