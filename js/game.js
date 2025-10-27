@@ -1412,14 +1412,6 @@ function isPlayerInZone(playerState, zoneAssignment, lineOfScrimmage) {
     // Check Y boundaries
     return playerYRel >= (zone.minY || -Infinity) && playerYRel <= (zone.maxY || Infinity);
 }
-// Helper to get zone center (absolute coords)
-function getZoneCenter(zoneAssignment, lineOfScrimmage) {
-     const zone = zoneBoundaries[zoneAssignment];
-     if (!zone || zone.xOffset !== undefined) return { x: CENTER_X, y: lineOfScrimmage + 7 }; // Default for non-area zones or errors
-     const centerX = zone.minX !== undefined && zone.maxX !== undefined ? (zone.minX + zone.maxX) / 2 : CENTER_X; // Default to field center if X undefined
-     const centerYRel = zone.minY !== undefined && zone.maxY !== undefined ? (zone.minY + zone.maxY) / 2 : 7; // Default to 7 yards deep if Y undefined
-     return { x: centerX, y: lineOfScrimmage + centerYRel };
-}
 // --- End Zone Helpers ---
 
 
