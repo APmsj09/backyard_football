@@ -1532,8 +1532,8 @@ function updateQBDecision(playState, offenseStates, defenseStates, gameLog) {
             const distance = Math.sqrt(dx*dx + dy*dy);
             const accuracy = qbPlayer.attributes.technical?.throwingAccuracy || 50;
             const accuracyRoll = (100 - accuracy) / 100;
-            const xError = getRandomInt(-5, 5) * accuracyRoll;
-            const yError = getRandomInt(-5, 5) * accuracyRoll;
+            const xError = (Math.random() - 0.5) * 6 * accuracyRoll; 
+            const yError = (Math.random() - 0.5) * 6 * accuracyRoll;
             const throwSpeedYPS = 25 + (qbPlayer.attributes.physical?.strength || 50) / 10;
             const airTime = Math.max(0.3, distance / throwSpeedYPS);
 
@@ -1782,6 +1782,13 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
                     playState.incomplete = true; playState.playIsLive = false; playState.ballState.inAir = false;
                     break;
                 }
+                // --- ADD THIS CHECK FOR OUT OF BOUNDS PASS ---
+            if (playState.ballState.x <= 0.1 || playState.ballState.x >= FIELD_WIDTH - 0.1 || playState.ballState.y >= FIELD_LENGTH - 0.1) {
+                gameLog.push(`‹‹ Pass sails out of bounds. Incomplete.`);
+                playState.incomplete = true; playState.playIsLive = false; playState.ballState.inAir = false;
+                break; // End play
+            }
+            // --- END ADDED BLOCK ---
             } else if (ballCarrierState) {
                 playState.ballState.x = ballCarrierState.x;
                 playState.ballState.y = ballCarrierState.y;
