@@ -775,7 +775,7 @@ function renderAvailablePlayerList(players, container, side) {
 }
 
 /** Renders the 'Messages' tab content. */
-function renderMessagesTab(gameState) {
+export function renderMessagesTab(gameState) {
     if (!elements.messagesList) { console.error("Messages list element not found."); return; }
     if (!gameState?.messages || !Array.isArray(gameState.messages)) {
         elements.messagesList.innerHTML = '<p class="text-gray-500">Messages unavailable.</p>';
@@ -796,7 +796,7 @@ function renderMessagesTab(gameState) {
 }
 
 /** Updates the visibility of the unread messages notification dot. */
-function updateMessagesNotification(messages, markAllAsRead = false) {
+export function updateMessagesNotification(messages, markAllAsRead = false) {
     if (!elements.messagesNotificationDot || !Array.isArray(messages)) return;
     if (markAllAsRead) {
         messages.forEach(msg => { if (msg) msg.isRead = true; });
