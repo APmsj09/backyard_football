@@ -126,7 +126,8 @@ export function setupElements() {
         simGameDrive: document.getElementById('sim-game-drive'),
         simGameDown: document.getElementById('sim-game-down'),
         simPossession: document.getElementById('sim-possession'),
-        fieldDisplay: document.getElementById('field-display'),
+        fieldCanvas: document.getElementById('field-canvas'),
+        fieldCanvasCtx: document.getElementById('field-canvas')?.getContext('2d'),
         simPlayLog: document.getElementById('sim-play-log'),
         simSpeedBtns: document.querySelectorAll('.sim-speed-btn'),
         simSkipBtn: document.getElementById('sim-skip-btn'),
@@ -1066,27 +1067,116 @@ export function setupDepthChartTabs() {
 // --- Live Game Sim UI Logic ---
 // ===================================
 
-/** Helper to update field visualization */
-function updateField(ballOnYard, possessionTeamName, homeTeamName) {
-    if (!elements.fieldDisplay) return; // Guard
-    const field = Array(12).fill(' . ');
-    // Determine ball marker based on possession
-    const ballMarker = !possessionTeamName ? ' ' : possessionTeamName === homeTeamName ? 'H' : 'A';
+/**
+ * Draws the state of a play (players, ball) onto the field canvas.
+ * @param {object} frameData - A single frame from resolvePlay.visualizationFrames.
+ * @param {string} homeTeamId - The ID of the home team for coloring.
+ */
+function drawFieldVisualization(frameData, homeTeamId) {
+    const ctx = elements.fieldCanvasCtx;
+    const canvas = elements.fieldCanvas;
+    if (!ctx || !canvas) return; // Exit if canvas not found
 
-    // Place the ball marker on the field visualization string
-    if (ballOnYard <= 0 && possessionTeamName) {
-         field[0] = `[${ballMarker}]`; // Own Endzone
-    } else if (ballOnYard >= 100 && possessionTeamName) {
-         field[11] = `[${ballMarker}]`; // Opponent Endzone
-    } else if (possessionTeamName) {
-        // Calculate the correct index (0-9 for field markers, add 1 for array index)
-        const fieldIndex = Math.floor(ballOnYard / 10) + 1;
-        // Clamp index to valid range [1, 10] which corresponds to field sections 1-11
-        const safeIndex = Math.max(1, Math.min(10, fieldIndex));
-        field[safeIndex] = ` ${ballMarker} `;
+    // Clear canvas
+    ctx.fillStyle = '#059669'; // green-700
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // --- Scaling ---
+    // We map 120 yards (FIELD_LENGTH) to the canvas height (320px)
+    const pixelsPerYard = canvas.height / FIELD_LENGTH; // e.g., 320 / 120 = 2.66
+    // We map 53.3 yards (FIELD_WIDTH) to the canvas width (600px)
+    const scaleX = canvas.width / FIELD_WIDTH;   // e.g., 600 / 53.3 = 11.25
+    const scaleY = pixelsPerYard;
+    // NOTE: This will look "stretched" horizontally. A 1:1 scale is more complex.
+    // --- End Scaling ---
+
+    // --- Draw Field Markings ---
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+    ctx.lineWidth = 1;
+    ctx.font = '10px "Inter"';
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
+    ctx.textAlign = 'center';
+
+    for (let y = 10; y <= 110; y += 10) { // 10-yard lines
+        const drawY = y * scaleY;
+        ctx.beginPath();
+        ctx.moveTo(0, drawY);
+        ctx.lineTo(canvas.width, drawY);
+        ctx.stroke();
+
+        if (y > 10 && y < 110) { // Don't draw numbers on goal lines
+            const yardLineNum = y <= 60 ? y - 10 : 120 - y - 10; // 10, 20... 50... 20, 10
+            ctx.fillText(yardLineNum.toString(), canvas.width / 2, drawY + 10);
+        }
     }
-    // Construct the field string representation
-    elements.fieldDisplay.textContent = `AWAY [${field.slice(0, 6).join('')}] [${field.slice(6, 12).join('')}] HOME`;
+    // --- End Field Markings ---
+
+    // If no frame data (e.g., pre-play), exit here
+    if (!frameData || !frameData.players) return;
+
+    // --- Draw Players ---
+    const playerRadius = 5;
+    frameData.players.forEach(pState => {
+        const drawX = pState.x * scaleX;
+        const drawY = pState.y * scaleY;
+
+        // Determine color
+        const isHome = pState.teamId === homeTeamId;
+        const isOffense = pState.isOffense;
+        let color = '#FFFFFF'; // Default (shouldn't happen)
+
+        if (isOffense) {
+            color = isHome ? '#DC2626' : '#2563EB'; // Home Offense: Red, Away Offense: Blue
+        } else {
+            color = isHome ? '#FBBF24' : '#E5E7EB'; // Home Defense: Yellow, Away Defense: Gray
+        }
+
+// --- Draw Players ---
+        const playerRadius = 6; // <-- Made slightly larger for numbers
+        frameData.players.forEach(pState => {
+            const drawX = pState.x * scaleX;
+            const drawY = pState.y * scaleY;
+            // ... (determine color) ...
+
+            // Draw player circle
+            ctx.fillStyle = color;
+            ctx.beginPath();
+            ctx.arc(drawX, drawY, playerRadius, 0, 2 * Math.PI);
+            ctx.fill();
+
+            // --- REPLACED 'X' / 'O' with Player Number ---
+            ctx.fillStyle = 'black'; // Color for the number
+            ctx.font = 'bold 8px "Inter"'; // Font for the number
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(pState.number || '?', drawX, drawY + 0.5); // Use number, fallback to '?'
+            // --- END REPLACEMENT ---
+
+            // Highlight ball carrier
+        if (pState.isBallCarrier) {
+            ctx.strokeStyle = '#FBBF24'; // Yellow highlight
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.arc(drawX, drawY, playerRadius + 3, 0, 2 * Math.PI);
+            ctx.stroke();
+        }
+    });
+
+    // --- Draw Ball ---
+    if (frameData.ball && frameData.ball.inAir) {
+        const ballDrawX = frameData.ball.x * scaleX;
+        const ballDrawY = frameData.ball.y * scaleY;
+        // Simple shadow
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
+        ctx.beginPath();
+        ctx.arc(ballDrawX + 2, ballDrawY + 2, 3, 0, 2 * Math.PI);
+        ctx.fill();
+        // Ball
+        ctx.fillStyle = '#854D0E'; // brown-700
+        ctx.beginPath();
+        ctx.arc(ballDrawX, ballDrawY, 3, 0, 2 * Math.PI);
+        ctx.fill();
+    }
 }
 
 /** Renders the live stats box with key player performances for the game. */
@@ -1193,6 +1283,12 @@ export function startLiveGameSim(gameResult, onComplete) {
 
     // --- Function to process the next log entry ---
     function nextEntry() {
+        if (gameResult.visualizationFrames && gameResult.visualizationFrames[liveGameCurrentIndex]) {
+            drawFieldVisualization(gameResult.visualizationFrames[liveGameCurrentIndex], gameResult.homeTeam.id);
+        } else if (liveGameCurrentIndex === 0) {
+            // Clear canvas at the start of the play-by-play
+            drawFieldVisualization(null);
+        }
         if (liveGameCurrentIndex >= liveGameLog.length) { // End condition
             clearInterval(liveGameInterval); liveGameInterval = null;
             // Ensure Final Score is Correct
@@ -1202,6 +1298,7 @@ export function startLiveGameSim(gameResult, onComplete) {
             }
              elements.simGameDown.textContent = "FINAL";
              elements.simPossession.textContent = "";
+            drawFieldVisualization(null);
             currentLiveGameResult = null; // Clear stored result
             if (liveGameCallback) { const cb = liveGameCallback; liveGameCallback = null; cb(); }
             return;
