@@ -1045,7 +1045,7 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
                 action: action, assignment: assignment,
                 routePath: routePath, currentPathIndex: 0,
                 engagedWith: null, isBlocked: false, blockedBy: null, isEngaged: false,
-                isBallCarrier: false, hasBall: false
+                isBallCarrier: false, hasBall: false, stunnedTicks: 0 // <-- ADD THIS LINE
             });
         });
     };
@@ -1094,7 +1094,14 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
 
     playState.activePlayers.forEach(pState => {
         let target = null; // Target: PlayerState (dynamic) or {x, y} (static point)
-
+        // --- ADD THIS BLOCK AT THE TOP ---
+        if (pState.stunnedTicks > 0) {
+            pState.stunnedTicks--;
+            pState.targetX = pState.x; // Player stands still while stunned
+            pState.targetY = pState.y;
+            return; // Skip all other AI logic for this tick
+        }
+        // --- END ADDED BLOCK ---
         // --- Handle Engaged State (Skip target update entirely) ---
         if (pState.isBlocked || pState.isEngaged) {
             pState.targetX = pState.x; pState.targetY = pState.y;
@@ -1329,7 +1336,7 @@ function checkTackleCollisions(playState, gameLog) {
      const ballCarrierState = playState.activePlayers.find(p => p.isBallCarrier);
      if (!ballCarrierState) return false;
 
-     const activeDefenders = playState.activePlayers.filter(p => !p.isOffense && !p.isBlocked && !p.isEngaged);
+     const activeDefenders = playState.activePlayers.filter(p => !p.isOffense && !p.isBlocked && !p.isEngaged && p.stunnedTicks === 0);
 
      for (const defender of activeDefenders) {
          if (getDistance(ballCarrierState, defender) < TACKLE_RANGE) {
@@ -1350,27 +1357,33 @@ function checkTackleCollisions(playState, gameLog) {
              const breakPower = ((carrierPlayer.attributes?.physical?.agility || 50) + (carrierPlayer.attributes?.physical?.strength || 50)/2) * ballCarrierState.fatigueModifier;
              const tacklePower = ((tacklerPlayer.attributes?.technical?.tackling || 50) + (tacklerPlayer.attributes?.physical?.strength || 50)/2) * defender.fatigueModifier;
              const diff = breakPower - (tacklePower + getRandomInt(-15, 25));
-             const TACKLE_THRESHOLD = 5;
+             const TACKLE_THRESHOLD = 8; // <-- NEW: Carrier must beat roll by 8 to break
 
              if (diff <= TACKLE_THRESHOLD) { // Tackle success
-                 playState.yards = ballCarrierState.y - playState.lineOfScrimmage;
-                 gameLog.push(`✋ ${ballCarrierState.name} tackled by ${defender.name} for a gain of ${playState.yards.toFixed(1)} yards.`);
-                 playState.playIsLive = false;
-                 if (!tacklerPlayer.gameStats) tacklerPlayer.gameStats = {};
-                 tacklerPlayer.gameStats.tackles = (tacklerPlayer.gameStats.tackles || 0) + 1;
-                 
-                 // --- SACK Logic ---
-                 if (ballCarrierState.slot === 'QB1' && ballCarrierState.action === 'qb_setup' && ballCarrierState.y < playState.lineOfScrimmage) {
-                     playState.sack = true;
-                     tacklerPlayer.gameStats.sacks = (tacklerPlayer.gameStats.sacks || 0) + 1;
-                     gameLog.push(`💥 SACK! ${tacklerPlayer.name} gets to ${ballCarrierState.name} for a loss!`);
-                 }
-                 // --- End SACK Logic ---
-                 
-                 return true; // Play ended
-             } else { // Broken tackle
+                playState.yards = ballCarrierState.y - playState.lineOfScrimmage;
+                playState.playIsLive = false;
+                if (!tacklerPlayer.gameStats) ensureStats(tacklerPlayer); // Use ensureStats
+                tacklerPlayer.gameStats.tackles = (tacklerPlayer.gameStats.tackles || 0) + 1;
+                
+                // --- REVISED SACK Logic ---
+                // Check if carrier is QB, was in a passing action, and is behind LoS
+                if (ballCarrierState.slot === 'QB1' && 
+                    (ballCarrierState.action === 'qb_setup') && // Only 'qb_setup' counts as sack
+                    ballCarrierState.y < playState.lineOfScrimmage) 
+                {
+                    playState.sack = true;
+                    tacklerPlayer.gameStats.sacks = (tacklerPlayer.gameStats.sacks || 0) + 1;
+                    // Log SACK instead of generic tackle
+                    gameLog.push(`💥 SACK! ${tacklerPlayer.name} gets to ${ballCarrierState.name} for a loss of ${Math.abs(playState.yards).toFixed(1)} yards!`);
+                } else {
+                    // Log generic tackle
+                    gameLog.push(`✋ ${ballCarrierState.name} tackled by ${defender.name} for a gain of ${playState.yards.toFixed(1)} yards.`);
+                }
+                return true; // Play ended
+            } else { // Broken tackle
                  gameLog.push(`💥 ${ballCarrierState.name} breaks tackle from ${defender.name}!`);
                  defender.isEngaged = false; // Defender failed
+                 defender.stunnedTicks = 10; // <-- ADD THIS LINE (Stun for 10 ticks / 1.5 seconds)
              }
          }
      }
@@ -1618,7 +1631,7 @@ function handleBallArrival(playState, gameLog) {
             const defenderInterference = closestDefender ? ( (closestDefender.agility || 50) + (closestDefender.playbookIQ || 50) ) / 2 * closestDefender.fatigueModifier : 0;
             const catchDiff = receiverCatchPower - (defenderInterference + getRandomInt(-15, 25));
 
-            if (catchDiff > 5) { // Catch
+            if (catchDiff > 2) { // Catch
                  intendedReceiver.isBallCarrier = true; intendedReceiver.hasBall = true;
                  playState.yards = intendedReceiver.y - playState.lineOfScrimmage;
                  gameLog.push(`👍 Caught by ${intendedReceiver.name} at y=${intendedReceiver.y.toFixed(1)}! (Air Yards: ${playState.yards.toFixed(1)})`);
