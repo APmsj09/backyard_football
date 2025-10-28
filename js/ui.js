@@ -10,6 +10,13 @@ import {
     relationshipLevels // <-- Added
 } from './data.js';
 
+// --- Visualization Constants (Must match game.js) ---
+const FIELD_LENGTH = 120;
+const FIELD_WIDTH = 53.3;
+const CENTER_X = FIELD_WIDTH / 2;
+const HASH_LEFT_X = 18.0;
+const HASH_RIGHT_X = 35.3;
+
 // --- Global UI State & Elements ---
 let elements = {};
 let selectedPlayerId = null; // Used for highlighting in draft pool
