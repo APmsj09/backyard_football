@@ -1783,12 +1783,13 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
                     break;
                 }
                 // --- ADD THIS CHECK FOR OUT OF BOUNDS PASS ---
-            if (playState.ballState.x <= 0.1 || playState.ballState.x >= FIELD_WIDTH - 0.1 || playState.ballState.y >= FIELD_LENGTH - 0.1) {
-                gameLog.push(`‹‹ Pass sails out of bounds. Incomplete.`);
-                playState.incomplete = true; playState.playIsLive = false; playState.ballState.inAir = false;
-                break; // End play
-            }
-            // --- END ADDED BLOCK ---
+                if (playState.ballState.x <= 0.1 || playState.ballState.x >= FIELD_WIDTH - 0.1 || playState.ballState.y >= FIELD_LENGTH - 0.1) {
+                    gameLog.push(`‹‹ Pass sails out of bounds. Incomplete.`);
+                    playState.incomplete = true; playState.playIsLive = false; playState.ballState.inAir = false;
+                    break; // End play
+                }
+                // --- END ADDED BLOCK ---
+                
             } else if (ballCarrierState) {
                 playState.ballState.x = ballCarrierState.x;
                 playState.ballState.y = ballCarrierState.y;
