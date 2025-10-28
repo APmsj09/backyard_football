@@ -41,7 +41,6 @@ function debounce(func, delay) {
 
 /**
  * Grabs references to all necessary DOM elements and stores them in the 'elements' object.
- * Explicitly gets each required element by ID for reliability.
  */
 export function setupElements() {
     console.log("Running setupElements...");
@@ -89,7 +88,7 @@ export function setupElements() {
         dashboardTabs: document.getElementById('dashboard-tabs'),
         dashboardContent: document.getElementById('dashboard-content'),
         advanceWeekBtn: document.getElementById('advance-week-btn'),
-        myTeamRoster: document.getElementById('my-team-roster'), // Container for My Team tab
+        myTeamRoster: document.getElementById('my-team-roster'),
         messagesList: document.getElementById('messages-list'),
         messagesNotificationDot: document.getElementById('messages-notification-dot'),
         scheduleList: document.getElementById('schedule-list'),
@@ -131,9 +130,9 @@ export function setupElements() {
         simPlayLog: document.getElementById('sim-play-log'),
         simSpeedBtns: document.querySelectorAll('.sim-speed-btn'),
         simSkipBtn: document.getElementById('sim-skip-btn'),
-        simLiveStats: document.getElementById('sim-live-stats'), // Live stats container
-        simStatsAway: document.getElementById('sim-stats-away'), // Away stats div
-        simStatsHome: document.getElementById('sim-stats-home')  // Home stats div
+        simLiveStats: document.getElementById('sim-live-stats'),
+        simStatsAway: document.getElementById('sim-stats-away'),
+        simStatsHome: document.getElementById('sim-stats-home')
     };
 
     // Log checks for missing elements
@@ -141,7 +140,6 @@ export function setupElements() {
     Object.keys(elements.screens).forEach(key => {
         if (!elements.screens[key]) console.error(`!!! Screen element ID "${key}" NOT FOUND.`);
     });
-    // Consider adding checks for other critical elements too
 
     // Populate draft sort options
     if (elements.draftSort) {
@@ -152,7 +150,7 @@ export function setupElements() {
             <option value="speed-desc">Speed (Fastest)</option>
             <option value="strength-desc">Strength (Strongest)</option>
             <option value="agility-desc">Agility (Most Agile)</option>
-            <option value="potential-desc">Potential (Highest)</option> {/* Added */}
+            <option value="potential-desc">Potential (Highest)</option>
         `;
         elements.draftSort.innerHTML = sortOptions;
     }
@@ -161,8 +159,6 @@ export function setupElements() {
 
 /**
  * Shows a specific screen div and hides all others.
- * Includes robustness checks.
- * @param {string} screenId - The ID of the screen element to show.
  */
 export function showScreen(screenId) {
     if (!elements || !elements.screens) {
@@ -171,7 +167,6 @@ export function showScreen(screenId) {
     }
     console.log(`showScreen called for: ${screenId}.`);
 
-    // Ensure the screen exists in our registry, try direct lookup if missing
     if (!elements.screens[screenId]) {
         console.warn(`Screen element "${screenId}" not found in initial setup. Attempting direct lookup.`);
         const element = document.getElementById(screenId);
@@ -179,14 +174,12 @@ export function showScreen(screenId) {
         else { console.error(`CRITICAL: Screen element ID "${screenId}" still not found.`); return; }
     }
 
-    // Hide all known screens
     Object.values(elements.screens).forEach(screenElement => {
         if (screenElement && screenElement.classList) {
             screenElement.classList.add('hidden');
         }
     });
 
-    // Show the target screen
     const targetScreen = elements.screens[screenId];
     if (targetScreen && targetScreen.classList) {
         targetScreen.classList.remove('hidden');
@@ -196,13 +189,7 @@ export function showScreen(screenId) {
 }
 
 /**
- * Displays the universal modal with custom content and actions.
- * @param {string} title - Modal title.
- * @param {string} bodyHtml - HTML content for the modal body.
- * @param {Function|null} onConfirm - Callback on confirm button click. Closes modal after execution.
- * @param {string} confirmText - Text for confirm button.
- * @param {Function|null} onCancel - Callback on cancel/close button click. Closes modal after execution.
- * @param {string} cancelText - Text for cancel/close button.
+ * Displays the universal modal.
  */
 export function showModal(title, bodyHtml, onConfirm = null, confirmText = 'Confirm', onCancel = null, cancelText = 'Close') {
     if (!elements.modal || !elements.modalTitle || !elements.modalBody) {
@@ -212,28 +199,29 @@ export function showModal(title, bodyHtml, onConfirm = null, confirmText = 'Conf
     elements.modalTitle.textContent = title;
     elements.modalBody.innerHTML = bodyHtml;
 
-    // Dynamically create action buttons
     const modalContent = elements.modal.querySelector('#modal-content');
     let actionsDiv = modalContent?.querySelector('#modal-actions');
-    if (actionsDiv) actionsDiv.remove(); // Clear previous actions
+    if (actionsDiv) actionsDiv.remove();
 
     actionsDiv = document.createElement('div');
     actionsDiv.id = 'modal-actions';
     actionsDiv.className = 'mt-6 text-right space-x-2';
 
+    // --- FIX: Added the missing createButton helper function ---
     const createButton = (text, classes, onClick) => {
         const button = document.createElement('button');
         button.textContent = text;
-        button.className = `btn ${classes}`; // Add a base class if you have one, or just use provided classes
+        button.className = `btn ${classes}`;
         button.onclick = onClick;
         return button;
      };
+    // --- END FIX ---
 
-    // Cancel/Close button (always present)
+    // Cancel/Close button
     const closeAction = () => { if (onCancel) onCancel(); hideModal(); };
     actionsDiv.appendChild(createButton(cancelText, 'bg-gray-500 hover:bg-gray-600 text-white font-bold py-2 px-6 rounded-lg', closeAction));
 
-    // Confirm button (only if onConfirm provided)
+    // Confirm button
     if (onConfirm && typeof onConfirm === 'function') {
         const confirmAction = () => { onConfirm(); hideModal(); };
         actionsDiv.appendChild(createButton(confirmText, 'bg-amber-500 hover:bg-amber-600 text-white font-bold py-2 px-6 rounded-lg', confirmAction));
@@ -257,10 +245,10 @@ export function updateLoadingProgress(progress) {
     }
 }
 
-/** Renders suggested team names as clickable buttons. */
+/** Renders suggested team names. */
 export function renderTeamNameSuggestions(names, onSelect) {
     if (!elements.teamNameSuggestions) return;
-    elements.teamNameSuggestions.innerHTML = ''; // Clear
+    elements.teamNameSuggestions.innerHTML = '';
     names.forEach(name => {
         const button = document.createElement('button');
         button.className = 'bg-gray-200 hover:bg-amber-500 hover:text-white text-gray-700 font-semibold py-2 px-4 rounded-lg transition';
@@ -272,40 +260,37 @@ export function renderTeamNameSuggestions(names, onSelect) {
 }
 
 /**
- * Renders the main draft screen UI, checking for draft completion.
+ * Renders the main draft screen UI.
  */
 export function renderDraftScreen(gameState, onPlayerSelect, currentSelectedId) {
-    // Robust check for essential gameState properties
     if (!gameState || !gameState.teams || !gameState.players || !gameState.draftOrder || !gameState.playerTeam) {
         console.error("renderDraftScreen called without valid gameState.");
         if(elements.draftHeader) elements.draftHeader.innerHTML = `<h2 class="text-3xl font-bold text-red-500">Draft Error: Invalid Game State</h2>`;
         return;
     }
     const { year, draftOrder, currentPick, playerTeam, players, teams } = gameState;
-    const ROSTER_LIMIT = 10; // Consider getting this from game.js or config
+    const ROSTER_LIMIT = 10;
 
     // Check draft end conditions
     const pickLimitReached = currentPick >= draftOrder.length;
     const undraftedPlayersCount = players.filter(p => p && !p.teamId).length;
     const noPlayersLeft = undraftedPlayersCount === 0;
     const allNeedsMetOrFull = teams.every(t => {
-        if (!t || !t.roster) return true; // Skip invalid teams
+        if (!t || !t.roster) return true;
         const needs = t.draftNeeds || 0;
         const picksMade = draftOrder.slice(0, currentPick).filter(teamInOrder => teamInOrder?.id === t.id).length;
         return (t.roster.length >= ROSTER_LIMIT) || picksMade >= needs;
     });
 
     if (pickLimitReached || noPlayersLeft || allNeedsMetOrFull) {
-        // Display draft complete message and disable controls
         if(elements.draftHeader) elements.draftHeader.innerHTML = `<h2 class="text-3xl font-bold">Season ${year} Draft Complete</h2><p>All picks made, pool empty, or rosters/needs filled.</p>`;
         if(elements.draftPlayerBtn) { elements.draftPlayerBtn.disabled = true; elements.draftPlayerBtn.textContent = 'Draft Complete'; }
-        renderSelectedPlayerCard(null, gameState); // Clear card
-        updateSelectedPlayerRow(null); // Clear highlight
-        if (elements.draftPoolTbody) elements.draftPoolTbody.innerHTML = `<tr><td colspan="15" class="p-4 text-center text-gray-500">Draft Complete.</td></tr>`; // Updated colspan
-        return; // Stop rendering active state
+        renderSelectedPlayerCard(null, gameState);
+        updateSelectedPlayerRow(null);
+        if (elements.draftPoolTbody) elements.draftPoolTbody.innerHTML = `<tr><td colspan="15" class="p-4 text-center text-gray-500">Draft Complete.</td></tr>`;
+        return;
     }
 
-    // Check for valid picking team
     const pickingTeam = draftOrder[currentPick];
     if (!pickingTeam) {
         console.error(`Draft Error: No valid team found at current pick index (${currentPick}).`);
@@ -320,11 +305,9 @@ export function renderDraftScreen(gameState, onPlayerSelect, currentSelectedId) 
     if (elements.draftPickNumber) elements.draftPickNumber.textContent = currentPick + 1;
     if (elements.draftPickingTeam) elements.draftPickingTeam.textContent = pickingTeam.name || 'Unknown Team';
 
-    // Render dynamic parts
-    renderDraftPool(gameState, onPlayerSelect); // Player list (will use scouting)
-    renderPlayerRoster(gameState.playerTeam); // Player's current roster
+    renderDraftPool(gameState, onPlayerSelect);
+    renderPlayerRoster(gameState.playerTeam);
 
-    // Update draft button state
     if (elements.draftPlayerBtn) {
         elements.draftPlayerBtn.disabled = !playerCanPick || currentSelectedId === null;
         elements.draftPlayerBtn.textContent = playerCanPick ? 'Draft Player' : `Waiting for ${pickingTeam.name || 'AI'}...`;
@@ -332,13 +315,12 @@ export function renderDraftScreen(gameState, onPlayerSelect, currentSelectedId) 
 }
 
 /**
- * Renders the draft pool table with scouted info, filters, and sorting.
+ * Renders the draft pool table with scouted info.
  */
 export function renderDraftPool(gameState, onPlayerSelect) {
-    // Check required elements and data
-    if (!elements.draftPoolTbody || !gameState || !gameState.players || !gameState.playerTeam?.roster) { // Added roster check
+    if (!elements.draftPoolTbody || !gameState || !gameState.players || !gameState.playerTeam?.roster) {
         console.error("Cannot render draft pool: Missing elements or invalid game state/roster.");
-        if(elements.draftPoolTbody) elements.draftPoolTbody.innerHTML = `<tr><td colspan="15" class="p-4 text-center text-red-500">Error loading players.</td></tr>`; // Updated colspan
+        if(elements.draftPoolTbody) elements.draftPoolTbody.innerHTML = `<tr><td colspan="15" class="p-4 text-center text-red-500">Error loading players.</td></tr>`;
         return;
     }
 
@@ -347,13 +329,11 @@ export function renderDraftPool(gameState, onPlayerSelect) {
     const posFilter = elements.draftFilterPos?.value || '';
     const sortMethod = elements.draftSort?.value || 'default';
 
-    // Filter players
     let filteredPlayers = undraftedPlayers.filter(p =>
         p.name.toLowerCase().includes(searchTerm) &&
         (!posFilter || p.favoriteOffensivePosition === posFilter || p.favoriteDefensivePosition === posFilter)
     );
 
-    // Sort players (ensure safe access)
     const potentialOrder = { 'A': 5, 'B': 4, 'C': 3, 'D': 2, 'F': 1 };
     switch (sortMethod) {
         case 'age-asc': filteredPlayers.sort((a, b) => (a?.age || 99) - (b?.age || 99)); break;
@@ -367,30 +347,27 @@ export function renderDraftPool(gameState, onPlayerSelect) {
              break;
     }
 
-    elements.draftPoolTbody.innerHTML = ''; // Clear
+    elements.draftPoolTbody.innerHTML = '';
 
     if (filteredPlayers.length === 0) {
-        elements.draftPoolTbody.innerHTML = `<tr><td colspan="15" class="p-4 text-center text-gray-500">No players match filters.</td></tr>`; // Updated colspan
+        elements.draftPoolTbody.innerHTML = `<tr><td colspan="15" class="p-4 text-center text-gray-500">No players match filters.</td></tr>`;
         return;
     }
 
-    // Populate table rows with scouted data
     filteredPlayers.forEach(player => {
-        // Get relationship and scouted info
         const maxLevel = gameState.playerTeam.roster.reduce(
              (max, rp) => Math.max(max, getRelationshipLevel(rp.id, player.id)),
              relationshipLevels.STRANGER.level
          );
         const scoutedPlayer = getScoutedPlayerInfo(player, maxLevel);
-        if (!scoutedPlayer) return; // Skip if scouting failed
+        if (!scoutedPlayer) return;
 
         const relationshipInfo = Object.values(relationshipLevels).find(rl => rl.level === maxLevel) || relationshipLevels.STRANGER;
 
         const row = document.createElement('tr');
         row.className = `cursor-pointer hover:bg-amber-100 draft-player-row ${scoutedPlayer.id === selectedPlayerId ? 'bg-amber-200' : ''}`;
-        row.dataset.playerId = scoutedPlayer.id; // Original ID
+        row.dataset.playerId = scoutedPlayer.id;
 
-        // Render scouted attributes, potential, and relationship (15 columns)
         row.innerHTML = `
             <td class="py-2 px-3 font-semibold">${scoutedPlayer.name ?? 'N/A'}</td>
             <td class="text-center py-2 px-3">${scoutedPlayer.age ?? '?'}</td>
@@ -409,7 +386,7 @@ export function renderDraftPool(gameState, onPlayerSelect) {
             <td class="text-center py-2 px-3">${scoutedPlayer.attributes?.technical?.blockShedding ?? '?'}</td>
         `;
 
-        row.onclick = () => onPlayerSelect(scoutedPlayer.id); // Use original ID
+        row.onclick = () => onPlayerSelect(scoutedPlayer.id);
         elements.draftPoolTbody.appendChild(row);
     });
 }
@@ -419,7 +396,7 @@ export const debouncedRenderDraftPool = debounce(renderDraftPool, 300);
 
 /** Highlights the selected player row in the draft pool. */
 export function updateSelectedPlayerRow(newSelectedId) {
-    selectedPlayerId = newSelectedId; // Update internal state
+    selectedPlayerId = newSelectedId;
     document.querySelectorAll('.draft-player-row').forEach(row => {
         row.classList.toggle('bg-amber-200', row.dataset.playerId === newSelectedId);
     });
@@ -435,7 +412,6 @@ export function renderSelectedPlayerCard(player, gameState) {
         return;
     }
 
-    // Get relationship and scouted info
     const maxLevel = gameState.playerTeam.roster.reduce(
         (max, rp) => Math.max(max, getRelationshipLevel(rp.id, player.id)),
         relationshipLevels.STRANGER.level
@@ -453,7 +429,6 @@ export function renderSelectedPlayerCard(player, gameState) {
     positions.forEach(pos => {
         let displayOverall = '?';
         let isScoutedRange = false;
-        // Check if relevant attributes are ranges
         if (scoutedPlayer.attributes) {
              isScoutedRange = Object.keys(positionOverallWeights[pos]).some(attrKey => {
                  for (const cat in scoutedPlayer.attributes) {
@@ -461,14 +436,12 @@ export function renderSelectedPlayerCard(player, gameState) {
                  } return false;
              });
         }
-        // Calculate overall using ORIGINAL player data if not obscured
         if (!isScoutedRange) displayOverall = calculateOverall(player, pos);
 
         overallsHtml += `<div class="bg-gray-200 p-2 rounded"><p class="font-semibold text-xs">${pos} OVR</p><p class="font-bold text-xl">${displayOverall}</p></div>`;
     });
     overallsHtml += '</div>';
 
-    // Display scouted info
     elements.selectedPlayerCard.innerHTML = `
         <h4 class="font-bold text-lg">${scoutedPlayer.name ?? 'Unknown Player'}</h4>
         <p class="text-sm text-gray-600">
@@ -480,7 +453,6 @@ export function renderSelectedPlayerCard(player, gameState) {
          </p>
         ${overallsHtml}`;
 
-    // Update draft button state
     const { draftOrder, currentPick, playerTeam } = gameState;
     const ROSTER_LIMIT = 10;
     if (draftOrder && currentPick >= 0 && currentPick < draftOrder.length && playerTeam && draftOrder[currentPick]) {
@@ -501,20 +473,20 @@ export function renderPlayerRoster(playerTeam) {
     const roster = playerTeam.roster || [];
     const ROSTER_LIMIT = 10;
     elements.rosterCount.textContent = `${roster.length}/${ROSTER_LIMIT}`;
-    elements.draftRosterList.innerHTML = ''; // Clear
+    elements.draftRosterList.innerHTML = '';
 
     if (roster.length === 0) {
         elements.draftRosterList.innerHTML = '<li class="p-2 text-center text-gray-500">No players drafted yet.</li>';
     } else {
         roster.forEach(player => {
-            if (!player) return; // Skip invalid
+            if (!player) return;
             const li = document.createElement('li');
             li.className = 'p-2';
             li.textContent = `${player.name} (${player.favoriteOffensivePosition || '-'}/${player.favoriteDefensivePosition || '-'})`;
             elements.draftRosterList.appendChild(li);
         });
     }
-    renderRosterSummary(playerTeam); // Update summary too
+    renderRosterSummary(playerTeam);
 }
 
 /** Renders the average overall ratings for the player's current roster. */
@@ -540,10 +512,8 @@ function renderRosterSummary(playerTeam) {
     summaryHtml += '</div>';
     elements.rosterSummary.innerHTML = summaryHtml;
 }
-
 /** Renders the main dashboard header and populates team filter. */
 export function renderDashboard(gameState) {
-    // Check essential parts of gameState
     if (!gameState || !gameState.playerTeam || !gameState.teams) {
         console.error("renderDashboard: Invalid gameState provided.");
         if(elements.dashboardTeamName) elements.dashboardTeamName.textContent = "Error Loading";
@@ -554,18 +524,16 @@ export function renderDashboard(gameState) {
     const WEEKS_IN_SEASON = 9; // Consider getting from game.js or config
     const currentW = (typeof currentWeek === 'number' && currentWeek < WEEKS_IN_SEASON) ? `Week ${currentWeek + 1}` : 'Offseason';
 
-    // Update header elements safely
     if (elements.dashboardTeamName) elements.dashboardTeamName.textContent = playerTeam.name || 'Your Team';
     if (elements.dashboardRecord) elements.dashboardRecord.textContent = `Record: ${playerTeam.wins || 0} - ${playerTeam.losses || 0}`;
     if (elements.dashboardYear) elements.dashboardYear.textContent = year || '?';
     if (elements.dashboardWeek) elements.dashboardWeek.textContent = currentW;
     if (elements.advanceWeekBtn) elements.advanceWeekBtn.textContent = (typeof currentWeek === 'number' && currentWeek < WEEKS_IN_SEASON) ? 'Advance Week' : 'Go to Offseason';
 
-    // Populate team filter dropdown
     if (elements.statsFilterTeam && Array.isArray(teams)) {
         let teamOptions = '<option value="">All Teams</option>';
         teams
-            .filter(t => t && t.id && t.name) // Ensure valid
+            .filter(t => t && t.id && t.name)
             .sort((a, b) => a.name.localeCompare(b.name))
             .forEach(t => teamOptions += `<option value="${t.id}">${t.name}</option>`);
         elements.statsFilterTeam.innerHTML = teamOptions;
@@ -575,7 +543,6 @@ export function renderDashboard(gameState) {
 
     if (messages && Array.isArray(messages)) updateMessagesNotification(messages);
 
-    // Determine and render the currently active tab
     const activeTabButton = elements.dashboardTabs?.querySelector('.tab-button.active');
     const activeTabId = activeTabButton ? activeTabButton.dataset.tab : 'my-team';
     switchTab(activeTabId, gameState);
@@ -585,19 +552,20 @@ export function renderDashboard(gameState) {
 export function switchTab(tabId, gameState) {
     if (!elements.dashboardContent || !elements.dashboardTabs) { console.error("Dashboard elements missing."); return; }
 
-    // Hide all tab content panes and deactivate buttons
     elements.dashboardContent.querySelectorAll('.tab-pane').forEach(p => p.classList.add('hidden'));
     elements.dashboardTabs.querySelectorAll('.tab-button').forEach(b => { b.classList.remove('active'); b.setAttribute('aria-selected', 'false'); });
 
-    // Activate the selected tab and content pane
     const contentPane = document.getElementById(`tab-content-${tabId}`);
     const tabButton = elements.dashboardTabs.querySelector(`[data-tab="${tabId}"]`);
     if (contentPane) contentPane.classList.remove('hidden'); else console.warn(`Content pane "${tabId}" not found.`);
     if (tabButton) { tabButton.classList.add('active'); tabButton.setAttribute('aria-selected', 'true'); } else console.warn(`Tab button "${tabId}" not found.`);
 
-    if (!gameState) { /* ... (handle missing gameState) ... */ return; }
+    if (!gameState) {
+        console.warn(`switchTab called for "${tabId}" without valid gameState.`);
+        if(contentPane) contentPane.innerHTML = '<p class="text-red-500">Error: Game state not available.</p>';
+        return;
+    }
 
-    // Render content for the selected tab
     try {
         switch (tabId) {
             case 'my-team': renderMyTeamTab(gameState); break;
@@ -607,7 +575,6 @@ export function switchTab(tabId, gameState) {
             case 'standings': renderStandingsTab(gameState); break;
             case 'player-stats': renderPlayerStatsTab(gameState); break;
             case 'hall-of-fame': renderHallOfFameTab(gameState); break;
-            // Add case for 'free-agents' later
             default:
                 console.warn(`Unknown tab: ${tabId}`);
                 if(contentPane) contentPane.innerHTML = `<p>Content for tab "${tabId}" not implemented.</p>`;
@@ -617,7 +584,6 @@ export function switchTab(tabId, gameState) {
         if(contentPane) contentPane.innerHTML = `<p class="text-red-500">Error rendering ${tabId} content. Check console.</p>`;
     }
 
-    // Mark messages as read if switching to the messages tab
     if (tabId === 'messages' && Array.isArray(gameState.messages)) {
         updateMessagesNotification(gameState.messages, true);
     }
@@ -632,14 +598,13 @@ function renderMyTeamTab(gameState) {
      }
      const roster = gameState.playerTeam.roster;
 
-     // Define attribute groups and ADD Potential
      const physicalAttrs = ['height', 'weight', 'speed', 'strength', 'agility', 'stamina'];
      const mentalAttrs = ['playbookIQ', 'clutch', 'consistency', 'toughness'];
      const technicalAttrs = ['throwingAccuracy', 'catchingHands', 'blocking', 'tackling', 'blockShedding'];
 
-     // Build table header HTML - ADD Pot column
      let tableHtml = `<div class="overflow-x-auto"><table class="min-w-full bg-white text-sm"><thead class="bg-gray-800 text-white sticky top-0 z-10"><tr>
         <th scope="col" class="py-2 px-3 text-left sticky left-0 bg-gray-800 z-20">Name</th>
+        <th scope="col" class="py-2 px-3">#</th> {/* Number */}
         <th scope="col" class="py-2 px-3">Type</th>
         <th scope="col" class="py-2 px-3">Age</th>
         <th scope="col" class="py-2 px-3">Pot</th> {/* Potential */}
@@ -647,25 +612,25 @@ function renderMyTeamTab(gameState) {
         ${physicalAttrs.map(h => `<th scope="col" class="py-2 px-3 uppercase">${h.slice(0,3)}</th>`).join('')}
         ${mentalAttrs.map(h => `<th scope="col" class="py-2 px-3 uppercase">${h.slice(0,3)}</th>`).join('')}
         ${technicalAttrs.map(h => `<th scope="col" class="py-2 px-3 uppercase">${h.slice(0,3)}</th>`).join('')}
-    </tr></thead><tbody class="divide-y">`; // Total columns: 5 + 6 + 4 + 5 = 20
+    </tr></thead><tbody class="divide-y">`; // Total columns: 6 + 6 + 4 + 5 = 21
 
      if (roster.length === 0) {
-         tableHtml += `<tr><td colspan="20" class="p-4 text-center text-gray-500">Your roster is empty.</td></tr>`; // Updated colspan
+         tableHtml += `<tr><td colspan="21" class="p-4 text-center text-gray-500">Your roster is empty.</td></tr>`; // Updated colspan
      } else {
          roster.forEach(p => {
-             if (!p || !p.attributes || !p.status) return; // Skip invalid
+             if (!p || !p.attributes || !p.status) return;
              const statusClass = p.status.duration > 0 ? 'text-red-500 font-semibold' : 'text-green-600';
              const statusText = p.status.description || 'Healthy';
              const typeTag = p.status.type === 'temporary' ? '<span class="status-tag temporary" title="Temporary Friend">[T]</span>' : '<span class="status-tag permanent" title="Permanent Roster">[P]</span>';
 
-             tableHtml += `<tr>
+             tableHtml += `<tr data-player-id="${p.id}" class="cursor-pointer hover:bg-amber-100">
                  <th scope="row" class="py-2 px-3 font-semibold sticky left-0 bg-white z-10">${p.name}</th>
+                 <td class="text-center py-2 px-3 font-medium">${p.number || '?'}</td> {/* Number */}
                  <td class="text-center py-2 px-3">${typeTag}</td>
                  <td class="text-center py-2 px-3">${p.age}</td>
                  <td class="text-center py-2 px-3 font-medium">${p.potential || '?'}</td> {/* Potential */}
                  <td class="text-center py-2 px-3 ${statusClass}" title="${statusText}">${statusText} ${p.status.duration > 0 ? `(${p.status.duration}w)` : ''}</td>`;
 
-             // Helper to render attribute cells safely
              const renderAttr = (val, attrName) => {
                  const breakthroughClass = p.breakthroughAttr === attrName ? ' breakthrough font-bold text-green-600' : '';
                  return `<td class="text-center py-2 px-3${breakthroughClass}" title="${attrName}">${val ?? '?'}</td>`;
@@ -685,7 +650,7 @@ function renderMyTeamTab(gameState) {
 /** Renders the 'Depth Chart' tab and its sub-components. */
 function renderDepthChartTab(gameState) {
     if (!gameState || !gameState.playerTeam || !gameState.playerTeam.roster || !gameState.playerTeam.formations || !gameState.playerTeam.depthChart) {
-        console.error("Cannot render depth chart: Invalid game state or missing required properties.");
+        console.error("Cannot render depth chart: Invalid game state.");
         if(elements.positionalOverallsContainer) elements.positionalOverallsContainer.innerHTML = '<p class="text-red-500">Error loading depth chart data.</p>';
         if(elements.offenseDepthChartPane) elements.offenseDepthChartPane.innerHTML = '<p class="text-red-500">Error loading offense data.</p>';
         if(elements.defenseDepthChartPane) elements.defenseDepthChartPane.innerHTML = '<p class="text-red-500">Error loading defense data.</p>';
@@ -727,7 +692,12 @@ function renderPositionalOveralls(roster) {
 
 /** Renders the depth chart slots and available players for one side. */
 function renderDepthChartSide(side, gameState, slotsContainer, rosterContainer) {
-    if (!slotsContainer || !rosterContainer || !gameState?.playerTeam?.roster || !gameState?.playerTeam?.depthChart) { /* ... error handling ... */ return; }
+    if (!slotsContainer || !rosterContainer || !gameState?.playerTeam?.roster || !gameState?.playerTeam?.depthChart) {
+        console.error(`Cannot render depth chart side "${side}": Missing elements or game state.`);
+        if(slotsContainer) slotsContainer.innerHTML = '<p class="text-red-500">Error</p>';
+        if(rosterContainer) rosterContainer.innerHTML = '<p class="text-red-500">Error</p>';
+        return;
+    }
     const { roster, depthChart } = gameState.playerTeam;
     const currentChart = depthChart[side] || {};
     const slots = Object.keys(currentChart);
@@ -917,11 +887,26 @@ function renderPlayerStatsTab(gameState) {
     const sortStat = elements.statsSort?.value || 'touchdowns';
     let playersToShow = gameState.players.filter(p => p && (teamIdFilter ? p.teamId === teamIdFilter : true));
     playersToShow.sort((a, b) => (b?.seasonStats?.[sortStat] || 0) - (a?.seasonStats?.[sortStat] || 0));
-    const stats = ['passYards', 'rushYards', 'recYards', 'receptions', 'touchdowns', 'tackles', 'sacks', 'interceptions'];
-    const statHeaders = stats.map(s => s.replace(/([A-Z])/g, ' $1').toUpperCase());
+    const stats = ['passYards', 'passCompletions', 'passAttempts', 'rushYards', 'recYards', 'receptions', 'touchdowns', 'tackles', 'sacks', 'interceptions', 'interceptionsThrown'];
+    const statHeaders = stats.map(s => {
+        if (s === 'passYards') return 'PASS YDS';
+        if (s === 'passCompletions') return 'COMP';
+        if (s === 'passAttempts') return 'ATT';
+        if (s === 'rushYards') return 'RUSH YDS';
+        if (s === 'recYards') return 'REC YDS';
+        if (s === 'receptions') return 'REC';
+        if (s === 'touchdowns') return 'TDS';
+        if (s === 'tackles') return 'TKL';
+        if (s === 'sacks') return 'SACK';
+        if (s === 'interceptions') return 'INT';
+        if (s === 'interceptionsThrown') return 'INT THR';
+        return s.toUpperCase();
+    });
+
     let tableHtml = `<div class="overflow-x-auto"><table class="min-w-full bg-white text-sm"><thead class="bg-gray-800 text-white sticky top-0 z-10"><tr><th scope="col" class="py-2 px-3 text-left sticky left-0 bg-gray-800 z-20">Name</th>${statHeaders.map(h => `<th scope="col" class="py-2 px-3">${h}</th>`).join('')}</tr></thead><tbody class="divide-y">`;
+    const numStats = stats.length + 1; // +1 for name
     if (playersToShow.length === 0) {
-        tableHtml += '<tr><td colspan="9" class="p-4 text-center text-gray-500">No players match criteria.</td></tr>';
+        tableHtml += `<tr><td colspan="${numStats}" class="p-4 text-center text-gray-500">No players match criteria.</td></tr>`;
     } else {
         playersToShow.forEach(p => {
             const playerTeamClass = p.teamId === gameState.playerTeam?.id ? 'bg-amber-50' : '';
@@ -1061,8 +1046,6 @@ export function setupDepthChartTabs() {
         }
     });
 }
-
-
 // ===================================
 // --- Live Game Sim UI Logic ---
 // ===================================
@@ -1071,7 +1054,7 @@ export function setupDepthChartTabs() {
  * Draws the state of a play (players, ball) onto the field canvas.
  * @param {object} frameData - A single frame from resolvePlay.visualizationFrames.
  */
-function drawFieldVisualization(frameData) { // <-- homeTeamId parameter REMOVED
+function drawFieldVisualization(frameData) {
     const ctx = elements.fieldCanvasCtx;
     const canvas = elements.fieldCanvas;
     if (!ctx || !canvas) return; // Exit if canvas not found
@@ -1081,8 +1064,8 @@ function drawFieldVisualization(frameData) { // <-- homeTeamId parameter REMOVED
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
     // --- Scaling ---
-    const pixelsPerYard = canvas.height / FIELD_LENGTH;
-    const scaleX = canvas.width / FIELD_WIDTH;
+    const pixelsPerYard = canvas.height / FIELD_LENGTH; // e.g., 320 / 120 = 2.66
+    const scaleX = canvas.width / FIELD_WIDTH;   // e.g., 600 / 53.3 = 11.25
     const scaleY = pixelsPerYard;
     // --- End Scaling ---
 
@@ -1105,42 +1088,37 @@ function drawFieldVisualization(frameData) { // <-- homeTeamId parameter REMOVED
             if (y === 20 || y === 100) {
                 ctx.fillText("GOAL", canvas.width / 2, drawY + 12);
             } else {
-                const yardLineNum = y <= 60 ? y - 10 : 120 - y - 10;
+                const yardLineNum = y <= 60 ? y - 10 : 120 - y - 10; // 10, 20... 50... 20, 10
                 ctx.fillText(yardLineNum.toString(), canvas.width / 2, drawY + 12); // Nudge text down
             }
         }
     }
     // --- End Field Markings ---
 
-    // If no frame data (e.g., pre-play), exit here
-    if (!frameData || !frameData.players) return;
+    if (!frameData || !frameData.players) return; // If no frame, just show empty field
 
     // --- Draw Players ---
-    const playerRadius = 7; // <-- Increased radius
+    const playerRadius = 7; // Increased radius
     ctx.textBaseline = 'middle'; // Set once
 
     frameData.players.forEach(pState => {
         if (pState.x === undefined || pState.y === undefined) return; // Safety check
-
+        
         const drawX = pState.x * scaleX;
         const drawY = pState.y * scaleY;
 
-        // --- Use Team Colors ---
-        // Use primary color from pState, with a fallback
+        // Use Team Colors
         ctx.fillStyle = pState.primaryColor || (pState.isOffense ? '#DC2626' : '#E5E7EB');
-        // ---
 
         // Draw player circle
         ctx.beginPath();
         ctx.arc(drawX, drawY, playerRadius, 0, 2 * Math.PI);
         ctx.fill();
 
-        // --- Draw Player Number ---
-        // Use secondary color (text color) from pState, with fallback
-        ctx.fillStyle = pState.secondaryColor || (pState.isOffense ? '#FFFFFF' : '#000000'); 
+        // Draw Player Number
+        ctx.fillStyle = pState.secondaryColor || (pState.isOffense ? '#FFFFFF' : '#000000');
         ctx.font = 'bold 9px "Inter"'; // Font for the number
-        ctx.fillText(pState.number || '?', drawX, drawY + 1); // Use number, fallback to '?'
-        // --- End Player Number ---
+        ctx.fillText(pState.number || '?', drawX, drawY + 1); // Use number
 
         // Highlight ball carrier
         if (pState.isBallCarrier) {
@@ -1181,30 +1159,25 @@ function renderLiveStatsBox(gameResult) {
     const generateTeamStatsHtml = (team) => {
         if (!team || !team.roster || team.roster.length === 0) return '<h5>No Player Data</h5>';
 
-        // Find key players based on final game stats
-        // Helper to find the player with the highest value for a given stat
         const findTopStat = (statName) => team.roster
-            .filter(p => p && p.gameStats && p.gameStats[statName] > 0) // Ensure player and stat exist and are positive
-            .sort((a, b) => (b.gameStats[statName] || 0) - (a.gameStats[statName] || 0))[0]; // Descending sort, get the first one
+            .filter(p => p && p.gameStats && p.gameStats[statName] > 0)
+            .sort((a, b) => (b.gameStats[statName] || 0) - (a.gameStats[statName] || 0))[0];
 
-        // Find players based on specific roles or stats
-        const qb = team.roster.find(p => p && p.gameStats && p.gameStats.passYards > 0); // Find first player with pass yards (likely QB)
+        const qb = team.roster.find(p => p && p.gameStats && p.gameStats.passYards > 0);
         const leadingRusher = findTopStat('rushYards');
         const leadingReceiver = findTopStat('recYards');
         const leadingTackler = findTopStat('tackles');
         const topSacker = findTopStat('sacks');
         const topInterceptor = findTopStat('interceptions');
 
-        // Build the HTML string for the team's stats
-        let html = `<h5 class="text-lg font-semibold text-amber-400 mb-1 border-b border-gray-600 pb-1">${team.name}</h5>`; // Team name header
-        let statsAdded = false; // Flag to check if any stats were added
+        let html = `<h5 class="text-lg font-semibold text-amber-400 mb-1 border-b border-gray-600 pb-1">${team.name}</h5>`;
+        let statsAdded = false;
 
-        // Add stats for key players if they exist
         if (qb) {
-            html += `<p>${qb.name} (QB): <strong>${qb.gameStats.passYards || 0} Yds, ${qb.gameStats.touchdowns || 0} TD</strong></p>`;
+            html += `<p>${qb.name} (QB): <strong>${qb.gameStats.passCompletions || 0}/${qb.gameStats.passAttempts || 0}, ${qb.gameStats.passYards || 0} Yds, ${qb.gameStats.touchdowns || 0} TD, ${qb.gameStats.interceptionsThrown || 0} INT</strong></p>`;
             statsAdded = true;
         }
-        if (leadingRusher && leadingRusher.id !== qb?.id) { // Avoid double listing if QB is top rusher
+        if (leadingRusher && leadingRusher.id !== qb?.id) {
             html += `<p>${leadingRusher.name} (Run): <strong>${leadingRusher.gameStats.rushYards || 0} Yds, ${leadingRusher.gameStats.touchdowns || 0} TD</strong></p>`;
             statsAdded = true;
         }
@@ -1213,13 +1186,11 @@ function renderLiveStatsBox(gameResult) {
             statsAdded = true;
         }
          if (leadingTackler) {
-             // Combine defensive stats for the leading tackler if they also lead sacks/INTs
              const sacks = (topSacker && topSacker.id === leadingTackler.id) ? (leadingTackler.gameStats.sacks || 0) : 0;
              const ints = (topInterceptor && topInterceptor.id === leadingTackler.id) ? (leadingTackler.gameStats.interceptions || 0) : 0;
              html += `<p>${leadingTackler.name} (Def): <strong>${leadingTackler.gameStats.tackles || 0} Tkl${sacks > 0 ? `, ${sacks} Sack` : ''}${ints > 0 ? `, ${ints} INT` : ''}</strong></p>`;
              statsAdded = true;
          }
-         // Add top sacker/interceptor if they weren't the leading tackler
          if (topSacker && topSacker.id !== leadingTackler?.id) {
               html += `<p>${topSacker.name} (Def): <strong>${topSacker.gameStats.sacks || 0} Sack</strong></p>`;
               statsAdded = true;
@@ -1229,36 +1200,33 @@ function renderLiveStatsBox(gameResult) {
               statsAdded = true;
           }
 
-        // Display message if no significant stats were found
         if (!statsAdded) {
              html += '<p class="text-gray-400">No significant stats recorded.</p>';
         }
-
         return html;
-    }; // --- End of generateTeamStatsHtml function ---
+    };
 
-    // Populate the away and home stats containers
     elements.simStatsAway.innerHTML = generateTeamStatsHtml(awayTeam);
     elements.simStatsHome.innerHTML = generateTeamStatsHtml(homeTeam);
-} // --- End of renderLiveStatsBox function ---
+}
 
-/** Starts the live game simulation with descriptive text. */
+/** Starts the live game simulation with descriptive text and visualization. */
 export function startLiveGameSim(gameResult, onComplete) {
     const ticker = elements.simPlayLog; const scoreboard = elements.simScoreboard;
-    // Robust checks for elements and gameResult
-    if (!ticker || !scoreboard || !elements.simAwayScore || !elements.simHomeScore || !elements.simGameDrive || !elements.simGameDown || !elements.simPossession || !elements.fieldDisplay || !elements.simLiveStats ) {
+    if (!ticker || !scoreboard || !elements.simAwayScore || !elements.simHomeScore || !elements.simGameDrive || !elements.simGameDown || !elements.simPossession || !elements.fieldCanvasCtx || !elements.simLiveStats ) {
         console.error("Live sim UI elements missing!"); if (onComplete) onComplete(); return;
     }
-    if (!gameResult || !Array.isArray(gameResult.gameLog) || !gameResult.homeTeam || !gameResult.awayTeam) {
-        console.warn("startLiveGameSim: invalid gameResult."); ticker.innerHTML = '<p>No game events.</p>'; if (onComplete) onComplete(); return;
+    if (!gameResult || !Array.isArray(gameResult.gameLog) || !gameResult.homeTeam || !gameResult.awayTeam || !Array.isArray(gameResult.visualizationFrames)) {
+        console.warn("startLiveGameSim: invalid gameResult or missing frames."); ticker.innerHTML = '<p>No game events to display.</p>'; if (onComplete) onComplete(); return;
     }
 
     if (liveGameInterval) clearInterval(liveGameInterval);
-    ticker.innerHTML = ''; // Clear log
-    liveGameCurrentIndex = 0; liveGameLog = gameResult.gameLog; liveGameCallback = onComplete;
-    currentLiveGameResult = gameResult; // Store result
+    ticker.innerHTML = '';
+    liveGameCurrentIndex = 0;
+    liveGameLog = gameResult.gameLog;
+    liveGameCallback = onComplete;
+    currentLiveGameResult = gameResult; // Store full result
 
-    // Initialize simulation state variables (used for descriptive text context)
     let currentHomeScore = 0; let currentAwayScore = 0; let ballOn = 20; let down = 1; let toGo = 10; let possessionTeamName = null; let currentDriveText = 'Pre-Game'; let driveActive = false;
 
     // Initialize UI
@@ -1266,32 +1234,32 @@ export function startLiveGameSim(gameResult, onComplete) {
     elements.simHomeTeam.textContent = gameResult.homeTeam.name;
     elements.simAwayScore.textContent = '0'; elements.simHomeScore.textContent = '0';
     elements.simGameDrive.textContent = currentDriveText; elements.simGameDown.textContent = ''; elements.simPossession.textContent = '';
-    updateField(ballOn, null, gameResult.homeTeam.name);
+    drawFieldVisualization(null); // Clear canvas
 
-    // Render Initial Stats Box (shows FINAL game stats)
+    // Render Final Stats Box
     renderLiveStatsBox(gameResult);
 
     // --- Function to process the next log entry ---
     function nextEntry() {
         // --- Draw current visualization frame ---
+        // Match log index to frame index
         if (gameResult.visualizationFrames && gameResult.visualizationFrames[liveGameCurrentIndex]) {
-            // Remove homeTeamId, it's no longer needed
-            drawFieldVisualization(gameResult.visualizationFrames[liveGameCurrentIndex]); // <-- CHANGED
+            drawFieldVisualization(gameResult.visualizationFrames[liveGameCurrentIndex]);
         } else if (liveGameCurrentIndex === 0) {
-            drawFieldVisualization(null);
+            drawFieldVisualization(null); // Clear at start
         }
         // ---
+
         if (liveGameCurrentIndex >= liveGameLog.length) { // End condition
             clearInterval(liveGameInterval); liveGameInterval = null;
-            // Ensure Final Score is Correct
-            if (currentLiveGameResult) { // Use stored result for accuracy
+            if (currentLiveGameResult) {
                 elements.simAwayScore.textContent = currentLiveGameResult.awayScore;
                 elements.simHomeScore.textContent = currentLiveGameResult.homeScore;
             }
              elements.simGameDown.textContent = "FINAL";
              elements.simPossession.textContent = "";
-            drawFieldVisualization(null);
-            currentLiveGameResult = null; // Clear stored result
+            drawFieldVisualization(null); // Clear canvas
+            currentLiveGameResult = null;
             if (liveGameCallback) { const cb = liveGameCallback; liveGameCallback = null; cb(); }
             return;
         }
@@ -1305,53 +1273,126 @@ export function startLiveGameSim(gameResult, onComplete) {
         const fieldSide = currentBallOn <= 50 ? (possessionTeamName === gameResult.homeTeam.name ? "own" : "opponent") : (possessionTeamName === gameResult.homeTeam.name ? "opponent" : "own");
         const yardLine = currentBallOn <= 50 ? currentBallOn : 100 - currentBallOn;
 
-        // --- Add enhanced descriptive text parsing from previous step ---
-         if (playLogEntry.startsWith('-- Drive')) { /* ... */ }
-         else if (playLogEntry.startsWith('====')) { /* ... */ }
-         else if (playLogEntry.startsWith('TOUCHDOWN')) { /* ... */ }
-         else if (playLogEntry.includes('conversion GOOD!')) { /* ... */ }
-         else if (playLogEntry.includes('FAILED!')) { /* ... */ }
-         else if (playLogEntry.startsWith('INTERCEPTION')) { /* ... */ }
-         else if (playLogEntry.startsWith('FUMBLE')) { /* ... */ }
-         // ... (Include ALL descriptive text conditions) ...
-         else if (playLogEntry.startsWith('First down!')) { /* ... */ }
-         else if (playLogEntry.startsWith('INJURY')) { /* ... */ }
+         if (playLogEntry.startsWith('-- Drive') || playLogEntry.startsWith('====')) {
+             styleClass = 'font-bold text-amber-400 mt-2';
+             if (playLogEntry.startsWith('==== FINAL')) styleClass += ' text-lg';
+             descriptiveText = `🏈 ${playLogEntry.replace('-- Drive', 'New Drive:')} 🏈`;
+             if (playLogEntry.startsWith('====')) descriptiveText = `⏱️ ${playLogEntry} ⏱️`;
+         } else if (playLogEntry.startsWith('🎉 TOUCHDOWN')) { // Check for emoji from game.js
+             descriptiveText = playLogEntry;
+             styleClass = 'font-semibold text-green-400';
+         } else if (playLogEntry.includes('conversion GOOD!')) {
+             descriptiveText = `✅ ${playLogEntry} Points are good!`;
+             styleClass = 'font-semibold text-green-400';
+         } else if (playLogEntry.includes('Conversion FAILED!')) {
+             descriptiveText = `❌ ${playLogEntry} No good!`;
+             styleClass = 'font-semibold text-red-400';
+         } else if (playLogEntry.startsWith('❗ INTERCEPTION') || playLogEntry.startsWith('❗ FUMBLE')) {
+             descriptiveText = playLogEntry; // Keep log message as is
+             styleClass = 'font-semibold text-red-400';
+         } else if (playLogEntry.startsWith('✋ Turnover on downs')) {
+             descriptiveText = playLogEntry;
+             styleClass = 'font-semibold text-red-400';
+         } else if (playLogEntry.startsWith('💥 SACK')) {
+              descriptiveText = `${playLogEntry.replace('SACK!', 'SACK!')} Ball on the ${fieldSide} ${yardLine - parseInt(playLogEntry.match(/loss of (\d+)/)?.[1] || 0)}.`;
+             styleClass = 'text-orange-400';
+         } else if (playLogEntry.includes('stuffed near the line')) {
+             descriptiveText = `🧱 ${playLogEntry} Stopped at the ${fieldSide} ${yardLine}!`;
+             styleClass = 'text-orange-300';
+         }
+         else if (playLogEntry.includes(' passes to ')) {
+              const passer = playLogEntry.match(/^(.*?) passes to/)?.[1];
+              const receiver = playLogEntry.match(/passes to (.*?)\.\.\./)?.[1];
+              descriptiveText = `🏈 ${passer} passes to ${receiver}...`; // Keep it simple, let result show
+         }
+         else if (playLogEntry.includes('Caught by') && playLogEntry.includes('yards.')) {
+             const yardsMatch = playLogEntry.match(/for (-?\d+\.?\d*) yards/);
+             const yards = yardsMatch ? parseFloat(yardsMatch[1]) : 0;
+             const newYardLine = Math.round(currentBallOn + yards);
+             const newFieldSide = newYardLine <= 50 ? (possessionTeamName === gameResult.homeTeam.name ? "own" : "opponent") : (possessionTeamName === gameResult.homeTeam.name ? "opponent" : "own");
+             const newYardLineNum = newYardLine <= 50 ? newYardLine : 100 - newYardLine;
+
+             if (yards >= 15) { descriptiveText = `🎯 ${playLogEntry.replace('Caught by', 'Hauled in by')} for a big gain! Ball at the ${newFieldSide} ${newYardLineNum}.`; }
+             else if (yards > 0) { descriptiveText = `👍 ${playLogEntry.replace('Caught by', 'Complete to')}. Ball at the ${newFieldSide} ${newYardLineNum}.`; }
+             else { descriptiveText = `✋ ${playLogEntry}. Stopped for minimal gain.`; }
+         }
+         else if (playLogEntry.includes('INCOMPLETE')) {
+              if (playLogEntry.includes('Defended by')) { descriptiveText = `🚫 ${playLogEntry.replace('INCOMPLETE pass to', 'Pass intended for')} Knocked away!`; }
+              else if (playLogEntry.includes('Off target')) { descriptiveText = ` overthrown... ${playLogEntry}`; }
+              else { descriptiveText = `❌ ${playLogEntry}`; }
+         }
+         else if (playLogEntry.match(/(\w+\s+'?\w+'?) (bursts through|shakes off|breaks into|is loose!|finds a small crease|runs out of bounds)/)) {
+             const yardsMatch = playLogEntry.match(/(\+|-)(\d+\.?\d*) yards/);
+             const yards = yardsMatch ? parseFloat(yardsMatch[1] + yardsMatch[2]) : (playLogEntry.includes("crease") ? getRandomInt(1,3) : getRandomInt(4,7));
+             if (yards >= 10) { descriptiveText = `💨 HE'S LOOSE! ${playLogEntry}! Great run!`; }
+             else { descriptiveText = `➡️ ${playLogEntry}. Nice gain on the ground.`; }
+             styleClass = 'text-cyan-300';
+         }
+         else if (playLogEntry.includes('tackled by') || playLogEntry.includes('Stopped by') || playLogEntry.includes('dragged down') || playLogEntry.includes('Caught from behind')) {
+              descriptiveText = `✋ ${playLogEntry}`;
+         }
+         else if (playLogEntry.startsWith('➡️ First down')) { // Check for emoji
+             descriptiveText = playLogEntry; // Keep log message
+              styleClass = 'text-yellow-300 font-semibold';
+         }
+         else if (playLogEntry.startsWith('🚑 INJURY')) { // Check for emoji
+             descriptiveText = playLogEntry;
+             styleClass = 'text-purple-400 italic';
+         }
         // ---
 
         p.textContent = descriptiveText;
         if (styleClass) p.className = styleClass;
         ticker.appendChild(p); ticker.scrollTop = ticker.scrollHeight;
 
-        // --- Update Internal Simulation State (parse playLogEntry to update ballOn, down, toGo, etc.) ---
-        // This needs careful implementation based on your exact log format
-        // Example parsing:
+        // --- Update Internal Simulation State (Parse log entry) ---
         try {
              if (playLogEntry.startsWith('-- Drive')) {
                  ballOn = 20; down = 1; toGo = 10; driveActive = true;
                  const driveMatch = playLogEntry.match(/(Drive \d+ \(H\d+\))/);
                  possessionTeamName = playLogEntry.includes(gameResult.homeTeam.name) ? gameResult.homeTeam.name : gameResult.awayTeam.name;
                  if(driveMatch) currentDriveText = driveMatch[0];
-             } else if (playLogEntry.startsWith('First down!')) {
-                 down = 1; toGo = 10;
-                 // Need to parse yard line from log if available, e.g., "...at the 45)"
-             } else if (playLogEntry.match(/for (-?\d+) yards?/)) {
-                 const yards = parseInt(playLogEntry.match(/for (-?\d+) yards?/)[1], 10);
-                 if (driveActive) { ballOn += yards; toGo -= yards; ballOn = Math.max(0,Math.min(100, ballOn)); if (toGo > 0) down++; }
-             } else if (playLogEntry.startsWith('INCOMPLETE')) {
+             } else if (playLogEntry.startsWith('➡️ First down')) {
+                 down = 1;
+                 const yardsMatch = playLogEntry.match(/(\d+) at the/); // "1st & 10 at the"
+                 const goalMatch = playLogEntry.match(/Goal at the (\d+)/); // "1st & Goal at the"
+                 if(goalMatch) toGo = parseInt(goalMatch[1], 10);
+                 else if (yardsMatch) toGo = parseInt(yardsMatch[1], 10);
+                 else toGo = 10;
+                 // Update ballOn based on log
+                 const yardLineMatch = playLogEntry.match(/at the (own|opponent) (\d+)/);
+                 if (yardLineMatch) {
+                     const side = yardLineMatch[1];
+                     const line = parseInt(yardLineMatch[2], 10);
+                     if (side === 'own') ballOn = line;
+                     else ballOn = 100 - line;
+                 }
+             } else if (playLogEntry.match(/for (-?\d+\.?\d*) yards?/)) {
+                 const yards = parseFloat(playLogEntry.match(/for (-?\d+\.?\d*) yards?/)[1]);
+                 if (driveActive) { ballOn += yards; toGo -= yards; ballOn = Math.round(Math.max(0,Math.min(100, ballOn))); toGo = Math.round(toGo); if (toGo > 0) down++; }
+             } else if (playLogEntry.startsWith('INCOMPLETE') || playLogEntry.startsWith('❌') || playLogEntry.startsWith('🚫') || playLogEntry.startsWith('‹‹')) {
                  if (driveActive) down++;
-             } else if (playLogEntry.startsWith('TOUCHDOWN')) {
+             } else if (playLogEntry.startsWith('🎉 TOUCHDOWN')) {
                  ballOn = 100; driveActive = false;
              } else if (playLogEntry.includes('conversion GOOD!')) {
-                 const points = playLogEntry.startsWith('2') ? 2 : 1;
+                 const points = playLogEntry.startsWith('✅ 2') ? 2 : 1;
                  if(possessionTeamName === gameResult.homeTeam.name) currentHomeScore += (6 + points); else currentAwayScore += (6 + points);
                  driveActive = false;
              } else if (playLogEntry.includes('Conversion FAILED!')) {
                  const points = 6;
                  if(possessionTeamName === gameResult.homeTeam.name) currentHomeScore += points; else currentAwayScore += points;
                  driveActive = false;
-             } else if (playLogEntry.startsWith('Turnover') || playLogEntry.startsWith('INTERCEPTION') || playLogEntry.startsWith('FUMBLE')) {
+             } else if (playLogEntry.startsWith('Turnover') || playLogEntry.startsWith('❗ INTERCEPTION') || playLogEntry.startsWith('❗ FUMBLE')) {
                  driveActive = false;
-                 // TODO: Ball position might change on turnovers
+                 // Update ballOn based on turnover log
+                 const yardLineMatch = playLogEntry.match(/at the (own|opponent) (\d+)/);
+                 if (yardLineMatch) {
+                     const side = yardLineMatch[1];
+                     const line = parseInt(yardLineMatch[2], 10);
+                     // Note: possession is about to flip, so "own" means new possession's own
+                     if (side === 'own') ballOn = line;
+                     else ballOn = 100 - line;
+                 }
              } else if (playLogEntry.startsWith('==== FINAL') || playLogEntry.startsWith('==== HALFTIME')) {
                  driveActive = false;
              }
@@ -1361,14 +1402,13 @@ export function startLiveGameSim(gameResult, onComplete) {
         }
         // --- End Internal State Update ---
 
-
         // --- Update UI elements ---
         elements.simAwayScore.textContent = currentAwayScore;
         elements.simHomeScore.textContent = currentHomeScore;
         elements.simGameDrive.textContent = currentDriveText;
         elements.simGameDown.textContent = driveActive ? `${down} & ${toGo <= 0 ? 'Goal' : toGo}` : (playLogEntry.startsWith("==== FINAL") ? "FINAL" : 'Change of Possession');
         elements.simPossession.textContent = possessionTeamName ? `${possessionTeamName} Ball` : '';
-        updateField(ballOn, possessionTeamName, gameResult.homeTeam.name);
+        // Field viz already updated at start of tick
 
         liveGameCurrentIndex++;
     }
@@ -1382,8 +1422,9 @@ export function startLiveGameSim(gameResult, onComplete) {
 export function skipLiveGameSim(gameResult) {
     if (liveGameInterval) { clearInterval(liveGameInterval); liveGameInterval = null; }
     const ticker = elements.simPlayLog;
-    if (ticker) { /* ... (add skip message) ... */ }
-    // Ensure Final Score is Displayed using gameResult or currentLiveGameResult
+    if (ticker) {
+        const p = document.createElement('p'); p.className = 'italic text-gray-400 mt-2'; p.textContent = '--- Simulation skipped ---'; ticker.appendChild(p); ticker.scrollTop = ticker.scrollHeight;
+    }
     const finalResult = gameResult || currentLiveGameResult;
     if (finalResult) {
         if (elements.simAwayScore) elements.simAwayScore.textContent = finalResult.awayScore;
@@ -1391,16 +1432,16 @@ export function skipLiveGameSim(gameResult) {
     } else { console.warn("skipLiveGameSim: No final result data available."); }
     if (elements.simGameDown) elements.simGameDown.textContent = "FINAL";
     if (elements.simPossession) elements.simPossession.textContent = "";
+    drawFieldVisualization(null); // Clear canvas
 
-    currentLiveGameResult = null; // Clear stored result
+    currentLiveGameResult = null;
     if (liveGameCallback) { const cb = liveGameCallback; liveGameCallback = null; cb(); }
 }
 
 /** Changes the speed of the live game simulation interval. */
 export function setSimSpeed(speed) {
-    liveGameSpeed = speed; // Update the speed variable
+    liveGameSpeed = speed;
 
-    // Update button visual styles
     elements.simSpeedBtns?.forEach(btn => btn.classList.remove('active', 'bg-blue-500', 'hover:bg-blue-600'));
     elements.simSpeedBtns?.forEach(btn => btn.classList.add('bg-gray-500', 'hover:bg-gray-600'));
     let activeButtonId;
@@ -1408,69 +1449,61 @@ export function setSimSpeed(speed) {
     const activeButton = document.getElementById(activeButtonId);
     if (activeButton) { activeButton.classList.remove('bg-gray-500', 'hover:bg-gray-600'); activeButton.classList.add('active', 'bg-blue-500', 'hover:bg-blue-600'); }
 
-    // If sim is running, clear and restart interval
     if (liveGameInterval) {
         clearInterval(liveGameInterval);
 
-        // Recreate the 'nextEntry' function locally to use current state
         function nextEntryForRestart() {
+            // --- Draw Frame ---
+            if (currentLiveGameResult && currentLiveGameResult.visualizationFrames && currentLiveGameResult.visualizationFrames[liveGameCurrentIndex]) {
+                drawFieldVisualization(currentLiveGameResult.visualizationFrames[liveGameCurrentIndex]);
+            }
+            // ---
+
             if (liveGameCurrentIndex >= liveGameLog.length) { // End condition
                 clearInterval(liveGameInterval); liveGameInterval = null;
-                // --- Display final score using stored result ---
                 if(currentLiveGameResult) {
                     if (elements.simAwayScore) elements.simAwayScore.textContent = currentLiveGameResult.awayScore;
                     if (elements.simHomeScore) elements.simHomeScore.textContent = currentLiveGameResult.homeScore;
                     if (elements.simGameDown) elements.simGameDown.textContent = "FINAL";
                     if (elements.simPossession) elements.simPossession.textContent = "";
                 } else { console.warn("setSimSpeed: No final result data on completion."); }
-                currentLiveGameResult = null; // Clear stored result
-                // ---
+                drawFieldVisualization(null); // Clear canvas
+                currentLiveGameResult = null;
                 if (liveGameCallback) { const cb = liveGameCallback; liveGameCallback = null; cb(); }
                 return;
             }
 
             // --- Logic identical to the main nextEntry function's DESCRIPTIVE TEXT part ---
-            // NOTE: This simple version just replays logs; it doesn't re-parse state dynamically. Scoreboard might jump at the end.
             const playLogEntry = liveGameLog[liveGameCurrentIndex];
             const p = document.createElement('p');
-
-            // Apply styling (copy descriptive logic)
-            let descriptiveText = playLogEntry; // Default
-            let styleClass = ''; // For specific styling
-
-            // Use stored result for team names
+            let descriptiveText = playLogEntry; let styleClass = '';
             const homeTeamName = currentLiveGameResult?.homeTeam?.name || 'Home';
             const awayTeamName = currentLiveGameResult?.awayTeam?.name || 'Away';
-            // Determine possession based on log content (less reliable than state)
             const currentPossession = playLogEntry.includes(homeTeamName) ? homeTeamName : playLogEntry.includes(awayTeamName) ? awayTeamName : null;
-
 
             // --- Start Copied Descriptive Text Logic ---
             if (playLogEntry.startsWith('-- Drive') || playLogEntry.startsWith('====')) {
-                styleClass = 'font-bold text-amber-400 mt-2';
-                if (playLogEntry.startsWith('==== FINAL')) styleClass += ' text-lg';
+                 styleClass = 'font-bold text-amber-400 mt-2';
+                 if (playLogEntry.startsWith('==== FINAL')) styleClass += ' text-lg';
                  descriptiveText = `🏈 ${playLogEntry.replace('-- Drive', 'New Drive:')} 🏈`;
                  if (playLogEntry.startsWith('====')) descriptiveText = `⏱️ ${playLogEntry} ⏱️`;
-            } else if (playLogEntry.startsWith('TOUCHDOWN')) {
-                descriptiveText = `🎉 TOUCHDOWN ${currentPossession || 'Team'}! ${playLogEntry.split('!')[1] || ''} 🎉`;
-                styleClass = 'font-semibold text-green-400';
+            } else if (playLogEntry.startsWith('🎉 TOUCHDOWN')) {
+                 descriptiveText = playLogEntry;
+                 styleClass = 'font-semibold text-green-400';
             } else if (playLogEntry.includes('conversion GOOD!')) {
-                descriptiveText = `✅ ${playLogEntry} Points are good!`;
-                styleClass = 'font-semibold text-green-400';
+                 descriptiveText = `✅ ${playLogEntry} Points are good!`;
+                 styleClass = 'font-semibold text-green-400';
             } else if (playLogEntry.includes('Conversion FAILED!')) {
-                descriptiveText = `❌ ${playLogEntry} No good!`;
-                styleClass = 'font-semibold text-red-400';
-            } else if (playLogEntry.startsWith('INTERCEPTION')) {
-                 descriptiveText = `❗ INTERCEPTED! ${playLogEntry.split('!')[1]}`;
+                 descriptiveText = `❌ ${playLogEntry} No good!`;
                  styleClass = 'font-semibold text-red-400';
-            } else if (playLogEntry.startsWith('FUMBLE')) {
-                 descriptiveText = `❗ FUMBLE! ${playLogEntry.split('!')[1]} Ball is loose! Recovered by the defense!`;
+            } else if (playLogEntry.startsWith('❗ INTERCEPTION') || playLogEntry.startsWith('❗ FUMBLE')) {
+                 descriptiveText = playLogEntry;
                  styleClass = 'font-semibold text-red-400';
-            } else if (playLogEntry.startsWith('Turnover on downs')) {
-                 descriptiveText = `✋ ${playLogEntry}`;
+            } else if (playLogEntry.startsWith('✋ Turnover on downs')) {
+                 descriptiveText = playLogEntry;
                  styleClass = 'font-semibold text-red-400';
-            } else if (playLogEntry.startsWith('SACK')) {
-                 descriptiveText = `💥 SACK! ${playLogEntry.split('!')[1]}`; // Simplified - no yard line info for restart
+            } else if (playLogEntry.startsWith('💥 SACK')) {
+                 descriptiveText = playLogEntry;
                 styleClass = 'text-orange-400';
             } else if (playLogEntry.includes('stuffed near the line')) {
                 descriptiveText = `🧱 ${playLogEntry} Nowhere to go!`;
@@ -1478,55 +1511,52 @@ export function setSimSpeed(speed) {
             }
             else if (playLogEntry.includes(' passes to ')) {
                  const passer = playLogEntry.match(/^(.*?) passes to/)?.[1];
-                 const receiver = playLogEntry.match(/passes to (.*?)\s*\(/)?.[1];
-                 const route = playLogEntry.match(/\((.*?)\)/)?.[1];
-
-                 if (playLogEntry.includes('Caught by') && playLogEntry.includes('yards.')) {
-                     const yardsMatch = playLogEntry.match(/for (-?\d+) yards/);
-                     const yards = yardsMatch ? parseInt(yardsMatch[1], 10) : 0;
-                     if (yards >= 15) descriptiveText = `🎯 ${passer} connects deep with ${receiver} on a ${route}! Gain of ${yards}!`;
-                     else if (yards > 0) descriptiveText = `👍 ${passer} finds ${receiver}. Complete for ${yards} yards.`;
-                     else descriptiveText = `✋ Quick pass to ${receiver}, stopped for ${yards} yards.`;
-                 } else if (playLogEntry.includes('INCOMPLETE')) {
-                     if (playLogEntry.includes('Defended by')) descriptiveText = `🚫 ${passer}'s pass for ${receiver} on the ${route} is broken up! Incomplete.`;
-                     else if (playLogEntry.includes('Off target')) descriptiveText = ` overthrown... ${passer}'s pass sails high. Incomplete.`;
-                     else descriptiveText = `❌ Pass intended for ${receiver} falls incomplete.`;
-                 } else descriptiveText = `Pass attempt from ${passer}... ${playLogEntry}`;
+                 const receiver = playLogEntry.match(/passes to (.*?)\.\.\./)?.[1];
+                 descriptiveText = `🏈 ${passer} passes to ${receiver}...`;
             }
-            else if (playLogEntry.match(/(\w+\s+'?\w+'?) (bursts through|shakes off|breaks into|is loose!|finds a small crease)/)) {
+            else if (playLogEntry.includes('Caught by') && playLogEntry.includes('yards.')) {
+                 const yardsMatch = playLogEntry.match(/for (-?\d+\.?\d*) yards/);
+                 const yards = yardsMatch ? parseFloat(yardsMatch[1]) : 0;
+                 if (yards >= 15) { descriptiveText = `🎯 ${playLogEntry.replace('Caught by', 'Hauled in by')} for a big gain!`; }
+                 else if (yards > 0) { descriptiveText = `👍 ${playLogEntry.replace('Caught by', 'Complete to')}.`; }
+                 else { descriptiveText = `✋ ${playLogEntry}. Stopped for minimal gain.`; }
+            }
+            else if (playLogEntry.includes('INCOMPLETE') || playLogEntry.startsWith('❌') || playLogEntry.startsWith('🚫') || playLogEntry.startsWith('‹‹')) {
+                  if (playLogEntry.includes('Defended by')) { descriptiveText = `🚫 ${playLogEntry.replace('INCOMPLETE pass to', 'Pass intended for')} Knocked away!`; }
+                  else if (playLogEntry.includes('Off target')) { descriptiveText = ` overthrown... ${playLogEntry}`; }
+                  else { descriptiveText = `❌ ${playLogEntry}`; }
+            }
+            else if (playLogEntry.match(/(\w+\s+'?\w+'?) (bursts through|shakes off|breaks into|is loose!|finds a small crease|runs out of bounds)/)) {
                 const runner = playLogEntry.match(/^(\w+\s+'?\w+'?)/)?.[1];
-                const yardsMatch = playLogEntry.match(/(\+|-)(\d+) yards?/); // Adjusted regex slightly
-                const yards = yardsMatch ? parseInt(yardsMatch[1] + yardsMatch[2]) : (playLogEntry.includes("crease") ? getRandomInt(1,3) : getRandomInt(4,7));
-                if (yards >= 10) descriptiveText = `💨 ${runner} breaks free! Gallops for ${yards} yards!`;
-                else if (yards > 3) descriptiveText = `➡️ Good run by ${runner}. Picks up ${yards} yards.`;
-                else descriptiveText = `➡️ ${runner} pushes forward for a short gain of ${yards}.`;
+                const yardsMatch = playLogEntry.match(/(\+|-)(\d+\.?\d*) yards/);
+                const yards = yardsMatch ? parseFloat(yardsMatch[1] + yardsMatch[2]) : (playLogEntry.includes("crease") ? getRandomInt(1,3) : getRandomInt(4,7));
+                if (yards >= 10) { descriptiveText = `💨 HE'S LOOSE! ${playLogEntry}! Great run!`; }
+                else { descriptiveText = `➡️ ${playLogEntry}. Nice gain on the ground.`; }
                 styleClass = 'text-cyan-300';
             }
             else if (playLogEntry.includes('tackled by') || playLogEntry.includes('Stopped by') || playLogEntry.includes('dragged down') || playLogEntry.includes('Caught from behind')) {
                  descriptiveText = `✋ ${playLogEntry}`;
             }
-            else if (playLogEntry.startsWith('First down!')) {
-                descriptiveText = `➡️ ${playLogEntry} Move the chains!`;
+            else if (playLogEntry.startsWith('➡️ First down')) {
+                descriptiveText = playLogEntry;
                  styleClass = 'text-yellow-300 font-semibold';
             }
-            else if (playLogEntry.startsWith('INJURY')) {
-                descriptiveText = `🚑 ${playLogEntry}`;
+            else if (playLogEntry.startsWith('🚑 INJURY')) {
+                descriptiveText = playLogEntry;
                 styleClass = 'text-purple-400 italic';
             }
             // --- End Copied Descriptive Text Logic ---
 
-            p.textContent = descriptiveText; // Use descriptive text
-            if (styleClass) p.className = styleClass; // Apply styles
+            p.textContent = descriptiveText;
+            if (styleClass) p.className = styleClass;
 
             if (elements.simPlayLog) {
                 elements.simPlayLog.appendChild(p);
                 elements.simPlayLog.scrollTop = elements.simPlayLog.scrollHeight;
             }
             liveGameCurrentIndex++;
-            // --- End identical logic ---
         } // --- End nextEntryForRestart function ---
 
-        // Restart the interval with the *new* speed
         liveGameInterval = setInterval(nextEntryForRestart, liveGameSpeed);
     }
 } // End setSimSpeed
