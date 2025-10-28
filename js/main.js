@@ -712,6 +712,7 @@ function main() {
         // Live Sim Controls
         document.getElementById('sim-skip-btn')?.addEventListener('click', () => {
             UI.skipLiveGameSim(currentLiveSimResult); // Pass stored result
+            UI.drawFieldVisualization(null); // <-- ADD THIS to clear canvas on skip
         });
         document.getElementById('sim-speed-play')?.addEventListener('click', () => UI.setSimSpeed(1000));
         document.getElementById('sim-speed-fast')?.addEventListener('click', () => UI.setSimSpeed(400));
