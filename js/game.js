@@ -289,6 +289,7 @@ function generatePlayer(minAge = 10, maxAge = 16) {
         age,
         favoriteOffensivePosition,
         favoriteDefensivePosition,
+        number: getRandomInt(1, 99),
         potential, // Added potential attribute
         attributes,
         teamId: null, // Initially undrafted
@@ -1073,7 +1074,207 @@ function getZoneCenter(zoneAssignment, lineOfScrimmage) {
 }
 // --- End Zone Helpers ---
 
+// game.js
 
+// ... (Zone Helpers, etc.) ...
+
+// =============================================================
+// --- TICK LOOP HELPER FUNCTIONS ---
+// =============================================================
+
+/**
+ * Calculates the absolute coordinate path for a given route.
+ * @param {string} routeName - The name of the route (e.g., 'Fly', 'Slant').
+ * @param {number} startX - The player's absolute starting X coordinate.
+ * @param {number} startY - The player's absolute starting Y coordinate.
+ * @returns {Array<object> | null} An array of {x, y} coordinate points, or null.
+ */
+function calculateRoutePath(routeName, startX, startY) {
+    const route = routeTree[routeName];
+    if (!route || !route.path) return null; // No path defined for this route
+
+    // Determine if player is on the left or right side of center (for mirroring X)
+    const xMirror = (startX < CENTER_X) ? -1 : 1;
+
+    const absolutePath = route.path.map(point => {
+        return {
+            x: startX + (point.x * xMirror), // Apply mirroring to X offset
+            y: startY + point.y              // Y offset is always downfield
+        };
+    });
+
+    return absolutePath;
+}
+
+/**
+ * Sets up the initial state for all players involved in a play, including positions and actions.
+ * @param {object} playState - The mutable play state object.
+ * @param {object} offense - The offensive team object.
+ * @param {object} defense - The defensive team object.
+ * @param {object} play - The specific offensive play object from the playbook.
+ * @param {object} assignments - Play assignments mapping slots to actions/routes.
+ * @param {number} ballOnYardLine - The yard line the ball is on (0-100 territory).
+ * @param {string} defensivePlayKey - The key for the called defensive play (e.g., 'Cover_2_Zone').
+ */
+function setupInitialPlayerStates(playState, offense, defense, play, assignments, ballOnYardLine, defensivePlayKey) {
+    playState.activePlayers = []; // Clear previous players
+    const usedPlayerIds_O = new Set();
+    const usedPlayerIds_D = new Set();
+    
+    // Get the defensive play data
+    const defPlay = defensivePlaybook[defensivePlayKey] || defensivePlaybook['Cover_2_Zone']; // Failsafe
+    const defAssignments = defPlay.assignments || {};
+
+    // Determine absolute Y coordinate for the Line of Scrimmage
+    playState.lineOfScrimmage = ballOnYardLine + 10; // 0-100 territory + 10yd endzone
+
+    // Determine Ball X coordinate (simplified - assume center for now)
+    const ballX = CENTER_X; // TODO: Could adjust based on hash marks
+
+    const setupSide = (team, side, formationData, isOffense) => {
+        if (!team || !team.roster || !formationData || !formationData.slots || !formationData.coordinates) {
+             console.error(`setupInitialPlayerStates: Invalid data for ${side}`);
+             return;
+        }
+
+        const usedSet = isOffense ? usedPlayerIds_O : usedPlayerIds_D;
+
+        formationData.slots.forEach(slot => {
+            // Find a valid player for the slot
+            const player = getPlayerBySlot(team, side, slot, usedSet) || findEmergencyPlayer(slot.replace(/\d/g,''), team, side, usedSet)?.player;
+            if (!player || !player.attributes) {
+                // console.warn(`No player found for ${side} slot: ${slot}`);
+                return; // Skip if no player available for this slot
+            }
+
+            // Get relative coordinates from formation data
+            const relCoords = formationData.coordinates[slot] || [0, 0];
+            let startX = ballX + relCoords[0];
+            let startY = playState.lineOfScrimmage + relCoords[1]; // Y offset relative to LoS
+
+            // Clamp initial positions
+            startX = Math.max(0.1, Math.min(FIELD_WIDTH - 0.1, startX));
+            startY = Math.max(10.1, Math.min(FIELD_LENGTH - 10.1, startY));
+
+            // Determine initial action, assignment, and targets
+            let action = 'idle';
+            let assignment = null; // Specific role (e.g., 'man_cover_WR1', 'zone_deep_half')
+            let targetX = startX;
+            let targetY = startY;
+            let routePath = null;
+
+            if (isOffense) {
+                assignment = assignments?.[slot]; // e.g., 'Fly', 'BlockPass', 'run_inside'
+                if (assignment) {
+                    if (assignment.toLowerCase().includes('block_pass')) {
+                        action = 'pass_block';
+                        targetY = startY - 0.5; // Initial step back
+                    } else if (assignment.toLowerCase().includes('block_run')) {
+                        action = 'run_block';
+                        targetY = startY + 0.5; // Initial step forward
+                    } else if (assignment.toLowerCase().includes('run_')) { // Designed run
+                        action = 'run_path';
+                        // Set initial target based on run type
+                        targetY = startY + 5; // Target 5 yards downfield
+                        if (assignment.includes('outside')) targetX = startX + (startX < CENTER_X ? -7 : 7); // Outside
+                        else targetX = startX + getRandomInt(-2, 2); // Inside
+                    } else if (routeTree[assignment]) { // It's a route name
+                         action = 'run_route';
+                         routePath = calculateRoutePath(assignment, startX, startY);
+                         if (routePath && routePath.length > 0) {
+                             targetX = routePath[0].x; // Target first point in path
+                             targetY = routePath[0].y;
+                         }
+                    }
+                } else if (slot.startsWith('OL')) { // Default OL action
+                     action = play.type === 'pass' ? 'pass_block' : 'run_block';
+                     targetY = startY + (action === 'pass_block' ? -0.5 : 0.5);
+                } else if (slot.startsWith('QB')) {
+                     action = 'qb_setup';
+                     if (play.type === 'pass') targetY = startY - 2; // Step back for dropback
+                }
+                pState.assignment = assignment; // Store offensive assignment (route name, block type)
+            } else { // Defense
+                 assignment = defAssignments[slot] || 'def_read'; // Get assignment from def playbook
+                 pState.assignment = assignment; // Store defensive assignment
+                 action = assignment; // Action is the assignment
+
+                 // Set initial target based on assignment
+                 if (assignment.startsWith('zone_')) {
+                     const zoneCenter = getZoneCenter(assignment, playState.lineOfScrimmage);
+                     targetX = zoneCenter.x;
+                     targetY = zoneCenter.y;
+                 } else if (assignment.startsWith('run_gap_') || assignment.startsWith('run_edge_')) {
+                     const gapTarget = zoneBoundaries[assignment];
+                     if (gapTarget) {
+                         targetX = ballX + gapTarget.xOffset;
+                         targetY = playState.lineOfScrimmage + gapTarget.yOffset;
+                     }
+                 } // Man/Blitz/Spy targets will be set dynamically in updatePlayerTargets
+            }
+
+            // Calculate fatigue modifier
+            const fatigueModifier = player ? Math.max(0.3, (1 - (player.fatigue / (player.attributes?.physical?.stamina || 50) * 3))) : 1.0;
+
+            // Add player state to the active list
+            playState.activePlayers.push({
+                id: player.id,
+                name: player.name,
+                number: player.number, // Pass number
+                teamId: team.id,
+                primaryColor: team.primaryColor, // Pass colors
+                secondaryColor: team.secondaryColor,
+                isOffense: isOffense,
+                slot: slot,
+                x: startX, y: startY, initialX: startX, initialY: startY, // Store initial pos
+                targetX: targetX, targetY: targetY,
+                speed: player.attributes.physical?.speed || 50,
+                strength: player.attributes.physical?.strength || 50,
+                agility: player.attributes.physical?.agility || 50,
+                blocking: player.attributes.technical?.blocking || 50,
+                blockShedding: player.attributes.technical?.blockShedding || 50,
+                tackling: player.attributes.technical?.tackling || 50,
+                catchingHands: player.attributes.technical?.catchingHands || 50,
+                throwingAccuracy: player.attributes.technical?.throwingAccuracy || 50,
+                playbookIQ: player.attributes.mental?.playbookIQ || 50,
+                fatigueModifier: fatigueModifier,
+                action: action, // Current high-level action
+                assignment: assignment, // Stored role (route, zone, man target, etc.)
+                routePath: routePath, // Array of {x, y} points
+                currentPathIndex: 0,
+                engagedWith: null,
+                isBlocked: false,
+                blockedBy: null,
+                isEngaged: false,
+                isBallCarrier: false,
+                hasBall: false
+            });
+        });
+    };
+
+    // Setup offense
+    const offenseFormationData = offenseFormations[offense.formations.offense];
+    setupSide(offense, 'offense', offenseFormationData, true);
+
+    // Setup defense
+    const defenseFormationData = defenseFormations[defense.formations.defense];
+    setupSide(defense, 'defense', defenseFormationData, false);
+
+    // Initial ball position (with QB)
+    const qbState = playState.activePlayers.find(p => p.slot === 'QB1');
+    if (qbState) {
+        playState.ballState.x = qbState.x;
+        playState.ballState.y = qbState.y;
+        playState.ballState.z = 1.0; // Ball held
+        qbState.hasBall = true;
+        // Set QB as initial ball carrier (for scramble logic)
+        qbState.isBallCarrier = true; 
+    } else {
+        console.error("CRITICAL: QB not found during setup! Ending play.");
+        playState.playIsLive = false;
+        playState.turnover = true; // Treat as a fumble
+    }
+}
 /**
  * Updates player targets based on their current action, assignment, and game state. (Improved AI)
  * Modifies playerState objects within playState.activePlayers directly.
