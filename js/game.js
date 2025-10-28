@@ -1743,6 +1743,7 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
 
 
     // --- 3. TICK LOOP ---
+    let ballCarrierState = null; // <-- ADD THIS LINE to declare it here
     try {
         while (playState.playIsLive && playState.tick < playState.maxTicks) {
             playState.tick++;
@@ -1750,7 +1751,7 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
 
             const offenseStates = playState.activePlayers.filter(p => p.isOffense);
             const defenseStates = playState.activePlayers.filter(p => !p.isOffense);
-            let ballCarrierState = playState.activePlayers.find(p => p.isBallCarrier);
+            ballCarrierState = playState.activePlayers.find(p => p.isBallCarrier);
 
             // A. Update Player Intentions/Targets (AI)
             updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrierState, type, assignments, defensivePlayKey);
