@@ -16,6 +16,24 @@ import {
 // --- Global Game State ---
 let game = null;
 
+// --- NEW: Team Color Definitions ---
+const teamColors = [
+    { primary: '#DC2626', secondary: '#FFFFFF' }, // Red (Home Offense)
+    { primary: '#2563EB', secondary: '#FFFFFF' }, // Blue (Away Offense)
+    { primary: '#FBBF24', secondary: '#000000' }, // Yellow (Home Defense)
+    { primary: '#D1D5DB', secondary: '#000000' }, // Gray (Away Defense)
+    { primary: '#10B981', secondary: '#000000' }, // Emerald
+    { primary: '#F97316', secondary: '#FFFFFF' }, // Orange
+    { primary: '#6366F1', secondary: '#FFFFFF' }, // Indigo
+    { primary: '#EC4899', secondary: '#FFFFFF' }, // Pink
+    { primary: '#000000', secondary: '#FFFFFF' }, // Black
+    { primary: '#84CC16', secondary: '#000000' }, // Lime
+    { primary: '#A855F7', secondary: '#FFFFFF' }, // Purple
+    { primary: '#14B8A6', secondary: '#FFFFFF' }, // Teal
+    // Add more color pairs as needed
+];
+let availableColors = [...teamColors];
+
 // --- Constants ---
 const offensivePositions = ['QB', 'RB', 'WR', 'OL'];
 const defensivePositions = ['DL', 'LB', 'DB'];
@@ -289,7 +307,7 @@ function generatePlayer(minAge = 10, maxAge = 16) {
         age,
         favoriteOffensivePosition,
         favoriteDefensivePosition,
-        number: getRandomInt(1, 99),
+        number: null,
         potential, // Added potential attribute
         attributes,
         teamId: null, // Initially undrafted
@@ -820,11 +838,100 @@ export function simulateAIPick(team) {
  * @param {object} team - The team object to add the player to.
  * @returns {boolean} True if the player was successfully added, false otherwise.
  */
+/**
+ * Adds a player object to a team's roster, assigns a unique position-based number,
+ * and updates the player's teamId.
+ * @param {object} player - The player object to add.
+ * @param {object} team - The team object to add the player to.
+ * @returns {boolean} True if the player was successfully added, false otherwise.
+ */
 export function addPlayerToTeam(player, team) {
      if (!player || !team || !team.roster || typeof player.id === 'undefined') {
          console.error("addPlayerToTeam: Invalid player or team object provided.");
          return false;
      }
+
+    // --- NEW: Position-Based Number Assignment ---
+    // Only assign a number if the player doesn't already have one
+    if (player.number === null) {
+        // 1. Find player's "primary" position by checking their best overall
+        const offOvr = calculateOverall(player, player.favoriteOffensivePosition);
+        const defOvr = calculateOverall(player, player.favoriteDefensivePosition);
+        const primaryPos = (offOvr >= defOvr) ? player.favoriteOffensivePosition : player.favoriteDefensivePosition;
+
+        // 2. Define preferred number ranges based on 7-on-7 positions
+        let preferredRanges = [];
+        switch (primaryPos) {
+            case 'QB':
+                preferredRanges.push([1, 19]); // QBs
+                break;
+            case 'WR':
+                preferredRanges.push([10, 19], [80, 89]); // WRs/QBs + classic WRs
+                break;
+            case 'RB':
+                preferredRanges.push([20, 39]); // RBs
+                break;
+            case 'DB':
+                preferredRanges.push([20, 49]); // DBs (overlap with RBs)
+                break;
+            case 'LB':
+                preferredRanges.push([40, 59], [90, 99]); // LBs
+                break;
+            case 'OL':
+                preferredRanges.push([60, 79]); // OL
+                break;
+            case 'DL':
+                preferredRanges.push([60, 79], [90, 99]); // DL (overlap with OL/LB)
+                break;
+            default:
+                preferredRanges.push([1, 99]); // Failsafe
+        }
+
+        // 3. Get all numbers currently used on the team
+        const existingNumbers = new Set(team.roster.map(p => p.number).filter(n => n !== null));
+
+        // 4. Create and shuffle a list of preferred numbers
+        let preferredNumbers = [];
+        for (const range of preferredRanges) {
+            for (let i = range[0]; i <= range[1]; i++) {
+                if (!existingNumbers.has(i)) { // Only add if not already taken
+                    preferredNumbers.push(i);
+                }
+            }
+        }
+        preferredNumbers.sort(() => 0.5 - Math.random()); // Shuffle the list
+
+        let numberAssigned = false;
+        // 5. Try to assign from the preferred list first
+        if (preferredNumbers.length > 0) {
+            player.number = preferredNumbers[0]; // Take the first random one
+            numberAssigned = true;
+        }
+
+        // 6. Fallback: If all preferred numbers were taken
+        if (!numberAssigned) {
+            console.warn(`Could not find preferred number for ${player.name} (${primaryPos}). Assigning random fallback.`);
+            let fallbackNumber;
+            let attempts = 0; // Safety break
+            do {
+                fallbackNumber = getRandomInt(1, 99);
+                attempts++;
+            } while (existingNumbers.has(fallbackNumber) && attempts < 200); // Try 200 times
+            
+            // If it still fails, assign the first available number 1-99
+            if (existingNumbers.has(fallbackNumber)) {
+                for (let i = 1; i <= 99; i++) {
+                    if (!existingNumbers.has(i)) {
+                        fallbackNumber = i;
+                        break;
+                    }
+                }
+            }
+            player.number = fallbackNumber;
+        }
+    }
+    // --- END NEW ---
+
     player.teamId = team.id;
     team.roster.push(player);
     return true;
@@ -2126,7 +2233,7 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
         playIsLive: true, tick: 0, maxTicks: 100, // ~15 seconds max play time
         yards: 0, touchdown: false, turnover: false, incomplete: false, sack: false,
         ballState: { x: 0, y: 0, z: 1.0, vx: 0, vy: 0, vz: 0, targetPlayerId: null, inAir: false },
-        lineOfScrimmage: 0, activePlayers: [], blockBattles: [],
+        lineOfScrimmage: 0, activePlayers: [], blockBattles: [], visualizationFrames: []
     };
 
     // 2. Setup Initial Player States & Positions
@@ -2266,7 +2373,15 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
                 pState.fatigueModifier = Math.max(0.3, (1 - (player.fatigue / (stamina * 3))));
             }
         });
-
+        // --- ADD THIS BLOCK ---
+        // I. Record Visualization Frame
+        // (Deep-clone player and ball states for this tick)
+        const frameData = {
+            players: JSON.parse(JSON.stringify(playState.activePlayers)),
+            ball: JSON.parse(JSON.stringify(playState.ballState))
+        };
+        playState.visualizationFrames.push(frameData);
+        // --- END ADDED BLOCK ---
 
     } // --- End TICK LOOP ---
 
@@ -2299,6 +2414,7 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
         turnover: playState.turnover,
         incomplete: playState.incomplete,
         log: gameLog // Pass back the potentially modified log
+        visualizationFrames: playState.visualizationFrames
     };
 }
 
@@ -2586,6 +2702,7 @@ export function simulateGame(homeTeam, awayTeam) {
     aiSetDepthChart(awayTeam);
 
     const gameLog = [];
+    const allVisualizationFrames = []; // <-- ADD THIS
     let homeScore = 0;
     let awayScore = 0;
     const weather = getRandom(['Sunny', 'Windy', 'Rain']);
@@ -2675,6 +2792,9 @@ export function simulateGame(homeTeam, awayTeam) {
 
             // --- Resolve play using NEW coordinate-based engine ---
             const result = resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, { gameLog, weather, ballOn });
+            if (result.visualizationFrames) {
+                allVisualizationFrames.push(...result.visualizationFrames); // <-- ADD THIS
+            }
             // ---
 
             // Update game state based on play result
@@ -2776,7 +2896,7 @@ export function simulateGame(homeTeam, awayTeam) {
         }
     });
 
-    return { homeTeam, awayTeam, homeScore, awayScore, gameLog, breakthroughs };
+    return { homeTeam, awayTeam, homeScore, awayScore, gameLog, breakthroughs, visualizationFrames: allVisualizationFrames};
 }
 
 
@@ -3277,9 +3397,9 @@ export function changeFormation(side, formationName) {
 
 /** Cuts a player from the player's team roster. */
 export function playerCut(playerId) {
-    if (!game || !game.playerTeam || !game.playerTeam.roster) { /* ... error handling ... */ return { success: false, message: "Game state error." }; }
+    if (!game || !game.playerTeam || !game.playerTeam.roster) { return { success: false, message: "Game state error." }; }
     const team = game.playerTeam;
-    const playerIndex = team.roster.findIndex(p => p && p.id === playerId); // Added p check
+    const playerIndex = team.roster.findIndex(p => p && p.id === playerId);
 
     if (playerIndex > -1) {
         const player = team.roster[playerIndex];
@@ -3287,10 +3407,11 @@ export function playerCut(playerId) {
 
         team.roster.splice(playerIndex, 1); // Remove from roster
         player.teamId = null; // Mark as free agent
+        player.number = null; // <-- ADDED: Free up the number
 
         // Remove from depth chart
         for (const side in team.depthChart) {
-             if (team.depthChart[side]) { // Check side exists
+             if (team.depthChart[side]) {
                   for (const slot in team.depthChart[side]) {
                       if (team.depthChart[side][slot] === playerId) { team.depthChart[side][slot] = null; }
                   }
@@ -3298,8 +3419,7 @@ export function playerCut(playerId) {
         }
         aiSetDepthChart(team); // Refill depth chart slots
         addMessage("Roster Move", `${player.name} has been cut from the team.`);
-        // Optionally decrease relationships between cut player and remaining roster?
-        team.roster.forEach(rp => { if (rp) decreaseRelationship(rp.id, player.id); });
+        team.roster.forEach(rp => { if (rp) decreaseRelationship(rp.id, player.id); }); // Decrease relationships
         return { success: true };
     } else { return { success: false, message: "Player not found on roster." }; }
 }
