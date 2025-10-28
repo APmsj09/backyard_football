@@ -1070,30 +1070,26 @@ export function setupDepthChartTabs() {
 /**
  * Draws the state of a play (players, ball) onto the field canvas.
  * @param {object} frameData - A single frame from resolvePlay.visualizationFrames.
- * @param {string} homeTeamId - The ID of the home team for coloring.
  */
-function drawFieldVisualization(frameData, homeTeamId) {
+function drawFieldVisualization(frameData) { // <-- homeTeamId parameter REMOVED
     const ctx = elements.fieldCanvasCtx;
     const canvas = elements.fieldCanvas;
     if (!ctx || !canvas) return; // Exit if canvas not found
 
     // Clear canvas
-    ctx.fillStyle = '#059669'; // green-700
+    ctx.fillStyle = '#059669'; // Tailwind green-700
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
     // --- Scaling ---
-    // We map 120 yards (FIELD_LENGTH) to the canvas height (320px)
-    const pixelsPerYard = canvas.height / FIELD_LENGTH; // e.g., 320 / 120 = 2.66
-    // We map 53.3 yards (FIELD_WIDTH) to the canvas width (600px)
-    const scaleX = canvas.width / FIELD_WIDTH;   // e.g., 600 / 53.3 = 11.25
+    const pixelsPerYard = canvas.height / FIELD_LENGTH;
+    const scaleX = canvas.width / FIELD_WIDTH;
     const scaleY = pixelsPerYard;
-    // NOTE: This will look "stretched" horizontally. A 1:1 scale is more complex.
     // --- End Scaling ---
 
     // --- Draw Field Markings ---
     ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
     ctx.lineWidth = 1;
-    ctx.font = '10px "Inter"';
+    ctx.font = 'bold 10px "Inter"'; // Made bold for visibility
     ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
     ctx.textAlign = 'center';
 
@@ -1105,8 +1101,13 @@ function drawFieldVisualization(frameData, homeTeamId) {
         ctx.stroke();
 
         if (y > 10 && y < 110) { // Don't draw numbers on goal lines
-            const yardLineNum = y <= 60 ? y - 10 : 120 - y - 10; // 10, 20... 50... 20, 10
-            ctx.fillText(yardLineNum.toString(), canvas.width / 2, drawY + 10);
+            // Goal line text
+            if (y === 20 || y === 100) {
+                ctx.fillText("GOAL", canvas.width / 2, drawY + 12);
+            } else {
+                const yardLineNum = y <= 60 ? y - 10 : 120 - y - 10;
+                ctx.fillText(yardLineNum.toString(), canvas.width / 2, drawY + 12); // Nudge text down
+            }
         }
     }
     // --- End Field Markings ---
@@ -1115,47 +1116,36 @@ function drawFieldVisualization(frameData, homeTeamId) {
     if (!frameData || !frameData.players) return;
 
     // --- Draw Players ---
-    const playerRadius = 5;
+    const playerRadius = 7; // <-- Increased radius
+    ctx.textBaseline = 'middle'; // Set once
+
     frameData.players.forEach(pState => {
+        if (pState.x === undefined || pState.y === undefined) return; // Safety check
+
         const drawX = pState.x * scaleX;
         const drawY = pState.y * scaleY;
 
-        // Determine color
-        const isHome = pState.teamId === homeTeamId;
-        const isOffense = pState.isOffense;
-        let color = '#FFFFFF'; // Default (shouldn't happen)
+        // --- Use Team Colors ---
+        // Use primary color from pState, with a fallback
+        ctx.fillStyle = pState.primaryColor || (pState.isOffense ? '#DC2626' : '#E5E7EB');
+        // ---
 
-        if (isOffense) {
-            color = isHome ? '#DC2626' : '#2563EB'; // Home Offense: Red, Away Offense: Blue
-        } else {
-            color = isHome ? '#FBBF24' : '#E5E7EB'; // Home Defense: Yellow, Away Defense: Gray
-        }
+        // Draw player circle
+        ctx.beginPath();
+        ctx.arc(drawX, drawY, playerRadius, 0, 2 * Math.PI);
+        ctx.fill();
 
-// --- Draw Players ---
-        const playerRadius = 6; // <-- Made slightly larger for numbers
-        frameData.players.forEach(pState => {
-            const drawX = pState.x * scaleX;
-            const drawY = pState.y * scaleY;
-            // ... (determine color) ...
+        // --- Draw Player Number ---
+        // Use secondary color (text color) from pState, with fallback
+        ctx.fillStyle = pState.secondaryColor || (pState.isOffense ? '#FFFFFF' : '#000000'); 
+        ctx.font = 'bold 9px "Inter"'; // Font for the number
+        ctx.fillText(pState.number || '?', drawX, drawY + 1); // Use number, fallback to '?'
+        // --- End Player Number ---
 
-            // Draw player circle
-            ctx.fillStyle = color;
-            ctx.beginPath();
-            ctx.arc(drawX, drawY, playerRadius, 0, 2 * Math.PI);
-            ctx.fill();
-
-            // --- REPLACED 'X' / 'O' with Player Number ---
-            ctx.fillStyle = 'black'; // Color for the number
-            ctx.font = 'bold 8px "Inter"'; // Font for the number
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
-            ctx.fillText(pState.number || '?', drawX, drawY + 0.5); // Use number, fallback to '?'
-            // --- END REPLACEMENT ---
-
-            // Highlight ball carrier
+        // Highlight ball carrier
         if (pState.isBallCarrier) {
             ctx.strokeStyle = '#FBBF24'; // Yellow highlight
-            ctx.lineWidth = 2;
+            ctx.lineWidth = 2.5; // Thicker highlight
             ctx.beginPath();
             ctx.arc(drawX, drawY, playerRadius + 3, 0, 2 * Math.PI);
             ctx.stroke();
@@ -1169,12 +1159,12 @@ function drawFieldVisualization(frameData, homeTeamId) {
         // Simple shadow
         ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
         ctx.beginPath();
-        ctx.arc(ballDrawX + 2, ballDrawY + 2, 3, 0, 2 * Math.PI);
+        ctx.arc(ballDrawX + 2, ballDrawY + 2, 4, 0, 2 * Math.PI); // Bigger shadow
         ctx.fill();
         // Ball
         ctx.fillStyle = '#854D0E'; // brown-700
         ctx.beginPath();
-        ctx.arc(ballDrawX, ballDrawY, 3, 0, 2 * Math.PI);
+        ctx.arc(ballDrawX, ballDrawY, 4, 0, 2 * Math.PI); // Bigger ball
         ctx.fill();
     }
 }
@@ -1283,12 +1273,14 @@ export function startLiveGameSim(gameResult, onComplete) {
 
     // --- Function to process the next log entry ---
     function nextEntry() {
+        // --- Draw current visualization frame ---
         if (gameResult.visualizationFrames && gameResult.visualizationFrames[liveGameCurrentIndex]) {
-            drawFieldVisualization(gameResult.visualizationFrames[liveGameCurrentIndex], gameResult.homeTeam.id);
+            // Remove homeTeamId, it's no longer needed
+            drawFieldVisualization(gameResult.visualizationFrames[liveGameCurrentIndex]); // <-- CHANGED
         } else if (liveGameCurrentIndex === 0) {
-            // Clear canvas at the start of the play-by-play
             drawFieldVisualization(null);
         }
+        // ---
         if (liveGameCurrentIndex >= liveGameLog.length) { // End condition
             clearInterval(liveGameInterval); liveGameInterval = null;
             // Ensure Final Score is Correct
