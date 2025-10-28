@@ -2413,7 +2413,7 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
         touchdown: playState.touchdown,
         turnover: playState.turnover,
         incomplete: playState.incomplete,
-        log: gameLog // Pass back the potentially modified log
+        log: gameLog, // Pass back the potentially modified log
         visualizationFrames: playState.visualizationFrames
     };
 }
