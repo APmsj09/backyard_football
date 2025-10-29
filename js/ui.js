@@ -269,6 +269,7 @@ export function renderTeamNameSuggestions(names, onSelect) {
     });
 }
 
+
 /**
  * Renders the main draft screen UI.
  */
@@ -315,8 +316,9 @@ export function renderDraftScreen(gameState, onPlayerSelect, currentSelectedId) 
     if (elements.draftPickNumber) elements.draftPickNumber.textContent = currentPick + 1;
     if (elements.draftPickingTeam) elements.draftPickingTeam.textContent = pickingTeam.name || 'Unknown Team';
 
-    renderDraftPool(gameState, onPlayerSelect);
+    renderDraftPool(gameState, onPlayerSelect, sortColumn, sortDirection); // <<< Pass sort params
     renderPlayerRoster(gameState.playerTeam);
+    updateDraftSortIndicators(sortColumn, sortDirection); // <<< Add this call
 
     if (elements.draftPlayerBtn) {
         elements.draftPlayerBtn.disabled = !playerCanPick || currentSelectedId === null;
@@ -337,24 +339,75 @@ export function renderDraftPool(gameState, onPlayerSelect) {
     const undraftedPlayers = gameState.players.filter(p => p && !p.teamId);
     const searchTerm = elements.draftSearch?.value.toLowerCase() || '';
     const posFilter = elements.draftFilterPos?.value || '';
-    const sortMethod = elements.draftSort?.value || 'default';
+   
 
     let filteredPlayers = undraftedPlayers.filter(p =>
         p.name.toLowerCase().includes(searchTerm) &&
         (!posFilter || p.favoriteOffensivePosition === posFilter || p.favoriteDefensivePosition === posFilter)
     );
 
+    // --- NEW SORT LOGIC ---
     const potentialOrder = { 'A': 5, 'B': 4, 'C': 3, 'D': 2, 'F': 1 };
-    switch (sortMethod) {
-        case 'age-asc': filteredPlayers.sort((a, b) => (a?.age || 99) - (b?.age || 99)); break;
-        case 'age-desc': filteredPlayers.sort((a, b) => (b?.age || 0) - (a?.age || 0)); break;
-        case 'speed-desc': filteredPlayers.sort((a, b) => (b?.attributes?.physical?.speed || 0) - (a?.attributes?.physical?.speed || 0)); break;
-        case 'strength-desc': filteredPlayers.sort((a, b) => (b?.attributes?.physical?.strength || 0) - (a?.attributes?.physical?.strength || 0)); break;
-        case 'agility-desc': filteredPlayers.sort((a, b) => (b?.attributes?.physical?.agility || 0) - (a?.attributes?.physical?.agility || 0)); break;
-        case 'potential-desc': filteredPlayers.sort((a, b) => (potentialOrder[b?.potential] || 0) - (potentialOrder[a?.potential] || 0)); break;
+    
+    const sortPlayer = (a, b, key, category = null) => {
+        const valA = category ? (a?.attributes?.[category]?.[key] || 0) : (a?.[key] || 0);
+        const valB = category ? (b?.attributes?.[category]?.[key] || 0) : (b?.[key] || 0);
+        return sortDirection === 'asc' ? valA - valB : valB - valA;
+    };
+    
+    switch (sortColumn) {
+        case 'name':
+            filteredPlayers.sort((a, b) => sortDirection === 'asc' ? a.name.localeCompare(b.name) : b.name.localeCompare(a.name));
+            break;
+        case 'age':
+            filteredPlayers.sort((a, b) => sortPlayer(a, b, 'age'));
+            break;
+        case 'position':
+            // This is a bit arbitrary, but sorts by one of the pref positions
+            filteredPlayers.sort((a, b) => {
+                const posA = a.favoriteOffensivePosition || a.favoriteDefensivePosition;
+                const posB = b.favoriteOffensivePosition || b.favoriteDefensivePosition;
+                return sortDirection === 'asc' ? posA.localeCompare(posB) : posB.localeCompare(posA);
+            });
+            break;
+        case 'height':
+            filteredPlayers.sort((a, b) => sortPlayer(a, b, 'height', 'physical'));
+            break;
+        case 'weight':
+            filteredPlayers.sort((a, b) => sortPlayer(a, b, 'weight', 'physical'));
+            break;
+        case 'speed':
+            filteredPlayers.sort((a, b) => sortPlayer(a, b, 'speed', 'physical'));
+            break;
+        case 'strength':
+            filteredPlayers.sort((a, b) => sortPlayer(a, b, 'strength', 'physical'));
+            break;
+        case 'agility':
+            filteredPlayers.sort((a, b) => sortPlayer(a, b, 'agility', 'physical'));
+            break;
+        case 'throwingAccuracy':
+            filteredPlayers.sort((a, b) => sortPlayer(a, b, 'throwingAccuracy', 'technical'));
+            break;
+        case 'catchingHands':
+            filteredPlayers.sort((a, b) => sortPlayer(a, b, 'catchingHands', 'technical'));
+            break;
+        case 'blocking':
+            filteredPlayers.sort((a, b) => sortPlayer(a, b, 'blocking', 'technical'));
+            break;
+        case 'tackling':
+            filteredPlayers.sort((a, b) => sortPlayer(a, b, 'tackling', 'technical'));
+            break;
+        case 'blockShedding':
+            filteredPlayers.sort((a, b) => sortPlayer(a, b, 'blockShedding', 'technical'));
+            break;
+        case 'potential':
         default:
-             filteredPlayers.sort((a, b) => (potentialOrder[b?.potential] || 0) - (potentialOrder[a?.potential] || 0)); // Default sort by potential
-             break;
+            filteredPlayers.sort((a, b) => {
+                const valA = potentialOrder[a?.potential] || 0;
+                const valB = potentialOrder[b?.potential] || 0;
+                return sortDirection === 'asc' ? valA - valB : valB - valA;
+            });
+            break;
     }
 
     elements.draftPoolTbody.innerHTML = '';
@@ -400,6 +453,19 @@ export function renderDraftPool(gameState, onPlayerSelect) {
         row.onclick = () => onPlayerSelect(scoutedPlayer.id);
         elements.draftPoolTbody.appendChild(row);
     });
+}
+
+export function updateDraftSortIndicators(sortColumn, sortDirection) {
+    // Remove all indicators
+    document.querySelectorAll('#draft-screen thead th .sort-indicator').forEach(span => {
+        span.textContent = '';
+    });
+    
+    // Add new indicator
+    const headerCell = document.querySelector(`#draft-screen thead th[data-sort="${sortColumn}"] .sort-indicator`);
+    if (headerCell) {
+        headerCell.textContent = (sortDirection === 'desc') ? ' ▼' : ' ▲';
+    }
 }
 
 /** Debounced version of renderDraftPool */
