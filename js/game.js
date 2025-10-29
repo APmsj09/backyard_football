@@ -2521,11 +2521,7 @@ function determinePlayCall(offense, defense, down, yardsToGo, ballOn, scoreDiff,
     chosenPlay = chosenPlay || getRandom(possiblePlays) || formationPlays[0];
     // gameLog.push(`Off Play Call: ${chosenPlay} (Pass Chance: ${passChance.toFixed(2)})`); // Optional: Log decision
     return chosenPlay;
-}
-Okay, let's make the defensive AI (determineDefensivePlayCall in game.js) smarter and more reactive. We'll add formation filtering, better weighted selection, and basic score/time awareness.
-
-🛡️ Improved determineDefensivePlayCall Function
-JavaScript
+};
 
 // Replace the determineDefensivePlayCall function in game.js with this:
 
