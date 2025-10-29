@@ -1292,7 +1292,7 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
         // This check overrides other offensive (non-QB) actions if the ball is in the air
         if (pState.isOffense && !pState.hasBall && !pState.isBallCarrier && (pState.slot.startsWith('WR') || pState.slot.startsWith('RB'))) {
             // Check if ball is in the air AND targeted at this player
-            if (playState.ballState.inAir && playState.ballState.targetPlayerId === pState.id) {
+            if (playState.ballState.inAir && playState.ballState.targetPlayerId === pState.id && getDistance(pState, ballPos) < 8.0) {
                 pState.action = 'attack_ball'; // Override current route
             } 
             // If ball is no longer in air (caught/dropped), action will be reset by handleBallArrival (e.g., 'run_path' or 'idle')
