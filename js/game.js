@@ -2643,7 +2643,7 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
                 playState.ballState.x += playState.ballState.vx * timeDelta;
                 playState.ballState.y += playState.ballState.vy * timeDelta;
                 playState.ballState.z += playState.ballState.vz * timeDelta;
-                playState.ballState.vz -= 9.8 * timeDelta * timeDelta; // Gravity
+                playState.ballState.vz -= 9.8 * timeDelta; // Gravity
                 if (playState.ballState.z <= 0.1 && playState.tick > 2) {
                     playState.incomplete = true; playState.playIsLive = false; playState.ballState.inAir = false;
                     break;
