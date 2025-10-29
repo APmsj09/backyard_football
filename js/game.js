@@ -1863,9 +1863,10 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
 
             // I. Record Visualization Frame
             const frameData = {
-                players: JSON.parse(JSON.stringify(playState.activePlayers)),
-                ball: JSON.parse(JSON.stringify(playState.ballState))
-            };
+            players: JSON.parse(JSON.stringify(playState.activePlayers)),
+            ball: JSON.parse(JSON.stringify(playState.ballState)),
+            logIndex: gameLog.length // <-- ADD THIS LINE
+            };
             playState.visualizationFrames.push(frameData);
 
         } // --- End TICK LOOP ---
