@@ -116,3 +116,22 @@ canvas#field-canvas {
     max-width: 100%;
     height: auto;
 }
+
+/* In css/style.css */
+#draft-screen thead th[data-sort] {
+    cursor: pointer;
+    user-select: none; /* Prevents text selection on click */
+}
+
+#draft-screen thead th[data-sort]:hover {
+    background-color: #374151; /* gray-700 */
+}
+
+.sort-indicator {
+    font-size: 0.8em;
+    padding-left: 4px;
+    vertical-align: middle;
+    /* Set a fixed width to prevent table jitter */
+    display: inline-block;
+    width: 1em;
+}
