@@ -8,6 +8,8 @@ import { formatHeight } from './utils.js'; // <<< --- ADD THIS LINE ---
 let gameState = null;
 let selectedPlayerId = null;
 let currentLiveSimResult = null; // Store result for potential skip
+let currentSortColumn = 'potential'; // Default sort
+let currentSortDirection = 'desc';   // Default direction
 
 // --- Constants ---
 const ROSTER_LIMIT = 10;
@@ -58,7 +60,7 @@ function handleConfirmTeam() {
             gameState = Game.getGameState(); // Includes playerTeam and global relationships map
             if (!gameState || !gameState.playerTeam) throw new Error("Failed to get game state after creating team.");
             UI.renderSelectedPlayerCard(null, gameState); // Pass gameState
-            UI.renderDraftScreen(gameState, handlePlayerSelectInDraft, selectedPlayerId); // Pass gameState for scouting
+            UI.renderDraftScreen(gameState, handlePlayerSelectInDraft, selectedPlayerId, currentSortColumn, currentSortDirection); // Pass gameState for scouting
             UI.showScreen('draftScreen');
             runAIDraftPicks();
         } catch (error) {
@@ -156,7 +158,7 @@ async function runAIDraftPicks() {
 
     // Loop while it's an AI team's turn and the draft isn't over
     while (currentPickingTeam && currentPickingTeam.id !== gameState.playerTeam.id) {
-        UI.renderDraftScreen(gameState, handlePlayerSelectInDraft, selectedPlayerId); // Pass gameState for scouting in UI
+        UI.renderDraftScreen(gameState, handlePlayerSelectInDraft, selectedPlayerId, currentSortColumn, currentSortDirection); // Pass sort state
         await new Promise(resolve => setTimeout(resolve, 50)); // Short delay for visual feedback
 
         Game.simulateAIPick(currentPickingTeam); // AI makes its selection (or skips if full)
@@ -184,7 +186,7 @@ async function runAIDraftPicks() {
                 runAIDraftPicks(); // Go back to simulating AI picks ONLY if draft isn't over
             }
         } else { // Render for player input
-            UI.renderDraftScreen(gameState, handlePlayerSelectInDraft, selectedPlayerId); // Pass gameState for scouting in UI
+            UI.renderDraftScreen(gameState, handlePlayerSelectInDraft, selectedPlayerId, currentSortColumn, currentSortDirection); // Pass sort state
         }
     } else { // Draft ended, call handler
         handleDraftEnd();
@@ -500,7 +502,7 @@ function handleGoToNextDraft() {
         if (!gameState) throw new Error("Game state lost after setting up next draft.");
         selectedPlayerId = null; // Clear any previous player selection
         UI.renderSelectedPlayerCard(null, gameState); // Clear the player detail card
-        UI.renderDraftScreen(gameState, handlePlayerSelectInDraft, selectedPlayerId); // Render the new draft screen
+        UI.renderDraftScreen(gameState, handlePlayerSelectInDraft, selectedPlayerId, currentSortColumn, currentSortDirection); // Pass sort state
         UI.showScreen('draftScreen'); // Display the draft screen
         runAIDraftPicks(); // Start the AI draft picks simulation
     } catch (error) {
@@ -731,10 +733,32 @@ function main() {
         });
 
         // Draft Filters/Sorting
-        document.getElementById('draft-search')?.addEventListener('input', () => { if (gameState) UI.debouncedRenderDraftPool(gameState, handlePlayerSelectInDraft); });
-        document.getElementById('draft-filter-pos')?.addEventListener('change', () => { if (gameState) UI.renderDraftPool(gameState, handlePlayerSelectInDraft); });
-        document.getElementById('draft-sort')?.addEventListener('change', () => { if (gameState) UI.renderDraftPool(gameState, handlePlayerSelectInDraft); });
+        document.getElementById('draft-search')?.addEventListener('input', () => { 
+            if (gameState) UI.debouncedRenderDraftPool(gameState, handlePlayerSelectInDraft, currentSortColumn, currentSortDirection); 
+        });
+        document.getElementById('draft-filter-pos')?.addEventListener('change', () => { 
+            if (gameState) UI.renderDraftPool(gameState, handlePlayerSelectInDraft, currentSortColumn, currentSortDirection); 
+        });
+        document.querySelector('#draft-screen thead tr')?.addEventListener('click', (e) => {
+            const headerCell = e.target.closest('th[data-sort]');
+            if (!headerCell || !gameState) return; // Not a sortable header or game not ready
 
+            const newSortColumn = headerCell.dataset.sort;
+
+            if (currentSortColumn === newSortColumn) {
+                // Flip direction if clicking the same column
+                currentSortDirection = (currentSortDirection === 'desc') ? 'asc' : 'desc';
+            } else {
+                // New column, set to default
+                currentSortColumn = newSortColumn;
+                currentSortDirection = 'desc'; // Default to descending
+            }
+
+            // Re-render the pool with new sorting
+            UI.renderDraftPool(gameState, handlePlayerSelectInDraft, currentSortColumn, currentSortDirection);
+            // Update the arrows in the header
+            UI.updateDraftSortIndicators(currentSortColumn, currentSortDirection);
+        });
         // Depth Chart Formation Changes
         document.getElementById('offense-formation-select')?.addEventListener('change', handleFormationChange);
         document.getElementById('defense-formation-select')?.addEventListener('change', handleFormationChange);
