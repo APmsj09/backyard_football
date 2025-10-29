@@ -60,7 +60,7 @@ function handleConfirmTeam() {
             gameState = Game.getGameState(); // Includes playerTeam and global relationships map
             if (!gameState || !gameState.playerTeam) throw new Error("Failed to get game state after creating team.");
             UI.renderSelectedPlayerCard(null, gameState); // Pass gameState
-            UI.renderDraftScreen(gameState, handlePlayerSelectInDraft, selectedPlayerId, currentSortColumn, currentSortDirection); // Pass gameState for scouting
+            UI.renderDraftScreen(gameState, handlePlayerSelectInDraft, selectedPlayerId, currentSortColumn, currentSortDirection); // Pass sort state
             UI.showScreen('draftScreen');
             runAIDraftPicks();
         } catch (error) {
