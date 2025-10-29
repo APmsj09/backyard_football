@@ -273,7 +273,7 @@ export function renderTeamNameSuggestions(names, onSelect) {
 /**
  * Renders the main draft screen UI.
  */
-export function renderDraftScreen(gameState, onPlayerSelect, currentSelectedId) {
+export function renderDraftScreen(gameState, onPlayerSelect, currentSelectedId, sortColumn, sortDirection) {
     if (!gameState || !gameState.teams || !gameState.players || !gameState.draftOrder || !gameState.playerTeam) {
         console.error("renderDraftScreen called without valid gameState.");
         if(elements.draftHeader) elements.draftHeader.innerHTML = `<h2 class="text-3xl font-bold text-red-500">Draft Error: Invalid Game State</h2>`;
