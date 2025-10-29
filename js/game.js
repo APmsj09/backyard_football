@@ -1669,22 +1669,41 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
     
                     break; // Go to the main pursuit logic at the end of the function
 
-                case assignment === 'pass_rush': case assignment === 'blitz_gap': case assignment === 'blitz_edge':
-                    target = qbState;
+                // --- NEW CODE ---
+            case assignment === 'pass_rush':
+            case assignment === 'blitz_gap':
+            case assignment === 'blitz_edge':
+                if (playType === 'run' && ballCarrierState) {
+                    // --- It's a run! Abort rush and pursue carrier ---
+                    target = ballCarrierState;
+                } else {
+                    // --- It's a pass play, rush the QB ---
+                    target = qbState; // Target the QB
                     const blockerInPath = offenseStates.find(o => !o.engagedWith && getDistance(pState, o) < 2.0 && Math.abs(o.x - pState.x) < 1.0 && ((pState.y < o.y && o.y < (target?.y || pState.y+5)) || (pState.y > o.y && o.y > (target?.y || pState.y-5))));
                     if (blockerInPath) {
                         const avoidOffset = (pState.x > blockerInPath.x) ? 1.0 : -1.0;
                         target = { x: pState.x + avoidOffset * 2, y: qbState ? qbState.y : pState.y + 5 };
-                    } 
-                    break;
+                    }
+                }
+                break;
 
-                case assignment?.startsWith('run_gap_'): case assignment?.startsWith('run_edge_'):
-                    const runTargetPoint = zoneBoundaries[assignment];
-                    const ballSnapX = offenseStates.find(p=>p.slot === 'OL2')?.initialX || CENTER_X;
-                    target = runTargetPoint ? { x: ballSnapX + (runTargetPoint.xOffset || 0), y: playState.lineOfScrimmage + (runTargetPoint.yOffset || 0) } : {x: pState.x, y: pState.y};
+                case assignment?.startsWith('run_gap_'):
+                case assignment?.startsWith('run_edge_'):
+                    if (playType === 'pass') {
+                        // --- It's a pass! Convert to pass rush ---
+                        pState.action = 'pass_rush'; // Change action
+                        target = qbState; // Target QB
+                    } else {
+                        // --- It's a run! Attack gap, then carrier ---
+                        const runTargetPoint = zoneBoundaries[assignment];
+                        const ballSnapX = offenseStates.find(p=>p.slot === 'OL2')?.initialX || CENTER_X;
+                        target = runTargetPoint ? { x: ballSnapX + (runTargetPoint.xOffset || 0), y: playState.lineOfScrimmage + (runTargetPoint.yOffset || 0) } : {x: pState.x, y: pState.y};
 
-                    if (readPlayType === 'pass') { pState.assignment = 'pass_rush'; target = qbState; }
-                    else if (ballCarrierState && getDistance(pState, ballCarrierState) < 6) { target = ballCarrierState; }
+                        // If carrier is close, override gap assignment and attack
+                        if (ballCarrierState && getDistance(pState, ballCarrierState) < 6) {
+                    target = ballCarrierState;
+                        }
+                    }
                     break;
 
                 case 'spy_QB':
@@ -1709,61 +1728,48 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                     // --- >>> NEW/IMPROVED CASES <<< ---
 
                 case 'run_support': // e.g., Safety coming downhill
-                    if (readPlayType === 'run' && ballCarrierState) {
-                    // --- ACTION: Attack Run ---
-                    // Aggressively attack the ball carrier, aiming slightly *ahead*
-                    // of their current target to cut off the angle.
-                    target = { 
-                        ...ballCarrierState, // Inherit carrier's speed/target info for pursuit
-                        targetX: ballCarrierState.targetX,
-                        targetY: ballCarrierState.targetY + 1.5 // Aim 1.5 yards *past* their target
-                    };
-                } else if (isBallInAir) {
-                    // --- ACTION: Play Ball (if nearby) ---
-                    if (getDistance(pState, ballPos) < 15) {
-                         target = ballPos;
+                    if (playType === 'run' && ballCarrierState) { // <<< USE playType
+                        // --- ACTION: Attack Run ---
+                        target = { 
+                            ...ballCarrierState, 
+                            targetX: ballCarrierState.targetX,
+                            targetY: ballCarrierState.targetY + 1.5 
+                        };
+                    } else if (isBallInAir) {
+                        // ... (existing pass logic) ...
                     } else {
-                         // Otherwise, drop to deep zone
-                         target = getZoneCenter('zone_deep_middle', playState.lineOfScrimmage);
+                        // --- ACTION: Read Play ---
+                        target = { x: pState.x, y: pState.y + 0.2 };
                     }
-                } else {
-                    // --- ACTION: Read Play ---
-                    // Hold position, slightly deeper than an LB
-                    target = { x: pState.x, y: pState.y + 0.2 };
-                }
-                break;
+                    break;
 
-            case 'fill_run': // e.g., LB reading the play
-                if (readPlayType === 'run' && ballCarrierState) {
-                    // --- ACTION: Attack Run ---
-                    // Commit to attacking the ball carrier.
-                    target = ballCarrierState;
-                } else if (readPlayType === 'pass') {
-                    // --- ACTION: Drop to Zone ---
-                    // Play was a pass, convert to a short zone defender.
-                    pState.assignment = 'zone_hook_curl_middle'; // Re-assign
-                    target = getZoneCenter('zone_hook_curl_middle', playState.lineOfScrimmage);
-                } else {
-                    // --- ACTION: Read Play ---
-                    // Hold position near the line of scrimmage, ready to react.
-                    target = { x: pState.x, y: pState.y + 0.1 };
-                }
-                break;
+                case 'fill_run': // e.g., LB reading the play
+                    if (playType === 'run' && ballCarrierState) { // <<< USE playType
+                        // --- ACTION: Attack Run ---
+                        target = ballCarrierState;
+                    } else if (playType === 'pass') { // <<< USE playType
+                        // --- ACTION: Drop to Zone ---
+                        pState.assignment = 'zone_hook_curl_middle';
+                        target = getZoneCenter('zone_hook_curl_middle', playState.lineOfScrimmage);
+                    } else {
+                        // --- ACTION: Read Play ---
+                        target = { x: pState.x, y: pState.y + 0.1 };
+                    }
+                    break;
 
-            case 'def_read': // Default "read and react"
-                 if (readPlayType === 'run' && ballCarrierState) {
-                    // --- ACTION: Attack Run ---
-                    target = ballCarrierState;
-                 } else if (readPlayType === 'pass') {
-                    // --- ACTION: Drop to Zone ---
-                    pState.assignment = 'zone_hook_curl_middle'; // Re-assign
-                    target = getZoneCenter('zone_hook_curl_middle', playState.lineOfScrimmage);
-                 } else {
-                    // --- ACTION: Read Play ---
-                    // Hold position
-                    target = { x: pState.x, y: pState.y };
-                 }
-                 break;
+                case 'def_read': // Default "read and react"
+                     if (playType === 'run' && ballCarrierState) { // <<< USE playType
+                        // --- ACTION: Attack Run ---
+                        target = ballCarrierState;
+                     } else if (playType === 'pass') { // <<< USE playType
+                        // --- ACTION: Drop to Zone ---
+                        pState.assignment = 'zone_hook_curl_middle';
+                        target = getZoneCenter('zone_hook_curl_middle', playState.lineOfScrimmage);
+                     } else {
+                        // --- ACTION: Read Play ---
+                        target = { x: pState.x, y: pState.y };
+                     }
+                     break;
 
             // --- >>> END NEW/IMPROVED CASES <<< ---
 
