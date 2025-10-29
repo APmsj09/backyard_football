@@ -1431,41 +1431,43 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                          }
                     }
                     break;
-                // --- NEW CODE TO ADD ---
-                case 'run_path':
-                case 'qb_scramble':
-                    const threatDistance = 4.0; // How far to look for immediate threats
-                    const visionDistance = 10.0; // How far to look downfield for lanes
+                    
+                // --- NEW, IMPROVED LOGIC ---
 
-                    // --- Find immediate threats to avoid ---
+                case 'run_path': { // --- Logic for RBs ---
+                    const threatDistance = 3.5; // How far to look for immediate threats
+                    const visionDistance = 10.0; // How far to look downfield for lanes
                     const nearestThreat = defenseStates
                         .filter(d => !d.isBlocked && !d.isEngaged && getDistance(pState, d) < threatDistance)
                         .sort((a, b) => getDistance(pState, a) - getDistance(pState, b))[0];
 
                     let targetXOffset = 0;
 
-                    if (nearestThreat && getDistance(pState, nearestThreat) < threatDistance / 2) {
+                    if (nearestThreat) {
                         // --- A. Immediate Avoidance (Threat is very close) ---
-                        // Just juke to the side
                         const distanceToThreat = getDistance(pState, nearestThreat);
-                        const avoidStrength = 1.0 + (threatDistance - distanceToThreat) * 0.75; // Stronger juke if closer
+                        const avoidStrength = 1.2 + (threatDistance - distanceToThreat) * 0.5; // Stronger juke
                         targetXOffset = (pState.x >= nearestThreat.x) ? avoidStrength : -avoidStrength;
                     } else {
-                        // --- B. No Immediate Threat: Find Best Lane ---
-                        // Check 3 lanes: left, center, right
-                        const lanes = [-7, 0, 7]; // X-offsets to check 10 yards downfield
-                        let bestLane = { xOffset: 0, minDist: 0 };
+                        // --- B. No Immediate Threat: Find Best Lane (with downhill bias) ---
+                        const lanes = [-4, 0, 4]; // Narrowed cut lanes (was [-7, 0, 7])
+                        const STRAIGHT_AHEAD_BONUS = 3.0; // <<< THE FIX: Add 3 yards of "virtual" open space
+                        let bestLane = { xOffset: 0, minDist: -Infinity }; // Start at -Infinity to ensure first lane is picked
 
                         lanes.forEach(xOffset => {
                             const lookAheadPoint = { x: pState.x + xOffset, y: pState.y + visionDistance };
-                            // Find closest defender to this *future* spot
                             const closestDefenderToLane = defenseStates
                                 .filter(d => !d.isBlocked && !d.isEngaged)
                                 .sort((a, b) => getDistance(lookAheadPoint, a) - getDistance(lookAheadPoint, b))[0];
-            
-                            const dist = closestDefenderToLane ? getDistance(lookAheadPoint, closestDefenderToLane) : 100; // Treat no defender as 100 yards away
+                    
+                            let dist = closestDefenderToLane ? getDistance(lookAheadPoint, closestDefenderToLane) : 100;
 
-                            // If this lane's closest defender is further away, it's a better lane
+                            // --- >>> THIS IS THE FIX <<< ---
+                            if (xOffset === 0) {
+                                dist += STRAIGHT_AHEAD_BONUS; // Make running straight ahead more desirable
+                            }
+                            // --- >>> END FIX <<< ---
+
                             if (dist > bestLane.minDist) {
                                 bestLane.minDist = dist;
                                 bestLane.xOffset = xOffset;
@@ -1473,12 +1475,41 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                         });
                         targetXOffset = bestLane.xOffset; // Target the best open lane
                     }
-    
-                    // --- Set Target ---
-                    // Target a point ~10 yards downfield, shifted by the avoidance/lane-finding logic
-                    pState.targetY = Math.min(FIELD_LENGTH - 10.1, pState.y + 10); // Target 10 yards ahead
+            
+                    pState.targetY = Math.min(FIELD_LENGTH - 10.1, pState.y + visionDistance);
                     pState.targetX = pState.x + targetXOffset;
                     break;
+                }
+
+                case 'qb_scramble': { // --- Logic for QBs ---
+                    const visionDistance = 8.0; // QB looks for shorter-term open space
+            
+                    // --- Find Best Lane (No downhill bonus, just find open grass) ---
+                    const lanes = [-8, 0, 8]; // Wider lanes, QB is desperate
+                    let targetXOffset = 0;
+                    let bestLane = { xOffset: 0, minDist: -Infinity };
+
+                    lanes.forEach(xOffset => {
+                        const lookAheadPoint = { x: pState.x + xOffset, y: pState.y + visionDistance };
+                        const closestDefenderToLane = defenseStates
+                            .filter(d => !d.isBlocked && !d.isEngaged)
+                            .sort((a, b) => getDistance(lookAheadPoint, a) - getDistance(lookAheadPoint, b))[0];
+                
+                        const dist = closestDefenderToLane ? getDistance(lookAheadPoint, closestDefenderToLane) : 100;
+
+                        if (dist > bestLane.minDist) {
+                            bestLane.minDist = dist;
+                            bestLane.xOffset = xOffset;
+                        }
+                    });
+                    targetXOffset = bestLane.xOffset; // Target the widest open lane
+
+                    pState.targetY = Math.min(FIELD_LENGTH - 10.1, pState.y + visionDistance);
+                    pState.targetX = pState.x + targetXOffset;
+                    break;
+                }
+                // --- END OF NEW BLOCKS ---
+                    
                 case 'qb_setup':
                     const POCKET_RADIUS = 6.0; // How far QB looks for immediate threats
                     const STEP_DISTANCE = 0.75; // How far QB steps/slides per adjustment
