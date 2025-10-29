@@ -231,37 +231,37 @@ function generatePlayer(minAge = 10, maxAge = 16) {
     
     switch (bestPosition) {
         case 'QB':
-            attributes.technical.throwingAccuracy = Math.round(attributes.technical.throwingAccuracy * 0.5 + getRandomInt(65, 95) * 0.5);
-            attributes.mental.playbookIQ = Math.round(attributes.mental.playbookIQ * 0.5 + getRandomInt(60, 95) * 0.5);
+            attributes.technical.throwingAccuracy = Math.round(attributes.technical.throwingAccuracy * baseStrength + getRandomInt(boostRange.min, boostRange.max) * boostStrength);
+            attributes.mental.playbookIQ = Math.round(attributes.mental.playbookIQ * baseStrength + getRandomInt(boostRange.min - 5, boostRange.max) * boostStrength);
             break;
         case 'RB':
-            attributes.physical.speed = Math.round(attributes.physical.speed * 0.5 + getRandomInt(60, 90) * 0.5);
-            attributes.physical.strength = Math.round(attributes.physical.strength * 0.5 + getRandomInt(55, 85) * 0.5);
-            attributes.physical.agility = Math.round(attributes.physical.agility * 0.5 + getRandomInt(60, 90) * 0.5);
+            attributes.physical.speed = Math.round(attributes.physical.speed * baseStrength + getRandomInt(boostRange.min, boostRange.max) * boostStrength);
+            attributes.physical.strength = Math.round(attributes.physical.strength * baseStrength + getRandomInt(boostRange.min - 10, boostRange.max - 5) * boostStrength);
+            attributes.physical.agility = Math.round(attributes.physical.agility * baseStrength + getRandomInt(boostRange.min, boostRange.max) * boostStrength);
             break;
         case 'WR':
-            attributes.physical.speed = Math.round(attributes.physical.speed * 0.5 + getRandomInt(65, 95) * 0.5);
-            attributes.technical.catchingHands = Math.round(attributes.technical.catchingHands * 0.5 + getRandomInt(60, 95) * 0.5);
-            attributes.physical.agility = Math.round(attributes.physical.agility * 0.5 + getRandomInt(70, 95) * 0.5);
+            attributes.physical.speed = Math.round(attributes.physical.speed * baseStrength + getRandomInt(boostRange.min, boostRange.max) * boostStrength);
+            attributes.technical.catchingHands = Math.round(attributes.technical.catchingHands * baseStrength + getRandomInt(boostRange.min, boostRange.max) * boostStrength);
+            attributes.physical.agility = Math.round(attributes.physical.agility * baseStrength + getRandomInt(boostRange.min, boostRange.max) * boostStrength);
             break;
         case 'OL':
-            attributes.physical.strength = Math.round(attributes.physical.strength * 0.5 + getRandomInt(70, 95) * 0.5);
-            attributes.technical.blocking = Math.round(attributes.technical.blocking * 0.5 + getRandomInt(65, 95) * 0.5);
+            attributes.physical.strength = Math.round(attributes.physical.strength * baseStrength + getRandomInt(boostRange.min, boostRange.max) * boostStrength);
+            attributes.technical.blocking = Math.round(attributes.technical.blocking * baseStrength + getRandomInt(boostRange.min, boostRange.max) * boostStrength);
             break;
         case 'DL':
-            attributes.physical.strength = Math.round(attributes.physical.strength * 0.5 + getRandomInt(70, 95) * 0.5);
-            attributes.technical.tackling = Math.round(attributes.technical.tackling * 0.5 + getRandomInt(65, 95) * 0.5);
-            attributes.technical.blockShedding = Math.round(attributes.technical.blockShedding * 0.5 + getRandomInt(60, 90) * 0.5);
+            attributes.physical.strength = Math.round(attributes.physical.strength * baseStrength + getRandomInt(boostRange.min, boostRange.max) * boostStrength);
+            attributes.technical.tackling = Math.round(attributes.technical.tackling * baseStrength + getRandomInt(boostRange.min - 10, boostRange.max - 5) * boostStrength);
+            attributes.technical.blockShedding = Math.round(attributes.technical.blockShedding * baseStrength + getRandomInt(boostRange.min, boostRange.max) * boostStrength);
             break;
         case 'LB':
-            attributes.technical.tackling = Math.round(attributes.technical.tackling * 0.5 + getRandomInt(65, 95) * 0.5);
-            attributes.physical.speed = Math.round(attributes.physical.speed * 0.5 + getRandomInt(60, 85) * 0.5);
-            attributes.mental.playbookIQ = Math.round(attributes.mental.playbookIQ * 0.5 + getRandomInt(50, 85) * 0.5);
+            attributes.technical.tackling = Math.round(attributes.technical.tackling * baseStrength + getRandomInt(boostRange.min, boostRange.max) * boostStrength);
+            attributes.physical.speed = Math.round(attributes.physical.speed * baseStrength + getRandomInt(boostRange.min - 10, boostRange.max - 5) * boostStrength);
+            attributes.mental.playbookIQ = Math.round(attributes.mental.playbookIQ * baseStrength + getRandomInt(boostRange.min - 5, boostRange.max) * boostStrength);
             break;
         case 'DB':
-            attributes.physical.speed = Math.round(attributes.physical.speed * 0.5 + getRandomInt(70, 95) * 0.5);
-            attributes.physical.agility = Math.round(attributes.physical.agility * 0.5 + getRandomInt(70, 95) * 0.5);
-            attributes.technical.catchingHands = Math.round(attributes.technical.catchingHands * 0.5 + getRandomInt(50, 80) * 0.5);
+            attributes.physical.speed = Math.round(attributes.physical.speed * baseStrength + getRandomInt(boostRange.min, boostRange.max) * boostStrength);
+            attributes.physical.agility = Math.round(attributes.physical.agility * baseStrength + getRandomInt(boostRange.min, boostRange.max) * boostStrength);
+            attributes.technical.catchingHands = Math.round(attributes.technical.catchingHands * baseStrength + getRandomInt(boostRange.min - 15, boostRange.max - 10) * boostStrength);
             break;
     }
 
