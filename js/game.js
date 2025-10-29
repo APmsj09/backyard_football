@@ -1392,45 +1392,124 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                     }
                     break; // End case 'route_complete'
 
-                case 'pass_block': 
-                    if (!pState.engagedWith) {
-                         const potentialTargets = defenseStates
-                             .filter(d => !d.isBlocked && !d.isEngaged && (d.assignment === 'pass_rush' || d.assignment?.includes('blitz')))
-                             .sort((a, b) => {
-                                 const distA = getDistance(qbState || pState, a); const distB = getDistance(qbState || pState, b);
-                                 const xDiffA = Math.abs(a.x - (qbState?.x || pState.x)); const xDiffB = Math.abs(b.x - (qbState?.x || pState.x));
-                                 return xDiffA - xDiffB || distA - distB;
-                             });
-                         const targetDefender = potentialTargets[0];
-                         if (targetDefender) {
-                             const interceptFactor = 0.6;
-                             pState.targetX = pState.x + (targetDefender.x - pState.x) * interceptFactor;
-                             pState.targetY = pState.y + (targetDefender.y - pState.y) * interceptFactor;
-                         } else {
-                             pState.targetX = pState.x;
-                             pState.targetY = pState.y - 0.05; // Tiny step back
-                         }
+                case 'pass_block': { // Using brackets to create a new scope
+                    if (pState.engagedWith) {
+                        pState.targetX = pState.x; // Stay engaged if already blocking
+                        pState.targetY = pState.y;
+                        break; // Exit case
                     }
-                    break;
-                case 'run_block':
-                     if (!pState.engagedWith) {
-                         const primaryTargets = defenseStates
-                             .filter(d => !d.isBlocked && !d.isEngaged && d.y < playState.lineOfScrimmage + 3 && Math.abs(d.x - pState.initialX) < 4)
-                             .sort((a, b) => getDistance(pState, a) - getDistance(pState, b));
-                         const secondaryTargets = defenseStates
-                             .filter(d => !d.isBlocked && !d.isEngaged && d.y >= playState.lineOfScrimmage + 3 && d.y < playState.lineOfScrimmage + 8 && Math.abs(d.x - pState.initialX) < 6)
-                             .sort((a, b) => getDistance(pState, a) - getDistance(pState, b));
-                         const targetDefender = primaryTargets[0] || secondaryTargets[0];
-                         if (targetDefender) {
-                             const interceptFactor = 0.6;
-                             pState.targetX = pState.x + (targetDefender.x - pState.x) * interceptFactor;
-                             pState.targetY = pState.y + (targetDefender.y - pState.y) * interceptFactor;
-                         } else {
-                             pState.targetX = pState.x;
-                             pState.targetY = pState.y + 1.0; // Move slightly downfield
-                         }
+
+                    // --- 1. Find Threat ---
+                    // Find the closest non-engaged rusher *to the blocker*
+                    const potentialTargets = defenseStates
+                        .filter(d => 
+                            !d.isBlocked && 
+                            !d.isEngaged && 
+                            (d.assignment === 'pass_rush' || d.assignment?.includes('blitz'))
+                        )
+                        .sort((a, b) => getDistance(pState, a) - getDistance(pState, b)); // Sort by distance to *me* (pState)
+
+                    const targetDefender = potentialTargets[0]; // This is the closest rusher to me
+
+                    // --- 2. Set Target "Set Point" ---
+                    if (targetDefender) {
+                        // --- Target: A spot between me and the rusher, but slightly back ---
+        
+                        // Calculate a point to "meet" the defender, favoring my side
+                        const interceptFactor = 0.7; // How aggressively to meet (0.5 = halfway)
+                        pState.targetX = pState.x + (targetDefender.x - pState.x) * interceptFactor;
+        
+                        // Set up *just* behind the line of scrimmage to form a pocket
+                        pState.targetY = pState.initialY - 0.5; 
+        
+                    } else {
+                        // --- No immediate threat: Hold the pocket ---
+                        // Just drop back 0.5 yards from my starting spot and hold ground
+                        pState.targetX = pState.initialX;
+                        pState.targetY = pState.initialY - 0.5;
                     }
-                    break;
+    
+                    // We set pState.targetX/Y directly, so we just break and let the
+                    // default pursuit/clamping logic at the end of the function execute.
+                    // We set `target = null` (which it is) so the dynamic pursuit logic is skipped,
+                    // and the player just moves to the {x, y} point we set.
+                    target = null; 
+                    break; // End case 'pass_block'
+                }
+                 // In updatePlayerTargets, inside the 'if (pState.isOffense)' switch:
+
+                case 'run_block': { // Using brackets to create a new scope
+                    if (pState.engagedWith) {
+                        pState.targetX = pState.x; // Stay engaged if already blocking
+                        pState.targetY = pState.y;
+                        break;
+                    }
+
+                    // --- 1. Determine Run Direction ---
+                    // Find the RB's assignment to know where the play is going
+                    const rbAssignment = offensiveAssignments['RB1'] || 'run_inside';
+                    const isInsideRun = rbAssignment.includes('inside');
+                    // Determine the "play side" X-direction (left = -1, right = 1)
+                    const playSideX = isInsideRun ? 0 : (pState.x < CENTER_X ? -1 : 1); // 0=Inside, else side
+
+                    // --- 2. Find Targets ---
+                    // Primary targets: Defenders on the Line (DL)
+                    const primaryTargets = defenseStates
+                        .filter(d => 
+                            !d.isBlocked && !d.isEngaged &&
+                            d.y < playState.lineOfScrimmage + 3 && // Close to LoS
+                            Math.abs(d.x - pState.initialX) < 5 // Horizontally nearby
+                        )
+                        .sort((a, b) => getDistance(pState, a) - getDistance(pState, b));
+
+                    // Secondary targets: LBs at the next level, in the direction of the play
+                    const secondaryTargets = defenseStates
+                        .filter(d => 
+                            !d.isBlocked && !d.isEngaged &&
+                            d.y >= playState.lineOfScrimmage + 3 && d.y < playState.lineOfScrimmage + 10 && // LB depth
+                            (isInsideRun ? Math.abs(d.x - CENTER_X) < 10 : (d.x - CENTER_X) * playSideX > 0) // In the box for inside, or on the play side for outside
+                        )
+                        .sort((a, b) => getDistance(pState, a) - getDistance(pState, b));
+
+                    const targetDefender = primaryTargets[0] || secondaryTargets[0];
+
+                    // --- 3. Set Target Point (Leverage) ---
+                    if (targetDefender) {
+                        let targetLeverageX = targetDefender.x;
+        
+                        if (isInsideRun) {
+                            // --- Inside Run Logic ---
+                            // Try to push the defender *away* from the center
+                            if (targetDefender.x < CENTER_X) {
+                                targetLeverageX = targetDefender.x - 0.75; // Push defender left
+                            } else {
+                                targetLeverageX = targetDefender.x + 0.75; // Push defender right
+                            }
+                        } else {
+                            // --- Outside Run Logic ---
+                            // Try to seal the defender *inside*
+                            if (playSideX < 0) { // Running Left
+                                targetLeverageX = targetDefender.x - 0.75; // Get on their left shoulder to push them right (inside)
+                            } else { // Running Right
+                                targetLeverageX = targetDefender.x + 0.75; // Get on their right shoulder to push them left (inside)
+                            }
+                        }
+        
+                        // Target the defender's leverage point
+                        target = { 
+                            x: targetLeverageX, 
+                            y: targetDefender.y + 0.5 // Aim slightly downfield
+                        };
+
+                    } else {
+                        // --- No defender: Climb to next level or follow play ---
+                        target = {
+                            x: pState.x + (playSideX * 2), // Move in the direction of the play
+                            y: pState.y + 3 // Move 3 yards downfield
+                        };
+                    }
+                    break; // Go to pursuit logic
+                }
                     
                 // --- NEW, IMPROVED LOGIC ---
 
