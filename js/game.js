@@ -1,7 +1,7 @@
 // game.js - COMPLETE FILE
 
 // --- Imports ---
-import { getRandom, getRandomInt } from './utils.js';
+import { getRandom, getRandomInt, estimateBestPosition} from './utils.js';
 import {
     // Data lists
     firstNames, lastNames, nicknames, teamNames, positions, divisionNames,
