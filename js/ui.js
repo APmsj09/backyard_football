@@ -10,6 +10,9 @@ import {
     relationshipLevels // <-- Added
 } from './data.js';
 
+// At the top of ui.js
+import { getRandom, getRandomInt, formatHeight } from './utils.js'; // <<< Add formatHeight here
+
 // --- Visualization Constants (Must match game.js) ---
 const FIELD_LENGTH = 120;
 const FIELD_WIDTH = 53.3;
@@ -375,13 +378,14 @@ export function renderDraftPool(gameState, onPlayerSelect) {
         row.className = `cursor-pointer hover:bg-amber-100 draft-player-row ${scoutedPlayer.id === selectedPlayerId ? 'bg-amber-200' : ''}`;
         row.dataset.playerId = scoutedPlayer.id;
 
+        // Make sure this line starts and ends with BACKTICKS (`)
         row.innerHTML = `
             <td class="py-2 px-3 font-semibold">${scoutedPlayer.name ?? 'N/A'}</td>
             <td class="text-center py-2 px-3">${scoutedPlayer.age ?? '?'}</td>
             <td class="text-center py-2 px-3 font-medium">${scoutedPlayer.potential ?? '?'}</td>
             <td class="text-center py-2 px-3 ${relationshipInfo.color}" title="${relationshipInfo.name}">${relationshipInfo.name.substring(0, 4)}</td>
-            <td class="text-center py-2 px-3 font-bold">${scoutedPlayer.estimatedPosition ?? '?'}</td> // <<< Use estimatedPosition
-            <td class="text-center py-2 px-3">${scoutedPlayer.attributes?.physical?.height ?? '?'}</td>
+            <td class="text-center py-2 px-3 font-bold">${scoutedPlayer.estimatedPosition ?? '?'}</td>
+            <td class="text-center py-2 px-3">${formatHeight(scoutedPlayer.attributes?.physical?.height) ?? '?'}</td>
             <td class="text-center py-2 px-3">${scoutedPlayer.attributes?.physical?.weight ?? '?'}</td>
             <td class="text-center py-2 px-3">${scoutedPlayer.attributes?.physical?.speed ?? '?'}</td>
             <td class="text-center py-2 px-3">${scoutedPlayer.attributes?.physical?.strength ?? '?'}</td>
@@ -391,8 +395,8 @@ export function renderDraftPool(gameState, onPlayerSelect) {
             <td class="text-center py-2 px-3">${scoutedPlayer.attributes?.technical?.blocking ?? '?'}</td>
             <td class="text-center py-2 px-3">${scoutedPlayer.attributes?.technical?.tackling ?? '?'}</td>
             <td class="text-center py-2 px-3">${scoutedPlayer.attributes?.technical?.blockShedding ?? '?'}</td>
-        `;
-
+        `; // <<< Make sure this closing backtick is present
+        
         row.onclick = () => onPlayerSelect(scoutedPlayer.id);
         elements.draftPoolTbody.appendChild(row);
     });
