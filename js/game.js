@@ -2523,6 +2523,7 @@ function determinePlayCall(offense, defense, down, yardsToGo, ballOn, scoreDiff,
     return chosenPlay;
 };
 
+
 // Replace the determineDefensivePlayCall function in game.js with this:
 
 /**
