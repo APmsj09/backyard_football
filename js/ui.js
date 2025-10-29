@@ -11,7 +11,7 @@ import {
 } from './data.js';
 
 // At the top of ui.js
-import { getRandom, getRandomInt, formatHeight,estimateBestPosition } from './utils.js'; // <<< Add formatHeight here
+import { getRandom, getRandomInt, formatHeight, estimateBestPosition } from './utils.js'; // <<< Add formatHeight here
 
 // --- Visualization Constants (Must match game.js) ---
 const FIELD_LENGTH = 120;
