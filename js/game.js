@@ -2572,7 +2572,7 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
             if (playState.playIsLive) {
                 ballCarrierState = playState.activePlayers.find(p => p.isBallCarrier);
                 if (ballCarrierState) {
-                    if (ballCarrierState.y >= FIELD_LENGTH - 10) { // TD
+                    if (ballCarrierState.y >= FIELD_LENGTH - 10 || ballCarrierState.y < 10) { // TD
                         playState.yards = FIELD_LENGTH - 10 - playState.lineOfScrimmage;
                         playState.touchdown = true; playState.playIsLive = false;
                         const scorer = game.players.find(p=>p && p.id === ballCarrierState.id);
