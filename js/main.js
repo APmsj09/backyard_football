@@ -544,7 +544,7 @@ function handleDashboardClicks(e) {
             const playerInfoHtml = `
                 <p class="text-sm text-gray-600">
                     Age: ${clickedPlayer.age ?? '?'} |
-                    H: ${clickedPlayer.attributes?.physical?.height ?? '?'} |
+                    H: ${formatHeight(clickedPlayer.attributes?.physical?.height) ?? '?'} | // <<< Use formatHeight
                     W: ${clickedPlayer.attributes?.physical?.weight ?? '?'} lbs
                 </p>
                 <p class="text-sm text-gray-600">
