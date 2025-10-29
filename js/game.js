@@ -1260,7 +1260,6 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
         playState.turnover = true;
     }
 }
-}
 
 /**
  * Updates player targets based on their current action, assignment, and game state. (Improved AI)
