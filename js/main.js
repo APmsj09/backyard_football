@@ -3,6 +3,7 @@ import * as Game from './game.js';
 import * as UI from './ui.js';
 import { positionOverallWeights } from './game.js'; // Changed this line
 import { relationshipLevels } from './data.js'; // Added this line
+import { formatHeight } from './utils.js'; // <<< --- ADD THIS LINE ---
 
 let gameState = null;
 let selectedPlayerId = null;
