@@ -2159,12 +2159,14 @@ function updateQBDecision(playState, offenseStates, defenseStates, gameLog) {
             const rec_speedYPS = rec_baseSpeedYPS + Math.max(0, (targetPlayerState.speed || 50) - 50) * rec_scaleFactor;
             const rec_moveDist = rec_speedYPS * targetPlayerState.fatigueModifier * est_airTime; // How far receiver will move
 
+            const targetLeadFactor = 0.3;
+
             let aimX = targetPlayerState.x;
             let aimY = targetPlayerState.y;
             
             if (rec_distToTarget > 0.1) { // If receiver is still moving
-                aimX += (rec_dx / rec_distToTarget) * rec_moveDist; // Lead the receiver
-                aimY += (rec_dy / rec_distToTarget) * rec_moveDist;
+                aimX += (rec_dx / rec_distToTarget) * rec_moveDist * targetLeadFactor; // Lead the receiver
+                aimY += (rec_dy / rec_distToTarget) * rec_moveDist * targetLeadFactor;
             }
 
             // 3. Calculate throw vector to the *predicted* position (aimX, aimY)
@@ -2478,7 +2480,7 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
     const { type, assignments } = play;
 
     const playState = {
-        playIsLive: true, tick: 0, maxTicks: 100,
+        playIsLive: true, tick: 0, maxTicks: 200,
         yards: 0, touchdown: false, turnover: false, incomplete: false, sack: false,
         ballState: { x: 0, y: 0, z: 1.0, vx: 0, vy: 0, vz: 0, targetPlayerId: null, inAir: false, throwerId: null, throwInitiated: false },
         lineOfScrimmage: 0, activePlayers: [], blockBattles: [], visualizationFrames: []
