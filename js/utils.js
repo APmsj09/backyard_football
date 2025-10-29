@@ -109,3 +109,17 @@ export function estimateBestPosition(scoutedPlayer) {
 
     return bestPos;
 }
+
+/**
+ * Converts total inches to a feet'inches" string format.
+ * @param {number} totalInches - The height in inches.
+ * @returns {string} The height formatted as X' Y". Returns '?' if input is invalid.
+ */
+export function formatHeight(totalInches) {
+    if (typeof totalInches !== 'number' || totalInches <= 0) {
+        return '?';
+    }
+    const feet = Math.floor(totalInches / 12);
+    const inches = totalInches % 12;
+    return `${feet}' ${inches}"`;
+}
