@@ -361,6 +361,8 @@ function getScoutedPlayerInfo(player, relationshipLevelNum) {
             }
         }
     }
+    scoutedPlayer.estimatedPosition = estimateBestPosition(scoutedPlayer);
+    
     return scoutedPlayer;
 }
 // --- End Scouting Helper ---
