@@ -1504,10 +1504,10 @@ export function startLiveGameSim(gameResult, onComplete) {
 
         liveGameCurrentIndex++;
     }
-    // --- End nextEntry function ---
+    // --- End nextFrame function ---
 
     // Start the interval timer
-    liveGameInterval = setInterval(nextEntry, liveGameSpeed);
+    liveGameInterval = setInterval(nextFrame, liveGameSpeed);
 }
 
 /** Stops the live game simulation interval. */
@@ -1613,6 +1613,6 @@ export function setSimSpeed(speed) {
         }
         // --- END NEW function ---
 
-        liveGameInterval = setInterval(nextEntryForRestart, liveGameSpeed);
+        liveGameInterval = setInterval(nextFrameForRestart, liveGameSpeed);
     }
 } // End setSimSpeed
