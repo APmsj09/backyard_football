@@ -1063,7 +1063,7 @@ export function setupDepthChartTabs() {
  * FIELD (53.3yds) is mapped to CANVAS HEIGHT (vertical).
  * @param {object} frameData - A single frame from resolvePlay.visualizationFrames.
  */
-function drawFieldVisualization(frameData) {
+export function drawFieldVisualization(frameData) {
     const ctx = elements.fieldCanvasCtx;
     const canvas = elements.fieldCanvas;
     if (!ctx || !canvas) return;
