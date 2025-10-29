@@ -149,6 +149,8 @@ function calculateSlotSuitability(player, slot, side, team) {
 /**
  * Generates a new player object.
  */
+// Replace the generatePlayer function in game.js with this:
+
 function generatePlayer(minAge = 10, maxAge = 16) {
     const firstName = getRandom(firstNames);
     const lastName = Math.random() < 0.4 ? getRandom(nicknames) : getRandom(lastNames);
@@ -161,6 +163,7 @@ function generatePlayer(minAge = 10, maxAge = 16) {
     let baseWeight = 70 + (ageProgress * 90) + getRandomInt(-10, 10);
     const bestPosition = getRandom(positions);
 
+    // --- Adjust size based on position ---
     switch (bestPosition) {
         case 'QB': case 'WR': baseHeight += getRandomInt(1, 4); baseWeight -= getRandomInt(0, 10); break;
         case 'OL': case 'DL': baseHeight -= getRandomInt(0, 2); baseWeight += getRandomInt(20, 40); break;
@@ -168,34 +171,64 @@ function generatePlayer(minAge = 10, maxAge = 16) {
     }
 
     const ageScalingFactor = 0.85 + ageProgress * 0.15;
+    // --- Generate Base Attributes (Slightly wider range) ---
     let attributes = {
         physical: {
-            speed: Math.round(getRandomInt(40, 70) * ageScalingFactor),
-            strength: Math.round(getRandomInt(40, 70) * ageScalingFactor),
-            agility: Math.round(getRandomInt(40, 70) * ageScalingFactor),
-            stamina: Math.round(getRandomInt(50, 80) * ageScalingFactor),
+            speed: Math.round(getRandomInt(35, 75) * ageScalingFactor), // Wider range
+            strength: Math.round(getRandomInt(35, 75) * ageScalingFactor), // Wider range
+            agility: Math.round(getRandomInt(35, 75) * ageScalingFactor), // Wider range
+            stamina: Math.round(getRandomInt(45, 85) * ageScalingFactor), // Wider range
             height: Math.round(baseHeight), weight: Math.round(baseWeight)
         },
         mental: {
-            playbookIQ: Math.round(getRandomInt(30, 70) * ageScalingFactor),
+            playbookIQ: Math.round(getRandomInt(25, 75) * ageScalingFactor), // Wider range
             clutch: getRandomInt(20, 90),
-            consistency: Math.round(getRandomInt(40, 80) * ageScalingFactor),
-            toughness: Math.round(getRandomInt(50, 95) * ageScalingFactor)
+            consistency: Math.round(getRandomInt(30, 85) * ageScalingFactor), // Wider range
+            toughness: Math.round(getRandomInt(40, 95) * ageScalingFactor) // Wider range
         },
         technical: {
-            throwingAccuracy: Math.round(getRandomInt(20, 50) * ageScalingFactor),
-            catchingHands: Math.round(getRandomInt(30, 60) * ageScalingFactor),
-            tackling: Math.round(getRandomInt(30, 60) * ageScalingFactor),
-            blocking: Math.round(getRandomInt(30, 60) * ageScalingFactor),
-            blockShedding: Math.round(getRandomInt(30, 60) * ageScalingFactor)
+            throwingAccuracy: Math.round(getRandomInt(20, 55) * ageScalingFactor), // Slightly wider base
+            catchingHands: Math.round(getRandomInt(25, 65) * ageScalingFactor), // Slightly wider base
+            tackling: Math.round(getRandomInt(25, 65) * ageScalingFactor), // Slightly wider base
+            blocking: Math.round(getRandomInt(25, 65) * ageScalingFactor), // Slightly wider base
+            blockShedding: Math.round(getRandomInt(25, 65) * ageScalingFactor) // Slightly wider base
         }
     };
 
+    // --- Apply weight modifier ---
     const weightModifier = (attributes.physical.weight - 125) / 50;
     attributes.physical.strength = Math.round(attributes.physical.strength + weightModifier * 10);
     attributes.physical.speed = Math.round(attributes.physical.speed - weightModifier * 8);
     attributes.physical.agility = Math.round(attributes.physical.agility - weightModifier * 5);
 
+    // --- >>> NEW: Determine Talent Tier <<< ---
+    let talentTier = 'Average';
+    const tierRoll = Math.random();
+    if (tierRoll < 0.05) { // 5% Elite
+        talentTier = 'Elite';
+    } else if (tierRoll < 0.20) { // 15% Good (5% + 15% = 20%)
+        talentTier = 'Good';
+    } else if (tierRoll < 0.70) { // 50% Average (20% + 50% = 70%)
+        talentTier = 'Average';
+    } else if (tierRoll < 0.90) { // 20% Below Average (70% + 20% = 90%)
+        talentTier = 'Below Average';
+    } else { // 10% Poor
+        talentTier = 'Poor';
+    }
+
+    // Define boost ranges per tier
+    const boostRanges = {
+        'Elite':         { min: 80, max: 99 },
+        'Good':          { min: 65, max: 85 },
+        'Average':       { min: 50, max: 75 },
+        'Below Average': { min: 35, max: 60 },
+        'Poor':          { min: 20, max: 45 }
+    };
+    const boostRange = boostRanges[talentTier];
+    const boostStrength = 0.6; // How much the boost influences the final stat (60% boost, 40% base)
+    const baseStrength = 1.0 - boostStrength;
+    // --- >>> END NEW <<< ---
+    
     switch (bestPosition) {
         case 'QB':
             attributes.technical.throwingAccuracy = Math.round(attributes.technical.throwingAccuracy * 0.5 + getRandomInt(65, 95) * 0.5);
