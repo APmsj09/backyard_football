@@ -456,7 +456,7 @@ export function renderSelectedPlayerCard(player, gameState) {
     elements.selectedPlayerCard.innerHTML = `
         <h4 class="font-bold text-lg">${scoutedPlayer.name ?? 'Unknown Player'}</h4>
         <p class="text-sm text-gray-600">
-            Age: ${scoutedPlayer.age ?? '?'} | H: ${scoutedPlayer.attributes?.physical?.height ?? '?'} | W: ${scoutedPlayer.attributes?.physical?.weight ?? '?'} lbs
+            Age: ${scoutedPlayer.age ?? '?'} | H: ${formatHeight(scoutedPlayer.attributes?.physical?.height) ?? '?'} | W: ${scoutedPlayer.attributes?.physical?.weight ?? '?'} lbs
         </p>
         <p class="text-sm text-gray-600">
             Est. Position: <span class="font-bold">${scoutedPlayer.estimatedPosition ?? '?'}</span> | // <<< Add estimatedPosition
@@ -635,7 +635,7 @@ function renderMyTeamTab(gameState) {
              const statusClass = p.status.duration > 0 ? 'text-red-500 font-semibold' : 'text-green-600';
              const statusText = p.status.description || 'Healthy';
              const typeTag = p.status.type === 'temporary' ? '<span class="status-tag temporary" title="Temporary Friend">[T]</span>' : '<span class="status-tag permanent" title="Permanent Roster">[P]</span>';
-
+            
              tableHtml += `<tr data-player-id="${p.id}" class="cursor-pointer hover:bg-amber-100">
                  <th scope="row" class="py-2 px-3 font-semibold sticky left-0 bg-white z-10">${p.name}</th>
                  <td class="text-center py-2 px-3 font-medium">${p.number || '?'}</td> {/* Number */}
@@ -646,6 +646,7 @@ function renderMyTeamTab(gameState) {
 
              const renderAttr = (val, attrName) => {
                  const breakthroughClass = p.breakthroughAttr === attrName ? ' breakthrough font-bold text-green-600' : '';
+                 const displayValue = attrName === 'height' ? formatHeight(val) : (val ?? '?');
                  return `<td class="text-center py-2 px-3${breakthroughClass}" title="${attrName}">${val ?? '?'}</td>`;
               };
 
