@@ -1059,97 +1059,115 @@ export function setupDepthChartTabs() {
 
 /**
  * Draws the state of a play (players, ball) onto the field canvas.
+ * FIELD (120yds) is mapped to CANVAS WIDTH (horizontal).
+ * FIELD (53.3yds) is mapped to CANVAS HEIGHT (vertical).
  * @param {object} frameData - A single frame from resolvePlay.visualizationFrames.
  */
 function drawFieldVisualization(frameData) {
     const ctx = elements.fieldCanvasCtx;
     const canvas = elements.fieldCanvas;
-    if (!ctx || !canvas) return; // Exit if canvas not found
+    if (!ctx || !canvas) return;
 
     // Clear canvas
     ctx.fillStyle = '#059669'; // Tailwind green-700
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-    // --- Scaling ---
-    const pixelsPerYard = canvas.height / FIELD_LENGTH; // e.g., 320 / 120 = 2.66
-    const scaleX = canvas.width / FIELD_WIDTH;   // e.g., 600 / 53.3 = 11.25
-    const scaleY = pixelsPerYard;
+    // --- Scaling (SWAPPED) ---
+    // Map 120 yards (FIELD_LENGTH) to canvas WIDTH (e.g., 840px)
+    const scaleX = canvas.width / FIELD_LENGTH; // e.g., 840 / 120 = 7
+    // Map 53.3 yards (FIELD_WIDTH) to canvas HEIGHT (e.g., 375px)
+    const scaleY = canvas.height / FIELD_WIDTH; // e.g., 375 / 53.3 = ~7
     // --- End Scaling ---
 
-    // --- Draw Field Markings ---
+    // --- Draw Field Markings (Rotated) ---
     ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
     ctx.lineWidth = 1;
-    ctx.font = 'bold 10px "Inter"'; // Made bold for visibility
+    ctx.font = 'bold 12px "Inter"'; // <-- Made text bigger
     ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
     ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
 
-    for (let y = 10; y <= 110; y += 10) { // 10-yard lines
-        const drawY = y * scaleY;
+    // Draw 10-yard lines (now vertical)
+    for (let y = 10; y <= 110; y += 10) { 
+        const drawX = y * scaleX; // Use Y-yard for X-coordinate
         ctx.beginPath();
-        ctx.moveTo(0, drawY);
-        ctx.lineTo(canvas.width, drawY);
+        ctx.moveTo(drawX, 0);
+        ctx.lineTo(drawX, canvas.height);
         ctx.stroke();
 
-        if (y > 10 && y < 110) { // Don't draw numbers on goal lines
-            // Goal line text
-            if (y === 20 || y === 100) {
-                ctx.fillText("GOAL", canvas.width / 2, drawY + 12);
-            } else {
-                const yardLineNum = y <= 60 ? y - 10 : 120 - y - 10; // 10, 20... 50... 20, 10
-                ctx.fillText(yardLineNum.toString(), canvas.width / 2, drawY + 12); // Nudge text down
-            }
+        if (y > 10 && y < 110) {
+            // Draw yard line numbers
+            const yardLineNum = y <= 60 ? y - 10 : 120 - y - 10;
+            ctx.fillText(yardLineNum.toString(), drawX, 15); // Near top sideline
+            ctx.fillText(yardLineNum.toString(), drawX, canvas.height - 15); // Near bottom sideline
         }
+    }
+    
+    // Draw Hash Marks (now horizontal)
+    const hashTopY = HASH_LEFT_X * scaleY; // Use X-hash for Y-coordinate
+    const hashBottomY = HASH_RIGHT_X * scaleY;
+    for (let y = 11; y < 110; y++) { // Every yard
+        if (y % 10 === 0) continue; // Skip main lines
+        const drawX = y * scaleX;
+        ctx.beginPath();
+        ctx.moveTo(drawX, hashTopY - 3);
+        ctx.lineTo(drawX, hashTopY + 3);
+        ctx.moveTo(drawX, hashBottomY - 3);
+        ctx.lineTo(drawX, hashBottomY + 3);
+        ctx.stroke();
     }
     // --- End Field Markings ---
 
     if (!frameData || !frameData.players) return; // If no frame, just show empty field
 
-    // --- Draw Players ---
-    const playerRadius = 7; // Increased radius
-    ctx.textBaseline = 'middle'; // Set once
-
+    // --- Draw Players (Rotated & Bigger) ---
+    const playerRadius = 8; // <-- Made bigger (was 7)
+    
     frameData.players.forEach(pState => {
-        if (pState.x === undefined || pState.y === undefined) return; // Safety check
-        
-        const drawX = pState.x * scaleX;
-        const drawY = pState.y * scaleY;
+        if (pState.x === undefined || pState.y === undefined) return;
+
+        // --- SWAPPED COORDINATES ---
+        const drawX = pState.y * scaleX; // Player Y-position maps to Canvas X
+        const drawY = pState.x * scaleY; // Player X-position maps to Canvas Y
+        // --- END SWAP ---
 
         // Use Team Colors
         ctx.fillStyle = pState.primaryColor || (pState.isOffense ? '#DC2626' : '#E5E7EB');
-
-        // Draw player circle
         ctx.beginPath();
         ctx.arc(drawX, drawY, playerRadius, 0, 2 * Math.PI);
         ctx.fill();
 
         // Draw Player Number
         ctx.fillStyle = pState.secondaryColor || (pState.isOffense ? '#FFFFFF' : '#000000');
-        ctx.font = 'bold 9px "Inter"'; // Font for the number
-        ctx.fillText(pState.number || '?', drawX, drawY + 1); // Use number
+        ctx.font = 'bold 10px "Inter"'; // <-- Made bigger (was 9px)
+        ctx.fillText(pState.number || '?', drawX, drawY + 1);
 
         // Highlight ball carrier
         if (pState.isBallCarrier) {
-            ctx.strokeStyle = '#FBBF24'; // Yellow highlight
-            ctx.lineWidth = 2.5; // Thicker highlight
+            ctx.strokeStyle = '#FBBF24';
+            ctx.lineWidth = 3; // <-- Made bigger (was 2.5)
             ctx.beginPath();
-            ctx.arc(drawX, drawY, playerRadius + 3, 0, 2 * Math.PI);
+            ctx.arc(drawX, drawY, playerRadius + 4, 0, 2 * Math.PI); // <-- Made bigger
             ctx.stroke();
         }
     });
 
-    // --- Draw Ball ---
+    // --- Draw Ball (Rotated & Bigger) ---
     if (frameData.ball && frameData.ball.inAir) {
-        const ballDrawX = frameData.ball.x * scaleX;
-        const ballDrawY = frameData.ball.y * scaleY;
-        // Simple shadow
+        // --- SWAPPED COORDINATES ---
+        const ballDrawX = frameData.ball.y * scaleX; // Ball Y maps to Canvas X
+        const ballDrawY = frameData.ball.x * scaleY; // Ball X maps to Canvas Y
+        // --- END SWAP ---
+        
+        // Shadow
         ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
         ctx.beginPath();
-        ctx.arc(ballDrawX + 2, ballDrawY + 2, 4, 0, 2 * Math.PI); // Bigger shadow
+        ctx.arc(ballDrawX + 2, ballDrawY + 2, 5, 0, 2 * Math.PI); // <-- Made bigger (was 4)
         ctx.fill();
         // Ball
         ctx.fillStyle = '#854D0E'; // brown-700
         ctx.beginPath();
-        ctx.arc(ballDrawX, ballDrawY, 4, 0, 2 * Math.PI); // Bigger ball
+        ctx.arc(ballDrawX, ballDrawY, 5, 0, 2 * Math.PI); // <-- Made bigger (was 4)
         ctx.fill();
     }
 }
