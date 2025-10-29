@@ -1225,19 +1225,41 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
     setupSide(offense, 'offense', offenseFormationData, true);
     // --- End Execute Setup ---
 
-    // --- Set Initial Ball Position (with QB) ---
+    // --- Set Initial Ball Position & Carrier ---
     const qbState = playState.activePlayers.find(p => p.slot === 'QB1' && p.isOffense);
-    if (qbState) {
+    const rbState = playState.activePlayers.find(p => p.slot === 'RB1' && p.isOffense); // Find the primary RB
+
+    if (play.type === 'run' && rbState && assignments[rbState.slot]?.includes('run_')) {
+        // --- IT'S A RUN PLAY ---
+        // Give the ball directly to the RB
+        if(rbState) {
+            rbState.hasBall = true;
+            rbState.isBallCarrier = true;
+            playState.ballState.x = rbState.x; // Ball snaps to RB's position
+            playState.ballState.y = rbState.y;
+            playState.ballState.z = 1.0;
+        }
+        if(qbState) {
+            qbState.hasBall = false;
+            qbState.isBallCarrier = false;
+            qbState.action = 'run_fake'; // Give QB a "fake" action
+        }
+    } else if (qbState) {
+        // --- IT'S A PASS PLAY ---
+        // Give the ball to the QB
+        qbState.hasBall = true;
+        qbState.isBallCarrier = false; // QB is NOT a "carrier" on a pass play
         playState.ballState.x = qbState.x;
         playState.ballState.y = qbState.y;
-        playState.ballState.z = 1.0; // Ball starts in QB hands height
-        qbState.hasBall = true; // QB possesses ball initially
-        qbState.isBallCarrier = true; // QB is initial ball carrier
+        playState.ballState.z = 1.0;
+        // qbState.action is already 'qb_setup' from earlier logic
     } else {
+        // --- CRITICAL ERROR ---
         console.error("CRITICAL: QB not found during setup! Ending play.");
         playState.playIsLive = false;
-        playState.turnover = true; // Treat as immediate turnover/error
+        playState.turnover = true;
     }
+}
 }
 
 /**
@@ -3063,6 +3085,17 @@ export function simulateGame(homeTeam, awayTeam) {
             
             const offensivePlayKey = determinePlayCall(offense, defense, down, yardsToGo, ballOn, scoreDiff, gameLog, drivesRemainingInGame);
             const defensivePlayKey = determineDefensivePlayCall(defense, offense, down, yardsToGo, ballOn, gameLog);
+
+            // --- >>> ADD THIS BLOCK <<< ---
+
+            // Get clean names for logging
+            const offPlayName = offensivePlayKey.split('_').slice(1).join(' '); // Gets "InsideRun" from "Balanced_InsideRun"
+            const defPlayName = defensivePlaybook[defensivePlayKey]?.name || defensivePlayKey; // Gets the "name" property
+
+            gameLog.push(`🏈 **Offense:** ${offPlayName}`);
+            gameLog.push(`🛡️ **Defense:** ${defPlayName}`);
+        
+            // --- >>> END BLOCK <<< ---
 
             const result = resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, { gameLog, weather, ballOn });
             if (result.visualizationFrames) {
