@@ -110,10 +110,9 @@ body {
 /* --- Field Visualization --- */
 canvas#field-canvas {
     background-color: #059669; /* green-700 */
-    border-left: 2px solid rgba(255,255,255,0.5);
-    border-right: 2px solid rgba(255,255,255,0.5);
-    /* Set a max-width to be responsive but not huge */
+    /* Endzones are now top and bottom */
+    border-top: 2px solid rgba(255,255,255,0.5);
+    border-bottom: 2px solid rgba(255,255,255,0.5);
     max-width: 100%;
     height: auto;
 }
-
