@@ -380,7 +380,7 @@ export function renderDraftPool(gameState, onPlayerSelect) {
             <td class="text-center py-2 px-3">${scoutedPlayer.age ?? '?'}</td>
             <td class="text-center py-2 px-3 font-medium">${scoutedPlayer.potential ?? '?'}</td>
             <td class="text-center py-2 px-3 ${relationshipInfo.color}" title="${relationshipInfo.name}">${relationshipInfo.name.substring(0, 4)}</td>
-            <td class="text-center py-2 px-3">${scoutedPlayer.favoriteOffensivePosition || '-'}/${scoutedPlayer.favoriteDefensivePosition || '-'}</td>
+            <td class="text-center py-2 px-3 font-bold">${scoutedPlayer.estimatedPosition ?? '?'}</td> // <<< Use estimatedPosition
             <td class="text-center py-2 px-3">${scoutedPlayer.attributes?.physical?.height ?? '?'}</td>
             <td class="text-center py-2 px-3">${scoutedPlayer.attributes?.physical?.weight ?? '?'}</td>
             <td class="text-center py-2 px-3">${scoutedPlayer.attributes?.physical?.speed ?? '?'}</td>
@@ -455,6 +455,7 @@ export function renderSelectedPlayerCard(player, gameState) {
             Age: ${scoutedPlayer.age ?? '?'} | H: ${scoutedPlayer.attributes?.physical?.height ?? '?'} | W: ${scoutedPlayer.attributes?.physical?.weight ?? '?'} lbs
         </p>
         <p class="text-sm text-gray-600">
+            Est. Position: <span class="font-bold">${scoutedPlayer.estimatedPosition ?? '?'}</span> | // <<< Add estimatedPosition
             Potential: <span class="font-semibold">${scoutedPlayer.potential ?? '?'}</span> |
             Relationship: <span class="font-semibold ${scoutedPlayer.relationshipColor || ''}">${scoutedPlayer.relationshipName ?? '?'}</span>
          </p>
@@ -488,8 +489,9 @@ export function renderPlayerRoster(playerTeam) {
         roster.forEach(player => {
             if (!player) return;
             const li = document.createElement('li');
+            const estimatedPos = estimateBestPosition(player); // Recalculate based on known stats
             li.className = 'p-2';
-            li.textContent = `${player.name} (${player.favoriteOffensivePosition || '-'}/${player.favoriteDefensivePosition || '-'})`;
+            li.textContent = `${player.name} (${estimatedPos ?? '?'})`; // <<< Use estimate
             elements.draftRosterList.appendChild(li);
         });
     }
