@@ -163,7 +163,7 @@ export const offensivePlaybook = {
 // Defensive Play Call Definitions
 export const defensivePlaybook = {
     // --- Cover 1 --- (Usually needs 1 Deep Safety + Man coverage)
-    'Cover_1_Man_331': { // Specific to 3-3-1 (3DL, 3LB, 1DB)
+    'Cover_1_Man_3-3-1': { // Specific to 3-3-1 (3DL, 3LB, 1DB)
         name: 'Cover 1 Man (3-3-1)', concept: 'Man', blitz: false,
         assignments: {
             'DL1': 'pass_rush', 'DL2': 'pass_rush', 'DL3': 'pass_rush',
@@ -172,7 +172,7 @@ export const defensivePlaybook = {
             // Note: Limited man coverage possible with only 1 DB
         }
     },
-    'Cover_1_Man_232': { // Specific to 2-3-2 (2DL, 3LB, 2DB)
+    'Cover_1_Man_2-3-2': { // Specific to 2-3-2 (2DL, 3LB, 2DB)
         name: 'Cover 1 Man (2-3-2)', concept: 'Man', blitz: false,
         assignments: {
             'DL1': 'pass_rush', 'DL2': 'pass_rush',
@@ -183,7 +183,7 @@ export const defensivePlaybook = {
     },
 
     // --- Cover 2 Zone --- (Usually needs 2 Deep Safeties)
-    'Cover_2_Zone_331': { // Specific to 3-3-1
+    'Cover_2_Zone_3-3-1': { // Specific to 3-3-1
         name: 'Cover 2 Zone (3-3-1)', concept: 'Zone', blitz: false,
         assignments: {
             'DL1': 'pass_rush', 'DL2': 'pass_rush', 'DL3': 'pass_rush',
@@ -191,7 +191,7 @@ export const defensivePlaybook = {
             'DB1': 'zone_deep_middle' // Can't truly run Cover 2, fallback to deep middle
         }
     },
-     'Cover_2_Zone_232': { // Specific to 2-3-2
+     'Cover_2_Zone_2-3-2': { // Specific to 2-3-2
         name: 'Cover 2 Zone (2-3-2)', concept: 'Zone', blitz: false,
         assignments: {
             'DL1': 'pass_rush', 'DL2': 'pass_rush',
@@ -201,7 +201,7 @@ export const defensivePlaybook = {
     },
 
     // --- Man Blitz --- (Cover 0 - No Safety Help)
-    'Man_Blitz_331': { // Specific to 3-3-1
+    'Man_Blitz_3-3-1': { // Specific to 3-3-1
         name: 'Man Blitz (3-3-1)', concept: 'Man', blitz: true,
         assignments: {
             'DL1': 'blitz_edge', 'DL2': 'blitz_gap', 'DL3': 'blitz_edge',
@@ -209,7 +209,7 @@ export const defensivePlaybook = {
             'DB1': 'man_cover_WR1' // Only 1 DB! Very risky. Might need AI adjustment.
         }
     },
-     'Man_Blitz_232': { // Specific to 2-3-2
+     'Man_Blitz_2-3-2': { // Specific to 2-3-2
         name: 'Man Blitz (2-3-2)', concept: 'Man', blitz: true,
         assignments: {
             'DL1': 'blitz_gap', 'DL2': 'blitz_gap',
@@ -219,7 +219,7 @@ export const defensivePlaybook = {
     },
 
     // --- Run Stop --- (Usually involves crashing gaps/edges)
-    'Run_Stop_421': { // Specific to 4-2-1
+    'Run_Stop_4-2-1': { // Specific to 4-2-1
         name: 'Run Stop (4-2-1)', concept: 'Run', blitz: true, // Assign 'Run' concept
         assignments: {
             'DL1': 'run_edge_left', 'DL2': 'run_gap_B_left', 'DL3': 'run_gap_B_right', 'DL4': 'run_edge_right',
@@ -227,7 +227,7 @@ export const defensivePlaybook = {
             'DB1': 'run_support' // Safety attacks downhill
         }
     },
-    'Run_Stop_331': { // Specific to 3-3-1
+    'Run_Stop_3-3-1': { // Specific to 3-3-1
         name: 'Run Stop (3-3-1)', concept: 'Run', blitz: true,
         assignments: {
             'DL1': 'run_gap_B_left', 'DL2': 'run_gap_A', 'DL3': 'run_gap_B_right', // DL control inside gaps
@@ -238,7 +238,7 @@ export const defensivePlaybook = {
 
 
     // --- Cover 3 Zone --- (Usually 1 Deep Middle, 2 Deep Sides, 4 Underneath)
-    'Cover_3_Zone_331': { // Specific to 3-3-1
+    'Cover_3_Zone_3-3-1': { // Specific to 3-3-1
         name: 'Cover 3 Zone (3-3-1)', concept: 'Zone', blitz: false,
         assignments: {
             'DL1': 'pass_rush', 'DL2': 'pass_rush', 'DL3': 'pass_rush',
@@ -248,7 +248,7 @@ export const defensivePlaybook = {
             // Note: No true deep side coverage from DBs
         }
     },
-    'Cover_3_Zone_232': { // Specific to 2-3-2
+    'Cover_3_Zone_2-3-2': { // Specific to 2-3-2
         name: 'Cover 3 Zone (2-3-2)', concept: 'Zone', blitz: false,
         assignments: {
             'DL1': 'pass_rush', 'DL2': 'pass_rush',
@@ -260,7 +260,7 @@ export const defensivePlaybook = {
     },
 
     // --- Zone Blitz ---
-    'Zone_Blitz_331': { // Specific to 3-3-1
+    'Zone_Blitz_3-3-1': { // Specific to 3-3-1
         name: 'Zone Blitz (3-3-1)', concept: 'Zone', blitz: true,
         assignments: {
             'DL1': 'pass_rush', 'DL2': 'zone_short_middle', // Nose drops!
@@ -269,7 +269,7 @@ export const defensivePlaybook = {
             'DB1': 'zone_deep_middle' // Safety plays deep
         }
     },
-     'Zone_Blitz_232': { // Specific to 2-3-2
+     'Zone_Blitz_2-3-2': { // Specific to 2-3-2
         name: 'Zone Blitz (2-3-2)', concept: 'Zone', blitz: true,
         assignments: {
             'DL1': 'pass_rush', 'DL2': 'pass_rush',
