@@ -1108,26 +1108,48 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
             // --- STEP 2: ADJUST Defensive Alignment ---
             if (!isOffense) {
                 const assignment = defAssignments[slot] || 'def_read'; // Get assignment from defensive play call
-                // If assigned to man coverage...
+
+                // 1. Man Coverage Alignment (Adjusted Starter Position)
                 if (assignment.startsWith('man_cover_')) {
-                    const targetSlot = assignment.split('man_cover_')[1]; // Extract target offensive slot (e.g., 'WR1')
-                    // Find the initial position of the offensive player being covered
+                    const targetSlot = assignment.split('man_cover_')[1];
                     const targetOffPlayer = initialOffenseStates.find(o => o.slot === targetSlot);
 
                     if (targetOffPlayer) {
-                        // --- Alignment Logic ---
                         // Position DB slightly inside and a set distance behind the WR
-                        const xOffset = targetOffPlayer.x < CENTER_X ? 1.5 : -1.5; // Inside shade (adjust value as needed)
-                        const yOffset = 6; // Depth off WR (adjust value as needed)
-                        startX = targetOffPlayer.x + xOffset; // Align relative to WR's X + shade
-                        startY = targetOffPlayer.y + yOffset; // Align relative to WR's Y + depth
-                        console.log(`Aligning DEF ${slot} (${player.name}) on OFF ${targetSlot} at ${startX.toFixed(1)}, ${startY.toFixed(1)}`); // Log alignment
+                        const xOffset = targetOffPlayer.x < CENTER_X ? 1.5 : -1.5; // Inside shade
+                        const yOffset = 6; // Depth off WR
+                        startX = targetOffPlayer.x + xOffset;
+                        startY = targetOffPlayer.y + yOffset;
+                        console.log(`Aligning DEF ${slot} (${player.name}) on OFF ${targetSlot} at ${startX.toFixed(1)}, ${startY.toFixed(1)}`);
                     } else {
-                        console.warn(`Man target ${targetSlot} not found for DEF ${slot}, using default formation coordinates.`);
-                        // If target offensive player not found (e.g., formation mismatch), use default coords
+                        console.warn(`Man target ${targetSlot} not found for DEF ${slot}.`);
                     }
                 }
-                // (Optional: Add similar logic here for zone defenders based on offense formation/personnel)
+
+                // 2. Zone Coverage Alignment (Adjust position slightly toward center)
+                else if (assignment.startsWith('zone_')) {
+                    const zoneTarget = getZoneCenter(assignment, playState.lineOfScrimmage);
+
+                    // If the formation put the player too close to the line, drop them back to their zone center
+                    if (startY < zoneTarget.y - 2) {
+                        startY = zoneTarget.y;
+                        startX = zoneTarget.x; // Target the X of the zone center
+                    }
+
+                    // Add a safety check for deep safeties being too wide or tight
+                    if (slot.startsWith('DB') && isNaN(relCoords[0])) { // Check if the formation slot was generic (X=0)
+                        const wideOffset = startX < CENTER_X ? -2 : 2; // Offset safety 2 yards to side of coverage
+                        startX += wideOffset;
+                        startY += 0.5; // Slight adjustment
+                    }
+                }
+
+                // 3. Run/Blitz Gap Alignment (Aggressive starting point)
+                else if (assignment.includes('run_gap_') || assignment.includes('blitz_gap')) {
+                    // Linebackers/DL need to be closer to the line of scrimmage initially
+                    // Ensure they are no more than 3 yards off the ball for run/gap integrity.
+                    startY = Math.min(startY, playState.lineOfScrimmage + 3);
+                }
             }
             // --- End STEP 2 ---
 
@@ -1964,23 +1986,46 @@ function checkBlockCollisions(playState) {
     const defenseStates = playState.activePlayers.filter(p => !p.isOffense);
 
     offenseStates.forEach(blocker => {
-        if ((blocker.action === 'pass_block' || blocker.action === 'run_block') && !blocker.engagedWith) {
-            const defendersInRange = defenseStates.filter(defender =>
+        const isRunBlock = blocker.action === 'run_block';
+
+        if ((blocker.action === 'pass_block' || isRunBlock) && !blocker.engagedWith) {
+
+            let defendersInRange = defenseStates.filter(defender =>
                 !defender.isBlocked && !defender.isEngaged &&
                 getDistance(blocker, defender) < BLOCK_ENGAGE_RANGE
             );
 
             if (defendersInRange.length > 0) {
-                const targetDefender = defendersInRange.sort((a, b) => getDistance(blocker, a) - getDistance(blocker, b))[0];
-                blocker.engagedWith = targetDefender.id;
-                blocker.isEngaged = true;
-                targetDefender.isBlocked = true;
-                targetDefender.blockedBy = blocker.id;
-                targetDefender.isEngaged = true;
-                playState.blockBattles.push({
-                    blockerId: blocker.id, defenderId: targetDefender.id,
-                    status: 'ongoing', streakA: 0, streakB: 0
-                });
+                // --- NEW: Add a preference for defenders downfield in a run play ---
+                if (isRunBlock) {
+                    // Filter: Only consider defenders who are on the line or slightly downfield
+                    defendersInRange = defendersInRange.filter(d =>
+                        d.y > blocker.y || d.y >= playState.lineOfScrimmage - 0.5
+                    );
+                    // Sort: Prioritize based on proximity to the blocker's *initial* position
+                    defendersInRange.sort((a, b) =>
+                        getDistance({ x: blocker.initialX, y: blocker.initialY }, a) -
+                        getDistance({ x: blocker.initialX, y: blocker.initialY }, b)
+                    );
+                } else {
+                    // Pass Block: Just sort by distance to current position
+                    defendersInRange.sort((a, b) => getDistance(blocker, a) - getDistance(blocker, b));
+                }
+                // --- END NEW LOGIC ---
+
+                const targetDefender = defendersInRange[0]; // Take the highest priority target
+
+                if (targetDefender) { // Check if the filtering left a valid target
+                    blocker.engagedWith = targetDefender.id;
+                    blocker.isEngaged = true;
+                    targetDefender.isBlocked = true;
+                    targetDefender.blockedBy = blocker.id;
+                    targetDefender.isEngaged = true;
+                    playState.blockBattles.push({
+                        blockerId: blocker.id, defenderId: targetDefender.id,
+                        status: 'ongoing', streakA: 0, streakB: 0
+                    });
+                }
             }
         }
     });
@@ -2053,7 +2098,7 @@ function checkTackleCollisions(playState, gameLog) {
 function resolveBattle(powerA, powerB, battle) {
     // 1. Calculate base difference
     const BASE_DIFF = powerA - powerB;
-    
+
     // 2. Add controlled randomness
     const roll = getRandomInt(-15, 15); // Centered, smaller random range
     const finalDiff = BASE_DIFF + roll;
