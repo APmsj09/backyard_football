@@ -1336,12 +1336,14 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
         // --- NEW: Receiver Ball-in-Air Logic ---
         // This check overrides other offensive (non-QB) actions if the ball is in the air
         if (pState.isOffense && !pState.hasBall && !pState.isBallCarrier && (pState.slot.startsWith('WR') || pState.slot.startsWith('RB'))) {
-            // Check if ball is in the air AND targeted at this player
-            if (playState.ballState.inAir && playState.ballState.targetPlayerId === pState.id && getDistance(pState, ballPos) < 8.0) {
-                pState.action = 'attack_ball'; // Override current route
+            const isIntendedTarget = playState.ballState.targetPlayerId === pState.id;
+            const distToLandingSpot = getDistance(pState, { x: playState.ballState.targetX, y: playState.ballState.targetY });
+            if (playState.ballState.inAir && (isIntendedTarget || distToLandingSpot < 8.0)) {
+                if (getDistance(pState, ballPos) < 15.0) {
+                    pState.action = 'attack_ball'; // Override current route
+                }
+                // If ball is no longer in air (caught/dropped), action will be reset by handleBallArrival (e.g., 'run_path' or 'idle')
             }
-            // If ball is no longer in air (caught/dropped), action will be reset by handleBallArrival (e.g., 'run_path' or 'idle')
-            // or if a new play starts.
         }
         // --- END NEW BLOCK ---
 
@@ -1510,7 +1512,7 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                     if (pState.engagedWith) {
                         pState.targetX = pState.x;
                         pState.targetY = pState.y;
-                        target = null;
+                        // target = null; // No longer needed
                         break;
                     }
 
@@ -1564,23 +1566,25 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                             }
                         }
 
+                        // --- 🛠️ FIX: Assign directly to pState.targetX/Y ---
                         // Target the defender's leverage point
-                        target = {
-                            x: targetLeverageX,
-                            y: targetDefender.y + 0.5 // Aim slightly downfield (drive block)
-                        };
+                        pState.targetX = targetLeverageX;
+                        pState.targetY = targetDefender.y + 0.5; // Aim slightly downfield (drive block)
+                        // --- End Fix ---
 
                     } else {
+                        // --- 🛠️ FIX: Assign directly to pState.targetX/Y ---
                         // --- No defender: Climb to next level or follow the run side ---
-                        target = {
-                            x: pState.x + (playSideX * 2),
-                            y: pState.y + 3
-                        };
+                        pState.targetX = pState.x + (playSideX * 2);
+                        pState.targetY = pState.y + 3;
+                        // --- End Fix ---
                     }
-                    target = null; // Target set by fixed point logic above
-                    break; // Go to pursuit logic
-                }
 
+                    // --- 🛠️ FIX: This line was removed as it was nullifying the logic ---
+                    // target = null; 
+
+                    break; // Break from 'run_block' case
+                }
                 case 'run_path': { // --- Logic for RBs ---
                     const threatDistance = 3.5; // How far to look for immediate threats
                     const visionDistance = 10.0; // How far to look downfield for lanes
@@ -1611,7 +1615,7 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
 
                             // --- >>> THIS IS THE FIX <<< ---
                             if (xOffset === 0) {
-                                dist -= STRAIGHT_AHEAD_PENALTY; // Make cutting left/right 5 yards "less open"
+                                dist += STRAIGHT_AHEAD_PENALTY; // Make cutting left/right 5 yards "less open"
                             }
                             // --- >>> END FIX <<< ---
 
@@ -1730,11 +1734,9 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
 
                     // --- Ball is in the Air ---
                     if (isBallInAir) {
-                        // If ball is targeted at my receiver OR it's catchable nearby...
                         if (playState.ballState.targetPlayerId === assignedReceiver.id || getDistance(pState, ballPos) < 15) {
-                            // --- ACTION: Play the Ball ---
-                            // Target the ball's (x, y) coordinates directly
-                            target = ballPos;
+                            // --- FIX: Target the landing spot, not the current position ---
+                            target = { x: playState.ballState.targetX, y: playState.ballState.targetY };
                         } else {
                             // --- ACTION: Stay in Coverage ---
                             // Ball is thrown elsewhere, stick to the receiver
@@ -1777,6 +1779,7 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                     const zoneCenter = getZoneCenter(assignment, playState.lineOfScrimmage);
                     let targetThreat = null; // Will hold a player object if we target one
                     let targetPoint = zoneCenter; // Default target is the zone's center
+                    const landingSpot = { x: playState.ballState.targetX, y: playState.ballState.targetY };
 
                     const isDeepZone = assignment.includes('deep');
 
@@ -1788,10 +1791,11 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
 
                     // --- 1. React to Ball in Air ---
                     // Check if the ball is thrown into this defender's zone
-                    if (isBallInAir && isPlayerInZone(ballPos, assignment, playState.lineOfScrimmage)) {
-                        // PRIORITY 1: Ball is in the air and in my zone. Attack the ball.
-                        target = ballPos; // Target the ball's {x, y} coordinates
-                        break; // Exit the switch, let pursuit logic at the end run
+
+                    if (isBallInAir && isPlayerInZone(landingSpot, assignment, playState.lineOfScrimmage)) {
+                        // --- FIX: Target the landing spot, not the current position ---
+                        target = landingSpot;
+                        break;
                     }
 
                     // --- 2. React to Run Play ---
@@ -1918,7 +1922,7 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                         // --- ACTION: Play Pass Defense (Ball is in the air) ---
                         // Check if the ball is thrown somewhat close by
                         if (getDistance(pState, ballPos) < 15) {
-                            target = ballPos; // Attack the ball
+                            target = { x: playState.ballState.targetX, y: playState.ballState.targetY };
                         } else {
                             // Ball is thrown deep/elsewhere, drop to default deep middle zone
                             target = getZoneCenter('zone_deep_middle', playState.lineOfScrimmage);
@@ -2068,7 +2072,7 @@ function checkTackleCollisions(playState, gameLog) {
 
     for (const defender of activeDefenders) {
         if (getDistance(ballCarrierState, defender) < TACKLE_RANGE) {
-            defender.isEngaged = true; // Mark defender as attempting tackle
+            // defender.isEngaged = true; // Mark defender as attempting tackle
 
             const carrierPlayer = game.players.find(p => p && p.id === ballCarrierState.id);
             const tacklerPlayer = game.players.find(p => p && p.id === defender.id);
@@ -2096,7 +2100,7 @@ function checkTackleCollisions(playState, gameLog) {
                 // --- REVISED SACK Logic ---
                 // Check if carrier is QB, was in a passing action, and is behind LoS
                 if (ballCarrierState.slot === 'QB1' &&
-                    (ballCarrierState.action === 'qb_setup') && // Only 'qb_setup' counts as sack
+                    (ballCarrierState.action === 'qb_setup' || ballCarrierState.action === 'qb_scramble') &&
                     ballCarrierState.y < playState.lineOfScrimmage) {
                     playState.sack = true;
                     tacklerPlayer.gameStats.sacks = (tacklerPlayer.gameStats.sacks || 0) + 1;
@@ -2132,23 +2136,40 @@ function resolveBattle(powerA, powerB, battle) {
     // --- QUICK RESOLVE CHECKS (Critical Success/Failure) ---
     // If one player's power is significantly higher, give them a chance to bypass streaks.
     if (powerA > powerB + 40 && Math.random() < 0.3) { // Blocker is much stronger (40+ power diff)
-        battle.streakA = 2; // Instant Win (Sustain)
+        battle.status = 'win_A'; // Instant Win (Pancake)
+        return; // Win is decided
     } else if (powerB > powerA + 40 && Math.random() < 0.3) { // Defender is much stronger
-        battle.streakB = 2; // Instant Win (Shed)
+        battle.status = 'win_B'; // Instant Win (Shed)
+        return; // Win is decided
     }
-    // Note: If instant win triggers, the streak update logic below is still run, which handles the final status='win_A/B'.
 
-    // --- STREAK & DECISION LOGIC ---
-    if (finalDiff > 12) { // A wins decisively (High Stat Impact)
-        battle.streakA++; battle.streakB = 0;
-        if (battle.streakA >= 2) battle.status = 'win_A';
-    } else if (finalDiff < -12) { // B wins decisively
-        battle.streakB++; battle.streakA = 0;
-        if (battle.streakB >= 2) battle.status = 'win_B';
-    } else { // Draw or Minor Win (No strong streak change)
-        // Your original, safe implementation: reset streaks unless it was a major victory.
-        battle.streakA = 0; battle.streakB = 0;
-        battle.status = 'ongoing'; // Use 'ongoing' instead of 'draw' for clarity in resolveOngoingBlocks
+    // --- STREAK & DECISION LOGIC (MODIFIED) ---
+    const STREAK_THRESHOLD = 5; // Win/loss decided at +/- 5 (was 12)
+    const WIN_STREAK = 3;       // Require 3 wins in a row (was 2)
+
+    if (finalDiff > STREAK_THRESHOLD) { // A wins the tick
+        battle.streakA++;
+        battle.streakB = 0; // Reset opponent's streak
+        battle.status = 'ongoing'; // Default to ongoing...
+
+        if (battle.streakA >= WIN_STREAK) {
+            battle.status = 'win_A'; // ...until the streak is met
+        }
+
+    } else if (finalDiff < -STREAK_THRESHOLD) { // B wins the tick
+        battle.streakB++;
+        battle.streakA = 0; // Reset opponent's streak
+        battle.status = 'ongoing'; // Default to ongoing...
+
+        if (battle.streakB >= WIN_STREAK) {
+            battle.status = 'win_B'; // ...until the streak is met
+        }
+
+    } else { // Draw (between -5 and +5)
+        // On a true draw, reset both streaks
+        battle.streakA = 0;
+        battle.streakB = 0;
+        battle.status = 'ongoing';
     }
 }
 
@@ -2158,11 +2179,20 @@ function resolveBattle(powerA, powerB, battle) {
 function resolveOngoingBlocks(playState, gameLog) {
     const battlesToRemove = [];
     playState.blockBattles.forEach((battle, index) => {
-        if (battle.status !== 'ongoing' && battle.status !== 'draw') return; // Only process active/drawn battles
+        // Only process battles that are currently active
+        if (battle.status !== 'ongoing') {
+            // This check is a safeguard, but resolveBattle should set status
+            // We'll clean up any stale 'win' states if they somehow persist
+            if (battle.status === 'win_A' || battle.status === 'win_B') {
+                battlesToRemove.push(index);
+            }
+            return;
+        }
 
         const blockerState = playState.activePlayers.find(p => p.id === battle.blockerId);
         const defenderState = playState.activePlayers.find(p => p.id === battle.defenderId);
 
+        // Check if players are still valid and engaged with each other
         if (!blockerState || !defenderState || blockerState.engagedWith !== defenderState.id || defenderState.blockedBy !== blockerState.id) {
             battle.status = 'disengaged';
             battlesToRemove.push(index);
@@ -2171,31 +2201,52 @@ function resolveOngoingBlocks(playState, gameLog) {
             return;
         }
 
-        const blockPower = ((blockerState.blocking || 50) + (blockerState.strength || 50)) * blockerState.fatigueModifier;
-        const shedPower = ((defenderState.blockShedding || 50) + (defenderState.strength || 50)) * defenderState.fatigueModifier;
-
-        resolveBattle(blockPower, shedPower, battle); // Helper updates battle.status
-
-        if (battle.status === 'win_B') { // Defender wins (sheds block)
-
-            gameLog.push(`🛡️ ${defenderState.name} sheds block from ${blockerState.name}!`);
-            blockerState.engagedWith = null; blockerState.isEngaged = false;
-            defenderState.isBlocked = false; defenderState.blockedBy = null; defenderState.isEngaged = false;
-            battlesToRemove.push(index);
-        } else if (battle.status === 'win_A' || battle.status === 'draw') { // Blocker sustains
-            battle.status = 'ongoing'; // Reset draw to ongoing for next tick
-            battle.streakA = 0; battle.streakB = 0;
-            blockerState.targetX = defenderState.x; blockerState.targetY = defenderState.y; // Mirror
-        }
-
+        // --- Check for distance-based disengagement ---
         if (getDistance(blockerState, defenderState) > BLOCK_ENGAGE_RANGE + 0.5) {
             battle.status = 'disengaged';
             battlesToRemove.push(index);
             blockerState.engagedWith = null; blockerState.isEngaged = false;
             defenderState.isBlocked = false; defenderState.blockedBy = null; defenderState.isEngaged = false;
+            return;
+        }
+
+        const blockPower = ((blockerState.blocking || 50) + (blockerState.strength || 50)) * blockerState.fatigueModifier;
+        const shedPower = ((defenderState.blockShedding || 50) + (defenderState.strength || 50)) * defenderState.fatigueModifier;
+
+        // --- Call the battle helper, which updates battle.status ---
+        resolveBattle(blockPower, shedPower, battle);
+
+        // --- 🛠️ CORRECTED LOGIC: Handle all 3 outcomes from resolveBattle ---
+
+        if (battle.status === 'win_B') {
+            // --- Outcome 1: Defender wins (sheds block) ---
+            gameLog.push(`🛡️ ${defenderState.name} sheds block from ${blockerState.name}!`);
+            blockerState.engagedWith = null; blockerState.isEngaged = false;
+            defenderState.isBlocked = false; defenderState.blockedBy = null; defenderState.isEngaged = false;
+            battlesToRemove.push(index);
+
+        } else if (battle.status === 'win_A') {
+            // --- Outcome 2: Blocker wins (pancake) ---
+            gameLog.push(`🥞 ${blockerState.name} pancakes ${defenderState.name}!`);
+
+            // Stun the defender for winning the block
+            defenderState.stunnedTicks = 15; // Stun for 15 ticks
+
+            // End the engagement
+            blockerState.engagedWith = null; blockerState.isEngaged = false;
+            defenderState.isBlocked = false; defenderState.blockedBy = null; defenderState.isEngaged = false;
+            battlesToRemove.push(index);
+
+        } else {
+            // --- Outcome 3: Battle is 'ongoing' ---
+            // (This now covers minor wins, minor losses, and draws)
+            // The battle continues. Blocker adjusts to mirror the defender.
+            blockerState.targetX = defenderState.x;
+            blockerState.targetY = defenderState.y;
         }
     });
 
+    // Clean up all completed battles
     for (let i = battlesToRemove.length - 1; i >= 0; i--) {
         playState.blockBattles.splice(battlesToRemove[i], 1);
     }
@@ -2206,6 +2257,9 @@ function resolveOngoingBlocks(playState, gameLog) {
  * Handles QB decision-making (throw, scramble, checkdown).
  */
 
+/**
+ * (MODIFIED with 4 fixes: Lead Factor, Decision Time, Scramble Logic, Accuracy Tuning)
+ */
 function updateQBDecision(playState, offenseStates, defenseStates, gameLog) {
     const qbState = offenseStates.find(p => p.slot === 'QB1' && (p.hasBall || p.isBallCarrier));
     if (!qbState || playState.ballState.inAir) return; // Exit if no QB with ball or ball already thrown
@@ -2275,12 +2329,13 @@ function updateQBDecision(playState, offenseStates, defenseStates, gameLog) {
     openReceivers.sort((a, b) => (b.separation - a.separation) || (a.distFromQB - b.distFromQB));
 
     // --- 3. Decision Timing Logic ---
-    // More patient: Minimum ticks before considering a non-pressured throw
     const initialReadTicks = 6; // QB needs ~0.9s to start reading, unless pressured
-    // Adjusted decision time: Slightly longer minimum, less sensitive to IQ extremes
-    const maxDecisionTimeTicks = Math.max(12, Math.round((100 - qbIQ) / 6) + 5); // e.g., IQ 50->13t, IQ 99->6t (max bumps to 12), IQ 1->21t
-    // Less drastic pressure modifier: Speeds up decision, but doesn't force immediate action as much
-    const pressureTimeReduction = isPressured ? Math.max(3, Math.round(maxDecisionTimeTicks * 0.3)) : 0; // Reduce time by up to 30%, minimum 3 ticks reduction
+
+    // --- 🛠️ MODIFIED --- Lowered floor from 12 to 6
+    const maxDecisionTimeTicks = Math.max(6, Math.round((100 - qbIQ) / 6) + 5);
+    // e.g., IQ 50->13t, IQ 99->6t (was 12), IQ 1->21t
+
+    const pressureTimeReduction = isPressured ? Math.max(3, Math.round(maxDecisionTimeTicks * 0.3)) : 0;
     const currentDecisionTickTarget = maxDecisionTimeTicks - pressureTimeReduction;
 
     let decisionMade = false;
@@ -2317,7 +2372,9 @@ function updateQBDecision(playState, offenseStates, defenseStates, gameLog) {
         const shouldThrowToOpen = openReceivers.length > 0 &&
             (!isPressured || Math.random() < (0.2 + qbToughness / 200)); // Less likely to force throw under pressure, modified by toughness
 
-        const canScramble = isPressured && qbAgility > 55 && Math.random() < 0.6; // Keep scramble logic similar
+        // --- 🛠️ MODIFIED --- Agility-based scramble chance
+        const baseScrambleChance = (qbAgility / 150); // e.g., 99 Agi -> 66%, 55 Agi -> 36%
+        const canScramble = isPressured && (Math.random() < baseScrambleChance);
 
         if (shouldThrowToOpen) {
             targetPlayerState = openReceivers[0]; // Throw to the best open receiver (sorted above)
@@ -2382,7 +2439,8 @@ function updateQBDecision(playState, offenseStates, defenseStates, gameLog) {
             const rec_speedYPS = rec_baseSpeedYPS + Math.max(0, (targetPlayerState.speed || 50) - 50) * rec_scaleFactor;
             const rec_moveDist = rec_speedYPS * targetPlayerState.fatigueModifier * est_airTime; // How far receiver will move
 
-            const targetLeadFactor = 0.3;
+            // --- 🛠️ MODIFIED --- Critical fix for leading the receiver
+            const targetLeadFactor = 0.9; // Was 0.3. This ensures receiver catches in stride.
 
             let aimX = targetPlayerState.x;
             let aimY = targetPlayerState.y;
@@ -2402,18 +2460,21 @@ function updateQBDecision(playState, offenseStates, defenseStates, gameLog) {
             const accuracy = qbAttrs.technical?.throwingAccuracy || 50;
             const accuracyPenalty = (100 - accuracy) / 180;
             const pressurePenalty = isPressured ? 1.5 : 1.0; // Keep pressure penalty
-            const xError = (Math.random() - 0.5) * 5 * accuracyPenalty * pressurePenalty;
-            const yError = (Math.random() - 0.5) * 5 * accuracyPenalty * pressurePenalty;
+
+            // --- 🛠️ MODIFIED --- Tunable error multiplier
+            const errorMultiplier = 8.0; // Tunable: (was 5.0) - higher = more error
+            const xError = (Math.random() - 0.5) * errorMultiplier * accuracyPenalty * pressurePenalty;
+            const yError = (Math.random() - 0.5) * errorMultiplier * accuracyPenalty * pressurePenalty;
 
             // 5. Calculate final ball velocity
             playState.ballState.vx = (dx / airTime) + xError;
             playState.ballState.vy = (dy / airTime) + yError;
             playState.ballState.vz = Math.min(15, 5 + distance / 3) / airTime;
 
-            playState.ballState.targetX = aimX; // Store the final aim point
-            playState.ballState.targetY = aimY; // Store the final aim point
+            playState.ballState.targetX = aimX + xError; // Store the final aim point (with error)
+            playState.ballState.targetY = aimY + yError; // Store the final aim point (with error)
 
-            gameLog.push(`[DEBUG] QB aiming at: (${aimX.toFixed(1)}, ${aimY.toFixed(1)})`);
+            gameLog.push(`[DEBUG] QB aiming at: (${(aimX + xError).toFixed(1)}, ${(aimY + yError).toFixed(1)})`);
             // --- End Ball Physics ---
 
         } else if (imminentSackDefender && actionTaken !== "Scramble") {
@@ -2440,7 +2501,6 @@ function updateQBDecision(playState, offenseStates, defenseStates, gameLog) {
     }
     // If no decisionMade and not pressured, QB continues holding/moving per 'qb_setup' target
 }
-
 
 /**
  * Handles ball arrival at target coordinates. (MODIFIED)
