@@ -1149,7 +1149,7 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
                      else if (assignment.toLowerCase().includes('block_run')) { action = 'run_block'; targetY = startY + 0.5; }
                      else if (assignment.toLowerCase().includes('run_')) {
                          action = 'run_path'; targetY = startY + 5; // Initial target for runner
-                         if (assignment.includes('outside')) targetX = startX + (startX < CENTER_X ? -7 : 7); else targetX = startX + getRandomInt(-2, 2);
+                         if (assignment.includes('outside')) targetX = startX + (startX < CENTER_X ? -2 : 2); else targetX = startX + getRandomInt(-1, 1);
                      } else if (routeTree[assignment]) { // Check if assignment is a defined route
                          action = 'run_route';
                          routePath = calculateRoutePath(assignment, startX, startY); // Calculate absolute path
@@ -1530,7 +1530,7 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                     } else {
                         // --- B. No Immediate Threat: Find Best Lane (with downhill bias) ---
                         const lanes = [-4, 0, 4]; // Narrowed cut lanes (was [-7, 0, 7])
-                        const STRAIGHT_AHEAD_BONUS = 3.0; // <<< THE FIX: Add 3 yards of "virtual" open space
+                        const STRAIGHT_AHEAD_PENALTY = 5.0; // <<< THE FIX: Add 3 yards of "virtual" open space
                         let bestLane = { xOffset: 0, minDist: -Infinity }; // Start at -Infinity to ensure first lane is picked
 
                         lanes.forEach(xOffset => {
@@ -1543,7 +1543,7 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
 
                             // --- >>> THIS IS THE FIX <<< ---
                             if (xOffset === 0) {
-                                dist += STRAIGHT_AHEAD_BONUS; // Make running straight ahead more desirable
+                                dist -= STRAIGHT_AHEAD_PENALTY; // Make cutting left/right 5 yards "less open"
                             }
                             // --- >>> END FIX <<< ---
 
@@ -2132,7 +2132,6 @@ function updateQBDecision(playState, offenseStates, defenseStates, gameLog) {
             return; // Exit and let updatePlayerTargets handle movement
         }
     }
-    // --- >>> END MODIFIED BLOCK <<< ---
     
     const qbIQ = qbAttrs.mental?.playbookIQ || 50;
     const qbConsistency = qbAttrs.mental?.consistency || 50;
@@ -2288,7 +2287,7 @@ function updateQBDecision(playState, offenseStates, defenseStates, gameLog) {
             // 4. Apply accuracy penalties
             const accuracy = qbAttrs.technical?.throwingAccuracy || 50;
             // --- >>> IMPROVED ACCURACY: Divisor changed from 120 to 150 ---
-            const accuracyPenalty = (100 - accuracy) / 150; 
+            const accuracyPenalty = (100 - accuracy) / 180; 
             const pressurePenalty = isPressured ? 1.5 : 1.0; // Keep pressure penalty
             const xError = (Math.random() - 0.5) * 6 * accuracyPenalty * pressurePenalty;
             const yError = (Math.random() - 0.5) * 6 * accuracyPenalty * pressurePenalty;
@@ -2329,157 +2328,152 @@ function updateQBDecision(playState, offenseStates, defenseStates, gameLog) {
  * Handles ball arrival at target coordinates.
  */
 function handleBallArrival(playState, gameLog) {
-    // --- 1. Check Ball Height FIRST ---
+    // 1. Ball Height Check
     if (!playState.ballState.inAir) return; // Ball not in air
 
-    const targetPlayerState = playState.activePlayers.find(p => p.id === playState.ballState.targetPlayerId);
-
     if (playState.ballState.z > 2.5) { // Check if ball is too high
-        gameLog.push(`‹‹ Pass to ${targetPlayerState?.name || 'receiver'} is thrown **too high**. Incomplete.`);
+        gameLog.push(`‹‹ Pass is thrown **too high**. Incomplete.`);
         playState.incomplete = true; playState.playIsLive = false; playState.ballState.inAir = false;
         return; // Play is over
     }
-    if (playState.ballState.z < 0.2) { // Check if ball is too low
-        gameLog.push(`‹‹ Pass to ${targetPlayerState?.name || 'receiver'} is thrown **too low** and hits the ground. Incomplete.`);
+    if (playState.ballState.z < 0.1) { // Check if ball is too low
+        gameLog.push(`‹‹ Pass is thrown **too low** and hits the ground. Incomplete.`);
         playState.incomplete = true; playState.playIsLive = false; playState.ballState.inAir = false;
         return; // Play is over
     }
-    // If we are here, ball is at a catchable height (0.2 - 2.5)
+    // If we are here, ball is at a catchable height (0.1 - 2.5)
 
-    // --- 2. Check if Target Receiver is Valid ---
+    // 2. Check if Target Receiver is Valid
+    const targetPlayerState = playState.activePlayers.find(p => p.id === playState.ballState.targetPlayerId);
     if (!targetPlayerState) {
         gameLog.push("‹‹ Pass intended target not found. Incomplete.");
         playState.incomplete = true; playState.playIsLive = false; playState.ballState.inAir = false;
         return;
     }
 
-    // --- 3. Find Players Near the Ball ---
-    const CATCH_CHECK_RADIUS = 1.8; // Use the wider radius we set
-    const playersNearBall = playState.activePlayers
-        .filter(p => getDistance(p, playState.ballState) < CATCH_CHECK_RADIUS)
-        .sort((a, b) => getDistance(a, playState.ballState) - getDistance(b, playState.ballState)); // Sort by closest
+    // 3. Find Key Players and Distances (NEW LOGIC)
+    const CATCH_CHECK_RADIUS = 1.8; // Our 1.8 yard radius
+    const receiverPlayer = game.players.find(p => p && p.id === targetPlayerState.id); // Get full receiver object
+    
+    // Find *closest* defender to the ball, regardless of radius
+    const closestDefenderState = playState.activePlayers
+        .filter(p => !p.isOffense && !p.isBlocked && !p.isEngaged)
+        .sort((a, b) => getDistance(a, playState.ballState) - getDistance(b, playState.ballState))[0];
+        
+    const defenderPlayer = closestDefenderState ? game.players.find(p => p && p.id === closestDefenderState.id) : null;
 
-    const intendedReceiver = playersNearBall.find(p => p.id === targetPlayerState.id);
-    const closestDefender = playersNearBall.find(p => !p.isOffense);
+    // Check if the key players are *actually in range*
+    const receiverInRange = getDistance(targetPlayerState, playState.ballState) < CATCH_CHECK_RADIUS;
+    const defenderInRange = closestDefenderState && getDistance(closestDefenderState, playState.ballState) < CATCH_CHECK_RADIUS;
 
-    let eventResolved = false; // Flag to ensure only one outcome
+    let eventResolved = false;
 
-    // --- 4. Interception Attempt (Prioritize Defense) ---
-    if (closestDefender) {
-        const defenderPlayer = game.players.find(p => p && p.id === closestDefender.id);
-        const receiverPlayer = intendedReceiver ? game.players.find(p => p && p.id === intendedReceiver.id) : null;
+    // 4. Interception Attempt (Only if defender is in range)
+    if (defenderInRange && defenderPlayer?.attributes) {
+        const defCatchSkill = defenderPlayer.attributes.technical?.catchingHands || 30;
+        const defAgility = defenderPlayer.attributes.physical?.agility || 50;
+        let defenderPower = (defCatchSkill * 0.6 + defAgility * 0.4) * closestDefenderState.fatigueModifier;
+        
+        let receiverPresencePenalty = 0;
+        if (receiverInRange && receiverPlayer?.attributes) { // Receiver must also be in range to fight for it
+             const recCatchSkill = receiverPlayer.attributes.technical?.catchingHands || 50;
+             const recStrength = receiverPlayer.attributes.physical?.strength || 50;
+             receiverPresencePenalty = ((recCatchSkill * 0.5 + recStrength * 0.2) * targetPlayerState.fatigueModifier) / 3;
+        }
 
-        if (defenderPlayer?.attributes) {
-            const defCatchSkill = defenderPlayer.attributes.technical?.catchingHands || 30;
-            const defAgility = defenderPlayer.attributes.physical?.agility || 50;
-            let defenderPower = (defCatchSkill * 0.6 + defAgility * 0.4) * closestDefender.fatigueModifier;
-            let receiverPresencePenalty = 0;
-            if (intendedReceiver && receiverPlayer?.attributes) {
-                 const recCatchSkill = receiverPlayer.attributes.technical?.catchingHands || 50;
-                 const recStrength = receiverPlayer.attributes.physical?.strength || 50;
-                 receiverPresencePenalty = ((recCatchSkill * 0.5 + recStrength * 0.2) * intendedReceiver.fatigueModifier) / 3;
-            }
-            const distToBallDef = getDistance(closestDefender, playState.ballState);
-            const proximityBonus = Math.max(0, (CATCH_CHECK_RADIUS - distToBallDef) * 20);
-            defenderPower += proximityBonus - receiverPresencePenalty;
+        const distToBallDef = getDistance(closestDefenderState, playState.ballState);
+        const proximityBonus = Math.max(0, (CATCH_CHECK_RADIUS - distToBallDef) * 20); // Bonus for being closer
+        defenderPower += proximityBonus - receiverPresencePenalty;
 
-            if (defenderPower + getRandomInt(0, 35) > 85) { // Threshold for INT
-                 eventResolved = true;
-                 gameLog.push(`❗ INTERCEPTION! ${closestDefender.name} (Catch: ${defCatchSkill}) jumps the route!`);
-                 playState.turnover = true;
-                 // ... (rest of interception state update logic: setting ball carrier, stats, etc.) ...
-                 closestDefender.isBallCarrier = true;
-                 closestDefender.hasBall = true;
-                 closestDefender.action = 'run_path';
-                 closestDefender.targetY = 0; 
-                 closestDefender.targetX = closestDefender.x;
-                 playState.activePlayers.forEach(p => {
-                     p.hasBall = (p.id === closestDefender.id);
-                     p.isBallCarrier = (p.id === closestDefender.id);
-                     if (p.isOffense) { p.action = 'pursuit'; }
-                     else if (p.id !== closestDefender.id) { p.action = 'run_block'; }
-                 });
-                 ensureStats(defenderPlayer);
-                 defenderPlayer.gameStats.interceptions = (defenderPlayer.gameStats.interceptions || 0) + 1;
-                 const throwerPlayer = game.players.find(p => p && p.id === playState.ballState.throwerId);
-                 if (throwerPlayer) {
-                     ensureStats(throwerPlayer);
-                     throwerPlayer.gameStats.interceptionsThrown = (throwerPlayer.gameStats.interceptionsThrown || 0) + 1;
-                 }
-            }
+        if (defenderPower + getRandomInt(0, 35) > 85) { // Threshold for INT
+             eventResolved = true;
+             gameLog.push(`❗ INTERCEPTION! ${closestDefenderState.name} (Catch: ${defCatchSkill}) jumps the route!`);
+             playState.turnover = true;
+             // ... (rest of interception state update logic) ...
+             closestDefenderState.isBallCarrier = true;
+             closestDefenderState.hasBall = true;
+             closestDefenderState.action = 'run_path';
+             closestDefenderState.targetY = 0; 
+             closestDefenderState.targetX = closestDefenderState.x;
+             playState.activePlayers.forEach(p => {
+                 p.hasBall = (p.id === closestDefenderState.id);
+                 p.isBallCarrier = (p.id === closestDefenderState.id);
+                 if (p.isOffense) { p.action = 'pursuit'; }
+                 else if (p.id !== closestDefenderState.id) { p.action = 'run_block'; }
+             });
+             ensureStats(defenderPlayer);
+             defenderPlayer.gameStats.interceptions = (defenderPlayer.gameStats.interceptions || 0) + 1;
+             const throwerPlayer = game.players.find(p => p && p.id === playState.ballState.throwerId);
+             if (throwerPlayer) {
+                 ensureStats(throwerPlayer);
+                 throwerPlayer.gameStats.interceptionsThrown = (throwerPlayer.gameStats.interceptionsThrown || 0) + 1;
+             }
         }
     }
 
-    // --- 5. Catch / Drop Attempt (If no Interception) ---
-    if (!eventResolved && intendedReceiver) {
-        const receiverPlayer = game.players.find(p => p && p.id === intendedReceiver.id);
-        if (receiverPlayer?.attributes) {
-            eventResolved = true; 
-            const recCatchSkill = receiverPlayer.attributes.technical?.catchingHands || 50;
-            const recConsistency = receiverPlayer.attributes.mental?.consistency || 50;
-            let receiverPower = (recCatchSkill * 0.8 + recConsistency * 0.2) * intendedReceiver.fatigueModifier;
-            let interferencePenalty = 0;
-            if (closestDefender) {
-                 const distToReceiver = getDistance(intendedReceiver, closestDefender);
-                 const distToBallDef = getDistance(closestDefender, playState.ballState);
-                 if (distToReceiver < 0.75 && distToBallDef < CATCH_CHECK_RADIUS) {
-                     const defAgility = closestDefender.agility || 50;
-                     const defStrength = closestDefender.strength || 50;
-                     interferencePenalty = ((defAgility * 0.6 + defStrength * 0.2) / 3) * (1.0 - (distToReceiver / 0.75));
-                 }
-            }
-            const distToBallRec = getDistance(intendedReceiver, playState.ballState);
-            const proximityBonusRec = Math.max(0, (CATCH_CHECK_RADIUS - distToBallRec) * 15);
-            receiverPower += proximityBonusRec;
-            const catchRoll = receiverPower + getRandomInt(0, 20);
-            const difficulty = interferencePenalty + getRandomInt(15, 35);
+    // 5. Catch / Drop Attempt (Only if NO interception AND receiver is in range)
+    if (!eventResolved && receiverInRange && receiverPlayer?.attributes) {
+        eventResolved = true; // Mark that we are resolving the play here
+        const recCatchSkill = receiverPlayer.attributes.technical?.catchingHands || 50;
+        const recConsistency = receiverPlayer.attributes.mental?.consistency || 50;
+        let receiverPower = (recCatchSkill * 0.8 + recConsistency * 0.2) * targetPlayerState.fatigueModifier;
 
-            if (catchRoll > difficulty) { // Catch successful!
-                intendedReceiver.isBallCarrier = true; intendedReceiver.hasBall = true;
-                intendedReceiver.action = 'run_path'; 
-                playState.yards = intendedReceiver.y - playState.lineOfScrimmage;
-                gameLog.push(`👍 CATCH! ${intendedReceiver.name} (Catch: ${recCatchSkill}) makes the reception!`);
-                // ... (rest of catch state update logic: stats, etc.) ...
-                 ensureStats(receiverPlayer);
-                 receiverPlayer.gameStats.receptions = (receiverPlayer.gameStats.receptions || 0) + 1;
-                 const throwerPlayer = game.players.find(p => p && p.id === playState.ballState.throwerId);
-                 if (throwerPlayer) {
-                     ensureStats(throwerPlayer);
-                     throwerPlayer.gameStats.passCompletions = (throwerPlayer.gameStats.passCompletions || 0) + 1;
-                 }
-            } else { // Drop / Incomplete
-                if (interferencePenalty > (receiverPower / 2) && closestDefender) {
-                    gameLog.push(`🚫 **SWATTED!** Pass to ${intendedReceiver.name} is broken up by ${closestDefender.name}!`);
-                } else {
-                    gameLog.push(`❌ **DROPPED!** Pass was on target to ${intendedReceiver.name} (Catch: ${recCatchSkill})!`);
-                }
-                playState.incomplete = true; playState.playIsLive = false;
+        let interferencePenalty = 0;
+        if (defenderInRange && closestDefenderState) { // Defender must also be in range to interfere
+             const distToReceiver = getDistance(targetPlayerState, closestDefenderState);
+             if (distToReceiver < 1.0) { // Defender is right on the receiver
+                 const defAgility = closestDefenderState.agility || 50;
+                 const defStrength = closestDefenderState.strength || 50;
+                 interferencePenalty = ((defAgility * 0.6 + defStrength * 0.2) / 3) * (1.0 - (distToReceiver / 1.0));
+             }
+        }
+
+        const distToBallRec = getDistance(targetPlayerState, playState.ballState);
+        const proximityBonusRec = Math.max(0, (CATCH_CHECK_RADIUS - distToBallRec) * 15);
+        receiverPower += proximityBonusRec;
+
+        const catchRoll = receiverPower + getRandomInt(0, 20);
+        const difficulty = interferencePenalty + getRandomInt(15, 35); // Base difficulty
+
+        if (catchRoll > difficulty) { // Catch successful!
+            targetPlayerState.isBallCarrier = true; targetPlayerState.hasBall = true;
+            targetPlayerState.action = 'run_path';
+            playState.yards = targetPlayerState.y - playState.lineOfScrimmage;
+            gameLog.push(`👍 CATCH! ${targetPlayerState.name} (Catch: ${recCatchSkill}) makes the reception!`);
+            
+            ensureStats(receiverPlayer);
+             receiverPlayer.gameStats.receptions = (receiverPlayer.gameStats.receptions || 0) + 1;
+             const throwerPlayer = game.players.find(p => p && p.id === playState.ballState.throwerId);
+             if (throwerPlayer) {
+                 ensureStats(throwerPlayer);
+                 throwerPlayer.gameStats.passCompletions = (throwerPlayer.gameStats.passCompletions || 0) + 1;
+             }
+        } else { // Drop / Incomplete
+            if (interferencePenalty > (receiverPower / 2) && closestDefenderState) {
+                gameLog.push(`🚫 **SWATTED!** Pass to ${targetPlayerState.name} is broken up by ${closestDefenderState.name}!`);
+            } else {
+                gameLog.push(`❌ **DROPPED!** Pass was on target to ${targetPlayerState.name} (Catch: ${recCatchSkill})!`);
             }
-        } else {
-             eventResolved = true; 
-             gameLog.push(`Error finding receiver player data (${intendedReceiver.id}) for catch check. Incomplete.`);
-             playState.incomplete = true; playState.playIsLive = false;
+            playState.incomplete = true; playState.playIsLive = false;
         }
     }
 
-    // --- 6. Inaccurate Pass (If no INT and receiver NOT in range) ---
+    // 6. Inaccurate Pass (Only if no INT and receiver was NOT in range)
     if (!eventResolved) {
          eventResolved = true;
-         
-         // [DEBUG LOG]: Check *how* off target it was
-         const distToReceiver = getDistance(ballPos, targetPlayerState);
+         const distToReceiver = getDistance(playState.ballState, targetPlayerState);
          let accuracyMsg = "**off target**";
          if (distToReceiver > 3.0) accuracyMsg = "**wildly off target**";
-         else if (ballPos.x > targetPlayerState.x + 1.5) accuracyMsg = "**too far outside**";
-         else if (ballPos.x < targetPlayerState.x - 1.5) accuracyMsg = "**too far inside**";
-         else if (ballPos.y > targetPlayerState.y + 1.5) accuracyMsg = "**overthrown**";
-         else if (ballPos.y < targetPlayerState.y - 1.5) accuracyMsg = "**underthrown**";
+         else if (playState.ballState.x > targetPlayerState.x + 1.5) accuracyMsg = "**too far outside**";
+         else if (playState.ballState.x < targetPlayerState.x - 1.5) accuracyMsg = "**too far inside**";
+         else if (playState.ballState.y > targetPlayerState.y + 1.5) accuracyMsg = "**overthrown**";
+         else if (playState.ballState.y < targetPlayerState.y - 1.5) accuracyMsg = "**underthrown**";
 
          gameLog.push(`‹‹ Pass to ${targetPlayerState?.name || 'receiver'} is ${accuracyMsg}. Incomplete.`);
          playState.incomplete = true; playState.playIsLive = false;
     }
 
-    // --- 7. Finalize Ball State ---
+    // 7. Finalize Ball State
     if (playState.playIsLive) { // Ball was caught or intercepted
         playState.ballState.inAir = false; 
         playState.ballState.z = 0.5;

@@ -1392,170 +1392,149 @@ export function startLiveGameSim(gameResult, onComplete) {
         }
 
         // --- Sync Log Entries ---
-        if (ticker && frame.logIndex > logIndexToShow) {
-            for (let i = logIndexToShow; i < frame.logIndex; i++) {
-                const playLogEntry = allLogs[i];
-                if (!playLogEntry) continue;
+            if (ticker && frame.logIndex > logIndexToShow) {
+                for (let i = logIndexToShow; i < frame.logIndex; i++) {
+                    const playLogEntry = allLogs[i];
+                    if (!playLogEntry) continue;
 
-                const p = document.createElement('p');
-                let styleClass = '';
-
-                // --- INTEGRATED Descriptive Text Logic ---
-                let descriptiveText = playLogEntry;
-                // Use 'ballOn' state variable that's updated below
-                const fieldSide = ballOn <= 50 ? (possessionTeamName === gameResult.homeTeam.name ? "own" : "opponent") : (possessionTeamName === gameResult.homeTeam.name ? "opponent" : "own");
-                const yardLine = ballOn <= 50 ? ballOn : 100 - ballOn;
-
-                if (playLogEntry.startsWith('-- Drive') || playLogEntry.startsWith('====')) {
-                    styleClass = 'font-bold text-amber-400 mt-2';
-                    if (playLogEntry.startsWith('==== FINAL')) styleClass += ' text-lg';
-                    descriptiveText = `🏈 ${playLogEntry.replace('-- Drive', 'New Drive:')} 🏈`;
-                    if (playLogEntry.startsWith('====')) descriptiveText = `⏱️ ${playLogEntry} ⏱️`;
-                } else if (playLogEntry.startsWith('🎉 TOUCHDOWN')) {
-                    descriptiveText = playLogEntry;
-                    styleClass = 'font-semibold text-green-400';
-                } else if (playLogEntry.includes('conversion GOOD!')) {
-                    descriptiveText = `✅ ${playLogEntry} Points are good!`;
-                    styleClass = 'font-semibold text-green-400';
-                } else if (playLogEntry.includes('Conversion FAILED!')) {
-                    descriptiveText = `❌ ${playLogEntry} No good!`;
-                    styleClass = 'font-semibold text-red-400';
-                } else if (playLogEntry.startsWith('❗ INTERCEPTION') || playLogEntry.startsWith('❗ FUMBLE')) {
-                    descriptiveText = playLogEntry;
-                    styleClass = 'font-semibold text-red-400';
-                } else if (playLogEntry.startsWith('✋ Turnover on downs')) {
-                    descriptiveText = playLogEntry;
-                    styleClass = 'font-semibold text-red-400';
-                } else if (playLogEntry.startsWith('💥 SACK')) {
-                     // Calculate post-sack yard line based on current ballOn state
-                     const loss = parseInt(playLogEntry.match(/loss of (\d+\.?\d*)/)?.[1] || 0);
-                     const postSackBallOn = Math.max(0, ballOn - loss); // ballOn is *before* sack here
-                     const postSackFieldSide = postSackBallOn <= 50 ? (possessionTeamName === gameResult.homeTeam.name ? "own" : "opponent") : (possessionTeamName === gameResult.homeTeam.name ? "opponent" : "own");
-                     const postSackYardLine = postSackBallOn <= 50 ? postSackBallOn : 100 - postSackBallOn;
-                     descriptiveText = `${playLogEntry.replace('SACK!', 'SACK!')} Ball on the ${postSackFieldSide} ${postSackYardLine}.`;
-                     styleClass = 'text-orange-400';
-                } else if (playLogEntry.includes('stuffed near the line')) {
-                    descriptiveText = `🧱 ${playLogEntry} Stopped at the ${fieldSide} ${yardLine}!`;
-                    styleClass = 'text-orange-300';
-                } else if (playLogEntry.includes(' passes to ')) {
-                    const passer = playLogEntry.match(/^(.*?) passes to/)?.[1];
-                    const receiver = playLogEntry.match(/passes to (.*?)\.\.\./)?.[1];
-                    descriptiveText = `🏈 ${passer} passes to ${receiver}...`;
-                } else if (playLogEntry.includes('Caught by') && playLogEntry.includes('yards')) { // Removed '.' dependency
-                    const yardsMatch = playLogEntry.match(/for (-?\d+\.?\d*) yards/);
-                    const yards = yardsMatch ? parseFloat(yardsMatch[1]) : 0;
-                    const newYardLine = Math.round(ballOn + yards); // Use state ballOn
-                    const newFieldSide = newYardLine <= 50 ? (possessionTeamName === gameResult.homeTeam.name ? "own" : "opponent") : (possessionTeamName === gameResult.homeTeam.name ? "opponent" : "own");
-                    const newYardLineNum = newYardLine <= 50 ? newYardLine : 100 - newYardLine;
-                    if (yards >= 15) { descriptiveText = `🎯 ${playLogEntry.replace('Caught by', 'Hauled in by')} for a big gain! Ball at the ${newFieldSide} ${newYardLineNum}.`; }
-                    else if (yards > 0) { descriptiveText = `👍 ${playLogEntry.replace('Caught by', 'Complete to')}. Ball at the ${newFieldSide} ${newYardLineNum}.`; }
-                    else { descriptiveText = `✋ ${playLogEntry}. Stopped for minimal gain.`; }
-                } else if (playLogEntry.includes('INCOMPLETE')) {
-                    if (playLogEntry.includes('Defended by')) { descriptiveText = `🚫 ${playLogEntry.replace('INCOMPLETE pass to', 'Pass intended for')} Knocked away!`; }
-                    else if (playLogEntry.includes('Off target')) { descriptiveText = ` overthrown... ${playLogEntry}`; } // Simplified
-                    else { descriptiveText = `❌ ${playLogEntry}`; }
-                    styleClass = 'font-semibold text-red-400'; // Apply style for all incompletes
-                } else if (playLogEntry.match(/(\w+\s+'?\w+'?) (bursts through|shakes off|breaks into|is loose!|finds a small crease|runs out of bounds)/)) {
-                     const yardsMatch = playLogEntry.match(/gain of (\d+\.?\d*)|loss of (\d+\.?\d*)/); // Check gain or loss
-                     let yards = 0;
-                     if(yardsMatch) {
-                         yards = parseFloat(yardsMatch[1] || `-${yardsMatch[2]}`); // Gain positive, loss negative
-                     } else if (playLogEntry.includes("crease")) {
-                         yards = getRandomInt(1,3); // Assume small gain if not specified
-                     } else {
-                         yards = getRandomInt(4,7); // Assume medium gain if not specified
-                     }
-                     const newYardLine = Math.round(ballOn + yards); // Use state ballOn
-                     const newFieldSide = newYardLine <= 50 ? (possessionTeamName === gameResult.homeTeam.name ? "own" : "opponent") : (possessionTeamName === gameResult.homeTeam.name ? "opponent" : "own");
-                     const newYardLineNum = newYardLine <= 50 ? newYardLine : 100 - newYardLine;
-                     if (yards >= 10) { descriptiveText = `💨 HE'S LOOSE! ${playLogEntry}! Great run! Ball at the ${newFieldSide} ${newYardLineNum}.`; }
-                     else if (yards > 0) { descriptiveText = `➡️ ${playLogEntry}. Nice gain on the ground. Ball at the ${newFieldSide} ${newYardLineNum}.`; }
-                     else { descriptiveText = `✋ ${playLogEntry}. Stopped near the line. Ball at the ${newFieldSide} ${newYardLineNum}.`; }
-                     styleClass = 'text-cyan-300';
-                } else if (playLogEntry.includes('tackled by') || playLogEntry.includes('Stopped by') || playLogEntry.includes('dragged down') || playLogEntry.includes('Caught from behind')) {
-                     const yardsMatch = playLogEntry.match(/gain of (\d+\.?\d*)|loss of (\d+\.?\d*)/); // Check gain or loss
-                     let yards = 0;
-                     if(yardsMatch) { yards = parseFloat(yardsMatch[1] || `-${yardsMatch[2]}`); }
-                     const newYardLine = Math.round(ballOn + yards); // Use state ballOn
-                     const newFieldSide = newYardLine <= 50 ? (possessionTeamName === gameResult.homeTeam.name ? "own" : "opponent") : (possessionTeamName === gameResult.homeTeam.name ? "opponent" : "own");
-                     const newYardLineNum = newYardLine <= 50 ? newYardLine : 100 - newYardLine;
-                     descriptiveText = `✋ ${playLogEntry} Ball at the ${newFieldSide} ${newYardLineNum}.`;
-                } else if (playLogEntry.startsWith('➡️ First down')) {
-                    descriptiveText = playLogEntry;
-                    styleClass = 'text-yellow-300 font-semibold';
-                } else if (playLogEntry.startsWith('🚑 INJURY')) {
-                    descriptiveText = playLogEntry;
-                    styleClass = 'text-purple-400 italic';
-                }
-                // --- End INTEGRATED Descriptive Text Logic ---
-
-                p.className = styleClass;
-                p.textContent = descriptiveText;
-                ticker.appendChild(p);
-
-                // --- INTEGRATED Update Internal Simulation State ---
-                try {
-                    if (playLogEntry.startsWith('-- Drive')) {
-                        ballOn = 20; down = 1; toGo = 10; driveActive = true;
-                        const driveMatch = playLogEntry.match(/(Drive \d+ \(H\d+\))/);
-                        possessionTeamName = playLogEntry.includes(gameResult.homeTeam.name) ? gameResult.homeTeam.name : gameResult.awayTeam.name;
-                        if(driveMatch) currentDriveText = driveMatch[0];
-                    } else if (playLogEntry.startsWith('➡️ First down')) {
-                        down = 1;
-                        const goalMatch = playLogEntry.match(/Goal at the (\d+)/);
-                        const yardLineMatch = playLogEntry.match(/at the (own|opponent) (\d+)/);
-                        if (yardLineMatch) {
-                            const side = yardLineMatch[1]; const line = parseInt(yardLineMatch[2], 10);
-                            if (side === 'own') ballOn = line; else ballOn = 100 - line;
+                    // --- >>> STEP 1: UPDATE INTERNAL STATE FIRST <<< ---
+                    // This block updates ballOn, down, toGo, etc.
+                    try {
+                        if (playLogEntry.startsWith('-- Drive')) {
+                            ballOn = 20; down = 1; toGo = 10; driveActive = true;
+                            const driveMatch = playLogEntry.match(/(Drive \d+ \(H\d+\))/);
+                            possessionTeamName = playLogEntry.includes(gameResult.homeTeam.name) ? gameResult.homeTeam.name : gameResult.awayTeam.name;
+                            if(driveMatch) currentDriveText = driveMatch[0];
+                        } else if (playLogEntry.startsWith('➡️ First down')) {
+                            down = 1;
+                            const goalMatch = playLogEntry.match(/Goal at the (\d+)/);
+                            const yardLineMatch = playLogEntry.match(/at the (own|opponent) (\d+)/);
+                            if (yardLineMatch) {
+                                const side = yardLineMatch[1]; const line = parseInt(yardLineMatch[2], 10);
+                                if (side === 'own') ballOn = line; else ballOn = 100 - line;
+                            }
+                            toGo = goalMatch ? parseInt(goalMatch[1], 10) : Math.min(10, 100 - ballOn);
+                            if (toGo <= 0) toGo = 1;
+                        } else if (playLogEntry.match(/gain of (\d+\.?\d*)|loss of (\d+\.?\d*)/)) {
+                            const yardsMatch = playLogEntry.match(/gain of (\d+\.?\d*)|loss of (\d+\.?\d*)/);
+                            let yards = 0;
+                            if(yardsMatch) { yards = parseFloat(yardsMatch[1] || `-${yardsMatch[2]}`); }
+                            if (driveActive) {
+                                ballOn += yards;
+                                toGo -= yards;
+                                ballOn = Math.round(Math.max(0,Math.min(100, ballOn)));
+                                toGo = Math.round(toGo);
+                                if (toGo > 0) down++; else if (ballOn < 100) down=1;
+                            }
+                        } else if (playLogEntry.includes('INCOMPLETE') || playLogEntry.startsWith('❌') || playLogEntry.startsWith('🚫') || playLogEntry.startsWith('‹‹')) {
+                            if (driveActive) down++;
+                        } else if (playLogEntry.startsWith('🎉 TOUCHDOWN')) {
+                            ballOn = 100; driveActive = false;
+                        } else if (playLogEntry.includes('conversion GOOD!')) {
+                            const points = playLogEntry.includes('2-point') ? 2 : 1;
+                            if(possessionTeamName === gameResult.homeTeam.name) currentHomeScore += (6 + points); else currentAwayScore += (6 + points);
+                            driveActive = false;
+                        } else if (playLogEntry.includes('Conversion FAILED!')) {
+                            const points = 6;
+                            if(possessionTeamName === gameResult.homeTeam.name) currentHomeScore += points; else currentAwayScore += points;
+                            driveActive = false;
+                        } else if (playLogEntry.startsWith('Turnover') || playLogEntry.startsWith('❗ INTERCEPTION') || playLogEntry.startsWith('❗ FUMBLE')) {
+                            driveActive = false;
+                            const yardLineMatch = playLogEntry.match(/at the (own|opponent) (\d+)/);
+                            if (yardLineMatch) {
+                                const side = yardLineMatch[1]; const line = parseInt(yardLineMatch[2], 10);
+                                if (side === 'own') ballOn = line; else ballOn = 100 - line;
+                            }
+                        } else if (playLogEntry.startsWith('==== FINAL') || playLogEntry.startsWith('==== HALFTIME')) {
+                            driveActive = false;
                         }
-                         toGo = goalMatch ? parseInt(goalMatch[1], 10) : Math.min(10, 100 - ballOn); // Set toGo based on new ballOn
-                         if (toGo <= 0) toGo = 1; // Ensure toGo is at least 1 if it's Goal
-                    } else if (playLogEntry.match(/gain of (\d+\.?\d*)|loss of (\d+\.?\d*)/)) {
-                         const yardsMatch = playLogEntry.match(/gain of (\d+\.?\d*)|loss of (\d+\.?\d*)/);
-                         let yards = 0;
-                         if(yardsMatch) { yards = parseFloat(yardsMatch[1] || `-${yardsMatch[2]}`); }
-                        if (driveActive) {
-                             ballOn += yards;
-                             toGo -= yards;
-                             ballOn = Math.round(Math.max(0,Math.min(100, ballOn)));
-                             toGo = Math.round(toGo);
-                             if (toGo > 0) down++; else if (ballOn < 100) down=1; // Reset down if first down, but not TD
-                         }
-                    } else if (playLogEntry.includes('INCOMPLETE') || playLogEntry.startsWith('❌') || playLogEntry.startsWith('🚫') || playLogEntry.startsWith('‹‹')) {
-                        if (driveActive) down++;
+                        if (down > 4 && driveActive) {
+                            driveActive = false;
+                        }
+                    } catch (parseError) {
+                        console.error("Error parsing log entry for sim state:", playLogEntry, parseError);
+                    }
+                    // --- >>> END STATE UPDATE BLOCK <<< ---
+
+
+                    // --- >>> STEP 2: CREATE DESCRIPTIVE TEXT (NOW USES UPDATED STATE) <<< ---
+                    const p = document.createElement('p');
+                    let styleClass = '';
+                    let descriptiveText = playLogEntry;
+
+                    // These variables now reflect the *result* of the play
+                    const fieldSide = ballOn <= 50 ? (possessionTeamName === gameResult.homeTeam.name ? "own" : "opponent") : (possessionTeamName === gameResult.homeTeam.name ? "opponent" : "own");
+                    const yardLine = ballOn <= 50 ? ballOn : 100 - ballOn;
+
+                    if (playLogEntry.startsWith('-- Drive') || playLogEntry.startsWith('====')) {
+                        styleClass = 'font-bold text-amber-400 mt-2';
+                        if (playLogEntry.startsWith('==== FINAL')) styleClass += ' text-lg';
+                        descriptiveText = `🏈 ${playLogEntry.replace('-- Drive', 'New Drive:')} 🏈`;
+                        if (playLogEntry.startsWith('====')) descriptiveText = `⏱️ ${playLogEntry} ⏱️`;
                     } else if (playLogEntry.startsWith('🎉 TOUCHDOWN')) {
-                        ballOn = 100; driveActive = false; // TD ends drive
+                        descriptiveText = playLogEntry;
+                        styleClass = 'font-semibold text-green-400';
                     } else if (playLogEntry.includes('conversion GOOD!')) {
-                        const points = playLogEntry.includes('2-point') ? 2 : 1;
-                        if(possessionTeamName === gameResult.homeTeam.name) currentHomeScore += (6 + points); else currentAwayScore += (6 + points);
-                        driveActive = false; // Conversion attempt ends drive possession
+                        descriptiveText = `✅ ${playLogEntry} Points are good!`;
+                        styleClass = 'font-semibold text-green-400';
                     } else if (playLogEntry.includes('Conversion FAILED!')) {
-                        const points = 6;
-                        if(possessionTeamName === gameResult.homeTeam.name) currentHomeScore += points; else currentAwayScore += points;
-                        driveActive = false; // Conversion attempt ends drive possession
-                    } else if (playLogEntry.startsWith('Turnover') || playLogEntry.startsWith('❗ INTERCEPTION') || playLogEntry.startsWith('❗ FUMBLE')) {
-                        driveActive = false; // Turnover ends drive
-                        const yardLineMatch = playLogEntry.match(/at the (own|opponent) (\d+)/);
-                        if (yardLineMatch) { // Update ballOn for next possession
-                            const side = yardLineMatch[1]; const line = parseInt(yardLineMatch[2], 10);
-                            // 'own'/'opponent' is relative to the *new* team with possession
-                            if (side === 'own') ballOn = line; else ballOn = 100 - line;
-                        }
-                         // Flip possession for next drive (handled when next drive starts)
-                    } else if (playLogEntry.startsWith('==== FINAL') || playLogEntry.startsWith('==== HALFTIME')) {
-                        driveActive = false; // End of period
+                        descriptiveText = `❌ ${playLogEntry} No good!`;
+                        styleClass = 'font-semibold text-red-400';
+                    } else if (playLogEntry.startsWith('❗ INTERCEPTION') || playLogEntry.startsWith('❗ FUMBLE')) {
+                        descriptiveText = playLogEntry;
+                        styleClass = 'font-semibold text-red-400';
+                    } else if (playLogEntry.startsWith('✋ Turnover on downs')) {
+                        descriptiveText = playLogEntry;
+                        styleClass = 'font-semibold text-red-400';
+                    } else if (playLogEntry.startsWith('💥 SACK')) {
+                         // Now the yard line is correct *after* the sack
+                         descriptiveText = `${playLogEntry.replace('SACK!', 'SACK!')} Ball on the ${fieldSide} ${yardLine}.`;
+                         styleClass = 'text-orange-400';
+                    } else if (playLogEntry.includes('stuffed near the line')) {
+                        descriptiveText = `🧱 ${playLogEntry} Stopped at the ${fieldSide} ${yardLine}!`;
+                        styleClass = 'text-orange-300';
+                    } else if (playLogEntry.includes(' passes to ')) {
+                        const passer = playLogEntry.match(/^(.*?) passes to/)?.[1];
+                        const receiver = playLogEntry.match(/passes to (.*?)\.\.\./)?.[1];
+                        descriptiveText = `🏈 ${passer} passes to ${receiver}...`;
+                    } else if (playLogEntry.includes('Caught by') && playLogEntry.includes('yards')) {
+                        const yardsMatch = playLogEntry.match(/for (-?\d+\.?\d*) yards/);
+                        const yards = yardsMatch ? parseFloat(yardsMatch[1]) : 0;
+                        if (yards >= 15) { descriptiveText = `🎯 ${playLogEntry.replace('Caught by', 'Hauled in by')} for a big gain! Ball at the ${fieldSide} ${yardLine}.`; }
+                        else if (yards > 0) { descriptiveText = `👍 ${playLogEntry.replace('Caught by', 'Complete to')}. Ball at the ${fieldSide} ${yardLine}.`; }
+                        else { descriptiveText = `✋ ${playLogEntry}. Stopped for minimal gain. Ball at the ${fieldSide} ${yardLine}.`; }
+                    } else if (playLogEntry.includes('INCOMPLETE')) {
+                        if (playLogEntry.includes('Defended by')) { descriptiveText = `🚫 ${playLogEntry.replace('INCOMPLETE pass to', 'Pass intended for')} Knocked away!`; }
+                        else if (playLogEntry.includes('Off target')) { descriptiveText = ` overthrown... ${playLogEntry}`; }
+                        else { descriptiveText = `❌ ${playLogEntry}`; }
+                        styleClass = 'font-semibold text-red-400';
+                    } else if (playLogEntry.match(/(\w+\s+'?\w+'?) (bursts through|shakes off|breaks into|is loose!|finds a small crease|runs out of bounds)/)) {
+                        const yardsMatch = playLogEntry.match(/gain of (\d+\.?\d*)|loss of (\d+\.?\d*)/);
+                        let yards = 0;
+                        if(yardsMatch) { yards = parseFloat(yardsMatch[1] || `-${yardsMatch[2]}`); }
+                        else if (playLogEntry.includes("crease")) { yards = getRandomInt(1,3); }
+                        else { yards = getRandomInt(4,7); }
+                        if (yards >= 10) { descriptiveText = `💨 HE'S LOOSE! ${playLogEntry}! Great run! Ball at the ${fieldSide} ${yardLine}.`; }
+                        else if (yards > 0) { descriptiveText = `➡️ ${playLogEntry}. Nice gain on the ground. Ball at the ${fieldSide} ${yardLine}.`; }
+                        else { descriptiveText = `✋ ${playLogEntry}. Stopped near the line. Ball at the ${fieldSide} ${yardLine}.`; }
+                        styleClass = 'text-cyan-300';
+                    } else if (playLogEntry.includes('tackled by') || playLogEntry.includes('Stopped by') || playLogEntry.includes('dragged down') || playLogEntry.includes('Caught from behind')) {
+                        descriptiveText = `${playLogEntry} Ball at the ${fieldSide} ${yardLine}.`; // Removed extra emoji
+                    } else if (playLogEntry.startsWith('➡️ First down')) {
+                        descriptiveText = playLogEntry;
+                        styleClass = 'text-yellow-300 font-semibold';
+                    } else if (playLogEntry.startsWith('🚑 INJURY')) {
+                        descriptiveText = playLogEntry;
+                        styleClass = 'text-purple-400 italic';
                     }
-                    if (down > 4 && driveActive) {
-                         driveActive = false; // Turnover on downs ends drive
-                         // Flip possession (handled when next drive starts)
-                         // Ball position remains where it ended
-                    }
-                } catch (parseError) {
-                    console.error("Error parsing log entry for sim state:", playLogEntry, parseError);
-                }
-                // --- End INTEGRATED Internal State Update ---
+                    // --- End INTEGRATED Descriptive Text Logic ---
 
-            } // End FOR loop for log entries
+                    // --- >>> STEP 3: APPEND TO TICKER <<< ---
+                    p.className = styleClass;
+                    p.textContent = descriptiveText;
+                    ticker.appendChild(p);
+
+                } // End FOR loop for log entries
 
             logIndexToShow = frame.logIndex;
             if(ticker) ticker.scrollTop = ticker.scrollHeight;
