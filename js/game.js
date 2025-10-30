@@ -2400,11 +2400,10 @@ function updateQBDecision(playState, offenseStates, defenseStates, gameLog) {
 
             // 4. Apply accuracy penalties
             const accuracy = qbAttrs.technical?.throwingAccuracy || 50;
-            // --- >>> IMPROVED ACCURACY: Divisor changed from 120 to 150 ---
             const accuracyPenalty = (100 - accuracy) / 180;
             const pressurePenalty = isPressured ? 1.5 : 1.0; // Keep pressure penalty
-            const xError = (Math.random() - 0.5) * 6 * accuracyPenalty * pressurePenalty;
-            const yError = (Math.random() - 0.5) * 6 * accuracyPenalty * pressurePenalty;
+            const xError = (Math.random() - 0.5) * 5 * accuracyPenalty * pressurePenalty;
+            const yError = (Math.random() - 0.5) * 5 * accuracyPenalty * pressurePenalty;
 
             // 5. Calculate final ball velocity
             playState.ballState.vx = (dx / airTime) + xError;
@@ -2444,7 +2443,7 @@ function updateQBDecision(playState, offenseStates, defenseStates, gameLog) {
 
 
 /**
- * Handles ball arrival at target coordinates.
+ * Handles ball arrival at target coordinates. (MODIFIED)
  */
 function handleBallArrival(playState, gameLog) {
     // 1. Ball Height Check
@@ -2470,8 +2469,9 @@ function handleBallArrival(playState, gameLog) {
         return;
     }
 
-    // 3. Find Key Players and Distances (NEW LOGIC)
-    const CATCH_CHECK_RADIUS = 1.8; // Our 1.8 yard radius
+    // 3. Find Key Players and Distances
+    // *** MODIFICATION 1: Increased catch radius ***
+    const CATCH_CHECK_RADIUS = 2.5; // Our 2.5 yard radius (was 1.8)
     const receiverPlayer = game.players.find(p => p && p.id === targetPlayerState.id); // Get full receiver object
 
     // Find *closest* defender to the ball, regardless of radius
@@ -2537,13 +2537,18 @@ function handleBallArrival(playState, gameLog) {
         const recConsistency = receiverPlayer.attributes.mental?.consistency || 50;
         let receiverPower = (recCatchSkill * 0.8 + recConsistency * 0.2) * targetPlayerState.fatigueModifier;
 
+        // *** MODIFICATION 2: Broader, scaling interference logic ***
         let interferencePenalty = 0;
+        const interferenceRadius = 2.0; // How close a defender needs to be to interfere (was 1.0)
         if (defenderInRange && closestDefenderState) { // Defender must also be in range to interfere
             const distToReceiver = getDistance(targetPlayerState, closestDefenderState);
-            if (distToReceiver < 1.0) { // Defender is right on the receiver
+
+            if (distToReceiver < interferenceRadius) { // Defender is in the receiver's space
                 const defAgility = closestDefenderState.agility || 50;
                 const defStrength = closestDefenderState.strength || 50;
-                interferencePenalty = ((defAgility * 0.6 + defStrength * 0.2) / 3) * (1.0 - (distToReceiver / 1.0));
+                // Scale penalty: 100% at 0 yards, 0% at 2.0 yards
+                const penaltyFactor = (1.0 - (distToReceiver / interferenceRadius));
+                interferencePenalty = ((defAgility * 0.6 + defStrength * 0.2) / 3) * penaltyFactor;
             }
         }
 
@@ -2551,8 +2556,10 @@ function handleBallArrival(playState, gameLog) {
         const proximityBonusRec = Math.max(0, (CATCH_CHECK_RADIUS - distToBallRec) * 15);
         receiverPower += proximityBonusRec;
 
+        // *** MODIFICATION 3: Stabilized difficulty check ***
         const catchRoll = receiverPower + getRandomInt(0, 20);
-        const difficulty = interferencePenalty + getRandomInt(15, 35); // Base difficulty
+        // Removed random(15, 35) and replaced with a static base + smaller random roll
+        const difficulty = interferencePenalty + 25 + getRandomInt(0, 10); // Base difficulty 25-35
 
         if (catchRoll > difficulty) { // Catch successful!
             targetPlayerState.isBallCarrier = true; targetPlayerState.hasBall = true;
@@ -2582,6 +2589,7 @@ function handleBallArrival(playState, gameLog) {
         eventResolved = true;
         const distToReceiver = getDistance(playState.ballState, targetPlayerState);
         let accuracyMsg = "**off target**";
+        // This logic is now less likely to be hit, but still good to have
         if (distToReceiver > 3.0) accuracyMsg = "**wildly off target**";
         else if (playState.ballState.x > targetPlayerState.x + 1.5) accuracyMsg = "**too far outside**";
         else if (playState.ballState.x < targetPlayerState.x - 1.5) accuracyMsg = "**too far inside**";
