@@ -1350,17 +1350,20 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
             switch (pState.action) {
                 // --- ADD THIS NEW CASE ---
                 case 'attack_ball':
-                    // Player's action is to move to the ball's current (x, y)
+                    // Player's action is to move to the ball's *INTENDED LANDING SPOT*
                     pState.targetX = playState.ballState.targetX;
                     pState.targetY = playState.ballState.targetY;
 
+                    // The debug log is now correct
                     gameLog.push(`[DEBUG] ${pState.name} attacking ball at: (${pState.targetX.toFixed(1)}, ${pState.targetY.toFixed(1)})`);
 
                     // Manually clamp targets within field boundaries, then return
                     pState.targetX = Math.max(0.5, Math.min(FIELD_WIDTH - 0.5, pState.targetX));
                     pState.targetY = Math.max(0.5, Math.min(FIELD_LENGTH - 0.5, pState.targetY));
 
-                    return; // Skip all other targeting logic for this player
+                    target = null;
+
+                    break; // Skip all other targeting logic for this player
                 // --- END NEW CASE ---
                 case 'run_route':
                     if (pState.routePath && pState.routePath.length > 0) {
