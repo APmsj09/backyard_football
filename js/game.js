@@ -1191,9 +1191,9 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
             startY = Math.max(10.5, Math.min(FIELD_LENGTH - 10.5, startY));
 
             // --- Determine Initial Action, Target Point, and Route Path ---
-            let action = 'idle'; 
-            let assignment = defAssignments[slot] || 'def_read'; 
-            let targetX = startX; 
+            let action = 'idle';
+            let assignment = defAssignments[slot] || 'def_read';
+            let targetX = startX;
             let targetY = startY;
             let routePath = null; // For receivers running routes
 
@@ -1320,7 +1320,7 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
  * Updates player targets based on their current action, assignment, and game state. (Improved AI)
  * Modifies playerState objects within playState.activePlayers directly.
  */
-function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrierState, playType, offensiveAssignments, gameLog) {
+function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrierState, playType, offensiveAssignments, gameLog = []) {
     const qbState = offenseStates.find(p => p.slot?.startsWith('QB'));
     const isBallInAir = playState.ballState.inAir;
     const ballPos = playState.ballState;
@@ -2713,9 +2713,27 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
         }
         // --- >>> END BLOCK <<< ---
     } catch (setupError) {
+        const errorMsg = setupError.message || "An unexpected error occurred during setup.";
+
         console.error("CRITICAL ERROR during setupInitialPlayerStates:", setupError);
-        gameLog.push("CRITICAL ERROR: Play setup failed. Turnover.");
-        return { yards: 0, turnover: true, incomplete: false, touchdown: false, log: gameLog, visualizationFrames: [] };
+
+        // --- PUSH DETAILED ERROR MESSAGE TO GAME LOG ---
+        gameLog.push(`💥 CRITICAL ERROR: Play setup failed!`);
+        gameLog.push(`[DEBUG] Reason: ${errorMsg}`);
+
+        // Add context if the error is a common one (like missing player/attribute)
+        if (errorMsg.includes('Cannot read properties of undefined')) {
+            gameLog.push(`[DEBUG] Check: Roster capacity or missing attributes on a drafted player.`);
+        }
+
+        return {
+            yards: 0,
+            turnover: true,
+            incomplete: false,
+            touchdown: false,
+            log: gameLog,
+            visualizationFrames: []
+        };
     }
 
     if (!playState.activePlayers.some(p => p.slot === 'QB1' && p.isOffense)) {
