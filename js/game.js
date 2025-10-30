@@ -905,22 +905,44 @@ function getPlayersForSlots(team, side, slotPrefix, usedPlayerIdsThisPlay, gameL
 /** Gets a single, healthy player for a specific slot. */
 function getPlayerBySlot(team, side, slot, usedPlayerIdsThisPlay) {
     if (!team || !team.depthChart || !team.depthChart[side] || !team.roster || !Array.isArray(team.roster)) {
-        console.error(`getPlayerBySlot: Invalid team data for ${slot} on ${side}.`); return null;
+        console.error(`getPlayerBySlot: Invalid team data for ${slot} on ${side}.`);
+        return null;
     }
+
     const sideDepthChart = team.depthChart[side];
     if (typeof sideDepthChart !== 'object' || sideDepthChart === null) {
-        console.error(`getPlayerBySlot: Invalid depth chart object for side ${side}.`); return null;
+        console.error(`getPlayerBySlot: Invalid depth chart object for side ${side}.`);
+        return null;
     }
+
     const position = slot.replace(/\d/g, '');
     const starterId = sideDepthChart[slot];
+
+    // --- STEP 1: Try to get the designated starter ---
     let player = team.roster.find(p => p && p.id === starterId);
-    if (!player || player.status?.duration > 0 || usedPlayerIdsThisPlay.has(player.id)) {
+
+    // Check if the starter is ineligible (injured/busy or already used elsewhere)
+    if (player && (player.status?.duration > 0 || usedPlayerIdsThisPlay.has(player.id))) {
+        player = null; // Mark the starter as unusable for this check
+    }
+
+    // --- STEP 2: If starter is ineligible or missing, find the best substitute ---
+    if (!player) {
+        // NOTE: We assume getBestSub finds a player who is *not* in usedPlayerIdsThisPlay
         player = getBestSub(team, position, usedPlayerIdsThisPlay);
     }
-    if (player && !usedPlayerIdsThisPlay.has(player.id)) {
-        usedPlayerIdsThisPlay.add(player.id);
+
+    // --- STEP 3: Finalize Player Usage ---
+    // If a valid, usable player was found (either starter or sub)
+    if (player) {
+        // This player is now guaranteed to be available (not injured and not previously used).
+        // The calling function (e.g., setupSide) must add this player's ID to the usedSet
+        // to prevent reuse in the same play.
+
+        usedPlayerIdsThisPlay.add(player.id); // <<< ASSUMING THIS FUNCTION IS RESPONSIBLE FOR MARKING USED
         return player;
     }
+
     return null;
 }
 
@@ -2714,7 +2736,7 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
             ballCarrierState = playState.activePlayers.find(p => p.isBallCarrier);
 
             // A. Update Player Intentions/Targets (AI)
-            updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrierState, type, assignments, defensivePlayKey);
+            updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrierState, type, assignments, defensivePlayCallKey, gameLog);
 
             // B. Update Player Positions (Movement)
             playState.activePlayers.forEach(p => updatePlayerPosition(p, timeDelta));
