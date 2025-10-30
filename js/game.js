@@ -2439,6 +2439,9 @@ function updateQBDecision(playState, offenseStates, defenseStates, gameLog) {
             qbState.hasBall = false;
             qbState.isBallCarrier = false;
 
+            playState.ballState.x = qbState.x;
+            playState.ballState.y = qbState.y;
+
             // --- Improved Ball Physics with Leading ---
 
             // 1. Estimate distance and airTime to the receiver's CURRENT position
@@ -2959,7 +2962,8 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
                 if (player) {
                     player.fatigue = Math.min(100, (player.fatigue || 0) + fatigueGain);
                     const stamina = player.attributes?.physical?.stamina || 50;
-                    pState.fatigueModifier = Math.max(0.3, (1 - (player.fatigue / (stamina * 3))));
+                    const fatigueRatio = Math.min(1.0, (player.fatigue || 0) / stamina);
+                    pState.fatigueModifier = Math.max(0.3, 1.0 - fatigueRatio);
                 }
             });
 
@@ -3274,7 +3278,7 @@ function determineDefensivePlayCall(defense, offense, down, yardsToGo, ballOn, s
     const offFormation = offenseFormations[offense.formations.offense];
     const offPersonnel = offFormation?.personnel || { WR: 2, RB: 1 };
     const isSpreadOffense = offPersonnel.WR >= 3;
-    const isHeavyOffense = (offPersonnel.RB || 0) >= 2 || (offPersonnel.OL || 0) >= 3; // Adjusted definition
+    const isHeavyOffense = (offPersonnel.RB || 0) >= 2;
 
     const coachType = defense.coach?.type || 'Balanced';
 
