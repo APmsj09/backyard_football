@@ -3316,7 +3316,7 @@ export function simulateGame(homeTeam, awayTeam) {
             const drivesRemainingInGame = (currentHalf === 1 ? totalDrivesPerHalf : 0) + drivesRemainingInHalf;
 
             const offensivePlayKey = determinePlayCall(offense, defense, down, yardsToGo, ballOn, scoreDiff, gameLog, drivesRemainingInGame);
-            const defensivePlayKey = determineDefensivePlayCall(defense, offense, down, yardsToGo, ballOn, gameLog);
+            const defensivePlayKey = determineDefensivePlayCall(defense, offense, down, yardsToGo, ballOn, scoreDiff, gameLog, drivesRemainingInGame);
 
             // --- >>> ADD THIS BLOCK <<< ---
 
