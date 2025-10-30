@@ -1306,8 +1306,10 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                 // --- ADD THIS NEW CASE ---
                 case 'attack_ball':
                     // Player's action is to move to the ball's current (x, y)
-                    pState.targetX = playState.ballState.x;
-                    pState.targetY = playState.ballState.y;
+                    pState.targetX = playState.ballState.targetX;
+                    pState.targetY = playState.ballState.targetY;
+
+                    gameLog.push(`[DEBUG] ${pState.name} attacking ball at: (${pState.targetX.toFixed(1)}, ${pState.targetY.toFixed(1)})`);
                     
                     // Manually clamp targets within field boundaries, then return
                     pState.targetX = Math.max(0.5, Math.min(FIELD_WIDTH - 0.5, pState.targetX));
@@ -2296,6 +2298,11 @@ function updateQBDecision(playState, offenseStates, defenseStates, gameLog) {
             playState.ballState.vx = (dx / airTime) + xError;
             playState.ballState.vy = (dy / airTime) + yError;
             playState.ballState.vz = Math.min(15, 5 + distance / 3) / airTime;
+
+            playState.ballState.targetX = aimX; // Store the final aim point
+            playState.ballState.targetY = aimY; // Store the final aim point
+
+            gameLog.push(`[DEBUG] QB aiming at: (${aimX.toFixed(1)}, ${aimY.toFixed(1)})`);
             // --- End Ball Physics ---
             
         } else if (imminentSackDefender && actionTaken !== "Scramble") {
@@ -2569,7 +2576,7 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
     const playState = {
         playIsLive: true, tick: 0, maxTicks: 200,
         yards: 0, touchdown: false, turnover: false, incomplete: false, sack: false,
-        ballState: { x: 0, y: 0, z: 1.0, vx: 0, vy: 0, vz: 0, targetPlayerId: null, inAir: false, throwerId: null, throwInitiated: false },
+        ballState: { x: 0, y: 0, z: 1.0, vx: 0, vy: 0, vz: 0, targetPlayerId: null, inAir: false, throwerId: null, throwInitiated: false, targetX: 0, targetY: 0 },
         lineOfScrimmage: 0, activePlayers: [], blockBattles: [], visualizationFrames: []
     };
 
@@ -2718,10 +2725,10 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
 
             // I. Record Visualization Frame
             const frameData = {
-            players: JSON.parse(JSON.stringify(playState.activePlayers)),
-            ball: JSON.parse(JSON.stringify(playState.ballState)),
+            players: JSON.parse(JSON.stringify(playState.activePlayers)),
+            ball: JSON.parse(JSON.stringify(playState.ballState)),
             logIndex: gameLog.length // <-- ADD THIS LINE
-            };
+            };
             playState.visualizationFrames.push(frameData);
 
         } // --- End TICK LOOP ---
