@@ -1154,8 +1154,8 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
                         assignment = 'zone_deep_middle';
                         action = assignment;
                         const zoneCenter = getZoneCenter(assignment, playState.lineOfScrimmage);
-                        targetX = zoneCenter.x;
-                        targetY = zoneCenter.y;
+                        startX = zoneCenter.x;
+                        startY = zoneCenter.y;
                     }
                 }
 
