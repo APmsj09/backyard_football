@@ -1275,9 +1275,8 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
     // STEP 1 already done (initialOffenseStates calculated)
     // Setup Defense (can now use initialOffenseStates for alignment)
     const defenseFormationData = defenseFormations[defense.formations.defense];
-    setupSide(defense, 'defense', defenseFormationData, false);
-    // Setup Offense
-    setupSide(offense, 'offense', offenseFormationData, true);
+    setupSide(defense, 'defense', defenseFormationData, false, initialOffenseStates); // <<< FIX
+    setupSide(offense, 'offense', offenseFormationData, true, initialOffenseStates); // <<< FIX
     // --- End Execute Setup ---
 
     // --- Set Initial Ball Position & Carrier ---
@@ -1320,7 +1319,7 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
  * Updates player targets based on their current action, assignment, and game state. (Improved AI)
  * Modifies playerState objects within playState.activePlayers directly.
  */
-function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrierState, playType, offensiveAssignments, gameLog = []) {
+function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrierState, playType, offensiveAssignments, defensivePlayKey, gameLog) {
     const qbState = offenseStates.find(p => p.slot?.startsWith('QB'));
     const isBallInAir = playState.ballState.inAir;
     const ballPos = playState.ballState;
