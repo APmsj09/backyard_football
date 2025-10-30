@@ -1128,7 +1128,7 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
 
             // --- STEP 2: ADJUST Defensive Alignment ---
             if (!isOffense) {
-                const assignment = defAssignments[slot] || 'def_read'; // Get assignment from defensive play call
+                let assignment = defAssignments[slot] || 'def_read'; // Get assignment from defensive play call
 
                 // 1. Man Coverage Alignment (Adjusted Starter Position)
                 if (assignment.startsWith('man_cover_')) {
