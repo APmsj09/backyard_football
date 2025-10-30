@@ -41,7 +41,7 @@ let currentLiveGameResult = null; // Stores the full gameResult object for accur
  * @param {number} delay - The debounce delay in milliseconds.
  */
 function debounce(func, delay) {
-    return function(...args) {
+    return function (...args) {
         clearTimeout(debounceTimeout); // Clear existing timeout
         debounceTimeout = setTimeout(() => {
             func.apply(this, args); // Call the original function after delay
@@ -224,7 +224,7 @@ export function showModal(title, bodyHtml, onConfirm = null, confirmText = 'Conf
         button.className = `btn ${classes}`;
         button.onclick = onClick;
         return button;
-     };
+    };
     // --- END FIX ---
 
     // Cancel/Close button
@@ -276,7 +276,7 @@ export function renderTeamNameSuggestions(names, onSelect) {
 export function renderDraftScreen(gameState, onPlayerSelect, currentSelectedId, sortColumn, sortDirection) {
     if (!gameState || !gameState.teams || !gameState.players || !gameState.draftOrder || !gameState.playerTeam) {
         console.error("renderDraftScreen called without valid gameState.");
-        if(elements.draftHeader) elements.draftHeader.innerHTML = `<h2 class="text-3xl font-bold text-red-500">Draft Error: Invalid Game State</h2>`;
+        if (elements.draftHeader) elements.draftHeader.innerHTML = `<h2 class="text-3xl font-bold text-red-500">Draft Error: Invalid Game State</h2>`;
         return;
     }
     const { year, draftOrder, currentPick, playerTeam, players, teams } = gameState;
@@ -294,8 +294,8 @@ export function renderDraftScreen(gameState, onPlayerSelect, currentSelectedId, 
     });
 
     if (pickLimitReached || noPlayersLeft || allNeedsMetOrFull) {
-        if(elements.draftHeader) elements.draftHeader.innerHTML = `<h2 class="text-3xl font-bold">Season ${year} Draft Complete</h2><p>All picks made, pool empty, or rosters/needs filled.</p>`;
-        if(elements.draftPlayerBtn) { elements.draftPlayerBtn.disabled = true; elements.draftPlayerBtn.textContent = 'Draft Complete'; }
+        if (elements.draftHeader) elements.draftHeader.innerHTML = `<h2 class="text-3xl font-bold">Season ${year} Draft Complete</h2><p>All picks made, pool empty, or rosters/needs filled.</p>`;
+        if (elements.draftPlayerBtn) { elements.draftPlayerBtn.disabled = true; elements.draftPlayerBtn.textContent = 'Draft Complete'; }
         renderSelectedPlayerCard(null, gameState);
         updateSelectedPlayerRow(null);
         if (elements.draftPoolTbody) elements.draftPoolTbody.innerHTML = `<tr><td colspan="15" class="p-4 text-center text-gray-500">Draft Complete.</td></tr>`;
@@ -305,7 +305,7 @@ export function renderDraftScreen(gameState, onPlayerSelect, currentSelectedId, 
     const pickingTeam = draftOrder[currentPick];
     if (!pickingTeam) {
         console.error(`Draft Error: No valid team found at current pick index (${currentPick}).`);
-        if(elements.draftHeader) elements.draftHeader.innerHTML = `<h2 class="text-3xl font-bold text-red-500">Draft Error Occurred</h2>`;
+        if (elements.draftHeader) elements.draftHeader.innerHTML = `<h2 class="text-3xl font-bold text-red-500">Draft Error Occurred</h2>`;
         return;
     }
 
@@ -332,14 +332,14 @@ export function renderDraftScreen(gameState, onPlayerSelect, currentSelectedId, 
 export function renderDraftPool(gameState, onPlayerSelect, sortColumn, sortDirection) {
     if (!elements.draftPoolTbody || !gameState || !gameState.players || !gameState.playerTeam?.roster) {
         console.error("Cannot render draft pool: Missing elements or invalid game state/roster.");
-        if(elements.draftPoolTbody) elements.draftPoolTbody.innerHTML = `<tr><td colspan="15" class="p-4 text-center text-red-500">Error loading players.</td></tr>`;
+        if (elements.draftPoolTbody) elements.draftPoolTbody.innerHTML = `<tr><td colspan="15" class="p-4 text-center text-red-500">Error loading players.</td></tr>`;
         return;
     }
 
     const undraftedPlayers = gameState.players.filter(p => p && !p.teamId);
     const searchTerm = elements.draftSearch?.value.toLowerCase() || '';
     const posFilter = elements.draftFilterPos?.value || '';
-   
+
 
     let filteredPlayers = undraftedPlayers.filter(p =>
         p.name.toLowerCase().includes(searchTerm) &&
@@ -348,13 +348,13 @@ export function renderDraftPool(gameState, onPlayerSelect, sortColumn, sortDirec
 
     // --- NEW SORT LOGIC ---
     const potentialOrder = { 'A': 5, 'B': 4, 'C': 3, 'D': 2, 'F': 1 };
-    
+
     const sortPlayer = (a, b, key, category = null) => {
         const valA = category ? (a?.attributes?.[category]?.[key] || 0) : (a?.[key] || 0);
         const valB = category ? (b?.attributes?.[category]?.[key] || 0) : (b?.[key] || 0);
         return sortDirection === 'asc' ? valA - valB : valB - valA;
     };
-    
+
     switch (sortColumn) {
         case 'name':
             filteredPlayers.sort((a, b) => sortDirection === 'asc' ? a.name.localeCompare(b.name) : b.name.localeCompare(a.name));
@@ -419,9 +419,9 @@ export function renderDraftPool(gameState, onPlayerSelect, sortColumn, sortDirec
 
     filteredPlayers.forEach(player => {
         const maxLevel = gameState.playerTeam.roster.reduce(
-             (max, rp) => Math.max(max, getRelationshipLevel(rp.id, player.id)),
-             relationshipLevels.STRANGER.level
-         );
+            (max, rp) => Math.max(max, getRelationshipLevel(rp.id, player.id)),
+            relationshipLevels.STRANGER.level
+        );
         const scoutedPlayer = getScoutedPlayerInfo(player, maxLevel);
         if (!scoutedPlayer) return;
 
@@ -449,7 +449,7 @@ export function renderDraftPool(gameState, onPlayerSelect, sortColumn, sortDirec
             <td class="text-center py-2 px-3">${scoutedPlayer.attributes?.technical?.tackling ?? '?'}</td>
             <td class="text-center py-2 px-3">${scoutedPlayer.attributes?.technical?.blockShedding ?? '?'}</td>
         `; // <<< Make sure this closing backtick is present
-        
+
         row.onclick = () => onPlayerSelect(scoutedPlayer.id);
         elements.draftPoolTbody.appendChild(row);
     });
@@ -460,7 +460,7 @@ export function updateDraftSortIndicators(sortColumn, sortDirection) {
     document.querySelectorAll('#draft-screen thead th .sort-indicator').forEach(span => {
         span.textContent = '';
     });
-    
+
     // Add new indicator
     const headerCell = document.querySelector(`#draft-screen thead th[data-sort="${sortColumn}"] .sort-indicator`);
     if (headerCell) {
@@ -507,11 +507,11 @@ export function renderSelectedPlayerCard(player, gameState) {
         let displayOverall = '?';
         let isScoutedRange = false;
         if (scoutedPlayer.attributes) {
-             isScoutedRange = Object.keys(positionOverallWeights[pos]).some(attrKey => {
-                 for (const cat in scoutedPlayer.attributes) {
-                     if (typeof scoutedPlayer.attributes[cat]?.[attrKey] === 'string') return true;
-                 } return false;
-             });
+            isScoutedRange = Object.keys(positionOverallWeights[pos]).some(attrKey => {
+                for (const cat in scoutedPlayer.attributes) {
+                    if (typeof scoutedPlayer.attributes[cat]?.[attrKey] === 'string') return true;
+                } return false;
+            });
         }
         if (!isScoutedRange) displayOverall = calculateOverall(player, pos);
 
@@ -538,7 +538,7 @@ export function renderSelectedPlayerCard(player, gameState) {
         const playerCanPick = pickingTeam.id === playerTeam.id && (playerTeam.roster?.length || 0) < ROSTER_LIMIT;
         elements.draftPlayerBtn.disabled = !playerCanPick || !player;
     } else {
-         if (elements.draftPlayerBtn) elements.draftPlayerBtn.disabled = true;
+        if (elements.draftPlayerBtn) elements.draftPlayerBtn.disabled = true;
     }
 }
 
@@ -573,8 +573,8 @@ function renderRosterSummary(playerTeam) {
     if (!elements.rosterSummary || !playerTeam) return;
     const roster = playerTeam.roster || [];
     if (roster.length === 0) {
-         elements.rosterSummary.innerHTML = '<p class="text-xs text-gray-500">Your roster is empty.</p>';
-         return;
+        elements.rosterSummary.innerHTML = '<p class="text-xs text-gray-500">Your roster is empty.</p>';
+        return;
     }
 
     let summaryHtml = '<h5 class="font-bold text-sm mb-1">Team Averages</h5><div class="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">';
@@ -595,8 +595,8 @@ function renderRosterSummary(playerTeam) {
 export function renderDashboard(gameState) {
     if (!gameState || !gameState.playerTeam || !gameState.teams) {
         console.error("renderDashboard: Invalid gameState provided.");
-        if(elements.dashboardTeamName) elements.dashboardTeamName.textContent = "Error Loading";
-        if(elements.dashboardRecord) elements.dashboardRecord.textContent = "";
+        if (elements.dashboardTeamName) elements.dashboardTeamName.textContent = "Error Loading";
+        if (elements.dashboardRecord) elements.dashboardRecord.textContent = "";
         return;
     }
     const { playerTeam, year, currentWeek, messages, teams } = gameState;
@@ -641,7 +641,7 @@ export function switchTab(tabId, gameState) {
 
     if (!gameState) {
         console.warn(`switchTab called for "${tabId}" without valid gameState.`);
-        if(contentPane) contentPane.innerHTML = '<p class="text-red-500">Error: Game state not available.</p>';
+        if (contentPane) contentPane.innerHTML = '<p class="text-red-500">Error: Game state not available.</p>';
         return;
     }
 
@@ -656,11 +656,11 @@ export function switchTab(tabId, gameState) {
             case 'hall-of-fame': renderHallOfFameTab(gameState); break;
             default:
                 console.warn(`Unknown tab: ${tabId}`);
-                if(contentPane) contentPane.innerHTML = `<p>Content for tab "${tabId}" not implemented.</p>`;
+                if (contentPane) contentPane.innerHTML = `<p>Content for tab "${tabId}" not implemented.</p>`;
         }
     } catch (error) {
         console.error(`Error rendering tab "${tabId}":`, error);
-        if(contentPane) contentPane.innerHTML = `<p class="text-red-500">Error rendering ${tabId} content. Check console.</p>`;
+        if (contentPane) contentPane.innerHTML = `<p class="text-red-500">Error rendering ${tabId} content. Check console.</p>`;
     }
 
     if (tabId === 'messages' && Array.isArray(gameState.messages)) {
@@ -670,39 +670,39 @@ export function switchTab(tabId, gameState) {
 
 /** Renders the 'My Team' tab content (roster table). */
 function renderMyTeamTab(gameState) {
-     if (!elements.myTeamRoster || !gameState?.playerTeam?.roster || !Array.isArray(gameState.playerTeam.roster)) {
-         console.error("Cannot render My Team tab: Missing elements or invalid roster data.");
-         if(elements.myTeamRoster) elements.myTeamRoster.innerHTML = '<p class="text-red-500">Error loading roster data.</p>';
-         return;
-     }
-     const roster = gameState.playerTeam.roster;
+    if (!elements.myTeamRoster || !gameState?.playerTeam?.roster || !Array.isArray(gameState.playerTeam.roster)) {
+        console.error("Cannot render My Team tab: Missing elements or invalid roster data.");
+        if (elements.myTeamRoster) elements.myTeamRoster.innerHTML = '<p class="text-red-500">Error loading roster data.</p>';
+        return;
+    }
+    const roster = gameState.playerTeam.roster;
 
-     const physicalAttrs = ['height', 'weight', 'speed', 'strength', 'agility', 'stamina'];
-     const mentalAttrs = ['playbookIQ', 'clutch', 'consistency', 'toughness'];
-     const technicalAttrs = ['throwingAccuracy', 'catchingHands', 'blocking', 'tackling', 'blockShedding'];
+    const physicalAttrs = ['height', 'weight', 'speed', 'strength', 'agility', 'stamina'];
+    const mentalAttrs = ['playbookIQ', 'clutch', 'consistency', 'toughness'];
+    const technicalAttrs = ['throwingAccuracy', 'catchingHands', 'blocking', 'tackling', 'blockShedding'];
 
-     let tableHtml = `<div class="overflow-x-auto"><table class="min-w-full bg-white text-sm"><thead class="bg-gray-800 text-white sticky top-0 z-10"><tr>
+    let tableHtml = `<div class="overflow-x-auto"><table class="min-w-full bg-white text-sm"><thead class="bg-gray-800 text-white sticky top-0 z-10"><tr>
         <th scope="col" class="py-2 px-3 text-left sticky left-0 bg-gray-800 z-20">Name</th>
         <th scope="col" class="py-2 px-3">#</th> {/* Number */}
         <th scope="col" class="py-2 px-3">Type</th>
         <th scope="col" class="py-2 px-3">Age</th>
         <th scope="col" class="py-2 px-3">Pot</th> {/* Potential */}
         <th scope="col" class="py-2 px-3">Status</th>
-        ${physicalAttrs.map(h => `<th scope="col" class="py-2 px-3 uppercase">${h.slice(0,3)}</th>`).join('')}
-        ${mentalAttrs.map(h => `<th scope="col" class="py-2 px-3 uppercase">${h.slice(0,3)}</th>`).join('')}
-        ${technicalAttrs.map(h => `<th scope="col" class="py-2 px-3 uppercase">${h.slice(0,3)}</th>`).join('')}
+        ${physicalAttrs.map(h => `<th scope="col" class="py-2 px-3 uppercase">${h.slice(0, 3)}</th>`).join('')}
+        ${mentalAttrs.map(h => `<th scope="col" class="py-2 px-3 uppercase">${h.slice(0, 3)}</th>`).join('')}
+        ${technicalAttrs.map(h => `<th scope="col" class="py-2 px-3 uppercase">${h.slice(0, 3)}</th>`).join('')}
     </tr></thead><tbody class="divide-y">`; // Total columns: 6 + 6 + 4 + 5 = 21
 
-     if (roster.length === 0) {
-         tableHtml += `<tr><td colspan="21" class="p-4 text-center text-gray-500">Your roster is empty.</td></tr>`; // Updated colspan
-     } else {
-         roster.forEach(p => {
-             if (!p || !p.attributes || !p.status) return;
-             const statusClass = p.status.duration > 0 ? 'text-red-500 font-semibold' : 'text-green-600';
-             const statusText = p.status.description || 'Healthy';
-             const typeTag = p.status.type === 'temporary' ? '<span class="status-tag temporary" title="Temporary Friend">[T]</span>' : '<span class="status-tag permanent" title="Permanent Roster">[P]</span>';
-            
-             tableHtml += `<tr data-player-id="${p.id}" class="cursor-pointer hover:bg-amber-100">
+    if (roster.length === 0) {
+        tableHtml += `<tr><td colspan="21" class="p-4 text-center text-gray-500">Your roster is empty.</td></tr>`; // Updated colspan
+    } else {
+        roster.forEach(p => {
+            if (!p || !p.attributes || !p.status) return;
+            const statusClass = p.status.duration > 0 ? 'text-red-500 font-semibold' : 'text-green-600';
+            const statusText = p.status.description || 'Healthy';
+            const typeTag = p.status.type === 'temporary' ? '<span class="status-tag temporary" title="Temporary Friend">[T]</span>' : '<span class="status-tag permanent" title="Permanent Roster">[P]</span>';
+
+            tableHtml += `<tr data-player-id="${p.id}" class="cursor-pointer hover:bg-amber-100">
                  <th scope="row" class="py-2 px-3 font-semibold sticky left-0 bg-white z-10">${p.name}</th>
                  <td class="text-center py-2 px-3 font-medium">${p.number || '?'}</td> {/* Number */}
                  <td class="text-center py-2 px-3">${typeTag}</td>
@@ -710,30 +710,30 @@ function renderMyTeamTab(gameState) {
                  <td class="text-center py-2 px-3 font-medium">${p.potential || '?'}</td> {/* Potential */}
                  <td class="text-center py-2 px-3 ${statusClass}" title="${statusText}">${statusText} ${p.status.duration > 0 ? `(${p.status.duration}w)` : ''}</td>`;
 
-             const renderAttr = (val, attrName) => {
-                 const breakthroughClass = p.breakthroughAttr === attrName ? ' breakthrough font-bold text-green-600' : '';
-                 const displayValue = attrName === 'height' ? formatHeight(val) : (val ?? '?');
-                 return `<td class="text-center py-2 px-3${breakthroughClass}" title="${attrName}">${val ?? '?'}</td>`;
-              };
+            const renderAttr = (val, attrName) => {
+                const breakthroughClass = p.breakthroughAttr === attrName ? ' breakthrough font-bold text-green-600' : '';
+                const displayValue = attrName === 'height' ? formatHeight(val) : (val ?? '?');
+                return `<td class="text-center py-2 px-3${breakthroughClass}" title="${attrName}">${val ?? '?'}</td>`;
+            };
 
-             physicalAttrs.forEach(attr => tableHtml += renderAttr(p.attributes.physical?.[attr], attr));
-             mentalAttrs.forEach(attr => tableHtml += renderAttr(p.attributes.mental?.[attr], attr));
-             technicalAttrs.forEach(attr => tableHtml += renderAttr(p.attributes.technical?.[attr], attr));
+            physicalAttrs.forEach(attr => tableHtml += renderAttr(p.attributes.physical?.[attr], attr));
+            mentalAttrs.forEach(attr => tableHtml += renderAttr(p.attributes.mental?.[attr], attr));
+            technicalAttrs.forEach(attr => tableHtml += renderAttr(p.attributes.technical?.[attr], attr));
 
-             tableHtml += `</tr>`;
-         });
-     }
-     elements.myTeamRoster.innerHTML = tableHtml + `</tbody></table></div>`;
- }
+            tableHtml += `</tr>`;
+        });
+    }
+    elements.myTeamRoster.innerHTML = tableHtml + `</tbody></table></div>`;
+}
 
 
 /** Renders the 'Depth Chart' tab and its sub-components. */
 function renderDepthChartTab(gameState) {
     if (!gameState || !gameState.playerTeam || !gameState.playerTeam.roster || !gameState.playerTeam.formations || !gameState.playerTeam.depthChart) {
         console.error("Cannot render depth chart: Invalid game state.");
-        if(elements.positionalOverallsContainer) elements.positionalOverallsContainer.innerHTML = '<p class="text-red-500">Error loading depth chart data.</p>';
-        if(elements.offenseDepthChartPane) elements.offenseDepthChartPane.innerHTML = '<p class="text-red-500">Error loading offense data.</p>';
-        if(elements.defenseDepthChartPane) elements.defenseDepthChartPane.innerHTML = '<p class="text-red-500">Error loading defense data.</p>';
+        if (elements.positionalOverallsContainer) elements.positionalOverallsContainer.innerHTML = '<p class="text-red-500">Error loading depth chart data.</p>';
+        if (elements.offenseDepthChartPane) elements.offenseDepthChartPane.innerHTML = '<p class="text-red-500">Error loading offense data.</p>';
+        if (elements.defenseDepthChartPane) elements.defenseDepthChartPane.innerHTML = '<p class="text-red-500">Error loading defense data.</p>';
         return;
     }
     const permanentRoster = gameState.playerTeam.roster.filter(p => p && p.status?.type !== 'temporary');
@@ -774,8 +774,8 @@ function renderPositionalOveralls(roster) {
 function renderDepthChartSide(side, gameState, slotsContainer, rosterContainer) {
     if (!slotsContainer || !rosterContainer || !gameState?.playerTeam?.roster || !gameState?.playerTeam?.depthChart) {
         console.error(`Cannot render depth chart side "${side}": Missing elements or game state.`);
-        if(slotsContainer) slotsContainer.innerHTML = '<p class="text-red-500">Error</p>';
-        if(rosterContainer) rosterContainer.innerHTML = '<p class="text-red-500">Error</p>';
+        if (slotsContainer) slotsContainer.innerHTML = '<p class="text-red-500">Error</p>';
+        if (rosterContainer) rosterContainer.innerHTML = '<p class="text-red-500">Error</p>';
         return;
     }
     const { roster, depthChart } = gameState.playerTeam;
@@ -844,11 +844,11 @@ function renderAvailablePlayerList(players, container, side) {
         playerEl.innerHTML = `${typeTag}${player.name ?? 'Unknown Player'}`;
         playerEl.setAttribute('title', `Drag ${player.name ?? 'Player'} to ${side} slot`);
         if (player.status?.type !== 'temporary') {
-             playerEl.draggable = true;
+            playerEl.draggable = true;
         } else {
-             playerEl.draggable = false;
-             playerEl.classList.add('opacity-50', 'cursor-not-allowed');
-             playerEl.setAttribute('title', `${player.name ?? 'Player'} (Temporary - Cannot move)`);
+            playerEl.draggable = false;
+            playerEl.classList.add('opacity-50', 'cursor-not-allowed');
+            playerEl.setAttribute('title', `${player.name ?? 'Player'} (Temporary - Cannot move)`);
         }
         container.appendChild(playerEl);
     });
@@ -889,7 +889,7 @@ export function updateMessagesNotification(messages, markAllAsRead = false) {
 function renderScheduleTab(gameState) {
     if (!elements.scheduleList || !gameState?.schedule || !Array.isArray(gameState.schedule) || !gameState.teams || !gameState.playerTeam) {
         console.error("Cannot render schedule: Missing elements or invalid game state.");
-        if(elements.scheduleList) elements.scheduleList.innerHTML = '<p class="text-red-500">Error loading schedule data.</p>';
+        if (elements.scheduleList) elements.scheduleList.innerHTML = '<p class="text-red-500">Error loading schedule data.</p>';
         return;
     }
     let html = '';
@@ -930,7 +930,7 @@ function renderScheduleTab(gameState) {
 function renderStandingsTab(gameState) {
     if (!elements.standingsContainer || !gameState?.divisions || !gameState.teams || !Array.isArray(gameState.teams) || !gameState.playerTeam) {
         console.error("Cannot render standings: Missing elements or invalid game state.");
-        if(elements.standingsContainer) elements.standingsContainer.innerHTML = '<p class="text-red-500">Error loading standings data.</p>';
+        if (elements.standingsContainer) elements.standingsContainer.innerHTML = '<p class="text-red-500">Error loading standings data.</p>';
         return;
     }
     elements.standingsContainer.innerHTML = '';
@@ -960,7 +960,7 @@ function renderStandingsTab(gameState) {
 function renderPlayerStatsTab(gameState) {
     if (!elements.playerStatsContainer || !gameState?.players || !Array.isArray(gameState.players)) {
         console.error("Cannot render player stats: Missing element or invalid player data.");
-        if(elements.playerStatsContainer) elements.playerStatsContainer.innerHTML = '<p class="text-red-500">Error loading player stats.</p>';
+        if (elements.playerStatsContainer) elements.playerStatsContainer.innerHTML = '<p class="text-red-500">Error loading player stats.</p>';
         return;
     }
     const teamIdFilter = elements.statsFilterTeam?.value || '';
@@ -1001,7 +1001,7 @@ function renderPlayerStatsTab(gameState) {
 function renderHallOfFameTab(gameState) {
     if (!elements.hallOfFameList || !gameState?.hallOfFame || !Array.isArray(gameState.hallOfFame)) {
         console.error("Cannot render Hall of Fame: Missing element or invalid data.");
-        if(elements.hallOfFameList) elements.hallOfFameList.innerHTML = '<p class="text-red-500">Error loading Hall of Fame.</p>';
+        if (elements.hallOfFameList) elements.hallOfFameList.innerHTML = '<p class="text-red-500">Error loading Hall of Fame.</p>';
         return;
     }
     const inductees = gameState.hallOfFame;
@@ -1042,7 +1042,8 @@ export function renderOffseasonScreen(offseasonReport, year) {
             devHtml += `<div class="p-2 bg-gray-100 rounded text-sm mb-1"><p class="font-bold">${playerName} (${playerAge})</p><div class="flex flex-wrap gap-x-2">`;
             if (res?.improvements?.length > 0) { res.improvements.forEach(imp => { devHtml += `<span class="text-green-600">${imp?.attr ?? '?'} +${imp?.increase ?? '?'}</span>`; }); }
             else { devHtml += `<span>No improvements</span>`; }
-            devHtml += '</div></div>'; });
+            devHtml += '</div></div>';
+        });
     } else { devHtml = '<p>No player development updates for your team.</p>'; }
     if (elements.playerDevelopmentContainer) elements.playerDevelopmentContainer.innerHTML = devHtml;
 
@@ -1064,9 +1065,9 @@ export function setupDragAndDrop(onDrop) {
             draggedEl = e.target;
             dragPlayerId = e.target.dataset.playerId;
             dragSide = e.target.closest('.depth-chart-sub-pane')?.id.includes('offense') ? 'offense' :
-                       e.target.closest('.depth-chart-sub-pane')?.id.includes('defense') ? 'defense' :
-                       e.target.closest('.roster-list')?.id.includes('offense') ? 'offense' :
-                       e.target.closest('.roster-list')?.id.includes('defense') ? 'defense' : null;
+                e.target.closest('.depth-chart-sub-pane')?.id.includes('defense') ? 'defense' :
+                    e.target.closest('.roster-list')?.id.includes('offense') ? 'offense' :
+                        e.target.closest('.roster-list')?.id.includes('defense') ? 'defense' : null;
             if (dragPlayerId && dragSide) {
                 e.dataTransfer.effectAllowed = 'move';
                 e.dataTransfer.setData('text/plain', dragPlayerId);
@@ -1161,7 +1162,7 @@ export function drawFieldVisualization(frameData) {
     ctx.textBaseline = 'middle';
 
     // Draw 10-yard lines (now vertical)
-    for (let y = 10; y <= 110; y += 10) { 
+    for (let y = 10; y <= 110; y += 10) {
         const drawX = y * scaleX; // Use Y-yard for X-coordinate
         ctx.beginPath();
         ctx.moveTo(drawX, 0);
@@ -1175,7 +1176,7 @@ export function drawFieldVisualization(frameData) {
             ctx.fillText(yardLineNum.toString(), drawX, canvas.height - 15); // Near bottom sideline
         }
     }
-    
+
     // Draw Hash Marks (now horizontal)
     const hashTopY = HASH_LEFT_X * scaleY; // Use X-hash for Y-coordinate
     const hashBottomY = HASH_RIGHT_X * scaleY;
@@ -1195,7 +1196,7 @@ export function drawFieldVisualization(frameData) {
 
     // --- Draw Players (Rotated & Bigger) ---
     const playerRadius = 8; // <-- Made bigger (was 7)
-    
+
     frameData.players.forEach(pState => {
         if (pState.x === undefined || pState.y === undefined) return;
 
@@ -1231,7 +1232,7 @@ export function drawFieldVisualization(frameData) {
         const ballDrawX = frameData.ball.y * scaleX; // Ball Y maps to Canvas X
         const ballDrawY = frameData.ball.x * scaleY; // Ball X maps to Canvas Y
         // --- END SWAP ---
-        
+
         // Shadow
         ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
         ctx.beginPath();
@@ -1257,50 +1258,73 @@ function renderLiveStatsBox(gameResult) {
     const generateTeamStatsHtml = (team) => {
         if (!team || !team.roster || team.roster.length === 0) return '<h5>No Player Data</h5>';
 
+        // Filters and sorts roster to find a specific stat leader
         const findTopStat = (statName) => team.roster
             .filter(p => p && p.gameStats && p.gameStats[statName] > 0)
             .sort((a, b) => (b.gameStats[statName] || 0) - (a.gameStats[statName] || 0))[0];
 
-        const qb = team.roster.find(p => p && p.gameStats && p.gameStats.passYards > 0);
+        // --- OFFENSIVE LEADERS ---
+        const qb = team.roster.find(p => p && p.gameStats && p.gameStats.passAttempts > 0); // Find QB by attempts
         const leadingRusher = findTopStat('rushYards');
         const leadingReceiver = findTopStat('recYards');
-        const leadingTackler = findTopStat('tackles');
-        const topSacker = findTopStat('sacks');
-        const topInterceptor = findTopStat('interceptions');
+        const offensivePlayersLogged = new Set();
 
         let html = `<h5 class="text-lg font-semibold text-amber-400 mb-1 border-b border-gray-600 pb-1">${team.name}</h5>`;
-        let statsAdded = false;
 
+        // 1. QB Stats
         if (qb) {
             html += `<p>${qb.name} (QB): <strong>${qb.gameStats.passCompletions || 0}/${qb.gameStats.passAttempts || 0}, ${qb.gameStats.passYards || 0} Yds, ${qb.gameStats.touchdowns || 0} TD, ${qb.gameStats.interceptionsThrown || 0} INT</strong></p>`;
-            statsAdded = true;
+            offensivePlayersLogged.add(qb.id);
         }
-        if (leadingRusher && leadingRusher.id !== qb?.id) {
-            html += `<p>${leadingRusher.name} (Run): <strong>${leadingRusher.gameStats.rushYards || 0} Yds, ${leadingRusher.gameStats.touchdowns || 0} TD</strong></p>`;
-            statsAdded = true;
-        }
-        if (leadingReceiver) {
-            html += `<p>${leadingReceiver.name} (Rec): <strong>${leadingReceiver.gameStats.receptions || 0}-${leadingReceiver.gameStats.recYards || 0} Yds, ${leadingReceiver.gameStats.touchdowns || 0} TD</strong></p>`;
-            statsAdded = true;
-        }
-         if (leadingTackler) {
-             const sacks = (topSacker && topSacker.id === leadingTackler.id) ? (leadingTackler.gameStats.sacks || 0) : 0;
-             const ints = (topInterceptor && topInterceptor.id === leadingTackler.id) ? (leadingTackler.gameStats.interceptions || 0) : 0;
-             html += `<p>${leadingTackler.name} (Def): <strong>${leadingTackler.gameStats.tackles || 0} Tkl${sacks > 0 ? `, ${sacks} Sack` : ''}${ints > 0 ? `, ${ints} INT` : ''}</strong></p>`;
-             statsAdded = true;
-         }
-         if (topSacker && topSacker.id !== leadingTackler?.id) {
-              html += `<p>${topSacker.name} (Def): <strong>${topSacker.gameStats.sacks || 0} Sack</strong></p>`;
-              statsAdded = true;
-         }
-          if (topInterceptor && topInterceptor.id !== leadingTackler?.id && topInterceptor.id !== topSacker?.id) {
-              html += `<p>${topInterceptor.name} (Def): <strong>${topInterceptor.gameStats.interceptions || 0} INT</strong></p>`;
-              statsAdded = true;
-          }
 
-        if (!statsAdded) {
-             html += '<p class="text-gray-400">No significant stats recorded.</p>';
+        // 2. Running Leader
+        if (leadingRusher && !offensivePlayersLogged.has(leadingRusher.id)) {
+            html += `<p>${leadingRusher.name} (Run): <strong>${leadingRusher.gameStats.rushYards || 0} Yds, ${leadingRusher.gameStats.touchdowns || 0} TD</strong></p>`;
+            offensivePlayersLogged.add(leadingRusher.id);
         }
+
+        // 3. Receiving Leader
+        if (leadingReceiver && !offensivePlayersLogged.has(leadingReceiver.id)) {
+            html += `<p>${leadingReceiver.name} (Rec): <strong>${leadingReceiver.gameStats.receptions || 0}-${leadingReceiver.gameStats.recYards || 0} Yds, ${leadingReceiver.gameStats.touchdowns || 0} TD</strong></p>`;
+            offensivePlayersLogged.add(leadingReceiver.id);
+        }
+
+        // --- DEFENSIVE LEADERS ---
+        const defensiveLeaders = {};
+
+        // Aggregate all defensive stats into a single map based on player ID
+        team.roster.forEach(p => {
+            if (p?.gameStats && (p.gameStats.tackles > 0 || p.gameStats.sacks > 0 || p.gameStats.interceptions > 0)) {
+                if (offensivePlayersLogged.has(p.id)) return; // Skip if already logged as an offensive leader
+
+                defensiveLeaders[p.id] = {
+                    name: p.name,
+                    tkl: p.gameStats.tackles || 0,
+                    sacks: p.gameStats.sacks || 0,
+                    ints: p.gameStats.interceptions || 0
+                };
+            }
+        });
+
+        // Convert map to array and sort by importance (Tkl, then Sack, then INT)
+        const sortedDefenders = Object.values(defensiveLeaders).sort((a, b) =>
+            (b.tkl - a.tkl) || (b.sacks - a.sacks) || (b.ints - a.ints)
+        ).slice(0, 3); // Limit to top 3 unique defensive players
+
+        // 4. Print Top Defensive Players
+        sortedDefenders.forEach(d => {
+            let defHtml = `<p>${d.name} (Def): <strong>${d.tkl} Tkl`;
+            if (d.sacks > 0) defHtml += `, ${d.sacks} Sack${d.sacks > 1 ? 's' : ''}`;
+            if (d.ints > 0) defHtml += `, ${d.ints} INT${d.ints > 1 ? 's' : ''}`;
+            defHtml += `</strong></p>`;
+            html += defHtml;
+        });
+
+        // 5. Final Check
+        if (offensivePlayersLogged.size === 0 && sortedDefenders.length === 0) {
+            html += '<p class="text-gray-400">No significant stats recorded.</p>';
+        }
+
         return html;
     };
 
@@ -1323,7 +1347,7 @@ export function startLiveGameSim(gameResult, onComplete) {
     // --- 2. Validate Data ---
     if (!gameResult || !Array.isArray(gameResult.gameLog) || !gameResult.homeTeam || !gameResult.awayTeam || !Array.isArray(gameResult.visualizationFrames)) {
         console.warn("startLiveGameSim: invalid gameResult or missing frames.");
-        if(ticker) ticker.innerHTML = '<p>No game events to display.</p>';
+        if (ticker) ticker.innerHTML = '<p>No game events to display.</p>';
         if (onComplete) onComplete();
         return;
     }
@@ -1354,14 +1378,14 @@ export function startLiveGameSim(gameResult, onComplete) {
     // --- End NEW state variables ---
 
     // --- 4. Render Initial/Static UI ---
-    if(ticker) ticker.innerHTML = '';
-    if(elements.simAwayTeam) elements.simAwayTeam.textContent = gameResult.awayTeam.name;
-    if(elements.simHomeTeam) elements.simHomeTeam.textContent = gameResult.homeTeam.name;
-    if(elements.simAwayScore) elements.simAwayScore.textContent = currentAwayScore; // Use state var
-    if(elements.simHomeScore) elements.simHomeScore.textContent = currentHomeScore; // Use state var
-    if(elements.simGameDrive) elements.simGameDrive.textContent = currentDriveText; // Use state var
-    if(elements.simGameDown) elements.simGameDown.textContent = driveActive ? `${down} & ${toGo <= 0 ? 'Goal' : toGo}` : ""; // Use state vars
-    if(elements.simPossession) elements.simPossession.textContent = possessionTeamName ? `${possessionTeamName} Ball` : ''; // Use state var
+    if (ticker) ticker.innerHTML = '';
+    if (elements.simAwayTeam) elements.simAwayTeam.textContent = gameResult.awayTeam.name;
+    if (elements.simHomeTeam) elements.simHomeTeam.textContent = gameResult.homeTeam.name;
+    if (elements.simAwayScore) elements.simAwayScore.textContent = currentAwayScore; // Use state var
+    if (elements.simHomeScore) elements.simHomeScore.textContent = currentHomeScore; // Use state var
+    if (elements.simGameDrive) elements.simGameDrive.textContent = currentDriveText; // Use state var
+    if (elements.simGameDown) elements.simGameDown.textContent = driveActive ? `${down} & ${toGo <= 0 ? 'Goal' : toGo}` : ""; // Use state vars
+    if (elements.simPossession) elements.simPossession.textContent = possessionTeamName ? `${possessionTeamName} Ball` : ''; // Use state var
     drawFieldVisualization(null);
     renderLiveStatsBox(gameResult);
 
@@ -1372,11 +1396,11 @@ export function startLiveGameSim(gameResult, onComplete) {
             clearInterval(liveGameInterval);
             liveGameInterval = null;
             if (currentLiveGameResult) { // Use final result for absolute accuracy
-                if(elements.simAwayScore) elements.simAwayScore.textContent = currentLiveGameResult.awayScore;
-                if(elements.simHomeScore) elements.simHomeScore.textContent = currentLiveGameResult.homeScore;
+                if (elements.simAwayScore) elements.simAwayScore.textContent = currentLiveGameResult.awayScore;
+                if (elements.simHomeScore) elements.simHomeScore.textContent = currentLiveGameResult.homeScore;
             } else { console.warn("Final score update skipped: currentLiveGameResult was null"); }
-            if(elements.simGameDown) elements.simGameDown.textContent = "FINAL";
-            if(elements.simPossession) elements.simPossession.textContent = "";
+            if (elements.simGameDown) elements.simGameDown.textContent = "FINAL";
+            if (elements.simPossession) elements.simPossession.textContent = "";
             drawFieldVisualization(null);
             currentLiveGameResult = null;
             if (liveGameCallback) { const cb = liveGameCallback; liveGameCallback = null; cb(); }
@@ -1392,160 +1416,160 @@ export function startLiveGameSim(gameResult, onComplete) {
         }
 
         // --- Sync Log Entries ---
-            if (ticker && frame.logIndex > logIndexToShow) {
-                for (let i = logIndexToShow; i < frame.logIndex; i++) {
-                    const playLogEntry = allLogs[i];
-                    if (!playLogEntry) continue;
+        if (ticker && frame.logIndex > logIndexToShow) {
+            for (let i = logIndexToShow; i < frame.logIndex; i++) {
+                const playLogEntry = allLogs[i];
+                if (!playLogEntry) continue;
 
-                    // --- >>> STEP 1: UPDATE INTERNAL STATE FIRST <<< ---
-                    // This block updates ballOn, down, toGo, etc.
-                    try {
-                        if (playLogEntry.startsWith('-- Drive')) {
-                            ballOn = 20; down = 1; toGo = 10; driveActive = true;
-                            const driveMatch = playLogEntry.match(/(Drive \d+ \(H\d+\))/);
-                            possessionTeamName = playLogEntry.includes(gameResult.homeTeam.name) ? gameResult.homeTeam.name : gameResult.awayTeam.name;
-                            if(driveMatch) currentDriveText = driveMatch[0];
-                        } else if (playLogEntry.startsWith('➡️ First down')) {
-                            down = 1;
-                            const goalMatch = playLogEntry.match(/Goal at the (\d+)/);
-                            const yardLineMatch = playLogEntry.match(/at the (own|opponent) (\d+)/);
-                            if (yardLineMatch) {
-                                const side = yardLineMatch[1]; const line = parseInt(yardLineMatch[2], 10);
-                                if (side === 'own') ballOn = line; else ballOn = 100 - line;
-                            }
-                            toGo = goalMatch ? parseInt(goalMatch[1], 10) : Math.min(10, 100 - ballOn);
-                            if (toGo <= 0) toGo = 1;
-                        } else if (playLogEntry.match(/gain of (\d+\.?\d*)|loss of (\d+\.?\d*)/)) {
-                            const yardsMatch = playLogEntry.match(/gain of (\d+\.?\d*)|loss of (\d+\.?\d*)/);
-                            let yards = 0;
-                            if(yardsMatch) { yards = parseFloat(yardsMatch[1] || `-${yardsMatch[2]}`); }
-                            if (driveActive) {
-                                ballOn += yards;
-                                toGo -= yards;
-                                ballOn = Math.round(Math.max(0,Math.min(100, ballOn)));
-                                toGo = Math.round(toGo);
-                                if (toGo > 0) down++; else if (ballOn < 100) down=1;
-                            }
-                        } else if (playLogEntry.includes('INCOMPLETE') || playLogEntry.startsWith('❌') || playLogEntry.startsWith('🚫') || playLogEntry.startsWith('‹‹')) {
-                            if (driveActive) down++;
-                        } else if (playLogEntry.startsWith('🎉 TOUCHDOWN')) {
-                            ballOn = 100; driveActive = false;
-                        } else if (playLogEntry.includes('conversion GOOD!')) {
-                            const points = playLogEntry.includes('2-point') ? 2 : 1;
-                            if(possessionTeamName === gameResult.homeTeam.name) currentHomeScore += (6 + points); else currentAwayScore += (6 + points);
-                            driveActive = false;
-                        } else if (playLogEntry.includes('Conversion FAILED!')) {
-                            const points = 6;
-                            if(possessionTeamName === gameResult.homeTeam.name) currentHomeScore += points; else currentAwayScore += points;
-                            driveActive = false;
-                        } else if (playLogEntry.startsWith('Turnover') || playLogEntry.startsWith('❗ INTERCEPTION') || playLogEntry.startsWith('❗ FUMBLE')) {
-                            driveActive = false;
-                            const yardLineMatch = playLogEntry.match(/at the (own|opponent) (\d+)/);
-                            if (yardLineMatch) {
-                                const side = yardLineMatch[1]; const line = parseInt(yardLineMatch[2], 10);
-                                if (side === 'own') ballOn = line; else ballOn = 100 - line;
-                            }
-                        } else if (playLogEntry.startsWith('==== FINAL') || playLogEntry.startsWith('==== HALFTIME')) {
-                            driveActive = false;
+                // --- >>> STEP 1: UPDATE INTERNAL STATE FIRST <<< ---
+                // This block updates ballOn, down, toGo, etc.
+                try {
+                    if (playLogEntry.startsWith('-- Drive')) {
+                        ballOn = 20; down = 1; toGo = 10; driveActive = true;
+                        const driveMatch = playLogEntry.match(/(Drive \d+ \(H\d+\))/);
+                        possessionTeamName = playLogEntry.includes(gameResult.homeTeam.name) ? gameResult.homeTeam.name : gameResult.awayTeam.name;
+                        if (driveMatch) currentDriveText = driveMatch[0];
+                    } else if (playLogEntry.startsWith('➡️ First down')) {
+                        down = 1;
+                        const goalMatch = playLogEntry.match(/Goal at the (\d+)/);
+                        const yardLineMatch = playLogEntry.match(/at the (own|opponent) (\d+)/);
+                        if (yardLineMatch) {
+                            const side = yardLineMatch[1]; const line = parseInt(yardLineMatch[2], 10);
+                            if (side === 'own') ballOn = line; else ballOn = 100 - line;
                         }
-                        if (down > 4 && driveActive) {
-                            driveActive = false;
-                        }
-                    } catch (parseError) {
-                        console.error("Error parsing log entry for sim state:", playLogEntry, parseError);
-                    }
-                    // --- >>> END STATE UPDATE BLOCK <<< ---
-
-
-                    // --- >>> STEP 2: CREATE DESCRIPTIVE TEXT (NOW USES UPDATED STATE) <<< ---
-                    const p = document.createElement('p');
-                    let styleClass = '';
-                    let descriptiveText = playLogEntry;
-
-                    // These variables now reflect the *result* of the play
-                    const fieldSide = ballOn <= 50 ? (possessionTeamName === gameResult.homeTeam.name ? "own" : "opponent") : (possessionTeamName === gameResult.homeTeam.name ? "opponent" : "own");
-                    const yardLine = ballOn <= 50 ? ballOn : 100 - ballOn;
-
-                    if (playLogEntry.startsWith('-- Drive') || playLogEntry.startsWith('====')) {
-                        styleClass = 'font-bold text-amber-400 mt-2';
-                        if (playLogEntry.startsWith('==== FINAL')) styleClass += ' text-lg';
-                        descriptiveText = `🏈 ${playLogEntry.replace('-- Drive', 'New Drive:')} 🏈`;
-                        if (playLogEntry.startsWith('====')) descriptiveText = `⏱️ ${playLogEntry} ⏱️`;
-                    } else if (playLogEntry.startsWith('🎉 TOUCHDOWN')) {
-                        descriptiveText = playLogEntry;
-                        styleClass = 'font-semibold text-green-400';
-                    } else if (playLogEntry.includes('conversion GOOD!')) {
-                        descriptiveText = `✅ ${playLogEntry} Points are good!`;
-                        styleClass = 'font-semibold text-green-400';
-                    } else if (playLogEntry.includes('Conversion FAILED!')) {
-                        descriptiveText = `❌ ${playLogEntry} No good!`;
-                        styleClass = 'font-semibold text-red-400';
-                    } else if (playLogEntry.startsWith('❗ INTERCEPTION') || playLogEntry.startsWith('❗ FUMBLE')) {
-                        descriptiveText = playLogEntry;
-                        styleClass = 'font-semibold text-red-400';
-                    } else if (playLogEntry.startsWith('✋ Turnover on downs')) {
-                        descriptiveText = playLogEntry;
-                        styleClass = 'font-semibold text-red-400';
-                    } else if (playLogEntry.startsWith('💥 SACK')) {
-                         // Now the yard line is correct *after* the sack
-                         descriptiveText = `${playLogEntry.replace('SACK!', 'SACK!')} Ball on the ${fieldSide} ${yardLine}.`;
-                         styleClass = 'text-orange-400';
-                    } else if (playLogEntry.includes('stuffed near the line')) {
-                        descriptiveText = `🧱 ${playLogEntry} Stopped at the ${fieldSide} ${yardLine}!`;
-                        styleClass = 'text-orange-300';
-                    } else if (playLogEntry.includes(' passes to ')) {
-                        const passer = playLogEntry.match(/^(.*?) passes to/)?.[1];
-                        const receiver = playLogEntry.match(/passes to (.*?)\.\.\./)?.[1];
-                        descriptiveText = `🏈 ${passer} passes to ${receiver}...`;
-                    } else if (playLogEntry.includes('Caught by') && playLogEntry.includes('yards')) {
-                        const yardsMatch = playLogEntry.match(/for (-?\d+\.?\d*) yards/);
-                        const yards = yardsMatch ? parseFloat(yardsMatch[1]) : 0;
-                        if (yards >= 15) { descriptiveText = `🎯 ${playLogEntry.replace('Caught by', 'Hauled in by')} for a big gain! Ball at the ${fieldSide} ${yardLine}.`; }
-                        else if (yards > 0) { descriptiveText = `👍 ${playLogEntry.replace('Caught by', 'Complete to')}. Ball at the ${fieldSide} ${yardLine}.`; }
-                        else { descriptiveText = `✋ ${playLogEntry}. Stopped for minimal gain. Ball at the ${fieldSide} ${yardLine}.`; }
-                    } else if (playLogEntry.includes('INCOMPLETE')) {
-                        if (playLogEntry.includes('Defended by')) { descriptiveText = `🚫 ${playLogEntry.replace('INCOMPLETE pass to', 'Pass intended for')} Knocked away!`; }
-                        else if (playLogEntry.includes('Off target')) { descriptiveText = ` overthrown... ${playLogEntry}`; }
-                        else { descriptiveText = `❌ ${playLogEntry}`; }
-                        styleClass = 'font-semibold text-red-400';
-                    } else if (playLogEntry.match(/(\w+\s+'?\w+'?) (bursts through|shakes off|breaks into|is loose!|finds a small crease|runs out of bounds)/)) {
+                        toGo = goalMatch ? parseInt(goalMatch[1], 10) : Math.min(10, 100 - ballOn);
+                        if (toGo <= 0) toGo = 1;
+                    } else if (playLogEntry.match(/gain of (\d+\.?\d*)|loss of (\d+\.?\d*)/)) {
                         const yardsMatch = playLogEntry.match(/gain of (\d+\.?\d*)|loss of (\d+\.?\d*)/);
                         let yards = 0;
-                        if(yardsMatch) { yards = parseFloat(yardsMatch[1] || `-${yardsMatch[2]}`); }
-                        else if (playLogEntry.includes("crease")) { yards = getRandomInt(1,3); }
-                        else { yards = getRandomInt(4,7); }
-                        if (yards >= 10) { descriptiveText = `💨 HE'S LOOSE! ${playLogEntry}! Great run! Ball at the ${fieldSide} ${yardLine}.`; }
-                        else if (yards > 0) { descriptiveText = `➡️ ${playLogEntry}. Nice gain on the ground. Ball at the ${fieldSide} ${yardLine}.`; }
-                        else { descriptiveText = `✋ ${playLogEntry}. Stopped near the line. Ball at the ${fieldSide} ${yardLine}.`; }
-                        styleClass = 'text-cyan-300';
-                    } else if (playLogEntry.includes('tackled by') || playLogEntry.includes('Stopped by') || playLogEntry.includes('dragged down') || playLogEntry.includes('Caught from behind')) {
-                        descriptiveText = `${playLogEntry} Ball at the ${fieldSide} ${yardLine}.`; // Removed extra emoji
-                    } else if (playLogEntry.startsWith('➡️ First down')) {
-                        descriptiveText = playLogEntry;
-                        styleClass = 'text-yellow-300 font-semibold';
-                    } else if (playLogEntry.startsWith('🚑 INJURY')) {
-                        descriptiveText = playLogEntry;
-                        styleClass = 'text-purple-400 italic';
+                        if (yardsMatch) { yards = parseFloat(yardsMatch[1] || `-${yardsMatch[2]}`); }
+                        if (driveActive) {
+                            ballOn += yards;
+                            toGo -= yards;
+                            ballOn = Math.round(Math.max(0, Math.min(100, ballOn)));
+                            toGo = Math.round(toGo);
+                            if (toGo > 0) down++; else if (ballOn < 100) down = 1;
+                        }
+                    } else if (playLogEntry.includes('INCOMPLETE') || playLogEntry.startsWith('❌') || playLogEntry.startsWith('🚫') || playLogEntry.startsWith('‹‹')) {
+                        if (driveActive) down++;
+                    } else if (playLogEntry.startsWith('🎉 TOUCHDOWN')) {
+                        ballOn = 100; driveActive = false;
+                    } else if (playLogEntry.includes('conversion GOOD!')) {
+                        const points = playLogEntry.includes('2-point') ? 2 : 1;
+                        if (possessionTeamName === gameResult.homeTeam.name) currentHomeScore += (6 + points); else currentAwayScore += (6 + points);
+                        driveActive = false;
+                    } else if (playLogEntry.includes('Conversion FAILED!')) {
+                        const points = 6;
+                        if (possessionTeamName === gameResult.homeTeam.name) currentHomeScore += points; else currentAwayScore += points;
+                        driveActive = false;
+                    } else if (playLogEntry.startsWith('Turnover') || playLogEntry.startsWith('❗ INTERCEPTION') || playLogEntry.startsWith('❗ FUMBLE')) {
+                        driveActive = false;
+                        const yardLineMatch = playLogEntry.match(/at the (own|opponent) (\d+)/);
+                        if (yardLineMatch) {
+                            const side = yardLineMatch[1]; const line = parseInt(yardLineMatch[2], 10);
+                            if (side === 'own') ballOn = line; else ballOn = 100 - line;
+                        }
+                    } else if (playLogEntry.startsWith('==== FINAL') || playLogEntry.startsWith('==== HALFTIME')) {
+                        driveActive = false;
                     }
-                    // --- End INTEGRATED Descriptive Text Logic ---
+                    if (down > 4 && driveActive) {
+                        driveActive = false;
+                    }
+                } catch (parseError) {
+                    console.error("Error parsing log entry for sim state:", playLogEntry, parseError);
+                }
+                // --- >>> END STATE UPDATE BLOCK <<< ---
 
-                    // --- >>> STEP 3: APPEND TO TICKER <<< ---
-                    p.className = styleClass;
-                    p.textContent = descriptiveText;
-                    ticker.appendChild(p);
 
-                } // End FOR loop for log entries
+                // --- >>> STEP 2: CREATE DESCRIPTIVE TEXT (NOW USES UPDATED STATE) <<< ---
+                const p = document.createElement('p');
+                let styleClass = '';
+                let descriptiveText = playLogEntry;
+
+                // These variables now reflect the *result* of the play
+                const fieldSide = ballOn <= 50 ? (possessionTeamName === gameResult.homeTeam.name ? "own" : "opponent") : (possessionTeamName === gameResult.homeTeam.name ? "opponent" : "own");
+                const yardLine = ballOn <= 50 ? ballOn : 100 - ballOn;
+
+                if (playLogEntry.startsWith('-- Drive') || playLogEntry.startsWith('====')) {
+                    styleClass = 'font-bold text-amber-400 mt-2';
+                    if (playLogEntry.startsWith('==== FINAL')) styleClass += ' text-lg';
+                    descriptiveText = `🏈 ${playLogEntry.replace('-- Drive', 'New Drive:')} 🏈`;
+                    if (playLogEntry.startsWith('====')) descriptiveText = `⏱️ ${playLogEntry} ⏱️`;
+                } else if (playLogEntry.startsWith('🎉 TOUCHDOWN')) {
+                    descriptiveText = playLogEntry;
+                    styleClass = 'font-semibold text-green-400';
+                } else if (playLogEntry.includes('conversion GOOD!')) {
+                    descriptiveText = `✅ ${playLogEntry} Points are good!`;
+                    styleClass = 'font-semibold text-green-400';
+                } else if (playLogEntry.includes('Conversion FAILED!')) {
+                    descriptiveText = `❌ ${playLogEntry} No good!`;
+                    styleClass = 'font-semibold text-red-400';
+                } else if (playLogEntry.startsWith('❗ INTERCEPTION') || playLogEntry.startsWith('❗ FUMBLE')) {
+                    descriptiveText = playLogEntry;
+                    styleClass = 'font-semibold text-red-400';
+                } else if (playLogEntry.startsWith('✋ Turnover on downs')) {
+                    descriptiveText = playLogEntry;
+                    styleClass = 'font-semibold text-red-400';
+                } else if (playLogEntry.startsWith('💥 SACK')) {
+                    // Now the yard line is correct *after* the sack
+                    descriptiveText = `${playLogEntry.replace('SACK!', 'SACK!')} Ball on the ${fieldSide} ${yardLine}.`;
+                    styleClass = 'text-orange-400';
+                } else if (playLogEntry.includes('stuffed near the line')) {
+                    descriptiveText = `🧱 ${playLogEntry} Stopped at the ${fieldSide} ${yardLine}!`;
+                    styleClass = 'text-orange-300';
+                } else if (playLogEntry.includes(' passes to ')) {
+                    const passer = playLogEntry.match(/^(.*?) passes to/)?.[1];
+                    const receiver = playLogEntry.match(/passes to (.*?)\.\.\./)?.[1];
+                    descriptiveText = `🏈 ${passer} passes to ${receiver}...`;
+                } else if (playLogEntry.includes('Caught by') && playLogEntry.includes('yards')) {
+                    const yardsMatch = playLogEntry.match(/for (-?\d+\.?\d*) yards/);
+                    const yards = yardsMatch ? parseFloat(yardsMatch[1]) : 0;
+                    if (yards >= 15) { descriptiveText = `🎯 ${playLogEntry.replace('Caught by', 'Hauled in by')} for a big gain! Ball at the ${fieldSide} ${yardLine}.`; }
+                    else if (yards > 0) { descriptiveText = `👍 ${playLogEntry.replace('Caught by', 'Complete to')}. Ball at the ${fieldSide} ${yardLine}.`; }
+                    else { descriptiveText = `✋ ${playLogEntry}. Stopped for minimal gain. Ball at the ${fieldSide} ${yardLine}.`; }
+                } else if (playLogEntry.includes('INCOMPLETE')) {
+                    if (playLogEntry.includes('Defended by')) { descriptiveText = `🚫 ${playLogEntry.replace('INCOMPLETE pass to', 'Pass intended for')} Knocked away!`; }
+                    else if (playLogEntry.includes('Off target')) { descriptiveText = ` overthrown... ${playLogEntry}`; }
+                    else { descriptiveText = `❌ ${playLogEntry}`; }
+                    styleClass = 'font-semibold text-red-400';
+                } else if (playLogEntry.match(/(\w+\s+'?\w+'?) (bursts through|shakes off|breaks into|is loose!|finds a small crease|runs out of bounds)/)) {
+                    const yardsMatch = playLogEntry.match(/gain of (\d+\.?\d*)|loss of (\d+\.?\d*)/);
+                    let yards = 0;
+                    if (yardsMatch) { yards = parseFloat(yardsMatch[1] || `-${yardsMatch[2]}`); }
+                    else if (playLogEntry.includes("crease")) { yards = getRandomInt(1, 3); }
+                    else { yards = getRandomInt(4, 7); }
+                    if (yards >= 10) { descriptiveText = `💨 HE'S LOOSE! ${playLogEntry}! Great run! Ball at the ${fieldSide} ${yardLine}.`; }
+                    else if (yards > 0) { descriptiveText = `➡️ ${playLogEntry}. Nice gain on the ground. Ball at the ${fieldSide} ${yardLine}.`; }
+                    else { descriptiveText = `✋ ${playLogEntry}. Stopped near the line. Ball at the ${fieldSide} ${yardLine}.`; }
+                    styleClass = 'text-cyan-300';
+                } else if (playLogEntry.includes('tackled by') || playLogEntry.includes('Stopped by') || playLogEntry.includes('dragged down') || playLogEntry.includes('Caught from behind')) {
+                    descriptiveText = `${playLogEntry} Ball at the ${fieldSide} ${yardLine}.`; // Removed extra emoji
+                } else if (playLogEntry.startsWith('➡️ First down')) {
+                    descriptiveText = playLogEntry;
+                    styleClass = 'text-yellow-300 font-semibold';
+                } else if (playLogEntry.startsWith('🚑 INJURY')) {
+                    descriptiveText = playLogEntry;
+                    styleClass = 'text-purple-400 italic';
+                }
+                // --- End INTEGRATED Descriptive Text Logic ---
+
+                // --- >>> STEP 3: APPEND TO TICKER <<< ---
+                p.className = styleClass;
+                p.textContent = descriptiveText;
+                ticker.appendChild(p);
+
+            } // End FOR loop for log entries
 
             logIndexToShow = frame.logIndex;
-            if(ticker) ticker.scrollTop = ticker.scrollHeight;
+            if (ticker) ticker.scrollTop = ticker.scrollHeight;
 
-             // --- Update UI elements AFTER processing logs for this frame ---
-             if(elements.simAwayScore) elements.simAwayScore.textContent = currentAwayScore;
-             if(elements.simHomeScore) elements.simHomeScore.textContent = currentHomeScore;
-             if(elements.simGameDrive) elements.simGameDrive.textContent = currentDriveText;
-             if(elements.simGameDown) elements.simGameDown.textContent = driveActive ? `${down} & ${toGo <= 0 ? 'Goal' : toGo}` : ( (liveGameCurrentIndex >= allFrames.length -1) ? "FINAL" : 'Change of Possession');
-             if(elements.simPossession) elements.simPossession.textContent = possessionTeamName ? `${possessionTeamName} Ball` : '';
-             // --- End UI Update ---
+            // --- Update UI elements AFTER processing logs for this frame ---
+            if (elements.simAwayScore) elements.simAwayScore.textContent = currentAwayScore;
+            if (elements.simHomeScore) elements.simHomeScore.textContent = currentHomeScore;
+            if (elements.simGameDrive) elements.simGameDrive.textContent = currentDriveText;
+            if (elements.simGameDown) elements.simGameDown.textContent = driveActive ? `${down} & ${toGo <= 0 ? 'Goal' : toGo}` : ((liveGameCurrentIndex >= allFrames.length - 1) ? "FINAL" : 'Change of Possession');
+            if (elements.simPossession) elements.simPossession.textContent = possessionTeamName ? `${possessionTeamName} Ball` : '';
+            // --- End UI Update ---
 
         } // End IF for syncing logs
         // --- End Sync Log Entries ---
@@ -1602,16 +1626,16 @@ export function setSimSpeed(speed) {
         // (This function is identical to the one in startLiveGameSim)
         function nextFrameForRestart() {
             if (!currentLiveGameResult || !currentLiveGameResult.visualizationFrames || !currentLiveGameResult.gameLog) {
-                 clearInterval(liveGameInterval); liveGameInterval = null; return;
+                clearInterval(liveGameInterval); liveGameInterval = null; return;
             }
-            
+
             const allFrames = currentLiveGameResult.visualizationFrames;
             const allLogs = currentLiveGameResult.gameLog;
             const ticker = elements.simPlayLog;
-            
+
             // We need to know the *current* frame index
             let frameIndex = liveGameCurrentIndex;
-            
+
             // We must find the log index *up to the current frame*
             let logIndexToShow = 0;
             if (frameIndex > 0 && frameIndex < allFrames.length) {
@@ -1628,14 +1652,14 @@ export function setSimSpeed(speed) {
                 elements.simGameDown.textContent = "FINAL";
                 elements.simPossession.textContent = "";
                 drawFieldVisualization(null);
-                
+
                 currentLiveGameResult = null;
                 if (liveGameCallback) { const cb = liveGameCallback; liveGameCallback = null; cb(); }
                 return;
             }
 
             const frame = allFrames[frameIndex];
-            
+
             // --- SYNC LOGS ---
             if (ticker && frame.logIndex > logIndexToShow) {
                 for (let i = logIndexToShow; i < frame.logIndex; i++) {
@@ -1649,7 +1673,7 @@ export function setSimSpeed(speed) {
                     else if (playLogEntry.startsWith('💥')) styleClass = 'text-orange-400';
                     else if (playLogEntry.startsWith('➡️')) styleClass = 'text-yellow-300 font-semibold';
                     else if (playLogEntry.startsWith('🚑')) styleClass = 'text-purple-400 italic';
-                    
+
                     p.className = styleClass;
                     p.textContent = playLogEntry;
                     ticker.appendChild(p);
@@ -1658,9 +1682,9 @@ export function setSimSpeed(speed) {
                 ticker.scrollTop = ticker.scrollHeight;
             }
             // --- END SYNC LOGS ---
-            
+
             drawFieldVisualization(frame);
-            
+
             liveGameCurrentIndex++; // Increment the *global* frame index
         }
         // --- END NEW function ---

@@ -115,6 +115,8 @@ canvas#field-canvas {
     border-bottom: 2px solid rgba(255,255,255,0.5);
     max-width: 100%;
     height: auto;
+    margin: 0 auto;
+    display: block;
 }
 
 /* In css/style.css */
