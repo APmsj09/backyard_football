@@ -2615,25 +2615,16 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
             // B. Update Player Positions (Movement)
             playState.activePlayers.forEach(p => updatePlayerPosition(p, timeDelta));
 
+// --- NEW, CORRECTED BLOCK ---
+
             // C. Update Ball Position
             if (playState.ballState.inAir) {
                 playState.ballState.x += playState.ballState.vx * timeDelta;
                 playState.ballState.y += playState.ballState.vy * timeDelta;
-                playState.ballState.z += playState.ballState.vz * timeDelta;
-                playState.ballState.vz -= 9.8 * timeDelta; // Gravity
-                if (playState.ballState.z <= 0.1 && playState.tick > 2) {
-                    playState.incomplete = true; playState.playIsLive = false; playState.ballState.inAir = false;
-                    break;
-                }
-                // --- ADD THIS CHECK FOR OUT OF BOUNDS PASS ---
-                if (playState.ballState.x <= 0.1 || playState.ballState.x >= FIELD_WIDTH - 0.1 || playState.ballState.y >= FIELD_LENGTH - 0.1) {
-                    gameLog.push(`‹‹ Pass sails out of bounds. Incomplete.`);
-                    playState.incomplete = true; playState.playIsLive = false; playState.ballState.inAir = false;
-                    break; // End play
-                }
-                // --- END ADDED BLOCK ---
-                
+                playState.ballState.z += playState.ballState.vz * timeDelta; // z pos updated
+                playState.ballState.vz -= 9.8 * timeDelta; // vz updated
             } else if (ballCarrierState) {
+                // Keep ball on the carrier if not in air
                 playState.ballState.x = ballCarrierState.x;
                 playState.ballState.y = ballCarrierState.y;
                 playState.ballState.z = 0.5;
@@ -2646,11 +2637,32 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
                 if (ballCarrierState) {
                     if (checkTackleCollisions(playState, gameLog)) break;
                 }
-                if (playState.ballState.inAir && playState.ballState.z <= 2.5 && playState.ballState.z > 0.1) {
-                    handleBallArrival(playState, gameLog);
-                    if (!playState.playIsLive) break;
+                
+                // --- STEP 1: CHECK FOR CATCH/INTERCEPTION FIRST ---
+                // Check if ball is in the air AND at a catchable height
+                if (playState.ballState.inAir && playState.ballState.z <= 2.5 && playState.ballState.z >= 0.1) {
+                    handleBallArrival(playState, gameLog); 
+                    // handleBallArrival will set playState.playIsLive to false if a catch,
+                    // drop, or INT occurs.
+                    if (!playState.playIsLive) break; // Play was resolved
+                }
+
+                // --- STEP 2: IF NO CATCH, CHECK FOR GROUND/OOB ---
+                // This only runs if the play wasn't already resolved by a catch
+                if (playState.ballState.inAir) { 
+                    if (playState.ballState.z <= 0.1 && playState.tick > 2) {
+                        gameLog.push(`‹‹ Pass hits the ground. Incomplete.`);
+                        playState.incomplete = true; playState.playIsLive = false; playState.ballState.inAir = false;
+                        break; // Ball hit ground
+                    }
+                    if (playState.ballState.x <= 0.1 || playState.ballState.x >= FIELD_WIDTH - 0.1 || playState.ballState.y >= FIELD_LENGTH - 0.1) {
+                        gameLog.push(`‹‹ Pass sails out of bounds. Incomplete.`);
+                        playState.incomplete = true; playState.playIsLive = false; playState.ballState.inAir = false;
+                        break; // Ball went out of bounds
+                    }
                 }
             }
+// --- END NEW BLOCK ---
 
             // E. Resolve Ongoing Battles (Blocks)
             if (playState.playIsLive) {
