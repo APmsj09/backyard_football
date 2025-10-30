@@ -1081,7 +1081,7 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
     // --- End STEP 1 ---
 
     // --- Helper function to set up players for one side (Offense or Defense) ---
-    const setupSide = (team, side, formationData, isOffense) => {
+    const setupSide = (team, side, formationData, isOffense, initialOffenseStates) => {
         // Validate input data
         if (!team || !team.roster || !formationData || !formationData.slots || !formationData.coordinates) {
             console.error(`setupInitialPlayerStates: Invalid data for ${side} team ${team?.name}`);
@@ -1092,7 +1092,7 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
         // Loop through each slot defined in the formation
         formationData.slots.forEach(slot => {
             // Find the best available player for the slot
-            const player = getPlayerBySlot(team, side, slot, usedSet, gameLog) || findEmergencyPlayer(slot.replace(/\d/g, ''), team, side, usedSet, gameLog)?.player; // <<< Check this function
+            const player = getPlayerBySlot(team, side, slot, usedSet) || findEmergencyPlayer(slot.replace(/\d/g, ''), team, side, usedSet)?.player;
             // Skip if no valid player can be found for this slot
             if (!player || !player.attributes) {
                 console.warn(`Could not find valid player for ${side} slot ${slot} on team ${team.name}`);
@@ -1169,9 +1169,9 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
             startY = Math.max(10.5, Math.min(FIELD_LENGTH - 10.5, startY));
 
             // --- Determine Initial Action, Target Point, and Route Path ---
-            let action = 'idle'; // Default action
-            let assignment = null; // Specific task from playbook
-            let targetX = startX; // Initial target is current position
+            let action = 'idle'; 
+            let assignment = defAssignments[slot] || 'def_read'; 
+            let targetX = startX; 
             let targetY = startY;
             let routePath = null; // For receivers running routes
 
