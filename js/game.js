@@ -877,7 +877,7 @@ function getBestSub(team, position, usedPlayerIds) {
 }
 
 /** Gets active players for specific slots (e.g., all 'WR' slots). */
-function getPlayersForSlots(team, side, slotPrefix, usedPlayerIdsThisPlay) {
+function getPlayersForSlots(team, side, slotPrefix, usedPlayerIdsThisPlay, gameLog) {
     if (!team || !team.depthChart || !team.depthChart[side] || !team.roster || !Array.isArray(team.roster)) {
         console.error(`getPlayersForSlots: Invalid team data for ${team?.id}, side ${side}.`); return [];
     }
@@ -1092,8 +1092,7 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
         // Loop through each slot defined in the formation
         formationData.slots.forEach(slot => {
             // Find the best available player for the slot
-            const player = getPlayerBySlot(team, side, slot, usedSet) || findEmergencyPlayer(slot.replace(/\d/g, ''), team, side, usedSet)?.player;
-
+            const player = getPlayerBySlot(team, side, slot, usedSet, gameLog)|| findEmergencyPlayer(slot.replace(/\d/g,''), team, side, usedSet, gameLog)?.player; // <<< Check this function
             // Skip if no valid player can be found for this slot
             if (!player || !player.attributes) {
                 console.warn(`Could not find valid player for ${side} slot ${slot} on team ${team.name}`);
@@ -1287,7 +1286,7 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
  * Updates player targets based on their current action, assignment, and game state. (Improved AI)
  * Modifies playerState objects within playState.activePlayers directly.
  */
-function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrierState, playType, offensiveAssignments, defensivePlayCallKey) {
+function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrierState, playType, offensiveAssignments, defensivePlayCallKey, gameLog) {
     const qbState = offenseStates.find(p => p.slot?.startsWith('QB'));
     const isBallInAir = playState.ballState.inAir;
     const ballPos = playState.ballState;
