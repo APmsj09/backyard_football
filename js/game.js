@@ -975,11 +975,11 @@ function findEmergencyPlayer(position, team, side, usedPlayerIdsThisPlay) {
 // Run/Blitz assignments: { xOffset, yOffset } relative to ball snap X and LoS Y=0.
 const zoneBoundaries = {
     // --- Pass Coverage Zones (Relative to LoS = 0) ---
-    'zone_flat_left': { minX: 0, maxX: HASH_LEFT_X - 3, minY: -2, maxY: 8 },   // Sideline, near LoS
-    'zone_flat_right': { minX: HASH_RIGHT_X + 3, maxX: FIELD_WIDTH, minY: -2, maxY: 8 },
-    'zone_hook_curl_left': { minX: HASH_LEFT_X - 2, maxX: CENTER_X - 1, minY: 7, maxY: 15 }, // Between hash and center, intermediate depth
-    'zone_hook_curl_middle': { minX: CENTER_X - 7, maxX: CENTER_X + 7, minY: 8, maxY: 16 }, // Center field, intermediate depth
-    'zone_hook_curl_right': { minX: CENTER_X + 1, maxX: HASH_RIGHT_X + 2, minY: 7, maxY: 15 }, // Between center and hash, intermediate depth (added for symmetry)
+    'zone_flat_left': { minX: 0, maxX: HASH_LEFT_X, minY: -2, maxY: 8 },
+    'zone_flat_right': { minX: HASH_RIGHT_X, maxX: FIELD_WIDTH, minY: -2, maxY: 8 },
+    'zone_hook_curl_left': { minX: HASH_LEFT_X, maxX: CENTER_X, minY: 7, maxY: 15 },
+    'zone_hook_curl_middle': { minX: HASH_LEFT_X, maxX: HASH_RIGHT_X, minY: 8, maxY: 16 }, // Sits *between* hashes
+    'zone_hook_curl_right': { minX: CENTER_X, maxX: HASH_RIGHT_X, minY: 7, maxY: 15 },
     'zone_short_middle': { minX: CENTER_X - 7, maxX: CENTER_X + 7, minY: 0, maxY: 12 }, // General short middle coverage
 
     'zone_deep_half_left': { minX: 0, maxX: CENTER_X, minY: 15, maxY: 60 },        // Deep left half of field
@@ -999,7 +999,7 @@ const zoneBoundaries = {
     'run_edge_right': { xOffset: 10, yOffset: 1.0 },   // Outside the tackle/end on right
 
     'blitz_gap': { xOffset: 0, yOffset: 1.0 },    // General inside blitz towards QB depth
-    'blitz_edge': { xOffset: 9, yOffset: 0.5 },    // Blitz wide towards QB depth (X will be mirrored based on side)
+    'blitz_edge': { xOffset: 9, yOffset: 0.5 },    // Blitz wide towards QB depth 
 
     // --- Conceptual/AI-Driven Assignments (Need logic in updatePlayerTargets) ---
     'pass_rush': null, // Target QB, handled by AI logic
@@ -1196,7 +1196,22 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
 
                     if (startY < zoneTarget.y - 2) {
                         startY = zoneTarget.y; startX = zoneTarget.x; targetX = startX; targetY = startY;
-                    } else { targetX = zoneTarget.x; targetY = zoneTarget.y; }
+                    } else if (assignment.startsWith('zone_')) {
+                        const zoneTarget = getZoneCenter(assignment, playState.lineOfScrimmage);
+
+                        // --- 🛠️ FIX: Always set the TARGET to the zone center ---
+                        targetX = zoneTarget.x;
+                        targetY = zoneTarget.y;
+
+                        // --- 🛠️ FIX: ONLY adjust startY for deep zones ---
+                        // e.g., A Safety is assigned a deep zone but their formation spot is shallow
+                        if (assignment.includes('deep') && startY < zoneTarget.y - 5) {
+                            // Snap them back to their deep responsibility
+                            startY = zoneTarget.y;
+                            startX = zoneTarget.x;
+                        }
+                        // --- For LBs and CBs, startX/startY will now correctly use their formation coordinates ---
+                    }
 
                     if (slot.startsWith('DB') && isNaN(relCoords[0])) {
                         const wideOffset = startX < CENTER_X ? -2 : 2;
@@ -1228,7 +1243,8 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
 
 
             // --- Create Player State Object for Simulation (uses the final values) ---
-            const fatigueModifier = player ? Math.max(0.3, (1 - (player.fatigue / (player.attributes?.physical?.stamina || 50) * 3))) : 1.0;
+            const fatigueRatio = player ? (player.fatigue / (player.attributes?.physical?.stamina || 50)) : 0;
+            const fatigueModifier = Math.max(0.3, 1.0 - fatigueRatio);
             playState.activePlayers.push({
                 id: player.id, name: player.name, number: player.number,
                 teamId: team.id, primaryColor: team.primaryColor, secondaryColor: team.secondaryColor,
@@ -1272,32 +1288,36 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
 
     // --- Set Initial Ball Position & Carrier ---
     const qbState = playState.activePlayers.find(p => p.slot === 'QB1' && p.isOffense);
-    const rbState = playState.activePlayers.find(p => p.slot === 'RB1' && p.isOffense); // Find the primary RB
+    const rbState = playState.activePlayers.find(p => p.slot === 'RB1' && p.isOffense);
 
-    if (play.type === 'run' && rbState && assignments[rbState.slot]?.includes('run_')) {
-        // --- IT'S A RUN PLAY ---
-        // Give the ball directly to the RB
+    const isQBRun = qbState && assignments[qbState.slot]?.includes('run_');
+    const isRBRun = rbState && assignments[rbState.slot]?.includes('run_');
+
+    if (play.type === 'run' && isRBRun && !isQBRun) {
+        // --- IT'S A RUN PLAY (to RB) ---
         if (rbState) {
             rbState.hasBall = true;
             rbState.isBallCarrier = true;
-            playState.ballState.x = rbState.x; // Ball snaps to RB's position
+            playState.ballState.x = rbState.x;
             playState.ballState.y = rbState.y;
             playState.ballState.z = 1.0;
         }
-        if (qbState) {
-            qbState.hasBall = false;
-            qbState.isBallCarrier = false;
-            qbState.action = 'run_fake'; // Give QB a "fake" action
-        }
+        if (qbState) { qbState.action = 'run_fake'; /* ... */ }
+
     } else if (qbState) {
-        // --- IT'S A PASS PLAY ---
-        // Give the ball to the QB
+        // --- IT'S A PASS PLAY or QB RUN ---
         qbState.hasBall = true;
-        qbState.isBallCarrier = false; // QB is NOT a "carrier" on a pass play
         playState.ballState.x = qbState.x;
         playState.ballState.y = qbState.y;
         playState.ballState.z = 1.0;
-        // qbState.action is already 'qb_setup' from earlier logic
+
+        if (isQBRun) {
+            qbState.isBallCarrier = true; // QB is the carrier
+            // qbState.action is already 'run_path' from setup
+        } else {
+            qbState.isBallCarrier = false; // QB is a passer
+            // qbState.action is already 'qb_setup' from setup
+        }
     } else {
         // --- CRITICAL ERROR ---
         console.error("CRITICAL: QB not found during setup! Ending play.");
@@ -2426,55 +2446,77 @@ function updateQBDecision(playState, offenseStates, defenseStates, gameLog) {
             const est_dy = targetPlayerState.y - qbState.y;
             const est_distance = Math.sqrt(est_dx * est_dx + est_dy * est_dy);
             const throwSpeedYPS = 25 + (qbAttrs.physical?.strength || 50) / 10;
-            const est_airTime = Math.max(0.3, est_distance / throwSpeedYPS); // Estimated time ball will be in air
+            let est_airTime = Math.max(0.3, est_distance / throwSpeedYPS); // Estimated time ball will be in air
 
-            // 2. Predict receiver's future position based on their current movement and estimated air time
+            // 2. Predict receiver's future position (the "perfect" aim point)
             const rec_dx = targetPlayerState.targetX - targetPlayerState.x;
             const rec_dy = targetPlayerState.targetY - targetPlayerState.y;
             const rec_distToTarget = Math.sqrt(rec_dx * rec_dx + rec_dy * rec_dy);
 
-            // Get receiver's speed (logic copied from updatePlayerPosition)
             const rec_baseSpeedYPS = 3.0;
             const rec_scaleFactor = (8.0 - rec_baseSpeedYPS) / (99 - 50);
             const rec_speedYPS = rec_baseSpeedYPS + Math.max(0, (targetPlayerState.speed || 50) - 50) * rec_scaleFactor;
-            const rec_moveDist = rec_speedYPS * targetPlayerState.fatigueModifier * est_airTime; // How far receiver will move
+            const rec_moveDist = rec_speedYPS * targetPlayerState.fatigueModifier * est_airTime;
 
-            // --- 🛠️ MODIFIED --- Critical fix for leading the receiver
-            const targetLeadFactor = 0.9; // Was 0.3. This ensures receiver catches in stride.
+            const targetLeadFactor = 0.9; // Lead the receiver (0.9 = 90%)
 
             let aimX = targetPlayerState.x;
             let aimY = targetPlayerState.y;
 
             if (rec_distToTarget > 0.1) { // If receiver is still moving
-                aimX += (rec_dx / rec_distToTarget) * rec_moveDist * targetLeadFactor; // Lead the receiver
+                aimX += (rec_dx / rec_distToTarget) * rec_moveDist * targetLeadFactor;
                 aimY += (rec_dy / rec_distToTarget) * rec_moveDist * targetLeadFactor;
             }
 
-            // 3. Calculate throw vector to the *predicted* position (aimX, aimY)
-            const dx = aimX - qbState.x;
-            const dy = aimY - qbState.y;
-            const distance = Math.sqrt(dx * dx + dy * dy); // Final distance to led target
-            const airTime = Math.max(0.3, distance / throwSpeedYPS); // Final, more accurate airTime
+            // --- 🛠️ MODIFIED ERROR AND VELOCITY LOGIC ---
 
-            // 4. Apply accuracy penalties
+            // 3. Calculate distance to the "perfect" aim point
+            const dx_perfect = aimX - qbState.x;
+            const dy_perfect = aimY - qbState.y;
+            const distance_perfect = Math.sqrt(dx_perfect * dx_perfect + dy_perfect * dy_perfect);
+
+            // 4. Apply accuracy penalties as a DISTANCE (in yards)
             const accuracy = qbAttrs.technical?.throwingAccuracy || 50;
-            const accuracyPenalty = (100 - accuracy) / 180;
-            const pressurePenalty = isPressured ? 1.5 : 1.0; // Keep pressure penalty
+            const accuracyPenalty = (100 - accuracy) / 100; // 0.0 (perfect) to 1.0 (bad)
+            const pressurePenalty = isPressured ? 2.5 : 1.0; // Higher penalty for pressure
 
-            // --- 🛠️ MODIFIED --- Tunable error multiplier
-            const errorMultiplier = 8.0; // Tunable: (was 5.0) - higher = more error
-            const xError = (Math.random() - 0.5) * errorMultiplier * accuracyPenalty * pressurePenalty;
-            const yError = (Math.random() - 0.5) * errorMultiplier * accuracyPenalty * pressurePenalty;
+            // Max error scales with pass distance and QB skill
+            // e.g., 40-yard pass (dist/10=4) * 0.5 (50 acc) * 1.0 (no pressure) = 2 yards max error
+            const maxErrorDistance = (distance_perfect / 10) * accuracyPenalty * pressurePenalty;
 
-            // 5. Calculate final ball velocity
-            playState.ballState.vx = (dx / airTime) + xError;
-            playState.ballState.vy = (dy / airTime) + yError;
-            playState.ballState.vz = Math.min(15, 5 + distance / 3) / airTime;
+            const xError = (Math.random() - 0.5) * 2 * maxErrorDistance; // Full range, e.g., -2.0 to +2.0 yards
+            const yError = (Math.random() - 0.5) * 2 * maxErrorDistance;
 
-            playState.ballState.targetX = aimX + xError; // Store the final aim point (with error)
-            playState.ballState.targetY = aimY + yError; // Store the final aim point (with error)
+            // 5. Calculate the *actual* final landing spot
+            const finalAimX = aimX + xError;
+            const finalAimY = aimY + yError;
 
-            gameLog.push(`[DEBUG] QB aiming at: (${(aimX + xError).toFixed(1)}, ${(aimY + yError).toFixed(1)})`);
+            // 6. CLAMP the final landing spot to be IN-BOUNDS
+            const MIN_X = 1.0; // 1-yard buffer from left sideline (0)
+            const MAX_X = FIELD_WIDTH - 1.0; // 1-yard buffer from right sideline (53.3)
+            const MIN_Y = 1.0; // 1-yard buffer from back of endzone (0)
+            const MAX_Y = FIELD_LENGTH - 1.0; // 1-yard buffer from back of endzone (120)
+
+            const clampedAimX = Math.max(MIN_X, Math.min(MAX_X, finalAimX));
+            const clampedAimY = Math.max(MIN_Y, Math.min(MAX_Y, finalAimY));
+
+            // 7. Calculate final velocity needed to hit the *clamped, errored* spot
+            const dx_final = clampedAimX - qbState.x;
+            const dy_final = clampedAimY - qbState.y;
+            const distance_final = Math.sqrt(dx_final * dx_final + dy_final * dy_final);
+
+            // Re-calculate airTime based on the *actual* throw distance
+            const airTime = Math.max(0.3, distance_final / throwSpeedYPS);
+
+            playState.ballState.vx = dx_final / airTime;
+            playState.ballState.vy = dy_final / airTime;
+            playState.ballState.vz = Math.min(15, 5 + distance_final / 3) / airTime;
+
+            // 8. Set the ball's target AND the receiver's target to the SAME spot
+            playState.ballState.targetX = clampedAimX; // Store the final aim point
+            playState.ballState.targetY = clampedAimY; // Store the final aim point
+
+            gameLog.push(`[DEBUG] QB aiming at: (${clampedAimX.toFixed(1)}, ${clampedAimY.toFixed(1)})`);
             // --- End Ball Physics ---
 
         } else if (imminentSackDefender && actionTaken !== "Scramble") {
