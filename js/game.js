@@ -440,7 +440,7 @@ function updatePlayerPosition(pState, timeDelta) {
     // --- 1. 🛠️ NEW: Increased "arrival" radius ---
     // Stop if player is very close to the target.
     // This prevents "vibrating" when trying to reach an exact 0.0 point.
-    const ARRIVAL_RADIUS = 0.2; 
+    const ARRIVAL_RADIUS = 0.2;
     if (distToTarget < ARRIVAL_RADIUS) {
         pState.x = pState.targetX;
         pState.y = pState.targetY;
@@ -452,13 +452,13 @@ function updatePlayerPosition(pState, timeDelta) {
     // This formula creates a faster, tighter speed range (4.5 to 9.0 YPS)
     const MIN_SPEED_YPS = 4.5; // Speed for a 1-stat player
     const MAX_SPEED_YPS = 9.0; // Speed for a 99-stat player
-    
+
     // This maps the 1-99 stat range to the [4.5, 9.0] speed range
     const speedYPS = MIN_SPEED_YPS + ((pState.speed || 50) - 1) * (MAX_SPEED_YPS - MIN_SPEED_YPS) / (99 - 1);
-    
+
     // --- 3. Store Speed for Momentum ---
     // This is the line we added for the momentum calculation
-    pState.currentSpeedYPS = speedYPS * pState.fatigueModifier; 
+    pState.currentSpeedYPS = speedYPS * pState.fatigueModifier;
 
     // --- 4. Calculate Movement ---
     const moveDist = pState.currentSpeedYPS * timeDelta;
@@ -510,7 +510,7 @@ function diagnosePlay(pState, truePlayType, offensivePlayKey, tick) {
     // 1. Minimum Ticks to Read
     // Higher IQ = fewer ticks. 99 IQ = 2 ticks. 50 IQ = 4 ticks.
     // This formula can be tuned, but it creates a 2-4 tick "read" window.
-    const minTicksToRead = Math.max(2, Math.round((100 - iq) / 25) + 1);
+    const minTicksToRead = Math.max(6, Math.round((100 - iq) / 25) * 3 + 3); // Was max(2, ... /25) + 1
 
     if (tick < minTicksToRead) {
         return 'read'; // Still reading, not committed
@@ -1552,69 +1552,63 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                     }
                     break; // End case 'route_complete'
 
-                case 'pass_block': { // Using brackets to create a new scope
+                case 'pass_block': {
                     if (pState.engagedWith) {
-                        pState.targetX = pState.x; // Stay engaged if already blocking
+                        pState.targetX = pState.x; // Stay engaged
                         pState.targetY = pState.y;
-                        target = null; // We are engaged, no new target
-                        break; // Exit case
+                        target = null;
+                        break;
                     }
 
                     // --- 1. Find All Threats ---
-                    // Find all non-engaged rushers
                     const potentialTargets = defenseStates
                         .filter(d =>
-                            !d.isBlocked &&
-                            !d.isEngaged &&
+                            !d.isBlocked && !d.isEngaged &&
                             (d.assignment === 'pass_rush' || d.assignment?.includes('blitz'))
                         );
 
                     if (potentialTargets.length === 0) {
                         // --- No threat: Hold the pocket ---
                         pState.targetX = pState.initialX; // Stay in your spot
-                        pState.targetY = pState.initialY - 0.75; // Set 0.75 yards deep
-                        target = null; // No dynamic target
-                        break; // Exit case
+                        pState.targetY = pState.initialY - 0.75;
+                        target = null;
+                        break;
                     }
 
-                    // --- 2. Find *My* Assignment ---
-                    // My assignment is the rusher closest to *me* (the blocker)
+                    // --- 2. Find *My* Assignment (Closest rusher) ---
                     const targetDefender = potentialTargets
-                        .sort((a, b) => getDistance(pState, a) - getDistance(b, pState))[0];
+                        .sort((a, b) => getDistance(pState, a) - getDistance(pState, b))[0];
 
-                    // --- 3. Set Target "Set Point" ---
+                    // --- 3. 🛠️ MODIFIED: Target an "Intercept Point" ---
                     if (targetDefender) {
-                        // --- Target: Mirror the defender's X, but at my set depth ---
+                        // Target a spot 1 yard in front of the rusher,
+                        // to cut them off from the QB.
 
-                        // Set up *just* behind the line of scrimmage to form a pocket
-                        const setPointY = pState.initialY - 0.75; // Drop back 0.75 yards
+                        // Find rusher's target (the QB)
+                        const qbTarget = qbState || { x: pState.x, y: pState.y - 5 }; // Fallback if QB is missing
 
-                        // Target the defender's *current* X-coordinate.
-                        // This makes the blocker "mirror" the rusher.
-                        let targetX = targetDefender.x;
+                        // Get vector from rusher to QB
+                        const dx = qbTarget.x - targetDefender.x;
+                        const dy = qbTarget.y - targetDefender.y;
+                        const dist = Math.max(0.1, Math.sqrt(dx * dx + dy * dy));
 
-                        // --- "Funnel" Logic ---
-                        // Prevent outside blockers from chasing rushers too far inside
-                        // (This assumes OL1 is left, OL3 is right)
-                        if ((pState.slot === 'OL1' || pState.slot === 'WR1') && targetDefender.x > pState.initialX + 1.5) { // Left blocker, rusher crosses way inside
-                            targetX = pState.initialX + 1.5; // "Pass them off" by not chasing further
-                        } else if ((pState.slot === 'OL3' || pState.slot === 'WR2') && targetDefender.x < pState.initialX - 1.5) { // Right blocker, rusher crosses way inside
-                            targetX = pState.initialX - 1.5; // "Pass them off"
-                        }
+                        // Set target 1 yard "in front" of the rusher (towards the blocker)
+                        // This is a dynamic intercept point that updates every tick.
+                        const interceptY = targetDefender.y - (dy / dist) * 1.0;
+                        const interceptX = targetDefender.x - (dx / dist) * 1.0;
 
-                        pState.targetX = targetX;
-                        pState.targetY = setPointY;
+                        pState.targetX = interceptX;
+                        pState.targetY = interceptY;
 
                     } else {
-                        // --- Fallback (shouldn't be reached if potentialTargets > 0, but good to have) ---
+                        // --- Fallback ---
                         pState.targetX = pState.initialX;
-                        pState.targetY = pState.initialY - 0.75; // Set 0.75 yards deep
+                        pState.targetY = pState.initialY - 0.75;
                     }
 
                     target = null; // We are moving to a fixed {x, y} point, not pursuing
                     break; // End case 'pass_block'
                 }
-                // In updatePlayerTargets, inside the 'if (pState.isOffense)' switch:
 
                 case 'run_block': {
                     if (pState.engagedWith) {
@@ -2217,7 +2211,7 @@ function checkTackleCollisions(playState, gameLog) {
                 (carrierPlayer.attributes?.physical?.strength || 50) * 0.5
             );
             // Momentum Bonus
-            const carrierMomentum = (carrierWeight * carrierSpeed) * 0.1; // Smaller bonus
+            const carrierMomentum = (carrierWeight * carrierSpeed) * MOMENTUM_SCALING_FACTOR;
             // Final Power
             const breakPower = (carrierSkill + carrierMomentum) * ballCarrierState.fatigueModifier;
 
@@ -2231,7 +2225,7 @@ function checkTackleCollisions(playState, gameLog) {
                 (tacklerPlayer.attributes?.physical?.strength || 50) * 0.5
             );
             // Momentum Bonus (Tacklers get a bigger bonus for hitting hard)
-            const tacklerMomentum = (tacklerWeight * tacklerSpeed) * 0.15;
+            const tacklerMomentum = (tacklerWeight * tacklerSpeed) * (MOMENTUM_SCALING_FACTOR * 1.5);
             // Final Power
             const tacklePower = (tacklerSkill + tacklerMomentum) * defender.fatigueModifier;
 
@@ -2260,7 +2254,7 @@ function checkTackleCollisions(playState, gameLog) {
             } else { // Broken tackle
                 // Log both powers for debugging
                 gameLog.push(`💥 ${ballCarrierState.name} (BrkPwr: ${breakPower.toFixed(0)}) breaks tackle from ${defender.name} (TklPwr: ${tacklePower.toFixed(0)})!`);
-                defender.stunnedTicks = 10;
+                defender.stunnedTicks = 30; // Was 10
             }
         }
     }
@@ -2376,7 +2370,7 @@ function resolveOngoingBlocks(playState, gameLog) {
             gameLog.push(`🥞 ${blockerState.name} pancakes ${defenderState.name}!`);
 
             // Stun the defender for winning the block
-            defenderState.stunnedTicks = 15; // Stun for 15 ticks
+            defenderState.stunnedTicks = 35; // Stun for 15 ticks
 
             // End the engagement
             blockerState.engagedWith = null; blockerState.isEngaged = false;
@@ -2481,34 +2475,33 @@ function updateQBDecision(playState, offenseStates, defenseStates, gameLog) {
     openReceivers.sort((a, b) => (b.separation - a.separation) || (a.distFromQB - b.distFromQB));
 
     // --- 3. Decision Timing Logic ---
-    const initialReadTicks = 6; // QB needs ~0.9s to start reading, unless pressured
+    const initialReadTicks = 18; // QB needs ~0.9s to start reading, unless pressured
 
     // --- 🛠️ MODIFIED --- Lowered floor from 12 to 6
-    const maxDecisionTimeTicks = Math.max(6, Math.round((100 - qbIQ) / 6) + 5);
+    const maxDecisionTimeTicks = Math.max(36, Math.round((100 - qbIQ) / 6) * 3 + 15); // Was 12, /6, +5
     // e.g., IQ 50->13t, IQ 99->6t (was 12), IQ 1->21t
 
-    const pressureTimeReduction = isPressured ? Math.max(3, Math.round(maxDecisionTimeTicks * 0.3)) : 0;
+    const pressureTimeReduction = isPressured ? Math.max(9, Math.round(maxDecisionTimeTicks * 0.3)) : 0; // Was 3
     const currentDecisionTickTarget = maxDecisionTimeTicks - pressureTimeReduction;
 
     let decisionMade = false;
-    let reason = ""; // For debugging/logging if needed
+    let reason = "";
 
     if (imminentSackDefender) {
-        decisionMade = true; // MUST decide now
+        decisionMade = true;
         reason = "Imminent Sack";
     } else if (playState.tick >= currentDecisionTickTarget) {
-        decisionMade = true; // Time's up based on IQ and pressure
+        decisionMade = true;
         reason = "Decision Time Expired";
     } else if (isPressured && playState.tick >= initialReadTicks) {
-        // If pressured but not imminent sack, become more likely to decide after initial read
-        if (Math.random() < 0.4 + (playState.tick / 50)) { // Increased chance over time under pressure
+        // Increased chance over time under pressure
+        if (Math.random() < 0.4 + (playState.tick / 150)) { // Was /50
             decisionMade = true;
             reason = "Pressured Decision";
         }
     } else if (!isPressured && openReceivers.length > 0 && playState.tick >= initialReadTicks) {
         // Not pressured, someone's open, past initial read time
-        // Decide based on QB Consistency: High consistency QBs take good reads earlier
-        const consistencyCheck = (qbConsistency / 150) + (playState.tick / (maxDecisionTimeTicks * 2)); // Higher consistency, higher tick = higher chance
+        const consistencyCheck = (qbConsistency / 150) + (playState.tick / (maxDecisionTimeTicks * 2)); // This logic is fine
         if (Math.random() < consistencyCheck) {
             decisionMade = true;
             reason = "Open Receiver Found";
@@ -2977,7 +2970,7 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
     const { type, assignments } = play;
 
     const playState = {
-        playIsLive: true, tick: 0, maxTicks: 200,
+        playIsLive: true, tick: 0, maxTicks: 500,
         yards: 0, touchdown: false, turnover: false, incomplete: false, sack: false,
         ballState: { x: 0, y: 0, z: 1.0, vx: 0, vy: 0, vz: 0, targetPlayerId: null, inAir: false, throwerId: null, throwInitiated: false, targetX: 0, targetY: 0 },
         lineOfScrimmage: 0, activePlayers: [], blockBattles: [], visualizationFrames: []
@@ -3091,7 +3084,7 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
                     // --- STEP 2: IF NOT CAUGHT, CHECK FOR GROUND/OOB ---
                     // This will catch passes that land far from the target
                     if (playState.playIsLive) { // Check again, as handleBallArrival might have ended it
-                        if (playState.ballState.z <= 0.1 && playState.tick > 2) {
+                        if (playState.ballState.z <= 0.1 && playState.tick > 6) {
                             gameLog.push(`‹‹ Pass hits the ground. Incomplete.`);
                             playState.incomplete = true; playState.playIsLive = false; playState.ballState.inAir = false;
                             break; // Ball hit ground
