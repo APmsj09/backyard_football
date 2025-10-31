@@ -1296,10 +1296,10 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
                         // On PA passes, *initially* act like it's a run block
                         action = 'run_block';
                     } else {
-                        action = assignment; 
+                        action = assignment;
                     }
                     targetY = startY + (action === 'pass_block' ? -0.5 : 0.5);
-                    
+
                 } else if (slot.startsWith('QB')) {
                     assignment = 'qb_setup';
                     action = assignment; if (play.type === 'pass') targetY = startY - 2;
@@ -1329,13 +1329,18 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
                         startY = targetOffPlayer.y + yOffset;
                         targetX = startX; targetY = startY; // Target is starting position
                     } else {
-                        // FIX: Receiver not found -> Fallback to deep zone.
-                        console.warn(`Man target ${targetSlot} not found for DEF ${slot}. Defaulting to deep zone alignment.`);
-                        assignment = 'zone_deep_middle'; // Reassign the assignment property
-                        action = assignment; // Reassign the action property
+                        // 🛠️ "SMART" FIX: Receiver not found -> Default to a "Robber" / Hook Zone
+                        console.warn(`Man target ${targetSlot} not found for DEF ${slot}. Defaulting to Hook/Curl zone.`);
+                        assignment = 'zone_hook_curl_middle'; // <-- ✅ THE "SMART" FIX
+                        action = assignment;
                         const zoneCenter = getZoneCenter(assignment, playState.lineOfScrimmage);
-                        targetX = zoneCenter.x; targetY = zoneCenter.y;
-                        startX = targetX; startY = targetY; // Set starting pos to the zone center
+
+                        // Align them in their new zone
+                        targetX = zoneCenter.x;
+                        targetY = zoneCenter.y;
+
+                        // But have them start from their *original* formation spot to keep the look
+                        // (Their targetY will make them drop into the zone at the snap)
                     }
                 }
 
@@ -1654,11 +1659,27 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
 
                     // --- 1. Find All Threats ---
                     const potentialTargets = defenseStates
-                        .filter(d =>
-                            !d.isBlocked && !d.isEngaged &&
-                            (d.assignment === 'pass_rush' || d.assignment?.includes('blitz'))
-                                (getDistance(d, qbState) < 8.0 && d.targetY < d.y - 0.5) // Is close AND moving downhill
-                        );
+                        .filter(d => {
+                            if (d.isBlocked || d.isEngaged) return false;
+
+                            // --- NEW ROBUST CHECKS ---
+
+                            // Check 1: Is it a designated pass rusher?
+                            if (d.assignment === 'pass_rush') return true;
+
+                            // Check 2: Is it a blitzer? (Safely check for string)
+                            if (typeof d.assignment === 'string' && d.assignment.includes('blitz')) return true;
+
+                            // Check 3: Is it a "new" threat (e.g., zone defender) attacking the QB?
+                            if (qbState) { // Only check this if the QB exists
+                                if (getDistance(d, qbState) < 8.0 && d.targetY < d.y - 0.5) {
+                                    return true; // Is close AND moving downhill
+                                }
+                            }
+
+                            return false; // Not a threat
+                            // --- END NEW CHECKS ---
+                        });
 
                     if (potentialTargets.length === 0) {
                         // --- No threat: Hold the pocket ---
@@ -2744,7 +2765,7 @@ function updateQBDecision(playState, offenseStates, defenseStates, gameLog) {
             targetPlayerState = openPrimaryReads[0];
             actionTaken = "Throw Fallback Read";
             gameLog.push(`[QB Read]: 🧠 ${qbState.name} (IQ: ${qbIQ})'s progression was covered, finds a late open read in ${targetPlayerState.name}!`);
-        
+
         } else if (checkdownIsOpen) {
             // --- 2. Throw to Checkdown (Safe Play) ---
             targetPlayerState = read3_checkdown;
@@ -4070,12 +4091,12 @@ export function simulateGame(homeTeam, awayTeam) {
             }
             if (!result.incomplete && result.visualizationFrames?.length > 0) {
                 const finalBallX = result.visualizationFrames[result.visualizationFrames.length - 1].ball.x;
-                
+
                 if (finalBallX < HASH_LEFT_X) ballHash = 'L';
                 else if (finalBallX > HASH_RIGHT_X) ballHash = 'R';
                 else ballHash = 'M';
             }
-            
+
 
             ballOn += result.yards;
             ballOn = Math.max(0, Math.min(100, ballOn));
