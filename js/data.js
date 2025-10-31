@@ -257,34 +257,34 @@ export const defensivePlaybook = {
     },
 
     // --- Man Blitz --- (Cover 0 - No Safety Help)
-    'Man_Blitz_3-3-1': { 
-        name: 'Man Blitz (3-3-1)', concept: 'Man', blitz: true,
-        assignments: {
-            // --- 3 Man Rush ---
-            'DL1': 'blitz_edge', 
-            'DL2': 'blitz_gap', 
-            'DL3': 'blitz_edge',
-            // --- 4 Man Coverage (Cover 0) ---
-            'DB1': 'man_cover_WR1', // DB takes best WR
-            'LB2': 'man_cover_WR2', // <-- FIX: MLB takes WR2
-            'LB3': 'man_cover_WR3', // OLB takes slot/WR3
-            'LB1': 'man_cover_RB1'  // OLB takes RB
-        }
-    },
-    'Man_Blitz_2-3-2': { 
-        name: 'Man Blitz (2-3-2)', concept: 'Man', blitz: true,
-        assignments: {
-            // --- 3 Man Rush ---
-            'DL1': 'blitz_gap', 
-            'DL2': 'blitz_gap',
-            'LB3': 'blitz_edge', // Only one OLB blitzes now
-            // --- 4 Man Coverage (Cover 0) ---
-            'DB1': 'man_cover_WR1', // DB on WR1
-            'DB2': 'man_cover_WR2', // DB on WR2
-            'LB1': 'man_cover_WR3', // <-- FIX: OLB takes WR3
-            'LB2': 'man_cover_RB1'  // MLB takes RB
-        }
-    },
+    'Man_Blitz_3-3-1': {
+        name: 'Man Blitz (3-3-1)', concept: 'Man', blitz: true,
+        assignments: {
+            // --- 3 Man Rush ---
+            'DL1': 'blitz_edge',
+            'DL2': 'blitz_gap',
+            'DL3': 'blitz_edge',
+            // --- 4 Man Coverage (Cover 0) ---
+            'DB1': 'man_cover_WR1', // DB takes best WR
+            'LB2': 'man_cover_WR2', // <-- FIX: MLB takes WR2
+            'LB3': 'man_cover_WR3', // OLB takes slot/WR3
+            'LB1': 'man_cover_RB1'  // OLB takes RB
+        }
+    },
+    'Man_Blitz_2-3-2': {
+        name: 'Man Blitz (2-3-2)', concept: 'Man', blitz: true,
+        assignments: {
+            // --- 3 Man Rush ---
+            'DL1': 'blitz_gap',
+            'DL2': 'blitz_gap',
+            'LB3': 'blitz_edge', // Only one OLB blitzes now
+            // --- 4 Man Coverage (Cover 0) ---
+            'DB1': 'man_cover_WR1', // DB on WR1
+            'DB2': 'man_cover_WR2', // DB on WR2
+            'LB1': 'man_cover_WR3', // <-- FIX: OLB takes WR3
+            'LB2': 'man_cover_RB1'  // MLB takes RB
+        }
+    },
 
     // --- Run Stop --- (Usually involves crashing gaps/edges)
     'Run_Stop_4-2-1': { // Specific to 4-2-1
