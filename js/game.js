@@ -1198,10 +1198,11 @@ function calculateRoutePath(routeName, startX, startY) {
  */
 // Replace the entire setupInitialPlayerStates function in game.js with this:
 
-function setupInitialPlayerStates(playState, offense, defense, play, assignments, ballOnYardLine, defensivePlayKey, ballHash = 'M') {
+function setupInitialPlayerStates(playState, offense, defense, play, assignments, ballOnYardLine, defensivePlayKey, ballHash = 'M', offensivePlayKey = '') {
     playState.activePlayers = []; // Reset active players for the new play
     const usedPlayerIds_O = new Set(); // Track used offense players for this play
     const usedPlayerIds_D = new Set(); // Track used defense players for this play
+    const isPlayAction = offensivePlayKey.includes('PA_');
 
     // Get the selected defensive play call and its assignments
     const defPlay = defensivePlaybook[defensivePlayKey] || defensivePlaybook['Cover_2_Zone']; // Fallback if key invalid
@@ -1290,7 +1291,15 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
                     }
                 } else if (slot.startsWith('OL')) {
                     assignment = play.type === 'pass' ? 'pass_block' : 'run_block';
-                    action = assignment; targetY = startY + (action === 'pass_block' ? -0.5 : 0.5);
+                    // --- OL "Sell the Fake" Logic ---
+                    if (isPlayAction && assignment === 'pass_block') {
+                        // On PA passes, *initially* act like it's a run block
+                        action = 'run_block';
+                    } else {
+                        action = assignment; 
+                    }
+                    targetY = startY + (action === 'pass_block' ? -0.5 : 0.5);
+                    
                 } else if (slot.startsWith('QB')) {
                     assignment = 'qb_setup';
                     action = assignment; if (play.type === 'pass') targetY = startY - 2;
@@ -1694,6 +1703,16 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                 }
 
                 case 'run_block': {
+
+                    const PA_DELAY_TICKS = 20; // 20 ticks = 1.0 second
+                    if (playType === 'pass' && playState.tick > PA_DELAY_TICKS) {
+                        pState.action = 'pass_block'; // Switch to pass blocking
+                        pState.targetX = pState.initialX; // Settle into the pocket
+                        pState.targetY = pState.initialY - 0.75;
+                        target = null;
+                        break; // Skip the run_block logic for this tick
+                    }
+
                     if (pState.engagedWith) {
                         pState.targetX = pState.x; // Stay engaged
                         pState.targetY = pState.y;
@@ -2719,6 +2738,13 @@ function updateQBDecision(playState, offenseStates, defenseStates, gameLog) {
             actionTaken = "Throw Current Read";
             gameLog.push(`[QB Read]: 🎯 ${qbState.name} (IQ: ${qbIQ}) hits his read ${targetPlayerState.name} in rhythm!`);
 
+            // --- 🛠️ SWAPPED: This block (Fallback) now comes BEFORE the checkdown ---
+        } else if (qbIQ > 55 && openPrimaryReads.length > 0 && Math.random() < 0.7) {
+            // --- 2. (IQ CHECK) Find another open primary read ---
+            targetPlayerState = openPrimaryReads[0];
+            actionTaken = "Throw Fallback Read";
+            gameLog.push(`[QB Read]: 🧠 ${qbState.name} (IQ: ${qbIQ})'s progression was covered, finds a late open read in ${targetPlayerState.name}!`);
+        
         } else if (checkdownIsOpen) {
             // --- 2. Throw to Checkdown (Safe Play) ---
             targetPlayerState = read3_checkdown;
@@ -2728,15 +2754,6 @@ function updateQBDecision(playState, offenseStates, defenseStates, gameLog) {
             } else {
                 gameLog.push(`[QB Read]: 🔒 ${qbState.name} (IQ: ${qbIQ})'s read was covered. Checking down to ${targetPlayerState.name}.`);
             }
-
-            // --- 🛠️ NEW FALLBACK ---
-        } else if (qbIQ > 55 && openPrimaryReads.length > 0 && Math.random() < 0.7) {
-            // --- 3. (IQ CHECK) Find another open primary read ---
-            // The QB is smart enough (IQ > 55) to re-scan.
-            targetPlayerState = openPrimaryReads[0];
-            actionTaken = "Throw Fallback Read";
-            gameLog.push(`[QB Read]: 🧠 ${qbState.name} (IQ: ${qbIQ})'s progression was covered, finds a late open read in ${targetPlayerState.name}!`);
-            // --- END NEW FALLBACK ---
 
         } else if (canScramble) {
             // --- 4. Scramble ---
@@ -3176,8 +3193,7 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
     try {
         playState.lineOfScrimmage = ballOn + 10;
         // 🛠️ MOVED: Run setup *before* the hot route check, using the *initial* assignments
-        setupInitialPlayerStates(playState, offense, defense, play, assignments, ballOn, defensivePlayKey);
-
+        setupInitialPlayerStates(playState, offense, defense, play, assignments, ballOn, defensivePlayKey, ballHash, offensivePlayKey);
         // --- >>> BLOCK TO CAPTURE FRAME 0 <<< ---
         if (playState.playIsLive) { // Ensure setup didn't immediately fail
             const initialFrameData = {
