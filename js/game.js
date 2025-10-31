@@ -2617,10 +2617,16 @@ function updateQBDecision(playState, offenseStates, defenseStates, gameLog) {
         // Re-scan for *very* open receivers
         const scramblingReceivers = offenseStates.filter(p => p.action === 'run_route' || p.action === 'route_complete');
         const scramblingOpenReceivers = scramblingReceivers.filter(recState => {
-            // ... (rest of scanning logic)
-            return separation > SEPARATION_THRESHOLD + 1.5;
-        }).sort((a, b) => getDistance(qbState, a) - getDistance(qbState, b));
 
+            // We must calculate separation *inside* the filter
+            const closestDefender = defenseStates.filter(d => !d.isBlocked && !d.isEngaged)
+                .sort((a, b) => getDistance(recState, a) - getDistance(recState, b))[0];
+            const separation = closestDefender ? getDistance(recState, closestDefender) : 100;
+
+            // Must be more open for a throw on the run
+            return separation > SEPARATION_THRESHOLD + 1.5;
+
+        }).sort((a, b) => getDistance(qbState, a) - getDistance(qbState, b)); // Sort by closest
         if (scramblingOpenReceivers.length > 0) {
             // --- DECIDED TO THROW ON THE RUN ---
             qbState.action = 'qb_setup';
