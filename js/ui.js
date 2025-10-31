@@ -29,7 +29,7 @@ let debounceTimeout = null; // For debouncing input
 
 // --- Live Game Sim State ---
 let liveGameInterval = null; // Holds interval ID for stopping/starting
-let liveGameSpeed = 1000; // Current sim speed in milliseconds
+let liveGameSpeed = 100; // Current sim speed in milliseconds
 let liveGameCurrentIndex = 0; // Current index in the game log array
 let liveGameLog = []; // Stores the log entries for the current sim
 let liveGameCallback = null; // Function to call when sim completes or is skipped

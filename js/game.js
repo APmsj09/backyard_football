@@ -534,6 +534,47 @@ function diagnosePlay(pState, truePlayType, offensivePlayKey, tick) {
     // (We could add logic for "Draw" plays fooling them, but this is a great start)
     return truePlayType; // Returns the correct play ('run' or 'pass')
 }
+/**
+ * Calculates a player's suitability for a *specific* slot, based on
+ * the priorities defined in the formation data.
+ */
+function calculateSlotSuitability(player, slot, side, team) {
+    if (!player || !player.attributes) return 0;
+
+    const formationName = team.formations[side];
+    const formationData = (side === 'offense') ? offenseFormations[formationName] : defenseFormations[formationName];
+
+    // Get the priority weights for this specific slot (e.g., "DB1")
+    const priorities = formationData?.slotPriorities?.[slot];
+
+    // If no priorities are defined for this slot, fall back to generic overall
+    if (!priorities) {
+        const position = slot.replace(/\d/g, ''); // 'DB1' -> 'DB'
+        return calculateOverall(player, position);
+    }
+
+    let suitabilityScore = 0;
+    let totalWeight = 0;
+
+    // Loop through all attribute categories (physical, mental, technical)
+    for (const cat in player.attributes) {
+        if (!player.attributes[cat]) continue;
+
+        // Loop through all attributes in that category (speed, strength, etc.)
+        for (const attr in player.attributes[cat]) {
+            if (priorities[attr]) {
+                const weight = priorities[attr];
+                const statValue = player.attributes[cat][attr] || 50;
+
+                suitabilityScore += (statValue * weight);
+                totalWeight += weight;
+            }
+        }
+    }
+
+    // Return the weighted average
+    return (totalWeight > 0) ? (suitabilityScore / totalWeight) : 0;
+}
 
 // =============================================================
 // --- GAME STATE & TEAM MANAGEMENT ---
@@ -724,11 +765,12 @@ export function setupDraft() {
 /** Automatically sets depth chart for an AI team. */
 export function aiSetDepthChart(team) {
     if (!team || !team.roster || !team.depthChart || !team.formations) {
-        console.error(`aiSetDepthChart: Invalid team data provided for ${team?.name || 'unknown team'}.`); return;
+        console.error(`aiSetDepthChart: Invalid team data for ${team?.name || 'unknown team'}.`); return;
     }
     const { roster, depthChart, formations } = team;
     if (roster.length === 0) return;
 
+    // Initialize all slots to null
     for (const side in depthChart) {
         if (!depthChart[side]) depthChart[side] = {};
         const formationSlots = (side === 'offense' ? offenseFormations[formations.offense]?.slots : defenseFormations[formations.defense]?.slots) || [];
@@ -737,13 +779,22 @@ export function aiSetDepthChart(team) {
         depthChart[side] = newChartSide;
     }
 
-    for (const side in depthChart) {
-        const slots = Object.keys(depthChart[side]);
-        let availablePlayers = roster.filter(p => p && p.attributes && p.status);
+    // --- 🛠️ FIX: Re-ordered the sides. Fill DEFENSE first. ---
+    const sides = ['defense', 'offense'];
+    const alreadyAssignedPlayerIds = new Set(); // Tracks players who have a starting job
 
+    for (const side of sides) {
+        const slots = Object.keys(depthChart[side]);
+        let availablePlayers = roster.filter(p => p && p.attributes && p.status?.duration === 0);
+
+        // Sort slots to prioritize key positions
         slots.sort((a, b) => {
-            if (side === 'offense') {
-                if (a.startsWith('QB')) return -1; if (b.startsWith('QB')) return 1;
+            if (side === 'defense') {
+                if (a.startsWith('DB1')) return -1; if (b.startsWith('DB1')) return 1;
+                if (a.startsWith('LB2')) return -1; if (b.startsWith('LB2')) return 1;
+                if (a.startsWith('DL2')) return -1; if (b.startsWith('DL2')) return 1;
+            } else { // offense
+                if (a.startsWith('QB1')) return -1; if (b.startsWith('QB1')) return 1;
                 if (a.startsWith('RB1')) return -1; if (b.startsWith('RB1')) return 1;
                 if (a.startsWith('WR1')) return -1; if (b.startsWith('WR1')) return 1;
             }
@@ -752,20 +803,23 @@ export function aiSetDepthChart(team) {
 
         slots.forEach(slot => {
             if (availablePlayers.length > 0) {
+                // Find the best player for this slot
                 const bestPlayerForSlot = availablePlayers.reduce((best, current) => {
-                    const bestSuitability = calculateSlotSuitability(best, slot, side, team);
-                    const currentSuitability = calculateSlotSuitability(current, slot, side, team);
-                    const otherSide = side === 'offense' ? 'defense' : 'offense';
-                    const isStartingCriticalOtherSide = (player) => (team.depthChart[otherSide]?.['QB1'] === player.id) || (team.depthChart[otherSide]?.['RB1'] === player.id);
-                    const bestIsCritical = isStartingCriticalOtherSide(best);
-                    const currentIsCritical = isStartingCriticalOtherSide(current);
-                    if (bestIsCritical && !currentIsCritical) return current;
-                    if (!bestIsCritical && currentIsCritical) return best;
+                    let bestSuitability = calculateSlotSuitability(best, slot, side, team);
+                    let currentSuitability = calculateSlotSuitability(current, slot, side, team);
+
+                    // --- 🛠️ "Ironman" Fix: Penalize players who already have a job ---
+                    // This now works, because 'defense' runs first.
+                    if (alreadyAssignedPlayerIds.has(best.id)) bestSuitability -= 50;
+                    if (alreadyAssignedPlayerIds.has(current.id)) currentSuitability -= 50;
+
                     return currentSuitability > bestSuitability ? current : best;
                 }, availablePlayers[0]);
 
                 if (bestPlayerForSlot) {
                     depthChart[side][slot] = bestPlayerForSlot.id;
+                    alreadyAssignedPlayerIds.add(bestPlayerForSlot.id);
+                    // 
                     availablePlayers = availablePlayers.filter(p => p.id !== bestPlayerForSlot.id);
                 }
             }
@@ -982,46 +1036,56 @@ function getPlayersForSlots(team, side, slotPrefix, usedPlayerIdsThisPlay, gameL
 
 /** Gets a single, healthy player for a specific slot. */
 function getPlayerBySlot(team, side, slot, usedPlayerIdsThisPlay) {
-    if (!team || !team.depthChart || !team.depthChart[side] || !team.roster || !Array.isArray(team.roster)) {
+    if (!team || !team.depthChart || !team.depthChart[side] || !team.roster) {
         console.error(`getPlayerBySlot: Invalid team data for ${slot} on ${side}.`);
         return null;
     }
 
     const sideDepthChart = team.depthChart[side];
-    if (typeof sideDepthChart !== 'object' || sideDepthChart === null) {
-        console.error(`getPlayerBySlot: Invalid depth chart object for side ${side}.`);
-        return null;
-    }
-
-    const position = slot.replace(/\d/g, '');
     const starterId = sideDepthChart[slot];
 
     // --- STEP 1: Try to get the designated starter ---
     let player = team.roster.find(p => p && p.id === starterId);
 
-    // Check if the starter is ineligible (injured/busy or already used elsewhere)
+    // Check if the starter is ineligible (injured or already used this play)
     if (player && (player.status?.duration > 0 || usedPlayerIdsThisPlay.has(player.id))) {
-        player = null; // Mark the starter as unusable for this check
+        player = null; // Mark the starter as unusable
     }
 
-    // --- STEP 2: If starter is ineligible or missing, find the best substitute ---
+    // --- STEP 2: If starter is ineligible, find the BEST possible substitute ---
     if (!player) {
-        // NOTE: We assume getBestSub finds a player who is *not* in usedPlayerIdsThisPlay
-        player = getBestSub(team, position, usedPlayerIdsThisPlay);
+        const availableSubs = team.roster.filter(p =>
+            p && p.status?.duration === 0 && !usedPlayerIdsThisPlay.has(p.id)
+        );
+
+        if (availableSubs.length > 0) {
+            // --- 🛠️ FIX: Use smart logic, not getBestSub ---
+            // Find the sub with the highest "suitability" for THIS slot
+            player = availableSubs.reduce((best, current) => {
+                const bestScore = calculateSlotSuitability(best, slot, side, team);
+                const currentScore = calculateSlotSuitability(current, slot, side, team);
+                return (currentScore > bestScore) ? current : best;
+            }, availableSubs[0]);
+        }
     }
 
     // --- STEP 3: Finalize Player Usage ---
-    // If a valid, usable player was found (either starter or sub)
     if (player) {
-        // This player is now guaranteed to be available (not injured and not previously used).
-        // The calling function (e.g., setupSide) must add this player's ID to the usedSet
-        // to prevent reuse in the same play.
-
-        usedPlayerIdsThisPlay.add(player.id); // <<< ASSUMING THIS FUNCTION IS RESPONSIBLE FOR MARKING USED
+        usedPlayerIdsThisPlay.add(player.id);
         return player;
     }
 
-    return null;
+    // --- STEP 4: Absolute fallback (find an emergency player) ---
+    // If no subs were found (e.g., everyone is used), try to grab ANYONE.
+    // This calls the "dumb" getBestSub as a last resort.
+    const position = slot.replace(/\d/g, '');
+    const emergencySub = getBestSub(team, position, usedPlayerIdsThisPlay);
+    if (emergencySub) {
+        usedPlayerIdsThisPlay.add(emergencySub.id);
+        return emergencySub;
+    }
+
+    return null; // No one is available
 }
 
 /** Finds *any* healthy, unused player on the roster as a last resort. */
@@ -1612,70 +1676,61 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
 
                 case 'run_block': {
                     if (pState.engagedWith) {
-                        pState.targetX = pState.x;
+                        pState.targetX = pState.x; // Stay engaged
                         pState.targetY = pState.y;
+                        target = null;
                         break;
                     }
 
-                    // --- 1. Determine Run Direction and Play-Side ---
-                    const rbAssignment = offensiveAssignments['RB1'] || 'run_inside';
-                    const isInsideRun = rbAssignment.includes('inside');
-                    const playSideX = isInsideRun ? 0 : (rbAssignment.includes('left') ? -1 : 1); // -1 Left, 1 Right
-
-                    // --- 2. Find Targets ---
+                    // --- 1. Find All Threats ---
                     const potentialTargets = defenseStates.filter(d =>
                         !d.isBlocked && !d.isEngaged &&
-                        d.y < playState.lineOfScrimmage + 10 // Look 10 yards deep
+                        // Look for DLs, LBs, or blitzing DBs
+                        (d.assignment?.includes('run_') || d.assignment?.includes('blitz') || d.assignment === 'pass_rush' || d.slot.startsWith('DL') || d.slot.startsWith('LB'))
                     );
 
-                    // --- 🛠️ MODIFIED: Sort by relevance to the play ---
-                    potentialTargets.sort((a, b) => {
-                        // Score 1: Is the defender in the "play-side" half of the field?
-                        // (e.g., on an Outside_Left run, is the defender on the left side?)
-                        const a_onPlaySide = isInsideRun ?
-                            (Math.abs(a.x - CENTER_X) < 8) : // Inside run: "Play side" is between hashes
-                            ((a.x - CENTER_X) * playSideX > 0); // Outside run: Defender is on correct side
-                        const b_onPlaySide = isInsideRun ?
-                            (Math.abs(b.x - CENTER_X) < 8) :
-                            ((b.x - CENTER_X) * playSideX > 0);
+                    if (potentialTargets.length === 0) {
+                        // No threat, climb to next level
+                        pState.targetX = pState.x;
+                        pState.targetY = pState.y + 3; // Move 3 yards forward
+                        target = null;
+                        break;
+                    }
 
-                        if (a_onPlaySide && !b_onPlaySide) return -1; // A is more relevant
-                        if (!a_onPlaySide && b_onPlaySide) return 1; // B is more relevant
+                    // --- 2. Find *My* Assignment (Closest relevant defender) ---
+                    // We'll keep the sort simple for now: closest defender first.
+                    // You can re-add your "play-side" logic later if needed.
+                    const targetDefender = potentialTargets
+                        .sort((a, b) => getDistance(pState, a) - getDistance(pState, b))[0];
 
-                        // Score 2: Who is closer to the Line of Scrimmage? (Prioritize DL/LBs)
-                        const a_depth = a.y - playState.lineOfScrimmage;
-                        const b_depth = b.y - playState.lineOfScrimmage;
-                        if (a_depth < b_depth) return -1; // A is closer to LoS
-                        if (a_depth > b_depth) return 1;
-
-                        // Score 3: Who is closer to this blocker?
-                        return getDistance(pState, a) - getDistance(pState, b);
-                    });
-                    // --- END MODIFIED SORT ---
-
-                    const targetDefender = potentialTargets[0]; // The most relevant target
-
-                    // --- 3. Set Target Point (Leverage) ---
+                    // --- 3. 🛠️ MODIFIED: Target an "Intercept Point" ---
                     if (targetDefender) {
-                        let targetLeverageX = targetDefender.x;
+                        // Target a spot 1 yard *in front of* the defender,
+                        // to cut them off from the ball carrier.
 
-                        if (isInsideRun) {
-                            // Drive defender *away* from the center
-                            targetLeverageX = targetDefender.x + (targetDefender.x < CENTER_X ? 1.0 : -1.0);
-                        } else {
-                            // Outside Run: "Seal" the defender *inside*
-                            targetLeverageX = targetDefender.x + (playSideX < 0 ? 1.0 : -1.0); // +1 for Left run, -1 for Right run
-                        }
+                        // Find defender's target (the ball carrier or gap)
+                        const runTarget = ballCarrierState || { x: pState.x, y: pState.y + 5 }; // Fallback
 
-                        pState.targetX = targetLeverageX;
-                        pState.targetY = targetDefender.y + 0.5; // Aim slightly downfield
+                        // Get vector from rusher to their target
+                        const dx = runTarget.x - targetDefender.x;
+                        const dy = runTarget.y - targetDefender.y;
+                        const dist = Math.max(0.1, Math.sqrt(dx * dx + dy * dy));
+
+                        // Set target 1 yard "in front" of the defender (towards the blocker)
+                        const interceptY = targetDefender.y - (dy / dist) * 1.0;
+                        const interceptX = targetDefender.x - (dx / dist) * 1.0;
+
+                        pState.targetX = interceptX;
+                        pState.targetY = interceptY;
 
                     } else {
-                        // No defender: Climb to next level
-                        pState.targetX = pState.x + (playSideX * 2);
-                        pState.targetY = pState.y + 3;
+                        // --- Fallback (shouldn't be reached if potentialTargets > 0) ---
+                        pState.targetX = pState.x;
+                        pState.targetY = pState.y + 3; // Climb
                     }
-                    break;
+
+                    target = null; // We are moving to a fixed {x, y} point
+                    break; // End case 'run_block'
                 }
                 case 'run_path': { // --- Logic for RBs ---
                     const threatDistance = 3.5; // How far to look for immediate threats
@@ -2623,9 +2678,9 @@ function updateQBDecision(playState, offenseStates, defenseStates, gameLog) {
             const rec_dy = targetPlayerState.targetY - targetPlayerState.y;
             const rec_distToTarget = Math.sqrt(rec_dx * rec_dx + rec_dy * rec_dy);
 
-            const rec_baseSpeedYPS = 3.0;
-            const rec_scaleFactor = (8.0 - rec_baseSpeedYPS) / (99 - 50);
-            const rec_speedYPS = rec_baseSpeedYPS + Math.max(0, (targetPlayerState.speed || 50) - 50) * rec_scaleFactor;
+            const MIN_SPEED_YPS = 4.5;
+            const MAX_SPEED_YPS = 9.0;
+            const rec_speedYPS = MIN_SPEED_YPS + ((targetPlayerState.speed || 50) - 1) * (MAX_SPEED_YPS - MIN_SPEED_YPS) / (99 - 1);
             const rec_moveDist = rec_speedYPS * targetPlayerState.fatigueModifier * est_airTime;
 
             const targetLeadFactor = 0.9; // Lead the receiver (0.9 = 90%)
@@ -3437,7 +3492,48 @@ function determinePlayCall(offense, defense, down, yardsToGo, ballOn, scoreDiff,
 };
 
 
-// Replace the determineDefensivePlayCall function in game.js with this:
+/**
+ * AI (PRE-SNAP) Logic: Chooses the best defensive formation to counter
+ * the offense's personnel and the current down/distance.
+ * @param {object} defense - The defensive team object.
+ * @param {string} offenseFormationName - The *name* of the offense's formation (e.g., "Spread").
+ * @param {number} down - The current down.
+ * @param {number} yardsToGo - The current yards to go.
+ * @returns {string} The name of the chosen defensive formation (e.g., "2-3-2").
+ */
+function determineDefensiveFormation(defense, offenseFormationName, down, yardsToGo) {
+    // --- 🛠️ NEW: Read the defensive coach's preferred formation ---
+    const coachPreferredFormation = defense.coach?.preferredDefense || '3-3-1';
+
+    // Get the offense's personnel (e.g., {QB: 1, RB: 1, WR: 3, OL: 2})
+    const offPersonnel = offenseFormations[offenseFormationName]?.personnel;
+
+    // --- 1. Down & Distance Logic (This overrides everything) ---
+    if (yardsToGo <= 2) {
+        // Short yardage: Bring in the big guys.
+        return '4-2-1'; // Run Stop formation
+    }
+    if (down >= 3 && yardsToGo >= 8) {
+        // Long passing down: Bring in coverage.
+        return '2-3-2'; // Nickel/Pass defense formation
+    }
+
+    // --- 2. Personnel Matching Logic (This overrides coach preference) ---
+    if (offPersonnel) {
+        if (offPersonnel.WR >= 3) {
+            // Offense is in "Spread" (3+ WRs). Must match them with DBs.
+            return '2-3-2';
+        }
+        if (offPersonnel.RB >= 2) {
+            // Offense is in "Power" (2+ RBs). Must match them with LBs/DL.
+            return '4-2-1';
+        }
+    }
+
+    // --- 3. Default / Balanced ---
+    // If it's 1st & 10 or a "normal" situation, use the COACH'S PREFERRED formation.
+    return coachPreferredFormation;
+}
 
 /**
  * Determines the defensive play call based on formation, situation, and basic tendencies.
@@ -3662,10 +3758,24 @@ export function simulateGame(homeTeam, awayTeam) {
             const drivesRemainingInHalf = totalDrivesPerHalf - drivesCompletedInHalf;
             const drivesRemainingInGame = (currentHalf === 1 ? totalDrivesPerHalf : 0) + drivesRemainingInHalf;
 
+            // --- 1. Offense makes its call (Play + Formation) ---
             const offensivePlayKey = determinePlayCall(offense, defense, down, yardsToGo, ballOn, scoreDiff, gameLog, drivesRemainingInGame);
-            const defensivePlayKey = determineDefensivePlayCall(defense, offense, down, yardsToGo, ballOn, scoreDiff, gameLog, drivesRemainingInGame);
+            const offenseFormationName = offense.formations.offense; // Get the chosen formation
 
-            // --- >>> ADD THIS BLOCK <<< ---
+            // --- 2. 🛠️ NEW: Defensive "Pre-Snap" Read ---
+            // The AI reads the situation and the offense's *personnel* to choose a FORMATION.
+            const defensiveFormationName = determineDefensiveFormation(
+                defense,
+                offenseFormationName, // Pass in the offense's formation *name*
+                down,
+                yardsToGo
+            );
+            // --- This is the most important line: we SET the defense's formation ---
+            defense.formations.defense = defensiveFormationName;
+
+            // --- 3. Defense picks a PLAY from that formation ---
+            // This function now correctly uses the formation we just set.
+            const defensivePlayKey = determineDefensivePlayCall(defense, offense, down, yardsToGo, ballOn, scoreDiff, gameLog, drivesRemainingInGame);
 
             // Get clean names for logging
             const offPlayName = offensivePlayKey.split('_').slice(1).join(' '); // Gets "InsideRun" from "Balanced_InsideRun"
@@ -3674,8 +3784,7 @@ export function simulateGame(homeTeam, awayTeam) {
             gameLog.push(`🏈 **Offense:** ${offPlayName}`);
             gameLog.push(`🛡️ **Defense:** ${defPlayName}`);
 
-            // --- >>> END BLOCK <<< ---
-
+            // --- 4. "Snap" ---
             const result = resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, { gameLog, weather, ballOn });
             if (result.visualizationFrames) {
                 allVisualizationFrames.push(...result.visualizationFrames);

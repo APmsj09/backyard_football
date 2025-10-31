@@ -198,12 +198,20 @@ export const offensivePlaybook = {
 // Defensive Play Call Definitions
 export const defensivePlaybook = {
     // --- Cover 1 --- (Usually needs 1 Deep Safety + Man coverage)
-    'Cover_1_Man_3-3-1': {
+    'Cover_1_Man_3-3-1': { // Specific to 3-3-1 (3DL, 3LB, 1DB)
         name: 'Cover 1 Man (3-3-1)', concept: 'Man', blitz: false,
         assignments: {
-            'DL1': 'pass_rush', 'DL2': 'pass_rush', 'DL3': 'pass_rush',
-            'LB1': 'man_cover_RB1', 'LB2': 'spy_QB', 'LB3': 'man_cover_WR3', // <-- FIX
-            'DB1': 'zone_deep_middle'
+            // --- 3 Man Rush ---
+            'DL1': 'pass_rush',
+            'DL2': 'pass_rush',
+            'DL3': 'pass_rush',
+            // --- 3 Man Coverage ---
+            'LB1': 'man_cover_WR1', // 🛠️ FIX: OLB must cover WR1 (Big Mismatch)
+            'LB3': 'man_cover_WR2', // 🛠️ FIX: OLB must cover WR2 (Big Mismatch)
+            'LB2': 'man_cover_RB1', // MLB covers the RB
+            // --- 1 Deep Safety ---
+            'DB1': 'zone_deep_middle' // The "1" in Cover 1
+            // NOTE: This play follows the rule, but leaves WR3 (the slot) wide open.
         }
     },
     'Cover_1_Man_2-3-2': { // Specific to 2-3-2 (2DL, 3LB, 2DB)
@@ -310,6 +318,22 @@ export const defensivePlaybook = {
             // --- 1 Deep Zone ---
             'DB1': 'zone_deep_middle'
             // Note: This is a 4-man rush, 3-man zone. It's weak in the flats.
+        }
+    },
+    // --- 🛠️ NEW PLAY FOR 4-2-1 ---
+    'Man_Blitz_4-2-1': {
+        name: 'Man Blitz (4-2-1)', concept: 'Man', blitz: true,
+        assignments: {
+            // --- 4 Man Rush ---
+            'DL1': 'blitz_edge',
+            'DL2': 'blitz_gap',
+            'DL3': 'blitz_gap',
+            'DL4': 'blitz_edge',
+            // --- 3 Man Coverage (Cover 0) ---
+            'DB1': 'man_cover_WR1', // Safety takes best WR
+            'LB1': 'man_cover_WR2', // LB takes WR2
+            'LB2': 'man_cover_WR3'  // LB takes WR3
+            // Note: This is a high-risk blitz! The RB (RB1) is left completely uncovered.
         }
     },
     'Run_Stop_3-3-1': { // Specific to 3-3-1
