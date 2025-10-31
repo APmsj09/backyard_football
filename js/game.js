@@ -2513,7 +2513,8 @@ function updateQBDecision(playState, offenseStates, defenseStates, gameLog) {
 
             playState.ballState.vx = dx_final / airTime;
             playState.ballState.vy = dy_final / airTime;
-            playState.ballState.vz = Math.min(15, 5 + distance_final / 3) / airTime;
+            const g = 9.8; // Our gravity constant from resolvePlay
+            playState.ballState.vz = (g * airTime) / 2;
 
             // 8. Set the ball's target AND the receiver's target to the SAME spot
             playState.ballState.targetX = clampedAimX; // Store the final aim point
@@ -2872,7 +2873,7 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
                 playState.ballState.x += playState.ballState.vx * timeDelta;
                 playState.ballState.y += playState.ballState.vy * timeDelta;
                 playState.ballState.z += playState.ballState.vz * timeDelta; // z pos updated
-                playState.ballState.vz -= 9.8 * timeDelta; // vz updated
+                playState.ballState.vz -= 9.8 * timeDelta; // vz updated (using 9.8 as our g)
             } else if (ballCarrierState) {
                 // Keep ball on the carrier if not in air
                 playState.ballState.x = ballCarrierState.x;
@@ -2888,27 +2889,41 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
                     if (checkTackleCollisions(playState, gameLog)) break;
                 }
 
-                // --- STEP 1: CHECK FOR CATCH/INTERCEPTION FIRST ---
-                // Check if ball is in the air AND at a catchable height
-                if (playState.ballState.inAir && playState.ballState.z <= 2.5 && playState.ballState.z >= 0.1) {
-                    handleBallArrival(playState, gameLog);
-                    // handleBallArrival will set playState.playIsLive to false if a catch,
-                    // drop, or INT occurs.
-                    if (!playState.playIsLive) break; // Play was resolved
-                }
+                // --- 🛠️ MODIFIED: CATCH & OOB LOGIC ---
 
-                // --- STEP 2: IF NO CATCH, CHECK FOR GROUND/OOB ---
-                // This only runs if the play wasn't already resolved by a catch
                 if (playState.ballState.inAir) {
-                    if (playState.ballState.z <= 0.1 && playState.tick > 2) {
-                        gameLog.push(`‹‹ Pass hits the ground. Incomplete.`);
-                        playState.incomplete = true; playState.playIsLive = false; playState.ballState.inAir = false;
-                        break; // Ball hit ground
+                    // --- STEP 1: CHECK FOR (X,Y) ARRIVAL ---
+                    // Calculate 2D distance to the target
+                    const distToTargetXY = Math.sqrt(
+                        Math.pow(playState.ballState.x - playState.ballState.targetX, 2) +
+                        Math.pow(playState.ballState.y - playState.ballState.targetY, 2)
+                    );
+
+                    // Define a radius for when the ball is "at" the spot
+                    const CATCH_ARRIVAL_RADIUS = 2.0;
+
+                    if (distToTargetXY < CATCH_ARRIVAL_RADIUS) {
+                        // --- Ball has arrived at the (X,Y) landing spot ---
+                        // NOW we call handleBallArrival to check the height (z) and resolve the play.
+                        handleBallArrival(playState, gameLog);
+
+                        // handleBallArrival sets playIsLive to false if the play is resolved
+                        if (!playState.playIsLive) break;
                     }
-                    if (playState.ballState.x <= 0.1 || playState.ballState.x >= FIELD_WIDTH - 0.1 || playState.ballState.y >= FIELD_LENGTH - 0.1) {
-                        gameLog.push(`‹‹ Pass sails out of bounds. Incomplete.`);
-                        playState.incomplete = true; playState.playIsLive = false; playState.ballState.inAir = false;
-                        break; // Ball went out of bounds
+
+                    // --- STEP 2: IF NOT CAUGHT, CHECK FOR GROUND/OOB ---
+                    // This will catch passes that land far from the target
+                    if (playState.playIsLive) { // Check again, as handleBallArrival might have ended it
+                        if (playState.ballState.z <= 0.1 && playState.tick > 2) {
+                            gameLog.push(`‹‹ Pass hits the ground. Incomplete.`);
+                            playState.incomplete = true; playState.playIsLive = false; playState.ballState.inAir = false;
+                            break; // Ball hit ground
+                        }
+                        if (playState.ballState.x <= 0.1 || playState.ballState.x >= FIELD_WIDTH - 0.1 || playState.ballState.y >= FIELD_LENGTH - 0.1 || playState.ballState.y <= 0.1) {
+                            gameLog.push(`‹‹ Pass sails out of bounds. Incomplete.`);
+                            playState.incomplete = true; playState.playIsLive = false; playState.ballState.inAir = false;
+                            break; // Ball went out of bounds
+                        }
                     }
                 }
             }
