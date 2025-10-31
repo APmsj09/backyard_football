@@ -1269,6 +1269,12 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
                 assignment = defAssignments[slot] || 'def_read'; // Assignment is read from playbook
                 action = assignment; // Action defaults to assignment
 
+                // The defense must line up behind the line of scrimmage (LoS).
+                // LoS = playState.lineOfScrimmage. We allow a tiny buffer (0.1 yards) to be on the line.
+
+                startY = Math.min(playState.lineOfScrimmage + 0.1, startY);
+                targetY = Math.min(playState.lineOfScrimmage + 0.1, targetY);
+
                 // 1. Man Coverage Alignment (Fallback)
                 if (assignment.startsWith('man_cover_')) {
                     const targetSlot = assignment.split('man_cover_')[1];
@@ -1335,13 +1341,15 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
             }
 
             // --- Clamp final starting position within field boundaries ---
-            // This is necessary because defensive alignment adjustments can push players OOB
             startX = Math.max(0.5, Math.min(FIELD_WIDTH - 0.5, startX));
+            // Y-clamp: Must be between 10.5 and 109.5 (endzone buffer)
             startY = Math.max(10.5, Math.min(FIELD_LENGTH - 10.5, startY));
 
-            // --- Ensure Target is Clamped if it was a default assignment ---
-            targetX = Math.max(0.5, Math.min(FIELD_WIDTH - 0.5, targetX));
-            targetY = Math.max(0.5, Math.min(FIELD_LENGTH - 0.5, targetY));
+            // 🚨 CRITICAL DEFENSE CLAMP: Must line up behind the LoS
+            if (!isOffense) {
+                startY = Math.min(playState.lineOfScrimmage, startY);
+                targetY = Math.min(playState.lineOfScrimmage, targetY);
+            }
 
 
             // --- Create Player State Object for Simulation (uses the final values) ---
