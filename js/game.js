@@ -31,6 +31,7 @@ const teamColors = [
     { primary: '#A855F7', secondary: '#FFFFFF' }, // Purple
     { primary: '#14B8A6', secondary: '#FFFFFF' }, // Teal
 ];
+
 let availableColors = [...teamColors];
 
 // --- Constants ---
@@ -637,14 +638,36 @@ export async function initializeLeague(onProgress) {
     addMessage("Ready!", "League generated. Time to create your team.");
 }
 
+function refillAvailableColors() {
+    const usedColorHexes = new Set(game.teams.map(t => t.primaryColor));
+    availableColors = teamColors.filter(c => !usedColorHexes.has(c.primary));
+    if (availableColors.length === 0) {
+        console.warn("All colors used! Resetting full color pool.");
+        availableColors = [...teamColors];
+    }
+}
+
+function getUniqueColor() {
+    if (!Array.isArray(availableColors) || availableColors.length === 0) {
+        refillAvailableColors();
+    }
+    const colorIndex = getRandomInt(0, availableColors.length - 1);
+    return availableColors.splice(colorIndex, 1)[0];
+}
+
 /**
  * Creates the player-controlled team and adds it to the game state.
  */
 export function createPlayerTeam(teamName) {
-    if (!game || !game.teams || !game.divisions) {
-        console.error("Cannot create player team: Game not initialized properly."); return;
+    if (!game || !game.teams || !game.divisions || !divisionNames) {
+        console.error("Cannot create player team: Game not initialized properly.");
+        return;
     }
-    const finalTeamName = teamName.toLowerCase().startsWith("the ") ? teamName : `The ${teamName}`;
+
+    const finalTeamName = teamName.toLowerCase().startsWith("the ")
+        ? teamName
+        : `The ${teamName}`;
+
     const div0Count = game.divisions[divisionNames[0]]?.length || 0;
     const div1Count = game.divisions[divisionNames[1]]?.length || 0;
     const division = div0Count <= div1Count ? divisionNames[0] : divisionNames[1];
@@ -654,28 +677,35 @@ export function createPlayerTeam(teamName) {
     const defaultOffenseSlots = offenseFormations[defaultOffense].slots;
     const defaultDefenseSlots = defenseFormations[defaultDefense].slots;
 
-    // --- ADD Colors to Player Team ---
-    if (availableColors.length === 0) availableColors = [...teamColors]; // Refill if empty
-    const colorSet = availableColors.splice(getRandomInt(0, availableColors.length - 1), 1)[0];
-    // --- END ADD ---
+    const colorSet = getUniqueColor();
 
     const playerTeam = {
-        id: crypto.randomUUID(), name: finalTeamName, roster: [],
-        coach: getRandom(coachPersonalities), division, wins: 0, losses: 0,
-        primaryColor: colorSet.primary, // <-- ADDED
-        secondaryColor: colorSet.secondary, // <-- ADDED
+        id: crypto.randomUUID(),
+        name: finalTeamName,
+        roster: [],
+        coach: getRandom(coachPersonalities),
+        division,
+        wins: 0,
+        losses: 0,
+        primaryColor: colorSet.primary,
+        secondaryColor: colorSet.secondary,
         formations: { offense: defaultOffense, defense: defaultDefense },
         depthChart: {
             offense: Object.fromEntries(defaultOffenseSlots.map(slot => [slot, null])),
-            defense: Object.fromEntries(defaultDefenseSlots.map(slot => [slot, null]))
+            defense: Object.fromEntries(defaultDefenseSlots.map(slot => [slot, null])),
         },
-        draftNeeds: 0
+        draftNeeds: 0,
+        isPlayerControlled: true,
     };
+
     game.teams.push(playerTeam);
+    if (!Array.isArray(game.divisions[division])) game.divisions[division] = [];
     game.divisions[division].push(playerTeam.id);
     game.playerTeam = playerTeam;
+
     addMessage("Team Created!", `Welcome to the league, ${finalTeamName}! It's time to build your team in the draft.`);
 }
+
 
 // =============================================================
 // --- DRAFT LOGIC ---
