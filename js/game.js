@@ -1454,6 +1454,10 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
         playState.ballState.y = qbState.y;
         playState.ballState.z = 1.0;
 
+        qbState.readProgression = ['WR1', 'WR2', 'RB1']; // 1st, 2nd, 3rd (Checkdown) reads
+        qbState.currentReadTargetSlot = qbState.readProgression[0]; // Start with the first read
+        qbState.ticksOnCurrentRead = 0;
+
         if (isQBRun) {
             qbState.isBallCarrier = true; // QB is the carrier
             // qbState.action is already 'run_path' from setup
@@ -1759,13 +1763,17 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                     if (nearestThreat) {
                         // --- A. Immediate Avoidance (Threat is very close) ---
                         const distanceToThreat = getDistance(pState, nearestThreat);
-                        const avoidStrength = 1.2 + (threatDistance - distanceToThreat) * 0.5; // Stronger juke
+                        const avoidStrength = 1.2 + (threatDistance - distanceToThreat) * 0.5;
                         targetXOffset = (pState.x >= nearestThreat.x) ? avoidStrength : -avoidStrength;
                     } else {
                         // --- B. No Immediate Threat: Find Best Lane (with downhill bias) ---
-                        const lanes = [-4, 0, 4]; // Narrowed cut lanes (was [-7, 0, 7])
-                        const STRAIGHT_AHEAD_PENALTY = 5.0; // <<< THE FIX: Add 3 yards of "virtual" open space
-                        let bestLane = { xOffset: 0, minDist: -Infinity }; // Start at -Infinity to ensure first lane is picked
+
+                        // --- 🛠️ MODIFICATIONS ---
+                        const lanes = [-5, 0, 5]; // 1. Widen the cut lanes
+                        const DOWNHILL_BONUS = 1.5; // 2. Lower the bonus from 5.0 to 1.5
+                        // --- END MODIFICATIONS ---
+
+                        let bestLane = { xOffset: 0, minDist: -Infinity };
 
                         lanes.forEach(xOffset => {
                             const lookAheadPoint = { x: pState.x + xOffset, y: pState.y + visionDistance };
@@ -1775,11 +1783,11 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
 
                             let dist = closestDefenderToLane ? getDistance(lookAheadPoint, closestDefenderToLane) : 100;
 
-                            // --- >>> THIS IS THE FIX <<< ---
+                            // --- 🛠️ MODIFIED ---
                             if (xOffset === 0) {
-                                dist += STRAIGHT_AHEAD_PENALTY; // Make cutting left/right 5 yards "less open"
+                                dist += DOWNHILL_BONUS; // 3. Apply the smaller, renamed bonus
                             }
-                            // --- >>> END FIX <<< ---
+                            // --- END MODIFIED ---
 
                             if (dist > bestLane.minDist) {
                                 bestLane.minDist = dist;
@@ -1789,7 +1797,7 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                         targetXOffset = bestLane.xOffset; // Target the best open lane
                     }
 
-                    pState.targetY = Math.min(FIELD_LENGTH - 1.0, pState.y + visionDistance); // Was - 10.1
+                    pState.targetY = Math.min(FIELD_LENGTH - 1.0, pState.y + visionDistance);
                     pState.targetX = pState.x + targetXOffset;
                     break;
                 }
@@ -2102,12 +2110,9 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                 case 'run_support': // e.g., Safety coming downhill
                     if (diagnosedPlayType === 'run' && ballCarrierState) {
                         // --- ACTION: Attack Run ---
-                        // Aggressively attack the ball carrier, aiming slightly *ahead*
-                        target = {
-                            ...ballCarrierState, // Inherit carrier's speed/target info for pursuit
-                            targetX: ballCarrierState.targetX,
-                            targetY: ballCarrierState.targetY + 1.5 // Aim 1.5 yards *past* their target
-                        };
+                        // 🛠️ FIX: Target the carrier's *current* X/Y coordinates.
+                        // This makes the target a fixed point, bypassing the lead-pursuit logic.
+                        target = { x: ballCarrierState.x, y: ballCarrierState.y };
                     } else if (isBallInAir) {
                         // --- ACTION: Play Pass Defense (Ball is in the air) ---
                         // Check if the ball is thrown somewhat close by
@@ -2125,9 +2130,10 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                     break; // Go to pursuit logic
 
                 case 'fill_run': // e.g., LB reading the play
-                    if (diagnosedPlayType === 'run' && ballCarrierState) { // <<< USE playType
+                    if (diagnosedPlayType === 'run' && ballCarrierState) {
                         // --- ACTION: Attack Run ---
-                        target = ballCarrierState;
+                        // 🛠️ FIX: Target the carrier's *current* X/Y coordinates.
+                        target = { x: ballCarrierState.x, y: ballCarrierState.y };
                     } else if (diagnosedPlayType === 'pass') { // <<< USE playType
                         // --- ACTION: Drop to Zone ---
                         pState.assignment = 'zone_hook_curl_middle';
@@ -2139,9 +2145,10 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                     break;
 
                 case 'def_read': // Default "read and react"
-                    if (diagnosedPlayType === 'run' && ballCarrierState) { // <<< USE playType
+                    if (diagnosedPlayType === 'run' && ballCarrierState) {
                         // --- ACTION: Attack Run ---
-                        target = ballCarrierState;
+                        // 🛠️ FIX: Target the carrier's *current* X/Y coordinates.
+                        target = { x: ballCarrierState.x, y: ballCarrierState.y };
                     } else if (diagnosedPlayType === 'pass') { // <<< USE playType
                         // --- ACTION: Drop to Zone ---
                         pState.assignment = 'zone_hook_curl_middle';
@@ -2169,55 +2176,59 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
             // --- Set Target Coordinates (Pursuit Logic) ---
             if (isPlayerState(target)) { // Target is a dynamic player state
 
-                // --- 🛠️ NEW: Check if this is Man Coverage (not ball pursuit) ---
+                // --- 1. Check if this is Man Coverage (not ball pursuit) ---
                 const isManCoverage = pState.assignment.startsWith('man_cover_') && !target.isBallCarrier;
 
                 if (isManCoverage) {
-                    // --- NEW MAN COVERAGE LOGIC ---
-                    const assignedReceiver = target; // Readability
+                    // --- MAN COVERAGE LOGIC ---
+                    const assignedReceiver = target;
                     const speedDiff = (pState.speed - assignedReceiver.speed);
 
-                    // 1. Y-Cushion: Faster DBs play 'on top' (in front), Slower DBs trail
-                    let yCushion = 1.0; // Default trail distance
-                    if (speedDiff > 10) yCushion = -1.5; // DB is much faster -> Play over the top
-                    else if (speedDiff > 0) yCushion = -0.5; // DB is slightly faster -> Press/even
+                    let yCushion = 1.0;
+                    if (speedDiff > 10) yCushion = -1.5;
+                    else if (speedDiff > 0) yCushion = -0.5;
 
-                    // 2. X-Leverage: Force receiver to the sideline (away from center)
                     let xLeverage = 0;
                     if (assignedReceiver.x < HASH_LEFT_X) {
-                        xLeverage = -1.0; // WR is far left, force them *more left* (to sideline)
+                        xLeverage = -1.0;
                     } else if (assignedReceiver.x > HASH_RIGHT_X) {
-                        xLeverage = 1.0;  // WR is far right, force them *more right*
+                        xLeverage = 1.0;
                     } else {
-                        // Slot receiver, play with "inside" leverage
                         xLeverage = (assignedReceiver.x < CENTER_X) ? 1.0 : -1.0;
                     }
 
-                    // 3. Set Target: Aim for the receiver's *next* spot, with our offsets
                     pState.targetX = assignedReceiver.targetX + xLeverage;
                     pState.targetY = assignedReceiver.targetY + yCushion;
 
-                } else {
-                    // --- EXISTING Ball Carrier Pursuit Logic ---
-                    // This logic (timeToIntercept, leadDist, etc.) is great for
-                    // chasing a ball carrier. We leave it as-is for that purpose.
+                } else if (target.isBallCarrier || !pState.isOffense) {
+                    // --- 2. "SMART PURSUIT" LOGIC (FOR BALL CARRIER or any non-Man-Coverage defender) ---
+                    // This now handles all defensive pursuit of any player (like a scrambling QB).
 
-                    const distToTarget = getDistance(pState, target);
-                    const carrierSpeedYPS = target.currentSpeedYPS || (target.speed / 10);
-                    const ownSpeedYPS = pState.currentSpeedYPS || (pState.speed / 10);
-                    const timeToIntercept = distToTarget > 0.1 ? distToTarget / ownSpeedYPS : 0;
-                    const leadDist = carrierSpeedYPS * timeToIntercept;
-                    const iqLeadFactor = 0.8 + ((pState.playbookIQ || 50) / 250);
-                    const finalLeadDist = leadDist * iqLeadFactor;
-                    const targetDX = target.targetX - target.x;
-                    const targetDY = target.targetY - target.y;
-                    const targetDistToTarget = Math.max(0.1, Math.sqrt(targetDX * targetDX + targetDY * targetDY));
+                    if (pState.y < target.y) {
+                        // --- A. I AM IN FRONT of the target (e.g., Safety) ---
+                        // Attack their current position. Fixes the "running backwards" bug.
+                        pState.targetX = target.x;
+                        pState.targetY = target.y;
+                    } else {
+                        // --- B. I AM BEHIND the target ---
+                        // Use the "lead pursuit" logic to catch up.
+                        const distToTarget = getDistance(pState, target);
+                        const carrierSpeedYPS = target.currentSpeedYPS || (target.speed / 10);
+                        const ownSpeedYPS = pState.currentSpeedYPS || (pState.speed / 10);
+                        const timeToIntercept = distToTarget > 0.1 ? distToTarget / ownSpeedYPS : 0;
+                        const leadDist = carrierSpeedYPS * timeToIntercept;
+                        const iqLeadFactor = 0.8 + ((pState.playbookIQ || 50) / 250);
+                        const finalLeadDist = leadDist * iqLeadFactor;
+                        const targetDX = target.targetX - target.x;
+                        const targetDY = target.targetY - target.y;
+                        const targetDistToTarget = Math.max(0.1, Math.sqrt(targetDX * targetDX + targetDY * targetDY));
 
-                    let futureTargetX = target.x + (targetDX / targetDistToTarget) * finalLeadDist;
-                    let futureTargetY = target.y + (targetDY / targetDistToTarget) * finalLeadDist;
+                        let futureTargetX = target.x + (targetDX / targetDistToTarget) * finalLeadDist;
+                        let futureTargetY = target.y + (targetDY / targetDistToTarget) * finalLeadDist;
 
-                    pState.targetX = futureTargetX;
-                    pState.targetY = futureTargetY;
+                        pState.targetX = futureTargetX;
+                        pState.targetY = futureTargetY;
+                    }
                 }
 
             } else if (target) { // Target is a fixed point {x, y}
@@ -2296,7 +2307,12 @@ function checkTackleCollisions(playState, gameLog) {
     if (!ballCarrierState) return false;
 
     // Filter defenders who are active and not engaged
-    const activeDefenders = playState.activePlayers.filter(p => !p.isOffense && !p.isBlocked && !p.isEngaged && p.stunnedTicks === 0);
+    const activeDefenders = playState.activePlayers.filter(p =>
+        p.teamId !== ballCarrierState.teamId && // Not on the carrier's team
+        !p.isBlocked &&
+        !p.isEngaged &&
+        p.stunnedTicks === 0
+    );
 
     // Define initial tackle attempts taken by the carrier this play
     if (ballCarrierState.tacklesBrokenThisPlay === undefined) ballCarrierState.tacklesBrokenThisPlay = 0;
@@ -2506,7 +2522,7 @@ function resolveOngoingBlocks(playState, gameLog) {
             //gameLog.push(`🥞 ${blockerState.name} pancakes ${defenderState.name}!`);
 
             // Stun the defender for winning the block
-            defenderState.stunnedTicks = 35; // Stun for 15 ticks
+            defenderState.stunnedTicks = 40;
 
             // End the engagement
             blockerState.engagedWith = null; blockerState.isEngaged = false;
@@ -2548,33 +2564,28 @@ function updateQBDecision(playState, offenseStates, defenseStates, gameLog) {
 
     // --- If QB is scrambling, check for a throw ---
     if (qbState.action === 'qb_scramble') {
-        const qbIQ = qbAttrs.mental?.playbookIQ || 50;
         // Chance to even *look* for a throw on the run
-        if (Math.random() > (qbIQ / 150)) { // e.g., 75 IQ = 50% chance to look per tick
-            return; // Keep scrambling
+        if (Math.random() > (qbIQ / 150)) {
+            return; // 🛠️ Keep scrambling, don't re-evaluate
         }
 
         // Re-scan for *very* open receivers
         const scramblingReceivers = offenseStates.filter(p => p.action === 'run_route' || p.action === 'route_complete');
         const scramblingOpenReceivers = scramblingReceivers.filter(recState => {
-            const closestDefender = defenseStates.filter(d => !d.isBlocked && !d.isEngaged).sort((a, b) => getDistance(recState, a) - getDistance(recState, b))[0];
-            const separation = closestDefender ? getDistance(recState, closestDefender) : 100;
-            // Must be more open for a throw on the run
+            // ... (rest of scanning logic)
             return separation > SEPARATION_THRESHOLD + 1.5;
-        }).sort((a, b) => getDistance(qbState, a) - getDistance(qbState, b)); // Sort by closest
+        }).sort((a, b) => getDistance(qbState, a) - getDistance(qbState, b));
 
-        // If a good target is found, decide to throw
         if (scramblingOpenReceivers.length > 0) {
             // --- DECIDED TO THROW ON THE RUN ---
-            // Stop scrambling, change action back to 'setup'
             qbState.action = 'qb_setup';
-            qbState.hasBall = true; // Give "possession" back to the throw logic
-            qbState.isBallCarrier = false; // No longer a "runner"
-            // The rest of this function will now execute as a normal pass
+            qbState.hasBall = true;
+            qbState.isBallCarrier = false;
         } else {
             // --- No one open, continue scrambling ---
-            return; // Exit and let updatePlayerTargets handle movement
+            return; // 🛠️ CRITICAL: Exit function and let updatePlayerTargets handle movement
         }
+        // We only proceed if we *decided to throw*
     }
 
     const qbIQ = qbAttrs.mental?.playbookIQ || 50;
@@ -2587,43 +2598,81 @@ function updateQBDecision(playState, offenseStates, defenseStates, gameLog) {
     const isPressured = !!pressureDefender;
     const imminentSackDefender = isPressured && getDistance(qbState, pressureDefender) < TACKLE_RANGE + 0.2;
 
-    // --- 2. Scan Receivers ---
+    // --- 2. Scan Receivers (Based on Progression) ---
     const receivers = offenseStates.filter(p =>
-        (p.action === 'run_route' || p.action === 'route_complete') &&
-        (p.slot.startsWith('WR') || p.slot.startsWith('RB'))
+        (p.action === 'run_route' || p.action === 'route_complete')
     );
-    let potentialTargets = [];
-    receivers.forEach(recState => {
+
+    // Helper to find a receiver's state and separation
+    const getTargetInfo = (slot) => {
+        if (!slot) return null; // Handle end of progression
+        const recState = receivers.find(r => r.slot === slot);
+        if (!recState) return null; // Receiver not in a route
+
         const closestDefender = defenseStates.filter(d => !d.isBlocked && !d.isEngaged)
             .sort((a, b) => getDistance(recState, a) - getDistance(recState, b))[0];
         const separation = closestDefender ? getDistance(recState, closestDefender) : 100;
         const distFromQB = getDistance(qbState, recState);
-        potentialTargets.push({ ...recState, separation, distFromQB });
-    });
 
-    // --- 🛠️ NEW: Explicitly find the RB as a checkdown read ---
-    // RB must be near or past the Line of Scrimmage to be a valid target
-    const rbRead = potentialTargets.find(p => p.slot === 'RB1' && p.y > playState.lineOfScrimmage - 2);
+        // (Optional: Add chemistry bonus from our previous discussion)
+        // const relationship = getRelationshipLevel(qbState.id, recState.id);
+        // if (relationship >= relationshipLevels.FRIEND.level) separation += 1.0;
+        // if (relationship >= relationshipLevels.GOOD_FRIEND.level) separation += 1.5;
 
-    // --- Filter for "Open" Receivers (and EXCLUDE the RB) ---
-    const openReceivers = potentialTargets.filter(t =>
-        t.separation > SEPARATION_THRESHOLD && t.slot !== 'RB1'
-    );
+        return { ...recState, separation, distFromQB };
+    };
 
-    // --- Sort Open Receivers: Prioritize better separation, then slightly favor closer targets ---
-    openReceivers.sort((a, b) => (b.separation - a.separation) || (a.distFromQB - b.distFromQB));
+    // Find the state of *all* potential reads in the progression
+    const read1 = getTargetInfo(qbState.readProgression[0]); // e.g., WR1
+    const read2 = getTargetInfo(qbState.readProgression[1]); // e.g., WR2
+    const read3_checkdown = getTargetInfo(qbState.readProgression[2]); // e.g., RB1
 
-    // --- 3. Decision Timing Logic ---
-    const initialReadTicks = 18; // QB needs ~0.9s to start reading, unless pressured
+    // This is our *current* focus
+    const currentRead = getTargetInfo(qbState.currentReadTargetSlot);
+    // --- END REPLACEMENT ---
 
-    // --- 🛠️ MODIFIED --- Lowered floor from 12 to 6
-    const maxDecisionTimeTicks = Math.max(36, Math.round((100 - qbIQ) / 6) * 3 + 15); // Was 12, /6, +5
-    // e.g., IQ 50->13t, IQ 99->6t (was 12), IQ 1->21t
 
-    const pressureTimeReduction = isPressured ? Math.max(9, Math.round(maxDecisionTimeTicks * 0.3)) : 0; // Was 3
+    // --- 🛠️ NEW: Update Read Progression ---
+    // (Add this new block *before* "Decision Timing Logic")
+
+    // --- 3. Update Read Progression ---
+    // How long (in ticks) to look at one read before moving to the next.
+    // Slower for low IQ, faster for high IQ.
+    const READ_PROGRESSION_DELAY = Math.max(6, Math.round((100 - qbIQ) / 8)); // ~0.3s - 0.7s
+    const initialReadTicks = 18; // ~0.9s to start first read
+
+    let decisionMade = false; // We declare this here to use in the read logic
+
+    if (playState.tick > initialReadTicks && !isPressured && !decisionMade) {
+        qbState.ticksOnCurrentRead++;
+
+        if (qbState.ticksOnCurrentRead > READ_PROGRESSION_DELAY) {
+            // Time to switch reads
+            const currentReadIndex = qbState.readProgression.indexOf(qbState.currentReadTargetSlot);
+            const nextReadIndex = currentReadIndex + 1;
+
+            if (nextReadIndex < qbState.readProgression.length) {
+                const nextReadSlot = qbState.readProgression[nextReadIndex];
+                qbState.currentReadTargetSlot = nextReadSlot;
+                qbState.ticksOnCurrentRead = 0;
+                // gameLog.push(`[QB Read]: ${qbState.name} moves to read #${nextReadIndex + 1} (${nextReadSlot})`);
+            } else {
+                // QB is on their last read (the checkdown). They will stare at them
+                // until time expires or pressure arrives.
+            }
+        }
+    }
+    // --- END NEW BLOCK ---
+
+
+    // --- 🛠️ REPLACEMENT: Simplified Decision Timing ---
+    // (Replace your old "Decision Timing Logic" block with this)
+
+    // --- 4. Decision Timing Logic ---
+    const maxDecisionTimeTicks = Math.max(36, Math.round((100 - qbIQ) / 6) * 3 + 15);
+    const pressureTimeReduction = isPressured ? Math.max(9, Math.round(maxDecisionTimeTicks * 0.3)) : 0;
     const currentDecisionTickTarget = maxDecisionTimeTicks - pressureTimeReduction;
 
-    let decisionMade = false;
     let reason = "";
 
     if (imminentSackDefender) {
@@ -2634,104 +2683,88 @@ function updateQBDecision(playState, offenseStates, defenseStates, gameLog) {
         reason = "Decision Time Expired";
     } else if (isPressured && playState.tick >= initialReadTicks) {
         // Increased chance over time under pressure
-        if (Math.random() < 0.4 + (playState.tick / 150)) { // Was /50
+        if (Math.random() < 0.4 + (playState.tick / 150)) {
             decisionMade = true;
             reason = "Pressured Decision";
         }
-    } else if (!isPressured && openReceivers.length > 0 && playState.tick >= initialReadTicks) {
-        // Not pressured, someone's open, past initial read time
-        const consistencyCheck = (qbConsistency / 150) + (playState.tick / (maxDecisionTimeTicks * 2)); // This logic is fine
-        if (Math.random() < consistencyCheck) {
-            decisionMade = true;
-            reason = "Open Receiver Found";
-        }
     }
-
-    // --- 4. Execute Decision ---
+    // --- 5. Execute Decision ---
     if (decisionMade) {
         let targetPlayerState = null;
         let actionTaken = "None";
 
-        // --- Determine Action based on Situation ---
-        const shouldThrowToOpen = openReceivers.length > 0 &&
-            (!isPressured || Math.random() < (0.2 + qbToughness / 200));
+        // --- NEW PROGRESSION-BASED DECISION ---
 
+        // 1. How open does the *current read* need to be?
+        let rhythmSepThreshold = SEPARATION_THRESHOLD + (isPressured ? 0.0 : 1.0);
+
+        const currentReadIsOpen = currentRead && currentRead.separation > rhythmSepThreshold;
+
+        // 2. Is the *checkdown* open?
+        const checkdownIsOpen = read3_checkdown && read3_checkdown.separation > SEPARATION_THRESHOLD;
+
+        // 3. 🛠️ NEW: Are *any* of the main reads open? (This is your fallback)
+        const openPrimaryReads = [read1, read2].filter(r => r && r.separation > SEPARATION_THRESHOLD)
+            .sort((a, b) => b.separation - a.separation); // Find the *most* open one
+
+        // 4. Scramble/Panic logic
         const baseScrambleChance = (qbAgility / 150);
         const canScramble = isPressured && (Math.random() < baseScrambleChance);
 
-        // --- 🛠️ REVISED: QB Read Progression (with 3rd Read) ---
-        const iqRoll = Math.random(); // Roll 0.0 to 1.0
+        // --- QB makes the decision based on this priority: ---
 
-        // 1. "Panic" Checkdown (Low IQ QBs do this more)
-        // This simulates a QB who decides before the snap, or panics
-        // e.g., 50 IQ = (100-50)/300 = 16.6% chance to panic and checkdown, ignoring open receivers
-        const panicCheckdownChance = (100 - qbIQ) / 300;
+        if (currentReadIsOpen) {
+            // --- 1. Throw to Current Read (In Rhythm) ---
+            targetPlayerState = currentRead;
+            actionTaken = "Throw Current Read";
+            gameLog.push(`[QB Read]: 🎯 ${qbState.name} (IQ: ${qbIQ}) hits his read ${targetPlayerState.name} in rhythm!`);
 
-        if (isPressured && reason !== "Imminent Sack") {
-            gameLog.push(`[QB Pressure]: 🥵 ${qbState.name} feels the heat and rushes the decision!`);
-        }
-
-        if (iqRoll < panicCheckdownChance && rbRead && !isPressured) { // Don't panic-checkdown if also scrambling
-            targetPlayerState = rbRead;
-            actionTaken = "Throw Checkdown (Panic)";
-            gameLog.push(`[QB Read]: 😰 ${qbState.name} (IQ: ${qbIQ}) panics! Checking down to ${rbRead.name}.`);
-
-            // 2. Main Read Progression (1st and 2nd reads)
-        } else if (shouldThrowToOpen) {
-            const bestRead = openReceivers[0];
-            const secondRead = openReceivers.length > 1 ? openReceivers[1] : null;
-
-            const iqRoll2 = Math.random();
-            const pickBestReadChance = qbIQ / 120; // 99 IQ = 82.5%, 50 IQ = 41.6%
-
-            if (iqRoll2 > pickBestReadChance && secondRead) {
-                targetPlayerState = secondRead;
-                actionTaken = "Throw Second Read";
-                gameLog.push(`[QB Read]: ⚠️ ${qbState.name} (IQ: ${qbIQ}) misses the primary! Throws to 2nd read ${targetPlayerState.name}.`);
+        } else if (checkdownIsOpen) {
+            // --- 2. Throw to Checkdown (Safe Play) ---
+            targetPlayerState = read3_checkdown;
+            actionTaken = "Throw Checkdown";
+            if (isPressured) {
+                gameLog.push(`[QB Read]: 🔒 ${qbState.name} feels pressure, dumps to checkdown ${targetPlayerState.name}.`);
             } else {
-                targetPlayerState = bestRead;
-                actionTaken = "Throw Open";
-                gameLog.push(`[QB Read]: 🎯 ${qbState.name} (IQ: ${qbIQ}) makes a great decision and throws to ${targetPlayerState.name}.`);
+                gameLog.push(`[QB Read]: 🔒 ${qbState.name} (IQ: ${qbIQ})'s read was covered. Checking down to ${targetPlayerState.name}.`);
             }
 
+            // --- 🛠️ NEW FALLBACK ---
+        } else if (qbIQ > 55 && openPrimaryReads.length > 0 && Math.random() < 0.7) {
+            // --- 3. (IQ CHECK) Find another open primary read ---
+            // The QB is smart enough (IQ > 55) to re-scan.
+            targetPlayerState = openPrimaryReads[0];
+            actionTaken = "Throw Fallback Read";
+            gameLog.push(`[QB Read]: 🧠 ${qbState.name} (IQ: ${qbIQ})'s progression was covered, finds a late open read in ${targetPlayerState.name}!`);
+            // --- END NEW FALLBACK ---
 
-            // 3. Scramble
         } else if (canScramble) {
+            // --- 4. Scramble ---
             qbState.action = 'qb_scramble';
             const pressureXDir = Math.sign(qbState.x - pressureDefender.x);
             qbState.targetX = Math.max(0.1, Math.min(FIELD_WIDTH - 0.1, qbState.x + pressureXDir * 8));
-            qbState.targetY = qbState.y + 5; // Scramble forward
+            qbState.targetY = qbState.y + 5;
             qbState.hasBall = false;
             qbState.isBallCarrier = true;
             playState.ballState.x = qbState.x; playState.ballState.y = qbState.y;
-            gameLog.push(`🏃 ${qbState.name} ${imminentSackDefender ? 'escapes the sack' : 'is flushed out'} and scrambles!`);
+            gameLog.push(`🏃 ${qbState.name} ${imminentSackDefender ? 'escapes the sack' : 'escapes'} and scrambles!`);
             actionTaken = "Scramble";
-            return; // Exit function after starting scramble
+            return;
 
-            // 4. Forced Checkdown (No one open or decided against risky throw)
-        } else if (rbRead) {
-            // If we got here, no one was open, but the RB is available.
-            targetPlayerState = rbRead;
-            actionTaken = "Throw Checkdown (Forced)";
-            gameLog.push(`[QB Read]: 🔒 ${qbState.name} sees no one open. Forced checkdown to ${rbRead.name}.`);
-
-        } else if (receivers.length > 0) {
-            // Fallback: Find *any* checkdown target if RB isn't available
-            let checkdownTargets = potentialTargets.filter(r => r.y > playState.lineOfScrimmage + 1)
-                .sort((a, b) => a.distFromQB - b.distFromQB);
-            if (checkdownTargets.length > 0) {
-                targetPlayerState = checkdownTargets[0];
-                actionTaken = "Throw Checkdown (Forced)";
-            } else {
-                targetPlayerState = null;
-                actionTaken = imminentSackDefender ? "Sack Imminent" : "Throw Away Check";
-            }
         } else {
-            // No receivers at all.
-            targetPlayerState = null;
-            actionTaken = imminentSackDefender ? "Sack Imminent" : "Throw Away Check";
+            // --- 5. Throw Away / Force It ---
+            const clutch = qbAttrs.mental?.clutch || 50;
+            if (isPressured && (qbIQ < 45 || clutch > 80) && currentRead && Math.random() < 0.3) {
+                // --- Force a bad throw ---
+                targetPlayerState = currentRead;
+                actionTaken = "Forced Throw";
+                gameLog.push(`[QB Read]: ⚠️ ${qbState.name} is pressured and forces a bad throw to ${targetPlayerState.name}!`);
+            } else {
+                // --- Throw Away ---
+                targetPlayerState = null;
+                actionTaken = "Throw Away";
+            }
         }
-
         // --- Perform Throw or Handle Sack/Throw Away ---
         if (targetPlayerState && (actionTaken.includes("Throw"))) {
             // --- Initiate Throw ---
