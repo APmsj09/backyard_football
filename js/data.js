@@ -519,17 +519,17 @@ export const defenseFormations = {
         }
     },
     '2-3-2': {
-        name: '2-3-2', // Lighter front, more coverage (Nickel-like)
+        name: '2-3-2',
         slots: ['DL1', 'DL2', 'LB1', 'LB2', 'LB3', 'DB1', 'DB2'],
         personnel: { DL: 2, LB: 3, DB: 2 },
         coordinates: {
-            DL1: [-3, 1.0],   // Left DT/End (3 tech area)
-            DL2: [3, 1.0],    // Right DT/End (3 tech area)
-            LB1: [-7, 4.5],   // Left OLB (Apex/Overhang)
-            LB2: [0, 5],      // Middle LB
-            LB3: [7, 4.5],    // Right OLB (Apex/Overhang)
-            DB1: [-15, 7],    // Left CB/Safety (Off coverage) - Adjusted depth
-            DB2: [15, 7]     // Right CB/Safety (Off coverage) - Adjusted depth
+            DL1: [-3, 1.0],
+            DL2: [3, 1.0],
+            LB1: [-7, 4.5],
+            LB2: [0, 5],
+            LB3: [7, 4.5],
+            DB1: [-15, 1.0],   // <-- 🛠️ FIX: Start 1 yard off the LoS
+            DB2: [15, 1.0]     // <-- 🛠️ FIX: Start 1 yard off the LoS
         },
         slotPriorities: {
             DL1: { strength: 2, blockShedding: 2, speed: 2, tackling: 1 }, // More balanced DL
