@@ -150,7 +150,7 @@ function calculateSlotSuitability(player, slot, side, team) {
 /**
  * Generates a new player object.
  */
-// Replace the generatePlayer function in game.js with this:
+// In game.js
 
 function generatePlayer(minAge = 10, maxAge = 16) {
     const firstName = getRandom(firstNames);
@@ -158,7 +158,7 @@ function generatePlayer(minAge = 10, maxAge = 16) {
     const age = getRandomInt(minAge, maxAge);
 
     // --- 🛠️ FIX #1: Determine ONE "bestPosition" from the favorites ---
-    // This ensures the player's stats match their listed position.
+    // (This logic is unchanged and is perfect)
     const favoriteOffensivePosition = getRandom(offensivePositions);
     const favoriteDefensivePosition = getRandom(defensivePositions);
     const isOffenseStar = Math.random() < 0.5;
@@ -176,65 +176,64 @@ function generatePlayer(minAge = 10, maxAge = 16) {
         case 'RB': baseWeight += getRandomInt(5, 15); break;
     }
 
-    // --- 🛠️ FIX #2: Determine Talent Tier FIRST ---
-    let talentTier = 'Average';
-    let potentialBonus = 0; // This will link talent to potential
-    const tierRoll = Math.random();
-    if (tierRoll < 0.05) {
-        talentTier = 'Elite';
-        potentialBonus = -0.20; // High chance of A/B
-    } else if (tierRoll < 0.20) {
-        talentTier = 'Good';
-        potentialBonus = -0.10; // High chance of B/C
-    } else if (tierRoll < 0.70) {
-        talentTier = 'Average';
-        potentialBonus = 0.0;
-    } else if (tierRoll < 0.90) {
-        talentTier = 'Below Average';
-        potentialBonus = 0.10; // High chance of D
-    } else {
-        talentTier = 'Poor';
-        potentialBonus = 0.20; // High chance of D/F
-    }
+    // --- 🛠️ REVISED FIX #2: Determine Talent Tiers INDEPENDENTLY ---
 
+    // Define the ranges once
     const boostRanges = {
-        'Elite': { min: 80, max: 95 },         // Base stats will be in this range
+        'Elite': { min: 80, max: 95 },
         'Good': { min: 65, max: 80 },
         'Average': { min: 50, max: 70 },
         'Below Average': { min: 35, max: 55 },
         'Poor': { min: 20, max: 40 }
     };
-    const boostRange = boostRanges[talentTier];
 
-    // --- 🛠️ FIX #3: Generate ALL attributes based on the Talent Tier ---
-    // This creates well-rounded players instead of "one-trick ponies"
+    // Helper function to get talent data from a random roll
+    const getTalentData = (roll) => {
+        if (roll < 0.05) return { tier: 'Elite', bonus: -0.20, range: boostRanges['Elite'] };
+        if (roll < 0.20) return { tier: 'Good', bonus: -0.10, range: boostRanges['Good'] };
+        if (roll < 0.70) return { tier: 'Average', bonus: 0.0, range: boostRanges['Average'] };
+        if (roll < 0.90) return { tier: 'Below Average', bonus: 0.10, range: boostRanges['Below Average'] };
+        return { tier: 'Poor', bonus: 0.20, range: boostRanges['Poor'] };
+    };
+
+    // Roll for each category independently!
+    const physicalData = getTalentData(Math.random());
+    const technicalData = getTalentData(Math.random());
+    const mentalData = getTalentData(Math.random());
+    // --- END REVISED FIX #2 ---
+
+
+    // --- 🛠️ REVISED FIX #3: Generate ALL attributes based on their OWN Talent Tier ---
+    // This creates the archetypes you wanted.
     let attributes = {
         physical: {
-            speed: getRandomInt(boostRange.min, boostRange.max),
-            strength: getRandomInt(boostRange.min, boostRange.max),
-            agility: getRandomInt(boostRange.min, boostRange.max),
-            stamina: getRandomInt(boostRange.min + 5, boostRange.max + 5), // Stamina slightly higher
+            speed: getRandomInt(physicalData.range.min, physicalData.range.max),
+            strength: getRandomInt(physicalData.range.min, physicalData.range.max),
+            agility: getRandomInt(physicalData.range.min, physicalData.range.max),
+            stamina: getRandomInt(physicalData.range.min + 5, physicalData.range.max + 5),
             height: Math.round(baseHeight),
             weight: Math.round(baseWeight)
         },
         mental: {
-            playbookIQ: getRandomInt(boostRange.min, boostRange.max),
+            playbookIQ: getRandomInt(mentalData.range.min, mentalData.range.max),
             clutch: getRandomInt(20, 90), // Clutch remains random
-            consistency: getRandomInt(boostRange.min, boostRange.max),
-            toughness: getRandomInt(boostRange.min, boostRange.max)
+            consistency: getRandomInt(mentalData.range.min, mentalData.range.max),
+            toughness: getRandomInt(mentalData.range.min, mentalData.range.max)
         },
         technical: {
-            throwingAccuracy: getRandomInt(boostRange.min, boostRange.max),
-            catchingHands: getRandomInt(boostRange.min, boostRange.max),
-            tackling: getRandomInt(boostRange.min, boostRange.max),
-            blocking: getRandomInt(boostRange.min, boostRange.max),
-            blockShedding: getRandomInt(boostRange.min, boostRange.max)
+            throwingAccuracy: getRandomInt(technicalData.range.min, technicalData.range.max),
+            catchingHands: getRandomInt(technicalData.range.min, technicalData.range.max),
+            tackling: getRandomInt(technicalData.range.min, technicalData.range.max),
+            blocking: getRandomInt(technicalData.range.min, technicalData.range.max),
+            blockShedding: getRandomInt(technicalData.range.min, technicalData.range.max)
         }
     };
+    // --- END REVISED FIX #3 ---
+
 
     // --- 🛠️ FIX #4: Apply positional boosts as a BONUS, not an overwrite ---
-    // This makes the player "extra good" at their job
-    const posBonus = 10; // A flat 10-point bonus
+    // (This logic is unchanged and is perfect)
+    const posBonus = 10;
     switch (bestPosition) {
         case 'QB':
             attributes.technical.throwingAccuracy += posBonus;
@@ -267,9 +266,10 @@ function generatePlayer(minAge = 10, maxAge = 16) {
     }
 
     // --- 🛠️ FIX #5: Apply Age & Weight Modifiers AFTER stats are set ---
+    // (This logic is also unchanged and is perfect)
 
-    // Apply Age Scaling (Older players are slightly better *now*)
-    const ageScalingFactor = 0.90 + (ageProgress * 0.10); // 90% to 100%
+    // Apply Age Scaling
+    const ageScalingFactor = 0.90 + (ageProgress * 0.10);
     Object.keys(attributes).forEach(cat => {
         Object.keys(attributes[cat]).forEach(attr => {
             if (typeof attributes[cat][attr] === 'number' && !['height', 'weight', 'clutch'].includes(attr)) {
@@ -278,11 +278,12 @@ function generatePlayer(minAge = 10, maxAge = 16) {
         });
     });
 
-    // Apply Weight Modifier
-    const weightModifier = (attributes.physical.weight - 125) / 50; // -1.1 to +1.1 approx
+    // Apply Weight Modifier (Revised)
+    const neutralWeight = 70 + (ageProgress * 90) + (['OL', 'DL'].includes(bestPosition) ? 30 : 0);
+    const weightModifier = (attributes.physical.weight - neutralWeight) / 25;
     attributes.physical.strength += (weightModifier * 10);
-    attributes.physical.speed -= (weightModifier * 8);
-    attributes.physical.agility -= (weightModifier * 5);
+    attributes.physical.speed -= (weightModifier * 6);
+    attributes.physical.agility -= (weightModifier * 4);
     // --- END FIX #5 ---
 
 
@@ -295,10 +296,14 @@ function generatePlayer(minAge = 10, maxAge = 16) {
         });
     });
 
-    // --- 🛠️ FIX #6: Link Potential to Talent Tier ---
+    // --- 🛠️ REVISED FIX #6: Link Potential to AVERAGE of Talent Tiers ---
     let potential = 'F';
-    let potentialRoll = Math.random() + potentialBonus; // Apply the bonus from the tier
-    potentialRoll = Math.max(0, Math.min(1, potentialRoll)); // Clamp roll
+
+    // Average the potential bonus from all three categories
+    const potentialBonus = (physicalData.bonus + technicalData.bonus + mentalData.bonus) / 3;
+
+    let potentialRoll = Math.random() + potentialBonus;
+    potentialRoll = Math.max(0, Math.min(1, potentialRoll));
 
     // Younger players get a *further* bonus to their roll
     if (age <= 11) potentialRoll -= 0.15;
@@ -310,7 +315,7 @@ function generatePlayer(minAge = 10, maxAge = 16) {
     else if (potentialRoll < 0.75) potential = 'C';
     else if (potentialRoll < 0.90) potential = 'D';
     else potential = 'F';
-    // --- END FIX #6 ---
+    // --- END REVISED FIX #6 ---
 
     const initialStats = {
         receptions: 0, recYards: 0, passYards: 0, rushYards: 0, touchdowns: 0,
@@ -1664,21 +1669,20 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
 
                             // --- NEW ROBUST CHECKS ---
 
-                            // Check 1: Is it a designated pass rusher?
-                            if (d.assignment === 'pass_rush') return true;
+                            // Check 1: Is the defender's *current action* a pass rush?
+                            if (d.action === 'pass_rush') return true; // <-- ✅ FIX 1
 
-                            // Check 2: Is it a blitzer? (Safely check for string)
-                            if (typeof d.assignment === 'string' && d.assignment.includes('blitz')) return true;
+                            // Check 2: Is the defender's *current action* a blitz?
+                            if (typeof d.action === 'string' && d.action.includes('blitz')) return true; // <-- ✅ FIX 2
 
                             // Check 3: Is it a "new" threat (e.g., zone defender) attacking the QB?
-                            if (qbState) { // Only check this if the QB exists
+                            if (qbState) {
                                 if (getDistance(d, qbState) < 8.0 && d.targetY < d.y - 0.5) {
                                     return true; // Is close AND moving downhill
                                 }
                             }
 
                             return false; // Not a threat
-                            // --- END NEW CHECKS ---
                         });
 
                     if (potentialTargets.length === 0) {
@@ -2601,6 +2605,7 @@ function updateQBDecision(playState, offenseStates, defenseStates, gameLog) {
     if (!qbPlayer || !qbPlayer.attributes) return;
 
     const qbAttrs = qbPlayer.attributes;
+    const qbIQ = qbAttrs.mental?.playbookIQ || 50;
 
     // --- If QB is scrambling, check for a throw ---
     if (qbState.action === 'qb_scramble') {
@@ -2628,7 +2633,6 @@ function updateQBDecision(playState, offenseStates, defenseStates, gameLog) {
         // We only proceed if we *decided to throw*
     }
 
-    const qbIQ = qbAttrs.mental?.playbookIQ || 50;
     const qbConsistency = qbAttrs.mental?.consistency || 50;
     const qbAgility = qbAttrs.physical?.agility || 50;
     const qbToughness = qbAttrs.mental?.toughness || 50; // Use for pressure decisions
