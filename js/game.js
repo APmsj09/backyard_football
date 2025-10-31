@@ -47,7 +47,7 @@ const CENTER_X = FIELD_WIDTH / 2; // Approx 26.65
 
 // --- Physics/Interaction Constants ---
 const TICK_DURATION_SECONDS = 0.05;
-const BLOCK_ENGAGE_RANGE = 1.0;
+const BLOCK_ENGAGE_RANGE = 1.5;
 const TACKLE_RANGE = 1.5;
 const CATCH_RADIUS = 0.8;
 const SEPARATION_THRESHOLD = 2.0;

@@ -717,10 +717,9 @@ function main() {
             UI.skipLiveGameSim(currentLiveSimResult); // Pass stored result
             UI.drawFieldVisualization(null); // <-- ADD THIS to clear canvas on skip
         });
-        document.getElementById('sim-speed-play')?.addEventListener('click', () => UI.setSimSpeed(1000));
-        document.getElementById('sim-speed-fast')?.addEventListener('click', () => UI.setSimSpeed(400));
-        document.getElementById('sim-speed-faster')?.addEventListener('click', () => UI.setSimSpeed(100));
-
+        document.getElementById('sim-speed-play')?.addEventListener('click', () => UI.setSimSpeed(50));  // 50ms = 1x (Real-time)
+        document.getElementById('sim-speed-fast')?.addEventListener('click', () => UI.setSimSpeed(20));  // 20ms = 2.5x Fast-forward
+        document.getElementById('sim-speed-faster')?.addEventListener('click', () => UI.setSimSpeed(150)); // 150ms = 3x Slow-mo
         // Dashboard Navigation and Content Interaction
         document.getElementById('dashboard-tabs')?.addEventListener('click', handleTabSwitch);
         document.getElementById('dashboard-content')?.addEventListener('click', handleDashboardClicks);
@@ -733,11 +732,11 @@ function main() {
         });
 
         // Draft Filters/Sorting
-        document.getElementById('draft-search')?.addEventListener('input', () => { 
-            if (gameState) UI.debouncedRenderDraftPool(gameState, handlePlayerSelectInDraft, currentSortColumn, currentSortDirection); 
+        document.getElementById('draft-search')?.addEventListener('input', () => {
+            if (gameState) UI.debouncedRenderDraftPool(gameState, handlePlayerSelectInDraft, currentSortColumn, currentSortDirection);
         });
-        document.getElementById('draft-filter-pos')?.addEventListener('change', () => { 
-            if (gameState) UI.renderDraftPool(gameState, handlePlayerSelectInDraft, currentSortColumn, currentSortDirection); 
+        document.getElementById('draft-filter-pos')?.addEventListener('change', () => {
+            if (gameState) UI.renderDraftPool(gameState, handlePlayerSelectInDraft, currentSortColumn, currentSortDirection);
         });
         document.querySelector('#draft-screen thead tr')?.addEventListener('click', (e) => {
             const headerCell = e.target.closest('th[data-sort]');
