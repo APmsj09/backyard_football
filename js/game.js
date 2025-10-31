@@ -1198,7 +1198,7 @@ function calculateRoutePath(routeName, startX, startY) {
  */
 // Replace the entire setupInitialPlayerStates function in game.js with this:
 
-function setupInitialPlayerStates(playState, offense, defense, play, assignments, ballOnYardLine, defensivePlayKey) {
+function setupInitialPlayerStates(playState, offense, defense, play, assignments, ballOnYardLine, defensivePlayKey, ballHash = 'M') {
     playState.activePlayers = []; // Reset active players for the new play
     const usedPlayerIds_O = new Set(); // Track used offense players for this play
     const usedPlayerIds_D = new Set(); // Track used defense players for this play
@@ -1209,7 +1209,9 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
 
     // Set the line of scrimmage (adding 10 for the endzone offset)
     playState.lineOfScrimmage = ballOnYardLine;
-    const ballX = CENTER_X; // Assume ball snaps from the center horizontally
+    let ballX = CENTER_X;
+    if (ballHash === 'L') ballX = HASH_LEFT_X;
+    else if (ballHash === 'R') ballX = HASH_RIGHT_X;
 
     // --- STEP 1: Calculate initial OFFENSIVE positions FIRST ---
     // Get the offensive formation data
@@ -1642,6 +1644,7 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                         .filter(d =>
                             !d.isBlocked && !d.isEngaged &&
                             (d.assignment === 'pass_rush' || d.assignment?.includes('blitz'))
+                                (getDistance(d, qbState) < 8.0 && d.targetY < d.y - 0.5) // Is close AND moving downhill
                         );
 
                     if (potentialTargets.length === 0) {
@@ -1920,17 +1923,7 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                     } else {
                         // --- Ball is NOT in the Air (Pass Play) ---
                         // Continue with your existing man-coverage logic
-                        const speedDiff = (pState.speed - assignedReceiver.speed);
-                        const yOffset = (speedDiff < -10) ? -1.0 : (speedDiff < -5) ? -0.5 : 0.5;
-                        let xOffset = 0;
-                        if (assignedReceiver.x < HASH_LEFT_X) xOffset = 1.0;
-                        else if (assignedReceiver.x > HASH_RIGHT_X) xOffset = -1.0;
-
-                        target = {
-                            ...assignedReceiver,
-                            targetX: assignedReceiver.targetX + xOffset,
-                            targetY: assignedReceiver.targetY + yOffset
-                        };
+                        target = assignedReceiver;
                     }
                     break; // Go to the main pursuit logic
                 }
@@ -1961,8 +1954,9 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                     // --- 2. React to Run Play ---
                     // Check if it's a run (after a few ticks) OR if the carrier is already past the LoS
                     const isRunPlay = (diagnosedPlayType === 'run' || (ballCarrierState && ballCarrierState.y > playState.lineOfScrimmage));
+                    const isQBScramble = qbState && (qbState.action === 'qb_scramble' || qbState.y > playState.lineOfScrimmage + 1);
 
-                    if (isRunPlay && ballCarrierState) {
+                    if ((isRunPlay || isQBScramble) && ballCarrierState) {
                         if (!isDeepZone) {
                             // --- Underneath Zone Run Support ---
                             // If the carrier is in/near my zone, my job is to stop the run.
@@ -1985,6 +1979,7 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                             // --- One receiver in zone ---
                             // Target the only threat.
                             targetThreat = threatsInZone[0];
+
                         } else {
                             // --- Multiple receivers in zone: "Split the difference" ---
                             // Find the deepest threat and the closest threat to "bracket" them.
@@ -1998,6 +1993,21 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                                 y: (deepestThreat.y + closestThreat.y) / 2
                             };
                         }
+
+                    } else if (!targetThreat && threatsInZone.length === 0 && assignment.startsWith('zone_flat_')) {
+                        // No one is in the flat. Look for a vertical threat to "sink" under.
+                        const verticalThreat = offenseStates.find(o =>
+                            (o.action === 'run_route' || o.action === 'route_complete') &&
+                            o.y > pState.y + 5 && // Threat is deeper than us
+                            getDistance(pState, o) < 15 // And in our general area
+                        );
+
+                        if (verticalThreat) {
+                            // "Sink" with the vertical route, but stay shallow
+                            const sinkDepth = Math.min(verticalThreat.y, pState.initialY + 7); // Don't sink more than 7 yards
+                            target = { x: pState.x, y: sinkDepth };
+                        }
+                        // If no vertical threat, the default target (zoneCenter) remains
                     }
 
                     // --- 4. Set Final Target ---
@@ -2025,8 +2035,9 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                         // --- It's a run! Abort rush and pursue carrier ---
                         target = ballCarrierState;
 
-                    } else if (diagnosedPlayType === 'pass' && qbState) {
-                        // --- Diagnosed PASS: Rush the QB ---
+                    } else if (qbState) {
+                        // --- 🛠️ MODIFIED: Diagnosed PASS or STILL READING: Rush the QB ---
+                        // A pass rusher's job is to rush until proven otherwise.
                         target = qbState;
 
                         // (Your existing blocker-avoidance logic)
@@ -2037,8 +2048,7 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                             target = { x: pState.x + avoidOffset * 2, y: qbState.y };
                         }
                     } else {
-                        // --- 🛠️ FIX: Handle 'read' state ---
-                        // Still reading the play, hold position/gap
+                        // --- Fallback: QB is gone or no QB state ---
                         target = null; // Pursuit logic will catch this and hold position
                     }
                     break;
@@ -2054,7 +2064,8 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                         pState.action = 'pass_rush';
                         target = qbState; // Target QB
                     } else {
-                        // --- It's a run! Attack gap, then carrier ---
+                        // --- 🛠️ MODIFIED: It's a run OR STILL READING: Attack gap, then carrier ---
+                        // A run-stopper's job is to play the run until proven otherwise.
                         const runTargetPoint = zoneBoundaries[assignment];
                         const ballSnapX = offenseStates.find(p => p.slot === 'OL2')?.initialX || CENTER_X;
                         target = runTargetPoint ? { x: ballSnapX + (runTargetPoint.xOffset || 0), y: playState.lineOfScrimmage + (runTargetPoint.yOffset || 0) } : { x: pState.x, y: pState.y };
@@ -2156,41 +2167,58 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
             }
 
             // --- Set Target Coordinates (Pursuit Logic) ---
-            if (isPlayerState(target)) { // Target is a dynamic player state (e.g., Ball Carrier)
-                // --- 🛠️ MODIFIED: Simplified Pursuit Vector ---
+            if (isPlayerState(target)) { // Target is a dynamic player state
 
-                const distToTarget = getDistance(pState, target);
+                // --- 🛠️ NEW: Check if this is Man Coverage (not ball pursuit) ---
+                const isManCoverage = pState.assignment.startsWith('man_cover_') && !target.isBallCarrier;
 
-                // Get carrier's current speed (from updatePlayerPosition)
-                const carrierSpeedYPS = target.currentSpeedYPS || (target.speed / 10);
+                if (isManCoverage) {
+                    // --- NEW MAN COVERAGE LOGIC ---
+                    const assignedReceiver = target; // Readability
+                    const speedDiff = (pState.speed - assignedReceiver.speed);
 
-                // Get defender's current speed (from updatePlayerPosition)
-                const ownSpeedYPS = pState.currentSpeedYPS || (pState.speed / 10);
+                    // 1. Y-Cushion: Faster DBs play 'on top' (in front), Slower DBs trail
+                    let yCushion = 1.0; // Default trail distance
+                    if (speedDiff > 10) yCushion = -1.5; // DB is much faster -> Play over the top
+                    else if (speedDiff > 0) yCushion = -0.5; // DB is slightly faster -> Press/even
 
-                // Estimate time until collision (a simplification based on straight-line speeds)
-                const timeToIntercept = distToTarget > 0.1 ? distToTarget / ownSpeedYPS : 0;
+                    // 2. X-Leverage: Force receiver to the sideline (away from center)
+                    let xLeverage = 0;
+                    if (assignedReceiver.x < HASH_LEFT_X) {
+                        xLeverage = -1.0; // WR is far left, force them *more left* (to sideline)
+                    } else if (assignedReceiver.x > HASH_RIGHT_X) {
+                        xLeverage = 1.0;  // WR is far right, force them *more right*
+                    } else {
+                        // Slot receiver, play with "inside" leverage
+                        xLeverage = (assignedReceiver.x < CENTER_X) ? 1.0 : -1.0;
+                    }
 
-                // Calculate how far to lead them based on estimated time to collision
-                // This essentially projects the carrier's movement during the defender's travel time.
-                const leadDist = carrierSpeedYPS * timeToIntercept;
+                    // 3. Set Target: Aim for the receiver's *next* spot, with our offsets
+                    pState.targetX = assignedReceiver.targetX + xLeverage;
+                    pState.targetY = assignedReceiver.targetY + yCushion;
 
-                // Add a small IQ factor for variation/accuracy (higher IQ = more lead)
-                const iqLeadFactor = 0.8 + ((pState.playbookIQ || 50) / 250);
-                const finalLeadDist = leadDist * iqLeadFactor;
+                } else {
+                    // --- EXISTING Ball Carrier Pursuit Logic ---
+                    // This logic (timeToIntercept, leadDist, etc.) is great for
+                    // chasing a ball carrier. We leave it as-is for that purpose.
 
-                // Calculate movement vector from carrier's current position to their TARGET
-                // This ensures the defender intercepts the carrier's *intended* path.
-                const targetDX = target.targetX - target.x;
-                const targetDY = target.targetY - target.y;
-                const targetDistToTarget = Math.max(0.1, Math.sqrt(targetDX * targetDX + targetDY * targetDY));
+                    const distToTarget = getDistance(pState, target);
+                    const carrierSpeedYPS = target.currentSpeedYPS || (target.speed / 10);
+                    const ownSpeedYPS = pState.currentSpeedYPS || (pState.speed / 10);
+                    const timeToIntercept = distToTarget > 0.1 ? distToTarget / ownSpeedYPS : 0;
+                    const leadDist = carrierSpeedYPS * timeToIntercept;
+                    const iqLeadFactor = 0.8 + ((pState.playbookIQ || 50) / 250);
+                    const finalLeadDist = leadDist * iqLeadFactor;
+                    const targetDX = target.targetX - target.x;
+                    const targetDY = target.targetY - target.y;
+                    const targetDistToTarget = Math.max(0.1, Math.sqrt(targetDX * targetDX + targetDY * targetDY));
 
-                // Calculate final interception point
-                let futureTargetX = target.x + (targetDX / targetDistToTarget) * finalLeadDist;
-                let futureTargetY = target.y + (targetDY / targetDistToTarget) * finalLeadDist;
+                    let futureTargetX = target.x + (targetDX / targetDistToTarget) * finalLeadDist;
+                    let futureTargetY = target.y + (targetDY / targetDistToTarget) * finalLeadDist;
 
-                // Set player target
-                pState.targetX = futureTargetX;
-                pState.targetY = futureTargetY;
+                    pState.targetX = futureTargetX;
+                    pState.targetY = futureTargetY;
+                }
 
             } else if (target) { // Target is a fixed point {x, y}
                 pState.targetX = target.x; pState.targetY = target.y;
@@ -2344,7 +2372,6 @@ function checkTackleCollisions(playState, gameLog) {
 
                 // --- 🛠️ NEW: SET JUKE ACTION & COOLDOWN ---
                 ballCarrierState.action = 'juke'; // Set temporary action state
-                ballCarrierState.stunnedTicks = 5;
                 ballCarrierState.jukeTicks = 5; // New timer to run the visualization effect
 
                 // Momentum Loss: Halve the current speed
@@ -2940,6 +2967,19 @@ function handleBallArrival(playState, gameLog) {
         const proximityBonusRec = Math.max(0, (CATCH_CHECK_RADIUS - distToBallRec) * 15);
         receiverPower += proximityBonusRec;
 
+        // --- Positional Interference ---
+        let positionalPenalty = 0;
+        if (interferencePenalty > 0 && closestDefenderState) {
+            // Check if defender is "in front" (closer to offense's goal line: lower Y)
+            if (closestDefenderState.y < targetPlayerState.y) {
+                // Defender has inside position!
+                positionalPenalty = 20; // 20-point penalty (makes catch harder)
+            } else {
+                // Defender is trailing
+                positionalPenalty = -10; // 10-point *bonus* to the receiver
+            }
+        }
+
         // *** MODIFICATION 3: Stabilized difficulty check ***
         const catchRoll = receiverPower + getRandomInt(0, 20);
         // Removed random(15, 35) and replaced with a static base + smaller random roll
@@ -3080,12 +3120,31 @@ function finalizeStats(playState, offense, defense) {
 function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameState) {
     const { gameLog = [], weather, ballOn } = gameState;
 
-    const play = offensivePlaybook[offensivePlayKey];
+    const play = JSON.parse(JSON.stringify(offensivePlaybook[offensivePlayKey]));
     if (!play) {
         console.error(`Play key "${offensivePlayKey}" not found...`);
         gameLog.push("CRITICAL ERROR: Play definition missing!");
         return { yards: 0, turnover: true, incomplete: false, touchdown: false, log: gameLog, visualizationFrames: [] };
     }
+
+    // --- 🛠️ NEW: RB "HOT ROUTE" AUDIBLE CHECK ---
+    const defensePlay = defensivePlaybook[defensivePlayKey];
+    const qbState = playState.activePlayers.find(p => p.slot === 'QB1' && p.isOffense);
+    const qbPlayer = qbState ? game.players.find(p => p && p.id === qbState.id) : null;
+    const qbIQ = qbPlayer?.attributes.mental.playbookIQ || 50;
+
+    if (play.type === 'pass' &&
+        defensePlay?.blitz === true &&
+        play.assignments['RB1'] &&
+        play.assignments['RB1'] !== 'BlockPass' &&
+        Math.random() < (qbIQ / 125)) // e.g., 75 IQ = 60% chance to spot blitz
+    {
+        play.assignments['RB1'] = 'BlockPass';
+        const rbPlayer = playState.activePlayers.find(p => p.slot === 'RB1' && p.isOffense);
+        gameLog.push(`[Pre-Snap]: 🧠 ${qbPlayer?.name || 'QB'} sees the blitz and keeps ${rbPlayer?.name || 'RB'} in to block!`);
+    }
+    // --- END HOT ROUTE CHECK ---
+
     const { type, assignments } = play;
 
     const playState = {
@@ -3097,7 +3156,7 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
 
     try {
         playState.lineOfScrimmage = ballOn + 10;
-        setupInitialPlayerStates(playState, offense, defense, play, assignments, ballOn, defensivePlayKey);
+        setupInitialPlayerStates(playState, offense, defense, play, assignments, ballOn, defensivePlayKey, ballHash);
         // --- >>> BLOCK TO CAPTURE FRAME 0 <<< ---
         if (playState.playIsLive) { // Ensure setup didn't immediately fail
             const initialFrameData = {
@@ -3572,37 +3631,50 @@ function determinePlayCall(offense, defense, down, yardsToGo, ballOn, scoreDiff,
  * @returns {string} The name of the chosen defensive formation (e.g., "2-3-2").
  */
 function determineDefensiveFormation(defense, offenseFormationName, down, yardsToGo) {
-    // --- 🛠️ NEW: Read the defensive coach's preferred formation ---
     const coachPreferredFormation = defense.coach?.preferredDefense || '3-3-1';
-
-    // Get the offense's personnel (e.g., {QB: 1, RB: 1, WR: 3, OL: 2})
     const offPersonnel = offenseFormations[offenseFormationName]?.personnel;
 
-    // --- 1. Down & Distance Logic (This overrides everything) ---
+    // --- 1. Situational Overrides (Highest Priority) ---
     if (yardsToGo <= 2) {
-        // Short yardage: Bring in the big guys.
+        // Short yardage: Bring in the big guys, regardless of personnel.
         return '4-2-1'; // Run Stop formation
     }
     if (down >= 3 && yardsToGo >= 8) {
-        // Long passing down: Bring in coverage.
+        // Long passing down: Bring in coverage, regardless of personnel.
         return '2-3-2'; // Nickel/Pass defense formation
     }
 
-    // --- 2. Personnel Matching Logic (This overrides coach preference) ---
+    // --- 2. Weighted Personnel Matching (Normal Downs) ---
+    let weightedChoices = [];
+
     if (offPersonnel) {
         if (offPersonnel.WR >= 3) {
-            // Offense is in "Spread" (3+ WRs). Must match them with DBs.
-            return '2-3-2';
+            // Offense is in "Spread". Heavily favor pass defense.
+            weightedChoices = [
+                '2-3-2', '2-3-2', '2-3-2', // 75% chance for Spread D
+                coachPreferredFormation    // 25% chance for coach's preferred
+            ];
+        } else if (offPersonnel.RB >= 2) {
+            // Offense is in "Power". Heavily favor run defense.
+            weightedChoices = [
+                '4-2-1', '4-2-1', '4-2-1', // 75% chance for Run Stop D
+                coachPreferredFormation    // 25% chance for coach's preferred
+            ];
+        } else {
+            // Offense is "Balanced". Favor coach's preference.
+            weightedChoices = [
+                coachPreferredFormation, coachPreferredFormation, // 50% chance for coach's
+                '3-3-1', // 25% chance for standard balanced
+                '2-3-2'  // 25% chance for pass-ready D
+            ];
         }
-        if (offPersonnel.RB >= 2) {
-            // Offense is in "Power" (2+ RBs). Must match them with LBs/DL.
-            return '4-2-1';
-        }
+    } else {
+        // Fallback if personnel is unknown
+        weightedChoices = [coachPreferredFormation, '3-3-1'];
     }
 
-    // --- 3. Default / Balanced ---
-    // If it's 1st & 10 or a "normal" situation, use the COACH'S PREFERRED formation.
-    return coachPreferredFormation;
+    // --- 3. Select and Return ---
+    return getRandom(weightedChoices) || coachPreferredFormation;
 }
 
 /**
@@ -3756,6 +3828,85 @@ function determineDefensivePlayCall(defense, offense, down, yardsToGo, ballOn, s
     return chosenPlay;
 }
 
+// In game.js
+
+/**
+ * Finds a suitable play to audible to from the same formation.
+ * @param {object} offense - The offense team object.
+ * @param {string} desiredType - 'pass' or 'run'.
+ * @param {string | null} desiredTag - Optional tag (e.g., 'short', 'inside').
+ * @returns {string | null} The key of the new play, or null if none found.
+ */
+function findAudiblePlay(offense, desiredType, desiredTag = null) {
+    const offenseFormationName = offense.formations.offense;
+
+    const possiblePlays = Object.keys(offensivePlaybook).filter(key =>
+        key.startsWith(offenseFormationName) &&
+        offensivePlaybook[key]?.type === desiredType
+    );
+
+    if (possiblePlays.length === 0) return null; // No plays of that type in this formation
+
+    if (desiredTag) {
+        const taggedPlays = possiblePlays.filter(key =>
+            offensivePlaybook[key]?.tags?.includes(desiredTag)
+        );
+        if (taggedPlays.length > 0) return getRandom(taggedPlays);
+    }
+
+    // Fallback to any play of the desired type
+    return getRandom(possiblePlays);
+}
+
+/**
+ * AI logic for the QB to check the defensive play and audible.
+ * @returns {{playKey: string, didAudible: boolean}}
+ */
+function aiCheckAudible(offense, offensivePlayKey, defense, defensivePlayKey, gameLog) {
+    const offensePlay = offensivePlaybook[offensivePlayKey];
+    const defensePlay = defensivePlaybook[defensivePlayKey];
+    const qb = offense.roster.find(p => p.id === offense.depthChart.offense.QB1);
+    const qbIQ = qb?.attributes.mental.playbookIQ || 50;
+
+    if (!offensePlay || !defensePlay || !qb) {
+        return { playKey: offensivePlayKey, didAudible: false };
+    }
+
+    const iqChance = qbIQ / 150; // 75 IQ = 50% chance to recognize
+    let newPlayKey = offensivePlayKey;
+    let didAudible = false;
+
+    // 1. Check: Run play vs. a stacked box (Run Stop or All-Out Blitz)
+    if (offensePlay.type === 'run' && (defensePlay.concept === 'Run' || (defensePlay.blitz && defensePlay.concept === 'Man'))) {
+        if (Math.random() < iqChance) {
+            const audibleTo = findAudiblePlay(offense, 'pass', 'short'); // Audible to a quick pass
+            if (audibleTo) {
+                newPlayKey = audibleTo;
+                didAudible = true;
+                gameLog.push(`[Audible]: 🧠 ${qb.name} sees the stacked box and audibles to a pass!`);
+            }
+        }
+    }
+    // 2. Check: Pass play vs. a safe zone (no blitz, 'Zone' concept)
+    else if (offensePlay.type === 'pass' && (defensePlay.blitz === false && defensePlay.concept === 'Zone')) {
+        // Good matchup, but maybe we can do better?
+        // Check if it's a "deep" pass vs. a soft "safeZone"
+        if (offensePlay.tags?.includes('deep') && Math.random() < iqChance) {
+            // Smart QB checks down to a run play
+            const audibleTo = findAudiblePlay(offense, 'run', 'inside');
+            if (audibleTo) {
+                newPlayKey = audibleTo;
+                didAudible = true;
+                gameLog.push(`[Audible]: 🧠 ${qb.name} sees the soft zone and audibles to a run!`);
+            }
+        }
+    }
+
+    return { playKey: newPlayKey, didAudible };
+}
+
+
+
 /**
  * Simulates a full game between two teams.
  */
@@ -3812,6 +3963,7 @@ export function simulateGame(homeTeam, awayTeam) {
         }
 
         let ballOn = 20, down = 1, yardsToGo = 10, driveActive = true;
+        let ballHash = 'M';
         gameLog.push(`-- Drive ${drivesThisGame + 1} (H${currentHalf}): ${offense.name} ball on own ${ballOn} --`);
 
         while (driveActive && down <= 4) {
@@ -3829,35 +3981,46 @@ export function simulateGame(homeTeam, awayTeam) {
             const drivesRemainingInGame = (currentHalf === 1 ? totalDrivesPerHalf : 0) + drivesRemainingInHalf;
 
             // --- 1. Offense makes its call (Play + Formation) ---
-            const offensivePlayKey = determinePlayCall(offense, defense, down, yardsToGo, ballOn, scoreDiff, gameLog, drivesRemainingInGame);
+            // 🛠️ MODIFIED: Store in a temporary variable
+            const offensivePlayKey_initial = determinePlayCall(offense, defense, down, yardsToGo, ballOn, scoreDiff, gameLog, drivesRemainingInGame);
             const offenseFormationName = offense.formations.offense; // Get the chosen formation
 
-            // --- 2. 🛠️ NEW: Defensive "Pre-Snap" Read ---
-            // The AI reads the situation and the offense's *personnel* to choose a FORMATION.
+            // --- 2. Defensive "Pre-Snap" Read ---
             const defensiveFormationName = determineDefensiveFormation(
                 defense,
-                offenseFormationName, // Pass in the offense's formation *name*
+                offenseFormationName,
                 down,
                 yardsToGo
             );
-            // --- This is the most important line: we SET the defense's formation ---
             defense.formations.defense = defensiveFormationName;
 
             // --- 3. Defense picks a PLAY from that formation ---
-            // This function now correctly uses the formation we just set.
             const defensivePlayKey = determineDefensivePlayCall(defense, offense, down, yardsToGo, ballOn, scoreDiff, gameLog, drivesRemainingInGame);
 
-            // Get clean names for logging
-            const offPlayName = offensivePlayKey.split('_').slice(1).join(' '); // Gets "InsideRun" from "Balanced_InsideRun"
-            const defPlayName = defensivePlaybook[defensivePlayKey]?.name || defensivePlayKey; // Gets the "name" property
+            // --- 4. 🛠️ NEW: AI QB AUDIBLE CHECK ---
+            const audibleResult = aiCheckAudible(offense, offensivePlayKey_initial, defense, defensivePlayKey, gameLog);
+            const offensivePlayKey = audibleResult.playKey; // Use the (potentially new) play key
+            // --- END NEW STEP ---
 
-            gameLog.push(`🏈 **Offense:** ${offPlayName}`);
+            // Get clean names for logging
+            const offPlayName = offensivePlayKey.split('_').slice(1).join(' ');
+            const defPlayName = defensivePlaybook[defensivePlayKey]?.name || defensivePlayKey;
+
+            gameLog.push(`🏈 **Offense:** ${offPlayName} ${audibleResult.didAudible ? '(Audible)' : ''}`); // 🛠️ Show audible
             gameLog.push(`🛡️ **Defense:** ${defPlayName}`);
 
-            // --- 4. "Snap" ---
+            // --- 5. "Snap" ---
             const result = resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, { gameLog, weather, ballOn });
             if (result.visualizationFrames) {
                 allVisualizationFrames.push(...result.visualizationFrames);
+            }
+            if (!result.incomplete && result.visualizationFrames?.length > 0) {
+                // Get the ball's final X position from the last frame
+                const finalBallX = result.visualizationFrames[result.visualizationFrames.length - 1].ball.x;
+
+                if (finalBallX < HASH_LEFT_X) ballHash = 'L';
+                else if (finalBallX > HASH_RIGHT_X) ballHash = 'R';
+                else ballHash = 'M';
             }
 
             ballOn += result.yards;

@@ -90,7 +90,7 @@ export const ZONES = {
 export const routeTree = {
     // --- Short Routes ---
     'Flat': { path: [{ x: 3, y: 1 }, { x: 7, y: 2 }] },        // Quick out to sideline
-    'Slant': { path: [{ x: 0, y: 3 }, { x: -3, y: 5 }] },       // Sharp cut inside (Assumes Pos X is right, Neg X is left/in)
+    'Slant': { path: [{ x: -3, y: 3 }] },                       // Sharp cut inside (Assumes Pos X is right, Neg X is left/in)
     'Drag': { path: [{ x: 0, y: 3 }, { x: -10, y: 4 }] },      // Shallow crosser
     'Screen': { path: [{ x: -3, y: -1 }, { x: -5, y: -1 }] },    // Step back/sideways for screen catch
 
@@ -206,12 +206,12 @@ export const defensivePlaybook = {
             'DL2': 'pass_rush',
             'DL3': 'pass_rush',
             // --- 3 Man Coverage ---
-            'LB1': 'man_cover_WR1', // 🛠️ FIX: OLB must cover WR1 (Big Mismatch)
-            'LB3': 'man_cover_WR2', // 🛠️ FIX: OLB must cover WR2 (Big Mismatch)
-            'LB2': 'man_cover_RB1', // MLB covers the RB
+            'DB1': 'man_cover_WR1', // 🛠️ FIX: Lone DB takes the #1 WR
+            'LB1': 'man_cover_WR2', // Mismatch, but covered
+            'LB3': 'man_cover_WR3', // Mismatch, but covered
             // --- 1 Deep Safety ---
-            'DB1': 'zone_deep_middle' // The "1" in Cover 1
-            // NOTE: This play follows the rule, but leaves WR3 (the slot) wide open.
+            'LB2': 'zone_deep_middle' // 🛠️ FIX: MLB becomes the "1" deep safety
+            // NOTE: This leaves the RB1 uncovered, a common Cover 1 tradeoff.
         }
     },
     'Cover_1_Man_2-3-2': { // Specific to 2-3-2 (2DL, 3LB, 2DB)
@@ -268,15 +268,16 @@ export const defensivePlaybook = {
     'Man_Blitz_3-3-1': {
         name: 'Man Blitz (3-3-1)', concept: 'Man', blitz: true,
         assignments: {
-            // --- 3 Man Rush ---
+            // --- 🛠️ 4 Man Rush ---
             'DL1': 'blitz_edge',
             'DL2': 'blitz_gap',
             'DL3': 'blitz_edge',
-            // --- 4 Man Coverage (Cover 0) ---
+            'LB2': 'blitz_gap', // 🛠️ FIX: Send the MLB
+            // --- 3 Man Coverage (Cover 0) ---
             'DB1': 'man_cover_WR1', // DB takes best WR
-            'LB2': 'man_cover_WR2', // <-- FIX: MLB takes WR2
-            'LB3': 'man_cover_WR3', // OLB takes slot/WR3
-            'LB1': 'man_cover_RB1'  // OLB takes RB
+            'LB1': 'man_cover_WR2', // Mismatch
+            'LB3': 'man_cover_WR3'  // Mismatch
+            // NOTE: RB1 is uncovered. This is a true blitz.
         }
     },
     'Man_Blitz_2-3-2': {
@@ -358,18 +359,18 @@ export const defensivePlaybook = {
         }
     },
     'Cover_3_Zone_2-3-2': {
-        name: 'Cover 3 Zone (2-3-2)', concept: 'Zone', blitz: false,
+        name: 'Cover 3 Blitz (2-3-2)', concept: 'Zone', blitz: true, // 🛠️ RENAMED
         assignments: {
-            // --- 2 Man Rush ---
+            // --- 🛠️ 3 Man Rush ---
             'DL1': 'pass_rush',
             'DL2': 'pass_rush',
-            // --- 3 Deep Zones ---
-            'DB1': 'zone_deep_third_left',  // DB takes deep left
-            'DB2': 'zone_deep_third_right', // DB takes deep right
-            'LB2': 'zone_deep_middle',      // <-- FIX: MLB drops to deep middle
+            'LB2': 'blitz_gap', // 🛠️ FIX: MLB blitzes
+            // --- 2 Deep Zones (Becomes Cover 2) ---
+            'DB1': 'zone_deep_half_left',  // 🛠️ FIX: DB takes deep half
+            'DB2': 'zone_deep_half_right', // 🛠️ FIX: DB takes deep half
             // --- 2 Underneath Zones ---
-            'LB1': 'zone_flat_left',        // OLB takes left flat/curl
-            'LB3': 'zone_flat_right'        // OLB takes right flat/curl
+            'LB1': 'zone_flat_left',
+            'LB3': 'zone_flat_right'
         }
     },
 
@@ -377,9 +378,15 @@ export const defensivePlaybook = {
     'Zone_Blitz_3-3-1': { // Specific to 3-3-1
         name: 'Zone Blitz (3-3-1)', concept: 'Zone', blitz: true,
         assignments: {
-            'DL1': 'pass_rush', 'DL2': 'zone_short_middle', // Nose drops!
+            // --- 🛠️ 4 Man Rush ---
+            'DL1': 'pass_rush',
+            //         'DL2': 'zone_short_middle', // 🛠️ REMOVED: Nose now rushes
+            'DL2': 'pass_rush',
             'DL3': 'pass_rush',
-            'LB1': 'blitz_edge', 'LB2': 'zone_hook_curl_left', 'LB3': 'blitz_gap', // 2 LBs blitz
+            'LB1': 'blitz_edge', // One LB blitzes
+            // --- 3 Underneath Zones ---
+            'LB2': 'zone_hook_curl_left',
+            'LB3': 'zone_hook_curl_right', // 🛠️ FIX: Other LBs drop
             'DB1': 'zone_deep_middle' // Safety plays deep
         }
     },
