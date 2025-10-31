@@ -3168,7 +3168,7 @@ function finalizeStats(playState, offense, defense) {
  * Simulates a single play using a coordinate-based tick system.
  */
 function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameState) {
-    const { gameLog = [], weather, ballOn } = gameState;
+    const { gameLog = [], weather, ballOn, ballHash = 'M' } = gameState; // <-- FIX IS HERE
 
     const play = JSON.parse(JSON.stringify(offensivePlaybook[offensivePlayKey]));
 
@@ -4064,18 +4064,18 @@ export function simulateGame(homeTeam, awayTeam) {
             gameLog.push(`🛡️ **Defense:** ${defPlayName}`);
 
             // --- 5. "Snap" ---
-            const result = resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, { gameLog, weather, ballOn });
+            const result = resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, { gameLog, weather, ballOn, ballHash });
             if (result.visualizationFrames) {
                 allVisualizationFrames.push(...result.visualizationFrames);
             }
             if (!result.incomplete && result.visualizationFrames?.length > 0) {
-                // Get the ball's final X position from the last frame
                 const finalBallX = result.visualizationFrames[result.visualizationFrames.length - 1].ball.x;
-
+                
                 if (finalBallX < HASH_LEFT_X) ballHash = 'L';
                 else if (finalBallX > HASH_RIGHT_X) ballHash = 'R';
                 else ballHash = 'M';
             }
+            
 
             ballOn += result.yards;
             ballOn = Math.max(0, Math.min(100, ballOn));
