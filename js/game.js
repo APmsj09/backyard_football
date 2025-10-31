@@ -1488,9 +1488,6 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                     pState.targetX = playState.ballState.targetX;
                     pState.targetY = playState.ballState.targetY;
 
-                    // The debug log is now correct
-                    gameLog.push(`[DEBUG] ${pState.name} attacking ball at: (${pState.targetX.toFixed(1)}, ${pState.targetY.toFixed(1)})`);
-
                     // Manually clamp targets within field boundaries, then return
                     pState.targetX = Math.max(0.5, Math.min(FIELD_WIDTH - 0.5, pState.targetX));
                     pState.targetY = Math.max(0.5, Math.min(FIELD_LENGTH - 0.5, pState.targetY));
@@ -2860,6 +2857,13 @@ function handleBallArrival(playState, gameLog) {
             } else {
                 gameLog.push(`👍 CATCH! ${targetPlayerState.name} (Catch: ${recCatchSkill}) makes the reception!`);
             }
+            
+            // Tell all other offensive players to start blocking
+            playState.activePlayers.forEach(p => {
+                if (p.isOffense && p.id !== targetPlayerState.id) {
+                    p.action = 'run_block'; // Set their action to 'run_block'
+                }
+            });
 
             ensureStats(receiverPlayer);
             receiverPlayer.gameStats.receptions = (receiverPlayer.gameStats.receptions || 0) + 1;
