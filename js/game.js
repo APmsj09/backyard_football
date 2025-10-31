@@ -1575,7 +1575,7 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
 
                 case 'pass_block': {
                     if (pState.engagedWith) {
-                        pState.targetX = pState.x; // Stay engaged
+                        pState.targetX = pState.x; // Stay engaged if already blocking
                         pState.targetY = pState.y;
                         target = null;
                         break;
@@ -1591,7 +1591,7 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                     if (potentialTargets.length === 0) {
                         // --- No threat: Hold the pocket ---
                         pState.targetX = pState.initialX; // Stay in your spot
-                        pState.targetY = pState.initialY - 0.75;
+                        pState.targetY = pState.initialY - 0.75; // Set 0.75 yards deep
                         target = null;
                         break;
                     }
@@ -1600,23 +1600,22 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                     const targetDefender = potentialTargets
                         .sort((a, b) => getDistance(pState, a) - getDistance(pState, b))[0];
 
-                    // --- 3. 🛠️ MODIFIED: Target an "Intercept Point" ---
+                    // --- 3. 🛠️ MODIFIED: Target a Dynamic Intercept Point ---
                     if (targetDefender) {
-                        // Target a spot 1 yard in front of the rusher,
-                        // to cut them off from the QB.
+                        // Get the defender's actual goal (the spot they are running toward this tick)
+                        const defenderGoalX = targetDefender.targetX;
+                        const defenderGoalY = targetDefender.targetY;
 
-                        // Find rusher's target (the QB)
-                        const qbTarget = qbState || { x: pState.x, y: pState.y - 5 }; // Fallback if QB is missing
-
-                        // Get vector from rusher to QB
-                        const dx = qbTarget.x - targetDefender.x;
-                        const dy = qbTarget.y - targetDefender.y;
+                        // Get vector from the defender's CURRENT position to their GOAL
+                        const dx = defenderGoalX - targetDefender.x;
+                        const dy = defenderGoalY - targetDefender.y;
                         const dist = Math.max(0.1, Math.sqrt(dx * dx + dy * dy));
 
-                        // Set target 1 yard "in front" of the rusher (towards the blocker)
-                        // This is a dynamic intercept point that updates every tick.
-                        const interceptY = targetDefender.y - (dy / dist) * 1.0;
-                        const interceptX = targetDefender.x - (dx / dist) * 1.0;
+                        // Set target 1 yard "in front" of the defender, along their path
+                        // This creates the intercept point.
+                        const interceptFactor = 1.0;
+                        const interceptY = targetDefender.y - (dy / dist) * interceptFactor;
+                        const interceptX = targetDefender.x - (dx / dist) * interceptFactor;
 
                         pState.targetX = interceptX;
                         pState.targetY = interceptY;
@@ -1628,7 +1627,7 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                     }
 
                     target = null; // We are moving to a fixed {x, y} point, not pursuing
-                    break; // End case 'pass_block'
+                    break;
                 }
 
                 case 'run_block': {
@@ -1642,52 +1641,52 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                     // --- 1. Find All Threats ---
                     const potentialTargets = defenseStates.filter(d =>
                         !d.isBlocked && !d.isEngaged &&
-                        // Look for DLs, LBs, or blitzing DBs
-                        (d.assignment?.includes('run_') || d.assignment?.includes('blitz') || d.assignment === 'pass_rush' || d.slot.startsWith('DL') || d.slot.startsWith('LB'))
+                        // Look for DLs, LBs, or blitzing DBs assigned to stop the run
+                        (d.assignment?.includes('run_') || d.assignment?.includes('blitz') || d.slot.startsWith('DL') || d.slot.startsWith('LB'))
                     );
 
                     if (potentialTargets.length === 0) {
                         // No threat, climb to next level
                         pState.targetX = pState.x;
-                        pState.targetY = pState.y + 3; // Move 3 yards forward
+                        pState.targetY = pState.y + 3;
                         target = null;
                         break;
                     }
 
                     // --- 2. Find *My* Assignment (Closest relevant defender) ---
-                    // We'll keep the sort simple for now: closest defender first.
-                    // You can re-add your "play-side" logic later if needed.
                     const targetDefender = potentialTargets
                         .sort((a, b) => getDistance(pState, a) - getDistance(pState, b))[0];
 
                     // --- 3. 🛠️ MODIFIED: Target an "Intercept Point" ---
                     if (targetDefender) {
-                        // Target a spot 1 yard *in front of* the defender,
-                        // to cut them off from the ball carrier.
+                        // Defender's target is where they are running this tick (gap or carrier)
+                        const defenderGoalX = targetDefender.targetX;
+                        const defenderGoalY = targetDefender.targetY;
 
-                        // Find defender's target (the ball carrier or gap)
-                        const runTarget = ballCarrierState || { x: pState.x, y: pState.y + 5 }; // Fallback
-
-                        // Get vector from rusher to their target
-                        const dx = runTarget.x - targetDefender.x;
-                        const dy = runTarget.y - targetDefender.y;
+                        // Get vector from the defender's CURRENT position to their GOAL
+                        const dx = defenderGoalX - targetDefender.x;
+                        const dy = defenderGoalY - targetDefender.y;
                         const dist = Math.max(0.1, Math.sqrt(dx * dx + dy * dy));
 
-                        // Set target 1 yard "in front" of the defender (towards the blocker)
-                        const interceptY = targetDefender.y - (dy / dist) * 1.0;
-                        const interceptX = targetDefender.x - (dx / dist) * 1.0;
+                        // Set target 1 yard "in front" of the defender (towards the blocker), 
+                        // ensuring we cut off their path.
+                        // The defender's goal for run defense is usually a spot *past* the blocker.
+                        const interceptFactor = 1.0;
+                        const interceptY = targetDefender.y + (dy / dist) * interceptFactor;
+                        const interceptX = targetDefender.x + (dx / dist) * interceptFactor;
 
+                        // Set the blocker's aim to this dynamic point
                         pState.targetX = interceptX;
                         pState.targetY = interceptY;
 
                     } else {
-                        // --- Fallback (shouldn't be reached if potentialTargets > 0) ---
+                        // Fallback (shouldn't be reached if potentialTargets > 0)
                         pState.targetX = pState.x;
-                        pState.targetY = pState.y + 3; // Climb
+                        pState.targetY = pState.y + 3;
                     }
 
-                    target = null; // We are moving to a fixed {x, y} point
-                    break; // End case 'run_block'
+                    target = null; // Target set by fixed point logic above
+                    break;
                 }
                 case 'run_path': { // --- Logic for RBs ---
                     const threatDistance = 3.5; // How far to look for immediate threats
@@ -2101,26 +2100,45 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
             }
 
             // --- Set Target Coordinates (Pursuit Logic) ---
-            if (isPlayerState(target)) { // Target is a dynamic player state
-                const targetSpeed = target.speed || 50;
-                const ownSpeedYPS = Math.max(1, (pState.speed / 10 * pState.fatigueModifier));
+            if (isPlayerState(target)) { // Target is a dynamic player state (e.g., Ball Carrier)
+                // --- 🛠️ MODIFIED: Simplified Pursuit Vector ---
+
                 const distToTarget = getDistance(pState, target);
+
+                // Get carrier's current speed (from updatePlayerPosition)
+                const carrierSpeedYPS = target.currentSpeedYPS || (target.speed / 10);
+
+                // Get defender's current speed (from updatePlayerPosition)
+                const ownSpeedYPS = pState.currentSpeedYPS || (pState.speed / 10);
+
+                // Estimate time until collision (a simplification based on straight-line speeds)
                 const timeToIntercept = distToTarget > 0.1 ? distToTarget / ownSpeedYPS : 0;
-                const anticipationFactor = Math.min(0.9, 0.4 + distToTarget / 15);
-                const targetMoveDist = (target.speed / 10) * (target.fatigueModifier || 1.0) * timeToIntercept * anticipationFactor;
 
-                const targetDX = target.targetX - target.x; const targetDY = target.targetY - target.y;
-                const targetDistToTarget = Math.sqrt(targetDX * targetDX + targetDY * targetDY);
+                // Calculate how far to lead them based on estimated time to collision
+                // This essentially projects the carrier's movement during the defender's travel time.
+                const leadDist = carrierSpeedYPS * timeToIntercept;
 
-                let futureTargetX = target.x; let futureTargetY = target.y;
-                if (targetDistToTarget > 0.1) {
-                    futureTargetX += (targetDX / targetDistToTarget) * targetMoveDist;
-                    futureTargetY += (targetDY / targetDistToTarget) * targetMoveDist;
-                }
-                pState.targetX = futureTargetX; pState.targetY = futureTargetY;
+                // Add a small IQ factor for variation/accuracy (higher IQ = more lead)
+                const iqLeadFactor = 0.8 + ((pState.playbookIQ || 50) / 250);
+                const finalLeadDist = leadDist * iqLeadFactor;
+
+                // Calculate movement vector from carrier's current position to their TARGET
+                // This ensures the defender intercepts the carrier's *intended* path.
+                const targetDX = target.targetX - target.x;
+                const targetDY = target.targetY - target.y;
+                const targetDistToTarget = Math.max(0.1, Math.sqrt(targetDX * targetDX + targetDY * targetDY));
+
+                // Calculate final interception point
+                let futureTargetX = target.x + (targetDX / targetDistToTarget) * finalLeadDist;
+                let futureTargetY = target.y + (targetDY / targetDistToTarget) * finalLeadDist;
+
+                // Set player target
+                pState.targetX = futureTargetX;
+                pState.targetY = futureTargetY;
+
             } else if (target) { // Target is a fixed point {x, y}
                 pState.targetX = target.x; pState.targetY = target.y;
-            } else { // Fallback hold
+            } else { // Fallback hold (target = null)
                 pState.targetX = pState.x; pState.targetY = pState.y;
             }
         } // End if(!isBlocked && !isEngaged)
@@ -2376,6 +2394,7 @@ function resolveOngoingBlocks(playState, gameLog) {
         if (battle.status === 'win_B') {
             // --- Outcome 1: Defender wins (sheds block) ---
             gameLog.push(`🛡️ ${defenderState.name} sheds block from ${blockerState.name}!`);
+            blockerState.stunnedTicks = 30; // Stun the blocker for losing the battle
             blockerState.engagedWith = null; blockerState.isEngaged = false;
             defenderState.isBlocked = false; defenderState.blockedBy = null; defenderState.isEngaged = false;
             battlesToRemove.push(index);
