@@ -34,6 +34,7 @@ let liveGameCurrentIndex = 0; // Current index in the game log array
 let liveGameLog = []; // Stores the log entries for the current sim
 let liveGameCallback = null; // Function to call when sim completes or is skipped
 let currentLiveGameResult = null; // Stores the full gameResult object for accurate final display
+let userPreferredSpeed = 50;
 
 let liveGameLogIndex = 0;
 let liveGameCurrentHomeScore = 0;
@@ -1347,6 +1348,10 @@ function renderLiveStatsBox(gameResult) {
  * Executes a single frame/tick of the live game simulation.
  * This is the core loop called by setInterval.
  */
+/**
+ * Executes a single frame/tick of the live game simulation.
+ * This is the core loop called by setInterval.
+ */
 function runLiveGameTick() {
     // --- 1. End Condition Check ---
     if (!currentLiveGameResult || !currentLiveGameResult.visualizationFrames || liveGameCurrentIndex >= currentLiveGameResult.visualizationFrames.length) {
@@ -1385,6 +1390,8 @@ function runLiveGameTick() {
         return;
     }
 
+    let playHasEnded = false; // --- 🛠️ NEW: Flag to track end of play
+
     // --- 3. Sync Log Entries & Update State (The Combined Step) ---
     if (ticker && frame.logIndex > liveGameLogIndex) {
         for (let i = liveGameLogIndex; i < frame.logIndex; i++) {
@@ -1410,6 +1417,7 @@ function runLiveGameTick() {
                     liveGameDriveActive = false;
                     styleClass = 'font-bold text-amber-400 mt-2 text-lg';
                     descriptiveText = `⏱️ ${playLogEntry} ⏱️`;
+                    playHasEnded = true; // Treat halftime/final as a "pause"
 
                 } else if (playLogEntry.startsWith('➡️ First down')) {
                     liveGameDown = 1;
@@ -1424,6 +1432,7 @@ function runLiveGameTick() {
 
                     styleClass = 'text-yellow-300 font-semibold';
                     descriptiveText = playLogEntry;
+                    playHasEnded = true; // A first down pauses the game
 
                 } else if (playLogEntry.match(/gain of (-?\d+\.?\d*)|loss of (\d+\.?\d*)/)) {
                     const yardsMatch = playLogEntry.match(/gain of (-?\d+\.?\d*)|loss of (\d+\.?\d*)/);
@@ -1449,16 +1458,19 @@ function runLiveGameTick() {
                     } else if (yards > 0) {
                         styleClass = 'text-cyan-300';
                     }
+                    playHasEnded = true; // A tackle/run ends the play
 
                 } else if (playLogEntry.includes('incomplete') || playLogEntry.includes('INCOMPLETE') || playLogEntry.startsWith('❌') || playLogEntry.startsWith('🚫') || playLogEntry.startsWith('‹‹')) {
                     if (liveGameDriveActive) liveGameDown++;
                     styleClass = 'font-semibold text-red-400';
-                    descriptiveText = playLogEntry; // Simple, as it's already descriptive
+                    descriptiveText = playLogEntry;
+                    playHasEnded = true; // An incompletion ends the play
 
                 } else if (playLogEntry.startsWith('🎉 TOUCHDOWN')) {
                     liveGameBallOn = 100; liveGameDriveActive = false;
                     styleClass = 'font-semibold text-green-400';
                     descriptiveText = playLogEntry;
+                    playHasEnded = true; // A TD ends the play
 
                 } else if (playLogEntry.includes('conversion GOOD!')) {
                     const points = playLogEntry.includes('2-point') ? 2 : 1;
@@ -1466,27 +1478,30 @@ function runLiveGameTick() {
                     liveGameDriveActive = false;
                     styleClass = 'font-semibold text-green-400';
                     descriptiveText = `✅ ${playLogEntry} Points are good!`;
+                    playHasEnded = true; // Conversion ends
 
                 } else if (playLogEntry.includes('Conversion FAILED!')) {
                     if (liveGamePossessionName === currentLiveGameResult.homeTeam.name) liveGameCurrentHomeScore += 6; else liveGameCurrentAwayScore += 6;
                     liveGameDriveActive = false;
                     styleClass = 'font-semibold text-red-400';
                     descriptiveText = `❌ ${playLogEntry} No good!`;
+                    playHasEnded = true; // Conversion ends
 
                 } else if (playLogEntry.startsWith('Turnover') || playLogEntry.startsWith('❗ INTERCEPTION') || playLogEntry.startsWith('❗ FUMBLE')) {
                     liveGameDriveActive = false;
                     const yardLineMatch = playLogEntry.match(/at the (own|opponent) (\d+)/);
                     if (yardLineMatch) {
                         const side = yardLineMatch[1]; const line = parseInt(yardLineMatch[2], 10);
-                        // Note: ballOn is relative to the *new* possessing team
                         liveGameBallOn = (side === 'own') ? line : 100 - line;
                     }
                     styleClass = 'font-semibold text-red-400';
                     descriptiveText = playLogEntry;
+                    playHasEnded = true; // Turnover ends the play
                 }
 
                 if (liveGameDown > 4 && liveGameDriveActive) {
                     liveGameDriveActive = false;
+                    // Note: The "Turnover on downs!" log will trigger 'playHasEnded' on its own
                 }
 
             } catch (parseError) {
@@ -1504,7 +1519,6 @@ function runLiveGameTick() {
         if (ticker) ticker.scrollTop = ticker.scrollHeight;
 
         // --- 5. Update Scoreboard UI ---
-        // This now happens *after* all logs for this frame are processed
         elements.simAwayScore.textContent = liveGameCurrentAwayScore;
         elements.simHomeScore.textContent = liveGameCurrentHomeScore;
         elements.simGameDrive.textContent = liveGameDriveText;
@@ -1523,10 +1537,42 @@ function runLiveGameTick() {
     // --- 6. Draw Visualization ---
     drawFieldVisualization(frame);
 
-    // --- 7. Advance to Next Frame ---
+    // --- 7. Advance to Next Frame OR Start Huddle ---
     liveGameCurrentIndex++;
+
+    // --- 🛠️ NEW: Huddle Logic ---
+    if (playHasEnded && liveGameCurrentIndex < allFrames.length) {
+        // The play is over! Stop the "action" clock.
+        clearInterval(liveGameInterval);
+        liveGameInterval = null;
+
+        // Start the "huddle" clock (2.5 second pause)
+        const HUDDLE_PAUSE_MS = 2500;
+        setTimeout(startNextPlay, HUDDLE_PAUSE_MS);
+    }
+    // --- END NEW LOGIC ---
 }
 
+/**
+ * 🛠️ NEW HELPER FUNCTION
+ * This function is called after the "huddle pause" (setTimeout) finishes.
+ * It clears the field and restarts the fast "action" clock.
+ */
+function startNextPlay() {
+    if (!currentLiveGameResult || liveGameCurrentIndex >= currentLiveGameResult.visualizationFrames.length) {
+        // Failsafe: If the game ended on that last play, just run the tick again to exit.
+        runLiveGameTick();
+        return;
+    }
+
+    // Clear the field (players are in the huddle)
+    drawFieldVisualization(null);
+    
+    // Restart the "action" clock using the user's preferred speed
+    if (!liveGameInterval) {
+         liveGameInterval = setInterval(runLiveGameTick, userPreferredSpeed);
+    }
+}
 
 /** Starts the live game simulation, syncing frames with log entries. */
 export function startLiveGameSim(gameResult, onComplete) {
@@ -1613,6 +1659,8 @@ export function skipLiveGameSim() {
 /** Changes the speed of the live game simulation interval. */
 export function setSimSpeed(speed) {
     liveGameSpeed = speed;
+
+    userPreferredSpeed = speed;
 
     // Update button styles
     elements.simSpeedBtns?.forEach(btn => {

@@ -2467,7 +2467,10 @@ function updateQBDecision(playState, offenseStates, defenseStates, gameLog) {
     const imminentSackDefender = isPressured && getDistance(qbState, pressureDefender) < TACKLE_RANGE + 0.2;
 
     // --- 2. Scan Receivers ---
-    const receivers = offenseStates.filter(p => p.action === 'run_route' || p.action === 'route_complete');
+    const receivers = offenseStates.filter(p =>
+        (p.action === 'run_route' || p.action === 'route_complete') &&
+        (p.slot.startsWith('WR') || p.slot.startsWith('RB'))
+    );
     let potentialTargets = [];
     receivers.forEach(recState => {
         const closestDefender = defenseStates.filter(d => !d.isBlocked && !d.isEngaged)
@@ -2857,7 +2860,7 @@ function handleBallArrival(playState, gameLog) {
             } else {
                 gameLog.push(`👍 CATCH! ${targetPlayerState.name} (Catch: ${recCatchSkill}) makes the reception!`);
             }
-            
+
             // Tell all other offensive players to start blocking
             playState.activePlayers.forEach(p => {
                 if (p.isOffense && p.id !== targetPlayerState.id) {
