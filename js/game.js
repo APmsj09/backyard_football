@@ -1382,7 +1382,7 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
  * Updates player targets based on their current action, assignment, and game state. (Improved AI)
  * Modifies playerState objects within playState.activePlayers directly.
  */
-function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrierState, playType, offensiveAssignments, defensivePlayKey, gameLog) {
+function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrierState, playType, offensivePlayKey, offensiveAssignments, defensivePlayKey, gameLog) {
     const qbState = offenseStates.find(p => p.slot?.startsWith('QB'));
     const isBallInAir = playState.ballState.inAir;
     const ballPos = playState.ballState;
@@ -2993,7 +2993,7 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
             ballCarrierState = playState.activePlayers.find(p => p.isBallCarrier);
 
             // A. Update Player Intentions/Targets (AI)
-            updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrierState, type, assignments, defensivePlayKey, gameLog);
+            updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrierState, type, offensivePlayKey, assignments, defensivePlayKey, gameLog);
 
             // B. Update Player Positions (Movement)
             playState.activePlayers.forEach(p => updatePlayerPosition(p, timeDelta));
