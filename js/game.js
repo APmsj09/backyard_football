@@ -1302,29 +1302,26 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
                 else if (assignment.startsWith('zone_')) {
                     const zoneTarget = getZoneCenter(assignment, playState.lineOfScrimmage);
 
-                    if (startY < zoneTarget.y - 2) {
-                        startY = zoneTarget.y; startX = zoneTarget.x; targetX = startX; targetY = startY;
-                    } else if (assignment.startsWith('zone_')) {
-                        const zoneTarget = getZoneCenter(assignment, playState.lineOfScrimmage);
+                    // --- 1. Set Target Position (Where player WANTS to go) ---
+                    targetX = zoneTarget.x;
+                    targetY = zoneTarget.y;
 
-                        // --- 🛠️ FIX: Always set the TARGET to the zone center ---
-                        targetX = zoneTarget.x;
-                        targetY = zoneTarget.y;
+                    // --- 2. Adjust Starting Position (Initial Alignment) ---
 
-                        // --- 🛠️ FIX: ONLY adjust startY for deep zones ---
-                        // e.g., A Safety is assigned a deep zone but their formation spot is shallow
-                        if (assignment.includes('deep') && startY < zoneTarget.y - 5) {
-                            // Snap them back to their deep responsibility
-                            startY = zoneTarget.y;
-                            startX = zoneTarget.x;
+                    // 🚨 Only snap deep safeties to their depth if they start shallow
+                    if (assignment.includes('deep') && startY < zoneTarget.y - 5) {
+                        startY = zoneTarget.y;
+                        startX = zoneTarget.x; // Align horizontally with zone center
+                    } else {
+                        // For LBs/CBs: use their formation coordinates, but align slightly
+                        // horizontally to the zone if their starting position is generic.
+                        if (slot.startsWith('DB')) {
+                            // Small cosmetic/leverage adjustment for outside DBs on the line
+                            const wideOffset = startX < CENTER_X ? -2 : 2;
+                            startX += wideOffset;
+                            startY = Math.min(playState.lineOfScrimmage + 1.0, startY); // Ensure they start shallow
                         }
-                        // --- For LBs and CBs, startX/startY will now correctly use their formation coordinates ---
-                    }
-
-                    if (slot.startsWith('DB') && isNaN(relCoords[0])) {
-                        const wideOffset = startX < CENTER_X ? -2 : 2;
-                        startX += wideOffset;
-                        startY += 0.5;
+                        // Otherwise, LBs and DLs stick close to their formation spot
                     }
                 }
 
