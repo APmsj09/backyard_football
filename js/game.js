@@ -1481,15 +1481,32 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
 
     playState.activePlayers.forEach(pState => {
         let target = null; // Target: PlayerState (dynamic) or {x, y} (static point)
-        // --- ADD THIS BLOCK AT THE TOP ---
+
+        // --- 1. HANDLE STUNNED STATE (Highest Priority) ---
         if (pState.stunnedTicks > 0) {
             pState.stunnedTicks--;
             pState.targetX = pState.x; // Player stands still while stunned
             pState.targetY = pState.y;
             return; // Skip all other AI logic for this tick
         }
-        // --- END ADDED BLOCK ---
-        // --- Handle Engaged State (Skip target update entirely) ---
+
+        // --- 2. HANDLE JUKE COOLDOWN & VISUALIZATION ---
+        if (pState.action === 'juke' || pState.jukeTicks > 0) {
+            pState.jukeTicks--;
+
+            // If juke is still active, player maintains current (reduced speed) course
+            if (pState.jukeTicks > 0) {
+                // 🛠️ FIX: Crucial to return here to prevent AI from recalculating the run_path target
+                // If they are mid-juke, they should maintain their direction.
+                return;
+            } else {
+                // Reset the action once the visual effect is over
+                pState.action = 'run_path';
+                pState.jukeTicks = 0;
+            }
+        }
+
+        // --- 3. PROCEED TO AI LOGIC ---
         if (pState.isBlocked || pState.isEngaged) {
             pState.targetX = pState.x; pState.targetY = pState.y;
             return;
@@ -2243,30 +2260,24 @@ function checkBlockCollisions(playState) {
 }
 
 /**
- * Checks for tackle attempts based on proximity to ball carrier.
- */
-/**
- * Checks for tackle attempts (MODIFIED with Weight & Momentum)
+ * Checks for tackle attempts (MODIFIED with Momentum and Successive Tackle Penalty)
+ * Assumes: The caller ensures defender.stunnedTicks is reset after a success/play end.
  */
 function checkTackleCollisions(playState, gameLog) {
     const ballCarrierState = playState.activePlayers.find(p => p.isBallCarrier);
     if (!ballCarrierState) return false;
 
+    // Filter defenders who are active and not engaged
     const activeDefenders = playState.activePlayers.filter(p => !p.isOffense && !p.isBlocked && !p.isEngaged && p.stunnedTicks === 0);
 
-    // We want momentum to be a "bonus" on top of skills.
-    const MOMENTUM_SCALING_FACTOR = 0.1;
-    // e.g., 200lb * 6 YPS = 1200. 1200 * 0.1 = 120. This is a big, powerful number.
-    // Let's try 0.2
-    // e.g., 200lb * 6 YPS = 1200. 1200 * 0.2 = 240.
-    // Let's re-think.
-    // AGI (81) vs TKL (77).
-    // Let's make the stats the "base" and momentum the "modifier".
+    // Define initial tackle attempts taken by the carrier this play
+    if (ballCarrierState.tacklesBrokenThisPlay === undefined) ballCarrierState.tacklesBrokenThisPlay = 0;
 
-    // --- 🛠️ NEW: Base Power + Momentum Bonus ---
+    const MOMENTUM_SCALING_FACTOR = 0.1; // Base scaling for carrier
+    const TACKLE_RANGE_CHECK = TACKLE_RANGE;
 
     for (const defender of activeDefenders) {
-        if (getDistance(ballCarrierState, defender) < TACKLE_RANGE) {
+        if (getDistance(ballCarrierState, defender) < TACKLE_RANGE_CHECK) {
 
             const carrierPlayer = game.players.find(p => p && p.id === ballCarrierState.id);
             const tacklerPlayer = game.players.find(p => p && p.id === defender.id);
@@ -2274,59 +2285,84 @@ function checkTackleCollisions(playState, gameLog) {
 
             if (checkFumble(carrierPlayer, tacklerPlayer, playState, gameLog)) return true;
 
-            // --- 1. Carrier's Power ---
+            // --- 1. Carrier's Break Power (Modified for Successive Tackles) ---
             const carrierWeight = carrierPlayer.attributes?.physical?.weight || 180;
             const carrierSpeed = ballCarrierState.currentSpeedYPS || 0;
+
+            // Apply heavy penalty for each broken tackle (e.g., 20% penalty per broken tackle)
+            const successiveTacklePenalty = ballCarrierState.tacklesBrokenThisPlay * 0.20;
+            const skillModifier = Math.max(0.1, 1.0 - successiveTacklePenalty); // Minimum 10% skill retained
+
             // Base "Break" skill = 100% Agility + 50% Strength
             const carrierSkill = (
                 (carrierPlayer.attributes?.physical?.agility || 50) * 1.0 +
                 (carrierPlayer.attributes?.physical?.strength || 50) * 0.5
-            );
-            // Momentum Bonus
+            ) * skillModifier; // Apply penalty here
+
+            // Momentum Bonus (less affected by penalty, as momentum is physical)
             const carrierMomentum = (carrierWeight * carrierSpeed) * MOMENTUM_SCALING_FACTOR;
-            // Final Power
+
             const breakPower = (carrierSkill + carrierMomentum) * ballCarrierState.fatigueModifier;
 
 
-            // --- 2. Tackler's Power ---
+            // --- 2. Tackler's Power (Easier to Tackle) ---
             const tacklerWeight = tacklerPlayer.attributes?.physical?.weight || 200;
             const tacklerSpeed = defender.currentSpeedYPS || 0;
+
             // Base "Tackle" skill = 100% Tackling + 50% Strength
             const tacklerSkill = (
                 (tacklerPlayer.attributes?.technical?.tackling || 50) * 1.0 +
                 (tacklerPlayer.attributes?.physical?.strength || 50) * 0.5
             );
-            // Momentum Bonus (Tacklers get a bigger bonus for hitting hard)
+
+            // Momentum Bonus (Tacklers get a 1.5x bonus for hitting hard)
             const tacklerMomentum = (tacklerWeight * tacklerSpeed) * (MOMENTUM_SCALING_FACTOR * 1.5);
-            // Final Power
+
             const tacklePower = (tacklerSkill + tacklerMomentum) * defender.fatigueModifier;
 
 
-            // --- 3. The Resolution ---
-            const roll = getRandomInt(-15, 15); // Increased randomness
-            const diff = (breakPower) - (tacklePower + roll); // Roll helps the tackler
+            // --- 3. The Resolution (More Predictable) ---
+            const roll = getRandomInt(-10, 10); // Reduced randomness to favor stats
+            const diff = (breakPower + roll) - tacklePower; // Roll now helps the carrier (simplified from previous logic)
 
             if (diff <= 0) { // Tackle success
                 playState.yards = ballCarrierState.y - playState.lineOfScrimmage;
                 playState.playIsLive = false;
-                if (!tacklerPlayer.gameStats) ensureStats(tacklerPlayer);
-                tacklerPlayer.gameStats.tackles = (tacklerPlayer.gameStats.tackles || 0) + 1;
 
-                if (ballCarrierState.slot === 'QB1' &&
-                    (ballCarrierState.action === 'qb_setup' || ballCarrierState.action === 'qb_scramble') &&
-                    ballCarrierState.y < playState.lineOfScrimCriminage) {
-
+                // ... (Sack/Tackle logging logic) ...
+                if (ballCarrierState.slot === 'QB1' && (ballCarrierState.action === 'qb_setup' || ballCarrierState.action === 'qb_scramble') && ballCarrierState.y < playState.lineOfScrimmage) {
                     playState.sack = true;
-                    tacklerPlayer.gameStats.sacks = (tacklerPlayer.gameStats.sacks || 0) + 1;
                     gameLog.push(`💥 SACK! ${tacklerPlayer.name} (TklPwr: ${tacklePower.toFixed(0)}) gets to ${ballCarrierState.name}!`);
                 } else {
                     gameLog.push(`✋ ${ballCarrierState.name} tackled by ${defender.name} (TklPwr: ${tacklePower.toFixed(0)}) for a gain of ${playState.yards.toFixed(1)} yards.`);
                 }
+
                 return true; // Play ended
-            } else { // Broken tackle
-                // Log both powers for debugging
+            } else { // Broken tackle (Juke)
+                // Increment the counter for the penalty to apply next time
+                ballCarrierState.tacklesBrokenThisPlay++;
+
+                // --- 🛠️ NEW: SET JUKE ACTION & COOLDOWN ---
+                ballCarrierState.action = 'juke'; // Set temporary action state
+                ballCarrierState.stunnedTicks = 5;
+                ballCarrierState.jukeTicks = 5; // New timer to run the visualization effect
+
+                // Momentum Loss: Halve the current speed
+                ballCarrierState.currentSpeedYPS *= 0.5;
+
                 gameLog.push(`💥 ${ballCarrierState.name} (BrkPwr: ${breakPower.toFixed(0)}) breaks tackle from ${defender.name} (TklPwr: ${tacklePower.toFixed(0)})!`);
-                defender.stunnedTicks = 30; // Was 10
+
+                // Stun the immediate tackler for failing
+                defender.stunnedTicks = 30;
+
+                // Check for nearby defenders to stun (group juke)
+                const JUKE_STUN_RADIUS = 3.0; // 3 yards (9 feet)
+                playState.activePlayers.forEach(p => {
+                    if (!p.isOffense && p.id !== defender.id && p.stunnedTicks === 0 && getDistance(ballCarrierState, p) < JUKE_STUN_RADIUS) {
+                        p.stunnedTicks = 15; // Shorter stun for being close
+                        gameLog.push(`[Juke]: ${p.name} was juked out of the play!`);
+                    }
+                });
             }
         }
     }
@@ -2432,7 +2468,7 @@ function resolveOngoingBlocks(playState, gameLog) {
 
         if (battle.status === 'win_B') {
             // --- Outcome 1: Defender wins (sheds block) ---
-            gameLog.push(`🛡️ ${defenderState.name} sheds block from ${blockerState.name}!`);
+            //gameLog.push(`🛡️ ${defenderState.name} sheds block from ${blockerState.name}!`);
             blockerState.stunnedTicks = 30; // Stun the blocker for losing the battle
             blockerState.engagedWith = null; blockerState.isEngaged = false;
             defenderState.isBlocked = false; defenderState.blockedBy = null; defenderState.isEngaged = false;
@@ -2440,7 +2476,7 @@ function resolveOngoingBlocks(playState, gameLog) {
 
         } else if (battle.status === 'win_A') {
             // --- Outcome 2: Blocker wins (pancake) ---
-            gameLog.push(`🥞 ${blockerState.name} pancakes ${defenderState.name}!`);
+            //gameLog.push(`🥞 ${blockerState.name} pancakes ${defenderState.name}!`);
 
             // Stun the defender for winning the block
             defenderState.stunnedTicks = 35; // Stun for 15 ticks

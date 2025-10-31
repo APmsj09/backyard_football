@@ -1228,6 +1228,24 @@ export function drawFieldVisualization(frameData) {
         ctx.font = 'bold 10px "Inter"'; // <-- Made bigger (was 9px)
         ctx.fillText(pState.number || '?', drawX, drawY + 1);
 
+        // --- 🛠️ NEW: Juke Visualization Effect ---
+        if (pState.action === 'juke' || pState.jukeTicks > 0) {
+            // Draw a quick gold flash behind the player
+            ctx.strokeStyle = 'rgba(255, 215, 0, 0.8)'; // Gold
+            ctx.lineWidth = 2.5; 
+            ctx.beginPath();
+            // Draw a dashed circle that fades out
+            ctx.setLineDash([3, 3]); 
+            ctx.arc(drawX, drawY, playerRadius + 3, 0, 2 * Math.PI); 
+            ctx.stroke();
+            ctx.setLineDash([]); // Reset dash for next drawing
+            
+            // Draw a small "Juke" text overlay for clarity (optional)
+            ctx.fillStyle = '#FFD700'; 
+            ctx.font = 'bold 8px "Inter"'; 
+            ctx.fillText('J', drawX + playerRadius + 2, drawY - playerRadius - 2); 
+        }
+
         // Highlight ball carrier
         if (pState.isBallCarrier) {
             ctx.strokeStyle = '#FBBF24';
