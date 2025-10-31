@@ -3121,32 +3121,18 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
     const { gameLog = [], weather, ballOn } = gameState;
 
     const play = JSON.parse(JSON.stringify(offensivePlaybook[offensivePlayKey]));
+
     if (!play) {
         console.error(`Play key "${offensivePlayKey}" not found...`);
         gameLog.push("CRITICAL ERROR: Play definition missing!");
         return { yards: 0, turnover: true, incomplete: false, touchdown: false, log: gameLog, visualizationFrames: [] };
     }
 
-    // --- 🛠️ NEW: RB "HOT ROUTE" AUDIBLE CHECK ---
-    const defensePlay = defensivePlaybook[defensivePlayKey];
-    const qbState = playState.activePlayers.find(p => p.slot === 'QB1' && p.isOffense);
-    const qbPlayer = qbState ? game.players.find(p => p && p.id === qbState.id) : null;
-    const qbIQ = qbPlayer?.attributes.mental.playbookIQ || 50;
+    // 🛠️ Get the *initial* type and assignments
+    const { type } = play;
+    let { assignments } = play; // Use 'let' so we can modify it
 
-    if (play.type === 'pass' &&
-        defensePlay?.blitz === true &&
-        play.assignments['RB1'] &&
-        play.assignments['RB1'] !== 'BlockPass' &&
-        Math.random() < (qbIQ / 125)) // e.g., 75 IQ = 60% chance to spot blitz
-    {
-        play.assignments['RB1'] = 'BlockPass';
-        const rbPlayer = playState.activePlayers.find(p => p.slot === 'RB1' && p.isOffense);
-        gameLog.push(`[Pre-Snap]: 🧠 ${qbPlayer?.name || 'QB'} sees the blitz and keeps ${rbPlayer?.name || 'RB'} in to block!`);
-    }
-    // --- END HOT ROUTE CHECK ---
-
-    const { type, assignments } = play;
-
+    // 🛠️ MOVED: playState is now declared *before* the hot route check
     const playState = {
         playIsLive: true, tick: 0, maxTicks: 1000,
         yards: 0, touchdown: false, turnover: false, incomplete: false, sack: false,
@@ -3156,7 +3142,9 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
 
     try {
         playState.lineOfScrimmage = ballOn + 10;
-        setupInitialPlayerStates(playState, offense, defense, play, assignments, ballOn, defensivePlayKey, ballHash);
+        // 🛠️ MOVED: Run setup *before* the hot route check, using the *initial* assignments
+        setupInitialPlayerStates(playState, offense, defense, play, assignments, ballOn, defensivePlayKey);
+
         // --- >>> BLOCK TO CAPTURE FRAME 0 <<< ---
         if (playState.playIsLive) { // Ensure setup didn't immediately fail
             const initialFrameData = {
@@ -3169,25 +3157,15 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
         // --- >>> END BLOCK <<< ---
     } catch (setupError) {
         const errorMsg = setupError.message || "An unexpected error occurred during setup.";
-
         console.error("CRITICAL ERROR during setupInitialPlayerStates:", setupError);
-
-        // --- PUSH DETAILED ERROR MESSAGE TO GAME LOG ---
         gameLog.push(`💥 CRITICAL ERROR: Play setup failed!`);
         gameLog.push(`[DEBUG] Reason: ${errorMsg}`);
-
-        // Add context if the error is a common one (like missing player/attribute)
         if (errorMsg.includes('Cannot read properties of undefined')) {
             gameLog.push(`[DEBUG] Check: Roster capacity or missing attributes on a drafted player.`);
         }
-
         return {
-            yards: 0,
-            turnover: true,
-            incomplete: false,
-            touchdown: false,
-            log: gameLog,
-            visualizationFrames: []
+            yards: 0, turnover: true, incomplete: false, touchdown: false,
+            log: gameLog, visualizationFrames: []
         };
     }
 
@@ -3196,9 +3174,38 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
         return { yards: 0, turnover: true, incomplete: false, touchdown: false, log: gameLog, visualizationFrames: [] };
     }
 
+    // --- 🛠️ MOVED: RB "HOT ROUTE" AUDIBLE CHECK (Now runs *after* setup) ---
+    const defensePlay = defensivePlaybook[defensivePlayKey];
+    const qbState = playState.activePlayers.find(p => p.slot === 'QB1' && p.isOffense); // Now works
+    const qbPlayer = qbState ? game.players.find(p => p && p.id === qbState.id) : null;
+    const qbIQ = qbPlayer?.attributes.mental.playbookIQ || 50;
+
+    if (play.type === 'pass' &&
+        defensePlay?.blitz === true &&
+        play.assignments['RB1'] &&
+        play.assignments['RB1'] !== 'BlockPass' &&
+        Math.random() < (qbIQ / 125)) // e.g., 75 IQ = 60% chance to spot blitz
+    {
+        play.assignments['RB1'] = 'BlockPass';
+        assignments = play.assignments; // 🛠️ Re-assign the local 'assignments' variable
+
+        const rbPlayer = playState.activePlayers.find(p => p.slot === 'RB1' && p.isOffense); // Now works
+        gameLog.push(`[Pre-Snap]: 🧠 ${qbPlayer?.name || 'QB'} sees the blitz and keeps ${rbPlayer?.name || 'RB'} in to block!`);
+
+        // 🛠️ CRITICAL FIX: We must also update the *live player state*
+        if (rbPlayer) {
+            rbPlayer.assignment = 'BlockPass';
+            rbPlayer.action = 'BlockPass';
+            // Also update their target to their initial spot
+            rbPlayer.targetX = rbPlayer.initialX;
+            rbPlayer.targetY = rbPlayer.initialY - 0.5; // Pass block step
+        }
+    }
+    // --- END HOT ROUTE CHECK ---
+
 
     // --- 3. TICK LOOP ---
-    let ballCarrierState = null; // Declared here to be accessible in the catch block
+    let ballCarrierState = null;
     try {
         while (playState.playIsLive && playState.tick < playState.maxTicks) {
             playState.tick++;
@@ -3208,18 +3215,16 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
             const offenseStates = playState.activePlayers.filter(p => p.isOffense);
             const defenseStates = playState.activePlayers.filter(p => !p.isOffense);
             ballCarrierState = playState.activePlayers.find(p => p.isBallCarrier);
-            const ballPos = playState.ballState; // Helper reference
+            const ballPos = playState.ballState;
 
             // --- STEP 1: QB Logic (Decide Throw/Scramble) ---
-            // This MUST happen before targets are updated so defenders
-            // can react to isBallInAir on the same tick.
             if (playState.playIsLive && type === 'pass' && !ballPos.inAir && !playState.turnover && !playState.sack) {
                 updateQBDecision(playState, offenseStates, defenseStates, gameLog);
                 if (!playState.playIsLive) break; // Play ended (e.g., QB threw away)
             }
 
             // --- STEP 2: Update Player Intentions/Targets (AI) ---
-            // Defenders will now see ballPos.inAir == true on the *same tick* it's thrown.
+            // 🛠️ This now passes the *final* (potentially modified) assignments
             updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrierState, type, offensivePlayKey, assignments, defensivePlayKey, gameLog);
 
             // --- STEP 3: Update Player Positions (Movement) ---
