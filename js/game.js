@@ -46,7 +46,7 @@ const HASH_RIGHT_X = 35.3; // Approx college hash mark X-coordinate
 const CENTER_X = FIELD_WIDTH / 2; // Approx 26.65
 
 // --- Physics/Interaction Constants ---
-const TICK_DURATION_SECONDS = 0.15;
+const TICK_DURATION_SECONDS = 0.05;
 const BLOCK_ENGAGE_RANGE = 1.0;
 const TACKLE_RANGE = 1.5;
 const CATCH_RADIUS = 0.8;
@@ -155,118 +155,138 @@ function generatePlayer(minAge = 10, maxAge = 16) {
     const firstName = getRandom(firstNames);
     const lastName = Math.random() < 0.4 ? getRandom(nicknames) : getRandom(lastNames);
     const age = getRandomInt(minAge, maxAge);
+
+    // --- 🛠️ FIX #1: Determine ONE "bestPosition" from the favorites ---
+    // This ensures the player's stats match their listed position.
     const favoriteOffensivePosition = getRandom(offensivePositions);
     const favoriteDefensivePosition = getRandom(defensivePositions);
+    const isOffenseStar = Math.random() < 0.5;
+    const bestPosition = isOffenseStar ? favoriteOffensivePosition : favoriteDefensivePosition;
+    // --- END FIX #1 ---
 
     const ageProgress = (age - 10) / (16 - 10);
     let baseHeight = 55 + (ageProgress * 15) + getRandomInt(-2, 2);
     let baseWeight = 70 + (ageProgress * 90) + getRandomInt(-10, 10);
-    const bestPosition = getRandom(positions);
 
-    // --- Adjust size based on position ---
+    // Adjust size based on position (This is good)
     switch (bestPosition) {
         case 'QB': case 'WR': baseHeight += getRandomInt(1, 4); baseWeight -= getRandomInt(0, 10); break;
         case 'OL': case 'DL': baseHeight -= getRandomInt(0, 2); baseWeight += getRandomInt(20, 40); break;
         case 'RB': baseWeight += getRandomInt(5, 15); break;
     }
 
-    const ageScalingFactor = 0.85 + ageProgress * 0.15;
-    // --- Generate Base Attributes (Slightly wider range) ---
+    // --- 🛠️ FIX #2: Determine Talent Tier FIRST ---
+    let talentTier = 'Average';
+    let potentialBonus = 0; // This will link talent to potential
+    const tierRoll = Math.random();
+    if (tierRoll < 0.05) {
+        talentTier = 'Elite';
+        potentialBonus = -0.20; // High chance of A/B
+    } else if (tierRoll < 0.20) {
+        talentTier = 'Good';
+        potentialBonus = -0.10; // High chance of B/C
+    } else if (tierRoll < 0.70) {
+        talentTier = 'Average';
+        potentialBonus = 0.0;
+    } else if (tierRoll < 0.90) {
+        talentTier = 'Below Average';
+        potentialBonus = 0.10; // High chance of D
+    } else {
+        talentTier = 'Poor';
+        potentialBonus = 0.20; // High chance of D/F
+    }
+
+    const boostRanges = {
+        'Elite': { min: 80, max: 95 },         // Base stats will be in this range
+        'Good': { min: 65, max: 80 },
+        'Average': { min: 50, max: 70 },
+        'Below Average': { min: 35, max: 55 },
+        'Poor': { min: 20, max: 40 }
+    };
+    const boostRange = boostRanges[talentTier];
+
+    // --- 🛠️ FIX #3: Generate ALL attributes based on the Talent Tier ---
+    // This creates well-rounded players instead of "one-trick ponies"
     let attributes = {
         physical: {
-            speed: Math.round(getRandomInt(35, 75) * ageScalingFactor), // Wider range
-            strength: Math.round(getRandomInt(35, 75) * ageScalingFactor), // Wider range
-            agility: Math.round(getRandomInt(35, 75) * ageScalingFactor), // Wider range
-            stamina: Math.round(getRandomInt(45, 85) * ageScalingFactor), // Wider range
-            height: Math.round(baseHeight), weight: Math.round(baseWeight)
+            speed: getRandomInt(boostRange.min, boostRange.max),
+            strength: getRandomInt(boostRange.min, boostRange.max),
+            agility: getRandomInt(boostRange.min, boostRange.max),
+            stamina: getRandomInt(boostRange.min + 5, boostRange.max + 5), // Stamina slightly higher
+            height: Math.round(baseHeight),
+            weight: Math.round(baseWeight)
         },
         mental: {
-            playbookIQ: Math.round(getRandomInt(25, 75) * ageScalingFactor), // Wider range
-            clutch: getRandomInt(20, 90),
-            consistency: Math.round(getRandomInt(30, 85) * ageScalingFactor), // Wider range
-            toughness: Math.round(getRandomInt(40, 95) * ageScalingFactor) // Wider range
+            playbookIQ: getRandomInt(boostRange.min, boostRange.max),
+            clutch: getRandomInt(20, 90), // Clutch remains random
+            consistency: getRandomInt(boostRange.min, boostRange.max),
+            toughness: getRandomInt(boostRange.min, boostRange.max)
         },
         technical: {
-            throwingAccuracy: Math.round(getRandomInt(20, 55) * ageScalingFactor), // Slightly wider base
-            catchingHands: Math.round(getRandomInt(25, 65) * ageScalingFactor), // Slightly wider base
-            tackling: Math.round(getRandomInt(25, 65) * ageScalingFactor), // Slightly wider base
-            blocking: Math.round(getRandomInt(25, 65) * ageScalingFactor), // Slightly wider base
-            blockShedding: Math.round(getRandomInt(25, 65) * ageScalingFactor) // Slightly wider base
+            throwingAccuracy: getRandomInt(boostRange.min, boostRange.max),
+            catchingHands: getRandomInt(boostRange.min, boostRange.max),
+            tackling: getRandomInt(boostRange.min, boostRange.max),
+            blocking: getRandomInt(boostRange.min, boostRange.max),
+            blockShedding: getRandomInt(boostRange.min, boostRange.max)
         }
     };
 
-    // --- Apply weight modifier ---
-    const weightModifier = (attributes.physical.weight - 125) / 50;
-    attributes.physical.strength = Math.round(attributes.physical.strength + weightModifier * 10);
-    attributes.physical.speed = Math.round(attributes.physical.speed - weightModifier * 8);
-    attributes.physical.agility = Math.round(attributes.physical.agility - weightModifier * 5);
-
-    // --- >>> NEW: Determine Talent Tier <<< ---
-    let talentTier = 'Average';
-    const tierRoll = Math.random();
-    if (tierRoll < 0.05) { // 5% Elite
-        talentTier = 'Elite';
-    } else if (tierRoll < 0.20) { // 15% Good (5% + 15% = 20%)
-        talentTier = 'Good';
-    } else if (tierRoll < 0.70) { // 50% Average (20% + 50% = 70%)
-        talentTier = 'Average';
-    } else if (tierRoll < 0.90) { // 20% Below Average (70% + 20% = 90%)
-        talentTier = 'Below Average';
-    } else { // 10% Poor
-        talentTier = 'Poor';
-    }
-
-    // Define boost ranges per tier
-    const boostRanges = {
-        'Elite': { min: 85, max: 99 }, // Was 80-99
-        'Good': { min: 70, max: 90 }, // Was 65-85
-        'Average': { min: 55, max: 80 }, // Was 50-75
-        'Below Average': { min: 40, max: 65 }, // Was 35-60
-        'Poor': { min: 25, max: 50 }  // Was 20-45
-    };
-    const boostRange = boostRanges[talentTier];
-    const boostStrength = 0.6; // How much the boost influences the final stat (60% boost, 40% base)
-    const baseStrength = 1.0 - boostStrength;
-    // --- >>> END NEW <<< ---
-
+    // --- 🛠️ FIX #4: Apply positional boosts as a BONUS, not an overwrite ---
+    // This makes the player "extra good" at their job
+    const posBonus = 10; // A flat 10-point bonus
     switch (bestPosition) {
         case 'QB':
-            attributes.technical.throwingAccuracy = Math.round(attributes.technical.throwingAccuracy * baseStrength + getRandomInt(boostRange.min, boostRange.max) * boostStrength);
-            attributes.mental.playbookIQ = Math.round(attributes.mental.playbookIQ * baseStrength + getRandomInt(boostRange.min - 5, boostRange.max) * boostStrength);
+            attributes.technical.throwingAccuracy += posBonus;
+            attributes.mental.playbookIQ += posBonus;
             break;
         case 'RB':
-            attributes.physical.speed = Math.round(attributes.physical.speed * baseStrength + getRandomInt(boostRange.min, boostRange.max) * boostStrength);
-            attributes.physical.strength = Math.round(attributes.physical.strength * baseStrength + getRandomInt(boostRange.min - 10, boostRange.max - 5) * boostStrength);
-            attributes.physical.agility = Math.round(attributes.physical.agility * baseStrength + getRandomInt(boostRange.min, boostRange.max) * boostStrength);
+            attributes.physical.agility += posBonus;
+            attributes.physical.strength += posBonus;
             break;
         case 'WR':
-            attributes.physical.speed = Math.round(attributes.physical.speed * baseStrength + getRandomInt(boostRange.min, boostRange.max) * boostStrength);
-            attributes.technical.catchingHands = Math.round(attributes.technical.catchingHands * baseStrength + getRandomInt(boostRange.min, boostRange.max) * boostStrength);
-            attributes.physical.agility = Math.round(attributes.physical.agility * baseStrength + getRandomInt(boostRange.min, boostRange.max) * boostStrength);
+            attributes.physical.speed += posBonus;
+            attributes.technical.catchingHands += posBonus;
             break;
         case 'OL':
-            attributes.physical.strength = Math.round(attributes.physical.strength * baseStrength + getRandomInt(boostRange.min, boostRange.max) * boostStrength);
-            attributes.technical.blocking = Math.round(attributes.technical.blocking * baseStrength + getRandomInt(boostRange.min, boostRange.max) * boostStrength);
+            attributes.physical.strength += posBonus;
+            attributes.technical.blocking += posBonus;
             break;
         case 'DL':
-            attributes.physical.strength = Math.round(attributes.physical.strength * baseStrength + getRandomInt(boostRange.min, boostRange.max) * boostStrength);
-            attributes.technical.tackling = Math.round(attributes.technical.tackling * baseStrength + getRandomInt(boostRange.min - 10, boostRange.max - 5) * boostStrength);
-            attributes.technical.blockShedding = Math.round(attributes.technical.blockShedding * baseStrength + getRandomInt(boostRange.min, boostRange.max) * boostStrength);
+            attributes.physical.strength += posBonus;
+            attributes.technical.blockShedding += posBonus;
             break;
         case 'LB':
-            attributes.technical.tackling = Math.round(attributes.technical.tackling * baseStrength + getRandomInt(boostRange.min, boostRange.max) * boostStrength);
-            attributes.physical.speed = Math.round(attributes.physical.speed * baseStrength + getRandomInt(boostRange.min - 10, boostRange.max - 5) * boostStrength);
-            attributes.mental.playbookIQ = Math.round(attributes.mental.playbookIQ * baseStrength + getRandomInt(boostRange.min - 5, boostRange.max) * boostStrength);
+            attributes.technical.tackling += posBonus;
+            attributes.mental.playbookIQ += posBonus;
             break;
         case 'DB':
-            attributes.physical.speed = Math.round(attributes.physical.speed * baseStrength + getRandomInt(boostRange.min, boostRange.max) * boostStrength);
-            attributes.physical.agility = Math.round(attributes.physical.agility * baseStrength + getRandomInt(boostRange.min, boostRange.max) * boostStrength);
-            attributes.technical.catchingHands = Math.round(attributes.technical.catchingHands * baseStrength + getRandomInt(boostRange.min - 15, boostRange.max - 10) * boostStrength);
+            attributes.physical.speed += posBonus;
+            attributes.physical.agility += posBonus;
             break;
     }
 
+    // --- 🛠️ FIX #5: Apply Age & Weight Modifiers AFTER stats are set ---
+
+    // Apply Age Scaling (Older players are slightly better *now*)
+    const ageScalingFactor = 0.90 + (ageProgress * 0.10); // 90% to 100%
     Object.keys(attributes).forEach(cat => {
-        if (!attributes[cat]) attributes[cat] = {};
+        Object.keys(attributes[cat]).forEach(attr => {
+            if (typeof attributes[cat][attr] === 'number' && !['height', 'weight', 'clutch'].includes(attr)) {
+                attributes[cat][attr] = attributes[cat][attr] * ageScalingFactor;
+            }
+        });
+    });
+
+    // Apply Weight Modifier
+    const weightModifier = (attributes.physical.weight - 125) / 50; // -1.1 to +1.1 approx
+    attributes.physical.strength += (weightModifier * 10);
+    attributes.physical.speed -= (weightModifier * 8);
+    attributes.physical.agility -= (weightModifier * 5);
+    // --- END FIX #5 ---
+
+
+    // Clamp all stats
+    Object.keys(attributes).forEach(cat => {
         Object.keys(attributes[cat]).forEach(attr => {
             if (typeof attributes[cat][attr] === 'number' && !['height', 'weight'].includes(attr)) {
                 attributes[cat][attr] = Math.max(1, Math.min(99, Math.round(attributes[cat][attr])));
@@ -274,25 +294,22 @@ function generatePlayer(minAge = 10, maxAge = 16) {
         });
     });
 
-    let potential = 'F'; const potentialRoll = Math.random();
-    if (age <= 11) {
-        if (potentialRoll < 0.20) potential = 'A';
-        else if (potentialRoll < 0.55) potential = 'B';
-        else if (potentialRoll < 0.85) potential = 'C';
-        else potential = 'D';
-    } else if (age <= 13) {
-        if (potentialRoll < 0.10) potential = 'A';
-        else if (potentialRoll < 0.40) potential = 'B';
-        else if (potentialRoll < 0.75) potential = 'C';
-        else if (potentialRoll < 0.95) potential = 'D';
-        else potential = 'F';
-    } else {
-        if (potentialRoll < 0.05) potential = 'A';
-        else if (potentialRoll < 0.25) potential = 'B';
-        else if (potentialRoll < 0.60) potential = 'C';
-        else if (potentialRoll < 0.90) potential = 'D';
-        else potential = 'F';
-    }
+    // --- 🛠️ FIX #6: Link Potential to Talent Tier ---
+    let potential = 'F';
+    let potentialRoll = Math.random() + potentialBonus; // Apply the bonus from the tier
+    potentialRoll = Math.max(0, Math.min(1, potentialRoll)); // Clamp roll
+
+    // Younger players get a *further* bonus to their roll
+    if (age <= 11) potentialRoll -= 0.15;
+    else if (age <= 13) potentialRoll -= 0.05;
+
+    // Determine final grade
+    if (potentialRoll < 0.20) potential = 'A';
+    else if (potentialRoll < 0.45) potential = 'B';
+    else if (potentialRoll < 0.75) potential = 'C';
+    else if (potentialRoll < 0.90) potential = 'D';
+    else potential = 'F';
+    // --- END FIX #6 ---
 
     const initialStats = {
         receptions: 0, recYards: 0, passYards: 0, rushYards: 0, touchdowns: 0,
@@ -303,7 +320,7 @@ function generatePlayer(minAge = 10, maxAge = 16) {
     return {
         id: crypto.randomUUID(), name: `${firstName} ${lastName}`, age,
         favoriteOffensivePosition, favoriteDefensivePosition,
-        number: null, // Set to null, assigned when joining team
+        number: null,
         potential, attributes, teamId: null,
         status: { type: 'healthy', description: '', duration: 0 }, fatigue: 0,
         gameStats: { ...initialStats }, seasonStats: { ...initialStats },
@@ -420,30 +437,39 @@ function updatePlayerPosition(pState, timeDelta) {
     const dy = pState.targetY - pState.y;
     const distToTarget = Math.sqrt(dx * dx + dy * dy);
 
-    if (distToTarget < 0.1) {
+    // --- 1. 🛠️ NEW: Increased "arrival" radius ---
+    // Stop if player is very close to the target.
+    // This prevents "vibrating" when trying to reach an exact 0.0 point.
+    const ARRIVAL_RADIUS = 0.2; 
+    if (distToTarget < ARRIVAL_RADIUS) {
         pState.x = pState.targetX;
         pState.y = pState.targetY;
         pState.currentSpeedYPS = 0; // Player has arrived
         return;
     }
 
-    // --- Calculate Speed (Yards Per Second) ---
-    const baseSpeedYPS = 3.0;
-    const scaleFactor = (8.0 - baseSpeedYPS) / (99 - 50);
-    const speedYPS = baseSpeedYPS + Math.max(0, (pState.speed || 50) - 50) * scaleFactor;
+    // --- 2. 🛠️ NEW: Corrected Speed Formula ---
+    // This formula creates a faster, tighter speed range (4.5 to 9.0 YPS)
+    const MIN_SPEED_YPS = 4.5; // Speed for a 1-stat player
+    const MAX_SPEED_YPS = 9.0; // Speed for a 99-stat player
+    
+    // This maps the 1-99 stat range to the [4.5, 9.0] speed range
+    const speedYPS = MIN_SPEED_YPS + ((pState.speed || 50) - 1) * (MAX_SPEED_YPS - MIN_SPEED_YPS) / (99 - 1);
+    
+    // --- 3. Store Speed for Momentum ---
+    // This is the line we added for the momentum calculation
+    pState.currentSpeedYPS = speedYPS * pState.fatigueModifier; 
 
-    // --- 🛠️ ADD THIS LINE ---
-    // Store the current speed (in YPS) on the state object
-    // This is what checkTackleCollisions will read!
-    pState.currentSpeedYPS = speedYPS;
-    // --- END ADDITION ---
-
-    const moveDist = speedYPS * pState.fatigueModifier * timeDelta;
+    // --- 4. Calculate Movement ---
+    const moveDist = pState.currentSpeedYPS * timeDelta;
 
     if (moveDist >= distToTarget) {
+        // We can reach the target this frame
         pState.x = pState.targetX;
         pState.y = pState.targetY;
+        // Keep pState.currentSpeedYPS as is, don't set to 0 (tackle logic needs it)
     } else {
+        // Move towards the target
         pState.x += (dx / distToTarget) * moveDist;
         pState.y += (dy / distToTarget) * moveDist;
     }
@@ -1406,18 +1432,28 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
             return;
         }
         // --- NEW: Receiver Ball-in-Air Logic ---
-        // This check overrides other offensive (non-QB) actions if the ball is in the air
-        if (pState.isOffense && !pState.hasBall && !pState.isBallCarrier && (pState.slot.startsWith('WR') || pState.slot.startsWith('RB'))) {
-            const isIntendedTarget = playState.ballState.targetPlayerId === pState.id;
-            const distToLandingSpot = getDistance(pState, { x: playState.ballState.targetX, y: playState.ballState.targetY });
-            if (playState.ballState.inAir && (isIntendedTarget || distToLandingSpot < 8.0)) {
-                if (getDistance(pState, ballPos) < 15.0) {
-                    pState.action = 'attack_ball'; // Override current route
+        if (pState.isOffense && !pState.hasBall && !pState.isBallCarrier) {
+
+            // --- Check if player *should* be attacking the ball ---
+            if ((pState.action === 'run_route' || pState.action === 'route_complete') && playState.ballState.inAir) {
+                const isIntendedTarget = playState.ballState.targetPlayerId === pState.id;
+                const distToLandingSpot = getDistance(pState, { x: playState.ballState.targetX, y: playState.ballState.targetY });
+
+                if (isIntendedTarget || distToLandingSpot < 8.0) {
+                    if (getDistance(pState, ballPos) < 15.0) {
+                        pState.action = 'attack_ball';
+                    }
                 }
-                // If ball is no longer in air (caught/dropped), action will be reset by handleBallArrival (e.g., 'run_path' or 'idle')
+                // --- 🛠️ FIX: Add ELSE to reset action ---
+            } else if (pState.action === 'attack_ball' && !playState.ballState.inAir) {
+                // If the player was attacking the ball, but the ball is no longer
+                // in the air (i.e., it was caught or dropped), reset their action.
+                pState.action = 'route_complete'; // Go back to a "neutral" state
+                pState.targetX = pState.x; // Stop moving
+                pState.targetY = pState.y;
             }
+            // --- END FIX ---
         }
-        // --- END NEW BLOCK ---
 
         // --- Offensive Logic ---
         if (pState.isOffense) {
@@ -1928,7 +1964,7 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                         // --- It's a run! Abort rush and pursue carrier ---
                         target = ballCarrierState;
 
-                    } else if (diagnosedPlayType === 'pass' && qbState) { 
+                    } else if (diagnosedPlayType === 'pass' && qbState) {
                         // --- Diagnosed PASS: Rush the QB ---
                         target = qbState;
 
@@ -1970,7 +2006,7 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                     if (diagnosedPlayType === 'run' && ballCarrierState) {
                         // --- Diagnosed RUN: Abort spy and attack ---
                         target = ballCarrierState;
-                    
+
                     } else if (qbState) { // Continue with original logic if it's a pass/read
                         // Check if QB is scrambling 
                         if (qbState.action === 'qb_scramble' || qbState.y > playState.lineOfScrimmage + 1) {
@@ -1978,8 +2014,8 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                             target = qbState;
                         } else {
                             // --- QB IS IN POCKET ---
-                            const spyDepth = 8; 
-                            target = { x: qbState.x, y: qbState.y + spyDepth }; 
+                            const spyDepth = 8;
+                            target = { x: qbState.x, y: qbState.y + spyDepth };
                         }
                     } else {
                         // --- QB IS GONE ---
@@ -2152,61 +2188,57 @@ function checkTackleCollisions(playState, gameLog) {
 
     const activeDefenders = playState.activePlayers.filter(p => !p.isOffense && !p.isBlocked && !p.isEngaged && p.stunnedTicks === 0);
 
-    // --- 🛠️ NEW: Scaling factor to make momentum stats comparable to skill stats ---
-    const MOMENTUM_SCALING_FACTOR = 0.05;
-    // (e.g., 200lb * 6 YPS = 1200. 1200 * 0.05 = 60. This is now on the same scale as a 60 Agility stat)
+    // We want momentum to be a "bonus" on top of skills.
+    const MOMENTUM_SCALING_FACTOR = 0.1;
+    // e.g., 200lb * 6 YPS = 1200. 1200 * 0.1 = 120. This is a big, powerful number.
+    // Let's try 0.2
+    // e.g., 200lb * 6 YPS = 1200. 1200 * 0.2 = 240.
+    // Let's re-think.
+    // AGI (81) vs TKL (77).
+    // Let's make the stats the "base" and momentum the "modifier".
+
+    // --- 🛠️ NEW: Base Power + Momentum Bonus ---
 
     for (const defender of activeDefenders) {
         if (getDistance(ballCarrierState, defender) < TACKLE_RANGE) {
 
             const carrierPlayer = game.players.find(p => p && p.id === ballCarrierState.id);
             const tacklerPlayer = game.players.find(p => p && p.id === defender.id);
-            if (!carrierPlayer || !tacklerPlayer) {
-                console.warn("Tackle check: Could not find original player objects.");
-                continue;
-            }
+            if (!carrierPlayer || !tacklerPlayer) continue;
 
-            if (checkFumble(carrierPlayer, tacklerPlayer, playState, gameLog)) {
-                return true;
-            }
-
-            // --- 🛠️ MODIFIED: Tackle/Break Power with Momentum ---
+            if (checkFumble(carrierPlayer, tacklerPlayer, playState, gameLog)) return true;
 
             // --- 1. Carrier's Power ---
-            // Get carrier's attributes
-            const carrierWeight = carrierPlayer.attributes?.physical?.weight || 180; // Default 180lbs
-            const carrierSpeed = ballCarrierState.currentSpeedYPS || 0; // MUST be calculated in updatePlayerPosition
-
-            // Skill (ability to "make a move"): 70% Agility, 30% Strength
+            const carrierWeight = carrierPlayer.attributes?.physical?.weight || 180;
+            const carrierSpeed = ballCarrierState.currentSpeedYPS || 0;
+            // Base "Break" skill = 100% Agility + 50% Strength
             const carrierSkill = (
-                (carrierPlayer.attributes?.physical?.agility || 50) * 0.7 +
-                (carrierPlayer.attributes?.physical?.strength || 50) * 0.3
+                (carrierPlayer.attributes?.physical?.agility || 50) * 1.0 +
+                (carrierPlayer.attributes?.physical?.strength || 50) * 0.5
             );
-            // Physics (ability to run *through*): Weight * Speed
-            const carrierMomentum = (carrierWeight * carrierSpeed) * MOMENTUM_SCALING_FACTOR;
+            // Momentum Bonus
+            const carrierMomentum = (carrierWeight * carrierSpeed) * 0.1; // Smaller bonus
+            // Final Power
+            const breakPower = (carrierSkill + carrierMomentum) * ballCarrierState.fatigueModifier;
 
-            // Final Break Power: 50% Skill, 50% Physics, modified by fatigue
-            const breakPower = (carrierSkill * 0.5 + carrierMomentum * 0.5) * ballCarrierState.fatigueModifier;
 
             // --- 2. Tackler's Power ---
-            // Get tackler's attributes
-            const tacklerWeight = tacklerPlayer.attributes?.physical?.weight || 200; // Default 200lbs
-            const tacklerSpeed = defender.currentSpeedYPS || 0; // MUST be calculated in updatePlayerPosition
-
-            // Skill (ability to "wrap up"): 100% Tackling, 30% Strength
+            const tacklerWeight = tacklerPlayer.attributes?.physical?.weight || 200;
+            const tacklerSpeed = defender.currentSpeedYPS || 0;
+            // Base "Tackle" skill = 100% Tackling + 50% Strength
             const tacklerSkill = (
                 (tacklerPlayer.attributes?.technical?.tackling || 50) * 1.0 +
-                (tacklerPlayer.attributes?.physical?.strength || 50) * 0.3
+                (tacklerPlayer.attributes?.physical?.strength || 50) * 0.5
             );
-            // Physics (ability to *stop* the carrier): Weight * Speed
-            const tacklerMomentum = (tacklerWeight * tacklerSpeed) * MOMENTUM_SCALING_FACTOR;
+            // Momentum Bonus (Tacklers get a bigger bonus for hitting hard)
+            const tacklerMomentum = (tacklerWeight * tacklerSpeed) * 0.15;
+            // Final Power
+            const tacklePower = (tacklerSkill + tacklerMomentum) * defender.fatigueModifier;
 
-            // Final Tackle Power: 60% Skill, 40% Physics, modified by fatigue
-            const tacklePower = (tacklerSkill * 0.6 + tacklerMomentum * 0.4) * defender.fatigueModifier;
 
             // --- 3. The Resolution ---
-            const roll = getRandomInt(-10, 10); // Centered random roll
-            const diff = (breakPower + roll) - tacklePower;
+            const roll = getRandomInt(-15, 15); // Increased randomness
+            const diff = (breakPower) - (tacklePower + roll); // Roll helps the tackler
 
             if (diff <= 0) { // Tackle success
                 playState.yards = ballCarrierState.y - playState.lineOfScrimmage;
@@ -2214,20 +2246,20 @@ function checkTackleCollisions(playState, gameLog) {
                 if (!tacklerPlayer.gameStats) ensureStats(tacklerPlayer);
                 tacklerPlayer.gameStats.tackles = (tacklerPlayer.gameStats.tackles || 0) + 1;
 
-                // --- SACK Logic ---
                 if (ballCarrierState.slot === 'QB1' &&
                     (ballCarrierState.action === 'qb_setup' || ballCarrierState.action === 'qb_scramble') &&
-                    ballCarrierState.y < playState.lineOfScrimmage) {
+                    ballCarrierState.y < playState.lineOfScrimCriminage) {
 
                     playState.sack = true;
                     tacklerPlayer.gameStats.sacks = (tacklerPlayer.gameStats.sacks || 0) + 1;
-                    gameLog.push(`💥 SACK! ${tacklerPlayer.name} (Assignment: ${defender.assignment}) gets to ${ballCarrierState.name} for a loss of ${Math.abs(playState.yards).toFixed(1)} yards!`);
+                    gameLog.push(`💥 SACK! ${tacklerPlayer.name} (TklPwr: ${tacklePower.toFixed(0)}) gets to ${ballCarrierState.name}!`);
                 } else {
-                    gameLog.push(`✋ ${ballCarrierState.name} (Action: ${ballCarrierState.action}) tackled by ${defender.name} for a gain of ${playState.yards.toFixed(1)} yards.`);
+                    gameLog.push(`✋ ${ballCarrierState.name} tackled by ${defender.name} (TklPwr: ${tacklePower.toFixed(0)}) for a gain of ${playState.yards.toFixed(1)} yards.`);
                 }
                 return true; // Play ended
             } else { // Broken tackle
-                gameLog.push(`💥 ${ballCarrierState.name} (Mom: ${carrierMomentum.toFixed(0)}) breaks tackle from ${defender.name} (Tkl: ${tacklerSkill.toFixed(0)})!`);
+                // Log both powers for debugging
+                gameLog.push(`💥 ${ballCarrierState.name} (BrkPwr: ${breakPower.toFixed(0)}) breaks tackle from ${defender.name} (TklPwr: ${tacklePower.toFixed(0)})!`);
                 defender.stunnedTicks = 10;
             }
         }
@@ -2503,9 +2535,14 @@ function updateQBDecision(playState, offenseStates, defenseStates, gameLog) {
         // e.g., 50 IQ = (100-50)/300 = 16.6% chance to panic and checkdown, ignoring open receivers
         const panicCheckdownChance = (100 - qbIQ) / 300;
 
+        if (isPressured && reason !== "Imminent Sack") {
+            gameLog.push(`[QB Pressure]: 🥵 ${qbState.name} feels the heat and rushes the decision!`);
+        }
+
         if (iqRoll < panicCheckdownChance && rbRead && !isPressured) { // Don't panic-checkdown if also scrambling
             targetPlayerState = rbRead;
             actionTaken = "Throw Checkdown (Panic)";
+            gameLog.push(`[QB Read]: 😰 ${qbState.name} (IQ: ${qbIQ}) panics! Checking down to ${rbRead.name}.`);
 
             // 2. Main Read Progression (1st and 2nd reads)
         } else if (shouldThrowToOpen) {
@@ -2518,10 +2555,13 @@ function updateQBDecision(playState, offenseStates, defenseStates, gameLog) {
             if (iqRoll2 > pickBestReadChance && secondRead) {
                 targetPlayerState = secondRead;
                 actionTaken = "Throw Second Read";
+                gameLog.push(`[QB Read]: ⚠️ ${qbState.name} (IQ: ${qbIQ}) misses the primary! Throws to 2nd read ${targetPlayerState.name}.`);
             } else {
                 targetPlayerState = bestRead;
                 actionTaken = "Throw Open";
+                gameLog.push(`[QB Read]: 🎯 ${qbState.name} (IQ: ${qbIQ}) makes a great decision and throws to ${targetPlayerState.name}.`);
             }
+
 
             // 3. Scramble
         } else if (canScramble) {
@@ -2541,6 +2581,7 @@ function updateQBDecision(playState, offenseStates, defenseStates, gameLog) {
             // If we got here, no one was open, but the RB is available.
             targetPlayerState = rbRead;
             actionTaken = "Throw Checkdown (Forced)";
+            gameLog.push(`[QB Read]: 🔒 ${qbState.name} sees no one open. Forced checkdown to ${rbRead.name}.`);
 
         } else if (receivers.length > 0) {
             // Fallback: Find *any* checkdown target if RB isn't available
@@ -2803,7 +2844,11 @@ function handleBallArrival(playState, gameLog) {
             targetPlayerState.isBallCarrier = true; targetPlayerState.hasBall = true;
             targetPlayerState.action = 'run_path';
             playState.yards = targetPlayerState.y - playState.lineOfScrimmage;
-            gameLog.push(`👍 CATCH! ${targetPlayerState.name} (Catch: ${recCatchSkill}) makes the reception!`);
+            if (interferencePenalty > 10) { // If there was significant interference
+                gameLog.push(`👍 CATCH! ${targetPlayerState.name} (Catch: ${recCatchSkill}) makes a tough contested reception!`);
+            } else {
+                gameLog.push(`👍 CATCH! ${targetPlayerState.name} (Catch: ${recCatchSkill}) makes the reception!`);
+            }
 
             ensureStats(receiverPlayer);
             receiverPlayer.gameStats.receptions = (receiverPlayer.gameStats.receptions || 0) + 1;
