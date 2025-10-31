@@ -1178,7 +1178,7 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
     const defAssignments = defPlay.assignments || {};
 
     // Set the line of scrimmage (adding 10 for the endzone offset)
-    playState.lineOfScrimmage = ballOnYardLine + 10;
+    playState.lineOfScrimmage = ballOnYardLine;
     const ballX = CENTER_X; // Assume ball snaps from the center horizontally
 
     // --- STEP 1: Calculate initial OFFENSIVE positions FIRST ---
@@ -1343,9 +1343,13 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
             startY = Math.max(10.5, Math.min(FIELD_LENGTH - 10.5, startY));
 
             // 🚨 CRITICAL DEFENSE CLAMP: Must line up behind the LoS
+            const LOS = playState.lineOfScrimmage;
+            const BUFFER = 0.3; // yards
+
             if (!isOffense) {
-                startY = Math.min(playState.lineOfScrimmage, startY);
-                targetY = Math.min(playState.lineOfScrimmage, targetY);
+                // Defense must be in front of (greater Y) than the line of scrimmage
+                startY = Math.max(LOS + BUFFER, startY);
+                targetY = Math.max(LOS + BUFFER, targetY);
             }
 
 
@@ -1389,8 +1393,8 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
     // STEP 1 already done (initialOffenseStates calculated)
     // Setup Defense (can now use initialOffenseStates for alignment)
     const defenseFormationData = defenseFormations[defense.formations.defense];
-    setupSide(defense, 'defense', defenseFormationData, false, initialOffenseStates); // <<< FIX
-    setupSide(offense, 'offense', offenseFormationData, true, initialOffenseStates); // <<< FIX
+    setupSide(offense, 'offense', offenseFormationData, true, initialOffenseStates); // OFFENSE FIRST
+    setupSide(defense, 'defense', defenseFormationData, false, initialOffenseStates); // then DEFENSE
     // --- End Execute Setup ---
 
     // --- Set Initial Ball Position & Carrier ---
