@@ -410,30 +410,42 @@ function getDistance(p1State, p2State) {
     return Math.sqrt(dx * dx + dy * dy);
 }
 /** Updates a player's position based on speed and target. */
-function updatePlayerPosition(playerState, timeDelta) {
-    if (!playerState || playerState.x === undefined || playerState.y === undefined || playerState.targetX === undefined || playerState.targetY === undefined) {
-        return; // Skip if state is invalid
+function updatePlayerPosition(pState, timeDelta) {
+    if (pState.stunnedTicks > 0) {
+        pState.currentSpeedYPS = 0; // Player is stunned
+        return;
     }
-    if (playerState.x === playerState.targetX && playerState.y === playerState.targetY) return;
 
-    const dx = playerState.targetX - playerState.x;
-    const dy = playerState.targetY - playerState.y;
-    const distanceToTarget = Math.sqrt(dx * dx + dy * dy);
+    const dx = pState.targetX - pState.x;
+    const dy = pState.targetY - pState.y;
+    const distToTarget = Math.sqrt(dx * dx + dy * dy);
 
+    if (distToTarget < 0.1) {
+        pState.x = pState.targetX;
+        pState.y = pState.targetY;
+        pState.currentSpeedYPS = 0; // Player has arrived
+        return;
+    }
+
+    // --- Calculate Speed (Yards Per Second) ---
     const baseSpeedYPS = 3.0;
     const scaleFactor = (8.0 - baseSpeedYPS) / (99 - 50);
-    const playerSpeedYPS = baseSpeedYPS + Math.max(0, (playerState.speed || 50) - 50) * scaleFactor;
-    const maxMoveDistance = playerSpeedYPS * (playerState.fatigueModifier || 1.0) * timeDelta;
+    const speedYPS = baseSpeedYPS + Math.max(0, (pState.speed || 50) - 50) * scaleFactor;
 
-    if (distanceToTarget <= maxMoveDistance || distanceToTarget < 0.1) {
-        playerState.x = playerState.targetX;
-        playerState.y = playerState.targetY;
+    // --- 🛠️ ADD THIS LINE ---
+    // Store the current speed (in YPS) on the state object
+    // This is what checkTackleCollisions will read!
+    pState.currentSpeedYPS = speedYPS;
+    // --- END ADDITION ---
+
+    const moveDist = speedYPS * pState.fatigueModifier * timeDelta;
+
+    if (moveDist >= distToTarget) {
+        pState.x = pState.targetX;
+        pState.y = pState.targetY;
     } else {
-        const moveRatio = maxMoveDistance / distanceToTarget;
-        playerState.x += dx * moveRatio;
-        playerState.y += dy * moveRatio;
-        playerState.x = Math.max(0.1, Math.min(FIELD_WIDTH - 0.1, playerState.x));
-        playerState.y = Math.max(0.1, Math.min(FIELD_LENGTH - 0.1, playerState.y));
+        pState.x += (dx / distToTarget) * moveDist;
+        pState.y += (dy / distToTarget) * moveDist;
     }
 }
 // --- End Coordinate/Physics Helpers ---
@@ -456,6 +468,46 @@ function checkFumble(ballCarrier, tackler, playState, gameLog) {
     return false;
 }
 // --- End Fumble Check Helper ---
+
+/**
+ * Simulates a defender's ability to "read" the play.
+ * Returns 'run', 'pass', or 'read' (if still diagnosing).
+ * @param {object} pState - The defender's state.
+ * @param {string} truePlayType - The actual play type ('run' or 'pass').
+ * @param {string} offensivePlayKey - The name of the offensive play (e.g., "PA_Cross").
+ * @param {number} tick - The current play tick.
+ * @returns {string} - The *diagnosed* play type ('run', 'pass', or 'read').
+ */
+function diagnosePlay(pState, truePlayType, offensivePlayKey, tick) {
+    const iq = pState.playbookIQ || 50;
+
+    // 1. Minimum Ticks to Read
+    // Higher IQ = fewer ticks. 99 IQ = 2 ticks. 50 IQ = 4 ticks.
+    // This formula can be tuned, but it creates a 2-4 tick "read" window.
+    const minTicksToRead = Math.max(2, Math.round((100 - iq) / 25) + 1);
+
+    if (tick < minTicksToRead) {
+        return 'read'; // Still reading, not committed
+    }
+
+    // 2. Play-Action Check (The "Inaccuracy" part)
+    const isPlayAction = (truePlayType === 'pass' && offensivePlayKey.includes('PA_'));
+
+    if (isPlayAction) {
+        // Higher IQ = lower chance to be fooled
+        // 99 IQ: (100 - 99) / 100 = 1% chance
+        // 50 IQ: (100 - 50) / 100 = 50% chance
+        const fooledChance = (100 - iq) / 100;
+
+        if (Math.random() < fooledChance) {
+            return 'run'; // --- FOOLED! --- Thinks it's a run.
+        }
+    }
+
+    // 3. Not fooled, or not a PA pass.
+    // (We could add logic for "Draw" plays fooling them, but this is a great start)
+    return truePlayType; // Returns the correct play ('run' or 'pass')
+}
 
 // =============================================================
 // --- GAME STATE & TEAM MANAGEMENT ---
@@ -1726,7 +1778,9 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
         // --- Defensive Logic ---
         else {
             const assignment = pState.assignment;
-            const readPlayType = playState.tick > 7 ? playType : null;
+            // Each defender diagnoses the play individually based on IQ
+            const diagnosedPlayType = diagnosePlay(pState, playType, offensivePlayKey, playState.tick);
+            // diagnosedPlayType will now be 'run', 'pass', or 'read'
 
             switch (true) {
                 case assignment?.startsWith('man_cover_'): { // Added brackets for new scope
@@ -1741,7 +1795,7 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                     }
 
                     // --- 🛠️ CORRECTED RUN/PASS READ LOGIC ---
-                    const isRunPlay = (playType === 'run' || (ballCarrierState && ballCarrierState.y > playState.lineOfScrimmage));
+                    const isRunPlay = (diagnosedPlayType === 'run' || (ballCarrierState && ballCarrierState.y > playState.lineOfScrimmage));
                     const isSafety = pState.slot.startsWith('DB') && (pState.initialY > playState.lineOfScrimmage + 7); // Is this a deep safety?
 
                     if (isBallInAir) {
@@ -1809,7 +1863,7 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
 
                     // --- 2. React to Run Play ---
                     // Check if it's a run (after a few ticks) OR if the carrier is already past the LoS
-                    const isRunPlay = (readPlayType === 'run' || (ballCarrierState && ballCarrierState.y > playState.lineOfScrimmage));
+                    const isRunPlay = (diagnosedPlayType === 'run' || (ballCarrierState && ballCarrierState.y > playState.lineOfScrimmage));
 
                     if (isRunPlay && ballCarrierState) {
                         if (!isDeepZone) {
@@ -1860,27 +1914,41 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
 
                     break; // Go to the main pursuit logic at the end of the function
 
-                // --- NEW CODE ---
                 case assignment === 'pass_rush':
                 case assignment === 'blitz_gap':
                 case assignment === 'blitz_edge':
-                    if (playType === 'run' && ballCarrierState) {
+
+                    // --- 🛠️ CRITICAL FIX: Check for ball in air FIRST ---
+                    if (isBallInAir) {
+                        // --- Ball is thrown! Abort rush and play the ball ---
+                        // Target the ball's *landing spot*
+                        target = { x: ballPos.targetX, y: ballPos.targetY };
+
+                    } else if (diagnosedPlayType === 'run' && ballCarrierState) {
                         // --- It's a run! Abort rush and pursue carrier ---
                         target = ballCarrierState;
-                    } else {
-                        // --- It's a pass play, rush the QB ---
-                        target = qbState; // Target the QB
+
+                    } else if (diagnosedPlayType === 'pass' && qbState) { 
+                        // --- Diagnosed PASS: Rush the QB ---
+                        target = qbState;
+
+                        // (Your existing blocker-avoidance logic)
                         const blockerInPath = offenseStates.find(o => !o.engagedWith && getDistance(pState, o) < 2.0 && Math.abs(o.x - pState.x) < 1.0 && ((pState.y < o.y && o.y < (target?.y || pState.y + 5)) || (pState.y > o.y && o.y > (target?.y || pState.y - 5))));
                         if (blockerInPath) {
                             const avoidOffset = (pState.x > blockerInPath.x) ? 1.0 : -1.0;
-                            target = { x: pState.x + avoidOffset * 2, y: qbState ? qbState.y : pState.y + 5 };
+                            // Target a point 2 yards to the side of the blocker, at the QB's depth
+                            target = { x: pState.x + avoidOffset * 2, y: qbState.y };
                         }
+                    } else {
+                        // --- 🛠️ FIX: Handle 'read' state ---
+                        // Still reading the play, hold position/gap
+                        target = null; // Pursuit logic will catch this and hold position
                     }
                     break;
 
                 case assignment?.startsWith('run_gap_'):
                 case assignment?.startsWith('run_edge_'):
-                    if (playType === 'pass') {
+                    if (diagnosedPlayType === 'pass') {
                         // --- It's a pass! Convert to pass rush ---
                         pState.action = 'pass_rush'; // Change action
                         target = qbState; // Target QB
@@ -1898,28 +1966,30 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                     break;
 
                 case 'spy_QB':
-                    if (qbState) {
-                        // Check if QB is scrambling past the LoS or has 'qb_scramble' action
+                    // --- 🛠️ FIX: Check for run diagnosis first ---
+                    if (diagnosedPlayType === 'run' && ballCarrierState) {
+                        // --- Diagnosed RUN: Abort spy and attack ---
+                        target = ballCarrierState;
+                    
+                    } else if (qbState) { // Continue with original logic if it's a pass/read
+                        // Check if QB is scrambling 
                         if (qbState.action === 'qb_scramble' || qbState.y > playState.lineOfScrimmage + 1) {
                             // --- QB IS SCRAMBLING ---
-                            // Spy's job is to attack. Target the QB player state directly.
                             target = qbState;
                         } else {
                             // --- QB IS IN POCKET ---
-                            // Spy mirrors the QB's X-position but stays 8 yards deeper.
-                            const spyDepth = 8; // Yards deeper than the QB to stay
-                            target = { x: qbState.x, y: qbState.y + spyDepth }; // Target a point in space
+                            const spyDepth = 8; 
+                            target = { x: qbState.x, y: qbState.y + spyDepth }; 
                         }
                     } else {
-                        // --- QB IS GONE (Ball thrown, sacked, etc.) ---
-                        // Spy becomes a "robber" and drops to the short-middle zone.
+                        // --- QB IS GONE ---
                         target = getZoneCenter('zone_hook_curl_middle', playState.lineOfScrimmage);
                     }
-                    break; // Let the pursuit logic at the end handle the 'target'
+                    break;
                 // --- >>> NEW/IMPROVED CASES <<< ---
 
                 case 'run_support': // e.g., Safety coming downhill
-                    if (playType === 'run' && ballCarrierState) {
+                    if (diagnosedPlayType === 'run' && ballCarrierState) {
                         // --- ACTION: Attack Run ---
                         // Aggressively attack the ball carrier, aiming slightly *ahead*
                         target = {
@@ -1944,10 +2014,10 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                     break; // Go to pursuit logic
 
                 case 'fill_run': // e.g., LB reading the play
-                    if (playType === 'run' && ballCarrierState) { // <<< USE playType
+                    if (diagnosedPlayType === 'run' && ballCarrierState) { // <<< USE playType
                         // --- ACTION: Attack Run ---
                         target = ballCarrierState;
-                    } else if (playType === 'pass') { // <<< USE playType
+                    } else if (diagnosedPlayType === 'pass') { // <<< USE playType
                         // --- ACTION: Drop to Zone ---
                         pState.assignment = 'zone_hook_curl_middle';
                         target = getZoneCenter('zone_hook_curl_middle', playState.lineOfScrimmage);
@@ -1958,10 +2028,10 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                     break;
 
                 case 'def_read': // Default "read and react"
-                    if (playType === 'run' && ballCarrierState) { // <<< USE playType
+                    if (diagnosedPlayType === 'run' && ballCarrierState) { // <<< USE playType
                         // --- ACTION: Attack Run ---
                         target = ballCarrierState;
-                    } else if (playType === 'pass') { // <<< USE playType
+                    } else if (diagnosedPlayType === 'pass') { // <<< USE playType
                         // --- ACTION: Drop to Zone ---
                         pState.assignment = 'zone_hook_curl_middle';
                         target = getZoneCenter('zone_hook_curl_middle', playState.lineOfScrimmage);
@@ -2073,57 +2143,92 @@ function checkBlockCollisions(playState) {
 /**
  * Checks for tackle attempts based on proximity to ball carrier.
  */
+/**
+ * Checks for tackle attempts (MODIFIED with Weight & Momentum)
+ */
 function checkTackleCollisions(playState, gameLog) {
     const ballCarrierState = playState.activePlayers.find(p => p.isBallCarrier);
     if (!ballCarrierState) return false;
 
     const activeDefenders = playState.activePlayers.filter(p => !p.isOffense && !p.isBlocked && !p.isEngaged && p.stunnedTicks === 0);
 
+    // --- 🛠️ NEW: Scaling factor to make momentum stats comparable to skill stats ---
+    const MOMENTUM_SCALING_FACTOR = 0.05;
+    // (e.g., 200lb * 6 YPS = 1200. 1200 * 0.05 = 60. This is now on the same scale as a 60 Agility stat)
+
     for (const defender of activeDefenders) {
         if (getDistance(ballCarrierState, defender) < TACKLE_RANGE) {
-            // defender.isEngaged = true; // Mark defender as attempting tackle
 
             const carrierPlayer = game.players.find(p => p && p.id === ballCarrierState.id);
             const tacklerPlayer = game.players.find(p => p && p.id === defender.id);
             if (!carrierPlayer || !tacklerPlayer) {
                 console.warn("Tackle check: Could not find original player objects.");
-                defender.isEngaged = false; // Release defender
                 continue;
             }
 
             if (checkFumble(carrierPlayer, tacklerPlayer, playState, gameLog)) {
-                return true; // Fumble ends play
+                return true;
             }
 
-            const breakPower = ((carrierPlayer.attributes?.physical?.agility || 50) + (carrierPlayer.attributes?.physical?.strength || 50) / 2) * ballCarrierState.fatigueModifier;
-            const tacklePower = ((tacklerPlayer.attributes?.technical?.tackling || 50) + (tacklerPlayer.attributes?.physical?.strength || 50) / 2) * defender.fatigueModifier;
-            const diff = breakPower - (tacklePower + getRandomInt(-15, 25));
-            const TACKLE_THRESHOLD = 8; // <-- NEW: Carrier must beat roll by 8 to break
+            // --- 🛠️ MODIFIED: Tackle/Break Power with Momentum ---
 
-            if (diff <= TACKLE_THRESHOLD) { // Tackle success
+            // --- 1. Carrier's Power ---
+            // Get carrier's attributes
+            const carrierWeight = carrierPlayer.attributes?.physical?.weight || 180; // Default 180lbs
+            const carrierSpeed = ballCarrierState.currentSpeedYPS || 0; // MUST be calculated in updatePlayerPosition
+
+            // Skill (ability to "make a move"): 70% Agility, 30% Strength
+            const carrierSkill = (
+                (carrierPlayer.attributes?.physical?.agility || 50) * 0.7 +
+                (carrierPlayer.attributes?.physical?.strength || 50) * 0.3
+            );
+            // Physics (ability to run *through*): Weight * Speed
+            const carrierMomentum = (carrierWeight * carrierSpeed) * MOMENTUM_SCALING_FACTOR;
+
+            // Final Break Power: 50% Skill, 50% Physics, modified by fatigue
+            const breakPower = (carrierSkill * 0.5 + carrierMomentum * 0.5) * ballCarrierState.fatigueModifier;
+
+            // --- 2. Tackler's Power ---
+            // Get tackler's attributes
+            const tacklerWeight = tacklerPlayer.attributes?.physical?.weight || 200; // Default 200lbs
+            const tacklerSpeed = defender.currentSpeedYPS || 0; // MUST be calculated in updatePlayerPosition
+
+            // Skill (ability to "wrap up"): 100% Tackling, 30% Strength
+            const tacklerSkill = (
+                (tacklerPlayer.attributes?.technical?.tackling || 50) * 1.0 +
+                (tacklerPlayer.attributes?.physical?.strength || 50) * 0.3
+            );
+            // Physics (ability to *stop* the carrier): Weight * Speed
+            const tacklerMomentum = (tacklerWeight * tacklerSpeed) * MOMENTUM_SCALING_FACTOR;
+
+            // Final Tackle Power: 60% Skill, 40% Physics, modified by fatigue
+            const tacklePower = (tacklerSkill * 0.6 + tacklerMomentum * 0.4) * defender.fatigueModifier;
+
+            // --- 3. The Resolution ---
+            const roll = getRandomInt(-10, 10); // Centered random roll
+            const diff = (breakPower + roll) - tacklePower;
+
+            if (diff <= 0) { // Tackle success
                 playState.yards = ballCarrierState.y - playState.lineOfScrimmage;
                 playState.playIsLive = false;
-                if (!tacklerPlayer.gameStats) ensureStats(tacklerPlayer); // Use ensureStats
+                if (!tacklerPlayer.gameStats) ensureStats(tacklerPlayer);
                 tacklerPlayer.gameStats.tackles = (tacklerPlayer.gameStats.tackles || 0) + 1;
 
-                // --- REVISED SACK Logic ---
-                // Check if carrier is QB, was in a passing action, and is behind LoS
+                // --- SACK Logic ---
                 if (ballCarrierState.slot === 'QB1' &&
                     (ballCarrierState.action === 'qb_setup' || ballCarrierState.action === 'qb_scramble') &&
                     ballCarrierState.y < playState.lineOfScrimmage) {
+
                     playState.sack = true;
                     tacklerPlayer.gameStats.sacks = (tacklerPlayer.gameStats.sacks || 0) + 1;
-                    // Log SACK instead of generic tackle
                     gameLog.push(`💥 SACK! ${tacklerPlayer.name} (Assignment: ${defender.assignment}) gets to ${ballCarrierState.name} for a loss of ${Math.abs(playState.yards).toFixed(1)} yards!`);
                 } else {
-                    // Log generic tackle
                     gameLog.push(`✋ ${ballCarrierState.name} (Action: ${ballCarrierState.action}) tackled by ${defender.name} for a gain of ${playState.yards.toFixed(1)} yards.`);
                 }
                 return true; // Play ended
             } else { // Broken tackle
-                gameLog.push(`💥 ${ballCarrierState.name} (Agi: ${carrierPlayer.attributes?.physical?.agility}) breaks tackle from ${defender.name} (Tkl: ${tacklerPlayer.attributes?.technical?.tackling})!`);
-                defender.isEngaged = false; // Defender failed
-                defender.stunnedTicks = 10; // <-- ADD THIS LINE (Stun for 10 ticks / 1.5 seconds)
+                gameLog.push(`💥 ${ballCarrierState.name} (Mom: ${carrierMomentum.toFixed(0)}) breaks tackle from ${defender.name} (Tkl: ${tacklerSkill.toFixed(0)})!`);
+                defender.stunnedTicks = 10;
             }
         }
     }
@@ -2331,8 +2436,14 @@ function updateQBDecision(playState, offenseStates, defenseStates, gameLog) {
         potentialTargets.push({ ...recState, separation, distFromQB });
     });
 
-    // --- Filter for "Open" Receivers ---
-    const openReceivers = potentialTargets.filter(t => t.separation > SEPARATION_THRESHOLD);
+    // --- 🛠️ NEW: Explicitly find the RB as a checkdown read ---
+    // RB must be near or past the Line of Scrimmage to be a valid target
+    const rbRead = potentialTargets.find(p => p.slot === 'RB1' && p.y > playState.lineOfScrimmage - 2);
+
+    // --- Filter for "Open" Receivers (and EXCLUDE the RB) ---
+    const openReceivers = potentialTargets.filter(t =>
+        t.separation > SEPARATION_THRESHOLD && t.slot !== 'RB1'
+    );
 
     // --- Sort Open Receivers: Prioritize better separation, then slightly favor closer targets ---
     openReceivers.sort((a, b) => (b.separation - a.separation) || (a.distFromQB - b.distFromQB));
@@ -2379,48 +2490,80 @@ function updateQBDecision(playState, offenseStates, defenseStates, gameLog) {
 
         // --- Determine Action based on Situation ---
         const shouldThrowToOpen = openReceivers.length > 0 &&
-            (!isPressured || Math.random() < (0.2 + qbToughness / 200)); // Less likely to force throw under pressure, modified by toughness
+            (!isPressured || Math.random() < (0.2 + qbToughness / 200));
 
-        // --- 🛠️ MODIFIED --- Agility-based scramble chance
-        const baseScrambleChance = (qbAgility / 150); // e.g., 99 Agi -> 66%, 55 Agi -> 36%
+        const baseScrambleChance = (qbAgility / 150);
         const canScramble = isPressured && (Math.random() < baseScrambleChance);
 
-        if (shouldThrowToOpen) {
-            targetPlayerState = openReceivers[0]; // Throw to the best open receiver (sorted above)
-            actionTaken = "Throw Open";
+        // --- 🛠️ REVISED: QB Read Progression (with 3rd Read) ---
+        const iqRoll = Math.random(); // Roll 0.0 to 1.0
+
+        // 1. "Panic" Checkdown (Low IQ QBs do this more)
+        // This simulates a QB who decides before the snap, or panics
+        // e.g., 50 IQ = (100-50)/300 = 16.6% chance to panic and checkdown, ignoring open receivers
+        const panicCheckdownChance = (100 - qbIQ) / 300;
+
+        if (iqRoll < panicCheckdownChance && rbRead && !isPressured) { // Don't panic-checkdown if also scrambling
+            targetPlayerState = rbRead;
+            actionTaken = "Throw Checkdown (Panic)";
+
+            // 2. Main Read Progression (1st and 2nd reads)
+        } else if (shouldThrowToOpen) {
+            const bestRead = openReceivers[0];
+            const secondRead = openReceivers.length > 1 ? openReceivers[1] : null;
+
+            const iqRoll2 = Math.random();
+            const pickBestReadChance = qbIQ / 120; // 99 IQ = 82.5%, 50 IQ = 41.6%
+
+            if (iqRoll2 > pickBestReadChance && secondRead) {
+                targetPlayerState = secondRead;
+                actionTaken = "Throw Second Read";
+            } else {
+                targetPlayerState = bestRead;
+                actionTaken = "Throw Open";
+            }
+
+            // 3. Scramble
         } else if (canScramble) {
             qbState.action = 'qb_scramble';
-            const pressureXDir = Math.sign(qbState.x - pressureDefender.x); // pressureDefender should exist if isPressured
+            const pressureXDir = Math.sign(qbState.x - pressureDefender.x);
             qbState.targetX = Math.max(0.1, Math.min(FIELD_WIDTH - 0.1, qbState.x + pressureXDir * 8));
             qbState.targetY = qbState.y + 5; // Scramble forward
-            qbState.hasBall = false; // Ball moves with player
+            qbState.hasBall = false;
             qbState.isBallCarrier = true;
-            playState.ballState.x = qbState.x; playState.ballState.y = qbState.y; // Keep ball pos updated
+            playState.ballState.x = qbState.x; playState.ballState.y = qbState.y;
             gameLog.push(`🏃 ${qbState.name} ${imminentSackDefender ? 'escapes the sack' : 'is flushed out'} and scrambles!`);
             actionTaken = "Scramble";
             return; // Exit function after starting scramble
-        } else if (receivers.length > 0) { // Checkdown if no one open or decided against risky throw
-            // Find closest receiver who is past the LoS
+
+            // 4. Forced Checkdown (No one open or decided against risky throw)
+        } else if (rbRead) {
+            // If we got here, no one was open, but the RB is available.
+            targetPlayerState = rbRead;
+            actionTaken = "Throw Checkdown (Forced)";
+
+        } else if (receivers.length > 0) {
+            // Fallback: Find *any* checkdown target if RB isn't available
             let checkdownTargets = potentialTargets.filter(r => r.y > playState.lineOfScrimmage + 1)
                 .sort((a, b) => a.distFromQB - b.distFromQB);
             if (checkdownTargets.length > 0) {
                 targetPlayerState = checkdownTargets[0];
-                actionTaken = "Throw Checkdown";
+                actionTaken = "Throw Checkdown (Forced)";
             } else {
-                // No viable checkdown, force throw away or sack
                 targetPlayerState = null;
                 actionTaken = imminentSackDefender ? "Sack Imminent" : "Throw Away Check";
             }
         } else {
-            // No receivers at all? Should not happen in a pass play. Force throw away/sack.
+            // No receivers at all.
             targetPlayerState = null;
             actionTaken = imminentSackDefender ? "Sack Imminent" : "Throw Away Check";
         }
 
         // --- Perform Throw or Handle Sack/Throw Away ---
-        if (targetPlayerState && (actionTaken === "Throw Open" || actionTaken === "Throw Checkdown")) {
+        if (targetPlayerState && (actionTaken.includes("Throw"))) {
             // --- Initiate Throw ---
-            gameLog.push(`🏈 ${qbState.name} [${reason}] ${actionTaken === "Throw Checkdown" ? 'checks down to' : 'throws to'} ${targetPlayerState.name}...`);
+            // 🛠️ MODIFIED: Log now includes the new actionTaken string
+            gameLog.push(`🏈 ${qbState.name} [${reason}] ${actionTaken.includes("Checkdown") ? 'checks down to' : 'throws to'} ${targetPlayerState.name}...`);
             playState.ballState.inAir = true;
             playState.ballState.targetPlayerId = targetPlayerState.id;
             playState.ballState.throwerId = qbState.id;
@@ -2428,6 +2571,7 @@ function updateQBDecision(playState, offenseStates, defenseStates, gameLog) {
             qbState.hasBall = false;
             qbState.isBallCarrier = false;
 
+            // Sync ball to QB's current position
             playState.ballState.x = qbState.x;
             playState.ballState.y = qbState.y;
 
@@ -2520,9 +2664,9 @@ function updateQBDecision(playState, offenseStates, defenseStates, gameLog) {
             // No target found or decided to throw away
             gameLog.push(`⤴️ ${qbState.name} ${isPressured ? 'feels the pressure and' : ''} throws it away!`);
             playState.incomplete = true;
-            playState.playIsLive = false; // End play immediately
+            playState.playIsLive = false;
             playState.ballState.inAir = false;
-            playState.ballState.throwInitiated = true; // Still counts as an attempt
+            playState.ballState.throwInitiated = true;
             playState.ballState.throwerId = qbState.id;
             qbState.hasBall = false;
             qbState.isBallCarrier = false;
@@ -2534,7 +2678,6 @@ function updateQBDecision(playState, offenseStates, defenseStates, gameLog) {
         qbState.targetX = qbState.x + pressureDirX * 1.5; // Step away from pressure
         qbState.targetY = qbState.y - 0.3; // Slight drift back/shuffle
     }
-    // If no decisionMade and not pressured, QB continues holding/moving per 'qb_setup' target
 }
 
 /**
@@ -3171,24 +3314,45 @@ function determinePlayCall(offense, defense, down, yardsToGo, ballOn, scoreDiff,
     const isLightBox = defBox <= 3; // e.g., 2-3-2 (2DL+3LB=5, but LBs might be spread) - Needs refinement
     const hasManyDBs = defDBs >= 2;
 
-    // --- Refined Play Selection ---
+    // --- 🛠️ REVISED: Refined Play Selection (with Smart Variety) ---
+
     if (desiredPlayType === 'pass') {
         const deepPlays = possiblePlays.filter(p => offensivePlaybook[p]?.tags?.includes('deep'));
         const shortPlays = possiblePlays.filter(p => offensivePlaybook[p]?.tags?.includes('short') || offensivePlaybook[p]?.tags?.includes('screen'));
-        const mediumPlays = possiblePlays.filter(p => !offensivePlaybook[p]?.tags?.includes('deep') && !offensivePlaybook[p]?.tags?.includes('short'));
+        const mediumPlays = possiblePlays.filter(p => !deepPlays.includes(p) && !shortPlays.includes(p));
 
-        // Weight selection based on situation and basic defense read
         let weightedOptions = [];
-        if (down >= 3 && yardsToGo >= 8 && deepPlays.length > 0) weightedOptions.push(...deepPlays, ...deepPlays); // Weight deep
-        if (yardsToGo <= 5 && shortPlays.length > 0) weightedOptions.push(...shortPlays, ...shortPlays); // Weight short
-        if (mediumPlays.length > 0) weightedOptions.push(...mediumPlays); // Add medium
 
-        // Adjust based on defense
-        if (isHeavyBox && shortPlays.length > 0) weightedOptions.push(...shortPlays); // Add more short vs heavy box (potential blitz)
-        if (hasManyDBs && mediumPlays.length > 0) weightedOptions.push(...mediumPlays); // Add more medium vs many DBs (attack underneath deep coverage)
+        // --- 1. Define the Situation ---
+        const isLongPass = yardsToGo >= 8;
+        const isShortPass = yardsToGo <= 4;
 
-        // Fill remaining options and choose
-        weightedOptions.push(...possiblePlays); // Add all possible plays to ensure a choice
+        // --- 2. Build Weighted List based on Situation ---
+        if (isLongPass) {
+            // Obvious "Long" down: NO short plays.
+            weightedOptions.push(...(deepPlays || []), ...(deepPlays || [])); // Heavily weight deep
+            weightedOptions.push(...(mediumPlays || []));                     // Also allow medium
+        } else if (isShortPass) {
+            // Obvious "Short" down: NO deep plays.
+            weightedOptions.push(...(shortPlays || []), ...(shortPlays || [])); // Heavily weight short
+            weightedOptions.push(...(mediumPlays || []));                       // Also allow medium
+        } else {
+            // "Normal" down (e.g., 1st & 10, 2nd & 7): Add ALL options for variety.
+            weightedOptions.push(...(deepPlays || []));
+            weightedOptions.push(...(mediumPlays || []));
+            weightedOptions.push(...(shortPlays || []));
+        }
+
+        // --- 3. Adjust based on defense (this logic is still good) ---
+        if (isHeavyBox && shortPlays.length > 0) weightedOptions.push(...shortPlays); // Add more short vs heavy box
+        if (hasManyDBs && mediumPlays.length > 0) weightedOptions.push(...mediumPlays); // Add more medium vs many DBs
+
+        // --- 4. Select Play ---
+        if (weightedOptions.length === 0) {
+            // Fallback: If no situation met (e.g., only have 'short' plays on 3rd & 10)
+            // just pick from any available pass play.
+            weightedOptions.push(...possiblePlays);
+        }
         chosenPlay = getRandom(weightedOptions);
 
     } else { // Run
@@ -3197,18 +3361,34 @@ function determinePlayCall(offense, defense, down, yardsToGo, ballOn, scoreDiff,
         const powerPlays = possiblePlays.filter(p => offensivePlaybook[p]?.tags?.includes('power'));
 
         let weightedOptions = [];
-        if (yardsToGo <= 2 && powerPlays.length > 0) weightedOptions.push(...powerPlays, ...powerPlays); // Weight power
-        if (yardsToGo <= 4 && insidePlays.length > 0) weightedOptions.push(...insidePlays); // Weight inside for medium-short
 
-        // Adjust based on defense
-        if (isLightBox && insidePlays.length > 0) weightedOptions.push(...insidePlays, ...insidePlays); // Attack light box inside
-        if (isHeavyBox && outsidePlays.length > 0) weightedOptions.push(...outsidePlays); // Bounce outside vs heavy box
+        // --- 1. Define the Situation ---
+        const isShortYardage = yardsToGo <= 2;
 
-        // Add player strength factor
-        if (avgRbOvr > 65 && outsidePlays.length > 0 && Math.random() < 0.4) weightedOptions.push(...outsidePlays); // Good RB might try outside
+        // --- 2. Adjust based on defense FIRST ---
+        if (isLightBox) weightedOptions.push(...(insidePlays || []), ...(insidePlays || [])); // Attack light box
+        if (isHeavyBox) weightedOptions.push(...(outsidePlays || [])); // Bounce outside
 
-        // Fill remaining options and choose
-        weightedOptions.push(...possiblePlays);
+        // --- 3. Build Weighted List based on Situation ---
+        if (isShortYardage) {
+            // Obvious "Short" down: NO outside plays (dumb call).
+            weightedOptions.push(...(powerPlays || []), ...(powerPlays || [])); // Heavily weight power
+            weightedOptions.push(...(insidePlays || []));                       // Also allow inside
+        } else {
+            // "Normal" run down: Add ALL options for variety.
+            weightedOptions.push(...(insidePlays || []));
+            weightedOptions.push(...(outsidePlays || []));
+            weightedOptions.push(...(powerPlays || []));
+        }
+
+        // --- 4. Add player strength factor ---
+        if (avgRbOvr > 65 && outsidePlays.length > 0 && Math.random() < 0.4) weightedOptions.push(...outsidePlays);
+
+        // --- 5. Select Play ---
+        if (weightedOptions.length === 0) {
+            // Fallback: just pick from any available run play.
+            weightedOptions.push(...possiblePlays);
+        }
         chosenPlay = getRandom(weightedOptions);
     }
 
