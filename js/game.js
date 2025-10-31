@@ -1532,78 +1532,68 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                     if (pState.engagedWith) {
                         pState.targetX = pState.x;
                         pState.targetY = pState.y;
-                        // target = null; // No longer needed
                         break;
                     }
 
                     // --- 1. Determine Run Direction and Play-Side ---
                     const rbAssignment = offensiveAssignments['RB1'] || 'run_inside';
                     const isInsideRun = rbAssignment.includes('inside');
-
-                    // PlaySideX: -1 for Left, 1 for Right, 0 for Inside (center bias)
-                    // This assumes runs are named consistently (run_outside_left, run_inside, etc.)
-                    const playSideX = isInsideRun ? 0 : (rbAssignment.includes('left') ? -1 : 1);
-
+                    const playSideX = isInsideRun ? 0 : (rbAssignment.includes('left') ? -1 : 1); // -1 Left, 1 Right
 
                     // --- 2. Find Targets ---
-                    // Primary targets: Defenders on the Line (DL) - prioritizes engaging immediately
-                    const primaryTargets = defenseStates
-                        .filter(d =>
-                            !d.isBlocked && !d.isEngaged &&
-                            d.y < playState.lineOfScrimmage + 3 && // Close to LoS
-                            Math.abs(d.x - pState.initialX) < 5 // Horizontally nearby
-                        )
-                        .sort((a, b) => getDistance(pState, a) - getDistance(pState, b));
+                    const potentialTargets = defenseStates.filter(d =>
+                        !d.isBlocked && !d.isEngaged &&
+                        d.y < playState.lineOfScrimmage + 10 // Look 10 yards deep
+                    );
 
-                    // Secondary targets: LBs at the next level (3-10 yards deep)
-                    const secondaryTargets = defenseStates
-                        .filter(d =>
-                            !d.isBlocked && !d.isEngaged &&
-                            d.y >= playState.lineOfScrimmage + 3 && d.y < playState.lineOfScrimmage + 10 &&
-                            (isInsideRun ? Math.abs(d.x - CENTER_X) < 10 : (d.x - CENTER_X) * playSideX > 0)
-                        )
-                        .sort((a, b) => getDistance(pState, a) - getDistance(pState, b));
+                    // --- 🛠️ MODIFIED: Sort by relevance to the play ---
+                    potentialTargets.sort((a, b) => {
+                        // Score 1: Is the defender in the "play-side" half of the field?
+                        // (e.g., on an Outside_Left run, is the defender on the left side?)
+                        const a_onPlaySide = isInsideRun ?
+                            (Math.abs(a.x - CENTER_X) < 8) : // Inside run: "Play side" is between hashes
+                            ((a.x - CENTER_X) * playSideX > 0); // Outside run: Defender is on correct side
+                        const b_onPlaySide = isInsideRun ?
+                            (Math.abs(b.x - CENTER_X) < 8) :
+                            ((b.x - CENTER_X) * playSideX > 0);
 
-                    const targetDefender = primaryTargets[0] || secondaryTargets[0];
+                        if (a_onPlaySide && !b_onPlaySide) return -1; // A is more relevant
+                        if (!a_onPlaySide && b_onPlaySide) return 1; // B is more relevant
+
+                        // Score 2: Who is closer to the Line of Scrimmage? (Prioritize DL/LBs)
+                        const a_depth = a.y - playState.lineOfScrimmage;
+                        const b_depth = b.y - playState.lineOfScrimmage;
+                        if (a_depth < b_depth) return -1; // A is closer to LoS
+                        if (a_depth > b_depth) return 1;
+
+                        // Score 3: Who is closer to this blocker?
+                        return getDistance(pState, a) - getDistance(pState, b);
+                    });
+                    // --- END MODIFIED SORT ---
+
+                    const targetDefender = potentialTargets[0]; // The most relevant target
 
                     // --- 3. Set Target Point (Leverage) ---
                     if (targetDefender) {
                         let targetLeverageX = targetDefender.x;
 
                         if (isInsideRun) {
-                            // FIX: Drive defender laterally/outward to open gap center
-                            if (targetDefender.x < CENTER_X) {
-                                targetLeverageX = targetDefender.x + 0.75; // Push defender right (outside)
-                            } else {
-                                targetLeverageX = targetDefender.x - 0.75; // Push defender left (outside)
-                            }
+                            // Drive defender *away* from the center
+                            targetLeverageX = targetDefender.x + (targetDefender.x < CENTER_X ? 1.0 : -1.0);
                         } else {
-                            // Outside Run Logic: Seal the defender *inside*
-                            if (playSideX < 0) { // Running Left
-                                targetLeverageX = targetDefender.x + 0.75; // Get on their right shoulder (to seal inside)
-                            } else { // Running Right
-                                targetLeverageX = targetDefender.x - 0.75; // Get on their left shoulder (to seal inside)
-                            }
+                            // Outside Run: "Seal" the defender *inside*
+                            targetLeverageX = targetDefender.x + (playSideX < 0 ? 1.0 : -1.0); // +1 for Left run, -1 for Right run
                         }
 
-                        // --- 🛠️ FIX: Assign directly to pState.targetX/Y ---
-                        // Target the defender's leverage point
                         pState.targetX = targetLeverageX;
-                        pState.targetY = targetDefender.y + 0.5; // Aim slightly downfield (drive block)
-                        // --- End Fix ---
+                        pState.targetY = targetDefender.y + 0.5; // Aim slightly downfield
 
                     } else {
-                        // --- 🛠️ FIX: Assign directly to pState.targetX/Y ---
-                        // --- No defender: Climb to next level or follow the run side ---
+                        // No defender: Climb to next level
                         pState.targetX = pState.x + (playSideX * 2);
                         pState.targetY = pState.y + 3;
-                        // --- End Fix ---
                     }
-
-                    // --- 🛠️ FIX: This line was removed as it was nullifying the logic ---
-                    // target = null; 
-
-                    break; // Break from 'run_block' case
+                    break;
                 }
                 case 'run_path': { // --- Logic for RBs ---
                     const threatDistance = 3.5; // How far to look for immediate threats
@@ -1739,61 +1729,60 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
             const readPlayType = playState.tick > 7 ? playType : null;
 
             switch (true) {
-                case assignment?.startsWith('man_cover_'):
+                case assignment?.startsWith('man_cover_'): { // Added brackets for new scope
                     const targetSlot = assignment.split('man_cover_')[1];
                     const assignedReceiver = offenseStates.find(o => o.slot === targetSlot);
 
                     if (!assignedReceiver) {
-                        // --- Target Not Found ---
-                        // The assigned receiver isn't on the field.
-                        // Convert to a 'robber' or short zone defender.
-                        pState.assignment = 'zone_hook_curl_middle'; // Change assignment
+                        // ... (your existing fallback logic is fine)
+                        pState.assignment = 'zone_hook_curl_middle';
                         target = getZoneCenter('zone_hook_curl_middle', playState.lineOfScrimmage);
-                        break; // Let the pursuit logic handle targeting this new point
+                        break;
                     }
 
-                    // --- Ball is in the Air ---
+                    // --- 🛠️ CORRECTED RUN/PASS READ LOGIC ---
+                    const isRunPlay = (playType === 'run' || (ballCarrierState && ballCarrierState.y > playState.lineOfScrimmage));
+                    const isSafety = pState.slot.startsWith('DB') && (pState.initialY > playState.lineOfScrimmage + 7); // Is this a deep safety?
+
                     if (isBallInAir) {
-                        if (playState.ballState.targetPlayerId === assignedReceiver.id || getDistance(pState, ballPos) < 15) {
-                            // --- FIX: Target the landing spot, not the current position ---
+                        // --- Ball is in the Air ---
+                        if (playState.ballState.targetPlayerId === assignedReceiver.id || getDistance(pState, { x: playState.ballState.targetX, y: playState.ballState.targetY }) < 15) {
+                            // Target the ball's landing spot
                             target = { x: playState.ballState.targetX, y: playState.ballState.targetY };
                         } else {
-                            // --- ACTION: Stay in Coverage ---
-                            // Ball is thrown elsewhere, stick to the receiver
+                            // Ball thrown elsewhere, stick to receiver
                             target = assignedReceiver;
                         }
-                    }
-                    // --- Ball is NOT in the Air ---
-                    else {
-                        // --- ACTION: Man Coverage ---
-                        // Target the receiver (player state object) directly.
-                        // The pursuit logic at the end of the function will handle anticipation.
-                        target = assignedReceiver;
+                    } else if (isRunPlay && ballCarrierState) {
+                        // --- ✳️ NEW: It's a Run Play! ---
 
-                        // We can add leverage logic here by creating a *proxy* target
-                        // for the pursuit logic to use, instead of modifying the pState directly.
-
-                        const speedDiff = (pState.speed - assignedReceiver.speed);
-                        // Trail if slower, stay on top if faster
-                        const yOffset = (speedDiff < -10) ? -1.0 : (speedDiff < -5) ? -0.5 : 0.5;
-
-                        let xOffset = 0; // Inside shade logic
-                        if (assignedReceiver.x < HASH_LEFT_X) { // Receiver is wide left
-                            xOffset = 1.0; // Shade 1 yard inside
-                        } else if (assignedReceiver.x > HASH_RIGHT_X) { // Receiver is wide right
-                            xOffset = -1.0; // Shade 1 yard inside
+                        // Safeties in man-coverage play "run support" and wait for the
+                        // runner to cross the LoS.
+                        if (isSafety && ballCarrierState.y < playState.lineOfScrimmage + 5) {
+                            // Runner is still bottled up, hold position
+                            target = pState;
+                        } else {
+                            // Cornerbacks and LBs in man-coverage must "shed" their
+                            // receiver and attack the run.
+                            target = ballCarrierState;
                         }
+                    } else {
+                        // --- Ball is NOT in the Air (Pass Play) ---
+                        // Continue with your existing man-coverage logic
+                        const speedDiff = (pState.speed - assignedReceiver.speed);
+                        const yOffset = (speedDiff < -10) ? -1.0 : (speedDiff < -5) ? -0.5 : 0.5;
+                        let xOffset = 0;
+                        if (assignedReceiver.x < HASH_LEFT_X) xOffset = 1.0;
+                        else if (assignedReceiver.x > HASH_RIGHT_X) xOffset = -1.0;
 
-                        // Create a *new* proxy target object for the pursuit logic.
-                        // It uses the receiver's state but tells our DB to aim
-                        // for a point *relative* to the receiver's future position.
                         target = {
-                            ...assignedReceiver, // Copy receiver's state (speed, fatigue, etc.)
-                            targetX: assignedReceiver.targetX + xOffset, // Target inside receiver's route
-                            targetY: assignedReceiver.targetY + yOffset  // Target slightly behind/ahead
+                            ...assignedReceiver,
+                            targetX: assignedReceiver.targetX + xOffset,
+                            targetY: assignedReceiver.targetY + yOffset
                         };
                     }
                     break; // Go to the main pursuit logic
+                }
 
                 case assignment?.startsWith('zone_'):
                     const zoneCenter = getZoneCenter(assignment, playState.lineOfScrimmage);
