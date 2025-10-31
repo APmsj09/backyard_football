@@ -534,47 +534,7 @@ function diagnosePlay(pState, truePlayType, offensivePlayKey, tick) {
     // (We could add logic for "Draw" plays fooling them, but this is a great start)
     return truePlayType; // Returns the correct play ('run' or 'pass')
 }
-/**
- * Calculates a player's suitability for a *specific* slot, based on
- * the priorities defined in the formation data.
- */
-function calculateSlotSuitability(player, slot, side, team) {
-    if (!player || !player.attributes) return 0;
 
-    const formationName = team.formations[side];
-    const formationData = (side === 'offense') ? offenseFormations[formationName] : defenseFormations[formationName];
-
-    // Get the priority weights for this specific slot (e.g., "DB1")
-    const priorities = formationData?.slotPriorities?.[slot];
-
-    // If no priorities are defined for this slot, fall back to generic overall
-    if (!priorities) {
-        const position = slot.replace(/\d/g, ''); // 'DB1' -> 'DB'
-        return calculateOverall(player, position);
-    }
-
-    let suitabilityScore = 0;
-    let totalWeight = 0;
-
-    // Loop through all attribute categories (physical, mental, technical)
-    for (const cat in player.attributes) {
-        if (!player.attributes[cat]) continue;
-
-        // Loop through all attributes in that category (speed, strength, etc.)
-        for (const attr in player.attributes[cat]) {
-            if (priorities[attr]) {
-                const weight = priorities[attr];
-                const statValue = player.attributes[cat][attr] || 50;
-
-                suitabilityScore += (statValue * weight);
-                totalWeight += weight;
-            }
-        }
-    }
-
-    // Return the weighted average
-    return (totalWeight > 0) ? (suitabilityScore / totalWeight) : 0;
-}
 
 // =============================================================
 // --- GAME STATE & TEAM MANAGEMENT ---
