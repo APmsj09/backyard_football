@@ -1672,10 +1672,6 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                         target = null;
                         break;
                     }
-                    if (pState.slot.startsWith('OL')) {
-                        const threatNames = potentialTargets.map(d => `${d.slot} (Action: ${d.action}, Pos: [${d.x.toFixed(1)}, ${d.y.toFixed(1)}])`);
-                        console.log(`[${pState.slot}] Action: ${pState.action}. Threats Seen: [${threatNames.join(', ') || 'NONE'}]`);
-                    }
 
                     // --- 1. Find All Threats ---
                     const potentialTargets = defenseStates
@@ -1699,6 +1695,10 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
 
                             return false; // Not a threat
                         });
+                    if (pState.slot.startsWith('OL')) {
+                        const threatNames = potentialTargets.map(d => `${d.slot} (Action: ${d.action}, Pos: [${d.x.toFixed(1)}, ${d.y.toFixed(1)}])`);
+                        console.log(`[${pState.slot}] Action: ${pState.action}. Threats Seen: [${threatNames.join(', ') || 'NONE'}]`);
+                    }
 
                     if (potentialTargets.length === 0) {
                         // --- No threat: Hold the pocket ---
