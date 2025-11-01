@@ -1699,31 +1699,17 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
 
                     // --- 3. 🛠️ MODIFIED: Target a Dynamic Intercept Point ---
                     if (targetDefender) {
-                        // Get the defender's actual goal (the spot they are running toward this tick)
-                        const defenderGoalX = targetDefender.targetX;
-                        const defenderGoalY = targetDefender.targetY;
-
-                        // Get vector from the defender's CURRENT position to their GOAL
-                        const dx = defenderGoalX - targetDefender.x;
-                        const dy = defenderGoalY - targetDefender.y;
-                        const dist = Math.max(0.1, Math.sqrt(dx * dx + dy * dy));
-
-                        // Set target 1 yard "in front" of the defender, along their path
-                        // This creates the intercept point.
-                        const interceptFactor = 1.0;
-                        const interceptY = targetDefender.y - (dy / dist) * interceptFactor;
-                        const interceptX = targetDefender.x - (dx / dist) * interceptFactor;
-
-                        pState.targetX = interceptX;
-                        pState.targetY = interceptY;
-
+                        // This makes the OL attack the defender's current position.
+                        // This is more aggressive and fixes the "matador" bug.
+                        pState.targetX = targetDefender.x;
+                        pState.targetY = targetDefender.y;
                     } else {
-                        // --- Fallback ---
+                        // Fallback (Hold pocket)
                         pState.targetX = pState.initialX;
                         pState.targetY = pState.initialY - 0.75;
                     }
 
-                    target = null; // We are moving to a fixed {x, y} point, not pursuing
+                    target = null; // Target set by fixed point logic above
                     break;
                 }
 
@@ -1746,11 +1732,21 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                     }
 
                     // --- 1. Find All Threats ---
-                    const potentialTargets = defenseStates.filter(d =>
-                        !d.isBlocked && !d.isEngaged &&
-                        // Look for DLs, LBs, or blitzing DBs assigned to stop the run
-                        (d.assignment?.includes('run_') || d.assignment?.includes('blitz') || d.slot.startsWith('DL') || d.slot.startsWith('LB'))
-                    );
+                    const potentialTargets = defenseStates
+                        .filter(d => {
+                            if (d.isBlocked || d.isEngaged) return false;
+
+                            // Is this a DL or LB?
+                            const isBoxPlayer = d.slot.startsWith('DL') || d.slot.startsWith('LB');
+                            if (!isBoxPlayer) return false; // Ignore DBs
+
+                            // Is this player explicitly dropping deep?
+                            const isDropping = (typeof d.assignment === 'string') &&
+                                (d.assignment.startsWith('man_cover_') || d.assignment.includes('deep_'));
+
+                            // If they are a box player AND they are NOT dropping deep, they are a threat.
+                            return !isDropping;
+                        });
 
                     if (potentialTargets.length === 0) {
                         // No threat, climb to next level
@@ -1764,35 +1760,18 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                     const targetDefender = potentialTargets
                         .sort((a, b) => getDistance(pState, a) - getDistance(pState, b))[0];
 
-                    // --- 3. 🛠️ MODIFIED: Target an "Intercept Point" ---
+                    // --- 3. 🛠️ MODIFIED: Target the DEFENDER
                     if (targetDefender) {
-                        // Defender's target is where they are running this tick (gap or carrier)
-                        const defenderGoalX = targetDefender.targetX;
-                        const defenderGoalY = targetDefender.targetY;
-
-                        // Get vector from the defender's CURRENT position to their GOAL
-                        const dx = defenderGoalX - targetDefender.x;
-                        const dy = defenderGoalY - targetDefender.y;
-                        const dist = Math.max(0.1, Math.sqrt(dx * dx + dy * dy));
-
-                        // Set target 1 yard "in front" of the defender (towards the blocker), 
-                        // ensuring we cut off their path.
-                        // The defender's goal for run defense is usually a spot *past* the blocker.
-                        const interceptFactor = 1.0;
-                        const interceptY = targetDefender.y + (dy / dist) * interceptFactor;
-                        const interceptX = targetDefender.x + (dx / dist) * interceptFactor;
-
-                        // Set the blocker's aim to this dynamic point
-                        pState.targetX = interceptX;
-                        pState.targetY = interceptY;
-
+                        // This makes the OL attack the defender's current position.
+                        pState.targetX = targetDefender.x;
+                        pState.targetY = targetDefender.y;
                     } else {
-                        // Fallback (shouldn't be reached if potentialTargets > 0)
+                        // Fallback (Climb to 2nd level)
                         pState.targetX = pState.x;
                         pState.targetY = pState.y + 3;
                     }
 
-                    target = null; // Target set by fixed point logic above
+                    target = null;
                     break;
                 }
                 case 'run_path': { // --- Logic for RBs ---
