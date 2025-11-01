@@ -1512,6 +1512,98 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
     // Helper: Determine if a target is the QB/Carrier and not null
     const isPlayerState = (t) => t && t.speed !== undefined;
 
+    const olAssignedDefenders = new Set();
+
+    // 1. Get all potential threats (DL/LBs who aren't dropping)
+    const allThreats = defenseStates.filter(d => {
+        if (d.isBlocked || d.isEngaged) return false;
+        const isBoxPlayer = d.slot.startsWith('DL') || d.slot.startsWith('LB');
+        if (!isBoxPlayer) return false;
+        const isDropping = (typeof d.assignment === 'string') &&
+                           (d.assignment.startsWith('man_cover_') || d.assignment.includes('deep_'));
+        return !isDropping;
+    });
+
+    // 2. Find all OL who need an assignment
+    const olBlockers = offenseStates.filter(p =>
+        !p.isEngaged &&
+        (p.action === 'pass_block' || (p.action === 'run_block' && !(playType === 'pass' && playState.tick > 20)))
+    );
+
+    // 3. Helper function to assign a target
+    const assignTarget = (blocker, availableThreats, logPrefix) => {
+        if (availableThreats.length === 0) {
+            // No threats left, hold pocket or climb
+            blocker.targetX = blocker.initialX;
+            blocker.targetY = blocker.y + (blocker.action === 'run_block' ? 3 : -0.75);
+            if (blocker.slot.startsWith('OL')) {
+                console.log(`[${logPrefix}] No target chosen. ${blocker.action === 'run_block' ? 'Climbing.' : 'Holding.'}`);
+            }
+            return;
+        }
+
+        // Find the closest available threat
+        availableThreats.sort((a, b) => getDistance(blocker, a) - getDistance(blocker, b));
+        const targetDefender = availableThreats[0];
+
+        // --- 🛠️ NEW: "Aggressive Intercept" Logic ---
+        // Find the defender's ultimate target (the QB on pass plays, or downfield on run plays)
+        let defenderGoal;
+        if (blocker.action === 'pass_block') {
+            defenderGoal = qbState || { x: blocker.x, y: blocker.y - 5 }; // Target QB
+        } else {
+            // On a run, the DL's goal is to get *past* the OL.
+            defenderGoal = { x: targetDefender.x, y: targetDefender.y + 2.0 }; // Target 2 yards downfield
+        }
+
+        // Calculate vector from defender to their goal
+        const dx = defenderGoal.x - targetDefender.x;
+        const dy = defenderGoal.y - targetDefender.y;
+        const dist = Math.max(0.1, Math.sqrt(dx * dx + dy * dy));
+
+        // Set the OL's target to be 1 yard *in front* of the defender, along their path
+        const INTERCEPT_DIST = 1.0; 
+        const interceptX = targetDefender.x - (dx / dist) * INTERCEPT_DIST;
+        const interceptY = targetDefender.y - (dy / dist) * INTERCEPT_DIST;
+
+        blocker.targetX = interceptX;
+        blocker.targetY = interceptY;
+        // --- END NEW LOGIC ---
+
+        // Mark this defender as "taken"
+        olAssignedDefenders.add(targetDefender.id);
+
+        if (blocker.slot.startsWith('OL')) {
+            console.log(`[${logPrefix}] Chosen Target: ${targetDefender.name} (${targetDefender.slot}) at [${targetDefender.x.toFixed(1)}, ${targetDefender.y.toFixed(1)}]`);
+            console.log(`[${logPrefix}] Moving to INTERCEPT at: [${blocker.targetX.toFixed(1)}, ${blocker.targetY.toFixed(1)}] (Defender's goal: [${defenderGoal.x.toFixed(1)}, ${defenderGoal.y.toFixed(1)}])`);
+        }
+    };
+
+    // 4. Process Blockers (Center first, then Guards/Tackles)
+    if (olBlockers.length > 0) {
+        olBlockers.sort((a, b) => {
+            if (a.slot === 'OL2') return -1; // Center first
+            if (b.slot === 'OL2') return 1;
+            return a.initialX - b.initialX; // Then left-to-right
+        });
+
+        // Log threats once per tick (for the first OL)
+        const firstOL = olBlockers[0];
+        if (firstOL.slot.startsWith('OL')) {
+             const logPrefix = `TICK ${playState.tick} | ${firstOL.name} (${firstOL.slot})`;
+             console.log(`--- ${logPrefix} (${firstOL.action.toUpperCase()}) ---`);
+             const threatNames = allThreats.map(d => `${d.slot} (Assign: ${d.assignment})`);
+             console.log(`[${firstOL.slot}] Threats Seen: [${threatNames.join(', ') || 'NONE'}]`);
+        }
+
+        // Assign targets one-by-one
+        for (const ol of olBlockers) {
+            const availableThreats = allThreats.filter(d => !olAssignedDefenders.has(d.id));
+            const prefix = `TICK ${playState.tick} | ${ol.name} (${ol.slot})`;
+            assignTarget(ol, availableThreats, prefix);
+        }
+    }
+
     playState.activePlayers.forEach(pState => {
         let target = null; // Target: PlayerState (dynamic) or {x, y} (static point)
 
@@ -1529,7 +1621,7 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
 
             // If juke is still active, player maintains current (reduced speed) course
             if (pState.jukeTicks > 0) {
-                // 🛠️ FIX: Crucial to return here to prevent AI from recalculating the run_path target
+                // Crucial to return here to prevent AI from recalculating the run_path target
                 // If they are mid-juke, they should maintain their direction.
                 return;
             } else {
@@ -1662,156 +1754,7 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                     }
                     break; // End case 'route_complete'
 
-                case 'pass_block': {
-                    if (pState.slot.startsWith('OL')) {
-                        console.log(`--- TICK ${playState.tick}: ${pState.name} (${pState.slot}) ---`);
-                    }
-                    if (pState.engagedWith) {
-                        pState.targetX = pState.x; // Stay engaged if already blocking
-                        pState.targetY = pState.y;
-                        target = null;
-                        break;
-                    }
-
-                    // --- 1. Find All Threats ---
-                    const potentialTargets = defenseStates
-                        .filter(d => {
-                            if (d.isBlocked || d.isEngaged) return false;
-
-                            // --- NEW ROBUST CHECKS ---
-
-                            // Check 1: Is the defender's *current action* a pass rush?
-                            if (d.action === 'pass_rush') return true; // <-- ✅ FIX 1
-
-                            // Check 2: Is the defender's *current action* a blitz?
-                            if (typeof d.action === 'string' && d.action.includes('blitz')) return true; // <-- ✅ FIX 2
-
-                            // Check 3: Is it a "new" threat (e.g., zone defender) attacking the QB?
-                            if (qbState) {
-                                if (getDistance(d, qbState) < 8.0 && d.targetY < d.y - 0.5) {
-                                    return true; // Is close AND moving downhill
-                                }
-                            }
-
-                            return false; // Not a threat
-                        });
-                    if (pState.slot.startsWith('OL')) {
-                        const threatNames = potentialTargets.map(d => `${d.slot} (Action: ${d.action}, Pos: [${d.x.toFixed(1)}, ${d.y.toFixed(1)}])`);
-                        console.log(`[${pState.slot}] Action: ${pState.action}. Threats Seen: [${threatNames.join(', ') || 'NONE'}]`);
-                    }
-
-                    if (potentialTargets.length === 0) {
-                        // --- No threat: Hold the pocket ---
-                        pState.targetX = pState.initialX; // Stay in your spot
-                        pState.targetY = pState.initialY - 0.75; // Set 0.75 yards deep
-                        target = null;
-                        break;
-                    }
-
-                    // --- 2. Find *My* Assignment (Closest rusher) ---
-                    const targetDefender = potentialTargets
-                        .sort((a, b) => getDistance(pState, a) - getDistance(pState, b))[0];
-
-                    // --- 3. 🛠️ MODIFIED: Target a Dynamic Intercept Point ---
-                    if (targetDefender) {
-                        // This makes the OL attack the defender's current position.
-                        // This is more aggressive and fixes the "matador" bug.
-                        pState.targetX = targetDefender.x;
-                        pState.targetY = targetDefender.y;
-                    } else {
-                        // Fallback (Hold pocket)
-                        pState.targetX = pState.initialX;
-                        pState.targetY = pState.initialY - 0.75;
-                    }
-                    if (pState.slot.startsWith('OL')) {
-                        if (targetDefender) {
-                            console.log(`[${pState.slot}] Chosen Target: ${targetDefender.name} (${targetDefender.slot}) at [${targetDefender.x.toFixed(1)}, ${targetDefender.y.toFixed(1)}]`);
-                            console.log(`[${pState.slot}] Moving to: [${pState.targetX.toFixed(1)}, ${pState.targetY.toFixed(1)}]`);
-                        } else {
-                            console.log(`[${pState.slot}] No target chosen. Holding pocket.`);
-                        }
-                    }
-
-                    target = null; // Target set by fixed point logic above
-                    break;
-                }
-
-                case 'run_block': {
-                    if (pState.slot.startsWith('OL')) {
-                        console.log(`--- TICK ${playState.tick}: ${pState.name} (${pState.slot}) ---`);
-                    }
-
-                    const PA_DELAY_TICKS = 20; // 20 ticks = 1.0 second
-                    if (playType === 'pass' && playState.tick > PA_DELAY_TICKS) {
-                        pState.action = 'pass_block'; // Switch to pass blocking
-                        pState.targetX = pState.initialX; // Settle into the pocket
-                        pState.targetY = pState.initialY - 0.75;
-                        target = null;
-                        break; // Skip the run_block logic for this tick
-                    }
-
-                    if (pState.engagedWith) {
-                        pState.targetX = pState.x; // Stay engaged
-                        pState.targetY = pState.y;
-                        target = null;
-                        break;
-                    }
-
-                    // --- 1. Find All Threats ---
-                    const potentialTargets = defenseStates
-                        .filter(d => {
-                            if (d.isBlocked || d.isEngaged) return false;
-
-                            // Is this a DL or LB?
-                            const isBoxPlayer = d.slot.startsWith('DL') || d.slot.startsWith('LB');
-                            if (!isBoxPlayer) return false; // Ignore DBs
-
-                            // Is this player explicitly dropping deep?
-                            const isDropping = (typeof d.assignment === 'string') &&
-                                (d.assignment.startsWith('man_cover_') || d.assignment.includes('deep_'));
-
-                            // If they are a box player AND they are NOT dropping deep, they are a threat.
-                            return !isDropping;
-                        });
-                    if (pState.slot.startsWith('OL')) {
-                        const threatNames = potentialTargets.map(d => `${d.slot} (Assign: ${d.assignment}, Pos: [${d.x.toFixed(1)}, ${d.y.toFixed(1)}])`);
-                        console.log(`[${pState.slot}] Action: ${pState.action}. Threats Seen: [${threatNames.join(', ') || 'NONE'}]`);
-                    }
-
-                    if (potentialTargets.length === 0) {
-                        // No threat, climb to next level
-                        pState.targetX = pState.x;
-                        pState.targetY = pState.y + 3;
-                        target = null;
-                        break;
-                    }
-
-                    // --- 2. Find *My* Assignment (Closest relevant defender) ---
-                    const targetDefender = potentialTargets
-                        .sort((a, b) => getDistance(pState, a) - getDistance(pState, b))[0];
-
-                    // --- 3. 🛠️ MODIFIED: Target the DEFENDER
-                    if (targetDefender) {
-                        // This makes the OL attack the defender's current position.
-                        pState.targetX = targetDefender.x;
-                        pState.targetY = targetDefender.y;
-                    } else {
-                        // Fallback (Climb to 2nd level)
-                        pState.targetX = pState.x;
-                        pState.targetY = pState.y + 3;
-                    }
-                    if (pState.slot.startsWith('OL')) {
-                        if (targetDefender) {
-                            console.log(`[${pState.slot}] Chosen Target: ${targetDefender.name} (${targetDefender.slot}) at [${targetDefender.x.toFixed(1)}, ${targetDefender.y.toFixed(1)}]`);
-                            console.log(`[${pState.slot}] Moving to: [${pState.targetX.toFixed(1)}, ${pState.targetY.toFixed(1)}]`);
-                        } else {
-                            console.log(`[${pState.slot}] No target chosen. Climbing to 2nd level.`);
-                        }
-                    }
-
-                    target = null;
-                    break;
-                }
+                                
                 case 'run_path': { // --- Logic for RBs ---
                     const threatDistance = 3.5; // How far to look for immediate threats
                     const visionDistance = 10.0; // How far to look downfield for lanes
