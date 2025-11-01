@@ -1390,18 +1390,26 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
 
             // --- Clamp final starting position within field boundaries ---
             startX = Math.max(0.5, Math.min(FIELD_WIDTH - 0.5, startX));
-            // Y-clamp: Must be between 10.5 and 109.5 (endzone buffer)
             startY = Math.max(10.5, Math.min(FIELD_LENGTH - 10.5, startY));
 
-            // 🚨 CRITICAL DEFENSE CLAMP: Must line up behind the LoS
+            // 🚨 CRITICAL NEUTRAL ZONE CLAMP:
             const LOS = playState.lineOfScrimmage;
-            const BUFFER = 0.3; // yards
+
+            // 🛠️ NEW: Define the neutral zone width (the "length of the ball")
+            const NEUTRAL_ZONE_WIDTH = 1.0; // 1 yard
 
             if (!isOffense) {
-                // Defense must be in front of (greater Y) than the line of scrimmage
-                startY = Math.max(LOS + BUFFER, startY);
-                targetY = Math.max(LOS + BUFFER, targetY);
+                // DEFENSE: Must line up *on or past* the neutral zone.
+                // e.g., If LOS=30, they must be at Y >= 31.0
+                startY = Math.max(LOS + NEUTRAL_ZONE_WIDTH, startY);
+                targetY = Math.max(LOS + NEUTRAL_ZONE_WIDTH, targetY);
+            } else {
+                // OFFENSE: Must line up *on or behind* the LoS.
+                // e.g., If LOS=30, they must be at Y <= 30.0
+                startY = Math.min(LOS, startY);
+                targetY = Math.min(LOS, targetY);
             }
+            // --- END NEUTRAL ZONE CLAMP ---
 
 
             // --- Create Player State Object for Simulation (uses the final values) ---
@@ -1655,11 +1663,18 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                     break; // End case 'route_complete'
 
                 case 'pass_block': {
+                    if (pState.slot.startsWith('OL')) {
+                        console.log(`--- TICK ${playState.tick}: ${pState.name} (${pState.slot}) ---`);
+                    }
                     if (pState.engagedWith) {
                         pState.targetX = pState.x; // Stay engaged if already blocking
                         pState.targetY = pState.y;
                         target = null;
                         break;
+                    }
+                    if (pState.slot.startsWith('OL')) {
+                        const threatNames = potentialTargets.map(d => `${d.slot} (Action: ${d.action}, Pos: [${d.x.toFixed(1)}, ${d.y.toFixed(1)}])`);
+                        console.log(`[${pState.slot}] Action: ${pState.action}. Threats Seen: [${threatNames.join(', ') || 'NONE'}]`);
                     }
 
                     // --- 1. Find All Threats ---
@@ -1708,12 +1723,23 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                         pState.targetX = pState.initialX;
                         pState.targetY = pState.initialY - 0.75;
                     }
+                    if (pState.slot.startsWith('OL')) {
+                        if (targetDefender) {
+                            console.log(`[${pState.slot}] Chosen Target: ${targetDefender.name} (${targetDefender.slot}) at [${targetDefender.x.toFixed(1)}, ${targetDefender.y.toFixed(1)}]`);
+                            console.log(`[${pState.slot}] Moving to: [${pState.targetX.toFixed(1)}, ${pState.targetY.toFixed(1)}]`);
+                        } else {
+                            console.log(`[${pState.slot}] No target chosen. Holding pocket.`);
+                        }
+                    }
 
                     target = null; // Target set by fixed point logic above
                     break;
                 }
 
                 case 'run_block': {
+                    if (pState.slot.startsWith('OL')) {
+                        console.log(`--- TICK ${playState.tick}: ${pState.name} (${pState.slot}) ---`);
+                    }
 
                     const PA_DELAY_TICKS = 20; // 20 ticks = 1.0 second
                     if (playType === 'pass' && playState.tick > PA_DELAY_TICKS) {
@@ -1747,6 +1773,10 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                             // If they are a box player AND they are NOT dropping deep, they are a threat.
                             return !isDropping;
                         });
+                    if (pState.slot.startsWith('OL')) {
+                        const threatNames = potentialTargets.map(d => `${d.slot} (Assign: ${d.assignment}, Pos: [${d.x.toFixed(1)}, ${d.y.toFixed(1)}])`);
+                        console.log(`[${pState.slot}] Action: ${pState.action}. Threats Seen: [${threatNames.join(', ') || 'NONE'}]`);
+                    }
 
                     if (potentialTargets.length === 0) {
                         // No threat, climb to next level
@@ -1769,6 +1799,14 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                         // Fallback (Climb to 2nd level)
                         pState.targetX = pState.x;
                         pState.targetY = pState.y + 3;
+                    }
+                    if (pState.slot.startsWith('OL')) {
+                        if (targetDefender) {
+                            console.log(`[${pState.slot}] Chosen Target: ${targetDefender.name} (${targetDefender.slot}) at [${targetDefender.x.toFixed(1)}, ${targetDefender.y.toFixed(1)}]`);
+                            console.log(`[${pState.slot}] Moving to: [${pState.targetX.toFixed(1)}, ${pState.targetY.toFixed(1)}]`);
+                        } else {
+                            console.log(`[${pState.slot}] No target chosen. Climbing to 2nd level.`);
+                        }
                     }
 
                     target = null;
@@ -2306,6 +2344,10 @@ function checkBlockCollisions(playState) {
                 const targetDefender = defendersInRange[0]; // Take the highest priority target
 
                 if (targetDefender) { // Check if the filtering left a valid target
+                    // --- 🛠️ ADD DEBUG LOG ---
+                    if (blocker.slot.startsWith('OL')) {
+                        console.log(`%c*** BLOCK ENGAGED (Tick: ${playState.tick}) ***: ${blocker.name} (${blocker.slot}) has engaged ${targetDefender.name} (${targetDefender.slot})`, 'color: #00dd00; font-weight: bold;');
+                    }
                     blocker.engagedWith = targetDefender.id;
                     blocker.isEngaged = true;
                     targetDefender.isBlocked = true;
