@@ -1509,6 +1509,10 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
     const isBallInAir = playState.ballState.inAir;
     const ballPos = playState.ballState;
 
+    const LOS = playState.lineOfScrimmage;
+    const POCKET_DEPTH_PASS = -1.5; // 1.5 yards *behind* the LoS
+    const POCKET_DEPTH_RUN = 0.5;   // 0.5 yards *in front* of the LoS
+
     // Helper: Determine if a target is the QB/Carrier and not null
     const isPlayerState = (t) => t && t.speed !== undefined;
 
@@ -1533,19 +1537,15 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
     // 3. Helper function to assign a target
     const assignTarget = (blocker, availableThreats, logPrefix) => {
 
-        // --- 🛠️ NEW: Define Pocket Depth ---
-        // This is the "set" point for the OL, relative to the LoS
-        const POCKET_DEPTH_PASS = -1.5; // 1.5 yards *behind* the LoS
-        const POCKET_DEPTH_RUN = 0.5;   // 0.5 yards *in front* of the LoS
-        // --- END NEW ---
-
-        const LOS = playState.lineOfScrimmage;
-
         if (availableThreats.length === 0) {
             // No threats left, hold pocket or climb
             blocker.targetX = blocker.initialX;
             // Set to the default pocket depth for their play type
             blocker.targetY = LOS + (blocker.action === 'run_block' ? POCKET_DEPTH_RUN : POCKET_DEPTH_PASS);
+
+            // --- 🛠️ ADD THIS ---
+            blocker.dynamicTargetId = null; // Explicitly clear dynamic target
+            // --- END ADD ---
 
             if (blocker.slot.startsWith('OL')) {
                 console.log(`[${logPrefix}] No target chosen. ${blocker.action === 'run_block' ? 'Climbing.' : 'Holding Pocket.'}`);
@@ -1557,36 +1557,13 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
         availableThreats.sort((a, b) => getDistance(blocker, a) - getDistance(blocker, b));
         const targetDefender = availableThreats[0];
 
-        // --- 🛠️ REVISED: "Aggressive Intercept" Logic ---
-        let defenderGoal;
-        if (blocker.action === 'pass_block') {
-            defenderGoal = qbState || { x: blocker.x, y: blocker.y - 5 }; // Target QB
-        } else {
-            // On a run, the DL's goal is to get *past* the OL.
-            defenderGoal = { x: targetDefender.x, y: targetDefender.y + 2.0 }; // Target 2 yards downfield
-        }
+        // --- ⛔ REMOVED: All "Aggressive Intercept" and vector logic ---
+        // --- ... (dx, dy, interceptX, interceptY, etc. all removed) ... ---
 
-        // Calculate vector from defender to their goal
-        const dx = defenderGoal.x - targetDefender.x;
-        const dy = defenderGoal.y - targetDefender.y;
-        const dist = Math.max(0.1, Math.sqrt(dx * dx + dy * dy));
-
-        // Calculate the intercept point (1 yard towards the defender's goal)
-        const INTERCEPT_DIST = 1.0;
-        const interceptX = targetDefender.x + (dx / dist) * INTERCEPT_DIST;
-        const interceptY = targetDefender.y + (dy / dist) * INTERCEPT_DIST;
-
-        // --- 🛠️ THE FIX: Set Target based on Pocket Depth ---
-        blocker.targetX = interceptX; // Always target the intercept X
-
-        if (blocker.action === 'pass_block') {
-            // On a PASS, move to the intercept X, but *at* pocket depth.
-            // This forces the "kick step" backward.
-            blocker.targetY = LOS + POCKET_DEPTH_PASS;
-        } else {
-            // On a RUN, attack the intercept point aggressively.
-            blocker.targetY = interceptY;
-        }
+        // --- 🛠️ THE FIX: Set the DYNAMIC target ID ---
+        // We no longer set targetX/Y here. We just assign the ID.
+        // The main game loop will handle the dynamic X/Y coordinates.
+        blocker.dynamicTargetId = targetDefender.id;
         // --- END FIX ---
 
         // Mark this defender as "taken"
@@ -1594,7 +1571,7 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
 
         if (blocker.slot.startsWith('OL')) {
             console.log(`[${logPrefix}] Chosen Target: ${targetDefender.name} (${targetDefender.slot}) at [${targetDefender.x.toFixed(1)}, ${targetDefender.y.toFixed(1)}]`);
-            console.log(`[${logPrefix}] Moving to INTERCEPT at: [${blocker.targetX.toFixed(1)}, ${blocker.targetY.toFixed(1)}]`);
+            // --- ⛔ REMOVED: The "Moving to INTERCEPT" log ---
         }
     };
 
@@ -1696,6 +1673,63 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
 
                     break; // Skip all other targeting logic for this player
                 // --- END NEW CASE ---
+
+                case 'pass_block':
+                    // This logic runs *every tick* after assignTarget() has run.
+
+                    if (pState.dynamicTargetId) {
+                        const target = defenseStates.find(d => d.id === pState.dynamicTargetId);
+
+                        // Check if target is still valid (exists and isn't already blocked by someone else)
+                        if (target && !target.isBlocked && !target.isEngaged) {
+                            // --- Target is valid: DYNAMICALLY UPDATE ---
+                            // Target the defender's CURRENT X position.
+                            // Target our static pocket Y depth.
+                            pState.targetX = target.x;
+                            pState.targetY = LOS + POCKET_DEPTH_PASS;
+                        } else {
+                            // --- Target is GONE (blocked, etc.) ---
+                            // Clear the ID. The main assignment logic at the
+                            // top of the function will find a new target next tick.
+                            pState.dynamicTargetId = null;
+                            // Hold current pocket position
+                            pState.targetX = pState.initialX;
+                            pState.targetY = LOS + POCKET_DEPTH_PASS;
+                        }
+                    }
+                    // else: dynamicTargetId is null.
+                    // This means 'assignTarget' set us to a static pocket-holding
+                    // spot. The pState.targetX/Y are already correct, so we do nothing
+                    // and let those static coordinates be used.
+
+                    target = null; // Prevent falling into defensive pursuit logic
+                    break;
+
+                case 'run_block':
+                    if (pState.dynamicTargetId) {
+                        const target = defenseStates.find(d => d.id === pState.dynamicTargetId);
+
+                        // Check if target is still valid
+                        if (target && !target.isBlocked && !target.isEngaged) {
+                            // --- Target is valid: DYNAMICALLY UPDATE ---
+                            // Attack the defender's CURRENT position.
+                            pState.targetX = target.x;
+                            pState.targetY = target.y;
+                        } else {
+                            // --- Target is GONE ---
+                            pState.dynamicTargetId = null;
+                            // Revert to the "climb" assignment
+                            pState.targetX = pState.initialX;
+                            pState.targetY = LOS + POCKET_DEPTH_RUN;
+                        }
+                    }
+                    // else: dynamicTargetId is null.
+                    // 'assignTarget' set us to a static "climb" spot.
+                    // pState.targetX/Y are already correct. Do nothing.
+
+                    target = null; // Prevent falling into defensive pursuit logic
+                    break;
+                // --- 🛠️ END NEW BLOCKING LOGIC ---
                 case 'run_route':
                     if (pState.routePath && pState.routePath.length > 0) {
                         const currentTargetIndex = Math.min(pState.currentPathIndex, pState.routePath.length - 1);
