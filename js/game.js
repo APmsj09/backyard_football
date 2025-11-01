@@ -1520,7 +1520,7 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
         const isBoxPlayer = d.slot.startsWith('DL') || d.slot.startsWith('LB');
         if (!isBoxPlayer) return false;
         const isDropping = (typeof d.assignment === 'string') &&
-                           (d.assignment.startsWith('man_cover_') || d.assignment.includes('deep_'));
+            (d.assignment.startsWith('man_cover_') || d.assignment.includes('deep_'));
         return !isDropping;
     });
 
@@ -1532,12 +1532,23 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
 
     // 3. Helper function to assign a target
     const assignTarget = (blocker, availableThreats, logPrefix) => {
+
+        // --- 🛠️ NEW: Define Pocket Depth ---
+        // This is the "set" point for the OL, relative to the LoS
+        const POCKET_DEPTH_PASS = -1.5; // 1.5 yards *behind* the LoS
+        const POCKET_DEPTH_RUN = 0.5;   // 0.5 yards *in front* of the LoS
+        // --- END NEW ---
+
+        const LOS = playState.lineOfScrimmage;
+
         if (availableThreats.length === 0) {
             // No threats left, hold pocket or climb
             blocker.targetX = blocker.initialX;
-            blocker.targetY = blocker.y + (blocker.action === 'run_block' ? 3 : -0.75);
+            // Set to the default pocket depth for their play type
+            blocker.targetY = LOS + (blocker.action === 'run_block' ? POCKET_DEPTH_RUN : POCKET_DEPTH_PASS);
+
             if (blocker.slot.startsWith('OL')) {
-                console.log(`[${logPrefix}] No target chosen. ${blocker.action === 'run_block' ? 'Climbing.' : 'Holding.'}`);
+                console.log(`[${logPrefix}] No target chosen. ${blocker.action === 'run_block' ? 'Climbing.' : 'Holding Pocket.'}`);
             }
             return;
         }
@@ -1546,8 +1557,7 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
         availableThreats.sort((a, b) => getDistance(blocker, a) - getDistance(blocker, b));
         const targetDefender = availableThreats[0];
 
-        // --- 🛠️ NEW: "Aggressive Intercept" Logic ---
-        // Find the defender's ultimate target (the QB on pass plays, or downfield on run plays)
+        // --- 🛠️ REVISED: "Aggressive Intercept" Logic ---
         let defenderGoal;
         if (blocker.action === 'pass_block') {
             defenderGoal = qbState || { x: blocker.x, y: blocker.y - 5 }; // Target QB
@@ -1561,21 +1571,30 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
         const dy = defenderGoal.y - targetDefender.y;
         const dist = Math.max(0.1, Math.sqrt(dx * dx + dy * dy));
 
-        // Set the OL's target to be 1 yard *in front* of the defender, along their path
-        const INTERCEPT_DIST = 1.0; 
-        const interceptX = targetDefender.x - (dx / dist) * INTERCEPT_DIST;
-        const interceptY = targetDefender.y - (dy / dist) * INTERCEPT_DIST;
+        // Calculate the intercept point (1 yard towards the defender's goal)
+        const INTERCEPT_DIST = 1.0;
+        const interceptX = targetDefender.x + (dx / dist) * INTERCEPT_DIST;
+        const interceptY = targetDefender.y + (dy / dist) * INTERCEPT_DIST;
 
-        blocker.targetX = interceptX;
-        blocker.targetY = interceptY;
-        // --- END NEW LOGIC ---
+        // --- 🛠️ THE FIX: Set Target based on Pocket Depth ---
+        blocker.targetX = interceptX; // Always target the intercept X
+
+        if (blocker.action === 'pass_block') {
+            // On a PASS, move to the intercept X, but *at* pocket depth.
+            // This forces the "kick step" backward.
+            blocker.targetY = LOS + POCKET_DEPTH_PASS;
+        } else {
+            // On a RUN, attack the intercept point aggressively.
+            blocker.targetY = interceptY;
+        }
+        // --- END FIX ---
 
         // Mark this defender as "taken"
         olAssignedDefenders.add(targetDefender.id);
 
         if (blocker.slot.startsWith('OL')) {
             console.log(`[${logPrefix}] Chosen Target: ${targetDefender.name} (${targetDefender.slot}) at [${targetDefender.x.toFixed(1)}, ${targetDefender.y.toFixed(1)}]`);
-            console.log(`[${logPrefix}] Moving to INTERCEPT at: [${blocker.targetX.toFixed(1)}, ${blocker.targetY.toFixed(1)}] (Defender's goal: [${defenderGoal.x.toFixed(1)}, ${defenderGoal.y.toFixed(1)}])`);
+            console.log(`[${logPrefix}] Moving to INTERCEPT at: [${blocker.targetX.toFixed(1)}, ${blocker.targetY.toFixed(1)}]`);
         }
     };
 
@@ -1590,10 +1609,10 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
         // Log threats once per tick (for the first OL)
         const firstOL = olBlockers[0];
         if (firstOL.slot.startsWith('OL')) {
-             const logPrefix = `TICK ${playState.tick} | ${firstOL.name} (${firstOL.slot})`;
-             console.log(`--- ${logPrefix} (${firstOL.action.toUpperCase()}) ---`);
-             const threatNames = allThreats.map(d => `${d.slot} (Assign: ${d.assignment})`);
-             console.log(`[${firstOL.slot}] Threats Seen: [${threatNames.join(', ') || 'NONE'}]`);
+            const logPrefix = `TICK ${playState.tick} | ${firstOL.name} (${firstOL.slot})`;
+            console.log(`--- ${logPrefix} (${firstOL.action.toUpperCase()}) ---`);
+            const threatNames = allThreats.map(d => `${d.slot} (Assign: ${d.assignment})`);
+            console.log(`[${firstOL.slot}] Threats Seen: [${threatNames.join(', ') || 'NONE'}]`);
         }
 
         // Assign targets one-by-one
@@ -1754,7 +1773,7 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                     }
                     break; // End case 'route_complete'
 
-                                
+
                 case 'run_path': { // --- Logic for RBs ---
                     const threatDistance = 3.5; // How far to look for immediate threats
                     const visionDistance = 10.0; // How far to look downfield for lanes
