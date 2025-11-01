@@ -2346,6 +2346,7 @@ function checkBlockCollisions(playState) {
                     }
                     blocker.engagedWith = targetDefender.id;
                     blocker.isEngaged = true;
+                    blocker.dynamicTargetId = targetDefender.id;
                     targetDefender.isBlocked = true;
                     targetDefender.blockedBy = blocker.id;
                     targetDefender.isEngaged = true;
