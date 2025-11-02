@@ -3018,7 +3018,7 @@ if (decisionMade) {
         playState.ballState.x = qbState.x; playState.ballState.y = qbState.y;
         gameLog.push(`🏃 ${qbState.name} ${imminentSackDefender ? 'escapes the sack' : 'escapes'} and scrambles!`);
         actionTaken = "Scramble";
-        return;
+       
         // --- END FIX ---
 
     } else {
