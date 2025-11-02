@@ -443,7 +443,7 @@ function updatePlayerPosition(pState, timeDelta) {
     const dy = pState.targetY - pState.y;
     const distToTarget = Math.sqrt(dx * dx + dy * dy);
 
-    // --- 1. 🛠️ NEW: Increased "arrival" radius ---
+    // --- 1. Increased "arrival" radius ---
     // Stop if player is very close to the target.
     // This prevents "vibrating" when trying to reach an exact 0.0 point.
     const ARRIVAL_RADIUS = 0.2;
@@ -454,7 +454,7 @@ function updatePlayerPosition(pState, timeDelta) {
         return;
     }
 
-    // --- 2. 🛠️ NEW: Corrected Speed Formula ---
+    // --- 2. Speed Formula ---
     // This formula creates a faster, tighter speed range (4.5 to 9.0 YPS)
     const MIN_SPEED_YPS = 4.5; // Speed for a 1-stat player
     const MAX_SPEED_YPS = 9.0; // Speed for a 99-stat player
