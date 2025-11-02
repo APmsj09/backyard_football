@@ -1575,8 +1575,8 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                 } else {
                     // No one left to block, just run downfield
                     blocker.dynamicTargetId = null;
-                    blocker.targetX = blocker.x; // Just keep running forward
-                    blocker.targetY = blocker.y + 5; // Target 5 yards upfield
+                    blocker.targetX = defender.x + (defender.vx || 0) * 0.3;
+                    blocker.targetY = defender.y + (defender.vy || 0) * 0.3;
 
                     if (blocker.slot.startsWith('OL')) {
                         console.log(`[${logPrefix}] No threats found. Climbing open field.`);
@@ -1777,11 +1777,11 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                         // Check if target is still valid
                         if (target && !target.isBlocked && !target.isEngaged) {
 
-                            
+
                             // Mirror the defender's X-position.
                             pState.targetX = target.x;
                             pState.targetY = target.y; // Target the defender's current Y
-                           
+
 
                         } else {
                             // --- Target is GONE ---
@@ -2451,24 +2451,27 @@ function checkBlockCollisions(playState) {
 
             // --- "Hitbox" Collision Logic ---
             // Define a "hitbox" for engagement
-            const ENGAGE_X_RANGE = 2.2; // How far sideways (yards)
-            const ENGAGE_Y_RANGE = 2.0; // How far forward/back (yards)
+            const speedFactor = Math.max(blocker.currentSpeedYPS || 1, 1.5);
+            const ENGAGE_X_RANGE = 2.0 + speedFactor * 0.5;
+            const ENGAGE_Y_RANGE = 1.8 + speedFactor * 0.3;
 
-            let defendersInRange = defenseStates.filter(defender => {
-                if (defender.isBlocked || defender.isEngaged ||
-                    // --- 🛠️ FIX #3: Stunned defenders cannot BE engaged ---
-                    (defender.stunnedTicks > 0)) {
-                    // --- END FIX #3 ---
-                    return false;
-                }
+            //const ENGAGE_X_RANGE = 3.0;
+            //const ENGAGE_Y_RANGE = 3.0;
 
-                // Check proximity using separate X and Y "hitboxes"
-                const distY = Math.abs(blocker.y - defender.y);
-                const distX = Math.abs(blocker.x - defender.x);
 
-                return (distX < ENGAGE_X_RANGE) && (distY < ENGAGE_Y_RANGE);
-            });
-            
+            const engagedDefenderIds = offenseStates
+                .filter(o => o.engagedWith)
+                .map(o => o.engagedWith);
+
+            let defendersInRange = defenseStates.filter(d =>
+                !engagedDefenderIds.includes(d.id) &&
+                !d.isBlocked &&
+                !d.isEngaged &&
+                d.stunnedTicks === 0 &&
+                Math.abs(blocker.x - d.x) < ENGAGE_X_RANGE &&
+                Math.abs(blocker.y - d.y) < ENGAGE_Y_RANGE
+            );
+
 
             if (defendersInRange.length > 0) {
                 if (isRunBlock) {
@@ -2643,8 +2646,11 @@ function resolveBattle(powerA, powerB, battle) {
     }
 
     // --- STREAK & DECISION LOGIC (MODIFIED) ---
-    const STREAK_THRESHOLD = 5; // Win/loss decided at +/- 5 (was 12)
-    const WIN_STREAK = 3;       // Require 3 wins in a row (was 2)
+    //const STREAK_THRESHOLD = 8;  // need a more decisive win per tick
+    //const WIN_STREAK = 4;        // require longer dominance
+
+    const diffScale = Math.abs(powerA - powerB) / 50;
+    const STREAK_THRESHOLD = 5 + diffScale;
 
     if (finalDiff > STREAK_THRESHOLD) { // A wins the tick
         battle.streakA++;
