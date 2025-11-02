@@ -1573,10 +1573,14 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                         console.log(`[${logPrefix}] No primary threats. CLIMBING to block ${secondaryTarget.name} (${secondaryTarget.slot})`);
                     }
                 } else {
+                    // --- 🛠️ FIX ---
                     // No one left to block, just run downfield
                     blocker.dynamicTargetId = null;
-                    blocker.targetX = defender.x + (defender.vx || 0) * 0.3;
-                    blocker.targetY = defender.y + (defender.vy || 0) * 0.3;
+                    // 'defender' is not defined here. The goal is to climb
+                    // to the open field. We'll set the target downfield.
+                    blocker.targetX = blocker.initialX; // Stay in your lane
+                    blocker.targetY = blocker.y + 7;    // and run 7 yards downfield
+                    // --- END FIX ---
 
                     if (blocker.slot.startsWith('OL')) {
                         console.log(`[${logPrefix}] No threats found. Climbing open field.`);
