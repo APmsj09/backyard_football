@@ -3159,7 +3159,7 @@ if (decisionMade) {
     qbState.targetX = qbState.x + pressureDirX * 1.5; // Step away from pressure
     qbState.targetY = qbState.y - 0.3; // Slight drift back/shuffle
 }
-}
+
 
 /**
  * Handles ball arrival at target coordinates. (MODIFIED)
