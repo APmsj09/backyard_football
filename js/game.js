@@ -1697,8 +1697,20 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
         }
 
         if (pState.isOffense && pState.isEngaged) {
-            // resolveOngoingBlocks() will set their targetX/Y to follow the defender.
-            // We must NOT run the switch logic below, or it will override the target.
+            const engagedDefender = defenseStates.find(d => d.id === pState.engagedWith);
+
+            if (engagedDefender) {
+                // Target the defender's current position to "stick" to them
+                pState.targetX = engagedDefender.x;
+                pState.targetY = engagedDefender.y;
+            } else {
+                // Defender is gone? (Shouldn't happen, but good fallback)
+                pState.isEngaged = false; // Break the engagement
+                pState.engagedWith = null;
+            }
+
+            // We MUST return here to skip the 'switch (pState.action)' logic,
+            // which would override our target (e.g., 'pass_block' case).
             return;
         }
 
@@ -2778,12 +2790,6 @@ function resolveOngoingBlocks(playState, gameLog) {
             defenderState.isBlocked = false; defenderState.blockedBy = null; defenderState.isEngaged = false;
             battlesToRemove.push(index);
 
-        } else {
-            // --- Outcome 3: Battle is 'ongoing' ---
-            // (This now covers minor wins, minor losses, and draws)
-            // The battle continues. Blocker adjusts to mirror the defender.
-            blockerState.targetX = defenderState.x;
-            blockerState.targetY = defenderState.y;
         }
     });
 
