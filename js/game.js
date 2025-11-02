@@ -1597,24 +1597,46 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
             // --- END NEW LOGIC ---
         }
 
-        // Find the closest available threat
-        availableThreats.sort((a, b) => getDistance(blocker, a) - getDistance(blocker, b));
-        const targetDefender = availableThreats[0];
+        // --- 🛠️ THIS IS THE NEW "LANE-BASED" LOGIC ---
+        // It replaces your old "Find the closest available threat" logic.
 
-        // --- All "Aggressive Intercept" and vector logic ---
+        const BLOCKING_LANE_WIDTH = 2.0; // How many yards to each side of the OL's center
 
-        // --- Set the DYNAMIC target ID ---
-        // We no longer set targetX/Y here. We just assign the ID.
-        // The main game loop will handle the dynamic X/Y coordinates.
+        // 1. Find "Primary Threats" (Defenders directly in the OL's lane)
+        //    We use 'initialX' to define the lane, not the player's current 'x'.
+        const primaryThreats = availableThreats.filter(d =>
+            Math.abs(d.x - blocker.initialX) < BLOCKING_LANE_WIDTH
+        );
+
+        let targetDefender = null;
+
+        if (primaryThreats.length > 0) {
+            // 2a. Found a threat in our lane. Sort them by distance and take the closest.
+            primaryThreats.sort((a, b) => getDistance(blocker, a) - getDistance(blocker, b));
+            targetDefender = primaryThreats[0];
+
+            if (blocker.slot.startsWith('OL')) {
+                console.log(`[${logPrefix}] Primary Target (in lane): ${targetDefender.name} (${targetDefender.slot})`);
+            }
+        } else {
+            // 2b. No one in our lane. "Help Out" logic.
+            // Look for the closest unblocked defender to "help."
+            availableThreats.sort((a, b) => getDistance(blocker, a) - getDistance(blocker, b));
+            targetDefender = availableThreats[0];
+
+            if (blocker.slot.startsWith('OL')) {
+                console.log(`[${logPrefix}] No threat in lane. Helping on closest: ${targetDefender.name} (${targetDefender.slot})`);
+            }
+        }
+        // --- END NEW "LANE-BASED" LOGIC ---
         blocker.dynamicTargetId = targetDefender.id;
-        // --- END FIX ---
+
 
         // Mark this defender as "taken"
         olAssignedDefenders.add(targetDefender.id);
 
         if (blocker.slot.startsWith('OL')) {
             console.log(`[${logPrefix}] Chosen Target: ${targetDefender.name} (${targetDefender.slot}) at [${targetDefender.x.toFixed(1)}, ${targetDefender.y.toFixed(1)}]`);
-            // --- ⛔ REMOVED: The "Moving to INTERCEPT" log ---
         }
     };
 
@@ -2316,9 +2338,23 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                     // --- 2. "SMART PURSUIT" LOGIC (FOR BALL CARRIER or any non-Man-Coverage defender) ---
                     // This now handles all defensive pursuit of any player (like a scrambling QB).
 
-                    if (pState.y < target.y) {
+                    // --- "IN FRONT" LOGIC ---
+                    let isDefenderInFront;
+                    if (target.isOffense) {
+                        // Offense is running towards HIGH Y (end zone at 110-120)
+                        // "In front" means the defender has a HIGHER Y value.
+                        isDefenderInFront = pState.y > target.y;
+                    } else {
+                        // Defense is running towards LOW Y (end zone at 0-10) after an INT
+                        // "In front" means the defender has a LOWER Y value.
+                        isDefenderInFront = pState.y < target.y;
+                    }
+                   
+
+
+                    if (isDefenderInFront) {
                         // --- A. I AM IN FRONT of the target (e.g., Safety) ---
-                        // Attack their current position. Fixes the "running backwards" bug.
+                        // Attack their current position. This makes the safety "come downhill".
                         pState.targetX = target.x;
                         pState.targetY = target.y;
                     } else {
@@ -2399,7 +2435,6 @@ function checkBlockCollisions(playState) {
             // --- ⛔ OLD 'getDistance' CODE REMOVED ---
 
             if (defendersInRange.length > 0) {
-                // --- (Your existing sorting logic is good) ---
                 if (isRunBlock) {
                     defendersInRange = defendersInRange.filter(d =>
                         d.y > blocker.y || d.y >= playState.lineOfScrimmage - 0.5
