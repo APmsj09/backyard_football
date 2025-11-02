@@ -1746,7 +1746,7 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                         const target = defenseStates.find(d => d.id === pState.dynamicTargetId);
 
                         // Check if target is still valid (exists and isn't already blocked by someone else)
-                        if (target && !target.isBlocked && !target.isEngaged) {
+                        if (target && (target.blockedBy === null || target.blockedBy === pState.id)) {
                             // --- Target is valid: DYNAMICALLY UPDATE ---
                             // Target the defender's CURRENT X position.
                             // Target our static pocket Y depth.
@@ -1775,7 +1775,7 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                         const target = defenseStates.find(d => d.id === pState.dynamicTargetId);
 
                         // Check if target is still valid
-                        if (target && !target.isBlocked && !target.isEngaged) {
+                        if (target && (target.blockedBy === null || target.blockedBy === pState.id)) {
 
 
                             // Mirror the defender's X-position.
@@ -2451,12 +2451,12 @@ function checkBlockCollisions(playState) {
 
             // --- "Hitbox" Collision Logic ---
             // Define a "hitbox" for engagement
-            const speedFactor = Math.max(blocker.currentSpeedYPS || 1, 1.5);
-            const ENGAGE_X_RANGE = 2.0 + speedFactor * 0.5;
-            const ENGAGE_Y_RANGE = 1.8 + speedFactor * 0.3;
+            //const speedFactor = Math.max(blocker.currentSpeedYPS || 1, 1.5);
+            //const ENGAGE_X_RANGE = 2.0 + speedFactor * 0.5;
+            //const ENGAGE_Y_RANGE = 1.8 + speedFactor * 0.3;
 
-            //const ENGAGE_X_RANGE = 3.0;
-            //const ENGAGE_Y_RANGE = 3.0;
+            const ENGAGE_X_RANGE = 3.0;
+            const ENGAGE_Y_RANGE = 3.0;
 
 
             const engagedDefenderIds = offenseStates
@@ -2646,11 +2646,11 @@ function resolveBattle(powerA, powerB, battle) {
     }
 
     // --- STREAK & DECISION LOGIC (MODIFIED) ---
-    //const STREAK_THRESHOLD = 8;  // need a more decisive win per tick
-    //const WIN_STREAK = 4;        // require longer dominance
+    const STREAK_THRESHOLD = 8;  // need a more decisive win per tick
+    const WIN_STREAK = 4;        // require longer dominance
 
-    const diffScale = Math.abs(powerA - powerB) / 50;
-    const STREAK_THRESHOLD = 5 + diffScale;
+    //const diffScale = Math.abs(powerA - powerB) / 50;
+    //const STREAK_THRESHOLD = 5 + diffScale;
 
     if (finalDiff > STREAK_THRESHOLD) { // A wins the tick
         battle.streakA++;
