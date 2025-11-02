@@ -1697,6 +1697,13 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
             pState.targetX = pState.x; pState.targetY = pState.y;
             return;
         }
+
+        if (pState.isOffense && pState.isEngaged) {
+            // resolveOngoingBlocks() will set their targetX/Y to follow the defender.
+            // We must NOT run the switch logic below, or it will override the target.
+            return;
+        }
+
         // --- NEW: Receiver Ball-in-Air Logic ---
         if (pState.isOffense && !pState.hasBall && !pState.isBallCarrier) {
 
