@@ -1771,38 +1771,44 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                     break;
 
                 case 'run_block':
-                    if (pState.dynamicTargetId) {
-                        const target = defenseStates.find(d => d.id === pState.dynamicTargetId);
+                        if (pState.dynamicTargetId) {
+                            const target = defenseStates.find(d => d.id === pState.dynamicTargetId);
 
-                        // Check if target is still valid
-                        if (target && !target.isBlocked && !target.isEngaged) {
-                            // --- Target is valid: DYNAMICALLY UPDATE ---
+                            // Check if target is still valid
+                            if (target && !target.isBlocked && !target.isEngaged) {
+                                // --- Target is valid: DYNAMICALLY UPDATE ---
 
-                            // --- 🛠️ THE FIX ---
-                            // Mirror the defender's X-position.
-                            pState.targetX = target.x;
+                                // --- 🛠️ THE FIX: Create a "WALL" ---
+                                // Mirror the defender's X-position.
+                                pState.targetX = target.x; 
+                                // Set an aggressive "wall" at the run blocking depth.
+                                pState.targetY = LOS + POCKET_DEPTH_RUN;
+                                // --- ⛔ OLD "CHASE" CODE REMOVED ---
 
-                            // Set an aggressive "wall" at the run blocking depth
-                            // (0.5 yards *past* the LoS). This forces a collision.
-                            pState.targetY = LOS + POCKET_DEPTH_RUN;
-                            // --- ⛔ OLD "CHASE" CODE REMOVED ---
-                            // pState.targetY = target.y; 
-                            // --- END FIX ---
-
-                        } else {
-                            // --- Target is GONE ---
-                            pState.dynamicTargetId = null;
-                            // Revert to the "climb" assignment (which also
-                            // targets the run pocket depth, so this is consistent)
-                            pState.targetX = pState.initialX;
-                            pState.targetY = LOS + POCKET_DEPTH_RUN;
+                            } else {
+                                // --- Target is GONE ---
+                                pState.dynamicTargetId = null;
+                                // Revert to the "climb" assignment
+                                pState.targetX = pState.initialX;
+                                pState.targetY = LOS + POCKET_DEPTH_RUN;
+                            }
                         }
-                    }
-                    // else: dynamicTargetId is null.
-                    // 'assignTarget' set us to a static "climb" spot.
-                    // pState.targetX/Y are already correct. Do nothing.
+                        // else: dynamicTargetId is null (already set by assignTarget)
+                        target = null; // Prevent falling into defensive pursuit logic
+                        break;
 
-                    target = null; // Prevent falling into defensive pursuit logic
+                case 'pursuit':
+                    // This is for offense after a turnover.
+                    // Their goal is to tackle the new ball carrier.
+                    if (ballCarrierState && !ballCarrierState.isOffense) {
+                        // Target the (defensive) ball carrier
+                        target = ballCarrierState;
+                    } else {
+                        // No carrier, or carrier is on offense (play is broken), just stop
+                        pState.targetX = pState.x;
+                        pState.targetY = pState.y;
+                        target = null;
+                    }
                     break;
 
                 case 'route_complete':
@@ -1997,394 +2003,428 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
         }
         // --- Defensive Logic ---
         else {
-            const assignment = pState.assignment;
-            // Each defender diagnoses the play individually based on IQ
-            const diagnosedPlayType = diagnosePlay(pState, playType, offensivePlayKey, playState.tick);
-            // diagnosedPlayType will now be 'run', 'pass', or 'read'
+            // --- 🛠️ NEW: Check if DEFENDER is the ball carrier ---
+            if (pState.isBallCarrier) {
+                // This player has the ball (after an INT).
+                // Use the same "run_path" logic as the RB, but run towards Y=0 (the other end zone).
+                const visionDistance = 10.0;
+                const lanes = [-5, 0, 5];
+                const DOWNHILL_BONUS = 1.5; // Bonus for running straight
+                let bestLane = { xOffset: 0, minDist: -Infinity };
 
-            switch (true) {
-                case assignment?.startsWith('man_cover_'): { // Added brackets for new scope
-                    const targetSlot = assignment.split('man_cover_')[1];
-                    const assignedReceiver = offenseStates.find(o => o.slot === targetSlot);
+                lanes.forEach(xOffset => {
+                    const lookAheadPoint = { x: pState.x + xOffset, y: pState.y - visionDistance }; // Run towards Y=0
 
-                    if (!assignedReceiver) {
-                        // ... (your existing fallback logic is fine)
-                        pState.assignment = 'zone_hook_curl_middle';
-                        target = getZoneCenter('zone_hook_curl_middle', playState.lineOfScrimmage);
-                        break;
+                    // Look for *offensive* players (who are now blockers)
+                    const closestBlockerToLane = offenseStates
+                        .filter(o => !o.isBlocked && !o.isEngaged)
+                        .sort((a, b) => getDistance(lookAheadPoint, a) - getDistance(lookAheadPoint, b))[0];
+
+                    let dist = closestBlockerToLane ? getDistance(lookAheadPoint, closestBlockerToLane) : 100;
+                    if (xOffset === 0) dist += DOWNHILL_BONUS; // Add bonus for running straight
+
+                    if (dist > bestLane.minDist) {
+                        bestLane.minDist = dist;
+                        bestLane.xOffset = xOffset;
                     }
+                });
 
-                    // --- 🛠️ CORRECTED RUN/PASS READ LOGIC ---
-                    const isRunPlay = (diagnosedPlayType === 'run' || (ballCarrierState && ballCarrierState.y > playState.lineOfScrimmage));
-                    const isSafety = pState.slot.startsWith('DB') && (pState.initialY > playState.lineOfScrimmage + 7); // Is this a deep safety?
+                pState.targetY = Math.max(0.5, pState.y - visionDistance); // Set target Y towards Y=0
+                pState.targetX = pState.x + bestLane.xOffset;
 
-                    if (isBallInAir) {
-                        // --- Ball is in the Air ---
-                        if (playState.ballState.targetPlayerId === assignedReceiver.id || getDistance(pState, { x: playState.ballState.targetX, y: playState.ballState.targetY }) < 15) {
-                            // Target the ball's landing spot
-                            target = { x: playState.ballState.targetX, y: playState.ballState.targetY };
+                // We have set the target, so skip all other defensive AI for this player.
+                // We do this by wrapping the entire rest of the defensive logic in an 'else' block.
+            } else {
+                const assignment = pState.assignment;
+                // Each defender diagnoses the play individually based on IQ
+                const diagnosedPlayType = diagnosePlay(pState, playType, offensivePlayKey, playState.tick);
+                // diagnosedPlayType will now be 'run', 'pass', or 'read'
+
+
+                switch (true) {
+                    case assignment?.startsWith('man_cover_'): { // Added brackets for new scope
+                        const targetSlot = assignment.split('man_cover_')[1];
+                        const assignedReceiver = offenseStates.find(o => o.slot === targetSlot);
+
+                        if (!assignedReceiver) {
+                            // ... (your existing fallback logic is fine)
+                            pState.assignment = 'zone_hook_curl_middle';
+                            target = getZoneCenter('zone_hook_curl_middle', playState.lineOfScrimmage);
+                            break;
+                        }
+
+                        // --- 🛠️ CORRECTED RUN/PASS READ LOGIC ---
+                        const isRunPlay = (diagnosedPlayType === 'run' || (ballCarrierState && ballCarrierState.y > playState.lineOfScrimmage));
+                        const isSafety = pState.slot.startsWith('DB') && (pState.initialY > playState.lineOfScrimmage + 7); // Is this a deep safety?
+
+                        if (isBallInAir) {
+                            // --- Ball is in the Air ---
+                            if (playState.ballState.targetPlayerId === assignedReceiver.id || getDistance(pState, { x: playState.ballState.targetX, y: playState.ballState.targetY }) < 15) {
+                                // Target the ball's landing spot
+                                target = { x: playState.ballState.targetX, y: playState.ballState.targetY };
+                            } else {
+                                // Ball thrown elsewhere, stick to receiver
+                                target = assignedReceiver;
+                            }
+                        } else if (isRunPlay && ballCarrierState) {
+                            // --- ✳️ NEW: It's a Run Play! ---
+
+                            // Safeties in man-coverage play "run support" and wait for the
+                            // runner to cross the LoS.
+                            if (isSafety && ballCarrierState.y < playState.lineOfScrimmage + 5) {
+                                // Runner is still bottled up, hold position
+                                target = pState;
+                            } else {
+                                // Cornerbacks and LBs in man-coverage must "shed" their
+                                // receiver and attack the run.
+                                target = ballCarrierState;
+                            }
                         } else {
-                            // Ball thrown elsewhere, stick to receiver
+                            // --- Ball is NOT in the Air (Pass Play) ---
+                            // Continue with your existing man-coverage logic
                             target = assignedReceiver;
                         }
-                    } else if (isRunPlay && ballCarrierState) {
-                        // --- ✳️ NEW: It's a Run Play! ---
-
-                        // Safeties in man-coverage play "run support" and wait for the
-                        // runner to cross the LoS.
-                        if (isSafety && ballCarrierState.y < playState.lineOfScrimmage + 5) {
-                            // Runner is still bottled up, hold position
-                            target = pState;
-                        } else {
-                            // Cornerbacks and LBs in man-coverage must "shed" their
-                            // receiver and attack the run.
-                            target = ballCarrierState;
-                        }
-                    } else {
-                        // --- Ball is NOT in the Air (Pass Play) ---
-                        // Continue with your existing man-coverage logic
-                        target = assignedReceiver;
-                    }
-                    break; // Go to the main pursuit logic
-                }
-
-                case assignment?.startsWith('zone_'):
-                    const zoneCenter = getZoneCenter(assignment, playState.lineOfScrimmage);
-                    let targetThreat = null; // Will hold a player object if we target one
-                    let targetPoint = zoneCenter; // Default target is the zone's center
-                    const landingSpot = { x: playState.ballState.targetX, y: playState.ballState.targetY };
-
-                    const isDeepZone = assignment.includes('deep');
-
-                    // Find all receivers currently in this defender's zone
-                    const threatsInZone = offenseStates.filter(o =>
-                        (o.action === 'run_route' || o.action === 'route_complete') &&
-                        isPlayerInZone(o, assignment, playState.lineOfScrimmage)
-                    );
-
-                    // --- 1. React to Ball in Air ---
-                    // Check if the ball is thrown into this defender's zone
-
-                    if (isBallInAir && isPlayerInZone(landingSpot, assignment, playState.lineOfScrimmage)) {
-                        // --- FIX: Target the landing spot, not the current position ---
-                        target = landingSpot;
-                        break;
+                        break; // Go to the main pursuit logic
                     }
 
-                    // --- 2. React to Run Play ---
-                    // Check if it's a run (after a few ticks) OR if the carrier is already past the LoS
-                    const isRunPlay = (diagnosedPlayType === 'run' || (ballCarrierState && ballCarrierState.y > playState.lineOfScrimmage));
-                    const isQBScramble = qbState && (qbState.action === 'qb_scramble' || qbState.y > playState.lineOfScrimmage + 1);
+                    case assignment?.startsWith('zone_'):
+                        const zoneCenter = getZoneCenter(assignment, playState.lineOfScrimmage);
+                        let targetThreat = null; // Will hold a player object if we target one
+                        let targetPoint = zoneCenter; // Default target is the zone's center
+                        const landingSpot = { x: playState.ballState.targetX, y: playState.ballState.targetY };
 
-                    if ((isRunPlay || isQBScramble) && ballCarrierState) {
-                        if (!isDeepZone) {
-                            // --- Underneath Zone Run Support ---
-                            // If the carrier is in/near my zone, my job is to stop the run.
-                            if (isPlayerInZone(ballCarrierState, assignment, playState.lineOfScrimmage) ||
-                                getDistance(pState, ballCarrierState) < 8.0) { // Or if they are just close by
-                                targetThreat = ballCarrierState; // Target the runner
-                            }
-                        } else {
-                            // --- Deep Zone Run Support (Safety) ---
-                            // Only attack the run if the carrier gets past the LBs (e.g., 7+ yards)
-                            if (ballCarrierState.y > playState.lineOfScrimmage + 7) {
-                                targetThreat = ballCarrierState; // Come up and make the tackle
-                            }
-                        }
-                    }
+                        const isDeepZone = assignment.includes('deep');
 
-                    // --- 3. React to Passing Threats (If not playing the run) ---
-                    if (!targetThreat && threatsInZone.length > 0) {
-                        if (threatsInZone.length === 1) {
-                            // --- One receiver in zone ---
-                            // Target the only threat.
-                            targetThreat = threatsInZone[0];
-
-                        } else {
-                            // --- Multiple receivers in zone: "Split the difference" ---
-                            // Find the deepest threat and the closest threat to "bracket" them.
-                            const deepestThreat = threatsInZone.sort((a, b) => b.y - a.y)[0];
-                            const closestThreat = threatsInZone.sort((a, b) => getDistance(pState, a) - getDistance(pState, b))[0];
-
-                            // Target a point halfway between the deepest and closest threats
-                            // This keeps the defender in a position to react to either.
-                            targetPoint = {
-                                x: (deepestThreat.x + closestThreat.x) / 2,
-                                y: (deepestThreat.y + closestThreat.y) / 2
-                            };
-                        }
-
-                    } else if (!targetThreat && threatsInZone.length === 0 && assignment.startsWith('zone_flat_')) {
-                        // No one is in the flat. Look for a vertical threat to "sink" under.
-                        const verticalThreat = offenseStates.find(o =>
+                        // Find all receivers currently in this defender's zone
+                        const threatsInZone = offenseStates.filter(o =>
                             (o.action === 'run_route' || o.action === 'route_complete') &&
-                            o.y > pState.y + 5 && // Threat is deeper than us
-                            getDistance(pState, o) < 15 // And in our general area
+                            isPlayerInZone(o, assignment, playState.lineOfScrimmage)
                         );
 
-                        if (verticalThreat) {
-                            // "Sink" with the vertical route, but stay shallow
-                            const sinkDepth = Math.min(verticalThreat.y, pState.initialY + 7); // Don't sink more than 7 yards
-                            target = { x: pState.x, y: sinkDepth };
-                        }
-                        // If no vertical threat, the default target (zoneCenter) remains
-                    }
+                        // --- 1. React to Ball in Air ---
+                        // Check if the ball is thrown into this defender's zone
 
-                    // --- 4. Set Final Target ---
-                    if (targetThreat) {
-                        // If we identified a specific player to target (runner or receiver)...
-                        target = targetThreat; // Set the target as the player object
-                    } else {
-                        // Otherwise, target the calculated point (Zone Center or Split-Difference point)
-                        target = targetPoint;
-                    }
-
-                    break; // Go to the main pursuit logic at the end of the function
-
-                case assignment === 'pass_rush':
-                case assignment === 'blitz_gap':
-                case assignment === 'blitz_edge':
-
-                    // --- 🛠️ NEW, RE-ORDERED LOGIC ---
-
-                    // 1. Highest Priority: Ball is in the air.
-                    if (isBallInAir) {
-                        // Ball is thrown! Abort rush and play the ball's landing spot.
-                        target = { x: ballPos.targetX, y: ballPos.targetY };
-
-                        // 2. Second Priority: Ball is on the ground (completed pass or handoff).
-                        //    (Check for ballCarrierState *before* checking qbState)
-                    } else if (ballCarrierState && ballCarrierState.id !== qbState?.id) {
-                        // It's a run play, OR a completed pass. 
-                        // The ball carrier is NOT the QB. Attack the carrier.
-                        target = ballCarrierState;
-
-                        // 3. Third Priority: It's a diagnosed run (and the carrier might be the QB)
-                    } else if (diagnosedPlayType === 'run' && ballCarrierState) {
-                        // It's a run! Pursue carrier.
-                        target = ballCarrierState;
-
-                        // 4. Fourth Priority: It's a pass play, ball hasn't been thrown.
-                    } else if (qbState) {
-                        // Diagnosed PASS or STILL READING: Rush the QB.
-                        target = qbState;
-
-                        // Blocker-avoidance logic
-                        const blockerInPath = offenseStates.find(o => !o.engagedWith && getDistance(pState, o) < 2.0 && Math.abs(o.x - pState.x) < 1.0 && ((pState.y < o.y && o.y < (target?.y || pState.y + 5)) || (pState.y > o.y && o.y > (target?.y || pState.y - 5))));
-                        if (blockerInPath) {
-                            const avoidOffset = (pState.x > blockerInPath.x) ? 1.0 : -1.0;
-                            target = { x: pState.x + avoidOffset * 2, y: qbState.y };
+                        if (isBallInAir && isPlayerInZone(landingSpot, assignment, playState.lineOfScrimmage)) {
+                            // --- FIX: Target the landing spot, not the current position ---
+                            target = landingSpot;
+                            break;
                         }
 
-                        // 5. Fallback
-                    } else {
-                        // QB is gone or no QB state (should be caught by ballCarrierState check, but good to have)
-                        target = null;
-                    }
-                    break;
+                        // --- 2. React to Run Play ---
+                        // Check if it's a run (after a few ticks) OR if the carrier is already past the LoS
+                        const isRunPlay = (diagnosedPlayType === 'run' || (ballCarrierState && ballCarrierState.y > playState.lineOfScrimmage));
+                        const isQBScramble = qbState && (qbState.action === 'qb_scramble' || qbState.y > playState.lineOfScrimmage + 1);
 
-                case assignment?.startsWith('run_gap_'):
-                case assignment?.startsWith('run_edge_'):
+                        if ((isRunPlay || isQBScramble) && ballCarrierState) {
+                            if (!isDeepZone) {
+                                // --- Underneath Zone Run Support ---
+                                // If the carrier is in/near my zone, my job is to stop the run.
+                                if (isPlayerInZone(ballCarrierState, assignment, playState.lineOfScrimmage) ||
+                                    getDistance(pState, ballCarrierState) < 8.0) { // Or if they are just close by
+                                    targetThreat = ballCarrierState; // Target the runner
+                                }
+                            } else {
+                                // --- Deep Zone Run Support (Safety) ---
+                                // Only attack the run if the carrier gets past the LBs (e.g., 7+ yards)
+                                if (ballCarrierState.y > playState.lineOfScrimmage + 7) {
+                                    targetThreat = ballCarrierState; // Come up and make the tackle
+                                }
+                            }
+                        }
 
-                    // --- 🛠️ NEW, RE-ORDERED LOGIC ---
+                        // --- 3. React to Passing Threats (If not playing the run) ---
+                        if (!targetThreat && threatsInZone.length > 0) {
+                            if (threatsInZone.length === 1) {
+                                // --- One receiver in zone ---
+                                // Target the only threat.
+                                targetThreat = threatsInZone[0];
 
-                    // 1. Ball in air?
-                    if (isBallInAir) {
-                        // Ball is thrown, abort gap assignment
-                        target = { x: ballPos.targetX, y: ballPos.targetY };
+                            } else {
+                                // --- Multiple receivers in zone: "Split the difference" ---
+                                // Find the deepest threat and the closest threat to "bracket" them.
+                                const deepestThreat = threatsInZone.sort((a, b) => b.y - a.y)[0];
+                                const closestThreat = threatsInZone.sort((a, b) => getDistance(pState, a) - getDistance(pState, b))[0];
 
-                        // 2. Ball on ground? (Handoff or Completed Pass)
-                    } else if (ballCarrierState && ballCarrierState.id !== qbState?.id) {
-                        // It's a completed pass or a handoff. Attack the carrier.
-                        target = ballCarrierState;
+                                // Target a point halfway between the deepest and closest threats
+                                // This keeps the defender in a position to react to either.
+                                targetPoint = {
+                                    x: (deepestThreat.x + closestThreat.x) / 2,
+                                    y: (deepestThreat.y + closestThreat.y) / 2
+                                };
+                            }
 
-                        // 3. Diagnosed pass, ball still in QB's hands?
-                    } else if (diagnosedPlayType === 'pass') {
-                        // It's a pass, but not yet thrown (or it's a QB scramble).
-                        // Convert to pass rush.
-                        pState.action = 'pass_rush';
-                        target = qbState; // Target QB
+                        } else if (!targetThreat && threatsInZone.length === 0 && assignment.startsWith('zone_flat_')) {
+                            // No one is in the flat. Look for a vertical threat to "sink" under.
+                            const verticalThreat = offenseStates.find(o =>
+                                (o.action === 'run_route' || o.action === 'route_complete') &&
+                                o.y > pState.y + 5 && // Threat is deeper than us
+                                getDistance(pState, o) < 15 // And in our general area
+                            );
 
-                        // 4. Diagnosed run (or still reading)?
-                    } else {
-                        // It's a run OR STILL READING: Attack gap, then carrier.
-                        const runTargetPoint = zoneBoundaries[assignment];
-                        const ballSnapX = offenseStates.find(p => p.slot === 'OL2')?.initialX || CENTER_X;
-                        target = runTargetPoint ? { x: ballSnapX + (runTargetPoint.xOffset || 0), y: playState.lineOfScrimmage + (runTargetPoint.yOffset || 0) } : { x: pState.x, y: pState.y };
+                            if (verticalThreat) {
+                                // "Sink" with the vertical route, but stay shallow
+                                const sinkDepth = Math.min(verticalThreat.y, pState.initialY + 7); // Don't sink more than 7 yards
+                                target = { x: pState.x, y: sinkDepth };
+                            }
+                            // If no vertical threat, the default target (zoneCenter) remains
+                        }
 
-                        if (ballCarrierState && getDistance(pState, ballCarrierState) < 6) {
+                        // --- 4. Set Final Target ---
+                        if (targetThreat) {
+                            // If we identified a specific player to target (runner or receiver)...
+                            target = targetThreat; // Set the target as the player object
+                        } else {
+                            // Otherwise, target the calculated point (Zone Center or Split-Difference point)
+                            target = targetPoint;
+                        }
+
+                        break; // Go to the main pursuit logic at the end of the function
+
+                    case assignment === 'pass_rush':
+                    case assignment === 'blitz_gap':
+                    case assignment === 'blitz_edge':
+
+                        // --- 🛠️ NEW, RE-ORDERED LOGIC ---
+
+                        // 1. Highest Priority: Ball is in the air.
+                        if (isBallInAir) {
+                            // Ball is thrown! Abort rush and play the ball's landing spot.
+                            target = { x: ballPos.targetX, y: ballPos.targetY };
+
+                            // 2. Second Priority: Ball is on the ground (completed pass or handoff).
+                            //    (Check for ballCarrierState *before* checking qbState)
+                        } else if (ballCarrierState && ballCarrierState.id !== qbState?.id) {
+                            // It's a run play, OR a completed pass. 
+                            // The ball carrier is NOT the QB. Attack the carrier.
                             target = ballCarrierState;
-                        }
-                    }
-                    break;
 
-                case 'spy_QB':
-                    // --- 🛠️ FIX: Check for run diagnosis first ---
-                    if (diagnosedPlayType === 'run' && ballCarrierState) {
-                        // --- Diagnosed RUN: Abort spy and attack ---
-                        target = ballCarrierState;
+                            // 3. Third Priority: It's a diagnosed run (and the carrier might be the QB)
+                        } else if (diagnosedPlayType === 'run' && ballCarrierState) {
+                            // It's a run! Pursue carrier.
+                            target = ballCarrierState;
 
-                    } else if (qbState) { // Continue with original logic if it's a pass/read
-                        // Check if QB is scrambling 
-                        if (qbState.action === 'qb_scramble' || qbState.y > playState.lineOfScrimmage + 1) {
-                            // --- QB IS SCRAMBLING ---
+                            // 4. Fourth Priority: It's a pass play, ball hasn't been thrown.
+                        } else if (qbState) {
+                            // Diagnosed PASS or STILL READING: Rush the QB.
                             target = qbState;
+
+                            // Blocker-avoidance logic
+                            const blockerInPath = offenseStates.find(o => !o.engagedWith && getDistance(pState, o) < 2.0 && Math.abs(o.x - pState.x) < 1.0 && ((pState.y < o.y && o.y < (target?.y || pState.y + 5)) || (pState.y > o.y && o.y > (target?.y || pState.y - 5))));
+                            if (blockerInPath) {
+                                const avoidOffset = (pState.x > blockerInPath.x) ? 1.0 : -1.0;
+                                target = { x: pState.x + avoidOffset * 2, y: qbState.y };
+                            }
+
+                            // 5. Fallback
                         } else {
-                            // --- QB IS IN POCKET ---
-                            const spyDepth = 8;
-                            target = { x: qbState.x, y: qbState.y + spyDepth };
+                            // QB is gone or no QB state (should be caught by ballCarrierState check, but good to have)
+                            target = null;
                         }
-                    } else {
-                        // --- QB IS GONE ---
-                        target = getZoneCenter('zone_hook_curl_middle', playState.lineOfScrimmage);
-                    }
-                    break;
-                // --- >>> NEW/IMPROVED CASES <<< ---
+                        break;
 
-                case 'run_support': // e.g., Safety coming downhill
-                    if (diagnosedPlayType === 'run' && ballCarrierState) {
-                        // --- ACTION: Attack Run ---
-                        // 🛠️ FIX: Target the carrier's *current* X/Y coordinates.
-                        // This makes the target a fixed point, bypassing the lead-pursuit logic.
-                        target = { x: ballCarrierState.x, y: ballCarrierState.y };
-                    } else if (isBallInAir) {
-                        // --- ACTION: Play Pass Defense (Ball is in the air) ---
-                        // Check if the ball is thrown somewhat close by
-                        if (getDistance(pState, ballPos) < 15) {
-                            target = { x: playState.ballState.targetX, y: playState.ballState.targetY };
+                    case assignment?.startsWith('run_gap_'):
+                    case assignment?.startsWith('run_edge_'):
+
+                        // --- 🛠️ NEW, RE-ORDERED LOGIC ---
+
+                        // 1. Ball in air?
+                        if (isBallInAir) {
+                            // Ball is thrown, abort gap assignment
+                            target = { x: ballPos.targetX, y: ballPos.targetY };
+
+                            // 2. Ball on ground? (Handoff or Completed Pass)
+                        } else if (ballCarrierState && ballCarrierState.id !== qbState?.id) {
+                            // It's a completed pass or a handoff. Attack the carrier.
+                            target = ballCarrierState;
+
+                            // 3. Diagnosed pass, ball still in QB's hands?
+                        } else if (diagnosedPlayType === 'pass') {
+                            // It's a pass, but not yet thrown (or it's a QB scramble).
+                            // Convert to pass rush.
+                            pState.action = 'pass_rush';
+                            target = qbState; // Target QB
+
+                            // 4. Diagnosed run (or still reading)?
                         } else {
-                            // Ball is thrown deep/elsewhere, drop to default deep middle zone
-                            target = getZoneCenter('zone_deep_middle', playState.lineOfScrimmage);
+                            // It's a run OR STILL READING: Attack gap, then carrier.
+                            const runTargetPoint = zoneBoundaries[assignment];
+                            const ballSnapX = offenseStates.find(p => p.slot === 'OL2')?.initialX || CENTER_X;
+                            target = runTargetPoint ? { x: ballSnapX + (runTargetPoint.xOffset || 0), y: playState.lineOfScrimmage + (runTargetPoint.yOffset || 0) } : { x: pState.x, y: pState.y };
+
+                            if (ballCarrierState && getDistance(pState, ballCarrierState) < 6) {
+                                target = ballCarrierState;
+                            }
                         }
-                    } else {
-                        // --- ACTION: Read Play (Ball not in air, not a run) ---
-                        // Hold position, slightly deeper than an LB, ready to react
-                        target = { x: pState.x, y: pState.y + 0.2 };
-                    }
-                    break; // Go to pursuit logic
+                        break;
 
-                case 'fill_run': // e.g., LB reading the play
-                    if (diagnosedPlayType === 'run' && ballCarrierState) {
-                        // --- ACTION: Attack Run ---
-                        // 🛠️ FIX: Target the carrier's *current* X/Y coordinates.
-                        target = { x: ballCarrierState.x, y: ballCarrierState.y };
-                    } else if (diagnosedPlayType === 'pass') { // <<< USE playType
-                        // --- ACTION: Drop to Zone ---
-                        pState.assignment = 'zone_hook_curl_middle';
-                        target = getZoneCenter('zone_hook_curl_middle', playState.lineOfScrimmage);
-                    } else {
-                        // --- ACTION: Read Play ---
-                        target = { x: pState.x, y: pState.y + 0.1 };
-                    }
-                    break;
+                    case 'spy_QB':
+                        // --- 🛠️ FIX: Check for run diagnosis first ---
+                        if (diagnosedPlayType === 'run' && ballCarrierState) {
+                            // --- Diagnosed RUN: Abort spy and attack ---
+                            target = ballCarrierState;
 
-                case 'def_read': // Default "read and react"
-                    if (diagnosedPlayType === 'run' && ballCarrierState) {
-                        // --- ACTION: Attack Run ---
-                        // 🛠️ FIX: Target the carrier's *current* X/Y coordinates.
-                        target = { x: ballCarrierState.x, y: ballCarrierState.y };
-                    } else if (diagnosedPlayType === 'pass') { // <<< USE playType
-                        // --- ACTION: Drop to Zone ---
-                        pState.assignment = 'zone_hook_curl_middle';
-                        target = getZoneCenter('zone_hook_curl_middle', playState.lineOfScrimmage);
-                    } else {
-                        // --- ACTION: Read Play ---
-                        target = { x: pState.x, y: pState.y };
-                    }
-                    break;
+                        } else if (qbState) { // Continue with original logic if it's a pass/read
+                            // Check if QB is scrambling 
+                            if (qbState.action === 'qb_scramble' || qbState.y > playState.lineOfScrimmage + 1) {
+                                // --- QB IS SCRAMBLING ---
+                                target = qbState;
+                            } else {
+                                // --- QB IS IN POCKET ---
+                                const spyDepth = 8;
+                                target = { x: qbState.x, y: qbState.y + spyDepth };
+                            }
+                        } else {
+                            // --- QB IS GONE ---
+                            target = getZoneCenter('zone_hook_curl_middle', playState.lineOfScrimmage);
+                        }
+                        break;
+                    // --- >>> NEW/IMPROVED CASES <<< ---
 
-                // --- >>> END NEW/IMPROVED CASES <<< ---
+                    case 'run_support': // e.g., Safety coming downhill
+                        if (diagnosedPlayType === 'run' && ballCarrierState) {
+                            // --- ACTION: Attack Run ---
+                            // 🛠️ FIX: Target the carrier's *current* X/Y coordinates.
+                            // This makes the target a fixed point, bypassing the lead-pursuit logic.
+                            target = { x: ballCarrierState.x, y: ballCarrierState.y };
+                        } else if (isBallInAir) {
+                            // --- ACTION: Play Pass Defense (Ball is in the air) ---
+                            // Check if the ball is thrown somewhat close by
+                            if (getDistance(pState, ballPos) < 15) {
+                                target = { x: playState.ballState.targetX, y: playState.ballState.targetY };
+                            } else {
+                                // Ball is thrown deep/elsewhere, drop to default deep middle zone
+                                target = getZoneCenter('zone_deep_middle', playState.lineOfScrimmage);
+                            }
+                        } else {
+                            // --- ACTION: Read Play (Ball not in air, not a run) ---
+                            // Hold position, slightly deeper than an LB, ready to react
+                            target = { x: pState.x, y: pState.y + 0.2 };
+                        }
+                        break; // Go to pursuit logic
 
-                default: // Fallback for unknown assignments or post-turnover pursuit
-                    if (isBallInAir) {
-                        target = ballPos; // Play the ball
-                    } else if (ballCarrierState) {
-                        target = ballCarrierState; // Chase the carrier
-                    } else {
-                        // Hold position, don't drift
-                        target = { x: pState.x, y: pState.y };
-                    }
-                    break;
-            }
+                    case 'fill_run': // e.g., LB reading the play
+                        if (diagnosedPlayType === 'run' && ballCarrierState) {
+                            // --- ACTION: Attack Run ---
+                            // 🛠️ FIX: Target the carrier's *current* X/Y coordinates.
+                            target = { x: ballCarrierState.x, y: ballCarrierState.y };
+                        } else if (diagnosedPlayType === 'pass') { // <<< USE playType
+                            // --- ACTION: Drop to Zone ---
+                            pState.assignment = 'zone_hook_curl_middle';
+                            target = getZoneCenter('zone_hook_curl_middle', playState.lineOfScrimmage);
+                        } else {
+                            // --- ACTION: Read Play ---
+                            target = { x: pState.x, y: pState.y + 0.1 };
+                        }
+                        break;
 
-            // --- Set Target Coordinates (Pursuit Logic) ---
-            if (isPlayerState(target)) { // Target is a dynamic player state
+                    case 'def_read': // Default "read and react"
+                        if (diagnosedPlayType === 'run' && ballCarrierState) {
+                            // --- ACTION: Attack Run ---
+                            // 🛠️ FIX: Target the carrier's *current* X/Y coordinates.
+                            target = { x: ballCarrierState.x, y: ballCarrierState.y };
+                        } else if (diagnosedPlayType === 'pass') { // <<< USE playType
+                            // --- ACTION: Drop to Zone ---
+                            pState.assignment = 'zone_hook_curl_middle';
+                            target = getZoneCenter('zone_hook_curl_middle', playState.lineOfScrimmage);
+                        } else {
+                            // --- ACTION: Read Play ---
+                            target = { x: pState.x, y: pState.y };
+                        }
+                        break;
 
-                // --- 1. Check if this is Man Coverage (not ball pursuit) ---
-                const isManCoverage = pState.assignment.startsWith('man_cover_') && !target.isBallCarrier;
+                    // --- >>> END NEW/IMPROVED CASES <<< ---
 
-                if (isManCoverage) {
-                    // --- MAN COVERAGE LOGIC ---
-                    const assignedReceiver = target;
-                    const speedDiff = (pState.speed - assignedReceiver.speed);
-
-                    let yCushion = 1.0;
-                    if (speedDiff > 10) yCushion = -1.5;
-                    else if (speedDiff > 0) yCushion = -0.5;
-
-                    let xLeverage = 0;
-                    if (assignedReceiver.x < HASH_LEFT_X) {
-                        xLeverage = -1.0;
-                    } else if (assignedReceiver.x > HASH_RIGHT_X) {
-                        xLeverage = 1.0;
-                    } else {
-                        xLeverage = (assignedReceiver.x < CENTER_X) ? 1.0 : -1.0;
-                    }
-
-                    pState.targetX = assignedReceiver.targetX + xLeverage;
-                    pState.targetY = assignedReceiver.targetY + yCushion;
-
-                } else if (target.isBallCarrier || !pState.isOffense) {
-                    // --- 2. "SMART PURSUIT" LOGIC (FOR BALL CARRIER or any non-Man-Coverage defender) ---
-                    // This now handles all defensive pursuit of any player (like a scrambling QB).
-
-                    // --- "IN FRONT" LOGIC ---
-                    let isDefenderInFront;
-                    if (target.isOffense) {
-                        // Offense is running towards HIGH Y (end zone at 110-120)
-                        // "In front" means the defender has a HIGHER Y value.
-                        isDefenderInFront = pState.y > target.y;
-                    } else {
-                        // Defense is running towards LOW Y (end zone at 0-10) after an INT
-                        // "In front" means the defender has a LOWER Y value.
-                        isDefenderInFront = pState.y < target.y;
-                    }
-                   
-
-
-                    if (isDefenderInFront) {
-                        // --- A. I AM IN FRONT of the target (e.g., Safety) ---
-                        // Attack their current position. This makes the safety "come downhill".
-                        pState.targetX = target.x;
-                        pState.targetY = target.y;
-                    } else {
-                        // --- B. I AM BEHIND the target ---
-                        // Use the "lead pursuit" logic to catch up.
-                        const distToTarget = getDistance(pState, target);
-                        const carrierSpeedYPS = target.currentSpeedYPS || (target.speed / 10);
-                        const ownSpeedYPS = pState.currentSpeedYPS || (pState.speed / 10);
-                        const timeToIntercept = distToTarget > 0.1 ? distToTarget / ownSpeedYPS : 0;
-                        const leadDist = carrierSpeedYPS * timeToIntercept;
-                        const iqLeadFactor = 0.8 + ((pState.playbookIQ || 50) / 250);
-                        const finalLeadDist = leadDist * iqLeadFactor;
-                        const targetDX = target.targetX - target.x;
-                        const targetDY = target.targetY - target.y;
-                        const targetDistToTarget = Math.max(0.1, Math.sqrt(targetDX * targetDX + targetDY * targetDY));
-
-                        let futureTargetX = target.x + (targetDX / targetDistToTarget) * finalLeadDist;
-                        let futureTargetY = target.y + (targetDY / targetDistToTarget) * finalLeadDist;
-
-                        pState.targetX = futureTargetX;
-                        pState.targetY = futureTargetY;
-                    }
+                    default: // Fallback for unknown assignments or post-turnover pursuit
+                        if (isBallInAir) {
+                            target = ballPos; // Play the ball
+                        } else if (ballCarrierState) {
+                            target = ballCarrierState; // Chase the carrier
+                        } else {
+                            // Hold position, don't drift
+                            target = { x: pState.x, y: pState.y };
+                        }
+                        break;
                 }
 
-            } else if (target) { // Target is a fixed point {x, y}
-                pState.targetX = target.x; pState.targetY = target.y;
-            } else { // Fallback hold (target = null)
-                pState.targetX = pState.x; pState.targetY = pState.y;
-            }
-        } // End if(!isBlocked && !isEngaged)
+                // --- Set Target Coordinates (Pursuit Logic) ---
+                if (isPlayerState(target)) { // Target is a dynamic player state
+
+                    // --- 1. Check if this is Man Coverage (not ball pursuit) ---
+                    const isManCoverage = pState.assignment.startsWith('man_cover_') && !target.isBallCarrier;
+
+                    if (isManCoverage) {
+                        // --- MAN COVERAGE LOGIC ---
+                        const assignedReceiver = target;
+                        const speedDiff = (pState.speed - assignedReceiver.speed);
+
+                        let yCushion = 1.0;
+                        if (speedDiff > 10) yCushion = -1.5;
+                        else if (speedDiff > 0) yCushion = -0.5;
+
+                        let xLeverage = 0;
+                        if (assignedReceiver.x < HASH_LEFT_X) {
+                            xLeverage = -1.0;
+                        } else if (assignedReceiver.x > HASH_RIGHT_X) {
+                            xLeverage = 1.0;
+                        } else {
+                            xLeverage = (assignedReceiver.x < CENTER_X) ? 1.0 : -1.0;
+                        }
+
+                        pState.targetX = assignedReceiver.targetX + xLeverage;
+                        pState.targetY = assignedReceiver.targetY + yCushion;
+
+                    } else if (target.isBallCarrier || !pState.isOffense) {
+                        // --- 2. "SMART PURSUIT" LOGIC (FOR BALL CARRIER or any non-Man-Coverage defender) ---
+                        // This now handles all defensive pursuit of any player (like a scrambling QB).
+
+                        // --- "IN FRONT" LOGIC ---
+                        let isDefenderInFront;
+                        if (target.isOffense) {
+                            // Offense is running towards HIGH Y (end zone at 110-120)
+                            // "In front" means the defender has a HIGHER Y value.
+                            isDefenderInFront = pState.y > target.y;
+                        } else {
+                            // Defense is running towards LOW Y (end zone at 0-10) after an INT
+                            // "In front" means the defender has a LOWER Y value.
+                            isDefenderInFront = pState.y < target.y;
+                        }
+
+
+
+                        if (isDefenderInFront) {
+                            // --- A. I AM IN FRONT of the target (e.g., Safety) ---
+                            // Attack their current position. This makes the safety "come downhill".
+                            pState.targetX = target.x;
+                            pState.targetY = target.y;
+                        } else {
+                            // --- B. I AM BEHIND the target ---
+                            // Use the "lead pursuit" logic to catch up.
+                            const distToTarget = getDistance(pState, target);
+                            const carrierSpeedYPS = target.currentSpeedYPS || (target.speed / 10);
+                            const ownSpeedYPS = pState.currentSpeedYPS || (pState.speed / 10);
+                            const timeToIntercept = distToTarget > 0.1 ? distToTarget / ownSpeedYPS : 0;
+                            const leadDist = carrierSpeedYPS * timeToIntercept;
+                            const iqLeadFactor = 0.8 + ((pState.playbookIQ || 50) / 250);
+                            const finalLeadDist = leadDist * iqLeadFactor;
+                            const targetDX = target.targetX - target.x;
+                            const targetDY = target.targetY - target.y;
+                            const targetDistToTarget = Math.max(0.1, Math.sqrt(targetDX * targetDX + targetDY * targetDY));
+
+                            let futureTargetX = target.x + (targetDX / targetDistToTarget) * finalLeadDist;
+                            let futureTargetY = target.y + (targetDY / targetDistToTarget) * finalLeadDist;
+
+                            pState.targetX = futureTargetX;
+                            pState.targetY = futureTargetY;
+                        }
+                    }
+
+                } else if (target) { // Target is a fixed point {x, y}
+                    pState.targetX = target.x; pState.targetY = target.y;
+                } else { // Fallback hold (target = null)
+                    pState.targetX = pState.x; pState.targetY = pState.y;
+                }
+            } // End if(!isBlocked && !isEngaged)
+        }
 
         // Clamp targets within field boundaries
         pState.targetX = Math.max(0.5, Math.min(FIELD_WIDTH - 0.5, pState.targetX));
@@ -2402,18 +2442,16 @@ function checkBlockCollisions(playState) {
 
     offenseStates.forEach(blocker => {
 
-        // --- 🛠️ FIX #1: Add this check ---
         // If the blocker is stunned, they cannot initiate a new block.
         if (blocker.stunnedTicks > 0) {
             return;
         }
-        // --- END FIX #1 ---
 
         const isRunBlock = blocker.action === 'run_block';
 
         if ((blocker.action === 'pass_block' || isRunBlock) && !blocker.engagedWith) {
 
-            // --- 🛠️ FIX #2: "Hitbox" Collision Logic ---
+            // --- "Hitbox" Collision Logic ---
             // Define a "hitbox" for engagement
             const ENGAGE_X_RANGE = 1.5; // How far sideways (yards)
             const ENGAGE_Y_RANGE = 1.2; // How far forward/back (yards)
