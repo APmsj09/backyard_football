@@ -1693,7 +1693,7 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
         }
 
         // --- 3. PROCEED TO AI LOGIC ---
-        if (pState.isBlocked || pState.isEngaged) {
+        if (pState.isBlocked) {
             pState.targetX = pState.x; pState.targetY = pState.y;
             return;
         }
@@ -1771,31 +1771,29 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                     break;
 
                 case 'run_block':
-                        if (pState.dynamicTargetId) {
-                            const target = defenseStates.find(d => d.id === pState.dynamicTargetId);
+                    if (pState.dynamicTargetId) {
+                        const target = defenseStates.find(d => d.id === pState.dynamicTargetId);
 
-                            // Check if target is still valid
-                            if (target && !target.isBlocked && !target.isEngaged) {
-                                // --- Target is valid: DYNAMICALLY UPDATE ---
+                        // Check if target is still valid
+                        if (target && !target.isBlocked && !target.isEngaged) {
 
-                                // --- 🛠️ THE FIX: Create a "WALL" ---
-                                // Mirror the defender's X-position.
-                                pState.targetX = target.x; 
-                                // Set an aggressive "wall" at the run blocking depth.
-                                pState.targetY = LOS + POCKET_DEPTH_RUN;
-                                // --- ⛔ OLD "CHASE" CODE REMOVED ---
+                            
+                            // Mirror the defender's X-position.
+                            pState.targetX = target.x;
+                            pState.targetY = target.y; // Target the defender's current Y
+                           
 
-                            } else {
-                                // --- Target is GONE ---
-                                pState.dynamicTargetId = null;
-                                // Revert to the "climb" assignment
-                                pState.targetX = pState.initialX;
-                                pState.targetY = LOS + POCKET_DEPTH_RUN;
-                            }
+                        } else {
+                            // --- Target is GONE ---
+                            pState.dynamicTargetId = null;
+                            // Revert to the "climb" assignment
+                            pState.targetX = pState.initialX;
+                            pState.targetY = LOS + POCKET_DEPTH_RUN;
                         }
-                        // else: dynamicTargetId is null (already set by assignTarget)
-                        target = null; // Prevent falling into defensive pursuit logic
-                        break;
+                    }
+                    // else: dynamicTargetId is null (already set by assignTarget)
+                    target = null; // Prevent falling into defensive pursuit logic
+                    break;
 
                 case 'pursuit':
                     // This is for offense after a turnover.
@@ -2453,8 +2451,8 @@ function checkBlockCollisions(playState) {
 
             // --- "Hitbox" Collision Logic ---
             // Define a "hitbox" for engagement
-            const ENGAGE_X_RANGE = 1.5; // How far sideways (yards)
-            const ENGAGE_Y_RANGE = 1.2; // How far forward/back (yards)
+            const ENGAGE_X_RANGE = 2.2; // How far sideways (yards)
+            const ENGAGE_Y_RANGE = 2.0; // How far forward/back (yards)
 
             let defendersInRange = defenseStates.filter(defender => {
                 if (defender.isBlocked || defender.isEngaged ||
@@ -2470,7 +2468,7 @@ function checkBlockCollisions(playState) {
 
                 return (distX < ENGAGE_X_RANGE) && (distY < ENGAGE_Y_RANGE);
             });
-            // --- ⛔ OLD 'getDistance' CODE REMOVED ---
+            
 
             if (defendersInRange.length > 0) {
                 if (isRunBlock) {
