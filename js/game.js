@@ -1744,7 +1744,44 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                     target = null;
 
                     break; // Skip all other targeting logic for this player
-                // --- END NEW CASE ---
+                case 'run_route': { // Use brackets for new variable scope
+                    if (!pState.routePath || pState.routePath.length === 0) {
+                        // No path, just stop and find space
+                        pState.action = 'route_complete';
+                        pState.targetX = pState.x;
+                        pState.targetY = pState.y;
+                        break;
+                    }
+
+                    // Get the current target point from the path
+                    const currentTargetPoint = pState.routePath[pState.currentPathIndex];
+
+                    // Check if we've arrived at the current point
+                    const ARRIVAL_RADIUS = 0.3; // Small radius for waypoints
+                    const dx = currentTargetPoint.x - pState.x;
+                    const dy = currentTargetPoint.y - pState.y;
+                    const distToTarget = Math.sqrt(dx * dx + dy * dy);
+
+                    if (distToTarget < ARRIVAL_RADIUS) {
+                        // --- Arrived, move to the next point ---
+                        pState.currentPathIndex++;
+
+                        if (pState.currentPathIndex < pState.routePath.length) {
+                            // --- More points in the route ---
+                            const nextTargetPoint = pState.routePath[pState.currentPathIndex];
+                            pState.targetX = nextTargetPoint.x;
+                            pState.targetY = nextTargetPoint.y;
+                        } else {
+                            // --- End of route ---
+                            pState.action = 'route_complete';
+                            pState.targetX = pState.x; // Stop for now
+                            pState.targetY = pState.y;
+                        }
+                    }
+                    // If not at target, just keep moving.
+                    // The targetX/targetY are already set, so we don't need an 'else'.
+                    break; // Exit the switch
+                }
 
                 case 'pass_block':
                     // This logic runs *every tick* after assignTarget() has run.
@@ -1952,9 +1989,8 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                     pState.targetX = pState.x + targetXOffset;
                     break;
                 }
-                // --- END OF NEW BLOCKS ---
 
-                case 'qb_setup':
+                case 'qb_setup': {
                     const POCKET_RADIUS = 6.0; // How far QB looks for immediate threats
                     const STEP_DISTANCE = 0.75; // How far QB steps/slides per adjustment
 
@@ -1964,7 +2000,7 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                             !d.isBlocked &&
                             !d.isEngaged &&
                             getDistance(pState, d) < POCKET_RADIUS &&
-                            d.targetY < pState.y + 2 // Filter for defenders generally moving towards or past QB depth
+                            d.targetY < pState.y + 2
                         )
                         .sort((a, b) => getDistance(pState, a) - getDistance(pState, b))[0];
 
@@ -1972,38 +2008,36 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                         // --- React to Threat ---
                         const dxThreat = closestThreat.x - pState.x;
                         const dyThreat = closestThreat.y - pState.y;
-                        const distThreat = getDistance(pState, closestThreat); // Already calculated essentially
-
-                        // Calculate escape vector (directly away from threat)
+                        const distThreat = getDistance(pState, closestThreat);
                         let escapeX = pState.x - (dxThreat / distThreat) * STEP_DISTANCE;
                         let escapeY = pState.y - (dyThreat / distThreat) * STEP_DISTANCE;
 
                         // --- Pocket Awareness ---
-                        // Prefer stepping UP slightly if pressure is from sides or front corners
-                        if (Math.abs(dxThreat) > dyThreat && escapeY > pState.initialY - 3) { // If threat is mostly lateral & haven't dropped too far
-                            escapeY = pState.y + STEP_DISTANCE * 0.5; // Step up slightly
-                            // Adjust X slightly away too
+                        if (Math.abs(dxThreat) > dyThreat && escapeY > pState.initialY - 3) {
+                            escapeY = pState.y + STEP_DISTANCE * 0.5; // Step up
                             escapeX = pState.x - Math.sign(dxThreat) * STEP_DISTANCE * 0.75;
                         }
-                        // Prevent drifting too far back
-                        escapeY = Math.max(pState.initialY - 4, escapeY); // Don't drift back more than 4 yards from initial drop spot
+                        escapeY = Math.max(pState.initialY - 4, escapeY); // Don't drift too far
 
-                        // Set target to escape point (clamped later)
                         pState.targetX = escapeX;
                         pState.targetY = escapeY;
-
                     } else {
                         // --- No Immediate Threat ---
-                        // If QB has reached initial target, stay there. Otherwise, continue moving to it.
+                        // If QB has reached initial target, stay there.
                         if (getDistance(pState, { x: pState.targetX, y: pState.targetY }) < 0.5) {
                             pState.targetX = pState.x;
                             pState.targetY = pState.y; // Hold position
                         }
-                        // If still moving to initial drop spot, the targetX/targetY set during setup remains valid.
+                        // If still moving to initial drop spot, the target remains valid.
                     }
-                    break; // End case 'qb_setup'
+                    break; // <-- CRITICAL: Exit the switch
+                }
+                // --- END NEW CASE ---
 
-                case 'idle': default: pState.targetX = pState.x; pState.targetY = pState.y; break;
+                case 'idle': default:
+                    pState.targetX = pState.x;
+                    pState.targetY = pState.y;
+                    break;
             }
         }
         // --- Defensive Logic ---
