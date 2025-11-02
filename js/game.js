@@ -1525,7 +1525,7 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
 
     const LOS = playState.lineOfScrimmage;
     const POCKET_DEPTH_PASS = -1.5; // 1.5 yards *behind* the LoS
-    const POCKET_DEPTH_RUN = 0.5;   // 0.5 yards *in front* of the LoS
+    const POCKET_DEPTH_RUN = 0.5;   // 0.5 yards *in front* of the LoS
 
     // Helper: Determine if a target is the QB/Carrier and not null
     const isPlayerState = (t) => t && t.speed !== undefined;
@@ -1552,7 +1552,7 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
     const assignTarget = (blocker, availableThreats, logPrefix) => {
 
         if (availableThreats.length === 0) {
-            // --- 🛠️ NEW "CLIMB" LOGIC ---
+            // --- "CLIMB" LOGIC ---
             // No primary (box) threats left.
             if (blocker.action === 'run_block') {
                 // --- CLIMB TO 2ND LEVEL ---
@@ -1573,14 +1573,13 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                         console.log(`[${logPrefix}] No primary threats. CLIMBING to block ${secondaryTarget.name} (${secondaryTarget.slot})`);
                     }
                 } else {
-                    // --- 🛠️ FIX ---
+                    // --- 🛠️ BUG FIX ---
                     // No one left to block, just run downfield
                     blocker.dynamicTargetId = null;
-                    // 'defender' is not defined here. The goal is to climb
-                    // to the open field. We'll set the target downfield.
+                    // 'defender' is not defined here.
                     blocker.targetX = blocker.initialX; // Stay in your lane
                     blocker.targetY = blocker.y + 7;    // and run 7 yards downfield
-                    // --- END FIX ---
+                    // --- END BUG FIX ---
 
                     if (blocker.slot.startsWith('OL')) {
                         console.log(`[${logPrefix}] No threats found. Climbing open field.`);
@@ -1598,16 +1597,12 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                 }
             }
             return; // Finished assigning
-            // --- END NEW LOGIC ---
         }
 
-        // --- 🛠️ THIS IS THE NEW "LANE-BASED" LOGIC ---
-        // It replaces your old "Find the closest available threat" logic.
-
-        const BLOCKING_LANE_WIDTH = 2.0; // How many yards to each side of the OL's center
+        // --- "LANE-BASED" LOGIC ---
+        const BLOCKING_LANE_WIDTH = 2.0;
 
         // 1. Find "Primary Threats" (Defenders directly in the OL's lane)
-        //    We use 'initialX' to define the lane, not the player's current 'x'.
         const primaryThreats = availableThreats.filter(d =>
             Math.abs(d.x - blocker.initialX) < BLOCKING_LANE_WIDTH
         );
@@ -1624,7 +1619,6 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
             }
         } else {
             // 2b. No one in our lane. "Help Out" logic.
-            // Look for the closest unblocked defender to "help."
             availableThreats.sort((a, b) => getDistance(blocker, a) - getDistance(blocker, b));
             targetDefender = availableThreats[0];
 
@@ -1632,9 +1626,8 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                 console.log(`[${logPrefix}] No threat in lane. Helping on closest: ${targetDefender.name} (${targetDefender.slot})`);
             }
         }
-        // --- END NEW "LANE-BASED" LOGIC ---
+        // --- END "LANE-BASED" LOGIC ---
         blocker.dynamicTargetId = targetDefender.id;
-
 
         // Mark this defender as "taken"
         olAssignedDefenders.add(targetDefender.id);
@@ -1721,7 +1714,6 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                         pState.action = 'attack_ball';
                     }
                 }
-                // --- 🛠️ FIX: Add ELSE to reset action ---
             } else if (pState.action === 'attack_ball' && !playState.ballState.inAir) {
                 // If the player was attacking the ball, but the ball is no longer
                 // in the air (i.e., it was caught or dropped), reset their action.
@@ -1729,13 +1721,11 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                 pState.targetX = pState.x; // Stop moving
                 pState.targetY = pState.y;
             }
-            // --- END FIX ---
         }
 
         // --- Offensive Logic ---
         if (pState.isOffense) {
             switch (pState.action) {
-                // --- ADD THIS NEW CASE ---
                 case 'attack_ball':
                     // Player's action is to move to the ball's *INTENDED LANDING SPOT*
                     pState.targetX = playState.ballState.targetX;
@@ -1748,6 +1738,7 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                     target = null;
 
                     break; // Skip all other targeting logic for this player
+
                 case 'run_route': { // Use brackets for new variable scope
                     if (!pState.routePath || pState.routePath.length === 0) {
                         // No path, just stop and find space
@@ -1968,26 +1959,34 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
 
                 case 'qb_scramble': { // --- Logic for QBs ---
                     const visionDistance = 8.0; // QB looks for shorter-term open space
-
-                    // --- Find Best Lane (No downhill bonus, just find open grass) ---
-                    const lanes = [-8, 0, 8]; // Wider lanes, QB is desperate
                     let targetXOffset = 0;
-                    let bestLane = { xOffset: 0, minDist: -Infinity };
 
-                    lanes.forEach(xOffset => {
-                        const lookAheadPoint = { x: pState.x + xOffset, y: pState.y + visionDistance };
-                        const closestDefenderToLane = defenseStates
-                            .filter(d => !d.isBlocked && !d.isEngaged)
-                            .sort((a, b) => getDistance(lookAheadPoint, a) - getDistance(lookAheadPoint, b))[0];
+                    // --- 🛠️ FIX: Check for QB's chosen direction ---
+                    if (pState.scrambleDirection) {
+                        // QB decision function already told us which way to run
+                        targetXOffset = pState.scrambleDirection * 8; // e.g., (1 * 8) or (-1 * 8)
+                        pState.scrambleDirection = null; // Clear the flag after we've used it
+                    } else {
+                        // --- Fallback: No specific direction, just find open grass (your original logic) ---
+                        const lanes = [-8, 0, 8]; // Wider lanes, QB is desperate
+                        let bestLane = { xOffset: 0, minDist: -Infinity };
 
-                        const dist = closestDefenderToLane ? getDistance(lookAheadPoint, closestDefenderToLane) : 100;
+                        lanes.forEach(xOffset => {
+                            const lookAheadPoint = { x: pState.x + xOffset, y: pState.y + visionDistance };
+                            const closestDefenderToLane = defenseStates
+                                .filter(d => !d.isBlocked && !d.isEngaged)
+                                .sort((a, b) => getDistance(lookAheadPoint, a) - getDistance(lookAheadPoint, b))[0];
 
-                        if (dist > bestLane.minDist) {
-                            bestLane.minDist = dist;
-                            bestLane.xOffset = xOffset;
-                        }
-                    });
-                    targetXOffset = bestLane.xOffset; // Target the widest open lane
+                            const dist = closestDefenderToLane ? getDistance(lookAheadPoint, closestDefenderToLane) : 100;
+
+                            if (dist > bestLane.minDist) {
+                                bestLane.minDist = dist;
+                                bestLane.xOffset = xOffset;
+                            }
+                        });
+                        targetXOffset = bestLane.xOffset; // Target the widest open lane
+                    }
+                    // --- END FIX ---
 
                     pState.targetY = Math.min(FIELD_LENGTH - 1.0, pState.y + visionDistance); // Was - 10.1
                     pState.targetX = pState.x + targetXOffset;
@@ -2815,6 +2814,9 @@ function resolveOngoingBlocks(playState, gameLog) {
 /**
  * (MODIFIED with 4 fixes: Lead Factor, Decision Time, Scramble Logic, Accuracy Tuning)
  */
+/**
+ * (MODIFIED with 4 fixes: Lead Factor, Decision Time, Scramble Logic, Accuracy Tuning)
+ */
 function updateQBDecision(playState, offenseStates, defenseStates, gameLog) {
     const qbState = offenseStates.find(p => p.slot === 'QB1' && (p.hasBall || p.isBallCarrier));
     if (!qbState || playState.ballState.inAir) return; // Exit if no QB with ball or ball already thrown
@@ -2887,11 +2889,6 @@ const getTargetInfo = (slot) => {
         .sort((a, b) => getDistance(recState, a) - getDistance(recState, b))[0];
     const separation = closestDefender ? getDistance(recState, closestDefender) : 100;
     const distFromQB = getDistance(qbState, recState);
-
-    // (Optional: Add chemistry bonus from our previous discussion)
-    // const relationship = getRelationshipLevel(qbState.id, recState.id);
-    // if (relationship >= relationshipLevels.FRIEND.level) separation += 1.0;
-    // if (relationship >= relationshipLevels.GOOD_FRIEND.level) separation += 1.5;
 
     return { ...recState, separation, distFromQB };
 };
@@ -3012,16 +3009,17 @@ if (decisionMade) {
 
     } else if (canScramble) {
         // --- 4. Scramble ---
+        // --- 🛠️ FIX: Store scramble direction instead of setting target ---
         qbState.action = 'qb_scramble';
         const pressureXDir = Math.sign(qbState.x - pressureDefender.x);
-        qbState.targetX = Math.max(0.1, Math.min(FIELD_WIDTH - 0.1, qbState.x + pressureXDir * 8));
-        qbState.targetY = qbState.y + 5;
+        qbState.scrambleDirection = pressureXDir; // 
         qbState.hasBall = false;
         qbState.isBallCarrier = true;
         playState.ballState.x = qbState.x; playState.ballState.y = qbState.y;
         gameLog.push(`🏃 ${qbState.name} ${imminentSackDefender ? 'escapes the sack' : 'escapes'} and scrambles!`);
         actionTaken = "Scramble";
         return;
+        // --- END FIX ---
 
     } else {
         // --- 5. Throw Away / Force It ---
