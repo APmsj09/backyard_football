@@ -2550,7 +2550,9 @@ function checkBlockCollisions(playState) {
 
                 playState.blockBattles.push({
                     blockerId: blocker.id, defenderId: targetDefender.id,
-                    status: 'ongoing', streakA: 0, streakB: 0
+                    status: 'ongoing',
+                    battleScore: 0,
+                    startTick: playState.tick
                 });
             }
         }
@@ -2680,48 +2682,29 @@ function resolveBattle(powerA, powerB, battle) {
     const BASE_DIFF = powerA - powerB;
 
     // 2. Add controlled randomness
-    const roll = getRandomInt(-15, 15); // Centered, smaller random range
-    const finalDiff = BASE_DIFF + roll;
+    const roll = getRandomInt(-15, 15);
 
-    // --- QUICK RESOLVE CHECKS (Critical Success/Failure) ---
-    // If one player's power is significantly higher, give them a chance to bypass streaks.
-    if (powerA > powerB + 40 && Math.random() < 0.3) { // Blocker is much stronger (40+ power diff)
-        battle.status = 'win_A'; // Instant Win (Pancake)
-        return; // Win is decided
-    } else if (powerB > powerA + 40 && Math.random() < 0.3) { // Defender is much stronger
-        battle.status = 'win_B'; // Instant Win (Shed)
-        return; // Win is decided
-    }
+    // 3. Calculate the "push" for this tick
+    // We divide by a large number to scale the battle over many ticks.
+    // A value of 100 means an average "push" is 0.5-1.0 points per tick.
+    const finalDiff = (BASE_DIFF + roll) / 100;
 
-    // --- STREAK & DECISION LOGIC (MODIFIED) ---
-    const STREAK_THRESHOLD = 8;  // need a more decisive win per tick
-    const WIN_STREAK = 4;        // require longer dominance
+    // 4. Apply the "push" to the battle score
+    battle.battleScore += finalDiff;
 
-    //const diffScale = Math.abs(powerA - powerB) / 50;
-    //const STREAK_THRESHOLD = 5 + diffScale;
+    // 5. Define the "reasonable numbers" (Win Threshold)
+    // This is how many points a player needs to "win" the tug of war.
+    const WIN_SCORE = 20;
 
-    if (finalDiff > STREAK_THRESHOLD) { // A wins the tick
-        battle.streakA++;
-        battle.streakB = 0; // Reset opponent's streak
-        battle.status = 'ongoing'; // Default to ongoing...
-
-        if (battle.streakA >= WIN_STREAK) {
-            battle.status = 'win_A'; // ...until the streak is met
-        }
-
-    } else if (finalDiff < -STREAK_THRESHOLD) { // B wins the tick
-        battle.streakB++;
-        battle.streakA = 0; // Reset opponent's streak
-        battle.status = 'ongoing'; // Default to ongoing...
-
-        if (battle.streakB >= WIN_STREAK) {
-            battle.status = 'win_B'; // ...until the streak is met
-        }
-
-    } else { // Draw (between -5 and +5)
-        // On a true draw, reset both streaks
-        battle.streakA = 0;
-        battle.streakB = 0;
+    // 6. Check for a winner
+    if (battle.battleScore > WIN_SCORE) {
+        // Blocker (A) wins
+        battle.status = 'win_A';
+    } else if (battle.battleScore < -WIN_SCORE) {
+        // Defender (B) wins
+        battle.status = 'win_B';
+    } else {
+        // No winner yet, battle continues
         battle.status = 'ongoing';
     }
 }
@@ -2732,6 +2715,9 @@ function resolveBattle(powerA, powerB, battle) {
 function resolveOngoingBlocks(playState, gameLog) {
     const battlesToRemove = [];
     playState.blockBattles.forEach((battle, index) => {
+        if (battle.startTick === playState.tick) {
+            return;
+        }
         // Only process battles that are currently active
         if (battle.status !== 'ongoing') {
             // This check is a safeguard, but resolveBattle should set status
