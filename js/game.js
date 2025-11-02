@@ -48,10 +48,11 @@ const CENTER_X = FIELD_WIDTH / 2; // Approx 26.65
 
 // --- Physics/Interaction Constants ---
 const TICK_DURATION_SECONDS = 0.05;
-const BLOCK_ENGAGE_RANGE = 1.5;
-const TACKLE_RANGE = 1.5;
+const BLOCK_ENGAGE_RANGE = 2;
+const TACKLE_RANGE = 1.8;
 const CATCH_RADIUS = 0.8;
 const SEPARATION_THRESHOLD = 2.0;
+const PLAYER_SEPARATION_RADIUS = 0.6;
 
 // --- Event/Balance Constants ---
 const weeklyEvents = [
@@ -3354,6 +3355,69 @@ const ensureStats = (player) => {
         };
     }
 };
+/**
+ * Checks for and resolves "soft" collisions between all active players.
+ * This prevents players from running on top of each other.
+ */
+function resolvePlayerCollisions(playState) {
+    const players = playState.activePlayers;
+    const playerRadius = PLAYER_SEPARATION_RADIUS;
+
+    // We must check every player against every other player
+    for (let i = 0; i < players.length; i++) {
+        const p1 = players[i];
+
+        for (let j = i + 1; j < players.length; j++) {
+            const p2 = players[j];
+
+            // --- CRITICAL: Skip collisions for interacting players ---
+            // We don't want to "nudge" a blocker off their defender,
+            // or a tackler away from the ball carrier.
+            if (p1.engagedWith === p2.id || p2.engagedWith === p1.id ||
+                p1.isBallCarrier || p2.isBallCarrier ||
+                p1.stunnedTicks > 0 || p2.stunnedTicks > 0) {
+                continue;
+            }
+
+            let dx = p1.x - p2.x;
+            let dy = p1.y - p2.y;
+            let dist = Math.sqrt(dx * dx + dy * dy);
+
+            // Handle rare case where players are on the exact same spot
+            if (dist < 0.01) {
+                dx = 0.1; // Give a tiny horizontal nudge
+                dy = 0;
+                dist = 0.1;
+            }
+
+            // Check if their "bubbles" are overlapping
+            if (dist < playerRadius) {
+                const overlap = playerRadius - dist;
+
+                // Calculate how much to push each player (half the overlap)
+                const pushAmount = overlap / 2;
+
+                // Normalize the dx/dy vector and apply the push
+                const pushX = (dx / dist) * pushAmount;
+                const pushY = (dy / dist) * pushAmount;
+
+                // Nudge p1 away from p2
+                p1.x += pushX;
+                p1.y += pushY;
+
+                // Nudge p2 away from p1
+                p2.x -= pushX;
+                p2.y -= pushY;
+
+                // --- Re-clamp positions to stay in-bounds ---
+                p1.x = Math.max(0.5, Math.min(FIELD_WIDTH - 0.5, p1.x));
+                p1.y = Math.max(0.5, Math.min(FIELD_LENGTH - 0.5, p1.y));
+                p2.x = Math.max(0.5, Math.min(FIELD_WIDTH - 0.5, p2.x));
+                p2.y = Math.max(0.5, Math.min(FIELD_LENGTH - 0.5, p2.y));
+            }
+        }
+    }
+}
 
 /**
  * Updates player game stats based on the final play outcome.
@@ -3522,11 +3586,13 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
             }
 
             // --- STEP 2: Update Player Intentions/Targets (AI) ---
-            // 🛠️ This now passes the *final* (potentially modified) assignments
             updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrierState, type, offensivePlayKey, assignments, defensivePlayKey, gameLog);
 
             // --- STEP 3: Update Player Positions (Movement) ---
             playState.activePlayers.forEach(p => updatePlayerPosition(p, timeDelta));
+
+            // --- STEP 3.5: Resolve Player Collisions ---
+            resolvePlayerCollisions(playState);
 
             // --- STEP 4: Update Ball Position ---
             // Re-find carrier *after* movement, in case of handoff (future)
