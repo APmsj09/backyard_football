@@ -1399,6 +1399,20 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
             const NEUTRAL_ZONE_WIDTH = 1.0; // 1 yard
 
             if (!isOffense) {
+                let attempts = 0;
+                let isStacked = playState.activePlayers.some(p =>
+                    !p.isOffense && p.x === startX && p.y === startY
+                );
+
+                while (isStacked && attempts < 10) {
+                    // Nudge the player 0.5 yards to a random side
+                    startX += (Math.random() < 0.5 ? -0.5 : 0.5);
+                    // Re-check if still stacked
+                    isStacked = playState.activePlayers.some(p =>
+                        !p.isOffense && p.x === startX && p.y === startY
+                    );
+                    attempts++;
+                }
                 // DEFENSE: Must line up *on or past* the neutral zone.
                 // e.g., If LOS=30, they must be at Y >= 31.0
                 startY = Math.max(LOS + NEUTRAL_ZONE_WIDTH, startY);
@@ -1538,29 +1552,58 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
     const assignTarget = (blocker, availableThreats, logPrefix) => {
 
         if (availableThreats.length === 0) {
-            // No threats left, hold pocket or climb
-            blocker.targetX = blocker.initialX;
-            // Set to the default pocket depth for their play type
-            blocker.targetY = LOS + (blocker.action === 'run_block' ? POCKET_DEPTH_RUN : POCKET_DEPTH_PASS);
+            // --- 🛠️ NEW "CLIMB" LOGIC ---
+            // No primary (box) threats left.
+            if (blocker.action === 'run_block') {
+                // --- CLIMB TO 2ND LEVEL ---
+                // Find any unblocked LB or Safety downfield
+                const secondaryThreats = defenseStates.filter(d =>
+                    !d.isBlocked && !d.isEngaged &&
+                    (d.slot.startsWith('LB') || d.slot.startsWith('DB')) &&
+                    d.y > LOS + 2 // They are at least 2 yards downfield
+                ).sort((a, b) => getDistance(blocker, a) - getDistance(blocker, b));
 
-            // --- 🛠️ ADD THIS ---
-            blocker.dynamicTargetId = null; // Explicitly clear dynamic target
-            // --- END ADD ---
+                if (secondaryThreats.length > 0) {
+                    // Found a 2nd level target!
+                    const secondaryTarget = secondaryThreats[0];
+                    blocker.dynamicTargetId = secondaryTarget.id;
+                    olAssignedDefenders.add(secondaryTarget.id); // Mark them as "taken"
 
-            if (blocker.slot.startsWith('OL')) {
-                console.log(`[${logPrefix}] No target chosen. ${blocker.action === 'run_block' ? 'Climbing.' : 'Holding Pocket.'}`);
+                    if (blocker.slot.startsWith('OL')) {
+                        console.log(`[${logPrefix}] No primary threats. CLIMBING to block ${secondaryTarget.name} (${secondaryTarget.slot})`);
+                    }
+                } else {
+                    // No one left to block, just run downfield
+                    blocker.dynamicTargetId = null;
+                    blocker.targetX = blocker.x; // Just keep running forward
+                    blocker.targetY = blocker.y + 5; // Target 5 yards upfield
+
+                    if (blocker.slot.startsWith('OL')) {
+                        console.log(`[${logPrefix}] No threats found. Climbing open field.`);
+                    }
+                }
+            } else {
+                // --- PASS BLOCK ---
+                // Hold the pocket (this is correct)
+                blocker.dynamicTargetId = null;
+                blocker.targetX = blocker.initialX;
+                blocker.targetY = LOS + POCKET_DEPTH_PASS;
+
+                if (blocker.slot.startsWith('OL')) {
+                    console.log(`[${logPrefix}] No target chosen. Holding Pocket.`);
+                }
             }
-            return;
+            return; // Finished assigning
+            // --- END NEW LOGIC ---
         }
 
         // Find the closest available threat
         availableThreats.sort((a, b) => getDistance(blocker, a) - getDistance(blocker, b));
         const targetDefender = availableThreats[0];
 
-        // --- ⛔ REMOVED: All "Aggressive Intercept" and vector logic ---
-        // --- ... (dx, dy, interceptX, interceptY, etc. all removed) ... ---
+        // --- All "Aggressive Intercept" and vector logic ---
 
-        // --- 🛠️ THE FIX: Set the DYNAMIC target ID ---
+        // --- Set the DYNAMIC target ID ---
         // We no longer set targetX/Y here. We just assign the ID.
         // The main game loop will handle the dynamic X/Y coordinates.
         blocker.dynamicTargetId = targetDefender.id;
@@ -1712,13 +1755,23 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                         // Check if target is still valid
                         if (target && !target.isBlocked && !target.isEngaged) {
                             // --- Target is valid: DYNAMICALLY UPDATE ---
-                            // Attack the defender's CURRENT position.
+
+                            // --- 🛠️ THE FIX ---
+                            // Mirror the defender's X-position.
                             pState.targetX = target.x;
-                            pState.targetY = target.y;
+
+                            // Set an aggressive "wall" at the run blocking depth
+                            // (0.5 yards *past* the LoS). This forces a collision.
+                            pState.targetY = LOS + POCKET_DEPTH_RUN;
+                            // --- ⛔ OLD "CHASE" CODE REMOVED ---
+                            // pState.targetY = target.y; 
+                            // --- END FIX ---
+
                         } else {
                             // --- Target is GONE ---
                             pState.dynamicTargetId = null;
-                            // Revert to the "climb" assignment
+                            // Revert to the "climb" assignment (which also
+                            // targets the run pocket depth, so this is consistent)
                             pState.targetX = pState.initialX;
                             pState.targetY = LOS + POCKET_DEPTH_RUN;
                         }
@@ -1728,26 +1781,6 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                     // pState.targetX/Y are already correct. Do nothing.
 
                     target = null; // Prevent falling into defensive pursuit logic
-                    break;
-                // --- 🛠️ END NEW BLOCKING LOGIC ---
-                case 'run_route':
-                    if (pState.routePath && pState.routePath.length > 0) {
-                        const currentTargetIndex = Math.min(pState.currentPathIndex, pState.routePath.length - 1);
-                        const targetPoint = pState.routePath[currentTargetIndex];
-                        if (getDistance(pState, targetPoint) < 0.75) {
-                            if (pState.currentPathIndex < pState.routePath.length - 1) {
-                                pState.currentPathIndex++;
-                                const nextPoint = pState.routePath[pState.currentPathIndex];
-                                pState.targetX = nextPoint.x; pState.targetY = nextPoint.y;
-                            } else {
-                                pState.action = 'route_complete'; // Finished path
-                            }
-                        } else {
-                            pState.targetX = targetPoint.x; pState.targetY = targetPoint.y;
-                        }
-                    } else if (getDistance(pState, { x: pState.targetX, y: pState.targetY }) < 0.5) {
-                        pState.action = 'route_complete';
-                    }
                     break;
 
                 case 'route_complete':
@@ -2090,47 +2123,69 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                 case assignment === 'blitz_gap':
                 case assignment === 'blitz_edge':
 
-                    // --- 🛠️ CRITICAL FIX: Check for ball in air FIRST ---
+                    // --- 🛠️ NEW, RE-ORDERED LOGIC ---
+
+                    // 1. Highest Priority: Ball is in the air.
                     if (isBallInAir) {
-                        // --- Ball is thrown! Abort rush and play the ball ---
-                        // Target the ball's *landing spot*
+                        // Ball is thrown! Abort rush and play the ball's landing spot.
                         target = { x: ballPos.targetX, y: ballPos.targetY };
 
-                    } else if (diagnosedPlayType === 'run' && ballCarrierState) {
-                        // --- It's a run! Abort rush and pursue carrier ---
+                        // 2. Second Priority: Ball is on the ground (completed pass or handoff).
+                        //    (Check for ballCarrierState *before* checking qbState)
+                    } else if (ballCarrierState && ballCarrierState.id !== qbState?.id) {
+                        // It's a run play, OR a completed pass. 
+                        // The ball carrier is NOT the QB. Attack the carrier.
                         target = ballCarrierState;
 
+                        // 3. Third Priority: It's a diagnosed run (and the carrier might be the QB)
+                    } else if (diagnosedPlayType === 'run' && ballCarrierState) {
+                        // It's a run! Pursue carrier.
+                        target = ballCarrierState;
+
+                        // 4. Fourth Priority: It's a pass play, ball hasn't been thrown.
                     } else if (qbState) {
-                        // --- 🛠️ MODIFIED: Diagnosed PASS or STILL READING: Rush the QB ---
-                        // A pass rusher's job is to rush until proven otherwise.
+                        // Diagnosed PASS or STILL READING: Rush the QB.
                         target = qbState;
 
-                        // (Your existing blocker-avoidance logic)
+                        // Blocker-avoidance logic
                         const blockerInPath = offenseStates.find(o => !o.engagedWith && getDistance(pState, o) < 2.0 && Math.abs(o.x - pState.x) < 1.0 && ((pState.y < o.y && o.y < (target?.y || pState.y + 5)) || (pState.y > o.y && o.y > (target?.y || pState.y - 5))));
                         if (blockerInPath) {
                             const avoidOffset = (pState.x > blockerInPath.x) ? 1.0 : -1.0;
-                            // Target a point 2 yards to the side of the blocker, at the QB's depth
                             target = { x: pState.x + avoidOffset * 2, y: qbState.y };
                         }
+
+                        // 5. Fallback
                     } else {
-                        // --- Fallback: QB is gone or no QB state ---
-                        target = null; // Pursuit logic will catch this and hold position
+                        // QB is gone or no QB state (should be caught by ballCarrierState check, but good to have)
+                        target = null;
                     }
                     break;
 
                 case assignment?.startsWith('run_gap_'):
                 case assignment?.startsWith('run_edge_'):
-                    // --- 🛠️ FIX: Check for ball in air FIRST ---
+
+                    // --- 🛠️ NEW, RE-ORDERED LOGIC ---
+
+                    // 1. Ball in air?
                     if (isBallInAir) {
                         // Ball is thrown, abort gap assignment
                         target = { x: ballPos.targetX, y: ballPos.targetY };
+
+                        // 2. Ball on ground? (Handoff or Completed Pass)
+                    } else if (ballCarrierState && ballCarrierState.id !== qbState?.id) {
+                        // It's a completed pass or a handoff. Attack the carrier.
+                        target = ballCarrierState;
+
+                        // 3. Diagnosed pass, ball still in QB's hands?
                     } else if (diagnosedPlayType === 'pass') {
-                        // It's a pass, but not yet thrown. Convert to pass rush.
+                        // It's a pass, but not yet thrown (or it's a QB scramble).
+                        // Convert to pass rush.
                         pState.action = 'pass_rush';
                         target = qbState; // Target QB
+
+                        // 4. Diagnosed run (or still reading)?
                     } else {
-                        // --- 🛠️ MODIFIED: It's a run OR STILL READING: Attack gap, then carrier ---
-                        // A run-stopper's job is to play the run until proven otherwise.
+                        // It's a run OR STILL READING: Attack gap, then carrier.
                         const runTargetPoint = zoneBoundaries[assignment];
                         const ballSnapX = offenseStates.find(p => p.slot === 'OL2')?.initialX || CENTER_X;
                         target = runTargetPoint ? { x: ballSnapX + (runTargetPoint.xOffset || 0), y: playState.lineOfScrimmage + (runTargetPoint.yOffset || 0) } : { x: pState.x, y: pState.y };
@@ -2310,43 +2365,63 @@ function checkBlockCollisions(playState) {
     const defenseStates = playState.activePlayers.filter(p => !p.isOffense);
 
     offenseStates.forEach(blocker => {
+
+        // --- 🛠️ FIX #1: Add this check ---
+        // If the blocker is stunned, they cannot initiate a new block.
+        if (blocker.stunnedTicks > 0) {
+            return;
+        }
+        // --- END FIX #1 ---
+
         const isRunBlock = blocker.action === 'run_block';
 
         if ((blocker.action === 'pass_block' || isRunBlock) && !blocker.engagedWith) {
 
-            let defendersInRange = defenseStates.filter(defender =>
-                !defender.isBlocked && !defender.isEngaged &&
-                getDistance(blocker, defender) < BLOCK_ENGAGE_RANGE
-            );
+            // --- 🛠️ FIX #2: "Hitbox" Collision Logic ---
+            // Define a "hitbox" for engagement
+            const ENGAGE_X_RANGE = 1.5; // How far sideways (yards)
+            const ENGAGE_Y_RANGE = 1.2; // How far forward/back (yards)
+
+            let defendersInRange = defenseStates.filter(defender => {
+                if (defender.isBlocked || defender.isEngaged ||
+                    // --- 🛠️ FIX #3: Stunned defenders cannot BE engaged ---
+                    (defender.stunnedTicks > 0)) {
+                    // --- END FIX #3 ---
+                    return false;
+                }
+
+                // Check proximity using separate X and Y "hitboxes"
+                const distY = Math.abs(blocker.y - defender.y);
+                const distX = Math.abs(blocker.x - defender.x);
+
+                return (distX < ENGAGE_X_RANGE) && (distY < ENGAGE_Y_RANGE);
+            });
+            // --- ⛔ OLD 'getDistance' CODE REMOVED ---
 
             if (defendersInRange.length > 0) {
-                // --- NEW: Add a preference for defenders downfield in a run play ---
+                // --- (Your existing sorting logic is good) ---
                 if (isRunBlock) {
-                    // Filter: Only consider defenders who are on the line or slightly downfield
                     defendersInRange = defendersInRange.filter(d =>
                         d.y > blocker.y || d.y >= playState.lineOfScrimmage - 0.5
                     );
-                    // Sort: Prioritize based on proximity to the blocker's *initial* position
                     defendersInRange.sort((a, b) =>
                         getDistance({ x: blocker.initialX, y: blocker.initialY }, a) -
                         getDistance({ x: blocker.initialX, y: blocker.initialY }, b)
                     );
                 } else {
-                    // Pass Block: Just sort by distance to current position
                     defendersInRange.sort((a, b) => getDistance(blocker, a) - getDistance(blocker, b));
                 }
-                // --- END NEW LOGIC ---
+                // --- END SORTING ---
 
-                const targetDefender = defendersInRange[0]; // Take the highest priority target
+                const targetDefender = defendersInRange[0];
 
-                if (targetDefender) { // Check if the filtering left a valid target
-                    // --- 🛠️ ADD DEBUG LOG ---
+                if (targetDefender) {
                     if (blocker.slot.startsWith('OL')) {
                         console.log(`%c*** BLOCK ENGAGED (Tick: ${playState.tick}) ***: ${blocker.name} (${blocker.slot}) has engaged ${targetDefender.name} (${targetDefender.slot})`, 'color: #00dd00; font-weight: bold;');
                     }
                     blocker.engagedWith = targetDefender.id;
                     blocker.isEngaged = true;
-                    blocker.dynamicTargetId = targetDefender.id;
+                    blocker.dynamicTargetId = targetDefender.id; // This "Brain vs Body" fix is correct
                     targetDefender.isBlocked = true;
                     targetDefender.blockedBy = blocker.id;
                     targetDefender.isEngaged = true;
