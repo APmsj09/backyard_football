@@ -521,7 +521,7 @@ function diagnosePlay(pState, truePlayType, offensivePlayKey, tick) {
     // 1. Minimum Ticks to Read
     // Higher IQ = fewer ticks. 99 IQ = 2 ticks. 50 IQ = 4 ticks.
     // This formula can be tuned, but it creates a 2-4 tick "read" window.
-    const minTicksToRead = Math.max(6, Math.round((100 - iq) / 25) * 3 + 3); // Was max(2, ... /25) + 1
+    const minTicksToRead = Math.max(10, Math.round((100 - iq) / 25) * 3 + 3); // Was max(2, ... /25) + 1
 
     if (tick < minTicksToRead) {
         return 'read'; // Still reading, not committed
@@ -2687,7 +2687,7 @@ function checkTackleCollisions(playState, gameLog) {
 
                 // --- 🛠️ NEW: SET JUKE ACTION & COOLDOWN ---
                 ballCarrierState.action = 'juke'; // Set temporary action state
-                ballCarrierState.jukeTicks = 5; // New timer to run the visualization effect
+                ballCarrierState.jukeTicks = 12; // New timer to run the visualization effect
 
                 // Momentum Loss: Halve the current speed
                 ballCarrierState.currentSpeedYPS *= 0.5;
@@ -2922,8 +2922,8 @@ function updateQBDecision(playState, offenseStates, defenseStates, gameLog) {
 
 
     // --- 3. Update Read Progression ---
-    const READ_PROGRESSION_DELAY = Math.max(6, Math.round((100 - qbIQ) / 8)); // ~0.3s - 0.7s
-    const initialReadTicks = 18; // ~0.9s to start first read
+    const READ_PROGRESSION_DELAY = Math.max(12, Math.round((100 - qbIQ) / 8)); // ~0.3s - 0.7s
+    const initialReadTicks = 20; // ~0.9s to start first read
 
     let decisionMade = false; // We declare this here to use in the read logic
 
@@ -3074,8 +3074,8 @@ function updateQBDecision(playState, offenseStates, defenseStates, gameLog) {
             const rec_dy = targetPlayerState.targetY - targetPlayerState.y;
             const rec_distToTarget = Math.sqrt(rec_dx * rec_dx + rec_dy * rec_dy);
 
-            const MIN_SPEED_YPS = 4.5;
-            const MAX_SPEED_YPS = 9.0;
+            const MIN_SPEED_YPS = 3.5;
+            const MAX_SPEED_YPS = 8.0;
             const rec_speedYPS = MIN_SPEED_YPS + ((targetPlayerState.speed || 50) - 1) * (MAX_SPEED_YPS - MIN_SPEED_YPS) / (99 - 1);
             const rec_moveDist = rec_speedYPS * targetPlayerState.fatigueModifier * est_airTime;
 
