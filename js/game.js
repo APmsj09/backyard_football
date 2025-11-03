@@ -439,6 +439,10 @@ function updatePlayerPosition(pState, timeDelta) {
         pState.currentSpeedYPS = 0; // Player is stunned
         return;
     }
+    if (pState.isBlocked || pState.isEngaged) {
+         pState.currentSpeedYPS = 0; // Player is in a block, don't move based on target
+         return; 
+    }
 
     const dx = pState.targetX - pState.x;
     const dy = pState.targetY - pState.y;
@@ -1310,6 +1314,18 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
                     assignment = 'qb_setup';
                     action = assignment; if (play.type === 'pass') targetY = startY - 2;
                 }
+                else {
+                        // Default for other players (like WRs) who don't have an assignment
+                        if (play.type === 'run') {
+                            assignment = 'run_block';
+                            action = 'run_block';
+                            targetY = startY + 0.5; // Step forward to block
+                        } else {
+                            // Default for unassigned on pass play (shouldn't happen often)
+                            assignment = 'idle';
+                            action = 'idle';
+                        }
+                    }
 
             } else { // Defense
                 // --- DEFENSE ALIGNMENT / ACTION ---
@@ -2378,7 +2394,7 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                             target = getZoneCenter('zone_hook_curl_middle', playState.lineOfScrimmage);
                         } else {
                             // --- ACTION: Read Play ---
-                            target = { x: pState.x, y: pState.y };
+                            target = { x: pState.x, y: pState.y + 0.5 };
                         }
                         break;
 
