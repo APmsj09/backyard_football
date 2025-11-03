@@ -1816,7 +1816,7 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                             // 🚨 FIX: Target the defender's CURRENT X and Y.
                             // This makes the OL attack the DL to initiate the block.
                             pState.targetX = target.x;
-                            pState.targetY = target.y; // <-- ✅ THIS IS THE FIX
+                            pState.targetY = LOS + POCKET_DEPTH_PASS;
                         } else {
                             // --- Target is GONE (blocked, etc.) ---
                             pState.dynamicTargetId = null;
@@ -3605,10 +3605,7 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
             // --- STEP 2: Update Player Intentions/Targets (AI) ---
             updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrierState, type, offensivePlayKey, assignments, defensivePlayKey, gameLog);
 
-            // --- STEP 3: Update Player Positions (Movement) ---
-            playState.activePlayers.forEach(p => updatePlayerPosition(p, timeDelta));
-
-            // --- STEP 4: Check Collisions & Resolve Catches/Incompletions ---
+            // --- STEP 3: Check Collisions & Resolve Catches/Incompletions ---
             if (playState.playIsLive) {
                 // A. Check for new block engagements
                 checkBlockCollisions(playState);
@@ -3650,6 +3647,8 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
                     }
                 }
             }            
+            // --- STEP 4: Update Player Positions (Movement) ---
+            playState.activePlayers.forEach(p => updatePlayerPosition(p, timeDelta));
 
             // --- STEP 5: Resolve "Nudge" Collisions ---
             resolvePlayerCollisions(playState);
