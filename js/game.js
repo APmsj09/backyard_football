@@ -613,7 +613,7 @@ export async function initializeLeague(onProgress) {
         const coach = getRandom(coachPersonalities);
 
         const offenseFormationData = offenseFormations[coach.preferredOffense] || offenseFormations['Balanced'];
-        const defenseFormationData = defenseFormations[coach.preferredDefense] || defenseFormations['3-3-1'];
+        const defenseFormationData = defenseFormations[coach.preferredDefense] || defenseFormations['3-1-3'];
         const offenseSlots = offenseFormationData.slots;
         const defenseSlots = defenseFormationData.slots;
 
@@ -679,7 +679,7 @@ export function createPlayerTeam(teamName) {
     const division = div0Count <= div1Count ? divisionNames[0] : divisionNames[1];
 
     const defaultOffense = 'Balanced';
-    const defaultDefense = '3-3-1';
+    const defaultDefense = '3-1-3';
     const defaultOffenseSlots = offenseFormations[defaultOffense].slots;
     const defaultDefenseSlots = defenseFormations[defaultDefense].slots;
 
@@ -3907,7 +3907,7 @@ function determinePlayCall(offense, defense, down, yardsToGo, ballOn, scoreDiff,
     let chosenPlay = null;
 
     // --- Basic Read of Defensive Personnel ---
-    const isHeavyBox = defBox >= 5; // e.g., 4-2-1 or 3-3-1 (3DL+3LB=6) qualifies
+    const isHeavyBox = defBox >= 5; // e.g., 4-2-1 or 3-1-3 (3DL+3LB=6) qualifies
     const isLightBox = defBox <= 3; // e.g., 2-3-2 (2DL+3LB=5, but LBs might be spread) - Needs refinement
     const hasManyDBs = defDBs >= 2;
 
@@ -4006,7 +4006,7 @@ function determinePlayCall(offense, defense, down, yardsToGo, ballOn, scoreDiff,
  * @returns {string} The name of the chosen defensive formation (e.g., "2-3-2").
  */
 function determineDefensiveFormation(defense, offenseFormationName, down, yardsToGo) {
-    const coachPreferredFormation = defense.coach?.preferredDefense || '3-3-1';
+    const coachPreferredFormation = defense.coach?.preferredDefense || '3-1-3';
     const offPersonnel = offenseFormations[offenseFormationName]?.personnel;
 
     // --- 1. Situational Overrides (Highest Priority) ---
@@ -4039,13 +4039,13 @@ function determineDefensiveFormation(defense, offenseFormationName, down, yardsT
             // Offense is "Balanced". Favor coach's preference.
             weightedChoices = [
                 coachPreferredFormation, coachPreferredFormation, // 50% chance for coach's
-                '3-3-1', // 25% chance for standard balanced
+                '3-1-3', // 25% chance for standard balanced
                 '2-3-2'  // 25% chance for pass-ready D
             ];
         }
     } else {
         // Fallback if personnel is unknown
-        weightedChoices = [coachPreferredFormation, '3-3-1'];
+        weightedChoices = [coachPreferredFormation, '3-1-3'];
     }
 
     // --- 3. Select and Return ---
