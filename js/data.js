@@ -341,8 +341,12 @@ export const defensivePlaybook = {
     'Run_Stop_4-2-1': { // Specific to 4-2-1
         name: 'Run Stop (4-2-1)', concept: 'Run', blitz: true, // Assign 'Run' concept
         assignments: {
-            'DL1': 'run_edge_left', 'DL2': 'run_gap_B_left', 'DL3': 'run_gap_B_right', 'DL4': 'run_edge_right',
-            'LB1': 'run_gap_A_left', 'LB2': 'run_gap_A_right',
+            'DL1': 'run_edge_left', 
+            'DL2': 'run_gap_B_left', 
+            'DL3': 'run_gap_B_right', 
+            'DL4': 'run_edge_right',
+            'LB1': 'run_gap_A_left', 
+            'LB2': 'run_gap_A_right',
             'DB1': 'run_support' // Safety attacks downhill
         }
     },
@@ -707,8 +711,8 @@ export const defenseFormations = {
             DL2: [-2.5, 1.0],
             DL3: [2.5, 1.0],
             DL4: [7, 1.0],    // 🛠️ Moved to 1yd (Neutral Zone)
-            LB1: [-3, 6],
-            LB2: [3, 6],
+            LB1: [-15, 6],
+            LB2: [15, 6],
             DB1: [0, 10]      // 🛠️ FIXED: Pulled safety up from 13 to 10 yds
         },
         slotPriorities: {
@@ -726,8 +730,8 @@ export const defenseFormations = {
         slots: ['DL1', 'DL2', 'LB1', 'LB2', 'LB3', 'DB1', 'DB2'],
         personnel: { DL: 2, LB: 3, DB: 2 },
         coordinates: {
-            DL1: [-3, 1.0],
-            DL2: [3, 1.0],
+            DL1: [-4, 1.0],
+            DL2: [4, 1.0],
             LB1: [-9, 5.0],   // 🛠️ Widened and standardized depth
             LB2: [0, 5.5],    // 🛠️ Moved MLB back slightly
             LB3: [9, 5.0],    // 🛠️ Widened and standardized depth
@@ -820,7 +824,7 @@ export const coachPersonalities = [
         type: 'Ground and Pound',
         description: 'Builds a tough team that runs the ball and plays strong defense.',
         preferredOffense: 'Power',
-        preferredDefense: '4-2-1',
+        preferredDefense: '4-0-3',
         attributePreferences: {
             physical: { speed: 1.1, strength: 1.8, agility: 1.2, stamina: 1.4, height: 1.0, weight: 1.6 },
             mental: { playbookIQ: 1.0, clutch: 1.0, consistency: 1.5, toughness: 1.5 },
@@ -831,7 +835,7 @@ export const coachPersonalities = [
         type: 'Blitz-Happy Defense',
         description: 'Wants fast, aggressive defenders to wreak havoc.',
         preferredOffense: 'Balanced',
-        preferredDefense: '4-2-1',
+        preferredDefense: '4-1-2',
         attributePreferences: {
             physical: { speed: 1.6, strength: 1.3, agility: 1.7, stamina: 1.2, height: 1.1, weight: 1.3 },
             mental: { playbookIQ: 1.2, clutch: 1.4, consistency: 0.9, toughness: 1.2 },

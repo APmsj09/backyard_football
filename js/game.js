@@ -1792,22 +1792,17 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                 }
 
                 case 'pass_block':
-                    // This logic runs *every tick* after assignTarget() has run.
-
                     if (pState.dynamicTargetId) {
                         const target = defenseStates.find(d => d.id === pState.dynamicTargetId);
 
-                        // Check if target is still valid (exists and isn't already blocked by someone else)
                         if (target && (target.blockedBy === null || target.blockedBy === pState.id)) {
                             // --- Target is valid: DYNAMICALLY UPDATE ---
-                            // Target the defender's CURRENT X position.
-                            // Target our static pocket Y depth.
+                            // 🚨 FIX: Target the defender's CURRENT X and Y.
+                            // This makes the OL attack the DL to initiate the block.
                             pState.targetX = target.x;
-                            pState.targetY = LOS + POCKET_DEPTH_PASS;
+                            pState.targetY = target.y; // <-- ✅ THIS IS THE FIX
                         } else {
                             // --- Target is GONE (blocked, etc.) ---
-                            // Clear the ID. The main assignment logic at the
-                            // top of the function will find a new target next tick.
                             pState.dynamicTargetId = null;
                             // Hold current pocket position
                             pState.targetX = pState.initialX;
