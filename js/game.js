@@ -181,11 +181,11 @@ function generatePlayer(minAge = 10, maxAge = 16) {
 
     // Define the ranges once
     const boostRanges = {
-        'Elite': { min: 80, max: 95 },
-        'Good': { min: 65, max: 80 },
-        'Average': { min: 50, max: 70 },
-        'Below Average': { min: 35, max: 55 },
-        'Poor': { min: 20, max: 40 }
+        'Elite': { min: 89, max: 99 },
+        'Good': { min: 75, max: 89 },
+        'Average': { min: 65, max: 75 },
+        'Below Average': { min: 55, max: 65 },
+        'Poor': { min: 45, max: 55 }
     };
 
     // Helper function to get talent data from a random roll
