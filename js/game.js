@@ -3597,25 +3597,7 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
             // --- STEP 3: Update Player Positions (Movement) ---
             playState.activePlayers.forEach(p => updatePlayerPosition(p, timeDelta));
 
-            // --- STEP 3.5: Resolve Player Collisions ---
-            resolvePlayerCollisions(playState);
-
-            // --- STEP 4: Update Ball Position ---
-            // Re-find carrier *after* movement, in case of handoff (future)
-            ballCarrierState = playState.activePlayers.find(p => p.isBallCarrier);
-            if (ballPos.inAir) {
-                ballPos.x += ballPos.vx * timeDelta;
-                ballPos.y += ballPos.vy * timeDelta;
-                ballPos.z += ballPos.vz * timeDelta;
-                ballPos.vz -= 9.8 * timeDelta; // Apply gravity
-            } else if (ballCarrierState) {
-                // Ball is held, sync it to the carrier's new position
-                ballPos.x = ballCarrierState.x;
-                ballPos.y = ballCarrierState.y;
-                ballPos.z = 0.5;
-            }
-
-            // --- STEP 5: Check Collisions & Resolve Catches/Incompletions ---
+            // --- STEP 4: Check Collisions & Resolve Catches/Incompletions ---
             if (playState.playIsLive) {
                 // A. Check for new block engagements
                 checkBlockCollisions(playState);
@@ -3656,29 +3638,53 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
                         }
                     }
                 }
+            }            
+
+            // --- STEP 5: Resolve "Nudge" Collisions ---
+            resolvePlayerCollisions(playState);
+
+            // --- STEP 6: Update Ball Position ---
+            // Re-find carrier *after* movement, in case of handoff (future)
+            ballCarrierState = playState.activePlayers.find(p => p.isBallCarrier);
+            if (ballPos.inAir) {
+                ballPos.x += ballPos.vx * timeDelta;
+                ballPos.y += ballPos.vy * timeDelta;
+                ballPos.z += ballPos.vz * timeDelta;
+                ballPos.vz -= 9.8 * timeDelta; // Apply gravity
+            } else if (ballCarrierState) {
+                // Ball is held, sync it to the carrier's new position
+                ballPos.x = ballCarrierState.x;
+                ballPos.y = ballCarrierState.y;
+                ballPos.z = 0.5;
             }
 
-            // --- STEP 6: Resolve Ongoing Battles (Blocks) ---
+            // --- STEP 7: Resolve Ongoing Battles (Blocks) ---
             if (playState.playIsLive) {
                 resolveOngoingBlocks(playState, gameLog);
             }
 
-            // --- STEP 7: Check Ball Carrier End Conditions (TD, OOB) ---
+            // --- STEP 8: Check Ball Carrier End Conditions (TD, OOB) ---
             if (playState.playIsLive) {
                 ballCarrierState = playState.activePlayers.find(p => p.isBallCarrier);
                 if (ballCarrierState) {
                     // Check for Touchdown (in either endzone)
-                    if (ballCarrierState.y >= FIELD_LENGTH - 10) { // Offensive TD
-                        playState.yards = ballCarrierState.y - playState.lineOfScrimmage; // Maximize yards
+                    if (ballCarrierState.y >= FIELD_LENGTH - 10 && ballCarrierState.isOffense) { // 🛠️ Offensive TD
+                        playState.yards = ballCarrierState.y - playState.lineOfScrimmage;
                         playState.touchdown = true; playState.playIsLive = false;
                         const scorer = game.players.find(p => p && p.id === ballCarrierState.id);
                         gameLog.push(`🎉 TOUCHDOWN ${scorer?.name || 'player'}!`);
                         break;
-                    } else if (ballCarrierState.y < 10) { // Defensive TD
-                        playState.yards = 0; // No offensive yards
+                    } else if (ballCarrierState.y < 10 && !ballCarrierState.isOffense) { // 🛠️ Defensive TD
+                        playState.yards = 0; 
                         playState.touchdown = true; playState.playIsLive = false;
                         const scorer = game.players.find(p => p && p.id === ballCarrierState.id);
                         gameLog.push(`🎉 DEFENSIVE TOUCHDOWN ${scorer?.name || 'player'}!`);
+                        break;
+                    } else if (ballCarrierState.y < 10 && ballCarrierState.isOffense) { // 🛠️ NEW: SAFETY
+                        playState.yards = 0; 
+                        playState.safety = true; // You must add safety: false to playState
+                        playState.playIsLive = false;
+                        gameLog.push(`SAFETY! ${ballCarrierState.name} was tackled in the endzone!`);
                         break;
                     }
                     // Check for Out of Bounds (Sidelines)
@@ -3691,7 +3697,7 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
                 }
             }
 
-            // --- STEP 8: Update Fatigue ---
+            // --- STEP 9: Update Fatigue ---
             playState.activePlayers.forEach(pState => {
                 if (!pState) return;
                 let fatigueGain = 0.1;
@@ -3713,7 +3719,7 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
                 }
             });
 
-            // --- STEP 9: Record Visualization Frame ---
+            // --- STEP 10: Record Visualization Frame ---
             const frameData = {
                 players: JSON.parse(JSON.stringify(playState.activePlayers)),
                 ball: JSON.parse(JSON.stringify(ballPos)),
