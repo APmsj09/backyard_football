@@ -241,22 +241,21 @@ export const offensivePlaybook = {
 // Defensive Play Call Definitions
 export const defensivePlaybook = {
     // --- Cover 1 --- (Usually needs 1 Deep Safety + Man coverage)
-    'Cover_1_Man_3-3-1': { // Specific to 3-3-1 (3DL, 3LB, 1DB)
-        name: 'Cover 1 Man (3-3-1)', concept: 'Man', blitz: false,
-        assignments: {
-            // --- 3 Man Rush ---
-            'DL1': 'pass_rush',
-            'DL2': 'pass_rush',
-            'DL3': 'pass_rush',
-            // --- 3 Man Coverage ---
-            'DB1': 'man_cover_WR1', // 🛠️ FIX: Lone DB takes the #1 WR
-            'LB1': 'man_cover_WR2', // Mismatch, but covered
-            'LB3': 'man_cover_WR3', // Mismatch, but covered
-            // --- 1 Deep Safety ---
-            'LB2': 'zone_deep_middle' // 🛠️ FIX: MLB becomes the "1" deep safety
-            // NOTE: This leaves the RB1 uncovered, a common Cover 1 tradeoff.
-        }
-    },
+    'Cover_1_Man_3-1-3': {
+    name: 'Cover 1 Man (3-1-3)',
+    concept: 'Man',
+    blitz: false,
+    compatibleFormations: ['3-1-3'],
+    assignments: {
+        'DL1': 'pass_rush',
+        'DL2': 'pass_rush',
+        'DL3': 'pass_rush',
+        'LB1': 'man_cover_RB1',         // LB takes the RB
+        'DB1': 'man_cover_WR1',         // Corner 1 takes WR1
+        'DB2': 'man_cover_WR2',         // Corner 2 takes WR2
+        'DB3': 'zone_deep_middle'       // Safety is the "1" deep
+    }
+},
     'Cover_1_Man_2-3-2': { // Specific to 2-3-2 (2DL, 3LB, 2DB)
         name: 'Cover 1 Man (2-3-2)', concept: 'Man', blitz: true, // It's a 3-man blitz
         assignments: {
@@ -275,7 +274,7 @@ export const defensivePlaybook = {
     },
 
     // --- Cover 2 Zone --- (Usually needs 2 Deep Safeties)
-    'Cover_1_Robber_3-3-1': {
+    'Cover_1_Robber_3-1-3': {
         name: 'Cover 1 Robber (3-3-1)', concept: 'Zone', blitz: false,
         assignments: {
             // --- 3 Man Rush ---
@@ -308,7 +307,7 @@ export const defensivePlaybook = {
     },
 
     // --- Man Blitz --- (Cover 0 - No Safety Help)
-    'Man_Blitz_3-3-1': {
+    'Man_Blitz_3-1-3': {
         name: 'Man Blitz (3-3-1)', concept: 'Man', blitz: true,
         assignments: {
             // --- 🛠️ 4 Man Rush ---
@@ -380,27 +379,39 @@ export const defensivePlaybook = {
             // Note: This is a high-risk blitz! The RB (RB1) is left completely uncovered.
         }
     },
-    'Run_Stop_3-3-1': { // Specific to 3-3-1
-        name: 'Run Stop (3-3-1)', concept: 'Run', blitz: true,
-        assignments: {
-            'DL1': 'run_gap_B_left', 'DL2': 'run_gap_A', 'DL3': 'run_gap_B_right', // DL control inside gaps
-            'LB1': 'run_edge_left', 'LB2': 'fill_run', 'LB3': 'run_edge_right', // LBs take edges + fill
-            'DB1': 'run_support'
-        }
-    },
+    'Run_Stop_3-1-3': {
+    name: 'Run Stop (3-1-3)',
+    concept: 'Run',
+    blitz: true,
+    compatibleFormations: ['3-1-3'],
+    assignments: {
+        'DL1': 'run_gap_B_left',
+        'DL2': 'run_gap_A',
+        'DL3': 'run_gap_B_right',
+        'LB1': 'fill_run',              // LB shoots a gap
+        'DB1': 'man_cover_WR1',           // Corner 1 contains
+        'DB2': 'man_cover_WR2',           // Corner 2 contains
+        'DB3': 'run_support'            // Safety comes downhill
+    }
+},
 
 
     // --- Cover 3 Zone --- (Usually 1 Deep Middle, 2 Deep Sides, 4 Underneath)
-    'Cover_3_Zone_3-3-1': {
-        name: 'Cover 1 Hook (3-3-1)', concept: 'Zone', blitz: false, // <-- RENAMED
-        assignments: {
-            'DL1': 'pass_rush', 'DL2': 'pass_rush', 'DL3': 'pass_rush',
-            'LB1': 'zone_flat_left',  // Left flat
-            'LB2': 'zone_hook_curl_middle', // <-- FIX: Middle hook/curl
-            'LB3': 'zone_flat_right', // Right flat
-            'DB1': 'zone_deep_middle' // 1 deep safety
-        }
-    },
+    'Cover_3_Zone_3-1-3': {
+    name: 'Cover 3 Zone (3-1-3)',
+    concept: 'Zone',
+    blitz: false,
+    compatibleFormations: ['3-1-3'],
+    assignments: {
+        'DL1': 'pass_rush',
+        'DL2': 'pass_rush',
+        'DL3': 'pass_rush',
+        'LB1': 'zone_hook_curl_middle', // LB has short middle
+        'DB1': 'zone_flat_left',        // Corner has left flat
+        'DB2': 'zone_flat_right',       // Corner has right flat
+        'DB3': 'zone_deep_middle'       // Safety has deep middle
+    }
+},
     'Cover_3_Zone_2-3-2': {
         name: 'Cover 3 Blitz (2-3-2)', concept: 'Zone', blitz: true, // 🛠️ RENAMED
         assignments: {
@@ -418,7 +429,7 @@ export const defensivePlaybook = {
     },
 
     // --- Zone Blitz ---
-    'Zone_Blitz_3-3-1': { // Specific to 3-3-1
+    'Zone_Blitz_3-1-3': { // Specific to 3-3-1
         name: 'Zone Blitz (3-3-1)', concept: 'Zone', blitz: true,
         assignments: {
             // --- 🛠️ 4 Man Rush ---
@@ -489,6 +500,21 @@ export const defensivePlaybook = {
             'DB2': 'man_cover_WR2'          // Safety 2 takes second WR
         }
     },
+    'LB_Blitz_3-1-3': {
+    name: 'LB Man Blitz (3-1-3)',
+    concept: 'Man',
+    blitz: true,
+    compatibleFormations: ['3-1-3'],
+    assignments: {
+        'DL1': 'pass_rush',
+        'DL2': 'pass_rush',
+        'DL3': 'pass_rush',
+        'LB1': 'blitz_gap',             // LB blitzes
+        'DB1': 'man_cover_WR1',         // 3 DBs in Cover 0 (no help)
+        'DB2': 'man_cover_WR2',
+        'DB3': 'man_cover_WR3'
+    }
+},
     'Run_Stop_4-1-2': {
         name: 'Run Stop (4-1-2)',
         concept: 'Run',
@@ -584,9 +610,9 @@ export const offenseFormations = {
             RB1: [-3, -5.5],  // Running back offset left, slightly deeper than QB
             WR1: [-18, 0.5],  // Wide Receiver Left (Split End), just off LoS
             WR2: [18, 0.5],   // Wide Receiver Right (Split End), just off LoS
-            OL1: [-4, -0.5],  // Left Lineman (Guard/Tackle area)
+            OL1: [-3, -0.5],  // Left Lineman (Guard/Tackle area)
             OL2: [0, -0.75],  // Center Lineman (slightly back)
-            OL3: [4, -0.5]    // Right Lineman (Guard/Tackle area)
+            OL3: [3, -0.5]    // Right Lineman (Guard/Tackle area)
         },
         slotPriorities: { // Key attributes for AI slotting (higher weight = more important)
             QB1: { throwingAccuracy: 3, playbookIQ: 2, speed: 1, agility: 1 },
@@ -608,9 +634,9 @@ export const offenseFormations = {
             WR1: [-22, 0.5],  // Far Wide Receiver Left (X)
             WR2: [22, 0.5],   // Far Wide Receiver Right (Z)
             WR3: [-9, 0.5],   // Slot Receiver Left (Y)
-            OL1: [-4, -0.5],  // <-- Adjusted to a 3-man line
+            OL1: [-3, -0.5],  // <-- Adjusted to a 3-man line
             OL2: [0, -0.75],  // <-- Adjusted (Center)
-            OL3: [4, -0.5]    // <-- ADDED
+            OL3: [3, -0.5]    // <-- ADDED
         },
         slotPriorities: {
             QB1: { throwingAccuracy: 3, playbookIQ: 2, speed: 1, agility: 1 },
@@ -632,9 +658,9 @@ export const offenseFormations = {
             RB1: [0, -6],     // Tailback / Halfback deep
             RB2: [-3, -4.5],  // Fullback / Blocking back offset left
             WR1: [15, 0.5],   // Single Wide Receiver Right
-            OL1: [-4, -0.5],  // Left Lineman
+            OL1: [-3, -0.5],  // Left Lineman
             OL2: [0, -0.75],  // Center Lineman
-            OL3: [4, -0.5]    // Right Lineman
+            OL3: [3, -0.5]    // Right Lineman
         },
         slotPriorities: {
             QB1: { throwingAccuracy: 2, playbookIQ: 1, strength: 1 }, // Less emphasis on throwing initially
@@ -649,27 +675,27 @@ export const offenseFormations = {
 };
 
 export const defenseFormations = {
-    '3-3-1': {
-        name: '3-3-1', // Balanced front, single high safety
-        slots: ['DL1', 'DL2', 'DL3', 'LB1', 'LB2', 'LB3', 'DB1'],
-        personnel: { DL: 3, LB: 3, DB: 1 },
+    '3-1-3': {
+        name: '3-1-3', // Pass-focused, 3 DBs
+        slots: ['DL1', 'DL2', 'DL3', 'LB1', 'DB1', 'DB2', 'DB3'],
+        personnel: { DL: 3, LB: 1, DB: 3 },
         coordinates: { // [xOffset from Center, yOffset from LoS]
-            DL1: [-4, 1.0],   // 🛠️ Moved to 1yd (Neutral Zone)
-            DL2: [0, 1.0],
-            DL3: [4, 1.0],    // 🛠️ Moved to 1yd (Neutral Zone)
-            LB1: [-5, 4.5],
-            LB2: [0, 5],
-            LB3: [5, 4.5],
-            DB1: [0, 10]      // 🛠️ FIXED: Pulled safety up from 12 to 10 yds
+            'DL1': [-5, 1.0],   // Left End
+            'DL2': [0, 1.0],    // Nose Tackle
+            'DL3': [5, 1.0],    // Right End
+            'LB1': [0, 5.0],    // Middle Linebacker
+            'DB1': [-18, 1.0],  // Left Corner (Pressed)
+            'DB2': [18, 1.0],   // Right Corner (Pressed)
+            'DB3': [0, 12.0]   // Deep Safety
         },
         slotPriorities: {
-            DL1: { strength: 3, blockShedding: 2, speed: 1, tackling: 1 },
-            DL2: { strength: 3, blockShedding: 3, weight: 1, tackling: 1 },
-            DL3: { strength: 3, blockShedding: 2, speed: 1, tackling: 1 },
-            LB1: { speed: 2, tackling: 3, playbookIQ: 2, agility: 1 },
-            LB2: { strength: 2, tackling: 3, playbookIQ: 3, blockShedding: 1 },
-            LB3: { speed: 2, tackling: 3, playbookIQ: 2, agility: 1 },
-            DB1: { speed: 3, playbookIQ: 2, catchingHands: 1, agility: 2 }
+            'DL1': { strength: 0.4, blockShedding: 0.3, speed: 0.2, tackling: 0.1 },
+            'DL2': { strength: 0.5, blockShedding: 0.4, tackling: 0.1, weight: 0.1 },
+            'DL3': { strength: 0.4, blockShedding: 0.3, speed: 0.2, tackling: 0.1 },
+            'LB1': { tackling: 0.3, speed: 0.3, playbookIQ: 0.2, strength: 0.2 },
+            'DB1': { speed: 0.5, agility: 0.3, catchingHands: 0.1, playbookIQ: 0.1 },
+            'DB2': { speed: 0.5, agility: 0.3, catchingHands: 0.1, playbookIQ: 0.1 },
+            'DB3': { speed: 0.4, playbookIQ: 0.3, agility: 0.2, tackling: 0.1 },
         }
     },
     '4-2-1': {
@@ -681,8 +707,8 @@ export const defenseFormations = {
             DL2: [-2.5, 1.0],
             DL3: [2.5, 1.0],
             DL4: [7, 1.0],    // 🛠️ Moved to 1yd (Neutral Zone)
-            LB1: [-3, 5],
-            LB2: [3, 5],
+            LB1: [-3, 6],
+            LB2: [3, 6],
             DB1: [0, 10]      // 🛠️ FIXED: Pulled safety up from 13 to 10 yds
         },
         slotPriorities: {
@@ -705,8 +731,8 @@ export const defenseFormations = {
             LB1: [-9, 5.0],   // 🛠️ Widened and standardized depth
             LB2: [0, 5.5],    // 🛠️ Moved MLB back slightly
             LB3: [9, 5.0],    // 🛠️ Widened and standardized depth
-            DB1: [-20, 7.0],  // 🛠️ FIXED: Moved back to 7 yds and widened
-            DB2: [20, 7.0]    // 🛠️ FIXED: Moved back to 7 yds and widened
+            DB1: [-22, 7.0],  // 🛠️ FIXED: Moved back to 7 yds and widened
+            DB2: [22, 7.0]    // 🛠️ FIXED: Moved back to 7 yds and widened
         },
         slotPriorities: {
             DL1: { strength: 2, blockShedding: 2, speed: 2, tackling: 1 },
@@ -735,8 +761,8 @@ export const defenseFormations = {
             'LB1': [0, 4.0],   // Middle Linebacker (Stacked 4 yards deep)
 
             // --- Defensive Backs (Safeties) ---
-            'DB1': [-10, 12.0], // Left Safety (Deep Half)
-            'DB2': [10, 12.0],  // Right Safety (Deep Half)
+            'DB1': [-20, 12.0], // Left Safety (Deep Half)
+            'DB2': [20, 12.0],  // Right Safety (Deep Half)
         },
         slotPriorities: {
             'DL1': { strength: 0.4, blockShedding: 0.3, speed: 0.2, tackling: 0.1 },
@@ -816,7 +842,7 @@ export const coachPersonalities = [
         type: 'Balanced',
         description: 'Prefers well-rounded players and a versatile team.',
         preferredOffense: 'Balanced',
-        preferredDefense: '3-3-1',
+        preferredDefense: '3-1-3',
         attributePreferences: {
             physical: { speed: 1.2, strength: 1.2, agility: 1.2, stamina: 1.2, height: 1.1, weight: 1.1 },
             mental: { playbookIQ: 1.2, clutch: 1.2, consistency: 1.2, toughness: 1.1 },
@@ -827,7 +853,7 @@ export const coachPersonalities = [
         type: 'The Moneyballer',
         description: 'Focuses on undervalued mental and technical stats.',
         preferredOffense: 'Balanced',
-        preferredDefense: '3-3-1',
+        preferredDefense: '3-1-3',
         attributePreferences: {
             physical: { speed: 0.8, strength: 0.8, agility: 1.2, stamina: 1.4, height: 1.0, weight: 1.0 },
             mental: { playbookIQ: 1.8, clutch: 1.3, consistency: 1.9, toughness: 1.3 },
