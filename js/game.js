@@ -440,8 +440,8 @@ function updatePlayerPosition(pState, timeDelta) {
         return;
     }
     if (pState.isBlocked || pState.isEngaged) {
-         pState.currentSpeedYPS = 0; // Player is in a block, don't move based on target
-         return; 
+        pState.currentSpeedYPS = 0; // Player is in a block, don't move based on target
+        return;
     }
 
     const dx = pState.targetX - pState.x;
@@ -1315,17 +1315,17 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
                     action = assignment; if (play.type === 'pass') targetY = startY - 2;
                 }
                 else {
-                        // Default for other players (like WRs) who don't have an assignment
-                        if (play.type === 'run') {
-                            assignment = 'run_block';
-                            action = 'run_block';
-                            targetY = startY + 0.5; // Step forward to block
-                        } else {
-                            // Default for unassigned on pass play (shouldn't happen often)
-                            assignment = 'idle';
-                            action = 'idle';
-                        }
+                    // Default for other players (like WRs) who don't have an assignment
+                    if (play.type === 'run') {
+                        assignment = 'run_block';
+                        action = 'run_block';
+                        targetY = startY + 0.5; // Step forward to block
+                    } else {
+                        // Default for unassigned on pass play (shouldn't happen often)
+                        assignment = 'idle';
+                        action = 'idle';
                     }
+                }
 
             } else { // Defense
                 // --- DEFENSE ALIGNMENT / ACTION ---
@@ -1434,11 +1434,11 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
                     // 🚨 FIX: Force DL to be exactly on the neutral zone line
                     startY = LOS + NEUTRAL_ZONE_WIDTH;
                     // Target will be set by AI, but start them at their line
-                    targetY = startY; 
+
                 } else {
                     // LBs and DBs can line up deeper based on formation
                     startY = Math.max(LOS + NEUTRAL_ZONE_WIDTH, startY);
-                    targetY = Math.max(LOS + NEUTRAL_ZONE_WIDTH, targetY);
+
                 }
 
             } else {
@@ -1447,11 +1447,11 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
                     // 🚨 FIX: Force OL to be exactly on the Line of Scrimmage
                     startY = LOS;
                     // Target will be set by AI, but start them on the line
-                    targetY = startY;
+
                 } else {
                     // QBs, RBs, WRs can line up behind the LoS
                     startY = Math.min(LOS, startY);
-                    targetY = Math.min(LOS, targetY);
+
                 }
             }
             // --- END NEUTRAL ZONE CLAMP ---
@@ -3660,7 +3660,7 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
                         }
                     }
                 }
-            }            
+            }
             // --- STEP 4: Update Player Positions (Movement) ---
             playState.activePlayers.forEach(p => updatePlayerPosition(p, timeDelta));
 
@@ -3699,13 +3699,13 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
                         gameLog.push(`🎉 TOUCHDOWN ${scorer?.name || 'player'}!`);
                         break;
                     } else if (ballCarrierState.y < 10 && !ballCarrierState.isOffense) { // 🛠️ Defensive TD
-                        playState.yards = 0; 
+                        playState.yards = 0;
                         playState.touchdown = true; playState.playIsLive = false;
                         const scorer = game.players.find(p => p && p.id === ballCarrierState.id);
                         gameLog.push(`🎉 DEFENSIVE TOUCHDOWN ${scorer?.name || 'player'}!`);
                         break;
                     } else if (ballCarrierState.y < 10 && ballCarrierState.isOffense) { // 🛠️ NEW: SAFETY
-                        playState.yards = 0; 
+                        playState.yards = 0;
                         playState.safety = true; // You must add safety: false to playState
                         playState.playIsLive = false;
                         gameLog.push(`SAFETY! ${ballCarrierState.name} was tackled in the endzone!`);
