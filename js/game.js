@@ -48,7 +48,7 @@ const CENTER_X = FIELD_WIDTH / 2; // Approx 26.65
 
 // --- Physics/Interaction Constants ---
 const TICK_DURATION_SECONDS = 0.05;
-const BLOCK_ENGAGE_RANGE = 2;
+const BLOCK_ENGAGE_RANGE = 3;
 const TACKLE_RANGE = 1.8;
 const CATCH_RADIUS = 0.8;
 const SEPARATION_THRESHOLD = 2.0;
@@ -1949,7 +1949,7 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
 
                         // --- 🛠️ MODIFICATIONS ---
                         const lanes = [-5, 0, 5]; // 1. Widen the cut lanes
-                        const DOWNHILL_BONUS = 1.5; // 2. Lower the bonus from 5.0 to 1.5
+                        const DOWNHILL_BONUS = 1.0; // 2. Lower the bonus from 5.0 to 1.5
                         // --- END MODIFICATIONS ---
 
                         let bestLane = { xOffset: 0, minDist: -Infinity };
