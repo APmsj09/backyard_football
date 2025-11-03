@@ -1604,21 +1604,17 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                         console.log(`[${logPrefix}] No primary threats. CLIMBING to block ${secondaryTarget.name} (${secondaryTarget.slot})`);
                     }
                 } else {
-                    // --- 🛠️ BUG FIX ---
-                    // No one left to block, just run downfield
-                    blocker.dynamicTargetId = null;
-                    // 'defender' is not defined here.
-                    blocker.targetX = blocker.initialX; // Stay in your lane
-                    blocker.targetY = blocker.y + 7;    // and run 7 yards downfield
-                    // --- END BUG FIX ---
-
+                    // --- No one left to block, set ID to null ---
+                    // The 'run_block' case will handle this.
+                    blocker.dynamicTargetId = null; 
+                    
                     if (blocker.slot.startsWith('OL')) {
-                        console.log(`[${logPrefix}] No threats found. Climbing open field.`);
+                        console.log(`[${logPrefix}] No threats found. Will climb open field.`);
                     }
                 }
             } else {
                 // --- PASS BLOCK ---
-                // Hold the pocket (this is correct)
+                // No threats found? Hold the pocket.
                 blocker.dynamicTargetId = null;
                 blocker.targetX = blocker.initialX;
                 blocker.targetY = LOS + POCKET_DEPTH_PASS;
@@ -1853,22 +1849,26 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
 
                         // Check if target is still valid
                         if (target && (target.blockedBy === null || target.blockedBy === pState.id)) {
-
-
+                            
+                            // --- Target is valid: Engage ---
                             // Mirror the defender's X-position.
                             pState.targetX = target.x;
                             pState.targetY = target.y; // Target the defender's current Y
 
-
                         } else {
-                            // --- Target is GONE ---
+                            // --- Target is GONE (e.g., blocked by someone else) ---
                             pState.dynamicTargetId = null;
-                            // Revert to the "climb" assignment
+                            // Revert to holding the line
                             pState.targetX = pState.initialX;
                             pState.targetY = LOS + POCKET_DEPTH_RUN;
                         }
+                    } else {
+                        // --- dynamicTargetId is NULL ---
+                        // This means assignTarget found no primary or secondary threats.
+                        // THIS is where the "climb in open field" logic belongs.
+                        pState.targetX = pState.initialX; // Stay in your lane
+                        pState.targetY = pState.y + 7;    // Run 7 yards downfield
                     }
-                    // else: dynamicTargetId is null (already set by assignTarget)
                     target = null; // Prevent falling into defensive pursuit logic
                     break;
 
@@ -2530,9 +2530,7 @@ function checkBlockCollisions(playState) {
 
         if ((blocker.action === 'pass_block' || isRunBlock)) {
 
-            // --- "BRAIN-FIRST" LOGIC ---
-            // Trust the AI Brain (updatePlayerTargets) to assign a target.
-
+            
             let targetDefender = null;
 
             // 1. Check if the assigned target is valid and in range
