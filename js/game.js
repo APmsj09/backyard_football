@@ -1430,15 +1430,29 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
                     );
                     attempts++;
                 }
-                // DEFENSE: Must line up *on or past* the neutral zone.
-                // e.g., If LOS=30, they must be at Y >= 31.0
-                startY = Math.max(LOS + NEUTRAL_ZONE_WIDTH, startY);
-                targetY = Math.max(LOS + NEUTRAL_ZONE_WIDTH, targetY);
+                if (slot.startsWith('DL')) {
+                    // 🚨 FIX: Force DL to be exactly on the neutral zone line
+                    startY = LOS + NEUTRAL_ZONE_WIDTH;
+                    // Target will be set by AI, but start them at their line
+                    targetY = startY; 
+                } else {
+                    // LBs and DBs can line up deeper based on formation
+                    startY = Math.max(LOS + NEUTRAL_ZONE_WIDTH, startY);
+                    targetY = Math.max(LOS + NEUTRAL_ZONE_WIDTH, targetY);
+                }
+
             } else {
-                // OFFENSE: Must line up *on or behind* the LoS.
-                // e.g., If LOS=30, they must be at Y <= 30.0
-                startY = Math.min(LOS, startY);
-                targetY = Math.min(LOS, targetY);
+                // --- OFFENSE ---
+                if (slot.startsWith('OL')) {
+                    // 🚨 FIX: Force OL to be exactly on the Line of Scrimmage
+                    startY = LOS;
+                    // Target will be set by AI, but start them on the line
+                    targetY = startY;
+                } else {
+                    // QBs, RBs, WRs can line up behind the LoS
+                    startY = Math.min(LOS, startY);
+                    targetY = Math.min(LOS, targetY);
+                }
             }
             // --- END NEUTRAL ZONE CLAMP ---
 
