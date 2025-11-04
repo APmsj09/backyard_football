@@ -1289,8 +1289,8 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
                 assignment = assignments?.[slot]; // Update assignment from offensive playbook
 
                 if (assignment) {
-                    if (assignment.toLowerCase().includes('block_pass')) { action = 'pass_block'; targetY = startY - 0.5; }
-                    else if (assignment.toLowerCase().includes('block_run')) { action = 'run_block'; targetY = startY + 0.5; }
+                    if (assignment.toLowerCase().includes('pass_block')) { action = 'pass_block'; targetY = startY - 0.5; }
+                    else if (assignment.toLowerCase().includes('run_block')) { action = 'run_block'; targetY = startY + 0.5; }
                     else if (assignment.toLowerCase().includes('run_')) {
                         action = 'run_path'; targetY = startY + 5;
                         if (assignment.includes('outside')) targetX = startX + (startX < CENTER_X ? -2 : 2); else targetX = startX + getRandomInt(-1, 1);
@@ -1582,10 +1582,10 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
     // --- ⭐️ Separate Linemen from Other Blockers ⭐️ ---
     const linemen = allBlockers.filter(p => p.slot.startsWith('OL'));
     const otherBlockers = allBlockers.filter(p => !p.slot.startsWith('OL'));
-    
+
     // 3. Helper function for LINEMEN ONLY (assignTarget)
     const assignLinemanTarget = (blocker, availableThreats, logPrefix) => {
-        
+
         if (availableThreats.length === 0) {
             // --- "CLIMB" LOGIC ---
             if (blocker.action === 'run_block') {
@@ -1599,12 +1599,12 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                 if (secondaryThreats.length > 0) {
                     const secondaryTarget = secondaryThreats[0];
                     blocker.dynamicTargetId = secondaryTarget.id;
-                    olAssignedDefenders.add(secondaryTarget.id); 
+                    olAssignedDefenders.add(secondaryTarget.id);
                     if (blocker.slot === 'OL2') {
                         console.log(`%c[OL2-BRAIN] ${logPrefix}: No primary threats. CLIMBING to block ${secondaryTarget.name} (${secondaryTarget.slot})`, 'color: #FFBF00');
                     }
                 } else {
-                    blocker.dynamicTargetId = null; 
+                    blocker.dynamicTargetId = null;
                     if (blocker.slot === 'OL2') {
                         console.log(`%c[OL2-BRAIN] ${logPrefix}: No threats found. Will climb open field.`, 'color: #FFBF00');
                     }
@@ -1613,7 +1613,7 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                 // --- PASS BLOCK ---
                 blocker.dynamicTargetId = null;
                 blocker.targetX = blocker.initialX;
-                blocker.targetY = LOS + POCKET_DEPTH_PASS;
+                blocker.targetY = targetY;
                 if (blocker.slot === 'OL2') {
                     console.log(`%c[OL2-BRAIN] ${logPrefix}: No target chosen. Holding Pocket.`, 'color: #FFBF00');
                 }
@@ -1644,7 +1644,7 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                 console.log(`%c[OL2-BRAIN] ${logPrefix}: No threat in lane. Helping on closest: ${targetDefender.name} (${targetDefender.slot})`, 'color: #FFBF00');
             }
         }
-        
+
         // --- ⭐️ FIX: Add a null check to prevent crash ⭐️ ---
         if (targetDefender) {
             blocker.dynamicTargetId = targetDefender.id;
@@ -1657,7 +1657,7 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
             blocker.dynamicTargetId = null;
             blocker.targetX = blocker.initialX;
             blocker.targetY = LOS + (blocker.action === 'pass_block' ? POCKET_DEPTH_PASS : POCKET_DEPTH_RUN);
-             if (blocker.slot === 'OL2') {
+            if (blocker.slot === 'OL2') {
                 console.log(`%c[OL2-BRAIN] ${logPrefix}: No primary or help targets found. Holding.`, 'color: #FFBF00');
             }
         }
@@ -1687,17 +1687,17 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
             assignLinemanTarget(ol, availableThreats, prefix);
         }
     }
-    
+
     // 5. Process OTHER BLOCKERS (RBs, WRs)
     if (otherBlockers.length > 0) {
         for (const blocker of otherBlockers) {
             // RBs/WRs get simpler logic: "Block the closest unassigned threat"
             const availableThreats = allThreats.filter(d => !olAssignedDefenders.has(d.id));
-            
+
             if (availableThreats.length > 0) {
                 availableThreats.sort((a, b) => getDistance(blocker, a) - getDistance(blocker, b));
                 const targetDefender = availableThreats[0];
-                
+
                 blocker.dynamicTargetId = targetDefender.id;
                 olAssignedDefenders.add(targetDefender.id);
             } else {
@@ -1785,11 +1785,10 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
         // --- Offensive Logic ---
         if (pState.isOffense) {
             // Check if this is an OL who was faking a run block on a PA pass
-            if (pState.slot.startsWith('OL') && 
-                pState.action === 'run_block' && 
-                playType === 'pass' && 
-                playState.tick > 20) 
-            {
+            if (pState.slot.startsWith('OL') &&
+                pState.action === 'run_block' &&
+                playType === 'pass' &&
+                playState.tick > 20) {
                 // The fake is over! Switch to pass blocking.
                 pState.action = 'pass_block';
                 // The "Brain" (which now runs every tick) will see this new action
@@ -1854,10 +1853,8 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
 
                         if (target && (target.blockedBy === null || target.blockedBy === pState.id)) {
                             // --- Target is valid: DYNAMICALLY UPDATE ---
-                            // 🚨 FIX: Target the defender's CURRENT X and Y.
-                            // This makes the OL attack the DL to initiate the block.
                             pState.targetX = target.x;
-                            pState.targetY = LOS + POCKET_DEPTH_PASS;
+                            pState.targetY = target.y; // <-- 💡 THE FIX: Target the defender's current Y
                         } else {
                             // --- Target is GONE (blocked, etc.) ---
                             pState.dynamicTargetId = null;
@@ -1866,10 +1863,12 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                             pState.targetY = LOS + POCKET_DEPTH_PASS;
                         }
                     }
-                    // else: dynamicTargetId is null.
-                    // This means 'assignTarget' set us to a static pocket-holding
-                    // spot. The pState.targetX/Y are already correct, so we do nothing
-                    // and let those static coordinates be used.
+                    // else: dynamicTargetId is null (no target assigned)
+                    // Hold current pocket position
+                    else {
+                        pState.targetX = pState.initialX;
+                        pState.targetY = LOS + POCKET_DEPTH_PASS;
+                    }
 
                     target = null; // Prevent falling into defensive pursuit logic
                     break;
@@ -1882,21 +1881,18 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                         if (target && (target.blockedBy === null || target.blockedBy === pState.id)) {
 
                             // --- Target is valid: Engage ---
-                            // Mirror the defender's X-position.
                             pState.targetX = target.x;
                             pState.targetY = target.y; // Target the defender's current Y
 
                         } else {
                             // --- Target is GONE (e.g., blocked by someone else) ---
                             pState.dynamicTargetId = null;
-                            // Revert to holding the line
-                            pState.targetX = pState.initialX;
-                            pState.targetY = LOS + POCKET_DEPTH_RUN;
+                            pState.targetX = pState.initialX; // Stay in your lane
+                            pState.targetY = pState.y + 7;    // 💡 THE FIX: Climb to the next level
                         }
                     } else {
-                        // --- dynamicTargetId is NULL ---
-                        // This means assignTarget found no primary or secondary threats.
-                        // THIS is where the "climb in open field" logic belongs.
+                        // --- dynamicTargetId is NULL (No target assigned) ---
+                        // Climb in open field
                         pState.targetX = pState.initialX; // Stay in your lane
                         pState.targetY = pState.y + 7;    // Run 7 yards downfield
                     }

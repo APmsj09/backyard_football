@@ -275,18 +275,18 @@ export const defensivePlaybook = {
 
     // --- Cover 2 Zone --- (Usually needs 2 Deep Safeties)
     'Cover_1_Robber_3-1-3': {
-        name: 'Cover 1 Robber (3-3-1)', concept: 'Zone', blitz: false,
+        name: 'Cover 1 Robber (3-1-3)',
+        concept: 'Zone',
+        blitz: false,
+        compatibleFormations: ['3-1-3'], // Added this for clarity
         assignments: {
-            // --- 3 Man Rush ---
             'DL1': 'pass_rush',
             'DL2': 'pass_rush',
             'DL3': 'pass_rush',
-            // --- 3 Underneath Zones ---
-            'LB1': 'zone_flat_left',        // Left flat
-            'LB3': 'zone_flat_right',       // Right flat
-            'LB2': 'zone_hook_curl_middle', // "Robber" sits in the middle
-            // --- 1 Deep Zone ---
-            'DB1': 'zone_deep_middle'      // Single high safety
+            'LB1': 'zone_hook_curl_middle', // <-- LB1 is the "Robber"
+            'DB1': 'zone_flat_left',        // <-- DB1 plays left flat
+            'DB2': 'zone_flat_right',       // <-- DB2 plays right flat
+            'DB3': 'zone_deep_middle'       // <-- DB3 is the deep safety
         }
     },
     'Cover_2_Zone_2-3-2': {
@@ -308,18 +308,21 @@ export const defensivePlaybook = {
 
     // --- Man Blitz --- (Cover 0 - No Safety Help)
     'Man_Blitz_3-1-3': {
-        name: 'Man Blitz (3-3-1)', concept: 'Man', blitz: true,
+        name: 'Man Blitz (3-1-3)',
+        concept: 'Man',
+        blitz: true,
+        compatibleFormations: ['3-1-3'],
         assignments: {
-            // --- 🛠️ 4 Man Rush ---
+            // --- 5 Man Rush ---
             'DL1': 'blitz_edge',
             'DL2': 'blitz_gap',
             'DL3': 'blitz_edge',
-            'LB2': 'blitz_gap', // 🛠️ FIX: Send the MLB
-            // --- 3 Man Coverage (Cover 0) ---
-            'DB1': 'man_cover_WR1', // DB takes best WR
-            'LB1': 'man_cover_WR2', // Mismatch
-            'LB3': 'man_cover_WR3'  // Mismatch
-            // NOTE: RB1 is uncovered. This is a true blitz.
+            'LB1': 'blitz_gap',             // <-- LB1 blitzes
+            'DB1': 'blitz_edge',            // <-- DB1 blitzes
+            // --- 2 Man Coverage (Cover 0) ---
+            'DB2': 'man_cover_WR1',         // <-- DB2 takes WR1
+            'DB3': 'man_cover_WR2'           // <-- DB3 takes WR2
+            // Note: RB1 and WR3 are left open. This is a true all-out blitz.
         }
     },
     'Man_Blitz_2-3-2': {
@@ -345,8 +348,8 @@ export const defensivePlaybook = {
             'DL2': 'run_gap_B_left', 
             'DL3': 'run_gap_B_right', 
             'DL4': 'run_edge_right',
-            'LB1': 'run_gap_A_left', 
-            'LB2': 'run_gap_A_right',
+            'LB1': 'man_cover_WR1', 
+            'LB2': 'man_cover_WR2',
             'DB1': 'run_support' // Safety attacks downhill
         }
     },
@@ -433,19 +436,22 @@ export const defensivePlaybook = {
     },
 
     // --- Zone Blitz ---
-    'Zone_Blitz_3-1-3': { // Specific to 3-3-1
-        name: 'Zone Blitz (3-3-1)', concept: 'Zone', blitz: true,
+    'Zone_Blitz_3-1-3': { 
+        name: 'Zone Blitz (3-1-3)',
+        concept: 'Zone',
+        blitz: true,
+        compatibleFormations: ['3-1-3'],
         assignments: {
-            // --- 🛠️ 4 Man Rush ---
+            // --- 4 Man Rush ---
             'DL1': 'pass_rush',
-            //         'DL2': 'zone_short_middle', // 🛠️ REMOVED: Nose now rushes
             'DL2': 'pass_rush',
             'DL3': 'pass_rush',
-            'LB1': 'blitz_edge', // One LB blitzes
-            // --- 3 Underneath Zones ---
-            'LB2': 'zone_hook_curl_left',
-            'LB3': 'zone_hook_curl_right', // 🛠️ FIX: Other LBs drop
-            'DB1': 'zone_deep_middle' // Safety plays deep
+            'LB1': 'blitz_gap',             // <-- LB1 blitzes
+            // --- 3 Deep Zones ---
+            'DB1': 'zone_deep_third_left',  // <-- DB1 plays deep left
+            'DB2': 'zone_deep_third_right', // <-- DB2 plays deep right
+            'DB3': 'zone_deep_middle'       // <-- DB3 plays deep middle
+            // Note: This leaves the underneath flats open.
         }
     },
     'Zone_Blitz_2-3-2': { // Specific to 2-3-2
