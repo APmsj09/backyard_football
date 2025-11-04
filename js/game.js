@@ -521,7 +521,7 @@ function diagnosePlay(pState, truePlayType, offensivePlayKey, tick) {
     // 1. Minimum Ticks to Read
     // Higher IQ = fewer ticks. 99 IQ = 2 ticks. 50 IQ = 4 ticks.
     // This formula can be tuned, but it creates a 2-4 tick "read" window.
-    const minTicksToRead = Math.max(10, Math.round((100 - iq) / 25) * 3 + 3); // Was max(2, ... /25) + 1
+    const minTicksToRead = Math.max(20, Math.round((100 - iq) / 25) * 3 + 3); // Was max(2, ... /25) + 1
 
     if (tick < minTicksToRead) {
         return 'read'; // Still reading, not committed
@@ -2757,7 +2757,7 @@ function resolveBattle(powerA, powerB, battle) {
 
     // 5. Define the "reasonable numbers" (Win Threshold)
     // This is how many points a player needs to "win" the tug of war.
-    const WIN_SCORE = 120;
+    const WIN_SCORE = 90;
 
     // 6. Check for a winner
     if (battle.battleScore > WIN_SCORE) {
@@ -2974,7 +2974,7 @@ function updateQBDecision(playState, offenseStates, defenseStates, gameLog) {
     // --- END NEW BLOCK ---
 
     // --- 4. Decision Timing Logic ---
-    const maxDecisionTimeTicks = Math.max(36, Math.round((100 - qbIQ) / 6) * 3 + 15);
+    const maxDecisionTimeTicks = Math.max(55, Math.round((100 - qbIQ) / 6) * 3 + 15);
     const pressureTimeReduction = isPressured ? Math.max(9, Math.round(maxDecisionTimeTicks * 0.3)) : 0;
     const currentDecisionTickTarget = maxDecisionTimeTicks - pressureTimeReduction;
 
