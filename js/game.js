@@ -2241,115 +2241,115 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                     }
 
                     case assignment?.startsWith('zone_'): { // Added brackets for new scope
-                    const zoneCenter = getZoneCenter(assignment, playState.lineOfScrimmage);
-                    let targetThreat = null; // The player we will target
-                    let targetPoint = zoneCenter; // The {x, y} point we will target
-                    const landingSpot = { x: playState.ballState.targetX, y: playState.ballState.targetY };
+                        const zoneCenter = getZoneCenter(assignment, playState.lineOfScrimmage);
+                        let targetThreat = null; // The player we will target
+                        let targetPoint = zoneCenter; // The {x, y} point we will target
+                        const landingSpot = { x: playState.ballState.targetX, y: playState.ballState.targetY };
 
-                    const isDeepZone = assignment.includes('deep');
+                        const isDeepZone = assignment.includes('deep');
 
-                    // Find all receivers currently in or very near this defender's zone
-                    const threatsInZone = offenseStates.filter(o =>
-                        (o.action === 'run_route' || o.action === 'route_complete') &&
-                        isPlayerInZone(o, assignment, playState.lineOfScrimmage)
-                    );
+                        // Find all receivers currently in or very near this defender's zone
+                        const threatsInZone = offenseStates.filter(o =>
+                            (o.action === 'run_route' || o.action === 'route_complete') &&
+                            isPlayerInZone(o, assignment, playState.lineOfScrimmage)
+                        );
 
-                    // --- 1. React to Ball in Air ---
-                    // If the ball is thrown into this defender's zone, attack the landing spot.
-                    if (isBallInAir && isPlayerInZone(landingSpot, assignment, playState.lineOfScrimmage)) {
-                        targetPoint = landingSpot;
-                        targetThreat = null; // Override any player target
-                        break; // Exit the switch, go to pursuit logic
-                    }
+                        // --- 1. React to Ball in Air ---
+                        // If the ball is thrown into this defender's zone, attack the landing spot.
+                        if (isBallInAir && isPlayerInZone(landingSpot, assignment, playState.lineOfScrimmage)) {
+                            targetPoint = landingSpot;
+                            targetThreat = null; // Override any player target
+                            break; // Exit the switch, go to pursuit logic
+                        }
 
-                    // --- 2. React to Run Play ---
-                    const isRunPlay = (diagnosedPlayType === 'run'); // 💡 Use diagnosis
-                    const isQBScramble = qbState && (qbState.action === 'qb_scramble' || qbState.y > playState.lineOfScrimmage + 1);
+                        // --- 2. React to Run Play ---
+                        const isRunPlay = (diagnosedPlayType === 'run'); // 💡 Use diagnosis
+                        const isQBScramble = qbState && (qbState.action === 'qb_scramble' || qbState.y > playState.lineOfScrimmage + 1);
 
-                    if ((isRunPlay || isQBScramble) && ballCarrierState) {
-                        if (!isDeepZone) {
-                            // --- Underneath Zone Run Support ---
-                            if (isPlayerInZone(ballCarrierState, assignment, playState.lineOfScrimmage) || getDistance(pState, ballCarrierState) < 8.0) {
-                                targetThreat = ballCarrierState; // Target the runner
+                        if ((isRunPlay || isQBScramble) && ballCarrierState) {
+                            if (!isDeepZone) {
+                                // --- Underneath Zone Run Support ---
+                                if (isPlayerInZone(ballCarrierState, assignment, playState.lineOfScrimmage) || getDistance(pState, ballCarrierState) < 8.0) {
+                                    targetThreat = ballCarrierState; // Target the runner
+                                }
+                            } else {
+                                // --- 💡 NEW: DEEP ZONE RUN SUPPORT (Safety) ---
+                                // If we diagnose 'run', we "creep up" and prepare to attack.
+                                if (diagnosedPlayType === 'run') {
+                                    // Creep up to 10 yards from LoS, mirroring the ball carrier's X
+                                    targetPoint = { x: ballCarrierState.x, y: playState.lineOfScrimmage + 10 };
+                                    targetThreat = null; // We are targeting a *spot*, not the player yet
+
+                                    // If the carrier breaks past 5 yards, we abandon our spot and attack them directly.
+                                    if (ballCarrierState.y > playState.lineOfScrimmage + 1) {
+                                        targetThreat = ballCarrierState; // Attack!
+                                    }
+                                }
+                                // If it's a pass (diagnosedPlayType === 'pass'), we do nothing here and let the pass logic handle it.
                             }
-                        } else {
-                            // --- 💡 NEW: DEEP ZONE RUN SUPPORT (Safety) ---
-                            // If we diagnose 'run', we "creep up" and prepare to attack.
-                            if (diagnosedPlayType === 'run') {
-                                // Creep up to 10 yards from LoS, mirroring the ball carrier's X
-                                targetPoint = { x: ballCarrierState.x, y: playState.lineOfScrimmage + 10 };
-                                targetThreat = null; // We are targeting a *spot*, not the player yet
+                        }
 
-                                // If the carrier breaks past 5 yards, we abandon our spot and attack them directly.
-                                if (ballCarrierState.y > playState.lineOfScrimmage + 1) {
-                                    targetThreat = ballCarrierState; // Attack!
+                        // --- 3. React to Passing Threats (If not playing the run or ball in air) ---
+                        if (!targetThreat && threatsInZone.length > 0) {
+
+                            if (isDeepZone) {
+                                // --- DEEP ZONE LOGIC ---
+                                // Prioritize the deepest receiver in the zone.
+                                threatsInZone.sort((a, b) => b.y - a.y); // Sort by deepest (highest Y)
+                                targetThreat = threatsInZone[0];
+
+                            } else {
+                                // --- UNDERNEATH ZONE LOGIC ---
+                                // Prioritize the closest receiver.
+                                threatsInZone.sort((a, b) => getDistance(pState, a) - getDistance(pState, b));
+                                targetThreat = threatsInZone[0];
+                            }
+
+                        } else if (!targetThreat && threatsInZone.length === 0) {
+                            // --- 4. No threats in zone. "Read" intermediate routes. ---
+
+                            // 💡 NEW "ROBBER" LOGIC for DEEP SAFETIES
+                            if (isDeepZone && diagnosedPlayType === 'pass') {
+                                // My deep zone is empty. Are there any intermediate threats I can rob?
+                                const intermediateThreats = offenseStates.filter(o =>
+                                    (o.action === 'run_route' || o.action === 'route_complete') &&
+                                    (o.assignment === 'In' || o.assignment === 'Post' || o.assignment === 'Drag') && // Look for crossing routes
+                                    isPlayerInZone(o, 'zone_hook_curl_middle', playState.lineOfScrimmage) // Check the intermediate zone
+                                );
+
+                                if (intermediateThreats.length > 0) {
+                                    // Found a threat! Attack the closest one.
+                                    intermediateThreats.sort((a, b) => getDistance(pState, a) - getDistance(pState, b));
+                                    targetThreat = intermediateThreats[0];
+                                    break; // Exit switch, go to pursuit
                                 }
                             }
-                            // If it's a pass (diagnosedPlayType === 'pass'), we do nothing here and let the pass logic handle it.
+
+                            // Original "Sink" logic for flat defenders
+                            if (assignment.startsWith('zone_flat_')) {
+                                const verticalThreat = offenseStates.find(o =>
+                                    (o.action === 'run_route' || o.action === 'route_complete') &&
+                                    o.y > pState.y + 5 && // Threat is deeper than us
+                                    getDistance(pState, o) < 15 // And in our general area
+                                );
+
+                                if (verticalThreat) {
+                                    const sinkDepth = Math.min(verticalThreat.y, pState.initialY + 7); // Don't sink more than 7 yards
+                                    targetPoint = { x: pState.x, y: sinkDepth };
+                                }
+                            }
+                            // If not a flat zone, and no robber target, targetPoint just remains zoneCenter
                         }
-                    }
 
-                    // --- 3. React to Passing Threats (If not playing the run or ball in air) ---
-                    if (!targetThreat && threatsInZone.length > 0) {
-                        
-                        if (isDeepZone) {
-                            // --- DEEP ZONE LOGIC ---
-                            // Prioritize the deepest receiver in the zone.
-                            threatsInZone.sort((a, b) => b.y - a.y); // Sort by deepest (highest Y)
-                            targetThreat = threatsInZone[0];
-
+                        // --- 5. Set Final Target ---
+                        if (targetThreat) {
+                            target = targetThreat; // Set the target as the player object
                         } else {
-                            // --- UNDERNEATH ZONE LOGIC ---
-                            // Prioritize the closest receiver.
-                            threatsInZone.sort((a, b) => getDistance(pState, a) - getDistance(pState, b));
-                            targetThreat = threatsInZone[0];
+                            target = targetPoint; // Target the calculated point
                         }
 
-                    } else if (!targetThreat && threatsInZone.length === 0) {
-                        // --- 4. No threats in zone. "Read" intermediate routes. ---
-                        
-                        // 💡 NEW "ROBBER" LOGIC for DEEP SAFETIES
-                        if (isDeepZone && diagnosedPlayType === 'pass') {
-                            // My deep zone is empty. Are there any intermediate threats I can rob?
-                            const intermediateThreats = offenseStates.filter(o =>
-                                (o.action === 'run_route' || o.action === 'route_complete') &&
-                                (o.assignment === 'In' || o.assignment === 'Post' || o.assignment === 'Drag') && // Look for crossing routes
-                                isPlayerInZone(o, 'zone_hook_curl_middle', playState.lineOfScrimmage) // Check the intermediate zone
-                            );
-
-                            if (intermediateThreats.length > 0) {
-                                // Found a threat! Attack the closest one.
-                                intermediateThreats.sort((a, b) => getDistance(pState, a) - getDistance(pState, b));
-                                targetThreat = intermediateThreats[0];
-                                break; // Exit switch, go to pursuit
-                            }
-                        }
-                        
-                        // Original "Sink" logic for flat defenders
-                        if (assignment.startsWith('zone_flat_')) {
-                            const verticalThreat = offenseStates.find(o =>
-                                (o.action === 'run_route' || o.action === 'route_complete') &&
-                                o.y > pState.y + 5 && // Threat is deeper than us
-                                getDistance(pState, o) < 15 // And in our general area
-                            );
-
-                            if (verticalThreat) {
-                                const sinkDepth = Math.min(verticalThreat.y, pState.initialY + 7); // Don't sink more than 7 yards
-                                targetPoint = { x: pState.x, y: sinkDepth };
-                            }
-                        }
-                        // If not a flat zone, and no robber target, targetPoint just remains zoneCenter
+                        break; // Go to the main pursuit logic at the end of the function
                     }
-
-                    // --- 5. Set Final Target ---
-                    if (targetThreat) {
-                        target = targetThreat; // Set the target as the player object
-                    } else {
-                        target = targetPoint; // Target the calculated point
-                    }
-
-                    break; // Go to the main pursuit logic at the end of the function
-                }
 
                     case assignment === 'pass_rush':
                     case assignment === 'blitz_gap':
@@ -4564,15 +4564,49 @@ export function simulateGame(homeTeam, awayTeam) {
             if (result.turnover) {
                 driveActive = false;
             } else if (result.touchdown) {
-                ballOn = 100;
-                const goesForTwo = Math.random() > 0.85;
-                const conversionSuccess = Math.random() > (goesForTwo ? 0.6 : 0.05);
-                if (conversionSuccess) {
-                    const points = goesForTwo ? 2 : 1;
+                ballOn = 100; // Mark the touchdown
+
+                // --- 1. Decide Conversion Type ---
+                const goesForTwo = Math.random() > 0.85; // 15% chance to go for 2
+                const points = goesForTwo ? 2 : 1;
+                const conversionBallOn = goesForTwo ? 95 : 98; // 2pt from 5-yd line, 1pt from 2-yd line
+                const conversionYardsToGo = 100 - conversionBallOn; // Yards needed (5 or 2)
+
+                gameLog.push(`--- ${points}-Point Conversion Attempt (from the ${conversionYardsToGo}-yd line) ---`);
+
+                // --- 2. Call the Play ---
+                const conversionOffensePlayKey = determinePlayCall(offense, defense, 1, conversionYardsToGo, conversionBallOn, scoreDiff, gameLog, drivesRemainingInGame);
+                const conversionDefenseFormation = determineDefensiveFormation(defense, offense.formations.offense, 1, conversionYardsToGo);
+                defense.formations.defense = conversionDefenseFormation;
+                const conversionDefensePlayKey = determineDefensivePlayCall(defense, offense, 1, conversionYardsToGo, conversionBallOn, scoreDiff, gameLog, drivesRemainingInGame);
+
+                // Log the conversion play calls
+                const offPlayName = conversionOffensePlayKey.split('_').slice(1).join(' ');
+                const defPlayName = defensivePlaybook[conversionDefensePlayKey]?.name || conversionDefensePlayKey;
+                gameLog.push(`🏈 **Offense:** ${offPlayName}`);
+                gameLog.push(`🛡️ **Defense:** ${defPlayName}`);
+
+                // --- 3. Resolve the Play ---
+                const conversionResult = resolvePlay(offense, defense, conversionOffensePlayKey, conversionDefensePlayKey, {
+                    gameLog,
+                    weather,
+                    ballOn: conversionBallOn,
+                    ballHash: 'M',
+                    down: 1,
+                    yardsToGo: conversionYardsToGo
+                });
+
+                // --- 4. Add Visualization Frames ---
+                if (conversionResult.visualizationFrames) {
+                    allVisualizationFrames.push(...conversionResult.visualizationFrames);
+                }
+
+                // --- 5. Tally Score ---
+                if (conversionResult.touchdown) {
                     gameLog.push(`✅ ${points}-point conversion GOOD!`);
                     if (offense.id === homeTeam.id) homeScore += (6 + points); else awayScore += (6 + points);
                 } else {
-                    gameLog.push(`❌ ${goesForTwo ? '2-point' : 'Extra point'} conversion FAILED!`);
+                    gameLog.push(`❌ ${points}-point conversion FAILED!`);
                     if (offense.id === homeTeam.id) homeScore += 6; else awayScore += 6;
                 }
                 driveActive = false;
