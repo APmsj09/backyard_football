@@ -108,8 +108,8 @@ export const routeTree = {
 
     // --- Blocking Assignments ---
     // Paths are minimal, logic is handled in updatePlayerTargets
-    'BlockRun': { path: [{ x: 0, y: 1 }] },
-    'BlockPass': { path: [{ x: 0, y: -0.5 }] },
+    'run_block': { path: [{ x: 0, y: 1 }] },
+    'pass_block': { path: [{ x: 0, y: -0.5 }] },
 
     // --- Running Back "Routes" (Placeholders for AI) ---
     // Actual pathing handled by 'run_path' action in updatePlayerTargets based on assignment name
@@ -122,27 +122,27 @@ export const offensivePlaybook = {
     // --- Balanced Formation (QB1, RB1, WR1, WR2, OL1, OL2, OL3) ---
     'Balanced_InsideRun': {
         type: 'run', tags: ['run', 'inside'],
-        assignments: { 'RB1': 'run_inside', 'WR1': 'BlockRun', 'WR2': 'BlockRun', 'OL1': 'BlockRun', 'OL2': 'BlockRun', 'OL3': 'BlockRun' }
+        assignments: { 'RB1': 'run_inside', 'WR1': 'run_block', 'WR2': 'run_block', 'OL1': 'run_block', 'OL2': 'run_block', 'OL3': 'run_block' }
     }, // Added OL blocks
     'Balanced_OutsideRun': {
         type: 'run', tags: ['run', 'outside'],
-        assignments: { 'RB1': 'run_outside', 'WR1': 'BlockRun', 'WR2': 'BlockRun', 'OL1': 'BlockRun', 'OL2': 'BlockRun', 'OL3': 'BlockRun' }
+        assignments: { 'RB1': 'run_outside', 'WR1': 'run_block', 'WR2': 'run_block', 'OL1': 'run_block', 'OL2': 'run_block', 'OL3': 'run_block' }
     }, // Added OL blocks
     'Balanced_SlantFlat': {
         type: 'pass', playAction: false, tags: ['pass', 'short', 'quick'],
-        assignments: { 'RB1': 'Flat', 'WR1': 'Slant', 'WR2': 'Slant', 'OL1': 'BlockPass', 'OL2': 'BlockPass', 'OL3': 'BlockPass' }
+        assignments: { 'RB1': 'Flat', 'WR1': 'Slant', 'WR2': 'Slant', 'OL1': 'pass_block', 'OL2': 'pass_block', 'OL3': 'pass_block' }
     }, // Renamed, added OL
     'Balanced_CurlCombo': {
         type: 'pass', playAction: false, tags: ['pass', 'medium', 'timing'],
-        assignments: { 'RB1': 'Flat', 'WR1': 'Curl', 'WR2': 'Out', 'OL1': 'BlockPass', 'OL2': 'BlockPass', 'OL3': 'BlockPass' }
+        assignments: { 'RB1': 'Flat', 'WR1': 'Curl', 'WR2': 'Out', 'OL1': 'pass_block', 'OL2': 'pass_block', 'OL3': 'pass_block' }
     }, // New play, added OL
     'Balanced_PA_Post': {
         type: 'pass', tags: ['pass', 'deep', 'pa'],
-        assignments: { 'RB1': 'BlockPass', 'WR1': 'Fly', 'WR2': 'Post', 'OL1': 'BlockPass', 'OL2': 'BlockPass', 'OL3': 'BlockPass' }
+        assignments: { 'RB1': 'pass_block', 'WR1': 'Fly', 'WR2': 'Post', 'OL1': 'pass_block', 'OL2': 'pass_block', 'OL3': 'pass_block' }
     },
     'Balanced_PA_Cross': {
         type: 'pass', tags: ['pass', 'medium', 'pa'],
-        assignments: { 'RB1': 'BlockPass', 'WR1': 'In', 'WR2': 'Drag', 'OL1': 'BlockPass', 'OL2': 'BlockPass', 'OL3': 'BlockPass' }
+        assignments: { 'RB1': 'pass_block', 'WR1': 'In', 'WR2': 'Drag', 'OL1': 'pass_block', 'OL2': 'pass_block', 'OL3': 'pass_block' }
     },
 
     // --- Spread Formation (QB1, WR1, WR2, WR3, OL1, OL2, OL3) ---
@@ -150,12 +150,12 @@ export const offensivePlaybook = {
         type: 'run', tags: ['run', 'inside', 'qb'], // Changed to QB run
         assignments: {
             'QB1': 'run_inside', // QB1 is now the runner
-            'WR1': 'BlockRun',
-            'WR2': 'BlockRun',
-            'WR3': 'BlockRun',
-            'OL1': 'BlockRun',
-            'OL2': 'BlockRun',
-            'OL3': 'BlockRun' // Added OL3
+            'WR1': 'run_block',
+            'WR2': 'run_block',
+            'WR3': 'run_block',
+            'OL1': 'run_block',
+            'OL2': 'run_block',
+            'OL3': 'run_block' // Added OL3
         }
     },
     'Spread_QuickSlants': {
@@ -164,9 +164,9 @@ export const offensivePlaybook = {
             'WR1': 'Slant',
             'WR2': 'Slant',
             'WR3': 'Flat', // WR3 takes the old RB route
-            'OL1': 'BlockPass',
-            'OL2': 'BlockPass',
-            'OL3': 'BlockPass' // Added OL3
+            'OL1': 'pass_block',
+            'OL2': 'pass_block',
+            'OL3': 'pass_block' // Added OL3
         }
     },
     'Spread_Three_Verts': { // Renamed from FourVerts
@@ -175,20 +175,20 @@ export const offensivePlaybook = {
             'WR1': 'Fly',
             'WR2': 'Fly',
             'WR3': 'Post', // Removed the RB1: 'Flat' route
-            'OL1': 'BlockPass',
-            'OL2': 'BlockPass',
-            'OL3': 'BlockPass' // Added OL3
+            'OL1': 'pass_block',
+            'OL2': 'pass_block',
+            'OL3': 'pass_block' // Added OL3
         }
     },
     'Spread_WR_Screen': {
         type: 'pass', tags: ['pass', 'screen'],
         assignments: {
             'WR3': 'Screen',
-            'WR1': 'BlockRun',
-            'WR2': 'BlockRun',
-            'OL1': 'BlockRun',
-            'OL2': 'BlockPass',
-            'OL3': 'BlockPass' // Added OL3 (was RB1)
+            'WR1': 'run_block',
+            'WR2': 'run_block',
+            'OL1': 'run_block',
+            'OL2': 'pass_block',
+            'OL3': 'pass_block' // Added OL3 (was RB1)
         }
     },
     'Spread_Mesh': {
@@ -197,9 +197,9 @@ export const offensivePlaybook = {
             'WR1': 'Drag',
             'WR2': 'Drag',
             'WR3': 'In', // Removed the RB1: 'Wheel' route
-            'OL1': 'BlockPass',
-            'OL2': 'BlockPass',
-            'OL3': 'BlockPass' // Added OL3
+            'OL1': 'pass_block',
+            'OL2': 'pass_block',
+            'OL3': 'pass_block' // Added OL3
         }
     },
     'Spread_Y-Cross': {
@@ -208,33 +208,33 @@ export const offensivePlaybook = {
             'WR1': 'Fly',
             'WR2': 'In',
             'WR3': 'Drag', // Removed the RB1: 'Flat' route
-            'OL1': 'BlockPass',
-            'OL2': 'BlockPass',
-            'OL3': 'BlockPass' // Added OL3
+            'OL1': 'pass_block',
+            'OL2': 'pass_block',
+            'OL3': 'pass_block' // Added OL3
         }
     },
 
     // --- Power Formation (QB1, RB1, RB2, WR1, OL1, OL2, OL3) ---
     'Power_Dive': {
         type: 'run', tags: ['run', 'inside', 'power'],
-        assignments: { 'RB1': 'run_inside', 'RB2': 'BlockRun', 'WR1': 'BlockRun', 'OL1': 'BlockRun', 'OL2': 'BlockRun', 'OL3': 'BlockRun' }
+        assignments: { 'RB1': 'run_inside', 'RB2': 'run_block', 'WR1': 'run_block', 'OL1': 'run_block', 'OL2': 'run_block', 'OL3': 'run_block' }
     }, // Added OL blocks
     'Power_Sweep': {
         type: 'run', tags: ['run', 'outside', 'power'],
-        assignments: { 'RB1': 'run_outside', 'RB2': 'BlockRun', 'WR1': 'BlockRun', 'OL1': 'BlockRun', 'OL2': 'BlockRun', 'OL3': 'BlockRun' }
+        assignments: { 'RB1': 'run_outside', 'RB2': 'run_block', 'WR1': 'run_block', 'OL1': 'run_block', 'OL2': 'run_block', 'OL3': 'run_block' }
     }, // Added OL blocks
     'Power_PA_Bootleg': {
         type: 'pass', tags: ['pass', 'medium', 'pa', 'rollout'],
-        assignments: { 'RB1': 'BlockPass', 'RB2': 'Flat', 'WR1': 'Corner', 'OL1': 'BlockPass', 'OL2': 'BlockPass', 'OL3': 'BlockPass' }
+        assignments: { 'RB1': 'pass_block', 'RB2': 'Flat', 'WR1': 'Corner', 'OL1': 'pass_block', 'OL2': 'pass_block', 'OL3': 'pass_block' }
     },
     // Added OL
     'Power_RB_Screen': {
         type: 'pass', tags: ['pass', 'screen'],
-        assignments: { 'RB1': 'Screen', 'RB2': 'BlockPass', 'WR1': 'BlockRun', 'OL1': 'BlockRun', 'OL2': 'BlockRun', 'OL3': 'BlockPass' }
+        assignments: { 'RB1': 'Screen', 'RB2': 'pass_block', 'WR1': 'run_block', 'OL1': 'run_block', 'OL2': 'run_block', 'OL3': 'pass_block' }
     }, // Added OL
     'Power_PA_FB_Flat': {
         type: 'pass', tags: ['pass', 'short', 'pa'],
-        assignments: { 'RB1': 'BlockPass', 'RB2': 'Flat', 'WR1': 'In', 'OL1': 'BlockPass', 'OL2': 'BlockPass', 'OL3': 'BlockPass' }
+        assignments: { 'RB1': 'pass_block', 'RB2': 'Flat', 'WR1': 'In', 'OL1': 'pass_block', 'OL2': 'pass_block', 'OL3': 'pass_block' }
     },
 };
 
