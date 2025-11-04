@@ -130,18 +130,22 @@ export const offensivePlaybook = {
     }, // Added OL blocks
     'Balanced_SlantFlat': {
         type: 'pass', playAction: false, tags: ['pass', 'short', 'quick'],
+        readProgression: ['WR1', 'WR2', 'RB1'], // Read 1: Slant, Read 2: Slant, Checkdown: Flat
         assignments: { 'RB1': 'Flat', 'WR1': 'Slant', 'WR2': 'Slant', 'OL1': 'pass_block', 'OL2': 'pass_block', 'OL3': 'pass_block' }
     }, // Renamed, added OL
     'Balanced_CurlCombo': {
         type: 'pass', playAction: false, tags: ['pass', 'medium', 'timing'],
+        readProgression: ['WR1', 'WR2', 'RB1'], // Read 1: Curl, Read 2: Out, Checkdown: Flat
         assignments: { 'RB1': 'Flat', 'WR1': 'Curl', 'WR2': 'Out', 'OL1': 'pass_block', 'OL2': 'pass_block', 'OL3': 'pass_block' }
     }, // New play, added OL
     'Balanced_PA_Post': {
         type: 'pass', tags: ['pass', 'deep', 'pa'],
+        readProgression: ['WR2', 'WR1'], // Read 1: Post, Read 2: Fly (RB is blocking)
         assignments: { 'RB1': 'pass_block', 'WR1': 'Fly', 'WR2': 'Post', 'OL1': 'pass_block', 'OL2': 'pass_block', 'OL3': 'pass_block' }
     },
     'Balanced_PA_Cross': {
         type: 'pass', tags: ['pass', 'medium', 'pa'],
+        readProgression: ['WR1', 'WR2'], // Read 1: In route, Read 2: Drag (RB is blocking)
         assignments: { 'RB1': 'pass_block', 'WR1': 'In', 'WR2': 'Drag', 'OL1': 'pass_block', 'OL2': 'pass_block', 'OL3': 'pass_block' }
     },
 
@@ -150,67 +154,40 @@ export const offensivePlaybook = {
         type: 'run', tags: ['run', 'inside', 'qb'], // Changed to QB run
         assignments: {
             'QB1': 'run_inside', // QB1 is now the runner
-            'WR1': 'run_block',
-            'WR2': 'run_block',
-            'WR3': 'run_block',
-            'OL1': 'run_block',
-            'OL2': 'run_block',
-            'OL3': 'run_block' // Added OL3
+            'WR1': 'run_block', 'WR2': 'run_block', 'WR3': 'run_block',
+            'OL1': 'run_block', 'OL2': 'run_block', 'OL3': 'run_block' 
         }
     },
     'Spread_QuickSlants': {
         type: 'pass', tags: ['pass', 'short', 'quick'],
+        readProgression: ['WR1', 'WR2', 'WR3'], // Read 1: Slant, Read 2: Slant, Checkdown: Flat
         assignments: {
-            'WR1': 'Slant',
-            'WR2': 'Slant',
-            'WR3': 'Flat', // WR3 takes the old RB route
-            'OL1': 'pass_block',
-            'OL2': 'pass_block',
-            'OL3': 'pass_block' // Added OL3
+            'WR1': 'Slant', 'WR2': 'Slant', 'WR3': 'Flat', 
+            'OL1': 'pass_block', 'OL2': 'pass_block', 'OL3': 'pass_block'
         }
     },
     'Spread_Three_Verts': { // Renamed from FourVerts
         type: 'pass', tags: ['pass', 'deep'],
+        readProgression: ['WR3', 'WR1', 'WR2'], // Read 1: Post, Read 2: Fly, Read 3: Fly
         assignments: {
-            'WR1': 'Fly',
-            'WR2': 'Fly',
-            'WR3': 'Post', // Removed the RB1: 'Flat' route
-            'OL1': 'pass_block',
-            'OL2': 'pass_block',
-            'OL3': 'pass_block' // Added OL3
-        }
-    },
-    'Spread_WR_Screen': {
-        type: 'pass', tags: ['pass', 'screen'],
-        assignments: {
-            'WR3': 'Screen',
-            'WR1': 'run_block',
-            'WR2': 'run_block',
-            'OL1': 'run_block',
-            'OL2': 'pass_block',
-            'OL3': 'pass_block' // Added OL3 (was RB1)
+            'WR1': 'Fly', 'WR2': 'Fly', 'WR3': 'Post', 
+            'OL1': 'pass_block', 'OL2': 'pass_block', 'OL3': 'pass_block' 
         }
     },
     'Spread_Mesh': {
         type: 'pass', tags: ['pass', 'short', 'timing'],
+        readProgression: ['WR1', 'WR2', 'WR3'], // Read 1: Drag, Read 2: Drag, Read 3: In
         assignments: {
-            'WR1': 'Drag',
-            'WR2': 'Drag',
-            'WR3': 'In', // Removed the RB1: 'Wheel' route
-            'OL1': 'pass_block',
-            'OL2': 'pass_block',
-            'OL3': 'pass_block' // Added OL3
+            'WR1': 'Drag', 'WR2': 'Drag', 'WR3': 'In',
+            'OL1': 'pass_block', 'OL2': 'pass_block', 'OL3': 'pass_block' 
         }
     },
     'Spread_Y-Cross': {
         type: 'pass', tags: ['pass', 'medium'],
+        readProgression: ['WR2', 'WR3', 'WR1'], // Read 1: In (Cross), Read 2: Drag (Under), Read 3: Fly (Clearout)
         assignments: {
-            'WR1': 'Fly',
-            'WR2': 'In',
-            'WR3': 'Drag', // Removed the RB1: 'Flat' route
-            'OL1': 'pass_block',
-            'OL2': 'pass_block',
-            'OL3': 'pass_block' // Added OL3
+            'WR1': 'Fly', 'WR2': 'In', 'WR3': 'Drag',
+            'OL1': 'pass_block', 'OL2': 'pass_block', 'OL3': 'pass_block'
         }
     },
 
@@ -218,23 +195,74 @@ export const offensivePlaybook = {
     'Power_Dive': {
         type: 'run', tags: ['run', 'inside', 'power'],
         assignments: { 'RB1': 'run_inside', 'RB2': 'run_block', 'WR1': 'run_block', 'OL1': 'run_block', 'OL2': 'run_block', 'OL3': 'run_block' }
-    }, // Added OL blocks
+    },
     'Power_Sweep': {
         type: 'run', tags: ['run', 'outside', 'power'],
         assignments: { 'RB1': 'run_outside', 'RB2': 'run_block', 'WR1': 'run_block', 'OL1': 'run_block', 'OL2': 'run_block', 'OL3': 'run_block' }
-    }, // Added OL blocks
+    },
     'Power_PA_Bootleg': {
         type: 'pass', tags: ['pass', 'medium', 'pa', 'rollout'],
+        readProgression: ['WR1', 'RB2'], // Read 1: Corner, Read 2: Flat
         assignments: { 'RB1': 'pass_block', 'RB2': 'Flat', 'WR1': 'Corner', 'OL1': 'pass_block', 'OL2': 'pass_block', 'OL3': 'pass_block' }
     },
-    // Added OL
     'Power_RB_Screen': {
         type: 'pass', tags: ['pass', 'screen'],
+        readProgression: ['RB1'], // One read: The screen
         assignments: { 'RB1': 'Screen', 'RB2': 'pass_block', 'WR1': 'run_block', 'OL1': 'run_block', 'OL2': 'run_block', 'OL3': 'pass_block' }
-    }, // Added OL
+    },
     'Power_PA_FB_Flat': {
         type: 'pass', tags: ['pass', 'short', 'pa'],
+        readProgression: ['WR1', 'RB2'], // Read 1: In route, Read 2: FB Flat
         assignments: { 'RB1': 'pass_block', 'RB2': 'Flat', 'WR1': 'In', 'OL1': 'pass_block', 'OL2': 'pass_block', 'OL3': 'pass_block' }
+    },
+    // --- Trips Left Formation (QB1, WR1, WR2, WR3, OL1, OL2, OL3) ---
+    'Trips_Left_Screen': {
+        type: 'pass', tags: ['pass', 'screen'],
+        readProgression: ['WR3'], // One read: The screen
+        assignments: {
+            'WR3': 'Screen',     // The receiver (closest to center)
+            'WR1': 'run_block',  // Lead blocker (farthest out)
+            'WR2': 'run_block',  // Lead blocker (middle)
+            'OL1': 'run_block',  // OL releases to block
+            'OL2': 'pass_block', // Sells the pass
+            'OL3': 'pass_block'  // Sells the pass
+        }
+    },
+    'Trips_Left_Slants': {
+        type: 'pass', tags: ['pass', 'short', 'quick'],
+        readProgression: ['WR1', 'WR2', 'WR3'], // Read 1: Outside Slant, Read 2: Middle Slant, Read 3: Inside Flat
+        assignments: {
+            'WR1': 'Slant',
+            'WR2': 'Slant',
+            'WR3': 'Flat',
+            'OL1': 'pass_block',
+            'OL2': 'pass_block',
+            'OL3': 'pass_block'
+        }
+    },
+    'Trips_Left_Verts': {
+        type: 'pass', tags: ['pass', 'deep'],
+        readProgression: ['WR3', 'WR2', 'WR1'], // Read 1: Inside Post, Read 2: Middle Fly, Read 3: Outside Fly
+        assignments: {
+            'WR1': 'Fly',
+            'WR2': 'Fly',
+            'WR3': 'Post',
+            'OL1': 'pass_block',
+            'OL2': 'pass_block',
+            'OL3': 'pass_block'
+        }
+    },
+    'Trips_Left_Drive': {
+        type: 'pass', tags: ['pass', 'medium', 'timing'],
+        readProgression: ['WR2', 'WR3', 'WR1'], // Read 1: In (Dig), Read 2: Drag (Shallow), Read 3: Fly (Clear-out)
+        assignments: {
+            'WR1': 'Fly',    // Clears out the deep coverage
+            'WR2': 'In',     // The primary read (10-12 yard In)
+            'WR3': 'Drag',   // The shallow crosser underneath
+            'OL1': 'pass_block',
+            'OL2': 'pass_block',
+            'OL3': 'pass_block'
+        }
     },
 };
 

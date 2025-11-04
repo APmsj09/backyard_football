@@ -1215,43 +1215,61 @@ export function drawFieldVisualization(frameData) {
         // --- SWAPPED COORDINATES ---
         const drawX = pState.y * scaleX; // Player Y-position maps to Canvas X
         const drawY = pState.x * scaleY; // Player X-position maps to Canvas Y
+
+        // --- Jiggle Calculation ---
+        let jiggleX = 0;
+        let jiggleY = 0;
+        if (pState.isEngaged) {
+            const jiggleAmount = 1; // 1 pixel jiggle. Increase for more shake.
+            jiggleX = (Math.random() - 0.5) * jiggleAmount;
+            jiggleY = (Math.random() - 0.5) * jiggleAmount;
+        }
+        // --- END Jiggle ---
         // --- END SWAP ---
 
-        // Use Team Colors
+        // Use Team Colors (Apply jiggle)
         ctx.fillStyle = pState.primaryColor || (pState.isOffense ? '#DC2626' : '#E5E7EB');
         ctx.beginPath();
-        ctx.arc(drawX, drawY, playerRadius, 0, 2 * Math.PI);
+        ctx.arc(drawX + jiggleX, drawY + jiggleY, playerRadius, 0, 2 * Math.PI);
         ctx.fill();
 
-        // Draw Player Number
+        // Draw Player Number (Apply jiggle)
         ctx.fillStyle = pState.secondaryColor || (pState.isOffense ? '#FFFFFF' : '#000000');
-        ctx.font = 'bold 10px "Inter"'; // <-- Made bigger (was 9px)
-        ctx.fillText(pState.number || '?', drawX, drawY + 1);
+        ctx.font = 'bold 10px "Inter"';
+        ctx.fillText(pState.number || '?', drawX + jiggleX, drawY + jiggleY + 1);
 
-        // --- 🛠️ NEW: Juke Visualization Effect ---
+        // --- Stunned Player Visual ---
+        // This is drawn at the *base* position so it doesn't jiggle
+        if (pState.stunnedTicks > 0) {
+            ctx.fillStyle = '#A0A0A0'; // Gray-500
+            ctx.font = 'bold 14px "Inter"';
+            ctx.fillText('💫', drawX, drawY - playerRadius - 8);
+        }
+
+        // --- Juke Visualization Effect ---
         if (pState.action === 'juke' || pState.jukeTicks > 0) {
-            // Draw a quick gold flash behind the player
             ctx.strokeStyle = 'rgba(255, 215, 0, 0.8)'; // Gold
-            ctx.lineWidth = 2.5; 
+            ctx.lineWidth = 2.5;
             ctx.beginPath();
-            // Draw a dashed circle that fades out
-            ctx.setLineDash([3, 3]); 
-            ctx.arc(drawX, drawY, playerRadius + 3, 0, 2 * Math.PI); 
+            ctx.setLineDash([3, 3]);
+            // Apply jiggle to the juke effect's base
+            ctx.arc(drawX + jiggleX, drawY + jiggleY, playerRadius + 3, 0, 2 * Math.PI);
             ctx.stroke();
-            ctx.setLineDash([]); // Reset dash for next drawing
-            
-            // Draw a small "Juke" text overlay for clarity (optional)
-            ctx.fillStyle = '#FFD700'; 
-            ctx.font = 'bold 8px "Inter"'; 
-            ctx.fillText('J', drawX + playerRadius + 2, drawY - playerRadius - 2); 
+            ctx.setLineDash([]);
+
+            // This text is drawn at the base position so it's stable
+            ctx.fillStyle = '#FFD700';
+            ctx.font = 'bold 8px "Inter"';
+            ctx.fillText('J', drawX + playerRadius + 2, drawY - playerRadius - 2);
         }
 
         // Highlight ball carrier
         if (pState.isBallCarrier) {
             ctx.strokeStyle = '#FBBF24';
-            ctx.lineWidth = 3; // <-- Made bigger (was 2.5)
+            ctx.lineWidth = 3;
             ctx.beginPath();
-            ctx.arc(drawX, drawY, playerRadius + 4, 0, 2 * Math.PI); // <-- Made bigger
+            // Apply jiggle to the highlight
+            ctx.arc(drawX + jiggleX, drawY + jiggleY, playerRadius + 4, 0, 2 * Math.PI);
             ctx.stroke();
         }
     });
@@ -1262,6 +1280,7 @@ export function drawFieldVisualization(frameData) {
         const ballDrawX = frameData.ball.y * scaleX; // Ball Y maps to Canvas X
         const ballDrawY = frameData.ball.x * scaleY; // Ball X maps to Canvas Y
         // --- END SWAP ---
+
 
         // Shadow
         ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
@@ -1585,10 +1604,10 @@ function startNextPlay() {
 
     // Clear the field (players are in the huddle)
     drawFieldVisualization(null);
-    
+
     // Restart the "action" clock using the user's preferred speed
     if (!liveGameInterval) {
-         liveGameInterval = setInterval(runLiveGameTick, userPreferredSpeed);
+        liveGameInterval = setInterval(runLiveGameTick, userPreferredSpeed);
     }
 }
 
