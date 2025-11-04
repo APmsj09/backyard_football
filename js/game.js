@@ -1124,11 +1124,11 @@ const zoneBoundaries = {
     'zone_hook_curl_right': { minX: CENTER_X, maxX: HASH_RIGHT_X, minY: 7, maxY: 15 },
     'zone_short_middle': { minX: CENTER_X - 7, maxX: CENTER_X + 7, minY: 0, maxY: 12 }, // General short middle coverage
 
-    'zone_deep_half_left': { minX: 0, maxX: CENTER_X, minY: 15, maxY: 60 },        // Deep left half of field
-    'zone_deep_half_right': { minX: CENTER_X, maxX: FIELD_WIDTH, minY: 15, maxY: 60 },
-    'zone_deep_middle': { minX: HASH_LEFT_X - 2, maxX: HASH_RIGHT_X + 2, minY: 18, maxY: 60 }, // Deep center field coverage (Cover 1/3 Safety)
-    'zone_deep_third_left': { minX: 0, maxX: HASH_LEFT_X, minY: 15, maxY: 60 },        // Deep outside left third (Cover 3 Corner/DB)
-    'zone_deep_third_right': { minX: HASH_RIGHT_X, maxX: FIELD_WIDTH, minY: 15, maxY: 60 }, // Deep outside right third (Cover 3 Corner/DB)
+    'zone_deep_half_left': { minX: 0, maxX: CENTER_X, minY: 15, maxY: 40 },        // Deep left half of field
+    'zone_deep_half_right': { minX: CENTER_X, maxX: FIELD_WIDTH, minY: 15, maxY: 40 },
+    'zone_deep_middle': { minX: HASH_LEFT_X - 2, maxX: HASH_RIGHT_X + 2, minY: 18, maxY: 40 }, // Deep center field coverage (Cover 1/3 Safety)
+    'zone_deep_third_left': { minX: 0, maxX: HASH_LEFT_X, minY: 15, maxY: 40 },        // Deep outside left third (Cover 3 Corner/DB)
+    'zone_deep_third_right': { minX: HASH_RIGHT_X, maxX: FIELD_WIDTH, minY: 15, maxY: 40 }, // Deep outside right third (Cover 3 Corner/DB)
 
     // --- Run/Blitz Gap Assignments (Relative to Ball Snap X, LoS Y=0) ---
     // Offsets determine the target point defender initially attacks.
@@ -2720,7 +2720,7 @@ function checkTackleCollisions(playState, gameLog) {
                 gameLog.push(`💥 ${ballCarrierState.name} (BrkPwr: ${breakPower.toFixed(0)}) breaks tackle from ${defender.name} (TklPwr: ${tacklePower.toFixed(0)})!`);
 
                 // Stun the immediate tackler for failing
-                defender.stunnedTicks = 30;
+                defender.stunnedTicks = 40;
 
                 // Check for nearby defenders to stun (group juke)
                 const JUKE_STUN_RADIUS = 3.0; // 3 yards (9 feet)
@@ -2823,7 +2823,7 @@ function resolveOngoingBlocks(playState, gameLog) {
         if (battle.status === 'win_B') {
             // --- Outcome 1: Defender wins (sheds block) ---
             //gameLog.push(`🛡️ ${defenderState.name} sheds block from ${blockerState.name}!`);
-            blockerState.stunnedTicks = 30; // Stun the blocker for losing the battle
+            blockerState.stunnedTicks = 80; // Stun the blocker for losing the battle
             blockerState.engagedWith = null; blockerState.isEngaged = false;
             defenderState.isBlocked = false; defenderState.blockedBy = null; defenderState.isEngaged = false;
             battlesToRemove.push(index);
@@ -2833,7 +2833,7 @@ function resolveOngoingBlocks(playState, gameLog) {
             //gameLog.push(`🥞 ${blockerState.name} pancakes ${defenderState.name}!`);
 
             // Stun the defender for winning the block
-            defenderState.stunnedTicks = 40;
+            defenderState.stunnedTicks = 80;
 
             // End the engagement
             blockerState.engagedWith = null; blockerState.isEngaged = false;
