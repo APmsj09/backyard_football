@@ -1576,7 +1576,7 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
     // 2. Find all OL who need an assignment
     const olBlockers = offenseStates.filter(p =>
         !p.isEngaged &&
-        (p.action === 'pass_block' || (p.action === 'run_block' && !(playType === 'pass' && playState.tick > 20)))
+        (p.action === 'pass_block' || p.action === 'run_block')
     );
 
     // 3. Helper function to assign a target
@@ -1606,8 +1606,8 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                 } else {
                     // --- No one left to block, set ID to null ---
                     // The 'run_block' case will handle this.
-                    blocker.dynamicTargetId = null; 
-                    
+                    blocker.dynamicTargetId = null;
+
                     if (blocker.slot.startsWith('OL')) {
                         console.log(`[${logPrefix}] No threats found. Will climb open field.`);
                     }
@@ -1764,6 +1764,17 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
 
         // --- Offensive Logic ---
         if (pState.isOffense) {
+            // Check if this is an OL who was faking a run block on a PA pass
+            if (pState.slot.startsWith('OL') && 
+                pState.action === 'run_block' && 
+                playType === 'pass' && 
+                playState.tick > 20) 
+            {
+                // The fake is over! Switch to pass blocking.
+                pState.action = 'pass_block';
+                // The "Brain" (which now runs every tick) will see this new action
+                // and give a correct pass_block assignment.
+            }
             switch (pState.action) {
                 case 'attack_ball':
                     // Player's action is to move to the ball's *INTENDED LANDING SPOT*
@@ -1849,7 +1860,7 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
 
                         // Check if target is still valid
                         if (target && (target.blockedBy === null || target.blockedBy === pState.id)) {
-                            
+
                             // --- Target is valid: Engage ---
                             // Mirror the defender's X-position.
                             pState.targetX = target.x;
@@ -1887,7 +1898,7 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                     break;
 
                 case 'route_complete':
-                    const FIND_SPACE_RADIUS = 7; // How far the receiver looks for space
+                    const FIND_SPACE_RADIUS = 12; // How far the receiver looks for space
                     const nearbyDefenders = defenseStates.filter(d =>
                         !d.isBlocked && !d.isEngaged && getDistance(pState, d) < FIND_SPACE_RADIUS
                     ).sort((a, b) => getDistance(pState, a) - getDistance(pState, b));
@@ -1944,7 +1955,7 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                     break; // End case 'route_complete'
 
 
-                case 'run_path': { // --- Logic for RBs ---
+                case 'run_path': { // --- Logic for ballcarriers ---
                     const threatDistance = 3.5; // How far to look for immediate threats
                     const visionDistance = 10.0; // How far to look downfield for lanes
                     const nearestThreat = defenseStates
@@ -1962,7 +1973,7 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                         // --- B. No Immediate Threat: Find Best Lane (with downhill bias) ---
 
                         // --- 🛠️ MODIFICATIONS ---
-                        const lanes = [-5, 0, 5]; // 1. Widen the cut lanes
+                        const lanes = [-6, 0, 6]; // 1. Widen the cut lanes
                         const DOWNHILL_BONUS = 1.0; // 2. Lower the bonus from 5.0 to 1.5
                         // --- END MODIFICATIONS ---
 
@@ -2530,7 +2541,7 @@ function checkBlockCollisions(playState) {
 
         if ((blocker.action === 'pass_block' || isRunBlock)) {
 
-            
+
             let targetDefender = null;
 
             // 1. Check if the assigned target is valid and in range
@@ -3173,6 +3184,9 @@ function updateQBDecision(playState, offenseStates, defenseStates, gameLog) {
 /**
  * Handles ball arrival at target coordinates. (MODIFIED)
  */
+/**
+ * Handles ball arrival at target coordinates. (MODIFIED)
+ */
 function handleBallArrival(playState, gameLog) {
     // 1. Ball Height Check
     if (!playState.ballState.inAir) return; // Ball not in air
@@ -3257,12 +3271,49 @@ function handleBallArrival(playState, gameLog) {
             }
         }
     }
+    // --- END 4. INT ATTEMPT ---
 
-    // Check for Pass Breakup (PBU)
+
+    // --- ⭐️ START NEW LOGIC BLOCK (4b) ⭐️ ---
+    // 4b. Contested Pass Breakup (PBU)
     // This runs if:
     // 1. No interception happened (eventResolved is false)
-    // 2. The defender *was* in range
-    // 3. The receiver was *not*
+    // 2. BOTH players are in range
+    // 3. The Defender is CLOSER (or equal distance) to the ball than the Receiver
+
+    // We must re-calculate distances here to be safe
+    const distToBallDef = defenderInRange ? getDistance(closestDefenderState, playState.ballState) : Infinity;
+    const distToBallRec = receiverInRange ? getDistance(targetPlayerState, playState.ballState) : Infinity;
+
+    if (!eventResolved && defenderInRange && receiverInRange && (distToBallDef <= distToBallRec)) {
+        // Defender is in position to swat the ball.
+        const defAgility = defenderPlayer.attributes.physical?.agility || 50;
+        const defStrength = defenderPlayer.attributes.physical?.strength || 50;
+
+        // Calculate PBU power (more based on agility/strength than hands)
+        let pbuPower = (defAgility * 0.7 + defStrength * 0.3) * closestDefenderState.fatigueModifier;
+
+        // Bonus for being *much* closer
+        if (distToBallDef < distToBallRec - 1.0) { // 1+ yard advantage
+            pbuPower += 15;
+        }
+
+        if (pbuPower + getRandomInt(0, 30) > 50) { // Threshold for a contested PBU
+            eventResolved = true;
+            gameLog.push(`🚫 **SWATTED!** ${closestDefenderState.name} breaks up the pass to ${targetPlayerState.name}!`);
+            playState.incomplete = true;
+            playState.playIsLive = false;
+        }
+    }
+    // --- ⭐️ END NEW LOGIC BLOCK (4b) ⭐️ ---
+
+
+    // 4c. "Solo" Pass Breakup (PBU)
+    // This is your original PBU block, now as a fallback.
+    // This runs if:
+    // 1. No INT (eventResolved is false)
+    // 2. No Contested PBU (eventResolved is false)
+    // 3. Defender is in range, but Receiver is NOT
     else if (!eventResolved && defenderInRange && !receiverInRange) {
         eventResolved = true; // The defender resolved this play
         gameLog.push(`🚫 **SWATTED!** Pass to ${targetPlayerState.name} is broken up by ${closestDefenderState.name}!`);
@@ -3270,7 +3321,11 @@ function handleBallArrival(playState, gameLog) {
         playState.playIsLive = false;
     }
 
-    // 5. Catch / Drop Attempt (Only if NO interception AND receiver is in range)
+    // 5. Catch / Drop Attempt
+    // This now only runs if:
+    // 1. No INT
+    // 2. No PBU (Contested or Solo)
+    // 3. And Receiver is in range
     if (!eventResolved && receiverInRange && receiverPlayer?.attributes) {
         eventResolved = true; // Mark that we are resolving the play here
         const recCatchSkill = receiverPlayer.attributes.technical?.catchingHands || 50;
@@ -3280,7 +3335,11 @@ function handleBallArrival(playState, gameLog) {
         // *** MODIFICATION 2: Broader, scaling interference logic ***
         let interferencePenalty = 0;
         const interferenceRadius = 2.0; // How close a defender needs to be to interfere (was 1.0)
-        if (defenderInRange && closestDefenderState) { // Defender must also be in range to interfere
+
+        // NOTE: We check 'defenderInRange' again here. This is correct.
+        // It's possible for the receiver to be in range (dist 2.4) and the
+        // defender to be out of range (dist 2.6).
+        if (defenderInRange && closestDefenderState) {
             const distToReceiver = getDistance(targetPlayerState, closestDefenderState);
 
             if (distToReceiver < interferenceRadius) { // Defender is in the receiver's space
@@ -3292,8 +3351,9 @@ function handleBallArrival(playState, gameLog) {
             }
         }
 
-        const distToBallRec = getDistance(targetPlayerState, playState.ballState);
-        const proximityBonusRec = Math.max(0, (CATCH_CHECK_RADIUS - distToBallRec) * 15);
+        // We use distToBallRec from our new block, but re-calc just in case
+        const receiverProximity = getDistance(targetPlayerState, playState.ballState);
+        const proximityBonusRec = Math.max(0, (CATCH_CHECK_RADIUS - receiverProximity) * 15);
         receiverPower += proximityBonusRec;
 
         // --- Positional Interference ---
@@ -3311,8 +3371,8 @@ function handleBallArrival(playState, gameLog) {
 
         // *** MODIFICATION 3: Stabilized difficulty check ***
         const catchRoll = receiverPower + getRandomInt(0, 20);
-        // Removed random(15, 35) and replaced with a static base + smaller random roll
-        const difficulty = interferencePenalty + 25 + getRandomInt(0, 10); // Base difficulty 25-35
+        // Apply *all* penalties to the difficulty
+        const difficulty = interferencePenalty + positionalPenalty + 25 + getRandomInt(0, 10); // Base difficulty 25-35
 
         if (catchRoll > difficulty) { // Catch successful!
             targetPlayerState.isBallCarrier = true; targetPlayerState.hasBall = true;
@@ -3339,8 +3399,10 @@ function handleBallArrival(playState, gameLog) {
                 throwerPlayer.gameStats.passCompletions = (throwerPlayer.gameStats.passCompletions || 0) + 1;
             }
         } else { // Drop / Incomplete
-            if (interferencePenalty > (receiverPower / 2) && closestDefenderState) {
-                gameLog.push(`🚫 **SWATTED!** Pass to ${targetPlayerState.name} is broken up by ${closestDefenderState.name}!`);
+            // --- ⭐️ LOGIC FIX: We no longer check for PBU here ---
+            // The PBU logic already ran. If we are here, it's just a drop.
+            if (interferencePenalty > 10 || positionalPenalty > 0) {
+                gameLog.push(`❌ **CONTESTED DROP!** Pass was on target to ${targetPlayerState.name} (Catch: ${recCatchSkill})!`);
             } else {
                 gameLog.push(`❌ **DROPPED!** Pass was on target to ${targetPlayerState.name} (Catch: ${recCatchSkill})!`);
             }
@@ -3524,7 +3586,7 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
     const { type } = play;
     let { assignments } = play; // Use 'let' so we can modify it
 
-    // 🛠️ MOVED: playState is now declared *before* the hot route check
+    //  playState is now declared *before* the hot route check
     const playState = {
         playIsLive: true, tick: 0, maxTicks: 1000,
         yards: 0, touchdown: false, turnover: false, incomplete: false, sack: false,
@@ -3534,7 +3596,7 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
 
     try {
         playState.lineOfScrimmage = ballOn + 10;
-        // 🛠️ MOVED: Run setup *before* the hot route check, using the *initial* assignments
+        // Run setup *before* the hot route check, using the *initial* assignments
         setupInitialPlayerStates(playState, offense, defense, play, assignments, ballOn, defensivePlayKey, ballHash, offensivePlayKey);
         // --- >>> BLOCK TO CAPTURE FRAME 0 <<< ---
         if (playState.playIsLive) { // Ensure setup didn't immediately fail
@@ -3565,7 +3627,7 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
         return { yards: 0, turnover: true, incomplete: false, touchdown: false, log: gameLog, visualizationFrames: [] };
     }
 
-    // --- 🛠️ MOVED: RB "HOT ROUTE" AUDIBLE CHECK (Now runs *after* setup) ---
+    // --- RB "HOT ROUTE" AUDIBLE CHECK (Now runs *after* setup) ---
     const defensePlay = defensivePlaybook[defensivePlayKey];
     const qbState = playState.activePlayers.find(p => p.slot === 'QB1' && p.isOffense); // Now works
     const qbPlayer = qbState ? game.players.find(p => p && p.id === qbState.id) : null;
@@ -3574,10 +3636,10 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
     if (play.type === 'pass' &&
         defensePlay?.blitz === true &&
         play.assignments['RB1'] &&
-        play.assignments['RB1'] !== 'BlockPass' &&
+        play.assignments['RB1'] !== 'pass_block' &&
         Math.random() < (qbIQ / 125)) // e.g., 75 IQ = 60% chance to spot blitz
     {
-        play.assignments['RB1'] = 'BlockPass';
+        play.assignments['RB1'] = 'pass_block';
         assignments = play.assignments; // 🛠️ Re-assign the local 'assignments' variable
 
         const rbPlayer = playState.activePlayers.find(p => p.slot === 'RB1' && p.isOffense); // Now works
@@ -3585,8 +3647,8 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
 
         // 🛠️ CRITICAL FIX: We must also update the *live player state*
         if (rbPlayer) {
-            rbPlayer.assignment = 'BlockPass';
-            rbPlayer.action = 'BlockPass';
+            rbPlayer.assignment = 'pass_block';
+            rbPlayer.action = 'pass_block';
             // Also update their target to their initial spot
             rbPlayer.targetX = rbPlayer.initialX;
             rbPlayer.targetY = rbPlayer.initialY - 0.5; // Pass block step
@@ -3939,7 +4001,7 @@ function determinePlayCall(offense, defense, down, yardsToGo, ballOn, scoreDiff,
     const isLightBox = defBox <= 3; // e.g., 2-3-2 (2DL+3LB=5, but LBs might be spread) - Needs refinement
     const hasManyDBs = defDBs >= 2;
 
-    // --- 🛠️ REVISED: Refined Play Selection (with Smart Variety) ---
+    // --- Refined Play Selection (with Smart Variety) ---
 
     if (desiredPlayType === 'pass') {
         const deepPlays = possiblePlays.filter(p => offensivePlaybook[p]?.tags?.includes('deep'));
