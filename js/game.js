@@ -2801,7 +2801,7 @@ function resolveBattle(powerA, powerB, battle) {
 
     // 5. Define the "reasonable numbers" (Win Threshold)
     // This is how many points a player needs to "win" the tug of war.
-    const WIN_SCORE = 60;
+    const WIN_SCORE = 20;
 
     // 6. Check for a winner
     if (battle.battleScore > WIN_SCORE) {
