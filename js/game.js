@@ -3658,13 +3658,14 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
         ballState: { x: 0, y: 0, z: 1.0, vx: 0, vy: 0, vz: 0, targetPlayerId: null, inAir: false, throwerId: null, throwInitiated: false, targetX: 0, targetY: 0 },
         lineOfScrimmage: 0, activePlayers: [], blockBattles: [], visualizationFrames: []
     };
+    let firstDownY = 0; // Declare firstDownY here
 
     try {
         playState.lineOfScrimmage = ballOn + 10;
         // Run setup *before* the hot route check, using the *initial* assignments
         setupInitialPlayerStates(playState, offense, defense, play, assignments, ballOn, defensivePlayKey, ballHash, offensivePlayKey);
         // Calculate the Y-coordinate for the first down marker
-        const firstDownY = playState.lineOfScrimmage + (yardsToGo || 10);
+        firstDownY = playState.lineOfScrimmage + (yardsToGo || 10);
         if (playState.playIsLive) { // Ensure setup didn't immediately fail
             const initialFrameData = {
                 players: JSON.parse(JSON.stringify(playState.activePlayers)),
