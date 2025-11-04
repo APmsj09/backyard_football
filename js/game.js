@@ -1574,53 +1574,48 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
     });
 
     // 2. Find all OL who need an assignment
-    const olBlockers = offenseStates.filter(p =>
+    const allBlockers = offenseStates.filter(p =>
         !p.isEngaged &&
         (p.action === 'pass_block' || p.action === 'run_block')
     );
 
-    // 3. Helper function to assign a target
-    const assignTarget = (blocker, availableThreats, logPrefix) => {
-
+    // --- ⭐️ Separate Linemen from Other Blockers ⭐️ ---
+    const linemen = allBlockers.filter(p => p.slot.startsWith('OL'));
+    const otherBlockers = allBlockers.filter(p => !p.slot.startsWith('OL'));
+    
+    // 3. Helper function for LINEMEN ONLY (assignTarget)
+    const assignLinemanTarget = (blocker, availableThreats, logPrefix) => {
+        
         if (availableThreats.length === 0) {
             // --- "CLIMB" LOGIC ---
-            // No primary (box) threats left.
             if (blocker.action === 'run_block') {
                 // --- CLIMB TO 2ND LEVEL ---
-                // Find any unblocked LB or Safety downfield
                 const secondaryThreats = defenseStates.filter(d =>
                     !d.isBlocked && !d.isEngaged &&
                     (d.slot.startsWith('LB') || d.slot.startsWith('DB')) &&
-                    d.y > LOS + 2 // They are at least 2 yards downfield
+                    d.y > LOS + 2
                 ).sort((a, b) => getDistance(blocker, a) - getDistance(blocker, b));
 
                 if (secondaryThreats.length > 0) {
-                    // Found a 2nd level target!
                     const secondaryTarget = secondaryThreats[0];
                     blocker.dynamicTargetId = secondaryTarget.id;
-                    olAssignedDefenders.add(secondaryTarget.id); // Mark them as "taken"
-
-                    if (blocker.slot.startsWith('OL')) {
-                        console.log(`[${logPrefix}] No primary threats. CLIMBING to block ${secondaryTarget.name} (${secondaryTarget.slot})`);
+                    olAssignedDefenders.add(secondaryTarget.id); 
+                    if (blocker.slot === 'OL2') {
+                        console.log(`%c[OL2-BRAIN] ${logPrefix}: No primary threats. CLIMBING to block ${secondaryTarget.name} (${secondaryTarget.slot})`, 'color: #FFBF00');
                     }
                 } else {
-                    // --- No one left to block, set ID to null ---
-                    // The 'run_block' case will handle this.
-                    blocker.dynamicTargetId = null;
-
-                    if (blocker.slot.startsWith('OL')) {
-                        console.log(`[${logPrefix}] No threats found. Will climb open field.`);
+                    blocker.dynamicTargetId = null; 
+                    if (blocker.slot === 'OL2') {
+                        console.log(`%c[OL2-BRAIN] ${logPrefix}: No threats found. Will climb open field.`, 'color: #FFBF00');
                     }
                 }
             } else {
                 // --- PASS BLOCK ---
-                // No threats found? Hold the pocket.
                 blocker.dynamicTargetId = null;
                 blocker.targetX = blocker.initialX;
                 blocker.targetY = LOS + POCKET_DEPTH_PASS;
-
-                if (blocker.slot.startsWith('OL')) {
-                    console.log(`[${logPrefix}] No target chosen. Holding Pocket.`);
+                if (blocker.slot === 'OL2') {
+                    console.log(`%c[OL2-BRAIN] ${logPrefix}: No target chosen. Holding Pocket.`, 'color: #FFBF00');
                 }
             }
             return; // Finished assigning
@@ -1629,7 +1624,6 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
         // --- "LANE-BASED" LOGIC ---
         const BLOCKING_LANE_WIDTH = 2.0;
 
-        // 1. Find "Primary Threats" (Defenders directly in the OL's lane)
         const primaryThreats = availableThreats.filter(d =>
             Math.abs(d.x - blocker.initialX) < BLOCKING_LANE_WIDTH
         );
@@ -1637,55 +1631,81 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
         let targetDefender = null;
 
         if (primaryThreats.length > 0) {
-            // 2a. Found a threat in our lane. Sort them by distance and take the closest.
             primaryThreats.sort((a, b) => getDistance(blocker, a) - getDistance(blocker, b));
             targetDefender = primaryThreats[0];
-
-            if (blocker.slot.startsWith('OL')) {
-                console.log(`[${logPrefix}] Primary Target (in lane): ${targetDefender.name} (${targetDefender.slot})`);
+            if (blocker.slot === 'OL2') {
+                console.log(`%c[OL2-BRAIN] ${logPrefix}: Primary Target (in lane): ${targetDefender.name} (${targetDefender.slot})`, 'color: #FFBF00');
             }
         } else {
             // 2b. No one in our lane. "Help Out" logic.
             availableThreats.sort((a, b) => getDistance(blocker, a) - getDistance(blocker, b));
-            targetDefender = availableThreats[0];
-
-            if (blocker.slot.startsWith('OL')) {
-                console.log(`[${logPrefix}] No threat in lane. Helping on closest: ${targetDefender.name} (${targetDefender.slot})`);
+            targetDefender = availableThreats[0]; // This can be undefined if availableThreats is empty
+            if (blocker.slot === 'OL2' && targetDefender) {
+                console.log(`%c[OL2-BRAIN] ${logPrefix}: No threat in lane. Helping on closest: ${targetDefender.name} (${targetDefender.slot})`, 'color: #FFBF00');
             }
         }
-        // --- END "LANE-BASED" LOGIC ---
-        blocker.dynamicTargetId = targetDefender.id;
-
-        // Mark this defender as "taken"
-        olAssignedDefenders.add(targetDefender.id);
-
-        if (blocker.slot.startsWith('OL')) {
-            console.log(`[${logPrefix}] Chosen Target: ${targetDefender.name} (${targetDefender.slot}) at [${targetDefender.x.toFixed(1)}, ${targetDefender.y.toFixed(1)}]`);
+        
+        // --- ⭐️ FIX: Add a null check to prevent crash ⭐️ ---
+        if (targetDefender) {
+            blocker.dynamicTargetId = targetDefender.id;
+            olAssignedDefenders.add(targetDefender.id);
+            if (blocker.slot === 'OL2') {
+                console.log(`%c[OL2-BRAIN] ${logPrefix}: Chosen Target: ${targetDefender.name} (${targetDefender.slot}) at [${targetDefender.x.toFixed(1)}, ${targetDefender.y.toFixed(1)}]`, 'color: #FFBF00');
+            }
+        } else {
+            // This OL has no one to block. Fallback to pass_block "Hold Pocket" logic.
+            blocker.dynamicTargetId = null;
+            blocker.targetX = blocker.initialX;
+            blocker.targetY = LOS + (blocker.action === 'pass_block' ? POCKET_DEPTH_PASS : POCKET_DEPTH_RUN);
+             if (blocker.slot === 'OL2') {
+                console.log(`%c[OL2-BRAIN] ${logPrefix}: No primary or help targets found. Holding.`, 'color: #FFBF00');
+            }
         }
     };
 
-    // 4. Process Blockers (Center first, then Guards/Tackles)
-    if (olBlockers.length > 0) {
-        olBlockers.sort((a, b) => {
+    // 4. Process Blockers (LINEMEN FIRST)
+    if (linemen.length > 0) {
+        linemen.sort((a, b) => {
             if (a.slot === 'OL2') return -1; // Center first
             if (b.slot === 'OL2') return 1;
             return a.initialX - b.initialX; // Then left-to-right
         });
 
-        // Log threats once per tick (for the first OL)
-        const firstOL = olBlockers[0];
-        if (firstOL.slot.startsWith('OL')) {
-            const logPrefix = `TICK ${playState.tick} | ${firstOL.name} (${firstOL.slot})`;
-            console.log(`--- ${logPrefix} (${firstOL.action.toUpperCase()}) ---`);
+        // --- OL2 LOG (Threat Header) ---
+        const ol2Logger = linemen.find(p => p.slot === 'OL2');
+        if (ol2Logger) {
+            const logPrefix = `TICK ${playState.tick} | ${ol2Logger.name} (OL2)`;
+            console.log(`--- %c[OL2-BRAIN] ${logPrefix} (${ol2Logger.action.toUpperCase()}) ---`, 'color: #FFBF00; font-weight: bold;');
             const threatNames = allThreats.map(d => `${d.slot} (Assign: ${d.assignment})`);
-            console.log(`[${firstOL.slot}] Threats Seen: [${threatNames.join(', ') || 'NONE'}]`);
+            console.log(`%c[OL2-BRAIN] Threats Seen: [${threatNames.join(', ') || 'NONE'}]`, 'color: #FFBF00');
         }
 
-        // Assign targets one-by-one
-        for (const ol of olBlockers) {
+        // Assign targets to all linemen
+        for (const ol of linemen) {
             const availableThreats = allThreats.filter(d => !olAssignedDefenders.has(d.id));
             const prefix = `TICK ${playState.tick} | ${ol.name} (${ol.slot})`;
-            assignTarget(ol, availableThreats, prefix);
+            assignLinemanTarget(ol, availableThreats, prefix);
+        }
+    }
+    
+    // 5. Process OTHER BLOCKERS (RBs, WRs)
+    if (otherBlockers.length > 0) {
+        for (const blocker of otherBlockers) {
+            // RBs/WRs get simpler logic: "Block the closest unassigned threat"
+            const availableThreats = allThreats.filter(d => !olAssignedDefenders.has(d.id));
+            
+            if (availableThreats.length > 0) {
+                availableThreats.sort((a, b) => getDistance(blocker, a) - getDistance(blocker, b));
+                const targetDefender = availableThreats[0];
+                
+                blocker.dynamicTargetId = targetDefender.id;
+                olAssignedDefenders.add(targetDefender.id);
+            } else {
+                // No one left for the RB/WR to block.
+                blocker.dynamicTargetId = null;
+                // Let their 'run_block' or 'pass_block' action handle them
+                // (e.g., pass_block will make them hold pocket, run_block will make them climb)
+            }
         }
     }
 
