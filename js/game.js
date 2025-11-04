@@ -2255,7 +2255,6 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                         );
 
                         // --- 1. React to Ball in Air ---
-                        // If the ball is thrown into this defender's zone, attack the landing spot.
                         if (isBallInAir && isPlayerInZone(landingSpot, assignment, playState.lineOfScrimmage)) {
                             targetPoint = landingSpot;
                             targetThreat = null; // Override any player target
@@ -2263,7 +2262,7 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                         }
 
                         // --- 2. React to Run Play ---
-                        const isRunPlay = (diagnosedPlayType === 'run'); // 💡 Use diagnosis
+                        const isRunPlay = (diagnosedPlayType === 'run');
                         const isQBScramble = qbState && (qbState.action === 'qb_scramble' || qbState.y > playState.lineOfScrimmage + 1);
 
                         if ((isRunPlay || isQBScramble) && ballCarrierState) {
@@ -2273,19 +2272,20 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                                     targetThreat = ballCarrierState; // Target the runner
                                 }
                             } else {
-                                // --- 💡 NEW: DEEP ZONE RUN SUPPORT (Safety) ---
-                                // If we diagnose 'run', we "creep up" and prepare to attack.
-                                if (diagnosedPlayType === 'run') {
+                                // --- 💡 FIXED: DEEP ZONE RUN SUPPORT (Safety) ---
+
+                                // 1. Check if the carrier has broken containment (5 yards)
+                                if (ballCarrierState.y > playState.lineOfScrimmage + 5) {
+                                    targetThreat = ballCarrierState; // ATTACK!
+
+                                    // 2. Else (carrier is bottled up), check if we *diagnosed* a run
+                                } else if (diagnosedPlayType === 'run') {
                                     // Creep up to 10 yards from LoS, mirroring the ball carrier's X
                                     targetPoint = { x: ballCarrierState.x, y: playState.lineOfScrimmage + 10 };
-                                    targetThreat = null; // We are targeting a *spot*, not the player yet
-
-                                    // If the carrier breaks past 5 yards, we abandon our spot and attack them directly.
-                                    if (ballCarrierState.y > playState.lineOfScrimmage + 1) {
-                                        targetThreat = ballCarrierState; // Attack!
-                                    }
+                                    targetThreat = null; // We are targeting a *spot*, not the player
                                 }
-                                // If it's a pass (diagnosedPlayType === 'pass'), we do nothing here and let the pass logic handle it.
+                                // 3. Else (it's a pass, or a scramble behind the LoS), do nothing.
+                                // This lets the pass logic (Block 4) take over, which is correct.
                             }
                         }
 
@@ -2308,7 +2308,7 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                         } else if (!targetThreat && threatsInZone.length === 0) {
                             // --- 4. No threats in zone. "Read" intermediate routes. ---
 
-                            // 💡 NEW "ROBBER" LOGIC for DEEP SAFETIES
+                            // "ROBBER" LOGIC for DEEP SAFETIES
                             if (isDeepZone && diagnosedPlayType === 'pass') {
                                 // My deep zone is empty. Are there any intermediate threats I can rob?
                                 const intermediateThreats = offenseStates.filter(o =>
@@ -2821,7 +2821,7 @@ function resolveBattle(powerA, powerB, battle) {
 
     // 5. Define the "reasonable numbers" (Win Threshold)
     // This is how many points a player needs to "win" the tug of war.
-    const WIN_SCORE = 20;
+    const WIN_SCORE = 12;
 
     // 6. Check for a winner
     if (battle.battleScore > WIN_SCORE) {
