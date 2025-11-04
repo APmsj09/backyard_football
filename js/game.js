@@ -1339,51 +1339,51 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
                 targetY = Math.min(playState.lineOfScrimmage + 0.1, targetY);
 
                 // 1. Man Coverage Alignment (Fallback)
-                    if (assignment.startsWith('man_cover_')) {
-                        const targetSlot = assignment.split('man_cover_')[1];
-                        const targetOffPlayer = initialOffenseStates.find(o => o.slot === targetSlot);
+                if (assignment.startsWith('man_cover_')) {
+                    const targetSlot = assignment.split('man_cover_')[1];
+                    const targetOffPlayer = initialOffenseStates.find(o => o.slot === targetSlot);
 
-                        if (targetOffPlayer) {
-                            // --- Successful Man Alignment ---
-                            const xOffset = targetOffPlayer.x < CENTER_X ? 1.5 : -1.5;
-                            const yOffset = 1.5; // Line up 1.5 yards away (press)
-                            startX = targetOffPlayer.x + xOffset;
-                            startY = targetOffPlayer.y + yOffset;
-                            targetX = startX; targetY = startY; // Target is starting position
+                    if (targetOffPlayer) {
+                        // --- Successful Man Alignment ---
+                        const xOffset = targetOffPlayer.x < CENTER_X ? 1.5 : -1.5;
+                        const yOffset = 1.5; // Line up 1.5 yards away (press)
+                        startX = targetOffPlayer.x + xOffset;
+                        startY = targetOffPlayer.y + yOffset;
+                        targetX = startX; targetY = startY; // Target is starting position
+                    } else {
+                        // --- 💡 "SMARTER" FIX: Target not found, try to find an uncovered receiver ---
+                        console.warn(`Man target ${targetSlot} not found for DEF ${slot}.`);
+
+                        // 1. Check if WR3 exists
+                        const wr3Target = initialOffenseStates.find(o => o.slot === 'WR3');
+                        // 2. Check if any *other* defender is already assigned to WR3
+                        const isWR3Covered = Object.values(defAssignments).includes('man_cover_WR3');
+
+                        if (wr3Target && !isWR3Covered) {
+                            // --- Found uncovered WR3! Assign this defender to them ---
+                            console.warn(`Re-assigning ${slot} to uncovered receiver WR3.`);
+                            assignment = `man_cover_WR3`; // This defender's new job
+                            action = assignment;
+
+                            // Align to this new target
+                            const xOffset = wr3Target.x < CENTER_X ? 1.5 : -1.5;
+                            const yOffset = 1.5;
+                            startX = wr3Target.x + xOffset;
+                            startY = wr3Target.y + yOffset;
+                            targetX = startX; targetY = startY;
                         } else {
-                            // --- 💡 "SMARTER" FIX: Target not found, try to find an uncovered receiver ---
-                            console.warn(`Man target ${targetSlot} not found for DEF ${slot}.`);
-                            
-                            // 1. Check if WR3 exists
-                            const wr3Target = initialOffenseStates.find(o => o.slot === 'WR3');
-                            // 2. Check if any *other* defender is already assigned to WR3
-                            const isWR3Covered = Object.values(defAssignments).includes('man_cover_WR3');
+                            // --- WR3 not available or already covered, default to zone ---
+                            console.warn(`No uncovered receiver found. Defaulting ${slot} to Hook/Curl zone.`);
+                            assignment = 'zone_hook_curl_middle';
+                            action = assignment;
+                            const zoneCenter = getZoneCenter(assignment, playState.lineOfScrimmage);
 
-                            if (wr3Target && !isWR3Covered) {
-                                // --- Found uncovered WR3! Assign this defender to them ---
-                                console.warn(`Re-assigning ${slot} to uncovered receiver WR3.`);
-                                assignment = `man_cover_WR3`; // This defender's new job
-                                action = assignment;
-                                
-                                // Align to this new target
-                                const xOffset = wr3Target.x < CENTER_X ? 1.5 : -1.5;
-                                const yOffset = 1.5; 
-                                startX = wr3Target.x + xOffset;
-                                startY = wr3Target.y + yOffset;
-                                targetX = startX; targetY = startY;
-                            } else {
-                                // --- WR3 not available or already covered, default to zone ---
-                                console.warn(`No uncovered receiver found. Defaulting ${slot} to Hook/Curl zone.`);
-                                assignment = 'zone_hook_curl_middle';
-                                action = assignment;
-                                const zoneCenter = getZoneCenter(assignment, playState.lineOfScrimmage);
-
-                                // Align them in their new zone
-                                targetX = zoneCenter.x;
-                                targetY = zoneCenter.y;
-                            }
+                            // Align them in their new zone
+                            targetX = zoneCenter.x;
+                            targetY = zoneCenter.y;
                         }
                     }
+                }
 
                 // 2. Zone Coverage Alignment (Drop to Zone Depth)
                 else if (assignment.startsWith('zone_')) {
@@ -1415,7 +1415,7 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
                 // 3. Run/Blitz Gap Assignment (Sets TARGET, not START)
                 else if (assignment.includes('run_gap_') || assignment.includes('blitz_gap') || assignment.includes('blitz_edge')) {
                     // startX and startY are already set to the formation spot. Leave them alone.
-                    
+
                     // Just set the TARGET to the gap.
                     const gapTarget = zoneBoundaries[assignment];
                     if (gapTarget) {
@@ -1426,7 +1426,7 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
                         targetX = ballX;
                         targetY = playState.lineOfScrimmage + 1.0;
                     }
-                    
+
                     // 💡 THE FIX: Only pull DL up to the line. LBs/DBs blitz from their depth.
                     if (slot.startsWith('DL')) {
                         startY = Math.min(startY, playState.lineOfScrimmage + 2.5);
@@ -1558,7 +1558,7 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
         // --- Dynamic Read Progression ---
         // 1. Get reads from the play definition
         const playReads = play.readProgression || [];
-        
+
         // 2. Build the final progression list
         let finalProgression = [];
 
@@ -2263,22 +2263,29 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                     }
 
                     // --- 2. React to Run Play ---
-                    const isRunPlay = (diagnosedPlayType === 'run' || (ballCarrierState && ballCarrierState.y > playState.lineOfScrimmage));
+                    const isRunPlay = (diagnosedPlayType === 'run'); // 💡 Use diagnosis
                     const isQBScramble = qbState && (qbState.action === 'qb_scramble' || qbState.y > playState.lineOfScrimmage + 1);
 
                     if ((isRunPlay || isQBScramble) && ballCarrierState) {
                         if (!isDeepZone) {
                             // --- Underneath Zone Run Support ---
-                            // If the carrier is in/near my zone, attack.
                             if (isPlayerInZone(ballCarrierState, assignment, playState.lineOfScrimmage) || getDistance(pState, ballCarrierState) < 8.0) {
                                 targetThreat = ballCarrierState; // Target the runner
                             }
                         } else {
-                            // --- Deep Zone Run Support (Safety) ---
-                            // Only attack if the carrier gets past the LBs (e.g., 7+ yards)
-                            if (ballCarrierState.y > playState.lineOfScrimmage + 7) {
-                                targetThreat = ballCarrierState; // Come up and make the tackle
+                            // --- 💡 NEW: DEEP ZONE RUN SUPPORT (Safety) ---
+                            // If we diagnose 'run', we "creep up" and prepare to attack.
+                            if (diagnosedPlayType === 'run') {
+                                // Creep up to 10 yards from LoS, mirroring the ball carrier's X
+                                targetPoint = { x: ballCarrierState.x, y: playState.lineOfScrimmage + 10 };
+                                targetThreat = null; // We are targeting a *spot*, not the player yet
+
+                                // If the carrier breaks past 5 yards, we abandon our spot and attack them directly.
+                                if (ballCarrierState.y > playState.lineOfScrimmage + 1) {
+                                    targetThreat = ballCarrierState; // Attack!
+                                }
                             }
+                            // If it's a pass (diagnosedPlayType === 'pass'), we do nothing here and let the pass logic handle it.
                         }
                     }
 
@@ -2299,10 +2306,27 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                         }
 
                     } else if (!targetThreat && threatsInZone.length === 0) {
-                        // --- 4. No threats in zone. "Sink" or "Read" ---
+                        // --- 4. No threats in zone. "Read" intermediate routes. ---
                         
+                        // 💡 NEW "ROBBER" LOGIC for DEEP SAFETIES
+                        if (isDeepZone && diagnosedPlayType === 'pass') {
+                            // My deep zone is empty. Are there any intermediate threats I can rob?
+                            const intermediateThreats = offenseStates.filter(o =>
+                                (o.action === 'run_route' || o.action === 'route_complete') &&
+                                (o.assignment === 'In' || o.assignment === 'Post' || o.assignment === 'Drag') && // Look for crossing routes
+                                isPlayerInZone(o, 'zone_hook_curl_middle', playState.lineOfScrimmage) // Check the intermediate zone
+                            );
+
+                            if (intermediateThreats.length > 0) {
+                                // Found a threat! Attack the closest one.
+                                intermediateThreats.sort((a, b) => getDistance(pState, a) - getDistance(pState, b));
+                                targetThreat = intermediateThreats[0];
+                                break; // Exit switch, go to pursuit
+                            }
+                        }
+                        
+                        // Original "Sink" logic for flat defenders
                         if (assignment.startsWith('zone_flat_')) {
-                            // No one is in the flat. Look for a vertical threat to "sink" under.
                             const verticalThreat = offenseStates.find(o =>
                                 (o.action === 'run_route' || o.action === 'route_complete') &&
                                 o.y > pState.y + 5 && // Threat is deeper than us
@@ -2310,22 +2334,18 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                             );
 
                             if (verticalThreat) {
-                                // "Sink" with the vertical route, but stay shallow
                                 const sinkDepth = Math.min(verticalThreat.y, pState.initialY + 7); // Don't sink more than 7 yards
                                 targetPoint = { x: pState.x, y: sinkDepth };
                             }
-                            // If no vertical threat, targetPoint remains zoneCenter
                         }
-                        // If not a flat zone, targetPoint just remains zoneCenter
+                        // If not a flat zone, and no robber target, targetPoint just remains zoneCenter
                     }
 
                     // --- 5. Set Final Target ---
                     if (targetThreat) {
-                        // If we identified a specific player to target (runner or receiver)...
                         target = targetThreat; // Set the target as the player object
                     } else {
-                        // Otherwise, target the calculated point (Zone Center or Sink point)
-                        target = targetPoint;
+                        target = targetPoint; // Target the calculated point
                     }
 
                     break; // Go to the main pursuit logic at the end of the function
@@ -2944,11 +2964,11 @@ function updateQBDecision(playState, offenseStates, defenseStates, gameLog) {
             // If they fail the "look for throw" check, force them to keep running
             return;
         }
-    } 
+    }
 
     const qbConsistency = qbAttrs.mental?.consistency || 50;
     const qbAgility = qbAttrs.physical?.agility || 50;
-    const qbToughness = qbAttrs.mental?.toughness || 50; 
+    const qbToughness = qbAttrs.mental?.toughness || 50;
 
     // --- 1. Assess Pressure ---
     const pressureDefender = defenseStates.find(d => !d.isBlocked && !d.isEngaged && getDistance(qbState, d) < 4.5);
@@ -2956,7 +2976,7 @@ function updateQBDecision(playState, offenseStates, defenseStates, gameLog) {
     const imminentSackDefender = isPressured && getDistance(qbState, pressureDefender) < TACKLE_RANGE + 0.2;
 
     // --- 2. Scan Receivers (Based on Progression) (REVISED) ---
-    
+
     // Helper to find a receiver's state and separation
     const getTargetInfo = (slot) => {
         if (!slot) return null; // Handle end of progression
@@ -2993,7 +3013,7 @@ function updateQBDecision(playState, offenseStates, defenseStates, gameLog) {
     const READ_PROGRESSION_DELAY = Math.max(12, Math.round((100 - qbIQ) / 8)); // ~0.3s - 0.7s
     const initialReadTicks = 20; // ~0.9s to start first read
 
-    let decisionMade = false; 
+    let decisionMade = false;
 
     if (playState.tick > initialReadTicks && !isPressured && !decisionMade) {
         qbState.ticksOnCurrentRead++;
@@ -3016,7 +3036,7 @@ function updateQBDecision(playState, offenseStates, defenseStates, gameLog) {
     // --- 4. Decision Timing Logic (REVISED) ---
     const baseDecisionTicks = 50; // 2.5 seconds for a 99-IQ QB
     const iqPenaltyTicks = Math.round((100 - qbIQ) / 5) * 2; // Adds ~0.1s per 5 IQ points lost
-    
+
     const maxDecisionTimeTicks = baseDecisionTicks + iqPenaltyTicks;
     const pressureTimeReduction = isPressured ? Math.max(15, Math.round(maxDecisionTimeTicks * 0.3)) : 0;
     const currentDecisionTickTarget = maxDecisionTimeTicks - pressureTimeReduction;
@@ -3036,7 +3056,7 @@ function updateQBDecision(playState, offenseStates, defenseStates, gameLog) {
             reason = "Pressured Decision";
         }
     }
-    
+
     // --- 5. Execute Decision ---
     if (decisionMade) {
         let targetPlayerState = null;
@@ -3094,7 +3114,7 @@ function updateQBDecision(playState, offenseStates, defenseStates, gameLog) {
             playState.ballState.x = qbState.x; playState.ballState.y = qbState.y;
             gameLog.push(`🏃 ${qbState.name} ${imminentSackDefender ? 'escapes the sack' : 'escapes'} and scrambles!`);
             actionTaken = "Scramble";
-            return; 
+            return;
 
         } else {
             // --- 5. Throw Away / Force It ---
@@ -3110,7 +3130,7 @@ function updateQBDecision(playState, offenseStates, defenseStates, gameLog) {
                 actionTaken = "Throw Away";
             }
         }
-        
+
         // --- Perform Throw or Handle Sack/Throw Away ---
         if (targetPlayerState && (actionTaken.includes("Throw"))) {
             // --- Initiate Throw ---
@@ -3133,7 +3153,7 @@ function updateQBDecision(playState, offenseStates, defenseStates, gameLog) {
             const est_dy = targetPlayerState.y - qbState.y;
             const est_distance = Math.sqrt(est_dx * est_dx + est_dy * est_dy);
             const throwSpeedYPS = 25 + (qbAttrs.physical?.strength || 50) / 10;
-            let est_airTime = Math.max(0.3, est_distance / throwSpeedYPS); 
+            let est_airTime = Math.max(0.3, est_distance / throwSpeedYPS);
 
             // 2. Predict receiver's future position (the "perfect" aim point)
             const rec_dx = targetPlayerState.targetX - targetPlayerState.x;
@@ -3145,7 +3165,7 @@ function updateQBDecision(playState, offenseStates, defenseStates, gameLog) {
             const rec_speedYPS = MIN_SPEED_YPS + ((targetPlayerState.speed || 50) - 1) * (MAX_SPEED_YPS - MIN_SPEED_YPS) / (99 - 1);
             const rec_moveDist = rec_speedYPS * targetPlayerState.fatigueModifier * est_airTime;
 
-            const targetLeadFactor = 0.9; 
+            const targetLeadFactor = 0.9;
 
             let aimX = targetPlayerState.x;
             let aimY = targetPlayerState.y;
@@ -3154,7 +3174,7 @@ function updateQBDecision(playState, offenseStates, defenseStates, gameLog) {
                 aimX += (rec_dx / rec_distToTarget) * rec_moveDist * targetLeadFactor;
                 aimY += (rec_dy / rec_distToTarget) * rec_moveDist * targetLeadFactor;
             }
-            
+
             // 3. Calculate distance to the "perfect" aim point
             const dx_perfect = aimX - qbState.x;
             const dy_perfect = aimY - qbState.y;
@@ -3163,7 +3183,7 @@ function updateQBDecision(playState, offenseStates, defenseStates, gameLog) {
             // 4. Apply accuracy penalties as a DISTANCE (in yards)
             const accuracy = qbAttrs.technical?.throwingAccuracy || 50;
             const accuracyPenalty = (100 - accuracy) / 100; // 0.0 (perfect) to 1.0 (bad)
-            const pressurePenalty = isPressured ? 2.5 : 1.0; 
+            const pressurePenalty = isPressured ? 2.5 : 1.0;
 
             const maxErrorDistance = (distance_perfect / 10) * accuracyPenalty * pressurePenalty;
 
@@ -3179,10 +3199,10 @@ function updateQBDecision(playState, offenseStates, defenseStates, gameLog) {
             const finalAimY = aimY + yError;
 
             // 6. CLAMP the final landing spot to be IN-BOUNDS
-            const MIN_X = 1.0; 
-            const MAX_X = FIELD_WIDTH - 1.0; 
-            const MIN_Y = 1.0; 
-            const MAX_Y = FIELD_LENGTH - 1.0; 
+            const MIN_X = 1.0;
+            const MAX_X = FIELD_WIDTH - 1.0;
+            const MIN_Y = 1.0;
+            const MAX_Y = FIELD_LENGTH - 1.0;
 
             const clampedAimX = Math.max(MIN_X, Math.min(MAX_X, finalAimX));
             const clampedAimY = Math.max(MIN_Y, Math.min(MAX_Y, finalAimY));
@@ -3196,12 +3216,12 @@ function updateQBDecision(playState, offenseStates, defenseStates, gameLog) {
 
             playState.ballState.vx = dx_final / airTime;
             playState.ballState.vy = dy_final / airTime;
-            const g = 9.8; 
+            const g = 9.8;
             playState.ballState.vz = (g * airTime) / 2;
 
             // 8. Set the ball's target AND the receiver's target to the SAME spot
-            playState.ballState.targetX = clampedAimX; 
-            playState.ballState.targetY = clampedAimY; 
+            playState.ballState.targetX = clampedAimX;
+            playState.ballState.targetY = clampedAimY;
 
             gameLog.push(`[DEBUG] QB aiming at: (${clampedAimX.toFixed(1)}, ${clampedAimY.toFixed(1)})`);
             // --- End Ball Physics ---
@@ -3617,7 +3637,7 @@ function finalizeStats(playState, offense, defense) {
  * Simulates a single play using a coordinate-based tick system.
  */
 function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameState) {
-    const { gameLog = [], weather, ballOn, ballHash = 'M' } = gameState; // <-- FIX IS HERE
+    const { gameLog = [], weather, ballOn, ballHash = 'M', down, yardsToGo } = gameState;
 
     const play = JSON.parse(JSON.stringify(offensivePlaybook[offensivePlayKey]));
 
@@ -3643,12 +3663,15 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
         playState.lineOfScrimmage = ballOn + 10;
         // Run setup *before* the hot route check, using the *initial* assignments
         setupInitialPlayerStates(playState, offense, defense, play, assignments, ballOn, defensivePlayKey, ballHash, offensivePlayKey);
-        // --- >>> BLOCK TO CAPTURE FRAME 0 <<< ---
+        // Calculate the Y-coordinate for the first down marker
+        const firstDownY = playState.lineOfScrimmage + (yardsToGo || 10);
         if (playState.playIsLive) { // Ensure setup didn't immediately fail
             const initialFrameData = {
                 players: JSON.parse(JSON.stringify(playState.activePlayers)),
                 ball: JSON.parse(JSON.stringify(playState.ballState)),
-                logIndex: gameLog.length // Log index before any play events
+                logIndex: gameLog.length, // Log index before any play events
+                lineOfScrimmage: playState.lineOfScrimmage,
+                firstDownY: firstDownY
             };
             playState.visualizationFrames.push(initialFrameData);
         }
@@ -3852,7 +3875,9 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
             const frameData = {
                 players: JSON.parse(JSON.stringify(playState.activePlayers)),
                 ball: JSON.parse(JSON.stringify(ballPos)),
-                logIndex: gameLog.length
+                logIndex: gameLog.length,
+                lineOfScrimmage: playState.lineOfScrimmage,
+                firstDownY: firstDownY
             };
             playState.visualizationFrames.push(frameData);
 
@@ -4520,7 +4545,7 @@ export function simulateGame(homeTeam, awayTeam) {
             gameLog.push(`🛡️ **Defense:** ${defPlayName}`);
 
             // --- 5. "Snap" ---
-            const result = resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, { gameLog, weather, ballOn, ballHash });
+            const result = resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, { gameLog, weather, ballOn, ballHash, down, yardsToGo });
             if (result.visualizationFrames) {
                 allVisualizationFrames.push(...result.visualizationFrames);
             }

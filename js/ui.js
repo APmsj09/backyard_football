@@ -1204,6 +1204,31 @@ export function drawFieldVisualization(frameData) {
     }
     // --- End Field Markings ---
 
+    // --- Draw LOS and First Down Lines ---
+    if (frameData && frameData.lineOfScrimmage) {
+        // Line of Scrimmage (Blue)
+        const losX = frameData.lineOfScrimmage * scaleX;
+        ctx.strokeStyle = '#3b82f6'; // Blue-500
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.moveTo(losX, 0);
+        ctx.lineTo(losX, canvas.height);
+        ctx.stroke();
+
+        // First Down Line (Yellow)
+        if (frameData.firstDownY < FIELD_LENGTH - 10) { // Only draw if not in endzone
+            const firstDownX = frameData.firstDownY * scaleX;
+            ctx.strokeStyle = '#eab308'; // Yellow-500
+            ctx.lineWidth = 3;
+            ctx.setLineDash([8, 8]); // Make it dashed
+            ctx.beginPath();
+            ctx.moveTo(firstDownX, 0);
+            ctx.lineTo(firstDownX, canvas.height);
+            ctx.stroke();
+            ctx.setLineDash([]); // Reset for other lines
+        }
+    }
+
     if (!frameData || !frameData.players) return; // If no frame, just show empty field
 
     // --- Draw Players (Rotated & Bigger) ---
