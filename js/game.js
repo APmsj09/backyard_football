@@ -2757,7 +2757,7 @@ function resolveBattle(powerA, powerB, battle) {
 
     // 5. Define the "reasonable numbers" (Win Threshold)
     // This is how many points a player needs to "win" the tug of war.
-    const WIN_SCORE = 90;
+    const WIN_SCORE = 60;
 
     // 6. Check for a winner
     if (battle.battleScore > WIN_SCORE) {
@@ -2974,7 +2974,7 @@ function updateQBDecision(playState, offenseStates, defenseStates, gameLog) {
     // --- END NEW BLOCK ---
 
     // --- 4. Decision Timing Logic ---
-    const maxDecisionTimeTicks = Math.max(55, Math.round((100 - qbIQ) / 6) * 3 + 15);
+    const maxDecisionTimeTicks = Math.max(200, Math.round((100 - qbIQ) / 6) * 3 + 15);
     const pressureTimeReduction = isPressured ? Math.max(9, Math.round(maxDecisionTimeTicks * 0.3)) : 0;
     const currentDecisionTickTarget = maxDecisionTimeTicks - pressureTimeReduction;
 
