@@ -2228,52 +2228,42 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
 
                         const isDeepZone = assignment.includes('deep');
 
-                        // --- 💡 SAFETY FIX #2 (RECEIVER AWARENESS) ---
-                        // Find all receivers who are EITHER in the zone, OR "threatening" it.
+                        // --- (This 'threatsInZone' logic is now correct) ---
                         const threatsInZone = offenseStates.filter(o => {
                             if (o.action !== 'run_route' && o.action !== 'route_complete') {
                                 return false;
                             }
-
-                            // Check 1: Is the player *already* in the zone?
                             if (isPlayerInZone(o, assignment, playState.lineOfScrimmage)) {
                                 return true;
                             }
-
-                            // Check 2: Is the player "threatening" the zone?
                             if (isDeepZone) {
-                                // (For Deep Safeties)
                                 const zone = zoneBoundaries[assignment];
                                 if (!zone) return false;
-                                // Is the receiver on our side of the field?
                                 const onOurSide = (o.x >= (zone.minX || 0) && o.x <= (zone.maxX || FIELD_WIDTH));
-                                // Is the receiver running a deep route (i.e., past the LBs)?
                                 const isDeepThreat = o.y > (playState.lineOfScrimmage + 7);
                                 if (onOurSide && isDeepThreat) {
-                                    return true; // Yes, this is a threat, even if not yet at 12yd depth
+                                    return true;
                                 }
                             } else {
-                                // (For Underneath Zones)
-                                // Is the player just generally close to us?
                                 if (getDistance(pState, o) < 7.0) {
                                     return true;
                                 }
                             }
                             return false;
                         });
-                        // --- 💡 END SAFETY FIX #2 ---
 
-
-                        // --- 1. React to Ball in Air ---
+                        // --- 1. React to Ball in Air (Highest Priority) ---
                         if (isBallInAir && isPlayerInZone(landingSpot, assignment, playState.lineOfScrimmage)) {
                             targetPoint = landingSpot;
                             targetThreat = null; // Override any player target
                             break; // Exit the switch, go to pursuit logic
                         }
 
-                        // --- 2. React to Run Play ---
+                        // --- 2. React to Run Play (Second Priority) ---
                         const isRunPlay = (diagnosedPlayType === 'run');
                         // isQBScramble is already defined above
+
+                        // This establishes the priority: Run/Scramble > Pass Threats
 
                         if ((isRunPlay || isQBScramble) && ballCarrierState) {
                             if (!isDeepZone) {
@@ -2283,71 +2273,55 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                                 }
                             } else {
                                 // --- DEEP ZONE RUN SUPPORT (Safety) ---
-
-                                // 1. Check if the carrier has broken containment (5 yards)
                                 if (ballCarrierState.y > playState.lineOfScrimmage + 5) {
                                     targetThreat = ballCarrierState; // ATTACK!
-
-                                    // 2. Else (carrier bottled up OR QB is scrambling)
-                                } else if (diagnosedPlayType === 'run' || isQBScramble) { // <-- 💡 SAFETY FIX #1 applied here
-                                    // Creep up to 10 yards from LoS, mirroring the ball carrier's X
+                                } else if (diagnosedPlayType === 'run' || isQBScramble) {
                                     targetPoint = { x: ballCarrierState.x, y: playState.lineOfScrimmage + 10 };
-                                    targetThreat = null; // We are targeting a *spot*, not the player
+                                    targetThreat = null; // We are targeting a *spot*
                                 }
-                                // 3. Else (it's a pass, or reading pass), do nothing.
                             }
                         }
-
-                        // --- 3. React to Passing Threats (If not playing the run or ball in air) ---
-                        // 💡 SAFETY FIX #2 (RECEIVER AWARENESS) makes 'threatsInZone' work correctly now.
-                        if (!targetThreat && threatsInZone.length > 0) {
+                        // --- 3. React to Passing Threats (Third Priority) ---
+                        // 💡 This is now an 'else if', so it ONLY runs if it's NOT a run/scramble.
+                        else if (threatsInZone.length > 0) {
                             if (isDeepZone) {
                                 // --- DEEP ZONE LOGIC ---
-                                // Prioritize the deepest receiver in the (threatened) zone.
-                                threatsInZone.sort((a, b) => b.y - a.y); // Sort by deepest (highest Y)
+                                threatsInZone.sort((a, b) => b.y - a.y);
                                 targetThreat = threatsInZone[0];
-
                             } else {
                                 // --- UNDERNEATH ZONE LOGIC ---
-                                // Prioritize the closest receiver.
                                 threatsInZone.sort((a, b) => getDistance(pState, a) - getDistance(pState, b));
                                 targetThreat = threatsInZone[0];
                             }
-
-                        } else if (!targetThreat && threatsInZone.length === 0) {
-                            // --- 4. No threats in zone. "Read" intermediate routes. ---
-
+                        }
+                        // --- 4. No threats in zone. "Read" intermediate routes. ---
+                        // 💡 This is also an 'else if'
+                        else if (threatsInZone.length === 0) {
                             // "ROBBER" LOGIC for DEEP SAFETIES
                             if (isDeepZone && diagnosedPlayType === 'pass') {
-                                // My deep zone is empty. Are there any intermediate threats I can rob?
                                 const intermediateThreats = offenseStates.filter(o =>
                                     (o.action === 'run_route' || o.action === 'route_complete') &&
-                                    (o.assignment === 'In' || o.assignment === 'Post' || o.assignment === 'Drag') && // Look for crossing routes
-                                    isPlayerInZone(o, 'zone_hook_curl_middle', playState.lineOfScrimmage) // Check the intermediate zone
+                                    (o.assignment === 'In' || o.assignment === 'Post' || o.assignment === 'Drag') &&
+                                    isPlayerInZone(o, 'zone_hook_curl_middle', playState.lineOfScrimmage)
                                 );
-
                                 if (intermediateThreats.length > 0) {
-                                    // Found a threat! Attack the closest one.
                                     intermediateThreats.sort((a, b) => getDistance(pState, a) - getDistance(pState, b));
                                     targetThreat = intermediateThreats[0];
                                     break; // Exit switch, go to pursuit
                                 }
                             }
-
-                            // Original "Sink" logic for flat defenders
+                            // "Sink" logic for flat defenders
                             if (assignment.startsWith('zone_flat_')) {
                                 const verticalThreat = offenseStates.find(o =>
                                     (o.action === 'run_route' || o.action === 'route_complete') &&
-                                    o.y > pState.y + 5 && // Threat is deeper than us
-                                    getDistance(pState, o) < 15 // And in our general area
+                                    o.y > pState.y + 5 &&
+                                    getDistance(pState, o) < 15
                                 );
-
                                 if (verticalThreat) {
-                                    const sinkDepth = Math.min(verticalThreat.y, pState.initialY + 7); // Don't sink more than 7 yards
+                                    const sinkDepth = Math.min(verticalThreat.y, pState.initialY + 7);
                                     targetPoint = { x: pState.x, y: sinkDepth };
                                 }
                             }
-                            // If not a flat zone, and no robber target, targetPoint just remains zoneCenter
                         }
 
                         // --- 5. Set Final Target ---
@@ -2788,7 +2762,7 @@ function resolveBattle(powerA, powerB, battle) {
 
     // 5. Define the "reasonable numbers" (Win Threshold)
     // This is how many points a player needs to "win" the tug of war.
-    const WIN_SCORE = 12;
+    const WIN_SCORE = 8;
 
     // 6. Check for a winner
     if (battle.battleScore > WIN_SCORE) {

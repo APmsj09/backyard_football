@@ -476,8 +476,8 @@ export const defensivePlaybook = {
             'DL3': 'pass_rush',
             'LB1': 'blitz_gap',             // <-- LB1 blitzes
             // --- 3 Deep Zones ---
-            'DB1': 'zone_deep_third_left',  // <-- DB1 plays deep left
-            'DB2': 'zone_deep_third_right', // <-- DB2 plays deep right
+            'DB1': 'zone_flat_left',  
+            'DB2': 'zone_flat_right', 
             'DB3': 'zone_deep_middle'       // <-- DB3 plays deep middle
             // Note: This leaves the underneath flats open.
         }
@@ -486,8 +486,8 @@ export const defensivePlaybook = {
         name: 'Zone Blitz (2-3-2)', concept: 'Zone', blitz: true,
         assignments: {
             'DL1': 'pass_rush', 'DL2': 'pass_rush',
-            'LB1': 'blitz_edge', 'LB2': 'zone_short_middle', 'LB3': 'blitz_gap', // 2 LBs blitz
-            'DB1': 'zone_deep_half_left', 'DB2': 'zone_deep_half_right' // 2 Deep zone defenders
+            'LB1': 'blitz_edge', 'LB2': 'zone_deep_middle', 'LB3': 'blitz_gap', // 2 LBs blitz
+            'DB1': 'zone_flat_left', 'DB2': 'zone_flat_right' // 2 Deep zone defenders
         }
     },
 
@@ -908,7 +908,50 @@ export const coachPersonalities = [
             mental: { playbookIQ: 0.9, clutch: 1.0, consistency: 0.8, toughness: 0.9 },
             technical: { throwingAccuracy: 1.1, catchingHands: 1.1, tackling: 1.1, blocking: 1.1, blockShedding: 1.0 }
         }
+    },{
+        type: 'Air Raid',
+        description: 'Loves to throw the deep ball. Wants tall, fast receivers and a QB with a strong arm.',
+        preferredOffense: 'Spread',
+        preferredDefense: '2-3-2',
+        attributePreferences: {
+            physical: { speed: 1.7, strength: 1.3, agility: 1.4, stamina: 0.9, height: 1.6, weight: 0.7 },
+            mental: { playbookIQ: 0.8, clutch: 1.5, consistency: 0.7, toughness: 1.0 },
+            technical: { throwingAccuracy: 1.2, catchingHands: 1.6, tackling: 0.5, blocking: 0.5, blockShedding: 0.5 }
+        }
     },
+    {
+        type: 'Defensive Guru',
+        description: 'Believes defense wins championships. Prefers smart, consistent defenders who don\'t miss tackles.',
+        preferredOffense: 'Balanced',
+        preferredDefense: '2-3-2',
+        attributePreferences: {
+            physical: { speed: 1.1, strength: 1.0, agility: 1.3, stamina: 1.3, height: 1.0, weight: 1.0 },
+            mental: { playbookIQ: 1.8, clutch: 0.7, consistency: 1.6, toughness: 1.3 },
+            technical: { throwingAccuracy: 0.7, catchingHands: 1.5, tackling: 1.8, blocking: 0.8, blockShedding: 1.3 }
+        }
+    },
+    {
+        type: 'Trench Warfare',
+        description: 'Wins games at the line of scrimmage. Wants the best OL and DL in the league.',
+        preferredOffense: 'Power',
+        preferredDefense: '4-0-3',
+        attributePreferences: {
+            physical: { speed: 0.5, strength: 2.0, agility: 0.5, stamina: 1.2, height: 1.0, weight: 2.0 },
+            mental: { playbookIQ: 0.8, clutch: 1.0, consistency: 1.0, toughness: 1.5 },
+            technical: { throwingAccuracy: 0.4, catchingHands: 0.4, tackling: 1.4, blocking: 2.0, blockShedding: 1.8 }
+        }
+    },
+    {
+        type: 'Skills Coach',
+        description: 'Ignores the lines. Just wants pure athletes: fast RBs, WRs, and DBs.',
+        preferredOffense: 'Spread',
+        preferredDefense: '2-3-2',
+        attributePreferences: {
+            physical: { speed: 1.8, strength: 0.6, agility: 1.8, stamina: 1.0, height: 1.1, weight: 0.6 },
+            mental: { playbookIQ: 1.0, clutch: 1.4, consistency: 0.8, toughness: 0.8 },
+            technical: { throwingAccuracy: 1.2, catchingHands: 1.7, tackling: 0.5, blocking: 0.2, blockShedding: 0.4 }
+        }
+    }
 ];
 
 // Fill in the attributePreferences for coachPersonalities if they were empty before
