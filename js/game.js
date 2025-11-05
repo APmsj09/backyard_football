@@ -2225,7 +2225,7 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
 
                         const isDeepZone = assignment.includes('deep');
 
-                        // --- (This 'threatsInZone' logic is now correct) ---
+                        // --- (This 'threatsInZone' logic is fine) ---
                         const threatsInZone = offenseStates.filter(o => {
                             if (o.action !== 'run_route' && o.action !== 'route_complete') {
                                 return false;
@@ -2237,7 +2237,7 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                                 const zone = zoneBoundaries[assignment];
                                 if (!zone) return false;
                                 const onOurSide = (o.x >= (zone.minX || 0) && o.x <= (zone.maxX || FIELD_WIDTH));
-                                const isDeepThreat = o.y > (playState.lineOfScrimmage + 10);
+                                const isDeepThreat = o.y > (playState.lineOfScrimmage + 7);
                                 if (onOurSide && isDeepThreat) {
                                     return true;
                                 }
@@ -2249,6 +2249,11 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                             return false;
                         });
 
+                        // --- 💡 NEW: Define a "Ground Threat" ---
+                        // This is true for a run, a scramble, OR a completed pass.
+                        const isGroundThreat = (ballCarrierState && !isBallInAir);
+
+
                         // --- 1. React to Ball in Air (Highest Priority) ---
                         if (isBallInAir && isPlayerInZone(landingSpot, assignment, playState.lineOfScrimmage)) {
                             targetPoint = landingSpot;
@@ -2256,13 +2261,9 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                             break; // Exit the switch, go to pursuit logic
                         }
 
-                        // --- 2. React to Run Play (Second Priority) ---
-                        const isRunPlay = (diagnosedPlayType === 'run');
-                        // isQBScramble is already defined above
-
-                        // This establishes the priority: Run/Scramble > Pass Threats
-
-                        if ((isRunPlay || isQBScramble) && ballCarrierState) {
+                        // --- 2. React to ANY Ground Threat (Second Priority) ---
+                        // 💡 This is the critical logic fix.
+                        else if (isGroundThreat) {
                             if (!isDeepZone) {
                                 // --- Underneath Zone Run Support ---
                                 if (isPlayerInZone(ballCarrierState, assignment, playState.lineOfScrimmage) || getDistance(pState, ballCarrierState) < 8.0) {
@@ -2270,16 +2271,19 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                                 }
                             } else {
                                 // --- DEEP ZONE RUN SUPPORT (Safety) ---
-                                if (ballCarrierState.y > playState.lineOfScrimmage) {
+                                // If carrier is 5+ yards downfield OR in our zone, ATTACK.
+                                if (ballCarrierState.y > (playState.lineOfScrimmage + 5) || isPlayerInZone(ballCarrierState, assignment, playState.lineOfScrimmage)) {
                                     targetThreat = ballCarrierState; // ATTACK!
-                                } else if (diagnosedPlayType === 'run' || isQBScramble) {
-                                    targetPoint = { x: ballCarrierState.x, y: playState.lineOfScrimmage + 7 };
-                                    targetThreat = null; // We are targeting a *spot*
+                                } else {
+                                    // Carrier is bottled up. "Creep" to a run-support position.
+                                    targetPoint = { x: ballCarrierState.x, y: playState.lineOfScrimmage + 10 }; // Creep to 10 yards
+                                    targetThreat = null;
                                 }
                             }
                         }
+
                         // --- 3. React to Passing Threats (Third Priority) ---
-                        // 💡 This is now an 'else if', so it ONLY runs if it's NOT a run/scramble.
+                        // (Only runs if ball is not in air AND there is no ground threat)
                         else if (threatsInZone.length > 0) {
                             if (isDeepZone) {
                                 // --- DEEP ZONE LOGIC ---
@@ -2291,46 +2295,35 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                                 targetThreat = threatsInZone[0];
                             }
                         }
+
                         // --- 4. No threats in zone. "Read" intermediate routes. ---
                         else if (threatsInZone.length === 0) {
                             // "ROBBER" LOGIC for DEEP SAFETIES
                             if (isDeepZone && diagnosedPlayType === 'pass') {
-
-                                // --- 💡 LOGIC FIX (V2): Check if I'm a "Half-Field" Safety ---
-                                // A "half-field" safety is one lined up clearly outside the hashes.
+                                // ... (Your existing, correct Robber logic) ...
                                 const isHalfFieldSafety = pState.x < (HASH_LEFT_X - 2) || pState.x > (HASH_RIGHT_X + 2);
-                                // We still need to know which side I'm on
                                 const isLeftSafety = pState.x < CENTER_X;
-                                // --- 💡 END FIX ---
-
                                 const intermediateThreats = offenseStates.filter(o => {
                                     if (o.action !== 'run_route' && o.action !== 'route_complete') return false;
-                                    
                                     const isCrosser = (o.assignment === 'In' || o.assignment === 'Post' || o.assignment === 'Drag');
                                     if (!isCrosser) return false;
-
                                     const isInMiddle = isPlayerInZone(o, 'zone_hook_curl_middle', playState.lineOfScrimmage);
                                     if (!isInMiddle) return false;
-
-                                    // --- 💡 NEW CHECK ---
-                                    // ONLY apply the "half-field" vision limit if I am one.
-                                    if (isHalfFieldSafety) { 
-                                        if (isLeftSafety && o.x > CENTER_X + 2) return false; // Left safety ignores far right
-                                        if (!isLeftSafety && o.x < CENTER_X - 2) return false; // Right safety ignores far left
+                                    if (isHalfFieldSafety) {
+                                        if (isLeftSafety && o.x > CENTER_X + 2) return false;
+                                        if (!isLeftSafety && o.x < CENTER_X - 2) return false;
                                     }
-                                    
-                                    // A single/middle safety will skip the check above and see all threats.
-                                    return true; 
+                                    return true;
                                 });
-
                                 if (intermediateThreats.length > 0) {
                                     intermediateThreats.sort((a, b) => getDistance(pState, a) - getDistance(pState, b));
                                     targetThreat = intermediateThreats[0];
-                                    break; // Exit switch, go to pursuit
+                                    break;
                                 }
                             }
                             // "Sink" logic for flat defenders
                             if (assignment.startsWith('zone_flat_')) {
+                                // ... (Your existing Sink logic) ...
                                 const verticalThreat = offenseStates.find(o =>
                                     (o.action === 'run_route' || o.action === 'route_complete') &&
                                     o.y > pState.y + 5 &&
@@ -4422,10 +4415,10 @@ export function simulateGame(homeTeam, awayTeam) {
     gameLog.push(`Weather: ${weather}`);
 
     const breakthroughs = [];
-    
+
     // 💡 THE FIX (from last time): Use fewer drives
-    const totalDrivesPerHalf = getRandomInt(4, 5); 
-    
+    const totalDrivesPerHalf = getRandomInt(4, 5);
+
     let currentHalf = 1, drivesThisGame = 0;
     let nextDriveStartBallOn = 20; // Track starting field position
 
@@ -4470,7 +4463,7 @@ export function simulateGame(homeTeam, awayTeam) {
 
         while (driveActive && down <= 4) {
             // ... (Forfeit check logic is unchanged) ...
-             if (offense.roster.filter(p => p && p.status?.duration === 0).length < MIN_HEALTHY_PLAYERS ||
+            if (offense.roster.filter(p => p && p.status?.duration === 0).length < MIN_HEALTHY_PLAYERS ||
                 defense.roster.filter(p => p && p.status?.duration === 0).length < MIN_HEALTHY_PLAYERS) {
                 gameLog.push("Forfeit condition met mid-drive."); gameForfeited = true; driveActive = false; break;
             }
@@ -4514,54 +4507,83 @@ export function simulateGame(homeTeam, awayTeam) {
             if (result.turnover) {
                 driveActive = false;
                 nextDriveStartBallOn = 100 - ballOn; // Flipped field
-            } else if (result.safety) { 
+            } else if (result.safety) {
                 gameLog.push(`SAFETY! 2 points for ${defense.name}!`);
                 if (defense.id === homeTeam.id) homeScore += 2; else awayScore += 2;
                 driveActive = false;
                 nextDriveStartBallOn = 20;
             } else if (result.touchdown) {
                 const wasOffensiveTD = !result.turnover;
-                
+
                 if (wasOffensiveTD) {
                     // --- OFFENSIVE TD: Run the conversion attempt ---
-                    ballOn = 100;
-                    const goesForTwo = Math.random() > 0.85; 
+                    ballOn = 100; // Mark the touchdown
+
+                    // --- 1. Decide Conversion Type ---
+                    const goesForTwo = Math.random() > 0.85; // 15% chance to go for 2
                     const points = goesForTwo ? 2 : 1;
-                    const conversionBallOn = goesForTwo ? 95 : 98;
-                    const conversionYardsToGo = 100 - conversionBallOn;
+                    const conversionBallOn = goesForTwo ? 95 : 98; // 2pt from 5-yd line, 1pt from 2-yd line
+                    const conversionYardsToGo = 100 - conversionBallOn; // Yards needed (5 or 2)
+
                     gameLog.push(`--- ${points}-Point Conversion Attempt (from the ${conversionYardsToGo}-yd line) ---`);
+
+                    // --- 2. Call the Play ---
                     const conversionOffensePlayKey = determinePlayCall(offense, defense, 1, conversionYardsToGo, conversionBallOn, scoreDiff, gameLog, drivesRemainingInGame);
                     const conversionDefenseFormation = determineDefensiveFormation(defense, offense.formations.offense, 1, conversionYardsToGo);
                     defense.formations.defense = conversionDefenseFormation;
                     const conversionDefensePlayKey = determineDefensivePlayCall(defense, offense, 1, conversionYardsToGo, conversionBallOn, scoreDiff, gameLog, drivesRemainingInGame);
-                    const convOffPlayName = conversionOffensePlayKey.split('_').slice(1).join(' ');
-                    const convDefPlayName = defensivePlaybook[conversionDefensePlayKey]?.name || defensivePlayKey;
-                    gameLog.push(`🏈 **Offense:** ${convOffPlayName}`);
-                    gameLog.push(`🛡️ **Defense:** ${convDefPlayName}`);
-                    const conversionResult = resolvePlay(offense, defense, conversionOffensePlayKey, conversionDefensePlayKey, { gameLog, weather, ballOn: conversionBallOn, ballHash: 'M', down: 1, yardsToGo: conversionYardsToGo });
+
+                    // Log the conversion play calls
+                    const offPlayName = conversionOffensePlayKey.split('_').slice(1).join(' ');
+                    const defPlayName = defensivePlaybook[conversionDefensePlayKey]?.name || defensivePlayKey;
+                    gameLog.push(`🏈 **Offense:** ${offPlayName}`);
+                    gameLog.push(`🛡️ **Defense:** ${defPlayName}`);
+
+                    // --- 3. Resolve the Play ---
+                    const conversionResult = resolvePlay(offense, defense, conversionOffensePlayKey, conversionDefensePlayKey, {
+                        gameLog,
+                        weather,
+                        ballOn: conversionBallOn,
+                        ballHash: 'M',
+                        down: 1,
+                        yardsToGo: conversionYardsToGo
+                    });
+
+                    // --- 4. Add Visualization Frames ---
                     if (conversionResult.visualizationFrames) {
                         allVisualizationFrames.push(...conversionResult.visualizationFrames);
                     }
 
-                    // Tally Score
+                    // --- 5. Tally Score ---
+                    // First, award 6 points for the initial touchdown
                     if (offense.id === homeTeam.id) homeScore += 6; else awayScore += 6;
+
+                    // Now, handle *only* the conversion points
                     if (conversionResult.touchdown) {
                         if (!conversionResult.turnover) {
+                            // --- 1. OFFENSE scored the conversion ---
                             gameLog.push(`✅ ${points}-point conversion GOOD!`);
                             if (offense.id === homeTeam.id) homeScore += points; else awayScore += points;
                         } else {
+                            // --- 2. DEFENSE scored on a turnover (Defensive 2-pt) ---
                             gameLog.push(`❌ ${points}-point conversion FAILED... AND RETURNED!`);
                             if (defense.id === homeTeam.id) homeScore += 2; else awayScore += 2;
                         }
                     } else {
+                        // --- 3. No TD on conversion (Failed attempt) ---
                         gameLog.push(`❌ ${points}-point conversion FAILED!`);
                     }
+
                 } else {
                     // --- DEFENSIVE TD: No conversion, just add 6 ---
+                    gameLog.push(`DEFENSIVE TOUCHDOWN! 6 points for ${defense.name}!`); // 💡 Added log
                     if (defense.id === homeTeam.id) homeScore += 6; else awayScore += 6;
                 }
+
+                // 💡 FIX: These lines now run for BOTH offensive and defensive TDs,
+                // ensuring the drive always ends after any touchdown.
                 driveActive = false;
-                nextDriveStartBallOn = 20; // Next drive starts at 20
+                nextDriveStartBallOn = 20; // After any TD, the next drive is a "kickoff"
             } else if (result.incomplete) {
                 down++;
             } else { // Completed play
@@ -4598,27 +4620,27 @@ export function simulateGame(homeTeam, awayTeam) {
 
         let overtimeRound = 0;
         let isStillTied = true;
-        
+
         // Possession order: "Receiving team of the second half" goes first.
         let otPossessionOrder = [receivingTeamSecondHalf, (receivingTeamSecondHalf.id === homeTeam.id) ? awayTeam : homeTeam];
 
         while (isStillTied && overtimeRound < 10) { // Safety break after 10 rounds
             overtimeRound++;
-            
+
             // Round 1: 5yd line (ballOn = 95)
             // Round 2: 10yd line (ballOn = 90), etc.
             const yardsFromGoal = 5 * overtimeRound;
             const startBallOn = 100 - yardsFromGoal;
-            
+
             gameLog.push(`--- OT Round ${overtimeRound}: Ball at the ${yardsFromGoal}-yard line ---`);
 
             for (const offense of otPossessionOrder) {
                 const defense = (offense.id === homeTeam.id) ? awayTeam : homeTeam;
-                
+
                 // If a defensive score on the first possession won the game, break
                 if (homeScore !== awayScore) {
                     isStillTied = false;
-                    break; 
+                    break;
                 }
 
                 // --- Start OT Drive ---
@@ -4680,9 +4702,9 @@ export function simulateGame(homeTeam, awayTeam) {
                         // OFFENSIVE TD. Run conversion logic.
                         ballOn = 100;
                         const wasOffensiveTD = !result.turnover; // Will be true
-                        
+
                         if (wasOffensiveTD) {
-                            const goesForTwo = Math.random() > 0.85; 
+                            const goesForTwo = Math.random() > 0.85;
                             const points = goesForTwo ? 2 : 1;
                             const conversionBallOn = goesForTwo ? 95 : 98;
                             const conversionYardsToGo = 100 - conversionBallOn;
@@ -4727,14 +4749,14 @@ export function simulateGame(homeTeam, awayTeam) {
                             down++;
                         }
                     }
-                    
+
                     if (down > 4 && driveActive) {
                         gameLog.push(`✋ Turnover on downs! Drive ends.`);
                         driveActive = false;
                     }
                 } // --- End OT Play Loop ---
             } // --- End OT `for` loop (both teams have gone) ---
-            
+
             // Check if still tied *after* the round
             if (isStillTied) { // Only check if a defensive TD didn't already end it
                 isStillTied = (homeScore === awayScore);
@@ -4745,7 +4767,7 @@ export function simulateGame(homeTeam, awayTeam) {
                 }
             }
         } // --- End OT `while(isStillTied)` loop ---
-        
+
         if (isStillTied) {
             gameLog.push(`After ${overtimeRound} rounds, the game is still tied. Declaring a TIE.`);
         } else {
@@ -4777,7 +4799,7 @@ export function simulateGame(homeTeam, awayTeam) {
 
         // 1. Check for Breakthroughs
         const perfThreshold = p.gameStats.touchdowns >= 1 || p.gameStats.passYards > 100 || p.gameStats.recYards > 50 || p.gameStats.rushYards > 50 || p.gameStats.tackles > 4 || p.gameStats.sacks >= 1 || p.gameStats.interceptions >= 1;
-        
+
         if (p.age < 14 && perfThreshold && Math.random() < 0.15) {
             const attributesToImprove = ['speed', 'strength', 'agility', 'throwingAccuracy', 'catchingHands', 'tackling', 'blocking', 'playbookIQ', 'blockShedding', 'toughness', 'consistency'];
             const attr = getRandom(attributesToImprove);
