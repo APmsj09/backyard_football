@@ -3017,7 +3017,7 @@ function updateQBDecision(playState, offenseStates, defenseStates, gameLog) {
     }
 
     // --- 4. Decision Timing Logic (REVISED) ---
-    const baseDecisionTicks = 50; // 2.5 seconds for a 99-IQ QB
+    const baseDecisionTicks = 70; // 3.5 seconds for a 99-IQ QB
     const iqPenaltyTicks = Math.round((100 - qbIQ) / 5) * 2; // Adds ~0.1s per 5 IQ points lost
 
     const maxDecisionTimeTicks = baseDecisionTicks + iqPenaltyTicks;
