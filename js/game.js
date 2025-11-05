@@ -2237,7 +2237,7 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                                 const zone = zoneBoundaries[assignment];
                                 if (!zone) return false;
                                 const onOurSide = (o.x >= (zone.minX || 0) && o.x <= (zone.maxX || FIELD_WIDTH));
-                                const isDeepThreat = o.y > (playState.lineOfScrimmage + 7);
+                                const isDeepThreat = o.y > (playState.lineOfScrimmage + 10);
                                 if (onOurSide && isDeepThreat) {
                                     return true;
                                 }
@@ -2270,10 +2270,10 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                                 }
                             } else {
                                 // --- DEEP ZONE RUN SUPPORT (Safety) ---
-                                if (ballCarrierState.y > playState.lineOfScrimmage + 5) {
+                                if (ballCarrierState.y > playState.lineOfScrimmage) {
                                     targetThreat = ballCarrierState; // ATTACK!
                                 } else if (diagnosedPlayType === 'run' || isQBScramble) {
-                                    targetPoint = { x: ballCarrierState.x, y: playState.lineOfScrimmage + 10 };
+                                    targetPoint = { x: ballCarrierState.x, y: playState.lineOfScrimmage + 7 };
                                     targetThreat = null; // We are targeting a *spot*
                                 }
                             }
@@ -2292,15 +2292,37 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                             }
                         }
                         // --- 4. No threats in zone. "Read" intermediate routes. ---
-                        // 💡 This is also an 'else if'
                         else if (threatsInZone.length === 0) {
                             // "ROBBER" LOGIC for DEEP SAFETIES
                             if (isDeepZone && diagnosedPlayType === 'pass') {
-                                const intermediateThreats = offenseStates.filter(o =>
-                                    (o.action === 'run_route' || o.action === 'route_complete') &&
-                                    (o.assignment === 'In' || o.assignment === 'Post' || o.assignment === 'Drag') &&
-                                    isPlayerInZone(o, 'zone_hook_curl_middle', playState.lineOfScrimmage)
-                                );
+
+                                // --- 💡 LOGIC FIX (V2): Check if I'm a "Half-Field" Safety ---
+                                // A "half-field" safety is one lined up clearly outside the hashes.
+                                const isHalfFieldSafety = pState.x < (HASH_LEFT_X - 2) || pState.x > (HASH_RIGHT_X + 2);
+                                // We still need to know which side I'm on
+                                const isLeftSafety = pState.x < CENTER_X;
+                                // --- 💡 END FIX ---
+
+                                const intermediateThreats = offenseStates.filter(o => {
+                                    if (o.action !== 'run_route' && o.action !== 'route_complete') return false;
+                                    
+                                    const isCrosser = (o.assignment === 'In' || o.assignment === 'Post' || o.assignment === 'Drag');
+                                    if (!isCrosser) return false;
+
+                                    const isInMiddle = isPlayerInZone(o, 'zone_hook_curl_middle', playState.lineOfScrimmage);
+                                    if (!isInMiddle) return false;
+
+                                    // --- 💡 NEW CHECK ---
+                                    // ONLY apply the "half-field" vision limit if I am one.
+                                    if (isHalfFieldSafety) { 
+                                        if (isLeftSafety && o.x > CENTER_X + 2) return false; // Left safety ignores far right
+                                        if (!isLeftSafety && o.x < CENTER_X - 2) return false; // Right safety ignores far left
+                                    }
+                                    
+                                    // A single/middle safety will skip the check above and see all threats.
+                                    return true; 
+                                });
+
                                 if (intermediateThreats.length > 0) {
                                     intermediateThreats.sort((a, b) => getDistance(pState, a) - getDistance(pState, b));
                                     targetThreat = intermediateThreats[0];
@@ -2851,11 +2873,6 @@ function resolveOngoingBlocks(playState, gameLog) {
     }
 }
 
-
-/**
- * Handles QB decision-making (throw, scramble, checkdown).
- */
-
 /**
  * Handles QB decision-making (throw, scramble, checkdown).
  */
@@ -3011,7 +3028,6 @@ function updateQBDecision(playState, offenseStates, defenseStates, gameLog) {
         const checkdownIsOpen = read_checkdown && read_checkdown.separation > SEPARATION_THRESHOLD;
 
         // 3. Are *any* of the main reads open? (This is your fallback)
-        // 💡 THE FIX: This buggy line has been DELETED.
         // const openPrimaryReads = [read1, read2].filter(...) 
 
         // 4. Scramble/Panic logic
@@ -3969,7 +3985,7 @@ function determinePlayCall(offense, defense, down, yardsToGo, ballOn, scoreDiff,
     if (coach.type === 'Youth Scout') passChance += 0.10; // Prefers Spread
     if (coach.type === 'Skills Coach') passChance += 0.20; // Wants to use his playmakers
     if (coach.type === 'Air Raid') passChance += 0.35; // Very pass-heavy
-    
+
     // Clamp final chance
     passChance = Math.max(0.05, Math.min(0.95, passChance));
 
