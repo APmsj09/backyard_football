@@ -1631,81 +1631,75 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
 
     // 3. Helper function for LINEMEN ONLY (assignTarget)
     const assignLinemanTarget = (blocker, availableThreats, logPrefix) => {
+        // Check if it's a live run play (run or completed pass)
+        const isLiveRunPlay = (ballCarrierState && !playState.ballState.inAir);
 
         if (availableThreats.length === 0) {
             // --- "CLIMB" LOGIC ---
-            if (blocker.action === 'run_block') {
-                // --- CLIMB TO 2ND LEVEL ---
-                const secondaryThreats = defenseStates.filter(d =>
-                    !d.isBlocked && !d.isEngaged &&
-                    (d.slot.startsWith('LB') || d.slot.startsWith('DB')) &&
-                    d.y > LOS + 2
-                ).sort((a, b) => getDistance(blocker, a) - getDistance(blocker, b));
-
-                if (secondaryThreats.length > 0) {
-                    const secondaryTarget = secondaryThreats[0];
-                    blocker.dynamicTargetId = secondaryTarget.id;
-                    olAssignedDefenders.add(secondaryTarget.id);
-                    if (blocker.slot === 'OL2') {
-                        console.log(`%c[OL2-BRAIN] ${logPrefix}: No primary threats. CLIMBING to block ${secondaryTarget.name} (${secondaryTarget.slot})`, 'color: #FFBF00');
-                    }
+            if (isLiveRunPlay) {
+                // --- 💡 NEW: Smart Climb (Ball Carrier Aware) ---
+                const nextLevelThreats = defenseStates.filter(d =>
+                    !d.isBlocked && !d.isEngaged && d.stunnedTicks === 0 &&
+                    d.y > blocker.y && // Must be "in front" of the blocker
+                    getDistance(blocker, d) < 15 // Must be within 15 yards
+                );
+                if (nextLevelThreats.length > 0) {
+                    // Sort by who is closest *to the ball carrier*
+                    nextLevelThreats.sort((a, b) => getDistance(a, ballCarrierState) - getDistance(b, ballCarrierState));
+                    const newTarget = nextLevelThreats[0];
+                    blocker.dynamicTargetId = newTarget.id;
+                    olAssignedDefenders.add(newTarget.id);
+                    if (blocker.slot === 'OL2') console.log(`%c[OL2-BRAIN] ${logPrefix}: No primary. Smart Climb to ${newTarget.name} (near carrier)`, 'color: #FFBF00');
                 } else {
-                    blocker.dynamicTargetId = null;
-                    if (blocker.slot === 'OL2') {
-                        console.log(`%c[OL2-BRAIN] ${logPrefix}: No threats found. Will climb open field.`, 'color: #FFBF00');
-                    }
+                    blocker.dynamicTargetId = null; // No one to block
+                    if (blocker.slot === 'OL2') console.log(`%c[OL2-BRAIN] ${logPrefix}: No primary or climb targets.`, 'color: #FFBF00');
                 }
             } else {
-                // --- PASS BLOCK ---
+                // --- PASS BLOCK (Ball in air or pre-throw) ---
                 blocker.dynamicTargetId = null;
                 blocker.targetX = blocker.initialX;
-                blocker.targetY = targetY;
-                if (blocker.slot === 'OL2') {
-                    console.log(`%c[OL2-BRAIN] ${logPrefix}: No target chosen. Holding Pocket.`, 'color: #FFBF00');
-                }
+                blocker.targetY = LOS + POCKET_DEPTH_PASS; // Hold pocket
+                if (blocker.slot === 'OL2') console.log(`%c[OL2-BRAIN] ${logPrefix}: No target chosen. Holding Pocket.`, 'color: #FFBF00');
             }
             return; // Finished assigning
         }
 
         // --- "LANE-BASED" LOGIC ---
         const BLOCKING_LANE_WIDTH = 2.0;
-
         const primaryThreats = availableThreats.filter(d =>
             Math.abs(d.x - blocker.initialX) < BLOCKING_LANE_WIDTH
         );
 
         let targetDefender = null;
-
         if (primaryThreats.length > 0) {
             primaryThreats.sort((a, b) => getDistance(blocker, a) - getDistance(blocker, b));
             targetDefender = primaryThreats[0];
-            if (blocker.slot === 'OL2') {
-                console.log(`%c[OL2-BRAIN] ${logPrefix}: Primary Target (in lane): ${targetDefender.name} (${targetDefender.slot})`, 'color: #FFBF00');
-            }
+            if (blocker.slot === 'OL2') console.log(`%c[OL2-BRAIN] ${logPrefix}: Primary Target (in lane): ${targetDefender.name} (${targetDefender.slot})`, 'color: #FFBF00');
         } else {
             // 2b. No one in our lane. "Help Out" logic.
             availableThreats.sort((a, b) => getDistance(blocker, a) - getDistance(blocker, b));
-            targetDefender = availableThreats[0]; // This can be undefined if availableThreats is empty
-            if (blocker.slot === 'OL2' && targetDefender) {
-                console.log(`%c[OL2-BRAIN] ${logPrefix}: No threat in lane. Helping on closest: ${targetDefender.name} (${targetDefender.slot})`, 'color: #FFBF00');
-            }
+            targetDefender = availableThreats[0];
+            if (blocker.slot === 'OL2' && targetDefender) console.log(`%c[OL2-BRAIN] ${logPrefix}: No threat in lane. Helping on closest: ${targetDefender.name} (${targetDefender.slot})`, 'color: #FFBF00');
         }
 
-        // --- ⭐️ FIX: Add a null check to prevent crash ⭐️ ---
         if (targetDefender) {
             blocker.dynamicTargetId = targetDefender.id;
             olAssignedDefenders.add(targetDefender.id);
-            if (blocker.slot === 'OL2') {
-                console.log(`%c[OL2-BRAIN] ${logPrefix}: Chosen Target: ${targetDefender.name} (${targetDefender.slot}) at [${targetDefender.x.toFixed(1)}, ${targetDefender.y.toFixed(1)}]`, 'color: #FFBF00');
-            }
+            if (blocker.slot === 'OL2') console.log(`%c[OL2-BRAIN] ${logPrefix}: Chosen Target: ${targetDefender.name} (${targetDefender.slot})`, 'color: #FFBF00');
         } else {
-            // This OL has no one to block. Fallback to pass_block "Hold Pocket" logic.
+            // Fallback: No one found, trigger climb/hold logic
             blocker.dynamicTargetId = null;
-            blocker.targetX = blocker.initialX;
-            blocker.targetY = LOS + (blocker.action === 'pass_block' ? POCKET_DEPTH_PASS : POCKET_DEPTH_RUN);
-            if (blocker.slot === 'OL2') {
-                console.log(`%c[OL2-BRAIN] ${logPrefix}: No primary or help targets found. Holding.`, 'color: #FFBF00');
+            if (isLiveRunPlay) {
+                // No one in lane, but it's a run play. Do a "dumb climb" for now.
+                // The next tick will run the "Smart Climb" logic above.
+                blocker.targetX = blocker.initialX;
+                blocker.targetY = blocker.y + 7;
+            } else {
+                // Pass block
+                blocker.targetX = blocker.initialX;
+                blocker.targetY = LOS + POCKET_DEPTH_PASS;
             }
+            if (blocker.slot === 'OL2') console.log(`%c[OL2-BRAIN] ${logPrefix}: No primary or help targets found. ${isLiveRunPlay ? 'Climbing' : 'Holding'}.`, 'color: #FFBF00');
         }
     };
 
@@ -1805,6 +1799,19 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
             // which would override our target (e.g., 'pass_block' case).
             return;
         }
+        // --- 💡 BLOCKER STATE-CHANGE LOGIC 💡 ---
+        // Check if the ball has just been caught by a *different* offensive player
+        if (pState.isOffense &&
+            pState.id !== ballCarrierState?.id && // I am not the carrier
+            (pState.action === 'pass_block' || pState.action === 'run_route' || pState.action === 'route_complete') &&
+            ballCarrierState && // A carrier exists
+            ballCarrierState.isOffense && // The carrier is on my team
+            !playState.ballState.inAir) // Ball is not in the air (i.e., it was caught)
+        {
+            pState.action = 'run_block';
+            pState.dynamicTargetId = null; // Clear any old target
+        }
+        // --- 💡 END NEW BLOCKER LOGIC 💡 ---
 
         // --- NEW: Receiver Ball-in-Air Logic ---
         if (pState.isOffense && !pState.hasBall && !pState.isBallCarrier) {
@@ -1896,53 +1903,41 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                 case 'pass_block':
                     if (pState.dynamicTargetId) {
                         const target = defenseStates.find(d => d.id === pState.dynamicTargetId);
-
                         if (target && (target.blockedBy === null || target.blockedBy === pState.id)) {
-                            // --- Target is valid: DYNAMICALLY UPDATE ---
                             pState.targetX = target.x;
                             pState.targetY = target.y;
                         } else {
-                            // --- Target is GONE (blocked, etc.) ---
+                            // Target gone, brain will assign new one
                             pState.dynamicTargetId = null;
-                            // Hold current pocket position
                             pState.targetX = pState.initialX;
                             pState.targetY = LOS + POCKET_DEPTH_PASS;
                         }
-                    }
-                    // else: dynamicTargetId is null (no target assigned)
-                    // Hold current pocket position
-                    else {
+                    } else {
+                        // No target assigned by brain (holding pocket)
                         pState.targetX = pState.initialX;
                         pState.targetY = LOS + POCKET_DEPTH_PASS;
                     }
-
-                    target = null; // Prevent falling into defensive pursuit logic
+                    target = null;
                     break;
 
                 case 'run_block':
                     if (pState.dynamicTargetId) {
                         const target = defenseStates.find(d => d.id === pState.dynamicTargetId);
-
-                        // Check if target is still valid
                         if (target && (target.blockedBy === null || target.blockedBy === pState.id)) {
-
-                            // --- Target is valid: Engage ---
                             pState.targetX = target.x;
-                            pState.targetY = target.y; // Target the defender's current Y
-
+                            pState.targetY = target.y;
                         } else {
-                            // --- Target is GONE (e.g., blocked by someone else) ---
+                            // Target gone, brain will assign new one
                             pState.dynamicTargetId = null;
-                            pState.targetX = pState.initialX; // Stay in your lane
-                            pState.targetY = pState.y + 7;   // Climb to the next level
+                            pState.targetX = pState.initialX; // Dumb climb
+                            pState.targetY = pState.y + 7;
                         }
                     } else {
-                        // --- dynamicTargetId is NULL (No target assigned) ---
-                        // Climb in open field
-                        pState.targetX = pState.initialX; // Stay in your lane
-                        pState.targetY = pState.y + 7;   // Run 7 yards downfield
+                        // No target assigned by brain (dumb climb)
+                        pState.targetX = pState.initialX; // Stay in lane
+                        pState.targetY = pState.y + 7;   // Run downfield
                     }
-                    target = null; // Prevent falling into defensive pursuit logic
+                    target = null;
                     break;
 
                 case 'pursuit':
@@ -2544,6 +2539,17 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
 
                             let futureTargetX = target.x + (targetDX / targetDistToTarget) * finalLeadDist;
                             let futureTargetY = target.y + (targetDY / targetDistToTarget) * finalLeadDist;
+
+                            const SIDELINE_BUFFER = 2.0;
+                            const nearLeftSideline = target.x < SIDELINE_BUFFER;
+                            const nearRightSideline = target.x > (FIELD_WIDTH - SIDELINE_BUFFER);
+
+                            if (nearLeftSideline || nearRightSideline) {
+                                // Carrier is hugging the sideline.
+                                // Don't lead them OOB. Just target their *current* X,
+                                // but lead their Y. This creates a good "cutoff" angle.
+                                futureTargetX = target.x;
+                            }
 
                             pState.targetX = futureTargetX;
                             pState.targetY = futureTargetY;
