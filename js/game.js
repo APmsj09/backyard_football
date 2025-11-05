@@ -177,31 +177,28 @@ function generatePlayer(minAge = 10, maxAge = 16) {
         case 'RB': baseWeight += getRandomInt(5, 15); break;
     }
 
-    // --- 🛠️ REVISED FIX #2: Determine Talent Tiers INDEPENDENTLY ---
-
-    // Define the ranges once
+    // Define the ranges once (Ranges adjusted for a better bell curve)
     const boostRanges = {
-        'Elite': { min: 89, max: 99 },
-        'Good': { min: 75, max: 89 },
-        'Average': { min: 65, max: 75 },
-        'Below Average': { min: 55, max: 65 },
-        'Poor': { min: 45, max: 55 }
+        'Elite': { min: 90, max: 99 },  // Top 2%
+        'Good': { min: 80, max: 90 },   // Next 10%
+        'Average': { min: 70, max: 80 },   // Main 60%
+        'Below Average': { min: 60, max: 70 },   // Next 20%
+        'Poor': { min: 40, max: 60 }    // Bottom 8%
     };
 
-    // Helper function to get talent data from a random roll
+    // Helper function to get talent data from a random roll (Probabilities adjusted)
     const getTalentData = (roll) => {
-        if (roll < 0.05) return { tier: 'Elite', bonus: -0.20, range: boostRanges['Elite'] };
-        if (roll < 0.20) return { tier: 'Good', bonus: -0.10, range: boostRanges['Good'] };
-        if (roll < 0.70) return { tier: 'Average', bonus: 0.0, range: boostRanges['Average'] };
-        if (roll < 0.90) return { tier: 'Below Average', bonus: 0.10, range: boostRanges['Below Average'] };
-        return { tier: 'Poor', bonus: 0.20, range: boostRanges['Poor'] };
+        if (roll < 0.02) return { tier: 'Elite', bonus: -0.20, range: boostRanges['Elite'] };       // 2% chance
+        if (roll < 0.12) return { tier: 'Good', bonus: -0.10, range: boostRanges['Good'] };        // 10% chance
+        if (roll < 0.72) return { tier: 'Average', bonus: 0.0, range: boostRanges['Average'] };      // 60% chance
+        if (roll < 0.92) return { tier: 'Below Average', bonus: 0.10, range: boostRanges['Below Average'] }; // 20% chance
+        return { tier: 'Poor', bonus: 0.20, range: boostRanges['Poor'] }; // 8% chance
     };
 
     // Roll for each category independently!
     const physicalData = getTalentData(Math.random());
     const technicalData = getTalentData(Math.random());
     const mentalData = getTalentData(Math.random());
-    // --- END REVISED FIX #2 ---
 
 
     // --- 🛠️ REVISED FIX #3: Generate ALL attributes based on their OWN Talent Tier ---
