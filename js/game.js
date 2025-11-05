@@ -4422,11 +4422,12 @@ export function simulateGame(homeTeam, awayTeam) {
     gameLog.push(`Weather: ${weather}`);
 
     const breakthroughs = [];
-    const totalDrivesPerHalf = 5;
-    let currentHalf = 1, drivesThisGame = 0;
     
-    // 💡 IMPROVEMENT #2: Track starting field position between drives
-    let nextDriveStartBallOn = 20; // Default for kickoffs
+    // 💡 THE FIX (from last time): Use fewer drives
+    const totalDrivesPerHalf = getRandomInt(4, 5); 
+    
+    let currentHalf = 1, drivesThisGame = 0;
+    let nextDriveStartBallOn = 20; // Track starting field position
 
     gameLog.push("Coin toss to determine first possession...");
     const coinFlipWinner = Math.random() < 0.5 ? homeTeam : awayTeam;
@@ -4452,6 +4453,7 @@ export function simulateGame(homeTeam, awayTeam) {
         const offense = possessionTeam;
         const defense = (possessionTeam.id === homeTeam.id) ? awayTeam : homeTeam;
 
+        // ... (Forfeit check logic is unchanged) ...
         const checkRoster = (team) => (team?.roster || []).filter(p => p && p.status?.duration === 0).length < MIN_HEALTHY_PLAYERS;
         if (checkRoster(offense) || checkRoster(defense)) {
             const forfeitingTeam = checkRoster(offense) ? offense : defense;
@@ -4462,13 +4464,13 @@ export function simulateGame(homeTeam, awayTeam) {
             break;
         }
 
-        // 💡 IMPROVEMENT #2: Use the dynamic starting field position
         let ballOn = nextDriveStartBallOn, down = 1, yardsToGo = 10, driveActive = true;
         let ballHash = 'M';
         gameLog.push(`-- Drive ${drivesThisGame + 1} (H${currentHalf}): ${offense.name} ball on own ${ballOn} --`);
 
         while (driveActive && down <= 4) {
-            if (offense.roster.filter(p => p && p.status?.duration === 0).length < MIN_HEALTHY_PLAYERS ||
+            // ... (Forfeit check logic is unchanged) ...
+             if (offense.roster.filter(p => p && p.status?.duration === 0).length < MIN_HEALTHY_PLAYERS ||
                 defense.roster.filter(p => p && p.status?.duration === 0).length < MIN_HEALTHY_PLAYERS) {
                 gameLog.push("Forfeit condition met mid-drive."); gameForfeited = true; driveActive = false; break;
             }
@@ -4476,32 +4478,18 @@ export function simulateGame(homeTeam, awayTeam) {
             const yardLineText = ballOn <= 50 ? `own ${ballOn}` : `opponent ${100 - ballOn}`;
             gameLog.push(`--- ${down}${down === 1 ? 'st' : down === 2 ? 'nd' : down === 3 ? 'rd' : 'th'} & ${yardsToGo <= 0 ? 'Goal' : yardsToGo} from the ${yardLineText} ---`);
 
+            // ... (Pre-snap AI and play-call logic is unchanged) ...
             const scoreDiff = offense.id === homeTeam.id ? homeScore - awayScore : awayScore - homeScore;
             const drivesCompletedInHalf = drivesThisGame % totalDrivesPerHalf;
             const drivesRemainingInHalf = totalDrivesPerHalf - drivesCompletedInHalf;
             const drivesRemainingInGame = (currentHalf === 1 ? totalDrivesPerHalf : 0) + drivesRemainingInHalf;
-
-            // --- 1. Offense makes its call ---
             const offensivePlayKey_initial = determinePlayCall(offense, defense, down, yardsToGo, ballOn, scoreDiff, gameLog, drivesRemainingInGame);
             const offenseFormationName = offense.formations.offense;
-
-            // --- 2. Defensive "Pre-Snap" Read ---
-            const defensiveFormationName = determineDefensiveFormation(
-                defense,
-                offenseFormationName,
-                down,
-                yardsToGo
-            );
+            const defensiveFormationName = determineDefensiveFormation(defense, offenseFormationName, down, yardsToGo);
             defense.formations.defense = defensiveFormationName;
-
-            // --- 3. Defense picks a PLAY ---
             const defensivePlayKey = determineDefensivePlayCall(defense, offense, down, yardsToGo, ballOn, scoreDiff, gameLog, drivesRemainingInGame);
-
-            // --- 4. AI QB AUDIBLE CHECK ---
             const audibleResult = aiCheckAudible(offense, offensivePlayKey_initial, defense, defensivePlayKey, gameLog);
             const offensivePlayKey = audibleResult.playKey;
-
-            // ... (logging)
             const offPlayName = offensivePlayKey.split('_').slice(1).join(' ');
             const defPlayName = defensivePlaybook[defensivePlayKey]?.name || defensivePlayKey;
             gameLog.push(`🏈 **Offense:** ${offPlayName} ${audibleResult.didAudible ? '(Audible)' : ''}`);
@@ -4520,45 +4508,65 @@ export function simulateGame(homeTeam, awayTeam) {
             }
 
             ballOn += result.yards;
-            ballOn = Math.max(0, Math.min(100, ballOn)); // ballOn is now the final spot of the play
+            ballOn = Math.max(0, Math.min(100, ballOn));
 
+            // --- (Post-play logic from your previous version) ---
             if (result.turnover) {
                 driveActive = false;
-                nextDriveStartBallOn = 100 - ballOn; // 💡 IMPROVEMENT #2: Flipped field
-            
-            // 💡 IMPROVEMENT #1: Handle Safeties
+                nextDriveStartBallOn = 100 - ballOn; // Flipped field
             } else if (result.safety) { 
                 gameLog.push(`SAFETY! 2 points for ${defense.name}!`);
                 if (defense.id === homeTeam.id) homeScore += 2; else awayScore += 2;
                 driveActive = false;
-                nextDriveStartBallOn = 20; // Simulates a free kick as a touchback
-            
+                nextDriveStartBallOn = 20;
             } else if (result.touchdown) {
-                // ... (conversion logic) ...
+                const wasOffensiveTD = !result.turnover;
                 
-                // --- 5. Tally Score ---
-                if (offense.id === homeTeam.id) homeScore += 6; else awayScore += 6; // Add 6 for the TD
+                if (wasOffensiveTD) {
+                    // --- OFFENSIVE TD: Run the conversion attempt ---
+                    ballOn = 100;
+                    const goesForTwo = Math.random() > 0.85; 
+                    const points = goesForTwo ? 2 : 1;
+                    const conversionBallOn = goesForTwo ? 95 : 98;
+                    const conversionYardsToGo = 100 - conversionBallOn;
+                    gameLog.push(`--- ${points}-Point Conversion Attempt (from the ${conversionYardsToGo}-yd line) ---`);
+                    const conversionOffensePlayKey = determinePlayCall(offense, defense, 1, conversionYardsToGo, conversionBallOn, scoreDiff, gameLog, drivesRemainingInGame);
+                    const conversionDefenseFormation = determineDefensiveFormation(defense, offense.formations.offense, 1, conversionYardsToGo);
+                    defense.formations.defense = conversionDefenseFormation;
+                    const conversionDefensePlayKey = determineDefensivePlayCall(defense, offense, 1, conversionYardsToGo, conversionBallOn, scoreDiff, gameLog, drivesRemainingInGame);
+                    const convOffPlayName = conversionOffensePlayKey.split('_').slice(1).join(' ');
+                    const convDefPlayName = defensivePlaybook[conversionDefensePlayKey]?.name || defensivePlayKey;
+                    gameLog.push(`🏈 **Offense:** ${convOffPlayName}`);
+                    gameLog.push(`🛡️ **Defense:** ${convDefPlayName}`);
+                    const conversionResult = resolvePlay(offense, defense, conversionOffensePlayKey, conversionDefensePlayKey, { gameLog, weather, ballOn: conversionBallOn, ballHash: 'M', down: 1, yardsToGo: conversionYardsToGo });
+                    if (conversionResult.visualizationFrames) {
+                        allVisualizationFrames.push(...conversionResult.visualizationFrames);
+                    }
 
-                if (conversionResult.touchdown) {
-                    if (!conversionResult.turnover) {
-                        gameLog.push(`✅ ${points}-point conversion GOOD!`);
-                        if (offense.id === homeTeam.id) homeScore += points; else awayScore += points;
+                    // Tally Score
+                    if (offense.id === homeTeam.id) homeScore += 6; else awayScore += 6;
+                    if (conversionResult.touchdown) {
+                        if (!conversionResult.turnover) {
+                            gameLog.push(`✅ ${points}-point conversion GOOD!`);
+                            if (offense.id === homeTeam.id) homeScore += points; else awayScore += points;
+                        } else {
+                            gameLog.push(`❌ ${points}-point conversion FAILED... AND RETURNED!`);
+                            if (defense.id === homeTeam.id) homeScore += 2; else awayScore += 2;
+                        }
                     } else {
-                        gameLog.push(`❌ ${points}-point conversion FAILED... AND RETURNED!`);
-                        if (defense.id === homeTeam.id) homeScore += 2; else awayScore += 2;
+                        gameLog.push(`❌ ${points}-point conversion FAILED!`);
                     }
                 } else {
-                    gameLog.push(`❌ ${points}-point conversion FAILED!`);
+                    // --- DEFENSIVE TD: No conversion, just add 6 ---
+                    if (defense.id === homeTeam.id) homeScore += 6; else awayScore += 6;
                 }
-                
                 driveActive = false;
-                nextDriveStartBallOn = 20; // 💡 IMPROVEMENT #2: Next drive starts at 20
-
+                nextDriveStartBallOn = 20; // Next drive starts at 20
             } else if (result.incomplete) {
                 down++;
             } else { // Completed play
                 yardsToGo -= result.yards;
-                if (yardsToGo <= 0) { // First down
+                if (yardsToGo <= 0) {
                     down = 1;
                     yardsToGo = Math.min(10, 100 - ballOn);
                     const newYardLineText = ballOn <= 50 ? `own ${ballOn}` : `opponent ${100 - ballOn}`;
@@ -4572,7 +4580,7 @@ export function simulateGame(homeTeam, awayTeam) {
                 const finalYardLineText = ballOn <= 50 ? `own ${ballOn}` : `opponent ${100 - ballOn}`;
                 gameLog.push(`✋ Turnover on downs! ${defense.name} takes over at the ${finalYardLineText}.`);
                 driveActive = false;
-                nextDriveStartBallOn = 100 - ballOn; // 💡 IMPROVEMENT #2: Flipped field
+                nextDriveStartBallOn = 100 - ballOn; // Flipped field
             }
         } // --- End Play Loop ---
 
@@ -4582,18 +4590,188 @@ export function simulateGame(homeTeam, awayTeam) {
         }
     } // --- End Game Loop ---
 
+
+    // --- 💡 NEW: OVERTIME TIEBREAKER LOGIC 💡 ---
+    if (homeScore === awayScore && !gameForfeited) {
+        gameLog.push(`==== GAME TIED: ${homeScore}-${awayScore} ====`);
+        gameLog.push(`Heading to Sudden Death Overtime!`);
+
+        let overtimeRound = 0;
+        let isStillTied = true;
+        
+        // Possession order: "Receiving team of the second half" goes first.
+        let otPossessionOrder = [receivingTeamSecondHalf, (receivingTeamSecondHalf.id === homeTeam.id) ? awayTeam : homeTeam];
+
+        while (isStillTied && overtimeRound < 10) { // Safety break after 10 rounds
+            overtimeRound++;
+            
+            // Round 1: 5yd line (ballOn = 95)
+            // Round 2: 10yd line (ballOn = 90), etc.
+            const yardsFromGoal = 5 * overtimeRound;
+            const startBallOn = 100 - yardsFromGoal;
+            
+            gameLog.push(`--- OT Round ${overtimeRound}: Ball at the ${yardsFromGoal}-yard line ---`);
+
+            for (const offense of otPossessionOrder) {
+                const defense = (offense.id === homeTeam.id) ? awayTeam : homeTeam;
+                
+                // If a defensive score on the first possession won the game, break
+                if (homeScore !== awayScore) {
+                    isStillTied = false;
+                    break; 
+                }
+
+                // --- Start OT Drive ---
+                let ballOn = startBallOn;
+                let down = 1;
+                let yardsToGo = 100 - ballOn; // Always Goal-to-go
+                let driveActive = true;
+                let ballHash = 'M';
+                gameLog.push(`OT Possession: ${offense.name}`);
+
+                while (driveActive && down <= 4) {
+                    const yardLineText = `opponent ${100 - ballOn}`;
+                    gameLog.push(`--- ${down} & ${yardsToGo <= 0 ? 'Goal' : yardsToGo} from the ${yardLineText} ---`);
+
+                    const scoreDiff = offense.id === homeTeam.id ? homeScore - awayScore : awayScore - homeScore;
+                    const drivesRemainingInGame = 0; // No time left
+
+                    // (Run the same pre-snap AI logic)
+                    const offensivePlayKey_initial = determinePlayCall(offense, defense, down, yardsToGo, ballOn, scoreDiff, gameLog, drivesRemainingInGame);
+                    const offenseFormationName = offense.formations.offense;
+                    const defensiveFormationName = determineDefensiveFormation(defense, offenseFormationName, down, yardsToGo);
+                    defense.formations.defense = defensiveFormationName;
+                    const defensivePlayKey = determineDefensivePlayCall(defense, offense, down, yardsToGo, ballOn, scoreDiff, gameLog, drivesRemainingInGame);
+                    const audibleResult = aiCheckAudible(offense, offensivePlayKey_initial, defense, defensivePlayKey, gameLog);
+                    const offensivePlayKey = audibleResult.playKey;
+                    const offPlayName = offensivePlayKey.split('_').slice(1).join(' ');
+                    const defPlayName = defensivePlaybook[defensivePlayKey]?.name || defensivePlayKey;
+                    gameLog.push(`🏈 **Offense:** ${offPlayName} ${audibleResult.didAudible ? '(Audible)' : ''}`);
+                    gameLog.push(`🛡️ **Defense:** ${defPlayName}`);
+
+                    // --- 5. "Snap" ---
+                    const result = resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, { gameLog, weather, ballOn, ballHash, down, yardsToGo });
+                    if (result.visualizationFrames) allVisualizationFrames.push(...result.visualizationFrames);
+                    if (!result.incomplete && result.visualizationFrames?.length > 0) {
+                        const finalBallX = result.visualizationFrames[result.visualizationFrames.length - 1].ball.x;
+                        if (finalBallX < HASH_LEFT_X) ballHash = 'L';
+                        else if (finalBallX > HASH_RIGHT_X) ballHash = 'R';
+                        else ballHash = 'M';
+                    }
+
+                    ballOn += result.yards;
+                    ballOn = Math.max(0, Math.min(100, ballOn));
+
+                    // --- Check OT Drive End Conditions ---
+                    if (result.turnover) {
+                        driveActive = false;
+                        gameLog.push(`Turnover! Drive ends.`);
+                        if (result.touchdown) { // Defensive TD
+                            gameLog.push(`DEFENSIVE TOUCHDOWN! Game Over!`);
+                            if (defense.id === homeTeam.id) homeScore += 6; else awayScore += 6;
+                            isStillTied = false; // Game ends
+                        }
+                    } else if (result.safety) {
+                        gameLog.push(`SAFETY! Game Over!`);
+                        if (defense.id === homeTeam.id) homeScore += 2; else awayScore += 2;
+                        driveActive = false;
+                        isStillTied = false; // Game ends
+                    } else if (result.touchdown) {
+                        // OFFENSIVE TD. Run conversion logic.
+                        ballOn = 100;
+                        const wasOffensiveTD = !result.turnover; // Will be true
+                        
+                        if (wasOffensiveTD) {
+                            const goesForTwo = Math.random() > 0.85; 
+                            const points = goesForTwo ? 2 : 1;
+                            const conversionBallOn = goesForTwo ? 95 : 98;
+                            const conversionYardsToGo = 100 - conversionBallOn;
+                            gameLog.push(`--- ${points}-Point Conversion Attempt ---`);
+                            // ... (call conversion plays) ...
+                            const conversionOffensePlayKey = determinePlayCall(offense, defense, 1, conversionYardsToGo, conversionBallOn, scoreDiff, gameLog, drivesRemainingInGame);
+                            const conversionDefenseFormation = determineDefensiveFormation(defense, offense.formations.offense, 1, conversionYardsToGo);
+                            defense.formations.defense = conversionDefenseFormation;
+                            const conversionDefensePlayKey = determineDefensivePlayCall(defense, offense, 1, conversionYardsToGo, conversionBallOn, scoreDiff, gameLog, drivesRemainingInGame);
+                            const convOffPlayName = conversionOffensePlayKey.split('_').slice(1).join(' ');
+                            const convDefPlayName = defensivePlaybook[conversionDefensePlayKey]?.name || defensivePlayKey;
+                            gameLog.push(`🏈 **Offense:** ${convOffPlayName}`);
+                            gameLog.push(`🛡️ **Defense:** ${convDefPlayName}`);
+                            const conversionResult = resolvePlay(offense, defense, conversionOffensePlayKey, conversionDefensePlayKey, { gameLog, weather, ballOn: conversionBallOn, ballHash: 'M', down: 1, yardsToGo: conversionYardsToGo });
+                            if (conversionResult.visualizationFrames) allVisualizationFrames.push(...conversionResult.visualizationFrames);
+
+                            // Tally Score
+                            if (offense.id === homeTeam.id) homeScore += 6; else awayScore += 6;
+                            if (conversionResult.touchdown) {
+                                if (!conversionResult.turnover) {
+                                    gameLog.push(`✅ ${points}-point conversion GOOD!`);
+                                    if (offense.id === homeTeam.id) homeScore += points; else awayScore += points;
+                                } else {
+                                    gameLog.push(`❌ Conversion FAILED... AND RETURNED! Game Over!`);
+                                    if (defense.id === homeTeam.id) homeScore += 2; else awayScore += 2;
+                                    isStillTied = false; // Game ends
+                                }
+                            } else {
+                                gameLog.push(`❌ ${points}-point conversion FAILED!`);
+                            }
+                        }
+                        driveActive = false; // Drive over
+                    } else if (result.incomplete) {
+                        down++;
+                    } else { // Completed play
+                        yardsToGo -= result.yards;
+                        if (yardsToGo <= 0) {
+                            down = 1;
+                            yardsToGo = Math.min(10, 100 - ballOn);
+                            gameLog.push(`➡️ First down! 1st & Goal at the ${100 - ballOn}.`);
+                        } else {
+                            down++;
+                        }
+                    }
+                    
+                    if (down > 4 && driveActive) {
+                        gameLog.push(`✋ Turnover on downs! Drive ends.`);
+                        driveActive = false;
+                    }
+                } // --- End OT Play Loop ---
+            } // --- End OT `for` loop (both teams have gone) ---
+            
+            // Check if still tied *after* the round
+            if (isStillTied) { // Only check if a defensive TD didn't already end it
+                isStillTied = (homeScore === awayScore);
+                if (isStillTied) {
+                    gameLog.push(`Round ${overtimeRound} ends. Still tied ${homeScore}-${awayScore}.`);
+                    // Flip possession order for next round
+                    otPossessionOrder.reverse();
+                }
+            }
+        } // --- End OT `while(isStillTied)` loop ---
+        
+        if (isStillTied) {
+            gameLog.push(`After ${overtimeRound} rounds, the game is still tied. Declaring a TIE.`);
+        } else {
+            gameLog.push(`Overtime complete. Final score: ${awayTeam.name} ${awayScore} - ${homeTeam.name} ${homeScore}`);
+        }
+    }
+    // --- 💡 END NEW OVERTIME BLOCK ---
+
+
     // --- Post-Game ---
     gameLog.push(`==== FINAL SCORE ==== ${awayTeam.name} ${awayScore} - ${homeTeam.name} ${homeScore}`);
 
     if (!gameForfeited) {
         if (homeScore > awayScore) { homeTeam.wins = (homeTeam.wins || 0) + 1; awayTeam.losses = (awayTeam.losses || 0) + 1; }
         else if (awayScore > homeScore) { awayTeam.wins = (awayTeam.wins || 0) + 1; homeTeam.losses = (homeTeam.losses || 0) + 1; }
+        // 💡 NEW: Handle Ties
+        else if (homeScore === awayScore) {
+            homeTeam.ties = (homeTeam.ties || 0) + 1;
+            awayTeam.ties = (awayTeam.ties || 0) + 1;
+        }
     } else {
         if (homeScore > awayScore) { homeTeam.wins = (homeTeam.wins || 0) + 1; awayTeam.losses = (awayTeam.losses || 0) + 1; }
         else if (awayScore > homeScore) { awayTeam.wins = (awayTeam.wins || 0) + 1; homeTeam.losses = (homeTeam.losses || 0) + 1; }
     }
 
-    // 💡 IMPROVEMENT #3: Post-Game Player Progression & Stat Aggregation
+    // --- (Post-Game Player Progression & Stat Aggregation) ---
     [...(homeTeam.roster || []), ...(awayTeam.roster || [])].forEach(p => {
         if (!p || !p.gameStats || !p.attributes) return;
 
@@ -4614,8 +4792,8 @@ export function simulateGame(homeTeam, awayTeam) {
         }
 
         // 2. Aggregate Stats
-        if (!p.seasonStats) p.seasonStats = {}; // Initialize if missing
-        if (!p.careerStats) p.careerStats = { seasonsPlayed: p.careerStats?.seasonsPlayed || 0 }; // Initialize if missing
+        if (!p.seasonStats) p.seasonStats = {};
+        if (!p.careerStats) p.careerStats = { seasonsPlayed: p.careerStats?.seasonsPlayed || 0 };
 
         for (const stat in p.gameStats) {
             if (typeof p.gameStats[stat] === 'number') {
@@ -4624,7 +4802,6 @@ export function simulateGame(homeTeam, awayTeam) {
             }
         }
     });
-    // --- 💡 END IMPROVEMENT #3 ---
 
     return { homeTeam, awayTeam, homeScore, awayScore, gameLog, breakthroughs, visualizationFrames: allVisualizationFrames };
 }
