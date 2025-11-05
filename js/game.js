@@ -1156,34 +1156,69 @@ const zoneBoundaries = {
 // Helper function (already exists or should be added in game.js)
 function getZoneCenter(zoneAssignment, lineOfScrimmage) {
     const zone = zoneBoundaries[zoneAssignment];
-    // Handle cases where zone is null (AI-driven) or defines offsets
-    if (!zone || zone.xOffset !== undefined) return { x: CENTER_X, y: lineOfScrimmage + 7 }; // Default fallback point
-    // Calculate center for defined zone areas
-    const centerX = zone.minX !== undefined && zone.maxX !== undefined ? (zone.minX + zone.maxX) / 2 : CENTER_X;
-    const centerYRel = zone.minY !== undefined && zone.maxY !== undefined ? (zone.minY + zone.maxY) / 2 : 7; // Default 7 yards deep
-    return { x: centerX, y: lineOfScrimmage + centerYRel };
+    const BACK_WALL_Y = FIELD_LENGTH - 0.5; // Max Y-coord (119.5)
+
+    // Handle non-spatial assignments (run gaps, blitzes) or missing zones
+    if (!zone || zone.xOffset !== undefined || zone.minY === undefined) {
+        // Default fallback point: 7 yards deep, center field
+        return { x: CENTER_X, y: Math.min(BACK_WALL_Y, lineOfScrimmage + 7) };
+    }
+
+    // --- 💡 NEW: Red Zone Compression Logic ---
+
+    // 1. Calculate the zone's "ideal" absolute Y boundaries
+    const idealMinY_abs = lineOfScrimmage + (zone.minY || 0);
+    const idealMaxY_abs = lineOfScrimmage + (zone.maxY || 20); // Default 20yd depth if undefined
+
+    // 2. Clamp the boundaries to the field of play
+    // The deepest point is the back wall.
+    const finalMaxY_abs = Math.min(idealMaxY_abs, BACK_WALL_Y);
+    // The shallowest point can't be deeper than the (clamped) deepest point.
+    const finalMinY_abs = Math.min(idealMinY_abs, finalMaxY_abs - 1.0); // Ensure 1yd of zone depth
+
+    // 3. Calculate the center of the *actual* (clamped) zone
+    const finalCenterY = (finalMinY_abs + finalMaxY_abs) / 2;
+    // --- 💡 END NEW LOGIC ---
+
+    // Calculate X-center (no change needed)
+    const centerX = zone.minX !== undefined && zone.maxX !== undefined
+        ? (zone.minX + zone.maxX) / 2
+        : CENTER_X;
+
+    return { x: centerX, y: finalCenterY };
 }
 
 /** Helper to check if a player is roughly within a zone's boundaries (absolute coords). */
 function isPlayerInZone(playerState, zoneAssignment, lineOfScrimmage) {
     const zone = zoneBoundaries[zoneAssignment];
+    const BACK_WALL_Y = FIELD_LENGTH - 0.5; // Max Y-coord (119.5)
 
-    // Check if the zone definition exists and has boundaries
-    if (!zone || zone.minX === undefined || zone.minY === undefined) {
-        // Also check if player state is valid
-        if (!playerState || playerState.x === undefined || playerState.y === undefined) {
-            return false;
-        }
-        // If zone has no boundaries (e.g., 'pass_rush'), it's not a spatial zone
+    // Check if player state is valid
+    if (!playerState || playerState.x === undefined || playerState.y === undefined) {
         return false;
     }
 
-    const playerYRel = playerState.y - lineOfScrimmage; // Player Y relative to LoS
+    // Check if the zone definition exists and has spatial boundaries
+    if (!zone || zone.minX === undefined || zone.minY === undefined) {
+        return false; // Not a spatial zone (e.g., 'pass_rush')
+    }
 
-    // Check if player X is within the zone's X boundaries
+    // --- 💡 NEW: Red Zone Compression Logic ---
+
+    // 1. Calculate the zone's "ideal" absolute Y boundaries
+    const idealMinY_abs = lineOfScrimmage + (zone.minY || 0);
+    const idealMaxY_abs = lineOfScrimmage + (zone.maxY || 20);
+
+    // 2. Clamp the boundaries to the field of play
+    const finalMaxY_abs = Math.min(idealMaxY_abs, BACK_WALL_Y);
+    const finalMinY_abs = Math.min(idealMinY_abs, finalMaxY_abs - 1.0);
+
+    // 3. Check if player's absolute Y is within the *actual* (clamped) zone
+    const withinY = playerState.y >= finalMinY_abs && playerState.y <= finalMaxY_abs;
+    // --- 💡 END NEW LOGIC ---
+
+    // Check X boundaries (no change needed)
     const withinX = playerState.x >= zone.minX && playerState.x <= zone.maxX;
-    // Check if player's relative Y is within the zone's Y boundaries
-    const withinY = playerYRel >= zone.minY && playerYRel <= zone.maxY;
 
     return withinX && withinY;
 }
@@ -3580,6 +3615,8 @@ function finalizeStats(playState, offense, defense) {
 // --- UPDATED resolvePlay FUNCTION ---
 // =============================================================
 
+// [in game.js]
+
 /**
  * Simulates a single play using a coordinate-based tick system.
  */
@@ -3591,61 +3628,50 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
     if (!play) {
         console.error(`Play key "${offensivePlayKey}" not found...`);
         gameLog.push("CRITICAL ERROR: Play definition missing!");
-        return { yards: 0, turnover: true, incomplete: false, touchdown: false, log: gameLog, visualizationFrames: [] };
+        return { yards: 0, turnover: true, incomplete: false, touchdown: false, safety: false, log: gameLog, visualizationFrames: [] };
     }
 
-    // 🛠️ Get the *initial* type and assignments
     const { type } = play;
-    let { assignments } = play; // Use 'let' so we can modify it
+    let { assignments } = play;
 
-    //  playState is now declared *before* the hot route check
     const playState = {
         playIsLive: true, tick: 0, maxTicks: 1000,
-        yards: 0, touchdown: false, turnover: false, incomplete: false, sack: false,
+        yards: 0, touchdown: false, turnover: false, incomplete: false, sack: false, safety: false, // <-- Added safety
         ballState: { x: 0, y: 0, z: 1.0, vx: 0, vy: 0, vz: 0, targetPlayerId: null, inAir: false, throwerId: null, throwInitiated: false, targetX: 0, targetY: 0 },
         lineOfScrimmage: 0, activePlayers: [], blockBattles: [], visualizationFrames: []
     };
-    let firstDownY = 0; // Declare firstDownY here
+    let firstDownY = 0;
 
     try {
         playState.lineOfScrimmage = ballOn + 10;
-        // Run setup *before* the hot route check, using the *initial* assignments
-        setupInitialPlayerStates(playState, offense, defense, play, assignments, ballOn, defensivePlayKey, ballHash, offensivePlayKey);
-        // Calculate the Y-coordinate for the first down marker
         firstDownY = playState.lineOfScrimmage + (yardsToGo || 10);
-        if (playState.playIsLive) { // Ensure setup didn't immediately fail
+        // We pass 'type' (which is just 'run' or 'pass') to setup
+        setupInitialPlayerStates(playState, offense, defense, play, assignments, ballOn, defensivePlayKey, ballHash, offensivePlayKey);
+
+        if (playState.playIsLive) {
             const initialFrameData = {
                 players: JSON.parse(JSON.stringify(playState.activePlayers)),
                 ball: JSON.parse(JSON.stringify(playState.ballState)),
-                logIndex: gameLog.length, // Log index before any play events
+                logIndex: gameLog.length,
                 lineOfScrimmage: playState.lineOfScrimmage,
                 firstDownY: firstDownY
             };
             playState.visualizationFrames.push(initialFrameData);
         }
-        // --- >>> END BLOCK <<< ---
     } catch (setupError) {
-        const errorMsg = setupError.message || "An unexpected error occurred during setup.";
         console.error("CRITICAL ERROR during setupInitialPlayerStates:", setupError);
-        gameLog.push(`💥 CRITICAL ERROR: Play setup failed!`);
-        gameLog.push(`[DEBUG] Reason: ${errorMsg}`);
-        if (errorMsg.includes('Cannot read properties of undefined')) {
-            gameLog.push(`[DEBUG] Check: Roster capacity or missing attributes on a drafted player.`);
-        }
-        return {
-            yards: 0, turnover: true, incomplete: false, touchdown: false,
-            log: gameLog, visualizationFrames: []
-        };
+        gameLog.push(`💥 CRITICAL ERROR: Play setup failed! ${setupError.message}`);
+        return { yards: 0, turnover: true, incomplete: false, touchdown: false, safety: false, log: gameLog, visualizationFrames: [] };
     }
 
     if (!playState.activePlayers.some(p => p.slot === 'QB1' && p.isOffense)) {
         gameLog.push("No QB found for play. Turnover.");
-        return { yards: 0, turnover: true, incomplete: false, touchdown: false, log: gameLog, visualizationFrames: [] };
+        return { yards: 0, turnover: true, incomplete: false, touchdown: false, safety: false, log: gameLog, visualizationFrames: [] };
     }
 
     // --- RB "HOT ROUTE" AUDIBLE CHECK (Now runs *after* setup) ---
     const defensePlay = defensivePlaybook[defensivePlayKey];
-    const qbState = playState.activePlayers.find(p => p.slot === 'QB1' && p.isOffense); // Now works
+    const qbState = playState.activePlayers.find(p => p.slot === 'QB1' && p.isOffense);
     const qbPlayer = qbState ? game.players.find(p => p && p.id === qbState.id) : null;
     const qbIQ = qbPlayer?.attributes.mental.playbookIQ || 50;
 
@@ -3653,21 +3679,18 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
         defensePlay?.blitz === true &&
         play.assignments['RB1'] &&
         play.assignments['RB1'] !== 'pass_block' &&
-        Math.random() < (qbIQ / 125)) // e.g., 75 IQ = 60% chance to spot blitz
-    {
+        Math.random() < (qbIQ / 125)) {
         play.assignments['RB1'] = 'pass_block';
-        assignments = play.assignments; // 🛠️ Re-assign the local 'assignments' variable
+        assignments = play.assignments;
 
-        const rbPlayer = playState.activePlayers.find(p => p.slot === 'RB1' && p.isOffense); // Now works
+        const rbPlayer = playState.activePlayers.find(p => p.slot === 'RB1' && p.isOffense);
         gameLog.push(`[Pre-Snap]: 🧠 ${qbPlayer?.name || 'QB'} sees the blitz and keeps ${rbPlayer?.name || 'RB'} in to block!`);
 
-        // 🛠️ CRITICAL FIX: We must also update the *live player state*
         if (rbPlayer) {
             rbPlayer.assignment = 'pass_block';
             rbPlayer.action = 'pass_block';
-            // Also update their target to their initial spot
             rbPlayer.targetX = rbPlayer.initialX;
-            rbPlayer.targetY = rbPlayer.initialY - 0.5; // Pass block step
+            rbPlayer.targetY = rbPlayer.initialY - 0.5;
         }
     }
     // --- END HOT ROUTE CHECK ---
@@ -3680,11 +3703,12 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
             playState.tick++;
             const timeDelta = TICK_DURATION_SECONDS;
 
-            // Get current states
             const offenseStates = playState.activePlayers.filter(p => p.isOffense);
             const defenseStates = playState.activePlayers.filter(p => !p.isOffense);
             ballCarrierState = playState.activePlayers.find(p => p.isBallCarrier);
             const ballPos = playState.ballState;
+
+            // --- 💡 RE-ORDERED TICK LOOP 💡 ---
 
             // --- STEP 1: QB Logic (Decide Throw/Scramble) ---
             if (playState.playIsLive && type === 'pass' && !ballPos.inAir && !playState.turnover && !playState.sack) {
@@ -3695,56 +3719,10 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
             // --- STEP 2: Update Player Intentions/Targets (AI) ---
             updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrierState, type, offensivePlayKey, assignments, defensivePlayKey, gameLog);
 
-            // --- STEP 3: Check Collisions & Resolve Catches/Incompletions ---
-            if (playState.playIsLive) {
-                // A. Check for new block engagements
-                checkBlockCollisions(playState);
-
-                // B. Check for tackles
-                ballCarrierState = playState.activePlayers.find(p => p.isBallCarrier);
-                if (ballCarrierState) {
-                    if (checkTackleCollisions(playState, gameLog)) break; // Play ended from tackle/fumble
-                }
-
-                // C. Check for Ball Arrival (Catch/INT/Drop)
-                if (ballPos.inAir) {
-                    // Check if ball has arrived at its (X,Y) destination
-                    const distToTargetXY = Math.sqrt(
-                        Math.pow(ballPos.x - ballPos.targetX, 2) +
-                        Math.pow(ballPos.y - ballPos.targetY, 2)
-                    );
-                    const CATCH_ARRIVAL_RADIUS = 2.0; // How close to the target to trigger a catch
-
-                    if (distToTargetXY < CATCH_ARRIVAL_RADIUS) {
-                        handleBallArrival(playState, gameLog); // Resolve the pass
-                        if (!playState.playIsLive) break; // Play ended
-                    }
-
-                    // D. Check for Ground / Out of Bounds (if not caught)
-                    if (playState.playIsLive) {
-                        // Check for ground (using the tick buffer we fixed)
-                        if (ballPos.z <= 0.1 && playState.tick > 6) {
-                            gameLog.push(`‹‹ Pass hits the ground. Incomplete.`);
-                            playState.incomplete = true; playState.playIsLive = false; ballPos.inAir = false;
-                            break;
-                        }
-                        // Check for OOB (including back of endzones)
-                        if (ballPos.x <= 0.1 || ballPos.x >= FIELD_WIDTH - 0.1 || ballPos.y >= FIELD_LENGTH - 0.1 || ballPos.y <= 0.1) {
-                            gameLog.push(`‹‹ Pass sails out of bounds. Incomplete.`);
-                            playState.incomplete = true; playState.playIsLive = false; ballPos.inAir = false;
-                            break;
-                        }
-                    }
-                }
-            }
-            // --- STEP 4: Update Player Positions (Movement) ---
+            // --- STEP 3: Update Player Positions (Movement) ---
             playState.activePlayers.forEach(p => updatePlayerPosition(p, timeDelta));
 
-            // --- STEP 5: Resolve "Nudge" Collisions ---
-            resolvePlayerCollisions(playState);
-
-            // --- STEP 6: Update Ball Position ---
-            // Re-find carrier *after* movement, in case of handoff (future)
+            // --- STEP 4: Update Ball Position ---
             ballCarrierState = playState.activePlayers.find(p => p.isBallCarrier);
             if (ballPos.inAir) {
                 ballPos.x += ballPos.vx * timeDelta;
@@ -3752,37 +3730,35 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
                 ballPos.z += ballPos.vz * timeDelta;
                 ballPos.vz -= 9.8 * timeDelta; // Apply gravity
             } else if (ballCarrierState) {
-                // Ball is held, sync it to the carrier's new position
                 ballPos.x = ballCarrierState.x;
                 ballPos.y = ballCarrierState.y;
                 ballPos.z = 0.5;
             }
 
-            // --- STEP 7: Resolve Ongoing Battles (Blocks) ---
-            if (playState.playIsLive) {
-                resolveOngoingBlocks(playState, gameLog);
-            }
+            // --- STEP 5: Resolve "Nudge" Collisions ---
+            resolvePlayerCollisions(playState);
 
-            // --- STEP 8: Check Ball Carrier End Conditions (TD, OOB) ---
+            // --- STEP 6: Check Ball Carrier End Conditions (TD, OOB, Safety) ---
+            // 💡 MOVED UP: This MUST run after positions are updated, but before tackles are checked.
             if (playState.playIsLive) {
                 ballCarrierState = playState.activePlayers.find(p => p.isBallCarrier);
                 if (ballCarrierState) {
                     // Check for Touchdown (in either endzone)
-                    if (ballCarrierState.y >= FIELD_LENGTH - 10 && ballCarrierState.isOffense) { // 🛠️ Offensive TD
+                    if (ballCarrierState.y >= FIELD_LENGTH - 10 && ballCarrierState.isOffense) { // Offensive TD
                         playState.yards = ballCarrierState.y - playState.lineOfScrimmage;
                         playState.touchdown = true; playState.playIsLive = false;
                         const scorer = game.players.find(p => p && p.id === ballCarrierState.id);
                         gameLog.push(`🎉 TOUCHDOWN ${scorer?.name || 'player'}!`);
                         break;
-                    } else if (ballCarrierState.y < 10 && !ballCarrierState.isOffense) { // 🛠️ Defensive TD
+                    } else if (ballCarrierState.y < 10 && !ballCarrierState.isOffense) { // Defensive TD
                         playState.yards = 0;
                         playState.touchdown = true; playState.playIsLive = false;
                         const scorer = game.players.find(p => p && p.id === ballCarrierState.id);
                         gameLog.push(`🎉 DEFENSIVE TOUCHDOWN ${scorer?.name || 'player'}!`);
                         break;
-                    } else if (ballCarrierState.y < 10 && ballCarrierState.isOffense) { // 🛠️ NEW: SAFETY
+                    } else if (ballCarrierState.y < 10 && ballCarrierState.isOffense) { // SAFETY
                         playState.yards = 0;
-                        playState.safety = true; // You must add safety: false to playState
+                        playState.safety = true;
                         playState.playIsLive = false;
                         gameLog.push(`SAFETY! ${ballCarrierState.name} was tackled in the endzone!`);
                         break;
@@ -3797,8 +3773,54 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
                 }
             }
 
+            // --- STEP 7: Check Collisions & Resolve Catches/Incompletions ---
+            if (playState.playIsLive) {
+                // A. Check for new block engagements
+                checkBlockCollisions(playState);
+
+                // B. Check for tackles
+                ballCarrierState = playState.activePlayers.find(p => p.isBallCarrier);
+                if (ballCarrierState) {
+                    if (checkTackleCollisions(playState, gameLog)) break; // Play ended from tackle/fumble
+                }
+
+                // C. Check for Ball Arrival (Catch/INT/Drop)
+                if (ballPos.inAir) {
+                    const distToTargetXY = Math.sqrt(
+                        Math.pow(ballPos.x - ballPos.targetX, 2) +
+                        Math.pow(ballPos.y - ballPos.targetY, 2)
+                    );
+                    const CATCH_ARRIVAL_RADIUS = 2.0;
+
+                    if (distToTargetXY < CATCH_ARRIVAL_RADIUS) {
+                        handleBallArrival(playState, gameLog);
+                        if (!playState.playIsLive) break;
+                    }
+
+                    // D. Check for Ground / Out of Bounds (if not caught)
+                    if (playState.playIsLive) {
+                        if (ballPos.z <= 0.1 && playState.tick > 6) {
+                            gameLog.push(`‹‹ Pass hits the ground. Incomplete.`);
+                            playState.incomplete = true; playState.playIsLive = false; ballPos.inAir = false;
+                            break;
+                        }
+                        if (ballPos.x <= 0.1 || ballPos.x >= FIELD_WIDTH - 0.1 || ballPos.y >= FIELD_LENGTH - 0.1 || ballPos.y <= 0.1) {
+                            gameLog.push(`‹‹ Pass sails out of bounds. Incomplete.`);
+                            playState.incomplete = true; playState.playIsLive = false; ballPos.inAir = false;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            // --- STEP 8: Resolve Ongoing Battles (Blocks) ---
+            if (playState.playIsLive) {
+                resolveOngoingBlocks(playState, gameLog);
+            }
+
             // --- STEP 9: Update Fatigue ---
             playState.activePlayers.forEach(pState => {
+                // ... (fatigue logic is fine) ...
                 if (!pState) return;
                 let fatigueGain = 0.1;
                 const action = pState.action;
@@ -3838,7 +3860,7 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
     }
 
     // --- 4. Finalize Results ---
-    if (playState.playIsLive && !playState.touchdown) { // If loop finished by time limit
+    if (playState.playIsLive && !playState.touchdown && !playState.safety) { // 💡 Added safety check
         ballCarrierState = playState.activePlayers.find(p => p.isBallCarrier);
         if (ballCarrierState) {
             playState.yards = ballCarrierState.y - playState.lineOfScrimmage;
@@ -3853,13 +3875,13 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
 
     playState.yards = Math.round(playState.yards);
     if (playState.sack) { playState.yards = Math.min(0, playState.yards); }
-    if (playState.incomplete || (playState.turnover && !playState.touchdown)) { // Don't reset yards on pick-six
+    if (playState.incomplete || (playState.turnover && !playState.touchdown) || playState.safety) { // 💡 Added safety
         playState.yards = 0;
     }
     if (playState.touchdown && !playState.turnover) { // Offensive TD
         playState.yards = Math.max(0, FIELD_LENGTH - 10 - playState.lineOfScrimmage);
     } else if (playState.touchdown && playState.turnover) { // Defensive TD
-        playState.yards = 0; // No offensive yards
+        playState.yards = 0;
     }
 
     finalizeStats(playState, offense, defense);
@@ -3869,6 +3891,7 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
         touchdown: playState.touchdown,
         turnover: playState.turnover,
         incomplete: playState.incomplete,
+        safety: playState.safety, // 💡 Pass safety state back
         log: gameLog,
         visualizationFrames: playState.visualizationFrames
     };
@@ -4741,10 +4764,28 @@ export function simulateGame(homeTeam, awayTeam) {
                         down++;
                     } else { // Completed play
                         yardsToGo -= result.yards;
-                        if (yardsToGo <= 0) {
+
+                        if (yardsToGo <= 0) { // First down
                             down = 1;
-                            yardsToGo = Math.min(10, 100 - ballOn);
-                            gameLog.push(`➡️ First down! 1st & Goal at the ${100 - ballOn}.`);
+
+                            // 💡 GOAL-LINE FIX:
+                            // Check if the new ball position is inside the 10-yard line
+                            if (ballOn >= 90) {
+                                yardsToGo = 100 - ballOn; // Set to "Goal-to-go"
+                            } else {
+                                yardsToGo = 10; // Normal first down
+                            }
+
+                            // 💡 FAILSAME: If yardsToGo is 0 (or less), it means we are on the goal line.
+                            // Set it to 1, because the offense must gain *at least* 1 yard (or 0.1) to score.
+                            // This prevents the `yardsToGo <= 0` check from immediately firing again.
+                            if (yardsToGo <= 0) {
+                                yardsToGo = 1;
+                            }
+
+                            const newYardLineText = ballOn <= 50 ? `own ${ballOn}` : `opponent ${100 - ballOn}`;
+                            gameLog.push(`➡️ First down ${offense.name}! ${ballOn >= 90 ? `1st & Goal at the ${100 - ballOn}` : `1st & 10 at the ${newYardLineText}`}.`);
+
                         } else {
                             down++;
                         }
