@@ -3960,10 +3960,16 @@ function determinePlayCall(offense, defense, down, yardsToGo, ballOn, scoreDiff,
     if (avgRbOvr > avgQbOvr + 15) passChance -= 0.05;
 
     // Coach Tendency
+    // --- Run-Heavy Coaches ---
     if (coach.type === 'Ground and Pound') passChance -= 0.20;
-    if (coach.type === 'West Coast Offense') passChance += 0.10; // WCO often short passes
-    if (coach.type === 'Spread') passChance += 0.15; // Spread leans pass
+    if (coach.type === 'Trench Warfare') passChance -= 0.25; // Even more run-focused
 
+    // --- Pass-Happy Coaches ---
+    if (coach.type === 'West Coast Offense') passChance += 0.10; // WCO often short passes
+    if (coach.type === 'Youth Scout') passChance += 0.10; // Prefers Spread
+    if (coach.type === 'Skills Coach') passChance += 0.20; // Wants to use his playmakers
+    if (coach.type === 'Air Raid') passChance += 0.35; // Very pass-heavy
+    
     // Clamp final chance
     passChance = Math.max(0.05, Math.min(0.95, passChance));
 
@@ -4541,12 +4547,30 @@ export function simulateGame(homeTeam, awayTeam) {
                 }
 
                 // --- 5. Tally Score ---
+
+                // First, award 6 points for the initial touchdown
+                if (offense.id === homeTeam.id) homeScore += 6; else awayScore += 6;
+
+                // Now, handle *only* the conversion points
                 if (conversionResult.touchdown) {
-                    gameLog.push(`✅ ${points}-point conversion GOOD!`);
-                    if (offense.id === homeTeam.id) homeScore += (6 + points); else awayScore += (6 + points);
+                    // A TD was scored on the conversion... but by who?
+
+                    if (!conversionResult.turnover) {
+                        // --- 1. OFFENSE scored the conversion ---
+                        gameLog.push(`✅ ${points}-point conversion GOOD!`);
+                        if (offense.id === homeTeam.id) homeScore += points; else awayScore += points;
+
+                    } else {
+                        // --- 2. DEFENSE scored on a turnover (Defensive 2-pt) ---
+                        // (This assumes 2 points for any defensive conversion TD)
+                        gameLog.push(`❌ ${points}-point conversion FAILED... AND RETURNED!`);
+                        if (defense.id === homeTeam.id) homeScore += 2; else awayScore += 2;
+                    }
+
                 } else {
+                    // --- 3. No TD on conversion (Failed attempt) ---
                     gameLog.push(`❌ ${points}-point conversion FAILED!`);
-                    if (offense.id === homeTeam.id) homeScore += 6; else awayScore += 6;
+                    // No more points to add
                 }
                 driveActive = false;
             } else if (result.incomplete) {
