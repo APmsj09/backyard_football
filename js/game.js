@@ -520,11 +520,36 @@ export function aiSetDepthChart(team) {
             if (availablePlayers.length > 0) {
                 // Find the best player for this slot
                 const bestPlayerForSlot = availablePlayers.reduce((best, current) => {
+                    if (!best) return current;
+                    const basePosition = slot.replace(/\d/g, '');
+
+                    // Base suitability using existing slot/formula
                     let bestSuitability = calculateSlotSuitability(best, slot, side, team);
                     let currentSuitability = calculateSlotSuitability(current, slot, side, team);
 
-                    // --- 🛠️ "Ironman" Fix: Penalize players who already have a job ---
-                    // This now works, because 'defense' runs first.
+                    // Boost players whose estimated best position matches the slot
+                    try {
+                        const bestEst = estimateBestPosition(best);
+                        const currEst = estimateBestPosition(current);
+                        if (bestEst === basePosition) bestSuitability += 12;
+                        if (currEst === basePosition) currentSuitability += 12;
+
+                        // Boost players who list this as a favorite/primary position
+                        if (best.favoriteOffensivePosition === basePosition || best.favoriteDefensivePosition === basePosition) bestSuitability += 8;
+                        if (current.favoriteOffensivePosition === basePosition || current.favoriteDefensivePosition === basePosition) currentSuitability += 8;
+
+                        // Penalize if player's estimated position is strongly on the opposite side
+                        const offensePositions = ['QB','RB','WR','OL'];
+                        const defensePositions = ['DL','LB','DB'];
+                        const bestSideMismatch = (side === 'offense' && defensePositions.includes(bestEst)) || (side === 'defense' && offensePositions.includes(bestEst));
+                        const currSideMismatch = (side === 'offense' && defensePositions.includes(currEst)) || (side === 'defense' && offensePositions.includes(currEst));
+                        if (bestSideMismatch) bestSuitability -= 20;
+                        if (currSideMismatch) currentSuitability -= 20;
+                    } catch (e) {
+                        // If estimateBestPosition fails for any player, ignore bonuses
+                    }
+
+                    // Penalize players who already have a starting job so we spread starters
                     if (alreadyAssignedPlayerIds.has(best.id)) bestSuitability -= 50;
                     if (alreadyAssignedPlayerIds.has(current.id)) currentSuitability -= 50;
 
@@ -3472,7 +3497,9 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
                 ball: deepClone(playState.ballState),
                 logIndex: gameLog.length,
                 lineOfScrimmage: playState.lineOfScrimmage,
-                firstDownY: firstDownY
+                firstDownY: firstDownY,
+                // Mark this first frame as the snap frame so the UI can render the ball
+                isSnap: true
             };
             playState.visualizationFrames.push(initialFrameData);
         }

@@ -1187,41 +1187,34 @@ export function drawFieldVisualization(frameData) {
     }
     ctx.restore();
 
-    // --- Camera & Zoom Logic ---
-    const ZOOM_LEVEL = 2.0; // Show half the field (adjust between 1.0-3.0 for different zoom levels)
-    
-    // Calculate base scaling (before zoom)
-    const baseScaleX = canvas.width / FIELD_LENGTH;
-    const baseScaleY = canvas.height / FIELD_WIDTH;
-    
-    // Apply zoom
-    const scaleX = baseScaleX * ZOOM_LEVEL;
-    const scaleY = baseScaleY * ZOOM_LEVEL;
-    
-    // Find focal point for camera (ball or line of scrimmage)
-    let cameraFocusX = frameData?.lineOfScrimmage || 60;
-    let cameraFocusY = CENTER_X;
-    
-    if (frameData?.ball) {
+    // --- Camera Logic: Fit full field width (sideline-to-sideline) vertically and pan left/right only ---
+    // Use a single scale so the full field width fits vertically and preserve aspect ratio.
+    const scale = canvas.height / FIELD_WIDTH;
+    const scaleX = scale;
+    const scaleY = scale;
+
+    // Find focal point along the field-length axis (y in world coords)
+    let cameraFocusYField = (frameData && frameData.lineOfScrimmage) != null ? frameData.lineOfScrimmage : 60;
+    if (frameData && frameData.ball) {
         if (frameData.ball.inAir) {
-            // Focus on ball for passes
-            cameraFocusX = frameData.ball.y;
-            cameraFocusY = frameData.ball.x;
+            cameraFocusYField = frameData.ball.y;
         } else {
-            // Focus on ball carrier
             const ballCarrier = frameData.players?.find(p => p.isBallCarrier);
-            if (ballCarrier) {
-                cameraFocusX = ballCarrier.y;
-                cameraFocusY = ballCarrier.x;
-            }
+            if (ballCarrier) cameraFocusYField = ballCarrier.y;
         }
     }
-    
-    // Calculate camera offset to center the focus point
-    const cameraOffsetX = (canvas.width / 2) - (cameraFocusX * scaleX);
-    const cameraOffsetY = (canvas.height / 2) - (cameraFocusY * scaleY);
-    
-    // Apply camera transform
+
+    // Compute camera offset so the focusYField is horizontally centered.
+    let cameraOffsetX = (canvas.width / 2) - (cameraFocusYField * scaleX);
+    // If the scaled field length is wider than the canvas, allow negative translate (pan). Otherwise clamp to 0.
+    const minOffsetX = Math.min(0, canvas.width - (FIELD_LENGTH * scaleX));
+    const maxOffsetX = 0;
+    cameraOffsetX = Math.max(minOffsetX, Math.min(maxOffsetX, cameraOffsetX));
+
+    // Vertical offset is fixed so the full field width is always visible (no vertical panning)
+    const cameraOffsetY = (canvas.height / 2) - (CENTER_X * scaleY);
+
+    // Apply camera transform (we translate only; positions are multiplied by scaleX/scaleY elsewhere)
     ctx.save();
     ctx.translate(cameraOffsetX, cameraOffsetY);
 
@@ -1337,56 +1330,15 @@ export function drawFieldVisualization(frameData) {
                 ctx.restore();
             }
 
-            // Draw collision and engagement effects
+            // Reduce engagement visuals to a subtle jiggle + soft halo (no bursts/ripples)
             if (player.isEngaged) {
-                // Find the engaged player(s)
-                const engagedWith = frameData.players.filter(other => 
-                    other !== player && 
-                    other.isEngaged &&
-                    Math.abs(other.x - player.x) < 2 &&
-                    Math.abs(other.y - player.y) < 2
-                );
-
-                engagedWith.forEach(other => {
-                    // Calculate the midpoint between players
-                    const midX = (drawX + (other.y * scaleX)) / 2;
-                    const midY = (drawY + (other.x * scaleY)) / 2;
-
-                    // Draw collision burst
-                    const burstSize = 15;
-                    for (let i = 0; i < 8; i++) {
-                        const angle = (Math.PI * 2 * i / 8) + (Date.now() / 200);
-                        ctx.beginPath();
-                        ctx.moveTo(midX, midY);
-                        ctx.lineTo(
-                            midX + Math.cos(angle) * burstSize,
-                            midY + Math.sin(angle) * burstSize
-                        );
-                        ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
-                        ctx.lineWidth = 2;
-                        ctx.stroke();
-                    }
-
-                    // Draw impact ripples
-                    const rippleCount = 2;
-                    for (let i = 0; i < rippleCount; i++) {
-                        const rippleSize = 10 + (i * 5) + (Math.sin(Date.now() / 200) * 2);
-                        ctx.beginPath();
-                        ctx.arc(midX, midY, rippleSize, 0, Math.PI * 2);
-                        ctx.strokeStyle = `rgba(255, 255, 255, ${0.2 - (i * 0.1)})`;
-                        ctx.lineWidth = 1;
-                        ctx.stroke();
-                    }
-                });
-
-                // Combat glow for engaged players
-                const gradient = ctx.createRadialGradient(drawX, drawY, 4, drawX, drawY, 12);
-                gradient.addColorStop(0, 'rgba(255, 255, 255, 0.5)');
-                gradient.addColorStop(0.5, 'rgba(255, 255, 255, 0.2)');
-                gradient.addColorStop(1, 'rgba(255, 255, 255, 0)');
+                // Small soft halo so engaged players are still visible without being overbearing
+                const gradient = ctx.createRadialGradient(drawX, drawY, 3, drawX, drawY, 10);
+                gradient.addColorStop(0, 'rgba(255,255,255,0.12)');
+                gradient.addColorStop(1, 'rgba(255,255,255,0)');
                 ctx.fillStyle = gradient;
                 ctx.beginPath();
-                ctx.arc(drawX, drawY, 12, 0, Math.PI * 2);
+                ctx.arc(drawX, drawY, 10, 0, Math.PI * 2);
                 ctx.fill();
             }
             
@@ -1453,46 +1405,54 @@ export function drawFieldVisualization(frameData) {
                 ctx.stroke();
             }
 
-            // Draw player number and position
-            if (player.number) {
-                // Position above number
-                if (player.position) {
-                    // Position text shadow
-                    ctx.font = '9px "Inter"';
-                    ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
-                    ctx.textAlign = 'center';
-                    ctx.textBaseline = 'middle';
-                    ctx.fillText(player.position, drawX + 1, drawY - 11);
-                    
-                    // Position text
-                    ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
-                    ctx.fillText(player.position, drawX, drawY - 12);
-                }
-                
-                // Number shadow
-                ctx.font = 'bold 11px "Inter"';
+            // Draw player number and position (derive display-only values locally so we don't mutate physics state)
+            // Prefer the slot assigned in the play (depth-chart placement) when available.
+            const displayPosition = (player.slot ? player.slot.replace(/\d+/g, '') : '') || player.position || player.favoriteOffensivePosition || player.favoriteDefensivePosition || (typeof estimateBestPosition === 'function' ? estimateBestPosition(player) : '') || '';
+
+            let displayNumber;
+            if (player.number != null && player.number !== '') {
+                displayNumber = player.number.toString();
+            } else {
+                // Derive a stable, non-colliding number from player name/id for display only
+                const seed = (player.name || player.id || 'player').toString();
+                let sum = 0;
+                for (let i = 0; i < seed.length; i++) sum += seed.charCodeAt(i);
+                displayNumber = ((sum % 99) + 1).toString();
+            }
+
+            // Position above number (if available)
+            if (displayPosition) {
+                ctx.font = '9px "Inter"';
                 ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
                 ctx.textAlign = 'center';
                 ctx.textBaseline = 'middle';
-                ctx.fillText(player.number.toString(), drawX + 1, drawY + 1);
-                
-                // Number
-                ctx.fillStyle = '#ffffff';
-                ctx.fillText(player.number.toString(), drawX, drawY);
+                ctx.fillText(displayPosition, drawX + 1, drawY - 11);
+
+                ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+                ctx.fillText(displayPosition, drawX, drawY - 12);
             }
+
+            // Number shadow and number (rendered from derived displayNumber, does not write back to player object)
+            ctx.font = 'bold 11px "Inter"';
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(displayNumber, drawX + 1, drawY + 1);
+
+            ctx.fillStyle = '#ffffff';
+            ctx.fillText(displayNumber, drawX, drawY);
         });
 
-        // Draw ball
-        if (frameData.ball) {
+        // Draw ball only if it's in the air or this frame is the snap frame
+        if (frameData.ball && (frameData.ball.inAir || frameData.isSnap)) {
             const drawX = frameData.ball.y * scaleX;
             const drawY = frameData.ball.x * scaleY;
 
-            // Enhanced ball visualization
+            // Enhanced ball visualization (same as before, but only when visible)
             const ballX = drawX;
             const ballY = drawY;
-            
+
             if (frameData.ball.inAir) {
-                // Draw trajectory shadow
                 ctx.save();
                 ctx.beginPath();
                 ctx.arc(ballX + 2, ballY + 2, 6, 0, Math.PI * 2);
@@ -1500,21 +1460,19 @@ export function drawFieldVisualization(frameData) {
                 ctx.fill();
                 ctx.restore();
 
-                // Aerial ball glow
                 const glowGradient = ctx.createRadialGradient(
                     ballX, ballY, 2,
                     ballX, ballY, 12
                 );
                 glowGradient.addColorStop(0, 'rgba(146, 64, 14, 0.6)');
                 glowGradient.addColorStop(1, 'rgba(146, 64, 14, 0)');
-                
+
                 ctx.beginPath();
                 ctx.arc(ballX, ballY, 12, 0, Math.PI * 2);
                 ctx.fillStyle = glowGradient;
                 ctx.fill();
             }
 
-            // Draw ball with 3D effect
             // Ball shadow
             ctx.beginPath();
             ctx.arc(ballX + 1, ballY + 1, frameData.ball.inAir ? 5 : 3, 0, Math.PI * 2);
