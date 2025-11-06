@@ -10,9 +10,13 @@ import {
     defenseFormations,
     relationshipLevels // <-- Added
 } from './data.js';
+import { 
+    positionOverallWeights, 
+    estimateBestPosition 
+} from './game/player.js';
 
 // At the top of ui.js
-import { getRandom, getRandomInt, formatHeight, estimateBestPosition } from './utils.js'; // <<< Add formatHeight here
+import { getRandom, getRandomInt, formatHeight} from './utils.js'; // <<< Add formatHeight here
 
 // --- Visualization Constants (Must match game.js) ---
 const FIELD_LENGTH = 120;
@@ -337,7 +341,7 @@ export function renderTeamNameSuggestions(names, onSelect) {
 /**
  * Renders the main draft screen UI.
  */
-export function renderDraftScreen(gameState, onPlayerSelect, currentSelectedId, sortColumn, sortDirection, positionOverallWeights) {
+export function renderDraftScreen(gameState, onPlayerSelect, currentSelectedId, sortColumn, sortDirection) {
     if (!gameState || !gameState.teams || !gameState.players || !gameState.draftOrder || !gameState.playerTeam) {
         console.error("renderDraftScreen called without valid gameState.");
         if (elements.draftHeader) elements.draftHeader.innerHTML = `<h2 class="text-3xl font-bold text-red-500">Draft Error: Invalid Game State</h2>`;
@@ -372,7 +376,7 @@ export function renderDraftScreen(gameState, onPlayerSelect, currentSelectedId, 
     if (elements.draftPickNumber) elements.draftPickNumber.textContent = `${currentPick + 1} (${currentTeamRosterSize}/${ROSTER_LIMIT} players)`;
     if (elements.draftPickingTeam) elements.draftPickingTeam.textContent = pickingTeam.name || 'Unknown Team';
 
-    renderDraftPool(gameState, onPlayerSelect, sortColumn, sortDirection, positionOverallWeights);
+    renderDraftPool(gameState, onPlayerSelect, sortColumn, sortDirection);
     renderPlayerRoster(gameState.playerTeam);
     updateDraftSortIndicators(sortColumn, sortDirection); // <<< Add this call
 
@@ -539,7 +543,7 @@ export function updateSelectedPlayerRow(newSelectedId) {
 }
 
 /** Renders the selected player card with scouted info. */
-export function renderSelectedPlayerCard(player, gameState, positionOverallWeights) {
+export function renderSelectedPlayerCard(player, gameState) {
     if (!elements.selectedPlayerCard) return;
 
     if (!player || !gameState || !gameState.playerTeam || !gameState.playerTeam.roster) {
@@ -602,7 +606,7 @@ export function renderSelectedPlayerCard(player, gameState, positionOverallWeigh
 }
 
 /** Renders the player's current roster list in the draft panel. */
-export function renderPlayerRoster(playerTeam, positionOverallWeights) {
+export function renderPlayerRoster(playerTeam) {
     if (!elements.rosterCount || !elements.draftRosterList || !playerTeam) {
         console.error("Cannot render player roster: Missing elements or playerTeam data.");
         return;
@@ -624,7 +628,7 @@ export function renderPlayerRoster(playerTeam, positionOverallWeights) {
             elements.draftRosterList.appendChild(li);
         });
     }
-    renderRosterSummary(playerTeam, positionOverallWeights);
+    renderRosterSummary(playerTeam)
 }
 
 /** Renders the average overall ratings for the player's current roster. */

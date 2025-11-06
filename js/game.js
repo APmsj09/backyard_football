@@ -1,8 +1,14 @@
 // game.js - COMPLETE FILE
 
 // --- Imports ---
-import { getRandom, getRandomInt, estimateBestPosition } from './utils.js';
-import { calculateOverall, calculateSlotSuitability, generatePlayer, positionOverallWeights } from './game/player.js';
+import { getRandom, getRandomInt } from './utils.js'; // Removed estimateBestPosition
+import { 
+    calculateOverall, 
+    calculateSlotSuitability, 
+    generatePlayer, 
+    positionOverallWeights,
+    estimateBestPosition  // <<< ADD IT HERE
+} from './game/player.js';
 import { getDistance, updatePlayerPosition } from './game/physics.js';
 
 // Re-export player helpers (moved to ./game/player.js) to preserve public API
