@@ -1,228 +1,354 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Backyard Football League</title>
+<script type="module">
+  // --- Game Logic Imports ---
+  import {
+    initializeLeague,
+    createPlayerTeam,
+    setupDraft,
+    getGameState,
+    addPlayerToTeam,
+    simulateAIPick,
+    generateSchedule,
+    simulateGame, // Using this for fast sim of draft
+    getScoutedPlayerInfo,
+    getRelationshipLevel,
+    simulateWeek
+  } from './game.js'; // Make sure game.js is in the same folder
 
-  <!-- Fonts -->
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link
-    href="https://fonts.googleapis.com/css2?family=Bangers&family=Inter:wght@400;600;700&display=swap"
-    rel="stylesheet"
-  />
+  // --- Screen Switcher ---
+  function showScreen(screenId) {
+    console.log("Switching to:", screenId);
+    document.querySelectorAll(".screen").forEach(s => s.classList.add("hidden"));
+    const screen = document.getElementById(screenId);
+    if (screen) screen.classList.remove("hidden");
+    else console.warn(`Screen "${screenId}" not found.`);
+  }
 
-  <!-- Tailwind (CDN) -->
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script>
-    tailwind.config = {
-      theme: {
-        extend: {
-          fontFamily: {
-            sans: ['Inter', 'sans-serif'],
-            bangers: ['Bangers', 'cursive'],
-          },
-        },
-      },
-    };
-  </script>
-
-  <style>
-    .font-bangers { font-family: 'Bangers', cursive; }
-    .tab-pane.hidden { display: none !important; }
-    .notification-dot {
-      position: absolute;
-      right: 0.5rem;
-      top: 0.5rem;
-      width: 0.5rem;
-      height: 0.5rem;
-      background: #ef4444;
-      border-radius: 9999px;
-    }
-  </style>
-</head>
-
-<body class="bg-gray-100 font-sans">
-
-  <div id="game-container" class="container mx-auto p-4">
-    <!-- === START SCREEN === -->
-    <section id="start-screen" class="text-center py-20">
-      <h1 class="font-bangers text-5xl mb-8 text-amber-500">Backyard Football League</h1>
-      <button id="start-game-btn"
-        class="bg-amber-500 hover:bg-amber-600 text-white font-bold py-3 px-8 rounded-lg text-xl transition">
-        Start New Game
-      </button>
-    </section>
-
-    <!-- === DASHBOARD === -->
-    <section id="dashboard-screen" class="hidden">
-      <header class="bg-white p-4 rounded-lg shadow-md mb-4 flex justify-between items-center">
-        <div>
-          <h2 id="dashboard-team-name" class="text-2xl font-bold text-gray-800">Team Name</h2>
-          <p id="dashboard-record" class="text-gray-600 font-semibold">Record: 0 - 0</p>
-        </div>
-        <div class="text-right">
-          <p class="font-bold text-lg">Season <span id="dashboard-year">1</span></p>
-          <p class="text-gray-600" id="dashboard-week">Week 1</p>
-        </div>
-        <button id="advance-week-btn"
-          class="bg-amber-500 hover:bg-amber-600 text-white font-bold py-2 px-6 rounded-lg transition text-lg">
-          Advance Week
-        </button>
-      </header>
-
-      <div class="flex gap-6">
-        <!-- === Sidebar Tabs === -->
-        <aside id="dashboard-tabs" class="w-1/5 flex-shrink-0">
-          <nav class="flex flex-col space-y-1">
-            <button data-tab="my-team"
-              class="tab-button p-2 rounded font-semibold text-sm text-gray-600 text-left transition mb-1 flex items-center gap-2 bg-amber-500 text-white">
-              My Team
-            </button>
-            <button data-tab="depth-chart"
-              class="tab-button p-2 rounded font-semibold text-sm text-gray-600 text-left transition mb-1 flex items-center gap-2 hover:bg-gray-100">
-              Depth Chart
-            </button>
-            <button data-tab="messages"
-              class="tab-button relative p-2 rounded font-semibold text-sm text-gray-600 text-left transition mb-1 flex items-center gap-2 hover:bg-gray-100">
-              Text Messages
-              <span id="messages-notification-dot" class="notification-dot hidden"></span>
-            </button>
-            <button data-tab="schedule"
-              class="tab-button p-2 rounded font-semibold text-sm text-gray-600 text-left transition mb-1 flex items-center gap-2 hover:bg-gray-100">
-              Schedule
-            </button>
-            <button data-tab="standings"
-              class="tab-button p-2 rounded font-semibold text-sm text-gray-600 text-left transition mb-1 flex items-center gap-2 hover:bg-gray-100">
-              Standings
-            </button>
-            <button data-tab="player-stats"
-              class="tab-button p-2 rounded font-semibold text-sm text-gray-600 text-left transition mb-1 flex items-center gap-2 hover:bg-gray-100">
-              Player Stats
-            </button>
-            <button data-tab="hall-of-fame"
-              class="tab-button p-2 rounded font-semibold text-sm text-gray-600 text-left transition mb-1 flex items-center gap-2 hover:bg-gray-100">
-              Hall of Fame
-            </button>
-          </nav>
-        </aside>
-
-        <!-- === Main Content === -->
-        <main id="dashboard-content" class="flex-grow bg-white p-6 rounded-lg shadow-md min-h-[600px]">
-          <!-- My Team -->
-          <div id="tab-content-my-team" class="tab-pane block">
-            <h3 class="text-xl font-bold mb-4">Team Roster</h3>
-            <div id="my-team-roster" class="space-y-2">
-              <p class="text-gray-500">No players yet.</p>
-            </div>
-          </div>
-
-          <!-- Depth Chart -->
-          <div id="tab-content-depth-chart" class="tab-pane hidden">
-            <h3 class="text-xl font-bold mb-4">Depth Chart</h3>
-            <div id="depth-chart-container" class="space-y-2">
-              <p class="text-gray-500">Depth chart will appear here.</p>
-            </div>
-          </div>
-
-          <!-- Messages -->
-          <div id="tab-content-messages" class="tab-pane hidden">
-            <h3 class="text-xl font-bold mb-4">Text Messages</h3>
-            <div id="messages-list" class="space-y-2 max-h-[500px] overflow-y-auto">
-              <p class="text-gray-500">No messages yet.</p>
-            </div>
-          </div>
-
-          <!-- Schedule -->
-          <div id="tab-content-schedule" class="tab-pane hidden">
-            <h3 class="text-xl font-bold mb-4">Season Schedule</h3>
-            <div id="schedule-list" class="space-y-4">
-              <p class="text-gray-500">Schedule not loaded.</p>
-            </div>
-          </div>
-
-          <!-- Standings -->
-          <div id="tab-content-standings" class="tab-pane hidden">
-            <h3 class="text-xl font-bold mb-4">League Standings</h3>
-            <div id="standings-container" class="space-y-6">
-              <p class="text-gray-500">Standings will appear here.</p>
-            </div>
-          </div>
-
-          <!-- Player Stats -->
-          <div id="tab-content-player-stats" class="tab-pane hidden">
-            <h3 class="text-xl font-bold mb-4">League Player Stats</h3>
-            <div id="player-stats-container">
-              <p class="text-gray-500">Player stats coming soon.</p>
-            </div>
-          </div>
-
-          <!-- Hall of Fame -->
-          <div id="tab-content-hall-of-fame" class="tab-pane hidden">
-            <h3 class="text-xl font-bold mb-4">Hall of Fame</h3>
-            <div id="hall-of-fame-list">
-              <p class="text-gray-500">No Hall of Fame entries yet.</p>
-            </div>
-          </div>
-        </main>
-      </div>
-    </section>
-  </div>
-
-  <!-- === Modal === -->
-  <div id="modal" class="hidden fixed inset-0 z-50 flex items-center justify-center">
-    <div class="absolute inset-0 bg-black/50" aria-hidden="true"></div>
-    <div id="modal-content" class="bg-white rounded-lg shadow-lg z-10 max-w-2xl w-full p-6">
-      <h3 id="modal-title" class="text-xl font-bold mb-2">Modal Title</h3>
-      <div id="modal-body" class="mb-4">Modal body content</div>
-      <div class="mt-6 text-right">
-        <button id="modal-default-close"
-          class="bg-gray-500 hover:bg-gray-600 text-white font-bold py-2 px-6 rounded-lg">Close</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- === Scripts === -->
-  <script>
-    // === TAB HANDLER ===
-    document.querySelectorAll('.tab-button').forEach(btn => {
-      btn.addEventListener('click', () => {
+  // --- Tab Handling ---
+  function setupTabs() {
+    document.querySelectorAll(".tab-button").forEach(btn => {
+      btn.addEventListener("click", () => {
         const tab = btn.dataset.tab;
-
-        // Reset all buttons
-        document.querySelectorAll('.tab-button').forEach(b => {
-          b.classList.remove('bg-amber-500', 'text-white');
-          b.classList.add('text-gray-600');
+        // Reset button styles
+        document.querySelectorAll(".tab-button").forEach(b => {
+          b.classList.remove("bg-amber-500", "text-white");
+          b.classList.add("text-gray-600", "hover:bg-gray-100");
         });
-
-        // Hide all content
-        document.querySelectorAll('.tab-pane').forEach(p => p.classList.add('hidden'));
-
-        // Activate clicked tab
-        btn.classList.add('bg-amber-500', 'text-white');
-        btn.classList.remove('text-gray-600');
-        document.getElementById(`tab-content-${tab}`).classList.remove('hidden');
+        // Hide all panes
+        document.querySelectorAll(".tab-pane").forEach(p => p.classList.add("hidden"));
+        // Activate clicked
+        btn.classList.add("bg-amber-500", "text-white");
+        btn.classList.remove("hover:bg-gray-100");
+        document.getElementById(`tab-content-${tab}`).classList.remove("hidden");
       });
     });
+  }
 
-    // === MODAL HANDLER ===
-    const modal = document.getElementById('modal');
-    const modalClose = document.getElementById('modal-default-close');
-    if (modalClose) {
-      modalClose.addEventListener('click', () => modal.classList.add('hidden'));
+  // --- Game Flow Handlers ---
+  function main() {
+    console.log("Initializing game...");
+    setupTabs();
+    showScreen("start-screen");
+
+    // Hook up buttons
+    document.getElementById("start-game-btn")?.addEventListener("click", startNewGame);
+    document.getElementById("confirm-team-btn")?.addEventListener("click", handleConfirmTeam);
+    document.getElementById("draft-player-btn")?.addEventListener("click", handleFinishDraft);
+    
+    // NEW: Hook up the advance week button
+    document.getElementById("advance-week-btn")?.addEventListener("click", handleAdvanceWeek);
+  }
+
+  async function startNewGame() {
+    console.log("Starting new game...");
+    const btn = document.getElementById("start-game-btn");
+    btn.textContent = "Loading League...";
+    btn.disabled = true;
+
+    // Call the game.js logic to create players/teams
+    await initializeLeague((progress) => {
+        btn.textContent = `Loading...(${(progress * 100).toFixed(0)}%)`;
+    });
+    
+    console.log("League initialized.");
+    btn.textContent = "Start New Game";
+    btn.disabled = false;
+    showScreen("team-select-screen");
+  }
+
+  function handleConfirmTeam() {
+    const teamName = document.getElementById("team-select").value;
+    if (!teamName) {
+      alert("Please select a team first!");
+      return;
+    }
+    
+    // Call game.js logic
+    createPlayerTeam(teamName);
+    setupDraft();
+    
+    const game = getGameState();
+    document.getElementById("dashboard-team-name").textContent = game.playerTeam.name;
+    
+    console.log("Team confirmed:", teamName);
+    
+    // Now that the draft is ready, render the draft screen
+    renderDraftScreen();
+    showScreen("draft-screen");
+  }
+
+  // NEW: Function to handle picking a player
+  function handlePickPlayer(event) {
+    const playerId = event.currentTarget.dataset.playerId;
+    const game = getGameState();
+    const player = game.players.find(p => p.id === playerId);
+    
+    if (!player || player.teamId) {
+        console.warn("Player already drafted or not found");
+        return;
     }
 
-    // === DEMO START BUTTON ===
-    const startBtn = document.getElementById('start-game-btn');
-    const startScreen = document.getElementById('start-screen');
-    const dashboardScreen = document.getElementById('dashboard-screen');
-    if (startBtn) {
-      startBtn.addEventListener('click', () => {
-        startScreen.classList.add('hidden');
-        dashboardScreen.classList.remove('hidden');
-      });
+    // Add player to our team
+    addPlayerToTeam(player, game.playerTeam);
+    game.currentPick++;
+    
+    // Re-render the draft screen to show the next pick
+    renderDraftScreen();
+  }
+
+  // NEW: Function to simulate the rest of the draft
+  function handleFinishDraft() {
+    console.log("Finishing draft...");
+    const game = getGameState();
+    const { draftOrder, teams } = game;
+
+    // Loop from the current pick to the end
+    for (let i = game.currentPick; i < draftOrder.length; i++) {
+        const team = draftOrder[i];
+        if (team && !team.isPlayerControlled) {
+            simulateAIPick(team);
+        }
     }
-  </script>
-</body>
-</html>
+    
+    console.log("Draft complete!");
+    game.currentPick = draftOrder.length; // Mark draft as done
+    
+    // Finalize setup
+    generateSchedule();
+    
+    // Render the dashboard data
+    renderDashboardData();
+    showScreen("dashboard-screen");
+    
+    // Open default tab
+    const firstTab = document.querySelector('#dashboard-tabs .tab-button[data-tab="my-team"]');
+    if (firstTab) firstTab.click();
+  }
+
+  // NEW: Function to simulate the next week
+  function handleAdvanceWeek() {
+    const btn = document.getElementById("advance-week-btn");
+    btn.textContent = "Simulating...";
+    btn.disabled = true;
+
+    // Use a timeout to let the UI update before the heavy sim
+    setTimeout(() => {
+        // Call game.js logic
+        const results = simulateWeek();
+        console.log("Week simulated, results:", results);
+        
+        // Re-render all dashboard data
+        renderDashboardData();
+
+        btn.textContent = "Advance Week";
+        btn.disabled = false;
+    }, 50); // 50ms delay
+  }
+
+
+  // --- NEW RENDER FUNCTIONS ---
+  // These functions read from game.js and build the HTML
+
+  function renderDraftScreen() {
+    const game = getGameState();
+    const { draftOrder, currentPick, players, playerTeam } = game;
+    const listEl = document.getElementById("draft-player-list");
+    listEl.innerHTML = ""; // Clear existing list
+    
+    if (currentPick >= draftOrder.length) {
+        listEl.innerHTML = `<p class="text-gray-600">Draft is complete!</p>`;
+        document.getElementById("draft-player-btn").textContent = "Go to Dashboard";
+        return;
+    }
+
+    const currentPickingTeam = draftOrder[currentPick];
+
+    // Check if it's the AI's turn
+    if (currentPickingTeam.id !== playerTeam.id) {
+        listEl.innerHTML = `<p class="text-gray-600 text-lg">Simulating... ${currentPickingTeam.name} are on the clock.</p>`;
+        
+        // Simulate the AI pick and re-render after a short delay
+        setTimeout(() => {
+            simulateAIPick(currentPickingTeam);
+            game.currentPick++;
+            renderDraftScreen();
+        }, 300); // 300ms delay to make sim visible
+        return;
+    }
+
+    // It's OUR turn
+    const pickNumber = currentPick + 1;
+    document.querySelector("#draft-screen h2").textContent = `Player Draft (Pick ${pickNumber})`;
+    
+    // Get top available players (undrafted)
+    const availablePlayers = players
+        .filter(p => !p.teamId)
+        .sort((a, b) => (b.attributes.physical.speed + b.attributes.technical.catchingHands) - (a.attributes.physical.speed + a.attributes.technical.catchingHands)); // Simple sort, replace with real overall
+
+    availablePlayers.slice(0, 15).forEach(player => {
+        // Use the scouting function to get player info (assuming level 0)
+        const scouted = getScoutedPlayerInfo(player, 0); 
+        
+        const card = document.createElement("div");
+        card.className = "bg-white rounded-lg shadow p-4 w-56 cursor-pointer hover:shadow-lg hover:border-blue-500 border border-transparent transition";
+        card.dataset.playerId = player.id;
+        card.innerHTML = `
+            <p class="font-bold text-lg">${player.name}</p>
+            <p class="text-gray-700 text-sm">Pos: ${scouted.estimatedPosition} | Age: ${player.age}</p>
+            <p class="text-amber-600 font-bold text-sm">Potential: ${scouted.potential}</p>
+            <p class="text-gray-500 text-xs mt-1">${player.attributes.physical.height}in, ${player.attributes.physical.weight}lbs</p>
+        `;
+        
+        // Add click listener to draft the player
+        card.addEventListener("click", handlePickPlayer);
+        listEl.appendChild(card);
+    });
+  }
+
+  function renderDashboardData() {
+    renderMyTeam();
+    renderSchedule();
+    renderStats();
+  }
+
+  function renderMyTeam() {
+    const game = getGameState();
+    const roster = game.playerTeam?.roster || [];
+    const container = document.getElementById("tab-content-my-team");
+    
+    if (roster.length === 0) {
+        container.innerHTML = `<h3 class="text-xl font-bold mb-4">Team Roster</h3><p class="text-gray-500">No players on roster.</p>`;
+        return;
+    }
+
+    // Build player cards
+    const cardsHTML = roster
+        .sort((a, b) => (a.number || 99) - (b.number || 99))
+        .map(p => {
+            const scouted = getScoutedPlayerInfo(p, 10); // Level 10 = we know our own players
+            return `
+            <div class="bg-gray-50 rounded-lg shadow-sm p-4 border border-gray-200">
+                <p class="font-bold text-lg text-gray-800">#${p.number || '-'} ${p.name}</p>
+                <p class="text-gray-600 text-sm">Pos: ${scouted.estimatedPosition} | Age: ${p.age}</p>
+                <p class="text-amber-700 font-bold text-sm">Potential: ${scouted.potential}</p>
+            </div>
+            `;
+    }).join("");
+
+    container.innerHTML = `
+        <h3 class="text-xl font-bold mb-4">Team Roster (${roster.length} players)</h3>
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            ${cardsHTML}
+        </div>
+    `;
+  }
+
+  function renderSchedule() {
+    const game = getGameState();
+    const { schedule, currentWeek, teams, playerTeam } = game;
+    const container = document.getElementById("tab-content-schedule");
+    
+    const gamesPerWeek = teams.length / 2;
+    let scheduleHTML = "";
+
+    for (let i = 0; i < 9; i++) { // 9 weeks
+        const isCurrent = (i === currentWeek);
+        const isPast = (i < currentWeek);
+        const weekStatus = isCurrent ? "Current Week" : isPast ? "Final" : "Upcoming";
+        
+        let weekBg = isCurrent ? "bg-amber-50 border-amber-200" : isPast ? "bg-gray-50 border-gray-200" : "bg-white border-gray-200";
+
+        scheduleHTML += `<div class="mb-6 p-4 rounded-lg border ${weekBg}">
+            <h4 class="text-lg font-bold mb-3 text-gray-700">Week ${i + 1} <span class="text-sm font-normal text-gray-500 ml-2">(${weekStatus})</span></h4>
+            <div class="space-y-2">
+        `;
+        
+        const weekGames = schedule.slice(i * gamesPerWeek, (i + 1) * gamesPerWeek);
+        const playerGame = weekGames.find(g => g.home.id === playerTeam.id || g.away.id === playerTeam.id);
+        
+        if (playerGame) {
+             scheduleHTML += `<div class="p-3 bg-white rounded shadow-sm border-l-4 ${isCurrent ? 'border-blue-500' : 'border-gray-300'}">
+                <span class="font-semibold">${playerGame.away.name}</span>
+                <span class="mx-2 text-gray-400">@</span>
+                <span class="font-semibold">${playerGame.home.name}</span>
+            </div>`;
+        } else {
+             scheduleHTML += `<div class="p-3 bg-white rounded shadow-sm"><p class="text-gray-600">BYE WEEK</p></div>`;
+        }
+        scheduleHTML += `</div></div>`;
+    }
+
+    container.innerHTML = `<h3 class="text-xl font-bold mb-4">Season Schedule</h3>${scheduleHTML}`;
+  }
+
+  function renderStats() {
+    const game = getGameState();
+    const roster = game.playerTeam?.roster || [];
+    const container = document.getElementById("tab-content-stats");
+
+    if (roster.length === 0) {
+        container.innerHTML = `<h3 class="text-xl font-bold mb-4">Player Stats</h3><p class="text-gray-500">No players on roster.</p>`;
+        return;
+    }
+    
+    // This is a simplified stat table. You can expand this.
+    const rowsHTML = roster.map(p => {
+        const stats = p.seasonStats || {};
+        return `
+        <tr class="border-b border-gray-200 hover:bg-gray-50">
+            <td class="py-2 px-4 font-semibold">${p.name}</td>
+            <td class="py-2 px-4 text-center">${stats.passYards || 0}</td>
+            <td class="py-2 px-4 text-center">${stats.rushYards || 0}</td>
+            <td class="py-2 px-4 text-center">${stats.recYards || 0}</td>
+            <td class="py-2 px-4 text-center">${stats.touchdowns || 0}</td>
+            <td class="py-2 px-4 text-center">${stats.tackles || 0}</td>
+            <td class="py-2 px-4 text-center">${stats.interceptions || 0}</td>
+        </tr>
+        `;
+    }).join("");
+
+    container.innerHTML = `
+        <h3 class="text-xl font-bold mb-4">Player Stats (Season)</h3>
+        <div class="overflow-x-auto">
+            <table class="min-w-full bg-white">
+                <thead class="bg-gray-100">
+                    <tr class="border-b-2 border-gray-300">
+                        <th class="py-2 px-4 text-left font-bold text-gray-600">Name</th>
+                        <th class="py-2 px-4 text-center font-bold text-gray-600">Pass Yd</th>
+                        <th class="py-2 px-4 text-center font-bold text-gray-600">Rush Yd</th>
+                        <th class="py-2 px-4 text-center font-bold text-gray-600">Rec Yd</th>
+                        <th class="py-2 px-4 text-center font-bold text-gray-600">TDs</th>
+                        <th class="py-2 px-4 text-center font-bold text-gray-600">Tkls</th>
+                        <th class="py-2 px-4 text-center font-bold text-gray-600">INTs</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${rowsHTML}
+                </tbody>
+            </table>
+        </div>
+    `;
+  }
+
+  // --- Initialize ---
+  document.addEventListener("DOMContentLoaded", main);
+</script>
