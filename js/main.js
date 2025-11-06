@@ -250,6 +250,7 @@ function handleDepthChartDrop(playerId, newPositionSlot, side) {
     }
     Game.updateDepthChart(playerId, newPositionSlot, side);
     gameState = Game.getGameState();
+    Game.saveGameState();
     UI.switchTab('depth-chart', gameState); // Re-render tab with updated state
 }
 
@@ -265,6 +266,7 @@ function handleFormationChange(e) {
     const formationName = e.target.value;
     Game.changeFormation(side, formationName);
     gameState = Game.getGameState();
+    Game.saveGameState();
     UI.switchTab('depth-chart', gameState); // Re-render tab
 }
 
@@ -319,7 +321,9 @@ function startLiveGame(playerGameMatch) {
                 console.error("Skipping simulation due to invalid match data:", match);
                 return;
             }
-            const result = Game.simulateGame(match.home, match.away);
+            // Use fastSim for all games except the one being watched
+            const isPlayerGame = match.home.id === playerGameMatch.home.id && match.away.id === playerGameMatch.away.id;
+            const result = Game.simulateGame(match.home, match.away, { fastSim: !isPlayerGame });
             if (!result) throw new Error("simulateGame returned null or undefined."); // Check result validity
 
             allResults.push(result);
@@ -335,11 +339,13 @@ function startLiveGame(playerGameMatch) {
                 });
             }
             // Store player's game result
-            if (match.home.id === playerGameMatch.home.id && match.away.id === playerGameMatch.away.id) {
+            if (isPlayerGame) {
                 currentLiveSimResult = result;
             }
         } catch (error) {
-            console.error(`Error simulating game during live sim week (${match?.away?.name || '?'} @ ${match?.home?.name || '?'}):`, error);
+            const awayName = match && match.away ? match.away.name : '?';
+            const homeName = match && match.home ? match.home.name : '?';
+            console.error(`Error simulating game during live sim week (${awayName} @ ${homeName}):`, error);
         }
     });
 
@@ -374,7 +380,13 @@ function simulateRestOfWeek() {
             if (gameState) handleSeasonEnd(); // Only call if gameState exists
             return;
         }
-        results = Game.simulateWeek(); // Simulates all games AND advances week
+        // Patch: Use fastSim for all games in simulateWeek
+        if (typeof Game.simulateWeek === 'function') {
+            results = Game.simulateWeek({ fastSim: true });
+        } else {
+            // Fallback: If simulateWeek does not support options, use normal
+            results = Game.simulateWeek();
+        }
     } catch (error) {
         console.error(`Error during Game.simulateWeek (Week ${gameState?.currentWeek + 1}):`, error); // Safe access currentWeek
         UI.showModal("Simulation Error", "An error occurred during week simulation. Check console.", null, '', null, 'OK');
@@ -703,9 +715,13 @@ function promptCallFriend() {
 function main() {
     console.log("Game starting... Document loaded.");
     try {
-        UI.setupElements();
+    UI.setupElements();
 
-        // --- Setup Global Event Listeners ---
+    // --- Load game state from localStorage if available ---
+    Game.loadGameState();
+    gameState = Game.getGameState();
+
+    // --- Setup Global Event Listeners ---
         document.getElementById('start-game-btn')?.addEventListener('click', startNewGame);
         document.getElementById('confirm-team-btn')?.addEventListener('click', handleConfirmTeam);
         document.getElementById('draft-player-btn')?.addEventListener('click', handleDraftPlayer);

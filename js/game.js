@@ -2,6 +2,11 @@
 
 // --- Imports ---
 import { getRandom, getRandomInt, estimateBestPosition } from './utils.js';
+import { calculateOverall, calculateSlotSuitability, generatePlayer, positionOverallWeights } from './game/player.js';
+import { getDistance, updatePlayerPosition } from './game/physics.js';
+
+// Re-export player helpers (moved to ./game/player.js) to preserve public API
+export { calculateOverall, calculateSlotSuitability, generatePlayer, positionOverallWeights };
 import {
     // Data lists
     firstNames, lastNames, nicknames, teamNames, positions, divisionNames,
@@ -72,276 +77,48 @@ const joinRequestChance = 0.03;
 const FUMBLE_CHANCE_BASE = 0.03;
 
 // --- Attribute Weights ---
-export const positionOverallWeights = {
-    QB: { throwingAccuracy: 0.4, playbookIQ: 0.3, consistency: 0.1, clutch: 0.1, speed: 0.05, agility: 0.05 },
-    RB: { speed: 0.3, strength: 0.2, agility: 0.2, catchingHands: 0.1, blocking: 0.1, stamina: 0.1 },
-    WR: { speed: 0.3, catchingHands: 0.3, agility: 0.2, height: 0.1, clutch: 0.1 },
-    OL: { strength: 0.4, blocking: 0.4, weight: 0.1, playbookIQ: 0.1 },
-    DL: { strength: 0.4, tackling: 0.25, blockShedding: 0.2, weight: 0.1, agility: 0.05 },
-    LB: { tackling: 0.3, speed: 0.2, strength: 0.2, blockShedding: 0.1, playbookIQ: 0.2 },
-    DB: { speed: 0.35, agility: 0.25, catchingHands: 0.15, tackling: 0.1, playbookIQ: 0.15 }
-};
+// Player rating/generation helpers moved to ./game/player.js
+// (calculateOverall, calculateSlotSuitability, generatePlayer, positionOverallWeights)
 
-// =============================================================
-// --- CORE HELPER FUNCTIONS ---
-// =============================================================
-
-/**
- * Calculates a player's overall rating for a given position.
- */
-export function calculateOverall(player, position) {
-    if (!player || !player.attributes) return 0;
-    const attrs = player.attributes;
-    const relevantWeights = positionOverallWeights[position];
-    if (!relevantWeights) return 0;
-
-    let score = 0;
-    for (const category in attrs) {
-        for (const attr in attrs[category]) {
-            if (relevantWeights[attr]) {
-                let value = attrs[category][attr];
-                if (attr === 'weight') value = (value || 100) / 2.5;
-                if (attr === 'height') value = ((value || 60) - 60);
-                if (typeof value === 'number') {
-                    score += value * relevantWeights[attr];
-                }
-            }
-        }
+// Deep clone helper with structuredClone fallback
+function deepClone(obj) {
+    try {
+        if (typeof structuredClone === 'function') return structuredClone(obj);
+    } catch (e) {
+        // Fallthrough to JSON
     }
-    return Math.min(99, Math.max(1, Math.round(score)));
+    return JSON.parse(JSON.stringify(obj));
+}
+
+// Ensure a value is a Set (if an array is passed, convert it)
+function ensureSet(val) {
+    if (val instanceof Set) return val;
+    if (Array.isArray(val)) return new Set(val);
+    return new Set();
 }
 
 /**
  * Calculates a player's suitability for a specific formation slot.
  */
-function calculateSlotSuitability(player, slot, side, team) {
-    if (!player || !player.attributes || !team || !team.formations || !team.formations[side]) return 0;
-    const formationName = team.formations[side];
-    const formationData = side === 'offense' ? offenseFormations[formationName] : defenseFormations[formationName];
-    const basePosition = slot.replace(/\d/g, '');
-
-    if (!formationData?.slotPriorities?.[slot]) {
-        return calculateOverall(player, basePosition);
-    }
-
-    const priorities = formationData.slotPriorities[slot];
-    let score = 0;
-    let totalWeight = 0;
-
-    for (const attr in priorities) {
-        for (const category in player.attributes) {
-            if (player.attributes[category]?.[attr] !== undefined) {
-                let value = player.attributes[category][attr];
-                if (typeof value !== 'number') continue;
-                if (attr === 'weight') value = value / 2.5;
-                if (attr === 'height') value = (value - 60);
-                score += value * priorities[attr];
-                totalWeight += priorities[attr];
-                break;
-            }
-        }
-    }
-
-    const baseOverall = calculateOverall(player, basePosition);
-    const finalScore = (totalWeight > 0 ? (score / totalWeight) : baseOverall) * 0.7 + (baseOverall * 0.3);
-
-    return Math.min(99, Math.max(1, Math.round(finalScore)));
-}
-
 /**
  * Generates a new player object.
  */
-// In game.js
-
-function generatePlayer(minAge = 10, maxAge = 16) {
-    const firstName = getRandom(firstNames);
-    const lastName = Math.random() < 0.4 ? getRandom(nicknames) : getRandom(lastNames);
-    const age = getRandomInt(minAge, maxAge);
-
-    // --- 🛠️ FIX #1: Determine ONE "bestPosition" from the favorites ---
-    // (This logic is unchanged and is perfect)
-    const favoriteOffensivePosition = getRandom(offensivePositions);
-    const favoriteDefensivePosition = getRandom(defensivePositions);
-    const isOffenseStar = Math.random() < 0.5;
-    const bestPosition = isOffenseStar ? favoriteOffensivePosition : favoriteDefensivePosition;
-    // --- END FIX #1 ---
-
-    const ageProgress = (age - 10) / (16 - 10);
-    let baseHeight = 55 + (ageProgress * 15) + getRandomInt(-2, 2);
-    let baseWeight = 70 + (ageProgress * 90) + getRandomInt(-10, 10);
-
-    // Adjust size based on position (This is good)
-    switch (bestPosition) {
-        case 'QB': case 'WR': baseHeight += getRandomInt(1, 4); baseWeight -= getRandomInt(0, 10); break;
-        case 'OL': case 'DL': baseHeight -= getRandomInt(0, 2); baseWeight += getRandomInt(20, 40); break;
-        case 'RB': baseWeight += getRandomInt(5, 15); break;
-    }
-
-    // Define the ranges once (Ranges adjusted for a better bell curve)
-    const boostRanges = {
-        'Elite': { min: 90, max: 99 },  // Top 2%
-        'Good': { min: 80, max: 90 },   // Next 10%
-        'Average': { min: 70, max: 80 },   // Main 60%
-        'Below Average': { min: 60, max: 70 },   // Next 20%
-        'Poor': { min: 40, max: 60 }    // Bottom 8%
-    };
-
-    // Helper function to get talent data from a random roll (Probabilities adjusted)
-    const getTalentData = (roll) => {
-        if (roll < 0.02) return { tier: 'Elite', bonus: -0.20, range: boostRanges['Elite'] };       // 2% chance
-        if (roll < 0.12) return { tier: 'Good', bonus: -0.10, range: boostRanges['Good'] };        // 10% chance
-        if (roll < 0.72) return { tier: 'Average', bonus: 0.0, range: boostRanges['Average'] };      // 60% chance
-        if (roll < 0.92) return { tier: 'Below Average', bonus: 0.10, range: boostRanges['Below Average'] }; // 20% chance
-        return { tier: 'Poor', bonus: 0.20, range: boostRanges['Poor'] }; // 8% chance
-    };
-
-    // Roll for each category independently!
-    const physicalData = getTalentData(Math.random());
-    const technicalData = getTalentData(Math.random());
-    const mentalData = getTalentData(Math.random());
-
-
-    // --- 🛠️ REVISED FIX #3: Generate ALL attributes based on their OWN Talent Tier ---
-    // This creates the archetypes you wanted.
-    let attributes = {
-        physical: {
-            speed: getRandomInt(physicalData.range.min, physicalData.range.max),
-            strength: getRandomInt(physicalData.range.min, physicalData.range.max),
-            agility: getRandomInt(physicalData.range.min, physicalData.range.max),
-            stamina: getRandomInt(physicalData.range.min + 5, physicalData.range.max + 5),
-            height: Math.round(baseHeight),
-            weight: Math.round(baseWeight)
-        },
-        mental: {
-            playbookIQ: getRandomInt(mentalData.range.min, mentalData.range.max),
-            clutch: getRandomInt(20, 90), // Clutch remains random
-            consistency: getRandomInt(mentalData.range.min, mentalData.range.max),
-            toughness: getRandomInt(mentalData.range.min, mentalData.range.max)
-        },
-        technical: {
-            throwingAccuracy: getRandomInt(technicalData.range.min, technicalData.range.max),
-            catchingHands: getRandomInt(technicalData.range.min, technicalData.range.max),
-            tackling: getRandomInt(technicalData.range.min, technicalData.range.max),
-            blocking: getRandomInt(technicalData.range.min, technicalData.range.max),
-            blockShedding: getRandomInt(technicalData.range.min, technicalData.range.max)
-        }
-    };
-    // --- END REVISED FIX #3 ---
-
-
-    // --- 🛠️ FIX #4: Apply positional boosts as a BONUS, not an overwrite ---
-    // (This logic is unchanged and is perfect)
-    const posBonus = 10;
-    switch (bestPosition) {
-        case 'QB':
-            attributes.technical.throwingAccuracy += posBonus;
-            attributes.mental.playbookIQ += posBonus;
-            break;
-        case 'RB':
-            attributes.physical.agility += posBonus;
-            attributes.physical.strength += posBonus;
-            break;
-        case 'WR':
-            attributes.physical.speed += posBonus;
-            attributes.technical.catchingHands += posBonus;
-            break;
-        case 'OL':
-            attributes.physical.strength += posBonus;
-            attributes.technical.blocking += posBonus;
-            break;
-        case 'DL':
-            attributes.physical.strength += posBonus;
-            attributes.technical.blockShedding += posBonus;
-            break;
-        case 'LB':
-            attributes.technical.tackling += posBonus;
-            attributes.mental.playbookIQ += posBonus;
-            break;
-        case 'DB':
-            attributes.physical.speed += posBonus;
-            attributes.physical.agility += posBonus;
-            break;
-    }
-
-    // --- 🛠️ FIX #5: Apply Age & Weight Modifiers AFTER stats are set ---
-    // (This logic is also unchanged and is perfect)
-
-    // Apply Age Scaling
-    const ageScalingFactor = 0.90 + (ageProgress * 0.10);
-    Object.keys(attributes).forEach(cat => {
-        Object.keys(attributes[cat]).forEach(attr => {
-            if (typeof attributes[cat][attr] === 'number' && !['height', 'weight', 'clutch'].includes(attr)) {
-                attributes[cat][attr] = attributes[cat][attr] * ageScalingFactor;
-            }
-        });
-    });
-
-    // Apply Weight Modifier (Revised)
-    const neutralWeight = 70 + (ageProgress * 90) + (['OL', 'DL'].includes(bestPosition) ? 30 : 0);
-    const weightModifier = (attributes.physical.weight - neutralWeight) / 25;
-    attributes.physical.strength += (weightModifier * 10);
-    attributes.physical.speed -= (weightModifier * 6);
-    attributes.physical.agility -= (weightModifier * 4);
-    // --- END FIX #5 ---
-
-
-    // Clamp all stats
-    Object.keys(attributes).forEach(cat => {
-        Object.keys(attributes[cat]).forEach(attr => {
-            if (typeof attributes[cat][attr] === 'number' && !['height', 'weight'].includes(attr)) {
-                attributes[cat][attr] = Math.max(1, Math.min(99, Math.round(attributes[cat][attr])));
-            }
-        });
-    });
-
-    // --- 🛠️ REVISED FIX #6: Link Potential to AVERAGE of Talent Tiers ---
-    let potential = 'F';
-
-    // Average the potential bonus from all three categories
-    const potentialBonus = (physicalData.bonus + technicalData.bonus + mentalData.bonus) / 3;
-
-    let potentialRoll = Math.random() + potentialBonus;
-    potentialRoll = Math.max(0, Math.min(1, potentialRoll));
-
-    // Younger players get a *further* bonus to their roll
-    if (age <= 11) potentialRoll -= 0.15;
-    else if (age <= 13) potentialRoll -= 0.05;
-
-    // Determine final grade
-    if (potentialRoll < 0.20) potential = 'A';
-    else if (potentialRoll < 0.45) potential = 'B';
-    else if (potentialRoll < 0.75) potential = 'C';
-    else if (potentialRoll < 0.90) potential = 'D';
-    else potential = 'F';
-    // --- END REVISED FIX #6 ---
-
-    const initialStats = {
-        receptions: 0, recYards: 0, passYards: 0, rushYards: 0, touchdowns: 0,
-        tackles: 0, sacks: 0, interceptions: 0,
-        passAttempts: 0, passCompletions: 0, interceptionsThrown: 0
-    };
-
-    return {
-        id: crypto.randomUUID(), name: `${firstName} ${lastName}`, age,
-        favoriteOffensivePosition, favoriteDefensivePosition,
-        number: null,
-        potential, attributes, teamId: null,
-        status: { type: 'healthy', description: '', duration: 0 }, fatigue: 0,
-        gameStats: { ...initialStats }, seasonStats: { ...initialStats },
-        careerStats: { ...initialStats, seasonsPlayed: 0 }
-    };
-}
+// Player generation & slot-suitability helpers moved to ./game/player.js
+// (generatePlayer, calculateSlotSuitability)
 
 /** Yields control to the main thread briefly. */
 export function yieldToMain() { return new Promise(resolve => setTimeout(resolve, 0)); }
 
-/** Adds a message to the player's inbox. */
-function addMessage(subject, body, isRead = false) {
-    if (!game || !game.messages) {
+/** Adds a message to the player's inbox.
+ * Accepts an optional gameObj for easier testing; falls back to the module-level `game`.
+ */
+function addMessage(subject, body, isRead = false, gameObj = null) {
+    const g = gameObj || game;
+    if (!g || !g.messages) {
         console.error("Cannot add message: Game object or messages array not initialized.");
         return;
     }
-    game.messages.unshift({ id: crypto.randomUUID(), subject, body, isRead });
+    g.messages.unshift({ id: crypto.randomUUID(), subject, body, isRead });
 }
 
 // --- Relationship Helpers ---
@@ -377,7 +154,7 @@ function getScoutedPlayerInfo(player, relationshipLevelNum) {
 
     const levelInfo = Object.values(relationshipLevels).find(rl => rl.level === relationshipLevelNum) || relationshipLevels.STRANGER;
     const accuracy = levelInfo.scoutAccuracy;
-    const scoutedPlayer = JSON.parse(JSON.stringify(player));
+    const scoutedPlayer = deepClone(player);
     scoutedPlayer.relationshipName = levelInfo.name;
     scoutedPlayer.relationshipColor = levelInfo.color;
 
@@ -422,67 +199,8 @@ function getScoutedPlayerInfo(player, relationshipLevelNum) {
 // --- End Scouting Helper ---
 
 
-// --- Coordinate/Physics Helpers ---
-/** Calculates distance between two player states. */
-function getDistance(p1State, p2State) {
-    if (!p1State || !p2State || p1State.x === undefined || p2State.x === undefined) return Infinity;
-    const dx = p1State.x - p2State.x;
-    const dy = p1State.y - p2State.y;
-    return Math.sqrt(dx * dx + dy * dy);
-}
-/** Updates a player's position based on speed and target. */
-function updatePlayerPosition(pState, timeDelta) {
-    if (pState.stunnedTicks > 0) {
-        pState.currentSpeedYPS = 0; // Player is stunned
-        return;
-    }
-    if (pState.isBlocked || pState.isEngaged) {
-        pState.currentSpeedYPS = 0; // Player is in a block, don't move based on target
-        return;
-    }
-
-    const dx = pState.targetX - pState.x;
-    const dy = pState.targetY - pState.y;
-    const distToTarget = Math.sqrt(dx * dx + dy * dy);
-
-    // --- 1. Increased "arrival" radius ---
-    // Stop if player is very close to the target.
-    // This prevents "vibrating" when trying to reach an exact 0.0 point.
-    const ARRIVAL_RADIUS = 0.2;
-    if (distToTarget < ARRIVAL_RADIUS) {
-        pState.x = pState.targetX;
-        pState.y = pState.targetY;
-        pState.currentSpeedYPS = 0; // Player has arrived
-        return;
-    }
-
-    // --- 2. Speed Formula ---
-    // This formula creates a faster, tighter speed range (4.5 to 9.0 YPS)
-    const MIN_SPEED_YPS = 4.5; // Speed for a 1-stat player
-    const MAX_SPEED_YPS = 9.0; // Speed for a 99-stat player
-
-    // This maps the 1-99 stat range to the [4.5, 9.0] speed range
-    const speedYPS = MIN_SPEED_YPS + ((pState.speed || 50) - 1) * (MAX_SPEED_YPS - MIN_SPEED_YPS) / (99 - 1);
-
-    // --- 3. Store Speed for Momentum ---
-    // This is the line we added for the momentum calculation
-    pState.currentSpeedYPS = speedYPS * pState.fatigueModifier;
-
-    // --- 4. Calculate Movement ---
-    const moveDist = pState.currentSpeedYPS * timeDelta;
-
-    if (moveDist >= distToTarget) {
-        // We can reach the target this frame
-        pState.x = pState.targetX;
-        pState.y = pState.targetY;
-        // Keep pState.currentSpeedYPS as is, don't set to 0 (tackle logic needs it)
-    } else {
-        // Move towards the target
-        pState.x += (dx / distToTarget) * moveDist;
-        pState.y += (dy / distToTarget) * moveDist;
-    }
-}
-// --- End Coordinate/Physics Helpers ---
+// Coordinate/Physics Helpers were moved to ./game/physics.js
+// Re-exported via import at the top of this file so callers remain unchanged.
 
 
 // --- Fumble Check Helper ---
@@ -1010,6 +728,8 @@ function getPlayersForSlots(team, side, slotPrefix, usedPlayerIdsThisPlay, gameL
     if (!team || !team.depthChart || !team.depthChart[side] || !team.roster || !Array.isArray(team.roster)) {
         console.error(`getPlayersForSlots: Invalid team data for ${team?.id}, side ${side}.`); return [];
     }
+    // Defensive: ensure usedPlayerIdsThisPlay is a Set
+    usedPlayerIdsThisPlay = ensureSet(usedPlayerIdsThisPlay);
     const sideDepthChart = team.depthChart[side];
     if (typeof sideDepthChart !== 'object' || sideDepthChart === null) {
         console.error(`getPlayersForSlots: Invalid depth chart for side "${side}" on ${team?.id}.`); return [];
@@ -1037,6 +757,9 @@ function getPlayerBySlot(team, side, slot, usedPlayerIdsThisPlay) {
         console.error(`getPlayerBySlot: Invalid team data for ${slot} on ${side}.`);
         return null;
     }
+
+    // Defensive: ensure usedPlayerIdsThisPlay is a Set
+    usedPlayerIdsThisPlay = ensureSet(usedPlayerIdsThisPlay);
 
     const sideDepthChart = team.depthChart[side];
     const starterId = sideDepthChart[slot];
@@ -1090,6 +813,8 @@ function findEmergencyPlayer(position, team, side, usedPlayerIdsThisPlay) {
     if (!team || !team.roster || !Array.isArray(team.roster)) {
         console.warn(`findEmergencyPlayer: Invalid team data for ${position}.`); return null;
     }
+    // Defensive: ensure usedPlayerIdsThisPlay is a Set
+    usedPlayerIdsThisPlay = ensureSet(usedPlayerIdsThisPlay);
     const availablePlayers = team.roster.filter(p => p && p.status?.duration === 0 && !usedPlayerIdsThisPlay.has(p.id));
     if (availablePlayers.length === 0) {
         console.warn(`findEmergencyPlayer: No healthy, unused players found on roster for ${position}.`); return null;
@@ -1970,8 +1695,23 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
 
                             // 💡 NEW "SEEK" LOGIC (see else block)
                             if (ballCarrierState) {
-                                pState.targetX = ballCarrierState.x;
-                                pState.targetY = ballCarrierState.y + 2;
+                                // IQ-based lane selection: high IQ = better anticipation of defenders
+                                const visionIQ = ballCarrierState.playbookIQ || 50;
+                                let bestLaneX = ballCarrierState.x;
+                                let bestLaneY = ballCarrierState.y + 2;
+                                // Scan for open lanes (avoid defenders within 4 yards)
+                                for (let dx = -4; dx <= 4; dx += 2) {
+                                    const laneX = ballCarrierState.x + dx;
+                                    const laneY = ballCarrierState.y + 2 + Math.round(visionIQ / 40); // High IQ = more yards forward
+                                    const defendersNearLane = defenseStates.filter(d => getDistance({x: laneX, y: laneY}, d) < (4 - visionIQ / 40));
+                                    if (defendersNearLane.length === 0) {
+                                        bestLaneX = laneX;
+                                        bestLaneY = laneY;
+                                        break;
+                                    }
+                                }
+                                pState.targetX = bestLaneX;
+                                pState.targetY = bestLaneY;
                             } else {
                                 pState.targetX = pState.initialX;
                                 pState.targetY = pState.y + 5;
@@ -2967,7 +2707,7 @@ function updateQBDecision(playState, offenseStates, defenseStates, gameLog) {
     if (!qbPlayer || !qbPlayer.attributes) return;
 
     const qbAttrs = qbPlayer.attributes;
-    const qbIQ = qbAttrs.mental?.playbookIQ || 50;
+    const qbIQ = Math.max(20, Math.min(99, qbAttrs.mental?.playbookIQ ?? 50)); // Clamp IQ for safety
 
     // --- If QB is scrambling, check for a throw ---
     if (qbState.action === 'qb_scramble') {
@@ -3073,11 +2813,13 @@ function updateQBDecision(playState, offenseStates, defenseStates, gameLog) {
     }
 
     // --- 4. Decision Timing Logic (REVISED) ---
-    const baseDecisionTicks = 70; // 3.5 seconds for a 99-IQ QB
-    const iqPenaltyTicks = Math.round((100 - qbIQ) / 5) * 2; // Adds ~0.1s per 5 IQ points lost
+    // Decision time scales with IQ: higher IQ = more patience
+    const baseDecisionTicks = 60; // 3.0s for 99 IQ
+    const iqPenaltyTicks = Math.round((100 - qbIQ) * 0.5); // 0.5 ticks per IQ point below 99
+    const calmnessBonus = Math.round(qbIQ * 0.2); // Higher IQ = more calm under pressure
 
-    const maxDecisionTimeTicks = baseDecisionTicks + iqPenaltyTicks;
-    const pressureTimeReduction = isPressured ? Math.max(15, Math.round(maxDecisionTimeTicks * 0.3)) : 0;
+    const maxDecisionTimeTicks = baseDecisionTicks + iqPenaltyTicks + calmnessBonus;
+    const pressureTimeReduction = isPressured ? Math.max(20, Math.round((100 - qbIQ) * 0.3)) : 0;
     const currentDecisionTickTarget = maxDecisionTimeTicks - pressureTimeReduction;
 
     let reason = "";
@@ -3089,8 +2831,9 @@ function updateQBDecision(playState, offenseStates, defenseStates, gameLog) {
         decisionMade = true;
         reason = "Decision Time Expired";
     } else if (isPressured && playState.tick >= initialReadTicks) {
-        // Increased chance over time under pressure
-        if (Math.random() < 0.4 + (playState.tick / 150)) {
+        // Panic chance scales with IQ: higher IQ = less panic
+        const panicChance = Math.max(0.15, 0.6 - qbIQ / 200); // 0.6 for 20 IQ, 0.1 for 99 IQ
+        if (Math.random() < panicChance + (playState.tick / 200)) {
             decisionMade = true;
             reason = "Pressured Decision";
         }
@@ -3114,9 +2857,12 @@ function updateQBDecision(playState, offenseStates, defenseStates, gameLog) {
         // 3. Are *any* of the main reads open? (This is your fallback)
         // const openPrimaryReads = [read1, read2].filter(...) 
 
-        // 4. Scramble/Panic logic
-        const baseScrambleChance = (qbAgility / 150);
-        const canScramble = isPressured && (Math.random() < baseScrambleChance);
+        // --- 4. Scramble/Panic logic (IQ-based) ---
+        const baseScrambleChance = (qbAgility / 120) + (qbIQ / 300); // Higher IQ = more likely to scramble correctly
+        // Check for open running lane: no defenders within 6 yards in front of QB
+        const openLane = !defenseStates.some(d => !d.isBlocked && !d.isEngaged && Math.abs(d.x - qbState.x) < 4 && (d.y < qbState.y) && getDistance(qbState, d) < 6);
+        // Common sense baseline: always scramble if lane is wide open and no pass is available
+        const canScramble = openLane && ((isPressured && Math.random() < baseScrambleChance) || playState.tick > initialReadTicks + 10);
 
         // --- QB makes the decision based on this priority: ---
 
@@ -3145,27 +2891,34 @@ function updateQBDecision(playState, offenseStates, defenseStates, gameLog) {
         } else if (canScramble) {
             // --- 4. Scramble ---
             qbState.action = 'qb_scramble';
-            const pressureXDir = Math.sign(qbState.x - pressureDefender.x);
-            qbState.scrambleDirection = pressureXDir; // Store the direction
+            qbState.scrambleDirection = 0; // Forward
             qbState.hasBall = false;
             qbState.isBallCarrier = true;
             playState.ballState.x = qbState.x; playState.ballState.y = qbState.y;
-            gameLog.push(`🏃 ${qbState.name} ${imminentSackDefender ? 'escapes the sack' : 'escapes'} and scrambles!`);
+            gameLog.push(`🏃 ${qbState.name} ${imminentSackDefender ? 'escapes the sack' : 'finds open lane'} and scrambles forward!`);
             actionTaken = "Scramble";
             return;
 
         } else {
-            // --- 5. Throw Away / Force It ---
+            // --- 5. Throw Away / Force It (IQ-based) ---
             const clutch = qbAttrs.mental?.clutch || 50;
-            if (isPressured && (qbIQ < 45 || clutch > 80) && currentRead && Math.random() < 0.3) {
-                // --- Force a bad throw ---
+            // Only throw away if no open lane and decision timer expired or imminent sack
+            if ((!openLane && (isPressured || playState.tick >= currentDecisionTickTarget)) || imminentSackDefender) {
+                // High IQ QBs less likely to throw away unless truly forced
+                if (qbIQ > 60 && Math.random() < 0.3) {
+                    // Try to extend play a bit longer
+                    return;
+                }
+                targetPlayerState = null;
+                actionTaken = "Throw Away";
+            } else if (isPressured && (qbIQ < 45 || clutch > 80) && currentRead && Math.random() < (0.3 + (60 - qbIQ) / 100)) {
+                // --- Force a bad throw: low IQ QBs more likely to force it ---
                 targetPlayerState = currentRead;
                 actionTaken = "Forced Throw";
                 gameLog.push(`[QB Read]: ⚠️ ${qbState.name} is pressured and forces a bad throw to ${targetPlayerState.name}!`);
             } else {
-                // --- Throw Away ---
-                targetPlayerState = null;
-                actionTaken = "Throw Away";
+                // Wait for play to develop
+                return;
             }
         }
 
@@ -3682,7 +3435,7 @@ function finalizeStats(playState, offense, defense) {
 function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameState) {
     const { gameLog = [], weather, ballOn, ballHash = 'M', down, yardsToGo } = gameState;
 
-    const play = JSON.parse(JSON.stringify(offensivePlaybook[offensivePlayKey]));
+    const play = deepClone(offensivePlaybook[offensivePlayKey]);
 
     if (!play) {
         console.error(`Play key "${offensivePlayKey}" not found...`);
@@ -3715,8 +3468,8 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
 
         if (playState.playIsLive) {
             const initialFrameData = {
-                players: JSON.parse(JSON.stringify(playState.activePlayers)),
-                ball: JSON.parse(JSON.stringify(playState.ballState)),
+                players: deepClone(playState.activePlayers),
+                ball: deepClone(playState.ballState),
                 logIndex: gameLog.length,
                 lineOfScrimmage: playState.lineOfScrimmage,
                 firstDownY: firstDownY
@@ -3907,8 +3660,8 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
 
             // --- STEP 10: Record Visualization Frame ---
             const frameData = {
-                players: JSON.parse(JSON.stringify(playState.activePlayers)),
-                ball: JSON.parse(JSON.stringify(ballPos)),
+                players: deepClone(playState.activePlayers),
+                ball: deepClone(ballPos),
                 logIndex: gameLog.length,
                 lineOfScrimmage: playState.lineOfScrimmage,
                 firstDownY: firstDownY
@@ -3996,7 +3749,7 @@ function determinePlayCall(offense, defense, down, yardsToGo, ballOn, scoreDiff,
     // Helper to get average overall for a position group (using active players if possible, else roster)
     const getAvgOverall = (team, positions) => {
         // Ideally, use players currently on field, but roster average is a good proxy
-        const players = team.roster.filter(p => p && positions.includes(p.favoriteOffensivePosition) || positions.includes(p.favoriteDefensivePosition));
+        const players = team.roster.filter(p => p && (positions.includes(p.favoriteOffensivePosition) || positions.includes(p.favoriteDefensivePosition)));
         if (players.length === 0) return 40; // Default low score if no players found
         const totalOvr = players.reduce((sum, p) => sum + calculateOverall(p, positions[0]), 0); // Use first pos in list for calc
         return totalOvr / players.length;
@@ -4447,7 +4200,8 @@ function aiCheckAudible(offense, offensivePlayKey, defense, defensivePlayKey, ga
     const offensePlay = offensivePlaybook[offensivePlayKey];
     const defensePlay = defensivePlaybook[defensivePlayKey];
     const qb = offense.roster.find(p => p.id === offense.depthChart.offense.QB1);
-    const qbIQ = qb?.attributes.mental.playbookIQ || 50;
+    // Defensive: use optional chaining for nested attributes to avoid runtime errors
+    const qbIQ = qb?.attributes?.mental?.playbookIQ ?? 50;
 
     if (!offensePlay || !defensePlay || !qb) {
         return { playKey: offensivePlayKey, didAudible: false };
@@ -4491,20 +4245,28 @@ function aiCheckAudible(offense, offensivePlayKey, defense, defensivePlayKey, ga
 /**
  * Simulates a full game between two teams.
  */
-export function simulateGame(homeTeam, awayTeam) {
+export function simulateGame(homeTeam, awayTeam, options = {}) {
+    // options: { fastSim: boolean } -- if true, minimize logging and skip visualization frames
+    const fastSim = options.fastSim === true;
+    // Patch: If fastSim, override TICK_DURATION_SECONDS for this simulation
+    let originalTickDuration = TICK_DURATION_SECONDS;
+    if (fastSim) {
+        // Set to a much smaller value for fast sim (e.g., 0.005)
+        globalThis.TICK_DURATION_SECONDS = 0.005;
+    }
     if (!homeTeam || !awayTeam || !homeTeam.roster || !awayTeam.roster) {
-        console.error("simulateGame: Invalid team data provided.");
+        if (!fastSim) console.error("simulateGame: Invalid team data provided.");
         return { homeTeam, awayTeam, homeScore: 0, awayScore: 0, gameLog: ["Error: Invalid team data"], breakthroughs: [] };
     }
     resetGameStats();
     aiSetDepthChart(homeTeam);
     aiSetDepthChart(awayTeam);
 
-    const gameLog = [];
-    const allVisualizationFrames = [];
+    const gameLog = fastSim ? [] : [];
+    const allVisualizationFrames = fastSim ? null : [];
     let homeScore = 0, awayScore = 0;
     const weather = getRandom(['Sunny', 'Windy', 'Rain']);
-    gameLog.push(`Weather: ${weather}`);
+    if (!fastSim) gameLog.push(`Weather: ${weather}`);
 
     const breakthroughs = [];
 
@@ -4514,21 +4276,21 @@ export function simulateGame(homeTeam, awayTeam) {
     let currentHalf = 1, drivesThisGame = 0;
     let nextDriveStartBallOn = 20; // Track starting field position
 
-    gameLog.push("Coin toss to determine first possession...");
+    if (!fastSim) gameLog.push("Coin toss to determine first possession...");
     const coinFlipWinner = Math.random() < 0.5 ? homeTeam : awayTeam;
     let possessionTeam = coinFlipWinner;
     let receivingTeamSecondHalf = (possessionTeam.id === homeTeam.id) ? awayTeam : homeTeam;
-    gameLog.push(`🪙 ${coinFlipWinner.name} won the toss and will receive the ball first!`);
+    if (!fastSim) gameLog.push(`🪙 ${coinFlipWinner.name} won the toss and will receive the ball first!`);
 
     let gameForfeited = false;
 
     while (drivesThisGame < totalDrivesPerHalf * 2 && !gameForfeited) {
         if (drivesThisGame === totalDrivesPerHalf) {
             currentHalf = 2;
-            gameLog.push(`==== HALFTIME ==== Score: ${awayTeam.name} ${awayScore} - ${homeTeam.name} ${homeScore}`);
+            if (!fastSim) gameLog.push(`==== HALFTIME ==== Score: ${awayTeam.name} ${awayScore} - ${homeTeam.name} ${homeScore}`);
             possessionTeam = receivingTeamSecondHalf;
             [...homeTeam.roster, ...awayTeam.roster].forEach(p => { if (p) p.fatigue = Math.max(0, (p.fatigue || 0) - 40); });
-            gameLog.push(`-- Second Half Kickoff: ${possessionTeam.name} receives --`);
+            if (!fastSim) gameLog.push(`-- Second Half Kickoff: ${possessionTeam.name} receives --`);
             nextDriveStartBallOn = 20; // Reset for kickoff
         }
 
@@ -4560,32 +4322,36 @@ export function simulateGame(homeTeam, awayTeam) {
                 gameLog.push("Forfeit condition met mid-drive."); gameForfeited = true; driveActive = false; break;
             }
 
-            const yardLineText = ballOn <= 50 ? `own ${ballOn}` : `opponent ${100 - ballOn}`;
-            gameLog.push(`--- ${down}${down === 1 ? 'st' : down === 2 ? 'nd' : down === 3 ? 'rd' : 'th'} & ${yardsToGo <= 0 ? 'Goal' : yardsToGo} from the ${yardLineText} ---`);
+            if (!fastSim) {
+                const yardLineText = ballOn <= 50 ? `own ${ballOn}` : `opponent ${100 - ballOn}`;
+                gameLog.push(`--- ${down}${down === 1 ? 'st' : down === 2 ? 'nd' : down === 3 ? 'rd' : 'th'} & ${yardsToGo <= 0 ? 'Goal' : yardsToGo} from the ${yardLineText} ---`);
+            }
 
             // ... (Pre-snap AI and play-call logic is unchanged) ...
             const scoreDiff = offense.id === homeTeam.id ? homeScore - awayScore : awayScore - homeScore;
             const drivesCompletedInHalf = drivesThisGame % totalDrivesPerHalf;
             const drivesRemainingInHalf = totalDrivesPerHalf - drivesCompletedInHalf;
             const drivesRemainingInGame = (currentHalf === 1 ? totalDrivesPerHalf : 0) + drivesRemainingInHalf;
-            const offensivePlayKey_initial = determinePlayCall(offense, defense, down, yardsToGo, ballOn, scoreDiff, gameLog, drivesRemainingInGame);
+            const offensivePlayKey_initial = determinePlayCall(offense, defense, down, yardsToGo, ballOn, scoreDiff, fastSim ? null : gameLog, drivesRemainingInGame);
             const offenseFormationName = offense.formations.offense;
             const defensiveFormationName = determineDefensiveFormation(defense, offenseFormationName, down, yardsToGo);
             defense.formations.defense = defensiveFormationName;
-            const defensivePlayKey = determineDefensivePlayCall(defense, offense, down, yardsToGo, ballOn, scoreDiff, gameLog, drivesRemainingInGame);
-            const audibleResult = aiCheckAudible(offense, offensivePlayKey_initial, defense, defensivePlayKey, gameLog);
+            const defensivePlayKey = determineDefensivePlayCall(defense, offense, down, yardsToGo, ballOn, scoreDiff, fastSim ? null : gameLog, drivesRemainingInGame);
+            const audibleResult = aiCheckAudible(offense, offensivePlayKey_initial, defense, defensivePlayKey, fastSim ? null : gameLog);
             const offensivePlayKey = audibleResult.playKey;
-            const offPlayName = offensivePlayKey.split('_').slice(1).join(' ');
-            const defPlayName = defensivePlaybook[defensivePlayKey]?.name || defensivePlayKey;
-            gameLog.push(`🏈 **Offense:** ${offPlayName} ${audibleResult.didAudible ? '(Audible)' : ''}`);
-            gameLog.push(`🛡️ **Defense:** ${defPlayName}`);
+            if (!fastSim) {
+                const offPlayName = offensivePlayKey.split('_').slice(1).join(' ');
+                const defPlayName = defensivePlaybook[defensivePlayKey]?.name || defensivePlayKey;
+                gameLog.push(`🏈 **Offense:** ${offPlayName} ${audibleResult.didAudible ? '(Audible)' : ''}`);
+                gameLog.push(`🛡️ **Defense:** ${defPlayName}`);
+            }
 
             // --- 5. "Snap" ---
-            const result = resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, { gameLog, weather, ballOn, ballHash, down, yardsToGo });
-            if (result.visualizationFrames) {
+            const result = resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, { gameLog: fastSim ? null : gameLog, weather, ballOn, ballHash, down, yardsToGo });
+            if (!fastSim && result.visualizationFrames) {
                 allVisualizationFrames.push(...result.visualizationFrames);
             }
-            if (!result.incomplete && result.visualizationFrames?.length > 0) {
+            if (!fastSim && !result.incomplete && result.visualizationFrames?.length > 0) {
                 const finalBallX = result.visualizationFrames[result.visualizationFrames.length - 1].ball.x;
                 if (finalBallX < HASH_LEFT_X) ballHash = 'L';
                 else if (finalBallX > HASH_RIGHT_X) ballHash = 'R';
@@ -4600,7 +4366,7 @@ export function simulateGame(homeTeam, awayTeam) {
                 driveActive = false;
                 nextDriveStartBallOn = 100 - ballOn; // Flipped field
             } else if (result.safety) {
-                gameLog.push(`SAFETY! 2 points for ${defense.name}!`);
+                if (!fastSim) gameLog.push(`SAFETY! 2 points for ${defense.name}!`);
                 if (defense.id === homeTeam.id) homeScore += 2; else awayScore += 2;
                 driveActive = false;
                 nextDriveStartBallOn = 20;
@@ -4617,7 +4383,7 @@ export function simulateGame(homeTeam, awayTeam) {
                     const conversionBallOn = goesForTwo ? 95 : 98; // 2pt from 5-yd line, 1pt from 2-yd line
                     const conversionYardsToGo = 100 - conversionBallOn; // Yards needed (5 or 2)
 
-                    gameLog.push(`--- ${points}-Point Conversion Attempt (from the ${conversionYardsToGo}-yd line) ---`);
+                    if (!fastSim) gameLog.push(`--- ${points}-Point Conversion Attempt (from the ${conversionYardsToGo}-yd line) ---`);
 
                     // --- 2. Call the Play ---
                     const conversionOffensePlayKey = determinePlayCall(offense, defense, 1, conversionYardsToGo, conversionBallOn, scoreDiff, gameLog, drivesRemainingInGame);
@@ -4626,14 +4392,16 @@ export function simulateGame(homeTeam, awayTeam) {
                     const conversionDefensePlayKey = determineDefensivePlayCall(defense, offense, 1, conversionYardsToGo, conversionBallOn, scoreDiff, gameLog, drivesRemainingInGame);
 
                     // Log the conversion play calls
-                    const offPlayName = conversionOffensePlayKey.split('_').slice(1).join(' ');
-                    const defPlayName = defensivePlaybook[conversionDefensePlayKey]?.name || defensivePlayKey;
-                    gameLog.push(`🏈 **Offense:** ${offPlayName}`);
-                    gameLog.push(`🛡️ **Defense:** ${defPlayName}`);
+                    if (!fastSim) {
+                        const offPlayName = conversionOffensePlayKey.split('_').slice(1).join(' ');
+                        const defPlayName = defensivePlaybook[conversionDefensePlayKey]?.name || defensivePlayKey;
+                        gameLog.push(`🏈 **Offense:** ${offPlayName}`);
+                        gameLog.push(`🛡️ **Defense:** ${defPlayName}`);
+                    }
 
                     // --- 3. Resolve the Play ---
                     const conversionResult = resolvePlay(offense, defense, conversionOffensePlayKey, conversionDefensePlayKey, {
-                        gameLog,
+                        gameLog: fastSim ? null : gameLog,
                         weather,
                         ballOn: conversionBallOn,
                         ballHash: 'M',
@@ -4642,7 +4410,7 @@ export function simulateGame(homeTeam, awayTeam) {
                     });
 
                     // --- 4. Add Visualization Frames ---
-                    if (conversionResult.visualizationFrames) {
+                    if (!fastSim && conversionResult.visualizationFrames) {
                         allVisualizationFrames.push(...conversionResult.visualizationFrames);
                     }
 
@@ -4654,21 +4422,21 @@ export function simulateGame(homeTeam, awayTeam) {
                     if (conversionResult.touchdown) {
                         if (!conversionResult.turnover) {
                             // --- 1. OFFENSE scored the conversion ---
-                            gameLog.push(`✅ ${points}-point conversion GOOD!`);
+                            if (!fastSim) gameLog.push(`✅ ${points}-point conversion GOOD!`);
                             if (offense.id === homeTeam.id) homeScore += points; else awayScore += points;
                         } else {
                             // --- 2. DEFENSE scored on a turnover (Defensive 2-pt) ---
-                            gameLog.push(`❌ ${points}-point conversion FAILED... AND RETURNED!`);
+                            if (!fastSim) gameLog.push(`❌ ${points}-point conversion FAILED... AND RETURNED!`);
                             if (defense.id === homeTeam.id) homeScore += 2; else awayScore += 2;
                         }
                     } else {
                         // --- 3. No TD on conversion (Failed attempt) ---
-                        gameLog.push(`❌ ${points}-point conversion FAILED!`);
+                        if (!fastSim) gameLog.push(`❌ ${points}-point conversion FAILED!`);
                     }
 
                 } else {
                     // --- DEFENSIVE TD: No conversion, just add 6 ---
-                    gameLog.push(`DEFENSIVE TOUCHDOWN! 6 points for ${defense.name}!`); // 💡 Added log
+                    if (!fastSim) gameLog.push(`DEFENSIVE TOUCHDOWN! 6 points for ${defense.name}!`); // 💡 Added log
                     if (defense.id === homeTeam.id) homeScore += 6; else awayScore += 6;
                 }
 
@@ -4702,8 +4470,10 @@ export function simulateGame(homeTeam, awayTeam) {
                     // This prevents "yards to go" from being 0.
                     if (yardsToGo <= 0) yardsToGo = 1;
 
-                    const newYardLineText = ballOn <= 50 ? `own ${ballOn}` : `opponent ${100 - ballOn}`;
-                    gameLog.push(`➡️ First down ${offense.name}! ${yardsToGoalLine <= 10 ? `1st & Goal at the ${yardsToGoalLine}` : `1st & 10 at the ${newYardLineText}`}.`);
+                    if (!fastSim) {
+                        const newYardLineText = ballOn <= 50 ? `own ${ballOn}` : `opponent ${100 - ballOn}`;
+                        gameLog.push(`➡️ First down ${offense.name}! ${yardsToGoalLine <= 10 ? `1st & Goal at the ${yardsToGoalLine}` : `1st & 10 at the ${newYardLineText}`}.`);
+                    }
 
                 } else { // Not a first down
                     down++;
@@ -4716,8 +4486,10 @@ export function simulateGame(homeTeam, awayTeam) {
             }
 
             if (down > 4 && driveActive) {
-                const finalYardLineText = ballOn <= 50 ? `own ${ballOn}` : `opponent ${100 - ballOn}`;
-                gameLog.push(`✋ Turnover on downs! ${defense.name} takes over at the ${finalYardLineText}.`);
+                if (!fastSim) {
+                    const finalYardLineText = ballOn <= 50 ? `own ${ballOn}` : `opponent ${100 - ballOn}`;
+                    gameLog.push(`✋ Turnover on downs! ${defense.name} takes over at the ${finalYardLineText}.`);
+                }
                 driveActive = false;
                 nextDriveStartBallOn = 100 - ballOn; // Flipped field
             }
@@ -4732,8 +4504,10 @@ export function simulateGame(homeTeam, awayTeam) {
 
     // --- 💡 NEW: OVERTIME TIEBREAKER LOGIC 💡 ---
     if (homeScore === awayScore && !gameForfeited) {
-        gameLog.push(`==== GAME TIED: ${homeScore}-${awayScore} ====`);
-        gameLog.push(`Heading to Sudden Death Overtime!`);
+        if (!fastSim) {
+            gameLog.push(`==== GAME TIED: ${homeScore}-${awayScore} ====`);
+            gameLog.push(`Heading to Sudden Death Overtime!`);
+        }
 
         let overtimeRound = 0;
         let isStillTied = true;
@@ -4749,7 +4523,7 @@ export function simulateGame(homeTeam, awayTeam) {
             const yardsFromGoal = 5 * overtimeRound;
             const startBallOn = 100 - yardsFromGoal;
 
-            gameLog.push(`--- OT Round ${overtimeRound}: Ball at the ${yardsFromGoal}-yard line ---`);
+            if (!fastSim) gameLog.push(`--- OT Round ${overtimeRound}: Ball at the ${yardsFromGoal}-yard line ---`);
 
             for (const offense of otPossessionOrder) {
                 const defense = (offense.id === homeTeam.id) ? awayTeam : homeTeam;
@@ -4960,6 +4734,10 @@ export function simulateGame(homeTeam, awayTeam) {
         }
     });
 
+    // Restore original tick duration after sim
+    if (fastSim) {
+        globalThis.TICK_DURATION_SECONDS = originalTickDuration;
+    }
     return { homeTeam, awayTeam, homeScore, awayScore, gameLog, breakthroughs, visualizationFrames: allVisualizationFrames };
 }
 
@@ -5177,7 +4955,8 @@ export function aiManageRoster(team) {
         if (Math.random() < aiSuccessChance) {
             bestFA.status = { type: 'temporary', description: 'Helping Out', duration: 1 };
             if (addPlayerToTeam(bestFA, team)) {
-                healthyCount++;
+                // Recompute healthy count from roster (temporary players have duration>0 and are not healthy)
+                healthyCount = team.roster.filter(p => p && p.status?.duration === 0).length;
                 console.log(`${team.name} signed temporary player ${bestFA.name}`);
             }
         } else {
@@ -5464,3 +5243,26 @@ export function markMessageAsRead(messageId) {
 
 // --- Exports for Scouting/Relationships ---
 export { getScoutedPlayerInfo, getRelationshipLevel }; // Export helpers needed by UI/Main
+
+// --- Game State Persistence ---
+export function saveGameState() {
+    try {
+        localStorage.setItem('backyardFootballGameState', JSON.stringify(game));
+    } catch (e) {
+        console.error('Error saving game state:', e);
+    }
+}
+
+export function loadGameState() {
+    try {
+        const saved = localStorage.getItem('backyardFootballGameState');
+        if (saved) {
+            const loaded = JSON.parse(saved);
+            Object.assign(game, loaded); // Shallow merge into existing game object
+            return game;
+        }
+    } catch (e) {
+        console.error('Error loading game state:', e);
+    }
+    return game;
+}

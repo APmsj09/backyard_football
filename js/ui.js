@@ -826,14 +826,24 @@ function renderSlot(positionSlot, roster, chart, container, side) {
     }
     slotEl.innerHTML = `
         <span class="font-bold w-1/4">${positionSlot}</span>
-        <div class="player-details-grid w-3/4">
+        <div class="player-details-grid w-3/4 grid grid-cols-15 gap-1">
             <span>${typeTag} ${player?.name ?? 'Empty'}</span>
             <span class="font-bold text-amber-600">${overall}</span>
+            <span>${player?.attributes?.physical?.height ?? '-'}</span>
+            <span>${player?.attributes?.physical?.weight ?? '-'}</span>
             <span>${player?.attributes?.physical?.speed ?? '-'}</span>
             <span>${player?.attributes?.physical?.strength ?? '-'}</span>
             <span>${player?.attributes?.physical?.agility ?? '-'}</span>
+            <span>${player?.attributes?.physical?.stamina ?? '-'}</span>
+            <span>${player?.attributes?.mental?.playbookIQ ?? '-'}</span>
+            <span>${player?.attributes?.mental?.clutch ?? '-'}</span>
+            <span>${player?.attributes?.mental?.consistency ?? '-'}</span>
+            <span>${player?.attributes?.mental?.toughness ?? '-'}</span>
             <span>${player?.attributes?.technical?.throwingAccuracy ?? '-'}</span>
             <span>${player?.attributes?.technical?.catchingHands ?? '-'}</span>
+            <span>${player?.attributes?.technical?.blocking ?? '-'}</span>
+            <span>${player?.attributes?.technical?.tackling ?? '-'}</span>
+            <span>${player?.attributes?.technical?.blockShedding ?? '-'}</span>
         </div>`;
     container.appendChild(slotEl);
 }
