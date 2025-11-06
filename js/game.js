@@ -1955,21 +1955,43 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                 case 'run_block':
                     if (pState.dynamicTargetId) {
                         const target = defenseStates.find(d => d.id === pState.dynamicTargetId);
+
+                        // Check if target is still valid
                         if (target && (target.blockedBy === null || target.blockedBy === pState.id)) {
+
+                            // --- Target is valid: Engage ---
                             pState.targetX = target.x;
-                            pState.targetY = target.y;
+                            pState.targetY = target.y; // Target the defender's current Y
+
                         } else {
-                            // Target gone, brain will assign new one
+                            // --- Target is GONE (e.g., blocked by someone else) ---
+                            // Brain will assign a new one next tick.
                             pState.dynamicTargetId = null;
-                            pState.targetX = pState.initialX; // Dumb climb
-                            pState.targetY = pState.y + 7;
+
+                            // 💡 NEW "SEEK" LOGIC (see else block)
+                            if (ballCarrierState) {
+                                pState.targetX = ballCarrierState.x;
+                                pState.targetY = ballCarrierState.y + 2;
+                            } else {
+                                pState.targetX = pState.initialX;
+                                pState.targetY = pState.y + 5;
+                            }
                         }
                     } else {
-                        // No target assigned by brain (dumb climb)
-                        pState.targetX = pState.initialX; // Stay in lane
-                        pState.targetY = pState.y + 7;   // Run downfield
+                        // --- 💡 NEW "SEEK" LOGIC ---
+                        // No target assigned (either won block or no one was near).
+                        // Seek out the ball carrier to find a new block.
+                        if (ballCarrierState) {
+                            // Target a spot slightly in front of the ball carrier
+                            pState.targetX = ballCarrierState.x;
+                            pState.targetY = ballCarrierState.y + 2; // Aim 2 yards in front
+                        } else {
+                            // Fallback (e.g., pre-handoff)
+                            pState.targetX = pState.initialX; // Stay in lane
+                            pState.targetY = pState.y + 5;   // Climb 5 yards
+                        }
                     }
-                    target = null;
+                    target = null; // Prevent falling into defensive pursuit logic
                     break;
 
                 case 'pursuit':
@@ -2606,10 +2628,9 @@ function checkBlockCollisions(playState) {
         }
 
         const isRunBlock = blocker.action === 'run_block';
+        const isPassBlock = blocker.action === 'pass_block';
 
-        if ((blocker.action === 'pass_block' || isRunBlock)) {
-
-
+        if (isPassBlock || isRunBlock) {
             let targetDefender = null;
 
             // 1. Check if the assigned target is valid and in range
@@ -2626,8 +2647,7 @@ function checkBlockCollisions(playState) {
                 }
             }
 
-            // 2. Fallback: If no assigned target, or target is out of range, check for "help"
-            //    This engages the *closest* defender who enters the engagement range.
+            // 2. Fallback: Check for "help" or "scrape" blocks
             if (!targetDefender) {
                 const engagedDefenderIds = new Set(
                     offenseStates.map(o => o.engagedWith).filter(Boolean)
@@ -2638,26 +2658,46 @@ function checkBlockCollisions(playState) {
                     !d.isBlocked &&
                     !d.isEngaged &&
                     d.stunnedTicks === 0 &&
-                    getDistance(blocker, d) < BLOCK_ENGAGE_RANGE // Use precise distance
+                    getDistance(blocker, d) < BLOCK_ENGAGE_RANGE
                 );
 
                 if (defendersInRange.length > 0) {
-                    // Sort by distance to engage the absolute closest
                     defendersInRange.sort((a, b) => getDistance(blocker, a) - getDistance(blocker, b));
                     targetDefender = defendersInRange[0];
                 }
             }
 
-            // 3. If we found a target, initiate the block
+            // 3. If we found a target, check for a "whiff" before engaging
+            if (targetDefender) {
+
+                // --- 💡 NEW "HOLDING" PREVENTION LOGIC 💡 ---
+                if (isPassBlock) {
+                    // This is a pass play. Check if the defender is *already past* the blocker.
+                    // (i.e., defender's Y is less than the blocker's Y)
+                    const WHIFF_BUFFER = 0.5; // 0.5 yard buffer
+                    if (targetDefender.y < (blocker.y - WHIFF_BUFFER)) {
+                        // The defender has beaten the blocker!
+                        // Do NOT engage. This prevents "holding" from behind.
+
+                        // If this was our assigned target, we've lost them.
+                        if (blocker.dynamicTargetId === targetDefender.id) {
+                            blocker.dynamicTargetId = null;
+                        }
+
+                        targetDefender = null; // Do not engage
+                    }
+                }
+                // --- 💡 END "HOLDING" LOGIC 💡 ---
+            }
+
+            // 4. If we *still* have a valid target, initiate the block
             if (targetDefender) {
                 if (blocker.slot.startsWith('OL')) {
                     console.log(`%c*** BLOCK ENGAGED (Tick: ${playState.tick}) ***: ${blocker.name} (${blocker.slot}) has engaged ${targetDefender.name} (${targetDefender.slot})`, 'color: #00dd00; font-weight: bold;');
                 }
                 blocker.engagedWith = targetDefender.id;
                 blocker.isEngaged = true;
-                // This "Brain vs Body" fix is correct
-                // We set dynamicTargetId here to ensure the "Brain" knows who we *actually* engaged
-                blocker.dynamicTargetId = targetDefender.id;
+                blocker.dynamicTargetId = targetDefender.id; // Confirm the target
 
                 targetDefender.isBlocked = true;
                 targetDefender.blockedBy = blocker.id;
@@ -2800,28 +2840,25 @@ function resolveBattle(powerA, powerB, battle) {
     const roll = getRandomInt(-15, 15);
 
     // 3. Calculate the "push" for this tick
-    // We divide by a large number to scale the battle over many ticks.
-    // A value of 100 means an average "push" is 0.5-1.0 points per tick.
     const finalDiff = (BASE_DIFF + roll) / 100;
 
     // 4. Apply the "push" to the battle score
     battle.battleScore += finalDiff;
 
     // 5. Define the "reasonable numbers" (Win Threshold)
-    // This is how many points a player needs to "win" the tug of war.
-    const WIN_SCORE = 8;
+    const WIN_SCORE = 6;
 
     // 6. Check for a winner
     if (battle.battleScore > WIN_SCORE) {
-        // Blocker (A) wins
         battle.status = 'win_A';
     } else if (battle.battleScore < -WIN_SCORE) {
-        // Defender (B) wins
         battle.status = 'win_B';
     } else {
-        // No winner yet, battle continues
         battle.status = 'ongoing';
     }
+
+    // 7. 💡 NEW: Return the push amount
+    return finalDiff;
 }
 
 /**
@@ -2833,20 +2870,15 @@ function resolveOngoingBlocks(playState, gameLog) {
         if (battle.startTick === playState.tick) {
             return;
         }
-        // Only process battles that are currently active
         if (battle.status !== 'ongoing') {
-            // This check is a safeguard, but resolveBattle should set status
-            // We'll clean up any stale 'win' states if they somehow persist
-            if (battle.status === 'win_A' || battle.status === 'win_B') {
-                battlesToRemove.push(index);
-            }
+            battlesToRemove.push(index);
             return;
         }
 
         const blockerState = playState.activePlayers.find(p => p.id === battle.blockerId);
         const defenderState = playState.activePlayers.find(p => p.id === battle.defenderId);
 
-        // Check if players are still valid and engaged with each other
+        // Check if players are still valid and engaged
         if (!blockerState || !defenderState || blockerState.engagedWith !== defenderState.id || defenderState.blockedBy !== blockerState.id) {
             battle.status = 'disengaged';
             battlesToRemove.push(index);
@@ -2855,7 +2887,7 @@ function resolveOngoingBlocks(playState, gameLog) {
             return;
         }
 
-        // --- Check for distance-based disengagement ---
+        // Check for distance-based disengagement
         if (getDistance(blockerState, defenderState) > BLOCK_ENGAGE_RANGE + 0.5) {
             battle.status = 'disengaged';
             battlesToRemove.push(index);
@@ -2867,31 +2899,53 @@ function resolveOngoingBlocks(playState, gameLog) {
         const blockPower = ((blockerState.blocking || 50) + (blockerState.strength || 50)) * blockerState.fatigueModifier;
         const shedPower = ((defenderState.blockShedding || 50) + (defenderState.strength || 50)) * defenderState.fatigueModifier;
 
-        // --- Call the battle helper, which updates battle.status ---
-        resolveBattle(blockPower, shedPower, battle);
+        // --- Call the battle helper, which updates battle.status AND returns the push ---
+        // 💡 MODIFIED: Capture the return value
+        const pushAmount = resolveBattle(blockPower, shedPower, battle);
 
-        // --- 🛠️ CORRECTED LOGIC: Handle all 3 outcomes from resolveBattle ---
+        // --- 💡 NEW: Apply the "Push" ---
+        if (battle.status === 'ongoing') {
+            // Calculate push direction (from blocker to defender)
+            const dx = defenderState.x - blockerState.x;
+            const dy = defenderState.y - blockerState.y;
+            const dist = Math.max(0.1, Math.sqrt(dx * dx + dy * dy));
+            const pushDirX = dx / dist;
+            const pushDirY = dy / dist;
 
+            // 'pushAmount' is the distance. Positive = blocker wins, pushes defender.
+            // Negative = defender wins, pushes blocker.
+            const PUSH_SCALING_FACTOR = 0.5; // Controls how fast the push is
+            const moveDist = pushAmount * PUSH_SCALING_FACTOR;
+
+            // Move both players along the "line" of the battle
+            // (updatePlayerPosition will NOT move them, so this is safe)
+            blockerState.x += pushDirX * moveDist;
+            blockerState.y += pushDirY * moveDist;
+            defenderState.x += pushDirX * moveDist;
+            defenderState.y += pushDirY * moveDist;
+
+            // Clamp their new positions
+            blockerState.x = Math.max(0.5, Math.min(FIELD_WIDTH - 0.5, blockerState.x));
+            blockerState.y = Math.max(0.5, Math.min(FIELD_LENGTH - 0.5, blockerState.y));
+            defenderState.x = Math.max(0.5, Math.min(FIELD_WIDTH - 0.5, defenderState.x));
+            defenderState.y = Math.max(0.5, Math.min(FIELD_LENGTH - 0.5, defenderState.y));
+        }
+        // --- 💡 END NEW PUSH LOGIC ---
+
+        // --- Handle battle win/loss logic ---
         if (battle.status === 'win_B') {
-            // --- Outcome 1: Defender wins (sheds block) ---
-            //gameLog.push(`🛡️ ${defenderState.name} sheds block from ${blockerState.name}!`);
-            blockerState.stunnedTicks = 80; // Stun the blocker for losing the battle
+            // ... (defender wins logic)
+            blockerState.stunnedTicks = 80;
             blockerState.engagedWith = null; blockerState.isEngaged = false;
             defenderState.isBlocked = false; defenderState.blockedBy = null; defenderState.isEngaged = false;
             battlesToRemove.push(index);
 
         } else if (battle.status === 'win_A') {
-            // --- Outcome 2: Blocker wins (pancake) ---
-            //gameLog.push(`🥞 ${blockerState.name} pancakes ${defenderState.name}!`);
-
-            // Stun the defender for winning the block
+            // ... (blocker wins logic)
             defenderState.stunnedTicks = 80;
-
-            // End the engagement
             blockerState.engagedWith = null; blockerState.isEngaged = false;
             defenderState.isBlocked = false; defenderState.blockedBy = null; defenderState.isEngaged = false;
             battlesToRemove.push(index);
-
         }
     });
 
@@ -3004,15 +3058,17 @@ function updateQBDecision(playState, offenseStates, defenseStates, gameLog) {
         if (qbState.ticksOnCurrentRead > READ_PROGRESSION_DELAY) {
             // Time to switch reads
             const currentReadIndex = qbState.readProgression.indexOf(qbState.currentReadTargetSlot);
-            const nextReadIndex = currentReadIndex + 1;
 
-            if (nextReadIndex < qbState.readProgression.length) {
-                const nextReadSlot = qbState.readProgression[nextReadIndex];
-                qbState.currentReadTargetSlot = nextReadSlot;
-                qbState.ticksOnCurrentRead = 0;
-            } else {
-                // QB is on their last read (the checkdown)
-            }
+            // Use modulo (%) to loop the progression
+            // (e.g., if length is 3)
+            // (0 + 1) % 3 = 1
+            // (1 + 1) % 3 = 2
+            // (2 + 1) % 3 = 0  <-- Loops back to the start!
+            const nextReadIndex = (currentReadIndex + 1) % qbState.readProgression.length;
+
+            const nextReadSlot = qbState.readProgression[nextReadIndex];
+            qbState.currentReadTargetSlot = nextReadSlot;
+            qbState.ticksOnCurrentRead = 0;
         }
     }
 
@@ -3830,15 +3886,15 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
             // --- STEP 9: Update Fatigue ---
             playState.activePlayers.forEach(pState => {
                 if (!pState) return;
-                let fatigueGain = 0.1;
+                let fatigueGain = 0.01;
                 const action = pState.action;
                 const assignment = pState.assignment;
                 if (action === 'run_path' || action === 'qb_scramble' || action === 'run_route' ||
                     action === 'pass_rush' || action === 'blitz_gap' || action === 'blitz_edge' ||
                     action === 'pursuit' || assignment?.startsWith('man_cover_')) {
-                    fatigueGain += 0.3;
+                    fatigueGain += 0.03;
                 } else if (action === 'pass_block' || action === 'run_block' || pState.engagedWith) {
-                    fatigueGain += 0.2;
+                    fatigueGain += 0.02;
                 }
                 const player = game.players.find(p => p && p.id === pState.id);
                 if (player) {
