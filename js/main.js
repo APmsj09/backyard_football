@@ -1,7 +1,6 @@
 // main.js
 import * as Game from './game.js';
 import * as UI from './ui.js';
-import { positionOverallWeights } from './game.js'; // Changed this line
 import { relationshipLevels } from './data.js'; // Added this line
 import { formatHeight } from './utils.js'; // <<< --- ADD THIS LINE ---
 
@@ -62,7 +61,7 @@ function handleConfirmTeam() {
             gameState = Game.getGameState(); // Includes playerTeam and global relationships map
             if (!gameState || !gameState.playerTeam) throw new Error("Failed to get game state after creating team.");
             UI.renderSelectedPlayerCard(null, gameState); // Pass gameState
-            UI.renderDraftScreen(gameState, handlePlayerSelectInDraft, selectedPlayerId, currentSortColumn, currentSortDirection); // Pass sort state
+            UI.renderDraftScreen(gameState, handlePlayerSelectInDraft, selectedPlayerId, currentSortColumn, currentSortDirection,positionOverallWeights); // Pass sort state
             UI.showScreen('draftScreen');
             runAIDraftPicks();
         } catch (error) {
@@ -86,7 +85,7 @@ function handlePlayerSelectInDraft(playerId) {
     const player = gameState.players.find(p => p.id === playerId);
     UI.updateSelectedPlayerRow(playerId);
     // Pass original player object and gameState (needed for relationships/scouting inside renderSelectedPlayerCard)
-    UI.renderSelectedPlayerCard(player, gameState);
+    UI.renderSelectedPlayerCard(player, gameState, positionOverallWeights);
 }
 
 /**
@@ -108,7 +107,7 @@ function handleDraftPlayer() {
         if (player && Game.addPlayerToTeam(player, team)) {
             selectedPlayerId = null;
             gameState.currentPick++;
-            UI.renderSelectedPlayerCard(null, gameState); // Clear card, pass state
+            UI.renderSelectedPlayerCard(null, gameState, positionOverallWeights);
             runAIDraftPicks(); // Continue draft
         } else {
             console.error(`Failed to add player ${selectedPlayerId} to team or player not found.`);
@@ -591,7 +590,7 @@ function handleGoToNextDraft() {
         gameState = Game.getGameState(); // Refresh the game state
         if (!gameState) throw new Error("Game state lost after setting up next draft.");
         selectedPlayerId = null; // Clear any previous player selection
-        UI.renderSelectedPlayerCard(null, gameState); // Clear the player detail card
+        UI.renderSelectedPlayerCard(null, gameState, positionOverallWeights);
         UI.renderDraftScreen(gameState, handlePlayerSelectInDraft, selectedPlayerId, currentSortColumn, currentSortDirection); // Pass sort state
         UI.showScreen('draftScreen'); // Display the draft screen
         runAIDraftPicks(); // Start the AI draft picks simulation

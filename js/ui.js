@@ -539,7 +539,7 @@ export function updateSelectedPlayerRow(newSelectedId) {
 }
 
 /** Renders the selected player card with scouted info. */
-export function renderSelectedPlayerCard(player, gameState) {
+export function renderSelectedPlayerCard(player, gameState, positionOverallWeights) {
     if (!elements.selectedPlayerCard) return;
 
     if (!player || !gameState || !gameState.playerTeam || !gameState.playerTeam.roster) {
