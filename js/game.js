@@ -3685,6 +3685,36 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
                 }
             });
 
+            // --- BENCH RECOVERY: players not active this play slowly recover fatigue ---
+            try {
+                const activeIds = new Set(playState.activePlayers.filter(p => p).map(p => p.id));
+                const BENCH_RECOVERY_PER_TICK = 0.003; // very slow recovery per simulation tick/play
+                game.players.forEach(p => {
+                    if (!p) return;
+                    if (p.status && p.status.duration > 0) return; // injured/busy don't recover normally
+                    if (activeIds.has(p.id)) return; // skip active players
+                    if ((p.fatigue || 0) <= 0) return; // nothing to recover
+                    p.fatigue = Math.max(0, (p.fatigue || 0) - BENCH_RECOVERY_PER_TICK);
+                });
+            } catch (err) {
+                console.error('Bench recovery error:', err);
+            }
+
+            // --- AI SUBSTITUTIONS: allow AI teams involved in the play to occasionally auto-sub ---
+            try {
+                const involvedTeamIds = new Set(playState.activePlayers.filter(p => p && p.teamId).map(p => p.teamId));
+                involvedTeamIds.forEach(tid => {
+                    const team = game.teams.find(tt => tt && tt.id === tid);
+                    if (!team) return;
+                    // Do not auto-sub the player's team (human-controlled)
+                    if (game.playerTeam && team.id === game.playerTeam.id) return;
+                    // Allow AI to make substitutions occasionally when fatigued
+                    autoMakeSubstitutions(team, { thresholdFatigue: 60, maxSubs: 2, chance: 0.2 });
+                });
+            } catch (err) {
+                console.error('AI substitution error:', err);
+            }
+
             // --- STEP 10: Record Visualization Frame ---
             const frameData = {
                 players: deepClone(playState.activePlayers),
@@ -5170,6 +5200,127 @@ export function updateDepthChart(playerId, newPositionSlot, side) {
     } else if (displacedPlayerId) {
         console.log(`Player ${displacedPlayerId} moved to bench from ${newPositionSlot}`);
     }
+}
+
+/**
+ * Substitute two players on a team: put inPlayer into the starter slot occupied by outPlayer.
+ * If inPlayer is currently assigned to another slot, the assignemnts will be swapped.
+ * Returns an object { success: boolean, message: string }
+ */
+export function substitutePlayers(teamId, outPlayerId, inPlayerId) {
+    if (!game || !game.teams) return { success: false, message: 'Game state invalid.' };
+    const team = game.teams.find(t => t && t.id === teamId) || game.playerTeam;
+    if (!team || !team.depthChart) return { success: false, message: 'Team or depth chart invalid.' };
+
+    const roster = team.roster || [];
+    const outPlayer = roster.find(p => p && p.id === outPlayerId);
+    const inPlayer = roster.find(p => p && p.id === inPlayerId);
+    if (!outPlayer) return { success: false, message: 'Outgoing player not found on roster.' };
+    if (!inPlayer) return { success: false, message: 'Incoming player not found on roster.' };
+
+    // depthChart is organized by side (offense/defense). Find slots across both sides.
+    const sides = Object.keys(team.depthChart || {});
+    const outSlots = [];
+    const inSlots = [];
+    sides.forEach(side => {
+        const chart = team.depthChart[side] || {};
+        Object.keys(chart).forEach(slot => {
+            if (chart[slot] === outPlayerId) outSlots.push({ side, slot });
+            if (chart[slot] === inPlayerId) inSlots.push({ side, slot });
+        });
+    });
+
+    if (outSlots.length === 0) {
+        return { success: false, message: 'Outgoing player is not currently a starter.' };
+    }
+
+    // Use first found out slot as target
+    const target = outSlots[0];
+    team.depthChart[target.side][target.slot] = inPlayerId;
+
+    if (inSlots.length > 0) {
+        // If incoming player was a starter, swap them
+        const inSlot = inSlots[0];
+        team.depthChart[inSlot.side][inSlot.slot] = outPlayerId;
+    } else {
+        // Incoming player was on bench. Remove any additional references to outPlayer in depth chart
+        sides.forEach(side => {
+            const chart = team.depthChart[side] || {};
+            Object.keys(chart).forEach(slot => {
+                if (chart[slot] === outPlayerId && !(side === target.side && slot === target.slot)) chart[slot] = null;
+            });
+        });
+    }
+
+    console.log(`Substitution: ${inPlayer.name} -> ${target.side}/${target.slot} replacing ${outPlayer.name}`);
+    return { success: true, message: 'Substitution completed.' };
+}
+
+/**
+ * AI: make intelligent substitutions for a team based on fatigue and suitability.
+ * Will attempt up to `maxSubs` swaps, preferring bench players with lower fatigue
+ * and better suitability for the target slot. Returns how many substitutions were made.
+ */
+export function autoMakeSubstitutions(team, options = {}) {
+    if (!team || !team.depthChart || !team.roster) return 0;
+    const thresholdFatigue = options.thresholdFatigue || 60; // starter fatigue threshold
+    const maxSubs = options.maxSubs || 2;
+    const chance = typeof options.chance === 'number' ? options.chance : 0.25; // probability to attempt any subs
+
+    if (Math.random() > chance) return 0; // don't always run
+
+    const roster = team.roster;
+    const sides = Object.keys(team.depthChart || {});
+    const starterIds = new Set();
+    sides.forEach(side => {
+        const chart = team.depthChart[side] || {};
+        Object.values(chart).forEach(id => { if (id) starterIds.add(id); });
+    });
+
+    let subsDone = 0;
+
+    // Iterate sides/slots and look for tired starters
+    for (const side of sides) {
+        const chart = team.depthChart[side] || {};
+        for (const slot of Object.keys(chart)) {
+            if (subsDone >= maxSubs) break;
+            const starterId = chart[slot];
+            if (!starterId) continue;
+            const starter = roster.find(p => p && p.id === starterId);
+            if (!starter) continue;
+            const starterFat = starter.fatigue || 0;
+            if (starter.status && starter.status.duration > 0) continue; // injured or busy handled elsewhere
+
+            // If starter is fatigued beyond threshold, try to find a bench replacement
+            if (starterFat >= thresholdFatigue) {
+                // bench candidates not starters, not injured, and with meaningfully lower fatigue
+                const candidates = roster.filter(p => p && !starterIds.has(p.id) && (!p.status || p.status.duration === 0) && ((p.fatigue || 0) + 8 < starterFat));
+                if (candidates.length === 0) continue;
+
+                // Score candidates by suitability for this slot (higher is better), tiebreaker lower fatigue
+                let best = null; let bestScore = -Infinity;
+                for (const cand of candidates) {
+                    const pos = slot.replace(/\d/g, '');
+                    const score = calculateSlotSuitability(cand, slot, side, team) + (-(cand.fatigue || 0) * 0.1);
+                    if (score > bestScore) { bestScore = score; best = cand; }
+                }
+
+                if (best) {
+                    const res = substitutePlayers(team.id, starterId, best.id);
+                    if (res && res.success) {
+                        subsDone++;
+                        // update starterIds set
+                        starterIds.delete(starterId);
+                        starterIds.add(best.id);
+                    }
+                }
+            }
+        }
+        if (subsDone >= maxSubs) break;
+    }
+
+    if (subsDone > 0) console.log(`autoMakeSubstitutions: ${team.name} made ${subsDone} subs`);
+    return subsDone;
 }
 
 /** Changes the player team's formation for offense or defense. */

@@ -155,6 +155,10 @@ export function setupElements() {
         simLiveStats: document.getElementById('sim-live-stats'),
         simStatsAway: document.getElementById('sim-stats-away'),
         simStatsHome: document.getElementById('sim-stats-home')
+        ,
+        // Players / substitution panel
+        simPlayersPanel: document.getElementById('sim-players-panel'),
+        simPlayersList: document.getElementById('sim-players-list')
     };
 
     // Log checks for missing elements
@@ -1615,6 +1619,128 @@ function renderLiveStatsBox(gameResult) {
 }
 
 /**
+ * Renders the players / substitution panel for the player's team during live sim.
+ */
+function renderSimPlayers() {
+    try {
+        if (!elements.simPlayersList) return;
+        const gs = (typeof Game !== 'undefined' && typeof Game.getGameState === 'function') ? Game.getGameState() : null;
+        if (!gs || !gs.playerTeam) {
+            elements.simPlayersList.innerHTML = '<p class="text-gray-400">No team data available.</p>';
+            return;
+        }
+        const team = gs.playerTeam;
+        const roster = team.roster || [];
+        const depth = team.depthChart || {};
+
+        // Build list grouped by starters and bench (depth contains sides: offense/defense)
+        const starterIds = new Set();
+        Object.keys(depth).forEach(side => {
+            const chart = depth[side] || {};
+            Object.values(chart).forEach(id => { if (id) starterIds.add(id); });
+        });
+        const starters = roster.filter(p => p && starterIds.has(p.id));
+        const bench = roster.filter(p => p && !starterIds.has(p.id));
+
+        const buildRow = (p, isStarter) => {
+            const stamina = p.attributes?.physical?.stamina || 50;
+            const fatigue = Math.max(0, Math.min(100, Math.round(p.fatigue || 0)));
+            const energyPct = Math.max(0, Math.round(100 - (fatigue / Math.max(1, stamina)) * 100));
+            const statusText = p.status?.type ? `${p.status.type}${p.status.duration ? ' ('+p.status.duration+')' : ''}` : 'healthy';
+            return `
+                <div class="flex items-center justify-between p-2 border-b border-gray-600">
+                    <div class="flex items-center gap-3">
+                        <div class="w-36">
+                            <div class="text-sm font-semibold">${p.name}</div>
+                            <div class="text-xs text-gray-300">#${p.number || '—'} • ${p.slot || '-'}</div>
+                        </div>
+                        <div class="w-40">
+                            <div class="relative h-3 bg-gray-600 rounded">
+                                <div style="width:${energyPct}%" class="absolute left-0 top-0 h-3 bg-amber-400 rounded"></div>
+                            </div>
+                            <div class="text-xs text-gray-300">Energy: ${energyPct}% • Fatigue: ${fatigue.toFixed? fatigue.toFixed(1) : fatigue}</div>
+                        </div>
+                        <div class="text-xs text-gray-300 w-28">Status: ${statusText}</div>
+                    </div>
+                    <div>
+                        ${isStarter ? `<button data-player-id="${p.id}" class="sub-out-btn btn bg-red-600 hover:bg-red-700 text-white text-xs py-1 px-2 rounded">Sub Out</button>` : `<button data-player-id="${p.id}" class="sub-in-btn btn bg-green-600 hover:bg-green-700 text-white text-xs py-1 px-2 rounded">Sub In</button>`}
+                    </div>
+                </div>
+            `;
+        };
+
+        let html = '';
+        if (starters.length > 0) {
+            html += '<div class="mb-2"><div class="text-sm font-semibold text-amber-300 mb-1">Starters</div>';
+            starters.forEach(s => { html += buildRow(s, true); });
+            html += '</div>';
+        }
+        html += '<div><div class="text-sm font-semibold text-amber-300 mb-1">Bench</div>';
+        bench.forEach(b => { html += buildRow(b, false); });
+        html += '</div>';
+
+        elements.simPlayersList.innerHTML = html;
+
+        // Attach handlers
+        elements.simPlayersList.querySelectorAll('.sub-in-btn').forEach(btn => {
+            btn.onclick = (e) => {
+                const inId = parseInt(btn.dataset.playerId, 10);
+                // Build select of available starter slots (with side + slot)
+                const slotOptions = [];
+                Object.keys(depth).forEach(side => {
+                    const chart = depth[side] || {};
+                    Object.keys(chart).forEach(slot => {
+                        const occupantId = chart[slot];
+                        const occupant = roster.find(p => p && p.id === occupantId);
+                        slotOptions.push({ value: `${side}|${slot}`, label: `${side.toUpperCase()} ${slot} (${occupant ? occupant.name : 'Vacant'})` });
+                    });
+                });
+                const selectHtml = `<select id="_sub_slot_select" class="w-full p-2 bg-white text-black">${slotOptions.map(s=>`<option value="${s.value}">${s.label}</option>`).join('')}</select>`;
+                showModal('Select Slot to Sub Into', selectHtml, () => {
+                    const chosen = document.getElementById('_sub_slot_select')?.value;
+                    if (!chosen) return;
+                    const [side, slot] = chosen.split('|');
+                    const outId = team.depthChart?.[side]?.[slot];
+                    const result = (typeof Game !== 'undefined' && typeof Game.substitutePlayers === 'function') ? Game.substitutePlayers(team.id, outId, inId) : { success: false, message: 'Substitution API unavailable' };
+                    if (!result.success) {
+                        showModal('Sub Failed', `<p>${result.message}</p>`, null, 'OK');
+                    } else {
+                        renderSimPlayers();
+                    }
+                }, 'Confirm');
+            };
+        });
+
+        elements.simPlayersList.querySelectorAll('.sub-out-btn').forEach(btn => {
+            btn.onclick = (e) => {
+                const outId = parseInt(btn.dataset.playerId, 10);
+                // Choose incoming bench player to swap with
+                const benchPlayers = roster.filter(p => p && !starterIds.has(p.id));
+                if (benchPlayers.length === 0) {
+                    showModal('No Bench', '<p>No bench players available to sub in.</p>', null, 'OK');
+                    return;
+                }
+                const options = benchPlayers.map(b => `<option value="${b.id}">${b.name} (#${b.number||'—'})</option>`).join('');
+                const selectHtml = `<select id="_sub_in_select" class="w-full p-2 bg-white text-black">${options}</select>`;
+                showModal('Select Bench Player to Sub In', selectHtml, () => {
+                    const inId = parseInt(document.getElementById('_sub_in_select')?.value, 10);
+                    if (!inId) return;
+                    const result = (typeof Game !== 'undefined' && typeof Game.substitutePlayers === 'function') ? Game.substitutePlayers(team.id, outId, inId) : { success: false, message: 'Substitution API unavailable' };
+                    if (!result.success) {
+                        showModal('Sub Failed', `<p>${result.message}</p>`, null, 'OK');
+                    } else {
+                        renderSimPlayers();
+                    }
+                }, 'Confirm');
+            };
+        });
+
+    } catch (err) {
+        console.error('renderSimPlayers failed:', err);
+    }
+}
+
+/**
  * Executes a single frame/tick of the live game simulation.
  * This is the core loop called by setInterval.
  */
@@ -1806,6 +1932,8 @@ function runLiveGameTick() {
 
     // --- 6. Draw Visualization ---
     drawFieldVisualization(frame);
+    // update players/substitution UI
+    try { renderSimPlayers(); } catch (err) { console.error('renderSimPlayers error:', err); }
 
     // --- 7. Advance to Next Frame OR Start Huddle ---
     liveGameCurrentIndex++;
@@ -1907,6 +2035,7 @@ export function startLiveGameSim(gameResult, onComplete) {
 
     drawFieldVisualization(null); // Clear field
     renderLiveStatsBox(gameResult); // Render the static "final" stats
+    try { renderSimPlayers(); } catch (err) { console.error('renderSimPlayers init error:', err); }
     setSimSpeed(liveGameSpeed); // Set default button style
 
     // --- 6. Start the Interval Timer ---
