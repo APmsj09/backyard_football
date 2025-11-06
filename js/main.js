@@ -239,26 +239,32 @@ async function handleDraftEnd() {
 
     // --- FIX: Show the modal *before* doing the heavy lifting ---
     console.log("Showing draft completion modal...");
-    UI.showModal("Draft Complete!", "<p>Finalizing rosters and generating schedule... Please wait.</p>", async () => {
-        // Actions after modal close
-        console.log("Draft completion modal confirmed, transitioning to dashboard...");
+
+    // Make an idempotent finalizer so we can auto-run it after background work or via the modal confirm
+    let _draftFinalized = false;
+    const finalizeDraft = async () => {
+        if (_draftFinalized) return;
+        _draftFinalized = true;
+        console.log("Finalizing draft and transitioning to dashboard...");
         try {
-            // We moved the schedule generation here, so it only runs when you click the button
-            Game.generateSchedule(); 
+            Game.generateSchedule();
             gameState = Game.getGameState();
             if (!gameState) throw new Error("Failed to get game state after schedule generation.");
-            
             UI.renderDashboard(gameState);
-            UI.switchTab('my-team', gameState); // This will now render correctly with Fix #1
+            UI.switchTab('my-team', gameState);
             UI.showScreen('dashboard-screen');
+            // Hide modal if still visible
+            try { UI.hideModal(); } catch (e) { /* ignore */ }
         } catch (error) {
             console.error("Error transitioning to dashboard after draft:", error);
             UI.showModal("Error", `Could not proceed to season: ${error.message}.`, null, '', null, 'Close');
         }
-    }, "Start Season");
+    };
+
+    // Show modal with confirm wired to finalizeDraft
+    UI.showModal("Draft Complete!", "<p>Finalizing rosters and generating schedule... Please wait.</p>", finalizeDraft, "Start Season");
 
     // --- Now, do the slow part *after* showing the modal ---
-    
     // 1. Get the modal button and disable it
     const modalConfirmBtn = document.querySelector('#modal-actions button.bg-amber-500');
     if (modalConfirmBtn) {
@@ -273,13 +279,11 @@ async function handleDraftEnd() {
     console.log("Setting depth charts in the background...");
     for (const team of gameState.teams) {
         if (!team) continue;
-        try { 
-            Game.aiSetDepthChart(team); 
-        } catch (error) { 
-            console.error(`Error setting depth chart for ${team.name}:`, error); 
+        try {
+            Game.aiSetDepthChart(team);
+        } catch (error) {
+            console.error(`Error setting depth chart for ${team.name}:`, error);
         }
-        // Optional: Yielding here makes it smoother but slower
-        // await yieldToMain(); 
     }
 
     // 4. Update the modal text and re-enable the button
@@ -292,6 +296,12 @@ async function handleDraftEnd() {
         modalConfirmBtn.disabled = false;
         modalConfirmBtn.textContent = "Start Season";
     }
+
+    // Auto-finalize draft so the game progresses even if the user doesn't click
+    try {
+        await yieldToMain();
+        finalizeDraft();
+    } catch (e) { console.error('Auto-finalize draft error:', e); }
 }
 
 /**
