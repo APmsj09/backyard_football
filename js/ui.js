@@ -79,9 +79,10 @@ export function setupElements() {
         },
 
         // --- Other Common UI Elements ---
-        modal: document.getElementById('modal'),
-        modalTitle: document.getElementById('modal-title'),
-        modalBody: document.getElementById('modal-body'),
+    modal: document.getElementById('modal'),
+    modalTitle: document.getElementById('modal-title'),
+    modalBody: document.getElementById('modal-body'),
+    modalDefaultClose: document.getElementById('modal-default-close'),
         loadingProgress: document.getElementById('loading-progress'),
         teamNameSuggestions: document.getElementById('team-name-suggestions'),
         customTeamName: document.getElementById('custom-team-name'),
@@ -181,6 +182,13 @@ export function setupElements() {
         elements.draftSort.innerHTML = sortOptions;
     }
     console.log("UI Elements setup check complete.");
+
+    // Wire up default modal close if present (helps when showModal isn't used to create buttons)
+    if (elements.modalDefaultClose) {
+        elements.modalDefaultClose.addEventListener('click', () => {
+            try { hideModal(); } catch (e) { console.warn('hideModal unavailable', e); }
+        });
+    }
 }
 
 /**

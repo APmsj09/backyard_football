@@ -175,10 +175,10 @@
                         <div id="my-team-roster"></div>
                     </div>
                     <div id="tab-content-depth-chart" class="tab-pane hidden">
-                        <div class="sub-tabs">
-                            <button data-sub-tab="offense" class="sub-tab active">Offense</button>
-                            <button data-sub-tab="defense" class="sub-tab">Defense</button>
-                        </div>
+                        <div id="depth-chart-sub-tabs" class="sub-tabs">
+                                <button data-sub-tab="offense" class="sub-tab active">Offense</button>
+                                <button data-sub-tab="defense" class="sub-tab">Defense</button>
+                            </div>
 
                         <div id="depth-chart-offense-pane" class="depth-chart-content">
                             <div class="depth-chart-starters">
@@ -456,6 +456,19 @@
                     </div>
                 </aside>
             </div>
+
+    <!-- Universal modal (used by ui.showModal / hideModal) -->
+    <div id="modal" class="hidden fixed inset-0 z-50 flex items-center justify-center">
+        <div class="absolute inset-0 bg-black/50" aria-hidden="true"></div>
+        <div id="modal-content" class="bg-white rounded-lg shadow-lg z-10 max-w-2xl w-full p-6" role="dialog" aria-modal="true">
+            <h3 id="modal-title" class="text-xl font-bold mb-2">Modal Title</h3>
+            <div id="modal-body" class="mb-4">Modal body content</div>
+            <div id="modal-actions" class="mt-6 text-right space-x-2">
+                <button id="modal-default-close" class="btn bg-gray-500 hover:bg-gray-600 text-white font-bold py-2 px-6 rounded-lg">Close</button>
+            </div>
+        </div>
+    </div>
+
     <script type="module" src="js/main.js"></script>
 </body>
 
