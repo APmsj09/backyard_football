@@ -1330,16 +1330,6 @@ export function drawFieldVisualization(frameData) {
             const drawX = player.y * scaleX + jiggleX;
             const drawY = player.x * scaleY + jiggleY;
 
-            // Draw player highlight/glow for ball carrier
-            if (player.isBallCarrier) {
-                ctx.save();
-                ctx.beginPath();
-                ctx.arc(drawX, drawY, 12, 0, Math.PI * 2);
-                ctx.fillStyle = 'rgba(251, 191, 36, 0.3)'; // Amber glow
-                ctx.fill();
-                ctx.restore();
-            }
-
             // Reduce engagement visuals to a subtle jiggle + soft halo (no bursts/ripples)
             if (player.isEngaged) {
                 // Small soft halo so engaged players are still visible without being overbearing
@@ -1352,22 +1342,11 @@ export function drawFieldVisualization(frameData) {
                 ctx.fill();
             }
             
-            // Ball carrier highlight
-            if (player.isBallCarrier) {
-                const gradient = ctx.createRadialGradient(drawX, drawY, 4, drawX, drawY, 14);
-                gradient.addColorStop(0, 'rgba(251, 191, 36, 0.8)');
-                gradient.addColorStop(0.6, 'rgba(251, 191, 36, 0.3)');
-                gradient.addColorStop(1, 'rgba(251, 191, 36, 0)');
-                ctx.fillStyle = gradient;
-                ctx.beginPath();
-                ctx.arc(drawX, drawY, 14, 0, Math.PI * 2);
-                ctx.fill();
-            }
+
 
             // Draw player body with 3D effect
-            const playerColor = player.isBallCarrier ? '#fbbf24' : // Amber-400
-                              player.isOffense ? '#3b82f6' : // Blue-500
-                              '#ef4444'; // Red-500
+            // Use the player's team color when available so the carrier keeps their team identity
+            const playerColor = player.primaryColor || (player.isOffense ? '#3b82f6' : '#ef4444');
 
             // Body shadow
             ctx.beginPath();
@@ -1386,6 +1365,18 @@ export function drawFieldVisualization(frameData) {
             ctx.arc(drawX - 2, drawY - 2, 3, 0, Math.PI * 2);
             ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
             ctx.fill();
+
+            // Ball carrier ring indicator: small stroked ring so the carrier is easy to spot
+            if (player.isBallCarrier) {
+                ctx.save();
+                ctx.beginPath();
+                ctx.arc(drawX, drawY, 12, 0, Math.PI * 2);
+                ctx.lineWidth = 3;
+                // Prefer a team secondary color for the ring if provided, else use amber
+                ctx.strokeStyle = player.secondaryColor || 'rgba(251, 191, 36, 0.95)';
+                ctx.stroke();
+                ctx.restore();
+            }
 
             // Draw movement indicator
             if (player.velocity && (Math.abs(player.velocity.x) > 0.1 || Math.abs(player.velocity.y) > 0.1)) {
