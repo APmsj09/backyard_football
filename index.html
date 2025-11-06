@@ -175,29 +175,128 @@
                         <div id="my-team-roster"></div>
                     </div>
                     <div id="tab-content-depth-chart" class="tab-pane hidden">
-                        <div>
-                            <div id="depth-chart-sub-tabs" class="flex border-b mb-4">
-                                <button data-sub-tab="offense" class="depth-chart-tab active">Offense</button>
-                                <button data-sub-tab="defense" class="depth-chart-tab">Defense</button>
-                            </div>
-                            <div id="depth-chart-offense-pane" class="depth-chart-sub-pane">
-                                <div class="mb-4"><label for="offense-formation-select"
-                                        class="mr-2 font-semibold">Formation:</label><select
-                                        id="offense-formation-select" class="p-2 border rounded bg-white"></select>
-                                </div>
-                                <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-                                    <div class="md:col-span-2">
-                                        <h4 class="text-lg font-bold mb-2">Offense Starters</h4>
-                                        <div id="offense-depth-chart-slots" class="space-y-2"></div>
+                        <div class="sub-tabs">
+                            <button data-sub-tab="offense" class="sub-tab active">Offense</button>
+                            <button data-sub-tab="defense" class="sub-tab">Defense</button>
+                        </div>
+
+                        <div id="depth-chart-offense-pane" class="depth-chart-content">
+                            <div class="depth-chart-starters">
+                                <div class="player-group">
+                                    <div class="player-group-title">
+                                        <span>Quarterbacks</span>
+                                        <span class="text-sm text-gray-500">QB</span>
                                     </div>
-                                    <div>
-                                        <h4 class="text-lg font-bold mb-2">Available Players</h4>
-                                        <div id="offense-depth-chart-roster" class="roster-list"></div>
+                                    <div id="offense-qb-slots" class="space-y-2"></div>
+                                </div>
+                                
+                                <div class="player-group">
+                                    <div class="player-group-title">
+                                        <span>Receivers</span>
+                                        <span class="text-sm text-gray-500">WR/TE</span>
+                                    </div>
+                                    <div id="offense-receiver-slots" class="space-y-2"></div>
+                                </div>
+
+                                <div class="player-group">
+                                    <div class="player-group-title">
+                                        <span>Running Backs</span>
+                                        <span class="text-sm text-gray-500">RB/FB</span>
+                                    </div>
+                                    <div id="offense-back-slots" class="space-y-2"></div>
+                                </div>
+
+                                <div class="player-group">
+                                    <div class="player-group-title">
+                                        <span>Offensive Line</span>
+                                        <span class="text-sm text-gray-500">OL</span>
+                                    </div>
+                                    <div id="offense-line-slots" class="space-y-2"></div>
+                                </div>
+                            </div>
+
+                            <div class="depth-chart-bench">
+                                <div class="player-group-title mb-3">
+                                    <span>Available Players</span>
+                                    <button class="text-sm text-amber-600 hover:text-amber-700">
+                                        View Stats
+                                    </button>
+                                </div>
+                                <div id="offense-depth-chart-roster" class="roster-list"></div>
+                            </div>
+                        </div>
+
+                        <div id="depth-chart-defense-pane" class="depth-chart-content hidden">
+                            <div class="depth-chart-starters">
+                                <div class="player-group">
+                                    <div class="player-group-title">
+                                        <span>Defensive Line</span>
+                                        <span class="text-sm text-gray-500">DL</span>
+                                    </div>
+                                    <div id="defense-line-slots" class="space-y-2"></div>
+                                </div>
+
+                                <div class="player-group">
+                                    <div class="player-group-title">
+                                        <span>Linebackers</span>
+                                        <span class="text-sm text-gray-500">LB</span>
+                                    </div>
+                                    <div id="defense-lb-slots" class="space-y-2"></div>
+                                </div>
+
+                                <div class="player-group">
+                                    <div class="player-group-title">
+                                        <span>Secondary</span>
+                                        <span class="text-sm text-gray-500">DB</span>
+                                    </div>
+                                    <div id="defense-db-slots" class="space-y-2"></div>
+                                </div>
+                            </div>
+
+                            <div class="depth-chart-bench">
+                                <div class="player-group-title mb-3">
+                                    <span>Available Players</span>
+                                    <button class="text-sm text-amber-600 hover:text-amber-700">
+                                        View Stats
+                                    </button>
+                                </div>
+                                <div id="defense-depth-chart-roster" class="roster-list"></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div id="tab-content-formations" class="tab-pane hidden">
+                        <div class="sub-tabs">
+                            <button data-sub-tab="offense-formations" class="sub-tab active">Offense</button>
+                            <button data-sub-tab="defense-formations" class="sub-tab">Defense</button>
+                        </div>
+
+                        <div class="grid grid-cols-2 gap-6 mt-4">
+                            <div id="offense-formations-list">
+                                <div class="player-group">
+                                    <div class="player-group-title">
+                                        <span>Offensive Formations</span>
+                                    </div>
+                                    <div class="mt-4 grid gap-4">
+                                        <select id="offense-formation-select" class="p-2 border rounded bg-white w-full"></select>
+                                        <div id="offense-formation-preview" class="aspect-video bg-gray-100 rounded-lg"></div>
                                     </div>
                                 </div>
                             </div>
-                            <div id="depth-chart-defense-pane" class="depth-chart-sub-pane hidden">
-                                <div class="mb-4"><label for="defense-formation-select"
+                            
+                            <div id="defense-formations-list" class="hidden">
+                                <div class="player-group">
+                                    <div class="player-group-title">
+                                        <span>Defensive Formations</span>
+                                    </div>
+                                    <div class="mt-4 grid gap-4">
+                                        <select id="defense-formation-select" class="p-2 border rounded bg-white w-full"></select>
+                                        <div id="defense-formation-preview" class="aspect-video bg-gray-100 rounded-lg"></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
                                         class="mr-2 font-semibold">Formation:</label><select
                                         id="defense-formation-select" class="p-2 border rounded bg-white"></select>
                                 </div>
