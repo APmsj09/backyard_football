@@ -158,6 +158,13 @@ async function runAIDraftPicks() {
     let safetyCounter = 0;
     const MAX_PICKS_WITHOUT_PROGRESS = 50;
 
+    // Helper to advance pick safely and clamp to draftOrder length
+    const advancePick = () => {
+        if (!gameState) return;
+        gameState.currentPick = (gameState.currentPick || 0) + 1;
+        if (gameState.draftOrder && gameState.currentPick > gameState.draftOrder.length) gameState.currentPick = gameState.draftOrder.length;
+    };
+
     if (checkDraftEnd()) {
         console.log("Draft end condition met before AI picks.");
         handleDraftEnd(); // Ensure draft end logic runs if condition met immediately
@@ -178,7 +185,7 @@ async function runAIDraftPicks() {
         // Skip invalid teams or teams with full rosters
         if (!currentPickingTeam || !currentPickingTeam.roster || currentPickingTeam.roster.length >= ROSTER_LIMIT) {
             console.log(`Skipping pick for ${currentPickingTeam?.name || 'invalid team'} (roster full or invalid team)`);
-            gameState.currentPick++;
+            advancePick();
             currentPickingTeam = gameState.draftOrder[gameState.currentPick];
             continue;
         }
@@ -186,9 +193,9 @@ async function runAIDraftPicks() {
         UI.renderDraftScreen(gameState, handlePlayerSelectInDraft, selectedPlayerId, currentSortColumn, currentSortDirection);
         await new Promise(resolve => setTimeout(resolve, 50)); // Short delay for visual feedback
 
-        const result = Game.simulateAIPick(currentPickingTeam);
-        if (result) safetyCounter = 0; // Reset counter if a pick was made successfully
-        gameState.currentPick++;
+    const result = Game.simulateAIPick(currentPickingTeam);
+    if (result) safetyCounter = 0; // Reset counter if a pick was made successfully
+    advancePick();
 
         if (checkDraftEnd()) {
             handleDraftEnd(); // End draft immediately if conditions met
@@ -204,7 +211,7 @@ async function runAIDraftPicks() {
         // If player's team roster is full, automatically skip their pick
         if (gameState.playerTeam.roster.length >= ROSTER_LIMIT) {
             console.log("Player roster full, skipping pick.");
-            gameState.currentPick++;
+            advancePick();
             // Check if skipping ended the draft (Fix for loop)
             if (checkDraftEnd()) {
                 handleDraftEnd();
