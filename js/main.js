@@ -17,6 +17,8 @@ const MIN_HEALTHY_PLAYERS = 7;
 const WEEKS_IN_SEASON = 9; // Number of weeks in the regular season
 
 // --- Event Handlers ---
+/** Yields control to the main thread briefly. */
+function yieldToMain() { return new Promise(resolve => setTimeout(resolve, 0)); }
 
 /**
  * Initializes the league and navigates to the team creation screen.
@@ -221,35 +223,68 @@ async function runAIDraftPicks() {
 /**
  * Finalizes the draft, sets depth charts, generates schedule, navigates to dashboard.
  */
-function handleDraftEnd() {
+async function handleDraftEnd() {
     console.log("Draft has concluded.");
     if (!gameState || !gameState.teams) {
         console.error("Cannot end draft: Game state invalid.");
         return;
     }
-    // Set initial depth charts
-    gameState.teams.forEach(team => {
-        if (!team) return; // Skip invalid team entries
-        try { Game.aiSetDepthChart(team); }
-        catch (error) { console.error(`Error setting depth chart for ${team.name}:`, error); }
-    });
 
+    // --- FIX: Show the modal *before* doing the heavy lifting ---
     console.log("Showing draft completion modal...");
-    UI.showModal("Draft Complete!", "<p>The draft has concluded. Get ready for the season!</p>", () => {
+    UI.showModal("Draft Complete!", "<p>Finalizing rosters and generating schedule... Please wait.</p>", async () => {
         // Actions after modal close
         console.log("Draft completion modal confirmed, transitioning to dashboard...");
         try {
-            Game.generateSchedule();
+            // We moved the schedule generation here, so it only runs when you click the button
+            Game.generateSchedule(); 
             gameState = Game.getGameState();
             if (!gameState) throw new Error("Failed to get game state after schedule generation.");
+            
             UI.renderDashboard(gameState);
-            UI.switchTab('my-team', gameState);
+            UI.switchTab('my-team', gameState); // This will now render correctly with Fix #1
             UI.showScreen('dashboard-screen');
         } catch (error) {
             console.error("Error transitioning to dashboard after draft:", error);
             UI.showModal("Error", `Could not proceed to season: ${error.message}.`, null, '', null, 'Close');
         }
     }, "Start Season");
+
+    // --- Now, do the slow part *after* showing the modal ---
+    
+    // 1. Get the modal button and disable it
+    const modalConfirmBtn = document.querySelector('#modal-actions button.bg-amber-500');
+    if (modalConfirmBtn) {
+        modalConfirmBtn.disabled = true;
+        modalConfirmBtn.textContent = "Loading...";
+    }
+
+    // 2. Yield to let the UI update (show the modal)
+    await yieldToMain();
+
+    // 3. Set depth charts (the slow part)
+    console.log("Setting depth charts in the background...");
+    for (const team of gameState.teams) {
+        if (!team) continue;
+        try { 
+            Game.aiSetDepthChart(team); 
+        } catch (error) { 
+            console.error(`Error setting depth chart for ${team.name}:`, error); 
+        }
+        // Optional: Yielding here makes it smoother but slower
+        // await yieldToMain(); 
+    }
+
+    // 4. Update the modal text and re-enable the button
+    console.log("Depth charts set.");
+    const modalBody = document.getElementById('modal-body');
+    if (modalBody) {
+        modalBody.innerHTML = "<p>The draft has concluded. Get ready for the season!</p>";
+    }
+    if (modalConfirmBtn) {
+        modalConfirmBtn.disabled = false;
+        modalConfirmBtn.textContent = "Start Season";
+    }
 }
 
 /**
