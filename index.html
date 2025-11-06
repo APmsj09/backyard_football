@@ -97,8 +97,14 @@
                                             class="sort-indicator"></span></th>
                                     <th scope="col" class="py-2 px-3" data-sort="strength">Str<span
                                             class="sort-indicator"></span></th>
-                                    <th scope="col" class="py-2 px-3" data-sort="agility">Agi<span
-                                            class="sort-indicator"></span></th>
+                    <th scope="col" class="py-2 px-3" data-sort="agility">Agi<span
+                        class="sort-indicator"></span></th>
+                    <th scope="col" class="py-2 px-3" data-sort="stamina">Stm<span
+                        class="sort-indicator"></span></th>
+                    <th scope="col" class="py-2 px-3" data-sort="playbookIQ">IQ<span
+                        class="sort-indicator"></span></th>
+                    <th scope="col" class="py-2 px-3" data-sort="toughness">Tgh<span
+                        class="sort-indicator"></span></th>
                                     <th scope="col" class="py-2 px-3" data-sort="throwingAccuracy">Thr<span
                                             class="sort-indicator"></span></th>
                                     <th scope="col" class="py-2 px-3" data-sort="catchingHands">Cat<span
@@ -321,21 +327,31 @@
                     </ul>
                 </div>
             </div>
-            <div class="text-center mt-8">
-                <button id="go-to-next-draft-btn"
-                    class="bg-amber-500 hover:bg-amber-600 text-white font-bold py-3 px-8 rounded-lg text-lg transition">Proceed
-                    to Next Season's Draft</button>
+            <div class="flex gap-4 items-start">
+                <div id="sim-field-visualization" class="flex-1 bg-green-700 p-2 rounded mb-4 text-center font-mono text-sm border-4 border-gray-400">
+                    <canvas id="field-canvas" width="1000" height="450">Your browser does not support the canvas</canvas>
+                </div>
+                <aside id="sim-scoreboard" class="broadcast-scoreboard w-64 bg-gray-800 text-white p-2 rounded mb-4">
+                    <div class="broadcast-top flex items-center justify-between mb-1">
+                        <div class="text-xs text-gray-300">LIVE</div>
+                        <div id="sim-game-down" class="text-xs text-gray-300">1st &amp; 10</div>
+                    </div>
+                    <div class="broadcast-body">
+                        <div class="broadcast-team flex items-center justify-between py-1">
+                            <div class="team-name text-sm font-semibold" id="sim-away-team">Away</div>
+                            <div class="team-score text-xl font-bold" id="sim-away-score">0</div>
+                        </div>
+                        <div class="broadcast-team flex items-center justify-between py-1 border-t border-gray-700">
+                            <div class="team-name text-sm font-semibold" id="sim-home-team">Home</div>
+                            <div class="team-score text-xl font-bold" id="sim-home-score">0</div>
+                        </div>
+                    </div>
+                    <div class="broadcast-bottom mt-2 text-xs text-gray-300">
+                        <div id="sim-possession">Possession: -</div>
+                        <div id="sim-game-drive" class="mt-1">Drive: --</div>
+                    </div>
+                </aside>
             </div>
-        </div>
-    </div>
-
-    <div id="modal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-        <div id="modal-content" class="bg-white rounded-lg shadow-2xl p-6 w-full max-w-lg max-h-[90vh]">
-            <h3 id="modal-title" class="text-2xl font-bold mb-4"></h3>
-            <div id="modal-body" class="max-h-[60vh] overflow-y-auto"></div>
-        </div>
-    </div>
-
     <script type="module" src="js/main.js"></script>
 </body>
 

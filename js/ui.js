@@ -344,7 +344,7 @@ export function renderDraftScreen(gameState, onPlayerSelect, currentSelectedId, 
 export function renderDraftPool(gameState, onPlayerSelect, sortColumn, sortDirection) {
     if (!elements.draftPoolTbody || !gameState || !gameState.players || !gameState.playerTeam?.roster) {
         console.error("Cannot render draft pool: Missing elements or invalid game state/roster.");
-        if (elements.draftPoolTbody) elements.draftPoolTbody.innerHTML = `<tr><td colspan="15" class="p-4 text-center text-red-500">Error loading players.</td></tr>`;
+        if (elements.draftPoolTbody) elements.draftPoolTbody.innerHTML = `<tr><td colspan="18" class="p-4 text-center text-red-500">Error loading players.</td></tr>`;
         return;
     }
 
@@ -425,7 +425,7 @@ export function renderDraftPool(gameState, onPlayerSelect, sortColumn, sortDirec
     elements.draftPoolTbody.innerHTML = '';
 
     if (filteredPlayers.length === 0) {
-        elements.draftPoolTbody.innerHTML = `<tr><td colspan="15" class="p-4 text-center text-gray-500">No players match filters.</td></tr>`;
+        elements.draftPoolTbody.innerHTML = `<tr><td colspan="18" class="p-4 text-center text-gray-500">No players match filters.</td></tr>`;
         return;
     }
 
@@ -455,6 +455,9 @@ export function renderDraftPool(gameState, onPlayerSelect, sortColumn, sortDirec
             <td class="text-center py-2 px-3">${scoutedPlayer.attributes?.physical?.speed ?? '?'}</td>
             <td class="text-center py-2 px-3">${scoutedPlayer.attributes?.physical?.strength ?? '?'}</td>
             <td class="text-center py-2 px-3">${scoutedPlayer.attributes?.physical?.agility ?? '?'}</td>
+            <td class="text-center py-2 px-3">${scoutedPlayer.attributes?.physical?.stamina ?? '?'}</td>
+            <td class="text-center py-2 px-3">${scoutedPlayer.attributes?.mental?.playbookIQ ?? '?'}</td>
+            <td class="text-center py-2 px-3">${scoutedPlayer.attributes?.mental?.toughness ?? '?'}</td>
             <td class="text-center py-2 px-3">${scoutedPlayer.attributes?.technical?.throwingAccuracy ?? '?'}</td>
             <td class="text-center py-2 px-3">${scoutedPlayer.attributes?.technical?.catchingHands ?? '?'}</td>
             <td class="text-center py-2 px-3">${scoutedPlayer.attributes?.technical?.blocking ?? '?'}</td>
@@ -796,7 +799,8 @@ function renderDepthChartSide(side, gameState, slotsContainer, rosterContainer) 
     slotsContainer.innerHTML = '';
     const header = document.createElement('div');
     header.className = 'depth-chart-slot flex items-center justify-between font-bold text-xs text-gray-500 px-2';
-    header.innerHTML = `<span class="w-1/4">POS</span><div class="player-details-grid w-3/4"><span>NAME</span><span>OVR</span><span>SPD</span><span>STR</span><span>AGI</span><span>THR</span><span>CAT</span></div>`;
+    // Columns: NAME, OVR, HGT, WGT, SPD, STR, AGI, STM, IQ, CLT, CST, TGH, THR, CAT, BLK, TCK, BSH
+    header.innerHTML = `<span class="w-1/4">POS</span><div class="player-details-grid w-3/4 grid grid-cols-17 gap-1"><span>NAME</span><span>OVR</span><span>HGT</span><span>WGT</span><span>SPD</span><span>STR</span><span>AGI</span><span>STM</span><span>IQ</span><span>CLT</span><span>CST</span><span>TGH</span><span>THR</span><span>CAT</span><span>BLK</span><span>TCK</span><span>BSH</span></div>`;
     slotsContainer.appendChild(header);
     slots.forEach(slot => renderSlot(slot, roster, currentChart, slotsContainer, side));
     const playersStartingOnThisSide = new Set(Object.values(currentChart).filter(Boolean));
@@ -824,9 +828,9 @@ function renderSlot(positionSlot, roster, chart, container, side) {
     } else {
         slotEl.setAttribute('title', `${player.name} (Temporary)`);
     }
-    slotEl.innerHTML = `
+        slotEl.innerHTML = `
         <span class="font-bold w-1/4">${positionSlot}</span>
-        <div class="player-details-grid w-3/4 grid grid-cols-15 gap-1">
+        <div class="player-details-grid w-3/4 grid grid-cols-17 gap-1">
             <span>${typeTag} ${player?.name ?? 'Empty'}</span>
             <span class="font-bold text-amber-600">${overall}</span>
             <span>${player?.attributes?.physical?.height ?? '-'}</span>
@@ -1187,9 +1191,12 @@ export function drawFieldVisualization(frameData) {
     }
     ctx.restore();
 
-    // --- Camera Logic: Fit full field width (sideline-to-sideline) vertically and pan left/right only ---
-    // Use a single scale so the full field width fits vertically and preserve aspect ratio.
-    const scale = canvas.height / FIELD_WIDTH;
+    // --- Camera Logic: Zoomable camera that keeps sidelines clamped and pans left/right only ---
+    // Base scale that fits the full field width vertically
+    const baseScale = canvas.height / FIELD_WIDTH;
+    // Zoom multiplier: increase to make models larger; keep conservative default
+    const ZOOM_MULTIPLIER = 1.15; // tweakable (1.0 = fit vertical exactly)
+    const scale = baseScale * ZOOM_MULTIPLIER;
     const scaleX = scale;
     const scaleY = scale;
 
@@ -1211,8 +1218,11 @@ export function drawFieldVisualization(frameData) {
     const maxOffsetX = 0;
     cameraOffsetX = Math.max(minOffsetX, Math.min(maxOffsetX, cameraOffsetX));
 
-    // Vertical offset is fixed so the full field width is always visible (no vertical panning)
-    const cameraOffsetY = (canvas.height / 2) - (CENTER_X * scaleY);
+    // Vertical offset: try to center on field sideline midpoint, but clamp so we never show beyond sidelines.
+    let cameraOffsetY = (canvas.height / 2) - (CENTER_X * scaleY);
+    const minOffsetY = Math.min(0, canvas.height - (FIELD_WIDTH * scaleY));
+    const maxOffsetY = 0;
+    cameraOffsetY = Math.max(minOffsetY, Math.min(maxOffsetY, cameraOffsetY));
 
     // Apply camera transform (we translate only; positions are multiplied by scaleX/scaleY elsewhere)
     ctx.save();
@@ -1895,8 +1905,17 @@ export function startLiveGameSim(gameResult, onComplete) {
     if (ticker) ticker.innerHTML = '';
     if (elements.simAwayTeam) elements.simAwayTeam.textContent = gameResult.awayTeam.name;
     if (elements.simHomeTeam) elements.simHomeTeam.textContent = gameResult.homeTeam.name;
-    if (elements.simAwayScore) elements.simAwayScore.textContent = liveGameCurrentHomeScore;
-    if (elements.simHomeScore) elements.simHomeScore.textContent = liveGameCurrentHomeScore;
+    if (elements.simAwayScore) {
+        elements.simAwayScore.textContent = liveGameCurrentAwayScore;
+        elements.simAwayScore.classList.add('away');
+        // optional: color by team primary color if available
+        try { if (gameResult.awayTeam?.primaryColor) elements.simAwayScore.style.color = gameResult.awayTeam.primaryColor; } catch(e) {}
+    }
+    if (elements.simHomeScore) {
+        elements.simHomeScore.textContent = liveGameCurrentHomeScore;
+        elements.simHomeScore.classList.add('home');
+        try { if (gameResult.homeTeam?.primaryColor) elements.simHomeScore.style.color = gameResult.homeTeam.primaryColor; } catch(e) {}
+    }
     if (elements.simGameDrive) elements.simGameDrive.textContent = liveGameDriveText;
     if (elements.simGameDown) elements.simGameDown.textContent = "1st & 10";
     if (elements.simPossession) elements.simPossession.textContent = '';
