@@ -372,7 +372,7 @@ export function renderDraftScreen(gameState, onPlayerSelect, currentSelectedId, 
     if (elements.draftPickNumber) elements.draftPickNumber.textContent = `${currentPick + 1} (${currentTeamRosterSize}/${ROSTER_LIMIT} players)`;
     if (elements.draftPickingTeam) elements.draftPickingTeam.textContent = pickingTeam.name || 'Unknown Team';
 
-    renderDraftPool(gameState, onPlayerSelect, sortColumn, sortDirection);
+    renderDraftPool(gameState, onPlayerSelect, sortColumn, sortDirection, positionOverallWeights);
     renderPlayerRoster(gameState.playerTeam);
     updateDraftSortIndicators(sortColumn, sortDirection); // <<< Add this call
 
@@ -385,7 +385,7 @@ export function renderDraftScreen(gameState, onPlayerSelect, currentSelectedId, 
 /**
  * Renders the draft pool table with scouted info.
  */
-export function renderDraftPool(gameState, onPlayerSelect, sortColumn, sortDirection) {
+export function renderDraftPool(gameState, onPlayerSelect, sortColumn, sortDirection, positionOverallWeights) {
     if (!elements.draftPoolTbody || !gameState || !gameState.players || !gameState.playerTeam?.roster) {
         console.error("Cannot render draft pool: Missing elements or invalid game state/roster.");
         if (elements.draftPoolTbody) elements.draftPoolTbody.innerHTML = `<tr><td colspan="18" class="p-4 text-center text-red-500">Error loading players.</td></tr>`;
@@ -618,7 +618,7 @@ export function renderPlayerRoster(playerTeam, positionOverallWeights) {
         roster.forEach(player => {
             if (!player) return;
             const li = document.createElement('li');
-            const estimatedPos = estimateBestPosition(player); // Recalculate based on known stats
+            const estimatedPos = estimateBestPosition(player, positionOverallWeights); // Recalculate based on known stats
             li.className = 'p-2';
             li.textContent = `${player.name} (${estimatedPos ?? '?'})`; // <<< Use estimate
             elements.draftRosterList.appendChild(li);

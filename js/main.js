@@ -827,10 +827,10 @@ function main() {
 
         // Draft Filters/Sorting
         document.getElementById('draft-search')?.addEventListener('input', () => {
-            if (gameState) UI.debouncedRenderDraftPool(gameState, handlePlayerSelectInDraft, currentSortColumn, currentSortDirection);
+            if (gameState) UI.debouncedRenderDraftPool(gameState, handlePlayerSelectInDraft, currentSortColumn, currentSortDirection, positionOverallWeights);
         });
         document.getElementById('draft-filter-pos')?.addEventListener('change', () => {
-            if (gameState) UI.renderDraftPool(gameState, handlePlayerSelectInDraft, currentSortColumn, currentSortDirection);
+            if (gameState) UI.renderDraftPool(gameState, handlePlayerSelectInDraft, currentSortColumn, currentSortDirection, positionOverallWeights);
         });
         document.querySelector('#draft-screen thead tr')?.addEventListener('click', (e) => {
             const headerCell = e.target.closest('th[data-sort]');
@@ -848,7 +848,7 @@ function main() {
             }
 
             // Re-render the pool with new sorting
-            UI.renderDraftPool(gameState, handlePlayerSelectInDraft, currentSortColumn, currentSortDirection);
+            UI.renderDraftPool(gameState, handlePlayerSelectInDraft, currentSortColumn, currentSortDirection, positionOverallWeights);
             // Update the arrows in the header
             UI.updateDraftSortIndicators(currentSortColumn, currentSortDirection);
         });
