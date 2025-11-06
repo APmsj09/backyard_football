@@ -1155,8 +1155,7 @@ export function setupDepthChartTabs() {
 
 /**
  * Draws the state of a play (players, ball) onto the field canvas.
- * FIELD (120yds) is mapped to CANVAS WIDTH (horizontal).
- * FIELD (53.3yds) is mapped to CANVAS HEIGHT (vertical).
+ * Uses a zoomed camera that follows the play action.
  * @param {object} frameData - A single frame from resolvePlay.visualizationFrames.
  */
 export function drawFieldVisualization(frameData) {
@@ -1164,38 +1163,106 @@ export function drawFieldVisualization(frameData) {
     const canvas = elements.fieldCanvas;
     if (!ctx || !canvas) return;
 
-    // Clear canvas
-    ctx.fillStyle = '#059669'; // Tailwind green-700
+    // Create field gradient
+    const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
+    gradient.addColorStop(0, '#059669');   // Grass base color
+    gradient.addColorStop(0.3, '#047857'); // Darker middle bands
+    gradient.addColorStop(0.7, '#047857');
+    gradient.addColorStop(1, '#059669');
+    
+    // Clear and fill with gradient
+    ctx.fillStyle = gradient;
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-    // --- Scaling (SWAPPED) ---
-    // Map 120 yards (FIELD_LENGTH) to canvas WIDTH (e.g., 840px)
-    const scaleX = canvas.width / FIELD_LENGTH; // e.g., 840 / 120 = 7
-    // Map 53.3 yards (FIELD_WIDTH) to canvas HEIGHT (e.g., 375px)
-    const scaleY = canvas.height / FIELD_WIDTH; // e.g., 375 / 53.3 = ~7
-    // --- End Scaling ---
+    // Draw field texture (subtle noise pattern)
+    ctx.save();
+    ctx.globalAlpha = 0.05;
+    for (let i = 0; i < canvas.width; i += 4) {
+        for (let j = 0; j < canvas.height; j += 4) {
+            if (Math.random() > 0.5) {
+                ctx.fillStyle = '#ffffff';
+                ctx.fillRect(i, j, 2, 2);
+            }
+        }
+    }
+    ctx.restore();
 
-    // --- Draw Field Markings (Rotated) ---
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
-    ctx.lineWidth = 1;
-    ctx.font = 'bold 12px "Inter"'; // <-- Made text bigger
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
+    // --- Camera & Zoom Logic ---
+    const ZOOM_LEVEL = 2.0; // Show half the field (adjust between 1.0-3.0 for different zoom levels)
+    
+    // Calculate base scaling (before zoom)
+    const baseScaleX = canvas.width / FIELD_LENGTH;
+    const baseScaleY = canvas.height / FIELD_WIDTH;
+    
+    // Apply zoom
+    const scaleX = baseScaleX * ZOOM_LEVEL;
+    const scaleY = baseScaleY * ZOOM_LEVEL;
+    
+    // Find focal point for camera (ball or line of scrimmage)
+    let cameraFocusX = frameData?.lineOfScrimmage || 60;
+    let cameraFocusY = CENTER_X;
+    
+    if (frameData?.ball) {
+        if (frameData.ball.inAir) {
+            // Focus on ball for passes
+            cameraFocusX = frameData.ball.y;
+            cameraFocusY = frameData.ball.x;
+        } else {
+            // Focus on ball carrier
+            const ballCarrier = frameData.players?.find(p => p.isBallCarrier);
+            if (ballCarrier) {
+                cameraFocusX = ballCarrier.y;
+                cameraFocusY = ballCarrier.x;
+            }
+        }
+    }
+    
+    // Calculate camera offset to center the focus point
+    const cameraOffsetX = (canvas.width / 2) - (cameraFocusX * scaleX);
+    const cameraOffsetY = (canvas.height / 2) - (cameraFocusY * scaleY);
+    
+    // Apply camera transform
+    ctx.save();
+    ctx.translate(cameraOffsetX, cameraOffsetY);
+
+    // Draw endzone areas with different shading
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.1)';
+    ctx.fillRect(0, 0, 10 * scaleX, FIELD_WIDTH * scaleY);
+    ctx.fillRect(110 * scaleX, 0, 10 * scaleX, FIELD_WIDTH * scaleY);
+
+    // Draw field markings with enhanced style
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
+    ctx.lineWidth = 1.5;
+    ctx.font = 'bold 14px "Inter"';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
 
-    // Draw 10-yard lines (now vertical)
+    // Draw yard lines with enhanced visibility
     for (let y = 10; y <= 110; y += 10) {
-        const drawX = y * scaleX; // Use Y-yard for X-coordinate
+        const drawX = y * scaleX;
+        
+        // Main yard lines (brighter)
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
+        ctx.lineWidth = 1.5;
         ctx.beginPath();
         ctx.moveTo(drawX, 0);
-        ctx.lineTo(drawX, canvas.height);
+        ctx.lineTo(drawX, FIELD_WIDTH * scaleY);
         ctx.stroke();
 
         if (y > 10 && y < 110) {
-            // Draw yard line numbers
+            // Enhanced yard numbers with shadow effect
             const yardLineNum = y <= 60 ? y - 10 : 120 - y - 10;
-            ctx.fillText(yardLineNum.toString(), drawX, 15); // Near top sideline
-            ctx.fillText(yardLineNum.toString(), drawX, canvas.height - 15); // Near bottom sideline
+            const numX = drawX;
+            
+            // Draw number shadows
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
+            ctx.fillText(yardLineNum.toString(), numX + 1, 16);
+            ctx.fillText(yardLineNum.toString(), numX + 1, FIELD_WIDTH * scaleY - 14);
+            
+            // Draw numbers
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
+            ctx.fillText(yardLineNum.toString(), numX, 15);
+            ctx.fillText(yardLineNum.toString(), numX, FIELD_WIDTH * scaleY - 15);
         }
     }
 
@@ -1239,96 +1306,274 @@ export function drawFieldVisualization(frameData) {
         }
     }
 
-    if (!frameData || !frameData.players) return; // If no frame, just show empty field
-
-    // --- Draw Players (Rotated & Bigger) ---
-    const playerRadius = 8; // <-- Made bigger (was 7)
-
-    frameData.players.forEach(pState => {
-        if (pState.x === undefined || pState.y === undefined) return;
-
-        // --- SWAPPED COORDINATES ---
-        const drawX = pState.y * scaleX; // Player Y-position maps to Canvas X
-        const drawY = pState.x * scaleY; // Player X-position maps to Canvas Y
-
-        // --- Jiggle Calculation ---
-        let jiggleX = 0;
-        let jiggleY = 0;
-        if (pState.isEngaged) {
-            const jiggleAmount = 1; // 1 pixel jiggle. Increase for more shake.
-            jiggleX = (Math.random() - 0.5) * jiggleAmount;
-            jiggleY = (Math.random() - 0.5) * jiggleAmount;
-        }
-        // --- END Jiggle ---
-        // --- END SWAP ---
-
-        // Use Team Colors (Apply jiggle)
-        ctx.fillStyle = pState.primaryColor || (pState.isOffense ? '#DC2626' : '#E5E7EB');
-        ctx.beginPath();
-        ctx.arc(drawX + jiggleX, drawY + jiggleY, playerRadius, 0, 2 * Math.PI);
-        ctx.fill();
-
-        // Draw Player Number (Apply jiggle)
-        ctx.fillStyle = pState.secondaryColor || (pState.isOffense ? '#FFFFFF' : '#000000');
-        ctx.font = 'bold 10px "Inter"';
-        ctx.fillText(pState.number || '?', drawX + jiggleX, drawY + jiggleY + 1);
-
-        // --- Stunned Player Visual ---
-        // This is drawn at the *base* position so it doesn't jiggle
-        if (pState.stunnedTicks > 0) {
-            ctx.fillStyle = '#A0A0A0'; // Gray-500
-            ctx.font = 'bold 14px "Inter"';
-            ctx.fillText('💫', drawX, drawY - playerRadius - 8);
+        if (!frameData || !frameData.players) {
+            ctx.restore(); // Don't forget to restore context
+            return; // If no frame, just show empty field
         }
 
-        // --- Juke Visualization Effect ---
-        if (pState.action === 'juke' || pState.jukeTicks > 0) {
-            ctx.strokeStyle = 'rgba(255, 215, 0, 0.8)'; // Gold
-            ctx.lineWidth = 2.5;
+        // --- Draw Players (Enhanced) ---
+        frameData.players.forEach(player => {
+            if (player.x === undefined || player.y === undefined) return;
+
+            // Calculate draw position with potential jiggle if engaged
+            let jiggleX = 0;
+            let jiggleY = 0;
+            if (player.isEngaged) {
+                const jiggleAmount = 1.5;
+                jiggleX = (Math.random() - 0.5) * jiggleAmount;
+                jiggleY = (Math.random() - 0.5) * jiggleAmount;
+            }
+
+            const drawX = player.y * scaleX + jiggleX;
+            const drawY = player.x * scaleY + jiggleY;
+
+            // Draw player highlight/glow for ball carrier
+            if (player.isBallCarrier) {
+                ctx.save();
+                ctx.beginPath();
+                ctx.arc(drawX, drawY, 12, 0, Math.PI * 2);
+                ctx.fillStyle = 'rgba(251, 191, 36, 0.3)'; // Amber glow
+                ctx.fill();
+                ctx.restore();
+            }
+
+            // Draw collision and engagement effects
+            if (player.isEngaged) {
+                // Find the engaged player(s)
+                const engagedWith = frameData.players.filter(other => 
+                    other !== player && 
+                    other.isEngaged &&
+                    Math.abs(other.x - player.x) < 2 &&
+                    Math.abs(other.y - player.y) < 2
+                );
+
+                engagedWith.forEach(other => {
+                    // Calculate the midpoint between players
+                    const midX = (drawX + (other.y * scaleX)) / 2;
+                    const midY = (drawY + (other.x * scaleY)) / 2;
+
+                    // Draw collision burst
+                    const burstSize = 15;
+                    for (let i = 0; i < 8; i++) {
+                        const angle = (Math.PI * 2 * i / 8) + (Date.now() / 200);
+                        ctx.beginPath();
+                        ctx.moveTo(midX, midY);
+                        ctx.lineTo(
+                            midX + Math.cos(angle) * burstSize,
+                            midY + Math.sin(angle) * burstSize
+                        );
+                        ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+                        ctx.lineWidth = 2;
+                        ctx.stroke();
+                    }
+
+                    // Draw impact ripples
+                    const rippleCount = 2;
+                    for (let i = 0; i < rippleCount; i++) {
+                        const rippleSize = 10 + (i * 5) + (Math.sin(Date.now() / 200) * 2);
+                        ctx.beginPath();
+                        ctx.arc(midX, midY, rippleSize, 0, Math.PI * 2);
+                        ctx.strokeStyle = `rgba(255, 255, 255, ${0.2 - (i * 0.1)})`;
+                        ctx.lineWidth = 1;
+                        ctx.stroke();
+                    }
+                });
+
+                // Combat glow for engaged players
+                const gradient = ctx.createRadialGradient(drawX, drawY, 4, drawX, drawY, 12);
+                gradient.addColorStop(0, 'rgba(255, 255, 255, 0.5)');
+                gradient.addColorStop(0.5, 'rgba(255, 255, 255, 0.2)');
+                gradient.addColorStop(1, 'rgba(255, 255, 255, 0)');
+                ctx.fillStyle = gradient;
+                ctx.beginPath();
+                ctx.arc(drawX, drawY, 12, 0, Math.PI * 2);
+                ctx.fill();
+            }
+            
+            // Ball carrier highlight
+            if (player.isBallCarrier) {
+                const gradient = ctx.createRadialGradient(drawX, drawY, 4, drawX, drawY, 14);
+                gradient.addColorStop(0, 'rgba(251, 191, 36, 0.8)');
+                gradient.addColorStop(0.6, 'rgba(251, 191, 36, 0.3)');
+                gradient.addColorStop(1, 'rgba(251, 191, 36, 0)');
+                ctx.fillStyle = gradient;
+                ctx.beginPath();
+                ctx.arc(drawX, drawY, 14, 0, Math.PI * 2);
+                ctx.fill();
+            }
+
+            // Draw player body with 3D effect
+            const playerColor = player.isBallCarrier ? '#fbbf24' : // Amber-400
+                              player.isOffense ? '#3b82f6' : // Blue-500
+                              '#ef4444'; // Red-500
+
+            // Body shadow
             ctx.beginPath();
-            ctx.setLineDash([3, 3]);
-            // Apply jiggle to the juke effect's base
-            ctx.arc(drawX + jiggleX, drawY + jiggleY, playerRadius + 3, 0, 2 * Math.PI);
-            ctx.stroke();
-            ctx.setLineDash([]);
+            ctx.arc(drawX + 1, drawY + 1, 8, 0, Math.PI * 2);
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
+            ctx.fill();
 
-            // This text is drawn at the base position so it's stable
-            ctx.fillStyle = '#FFD700';
-            ctx.font = 'bold 8px "Inter"';
-            ctx.fillText('J', drawX + playerRadius + 2, drawY - playerRadius - 2);
-        }
-
-        // Highlight ball carrier
-        if (pState.isBallCarrier) {
-            ctx.strokeStyle = '#FBBF24';
-            ctx.lineWidth = 3;
+            // Main body
             ctx.beginPath();
-            // Apply jiggle to the highlight
-            ctx.arc(drawX + jiggleX, drawY + jiggleY, playerRadius + 4, 0, 2 * Math.PI);
-            ctx.stroke();
+            ctx.arc(drawX, drawY, 8, 0, Math.PI * 2);
+            ctx.fillStyle = playerColor;
+            ctx.fill();
+
+            // Highlight
+            ctx.beginPath();
+            ctx.arc(drawX - 2, drawY - 2, 3, 0, Math.PI * 2);
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
+            ctx.fill();
+
+            // Draw movement indicator
+            if (player.velocity && (Math.abs(player.velocity.x) > 0.1 || Math.abs(player.velocity.y) > 0.1)) {
+                const speed = Math.sqrt(player.velocity.x ** 2 + player.velocity.y ** 2);
+                const angle = Math.atan2(player.velocity.y, player.velocity.x);
+                
+                // Draw speed trail
+                ctx.beginPath();
+                ctx.moveTo(drawX, drawY);
+                const trailLength = 10 + speed * 3;
+                
+                // Create gradient for trail
+                const trailGradient = ctx.createLinearGradient(
+                    drawX, drawY,
+                    drawX + Math.cos(angle) * trailLength,
+                    drawY + Math.sin(angle) * trailLength
+                );
+                trailGradient.addColorStop(0, playerColor);
+                trailGradient.addColorStop(1, 'rgba(255, 255, 255, 0)');
+                
+                ctx.lineTo(
+                    drawX - Math.cos(angle) * trailLength,
+                    drawY - Math.sin(angle) * trailLength
+                );
+                ctx.strokeStyle = trailGradient;
+                ctx.lineWidth = 3;
+                ctx.stroke();
+            }
+
+            // Draw player number and position
+            if (player.number) {
+                // Position above number
+                if (player.position) {
+                    // Position text shadow
+                    ctx.font = '9px "Inter"';
+                    ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    ctx.fillText(player.position, drawX + 1, drawY - 11);
+                    
+                    // Position text
+                    ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+                    ctx.fillText(player.position, drawX, drawY - 12);
+                }
+                
+                // Number shadow
+                ctx.font = 'bold 11px "Inter"';
+                ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(player.number.toString(), drawX + 1, drawY + 1);
+                
+                // Number
+                ctx.fillStyle = '#ffffff';
+                ctx.fillText(player.number.toString(), drawX, drawY);
+            }
+        });
+
+        // Draw ball
+        if (frameData.ball) {
+            const drawX = frameData.ball.y * scaleX;
+            const drawY = frameData.ball.x * scaleY;
+
+            // Enhanced ball visualization
+            const ballX = drawX;
+            const ballY = drawY;
+            
+            if (frameData.ball.inAir) {
+                // Draw trajectory shadow
+                ctx.save();
+                ctx.beginPath();
+                ctx.arc(ballX + 2, ballY + 2, 6, 0, Math.PI * 2);
+                ctx.fillStyle = 'rgba(0, 0, 0, 0.2)';
+                ctx.fill();
+                ctx.restore();
+
+                // Aerial ball glow
+                const glowGradient = ctx.createRadialGradient(
+                    ballX, ballY, 2,
+                    ballX, ballY, 12
+                );
+                glowGradient.addColorStop(0, 'rgba(146, 64, 14, 0.6)');
+                glowGradient.addColorStop(1, 'rgba(146, 64, 14, 0)');
+                
+                ctx.beginPath();
+                ctx.arc(ballX, ballY, 12, 0, Math.PI * 2);
+                ctx.fillStyle = glowGradient;
+                ctx.fill();
+            }
+
+            // Draw ball with 3D effect
+            // Ball shadow
+            ctx.beginPath();
+            ctx.arc(ballX + 1, ballY + 1, frameData.ball.inAir ? 5 : 3, 0, Math.PI * 2);
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
+            ctx.fill();
+
+            // Main ball
+            ctx.beginPath();
+            ctx.arc(ballX, ballY, frameData.ball.inAir ? 5 : 3, 0, Math.PI * 2);
+            ctx.fillStyle = '#92400e';
+            ctx.fill();
+
+            // Ball highlight
+            ctx.beginPath();
+            ctx.arc(ballX - 1, ballY - 1, frameData.ball.inAir ? 2 : 1, 0, Math.PI * 2);
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
+            ctx.fill();
+
+            // Draw enhanced trajectory for passes
+            if (frameData.ball.inAir && frameData.ball.velocity) {
+                const angle = Math.atan2(frameData.ball.velocity.y, frameData.ball.velocity.x);
+                const speed = Math.sqrt(frameData.ball.velocity.x ** 2 + frameData.ball.velocity.y ** 2);
+                const trailLength = 20 + speed * 4;
+
+                // Draw trail shadow
+                ctx.beginPath();
+                ctx.moveTo(ballX + 1, ballY + 1);
+                ctx.lineTo(
+                    ballX + Math.cos(angle) * trailLength + 1,
+                    ballY + Math.sin(angle) * trailLength + 1
+                );
+                ctx.strokeStyle = 'rgba(0, 0, 0, 0.2)';
+                ctx.lineWidth = 3;
+                ctx.stroke();
+
+                // Draw main trail with gradient
+                const trailGradient = ctx.createLinearGradient(
+                    ballX, ballY,
+                    ballX + Math.cos(angle) * trailLength,
+                    ballY + Math.sin(angle) * trailLength
+                );
+                trailGradient.addColorStop(0, '#92400e');
+                trailGradient.addColorStop(1, 'rgba(146, 64, 14, 0)');
+
+                ctx.beginPath();
+                ctx.moveTo(ballX, ballY);
+                ctx.lineTo(
+                    ballX + Math.cos(angle) * trailLength,
+                    ballY + Math.sin(angle) * trailLength
+                );
+                ctx.strokeStyle = trailGradient;
+                ctx.lineWidth = 2;
+                ctx.stroke();
+            }
         }
-    });
 
-    // --- Draw Ball (Rotated & Bigger) ---
-    if (frameData.ball && frameData.ball.inAir) {
-        // --- SWAPPED COORDINATES ---
-        const ballDrawX = frameData.ball.y * scaleX; // Ball Y maps to Canvas X
-        const ballDrawY = frameData.ball.x * scaleY; // Ball X maps to Canvas Y
-        // --- END SWAP ---
-
-
-        // Shadow
-        ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
-        ctx.beginPath();
-        ctx.arc(ballDrawX + 2, ballDrawY + 2, 5, 0, 2 * Math.PI); // <-- Made bigger (was 4)
-        ctx.fill();
-        // Ball
-        ctx.fillStyle = '#854D0E'; // brown-700
-        ctx.beginPath();
-        ctx.arc(ballDrawX, ballDrawY, 5, 0, 2 * Math.PI); // <-- Made bigger (was 4)
-        ctx.fill();
+        // Restore context to remove camera transform
+        ctx.restore();
     }
-}
 
 /** Renders the live stats box with key player performances for the game. */
 function renderLiveStatsBox(gameResult) {
