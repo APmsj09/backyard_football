@@ -193,9 +193,9 @@ async function runAIDraftPicks() {
         UI.renderDraftScreen(gameState, handlePlayerSelectInDraft, selectedPlayerId, currentSortColumn, currentSortDirection);
         await new Promise(resolve => setTimeout(resolve, 50)); // Short delay for visual feedback
 
-    const result = Game.simulateAIPick(currentPickingTeam);
-    if (result) safetyCounter = 0; // Reset counter if a pick was made successfully
-    advancePick();
+        const result = Game.simulateAIPick(currentPickingTeam);
+        if (result) safetyCounter = 0; // Reset counter if a pick was made successfully
+        advancePick();
 
         if (checkDraftEnd()) {
             handleDraftEnd(); // End draft immediately if conditions met
@@ -793,13 +793,13 @@ function promptCallFriend() {
 function main() {
     console.log("Game starting... Document loaded.");
     try {
-    UI.setupElements();
+        UI.setupElements();
 
-    // --- Load game state from localStorage if available ---
-    Game.loadGameState();
-    gameState = Game.getGameState();
+        // --- Load game state from localStorage if available ---
+        Game.loadGameState();
+        gameState = Game.getGameState();
 
-    // --- Setup Global Event Listeners ---
+        // --- Setup Global Event Listeners ---
         document.getElementById('start-game-btn')?.addEventListener('click', startNewGame);
         document.getElementById('confirm-team-btn')?.addEventListener('click', handleConfirmTeam);
         document.getElementById('draft-player-btn')?.addEventListener('click', handleDraftPlayer);
@@ -808,8 +808,8 @@ function main() {
 
         // Live Sim Controls
         document.getElementById('sim-skip-btn')?.addEventListener('click', () => {
-            UI.skipLiveGameSim(currentLiveSimResult); // Pass stored result
-            UI.drawFieldVisualization(null); // <-- ADD THIS to clear canvas on skip
+            UI.skipLiveGameSim(); // No argument needed!
+            UI.drawFieldVisualization(null);
         });
         document.getElementById('sim-speed-play')?.addEventListener('click', () => UI.setSimSpeed(50));  // 50ms = 1x (Real-time)
         document.getElementById('sim-speed-fast')?.addEventListener('click', () => UI.setSimSpeed(20));  // 20ms = 2.5x Fast-forward

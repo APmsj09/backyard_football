@@ -52,7 +52,7 @@ const HASH_RIGHT_X = 35.3; // Approx college hash mark X-coordinate
 const CENTER_X = FIELD_WIDTH / 2; // Approx 26.65
 
 // --- Physics/Interaction Constants ---
-const TICK_DURATION_SECONDS = 0.05;
+let TICK_DURATION_SECONDS = 0.05;
 const BLOCK_ENGAGE_RANGE = 2;
 const TACKLE_RANGE = 1.8;
 const CATCH_RADIUS = 0.8;
@@ -4307,10 +4307,14 @@ export function simulateGame(homeTeam, awayTeam, options = {}) {
     const fastSim = options.fastSim === true;
     // Patch: If fastSim, override TICK_DURATION_SECONDS for this simulation
     let originalTickDuration = TICK_DURATION_SECONDS;
-    if (fastSim) {
-        // Set to a much smaller value for fast sim (e.g., 0.005)
-        globalThis.TICK_DURATION_SECONDS = 0.005;
-    }
+// Declare result variable outside the try block
+    let gameResult;
+
+    try {
+        if (fastSim) {
+            // Directly modify the module-level 'let'
+            TICK_DURATION_SECONDS = 0.005;
+        }
     if (!homeTeam || !awayTeam || !homeTeam.roster || !awayTeam.roster) {
         if (!fastSim) console.error("simulateGame: Invalid team data provided.");
         return { homeTeam, awayTeam, homeScore: 0, awayScore: 0, gameLog: ["Error: Invalid team data"], breakthroughs: [] };
@@ -4791,11 +4795,19 @@ export function simulateGame(homeTeam, awayTeam, options = {}) {
         }
     });
 
-    // Restore original tick duration after sim
-    if (fastSim) {
-        globalThis.TICK_DURATION_SECONDS = originalTickDuration;
+    // At the VERY end of all logic, assign the return value
+        gameResult = {
+            homeTeam, awayTeam, homeScore, awayScore,
+            gameLog, breakthroughs, visualizationFrames: allVisualizationFrames
+        };
+
+    } finally {
+        // This block ALWAYS executes, resetting the speed
+        TICK_DURATION_SECONDS = originalTickDuration;
     }
-    return { homeTeam, awayTeam, homeScore, awayScore, gameLog, breakthroughs, visualizationFrames: allVisualizationFrames };
+
+    // Return the result *after* the 'finally' block has run
+    return gameResult;
 }
 
 
