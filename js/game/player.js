@@ -1,6 +1,6 @@
 // player.js - player generation and rating helpers
 
-import { getRandom, getRandomInt, estimateBestPosition } from '../utils.js';
+import { getRandom, getRandomInt} from '../utils.js';
 import {
     firstNames, lastNames, nicknames,
     offenseFormations, defenseFormations
