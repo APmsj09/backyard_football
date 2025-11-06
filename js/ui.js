@@ -200,26 +200,39 @@ export function showScreen(screenId) {
         return;
     }
     console.log(`showScreen called for: ${screenId}.`);
-
-    if (!elements.screens[screenId]) {
+    
+    // Try to match the screen by converting kebab-case to camelCase
+    const camelScreenId = screenId.replace(/-([a-z])/g, g => g[1].toUpperCase());
+    if (!elements.screens[screenId] && !elements.screens[camelScreenId]) {
         console.warn(`Screen element "${screenId}" not found in initial setup. Attempting direct lookup.`);
         const element = document.getElementById(screenId);
-        if (element) { elements.screens[screenId] = element; }
+        if (element) { 
+            elements.screens[screenId] = element;
+            // Also store with camelCase key for future lookups
+            elements.screens[camelScreenId] = element;
+        }
         else { console.error(`CRITICAL: Screen element ID "${screenId}" still not found.`); return; }
     }
+    
+    // Use whichever key exists
+    const screenElement = elements.screens[screenId] || elements.screens[camelScreenId];
 
-    Object.values(elements.screens).forEach(screenElement => {
-        if (screenElement && screenElement.classList) {
-            screenElement.classList.add('hidden');
+    Object.values(elements.screens).forEach(screen => {
+        if (screen && screen.classList) {
+            screen.classList.add('hidden');
         }
     });
-
-    const targetScreen = elements.screens[screenId];
-    if (targetScreen && targetScreen.classList) {
-        targetScreen.classList.remove('hidden');
+    
+    if (screenElement && screenElement.classList) {
+        screenElement.classList.remove('hidden');
     } else {
         console.error(`Attempted to show screen "${screenId}" but element reference invalid.`);
+        return;
     }
+    
+    // Store screen reference for both kebab and camel case
+    elements.screens[screenId] = screenElement;
+    elements.screens[camelScreenId] = screenElement;
 }
 
 /**
