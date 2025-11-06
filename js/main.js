@@ -592,7 +592,7 @@ function handleGoToNextDraft() {
         if (!gameState) throw new Error("Game state lost after setting up next draft.");
         selectedPlayerId = null; // Clear any previous player selection
         UI.renderSelectedPlayerCard(null, gameState, positionOverallWeights);
-        UI.renderDraftScreen(gameState, handlePlayerSelectInDraft, selectedPlayerId, currentSortColumn, currentSortDirection); // Pass sort state
+        UI.renderDraftScreen(gameState, handlePlayerSelectInDraft, selectedPlayerId, currentSortColumn, currentSortDirection, positionOverallWeights); // Pass sort state
         UI.showScreen('draftScreen'); // Display the draft screen
         runAIDraftPicks(); // Start the AI draft picks simulation
     } catch (error) {
