@@ -5,12 +5,32 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Backyard Football League</title>
-    <script src="https://cdn.tailwindcss.com"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Bangers&family=Inter:wght@400;600;700&display=swap"
         rel="stylesheet">
+    
     <link rel="stylesheet" href="css/style.css">
+
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            // This adds your custom font
+            fontFamily: {
+              sans: ['Inter', 'sans-serif'],
+              bangers: ['Bangers', 'cursive'],
+            },
+            // This is the fix for your stacked attributes
+            gridTemplateColumns: {
+              '17': 'repeat(17, minmax(0, 1fr))',
+            }
+          }
+        }
+      }
+    </script>
 </head>
 
 <body class="bg-gray-100 font-sans">
