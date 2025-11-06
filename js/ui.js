@@ -807,22 +807,70 @@ function renderMyTeamTab(gameState) {
     elements.myTeamRoster.innerHTML = tableHtml + `</tbody></table></div>`;
 }
 
+/**
+ * NEW HELPER FUNCTION
+ * Gets the correct group container ID for a given position slot.
+ * @param {string} positionSlot - The slot name (e.g., "QB1", "WR1", "DL1").
+ * @param {string} side - 'offense' or 'defense'.
+ * @returns {string|null} The DOM ID of the container, or null if not found.
+ */
+function getSlotContainerId(positionSlot, side) {
+    // Get the base position (e.g., "WR1" -> "WR")
+    const basePosition = positionSlot.replace(/\d/g, ''); 
+
+    if (side === 'offense') {
+        switch (basePosition) {
+            case 'QB':
+                return 'offense-qb-slots';
+            case 'WR':
+            case 'TE': // Receivers and TEs go in the same group
+                return 'offense-receiver-slots';
+            case 'RB':
+            case 'FB': // Running backs and Fullbacks go in the same group
+                return 'offense-back-slots';
+            case 'OL':
+                return 'offense-line-slots';
+            default:
+                console.warn(`Unknown offensive slot container for: ${positionSlot}`);
+                return null;
+        }
+    } else if (side === 'defense') {
+        switch (basePosition) {
+            case 'DL':
+                return 'defense-line-slots';
+            case 'LB':
+                return 'defense-lb-slots';
+            case 'DB': // All defensive backs (CB, S) go in this group
+                return 'defense-db-slots';
+            default:
+                console.warn(`Unknown defensive slot container for: ${positionSlot}`);
+                return null;
+        }
+    }
+    return null;
+}
+
 
 /** Renders the 'Depth Chart' tab and its sub-components. */
 function renderDepthChartTab(gameState) {
     if (!gameState || !gameState.playerTeam || !gameState.playerTeam.roster || !gameState.playerTeam.formations || !gameState.playerTeam.depthChart) {
         console.error("Cannot render depth chart: Invalid game state.");
+        // Clear all panes just in case
         if (elements.positionalOverallsContainer) elements.positionalOverallsContainer.innerHTML = '<p class="text-red-500">Error loading depth chart data.</p>';
         if (elements.offenseDepthChartPane) elements.offenseDepthChartPane.innerHTML = '<p class="text-red-500">Error loading offense data.</p>';
         if (elements.defenseDepthChartPane) elements.defenseDepthChartPane.innerHTML = '<p class="text-red-500">Error loading defense data.</p>';
         return;
     }
     const permanentRoster = gameState.playerTeam.roster.filter(p => p && p.status?.type !== 'temporary');
+    
+    // These functions are still correct
     renderPositionalOveralls(permanentRoster);
     renderFormationDropdown('offense', Object.values(offenseFormations), gameState.playerTeam.formations.offense);
-    renderDepthChartSide('offense', gameState, elements.offenseDepthChartSlots, elements.offenseDepthChartRoster);
     renderFormationDropdown('defense', Object.values(defenseFormations), gameState.playerTeam.formations.defense);
-    renderDepthChartSide('defense', gameState, elements.defenseDepthChartSlots, elements.defenseDepthChartRoster);
+
+    // Call the new side-rendering functions
+    renderDepthChartSide('offense', gameState);
+    renderDepthChartSide('defense', gameState);
 }
 
 /** Populates the formation selection dropdown. */
@@ -852,25 +900,55 @@ function renderPositionalOveralls(roster) {
 }
 
 /** Renders the depth chart slots and available players for one side. */
-function renderDepthChartSide(side, gameState, slotsContainer, rosterContainer) {
-    if (!slotsContainer || !rosterContainer || !gameState?.playerTeam?.roster || !gameState?.playerTeam?.depthChart) {
+function renderDepthChartSide(side, gameState) {
+    // Get the roster container for this side (e.g., 'offense-depth-chart-roster')
+    const rosterContainer = elements[`${side}DepthChartRoster`];
+
+    if (!rosterContainer || !gameState?.playerTeam?.roster || !gameState?.playerTeam?.depthChart) {
         console.error(`Cannot render depth chart side "${side}": Missing elements or game state.`);
-        if (slotsContainer) slotsContainer.innerHTML = '<p class="text-red-500">Error</p>';
         if (rosterContainer) rosterContainer.innerHTML = '<p class="text-red-500">Error</p>';
         return;
     }
+
     const { roster, depthChart } = gameState.playerTeam;
     const currentChart = depthChart[side] || {};
     const slots = Object.keys(currentChart);
-    slotsContainer.innerHTML = '';
-    const header = document.createElement('div');
-    header.className = 'depth-chart-slot flex items-center justify-between font-bold text-xs text-gray-500 px-2';
-    // Columns: NAME, OVR, HGT, WGT, SPD, STR, AGI, STM, IQ, CLT, CST, TGH, THR, CAT, BLK, TCK, BSH
-    header.innerHTML = `<span class="w-1/4">POS</span><div class="player-details-grid w-3/4 grid grid-cols-17 gap-1"><span>NAME</span><span>OVR</span><span>HGT</span><span>WGT</span><span>SPD</span><span>STR</span><span>AGI</span><span>STM</span><span>IQ</span><span>CLT</span><span>CST</span><span>TGH</span><span>THR</span><span>CAT</span><span>BLK</span><span>TCK</span><span>BSH</span></div>`;
-    slotsContainer.appendChild(header);
-    slots.forEach(slot => renderSlot(slot, roster, currentChart, slotsContainer, side));
+
+    // --- NEW LOGIC: Clear all grouped containers for this side ---
+    const groupContainerIds = (side === 'offense') 
+        ? ['offense-qb-slots', 'offense-receiver-slots', 'offense-back-slots', 'offense-line-slots']
+        : ['defense-line-slots', 'defense-lb-slots', 'defense-db-slots'];
+
+    groupContainerIds.forEach(id => {
+        const container = document.getElementById(id);
+        if (container) {
+            container.innerHTML = ''; // Clear the container
+        } else {
+            console.warn(`Depth chart group container #${id} not found in HTML.`);
+        }
+    });
+    // --- END NEW LOGIC ---
+
+    // Render each slot into its correct group
+    slots.forEach(positionSlot => {
+        // Find the specific container ID for this slot (e.g., "QB1" -> "offense-qb-slots")
+        const containerId = getSlotContainerId(positionSlot, side);
+        const containerElement = document.getElementById(containerId);
+        
+        if (containerElement) {
+            // The existing renderSlot function is perfect for this!
+            // We just tell it which player, chart, and *specific container* to use.
+            renderSlot(positionSlot, roster, currentChart, containerElement, side);
+        } else {
+            console.warn(`No container found for slot ${positionSlot} (ID: ${containerId})`);
+        }
+    });
+
+    // Find players who are not starting on this side
     const playersStartingOnThisSide = new Set(Object.values(currentChart).filter(Boolean));
     const availablePlayers = roster.filter(p => p && !playersStartingOnThisSide.has(p.id));
+    
+    // Render the available "bench" players
     renderAvailablePlayerList(availablePlayers, rosterContainer, side);
 }
 
