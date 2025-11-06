@@ -69,6 +69,14 @@ export function setupElements() {
     elements = {
         // --- Screens ---
         screens: {
+            'start-screen': document.getElementById('start-screen'),
+            'loading-screen': document.getElementById('loading-screen'),
+            'team-creation-screen': document.getElementById('team-creation-screen'),
+            'draft-screen': document.getElementById('draft-screen'),
+            'dashboard-screen': document.getElementById('dashboard-screen'),
+            'offseason-screen': document.getElementById('offseason-screen'),
+            'game-sim-screen': document.getElementById('game-sim-screen'),
+            // Also store camelCase versions for backward compatibility
             startScreen: document.getElementById('start-screen'),
             loadingScreen: document.getElementById('loading-screen'),
             teamCreationScreen: document.getElementById('team-creation-screen'),
@@ -130,6 +138,24 @@ export function setupElements() {
         defenseDepthChartSlots: document.getElementById('defense-depth-chart-slots'),
         defenseDepthChartRoster: document.getElementById('defense-depth-chart-roster'),
         positionalOverallsContainer: document.getElementById('positional-overalls-container'),
+        
+        // --- Game Sim Screen Elements ---
+        gameSimScreen: document.getElementById('game-sim-screen'),
+        simScoreboard: document.getElementById('sim-scoreboard'),
+        simAwayTeam: document.getElementById('sim-away-team'),
+        simAwayScore: document.getElementById('sim-away-score'),
+        simHomeTeam: document.getElementById('sim-home-team'),
+        simHomeScore: document.getElementById('sim-home-score'),
+        simGameDrive: document.getElementById('sim-game-drive'),
+        simGameDown: document.getElementById('sim-game-down'),
+        simPossession: document.getElementById('sim-possession'),
+        fieldCanvas: document.getElementById('field-canvas'),
+        simPlayLog: document.getElementById('sim-play-log'),
+        simSpeedBtns: document.querySelectorAll('.sim-speed-btn'),
+        simSkipBtn: document.getElementById('sim-skip-btn'),
+        simLiveStats: document.getElementById('sim-live-stats'),
+        simStatsAway: document.getElementById('sim-stats-away'),
+        simStatsHome: document.getElementById('sim-stats-home'),
 
         // --- Offseason Screen Elements ---
         offseasonYear: document.getElementById('offseason-year'),
@@ -661,19 +687,40 @@ export function renderDashboard(gameState) {
 
 /** Handles switching between dashboard tabs and rendering content. */
 export function switchTab(tabId, gameState) {
-    if (!elements.dashboardContent || !elements.dashboardTabs) { console.error("Dashboard elements missing."); return; }
+    console.log(`Switching to tab: ${tabId}, Game state:`, gameState ? 'valid' : 'invalid');
+    
+    if (!elements.dashboardContent || !elements.dashboardTabs) { 
+        console.error("Dashboard elements missing."); 
+        return; 
+    }
 
+    // Hide all panes first
     elements.dashboardContent.querySelectorAll('.tab-pane').forEach(p => p.classList.add('hidden'));
-    elements.dashboardTabs.querySelectorAll('.tab-button').forEach(b => { b.classList.remove('active'); b.setAttribute('aria-selected', 'false'); });
+    elements.dashboardTabs.querySelectorAll('.tab-button').forEach(b => { 
+        b.classList.remove('active'); 
+        b.setAttribute('aria-selected', 'false'); 
+    });
 
     const contentPane = document.getElementById(`tab-content-${tabId}`);
     const tabButton = elements.dashboardTabs.querySelector(`[data-tab="${tabId}"]`);
-    if (contentPane) contentPane.classList.remove('hidden'); else console.warn(`Content pane "${tabId}" not found.`);
-    if (tabButton) { tabButton.classList.add('active'); tabButton.setAttribute('aria-selected', 'true'); } else console.warn(`Tab button "${tabId}" not found.`);
+    
+    if (!contentPane) {
+        console.error(`Content pane "tab-content-${tabId}" not found.`);
+        return;
+    }
+    if (!tabButton) {
+        console.error(`Tab button for "${tabId}" not found.`);
+        return;
+    }
+
+    // Show the selected tab
+    contentPane.classList.remove('hidden');
+    tabButton.classList.add('active');
+    tabButton.setAttribute('aria-selected', 'true');
 
     if (!gameState) {
         console.warn(`switchTab called for "${tabId}" without valid gameState.`);
-        if (contentPane) contentPane.innerHTML = '<p class="text-red-500">Error: Game state not available.</p>';
+        contentPane.innerHTML = '<p class="text-red-500">Error: Game state not available.</p>';
         return;
     }
 
