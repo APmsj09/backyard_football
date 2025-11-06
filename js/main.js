@@ -62,7 +62,7 @@ function handleConfirmTeam() {
             gameState = Game.getGameState(); // Includes playerTeam and global relationships map
             if (!gameState || !gameState.playerTeam) throw new Error("Failed to get game state after creating team.");
             UI.renderSelectedPlayerCard(null, gameState); // Pass gameState
-            UI.renderDraftScreen(gameState, handlePlayerSelectInDraft, selectedPlayerId, currentSortColumn, currentSortDirection,positionOverallWeights); // Pass sort state
+            UI.renderDraftScreen(gameState, handlePlayerSelectInDraft, selectedPlayerId, currentSortColumn, currentSortDirection, positionOverallWeights);
             UI.showScreen('draftScreen');
             runAIDraftPicks();
         } catch (error) {
@@ -190,7 +190,7 @@ async function runAIDraftPicks() {
             continue;
         }
 
-        UI.renderDraftScreen(gameState, handlePlayerSelectInDraft, selectedPlayerId, currentSortColumn, currentSortDirection);
+        UI.renderDraftScreen(gameState, handlePlayerSelectInDraft, selectedPlayerId, currentSortColumn, currentSortDirection, positionOverallWeights);
         await new Promise(resolve => setTimeout(resolve, 50)); // Short delay for visual feedback
 
         const result = Game.simulateAIPick(currentPickingTeam);
@@ -219,7 +219,7 @@ async function runAIDraftPicks() {
                 runAIDraftPicks(); // Go back to simulating AI picks ONLY if draft isn't over
             }
         } else { // Render for player input
-            UI.renderDraftScreen(gameState, handlePlayerSelectInDraft, selectedPlayerId, currentSortColumn, currentSortDirection); // Pass sort state
+            UI.renderDraftScreen(gameState, handlePlayerSelectInDraft, selectedPlayerId, currentSortColumn, currentSortDirection, positionOverallWeights);
         }
     } else { // Draft ended, call handler
         handleDraftEnd();

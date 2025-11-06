@@ -337,7 +337,7 @@ export function renderTeamNameSuggestions(names, onSelect) {
 /**
  * Renders the main draft screen UI.
  */
-export function renderDraftScreen(gameState, onPlayerSelect, currentSelectedId, sortColumn, sortDirection) {
+export function renderDraftScreen(gameState, onPlayerSelect, currentSelectedId, sortColumn, sortDirection, positionOverallWeights) {
     if (!gameState || !gameState.teams || !gameState.players || !gameState.draftOrder || !gameState.playerTeam) {
         console.error("renderDraftScreen called without valid gameState.");
         if (elements.draftHeader) elements.draftHeader.innerHTML = `<h2 class="text-3xl font-bold text-red-500">Draft Error: Invalid Game State</h2>`;
@@ -602,7 +602,7 @@ export function renderSelectedPlayerCard(player, gameState, positionOverallWeigh
 }
 
 /** Renders the player's current roster list in the draft panel. */
-export function renderPlayerRoster(playerTeam) {
+export function renderPlayerRoster(playerTeam, positionOverallWeights) {
     if (!elements.rosterCount || !elements.draftRosterList || !playerTeam) {
         console.error("Cannot render player roster: Missing elements or playerTeam data.");
         return;
@@ -628,7 +628,7 @@ export function renderPlayerRoster(playerTeam) {
 }
 
 /** Renders the average overall ratings for the player's current roster. */
-function renderRosterSummary(playerTeam) {
+function renderRosterSummary(playerTeam, positionOverallWeights) {
     if (!elements.rosterSummary || !playerTeam) return;
     const roster = playerTeam.roster || [];
     if (roster.length === 0) {
