@@ -210,15 +210,17 @@ function handleDraftEnd() {
         catch (error) { console.error(`Error setting depth chart for ${team.name}:`, error); }
     });
 
+    console.log("Showing draft completion modal...");
     UI.showModal("Draft Complete!", "<p>The draft has concluded. Get ready for the season!</p>", () => {
         // Actions after modal close
+        console.log("Draft completion modal confirmed, transitioning to dashboard...");
         try {
             Game.generateSchedule();
             gameState = Game.getGameState();
             if (!gameState) throw new Error("Failed to get game state after schedule generation.");
             UI.renderDashboard(gameState);
             UI.switchTab('my-team', gameState);
-            UI.showScreen('dashboardScreen');
+            UI.showScreen('dashboard-screen');
         } catch (error) {
             console.error("Error transitioning to dashboard after draft:", error);
             UI.showModal("Error", `Could not proceed to season: ${error.message}.`, null, '', null, 'Close');
