@@ -628,7 +628,7 @@ export function renderPlayerRoster(playerTeam) {
             elements.draftRosterList.appendChild(li);
         });
     }
-    renderRosterSummary(playerTeam)
+    renderRosterSummary(playerTeam, positionOverallWeights);
 }
 
 /** Renders the average overall ratings for the player's current roster. */
