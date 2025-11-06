@@ -294,19 +294,9 @@ export function renderDraftScreen(gameState, onPlayerSelect, currentSelectedId, 
     const { year, draftOrder, currentPick, playerTeam, players, teams } = gameState;
     const ROSTER_LIMIT = 10;
 
-    // Check draft end conditions
-    const pickLimitReached = currentPick >= draftOrder.length;
-    const undraftedPlayersCount = players.filter(p => p && !p.teamId).length;
-    const noPlayersLeft = undraftedPlayersCount === 0;
-    const allNeedsMetOrFull = teams.every(t => {
-        if (!t || !t.roster) return true;
-        const needs = t.draftNeeds || 0;
-        const picksMade = draftOrder.slice(0, currentPick).filter(teamInOrder => teamInOrder?.id === t.id).length;
-        return (t.roster.length >= ROSTER_LIMIT) || picksMade >= needs;
-    });
-
-    if (pickLimitReached || noPlayersLeft || allNeedsMetOrFull) {
-        if (elements.draftHeader) elements.draftHeader.innerHTML = `<h2 class="text-3xl font-bold">Season ${year} Draft Complete</h2><p>All picks made, pool empty, or rosters/needs filled.</p>`;
+    // Only check if we've reached the end of the draft order
+    if (currentPick >= draftOrder.length) {
+        if (elements.draftHeader) elements.draftHeader.innerHTML = `<h2 class="text-3xl font-bold">Season ${year} Draft Complete</h2>`;
         if (elements.draftPlayerBtn) { elements.draftPlayerBtn.disabled = true; elements.draftPlayerBtn.textContent = 'Draft Complete'; }
         renderSelectedPlayerCard(null, gameState);
         updateSelectedPlayerRow(null);
@@ -321,11 +311,13 @@ export function renderDraftScreen(gameState, onPlayerSelect, currentSelectedId, 
         return;
     }
 
-    const playerCanPick = pickingTeam.id === playerTeam.id && (playerTeam.roster?.length || 0) < ROSTER_LIMIT;
+    // Check if current team can still draft
+    const currentTeamRosterSize = pickingTeam.roster?.length || 0;
+    const playerCanPick = pickingTeam.id === playerTeam.id && currentTeamRosterSize < ROSTER_LIMIT;
 
-    // Update header
+    // Update header with detailed pick information
     if (elements.draftYear) elements.draftYear.textContent = year;
-    if (elements.draftPickNumber) elements.draftPickNumber.textContent = currentPick + 1;
+    if (elements.draftPickNumber) elements.draftPickNumber.textContent = `${currentPick + 1} (${currentTeamRosterSize}/${ROSTER_LIMIT} players)`;
     if (elements.draftPickingTeam) elements.draftPickingTeam.textContent = pickingTeam.name || 'Unknown Team';
 
     renderDraftPool(gameState, onPlayerSelect, sortColumn, sortDirection);

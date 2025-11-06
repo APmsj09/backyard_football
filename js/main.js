@@ -128,25 +128,33 @@ async function runAIDraftPicks() {
     }
     // Helper function to check draft completion conditions
     const checkDraftEnd = () => {
+        // Safety check for invalid game state
+        if (!gameState.draftOrder || !gameState.players || !gameState.teams) {
+            console.error("Invalid game state in checkDraftEnd");
+            return true; // End draft if game state is invalid
+        }
+
         // Condition 1: Current pick exceeds the total number of picks in the defined order
         const pickLimitReached = gameState.currentPick >= gameState.draftOrder.length;
 
         // Condition 2: No more players available to draft
-        const noPlayersLeft = gameState.players.filter(p => p && !p.teamId).length === 0; // Added p check
+        const noPlayersLeft = gameState.players.filter(p => p && !p.teamId).length === 0;
 
-        // Condition 3: All teams have either filled their roster or met their specific draft needs for this draft
-        const allNeedsMetOrFull = gameState.teams.every(t => {
-            if (!t || !t.roster) return true; // Skip invalid team
-            const needs = t.draftNeeds || 0;
-            // Count how many picks this team has *actually* made so far in the draft order
-            const picksMade = gameState.draftOrder.slice(0, gameState.currentPick).filter(teamInOrder => teamInOrder?.id === t.id).length; // Safe access id
-            // Team is satisfied if roster full OR they've made enough picks to meet initial need
-            return t.roster.length >= ROSTER_LIMIT || picksMade >= needs;
-        });
+        // Condition 3: All valid teams have filled their roster
+        const allTeamsFull = gameState.teams.every(t => !t || !t.roster || t.roster.length >= ROSTER_LIMIT);
+
+        // Debug logging
+        if (pickLimitReached) console.log("Draft ending: Pick limit reached");
+        if (noPlayersLeft) console.log("Draft ending: No undrafted players left");
+        if (allTeamsFull) console.log("Draft ending: All teams have full rosters");
 
         // Draft ends if any of these conditions are true
-        return pickLimitReached || noPlayersLeft || allNeedsMetOrFull;
+        return pickLimitReached || noPlayersLeft || allTeamsFull;
     };
+
+    // Add safety counter to prevent infinite loops
+    let safetyCounter = 0;
+    const MAX_PICKS_WITHOUT_PROGRESS = 50;
 
     if (checkDraftEnd()) {
         console.log("Draft end condition met before AI picks.");
@@ -158,11 +166,27 @@ async function runAIDraftPicks() {
 
     // Loop while it's an AI team's turn and the draft isn't over
     while (currentPickingTeam && currentPickingTeam.id !== gameState.playerTeam.id) {
-        UI.renderDraftScreen(gameState, handlePlayerSelectInDraft, selectedPlayerId, currentSortColumn, currentSortDirection); // Pass sort state
+        // Safety check to prevent infinite loops
+        if (safetyCounter++ > MAX_PICKS_WITHOUT_PROGRESS) {
+            console.error("Draft appears stuck - forcing end");
+            handleDraftEnd();
+            return;
+        }
+
+        // Skip invalid teams or teams with full rosters
+        if (!currentPickingTeam || !currentPickingTeam.roster || currentPickingTeam.roster.length >= ROSTER_LIMIT) {
+            console.log(`Skipping pick for ${currentPickingTeam?.name || 'invalid team'} (roster full or invalid team)`);
+            gameState.currentPick++;
+            currentPickingTeam = gameState.draftOrder[gameState.currentPick];
+            continue;
+        }
+
+        UI.renderDraftScreen(gameState, handlePlayerSelectInDraft, selectedPlayerId, currentSortColumn, currentSortDirection);
         await new Promise(resolve => setTimeout(resolve, 50)); // Short delay for visual feedback
 
-        Game.simulateAIPick(currentPickingTeam); // AI makes its selection (or skips if full)
-        gameState.currentPick++; // Advance pick number
+        const result = Game.simulateAIPick(currentPickingTeam);
+        if (result) safetyCounter = 0; // Reset counter if a pick was made successfully
+        gameState.currentPick++;
 
         if (checkDraftEnd()) {
             handleDraftEnd(); // End draft immediately if conditions met
