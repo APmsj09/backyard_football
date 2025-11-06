@@ -1,8 +1,9 @@
 import {
     calculateOverall,
-    positionOverallWeights,
-    getRelationshipLevel, // <-- Added
-    getScoutedPlayerInfo // <-- Added
+    getRelationshipLevel,
+    getScoutedPlayerInfo,
+    getGameState,        // <<< --- ADD THIS LINE
+    substitutePlayers    // <<< --- ADD THIS LINE
 } from './game.js';
 import {
     offenseFormations,
@@ -1770,7 +1771,7 @@ function renderLiveStatsBox(gameResult) {
 function renderSimPlayers() {
     try {
         if (!elements.simPlayersList) return;
-        const gs = (typeof Game !== 'undefined' && typeof Game.getGameState === 'function') ? Game.getGameState() : null;
+        const gs = getGameState();
         if (!gs || !gs.playerTeam) {
             elements.simPlayersList.innerHTML = '<p class="text-gray-400">No team data available.</p>';
             return;
