@@ -10,13 +10,13 @@ import {
     defenseFormations,
     relationshipLevels // <-- Added
 } from './data.js';
-import { 
-    positionOverallWeights, 
-    estimateBestPosition 
+import {
+    positionOverallWeights,
+    estimateBestPosition
 } from './game/player.js';
 
 // At the top of ui.js
-import { getRandom, getRandomInt, formatHeight} from './utils.js'; // <<< Add formatHeight here
+import { getRandom, getRandomInt, formatHeight } from './utils.js'; // <<< Add formatHeight here
 
 // --- Visualization Constants (Must match game.js) ---
 const FIELD_LENGTH = 120;
@@ -92,10 +92,10 @@ export function setupElements() {
         },
 
         // --- Other Common UI Elements ---
-    modal: document.getElementById('modal'),
-    modalTitle: document.getElementById('modal-title'),
-    modalBody: document.getElementById('modal-body'),
-    modalDefaultClose: document.getElementById('modal-default-close'),
+        modal: document.getElementById('modal'),
+        modalTitle: document.getElementById('modal-title'),
+        modalBody: document.getElementById('modal-body'),
+        modalDefaultClose: document.getElementById('modal-default-close'),
         loadingProgress: document.getElementById('loading-progress'),
         teamNameSuggestions: document.getElementById('team-name-suggestions'),
         customTeamName: document.getElementById('custom-team-name'),
@@ -143,7 +143,7 @@ export function setupElements() {
         defenseDepthChartSlots: document.getElementById('defense-depth-chart-slots'),
         defenseDepthChartRoster: document.getElementById('defense-depth-chart-roster'),
         positionalOverallsContainer: document.getElementById('positional-overalls-container'),
-        
+
         // --- Game Sim Screen Elements ---
         gameSimScreen: document.getElementById('game-sim-screen'),
         simScoreboard: document.getElementById('sim-scoreboard'),
@@ -231,20 +231,20 @@ export function showScreen(screenId) {
         return;
     }
     console.log(`showScreen called for: ${screenId}.`);
-    
+
     // Try to match the screen by converting kebab-case to camelCase
     const camelScreenId = screenId.replace(/-([a-z])/g, g => g[1].toUpperCase());
     if (!elements.screens[screenId] && !elements.screens[camelScreenId]) {
         console.warn(`Screen element "${screenId}" not found in initial setup. Attempting direct lookup.`);
         const element = document.getElementById(screenId);
-        if (element) { 
+        if (element) {
             elements.screens[screenId] = element;
             // Also store with camelCase key for future lookups
             elements.screens[camelScreenId] = element;
         }
         else { console.error(`CRITICAL: Screen element ID "${screenId}" still not found.`); return; }
     }
-    
+
     // Use whichever key exists
     const screenElement = elements.screens[screenId] || elements.screens[camelScreenId];
 
@@ -253,14 +253,14 @@ export function showScreen(screenId) {
             screen.classList.add('hidden');
         }
     });
-    
+
     if (screenElement && screenElement.classList) {
         screenElement.classList.remove('hidden');
     } else {
         console.error(`Attempted to show screen "${screenId}" but element reference invalid.`);
         return;
     }
-    
+
     // Store screen reference for both kebab and camel case
     elements.screens[screenId] = screenElement;
     elements.screens[camelScreenId] = screenElement;
@@ -693,22 +693,22 @@ export function renderDashboard(gameState) {
 /** Handles switching between dashboard tabs and rendering content. */
 export function switchTab(tabId, gameState) {
     console.log(`Switching to tab: ${tabId}, Game state:`, gameState ? 'valid' : 'invalid');
-    
-    if (!elements.dashboardContent || !elements.dashboardTabs) { 
-        console.error("Dashboard elements missing."); 
-        return; 
+
+    if (!elements.dashboardContent || !elements.dashboardTabs) {
+        console.error("Dashboard elements missing.");
+        return;
     }
 
     // Hide all panes first
     elements.dashboardContent.querySelectorAll('.tab-pane').forEach(p => p.classList.add('hidden'));
-    elements.dashboardTabs.querySelectorAll('.tab-button').forEach(b => { 
-        b.classList.remove('active'); 
-        b.setAttribute('aria-selected', 'false'); 
+    elements.dashboardTabs.querySelectorAll('.tab-button').forEach(b => {
+        b.classList.remove('active');
+        b.setAttribute('aria-selected', 'false');
     });
 
     const contentPane = document.getElementById(`tab-content-${tabId}`);
     const tabButton = elements.dashboardTabs.querySelector(`[data-tab="${tabId}"]`);
-    
+
     if (!contentPane) {
         console.error(`Content pane "tab-content-${tabId}" not found.`);
         return;
@@ -821,7 +821,7 @@ function renderMyTeamTab(gameState) {
  */
 function getSlotContainerId(positionSlot, side) {
     // Get the base position (e.g., "WR1" -> "WR")
-    const basePosition = positionSlot.replace(/\d/g, ''); 
+    const basePosition = positionSlot.replace(/\d/g, '');
 
     if (side === 'offense') {
         switch (basePosition) {
@@ -867,7 +867,7 @@ function renderDepthChartTab(gameState) {
         return;
     }
     const permanentRoster = gameState.playerTeam.roster.filter(p => p && p.status?.type !== 'temporary');
-    
+
     // These functions are still correct
     renderPositionalOveralls(permanentRoster);
     renderFormationDropdown('offense', Object.values(offenseFormations), gameState.playerTeam.formations.offense);
@@ -920,7 +920,7 @@ function renderDepthChartSide(side, gameState) {
     const slots = Object.keys(currentChart);
 
     // --- NEW LOGIC: Clear all grouped containers for this side ---
-    const groupContainerIds = (side === 'offense') 
+    const groupContainerIds = (side === 'offense')
         ? ['offense-qb-slots', 'offense-receiver-slots', 'offense-back-slots', 'offense-line-slots']
         : ['defense-line-slots', 'defense-lb-slots', 'defense-db-slots'];
 
@@ -939,7 +939,7 @@ function renderDepthChartSide(side, gameState) {
         // Find the specific container ID for this slot (e.g., "QB1" -> "offense-qb-slots")
         const containerId = getSlotContainerId(positionSlot, side);
         const containerElement = document.getElementById(containerId);
-        
+
         if (containerElement) {
             // The existing renderSlot function is perfect for this!
             // We just tell it which player, chart, and *specific container* to use.
@@ -952,22 +952,52 @@ function renderDepthChartSide(side, gameState) {
     // Find players who are not starting on this side
     const playersStartingOnThisSide = new Set(Object.values(currentChart).filter(Boolean));
     const availablePlayers = roster.filter(p => p && !playersStartingOnThisSide.has(p.id));
-    
+
     // Render the available "bench" players
     renderAvailablePlayerList(availablePlayers, rosterContainer, side);
 }
 
-/** Renders a single depth chart slot. */
+/** Renders a single depth chart slot. (NEW, CLEANER VERSION) */
 function renderSlot(positionSlot, roster, chart, container, side) {
     const playerId = chart[positionSlot];
     const player = Array.isArray(roster) ? roster.find(p => p?.id === playerId) : null;
     const basePosition = positionSlot.replace(/\d/g, '');
     const overall = player ? calculateOverall(player, basePosition) : '---';
     const typeTag = player?.status?.type === 'temporary' ? '<span class="status-tag temporary">[T]</span>' : '';
+
+    // --- 1. Get Key Attributes ---
+    // Use the weights to find what's important for this position
+    const keyAttributes = (positionOverallWeights && positionOverallWeights[basePosition])
+        ? Object.keys(positionOverallWeights[basePosition])
+        : ['speed', 'strength', 'agility']; // Fallback if pos not found
+
+    // --- 2. Build Dynamic Stats HTML ---
+    let statsHtml = '';
+
+    // We will always show Height and Weight
+    statsHtml += `<div class="text-center"><span class="font-semibold text-gray-500 text-xs">H</span><p>${formatHeight(getStat(player, 'height'))}</p></div>`;
+    statsHtml += `<div class="text-center"><span class="font-semibold text-gray-500 text-xs">W</span><p>${getStat(player, 'weight')}</p></div>`;
+
+    // Now show the key attributes
+    for (const attr of keyAttributes) {
+        const value = getStat(player, attr);
+        // Create a 3-letter abbreviation for the title
+        const abbr = (attr.charAt(0) + attr.slice(1).replace(/[aeiou]/g, '')).slice(0, 3).toUpperCase();
+        statsHtml += `<div class="text-center"><span class="font-semibold text-gray-500 text-xs" title="${attr}">${abbr}</span><p>${value}</p></div>`;
+    }
+
+    // --- 3. Set Dynamic Grid Columns ---
+    // Total cols = 2 (H, W) + number of key attributes
+    const totalCols = 2 + keyAttributes.length;
+    // This will result in standard classes like grid-cols-6, grid-cols-7, or grid-cols-8
+    const gridClass = `grid-cols-${totalCols}`;
+
+    // --- 4. Build the final element ---
     const slotEl = document.createElement('div');
-    slotEl.className = 'depth-chart-slot bg-gray-200 p-2 rounded flex items-center justify-between';
+    slotEl.className = 'depth-chart-slot bg-gray-100 p-2 rounded flex items-center justify-between gap-4';
     slotEl.dataset.positionSlot = positionSlot;
     slotEl.dataset.side = side;
+
     if (player && player.status?.type !== 'temporary') {
         slotEl.draggable = true;
         slotEl.dataset.playerId = player.id;
@@ -977,27 +1007,23 @@ function renderSlot(positionSlot, roster, chart, container, side) {
     } else {
         slotEl.setAttribute('title', `${player.name} (Temporary)`);
     }
+
+    // This new layout is 3 distinct parts, not one massive grid
     slotEl.innerHTML = `
-        <span class="font-bold w-1/4">${positionSlot}</span>
-        <div class="player-details-grid w-3/4 grid grid-cols-17 gap-1">
-            <span>${typeTag} ${player?.name ?? 'Empty'}</span>
-            <span class="font-bold text-amber-600">${overall}</span>
-            <span>${player?.attributes?.physical?.height ?? '-'}</span>
-            <span>${player?.attributes?.physical?.weight ?? '-'}</span>
-            <span>${player?.attributes?.physical?.speed ?? '-'}</span>
-            <span>${player?.attributes?.physical?.strength ?? '-'}</span>
-            <span>${player?.attributes?.physical?.agility ?? '-'}</span>
-            <span>${player?.attributes?.physical?.stamina ?? '-'}</span>
-            <span>${player?.attributes?.mental?.playbookIQ ?? '-'}</span>
-            <span>${player?.attributes?.mental?.clutch ?? '-'}</span>
-            <span>${player?.attributes?.mental?.consistency ?? '-'}</span>
-            <span>${player?.attributes?.mental?.toughness ?? '-'}</span>
-            <span>${player?.attributes?.technical?.throwingAccuracy ?? '-'}</span>
-            <span>${player?.attributes?.technical?.catchingHands ?? '-'}</span>
-            <span>${player?.attributes?.technical?.blocking ?? '-'}</span>
-            <span>${player?.attributes?.technical?.tackling ?? '-'}</span>
-            <span>${player?.attributes?.technical?.blockShedding ?? '-'}</span>
-        </div>`;
+        <div class="flex-shrink-0 w-1/3">
+            <span class="font-bold block">${positionSlot}</span>
+            <span class="text-sm font-medium truncate">${typeTag} ${player?.name ?? 'Empty'}</span>
+        </div>
+
+        <div class="flex-shrink-0 font-bold text-xl text-amber-600 px-4">
+            ${overall}
+        </div>
+
+        <div class="flex-grow grid ${gridClass} gap-2 text-sm">
+            ${statsHtml}
+        </div>
+    `;
+
     container.appendChild(slotEl);
 }
 
@@ -1797,7 +1823,7 @@ function renderSimPlayers() {
             const stamina = p.attributes?.physical?.stamina || 50;
             const fatigue = Math.max(0, Math.min(100, Math.round(p.fatigue || 0)));
             const energyPct = Math.max(0, Math.round(100 - (fatigue / Math.max(1, stamina)) * 100));
-            const statusText = p.status?.type ? `${p.status.type}${p.status.duration ? ' ('+p.status.duration+')' : ''}` : 'healthy';
+            const statusText = p.status?.type ? `${p.status.type}${p.status.duration ? ' (' + p.status.duration + ')' : ''}` : 'healthy';
             return `
                 <div class="flex items-center justify-between p-2 border-b border-gray-600">
                     <div class="flex items-center gap-3">
@@ -1809,7 +1835,7 @@ function renderSimPlayers() {
                             <div class="relative h-3 bg-gray-600 rounded">
                                 <div style="width:${energyPct}%" class="absolute left-0 top-0 h-3 bg-amber-400 rounded"></div>
                             </div>
-                            <div class="text-xs text-gray-300">Energy: ${energyPct}% • Fatigue: ${fatigue.toFixed? fatigue.toFixed(1) : fatigue}</div>
+                            <div class="text-xs text-gray-300">Energy: ${energyPct}% • Fatigue: ${fatigue.toFixed ? fatigue.toFixed(1) : fatigue}</div>
                         </div>
                         <div class="text-xs text-gray-300 w-28">Status: ${statusText}</div>
                     </div>
@@ -1846,7 +1872,7 @@ function renderSimPlayers() {
                         slotOptions.push({ value: `${side}|${slot}`, label: `${side.toUpperCase()} ${slot} (${occupant ? occupant.name : 'Vacant'})` });
                     });
                 });
-                const selectHtml = `<select id="_sub_slot_select" class="w-full p-2 bg-white text-black">${slotOptions.map(s=>`<option value="${s.value}">${s.label}</option>`).join('')}</select>`;
+                const selectHtml = `<select id="_sub_slot_select" class="w-full p-2 bg-white text-black">${slotOptions.map(s => `<option value="${s.value}">${s.label}</option>`).join('')}</select>`;
                 showModal('Select Slot to Sub Into', selectHtml, () => {
                     const chosen = document.getElementById('_sub_slot_select')?.value;
                     if (!chosen) return;
@@ -1871,7 +1897,7 @@ function renderSimPlayers() {
                     showModal('No Bench', '<p>No bench players available to sub in.</p>', null, 'OK');
                     return;
                 }
-                const options = benchPlayers.map(b => `<option value="${b.id}">${b.name} (#${b.number||'—'})</option>`).join('');
+                const options = benchPlayers.map(b => `<option value="${b.id}">${b.name} (#${b.number || '—'})</option>`).join('');
                 const selectHtml = `<select id="_sub_in_select" class="w-full p-2 bg-white text-black">${options}</select>`;
                 showModal('Select Bench Player to Sub In', selectHtml, () => {
                     const inId = parseInt(document.getElementById('_sub_in_select')?.value, 10);
