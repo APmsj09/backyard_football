@@ -212,17 +212,19 @@ function getScoutedPlayerInfo(player, relationshipLevelNum) {
 // --- Fumble Check Helper ---
 /** Checks for a fumble during a tackle attempt. */
 /** Checks for a fumble during a tackle attempt. */
-function checkFumble(ballCarrier, tackler, playState, gameLog) {
-    if (!ballCarrier || !tackler || !ballCarrier.attributes || !tackler.attributes) return false;
-    const carrierModifier = (ballCarrier.attributes.mental?.toughness || 50) / 100;
-    const tacklerModifier = ((tackler.attributes.physical?.strength || 50) + (tackler.attributes.technical?.tackling || 50)) / 100;
+function checkFumble(ballCarrierState, tacklerState, playState, gameLog) {
+    if (!ballCarrierState || !tacklerState || !ballCarrierState.agility || !tacklerState.tackling) return false;
+    
+    // Use the pState attributes directly (which are copied from the roster)
+    const carrierModifier = (ballCarrierState.toughness || 50) / 100;
+    const tacklerModifier = ((tacklerState.strength || 50) + (tacklerState.tackling || 50)) / 100;
     const fumbleChance = FUMBLE_CHANCE_BASE * (tacklerModifier / (carrierModifier + 0.5));
 
     if (Math.random() < fumbleChance) {
-        gameLog.push(`❗ FUMBLE! Ball knocked loose by ${tackler.name}!`);
+        gameLog.push(`❗ FUMBLE! Ball knocked loose by ${tacklerState.name}!`);
         playState.turnover = true; // It's a turnover *for now*
 
-        // --- THIS IS THE NEW LOGIC ---
+        // --- THIS IS THE CORRECTED LOGIC ---
         // 1. Put the ball on the ground
         playState.ballState.isLoose = true; // The ball is now live
         playState.ballState.inAir = false;   // It's on the ground, not in the air
@@ -230,14 +232,14 @@ function checkFumble(ballCarrier, tackler, playState, gameLog) {
         playState.ballState.vx = 0;
         playState.ballState.vy = 0;
 
-        // 2. The ball carrier no longer has the ball
-        ballCarrier.isBallCarrier = false;
-        ballCarrier.hasBall = false;
-        ballCarrier.stunnedTicks = 40; // Stun the fumbler
+        // 2. Modify the ballCarrier's pState
+        ballCarrierState.isBallCarrier = false;
+        ballCarrierState.hasBall = false;
+        ballCarrierState.stunnedTicks = 40; // Stun the fumbler (pState)
 
-        // 3. Stun the tackler who caused it (simulates them being in the tackle)
-        tackler.stunnedTicks = 20;
-        // --- END NEW LOGIC ---
+        // 3. Stun the tackler's pState
+        tacklerState.stunnedTicks = 20;
+        // --- END CORRECTED LOGIC ---
 
         return true; // Return true to signal a fumble happened
     }
@@ -1330,6 +1332,8 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
                 catchingHands: player.attributes.technical?.catchingHands || 50,
                 throwingAccuracy: player.attributes.technical?.throwingAccuracy || 50,
                 playbookIQ: player.attributes.mental?.playbookIQ || 50,
+                toughness: player.attributes.mental?.toughness || 50,
+                consistency: player.attributes.mental?.consistency || 50,
                 fatigueModifier: fatigueModifier,
                 // Initial state flags
                 action: action,

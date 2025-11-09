@@ -41,6 +41,7 @@ let liveGameLog = []; // Stores the log entries for the current sim
 let liveGameCallback = null; // Function to call when sim completes or is skipped
 let currentLiveGameResult = null; // Stores the full gameResult object for accurate final display
 let userPreferredSpeed = 50;
+let huddleTimeout = null;
 
 let liveGameLogIndex = 0;
 let liveGameCurrentHomeScore = 0;
@@ -629,7 +630,7 @@ export function renderPlayerRoster(playerTeam) {
             elements.draftRosterList.appendChild(li);
         });
     }
-    renderRosterSummary(playerTeam, positionOverallWeights);
+    renderRosterSummary(playerTeam);
 }
 
 /** Renders the average overall ratings for the player's current roster. */
@@ -1897,22 +1898,34 @@ function renderLiveStatsBox(gameResult) {
  * Renders the players / substitution panel for the player's team during live sim.
  * Reads live fatigue data from the provided frame.
  */
-function renderSimPlayers(frame) { // <-- 1. Accept frame
+function renderSimPlayers(frame) {
+    // Helper to find the correct team object (home or away) from the live game result
+    const findTeamInResult = (playerTeamId) => {
+        if (!currentLiveGameResult) return null;
+        if (currentLiveGameResult.homeTeam?.id === playerTeamId) return currentLiveGameResult.homeTeam;
+        if (currentLiveGameResult.awayTeam?.id === playerTeamId) return currentLiveGameResult.awayTeam;
+        return null; // Player's team not in this game
+    };
+
     try {
-        if (!elements.simPlayersList) return;
-
-        // 2. Get global state (still needed for roster list)
-        const gs = getGameState();
-
-        if (!gs || !gs.playerTeam) {
-            elements.simPlayersList.innerHTML = '<p class="text-gray-400">No team data available.</p>';
+        if (!elements.simPlayersList || !currentLiveGameResult) {
+            // Don't render if element is missing or game isn't running
             return;
         }
-        const team = gs.playerTeam;
+
+        // 1. FIX: Get the player's team from the LIVE game result, not global state
+        const gs = getGameState(); // Still need this for the player's team ID
+        const playerTeamId = gs?.playerTeam?.id;
+        const team = findTeamInResult(playerTeamId);
+
+        if (!team || !playerTeamId) {
+            elements.simPlayersList.innerHTML = '<p class="text-gray-400">No team data available for this game.</p>';
+            return;
+        }
         const roster = team.roster || [];
         const depth = team.depthChart || {};
 
-        // 3. Create a Map of current fatigue values from the frame
+        // 2. Create a Map of current fatigue values from the frame
         const fatigueMap = new Map();
         if (frame && frame.players) {
             frame.players.forEach(pState => {
@@ -1935,9 +1948,10 @@ function renderSimPlayers(frame) { // <-- 1. Accept frame
         const buildRow = (p, isStarter) => {
             const stamina = p.attributes?.physical?.stamina || 50;
 
-            // 4. Get fatigue from the frame map if available, 
-            //    otherwise use the (final) fatigue from the player object
-            const currentFatigue = fatigueMap.has(p.id) ? fatigueMap.get(p.id) : (p.fatigue || 0);
+            // 3. FIX: Get fatigue from the frame map if available,
+            //    otherwise default to 0 (for benched players not in the frame).
+            //    Do not use p.fatigue, which is the FINAL fatigue from the result object.
+            const currentFatigue = fatigueMap.get(p.id) || 0;
 
             const fatigue = Math.max(0, Math.min(100, Math.round(currentFatigue)));
 
@@ -1998,7 +2012,10 @@ function renderSimPlayers(frame) { // <-- 1. Accept frame
                     if (!chosen) return;
                     const [side, slot] = chosen.split('|');
                     const outId = team.depthChart?.[side]?.[slot];
-                    const result = (typeof Game !== 'undefined' && typeof Game.substitutePlayers === 'function') ? Game.substitutePlayers(team.id, outId, inId) : { success: false, message: 'Substitution API unavailable' };
+
+                    // 4. FIX: Use the imported substitutePlayers function
+                    const result = substitutePlayers(team.id, outId, inId);
+
                     if (!result.success) {
                         showModal('Sub Failed', `<p>${result.message}</p>`, null, 'OK');
                     } else {
@@ -2022,7 +2039,10 @@ function renderSimPlayers(frame) { // <-- 1. Accept frame
                 showModal('Select Bench Player to Sub In', selectHtml, () => {
                     const inId = parseInt(document.getElementById('_sub_in_select')?.value, 10);
                     if (!inId) return;
-                    const result = (typeof Game !== 'undefined' && typeof Game.substitutePlayers === 'function') ? Game.substitutePlayers(team.id, outId, inId) : { success: false, message: 'Substitution API unavailable' };
+
+                    // 5. FIX: Use the imported substitutePlayers function
+                    const result = substitutePlayers(team.id, outId, inId);
+
                     if (!result.success) {
                         showModal('Sub Failed', `<p>${result.message}</p>`, null, 'OK');
                     } else {
@@ -2255,10 +2275,13 @@ function runLiveGameTick() {
         // The play is over! Stop the "action" clock.
         clearInterval(liveGameInterval);
         liveGameInterval = null;
+        clearTimeout(huddleTimeout); // Clear any stray huddle just in case
 
         // Start the "huddle" clock (2.5 second pause)
         const HUDDLE_PAUSE_MS = 2500;
-        setTimeout(startNextPlay, HUDDLE_PAUSE_MS);
+
+        // FIX: Store the timeout ID
+        huddleTimeout = setTimeout(startNextPlay, HUDDLE_PAUSE_MS);
     }
     // --- END NEW LOGIC ---
 }
@@ -2269,6 +2292,7 @@ function runLiveGameTick() {
  * It clears the field and restarts the fast "action" clock.
  */
 function startNextPlay() {
+    huddleTimeout = null;
     if (!currentLiveGameResult || liveGameCurrentIndex >= currentLiveGameResult.visualizationFrames.length) {
         // Failsafe: If the game ended on that last play, just run the tick again to exit.
         runLiveGameTick();
@@ -2348,7 +2372,11 @@ export function startLiveGameSim(gameResult, onComplete) {
 
     drawFieldVisualization(null); // Clear field
     renderLiveStatsBox(gameResult); // Render the static "final" stats
-    try { renderSimPlayers(); } catch (err) { console.error('renderSimPlayers init error:', err); }
+    try { 
+        renderSimPlayers(gameResult.visualizationFrames[0]); 
+    } catch (err) { 
+        console.error('renderSimPlayers init error:', err); 
+    }
     setSimSpeed(liveGameSpeed); // Set default button style
 
     // --- 6. Start the Interval Timer ---
@@ -2358,6 +2386,8 @@ export function startLiveGameSim(gameResult, onComplete) {
 export function skipLiveGameSim() {
     if (liveGameInterval) { clearInterval(liveGameInterval); liveGameInterval = null; }
 
+    clearTimeout(huddleTimeout); // FIX: Cancel any pending huddle
+    huddleTimeout = null;
     const finalResult = currentLiveGameResult; // Get the result before we clear it
 
     // Call the end-state of the tick function immediately to show the final frame
@@ -2400,10 +2430,15 @@ export function setSimSpeed(speed) {
         activeButton.classList.add('active', 'bg-blue-500', 'hover:bg-blue-600');
     }
 
+    clearTimeout(huddleTimeout); // FIX: Cancel any pending huddle
+    huddleTimeout = null;
+
     // If sim is running, clear and restart interval with the new speed
-    if (liveGameInterval) {
-        clearInterval(liveGameInterval);
-        // --- 🛠️ FIX: Restart using the ONE global tick function ---
+    if (currentLiveGameResult && liveGameCurrentIndex < currentLiveGameResult.visualizationFrames.length) {
+        if (liveGameInterval) {
+            clearInterval(liveGameInterval); // Clear old action clock
+        }
+        // Start new action clock immediately, effectively skipping the huddle
         liveGameInterval = setInterval(runLiveGameTick, liveGameSpeed);
     }
 }
