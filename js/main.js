@@ -310,11 +310,18 @@ async function handleDraftEnd() {
 function handleTabSwitch(e) {
     if (e.target.matches('.tab-button')) {
         const tabId = e.target.dataset.tab;
+
+        // --- THIS IS THE FIX ---
+        // Force a refresh of the gameState variable from the source
+        // to ensure we have the absolute latest version.
+        gameState = Game.getGameState();
+        // --- END FIX ---
+
         if (!gameState) {
             console.error("Cannot switch tab: Game state not available.");
             return;
         }
-        UI.switchTab(tabId, gameState); // Pass gameState for rendering tab content
+        UI.switchTab(tabId, gameState); // Pass the freshly-fetched gameState
     }
 }
 

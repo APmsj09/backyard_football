@@ -2,8 +2,8 @@ import {
     calculateOverall,
     getRelationshipLevel,
     getScoutedPlayerInfo,
-    getGameState,        
-    substitutePlayers    
+    getGameState,
+    substitutePlayers
 } from './game.js';
 import {
     offenseFormations,
@@ -16,7 +16,7 @@ import {
 } from './game/player.js';
 
 // At the top of ui.js
-import { getRandom, getRandomInt, formatHeight } from './utils.js'; 
+import { getRandom, getRandomInt, formatHeight } from './utils.js';
 
 // --- Visualization Constants (Must match game.js) ---
 const FIELD_LENGTH = 120;
@@ -962,11 +962,11 @@ function getStat(player, attrKey) {
     if (!player || !player.attributes) return '-';
     if (attrKey === 'height') return formatHeight(player.attributes.physical?.height);
     if (attrKey === 'weight') return player.attributes.physical?.weight || '-';
-    
+
     if (player.attributes.physical?.[attrKey] !== undefined) return player.attributes.physical[attrKey];
     if (player.attributes.mental?.[attrKey] !== undefined) return player.attributes.mental[attrKey];
     if (player.attributes.technical?.[attrKey] !== undefined) return player.attributes.technical[attrKey];
-    
+
     return '-';
 }
 
@@ -979,16 +979,16 @@ function renderSlot(positionSlot, roster, chart, container, side) {
     const typeTag = player?.status?.type === 'temporary' ? '<span class="status-tag temporary">[T]</span>' : '';
 
     // --- 1. Get Key Attributes ---
-    
+
     // These attributes will ALWAYS be shown
     const baseAttributes = [
-        'height', 
-        'weight', 
-        'speed', 
-        'strength', 
-        'agility', 
+        'height',
+        'weight',
+        'speed',
+        'strength',
+        'agility',
         'stamina',
-        'playbookIQ' 
+        'playbookIQ'
     ];
 
     // These are the "skill" attributes
@@ -1004,10 +1004,10 @@ function renderSlot(positionSlot, roster, chart, container, side) {
     // Combine the lists, removing any duplicates
     // (e.g., if 'playbookIQ' was in both, it won't be duplicated)
     const allAttributes = [...new Set([...baseAttributes, ...positionalAttributes])];
-    
+
     // --- 2. Build Dynamic Stats HTML ---
     let statsHtml = '';
-    
+
     for (const attr of allAttributes) {
         const value = getStat(player, attr);
         // Create an abbreviation for the title
@@ -1018,7 +1018,7 @@ function renderSlot(positionSlot, roster, chart, container, side) {
         if (attr === 'throwingAccuracy') abbr = 'THR';
         if (attr === 'catchingHands') abbr = 'HND';
         if (attr === 'blockShedding') abbr = 'BSH';
-        
+
         statsHtml += `<div class="text-center"><span class="font-semibold text-gray-500 text-xs" title="${attr}">${abbr}</span><p class="font-medium">${value}</p></div>`;
     }
 
@@ -1053,7 +1053,7 @@ function renderSlot(positionSlot, roster, chart, container, side) {
             ${statsHtml}
         </div>
     `;
-    
+
     container.appendChild(slotEl);
 }
 
@@ -1400,7 +1400,7 @@ export function drawFieldVisualization(frameData) {
     // Base scale that fits the full field width vertically
     const baseScale = canvas.height / FIELD_WIDTH;
     // Zoom multiplier: increase to make models larger; keep conservative default
-    const ZOOM_MULTIPLIER = 1.15; // tweakable (1.0 = fit vertical exactly)
+    const ZOOM_MULTIPLIER = 1.0; // tweakable (1.0 = fit vertical exactly)
     const scale = baseScale * ZOOM_MULTIPLIER;
     const scaleX = scale;
     const scaleY = scale;
@@ -1545,6 +1545,30 @@ export function drawFieldVisualization(frameData) {
             ctx.beginPath();
             ctx.arc(drawX, drawY, 10, 0, Math.PI * 2);
             ctx.fill();
+        }
+
+        if (player.stunnedTicks > 0) {
+            // Create a pulsing effect based on time
+            // This pulses between 0 (small) and 1 (large)
+            const pulse = (Math.sin(Date.now() / 200) + 1) / 2;
+
+            // The circle radius will pulse between 8px and 14px
+            const pulseRadius = 8 + (pulse * 6);
+            // The opacity will pulse between 0.5 and 0.9
+            const pulseAlpha = 0.5 + (pulse * 0.4);
+
+            ctx.save();
+            ctx.beginPath();
+            ctx.arc(drawX, drawY, pulseRadius, 0, Math.PI * 2);
+
+            // Create a pulsing red glow
+            const stunGradient = ctx.createRadialGradient(drawX, drawY, 3, drawX, drawY, pulseRadius);
+            stunGradient.addColorStop(0, `rgba(220, 38, 38, ${pulseAlpha})`); // red-600 with pulsing alpha
+            stunGradient.addColorStop(1, 'rgba(220, 38, 38, 0)'); // Fades to transparent
+
+            ctx.fillStyle = stunGradient;
+            ctx.fill();
+            ctx.restore();
         }
 
 

@@ -2,10 +2,10 @@
 
 // --- Imports ---
 import { getRandom, getRandomInt } from './utils.js'; // Removed estimateBestPosition
-import { 
-    calculateOverall, 
-    calculateSlotSuitability, 
-    generatePlayer, 
+import {
+    calculateOverall,
+    calculateSlotSuitability,
+    generatePlayer,
     positionOverallWeights,
     estimateBestPosition  // <<< ADD IT HERE
 } from './game/player.js';
@@ -4091,12 +4091,12 @@ function determineDefensivePlayCall(defense, offense, down, yardsToGo, ballOn, s
     }
 
     // --- 2. Filter Playbook for Current Formation ---
-    // Filter plays compatible with the current defensive formation
     const availablePlays = Object.keys(defensivePlaybook).filter(key => {
         // Basic check: Assumes play keys include formation name (e.g., "Cover_1_Man_331")
-        return key.includes(defenseFormationName);
-        // OR, implement a tagging system in defensivePlaybook if keys are generic
-        // return defensivePlaybook[key]?.compatibleFormations?.includes(defenseFormationName);
+        // return key.includes(defenseFormationName); // <<< This is the old way
+
+        // This is the new, "smarter" way
+        return defensivePlaybook[key]?.compatibleFormations?.includes(defenseFormationName);
     });
 
     if (availablePlays.length === 0) {
@@ -4106,24 +4106,20 @@ function determineDefensivePlayCall(defense, offense, down, yardsToGo, ballOn, s
         return allPlays.length > 0 ? getRandom(allPlays) : 'Cover_2_Zone_331'; // Absolute fallback
     }
 
-    // --- 3. Categorize *Available* Plays ---
-    const categorizedPlays = { blitz: [], runStop: [], zone: [], man: [], safeZone: [], prevent: [] }; // Added safe/prevent categories
+    // --- 3. Categorize *Available* Plays using TAGS ---
+    const categorizedPlays = { blitz: [], runStop: [], zone: [], man: [], safeZone: [], prevent: [] };
+
     availablePlays.forEach(key => {
         const play = defensivePlaybook[key];
-        if (!play) return;
-        // Basic categorization (Refine tags/logic as needed)
-        if (play.concept === 'Run' || key.includes('Run_Stop')) categorizedPlays.runStop.push(key);
-        if (play.blitz === true) categorizedPlays.blitz.push(key); // Blitz can overlap with Man/Zone
-        if (play.concept === 'Zone') {
-            categorizedPlays.zone.push(key);
-            // Identify safer zones (e.g., Cover 2, Cover 3 without blitz)
-            if (!play.blitz && (key.includes('Cover_2') || key.includes('Cover_3'))) {
-                categorizedPlays.safeZone.push(key);
-            }
-            // Could add Prevent tag/logic here if needed (e.g., deep zones only)
-            // if (play.tags?.includes('prevent')) categorizedPlays.prevent.push(key);
-        }
-        if (play.concept === 'Man') categorizedPlays.man.push(key);
+        // We check for the 'tags' array now, not 'concept' or 'blitz'
+        if (!play || !play.tags) return;
+
+        if (play.tags.includes('blitz')) categorizedPlays.blitz.push(key);
+        if (play.tags.includes('runStop')) categorizedPlays.runStop.push(key);
+        if (play.tags.includes('zone')) categorizedPlays.zone.push(key);
+        if (play.tags.includes('man')) categorizedPlays.man.push(key);
+        if (play.tags.includes('safeZone')) categorizedPlays.safeZone.push(key);
+        if (play.tags.includes('prevent')) categorizedPlays.prevent.push(key);
     });
 
     // --- 4. Analyze Situation ---
@@ -4329,7 +4325,7 @@ export function simulateGame(homeTeam, awayTeam, options = {}) {
         aiSetDepthChart(homeTeam);
         aiSetDepthChart(awayTeam);
 
-        const gameLog = fastSim ? [] : [];
+        const gameLog = []; // ALWAYS create a log array
         const allVisualizationFrames = fastSim ? null : [];
         let homeScore = 0, awayScore = 0;
         const weather = getRandom(['Sunny', 'Windy', 'Rain']);
@@ -4414,7 +4410,7 @@ export function simulateGame(homeTeam, awayTeam, options = {}) {
                 }
 
                 // --- 5. "Snap" ---
-                const result = resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, { gameLog: fastSim ? null : gameLog, weather, ballOn, ballHash, down, yardsToGo });
+                const result = resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, { gameLog: gameLog, weather, ballOn, ballHash, down, yardsToGo });
                 if (!fastSim && result.visualizationFrames) {
                     allVisualizationFrames.push(...result.visualizationFrames);
                 }
@@ -4896,7 +4892,7 @@ function processRelationshipEvents() {
 }
 
 /** Simulates all games for the current week and advances state. */
-export function simulateWeek() {
+export function simulateWeek(options = {}) {
     if (!game || !game.teams || !game.schedule) { console.error("simulateWeek: Invalid game state."); return []; }
     const WEEKS_IN_SEASON = 9;
     if (game.currentWeek >= WEEKS_IN_SEASON) { console.warn("simulateWeek: Season already over."); return null; }
@@ -4916,7 +4912,7 @@ export function simulateWeek() {
     const results = weeklyGames.map(match => {
         try {
             if (!match?.home || !match?.away) { return null; }
-            const result = simulateGame(match.home, match.away);
+            const result = simulateGame(match.home, match.away, options);
             if (result?.breakthroughs) {
                 result.breakthroughs.forEach(b => {
                     if (b?.player?.teamId === game.playerTeam?.id) {
