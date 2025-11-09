@@ -23,6 +23,15 @@
             'sans': ['Inter', 'sans-serif'],
             'display': ['Bangers', 'cursive'],
           },
+          // --- ADD THIS BLOCK ---
+          gridTemplateColumns: {
+            // Add a 17-column grid
+            '17': 'repeat(17, minmax(0, 1fr))',
+          },
+          gridColumn: {
+            // Add spans for 17-col grid (though you don't use them, it's good practice)
+            'span-17': 'span 17 / span 17',
+          }
         }
       }
     }
@@ -220,6 +229,10 @@
                     <h4 class="player-group-title">Receivers (WR/TE)</h4>
                     <div class="slot-list"></div>
                   </div>
+                  <div id="offense-line-slots" class="player-group">
+                    <h4 class="player-group-title">Offensive Line (OL)</h4>
+                    <div class="slot-list"></div>
+                  </div>
                 </div>
                 <div id="offense-depth-chart-roster" class="roster-list space-y-2">
                 </div>
@@ -233,12 +246,15 @@
                 <div id="defense-depth-chart-slots" class="md:col-span-2 space-y-4">
                   <div id="defense-line-slots" class="player-group">
                     <h4 class="player-group-title">Defensive Line (DL)</h4>
+                    <div class="slot-list"></div>
                   </div>
                   <div id="defense-lb-slots" class="player-group">
                     <h4 class="player-group-title">Linebackers (LB)</h4>
+                    <div class="slot-list"></div>
                   </div>
                   <div id="defense-db-slots" class="player-group">
                     <h4 class="player-group-title">Defensive Backs (DB)</h4>
+                    <div class="slot-list"></div>
                   </div>
                 </div>
                 <div id="defense-depth-chart-roster" class="roster-list space-y-2">
