@@ -478,9 +478,22 @@ export function setupDraft() {
     game.draftOrder = [];
     game.currentPick = 0;
 
-    const sortedTeams = [...game.teams]
-        .filter(t => t)
-        .sort((a, b) => (a.wins || 0) - (b.wins || 0) || (b.losses || 0) - (a.losses || 0));
+    let sortedTeams;
+
+    if (game.year === 1) {
+        // --- YEAR 1 DRAFT LOTTERY ---
+        // All teams are 0-0, so we shuffle the order
+        console.log("Year 1: Running draft lottery...");
+        sortedTeams = [...game.teams]
+            .filter(t => t)
+            .sort(() => 0.5 - Math.random()); // Simple array shuffle
+    } else {
+        // --- STANDARD DRAFT ORDER (Worst picks first) ---
+        console.log(`Year ${game.year}: Setting draft order by record.`);
+        sortedTeams = [...game.teams]
+            .filter(t => t)
+            .sort((a, b) => (a.wins || 0) - (b.wins || 0) || (b.losses || 0) - (a.losses || 0));
+    }
 
     const ROSTER_LIMIT = 10;
     console.log("Setting draft needs based on current rosters...");
@@ -5225,7 +5238,16 @@ export function simulateWeek(options = {}) {
     }).filter(Boolean);
 
     if (!game.gameResults) game.gameResults = [];
-    game.gameResults.push(...results);
+
+    
+    // We must save a minimal version of the result to prevent circular JSON errors
+    const minimalResults = results.map(r => ({
+        homeTeam: { id: r.homeTeam.id, name: r.homeTeam.name },
+        awayTeam: { id: r.awayTeam.id, name: r.awayTeam.name },
+        homeScore: r.homeScore,
+        awayScore: r.awayScore
+    }));
+    game.gameResults.push(...minimalResults);
     processRelationshipEvents();
 
     game.currentWeek++;

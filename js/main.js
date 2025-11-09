@@ -504,7 +504,18 @@ function startLiveGame(playerGameMatch) {
 
     // Update state and start UI
     if (!gameState.gameResults) gameState.gameResults = [];
-    gameState.gameResults.push(...allResults.filter(Boolean)); // Filter out potential nulls from errors
+
+    // --- THIS IS THE FIX ---
+    // We must save a minimal version of the result
+    const minimalResults = allResults.filter(Boolean).map(r => ({
+        homeTeam: { id: r.homeTeam.id, name: r.homeTeam.name },
+        awayTeam: { id: r.awayTeam.id, name: r.awayTeam.name },
+        homeScore: r.homeScore,
+        awayScore: r.awayScore
+    }));
+    gameState.gameResults.push(...minimalResults);
+    // --- END FIX ---
+
     gameState.currentWeek++;
 
     if (currentLiveSimResult) {
@@ -624,7 +635,7 @@ function finishWeekSimulation(results) {
         try { Game.aiManageRoster(team); } catch (e) { console.error(`Error during AI roster management for ${team.name}:`, e) }
     });
     Game.generateWeeklyFreeAgents();
-    
+
 
     // Refresh state and UI
     gameState = Game.getGameState();
