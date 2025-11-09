@@ -1178,7 +1178,7 @@ function renderScheduleTab(gameState) {
             weekGames.forEach(g => {
                 if (!g || !g.home || !g.away) { return; }
                 let content;
-                const result = isPastWeek ? (gameState.gameResults || []).find(r => r && r.homeTeam === g.home && r.awayTeam === g.away) : null;
+                const result = isPastWeek ? (gameState.gameResults || []).find(r => r && r.homeTeam.id === g.home.id && r.awayTeam.id === g.away.id) : null;
                 let resultClass = '';
                 if (result) {
                     content = `<span class="${result.awayScore > result.homeScore ? 'font-bold' : ''}">${g.away.name ?? '?'} ${result.awayScore ?? '?'}</span> @ <span class="${result.homeScore > result.awayScore ? 'font-bold' : ''}">${g.home.name ?? '?'} ${result.homeScore ?? '?'}</span>`;

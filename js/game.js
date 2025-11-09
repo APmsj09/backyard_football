@@ -4387,7 +4387,8 @@ export function simulateGame(homeTeam, awayTeam, options = {}) {
 
             let ballOn = nextDriveStartBallOn, down = 1, yardsToGo = 10, driveActive = true;
             let ballHash = 'M';
-            gameLog.push(`-- Drive ${drivesThisGame + 1} (H${currentHalf}): ${offense.name} ball on own ${ballOn} --`);
+            const yardLineText = ballOn <= 50 ? `own ${ballOn}` : `opponent ${100 - ballOn}`;
+            gameLog.push(`-- Drive ${drivesThisGame + 1} (H${currentHalf}): ${offense.name} ball on ${yardLineText} --`);
 
             while (driveActive && down <= 4) {
                 // ... (Forfeit check logic is unchanged) ...
@@ -4810,9 +4811,15 @@ export function simulateGame(homeTeam, awayTeam, options = {}) {
             }
         });
 
-        // At the VERY end of all logic, assign the return value
+        const finalHomeTeam = game.teams.find(t => t.id === homeTeam.id);
+        const finalAwayTeam = game.teams.find(t => t.id === awayTeam.id);
+
         gameResult = {
-            homeTeam, awayTeam, homeScore, awayScore,
+
+            homeTeam: finalHomeTeam, // Use the final object
+            awayTeam: finalAwayTeam, // Use the final object
+
+            homeScore, awayScore,
             gameLog, breakthroughs, visualizationFrames: allVisualizationFrames
         };
 
