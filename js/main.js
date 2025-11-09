@@ -303,6 +303,74 @@ async function handleDraftEnd() {
         finalizeDraft();
     } catch (e) { console.error('Auto-finalize draft error:', e); }
 }
+/**
+ * A generic function to load a game from a save key and navigate to the correct screen.
+ * @param {string} [saveKey] - The localStorage key to load. Defaults to the main save.
+ */
+async function handleLoadGame(saveKey) { // <<< --- "async" KEYWORD ADDED HERE
+    console.log(`Attempting to load from key: ${saveKey || 'default'}`);
+    try {
+        // 1. Call the load function
+        // We pass 'saveKey' (which is undefined for the default "Load Game" button)
+        const loadedState = Game.loadGameState(saveKey);
+
+        // 2. Check if it worked
+        if (!loadedState || !loadedState.teams || loadedState.teams.length === 0) {
+            UI.showModal("Load Failed", "<p>No saved game data was found.</p>");
+            return;
+        }
+
+        // 3. Set the global gameState
+        gameState = loadedState;
+        selectedPlayerId = null; // Clear any old selection
+
+        // 4. Navigate to the correct screen
+        if (gameState.currentWeek >= 0) {
+            // Game is in progress, go to dashboard
+            console.log("Save file found (in-season). Loading dashboard...");
+            UI.renderDashboard(gameState);
+            UI.switchTab('my-team', gameState);
+            UI.showScreen('dashboard-screen');
+        } else {
+            // Game is in the middle of a draft
+            console.log("Save file found (mid-draft). Loading draft screen...");
+
+            // This 'await' is why the function must be async
+            const { positionOverallWeights } = await import('./game/player.js');
+
+            UI.renderSelectedPlayerCard(null, gameState, positionOverallWeights);
+            UI.renderDraftScreen(gameState, handlePlayerSelectInDraft, selectedPlayerId, currentSortColumn, currentSortDirection, positionOverallWeights);
+            UI.showScreen('draftScreen');
+            // We do NOT call runAIDraftPicks, just load the state
+        }
+    } catch (error) {
+        console.error("Error loading game:", error);
+        UI.showModal("Error", `Could not load game data: ${error.message}`, null, '', null, 'Close');
+    }
+}
+
+/**
+ * Handles the "Load Test Roster" button click.
+ * This is just a wrapper for handleLoadGame with a specific key.
+ */
+async function handleLoadTestRoster() { // <<< --- "async" KEYWORD ADDED HERE
+    await handleLoadGame('my_test_roster');
+}
+
+/**
+ * Handles the "Save as Test Roster" button click.
+ */
+function handleSaveTestRoster() {
+    // ... (this function is fine as-is)
+    if (!gameState) {
+        UI.showModal("Save Failed", "<p>No game data to save.</p>");
+        return;
+    }
+
+    Game.saveGameState('my_test_roster');
+
+    UI.showModal("Test Roster Saved", "<p>Your current game state has been saved as the 'Test Roster'. You can now load it from the start screen.</p>");
+}
 
 /**
  * Handles clicks on dashboard navigation tabs.
@@ -809,9 +877,13 @@ function main() {
         // --- Setup Global Event Listeners ---
         document.getElementById('start-game-btn')?.addEventListener('click', startNewGame);
         document.getElementById('confirm-team-btn')?.addEventListener('click', handleConfirmTeam);
+        document.getElementById('load-game-btn')?.addEventListener('click', handleLoadGame);
+        document.getElementById('load-test-roster-btn')?.addEventListener('click', handleLoadTestRoster);
+        document.getElementById('save-test-roster-btn')?.addEventListener('click', handleSaveTestRoster);
         document.getElementById('draft-player-btn')?.addEventListener('click', handleDraftPlayer);
         document.getElementById('advance-week-btn')?.addEventListener('click', handleAdvanceWeek);
         document.getElementById('go-to-next-draft-btn')?.addEventListener('click', handleGoToNextDraft);
+
 
         // Live Sim Controls
         document.getElementById('sim-skip-btn')?.addEventListener('click', () => {

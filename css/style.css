@@ -309,9 +309,6 @@ canvas#field-canvas {
   box-shadow: 0 6px 18px rgba(0,0,0,0.4);
   font-family: 'Inter', sans-serif;
 }
-.broadcast-scoreboard .broadcast-top { display: flex; justify-content: space-between; align-items: center; }
-.broadcast-scoreboard .broadcast-body { padding: 4px 6px; }
-.broadcast-scoreboard .broadcast-team { display:flex; justify-content:space-between; align-items:center; }
 .broadcast-scoreboard .team-name { color: #e5e7eb; }
 .broadcast-scoreboard .team-score { color: #fff; }
 .broadcast-scoreboard .team-score.home { color: #fbbf24; }

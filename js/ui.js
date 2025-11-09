@@ -632,25 +632,65 @@ export function renderPlayerRoster(playerTeam) {
 }
 
 /** Renders the average overall ratings for the player's current roster. */
-function renderRosterSummary(playerTeam, positionOverallWeights) {
+function renderRosterSummary(playerTeam) {
     if (!elements.rosterSummary || !playerTeam) return;
+
     const roster = playerTeam.roster || [];
+
     if (roster.length === 0) {
         elements.rosterSummary.innerHTML = '<p class="text-xs text-gray-500">Your roster is empty.</p>';
         return;
     }
 
-    let summaryHtml = '<h5 class="font-bold text-sm mb-1">Team Averages</h5><div class="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">';
+    let summaryHtml = '<h5 class="font-bold text-sm mb-1">Team Starters</h5><div class="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">';
+
+    // 1. Create a pool of players who can start
+    //    (Not temporary and not injured)
+    let availablePlayers = roster.filter(p =>
+        p &&
+        p.attributes &&
+        p.status?.type !== 'temporary' &&
+        p.status?.duration === 0
+    );
+
+    // 2. Loop through each position we need to fill
     Object.keys(positionOverallWeights).forEach(pos => {
-        const validPlayers = roster.filter(p => p && p.attributes);
-        if (validPlayers.length === 0) {
-            summaryHtml += `<div class="flex justify-between"><span class="font-semibold">${pos}:</span><span class="font-bold">N/A</span></div>`;
+
+        // 3. If no players are left in the pool, show N/A
+        if (availablePlayers.length === 0) {
+            summaryHtml += `<div class="flex justify-between"><span class="font-semibold">${pos}:</span><span class="font-bold text-gray-400">N/A</span></div>`;
             return;
         }
-        const totalOvr = validPlayers.reduce((sum, player) => sum + calculateOverall(player, pos), 0);
-        const avgOvr = Math.round(totalOvr / validPlayers.length);
-        summaryHtml += `<div class="flex justify-between"><span class="font-semibold">${pos}:</span><span class="font-bold">${avgOvr}</span></div>`;
+
+        // 4. Find the best player *in the available pool* for this position
+        let bestPlayer = null;
+        let bestOverall = -1;
+
+        for (const player of availablePlayers) {
+            const ovr = calculateOverall(player, pos);
+            if (ovr > bestOverall) {
+                bestOverall = ovr;
+                bestPlayer = player;
+            }
+        }
+
+        // 5. If we found a starter for this position...
+        if (bestPlayer) {
+            // ...add them to the HTML...
+            summaryHtml += `<div class="flex justify-between" title="Starter: ${bestPlayer.name} (${bestOverall} Ovr)">
+                              <span class="font-semibold">${pos}:</span>
+                              <span class="font-bold">${bestOverall}</span>
+                            </div>`;
+
+            // 6. ...and REMOVE them from the pool so they can't start at another position.
+            availablePlayers = availablePlayers.filter(p => p.id !== bestPlayer.id);
+
+        } else {
+            // Fallback in case no valid player was found (shouldn't happen if pool > 0)
+            summaryHtml += `<div class="flex justify-between"><span class="font-semibold">${pos}:</span><span class="font-bold text-gray-400">N/A</span></div>`;
+        }
     });
+
     summaryHtml += '</div>';
     elements.rosterSummary.innerHTML = summaryHtml;
 }
@@ -1852,10 +1892,17 @@ function renderLiveStatsBox(gameResult) {
 /**
  * Renders the players / substitution panel for the player's team during live sim.
  */
-function renderSimPlayers() {
+/**
+ * Renders the players / substitution panel for the player's team during live sim.
+ * Reads live fatigue data from the provided frame.
+ */
+function renderSimPlayers(frame) { // <-- 1. Accept frame
     try {
         if (!elements.simPlayersList) return;
+
+        // 2. Get global state (still needed for roster list)
         const gs = getGameState();
+
         if (!gs || !gs.playerTeam) {
             elements.simPlayersList.innerHTML = '<p class="text-gray-400">No team data available.</p>';
             return;
@@ -1864,7 +1911,18 @@ function renderSimPlayers() {
         const roster = team.roster || [];
         const depth = team.depthChart || {};
 
-        // Build list grouped by starters and bench (depth contains sides: offense/defense)
+        // 3. Create a Map of current fatigue values from the frame
+        const fatigueMap = new Map();
+        if (frame && frame.players) {
+            frame.players.forEach(pState => {
+                if (pState.teamId === team.id) {
+                    // Use 'pState.fatigue' which we added in Step 1
+                    fatigueMap.set(pState.id, pState.fatigue);
+                }
+            });
+        }
+
+        // Build list grouped by starters and bench
         const starterIds = new Set();
         Object.keys(depth).forEach(side => {
             const chart = depth[side] || {};
@@ -1875,9 +1933,16 @@ function renderSimPlayers() {
 
         const buildRow = (p, isStarter) => {
             const stamina = p.attributes?.physical?.stamina || 50;
-            const fatigue = Math.max(0, Math.min(100, Math.round(p.fatigue || 0)));
+
+            // 4. Get fatigue from the frame map if available, 
+            //    otherwise use the (final) fatigue from the player object
+            const currentFatigue = fatigueMap.has(p.id) ? fatigueMap.get(p.id) : (p.fatigue || 0);
+
+            const fatigue = Math.max(0, Math.min(100, Math.round(currentFatigue)));
+
             const energyPct = Math.max(0, Math.round(100 - (fatigue / Math.max(1, stamina)) * 100));
             const statusText = p.status?.type ? `${p.status.type}${p.status.duration ? ' (' + p.status.duration + ')' : ''}` : 'healthy';
+
             return `
                 <div class="flex items-center justify-between p-2 border-b border-gray-600">
                     <div class="flex items-center gap-3">
@@ -1889,7 +1954,7 @@ function renderSimPlayers() {
                             <div class="relative h-3 bg-gray-600 rounded">
                                 <div style="width:${energyPct}%" class="absolute left-0 top-0 h-3 bg-amber-400 rounded"></div>
                             </div>
-                            <div class="text-xs text-gray-300">Energy: ${energyPct}% • Fatigue: ${fatigue.toFixed ? fatigue.toFixed(1) : fatigue}</div>
+                            <div class="text-xs text-gray-300">Energy: ${energyPct}% • Fatigue: ${fatigue.toFixed(1)}</div>
                         </div>
                         <div class="text-xs text-gray-300 w-28">Status: ${statusText}</div>
                     </div>
@@ -1936,7 +2001,7 @@ function renderSimPlayers() {
                     if (!result.success) {
                         showModal('Sub Failed', `<p>${result.message}</p>`, null, 'OK');
                     } else {
-                        renderSimPlayers();
+                        renderSimPlayers(frame); // Re-render with current frame
                     }
                 }, 'Confirm');
             };
@@ -1960,7 +2025,7 @@ function renderSimPlayers() {
                     if (!result.success) {
                         showModal('Sub Failed', `<p>${result.message}</p>`, null, 'OK');
                     } else {
-                        renderSimPlayers();
+                        renderSimPlayers(frame); // Re-render with current frame
                     }
                 }, 'Confirm');
             };
@@ -2094,6 +2159,11 @@ function runLiveGameTick() {
                     playHasEnded = true; // An incompletion ends the play
 
                 } else if (playLogEntry.startsWith('🎉 TOUCHDOWN')) {
+                    if (liveGamePossessionName === currentLiveGameResult.homeTeam.name) {
+                        liveGameCurrentHomeScore += 6;
+                    } else {
+                        liveGameCurrentAwayScore += 6;
+                    }
                     liveGameBallOn = 100; liveGameDriveActive = false;
                     styleClass = 'font-semibold text-green-400';
                     descriptiveText = playLogEntry;
@@ -2164,7 +2234,7 @@ function runLiveGameTick() {
     // --- 6. Draw Visualization ---
     drawFieldVisualization(frame);
     // update players/substitution UI
-    try { renderSimPlayers(); } catch (err) { console.error('renderSimPlayers error:', err); }
+    try { renderSimPlayers(frame); } catch (err) { console.error('renderSimPlayers error:', err); }
 
     // --- 7. Advance to Next Frame OR Start Huddle ---
     liveGameCurrentIndex++;

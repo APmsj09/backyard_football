@@ -714,9 +714,16 @@ export function generateSchedule() {
 }
 
 /** Resets player fatigue and game stats (typically before a game). */
-function resetGameStats() {
-    if (!game || !game.players) { console.warn("resetGameStats: Game or players list not available."); return; }
-    game.players.forEach(player => {
+function resetGameStats(teamA, teamB) {
+    // Combine the rosters of just these two teams
+    const playersInGame = [...(teamA?.roster || []), ...(teamB?.roster || [])];
+
+    if (playersInGame.length === 0) {
+        console.warn("resetGameStats: No players found on rosters.");
+        return;
+    }
+
+    playersInGame.forEach(player => {
         if (!player) return;
         player.fatigue = 0;
         player.gameStats = {
@@ -3685,6 +3692,10 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
                 const player = game.players.find(p => p && p.id === pState.id);
                 if (player) {
                     player.fatigue = Math.min(100, (player.fatigue || 0) + fatigueGain);
+
+                    pState.fatigue = player.fatigue; // Copy live fatigue to the sim object
+
+
                     const stamina = player.attributes?.physical?.stamina || 50;
                     const fatigueRatio = Math.min(1.0, (player.fatigue || 0) / stamina);
                     pState.fatigueModifier = Math.max(0.3, 1.0 - fatigueRatio);
@@ -4321,7 +4332,7 @@ export function simulateGame(homeTeam, awayTeam, options = {}) {
             if (!fastSim) console.error("simulateGame: Invalid team data provided.");
             return { homeTeam, awayTeam, homeScore: 0, awayScore: 0, gameLog: ["Error: Invalid team data"], breakthroughs: [] };
         }
-        resetGameStats();
+        resetGameStats(homeTeam, awayTeam);
         aiSetDepthChart(homeTeam);
         aiSetDepthChart(awayTeam);
 
@@ -5436,25 +5447,55 @@ export function markMessageAsRead(messageId) {
 // --- Exports for Scouting/Relationships ---
 export { getScoutedPlayerInfo, getRelationshipLevel }; // Export helpers needed by UI/Main
 
-// --- Game State Persistence ---
-export function saveGameState() {
+const DEFAULT_SAVE_KEY = 'backyardFootballGameState';
+
+/**
+ * Saves the current game state to localStorage under a specific key.
+ * @param {string} [saveKey=DEFAULT_SAVE_KEY] - The key to save the game under.
+ */
+export function saveGameState(saveKey = DEFAULT_SAVE_KEY) {
     try {
-        localStorage.setItem('backyardFootballGameState', JSON.stringify(game));
+        // --- FIX: We must convert the Map to an Object for JSON.stringify ---
+        const gameStateToSave = { ...game };
+        if (game.relationships instanceof Map) {
+            gameStateToSave.relationships = Object.fromEntries(game.relationships);
+        }
+        // --- END FIX ---
+
+        localStorage.setItem(saveKey, JSON.stringify(gameStateToSave));
+        if (saveKey === DEFAULT_SAVE_KEY) {
+            console.log("Game state saved.");
+        } else {
+            console.log(`Game state saved to key: ${saveKey}`);
+        }
     } catch (e) {
         console.error('Error saving game state:', e);
     }
 }
 
-export function loadGameState() {
+/**
+ * Loads a game state from localStorage using a specific key.
+ * @param {string} [saveKey=DEFAULT_SAVE_KEY] - The key to load the game from.
+ */
+export function loadGameState(saveKey = DEFAULT_SAVE_KEY) {
     try {
-        const saved = localStorage.getItem('backyardFootballGameState');
+        const saved = localStorage.getItem(saveKey);
         if (saved) {
             const loaded = JSON.parse(saved);
-            Object.assign(game, loaded); // Shallow merge into existing game object
-            return game;
+
+            // Set 'game' to the loaded object
+            game = loaded;
+
+            // Check if relationships is a plain object and convert it back to a Map
+            if (game.relationships && !(game.relationships instanceof Map)) {
+                game.relationships = new Map(Object.entries(game.relationships));
+            }
+
+            return game; // Return the loaded game
         }
     } catch (e) {
         console.error('Error loading game state:', e);
     }
-    return game;
+    // If no save was found, return null
+    return null;
 }
