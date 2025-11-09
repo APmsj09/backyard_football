@@ -2,8 +2,8 @@ import {
     calculateOverall,
     getRelationshipLevel,
     getScoutedPlayerInfo,
-    getGameState,        // <<< --- ADD THIS LINE
-    substitutePlayers    // <<< --- ADD THIS LINE
+    getGameState,        
+    substitutePlayers    
 } from './game.js';
 import {
     offenseFormations,
@@ -16,7 +16,7 @@ import {
 } from './game/player.js';
 
 // At the top of ui.js
-import { getRandom, getRandomInt, formatHeight } from './utils.js'; // <<< Add formatHeight here
+import { getRandom, getRandomInt, formatHeight } from './utils.js'; 
 
 // --- Visualization Constants (Must match game.js) ---
 const FIELD_LENGTH = 120;
@@ -957,6 +957,19 @@ function renderDepthChartSide(side, gameState) {
     renderAvailablePlayerList(availablePlayers, rosterContainer, side);
 }
 
+/** Helper to find a player's attribute value from any category. */
+function getStat(player, attrKey) {
+    if (!player || !player.attributes) return '-';
+    if (attrKey === 'height') return formatHeight(player.attributes.physical?.height);
+    if (attrKey === 'weight') return player.attributes.physical?.weight || '-';
+    
+    if (player.attributes.physical?.[attrKey] !== undefined) return player.attributes.physical[attrKey];
+    if (player.attributes.mental?.[attrKey] !== undefined) return player.attributes.mental[attrKey];
+    if (player.attributes.technical?.[attrKey] !== undefined) return player.attributes.technical[attrKey];
+    
+    return '-';
+}
+
 /** Renders a single depth chart slot. (NEW, CLEANER VERSION) */
 function renderSlot(positionSlot, roster, chart, container, side) {
     const playerId = chart[positionSlot];
@@ -966,33 +979,50 @@ function renderSlot(positionSlot, roster, chart, container, side) {
     const typeTag = player?.status?.type === 'temporary' ? '<span class="status-tag temporary">[T]</span>' : '';
 
     // --- 1. Get Key Attributes ---
-    // Use the weights to find what's important for this position
-    const keyAttributes = (positionOverallWeights && positionOverallWeights[basePosition])
-        ? Object.keys(positionOverallWeights[basePosition])
-        : ['speed', 'strength', 'agility']; // Fallback if pos not found
+    
+    // These attributes will ALWAYS be shown
+    const baseAttributes = [
+        'height', 
+        'weight', 
+        'speed', 
+        'strength', 
+        'agility', 
+        'stamina',
+        'playbookIQ' 
+    ];
 
+    // These are the "skill" attributes
+    const technicalKeys = ['throwingAccuracy', 'catchingHands', 'blocking', 'tackling', 'blockShedding'];
+
+    // Get the important *technical* skills for this position
+    const positionalAttributes = (positionOverallWeights && positionOverallWeights[basePosition])
+        ? Object.keys(positionOverallWeights[basePosition])
+            .filter(key => technicalKeys.includes(key)) // Only get skill keys
+            .sort() // Sort them alphabetically
+        : []; // Fallback
+
+    // Combine the lists, removing any duplicates
+    // (e.g., if 'playbookIQ' was in both, it won't be duplicated)
+    const allAttributes = [...new Set([...baseAttributes, ...positionalAttributes])];
+    
     // --- 2. Build Dynamic Stats HTML ---
     let statsHtml = '';
-
-    // We will always show Height and Weight
-    statsHtml += `<div class="text-center"><span class="font-semibold text-gray-500 text-xs">H</span><p>${formatHeight(getStat(player, 'height'))}</p></div>`;
-    statsHtml += `<div class="text-center"><span class="font-semibold text-gray-500 text-xs">W</span><p>${getStat(player, 'weight')}</p></div>`;
-
-    // Now show the key attributes
-    for (const attr of keyAttributes) {
+    
+    for (const attr of allAttributes) {
         const value = getStat(player, attr);
-        // Create a 3-letter abbreviation for the title
-        const abbr = (attr.charAt(0) + attr.slice(1).replace(/[aeiou]/g, '')).slice(0, 3).toUpperCase();
-        statsHtml += `<div class="text-center"><span class="font-semibold text-gray-500 text-xs" title="${attr}">${abbr}</span><p>${value}</p></div>`;
+        // Create an abbreviation for the title
+        let abbr = attr.slice(0, 3).toUpperCase();
+        if (attr === 'height') abbr = 'HGT';
+        if (attr === 'weight') abbr = 'WGT';
+        if (attr === 'playbookIQ') abbr = 'IQ';
+        if (attr === 'throwingAccuracy') abbr = 'THR';
+        if (attr === 'catchingHands') abbr = 'HND';
+        if (attr === 'blockShedding') abbr = 'BSH';
+        
+        statsHtml += `<div class="text-center"><span class="font-semibold text-gray-500 text-xs" title="${attr}">${abbr}</span><p class="font-medium">${value}</p></div>`;
     }
 
-    // --- 3. Set Dynamic Grid Columns ---
-    // Total cols = 2 (H, W) + number of key attributes
-    const totalCols = 2 + keyAttributes.length;
-    // This will result in standard classes like grid-cols-6, grid-cols-7, or grid-cols-8
-    const gridClass = `grid-cols-${totalCols}`;
-
-    // --- 4. Build the final element ---
+    // --- 3. Build the final element ---
     const slotEl = document.createElement('div');
     slotEl.className = 'depth-chart-slot bg-gray-100 p-2 rounded flex items-center justify-between gap-4';
     slotEl.dataset.positionSlot = positionSlot;
@@ -1019,11 +1049,11 @@ function renderSlot(positionSlot, roster, chart, container, side) {
             ${overall}
         </div>
 
-        <div class="flex-grow grid ${gridClass} gap-2 text-sm">
+        <div class="flex-grow grid grid-flow-col auto-cols-fr gap-3 text-sm">
             ${statsHtml}
         </div>
     `;
-
+    
     container.appendChild(slotEl);
 }
 
