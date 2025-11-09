@@ -4399,7 +4399,14 @@ export function simulateGame(homeTeam, awayTeam, options = {}) {
 
                 if (!fastSim) {
                     const yardLineText = ballOn <= 50 ? `own ${ballOn}` : `opponent ${100 - ballOn}`;
-                    gameLog.push(`--- ${down}${down === 1 ? 'st' : down === 2 ? 'nd' : down === 3 ? 'rd' : 'th'} & ${yardsToGo <= 0 ? 'Goal' : yardsToGo} from the ${yardLineText} ---`);
+
+                    // --- THIS IS THE FIX ---
+                    const yardsToGoalLine = 100 - ballOn;
+                    const isGoalToGo = yardsToGo >= yardsToGoalLine;
+                    const downText = `${down}${down === 1 ? 'st' : down === 2 ? 'nd' : down === 3 ? 'rd' : 'th'}`;
+                    const yardsText = isGoalToGo ? 'Goal' : yardsToGo;
+                    gameLog.push(`--- ${downText} & ${yardsText} from the ${yardLineText} ---`);
+                    // --- END FIX ---
                 }
 
                 // ... (Pre-snap AI and play-call logic is unchanged) ...
