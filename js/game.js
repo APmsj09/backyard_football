@@ -211,6 +211,7 @@ function getScoutedPlayerInfo(player, relationshipLevelNum) {
 
 // --- Fumble Check Helper ---
 /** Checks for a fumble during a tackle attempt. */
+/** Checks for a fumble during a tackle attempt. */
 function checkFumble(ballCarrier, tackler, playState, gameLog) {
     if (!ballCarrier || !tackler || !ballCarrier.attributes || !tackler.attributes) return false;
     const carrierModifier = (ballCarrier.attributes.mental?.toughness || 50) / 100;
@@ -218,14 +219,30 @@ function checkFumble(ballCarrier, tackler, playState, gameLog) {
     const fumbleChance = FUMBLE_CHANCE_BASE * (tacklerModifier / (carrierModifier + 0.5));
 
     if (Math.random() < fumbleChance) {
-        gameLog.push(`❗ FUMBLE! Ball knocked loose by ${tackler.name}! Recovered by Defense!`);
-        playState.turnover = true;
-        playState.playIsLive = false;
-        return true;
+        gameLog.push(`❗ FUMBLE! Ball knocked loose by ${tackler.name}!`);
+        playState.turnover = true; // It's a turnover *for now*
+
+        // --- THIS IS THE NEW LOGIC ---
+        // 1. Put the ball on the ground
+        playState.ballState.isLoose = true; // The ball is now live
+        playState.ballState.inAir = false;   // It's on the ground, not in the air
+        playState.ballState.z = 0.1;
+        playState.ballState.vx = 0;
+        playState.ballState.vy = 0;
+
+        // 2. The ball carrier no longer has the ball
+        ballCarrier.isBallCarrier = false;
+        ballCarrier.hasBall = false;
+        ballCarrier.stunnedTicks = 40; // Stun the fumbler
+
+        // 3. Stun the tackler who caused it (simulates them being in the tackle)
+        tackler.stunnedTicks = 20;
+        // --- END NEW LOGIC ---
+
+        return true; // Return true to signal a fumble happened
     }
     return false;
 }
-// --- End Fumble Check Helper ---
 
 /**
  * Simulates a defender's ability to "read" the play.
@@ -1404,6 +1421,17 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
 
     const olAssignedDefenders = new Set();
 
+    // HIGHEST PRIORITY: If ball is loose, everyone chases it.
+    if (playState.ballState.isLoose) {
+        playState.activePlayers.forEach(pState => {
+            if (pState.stunnedTicks === 0 && !pState.isEngaged) {
+                pState.targetX = playState.ballState.x;
+                pState.targetY = playState.ballState.y;
+            }
+        });
+        return; // Skip all other AI logic
+    }
+
     // 1. Get all potential threats (DL/LBs who aren't dropping)
     const allThreats = defenseStates.filter(d => {
         if (d.isBlocked || d.isEngaged) return false;
@@ -2521,8 +2549,14 @@ function checkTackleCollisions(playState, gameLog) {
             const tacklerPlayer = game.players.find(p => p && p.id === defender.id);
             if (!carrierPlayer || !tacklerPlayer) continue;
 
-            if (checkFumble(carrierPlayer, tacklerPlayer, playState, gameLog)) return true;
+            if (checkFumble(carrierPlayer, tacklerPlayer, playState, gameLog)) {
+                // A fumble happened. The play *continues* as a loose ball.
+                // We must NOT return true here.
 
+                // We *do* want to stun the original carrier.
+                ballCarrierState.stunnedTicks = 40;
+                return false; // Return false to continue the tick loop
+            }
             // --- 1. Carrier's Break Power (Modified for Successive Tackles) ---
             const carrierWeight = carrierPlayer.attributes?.physical?.weight || 180;
             const carrierSpeed = ballCarrierState.currentSpeedYPS || 0;
@@ -2604,6 +2638,53 @@ function checkTackleCollisions(playState, gameLog) {
         }
     }
     return false; // Play continues
+}
+
+/**
+ * Checks if any player is close enough to recover a loose ball.
+ * This is the "battle" logic.
+ * @returns {object|null} The player state (pState) of the recoverer, or null.
+ */
+function checkFumbleRecovery(playState, gameLog, TACKLE_RANGE) {
+    if (!playState.ballState.isLoose) return null;
+
+    const ballPos = playState.ballState;
+
+    // Find all active, non-stunned players within recovery range
+    const playersInRange = playState.activePlayers.filter(p =>
+        p.stunnedTicks === 0 &&
+        !p.isEngaged &&
+        getDistance(p, ballPos) < TACKLE_RANGE
+    );
+
+    if (playersInRange.length === 0) {
+        return null; // No one is close enough, ball is still loose
+    }
+
+    // --- A "Battle" happens! ---
+    // Every player in range gets a "recovery score"
+    let bestPlayer = null;
+    let maxScore = -Infinity;
+
+    playersInRange.forEach(p => {
+        // Agility, Hands, and Toughness matter
+        const skill = (p.agility * 0.4) + (p.catchingHands * 0.4) + (p.toughness * 0.2);
+
+        // Proximity is the most important factor
+        const distance = getDistance(p, ballPos);
+        const proximityBonus = (TACKLE_RANGE - distance) * 50; // Huge bonus for being on top of it
+
+        const roll = getRandomInt(-10, 10);
+        const finalScore = skill + proximityBonus + roll;
+
+        if (finalScore > maxScore) {
+            maxScore = finalScore;
+            bestPlayer = p;
+        }
+    });
+
+    // We have a winner
+    return bestPlayer;
 }
 
 /**
@@ -3487,7 +3568,16 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
     const playState = {
         playIsLive: true, tick: 0, maxTicks: 1000,
         yards: 0, touchdown: false, turnover: false, incomplete: false, sack: false, safety: false,
-        ballState: { x: 0, y: 0, z: 1.0, vx: 0, vy: 0, vz: 0, targetPlayerId: null, inAir: false, throwerId: null, throwInitiated: false, targetX: 0, targetY: 0 },
+        ballState: {
+            x: 0, y: 0, z: 1.0,
+            vx: 0, vy: 0, vz: 0,
+            targetPlayerId: null,
+            inAir: false,
+            isLoose: false, // <<< --- ADD THIS LINE
+            throwerId: null,
+            throwInitiated: false,
+            targetX: 0, targetY: 0
+        },
         lineOfScrimmage: 0, activePlayers: [], blockBattles: [], visualizationFrames: []
     };
     let firstDownY = 0;
@@ -3656,7 +3746,47 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
                         if (!playState.playIsLive) break;
                     }
 
-                    // D. Check for Ground / Out of Bounds (if not caught)
+                    // D. Check for Fumble Recovery
+                    if (playState.ballState.isLoose) {
+                        const recoverer = checkFumbleRecovery(playState, gameLog, TACKLE_RANGE);
+
+                        if (recoverer) {
+                            // Someone recovered the ball!
+                            playState.ballState.isLoose = false;
+                            recoverer.isBallCarrier = true;
+                            recoverer.hasBall = true;
+                            recoverer.action = 'run_path';
+
+                            if (recoverer.isOffense) {
+                                // --- OFFENSE RECOVERED ---
+                                playState.turnover = false; // It's no longer a turnover
+                                gameLog.push(`👍 ${recoverer.name} recovers the fumble!`);
+                                // Update player responsibilities
+                                playState.activePlayers.forEach(p => {
+                                    if (p.isOffense && p.id !== recoverer.id) {
+                                        p.action = 'run_block'; // Block for the runner
+                                    } else if (!p.isOffense) {
+                                        p.action = 'pursuit'; // Defense must now pursue
+                                    }
+                                });
+                            } else {
+                                // --- DEFENSE RECOVERED ---
+                                playState.turnover = true; // It is confirmed as a turnover
+                                gameLog.push(`❗ ${recoverer.name} recovers the fumble for the Defense!`);
+                                // Update player responsibilities (this was already set in checkFumble)
+                                playState.activePlayers.forEach(p => {
+                                    if (p.isOffense) {
+                                        p.action = 'pursuit';
+                                    } else if (p.id !== recoverer.id) {
+                                        p.action = 'run_block';
+                                    }
+                                });
+                            }
+                        }
+                        // If no recoverer, the ball is still loose, play continues
+                    }
+
+                    // E. Check for Ground / Out of Bounds (if not caught)
                     if (playState.playIsLive) {
                         if (ballPos.z <= 0.1 && playState.tick > 6) {
                             gameLog.push(`‹‹ Pass hits the ground. Incomplete.`);

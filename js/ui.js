@@ -1715,7 +1715,7 @@ export function drawFieldVisualization(frameData) {
     });
 
     // Draw ball only if it's in the air or this frame is the snap frame
-    if (frameData.ball && (frameData.ball.inAir || frameData.isSnap)) {
+    if (frameData.ball && (frameData.ball.inAir || frameData.isSnap || frameData.ball.isLoose)) {
         const drawX = frameData.ball.y * scaleX;
         const drawY = frameData.ball.x * scaleY;
 
