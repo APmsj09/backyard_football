@@ -624,6 +624,7 @@ function finishWeekSimulation(results) {
         try { Game.aiManageRoster(team); } catch (e) { console.error(`Error during AI roster management for ${team.name}:`, e) }
     });
     Game.generateWeeklyFreeAgents();
+    
 
     // Refresh state and UI
     gameState = Game.getGameState();

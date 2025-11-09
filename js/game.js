@@ -4522,8 +4522,10 @@ export function simulateGame(homeTeam, awayTeam, options = {}) {
                     down++;
                 } else { // Completed play
 
-                    // 💡 FIX: Check if we are ALREADY in a goal-to-go situation
-                    const wasGoalToGo = (yardsToGo < 10);
+                    const goalLineY = FIELD_LENGTH - 10; // 110
+                    const absoluteLoS_Y = ballOn + 10;
+                    const yardsToGoalLine = goalLineY - absoluteLoS_Y;
+                    const wasGoalToGo = (yardsToGo >= yardsToGoalLine);
 
                     yardsToGo -= result.yards;
 

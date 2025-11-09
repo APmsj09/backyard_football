@@ -47,18 +47,21 @@
       <p class="text-lg ...">Build your dynasty. Win the championship.</p>
 
       <div class="flex flex-col items-center gap-4">
-        <button id="start-game-btn" class="btn bg-amber-500 ...">
+        <button id="start-game-btn"
+          class="btn bg-amber-500 hover:bg-amber-600 text-white font-bold py-3 px-8 rounded-lg text-xl transition">
           Start New Game
         </button>
 
-        <button id="load-game-btn"
-          class="btn bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-6 rounded-lg text-lg transition">
-          Load Last Game
-        </button>
-        <button id="load-test-roster-btn"
-          class="btn bg-gray-500 hover:bg-gray-600 text-white font-bold py-2 px-6 rounded-lg text-lg transition">
-          Load Test Roster (Skip Draft)
-        </button>
+        <div class="flex flex-row gap-4">
+          <button id="load-game-btn"
+            class="btn bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-6 rounded-lg text-lg transition">
+            Load Last Game
+          </button>
+          <button id="load-test-roster-btn"
+            class="btn bg-gray-500 hover:bg-gray-600 text-white font-bold py-2 px-6 rounded-lg text-lg transition">
+            Load Test Roster (Skip Draft)
+          </button>
+        </div>
       </div>
     </section>
 
@@ -175,7 +178,9 @@
     </section>
 
     <section id="dashboard-screen" class="screen hidden">
+
       <div class="flex justify-between items-center p-4 bg-gray-800 text-white rounded-lg shadow-md mb-4">
+
         <div>
           <h2 id="dashboard-team-name" class="text-3xl font-bold">Your Team</h2>
           <p>
@@ -184,7 +189,9 @@
             <span id="dashboard-week" class="font-bold text-amber-400">Week 1</span>
           </p>
         </div>
-        <div class="flex gap-4"> <button id="save-test-roster-btn"
+
+        <div class="flex gap-4">
+          <button id="save-test-roster-btn"
             class="btn bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-6 rounded-lg text-lg transition">
             Save as Test Roster
           </button>
@@ -194,138 +201,140 @@
           </button>
         </div>
 
-        <div class="flex flex-col md:flex-row gap-4">
-          <nav id="dashboard-tabs" class="md:w-1/5 lg:w-1/6">
-            <button class="tab-button active" data-tab="my-team" aria-selected="true">My Team</button>
-            <button class="tab-button" data-tab="depth-chart" aria-selected="false">Depth Chart</button>
-            <button class="tab-button" data-tab="schedule" aria-selected="false">Schedule</button>
-            <button class="tab-button" data-tab="standings" aria-selected="false">Standings</button>
-            <button class="tab-button" data-tab="player-stats" aria-selected="false">Player Stats</button>
-            <button class="tab-button" data-tab="hall-of-fame" aria-selected="false">Hall of Fame</button>
-            <button class="tab-button relative" data-tab="messages" aria-selected="false">
-              Messages
-              <span id="messages-notification-dot"
-                class="absolute top-2 right-2 w-3 h-3 bg-red-500 rounded-full border-2 border-white hidden"></span>
-            </button>
-          </nav>
+      </div>
+      <div class="flex flex-col md:flex-row gap-4">
 
-          <main id="dashboard-content" class="md:w-4/5 lg:w-5/6 bg-white rounded-lg shadow p-6 min-h-[60vh]">
+        <nav id="dashboard-tabs" class="md:w-1/5 lg:w-1/6">
+          <button class="tab-button active" data-tab="my-team" aria-selected="true">My Team</button>
+          <button class="tab-button" data-tab="depth-chart" aria-selected="false">Depth Chart</button>
+          <button class="tab-button" data-tab="schedule" aria-selected="false">Schedule</button>
+          <button class="tab-button" data-tab="standings" aria-selected="false">Standings</button>
+          <button class="tab-button" data-tab="player-stats" aria-selected="false">Player Stats</button>
+          <button class="tab-button" data-tab="hall-of-fame" aria-selected="false">Hall of Fame</button>
+          <button class="tab-button relative" data-tab="messages" aria-selected="false">
+            Messages
+            <span id="messages-notification-dot"
+              class="absolute top-2 right-2 w-3 h-3 bg-red-500 rounded-full border-2 border-white hidden"></span>
+          </button>
+        </nav>
 
-            <div id="tab-content-my-team" class="tab-pane">
-              <h3 class="text-2xl font-bold mb-4">My Team Roster</h3>
-              <div id="my-team-roster">
-              </div>
+        <main id="dashboard-content" class="md:w-4/5 lg:w-5/6 bg-white rounded-lg shadow p-6 min-h-[60vh]">
+
+          <div id="tab-content-my-team" class="tab-pane">
+            <h3 class="text-2xl font-bold mb-4">My Team Roster</h3>
+            <div id="my-team-roster">
+            </div>
+          </div>
+
+          <div id="tab-content-depth-chart" class="tab-pane hidden">
+            <h3 class="text-2xl font-bold mb-4">Depth Chart</h3>
+            <div id="depth-chart-sub-tabs" class="border-b mb-4">
+              <button class="depth-chart-tab sub-tab active" data-sub-tab="offense"
+                aria-selected="true">Offense</button>
+              <button class="depth-chart-tab sub-tab" data-sub-tab="defense" aria-selected="false">Defense</button>
+              <button class="depth-chart-tab sub-tab" data-sub-tab="overalls" aria-selected="false">Positional
+                Overalls</button>
             </div>
 
-            <div id="tab-content-depth-chart" class="tab-pane hidden">
-              <h3 class="text-2xl font-bold mb-4">Depth Chart</h3>
-              <div id="depth-chart-sub-tabs" class="border-b mb-4">
-                <button class="depth-chart-tab sub-tab active" data-sub-tab="offense"
-                  aria-selected="true">Offense</button>
-                <button class="depth-chart-tab sub-tab" data-sub-tab="defense" aria-selected="false">Defense</button>
-                <button class="depth-chart-tab sub-tab" data-sub-tab="overalls" aria-selected="false">Positional
-                  Overalls</button>
-              </div>
-
-              <div id="depth-chart-offense-pane" class="depth-chart-sub-pane">
-                <label for="offense-formation-select" class="font-bold">Formation:</label>
-                <select id="offense-formation-select" class="p-1 border rounded mb-4"></select>
-                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <div id="offense-depth-chart-slots" class="md:col-span-2 space-y-4">
-                    <div id="offense-qb-slots" class="player-group">
-                      <h4 class="player-group-title">Quarterbacks</h4>
-                      <div class="slot-list"></div>
-                    </div>
-                    <div id="offense-back-slots" class="player-group">
-                      <h4 class="player-group-title">Backs (RB/FB)</h4>
-                      <div class="slot-list"></div>
-                    </div>
-                    <div id="offense-receiver-slots" class="player-group">
-                      <h4 class="player-group-title">Receivers (WR/TE)</h4>
-                      <div class="slot-list"></div>
-                    </div>
-                    <div id="offense-line-slots" class="player-group">
-                      <h4 class="player-group-title">Offensive Line (OL)</h4>
-                      <div class="slot-list"></div>
-                    </div>
+            <div id="depth-chart-offense-pane" class="depth-chart-sub-pane">
+              <label for="offense-formation-select" class="font-bold">Formation:</label>
+              <select id="offense-formation-select" class="p-1 border rounded mb-4"></select>
+              <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div id="offense-depth-chart-slots" class="md:col-span-2 space-y-4">
+                  <div id="offense-qb-slots" class="player-group">
+                    <h4 class="player-group-title">Quarterbacks</h4>
+                    <div class="slot-list"></div>
                   </div>
-                  <div id="offense-depth-chart-roster" class="roster-list space-y-2">
+                  <div id="offense-back-slots" class="player-group">
+                    <h4 class="player-group-title">Backs (RB/FB)</h4>
+                    <div class="slot-list"></div>
                   </div>
-                </div>
-              </div>
-
-              <div id="depth-chart-defense-pane" class="depth-chart-sub-pane hidden">
-                <label for="defense-formation-select" class="font-bold">Formation:</label>
-                <select id="defense-formation-select" class="p-1 border rounded mb-4"></select>
-                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <div id="defense-depth-chart-slots" class="md:col-span-2 space-y-4">
-                    <div id="defense-line-slots" class="player-group">
-                      <h4 class="player-group-title">Defensive Line (DL)</h4>
-                      <div class="slot-list"></div>
-                    </div>
-                    <div id="defense-lb-slots" class="player-group">
-                      <h4 class="player-group-title">Linebackers (LB)</h4>
-                      <div class="slot-list"></div>
-                    </div>
-                    <div id="defense-db-slots" class="player-group">
-                      <h4 class="player-group-title">Defensive Backs (DB)</h4>
-                      <div class="slot-list"></div>
-                    </div>
+                  <div id="offense-receiver-slots" class="player-group">
+                    <h4 class="player-group-title">Receivers (WR/TE)</h4>
+                    <div class="slot-list"></div>
                   </div>
-                  <div id="defense-depth-chart-roster" class="roster-list space-y-2">
+                  <div id="offense-line-slots" class="player-group">
+                    <h4 class="player-group-title">Offensive Line (OL)</h4>
+                    <div class="slot-list"></div>
                   </div>
                 </div>
-              </div>
-
-              <div id="positional-overalls-container" class="depth-chart-sub-pane hidden overflow-x-auto">
-              </div>
-            </div>
-
-            <div id="tab-content-messages" class="tab-pane hidden">
-              <h3 class="text-2xl font-bold mb-4">Messages</h3>
-              <div id="messages-list" class="space-y-2">
+                <div id="offense-depth-chart-roster" class="roster-list space-y-2">
+                </div>
               </div>
             </div>
 
-            <div id="tab-content-schedule" class="tab-pane hidden">
-              <h3 class="text-2xl font-bold mb-4">Schedule & Results</h3>
-              <div id="schedule-list">
+            <div id="depth-chart-defense-pane" class="depth-chart-sub-pane hidden">
+              <label for="defense-formation-select" class="font-bold">Formation:</label>
+              <select id="defense-formation-select" class="p-1 border rounded mb-4"></select>
+              <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div id="defense-depth-chart-slots" class="md:col-span-2 space-y-4">
+                  <div id="defense-line-slots" class="player-group">
+                    <h4 class="player-group-title">Defensive Line (DL)</h4>
+                    <div class="slot-list"></div>
+                  </div>
+                  <div id="defense-lb-slots" class="player-group">
+                    <h4 class="player-group-title">Linebackers (LB)</h4>
+                    <div class="slot-list"></div>
+                  </div>
+                  <div id="defense-db-slots" class="player-group">
+                    <h4 class="player-group-title">Defensive Backs (DB)</h4>
+                    <div class="slot-list"></div>
+                  </div>
+                </div>
+                <div id="defense-depth-chart-roster" class="roster-list space-y-2">
+                </div>
               </div>
             </div>
 
-            <div id="tab-content-standings" class="tab-pane hidden">
-              <h3 class="text-2xl font-bold mb-4">League Standings</h3>
-              <div id="standings-container" class="grid grid-cols-1 md:grid-cols-2 gap-6">
-              </div>
+            <div id="positional-overalls-container" class="depth-chart-sub-pane hidden overflow-x-auto">
             </div>
+          </div>
 
-            <div id="tab-content-player-stats" class="tab-pane hidden">
-              <h3 class="text-2xl font-bold mb-4">Player Stats</h3>
-              <div class="flex gap-4 mb-4">
-                <select id="stats-filter-team" class="p-2 border rounded">
-                </select>
-                <select id="stats-sort" class="p-2 border rounded">
-                  <option value="touchdowns">Sort by: TDs</option>
-                  <option value="passYards">Sort by: Pass Yds</option>
-                  <option value="rushYards">Sort by: Rush Yds</option>
-                  <option value="recYards">Sort by: Rec Yds</option>
-                  <option value="tackles">Sort by: Tackles</option>
-                  <option value="sacks">Sort by: Sacks</option>
-                  <option value="interceptions">Sort by: INTs</option>
-                </select>
-              </div>
-              <div id="player-stats-container">
-              </div>
+          <div id="tab-content-messages" class="tab-pane hidden">
+            <h3 class="text-2xl font-bold mb-4">Messages</h3>
+            <div id="messages-list" class="space-y-2">
             </div>
+          </div>
 
-            <div id="tab-content-hall-of-fame" class="tab-pane hidden">
-              <h3 class="text-2xl font-bold mb-4">Hall of Fame</h3>
-              <div id="hall-of-fame-list">
-              </div>
+          <div id="tab-content-schedule" class="tab-pane hidden">
+            <h3 class="text-2xl font-bold mb-4">Schedule & Results</h3>
+            <div id="schedule-list">
             </div>
+          </div>
 
-          </main>
-        </div>
+          <div id="tab-content-standings" class="tab-pane hidden">
+            <h3 class="text-2xl font-bold mb-4">League Standings</h3>
+            <div id="standings-container" class="grid grid-cols-1 md:grid-cols-2 gap-6">
+            </div>
+          </div>
+
+          <div id="tab-content-player-stats" class="tab-pane hidden">
+            <h3 class="text-2xl font-bold mb-4">Player Stats</h3>
+            <div class="flex gap-4 mb-4">
+              <select id="stats-filter-team" class="p-2 border rounded">
+              </select>
+              <select id="stats-sort" class="p-2 border rounded">
+                <option value="touchdowns">Sort by: TDs</option>
+                <option value="passYards">Sort by: Pass Yds</option>
+                <option value="rushYards">Sort by: Rush Yds</option>
+                <option value="recYards">Sort by: Rec Yds</option>
+                <option value="tackles">Sort by: Tackles</option>
+                <option value="sacks">Sort by: Sacks</option>
+                <option value="interceptions">Sort by: INTs</option>
+              </select>
+            </div>
+            <div id="player-stats-container">
+            </div>
+          </div>
+
+          <div id="tab-content-hall-of-fame" class="tab-pane hidden">
+            <h3 class="text-2xl font-bold mb-4">Hall of Fame</h3>
+            <div id="hall-of-fame-list">
+            </div>
+          </div>
+
+        </main>
+      </div>
     </section>
 
     <section id="game-sim-screen" class="screen hidden bg-gray-900 text-gray-200 p-4 rounded-lg shadow-2xl">

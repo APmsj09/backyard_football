@@ -31,6 +31,7 @@ let selectedPlayerId = null; // Used for highlighting in draft pool
 let dragPlayerId = null; // ID of player being dragged in depth chart
 let dragSide = null; // 'offense' or 'defense' being dragged from/to
 let debounceTimeout = null; // For debouncing input
+let liveGameIsConversion = false;
 
 // --- Live Game Sim State ---
 let liveGameInterval = null; // Holds interval ID for stopping/starting
@@ -1177,7 +1178,7 @@ function renderScheduleTab(gameState) {
             weekGames.forEach(g => {
                 if (!g || !g.home || !g.away) { return; }
                 let content;
-                const result = isPastWeek ? (gameState.gameResults || []).find(r => r && r.homeTeam?.id === g.home.id && r.awayTeam?.id === g.away.id) : null;
+                const result = isPastWeek ? (gameState.gameResults || []).find(r => r && r.homeTeam === g.home && r.awayTeam === g.away) : null;
                 let resultClass = '';
                 if (result) {
                     content = `<span class="${result.awayScore > result.homeScore ? 'font-bold' : ''}">${g.away.name ?? '?'} ${result.awayScore ?? '?'}</span> @ <span class="${result.homeScore > result.awayScore ? 'font-bold' : ''}">${g.home.name ?? '?'} ${result.homeScore ?? '?'}</span>`;
@@ -2096,7 +2097,13 @@ function runLiveGameTick() {
 
             // --- 🛠️ COMBINED LOGIC: Parse log AND set styles ---
             try {
-                if (playLogEntry.startsWith('-- Drive')) {
+                if (playLogEntry.includes('Conversion Attempt')) {
+                    liveGameIsConversion = true; // Set the flag
+                    styleClass = 'font-bold text-amber-400 mt-2';
+                    descriptiveText = `🏈 ${playLogEntry} 🏈`;
+                }
+
+                else if (playLogEntry.startsWith('-- Drive')) {
                     liveGameBallOn = 20; liveGameDown = 1; liveGameToGo = 10; liveGameDriveActive = true;
                     const driveMatch = playLogEntry.match(/(Drive \d+ \(H\d+\))/);
                     liveGamePossessionName = playLogEntry.includes(currentLiveGameResult.homeTeam.name) ? currentLiveGameResult.homeTeam.name : currentLiveGameResult.awayTeam.name;
@@ -2159,10 +2166,12 @@ function runLiveGameTick() {
                     playHasEnded = true; // An incompletion ends the play
 
                 } else if (playLogEntry.startsWith('🎉 TOUCHDOWN')) {
-                    if (liveGamePossessionName === currentLiveGameResult.homeTeam.name) {
-                        liveGameCurrentHomeScore += 6;
-                    } else {
-                        liveGameCurrentAwayScore += 6;
+                    if (!liveGameIsConversion) { // Only add 6 if it's NOT a conversion
+                        if (liveGamePossessionName === currentLiveGameResult.homeTeam.name) {
+                            liveGameCurrentHomeScore += 6;
+                        } else {
+                            liveGameCurrentAwayScore += 6;
+                        }
                     }
                     liveGameBallOn = 100; liveGameDriveActive = false;
                     styleClass = 'font-semibold text-green-400';
@@ -2171,14 +2180,16 @@ function runLiveGameTick() {
 
                 } else if (playLogEntry.includes('conversion GOOD!')) {
                     const points = playLogEntry.includes('2-point') ? 2 : 1;
-                    if (liveGamePossessionName === currentLiveGameResult.homeTeam.name) liveGameCurrentHomeScore += (6 + points); else liveGameCurrentAwayScore += (6 + points);
+                    if (liveGamePossessionName === currentLiveGameResult.homeTeam.name) liveGameCurrentHomeScore += points; else liveGameCurrentAwayScore += points;
+                    liveGameIsConversion = false;
                     liveGameDriveActive = false;
+                    
                     styleClass = 'font-semibold text-green-400';
                     descriptiveText = `✅ ${playLogEntry} Points are good!`;
                     playHasEnded = true; // Conversion ends
 
                 } else if (playLogEntry.includes('Conversion FAILED!')) {
-                    if (liveGamePossessionName === currentLiveGameResult.homeTeam.name) liveGameCurrentHomeScore += 6; else liveGameCurrentAwayScore += 6;
+                    liveGameIsConversion = false;
                     liveGameDriveActive = false;
                     styleClass = 'font-semibold text-red-400';
                     descriptiveText = `❌ ${playLogEntry} No good!`;
@@ -2314,6 +2325,7 @@ export function startLiveGameSim(gameResult, onComplete) {
     liveGameDriveActive = false; // Will be set true by the first drive log
     liveGamePossessionName = ''; // Will be set by the first drive log
     liveGameDriveText = "Kickoff"; // Default text
+    liveGameIsConversion = false;
 
     // --- 5. Render Initial/Static UI ---
     if (ticker) ticker.innerHTML = '';
