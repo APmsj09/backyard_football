@@ -264,6 +264,21 @@ export const offensivePlaybook = {
             'OL3': 'pass_block'
         }
     },
+    'Punt_Punt': {
+        name: 'Punt',
+        type: 'punt', // <-- NEW PLAY TYPE
+        tags: ['specialTeams'],
+        readProgression: [], // No reads
+        assignments: {
+            'QB1': 'punt', // <-- NEW ASSIGNMENT
+            'OL1': 'pass_block',
+            'OL2': 'pass_block',
+            'OL3': 'pass_block',
+            'RB1': 'pass_block',
+            'WR1': 'run_route', // Gunners run downfield
+            'WR2': 'run_route'
+        }
+    },
 };
 
 // Defensive Play Call Definitions
@@ -699,7 +714,23 @@ export const defensivePlaybook = {
             'DB2': 'zone_deep_third_right',
             'DB3': 'zone_deep_middle'
         }
-    }
+    },
+    'Punt_Return_Return': {
+        name: 'Punt Return',
+        concept: 'Zone',
+        blitz: false,
+        compatibleFormations: ['Punt_Return'], // Only works with this formation
+        tags: ['specialTeams', 'zone'],
+        assignments: {
+            'DL1': 'pass_rush', // Rush the punter
+            'DL2': 'pass_rush', // Rush the punter
+            'LB1': 'run_block', // Hold up the gunner
+            'LB2': 'run_block', // Hold up the gunner
+            'DB1': 'punt_return', // <-- NEW ASSIGNMENT
+            'DB2': 'punt_return',
+            'DB3': 'punt_return'
+        }
+    },
 };
 
 
@@ -777,6 +808,29 @@ export const offenseFormations = {
             OL1: { strength: 3, blocking: 3, weight: 1 },
             OL2: { strength: 3, blocking: 3, weight: 1 },
             OL3: { strength: 3, blocking: 3, weight: 1 }
+        }
+    },
+    'Punt': {
+        name: 'Punt',
+        personnel: { 'OL': 3, 'WR': 2, 'QB': 1, 'RB': 1 }, // 7-man team
+        slots: ['OL1', 'OL2', 'OL3', 'WR1', 'WR2', 'RB1', 'QB1'], // QB is the Punter
+        coordinates: {
+            'QB1': [0, -10],  // Punter
+            'OL1': [0, 0],    // Long snapper (at 'OL2' position)
+            'OL2': [-3, 0],   // Blocker
+            'OL3': [3, 0],    // Blocker
+            'RB1': [-1, -7],  // Personal protector
+            'WR1': [-20, 1],  // Gunner
+            'WR2': [20, 1]    // Gunner
+        },
+        slotPriorities: { // Priorities for AI to fill this formation
+            'QB1': { 'throwingAccuracy': 0.6, 'strength': 0.4 }, // Punter
+            'OL1': { 'blocking': 0.5, 'strength': 0.5 }, // Snapper
+            'OL2': { 'blocking': 0.7, 'strength': 0.3 },
+            'OL3': { 'blocking': 0.7, 'strength': 0.3 },
+            'RB1': { 'blocking': 0.5, 'playbookIQ': 0.5 }, // Protector
+            'WR1': { 'speed': 0.8, 'tackling': 0.2 }, // Gunner
+            'WR2': { 'speed': 0.8, 'tackling': 0.2 }  // Gunner
         }
     },
 };
@@ -907,6 +961,29 @@ export const defenseFormations = {
             'DB1': { speed: 0.5, agility: 0.3, catchingHands: 0.1, playbookIQ: 0.1 },
             'DB2': { speed: 0.5, agility: 0.3, catchingHands: 0.1, playbookIQ: 0.1 },
             'DB3': { speed: 0.4, playbookIQ: 0.3, agility: 0.2, tackling: 0.1 },
+        }
+    },
+    'Punt_Return': {
+        name: 'Punt Return',
+        personnel: { 'DL': 2, 'LB': 2, 'DB': 3 }, // 7-man team
+        slots: ['DL1', 'DL2', 'LB1', 'LB2', 'DB1', 'DB2', 'DB3'],
+        coordinates: {
+            'DL1': [-3, 10],  // Rusher
+            'DL2': [3, 10],   // Rusher
+            'LB1': [-15, 12], // Contain
+            'LB2': [15, 12],  // Contain
+            'DB1': [-10, 35], // Returner
+            'DB2': [10, 35],  // Returner
+            'DB3': [0, 40],   // Deep Returner
+        },
+        slotPriorities: {
+            'DL1': { 'speed': 0.6, 'blockShedding': 0.4 },
+            'DL2': { 'speed': 0.6, 'blockShedding': 0.4 },
+            'LB1': { 'blocking': 0.5, 'speed': 0.5 },
+            'LB2': { 'blocking': 0.5, 'speed': 0.5 },
+            'DB1': { 'agility': 0.6, 'speed': 0.4 },
+            'DB2': { 'agility': 0.6, 'speed': 0.4 },
+            'DB3': { 'agility': 0.7, 'speed': 0.3 }, // Best returner
         }
     },
 };

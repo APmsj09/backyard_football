@@ -3792,11 +3792,89 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
         visualizationFrames: playState.visualizationFrames
     };
 }
+/**
+ * Resolves a punt play. Calculates distance based on QB strength and accuracy.
+ * This does not use the tick simulation.
+ * @returns {object} A simple result object.
+ */
+function resolvePunt(offense, defense, gameState) {
+    const { gameLog, ballOn } = gameState;
+
+    // Find the QB from the main roster (we assume they are the punter)
+    const qb = offense.roster.find(p => p && p.id === offense.depthChart.offense.QB1);
+
+    if (!qb) {
+        gameLog.push("PUNT FAILED! No QB found on roster.");
+        // Turnover at the line of scrimmage
+        return { turnover: true, newBallOn: 100 - ballOn };
+    }
+
+    // --- 1. Calculate Punt Power & Base Distance ---
+    // We use Strength (60%) and Throwing Accuracy (40%)
+    const puntPower = (qb.attributes.physical.strength * 0.6) + (qb.attributes.technical.throwingAccuracy * 0.4);
+
+    // Base distance gives a range of 28 (min stats) to 58 (max stats) yards
+    const baseDistance = 25 + (puntPower / 3);
+
+    // --- 2. Add Variability (Your "Levels") ---
+    const consistency = qb.attributes.mental.consistency || 50;
+    const maxVariability = 10; // Max +/- 10 yards
+    const variabilityRange = maxVariability * (1 - (consistency / 100));
+
+    const finalPuntDistance = baseDistance + getRandom(-variabilityRange, variabilityRange);
+
+    // --- 3. Calculate New Ball Position ---
+    const lineOfScrimmage = ballOn + 10;
+    const puntLandingY = lineOfScrimmage + finalPuntDistance;
+
+    let newBallOn = 0; // This is the new 'ballOn' for the receiving team
+
+    if (puntLandingY >= 110) {
+        // Touchback (ball lands in or past the endzone)
+        newBallOn = 20; // Receiving team gets ball at their 20
+        gameLog.push(`🏈 PUNT by ${qb.name}. It's a TOUCHBACK!`);
+    } else {
+        // Ball lands in bounds.
+        const newBallOnField = puntLandingY - 10;
+        newBallOn = 100 - newBallOnField;
+
+        // Failsafe: Pin them deep. Ball can't be *worse* than the 1-yard line.
+        if (newBallOn < 1) newBallOn = 1;
+
+        const yardLineText = newBallOn <= 50 ? `own ${newBallOn.toFixed(0)}` : `opponent ${(100 - newBallOn).toFixed(0)}`;
+        gameLog.push(`🏈 PUNT by ${qb.name}. Ball goes ${finalPuntDistance.toFixed(1)} yards. ${defense.name} takes over at their ${yardLineText}.`);
+    }
+
+    // A punt is always a turnover
+    return { turnover: true, newBallOn: Math.round(newBallOn) };
+}
 
 
 // =============================================================
 // --- GAME SIMULATION ---
 // =============================================================
+
+/**
+ * AI logic to determine if a team should punt on 4th down.
+ * @returns {boolean} - True if the team should punt, false to go for it.
+ */
+function determinePuntDecision(down, yardsToGo, ballOn) {
+    // 1. Not 4th down? Don't punt.
+    if (down !== 4) return false;
+
+    // 2. In field goal range or "go for it" territory? (e.g., past opponent's 40-yd line)
+    if (ballOn >= 60) return false;
+
+    // 3. 4th and short? Go for it.
+    if (yardsToGo <= 2) return false;
+
+    // 4. Backed up in own territory? (e.g., inside own 10-yd line)
+    // Even if it's 4th & 1, it's too risky. Punt it.
+    if (ballOn <= 10) return true;
+
+    // 5. Otherwise (e.g., 4th & 5 from your own 30), punt.
+    return true;
+}
 
 /**
  * Determines the offensive play call based on game situation, personnel, and matchups.
@@ -3928,7 +4006,10 @@ function determinePlayCall(offense, defense, down, yardsToGo, ballOn, scoreDiff,
 
 
     // Filter plays matching the desired type (pass/run)
-    let possiblePlays = formationPlays.filter(key => offensivePlaybook[key]?.type === desiredPlayType);
+    let possiblePlays = formationPlays.filter(key =>
+        offensivePlaybook[key]?.type === desiredPlayType &&
+        offensivePlaybook[key]?.type !== 'punt'
+    );
 
     // If no plays of desired type exist (shouldn't happen with good playbook), switch type
     if (possiblePlays.length === 0) {
@@ -4029,6 +4110,8 @@ function determinePlayCall(offense, defense, down, yardsToGo, ballOn, scoreDiff,
 };
 
 
+
+
 /**
  * AI (PRE-SNAP) Logic: Chooses the best defensive formation to counter
  * the offense's personnel and the current down/distance.
@@ -4039,6 +4122,11 @@ function determinePlayCall(offense, defense, down, yardsToGo, ballOn, scoreDiff,
  * @returns {string} The name of the chosen defensive formation (e.g., "2-3-2").
  */
 function determineDefensiveFormation(defense, offenseFormationName, down, yardsToGo) {
+    // 1. Special Teams Check (Highest Priority)
+    // This is how the teams "signal" a punt.
+    if (offenseFormationName === 'Punt') {
+        return 'Punt_Return'; // Call the punt return formation
+    }
     const coachPreferredFormation = defense.coach?.preferredDefense || '3-1-3';
     const offPersonnel = offenseFormations[offenseFormationName]?.personnel;
 
@@ -4391,67 +4479,131 @@ export function simulateGame(homeTeam, awayTeam, options = {}) {
             gameLog.push(`-- Drive ${drivesThisGame + 1} (H${currentHalf}): ${offense.name} ball on ${yardLineText} --`);
 
             while (driveActive && down <= 4) {
-                // ... (Forfeit check logic is unchanged) ...
+                // --- 1. FORFEIT CHECK ---
+                // First, check if either team can't field enough players
                 if (offense.roster.filter(p => p && p.status?.duration === 0).length < MIN_HEALTHY_PLAYERS ||
                     defense.roster.filter(p => p && p.status?.duration === 0).length < MIN_HEALTHY_PLAYERS) {
-                    gameLog.push("Forfeit condition met mid-drive."); gameForfeited = true; driveActive = false; break;
+                    gameLog.push("Forfeit condition met mid-drive.");
+                    gameForfeited = true;
+                    driveActive = false;
+                    break; // Exit the drive loop immediately
                 }
 
-                if (!fastSim) {
-                    const yardLineText = ballOn <= 50 ? `own ${ballOn}` : `opponent ${100 - ballOn}`;
+                // --- 2. PUNT DECISION LOGIC ---
+                // Check if the AI decides to punt
+                const shouldPunt = determinePuntDecision(down, yardsToGo, ballOn);
 
-                    // --- THIS IS THE FIX ---
-                    const yardsToGoalLine = 100 - ballOn;
-                    const isGoalToGo = yardsToGo >= yardsToGoalLine;
-                    const downText = `${down}${down === 1 ? 'st' : down === 2 ? 'nd' : down === 3 ? 'rd' : 'th'}`;
-                    const yardsText = isGoalToGo ? 'Goal' : yardsToGo;
-                    gameLog.push(`--- ${downText} & ${yardsText} from the ${yardLineText} ---`);
-                    // --- END FIX ---
+                let result; // Declare 'result' here so it's in scope for all post-play logic
+
+                if (shouldPunt) {
+                    // --- 3A. IT'S A PUNT ---
+                    if (!fastSim) {
+                        gameLog.push(`--- 4th & ${yardsToGo <= 0 ? 'Goal' : yardsToGo}. ${offense.name} is punting. ---`);
+                    }
+
+                    // Force formations
+                    offense.formations.offense = 'Punt';
+                    defense.formations.defense = 'Punt_Return';
+
+                    // Resolve the punt (this is a simplified simulation)
+                    result = resolvePunt(offense, defense, { gameLog, ballOn });
+
+                    // Add a blank frame to the visualization to sync the log
+                    if (!fastSim && allVisualizationFrames) {
+                        allVisualizationFrames.push({
+                            players: [], ball: null, logIndex: gameLog.length,
+                            lineOfScrimmage: ballOn + 10, firstDownY: ballOn + 10 + yardsToGo
+                        });
+                    }
+
+                    // A punt is a turnover, so the drive ends.
+                    driveActive = false;
+                    nextDriveStartBallOn = result.newBallOn;
+
+                } else {
+                    // --- 3B. IT'S A NORMAL PLAY ---
+
+                    // Log the current down and distance
+                    if (!fastSim) {
+                        const yardLineText = ballOn <= 50 ? `own ${ballOn}` : `opponent ${100 - ballOn}`;
+                        const yardsToGoalLine = 100 - ballOn;
+                        // Use the corrected goal-to-go logic
+                        const isGoalToGo = (ballOn + 10) + yardsToGo >= (FIELD_LENGTH - 10);
+                        const downText = `${down}${down === 1 ? 'st' : down === 2 ? 'nd' : down === 3 ? 'rd' : 'th'}`;
+                        const yardsText = isGoalToGo ? 'Goal' : yardsToGo;
+                        gameLog.push(`--- ${downText} & ${yardsText} from the ${yardLineText} ---`);
+                    }
+
+                    // --- 4. PRE-SNAP & PLAY CALLING ---
+
+                    // Reset to default formation (in case the last play was a punt)
+                    offense.formations.offense = offense.coach.preferredOffense || 'Balanced';
+
+                    // AI determines play calls
+                    const scoreDiff = offense.id === homeTeam.id ? homeScore - awayScore : awayScore - homeScore;
+                    const drivesCompletedInHalf = drivesThisGame % totalDrivesPerHalf;
+                    const drivesRemainingInHalf = totalDrivesPerHalf - drivesCompletedInHalf;
+                    const drivesRemainingInGame = (currentHalf === 1 ? totalDrivesPerHalf : 0) + drivesRemainingInHalf;
+
+                    const offensivePlayKey_initial = determinePlayCall(offense, defense, down, yardsToGo, ballOn, scoreDiff, fastSim ? null : gameLog, drivesRemainingInGame);
+                    const offenseFormationName = offense.formations.offense; // Get the *actual* formation
+
+                    const defensiveFormationName = determineDefensiveFormation(defense, offenseFormationName, down, yardsToGo);
+                    defense.formations.defense = defensiveFormationName;
+
+                    const defensivePlayKey = determineDefensivePlayCall(defense, offense, down, yardsToGo, ballOn, scoreDiff, fastSim ? null : gameLog, drivesRemainingInGame);
+
+                    // Check for AI audible
+                    const audibleResult = aiCheckAudible(offense, offensivePlayKey_initial, defense, defensivePlayKey, fastSim ? null : gameLog);
+                    const offensivePlayKey = audibleResult.playKey;
+
+                    // Log the chosen plays
+                    if (!fastSim) {
+                        const offPlayName = offensivePlaybook[offensivePlayKey]?.name || offensivePlayKey.split('_').slice(1).join(' ');
+                        const defPlayName = defensivePlaybook[defensivePlayKey]?.name || defensivePlayKey;
+                        gameLog.push(`🏈 **Offense:** ${offPlayName} ${audibleResult.didAudible ? '(Audible)' : ''}`);
+                        gameLog.push(`🛡️ **Defense:** ${defPlayName}`);
+                    }
+
+                    // --- 5. "SNAP" (Resolve the play) ---
+                    result = resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, { gameLog: gameLog, weather, ballOn, ballHash, down, yardsToGo });
+
+                    // --- 6. POST-PLAY LOGIC ---
+
+                    // Add visualization frames
+                    if (!fastSim && result.visualizationFrames) {
+                        allVisualizationFrames.push(...result.visualizationFrames);
+                    }
+
+                    // Update ball hash position for next play
+                    if (!fastSim && !result.incomplete && result.visualizationFrames?.length > 0) {
+                        const finalBallX = result.visualizationFrames[result.visualizationFrames.length - 1].ball.x;
+                        if (finalBallX < HASH_LEFT_X) ballHash = 'L';
+                        else if (finalBallX > HASH_RIGHT_X) ballHash = 'R';
+                        else ballHash = 'M';
+                    }
+
+                    // Update ball-on-yard-line
+                    ballOn += result.yards;
+                    ballOn = Math.max(0, Math.min(100, ballOn));
                 }
 
-                // ... (Pre-snap AI and play-call logic is unchanged) ...
-                const scoreDiff = offense.id === homeTeam.id ? homeScore - awayScore : awayScore - homeScore;
-                const drivesCompletedInHalf = drivesThisGame % totalDrivesPerHalf;
-                const drivesRemainingInHalf = totalDrivesPerHalf - drivesCompletedInHalf;
-                const drivesRemainingInGame = (currentHalf === 1 ? totalDrivesPerHalf : 0) + drivesRemainingInHalf;
-                const offensivePlayKey_initial = determinePlayCall(offense, defense, down, yardsToGo, ballOn, scoreDiff, fastSim ? null : gameLog, drivesRemainingInGame);
-                const offenseFormationName = offense.formations.offense;
-                const defensiveFormationName = determineDefensiveFormation(defense, offenseFormationName, down, yardsToGo);
-                defense.formations.defense = defensiveFormationName;
-                const defensivePlayKey = determineDefensivePlayCall(defense, offense, down, yardsToGo, ballOn, scoreDiff, fastSim ? null : gameLog, drivesRemainingInGame);
-                const audibleResult = aiCheckAudible(offense, offensivePlayKey_initial, defense, defensivePlayKey, fastSim ? null : gameLog);
-                const offensivePlayKey = audibleResult.playKey;
-                if (!fastSim) {
-                    const offPlayName = offensivePlayKey.split('_').slice(1).join(' ');
-                    const defPlayName = defensivePlaybook[defensivePlayKey]?.name || defensivePlayKey;
-                    gameLog.push(`🏈 **Offense:** ${offPlayName} ${audibleResult.didAudible ? '(Audible)' : ''}`);
-                    gameLog.push(`🛡️ **Defense:** ${defPlayName}`);
-                }
+                // --- 7. HANDLE PLAY RESULT (for both punt and normal plays) ---
 
-                // --- 5. "Snap" ---
-                const result = resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, { gameLog: gameLog, weather, ballOn, ballHash, down, yardsToGo });
-                if (!fastSim && result.visualizationFrames) {
-                    allVisualizationFrames.push(...result.visualizationFrames);
-                }
-                if (!fastSim && !result.incomplete && result.visualizationFrames?.length > 0) {
-                    const finalBallX = result.visualizationFrames[result.visualizationFrames.length - 1].ball.x;
-                    if (finalBallX < HASH_LEFT_X) ballHash = 'L';
-                    else if (finalBallX > HASH_RIGHT_X) ballHash = 'R';
-                    else ballHash = 'M';
-                }
+                // This logic runs *after* the if/else, but *inside* the while loop
 
-                ballOn += result.yards;
-                ballOn = Math.max(0, Math.min(100, ballOn));
-
-                // --- (Post-play logic from your previous version) ---
                 if (result.turnover) {
                     driveActive = false;
-                    nextDriveStartBallOn = 100 - ballOn; // Flipped field
+                    // If it was a punt, newBallOn was already set.
+                    // If it was a regular turnover, set it now.
+                    if (!shouldPunt) {
+                        nextDriveStartBallOn = 100 - ballOn; // Flipped field
+                    }
                 } else if (result.safety) {
                     if (!fastSim) gameLog.push(`SAFETY! 2 points for ${defense.name}!`);
                     if (defense.id === homeTeam.id) homeScore += 2; else awayScore += 2;
                     driveActive = false;
-                    nextDriveStartBallOn = 20;
+                    nextDriveStartBallOn = 20; // Safety punt
                 } else if (result.touchdown) {
                     const wasOffensiveTD = !result.turnover;
 
@@ -4459,79 +4611,72 @@ export function simulateGame(homeTeam, awayTeam, options = {}) {
                         // --- OFFENSIVE TD: Run the conversion attempt ---
                         ballOn = 100; // Mark the touchdown
 
-                        // --- 1. Decide Conversion Type ---
-                        const goesForTwo = Math.random() > 0.85; // 15% chance to go for 2
+                        const goesForTwo = Math.random() > 0.85; // 15% chance
                         const points = goesForTwo ? 2 : 1;
-                        const conversionBallOn = goesForTwo ? 95 : 98; // 2pt from 5-yd line, 1pt from 2-yd line
-                        const conversionYardsToGo = 100 - conversionBallOn; // Yards needed (5 or 2)
+                        const conversionBallOn = goesForTwo ? 95 : 98; // 5-yd or 2-yd line
+                        const conversionYardsToGo = 100 - conversionBallOn;
 
                         if (!fastSim) gameLog.push(`--- ${points}-Point Conversion Attempt (from the ${conversionYardsToGo}-yd line) ---`);
 
-                        // --- 2. Call the Play ---
+                        // Force default formations for conversion
+                        offense.formations.offense = offense.coach.preferredOffense || 'Balanced';
                         const conversionOffensePlayKey = determinePlayCall(offense, defense, 1, conversionYardsToGo, conversionBallOn, scoreDiff, gameLog, drivesRemainingInGame);
+
                         const conversionDefenseFormation = determineDefensiveFormation(defense, offense.formations.offense, 1, conversionYardsToGo);
                         defense.formations.defense = conversionDefenseFormation;
                         const conversionDefensePlayKey = determineDefensivePlayCall(defense, offense, 1, conversionYardsToGo, conversionBallOn, scoreDiff, gameLog, drivesRemainingInGame);
 
-                        // Log the conversion play calls
                         if (!fastSim) {
-                            const offPlayName = conversionOffensePlayKey.split('_').slice(1).join(' ');
+                            const offPlayName = offensivePlaybook[conversionOffensePlayKey]?.name || conversionOffensePlayKey.split('_').slice(1).join(' ');
                             const defPlayName = defensivePlaybook[conversionDefensePlayKey]?.name || defensivePlayKey;
                             gameLog.push(`🏈 **Offense:** ${offPlayName}`);
                             gameLog.push(`🛡️ **Defense:** ${defPlayName}`);
                         }
 
-                        // --- 3. Resolve the Play ---
                         const conversionResult = resolvePlay(offense, defense, conversionOffensePlayKey, conversionDefensePlayKey, {
                             gameLog: fastSim ? null : gameLog,
-                            weather,
-                            ballOn: conversionBallOn,
-                            ballHash: 'M',
-                            down: 1,
-                            yardsToGo: conversionYardsToGo
+                            weather, ballOn: conversionBallOn, ballHash: 'M', down: 1, yardsToGo: conversionYardsToGo
                         });
 
-                        // --- 4. Add Visualization Frames ---
                         if (!fastSim && conversionResult.visualizationFrames) {
                             allVisualizationFrames.push(...conversionResult.visualizationFrames);
                         }
 
-                        // --- 5. Tally Score ---
-                        // First, award 6 points for the initial touchdown
+                        // Tally Score
                         if (offense.id === homeTeam.id) homeScore += 6; else awayScore += 6;
 
-                        // Now, handle *only* the conversion points
                         if (conversionResult.touchdown) {
                             if (!conversionResult.turnover) {
-                                // --- 1. OFFENSE scored the conversion ---
+                                // OFFENSE scored conversion
                                 if (!fastSim) gameLog.push(`✅ ${points}-point conversion GOOD!`);
                                 if (offense.id === homeTeam.id) homeScore += points; else awayScore += points;
                             } else {
-                                // --- 2. DEFENSE scored on a turnover (Defensive 2-pt) ---
+                                // DEFENSE scored on a turnover (Defensive 2-pt)
                                 if (!fastSim) gameLog.push(`❌ ${points}-point conversion FAILED... AND RETURNED!`);
                                 if (defense.id === homeTeam.id) homeScore += 2; else awayScore += 2;
                             }
                         } else {
-                            // --- 3. No TD on conversion (Failed attempt) ---
+                            // No TD on conversion (Failed attempt)
                             if (!fastSim) gameLog.push(`❌ ${points}-point conversion FAILED!`);
                         }
 
                     } else {
-                        // --- DEFENSIVE TD: No conversion, just add 6 ---
-                        if (!fastSim) gameLog.push(`DEFENSIVE TOUCHDOWN! 6 points for ${defense.name}!`); // 💡 Added log
+                        // --- DEFENSIVE TD ---
+                        if (!fastSim) gameLog.push(`DEFENSIVE TOUCHDOWN! 6 points for ${defense.name}!`);
                         if (defense.id === homeTeam.id) homeScore += 6; else awayScore += 6;
                     }
 
-                    // 💡 FIX: These lines now run for BOTH offensive and defensive TDs,
-                    // ensuring the drive always ends after any touchdown.
+                    // This runs for BOTH offensive and defensive TDs
                     driveActive = false;
-                    nextDriveStartBallOn = 20; // After any TD, the next drive is a "kickoff"
+                    nextDriveStartBallOn = 20; // Next drive is a kickoff
+
                 } else if (result.incomplete) {
                     down++;
-                } else { // Completed play
+
+                } else if (!shouldPunt) { // Completed play (and not a punt)
 
                     const goalLineY = FIELD_LENGTH - 10; // 110
-                    const absoluteLoS_Y = ballOn + 10;
+                    const absoluteLoS_Y = (ballOn - result.yards) + 10; // BallOn *before* the play
                     const yardsToGoalLine = goalLineY - absoluteLoS_Y;
                     const wasGoalToGo = (yardsToGo >= yardsToGoalLine);
 
@@ -4539,36 +4684,29 @@ export function simulateGame(homeTeam, awayTeam, options = {}) {
 
                     if (yardsToGo <= 0) { // First down
                         down = 1;
+                        const newYardsToGoalLine = 100 - ballOn;
 
-                        const yardsToGoalLine = 100 - ballOn;
-
-                        if (yardsToGoalLine <= 10) {
-                            // We are now 1st & Goal
-                            yardsToGo = yardsToGoalLine;
+                        if (newYardsToGoalLine <= 10) {
+                            yardsToGo = newYardsToGoalLine; // 1st & Goal
                         } else {
-                            // Normal 1st & 10
-                            yardsToGo = 10;
+                            yardsToGo = 10; // 1st & 10
                         }
-
-                        // Failsafe for being on the goal line.
-                        // This prevents "yards to go" from being 0.
-                        if (yardsToGo <= 0) yardsToGo = 1;
+                        if (yardsToGo <= 0) yardsToGo = 1; // Failsafe on goal line
 
                         if (!fastSim) {
                             const newYardLineText = ballOn <= 50 ? `own ${ballOn}` : `opponent ${100 - ballOn}`;
-                            gameLog.push(`➡️ First down ${offense.name}! ${yardsToGoalLine <= 10 ? `1st & Goal at the ${yardsToGoalLine}` : `1st & 10 at the ${newYardLineText}`}.`);
+                            gameLog.push(`➡️ First down ${offense.name}! ${newYardsToGoalLine <= 10 ? `1st & Goal at the ${newYardsToGoalLine}` : `1st & 10 at the ${newYardLineText}`}.`);
                         }
 
                     } else { // Not a first down
                         down++;
-                        // 💡 FIX: If it was Goal-to-go, it's *still* Goal-to-go
-                        // This ensures the log text is correct.
                         if (wasGoalToGo) {
-                            yardsToGo = 100 - ballOn; // e.g., 3rd & Goal at the 2
+                            yardsToGo = 100 - ballOn; // Still Goal-to-go
                         }
                     }
                 }
 
+                // --- 8. CHECK FOR TURNOVER ON DOWNS ---
                 if (down > 4 && driveActive) {
                     if (!fastSim) {
                         const finalYardLineText = ballOn <= 50 ? `own ${ballOn}` : `opponent ${100 - ballOn}`;
@@ -4577,7 +4715,7 @@ export function simulateGame(homeTeam, awayTeam, options = {}) {
                     driveActive = false;
                     nextDriveStartBallOn = 100 - ballOn; // Flipped field
                 }
-            } // --- End Play Loop ---
+            } // --- End Play Loop (while driveActive && down <= 4) ---
 
             drivesThisGame++;
             if (drivesThisGame < totalDrivesPerHalf * 2 && !gameForfeited) {
