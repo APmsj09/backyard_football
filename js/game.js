@@ -1,13 +1,13 @@
 // game.js - COMPLETE FILE
 
 // --- Imports ---
-import { getRandom, getRandomInt } from './utils.js'; 
+import { getRandom, getRandomInt } from './utils.js';
 import {
     calculateOverall,
     calculateSlotSuitability,
     generatePlayer,
     positionOverallWeights,
-    estimateBestPosition  
+    estimateBestPosition
 } from './game/player.js';
 import { getDistance, updatePlayerPosition } from './game/physics.js';
 
@@ -220,11 +220,11 @@ function checkFumble(ballCarrier, tackler, playState, gameLog) {
     if (!ballCarrier?.attributes?.physical || !tackler?.attributes?.technical) {
         return false;
     }
-    
+
     // Find the live pState objects to get their current stun status
     const ballCarrierState = playState.activePlayers.find(p => p.id === ballCarrier.id);
     const tacklerState = playState.activePlayers.find(p => p.id === tackler.id);
-    
+
     // If states can't be found (shouldn't happen), exit
     if (!ballCarrierState || !tacklerState) {
         return false;
@@ -238,7 +238,7 @@ function checkFumble(ballCarrier, tackler, playState, gameLog) {
     const carrierModifier = toughness / 100;
     const tacklerModifier = (strength + tackling) / 100;
     // --- 💡 END FIX ---
-    
+
     const fumbleChance = FUMBLE_CHANCE_BASE * (tacklerModifier / (carrierModifier + 0.5));
 
     if (Math.random() < fumbleChance) {
@@ -1066,7 +1066,7 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
     // --- 💡 FIX: Changed the invalid fallback 'Cover_2_Zone' to a valid key ---
     const defPlay = defensivePlaybook[defensivePlayKey] || defensivePlaybook['Cover_2_Zone_3-1-3']; // Fallback if key invalid
     // --- 💡 END FIX ---
-    
+
     const defAssignments = defPlay.assignments || {};
 
     // Set the line of scrimmage (adding 10 for the endzone offset)
@@ -2564,25 +2564,24 @@ function checkBlockCollisions(playState) {
  * Checks for tackle attempts (MODIFIED with Momentum and Successive Tackle Penalty)
  * Assumes: The caller ensures defender.stunnedTicks is reset after a success/play end.
  */
+// game.js
+
 function checkTackleCollisions(playState, gameLog) {
     const ballCarrierState = playState.activePlayers.find(p => p.isBallCarrier);
     if (!ballCarrierState) return false;
 
-    // Filter defenders who are active and not engaged
     const activeDefenders = playState.activePlayers.filter(p =>
-        p.teamId !== ballCarrierState.teamId && // Not on the carrier's team
+        p.teamId !== ballCarrierState.teamId &&
         !p.isBlocked &&
         !p.isEngaged &&
         p.stunnedTicks === 0
     );
 
-    // --- 💡 FIX: Initialize the tackle counter if it doesn't exist ---
     if (ballCarrierState.tacklesBrokenThisPlay === undefined) {
         ballCarrierState.tacklesBrokenThisPlay = 0;
     }
-    // --- 💡 END FIX ---
 
-    const MOMENTUM_SCALING_FACTOR = 0.1; // Base scaling for carrier
+    const MOMENTUM_SCALING_FACTOR = 0.1;
     const TACKLE_RANGE_CHECK = TACKLE_RANGE;
 
     for (const defender of activeDefenders) {
@@ -2593,59 +2592,43 @@ function checkTackleCollisions(playState, gameLog) {
             if (!carrierPlayer || !tacklerPlayer) continue;
 
             if (checkFumble(carrierPlayer, tacklerPlayer, playState, gameLog)) {
-                // A fumble happened. The play *continues* as a loose ball.
-                // We must NOT return true here.
-
-                // We *do* want to stun the original carrier.
                 ballCarrierState.stunnedTicks = 40;
-                return false; // Return false to continue the tick loop
+                return false;
             }
-            // --- 1. Carrier's Break Power (Modified for Successive Tackles) ---
+
             const carrierWeight = carrierPlayer.attributes?.physical?.weight || 180;
             const carrierSpeed = ballCarrierState.currentSpeedYPS || 0;
-
-            // Apply heavy penalty for each broken tackle (e.g., 20% penalty per broken tackle)
             const successiveTacklePenalty = ballCarrierState.tacklesBrokenThisPlay * 0.20;
-            const skillModifier = Math.max(0.1, 1.0 - successiveTacklePenalty); // Minimum 10% skill retained
-
-            // Base "Break" skill = 100% Agility + 50% Strength
+            const skillModifier = Math.max(0.1, 1.0 - successiveTacklePenalty);
             const carrierSkill = (
                 (carrierPlayer.attributes?.physical?.agility || 50) * 1.0 +
                 (carrierPlayer.attributes?.physical?.strength || 50) * 0.5
-            ) * skillModifier; // Apply penalty here
-
-            // Momentum Bonus (less affected by penalty, as momentum is physical)
+            ) * skillModifier;
             const carrierMomentum = (carrierWeight * carrierSpeed) * MOMENTUM_SCALING_FACTOR;
-
             const breakPower = (carrierSkill + carrierMomentum) * ballCarrierState.fatigueModifier;
-
 
             // --- 2. Tackler's Power (Easier to Tackle) ---
             const tacklerWeight = tacklerPlayer.attributes?.physical?.weight || 200;
             const tacklerSpeed = defender.currentSpeedYPS || 0;
-
             // Base "Tackle" skill = 100% Tackling + 50% Strength
             const tacklerSkill = (
                 (tacklerPlayer.attributes?.technical?.tackling || 50) * 1.0 +
                 (tacklerPlayer.attributes?.physical?.strength || 50) * 0.5
             );
-
             // Momentum Bonus (Tacklers get a 1.5x bonus for hitting hard)
             const tacklerMomentum = (tacklerWeight * tacklerSpeed) * (MOMENTUM_SCALING_FACTOR * 1.5);
-
             const tacklePower = (tacklerSkill + tacklerMomentum) * defender.fatigueModifier;
-
-
             // --- 3. The Resolution (More Predictable) ---
-            const roll = getRandomInt(-10, 10); // Reduced randomness to favor stats
-            const diff = (breakPower + roll) - tacklePower; // Roll now helps the carrier (simplified from previous logic)
+            const roll = getRandomInt(-10, 10);
+            const diff = (breakPower + roll) - tacklePower;
 
             if (diff <= 0) { // Tackle success
                 playState.yards = ballCarrierState.y - playState.lineOfScrimmage;
                 playState.playIsLive = false;
 
-                // ... (Sack/Tackle logging logic) ...
-                if (ballCarrierState.slot === 'QB1' && (ballCarrierState.action === 'qb_setup' || ballCarrierState.action === 'qb_scramble') && ballCarrierState.y < playState.lineOfScrimGmage) {
+                // --- 💡 FIX: Corrected the typo 'lineOfScrimGmage' to 'lineOfScrimmage' ---
+                if (ballCarrierState.slot === 'QB1' && (ballCarrierState.action === 'qb_setup' || ballCarrierState.action === 'qb_scramble') && ballCarrierState.y < playState.lineOfScrimmage) {
+                    // --- 💡 END FIX ---
                     playState.sack = true;
                     gameLog.push(`💥 SACK! ${tacklerPlayer.name} (TklPwr: ${tacklePower.toFixed(0)}) gets to ${ballCarrierState.name}!`);
                 } else {
@@ -2654,26 +2637,18 @@ function checkTackleCollisions(playState, gameLog) {
 
                 return true; // Play ended
             } else { // Broken tackle (Juke)
-                // Increment the counter for the penalty to apply next time
                 ballCarrierState.tacklesBrokenThisPlay++;
-
-                // --- 🛠️ NEW: SET JUKE ACTION & COOLDOWN ---
-                ballCarrierState.action = 'juke'; // Set temporary action state
-                ballCarrierState.jukeTicks = 12; // New timer to run the visualization effect
-
-                // Momentum Loss: Halve the current speed
+                ballCarrierState.action = 'juke';
+                ballCarrierState.jukeTicks = 12;
                 ballCarrierState.currentSpeedYPS *= 0.5;
 
                 gameLog.push(`💥 ${ballCarrierState.name} (BrkPwr: ${breakPower.toFixed(0)}) breaks tackle from ${defender.name} (TklPwr: ${tacklePower.toFixed(0)})!`);
-
-                // Stun the immediate tackler for failing
                 defender.stunnedTicks = 40;
 
-                // Check for nearby defenders to stun (group juke)
-                const JUKE_STUN_RADIUS = 3.0; // 3 yards (9 feet)
+                const JUKE_STUN_RADIUS = 3.0;
                 playState.activePlayers.forEach(p => {
                     if (!p.isOffense && p.id !== defender.id && p.stunnedTicks === 0 && getDistance(ballCarrierState, p) < JUKE_STUN_RADIUS) {
-                        p.stunnedTicks = 15; // Shorter stun for being close
+                        p.stunnedTicks = 15;
                         gameLog.push(`[Juke]: ${p.name} was juked out of the play!`);
                     }
                 });
@@ -3230,7 +3205,7 @@ function handleBallArrival(playState, gameLog) {
     }
 
     // 3. Find Key Players and Distances
-    const CATCH_CHECK_RADIUS = 2.5; 
+    const CATCH_CHECK_RADIUS = 2.5;
     const receiverPlayer = game.players.find(p => p && p.id === targetPlayerState.id); // Get full receiver object
 
     const closestDefenderState = playState.activePlayers
@@ -3238,7 +3213,7 @@ function handleBallArrival(playState, gameLog) {
         .sort((a, b) => getDistance(a, playState.ballState) - getDistance(b, playState.ballState))[0];
 
     const defenderPlayer = closestDefenderState ? game.players.find(p => p && p.id === closestDefenderState.id) : null;
-    
+
     // --- 💡 FIX: Find the throwerPlayer *before* the interception check ---
     const throwerPlayer = game.players.find(p => p && p.id === playState.ballState.throwerId);
     ensureStats(throwerPlayer); // Make sure throwerPlayer.gameStats exists
@@ -3256,7 +3231,7 @@ function handleBallArrival(playState, gameLog) {
         let defenderPower = (defCatchSkill * 0.6 + defAgility * 0.4) * closestDefenderState.fatigueModifier;
 
         let receiverPresencePenalty = 0;
-        if (receiverInRange && receiverPlayer?.attributes) { 
+        if (receiverInRange && receiverPlayer?.attributes) {
             const recCatchSkill = receiverPlayer.attributes.technical?.catchingHands || 50;
             const recStrength = receiverPlayer.attributes.physical?.strength || 50;
             receiverPresencePenalty = ((recCatchSkill * 0.5 + recStrength * 0.2) * targetPlayerState.fatigueModifier) / 3;
@@ -3270,7 +3245,7 @@ function handleBallArrival(playState, gameLog) {
             eventResolved = true;
             gameLog.push(`❗ INTERCEPTION! ${closestDefenderState.name} (Catch: ${defCatchSkill}) jumps the route!`);
             playState.turnover = true;
-            
+
             closestDefenderState.isBallCarrier = true;
             closestDefenderState.hasBall = true;
             closestDefenderState.action = 'run_path';
@@ -3282,10 +3257,10 @@ function handleBallArrival(playState, gameLog) {
                 if (p.isOffense) { p.action = 'pursuit'; }
                 else if (p.id !== closestDefenderState.id) { p.action = 'run_block'; }
             });
-            
+
             ensureStats(defenderPlayer);
             defenderPlayer.gameStats.interceptions = (defenderPlayer.gameStats.interceptions || 0) + 1;
-            
+
             // --- 💡 FIX: This check is now safe because we ensured stats earlier ---
             if (throwerPlayer) {
                 throwerPlayer.gameStats.interceptionsThrown = (throwerPlayer.gameStats.interceptionsThrown || 0) + 1;
@@ -3314,7 +3289,7 @@ function handleBallArrival(playState, gameLog) {
             playState.playIsLive = false;
         }
     }
-    
+
     else if (!eventResolved && defenderInRange && !receiverInRange) {
         eventResolved = true; // The defender resolved this play
         gameLog.push(`🚫 **SWATTED!** Pass to ${targetPlayerState.name} is broken up by ${closestDefenderState.name}!`);
@@ -3328,9 +3303,9 @@ function handleBallArrival(playState, gameLog) {
         const recCatchSkill = receiverPlayer.attributes.technical?.catchingHands || 50;
         const recConsistency = receiverPlayer.attributes.mental?.consistency || 50;
         let receiverPower = (recCatchSkill * 0.8 + recConsistency * 0.2) * targetPlayerState.fatigueModifier;
-        
+
         let interferencePenalty = 0;
-        const interferenceRadius = 2.0; 
+        const interferenceRadius = 2.0;
 
         if (defenderInRange && closestDefenderState) {
             const distToReceiver = getDistance(targetPlayerState, closestDefenderState);
@@ -3346,16 +3321,16 @@ function handleBallArrival(playState, gameLog) {
         const receiverProximity = getDistance(targetPlayerState, playState.ballState);
         const proximityBonusRec = Math.max(0, (CATCH_CHECK_RADIUS - receiverProximity) * 15);
         receiverPower += proximityBonusRec;
-        
+
         let positionalPenalty = 0;
         if (interferencePenalty > 0 && closestDefenderState) {
             if (closestDefenderState.y < targetPlayerState.y) {
-                positionalPenalty = 20; 
+                positionalPenalty = 20;
             } else {
-                positionalPenalty = -10; 
+                positionalPenalty = -10;
             }
         }
-        
+
         const catchRoll = receiverPower + getRandomInt(0, 20);
         const difficulty = interferencePenalty + positionalPenalty + 25 + getRandomInt(0, 10); // Base difficulty 25-35
 
@@ -3363,21 +3338,21 @@ function handleBallArrival(playState, gameLog) {
             targetPlayerState.isBallCarrier = true; targetPlayerState.hasBall = true;
             targetPlayerState.action = 'run_path';
             playState.yards = targetPlayerState.y - playState.lineOfScrimmage;
-            if (interferencePenalty > 10) { 
+            if (interferencePenalty > 10) {
                 gameLog.push(`👍 CATCH! ${targetPlayerState.name} (Catch: ${recCatchSkill}) makes a tough contested reception!`);
             } else {
                 gameLog.push(`👍 CATCH! ${targetPlayerState.name} (Catch: ${recCatchSkill}) makes the reception!`);
             }
-            
+
             playState.activePlayers.forEach(p => {
                 if (p.isOffense && p.id !== targetPlayerState.id) {
-                    p.action = 'run_block'; 
+                    p.action = 'run_block';
                 }
             });
 
             ensureStats(receiverPlayer);
             receiverPlayer.gameStats.receptions = (receiverPlayer.gameStats.receptions || 0) + 1;
-            
+
             // --- 💡 FIX: This check is now safe ---
             if (throwerPlayer) {
                 throwerPlayer.gameStats.passCompletions = (throwerPlayer.gameStats.passCompletions || 0) + 1;
@@ -4028,18 +4003,19 @@ function determinePlayCall(offense, defense, down, yardsToGo, ballOn, scoreDiff,
     const offenseFormation = offenseFormations[offenseFormationName];
     const defenseFormation = defenseFormations[defenseFormationName];
 
+    // --- 💡 FIX: Added optional chaining '?' to prevent crash if defenseFormation is undefined ---
     if (!offenseFormation?.personnel || !defenseFormation?.personnel) {
+        // --- 💡 END FIX ---
         console.error(`CRITICAL ERROR: Formation data missing for ${offense.name} (${offenseFormationName}) or ${defense.name} (${defenseFormationName}).`);
         return 'Balanced_InsideRun';
     }
 
     // --- 2. Calculate Average Positional Strengths ---
-    // Helper to get average overall for a position group (using active players if possible, else roster)
+    // (Rest of the function is identical)
     const getAvgOverall = (team, positions) => {
-        // Ideally, use players currently on field, but roster average is a good proxy
         const players = team.roster.filter(p => p && (positions.includes(p.favoriteOffensivePosition) || positions.includes(p.favoriteDefensivePosition)));
-        if (players.length === 0) return 40; // Default low score if no players found
-        const totalOvr = players.reduce((sum, p) => sum + calculateOverall(p, positions[0]), 0); // Use first pos in list for calc
+        if (players.length === 0) return 40;
+        const totalOvr = players.reduce((sum, p) => sum + calculateOverall(p, positions[0]), 0);
         return totalOvr / players.length;
     };
 
@@ -4052,67 +4028,55 @@ function determinePlayCall(offense, defense, down, yardsToGo, ballOn, scoreDiff,
     const avgDbOvr = getAvgOverall(defense, ['DB']);
 
     // --- 3. Determine Base Pass Chance (Situational Factors) ---
-    let passChance = 0.45; // Base inclination
+    let passChance = 0.45;
 
-    // Down & Distance
     if (down === 3 && yardsToGo >= 7) passChance += 0.35;
     else if (down === 3 && yardsToGo >= 4) passChance += 0.20;
-    else if (down === 4 && yardsToGo >= 4) passChance = 0.90; // Must pass if long
-    else if (down === 4 && yardsToGo >= 2) passChance = 0.60; // Likely pass if medium
-    else if (yardsToGo <= 2) passChance -= 0.35; // Short yardage favors run
+    else if (down === 4 && yardsToGo >= 4) passChance = 0.90;
+    else if (down === 4 && yardsToGo >= 2) passChance = 0.60;
+    else if (yardsToGo <= 2) passChance -= 0.35;
 
-    // Field Position (Red Zone)
-    if (ballOn > 85) passChance -= 0.15; // Closer to endzone, slightly favors run/quick pass
-    if (ballOn > 95) passChance -= 0.25; // Goal line heavily favors run
+    if (ballOn > 85) passChance -= 0.15;
+    if (ballOn > 95) passChance -= 0.25;
 
-    // Game Situation (Score & Time)
-    const totalDrivesPerHalf = 8; // Approx
-    const isLateGame = drivesRemaining <= 3; // Adjusted threshold
+    const totalDrivesPerHalf = 8;
+    const isLateGame = drivesRemaining <= 3;
     const isEndOfHalf = (drivesRemaining % totalDrivesPerHalf <= 1) && drivesRemaining <= totalDrivesPerHalf;
     const urgencyFactor = isLateGame || isEndOfHalf;
 
-    if (scoreDiff < -14) passChance += (urgencyFactor ? 0.4 : 0.25); // Trailing big
-    else if (scoreDiff < -7) passChance += (urgencyFactor ? 0.25 : 0.15); // Trailing
-    if (scoreDiff > 10 && urgencyFactor) passChance -= 0.4; // Leading big, late -> run clock
-    else if (scoreDiff > 4 && urgencyFactor) passChance -= 0.2; // Leading moderately, late -> lean run
+    if (scoreDiff < -14) passChance += (urgencyFactor ? 0.4 : 0.25);
+    else if (scoreDiff < -7) passChance += (urgencyFactor ? 0.25 : 0.15);
+    if (scoreDiff > 10 && urgencyFactor) passChance -= 0.4;
+    else if (scoreDiff > 4 && urgencyFactor) passChance -= 0.2;
 
     // --- 4. Adjust Pass Chance based on Matchups & Personnel ---
-
-    // Personnel Mismatch (Offense Formation vs Defense Formation)
     const offWRs = offenseFormation.personnel.WR || 0;
     const defDBs = defenseFormation.personnel.DB || 0;
     const offHeavy = (offenseFormation.personnel.RB || 0) + (offenseFormation.personnel.OL || 0);
     const defBox = (defenseFormation.personnel.DL || 0) + (defenseFormation.personnel.LB || 0);
 
-    if (offWRs > defDBs + 1) passChance += 0.15; // Significant WR advantage vs DBs
-    if (offHeavy > defBox + 1) passChance -= 0.15; // Significant blocking advantage vs Box
+    if (offWRs > defDBs + 1) passChance += 0.15;
+    if (offHeavy > defBox + 1) passChance -= 0.15;
 
-    // Player Quality Matchup
-    if (avgWrOvr > avgDbOvr + 15) passChance += 0.20; // Big WR advantage
+    if (avgWrOvr > avgDbOvr + 15) passChance += 0.20;
     else if (avgWrOvr > avgDbOvr + 7) passChance += 0.10;
-    if (avgDbOvr > avgWrOvr + 10) passChance -= 0.15; // Big DB advantage
+    if (avgDbOvr > avgWrOvr + 10) passChance -= 0.15;
 
-    if (avgOlOvr > (avgDlOvr + avgLbOvr) / 2 + 10) passChance -= 0.10; // OL dominates front -> easier runs
-    if ((avgDlOvr + avgLbOvr) / 2 > avgOlOvr + 15) passChance += 0.15; // Front dominates OL -> harder runs
+    if (avgOlOvr > (avgDlOvr + avgLbOvr) / 2 + 10) passChance -= 0.10;
+    if ((avgDlOvr + avgLbOvr) / 2 > avgOlOvr + 15) passChance += 0.15;
 
-    // QB vs RB Strength
-    if (avgQbOvr < 55 && avgRbOvr > 60) passChance -= 0.15; // Weak QB, rely on RB
-    if (avgRbOvr < 55 && avgQbOvr > 60) passChance += 0.10; // Weak RB, rely on QB
+    if (avgQbOvr < 55 && avgRbOvr > 60) passChance -= 0.15;
+    if (avgRbOvr < 55 && avgQbOvr > 60) passChance += 0.10;
     if (avgQbOvr > avgRbOvr + 15) passChance += 0.05;
     if (avgRbOvr > avgQbOvr + 15) passChance -= 0.05;
 
-    // Coach Tendency
-    // --- Run-Heavy Coaches ---
     if (coach.type === 'Ground and Pound') passChance -= 0.20;
-    if (coach.type === 'Trench Warfare') passChance -= 0.25; // Even more run-focused
+    if (coach.type === 'Trench Warfare') passChance -= 0.25;
+    if (coach.type === 'West Coast Offense') passChance += 0.10;
+    if (coach.type === 'Youth Scout') passChance += 0.10;
+    if (coach.type === 'Skills Coach') passChance += 0.20;
+    if (coach.type === 'Air Raid') passChance += 0.35;
 
-    // --- Pass-Happy Coaches ---
-    if (coach.type === 'West Coast Offense') passChance += 0.10; // WCO often short passes
-    if (coach.type === 'Youth Scout') passChance += 0.10; // Prefers Spread
-    if (coach.type === 'Skills Coach') passChance += 0.20; // Wants to use his playmakers
-    if (coach.type === 'Air Raid') passChance += 0.35; // Very pass-heavy
-
-    // Clamp final chance
     passChance = Math.max(0.05, Math.min(0.95, passChance));
 
     // --- 5. Determine Play Type (Pass or Run) ---
@@ -4125,79 +4089,57 @@ function determinePlayCall(offense, defense, down, yardsToGo, ballOn, scoreDiff,
         return 'Balanced_InsideRun'; // Fallback
     }
 
-    // Short Yardage Special Case (QB Sneak / Power Run)
-    if (yardsToGo <= 1 && Math.random() < 0.7) { // High chance for sneak/power in short yardage
-        if (avgQbOvr > 60 && Math.random() < 0.5) { // If decent QB, consider sneak
-            const sneakPlay = formationPlays.find(p => offensivePlaybook[p]?.tags?.includes('sneak')); // Need a sneak play tag
+    if (yardsToGo <= 1 && Math.random() < 0.7) {
+        if (avgQbOvr > 60 && Math.random() < 0.5) {
+            const sneakPlay = formationPlays.find(p => offensivePlaybook[p]?.tags?.includes('sneak'));
             if (sneakPlay) return sneakPlay;
         }
-        // Prioritize Power runs if available
         const powerPlays = formationPlays.filter(p => offensivePlaybook[p]?.tags?.includes('power') && offensivePlaybook[p]?.type === 'run');
         if (powerPlays.length > 0) return getRandom(powerPlays);
-        // Fallback to any inside run
         const insideRuns = formationPlays.filter(p => offensivePlaybook[p]?.tags?.includes('inside') && offensivePlaybook[p]?.type === 'run');
         if (insideRuns.length > 0) return getRandom(insideRuns);
-        // If absolutely nothing else, default back to desired type
     }
 
-
-    // Filter plays matching the desired type (pass/run)
     let possiblePlays = formationPlays.filter(key =>
         offensivePlaybook[key]?.type === desiredPlayType &&
         offensivePlaybook[key]?.type !== 'punt'
     );
 
-    // If no plays of desired type exist (shouldn't happen with good playbook), switch type
     if (possiblePlays.length === 0) {
         desiredPlayType = (desiredPlayType === 'pass' ? 'run' : 'pass');
         possiblePlays = formationPlays.filter(key => offensivePlaybook[key]?.type === desiredPlayType);
-        if (possiblePlays.length === 0) return formationPlays[0]; // Absolute fallback
+        if (possiblePlays.length === 0) return formationPlays[0];
     }
 
     let chosenPlay = null;
-
-    // --- Basic Read of Defensive Personnel ---
-    const isHeavyBox = defBox >= 5; // e.g., 4-2-1 or 3-1-3 (3DL+3LB=6) qualifies
-    const isLightBox = defBox <= 3; // e.g., 2-3-2 (2DL+3LB=5, but LBs might be spread) - Needs refinement
+    const isHeavyBox = defBox >= 5;
+    const isLightBox = defBox <= 3;
     const hasManyDBs = defDBs >= 2;
-
-    // --- Refined Play Selection (with Smart Variety) ---
 
     if (desiredPlayType === 'pass') {
         const deepPlays = possiblePlays.filter(p => offensivePlaybook[p]?.tags?.includes('deep'));
         const shortPlays = possiblePlays.filter(p => offensivePlaybook[p]?.tags?.includes('short') || offensivePlaybook[p]?.tags?.includes('screen'));
         const mediumPlays = possiblePlays.filter(p => !deepPlays.includes(p) && !shortPlays.includes(p));
-
         let weightedOptions = [];
-
-        // --- 1. Define the Situation ---
         const isLongPass = yardsToGo >= 8;
         const isShortPass = yardsToGo <= 4;
 
-        // --- 2. Build Weighted List based on Situation ---
         if (isLongPass) {
-            // Obvious "Long" down: NO short plays.
-            weightedOptions.push(...(deepPlays || []), ...(deepPlays || [])); // Heavily weight deep
-            weightedOptions.push(...(mediumPlays || []));                     // Also allow medium
+            weightedOptions.push(...(deepPlays || []), ...(deepPlays || []));
+            weightedOptions.push(...(mediumPlays || []));
         } else if (isShortPass) {
-            // Obvious "Short" down: NO deep plays.
-            weightedOptions.push(...(shortPlays || []), ...(shortPlays || [])); // Heavily weight short
-            weightedOptions.push(...(mediumPlays || []));                       // Also allow medium
+            weightedOptions.push(...(shortPlays || []), ...(shortPlays || []));
+            weightedOptions.push(...(mediumPlays || []));
         } else {
-            // "Normal" down (e.g., 1st & 10, 2nd & 7): Add ALL options for variety.
             weightedOptions.push(...(deepPlays || []));
             weightedOptions.push(...(mediumPlays || []));
             weightedOptions.push(...(shortPlays || []));
         }
 
-        // --- 3. Adjust based on defense (this logic is still good) ---
-        if (isHeavyBox && shortPlays.length > 0) weightedOptions.push(...shortPlays); // Add more short vs heavy box
-        if (hasManyDBs && mediumPlays.length > 0) weightedOptions.push(...mediumPlays); // Add more medium vs many DBs
+        if (isHeavyBox && shortPlays.length > 0) weightedOptions.push(...shortPlays);
+        if (hasManyDBs && mediumPlays.length > 0) weightedOptions.push(...mediumPlays);
 
-        // --- 4. Select Play ---
         if (weightedOptions.length === 0) {
-            // Fallback: If no situation met (e.g., only have 'short' plays on 3rd & 10)
-            // just pick from any available pass play.
             weightedOptions.push(...possiblePlays);
         }
         chosenPlay = getRandom(weightedOptions);
@@ -4206,47 +4148,32 @@ function determinePlayCall(offense, defense, down, yardsToGo, ballOn, scoreDiff,
         const insidePlays = possiblePlays.filter(p => offensivePlaybook[p]?.tags?.includes('inside'));
         const outsidePlays = possiblePlays.filter(p => offensivePlaybook[p]?.tags?.includes('outside'));
         const powerPlays = possiblePlays.filter(p => offensivePlaybook[p]?.tags?.includes('power'));
-
         let weightedOptions = [];
-
-        // --- 1. Define the Situation ---
         const isShortYardage = yardsToGo <= 2;
 
-        // --- 2. Adjust based on defense FIRST ---
-        if (isLightBox) weightedOptions.push(...(insidePlays || []), ...(insidePlays || [])); // Attack light box
-        if (isHeavyBox) weightedOptions.push(...(outsidePlays || [])); // Bounce outside
+        if (isLightBox) weightedOptions.push(...(insidePlays || []), ...(insidePlays || []));
+        if (isHeavyBox) weightedOptions.push(...(outsidePlays || []));
 
-        // --- 3. Build Weighted List based on Situation ---
         if (isShortYardage) {
-            // Obvious "Short" down: NO outside plays (dumb call).
-            weightedOptions.push(...(powerPlays || []), ...(powerPlays || [])); // Heavily weight power
-            weightedOptions.push(...(insidePlays || []));                       // Also allow inside
+            weightedOptions.push(...(powerPlays || []), ...(powerPlays || []));
+            weightedOptions.push(...(insidePlays || []));
         } else {
-            // "Normal" run down: Add ALL options for variety.
             weightedOptions.push(...(insidePlays || []));
             weightedOptions.push(...(outsidePlays || []));
             weightedOptions.push(...(powerPlays || []));
         }
 
-        // --- 4. Add player strength factor ---
         if (avgRbOvr > 65 && outsidePlays.length > 0 && Math.random() < 0.4) weightedOptions.push(...outsidePlays);
 
-        // --- 5. Select Play ---
         if (weightedOptions.length === 0) {
-            // Fallback: just pick from any available run play.
             weightedOptions.push(...possiblePlays);
         }
         chosenPlay = getRandom(weightedOptions);
     }
 
-    // Final fallback
     chosenPlay = chosenPlay || getRandom(possiblePlays) || formationPlays[0];
-    // gameLog.push(`Off Play Call: ${chosenPlay} (Pass Chance: ${passChance.toFixed(2)})`); // Optional: Log decision
     return chosenPlay;
 };
-
-
-
 
 /**
  * AI (PRE-SNAP) Logic: Chooses the best defensive formation to counter
@@ -5261,7 +5188,7 @@ export function simulateWeek(options = {}) {
 
     if (!game.gameResults) game.gameResults = [];
 
-    
+
     // We must save a minimal version of the result to prevent circular JSON errors
     const minimalResults = results.map(r => ({
         homeTeam: { id: r.homeTeam.id, name: r.homeTeam.name },
