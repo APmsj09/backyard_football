@@ -68,6 +68,24 @@ function debounce(func, delay) {
     };
 }
 
+/** Helper: Gets full player objects from a team's roster of IDs. */
+function getUIRosterObjects(team) {
+    if (!team || !Array.isArray(team.roster)) return [];
+    
+    const gs = getGameState(); // Get the master game state
+    if (!gs || !Array.isArray(gs.players)) return [];
+
+    // Handle old save files or non-ID rosters
+    if (team.roster.length > 0 && typeof team.roster[0] === 'object' && team.roster[0] !== null) {
+        console.warn("Detected old save file format. Please start a new game.");
+        return team.roster.filter(p => p);
+    }
+    
+    // New way: Look up IDs from the master list
+    const rosterIds = new Set(team.roster);
+    return gs.players.filter(p => p && rosterIds.has(p.id));
+}
+
 /**
  * Grabs references to all necessary DOM elements and stores them in the 'elements' object.
  */
@@ -399,7 +417,6 @@ export function renderDraftScreen(gameState, onPlayerSelect, currentSelectedId, 
     const { year, draftOrder, currentPick, playerTeam, players, teams } = gameState;
     const ROSTER_LIMIT = 10;
 
-    // Only check if we've reached the end of the draft order
     if (currentPick >= draftOrder.length) {
         if (elements.draftHeader) elements.draftHeader.innerHTML = `<h2 class="text-3xl font-bold">Season ${year} Draft Complete</h2>`;
         if (elements.draftPlayerBtn) { elements.draftPlayerBtn.disabled = true; elements.draftPlayerBtn.textContent = 'Draft Complete'; }
@@ -415,19 +432,20 @@ export function renderDraftScreen(gameState, onPlayerSelect, currentSelectedId, 
         if (elements.draftHeader) elements.draftHeader.innerHTML = `<h2 class="text-3xl font-bold text-red-500">Draft Error Occurred</h2>`;
         return;
     }
-
-    // Check if current team can still draft
+    
+    // --- 💡 FIX: Use .roster.length (array of IDs is fine for a count) ---
     const currentTeamRosterSize = pickingTeam.roster?.length || 0;
     const playerCanPick = pickingTeam.id === playerTeam.id && currentTeamRosterSize < ROSTER_LIMIT;
 
-    // Update header with detailed pick information
     if (elements.draftYear) elements.draftYear.textContent = year;
     if (elements.draftPickNumber) elements.draftPickNumber.textContent = `${currentPick + 1} (${currentTeamRosterSize}/${ROSTER_LIMIT} players)`;
     if (elements.draftPickingTeam) elements.draftPickingTeam.textContent = pickingTeam.name || 'Unknown Team';
 
     renderDraftPool(gameState, onPlayerSelect, sortColumn, sortDirection);
-    renderPlayerRoster(gameState.playerTeam);
-    updateDraftSortIndicators(sortColumn, sortDirection); // <<< Add this call
+    
+    // --- 💡 FIX: Pass playerTeam object (renderPlayerRoster will call the helper) ---
+    renderPlayerRoster(gameState.playerTeam); 
+    updateDraftSortIndicators(sortColumn, sortDirection); 
 
     if (elements.draftPlayerBtn) {
         elements.draftPlayerBtn.disabled = !playerCanPick || currentSelectedId === null;
@@ -445,6 +463,9 @@ export function renderDraftPool(gameState, onPlayerSelect, sortColumn, sortDirec
         return;
     }
 
+    // --- 💡 FIX: Get roster objects for relationship calc ---
+    const playerRoster = getUIRosterObjects(gameState.playerTeam);
+    
     const undraftedPlayers = gameState.players.filter(p => p && !p.teamId);
     const searchTerm = elements.draftSearch?.value.toLowerCase() || '';
     const posFilter = elements.draftFilterPos?.value || '';
@@ -527,7 +548,8 @@ export function renderDraftPool(gameState, onPlayerSelect, sortColumn, sortDirec
     }
 
     filteredPlayers.forEach(player => {
-        const maxLevel = gameState.playerTeam.roster.reduce(
+        // --- 💡 FIX: Use the playerRoster objects we fetched earlier ---
+        const maxLevel = playerRoster.reduce(
             (max, rp) => Math.max(max, getRelationshipLevel(rp.id, player.id)),
             relationshipLevels.STRANGER.level
         );
@@ -600,8 +622,10 @@ export function renderSelectedPlayerCard(player, gameState) {
         if (elements.draftPlayerBtn) elements.draftPlayerBtn.disabled = true;
         return;
     }
-
-    const maxLevel = gameState.playerTeam.roster.reduce(
+    
+    // --- 💡 FIX: Get roster objects for relationship calc ---
+    const playerRoster = getUIRosterObjects(gameState.playerTeam);
+    const maxLevel = playerRoster.reduce(
         (max, rp) => Math.max(max, getRelationshipLevel(rp.id, player.id)),
         relationshipLevels.STRANGER.level
     );
@@ -660,8 +684,11 @@ export function renderPlayerRoster(playerTeam) {
         console.error("Cannot render player roster: Missing elements or playerTeam data.");
         return;
     }
-    const roster = playerTeam.roster || [];
+    
+    // --- 💡 FIX: Get roster objects ---
+    const roster = getUIRosterObjects(playerTeam);
     const ROSTER_LIMIT = 10;
+    
     elements.rosterCount.textContent = `${roster.length}/${ROSTER_LIMIT}`;
     elements.draftRosterList.innerHTML = '';
 
@@ -671,20 +698,20 @@ export function renderPlayerRoster(playerTeam) {
         roster.forEach(player => {
             if (!player) return;
             const li = document.createElement('li');
-            const estimatedPos = estimateBestPosition(player, positionOverallWeights); // Recalculate based on known stats
+            const estimatedPos = estimateBestPosition(player, positionOverallWeights); 
             li.className = 'p-2';
-            li.textContent = `${player.name} (${estimatedPos ?? '?'})`; // <<< Use estimate
+            li.textContent = `${player.name} (${estimatedPos ?? '?'})`; 
             elements.draftRosterList.appendChild(li);
         });
     }
-    renderRosterSummary(playerTeam);
+    
+    // --- 💡 FIX: Pass the full roster objects ---
+    renderRosterSummary(roster);
 }
 
 /** Renders the average overall ratings for the player's current roster. */
-function renderRosterSummary(playerTeam) {
-    if (!elements.rosterSummary || !playerTeam) return;
-
-    const roster = playerTeam.roster || [];
+function renderRosterSummary(roster) { // 💡 FIX: Now accepts the roster objects directly
+    if (!elements.rosterSummary) return;
 
     if (roster.length === 0) {
         elements.rosterSummary.innerHTML = '<p class="text-xs text-gray-500">Your roster is empty.</p>';
@@ -692,16 +719,13 @@ function renderRosterSummary(playerTeam) {
     }
 
     let summaryHtml = '<h5 class="font-bold text-sm mb-1">Team Starters</h5><div class="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">';
-
-    // 1. Create a pool of players who can start
-    //    (Not temporary and not injured)
+    
     let availablePlayers = roster.filter(p =>
         p &&
         p.attributes &&
         p.status?.type !== 'temporary' &&
         p.status?.duration === 0
     );
-
     // 2. Loop through each position we need to fill
     Object.keys(positionOverallWeights).forEach(pos => {
 
@@ -848,7 +872,7 @@ function renderMyTeamTab(gameState) {
         if (elements.myTeamRoster) elements.myTeamRoster.innerHTML = '<p class="text-red-500">Error loading roster data.</p>';
         return;
     }
-    const roster = gameState.playerTeam.roster;
+    const roster = getUIRosterObjects(gameState.playerTeam);
 
     const physicalAttrs = ['height', 'weight', 'speed', 'strength', 'agility', 'stamina'];
     const mentalAttrs = ['playbookIQ', 'clutch', 'consistency', 'toughness'];
@@ -949,21 +973,20 @@ function getSlotContainerId(positionSlot, side) {
 function renderDepthChartTab(gameState) {
     if (!gameState || !gameState.playerTeam || !gameState.playerTeam.roster || !gameState.playerTeam.formations || !gameState.playerTeam.depthChart) {
         console.error("Cannot render depth chart: Invalid game state.");
-        // Clear all panes just in case
         if (elements.positionalOverallsContainer) elements.positionalOverallsContainer.innerHTML = '<p class="text-red-500">Error loading depth chart data.</p>';
         if (elements.offenseDepthChartPane) elements.offenseDepthChartPane.innerHTML = '<p class="text-red-500">Error loading offense data.</p>';
         if (elements.defenseDepthChartPane) elements.defenseDepthChartPane.innerHTML = '<p class="text-red-500">Error loading defense data.</p>';
         return;
     }
     
-    // This function is still fine
-    renderPositionalOveralls(gameState.playerTeam.roster.filter(p => p && p.status?.type !== 'temporary'));
+    // --- 💡 FIX: Get roster objects ---
+    const permanentRoster = getUIRosterObjects(gameState.playerTeam)
+                                .filter(p => p && p.status?.type !== 'temporary');
 
-    // These are also fine
+    renderPositionalOveralls(permanentRoster);
     renderFormationDropdown('offense', Object.values(offenseFormations), gameState.playerTeam.formations.offense);
     renderFormationDropdown('defense', Object.values(defenseFormations), gameState.playerTeam.formations.defense);
 
-    // --- 💡 NEW: Call the new side-rendering functions ---
     renderDepthChartSide('offense', gameState);
     renderDepthChartSide('defense', gameState);
 }
@@ -979,12 +1002,15 @@ function renderFormationDropdown(side, formations, currentFormationName) {
 }
 
 /** Renders the table showing overall ratings for each player at each position. */
-function renderPositionalOveralls(roster) {
+function renderPositionalOveralls(roster) { // 💡 FIX: Accepts roster objects
     if (!elements.positionalOverallsContainer) return;
     const positions = Object.keys(positionOverallWeights);
     let table = `<table class="min-w-full text-sm text-left"><thead class="bg-gray-100"><tr><th scope="col" class="p-2 font-semibold sticky left-0 bg-gray-100 z-10">Player</th>${positions.map(p => `<th scope="col" class="p-2 font-semibold text-center">${p}</th>`).join('')}</tr></thead><tbody>`;
+    
+    // --- 💡 FIX: roster is now the full object array ---
     if (roster && roster.length > 0) {
         roster.forEach(player => {
+    // --- 💡 END FIX ---
             if (!player) return;
             table += `<tr class="border-b"><th scope="row" class="p-2 font-bold sticky left-0 bg-white z-0">${player.name}</th>${positions.map(p => `<td class="p-2 text-center">${calculateOverall(player, p)}</td>`).join('')}</tr>`;
         });
@@ -1006,17 +1032,20 @@ function renderDepthChartSide(side, gameState) {
         return;
     }
     
-    const { roster, depthChart, formations } = gameState.playerTeam;
+    const { depthChart, formations } = gameState.playerTeam;
+    // --- 💡 FIX: Get roster objects ---
+    const roster = getUIRosterObjects(gameState.playerTeam);
+    
     const currentChart = depthChart[side] || {};
     const formationName = formations[side];
     const formationData = (side === 'offense' ? offenseFormations[formationName] : defenseFormations[formationName]);
 
-    // Find players who are not starting
     const playersStartingOnThisSide = new Set(Object.values(currentChart).filter(Boolean));
+    
+    // --- 💡 FIX: Filter from our full roster object list ---
     const benchedPlayers = roster.filter(p => p && !playersStartingOnThisSide.has(p.id) && p.status?.type !== 'temporary');
 
-    // Call the new helper functions
-    renderVisualFormationSlots(visualFieldContainer, currentChart, formationData, benchedPlayers, roster, side);
+    renderVisualFormationSlots(visualFieldContainer, currentChart, formationData, benchedPlayers, roster, side); // Pass full roster
     renderDepthChartBench(benchTableContainer, benchedPlayers, side);
 }
 
@@ -2086,38 +2115,36 @@ function renderLiveStatsBox(gameResult) {
  * Reads live fatigue data from the provided frame.
  */
 function renderSimPlayers(frame) {
-    // Helper to find the correct team object (home or away) from the live game result
     const findTeamInResult = (playerTeamId) => {
         if (!currentLiveGameResult) return null;
         if (currentLiveGameResult.homeTeam?.id === playerTeamId) return currentLiveGameResult.homeTeam;
         if (currentLiveGameResult.awayTeam?.id === playerTeamId) return currentLiveGameResult.awayTeam;
-        return null; // Player's team not in this game
+        return null; 
     };
 
     try {
         if (!elements.simPlayersList || !currentLiveGameResult) {
-            // Don't render if element is missing or game isn't running
             return;
         }
 
-        // 1. FIX: Get the player's team from the LIVE game result, not global state
-        const gs = getGameState(); // Still need this for the player's team ID
+        const gs = getGameState(); 
         const playerTeamId = gs?.playerTeam?.id;
-        const team = findTeamInResult(playerTeamId);
+        const team = findTeamInResult(playerTeamId); // This is the team object with roster IDs
 
         if (!team || !playerTeamId) {
             elements.simPlayersList.innerHTML = '<p class="text-gray-400">No team data available for this game.</p>';
             return;
         }
-        const roster = team.roster || [];
+        
+        // --- 💡 FIX: Get roster objects using the helper ---
+        const roster = getUIRosterObjects(team);
         const depth = team.depthChart || {};
-
-        // 2. Create a Map of current fatigue values from the frame
+        // --- 💡 END FIX ---
+        
         const fatigueMap = new Map();
         if (frame && frame.players) {
             frame.players.forEach(pState => {
                 if (pState.teamId === team.id) {
-                    // Use 'pState.fatigue' which we added in Step 1
                     fatigueMap.set(pState.id, pState.fatigue);
                 }
             });
@@ -2182,7 +2209,7 @@ function renderSimPlayers(frame) {
         // Attach handlers
         elements.simPlayersList.querySelectorAll('.sub-in-btn').forEach(btn => {
             btn.onclick = (e) => {
-                const inId = parseInt(btn.dataset.playerId, 10);
+                const inId = btn.dataset.playerId;
                 // Build select of available starter slots (with side + slot)
                 const slotOptions = [];
                 Object.keys(depth).forEach(side => {
@@ -2214,7 +2241,7 @@ function renderSimPlayers(frame) {
 
         elements.simPlayersList.querySelectorAll('.sub-out-btn').forEach(btn => {
             btn.onclick = (e) => {
-                const outId = parseInt(btn.dataset.playerId, 10);
+                const outId = btn.dataset.playerId;
                 // Choose incoming bench player to swap with
                 const benchPlayers = roster.filter(p => p && !starterIds.has(p.id));
                 if (benchPlayers.length === 0) {

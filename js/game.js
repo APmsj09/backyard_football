@@ -565,8 +565,8 @@ export function setupDraft() {
 
 /** Automatically sets depth chart for an AI team. */
 export function aiSetDepthChart(team) {
-   const roster = getRosterObjects(team);
-    
+    const roster = getRosterObjects(team);
+
     if (!team || !roster || !team.depthChart || !team.formations) {
         console.error(`aiSetDepthChart: Invalid team data for ${team?.name || 'unknown team'}.`); return;
     }
@@ -582,7 +582,7 @@ export function aiSetDepthChart(team) {
         depthChart[side] = newChartSide;
     }
 
-   
+
     const sides = ['defense', 'offense'];
     const alreadyAssignedPlayerIds = new Set(); // Tracks players who have a starting job
 
@@ -837,19 +837,25 @@ function checkInGameInjury(player, gameLog) {
     }
 }
 
-/** Finds the best available substitute player. */
+// game.js
+
 function getBestSub(team, position, usedPlayerIds) {
-    if (!team || !team.roster || !Array.isArray(team.roster)) {
+    // --- 💡 FIX: Get roster objects ---
+    const roster = getRosterObjects(team);
+    if (!team || !roster || !Array.isArray(roster)) {
+        // --- 💡 END FIX ---
         console.warn("getBestSub: Invalid team or roster provided."); return null;
     }
-    const availableSubs = team.roster.filter(p => p && p.status?.duration === 0 && !usedPlayerIds.has(p.id));
+    // --- 💡 FIX: Filter from our full roster object list ---
+    const availableSubs = roster.filter(p => p && p.status?.duration === 0 && !usedPlayerIds.has(p.id));
     if (availableSubs.length === 0) return null;
     return availableSubs.reduce((best, current) => (calculateOverall(current, position) > calculateOverall(best, position)) ? current : best, availableSubs[0]);
 }
 
 /** Gets active players for specific slots (e.g., all 'WR' slots). */
 function getPlayersForSlots(team, side, slotPrefix, usedPlayerIdsThisPlay, gameLog) {
-    if (!team || !team.depthChart || !team.depthChart[side] || !team.roster || !Array.isArray(team.roster)) {
+    const roster = getRosterObjects(team);
+    if (!team || !team.depthChart || !team.depthChart[side] || !roster) {
         console.error(`getPlayersForSlots: Invalid team data for ${team?.id}, side ${side}.`); return [];
     }
     // Defensive: ensure usedPlayerIdsThisPlay is a Set
@@ -863,7 +869,7 @@ function getPlayersForSlots(team, side, slotPrefix, usedPlayerIdsThisPlay, gameL
     const activePlayers = [];
     slots.forEach(slot => {
         const starterId = sideDepthChart[slot];
-        let player = team.roster.find(p => p && p.id === starterId);
+        let player = roster.find(p => p && p.id === starterId);
         if (!player || player.status?.duration > 0 || usedPlayerIdsThisPlay.has(player.id)) {
             player = getBestSub(team, position, usedPlayerIdsThisPlay);
         }
@@ -875,36 +881,36 @@ function getPlayersForSlots(team, side, slotPrefix, usedPlayerIdsThisPlay, gameL
     return activePlayers;
 }
 
-/** Gets a single, healthy player for a specific slot. */
+// game.js
+
 function getPlayerBySlot(team, side, slot, usedPlayerIdsThisPlay) {
-    if (!team || !team.depthChart || !team.depthChart[side] || !team.roster) {
+    const roster = getRosterObjects(team);
+    if (!team || !team.depthChart || !team.depthChart[side] || !roster) {
         console.error(`getPlayerBySlot: Invalid team data for ${slot} on ${side}.`);
         return null;
     }
 
-    // Defensive: ensure usedPlayerIdsThisPlay is a Set
     usedPlayerIdsThisPlay = ensureSet(usedPlayerIdsThisPlay);
 
     const sideDepthChart = team.depthChart[side];
     const starterId = sideDepthChart[slot];
 
     // --- STEP 1: Try to get the designated starter ---
-    let player = team.roster.find(p => p && p.id === starterId);
+    // --- 💡 FIX: Find from our full roster object list ---
+    let player = roster.find(p => p && p.id === starterId);
 
-    // Check if the starter is ineligible (injured or already used this play)
     if (player && (player.status?.duration > 0 || usedPlayerIdsThisPlay.has(player.id))) {
-        player = null; // Mark the starter as unusable
+        player = null;
     }
 
     // --- STEP 2: If starter is ineligible, find the BEST possible substitute ---
     if (!player) {
-        const availableSubs = team.roster.filter(p =>
+        // --- 💡 FIX: Filter from our full roster object list ---
+        const availableSubs = roster.filter(p =>
             p && p.status?.duration === 0 && !usedPlayerIdsThisPlay.has(p.id)
         );
 
         if (availableSubs.length > 0) {
-            // --- 🛠️ FIX: Use smart logic, not getBestSub ---
-            // Find the sub with the highest "suitability" for THIS slot
             player = availableSubs.reduce((best, current) => {
                 const bestScore = calculateSlotSuitability(best, slot, side, team);
                 const currentScore = calculateSlotSuitability(current, slot, side, team);
@@ -919,11 +925,9 @@ function getPlayerBySlot(team, side, slot, usedPlayerIdsThisPlay) {
         return player;
     }
 
-    // --- STEP 4: Absolute fallback (find an emergency player) ---
-    // If no subs were found (e.g., everyone is used), try to grab ANYONE.
-    // This calls the "dumb" getBestSub as a last resort.
+    // --- STEP 4: Absolute fallback ---
     const position = slot.replace(/\d/g, '');
-    const emergencySub = getBestSub(team, position, usedPlayerIdsThisPlay);
+    const emergencySub = getBestSub(team, position, usedPlayerIdsThisPlay); // getBestSub also needs fix
     if (emergencySub) {
         usedPlayerIdsThisPlay.add(emergencySub.id);
         return emergencySub;
@@ -932,14 +936,19 @@ function getPlayerBySlot(team, side, slot, usedPlayerIdsThisPlay) {
     return null; // No one is available
 }
 
-/** Finds *any* healthy, unused player on the roster as a last resort. */
+// game.js
+
 function findEmergencyPlayer(position, team, side, usedPlayerIdsThisPlay) {
-    if (!team || !team.roster || !Array.isArray(team.roster)) {
+    // --- 💡 FIX: Get roster objects ---
+    const roster = getRosterObjects(team);
+    if (!team || !roster || !Array.isArray(roster)) {
+    // --- 💡 END FIX ---
         console.warn(`findEmergencyPlayer: Invalid team data for ${position}.`); return null;
     }
-    // Defensive: ensure usedPlayerIdsThisPlay is a Set
+
     usedPlayerIdsThisPlay = ensureSet(usedPlayerIdsThisPlay);
-    const availablePlayers = team.roster.filter(p => p && p.status?.duration === 0 && !usedPlayerIdsThisPlay.has(p.id));
+    // --- 💡 FIX: Filter from our full roster object list ---
+    const availablePlayers = roster.filter(p => p && p.status?.duration === 0 && !usedPlayerIdsThisPlay.has(p.id));
     if (availablePlayers.length === 0) {
         console.warn(`findEmergencyPlayer: No healthy, unused players found on roster for ${position}.`); return null;
     }
@@ -5241,13 +5250,16 @@ export function callFriend(playerId) {
         return { success: false, message: "Game state error prevented calling friend." };
     }
     const team = game.playerTeam;
-    if (!team.roster.some(p => p && p.status?.duration > 0)) {
+    // --- 💡 FIX: Get roster objects ---
+    const roster = getRosterObjects(team);
+    if (!roster.some(p => p && p.status?.duration > 0)) {
+    // --- 💡 END FIX ---
         return { success: false, message: "You can only call a friend if a player on your team is currently injured or busy." };
     }
     const player = game.freeAgents.find(p => p && p.id === playerId);
     if (!player) return { success: false, message: "That player is no longer available this week." };
 
-    const maxLevel = team.roster.reduce(
+    const maxLevel = roster.reduce( // Use the roster objects
         (max, rosterPlayer) => Math.max(max, getRelationshipLevel(rosterPlayer?.id, playerId)),
         relationshipLevels.STRANGER.level
     );
@@ -5259,8 +5271,11 @@ export function callFriend(playerId) {
 
     if (Math.random() < successChance) {
         player.status = { type: 'temporary', description: 'Helping Out', duration: 1 };
-        if (addPlayerToTeam(player, team)) {
-            team.roster.forEach(rosterPlayer => {
+        if (addPlayerToTeam(player, team)) { // This now adds an ID
+            // --- 💡 FIX: Get the full roster objects to do relationship improvements ---
+            const fullRoster = getRosterObjects(team);
+            fullRoster.forEach(rosterPlayer => {
+            // --- 💡 END FIX ---
                 if (rosterPlayer && rosterPlayer.id !== player.id) {
                     improveRelationship(rosterPlayer.id, player.id);
                 }
@@ -5278,13 +5293,15 @@ export function callFriend(playerId) {
     }
 }
 
+// game.js
 
-/**
- * AI logic for signing temporary free agents if roster is short.
- */
 export function aiManageRoster(team) {
     if (!team || !team.roster || !game || !game.freeAgents || !team.coach) return;
-    let healthyCount = team.roster.filter(p => p && p.status?.duration === 0).length;
+    
+    // --- 💡 FIX: Get roster objects ---
+    const roster = getRosterObjects(team);
+    let healthyCount = roster.filter(p => p && p.status?.duration === 0).length;
+    // --- 💡 END FIX ---
 
     while (healthyCount < MIN_HEALTHY_PLAYERS && game.freeAgents.length > 0) {
         const bestFA = game.freeAgents
@@ -5300,9 +5317,10 @@ export function aiManageRoster(team) {
 
         if (Math.random() < aiSuccessChance) {
             bestFA.status = { type: 'temporary', description: 'Helping Out', duration: 1 };
-            if (addPlayerToTeam(bestFA, team)) {
-                // Recompute healthy count from roster (temporary players have duration>0 and are not healthy)
-                healthyCount = team.roster.filter(p => p && p.status?.duration === 0).length;
+            if (addPlayerToTeam(bestFA, team)) { 
+                // --- 💡 FIX: Re-get roster objects to check count ---
+                const newRoster = getRosterObjects(team);
+                healthyCount = newRoster.filter(p => p && p.status?.duration === 0).length;
                 console.log(`${team.name} signed temporary player ${bestFA.name}`);
             }
         } else {
@@ -5373,9 +5391,15 @@ export function advanceToOffseason() {
     const teammateImproveChance = 0.15;
     game.teams.forEach(team => {
         if (!team || !team.roster || team.roster.length < 2) return;
-        for (let i = 0; i < team.roster.length; i++) {
-            for (let j = i + 1; j < team.roster.length; j++) {
-                const p1 = team.roster[i]; const p2 = team.roster[j];
+        
+        // --- 💡 FIX: Get roster objects ---
+        const fullRoster = getRosterObjects(team);
+        if (fullRoster.length < 2) return;
+        
+        for (let i = 0; i < fullRoster.length; i++) {
+            for (let j = i + 1; j < fullRoster.length; j++) {
+                const p1 = fullRoster[i]; const p2 = fullRoster[j];
+        // --- 💡 END FIX ---
                 if (!p1 || !p2) continue;
                 if (Math.random() < teammateImproveChance) improveRelationship(p1.id, p2.id);
             }
@@ -5384,10 +5408,13 @@ export function advanceToOffseason() {
 
     game.teams.forEach(team => {
         if (!team || !team.roster) return;
-        const currentRoster = [...team.roster.filter(p => p)];
-        team.roster = [];
+        
+        // --- 💡 FIX: Get roster objects ---
+        const currentRoster = getRosterObjects(team);
+        team.roster = []; // Clear roster to rebuild with IDs
 
         currentRoster.forEach(player => {
+        // --- 💡 END FIX ---
             if (!player.careerStats || !player.attributes) return;
 
             player.age++;
@@ -5425,7 +5452,8 @@ export function advanceToOffseason() {
                 player.seasonStats = { receptions: 0, recYards: 0, passYards: 0, rushYards: 0, touchdowns: 0, tackles: 0, sacks: 0, interceptions: 0, passAttempts: 0, passCompletions: 0, interceptionsThrown: 0 };
                 if (!player.status) player.status = {};
                 player.status = { type: 'healthy', description: '', duration: 0 };
-                team.roster.push(player);
+                // --- 💡 FIX: Add the ID back to the roster ---
+                team.roster.push(player.id);
             } else {
                 player.teamId = null;
                 totalVacancies++;
@@ -5636,10 +5664,10 @@ export function playerCut(playerId) {
         const [removedId] = team.roster.splice(playerIndex, 1);
         const player = game.players.find(p => p && p.id === removedId); // Find the full object
 
-        if (player.status?.type === 'temporary') { 
-                team.roster.splice(playerIndex, 0, removedId); // Add it back!
-                return { success: false, message: "Cannot cut temporary friends." }; 
-            }
+        if (player.status?.type === 'temporary') {
+            team.roster.splice(playerIndex, 0, removedId); // Add it back!
+            return { success: false, message: "Cannot cut temporary friends." };
+        }
         player.teamId = null;
         player.number = null; // Free up the number
 
@@ -5664,27 +5692,33 @@ export function playerSignFreeAgent(playerId) {
     }
     const team = game.playerTeam;
     const ROSTER_LIMIT = 10;
-    if (team.roster.length >= ROSTER_LIMIT) {
+    
+    // --- 💡 FIX: Get roster objects ---
+    const roster = getRosterObjects(team);
+    if (roster.length >= ROSTER_LIMIT) {
+    // --- 💡 END FIX ---
         return { success: false, message: `Roster is full (${ROSTER_LIMIT} players max).` };
     }
 
-    // Find player in main list, ensure they are FA
     const player = game.players.find(p => p && p.id === playerId && !p.teamId);
 
     if (player) {
-        player.status = { type: 'healthy', description: '', duration: 0 }; // Ensure healthy status
+        player.status = { type: 'healthy', description: '', duration: 0 }; 
 
         if (addPlayerToTeam(player, team)) { // This function now handles number assignment
             aiSetDepthChart(team);
             addMessage("Roster Move", `${player.name} has been signed to the team!`);
-            // Optionally improve relationship between new player and roster?
-            team.roster.forEach(rp => { if (rp && rp.id !== player.id) improveRelationship(rp.id, player.id); });
+            
+            // --- 💡 FIX: Get the full roster objects ---
+            const fullRoster = getRosterObjects(team);
+            fullRoster.forEach(rp => { if (rp && rp.id !== player.id) improveRelationship(rp.id, player.id); });
+            // --- 💡 END FIX ---
+            
             return { success: true };
         } else {
             return { success: false, message: "Failed to add player to roster." };
         }
     } else {
-        // Check if player exists but isn't FA
         const existingPlayer = game.players.find(p => p && p.id === playerId);
         if (existingPlayer && existingPlayer.teamId) {
             return { success: false, message: "Player is already on another team." };
