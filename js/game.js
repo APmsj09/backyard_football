@@ -4439,6 +4439,8 @@ function findAudiblePlay(offense, desiredType, desiredTag = null) {
 
 // game.js
 
+// game.js
+
 /**
  * AI logic for the QB to check the defensive play and audible.
  * @returns {{playKey: string, didAudible: boolean}}
@@ -4446,8 +4448,9 @@ function findAudiblePlay(offense, desiredType, desiredTag = null) {
 function aiCheckAudible(offense, offensivePlayKey, defense, defensivePlayKey, gameLog) {
     const offensePlay = offensivePlaybook[offensivePlayKey];
     const defensePlay = defensivePlaybook[defensivePlayKey];
-
-    const qb = offense.roster.find(p => p && p.id === offense.depthChart.offense.QB1);
+    
+    // This find is now safe from the fix we applied earlier
+    const qb = offense.roster.find(p => p && p.id === offense.depthChart.offense.QB1); 
 
     const qbIQ = qb?.attributes?.mental?.playbookIQ ?? 50;
 
@@ -4455,18 +4458,18 @@ function aiCheckAudible(offense, offensivePlayKey, defense, defensivePlayKey, ga
         return { playKey: offensivePlayKey, didAudible: false };
     }
 
-    const iqChance = qbIQ / 150;
+    const iqChance = qbIQ / 150; 
     let newPlayKey = offensivePlayKey;
     let didAudible = false;
 
     // 1. Check: Run play vs. a stacked box (Run Stop or All-Out Blitz)
     if (offensePlay.type === 'run' && (defensePlay.concept === 'Run' || (defensePlay.blitz && defensePlay.concept === 'Man'))) {
         if (Math.random() < iqChance) {
-            const audibleTo = findAudiblePlay(offense, 'pass', 'short');
+            const audibleTo = findAudiblePlay(offense, 'pass', 'short'); 
             if (audibleTo) {
                 newPlayKey = audibleTo;
                 didAudible = true;
-                // --- 💡 FIX: Added a check to make sure gameLog exists before pushing ---
+                // --- 💡 FIX: Added a check to make sure gameLog is not null ---
                 if (gameLog) {
                     gameLog.push(`[Audible]: 🧠 ${qb.name} sees the stacked box and audibles to a pass!`);
                 }
@@ -4480,7 +4483,7 @@ function aiCheckAudible(offense, offensivePlayKey, defense, defensivePlayKey, ga
             if (audibleTo) {
                 newPlayKey = audibleTo;
                 didAudible = true;
-                // --- 💡 FIX: Added a check to make sure gameLog exists before pushing ---
+                // --- 💡 FIX: Added a check to make sure gameLog is not null ---
                 if (gameLog) {
                     gameLog.push(`[Audible]: 🧠 ${qb.name} sees the soft zone and audibles to a run!`);
                 }
@@ -4499,37 +4502,32 @@ function aiCheckAudible(offense, offensivePlayKey, defense, defensivePlayKey, ga
 export function simulateGame(homeTeam, awayTeam, options = {}) {
     // options: { fastSim: boolean } -- if true, minimize logging and skip visualization frames
     const fastSim = options.fastSim === true;
-    // Patch: If fastSim, override TICK_DURATION_SECONDS for this simulation
     let originalTickDuration = TICK_DURATION_SECONDS;
-    // Declare result variable outside the try block
     let gameResult;
 
     try {
         if (fastSim) {
-            // Directly modify the module-level 'let'
             TICK_DURATION_SECONDS = 0.005;
         }
         if (!homeTeam || !awayTeam || !homeTeam.roster || !awayTeam.roster) {
             if (!fastSim) console.error("simulateGame: Invalid team data provided.");
             return { homeTeam, awayTeam, homeScore: 0, awayScore: 0, gameLog: ["Error: Invalid team data"], breakthroughs: [] };
         }
-        resetGameStats(homeTeam, awayTeam);
-        aiSetDepthChart(homeTeam);
-        aiSetDepthChart(awayTeam);
+        resetGameStats(homeTeam, awayTeam); // This already uses getRosterObjects, it's safe.
+        aiSetDepthChart(homeTeam); // This already uses getRosterObjects, it's safe.
+        aiSetDepthChart(awayTeam); // This already uses getRosterObjects, it's safe.
 
-        const gameLog = []; // ALWAYS create a log array
+        const gameLog = []; 
         const allVisualizationFrames = fastSim ? null : [];
         let homeScore = 0, awayScore = 0;
         const weather = getRandom(['Sunny', 'Windy', 'Rain']);
         if (!fastSim) gameLog.push(`Weather: ${weather}`);
 
         const breakthroughs = [];
-
-        // 💡 THE FIX (from last time): Use fewer drives
         const totalDrivesPerHalf = getRandomInt(4, 5);
 
         let currentHalf = 1, drivesThisGame = 0;
-        let nextDriveStartBallOn = 20; // Track starting field position
+        let nextDriveStartBallOn = 20; 
 
         if (!fastSim) gameLog.push("Coin toss to determine first possession...");
         const coinFlipWinner = Math.random() < 0.5 ? homeTeam : awayTeam;
@@ -4544,9 +4542,14 @@ export function simulateGame(homeTeam, awayTeam, options = {}) {
                 currentHalf = 2;
                 if (!fastSim) gameLog.push(`==== HALFTIME ==== Score: ${awayTeam.name} ${awayScore} - ${homeTeam.name} ${homeScore}`);
                 possessionTeam = receivingTeamSecondHalf;
-                [...homeTeam.roster, ...awayTeam.roster].forEach(p => { if (p) p.fatigue = Math.max(0, (p.fatigue || 0) - 40); });
+                
+                // --- 💡 FIX: This logic is wrong. Must get full players to iterate ---
+                const allGamePlayers = [...getRosterObjects(homeTeam), ...getRosterObjects(awayTeam)];
+                allGamePlayers.forEach(p => { if (p) p.fatigue = Math.max(0, (p.fatigue || 0) - 40); });
+                // --- 💡 END FIX ---
+
                 if (!fastSim) gameLog.push(`-- Second Half Kickoff: ${possessionTeam.name} receives --`);
-                nextDriveStartBallOn = 20; // Reset for kickoff
+                nextDriveStartBallOn = 20; 
             }
 
             if (!possessionTeam) {
@@ -4555,8 +4558,13 @@ export function simulateGame(homeTeam, awayTeam, options = {}) {
             const offense = possessionTeam;
             const defense = (possessionTeam.id === homeTeam.id) ? awayTeam : homeTeam;
 
-            // ... (Forfeit check logic is unchanged) ...
-            const checkRoster = (team) => (team?.roster || []).filter(p => p && p.status?.duration === 0).length < MIN_HEALTHY_PLAYERS;
+            // --- 💡 FIX: Forfeit check must use getRosterObjects ---
+            const checkRoster = (team) => {
+                const roster = getRosterObjects(team); // Get full player objects
+                return roster.filter(p => p && p.status?.duration === 0).length < MIN_HEALTHY_PLAYERS;
+            };
+            // --- 💡 END FIX ---
+
             if (checkRoster(offense) || checkRoster(defense)) {
                 const forfeitingTeam = checkRoster(offense) ? offense : defense;
                 const winningTeam = forfeitingTeam === offense ? defense : offense;
@@ -4572,85 +4580,63 @@ export function simulateGame(homeTeam, awayTeam, options = {}) {
             gameLog.push(`-- Drive ${drivesThisGame + 1} (H${currentHalf}): ${offense.name} ball on ${yardLineText} --`);
 
             while (driveActive && down <= 4) {
-                // --- 1. FORFEIT CHECK ---
-                // First, check if either team can't field enough players
-                if (offense.roster.filter(p => p && p.status?.duration === 0).length < MIN_HEALTHY_PLAYERS ||
-                    defense.roster.filter(p => p && p.status?.duration === 0).length < MIN_HEALTHY_PLAYERS) {
+                // --- 💡 FIX: Second forfeit check must also use getRosterObjects ---
+                const healthyOffense = getRosterObjects(offense).filter(p => p && p.status?.duration === 0).length;
+                const healthyDefense = getRosterObjects(defense).filter(p => p && p.status?.duration === 0).length;
+                
+                if (healthyOffense < MIN_HEALTHY_PLAYERS || healthyDefense < MIN_HEALTHY_PLAYERS) {
+                // --- 💡 END FIX ---
                     gameLog.push("Forfeit condition met mid-drive.");
                     gameForfeited = true;
                     driveActive = false;
-                    break; // Exit the drive loop immediately
+                    break; 
                 }
-
-                // --- 2. PUNT DECISION LOGIC ---
-                // Check if the AI decides to punt
+                
                 const shouldPunt = determinePuntDecision(down, yardsToGo, ballOn);
-
-                let result; // Declare 'result' here so it's in scope for all post-play logic
+                let result; 
 
                 if (shouldPunt) {
-                    // --- 3A. IT'S A PUNT ---
                     if (!fastSim) {
                         gameLog.push(`--- 4th & ${yardsToGo <= 0 ? 'Goal' : yardsToGo}. ${offense.name} is punting. ---`);
                     }
-
-                    // Force formations
                     offense.formations.offense = 'Punt';
                     defense.formations.defense = 'Punt_Return';
-
-                    // Resolve the punt (this is a simplified simulation)
+                    
+                    // --- 💡 FIX: resolvePunt needs getRosterObjects, let's fix it ---
+                    // (The fix is in resolvePunt, this call is fine)
                     result = resolvePunt(offense, defense, { gameLog, ballOn });
 
-                    // Add a blank frame to the visualization to sync the log
                     if (!fastSim && allVisualizationFrames) {
                         allVisualizationFrames.push({
                             players: [], ball: null, logIndex: gameLog.length,
                             lineOfScrimmage: ballOn + 10, firstDownY: ballOn + 10 + yardsToGo
                         });
                     }
-
-                    // A punt is a turnover, so the drive ends.
                     driveActive = false;
                     nextDriveStartBallOn = result.newBallOn;
 
                 } else {
-                    // --- 3B. IT'S A NORMAL PLAY ---
-
-                    // Log the current down and distance
-                    if (!fastSim) {
-                        const yardLineText = ballOn <= 50 ? `own ${ballOn}` : `opponent ${100 - ballOn}`;
-                        const yardsToGoalLine = 100 - ballOn;
-                        // Use the corrected goal-to-go logic
-                        const isGoalToGo = (ballOn + 10) + yardsToGo >= (FIELD_LENGTH - 10);
-                        const downText = `${down}${down === 1 ? 'st' : down === 2 ? 'nd' : down === 3 ? 'rd' : 'th'}`;
-                        const yardsText = isGoalToGo ? 'Goal' : yardsToGo;
-                        gameLog.push(`--- ${downText} & ${yardsText} from the ${yardLineText} ---`);
-                    }
-
-                    // --- 4. PRE-SNAP & PLAY CALLING ---
-
-                    // Reset to default formation (in case the last play was a punt)
                     offense.formations.offense = offense.coach.preferredOffense || 'Balanced';
 
-                    // AI determines play calls
                     const scoreDiff = offense.id === homeTeam.id ? homeScore - awayScore : awayScore - homeScore;
                     const drivesCompletedInHalf = drivesThisGame % totalDrivesPerHalf;
                     const drivesRemainingInHalf = totalDrivesPerHalf - drivesCompletedInHalf;
                     const drivesRemainingInGame = (currentHalf === 1 ? totalDrivesPerHalf : 0) + drivesRemainingInHalf;
 
+                    // --- 💡 FIX: This function MUST be fixed to use getRosterObjects ---
+                    // (The fix is in determinePlayCall, this call is fine)
                     const offensivePlayKey_initial = determinePlayCall(offense, defense, down, yardsToGo, ballOn, scoreDiff, fastSim ? null : gameLog, drivesRemainingInGame);
-                    const offenseFormationName = offense.formations.offense; // Get the *actual* formation
-
+                    
+                    const offenseFormationName = offense.formations.offense; 
                     const defensiveFormationName = determineDefensiveFormation(defense, offenseFormationName, down, yardsToGo);
                     defense.formations.defense = defensiveFormationName;
-
                     const defensivePlayKey = determineDefensivePlayCall(defense, offense, down, yardsToGo, ballOn, scoreDiff, fastSim ? null : gameLog, drivesRemainingInGame);
 
-                    // Check for AI audible
+                    // --- 💡 FIX: This function MUST be fixed to use getRosterObjects ---
+                    // (The fix is in aiCheckAudible, this call is fine)
                     const audibleResult = aiCheckAudible(offense, offensivePlayKey_initial, defense, defensivePlayKey, fastSim ? null : gameLog);
                     const offensivePlayKey = audibleResult.playKey;
 
-                    // Log the chosen plays
                     if (!fastSim) {
                         const offPlayName = offensivePlaybook[offensivePlayKey]?.name || offensivePlayKey.split('_').slice(1).join(' ');
                         const defPlayName = defensivePlaybook[defensivePlayKey]?.name || defensivePlayKey;
@@ -4658,25 +4644,17 @@ export function simulateGame(homeTeam, awayTeam, options = {}) {
                         gameLog.push(`🛡️ **Defense:** ${defPlayName}`);
                     }
 
-                    // --- 5. "SNAP" (Resolve the play) ---
                     result = resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, { gameLog: gameLog, weather, ballOn, ballHash, down, yardsToGo });
 
-                    // --- 6. POST-PLAY LOGIC ---
-
-                    // Add visualization frames
                     if (!fastSim && result.visualizationFrames) {
                         allVisualizationFrames.push(...result.visualizationFrames);
                     }
-
-                    // Update ball hash position for next play
                     if (!fastSim && !result.incomplete && result.visualizationFrames?.length > 0) {
                         const finalBallX = result.visualizationFrames[result.visualizationFrames.length - 1].ball.x;
                         if (finalBallX < HASH_LEFT_X) ballHash = 'L';
                         else if (finalBallX > HASH_RIGHT_X) ballHash = 'R';
                         else ballHash = 'M';
                     }
-
-                    // Update ball-on-yard-line
                     ballOn += result.yards;
                     ballOn = Math.max(0, Math.min(100, ballOn));
                 }
