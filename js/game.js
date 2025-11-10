@@ -942,7 +942,7 @@ function findEmergencyPlayer(position, team, side, usedPlayerIdsThisPlay) {
     // --- 💡 FIX: Get roster objects ---
     const roster = getRosterObjects(team);
     if (!team || !roster || !Array.isArray(roster)) {
-    // --- 💡 END FIX ---
+        // --- 💡 END FIX ---
         console.warn(`findEmergencyPlayer: Invalid team data for ${position}.`); return null;
     }
 
@@ -3569,6 +3569,8 @@ function finalizeStats(playState, offense, defense) {
 /**
  * Simulates a single play using a coordinate-based tick system.
  */
+// game.js
+
 function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameState) {
     const { gameLog = [], weather, ballOn, ballHash = 'M', down, yardsToGo } = gameState;
 
@@ -3633,10 +3635,7 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
     const defensePlay = defensivePlaybook[defensivePlayKey];
     const qbState = playState.activePlayers.find(p => p.slot === 'QB1' && p.isOffense);
     const qbPlayer = qbState ? game.players.find(p => p && p.id === qbState.id) : null;
-
-    // --- 💡 FIX: Chained 'attributes' and 'mental' optionally ---
     const qbIQ = qbPlayer?.attributes?.mental?.playbookIQ || 50;
-    // --- 💡 END FIX ---
 
     if (play.type === 'pass' &&
         defensePlay?.blitz === true &&
@@ -3647,7 +3646,9 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
         assignments = play.assignments;
 
         const rbPlayer = playState.activePlayers.find(p => p.slot === 'RB1' && p.isOffense);
-        gameLog.push(`[Pre-Snap]: 🧠 ${qbPlayer?.name || 'QB'} sees the blitz and keeps ${rbPlayer?.name || 'RB'} in to block!`);
+        if (gameLog) { // Safe push
+            gameLog.push(`[Pre-Snap]: 🧠 ${qbPlayer?.name || 'QB'} sees the blitz and keeps ${rbPlayer?.name || 'RB'} in to block!`);
+        }
 
         if (rbPlayer) {
             rbPlayer.assignment = 'pass_block';
@@ -3733,13 +3734,56 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
 
             // --- STEP 7: Check Collisions & Resolve Catches/Incompletions ---
             if (playState.playIsLive) {
+                // A. Check for new block engagements
                 checkBlockCollisions(playState);
 
+                // B. Check for tackles
                 ballCarrierState = playState.activePlayers.find(p => p.isBallCarrier);
                 if (ballCarrierState) {
                     if (checkTackleCollisions(playState, gameLog)) break;
                 }
 
+                // --- 💡 FIX: FUMBLE RECOVERY LOGIC MOVED HERE ---
+                // D. Check for Fumble Recovery (Now OUTSIDE of the ballPos.inAir check)
+                if (playState.ballState.isLoose) {
+                    const recoverer = checkFumbleRecovery(playState, gameLog, TACKLE_RANGE);
+
+                    if (recoverer) {
+                        // Someone recovered the ball!
+                        playState.ballState.isLoose = false;
+                        recoverer.isBallCarrier = true;
+                        recoverer.hasBall = true;
+                        recoverer.action = 'run_path';
+
+                        if (recoverer.isOffense) {
+                            // --- OFFENSE RECOVERED ---
+                            playState.turnover = false; // It's no longer a turnover
+                            gameLog.push(`👍 ${recoverer.name} recovers the fumble!`);
+                            playState.activePlayers.forEach(p => {
+                                if (p.isOffense && p.id !== recoverer.id) {
+                                    p.action = 'run_block'; // Block for the runner
+                                } else if (!p.isOffense) {
+                                    p.action = 'pursuit'; // Defense must now pursue
+                                }
+                            });
+                        } else {
+                            // --- DEFENSE RECOVERED ---
+                            playState.turnover = true; // It is confirmed as a turnover
+                            gameLog.push(`❗ ${recoverer.name} recovers the fumble for the Defense!`);
+                            playState.activePlayers.forEach(p => {
+                                if (p.isOffense) {
+                                    p.action = 'pursuit';
+                                } else if (p.id !== recoverer.id) {
+                                    p.action = 'run_block';
+                                }
+                            });
+                        }
+                    }
+                    // If no recoverer, the ball is still loose, play continues
+                }
+                // --- 💡 END OF MOVED BLOCK ---
+
+                // C. Check for Ball Arrival (Catch/INT/Drop)
                 if (ballPos.inAir) {
                     const distToTargetXY = Math.sqrt(
                         Math.pow(ballPos.x - ballPos.targetX, 2) +
@@ -3752,39 +3796,7 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
                         if (!playState.playIsLive) break;
                     }
 
-                    if (playState.ballState.isLoose) {
-                        const recoverer = checkFumbleRecovery(playState, gameLog, TACKLE_RANGE);
-
-                        if (recoverer) {
-                            playState.ballState.isLoose = false;
-                            recoverer.isBallCarrier = true;
-                            recoverer.hasBall = true;
-                            recoverer.action = 'run_path';
-
-                            if (recoverer.isOffense) {
-                                playState.turnover = false;
-                                gameLog.push(`👍 ${recoverer.name} recovers the fumble!`);
-                                playState.activePlayers.forEach(p => {
-                                    if (p.isOffense && p.id !== recoverer.id) {
-                                        p.action = 'run_block';
-                                    } else if (!p.isOffense) {
-                                        p.action = 'pursuit';
-                                    }
-                                });
-                            } else {
-                                playState.turnover = true;
-                                gameLog.push(`❗ ${recoverer.name} recovers the fumble for the Defense!`);
-                                playState.activePlayers.forEach(p => {
-                                    if (p.isOffense) {
-                                        p.action = 'pursuit';
-                                    } else if (p.id !== recoverer.id) {
-                                        p.action = 'run_block';
-                                    }
-                                });
-                            }
-                        }
-                    }
-
+                    // E. Check for Ground / Out of Bounds (if not caught)
                     if (playState.playIsLive) {
                         if (ballPos.z <= 0.1 && playState.tick > 6) {
                             gameLog.push(`‹‹ Pass hits the ground. Incomplete.`);
@@ -3797,7 +3809,7 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
                             break;
                         }
                     }
-                }
+                } // --- End of if(ballPos.inAir) ---
             }
             if (!playState.playIsLive) break;
 
@@ -5253,7 +5265,7 @@ export function callFriend(playerId) {
     // --- 💡 FIX: Get roster objects ---
     const roster = getRosterObjects(team);
     if (!roster.some(p => p && p.status?.duration > 0)) {
-    // --- 💡 END FIX ---
+        // --- 💡 END FIX ---
         return { success: false, message: "You can only call a friend if a player on your team is currently injured or busy." };
     }
     const player = game.freeAgents.find(p => p && p.id === playerId);
@@ -5275,7 +5287,7 @@ export function callFriend(playerId) {
             // --- 💡 FIX: Get the full roster objects to do relationship improvements ---
             const fullRoster = getRosterObjects(team);
             fullRoster.forEach(rosterPlayer => {
-            // --- 💡 END FIX ---
+                // --- 💡 END FIX ---
                 if (rosterPlayer && rosterPlayer.id !== player.id) {
                     improveRelationship(rosterPlayer.id, player.id);
                 }
@@ -5297,7 +5309,7 @@ export function callFriend(playerId) {
 
 export function aiManageRoster(team) {
     if (!team || !team.roster || !game || !game.freeAgents || !team.coach) return;
-    
+
     // --- 💡 FIX: Get roster objects ---
     const roster = getRosterObjects(team);
     let healthyCount = roster.filter(p => p && p.status?.duration === 0).length;
@@ -5317,7 +5329,7 @@ export function aiManageRoster(team) {
 
         if (Math.random() < aiSuccessChance) {
             bestFA.status = { type: 'temporary', description: 'Helping Out', duration: 1 };
-            if (addPlayerToTeam(bestFA, team)) { 
+            if (addPlayerToTeam(bestFA, team)) {
                 // --- 💡 FIX: Re-get roster objects to check count ---
                 const newRoster = getRosterObjects(team);
                 healthyCount = newRoster.filter(p => p && p.status?.duration === 0).length;
@@ -5391,15 +5403,15 @@ export function advanceToOffseason() {
     const teammateImproveChance = 0.15;
     game.teams.forEach(team => {
         if (!team || !team.roster || team.roster.length < 2) return;
-        
+
         // --- 💡 FIX: Get roster objects ---
         const fullRoster = getRosterObjects(team);
         if (fullRoster.length < 2) return;
-        
+
         for (let i = 0; i < fullRoster.length; i++) {
             for (let j = i + 1; j < fullRoster.length; j++) {
                 const p1 = fullRoster[i]; const p2 = fullRoster[j];
-        // --- 💡 END FIX ---
+                // --- 💡 END FIX ---
                 if (!p1 || !p2) continue;
                 if (Math.random() < teammateImproveChance) improveRelationship(p1.id, p2.id);
             }
@@ -5408,13 +5420,13 @@ export function advanceToOffseason() {
 
     game.teams.forEach(team => {
         if (!team || !team.roster) return;
-        
+
         // --- 💡 FIX: Get roster objects ---
         const currentRoster = getRosterObjects(team);
         team.roster = []; // Clear roster to rebuild with IDs
 
         currentRoster.forEach(player => {
-        // --- 💡 END FIX ---
+            // --- 💡 END FIX ---
             if (!player.careerStats || !player.attributes) return;
 
             player.age++;
@@ -5692,28 +5704,28 @@ export function playerSignFreeAgent(playerId) {
     }
     const team = game.playerTeam;
     const ROSTER_LIMIT = 10;
-    
+
     // --- 💡 FIX: Get roster objects ---
     const roster = getRosterObjects(team);
     if (roster.length >= ROSTER_LIMIT) {
-    // --- 💡 END FIX ---
+        // --- 💡 END FIX ---
         return { success: false, message: `Roster is full (${ROSTER_LIMIT} players max).` };
     }
 
     const player = game.players.find(p => p && p.id === playerId && !p.teamId);
 
     if (player) {
-        player.status = { type: 'healthy', description: '', duration: 0 }; 
+        player.status = { type: 'healthy', description: '', duration: 0 };
 
         if (addPlayerToTeam(player, team)) { // This function now handles number assignment
             aiSetDepthChart(team);
             addMessage("Roster Move", `${player.name} has been signed to the team!`);
-            
+
             // --- 💡 FIX: Get the full roster objects ---
             const fullRoster = getRosterObjects(team);
             fullRoster.forEach(rp => { if (rp && rp.id !== player.id) improveRelationship(rp.id, player.id); });
             // --- 💡 END FIX ---
-            
+
             return { success: true };
         } else {
             return { success: false, message: "Failed to add player to roster." };
