@@ -4383,6 +4383,8 @@ function findAudiblePlay(offense, desiredType, desiredTag = null) {
     return getRandom(possiblePlays);
 }
 
+// game.js
+
 /**
  * AI logic for the QB to check the defensive play and audible.
  * @returns {{playKey: string, didAudible: boolean}}
@@ -4390,40 +4392,44 @@ function findAudiblePlay(offense, desiredType, desiredTag = null) {
 function aiCheckAudible(offense, offensivePlayKey, defense, defensivePlayKey, gameLog) {
     const offensePlay = offensivePlaybook[offensivePlayKey];
     const defensePlay = defensivePlaybook[defensivePlayKey];
-    const qb = offense.roster.find(p => p.id === offense.depthChart.offense.QB1);
-    // Defensive: use optional chaining for nested attributes to avoid runtime errors
+    
+    const qb = offense.roster.find(p => p && p.id === offense.depthChart.offense.QB1); 
+
     const qbIQ = qb?.attributes?.mental?.playbookIQ ?? 50;
 
     if (!offensePlay || !defensePlay || !qb) {
         return { playKey: offensivePlayKey, didAudible: false };
     }
 
-    const iqChance = qbIQ / 150; // 75 IQ = 50% chance to recognize
+    const iqChance = qbIQ / 150; 
     let newPlayKey = offensivePlayKey;
     let didAudible = false;
 
     // 1. Check: Run play vs. a stacked box (Run Stop or All-Out Blitz)
     if (offensePlay.type === 'run' && (defensePlay.concept === 'Run' || (defensePlay.blitz && defensePlay.concept === 'Man'))) {
         if (Math.random() < iqChance) {
-            const audibleTo = findAudiblePlay(offense, 'pass', 'short'); // Audible to a quick pass
+            const audibleTo = findAudiblePlay(offense, 'pass', 'short'); 
             if (audibleTo) {
                 newPlayKey = audibleTo;
                 didAudible = true;
-                gameLog.push(`[Audible]: 🧠 ${qb.name} sees the stacked box and audibles to a pass!`);
+                // --- 💡 FIX: Added a check to make sure gameLog exists before pushing ---
+                if (gameLog) {
+                    gameLog.push(`[Audible]: 🧠 ${qb.name} sees the stacked box and audibles to a pass!`);
+                }
             }
         }
     }
     // 2. Check: Pass play vs. a safe zone (no blitz, 'Zone' concept)
     else if (offensePlay.type === 'pass' && (defensePlay.blitz === false && defensePlay.concept === 'Zone')) {
-        // Good matchup, but maybe we can do better?
-        // Check if it's a "deep" pass vs. a soft "safeZone"
         if (offensePlay.tags?.includes('deep') && Math.random() < iqChance) {
-            // Smart QB checks down to a run play
             const audibleTo = findAudiblePlay(offense, 'run', 'inside');
             if (audibleTo) {
                 newPlayKey = audibleTo;
                 didAudible = true;
-                gameLog.push(`[Audible]: 🧠 ${qb.name} sees the soft zone and audibles to a run!`);
+                // --- 💡 FIX: Added a check to make sure gameLog exists before pushing ---
+                if (gameLog) {
+                    gameLog.push(`[Audible]: 🧠 ${qb.name} sees the soft zone and audibles to a run!`);
+                }
             }
         }
     }
@@ -5109,7 +5115,7 @@ export function simulateWeek(options = {}) {
     generateWeeklyEvents();
     game.breakthroughs = [];
 
-    // --- 💡 NEW BUG FIX BLOCK ---
+
     // Check if the schedule exists OR if it's empty when it shouldn't be
     if (!game.schedule || game.schedule.length === 0) {
         // Only generate a new schedule if we are at the *start* of the season
@@ -5122,7 +5128,7 @@ export function simulateWeek(options = {}) {
             return [];
         }
     }
-    // --- 💡 END BUG FIX BLOCK ---
+
 
     const gamesPerWeek = game.teams.length / 2;
     const startIndex = game.currentWeek * gamesPerWeek;
