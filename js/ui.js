@@ -1429,21 +1429,32 @@ export function setupDragAndDrop(onDrop) {
 }
 
 
-/** Sets up event listener for depth chart sub-tabs (Offense/Defense). */
+// ui.js
+
+/** Sets up event listener for depth chart sub-tabs (Offense/Defense/Overalls). */
 export function setupDepthChartTabs() {
     if (!elements.depthChartSubTabs) { console.error("Depth chart tabs container missing."); return; }
+
     elements.depthChartSubTabs.addEventListener('click', e => {
         if (e.target.matches('.depth-chart-tab')) {
             const subTab = e.target.dataset.subTab;
+
+            // 1. Update button active states
             elements.depthChartSubTabs.querySelectorAll('.depth-chart-tab').forEach(t => {
                 const isSelected = t === e.target;
                 t.classList.toggle('active', isSelected);
                 t.setAttribute('aria-selected', isSelected.toString());
             });
+
+            // --- 💡 FIX: Find all three panes ---
             const offensePane = document.getElementById('depth-chart-offense-pane');
             const defensePane = document.getElementById('depth-chart-defense-pane');
+            const overallsPane = document.getElementById('positional-overalls-container'); // <-- The missing pane
+
+            // --- 💡 FIX: Toggle all three panes correctly ---
             if (offensePane) offensePane.classList.toggle('hidden', subTab !== 'offense');
             if (defensePane) defensePane.classList.toggle('hidden', subTab !== 'defense');
+            if (overallsPane) overallsPane.classList.toggle('hidden', subTab !== 'overalls'); // <-- The new logic
         }
     });
 }
