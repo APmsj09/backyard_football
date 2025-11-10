@@ -103,6 +103,22 @@ function ensureSet(val) {
     return new Set();
 }
 
+/** Helper: Gets full player objects from a team's roster of IDs. */
+function getRosterObjects(team) {
+    if (!team || !Array.isArray(team.roster)) return [];
+    if (!game || !Array.isArray(game.players)) return [];
+
+    // Handle old save files or non-ID rosters
+    if (team.roster.length > 0 && typeof team.roster[0] === 'object' && team.roster[0] !== null) {
+        console.warn("Detected old save file format. Please start a new game.");
+        return team.roster.filter(p => p);
+    }
+
+    // New way: Look up IDs from the master list
+    const rosterIds = new Set(team.roster);
+    return game.players.filter(p => p && rosterIds.has(p.id));
+}
+
 /**
  * Calculates a player's suitability for a specific formation slot.
  */
@@ -344,20 +360,20 @@ export async function initializeLeague(onProgress) {
     console.log("Assigning initial non-stranger relationships...");
     const relationshipChance = 0.05; // 5% chance of any two players having a non-stranger relationship
     let relationshipsAdded = 0;
-    
+
     for (let i = 0; i < game.players.length; i++) {
         for (let j = i + 1; j < game.players.length; j++) {
             const roll = Math.random();
-            
+
             // Only create an entry if it's NOT a stranger
             if (roll < relationshipChance) {
-                const p1 = game.players[i]; 
+                const p1 = game.players[i];
                 const p2 = game.players[j];
                 if (!p1 || !p2) continue;
 
                 let level = relationshipLevels.ACQUAINTANCE.level; // Default to acquaintance
                 const specialRoll = Math.random();
-                
+
                 if (specialRoll < 0.05) level = relationshipLevels.BEST_FRIEND.level; // 0.25% overall
                 else if (specialRoll < 0.20) level = relationshipLevels.GOOD_FRIEND.level; // 1% overall
                 else if (specialRoll < 0.50) level = relationshipLevels.FRIEND.level; // 2.5% overall
@@ -375,7 +391,7 @@ export async function initializeLeague(onProgress) {
     }
     console.log(`Assigned ${relationshipsAdded} initial non-stranger relationships.`);
     // --- 💡 END FIX ---
-    
+
     onProgress(0.9); await yieldToMain();
 
 
@@ -395,13 +411,13 @@ export async function initializeLeague(onProgress) {
         const offenseSlots = offenseFormationData.slots;
         const defenseSlots = defenseFormationData.slots;
 
-        if (availableColors.length === 0) availableColors = [...teamColors]; 
+        if (availableColors.length === 0) availableColors = [...teamColors];
         const colorSet = availableColors.splice(getRandomInt(0, availableColors.length - 1), 1)[0];
-        
+
         const team = {
             id: crypto.randomUUID(), name: teamName, roster: [], coach, division, wins: 0, losses: 0,
-            primaryColor: colorSet.primary, 
-            secondaryColor: colorSet.secondary, 
+            primaryColor: colorSet.primary,
+            secondaryColor: colorSet.secondary,
             formations: { offense: offenseFormationData.name, defense: defenseFormationData.name },
             depthChart: {
                 offense: Object.fromEntries(offenseSlots.map(slot => [slot, null])),
@@ -549,10 +565,12 @@ export function setupDraft() {
 
 /** Automatically sets depth chart for an AI team. */
 export function aiSetDepthChart(team) {
-    if (!team || !team.roster || !team.depthChart || !team.formations) {
+   const roster = getRosterObjects(team);
+    
+    if (!team || !roster || !team.depthChart || !team.formations) {
         console.error(`aiSetDepthChart: Invalid team data for ${team?.name || 'unknown team'}.`); return;
     }
-    const { roster, depthChart, formations } = team;
+    const { depthChart, formations } = team; // roster is now defined above
     if (roster.length === 0) return;
 
     // Initialize all slots to null
@@ -564,7 +582,7 @@ export function aiSetDepthChart(team) {
         depthChart[side] = newChartSide;
     }
 
-    // --- 🛠️ FIX: Re-ordered the sides. Fill DEFENSE first. ---
+   
     const sides = ['defense', 'offense'];
     const alreadyAssignedPlayerIds = new Set(); // Tracks players who have a starting job
 
@@ -674,6 +692,7 @@ export function addPlayerToTeam(player, team) {
 
     // --- Position-Based Number Assignment ---
     if (player.number === null) {
+        // ... (all your existing number assignment logic stays exactly the same) ...
         const offOvr = calculateOverall(player, player.favoriteOffensivePosition);
         const defOvr = calculateOverall(player, player.favoriteDefensivePosition);
         const primaryPos = (offOvr >= defOvr) ? player.favoriteOffensivePosition : player.favoriteDefensivePosition;
@@ -690,7 +709,9 @@ export function addPlayerToTeam(player, team) {
             default: preferredRanges.push([1, 99]);
         }
 
-        const existingNumbers = new Set(team.roster.map(p => p.number).filter(n => n !== null));
+        // 💡 FIX: We must get roster objects to check existing numbers
+        const fullRoster = getRosterObjects(team);
+        const existingNumbers = new Set(fullRoster.map(p => p.number).filter(n => n !== null));
 
         let preferredNumbers = [];
         for (const range of preferredRanges) {
@@ -731,7 +752,8 @@ export function addPlayerToTeam(player, team) {
     // --- END NEW ---
 
     player.teamId = team.id;
-    team.roster.push(player);
+    // --- 💡 FIX: Push the ID, not the full object ---
+    team.roster.push(player.id);
     return true;
 }
 
@@ -780,7 +802,7 @@ export function generateSchedule() {
 /** Resets player fatigue and game stats (typically before a game). */
 function resetGameStats(teamA, teamB) {
     // Combine the rosters of just these two teams
-    const playersInGame = [...(teamA?.roster || []), ...(teamB?.roster || [])];
+    const playersInGame = [...getRosterObjects(teamA), ...getRosterObjects(teamB)];
 
     if (playersInGame.length === 0) {
         console.warn("resetGameStats: No players found on rosters.");
@@ -2637,9 +2659,9 @@ function checkTackleCollisions(playState, gameLog) {
                 playState.yards = ballCarrierState.y - playState.lineOfScrimmage;
                 playState.playIsLive = false;
 
-               
+
                 if (ballCarrierState.slot === 'QB1' && (ballCarrierState.action === 'qb_setup' || ballCarrierState.action === 'qb_scramble') && ballCarrierState.y < playState.lineOfScrimmage) {
-                    
+
                     playState.sack = true;
                     gameLog.push(`💥 SACK! ${tacklerPlayer.name} (TklPwr: ${tacklePower.toFixed(0)}) gets to ${ballCarrierState.name}!`);
                 } else {
@@ -3560,7 +3582,7 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
             vx: 0, vy: 0, vz: 0,
             targetPlayerId: null,
             inAir: false,
-            isLoose: false, 
+            isLoose: false,
             throwerId: null,
             throwInitiated: false,
             targetX: 0, targetY: 0
@@ -3602,7 +3624,7 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
     const defensePlay = defensivePlaybook[defensivePlayKey];
     const qbState = playState.activePlayers.find(p => p.slot === 'QB1' && p.isOffense);
     const qbPlayer = qbState ? game.players.find(p => p && p.id === qbState.id) : null;
-    
+
     // --- 💡 FIX: Chained 'attributes' and 'mental' optionally ---
     const qbIQ = qbPlayer?.attributes?.mental?.playbookIQ || 50;
     // --- 💡 END FIX ---
@@ -3677,25 +3699,25 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
                         playState.touchdown = true; playState.playIsLive = false;
                         const scorer = game.players.find(p => p && p.id === ballCarrierState.id);
                         gameLog.push(`🎉 TOUCHDOWN ${scorer?.name || 'player'}!`);
-                        break; 
+                        break;
                     } else if (ballCarrierState.y < 10 && !ballCarrierState.isOffense) { // Defensive TD
                         playState.yards = 0;
                         playState.touchdown = true; playState.playIsLive = false;
                         const scorer = game.players.find(p => p && p.id === ballCarrierState.id);
                         gameLog.push(`🎉 DEFENSIVE TOUCHDOWN ${scorer?.name || 'player'}!`);
-                        break; 
+                        break;
                     } else if (ballCarrierState.y < 10 && ballCarrierState.isOffense) { // SAFETY
                         playState.yards = 0;
                         playState.safety = true;
                         playState.playIsLive = false;
                         gameLog.push(`SAFETY! ${ballCarrierState.name} was tackled in the endzone!`);
-                        break; 
+                        break;
                     }
                     if (ballCarrierState.x <= 0.1 || ballCarrierState.x >= FIELD_WIDTH - 0.1) {
                         playState.yards = ballCarrierState.y - playState.lineOfScrimmage;
                         playState.playIsLive = false;
                         gameLog.push(` sidelines... ${ballCarrierState.name} ran out of bounds after a gain of ${playState.yards.toFixed(1)} yards.`);
-                        break; 
+                        break;
                     }
                 }
             }
@@ -3706,7 +3728,7 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
 
                 ballCarrierState = playState.activePlayers.find(p => p.isBallCarrier);
                 if (ballCarrierState) {
-                    if (checkTackleCollisions(playState, gameLog)) break; 
+                    if (checkTackleCollisions(playState, gameLog)) break;
                 }
 
                 if (ballPos.inAir) {
@@ -3720,7 +3742,7 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
                         handleBallArrival(playState, gameLog);
                         if (!playState.playIsLive) break;
                     }
-                    
+
                     if (playState.ballState.isLoose) {
                         const recoverer = checkFumbleRecovery(playState, gameLog, TACKLE_RANGE);
 
@@ -3731,17 +3753,17 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
                             recoverer.action = 'run_path';
 
                             if (recoverer.isOffense) {
-                                playState.turnover = false; 
+                                playState.turnover = false;
                                 gameLog.push(`👍 ${recoverer.name} recovers the fumble!`);
                                 playState.activePlayers.forEach(p => {
                                     if (p.isOffense && p.id !== recoverer.id) {
-                                        p.action = 'run_block'; 
+                                        p.action = 'run_block';
                                     } else if (!p.isOffense) {
-                                        p.action = 'pursuit'; 
+                                        p.action = 'pursuit';
                                     }
                                 });
                             } else {
-                                playState.turnover = true; 
+                                playState.turnover = true;
                                 gameLog.push(`❗ ${recoverer.name} recovers the fumble for the Defense!`);
                                 playState.activePlayers.forEach(p => {
                                     if (p.isOffense) {
@@ -3768,7 +3790,7 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
                     }
                 }
             }
-            if (!playState.playIsLive) break; 
+            if (!playState.playIsLive) break;
 
             // --- STEP 8: Resolve Ongoing Battles (Blocks) ---
             resolveOngoingBlocks(playState, gameLog);
@@ -3789,7 +3811,7 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
                 const player = game.players.find(p => p && p.id === pState.id);
                 if (player) {
                     player.fatigue = Math.min(100, (player.fatigue || 0) + fatigueGain);
-                    pState.fatigue = player.fatigue; 
+                    pState.fatigue = player.fatigue;
                     const stamina = player.attributes?.physical?.stamina || 50;
                     const fatigueRatio = Math.min(1.0, (player.fatigue || 0) / stamina);
                     pState.fatigueModifier = Math.max(0.3, 1.0 - fatigueRatio);
@@ -3798,12 +3820,12 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
 
             try {
                 const activeIds = new Set(playState.activePlayers.filter(p => p).map(p => p.id));
-                const BENCH_RECOVERY_PER_TICK = 0.003; 
+                const BENCH_RECOVERY_PER_TICK = 0.003;
                 game.players.forEach(p => {
                     if (!p) return;
-                    if (p.status && p.status.duration > 0) return; 
-                    if (activeIds.has(p.id)) return; 
-                    if ((p.fatigue || 0) <= 0) return; 
+                    if (p.status && p.status.duration > 0) return;
+                    if (activeIds.has(p.id)) return;
+                    if ((p.fatigue || 0) <= 0) return;
                     p.fatigue = Math.max(0, (p.fatigue || 0) - BENCH_RECOVERY_PER_TICK);
                 });
             } catch (err) {
@@ -3903,7 +3925,7 @@ function resolvePunt(offense, defense, gameState) {
     const strength = qb.attributes?.physical?.strength || 50;
     const accuracy = qb.attributes?.technical?.throwingAccuracy || 50;
     const consistency = qb.attributes?.mental?.consistency || 50;
-    
+
     const puntPower = (strength * 0.6) + (accuracy * 0.4);
     // --- 💡 END FIX ---
 
@@ -4403,8 +4425,8 @@ function findAudiblePlay(offense, desiredType, desiredTag = null) {
 function aiCheckAudible(offense, offensivePlayKey, defense, defensivePlayKey, gameLog) {
     const offensePlay = offensivePlaybook[offensivePlayKey];
     const defensePlay = defensivePlaybook[defensivePlayKey];
-    
-    const qb = offense.roster.find(p => p && p.id === offense.depthChart.offense.QB1); 
+
+    const qb = offense.roster.find(p => p && p.id === offense.depthChart.offense.QB1);
 
     const qbIQ = qb?.attributes?.mental?.playbookIQ ?? 50;
 
@@ -4412,14 +4434,14 @@ function aiCheckAudible(offense, offensivePlayKey, defense, defensivePlayKey, ga
         return { playKey: offensivePlayKey, didAudible: false };
     }
 
-    const iqChance = qbIQ / 150; 
+    const iqChance = qbIQ / 150;
     let newPlayKey = offensivePlayKey;
     let didAudible = false;
 
     // 1. Check: Run play vs. a stacked box (Run Stop or All-Out Blitz)
     if (offensePlay.type === 'run' && (defensePlay.concept === 'Run' || (defensePlay.blitz && defensePlay.concept === 'Man'))) {
         if (Math.random() < iqChance) {
-            const audibleTo = findAudiblePlay(offense, 'pass', 'short'); 
+            const audibleTo = findAudiblePlay(offense, 'pass', 'short');
             if (audibleTo) {
                 newPlayKey = audibleTo;
                 didAudible = true;
@@ -5611,10 +5633,13 @@ export function playerCut(playerId) {
     const playerIndex = team.roster.findIndex(p => p && p.id === playerId);
 
     if (playerIndex > -1) {
-        const player = team.roster[playerIndex];
-        if (player.status?.type === 'temporary') { return { success: false, message: "Cannot cut temporary friends." }; }
+        const [removedId] = team.roster.splice(playerIndex, 1);
+        const player = game.players.find(p => p && p.id === removedId); // Find the full object
 
-        team.roster.splice(playerIndex, 1);
+        if (player.status?.type === 'temporary') { 
+                team.roster.splice(playerIndex, 0, removedId); // Add it back!
+                return { success: false, message: "Cannot cut temporary friends." }; 
+            }
         player.teamId = null;
         player.number = null; // Free up the number
 
