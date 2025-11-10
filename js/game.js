@@ -1033,7 +1033,7 @@ function calculateRoutePath(routeName, startX, startY) {
 /**
  * Sets up the initial state for all players involved in a play.
  */
-// Replace the entire setupInitialPlayerStates function in game.js with this:
+// game.js
 
 function setupInitialPlayerStates(playState, offense, defense, play, assignments, ballOnYardLine, defensivePlayKey, ballHash = 'M', offensivePlayKey = '') {
     playState.activePlayers = []; // Reset active players for the new play
@@ -1042,7 +1042,10 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
     const isPlayAction = offensivePlayKey.includes('PA_');
 
     // Get the selected defensive play call and its assignments
-    const defPlay = defensivePlaybook[defensivePlayKey] || defensivePlaybook['Cover_2_Zone']; // Fallback if key invalid
+    // --- 💡 FIX: Changed the invalid fallback 'Cover_2_Zone' to a valid key ---
+    const defPlay = defensivePlaybook[defensivePlayKey] || defensivePlaybook['Cover_2_Zone_3-1-3']; // Fallback if key invalid
+    // --- 💡 END FIX ---
+    
     const defAssignments = defPlay.assignments || {};
 
     // Set the line of scrimmage (adding 10 for the endzone offset)
