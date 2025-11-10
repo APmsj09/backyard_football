@@ -3933,7 +3933,8 @@ function resolvePunt(offense, defense, gameState) {
     const { gameLog, ballOn } = gameState;
 
     // Find the QB from the main roster (we assume they are the punter)
-    const qb = offense.roster.find(p => p && p.id === offense.depthChart.offense.QB1);
+    const roster = getRosterObjects(offense);
+    const qb = roster.find(p => p && p.id === offense.depthChart.offense.QB1);
 
     if (!qb) {
         gameLog.push("PUNT FAILED! No QB found on roster.");
@@ -4014,11 +4015,17 @@ function determinePuntDecision(down, yardsToGo, ballOn) {
 /**
  * Determines the offensive play call based on game situation, personnel, and matchups.
  */
+// game.js
+
 function determinePlayCall(offense, defense, down, yardsToGo, ballOn, scoreDiff, gameLog, drivesRemaining) {
-    // --- 1. Validate Inputs ---
-    if (!offense?.roster || !defense?.roster || !offense?.formations?.offense || !defense?.formations?.defense || !offense?.coach) {
+    // --- 💡 FIX: Get roster objects ---
+    const offenseRoster = getRosterObjects(offense);
+    const defenseRoster = getRosterObjects(defense);
+
+    if (!offenseRoster || !defenseRoster || !offense?.formations?.offense || !defense?.formations?.defense || !offense?.coach) {
+        // --- 💡 END FIX ---
         console.error("determinePlayCall: Invalid team data provided.");
-        return 'Balanced_InsideRun'; // Safe fallback
+        return 'Balanced_InsideRun';
     }
 
     const { coach } = offense;
@@ -4027,31 +4034,29 @@ function determinePlayCall(offense, defense, down, yardsToGo, ballOn, scoreDiff,
     const offenseFormation = offenseFormations[offenseFormationName];
     const defenseFormation = defenseFormations[defenseFormationName];
 
-    // --- 💡 FIX: Added optional chaining '?' to prevent crash if defenseFormation is undefined ---
     if (!offenseFormation?.personnel || !defenseFormation?.personnel) {
-        // --- 💡 END FIX ---
         console.error(`CRITICAL ERROR: Formation data missing for ${offense.name} (${offenseFormationName}) or ${defense.name} (${defenseFormationName}).`);
         return 'Balanced_InsideRun';
     }
 
-    // --- 2. Calculate Average Positional Strengths ---
-    // (Rest of the function is identical)
-    const getAvgOverall = (team, positions) => {
-        const players = team.roster.filter(p => p && (positions.includes(p.favoriteOffensivePosition) || positions.includes(p.favoriteDefensivePosition)));
+    // --- 💡 FIX: Helper now uses the passed-in roster objects ---
+    const getAvgOverall = (roster, positions) => {
+        const players = roster.filter(p => p && (positions.includes(p.favoriteOffensivePosition) || positions.includes(p.favoriteDefensivePosition)));
         if (players.length === 0) return 40;
         const totalOvr = players.reduce((sum, p) => sum + calculateOverall(p, positions[0]), 0);
         return totalOvr / players.length;
     };
 
-    const avgQbOvr = getAvgOverall(offense, ['QB']);
-    const avgRbOvr = getAvgOverall(offense, ['RB']);
-    const avgWrOvr = getAvgOverall(offense, ['WR']);
-    const avgOlOvr = getAvgOverall(offense, ['OL']);
-    const avgDlOvr = getAvgOverall(defense, ['DL']);
-    const avgLbOvr = getAvgOverall(defense, ['LB']);
-    const avgDbOvr = getAvgOverall(defense, ['DB']);
+    const avgQbOvr = getAvgOverall(offenseRoster, ['QB']);
+    const avgRbOvr = getAvgOverall(offenseRoster, ['RB']);
+    const avgWrOvr = getAvgOverall(offenseRoster, ['WR']);
+    const avgOlOvr = getAvgOverall(offenseRoster, ['OL']);
+    const avgDlOvr = getAvgOverall(defenseRoster, ['DL']);
+    const avgLbOvr = getAvgOverall(defenseRoster, ['LB']);
+    const avgDbOvr = getAvgOverall(defenseRoster, ['DB']);
+    // --- 💡 END FIX ---
 
-    // --- 3. Determine Base Pass Chance (Situational Factors) ---
+    // ... (rest of the function is identical and fine) ...
     let passChance = 0.45;
 
     if (down === 3 && yardsToGo >= 7) passChance += 0.35;
@@ -4072,8 +4077,6 @@ function determinePlayCall(offense, defense, down, yardsToGo, ballOn, scoreDiff,
     else if (scoreDiff < -7) passChance += (urgencyFactor ? 0.25 : 0.15);
     if (scoreDiff > 10 && urgencyFactor) passChance -= 0.4;
     else if (scoreDiff > 4 && urgencyFactor) passChance -= 0.2;
-
-    // --- 4. Adjust Pass Chance based on Matchups & Personnel ---
     const offWRs = offenseFormation.personnel.WR || 0;
     const defDBs = defenseFormation.personnel.DB || 0;
     const offHeavy = (offenseFormation.personnel.RB || 0) + (offenseFormation.personnel.OL || 0);
@@ -4102,15 +4105,11 @@ function determinePlayCall(offense, defense, down, yardsToGo, ballOn, scoreDiff,
     if (coach.type === 'Air Raid') passChance += 0.35;
 
     passChance = Math.max(0.05, Math.min(0.95, passChance));
-
-    // --- 5. Determine Play Type (Pass or Run) ---
     let desiredPlayType = (Math.random() < passChance) ? 'pass' : 'run';
-
-    // --- 6. Select Specific Play ---
     const formationPlays = Object.keys(offensivePlaybook).filter(key => key.startsWith(offenseFormationName));
     if (formationPlays.length === 0) {
         console.error(`CRITICAL: No plays found for formation ${offenseFormationName}!`);
-        return 'Balanced_InsideRun'; // Fallback
+        return 'Balanced_InsideRun';
     }
 
     if (yardsToGo <= 1 && Math.random() < 0.7) {
@@ -4448,9 +4447,10 @@ function findAudiblePlay(offense, desiredType, desiredTag = null) {
 function aiCheckAudible(offense, offensivePlayKey, defense, defensivePlayKey, gameLog) {
     const offensePlay = offensivePlaybook[offensivePlayKey];
     const defensePlay = defensivePlaybook[defensivePlayKey];
-    
+
     // This find is now safe from the fix we applied earlier
-    const qb = offense.roster.find(p => p && p.id === offense.depthChart.offense.QB1); 
+    const roster = getRosterObjects(offense);
+    const qb = roster.find(p => p && p.id === offense.depthChart.offense.QB1);
 
     const qbIQ = qb?.attributes?.mental?.playbookIQ ?? 50;
 
@@ -4458,14 +4458,14 @@ function aiCheckAudible(offense, offensivePlayKey, defense, defensivePlayKey, ga
         return { playKey: offensivePlayKey, didAudible: false };
     }
 
-    const iqChance = qbIQ / 150; 
+    const iqChance = qbIQ / 150;
     let newPlayKey = offensivePlayKey;
     let didAudible = false;
 
     // 1. Check: Run play vs. a stacked box (Run Stop or All-Out Blitz)
     if (offensePlay.type === 'run' && (defensePlay.concept === 'Run' || (defensePlay.blitz && defensePlay.concept === 'Man'))) {
         if (Math.random() < iqChance) {
-            const audibleTo = findAudiblePlay(offense, 'pass', 'short'); 
+            const audibleTo = findAudiblePlay(offense, 'pass', 'short');
             if (audibleTo) {
                 newPlayKey = audibleTo;
                 didAudible = true;
@@ -4517,7 +4517,7 @@ export function simulateGame(homeTeam, awayTeam, options = {}) {
         aiSetDepthChart(homeTeam); // This already uses getRosterObjects, it's safe.
         aiSetDepthChart(awayTeam); // This already uses getRosterObjects, it's safe.
 
-        const gameLog = []; 
+        const gameLog = [];
         const allVisualizationFrames = fastSim ? null : [];
         let homeScore = 0, awayScore = 0;
         const weather = getRandom(['Sunny', 'Windy', 'Rain']);
@@ -4527,7 +4527,7 @@ export function simulateGame(homeTeam, awayTeam, options = {}) {
         const totalDrivesPerHalf = getRandomInt(4, 5);
 
         let currentHalf = 1, drivesThisGame = 0;
-        let nextDriveStartBallOn = 20; 
+        let nextDriveStartBallOn = 20;
 
         if (!fastSim) gameLog.push("Coin toss to determine first possession...");
         const coinFlipWinner = Math.random() < 0.5 ? homeTeam : awayTeam;
@@ -4542,14 +4542,14 @@ export function simulateGame(homeTeam, awayTeam, options = {}) {
                 currentHalf = 2;
                 if (!fastSim) gameLog.push(`==== HALFTIME ==== Score: ${awayTeam.name} ${awayScore} - ${homeTeam.name} ${homeScore}`);
                 possessionTeam = receivingTeamSecondHalf;
-                
-                // --- 💡 FIX: This logic is wrong. Must get full players to iterate ---
+
+
                 const allGamePlayers = [...getRosterObjects(homeTeam), ...getRosterObjects(awayTeam)];
                 allGamePlayers.forEach(p => { if (p) p.fatigue = Math.max(0, (p.fatigue || 0) - 40); });
-                // --- 💡 END FIX ---
+
 
                 if (!fastSim) gameLog.push(`-- Second Half Kickoff: ${possessionTeam.name} receives --`);
-                nextDriveStartBallOn = 20; 
+                nextDriveStartBallOn = 20;
             }
 
             if (!possessionTeam) {
@@ -4583,17 +4583,17 @@ export function simulateGame(homeTeam, awayTeam, options = {}) {
                 // --- 💡 FIX: Second forfeit check must also use getRosterObjects ---
                 const healthyOffense = getRosterObjects(offense).filter(p => p && p.status?.duration === 0).length;
                 const healthyDefense = getRosterObjects(defense).filter(p => p && p.status?.duration === 0).length;
-                
+
                 if (healthyOffense < MIN_HEALTHY_PLAYERS || healthyDefense < MIN_HEALTHY_PLAYERS) {
-                // --- 💡 END FIX ---
+                    // --- 💡 END FIX ---
                     gameLog.push("Forfeit condition met mid-drive.");
                     gameForfeited = true;
                     driveActive = false;
-                    break; 
+                    break;
                 }
-                
+
                 const shouldPunt = determinePuntDecision(down, yardsToGo, ballOn);
-                let result; 
+                let result;
 
                 if (shouldPunt) {
                     if (!fastSim) {
@@ -4601,7 +4601,7 @@ export function simulateGame(homeTeam, awayTeam, options = {}) {
                     }
                     offense.formations.offense = 'Punt';
                     defense.formations.defense = 'Punt_Return';
-                    
+
                     // --- 💡 FIX: resolvePunt needs getRosterObjects, let's fix it ---
                     // (The fix is in resolvePunt, this call is fine)
                     result = resolvePunt(offense, defense, { gameLog, ballOn });
@@ -4616,6 +4616,23 @@ export function simulateGame(homeTeam, awayTeam, options = {}) {
                     nextDriveStartBallOn = result.newBallOn;
 
                 } else {
+
+                    // --- 3B. IT'S A NORMAL PLAY ---
+
+                    // Log the current down and distance
+                    if (!fastSim) {
+                        const yardLineText = ballOn <= 50 ? `own ${ballOn}` : `opponent ${100 - ballOn}`;
+                        const yardsToGoalLine = 100 - ballOn;
+                        // Use the corrected goal-to-go logic
+                        const isGoalToGo = (ballOn + 10) + yardsToGo >= (FIELD_LENGTH - 10);
+                        const downText = `${down}${down === 1 ? 'st' : down === 2 ? 'nd' : down === 3 ? 'rd' : 'th'}`;
+                        const yardsText = isGoalToGo ? 'Goal' : yardsToGo;
+                        gameLog.push(`--- ${downText} & ${yardsText} from the ${yardLineText} ---`);
+                    }
+
+                    // --- 4. PRE-SNAP & PLAY CALLING ---
+
+                    // Reset to default formation (in case the last play was a punt)
                     offense.formations.offense = offense.coach.preferredOffense || 'Balanced';
 
                     const scoreDiff = offense.id === homeTeam.id ? homeScore - awayScore : awayScore - homeScore;
@@ -4626,8 +4643,8 @@ export function simulateGame(homeTeam, awayTeam, options = {}) {
                     // --- 💡 FIX: This function MUST be fixed to use getRosterObjects ---
                     // (The fix is in determinePlayCall, this call is fine)
                     const offensivePlayKey_initial = determinePlayCall(offense, defense, down, yardsToGo, ballOn, scoreDiff, fastSim ? null : gameLog, drivesRemainingInGame);
-                    
-                    const offenseFormationName = offense.formations.offense; 
+
+                    const offenseFormationName = offense.formations.offense;
                     const defensiveFormationName = determineDefensiveFormation(defense, offenseFormationName, down, yardsToGo);
                     defense.formations.defense = defensiveFormationName;
                     const defensivePlayKey = determineDefensivePlayCall(defense, offense, down, yardsToGo, ballOn, scoreDiff, fastSim ? null : gameLog, drivesRemainingInGame);
@@ -4716,21 +4733,20 @@ export function simulateGame(homeTeam, awayTeam, options = {}) {
                         // Tally Score
                         if (offense.id === homeTeam.id) homeScore += 6; else awayScore += 6;
 
-                        if (conversionResult.touchdown) {
-                            if (!conversionResult.turnover) {
-                                // OFFENSE scored conversion
-                                if (!fastSim) gameLog.push(`✅ ${points}-point conversion GOOD!`);
-                                if (offense.id === homeTeam.id) homeScore += points; else awayScore += points;
-                            } else {
-                                // DEFENSE scored on a turnover (Defensive 2-pt)
-                                if (!fastSim) gameLog.push(`❌ ${points}-point conversion FAILED... AND RETURNED!`);
-                                if (defense.id === homeTeam.id) homeScore += 2; else awayScore += 2;
-                            }
+                        if (conversionResult.touchdown && !conversionResult.turnover) {
+                            // OFFENSE scored conversion
+                            if (!fastSim) gameLog.push(`✅ ${points}-point conversion GOOD!`);
+                            if (offense.id === homeTeam.id) homeScore += (6 + points); else awayScore += (6 + points);
+                        } else if (conversionResult.touchdown && conversionResult.turnover) {
+                            // DEFENSE scored on a turnover
+                            if (!fastSim) gameLog.push(`❌ ${points}-point conversion FAILED... AND RETURNED!`);
+                            if (offense.id === homeTeam.id) homeScore += 6; else awayScore += 6; // Base TD
+                            if (defense.id === homeTeam.id) homeScore += 2; else awayScore += 2; // Defensive 2pt
                         } else {
-                            // No TD on conversion (Failed attempt)
+                            // No TD on conversion
                             if (!fastSim) gameLog.push(`❌ ${points}-point conversion FAILED!`);
+                            if (offense.id === homeTeam.id) homeScore += 6; else awayScore += 6; // Base TD
                         }
-
                     } else {
                         // --- DEFENSIVE TD ---
                         if (!fastSim) gameLog.push(`DEFENSIVE TOUCHDOWN! 6 points for ${defense.name}!`);
@@ -4996,7 +5012,8 @@ export function simulateGame(homeTeam, awayTeam, options = {}) {
         }
 
         // --- (Post-Game Player Progression & Stat Aggregation) ---
-        [...(homeTeam.roster || []), ...(awayTeam.roster || [])].forEach(p => {
+        const allGamePlayersForStats = [...getRosterObjects(homeTeam), ...getRosterObjects(awayTeam)];
+        allGamePlayersForStats.forEach(p => {
             if (!p || !p.gameStats || !p.attributes) return;
 
             // 1. Check for Breakthroughs
@@ -5031,10 +5048,8 @@ export function simulateGame(homeTeam, awayTeam, options = {}) {
         const finalAwayTeam = game.teams.find(t => t.id === awayTeam.id);
 
         gameResult = {
-
-            homeTeam: finalHomeTeam, // Use the final object
-            awayTeam: finalAwayTeam, // Use the final object
-
+            homeTeam: homeTeam,
+            awayTeam: awayTeam,
             homeScore, awayScore,
             gameLog, breakthroughs, visualizationFrames: allVisualizationFrames
         };
