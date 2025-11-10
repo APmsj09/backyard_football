@@ -1049,6 +1049,7 @@ function renderDepthChartSide(side, gameState) {
     renderDepthChartBench(benchTableContainer, benchedPlayers, side);
 }
 
+
 /**
  * Renders the visual, on-field player slots and their assignment dropdowns.
  */
@@ -1062,8 +1063,6 @@ function renderVisualFormationSlots(container, currentChart, formationData, benc
     
     const slots = formationData.slots;
 
-    // --- 💡 FIX: Create the dropdown options ---
-    // Start with the "Empty" option
     const optionsHtml = [
         '<option value="null">-- Empty --</option>',
         ...benchedPlayers.map(p => `<option value="${p.id}">${p.name}</option>`)
@@ -1075,54 +1074,44 @@ function renderVisualFormationSlots(container, currentChart, formationData, benc
         const relCoords = formationData.coordinates[slot] || [0, 0];
         
         // --- Coordinate Mapping ---
-        // Map X coordinate to 'left' percentage (0-100%)
-        const x_percent = 50 + (relCoords[0] * 1.7); // 50% is center, 1.7 is scaling
+        // 💡 FIX: Increased horizontal multiplier to spread slots
+        const x_percent = 50 + (relCoords[0] * 2.0); // Was 1.7
 
-        // 💡 FIX: Map Y coordinate with a larger multiplier for more vertical space
-        // Y = 0 is LoS (50%).
-        const y_percent = 50 + (relCoords[1] * 6); // Was * 3, now * 6
+        // 💡 FIX: Increased vertical multiplier to use the 400px height
+        const y_percent = 50 + (relCoords[1] * 8); // Was 6
         
         const slotEl = document.createElement('div');
         slotEl.className = 'player-slot-visual';
         slotEl.dataset.positionSlot = slot;
         slotEl.dataset.side = side;
-        slotEl.style.left = `${Math.max(10, Math.min(90, x_percent))}%`; // Clamp to 10%-90%
-        slotEl.style.top = `${Math.max(10, Math.min(90, y_percent))}%`;  // Clamp to 10%-90%
+        // 💡 FIX: Tighter clamp to prevent going off-edge
+        slotEl.style.left = `${Math.max(15, Math.min(85, x_percent))}%`; // Was 10/90
+        slotEl.style.top = `${Math.max(12, Math.min(88, y_percent))}%`;  // Was 10/90
         
         if (player && player.status?.type !== 'temporary') {
              slotEl.draggable = true;
              slotEl.dataset.playerId = player.id;
         }
 
-        // --- 💡 FIX: Logic for Overall and Dropdown ---
         let overallHtml = '';
         let finalOptionsHtml = optionsHtml;
 
         if (player) {
-            // 1. Calculate and show the overall
             const basePosition = slot.replace(/\d/g, '');
             const overall = calculateOverall(player, basePosition);
             overallHtml = `<div class="slot-overall">${overall} OVR</div>`;
-
-            // 2. Add the *current starter* to the list of options
             finalOptionsHtml += `<option value="${player.id}">${player.name}</option>`;
         } else {
-            // No player, just show empty dashes for overall
             overallHtml = `<div class="slot-overall">-- OVR</div>`;
         }
 
-        // Build the dropdown
         const selectEl = document.createElement('select');
         selectEl.className = 'slot-select';
         selectEl.dataset.slot = slot;
         selectEl.dataset.side = side;
         selectEl.innerHTML = finalOptionsHtml;
-
-        // 3. Set the selected value to the current player
         selectEl.value = playerId || "null";
         
-        // --- 💡 FIX: Combined UI ---
-        // Removed the separate player name text, now just label, overall, and dropdown
         slotEl.innerHTML = `
             <span class="slot-label">${slot}</span>
             ${overallHtml}

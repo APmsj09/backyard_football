@@ -382,9 +382,10 @@ canvas#field-canvas {
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    /* 💡 FIX: Smaller width to prevent overlap */
-    width: 140px; 
-    padding: 8px;
+    /* 💡 FIX: Smaller width */
+    width: 120px; 
+    /* 💡 FIX: Less padding */
+    padding: 6px;
     border: 2px dashed #9ca3af; /* gray-400 */
     border-radius: 8px;
     background-color: rgba(0, 0, 0, 0.3); /* Darker transparent bg */
@@ -392,17 +393,42 @@ canvas#field-canvas {
     transition: all 0.2s ease;
 }
 
-.player-slot-visual.drag-over {
-    border-style: solid;
-    border-color: #f59e0b; /* amber-500 */
-    background-color: rgba(251, 191, 36, 0.2);
-}
-
 .player-slot-visual .slot-label {
-    font-size: 1rem;
+    /* 💡 FIX: Smaller font */
+    font-size: 0.875rem; /* was 1rem */
     font-weight: 700;
     color: #ffffff;
     text-shadow: 1px 1px 2px rgba(0,0,0,0.7);
+}
+
+/* 💡 FIX: Smaller font */
+.slot-overall {
+    font-size: 0.75rem; /* was 0.875rem */
+    font-weight: 700;
+    color: #fcd34d; /* amber-300 */
+    margin-top: -2px;
+    margin-bottom: 4px;
+}
+
+/* 💡 FIX: Smaller font */
+.slot-select {
+    width: 100%;
+    margin-top: 4px;
+    font-size: 0.75rem; /* was 0.875rem */
+    font-weight: 600;
+    border-radius: 4px;
+    border: 1px solid #6b7280; /* gray-500 */
+    padding: 2px 4px; /* Tighter padding */
+    background-color: #374151; /* gray-700 */
+    color: #f9fafb; /* gray-50 */
+    cursor: pointer;
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    appearance: none;
+    background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='%23d1d5db' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 10 13 14 9'%3e%3c/polyline%3e%3c/svg%3e");
+    background-position: right 0.5rem center;
+    background-repeat: no-repeat;
+    background-size: 1em 1em;
 }
 
 /* 💡 NEW: Overall Rating Style */
