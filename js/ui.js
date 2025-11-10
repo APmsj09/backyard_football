@@ -316,14 +316,61 @@ export function hideModal() {
     elements.modal?.classList.add('hidden');
 }
 
-/** Updates the loading progress bar. */
 export function updateLoadingProgress(progress) {
-    if (elements.loadingProgress) {
-        const validProgress = Math.max(0, Math.min(1, progress));
-        elements.loadingProgress.style.width = `${validProgress * 100}%`;
-        elements.loadingProgress.parentElement?.setAttribute('aria-valuenow', Math.round(validProgress * 100));
+    const progressElement = document.getElementById('loading-progress');
+    const progressText = document.getElementById('loading-progress-text');
+
+    if (progressElement) {
+        progressElement.style.width = progress + "%";
+        progressElement.setAttribute("aria-valuenow", progress);
+    }
+
+    if (progressText) {
+        progressText.textContent = `${progress}%`;
     }
 }
+
+// Rotating loading messages
+const loadingMessages = [
+    "Scouting rookies...",
+    "Building team rosters...",
+    "Analyzing player stats...",
+    "Setting up salary caps...",
+    "Scheduling season games...",
+    "Drafting prospects...",
+    "Signing free agents...",
+    "Preparing preseason matchups...",
+    "Almost ready for kickoff!"
+];
+
+let messageIndex = 0;
+let messageInterval = null;
+
+export function startLoadingMessages() {
+    const messageEl = document.getElementById('loading-message');
+    if (!messageEl) return;
+
+    messageEl.textContent = loadingMessages[0];
+    messageIndex = 1;
+
+    messageInterval = setInterval(() => {
+        messageEl.style.opacity = 0;
+
+        setTimeout(() => {
+            messageEl.textContent = loadingMessages[messageIndex];
+            messageEl.style.opacity = 1;
+            messageIndex = (messageIndex + 1) % loadingMessages.length;
+        }, 600);
+    }, 2500);
+}
+
+export function stopLoadingMessages() {
+    if (messageInterval) {
+        clearInterval(messageInterval);
+        messageInterval = null;
+    }
+}
+
 
 /** Renders suggested team names. */
 export function renderTeamNameSuggestions(names, onSelect) {
@@ -2203,7 +2250,7 @@ function runLiveGameTick() {
                     if (liveGamePossessionName === currentLiveGameResult.homeTeam.name) liveGameCurrentHomeScore += points; else liveGameCurrentAwayScore += points;
                     liveGameIsConversion = false;
                     liveGameDriveActive = false;
-                    
+
                     styleClass = 'font-semibold text-green-400';
                     descriptiveText = `✅ ${playLogEntry} Points are good!`;
                     playHasEnded = true; // Conversion ends
@@ -2372,10 +2419,10 @@ export function startLiveGameSim(gameResult, onComplete) {
 
     drawFieldVisualization(null); // Clear field
     renderLiveStatsBox(gameResult); // Render the static "final" stats
-    try { 
-        renderSimPlayers(gameResult.visualizationFrames[0]); 
-    } catch (err) { 
-        console.error('renderSimPlayers init error:', err); 
+    try {
+        renderSimPlayers(gameResult.visualizationFrames[0]);
+    } catch (err) {
+        console.error('renderSimPlayers init error:', err);
     }
     setSimSpeed(liveGameSpeed); // Set default button style
 

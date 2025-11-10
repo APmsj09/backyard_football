@@ -24,19 +24,46 @@ function yieldToMain() { return new Promise(resolve => setTimeout(resolve, 0)); 
  * Initializes the league and navigates to the team creation screen.
  */
 async function startNewGame() {
-    try {
-        UI.showScreen('loadingScreen');
-        await new Promise(resolve => setTimeout(resolve, 50)); // Brief pause for UI
-        await Game.initializeLeague(UI.updateLoadingProgress); // Generate players, AI teams, relationships
-        gameState = Game.getGameState(); // Get initial state
-        if (!gameState) throw new Error("Failed to get game state after initialization.");
-        UI.renderTeamNameSuggestions(['Jets', 'Sharks', 'Tigers', 'Bulldogs', 'Panthers', 'Giants'], handleTeamNameSelection);
-        UI.showScreen('teamCreationScreen');
-    } catch (error) {
-        console.error("Error starting game:", error);
-        UI.showModal("Error", `Could not start a new game: ${error.message}. Please check the console for details.`, null, '', null, 'Close');
-    }
+  try {
+    // Show the loading screen + start animated messages
+    UI.showScreen("loading-screen");
+    UI.startLoadingMessages();
+
+    // Small delay to ensure the UI renders before the heavy work starts
+    await new Promise(resolve => setTimeout(resolve, 50));
+
+    // Initialize the game world and update the progress bar
+    await Game.initializeLeague(UI.updateLoadingProgress);
+
+    // Stop rotating messages when done
+    UI.stopLoadingMessages();
+
+    // Retrieve the generated game state
+    gameState = Game.getGameState();
+    if (!gameState) throw new Error("Failed to get game state after initialization.");
+
+    // Prepare team name suggestions
+    UI.renderTeamNameSuggestions(
+      ['Jets', 'Sharks', 'Tigers', 'Bulldogs', 'Panthers', 'Giants'],
+      handleTeamNameSelection
+    );
+
+    // Transition to team creation screen
+    UI.showScreen('team-creation-screen');
+  } catch (error) {
+    console.error("Error starting game:", error);
+    UI.stopLoadingMessages(); // <-- make sure to stop them if something fails
+    UI.showModal(
+      "Error",
+      `Could not start a new game: ${error.message}. Please check the console for details.`,
+      null,
+      '',
+      null,
+      'Close'
+    );
+  }
 }
+
 
 /**
  * Updates the custom team name input when a suggestion is clicked.

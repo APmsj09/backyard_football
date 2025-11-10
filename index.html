@@ -20,16 +20,13 @@
       theme: {
         extend: {
           fontFamily: {
-            'sans': ['Inter', 'sans-serif'],
-            'display': ['Bangers', 'cursive'],
+            sans: ['Inter', 'sans-serif'],
+            display: ['Bangers', 'cursive'],
           },
-          // --- ADD THIS BLOCK ---
           gridTemplateColumns: {
-            // Add a 17-column grid
             '17': 'repeat(17, minmax(0, 1fr))',
           },
           gridColumn: {
-            // Add spans for 17-col grid (though you don't use them, it's good practice)
             'span-17': 'span 17 / span 17',
           }
         }
@@ -42,7 +39,7 @@
 
   <div class="container mx-auto p-4">
 
-    <section id="start-screen" class="screen text-center ...">
+    <section id="start-screen" class="screen text-center">
       <h1 class="font-display ...">Football GM</h1>
       <p class="text-lg ...">Build your dynasty. Win the championship.</p>
 
@@ -65,14 +62,27 @@
       </div>
     </section>
 
-    <section id="loading-screen" class="screen hidden text-center p-8 bg-white rounded-lg shadow-lg">
-      <h2 class="text-3xl font-bold mb-6">Generating League...</h2>
-      <p class="text-gray-600 mb-4">Please wait while we create players, teams, and rivalries.</p>
-      <div class="w-full bg-gray-200 rounded-full h-4 overflow-hidden">
-        <div id="loading-progress" class="bg-amber-500 h-4 rounded-full transition-all duration-300" style="width: 0%"
-          aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"></div>
+    <!-- ⚡ Enhanced Loading Screen -->
+    <section id="loading-screen"
+      class="screen hidden flex flex-col items-center justify-center text-center p-8 bg-gray-900 text-white rounded-lg shadow-lg min-h-[60vh]">
+      <h2 class="text-3xl font-bold mb-4 tracking-wide">🏈 Building Your League...</h2>
+      <p class="text-gray-300 mb-6 text-lg">Please wait while we create players, teams, and rivalries.</p>
+
+      <!-- Progress Bar -->
+      <div class="w-3/4 max-w-md bg-gray-700 rounded-full h-6 overflow-hidden shadow-lg">
+        <div id="loading-progress" class="h-6 bg-amber-500 rounded-full transition-all duration-500 ease-out"
+          style="width: 0%;" role="progressbar" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"></div>
       </div>
+
+      <!-- Progress Percentage -->
+      <p id="loading-progress-text" class="mt-4 text-amber-300 text-lg font-semibold tracking-wide">0%</p>
+
+      <!-- Rotating Status Message -->
+      <p id="loading-message" class="mt-6 text-gray-400 italic text-lg transition-opacity duration-700">
+        Initializing draft data...
+      </p>
     </section>
+
 
     <section id="team-creation-screen" class="screen hidden p-8 bg-white rounded-lg shadow-lg">
       <h2 class="text-3xl font-bold mb-6">Create Your Team</h2>
@@ -429,7 +439,7 @@
       </div>
 
       <button id="go-to-next-draft-btn"
-        classs="btn bg-amber-500 hover:bg-amber-600 text-white font-bold py-3 px-8 rounded-lg text-xl transition mt-8">
+        class="btn bg-amber-500 hover:bg-amber-600 text-white font-bold py-3 px-8 rounded-lg text-xl transition mt-8">
         Proceed to Next Year's Draft
       </button>
     </section>
