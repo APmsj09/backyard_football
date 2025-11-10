@@ -1490,6 +1490,8 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
  * Updates player targets based on their current action, assignment, and game state. (Improved AI)
  * Modifies playerState objects within playState.activePlayers directly.
  */
+// game.js
+
 function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrierState, playType, offensivePlayKey, offensiveAssignments, defensivePlayKey, gameLog) {
     const qbState = offenseStates.find(p => p.slot?.startsWith('QB'));
     const isBallInAir = playState.ballState.inAir;
@@ -1499,12 +1501,9 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
     const POCKET_DEPTH_PASS = -1.5; // 1.5 yards *behind* the LoS
     const POCKET_DEPTH_RUN = 0.5;   // 0.5 yards *in front* of the LoS
 
-    // Helper: Determine if a target is the QB/Carrier and not null
     const isPlayerState = (t) => t && t.speed !== undefined;
-
     const olAssignedDefenders = new Set();
 
-    // HIGHEST PRIORITY: If ball is loose, everyone chases it.
     if (playState.ballState.isLoose) {
         playState.activePlayers.forEach(pState => {
             if (pState.stunnedTicks === 0 && !pState.isEngaged) {
@@ -1512,10 +1511,9 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                 pState.targetY = playState.ballState.y;
             }
         });
-        return; // Skip all other AI logic
+        return; 
     }
 
-    // 1. Get all potential threats (DL/LBs who aren't dropping)
     const allThreats = defenseStates.filter(d => {
         if (d.isBlocked || d.isEngaged) return false;
         const isBoxPlayer = d.slot.startsWith('DL') || d.slot.startsWith('LB');
@@ -1525,54 +1523,58 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
         return !isDropping;
     });
 
-    // 2. Find all OL who need an assignment
     const allBlockers = offenseStates.filter(p =>
         !p.isEngaged &&
         (p.action === 'pass_block' || p.action === 'run_block')
     );
 
-    // --- ⭐️ Separate Linemen from Other Blockers ⭐️ ---
     const linemen = allBlockers.filter(p => p.slot.startsWith('OL'));
     const otherBlockers = allBlockers.filter(p => !p.slot.startsWith('OL'));
 
-    // 3. Helper function for LINEMEN ONLY (assignTarget)
     const assignLinemanTarget = (blocker, availableThreats, logPrefix) => {
-        // Check if it's a live run play (run or completed pass)
-        const isLiveRunPlay = (ballCarrierState && !playState.ballState.inAir);
+        
+        if (blocker.isEngaged && blocker.engagedWith) {
+            const engagedTarget = defenseStates.find(d => d.id === blocker.engagedWith);
+            if (engagedTarget) {
+                blocker.targetX = engagedTarget.x;
+                blocker.targetY = engagedTarget.y;
+                return; 
+            } else {
+                blocker.isEngaged = false;
+                blocker.engagedWith = null;
+            }
+        }
 
-        if (availableThreats.length === 0) {
-            // --- "CLIMB" LOGIC ---
+        const isLiveRunPlay = (ballCarrierState && !playState.ballState.inAir);
+        const unengagedThreats = availableThreats.filter(d => !d.isBlocked && !d.blockedBy);
+
+        if (unengagedThreats.length === 0) {
             if (isLiveRunPlay) {
-                // --- 💡 NEW: Smart Climb (Ball Carrier Aware) ---
                 const nextLevelThreats = defenseStates.filter(d =>
                     !d.isBlocked && !d.isEngaged && d.stunnedTicks === 0 &&
-                    d.y > blocker.y && // Must be "in front" of the blocker
-                    getDistance(blocker, d) < 15 // Must be within 15 yards
+                    d.y > blocker.y && getDistance(blocker, d) < 15
                 );
                 if (nextLevelThreats.length > 0) {
-                    // Sort by who is closest *to the ball carrier*
                     nextLevelThreats.sort((a, b) => getDistance(a, ballCarrierState) - getDistance(b, ballCarrierState));
                     const newTarget = nextLevelThreats[0];
                     blocker.dynamicTargetId = newTarget.id;
                     olAssignedDefenders.add(newTarget.id);
-                    if (blocker.slot === 'OL2') console.log(`%c[OL2-BRAIN] ${logPrefix}: No primary. Smart Climb to ${newTarget.name} (near carrier)`, 'color: #FFBF00');
+                    if (blocker.slot === 'OL2' && gameLog) console.log(`%c[OL2-BRAIN] ${logPrefix}: No primary. Smart Climb to ${newTarget.name} (near carrier)`, 'color: #FFBF00');
                 } else {
-                    blocker.dynamicTargetId = null; // No one to block
-                    if (blocker.slot === 'OL2') console.log(`%c[OL2-BRAIN] ${logPrefix}: No primary or climb targets.`, 'color: #FFBF00');
+                    blocker.dynamicTargetId = null; 
+                    if (blocker.slot === 'OL2' && gameLog) console.log(`%c[OL2-BRAIN] ${logPrefix}: No primary or climb targets.`, 'color: #FFBF00');
                 }
             } else {
-                // --- PASS BLOCK (Ball in air or pre-throw) ---
                 blocker.dynamicTargetId = null;
                 blocker.targetX = blocker.initialX;
-                blocker.targetY = LOS + POCKET_DEPTH_PASS; // Hold pocket
-                if (blocker.slot === 'OL2') console.log(`%c[OL2-BRAIN] ${logPrefix}: No target chosen. Holding Pocket.`, 'color: #FFBF00');
+                blocker.targetY = LOS + POCKET_DEPTH_PASS; 
+                if (blocker.slot === 'OL2' && gameLog) console.log(`%c[OL2-BRAIN] ${logPrefix}: No target chosen. Holding Pocket.`, 'color: #FFBF00');
             }
-            return; // Finished assigning
+            return; 
         }
 
-        // --- "LANE-BASED" LOGIC ---
         const BLOCKING_LANE_WIDTH = 2.0;
-        const primaryThreats = availableThreats.filter(d =>
+        const primaryThreats = unengagedThreats.filter(d =>
             Math.abs(d.x - blocker.initialX) < BLOCKING_LANE_WIDTH
         );
 
@@ -1580,53 +1582,78 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
         if (primaryThreats.length > 0) {
             primaryThreats.sort((a, b) => getDistance(blocker, a) - getDistance(blocker, b));
             targetDefender = primaryThreats[0];
-            if (blocker.slot === 'OL2') console.log(`%c[OL2-BRAIN] ${logPrefix}: Primary Target (in lane): ${targetDefender.name} (${targetDefender.slot})`, 'color: #FFBF00');
+            if (blocker.slot === 'OL2' && gameLog) console.log(`%c[OL2-BRAIN] ${logPrefix}: Primary Target (in lane): ${targetDefender.name} (${targetDefender.slot})`, 'color: #FFBF00');
         } else {
-            // 2b. No one in our lane. "Help Out" logic.
-            availableThreats.sort((a, b) => getDistance(blocker, a) - getDistance(blocker, b));
-            targetDefender = availableThreats[0];
-            if (blocker.slot === 'OL2' && targetDefender) console.log(`%c[OL2-BRAIN] ${logPrefix}: No threat in lane. Helping on closest: ${targetDefender.name} (${targetDefender.slot})`, 'color: #FFBF00');
+            if (qbState && playType === 'pass') { 
+                unengagedThreats.sort((a, b) => {
+                    const aQBdist = getDistance(qbState, a);
+                    const bQBdist = getDistance(qbState, b);
+                    return aQBdist - bQBdist;
+                });
+            } else { 
+                 unengagedThreats.sort((a, b) => getDistance(blocker, a) - getDistance(blocker, b));
+            }
+            
+            targetDefender = unengagedThreats[0];
         }
 
         if (targetDefender) {
+            const dist = getDistance(blocker, targetDefender);
+            const ENGAGE_DISTANCE = BLOCK_ENGAGE_RANGE; 
+
             blocker.dynamicTargetId = targetDefender.id;
             olAssignedDefenders.add(targetDefender.id);
-            if (blocker.slot === 'OL2') console.log(`%c[OL2-BRAIN] ${logPrefix}: Chosen Target: ${targetDefender.name} (${targetDefender.slot})`, 'color: #FFBF00');
+            
+            blocker.targetX = targetDefender.x;
+            blocker.targetY = targetDefender.y;
+
+            if (dist < ENGAGE_DISTANCE) {
+                blocker.isEngaged = true;
+                blocker.engagedWith = targetDefender.id;
+                targetDefender.isEngaged = true;
+                targetDefender.isBlocked = true; 
+                targetDefender.blockedBy = blocker.id; 
+                
+                playState.blockBattles.push({
+                    blockerId: blocker.id, defenderId: targetDefender.id,
+                    status: 'ongoing',
+                    battleScore: 0,
+                    startTick: playState.tick
+                });
+
+                if (blocker.slot === 'OL2' && gameLog) console.log(`%c[OL2-BRAIN] ${logPrefix}: ENGAGED ${targetDefender.name} (${targetDefender.slot})`, 'color: #00dd00');
+            } else {
+                if (blocker.slot === 'OL2' && gameLog) console.log(`%c[OL2-BRAIN] ${logPrefix}: Moving to help on: ${targetDefender.name} (${targetDefender.slot}) [Dist: ${dist.toFixed(1)}]`, 'color: #FFBF00');
+            }
+
         } else {
-            // Fallback: No one found, trigger climb/hold logic
             blocker.dynamicTargetId = null;
             if (isLiveRunPlay) {
-                // No one in lane, but it's a run play. Do a "dumb climb" for now.
-                // The next tick will run the "Smart Climb" logic above.
                 blocker.targetX = blocker.initialX;
                 blocker.targetY = blocker.y + 7;
             } else {
-                // Pass block
                 blocker.targetX = blocker.initialX;
                 blocker.targetY = LOS + POCKET_DEPTH_PASS;
             }
-            if (blocker.slot === 'OL2') console.log(`%c[OL2-BRAIN] ${logPrefix}: No primary or help targets found. ${isLiveRunPlay ? 'Climbing' : 'Holding'}.`, 'color: #FFBF00');
+            if (blocker.slot === 'OL2' && gameLog) console.log(`%c[OL2-BRAIN] ${logPrefix}: No primary or help targets found. ${isLiveRunPlay ? 'Climbing' : 'Holding'}.`, 'color: #FFBF00');
         }
     };
-
-    // 4. Process Blockers (LINEMEN FIRST)
+    
     if (linemen.length > 0) {
         linemen.sort((a, b) => {
-            if (a.slot === 'OL2') return -1; // Center first
+            if (a.slot === 'OL2') return -1; 
             if (b.slot === 'OL2') return 1;
-            return a.initialX - b.initialX; // Then left-to-right
+            return a.initialX - b.initialX; 
         });
-
-        // --- OL2 LOG (Threat Header) ---
+        
         const ol2Logger = linemen.find(p => p.slot === 'OL2');
-        if (ol2Logger) {
+        if (ol2Logger && gameLog) { // Added gameLog check
             const logPrefix = `TICK ${playState.tick} | ${ol2Logger.name} (OL2)`;
             console.log(`--- %c[OL2-BRAIN] ${logPrefix} (${ol2Logger.action.toUpperCase()}) ---`, 'color: #FFBF00; font-weight: bold;');
             const threatNames = allThreats.map(d => `${d.slot} (Assign: ${d.assignment})`);
             console.log(`%c[OL2-BRAIN] Threats Seen: [${threatNames.join(', ') || 'NONE'}]`, 'color: #FFBF00');
         }
-
-        // Assign targets to all linemen
+        
         for (const ol of linemen) {
             const availableThreats = allThreats.filter(d => !olAssignedDefenders.has(d.id));
             const prefix = `TICK ${playState.tick} | ${ol.name} (${ol.slot})`;
@@ -1634,55 +1661,40 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
         }
     }
 
-    // 5. Process OTHER BLOCKERS (RBs, WRs)
     if (otherBlockers.length > 0) {
         for (const blocker of otherBlockers) {
-            // RBs/WRs get simpler logic: "Block the closest unassigned threat"
             const availableThreats = allThreats.filter(d => !olAssignedDefenders.has(d.id));
-
             if (availableThreats.length > 0) {
                 availableThreats.sort((a, b) => getDistance(blocker, a) - getDistance(blocker, b));
                 const targetDefender = availableThreats[0];
-
                 blocker.dynamicTargetId = targetDefender.id;
                 olAssignedDefenders.add(targetDefender.id);
             } else {
-                // No one left for the RB/WR to block.
                 blocker.dynamicTargetId = null;
-                // Let their 'run_block' or 'pass_block' action handle them
-                // (e.g., pass_block will make them hold pocket, run_block will make them climb)
             }
         }
     }
 
     playState.activePlayers.forEach(pState => {
-        let target = null; // Target: PlayerState (dynamic) or {x, y} (static point)
+        let target = null; 
 
-        // --- 1. HANDLE STUNNED STATE (Highest Priority) ---
         if (pState.stunnedTicks > 0) {
             pState.stunnedTicks--;
-            pState.targetX = pState.x; // Player stands still while stunned
+            pState.targetX = pState.x; 
             pState.targetY = pState.y;
-            return; // Skip all other AI logic for this tick
+            return; 
         }
 
-        // --- 2. HANDLE JUKE COOLDOWN & VISUALIZATION ---
         if (pState.action === 'juke' || pState.jukeTicks > 0) {
             pState.jukeTicks--;
-
-            // If juke is still active, player maintains current (reduced speed) course
             if (pState.jukeTicks > 0) {
-                // Crucial to return here to prevent AI from recalculating the run_path target
-                // If they are mid-juke, they should maintain their direction.
                 return;
             } else {
-                // Reset the action once the visual effect is over
                 pState.action = 'run_path';
                 pState.jukeTicks = 0;
             }
         }
 
-        // --- 3. PROCEED TO AI LOGIC ---
         if (pState.isBlocked) {
             pState.targetX = pState.x; pState.targetY = pState.y;
             return;
@@ -1690,39 +1702,28 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
 
         if (pState.isOffense && pState.isEngaged) {
             const engagedDefender = defenseStates.find(d => d.id === pState.engagedWith);
-
             if (engagedDefender) {
-                // Target the defender's current position to "stick" to them
                 pState.targetX = engagedDefender.x;
                 pState.targetY = engagedDefender.y;
             } else {
-                // Defender is gone? (Shouldn't happen, but good fallback)
-                pState.isEngaged = false; // Break the engagement
+                pState.isEngaged = false; 
                 pState.engagedWith = null;
             }
-
-            // We MUST return here to skip the 'switch (pState.action)' logic,
-            // which would override our target (e.g., 'pass_block' case).
             return;
         }
-        // --- 💡 BLOCKER STATE-CHANGE LOGIC 💡 ---
-        // Check if the ball has just been caught by a *different* offensive player
+        
         if (pState.isOffense &&
-            pState.id !== ballCarrierState?.id && // I am not the carrier
+            pState.id !== ballCarrierState?.id && 
             (pState.action === 'pass_block' || pState.action === 'run_route' || pState.action === 'route_complete') &&
-            ballCarrierState && // A carrier exists
-            ballCarrierState.isOffense && // The carrier is on my team
-            !playState.ballState.inAir) // Ball is not in the air (i.e., it was caught)
+            ballCarrierState && 
+            ballCarrierState.isOffense && 
+            !playState.ballState.inAir) 
         {
             pState.action = 'run_block';
-            pState.dynamicTargetId = null; // Clear any old target
+            pState.dynamicTargetId = null; 
         }
-        // --- 💡 END NEW BLOCKER LOGIC 💡 ---
-
-        // --- NEW: Receiver Ball-in-Air Logic ---
+        
         if (pState.isOffense && !pState.hasBall && !pState.isBallCarrier) {
-
-            // --- Check if player *should* be attacking the ball ---
             if ((pState.action === 'run_route' || pState.action === 'route_complete') && playState.ballState.inAir) {
                 const isIntendedTarget = playState.ballState.targetPlayerId === pState.id;
                 const distToLandingSpot = getDistance(pState, { x: playState.ballState.targetX, y: playState.ballState.targetY });
@@ -1733,77 +1734,55 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                     }
                 }
             } else if (pState.action === 'attack_ball' && !playState.ballState.inAir) {
-                // If the player was attacking the ball, but the ball is no longer
-                // in the air (i.e., it was caught or dropped), reset their action.
-                pState.action = 'route_complete'; // Go back to a "neutral" state
-                pState.targetX = pState.x; // Stop moving
+                pState.action = 'route_complete'; 
+                pState.targetX = pState.x; 
                 pState.targetY = pState.y;
             }
         }
 
         // --- Offensive Logic ---
         if (pState.isOffense) {
-            // Check if this is an OL who was faking a run block on a PA pass
             if (pState.slot.startsWith('OL') &&
                 pState.action === 'run_block' &&
                 playType === 'pass' &&
                 playState.tick > 20) {
-                // The fake is over! Switch to pass blocking.
                 pState.action = 'pass_block';
-                // The "Brain" (which now runs every tick) will see this new action
-                // and give a correct pass_block assignment.
             }
             switch (pState.action) {
                 case 'attack_ball':
-                    // Player's action is to move to the ball's *INTENDED LANDING SPOT*
                     pState.targetX = playState.ballState.targetX;
                     pState.targetY = playState.ballState.targetY;
-
-                    // Manually clamp targets within field boundaries, then return
                     pState.targetX = Math.max(0.5, Math.min(FIELD_WIDTH - 0.5, pState.targetX));
                     pState.targetY = Math.max(0.5, Math.min(FIELD_LENGTH - 0.5, pState.targetY));
-
                     target = null;
+                    break; 
 
-                    break; // Skip all other targeting logic for this player
-
-                case 'run_route': { // Use brackets for new variable scope
+                case 'run_route': { 
                     if (!pState.routePath || pState.routePath.length === 0) {
-                        // No path, just stop and find space
                         pState.action = 'route_complete';
                         pState.targetX = pState.x;
                         pState.targetY = pState.y;
                         break;
                     }
-
-                    // Get the current target point from the path
                     const currentTargetPoint = pState.routePath[pState.currentPathIndex];
-
-                    // Check if we've arrived at the current point
-                    const ARRIVAL_RADIUS = 0.3; // Small radius for waypoints
+                    const ARRIVAL_RADIUS = 0.3; 
                     const dx = currentTargetPoint.x - pState.x;
                     const dy = currentTargetPoint.y - pState.y;
                     const distToTarget = Math.sqrt(dx * dx + dy * dy);
 
                     if (distToTarget < ARRIVAL_RADIUS) {
-                        // --- Arrived, move to the next point ---
                         pState.currentPathIndex++;
-
                         if (pState.currentPathIndex < pState.routePath.length) {
-                            // --- More points in the route ---
                             const nextTargetPoint = pState.routePath[pState.currentPathIndex];
                             pState.targetX = nextTargetPoint.x;
                             pState.targetY = nextTargetPoint.y;
                         } else {
-                            // --- End of route ---
                             pState.action = 'route_complete';
-                            pState.targetX = pState.x; // Stop for now
+                            pState.targetX = pState.x; 
                             pState.targetY = pState.y;
                         }
                     }
-                    // If not at target, just keep moving.
-                    // The targetX/targetY are already set, so we don't need an 'else'.
-                    break; // Exit the switch
+                    break; 
                 }
 
                 case 'pass_block':
@@ -1813,13 +1792,11 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                             pState.targetX = target.x;
                             pState.targetY = target.y;
                         } else {
-                            // Target gone, brain will assign new one
                             pState.dynamicTargetId = null;
                             pState.targetX = pState.initialX;
                             pState.targetY = LOS + POCKET_DEPTH_PASS;
                         }
                     } else {
-                        // No target assigned by brain (holding pocket)
                         pState.targetX = pState.initialX;
                         pState.targetY = LOS + POCKET_DEPTH_PASS;
                     }
@@ -1829,29 +1806,18 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                 case 'run_block':
                     if (pState.dynamicTargetId) {
                         const target = defenseStates.find(d => d.id === pState.dynamicTargetId);
-
-                        // Check if target is still valid
                         if (target && (target.blockedBy === null || target.blockedBy === pState.id)) {
-
-                            // --- Target is valid: Engage ---
                             pState.targetX = target.x;
-                            pState.targetY = target.y; // Target the defender's current Y
-
+                            pState.targetY = target.y; 
                         } else {
-                            // --- Target is GONE (e.g., blocked by someone else) ---
-                            // Brain will assign a new one next tick.
                             pState.dynamicTargetId = null;
-
-                            // 💡 NEW "SEEK" LOGIC (see else block)
                             if (ballCarrierState) {
-                                // IQ-based lane selection: high IQ = better anticipation of defenders
                                 const visionIQ = ballCarrierState.playbookIQ || 50;
                                 let bestLaneX = ballCarrierState.x;
                                 let bestLaneY = ballCarrierState.y + 2;
-                                // Scan for open lanes (avoid defenders within 4 yards)
                                 for (let dx = -4; dx <= 4; dx += 2) {
                                     const laneX = ballCarrierState.x + dx;
-                                    const laneY = ballCarrierState.y + 2 + Math.round(visionIQ / 40); // High IQ = more yards forward
+                                    const laneY = ballCarrierState.y + 2 + Math.round(visionIQ / 40); 
                                     const defendersNearLane = defenseStates.filter(d => getDistance({ x: laneX, y: laneY }, d) < (4 - visionIQ / 40));
                                     if (defendersNearLane.length === 0) {
                                         bestLaneX = laneX;
@@ -1867,29 +1833,21 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                             }
                         }
                     } else {
-                        // --- 💡 NEW "SEEK" LOGIC ---
-                        // No target assigned (either won block or no one was near).
-                        // Seek out the ball carrier to find a new block.
                         if (ballCarrierState) {
-                            // Target a spot slightly in front of the ball carrier
                             pState.targetX = ballCarrierState.x;
-                            pState.targetY = ballCarrierState.y + 2; // Aim 2 yards in front
+                            pState.targetY = ballCarrierState.y + 2; 
                         } else {
-                            // Fallback (e.g., pre-handoff)
-                            pState.targetX = pState.initialX; // Stay in lane
-                            pState.targetY = pState.y + 5;   // Climb 5 yards
+                            pState.targetX = pState.initialX; 
+                            pState.targetY = pState.y + 5;   
                         }
                     }
-                    target = null; // Prevent falling into defensive pursuit logic
+                    target = null; 
                     break;
 
                 case 'pursuit':
-                    // This is for offense after a turnover.
                     if (ballCarrierState && !ballCarrierState.isOffense) {
-                        // Target the (defensive) ball carrier
                         target = ballCarrierState;
                     } else {
-                        // No carrier, or carrier is on offense (play is broken), just stop
                         pState.targetX = pState.x;
                         pState.targetY = pState.y;
                         target = null;
@@ -1897,40 +1855,29 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                     break;
 
                 case 'route_complete':
-                    const FIND_SPACE_RADIUS = 12; // How far the receiver looks for space
+                    const FIND_SPACE_RADIUS = 12; 
                     const nearbyDefenders = defenseStates.filter(d =>
                         !d.isBlocked && !d.isEngaged && getDistance(pState, d) < FIND_SPACE_RADIUS
                     ).sort((a, b) => getDistance(pState, a) - getDistance(pState, b));
 
                     if (qbState?.action === 'qb_scramble') {
-                        // --- Scramble Drill ---
-                        // Move towards sideline QB is rolling to, maintaining depth
-                        pState.targetX = qbState.targetX > CENTER_X ? FIELD_WIDTH - 5 : 5; // Target sideline area
-                        pState.targetY = Math.max(playState.lineOfScrimmage + 3, qbState.y + 2); // Stay slightly ahead of QB
+                        pState.targetX = qbState.targetX > CENTER_X ? FIELD_WIDTH - 5 : 5; 
+                        pState.targetY = Math.max(playState.lineOfScrimmage + 3, qbState.y + 2); 
                     } else if (nearbyDefenders.length === 0) {
-                        // --- Wide Open ---
-                        // Stand mostly still, maybe slight drift towards center/sideline
                         pState.targetX = pState.x + (pState.x < CENTER_X ? -0.1 : 0.1);
                         pState.targetY = pState.y;
                     } else {
-                        // --- Find Open Space among defenders ---
                         let bestX = pState.x;
                         let bestY = pState.y;
-                        let maxMinDist = 0; // Find spot with largest distance to *closest* defender
-
-                        // Check a few potential spots around the receiver
+                        let maxMinDist = 0; 
                         const potentialSpots = [
-                            { x: pState.x + 3, y: pState.y }, { x: pState.x - 3, y: pState.y }, // Horizontal
-                            { x: pState.x, y: pState.y + 2 }, { x: pState.x, y: pState.y - 2 }, // Vertical
-                            { x: pState.x + 2, y: pState.y + 2 }, { x: pState.x - 2, y: pState.y + 2 }, // Diagonals
+                            { x: pState.x + 3, y: pState.y }, { x: pState.x - 3, y: pState.y }, 
+                            { x: pState.x, y: pState.y + 2 }, { x: pState.x, y: pState.y - 2 }, 
+                            { x: pState.x + 2, y: pState.y + 2 }, { x: pState.x - 2, y: pState.y + 2 }, 
                             { x: pState.x + 2, y: pState.y - 2 }, { x: pState.x - 2, y: pState.y - 2 },
                         ];
-
                         potentialSpots.forEach(spot => {
-                            // Ensure spot is in reasonable bounds (e.g., past LoS)
                             if (spot.y < playState.lineOfScrimmage + 1) return;
-
-                            // Find distance to the closest defender from this potential spot
                             let minDistToDefender = FIND_SPACE_RADIUS;
                             nearbyDefenders.forEach(def => {
                                 const dist = getDistance(spot, def);
@@ -1938,25 +1885,20 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                                     minDistToDefender = dist;
                                 }
                             });
-
-                            // If this spot offers more separation than the current best, choose it
                             if (minDistToDefender > maxMinDist) {
                                 maxMinDist = minDistToDefender;
                                 bestX = spot.x;
                                 bestY = spot.y;
                             }
                         });
-
-                        // Target the best found spot
                         pState.targetX = bestX;
                         pState.targetY = bestY;
                     }
-                    break; // End case 'route_complete'
+                    break; 
 
-
-                case 'run_path': { // --- Logic for ballcarriers ---
-                    const threatDistance = 3.5; // How far to look for immediate threats
-                    const visionDistance = 10.0; // How far to look downfield for lanes
+                case 'run_path': { 
+                    const threatDistance = 3.5; 
+                    const visionDistance = 10.0; 
                     const nearestThreat = defenseStates
                         .filter(d => !d.isBlocked && !d.isEngaged && getDistance(pState, d) < threatDistance)
                         .sort((a, b) => getDistance(pState, a) - getDistance(pState, b))[0];
@@ -1964,12 +1906,10 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                     let targetXOffset = 0;
 
                     if (nearestThreat) {
-                        // --- A. Immediate Avoidance (Threat is very close) ---
                         const distanceToThreat = getDistance(pState, nearestThreat);
                         const avoidStrength = 1.2 + (threatDistance - distanceToThreat) * 0.5;
                         targetXOffset = (pState.x >= nearestThreat.x) ? avoidStrength : -avoidStrength;
                     } else {
-                        // --- B. No Immediate Threat: Find Best Lane (with downhill bias) ---
                         const lanes = [-6, 0, 6];
                         const DOWNHILL_BONUS = 1.0;
                         let bestLane = { xOffset: 0, minDist: -Infinity };
@@ -1979,65 +1919,53 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                             const closestDefenderToLane = defenseStates
                                 .filter(d => !d.isBlocked && !d.isEngaged)
                                 .sort((a, b) => getDistance(lookAheadPoint, a) - getDistance(lookAheadPoint, b))[0];
-
                             let dist = closestDefenderToLane ? getDistance(lookAheadPoint, closestDefenderToLane) : 100;
-
                             if (xOffset === 0) {
                                 dist += DOWNHILL_BONUS;
                             }
-
                             if (dist > bestLane.minDist) {
                                 bestLane.minDist = dist;
                                 bestLane.xOffset = xOffset;
                             }
                         });
-                        targetXOffset = bestLane.xOffset; // Target the best open lane
+                        targetXOffset = bestLane.xOffset; 
                     }
-
                     pState.targetY = Math.min(FIELD_LENGTH - 1.0, pState.y + visionDistance);
                     pState.targetX = pState.x + targetXOffset;
                     break;
                 }
 
-                case 'qb_scramble': { // --- Logic for QBs ---
-                    const visionDistance = 8.0; // QB looks for shorter-term open space
+                case 'qb_scramble': { 
+                    const visionDistance = 8.0; 
                     let targetXOffset = 0;
 
                     if (pState.scrambleDirection) {
-                        // QB decision function already told us which way to run
-                        targetXOffset = pState.scrambleDirection * 8; // e.g., (1 * 8) or (-1 * 8)
-                        pState.scrambleDirection = null; // Clear the flag after we've used it
+                        targetXOffset = pState.scrambleDirection * 8; 
+                        pState.scrambleDirection = null; 
                     } else {
-                        // --- Fallback: No specific direction, just find open grass (your original logic) ---
-                        const lanes = [-8, 0, 8]; // Wider lanes, QB is desperate
+                        const lanes = [-8, 0, 8]; 
                         let bestLane = { xOffset: 0, minDist: -Infinity };
-
                         lanes.forEach(xOffset => {
                             const lookAheadPoint = { x: pState.x + xOffset, y: pState.y + visionDistance };
                             const closestDefenderToLane = defenseStates
                                 .filter(d => !d.isBlocked && !d.isEngaged)
                                 .sort((a, b) => getDistance(lookAheadPoint, a) - getDistance(lookAheadPoint, b))[0];
-
                             const dist = closestDefenderToLane ? getDistance(lookAheadPoint, closestDefenderToLane) : 100;
-
                             if (dist > bestLane.minDist) {
                                 bestLane.minDist = dist;
                                 bestLane.xOffset = xOffset;
                             }
                         });
-                        targetXOffset = bestLane.xOffset; // Target the widest open lane
+                        targetXOffset = bestLane.xOffset; 
                     }
-
                     pState.targetY = Math.min(FIELD_LENGTH - 1.0, pState.y + visionDistance);
                     pState.targetX = pState.x + targetXOffset;
                     break;
                 }
 
                 case 'qb_setup': {
-                    const POCKET_RADIUS = 6.0; // How far QB looks for immediate threats
-                    const STEP_DISTANCE = 0.75; // How far QB steps/slides per adjustment
-
-                    // Find closest non-engaged defender moving towards the QB within radius
+                    const POCKET_RADIUS = 6.0; 
+                    const STEP_DISTANCE = 0.75; 
                     const closestThreat = defenseStates
                         .filter(d =>
                             !d.isBlocked &&
@@ -2048,32 +1976,26 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                         .sort((a, b) => getDistance(pState, a) - getDistance(pState, b))[0];
 
                     if (closestThreat) {
-                        // --- React to Threat ---
                         const dxThreat = closestThreat.x - pState.x;
                         const dyThreat = closestThreat.y - pState.y;
                         const distThreat = getDistance(pState, closestThreat);
                         let escapeX = pState.x - (dxThreat / distThreat) * STEP_DISTANCE;
                         let escapeY = pState.y - (dyThreat / distThreat) * STEP_DISTANCE;
 
-                        // --- Pocket Awareness ---
                         if (Math.abs(dxThreat) > dyThreat && escapeY > pState.initialY - 3) {
                             escapeY = pState.y + STEP_DISTANCE * 0.5; // Step up
                             escapeX = pState.x - Math.sign(dxThreat) * STEP_DISTANCE * 0.75;
                         }
-                        escapeY = Math.max(pState.initialY - 4, escapeY); // Don't drift too far
-
+                        escapeY = Math.max(pState.initialY - 4, escapeY); 
                         pState.targetX = escapeX;
                         pState.targetY = escapeY;
                     } else {
-                        // --- No Immediate Threat ---
-                        // If QB has reached initial target, stay there.
                         if (getDistance(pState, { x: pState.targetX, y: pState.targetY }) < 0.5) {
                             pState.targetX = pState.x;
                             pState.targetY = pState.y; // Hold position
                         }
-                        // If still moving to initial drop spot, the target remains valid.
                     }
-                    break; // <-- CRITICAL: Exit the switch
+                    break; 
                 }
 
                 case 'idle': default:
@@ -2084,94 +2006,68 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
         }
         // --- Defensive Logic ---
         else {
-            // --- Check if DEFENDER is the ball carrier ---
             if (pState.isBallCarrier) {
-                // This player has the ball (after an INT).
-                // Use the same "run_path" logic as the RB, but run towards Y=0 (the other end zone).
                 const visionDistance = 10.0;
                 const lanes = [-5, 0, 5];
-                const DOWNHILL_BONUS = 1.5; // Bonus for running straight
+                const DOWNHILL_BONUS = 1.5; 
                 let bestLane = { xOffset: 0, minDist: -Infinity };
-
                 lanes.forEach(xOffset => {
-                    const lookAheadPoint = { x: pState.x + xOffset, y: pState.y - visionDistance }; // Run towards Y=0
-
-                    // Look for *offensive* players (who are now blockers)
+                    const lookAheadPoint = { x: pState.x + xOffset, y: pState.y - visionDistance }; 
                     const closestBlockerToLane = offenseStates
                         .filter(o => !o.isBlocked && !o.isEngaged)
                         .sort((a, b) => getDistance(lookAheadPoint, a) - getDistance(lookAheadPoint, b))[0];
-
                     let dist = closestBlockerToLane ? getDistance(lookAheadPoint, closestBlockerToLane) : 100;
-                    if (xOffset === 0) dist += DOWNHILL_BONUS; // Add bonus for running straight
-
+                    if (xOffset === 0) dist += DOWNHILL_BONUS; 
                     if (dist > bestLane.minDist) {
                         bestLane.minDist = dist;
                         bestLane.xOffset = xOffset;
                     }
                 });
-
-                pState.targetY = Math.max(0.5, pState.y - visionDistance); // Set target Y towards Y=0
+                pState.targetY = Math.max(0.5, pState.y - visionDistance); 
                 pState.targetX = pState.x + bestLane.xOffset;
 
             } else {
                 const assignment = pState.assignment;
-                // Each defender diagnoses the play individually based on IQ
                 const diagnosedPlayType = diagnosePlay(pState, playType, offensivePlayKey, playState.tick);
-                // diagnosedPlayType will now be 'run', 'pass', or 'read'
-
-                // --- 💡 SAFETY FIX #1 (QB SCRAMBLE) ---
-                // This check is now needed by *both* Man and Zone logic.
                 const isQBScramble = qbState && (qbState.action === 'qb_scramble' || qbState.y > playState.lineOfScrimmage + 1);
-                // --- END FIX ---
-
+                
                 switch (true) {
                     case assignment?.startsWith('man_cover_'): {
                         const targetSlot = assignment.split('man_cover_')[1];
                         const assignedReceiver = offenseStates.find(o => o.slot === targetSlot);
-
                         if (!assignedReceiver) {
                             pState.assignment = 'zone_hook_curl_middle';
                             target = getZoneCenter('zone_hook_curl_middle', playState.lineOfScrimmage);
                             break;
                         }
-
                         const isRunPlay = (diagnosedPlayType === 'run' || (ballCarrierState && ballCarrierState.y > playState.lineOfScrimmage));
                         const isSafety = pState.slot.startsWith('DB') && (pState.initialY > playState.lineOfScrimmage + 7);
 
                         if (isBallInAir) {
-                            // --- Ball is in the Air ---
                             if (playState.ballState.targetPlayerId === assignedReceiver.id || getDistance(pState, { x: playState.ballState.targetX, y: playState.ballState.targetY }) < 15) {
-                                // Target the ball's landing spot
                                 target = { x: playState.ballState.targetX, y: playState.ballState.targetY };
                             } else {
-                                // Ball thrown elsewhere, stick to receiver
                                 target = assignedReceiver;
                             }
                         } else if ((isRunPlay || isQBScramble) && ballCarrierState) {
-                            // --- ✳️ It's a Run Play or QB Scramble! ---
                             if (isSafety && ballCarrierState.y < playState.lineOfScrimmage + 5) {
-                                // Runner is still bottled up, hold position
                                 target = pState;
                             } else {
-                                // Cornerbacks and LBs in man-coverage must attack the run.
                                 target = ballCarrierState;
                             }
                         } else {
-                            // --- Ball is NOT in the Air (Pass Play) ---
                             target = assignedReceiver;
                         }
-                        break; // Go to the main pursuit logic
+                        break; 
                     }
 
                     case assignment?.startsWith('zone_'): {
                         const zoneCenter = getZoneCenter(assignment, playState.lineOfScrimmage);
-                        let targetThreat = null; // The player we will target
-                        let targetPoint = zoneCenter; // The {x, y} point we will target
+                        let targetThreat = null; 
+                        let targetPoint = zoneCenter; 
                         const landingSpot = { x: playState.ballState.targetX, y: playState.ballState.targetY };
-
                         const isDeepZone = assignment.includes('deep');
-
-                        // --- (This 'threatsInZone' logic is fine) ---
+                        
                         const threatsInZone = offenseStates.filter(o => {
                             if (o.action !== 'run_route' && o.action !== 'route_complete') {
                                 return false;
@@ -2194,59 +2090,42 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                             }
                             return false;
                         });
-
-                        // --- 💡 NEW: Define a "Ground Threat" ---
-                        // This is true for a run, a scramble, OR a completed pass.
+                        
                         const isGroundThreat = (ballCarrierState && !isBallInAir);
-
-
-                        // --- 1. React to Ball in Air (Highest Priority) ---
+                        
                         if (isBallInAir && isPlayerInZone(landingSpot, assignment, playState.lineOfScrimmage)) {
                             targetPoint = landingSpot;
-                            targetThreat = null; // Override any player target
-                            break; // Exit the switch, go to pursuit logic
+                            targetThreat = null; 
+                            break; 
                         }
-
-                        // --- 2. React to ANY Ground Threat (Second Priority) ---
-                        // 💡 This is the critical logic fix.
+                        
                         else if (isGroundThreat) {
                             if (!isDeepZone) {
-                                // --- Underneath Zone Run Support ---
                                 if (isPlayerInZone(ballCarrierState, assignment, playState.lineOfScrimmage) || getDistance(pState, ballCarrierState) < 8.0) {
-                                    targetThreat = ballCarrierState; // Target the runner
+                                    targetThreat = ballCarrierState; 
                                 }
                             } else {
-                                // --- DEEP ZONE RUN SUPPORT (Safety) ---
-                                // If carrier is 5+ yards downfield OR in our zone, ATTACK.
                                 if (ballCarrierState.y > (playState.lineOfScrimmage + 5) || isPlayerInZone(ballCarrierState, assignment, playState.lineOfScrimmage)) {
-                                    targetThreat = ballCarrierState; // ATTACK!
+                                    targetThreat = ballCarrierState; 
                                 } else {
-                                    // Carrier is bottled up. "Creep" to a run-support position.
-                                    targetPoint = { x: ballCarrierState.x, y: playState.lineOfScrimmage + 10 }; // Creep to 10 yards
+                                    targetPoint = { x: ballCarrierState.x, y: playState.lineOfScrimmage + 10 }; 
                                     targetThreat = null;
                                 }
                             }
                         }
-
-                        // --- 3. React to Passing Threats (Third Priority) ---
-                        // (Only runs if ball is not in air AND there is no ground threat)
+                        
                         else if (threatsInZone.length > 0) {
                             if (isDeepZone) {
-                                // --- DEEP ZONE LOGIC ---
                                 threatsInZone.sort((a, b) => b.y - a.y);
                                 targetThreat = threatsInZone[0];
                             } else {
-                                // --- UNDERNEATH ZONE LOGIC ---
                                 threatsInZone.sort((a, b) => getDistance(pState, a) - getDistance(pState, b));
                                 targetThreat = threatsInZone[0];
                             }
                         }
-
-                        // --- 4. No threats in zone. "Read" intermediate routes. ---
+                        
                         else if (threatsInZone.length === 0) {
-                            // "ROBBER" LOGIC for DEEP SAFETIES
                             if (isDeepZone && diagnosedPlayType === 'pass') {
-                                // ... (Your existing, correct Robber logic) ...
                                 const isHalfFieldSafety = pState.x < (HASH_LEFT_X - 2) || pState.x > (HASH_RIGHT_X + 2);
                                 const isLeftSafety = pState.x < CENTER_X;
                                 const intermediateThreats = offenseStates.filter(o => {
@@ -2267,9 +2146,7 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                                     break;
                                 }
                             }
-                            // "Sink" logic for flat defenders
                             if (assignment.startsWith('zone_flat_')) {
-                                // ... (Your existing Sink logic) ...
                                 const verticalThreat = offenseStates.find(o =>
                                     (o.action === 'run_route' || o.action === 'route_complete') &&
                                     o.y > pState.y + 5 &&
@@ -2281,45 +2158,31 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                                 }
                             }
                         }
-
-                        // --- 5. Set Final Target ---
+                        
                         if (targetThreat) {
-                            target = targetThreat; // Set the target as the player object
+                            target = targetThreat; 
                         } else {
-                            target = targetPoint; // Target the calculated point
+                            target = targetPoint; 
                         }
-
-                        break; // Go to the main pursuit logic at the end of the function
+                        break; 
                     }
 
                     case assignment === 'pass_rush':
                     case assignment === 'blitz_gap':
                     case assignment === 'blitz_edge':
-                        // 1. Highest Priority: Ball is in the air.
                         if (isBallInAir) {
                             target = { x: ballPos.targetX, y: ballPos.targetY };
-
-                            // 2. Second Priority: Ball is on the ground (completed pass or handoff).
                         } else if (ballCarrierState && ballCarrierState.id !== qbState?.id) {
                             target = ballCarrierState;
-
-                            // 3. Third Priority: It's a diagnosed run (and the carrier might be the QB)
                         } else if (diagnosedPlayType === 'run' && ballCarrierState) {
                             target = ballCarrierState;
-
-                            // 4. Fourth Priority: It's a pass play, ball hasn't been thrown.
                         } else if (qbState) {
-                            // Diagnosed PASS or STILL READING: Rush the QB.
                             target = qbState;
-
-                            // Blocker-avoidance logic
                             const blockerInPath = offenseStates.find(o => !o.engagedWith && getDistance(pState, o) < 2.0 && Math.abs(o.x - pState.x) < 1.0 && ((pState.y < o.y && o.y < (target?.y || pState.y + 5)) || (pState.y > o.y && o.y > (target?.y || pState.y - 5))));
                             if (blockerInPath) {
                                 const avoidOffset = (pState.x > blockerInPath.x) ? 1.0 : -1.0;
                                 target = { x: pState.x + avoidOffset * 2, y: qbState.y };
                             }
-
-                            // 5. Fallback
                         } else {
                             target = null;
                         }
@@ -2327,26 +2190,17 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
 
                     case assignment?.startsWith('run_gap_'):
                     case assignment?.startsWith('run_edge_'):
-                        // 1. Ball in air?
                         if (isBallInAir) {
                             target = { x: ballPos.targetX, y: ballPos.targetY };
-
-                            // 2. Ball on ground? (Handoff or Completed Pass)
                         } else if (ballCarrierState && ballCarrierState.id !== qbState?.id) {
                             target = ballCarrierState;
-
-                            // 3. Diagnosed pass, ball still in QB's hands?
                         } else if (diagnosedPlayType === 'pass') {
                             pState.action = 'pass_rush';
-                            target = qbState; // Target QB
-
-                            // 4. Diagnosed run (or still reading)?
+                            target = qbState; 
                         } else {
-                            // It's a run OR STILL READING: Attack gap, then carrier.
                             const runTargetPoint = zoneBoundaries[assignment];
                             const ballSnapX = offenseStates.find(p => p.slot === 'OL2')?.initialX || CENTER_X;
                             target = runTargetPoint ? { x: ballSnapX + (runTargetPoint.xOffset || 0), y: playState.lineOfScrimmage + (runTargetPoint.yOffset || 0) } : { x: pState.x, y: pState.y };
-
                             if (ballCarrierState && getDistance(pState, ballCarrierState) < 6) {
                                 target = ballCarrierState;
                             }
@@ -2356,8 +2210,7 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                     case 'spy_QB':
                         if (diagnosedPlayType === 'run' && ballCarrierState) {
                             target = ballCarrierState;
-
-                        } else if (qbState) { // Continue with original logic if it's a pass/read
+                        } else if (qbState) { 
                             if (qbState.action === 'qb_scramble' || qbState.y > playState.lineOfScrimmage + 1) {
                                 target = qbState;
                             } else {
@@ -2369,7 +2222,7 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                         }
                         break;
 
-                    case 'run_support': // e.g., Safety coming downhill
+                    case 'run_support': 
                         if (diagnosedPlayType === 'run' && ballCarrierState) {
                             target = { x: ballCarrierState.x, y: ballCarrierState.y };
                         } else if (isBallInAir) {
@@ -2383,7 +2236,7 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                         }
                         break;
 
-                    case 'fill_run': // e.g., LB reading the play
+                    case 'fill_run': 
                         if (diagnosedPlayType === 'run' && ballCarrierState) {
                             target = { x: ballCarrierState.x, y: ballCarrierState.y };
                         } else if (diagnosedPlayType === 'pass') {
@@ -2394,7 +2247,7 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                         }
                         break;
 
-                    case 'def_read': // Default "read and react"
+                    case 'def_read': 
                         if (diagnosedPlayType === 'run' && ballCarrierState) {
                             target = { x: ballCarrierState.x, y: ballCarrierState.y };
                         } else if (diagnosedPlayType === 'pass') {
@@ -2405,23 +2258,21 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                         }
                         break;
 
-                    default: // Fallback
+                    default: 
                         if (isBallInAir) {
-                            target = ballPos; // Play the ball
+                            target = ballPos; 
                         } else if (ballCarrierState) {
-                            target = ballCarrierState; // Chase the carrier
+                            target = ballCarrierState; 
                         } else {
                             target = { x: pState.x, y: pState.y };
                         }
                         break;
                 }
-
-                // --- Set Target Coordinates (Pursuit Logic) ---
-                if (isPlayerState(target)) { // Target is a dynamic player state
+                
+                if (isPlayerState(target)) { 
                     const isManCoverage = pState.assignment.startsWith('man_cover_') && !target.isBallCarrier;
 
                     if (isManCoverage) {
-                        // --- MAN COVERAGE LOGIC ---
                         const assignedReceiver = target;
                         const speedDiff = (pState.speed - assignedReceiver.speed);
 
@@ -2437,7 +2288,6 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                         } else {
                             xLeverage = (assignedReceiver.x < CENTER_X) ? 1.0 : -1.0;
                         }
-
                         pState.targetX = assignedReceiver.targetX + xLeverage;
                         pState.targetY = assignedReceiver.targetY + yCushion;
 
@@ -2445,10 +2295,8 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                         // --- "SMART PURSUIT" LOGIC (FOR BALL CARRIER or any non-Man-Coverage defender) ---
                         let isDefenderInFront;
                         if (target.isOffense) {
-                            // Offense is running towards HIGH Y (end zone at 110-120)
                             isDefenderInFront = pState.y > target.y;
                         } else {
-                            // Defense is running towards LOW Y (end zone at 0-10) after an INT
                             isDefenderInFront = pState.y < target.y;
                         }
 
@@ -2456,51 +2304,82 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                             // --- A. I AM IN FRONT of the target (e.g., Safety) ---
                             pState.targetX = target.x;
                             pState.targetY = target.y;
+                        
+                        // --- 💡💡💡 START OF USER-PROVIDED FIX 💡💡💡 ---
                         } else {
                             // --- B. I AM BEHIND the target ---
                             const distToTarget = getDistance(pState, target);
-                            const carrierSpeedYPS = target.currentSpeedYPS || (target.speed / 10);
-                            const ownSpeedYPS = pState.currentSpeedYPS || ((pState.speed / 10) * pState.fatigueModifier);
-                            const timeToIntercept = distToTarget > 0.1 ? distToTarget / ownSpeedYPS : 0;
-                            const leadDist = carrierSpeedYPS * timeToIntercept;
-                            const iqLeadFactor = 0.8 + ((pState.playbookIQ || 50) / 250);
-                            const finalLeadDist = leadDist * iqLeadFactor;
-                            const targetDX = target.targetX - target.x;
-                            const targetDY = target.targetY - target.y;
-                            const targetDistToTarget = Math.max(0.1, Math.sqrt(targetDX * targetDX + targetDY * targetDY));
 
-                            let futureTargetX = target.x + (targetDX / targetDistToTarget) * finalLeadDist;
-                            let futureTargetY = target.y + (targetDY / targetDistToTarget) * finalLeadDist;
+                            // Base deltas
+                            const dx = target.x - pState.x;
+                            const dy = target.y - pState.y;
 
-                            const SIDELINE_BUFFER = 2.0;
-                            const nearLeftSideline = target.x < SIDELINE_BUFFER;
-                            const nearRightSideline = target.x > (FIELD_WIDTH - SIDELINE_BUFFER);
+                            // --- 🧠 Determine if defender has "contain responsibility" ---
+                            // Edge players: CBs, DEs, and OLBs — usually keep outside leverage.
+                            // 💡 NOTE: We don't have DE/OLB slots, so we'll use DL/LB/DB
+                            const isContainPlayer = (
+                                pState.slot.startsWith('DB') || // CBs
+                                pState.slot.startsWith('DL1') || // Left End
+                                pState.slot.startsWith('DL3') || // Right End (in 3-1-3)
+                                pState.slot.startsWith('DL4')    // Right End (in 4-2-1)
+                            );
 
-                            if (nearLeftSideline || nearRightSideline) {
-                                // Carrier is hugging the sideline.
-                                // Don't lead them OOB. Just target their *current* X,
-                                // but lead their Y. This creates a good "cutoff" angle.
-                                futureTargetX = target.x;
+                            // --- Contain Logic Parameters ---
+                            // Wider contain players favor a shallower inside pursuit (smaller angle)
+                            const containDiscipline = isContainPlayer ? 0.65 : 1.0;
+                            const maxContainOffset = isContainPlayer ? 3.0 : 0.0; // yards wider
+
+                            // --- Smart pursuit angle ---
+                            const lateralFactor = Math.min(1.0, Math.abs(dx) / 5.0); // wider if ball is off-center
+                            const leadAngle = Math.atan2(dy, dx * containDiscipline);
+                            const pursuitSpeedFactor = 0.4 + (0.6 * (distToTarget / 10.0)); // lead more when far away
+                            const leadFactor = Math.min(1.0, lateralFactor * pursuitSpeedFactor);
+
+                            // Compute pursuit target position
+                            let pursuitX = target.x - (dx * leadFactor * containDiscipline);
+                            let pursuitY = target.y - (dy * 0.05); // trail slightly behind
+
+                            // --- Apply contain offset (stay outside the ball carrier) ---
+                            if (isContainPlayer) {
+                                // Determine side of the field (player's starting X)
+                                const sideSign = (pState.initialX < CENTER_X) ? -1 : 1; // Left side = -1, Right side = 1
+                                pursuitX += sideSign * maxContainOffset;
                             }
 
-                            pState.targetX = futureTargetX;
-                            pState.targetY = futureTargetY;
+                            // --- Choose pursuit strategy based on range ---
+                            if (distToTarget < 2.0) {
+                                // Close range: aim directly at carrier
+                                pState.targetX = target.x;
+                                pState.targetY = target.y;
+                            } else {
+                                pState.targetX = pursuitX;
+                                pState.targetY = pursuitY;
+                            }
+
+                            // --- Debug Log (optional) ---
+                            if (gameLog && (pState.slot.startsWith('DL1') || pState.slot.startsWith('DB1') || pState.slot.startsWith('LB1'))) {
+                                console.log(
+                                    `%c[PURSUIT] Tick ${playState.tick}: ${pState.name} (${pState.slot}) ` +
+                                    `→ Target ${target.name} | Dist=${distToTarget.toFixed(1)} | Contain=${isContainPlayer}`,
+                                    'color: #9999FF'
+                                );
+                            }
                         }
+                        // --- 💡💡💡 END OF USER-PROVIDED FIX 💡💡💡 ---
                     }
 
-                } else if (target) { // Target is a fixed point {x, y}
+                } else if (target) { 
                     pState.targetX = target.x; pState.targetY = target.y;
-                } else { // Fallback hold (target = null)
+                } else { 
                     pState.targetX = pState.x; pState.targetY = pState.y;
                 }
-            } // End if(!isBlocked && !isEngaged)
+            } 
         }
-
-        // Clamp targets within field boundaries
+        
         pState.targetX = Math.max(0.5, Math.min(FIELD_WIDTH - 0.5, pState.targetX));
         pState.targetY = Math.max(0.5, Math.min(FIELD_LENGTH - 0.5, pState.targetY));
-    }); // End forEach activePlayer
-} // End updatePlayerTargets
+    }); 
+}
 
 
 /**
