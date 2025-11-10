@@ -450,6 +450,8 @@ function handleFormationChange(e) {
     UI.switchTab('depth-chart', gameState); // Re-render tab
 }
 
+// main.js
+
 /**
  * Handles 'Advance Week' / 'Go to Offseason' button click.
  */
@@ -459,14 +461,27 @@ async function handleAdvanceWeek() {
         UI.showModal("Error", "Cannot advance week due to invalid game state.", null, '', null, 'Close');
         return;
     }
-    if (gameState.currentWeek >= WEEKS_IN_SEASON) { handleSeasonEnd(); return; }
+    if (gameState.currentWeek >= WEEKS_IN_SEASON) {
+        handleSeasonEnd();
+        return;
+    }
 
-    // Find player's game
+    // --- 💡 NEW BUG FIX BLOCK ---
+    // Check if schedule is missing AND it's the start of the season
+    if (gameState.currentWeek === 0 && (!gameState.schedule || gameState.schedule.length === 0)) {
+        console.log("handleAdvanceWeek: No schedule found for Week 0. Generating one now...");
+        Game.generateSchedule();
+        gameState = Game.getGameState(); // Refresh state after schedule generation
+    }
+    // --- 💡 END FIX ---
+
+
+    // Find player's game (this check will now work correctly)
     const gamesPerWeek = gameState.teams.length / 2;
     const weekStartIndex = gameState.currentWeek * gamesPerWeek;
     const weekEndIndex = weekStartIndex + gamesPerWeek;
     const playerGameMatch = gameState.schedule.slice(weekStartIndex, weekEndIndex)
-        .find(g => g && g.home && g.away && (g.home.id === gameState.playerTeam.id || g.away.id === gameState.playerTeam.id)); // Added safety checks
+        .find(g => g && g.home && g.away && (g.home.id === gameState.playerTeam.id || g.away.id === gameState.playerTeam.id));
 
     if (playerGameMatch) { // Game day
         UI.showModal("Game Day!",
