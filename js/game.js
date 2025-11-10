@@ -3744,19 +3744,25 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
             }
 
             // --- STEP 10: Record Visualization Frame ---
-            const frameData = {
-                players: deepClone(playState.activePlayers),
-                ball: deepClone(ballPos),
-                logIndex: gameLog.length,
-                lineOfScrimmage: playState.lineOfScrimmage,
-                firstDownY: firstDownY
-            };
-            playState.visualizationFrames.push(frameData);
-
+            if (gameLog) {
+                const frameData = {
+                    players: deepClone(playState.activePlayers),
+                    ball: deepClone(ballPos),
+                    logIndex: gameLog.length, // This is now safe
+                    lineOfScrimmage: playState.lineOfScrimmage,
+                    firstDownY: firstDownY
+                };
+                playState.visualizationFrames.push(frameData);
+            }
         } // --- End TICK LOOP ---
     } catch (tickError) {
-        console.error("CRITICAL ERROR during simulation tick loop:", tickError);
-        if (gameLog) gameLog.push(`CRITICAL ERROR: Simulation failed mid-play. ${tickError.message}`);
+        console.error("CRITICAL ERROR during simulation tick loop:", tickError); // This is line 3758
+
+        // 💡 FIX: Add a null check before pushing to the log
+        if (gameLog) {
+            gameLog.push(`CRITICAL ERROR: Simulation failed mid-play. ${tickError.message}`);
+        }
+
         playState.playIsLive = false;
         playState.incomplete = true;
     }
