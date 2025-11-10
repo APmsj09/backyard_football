@@ -2560,7 +2560,6 @@ function checkBlockCollisions(playState) {
         }
     });
 }
-
 /**
  * Checks for tackle attempts (MODIFIED with Momentum and Successive Tackle Penalty)
  * Assumes: The caller ensures defender.stunnedTicks is reset after a success/play end.
@@ -2577,8 +2576,11 @@ function checkTackleCollisions(playState, gameLog) {
         p.stunnedTicks === 0
     );
 
-    // Define initial tackle attempts taken by the carrier this play
-    if (ballCarrierState.tacklesBrokenThisPlay === undefined) ballCarrierState.tacklesBrokenThisPlay = 0;
+    // --- 💡 FIX: Initialize the tackle counter if it doesn't exist ---
+    if (ballCarrierState.tacklesBrokenThisPlay === undefined) {
+        ballCarrierState.tacklesBrokenThisPlay = 0;
+    }
+    // --- 💡 END FIX ---
 
     const MOMENTUM_SCALING_FACTOR = 0.1; // Base scaling for carrier
     const TACKLE_RANGE_CHECK = TACKLE_RANGE;
@@ -2643,7 +2645,7 @@ function checkTackleCollisions(playState, gameLog) {
                 playState.playIsLive = false;
 
                 // ... (Sack/Tackle logging logic) ...
-                if (ballCarrierState.slot === 'QB1' && (ballCarrierState.action === 'qb_setup' || ballCarrierState.action === 'qb_scramble') && ballCarrierState.y < playState.lineOfScrimmage) {
+                if (ballCarrierState.slot === 'QB1' && (ballCarrierState.action === 'qb_setup' || ballCarrierState.action === 'qb_scramble') && ballCarrierState.y < playState.lineOfScrimGmage) {
                     playState.sack = true;
                     gameLog.push(`💥 SACK! ${tacklerPlayer.name} (TklPwr: ${tacklePower.toFixed(0)}) gets to ${ballCarrierState.name}!`);
                 } else {
@@ -3228,18 +3230,20 @@ function handleBallArrival(playState, gameLog) {
     }
 
     // 3. Find Key Players and Distances
-    // *** MODIFICATION 1: Increased catch radius ***
-    const CATCH_CHECK_RADIUS = 2.5; // Our 2.5 yard radius (was 1.8)
+    const CATCH_CHECK_RADIUS = 2.5; 
     const receiverPlayer = game.players.find(p => p && p.id === targetPlayerState.id); // Get full receiver object
 
-    // Find *closest* defender to the ball, regardless of radius
     const closestDefenderState = playState.activePlayers
         .filter(p => !p.isOffense && !p.isBlocked && !p.isEngaged)
         .sort((a, b) => getDistance(a, playState.ballState) - getDistance(b, playState.ballState))[0];
 
     const defenderPlayer = closestDefenderState ? game.players.find(p => p && p.id === closestDefenderState.id) : null;
+    
+    // --- 💡 FIX: Find the throwerPlayer *before* the interception check ---
+    const throwerPlayer = game.players.find(p => p && p.id === playState.ballState.throwerId);
+    ensureStats(throwerPlayer); // Make sure throwerPlayer.gameStats exists
+    // --- 💡 END FIX ---
 
-    // Check if the key players are *actually in range*
     const receiverInRange = getDistance(targetPlayerState, playState.ballState) < CATCH_CHECK_RADIUS;
     const defenderInRange = closestDefenderState && getDistance(closestDefenderState, playState.ballState) < CATCH_CHECK_RADIUS;
 
@@ -3252,7 +3256,7 @@ function handleBallArrival(playState, gameLog) {
         let defenderPower = (defCatchSkill * 0.6 + defAgility * 0.4) * closestDefenderState.fatigueModifier;
 
         let receiverPresencePenalty = 0;
-        if (receiverInRange && receiverPlayer?.attributes) { // Receiver must also be in range to fight for it
+        if (receiverInRange && receiverPlayer?.attributes) { 
             const recCatchSkill = receiverPlayer.attributes.technical?.catchingHands || 50;
             const recStrength = receiverPlayer.attributes.physical?.strength || 50;
             receiverPresencePenalty = ((recCatchSkill * 0.5 + recStrength * 0.2) * targetPlayerState.fatigueModifier) / 3;
@@ -3266,7 +3270,7 @@ function handleBallArrival(playState, gameLog) {
             eventResolved = true;
             gameLog.push(`❗ INTERCEPTION! ${closestDefenderState.name} (Catch: ${defCatchSkill}) jumps the route!`);
             playState.turnover = true;
-            // ... (rest of interception state update logic) ...
+            
             closestDefenderState.isBallCarrier = true;
             closestDefenderState.hasBall = true;
             closestDefenderState.action = 'run_path';
@@ -3278,38 +3282,27 @@ function handleBallArrival(playState, gameLog) {
                 if (p.isOffense) { p.action = 'pursuit'; }
                 else if (p.id !== closestDefenderState.id) { p.action = 'run_block'; }
             });
+            
             ensureStats(defenderPlayer);
             defenderPlayer.gameStats.interceptions = (defenderPlayer.gameStats.interceptions || 0) + 1;
-            const throwerPlayer = game.players.find(p => p && p.id === playState.ballState.throwerId);
+            
+            // --- 💡 FIX: This check is now safe because we ensured stats earlier ---
             if (throwerPlayer) {
-                ensureStats(throwerPlayer);
                 throwerPlayer.gameStats.interceptionsThrown = (throwerPlayer.gameStats.interceptionsThrown || 0) + 1;
             }
+            // --- 💡 END FIX ---
         }
     }
     // --- END 4. INT ATTEMPT ---
 
-
-    // --- ⭐️ START NEW LOGIC BLOCK (4b) ⭐️ ---
-    // 4b. Contested Pass Breakup (PBU)
-    // This runs if:
-    // 1. No interception happened (eventResolved is false)
-    // 2. BOTH players are in range
-    // 3. The Defender is CLOSER (or equal distance) to the ball than the Receiver
-
-    // We must re-calculate distances here to be safe
     const distToBallDef = defenderInRange ? getDistance(closestDefenderState, playState.ballState) : Infinity;
     const distToBallRec = receiverInRange ? getDistance(targetPlayerState, playState.ballState) : Infinity;
 
     if (!eventResolved && defenderInRange && receiverInRange && (distToBallDef <= distToBallRec)) {
-        // Defender is in position to swat the ball.
         const defAgility = defenderPlayer.attributes.physical?.agility || 50;
         const defStrength = defenderPlayer.attributes.physical?.strength || 50;
-
-        // Calculate PBU power (more based on agility/strength than hands)
         let pbuPower = (defAgility * 0.7 + defStrength * 0.3) * closestDefenderState.fatigueModifier;
 
-        // Bonus for being *much* closer
         if (distToBallDef < distToBallRec - 1.0) { // 1+ yard advantage
             pbuPower += 15;
         }
@@ -3321,15 +3314,7 @@ function handleBallArrival(playState, gameLog) {
             playState.playIsLive = false;
         }
     }
-    // --- ⭐️ END NEW LOGIC BLOCK (4b) ⭐️ ---
-
-
-    // 4c. "Solo" Pass Breakup (PBU)
-    // This is your original PBU block, now as a fallback.
-    // This runs if:
-    // 1. No INT (eventResolved is false)
-    // 2. No Contested PBU (eventResolved is false)
-    // 3. Defender is in range, but Receiver is NOT
+    
     else if (!eventResolved && defenderInRange && !receiverInRange) {
         eventResolved = true; // The defender resolved this play
         gameLog.push(`🚫 **SWATTED!** Pass to ${targetPlayerState.name} is broken up by ${closestDefenderState.name}!`);
@@ -3338,85 +3323,66 @@ function handleBallArrival(playState, gameLog) {
     }
 
     // 5. Catch / Drop Attempt
-    // This now only runs if:
-    // 1. No INT
-    // 2. No PBU (Contested or Solo)
-    // 3. And Receiver is in range
     if (!eventResolved && receiverInRange && receiverPlayer?.attributes) {
         eventResolved = true; // Mark that we are resolving the play here
         const recCatchSkill = receiverPlayer.attributes.technical?.catchingHands || 50;
         const recConsistency = receiverPlayer.attributes.mental?.consistency || 50;
         let receiverPower = (recCatchSkill * 0.8 + recConsistency * 0.2) * targetPlayerState.fatigueModifier;
-
-        // *** MODIFICATION 2: Broader, scaling interference logic ***
+        
         let interferencePenalty = 0;
-        const interferenceRadius = 2.0; // How close a defender needs to be to interfere (was 1.0)
+        const interferenceRadius = 2.0; 
 
-        // NOTE: We check 'defenderInRange' again here. This is correct.
-        // It's possible for the receiver to be in range (dist 2.4) and the
-        // defender to be out of range (dist 2.6).
         if (defenderInRange && closestDefenderState) {
             const distToReceiver = getDistance(targetPlayerState, closestDefenderState);
 
             if (distToReceiver < interferenceRadius) { // Defender is in the receiver's space
                 const defAgility = closestDefenderState.agility || 50;
                 const defStrength = closestDefenderState.strength || 50;
-                // Scale penalty: 100% at 0 yards, 0% at 2.0 yards
                 const penaltyFactor = (1.0 - (distToReceiver / interferenceRadius));
                 interferencePenalty = ((defAgility * 0.6 + defStrength * 0.2) / 3) * penaltyFactor;
             }
         }
 
-        // We use distToBallRec from our new block, but re-calc just in case
         const receiverProximity = getDistance(targetPlayerState, playState.ballState);
         const proximityBonusRec = Math.max(0, (CATCH_CHECK_RADIUS - receiverProximity) * 15);
         receiverPower += proximityBonusRec;
-
-        // --- Positional Interference ---
+        
         let positionalPenalty = 0;
         if (interferencePenalty > 0 && closestDefenderState) {
-            // Check if defender is "in front" (closer to offense's goal line: lower Y)
             if (closestDefenderState.y < targetPlayerState.y) {
-                // Defender has inside position!
-                positionalPenalty = 20; // 20-point penalty (makes catch harder)
+                positionalPenalty = 20; 
             } else {
-                // Defender is trailing
-                positionalPenalty = -10; // 10-point *bonus* to the receiver
+                positionalPenalty = -10; 
             }
         }
-
-        // *** MODIFICATION 3: Stabilized difficulty check ***
+        
         const catchRoll = receiverPower + getRandomInt(0, 20);
-        // Apply *all* penalties to the difficulty
         const difficulty = interferencePenalty + positionalPenalty + 25 + getRandomInt(0, 10); // Base difficulty 25-35
 
         if (catchRoll > difficulty) { // Catch successful!
             targetPlayerState.isBallCarrier = true; targetPlayerState.hasBall = true;
             targetPlayerState.action = 'run_path';
             playState.yards = targetPlayerState.y - playState.lineOfScrimmage;
-            if (interferencePenalty > 10) { // If there was significant interference
+            if (interferencePenalty > 10) { 
                 gameLog.push(`👍 CATCH! ${targetPlayerState.name} (Catch: ${recCatchSkill}) makes a tough contested reception!`);
             } else {
                 gameLog.push(`👍 CATCH! ${targetPlayerState.name} (Catch: ${recCatchSkill}) makes the reception!`);
             }
-
-            // Tell all other offensive players to start blocking
+            
             playState.activePlayers.forEach(p => {
                 if (p.isOffense && p.id !== targetPlayerState.id) {
-                    p.action = 'run_block'; // Set their action to 'run_block'
+                    p.action = 'run_block'; 
                 }
             });
 
             ensureStats(receiverPlayer);
             receiverPlayer.gameStats.receptions = (receiverPlayer.gameStats.receptions || 0) + 1;
-            const throwerPlayer = game.players.find(p => p && p.id === playState.ballState.throwerId);
+            
+            // --- 💡 FIX: This check is now safe ---
             if (throwerPlayer) {
-                ensureStats(throwerPlayer);
                 throwerPlayer.gameStats.passCompletions = (throwerPlayer.gameStats.passCompletions || 0) + 1;
             }
         } else { // Drop / Incomplete
-            // --- ⭐️ LOGIC FIX: We no longer check for PBU here ---
-            // The PBU logic already ran. If we are here, it's just a drop.
             if (interferencePenalty > 10 || positionalPenalty > 0) {
                 gameLog.push(`❌ **CONTESTED DROP!** Pass was on target to ${targetPlayerState.name} (Catch: ${recCatchSkill})!`);
             } else {
@@ -3431,7 +3397,6 @@ function handleBallArrival(playState, gameLog) {
         eventResolved = true;
         const distToReceiver = getDistance(playState.ballState, targetPlayerState);
         let accuracyMsg = "**off target**";
-        // This logic is now less likely to be hit, but still good to have
         if (distToReceiver > 3.0) accuracyMsg = "**wildly off target**";
         else if (playState.ballState.x > targetPlayerState.x + 1.5) accuracyMsg = "**too far outside**";
         else if (playState.ballState.x < targetPlayerState.x - 1.5) accuracyMsg = "**too far inside**";
