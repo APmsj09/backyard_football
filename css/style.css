@@ -334,11 +334,11 @@ canvas#field-canvas {
   width: 1em;
 }
 
-/* --- NEW DEPTH CHART STYLES --- */
+/* --- NEW DEPTH CHART STYLES (v2) --- */
 
 .visual-field-container {
-    background-color: #f3f4f6;
-    border: 1px solid #d1d5db;
+    background-color: #f3f4f6; /* gray-100 */
+    border: 1px solid #d1d5db; /* gray-300 */
     border-radius: 8px;
     padding: 8px;
 }
@@ -348,14 +348,15 @@ canvas#field-canvas {
     font-weight: 700;
     font-size: 0.75rem;
     letter-spacing: 0.1em;
-    color: #4b5563;
+    color: #4b5563; /* gray-600 */
     margin-bottom: 8px;
 }
 
 .visual-field {
     position: relative;
     width: 100%;
-    height: 300px;
+    /* 💡 FIX: More vertical space */
+    height: 400px; 
     background-color: #166534; /* green-700 */
     border-radius: 4px;
     overflow: hidden;
@@ -381,11 +382,12 @@ canvas#field-canvas {
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    width: 160px;
+    /* 💡 FIX: Smaller width to prevent overlap */
+    width: 140px; 
     padding: 8px;
     border: 2px dashed #9ca3af; /* gray-400 */
     border-radius: 8px;
-    background-color: rgba(0, 0, 0, 0.2);
+    background-color: rgba(0, 0, 0, 0.3); /* Darker transparent bg */
     transform: translate(-50%, -50%); /* Center the slot on its coordinates */
     transition: all 0.2s ease;
 }
@@ -403,40 +405,54 @@ canvas#field-canvas {
     text-shadow: 1px 1px 2px rgba(0,0,0,0.7);
 }
 
-/* Slot select dropdown */
+/* 💡 NEW: Overall Rating Style */
+.slot-overall {
+    font-size: 0.875rem;
+    font-weight: 700;
+    color: #fcd34d; /* amber-300 */
+    margin-top: -2px;
+    margin-bottom: 4px;
+}
+
+/* 💡 FIX: Styled Dropdown */
 .slot-select {
     width: 100%;
     margin-top: 4px;
     font-size: 0.875rem;
+    font-weight: 600;
     border-radius: 4px;
-    border: 1px solid #d1d5db;
+    border: 1px solid #6b7280; /* gray-500 */
     padding: 4px 6px;
-    background-color: #f9fafb;
-    color: #1f2937;
+    background-color: #374151; /* gray-700 */
+    color: #f9fafb; /* gray-50 */
     cursor: pointer;
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    appearance: none;
+    background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='%23d1d5db' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 10 13 14 9'%3e%3c/polyline%3e%3c/svg%3e");
+    background-position: right 0.5rem center;
+    background-repeat: no-repeat;
+    background-size: 1em 1em;
 }
 
 .slot-select:hover {
-    background-color: #f3f4f6;
+    background-color: #4b5563; /* gray-600 */
 }
 
-/* Bench player row */
+/* (Bench styles remain the same) */
 .bench-table-container {
     max-height: 400px;
     overflow-y: auto;
     border: 1px solid #e5e7eb;
     border-radius: 8px;
 }
-
 .bench-player-row {
-    cursor: move; /* Grab cursor */
+    cursor: move; 
     transition: background-color 0.1s ease;
 }
-
 .bench-player-row:hover {
     background-color: #fef3c7; /* amber-100 */
 }
-
 .bench-player-row.dragging {
     opacity: 0.4;
     background-color: #eab308;

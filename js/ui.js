@@ -1033,9 +1033,9 @@ function renderVisualFormationSlots(container, currentChart, formationData, benc
     
     const slots = formationData.slots;
 
-    // Build the <option> list for the dropdowns
-    // It includes an "Empty" option plus all benched players
-    const benchedOptionsHtml = [
+    // --- 💡 FIX: Create the dropdown options ---
+    // Start with the "Empty" option
+    const optionsHtml = [
         '<option value="null">-- Empty --</option>',
         ...benchedPlayers.map(p => `<option value="${p.id}">${p.name}</option>`)
     ].join('');
@@ -1047,41 +1047,56 @@ function renderVisualFormationSlots(container, currentChart, formationData, benc
         
         // --- Coordinate Mapping ---
         // Map X coordinate to 'left' percentage (0-100%)
-        // We'll map -25 (far left) to ~15% and +25 (far right) to ~85%
-        const x_percent = 50 + (relCoords[0] * 1.6); // 50% is center, 1.6 is a scaling factor
+        const x_percent = 50 + (relCoords[0] * 1.7); // 50% is center, 1.7 is scaling
 
-        // Map Y coordinate to 'top' percentage (0-100%)
-        // Y = 0 is LoS (50%). Y = -5 is 5yds behind LoS. Y = +5 is 5yds in front.
-        const y_percent = 50 + (relCoords[1] * 3); // 50% is LoS, 3 is a scaling factor
+        // 💡 FIX: Map Y coordinate with a larger multiplier for more vertical space
+        // Y = 0 is LoS (50%).
+        const y_percent = 50 + (relCoords[1] * 6); // Was * 3, now * 6
         
         const slotEl = document.createElement('div');
         slotEl.className = 'player-slot-visual';
         slotEl.dataset.positionSlot = slot;
         slotEl.dataset.side = side;
-        slotEl.style.left = `${x_percent}%`;
-        slotEl.style.top = `${y_percent}%`;
+        slotEl.style.left = `${Math.max(10, Math.min(90, x_percent))}%`; // Clamp to 10%-90%
+        slotEl.style.top = `${Math.max(10, Math.min(90, y_percent))}%`;  // Clamp to 10%-90%
         
-        // Add drag-and-drop only if the player is not temporary
         if (player && player.status?.type !== 'temporary') {
              slotEl.draggable = true;
              slotEl.dataset.playerId = player.id;
         }
 
-        // Build dropdown to assign benched players
+        // --- 💡 FIX: Logic for Overall and Dropdown ---
+        let overallHtml = '';
+        let finalOptionsHtml = optionsHtml;
+
+        if (player) {
+            // 1. Calculate and show the overall
+            const basePosition = slot.replace(/\d/g, '');
+            const overall = calculateOverall(player, basePosition);
+            overallHtml = `<div class="slot-overall">${overall} OVR</div>`;
+
+            // 2. Add the *current starter* to the list of options
+            finalOptionsHtml += `<option value="${player.id}">${player.name}</option>`;
+        } else {
+            // No player, just show empty dashes for overall
+            overallHtml = `<div class="slot-overall">-- OVR</div>`;
+        }
+
+        // Build the dropdown
         const selectEl = document.createElement('select');
         selectEl.className = 'slot-select';
         selectEl.dataset.slot = slot;
         selectEl.dataset.side = side;
-        selectEl.innerHTML = benchedOptionsHtml;
-        
-        // If a player is assigned, set the dropdown value
-        if (playerId) {
-            selectEl.value = "null"; // Default to empty
-        }
+        selectEl.innerHTML = finalOptionsHtml;
 
+        // 3. Set the selected value to the current player
+        selectEl.value = playerId || "null";
+        
+        // --- 💡 FIX: Combined UI ---
+        // Removed the separate player name text, now just label, overall, and dropdown
         slotEl.innerHTML = `
             <span class="slot-label">${slot}</span>
-            <div class="text-white text-sm font-medium">${player ? player.name : 'Empty'}</div>
+            ${overallHtml}
         `;
         
         slotEl.appendChild(selectEl);
