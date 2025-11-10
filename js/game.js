@@ -340,31 +340,44 @@ export async function initializeLeague(onProgress) {
     console.log("Player generation complete.");
     onProgress(0.7); await yieldToMain();
 
-    // --- Generate initial relationships ---
-    console.log("Assigning initial relationships...");
-    const totalPairs = (game.players.length * (game.players.length - 1)) / 2;
-    let pairsProcessed = 0;
+    // --- 💡 NEW: Generate sparse, non-stranger relationships ---
+    console.log("Assigning initial non-stranger relationships...");
+    const relationshipChance = 0.05; // 5% chance of any two players having a non-stranger relationship
+    let relationshipsAdded = 0;
+    
     for (let i = 0; i < game.players.length; i++) {
         for (let j = i + 1; j < game.players.length; j++) {
-            const p1 = game.players[i]; const p2 = game.players[j];
-            if (!p1 || !p2) continue;
-            let level = relationshipLevels.STRANGER.level;
             const roll = Math.random();
-            if (roll < 0.01) level = relationshipLevels.BEST_FRIEND.level;
-            else if (roll < 0.05) level = relationshipLevels.GOOD_FRIEND.level;
-            else if (roll < 0.15) level = relationshipLevels.FRIEND.level;
-            else if (roll < 0.40) level = relationshipLevels.ACQUAINTANCE.level;
-            const key = [p1.id, p2.id].sort().join('_');
-            game.relationships.set(key, level);
-            pairsProcessed++;
+            
+            // Only create an entry if it's NOT a stranger
+            if (roll < relationshipChance) {
+                const p1 = game.players[i]; 
+                const p2 = game.players[j];
+                if (!p1 || !p2) continue;
+
+                let level = relationshipLevels.ACQUAINTANCE.level; // Default to acquaintance
+                const specialRoll = Math.random();
+                
+                if (specialRoll < 0.05) level = relationshipLevels.BEST_FRIEND.level; // 0.25% overall
+                else if (specialRoll < 0.20) level = relationshipLevels.GOOD_FRIEND.level; // 1% overall
+                else if (specialRoll < 0.50) level = relationshipLevels.FRIEND.level; // 2.5% overall
+                // else: 2.5% chance of acquaintance
+
+                const key = [p1.id, p2.id].sort().join('_');
+                game.relationships.set(key, level);
+                relationshipsAdded++;
+            }
         }
         if (i % 20 === 0 && onProgress) {
-            onProgress(0.7 + (pairsProcessed / totalPairs) * 0.2);
+            onProgress(0.7 + (i / totalPlayers) * 0.2); // Update progress based on player loop
             await yieldToMain();
         }
     }
-    console.log(`Assigned ${game.relationships.size} initial relationships.`);
+    console.log(`Assigned ${relationshipsAdded} initial non-stranger relationships.`);
+    // --- 💡 END FIX ---
+    
     onProgress(0.9); await yieldToMain();
+
 
     // --- Generate AI teams ---
     console.log("Generating AI teams...");
@@ -382,15 +395,13 @@ export async function initializeLeague(onProgress) {
         const offenseSlots = offenseFormationData.slots;
         const defenseSlots = defenseFormationData.slots;
 
-        // --- ADD Colors to Team ---
-        if (availableColors.length === 0) availableColors = [...teamColors]; // Refill if empty
+        if (availableColors.length === 0) availableColors = [...teamColors]; 
         const colorSet = availableColors.splice(getRandomInt(0, availableColors.length - 1), 1)[0];
-        // --- END ADD ---
-
+        
         const team = {
             id: crypto.randomUUID(), name: teamName, roster: [], coach, division, wins: 0, losses: 0,
-            primaryColor: colorSet.primary, // <-- ADDED
-            secondaryColor: colorSet.secondary, // <-- ADDED
+            primaryColor: colorSet.primary, 
+            secondaryColor: colorSet.secondary, 
             formations: { offense: offenseFormationData.name, defense: defenseFormationData.name },
             depthChart: {
                 offense: Object.fromEntries(offenseSlots.map(slot => [slot, null])),
