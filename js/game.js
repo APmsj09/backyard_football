@@ -212,16 +212,37 @@ function getScoutedPlayerInfo(player, relationshipLevelNum) {
 // --- Fumble Check Helper ---
 /** Checks for a fumble during a tackle attempt. */
 /** Checks for a fumble during a tackle attempt. */
-function checkFumble(ballCarrierState, tacklerState, playState, gameLog) {
-    if (!ballCarrierState || !tacklerState || !ballCarrierState.agility || !tacklerState.tackling) return false;
+// game.js
+
+/** Checks for a fumble during a tackle attempt. */
+function checkFumble(ballCarrier, tackler, playState, gameLog) {
+    // --- 💡 FIX: Check the full player attribute objects ---
+    if (!ballCarrier?.attributes?.physical || !tackler?.attributes?.technical) {
+        return false;
+    }
     
-    // Use the pState attributes directly (which are copied from the roster)
-    const carrierModifier = (ballCarrierState.toughness || 50) / 100;
-    const tacklerModifier = ((tacklerState.strength || 50) + (tacklerState.tackling || 50)) / 100;
+    // Find the live pState objects to get their current stun status
+    const ballCarrierState = playState.activePlayers.find(p => p.id === ballCarrier.id);
+    const tacklerState = playState.activePlayers.find(p => p.id === tackler.id);
+    
+    // If states can't be found (shouldn't happen), exit
+    if (!ballCarrierState || !tacklerState) {
+        return false;
+    }
+
+    // --- 💡 FIX: Get attributes from the correct player objects ---
+    const toughness = ballCarrier.attributes.mental?.toughness || 50;
+    const strength = tackler.attributes.physical?.strength || 50;
+    const tackling = tackler.attributes.technical?.tackling || 50;
+
+    const carrierModifier = toughness / 100;
+    const tacklerModifier = (strength + tackling) / 100;
+    // --- 💡 END FIX ---
+    
     const fumbleChance = FUMBLE_CHANCE_BASE * (tacklerModifier / (carrierModifier + 0.5));
 
     if (Math.random() < fumbleChance) {
-        gameLog.push(`❗ FUMBLE! Ball knocked loose by ${tacklerState.name}!`);
+        gameLog.push(`❗ FUMBLE! Ball knocked loose by ${tackler.name}!`);
         playState.turnover = true; // It's a turnover *for now*
 
         // --- THIS IS THE CORRECTED LOGIC ---
