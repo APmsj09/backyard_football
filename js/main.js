@@ -437,6 +437,26 @@ function handleDepthChartDrop(playerId, newPositionSlot, side) {
 }
 
 /**
+ * Handles changing a player slot using the dropdown.
+ */
+function handleDepthChartSelect(e) {
+    if (!e.target.matches('.slot-select')) return;
+
+    const selectEl = e.target;
+    const playerId = selectEl.value === 'null' ? null : selectEl.value;
+    const newPositionSlot = selectEl.dataset.slot;
+    const side = selectEl.dataset.side;
+
+    if (!newPositionSlot || !side || !gameState) {
+        console.error("Cannot assign player: missing data from select element.");
+        return;
+    }
+
+    // Call the same drop handler, but with the new player ID
+    handleDepthChartDrop(playerId, newPositionSlot, side);
+}
+
+/**
  * Handles formation change event.
  */
 function handleFormationChange(e) {
@@ -955,6 +975,7 @@ function main() {
         // Dashboard Navigation and Content Interaction
         document.getElementById('dashboard-tabs')?.addEventListener('click', handleTabSwitch);
         document.getElementById('dashboard-content')?.addEventListener('click', handleDashboardClicks);
+        document.getElementById('dashboard-content')?.addEventListener('change', handleDepthChartSelect);
         // Messages List (Event Delegation)
         document.getElementById('messages-list')?.addEventListener('click', (e) => {
             const messageItem = e.target.closest('.message-item');

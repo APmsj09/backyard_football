@@ -249,26 +249,16 @@
             <div id="depth-chart-offense-pane" class="depth-chart-sub-pane">
               <label for="offense-formation-select" class="font-bold">Formation:</label>
               <select id="offense-formation-select" class="p-1 border rounded mb-4"></select>
-              <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div id="offense-depth-chart-slots" class="md:col-span-2 space-y-4">
-                  <div id="offense-qb-slots" class="player-group">
-                    <h4 class="player-group-title">Quarterbacks</h4>
-                    <div class="slot-list"></div>
-                  </div>
-                  <div id="offense-back-slots" class="player-group">
-                    <h4 class="player-group-title">Backs (RB/FB)</h4>
-                    <div class="slot-list"></div>
-                  </div>
-                  <div id="offense-receiver-slots" class="player-group">
-                    <h4 class="player-group-title">Receivers (WR/TE)</h4>
-                    <div class="slot-list"></div>
-                  </div>
-                  <div id="offense-line-slots" class="player-group">
-                    <h4 class="player-group-title">Offensive Line (OL)</h4>
-                    <div class="slot-list"></div>
-                  </div>
+
+              <div class="visual-field-container">
+                <div class="visual-field-header">OFFENSIVE FIELD</div>
+                <div id="offense-visual-field" class="visual-field offense-field">
                 </div>
-                <div id="offense-depth-chart-roster" class="roster-list space-y-2">
+              </div>
+
+              <div class="bench-container mt-6">
+                <h4 class="text-xl font-bold mb-2">Offensive Bench</h4>
+                <div id="offense-bench-table" class="bench-table-container">
                 </div>
               </div>
             </div>
@@ -276,22 +266,16 @@
             <div id="depth-chart-defense-pane" class="depth-chart-sub-pane hidden">
               <label for="defense-formation-select" class="font-bold">Formation:</label>
               <select id="defense-formation-select" class="p-1 border rounded mb-4"></select>
-              <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div id="defense-depth-chart-slots" class="md:col-span-2 space-y-4">
-                  <div id="defense-line-slots" class="player-group">
-                    <h4 class="player-group-title">Defensive Line (DL)</h4>
-                    <div class="slot-list"></div>
-                  </div>
-                  <div id="defense-lb-slots" class="player-group">
-                    <h4 class="player-group-title">Linebackers (LB)</h4>
-                    <div class="slot-list"></div>
-                  </div>
-                  <div id="defense-db-slots" class="player-group">
-                    <h4 class="player-group-title">Defensive Backs (DB)</h4>
-                    <div class="slot-list"></div>
-                  </div>
+
+              <div class="visual-field-container">
+                <div class="visual-field-header">DEFENSIVE FIELD</div>
+                <div id="defense-visual-field" class="visual-field defense-field">
                 </div>
-                <div id="defense-depth-chart-roster" class="roster-list space-y-2">
+              </div>
+
+              <div class="bench-container mt-6">
+                <h4 class="text-xl font-bold mb-2">Defensive Bench</h4>
+                <div id="defense-bench-table" class="bench-table-container">
                 </div>
               </div>
             </div>

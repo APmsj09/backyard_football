@@ -955,14 +955,15 @@ function renderDepthChartTab(gameState) {
         if (elements.defenseDepthChartPane) elements.defenseDepthChartPane.innerHTML = '<p class="text-red-500">Error loading defense data.</p>';
         return;
     }
-    const permanentRoster = gameState.playerTeam.roster.filter(p => p && p.status?.type !== 'temporary');
+    
+    // This function is still fine
+    renderPositionalOveralls(gameState.playerTeam.roster.filter(p => p && p.status?.type !== 'temporary'));
 
-    // These functions are still correct
-    renderPositionalOveralls(permanentRoster);
+    // These are also fine
     renderFormationDropdown('offense', Object.values(offenseFormations), gameState.playerTeam.formations.offense);
     renderFormationDropdown('defense', Object.values(defenseFormations), gameState.playerTeam.formations.defense);
 
-    // Call the new side-rendering functions
+    // --- 💡 NEW: Call the new side-rendering functions ---
     renderDepthChartSide('offense', gameState);
     renderDepthChartSide('defense', gameState);
 }
@@ -995,55 +996,149 @@ function renderPositionalOveralls(roster) {
 
 /** Renders the depth chart slots and available players for one side. */
 function renderDepthChartSide(side, gameState) {
-    // Get the roster container for this side (e.g., 'offense-depth-chart-roster')
-    const rosterContainer = elements[`${side}DepthChartRoster`];
+    const visualFieldContainer = document.getElementById(`${side}-visual-field`);
+    const benchTableContainer = document.getElementById(`${side}-bench-table`);
 
-    if (!rosterContainer || !gameState?.playerTeam?.roster || !gameState?.playerTeam?.depthChart) {
+    if (!visualFieldContainer || !benchTableContainer || !gameState?.playerTeam?.roster || !gameState?.playerTeam?.depthChart) {
         console.error(`Cannot render depth chart side "${side}": Missing elements or game state.`);
-        if (rosterContainer) rosterContainer.innerHTML = '<p class="text-red-500">Error</p>';
+        if (visualFieldContainer) visualFieldContainer.innerHTML = '<p class="text-red-500">Error</p>';
+        if (benchTableContainer) benchTableContainer.innerHTML = '<p class="text-red-500">Error</p>';
         return;
     }
-
-    const { roster, depthChart } = gameState.playerTeam;
+    
+    const { roster, depthChart, formations } = gameState.playerTeam;
     const currentChart = depthChart[side] || {};
-    const slots = Object.keys(currentChart);
+    const formationName = formations[side];
+    const formationData = (side === 'offense' ? offenseFormations[formationName] : defenseFormations[formationName]);
 
-    // --- NEW LOGIC: Clear all grouped containers for this side ---
-    const groupContainerIds = (side === 'offense')
-        ? ['offense-qb-slots', 'offense-receiver-slots', 'offense-back-slots', 'offense-line-slots']
-        : ['defense-line-slots', 'defense-lb-slots', 'defense-db-slots'];
-
-    groupContainerIds.forEach(id => {
-        const container = document.getElementById(id);
-        if (container) {
-            container.innerHTML = ''; // Clear the container
-        } else {
-            console.warn(`Depth chart group container #${id} not found in HTML.`);
-        }
-    });
-    // --- END NEW LOGIC ---
-
-    // Render each slot into its correct group
-    slots.forEach(positionSlot => {
-        // Find the specific container ID for this slot (e.g., "QB1" -> "offense-qb-slots")
-        const containerId = getSlotContainerId(positionSlot, side);
-        const containerElement = document.getElementById(containerId);
-
-        if (containerElement) {
-            // The existing renderSlot function is perfect for this!
-            // We just tell it which player, chart, and *specific container* to use.
-            renderSlot(positionSlot, roster, currentChart, containerElement, side);
-        } else {
-            console.warn(`No container found for slot ${positionSlot} (ID: ${containerId})`);
-        }
-    });
-
-    // Find players who are not starting on this side
+    // Find players who are not starting
     const playersStartingOnThisSide = new Set(Object.values(currentChart).filter(Boolean));
-    const availablePlayers = roster.filter(p => p && !playersStartingOnThisSide.has(p.id));
+    const benchedPlayers = roster.filter(p => p && !playersStartingOnThisSide.has(p.id) && p.status?.type !== 'temporary');
 
-    // Render the available "bench" players
-    renderAvailablePlayerList(availablePlayers, rosterContainer, side);
+    // Call the new helper functions
+    renderVisualFormationSlots(visualFieldContainer, currentChart, formationData, benchedPlayers, roster, side);
+    renderDepthChartBench(benchTableContainer, benchedPlayers, side);
+}
+
+/**
+ * Renders the visual, on-field player slots and their assignment dropdowns.
+ */
+function renderVisualFormationSlots(container, currentChart, formationData, benchedPlayers, allRoster, side) {
+    container.innerHTML = ''; // Clear existing slots
+
+    if (!formationData || !formationData.slots || !formationData.coordinates) {
+        container.innerHTML = '<p class="text-white p-4">Select a formation to see the depth chart.</p>';
+        return;
+    }
+    
+    const slots = formationData.slots;
+
+    // Build the <option> list for the dropdowns
+    // It includes an "Empty" option plus all benched players
+    const benchedOptionsHtml = [
+        '<option value="null">-- Empty --</option>',
+        ...benchedPlayers.map(p => `<option value="${p.id}">${p.name}</option>`)
+    ].join('');
+
+    slots.forEach(slot => {
+        const playerId = currentChart[slot];
+        const player = allRoster.find(p => p && p.id === playerId);
+        const relCoords = formationData.coordinates[slot] || [0, 0];
+        
+        // --- Coordinate Mapping ---
+        // Map X coordinate to 'left' percentage (0-100%)
+        // We'll map -25 (far left) to ~15% and +25 (far right) to ~85%
+        const x_percent = 50 + (relCoords[0] * 1.6); // 50% is center, 1.6 is a scaling factor
+
+        // Map Y coordinate to 'top' percentage (0-100%)
+        // Y = 0 is LoS (50%). Y = -5 is 5yds behind LoS. Y = +5 is 5yds in front.
+        const y_percent = 50 + (relCoords[1] * 3); // 50% is LoS, 3 is a scaling factor
+        
+        const slotEl = document.createElement('div');
+        slotEl.className = 'player-slot-visual';
+        slotEl.dataset.positionSlot = slot;
+        slotEl.dataset.side = side;
+        slotEl.style.left = `${x_percent}%`;
+        slotEl.style.top = `${y_percent}%`;
+        
+        // Add drag-and-drop only if the player is not temporary
+        if (player && player.status?.type !== 'temporary') {
+             slotEl.draggable = true;
+             slotEl.dataset.playerId = player.id;
+        }
+
+        // Build dropdown to assign benched players
+        const selectEl = document.createElement('select');
+        selectEl.className = 'slot-select';
+        selectEl.dataset.slot = slot;
+        selectEl.dataset.side = side;
+        selectEl.innerHTML = benchedOptionsHtml;
+        
+        // If a player is assigned, set the dropdown value
+        if (playerId) {
+            selectEl.value = "null"; // Default to empty
+        }
+
+        slotEl.innerHTML = `
+            <span class="slot-label">${slot}</span>
+            <div class="text-white text-sm font-medium">${player ? player.name : 'Empty'}</div>
+        `;
+        
+        slotEl.appendChild(selectEl);
+        container.appendChild(slotEl);
+    });
+}
+
+/**
+ * Renders the bench players into a sortable, draggable table.
+ */
+function renderDepthChartBench(container, benchedPlayers, side) {
+    const physicalAttrs = ['height', 'weight', 'speed', 'strength', 'agility', 'stamina'];
+    const mentalAttrs = ['playbookIQ', 'clutch', 'consistency', 'toughness'];
+    const technicalAttrs = ['throwingAccuracy', 'catchingHands', 'blocking', 'tackling', 'blockShedding'];
+
+    let tableHtml = `<table class="min-w-full bg-white text-sm"><thead class="bg-gray-100 sticky top-0 z-10"><tr>
+        <th scope="col" class="py-2 px-3 text-left sticky left-0 bg-gray-100 z-20">Name</th>
+        <th scope="col" class="py-2 px-3">Age</th>
+        <th scope="col" class="py-2 px-3">Pot</th>
+        <th scope="col" class="py-2 px-3">Status</th>
+        ${physicalAttrs.map(h => `<th scope="col" class="py-2 px-3 uppercase">${h.slice(0, 3)}</th>`).join('')}
+        ${mentalAttrs.map(h => `<th scope="col" class="py-2 px-3 uppercase">${h.slice(0, 3)}</th>`).join('')}
+        ${technicalAttrs.map(h => `<th scope="col" class="py-2 px-3 uppercase">${h.slice(0, 3)}</th>`).join('')}
+    </tr></thead><tbody class="divide-y">`;
+
+    if (benchedPlayers.length === 0) {
+        tableHtml += `<tr><td colspan="20" class="p-4 text-center text-gray-500">All players are starting.</td></tr>`;
+    } else {
+        benchedPlayers.forEach(p => {
+            if (!p || !p.attributes || !p.status) return;
+            
+            const statusClass = p.status.duration > 0 ? 'text-red-500 font-semibold' : 'text-green-600';
+            const statusText = p.status.description || 'Healthy';
+
+            tableHtml += `
+                <tr class="bench-player-row" draggable="true" data-player-id="${p.id}" data-side="${side}">
+                    <th scope="row" class="py-2 px-3 font-semibold sticky left-0 bg-white z-10">${p.name}</th>
+                    <td class="text-center py-2 px-3">${p.age}</td>
+                    <td class="text-center py-2 px-3 font-medium">${p.potential || '?'}</td>
+                    <td class="text-center py-2 px-3 ${statusClass}" title="${statusText}">
+                        ${statusText} ${p.status.duration > 0 ? `(${p.status.duration}w)` : ''}
+                    </td>
+            `;
+
+            const renderAttr = (val, attrName) => {
+                const displayValue = attrName === 'height' ? formatHeight(val) : (val ?? '?');
+                return `<td class="text-center py-2 px-3" title="${attrName}">${displayValue}</td>`;
+            };
+
+            physicalAttrs.forEach(attr => tableHtml += renderAttr(p.attributes.physical?.[attr], attr));
+            mentalAttrs.forEach(attr => tableHtml += renderAttr(p.attributes.mental?.[attr], attr));
+            technicalAttrs.forEach(attr => tableHtml += renderAttr(p.attributes.technical?.[attr], attr));
+
+            tableHtml += `</tr>`;
+        });
+    }
+    container.innerHTML = tableHtml + `</tbody></table>`;
 }
 
 /** Helper to find a player's attribute value from any category. */
@@ -1379,57 +1474,76 @@ export function renderOffseasonScreen(offseasonReport, year) {
 export function setupDragAndDrop(onDrop) {
     const container = document.getElementById('dashboard-content');
     if (!container) { console.error("Drag/drop container (dashboard-content) missing."); return; }
+    
     let draggedEl = null;
+    
     container.addEventListener('dragstart', e => {
-        if (e.target.matches('.draggable-player, .depth-chart-slot[draggable="true"]')) {
+        // --- 💡 FIX: Drag from bench row OR visual slot ---
+        if (e.target.matches('.bench-player-row') || e.target.matches('.player-slot-visual[draggable="true"]')) {
             draggedEl = e.target;
             dragPlayerId = e.target.dataset.playerId;
-            dragSide = e.target.closest('.depth-chart-sub-pane')?.id.includes('offense') ? 'offense' :
-                e.target.closest('.depth-chart-sub-pane')?.id.includes('defense') ? 'defense' :
-                    e.target.closest('.roster-list')?.id.includes('offense') ? 'offense' :
-                        e.target.closest('.roster-list')?.id.includes('defense') ? 'defense' : null;
+            dragSide = e.target.dataset.side;
+
             if (dragPlayerId && dragSide) {
                 e.dataTransfer.effectAllowed = 'move';
                 e.dataTransfer.setData('text/plain', dragPlayerId);
                 setTimeout(() => draggedEl?.classList.add('dragging'), 0);
-            } else { e.preventDefault(); }
-        } else { e.preventDefault(); }
+            } else {
+                e.preventDefault();
+            }
+        } else {
+            e.preventDefault();
+        }
     });
+
     container.addEventListener('dragend', e => {
-        if (draggedEl) { draggedEl.classList.remove('dragging'); }
+        if (draggedEl) { 
+            draggedEl.classList.remove('dragging');
+        }
         draggedEl = null; dragPlayerId = null; dragSide = null;
         document.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over'));
     });
+
     container.addEventListener('dragover', e => {
         e.preventDefault();
         e.dataTransfer.dropEffect = 'move';
-        const targetSlot = e.target.closest('.depth-chart-slot');
+        
+        // --- 💡 FIX: Target the new visual slot ---
+        const targetSlot = e.target.closest('.player-slot-visual');
+        
         document.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over'));
+        
         if (targetSlot && targetSlot.dataset.side === dragSide) {
             targetSlot.classList.add('drag-over');
         }
     });
+
     container.addEventListener('dragleave', e => {
-        const targetSlot = e.target.closest('.depth-chart-slot');
-        if (targetSlot) { targetSlot.classList.remove('drag-over'); }
+        const targetSlot = e.target.closest('.player-slot-visual');
+        if (targetSlot) { 
+            targetSlot.classList.remove('drag-over');
+        }
         if (!e.relatedTarget || !container.contains(e.relatedTarget)) {
             document.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over'));
         }
     });
+
     container.addEventListener('drop', e => {
         e.preventDefault();
         document.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over'));
-        const dropSlot = e.target.closest('.depth-chart-slot');
+        
+        // --- 💡 FIX: Target the new visual slot ---
+        const dropSlot = e.target.closest('.player-slot-visual');
         const dropSide = dropSlot?.dataset.side;
+        
         if (dropSlot && dropSlot.dataset.positionSlot && dragPlayerId && dropSide === dragSide) {
             onDrop(dragPlayerId, dropSlot.dataset.positionSlot, dropSide);
-        } else { console.log("Invalid drop target."); }
+        } else { 
+            console.log("Invalid drop target."); 
+        }
         draggedEl = null; dragPlayerId = null; dragSide = null;
     });
 }
-
-
-// ui.js
 
 /** Sets up event listener for depth chart sub-tabs (Offense/Defense/Overalls). */
 export function setupDepthChartTabs() {
