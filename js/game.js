@@ -2626,9 +2626,9 @@ function checkTackleCollisions(playState, gameLog) {
                 playState.yards = ballCarrierState.y - playState.lineOfScrimmage;
                 playState.playIsLive = false;
 
-                // --- 💡 FIX: Corrected the typo 'lineOfScrimGmage' to 'lineOfScrimmage' ---
+               
                 if (ballCarrierState.slot === 'QB1' && (ballCarrierState.action === 'qb_setup' || ballCarrierState.action === 'qb_scramble') && ballCarrierState.y < playState.lineOfScrimmage) {
-                    // --- 💡 END FIX ---
+                    
                     playState.sack = true;
                     gameLog.push(`💥 SACK! ${tacklerPlayer.name} (TklPwr: ${tacklePower.toFixed(0)}) gets to ${ballCarrierState.name}!`);
                 } else {
@@ -4213,13 +4213,13 @@ function determineDefensivePlayCall(defense, offense, down, yardsToGo, ballOn, s
     // --- 1. Validate Inputs & Get Current Formation ---
     if (!defense?.roster || !offense?.roster || !defense?.formations?.defense || !offense?.formations?.offense || !defense?.coach) {
         console.error("determineDefensivePlayCall: Invalid team data provided.");
-        return 'Cover_2_Zone_331'; // Need a safe, common fallback (adjust if needed)
+        return 'Cover_2_Zone_3-1-3'; // Need a safe, common fallback (adjust if needed)
     }
     const defenseFormationName = defense.formations.defense;
     const defenseFormation = defenseFormations[defenseFormationName];
     if (!defenseFormation) {
         console.error(`CRITICAL ERROR: Defensive formation data missing for ${defense.name} (${defenseFormationName}).`);
-        return 'Cover_2_Zone_331'; // Fallback
+        return 'Cover_2_Zone_3-1-3'; // Fallback
     }
 
     // --- 2. Filter Playbook for Current Formation ---
@@ -4235,7 +4235,7 @@ function determineDefensivePlayCall(defense, offense, down, yardsToGo, ballOn, s
         console.error(`CRITICAL: No defensive plays found in playbook compatible with ${defenseFormationName}!`);
         // Try finding *any* play as a last resort, though assignments might be wrong
         const allPlays = Object.keys(defensivePlaybook);
-        return allPlays.length > 0 ? getRandom(allPlays) : 'Cover_2_Zone_331'; // Absolute fallback
+        return allPlays.length > 0 ? getRandom(allPlays) : 'Cover_2_Zone_3-1-3'; // Absolute fallback
     }
 
     // --- 3. Categorize *Available* Plays using TAGS ---
@@ -4346,7 +4346,7 @@ function determineDefensivePlayCall(defense, offense, down, yardsToGo, ballOn, s
     // Final safety net - should not be reached if availablePlays has items
     if (!chosenPlay) {
         console.error("CRITICAL FALLBACK: Could not select any defensive play.");
-        chosenPlay = availablePlays[0] || 'Cover_2_Zone_331';
+        chosenPlay = availablePlays[0] || 'Cover_2_Zone_3-1-3';
     }
 
     // gameLog.push(`Def Play Call: ${chosenPlay}`); // Optional: Log decision
