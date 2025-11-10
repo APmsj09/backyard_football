@@ -1,13 +1,13 @@
 // game.js - COMPLETE FILE
 
 // --- Imports ---
-import { getRandom, getRandomInt } from './utils.js'; // Removed estimateBestPosition
+import { getRandom, getRandomInt } from './utils.js'; 
 import {
     calculateOverall,
     calculateSlotSuitability,
     generatePlayer,
     positionOverallWeights,
-    estimateBestPosition  // <<< ADD IT HERE
+    estimateBestPosition  
 } from './game/player.js';
 import { getDistance, updatePlayerPosition } from './game/physics.js';
 
@@ -5203,23 +5203,52 @@ function processRelationshipEvents() {
     }
 }
 
-/** Simulates all games for the current week and advances state. */
+/**
+ * Simulates all games for the current week and advances state.
+ */
 export function simulateWeek(options = {}) {
-    if (!game || !game.teams || !game.schedule) { console.error("simulateWeek: Invalid game state."); return []; }
+    // 1. MODIFIED: Removed !game.schedule from this check
+    if (!game || !game.teams) {
+        console.error("simulateWeek: Invalid game state.");
+        return [];
+    }
     const WEEKS_IN_SEASON = 9;
-    if (game.currentWeek >= WEEKS_IN_SEASON) { console.warn("simulateWeek: Season already over."); return null; }
+    if (game.currentWeek >= WEEKS_IN_SEASON) {
+        console.warn("simulateWeek: Season already over.");
+        return null;
+    }
 
     endOfWeekCleanup();
     updatePlayerStatuses();
     generateWeeklyEvents();
     game.breakthroughs = [];
 
+    // --- 💡 NEW BUG FIX BLOCK ---
+    // Check if the schedule exists OR if it's empty when it shouldn't be
+    if (!game.schedule || game.schedule.length === 0) {
+        // Only generate a new schedule if we are at the *start* of the season
+        if (game.currentWeek === 0) {
+            console.log("No schedule found for Week 0. Generating new season schedule...");
+            generateSchedule(); // This will populate game.schedule
+        } else {
+            // If we're past week 0 and have no schedule, something is very wrong.
+            console.error(`simulateWeek: Schedule is missing mid-season (Week ${game.currentWeek}). Cannot proceed.`);
+            return [];
+        }
+    }
+    // --- 💡 END BUG FIX BLOCK ---
+
     const gamesPerWeek = game.teams.length / 2;
     const startIndex = game.currentWeek * gamesPerWeek;
     const endIndex = startIndex + gamesPerWeek;
-    const weeklyGames = game.schedule.slice(startIndex, endIndex);
+    const weeklyGames = game.schedule.slice(startIndex, endIndex); // This should now work
 
-    if (!weeklyGames || weeklyGames.length === 0) { console.warn(`No games found for week ${game.currentWeek}`); }
+    if (!weeklyGames || weeklyGames.length === 0) {
+        console.warn(`No games found for week ${game.currentWeek}`);
+        // Do not proceed if games are still missing after the check
+        game.currentWeek++;
+        return [];
+    }
 
     const results = weeklyGames.map(match => {
         try {
