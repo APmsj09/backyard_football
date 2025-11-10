@@ -3524,11 +3524,6 @@ function finalizeStats(playState, offense, defense) {
 // --- UPDATED resolvePlay FUNCTION ---
 // =============================================================
 
-// [in game.js]
-
-/**
- * Simulates a single play using a coordinate-based tick system.
- */
 /**
  * Simulates a single play using a coordinate-based tick system.
  */
@@ -3554,7 +3549,7 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
             vx: 0, vy: 0, vz: 0,
             targetPlayerId: null,
             inAir: false,
-            isLoose: false, // <<< --- ADD THIS LINE
+            isLoose: false, 
             throwerId: null,
             throwInitiated: false,
             targetX: 0, targetY: 0
@@ -3564,16 +3559,11 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
     let firstDownY = 0;
 
     try {
-        // 💡 FIX: Calculate firstDownY correctly, clamping it to the goal line (110)
         const absoluteLoS_Y = ballOn + 10;
         const goalLineY = FIELD_LENGTH - 10; // This is 110
         firstDownY = Math.min(absoluteLoS_Y + (yardsToGo || 10), goalLineY);
 
-        // We pass the raw 'ballOn' (e.g., 20) to setup
         setupInitialPlayerStates(playState, offense, defense, play, assignments, ballOn, defensivePlayKey, ballHash, offensivePlayKey);
-
-        // 💡 FIX: setupInitialPlayerStates now sets the correct LoS (e.g., 30)
-        // firstDownY is already correct (e.g., 40)
 
         if (playState.playIsLive) {
             const initialFrameData = {
@@ -3582,7 +3572,6 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
                 logIndex: gameLog.length,
                 lineOfScrimmage: playState.lineOfScrimmage,
                 firstDownY: firstDownY,
-                // Mark this first frame as the snap frame so the UI can render the ball
                 isSnap: true
             };
             playState.visualizationFrames.push(initialFrameData);
@@ -3602,7 +3591,10 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
     const defensePlay = defensivePlaybook[defensivePlayKey];
     const qbState = playState.activePlayers.find(p => p.slot === 'QB1' && p.isOffense);
     const qbPlayer = qbState ? game.players.find(p => p && p.id === qbState.id) : null;
-    const qbIQ = qbPlayer?.attributes.mental.playbookIQ || 50;
+    
+    // --- 💡 FIX: Chained 'attributes' and 'mental' optionally ---
+    const qbIQ = qbPlayer?.attributes?.mental?.playbookIQ || 50;
+    // --- 💡 END FIX ---
 
     if (play.type === 'pass' &&
         defensePlay?.blitz === true &&
@@ -3637,8 +3629,6 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
             ballCarrierState = playState.activePlayers.find(p => p.isBallCarrier);
             const ballPos = playState.ballState;
 
-            // --- 💡 RE-ORDERED TICK LOOP 💡 ---
-
             // --- STEP 1: QB Logic (Decide Throw/Scramble) ---
             if (playState.playIsLive && type === 'pass' && !ballPos.inAir && !playState.turnover && !playState.sack) {
                 updateQBDecision(playState, offenseStates, defenseStates, gameLog);
@@ -3668,53 +3658,46 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
             resolvePlayerCollisions(playState);
 
             // --- STEP 6: Check Ball Carrier End Conditions (TD, OOB, Safety) ---
-            // 💡 This now runs BEFORE tackles are checked.
             if (playState.playIsLive) {
                 ballCarrierState = playState.activePlayers.find(p => p.isBallCarrier);
                 if (ballCarrierState) {
-                    // Check for Touchdown (in either endzone)
                     if (ballCarrierState.y >= FIELD_LENGTH - 10 && ballCarrierState.isOffense) { // Offensive TD
                         playState.yards = ballCarrierState.y - playState.lineOfScrimmage;
                         playState.touchdown = true; playState.playIsLive = false;
                         const scorer = game.players.find(p => p && p.id === ballCarrierState.id);
                         gameLog.push(`🎉 TOUCHDOWN ${scorer?.name || 'player'}!`);
-                        break; // <-- This break is critical
+                        break; 
                     } else if (ballCarrierState.y < 10 && !ballCarrierState.isOffense) { // Defensive TD
                         playState.yards = 0;
                         playState.touchdown = true; playState.playIsLive = false;
                         const scorer = game.players.find(p => p && p.id === ballCarrierState.id);
                         gameLog.push(`🎉 DEFENSIVE TOUCHDOWN ${scorer?.name || 'player'}!`);
-                        break; // <-- This break is critical
+                        break; 
                     } else if (ballCarrierState.y < 10 && ballCarrierState.isOffense) { // SAFETY
                         playState.yards = 0;
                         playState.safety = true;
                         playState.playIsLive = false;
                         gameLog.push(`SAFETY! ${ballCarrierState.name} was tackled in the endzone!`);
-                        break; // <-- This break is critical
+                        break; 
                     }
-                    // Check for Out of Bounds (Sidelines)
                     if (ballCarrierState.x <= 0.1 || ballCarrierState.x >= FIELD_WIDTH - 0.1) {
                         playState.yards = ballCarrierState.y - playState.lineOfScrimmage;
                         playState.playIsLive = false;
                         gameLog.push(` sidelines... ${ballCarrierState.name} ran out of bounds after a gain of ${playState.yards.toFixed(1)} yards.`);
-                        break; // <-- This break is critical
+                        break; 
                     }
                 }
             }
 
             // --- STEP 7: Check Collisions & Resolve Catches/Incompletions ---
-            // These checks will NOT run if a TD/OOB/Safety just happened.
             if (playState.playIsLive) {
-                // A. Check for new block engagements
                 checkBlockCollisions(playState);
 
-                // B. Check for tackles
                 ballCarrierState = playState.activePlayers.find(p => p.isBallCarrier);
                 if (ballCarrierState) {
-                    if (checkTackleCollisions(playState, gameLog)) break; // Play ended from tackle/fumble
+                    if (checkTackleCollisions(playState, gameLog)) break; 
                 }
 
-                // C. Check for Ball Arrival (Catch/INT/Drop)
                 if (ballPos.inAir) {
                     const distToTargetXY = Math.sqrt(
                         Math.pow(ballPos.x - ballPos.targetX, 2) +
@@ -3726,35 +3709,29 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
                         handleBallArrival(playState, gameLog);
                         if (!playState.playIsLive) break;
                     }
-
-                    // D. Check for Fumble Recovery
+                    
                     if (playState.ballState.isLoose) {
                         const recoverer = checkFumbleRecovery(playState, gameLog, TACKLE_RANGE);
 
                         if (recoverer) {
-                            // Someone recovered the ball!
                             playState.ballState.isLoose = false;
                             recoverer.isBallCarrier = true;
                             recoverer.hasBall = true;
                             recoverer.action = 'run_path';
 
                             if (recoverer.isOffense) {
-                                // --- OFFENSE RECOVERED ---
-                                playState.turnover = false; // It's no longer a turnover
+                                playState.turnover = false; 
                                 gameLog.push(`👍 ${recoverer.name} recovers the fumble!`);
-                                // Update player responsibilities
                                 playState.activePlayers.forEach(p => {
                                     if (p.isOffense && p.id !== recoverer.id) {
-                                        p.action = 'run_block'; // Block for the runner
+                                        p.action = 'run_block'; 
                                     } else if (!p.isOffense) {
-                                        p.action = 'pursuit'; // Defense must now pursue
+                                        p.action = 'pursuit'; 
                                     }
                                 });
                             } else {
-                                // --- DEFENSE RECOVERED ---
-                                playState.turnover = true; // It is confirmed as a turnover
+                                playState.turnover = true; 
                                 gameLog.push(`❗ ${recoverer.name} recovers the fumble for the Defense!`);
-                                // Update player responsibilities (this was already set in checkFumble)
                                 playState.activePlayers.forEach(p => {
                                     if (p.isOffense) {
                                         p.action = 'pursuit';
@@ -3764,10 +3741,8 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
                                 });
                             }
                         }
-                        // If no recoverer, the ball is still loose, play continues
                     }
 
-                    // E. Check for Ground / Out of Bounds (if not caught)
                     if (playState.playIsLive) {
                         if (ballPos.z <= 0.1 && playState.tick > 6) {
                             gameLog.push(`‹‹ Pass hits the ground. Incomplete.`);
@@ -3782,7 +3757,7 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
                     }
                 }
             }
-            if (!playState.playIsLive) break; // Final check before next loop iteration
+            if (!playState.playIsLive) break; 
 
             // --- STEP 8: Resolve Ongoing Battles (Blocks) ---
             resolveOngoingBlocks(playState, gameLog);
@@ -3803,40 +3778,33 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
                 const player = game.players.find(p => p && p.id === pState.id);
                 if (player) {
                     player.fatigue = Math.min(100, (player.fatigue || 0) + fatigueGain);
-
-                    pState.fatigue = player.fatigue; // Copy live fatigue to the sim object
-
-
+                    pState.fatigue = player.fatigue; 
                     const stamina = player.attributes?.physical?.stamina || 50;
                     const fatigueRatio = Math.min(1.0, (player.fatigue || 0) / stamina);
                     pState.fatigueModifier = Math.max(0.3, 1.0 - fatigueRatio);
                 }
             });
 
-            // --- BENCH RECOVERY: players not active this play slowly recover fatigue ---
             try {
                 const activeIds = new Set(playState.activePlayers.filter(p => p).map(p => p.id));
-                const BENCH_RECOVERY_PER_TICK = 0.003; // very slow recovery per simulation tick/play
+                const BENCH_RECOVERY_PER_TICK = 0.003; 
                 game.players.forEach(p => {
                     if (!p) return;
-                    if (p.status && p.status.duration > 0) return; // injured/busy don't recover normally
-                    if (activeIds.has(p.id)) return; // skip active players
-                    if ((p.fatigue || 0) <= 0) return; // nothing to recover
+                    if (p.status && p.status.duration > 0) return; 
+                    if (activeIds.has(p.id)) return; 
+                    if ((p.fatigue || 0) <= 0) return; 
                     p.fatigue = Math.max(0, (p.fatigue || 0) - BENCH_RECOVERY_PER_TICK);
                 });
             } catch (err) {
                 console.error('Bench recovery error:', err);
             }
 
-            // --- AI SUBSTITUTIONS: allow AI teams involved in the play to occasionally auto-sub ---
             try {
                 const involvedTeamIds = new Set(playState.activePlayers.filter(p => p && p.teamId).map(p => p.teamId));
                 involvedTeamIds.forEach(tid => {
                     const team = game.teams.find(tt => tt && tt.id === tid);
                     if (!team) return;
-                    // Do not auto-sub the player's team (human-controlled)
                     if (game.playerTeam && team.id === game.playerTeam.id) return;
-                    // Allow AI to make substitutions occasionally when fatigued
                     autoMakeSubstitutions(team, { thresholdFatigue: 60, maxSubs: 2, chance: 0.2 });
                 });
             } catch (err) {
@@ -3862,7 +3830,6 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
     }
 
     // --- 4. Finalize Results ---
-    // (This logic is now run *after* the loop, ensuring TD/Tackle priority)
     if (playState.playIsLive && !playState.touchdown && !playState.safety) {
         ballCarrierState = playState.activePlayers.find(p => p.isBallCarrier);
         if (ballCarrierState) {
@@ -3882,9 +3849,7 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
         playState.yards = 0;
     }
 
-    // 💡 This check is now redundant but safe. The TD check in the loop sets the yards.
     if (playState.touchdown && !playState.turnover) { // Offensive TD
-        // Ensure yards are set to at least the yards to the goal line
         const yardsToGoal = (FIELD_LENGTH - 10) - (ballOn + 10);
         playState.yards = Math.max(yardsToGoal, playState.yards);
     } else if (playState.touchdown && playState.turnover) { // Defensive TD
@@ -3908,6 +3873,8 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
  * This does not use the tick simulation.
  * @returns {object} A simple result object.
  */
+// game.js
+
 function resolvePunt(offense, defense, gameState) {
     const { gameLog, ballOn } = gameState;
 
@@ -3921,14 +3888,18 @@ function resolvePunt(offense, defense, gameState) {
     }
 
     // --- 1. Calculate Punt Power & Base Distance ---
-    // We use Strength (60%) and Throwing Accuracy (40%)
-    const puntPower = (qb.attributes.physical.strength * 0.6) + (qb.attributes.technical.throwingAccuracy * 0.4);
+    // 💡 FIX: Added optional chaining and fallbacks for all attribute access ---
+    const strength = qb.attributes?.physical?.strength || 50;
+    const accuracy = qb.attributes?.technical?.throwingAccuracy || 50;
+    const consistency = qb.attributes?.mental?.consistency || 50;
+    
+    const puntPower = (strength * 0.6) + (accuracy * 0.4);
+    // --- 💡 END FIX ---
 
     // Base distance gives a range of 28 (min stats) to 58 (max stats) yards
     const baseDistance = 25 + (puntPower / 3);
 
     // --- 2. Add Variability (Your "Levels") ---
-    const consistency = qb.attributes.mental.consistency || 50;
     const maxVariability = 10; // Max +/- 10 yards
     const variabilityRange = maxVariability * (1 - (consistency / 100));
 
@@ -3959,7 +3930,6 @@ function resolvePunt(offense, defense, gameState) {
     // A punt is always a turnover
     return { turnover: true, newBallOn: Math.round(newBallOn) };
 }
-
 
 // =============================================================
 // --- GAME SIMULATION ---
