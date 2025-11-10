@@ -4378,8 +4378,9 @@ function aiCheckAudible(offense, offensivePlayKey, defense, defensivePlayKey, ga
 /**
  * Simulates a full game between two teams.
  */
+// game.js
+
 export function simulateGame(homeTeam, awayTeam, options = {}) {
-    // options: { fastSim: boolean } -- if true, minimize logging and skip visualization frames
     const fastSim = options.fastSim === true;
     let originalTickDuration = TICK_DURATION_SECONDS;
     let gameResult;
@@ -4392,11 +4393,12 @@ export function simulateGame(homeTeam, awayTeam, options = {}) {
             if (!fastSim) console.error("simulateGame: Invalid team data provided.");
             return { homeTeam, awayTeam, homeScore: 0, awayScore: 0, gameLog: ["Error: Invalid team data"], breakthroughs: [] };
         }
-        resetGameStats(homeTeam, awayTeam); // This already uses getRosterObjects, it's safe.
-        aiSetDepthChart(homeTeam); // This already uses getRosterObjects, it's safe.
-        aiSetDepthChart(awayTeam); // This already uses getRosterObjects, it's safe.
+        
+        resetGameStats(homeTeam, awayTeam); 
+        aiSetDepthChart(homeTeam); 
+        aiSetDepthChart(awayTeam); 
 
-        const gameLog = [];
+        const gameLog = []; 
         const allVisualizationFrames = fastSim ? null : [];
         let homeScore = 0, awayScore = 0;
         const weather = getRandom(['Sunny', 'Windy', 'Rain']);
@@ -4404,9 +4406,8 @@ export function simulateGame(homeTeam, awayTeam, options = {}) {
 
         const breakthroughs = [];
         const totalDrivesPerHalf = getRandomInt(4, 5);
-
         let currentHalf = 1, drivesThisGame = 0;
-        let nextDriveStartBallOn = 20;
+        let nextDriveStartBallOn = 20; 
 
         if (!fastSim) gameLog.push("Coin toss to determine first possession...");
         const coinFlipWinner = Math.random() < 0.5 ? homeTeam : awayTeam;
@@ -4421,14 +4422,18 @@ export function simulateGame(homeTeam, awayTeam, options = {}) {
                 currentHalf = 2;
                 if (!fastSim) gameLog.push(`==== HALFTIME ==== Score: ${awayTeam.name} ${awayScore} - ${homeTeam.name} ${homeScore}`);
                 possessionTeam = receivingTeamSecondHalf;
-
-
+                
                 const allGamePlayers = [...getRosterObjects(homeTeam), ...getRosterObjects(awayTeam)];
-                allGamePlayers.forEach(p => { if (p) p.fatigue = Math.max(0, (p.fatigue || 0) - 40); });
-
+                allGamePlayers.forEach(p => { 
+                    if (p && typeof p.fatigue === "number") {
+                        p.fatigue = Math.max(0, p.fatigue - 40);
+                    } else if (p) {
+                        p.fatigue = 0;
+                    }
+                });
 
                 if (!fastSim) gameLog.push(`-- Second Half Kickoff: ${possessionTeam.name} receives --`);
-                nextDriveStartBallOn = 20;
+                nextDriveStartBallOn = 20; 
             }
 
             if (!possessionTeam) {
@@ -4437,16 +4442,15 @@ export function simulateGame(homeTeam, awayTeam, options = {}) {
             const offense = possessionTeam;
             const defense = (possessionTeam.id === homeTeam.id) ? awayTeam : homeTeam;
 
-            // --- 💡 FIX: Forfeit check must use getRosterObjects ---
             const checkRoster = (team) => {
-                const roster = getRosterObjects(team); // Get full player objects
+                const roster = getRosterObjects(team); 
                 return roster.filter(p => p && p.status?.duration === 0).length < MIN_HEALTHY_PLAYERS;
             };
-            // --- 💡 END FIX ---
 
             if (checkRoster(offense) || checkRoster(defense)) {
                 const forfeitingTeam = checkRoster(offense) ? offense : defense;
                 const winningTeam = forfeitingTeam === offense ? defense : offense;
+                // 💡 FIX: This log is critical, so it should stay, but others can go.
                 gameLog.push(`❗ ${forfeitingTeam.name} cannot field enough healthy players (${MIN_HEALTHY_PLAYERS}) and forfeits.`);
                 if (winningTeam === homeTeam) { homeScore = 21; awayScore = 0; } else { homeScore = 0; awayScore = 21; }
                 gameForfeited = true;
@@ -4456,23 +4460,22 @@ export function simulateGame(homeTeam, awayTeam, options = {}) {
             let ballOn = nextDriveStartBallOn, down = 1, yardsToGo = 10, driveActive = true;
             let ballHash = 'M';
             const yardLineText = ballOn <= 50 ? `own ${ballOn}` : `opponent ${100 - ballOn}`;
-            gameLog.push(`-- Drive ${drivesThisGame + 1} (H${currentHalf}): ${offense.name} ball on ${yardLineText} --`);
+            // 💡 FIX: Only log if not fastSim
+            if (!fastSim) gameLog.push(`-- Drive ${drivesThisGame + 1} (H${currentHalf}): ${offense.name} ball on ${yardLineText} --`);
 
             while (driveActive && down <= 4) {
-                // --- 💡 FIX: Second forfeit check must also use getRosterObjects ---
                 const healthyOffense = getRosterObjects(offense).filter(p => p && p.status?.duration === 0).length;
                 const healthyDefense = getRosterObjects(defense).filter(p => p && p.status?.duration === 0).length;
-
+                
                 if (healthyOffense < MIN_HEALTHY_PLAYERS || healthyDefense < MIN_HEALTHY_PLAYERS) {
-                    // --- 💡 END FIX ---
                     gameLog.push("Forfeit condition met mid-drive.");
                     gameForfeited = true;
                     driveActive = false;
-                    break;
+                    break; 
                 }
-
+                
                 const shouldPunt = determinePuntDecision(down, yardsToGo, ballOn);
-                let result;
+                let result; 
 
                 if (shouldPunt) {
                     if (!fastSim) {
@@ -4480,10 +4483,9 @@ export function simulateGame(homeTeam, awayTeam, options = {}) {
                     }
                     offense.formations.offense = 'Punt';
                     defense.formations.defense = 'Punt_Return';
-
-                    // --- 💡 FIX: resolvePunt needs getRosterObjects, let's fix it ---
-                    // (The fix is in resolvePunt, this call is fine)
-                    result = resolvePunt(offense, defense, { gameLog, ballOn });
+                    
+                    // 💡 FIX: Pass gameLog (it's safe) but fastSim will skip internal logging
+                    result = resolvePunt(offense, defense, { gameLog, ballOn }); 
 
                     if (!fastSim && allVisualizationFrames) {
                         allVisualizationFrames.push({
@@ -4495,7 +4497,6 @@ export function simulateGame(homeTeam, awayTeam, options = {}) {
                     nextDriveStartBallOn = result.newBallOn;
 
                 } else {
-
                     // --- 3B. IT'S A NORMAL PLAY ---
 
                     // Log the current down and distance
@@ -4510,26 +4511,19 @@ export function simulateGame(homeTeam, awayTeam, options = {}) {
                     }
 
                     // --- 4. PRE-SNAP & PLAY CALLING ---
-
-                    // Reset to default formation (in case the last play was a punt)
                     offense.formations.offense = offense.coach.preferredOffense || 'Balanced';
 
                     const scoreDiff = offense.id === homeTeam.id ? homeScore - awayScore : awayScore - homeScore;
                     const drivesCompletedInHalf = drivesThisGame % totalDrivesPerHalf;
                     const drivesRemainingInHalf = totalDrivesPerHalf - drivesCompletedInHalf;
                     const drivesRemainingInGame = (currentHalf === 1 ? totalDrivesPerHalf : 0) + drivesRemainingInHalf;
-
-                    // --- 💡 FIX: This function MUST be fixed to use getRosterObjects ---
-                    // (The fix is in determinePlayCall, this call is fine)
+                    
+                    // 💡 FIX: Pass null for gameLog if fastSim
                     const offensivePlayKey_initial = determinePlayCall(offense, defense, down, yardsToGo, ballOn, scoreDiff, fastSim ? null : gameLog, drivesRemainingInGame);
-
-                    const offenseFormationName = offense.formations.offense;
+                    const offenseFormationName = offense.formations.offense; 
                     const defensiveFormationName = determineDefensiveFormation(defense, offenseFormationName, down, yardsToGo);
                     defense.formations.defense = defensiveFormationName;
                     const defensivePlayKey = determineDefensivePlayCall(defense, offense, down, yardsToGo, ballOn, scoreDiff, fastSim ? null : gameLog, drivesRemainingInGame);
-
-                    // --- 💡 FIX: This function MUST be fixed to use getRosterObjects ---
-                    // (The fix is in aiCheckAudible, this call is fine)
                     const audibleResult = aiCheckAudible(offense, offensivePlayKey_initial, defense, defensivePlayKey, fastSim ? null : gameLog);
                     const offensivePlayKey = audibleResult.playKey;
 
@@ -4540,7 +4534,8 @@ export function simulateGame(homeTeam, awayTeam, options = {}) {
                         gameLog.push(`🛡️ **Defense:** ${defPlayName}`);
                     }
 
-                    result = resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, { gameLog: gameLog, weather, ballOn, ballHash, down, yardsToGo });
+                    // 💡 FIX: Pass null for gameLog if fastSim
+                    result = resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, { gameLog: fastSim ? null : gameLog, weather, ballOn, ballHash, down, yardsToGo });
 
                     if (!fastSim && result.visualizationFrames) {
                         allVisualizationFrames.push(...result.visualizationFrames);
@@ -4554,44 +4549,33 @@ export function simulateGame(homeTeam, awayTeam, options = {}) {
                     ballOn += result.yards;
                     ballOn = Math.max(0, Math.min(100, ballOn));
                 }
-
-                // --- 7. HANDLE PLAY RESULT (for both punt and normal plays) ---
-
-                // This logic runs *after* the if/else, but *inside* the while loop
-
+                
                 if (result.turnover) {
                     driveActive = false;
-                    // If it was a punt, newBallOn was already set.
-                    // If it was a regular turnover, set it now.
                     if (!shouldPunt) {
-                        nextDriveStartBallOn = 100 - ballOn; // Flipped field
+                        nextDriveStartBallOn = 100 - ballOn; 
                     }
                 } else if (result.safety) {
                     if (!fastSim) gameLog.push(`SAFETY! 2 points for ${defense.name}!`);
                     if (defense.id === homeTeam.id) homeScore += 2; else awayScore += 2;
                     driveActive = false;
-                    nextDriveStartBallOn = 20; // Safety punt
+                    nextDriveStartBallOn = 20; 
                 } else if (result.touchdown) {
                     const wasOffensiveTD = !result.turnover;
 
                     if (wasOffensiveTD) {
-                        // --- OFFENSIVE TD: Run the conversion attempt ---
-                        ballOn = 100; // Mark the touchdown
-
-                        const goesForTwo = Math.random() > 0.85; // 15% chance
+                        ballOn = 100; 
+                        const goesForTwo = Math.random() > 0.85; 
                         const points = goesForTwo ? 2 : 1;
-                        const conversionBallOn = goesForTwo ? 95 : 98; // 5-yd or 2-yd line
+                        const conversionBallOn = goesForTwo ? 95 : 98; 
                         const conversionYardsToGo = 100 - conversionBallOn;
-
                         if (!fastSim) gameLog.push(`--- ${points}-Point Conversion Attempt (from the ${conversionYardsToGo}-yd line) ---`);
-
-                        // Force default formations for conversion
+                        
                         offense.formations.offense = offense.coach.preferredOffense || 'Balanced';
-                        const conversionOffensePlayKey = determinePlayCall(offense, defense, 1, conversionYardsToGo, conversionBallOn, scoreDiff, gameLog, drivesRemainingInGame);
-
+                        const conversionOffensePlayKey = determinePlayCall(offense, defense, 1, conversionYardsToGo, conversionBallOn, scoreDiff, fastSim ? null : gameLog, drivesRemainingInGame);
                         const conversionDefenseFormation = determineDefensiveFormation(defense, offense.formations.offense, 1, conversionYardsToGo);
                         defense.formations.defense = conversionDefenseFormation;
-                        const conversionDefensePlayKey = determineDefensivePlayCall(defense, offense, 1, conversionYardsToGo, conversionBallOn, scoreDiff, gameLog, drivesRemainingInGame);
+                        const conversionDefensePlayKey = determineDefensivePlayCall(defense, offense, 1, conversionYardsToGo, conversionBallOn, scoreDiff, fastSim ? null : gameLog, drivesRemainingInGame);
 
                         if (!fastSim) {
                             const offPlayName = offensivePlaybook[conversionOffensePlayKey]?.name || conversionOffensePlayKey.split('_').slice(1).join(' ');
@@ -4600,6 +4584,7 @@ export function simulateGame(homeTeam, awayTeam, options = {}) {
                             gameLog.push(`🛡️ **Defense:** ${defPlayName}`);
                         }
 
+                        // 💡 FIX: Pass null for gameLog if fastSim
                         const conversionResult = resolvePlay(offense, defense, conversionOffensePlayKey, conversionDefensePlayKey, {
                             gameLog: fastSim ? null : gameLog,
                             weather, ballOn: conversionBallOn, ballHash: 'M', down: 1, yardsToGo: conversionYardsToGo
@@ -4608,41 +4593,34 @@ export function simulateGame(homeTeam, awayTeam, options = {}) {
                         if (!fastSim && conversionResult.visualizationFrames) {
                             allVisualizationFrames.push(...conversionResult.visualizationFrames);
                         }
-
-                        // Tally Score
-                        if (offense.id === homeTeam.id) homeScore += 6; else awayScore += 6;
-
+                        
                         if (conversionResult.touchdown && !conversionResult.turnover) {
-                            // OFFENSE scored conversion
                             if (!fastSim) gameLog.push(`✅ ${points}-point conversion GOOD!`);
                             if (offense.id === homeTeam.id) homeScore += (6 + points); else awayScore += (6 + points);
                         } else if (conversionResult.touchdown && conversionResult.turnover) {
-                            // DEFENSE scored on a turnover
                             if (!fastSim) gameLog.push(`❌ ${points}-point conversion FAILED... AND RETURNED!`);
-                            if (offense.id === homeTeam.id) homeScore += 6; else awayScore += 6; // Base TD
-                            if (defense.id === homeTeam.id) homeScore += 2; else awayScore += 2; // Defensive 2pt
+                            if (offense.id === homeTeam.id) homeScore += 6; else awayScore += 6; 
+                            if (defense.id === homeTeam.id) homeScore += 2; else awayScore += 2; 
                         } else {
-                            // No TD on conversion
                             if (!fastSim) gameLog.push(`❌ ${points}-point conversion FAILED!`);
-                            if (offense.id === homeTeam.id) homeScore += 6; else awayScore += 6; // Base TD
+                            if (offense.id === homeTeam.id) homeScore += 6; else awayScore += 6; 
                         }
+
                     } else {
                         // --- DEFENSIVE TD ---
                         if (!fastSim) gameLog.push(`DEFENSIVE TOUCHDOWN! 6 points for ${defense.name}!`);
                         if (defense.id === homeTeam.id) homeScore += 6; else awayScore += 6;
                     }
-
-                    // This runs for BOTH offensive and defensive TDs
+                    
                     driveActive = false;
-                    nextDriveStartBallOn = 20; // Next drive is a kickoff
+                    nextDriveStartBallOn = 20; 
 
                 } else if (result.incomplete) {
                     down++;
 
-                } else if (!shouldPunt) { // Completed play (and not a punt)
-
-                    const goalLineY = FIELD_LENGTH - 10; // 110
-                    const absoluteLoS_Y = (ballOn - result.yards) + 10; // BallOn *before* the play
+                } else if (!shouldPunt) { // Completed play
+                    const goalLineY = FIELD_LENGTH - 10; 
+                    const absoluteLoS_Y = (ballOn - result.yards) + 10; 
                     const yardsToGoalLine = goalLineY - absoluteLoS_Y;
                     const wasGoalToGo = (yardsToGo >= yardsToGoalLine);
 
@@ -4653,11 +4631,11 @@ export function simulateGame(homeTeam, awayTeam, options = {}) {
                         const newYardsToGoalLine = 100 - ballOn;
 
                         if (newYardsToGoalLine <= 10) {
-                            yardsToGo = newYardsToGoalLine; // 1st & Goal
+                            yardsToGo = newYardsToGoalLine; 
                         } else {
-                            yardsToGo = 10; // 1st & 10
+                            yardsToGo = 10; 
                         }
-                        if (yardsToGo <= 0) yardsToGo = 1; // Failsafe on goal line
+                        if (yardsToGo <= 0) yardsToGo = 1; 
 
                         if (!fastSim) {
                             const newYardLineText = ballOn <= 50 ? `own ${ballOn}` : `opponent ${100 - ballOn}`;
@@ -4667,21 +4645,20 @@ export function simulateGame(homeTeam, awayTeam, options = {}) {
                     } else { // Not a first down
                         down++;
                         if (wasGoalToGo) {
-                            yardsToGo = 100 - ballOn; // Still Goal-to-go
+                            yardsToGo = 100 - ballOn; 
                         }
                     }
                 }
 
-                // --- 8. CHECK FOR TURNOVER ON DOWNS ---
                 if (down > 4 && driveActive) {
                     if (!fastSim) {
                         const finalYardLineText = ballOn <= 50 ? `own ${ballOn}` : `opponent ${100 - ballOn}`;
                         gameLog.push(`✋ Turnover on downs! ${defense.name} takes over at the ${finalYardLineText}.`);
                     }
                     driveActive = false;
-                    nextDriveStartBallOn = 100 - ballOn; // Flipped field
+                    nextDriveStartBallOn = 100 - ballOn; 
                 }
-            } // --- End Play Loop (while driveActive && down <= 4) ---
+            } // --- End Play Loop ---
 
             drivesThisGame++;
             if (drivesThisGame < totalDrivesPerHalf * 2 && !gameForfeited) {
@@ -4689,8 +4666,7 @@ export function simulateGame(homeTeam, awayTeam, options = {}) {
             }
         } // --- End Game Loop ---
 
-
-        // --- 💡 NEW: OVERTIME TIEBREAKER LOGIC 💡 ---
+        // --- OVERTIME LOGIC ---
         if (homeScore === awayScore && !gameForfeited) {
             if (!fastSim) {
                 gameLog.push(`==== GAME TIED: ${homeScore}-${awayScore} ====`);
@@ -4699,188 +4675,176 @@ export function simulateGame(homeTeam, awayTeam, options = {}) {
 
             let overtimeRound = 0;
             let isStillTied = true;
-
-            // Possession order: "Receiving team of the second half" goes first.
             let otPossessionOrder = [receivingTeamSecondHalf, (receivingTeamSecondHalf.id === homeTeam.id) ? awayTeam : homeTeam];
 
-            while (isStillTied && overtimeRound < 10) { // Safety break after 10 rounds
+            while (isStillTied && overtimeRound < 10) { 
                 overtimeRound++;
-
-                // Round 1: 5yd line (ballOn = 95)
-                // Round 2: 10yd line (ballOn = 90), etc.
                 const yardsFromGoal = 5 * overtimeRound;
                 const startBallOn = 100 - yardsFromGoal;
-
                 if (!fastSim) gameLog.push(`--- OT Round ${overtimeRound}: Ball at the ${yardsFromGoal}-yard line ---`);
 
                 for (const offense of otPossessionOrder) {
                     const defense = (offense.id === homeTeam.id) ? awayTeam : homeTeam;
-
-                    // If a defensive score on the first possession won the game, break
                     if (homeScore !== awayScore) {
                         isStillTied = false;
                         break;
                     }
 
-                    // --- Start OT Drive ---
                     let ballOn = startBallOn;
                     let down = 1;
-                    let yardsToGo = 100 - ballOn; // Always Goal-to-go
+                    let yardsToGo = 100 - ballOn; 
                     let driveActive = true;
                     let ballHash = 'M';
-                    gameLog.push(`OT Possession: ${offense.name}`);
+                    // 💡 FIX: Only log if not fastSim
+                    if (!fastSim) gameLog.push(`OT Possession: ${offense.name}`);
 
                     while (driveActive && down <= 4) {
-                        const yardLineText = `opponent ${100 - ballOn}`;
-                        gameLog.push(`--- ${down} & ${yardsToGo <= 0 ? 'Goal' : yardsToGo} from the ${yardLineText} ---`);
+                        // 💡 FIX: Only log if not fastSim
+                        if (!fastSim) {
+                            const yardLineText = `opponent ${100 - ballOn}`;
+                            gameLog.push(`--- ${down} & ${yardsToGo <= 0 ? 'Goal' : yardsToGo} from the ${yardLineText} ---`);
+                        }
 
                         const scoreDiff = offense.id === homeTeam.id ? homeScore - awayScore : awayScore - homeScore;
-                        const drivesRemainingInGame = 0; // No time left
-
-                        // (Run the same pre-snap AI logic)
-                        const offensivePlayKey_initial = determinePlayCall(offense, defense, down, yardsToGo, ballOn, scoreDiff, gameLog, drivesRemainingInGame);
+                        const drivesRemainingInGame = 0; 
+                        
+                        // 💡 FIX: Pass null for gameLog if fastSim
+                        const offensivePlayKey_initial = determinePlayCall(offense, defense, down, yardsToGo, ballOn, scoreDiff, fastSim ? null : gameLog, drivesRemainingInGame);
                         const offenseFormationName = offense.formations.offense;
                         const defensiveFormationName = determineDefensiveFormation(defense, offenseFormationName, down, yardsToGo);
                         defense.formations.defense = defensiveFormationName;
-                        const defensivePlayKey = determineDefensivePlayCall(defense, offense, down, yardsToGo, ballOn, scoreDiff, gameLog, drivesRemainingInGame);
-                        const audibleResult = aiCheckAudible(offense, offensivePlayKey_initial, defense, defensivePlayKey, gameLog);
+                        const defensivePlayKey = determineDefensivePlayCall(defense, offense, down, yardsToGo, ballOn, scoreDiff, fastSim ? null : gameLog, drivesRemainingInGame);
+                        const audibleResult = aiCheckAudible(offense, offensivePlayKey_initial, defense, defensivePlayKey, fastSim ? null : gameLog);
                         const offensivePlayKey = audibleResult.playKey;
-                        const offPlayName = offensivePlayKey.split('_').slice(1).join(' ');
-                        const defPlayName = defensivePlaybook[defensivePlayKey]?.name || defensivePlayKey;
-                        gameLog.push(`🏈 **Offense:** ${offPlayName} ${audibleResult.didAudible ? '(Audible)' : ''}`);
-                        gameLog.push(`🛡️ **Defense:** ${defPlayName}`);
+                        
+                        if (!fastSim) {
+                            const offPlayName = offensivePlayKey.split('_').slice(1).join(' ');
+                            const defPlayName = defensivePlaybook[defensivePlayKey]?.name || defensivePlayKey;
+                            gameLog.push(`🏈 **Offense:** ${offPlayName} ${audibleResult.didAudible ? '(Audible)' : ''}`);
+                            gameLog.push(`🛡️ **Defense:** ${defPlayName}`);
+                        }
 
-                        // --- 5. "Snap" ---
-                        const result = resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, { gameLog, weather, ballOn, ballHash, down, yardsToGo });
-                        if (result.visualizationFrames) allVisualizationFrames.push(...result.visualizationFrames);
-                        if (!result.incomplete && result.visualizationFrames?.length > 0) {
+                        // 💡 FIX: Pass null for gameLog if fastSim
+                        const result = resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, { gameLog: fastSim ? null : gameLog, weather, ballOn, ballHash, down, yardsToGo });
+                        
+                        if (!fastSim && result.visualizationFrames) allVisualizationFrames.push(...result.visualizationFrames);
+                        if (!fastSim && !result.incomplete && result.visualizationFrames?.length > 0) {
                             const finalBallX = result.visualizationFrames[result.visualizationFrames.length - 1].ball.x;
                             if (finalBallX < HASH_LEFT_X) ballHash = 'L';
                             else if (finalBallX > HASH_RIGHT_X) ballHash = 'R';
                             else ballHash = 'M';
                         }
-
                         ballOn += result.yards;
                         ballOn = Math.max(0, Math.min(100, ballOn));
 
-                        // --- Check OT Drive End Conditions ---
                         if (result.turnover) {
                             driveActive = false;
-                            gameLog.push(`Turnover! Drive ends.`);
-                            if (result.touchdown) { // Defensive TD
-                                gameLog.push(`DEFENSIVE TOUCHDOWN! Game Over!`);
+                            if (!fastSim) gameLog.push(`Turnover! Drive ends.`);
+                            if (result.touchdown) { 
+                                if (!fastSim) gameLog.push(`DEFENSIVE TOUCHDOWN! Game Over!`);
                                 if (defense.id === homeTeam.id) homeScore += 6; else awayScore += 6;
-                                isStillTied = false; // Game ends
+                                isStillTied = false; 
                             }
                         } else if (result.safety) {
-                            gameLog.push(`SAFETY! Game Over!`);
+                            if (!fastSim) gameLog.push(`SAFETY! Game Over!`);
                             if (defense.id === homeTeam.id) homeScore += 2; else awayScore += 2;
                             driveActive = false;
-                            isStillTied = false; // Game ends
+                            isStillTied = false; 
                         } else if (result.touchdown) {
-                            // OFFENSIVE TD. Run conversion logic.
                             ballOn = 100;
-                            const wasOffensiveTD = !result.turnover; // Will be true
+                            const wasOffensiveTD = !result.turnover; 
 
                             if (wasOffensiveTD) {
                                 const goesForTwo = Math.random() > 0.85;
                                 const points = goesForTwo ? 2 : 1;
                                 const conversionBallOn = goesForTwo ? 95 : 98;
                                 const conversionYardsToGo = 100 - conversionBallOn;
-                                gameLog.push(`--- ${points}-Point Conversion Attempt ---`);
-                                // ... (call conversion plays) ...
-                                const conversionOffensePlayKey = determinePlayCall(offense, defense, 1, conversionYardsToGo, conversionBallOn, scoreDiff, gameLog, drivesRemainingInGame);
+                                if (!fastSim) gameLog.push(`--- ${points}-Point Conversion Attempt ---`);
+                                
+                                const conversionOffensePlayKey = determinePlayCall(offense, defense, 1, conversionYardsToGo, conversionBallOn, scoreDiff, fastSim ? null : gameLog, drivesRemainingInGame);
                                 const conversionDefenseFormation = determineDefensiveFormation(defense, offense.formations.offense, 1, conversionYardsToGo);
                                 defense.formations.defense = conversionDefenseFormation;
-                                const conversionDefensePlayKey = determineDefensivePlayCall(defense, offense, 1, conversionYardsToGo, conversionBallOn, scoreDiff, gameLog, drivesRemainingInGame);
-                                const convOffPlayName = conversionOffensePlayKey.split('_').slice(1).join(' ');
-                                const convDefPlayName = defensivePlaybook[conversionDefensePlayKey]?.name || defensivePlayKey;
-                                gameLog.push(`🏈 **Offense:** ${convOffPlayName}`);
-                                gameLog.push(`🛡️ **Defense:** ${convDefPlayName}`);
-                                const conversionResult = resolvePlay(offense, defense, conversionOffensePlayKey, conversionDefensePlayKey, { gameLog, weather, ballOn: conversionBallOn, ballHash: 'M', down: 1, yardsToGo: conversionYardsToGo });
-                                if (conversionResult.visualizationFrames) allVisualizationFrames.push(...conversionResult.visualizationFrames);
+                                const conversionDefensePlayKey = determineDefensivePlayCall(defense, offense, 1, conversionYardsToGo, conversionBallOn, scoreDiff, fastSim ? null : gameLog, drivesRemainingInGame);
+                                
+                                if (!fastSim) {
+                                    const convOffPlayName = conversionOffensePlayKey.split('_').slice(1).join(' ');
+                                    const convDefPlayName = defensivePlaybook[conversionDefensePlayKey]?.name || defensivePlayKey;
+                                    gameLog.push(`🏈 **Offense:** ${convOffPlayName}`);
+                                    gameLog.push(`🛡️ **Defense:** ${convDefPlayName}`);
+                                }
+                                
+                                // 💡 FIX: Pass null for gameLog if fastSim
+                                const conversionResult = resolvePlay(offense, defense, conversionOffensePlayKey, conversionDefensePlayKey, { gameLog: fastSim ? null : gameLog, weather, ballOn: conversionBallOn, ballHash: 'M', down: 1, yardsToGo: conversionYardsToGo });
+                                
+                                if (!fastSim && conversionResult.visualizationFrames) allVisualizationFrames.push(...conversionResult.visualizationFrames);
 
-                                // Tally Score
-                                if (offense.id === homeTeam.id) homeScore += 6; else awayScore += 6;
                                 if (conversionResult.touchdown) {
                                     if (!conversionResult.turnover) {
-                                        gameLog.push(`✅ ${points}-point conversion GOOD!`);
-                                        if (offense.id === homeTeam.id) homeScore += points; else awayScore += points;
+                                        if (!fastSim) gameLog.push(`✅ ${points}-point conversion GOOD!`);
+                                        if (offense.id === homeTeam.id) homeScore += (6 + points); else awayScore += (6 + points);
                                     } else {
-                                        gameLog.push(`❌ Conversion FAILED... AND RETURNED! Game Over!`);
+                                        if (!fastSim) gameLog.push(`❌ Conversion FAILED... AND RETURNED! Game Over!`);
+                                        if (offense.id === homeTeam.id) homeScore += 6; else awayScore += 6; 
                                         if (defense.id === homeTeam.id) homeScore += 2; else awayScore += 2;
-                                        isStillTied = false; // Game ends
+                                        isStillTied = false; 
                                     }
                                 } else {
-                                    gameLog.push(`❌ ${points}-point conversion FAILED!`);
+                                    if (!fastSim) gameLog.push(`❌ ${points}-point conversion FAILED!`);
+                                    if (offense.id === homeTeam.id) homeScore += 6; else awayScore += 6; 
                                 }
                             }
-                            driveActive = false; // Drive over
+                            driveActive = false; 
                         } else if (result.incomplete) {
                             down++;
                         } else { // Completed play
                             yardsToGo -= result.yards;
-
-                            if (yardsToGo <= 0) { // First down
+                            if (yardsToGo <= 0) { 
                                 down = 1;
-
-                                // 💡 GOAL-LINE FIX:
-                                // Check if the new ball position is inside the 10-yard line
                                 if (ballOn >= 90) {
-                                    yardsToGo = 100 - ballOn; // Set to "Goal-to-go"
+                                    yardsToGo = 100 - ballOn; 
                                 } else {
-                                    yardsToGo = 10; // Normal first down
+                                    yardsToGo = 10; 
                                 }
-
-                                // 💡 FAILSAME: If yardsToGo is 0 (or less), it means we are on the goal line.
-                                // Set it to 1, because the offense must gain *at least* 1 yard (or 0.1) to score.
-                                // This prevents the `yardsToGo <= 0` check from immediately firing again.
                                 if (yardsToGo <= 0) {
                                     yardsToGo = 1;
                                 }
-
-                                const newYardLineText = ballOn <= 50 ? `own ${ballOn}` : `opponent ${100 - ballOn}`;
-                                gameLog.push(`➡️ First down ${offense.name}! ${ballOn >= 90 ? `1st & Goal at the ${100 - ballOn}` : `1st & 10 at the ${newYardLineText}`}.`);
-
+                                if (!fastSim) {
+                                    const newYardLineText = ballOn <= 50 ? `own ${ballOn}` : `opponent ${100 - ballOn}`;
+                                    gameLog.push(`➡️ First down ${offense.name}! ${ballOn >= 90 ? `1st & Goal at the ${100 - ballOn}` : `1st & 10 at the ${newYardLineText}`}.`);
+                                }
                             } else {
                                 down++;
                             }
                         }
-
                         if (down > 4 && driveActive) {
-                            gameLog.push(`✋ Turnover on downs! Drive ends.`);
+                            if (!fastSim) gameLog.push(`✋ Turnover on downs! Drive ends.`);
                             driveActive = false;
                         }
                     } // --- End OT Play Loop ---
-                } // --- End OT `for` loop (both teams have gone) ---
+                } // --- End OT `for` loop ---
 
-                // Check if still tied *after* the round
-                if (isStillTied) { // Only check if a defensive TD didn't already end it
+                if (isStillTied) { 
                     isStillTied = (homeScore === awayScore);
                     if (isStillTied) {
-                        gameLog.push(`Round ${overtimeRound} ends. Still tied ${homeScore}-${awayScore}.`);
-                        // Flip possession order for next round
+                        if (!fastSim) gameLog.push(`Round ${overtimeRound} ends. Still tied ${homeScore}-${awayScore}.`);
                         otPossessionOrder.reverse();
                     }
                 }
             } // --- End OT `while(isStillTied)` loop ---
 
             if (isStillTied) {
-                gameLog.push(`After ${overtimeRound} rounds, the game is still tied. Declaring a TIE.`);
+                if (!fastSim) gameLog.push(`After ${overtimeRound} rounds, the game is still tied. Declaring a TIE.`);
             } else {
-                gameLog.push(`Overtime complete. Final score: ${awayTeam.name} ${awayScore} - ${homeTeam.name} ${homeScore}`);
+                if (!fastSim) gameLog.push(`Overtime complete. Final score: ${awayTeam.name} ${awayScore} - ${homeTeam.name} ${homeScore}`);
             }
         }
-        // --- 💡 END NEW OVERTIME BLOCK ---
+        // --- END OVERTIME BLOCK ---
 
-
-        // --- Post-Game ---
         gameLog.push(`==== FINAL SCORE ==== ${awayTeam.name} ${awayScore} - ${homeTeam.name} ${homeScore}`);
 
         if (!gameForfeited) {
             if (homeScore > awayScore) { homeTeam.wins = (homeTeam.wins || 0) + 1; awayTeam.losses = (awayTeam.losses || 0) + 1; }
             else if (awayScore > homeScore) { awayTeam.wins = (awayTeam.wins || 0) + 1; homeTeam.losses = (homeTeam.losses || 0) + 1; }
-            // 💡 NEW: Handle Ties
             else if (homeScore === awayScore) {
                 homeTeam.ties = (homeTeam.ties || 0) + 1;
                 awayTeam.ties = (awayTeam.ties || 0) + 1;
@@ -4890,12 +4854,10 @@ export function simulateGame(homeTeam, awayTeam, options = {}) {
             else if (awayScore > homeScore) { awayTeam.wins = (awayTeam.wins || 0) + 1; homeTeam.losses = (homeTeam.losses || 0) + 1; }
         }
 
-        // --- (Post-Game Player Progression & Stat Aggregation) ---
         const allGamePlayersForStats = [...getRosterObjects(homeTeam), ...getRosterObjects(awayTeam)];
         allGamePlayersForStats.forEach(p => {
             if (!p || !p.gameStats || !p.attributes) return;
 
-            // 1. Check for Breakthroughs
             const perfThreshold = p.gameStats.touchdowns >= 1 || p.gameStats.passYards > 100 || p.gameStats.recYards > 50 || p.gameStats.rushYards > 50 || p.gameStats.tackles > 4 || p.gameStats.sacks >= 1 || p.gameStats.interceptions >= 1;
 
             if (p.age < 14 && perfThreshold && Math.random() < 0.15) {
@@ -4904,14 +4866,13 @@ export function simulateGame(homeTeam, awayTeam, options = {}) {
                 for (const cat in p.attributes) {
                     if (p.attributes[cat]?.[attr] !== undefined && p.attributes[cat][attr] < 99) {
                         p.attributes[cat][attr]++;
-                        p.breakthroughAttr = attr; // Mark for UI
+                        p.breakthroughAttr = attr; 
                         breakthroughs.push({ player: p, attr, teamName: p.teamId === homeTeam.id ? homeTeam.name : awayTeam.name });
                         break;
                     }
                 }
             }
 
-            // 2. Aggregate Stats
             if (!p.seasonStats) p.seasonStats = {};
             if (!p.careerStats) p.careerStats = { seasonsPlayed: p.careerStats?.seasonsPlayed || 0 };
 
@@ -4923,22 +4884,17 @@ export function simulateGame(homeTeam, awayTeam, options = {}) {
             }
         });
 
-        const finalHomeTeam = game.teams.find(t => t.id === homeTeam.id);
-        const finalAwayTeam = game.teams.find(t => t.id === awayTeam.id);
-
         gameResult = {
-            homeTeam: homeTeam,
-            awayTeam: awayTeam,
+            homeTeam: homeTeam, 
+            awayTeam: awayTeam, 
             homeScore, awayScore,
             gameLog, breakthroughs, visualizationFrames: allVisualizationFrames
         };
 
     } finally {
-        // This block ALWAYS executes, resetting the speed
         TICK_DURATION_SECONDS = originalTickDuration;
     }
-
-    // Return the result *after* the 'finally' block has run
+    
     return gameResult;
 }
 

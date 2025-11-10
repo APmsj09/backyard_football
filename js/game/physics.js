@@ -2,61 +2,69 @@
 
 /** Calculates distance between two player states. */
 export function getDistance(p1State, p2State) {
-    if (!p1State || !p2State || p1State.x === undefined || p2State.x === undefined) return Infinity;
+    if (
+        !p1State || !p2State ||
+        typeof p1State.x !== 'number' || typeof p1State.y !== 'number' ||
+        typeof p2State.x !== 'number' || typeof p2State.y !== 'number'
+    ) return Infinity;
+
     const dx = p1State.x - p2State.x;
     const dy = p1State.y - p2State.y;
     return Math.sqrt(dx * dx + dy * dy);
 }
 
-/** Updates a player's position based on speed and target. */
+
+// physics.js - safe coordinate/movement helper
 export function updatePlayerPosition(pState, timeDelta) {
-    if (pState.stunnedTicks > 0) {
-        pState.currentSpeedYPS = 0; // Player is stunned
-        return;
-    }
-    if (pState.isBlocked || pState.isEngaged) {
-        pState.currentSpeedYPS = 0; // Player is in a block, don't move based on target
+    // --- 0. Early exit for invalid state ---
+    if (!pState || typeof pState.x !== 'number' || typeof pState.y !== 'number') return;
+
+    // --- 1. Handle stunned or blocked players ---
+    if (pState.stunnedTicks > 0 || pState.isBlocked || pState.isEngaged) {
+        pState.currentSpeedYPS = 0;
         return;
     }
 
+    // --- 2. Ensure target coordinates are valid ---
+    if (typeof pState.targetX !== 'number' || typeof pState.targetY !== 'number') {
+        pState.currentSpeedYPS = 0;
+        return;
+    }
+
+    // --- 3. Calculate vector to target ---
     const dx = pState.targetX - pState.x;
     const dy = pState.targetY - pState.y;
     const distToTarget = Math.sqrt(dx * dx + dy * dy);
 
-    // --- 1. Increased "arrival" radius ---
-    // Stop if player is very close to the target.
-    // This prevents "vibrating" when trying to reach an exact 0.0 point.
+    // --- 4. Arrival radius (avoid vibration) ---
     const ARRIVAL_RADIUS = 0.2;
     if (distToTarget < ARRIVAL_RADIUS) {
         pState.x = pState.targetX;
         pState.y = pState.targetY;
-        pState.currentSpeedYPS = 0; // Player has arrived
+        pState.currentSpeedYPS = 0;
         return;
     }
 
-    // --- 2. Speed Formula ---
-    // This formula creates a faster, tighter speed range (4.5 to 9.0 YPS)
-    const MIN_SPEED_YPS = 4.5; // Speed for a 1-stat player
-    const MAX_SPEED_YPS = 9.0; // Speed for a 99-stat player
+    // --- 5. Speed calculation based on stat ---
+    const MIN_SPEED_YPS = 4.5;
+    const MAX_SPEED_YPS = 8.0;
+    const stat = typeof pState.speed === 'number' ? pState.speed : 50;
+    const speedYPS = MIN_SPEED_YPS + ((stat - 1) * (MAX_SPEED_YPS - MIN_SPEED_YPS)) / (99 - 1);
 
-    // This maps the 1-99 stat range to the [4.5, 9.0] speed range
-    const speedYPS = MIN_SPEED_YPS + ((pState.speed || 50) - 1) * (MAX_SPEED_YPS - MIN_SPEED_YPS) / (99 - 1);
+    // --- 6. Apply fatigue/momentum ---
+    pState.currentSpeedYPS = speedYPS * (typeof pState.fatigueModifier === 'number' ? pState.fatigueModifier : 1);
 
-    // --- 3. Store Speed for Momentum ---
-    // This is the line we added for the momentum calculation
-    pState.currentSpeedYPS = speedYPS * pState.fatigueModifier;
-
-    // --- 4. Calculate Movement ---
+    // --- 7. Move towards target ---
     const moveDist = pState.currentSpeedYPS * timeDelta;
 
     if (moveDist >= distToTarget) {
-        // We can reach the target this frame
+        // Can reach target this tick
         pState.x = pState.targetX;
         pState.y = pState.targetY;
-        // Keep pState.currentSpeedYPS as is, don't set to 0 (tackle logic needs it)
     } else {
-        // Move towards the target
+        // Move proportionally towards target
         pState.x += (dx / distToTarget) * moveDist;
         pState.y += (dy / distToTarget) * moveDist;
     }
 }
+
