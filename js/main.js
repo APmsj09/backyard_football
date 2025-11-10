@@ -10,6 +10,7 @@ let selectedPlayerId = null;
 let currentLiveSimResult = null; // Store result for potential skip
 let currentSortColumn = 'potential'; // Default sort
 let currentSortDirection = 'desc';   // Default direction
+let activeSaveKey = 'backyardFootballGameState'; 
 
 // --- Constants ---
 const ROSTER_LIMIT = 10;
@@ -334,41 +335,36 @@ async function handleDraftEnd() {
  * A generic function to load a game from a save key and navigate to the correct screen.
  * @param {string} [saveKey] - The localStorage key to load. Defaults to the main save.
  */
-async function handleLoadGame(saveKey) { // <<< --- "async" KEYWORD ADDED HERE
+async function handleLoadGame(saveKey) {
     console.log(`Attempting to load from key: ${saveKey || 'default'}`);
     try {
-        // 1. Call the load function
-        // We pass 'saveKey' (which is undefined for the default "Load Game" button)
-        const loadedState = Game.loadGameState(saveKey);
+        // 💡 FIX: Use a variable to track which key we are loading
+        const keyToLoad = saveKey || 'backyardFootballGameState';
+        const loadedState = Game.loadGameState(keyToLoad);
 
-        // 2. Check if it worked
         if (!loadedState || !loadedState.teams || loadedState.teams.length === 0) {
             UI.showModal("Load Failed", "<p>No saved game data was found.</p>");
             return;
         }
 
-        // 3. Set the global gameState
         gameState = loadedState;
-        selectedPlayerId = null; // Clear any old selection
+        selectedPlayerId = null; 
+        
+        // 💡 FIX: Store the successfully loaded key as the active key
+        activeSaveKey = keyToLoad;
+        console.log(`Successfully loaded from key: ${activeSaveKey}`);
 
-        // 4. Navigate to the correct screen
         if (gameState.currentWeek >= 0) {
-            // Game is in progress, go to dashboard
             console.log("Save file found (in-season). Loading dashboard...");
             UI.renderDashboard(gameState);
             UI.switchTab('my-team', gameState);
             UI.showScreen('dashboard-screen');
         } else {
-            // Game is in the middle of a draft
             console.log("Save file found (mid-draft). Loading draft screen...");
-
-            // This 'await' is why the function must be async
             const { positionOverallWeights } = await import('./game/player.js');
-
             UI.renderSelectedPlayerCard(null, gameState, positionOverallWeights);
             UI.renderDraftScreen(gameState, handlePlayerSelectInDraft, selectedPlayerId, currentSortColumn, currentSortDirection, positionOverallWeights);
             UI.showScreen('draftScreen');
-            // We do NOT call runAIDraftPicks, just load the state
         }
     } catch (error) {
         console.error("Error loading game:", error);
@@ -388,13 +384,16 @@ async function handleLoadTestRoster() { // <<< --- "async" KEYWORD ADDED HERE
  * Handles the "Save as Test Roster" button click.
  */
 function handleSaveTestRoster() {
-    // ... (this function is fine as-is)
     if (!gameState) {
         UI.showModal("Save Failed", "<p>No game data to save.</p>");
         return;
     }
 
     Game.saveGameState('my_test_roster');
+    
+    // 💡 FIX: Set the active key to the one we just saved to
+    activeSaveKey = 'my_test_roster'; 
+    console.log(`Set active save key to: ${activeSaveKey}`);
 
     UI.showModal("Test Roster Saved", "<p>Your current game state has been saved as the 'Test Roster'. You can now load it from the start screen.</p>");
 }
@@ -430,7 +429,10 @@ function handleDepthChartDrop(playerId, newPositionSlot, side) {
     }
     Game.updateDepthChart(playerId, newPositionSlot, side);
     gameState = Game.getGameState();
-    Game.saveGameState();
+    
+    // 💡 FIX: Save to the activeSaveKey, not the default
+    Game.saveGameState(activeSaveKey);
+    
     UI.switchTab('depth-chart', gameState); // Re-render tab with updated state
 }
 
@@ -446,7 +448,10 @@ function handleFormationChange(e) {
     const formationName = e.target.value;
     Game.changeFormation(side, formationName);
     gameState = Game.getGameState();
-    Game.saveGameState();
+    
+    // 💡 FIX: Save to the activeSaveKey, not the default
+    Game.saveGameState(activeSaveKey);
+
     UI.switchTab('depth-chart', gameState); // Re-render tab
 }
 
