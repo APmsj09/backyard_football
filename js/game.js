@@ -4912,7 +4912,7 @@ export function simulateGame(homeTeam, awayTeam, options = {}) {
             visualizationFrames: allVisualizationFrames
         };
 
-        s
+        
     } catch (error) {
         console.error(`simulateGame ERROR: ${error.message}`, error); // Improved logging
         gameResult = {
