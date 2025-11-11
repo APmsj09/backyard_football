@@ -4854,7 +4854,7 @@ export function simulateGame(homeTeam, awayTeam, options = {}) {
                 if (!fastSim) gameLog.push(`After ${overtimeRound} rounds, the game is still tied. Declaring a TIE.`);
             } else {
                 if (!fastSim) gameLog.push(`Overtime complete. Final score: ${awayTeam.name} ${awayScore} - ${homeTeam.name} ${homeScore}`);
-                E
+                
             }
         }
         // --- END OVERTIME BLOCK ---
