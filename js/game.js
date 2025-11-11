@@ -4479,6 +4479,7 @@ export function simulateGame(homeTeam, awayTeam, options = {}) {
                 let result;
                 // ✅ **FIX:** Declare scoreDiff with 'let' at the top of the loop scope
                 let scoreDiff;
+                let drivesRemainingInGame;
 
                 if (shouldPunt) {
                     if (!fastSim) {
@@ -4515,7 +4516,7 @@ export function simulateGame(homeTeam, awayTeam, options = {}) {
                     scoreDiff = offense.id === homeTeam.id ? homeScore - awayScore : awayScore - homeScore;
                     const drivesCompletedInHalf = drivesThisGame % totalDrivesPerHalf;
                     const drivesRemainingInHalf = totalDrivesPerHalf - drivesCompletedInHalf;
-                    const drivesRemainingInGame = (currentHalf === 1 ? totalDrivesPerHalf : 0) + drivesRemainingInHalf;
+                    drivesRemainingInGame = (currentHalf === 1 ? totalDrivesPerHalf : 0) + drivesRemainingInHalf;
 
                     const offensivePlayKey_initial = determinePlayCall(offense, defense, down, yardsToGo, ballOn, scoreDiff, fastSim ? null : gameLog, drivesRemainingInGame);
                     const offenseFormationName = offense.formations.offense;
