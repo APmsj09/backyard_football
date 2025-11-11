@@ -258,7 +258,7 @@ function checkFumble(ballCarrier, tackler, playState, gameLog) {
     const fumbleChance = FUMBLE_CHANCE_BASE * (tacklerModifier / (carrierModifier + 0.5));
 
     if (Math.random() < fumbleChance) {
-        gameLog.push(`❗ FUMBLE! Ball knocked loose by ${tackler.name}!`);
+        if (gameLog) gameLog.push(`❗ FUMBLE! Ball knocked loose by ${tackler.name}!`);
         playState.turnover = true; // It's a turnover *for now*
 
         // --- THIS IS THE CORRECTED LOGIC ---
@@ -2550,9 +2550,9 @@ function checkTackleCollisions(playState, gameLog) {
                 if (ballCarrierState.slot === 'QB1' && (ballCarrierState.action === 'qb_setup' || ballCarrierState.action === 'qb_scramble') && ballCarrierState.y < playState.lineOfScrimmage) {
 
                     playState.sack = true;
-                    gameLog.push(`💥 SACK! ${tacklerPlayer.name} (TklPwr: ${tacklePower.toFixed(0)}) gets to ${ballCarrierState.name}!`);
+                    if (gameLog) gameLog.push(`💥 SACK! ${tacklerPlayer.name} (TklPwr: ${tacklePower.toFixed(0)}) gets to ${ballCarrierState.name}!`);
                 } else {
-                    gameLog.push(`✋ ${ballCarrierState.name} tackled by ${defender.name} (TklPwr: ${tacklePower.toFixed(0)}) for a gain of ${playState.yards.toFixed(1)} yards.`);
+                    if (gameLog) gameLog.push(`✋ ${ballCarrierState.name} tackled by ${defender.name} (TklPwr: ${tacklePower.toFixed(0)}) for a gain of ${playState.yards.toFixed(1)} yards.`);
                 }
 
                 return true; // Play ended
@@ -2562,14 +2562,14 @@ function checkTackleCollisions(playState, gameLog) {
                 ballCarrierState.jukeTicks = 12;
                 ballCarrierState.currentSpeedYPS *= 0.5;
 
-                gameLog.push(`💥 ${ballCarrierState.name} (BrkPwr: ${breakPower.toFixed(0)}) breaks tackle from ${defender.name} (TklPwr: ${tacklePower.toFixed(0)})!`);
+                if (gameLog) gameLog.push(`💥 ${ballCarrierState.name} (BrkPwr: ${breakPower.toFixed(0)}) breaks tackle from ${defender.name} (TklPwr: ${tacklePower.toFixed(0)})!`);
                 defender.stunnedTicks = 40;
 
                 const JUKE_STUN_RADIUS = 3.0;
                 playState.activePlayers.forEach(p => {
                     if (!p.isOffense && p.id !== defender.id && p.stunnedTicks === 0 && getDistance(ballCarrierState, p) < JUKE_STUN_RADIUS) {
                         p.stunnedTicks = 15;
-                        gameLog.push(`[Juke]: ${p.name} was juked out of the play!`);
+                        if (gameLog) gameLog.push(`[Juke]: ${p.name} was juked out of the play!`);
                     }
                 });
             }
@@ -2927,22 +2927,22 @@ function updateQBDecision(playState, offenseStates, defenseStates, gameLog) {
             // --- 1. Throw to Current Read (In Rhythm) ---
             targetPlayerState = currentRead;
             actionTaken = "Throw Current Read";
-            gameLog.push(`[QB Read]: 🎯 ${qbState.name} (IQ: ${qbIQ}) hits his read ${targetPlayerState.name} in rhythm!`);
+            if (gameLog) gameLog.push(`[QB Read]: 🎯 ${qbState.name} (IQ: ${qbIQ}) hits his read ${targetPlayerState.name} in rhythm!`);
 
         } else if (qbIQ > 55 && openPrimaryReads.length > 0 && Math.random() < 0.7) {
             // --- 2. (IQ CHECK) Find another open primary read ---
             targetPlayerState = openPrimaryReads[0];
             actionTaken = "Throw Fallback Read";
-            gameLog.push(`[QB Read]: 🧠 ${qbState.name} (IQ: ${qbIQ})'s progression was covered, finds a late open read in ${targetPlayerState.name}!`);
+             if (gameLog) gameLog.push(`[QB Read]: 🧠 ${qbState.name} (IQ: ${qbIQ})'s progression was covered, finds a late open read in ${targetPlayerState.name}!`);
 
         } else if (checkdownIsOpen) {
             // --- 3. Throw to Checkdown (Safe Play) ---
             targetPlayerState = read_checkdown;
             actionTaken = "Throw Checkdown";
             if (isPressured) {
-                gameLog.push(`[QB Read]: 🔒 ${qbState.name} feels pressure, dumps to checkdown ${targetPlayerState.name}.`);
+                if (gameLog) gameLog.push(`[QB Read]: 🔒 ${qbState.name} feels pressure, dumps to checkdown ${targetPlayerState.name}.`);
             } else {
-                gameLog.push(`[QB Read]: 🔒 ${qbState.name} (IQ: ${qbIQ})'s read was covered. Checking down to ${targetPlayerState.name}.`);
+                if (gameLog) gameLog.push(`[QB Read]: 🔒 ${qbState.name} (IQ: ${qbIQ})'s read was covered. Checking down to ${targetPlayerState.name}.`);
             }
 
         } else if (canScramble) {
@@ -2952,7 +2952,7 @@ function updateQBDecision(playState, offenseStates, defenseStates, gameLog) {
             qbState.hasBall = false;
             qbState.isBallCarrier = true;
             playState.ballState.x = qbState.x; playState.ballState.y = qbState.y;
-            gameLog.push(`🏃 ${qbState.name} ${imminentSackDefender ? 'escapes the sack' : 'finds open lane'} and scrambles forward!`);
+            if (gameLog) gameLog.push(`🏃 ${qbState.name} ${imminentSackDefender ? 'escapes the sack' : 'finds open lane'} and scrambles forward!`);
             actionTaken = "Scramble";
             return;
 
@@ -2972,7 +2972,7 @@ function updateQBDecision(playState, offenseStates, defenseStates, gameLog) {
                 // --- Force a bad throw: low IQ QBs more likely to force it ---
                 targetPlayerState = currentRead;
                 actionTaken = "Forced Throw";
-                gameLog.push(`[QB Read]: ⚠️ ${qbState.name} is pressured and forces a bad throw to ${targetPlayerState.name}!`);
+                if (gameLog) gameLog.push(`[QB Read]: ⚠️ ${qbState.name} is pressured and forces a bad throw to ${targetPlayerState.name}!`);
             } else {
                 // Wait for play to develop
                 return;
@@ -2982,7 +2982,7 @@ function updateQBDecision(playState, offenseStates, defenseStates, gameLog) {
         // --- Perform Throw or Handle Sack/Throw Away ---
         if (targetPlayerState && (actionTaken.includes("Throw"))) {
             // --- Initiate Throw ---
-            gameLog.push(`🏈 ${qbState.name} [${reason}] ${actionTaken.includes("Checkdown") ? 'checks down to' : 'throws to'} ${targetPlayerState.name}...`);
+            if (gameLog) gameLog.push(`🏈 ${qbState.name} [${reason}] ${actionTaken.includes("Checkdown") ? 'checks down to' : 'throws to'} ${targetPlayerState.name}...`);
             playState.ballState.inAir = true;
             playState.ballState.targetPlayerId = targetPlayerState.id;
             playState.ballState.throwerId = qbState.id;
@@ -3071,16 +3071,16 @@ function updateQBDecision(playState, offenseStates, defenseStates, gameLog) {
             playState.ballState.targetX = clampedAimX;
             playState.ballState.targetY = clampedAimY;
 
-            gameLog.push(`[DEBUG] QB aiming at: (${clampedAimX.toFixed(1)}, ${clampedAimY.toFixed(1)})`);
+            if (gameLog) gameLog.push(`[DEBUG] QB aiming at: (${clampedAimX.toFixed(1)}, ${clampedAimY.toFixed(1)})`);
             // --- End Ball Physics ---
 
         } else if (imminentSackDefender && actionTaken !== "Scramble") {
             // QB held it too long waiting for sack
-            gameLog.push(`⏳ ${qbState.name} holds it too long...`);
+            if (gameLog) gameLog.push(`⏳ ${qbState.name} holds it too long...`);
             // Sack will be handled by checkTackleCollisions on next tick
         } else {
             // No target found or decided to throw away
-            gameLog.push(`⤴️ ${qbState.name} ${isPressured ? 'feels the pressure and' : ''} throws it away!`);
+            if (gameLog) gameLog.push(`⤴️ ${qbState.name} ${isPressured ? 'feels the pressure and' : ''} throws it away!`);
             playState.incomplete = true;
             playState.playIsLive = false;
             playState.ballState.inAir = false;
@@ -3105,12 +3105,12 @@ function handleBallArrival(playState, gameLog) {
     if (!playState.ballState.inAir) return; // Ball not in air
 
     if (playState.ballState.z > 2.5) { // Check if ball is too high
-        gameLog.push(`‹‹ Pass is thrown **too high**. Incomplete.`);
+        if (gameLog) gameLog.push(`‹‹ Pass is thrown **too high**. Incomplete.`);
         playState.incomplete = true; playState.playIsLive = false; playState.ballState.inAir = false;
         return; // Play is over
     }
     if (playState.ballState.z < 0.1) { // Check if ball is too low
-        gameLog.push(`‹‹ Pass is thrown **too low** and hits the ground. Incomplete.`);
+        if (gameLog) gameLog.push(`‹‹ Pass is thrown **too low** and hits the ground. Incomplete.`);
         playState.incomplete = true; playState.playIsLive = false; playState.ballState.inAir = false;
         return; // Play is over
     }
@@ -3119,7 +3119,7 @@ function handleBallArrival(playState, gameLog) {
     // 2. Check if Target Receiver is Valid
     const targetPlayerState = playState.activePlayers.find(p => p.id === playState.ballState.targetPlayerId);
     if (!targetPlayerState) {
-        gameLog.push("‹‹ Pass intended target not found. Incomplete.");
+        if (gameLog) gameLog.push("‹‹ Pass intended target not found. Incomplete.");
         playState.incomplete = true; playState.playIsLive = false; playState.ballState.inAir = false;
         return;
     }
@@ -3163,7 +3163,7 @@ function handleBallArrival(playState, gameLog) {
 
         if (defenderPower + getRandomInt(0, 35) > 85) { // Threshold for INT
             eventResolved = true;
-            gameLog.push(`❗ INTERCEPTION! ${closestDefenderState.name} (Catch: ${defCatchSkill}) jumps the route!`);
+            if (gameLog) gameLog.push(`❗ INTERCEPTION! ${closestDefenderState.name} (Catch: ${defCatchSkill}) jumps the route!`);
             playState.turnover = true;
 
             closestDefenderState.isBallCarrier = true;
@@ -3204,7 +3204,7 @@ function handleBallArrival(playState, gameLog) {
 
         if (pbuPower + getRandomInt(0, 30) > 50) { // Threshold for a contested PBU
             eventResolved = true;
-            gameLog.push(`🚫 **SWATTED!** ${closestDefenderState.name} breaks up the pass to ${targetPlayerState.name}!`);
+           if (gameLog)  gameLog.push(`🚫 **SWATTED!** ${closestDefenderState.name} breaks up the pass to ${targetPlayerState.name}!`);
             playState.incomplete = true;
             playState.playIsLive = false;
         }
@@ -3212,7 +3212,7 @@ function handleBallArrival(playState, gameLog) {
 
     else if (!eventResolved && defenderInRange && !receiverInRange) {
         eventResolved = true; // The defender resolved this play
-        gameLog.push(`🚫 **SWATTED!** Pass to ${targetPlayerState.name} is broken up by ${closestDefenderState.name}!`);
+       if (gameLog) gameLog.push(`🚫 **SWATTED!** Pass to ${targetPlayerState.name} is broken up by ${closestDefenderState.name}!`);
         playState.incomplete = true;
         playState.playIsLive = false;
     }
@@ -3259,9 +3259,9 @@ function handleBallArrival(playState, gameLog) {
             targetPlayerState.action = 'run_path';
             playState.yards = targetPlayerState.y - playState.lineOfScrimmage;
             if (interferencePenalty > 10) {
-                gameLog.push(`👍 CATCH! ${targetPlayerState.name} (Catch: ${recCatchSkill}) makes a tough contested reception!`);
+                if (gameLog) gameLog.push(`👍 CATCH! ${targetPlayerState.name} (Catch: ${recCatchSkill}) makes a tough contested reception!`);
             } else {
-                gameLog.push(`👍 CATCH! ${targetPlayerState.name} (Catch: ${recCatchSkill}) makes the reception!`);
+               if (gameLog) gameLog.push(`👍 CATCH! ${targetPlayerState.name} (Catch: ${recCatchSkill}) makes the reception!`);
             }
 
             playState.activePlayers.forEach(p => {
@@ -3279,9 +3279,9 @@ function handleBallArrival(playState, gameLog) {
             }
         } else { // Drop / Incomplete
             if (interferencePenalty > 10 || positionalPenalty > 0) {
-                gameLog.push(`❌ **CONTESTED DROP!** Pass was on target to ${targetPlayerState.name} (Catch: ${recCatchSkill})!`);
+                if (gameLog) gameLog.push(`❌ **CONTESTED DROP!** Pass was on target to ${targetPlayerState.name} (Catch: ${recCatchSkill})!`);
             } else {
-                gameLog.push(`❌ **DROPPED!** Pass was on target to ${targetPlayerState.name} (Catch: ${recCatchSkill})!`);
+                if (gameLog) gameLog.push(`❌ **DROPPED!** Pass was on target to ${targetPlayerState.name} (Catch: ${recCatchSkill})!`);
             }
             playState.incomplete = true; playState.playIsLive = false;
         }
@@ -3298,7 +3298,7 @@ function handleBallArrival(playState, gameLog) {
         else if (playState.ballState.y > targetPlayerState.y + 1.5) accuracyMsg = "**overthrown**";
         else if (playState.ballState.y < targetPlayerState.y - 1.5) accuracyMsg = "**underthrown**";
 
-        gameLog.push(`‹‹ Pass to ${targetPlayerState?.name || 'receiver'} is ${accuracyMsg}. Incomplete.`);
+        if (gameLog) gameLog.push(`‹‹ Pass to ${targetPlayerState?.name || 'receiver'} is ${accuracyMsg}. Incomplete.`);
         playState.incomplete = true; playState.playIsLive = false;
     }
 
@@ -3456,7 +3456,7 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
 
     if (!play) {
         console.error(`Play key "${offensivePlayKey}" not found...`);
-        gameLog.push("CRITICAL ERROR: Play definition missing!");
+        if (gameLog) gameLog.push("CRITICAL ERROR: Play definition missing!");
         return { yards: 0, turnover: true, incomplete: false, touchdown: false, safety: false, log: gameLog, visualizationFrames: [] };
     }
 
@@ -3505,7 +3505,7 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
     }
 
     if (!playState.activePlayers.some(p => p.slot === 'QB1' && p.isOffense)) {
-        gameLog.push("No QB found for play. Turnover.");
+       if (gameLog)  gameLog.push("No QB found for play. Turnover.");
         return { yards: 0, turnover: true, incomplete: false, touchdown: false, safety: false, log: gameLog, visualizationFrames: [] };
     }
 
@@ -3586,25 +3586,25 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
                         playState.yards = ballCarrierState.y - playState.lineOfScrimmage;
                         playState.touchdown = true; playState.playIsLive = false;
                         const scorer = game.players.find(p => p && p.id === ballCarrierState.id);
-                        gameLog.push(`🎉 TOUCHDOWN ${scorer?.name || 'player'}!`);
+                        if (gameLog) gameLog.push(`🎉 TOUCHDOWN ${scorer?.name || 'player'}!`);
                         break;
                     } else if (ballCarrierState.y < 10 && !ballCarrierState.isOffense) { // Defensive TD
                         playState.yards = 0;
                         playState.touchdown = true; playState.playIsLive = false;
                         const scorer = game.players.find(p => p && p.id === ballCarrierState.id);
-                        gameLog.push(`🎉 DEFENSIVE TOUCHDOWN ${scorer?.name || 'player'}!`);
+                        if (gameLog) gameLog.push(`🎉 DEFENSIVE TOUCHDOWN ${scorer?.name || 'player'}!`);
                         break;
                     } else if (ballCarrierState.y < 10 && ballCarrierState.isOffense) { // SAFETY
                         playState.yards = 0;
                         playState.safety = true;
                         playState.playIsLive = false;
-                        gameLog.push(`SAFETY! ${ballCarrierState.name} was tackled in the endzone!`);
+                        if (gameLog) gameLog.push(`SAFETY! ${ballCarrierState.name} was tackled in the endzone!`);
                         break;
                     }
                     if (ballCarrierState.x <= 0.1 || ballCarrierState.x >= FIELD_WIDTH - 0.1) {
                         playState.yards = ballCarrierState.y - playState.lineOfScrimmage;
                         playState.playIsLive = false;
-                        gameLog.push(` sidelines... ${ballCarrierState.name} ran out of bounds after a gain of ${playState.yards.toFixed(1)} yards.`);
+                        if (gameLog) gameLog.push(` sidelines... ${ballCarrierState.name} ran out of bounds after a gain of ${playState.yards.toFixed(1)} yards.`);
                         break;
                     }
                 }
@@ -3636,7 +3636,7 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
                         if (recoverer.isOffense) {
                             // --- OFFENSE RECOVERED ---
                             playState.turnover = false; // It's no longer a turnover
-                            gameLog.push(`👍 ${recoverer.name} recovers the fumble!`);
+                            if (gameLog) gameLog.push(`👍 ${recoverer.name} recovers the fumble!`);
                             playState.activePlayers.forEach(p => {
                                 if (p.isOffense && p.id !== recoverer.id) {
                                     p.action = 'run_block'; // Block for the runner
@@ -3647,7 +3647,7 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
                         } else {
                             // --- DEFENSE RECOVERED ---
                             playState.turnover = true; // It is confirmed as a turnover
-                            gameLog.push(`❗ ${recoverer.name} recovers the fumble for the Defense!`);
+                           if (gameLog) gameLog.push(`❗ ${recoverer.name} recovers the fumble for the Defense!`);
                             playState.activePlayers.forEach(p => {
                                 if (p.isOffense) {
                                     p.action = 'pursuit';
@@ -3677,12 +3677,12 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
                     // E. Check for Ground / Out of Bounds (if not caught)
                     if (playState.playIsLive) {
                         if (ballPos.z <= 0.1 && playState.tick > 6) {
-                            gameLog.push(`‹‹ Pass hits the ground. Incomplete.`);
+                            if (gameLog) gameLog.push(`‹‹ Pass hits the ground. Incomplete.`);
                             playState.incomplete = true; playState.playIsLive = false; ballPos.inAir = false;
                             break;
                         }
                         if (ballPos.x <= 0.1 || ballPos.x >= FIELD_WIDTH - 0.1 || ballPos.y >= FIELD_LENGTH - 0.1 || ballPos.y <= 0.1) {
-                            gameLog.push(`‹‹ Pass sails out of bounds. Incomplete.`);
+                            if (gameLog) gameLog.push(`‹‹ Pass sails out of bounds. Incomplete.`);
                             playState.incomplete = true; playState.playIsLive = false; ballPos.inAir = false;
                             break;
                         }
@@ -3772,12 +3772,12 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
         ballCarrierState = playState.activePlayers.find(p => p.isBallCarrier);
         if (ballCarrierState) {
             playState.yards = ballCarrierState.y - playState.lineOfScrimmage;
-            gameLog.push(`⏱️ Play ends. Gain of ${playState.yards.toFixed(1)} yards.`);
+           if (gameLog) gameLog.push(`⏱️ Play ends. Gain of ${playState.yards.toFixed(1)} yards.`);
         } else if (!playState.sack && !playState.turnover) {
             playState.incomplete = true; playState.yards = 0;
-            gameLog.push("⏱️ Play ends, incomplete.");
+           if (gameLog) gameLog.push("⏱️ Play ends, incomplete.");
         } else {
-            gameLog.push("⏱️ Play ends.");
+           if (gameLog) gameLog.push("⏱️ Play ends.");
         }
     }
 
@@ -3821,7 +3821,7 @@ function resolvePunt(offense, defense, gameState) {
     const qb = roster.find(p => p && p.id === offense.depthChart.offense.QB1);
 
     if (!qb) {
-        gameLog.push("PUNT FAILED! No QB found on roster.");
+        if (gameLog) gameLog.push("PUNT FAILED! No QB found on roster.");
         // Turnover at the line of scrimmage
         return { turnover: true, newBallOn: 100 - ballOn };
     }
@@ -3853,7 +3853,7 @@ function resolvePunt(offense, defense, gameState) {
     if (puntLandingY >= 110) {
         // Touchback (ball lands in or past the endzone)
         newBallOn = 20; // Receiving team gets ball at their 20
-        gameLog.push(`🏈 PUNT by ${qb.name}. It's a TOUCHBACK!`);
+        if (gameLog) gameLog.push(`🏈 PUNT by ${qb.name}. It's a TOUCHBACK!`);
     } else {
         // Ball lands in bounds.
         const newBallOnField = puntLandingY - 10;
@@ -3863,7 +3863,7 @@ function resolvePunt(offense, defense, gameState) {
         if (newBallOn < 1) newBallOn = 1;
 
         const yardLineText = newBallOn <= 50 ? `own ${newBallOn.toFixed(0)}` : `opponent ${(100 - newBallOn).toFixed(0)}`;
-        gameLog.push(`🏈 PUNT by ${qb.name}. Ball goes ${finalPuntDistance.toFixed(1)} yards. ${defense.name} takes over at their ${yardLineText}.`);
+       if (gameLog) gameLog.push(`🏈 PUNT by ${qb.name}. Ball goes ${finalPuntDistance.toFixed(1)} yards. ${defense.name} takes over at their ${yardLineText}.`);
     }
 
     // A punt is always a turnover
@@ -4456,7 +4456,7 @@ export function simulateGame(homeTeam, awayTeam, options = {}) {
                 const forfeitingTeam = checkRoster(offense) ? offense : defense;
                 const winningTeam = forfeitingTeam === offense ? defense : offense;
                 // 💡 FIX: This log is critical, so it should stay, but others can go.
-                gameLog.push(`❗ ${forfeitingTeam.name} cannot field enough healthy players (${MIN_HEALTHY_PLAYERS}) and forfeits.`);
+               if (gameLog) gameLog.push(`❗ ${forfeitingTeam.name} cannot field enough healthy players (${MIN_HEALTHY_PLAYERS}) and forfeits.`);
                 if (winningTeam === homeTeam) { homeScore = 21; awayScore = 0; } else { homeScore = 0; awayScore = 21; }
                 gameForfeited = true;
                 break;
@@ -4473,7 +4473,7 @@ export function simulateGame(homeTeam, awayTeam, options = {}) {
                 const healthyDefense = getRosterObjects(defense).filter(p => p && p.status?.duration === 0).length;
 
                 if (healthyOffense < MIN_HEALTHY_PLAYERS || healthyDefense < MIN_HEALTHY_PLAYERS) {
-                    gameLog.push("Forfeit condition met mid-drive.");
+                   if (gameLog) gameLog.push("Forfeit condition met mid-drive.");
                     gameForfeited = true;
                     driveActive = false;
                     break;
@@ -4535,8 +4535,8 @@ export function simulateGame(homeTeam, awayTeam, options = {}) {
                     if (!fastSim) {
                         const offPlayName = offensivePlaybook[offensivePlayKey]?.name || offensivePlayKey.split('_').slice(1).join(' ');
                         const defPlayName = defensivePlaybook[defensivePlayKey]?.name || defensivePlayKey;
-                        gameLog.push(`🏈 **Offense:** ${offPlayName} ${audibleResult.didAudible ? '(Audible)' : ''}`);
-                        gameLog.push(`🛡️ **Defense:** ${defPlayName}`);
+                        if (gameLog) gameLog.push(`🏈 **Offense:** ${offPlayName} ${audibleResult.didAudible ? '(Audible)' : ''}`);
+                        if (gameLog) gameLog.push(`🛡️ **Defense:** ${defPlayName}`);
                     }
 
                     // 💡 FIX: Pass null for gameLog if fastSim
@@ -4707,7 +4707,7 @@ export function simulateGame(homeTeam, awayTeam, options = {}) {
                         // 💡 FIX: Only log if not fastSim
                         if (!fastSim) {
                             const yardLineText = `opponent ${100 - ballOn}`;
-                            gameLog.push(`--- ${down} & ${yardsToGo <= 0 ? 'Goal' : yardsToGo} from the ${yardLineText} ---`);
+                            if (gameLog) gameLog.push(`--- ${down} & ${yardsToGo <= 0 ? 'Goal' : yardsToGo} from the ${yardLineText} ---`);
                         }
 
                         const scoreDiff = offense.id === homeTeam.id ? homeScore - awayScore : awayScore - homeScore;
@@ -4725,8 +4725,8 @@ export function simulateGame(homeTeam, awayTeam, options = {}) {
                         if (!fastSim) {
                             const offPlayName = offensivePlayKey.split('_').slice(1).join(' ');
                             const defPlayName = defensivePlaybook[defensivePlayKey]?.name || defensivePlayKey;
-                            gameLog.push(`🏈 **Offense:** ${offPlayName} ${audibleResult.didAudible ? '(Audible)' : ''}`);
-                            gameLog.push(`🛡️ **Defense:** ${defPlayName}`);
+                            if (gameLog) gameLog.push(`🏈 **Offense:** ${offPlayName} ${audibleResult.didAudible ? '(Audible)' : ''}`);
+                            if (gameLog) gameLog.push(`🛡️ **Defense:** ${defPlayName}`);
                         }
 
                         // 💡 FIX: Pass null for gameLog if fastSim
@@ -4774,8 +4774,8 @@ export function simulateGame(homeTeam, awayTeam, options = {}) {
                                 if (!fastSim) {
                                     const convOffPlayName = conversionOffensePlayKey.split('_').slice(1).join(' ');
                                     const convDefPlayName = defensivePlaybook[conversionDefensePlayKey]?.name || defensivePlayKey;
-                                    gameLog.push(`🏈 **Offense:** ${convOffPlayName}`);
-                                    gameLog.push(`🛡️ **Defense:** ${convDefPlayName}`);
+                                    if (gameLog) gameLog.push(`🏈 **Offense:** ${convOffPlayName}`);
+                                    if (gameLog) gameLog.push(`🛡️ **Defense:** ${convDefPlayName}`);
                                 }
 
                                 // 💡 FIX: Pass null for gameLog if fastSim
@@ -4815,7 +4815,7 @@ export function simulateGame(homeTeam, awayTeam, options = {}) {
                                 }
                                 if (!fastSim) {
                                     const newYardLineText = ballOn <= 50 ? `own ${ballOn}` : `opponent ${100 - ballOn}`;
-                                    gameLog.push(`➡️ First down ${offense.name}! ${ballOn >= 90 ? `1st & Goal at the ${100 - ballOn}` : `1st & 10 at the ${newYardLineText}`}.`);
+                                    if (gameLog) gameLog.push(`➡️ First down ${offense.name}! ${ballOn >= 90 ? `1st & Goal at the ${100 - ballOn}` : `1st & 10 at the ${newYardLineText}`}.`);
                                 }
                             } else {
                                 down++;
@@ -4845,7 +4845,7 @@ export function simulateGame(homeTeam, awayTeam, options = {}) {
         }
         // --- END OVERTIME BLOCK ---
 
-        gameLog.push(`==== FINAL SCORE ==== ${awayTeam.name} ${awayScore} - ${homeTeam.name} ${homeScore}`);
+        if (gameLog) gameLog.push(`==== FINAL SCORE ==== ${awayTeam.name} ${awayScore} - ${homeTeam.name} ${homeScore}`);
 
         if (!gameForfeited) {
             if (homeScore > awayScore) { homeTeam.wins = (homeTeam.wins || 0) + 1; awayTeam.losses = (awayTeam.losses || 0) + 1; }
