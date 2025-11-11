@@ -2460,7 +2460,7 @@ function checkBlockCollisions(playState) {
             // 4. If we *still* have a valid target, initiate the block
             if (targetDefender) {
                 if (blocker.slot.startsWith('OL')) {
-                    console.log(`%c*** BLOCK ENGAGED (Tick: ${playState.tick}) ***: ${blocker.name} (${blocker.slot}) has engaged ${targetDefender.name} (${targetDefender.slot})`, 'color: #00dd00; font-weight: bold;');
+                    //console.log(`%c*** BLOCK ENGAGED (Tick: ${playState.tick}) ***: ${blocker.name} (${blocker.slot}) has engaged ${targetDefender.name} (${targetDefender.slot})`, 'color: #00dd00; font-weight: bold;');
                 }
                 blocker.engagedWith = targetDefender.id;
                 blocker.isEngaged = true;
