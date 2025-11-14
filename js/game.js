@@ -4955,6 +4955,15 @@ export function simulateGame(homeTeam, awayTeam, options = {}) {
                 }
             }
         });
+        if (!game.gameResults) {
+            game.gameResults = [];
+        }
+        game.gameResults.push({
+            homeTeam: { id: homeTeam.id, name: homeTeam.name },
+            awayTeam: { id: awayTeam.id, name: awayTeam.name },
+            homeScore: homeScore,
+            awayScore: awayScore
+        });
 
         gameResult = {
             homeTeam,
@@ -5131,17 +5140,6 @@ export function simulateWeek(options = {}) {
         }
     }).filter(Boolean);
 
-    if (!game.gameResults) game.gameResults = [];
-
-
-    // We must save a minimal version of the result to prevent circular JSON errors
-    const minimalResults = results.map(r => ({
-        homeTeam: { id: r.homeTeam.id, name: r.homeTeam.name },
-        awayTeam: { id: r.awayTeam.id, name: r.awayTeam.name },
-        homeScore: r.homeScore,
-        awayScore: r.awayScore
-    }));
-    game.gameResults.push(...minimalResults);
     processRelationshipEvents();
 
     game.currentWeek++;
