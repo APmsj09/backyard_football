@@ -2772,7 +2772,7 @@ function resolveOngoingBlocks(playState, gameLog) {
 /**
  * Handles QB decision-making (throw, scramble, checkdown).
  */
-function updateQBDecision(playState, offenseStates, defenseStates, gameLog) {
+function updateQBDecision(playState, offenseStates, defenseStates, gameLog, aiTickMultiplier = 1) { 
     const qbState = offenseStates.find(p => p.slot === 'QB1' && (p.hasBall || p.isBallCarrier));
     if (!qbState || playState.ballState.inAir) return; // Exit if no QB with ball or ball already thrown
     if (qbState.isBallCarrier && qbState.action !== 'qb_scramble') return;
@@ -2861,8 +2861,8 @@ function updateQBDecision(playState, offenseStates, defenseStates, gameLog) {
 
 
     // --- 3. Update Read Progression ---
-    const READ_PROGRESSION_DELAY = Math.max(12, Math.round((100 - qbIQ) / 8)); // ~0.3s - 0.7s
-    const initialReadTicks = 20; // ~0.9s to start first read
+    const READ_PROGRESSION_DELAY = Math.max(12, Math.round((100 - qbIQ) / 8)) * aiTickMultiplier; // 💡 SCALED
+    const initialReadTicks = 20 * aiTickMultiplier; // 💡 SCALED
 
     let decisionMade = false;
 
@@ -2888,12 +2888,12 @@ function updateQBDecision(playState, offenseStates, defenseStates, gameLog) {
 
     // --- 4. Decision Timing Logic (REVISED) ---
     // Decision time scales with IQ: higher IQ = more patience
-    const baseDecisionTicks = 60; // 3.0s for 99 IQ
-    const iqPenaltyTicks = Math.round((100 - qbIQ) * 0.5); // 0.5 ticks per IQ point below 99
-    const calmnessBonus = Math.round(qbIQ * 0.2); // Higher IQ = more calm under pressure
+    const baseDecisionTicks = 60 * aiTickMultiplier; // 💡 SCALED
+    const iqPenaltyTicks = Math.round((100 - qbIQ) * 0.5) * aiTickMultiplier; // 💡 SCALED
+    const calmnessBonus = Math.round(qbIQ * 0.2) * aiTickMultiplier; // 💡 SCALED
 
-    const maxDecisionTimeTicks = baseDecisionTicks + iqPenaltyTicks + calmnessBonus;
-    const pressureTimeReduction = isPressured ? Math.max(20, Math.round((100 - qbIQ) * 0.3)) : 0;
+    const maxDecisionTimeTicks = baseDecisionTicks + iqPenaltyTicks + calmnessBonus;
+    const pressureTimeReduction = isPressured ? Math.max(20, Math.round((100 - qbIQ) * 0.3)) * aiTickMultiplier : 0; // 💡 SCALED
     const currentDecisionTickTarget = maxDecisionTimeTicks - pressureTimeReduction;
 
     let reason = "";
@@ -3505,6 +3505,8 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
     const { type } = play;
     let { assignments } = play;
 
+    const aiTickMultiplier = 0.05 / TICK_DURATION_SECONDS;
+
     const playState = {
         playIsLive: true, tick: 0, maxTicks: 1000,
         yards: 0, touchdown: false, turnover: false, incomplete: false, sack: false, safety: false,
@@ -3594,8 +3596,8 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
 
             // --- STEP 1: QB Logic (Decide Throw/Scramble) ---
             if (playState.playIsLive && type === 'pass' && !ballPos.inAir && !playState.turnover && !playState.sack) {
-                updateQBDecision(playState, offenseStates, defenseStates, gameLog);
-            }
+                updateQBDecision(playState, offenseStates, defenseStates, gameLog, aiTickMultiplier); // 💡 Pass multiplier
+            }
             if (!playState.playIsLive) break; // Play ended (e.g., QB threw away)
 
             // --- STEP 2: Update Player Intentions/Targets (AI) ---
