@@ -4706,7 +4706,7 @@ export function simulateGame(homeTeam, awayTeam, options = {}) {
                     if (!fastSim) gameLog.push(`OT Possession: ${offense.name}`);
 
                     while (driveActive && down <= 4) {
-                        // ✅ **FIX (OT):** Declare scoreDiff here
+                        
                         let scoreDiff;
                         if (!fastSim) {
                             const yardLineText = `opponent ${100 - ballOn}`;
