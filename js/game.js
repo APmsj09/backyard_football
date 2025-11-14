@@ -4955,15 +4955,7 @@ export function simulateGame(homeTeam, awayTeam, options = {}) {
                 }
             }
         });
-        if (!game.gameResults) {
-            game.gameResults = [];
-        }
-        game.gameResults.push({
-            homeTeam: { id: homeTeam.id, name: homeTeam.name },
-            awayTeam: { id: awayTeam.id, name: awayTeam.name },
-            homeScore: homeScore,
-            awayScore: awayScore
-        });
+        
 
         gameResult = {
             homeTeam,
@@ -4989,6 +4981,18 @@ export function simulateGame(homeTeam, awayTeam, options = {}) {
         };
     } finally {
         TICK_DURATION_SECONDS = originalTickDuration;
+    }
+    // This runs *after* the try/catch, so it always gets a gameResult (even a 0-0 error one)
+    if (gameResult) {
+        if (!game.gameResults) {
+            game.gameResults = [];
+        }
+        game.gameResults.push({
+            homeTeam: { id: gameResult.homeTeam.id, name: gameResult.homeTeam.name },
+            awayTeam: { id: gameResult.awayTeam.id, name: gameResult.awayTeam.name },
+            homeScore: gameResult.homeScore,
+            awayScore: gameResult.awayScore
+        });
     }
 
     return gameResult;
