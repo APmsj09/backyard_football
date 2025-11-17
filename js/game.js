@@ -3511,7 +3511,7 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
     // const aiTickMultiplier = 0.05 / TICK_DURATION_SECONDS;
 
     const playState = {
-        playIsLive: true, tick: 0, maxTicks: 1000 * aiTickMultiplier,
+        playIsLive: true, tick: 0, maxTicks: 1000,
         yards: 0, touchdown: false, turnover: false, incomplete: false, sack: false, safety: false,
         ballState: {
             x: 0, y: 0, z: 1.0,
