@@ -3492,6 +3492,7 @@ function finalizeStats(playState, offense, defense) {
 
 function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameState) {
     const { gameLog = [], weather, ballOn, ballHash = 'M', down, yardsToGo } = gameState;
+    const fastSim = options.fastSim === true; // Get fastSim from options
 
     const play = deepClone(offensivePlaybook[offensivePlayKey]);
 
@@ -3504,7 +3505,7 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
     const { type } = play;
     let { assignments } = play;
 
-    const aiTickMultiplier = 0.05 / TICK_DURATION_SECONDS;
+    // const aiTickMultiplier = 0.05 / TICK_DURATION_SECONDS;
 
     const playState = {
         playIsLive: true, tick: 0, maxTicks: 1000 * aiTickMultiplier,
@@ -3584,9 +3585,11 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
     // --- 3. TICK LOOP ---
     let ballCarrierState = null;
     try {
+        const timeDelta = fastSim ? TICK_DURATION_SECONDS * 10 : TICK_DURATION_SECONDS;
+        
         while (playState.playIsLive && playState.tick < playState.maxTicks) {
             playState.tick++;
-            const timeDelta = TICK_DURATION_SECONDS;
+            
 
             const offenseStates = playState.activePlayers.filter(p => p.isOffense);
             const defenseStates = playState.activePlayers.filter(p => !p.isOffense);
@@ -4520,7 +4523,7 @@ export function simulateGame(homeTeam, awayTeam, options = {}) {
 
     try {
         if (fastSim) {
-            TICK_DURATION_SECONDS = 0.005;
+            TICK_DURATION_SECONDS = 0.005; 
         }
         if (!homeTeam || !awayTeam || !homeTeam.roster || !awayTeam.roster) {
             if (!fastSim) console.error("simulateGame: Invalid team data provided.");
@@ -4689,7 +4692,10 @@ export function simulateGame(homeTeam, awayTeam, options = {}) {
                         if (gameLog) gameLog.push(`🛡️ **Defense:** ${defPlayName}`);
                     }
 
-                    result = resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, { gameLog: fastSim ? null : gameLog, weather, ballOn, ballHash, down, yardsToGo });
+                    result = resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, 
+                    { gameLog: fastSim ? null : gameLog, weather, ballOn, ballHash, down, yardsToGo },
+                    options // <-- ADD THIS
+                    );
 
                     if (!fastSim && result.visualizationFrames) {
                         allVisualizationFrames.push(...result.visualizationFrames);
@@ -4736,7 +4742,7 @@ export function simulateGame(homeTeam, awayTeam, options = {}) {
                         const conversionResult = resolvePlay(offense, defense, conversionOffensePlayKey, conversionDefensePlayKey, {
                             gameLog: fastSim ? null : gameLog,
                             weather, ballOn: conversionBallOn, ballHash: 'M', down: 1, yardsToGo: conversionYardsToGo
-                        });
+                        }, options);
 
                         if (!fastSim && conversionResult.visualizationFrames) {
                             allVisualizationFrames.push(...conversionResult.visualizationFrames);
@@ -4899,7 +4905,10 @@ export function simulateGame(homeTeam, awayTeam, options = {}) {
                             if (gameLog) gameLog.push(`🛡️ **Defense:** ${defPlayName}`);
                         }
 
-                        const result = resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, { gameLog: fastSim ? null : gameLog, weather, ballOn, ballHash, down, yardsToGo });
+                        const result = resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, 
+                            { gameLog: fastSim ? null : gameLog, weather, ballOn, ballHash, down, yardsToGo },
+                            options 
+                        );
 
                         if (!fastSim && result.visualizationFrames) allVisualizationFrames.push(...result.visualizationFrames);
                         if (!fastSim && !result.incomplete && result.visualizationFrames?.length > 0) {
@@ -4952,8 +4961,11 @@ export function simulateGame(homeTeam, awayTeam, options = {}) {
                                     if (gameLog) gameLog.push(`🛡️ **Defense:** ${convDefPlayName}`);
                                 }
 
-                                const conversionResult = resolvePlay(offense, defense, conversionOffensePlayKey, conversionDefensePlayKey, { gameLog: fastSim ? null : gameLog, weather, ballOn: conversionBallOn, ballHash: 'M', down: 1, yardsToGo: conversionYardsToGo });
-
+                                const conversionResult = resolvePlay(offense, defense, conversionOffensePlayKey, conversionDefensePlayKey, 
+                                    { gameLog: fastSim ? null : gameLog, weather, ballOn: conversionBallOn, ballHash: 'M', down: 1, yardsToGo: conversionYardsToGo },
+                                    options // <-- ADD THIS
+                                );
+                                
                                 if (!fastSim && conversionResult.visualizationFrames) allVisualizationFrames.push(...conversionResult.visualizationFrames);
 
                                 if (conversionResult.touchdown) {
@@ -5094,7 +5106,7 @@ export function simulateGame(homeTeam, awayTeam, options = {}) {
             visualizationFrames: null
         };
     } finally {
-        TICK_DURATION_SECONDS = originalTickDuration;
+        // TICK_DURATION_SECONDS = originalTickDuration;
     }
     // This runs *after* the try/catch, so it always gets a gameResult (even a 0-0 error one)
     if (gameResult) {
