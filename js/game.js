@@ -3113,6 +3113,8 @@ function updateQBDecision(playState, offenseStates, defenseStates, gameLog, aiTi
         qbState.targetY = qbState.y - 0.3; // Slight drift back/shuffle
     }
 }
+// game.js
+
 /**
  * Handles ball arrival at target coordinates. (MODIFIED)
  */
@@ -3150,10 +3152,8 @@ function handleBallArrival(playState, gameLog) {
 
     const defenderPlayer = closestDefenderState ? game.players.find(p => p && p.id === closestDefenderState.id) : null;
 
-    // --- 💡 FIX: Find the throwerPlayer *before* the interception check ---
     const throwerPlayer = game.players.find(p => p && p.id === playState.ballState.throwerId);
-    ensureStats(throwerPlayer); // Make sure throwerPlayer.gameStats exists
-    // --- 💡 END FIX ---
+    ensureStats(throwerPlayer); 
 
     const receiverInRange = getDistance(targetPlayerState, playState.ballState) < CATCH_CHECK_RADIUS;
     const defenderInRange = closestDefenderState && getDistance(closestDefenderState, playState.ballState) < CATCH_CHECK_RADIUS;
@@ -3197,11 +3197,9 @@ function handleBallArrival(playState, gameLog) {
             ensureStats(defenderPlayer);
             defenderPlayer.gameStats.interceptions = (defenderPlayer.gameStats.interceptions || 0) + 1;
 
-            // --- 💡 FIX: This check is now safe because we ensured stats earlier ---
             if (throwerPlayer) {
                 throwerPlayer.gameStats.interceptionsThrown = (throwerPlayer.gameStats.interceptionsThrown || 0) + 1;
             }
-            // --- 💡 END FIX ---
         }
     }
     // --- END 4. INT ATTEMPT ---
@@ -3286,13 +3284,14 @@ function handleBallArrival(playState, gameLog) {
                 }
             });
 
-            ensureStats(receiverPlayer);
-            receiverPlayer.gameStats.receptions = (receiverPlayer.gameStats.receptions || 0) + 1;
+            // 💡💡💡 --- FIX: REMOVED THE DOUBLE-COUNT --- 💡💡💡
+            // ensureStats(receiverPlayer);
+            // receiverPlayer.gameStats.receptions = (receiverPlayer.gameStats.receptions || 0) + 1;
+            // if (throwerPlayer) {
+            //     throwerPlayer.gameStats.passCompletions = (throwerPlayer.gameStats.passCompletions || 0) + 1;
+            // }
+            // 💡💡💡 --- END OF FIX --- 💡💡💡
 
-            // --- 💡 FIX: This check is now safe ---
-            if (throwerPlayer) {
-                throwerPlayer.gameStats.passCompletions = (throwerPlayer.gameStats.passCompletions || 0) + 1;
-            }
         } else { // Drop / Incomplete
             if (interferencePenalty > 10 || positionalPenalty > 0) {
                 if (gameLog) gameLog.push(`❌ **CONTESTED DROP!** Pass was on target to ${targetPlayerState.name} (Catch: ${recCatchSkill})!`);
