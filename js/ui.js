@@ -2096,19 +2096,12 @@ function renderLiveStatsBox(gameResult) {
     elements.simStatsHome.innerHTML = generateTeamStatsHtml(homeTeam);
 }
 
-/**
- * Renders the players / substitution panel for the player's team during live sim.
- */
-/**
- * Renders the players / substitution panel for the player's team during live sim.
- * Reads live fatigue data from the provided frame.
- */
 function renderSimPlayers(frame) {
     const findTeamInResult = (playerTeamId) => {
         if (!currentLiveGameResult) return null;
         if (currentLiveGameResult.homeTeam?.id === playerTeamId) return currentLiveGameResult.homeTeam;
         if (currentLiveGameResult.awayTeam?.id === playerTeamId) return currentLiveGameResult.awayTeam;
-        return null; 
+        return null;
     };
 
     try {
@@ -2116,7 +2109,7 @@ function renderSimPlayers(frame) {
             return;
         }
 
-        const gs = getGameState(); 
+        const gs = getGameState();
         const playerTeamId = gs?.playerTeam?.id;
         const team = findTeamInResult(playerTeamId); // This is the team object with roster IDs
 
@@ -2124,12 +2117,10 @@ function renderSimPlayers(frame) {
             elements.simPlayersList.innerHTML = '<p class="text-gray-400">No team data available for this game.</p>';
             return;
         }
-        
-        // --- 💡 FIX: Get roster objects using the helper ---
+
         const roster = getUIRosterObjects(team);
         const depth = team.depthChart || {};
-        // --- 💡 END FIX ---
-        
+
         const fatigueMap = new Map();
         if (frame && frame.players) {
             frame.players.forEach(pState => {
@@ -2150,23 +2141,36 @@ function renderSimPlayers(frame) {
 
         const buildRow = (p, isStarter) => {
             const stamina = p.attributes?.physical?.stamina || 50;
-
-            // 3. FIX: Get fatigue from the frame map if available,
-            //    otherwise default to 0 (for benched players not in the frame).
-            //    Do not use p.fatigue, which is the FINAL fatigue from the result object.
             const currentFatigue = fatigueMap.get(p.id) || 0;
-
             const fatigue = Math.max(0, Math.min(100, Math.round(currentFatigue)));
-
             const energyPct = Math.max(0, Math.round(100 - (fatigue / Math.max(1, stamina)) * 100));
-            const statusText = p.status?.type ? `${p.status.type}${p.status.duration ? ' (' + p.status.duration + ')' : ''}` : 'healthy';
+
+            // 💡 FIX: Find the player's current slot from the depth chart
+            let currentSlot = 'Bench';
+            if (isStarter) {
+                for (const side in depth) {
+                    for (const slot in depth[side]) {
+                        if (depth[side][slot] === p.id) {
+                            currentSlot = slot;
+                            break;
+                        }
+                    }
+                    if (currentSlot !== 'Bench') break;
+                }
+            }
+            // 💡 END FIX
+
+            // 💡 FIX: Use the 'status' object from the main player object in 'roster'
+            const statusText = (p.status?.duration > 0) ? `${p.status.description} (${p.status.duration}w)` : 'Healthy';
+            const statusClass = (p.status?.duration > 0) ? 'text-red-400' : 'text-gray-300';
+            // 💡 END FIX
 
             return `
                 <div class="flex items-center justify-between p-2 border-b border-gray-600">
                     <div class="flex items-center gap-3">
                         <div class="w-36">
                             <div class="text-sm font-semibold">${p.name}</div>
-                            <div class="text-xs text-gray-300">#${p.number || '—'} • ${p.slot || '-'}</div>
+                            <div class="text-xs text-gray-300">#${p.number || '—'} • ${currentSlot}</div>
                         </div>
                         <div class="w-40">
                             <div class="relative h-3 bg-gray-600 rounded">
@@ -2174,7 +2178,7 @@ function renderSimPlayers(frame) {
                             </div>
                             <div class="text-xs text-gray-300">Energy: ${energyPct}% • Fatigue: ${fatigue.toFixed(1)}</div>
                         </div>
-                        <div class="text-xs text-gray-300 w-28">Status: ${statusText}</div>
+                        <div class="text-xs ${statusClass} w-28">Status: ${statusText}</div>
                     </div>
                     <div>
                         ${isStarter ? `<button data-player-id="${p.id}" class="sub-out-btn btn bg-red-600 hover:bg-red-700 text-white text-xs py-1 px-2 rounded">Sub Out</button>` : `<button data-player-id="${p.id}" class="sub-in-btn btn bg-green-600 hover:bg-green-700 text-white text-xs py-1 px-2 rounded">Sub In</button>`}
@@ -2216,7 +2220,6 @@ function renderSimPlayers(frame) {
                     const [side, slot] = chosen.split('|');
                     const outId = team.depthChart?.[side]?.[slot];
 
-                    // 4. FIX: Use the imported substitutePlayers function
                     const result = substitutePlayers(team.id, outId, inId);
 
                     if (!result.success) {
@@ -2240,10 +2243,13 @@ function renderSimPlayers(frame) {
                 const options = benchPlayers.map(b => `<option value="${b.id}">${b.name} (#${b.number || '—'})</option>`).join('');
                 const selectHtml = `<select id="_sub_in_select" class="w-full p-2 bg-white text-black">${options}</select>`;
                 showModal('Select Bench Player to Sub In', selectHtml, () => {
-                    const inId = parseInt(document.getElementById('_sub_in_select')?.value, 10);
+                    // --- 💡💡💡 THIS IS THE FIX 💡💡💡 ---
+                    // Player IDs are strings (UUIDs), not integers.
+                    const inId = document.getElementById('_sub_in_select')?.value;
+                    // --- 💡💡💡 END OF FIX 💡💡💡 ---
+                    
                     if (!inId) return;
 
-                    // 5. FIX: Use the imported substitutePlayers function
                     const result = substitutePlayers(team.id, outId, inId);
 
                     if (!result.success) {
@@ -2260,10 +2266,6 @@ function renderSimPlayers(frame) {
     }
 }
 
-/**
- * Executes a single frame/tick of the live game simulation.
- * This is the core loop called by setInterval.
- */
 /**
  * Executes a single frame/tick of the live game simulation.
  * This is the core loop called by setInterval.
@@ -2387,10 +2389,31 @@ function runLiveGameTick() {
                     styleClass = 'font-semibold text-red-400';
                     descriptiveText = playLogEntry;
                     playHasEnded = true; // An incompletion ends the play
+                
+                // --- 💡 FIX: ADDED PUNT LOGIC ---
+                } else if (playLogEntry.includes('PUNT by')) {
+                    liveGameDriveActive = false; // Punt is a change of possession
+                    styleClass = 'font-semibold text-blue-300'; // Special teams color
+                    descriptiveText = playLogEntry;
+                    playHasEnded = true; // A punt play ends the sequence
+                
+                } else if (playLogEntry.includes('MUFFED PUNT')) {
+                     // Don't change driveActive yet, wait for the recovery log
+                    styleClass = 'font-bold text-red-500';
+                    descriptiveText = playLogEntry;
+                    playHasEnded = false; // The muff itself doesn't pause, the recovery does
+                
+                } else if (playLogEntry.includes('recovers the muff')) {
+                    liveGameDriveActive = !playLogEntry.includes(liveGamePossessionName); // Turnover if defense recovers
+                    styleClass = 'font-semibold text-yellow-300';
+                    descriptiveText = playLogEntry;
+                    playHasEnded = true; // The recovery ends the play
+                // --- 💡 END FIX ---
 
-                } else if (playLogEntry.startsWith('🎉 TOUCHDOWN')) {
+                } else if (playLogEntry.startsWith('🎉 TOUCHDOWN') || playLogEntry.startsWith('🎉 PUNT RETURN TOUCHDOWN')) {
                     if (!liveGameIsConversion) { // Only add 6 if it's NOT a conversion
-                        if (liveGamePossessionName === currentLiveGameResult.homeTeam.name) {
+                        // 💡 FIX: Check if log contains home/away name for defensive/return TDs
+                        if (playLogEntry.includes(currentLiveGameResult.homeTeam.name) || (liveGamePossessionName === currentLiveGameResult.homeTeam.name && !playLogEntry.includes(currentLiveGameResult.awayTeam.name))) {
                             liveGameCurrentHomeScore += 6;
                         } else {
                             liveGameCurrentAwayScore += 6;
