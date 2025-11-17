@@ -1075,7 +1075,7 @@ function renderVisualFormationSlots(container, currentChart, formationData, benc
         
         // --- Coordinate Mapping ---
         // 💡 FIX: Increased horizontal multiplier to spread slots
-        const x_percent = 50 + (relCoords[0] * 2.0); // Was 1.7
+        const x_percent = 50 + (relCoords[0] * 3.0); // 💡 WAS 2.0
 
         // 💡 FIX: Increased vertical multiplier to use the 400px height
         const y_percent = 50 + (relCoords[1] * 8); // Was 6
