@@ -381,10 +381,8 @@ canvas#field-canvas {
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    /* 💡 FIX: Made the card narrower */
-    width: 100px; 
-    /* 💡 FIX: Reduced padding */
-    padding: 4px;
+    width: 100px; /* 💡 Narrower card */
+    padding: 4px; /* 💡 Less padding */
     border: 2px dashed #9ca3af; /* gray-400 */
     border-radius: 8px;
     background-color: rgba(0, 0, 0, 0.3); /* Darker transparent bg */
@@ -393,31 +391,28 @@ canvas#field-canvas {
 }
 
 .player-slot-visual .slot-label {
-    /* 💡 FIX: Smaller font */
-    font-size: 0.75rem; /* was 0.875rem */
+    font-size: 0.75rem; /* 💡 Smaller font */
     font-weight: 700;
     color: #ffffff;
-  s   text-shadow: 1px 1px 2px rgba(0,0,0,0.7);
+    text-shadow: 1px 1px 2px rgba(0,0,0,0.7);
 }
 
-/* 💡 FIX: Merged the two .slot-overall definitions and shrank font */
 .slot-overall {
-    font-size: 0.75rem; /* was 0.875rem */
+    font-size: 0.75rem; /* 💡 Smaller font */
     font-weight: 700;
     color: #fcd34d; /* amber-300 */
     margin-top: -2px;
     margin-bottom: 4px;
 }
 
-/* 💡 FIX: Merged the two .slot-select definitions and shrank font/padding */
 .slot-select {
     width: 100%;
     margin-top: 4px;
-    font-size: 0.75rem; /* was 0.875rem */
+    font-size: 0.75rem; /* 💡 Smaller font */
     font-weight: 600;
     border-radius: 4px;
     border: 1px solid #6b7280; /* gray-500 */
-    padding: 2px 4px; /* was 4px 6px */
+    padding: 2px 4px; /* 💡 Tighter padding */
     background-color: #374151; /* gray-700 */
     color: #f9fafb; /* gray-50 */
     cursor: pointer;
@@ -443,7 +438,7 @@ canvas#field-canvas {
 }
 .bench-player-row {
     cursor: move; 
-    transition: background-color 0.1s ease;
+  m   transition: background-color 0.1s ease;
 }
 .bench-player-row:hover {
     background-color: #fef3c7; /* amber-100 */
