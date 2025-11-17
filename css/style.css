@@ -337,149 +337,118 @@ canvas#field-canvas {
 /* --- NEW DEPTH CHART STYLES (v2) --- */
 
 .visual-field-container {
-    background-color: #f3f4f6; /* gray-100 */
-    border: 1px solid #d1d5db; /* gray-300 */
-    border-radius: 8px;
-    padding: 8px;
+    background-color: #f3f4f6; /* gray-100 */
+    border: 1px solid #d1d5db; /* gray-300 */
+    border-radius: 8px;
+    padding: 8px;
 }
 
 .visual-field-header {
-    text-align: center;
-    font-weight: 700;
-    font-size: 0.75rem;
-    letter-spacing: 0.1em;
-    color: #4b5563; /* gray-600 */
-    margin-bottom: 8px;
+    text-align: center;
+    font-weight: 700;
+    font-size: 0.75rem;
+    letter-spacing: 0.1em;
+    color: #4b5563; /* gray-600 */
+    margin-bottom: 8px;
 }
 
 .visual-field {
-    position: relative;
-    width: 100%;
-    /* 💡 FIX: More vertical space */
-    height: 400px; 
-    background-color: #166534; /* green-700 */
-    border-radius: 4px;
-    overflow: hidden;
-    border: 2px solid #a1a1aa; /* gray-400 */
+    position: relative;
+    width: 100%;
+    height: 400px; 
+    background-color: #166534; /* green-700 */
+    border-radius: 4px;
+    overflow: hidden;
+    border: 2px solid #a1a1aa; /* gray-400 */
 }
 
 /* Line of Scrimmage */
 .visual-field::before {
-    content: '';
-    position: absolute;
-    left: 0;
-    right: 0;
-    top: 50%;
-    height: 4px;
-    background-color: #facc15; /* yellow-400 */
-    opacity: 0.5;
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 50%;
+    height: 4px;
+    background-color: #facc15; /* yellow-400 */
+    opacity: 0.5;
 }
 
 /* Visual Player Slot */
 .player-slot-visual {
-    position: absolute;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    /* 💡 FIX: Smaller width */
-    width: 120px; 
-    /* 💡 FIX: Less padding */
-    padding: 6px;
-    border: 2px dashed #9ca3af; /* gray-400 */
-    border-radius: 8px;
-    background-color: rgba(0, 0, 0, 0.3); /* Darker transparent bg */
-    transform: translate(-50%, -50%); /* Center the slot on its coordinates */
-    transition: all 0.2s ease;
+    position: absolute;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    /* 💡 FIX: Made the card narrower */
+    width: 100px; 
+    /* 💡 FIX: Reduced padding */
+    padding: 4px;
+    border: 2px dashed #9ca3af; /* gray-400 */
+    border-radius: 8px;
+    background-color: rgba(0, 0, 0, 0.3); /* Darker transparent bg */
+    transform: translate(-50%, -50%); /* Center the slot on its coordinates */
+    transition: all 0.2s ease;
 }
 
 .player-slot-visual .slot-label {
-    /* 💡 FIX: Smaller font */
-    font-size: 0.875rem; /* was 1rem */
-    font-weight: 700;
-    color: #ffffff;
-    text-shadow: 1px 1px 2px rgba(0,0,0,0.7);
+    /* 💡 FIX: Smaller font */
+    font-size: 0.75rem; /* was 0.875rem */
+    font-weight: 700;
+    color: #ffffff;
+  s   text-shadow: 1px 1px 2px rgba(0,0,0,0.7);
 }
 
-/* 💡 FIX: Smaller font */
+/* 💡 FIX: Merged the two .slot-overall definitions and shrank font */
 .slot-overall {
-    font-size: 0.75rem; /* was 0.875rem */
-    font-weight: 700;
-    color: #fcd34d; /* amber-300 */
-    margin-top: -2px;
-    margin-bottom: 4px;
+    font-size: 0.75rem; /* was 0.875rem */
+    font-weight: 700;
+    color: #fcd34d; /* amber-300 */
+    margin-top: -2px;
+    margin-bottom: 4px;
 }
 
-/* 💡 FIX: Smaller font */
+/* 💡 FIX: Merged the two .slot-select definitions and shrank font/padding */
 .slot-select {
-    width: 100%;
-    margin-top: 4px;
-    font-size: 0.75rem; /* was 0.875rem */
-    font-weight: 600;
-    border-radius: 4px;
-    border: 1px solid #6b7280; /* gray-500 */
-    padding: 2px 4px; /* Tighter padding */
-    background-color: #374151; /* gray-700 */
-    color: #f9fafb; /* gray-50 */
-    cursor: pointer;
-    -webkit-appearance: none;
-    -moz-appearance: none;
-    appearance: none;
-    background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='%23d1d5db' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 10 13 14 9'%3e%3c/polyline%3e%3c/svg%3e");
-    background-position: right 0.5rem center;
-    background-repeat: no-repeat;
-    background-size: 1em 1em;
-}
-
-/* 💡 NEW: Overall Rating Style */
-.slot-overall {
-    font-size: 0.875rem;
-    font-weight: 700;
-    color: #fcd34d; /* amber-300 */
-    margin-top: -2px;
-    margin-bottom: 4px;
-}
-
-/* 💡 FIX: Styled Dropdown */
-.slot-select {
-    width: 100%;
-    margin-top: 4px;
-    font-size: 0.875rem;
-    font-weight: 600;
-    border-radius: 4px;
-    border: 1px solid #6b7280; /* gray-500 */
-    padding: 4px 6px;
-    background-color: #374151; /* gray-700 */
-    color: #f9fafb; /* gray-50 */
-    cursor: pointer;
-    -webkit-appearance: none;
-    -moz-appearance: none;
-    appearance: none;
-    background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='%23d1d5db' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 10 13 14 9'%3e%3c/polyline%3e%3c/svg%3e");
-    background-position: right 0.5rem center;
-    background-repeat: no-repeat;
-    background-size: 1em 1em;
+    width: 100%;
+    margin-top: 4px;
+    font-size: 0.75rem; /* was 0.875rem */
+    font-weight: 600;
+    border-radius: 4px;
+    border: 1px solid #6b7280; /* gray-500 */
+    padding: 2px 4px; /* was 4px 6px */
+    background-color: #374151; /* gray-700 */
+    color: #f9fafb; /* gray-50 */
+    cursor: pointer;
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    appearance: none;
+    background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='%23d1d5db' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 10 13 14 9'%3e%3c/polyline%3e%3c/svg%3e");
+    background-position: right 0.5rem center;
+    background-repeat: no-repeat;
+    background-size: 1em 1em;
 }
 
 .slot-select:hover {
-    background-color: #4b5563; /* gray-600 */
+    background-color: #4b5563; /* gray-600 */
 }
 
 /* (Bench styles remain the same) */
 .bench-table-container {
-    max-height: 400px;
-    overflow-y: auto;
-    border: 1px solid #e5e7eb;
-    border-radius: 8px;
+    max-height: 400px;
+    overflow-y: auto;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
 }
 .bench-player-row {
-    cursor: move; 
-    transition: background-color 0.1s ease;
+    cursor: move; 
+    transition: background-color 0.1s ease;
 }
 .bench-player-row:hover {
-    background-color: #fef3c7; /* amber-100 */
+    background-color: #fef3c7; /* amber-100 */
 }
 .bench-player-row.dragging {
-    opacity: 0.4;
-    background-color: #eab308;
+    opacity: 0.4;
+    background-color: #eab308;
 }
