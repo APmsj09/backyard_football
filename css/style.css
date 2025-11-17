@@ -438,7 +438,7 @@ canvas#field-canvas {
 }
 .bench-player-row {
     cursor: move; 
-  m   transition: background-color 0.1s ease;
+    transition: background-color 0.1s ease;
 }
 .bench-player-row:hover {
     background-color: #fef3c7; /* amber-100 */
