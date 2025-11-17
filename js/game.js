@@ -5109,7 +5109,7 @@ export function simulateGame(homeTeam, awayTeam, options = {}) {
             visualizationFrames: null
         };
     } finally {
-        // TICK_DURATION_SECONDS = originalTickDuration;
+         TICK_DURATION_SECONDS = originalTickDuration;
     }
     // This runs *after* the try/catch, so it always gets a gameResult (even a 0-0 error one)
     if (gameResult) {
