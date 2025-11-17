@@ -3851,67 +3851,154 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
     };
 }
 /**
- * Resolves a punt play. Calculates distance based on QB strength and accuracy.
- * This does not use the tick simulation.
- * @returns {object} A simple result object.
+ * Resolves a punt play. Calculates distance, simulates a potential return,
+ * and handles muffs or touchdowns.
+ * This does not use the full tick simulation but provides a dynamic result.
+ * @returns {object} A result object: { turnover, newBallOn, homeScore, awayScore }
  */
-// game.js
-
-function resolvePunt(offense, defense, gameState) {
+function resolvePunt(offense, defense, gameState, homeScore, awayScore, homeTeamId) {
     const { gameLog, ballOn } = gameState;
 
-    // Find the QB from the main roster (we assume they are the punter)
-    const roster = getRosterObjects(offense);
-    const qb = roster.find(p => p && p.id === offense.depthChart.offense.QB1);
+    // --- 1. Find Punter (Assumed to be QB1) ---
+    const offenseRoster = getRosterObjects(offense);
+    const qb = offenseRoster.find(p => p && p.id === offense.depthChart.offense.QB1);
 
     if (!qb) {
         if (gameLog) gameLog.push("PUNT FAILED! No QB found on roster.");
-        // Turnover at the line of scrimmage
-        return { turnover: true, newBallOn: 100 - ballOn };
+        return { turnover: true, newBallOn: 100 - ballOn, homeScore, awayScore };
     }
 
-    // --- 1. Calculate Punt Power & Base Distance ---
-    // 💡 FIX: Added optional chaining and fallbacks for all attribute access ---
+    // --- 2. Calculate Punt Distance ---
     const strength = qb.attributes?.physical?.strength || 50;
-    const accuracy = qb.attributes?.technical?.throwingAccuracy || 50;
+    const accuracy = qb.attributes?.technical?.throwingAccuracy || 50; // Using QB accuracy as per original logic
     const consistency = qb.attributes?.mental?.consistency || 50;
 
     const puntPower = (strength * 0.6) + (accuracy * 0.4);
-    // --- 💡 END FIX ---
-
-    // Base distance gives a range of 28 (min stats) to 58 (max stats) yards
     const baseDistance = 25 + (puntPower / 3);
-
-    // --- 2. Add Variability (Your "Levels") ---
-    const maxVariability = 10; // Max +/- 10 yards
+    const maxVariability = 10;
     const variabilityRange = maxVariability * (1 - (consistency / 100));
-
     const finalPuntDistance = baseDistance + getRandom(-variabilityRange, variabilityRange);
 
-    // --- 3. Calculate New Ball Position ---
+    // --- 3. Calculate Landing Spot ---
     const lineOfScrimmage = ballOn + 10;
     const puntLandingY = lineOfScrimmage + finalPuntDistance;
 
-    let newBallOn = 0; // This is the new 'ballOn' for the receiving team
+    let newBallOn = 0;
+    let turnover = true;
+    let newHomeScore = homeScore;
+    let newAwayScore = awayScore;
 
+    // --- 4. Handle Touchback ---
     if (puntLandingY >= 110) {
-        // Touchback (ball lands in or past the endzone)
         newBallOn = 20; // Receiving team gets ball at their 20
         if (gameLog) gameLog.push(`🏈 PUNT by ${qb.name}. It's a TOUCHBACK!`);
     } else {
-        // Ball lands in bounds.
-        const newBallOnField = puntLandingY - 10;
-        newBallOn = 100 - newBallOnField;
+        // --- 5. Handle Live Return ---
+        const defenseRoster = getRosterObjects(defense);
+        const healthyDefenders = defenseRoster.filter(p => p && p.status?.duration === 0);
 
-        // Failsafe: Pin them deep. Ball can't be *worse* than the 1-yard line.
+        if (healthyDefenders.length === 0) {
+            // No healthy defenders, automatic touchback
+            newBallOn = 20;
+            if (gameLog) gameLog.push(`🏈 PUNT by ${qb.name}. No healthy returner! TOUCHBACK!`);
+            return { turnover: true, newBallOn: 20, homeScore, awayScore };
+        }
+
+        // 5a. Find Best Returner (Speed + Agility + Hands)
+        const returner = healthyDefenders.reduce((best, current) => {
+            const bestScore = (best.attributes?.physical?.speed || 40) + (best.attributes?.physical?.agility || 40) + (best.attributes?.technical?.catchingHands || 40);
+            const currentScore = (current.attributes?.physical?.speed || 40) + (current.attributes?.physical?.agility || 40) + (current.attributes?.technical?.catchingHands || 40);
+            return currentScore > bestScore ? current : best;
+        }, healthyDefenders[0]);
+
+        // 5b. Find Coverage Team (Offense minus Punter)
+        const coverageTeam = offenseRoster.filter(p => p && p.status?.duration === 0 && p.id !== qb.id);
+        let coveragePower = 50;
+        if (coverageTeam.length > 0) {
+            let avgCoverageTackling = 0;
+            let avgCoverageSpeed = 0;
+            coverageTeam.forEach(p => {
+                avgCoverageTackling += (p.attributes?.technical?.tackling || 40);
+                avgCoverageSpeed += (p.attributes?.physical?.speed || 40);
+            });
+            avgCoverageTackling /= coverageTeam.length;
+            avgCoverageSpeed /= coverageTeam.length;
+            coveragePower = (avgCoverageTackling * 0.6) + (avgCoverageSpeed * 0.4);
+        }
+
+        // 5c. Check for Muff/Fumble
+        const catchingHands = returner.attributes?.technical?.catchingHands || 50;
+        const muffChance = 0.05 + (1 - (catchingHands / 100)) * 0.15; // 5% (99 hands) to 20% (1 hands)
+        let returnYards = 0;
+
+        if (Math.random() < muffChance) {
+            if (gameLog) gameLog.push(`❗ MUFFED PUNT! ${returner.name} drops the ball!`);
+            // 50/50 recovery
+            if (Math.random() < 0.5) {
+                if (gameLog) gameLog.push(`👍 ${defense.name} recovers the muff!`);
+                returnYards = 0; // Ball is dead where it was muffed
+            } else {
+                if (gameLog) gameLog.push(`❗ TURNOVER! ${offense.name} recovers the muffed punt!`);
+                const newBallOnField = puntLandingY - 10;
+                newBallOn = newBallOnField; // Offense's new ballOn
+                turnover = false; // It's not a turnover!
+                return { turnover: false, newBallOn: Math.round(newBallOn), homeScore, awayScore };
+            }
+        } else {
+            // 5d. Calculate Return Yards (if not muffed)
+            const returnerSpeed = returner.attributes?.physical?.speed || 50;
+            const returnerAgility = returner.attributes?.physical?.agility || 50;
+            const returnerConsistency = returner.attributes?.mental?.consistency || 50;
+            const returnerPower = (returnerSpeed * 0.5) + (returnerAgility * 0.5);
+
+            const baseReturn = 5 + (returnerPower - 50) / 5; // Base return yards
+            const coverageModifier = (coveragePower - 50) / 10; // Coverage limits return
+            const returnVariabilityRange = 10 * (1 - (returnerConsistency / 100));
+            const returnVariability = getRandom(-returnVariabilityRange, returnVariabilityRange);
+
+            returnYards = baseReturn - coverageModifier + returnVariability;
+
+            // Big play chance
+            if (Math.random() < (returnerAgility / 1000)) {
+                returnYards += getRandom(15, 40);
+            }
+            // Tackle for loss chance
+            if (Math.random() < (coveragePower / 1000)) {
+                returnYards -= getRandom(5, 10);
+            }
+        }
+
+        // --- 6. Finalize Return ---
+        const catchYardLine = 100 - (puntLandingY - 10); // e.g., 40 yard line
+
+        if (returnYards > 0) {
+            if (gameLog) gameLog.push(`🏈 PUNT by ${qb.name}. ${returner.name} catches at the ${catchYardLine.toFixed(0)} and returns for ${returnYards.toFixed(0)} yards!`);
+        } else {
+            if (gameLog) gameLog.push(`🏈 PUNT by ${qb.name}. ${returner.name} calls for a FAIR CATCH at the ${catchYardLine.toFixed(0)}.`);
+            returnYards = 0;
+        }
+
+        const newBallOnField = (puntLandingY - 10) - returnYards; // Return yards come *back*
+        newBallOn = 100 - newBallOnField; // Flips the field for the receiving team
+
+        // Check for return TD
+        if (newBallOnField <= 0) {
+            if (gameLog) gameLog.push(`🎉 PUNT RETURN TOUCHDOWN! ${returner.name}!`);
+            if (defense.id === homeTeamId) newHomeScore += 6; else newAwayScore += 6;
+            // Set up for the kickoff
+            newBallOn = 20;
+        }
+
+        // Clamp ball position
         if (newBallOn < 1) newBallOn = 1;
 
         const yardLineText = newBallOn <= 50 ? `own ${newBallOn.toFixed(0)}` : `opponent ${(100 - newBallOn).toFixed(0)}`;
-        if (gameLog) gameLog.push(`🏈 PUNT by ${qb.name}. Ball goes ${finalPuntDistance.toFixed(1)} yards. ${defense.name} takes over at their ${yardLineText}.`);
+        if (newBallOnField > 0) { // Don't log this if it was a TD
+            if (gameLog) gameLog.push(`${defense.name} takes over at their ${yardLineText}.`);
+        }
     }
 
-    // A punt is always a turnover
-    return { turnover: true, newBallOn: Math.round(newBallOn) };
+    return { turnover: turnover, newBallOn: Math.round(newBallOn), homeScore: newHomeScore, awayScore: newAwayScore };
 }
 
 // =============================================================
@@ -4521,31 +4608,57 @@ export function simulateGame(homeTeam, awayTeam, options = {}) {
 
                 const shouldPunt = determinePuntDecision(down, yardsToGo, ballOn);
                 let result;
-                // ✅ **FIX:** Declare scoreDiff with 'let' at the top of the loop scope
                 let scoreDiff;
                 let drivesRemainingInGame;
 
                 if (shouldPunt) {
+                    // --- 3A. IT'S A PUNT PLAY ---
                     if (!fastSim) {
                         gameLog.push(`--- 4th & ${yardsToGo <= 0 ? 'Goal' : yardsToGo}. ${offense.name} is punting. ---`);
                     }
+                    // Set special team formations
                     offense.formations.offense = 'Punt';
                     defense.formations.defense = 'Punt_Return';
 
-                    result = resolvePunt(offense, defense, { gameLog, ballOn });
+                    // 💡 **MODIFIED CALL:** Pass scores in, get scores back
+                    result = resolvePunt(
+                        offense, defense,
+                        { gameLog: fastSim ? null : gameLog, ballOn },
+                        homeScore,
+                        awayScore,
+                        homeTeam.id
+                    );
+
+                    // 💡 **NEW LOGIC:** Update scores based on punt result (e.g., Return TD)
+                    homeScore = result.homeScore;
+                    awayScore = result.awayScore;
+
+                    if (result.turnover === false) {
+                        // This means a muff was recovered by the punting team!
+                        driveActive = true; // Keep the drive alive
+                        ballOn = result.newBallOn;
+                        down = 1;
+                        yardsToGo = Math.max(1, Math.min(10, 100 - ballOn));
+                        if (!fastSim) gameLog.push(`➡️ First down ${offense.name}!`);
+                    } else {
+                        // This was a normal punt, a touchback, or a return TD.
+                        // In all cases, the drive ends for the offense.
+                        driveActive = false;
+                        nextDriveStartBallOn = result.newBallOn;
+                    }
 
                     if (!fastSim && allVisualizationFrames) {
+                        // Add a simple frame for the punt
                         allVisualizationFrames.push({
                             players: [], ball: null, logIndex: gameLog.length,
                             lineOfScrimmage: ballOn + 10, firstDownY: ballOn + 10 + yardsToGo
                         });
                     }
-                    driveActive = false;
-                    nextDriveStartBallOn = result.newBallOn;
 
                 } else {
                     // --- 3B. IT'S A NORMAL PLAY ---
                     if (!fastSim) {
+                        // ... (existing gameLog push for down & distance) ...
                         const yardLineText = ballOn <= 50 ? `own ${ballOn}` : `opponent ${100 - ballOn}`;
                         const isGoalToGo = (ballOn + 10) + yardsToGo >= (FIELD_LENGTH - 10);
                         const downText = `${down}${down === 1 ? 'st' : down === 2 ? 'nd' : down === 3 ? 'rd' : 'th'}`;
@@ -4595,7 +4708,7 @@ export function simulateGame(homeTeam, awayTeam, options = {}) {
                 // --- 5. PROCESS PLAY RESULT (Corrected Order) ---
 
                 // --- 1. CHECK FOR TOUCHDOWN (OFFENSIVE OR DEFENSIVE) ---
-                if (result.touchdown) {
+                if (result.touchdown && !shouldPunt) {
                     const wasOffensiveTD = !result.turnover;
 
                     if (wasOffensiveTD) {
@@ -4657,7 +4770,7 @@ export function simulateGame(homeTeam, awayTeam, options = {}) {
                     nextDriveStartBallOn = 20;
 
                     // --- 2. CHECK FOR SAFETY ---
-                } else if (result.safety) {
+                } else if (result.safety && !shouldPunt) {
                     if (!fastSim) gameLog.push(`SAFETY! 2 points for ${defense.name}!`);
                     if (defense.id === homeTeam.id) homeScore += 2; else awayScore += 2;
                     scoreDiff = offense.id === homeTeam.id ? homeScore - awayScore : awayScore - homeScore;
@@ -4667,7 +4780,7 @@ export function simulateGame(homeTeam, awayTeam, options = {}) {
                     nextDriveStartBallOn = 20; // Defense will receive the "free kick" (simplified)
 
                     // --- 3. CHECK FOR NON-TD TURNOVER ---
-                } else if (result.turnover) {
+                } else if (result.turnover && !shouldPunt) {
                     driveActive = false;
                     if (!shouldPunt) {
                         // This is a turnover on downs or a non-TD INT/fumble
@@ -4676,7 +4789,7 @@ export function simulateGame(homeTeam, awayTeam, options = {}) {
                     // (if it was a punt, nextDriveStartBallOn was already set by resolvePunt)
 
                     // --- 4. CHECK FOR INCOMPLETE PASS ---
-                } else if (result.incomplete) {
+                } else if (result.incomplete && !shouldPunt) {
                     down++;
 
                     // --- 5. REGULAR PLAY (GAIN/LOSS) ---
@@ -5460,9 +5573,9 @@ export function substitutePlayers(teamId, outPlayerId, inPlayerId) {
     const team = game.teams.find(t => t && t.id === teamId) || game.playerTeam;
     if (!team || !team.depthChart) return { success: false, message: 'Team or depth chart invalid.' };
 
-    const roster = team.roster || [];
-    const outPlayer = roster.find(p => p && p.id === outPlayerId);
-    const inPlayer = roster.find(p => p && p.id === inPlayerId);
+    const fullRoster = getRosterObjects(team);
+    const outPlayer = fullRoster.find(p => p && p.id === outPlayerId);
+    const inPlayer = fullRoster.find(p => p && p.id === inPlayerId);
     if (!outPlayer) return { success: false, message: 'Outgoing player not found on roster.' };
     if (!inPlayer) return { success: false, message: 'Incoming player not found on roster.' };
 
@@ -5517,7 +5630,7 @@ export function autoMakeSubstitutions(team, options = {}) {
 
     if (Math.random() > chance) return 0; // don't always run
 
-    const roster = team.roster;
+    const fullRoster = getRosterObjects(team);
     const sides = Object.keys(team.depthChart || {});
     const starterIds = new Set();
     sides.forEach(side => {
@@ -5534,7 +5647,7 @@ export function autoMakeSubstitutions(team, options = {}) {
             if (subsDone >= maxSubs) break;
             const starterId = chart[slot];
             if (!starterId) continue;
-            const starter = roster.find(p => p && p.id === starterId);
+            const starter = fullRoster.find(p => p && p.id === starterId);
             if (!starter) continue;
             const starterFat = starter.fatigue || 0;
             if (starter.status && starter.status.duration > 0) continue; // injured or busy handled elsewhere
@@ -5542,7 +5655,7 @@ export function autoMakeSubstitutions(team, options = {}) {
             // If starter is fatigued beyond threshold, try to find a bench replacement
             if (starterFat >= thresholdFatigue) {
                 // bench candidates not starters, not injured, and with meaningfully lower fatigue
-                const candidates = roster.filter(p => p && !starterIds.has(p.id) && (!p.status || p.status.duration === 0) && ((p.fatigue || 0) + 8 < starterFat));
+                const candidates = fullRoster.filter(p => p && !starterIds.has(p.id) && (!p.status || p.status.duration === 0) && ((p.fatigue || 0) + 8 < starterFat));
                 if (candidates.length === 0) continue;
 
                 // Score candidates by suitability for this slot (higher is better), tiebreaker lower fatigue
@@ -5589,7 +5702,7 @@ export function changeFormation(side, formationName) {
 export function playerCut(playerId) {
     if (!game || !game.playerTeam || !game.playerTeam.roster) { return { success: false, message: "Game state error." }; }
     const team = game.playerTeam;
-    const playerIndex = team.roster.findIndex(p => p && p.id === playerId);
+    const playerIndex = team.roster.findIndex(pId => pId === playerId);
 
     if (playerIndex > -1) {
         const [removedId] = team.roster.splice(playerIndex, 1);
@@ -5611,7 +5724,9 @@ export function playerCut(playerId) {
         }
         aiSetDepthChart(team);
         addMessage("Roster Move", `${player.name} has been cut from the team.`);
-        team.roster.forEach(rp => { if (rp) decreaseRelationship(rp.id, player.id); });
+        team.roster.forEach(rosterPlayerId => {
+            if (rosterPlayerId) decreaseRelationship(rosterPlayerId, player.id);
+        });
         return { success: true };
     } else { return { success: false, message: "Player not found on roster." }; }
 }
