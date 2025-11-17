@@ -2516,7 +2516,7 @@ function runLiveGameTick() {
         clearTimeout(huddleTimeout); // Clear any stray huddle just in case
 
         // Start the "huddle" clock (2.5 second pause)
-        const HUDDLE_PAUSE_MS = 2500;
+        const HUDDLE_PAUSE_MS = 3500;
 
         // FIX: Store the timeout ID
         huddleTimeout = setTimeout(startNextPlay, HUDDLE_PAUSE_MS);
