@@ -1182,7 +1182,11 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
                 assignment = assignments?.[slot]; // Update assignment from offensive playbook
 
                 if (assignment) {
-                    if (assignment.toLowerCase().includes('pass_block')) { action = 'pass_block'; targetY = startY - 0.5; }
+                    if (assignment.toLowerCase() === 'punt') {
+                        action = 'punt_kick';
+                        targetY = startY - 2; // Step back
+                    }
+                    else if (assignment.toLowerCase().includes('pass_block')) { action = 'pass_block'; targetY = startY - 0.5; }
                     else if (assignment.toLowerCase().includes('run_block')) { action = 'run_block'; targetY = startY + 0.5; }
                     else if (assignment.toLowerCase().includes('run_')) {
                         action = 'run_path'; targetY = startY + 5;
@@ -1225,6 +1229,15 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
                 assignment = defAssignments[slot] || 'def_read'; // Assignment is read from playbook
                 action = assignment; // Action defaults to assignment
 
+                // 💡 **START: ADD PUNT RETURN LOGIC**
+                if (assignment.toLowerCase() === 'punt_return') {
+                    action = 'punt_return';
+                    // Use the Y-coordinate from the formation
+                    targetY = startY; 
+                    targetX = startX;
+                }
+                // 💡 **END: ADD PUNT RETURN LOGIC**
+    
                 // The defense must line up behind the line of scrimmage (LoS).
                 // LoS = playState.lineOfScrimmage. We allow a tiny buffer (0.1 yards) to be on the line.
 
@@ -1444,11 +1457,15 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
         if (qbState) { qbState.action = 'run_fake'; /* ... */ }
 
     } else if (qbState) {
-        // --- IT'S A PASS PLAY or QB RUN ---
+        // --- IT'S A PASS PLAY or QB RUN  or Punt---
         qbState.hasBall = true;
         playState.ballState.x = qbState.x;
         playState.ballState.y = qbState.y;
         playState.ballState.z = 1.0;
+
+        if (play.type === 'punt') {
+            qbState.isBallCarrier = false; // Not a "carrier" in the same way
+            // 'action' is already 'punt_kick'
 
         // --- Dynamic Read Progression ---
         // 1. Get reads from the play definition
@@ -3117,12 +3134,152 @@ function updateQBDecision(playState, offenseStates, defenseStates, gameLog, aiTi
         qbState.targetY = qbState.y - 0.3; // Slight drift back/shuffle
     }
 }
+
+/**
+ * Handles Punter decision-making (timing the kick).
+ * This runs INSTEAD of updateQBDecision on punt plays.
+ */
+function updatePunterDecision(playState, offenseStates, gameLog) {
+    const punterState = offenseStates.find(p => p.action === 'punt_kick' && p.hasBall);
+    if (!punterState) return; // Punter already kicked or isn't on field
+
+    const punterPlayer = game.players.find(p => p && p.id === punterState.id);
+    if (!punterPlayer || !punterPlayer.attributes) return;
+
+    // --- 1. Define Punt Timing ---
+    // (50 ticks = 2.5 seconds for snap and kick)
+    const KICK_TICK = 50; 
+
+    if (playState.tick < KICK_TICK) {
+        // Punter is waiting for the snap/setting up
+        punterState.targetX = punterState.x;
+        punterState.targetY = punterState.y;
+        return;
+    }
+
+    if (playState.tick === KICK_TICK) {
+        // --- 2. Time to Kick! ---
+        if (gameLog) gameLog.push(`🏈 ${punterState.name} gets the punt away!`);
+        
+        const pAttrs = punterPlayer.attributes;
+        // We use strength for power, accuracy for control
+        const strength = pAttrs.physical?.strength || 50;
+        const accuracy = pAttrs.technical?.throwingAccuracy || 50; // Using this as "kicking_accuracy"
+        const consistency = pAttrs.mental?.consistency || 50;
+
+        // --- 3. Calculate Punt Distance & Hang Time ---
+        // Base distance: 30-50 yards
+        const baseDistance = 30 + (strength / 5); 
+        // Consistency roll
+        const consistencyRoll = (50 - consistency) / 10; // +/- 5 yards for 50 cons.
+        const distance = baseDistance + getRandom(-consistencyRoll, consistencyRoll);
+
+        // Base hang time: 3.5 - 5.5 seconds
+        const hangTimeSeconds = (3.5 + (strength / 50));
+        
+        // --- 4. Calculate Aim Point (Error) ---
+        const accuracyPenalty = (100 - accuracy); // 0 (perfect) to 99 (wild)
+        // Max error: 0 to 20 yards sideways
+        const maxErrorDistance = (accuracyPenalty / 5); 
+        const xError = getRandom(-maxErrorDistance, maxErrorDistance);
+
+        const aimX = CENTER_X + xError;
+        const aimY = punterState.y + distance; // Kicking downfield
+
+        // --- 5. Calculate Final Landing Spot & Velocities ---
+        // Clamp to be in-bounds (but allow into endzone)
+        const clampedAimX = Math.max(1.0, Math.min(FIELD_WIDTH - 1.0, aimX));
+        const clampedAimY = Math.max(1.0, Math.min(FIELD_LENGTH - 1.0, aimY));
+
+        const dx_final = clampedAimX - punterState.x;
+        const dy_final = clampedAimY - punterState.y;
+        
+        const airTimeTicks = hangTimeSeconds / TICK_DURATION_SECONDS;
+
+        playState.ballState.vx = dx_final / airTimeTicks;
+        playState.ballState.vy = dy_final / airTimeTicks;
+        const g = 9.8; // Gravity
+        playState.ballState.vz = (g * hangTimeSeconds) / 2; // Initial upward velocity
+
+        // --- 6. Set Ball State ---
+        playState.ballState.inAir = true;
+        playState.ballState.targetPlayerId = null; // **CRITICAL: No target player**
+        playState.ballState.throwerId = punterState.id; // It was "thrown" by punter
+        playState.ballState.throwInitiated = true;
+        playState.ballState.targetX = clampedAimX;
+        playState.ballState.targetY = clampedAimY;
+
+        punterState.hasBall = false;
+        punterState.isBallCarrier = false;
+        punterState.action = 'idle'; // Kick is done
+    }
+}
 // game.js
 
 /**
  * Handles ball arrival at target coordinates. (MODIFIED)
  */
-function handleBallArrival(playState, gameLog) {
+function handleBallArrival(playState, gameLog, play) {
+    // --- 💡 START: NEW PUNT CATCH LOGIC ---
+    if (play.type === 'punt' && playState.ballState.inAir && playState.ballState.targetPlayerId === null) {
+        if (playState.ballState.z < 0.1) return; // Already hit ground, will be handled by tick loop
+
+        const CATCH_CHECK_RADIUS = 3.0; // Wider radius for punts
+        const ballPos = playState.ballState;
+
+        // Find all *defenders* (returners) in range
+        const returnersInRange = playState.activePlayers.filter(p =>
+            !p.isOffense &&
+            !p.isEngaged &&
+            p.action === 'punt_return' &&
+            getDistance(p, ballPos) < CATCH_CHECK_RADIUS
+        );
+
+        if (returnersInRange.length === 0) {
+            // No returner is in range to catch it. Let it fall.
+            return;
+        }
+
+        // Find the closest returner to the ball
+        const returnerState = returnersInRange.sort((a, b) => getDistance(a, ballPos) - getDistance(b, ballPos))[0];
+        const returnerPlayer = game.players.find(p => p && p.id === returnerState.id);
+        if (!returnerPlayer) return; // Safety check
+
+        // Check for a muff
+        const catchingHands = returnerPlayer.attributes?.technical?.catchingHands || 50;
+        const muffChance = 0.05 + (1 - (catchingHands / 100)) * 0.15; // 5% to 20%
+
+        if (Math.random() < muffChance) {
+            // --- MUFFED PUNT! ---
+            if (gameLog) gameLog.push(`❗ MUFFED PUNT! ${returnerState.name} drops it!`);
+            playState.ballState.isLoose = true;
+            playState.ballState.inAir = false;
+            playState.ballState.z = 0.1;
+            playState.turnover = true; // It's a turnover *for now*
+            returnerState.stunnedTicks = 30;
+        } else {
+            // --- CATCH SUCCESSFUL ---
+            if (gameLog) gameLog.push(`🏈 Punt caught by ${returnerState.name}.`);
+            playState.turnover = true;
+            playState.ballState.inAir = false;
+
+            // Assign ball carrier
+            returnerState.isBallCarrier = true;
+            returnerState.hasBall = true;
+            returnerState.action = 'run_path';
+            playState.activePlayers.forEach(p => {
+                p.hasBall = (p.id === returnerState.id);
+                p.isBallCarrier = (p.id === returnerState.id);
+                if (p.isOffense) {
+                    p.action = 'pursuit'; // Gunners now tackle
+                } else if (p.id !== returnerState.id) {
+                    p.action = 'run_block'; // Teammates now block
+                }
+            });
+        }
+        return; // Punt event resolved
+    }
+    // --- 💡 END: NEW PUNT CATCH LOGIC ---
     // 1. Ball Height Check
     if (!playState.ballState.inAir) return; // Ball not in air
 
@@ -3199,10 +3356,10 @@ function handleBallArrival(playState, gameLog) {
             });
 
             ensureStats(defenderPlayer);
-            defenderPlayer.gameStats.interceptions = (defenderPlayer.gameStats.interceptions || 0) + 1;
+            //defenderPlayer.gameStats.interceptions = (defenderPlayer.gameStats.interceptions || 0) + 1;
 
             if (throwerPlayer) {
-                throwerPlayer.gameStats.interceptionsThrown = (throwerPlayer.gameStats.interceptionsThrown || 0) + 1;
+                //throwerPlayer.gameStats.interceptionsThrown = (throwerPlayer.gameStats.interceptionsThrown || 0) + 1;
             }
         }
     }
@@ -3513,6 +3670,8 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
     const playState = {
         playIsLive: true, tick: 0, maxTicks: 1000,
         yards: 0, touchdown: false, turnover: false, incomplete: false, sack: false, safety: false,
+        finalBallY: 0, // 💡 
+        touchback: false, // 💡 
         ballState: {
             x: 0, y: 0, z: 1.0,
             vx: 0, vy: 0, vz: 0,
@@ -3599,9 +3758,13 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
             ballCarrierState = playState.activePlayers.find(p => p.isBallCarrier);
             const ballPos = playState.ballState;
 
-            // --- STEP 1: QB Logic (Decide Throw/Scramble) ---
-            if (playState.playIsLive && type === 'pass' && !ballPos.inAir && !playState.turnover && !playState.sack) {
-                updateQBDecision(playState, offenseStates, defenseStates, gameLog);
+            // --- STEP 1: QB / Punter Logic (Decide Throw/Scramble) ---
+            if (playState.playIsLive && !ballPos.inAir && !playState.turnover && !playState.sack) {
+                if (type === 'pass') {
+                    updateQBDecision(playState, offenseStates, defenseStates, gameLog);
+                } else if (type === 'punt' && !ballPos.isLoose) {
+                    updatePunterDecision(playState, offenseStates, gameLog);
+                }
             }
             if (!playState.playIsLive) break; // Play ended (e.g., QB threw away)
 
@@ -3633,6 +3796,7 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
                 if (ballCarrierState) {
                     if (ballCarrierState.y >= FIELD_LENGTH - 10 && ballCarrierState.isOffense) { // Offensive TD
                         playState.yards = ballCarrierState.y - playState.lineOfScrimmage;
+                        playState.finalBallY = ballCarrierState.y;
                         playState.touchdown = true; playState.playIsLive = false;
                         const scorer = game.players.find(p => p && p.id === ballCarrierState.id);
                         if (gameLog) gameLog.push(`🎉 TOUCHDOWN ${scorer?.name || 'player'}!`);
@@ -3640,11 +3804,13 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
                     } else if (ballCarrierState.y < 10 && !ballCarrierState.isOffense) { // Defensive TD
                         playState.yards = 0;
                         playState.touchdown = true; playState.playIsLive = false;
+                        playState.finalBallY = ballCarrierState.y;
                         const scorer = game.players.find(p => p && p.id === ballCarrierState.id);
                         if (gameLog) gameLog.push(`🎉 DEFENSIVE TOUCHDOWN ${scorer?.name || 'player'}!`);
                         break;
                     } else if (ballCarrierState.y < 10 && ballCarrierState.isOffense) { // SAFETY
                         playState.yards = 0;
+                        playState.finalBallY = ballCarrierState.y;
                         playState.safety = true;
                         playState.playIsLive = false;
                         if (gameLog) gameLog.push(`SAFETY! ${ballCarrierState.name} was tackled in the endzone!`);
@@ -3652,6 +3818,7 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
                     }
                     if (ballCarrierState.x <= 0.1 || ballCarrierState.x >= FIELD_WIDTH - 0.1) {
                         playState.yards = ballCarrierState.y - playState.lineOfScrimmage;
+                        playState.finalBallY = ballCarrierState.y;
                         playState.playIsLive = false;
                         if (gameLog) gameLog.push(` sidelines... ${ballCarrierState.name} ran out of bounds after a gain of ${playState.yards.toFixed(1)} yards.`);
                         break;
@@ -3667,8 +3834,11 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
                 // B. Check for tackles
                 ballCarrierState = playState.activePlayers.find(p => p.isBallCarrier);
                 if (ballCarrierState) {
-                    if (checkTackleCollisions(playState, gameLog)) break;
-                }
+                    if (checkTackleCollisions(playState, gameLog)) {
+                        playState.finalBallY = ballCarrierState.y; // 💡 **ADD THIS**
+                        break;
+                    }
+                }
 
                 // --- 💡 FIX: FUMBLE RECOVERY LOGIC MOVED HERE ---
                 // D. Check for Fumble Recovery (Now OUTSIDE of the ballPos.inAir check)
@@ -3719,22 +3889,46 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
                     const CATCH_ARRIVAL_RADIUS = 2.0;
 
                     if (distToTargetXY < CATCH_ARRIVAL_RADIUS) {
-                        handleBallArrival(playState, gameLog);
-                        if (!playState.playIsLive) break;
+                        handleBallArrival(playState, gameLog, play);
+                        if (!playState.playIsLive) {
+                            if (playState.incomplete) {
+                                playState.finalBallY = ballPos.y; // 💡 **ADD THIS**
+                            }
+                            break;
+                        }
                     }
 
                     // E. Check for Ground / Out of Bounds (if not caught)
                     if (playState.playIsLive) {
                         if (ballPos.z <= 0.1 && playState.tick > 6) {
-                            if (gameLog) gameLog.push(`‹‹ Pass hits the ground. Incomplete.`);
-                            playState.incomplete = true; playState.playIsLive = false; ballPos.inAir = false;
-                            break;
-                        }
+                            // 💡 **START: MODIFIED GROUND BALL LOGIC**
+                            if (type === 'punt') {
+                                if (gameLog) gameLog.push(`🏈 Punt is downed.`);
+                                playState.turnover = true; // Defense's ball
+                            } else {
+                                if (gameLog) gameLog.push(`‹‹ Pass hits the ground. Incomplete.`);
+                            }
+                            playState.incomplete = true; playState.playIsLive = false; ballPos.inAir = false;
+                            playState.finalBallY = ballPos.y; // 💡 **ADD THIS**
+                            break;
+                        }
                         if (ballPos.x <= 0.1 || ballPos.x >= FIELD_WIDTH - 0.1 || ballPos.y >= FIELD_LENGTH - 0.1 || ballPos.y <= 0.1) {
-                            if (gameLog) gameLog.push(`‹‹ Pass sails out of bounds. Incomplete.`);
-                            playState.incomplete = true; playState.playIsLive = false; ballPos.inAir = false;
-                            break;
-                        }
+                            // 💡 **START: MODIFIED OOB BALL LOGIC**
+                            if (type === 'punt') {
+                                if (ballPos.y >= FIELD_LENGTH - 10) { // Endzone
+                                    if (gameLog) gameLog.push(`🏈 Punt sails out of the endzone. Touchback.`);
+                                    playState.touchback = true;
+                                } else {
+                                    if (gameLog) gameLog.push(`🏈 Punt goes out of bounds.`);
+                                }
+                                playState.turnover = true;
+                            } else {
+                                if (gameLog) gameLog.push(`‹‹ Pass sails out of bounds. Incomplete.`);
+                            }
+                            playState.incomplete = true; playState.playIsLive = false; ballPos.inAir = false;
+                            playState.finalBallY = ballPos.y; // 💡 **ADD THIS**
+                            break;
+                        }
                     }
                 } // --- End of if(ballPos.inAir) ---
             }
@@ -3821,11 +4015,14 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
         ballCarrierState = playState.activePlayers.find(p => p.isBallCarrier);
         if (ballCarrierState) {
             playState.yards = ballCarrierState.y - playState.lineOfScrimmage;
+            playState.finalBallY = ballCarrierState.y;
             if (gameLog) gameLog.push(`⏱️ Play ends. Gain of ${playState.yards.toFixed(1)} yards.`);
         } else if (!playState.sack && !playState.turnover) {
             playState.incomplete = true; playState.yards = 0;
+            playState.finalBallY = ballCarrierState.y;
             if (gameLog) gameLog.push("⏱️ Play ends, incomplete.");
         } else {
+            playState.finalBallY = ballCarrierState.y;
             if (gameLog) gameLog.push("⏱️ Play ends.");
         }
     }
@@ -3851,6 +4048,8 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
         turnover: playState.turnover,
         incomplete: playState.incomplete,
         safety: playState.safety,
+        touchback: playState.touchback, // 💡 **ADD THIS**
+        finalBallY: playState.finalBallY, // 💡 **ADD THIS**
         log: gameLog,
         visualizationFrames: playState.visualizationFrames
     };
@@ -4612,53 +4811,61 @@ export function simulateGame(homeTeam, awayTeam, options = {}) {
                 }
 
                 const shouldPunt = determinePuntDecision(down, yardsToGo, ballOn);
-                let result;
-                let scoreDiff;
-                let drivesRemainingInGame;
+                let result;
+                let scoreDiff;
+                let drivesRemainingInGame;
+                let offensivePlayKey; // 💡 **MOVED DECLARATION UP**
+                let defensivePlayKey; // 💡 **MOVED DECLARATION UP**
 
-                if (shouldPunt) {
-                    // --- 3A. IT'S A PUNT PLAY ---
-                    if (!fastSim) {
-                        gameLog.push(`--- 4th & ${yardsToGo <= 0 ? 'Goal' : yardsToGo}. ${offense.name} is punting. ---`);
-                    }
-                    // Set special team formations
-                    offense.formations.offense = 'Punt';
-                    defense.formations.defense = 'Punt_Return';
+                if (shouldPunt) {
+               
+               // Set the offensive formation and play
+                offense.formations.offense = 'Punt';
+                offensivePlayKey = 'Punt_Punt'; 
+                
+                // Set the defensive formation and play
+                defense.formations.defense = 'Punt_Return';
+                defensivePlayKey = 'Punt_Return_Return';
+                
+                if (!fastSim) {
+                    const offPlayName = offensivePlaybook[offensivePlayKey]?.name || "Punt";
+                    const defPlayName = defensivePlaybook[defensivePlayKey]?.name || "Punt Return";
+                    gameLog.push(`🏈 **Offense:** ${offPlayName}`);
+                    gameLog.push(`🛡️ **Defense:** ${defPlayName}`);
+                }
 
-                    // 💡 **MODIFIED CALL:** Pass scores in, get scores back
-                    result = resolvePunt(
-                        offense, defense,
-                        { gameLog: fastSim ? null : gameLog, ballOn },
-                        homeScore,
-                        awayScore,
-                        homeTeam.id
-                    );
+                result = resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey,
+                    { gameLog: fastSim ? null : gameLog, weather, ballOn, ballHash, down, yardsToGo },
+                    options
+                );
 
-                    // 💡 **NEW LOGIC:** Update scores based on punt result (e.g., Return TD)
-                    homeScore = result.homeScore;
-                    awayScore = result.awayScore;
+                if (!fastSim && result.visualizationFrames) {
+                    allVisualizationFrames.push(...result.visualizationFrames);
+                }
+               
+                    // --- It was a punt, handle the result ---
+                    driveActive = false; // A punt always ends the offensive possession (unless muffed)
 
-                    if (result.turnover === false) {
-                        // This means a muff was recovered by the punting team!
-                        driveActive = true; // Keep the drive alive
-                        ballOn = result.newBallOn;
-                        down = 1;
-                        yardsToGo = Math.max(1, Math.min(10, 100 - ballOn));
-                        if (!fastSim) gameLog.push(`➡️ First down ${offense.name}!`);
-                    } else {
-                        // This was a normal punt, a touchback, or a return TD.
-                        // In all cases, the drive ends for the offense.
-                        driveActive = false;
-                        nextDriveStartBallOn = result.newBallOn;
-                    }
-
-                    if (!fastSim && allVisualizationFrames) {
-                        // Add a simple frame for the punt
-                        allVisualizationFrames.push({
-                            players: [], ball: null, logIndex: gameLog.length,
-                            lineOfScrimmage: ballOn + 10, firstDownY: ballOn + 10 + yardsToGo
-                        });
-                    }
+                    if (result.touchdown && result.turnover) { // Punt Return TD
+                        if (defense.id === homeTeam.id) homeScore += 6; else awayScore += 6;
+                        nextDriveStartBallOn = 20; // Kickoff
+                    } else if (result.touchdown && !result.turnover) { // Blocked punt, recovered by offense for TD
+                        if (offense.id === homeTeam.id) homeScore += 6; else awayScore += 6;
+                        // ... (Handle conversion logic here, simplified for now) ...
+                        nextDriveStartBallOn = 20; // Kickoff
+                    } else if (result.touchback) { // Punt went into endzone
+                        nextDriveStartBallOn = 20;
+                    } else if (result.turnover) { // Normal punt, defense takes possession
+                        const finalBallOn = result.finalBallY - 10;
+                        nextDriveStartBallOn = 100 - finalBallOn;
+                    } else { // No turnover (Muffed punt recovered by offense)
+                        const finalBallOn = result.finalBallY - 10;
+                        ballOn = finalBallOn;
+                        down = 1;
+                        yardsToGo = 10; // (Add goal-line logic if needed)
+                        driveActive = true; // Drive continues!
+                        if (!fastSim) gameLog.push(`➡️ First down ${offense.name}!`);
+                    }
 
                 } else {
                     // --- 3B. IT'S A NORMAL PLAY ---
@@ -4674,7 +4881,7 @@ export function simulateGame(homeTeam, awayTeam, options = {}) {
                     // --- 4. PRE-SNAP & PLAY CALLING ---
                     offense.formations.offense = offense.coach.preferredOffense || 'Balanced';
 
-                    // ✅ **FIX:** Assign the scoreDiff (it was declared above)
+                    // Assign the scoreDiff (it was declared above)
                     scoreDiff = offense.id === homeTeam.id ? homeScore - awayScore : awayScore - homeScore;
                     const drivesCompletedInHalf = drivesThisGame % totalDrivesPerHalf;
                     const drivesRemainingInHalf = totalDrivesPerHalf - drivesCompletedInHalf;
@@ -4695,10 +4902,10 @@ export function simulateGame(homeTeam, awayTeam, options = {}) {
                         if (gameLog) gameLog.push(`🛡️ **Defense:** ${defPlayName}`);
                     }
 
-                    result = resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, 
-                    { gameLog: fastSim ? null : gameLog, weather, ballOn, ballHash, down, yardsToGo },
-                    options // <-- ADD THIS
-                    );
+                    result = resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey,
+                    { gameLog: fastSim ? null : gameLog, weather, ballOn, ballHash, down, yardsToGo },
+                    options
+                    );
 
                     if (!fastSim && result.visualizationFrames) {
                         allVisualizationFrames.push(...result.visualizationFrames);
@@ -5562,7 +5769,7 @@ export function updateDepthChart(playerId, newPositionSlot, side) {
     const team = game?.playerTeam;
     if (!team || !team.depthChart || !team.depthChart[side]) { console.error("updateDepthChart: Invalid state."); return; }
     const chart = team.depthChart[side];
-    const player = team.roster.find(p => p && p.id === playerId);
+    const player = game.players.find(p => p && p.id === playerId);
     if (player && player.status?.type === 'temporary') {
         console.warn("Cannot move temporary players in depth chart.");
         return;
