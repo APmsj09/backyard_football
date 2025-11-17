@@ -217,68 +217,72 @@ export const offensivePlaybook = {
     },
     // --- Trips Left Formation (QB1, WR1, WR2, WR3, OL1, OL2, OL3) ---
     'Trips_Left_Screen': {
-        type: 'pass', tags: ['pass', 'screen'],
-        readProgression: ['WR3'], // One read: The screen
-        assignments: {
-            'WR3': 'Screen',     // The receiver (closest to center)
-            'WR1': 'run_block',  // Lead blocker (farthest out)
-            'WR2': 'run_block',  // Lead blocker (middle)
-            'OL1': 'run_block',  // OL releases to block
-            'OL2': 'pass_block', // Sells the pass
-            'OL3': 'pass_block'  // Sells the pass
-        }
-    },
+        name: 'Trips Left Screen', // **FIX:** Added name
+        type: 'pass', tags: ['pass', 'screen'],
+        readProgression: ['WR3'], // One read: The screen
+        assignments: {
+            'WR3': 'Screen',     // The receiver (closest to center)
+            'WR1': 'run_block',  // Lead blocker (farthest out)
+            'WR2': 'run_block',  // Lead blocker (middle)
+            'OL1': 'run_block',  // OL releases to block
+            'OL2': 'pass_block', // Sells the pass
+            'OL3': 'pass_block'  // Sells the pass
+        }
+    },
     'Trips_Left_Slants': {
-        type: 'pass', tags: ['pass', 'short', 'quick'],
-        readProgression: ['WR1', 'WR2', 'WR3'], // Read 1: Outside Slant, Read 2: Middle Slant, Read 3: Inside Flat
-        assignments: {
-            'WR1': 'Slant',
-            'WR2': 'Slant',
-            'WR3': 'Flat',
-            'OL1': 'pass_block',
-            'OL2': 'pass_block',
-            'OL3': 'pass_block'
-        }
-    },
+        name: 'Trips Left Slants', // **FIX:** Added name
+        type: 'pass', tags: ['pass', 'short', 'quick'],
+        readProgression: ['WR1', 'WR2', 'WR3'], // Read 1: Outside Slant, Read 2: Middle Slant, Read 3: Inside Flat
+        assignments: {
+            'WR1': 'Slant',
+            'WR2': 'Slant',
+            'WR3': 'Flat',
+            'OL1': 'pass_block',
+            'OL2': 'pass_block',
+            'OL3': 'pass_block'
+        }
+    },
     'Trips_Left_Verts': {
-        type: 'pass', tags: ['pass', 'deep'],
-        readProgression: ['WR3', 'WR2', 'WR1'], // Read 1: Inside Post, Read 2: Middle Fly, Read 3: Outside Fly
-        assignments: {
-            'WR1': 'Fly',
-            'WR2': 'Fly',
-            'WR3': 'Post',
-            'OL1': 'pass_block',
-            'OL2': 'pass_block',
-            'OL3': 'pass_block'
-        }
-    },
+        name: 'Trips Left Verts', // **FIX:** Added name
+        type: 'pass', tags: ['pass', 'deep'],
+        readProgression: ['WR3', 'WR2', 'WR1'], // Read 1: Inside Post, Read 2: Middle Fly, Read 3: Outside Fly
+        assignments: {
+            'WR1': 'Fly',
+            'WR2': 'Fly',
+            'WR3': 'Post',
+            'OL1': 'pass_block',
+            'OL2': 'pass_block',
+            'OL3': 'pass_block'
+        }
+    },
     'Trips_Left_Drive': {
-        type: 'pass', tags: ['pass', 'medium', 'timing'],
-        readProgression: ['WR2', 'WR3', 'WR1'], // Read 1: In (Dig), Read 2: Drag (Shallow), Read 3: Fly (Clear-out)
-        assignments: {
-            'WR1': 'Fly',    // Clears out the deep coverage
-            'WR2': 'In',     // The primary read (10-12 yard In)
-            'WR3': 'Drag',   // The shallow crosser underneath
-            'OL1': 'pass_block',
-            'OL2': 'pass_block',
-            'OL3': 'pass_block'
-        }
-    },
+        name: 'Trips Left Drive', // **FIX:** Added name
+        type: 'pass', tags: ['pass', 'medium', 'timing'],
+        readProgression: ['WR2', 'WR3', 'WR1'], // Read 1: In (Dig), Read 2: Drag (Shallow), Read 3: Fly (Clear-out)
+        assignments: {
+            'WR1': 'Fly',    // Clears out the deep coverage
+            'WR2': 'In',     // The primary read (10-12 yard In)
+            'WR3': 'Drag',   // The shallow crosser underneath
+            'OL1': 'pass_block',
+            'OL2': 'pass_block',
+            'OL3': 'pass_block'
+        }
+    },
     'Punt_Punt': {
-        name: 'Punt',
-        type: 'punt', // <-- NEW PLAY TYPE
-        tags: ['specialTeams'],
-        readProgression: [], // No reads
-        assignments: {
-            'QB1': 'punt', // <-- NEW ASSIGNMENT
-            'OL1': 'pass_block',
-            'OL2': 'pass_block',
-            'OL3': 'pass_block',
-            'RB1': 'pass_block',
-            'WR1': 'run_route', // Gunners run downfield
-            'WR2': 'run_route'
-        }
-    },
+        name: 'Punt',
+        type: 'punt', 
+        tags: ['specialTeams'],
+        readProgression: [], // No reads
+        assignments: {
+            'QB1': 'punt', // This assignment is symbolic for our new resolvePunt
+            'OL1': 'pass_block',
+            'OL2': 'pass_block',
+            'OL3': 'pass_block',
+            'RB1': 'pass_block',
+            'WR1': 'Fly', // **FIX:** Gunners now run a 'Fly' route
+            'WR2': 'Fly'  // **FIX:** Gunners now run a 'Fly' route
+        }
+    },
 };
 
 // Defensive Play Call Definitions
@@ -811,28 +815,30 @@ export const offenseFormations = {
         }
     },
     'Punt': {
-        name: 'Punt',
-        personnel: { 'OL': 3, 'WR': 2, 'QB': 1, 'RB': 1 }, // 7-man team
-        slots: ['OL1', 'OL2', 'OL3', 'WR1', 'WR2', 'RB1', 'QB1'], // QB is the Punter
-        coordinates: {
-            'QB1': [0, -10],  // Punter
-            'OL1': [0, 0],    // Long snapper (at 'OL2' position)
-            'OL2': [-3, 0],   // Blocker
-            'OL3': [3, 0],    // Blocker
-            'RB1': [-1, -7],  // Personal protector
-            'WR1': [-20, 1],  // Gunner
-            'WR2': [20, 1]    // Gunner
-        },
-        slotPriorities: { // Priorities for AI to fill this formation
-            'QB1': { 'throwingAccuracy': 0.6, 'strength': 0.4 }, // Punter
-            'OL1': { 'blocking': 0.5, 'strength': 0.5 }, // Snapper
-            'OL2': { 'blocking': 0.7, 'strength': 0.3 },
-            'OL3': { 'blocking': 0.7, 'strength': 0.3 },
-            'RB1': { 'blocking': 0.5, 'playbookIQ': 0.5 }, // Protector
-            'WR1': { 'speed': 0.8, 'tackling': 0.2 }, // Gunner
-            'WR2': { 'speed': 0.8, 'tackling': 0.2 }  // Gunner
-        }
-    },
+        name: 'Punt',
+        personnel: { 'OL': 3, 'WR': 2, 'QB': 1, 'RB': 1 }, // 7-man team
+        slots: ['OL1', 'OL2', 'OL3', 'WR1', 'WR2', 'RB1', 'QB1'], // QB is the Punter
+        coordinates: {
+            'QB1': [0, -10],  // Punter
+            'OL1': [0, -0.75],  // Long snapper (at 'OL2' position)
+            'OL2': [-3, -0.5],  // Blocker
+            'OL3': [3, -0.5],    // Blocker
+            'RB1': [-1, -7],  // Personal protector
+            'WR1': [-20, 0.5],  // Gunner
+            'WR2': [20, 0.5]    // Gunner
+        },
+        slotPriorities: { // Priorities for AI to fill this formation
+            // **FIX:** We use QB strength/accuracy for punting in our logic
+            'QB1': { 'strength': 3, 'throwingAccuracy': 2 }, // Punter
+            'OL1': { 'blocking': 3, 'strength': 2 }, // Snapper
+            'OL2': { 'blocking': 3, 'strength': 1 },
+            'OL3': { 'blocking': 3, 'strength': 1 },
+            'RB1': { 'blocking': 3, 'playbookIQ': 2 }, // Protector
+            // **FIX:** Gunners need speed to get downfield and tackling ability
+            'WR1': { 'speed': 3, 'tackling': 2 },
+            'WR2': { 'speed': 3, 'tackling': 2 }
+        }
+    },
 };
 
 export const defenseFormations = {
@@ -964,28 +970,31 @@ export const defenseFormations = {
         }
     },
     'Punt_Return': {
-        name: 'Punt Return',
-        personnel: { 'DL': 2, 'LB': 2, 'DB': 3 }, // 7-man team
-        slots: ['DL1', 'DL2', 'LB1', 'LB2', 'DB1', 'DB2', 'DB3'],
-        coordinates: {
-            'DL1': [-3, 10],  // Rusher
-            'DL2': [3, 10],   // Rusher
-            'LB1': [-15, 12], // Contain
-            'LB2': [15, 12],  // Contain
-            'DB1': [-10, 35], // Returner
-            'DB2': [10, 35],  // Returner
-            'DB3': [0, 40],   // Deep Returner
-        },
-        slotPriorities: {
-            'DL1': { 'speed': 0.6, 'blockShedding': 0.4 },
-            'DL2': { 'speed': 0.6, 'blockShedding': 0.4 },
-            'LB1': { 'blocking': 0.5, 'speed': 0.5 },
-            'LB2': { 'blocking': 0.5, 'speed': 0.5 },
-            'DB1': { 'agility': 0.6, 'speed': 0.4 },
-            'DB2': { 'agility': 0.6, 'speed': 0.4 },
-            'DB3': { 'agility': 0.7, 'speed': 0.3 }, // Best returner
-        }
-    },
+        name: 'Punt Return',
+        personnel: { 'DL': 2, 'LB': 2, 'DB': 3 }, // 7-man team
+        slots: ['DL1', 'DL2', 'LB1', 'LB2', 'DB1', 'DB2', 'DB3'],
+        coordinates: { 
+            // **FIX:** All Y-coordinates are now relative to the LoS (Y=0)
+            'DL1': [-3, 1.0],  // Rusher (on the line)
+            'DL2': [3, 1.0],   // Rusher (on the line)
+            'LB1': [-15, 5.0], // Contain (off the line)
+            'LB2': [15, 5.0],  // Contain (off the line)
+            'DB1': [-10, 40.0], // Returner
+            'DB2': [10, 40.0],  // Returner
+            'DB3': [0, 45.0],   // Deep Returner
+        },
+        slotPriorities: {
+            // **FIX:** Priorities should match their jobs
+            'DL1': { 'speed': 3, 'blockShedding': 2 }, // Punt Rusher
+            'DL2': { 'speed': 3, 'blockShedding': 2 }, // Punt Rusher
+            'LB1': { 'blocking': 3, 'speed': 2 }, // Hold up gunners
+            'LB2': { 'blocking': 3, 'speed': 2 }, // Hold up gunners
+            // **FIX:** Returners need agility, speed, and hands
+            'DB1': { 'agility': 3, 'speed': 2, 'catchingHands': 1 },
+            'DB2': { 'agility': 3, 'speed': 2, 'catchingHands': 1 },
+            'DB3': { 'agility': 3, 'speed': 3, 'catchingHands': 2 }, // Best returner
+        }
+    },
 };
 
 export const coachPersonalities = [
