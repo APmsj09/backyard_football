@@ -158,10 +158,13 @@ export function setupElements() {
         defenseFormationSelect: document.getElementById('defense-formation-select'),
         offenseDepthChartPane: document.getElementById('depth-chart-offense-pane'),
         defenseDepthChartPane: document.getElementById('depth-chart-defense-pane'),
-        offenseDepthChartSlots: document.getElementById('offense-depth-chart-slots'),
-        offenseDepthChartRoster: document.getElementById('offense-depth-chart-roster'),
-        defenseDepthChartSlots: document.getElementById('defense-depth-chart-slots'),
-        defenseDepthChartRoster: document.getElementById('defense-depth-chart-roster'),
+        // ✔ Correct visual field containers
+        offenseVisualField: document.getElementById('offense-visual-field'),
+        defenseVisualField: document.getElementById('defense-visual-field'),
+
+        // ✔ Correct bench table containers
+        offenseBenchTable: document.getElementById('offense-bench-table'),
+        defenseBenchTable: document.getElementById('defense-bench-table'),
         positionalOverallsContainer: document.getElementById('positional-overalls-container'),
 
         // --- Game Sim Screen Elements ---
