@@ -2308,7 +2308,7 @@ function runLiveGameTick() {
         return;
     }
 
-    let playHasEnded = false; // --- 🛠️ NEW: Flag to track end of play
+    let playHasEnded = false; // Flag to track end of play
 
     // --- 3. Sync Log Entries & Update State (The Combined Step) ---
     if (ticker && frame.logIndex > liveGameLogIndex) {
@@ -2320,7 +2320,7 @@ function runLiveGameTick() {
             let styleClass = '';
             let descriptiveText = playLogEntry;
 
-            // --- 🛠️ COMBINED LOGIC: Parse log AND set styles ---
+            // --- COMBINED LOGIC: Parse log AND set styles ---
             try {
                 if (playLogEntry.includes('Conversion Attempt')) {
                     liveGameIsConversion = true; // Set the flag
@@ -2390,30 +2390,42 @@ function runLiveGameTick() {
                     descriptiveText = playLogEntry;
                     playHasEnded = true; // An incompletion ends the play
                 
-                // --- 💡 FIX: ADDED PUNT LOGIC ---
+                // --- 💡💡💡 START PUNT LOGIC FIX 💡💡💡 ---
                 } else if (playLogEntry.includes('PUNT by')) {
-                    liveGameDriveActive = false; // Punt is a change of possession
                     styleClass = 'font-semibold text-blue-300'; // Special teams color
                     descriptiveText = playLogEntry;
-                    playHasEnded = true; // A punt play ends the sequence
+                    // This log is an *outcome* if it includes one of these phrases
+                    if (playLogEntry.includes('TOUCHBACK') || playLogEntry.includes('FAIR CATCH') || playLogEntry.includes('returns for') || playLogEntry.includes('No healthy returner')) {
+                        liveGameDriveActive = false;
+                        playHasEnded = true;
+                    }
+                    // If it's just "PUNT by..." it's part of a muff sequence, so we don't end the play
                 
                 } else if (playLogEntry.includes('MUFFED PUNT')) {
-                     // Don't change driveActive yet, wait for the recovery log
                     styleClass = 'font-bold text-red-500';
                     descriptiveText = playLogEntry;
                     playHasEnded = false; // The muff itself doesn't pause, the recovery does
                 
                 } else if (playLogEntry.includes('recovers the muff')) {
-                    liveGameDriveActive = !playLogEntry.includes(liveGamePossessionName); // Turnover if defense recovers
+                    // **CRITICAL FIX**: This logic was inverted.
+                    // If the offense's name is in the log, they kept possession.
+                    liveGameDriveActive = playLogEntry.includes(liveGamePossessionName);
                     styleClass = 'font-semibold text-yellow-300';
                     descriptiveText = playLogEntry;
-                    playHasEnded = true; // The recovery ends the play
-                // --- 💡 END FIX ---
+                    playHasEnded = true; // The recovery is the end of the play
+                
+                } else if (playLogEntry.includes('PUNT FAILED')) {
+                    liveGameDriveActive = false;
+                    styleClass = 'font-bold text-red-500';
+                    descriptiveText = playLogEntry;
+                    playHasEnded = true;
+                // --- 💡💡💡 END PUNT LOGIC FIX 💡💡💡 ---
 
                 } else if (playLogEntry.startsWith('🎉 TOUCHDOWN') || playLogEntry.startsWith('🎉 PUNT RETURN TOUCHDOWN')) {
-                    if (!liveGameIsConversion) { // Only add 6 if it's NOT a conversion
-                        // 💡 FIX: Check if log contains home/away name for defensive/return TDs
-                        if (playLogEntry.includes(currentLiveGameResult.homeTeam.name) || (liveGamePossessionName === currentLiveGameResult.homeTeam.name && !playLogEntry.includes(currentLiveGameResult.awayTeam.name))) {
+                    if (!liveGameIsConversion) {
+                        // 💡 FIX: Correctly attribute defensive/return TDs
+                        const isHomeTD = playLogEntry.includes(currentLiveGameResult.homeTeam.name) || (liveGamePossessionName === currentLiveGameResult.homeTeam.name && !playLogEntry.includes(currentLiveGameResult.awayTeam.name));
+                        if (isHomeTD) {
                             liveGameCurrentHomeScore += 6;
                         } else {
                             liveGameCurrentAwayScore += 6;
@@ -2496,7 +2508,7 @@ function runLiveGameTick() {
     // --- 7. Advance to Next Frame OR Start Huddle ---
     liveGameCurrentIndex++;
 
-    // --- 🛠️ NEW: Huddle Logic ---
+    // --- NEW: Huddle Logic ---
     if (playHasEnded && liveGameCurrentIndex < allFrames.length) {
         // The play is over! Stop the "action" clock.
         clearInterval(liveGameInterval);
