@@ -2861,9 +2861,9 @@ function updateQBDecision(playState, offenseStates, defenseStates, gameLog, aiTi
 
 
     // --- 3. Update Read Progression ---
-    const READ_PROGRESSION_DELAY = Math.max(12, Math.round((100 - qbIQ) / 8)) * aiTickMultiplier; // 💡 SCALED
-    const initialReadTicks = 20 * aiTickMultiplier; // 💡 SCALED
-
+    const READ_PROGRESSION_DELAY = Math.max(2, Math.round(Math.max(12, Math.round((100 - qbIQ) / 8)) / aiTickMultiplier));
+    const initialReadTicks = Math.max(2, Math.round(20 / aiTickMultiplier));
+    
     let decisionMade = false;
 
     if (playState.tick > initialReadTicks && !isPressured && !decisionMade) {
@@ -2888,12 +2888,11 @@ function updateQBDecision(playState, offenseStates, defenseStates, gameLog, aiTi
 
     // --- 4. Decision Timing Logic (REVISED) ---
     // Decision time scales with IQ: higher IQ = more patience
-    const baseDecisionTicks = 60 * aiTickMultiplier; // 💡 SCALED
-    const iqPenaltyTicks = Math.round((100 - qbIQ) * 0.5) * aiTickMultiplier; // 💡 SCALED
-    const calmnessBonus = Math.round(qbIQ * 0.2) * aiTickMultiplier; // 💡 SCALED
-
-    const maxDecisionTimeTicks = baseDecisionTicks + iqPenaltyTicks + calmnessBonus;
-    const pressureTimeReduction = isPressured ? Math.max(20, Math.round((100 - qbIQ) * 0.3)) * aiTickMultiplier : 0; // 💡 SCALED
+    const baseDecisionTicks = Math.round(60 / aiTickMultiplier);
+    const iqPenaltyTicks = Math.round(Math.round((100 - qbIQ) * 0.5) / aiTickMultiplier);
+    const calmnessBonus = Math.round(Math.round(qbIQ * 0.2) / aiTickMultiplier);
+    const maxDecisionTimeTicks = baseDecisionTicks + iqPenaltyTicks + calmnessBonus;
+    const pressureTimeReduction = isPressured ? Math.max(2, Math.round(Math.max(20, Math.round((100 - qbIQ) * 0.3)) / aiTickMultiplier)) : 0;
     const currentDecisionTickTarget = maxDecisionTimeTicks - pressureTimeReduction;
 
     let reason = "";
