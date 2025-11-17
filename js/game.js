@@ -2861,8 +2861,8 @@ function updateQBDecision(playState, offenseStates, defenseStates, gameLog, aiTi
 
 
     // --- 3. Update Read Progression ---
-    const READ_PROGRESSION_DELAY = Math.max(2, Math.round(Math.max(12, Math.round((100 - qbIQ) / 8)) / aiTickMultiplier));
-    const initialReadTicks = Math.max(2, Math.round(20 / aiTickMultiplier));
+    const READ_PROGRESSION_DELAY = Math.max(12, Math.round((100 - qbIQ) / 8));
+    const initialReadTicks = 20;
     
     let decisionMade = false;
 
@@ -2888,11 +2888,11 @@ function updateQBDecision(playState, offenseStates, defenseStates, gameLog, aiTi
 
     // --- 4. Decision Timing Logic (REVISED) ---
     // Decision time scales with IQ: higher IQ = more patience
-    const baseDecisionTicks = Math.round(60 / aiTickMultiplier);
-    const iqPenaltyTicks = Math.round(Math.round((100 - qbIQ) * 0.5) / aiTickMultiplier);
-    const calmnessBonus = Math.round(Math.round(qbIQ * 0.2) / aiTickMultiplier);
+    const baseDecisionTicks = 60;
+    const iqPenaltyTicks = Math.round((100 - qbIQ) * 0.5);
+    const calmnessBonus = Math.round(qbIQ * 0.2);
     const maxDecisionTimeTicks = baseDecisionTicks + iqPenaltyTicks + calmnessBonus;
-    const pressureTimeReduction = isPressured ? Math.max(2, Math.round(Math.max(20, Math.round((100 - qbIQ) * 0.3)) / aiTickMultiplier)) : 0;
+    const pressureTimeReduction = isPressured ? Math.max(20, Math.round((100 - qbIQ) * 0.3)) : 0;
     const currentDecisionTickTarget = maxDecisionTimeTicks - pressureTimeReduction;
 
     let reason = "";
@@ -3507,7 +3507,7 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
     const aiTickMultiplier = 0.05 / TICK_DURATION_SECONDS;
 
     const playState = {
-        playIsLive: true, tick: 0, maxTicks: 1000,
+        playIsLive: true, tick: 0, maxTicks: 1000 * aiTickMultiplier,
         yards: 0, touchdown: false, turnover: false, incomplete: false, sack: false, safety: false,
         ballState: {
             x: 0, y: 0, z: 1.0,
@@ -3595,7 +3595,7 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
 
             // --- STEP 1: QB Logic (Decide Throw/Scramble) ---
             if (playState.playIsLive && type === 'pass' && !ballPos.inAir && !playState.turnover && !playState.sack) {
-                updateQBDecision(playState, offenseStates, defenseStates, gameLog, aiTickMultiplier); // 💡 Pass multiplier
+                updateQBDecision(playState, offenseStates, defenseStates, gameLog);
             }
             if (!playState.playIsLive) break; // Play ended (e.g., QB threw away)
 
