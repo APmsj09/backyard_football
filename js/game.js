@@ -3489,9 +3489,9 @@ function finalizeStats(playState, offense, defense) {
  */
 // game.js
 
-function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameState) {
-    const { gameLog = [], weather, ballOn, ballHash = 'M', down, yardsToGo } = gameState;
-    const fastSim = options.fastSim === true; // Get fastSim from options
+function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameState, options = {}) {
+    const { gameLog = [], weather, ballOn, ballHash = 'M', down, yardsToGo } = gameState;
+    const fastSim = options.fastSim === true; // Get fastSim from options
 
     const play = deepClone(offensivePlaybook[offensivePlayKey]);
 
