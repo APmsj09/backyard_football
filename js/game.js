@@ -2562,12 +2562,16 @@ function checkTackleCollisions(playState, gameLog) {
             if (diff <= 0) { // Tackle success
                 playState.yards = ballCarrierState.y - playState.lineOfScrimmage;
                 playState.playIsLive = false;
+                ensureStats(tacklerPlayer); 
+                tacklerPlayer.gameStats.tackles = (tacklerPlayer.gameStats.tackles || 0) + 1;
 
 
                 if (ballCarrierState.slot === 'QB1' && (ballCarrierState.action === 'qb_setup' || ballCarrierState.action === 'qb_scramble') && ballCarrierState.y < playState.lineOfScrimmage) {
 
                     playState.sack = true;
                     if (gameLog) gameLog.push(`💥 SACK! ${tacklerPlayer.name} (TklPwr: ${tacklePower.toFixed(0)}) gets to ${ballCarrierState.name}!`);
+
+                    tacklerPlayer.gameStats.sacks = (tacklerPlayer.gameStats.sacks || 0) + 1;
                 } else {
                     if (gameLog) gameLog.push(`✋ ${ballCarrierState.name} tackled by ${defender.name} (TklPwr: ${tacklePower.toFixed(0)}) for a gain of ${playState.yards.toFixed(1)} yards.`);
                 }
@@ -5002,7 +5006,7 @@ export function simulateGame(homeTeam, awayTeam, options = {}) {
                                 }
                                 if (yardsToGo <= 0) {
                                     yardsToGo = 1;
-                                    s
+                                    
                                 }
                                 if (!fastSim) {
                                     const newYardLineText = ballOn <= 50 ? `own ${ballOn}` : `opponent ${100 - ballOn}`;
