@@ -2118,47 +2118,41 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                         }
 
                         else if (threatsInZone.length === 0) {
-                            if (isDeepZone && diagnosedPlayType === 'pass') {
-                                const isHalfFieldSafety = pState.x < (HASH_LEFT_X - 2) || pState.x > (HASH_RIGHT_X + 2);
-                                const isLeftSafety = pState.x < CENTER_X;
-                                const intermediateThreats = offenseStates.filter(o => {
-                                    if (o.action !== 'run_route' && o.action !== 'route_complete') return false;
-                                    const isCrosser = (o.assignment === 'In' || o.assignment === 'Post' || o.assignment === 'Drag');
-                                    if (!isCrosser) return false;
-                                    const isInMiddle = isPlayerInZone(o, 'zone_hook_curl_middle', playState.lineOfScrimmage);
-                                    if (!isInMiddle) return false;
-                                    if (isHalfFieldSafety) {
-                                        if (isLeftSafety && o.x > CENTER_X + 2) return false;
-                                        if (!isLeftSafety && o.x < CENTER_X - 2) return false;
-                                    }
-                                    return true;
-                                });
-                                if (intermediateThreats.length > 0) {
-                                    intermediateThreats.sort((a, b) => getDistance(pState, a) - getDistance(pState, b));
-                                    targetThreat = intermediateThreats[0];
-                                    break;
-                                }
-                            }
-                            if (assignment.startsWith('zone_flat_')) {
-                                const verticalThreat = offenseStates.find(o =>
-                                    (o.action === 'run_route' || o.action === 'route_complete') &&
-                                    o.y > pState.y + 5 &&
-                                    getDistance(pState, o) < 15
-                                );
-                                if (verticalThreat) {
-                                    const sinkDepth = Math.min(verticalThreat.y, pState.initialY + 7);
-                                    targetPoint = { x: pState.x, y: sinkDepth };
-                                }
-                            }
-                        }
+                            // --- 💡 FIX: MATCH ZONE PRINCIPLES ---
+                            // Even if no one is IN my zone, who is threatening to ENTER it?
+                            // I should drift toward them rather than standing in the dead center.
 
-                        if (targetThreat) {
-                            target = targetThreat;
-                        } else {
-                            target = targetPoint;
+                            const zoneCenter = getZoneCenter(assignment, playState.lineOfScrimmage);
+                            
+                            // Find the closest offensive player who is NOT the QB/RB
+                            const nearestReceiver = offenseStates
+                                .filter(o => o.action.includes('route') && !o.hasBall)
+                                .sort((a, b) => getDistance(zoneCenter, a) - getDistance(zoneCenter, b))[0];
+
+                            if (nearestReceiver) {
+                                const distToReceiver = getDistance(zoneCenter, nearestReceiver);
+                                
+                                // If a receiver is approaching (within 10 yards of zone center), drift toward them.
+                                if (distToReceiver < 10.0) {
+                                    // Calculate a midpoint between zone center and the receiver
+                                    // "Cheat" 30% of the way toward the receiver, but stay anchored to zone
+                                    const driftFactor = 0.3;
+                                    
+                                    targetPoint = {
+                                        x: zoneCenter.x + (nearestReceiver.x - zoneCenter.x) * driftFactor,
+                                        y: zoneCenter.y + (nearestReceiver.y - zoneCenter.y) * driftFactor
+                                    };
+                                } else {
+                                    // No immediate threat, hold center
+                                    targetPoint = zoneCenter;
+                                }
+                            } else {
+                                targetPoint = zoneCenter;
+                            }
+                            
+                            targetThreat = null;
+                            // --- END MATCH ZONE FIX ---
                         }
-                        break;
-                    }
 
                     case assignment === 'pass_rush':
                     case assignment === 'blitz_gap':
@@ -2382,6 +2376,37 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                                 // 4. Set the Vertical Target (The "Parallel" Fix)
                                 // Instead of target.y (where he is), we go to predictedRunnerY (where he will be)
                                 pState.targetY = predictedRunnerY;
+                                
+                            // 💡 FIX: BLOCKER AVOIDANCE ("Scraping")
+                                // Check if an offensive player (who isn't the ball carrier) is directly in my path
+                                const distToTargetNow = getDistance(pState, {x: pState.targetX, y: pState.targetY});
+                                
+                                // Only scrape if we aren't about to make the tackle (don't dodge when 2 yards away)
+                                if (distToTargetNow > 2.5) {
+                                    const blockerInPath = offenseStates.find(o => 
+                                        !o.isBallCarrier && 
+                                        !o.isEngaged && 
+                                        Math.abs(o.y - pState.y) < 2.0 && // He is at my depth or slightly ahead
+                                        Math.abs(o.x - pState.x) < 1.5 && // He is directly in front of me
+                                        getDistance(pState, o) < 3.0      // He is close
+                                    );
+
+                                    if (blockerInPath) {
+                                        // SCRAPE DECISION: Go toward the ball carrier's side of the blocker
+                                        const directionToBall = Math.sign(target.x - blockerInPath.x);
+                                        
+                                        // If ball is exactly behind blocker, pick the side with more space
+                                        const scrapeDir = directionToBall !== 0 ? directionToBall : (pState.x < CENTER_X ? -1 : 1);
+                                        
+                                        // Force lateral movement to avoid the block engagement
+                                        pState.targetX = blockerInPath.x + (scrapeDir * 2.5);
+                                        
+                                        // Slow down forward progress slightly while scraping
+                                        pState.targetY = pState.y + 0.5; 
+                                    }
+                                }
+                                // <--- END SCRAPE LOGIC --->
+
                             }
 
                             // --- Debug Log (optional) ---
