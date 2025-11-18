@@ -1124,7 +1124,6 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
 
         // --- 💡 FIX START: Priority Sorting ---
         // We MUST sort the slots to ensure critical positions (QB) are filled FIRST.
-        // This prevents a "Best Sub" logic from stealing the QB to play WR/RB.
         const sortedSlots = [...formationData.slots].sort((a, b) => {
             // 1. Quarterbacks always go first
             if (a.startsWith('QB')) return -1;
@@ -1159,7 +1158,6 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
             const player = getPlayerBySlot(team, side, slot, usedSet) || findEmergencyPlayer(slot.replace(/\d/g, ''), team, side, usedSet)?.player;
             
             if (!player || !player.attributes) {
-                // If it's a QB and we are missing them, this is likely where the silent crash started
                 if (slot.startsWith('QB')) {
                      console.error(`CRITICAL: Could not find QB for ${team.name}. Roster might be empty.`);
                 }
@@ -1217,49 +1215,47 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
             } else { // Defense
                 
                 assignment = defAssignments[slot];
-                action = assignment; 
 
-                // If explicit assignment exists, respect it and track it (if it wasn't tracked already)
-            if (assignment && assignment.startsWith('man_cover_')) {
-                const targetName = assignment.replace('man_cover_', '');
-                coveredManTargets.add(targetName);
-            }
-
-            if (!assignment) {
-                if (slot.startsWith('DL')) {
-                    assignment = 'run_gap_A'; // Linemen rush
-                } 
-                else if (slot.startsWith('DB')) {
-                    // 1. Define priority list of threats
-                    const threats = ['WR1', 'WR2', 'WR3', 'RB1', 'TE1', 'WR4', 'RB2'];
-                    
-                    // 2. Find the first threat NOT in the 'coveredManTargets' Set
-                    const bestTarget = threats.find(t => !coveredManTargets.has(t));
-
-                    if (bestTarget) {
-                        assignment = `man_cover_${bestTarget}`;
-                        coveredManTargets.add(bestTarget); // 🚨 Mark as taken so DB2 doesn't take him too
-                    } else {
-                        // Everyone covered? Play safety.
-                        assignment = 'zone_deep_middle'; 
-                    }
-                } 
-                else if (slot.startsWith('LB')) {
-                     // LBs look for RBs/TEs first, then zone
-                     const lbThreats = ['RB1', 'WR3', 'TE1', 'RB2'];
-                     const lbTarget = lbThreats.find(t => !coveredManTargets.has(t));
-                     
-                     if (lbTarget) {
-                         assignment = `man_cover_${lbTarget}`;
-                         coveredManTargets.add(lbTarget);
-                     } else {
-                         assignment = 'spy_QB';
-                     }
-                } 
-                else {
-                    assignment = 'def_read';
+                // If explicit assignment exists, respect it and track it
+                if (assignment && assignment.startsWith('man_cover_')) {
+                    const targetName = assignment.replace('man_cover_', '');
+                    coveredManTargets.add(targetName);
                 }
-            }
+
+                // --- 💡 FIX: Handle missing assignments (Smart Fallbacks) ---
+                if (!assignment) {
+                    if (slot.startsWith('DL')) {
+                        assignment = 'run_gap_A'; // Linemen rush
+                    } 
+                    else if (slot.startsWith('DB')) {
+                        const threats = ['WR1', 'WR2', 'WR3', 'RB1', 'TE1', 'WR4', 'RB2'];
+                        const bestTarget = threats.find(t => !coveredManTargets.has(t));
+
+                        if (bestTarget) {
+                            assignment = `man_cover_${bestTarget}`;
+                            coveredManTargets.add(bestTarget); 
+                        } else {
+                            assignment = 'zone_deep_middle'; 
+                        }
+                    } 
+                    else if (slot.startsWith('LB')) {
+                         const lbThreats = ['RB1', 'WR3', 'TE1', 'RB2'];
+                         const lbTarget = lbThreats.find(t => !coveredManTargets.has(t));
+                         
+                         if (lbTarget) {
+                             assignment = `man_cover_${lbTarget}`;
+                             coveredManTargets.add(lbTarget);
+                         } else {
+                             assignment = 'spy_QB';
+                         }
+                    } 
+                    else {
+                        assignment = 'def_read';
+                    }
+                }
+                
+                // 💡 FIX: Set Action AFTER assignment is guaranteed to be set
+                action = assignment; 
 
                 if (assignment.toLowerCase() === 'punt_return') {
                     action = 'punt_return';
@@ -1282,6 +1278,7 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
                         startY = targetOffPlayer.y + yOffset;
                         targetX = startX; targetY = startY; 
                     } else {
+                        // Fallback if specific man target not found on field
                         const wr3Target = initialOffenseStates.find(o => o.slot === 'WR3');
                         const isWR3Covered = Object.values(defAssignments).includes('man_cover_WR3');
 
