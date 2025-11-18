@@ -1899,9 +1899,24 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                         });
                         targetXOffset = bestLane.xOffset;
                     }
-                    pState.targetY = Math.min(FIELD_LENGTH - 1.0, pState.y + visionDistance);
-                    pState.targetX = pState.x + targetXOffset;
-                    break;
+                    // 💡 FIX: Sideline Awareness (Stay In Bounds!)
+                        // If we are within 4 yards of the sideline, force a cut back inside.
+                        const distToLeftLine = pState.x;
+                        const distToRightLine = FIELD_WIDTH - pState.x;
+                        const DANGER_ZONE = 4.0;
+
+                        if (distToLeftLine < DANGER_ZONE) {
+                            // Too close to left, force move right
+                            targetXOffset = Math.max(2.0, targetXOffset + 2.0);
+                        } 
+                        else if (distToRightLine < DANGER_ZONE) {
+                            // Too close to right, force move left
+                            targetXOffset = Math.min(-2.0, targetXOffset - 2.0);
+                        }
+
+                        pState.targetY = Math.min(FIELD_LENGTH - 1.0, pState.y + visionDistance);
+                        pState.targetX = pState.x + targetXOffset;
+                        break;
                 }
 
                 case 'qb_scramble': {
@@ -2069,18 +2084,27 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                         }
 
                         else if (isGroundThreat) {
+                            // --- 💡 FIX 2: Aggressive Run Support ---
+                            // Check if the runner has crossed the Line of Scrimmage
+                            const crossedLOS = ballCarrierState.y > playState.lineOfScrimmage + 1.0;
+                            
                             if (!isDeepZone) {
-                                if (isPlayerInZone(ballCarrierState, assignment, playState.lineOfScrimmage) || getDistance(pState, ballCarrierState) < 8.0) {
+                                // If I am a shallow defender (LB/CB) and the runner crosses LOS,
+                                // I abandon my zone immediately and pursue.
+                                if (crossedLOS || isPlayerInZone(ballCarrierState, assignment, playState.lineOfScrimmage) || getDistance(pState, ballCarrierState) < 10.0) {
                                     targetThreat = ballCarrierState;
                                 }
                             } else {
+                                // Deep defenders (Safeties) stay back until the runner breaks free (5 yards past LOS)
                                 if (ballCarrierState.y > (playState.lineOfScrimmage + 5) || isPlayerInZone(ballCarrierState, assignment, playState.lineOfScrimmage)) {
                                     targetThreat = ballCarrierState;
                                 } else {
-                                    targetPoint = { x: ballCarrierState.x, y: playState.lineOfScrimmage + 10 };
+                                    // Stay deep to prevent trick plays
+                                    targetPoint = { x: ballCarrierState.x, y: playState.lineOfScrimmage + 15 };
                                     targetThreat = null;
                                 }
                             }
+                            // --- END FIX 2 ---
                         }
 
                         else if (threatsInZone.length > 0) {
@@ -2666,10 +2690,13 @@ function resolveBattle(powerA, powerB, battle) {
  */
 function resolveOngoingBlocks(playState, gameLog) {
     const battlesToRemove = [];
+    
+    // 💡 NEW: Find the ball carrier once
+    const ballCarrier = playState.activePlayers.find(p => p.isBallCarrier);
+
     playState.blockBattles.forEach((battle, index) => {
-        if (battle.startTick === playState.tick) {
-            return;
-        }
+        if (battle.startTick === playState.tick) return;
+        
         if (battle.status !== 'ongoing') {
             battlesToRemove.push(index);
             return;
@@ -2678,7 +2705,7 @@ function resolveOngoingBlocks(playState, gameLog) {
         const blockerState = playState.activePlayers.find(p => p.id === battle.blockerId);
         const defenderState = playState.activePlayers.find(p => p.id === battle.defenderId);
 
-        // Check if players are still valid and engaged
+        // Validation check
         if (!blockerState || !defenderState || blockerState.engagedWith !== defenderState.id || defenderState.blockedBy !== blockerState.id) {
             battle.status = 'disengaged';
             battlesToRemove.push(index);
@@ -2686,6 +2713,24 @@ function resolveOngoingBlocks(playState, gameLog) {
             if (defenderState) { defenderState.isBlocked = false; defenderState.blockedBy = null; defenderState.isEngaged = false; }
             return;
         }
+
+        // --- 💡 FIX 1: Smart Shedding (Runner Passed Me) ---
+        // If the ball carrier is 2 yards deeper downfield than the defender, 
+        // the defender gives up the block to chase from behind.
+        if (ballCarrier && ballCarrier.y > (defenderState.y + 2.0)) {
+             battle.status = 'disengaged';
+             battlesToRemove.push(index);
+             
+             blockerState.engagedWith = null; 
+             blockerState.isEngaged = false;
+             
+             defenderState.isBlocked = false; 
+             defenderState.blockedBy = null; 
+             defenderState.isEngaged = false;
+             defenderState.action = 'pursuit'; // Force pursuit mode immediately
+             return;
+        }
+        // --- END FIX 1 ---
 
         // Check for distance-based disengagement
         if (getDistance(blockerState, defenderState) > BLOCK_ENGAGE_RANGE + 0.5) {
@@ -2699,57 +2744,42 @@ function resolveOngoingBlocks(playState, gameLog) {
         const blockPower = ((blockerState.blocking || 50) + (blockerState.strength || 50)) * blockerState.fatigueModifier;
         const shedPower = ((defenderState.blockShedding || 50) + (defenderState.strength || 50)) * defenderState.fatigueModifier;
 
-        // --- Call the battle helper, which updates battle.status AND returns the push ---
-        // 💡 MODIFIED: Capture the return value
         const pushAmount = resolveBattle(blockPower, shedPower, battle);
 
-        // --- 💡 NEW: Apply the "Push" ---
         if (battle.status === 'ongoing') {
-            // Calculate push direction (from blocker to defender)
             const dx = defenderState.x - blockerState.x;
             const dy = defenderState.y - blockerState.y;
             const dist = Math.max(0.1, Math.sqrt(dx * dx + dy * dy));
             const pushDirX = dx / dist;
             const pushDirY = dy / dist;
 
-            // 'pushAmount' is the distance. Positive = blocker wins, pushes defender.
-            // Negative = defender wins, pushes blocker.
-            const PUSH_SCALING_FACTOR = 0.5; // Controls how fast the push is
+            const PUSH_SCALING_FACTOR = 0.5; 
             const moveDist = pushAmount * PUSH_SCALING_FACTOR;
 
-            // Move both players along the "line" of the battle
-            // (updatePlayerPosition will NOT move them, so this is safe)
             blockerState.x += pushDirX * moveDist;
             blockerState.y += pushDirY * moveDist;
             defenderState.x += pushDirX * moveDist;
             defenderState.y += pushDirY * moveDist;
 
-            // Clamp their new positions
             blockerState.x = Math.max(0.5, Math.min(FIELD_WIDTH - 0.5, blockerState.x));
             blockerState.y = Math.max(0.5, Math.min(FIELD_LENGTH - 0.5, blockerState.y));
             defenderState.x = Math.max(0.5, Math.min(FIELD_WIDTH - 0.5, defenderState.x));
             defenderState.y = Math.max(0.5, Math.min(FIELD_LENGTH - 0.5, defenderState.y));
         }
-        // --- 💡 END NEW PUSH LOGIC ---
 
-        // --- Handle battle win/loss logic ---
-        if (battle.status === 'win_B') {
-            // ... (defender wins logic)
-            blockerState.stunnedTicks = 80;
+        if (battle.status === 'win_B') { // Defender wins (sheds block)
+            blockerState.stunnedTicks = 60; // Increased stun slightly
             blockerState.engagedWith = null; blockerState.isEngaged = false;
             defenderState.isBlocked = false; defenderState.blockedBy = null; defenderState.isEngaged = false;
             battlesToRemove.push(index);
-
-        } else if (battle.status === 'win_A') {
-            // ... (blocker wins logic)
-            defenderState.stunnedTicks = 80;
+        } else if (battle.status === 'win_A') { // Blocker wins (pancake)
+            defenderState.stunnedTicks = 60;
             blockerState.engagedWith = null; blockerState.isEngaged = false;
             defenderState.isBlocked = false; defenderState.blockedBy = null; defenderState.isEngaged = false;
             battlesToRemove.push(index);
         }
     });
 
-    // Clean up all completed battles
     for (let i = battlesToRemove.length - 1; i >= 0; i--) {
         playState.blockBattles.splice(battlesToRemove[i], 1);
     }
@@ -3303,9 +3333,16 @@ function handleBallArrival(playState, gameLog, play) {
         const proximityBonus = Math.max(0, (CATCH_CHECK_RADIUS - distToBallDef) * 20); // Bonus for being closer
         defenderPower += proximityBonus - receiverPresencePenalty;
 
-        if (defenderPower + getRandomInt(0, 35) > 85) { // Threshold for INT
-            eventResolved = true;
-            if (gameLog) gameLog.push(`❗ INTERCEPTION! ${closestDefenderState.name} (Catch: ${defCatchSkill}) jumps the route!`);
+        // 1. Reward being right on top of the ball (Precision)
+        // 2. Lower the absolute threshold so normal players can catch bad throws
+        
+        // Calculate a "Good Read" bonus (0 to 20) based on how close they are
+        const precisionBonus = Math.max(0, (1.5 - distToBallDef) * 15); 
+        
+        // Lower threshold from 85 to 75 to punish mistakes more often
+        if ((defenderPower + precisionBonus + getRandomInt(0, 35)) > 75) { 
+             eventResolved = true;
+             if (gameLog) gameLog.push(`❗ INTERCEPTION! ${closestDefenderState.name} jumps the route!`);
             playState.turnover = true;
 
             closestDefenderState.isBallCarrier = true;
