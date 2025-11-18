@@ -2154,6 +2154,18 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                             // --- END MATCH ZONE FIX ---
                         }
 
+                        // 💡 MISSING LOGIC ADDED HERE:
+                        // Apply the calculated target to the player state
+                        if (targetThreat) {
+                            pState.targetX = targetThreat.x;
+                            pState.targetY = targetThreat.y;
+                        } else if (targetPoint) {
+                            pState.targetX = targetPoint.x;
+                            pState.targetY = targetPoint.y;
+                        }
+                        break; // 💡 STOP here so we don't fall into 'pass_rush'
+                    } // 💡 Close the 'zone_' case block
+
                     case assignment === 'pass_rush':
                     case assignment === 'blitz_gap':
                     case assignment === 'blitz_edge':
