@@ -2664,6 +2664,14 @@ function updateQBDecision(playState, offenseStates, defenseStates, gameLog, aiTi
     const qbAttrs = qbPlayer.attributes;
     const qbIQ = Math.max(20, Math.min(99, qbAttrs.mental?.playbookIQ ?? 50)); // Clamp IQ for safety
 
+    // --- SAFETY GUARD: Ensure readProgression exists ---
+    // This fixes the "Cannot read properties of null (reading 'indexOf')" error
+    const progression = Array.isArray(qbState.readProgression) ? qbState.readProgression : [];
+    if (progression.length === 0) {
+        // Fallback if empty
+        progression.push('WR1', 'WR2', 'RB1'); 
+    }
+
     // --- If QB is scrambling, check for a throw ---
     if (qbState.action === 'qb_scramble') {
         // Chance to even *look* for a throw on the run
@@ -2724,11 +2732,16 @@ function updateQBDecision(playState, offenseStates, defenseStates, gameLog, aiTi
     };
 
     // 1. Get info for *all* receivers in the progression
-    const allReadInfos = (qbState.readProgression || []).map(slot => getTargetInfo(slot));
+    // FIX: Use the local safe 'progression' variable
+    const allReadInfos = progression.map(slot => getTargetInfo(slot));
 
     // 2. Identify the current read
-    const currentReadIndex = qbState.currentReadTargetSlot ? qbState.readProgression.indexOf(qbState.currentReadTargetSlot) : -1;
-    const currentRead = allReadInfos[currentReadIndex] || null;
+    // FIX: Use the local safe 'progression' variable and guard the lookup
+    const currentReadIndex = (qbState.currentReadTargetSlot && progression.length > 0) 
+        ? progression.indexOf(qbState.currentReadTargetSlot) 
+        : -1;
+    
+    const currentRead = (currentReadIndex !== -1) ? allReadInfos[currentReadIndex] : null;
 
     // 3. Identify the checkdown (the *last* receiver in the progression)
     const read_checkdown = allReadInfos[allReadInfos.length - 1] || null;
@@ -2752,16 +2765,14 @@ function updateQBDecision(playState, offenseStates, defenseStates, gameLog, aiTi
 
         if (qbState.ticksOnCurrentRead > READ_PROGRESSION_DELAY) {
             // Time to switch reads
-            const currentReadIndex = qbState.readProgression.indexOf(qbState.currentReadTargetSlot);
+            // FIX: Guard against -1 index or empty progression
+            let nextReadIndex = 0;
+            if (currentReadIndex !== -1 && progression.length > 0) {
+                // Use modulo (%) to loop the progression
+                nextReadIndex = (currentReadIndex + 1) % progression.length;
+            }
 
-            // Use modulo (%) to loop the progression
-            // (e.g., if length is 3)
-            // (0 + 1) % 3 = 1
-            // (1 + 1) % 3 = 2
-            // (2 + 1) % 3 = 0  <-- Loops back to the start!
-            const nextReadIndex = (currentReadIndex + 1) % qbState.readProgression.length;
-
-            const nextReadSlot = qbState.readProgression[nextReadIndex];
+            const nextReadSlot = progression[nextReadIndex];
             qbState.currentReadTargetSlot = nextReadSlot;
             qbState.ticksOnCurrentRead = 0;
         }
