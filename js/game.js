@@ -12,7 +12,7 @@ import {
 import { getDistance, updatePlayerPosition } from './game/physics.js';
 
 // Re-export player helpers (moved to ./game/player.js) to preserve public API
-export { calculateOverall, calculateSlotSuitability, generatePlayer, positionOverallWeights };
+export { calculateOverall, calculateSlotSuitability, generatePlayer, positionOverallWeights, getRosterObjects, getPlayer };
 import {
     // Data lists
     firstNames, lastNames, nicknames, teamNames, positions, divisionNames,
@@ -5919,4 +5919,8 @@ export function loadGameState(saveKey = DEFAULT_SAVE_KEY) {
     }
     // If no save was found, return null
     return null;
+}
+export function getPlayer(id) {
+    if (typeof playerMap !== 'undefined') return playerMap.get(id);
+    return game?.players?.find(p => p.id === id);
 }
