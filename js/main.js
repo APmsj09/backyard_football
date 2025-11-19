@@ -716,6 +716,8 @@ function finishWeekSimulation(results) {
 
     if (gameState.currentWeek >= WEEKS_IN_SEASON) { handleSeasonEnd(); return; }
 
+    const playerTeamObjects = Game.getRosterObjects(gameState.playerTeam);
+    
     // Prompt call friend if needed
     const hasUnavailablePlayer = gameState.playerTeam.roster.some(p => p && p.status?.duration > 0);
     const healthyCount = gameState.playerTeam.roster.filter(p => p && p.status?.duration === 0).length;
@@ -776,7 +778,7 @@ function handleDashboardClicks(e) {
         }
 
         // Find the full player object
-        const clickedPlayer = gameState.players.find(p => p.id === clickedPlayerId);
+        const clickedPlayer = Game.getPlayer(clickedPlayerId);
 
         if (clickedPlayer) {
             // --- Show Player Details Modal ---
@@ -883,6 +885,7 @@ function promptCallFriend() {
     }
 
     const { freeAgents, playerTeam } = gameState;
+    const rosterObjects = Game.getRosterObjects(playerTeam);
     const unavailableCount = playerTeam.roster.filter(p => p && p.status?.duration > 0).length;
     const healthyCount = playerTeam.roster.length - unavailableCount;
 
@@ -896,16 +899,19 @@ function promptCallFriend() {
 
     // Build modal content
     const modalBodyIntro = `<p>You only have ${healthyCount} healthy players available! Call a friend to fill in?</p>`;
+    
     // Map free agents to include their relationship name for display
     const freeAgentsWithRel = freeAgents.map(p => {
         if (!p) return null;
-        const maxLevel = playerTeam.roster.reduce(
-            (max, rp) => Math.max(max, Game.getRelationshipLevel(rp?.id, p.id)), // Safe access rp.id
+        
+        // ⚡ FIX: rosterObjects is now an array of objects, so rp.id works
+        const maxLevel = rosterObjects.reduce(
+            (max, rp) => Math.max(max, Game.getRelationshipLevel(rp?.id, p.id)), 
             relationshipLevels.STRANGER.level
         );
         const relInfo = Object.values(relationshipLevels).find(rl => rl.level === maxLevel) || relationshipLevels.STRANGER;
         return { ...p, relationshipName: relInfo.name };
-    }).filter(Boolean); // Remove nulls
+    }).filter(Boolean);
 
     const friendListHtml = buildCallFriendModalHtml(freeAgentsWithRel);
     const modalBody = modalBodyIntro + friendListHtml;
