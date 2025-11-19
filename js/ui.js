@@ -3,7 +3,8 @@ import {
     getRelationshipLevel,
     getScoutedPlayerInfo,
     getGameState,
-    substitutePlayers
+    substitutePlayers,
+    getRosterObjects
 } from './game.js';
 import {
     offenseFormations,
@@ -1043,7 +1044,7 @@ function renderDepthChartSide(side, gameState) {
     const formationName = formations[side];
     const formationData = (side === 'offense' ? offenseFormations[formationName] : defenseFormations[formationName]);
 
-    const playersStartingOnThisSide = new Set(Object.values(currentChart).filter(Boolean));
+    const playersStartingOnThisSide = new Set(Object.values(currentChart).filter(Boolean)); // Set of IDs
     
     // --- 💡 FIX: Filter from our full roster object list ---
     const benchedPlayers = roster.filter(p => p && !playersStartingOnThisSide.has(p.id) && p.status?.type !== 'temporary');
