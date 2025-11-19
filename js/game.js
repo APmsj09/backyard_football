@@ -1154,6 +1154,11 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
             let targetY = 0;
             let routePath = null;
 
+            // 💡 NEW: Initialize QB specific variables
+            let readProgression = null;
+            let currentReadTargetSlot = null;
+            let ticksOnCurrentRead = 0;
+
             // --- A. Find Player and Initial Position ---
             const player = getPlayerBySlot(team, side, slot, usedSet) || findEmergencyPlayer(slot.replace(/\d/g, ''), team, side, usedSet)?.player;
             
@@ -1197,9 +1202,18 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
                         action = assignment;
                     }
                     targetY = startY + (action === 'pass_block' ? -0.5 : 0.5);
-                } else if (slot.startsWith('QB')) {
+                } 
+                // 💡 FIX: Initialize QB Reads Here
+                else if (slot.startsWith('QB')) {
                     assignment = 'qb_setup';
-                    action = assignment; if (play.type === 'pass') targetY = startY - 2;
+                    action = assignment; 
+                    if (play.type === 'pass') {
+                        targetY = startY - 2;
+                        // Get reads from play or default to standard progression
+                        const rawReads = play.readProgression || [];
+                        readProgression = rawReads.length > 0 ? rawReads : ['WR1', 'WR2', 'RB1', 'TE1'];
+                        currentReadTargetSlot = readProgression[0];
+                    }
                 }
                 else {
                     if (play.type === 'run') {
@@ -1222,10 +1236,9 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
                     coveredManTargets.add(targetName);
                 }
 
-                // --- 💡 FIX: Handle missing assignments (Smart Fallbacks) ---
                 if (!assignment) {
                     if (slot.startsWith('DL')) {
-                        assignment = 'run_gap_A'; // Linemen rush
+                        assignment = 'run_gap_A'; 
                     } 
                     else if (slot.startsWith('DB')) {
                         const threats = ['WR1', 'WR2', 'WR3', 'RB1', 'TE1', 'WR4', 'RB2'];
@@ -1254,7 +1267,6 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
                     }
                 }
                 
-                // 💡 FIX: Set Action AFTER assignment is guaranteed to be set
                 action = assignment; 
 
                 if (assignment.toLowerCase() === 'punt_return') {
@@ -1278,7 +1290,7 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
                         startY = targetOffPlayer.y + yOffset;
                         targetX = startX; targetY = startY; 
                     } else {
-                        // Fallback if specific man target not found on field
+                        // Fallback logic
                         const wr3Target = initialOffenseStates.find(o => o.slot === 'WR3');
                         const isWR3Covered = Object.values(defAssignments).includes('man_cover_WR3');
 
@@ -1389,6 +1401,12 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
                 assignment: assignment,
                 routePath: routePath,
                 currentPathIndex: 0,
+                
+                // 💡 FIX: Add QB Read Properties to the object
+                readProgression: readProgression,
+                currentReadTargetSlot: currentReadTargetSlot,
+                ticksOnCurrentRead: ticksOnCurrentRead,
+
                 engagedWith: null,
                 isBlocked: false,
                 blockedBy: null,
@@ -4062,14 +4080,16 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
             playState.finalBallY = ballCarrierState.y;
             if (gameLog) gameLog.push(`⏱️ Play ends. Gain of ${playState.yards.toFixed(1)} yards.`);
         } else if (!playState.sack && !playState.turnover) {
-            playState.incomplete = true; playState.yards = 0;
-            playState.finalBallY = ballCarrierState.y;
-            if (gameLog) gameLog.push("⏱️ Play ends, incomplete.");
-        } else {
-            playState.finalBallY = ballCarrierState.y;
-            if (gameLog) gameLog.push("⏱️ Play ends.");
-        }
-    }
+            playState.incomplete = true; 
+            playState.yards = 0;
+            // 💡 FIX: Reference the Ball's position at the end of the play
+            playState.finalBallY = playState.ballState.y; 
+            if (gameLog) gameLog.push("⏱️ Play ends, incomplete."); // Log the clean end
+        } else { // Handles remaining sacks, turnovers, or unknown ends
+            playState.finalBallY = ballCarrierState ? ballCarrierState.y : playState.ballState.y;
+            if (gameLog) gameLog.push("⏱️ Play ends.");
+        }
+    }
 
     playState.yards = Math.round(playState.yards);
     if (playState.sack) { playState.yards = Math.min(0, playState.yards); }
