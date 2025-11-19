@@ -5920,7 +5920,7 @@ export function loadGameState(saveKey = DEFAULT_SAVE_KEY) {
     // If no save was found, return null
     return null;
 }
-export function getPlayer(id) {
+function getPlayer(id) {
     if (typeof playerMap !== 'undefined') return playerMap.get(id);
     return game?.players?.find(p => p.id === id);
 }
