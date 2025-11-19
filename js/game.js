@@ -676,7 +676,7 @@ export function addPlayerToTeam(player, team) {
     }
 
     // --- Position-Based Number Assignment ---
-    if (player.number === null) {
+    if (player.number == null) {
         // ... (all your existing number assignment logic stays exactly the same) ...
         const offOvr = calculateOverall(player, player.favoriteOffensivePosition);
         const defOvr = calculateOverall(player, player.favoriteDefensivePosition);
@@ -1447,22 +1447,21 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
 
         if (play.type === 'punt') {
             qbState.isBallCarrier = false;
+
             const playReads = play.readProgression || [];
             let finalProgression = [];
+
             if (playReads.length > 0) {
-                finalProgression = [...playReads];
+                finalProgression = [...playReads];     // ✅ FIXED
             } else {
-                finalProgression = ['WR1', 'WR2', 'RB1'];
+                finalProgression = ['WR1', 'WR2', 'WR3', 'RB1'];
             }
+
             qbState.readProgression = finalProgression;
-            qbState.currentReadTargetSlot = qbState.readProgression[0];
+            qbState.currentReadTargetSlot = finalProgression[0];
             qbState.ticksOnCurrentRead = 0;
 
-            if (isQBRun) {
-                qbState.isBallCarrier = true;
-            } else {
-                qbState.isBallCarrier = false;
-            }
+            qbState.isBallCarrier = !!isQBRun;
         }
     } else {
         // --- CRITICAL ERROR HANDLER ---
@@ -5179,7 +5178,7 @@ export function simulateGame(homeTeam, awayTeam, options = {}) {
             else if (awayScore > homeScore) { awayTeam.wins = (awayTeam.wins || 0) + 1; homeTeam.losses = (homeTeam.losses || 0) + 1; }
         }
 
-        const allGamePlayersForStats = [...getRosterObjects(homeTeam), ...getRosterObjects(awayTeam)];
+        const allGamePlayersForStats = [getRosterObjects(homeTeam), getRosterObjects(awayTeam)];
         allGamePlayersForStats.forEach(p => {
             if (!p || !p.gameStats || !p.attributes) return;
 
