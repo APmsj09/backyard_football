@@ -2355,6 +2355,12 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                             // --- B. I AM BEHIND the target (CHASE LOGIC) ---
                             
                             const distToTarget = getDistance(pState, target);
+
+                            let isContainPlayer = (
+                                pState.slot.startsWith('DB') ||
+                                pState.slot.startsWith('DL1') ||
+                                pState.slot.startsWith('DL4')
+                            );
                             
                             // 1. "Kill Shot" Radius: If close, ignore angles and run straight at them.
                             if (distToTarget < 4.0) {
@@ -2372,7 +2378,7 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                                 const predictedRunnerY = target.y + (estimatedTime * 0.5); 
                                 
                                 // 3. Containment Logic (Don't get outrun to the edge)
-                                const isContainPlayer = (
+                                isContainPlayer = (
                                     pState.slot.startsWith('DB') ||
                                     pState.slot.startsWith('DL1') || 
                                     pState.slot.startsWith('DL4')
@@ -2911,7 +2917,7 @@ function updateQBDecision(playState, offenseStates, defenseStates, gameLog, aiTi
     };
 
     // 1. Get info for *all* receivers in the progression
-    const allReadInfos = qbState.readProgression.map(slot => getTargetInfo(slot));
+    const allReadInfos = (qbState.readProgression || []).map(slot => getTargetInfo(slot));
 
     // 2. Identify the current read
     const currentReadIndex = qbState.readProgression.indexOf(qbState.currentReadTargetSlot);
@@ -4083,10 +4089,10 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
             playState.incomplete = true; 
             playState.yards = 0;
             // 💡 FIX: Reference the Ball's position at the end of the play
-            playState.finalBallY = playState.ballState.y; 
+            playState.finalBallY = playState.ballState?.y;
             if (gameLog) gameLog.push("⏱️ Play ends, incomplete."); // Log the clean end
         } else { // Handles remaining sacks, turnovers, or unknown ends
-            playState.finalBallY = ballCarrierState ? ballCarrierState.y : playState.ballState.y;
+            playState.finalBallY = ballCarrierState ? ballCarrierState.y : playState.ballState?.y;
             if (gameLog) gameLog.push("⏱️ Play ends.");
         }
     }
