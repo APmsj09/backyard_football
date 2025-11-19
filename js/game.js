@@ -3852,36 +3852,50 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
 
             // --- STEP 6: Check Ball Carrier End Conditions (TD, OOB, Safety) ---
             if (playState.playIsLive) {
-                ballCarrierState = playState.activePlayers.find(p => p.isBallCarrier);
-                if (ballCarrierState) {
-                    if (ballCarrierState.y >= FIELD_LENGTH - 10 && ballCarrierState.isOffense) { // Offensive TD
-                        playState.yards = ballCarrierState.y - playState.lineOfScrimmage;
-                        playState.finalBallY = ballCarrierState.y;
-                        playState.touchdown = true; playState.playIsLive = false;
-                        const scorer = game.players.find(p => p && p.id === ballCarrierState.id);
-                        if (gameLog) gameLog.push(`🎉 TOUCHDOWN ${scorer?.name || 'player'}!`);
-                        break;
-                    } else if (ballCarrierState.y < 10 && !ballCarrierState.isOffense) { // Defensive TD
-                        playState.yards = 0;
-                        playState.touchdown = true; playState.playIsLive = false;
-                        playState.finalBallY = ballCarrierState.y;
-                        const scorer = game.players.find(p => p && p.id === ballCarrierState.id);
-                        if (gameLog) gameLog.push(`🎉 DEFENSIVE TOUCHDOWN ${scorer?.name || 'player'}!`);
-                        break;
-                    } else if (ballCarrierState.y < 10 && ballCarrierState.isOffense) { // SAFETY
-                        playState.yards = 0;
-                        playState.finalBallY = ballCarrierState.y;
-                        playState.safety = true;
-                        playState.playIsLive = false;
-                        if (gameLog) gameLog.push(`SAFETY! ${ballCarrierState.name} was tackled in the endzone!`);
-                        break;
-                    }
+                // Re-find the ball carrier to ensure we have the absolute latest state
+                ballCarrierState = playState.activePlayers.find(p => p.isBallCarrier); 
+    
+                // Check 1: OFFENSIVE TOUCHDOWN (Check if Y is past the goal line, which is 110)
+                // Using a tolerance check (>= 109.9) to account for float precision
+                if (ballCarrierState?.y >= (FIELD_LENGTH - 10 - 0.1) && ballCarrierState.isOffense) {
+                    playState.yards = ballCarrierState.y - playState.lineOfScrimmage;
+                    playState.finalBallY = ballCarrierState.y;
+                    playState.touchdown = true; 
+                    playState.playIsLive = false;
+                    const scorer = game.players.find(p => p && p.id === ballCarrierState.id);
+                    if (gameLog) gameLog.push(`🎉 TOUCHDOWN ${scorer?.name || 'player'}!`);
+                    break; // BREAK THE WHILE LOOP
+                } 
+    
+                // Check 2: DEFENSIVE TOUCHDOWN (If defense runs the ball back into their own endzone, which is Y < 10)
+                else if (ballCarrierState?.y <= 10 && !ballCarrierState.isOffense) {
+                    playState.yards = 0; // Yards from the start of the drive, but 6 pts for defense
+                    playState.touchdown = true; 
+                    playState.playIsLive = false;
+                    playState.finalBallY = ballCarrierState.y;
+                    const scorer = game.players.find(p => p && p.id === ballCarrierState.id);
+                    if (gameLog) gameLog.push(`🎉 DEFENSIVE TOUCHDOWN ${scorer?.name || 'player'}!`);
+                    break; // BREAK THE WHILE LOOP
+                } 
+    
+                // Check 3: SAFETY (If offense runs the ball back into their own endzone, which is Y < 10)
+                else if (ballCarrierState?.y <= 10 && ballCarrierState.isOffense) { 
+                    playState.yards = 0;
+                    playState.finalBallY = ballCarrierState.y;
+                    playState.safety = true;
+                    playState.playIsLive = false;
+                    if (gameLog) gameLog.push(`SAFETY! ${ballCarrierState.name} was tackled in the endzone!`);
+                    break; // BREAK THE WHILE LOOP
+                }
+
+                // Check 4: Out of Bounds (Side or End Zone)
+                if (ballCarrierState) { // Only check OOB if a carrier exists
                     if (ballCarrierState.x <= 0.1 || ballCarrierState.x >= FIELD_WIDTH - 0.1) {
                         playState.yards = ballCarrierState.y - playState.lineOfScrimmage;
                         playState.finalBallY = ballCarrierState.y;
                         playState.playIsLive = false;
                         if (gameLog) gameLog.push(` sidelines... ${ballCarrierState.name} ran out of bounds after a gain of ${playState.yards.toFixed(1)} yards.`);
-                        break;
+                        break; // BREAK THE WHILE LOOP
                     }
                 }
             }
