@@ -688,12 +688,12 @@ function finishWeekSimulation(results) {
         else { UI.showModal("Critical Error", "Game state lost. Please refresh.", null, '', null, 'OK'); }
         return;
     }
+
     // Show results modal
     if (results && results.length > 0) {
         const resultsHtml = buildResultsModalHtml(results);
-        UI.showModal(`Week ${gameState.currentWeek} Results`, resultsHtml); // currentWeek was already advanced
+        UI.showModal(`Week ${gameState.currentWeek} Results`, resultsHtml); 
     } else {
-        console.warn("finishWeekSimulation called with no valid game results.");
         UI.showModal(`Week ${gameState.currentWeek} Advanced`, "<p>The week has advanced, but no game results were found.</p>");
     }
 
@@ -702,7 +702,6 @@ function finishWeekSimulation(results) {
         try { Game.aiManageRoster(team); } catch (e) { console.error(`Error during AI roster management for ${team.name}:`, e) }
     });
     Game.generateWeeklyFreeAgents();
-
 
     // Refresh state and UI
     gameState = Game.getGameState();
@@ -716,11 +715,13 @@ function finishWeekSimulation(results) {
 
     if (gameState.currentWeek >= WEEKS_IN_SEASON) { handleSeasonEnd(); return; }
 
+    // --- ⚡ FIX: Hydrate Roster IDs to Objects ---
+    // We use the new Game.getRosterObjects helper to get the actual player data
     const playerTeamObjects = Game.getRosterObjects(gameState.playerTeam);
     
-    // Prompt call friend if needed
-    const hasUnavailablePlayer = gameState.playerTeam.roster.some(p => p && p.status?.duration > 0);
-    const healthyCount = gameState.playerTeam.roster.filter(p => p && p.status?.duration === 0).length;
+    const hasUnavailablePlayer = playerTeamObjects.some(p => p && p.status?.duration > 0);
+    const healthyCount = playerTeamObjects.filter(p => p && p.status?.duration === 0).length;
+    
     if (hasUnavailablePlayer && healthyCount < MIN_HEALTHY_PLAYERS) {
         promptCallFriend();
     }
@@ -777,8 +778,12 @@ function handleDashboardClicks(e) {
             return;
         }
 
-        // Find the full player object
-        const clickedPlayer = Game.getPlayer(clickedPlayerId);
+        let clickedPlayer;
+        if (typeof Game.getPlayer === 'function') {
+            clickedPlayer = Game.getPlayer(clickedPlayerId);
+        } else {
+            clickedPlayer = gameState.players.find(p => p.id === clickedPlayerId);
+        }
 
         if (clickedPlayer) {
             // --- Show Player Details Modal ---
@@ -877,48 +882,45 @@ function buildCallFriendModalHtml(freeAgents) {
 
 /** Displays Call Friend modal and sets up event listeners for the CALL buttons. */
 function promptCallFriend() {
-    gameState = Game.getGameState(); // Refresh state
+    gameState = Game.getGameState(); 
     if (!gameState || !gameState.playerTeam || !gameState.playerTeam.roster) {
-        console.error("Cannot prompt call friend: Invalid game state or missing player team/roster.");
-        UI.showModal("Error", "Cannot display call friend options due to game state error.", null, '', null, 'Close');
+        console.error("Cannot prompt call friend: Invalid game state.");
         return;
     }
 
     const { freeAgents, playerTeam } = gameState;
+    
+    // ⚡ FIX: Get full objects
     const rosterObjects = Game.getRosterObjects(playerTeam);
-    const unavailableCount = playerTeam.roster.filter(p => p && p.status?.duration > 0).length;
-    const healthyCount = playerTeam.roster.length - unavailableCount;
 
-    // Exit if not needed or no FAs
+    const unavailableCount = rosterObjects.filter(p => p && p.status?.duration > 0).length;
+    const healthyCount = rosterObjects.length - unavailableCount;
+
     if (healthyCount >= MIN_HEALTHY_PLAYERS || !Array.isArray(freeAgents) || freeAgents.length === 0) {
-        if (healthyCount < MIN_HEALTHY_PLAYERS && (!Array.isArray(freeAgents) || freeAgents.length === 0)) {
-            console.log("Roster short, but no free agents available to call.");
-        }
-        return; // Don't show modal
+        return; 
     }
 
-    // Build modal content
     const modalBodyIntro = `<p>You only have ${healthyCount} healthy players available! Call a friend to fill in?</p>`;
     
-    // Map free agents to include their relationship name for display
+    // Map free agents to include their relationship name
     const freeAgentsWithRel = freeAgents.map(p => {
         if (!p) return null;
         
-        // ⚡ FIX: rosterObjects is now an array of objects, so rp.id works
+        // ⚡ FIX: Use rosterObjects (array of players) not roster (array of strings)
         const maxLevel = rosterObjects.reduce(
             (max, rp) => Math.max(max, Game.getRelationshipLevel(rp?.id, p.id)), 
             relationshipLevels.STRANGER.level
         );
         const relInfo = Object.values(relationshipLevels).find(rl => rl.level === maxLevel) || relationshipLevels.STRANGER;
         return { ...p, relationshipName: relInfo.name };
-    }).filter(Boolean);
+    }).filter(Boolean); 
 
     const friendListHtml = buildCallFriendModalHtml(freeAgentsWithRel);
     const modalBody = modalBodyIntro + friendListHtml;
 
     UI.showModal("Call a Friend?", modalBody, null, '', null, 'Maybe Later');
 
-    // Add event listener using delegation
+    // ... (Rest of function remains the same) ...
     const modalBodyElement = document.getElementById('modal-body');
     if (!modalBodyElement) return;
 
@@ -926,22 +928,21 @@ function promptCallFriend() {
         if (e.target.matches('.call-friend-btn')) {
             const playerId = e.target.dataset.playerId;
             if (!playerId) return;
-            modalBodyElement.removeEventListener('click', callButtonDelegationHandler); // Remove listener
-
+            modalBodyElement.removeEventListener('click', callButtonDelegationHandler); 
+            
             const result = Game.callFriend(playerId);
             UI.hideModal();
 
             setTimeout(() => {
                 UI.showModal("Call Result", `<p>${result.message}</p>`);
-                gameState = Game.getGameState(); // Refresh state
+                gameState = Game.getGameState(); 
                 if (!gameState) return;
                 const activeTabEl = document.querySelector('#dashboard-tabs .tab-button.active');
                 const activeTab = activeTabEl ? activeTabEl.dataset.tab : 'my-team';
-                UI.switchTab(activeTab, gameState); // Update UI
+                UI.switchTab(activeTab, gameState); 
             }, 100);
         }
     };
-    // Remove previous listener (safety) before adding new one
     modalBodyElement.removeEventListener('click', callButtonDelegationHandler);
     modalBodyElement.addEventListener('click', callButtonDelegationHandler);
 }
