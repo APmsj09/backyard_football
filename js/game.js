@@ -1211,8 +1211,9 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
                         targetY = startY - 2;
                         // Get reads from play or default to standard progression
                         const rawReads = play.readProgression || [];
-                        readProgression = rawReads.length > 0 ? rawReads : ['WR1', 'WR2', 'RB1', 'TE1'];
-                        currentReadTargetSlot = readProgression[0];
+                        readProgression = rawReads.length > 0 ? rawReads : ['WR1', 'WR2', 'RB1', 'WR3'];
+                        // FIX: Ensure the slot is valid before assigning the current read
+                        currentReadTargetSlot = readProgression.length > 0 ? readProgression[0] : null;
                     }
                 }
                 else {
@@ -1241,7 +1242,7 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
                         assignment = 'run_gap_A';
                     }
                     else if (slot.startsWith('DB')) {
-                        const threats = ['WR1', 'WR2', 'WR3', 'RB1', 'TE1', 'WR4', 'RB2'];
+                        const threats = ['WR1', 'WR2', 'WR3', 'RB1', 'RB2'];
                         const bestTarget = threats.find(t => !coveredManTargets.has(t));
 
                         if (bestTarget) {
@@ -1252,7 +1253,7 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
                         }
                     }
                     else if (slot.startsWith('LB')) {
-                        const lbThreats = ['RB1', 'WR3', 'TE1', 'RB2'];
+                        const lbThreats = ['RB1', 'WR3', 'RB2'];
                         const lbTarget = lbThreats.find(t => !coveredManTargets.has(t));
 
                         if (lbTarget) {
@@ -1454,7 +1455,7 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
             if (playReads.length > 0) {
                 finalProgression = [...playReads];     // ✅ FIXED
             } else {
-                finalProgression = ['WR1', 'WR2', 'WR3', 'RB1'];
+                finalProgression = ['WR1', 'WR2', 'RB1'];
             }
 
             qbState.readProgression = finalProgression;
@@ -2726,8 +2727,8 @@ function updateQBDecision(playState, offenseStates, defenseStates, gameLog, aiTi
     const allReadInfos = (qbState.readProgression || []).map(slot => getTargetInfo(slot));
 
     // 2. Identify the current read
-    const currentReadIndex = qbState.readProgression.indexOf(qbState.currentReadTargetSlot);
-    const currentRead = allReadInfos[currentReadIndex] || null;
+    const currentReadIndex = qbState.currentReadTargetSlot ? qbState.readProgression.indexOf(qbState.currentReadTargetSlot) : -1;
+    const currentRead = allReadInfos[currentReadIndex] || null;
 
     // 3. Identify the checkdown (the *last* receiver in the progression)
     const read_checkdown = allReadInfos[allReadInfos.length - 1] || null;
