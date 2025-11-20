@@ -4600,7 +4600,7 @@ export function simulateGame(homeTeam, awayTeam, options = {}) {
                     ballOn = Math.max(0, Math.min(100, ballOn));
                 }
 
-                // --- 5. PROCESS PLAY RESULT (Corrected Order) ---
+                // --- 5. PROCESS PLAY RESULT (Corrected Logic) ---
 
                 // --- 1. CHECK FOR TOUCHDOWN (OFFENSIVE OR DEFENSIVE) ---
                 if (result.touchdown && !shouldPunt) {
@@ -4661,17 +4661,10 @@ export function simulateGame(homeTeam, awayTeam, options = {}) {
                         scoreDiff = offense.id === homeTeam.id ? homeScore - awayScore : awayScore - homeScore;
                     }
 
-                    // --- 💡 CRITICAL FIX: SWAP POSSESSION HERE ---
-                    // Regardless of who scored (Offense or Defense), the ball goes to the
-                    // team that was playing Defense (or the non-scoring offense in a return).
-                    // Actually, simpler logic: 
-                    // If Offense scored -> Kickoff to Defense.
-                    // If Defense scored -> Kickoff to Offense.
-                    
+                    // --- SWAP POSSESSION ---
                     if (wasOffensiveTD) {
                         currentOffense = defense; 
                     } else {
-                        // If defense scored, they kick off, so original offense receives.
                         currentOffense = offense;
                     }
                     
@@ -4686,13 +4679,12 @@ export function simulateGame(homeTeam, awayTeam, options = {}) {
 
                     // End the drive and set up for a safety punt
                     driveActive = false;
-                    nextDriveStartBallOn = 20; // Defense will receive the "free kick" (simplified)
+                    nextDriveStartBallOn = 20; 
 
-                    // --- 3. CHECK FOR NON-TD TURNOVER ---
+                // --- 3. CHECK FOR NON-TD TURNOVER ---
                 } else if (result.turnover && !shouldPunt) {
                     driveActive = false;
                     
-                    // 💡 FIX: Explicitly swap possession to the defense
                     currentOffense = defense;
 
                     // Calculate spot based on where the play ENDED
@@ -4709,25 +4701,24 @@ export function simulateGame(homeTeam, awayTeam, options = {}) {
                     if (!fastSim) {
                         const spotText = nextDriveStartBallOn <= 50 ? `own ${nextDriveStartBallOn}` : `opponent ${100 - nextDriveStartBallOn}`;
                         if (result.incomplete && down > 4) {
-                             // Turnover on downs logic (ball goes back to previous LOS logic usually applies, 
-                             // but using the result.finalBallY is safe for now)
                              if(result.incomplete) nextDriveStartBallOn = 100 - ballOn; // Reset to LOS
                              gameLog.push(`✋ Turnover on downs! ${defense.name} takes over.`);
                         } else {
                              gameLog.push(`🔄 Possession changes! Ball spotted at ${spotText}.`);
                         }
                     }
-                }
-                    // --- 4. CHECK FOR INCOMPLETE PASS ---
+                
+                // --- 4. CHECK FOR INCOMPLETE PASS ---
                 } else if (result.incomplete && !shouldPunt) {
                     down++;
 
-                    // --- 5. REGULAR PLAY (GAIN/LOSS) ---
+                // --- 5. REGULAR PLAY (GAIN/LOSS) ---
                 } else if (!shouldPunt) { // Completed play, not a punt
                     const goalLineY = FIELD_LENGTH - 10;
-                    const absoluteLoS_Y = (ballOn - result.yards) + 10;
-                    const yardsToGoalLine = goalLineY - absoluteLoS_Y;
-                    const wasGoalToGo = (yardsToGo >= yardsToGoalLine);
+                    const absoluteLoS_Y = (ballOn - result.yards) + 10; // ballOn is yardline relative to offense direction
+                    const yardsToGoalLine = goalLineY - absoluteLoS_Y; // Recalculate relative to field coords if needed, but simplified logic uses yardsToGo
+                    // Actually, simplified logic:
+                    const wasGoalToGo = ((ballOn + 10) + yardsToGo) >= (FIELD_LENGTH - 10); 
 
                     yardsToGo -= result.yards;
 
@@ -4736,11 +4727,11 @@ export function simulateGame(homeTeam, awayTeam, options = {}) {
                         const newYardsToGoalLine = 100 - ballOn;
 
                         if (newYardsToGoalLine <= 10) {
-                            yardsToGo = newYardsToGoalLine; // e.g., 1st & Goal from the 8
+                            yardsToGo = newYardsToGoalLine; 
                         } else {
-                            yardsToGo = 10; // 1st & 10
+                            yardsToGo = 10; 
                         }
-                        if (yardsToGo <= 0) yardsToGo = 1; // 1st & Goal from the <1 yard line
+                        if (yardsToGo <= 0) yardsToGo = 1; 
 
                         if (!fastSim) {
                             const newYardLineText = ballOn <= 50 ? `own ${ballOn}` : `opponent ${100 - ballOn}`;
@@ -4750,12 +4741,13 @@ export function simulateGame(homeTeam, awayTeam, options = {}) {
                     } else { // Not a first down
                         down++;
                         if (wasGoalToGo) {
-                            yardsToGo = 100 - ballOn; // Update yards to go on "Goal to Go"
+                            yardsToGo = 100 - ballOn; 
                         }
                     }
                 }
+            }
 
-                // --- 6. CHECK FOR TURNOVER ON DOWNS (at the end of all checks) ---
+                // --- 6. CHECK FOR TURNOVER ON DOWNS ---
                 if (down > 4 && driveActive) {
                     if (!fastSim) {
                         const finalYardLineText = ballOn <= 50 ? `own ${ballOn}` : `opponent ${100 - ballOn}`;
@@ -4764,7 +4756,6 @@ export function simulateGame(homeTeam, awayTeam, options = {}) {
                     driveActive = false;
                     nextDriveStartBallOn = 100 - ballOn;
                 }
-            } // --- End Play Loop (while driveActive) ---
 
             drivesThisGame++;
             if (drivesThisGame < totalDrivesPerHalf * 2 && !gameForfeited) {
@@ -4915,6 +4906,7 @@ export function simulateGame(homeTeam, awayTeam, options = {}) {
                                 }
                             }
                             driveActive = false;
+                        
                         } else if (result.incomplete) {
                             down++;
                         } else { // Completed play
