@@ -2089,7 +2089,7 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
         // --- A. MAN COVERAGE (With Leverage) ---
         if (assignment?.startsWith('man_cover_')) {
             const targetSlot = assignment.replace('man_cover_', '');
-            const targetRec = offenseStates.find(o => o.slot === targetSlot);
+            const targetRec = initialOffenseStates.find(o => o.slot === targetSlot);
 
             if (!targetRec) {
                 const zoneCenter = pState.cachedZoneCenter || {x: pState.initialX, y: pState.initialY};
