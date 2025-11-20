@@ -884,7 +884,7 @@ function getPlayerBySlot(team, side, slot, usedPlayerIdsThisPlay) {
     const starterId = sideDepthChart[slot];
 
     // --- STEP 1: Try to get the designated starter ---
-    // --- 💡 FIX: Find from our full roster object list ---
+    // ---  Find from our full roster object list ---
     let player = roster.find(p => p && p.id === starterId);
 
     if (player && (player.status?.duration > 0 || usedPlayerIdsThisPlay.has(player.id))) {
@@ -893,7 +893,7 @@ function getPlayerBySlot(team, side, slot, usedPlayerIdsThisPlay) {
 
     // --- STEP 2: If starter is ineligible, find the BEST possible substitute ---
     if (!player) {
-        // --- 💡 FIX: Filter from our full roster object list ---
+        // ---  Filter from our full roster object list ---
         const availableSubs = roster.filter(p =>
             p && p.status?.duration === 0 && !usedPlayerIdsThisPlay.has(p.id)
         );
@@ -927,15 +927,15 @@ function getPlayerBySlot(team, side, slot, usedPlayerIdsThisPlay) {
 // game.js
 
 function findEmergencyPlayer(position, team, side, usedPlayerIdsThisPlay) {
-    // --- 💡 FIX: Get roster objects ---
+    // ---  Get roster objects ---
     const roster = getRosterObjects(team);
     if (!team || !roster || !Array.isArray(roster)) {
-        // --- 💡 END FIX ---
+        // --- END FIX ---
         console.warn(`findEmergencyPlayer: Invalid team data for ${position}.`); return null;
     }
 
     usedPlayerIdsThisPlay = ensureSet(usedPlayerIdsThisPlay);
-    // --- 💡 FIX: Filter from our full roster object list ---
+    // ---  Filter from our full roster object list ---
     const availablePlayers = roster.filter(p => p && p.status?.duration === 0 && !usedPlayerIdsThisPlay.has(p.id));
     if (availablePlayers.length === 0) {
         console.warn(`findEmergencyPlayer: No healthy, unused players found on roster for ${position}.`); return null;
@@ -1010,7 +1010,7 @@ function getZoneCenter(zoneAssignment, lineOfScrimmage) {
         return { x: CENTER_X, y: Math.min(BACK_WALL_Y, lineOfScrimmage + 7) };
     }
 
-    // --- 💡 NEW: Red Zone Compression Logic ---
+    // ---  Red Zone Compression Logic ---
 
     // 1. Calculate the zone's "ideal" absolute Y boundaries
     const idealMinY_abs = lineOfScrimmage + (zone.minY || 0);
@@ -1024,7 +1024,7 @@ function getZoneCenter(zoneAssignment, lineOfScrimmage) {
 
     // 3. Calculate the center of the *actual* (clamped) zone
     const finalCenterY = (finalMinY_abs + finalMaxY_abs) / 2;
-    // --- 💡 END NEW LOGIC ---
+    // ---  END  LOGIC ---
 
     // Calculate X-center (no change needed)
     const centerX = zone.minX !== undefined && zone.maxX !== undefined
@@ -1049,7 +1049,7 @@ function isPlayerInZone(playerState, zoneAssignment, lineOfScrimmage) {
         return false; // Not a spatial zone (e.g., 'pass_rush')
     }
 
-    // --- 💡 NEW: Red Zone Compression Logic ---
+    // ---  Red Zone Compression Logic ---
 
     // 1. Calculate the zone's "ideal" absolute Y boundaries
     const idealMinY_abs = lineOfScrimmage + (zone.minY || 0);
@@ -1061,7 +1061,7 @@ function isPlayerInZone(playerState, zoneAssignment, lineOfScrimmage) {
 
     // 3. Check if player's absolute Y is within the *actual* (clamped) zone
     const withinY = playerState.y >= finalMinY_abs && playerState.y <= finalMaxY_abs;
-    // --- 💡 END NEW LOGIC ---
+    // ---  END  LOGIC ---
 
     // Check X boundaries (no change needed)
     const withinX = playerState.x >= zone.minX && playerState.x <= zone.maxX;
@@ -1125,7 +1125,7 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
         }
         const usedSet = isOffense ? usedPlayerIds_O : usedPlayerIds_D;
 
-        // --- 💡 FIX START: Priority Sorting ---
+
         // We MUST sort the slots to ensure critical positions (QB) are filled FIRST.
         const sortedSlots = [...formationData.slots].sort((a, b) => {
             // 1. Quarterbacks always go first
@@ -1137,9 +1137,9 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
             // 3. Everyone else
             return 0;
         });
-        // --- 💡 FIX END ---
 
-        // --- 💡 NEW: Track who is already being covered by the playbook ---
+
+        // ---  Track who is already being covered by the playbook ---
         const coveredManTargets = new Set();
         if (!isOffense) {
             Object.values(defAssignments).forEach(assign => {
@@ -1427,8 +1427,6 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
                 cachedZoneCenter: zoneCenter,
                 routePath: routePath,
                 currentPathIndex: 0,
-
-                // 💡 FIX: Add QB Read Properties to the object
                 readProgression: readProgression,
                 currentReadTargetSlot: currentReadTargetSlot,
                 ticksOnCurrentRead: ticksOnCurrentRead,
@@ -2591,9 +2589,6 @@ function resolveOngoingBlocks(playState, gameLog) {
 /**
  * Handles QB decision-making (throw, scramble, checkdown).
  */
-/**
- * Handles QB decision-making (throw, scramble, checkdown).
- */
 function updateQBDecision(playState, offenseStates, defenseStates, gameLog, aiTickMultiplier = 1) {
     const qbState = offenseStates.find(p => p.slot === 'QB1' && (p.hasBall || p.isBallCarrier));
     if (!qbState || playState.ballState.inAir) return; // Exit if no QB with ball or ball already thrown
@@ -3408,9 +3403,11 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
 
     const playState = {
         playIsLive: true, tick: 0, maxTicks: 1000,
+        type: type,                // <--- ADD THIS LINE
+        assignments: assignments,  // <--- ADD THIS LINE
         yards: 0, touchdown: false, turnover: false, incomplete: false, sack: false, safety: false,
-        finalBallY: 0, // 💡 
-        touchback: false, // 💡 
+        finalBallY: 0,
+        touchback: false,
         ballState: {
             x: 0, y: 0, z: 1.0,
             vx: 0, vy: 0, vz: 0,
