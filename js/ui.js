@@ -1058,70 +1058,121 @@ function renderDepthChartSide(side, gameState) {
  * Renders the visual, on-field player slots and their assignment dropdowns.
  */
 function renderVisualFormationSlots(container, currentChart, formationData, benchedPlayers, allRoster, side) {
-    container.innerHTML = ''; // Clear existing slots
+    container.innerHTML = '';
+    container.classList.add('visual-field-container'); // Ensure CSS hook exists
 
     if (!formationData || !formationData.slots || !formationData.coordinates) {
-        container.innerHTML = '<p class="text-white p-4">Select a formation to see the depth chart.</p>';
+        container.innerHTML = '<div class="flex h-full items-center justify-center text-white/70 italic">Select a formation to view alignment.</div>';
         return;
     }
+
+    // Add Line of Scrimmage (Visual Aid)
+    const LOS_PERCENT = side === 'offense' ? 60 : 40; // Offense starts near bottom, Defense near top
     
+    const losEl = document.createElement('div');
+    losEl.className = 'los-marker';
+    losEl.style.top = `${LOS_PERCENT}%`;
+    container.appendChild(losEl);
+
     const slots = formationData.slots;
 
+    // Pre-build options for performance
     const optionsHtml = [
         '<option value="null">-- Empty --</option>',
-        ...benchedPlayers.map(p => `<option value="${p.id}">${p.name}</option>`)
+        ...benchedPlayers.map(p => `<option value="${p.id}">${p.name} (${calculateOverall(p, p.favoriteOffensivePosition || 'ATH')})</option>`)
     ].join('');
+
+    // --- SPACING ADJUSTMENTS ---
+    // These multipliers determine how much a "yard" in your formation data
+    // translates to a percentage of the field's width/height.
+    // Increase these to spread players out more.
+    const X_SPACING_MULTIPLIER = 2.5; // Increased from 1.8
+    const Y_SPACING_MULTIPLIER = 4.5; // Increased from 3.5
 
     slots.forEach(slot => {
         const playerId = currentChart[slot];
         const player = allRoster.find(p => p && p.id === playerId);
-        const relCoords = formationData.coordinates[slot] || [0, 0];
-        
-        // --- Coordinate Mapping ---
-        // 💡 FIX: Increased horizontal multiplier to spread slots
-        const x_percent = 50 + (relCoords[0] * 3.0); // 💡 WAS 2.0
+        const relCoords = formationData.coordinates[slot] || [0, 0]; // [x, y] relative to center/LOS
 
-        // 💡 FIX: Increased vertical multiplier to use the 400px height
-        const y_percent = 50 + (relCoords[1] * 8); // Was 6
-        
+        // Calculate X position: 0 is center, -X is Left, +X is Right
+        const x_percent = 50 + (relCoords[0] * X_SPACING_MULTIPLIER);
+
+        // Calculate Y position: 0 is LOS
+        let y_percent;
+        if (side === 'offense') {
+            // For offense, positive Y in data means deeper in backfield (further down screen)
+            // Negative Y means further downfield (further up screen)
+            y_percent = LOS_PERCENT + (relCoords[1] * Y_SPACING_MULTIPLIER);
+        } else {
+            // For defense, positive Y in data means deeper/further from LOS (further up screen)
+            // Negative Y means closer to/behind LOS (further down screen)
+            y_percent = LOS_PERCENT - (relCoords[1] * Y_SPACING_MULTIPLIER);
+        }
+
+        // Clamp values to keep inside the box (add a bit more padding if needed)
+        const PADDING_OFFSET = 7; // Increased from 5 to account for larger card size
+        const clampedX = Math.max(PADDING_OFFSET, Math.min(100 - PADDING_OFFSET, x_percent));
+        const clampedY = Math.max(PADDING_OFFSET, Math.min(100 - PADDING_OFFSET, y_percent));
+
         const slotEl = document.createElement('div');
         slotEl.className = 'player-slot-visual';
         slotEl.dataset.positionSlot = slot;
         slotEl.dataset.side = side;
-        // 💡 FIX: Tighter clamp to prevent going off-edge
-        slotEl.style.left = `${Math.max(15, Math.min(85, x_percent))}%`; // Was 10/90
-        slotEl.style.top = `${Math.max(12, Math.min(88, y_percent))}%`;  // Was 10/90
         
+        // Set position
+        slotEl.style.left = `${clampedX}%`;
+        slotEl.style.top = `${clampedY}%`;
+
         if (player && player.status?.type !== 'temporary') {
              slotEl.draggable = true;
              slotEl.dataset.playerId = player.id;
         }
 
+        // HTML Content (remains largely the same)
         let overallHtml = '';
         let finalOptionsHtml = optionsHtml;
 
         if (player) {
-            const basePosition = slot.replace(/\d/g, '');
+            const basePosition = slot.replace(/\d/g, ''); // e.g., 'WR1' -> 'WR'
             const overall = calculateOverall(player, basePosition);
-            overallHtml = `<div class="slot-overall">${overall} OVR</div>`;
-            finalOptionsHtml += `<option value="${player.id}">${player.name}</option>`;
+            
+            // Color code overall based on value
+            let overallColorClass = 'bg-gray-500'; // Default
+            if (overall >= 90) overallColorClass = 'bg-green-600'; // Elite
+            else if (overall >= 80) overallColorClass = 'bg-blue-600'; // Great
+            else if (overall >= 70) overallColorClass = 'bg-amber-600'; // Good
+            else if (overall >= 60) overallColorClass = 'bg-red-600'; // Average
+            
+            overallHtml = `<div class="slot-overall ${overallColorClass}">${overall}</div>`;
+            
+            // Handle dropdown selection for current player
+            if (!benchedPlayers.find(b => b.id === player.id)) {
+                finalOptionsHtml = `<option value="${player.id}" selected>${player.name} (${overall})</option>` + optionsHtml;
+            } else {
+                finalOptionsHtml = finalOptionsHtml.replace(`value="${player.id}"`, `value="${player.id}" selected`);
+            }
         } else {
-            overallHtml = `<div class="slot-overall">-- OVR</div>`;
+            overallHtml = `<div class="slot-overall bg-gray-500">--</div>`;
         }
 
-        const selectEl = document.createElement('select');
-        selectEl.className = 'slot-select';
-        selectEl.dataset.slot = slot;
-        selectEl.dataset.side = side;
-        selectEl.innerHTML = finalOptionsHtml;
-        selectEl.value = playerId || "null";
-        
         slotEl.innerHTML = `
             <span class="slot-label">${slot}</span>
             ${overallHtml}
+            <select class="slot-select" data-slot="${slot}" data-side="${side}">
+                ${finalOptionsHtml}
+            </select>
         `;
         
-        slotEl.appendChild(selectEl);
+        // Add change listener for dropdown
+        const select = slotEl.querySelector('select');
+        select.addEventListener('change', (e) => {
+            const newPlayerId = e.target.value;
+            const event = new CustomEvent('depth-chart-changed', { 
+                detail: { playerId: newPlayerId === 'null' ? null : newPlayerId, slot: slot, side: side } 
+            });
+            document.dispatchEvent(event);
+        });
+
         container.appendChild(slotEl);
     });
 }
