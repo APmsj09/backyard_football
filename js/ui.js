@@ -1059,58 +1059,73 @@ function renderDepthChartSide(side, gameState) {
  */
 function renderVisualFormationSlots(container, currentChart, formationData, benchedPlayers, allRoster, side) {
     container.innerHTML = '';
-    container.classList.add('visual-field-container'); // Ensure CSS hook exists
+    container.classList.add('visual-field-container'); 
 
     if (!formationData || !formationData.slots || !formationData.coordinates) {
         container.innerHTML = '<div class="flex h-full items-center justify-center text-white/70 italic">Select a formation to view alignment.</div>';
         return;
     }
 
-    // Add Line of Scrimmage (Visual Aid)
-    const LOS_PERCENT = side === 'offense' ? 60 : 40; // Offense starts near bottom, Defense near top
-    
+    // Add Line of Scrimmage
+    const LOS_PERCENT = side === 'offense' ? 60 : 40;
     const losEl = document.createElement('div');
     losEl.className = 'los-marker';
     losEl.style.top = `${LOS_PERCENT}%`;
     container.appendChild(losEl);
 
-    const slots = formationData.slots;
+    // Spacing Multipliers (From previous fix)
+    const X_SPACING_MULTIPLIER = 2.5; 
+    const Y_SPACING_MULTIPLIER = 4.5; 
+    const PADDING_OFFSET = 7;
 
-    // Pre-build options for performance
-    const optionsHtml = [
-        '<option value="null">-- Empty --</option>',
-        ...benchedPlayers.map(p => `<option value="${p.id}">${p.name} (${calculateOverall(p, p.favoriteOffensivePosition || 'ATH')})</option>`)
-    ].join('');
-
-    // --- SPACING ADJUSTMENTS ---
-    // These multipliers determine how much a "yard" in your formation data
-    // translates to a percentage of the field's width/height.
-    // Increase these to spread players out more.
-    const X_SPACING_MULTIPLIER = 2.5; // Increased from 1.8
-    const Y_SPACING_MULTIPLIER = 4.5; // Increased from 3.5
-
-    slots.forEach(slot => {
+    formationData.slots.forEach(slot => {
         const playerId = currentChart[slot];
-        const player = allRoster.find(p => p && p.id === playerId);
-        const relCoords = formationData.coordinates[slot] || [0, 0]; // [x, y] relative to center/LOS
+        const currentPlayer = allRoster.find(p => p && p.id === playerId);
+        const relCoords = formationData.coordinates[slot] || [0, 0];
 
-        // Calculate X position: 0 is center, -X is Left, +X is Right
+        // 1. Determine Position Context (e.g., "WR" from "WR1")
+        const basePosition = slot.replace(/\d/g, ''); 
+
+        // 2. Build Dropdown Options (Specific to this slot!)
+        // We calculate the Overall for EVERY bench player relative to THIS position.
+        const benchOptions = benchedPlayers.map(p => {
+            return {
+                id: p.id,
+                name: p.name,
+                ovr: calculateOverall(p, basePosition) // Context-aware rating
+            };
+        });
+
+        // Sort bench by OVR descending (Best players at top)
+        benchOptions.sort((a, b) => b.ovr - a.ovr);
+
+        // Generate HTML for options
+        let optionsHtml = '<option value="null">-- Empty --</option>';
+        
+        // If there is a current player, add them at the top (even if not on bench)
+        if (currentPlayer) {
+            const currentOvr = calculateOverall(currentPlayer, basePosition);
+            optionsHtml += `<option value="${currentPlayer.id}" selected>${currentPlayer.name} - ${currentOvr}</option>`;
+            optionsHtml += `<option disabled>──────────</option>`; // Visual separator
+        }
+
+        // Add sorted bench players
+        benchOptions.forEach(opt => {
+            // Don't duplicate the current player if they were somehow in the bench list
+            if (opt.id !== playerId) {
+                optionsHtml += `<option value="${opt.id}">${opt.name} - ${opt.ovr}</option>`;
+            }
+        });
+
+        // --- Coordinate Mapping (Visual Position) ---
         const x_percent = 50 + (relCoords[0] * X_SPACING_MULTIPLIER);
-
-        // Calculate Y position: 0 is LOS
         let y_percent;
         if (side === 'offense') {
-            // For offense, positive Y in data means deeper in backfield (further down screen)
-            // Negative Y means further downfield (further up screen)
-            y_percent = LOS_PERCENT + (relCoords[1] * Y_SPACING_MULTIPLIER);
+            y_percent = LOS_PERCENT + (relCoords[1] * Y_SPACING_MULTIPLIER); 
         } else {
-            // For defense, positive Y in data means deeper/further from LOS (further up screen)
-            // Negative Y means closer to/behind LOS (further down screen)
             y_percent = LOS_PERCENT - (relCoords[1] * Y_SPACING_MULTIPLIER);
         }
 
-        // Clamp values to keep inside the box (add a bit more padding if needed)
-        const PADDING_OFFSET = 7; // Increased from 5 to account for larger card size
         const clampedX = Math.max(PADDING_OFFSET, Math.min(100 - PADDING_OFFSET, x_percent));
         const clampedY = Math.max(PADDING_OFFSET, Math.min(100 - PADDING_OFFSET, y_percent));
 
@@ -1118,39 +1133,25 @@ function renderVisualFormationSlots(container, currentChart, formationData, benc
         slotEl.className = 'player-slot-visual';
         slotEl.dataset.positionSlot = slot;
         slotEl.dataset.side = side;
-        
-        // Set position
         slotEl.style.left = `${clampedX}%`;
         slotEl.style.top = `${clampedY}%`;
 
-        if (player && player.status?.type !== 'temporary') {
+        if (currentPlayer && currentPlayer.status?.type !== 'temporary') {
              slotEl.draggable = true;
-             slotEl.dataset.playerId = player.id;
+             slotEl.dataset.playerId = currentPlayer.id;
         }
 
-        // HTML Content (remains largely the same)
+        // Badge Logic
         let overallHtml = '';
-        let finalOptionsHtml = optionsHtml;
-
-        if (player) {
-            const basePosition = slot.replace(/\d/g, ''); // e.g., 'WR1' -> 'WR'
-            const overall = calculateOverall(player, basePosition);
+        if (currentPlayer) {
+            const overall = calculateOverall(currentPlayer, basePosition);
+            let colorClass = 'bg-gray-500';
+            if (overall >= 90) colorClass = 'bg-green-600';
+            else if (overall >= 80) colorClass = 'bg-blue-600';
+            else if (overall >= 70) colorClass = 'bg-amber-600';
+            else if (overall >= 60) colorClass = 'bg-red-600';
             
-            // Color code overall based on value
-            let overallColorClass = 'bg-gray-500'; // Default
-            if (overall >= 90) overallColorClass = 'bg-green-600'; // Elite
-            else if (overall >= 80) overallColorClass = 'bg-blue-600'; // Great
-            else if (overall >= 70) overallColorClass = 'bg-amber-600'; // Good
-            else if (overall >= 60) overallColorClass = 'bg-red-600'; // Average
-            
-            overallHtml = `<div class="slot-overall ${overallColorClass}">${overall}</div>`;
-            
-            // Handle dropdown selection for current player
-            if (!benchedPlayers.find(b => b.id === player.id)) {
-                finalOptionsHtml = `<option value="${player.id}" selected>${player.name} (${overall})</option>` + optionsHtml;
-            } else {
-                finalOptionsHtml = finalOptionsHtml.replace(`value="${player.id}"`, `value="${player.id}" selected`);
-            }
+            overallHtml = `<div class="slot-overall ${colorClass}">${overall}</div>`;
         } else {
             overallHtml = `<div class="slot-overall bg-gray-500">--</div>`;
         }
@@ -1159,11 +1160,10 @@ function renderVisualFormationSlots(container, currentChart, formationData, benc
             <span class="slot-label">${slot}</span>
             ${overallHtml}
             <select class="slot-select" data-slot="${slot}" data-side="${side}">
-                ${finalOptionsHtml}
+                ${optionsHtml}
             </select>
         `;
         
-        // Add change listener for dropdown
         const select = slotEl.querySelector('select');
         select.addEventListener('change', (e) => {
             const newPlayerId = e.target.value;
