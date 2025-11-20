@@ -1425,8 +1425,9 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
         playState.ballState.y = qbState.y;
         playState.ballState.z = 1.0;
         
-        // 💡 FIX: Separate hasBall from isBallCarrier
-        qbState.isBallCarrier = !!isQBRun; 
+        // 💡 MAKE SURE THIS IS HERE:
+        // Only mark as a "runner" if it is explicitly a run play (e.g. QB Sneak)
+        qbState.isBallCarrier = !!isQBRun;
 
         if (play.type === 'punt') {
             qbState.isBallCarrier = false;
@@ -1655,14 +1656,20 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
     }
 
     // -- Offensive Logic Updates --
+
+    const isQuarterbackInPocket = ballCarrierState && 
+                                  ballCarrierState.slot.startsWith('QB') && 
+                                  ballCarrierState.action === 'qb_setup';
     if (pState.isOffense &&
-      pState.id !== ballCarrierState?.id &&
-      (pState.action === 'pass_block' || pState.action === 'run_route' || pState.action === 'route_complete') &&
-      ballCarrierState &&
-      ballCarrierState.isOffense &&
-      !playState.ballState.inAir) {
-      pState.action = 'run_block';
-      pState.dynamicTargetId = null;
+        pState.id !== ballCarrierState?.id &&
+        (pState.action === 'pass_block' || pState.action === 'run_route' || pState.action === 'route_complete') &&
+        ballCarrierState &&
+        ballCarrierState.isOffense &&
+        !playState.ballState.inAir &&
+        !isQuarterbackInPocket) { // <--- 💡 THIS LINE PREVENTS THE BUG
+        
+        pState.action = 'run_block';
+        pState.dynamicTargetId = null;
     }
 
     if (pState.isOffense && !pState.hasBall && !pState.isBallCarrier) {
@@ -4518,58 +4525,72 @@ export function simulateGame(homeTeam, awayTeam, options = {}) {
                         const points = goesForTwo ? 2 : 1;
                         const conversionBallOn = goesForTwo ? 95 : 98;
                         const conversionYardsToGo = 100 - conversionBallOn;
-                        if (!fastSim) gameLog.push(`--- ${points}-Point Conversion Attempt (from the ${conversionYardsToGo}-yd line) ---`);
+                        if (!fastSim) gameLog.push(`🏈 --- ${points}-Point Conversion Attempt ---`);
 
+                        // Setup Conversion Play
                         offense.formations.offense = offense.coach.preferredOffense || 'Balanced';
-
+                        
+                        // Determine Plays
                         const conversionOffensePlayKey = determinePlayCall(offense, defense, 1, conversionYardsToGo, conversionBallOn, scoreDiff, fastSim ? null : gameLog, drivesRemainingInGame);
                         const conversionDefenseFormation = determineDefensiveFormation(defense, offense.formations.offense, 1, conversionYardsToGo);
                         defense.formations.defense = conversionDefenseFormation;
                         const conversionDefensePlayKey = determineDefensivePlayCall(defense, offense, 1, conversionYardsToGo, conversionBallOn, scoreDiff, fastSim ? null : gameLog, drivesRemainingInGame);
 
                         if (!fastSim) {
-                            const offPlayName = offensivePlaybook[conversionOffensePlayKey]?.name || conversionOffensePlayKey.split('_').slice(1).join(' ');
-                            const defPlayName = defensivePlaybook[conversionDefensePlayKey]?.name || defensivePlayKey;
-                            gameLog.push(`🏈 **Offense:** ${offPlayName}`);
-                            gameLog.push(`🛡️ **Defense:** ${defPlayName}`);
+                           // Optional: Log play names
                         }
 
-                        const conversionResult = resolvePlay(offense, defense, conversionOffensePlayKey, conversionDefensePlayKey, {
-                            gameLog: fastSim ? null : gameLog,
-                            weather, ballOn: conversionBallOn, ballHash: 'M', down: 1, yardsToGo: conversionYardsToGo
-                        }, options);
+                        // Run Conversion
+                        const conversionResult = resolvePlay(offense, defense, conversionOffensePlayKey, conversionDefensePlayKey,
+                            { gameLog: fastSim ? null : gameLog, weather, ballOn: conversionBallOn, ballHash: 'M', down: 1, yardsToGo: conversionYardsToGo },
+                            options
+                        );
 
                         if (!fastSim && conversionResult.visualizationFrames) {
                             allVisualizationFrames.push(...conversionResult.visualizationFrames);
                         }
 
+                        // Score Conversion
                         if (conversionResult.touchdown && !conversionResult.turnover) {
-                            if (!fastSim) gameLog.push(`✅ ${points}-point conversion GOOD!`);
+                            if (!fastSim) gameLog.push(`✅ ${points}-point conversion GOOD! Points are good!`);
                             if (offense.id === homeTeam.id) homeScore += (6 + points); else awayScore += (6 + points);
-                            scoreDiff = offense.id === homeTeam.id ? homeScore - awayScore : awayScore - homeScore;
                         } else if (conversionResult.touchdown && conversionResult.turnover) {
-                            if (!fastSim) gameLog.push(`❌ ${points}-point conversion FAILED... AND RETURNED!`);
-                            if (offense.id === homeTeam.id) homeScore += 6; else awayScore += 6;
-                            if (defense.id === homeTeam.id) homeScore += 2; else awayScore += 2;
-                            scoreDiff = offense.id === homeTeam.id ? homeScore - awayScore : awayScore - homeScore;
+                             // Returned conversion (very rare 2 points for defense)
+                             if (!fastSim) gameLog.push(`❌ Conversion FAILED... AND RETURNED!`);
+                             if (offense.id === homeTeam.id) homeScore += 6; else awayScore += 6;
+                             if (defense.id === homeTeam.id) homeScore += 2; else awayScore += 2;
                         } else {
                             if (!fastSim) gameLog.push(`❌ ${points}-point conversion FAILED!`);
                             if (offense.id === homeTeam.id) homeScore += 6; else awayScore += 6;
-                            scoreDiff = offense.id === homeTeam.id ? homeScore - awayScore : awayScore - homeScore;
                         }
+                        
+                        scoreDiff = offense.id === homeTeam.id ? homeScore - awayScore : awayScore - homeScore;
 
                     } else {
-                        // --- Defensive TD ---
+                        // --- Defensive TD (Interception/Fumble Return) ---
                         if (!fastSim) gameLog.push(`🎉 DEFENSIVE TOUCHDOWN! 6 points for ${defense.name}!`);
                         if (defense.id === homeTeam.id) homeScore += 6; else awayScore += 6;
                         scoreDiff = offense.id === homeTeam.id ? homeScore - awayScore : awayScore - homeScore;
                     }
 
-                    // End the drive and set up for a kickoff
+                    // --- 💡 CRITICAL FIX: SWAP POSSESSION HERE ---
+                    // Regardless of who scored (Offense or Defense), the ball goes to the
+                    // team that was playing Defense (or the non-scoring offense in a return).
+                    // Actually, simpler logic: 
+                    // If Offense scored -> Kickoff to Defense.
+                    // If Defense scored -> Kickoff to Offense.
+                    
+                    if (wasOffensiveTD) {
+                        currentOffense = defense; 
+                    } else {
+                        // If defense scored, they kick off, so original offense receives.
+                        currentOffense = offense;
+                    }
+                    
                     driveActive = false;
-                    nextDriveStartBallOn = 20;
+                    nextDriveStartBallOn = 20; 
 
-                    // --- 2. CHECK FOR SAFETY ---
+                // --- 2. CHECK FOR SAFETY ---
                 } else if (result.safety && !shouldPunt) {
                     if (!fastSim) gameLog.push(`SAFETY! 2 points for ${defense.name}!`);
                     if (defense.id === homeTeam.id) homeScore += 2; else awayScore += 2;
