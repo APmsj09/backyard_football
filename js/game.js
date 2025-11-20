@@ -1199,15 +1199,26 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
                         action = assignment;
                     }
                     targetY = startY + (action === 'pass_block' ? -0.5 : 0.5);
-                }
-                else if (slot.startsWith('QB')) {
-                    assignment = 'qb_setup';
-                    action = assignment;
-                    if (play.type === 'pass') {
-                        targetY = startY - 2;
-                        const rawReads = play.readProgression || [];
-                        readProgression = rawReads.length > 0 ? [...rawReads] : ['WR1', 'WR2', 'RB1', 'WR3'];
-                        currentReadTargetSlot = readProgression[0];
+                } else if (slot.startsWith('QB')) {
+                    // 💡 FIX: Check for Punt Type explicitly
+                    if (play.type === 'punt') {
+                        assignment = 'punt';
+                        action = 'punt_kick';
+                        // Set him deep for the punt
+                        targetY = startY - 5; 
+                        // Ensure he is looking at the snap
+                        targetX = startX;
+                    } 
+                    // Standard QB Logic
+                    else {
+                        assignment = 'qb_setup';
+                        action = assignment;
+                        if (play.type === 'pass') {
+                            targetY = startY - 2;
+                            const rawReads = play.readProgression || [];
+                            readProgression = rawReads.length > 0 ? [...rawReads] : ['WR1', 'WR2', 'RB1', 'WR3'];
+                            currentReadTargetSlot = readProgression[0];
+                        }
                     }
                 }
                 else {
@@ -1618,6 +1629,27 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
   // 5. Main Player Loop (Offense Movement & Defense AI)
   playState.activePlayers.forEach(pState => {
     let target = null;
+
+        // --- 💡 FIX 1: TURNOVER / INT PURSUIT OVERRIDE ---
+        // If there is a turnover (INT or Fumble Recovery by defense), 
+        // AND this player is on the original Offense, they must switch to tackling.
+        if (playState.turnover && pState.isOffense) {
+            pState.action = 'pursuit';
+            
+            // Find the new ball carrier (the defender who stole it)
+            const interceptor = playState.activePlayers.find(p => p.isBallCarrier);
+            
+            if (interceptor) {
+                // Simple pursuit logic
+                pState.targetX = interceptor.x;
+                pState.targetY = interceptor.y;
+            } else {
+                // Ball is loose or in transition, run to ball
+                pState.targetX = playState.ballState.x;
+                pState.targetY = playState.ballState.y;
+            }
+            return; // Stop processing routes/blocks
+        }
 
     // -- Common Status Checks --
     if (pState.stunnedTicks > 0) {
@@ -2597,7 +2629,8 @@ function resolveOngoingBlocks(playState, gameLog) {
 }
 
 /**
- * Handles QB decision-making (throw, scramble, checkdown).
+ * Handles QB decision-making.
+ * UPDATED: Slower progression to allow routes to develop.
  */
 function updateQBDecision(playState, offenseStates, defenseStates, gameLog, aiTickMultiplier = 1) {
     const qbState = offenseStates.find(p => p.slot === 'QB1');
@@ -2610,16 +2643,15 @@ function updateQBDecision(playState, offenseStates, defenseStates, gameLog, aiTi
     const qbAttrs = qbPlayer.attributes;
     const qbIQ = Math.max(20, Math.min(99, qbAttrs.mental?.playbookIQ ?? 50));
     const qbAgility = qbAttrs.physical?.agility || 50;
-    const qbToughness = qbAttrs.mental?.toughness || 50;
     const qbStrength = qbAttrs.physical?.strength || 50;
     const qbAcc = qbAttrs.technical?.throwingAccuracy || 50;
 
-    // --- SAFETY GUARD: Ensure readProgression exists ---
+    // Ensure progression exists
     const progression = Array.isArray(qbState.readProgression) && qbState.readProgression.length > 0
         ? qbState.readProgression
         : ['WR1', 'WR2', 'RB1', 'WR3'];
 
-    // --- 1. Helper: Get Target Info (THE FIX: Calculates Separation correctly) ---
+    // --- 1. Helper: Get Target Info ---
     const getTargetInfo = (slot) => {
         if (!slot) return null;
         const recState = offenseStates.find(r => r.slot === slot && (r.action.includes('route') || r.action === 'idle'));
@@ -2627,9 +2659,21 @@ function updateQBDecision(playState, offenseStates, defenseStates, gameLog, aiTi
 
         // Find closest defender TO THE RECEIVER
         let minSeparation = 100;
+        
+        // Check if receiver is making a cut (stationary moment) vs running
+        const isRunning = recState.action === 'run_route';
+
         defenseStates.forEach(d => {
             if (!d.isBlocked && !d.isEngaged && d.stunnedTicks === 0) {
-                const dist = getDistance(recState, d);
+                let dist = getDistance(recState, d);
+                
+                // 💡 LOGIC TWEAK: If the receiver is running a route, we care about 
+                // where they are GOING, not just where they ARE.
+                // If defender is "trailing" (behind the receiver), effectively increase separation
+                if (isRunning && d.y < recState.y - 1.0) {
+                     dist += 1.0; // Bonus separation for having a step on the DB
+                }
+                
                 if (dist < minSeparation) minSeparation = dist;
             }
         });
@@ -2638,237 +2682,240 @@ function updateQBDecision(playState, offenseStates, defenseStates, gameLog, aiTi
         return { state: recState, separation: minSeparation, distFromQB };
     };
 
-    // --- 2. Scramble Mode Logic (Throw on the Run) ---
-    if (qbState.action === 'qb_scramble') {
-        // Chance to look for a throw while running (IQ based)
-        if (Math.random() < (qbIQ / 150)) {
-            // Scan for VERY open receivers
-            const potentialTargets = offenseStates
-                .filter(p => p.action.includes('route') || p.action === 'idle')
-                .map(p => {
-                    // Quick separation check
-                    const defs = defenseStates.filter(d => !d.isBlocked && getDistance(p, d) < 4.0);
-                    const sep = defs.length === 0 ? 10 : Math.min(...defs.map(d => getDistance(p, d)));
-                    return { state: p, separation: sep };
-                })
-                .filter(t => t.separation > 3.0) // Must be wide open
-                .sort((a, b) => getDistance(qbState, a.state) - getDistance(qbState, b.state));
+    // --- 2. Assess Pressure ---
+    const pressureDefender = defenseStates.find(d => !d.isBlocked && !d.isEngaged && getDistance(qbState, d) < 5.0);
+    const isPressured = !!pressureDefender;
+    const imminentSackDefender = isPressured && getDistance(qbState, pressureDefender) < 2.0;
 
-            if (potentialTargets.length > 0) {
-                // Stop and throw
-                qbState.action = 'qb_setup';
-                qbState.hasBall = true;
-                qbState.isBallCarrier = false;
-                // Fall through to main logic to execute the throw
-            } else {
-                return; // Keep scrambling
-            }
-        } else {
-            return; // Keep scrambling
-        }
+    // --- 3. Update Read Progression (THE TIMING FIX) ---
+    
+    // How long does a route take to develop?
+    // Primary read needs ~2.0s (40 ticks). Secondary reads get ~0.8s (16 ticks).
+    // Higher IQ processes secondary reads faster, but DOES NOT abandon the primary read early.
+    
+    const isPrimaryRead = qbState.currentReadTargetSlot === progression[0];
+    
+    let requiredTimeOnRead;
+    
+    if (isPrimaryRead) {
+        // FORCE the QB to stick with the first read during the dropback
+        // Unless pressured, give the primary route 45 ticks (2.25 seconds) to work.
+        requiredTimeOnRead = 45; 
+    } else {
+        // Secondary reads: Higher IQ scans faster
+        // IQ 99 = 12 ticks (0.6s), IQ 50 = 20 ticks (1.0s)
+        requiredTimeOnRead = Math.max(12, 28 - Math.round(qbIQ / 6));
     }
 
-    // --- 3. Assess Pressure ---
-    const pressureDefender = defenseStates.find(d => !d.isBlocked && !d.isEngaged && getDistance(qbState, d) < 4.5);
-    const isPressured = !!pressureDefender;
-    const imminentSackDefender = isPressured && getDistance(qbState, pressureDefender) < TACKLE_RANGE + 0.2;
+    // If pressured, we cycle significantly faster
+    if (isPressured) requiredTimeOnRead = Math.round(requiredTimeOnRead * 0.5);
 
-    // --- 4. Update Read Progression ---
-    // Cycle reads based on IQ. 99 IQ = ~10 ticks (0.5s), 50 IQ = ~16 ticks
-    const READ_DELAY = Math.max(10, Math.round((100 - qbIQ) / 6)); 
-    
-    if (playState.tick > 20 && !imminentSackDefender) {
-        qbState.ticksOnCurrentRead++;
-        if (qbState.ticksOnCurrentRead > READ_DELAY) {
-            const currIdx = progression.indexOf(qbState.currentReadTargetSlot);
-            // Loop through progression
-            const nextIdx = (currIdx + 1) % progression.length;
+    // Increment Tick Counter
+    qbState.ticksOnCurrentRead = (qbState.ticksOnCurrentRead || 0) + 1;
+
+    // Check Switch Condition
+    if (!imminentSackDefender && qbState.ticksOnCurrentRead > requiredTimeOnRead) {
+        const currIdx = progression.indexOf(qbState.currentReadTargetSlot);
+        
+        // If we are at the end of the progression, stay on the Checkdown/Last Read
+        if (currIdx < progression.length - 1) {
+            const nextIdx = currIdx + 1;
             qbState.currentReadTargetSlot = progression[nextIdx];
             qbState.ticksOnCurrentRead = 0;
+            // if (gameLog) gameLog.push(`👀 QB scans to ${qbState.currentReadTargetSlot}`); // Debug log
         }
     }
 
-    // --- 5. Decision Timing & Logic ---
-    const baseDecisionTicks = 60;
-    const maxDecisionTimeTicks = baseDecisionTicks + Math.round((100 - qbIQ) * 0.5); // Low IQ holds ball longer
-    const pressureTimeReduction = isPressured ? Math.max(20, Math.round((100 - qbIQ) * 0.3)) : 0;
-    const currentDecisionTickTarget = maxDecisionTimeTicks - pressureTimeReduction;
-
+    // --- 4. Decision Logic ---
+    const baseDecisionTicks = 100; // 5.0 Seconds total pocket time allowed
+    const maxDecisionTimeTicks = baseDecisionTicks; 
+    
     let decisionMade = false;
     let reason = "";
 
     if (imminentSackDefender) {
         decisionMade = true;
         reason = "Imminent Sack";
-    } else if (playState.tick >= currentDecisionTickTarget) {
+    } else if (playState.tick >= maxDecisionTimeTicks) {
         decisionMade = true;
         reason = "Time Expired";
-    } else if (isPressured && playState.tick >= 20) {
-        // Panic check based on IQ
-        const panicChance = Math.max(0.1, 0.6 - qbIQ / 200);
+    } else if (isPressured && playState.tick >= 40) { // Don't panic instantly
+        const panicChance = Math.max(0.05, 0.4 - qbIQ / 200);
         if (Math.random() < panicChance) {
             decisionMade = true;
             reason = "Pressure Panic";
         }
     }
 
-    // --- 6. Execute Decision ---
-    if (decisionMade || (qbState.currentReadTargetSlot && !decisionMade)) { 
-        // ^ Note: We check reads even if "decisionMade" isn't forced yet, provided we found an open guy
-        
-        let targetPlayerState = null;
-        let actionTaken = "None";
+    // --- 5. Execute Decision ---
+    let targetPlayerState = null;
+    let actionTaken = "None";
 
-        // Collect Info
-        const currentReadInfo = getTargetInfo(qbState.currentReadTargetSlot);
-        const checkdownInfo = getTargetInfo(progression[progression.length - 1]); 
-        
-        // Thresholds
-        const OPEN_SEP = 2.5 + (isPressured ? 0.5 : 0); // Need more sep if pressured
-        const CHECKDOWN_SEP = 2.0;
+    const currentReadInfo = getTargetInfo(qbState.currentReadTargetSlot);
+    const checkdownInfo = getTargetInfo(progression[progression.length - 1]); 
+    
+    // Thresholds
+    // If pressured, we accept tighter windows (0.8). Normal is 1.2.
+    const OPEN_SEP = isPressured ? 0.8 : 1.2; 
+    const CHECKDOWN_SEP = 1.0;
 
-        // Check Scramble Lane (Original Logic)
-        const openLane = !defenseStates.some(d => 
-            !d.isBlocked && !d.isEngaged && 
-            Math.abs(d.x - qbState.x) < 4 && (d.y < qbState.y) && 
-            getDistance(qbState, d) < 6
-        );
-        const canScramble = openLane && ((isPressured && Math.random() < (qbAgility/100)) || playState.tick > 60);
+    // Check Scramble Lane
+    const openLane = !defenseStates.some(d => 
+        !d.isBlocked && !d.isEngaged && 
+        Math.abs(d.x - qbState.x) < 3.5 && (d.y < qbState.y + 1)
+    );
+    
+    // Only scramble if lane is wide open OR forced out
+    const canScramble = openLane && (isPressured || playState.tick > 80) && (Math.random() < (qbAgility/120));
 
-        // --- DECISION TREE ---
-
-        // 1. Is Current Read Open?
-        if (currentReadInfo && currentReadInfo.separation > OPEN_SEP) {
-            targetPlayerState = currentReadInfo.state;
-            actionTaken = "Throw Read";
-            decisionMade = true;
-        }
-        // 2. If pressured, is Checkdown open?
-        else if ((isPressured || reason === "Time Expired") && checkdownInfo && checkdownInfo.separation > CHECKDOWN_SEP) {
+    // 1. Is Current Read Open?
+    if (currentReadInfo && currentReadInfo.separation > OPEN_SEP) {
+        targetPlayerState = currentReadInfo.state;
+        actionTaken = "Throw Read";
+        decisionMade = true;
+    }
+    // 2. Scramble?
+    else if (canScramble && decisionMade) {
+        actionTaken = "Scramble";
+    }
+    // 3. Checkdown (Only if we've moved past primary reads or are pressured)
+    else if ((isPressured || !isPrimaryRead) && checkdownInfo && checkdownInfo.separation > CHECKDOWN_SEP) {
+        // Don't throw checkdown IMMEDIATELY if primary is still developing, unless dying
+        if (playState.tick > 30 || isPressured) {
             targetPlayerState = checkdownInfo.state;
             actionTaken = "Throw Checkdown";
             decisionMade = true;
         }
-        // 3. Scramble?
-        else if (canScramble && decisionMade) {
-            actionTaken = "Scramble";
-        }
-        // 4. Forced Throw / Throw Away (Panic Logic)
-        else if (decisionMade) {
-            const clutch = qbAttrs.mental?.clutch || 50;
-            // High Clutch or Low IQ might force a throw
-            if (currentReadInfo && (clutch > 80 || qbIQ < 40) && Math.random() < 0.4) {
-                targetPlayerState = currentReadInfo.state;
-                actionTaken = "Forced Throw";
-                if(gameLog) gameLog.push(`⚠️ ${qbState.name} forces a throw into coverage!`);
-            } else {
-                actionTaken = "Throw Away";
-            }
-        }
+    }
+    // 4. Forced Actions
+    else if (decisionMade) {
+        const clutch = qbAttrs.mental?.clutch || 50;
+        
+        if (reason === "Imminent Sack") {
+             // Hail Mary / Panic throw
+             const desperationTarget = offenseStates
+                .filter(o => o.action.includes('route'))
+                .sort((a, b) => {
+                    // Find whoever has MOST separation
+                    const sA = getTargetInfo(a.slot)?.separation || 0;
+                    const sB = getTargetInfo(b.slot)?.separation || 0;
+                    return sB - sA;
+                })[0];
 
-        // --- EXECUTE ---
-
-        if (actionTaken === "Scramble") {
-            qbState.action = 'qb_scramble';
-            qbState.scrambleDirection = 0; // Forward
-            qbState.hasBall = false;
-            qbState.isBallCarrier = true;
-            playState.ballState.x = qbState.x; 
-            playState.ballState.y = qbState.y;
-            if (gameLog) gameLog.push(`🏃 ${qbState.name} sees green grass and scrambles!`);
-            return;
-        }
-        else if (actionTaken === "Throw Away") {
-            if (gameLog) gameLog.push(`👋 ${qbState.name} throws it away to avoid the sack.`);
-            playState.incomplete = true;
-            playState.playIsLive = false;
-            playState.ballState.inAir = false;
-            // Sync ball stats for the record
-            playState.ballState.throwInitiated = true;
-            playState.ballState.throwerId = qbState.id;
-            return;
-        }
-        else if (targetPlayerState && actionTaken.includes("Throw")) {
-            if (gameLog) gameLog.push(`🏈 ${qbState.name} throws to ${targetPlayerState.name} (${actionTaken})...`);
-
-            // --- NEW PHYSICS: Leading the Pass ---
-            
-            // 1. Base physics
-            const velocity = 20 + (qbStrength / 4); // 25-35 yds/sec
-            const rawDist = getDistance(qbState, targetPlayerState);
-            const airTime = Math.max(0.4, rawDist / velocity);
-
-            // 2. Predict Receiver Vector
-            let aimX = targetPlayerState.x;
-            let aimY = targetPlayerState.y;
-
-            // Only lead if they are running a route
-            if (targetPlayerState.action.includes('route')) {
-                const recSpeedYPS = (targetPlayerState.speed / 100) * 8.0;
-                // Get vector to current target
-                const destDx = targetPlayerState.targetX - targetPlayerState.x;
-                const destDy = targetPlayerState.targetY - targetPlayerState.y;
-                const destDist = Math.sqrt(destDx*destDx + destDy*destDy);
-
-                if (destDist > 0.1) {
-                    const leadFactor = 0.9; // Lead amount
-                    const normX = destDx / destDist;
-                    const normY = destDy / destDist;
-                    
-                    aimX += (normX * recSpeedYPS * airTime * leadFactor);
-                    aimY += (normY * recSpeedYPS * airTime * leadFactor);
-                }
-            }
-
-            // 3. Apply Accuracy/Pressure Error
-            const accPenalty = (100 - qbAcc) / 20; 
-            const pressurePenalty = isPressured ? 2.0 : 1.0;
-            const forcedPenalty = actionTaken === "Forced Throw" ? 2.0 : 1.0;
-            
-            const maxError = (rawDist / 15) * accPenalty * pressurePenalty * forcedPenalty;
-            
-            // Circular Error
-            const angle = Math.random() * Math.PI * 2;
-            const errDist = Math.random() * maxError;
-            aimX += Math.cos(angle) * errDist;
-            aimY += Math.sin(angle) * errDist;
-
-            // 4. Clamp
-            aimX = Math.max(1, Math.min(FIELD_WIDTH - 1, aimX));
-            aimY = Math.max(1, Math.min(FIELD_LENGTH - 1, aimY));
-
-            // 5. Launch
-            
-            playState.ballState.inAir = true;
-            playState.ballState.throwInitiated = true;
-            playState.ballState.throwTick = playState.tick;
-            playState.ballState.throwerId = qbState.id;
-            playState.ballState.targetPlayerId = targetPlayerState.id;
-            playState.ballState.targetX = aimX;
-            playState.ballState.targetY = aimY;
-
-            const finalDx = aimX - qbState.x;
-            const finalDy = aimY - qbState.y;
-            const finalDist = Math.sqrt(finalDx*finalDx + finalDy*finalDy);
-            const finalAirTime = finalDist / velocity;
-
-            playState.ballState.vx = finalDx / finalAirTime;
-            playState.ballState.vy = finalDy / finalAirTime;
-            playState.ballState.vz = (9.8 * finalAirTime) / 2;
-            playState.ballState.x = qbState.x;
-            playState.ballState.y = qbState.y;
-
-            qbState.hasBall = false;
-            qbState.isBallCarrier = false;
+             if (desperationTarget && Math.random() > 0.3) {
+                 targetPlayerState = desperationTarget;
+                 actionTaken = "Forced Throw";
+             } else {
+                 actionTaken = "Throw Away";
+             }
+        } else {
+            actionTaken = "Throw Away";
         }
     }
-    
-    // --- 7. Setup Movement (Evasive) ---
-    // Keeps QB alive in pocket while reading
-    if (qbState.action === 'qb_setup' && isPressured && !decisionMade) {
-        const pressureDirX = Math.sign(qbState.x - pressureDefender.x);
-        qbState.targetX = qbState.x + pressureDirX * 1.5; // Step away
-        qbState.targetY = qbState.y - 0.3; // Drift back
+
+    // --- EXECUTE ---
+
+    if (actionTaken === "Scramble") {
+        qbState.action = 'qb_scramble';
+        qbState.scrambleDirection = 0; 
+        qbState.hasBall = false;
+        qbState.isBallCarrier = true;
+        playState.ballState.x = qbState.x; 
+        playState.ballState.y = qbState.y;
+        if (gameLog) gameLog.push(`🏃 ${qbState.name} takes off running!`);
+        return;
+    }
+    else if (actionTaken === "Throw Away") {
+        if (gameLog) gameLog.push(`👋 ${qbState.name} throws it away.`);
+        playState.incomplete = true;
+        playState.playIsLive = false;
+        playState.ballState.inAir = false;
+        playState.ballState.throwInitiated = true;
+        playState.ballState.throwerId = qbState.id;
+        return;
+    }
+    else if (targetPlayerState && actionTaken.includes("Throw")) {
+        if (gameLog) gameLog.push(`🏈 ${qbState.name} throws to ${targetPlayerState.name} (${actionTaken})...`);
+
+        // --- PHYSICS: Leading the Pass ---
+        const velocity = 20 + (qbStrength / 4); 
+        const rawDist = getDistance(qbState, targetPlayerState);
+        const airTime = Math.max(0.4, rawDist / velocity);
+
+        let aimX = targetPlayerState.x;
+        let aimY = targetPlayerState.y;
+
+        if (targetPlayerState.action.includes('route')) {
+            const recSpeedYPS = (targetPlayerState.speed / 100) * 8.0;
+            const destDx = targetPlayerState.targetX - targetPlayerState.x;
+            const destDy = targetPlayerState.targetY - targetPlayerState.y;
+            const destDist = Math.sqrt(destDx*destDx + destDy*destDy);
+
+            if (destDist > 0.1) {
+                const leadFactor = 0.85; 
+                const normX = destDx / destDist;
+                const normY = destDy / destDist;
+                aimX += (normX * recSpeedYPS * airTime * leadFactor);
+                aimY += (normY * recSpeedYPS * airTime * leadFactor);
+            }
+        }
+
+        // Accuracy
+        const accPenalty = (100 - qbAcc) / 20; 
+        const pressurePenalty = isPressured ? 2.0 : 1.0;
+        const forcedPenalty = actionTaken === "Forced Throw" ? 3.0 : 1.0;
+        
+        const maxError = (rawDist / 18) * accPenalty * pressurePenalty * forcedPenalty;
+        
+        const angle = Math.random() * Math.PI * 2;
+        const errDist = Math.random() * maxError;
+        aimX += Math.cos(angle) * errDist;
+        aimY += Math.sin(angle) * errDist;
+
+        // Clamp
+        aimX = Math.max(1, Math.min(FIELD_WIDTH - 1, aimX));
+        aimY = Math.max(1, Math.min(FIELD_LENGTH - 1, aimY));
+
+        // Set Ball State
+        playState.ballState.inAir = true;
+        playState.ballState.throwInitiated = true;
+        playState.ballState.throwTick = playState.tick;
+        playState.ballState.throwerId = qbState.id;
+        playState.ballState.targetPlayerId = targetPlayerState.id;
+        playState.ballState.targetX = aimX;
+        playState.ballState.targetY = aimY;
+
+        const finalDx = aimX - qbState.x;
+        const finalDy = aimY - qbState.y;
+        const finalDist = Math.sqrt(finalDx*finalDx + finalDy*finalDy);
+        const finalAirTime = finalDist / velocity;
+
+        playState.ballState.vx = finalDx / finalAirTime;
+        playState.ballState.vy = finalDy / finalAirTime;
+        playState.ballState.vz = (9.8 * finalAirTime) / 2;
+        playState.ballState.x = qbState.x;
+        playState.ballState.y = qbState.y;
+
+        qbState.hasBall = false;
+        qbState.isBallCarrier = false;
+    }
+
+    // --- 6. Setup Movement (Drift) ---
+    if (qbState.action === 'qb_setup' && !decisionMade) {
+        // If pressured, move away
+        if (isPressured) {
+            const pressureDirX = Math.sign(qbState.x - pressureDefender.x);
+            qbState.targetX = qbState.x + pressureDirX * 1.5; 
+            qbState.targetY = qbState.y - 0.5; 
+        } else {
+            // Drift slightly back
+            if (playState.tick < 40) {
+                qbState.targetY = qbState.initialY - 3; // Deep drop
+            } else {
+                // Step up slightly
+                qbState.targetY = qbState.initialY - 1.5;
+            }
+        }
     }
 }
 
@@ -2878,23 +2925,22 @@ function updateQBDecision(playState, offenseStates, defenseStates, gameLog, aiTi
  */
 function updatePunterDecision(playState, offenseStates, gameLog) {
     const punterState = offenseStates.find(p => p.action === 'punt_kick' && p.hasBall);
-    if (!punterState) return; // Punter already kicked or isn't on field
+    if (!punterState) return; 
 
-    const punterPlayer = game.players.find(p => p && p.id === punterState.id);
+    const punterPlayer = getPlayer(punterState.id);
     if (!punterPlayer || !punterPlayer.attributes) return;
 
-    // --- 1. Define Punt Timing ---
     // (50 ticks = 2.5 seconds for snap and kick)
     const KICK_TICK = 50;
 
     if (playState.tick < KICK_TICK) {
-        // Punter is waiting for the snap/setting up
         punterState.targetX = punterState.x;
         punterState.targetY = punterState.y;
         return;
     }
 
-    if (playState.tick === KICK_TICK) {
+    // 💡 FIX: Change '===' to '>=' so he kicks even if we miss the exact millisecond
+    if (playState.tick >= KICK_TICK) {
         // --- 2. Time to Kick! ---
         if (gameLog) gameLog.push(`🏈 ${punterState.name} gets the punt away!`);
 
