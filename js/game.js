@@ -1455,40 +1455,37 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
     const isRBRun = rbState && assignments[rbState.slot]?.includes('run_');
 
     if (play.type === 'run' && isRBRun && !isQBRun) {
+        // --- RB HANDOFF PLAY ---
         if (rbState) {
             rbState.hasBall = true;
-            rbState.isBallCarrier = true;
+            rbState.isBallCarrier = true; // RB is immediately the runner
             playState.ballState.x = rbState.x;
             playState.ballState.y = rbState.y;
             playState.ballState.z = 1.0;
         }
         if (qbState) { qbState.action = 'run_fake'; }
-    } else if (qbState) {
+    } 
+    else if (qbState) {
+        // --- PASS PLAY / QB RUN / PUNT ---
         qbState.hasBall = true;
         playState.ballState.x = qbState.x;
         playState.ballState.y = qbState.y;
         playState.ballState.z = 1.0;
 
+        // 💡 FIX: QB is ONLY 'isBallCarrier' if it is a designed run.
+        // Otherwise, he just 'hasBall' (in pocket).
+        qbState.isBallCarrier = !!isQBRun; 
+
         if (play.type === 'punt') {
             qbState.isBallCarrier = false;
-
+            // Ensure punter has some progression logic just in case
             const playReads = play.readProgression || [];
-            let finalProgression = [];
-
-            if (playReads.length > 0) {
-                finalProgression = [...playReads];     // ✅ FIXED
-            } else {
-                finalProgression = ['WR1', 'WR2', 'RB1'];
-            }
-
+            let finalProgression = playReads.length > 0 ? [...playReads] : ['WR1', 'WR2', 'RB1'];
             qbState.readProgression = finalProgression;
             qbState.currentReadTargetSlot = finalProgression[0];
             qbState.ticksOnCurrentRead = 0;
-
-            qbState.isBallCarrier = !!isQBRun;
         }
     } else {
-        // --- CRITICAL ERROR HANDLER ---
         console.error("CRITICAL: QB not found during setup! Ending play.");
         playState.playIsLive = false;
         playState.turnover = true;
@@ -2295,7 +2292,14 @@ function checkBlockCollisions(playState) {
     });
 }
 function checkTackleCollisions(playState, gameLog) {
-    const ballCarrierState = playState.activePlayers.find(p => p.isBallCarrier);
+    // 💡 FIX: Target anyone who HAS the ball, even if they aren't "running" yet (Pocket QB)
+    // We also ensure the ball isn't flying through the air.
+    const ballCarrierState = playState.activePlayers.find(p => 
+        (p.isBallCarrier || p.hasBall) && 
+        !playState.ballState.inAir && 
+        !playState.ballState.isLoose
+    );
+
     if (!ballCarrierState) return false;
 
     const TACKLE_RANGE_CHECK = TACKLE_RANGE;
@@ -2315,7 +2319,6 @@ function checkTackleCollisions(playState, gameLog) {
     for (const defender of activeDefenders) {
         if (getDistance(ballCarrierState, defender) < TACKLE_RANGE_CHECK) {
             
-            // Fumble Check
             if (checkFumble(ballCarrierState, defender, playState, gameLog)) {
                 ballCarrierState.stunnedTicks = 40;
                 return false; 
@@ -2349,17 +2352,20 @@ function checkTackleCollisions(playState, gameLog) {
                     ensureStats(tacklerPlayer);
                     tacklerPlayer.gameStats.tackles = (tacklerPlayer.gameStats.tackles || 0) + 1;
 
-                    // 💡 FIX: Only count as SACK if it's a PASS play and behind LOS
-                    // Also ensures the carrier is actually the QB
+                    // 💡 SACK LOGIC: Updated to use the passed variable
                     const isBehindLOS = ballCarrierState.y < playState.lineOfScrimmage;
-                    const isPassPlay = playState.type === 'pass'; // Requires the fix we did in resolvePlay earlier
                     
-                    if (ballCarrierState.slot === 'QB1' && isBehindLOS && isPassPlay) {
+                    // It is a sack if: 
+                    // 1. Carrier is a QB 
+                    // 2. Behind Line 
+                    // 3. It was a Pass play (Play type) OR they were in setup/scramble mode
+                    const isSackAction = (ballCarrierState.action === 'qb_setup' || ballCarrierState.action === 'qb_scramble');
+                    
+                    if (ballCarrierState.slot.startsWith('QB') && isBehindLOS && (playState.type === 'pass' || isSackAction)) {
                         playState.sack = true;
                         if (gameLog) gameLog.push(`💥 SACK! ${defender.name} drops ${ballCarrierState.name}!`);
                         tacklerPlayer.gameStats.sacks = (tacklerPlayer.gameStats.sacks || 0) + 1;
                     } else {
-                        // Regular tackle
                         const yards = playState.yards.toFixed(1);
                         if (gameLog) gameLog.push(`✋ ${ballCarrierState.name} tackled by ${defender.name} for ${yards < 0 ? 'a loss of ' + Math.abs(yards) : 'a gain of ' + yards}.`);
                     }
@@ -2577,9 +2583,9 @@ function resolveOngoingBlocks(playState, gameLog) {
  * Handles QB decision-making (throw, scramble, checkdown).
  */
 function updateQBDecision(playState, offenseStates, defenseStates, gameLog, aiTickMultiplier = 1) {
-    const qbState = offenseStates.find(p => p.slot === 'QB1' && (p.hasBall || p.isBallCarrier));
-    if (!qbState || playState.ballState.inAir) return; // Exit if no QB with ball or ball already thrown
-    if (qbState.isBallCarrier && qbState.action !== 'qb_scramble') return;
+    const qbState = offenseStates.find(p => p.slot === 'QB1');
+    if (!qbState || !qbState.hasBall || playState.ballState.inAir) return;
+    if (qbState.isBallCarrier) return;
 
     const qbPlayer = getPlayer(qbState.id);
     if (!qbPlayer || !qbPlayer.attributes) return;
