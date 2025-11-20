@@ -4528,7 +4528,8 @@ export function simulateGame(homeTeam, awayTeam, options = {}) {
         let receivingTeamSecondHalf = (possessionTeam.id === homeTeam.id) ? awayTeam : homeTeam;
         
         // Track the current offense explicitly
-        let currentOffense = possessionTeam; 
+        let currentOffense = coinFlipWinner; 
+        let gameForfeited = false;
 
         while (drivesThisGame < totalDrivesPerHalf * 2 && !gameForfeited) {
             
@@ -4541,15 +4542,16 @@ export function simulateGame(homeTeam, awayTeam, options = {}) {
                 const allGamePlayers = [...getRosterObjects(homeTeam), ...getRosterObjects(awayTeam)];
                 allGamePlayers.forEach(p => { if(p) p.fatigue = Math.max(0, (p.fatigue||0) - 40); });
 
-                // Second Half Kickoff
-                currentOffense = receivingTeamSecondHalf; // Set specific team
+                // 💡 FIX 2: Set offense for 2nd half
+                currentOffense = receivingTeamSecondHalf; 
                 nextDriveStartBallOn = 20;
                 if (!fastSim) gameLog.push(`-- Second Half Kickoff: ${currentOffense.name} receives --`);
             }
 
-            const offense = currentOffense;
+            // 💡 FIX 3: Use currentOffense
+            const offense = currentOffense; 
             const defense = (offense.id === homeTeam.id) ? awayTeam : homeTeam;
-
+            
             const checkRoster = (team) => {
                 const roster = getRosterObjects(team);
                 return roster.filter(p => p && p.status?.duration === 0).length < MIN_HEALTHY_PLAYERS;
@@ -4616,25 +4618,25 @@ export function simulateGame(homeTeam, awayTeam, options = {}) {
                     // --- It was a punt, handle the result ---
                     driveActive = false; // A punt always ends the offensive possession (unless muffed)
 
-                    if (result.touchdown && result.turnover) { // Punt Return TD
-                        if (defense.id === homeTeam.id) homeScore += 6; else awayScore += 6;
-                        nextDriveStartBallOn = 20; // Kickoff
-                    } else if (result.touchdown && !result.turnover) { // Blocked punt, recovered by offense for TD
+                    if (result.touchdown && !result.turnover) { 
+                        // Blocked punt TD by Offense
                         if (offense.id === homeTeam.id) homeScore += 6; else awayScore += 6;
-                        // ... (Handle conversion logic here, simplified for now) ...
-                        nextDriveStartBallOn = 20; // Kickoff
-                    } else if (result.touchback) { // Punt went into endzone
+                        currentOffense = defense; // Kickoff to other team
                         nextDriveStartBallOn = 20;
-                    } else if (result.turnover) { // Normal punt, defense takes possession
-                        const finalBallOn = result.finalBallY - 10;
-                        nextDriveStartBallOn = 100 - finalBallOn;
-                    } else { // No turnover (Muffed punt recovered by offense)
-                        const finalBallOn = result.finalBallY - 10;
-                        ballOn = finalBallOn;
-                        down = 1;
-                        yardsToGo = 10; // (Add goal-line logic if needed)
-                        driveActive = true; // Drive continues!
-                        if (!fastSim) gameLog.push(`➡️ First down ${offense.name}!`);
+                    } else if (result.touchdown && result.turnover) { 
+                        // Punt Return TD
+                        if (defense.id === homeTeam.id) homeScore += 6; else awayScore += 6;
+                        currentOffense = offense; // Kickoff to original offense
+                        nextDriveStartBallOn = 20;
+                    } else if (result.touchback) {
+                        currentOffense = defense;
+                        nextDriveStartBallOn = 20;
+                    } else { 
+                        // Normal punt
+                        const finalY = result.finalBallY || (ballOn + 40 + 10); 
+                        const absoluteBallOn = finalY - 10;
+                        currentOffense = defense; // Possession flips
+                        nextDriveStartBallOn = Math.round(Math.max(1, Math.min(99, 100 - absoluteBallOn)));
                     }
 
                 } else {
@@ -4769,34 +4771,38 @@ export function simulateGame(homeTeam, awayTeam, options = {}) {
                     driveActive = false;
                     if (!shouldPunt) {
                         // Turnover on downs, INT, or Fumble recovery (non-TD)
-        
-                        // 💡 FIX: Calculate spot based on where the play ENDED, not started.
-                        // result.finalBallY is absolute (e.g. 30). 
-                        // 10 = Endzone line. So field position is finalBallY - 10.
-                        // Since possession flips, the new offense attacks the other way, 
-                        // but for simplicity in this coordinate system, we usually normalize to 0-100.
-        
-                        let turnoverSpot = (result.finalBallY !== undefined) ? (result.finalBallY - 10) : ballOn;
-        
-                        // Clamp
-                        turnoverSpot = Math.max(1, Math.min(99, turnoverSpot));
-        
-                        // Flip field logic:
-                        // If INT was at absolute Y=30 (own 20), new team gets it at their own 20.
-                        // In our "0-100" logic, that stays 20.
+                        
+                        // 💡 FIX: Calculate spot based on where the play ENDED (return yards included).
+                        // If result.finalBallY is undefined, fallback to LOS + 10 as a safe default.
+                        const finalY = result.finalBallY !== undefined ? result.finalBallY : (ballOn + 10);
+                        const absoluteBallOn = finalY - 10;
+                        
+                        // Calculate the new field position for the OTHER team.
+                        // 100 - absoluteBallOn "flips" the field.
+                        let turnoverSpot = 100 - absoluteBallOn;
+
+                        // Clamp to valid range (1-99)
+                        turnoverSpot = Math.round(Math.max(1, Math.min(99, turnoverSpot)));
+                        
                         nextDriveStartBallOn = turnoverSpot;
 
                         if (!fastSim) {
-                             const spotText = nextDriveStartBallOn <= 50 ? `own ${nextDriveStartBallOn.toFixed(0)}` : `opponent ${(100-nextDriveStartBallOn).toFixed(0)}`;
-                             // Optional: Check if it was downs or actual turnover
+                             // Display logic for the log
+                             const spotText = nextDriveStartBallOn <= 50 ? `own ${nextDriveStartBallOn}` : `opponent ${100 - nextDriveStartBallOn}`;
+                             
                              if (result.incomplete && down > 4) {
-                                 // Turnover on downs logic is slightly different (ball goes back to LOS)
-                                 nextDriveStartBallOn = 100 - ballOn; 
+                                 // Turnover on DOWNS logic is slightly different: ball goes back to LOS (no return possible)
+                                 // Wait, result.turnover is usually true for downs. 
+                                 // But result.incomplete handles the "play failed" part.
+                                 // Actually, usually turnover on downs happens at the LOS of the previous play.
+                                 // Let's rely on the standard logic unless it was specifically an incompletion on 4th down.
+                                 // (If it was a run that failed on 4th down, the spot is correct based on tackle).
+                                 // If it was an incomplete pass on 4th down, ball goes back to original LOS.
+                                 if(result.incomplete) {
+                                     nextDriveStartBallOn = 100 - ballOn;
+                                 }
                              } else {
                                  // Interception/Fumble Return spot
-                                 // Note: To correctly flip perspective for the next loop's logic, 
-                                 // if the returner ran "down" towards Y=10, the value corresponds to the new offense's "Own" territory.
-                                 // No math needed if we just trust the absolute Y minus endzone.
                                  gameLog.push(`🔄 Possession changes! Ball spotted at ${spotText}.`);
                              }
                         }
