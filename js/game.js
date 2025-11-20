@@ -2038,6 +2038,65 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
         const diagnosis = diagnosePlay(pState, playType, offensivePlayKey, playState.tick);
         const isRunRead = (diagnosis === 'run');
 
+      // --- 💡 NEW: PURSUIT OVERRIDE (The "Ball is Live" Trigger) ---
+        // If the ball is NOT in the air, and an offensive player has it, 
+        // and the ball is past the Line of Scrimmage (or it was a completed pass),
+        // abandoning coverage to tackle is the priority.
+
+        const isBallCaughtOrRun = ballCarrierState && ballCarrierState.isOffense && !playState.ballState.inAir;
+        const isBallPastLOS = ballCarrierState && ballCarrierState.y > (LOS + 1.0);
+        
+        // DBs shouldn't crash down on a run IMMEDIATELY unless it breaks the line
+        // But if a pass is caught (isBallCaughtOrRun + playType was pass), they must react.
+        const shouldPursue = isBallCaughtOrRun && (isBallPastLOS || playType === 'pass' || pState.y < ballCarrierState.y + 10);
+
+        if (shouldPursue) {
+            pState.action = 'pursuit';
+            
+            // --- Pursuit Angles (Lead the target) ---
+            const runnerSpeed = ballCarrierState.currentSpeedYPS || 0.5; // Fallback speed
+            const mySpeed = (pState.speed / 100) * 8.5;
+            
+            // Simple intercept geometry
+            const dist = getDistance(pState, ballCarrierState);
+            const timeToIntercept = dist / mySpeed;
+            
+            // Predict where runner will be
+            // (We clamp the prediction so they don't run to the parking lot)
+            const predictionTime = Math.min(1.5, timeToIntercept); 
+            
+            // Basic vector of runner
+            const runnerDirY = 1.0; // Assume running downfield primarily
+            const runnerDirX = Math.sign(ballCarrierState.x - CENTER_X) * 0.2; // Slight assumption of running to sideline
+            
+            // If runner is juking/moving laterally, we could use their last delta, 
+            // but simply aiming 'downfield' of them is usually enough for a DB.
+            
+            let interceptX = ballCarrierState.x + (runnerDirX * runnerSpeed * predictionTime);
+            let interceptY = ballCarrierState.y + (runnerDirY * runnerSpeed * predictionTime);
+
+            // DBs take better angles (Inside-Out) to prevent sideline breaks
+            if (pState.slot.startsWith('DB') || pState.slot.startsWith('S')) {
+                if (ballCarrierState.x < 26 && pState.x > ballCarrierState.x) {
+                    // Runner on left, DB on right -> Aim slightly deeper to seal edge
+                    interceptY += 1.0; 
+                } else if (ballCarrierState.x > 26 && pState.x < ballCarrierState.x) {
+                    // Runner on right, DB on left
+                    interceptY += 1.0;
+                }
+            }
+
+            pState.targetX = interceptX;
+            pState.targetY = interceptY;
+            
+            // Clamp to field
+            pState.targetX = Math.max(0.5, Math.min(FIELD_WIDTH - 0.5, pState.targetX));
+            pState.targetY = Math.max(0.5, Math.min(FIELD_LENGTH - 0.5, pState.targetY));
+            
+            return; // STOP processing Zone/Man logic. Go get him.
+        }
+        // --- END PURSUIT OVERRIDE ---
+
         // 3. ASSIGNMENT LOGIC
         const assignment = pState.assignment;
 
