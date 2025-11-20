@@ -29,62 +29,65 @@ export const positionOverallWeights = {
  * @returns {string} The abbreviation of the estimated best position (e.g., "WR", "LB").
  */
 export function estimateBestPosition(scoutedPlayer) {
-    // Safety check for invalid data
-    if (!scoutedPlayer?.attributes?.physical) {
+    // 1. Fast fail if data is missing
+    if (!scoutedPlayer || !scoutedPlayer.attributes) {
         return 'UTIL';
     }
 
-    // --- 1. Create a "Clean" Player for Rating ---
-
-    // This helper converts "70-80" to 75, or just returns the number.
-    const getAttrValue = (attr) => {
-        if (typeof attr === 'number') {
-            return attr;
+    // --- Helper: Normalize Attribute Values ---
+    // Converts numbers, strings ("70-80"), or "?" to a usable number
+    const resolveAttr = (val) => {
+        if (typeof val === 'number') return val;
+        if (typeof val === 'string') {
+            if (val.includes('-')) {
+                const [min, max] = val.split('-').map(Number);
+                return (min + max) / 2;
+            }
+            // Handle "?" or other non-numeric strings by returning a safe average
+            return 50; 
         }
-        if (typeof attr === 'string' && attr.includes('-')) {
-            const [low, high] = attr.split('-').map(Number);
-            return (low + high) / 2; // Use midpoint
-        }
-        return 30; // Default low value if data is bad
+        return 0; // Fallback for null/undefined
     };
 
-    // Create a temporary player object with averaged attributes
-    const tempPlayer = {
-        attributes: {
-            physical: {},
-            mental: {},
-            technical: {}
-        }
-    };
-
-    // Loop over all scouted attributes and "clean" them
-    for (const category in scoutedPlayer.attributes) {
-        if (!tempPlayer.attributes[category]) continue; // Should not happen, but safe
-        for (const attr in scoutedPlayer.attributes[category]) {
-            // Set the temp player's stat to the cleaned value
-            tempPlayer.attributes[category][attr] = getAttrValue(scoutedPlayer.attributes[category][attr]);
+    // --- 2. Create "Clean" Player Object ---
+    // We use spread (...) to keep ID/Name/etc, then overwrite attributes
+    // with the normalized numeric versions.
+    const cleanAttributes = {};
+    
+    for (const [category, attrs] of Object.entries(scoutedPlayer.attributes)) {
+        cleanAttributes[category] = {};
+        for (const [key, value] of Object.entries(attrs)) {
+            cleanAttributes[category][key] = resolveAttr(value);
         }
     }
 
-    // --- 2. Find the Best Position using calculateOverall ---
+    const tempPlayer = {
+        ...scoutedPlayer,
+        attributes: cleanAttributes
+    };
 
+    // --- 3. Evaluate Positions ---
     let bestPos = 'UTIL';
-    let maxScore = -1;
+    let maxScore = -Infinity;
 
-    // Loop through the *real* position weights from this file
-    for (const pos in positionOverallWeights) {
-        // Use the game's actual rating function
-        const currentScore = calculateOverall(tempPlayer, pos);
+    // Optional: Define valuable positions to break ties. 
+    // If a player is 80 WR and 80 CB, we usually prefer the offensive skill position.
+    // We iterate keys of weights, so this order is implicit, but strictly > means
+    // the first one found keeps the title in a tie.
+    const positions = Object.keys(positionOverallWeights);
 
-        if (currentScore > maxScore) {
-            maxScore = currentScore;
+    for (const pos of positions) {
+        // Calculate score using the normalized data
+        const score = calculateOverall(tempPlayer, pos);
+
+        if (score > maxScore) {
+            maxScore = score;
             bestPos = pos;
         }
     }
 
     return bestPos;
 }
-
 /**
  * Calculates a player's overall rating for a given position.
  */
@@ -155,136 +158,173 @@ export function generatePlayer(minAge = 10, maxAge = 16) {
     const lastName = Math.random() < 0.4 ? getRandom(nicknames) : getRandom(lastNames);
     const age = getRandomInt(minAge, maxAge);
 
+    // 1. Determine Position
     const favoriteOffensivePosition = getRandom(offensivePositions);
     const favoriteDefensivePosition = getRandom(defensivePositions);
     const isOffenseStar = Math.random() < 0.5;
     const bestPosition = isOffenseStar ? favoriteOffensivePosition : favoriteDefensivePosition;
 
-    const ageProgress = (age - 10) / (16 - 10);
-    let baseHeight = 55 + (ageProgress * 15) + getRandomInt(-2, 2);
-    let baseWeight = 70 + (ageProgress * 90) + getRandomInt(-10, 10);
-
-    switch (bestPosition) {
-        case 'QB': case 'WR': baseHeight += getRandomInt(1, 4); baseWeight -= getRandomInt(0, 10); break;
-        case 'OL': case 'DL': baseHeight -= getRandomInt(0, 2); baseWeight += getRandomInt(20, 40); break;
-        case 'RB': baseWeight += getRandomInt(5, 15); break;
-    }
-
-    const boostRanges = {
+    // 2. Define Attribute Tiers
+    const tiers = {
         'Elite': { min: 90, max: 99 },
-        'Good': { min: 80, max: 90 },
-        'Average': { min: 70, max: 80 },
-        'Below Average': { min: 60, max: 70 },
-        'Poor': { min: 40, max: 60 }
+        'Great': { min: 80, max: 89 },
+        'Good': { min: 70, max: 79 },
+        'Average': { min: 55, max: 69 },
+        'Poor': { min: 40, max: 54 },
+        'Terrible': { min: 20, max: 39 }
     };
 
-    const getTalentData = (roll) => {
-        if (roll < 0.02) return { tier: 'Elite', bonus: -0.20, range: boostRanges['Elite'] };
-        if (roll < 0.12) return { tier: 'Good', bonus: -0.10, range: boostRanges['Good'] };
-        if (roll < 0.72) return { tier: 'Average', bonus: 0.0, range: boostRanges['Average'] };
-        if (roll < 0.92) return { tier: 'Below Average', bonus: 0.10, range: boostRanges['Below Average'] };
-        return { tier: 'Poor', bonus: 0.20, range: boostRanges['Poor'] };
+    // 3. Define "Key Attributes" per position
+    // These attributes get a statistical advantage during generation
+    const getKeyAttributes = (pos) => {
+        switch (pos) {
+            case 'QB': return ['throwingAccuracy', 'playbookIQ', 'consistency'];
+            case 'RB': return ['speed', 'agility', 'strength', 'toughness'];
+            case 'WR': return ['speed', 'catchingHands', 'agility'];
+            case 'OL': return ['strength', 'blocking', 'toughness'];
+            case 'DL': return ['strength', 'blockShedding', 'tackling'];
+            case 'LB': return ['tackling', 'playbookIQ', 'strength'];
+            case 'DB': return ['speed', 'agility', 'catchingHands'];
+            default: return [];
+        }
+    };
+    const keyAttrs = new Set(getKeyAttributes(bestPosition));
+
+    // 4. The Core Generator Function
+    // Generates a specific value based on whether it is a "Key" stat for this player
+    const generateAttributeValue = (attributeName) => {
+        const isKey = keyAttrs.has(attributeName);
+        const roll = Math.random();
+
+        let tier;
+
+        if (isKey) {
+            // Weighted towards greatness for key position stats
+            if (roll < 0.15) tier = 'Elite';       // 15%
+            else if (roll < 0.40) tier = 'Great';  // 25%
+            else if (roll < 0.75) tier = 'Good';   // 35%
+            else if (roll < 0.95) tier = 'Average';// 20%
+            else tier = 'Poor';                    // 5% (Bust factor)
+        } else {
+            // Bell curve-ish for non-key stats
+            if (roll < 0.02) tier = 'Elite';       // 2% (Random freak athlete)
+            else if (roll < 0.10) tier = 'Great';  // 8%
+            else if (roll < 0.30) tier = 'Good';   // 20%
+            else if (roll < 0.70) tier = 'Average';// 40%
+            else if (roll < 0.90) tier = 'Poor';   // 20%
+            else tier = 'Terrible';                // 10%
+        }
+
+        return getRandomInt(tiers[tier].min, tiers[tier].max);
     };
 
-    const physicalData = getTalentData(Math.random());
-    const technicalData = getTalentData(Math.random());
-    const mentalData = getTalentData(Math.random());
-
+    // 5. Generate Raw Attributes (Before Age/Weight scaling)
     let attributes = {
         physical: {
-            speed: getRandomInt(physicalData.range.min, physicalData.range.max),
-            strength: getRandomInt(physicalData.range.min, physicalData.range.max),
-            agility: getRandomInt(physicalData.range.min, physicalData.range.max),
-            stamina: getRandomInt(physicalData.range.min + 5, physicalData.range.max + 5),
-            height: Math.round(baseHeight),
-            weight: Math.round(baseWeight)
+            speed: generateAttributeValue('speed'),
+            strength: generateAttributeValue('strength'),
+            agility: generateAttributeValue('agility'),
+            stamina: generateAttributeValue('stamina'),
+            // Height/Weight calc comes later
+            height: 0, weight: 0 
         },
         mental: {
-            playbookIQ: getRandomInt(mentalData.range.min, mentalData.range.max),
-            clutch: getRandomInt(20, 90),
-            consistency: getRandomInt(mentalData.range.min, mentalData.range.max),
-            toughness: getRandomInt(mentalData.range.min, mentalData.range.max)
+            playbookIQ: generateAttributeValue('playbookIQ'),
+            clutch: getRandomInt(20, 99), // Clutch is purely random regardless of position
+            consistency: generateAttributeValue('consistency'),
+            toughness: generateAttributeValue('toughness')
         },
         technical: {
-            throwingAccuracy: getRandomInt(technicalData.range.min, technicalData.range.max),
-            catchingHands: getRandomInt(technicalData.range.min, technicalData.range.max),
-            tackling: getRandomInt(technicalData.range.min, technicalData.range.max),
-            blocking: getRandomInt(technicalData.range.min, technicalData.range.max),
-            blockShedding: getRandomInt(technicalData.range.min, technicalData.range.max)
+            throwingAccuracy: generateAttributeValue('throwingAccuracy'),
+            catchingHands: generateAttributeValue('catchingHands'),
+            tackling: generateAttributeValue('tackling'),
+            blocking: generateAttributeValue('blocking'),
+            blockShedding: generateAttributeValue('blockShedding')
         }
     };
 
-    const posBonus = 10;
-    switch (bestPosition) {
-        case 'QB':
-            attributes.technical.throwingAccuracy += posBonus;
-            attributes.mental.playbookIQ += posBonus;
-            break;
-        case 'RB':
-            attributes.physical.agility += posBonus;
-            attributes.physical.strength += posBonus;
-            break;
-        case 'WR':
-            attributes.physical.speed += posBonus;
-            attributes.technical.catchingHands += posBonus;
-            break;
-        case 'OL':
-            attributes.physical.strength += posBonus;
-            attributes.technical.blocking += posBonus;
-            break;
-        case 'DL':
-            attributes.physical.strength += posBonus;
-            attributes.technical.blockShedding += posBonus;
-            break;
-        case 'LB':
-            attributes.technical.tackling += posBonus;
-            attributes.mental.playbookIQ += posBonus;
-            break;
-        case 'DB':
-            attributes.physical.speed += posBonus;
-            attributes.physical.agility += posBonus;
-            break;
+    // 6. Calculate Height/Weight
+    // Physics logic: We want weight to roughly correlate with strength, 
+    // but we also want variance (fat/slow vs lean/strong)
+    const ageProgress = (age - 10) / (16 - 10);
+    
+    // Base size based on age
+    let height = 55 + (ageProgress * 15) + getRandomInt(-3, 5); // Inches
+    let weight = 70 + (ageProgress * 90) + getRandomInt(-15, 20); // Lbs
+
+    // Position adjustments
+    if (['OL', 'DL'].includes(bestPosition)) {
+        weight += getRandomInt(20, 50);
+        attributes.physical.strength += 10; // Bonus for pure mass
+    } else if (['WR', 'DB'].includes(bestPosition)) {
+        weight -= getRandomInt(5, 15);
     }
 
-    const ageScalingFactor = 0.90 + (ageProgress * 0.10);
+    attributes.physical.height = Math.round(height);
+    attributes.physical.weight = Math.round(weight);
+
+    // 7. Physics Constraints
+    // If player is heavy, penalize speed/agility. If light, penalize strength.
+    // We check relative to "expected" weight for their age.
+    const expectedWeight = 70 + (ageProgress * 90);
+    const weightDiff = attributes.physical.weight - expectedWeight;
+
+    if (weightDiff > 20) {
+        // Heavy player
+        attributes.physical.speed -= Math.round(weightDiff * 0.4);
+        attributes.physical.agility -= Math.round(weightDiff * 0.3);
+        attributes.physical.strength += Math.round(weightDiff * 0.2);
+    } else if (weightDiff < -10) {
+        // Skinny player
+        attributes.physical.strength -= Math.round(Math.abs(weightDiff) * 0.5);
+        attributes.physical.speed += Math.round(Math.abs(weightDiff) * 0.2);
+    }
+
+    // 8. Age Scaling
+    // A 10-year-old with "99 speed" isn't actually running a 4.2 40yd dash.
+    // They are 99 *relative to their age group*. 
+    // We scale stats down so they grow into them over seasons.
+    const ageScalingFactor = 0.60 + (ageProgress * 0.40); // 10yo = 60%, 16yo = 100%
+    
     Object.keys(attributes).forEach(cat => {
         Object.keys(attributes[cat]).forEach(attr => {
-            if (typeof attributes[cat][attr] === 'number' && !['height', 'weight', 'clutch'].includes(attr)) {
-                attributes[cat][attr] = attributes[cat][attr] * ageScalingFactor;
-            }
+            // Don't scale height/weight/clutch
+            if (['height', 'weight', 'clutch'].includes(attr)) return;
+            
+            // Scale it
+            let val = attributes[cat][attr] * ageScalingFactor;
+            
+            // Clamp between 1 and 99
+            attributes[cat][attr] = Math.max(1, Math.min(99, Math.round(val)));
         });
     });
 
-    const neutralWeight = 70 + (ageProgress * 90) + (['OL', 'DL'].includes(bestPosition) ? 30 : 0);
-    const weightModifier = (attributes.physical.weight - neutralWeight) / 25;
-    attributes.physical.strength += (weightModifier * 10);
-    attributes.physical.speed -= (weightModifier * 6);
-    attributes.physical.agility -= (weightModifier * 4);
-
+    // 9. Determine Potential
+    // Potential is based on how high their "natural rolls" were before age scaling
+    // We look at the average of their key attributes vs global average
+    let rawSum = 0;
+    let count = 0;
     Object.keys(attributes).forEach(cat => {
         Object.keys(attributes[cat]).forEach(attr => {
-            if (typeof attributes[cat][attr] === 'number' && !['height', 'weight'].includes(attr)) {
-                attributes[cat][attr] = Math.max(1, Math.min(99, Math.round(attributes[cat][attr])));
-            }
+            if (['height', 'weight', 'clutch'].includes(attr)) return;
+            // Reverse the age scaling to peek at their "true talent"
+            const trueTalent = attributes[cat][attr] / ageScalingFactor;
+            rawSum += trueTalent;
+            count++;
         });
     });
 
+    const avgTalent = rawSum / count; // 0-99
     let potential = 'F';
 
-    const potentialBonus = (physicalData.bonus + technicalData.bonus + mentalData.bonus) / 3;
+    // Add variance so a low current-skill player might still have high potential
+    const potentialRoll = avgTalent + getRandomInt(-10, 15); 
 
-    let potentialRoll = Math.random() + potentialBonus;
-    potentialRoll = Math.max(0, Math.min(1, potentialRoll));
-
-    if (age <= 11) potentialRoll -= 0.15;
-    else if (age <= 13) potentialRoll -= 0.05;
-
-    if (potentialRoll < 0.20) potential = 'A';
-    else if (potentialRoll < 0.45) potential = 'B';
-    else if (potentialRoll < 0.75) potential = 'C';
-    else if (potentialRoll < 0.90) potential = 'D';
-    else potential = 'F';
-
+    if (potentialRoll >= 85) potential = 'A';
+    else if (potentialRoll >= 75) potential = 'B';
+    else if (potentialRoll >= 65) potential = 'C';
+    else if (potentialRoll >= 50) potential = 'D';
+    
     const initialStats = {
         receptions: 0, recYards: 0, passYards: 0, rushYards: 0, touchdowns: 0,
         tackles: 0, sacks: 0, interceptions: 0,
@@ -292,12 +332,19 @@ export function generatePlayer(minAge = 10, maxAge = 16) {
     };
 
     return {
-        id: crypto.randomUUID(), name: `${firstName} ${lastName}`, age,
-        favoriteOffensivePosition, favoriteDefensivePosition,
+        id: crypto.randomUUID(),
+        name: `${firstName} ${lastName}`,
+        age,
+        favoriteOffensivePosition,
+        favoriteDefensivePosition,
         number: null,
-        potential, attributes, teamId: null,
-        status: { type: 'healthy', description: '', duration: 0 }, fatigue: 0,
-        gameStats: { ...initialStats }, seasonStats: { ...initialStats },
+        potential,
+        attributes,
+        teamId: null,
+        status: { type: 'healthy', description: '', duration: 0 },
+        fatigue: 0,
+        gameStats: { ...initialStats },
+        seasonStats: { ...initialStats },
         careerStats: { ...initialStats, seasonsPlayed: 0 }
     };
 }
