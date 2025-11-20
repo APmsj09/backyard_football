@@ -336,97 +336,107 @@ canvas#field-canvas {
 
 /* --- NEW DEPTH CHART STYLES (v2) --- */
 
+/* The main container created by JS */
 .visual-field-container {
-    background-color: #f3f4f6; /* gray-100 */
-    border: 1px solid #d1d5db; /* gray-300 */
-    border-radius: 8px;
-    padding: 8px;
+    position: relative; /* Essential for absolute children */
+    width: 100%;
+    height: 500px;      /* Fixed height is required */
+    background-color: #059669; /* Grass Green */
+    
+    /* Grid lines to make it look like a field */
+    background-image: 
+        linear-gradient(rgba(255,255,255,0.2) 2px, transparent 2px),
+        linear-gradient(90deg, rgba(255,255,255,0.2) 2px, transparent 2px);
+    background-size: 100% 10%, 10% 100%;
+    
+    border: 4px solid #064e3b; /* Dark green border */
+    border-radius: 8px;
+    overflow: hidden;
+    margin-bottom: 1rem;
+    box-shadow: inset 0 0 20px rgba(0,0,0,0.3);
 }
 
-.visual-field-header {
-    text-align: center;
-    font-weight: 700;
-    font-size: 0.75rem;
-    letter-spacing: 0.1em;
-    color: #4b5563; /* gray-600 */
-    margin-bottom: 8px;
+/* The blue line of scrimmage marker */
+.los-marker {
+    position: absolute;
+    left: 0;
+    width: 100%;
+    height: 4px;
+    background-color: #3b82f6; /* Blue-500 */
+    box-shadow: 0 0 8px #2563eb;
+    z-index: 1;
+    pointer-events: none; /* Let clicks pass through */
 }
 
-.visual-field {
-    position: relative;
-    width: 100%;
-    height: 400px; 
-    background-color: #166534; /* green-700 */
-    border-radius: 4px;
-    overflow: hidden;
-    border: 2px solid #a1a1aa; /* gray-400 */
-}
-
-/* Line of Scrimmage */
-.visual-field::before {
-    content: '';
-    position: absolute;
-    left: 0;
-    right: 0;
-    top: 50%;
-    height: 4px;
-    background-color: #facc15; /* yellow-400 */
-    opacity: 0.5;
-}
-
-/* Visual Player Slot */
+/* The individual player slot (dot/card) */
 .player-slot-visual {
-    position: absolute;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    width: 100px; /* 💡 Narrower card */
-    padding: 4px; /* 💡 Less padding */
-    border: 2px dashed #9ca3af; /* gray-400 */
-    border-radius: 8px;
-    background-color: rgba(0, 0, 0, 0.3); /* Darker transparent bg */
-    transform: translate(-50%, -50%); /* Center the slot on its coordinates */
-    transition: all 0.2s ease;
+    position: absolute;
+    transform: translate(-50%, -50%); /* Centers the dot on the X/Y coordinate */
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    width: 110px; /* Width of the card */
+    z-index: 10;
+    transition: all 0.2s ease;
+    
+    /* Glassmorphism background */
+    background: rgba(31, 41, 55, 0.85); /* Gray-800 with opacity */
+    padding: 6px;
+    border-radius: 6px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
 }
 
-.player-slot-visual .slot-label {
-    font-size: 0.75rem; /* 💡 Smaller font */
-    font-weight: 700;
-    color: #ffffff;
-    text-shadow: 1px 1px 2px rgba(0,0,0,0.7);
+/* Highlight when dragging over */
+.player-slot-visual.drag-over {
+    transform: translate(-50%, -50%) scale(1.1);
+    background: rgba(251, 191, 36, 0.9); /* Amber-400 */
+    border-color: #f59e0b;
+    z-index: 20;
 }
 
+/* Position Name Label (e.g. "QB") */
+.slot-label {
+    font-size: 0.7rem;
+    font-weight: 800;
+    text-transform: uppercase;
+    color: #9ca3af; /* Gray-400 */
+    margin-bottom: 2px;
+}
+
+/* Overall Rating Badge */
 .slot-overall {
-    font-size: 0.75rem; /* 💡 Smaller font */
-    font-weight: 700;
-    color: #fcd34d; /* amber-300 */
-    margin-top: -2px;
-    margin-bottom: 4px;
+    position: absolute;
+    top: -8px;
+    right: -8px;
+    background-color: #d97706; /* Amber-600 */
+    color: white;
+    font-size: 0.7rem;
+    font-weight: bold;
+    padding: 2px 6px;
+    border-radius: 999px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.2);
 }
 
+.slot-overall.bg-red-500 {
+    background-color: #ef4444;
+}
+
+/* The Dropdown inside the slot */
 .slot-select {
-    width: 100%;
-    margin-top: 4px;
-    font-size: 0.75rem; /* 💡 Smaller font */
-    font-weight: 600;
-    border-radius: 4px;
-    border: 1px solid #6b7280; /* gray-500 */
-    padding: 2px 4px; /* 💡 Tighter padding */
-    background-color: #374151; /* gray-700 */
-    color: #f9fafb; /* gray-50 */
-    cursor: pointer;
-    -webkit-appearance: none;
-    -moz-appearance: none;
-    appearance: none;
-    background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='%23d1d5db' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 10 13 14 9'%3e%3c/polyline%3e%3c/svg%3e");
-    background-position: right 0.5rem center;
-    background-repeat: no-repeat;
-    background-size: 1em 1em;
+    width: 100%;
+    font-size: 0.75rem;
+    padding: 2px 4px;
+    border-radius: 4px;
+    border: 1px solid #4b5563;
+    background-color: #111827; /* Gray-900 */
+    color: #f3f4f6; /* Gray-100 */
+    cursor: pointer;
+    text-overflow: ellipsis;
 }
 
 .slot-select:hover {
-    background-color: #4b5563; /* gray-600 */
+    background-color: #374151;
 }
 
 /* (Bench styles remain the same) */
