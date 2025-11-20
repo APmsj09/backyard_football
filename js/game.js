@@ -2298,15 +2298,11 @@ function checkTackleCollisions(playState, gameLog) {
     const ballCarrierState = playState.activePlayers.find(p => p.isBallCarrier);
     if (!ballCarrierState) return false;
 
-    // Filter for active defenders close to the ball carrier
-    // 💡 Optimization: We filter by distance HERE to avoid doing math on far-away players
     const TACKLE_RANGE_CHECK = TACKLE_RANGE;
     const activeDefenders = playState.activePlayers.filter(p =>
         p.teamId !== ballCarrierState.teamId &&
-        !p.isBlocked &&
-        !p.isEngaged &&
-        p.stunnedTicks === 0 &&
-        Math.abs(p.x - ballCarrierState.x) < TACKLE_RANGE_CHECK && // Fast box check first
+        !p.isBlocked && !p.isEngaged && p.stunnedTicks === 0 &&
+        Math.abs(p.x - ballCarrierState.x) < TACKLE_RANGE_CHECK &&
         Math.abs(p.y - ballCarrierState.y) < TACKLE_RANGE_CHECK
     );
 
@@ -2318,43 +2314,29 @@ function checkTackleCollisions(playState, gameLog) {
 
     for (const defender of activeDefenders) {
         if (getDistance(ballCarrierState, defender) < TACKLE_RANGE_CHECK) {
-
-            // 💡 FIX: We passed the whole objects (player objects) to checkFumble before.
-            // Now we pass the pStates (which now have attributes).
-            // You might need to update checkFumble to look at pState.toughness instead of p.attributes.mental.toughness
-            // For now, we will pass the pStates directly.
+            
+            // Fumble Check
             if (checkFumble(ballCarrierState, defender, playState, gameLog)) {
                 ballCarrierState.stunnedTicks = 40;
-                return false; // Fumble occurred
+                return false; 
             }
 
-            // --- 1. Carrier Momentum (Uses flattened stats) ---
-            const carrierWeight = ballCarrierState.weight || 180; // 💡 No lookup needed
+            // Break Tackle Math
+            const carrierWeight = ballCarrierState.weight || 180;
             const carrierSpeed = ballCarrierState.currentSpeedYPS || 0;
             const successiveTacklePenalty = ballCarrierState.tacklesBrokenThisPlay * 0.20;
             const skillModifier = Math.max(0.1, 1.0 - successiveTacklePenalty);
 
-            const carrierSkill = (
-                (ballCarrierState.agility || 50) * 1.0 +
-                (ballCarrierState.strength || 50) * 0.5
-            ) * skillModifier;
-
+            const carrierSkill = ((ballCarrierState.agility || 50) * 1.0 + (ballCarrierState.strength || 50) * 0.5) * skillModifier;
             const carrierMomentum = (carrierWeight * carrierSpeed) * MOMENTUM_SCALING_FACTOR;
             const breakPower = (carrierSkill + carrierMomentum) * ballCarrierState.fatigueModifier;
 
-            // --- 2. Tackler Power ---
-            const tacklerWeight = defender.weight || 200; // 💡 No lookup needed
+            const tacklerWeight = defender.weight || 200;
             const tacklerSpeed = defender.currentSpeedYPS || 0;
-
-            const tacklerSkill = (
-                (defender.tackling || 50) * 1.0 +
-                (defender.strength || 50) * 0.5
-            );
-
+            const tacklerSkill = ((defender.tackling || 50) * 1.0 + (defender.strength || 50) * 0.5);
             const tacklerMomentum = (tacklerWeight * tacklerSpeed) * (MOMENTUM_SCALING_FACTOR * 1.5);
             const tacklePower = (tacklerSkill + tacklerMomentum) * defender.fatigueModifier;
 
-            // --- 3. Resolution ---
             const roll = getRandomInt(-10, 10);
             const diff = (breakPower + roll) - tacklePower;
 
@@ -2362,18 +2344,24 @@ function checkTackleCollisions(playState, gameLog) {
                 playState.yards = ballCarrierState.y - playState.lineOfScrimmage;
                 playState.playIsLive = false;
 
-                // We only look up the 'real' player object at the very end to record stats
-                const tacklerPlayer = game.players.find(p => p && p.id === defender.id);
+                const tacklerPlayer = getPlayer(defender.id);
                 if (tacklerPlayer) {
                     ensureStats(tacklerPlayer);
                     tacklerPlayer.gameStats.tackles = (tacklerPlayer.gameStats.tackles || 0) + 1;
 
-                    if (ballCarrierState.slot === 'QB1' && ballCarrierState.y < playState.lineOfScrimmage) {
+                    // 💡 FIX: Only count as SACK if it's a PASS play and behind LOS
+                    // Also ensures the carrier is actually the QB
+                    const isBehindLOS = ballCarrierState.y < playState.lineOfScrimmage;
+                    const isPassPlay = playState.type === 'pass'; // Requires the fix we did in resolvePlay earlier
+                    
+                    if (ballCarrierState.slot === 'QB1' && isBehindLOS && isPassPlay) {
                         playState.sack = true;
                         if (gameLog) gameLog.push(`💥 SACK! ${defender.name} drops ${ballCarrierState.name}!`);
                         tacklerPlayer.gameStats.sacks = (tacklerPlayer.gameStats.sacks || 0) + 1;
                     } else {
-                        if (gameLog) gameLog.push(`✋ ${ballCarrierState.name} tackled by ${defender.name} for a gain of ${playState.yards.toFixed(1)}.`);
+                        // Regular tackle
+                        const yards = playState.yards.toFixed(1);
+                        if (gameLog) gameLog.push(`✋ ${ballCarrierState.name} tackled by ${defender.name} for ${yards < 0 ? 'a loss of ' + Math.abs(yards) : 'a gain of ' + yards}.`);
                     }
                 }
                 return true; // Play ended
@@ -2382,7 +2370,6 @@ function checkTackleCollisions(playState, gameLog) {
                 ballCarrierState.action = 'juke';
                 ballCarrierState.jukeTicks = 12;
                 ballCarrierState.currentSpeedYPS *= 0.5;
-
                 if (gameLog) gameLog.push(`💥 ${ballCarrierState.name} breaks tackle from ${defender.name}!`);
                 defender.stunnedTicks = 40;
             }
@@ -4536,36 +4523,32 @@ export function simulateGame(homeTeam, awayTeam, options = {}) {
 
         if (!fastSim) gameLog.push("Coin toss to determine first possession...");
         const coinFlipWinner = Math.random() < 0.5 ? homeTeam : awayTeam;
+        // Initial kickoff logic
         let possessionTeam = coinFlipWinner;
         let receivingTeamSecondHalf = (possessionTeam.id === homeTeam.id) ? awayTeam : homeTeam;
-        if (!fastSim) gameLog.push(`🪙 ${coinFlipWinner.name} won the toss and will receive the ball first!`);
-
-        let gameForfeited = false;
+        
+        // Track the current offense explicitly
+        let currentOffense = possessionTeam; 
 
         while (drivesThisGame < totalDrivesPerHalf * 2 && !gameForfeited) {
+            
+            // --- HALFTIME LOGIC ---
             if (drivesThisGame === totalDrivesPerHalf) {
                 currentHalf = 2;
                 if (!fastSim) gameLog.push(`==== HALFTIME ==== Score: ${awayTeam.name} ${awayScore} - ${homeTeam.name} ${homeScore}`);
-                possessionTeam = receivingTeamSecondHalf;
-
+                
+                // Reset Fatigue
                 const allGamePlayers = [...getRosterObjects(homeTeam), ...getRosterObjects(awayTeam)];
-                allGamePlayers.forEach(p => {
-                    if (p && typeof p.fatigue === "number") {
-                        p.fatigue = Math.max(0, p.fatigue - 40);
-                    } else if (p) {
-                        p.fatigue = 0;
-                    }
-                });
+                allGamePlayers.forEach(p => { if(p) p.fatigue = Math.max(0, (p.fatigue||0) - 40); });
 
-                if (!fastSim) gameLog.push(`-- Second Half Kickoff: ${possessionTeam.name} receives --`);
+                // Second Half Kickoff
+                currentOffense = receivingTeamSecondHalf; // Set specific team
                 nextDriveStartBallOn = 20;
+                if (!fastSim) gameLog.push(`-- Second Half Kickoff: ${currentOffense.name} receives --`);
             }
 
-            if (!possessionTeam) {
-                console.error("Possession team is null! Ending game loop."); break;
-            }
-            const offense = possessionTeam;
-            const defense = (possessionTeam.id === homeTeam.id) ? awayTeam : homeTeam;
+            const offense = currentOffense;
+            const defense = (offense.id === homeTeam.id) ? awayTeam : homeTeam;
 
             const checkRoster = (team) => {
                 const roster = getRosterObjects(team);
@@ -4785,11 +4768,39 @@ export function simulateGame(homeTeam, awayTeam, options = {}) {
                 } else if (result.turnover && !shouldPunt) {
                     driveActive = false;
                     if (!shouldPunt) {
-                        // This is a turnover on downs or a non-TD INT/fumble
-                        nextDriveStartBallOn = 100 - ballOn;
-                    }
-                    // (if it was a punt, nextDriveStartBallOn was already set by resolvePunt)
+                        // Turnover on downs, INT, or Fumble recovery (non-TD)
+        
+                        // 💡 FIX: Calculate spot based on where the play ENDED, not started.
+                        // result.finalBallY is absolute (e.g. 30). 
+                        // 10 = Endzone line. So field position is finalBallY - 10.
+                        // Since possession flips, the new offense attacks the other way, 
+                        // but for simplicity in this coordinate system, we usually normalize to 0-100.
+        
+                        let turnoverSpot = (result.finalBallY !== undefined) ? (result.finalBallY - 10) : ballOn;
+        
+                        // Clamp
+                        turnoverSpot = Math.max(1, Math.min(99, turnoverSpot));
+        
+                        // Flip field logic:
+                        // If INT was at absolute Y=30 (own 20), new team gets it at their own 20.
+                        // In our "0-100" logic, that stays 20.
+                        nextDriveStartBallOn = turnoverSpot;
 
+                        if (!fastSim) {
+                             const spotText = nextDriveStartBallOn <= 50 ? `own ${nextDriveStartBallOn.toFixed(0)}` : `opponent ${(100-nextDriveStartBallOn).toFixed(0)}`;
+                             // Optional: Check if it was downs or actual turnover
+                             if (result.incomplete && down > 4) {
+                                 // Turnover on downs logic is slightly different (ball goes back to LOS)
+                                 nextDriveStartBallOn = 100 - ballOn; 
+                             } else {
+                                 // Interception/Fumble Return spot
+                                 // Note: To correctly flip perspective for the next loop's logic, 
+                                 // if the returner ran "down" towards Y=10, the value corresponds to the new offense's "Own" territory.
+                                 // No math needed if we just trust the absolute Y minus endzone.
+                                 gameLog.push(`🔄 Possession changes! Ball spotted at ${spotText}.`);
+                             }
+                        }
+                    }
                     // --- 4. CHECK FOR INCOMPLETE PASS ---
                 } else if (result.incomplete && !shouldPunt) {
                     down++;
