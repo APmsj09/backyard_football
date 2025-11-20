@@ -2630,7 +2630,7 @@ function resolveOngoingBlocks(playState, gameLog) {
 
 /**
  * Handles QB decision-making.
- * UPDATED: Slower progression to allow routes to develop.
+ * TUNED: Slower "Internal Clock" to allow deep routes to develop.
  */
 function updateQBDecision(playState, offenseStates, defenseStates, gameLog, aiTickMultiplier = 1) {
     const qbState = offenseStates.find(p => p.slot === 'QB1');
@@ -2646,89 +2646,85 @@ function updateQBDecision(playState, offenseStates, defenseStates, gameLog, aiTi
     const qbStrength = qbAttrs.physical?.strength || 50;
     const qbAcc = qbAttrs.technical?.throwingAccuracy || 50;
 
-    // Ensure progression exists
     const progression = Array.isArray(qbState.readProgression) && qbState.readProgression.length > 0
         ? qbState.readProgression
         : ['WR1', 'WR2', 'RB1', 'WR3'];
 
-    // --- 1. Helper: Get Target Info ---
+    // --- 1. Helper: Get Target Info (Lane Logic Included) ---
     const getTargetInfo = (slot) => {
         if (!slot) return null;
         const recState = offenseStates.find(r => r.slot === slot && (r.action.includes('route') || r.action === 'idle'));
         if (!recState) return null;
 
-        // Find closest defender TO THE RECEIVER
+        const distFromQB = getDistance(qbState, recState);
         let minSeparation = 100;
-        
-        // Check if receiver is making a cut (stationary moment) vs running
         const isRunning = recState.action === 'run_route';
 
         defenseStates.forEach(d => {
             if (!d.isBlocked && !d.isEngaged && d.stunnedTicks === 0) {
                 let dist = getDistance(recState, d);
-                
-                // 💡 LOGIC TWEAK: If the receiver is running a route, we care about 
-                // where they are GOING, not just where they ARE.
-                // If defender is "trailing" (behind the receiver), effectively increase separation
-                if (isRunning && d.y < recState.y - 1.0) {
-                     dist += 1.0; // Bonus separation for having a step on the DB
+
+                // Undercut Check
+                const distDefenderToQB = getDistance(qbState, d);
+                if (distDefenderToQB < distFromQB - 1.0) { 
+                    const area = Math.abs((d.x - qbState.x) * (recState.y - qbState.y) - (d.y - qbState.y) * (recState.x - qbState.x));
+                    const distToLane = area / distFromQB;
+                    if (distToLane < 1.5) dist = 0.0; // BLOCKED
+                }
+
+                // Trailing Bonus (Defender is behind receiver)
+                if (isRunning && d.y < recState.y - 1.0 && dist > 0.1) {
+                     dist += 1.5; // Increased bonus so QB trusts deep speed more
                 }
                 
                 if (dist < minSeparation) minSeparation = dist;
             }
         });
 
-        const distFromQB = getDistance(qbState, recState);
         return { state: recState, separation: minSeparation, distFromQB };
     };
 
     // --- 2. Assess Pressure ---
-    const pressureDefender = defenseStates.find(d => !d.isBlocked && !d.isEngaged && getDistance(qbState, d) < 5.0);
+    const pressureDefender = defenseStates.find(d => !d.isBlocked && !d.isEngaged && getDistance(qbState, d) < 4.5);
     const isPressured = !!pressureDefender;
-    const imminentSackDefender = isPressured && getDistance(qbState, pressureDefender) < 2.0;
+    const imminentSackDefender = isPressured && getDistance(qbState, pressureDefender) < 1.8;
 
-    // --- 3. Update Read Progression (THE TIMING FIX) ---
-    
-    // How long does a route take to develop?
-    // Primary read needs ~2.0s (40 ticks). Secondary reads get ~0.8s (16 ticks).
-    // Higher IQ processes secondary reads faster, but DOES NOT abandon the primary read early.
-    
+    // --- 3. Update Read Progression (SLOWED DOWN) ---
     const isPrimaryRead = qbState.currentReadTargetSlot === progression[0];
-    
     let requiredTimeOnRead;
     
     if (isPrimaryRead) {
-        // FORCE the QB to stick with the first read during the dropback
-        // Unless pressured, give the primary route 45 ticks (2.25 seconds) to work.
-        requiredTimeOnRead = 45; 
+        // Primary Read: 60 Ticks = 3.0 Seconds. 
+        // Allows deep posts/corners to actually break.
+        requiredTimeOnRead = 60; 
     } else {
-        // Secondary reads: Higher IQ scans faster
-        // IQ 99 = 12 ticks (0.6s), IQ 50 = 20 ticks (1.0s)
-        requiredTimeOnRead = Math.max(12, 28 - Math.round(qbIQ / 6));
+        // Secondary Read: 25-35 Ticks (~1.5 Seconds)
+        // High IQ scans slightly faster, but not instant.
+        requiredTimeOnRead = Math.max(25, 45 - Math.round(qbIQ / 5));
     }
 
-    // If pressured, we cycle significantly faster
-    if (isPressured) requiredTimeOnRead = Math.round(requiredTimeOnRead * 0.5);
+    // "Hesitation" Logic: If target is *almost* open, stare at them longer
+    const currentInfo = getTargetInfo(qbState.currentReadTargetSlot);
+    if (currentInfo && currentInfo.separation > 0.5 && currentInfo.separation < 1.5) {
+        requiredTimeOnRead += 15; // Add 0.75s hesitation
+    }
 
-    // Increment Tick Counter
+    // Pressure speeds up processing, but not drastically
+    if (isPressured) requiredTimeOnRead = Math.round(requiredTimeOnRead * 0.7);
+
     qbState.ticksOnCurrentRead = (qbState.ticksOnCurrentRead || 0) + 1;
 
-    // Check Switch Condition
     if (!imminentSackDefender && qbState.ticksOnCurrentRead > requiredTimeOnRead) {
         const currIdx = progression.indexOf(qbState.currentReadTargetSlot);
-        
-        // If we are at the end of the progression, stay on the Checkdown/Last Read
         if (currIdx < progression.length - 1) {
             const nextIdx = currIdx + 1;
             qbState.currentReadTargetSlot = progression[nextIdx];
             qbState.ticksOnCurrentRead = 0;
-            // if (gameLog) gameLog.push(`👀 QB scans to ${qbState.currentReadTargetSlot}`); // Debug log
         }
     }
 
     // --- 4. Decision Logic ---
-    const baseDecisionTicks = 100; // 5.0 Seconds total pocket time allowed
-    const maxDecisionTimeTicks = baseDecisionTicks; 
+    const maxDecisionTimeTicks = 160; // Increased to 7.0 seconds (Simulates scrambling around)
     
     let decisionMade = false;
     let reason = "";
@@ -2739,7 +2735,8 @@ function updateQBDecision(playState, offenseStates, defenseStates, gameLog, aiTi
     } else if (playState.tick >= maxDecisionTimeTicks) {
         decisionMade = true;
         reason = "Time Expired";
-    } else if (isPressured && playState.tick >= 40) { // Don't panic instantly
+    } else if (isPressured && playState.tick >= 50) { 
+        // Delay panic until 2.5s even with pressure
         const panicChance = Math.max(0.05, 0.4 - qbIQ / 200);
         if (Math.random() < panicChance) {
             decisionMade = true;
@@ -2751,58 +2748,52 @@ function updateQBDecision(playState, offenseStates, defenseStates, gameLog, aiTi
     let targetPlayerState = null;
     let actionTaken = "None";
 
-    const currentReadInfo = getTargetInfo(qbState.currentReadTargetSlot);
+    const currentReadInfoResults = getTargetInfo(qbState.currentReadTargetSlot);
     const checkdownInfo = getTargetInfo(progression[progression.length - 1]); 
     
-    // Thresholds
-    // If pressured, we accept tighter windows (0.8). Normal is 1.2.
     const OPEN_SEP = isPressured ? 0.8 : 1.2; 
     const CHECKDOWN_SEP = 1.0;
 
-    // Check Scramble Lane
     const openLane = !defenseStates.some(d => 
         !d.isBlocked && !d.isEngaged && 
         Math.abs(d.x - qbState.x) < 3.5 && (d.y < qbState.y + 1)
     );
     
-    // Only scramble if lane is wide open OR forced out
-    const canScramble = openLane && (isPressured || playState.tick > 80) && (Math.random() < (qbAgility/120));
+    // SCRAMBLE DELAY: Only scramble if tick > 80 (4.0s) OR pressured
+    const canScramble = openLane && (isPressured || playState.tick > 80) && (Math.random() < (qbAgility/100));
 
     // 1. Is Current Read Open?
-    if (currentReadInfo && currentReadInfo.separation > OPEN_SEP) {
-        targetPlayerState = currentReadInfo.state;
+    if (currentReadInfoResults && currentReadInfoResults.separation > OPEN_SEP) {
+        targetPlayerState = currentReadInfoResults.state;
         actionTaken = "Throw Read";
         decisionMade = true;
     }
-    // 2. Scramble?
-    else if (canScramble && decisionMade) {
-        actionTaken = "Scramble";
-    }
-    // 3. Checkdown (Only if we've moved past primary reads or are pressured)
+    // 2. Checkdown (Only if we've moved past primary reads or are pressured)
     else if ((isPressured || !isPrimaryRead) && checkdownInfo && checkdownInfo.separation > CHECKDOWN_SEP) {
-        // Don't throw checkdown IMMEDIATELY if primary is still developing, unless dying
-        if (playState.tick > 30 || isPressured) {
+        // Wait until tick 50 (2.5s) to dump it off, unless dying
+        if (playState.tick > 50 || isPressured) {
             targetPlayerState = checkdownInfo.state;
             actionTaken = "Throw Checkdown";
             decisionMade = true;
         }
     }
+    // 3. Scramble?
+    else if (canScramble && decisionMade) {
+        actionTaken = "Scramble";
+    }
     // 4. Forced Actions
     else if (decisionMade) {
-        const clutch = qbAttrs.mental?.clutch || 50;
-        
         if (reason === "Imminent Sack") {
-             // Hail Mary / Panic throw
              const desperationTarget = offenseStates
                 .filter(o => o.action.includes('route'))
                 .sort((a, b) => {
-                    // Find whoever has MOST separation
                     const sA = getTargetInfo(a.slot)?.separation || 0;
                     const sB = getTargetInfo(b.slot)?.separation || 0;
                     return sB - sA;
                 })[0];
 
-             if (desperationTarget && Math.random() > 0.3) {
+             // Low chance to make a hero throw, mostly throw away
+             if (desperationTarget && Math.random() > 0.2 && qbAttrs.mental?.clutch > 60) {
                  targetPlayerState = desperationTarget;
                  actionTaken = "Forced Throw";
              } else {
@@ -2814,7 +2805,6 @@ function updateQBDecision(playState, offenseStates, defenseStates, gameLog, aiTi
     }
 
     // --- EXECUTE ---
-
     if (actionTaken === "Scramble") {
         qbState.action = 'qb_scramble';
         qbState.scrambleDirection = 0; 
@@ -2837,7 +2827,6 @@ function updateQBDecision(playState, offenseStates, defenseStates, gameLog, aiTi
     else if (targetPlayerState && actionTaken.includes("Throw")) {
         if (gameLog) gameLog.push(`🏈 ${qbState.name} throws to ${targetPlayerState.name} (${actionTaken})...`);
 
-        // --- PHYSICS: Leading the Pass ---
         const velocity = 20 + (qbStrength / 4); 
         const rawDist = getDistance(qbState, targetPlayerState);
         const airTime = Math.max(0.4, rawDist / velocity);
@@ -2860,11 +2849,9 @@ function updateQBDecision(playState, offenseStates, defenseStates, gameLog, aiTi
             }
         }
 
-        // Accuracy
         const accPenalty = (100 - qbAcc) / 20; 
         const pressurePenalty = isPressured ? 2.0 : 1.0;
         const forcedPenalty = actionTaken === "Forced Throw" ? 3.0 : 1.0;
-        
         const maxError = (rawDist / 18) * accPenalty * pressurePenalty * forcedPenalty;
         
         const angle = Math.random() * Math.PI * 2;
@@ -2872,11 +2859,9 @@ function updateQBDecision(playState, offenseStates, defenseStates, gameLog, aiTi
         aimX += Math.cos(angle) * errDist;
         aimY += Math.sin(angle) * errDist;
 
-        // Clamp
         aimX = Math.max(1, Math.min(FIELD_WIDTH - 1, aimX));
         aimY = Math.max(1, Math.min(FIELD_LENGTH - 1, aimY));
 
-        // Set Ball State
         playState.ballState.inAir = true;
         playState.ballState.throwInitiated = true;
         playState.ballState.throwTick = playState.tick;
@@ -2902,17 +2887,15 @@ function updateQBDecision(playState, offenseStates, defenseStates, gameLog, aiTi
 
     // --- 6. Setup Movement (Drift) ---
     if (qbState.action === 'qb_setup' && !decisionMade) {
-        // If pressured, move away
         if (isPressured) {
             const pressureDirX = Math.sign(qbState.x - pressureDefender.x);
             qbState.targetX = qbState.x + pressureDirX * 1.5; 
             qbState.targetY = qbState.y - 0.5; 
         } else {
-            // Drift slightly back
-            if (playState.tick < 40) {
-                qbState.targetY = qbState.initialY - 3; // Deep drop
+            // Slow drift back
+            if (playState.tick < 60) {
+                qbState.targetY = qbState.initialY - 3; 
             } else {
-                // Step up slightly
                 qbState.targetY = qbState.initialY - 1.5;
             }
         }
@@ -4708,44 +4691,33 @@ export function simulateGame(homeTeam, awayTeam, options = {}) {
                     // --- 3. CHECK FOR NON-TD TURNOVER ---
                 } else if (result.turnover && !shouldPunt) {
                     driveActive = false;
-                    if (!shouldPunt) {
-                        // Turnover on downs, INT, or Fumble recovery (non-TD)
-                        
-                        // 💡 FIX: Calculate spot based on where the play ENDED (return yards included).
-                        // If result.finalBallY is undefined, fallback to LOS + 10 as a safe default.
-                        const finalY = result.finalBallY !== undefined ? result.finalBallY : (ballOn + 10);
-                        const absoluteBallOn = finalY - 10;
-                        
-                        // Calculate the new field position for the OTHER team.
-                        // 100 - absoluteBallOn "flips" the field.
-                        let turnoverSpot = 100 - absoluteBallOn;
+                    
+                    // 💡 FIX: Explicitly swap possession to the defense
+                    currentOffense = defense;
 
-                        // Clamp to valid range (1-99)
-                        turnoverSpot = Math.round(Math.max(1, Math.min(99, turnoverSpot)));
-                        
-                        nextDriveStartBallOn = turnoverSpot;
+                    // Calculate spot based on where the play ENDED
+                    const finalY = result.finalBallY !== undefined ? result.finalBallY : (ballOn + 10);
+                    const absoluteBallOn = finalY - 10;
+                    
+                    // Flip the field for the new offense
+                    let turnoverSpot = 100 - absoluteBallOn;
+                    
+                    // Clamp
+                    turnoverSpot = Math.round(Math.max(1, Math.min(99, turnoverSpot)));
+                    nextDriveStartBallOn = turnoverSpot;
 
-                        if (!fastSim) {
-                             // Display logic for the log
-                             const spotText = nextDriveStartBallOn <= 50 ? `own ${nextDriveStartBallOn}` : `opponent ${100 - nextDriveStartBallOn}`;
-                             
-                             if (result.incomplete && down > 4) {
-                                 // Turnover on DOWNS logic is slightly different: ball goes back to LOS (no return possible)
-                                 // Wait, result.turnover is usually true for downs. 
-                                 // But result.incomplete handles the "play failed" part.
-                                 // Actually, usually turnover on downs happens at the LOS of the previous play.
-                                 // Let's rely on the standard logic unless it was specifically an incompletion on 4th down.
-                                 // (If it was a run that failed on 4th down, the spot is correct based on tackle).
-                                 // If it was an incomplete pass on 4th down, ball goes back to original LOS.
-                                 if(result.incomplete) {
-                                     nextDriveStartBallOn = 100 - ballOn;
-                                 }
-                             } else {
-                                 // Interception/Fumble Return spot
-                                 gameLog.push(`🔄 Possession changes! Ball spotted at ${spotText}.`);
-                             }
+                    if (!fastSim) {
+                        const spotText = nextDriveStartBallOn <= 50 ? `own ${nextDriveStartBallOn}` : `opponent ${100 - nextDriveStartBallOn}`;
+                        if (result.incomplete && down > 4) {
+                             // Turnover on downs logic (ball goes back to previous LOS logic usually applies, 
+                             // but using the result.finalBallY is safe for now)
+                             if(result.incomplete) nextDriveStartBallOn = 100 - ballOn; // Reset to LOS
+                             gameLog.push(`✋ Turnover on downs! ${defense.name} takes over.`);
+                        } else {
+                             gameLog.push(`🔄 Possession changes! Ball spotted at ${spotText}.`);
                         }
                     }
+                }
                     // --- 4. CHECK FOR INCOMPLETE PASS ---
                 } else if (result.incomplete && !shouldPunt) {
                     down++;
