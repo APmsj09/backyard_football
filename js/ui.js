@@ -1056,6 +1056,7 @@ function renderDepthChartSide(side, gameState) {
 
 /**
  * Renders the visual, on-field player slots and their assignment dropdowns.
+ * UPDATED: Shows full roster, contextual overalls, and swap indicators.
  */
 function renderVisualFormationSlots(container, currentChart, formationData, benchedPlayers, allRoster, side) {
     container.innerHTML = '';
@@ -1073,7 +1074,6 @@ function renderVisualFormationSlots(container, currentChart, formationData, benc
     losEl.style.top = `${LOS_PERCENT}%`;
     container.appendChild(losEl);
 
-    // Spacing Multipliers (From previous fix)
     const X_SPACING_MULTIPLIER = 2.5; 
     const Y_SPACING_MULTIPLIER = 4.5; 
     const PADDING_OFFSET = 7;
@@ -1086,35 +1086,54 @@ function renderVisualFormationSlots(container, currentChart, formationData, benc
         // 1. Determine Position Context (e.g., "WR" from "WR1")
         const basePosition = slot.replace(/\d/g, ''); 
 
-        // 2. Build Dropdown Options (Specific to this slot!)
-        // We calculate the Overall for EVERY bench player relative to THIS position.
-        const benchOptions = benchedPlayers.map(p => {
-            return {
-                id: p.id,
-                name: p.name,
-                ovr: calculateOverall(p, basePosition) // Context-aware rating
-            };
-        });
+        // 2. Build Dropdown Options (FULL ROSTER)
+        // Map every player to an option object with their OVR for THIS specific position
+        const rosterOptions = allRoster
+            .filter(p => p && p.status?.type !== 'temporary') // Filter out temporary/helping friends if desired
+            .map(p => {
+                // Check if this player is assigned to ANY slot in the current chart
+                const assignedSlot = Object.keys(currentChart).find(key => currentChart[key] === p.id);
+                const isAssignedHere = assignedSlot === slot;
+                const isAssignedElsewhere = assignedSlot && !isAssignedHere;
 
-        // Sort bench by OVR descending (Best players at top)
-        benchOptions.sort((a, b) => b.ovr - a.ovr);
+                return {
+                    id: p.id,
+                    name: p.name,
+                    ovr: calculateOverall(p, basePosition), // Context-aware rating
+                    assignedSlot: assignedSlot,
+                    isAssignedHere: isAssignedHere,
+                    isAssignedElsewhere: isAssignedElsewhere
+                };
+            });
+
+        // Sort by OVR descending (Best fit for this slot at the top)
+        rosterOptions.sort((a, b) => b.ovr - a.ovr);
 
         // Generate HTML for options
         let optionsHtml = '<option value="null">-- Empty --</option>';
         
-        // If there is a current player, add them at the top (even if not on bench)
-        if (currentPlayer) {
-            const currentOvr = calculateOverall(currentPlayer, basePosition);
-            optionsHtml += `<option value="${currentPlayer.id}" selected>${currentPlayer.name} - ${currentOvr}</option>`;
-            optionsHtml += `<option disabled>──────────</option>`; // Visual separator
-        }
+        rosterOptions.forEach(opt => {
+            let label = `${opt.name} - ${opt.ovr}`;
+            let styleClass = "";
+            let suffix = "";
 
-        // Add sorted bench players
-        benchOptions.forEach(opt => {
-            // Don't duplicate the current player if they were somehow in the bench list
-            if (opt.id !== playerId) {
-                optionsHtml += `<option value="${opt.id}">${opt.name} - ${opt.ovr}</option>`;
+            if (opt.isAssignedHere) {
+                suffix = " (Current)";
+                styleClass = "font-bold bg-gray-200 text-black";
+            } else if (opt.isAssignedElsewhere) {
+                // SWAP SCENARIO
+                suffix = ` (Starts at ${opt.assignedSlot})`;
+                styleClass = "text-amber-600 font-semibold bg-amber-50"; // Orange/Amber for swap warning
+            } else {
+                // BENCH SCENARIO
+                suffix = " (Bench)";
+                styleClass = "text-green-600 bg-white"; // Green for available
             }
+
+            // Add the option
+            optionsHtml += `<option value="${opt.id}" ${opt.isAssignedHere ? 'selected' : ''} class="${styleClass}">
+                ${label}${suffix}
+            </option>`;
         });
 
         // --- Coordinate Mapping (Visual Position) ---
@@ -1167,8 +1186,14 @@ function renderVisualFormationSlots(container, currentChart, formationData, benc
         const select = slotEl.querySelector('select');
         select.addEventListener('change', (e) => {
             const newPlayerId = e.target.value;
+            
+            // Dispatch event to Main.js to handle the data update (and the swap logic)
             const event = new CustomEvent('depth-chart-changed', { 
-                detail: { playerId: newPlayerId === 'null' ? null : newPlayerId, slot: slot, side: side } 
+                detail: { 
+                    playerId: newPlayerId === 'null' ? null : newPlayerId, 
+                    slot: slot, 
+                    side: side 
+                } 
             });
             document.dispatchEvent(event);
         });
