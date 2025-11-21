@@ -2070,18 +2070,20 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
         const diagnosis = diagnosePlay(pState, playType, offensivePlayKey, playState.tick);
         const isRunRead = (diagnosis === 'run');
 
-        // --- 💡 NEW: PURSUIT OVERRIDE (The "Ball is Live" Trigger) ---
-        // If the ball is NOT in the air, and an offensive player has it, 
-        // and the ball is past the Line of Scrimmage (or it was a completed pass),
-        // abandoning coverage to tackle is the priority.
-
+        // --- 💡 FIX: Pursuit Override Logic ---
         const isBallCaughtOrRun = ballCarrierState && ballCarrierState.isOffense && !playState.ballState.inAir;
         const isBallPastLOS = ballCarrierState && ballCarrierState.y > (LOS + 1.0);
+        
+        // 🚫 STOP THE BLITZ: Check if the "Runner" is just the QB standing in the pocket
+        const isQBInPocket = ballCarrierState && ballCarrierState.slot.startsWith('QB') && !isBallPastLOS;
 
-        // DBs shouldn't crash down on a run IMMEDIATELY unless it breaks the line
-        // But if a pass is caught (isBallCaughtOrRun + playType was pass), they must react.
-        const shouldPursue = isBallCaughtOrRun && (isBallPastLOS || playType === 'pass' || pState.y < ballCarrierState.y + 10);
-
+        // Only pursue if:
+        // 1. The ball is live (caught or run)
+        // 2. The carrier is NOT the QB in the pocket (wait for throw or scramble)
+        // 3. The situation warrants it (Past LOS, or it's a completed pass)
+        const shouldPursue = isBallCaughtOrRun && 
+                             !isQBInPocket && 
+                             (isBallPastLOS || playType === 'pass' || pState.y < ballCarrierState.y + 10);
         if (shouldPursue) {
             pState.action = 'pursuit';
             
@@ -2905,81 +2907,58 @@ function updateQBDecision(playState, offenseStates, defenseStates, gameLog, aiTi
  * This runs INSTEAD of updateQBDecision on punt plays.
  */
 function updatePunterDecision(playState, offenseStates, gameLog) {
-    const punterState = offenseStates.find(p => p.action === 'punt_kick' && p.hasBall);
-    if (!punterState) return;
+    // 💡 FIX: Relaxed find condition. If action is punt_kick, he's the punter.
+    // We rely on action, not just hasBall, to ensure we find him.
+    const punterState = offenseStates.find(p => p.action === 'punt_kick');
+    
+    if (!punterState) return; 
+    if (!punterState.hasBall) return; // If he lost the ball (fumble), stop.
 
-    const punterPlayer = getPlayer(punterState.id);
-    if (!punterPlayer || !punterPlayer.attributes) return;
-
-    // (50 ticks = 2.5 seconds for snap and kick)
-    const KICK_TICK = 50;
+    const KICK_TICK = 50; // 2.5 seconds
 
     if (playState.tick < KICK_TICK) {
+        // Freeze him in place (charging up)
         punterState.targetX = punterState.x;
         punterState.targetY = punterState.y;
         return;
     }
 
-    // 💡 FIX: Change '===' to '>=' so he kicks even if we miss the exact millisecond
-    if (playState.tick >= KICK_TICK) {
-        // --- 2. Time to Kick! ---
-        if (gameLog) gameLog.push(`🏈 ${punterState.name} gets the punt away!`);
+    // Time to kick
+    if (playState.tick === KICK_TICK) { // Execute once
+        if (gameLog) gameLog.push(`🏈 ${punterState.name} punts the ball!`);
+        
+        const pPlayer = getPlayer(punterState.id);
+        const strength = pPlayer?.attributes?.physical?.strength || 50;
+        
+        // Calculate Kick
+        const baseDist = 35 + (strength * 0.4); // 35 to 75 yards
+        const distance = baseDist + getRandomInt(-5, 5);
+        const hangTime = 3.0 + (strength / 50);
+        
+        const aimX = CENTER_X + getRandomInt(-5, 5);
+        const aimY = punterState.y + distance;
 
-        const pAttrs = punterPlayer.attributes;
-        // We use strength for power, accuracy for control
-        const strength = pAttrs.physical?.strength || 50;
-        const accuracy = pAttrs.technical?.throwingAccuracy || 50; // Using this as "kicking_accuracy"
-        const consistency = pAttrs.mental?.consistency || 50;
+        const clampedAimY = Math.min(FIELD_LENGTH - 5, aimY); // Don't kick out of stadium
+        
+        const dx = aimX - punterState.x;
+        const dy = clampedAimY - punterState.y;
+        const airTicks = hangTime / TICK_DURATION_SECONDS;
 
-        // --- 3. Calculate Punt Distance & Hang Time ---
-        // Base distance: 30-50 yards
-        const baseDistance = 30 + (strength / 5);
-        // Consistency roll
-        const consistencyRoll = (50 - consistency) / 10; // +/- 5 yards for 50 cons.
-        const distance = baseDistance + getRandom(-consistencyRoll, consistencyRoll);
-
-        // Base hang time: 3.5 - 5.5 seconds
-        const hangTimeSeconds = (3.5 + (strength / 50));
-
-        // --- 4. Calculate Aim Point (Error) ---
-        const accuracyPenalty = (100 - accuracy); // 0 (perfect) to 99 (wild)
-        // Max error: 0 to 20 yards sideways
-        const maxErrorDistance = (accuracyPenalty / 5);
-        const xError = getRandom(-maxErrorDistance, maxErrorDistance);
-
-        const aimX = CENTER_X + xError;
-        const aimY = punterState.y + distance; // Kicking downfield
-
-        // --- 5. Calculate Final Landing Spot & Velocities ---
-        // Clamp to be in-bounds (but allow into endzone)
-        const clampedAimX = Math.max(1.0, Math.min(FIELD_WIDTH - 1.0, aimX));
-        const clampedAimY = Math.max(1.0, Math.min(FIELD_LENGTH - 1.0, aimY));
-
-        const dx_final = clampedAimX - punterState.x;
-        const dy_final = clampedAimY - punterState.y;
-
-        const airTimeTicks = hangTimeSeconds / TICK_DURATION_SECONDS;
-
-        playState.ballState.vx = dx_final / airTimeTicks;
-        playState.ballState.vy = dy_final / airTimeTicks;
-        const g = 9.8; // Gravity
-        playState.ballState.vz = (g * hangTimeSeconds) / 2; // Initial upward velocity
-
-        // --- 6. Set Ball State ---
         playState.ballState.inAir = true;
-        playState.ballState.targetPlayerId = null; // **CRITICAL: No target player**
-        playState.ballState.throwerId = punterState.id; // It was "thrown" by punter
-        playState.ballState.throwInitiated = true;
-        playState.ballState.targetX = clampedAimX;
+        playState.ballState.throwerId = punterState.id;
+        playState.ballState.targetX = aimX;
         playState.ballState.targetY = clampedAimY;
-
+        
+        playState.ballState.vx = dx / airTicks;
+        playState.ballState.vy = dy / airTicks;
+        playState.ballState.vz = (9.8 * hangTime) / 2;
+        
+        // Release Ball
         punterState.hasBall = false;
         punterState.isBallCarrier = false;
-        punterState.action = 'idle'; // Kick is done
+        punterState.action = 'idle'; // Done
     }
 }
-// game.js
-
 /**
  * Handles ball arrival at target coordinates. (MODIFIED)
  */
