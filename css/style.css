@@ -1,4 +1,4 @@
-/* style.css */
+/* style.css - COMPLETE & FIXED */
 
 /* --- Global & Fonts --- */
 body {
@@ -9,12 +9,12 @@ body {
   font-family: 'Bangers', cursive;
 }
 
-/* --- ⭐️ ADDED: Screen Management --- */
+/* --- Screen Management --- */
 .screen.hidden {
   display: none !important;
 }
 
-/* --- ⭐️ ADDED: Status Tags --- */
+/* --- Status Tags --- */
 .status-tag {
   display: inline-block;
   font-size: 0.75rem;
@@ -75,6 +75,20 @@ body {
 .tab-button svg {
   width: 1.25rem;
   height: 1.25rem;
+}
+
+/* --- Schedule Results (Added Fix) --- */
+.player-win {
+    border-left: 4px solid #22c55e; /* Green */
+}
+.player-loss {
+    border-left: 4px solid #ef4444; /* Red */
+}
+
+/* --- Player Breakthrough (Added Fix) --- */
+.breakthrough {
+    color: #16a34a; /* Green-600 */
+    font-weight: bold;
 }
 
 /* --- Depth Chart --- */
@@ -416,11 +430,14 @@ canvas#field-canvas {
     padding: 2px 6px;
     border-radius: 999px;
     box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+    z-index: 12;
 }
 
-.slot-overall.bg-red-500 {
-    background-color: #ef4444;
-}
+.slot-overall.bg-red-500 { background-color: #ef4444; }
+.slot-overall.bg-green-600 { background-color: #16a34a; }
+.slot-overall.bg-blue-600 { background-color: #2563eb; }
+.slot-overall.bg-amber-600 { background-color: #d97706; }
+.slot-overall.bg-gray-500 { background-color: #6b7280; }
 
 /* The Dropdown inside the slot */
 .slot-select {
@@ -433,27 +450,50 @@ canvas#field-canvas {
     color: #f3f4f6; /* Gray-100 */
     cursor: pointer;
     text-overflow: ellipsis;
+    z-index: 11; /* Ensure clicking dropdown works */
 }
 
 .slot-select:hover {
     background-color: #374151;
 }
 
-/* (Bench styles remain the same) */
+/* Ensure options inside dropdown are readable */
+.slot-select option {
+    background-color: #1f2937; /* Gray-800 */
+    color: #f3f4f6; /* Gray-100 */
+    padding: 4px;
+}
+
+.slot-select option.bg-gray-200 {
+    background-color: #e5e7eb;
+    color: #000;
+}
+
+.slot-select option.bg-amber-50 {
+    background-color: #fffbeb;
+    color: #d97706;
+}
+
+.slot-select option.bg-white {
+    background-color: #ffffff;
+    color: #16a34a;
+}
+
+/* (Bench styles) */
 .bench-table-container {
-    max-height: 400px;
-    overflow-y: auto;
-    border: 1px solid #e5e7eb;
-    border-radius: 8px;
+    max-height: 400px;
+    overflow-y: auto;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
 }
 .bench-player-row {
-    cursor: move; 
-    transition: background-color 0.1s ease;
+    cursor: move; 
+    transition: background-color 0.1s ease;
 }
 .bench-player-row:hover {
-    background-color: #fef3c7; /* amber-100 */
+    background-color: #fef3c7; /* amber-100 */
 }
 .bench-player-row.dragging {
-    opacity: 0.4;
-    background-color: #eab308;
+    opacity: 0.4;
+    background-color: #eab308;
 }
