@@ -283,7 +283,7 @@ function diagnosePlay(pState, truePlayType, offensivePlayKey, tick) {
     // 1. Minimum Ticks to Read
     // Higher IQ = fewer ticks. 99 IQ = 2 ticks. 50 IQ = 4 ticks.
     // This formula can be tuned, but it creates a 2-4 tick "read" window.
-    const minTicksToRead = Math.max(20, Math.round((100 - iq) / 25) * 3 + 3); // Was max(2, ... /25) + 1
+    const minTicksToRead = Math.max(30, Math.round((100 - iq) / 20) * 5 + 10);
 
     if (tick < minTicksToRead) {
         return 'read'; // Still reading, not committed
@@ -2569,13 +2569,13 @@ function resolveOngoingBlocks(playState, gameLog) {
         const blockPower = ((blockerState.blocking || 50) + (blockerState.strength || 50)) * blockerState.fatigueModifier;
         const shedPower = ((defenderState.blockShedding || 50) + (defenderState.strength || 50)) * defenderState.fatigueModifier;
         // Every 10 ticks, check for a "move"
-        if (playState.tick % 50 === 0) {
+        if (playState.tick % 60 === 0) {
             const moveRoll = Math.random();
             // High agility defenders vs Low agility blockers = high win chance
             const agilityDiff = (defenderState.agility || 50) - (blockerState.agility || 50);
 
             // 5% base chance + bonus for agility difference
-            const breakChance = 0.08 + (agilityDiff / 200);
+            const breakChance = 0.01 + (Math.max(0, agilityDiff) / 1000);
 
             if (moveRoll < breakChance) {
                 // INSTANT WIN
@@ -3691,18 +3691,30 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
                     // E. Check for Ground / Out of Bounds (if not caught)
                     if (playState.playIsLive) {
                         if ((ballPos.z || 0) <= 0.1 && playState.tick > 6) {
-                            if (loopType === 'punt') {
-                                if (gameLog) gameLog.push(`🏈 Punt is downed.`);
-                                playState.turnover = true; // Defense's ball
-                            } else {
-                                if (gameLog) gameLog.push(`‹‹ Pass hits the ground. Incomplete.`);
+                        if (loopType === 'punt') {
+                            // 💡 FIX: Calculate Punt Distance and Spot
+                            const distTraveled = Math.abs(ballPos.y - playState.lineOfScrimmage);
+                            const distFormatted = distTraveled.toFixed(0);
+                            
+                            // Calculate Yard Line (0-100 scale)
+                            // Note: Punter kicks from ~20 towards 100. 
+                            const finalYardLine = 100 - ballPos.y; 
+                            const side = finalYardLine <= 50 ? "own" : "opponent";
+                            const yardNum = finalYardLine <= 50 ? Math.round(finalYardLine) : Math.round(100 - finalYardLine);
+
+                            if (gameLog) {
+                                gameLog.push(`🏈 Punt is downed at the ${side} ${yardNum} (${distFormatted} yard punt).`);
                             }
-                            playState.incomplete = true;
-                            playState.playIsLive = false;
-                            ballPos.inAir = false;
-                            playState.finalBallY = ballPos.y;
-                            break;
+                            playState.turnover = true; 
+                        } else {
+                            if (gameLog) gameLog.push(`‹‹ Pass hits the ground. Incomplete.`);
                         }
+                        playState.incomplete = true;
+                        playState.playIsLive = false;
+                        ballPos.inAir = false;
+                        playState.finalBallY = ballPos.y;
+                        break;
+                    }
 
                         if ((ballPos.x || 0) <= 0.1 || (ballPos.x || 0) >= (FIELD_WIDTH - 0.1) || (ballPos.y || 0) >= (FIELD_LENGTH - 0.1) || (ballPos.y || 0) <= 0.1) {
                             if (loopType === 'punt') {
