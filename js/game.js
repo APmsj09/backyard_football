@@ -1277,8 +1277,8 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
                     targetX = startX;
                 }
 
-                startY = Math.min(playState.lineOfScrimmage + 0.1, startY);
-                targetY = Math.min(playState.lineOfScrimmage + 0.1, targetY);
+                //startY = Math.min(playState.lineOfScrimmage + 0.1, startY);
+                //targetY = Math.min(playState.lineOfScrimmage + 0.1, targetY);
 
                 // 1. Man Coverage
                 if (assignment.startsWith('man_cover_')) {
