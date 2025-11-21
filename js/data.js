@@ -723,16 +723,18 @@ export const defensivePlaybook = {
         name: 'Punt Return',
         concept: 'Zone',
         blitz: false,
-        compatibleFormations: ['Punt_Return'], // Only works with this formation
+        compatibleFormations: ['Punt_Return'],
         tags: ['specialTeams', 'zone'],
         assignments: {
             'DL1': 'pass_rush', // Rush the punter
-            'DL2': 'pass_rush', // Rush the punter
-            'LB1': 'run_block', // Hold up the gunner
-            'LB2': 'run_block', // Hold up the gunner
-            'DB1': 'punt_return', // <-- NEW ASSIGNMENT
+            'DL2': 'pass_rush', 
+            // 💡 FIX: Change 'run_block' to 'man_cover'
+            // LBs will now chase/jam the Gunners (WR1/WR2)
+            'LB1': 'man_cover_WR1', 
+            'LB2': 'man_cover_WR2', 
+            'DB1': 'punt_return', // Blockers for returner
             'DB2': 'punt_return',
-            'DB3': 'punt_return'
+            'DB3': 'punt_return'  // The Returner
         }
     },
 };
