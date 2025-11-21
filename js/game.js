@@ -2923,8 +2923,7 @@ function updatePunterDecision(playState, offenseStates, gameLog) {
         return;
     }
 
-    // Time to kick
-    if (playState.tick === KICK_TICK) { // Execute once
+    if (playState.tick >= KICK_TICK) { // Execute once
         if (gameLog) gameLog.push(`🏈 ${punterState.name} punts the ball!`);
         
         const pPlayer = getPlayer(punterState.id);
@@ -2933,25 +2932,28 @@ function updatePunterDecision(playState, offenseStates, gameLog) {
         // Calculate Kick
         const baseDist = 35 + (strength * 0.4); // 35 to 75 yards
         const distance = baseDist + getRandomInt(-5, 5);
-        const hangTime = 3.0 + (strength / 50);
+        const hangTime = 3.0 + (strength / 50); // Seconds
         
         const aimX = CENTER_X + getRandomInt(-5, 5);
-        const aimY = punterState.y + distance;
+        const aimY = punterState.y + distance; // Punting UP field
 
         const clampedAimY = Math.min(FIELD_LENGTH - 5, aimY); // Don't kick out of stadium
         
         const dx = aimX - punterState.x;
         const dy = clampedAimY - punterState.y;
-        const airTicks = hangTime / TICK_DURATION_SECONDS;
+
+        // 💡 FIX: Use hangTime (Seconds) for velocity, NOT airTicks.
+        // This calculates Yards Per Second.
+        playState.ballState.vx = dx / hangTime;
+        playState.ballState.vy = dy / hangTime;
+        
+        // Vertical velocity (Z)
+        playState.ballState.vz = (9.8 * hangTime) / 2;
 
         playState.ballState.inAir = true;
         playState.ballState.throwerId = punterState.id;
         playState.ballState.targetX = aimX;
         playState.ballState.targetY = clampedAimY;
-        
-        playState.ballState.vx = dx / airTicks;
-        playState.ballState.vy = dy / airTicks;
-        playState.ballState.vz = (9.8 * hangTime) / 2;
         
         // Release Ball
         punterState.hasBall = false;
