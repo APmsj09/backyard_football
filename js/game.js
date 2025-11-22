@@ -4966,7 +4966,8 @@ export function simulateGame(homeTeam, awayTeam, options = {}) {
             else if (awayScore > homeScore) { awayTeam.wins = (awayTeam.wins || 0) + 1; homeTeam.losses = (homeTeam.losses || 0) + 1; }
         }
 
-        const allGamePlayersForStats = [getRosterObjects(homeTeam), getRosterObjects(awayTeam)];
+        const allGamePlayersForStats = [...getRosterObjects(homeTeam), ...getRosterObjects(awayTeam)];
+        
         allGamePlayersForStats.forEach(p => {
             if (!p || !p.gameStats || !p.attributes) return;
 
