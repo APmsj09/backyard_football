@@ -1852,7 +1852,7 @@ export function drawFieldVisualization(frameData) {
     frameData.players.forEach(player => {
         if (player.x === undefined || player.y === undefined) return;
 
-        // Calculate draw position with potential jiggle if engaged
+        // Jiggle logic for engagement
         let jiggleX = 0;
         let jiggleY = 0;
         if (player.isEngaged) {
@@ -1864,9 +1864,8 @@ export function drawFieldVisualization(frameData) {
         const drawX = player.y * scaleX + jiggleX;
         const drawY = player.x * scaleY + jiggleY;
 
-        // Reduce engagement visuals to a subtle jiggle + soft halo (no bursts/ripples)
+        // Draw engagement halo
         if (player.isEngaged) {
-            // Small soft halo so engaged players are still visible without being overbearing
             const gradient = ctx.createRadialGradient(drawX, drawY, 3, drawX, drawY, 10);
             gradient.addColorStop(0, 'rgba(255,255,255,0.12)');
             gradient.addColorStop(1, 'rgba(255,255,255,0)');
@@ -1876,37 +1875,27 @@ export function drawFieldVisualization(frameData) {
             ctx.fill();
         }
 
+        // Draw stun effect
         if (player.stunnedTicks > 0) {
-            // Create a pulsing effect based on time
-            // This pulses between 0 (small) and 1 (large)
             const pulse = (Math.sin(Date.now() / 200) + 1) / 2;
-
-            // The circle radius will pulse between 8px and 14px
             const pulseRadius = 8 + (pulse * 6);
-            // The opacity will pulse between 0.5 and 0.9
             const pulseAlpha = 0.5 + (pulse * 0.4);
 
             ctx.save();
             ctx.beginPath();
             ctx.arc(drawX, drawY, pulseRadius, 0, Math.PI * 2);
-
-            // Create a pulsing red glow
             const stunGradient = ctx.createRadialGradient(drawX, drawY, 3, drawX, drawY, pulseRadius);
-            stunGradient.addColorStop(0, `rgba(220, 38, 38, ${pulseAlpha})`); // red-600 with pulsing alpha
-            stunGradient.addColorStop(1, 'rgba(220, 38, 38, 0)'); // Fades to transparent
-
+            stunGradient.addColorStop(0, `rgba(220, 38, 38, ${pulseAlpha})`);
+            stunGradient.addColorStop(1, 'rgba(220, 38, 38, 0)');
             ctx.fillStyle = stunGradient;
             ctx.fill();
             ctx.restore();
         }
 
-
-
-        // Draw player body with 3D effect
-        // Use the player's team color when available so the carrier keeps their team identity
+        // Draw player body
         const playerColor = player.primaryColor || (player.isOffense ? '#3b82f6' : '#ef4444');
 
-        // Body shadow
+        // Shadow
         ctx.beginPath();
         ctx.arc(drawX + 1, drawY + 1, 8, 0, Math.PI * 2);
         ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
@@ -1924,62 +1913,32 @@ export function drawFieldVisualization(frameData) {
         ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
         ctx.fill();
 
-        // Ball carrier ring indicator: small stroked ring so the carrier is easy to spot
+        // Ball carrier indicator
         if (player.isBallCarrier) {
             ctx.save();
             ctx.beginPath();
             ctx.arc(drawX, drawY, 12, 0, Math.PI * 2);
             ctx.lineWidth = 3;
-            // Prefer a team secondary color for the ring if provided, else use amber
             ctx.strokeStyle = player.secondaryColor || 'rgba(251, 191, 36, 0.95)';
             ctx.stroke();
             ctx.restore();
         }
 
-        // Draw movement indicator
-        if (player.velocity && (Math.abs(player.velocity.x) > 0.1 || Math.abs(player.velocity.y) > 0.1)) {
-            const speed = Math.sqrt(player.velocity.x ** 2 + player.velocity.y ** 2);
-            const angle = Math.atan2(player.velocity.y, player.velocity.x);
+        // --- 💡 MOVEMENT TRAIL REMOVED HERE --- 
 
-            // Draw speed trail
-            ctx.beginPath();
-            ctx.moveTo(drawX, drawY);
-            const trailLength = 10 + speed * 3;
-
-            // Create gradient for trail
-            const trailGradient = ctx.createLinearGradient(
-                drawX, drawY,
-                drawX + Math.cos(angle) * trailLength,
-                drawY + Math.sin(angle) * trailLength
-            );
-            trailGradient.addColorStop(0, playerColor);
-            trailGradient.addColorStop(1, 'rgba(255, 255, 255, 0)');
-
-            ctx.lineTo(
-                drawX - Math.cos(angle) * trailLength,
-                drawY - Math.sin(angle) * trailLength
-            );
-            ctx.strokeStyle = trailGradient;
-            ctx.lineWidth = 3;
-            ctx.stroke();
-        }
-
-        // Draw player number and position (derive display-only values locally so we don't mutate physics state)
-        // Prefer the slot assigned in the play (depth-chart placement) when available.
-        const displayPosition = (player.slot ? player.slot.replace(/\d+/g, '') : '') || player.position || player.favoriteOffensivePosition || player.favoriteDefensivePosition || (typeof estimateBestPosition === 'function' ? estimateBestPosition(player) : '') || '';
+        // Draw player number/position text
+        const displayPosition = (player.slot ? player.slot.replace(/\d+/g, '') : '') || player.position || player.favoriteOffensivePosition || player.favoriteDefensivePosition || '';
 
         let displayNumber;
         if (player.number != null && player.number !== '') {
             displayNumber = player.number.toString();
         } else {
-            // Derive a stable, non-colliding number from player name/id for display only
             const seed = (player.name || player.id || 'player').toString();
             let sum = 0;
             for (let i = 0; i < seed.length; i++) sum += seed.charCodeAt(i);
             displayNumber = ((sum % 99) + 1).toString();
         }
 
-        // Position above number (if available)
         if (displayPosition) {
             ctx.font = '9px "Inter"';
             ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
@@ -1991,7 +1950,6 @@ export function drawFieldVisualization(frameData) {
             ctx.fillText(displayPosition, drawX, drawY - 12);
         }
 
-        // Number shadow and number (rendered from derived displayNumber, does not write back to player object)
         ctx.font = 'bold 11px "Inter"';
         ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
         ctx.textAlign = 'center';
