@@ -2161,6 +2161,25 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
             }
         }
 
+            // --- 💡 FIX: PUNT RETURN LOGIC ---
+        else if (assignment === 'punt_return') {
+            if (playState.ballState.inAir) {
+                // 1. Ball is in the air! Go get it!
+                // Target the landing spot calculated by the physics engine
+                pState.targetX = playState.ballState.targetX;
+                pState.targetY = playState.ballState.targetY;
+                
+                // Switch action to "Attack Ball" to ensure they catch it
+                pState.action = 'attack_ball'; 
+            } else {
+                // 2. Ball not kicked yet. Stay Deep.
+                // Do NOT chase the punter. Hold initial position.
+                pState.targetX = pState.initialX;
+                pState.targetY = pState.initialY;
+                pState.action = 'punt_return'; // Just wait
+            }
+        }
+
         // --- B. ZONE COVERAGE (With Organic Drift) ---
         else if (assignment?.startsWith('zone_')) {
             const zoneCenter = pState.cachedZoneCenter || getZoneCenter(assignment, LOS);
