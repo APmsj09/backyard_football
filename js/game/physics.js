@@ -19,15 +19,20 @@ export function updatePlayerPosition(pState, timeDelta) {
     // --- 0. Early exit for invalid state ---
     if (!pState || typeof pState.x !== 'number' || typeof pState.y !== 'number') return;
 
+    // Initialize velocity if missing (prevents UI errors)
+    if (!pState.velocity) pState.velocity = { x: 0, y: 0 };
+
     // --- 1. Handle stunned or blocked players ---
     if (pState.stunnedTicks > 0 || pState.isBlocked || pState.isEngaged) {
         pState.currentSpeedYPS = 0;
+        pState.velocity = { x: 0, y: 0 }; // Stop trails
         return;
     }
 
     // --- 2. Ensure target coordinates are valid ---
     if (typeof pState.targetX !== 'number' || typeof pState.targetY !== 'number') {
         pState.currentSpeedYPS = 0;
+        pState.velocity = { x: 0, y: 0 };
         return;
     }
 
@@ -42,10 +47,12 @@ export function updatePlayerPosition(pState, timeDelta) {
         pState.x = pState.targetX;
         pState.y = pState.targetY;
         pState.currentSpeedYPS = 0;
+        pState.velocity = { x: 0, y: 0 }; // Arrived, stop trails
         return;
     }
 
     // --- 5. Speed calculation based on stat ---
+    // Scale: 1-99 stat maps to 4.5 - 8.0 Yards/Sec
     const MIN_SPEED_YPS = 4.5;
     const MAX_SPEED_YPS = 8.0;
     const stat = typeof pState.speed === 'number' ? pState.speed : 50;
@@ -57,14 +64,23 @@ export function updatePlayerPosition(pState, timeDelta) {
     // --- 7. Move towards target ---
     const moveDist = pState.currentSpeedYPS * timeDelta;
 
+    // Calculate unit vector components
+    const vx = (dx / distToTarget);
+    const vy = (dy / distToTarget);
+
     if (moveDist >= distToTarget) {
         // Can reach target this tick
         pState.x = pState.targetX;
         pState.y = pState.targetY;
     } else {
         // Move proportionally towards target
-        pState.x += (dx / distToTarget) * moveDist;
-        pState.y += (dy / distToTarget) * moveDist;
+        pState.x += vx * moveDist;
+        pState.y += vy * moveDist;
     }
+
+    // --- 8. 💡 FIX: Update Velocity for UI Trails ---
+    // UI uses this to draw the lines behind running players
+    pState.velocity.x = vx * pState.currentSpeedYPS;
+    pState.velocity.y = vy * pState.currentSpeedYPS;
 }
 
