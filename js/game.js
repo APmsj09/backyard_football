@@ -4152,33 +4152,22 @@ function determineDefensiveFormation(defense, offenseFormationName, down, yardsT
 /**
  * Determines the defensive play call based on formation, situation, and basic tendencies.
  */
-function determineDefensivePlayCall(defense, offense, down, yardsToGo, ballOn, scoreDiff, gameLog, drivesRemaining) { // Added scoreDiff, drivesRemaining
+function determineDefensivePlayCall(defense, offense, down, yardsToGo, ballOn, scoreDiff, gameLog, drivesRemaining) {
     // --- 1. Validate Inputs & Get Current Formation ---
     if (!defense?.roster || !offense?.roster || !defense?.formations?.defense || !offense?.formations?.offense || !defense?.coach) {
         console.error("determineDefensivePlayCall: Invalid team data provided.");
-        return 'Cover_2_Zone_3-1-3'; // Need a safe, common fallback (adjust if needed)
+        return 'Cover_2_Zone_3-1-3'; 
     }
     const defenseFormationName = defense.formations.defense;
-    const defenseFormation = defenseFormations[defenseFormationName];
-    if (!defenseFormation) {
-        console.error(`CRITICAL ERROR: Defensive formation data missing for ${defense.name} (${defenseFormationName}).`);
-        return 'Cover_2_Zone_3-1-3'; // Fallback
-    }
-
+    
     // --- 2. Filter Playbook for Current Formation ---
-    const availablePlays = Object.keys(defensivePlaybook).filter(key => {
-        // Basic check: Assumes play keys include formation name (e.g., "Cover_1_Man_331")
-        // return key.includes(defenseFormationName); // <<< This is the old way
-
-        // This is the new, "smarter" way
-        return defensivePlaybook[key]?.compatibleFormations?.includes(defenseFormationName);
-    });
+    const availablePlays = Object.keys(defensivePlaybook).filter(key => 
+        defensivePlaybook[key]?.compatibleFormations?.includes(defenseFormationName)
+    );
 
     if (availablePlays.length === 0) {
         console.error(`CRITICAL: No defensive plays found in playbook compatible with ${defenseFormationName}!`);
-        // Try finding *any* play as a last resort, though assignments might be wrong
-        const allPlays = Object.keys(defensivePlaybook);
-        return allPlays.length > 0 ? getRandom(allPlays) : 'Cover_2_Zone_3-1-3'; // Absolute fallback
+        return 'Cover_2_Zone_3-1-3'; 
     }
 
     // --- 3. Categorize *Available* Plays using TAGS ---
@@ -4186,116 +4175,117 @@ function determineDefensivePlayCall(defense, offense, down, yardsToGo, ballOn, s
 
     availablePlays.forEach(key => {
         const play = defensivePlaybook[key];
-        // We check for the 'tags' array now, not 'concept' or 'blitz'
         if (!play || !play.tags) return;
+
+        // 💡 FIX: Isolate Prevent plays so they don't pollute general pools
+        if (play.tags.includes('prevent')) {
+            categorizedPlays.prevent.push(key);
+            return; 
+        }
 
         if (play.tags.includes('blitz')) categorizedPlays.blitz.push(key);
         if (play.tags.includes('runStop')) categorizedPlays.runStop.push(key);
         if (play.tags.includes('zone')) categorizedPlays.zone.push(key);
         if (play.tags.includes('man')) categorizedPlays.man.push(key);
         if (play.tags.includes('safeZone')) categorizedPlays.safeZone.push(key);
-        if (play.tags.includes('prevent')) categorizedPlays.prevent.push(key);
     });
 
     // --- 4. Analyze Situation ---
-    const isObviousPass = (down >= 3 && yardsToGo >= 7) || (down === 4 && yardsToGo >= 2) || (down >= 2 && yardsToGo >= 12);
-    const isObviousRun = (yardsToGo <= 1) || (down >= 3 && yardsToGo <= 3);
-    const isRedZone = ballOn >= 80; // Offense near goal line
-    const isBackedUp = ballOn <= 15; // Offense deep in own territory
-
-    const offFormation = offenseFormations[offense.formations.offense];
-    const offPersonnel = offFormation?.personnel || { WR: 2, RB: 1 };
-    const isSpreadOffense = offPersonnel.WR >= 3;
-    const isHeavyOffense = (offPersonnel.RB || 0) >= 2;
+    const isLongPass = (down >= 3 && yardsToGo >= 8) || (down === 4 && yardsToGo >= 5);
+    const isHailMary = (down >= 3 && yardsToGo >= 20) || (drivesRemaining <= 1 && scoreDiff > 0); // Winning late
+    const isObviousRun = (yardsToGo <= 1) || (down >= 3 && yardsToGo <= 2);
+    const isRedZone = ballOn >= 80; 
+    const isBackedUp = ballOn <= 15; 
 
     const coachType = defense.coach?.type || 'Balanced';
 
-    // Game Situation (Time/Score)
-    const totalDrivesPerHalf = 8; // Approx
+    // Game Situation
     const isLateGame = drivesRemaining <= 3;
-    const isEndOfHalf = (drivesRemaining % totalDrivesPerHalf <= 1) && drivesRemaining <= totalDrivesPerHalf;
-    const urgencyFactor = isLateGame || isEndOfHalf;
-    const isDefWinningBig = scoreDiff > 10; // Positive scoreDiff means defense is winning
-    const isDefLosingBig = scoreDiff < -10; // Negative scoreDiff means defense is losing
+    const isDefWinningBig = scoreDiff > 10; 
+    const isDefLosingBig = scoreDiff < -10; 
 
-    // --- 5. Build Weighted List of Preferred Plays ---
-    let preferredPlays = []; // Use array directly for weighting via duplicates
+    // --- 5. Adaptive AI (Predicting the Offense) ---
+    // Look at the Offense's formation name to guess intent.
+    let runThreat = 0.5; // Base 50/50
+    const offFormNameLower = offense.formations.offense.toLowerCase();
 
-    // Add plays multiple times based on situation appropriateness
-    // A) Base Situation (Obvious Pass/Run/Normal)
-    if (isObviousRun || (isHeavyOffense && !isObviousPass)) {
-        preferredPlays.push(...(categorizedPlays.runStop || []), ...(categorizedPlays.runStop || [])); // Heavily weight run stop
-        preferredPlays.push(...(categorizedPlays.blitz || [])); // Blitz is also good vs run
-        preferredPlays.push(...(categorizedPlays.man || [])); // Man can work vs heavy
-    } else if (isObviousPass || isSpreadOffense) {
-        preferredPlays.push(...(categorizedPlays.zone || [])); // Favor zone vs pass
-        preferredPlays.push(...(categorizedPlays.man || []));
-        preferredPlays.push(...(categorizedPlays.blitz || [])); // Add pressure
-    } else { // Normal down/distance
-        preferredPlays.push(...(categorizedPlays.zone || [])); // Balanced approach
-        preferredPlays.push(...(categorizedPlays.man || []));
-        preferredPlays.push(...(categorizedPlays.runStop || []));
+    if (offFormNameLower.includes('spread') || offFormNameLower.includes('empty') || offFormNameLower.includes('trips')) runThreat -= 0.3;
+    if (offFormNameLower.includes('power') || offFormNameLower.includes('goal') || offFormNameLower.includes('heavy')) runThreat += 0.3;
+    
+    // Adjust based on down/distance
+    if (down === 3 && yardsToGo > 6) runThreat -= 0.2;
+    if (yardsToGo <= 2) runThreat += 0.2;
+
+    // --- 6. Build Weighted List of Preferred Plays ---
+    let preferredPlays = []; 
+
+    // A) PREVENT SITUATIONS (Top Priority)
+    if (isHailMary && categorizedPlays.prevent.length > 0) {
+        return getRandom(categorizedPlays.prevent);
     }
 
-    // B) Coach Tendency Adjustments
-    if (coachType === 'Blitz-Happy Defense' && categorizedPlays.blitz.length > 0) {
-        preferredPlays.push(...categorizedPlays.blitz, ...categorizedPlays.blitz, ...categorizedPlays.blitz); // Add blitz calls 3 extra times
-    } else if (coachType === 'Ground and Pound' && categorizedPlays.runStop.length > 0) { // Often implies strong D coach
-        preferredPlays.push(...categorizedPlays.runStop, ...categorizedPlays.runStop); // Add run stop 2 extra times
-    } else if (coachType === 'West Coast Offense' && categorizedPlays.zone.length > 0) { // Often implies zone D coach
-        preferredPlays.push(...categorizedPlays.safeZone, ...categorizedPlays.safeZone); // Add safer zones 2 extra times
-    } else { // Balanced or other types - maybe add one of each core type
+    // B) Adaptive Reaction
+    if (runThreat > 0.7) {
+        // High Run Threat
+        preferredPlays.push(...(categorizedPlays.runStop || [])); 
+        preferredPlays.push(...(categorizedPlays.runStop || [])); // Double weight
+        preferredPlays.push(...(categorizedPlays.blitz || [])); 
+        preferredPlays.push(...(categorizedPlays.man || [])); 
+    } else if (runThreat < 0.3) {
+        // High Pass Threat
+        preferredPlays.push(...(categorizedPlays.zone || [])); 
+        preferredPlays.push(...(categorizedPlays.zone || [])); // Double weight
+        preferredPlays.push(...(categorizedPlays.man || []));
+        preferredPlays.push(...(categorizedPlays.blitz || [])); 
+        
+        // Only add prevent on very long downs
+        if (yardsToGo > 15) preferredPlays.push(...(categorizedPlays.prevent || []));
+    } else {
+        // Balanced
         preferredPlays.push(...(categorizedPlays.zone || []));
         preferredPlays.push(...(categorizedPlays.man || []));
         preferredPlays.push(...(categorizedPlays.runStop || []));
     }
 
-
-    // C) Game Situation Adjustments (Score/Time)
-    if (urgencyFactor && isDefLosingBig) { // Losing big late -> Aggressive
-        preferredPlays.push(...(categorizedPlays.blitz || []), ...(categorizedPlays.blitz || []));
-        preferredPlays.push(...(categorizedPlays.man || [])); // Riskier man coverage
-    } else if (urgencyFactor && isDefWinningBig) { // Winning big late -> Conservative
-        preferredPlays.push(...(categorizedPlays.safeZone || []), ...(categorizedPlays.safeZone || [])); // Play safe zone
-        preferredPlays.push(...(categorizedPlays.runStop || [])); // Prevent easy runs
+    // C) Coach Tendency Adjustments
+    if (coachType === 'Blitz-Happy Defense' && categorizedPlays.blitz.length > 0) {
+        preferredPlays.push(...categorizedPlays.blitz, ...categorizedPlays.blitz); 
+    } else if (coachType === 'Ground and Pound' && categorizedPlays.runStop.length > 0) { 
+        preferredPlays.push(...categorizedPlays.runStop, ...categorizedPlays.runStop); 
+    } else if (coachType === 'West Coast Offense' && categorizedPlays.zone.length > 0) { 
+        preferredPlays.push(...categorizedPlays.safeZone, ...categorizedPlays.safeZone); 
     }
 
-    // D) Field Position Adjustments
-    if (isRedZone) { // Offense near goal line
-        preferredPlays.push(...(categorizedPlays.man || []), ...(categorizedPlays.man || [])); // Tight man coverage
-        preferredPlays.push(...categorizedPlays.zone.filter(k => !k.includes('Deep'))); // Short zones
-        preferredPlays.push(...(categorizedPlays.blitz || [])); // Pressure
+    // D) Score/Situation Adjustments
+    if (isLateGame && isDefWinningBig) {
+        // Protect lead: Safe Zones, no Blitzing
+        preferredPlays.push(...(categorizedPlays.safeZone || []));
+        preferredPlays = preferredPlays.filter(key => !categorizedPlays.blitz.includes(key));
+    } else if (isLateGame && isDefLosingBig) {
+        // Desperation: Blitz heavily
+        preferredPlays.push(...(categorizedPlays.blitz || []));
+        preferredPlays.push(...(categorizedPlays.blitz || []));
     }
-    if (isBackedUp) { // Offense deep
-        preferredPlays.push(...(categorizedPlays.blitz || [])); // Go for safety/bad field pos
-        preferredPlays.push(...(categorizedPlays.runStop || []));
+
+    if (isRedZone) { 
+        preferredPlays.push(...(categorizedPlays.man || [])); 
+        preferredPlays.push(...(categorizedPlays.blitz || []));
+        // Remove deep zones
+        preferredPlays = preferredPlays.filter(key => !key.toLowerCase().includes('deep'));
     }
 
-
-    // --- 6. Select Play ---
-    let chosenPlay = null;
-
+    // --- 7. Select Play ---
     // Filter preferred list to ensure plays are actually available in current formation
     const validPreferredPlays = preferredPlays.filter(play => availablePlays.includes(play));
 
     if (validPreferredPlays.length > 0) {
-        chosenPlay = getRandom(validPreferredPlays); // Select randomly from the weighted list
+        return getRandom(validPreferredPlays); 
     } else {
-        // Fallback if weighting resulted in no valid options (unlikely but possible)
-        console.warn(`No valid preferred plays found for ${defenseFormationName} in current situation. Choosing random available play.`);
-        chosenPlay = getRandom(availablePlays); // Choose randomly from plays valid for the formation
+        // Fallback 
+        console.warn(`No valid preferred plays found for ${defenseFormationName}. Choosing random.`);
+        return getRandom(availablePlays); 
     }
-
-    // Final safety net - should not be reached if availablePlays has items
-    if (!chosenPlay) {
-        console.error("CRITICAL FALLBACK: Could not select any defensive play.");
-        chosenPlay = availablePlays[0] || 'Cover_2_Zone_3-1-3';
-    }
-
-    // gameLog.push(`Def Play Call: ${chosenPlay}`); // Optional: Log decision
-    return chosenPlay;
 }
-
 // In game.js
 
 /**
