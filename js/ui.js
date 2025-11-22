@@ -784,6 +784,8 @@ export function renderDashboard(gameState) {
     const currentW = (typeof currentWeek === 'number' && currentWeek < WEEKS_IN_SEASON) ? `Week ${currentWeek + 1}` : 'Offseason';
 
     if (elements.dashboardTeamName) elements.dashboardTeamName.textContent = playerTeam.name || 'Your Team';
+    const recordText = `Record: ${playerTeam.wins || 0} - ${playerTeam.losses || 0}` + 
+                       ((playerTeam.ties && playerTeam.ties > 0) ? ` - ${playerTeam.ties}` : '');
     if (elements.dashboardRecord) elements.dashboardRecord.textContent = `Record: ${playerTeam.wins || 0} - ${playerTeam.losses || 0}`;
     if (elements.dashboardYear) elements.dashboardYear.textContent = year || '?';
     if (elements.dashboardWeek) elements.dashboardWeek.textContent = currentW;
@@ -1468,7 +1470,7 @@ function renderStandingsTab(gameState) {
         const divisionTeamIds = new Set(divisionTeamIdsArray);
         const divEl = document.createElement('div');
         divEl.className = 'mb-6';
-        let tableHtml = `<h4 class="text-xl font-bold mb-2">${divName} Division</h4><table class="min-w-full bg-white text-sm"><thead class="bg-gray-800 text-white"><tr><th scope="col" class="py-2 px-3 text-left">Team</th><th scope="col" class="py-2 px-3">W</th><th scope="col" class="py-2 px-3">L</th></tr></thead><tbody class="divide-y">`;
+        let tableHtml = `<h4 class="text-xl font-bold mb-2">${divName} Division</h4><table class="min-w-full bg-white text-sm"><thead class="bg-gray-800 text-white"><tr><th scope="col" class="py-2 px-3 text-left">Team</th><th scope="col" class="py-2 px-3">W</th><th scope="col" class="py-2 px-3">L</th><th scope="col" class="py-2 px-3">T</th></tr></thead><tbody class="divide-y">`;
         const divTeams = gameState.teams
             .filter(t => t && divisionTeamIds.has(t.id))
             .sort((a, b) => (b?.wins || 0) - (a?.wins || 0) || (a?.losses || 0) - (b?.losses || 0));
@@ -2093,7 +2095,6 @@ export function drawFieldVisualization(frameData) {
 /** Renders the live stats box with key player performances for the game. */
 function renderLiveStatsBox(gameResult) {
     if (!elements.simLiveStats || !elements.simStatsAway || !elements.simStatsHome || !gameResult) {
-        console.warn("Cannot render live stats box: Missing elements or gameResult.");
         return;
     }
     const { homeTeam, awayTeam } = gameResult;
@@ -2102,13 +2103,16 @@ function renderLiveStatsBox(gameResult) {
     const generateTeamStatsHtml = (team) => {
         if (!team || !team.roster || team.roster.length === 0) return '<h5>No Player Data</h5>';
 
+        // 💡 FIX: Convert Roster IDs to Player Objects so we can read stats
+        const fullRoster = getUIRosterObjects(team); 
+
         // Filters and sorts roster to find a specific stat leader
-        const findTopStat = (statName) => team.roster
+        const findTopStat = (statName) => fullRoster
             .filter(p => p && p.gameStats && p.gameStats[statName] > 0)
             .sort((a, b) => (b.gameStats[statName] || 0) - (a.gameStats[statName] || 0))[0];
 
         // --- OFFENSIVE LEADERS ---
-        const qb = team.roster.find(p => p && p.gameStats && p.gameStats.passAttempts > 0); // Find QB by attempts
+        const qb = fullRoster.find(p => p && p.gameStats && p.gameStats.passAttempts > 0); 
         const leadingRusher = findTopStat('rushYards');
         const leadingReceiver = findTopStat('recYards');
         const offensivePlayersLogged = new Set();
@@ -2117,56 +2121,50 @@ function renderLiveStatsBox(gameResult) {
 
         // 1. QB Stats
         if (qb) {
-            html += `<p>${qb.name} (QB): <strong>${qb.gameStats.passCompletions || 0}/${qb.gameStats.passAttempts || 0}, ${qb.gameStats.passYards || 0} Yds, ${qb.gameStats.touchdowns || 0} TD, ${qb.gameStats.interceptionsThrown || 0} INT</strong></p>`;
+            html += `<p class="text-sm">${qb.name}: <strong>${qb.gameStats.passCompletions}/${qb.gameStats.passAttempts}, ${qb.gameStats.passYards} yds, ${qb.gameStats.touchdowns} TD, ${qb.gameStats.interceptionsThrown} INT</strong></p>`;
             offensivePlayersLogged.add(qb.id);
         }
 
         // 2. Running Leader
         if (leadingRusher && !offensivePlayersLogged.has(leadingRusher.id)) {
-            html += `<p>${leadingRusher.name} (Run): <strong>${leadingRusher.gameStats.rushYards || 0} Yds, ${leadingRusher.gameStats.touchdowns || 0} TD</strong></p>`;
+            html += `<p class="text-sm">${leadingRusher.name}: <strong>${leadingRusher.gameStats.rushYards} Rush Yds, ${leadingRusher.gameStats.touchdowns} TD</strong></p>`;
             offensivePlayersLogged.add(leadingRusher.id);
         }
 
         // 3. Receiving Leader
         if (leadingReceiver && !offensivePlayersLogged.has(leadingReceiver.id)) {
-            html += `<p>${leadingReceiver.name} (Rec): <strong>${leadingReceiver.gameStats.receptions || 0}-${leadingReceiver.gameStats.recYards || 0} Yds, ${leadingReceiver.gameStats.touchdowns || 0} TD</strong></p>`;
+            html += `<p class="text-sm">${leadingReceiver.name}: <strong>${leadingReceiver.gameStats.receptions} Rec, ${leadingReceiver.gameStats.recYards} Yds, ${leadingReceiver.gameStats.touchdowns} TD</strong></p>`;
             offensivePlayersLogged.add(leadingReceiver.id);
         }
 
         // --- DEFENSIVE LEADERS ---
-        const defensiveLeaders = {};
+        const defensiveLeaders = [];
 
-        // Aggregate all defensive stats into a single map based on player ID
-        team.roster.forEach(p => {
+        fullRoster.forEach(p => {
             if (p?.gameStats && (p.gameStats.tackles > 0 || p.gameStats.sacks > 0 || p.gameStats.interceptions > 0)) {
-                if (offensivePlayersLogged.has(p.id)) return; // Skip if already logged as an offensive leader
-
-                defensiveLeaders[p.id] = {
-                    name: p.name,
-                    tkl: p.gameStats.tackles || 0,
-                    sacks: p.gameStats.sacks || 0,
-                    ints: p.gameStats.interceptions || 0
-                };
+                if (offensivePlayersLogged.has(p.id)) return; 
+                defensiveLeaders.push(p);
             }
         });
 
-        // Convert map to array and sort by importance (Tkl, then Sack, then INT)
-        const sortedDefenders = Object.values(defensiveLeaders).sort((a, b) =>
-            (b.tkl - a.tkl) || (b.sacks - a.sacks) || (b.ints - a.ints)
-        ).slice(0, 3); // Limit to top 3 unique defensive players
+        // Sort by "Impact" (Int > Sack > Tackle)
+        defensiveLeaders.sort((a, b) => {
+            const scoreA = (a.gameStats.interceptions * 10) + (a.gameStats.sacks * 5) + a.gameStats.tackles;
+            const scoreB = (b.gameStats.interceptions * 10) + (b.gameStats.sacks * 5) + b.gameStats.tackles;
+            return scoreB - scoreA;
+        });
 
-        // 4. Print Top Defensive Players
-        sortedDefenders.forEach(d => {
-            let defHtml = `<p>${d.name} (Def): <strong>${d.tkl} Tkl`;
-            if (d.sacks > 0) defHtml += `, ${d.sacks} Sack${d.sacks > 1 ? 's' : ''}`;
-            if (d.ints > 0) defHtml += `, ${d.ints} INT${d.ints > 1 ? 's' : ''}`;
+        // 4. Print Top 3 Defenders
+        defensiveLeaders.slice(0, 3).forEach(d => {
+            let defHtml = `<p class="text-sm">${d.name}: <strong>${d.gameStats.tackles} Tkl`;
+            if (d.gameStats.sacks > 0) defHtml += `, ${d.gameStats.sacks} Sack`;
+            if (d.gameStats.interceptions > 0) defHtml += `, ${d.gameStats.interceptions} INT`;
             defHtml += `</strong></p>`;
             html += defHtml;
         });
 
-        // 5. Final Check
-        if (offensivePlayersLogged.size === 0 && sortedDefenders.length === 0) {
-            html += '<p class="text-gray-400">No significant stats recorded.</p>';
+        if (offensivePlayersLogged.size === 0 && defensiveLeaders.length === 0) {
+            html += '<p class="text-gray-400 text-xs">No significant stats.</p>';
         }
 
         return html;
@@ -2593,13 +2591,17 @@ function runLiveGameTick() {
         // The play is over! Stop the "action" clock.
         clearInterval(liveGameInterval);
         liveGameInterval = null;
-        clearTimeout(huddleTimeout); // Clear any stray huddle just in case
+        clearTimeout(huddleTimeout); 
 
-        // Start the "huddle" clock (2.5 second pause)
-        const HUDDLE_PAUSE_MS = 3500;
+        // 💡 UPDATED TIMING:
+        // 2.0 seconds to view the tackle (Post-Play)
+        // + 2.5 seconds for the Huddle/Log reading
+        // = 4.5 seconds Total Pause before the next lineup appears
+        const POST_PLAY_VIEWING_MS = 2000; 
+        const HUDDLE_TIME_MS = 2500;
+        const TOTAL_PAUSE_MS = POST_PLAY_VIEWING_MS + HUDDLE_TIME_MS;
 
-        // FIX: Store the timeout ID
-        huddleTimeout = setTimeout(startNextPlay, HUDDLE_PAUSE_MS);
+        huddleTimeout = setTimeout(startNextPlay, TOTAL_PAUSE_MS);
     }
     // --- END NEW LOGIC ---
 }
