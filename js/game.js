@@ -2358,17 +2358,16 @@ function checkBlockCollisions(playState) {
     });
 }
 function checkTackleCollisions(playState, gameLog) {
-    // 💡 FIX: Target anyone who HAS the ball, even if they aren't "running" yet (Pocket QB)
-    // We also ensure the ball isn't flying through the air.
-    const ballCarrierState = playState.activePlayers.find(p =>
-        (p.isBallCarrier || p.hasBall) &&
-        !playState.ballState.inAir &&
+    // Target anyone who HAS the ball (Runner, QB, WR after catch)
+    const ballCarrierState = playState.activePlayers.find(p => 
+        (p.isBallCarrier || p.hasBall) && 
+        !playState.ballState.inAir && 
         !playState.ballState.isLoose
     );
 
     if (!ballCarrierState) return false;
 
-    const TACKLE_RANGE_CHECK = TACKLE_RANGE;
+    const TACKLE_RANGE_CHECK = TACKLE_RANGE; // 1.8
     const activeDefenders = playState.activePlayers.filter(p =>
         p.teamId !== ballCarrierState.teamId &&
         !p.isBlocked && !p.isEngaged && p.stunnedTicks === 0 &&
@@ -2384,16 +2383,16 @@ function checkTackleCollisions(playState, gameLog) {
 
     for (const defender of activeDefenders) {
         if (getDistance(ballCarrierState, defender) < TACKLE_RANGE_CHECK) {
-
+            
             if (checkFumble(ballCarrierState, defender, playState, gameLog)) {
                 ballCarrierState.stunnedTicks = 40;
-                return false;
+                return false; 
             }
 
             // Break Tackle Math
             const carrierWeight = ballCarrierState.weight || 180;
             const carrierSpeed = ballCarrierState.currentSpeedYPS || 0;
-            const successiveTacklePenalty = ballCarrierState.tacklesBrokenThisPlay * 0.20;
+            const successiveTacklePenalty = ballCarrierState.tacklesBrokenThisPlay * 0.25; // Increased penalty for multiple breaks
             const skillModifier = Math.max(0.1, 1.0 - successiveTacklePenalty);
 
             const carrierSkill = ((ballCarrierState.agility || 50) * 1.0 + (ballCarrierState.strength || 50) * 0.5) * skillModifier;
@@ -2404,12 +2403,15 @@ function checkTackleCollisions(playState, gameLog) {
             const tacklerSpeed = defender.currentSpeedYPS || 0;
             const tacklerSkill = ((defender.tackling || 50) * 1.0 + (defender.strength || 50) * 0.5);
             const tacklerMomentum = (tacklerWeight * tacklerSpeed) * (MOMENTUM_SCALING_FACTOR * 1.5);
-            const tacklePower = (tacklerSkill + tacklerMomentum) * defender.fatigueModifier;
+            
+            // 💡 TUNING: Added +15.0 TACKLE_BIAS to make wrapping up easier
+            const TACKLE_BIAS = 15.0; 
+            const tacklePower = ((tacklerSkill + tacklerMomentum) * defender.fatigueModifier) + TACKLE_BIAS;
 
             const roll = getRandomInt(-10, 10);
             const diff = (breakPower + roll) - tacklePower;
 
-            if (diff <= 0) { // Tackle success
+            if (diff <= 0) { // Tackle success (Runner failed to break it)
                 playState.yards = ballCarrierState.y - playState.lineOfScrimmage;
                 playState.playIsLive = false;
 
@@ -2418,32 +2420,39 @@ function checkTackleCollisions(playState, gameLog) {
                     ensureStats(tacklerPlayer);
                     tacklerPlayer.gameStats.tackles = (tacklerPlayer.gameStats.tackles || 0) + 1;
 
-                    // 💡 SACK LOGIC: Updated to use the passed variable
+                    // Sack Logic
                     const isBehindLOS = ballCarrierState.y < playState.lineOfScrimmage;
-
-                    // It is a sack if: 
-                    // 1. Carrier is a QB 
-                    // 2. Behind Line 
-                    // 3. It was a Pass play (Play type) OR they were in setup/scramble mode
                     const isSackAction = (ballCarrierState.action === 'qb_setup' || ballCarrierState.action === 'qb_scramble');
-
+                    
                     if (ballCarrierState.slot.startsWith('QB') && isBehindLOS && (playState.type === 'pass' || isSackAction)) {
                         playState.sack = true;
                         if (gameLog) gameLog.push(`💥 SACK! ${defender.name} drops ${ballCarrierState.name}!`);
                         tacklerPlayer.gameStats.sacks = (tacklerPlayer.gameStats.sacks || 0) + 1;
                     } else {
-                        const yards = playState.yards.toFixed(1);
-                        if (gameLog) gameLog.push(`✋ ${ballCarrierState.name} tackled by ${defender.name} for ${yards < 0 ? 'a loss of ' + Math.abs(yards) : 'a gain of ' + yards}.`);
+                        // Safety Logic
+                        if (playState.safety) {
+                             if (gameLog) gameLog.push(`SAFETY! ${ballCarrierState.name} tackled in endzone by ${defender.name}!`);
+                        } else {
+                             // Normal Tackle
+                             const yards = playState.yards.toFixed(1);
+                             if (gameLog) gameLog.push(`✋ ${ballCarrierState.name} tackled by ${defender.name} for ${yards < 0 ? 'a loss of ' + Math.abs(yards) : 'a gain of ' + yards}.`);
+                        }
                     }
                 }
                 return true; // Play ended
-            } else { // Broken tackle
+            } else { // Broken Tackle (Juke)
                 ballCarrierState.tacklesBrokenThisPlay++;
                 ballCarrierState.action = 'juke';
-                ballCarrierState.jukeTicks = 12;
-                ballCarrierState.currentSpeedYPS *= 0.5;
+                
+                // 💡 TUNING: Stronger slowdown penalty for the runner
+                ballCarrierState.jukeTicks = 10; // Duration of "juke" animation
+                ballCarrierState.currentSpeedYPS *= 0.4; // Lose 60% of speed (was 50%)
+
                 if (gameLog) gameLog.push(`💥 ${ballCarrierState.name} breaks tackle from ${defender.name}!`);
-                defender.stunnedTicks = 40;
+                
+                // 💡 TUNING: Reduced defender stun duration (Was 40 ticks / 2.0s)
+                // Now 20 ticks (1.0s), allowing them to recover and pursue again.
+                defender.stunnedTicks = 20; 
             }
         }
     }
