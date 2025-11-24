@@ -11,8 +11,6 @@ import {
 } from './game/player.js';
 import { getDistance, updatePlayerPosition } from './game/physics.js';
 
-// Re-export player helpers (moved to ./game/player.js) to preserve public API
-export { calculateOverall, calculateSlotSuitability, generatePlayer, positionOverallWeights, getRosterObjects, getPlayer };
 import {
     // Data lists
     firstNames, lastNames, nicknames, teamNames, positions, divisionNames,
@@ -3499,7 +3497,6 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
         finalBallY: 0,
         touchback: false,
         returnStartY: null,
-        hasLoggedTD: false,
         ballState: {
             x: 0, y: 0, z: 1.0,
             vx: 0, vy: 0, vz: 0,
@@ -5789,9 +5786,6 @@ export function markMessageAsRead(messageId) {
     if (message) { message.isRead = true; }
 }
 
-// --- Exports for Scouting/Relationships ---
-export { getScoutedPlayerInfo, getRelationshipLevel }; // Export helpers needed by UI/Main
-
 const DEFAULT_SAVE_KEY = 'backyardFootballGameState';
 
 /**
@@ -5848,3 +5842,14 @@ function getPlayer(id) {
     if (typeof playerMap !== 'undefined') return playerMap.get(id);
     return game?.players?.find(p => p.id === id);
 }
+// =============================================================
+// --- EXPORTS ---
+// =============================================================
+
+export { 
+    initializeLeague, createPlayerTeam, setupDraft, getGameState, saveGameState, loadGameState, getBreakthroughs,
+    addPlayerToTeam, playerCut, playerSignFreeAgent, callFriend, aiManageRoster, aiSetDepthChart, updateDepthChart, changeFormation,
+    getRosterObjects, getPlayer, simulateAIPick, simulateGame, simulateWeek, advanceToOffseason, generateWeeklyFreeAgents, generateSchedule,
+    addMessage, markMessageAsRead, getScoutedPlayerInfo, getRelationshipLevel, calculateOverall, calculateSlotSuitability,
+    autoMakeSubstitutions // <--- CRITICAL EXPORT
+};
