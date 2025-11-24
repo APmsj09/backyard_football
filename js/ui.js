@@ -2500,6 +2500,12 @@ function runLiveGameTick() {
                     descriptiveText = playLogEntry;
                     playHasEnded = true; // Turnover ends the play
                 }
+                else if (playLogEntry.includes('Play ends') || playLogEntry.includes('⏱️')) {
+                        // 💡 FIX: Catch-all for end of play
+                        styleClass = 'text-gray-400 italic';
+                        descriptiveText = playLogEntry;
+                        playHasEnded = true;
+                    }
 
                 if (liveGameDown > 4 && liveGameDriveActive) {
                     liveGameDriveActive = false;
