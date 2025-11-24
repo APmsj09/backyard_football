@@ -2085,43 +2085,41 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
         if (shouldPursue) {
             pState.action = 'pursuit';
             
-            // --- Pursuit Angles (Lead the target) ---
-            const runnerSpeed = ballCarrierState.currentSpeedYPS || 0.5; 
-            const mySpeed = (pState.speed / 100) * 8.5;
-            
             const dist = getDistance(pState, ballCarrierState);
-            const timeToIntercept = dist / mySpeed;
+
+            // 1. Calculate standard prediction (lead the target)
+            // Lead more if far away, less if close.
+            let predictionTime = Math.min(1.5, dist / 10.0); 
+
+            // 2. 💡 FIX: ESCORT BUG PREVENTION
+            // If the defender is AHEAD of the runner (closer to the endzone),
+            // or very close, they should NOT predict. They should run directly at the body.
+            // Assuming Offense runs from Y=0 to Y=120:
+            const isDefenderAhead = pState.y > ballCarrierState.y; 
             
-            // 💡 FIX: "Close the Door" Logic
-            // If we are close (within 5 yards), DO NOT PREDICT. Run straight at them.
-            // Otherwise, they will run parallel to the runner toward a future point.
-            let predictionTime = Math.min(1.5, timeToIntercept); 
-            if (dist < 5.0) {
-                predictionTime = 0; // Zero prediction = Run directly at body
+            if (dist < 4.0 || isDefenderAhead) {
+                predictionTime = 0; // Run directly at current position
             }
             
-            const runnerDirY = 1.0; 
-            const runnerDirX = Math.sign(ballCarrierState.x - CENTER_X) * 0.2; 
-            
-            let interceptX = ballCarrierState.x + (runnerDirX * runnerSpeed * predictionTime);
-            let interceptY = ballCarrierState.y + (runnerDirY * runnerSpeed * predictionTime);
+            // 3. Calculate Target
+            const carrierVelX = ballCarrierState.velocity?.x || 0;
+            const carrierVelY = ballCarrierState.velocity?.y || 0;
 
-            // DBs take better angles (Inside-Out) ONLY if they are far away
+            let interceptX = ballCarrierState.x + (carrierVelX * predictionTime);
+            let interceptY = ballCarrierState.y + (carrierVelY * predictionTime);
+
+            // 4. DB Angle Logic (Inside-Out) - Only if far away
             if (dist > 5.0 && (pState.slot.startsWith('DB') || pState.slot.startsWith('S'))) {
-                if (ballCarrierState.x < 26 && pState.x > ballCarrierState.x) {
-                    interceptY += 1.0; 
-                } else if (ballCarrierState.x > 26 && pState.x < ballCarrierState.x) {
-                    interceptY += 1.0;
-                }
+                 if (ballCarrierState.x < 26 && pState.x > ballCarrierState.x) {
+                     interceptY += 1.0; // Stay slightly deeper to seal edge
+                 } else if (ballCarrierState.x > 26 && pState.x < ballCarrierState.x) {
+                     interceptY += 1.0;
+                 }
             }
 
-            pState.targetX = interceptX;
-            pState.targetY = interceptY;
-            
-            pState.targetX = Math.max(0.5, Math.min(FIELD_WIDTH - 0.5, pState.targetX));
-            pState.targetY = Math.max(0.5, Math.min(FIELD_LENGTH - 0.5, pState.targetY));
-            
-            return; 
+            pState.targetX = Math.max(0.5, Math.min(FIELD_WIDTH - 0.5, interceptX));
+            pState.targetY = Math.max(0.5, Math.min(FIELD_LENGTH - 0.5, interceptY));
+            return;
         }
         // --- END PURSUIT OVERRIDE ---
 
@@ -2181,49 +2179,61 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
         // --- B. ZONE COVERAGE (With Organic Drift) ---
         else if (assignment?.startsWith('zone_')) {
             const zoneCenter = pState.cachedZoneCenter || getZoneCenter(assignment, LOS);
-            let finalTarget = { x: zoneCenter.x, y: zoneCenter.y };
-
-            // 1. RUN READ (Progressive Step Up)
-            if (isRunRead && ballCarrierState) {
-                if (ballCarrierState.y > LOS + 1) {
-                    finalTarget = { x: ballCarrierState.x, y: ballCarrierState.y };
-                } else {
-                    finalTarget.x = (zoneCenter.x + ballCarrierState.x) / 2;
-                    finalTarget.y = (zoneCenter.y + ballCarrierState.y) / 2;
-                }
+            
+            // 1. RUN READ (Step Up)
+            if (isRunRead && ballCarrierState) { 
+                pState.targetX = (zoneCenter.x + ballCarrierState.x) / 2; 
+                pState.targetY = (zoneCenter.y + ballCarrierState.y) / 2; 
             }
-            // 2. PASS READ (Organic Drift)
-            else {
-                const threats = offenseStates.filter(o =>
-                    o.action.includes('route') &&
-                    getDistance({ x: o.x, y: o.y }, zoneCenter) < 12
-                );
+            // 2. PASS READ (Match & Carry)
+            else { 
+                // Find the single MOST threatening receiver in my area
+                // (Within 12 yards of my zone center)
+                const threats = offenseStates
+                    .filter(o => o.action.includes('route') && getDistance({x: o.x, y: o.y}, zoneCenter) < 12.0)
+                    .sort((a, b) => getDistance({x: a.x, y: a.y}, zoneCenter) - getDistance({x: b.x, y: b.y}, zoneCenter));
 
                 if (threats.length > 0) {
-                    let sumX = 0, sumY = 0;
-                    threats.forEach(t => { sumX += t.x; sumY += t.y; });
-                    finalTarget.x = ((sumX / threats.length) * 0.7) + (zoneCenter.x * 0.3);
-                    finalTarget.y = ((sumY / threats.length) * 0.7) + (zoneCenter.y * 0.3);
+                    const targetRec = threats[0]; // Lock onto the closest threat
+                    
+                    // Blend Position: 80% Player, 20% Zone Anchor
+                    // This keeps them relative to the player but tethered to their area
+                    const BLEND = 0.8;
+                    pState.targetX = (targetRec.x * BLEND) + (zoneCenter.x * (1 - BLEND));
+                    pState.targetY = (targetRec.y * BLEND) + (zoneCenter.y * (1 - BLEND));
+
+                    // Leverage Logic:
+                    if (assignment.includes('deep')) {
+                         // Deep Zone: Stay ON TOP (Deeper) of the receiver
+                         pState.targetY = Math.max(pState.targetY, targetRec.y + 2.5);
+                    } else {
+                         // Short/Flat Zone: Stay UNDERNEATH the receiver to jump routes
+                         pState.targetY = Math.min(pState.targetY, targetRec.y + 1.0);
+                    }
+
+                } else {
+                    // No threats? Hold zone center.
+                    pState.targetX = zoneCenter.x; 
+                    pState.targetY = zoneCenter.y; 
                 }
 
-                // 3. DEEP CAP LOGIC (Safety Valve)
+                // 3. DEEP CAP OVERRIDE (Safety Valve)
+                // If I am a deep defender, NEVER let anyone get deeper than me on my side.
                 if (assignment.includes('deep')) {
-                    const mySideReceivers = offenseStates.filter(o =>
-                        Math.abs(o.x - pState.x) < 20 && o.y > LOS + 5
-                    );
+                    const mySideReceivers = offenseStates
+                        .filter(o => Math.abs(o.x - pState.x) < 25 && o.y > LOS + 5) // Check wider area
+                        .sort((a, b) => b.y - a.y); // Deepest first
+                    
                     if (mySideReceivers.length > 0) {
-                        mySideReceivers.sort((a, b) => b.y - a.y);
-                        const deepest = mySideReceivers[0];
-                        if (deepest.y > (finalTarget.y - 4)) {
-                            finalTarget.y = deepest.y + 4;
-                            finalTarget.x = (finalTarget.x + deepest.x) / 2;
+                        const deepestRec = mySideReceivers[0];
+                        // If receiver is getting behind me (or close to it), bail out deep
+                        if (pState.targetY < deepestRec.y + 4) { 
+                            pState.targetY = deepestRec.y + 4; 
+                            pState.targetX = (pState.targetX + deepestRec.x) / 2; // Shadow them
                         }
                     }
                 }
             }
-
-            pState.targetX = finalTarget.x;
-            pState.targetY = finalTarget.y;
         }
 
         // --- C. BLITZ / RUSH / SPY ---
