@@ -475,13 +475,7 @@ function handleFormationChange(e) {
     UI.switchTab('depth-chart', gameState); // Re-render tab
 }
 
-// main.js
-
 /**
- * Handles 'Advance Week' / 'Go to Offseason' button click.
- */
-/**
- * 💡 FIX: Pre-Simulation Roster Check
  * Intercepts "Advance Week" to check for short rosters.
  */
 async function handleAdvanceWeek() {
@@ -491,19 +485,24 @@ async function handleAdvanceWeek() {
     const rosterObjects = Game.getRosterObjects(gameState.playerTeam);
     const healthyCount = rosterObjects.filter(p => p && p.status?.duration === 0).length;
 
-    // 2. If short, trigger call friend (with a callback to proceed if they ignore)
+    // 2. If Roster is Short ( < 7 players)
     if (healthyCount < MIN_HEALTHY_PLAYERS) {
         const hasFreeAgents = gameState.freeAgents && gameState.freeAgents.length > 0;
         
         if (hasFreeAgents) {
+            // Case A: Friends Available -> Open Call Menu
             console.log("Roster check failed: Prompting Call Friend.");
-            promptCallFriend(proceedWithAdvanceWeek); // Pass the "Proceed" function as a callback
+            // Pass 'proceedWithAdvanceWeek' as the callback for the "Cancel/Later" button
+            // effectively turning it into a "Proceed Shorthanded" button.
+            promptCallFriend(proceedWithAdvanceWeek); 
             return; 
         } else {
-            // No friends to call? Warn.
+            // Case B: No Friends Available -> Show Warning Modal
             UI.showModal("Warning: Short Roster", 
-               `<p>You only have ${healthyCount} healthy players. You need ${MIN_HEALTHY_PLAYERS} to avoid forfeiting.</p><p>No friends are available to call.</p>`,
-               () => proceedWithAdvanceWeek(), "Proceed Anyway"
+               `<p>You only have ${healthyCount} healthy players. You need ${MIN_HEALTHY_PLAYERS} to avoid forfeiting.</p>
+                <p class="text-red-500 mt-2">There are no friends available to call this week.</p>`,
+               () => proceedWithAdvanceWeek(), "Proceed Shorthanded",
+               null, "Cancel"
             );
             return;
         }
@@ -514,8 +513,7 @@ async function handleAdvanceWeek() {
 }
 
 /**
- * 💡 FIX: Refactored Core Logic
- * This contains the original logic of handleAdvanceWeek
+ * Executes the actual week simulation and scene transition.
  */
 function proceedWithAdvanceWeek() {
     if (!gameState) return;
@@ -525,6 +523,7 @@ function proceedWithAdvanceWeek() {
         return;
     }
 
+    // Generate schedule if missing (Week 0 fix)
     if (gameState.currentWeek === 0 && (!gameState.schedule || gameState.schedule.length === 0)) {
         Game.generateSchedule();
         gameState = Game.getGameState(); 
