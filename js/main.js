@@ -2,83 +2,57 @@
 import * as Game from './game.js';
 import * as UI from './ui.js';
 import { positionOverallWeights } from './game/player.js';
-import { relationshipLevels } from './data.js'; // Added this line
-import { formatHeight } from './utils.js'; // <<< --- ADD THIS LINE ---
+import { relationshipLevels } from './data.js'; 
+import { formatHeight } from './utils.js';
 
+// --- Global State ---
 let gameState = null;
 let selectedPlayerId = null;
-let currentLiveSimResult = null; // Store result for potential skip
-let currentSortColumn = 'potential'; // Default sort
-let currentSortDirection = 'desc';   // Default direction
+let currentLiveSimResult = null; 
+let currentSortColumn = 'potential'; 
+let currentSortDirection = 'desc';   
 let activeSaveKey = 'backyardFootballGameState'; 
 
 // --- Constants ---
 const ROSTER_LIMIT = 10;
 const MIN_HEALTHY_PLAYERS = 7;
-const WEEKS_IN_SEASON = 9; // Number of weeks in the regular season
+const WEEKS_IN_SEASON = 9; 
 
-// --- Event Handlers ---
-/** Yields control to the main thread briefly. */
 function yieldToMain() { return new Promise(resolve => setTimeout(resolve, 0)); }
 
-/**
- * Initializes the league and navigates to the team creation screen.
- */
+// =============================================================
+// --- CORE HANDLERS ---
+// =============================================================
+
 async function startNewGame() {
   try {
-    // Show the loading screen + start animated messages
     UI.showScreen("loading-screen");
     UI.startLoadingMessages();
-
-    // Small delay to ensure the UI renders before the heavy work starts
     await new Promise(resolve => setTimeout(resolve, 50));
-
-    // Initialize the game world and update the progress bar
+    
     await Game.initializeLeague(UI.updateLoadingProgress);
-
-    // Stop rotating messages when done
     UI.stopLoadingMessages();
 
-    // Retrieve the generated game state
     gameState = Game.getGameState();
-    if (!gameState) throw new Error("Failed to get game state after initialization.");
+    if (!gameState) throw new Error("Failed to get game state.");
 
-    // Prepare team name suggestions
     UI.renderTeamNameSuggestions(
       ['Jets', 'Sharks', 'Tigers', 'Bulldogs', 'Panthers', 'Giants'],
       handleTeamNameSelection
     );
-
-    // Transition to team creation screen
     UI.showScreen('team-creation-screen');
   } catch (error) {
     console.error("Error starting game:", error);
-    UI.stopLoadingMessages(); // <-- make sure to stop them if something fails
-    UI.showModal(
-      "Error",
-      `Could not start a new game: ${error.message}. Please check the console for details.`,
-      null,
-      '',
-      null,
-      'Close'
-    );
+    UI.stopLoadingMessages();
+    UI.showModal("Error", `Could not start game: ${error.message}`, null, '', null, 'Close');
   }
 }
 
-
-/**
- * Updates the custom team name input when a suggestion is clicked.
- */
 function handleTeamNameSelection(name) {
     const customNameInput = document.getElementById('custom-team-name');
-    if (customNameInput) {
-        customNameInput.value = name;
-    }
+    if (customNameInput) customNameInput.value = name;
 }
 
-/**
- * Creates the player's team, sets up the draft, and navigates to the draft screen.
- */
 function handleConfirmTeam() {
     const customNameInput = document.getElementById('custom-team-name');
     const customName = customNameInput ? customNameInput.value.trim() : '';
@@ -87,49 +61,36 @@ function handleConfirmTeam() {
         try {
             Game.createPlayerTeam(customName);
             Game.setupDraft();
-            gameState = Game.getGameState(); // Includes playerTeam and global relationships map
-            if (!gameState || !gameState.playerTeam) throw new Error("Failed to get game state after creating team.");
-            UI.renderSelectedPlayerCard(null, gameState); // Pass gameState
+            gameState = Game.getGameState(); 
+            
+            UI.renderSelectedPlayerCard(null, gameState);
             UI.renderDraftScreen(gameState, handlePlayerSelectInDraft, selectedPlayerId, currentSortColumn, currentSortDirection, positionOverallWeights);
-            UI.showScreen('draftScreen');
+            UI.showScreen('draft-screen');
             runAIDraftPicks();
         } catch (error) {
             console.error("Error confirming team:", error);
-            UI.showModal("Error", `Could not create team or start draft: ${error.message}.`, null, '', null, 'Close');
+            UI.showModal("Error", `Could not create team: ${error.message}`, null, '', null, 'Close');
         }
     } else {
-        UI.showModal("Team Name Required", "<p>Please enter or select a team name to continue.</p>");
+        UI.showModal("Team Name Required", "<p>Please enter a team name.</p>");
     }
 }
 
-/**
- * Handles selecting a player from the draft pool list.
- */
 function handlePlayerSelectInDraft(playerId) {
-    if (!gameState || !gameState.players) {
-        console.error("Cannot select player: Game state or players list not available.");
-        return;
-    }
+    if (!gameState) return;
     selectedPlayerId = playerId;
     const player = gameState.players.find(p => p.id === playerId);
     UI.updateSelectedPlayerRow(playerId);
-    // Pass original player object and gameState (needed for relationships/scouting inside renderSelectedPlayerCard)
     UI.renderSelectedPlayerCard(player, gameState, positionOverallWeights);
 }
 
-/**
- * Handles the 'Draft Player' button click.
- */
 function handleDraftPlayer() {
-    if (!gameState || !gameState.playerTeam || !gameState.players) {
-        console.error("Cannot draft player: Game state invalid.");
-        return;
-    }
+    if (!gameState) return;
     if (selectedPlayerId) {
         const player = gameState.players.find(p => p.id === selectedPlayerId);
         const team = gameState.playerTeam;
         if (team.roster.length >= ROSTER_LIMIT) {
-            UI.showModal("Roster Full", `<p>Your roster is full (${ROSTER_LIMIT} players)! You cannot draft more players.</p>`);
+            UI.showModal("Roster Full", `<p>Roster full (${ROSTER_LIMIT} players).</p>`);
             return;
         }
 
@@ -137,384 +98,230 @@ function handleDraftPlayer() {
             selectedPlayerId = null;
             gameState.currentPick++;
             UI.renderSelectedPlayerCard(null, gameState, positionOverallWeights);
-            runAIDraftPicks(); // Continue draft
+            runAIDraftPicks(); 
         } else {
-            console.error(`Failed to add player ${selectedPlayerId} to team or player not found.`);
-            UI.showModal("Draft Error", "Could not draft the selected player. Please check the console.", null, '', null, 'Close');
+            UI.showModal("Draft Error", "Could not draft player.", null, '', null, 'Close');
         }
-    } else {
-        console.warn("Draft Player button clicked but no player selected.");
     }
 }
 
-/**
- * Simulates AI draft picks until it's the player's turn or the draft ends.
- * Includes fix for potential infinite loop when skipping player picks.
- */
 async function runAIDraftPicks() {
-    if (!gameState || !gameState.teams || !gameState.players || !gameState.draftOrder || !gameState.playerTeam) {
-        console.error("Cannot run AI draft picks: Game state invalid.");
-        return; // Stop if game state is broken
-    }
-    // Helper function to check draft completion conditions
+    if (!gameState) return;
+    
     const checkDraftEnd = () => {
-        // Safety check for invalid game state
-        if (!gameState.draftOrder || !gameState.players || !gameState.teams) {
-            console.error("Invalid game state in checkDraftEnd");
-            return true; // End draft if game state is invalid
-        }
-
-        // Condition 1: Current pick exceeds the total number of picks in the defined order
         const pickLimitReached = gameState.currentPick >= gameState.draftOrder.length;
-
-        // Condition 2: No more players available to draft
         const noPlayersLeft = gameState.players.filter(p => p && !p.teamId).length === 0;
-
-        // Condition 3: All valid teams have filled their roster
         const allTeamsFull = gameState.teams.every(t => !t || !t.roster || t.roster.length >= ROSTER_LIMIT);
-
-        // Debug logging
-        if (pickLimitReached) console.log("Draft ending: Pick limit reached");
-        if (noPlayersLeft) console.log("Draft ending: No undrafted players left");
-        if (allTeamsFull) console.log("Draft ending: All teams have full rosters");
-
-        // Draft ends if any of these conditions are true
         return pickLimitReached || noPlayersLeft || allTeamsFull;
     };
 
-    // Add safety counter to prevent infinite loops
     let safetyCounter = 0;
     const MAX_PICKS_WITHOUT_PROGRESS = 50;
 
-    // Helper to advance pick safely and clamp to draftOrder length
     const advancePick = () => {
-        if (!gameState) return;
         gameState.currentPick = (gameState.currentPick || 0) + 1;
         if (gameState.draftOrder && gameState.currentPick > gameState.draftOrder.length) gameState.currentPick = gameState.draftOrder.length;
     };
 
     if (checkDraftEnd()) {
-        console.log("Draft end condition met before AI picks.");
-        handleDraftEnd(); // Ensure draft end logic runs if condition met immediately
+        handleDraftEnd();
         return;
     }
 
     let currentPickingTeam = gameState.draftOrder[gameState.currentPick];
 
-    // Loop while it's an AI team's turn and the draft isn't over
     while (currentPickingTeam && currentPickingTeam.id !== gameState.playerTeam.id) {
-        // Safety check to prevent infinite loops
         if (safetyCounter++ > MAX_PICKS_WITHOUT_PROGRESS) {
-            console.error("Draft appears stuck - forcing end");
             handleDraftEnd();
             return;
         }
 
-        // Skip invalid teams or teams with full rosters
         if (!currentPickingTeam || !currentPickingTeam.roster || currentPickingTeam.roster.length >= ROSTER_LIMIT) {
-            console.log(`Skipping pick for ${currentPickingTeam?.name || 'invalid team'} (roster full or invalid team)`);
             advancePick();
             currentPickingTeam = gameState.draftOrder[gameState.currentPick];
             continue;
         }
 
         UI.renderDraftScreen(gameState, handlePlayerSelectInDraft, selectedPlayerId, currentSortColumn, currentSortDirection, positionOverallWeights);
-        await new Promise(resolve => setTimeout(resolve, 50)); // Short delay for visual feedback
+        await new Promise(resolve => setTimeout(resolve, 50));
 
         const result = Game.simulateAIPick(currentPickingTeam);
-        if (result) safetyCounter = 0; // Reset counter if a pick was made successfully
+        if (result) safetyCounter = 0; 
         advancePick();
 
         if (checkDraftEnd()) {
-            handleDraftEnd(); // End draft immediately if conditions met
+            handleDraftEnd(); 
             return;
         }
-
-        // Get next picking team, handle potential end of draft order
         currentPickingTeam = gameState.draftOrder[gameState.currentPick];
     }
 
-    // Player's turn (or draft ended while AI was picking)
     if (!checkDraftEnd()) {
-        // If player's team roster is full, automatically skip their pick
         if (gameState.playerTeam.roster.length >= ROSTER_LIMIT) {
-            console.log("Player roster full, skipping pick.");
             advancePick();
-            // Check if skipping ended the draft (Fix for loop)
             if (checkDraftEnd()) {
                 handleDraftEnd();
             } else {
-                runAIDraftPicks(); // Go back to simulating AI picks ONLY if draft isn't over
+                runAIDraftPicks(); 
             }
-        } else { // Render for player input
+        } else { 
             UI.renderDraftScreen(gameState, handlePlayerSelectInDraft, selectedPlayerId, currentSortColumn, currentSortDirection, positionOverallWeights);
         }
-    } else { // Draft ended, call handler
+    } else { 
         handleDraftEnd();
     }
 }
 
-
-/**
- * Finalizes the draft, sets depth charts, generates schedule, navigates to dashboard.
- */
 async function handleDraftEnd() {
-    console.log("Draft has concluded.");
-    if (!gameState || !gameState.teams) {
-        console.error("Cannot end draft: Game state invalid.");
-        return;
-    }
+    if (!gameState) return;
 
-    // --- FIX: Show the modal *before* doing the heavy lifting ---
-    console.log("Showing draft completion modal...");
-
-    // Make an idempotent finalizer so we can auto-run it after background work or via the modal confirm
     let _draftFinalized = false;
     const finalizeDraft = async () => {
         if (_draftFinalized) return;
         _draftFinalized = true;
-        console.log("Finalizing draft and transitioning to dashboard...");
         try {
             Game.generateSchedule();
             gameState = Game.getGameState();
-            if (!gameState) throw new Error("Failed to get game state after schedule generation.");
             UI.renderDashboard(gameState);
             UI.switchTab('my-team', gameState);
             UI.showScreen('dashboard-screen');
-            // Hide modal if still visible
-            try { UI.hideModal(); } catch (e) { /* ignore */ }
+            try { UI.hideModal(); } catch (e) { }
         } catch (error) {
-            console.error("Error transitioning to dashboard after draft:", error);
-            UI.showModal("Error", `Could not proceed to season: ${error.message}.`, null, '', null, 'Close');
+            UI.showModal("Error", `Could not proceed: ${error.message}`, null, '', null, 'Close');
         }
     };
 
-    // Show modal with confirm wired to finalizeDraft
-    UI.showModal("Draft Complete!", "<p>Finalizing rosters and generating schedule... Please wait.</p>", finalizeDraft, "Start Season");
+    UI.showModal("Draft Complete!", "<p>Finalizing rosters... Please wait.</p>", finalizeDraft, "Start Season");
 
-    // --- Now, do the slow part *after* showing the modal ---
-    // 1. Get the modal button and disable it
+    // Disable modal button briefly
     const modalConfirmBtn = document.querySelector('#modal-actions button.bg-amber-500');
     if (modalConfirmBtn) {
         modalConfirmBtn.disabled = true;
         modalConfirmBtn.textContent = "Loading...";
     }
 
-    // 2. Yield to let the UI update (show the modal)
     await yieldToMain();
 
-    // 3. Set depth charts (the slow part)
-    console.log("Setting depth charts in the background...");
+    console.log("Setting depth charts...");
     for (const team of gameState.teams) {
         if (!team) continue;
-        try {
-            Game.aiSetDepthChart(team);
-        } catch (error) {
-            console.error(`Error setting depth chart for ${team.name}:`, error);
-        }
+        try { Game.aiSetDepthChart(team); } catch (error) { console.error(error); }
     }
 
-    // 4. Update the modal text and re-enable the button
-    console.log("Depth charts set.");
     const modalBody = document.getElementById('modal-body');
-    if (modalBody) {
-        modalBody.innerHTML = "<p>The draft has concluded. Get ready for the season!</p>";
-    }
+    if (modalBody) modalBody.innerHTML = "<p>Draft complete. Get ready for the season!</p>";
     if (modalConfirmBtn) {
         modalConfirmBtn.disabled = false;
         modalConfirmBtn.textContent = "Start Season";
     }
 
-    // Auto-finalize draft so the game progresses even if the user doesn't click
-    try {
-        await yieldToMain();
-        finalizeDraft();
-    } catch (e) { console.error('Auto-finalize draft error:', e); }
+    try { await yieldToMain(); finalizeDraft(); } catch (e) { }
 }
-/**
- * A generic function to load a game from a save key and navigate to the correct screen.
- * @param {string} [saveKey] - The localStorage key to load. Defaults to the main save.
- */
+
+// --- LOADING & SAVING ---
+
 async function handleLoadGame(saveKey) {
-    console.log(`Attempting to load from key: ${saveKey || 'default'}`);
     try {
-        // 💡 FIX: Use a variable to track which key we are loading
         const keyToLoad = saveKey || 'backyardFootballGameState';
         const loadedState = Game.loadGameState(keyToLoad);
 
-        if (!loadedState || !loadedState.teams || loadedState.teams.length === 0) {
-            UI.showModal("Load Failed", "<p>No saved game data was found.</p>");
+        if (!loadedState || !loadedState.teams) {
+            UI.showModal("Load Failed", "<p>No saved game data found.</p>");
             return;
         }
 
         gameState = loadedState;
         selectedPlayerId = null; 
-        
-        // 💡 FIX: Store the successfully loaded key as the active key
         activeSaveKey = keyToLoad;
-        console.log(`Successfully loaded from key: ${activeSaveKey}`);
 
         if (gameState.currentWeek >= 0) {
-            console.log("Save file found (in-season). Loading dashboard...");
             UI.renderDashboard(gameState);
             UI.switchTab('my-team', gameState);
             UI.showScreen('dashboard-screen');
         } else {
-            console.log("Save file found (mid-draft). Loading draft screen...");
-            //const { positionOverallWeights } = await import('./game/player.js');
+            // In Draft
             UI.renderSelectedPlayerCard(null, gameState, positionOverallWeights);
             UI.renderDraftScreen(gameState, handlePlayerSelectInDraft, selectedPlayerId, currentSortColumn, currentSortDirection, positionOverallWeights);
-            UI.showScreen('draftScreen');
+            UI.showScreen('draft-screen'); 
         }
     } catch (error) {
-        console.error("Error loading game:", error);
-        UI.showModal("Error", `Could not load game data: ${error.message}`, null, '', null, 'Close');
+        UI.showModal("Error", `Could not load game: ${error.message}`, null, '', null, 'Close');
     }
 }
 
-/**
- * Handles the "Load Test Roster" button click.
- * This is just a wrapper for handleLoadGame with a specific key.
- */
-async function handleLoadTestRoster() { // <<< --- "async" KEYWORD ADDED HERE
-    await handleLoadGame('my_test_roster');
-}
+async function handleLoadTestRoster() { await handleLoadGame('my_test_roster'); }
 
-/**
- * Handles the "Save as Test Roster" button click.
- */
 function handleSaveTestRoster() {
-    if (!gameState) {
-        UI.showModal("Save Failed", "<p>No game data to save.</p>");
-        return;
-    }
-
+    if (!gameState) return;
     Game.saveGameState('my_test_roster');
-    
-    // 💡 FIX: Set the active key to the one we just saved to
     activeSaveKey = 'my_test_roster'; 
-    console.log(`Set active save key to: ${activeSaveKey}`);
-
-    UI.showModal("Test Roster Saved", "<p>Your current game state has been saved as the 'Test Roster'. You can now load it from the start screen.</p>");
+    UI.showModal("Saved", "<p>Game saved as 'Test Roster'.</p>");
 }
 
-/**
- * Handles clicks on dashboard navigation tabs.
- */
+// --- DASHBOARD INTERACTION ---
+
 function handleTabSwitch(e) {
     if (e.target.matches('.tab-button')) {
         const tabId = e.target.dataset.tab;
-
-        // --- THIS IS THE FIX ---
-        // Force a refresh of the gameState variable from the source
-        // to ensure we have the absolute latest version.
-        gameState = Game.getGameState();
-        // --- END FIX ---
-
-        if (!gameState) {
-            console.error("Cannot switch tab: Game state not available.");
-            return;
-        }
-        UI.switchTab(tabId, gameState); // Pass the freshly-fetched gameState
+        gameState = Game.getGameState(); 
+        if (gameState) UI.switchTab(tabId, gameState);
     }
 }
 
-/**
- * Handles depth chart drop event.
- */
 function handleDepthChartDrop(playerId, newPositionSlot, side) {
-    if (!gameState) {
-        console.error("Cannot update depth chart: Game state not available.");
-        return;
-    }
+    if (!gameState) return;
     Game.updateDepthChart(playerId, newPositionSlot, side);
     gameState = Game.getGameState();
-    
-    // 💡 FIX: Save to the activeSaveKey, not the default
     Game.saveGameState(activeSaveKey);
-    
-    UI.switchTab('depth-chart', gameState); // Re-render tab with updated state
+    UI.switchTab('depth-chart', gameState); 
 }
 
-/**
- * Handles changing a player slot using the dropdown.
- */
 function handleDepthChartSelect(e) {
     if (!e.target.matches('.slot-select')) return;
-
     const selectEl = e.target;
     const playerId = selectEl.value === 'null' ? null : selectEl.value;
     const newPositionSlot = selectEl.dataset.slot;
     const side = selectEl.dataset.side;
-
-    if (!newPositionSlot || !side || !gameState) {
-        console.error("Cannot assign player: missing data from select element.");
-        return;
+    if (newPositionSlot && side && gameState) {
+        handleDepthChartDrop(playerId, newPositionSlot, side);
     }
-
-    // Call the same drop handler, but with the new player ID
-    handleDepthChartDrop(playerId, newPositionSlot, side);
 }
 
-/**
- * Handles formation change event.
- */
 function handleFormationChange(e) {
-    if (!gameState) {
-        console.error("Cannot change formation: Game state not available.");
-        return;
-    }
+    if (!gameState) return;
     const side = e.target.id.includes('offense') ? 'offense' : 'defense';
     const formationName = e.target.value;
     Game.changeFormation(side, formationName);
     gameState = Game.getGameState();
-    
-    // 💡 FIX: Save to the activeSaveKey, not the default
     Game.saveGameState(activeSaveKey);
-
-    UI.switchTab('depth-chart', gameState); // Re-render tab
+    UI.switchTab('depth-chart', gameState);
 }
 
-/**
- * Intercepts "Advance Week" to check for short rosters.
- */
+// --- SIMULATION & WEEK ADVANCE ---
+
 async function handleAdvanceWeek() {
     if (!gameState) return;
 
-    // 1. Check Roster Health
     const rosterObjects = Game.getRosterObjects(gameState.playerTeam);
     const healthyCount = rosterObjects.filter(p => p && p.status?.duration === 0).length;
 
-    // 2. If Roster is Short ( < 7 players)
     if (healthyCount < MIN_HEALTHY_PLAYERS) {
         const hasFreeAgents = gameState.freeAgents && gameState.freeAgents.length > 0;
-        
         if (hasFreeAgents) {
-            // Case A: Friends Available -> Open Call Menu
             console.log("Roster check failed: Prompting Call Friend.");
-            // Pass 'proceedWithAdvanceWeek' as the callback for the "Cancel/Later" button
-            // effectively turning it into a "Proceed Shorthanded" button.
             promptCallFriend(proceedWithAdvanceWeek); 
             return; 
         } else {
-            // Case B: No Friends Available -> Show Warning Modal
             UI.showModal("Warning: Short Roster", 
-               `<p>You only have ${healthyCount} healthy players. You need ${MIN_HEALTHY_PLAYERS} to avoid forfeiting.</p>
-                <p class="text-red-500 mt-2">There are no friends available to call this week.</p>`,
-               () => proceedWithAdvanceWeek(), "Proceed Shorthanded",
-               null, "Cancel"
+               `<p>You only have ${healthyCount} healthy players. You need ${MIN_HEALTHY_PLAYERS} to avoid forfeiting.</p><p>No friends are available to call.</p>`,
+               () => proceedWithAdvanceWeek(), "Proceed Anyway"
             );
             return;
         }
     }
-
-    // 3. If healthy, proceed normally
     proceedWithAdvanceWeek();
 }
 
-/**
- * Executes the actual week simulation and scene transition.
- */
 function proceedWithAdvanceWeek() {
     if (!gameState) return;
     
@@ -523,7 +330,6 @@ function proceedWithAdvanceWeek() {
         return;
     }
 
-    // Generate schedule if missing (Week 0 fix)
     if (gameState.currentWeek === 0 && (!gameState.schedule || gameState.schedule.length === 0)) {
         Game.generateSchedule();
         gameState = Game.getGameState(); 
@@ -589,7 +395,7 @@ function startLiveGame(playerGameMatch) {
     gameState.currentWeek++;
 
     if (currentLiveSimResult) {
-        UI.showScreen('game-sim-screen'); // Fixed ID case
+        UI.showScreen('game-sim-screen');
         UI.startLiveGameSim(currentLiveSimResult, () => { 
             finishWeekSimulation(allResults.filter(Boolean)); 
             currentLiveSimResult = null; 
@@ -639,7 +445,6 @@ function finishWeekSimulation(results) {
         if (!gameState?.playerTeam || !Array.isArray(results)) return "<p>Error.</p>";
         const playerGame = results.find(r => r && (r.homeTeam?.id === gameState.playerTeam.id || r.awayTeam?.id === gameState.playerTeam.id));
         
-        // FIX: Check for ties
         let resultText = 'BYE';
         if (playerGame) {
             const myScore = playerGame.homeTeam.id === gameState.playerTeam.id ? playerGame.homeScore : playerGame.awayScore;
@@ -683,25 +488,29 @@ function finishWeekSimulation(results) {
 
     if (gameState.currentWeek >= WEEKS_IN_SEASON) { handleSeasonEnd(); return; }
 
-    // Prompt call friend logic...
     const roster = Game.getRosterObjects(gameState.playerTeam);
     const healthyCount = roster.filter(p => p && p.status?.duration === 0).length;
     if (healthyCount < MIN_HEALTHY_PLAYERS) {
         promptCallFriend();
     }
 }
-
 /** Builds HTML for weekly results modal. */
 function buildResultsModalHtml(results) {
     if (!gameState || !gameState.playerTeam) return "<p>Error displaying results: Game state missing.</p>";
     if (!Array.isArray(results)) return "<p>Error: Invalid results data.</p>";
 
     const playerGame = results.find(r => r && (r.homeTeam?.id === gameState.playerTeam.id || r.awayTeam?.id === gameState.playerTeam.id));
-    const playerTeamResultText = playerGame
-        ? (playerGame.homeTeam.id === gameState.playerTeam.id
-            ? (playerGame.homeScore > playerGame.awayScore ? 'WON' : (playerGame.homeScore < playerGame.awayScore ? 'LOST' : 'TIED'))
-            : (playerGame.awayScore > playerGame.homeScore ? 'WON' : (playerGame.awayScore < playerGame.homeScore ? 'LOST' : 'TIED')))
-        : 'BYE / Error?';
+    
+    let playerTeamResultText = 'BYE / Error?';
+    if (playerGame) {
+        const isHome = playerGame.homeTeam.id === gameState.playerTeam.id;
+        const myScore = isHome ? playerGame.homeScore : playerGame.awayScore;
+        const oppScore = isHome ? playerGame.awayScore : playerGame.homeScore;
+        
+        if (myScore > oppScore) playerTeamResultText = 'WON';
+        else if (myScore < oppScore) playerTeamResultText = 'LOST';
+        else playerTeamResultText = 'TIED';
+    }
 
     const breakthroughs = Game.getBreakthroughs() || [];
 
@@ -729,104 +538,38 @@ function buildResultsModalHtml(results) {
     return html;
 }
 
-/** Processes results, updates UI, triggers AI actions, prompts call friend. */
-function finishWeekSimulation(results) {
-    if (!gameState || !gameState.teams || !gameState.playerTeam || !gameState.playerTeam.roster) {
-        console.error("Cannot finish week simulation: Game state invalid.");
-        gameState = Game.getGameState();
-        if (gameState) { UI.renderDashboard(gameState); UI.showScreen('dashboardScreen'); }
-        else { UI.showModal("Critical Error", "Game state lost. Please refresh.", null, '', null, 'OK'); }
-        return;
-    }
-
-    // Show results modal
-    if (results && results.length > 0) {
-        const resultsHtml = buildResultsModalHtml(results);
-        UI.showModal(`Week ${gameState.currentWeek} Results`, resultsHtml); 
-    } else {
-        UI.showModal(`Week ${gameState.currentWeek} Advanced`, "<p>The week has advanced, but no game results were found.</p>");
-    }
-
-    // Post-Results Logic
-    gameState.teams.filter(t => t && t.id !== gameState.playerTeam.id).forEach(team => {
-        try { Game.aiManageRoster(team); } catch (e) { console.error(`Error during AI roster management for ${team.name}:`, e) }
-    });
-    Game.generateWeeklyFreeAgents();
-
-    // Refresh state and UI
-    gameState = Game.getGameState();
-    if (!gameState) { UI.showModal("Critical Error", "Game state lost after AI management. Please refresh.", null, '', null, 'OK'); return; }
-
-    UI.renderDashboard(gameState);
-    const activeTabEl = document.querySelector('#dashboard-tabs .tab-button.active');
-    const activeTab = activeTabEl ? activeTabEl.dataset.tab : 'my-team';
-    UI.switchTab(activeTab, gameState);
-    UI.showScreen('dashboardScreen');
-
-    if (gameState.currentWeek >= WEEKS_IN_SEASON) { handleSeasonEnd(); return; }
-
-    // --- ⚡ FIX: Hydrate Roster IDs to Objects ---
-    // We use the new Game.getRosterObjects helper to get the actual player data
-    const playerTeamObjects = Game.getRosterObjects(gameState.playerTeam);
-    
-    const hasUnavailablePlayer = playerTeamObjects.some(p => p && p.status?.duration > 0);
-    const healthyCount = playerTeamObjects.filter(p => p && p.status?.duration === 0).length;
-    
-    if (hasUnavailablePlayer && healthyCount < MIN_HEALTHY_PLAYERS) {
-        promptCallFriend();
-    }
-}
-
-/** Handles end of season logic. */
 function handleSeasonEnd() {
     try {
-        const offseasonReport = Game.advanceToOffseason();
+        const report = Game.advanceToOffseason();
         gameState = Game.getGameState();
-        if (!gameState) throw new Error("Game state lost after advancing to offseason.");
-        UI.renderOffseasonScreen(offseasonReport, gameState.year);
-        UI.showScreen('offseasonScreen');
+        UI.renderOffseasonScreen(report, gameState.year);
+        UI.showScreen('offseason-screen');
     } catch (error) {
-        console.error("Error during offseason processing:", error);
-        UI.showModal("Offseason Error", `Could not process offseason: ${error.message}. Check console.`, null, '', null, 'Close');
+        console.error(error);
     }
 }
 
-/** Handles proceeding to next draft from offseason screen. */
 function handleGoToNextDraft() {
     try {
-        Game.setupDraft(); // Set up the draft order and rounds
-        gameState = Game.getGameState(); // Refresh the game state
-        if (!gameState) throw new Error("Game state lost after setting up next draft.");
-        selectedPlayerId = null; // Clear any previous player selection
+        Game.setupDraft(); 
+        gameState = Game.getGameState(); 
+        selectedPlayerId = null; 
         UI.renderSelectedPlayerCard(null, gameState, positionOverallWeights);
-        UI.renderDraftScreen(gameState, handlePlayerSelectInDraft, selectedPlayerId, currentSortColumn, currentSortDirection, positionOverallWeights); // Pass sort state
-        UI.showScreen('draftScreen'); // Display the draft screen
-        runAIDraftPicks(); // Start the AI draft picks simulation
+        UI.renderDraftScreen(gameState, handlePlayerSelectInDraft, selectedPlayerId, currentSortColumn, currentSortDirection, positionOverallWeights); 
+        UI.showScreen('draft-screen'); 
+        runAIDraftPicks(); 
     } catch (error) {
-        console.error("Error proceeding to next draft:", error);
-        UI.showModal("Draft Setup Error", `Could not start next draft: ${error.message}. Please check console.`, null, '', null, 'Close');
+        console.error(error);
     }
 }
 
-/**
- * Handles clicks within the main dashboard content area.
- * Supports clicking player names in the 'My Team' roster.
- * @param {Event} e - The click event.
- */
 function handleDashboardClicks(e) {
     const target = e.target;
-
-    // --- Player Click in Roster Table ---
     const playerRow = target.closest('#my-team-roster tbody tr[data-player-id]');
 
     if (playerRow && playerRow.dataset.playerId) {
         const clickedPlayerId = playerRow.dataset.playerId;
-        // console.log(`Clicked on player row with ID: ${clickedPlayerId}`); // For debugging
-
-        if (!gameState || !gameState.players) {
-            console.error("Cannot show player details: Game state or players list missing.");
-            return;
-        }
+        if (!gameState) return;
 
         let clickedPlayer;
         if (typeof Game.getPlayer === 'function') {
@@ -836,81 +579,49 @@ function handleDashboardClicks(e) {
         }
 
         if (clickedPlayer) {
-            // --- Show Player Details Modal ---
             const positions = Object.keys(positionOverallWeights);
             let overallsHtml = '<div class="mt-4 grid grid-cols-4 gap-2 text-center">';
             positions.forEach(pos => {
-                overallsHtml += `<div class="bg-gray-200 p-2 rounded"><p class="font-semibold text-xs">${pos} OVR</p><p class="font-bold text-xl">${Game.calculateOverall(clickedPlayer, pos)}</p></div>`;
+                overallsHtml += `<div class="bg-gray-200 p-2 rounded"><p class="font-semibold text-xs">${pos}</p><p class="font-bold text-xl">${Game.calculateOverall(clickedPlayer, pos)}</p></div>`;
             });
             overallsHtml += '</div>';
 
-            // Basic player info
             const playerInfoHtml = `
                 <p class="text-sm text-gray-600">
-                    Age: ${clickedPlayer.age ?? '?'} |
-                    H: ${formatHeight(clickedPlayer.attributes?.physical?.height) ?? '?'} | // <<< Use formatHeight
-                    W: ${clickedPlayer.attributes?.physical?.weight ?? '?'} lbs
+                    Age: ${clickedPlayer.age} | H: ${formatHeight(clickedPlayer.attributes?.physical?.height)} | W: ${clickedPlayer.attributes?.physical?.weight} lbs
                 </p>
-                <p class="text-sm text-gray-600">
-                    Potential: <span class="font-semibold">${clickedPlayer.potential ?? '?'}</span>
-                    {/* Could add relationship info here if needed */}
-                </p>
+                <p class="text-sm text-gray-600">Potential: <span class="font-semibold">${clickedPlayer.potential}</span></p>
                 ${overallsHtml}
-                {/* TODO: Add season/career stats display */}
+                <button class="mt-4 w-full bg-red-500 text-white py-2 rounded hover:bg-red-600" onclick="app.cutPlayer('${clickedPlayer.id}')">Cut Player</button>
             `;
-
-            // Show modal with player info
-            // TODO: Add action buttons like 'Cut Player'
             UI.showModal(`${clickedPlayer.name}`, playerInfoHtml, null, '', null, 'Close');
-
-        } else {
-            console.warn(`Player with ID ${clickedPlayerId} not found in game state.`);
         }
     }
-    // --- End Player Click ---
 }
 
-/** Handles stat filter/sort changes by re-rendering the stats tab. */
 function handleStatsChange() {
-    if (!gameState) {
-        console.error("Cannot update stats: Game state not available.");
-        return;
-    }
-    UI.switchTab('player-stats', gameState); // Re-render the stats tab
+    if (!gameState) return;
+    UI.switchTab('player-stats', gameState);
 }
 
-/** Handles clicking a message - shows modal and marks as read. */
 function handleMessageClick(messageId) {
-    if (!gameState || !gameState.messages) {
-        console.error("Cannot handle message click: Game state or messages not available.");
-        UI.showModal("Error", "Could not load message details.", null, '', null, 'Close');
-        return;
-    }
-    const message = gameState.messages.find(m => m && m.id === messageId); // Added m check
+    if (!gameState || !gameState.messages) return;
+    const message = gameState.messages.find(m => m && m.id === messageId); 
     if (message) {
         UI.showModal(message.subject, `<p class="whitespace-pre-wrap">${message.body}</p>`);
         Game.markMessageAsRead(messageId);
-        UI.renderMessagesTab(gameState); // Re-render list
-        UI.updateMessagesNotification(gameState.messages); // Update dot
-    } else {
-        console.warn(`Message with ID ${messageId} not found.`);
-        UI.showModal("Error", "Message not found.", null, '', null, 'Close');
+        UI.renderMessagesTab(gameState); 
+        UI.updateMessagesNotification(gameState.messages); 
     }
 }
 
-/** Builds HTML for the Call Friend modal body. */
 function buildCallFriendModalHtml(freeAgents) {
     let html = '<div class="mt-4 space-y-2">';
-    if (!Array.isArray(freeAgents)) {
-        console.error("buildCallFriendModalHtml: Invalid freeAgents data provided.");
-        return '<p class="text-red-500">Error loading available friends.</p>';
-    }
-    if (freeAgents.length === 0) {
-        return '<p class="text-gray-500">No friends available to call this week.</p>';
-    }
+    if (!Array.isArray(freeAgents)) return '<p>Error.</p>';
+    if (freeAgents.length === 0) return '<p>No friends available.</p>';
+    
     freeAgents.forEach(p => {
-        if (!p) return; // Skip invalid
-        // Calculate best overall safely
+        if (!p) return; 
         const bestPos = Object.keys(positionOverallWeights).reduce((best, pos) => {
             const currentOvr = Game.calculateOverall(p, pos);
             return currentOvr > best.ovr ? { pos, ovr: currentOvr } : best;
@@ -919,8 +630,8 @@ function buildCallFriendModalHtml(freeAgents) {
         html += `
             <div class="flex items-center justify-between p-2 bg-gray-100 rounded">
                 <div>
-                    <p class="font-bold">${p.name || '?'}</p>
-                    <p class="text-sm text-gray-600">${p.relationshipName || 'Unknown'} (Best: ${bestPos.pos} - ${bestPos.ovr} Ovr)</p>
+                    <p class="font-bold">${p.name}</p>
+                    <p class="text-sm text-gray-600">${p.relationshipName} (Best: ${bestPos.pos} - ${bestPos.ovr})</p>
                 </div>
                 <button data-player-id="${p.id}" class="call-friend-btn bg-green-500 hover:bg-green-600 text-white px-3 py-1 text-xs rounded font-semibold transition">CALL</button>
             </div>
@@ -930,7 +641,6 @@ function buildCallFriendModalHtml(freeAgents) {
     return html;
 }
 
-/** Displays Call Friend modal and sets up event listeners for the CALL buttons. */
 function promptCallFriend(onIgnore = null) {
     gameState = Game.getGameState(); 
     if (!gameState) return;
@@ -939,10 +649,6 @@ function promptCallFriend(onIgnore = null) {
     const rosterObjects = Game.getRosterObjects(playerTeam);
     const healthyCount = rosterObjects.filter(p => p && p.status?.duration === 0).length;
 
-    // If onIgnore is passed, we show the modal regardless of freeAgents length,
-    // because the user is trying to Advance. If no free agents, list is just empty/msg.
-    
-    // Only skip if we have enough players AND we weren't forced to show this.
     if (!onIgnore && (healthyCount >= MIN_HEALTHY_PLAYERS || !Array.isArray(freeAgents) || freeAgents.length === 0)) return;
 
     const modalBodyIntro = `<p>Only ${healthyCount} healthy players! Call a friend?</p>`;
@@ -958,8 +664,6 @@ function promptCallFriend(onIgnore = null) {
     }).filter(Boolean); 
 
     const friendListHtml = buildCallFriendModalHtml(freeAgentsWithRel);
-    
-    // 💡 FIX: Determine cancel button text/action
     const cancelText = onIgnore ? "Proceed Shorthanded" : "Later";
     const onCancel = onIgnore || null;
 
@@ -1012,7 +716,7 @@ window.app = {
 document.addEventListener('DOMContentLoaded', () => {
     console.log("App init...");
     UI.setupElements();
-    
+
     // Setup Listeners
     document.getElementById('draft-search')?.addEventListener('input', () => {
         if (gameState) UI.debouncedRenderDraftPool(gameState, handlePlayerSelectInDraft, currentSortColumn, currentSortDirection, positionOverallWeights);
@@ -1047,7 +751,7 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('offense-formation-select')?.addEventListener('change', handleFormationChange);
     document.getElementById('defense-formation-select')?.addEventListener('change', handleFormationChange);
     document.getElementById('dashboard-content')?.addEventListener('change', handleDepthChartSelect); 
-    
+
     document.getElementById('stats-filter-team')?.addEventListener('change', handleStatsChange);
     document.getElementById('stats-sort')?.addEventListener('change', handleStatsChange);
 
@@ -1060,7 +764,9 @@ document.addEventListener('DOMContentLoaded', () => {
         UI.showScreen('start-screen'); 
     }
 });
-
+// =============================================================
+// --- INITIALIZATION & EVENT LISTENERS ---
+// =============================================================
 
 /**
  * Main function to initialize the game and set up event listeners.
@@ -1087,20 +793,22 @@ function main() {
 
         // Live Sim Controls
         document.getElementById('sim-skip-btn')?.addEventListener('click', () => {
-            UI.skipLiveGameSim(); // No argument needed!
+            UI.skipLiveGameSim(); 
             UI.drawFieldVisualization(null);
         });
-        document.getElementById('sim-speed-play')?.addEventListener('click', () => UI.setSimSpeed(50));  // 50ms = 1x (Real-time)
-        document.getElementById('sim-speed-fast')?.addEventListener('click', () => UI.setSimSpeed(20));  // 20ms = 2.5x Fast-forward
-        document.getElementById('sim-speed-faster')?.addEventListener('click', () => UI.setSimSpeed(150)); // 150ms = 3x Slow-mo
+        document.getElementById('sim-speed-play')?.addEventListener('click', () => UI.setSimSpeed(50));  
+        document.getElementById('sim-speed-fast')?.addEventListener('click', () => UI.setSimSpeed(20));  
+        document.getElementById('sim-speed-faster')?.addEventListener('click', () => UI.setSimSpeed(150)); 
+        
         // Dashboard Navigation and Content Interaction
         document.getElementById('dashboard-tabs')?.addEventListener('click', handleTabSwitch);
         document.getElementById('dashboard-content')?.addEventListener('click', handleDashboardClicks);
         document.getElementById('dashboard-content')?.addEventListener('change', handleDepthChartSelect);
+        
         // Messages List (Event Delegation)
         document.getElementById('messages-list')?.addEventListener('click', (e) => {
             const messageItem = e.target.closest('.message-item');
-            if (messageItem?.dataset.messageId) { // Safe access
+            if (messageItem?.dataset.messageId) { 
                 handleMessageClick(messageItem.dataset.messageId);
             }
         });
@@ -1114,24 +822,21 @@ function main() {
         });
         document.querySelector('#draft-screen thead tr')?.addEventListener('click', (e) => {
             const headerCell = e.target.closest('th[data-sort]');
-            if (!headerCell || !gameState) return; // Not a sortable header or game not ready
+            if (!headerCell || !gameState) return; 
 
             const newSortColumn = headerCell.dataset.sort;
 
             if (currentSortColumn === newSortColumn) {
-                // Flip direction if clicking the same column
                 currentSortDirection = (currentSortDirection === 'desc') ? 'asc' : 'desc';
             } else {
-                // New column, set to default
                 currentSortColumn = newSortColumn;
-                currentSortDirection = 'desc'; // Default to descending
+                currentSortDirection = 'desc'; 
             }
 
-            // Re-render the pool with new sorting
             UI.renderDraftPool(gameState, handlePlayerSelectInDraft, currentSortColumn, currentSortDirection, positionOverallWeights);
-            // Update the arrows in the header
             UI.updateDraftSortIndicators(currentSortColumn, currentSortDirection);
         });
+
         // Depth Chart Formation Changes
         document.getElementById('offense-formation-select')?.addEventListener('change', handleFormationChange);
         document.getElementById('defense-formation-select')?.addEventListener('change', handleFormationChange);
@@ -1148,18 +853,16 @@ function main() {
         UI.showScreen('startScreen');
 
     } catch (error) {
-        // --- Graceful Initialization Error Handling ---
         console.error("Fatal error during initialization:", error);
         const body = document.body;
         if (body) {
             body.innerHTML = `<div style="padding: 20px; color: #b91c1c; background-color: #fef2f2; border: 1px solid #fecaca; border-radius: 8px; font-family: sans-serif;">
                                  <h1 style="font-size: 1.5em; margin-bottom: 10px; color: #991b1b;">Initialization Error</h1>
                                  <p>We're sorry, but the game couldn't start due to an unexpected error.</p>
-                                 <p>Please try refreshing the page. If the problem persists, check the browser console (usually by pressing F12) for more technical details.</p>
+                                 <p>Please try refreshing the page. If the problem persists, check the browser console.</p>
                                  <pre style="margin-top: 15px; padding: 10px; background-color: #fee2e2; border-radius: 4px; font-size: 0.9em; overflow-x: auto; white-space: pre-wrap; word-wrap: break-word;">${error.stack || error.message}</pre>
                                </div>`;
         }
-        // --- End Graceful Error Handling ---
     }
 }
 
