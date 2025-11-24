@@ -3938,6 +3938,16 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
 
     finalizeStats(playState, offense, defense);
 
+    if (gameLog) {
+        playState.visualizationFrames.push({
+            players: deepClone(playState.activePlayers),
+            ball: deepClone(playState.ballState),
+            logIndex: gameLog.length, // Captures all final logs
+            lineOfScrimmage: playState.lineOfScrimmage,
+            firstDownY: (typeof firstDownY !== 'undefined') ? firstDownY : null
+        });
+    }
+
     return {
         yards: playState.yards,
         touchdown: playState.touchdown,
