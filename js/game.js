@@ -5628,7 +5628,7 @@ export function autoMakeSubstitutions(team, options = {}) {
 
     const fullRoster = getRosterObjects(team);
     
-    // Identify current starters
+    // Identify current starters to avoid subbing a starter into another starter slot
     const sides = Object.keys(team.depthChart || {});
     const starterIds = new Set();
     sides.forEach(side => {
@@ -5638,6 +5638,7 @@ export function autoMakeSubstitutions(team, options = {}) {
 
     let subsDone = 0;
 
+    // Iterate sides/slots and look for tired starters
     for (const side of sides) {
         const chart = team.depthChart[side] || {};
         for (const slot of Object.keys(chart)) {
@@ -5650,12 +5651,14 @@ export function autoMakeSubstitutions(team, options = {}) {
             if (!starter) continue;
             
             const starterFat = starter.fatigue || 0;
-            
-            // If starter is tired...
+            // Skip if starter is injured (handled elsewhere) or not tired enough
+            if (starter.status && starter.status.duration > 0) continue; 
+
+            // If starter is fatigued beyond threshold, try to find a bench replacement
             if (starterFat >= thresholdFatigue) {
-                // Find bench candidates
-                // 💡 FIX: Relaxed the "Freshness" requirement. 
-                // Any bench player with 10 less fatigue is valid (was implicitly stricter).
+                // Find bench candidates: not currently starting, healthy, and fresher
+                // 💡 FIX: Relaxed "Freshness" requirement. 
+                // Any bench player with 10 less fatigue is valid.
                 const candidates = fullRoster.filter(p => 
                     p && 
                     !starterIds.has(p.id) && 
@@ -5665,11 +5668,12 @@ export function autoMakeSubstitutions(team, options = {}) {
 
                 if (candidates.length === 0) continue;
 
-                // Pick best fit
+                // Score candidates by suitability for this slot
                 let best = null; 
                 let bestScore = -Infinity;
                 
                 for (const cand of candidates) {
+                    // calculateSlotSuitability might return raw overall, which is fine
                     const score = calculateSlotSuitability(cand, slot, side, team);
                     if (score > bestScore) { bestScore = score; best = cand; }
                 }
@@ -5678,6 +5682,7 @@ export function autoMakeSubstitutions(team, options = {}) {
                     const res = substitutePlayers(team.id, starterId, best.id);
                     if (res && res.success) {
                         subsDone++;
+                        // Update local starter set so we don't sub them back out immediately
                         starterIds.delete(starterId);
                         starterIds.add(best.id);
                         // console.log(`🔄 AI Sub: ${team.name} swapped ${starter.name} (${Math.round(starterFat)}%) for ${best.name}`);
@@ -5687,6 +5692,8 @@ export function autoMakeSubstitutions(team, options = {}) {
         }
         if (subsDone >= maxSubs) break;
     }
+
+    if (subsDone > 0) console.log(`autoMakeSubstitutions: ${team.name} made ${subsDone} subs`);
     return subsDone;
 }
 /** Changes the player team's formation for offense or defense. */
