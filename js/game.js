@@ -5609,7 +5609,7 @@ export function substitutePlayers(teamId, outPlayerId, inPlayerId) {
  * AI: make intelligent substitutions for a team based on fatigue.
  * Will attempt up to `maxSubs` swaps.
  */
-export function autoMakeSubstitutions(team, options = {}) {
+function autoMakeSubstitutions(team, options = {}) {
     if (!team || !team.depthChart || !team.roster) return 0;
     
     // Default options
