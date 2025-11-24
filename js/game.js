@@ -5609,26 +5609,22 @@ export function substitutePlayers(teamId, outPlayerId, inPlayerId) {
 }
 
 /**
- * AI: make intelligent substitutions for a team based on fatigue and suitability.
- * Will attempt up to `maxSubs` swaps, preferring bench players with lower fatigue
- * and better suitability for the target slot. Returns how many substitutions were made.
+ * AI: make intelligent substitutions for a team based on fatigue.
+ * Will attempt up to `maxSubs` swaps.
  */
 export function autoMakeSubstitutions(team, options = {}) {
     if (!team || !team.depthChart || !team.roster) return 0;
     
-    // 💡 FIX: Lower threshold to 50 (start subbing at 50% fatigue)
+    // Default options
     const thresholdFatigue = options.thresholdFatigue || 50; 
     const maxSubs = options.maxSubs || 3;
-    
-    // 💡 FIX: Increase chance to run (was 0.25)
-    // We want this to check frequently so tired players get off the field.
     const chance = typeof options.chance === 'number' ? options.chance : 0.8; 
 
     if (Math.random() > chance) return 0; 
 
     const fullRoster = getRosterObjects(team);
     
-    // Identify current starters to avoid subbing a starter into another starter slot
+    // Identify current starters
     const sides = Object.keys(team.depthChart || {});
     const starterIds = new Set();
     sides.forEach(side => {
@@ -5638,7 +5634,6 @@ export function autoMakeSubstitutions(team, options = {}) {
 
     let subsDone = 0;
 
-    // Iterate sides/slots and look for tired starters
     for (const side of sides) {
         const chart = team.depthChart[side] || {};
         for (const slot of Object.keys(chart)) {
@@ -5650,30 +5645,25 @@ export function autoMakeSubstitutions(team, options = {}) {
             const starter = fullRoster.find(p => p && p.id === starterId);
             if (!starter) continue;
             
-            const starterFat = starter.fatigue || 0;
             // Skip if starter is injured (handled elsewhere) or not tired enough
             if (starter.status && starter.status.duration > 0) continue; 
+            const starterFat = starter.fatigue || 0;
 
-            // If starter is fatigued beyond threshold, try to find a bench replacement
             if (starterFat >= thresholdFatigue) {
-                // Find bench candidates: not currently starting, healthy, and fresher
-                // 💡 FIX: Relaxed "Freshness" requirement. 
-                // Any bench player with 10 less fatigue is valid.
+                // Find bench candidates
                 const candidates = fullRoster.filter(p => 
                     p && 
                     !starterIds.has(p.id) && 
                     (!p.status || p.status.duration === 0) && 
-                    ((p.fatigue || 0) < (starterFat - 10)) // Must be at least 10% fresher
+                    ((p.fatigue || 0) < (starterFat - 10)) 
                 );
 
                 if (candidates.length === 0) continue;
 
-                // Score candidates by suitability for this slot
                 let best = null; 
                 let bestScore = -Infinity;
                 
                 for (const cand of candidates) {
-                    // calculateSlotSuitability might return raw overall, which is fine
                     const score = calculateSlotSuitability(cand, slot, side, team);
                     if (score > bestScore) { bestScore = score; best = cand; }
                 }
@@ -5682,18 +5672,14 @@ export function autoMakeSubstitutions(team, options = {}) {
                     const res = substitutePlayers(team.id, starterId, best.id);
                     if (res && res.success) {
                         subsDone++;
-                        // Update local starter set so we don't sub them back out immediately
                         starterIds.delete(starterId);
                         starterIds.add(best.id);
-                        // console.log(`🔄 AI Sub: ${team.name} swapped ${starter.name} (${Math.round(starterFat)}%) for ${best.name}`);
                     }
                 }
             }
         }
         if (subsDone >= maxSubs) break;
     }
-
-    if (subsDone > 0) console.log(`autoMakeSubstitutions: ${team.name} made ${subsDone} subs`);
     return subsDone;
 }
 /** Changes the player team's formation for offense or defense. */
