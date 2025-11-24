@@ -2993,65 +2993,99 @@ function updatePunterDecision(playState, offenseStates, gameLog) {
  * Handles ball arrival at target coordinates. (MODIFIED)
  */
 function handleBallArrival(playState, gameLog, play) {
-    // --- 💡 START: NEW PUNT CATCH LOGIC ---
+    // --- 💡 FIX: UPDATED PUNT CATCH LOGIC ---
     if (play.type === 'punt' && playState.ballState.inAir && playState.ballState.targetPlayerId === null) {
-        if (playState.ballState.z < 0.1) return; // Already hit ground, will be handled by tick loop
+        // If ball is too high, they can't catch it yet (wait for it to come down)
+        if (playState.ballState.z > 3.0) return; 
+        
+        // If it already hit the ground (z <= 0), the tick loop handles the "Downed" logic.
+        if (playState.ballState.z <= 0.1) return;
 
-        const CATCH_CHECK_RADIUS = 3.0; // Wider radius for punts
+        const CATCH_CHECK_RADIUS = 4.0; // Slightly generous radius to ensure pickup
         const ballPos = playState.ballState;
 
         // Find all *defenders* (returners) in range
+        // 💡 FIX: Removed "p.action === 'punt_return'" check. 
+        // Any unblocked defender near the landing spot should try to catch it.
         const returnersInRange = playState.activePlayers.filter(p =>
             !p.isOffense &&
             !p.isEngaged &&
-            p.action === 'punt_return' &&
+            p.stunnedTicks === 0 &&
             getDistance(p, ballPos) < CATCH_CHECK_RADIUS
         );
 
         if (returnersInRange.length === 0) {
-            // No returner is in range to catch it. Let it fall.
+            // No returner is close enough yet. Let it keep flying/falling.
             return;
         }
 
         // Find the closest returner to the ball
         const returnerState = returnersInRange.sort((a, b) => getDistance(a, ballPos) - getDistance(b, ballPos))[0];
-        const returnerPlayer = game.players.find(p => p && p.id === returnerState.id);
-        if (!returnerPlayer) return; // Safety check
+        const returnerPlayer = getPlayer(returnerState.id); // Helper to get full object
+        
+        if (!returnerPlayer) return; 
 
         // Check for a muff
         const catchingHands = returnerPlayer.attributes?.technical?.catchingHands || 50;
-        const muffChance = 0.05 + (1 - (catchingHands / 100)) * 0.15; // 5% to 20%
+        // 5% base muff chance + up to 15% more if hands are bad
+        const muffChance = 0.05 + (1 - (catchingHands / 100)) * 0.15; 
 
         if (Math.random() < muffChance) {
             // --- MUFFED PUNT! ---
             if (gameLog) gameLog.push(`❗ MUFFED PUNT! ${returnerState.name} drops it!`);
+            
             playState.ballState.isLoose = true;
             playState.ballState.inAir = false;
-            playState.ballState.z = 0.1;
-            playState.turnover = true; // It's a turnover *for now*
-            returnerState.stunnedTicks = 30;
+            playState.ballState.z = 0.1; // Drops to ground
+            
+            // Bounce the ball slightly
+            playState.ballState.vx = (Math.random() - 0.5) * 5;
+            playState.ballState.vy = (Math.random() - 0.5) * 5;
+
+            returnerState.stunnedTicks = 30; // Fumble recovery delay for the dropper
         } else {
             // --- CATCH SUCCESSFUL ---
             if (gameLog) gameLog.push(`🏈 Punt caught by ${returnerState.name}.`);
+            
+            // 💡 FIX: Explicitly set play state to live/turnover
             playState.turnover = true;
             playState.ballState.inAir = false;
+            playState.ballState.isLoose = false;
+            
 
             // Assign ball carrier
             returnerState.isBallCarrier = true;
             returnerState.hasBall = true;
-            returnerState.action = 'run_path';
+            returnerState.action = 'run_path'; // Start running!
+            playState.returnStartY = returnerState.y;
+            
+            // Snap ball to player
+            playState.ballState.x = returnerState.x;
+            playState.ballState.y = returnerState.y;
+            playState.ballState.z = 1.0;
+
+            // Update everyone else's AI
             playState.activePlayers.forEach(p => {
                 p.hasBall = (p.id === returnerState.id);
                 p.isBallCarrier = (p.id === returnerState.id);
+                
                 if (p.isOffense) {
                     p.action = 'pursuit'; // Gunners now tackle
                 } else if (p.id !== returnerState.id) {
                     p.action = 'run_block'; // Teammates now block
+                    // Assign blocks for return team
+                    // Find nearest gunner to block
+                    const nearestEnemy = playState.activePlayers
+                        .filter(e => e.isOffense && getDistance(p, e) < 15)
+                        .sort((a,b) => getDistance(p, a) - getDistance(p, b))[0];
+                    
+                    if(nearestEnemy) p.dynamicTargetId = nearestEnemy.id;
                 }
             });
         }
         return; // Punt event resolved
     }
+    // --- END PUNT LOGIC ---
     // --- 💡 END: NEW PUNT CATCH LOGIC ---
     // 1. Ball Height Check
     if (!playState.ballState.inAir) return; // Ball not in air
@@ -3120,6 +3154,7 @@ function handleBallArrival(playState, gameLog, play) {
             eventResolved = true;
             if (gameLog) gameLog.push(`❗ INTERCEPTION! ${closestDefenderState.name} jumps the route!`);
             playState.turnover = true;
+            playState.returnStartY = closestDefenderState.y;
 
             closestDefenderState.isBallCarrier = true;
             closestDefenderState.hasBall = true;
@@ -3270,9 +3305,16 @@ function handleBallArrival(playState, gameLog, play) {
 const ensureStats = (player) => {
     if (player && !player.gameStats) {
         player.gameStats = {
-            receptions: 0, recYards: 0, passYards: 0, rushYards: 0, touchdowns: 0,
-            tackles: 0, sacks: 0, interceptions: 0,
-            passAttempts: 0, passCompletions: 0, interceptionsThrown: 0
+            // Passing
+            passAttempts: 0, passCompletions: 0, passYards: 0, interceptionsThrown: 0,
+            // Rushing
+            rushYards: 0,
+            // Receiving
+            receptions: 0, recYards: 0, targets: 0, drops: 0,
+            // Defense / Special Teams
+            tackles: 0, sacks: 0, interceptions: 0, returnYards: 0,
+            // Scoring
+            touchdowns: 0
         };
     }
 };
@@ -3348,73 +3390,77 @@ function finalizeStats(playState, offense, defense) {
     const carrierState = playState.activePlayers.find(p => p.isBallCarrier);
     const throwerState = playState.activePlayers.find(p => p.id === playState.ballState.throwerId);
     const receiverState = playState.activePlayers.find(p => p.id === playState.ballState.targetPlayerId && p.isOffense);
-    // Find the defensive player who ended up with the ball (if any)
-    const interceptorState = playState.turnover && !playState.sack ? playState.activePlayers.find(p => p.isBallCarrier && !p.isOffense) : null;
-
+    
     const qbPlayer = throwerState ? game.players.find(p => p && p.id === throwerState.id) : null;
     const carrierPlayer = carrierState ? game.players.find(p => p && p.id === carrierState.id) : null;
     const receiverPlayer = receiverState ? game.players.find(p => p && p.id === receiverState.id) : null;
-    // Note: interceptorPlayer and carrierPlayer might be the same person
-    const interceptorPlayer = interceptorState ? game.players.find(p => p && p.id === interceptorState.id) : null;
 
     // --- 2. Ensure stats objects exist ---
     ensureStats(qbPlayer);
     ensureStats(carrierPlayer);
     ensureStats(receiverPlayer);
-    ensureStats(interceptorPlayer);
 
-    // --- 3. Handle Pass Attempt Stats (always happens on throw) ---
+    // --- 3. Handle Pass Attempt Stats ---
     if (qbPlayer && playState.ballState.throwInitiated) {
-        qbPlayer.gameStats.passAttempts = (qbPlayer.gameStats.passAttempts || 0) + 1;
-    }
-
-    // --- 4. Handle Turnover-Specific Stats (Interception) ---
-    if (playState.turnover && interceptorPlayer) {
-        // Note: The 'interceptions' stat is already awarded in handleBallArrival
-        if (qbPlayer) {
-            qbPlayer.gameStats.interceptionsThrown = (qbPlayer.gameStats.interceptionsThrown || 0) + 1;
+        qbPlayer.gameStats.passAttempts++;
+        
+        // Track Target
+        if (receiverPlayer) {
+            receiverPlayer.gameStats.targets = (receiverPlayer.gameStats.targets || 0) + 1;
         }
     }
 
-    // --- 5. Handle Final Play Result (TDs, Yards) ---
+    // --- 4. Handle Sack (Negative Rush Yards for QB) ---
+    if (playState.sack && carrierPlayer) {
+        // In simple stats, a sack counts as negative rushing yards for the QB
+        carrierPlayer.gameStats.rushYards += Math.round(playState.yards); 
+        return; // Sack ends the stat processing for this play
+    }
+
+    // --- 5. Handle Play Result ---
     const isTouchdown = playState.touchdown;
     const finalYards = Math.round(playState.yards);
 
-    if (playState.sack) {
-        // Sack stats are handled in checkTackleCollisions
-    } else if (playState.incomplete) {
-        // No yards, no TD. (Attempt/INT already counted)
+    if (playState.incomplete) {
+        // Track Drop? (Optional: You can add logic here if you have a 'dropped' flag)
     } else if (carrierPlayer) {
-        // If the play ended with a carrier (run, catch, or INT return)
+        
+        // --- A. Offensive Passing Play ---
         const wasPassCaught = carrierState.id === receiverState?.id && playState.ballState.throwInitiated;
 
         if (wasPassCaught && receiverPlayer) {
-            // --- A. Offensive Receiving Play ---
-            receiverPlayer.gameStats.receptions = (receiverPlayer.gameStats.receptions || 0) + 1;
-            receiverPlayer.gameStats.recYards = (receiverPlayer.gameStats.recYards || 0) + finalYards;
-            if (isTouchdown) receiverPlayer.gameStats.touchdowns = (receiverPlayer.gameStats.touchdowns || 0) + 1;
+            receiverPlayer.gameStats.receptions++;
+            receiverPlayer.gameStats.recYards += finalYards;
+            if (isTouchdown) receiverPlayer.gameStats.touchdowns++;
 
             if (qbPlayer) {
-                qbPlayer.gameStats.passCompletions = (qbPlayer.gameStats.passCompletions || 0) + 1;
-                qbPlayer.gameStats.passYards = (qbPlayer.gameStats.passYards || 0) + finalYards;
-                if (isTouchdown) qbPlayer.gameStats.touchdowns = (qbPlayer.gameStats.touchdowns || 0) + 1;
+                qbPlayer.gameStats.passCompletions++;
+                qbPlayer.gameStats.passYards += finalYards;
+                if (isTouchdown) qbPlayer.gameStats.touchdowns++;
             }
-        } else if (carrierState.isOffense) {
-            // --- B. Offensive Rushing Play ---
-            carrierPlayer.gameStats.rushYards = (carrierPlayer.gameStats.rushYards || 0) + finalYards;
-            if (isTouchdown) carrierPlayer.gameStats.touchdowns = (carrierPlayer.gameStats.touchdowns || 0) + 1;
-
-        } else if (!carrierState.isOffense) {
-            // --- C. Defensive Return (INT or Fumble) ---
-            // This is the carrierPlayer (who is the interceptorPlayer or fumble recoverer)
-
-            // <<< --- THIS IS THE FIX --- >>>
+        } 
+        // --- B. Offensive Rushing Play ---
+        else if (carrierState.isOffense) {
+            carrierPlayer.gameStats.rushYards += finalYards;
+            if (isTouchdown) carrierPlayer.gameStats.touchdowns++;
+        } 
+        // --- C. Defensive/Special Teams Return (INT, Punt, Fumble) ---
+        else if (!carrierState.isOffense) {
             if (isTouchdown) {
-                // Award the touchdown to the defensive player
-                carrierPlayer.gameStats.touchdowns = (carrierPlayer.gameStats.touchdowns || 0) + 1;
+                carrierPlayer.gameStats.touchdowns++;
             }
-            // (We can add return yards here later if we want)
-            // carrierPlayer.gameStats.returnYards = (carrierPlayer.gameStats.returnYards || 0) + yards; 
+            
+            // Calculate Return Yards
+            // Return Yards = |End Y - Start Y|
+            if (playState.returnStartY !== null) {
+                const returnYards = Math.round(Math.abs(carrierState.y - playState.returnStartY));
+                carrierPlayer.gameStats.returnYards += returnYards;
+            }
+            
+            // If it was an INT, credit the thrower with an INT thrown
+            if (playState.turnover && qbPlayer && playState.ballState.throwInitiated) {
+                qbPlayer.gameStats.interceptionsThrown++;
+            }
         }
     }
 }
@@ -3452,6 +3498,8 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
         yards: 0, touchdown: false, turnover: false, incomplete: false, sack: false, safety: false,
         finalBallY: 0,
         touchback: false,
+        returnStartY: null,
+        hasLoggedTD: false,
         ballState: {
             x: 0, y: 0, z: 1.0,
             vx: 0, vy: 0, vz: 0,
@@ -3790,7 +3838,7 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
                         pState.fatigue = player.fatigue;
                         const stamina = player.attributes?.physical?.stamina || 50;
                         const fatigueRatio = Math.min(1.0, (player.fatigue || 0) / stamina);
-                        pState.fatigueModifier = Math.max(0.3, 1.0 - fatigueRatio);
+                        pState.fatigueModifier = Math.max(0.75, 1.0 - (fatigueRatio * 0.25));
                     }
                 } catch (e) {
                     console.error('Per-player fatigue update error:', e);
@@ -3827,8 +3875,16 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
                 involvedTeamIds.forEach(tid => {
                     const team = (game && game.teams) ? game.teams.find(tt => tt && tt.id === tid) : null;
                     if (!team) return;
+                    
+                    // 💡 FIX: Allow player team to auto-sub if you want, or keep the check.
+                    // Currently skipping playerTeam so you have control.
                     if (game.playerTeam && team.id === game.playerTeam.id) return;
-                    if (typeof autoMakeSubstitutions === 'function') autoMakeSubstitutions(team, { thresholdFatigue: 60, maxSubs: 2, chance: 0.2 });
+
+                    // 💡 FIX: Run with high chance (1.0) every ~2 seconds (tick % 40)
+                    // This prevents checking 20 times a second, but guarantees checks happen.
+                    if (playState.tick % 40 === 0) {
+                        autoMakeSubstitutions(team, { thresholdFatigue: 50, maxSubs: 2, chance: 1.0 });
+                    }
                 });
             } catch (err) {
                 console.error('AI substitution error:', err);
@@ -5559,13 +5615,20 @@ export function substitutePlayers(teamId, outPlayerId, inPlayerId) {
  */
 export function autoMakeSubstitutions(team, options = {}) {
     if (!team || !team.depthChart || !team.roster) return 0;
-    const thresholdFatigue = options.thresholdFatigue || 60; // starter fatigue threshold
-    const maxSubs = options.maxSubs || 2;
-    const chance = typeof options.chance === 'number' ? options.chance : 0.25; // probability to attempt any subs
+    
+    // 💡 FIX: Lower threshold to 50 (start subbing at 50% fatigue)
+    const thresholdFatigue = options.thresholdFatigue || 50; 
+    const maxSubs = options.maxSubs || 3;
+    
+    // 💡 FIX: Increase chance to run (was 0.25)
+    // We want this to check frequently so tired players get off the field.
+    const chance = typeof options.chance === 'number' ? options.chance : 0.8; 
 
-    if (Math.random() > chance) return 0; // don't always run
+    if (Math.random() > chance) return 0; 
 
     const fullRoster = getRosterObjects(team);
+    
+    // Identify current starters
     const sides = Object.keys(team.depthChart || {});
     const starterIds = new Set();
     sides.forEach(side => {
@@ -5575,29 +5638,39 @@ export function autoMakeSubstitutions(team, options = {}) {
 
     let subsDone = 0;
 
-    // Iterate sides/slots and look for tired starters
     for (const side of sides) {
         const chart = team.depthChart[side] || {};
         for (const slot of Object.keys(chart)) {
             if (subsDone >= maxSubs) break;
+            
             const starterId = chart[slot];
             if (!starterId) continue;
+            
             const starter = fullRoster.find(p => p && p.id === starterId);
             if (!starter) continue;
+            
             const starterFat = starter.fatigue || 0;
-            if (starter.status && starter.status.duration > 0) continue; // injured or busy handled elsewhere
-
-            // If starter is fatigued beyond threshold, try to find a bench replacement
+            
+            // If starter is tired...
             if (starterFat >= thresholdFatigue) {
-                // bench candidates not starters, not injured, and with meaningfully lower fatigue
-                const candidates = fullRoster.filter(p => p && !starterIds.has(p.id) && (!p.status || p.status.duration === 0) && ((p.fatigue || 0) + 8 < starterFat));
+                // Find bench candidates
+                // 💡 FIX: Relaxed the "Freshness" requirement. 
+                // Any bench player with 10 less fatigue is valid (was implicitly stricter).
+                const candidates = fullRoster.filter(p => 
+                    p && 
+                    !starterIds.has(p.id) && 
+                    (!p.status || p.status.duration === 0) && 
+                    ((p.fatigue || 0) < (starterFat - 10)) // Must be at least 10% fresher
+                );
+
                 if (candidates.length === 0) continue;
 
-                // Score candidates by suitability for this slot (higher is better), tiebreaker lower fatigue
-                let best = null; let bestScore = -Infinity;
+                // Pick best fit
+                let best = null; 
+                let bestScore = -Infinity;
+                
                 for (const cand of candidates) {
-                    const pos = slot.replace(/\d/g, '');
-                    const score = calculateSlotSuitability(cand, slot, side, team) + (-(cand.fatigue || 0) * 0.1);
+                    const score = calculateSlotSuitability(cand, slot, side, team);
                     if (score > bestScore) { bestScore = score; best = cand; }
                 }
 
@@ -5605,20 +5678,17 @@ export function autoMakeSubstitutions(team, options = {}) {
                     const res = substitutePlayers(team.id, starterId, best.id);
                     if (res && res.success) {
                         subsDone++;
-                        // update starterIds set
                         starterIds.delete(starterId);
                         starterIds.add(best.id);
+                        // console.log(`🔄 AI Sub: ${team.name} swapped ${starter.name} (${Math.round(starterFat)}%) for ${best.name}`);
                     }
                 }
             }
         }
         if (subsDone >= maxSubs) break;
     }
-
-    if (subsDone > 0) console.log(`autoMakeSubstitutions: ${team.name} made ${subsDone} subs`);
     return subsDone;
 }
-
 /** Changes the player team's formation for offense or defense. */
 export function changeFormation(side, formationName) {
     const team = game?.playerTeam;
