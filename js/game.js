@@ -127,12 +127,12 @@ function getRosterObjects(team) {
 // (generatePlayer, calculateSlotSuitability)
 
 /** Yields control to the main thread briefly. */
-export function yieldToMain() { return new Promise(resolve => setTimeout(resolve, 0)); }
+function yieldToMain() { return new Promise(resolve => setTimeout(resolve, 0)); }
 
 /** Adds a message to the player's inbox.
  * Accepts an optional gameObj for easier testing; falls back to the module-level `game`.
  */
-export function addMessage(subject, body, isRead = false, gameObj = null) {
+function addMessage(subject, body, isRead = false, gameObj = null) {
     const g = gameObj || game;
     if (!g || !g.messages) {
         console.error("Cannot add message: Game object or messages array not initialized.");
@@ -314,7 +314,7 @@ function diagnosePlay(pState, truePlayType, offensivePlayKey, tick) {
 /**
  * Initializes the league state (teams, players, relationships).
  */
-export async function initializeLeague(onProgress) {
+async function initializeLeague(onProgress) {
     console.log("Initializing league...");
     game = {
         year: 1, teams: [], players: [], freeAgents: [], playerTeam: null, schedule: [],
@@ -442,7 +442,7 @@ function getUniqueColor() {
 /**
  * Creates the player-controlled team and adds it to the game state.
  */
-export function createPlayerTeam(teamName) {
+function createPlayerTeam(teamName) {
     if (!game || !game.teams || !game.divisions || !divisionNames) {
         console.error("Cannot create player team: Game not initialized properly.");
         return;
@@ -509,7 +509,7 @@ function getPlayerScore(player, coach) {
 }
 
 /** Sets up draft order based on standings. */
-export function setupDraft() {
+function setupDraft() {
     if (!game || !game.teams) { console.error("setupDraft: Game/teams not initialized."); return; }
     game.draftOrder = [];
     game.currentPick = 0;
@@ -550,7 +550,7 @@ export function setupDraft() {
 }
 
 /** Automatically sets depth chart for an AI team. */
-export function aiSetDepthChart(team) {
+function aiSetDepthChart(team) {
     const roster = getRosterObjects(team);
 
     if (!team || !roster || !team.depthChart || !team.formations) {
@@ -642,7 +642,7 @@ export function aiSetDepthChart(team) {
 }
 
 /** Simulates an AI team's draft pick. */
-export function simulateAIPick(team) {
+function simulateAIPick(team) {
     if (!team || !team.roster || !game || !game.players || !team.coach) {
         console.error(`simulateAIPick: Invalid team data or game state.`); return null;
     }
@@ -670,7 +670,7 @@ export function simulateAIPick(team) {
  * Adds a player object to a team's roster, assigns a unique position-based number,
  * and updates the player's teamId.
  */
-export function addPlayerToTeam(player, team) {
+function addPlayerToTeam(player, team) {
     if (!player || !team || !team.roster || typeof player.id === 'undefined') {
         console.error("addPlayerToTeam: Invalid player or team object provided.");
         return false;
@@ -750,7 +750,7 @@ export function addPlayerToTeam(player, team) {
 /**
  * Generates the league schedule using a round-robin algorithm within divisions.
  */
-export function generateSchedule() {
+function generateSchedule() {
     if (!game || !game.teams || !game.divisions || !divisionNames || divisionNames.length !== 2) {
         console.error("generateSchedule: Game state invalid."); game.schedule = []; return;
     }
@@ -4470,7 +4470,7 @@ function aiCheckAudible(offense, offensivePlayKey, defense, defensivePlayKey, ga
 /**
  * Simulates a full game between two teams.
  */
-export function simulateGame(homeTeam, awayTeam, options = {}) {
+function simulateGame(homeTeam, awayTeam, options = {}) {
     const fastSim = options.fastSim === true;
     let originalTickDuration = TICK_DURATION_SECONDS;
     let gameResult;
@@ -5193,7 +5193,7 @@ function processRelationshipEvents() {
 /**
  * Simulates all games for the current week and advances state.
  */
-export function simulateWeek(options = {}) {
+function simulateWeek(options = {}) {
     // 1. MODIFIED: Removed !game.schedule from this check
     if (!game || !game.teams) {
         console.error("simulateWeek: Invalid game state.");
@@ -5269,7 +5269,7 @@ export function simulateWeek(options = {}) {
 // =============================================================
 
 /** Generates a list of available free agents for the week. */
-export function generateWeeklyFreeAgents() {
+function generateWeeklyFreeAgents() {
     if (!game || !game.players) { console.error("generateWeeklyFreeAgents: Game not initialized."); return; }
     const undraftedPlayers = game.players.filter(p => p && !p.teamId);
     game.freeAgents = [];
@@ -5286,7 +5286,7 @@ export function generateWeeklyFreeAgents() {
 /**
  * Handles the player attempting to call a free agent friend.
  */
-export function callFriend(playerId) {
+function callFriend(playerId) {
     if (!game || !game.playerTeam || !game.playerTeam.roster || !game.freeAgents) {
         console.error("Cannot call friend: Invalid game state.");
         return { success: false, message: "Game state error prevented calling friend." };
@@ -5337,7 +5337,7 @@ export function callFriend(playerId) {
 
 // game.js
 
-export function aiManageRoster(team) {
+function aiManageRoster(team) {
     if (!team || !team.roster || !game || !game.freeAgents || !team.coach) return;
 
     // --- 💡 FIX: Get roster objects ---
@@ -5421,7 +5421,7 @@ function developPlayer(player) {
 }
 
 /** Handles offseason logic: aging, development, departures, teammates, rookies. */
-export function advanceToOffseason() {
+function advanceToOffseason() {
     if (!game || !game.teams || !game.players) { return { retiredPlayers: [], hofInductees: [], developmentResults: [], leavingPlayers: [] }; }
     game.year++;
     console.log(`Advancing to Offseason for Year ${game.year}`);
@@ -5542,7 +5542,7 @@ export function advanceToOffseason() {
 // =============================================================
 
 /** Updates the player's depth chart based on drag-and-drop. */
-export function updateDepthChart(playerId, newPositionSlot, side) {
+function updateDepthChart(playerId, newPositionSlot, side) {
     const team = game?.playerTeam;
     if (!team || !team.depthChart || !team.depthChart[side]) { console.error("updateDepthChart: Invalid state."); return; }
     const chart = team.depthChart[side];
@@ -5690,7 +5690,7 @@ function autoMakeSubstitutions(team, options = {}) {
     return subsDone;
 }
 /** Changes the player team's formation for offense or defense. */
-export function changeFormation(side, formationName) {
+function changeFormation(side, formationName) {
     const team = game?.playerTeam;
     const formations = side === 'offense' ? offenseFormations : defenseFormations;
     const formation = formations[formationName];
@@ -5704,7 +5704,7 @@ export function changeFormation(side, formationName) {
 }
 
 /** Cuts a player from the player's team roster. */
-export function playerCut(playerId) {
+function playerCut(playerId) {
     if (!game || !game.playerTeam || !game.playerTeam.roster) { return { success: false, message: "Game state error." }; }
     const team = game.playerTeam;
     const playerIndex = team.roster.findIndex(pId => pId === playerId);
@@ -5737,7 +5737,7 @@ export function playerCut(playerId) {
 }
 
 /** Signs an available free agent player to the player's team roster. */
-export function playerSignFreeAgent(playerId) {
+function playerSignFreeAgent(playerId) {
     if (!game || !game.playerTeam || !game.playerTeam.roster || !game.players) {
         return { success: false, message: "Game state error." };
     }
@@ -5785,13 +5785,13 @@ export function playerSignFreeAgent(playerId) {
 // =============================================================
 
 /** Returns the current game state object. */
-export function getGameState() { return game; }
+function getGameState() { return game; }
 
 /** Returns the breakthroughs from the most recent week/game. */
-export function getBreakthroughs() { return game?.breakthroughs || []; } // Safe access
+function getBreakthroughs() { return game?.breakthroughs || []; } // Safe access
 
 /** Marks a specific message as read. */
-export function markMessageAsRead(messageId) {
+function markMessageAsRead(messageId) {
     const message = game?.messages?.find(m => m && m.id === messageId); // Safe access
     if (message) { message.isRead = true; }
 }
@@ -5802,7 +5802,7 @@ const DEFAULT_SAVE_KEY = 'backyardFootballGameState';
  * Saves the current game state to localStorage under a specific key.
  * @param {string} [saveKey=DEFAULT_SAVE_KEY] - The key to save the game under.
  */
-export function saveGameState(saveKey = DEFAULT_SAVE_KEY) {
+function saveGameState(saveKey = DEFAULT_SAVE_KEY) {
     try {
         // --- FIX: We must convert the Map to an Object for JSON.stringify ---
         const gameStateToSave = { ...game };
@@ -5826,7 +5826,7 @@ export function saveGameState(saveKey = DEFAULT_SAVE_KEY) {
  * Loads a game state from localStorage using a specific key.
  * @param {string} [saveKey=DEFAULT_SAVE_KEY] - The key to load the game from.
  */
-export function loadGameState(saveKey = DEFAULT_SAVE_KEY) {
+function loadGameState(saveKey = DEFAULT_SAVE_KEY) {
     try {
         const saved = localStorage.getItem(saveKey);
         if (saved) {
