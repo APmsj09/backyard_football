@@ -361,7 +361,7 @@ async function handleLoadGame(saveKey) {
             UI.showScreen('dashboard-screen');
         } else {
             console.log("Save file found (mid-draft). Loading draft screen...");
-            const { positionOverallWeights } = await import('./game/player.js');
+            //const { positionOverallWeights } = await import('./game/player.js');
             UI.renderSelectedPlayerCard(null, gameState, positionOverallWeights);
             UI.renderDraftScreen(gameState, handlePlayerSelectInDraft, selectedPlayerId, currentSortColumn, currentSortDirection, positionOverallWeights);
             UI.showScreen('draftScreen');
@@ -480,100 +480,105 @@ function handleFormationChange(e) {
 /**
  * Handles 'Advance Week' / 'Go to Offseason' button click.
  */
+/**
+ * 💡 FIX: Pre-Simulation Roster Check
+ * Intercepts "Advance Week" to check for short rosters.
+ */
 async function handleAdvanceWeek() {
-    if (!gameState || !gameState.schedule || !gameState.teams || !gameState.playerTeam) {
-        console.error("Cannot advance week: Game state invalid.");
-        UI.showModal("Error", "Cannot advance week due to invalid game state.", null, '', null, 'Close');
-        return;
+    if (!gameState) return;
+
+    // 1. Check Roster Health
+    const rosterObjects = Game.getRosterObjects(gameState.playerTeam);
+    const healthyCount = rosterObjects.filter(p => p && p.status?.duration === 0).length;
+
+    // 2. If short, trigger call friend (with a callback to proceed if they ignore)
+    if (healthyCount < MIN_HEALTHY_PLAYERS) {
+        const hasFreeAgents = gameState.freeAgents && gameState.freeAgents.length > 0;
+        
+        if (hasFreeAgents) {
+            console.log("Roster check failed: Prompting Call Friend.");
+            promptCallFriend(proceedWithAdvanceWeek); // Pass the "Proceed" function as a callback
+            return; 
+        } else {
+            // No friends to call? Warn.
+            UI.showModal("Warning: Short Roster", 
+               `<p>You only have ${healthyCount} healthy players. You need ${MIN_HEALTHY_PLAYERS} to avoid forfeiting.</p><p>No friends are available to call.</p>`,
+               () => proceedWithAdvanceWeek(), "Proceed Anyway"
+            );
+            return;
+        }
     }
+
+    // 3. If healthy, proceed normally
+    proceedWithAdvanceWeek();
+}
+
+/**
+ * 💡 FIX: Refactored Core Logic
+ * This contains the original logic of handleAdvanceWeek
+ */
+function proceedWithAdvanceWeek() {
+    if (!gameState) return;
+    
     if (gameState.currentWeek >= WEEKS_IN_SEASON) {
         handleSeasonEnd();
         return;
     }
 
-    // --- 💡 NEW BUG FIX BLOCK ---
-    // Check if schedule is missing AND it's the start of the season
     if (gameState.currentWeek === 0 && (!gameState.schedule || gameState.schedule.length === 0)) {
-        console.log("handleAdvanceWeek: No schedule found for Week 0. Generating one now...");
         Game.generateSchedule();
-        gameState = Game.getGameState(); // Refresh state after schedule generation
+        gameState = Game.getGameState(); 
     }
-    // --- 💡 END FIX ---
 
-
-    // Find player's game (this check will now work correctly)
     const gamesPerWeek = gameState.teams.length / 2;
     const weekStartIndex = gameState.currentWeek * gamesPerWeek;
     const weekEndIndex = weekStartIndex + gamesPerWeek;
     const playerGameMatch = gameState.schedule.slice(weekStartIndex, weekEndIndex)
         .find(g => g && g.home && g.away && (g.home.id === gameState.playerTeam.id || g.away.id === gameState.playerTeam.id));
 
-    if (playerGameMatch) { // Game day
+    if (playerGameMatch) { 
         UI.showModal("Game Day!",
-            `<p>It's Week ${gameState.currentWeek + 1}! Your opponent is <strong>${playerGameMatch.home.id === gameState.playerTeam.id ? playerGameMatch.away.name : playerGameMatch.home.name}</strong>.</p>`,
-            () => startLiveGame(playerGameMatch), "Watch Game Live",
+            `<p>Week ${gameState.currentWeek + 1} vs <strong>${playerGameMatch.home.id === gameState.playerTeam.id ? playerGameMatch.away.name : playerGameMatch.home.name}</strong>.</p>`,
+            () => startLiveGame(playerGameMatch), "Watch Game",
             () => simulateRestOfWeek(), "Sim Week"
         );
-    } else { // Bye week or error
-        console.warn(`No game found for player team in Week ${gameState.currentWeek + 1}. Simulating week.`);
+    } else {
         simulateRestOfWeek();
     }
 }
 
-/**
- * Simulates week's games instantly, stores player result, starts live sim UI.
- */
 function startLiveGame(playerGameMatch) {
-    console.log("Simulating week's games before starting live view...");
-    if (!gameState || !gameState.schedule || !gameState.teams) {
-        console.error("Cannot start live game: Invalid game state.");
-        return;
-    }
+    if (!gameState) return;
     currentLiveSimResult = null;
     const gamesPerWeek = gameState.teams.length / 2;
     const allGames = gameState.schedule.slice(gameState.currentWeek * gamesPerWeek, (gameState.currentWeek + 1) * gamesPerWeek);
     let allResults = [];
 
-    // Simulate all games
     allGames.forEach(match => {
         try {
-            if (!match || !match.home || !match.away) { // Added !match check
-                console.error("Skipping simulation due to invalid match data:", match);
-                return;
-            }
-            // Use fastSim for all games except the one being watched
+            if (!match || !match.home || !match.away) return;
             const isPlayerGame = match.home.id === playerGameMatch.home.id && match.away.id === playerGameMatch.away.id;
             const result = Game.simulateGame(match.home, match.away, { fastSim: !isPlayerGame });
-            if (!result) throw new Error("simulateGame returned null or undefined."); // Check result validity
+            if (!result) return;
 
             allResults.push(result);
-            // Handle breakthroughs for player messages
-            if (result.breakthroughs && Array.isArray(result.breakthroughs)) { // Check breakthroughs is array
+            
+            if (result.breakthroughs && Array.isArray(result.breakthroughs)) {
                 result.breakthroughs.forEach(b => {
-                    if (b && b.player && b.player.teamId === gameState.playerTeam?.id) { // Added checks for b and b.player
-                        // Use Game.addMessage if available
-                        if (typeof Game.addMessage === 'function') { // Check type explicitly
+                    if (b && b.player && b.player.teamId === gameState.playerTeam?.id) {
+                        if (typeof Game.addMessage === 'function') {
                             Game.addMessage("Player Breakthrough!", `${b.player.name} improved ${b.attr}!`);
-                        } else { console.log(`Player Breakthrough: ${b.player.name} improved ${b.attr}! (addMessage not found/exported)`); }
+                        }
                     }
                 });
             }
-            // Store player's game result
-            if (isPlayerGame) {
-                currentLiveSimResult = result;
-            }
+            if (isPlayerGame) currentLiveSimResult = result;
         } catch (error) {
-            const awayName = match && match.away ? match.away.name : '?';
-            const homeName = match && match.home ? match.home.name : '?';
-            console.error(`Error simulating game during live sim week (${awayName} @ ${homeName}):`, error);
+            console.error(`Sim error:`, error);
         }
     });
 
-    // Update state and start UI
     if (!gameState.gameResults) gameState.gameResults = [];
-
-    // --- THIS IS THE FIX ---
-    // We must save a minimal version of the result
     const minimalResults = allResults.filter(Boolean).map(r => ({
         homeTeam: { id: r.homeTeam.id, name: r.homeTeam.name },
         awayTeam: { id: r.awayTeam.id, name: r.awayTeam.name },
@@ -581,63 +586,109 @@ function startLiveGame(playerGameMatch) {
         awayScore: r.awayScore
     }));
     gameState.gameResults.push(...minimalResults);
-    // --- END FIX ---
 
     gameState.currentWeek++;
 
     if (currentLiveSimResult) {
-        UI.showScreen('gameSimScreen');
-        UI.startLiveGameSim(currentLiveSimResult, () => { // Pass full result
-            console.log("Live sim finished or skipped.");
-            finishWeekSimulation(allResults.filter(Boolean)); // Pass valid results
-            currentLiveSimResult = null; // Clear after use
+        UI.showScreen('game-sim-screen'); // Fixed ID case
+        UI.startLiveGameSim(currentLiveSimResult, () => { 
+            finishWeekSimulation(allResults.filter(Boolean)); 
+            currentLiveSimResult = null; 
         });
     } else {
-        console.error("Player game result not found or failed simulation. Proceeding without live view.");
-        finishWeekSimulation(allResults.filter(Boolean)); // Process valid results
+        finishWeekSimulation(allResults.filter(Boolean)); 
     }
 }
 
-
-/**
- * Simulates the entire week's games instantly.
- */
 function simulateRestOfWeek() {
-    console.log("Simulating entire week...");
     let results = null;
     try {
         if (!gameState || gameState.currentWeek >= WEEKS_IN_SEASON) {
-            console.log("Attempted to simulate week, but season is already over or state invalid.");
-            if (gameState) handleSeasonEnd(); // Only call if gameState exists
+            if (gameState) handleSeasonEnd();
             return;
         }
-        // Patch: Use fastSim for all games in simulateWeek
         if (typeof Game.simulateWeek === 'function') {
             results = Game.simulateWeek({ fastSim: true });
-        } else {
-            // Fallback: If simulateWeek does not support options, use normal
-            results = Game.simulateWeek();
         }
     } catch (error) {
-        console.error(`Error during Game.simulateWeek (Week ${gameState?.currentWeek + 1}):`, error); // Safe access currentWeek
-        UI.showModal("Simulation Error", "An error occurred during week simulation. Check console.", null, '', null, 'OK');
-        if (gameState) gameState.currentWeek++; // Cautiously advance week
-        results = []; // Treat as empty results
+        console.error("Sim week error:", error);
+        if (gameState) gameState.currentWeek++;
+        results = [];
     }
 
-    if (results !== null) { // simulateWeek returns null if season ended BEFORE sim
+    if (results !== null) {
         finishWeekSimulation(results);
-    } else if (gameState && gameState.currentWeek >= WEEKS_IN_SEASON) { // Season ended AFTER sim attempt
+    } else if (gameState && gameState.currentWeek >= WEEKS_IN_SEASON) { 
         handleSeasonEnd();
-    } else { // simulateWeek returned null unexpectedly or critical error
-        console.error("simulateWeek finished unexpectedly or errored mid-season.");
-        gameState = Game.getGameState(); // Attempt to refresh state
+    } else {
+        gameState = Game.getGameState(); 
         if (gameState) {
             UI.renderDashboard(gameState);
-            UI.showScreen('dashboardScreen');
-        } else {
-            UI.showModal("Critical Error", "Game state lost after simulation error. Please refresh.", null, '', null, 'OK');
+            UI.showScreen('dashboard-screen');
         }
+    }
+}
+
+function finishWeekSimulation(results) {
+    if (!gameState) {
+        gameState = Game.getGameState();
+        if (gameState) { UI.renderDashboard(gameState); UI.showScreen('dashboard-screen'); }
+        return;
+    }
+
+    const buildResultsModalHtml = (results) => {
+        if (!gameState?.playerTeam || !Array.isArray(results)) return "<p>Error.</p>";
+        const playerGame = results.find(r => r && (r.homeTeam?.id === gameState.playerTeam.id || r.awayTeam?.id === gameState.playerTeam.id));
+        
+        // FIX: Check for ties
+        let resultText = 'BYE';
+        if (playerGame) {
+            const myScore = playerGame.homeTeam.id === gameState.playerTeam.id ? playerGame.homeScore : playerGame.awayScore;
+            const oppScore = playerGame.homeTeam.id === gameState.playerTeam.id ? playerGame.awayScore : playerGame.homeScore;
+            if (myScore > oppScore) resultText = "WON";
+            else if (myScore < oppScore) resultText = "LOST";
+            else resultText = "TIED";
+        }
+
+        let html = `<h4>Your Result: ${resultText}</h4>`;
+        if (playerGame) {
+            html += `<p>${playerGame.awayTeam.name} ${playerGame.awayScore} @ ${playerGame.homeTeam.name} ${playerGame.homeScore}</p>`;
+        }
+        html += '<h4 class="mt-4">All Results</h4><div class="space-y-1 text-sm mt-2">';
+        results.forEach(r => {
+            if (!r) return;
+            const isPlayerGame = r.homeTeam.id === gameState.playerTeam.id || r.awayTeam.id === gameState.playerTeam.id;
+            html += `<p class="${isPlayerGame ? 'font-bold text-amber-600' : ''}">${r.awayTeam.name} ${r.awayScore} @ ${r.homeTeam.name} ${r.homeScore}</p>`;
+        });
+        html += '</div>';
+        return html;
+    };
+
+    if (results && results.length > 0) {
+        UI.showModal(`Week ${gameState.currentWeek} Results`, buildResultsModalHtml(results)); 
+    }
+
+    gameState.teams.filter(t => t && t.id !== gameState.playerTeam.id).forEach(team => {
+        try { Game.aiManageRoster(team); } catch (e) {}
+    });
+    Game.generateWeeklyFreeAgents();
+
+    gameState = Game.getGameState();
+    if (!gameState) return;
+
+    UI.renderDashboard(gameState);
+    const activeTabEl = document.querySelector('#dashboard-tabs .tab-button.active');
+    const activeTab = activeTabEl ? activeTabEl.dataset.tab : 'my-team';
+    UI.switchTab(activeTab, gameState);
+    UI.showScreen('dashboard-screen');
+
+    if (gameState.currentWeek >= WEEKS_IN_SEASON) { handleSeasonEnd(); return; }
+
+    // Prompt call friend logic...
+    const roster = Game.getRosterObjects(gameState.playerTeam);
+    const healthyCount = roster.filter(p => p && p.status?.duration === 0).length;
+    if (healthyCount < MIN_HEALTHY_PLAYERS) {
+        promptCallFriend();
     }
 }
 
@@ -881,32 +932,24 @@ function buildCallFriendModalHtml(freeAgents) {
 }
 
 /** Displays Call Friend modal and sets up event listeners for the CALL buttons. */
-function promptCallFriend() {
+function promptCallFriend(onIgnore = null) {
     gameState = Game.getGameState(); 
-    if (!gameState || !gameState.playerTeam || !gameState.playerTeam.roster) {
-        console.error("Cannot prompt call friend: Invalid game state.");
-        return;
-    }
+    if (!gameState) return;
 
     const { freeAgents, playerTeam } = gameState;
-    
-    // ⚡ FIX: Get full objects
     const rosterObjects = Game.getRosterObjects(playerTeam);
+    const healthyCount = rosterObjects.filter(p => p && p.status?.duration === 0).length;
 
-    const unavailableCount = rosterObjects.filter(p => p && p.status?.duration > 0).length;
-    const healthyCount = rosterObjects.length - unavailableCount;
-
-    if (healthyCount >= MIN_HEALTHY_PLAYERS || !Array.isArray(freeAgents) || freeAgents.length === 0) {
-        return; 
-    }
-
-    const modalBodyIntro = `<p>You only have ${healthyCount} healthy players available! Call a friend to fill in?</p>`;
+    // If onIgnore is passed, we show the modal regardless of freeAgents length,
+    // because the user is trying to Advance. If no free agents, list is just empty/msg.
     
-    // Map free agents to include their relationship name
-    const freeAgentsWithRel = freeAgents.map(p => {
+    // Only skip if we have enough players AND we weren't forced to show this.
+    if (!onIgnore && (healthyCount >= MIN_HEALTHY_PLAYERS || !Array.isArray(freeAgents) || freeAgents.length === 0)) return;
+
+    const modalBodyIntro = `<p>Only ${healthyCount} healthy players! Call a friend?</p>`;
+    
+    const freeAgentsWithRel = (freeAgents || []).map(p => {
         if (!p) return null;
-        
-        // ⚡ FIX: Use rosterObjects (array of players) not roster (array of strings)
         const maxLevel = rosterObjects.reduce(
             (max, rp) => Math.max(max, Game.getRelationshipLevel(rp?.id, p.id)), 
             relationshipLevels.STRANGER.level
@@ -916,11 +959,13 @@ function promptCallFriend() {
     }).filter(Boolean); 
 
     const friendListHtml = buildCallFriendModalHtml(freeAgentsWithRel);
-    const modalBody = modalBodyIntro + friendListHtml;
+    
+    // 💡 FIX: Determine cancel button text/action
+    const cancelText = onIgnore ? "Proceed Shorthanded" : "Later";
+    const onCancel = onIgnore || null;
 
-    UI.showModal("Call a Friend?", modalBody, null, '', null, 'Maybe Later');
+    UI.showModal("Call a Friend?", modalBodyIntro + friendListHtml, null, '', onCancel, cancelText);
 
-    // ... (Rest of function remains the same) ...
     const modalBodyElement = document.getElementById('modal-body');
     if (!modalBodyElement) return;
 
@@ -928,7 +973,6 @@ function promptCallFriend() {
         if (e.target.matches('.call-friend-btn')) {
             const playerId = e.target.dataset.playerId;
             if (!playerId) return;
-            modalBodyElement.removeEventListener('click', callButtonDelegationHandler); 
             
             const result = Game.callFriend(playerId);
             UI.hideModal();
@@ -936,16 +980,87 @@ function promptCallFriend() {
             setTimeout(() => {
                 UI.showModal("Call Result", `<p>${result.message}</p>`);
                 gameState = Game.getGameState(); 
-                if (!gameState) return;
-                const activeTabEl = document.querySelector('#dashboard-tabs .tab-button.active');
-                const activeTab = activeTabEl ? activeTabEl.dataset.tab : 'my-team';
-                UI.switchTab(activeTab, gameState); 
+                if (gameState) UI.switchTab('my-team', gameState); 
             }, 100);
         }
     };
-    modalBodyElement.removeEventListener('click', callButtonDelegationHandler);
-    modalBodyElement.addEventListener('click', callButtonDelegationHandler);
+    modalBodyElement.addEventListener('click', callButtonDelegationHandler, {once:true});
 }
+
+// --- Public API ---
+window.app = {
+    startNewGame,
+    handleLoadGame,
+    handleLoadTestRoster,
+    handleSaveTestRoster,
+    handleConfirmTeam,
+    handleDraftPlayer,
+    onDraftSelect: handlePlayerSelectInDraft,
+    handleAdvanceWeek,
+    skipSim: UI.skipLiveGameSim,
+    setSpeed: UI.setSimSpeed,
+    cutPlayer: (id) => {
+        if(confirm("Cut this player?")) {
+            Game.playerCut(id);
+            UI.hideModal();
+            gameState = Game.getGameState();
+            UI.switchTab('my-team', gameState);
+        }
+    }
+};
+
+// --- Initialization ---
+document.addEventListener('DOMContentLoaded', () => {
+    console.log("App init...");
+    UI.setupElements();
+    
+    // Setup Listeners
+    document.getElementById('draft-search')?.addEventListener('input', () => {
+        if (gameState) UI.debouncedRenderDraftPool(gameState, handlePlayerSelectInDraft, currentSortColumn, currentSortDirection, positionOverallWeights);
+    });
+    document.getElementById('draft-filter-pos')?.addEventListener('change', () => {
+        if (gameState) UI.renderDraftPool(gameState, handlePlayerSelectInDraft, currentSortColumn, currentSortDirection, positionOverallWeights);
+    });
+    document.querySelector('#draft-screen thead tr')?.addEventListener('click', (e) => {
+        const headerCell = e.target.closest('th[data-sort]');
+        if (!headerCell || !gameState) return; 
+        const newSortColumn = headerCell.dataset.sort;
+        if (currentSortColumn === newSortColumn) {
+            currentSortDirection = (currentSortDirection === 'desc') ? 'asc' : 'desc';
+        } else {
+            currentSortColumn = newSortColumn;
+            currentSortDirection = 'desc';
+        }
+        UI.renderDraftPool(gameState, handlePlayerSelectInDraft, currentSortColumn, currentSortDirection, positionOverallWeights);
+        UI.updateDraftSortIndicators(currentSortColumn, currentSortDirection);
+    });
+
+    document.body.addEventListener('click', (e) => {
+        if (e.target.matches('.tab-button')) {
+            handleTabSwitch(e);
+        }
+        if (e.target.closest('.message-item')) {
+            const id = e.target.closest('.message-item').dataset.messageId;
+            handleMessageClick(id);
+        }
+    });
+
+    document.getElementById('offense-formation-select')?.addEventListener('change', handleFormationChange);
+    document.getElementById('defense-formation-select')?.addEventListener('change', handleFormationChange);
+    document.getElementById('dashboard-content')?.addEventListener('change', handleDepthChartSelect); 
+    
+    document.getElementById('stats-filter-team')?.addEventListener('change', handleStatsChange);
+    document.getElementById('stats-sort')?.addEventListener('change', handleStatsChange);
+
+    UI.setupDragAndDrop(handleDepthChartDrop);
+    UI.setupDepthChartTabs();
+
+    if (Game.loadGameState()) {
+        handleLoadGame();
+    } else {
+        UI.showScreen('start-screen'); 
+    }
+});
 
 
 /**
