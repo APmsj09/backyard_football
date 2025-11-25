@@ -4,7 +4,8 @@ import {
     getScoutedPlayerInfo,
     getGameState,
     substitutePlayers,
-    getRosterObjects
+    getRosterObjects,
+    changeFormation
 } from './game.js';
 import {
     offenseFormations,
