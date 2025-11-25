@@ -215,6 +215,7 @@ export function setupElements() {
         // Players / substitution panel
         simPlayersPanel: document.getElementById('sim-players-panel'),
         simPlayersList: document.getElementById('sim-players-list')
+        
     };
 
     // Log checks for missing elements
@@ -244,6 +245,7 @@ export function setupElements() {
             try { hideModal(); } catch (e) { console.warn('hideModal unavailable', e); }
         });
     }
+    setupFormationListeners();
 }
 
 /**
@@ -446,10 +448,16 @@ export function renderDraftScreen(gameState, onPlayerSelect, currentSelectedId, 
     if (elements.draftPickingTeam) elements.draftPickingTeam.textContent = pickingTeam.name || 'Unknown Team';
 
     renderDraftPool(gameState, onPlayerSelect, sortColumn, sortDirection);
-    
-    // --- 💡 FIX: Pass playerTeam object (renderPlayerRoster will call the helper) ---
     renderPlayerRoster(gameState.playerTeam); 
     updateDraftSortIndicators(sortColumn, sortDirection); 
+
+    if (currentSelectedId) {
+        // Find the player object from the master list (sorted or unsorted)
+        const playerObj = gameState.players.find(p => p.id === currentSelectedId);
+        if (playerObj) {
+            renderSelectedPlayerCard(playerObj, gameState);
+        }
+    }
 
     if (elements.draftPlayerBtn) {
         elements.draftPlayerBtn.disabled = !playerCanPick || currentSelectedId === null;
@@ -480,13 +488,25 @@ export function renderDraftPool(gameState, onPlayerSelect, sortColumn, sortDirec
         (!posFilter || p.favoriteOffensivePosition === posFilter || p.favoriteDefensivePosition === posFilter)
     );
 
-    // --- NEW SORT LOGIC ---
+    // --- IMPROVED SORT LOGIC WITH TIE-BREAKER ---
     const potentialOrder = { 'A': 5, 'B': 4, 'C': 3, 'D': 2, 'F': 1 };
 
+    // Helper: Sorts by primary key, then breaks ties with Overall Rating
     const sortPlayer = (a, b, key, category = null) => {
+        // 1. Primary Sort (e.g., Speed)
         const valA = category ? (a?.attributes?.[category]?.[key] || 0) : (a?.[key] || 0);
         const valB = category ? (b?.attributes?.[category]?.[key] || 0) : (b?.[key] || 0);
-        return sortDirection === 'asc' ? valA - valB : valB - valA;
+        
+        if (valA !== valB) {
+            return sortDirection === 'asc' ? valA - valB : valB - valA;
+        }
+
+        // 2. Tie-Breaker: Overall Rating (Always Descending)
+        // We want the best player at the top, even if we are sorting by age/height
+        const ovrA = calculateOverall(a, estimateBestPosition(a));
+        const ovrB = calculateOverall(b, estimateBestPosition(b));
+        
+        return ovrB - ovrA; 
     };
 
     switch (sortColumn) {
@@ -497,11 +517,12 @@ export function renderDraftPool(gameState, onPlayerSelect, sortColumn, sortDirec
             filteredPlayers.sort((a, b) => sortPlayer(a, b, 'age'));
             break;
         case 'position':
-            // This is a bit arbitrary, but sorts by one of the pref positions
             filteredPlayers.sort((a, b) => {
                 const posA = a.favoriteOffensivePosition || a.favoriteDefensivePosition;
                 const posB = b.favoriteOffensivePosition || b.favoriteDefensivePosition;
-                return sortDirection === 'asc' ? posA.localeCompare(posB) : posB.localeCompare(posA);
+                // Use overall as tiebreaker here too
+                if (posA !== posB) return sortDirection === 'asc' ? posA.localeCompare(posB) : posB.localeCompare(posA);
+                return calculateOverall(b, estimateBestPosition(b)) - calculateOverall(a, estimateBestPosition(a));
             });
             break;
         case 'height':
@@ -536,10 +557,18 @@ export function renderDraftPool(gameState, onPlayerSelect, sortColumn, sortDirec
             break;
         case 'potential':
         default:
+            // Improved Default Sort: Potential Letter -> Overall Rating
             filteredPlayers.sort((a, b) => {
                 const valA = potentialOrder[a?.potential] || 0;
                 const valB = potentialOrder[b?.potential] || 0;
-                return sortDirection === 'asc' ? valA - valB : valB - valA;
+                
+                if (valA !== valB) {
+                    return sortDirection === 'asc' ? valA - valB : valB - valA;
+                }
+                // If potential is same (e.g. both 'A'), sort by Overall
+                const ovrA = calculateOverall(a, estimateBestPosition(a));
+                const ovrB = calculateOverall(b, estimateBestPosition(b));
+                return ovrB - ovrA;
             });
             break;
     }
@@ -1049,9 +1078,9 @@ function renderDepthChartSide(side, gameState) {
     const playersStartingOnThisSide = new Set(Object.values(currentChart).filter(Boolean)); // Set of IDs
     
     // --- 💡 FIX: Filter from our full roster object list ---
-    const benchedPlayers = roster.filter(p => p && !playersStartingOnThisSide.has(p.id) && p.status?.type !== 'temporary');
+    const benchedPlayers = roster.filter(p => p && !playersStartingOnThisSide.has(p.id));
 
-    renderVisualFormationSlots(visualFieldContainer, currentChart, formationData, benchedPlayers, roster, side); // Pass full roster
+    renderVisualFormationSlots(visualFieldContainer, currentChart, formationData, benchedPlayers, roster, side);
     renderDepthChartBench(benchTableContainer, benchedPlayers, side);
 }
 
@@ -1091,7 +1120,7 @@ function renderVisualFormationSlots(container, currentChart, formationData, benc
         // 2. Build Dropdown Options (FULL ROSTER)
         // Map every player to an option object with their OVR for THIS specific position
         const rosterOptions = allRoster
-            .filter(p => p && p.status?.type !== 'temporary') // Filter out temporary/helping friends if desired
+            .filter(p => p) // Filter out temporary/helping friends if desired
             .map(p => {
                 // Check if this player is assigned to ANY slot in the current chart
                 const assignedSlot = Object.keys(currentChart).find(key => currentChart[key] === p.id);
@@ -1157,7 +1186,7 @@ function renderVisualFormationSlots(container, currentChart, formationData, benc
         slotEl.style.left = `${clampedX}%`;
         slotEl.style.top = `${clampedY}%`;
 
-        if (currentPlayer && currentPlayer.status?.type !== 'temporary') {
+        if (currentPlayer) {
              slotEl.draggable = true;
              slotEl.dataset.playerId = currentPlayer.id;
         }
@@ -1372,13 +1401,15 @@ function renderAvailablePlayerList(players, container, side) {
         playerEl.dataset.playerId = player.id;
         playerEl.dataset.side = side;
         playerEl.innerHTML = `${typeTag}${player.name ?? 'Unknown Player'}`;
+        
+        // --- Unified Drag Logic ---
+        // Always allow drag if player exists.
+        playerEl.draggable = true;
         playerEl.setAttribute('title', `Drag ${player.name ?? 'Player'} to ${side} slot`);
-        if (player.status?.type !== 'temporary') {
-            playerEl.draggable = true;
-        } else {
-            playerEl.draggable = false;
-            playerEl.classList.add('opacity-50', 'cursor-not-allowed');
-            playerEl.setAttribute('title', `${player.name ?? 'Player'} (Temporary - Cannot move)`);
+        
+        // Optional: Visual distinction without disabling functionality
+        if (player.status?.type === 'temporary') {
+            playerEl.classList.add('text-amber-700', 'font-semibold');
         }
         container.appendChild(playerEl);
     });
@@ -1468,18 +1499,53 @@ function renderStandingsTab(gameState) {
         const divisionTeamIdsArray = gameState.divisions[divName];
         if (!Array.isArray(divisionTeamIdsArray)) { continue; }
         const divisionTeamIds = new Set(divisionTeamIdsArray);
+        
         const divEl = document.createElement('div');
         divEl.className = 'mb-6';
         let tableHtml = `<h4 class="text-xl font-bold mb-2">${divName} Division</h4><table class="min-w-full bg-white text-sm"><thead class="bg-gray-800 text-white"><tr><th scope="col" class="py-2 px-3 text-left">Team</th><th scope="col" class="py-2 px-3">W</th><th scope="col" class="py-2 px-3">L</th><th scope="col" class="py-2 px-3">T</th></tr></thead><tbody class="divide-y">`;
+        
+        // --- 💡 FIX: Inserted New Sorting Logic Here ---
         const divTeams = gameState.teams
             .filter(t => t && divisionTeamIds.has(t.id))
-            .sort((a, b) => (b?.wins || 0) - (a?.wins || 0) || (a?.losses || 0) - (b?.losses || 0));
+            .sort((a, b) => {
+                // --- WIN PERCENTAGE SORT ---
+                // (Wins + 0.5 * Ties) / Total Games
+                const getWinPct = (team) => {
+                    const w = team.wins || 0;
+                    const l = team.losses || 0;
+                    const t = team.ties || 0;
+                    const games = w + l + t;
+                    return games === 0 ? 0 : (w + 0.5 * t) / games;
+                };
+
+                const pctA = getWinPct(a);
+                const pctB = getWinPct(b);
+
+                if (pctA !== pctB) return pctB - pctA; // Higher % first
+
+                // Tiebreaker: Most Wins
+                if ((b.wins || 0) !== (a.wins || 0)) return (b.wins || 0) - (a.wins || 0);
+                
+                // Tiebreaker: Alphabetical
+                return a.name.localeCompare(b.name);
+            });
+        // --- End Fix ---
+
         if (divTeams.length > 0) {
             divTeams.forEach(t => {
-                tableHtml += `<tr class="${t.id === gameState.playerTeam.id ? 'bg-amber-100 font-semibold' : ''}"><th scope="row" class="py-2 px-3 text-left">${t.name}</th><td class="text-center py-2 px-3">${t.wins || 0}</td><td class="text-center py-2 px-3">${t.losses || 0}</td></tr>`;
+                // Highlight player team
+                const isPlayer = t.id === gameState.playerTeam.id;
+                const rowClass = isPlayer ? 'bg-amber-100 font-bold border-l-4 border-amber-500' : '';
+                
+                tableHtml += `<tr class="${rowClass}">
+                    <th scope="row" class="py-2 px-3 text-left">${t.name}</th>
+                    <td class="text-center py-2 px-3">${t.wins || 0}</td>
+                    <td class="text-center py-2 px-3">${t.losses || 0}</td>
+                    <td class="text-center py-2 px-3 text-gray-500">${t.ties || 0}</td>
+                </tr>`;
             });
         } else {
-            tableHtml += '<tr><td colspan="3" class="p-4 text-center text-gray-500">No teams found.</td></tr>';
+            tableHtml += '<tr><td colspan="4" class="p-4 text-center text-gray-500">No teams found.</td></tr>';
         }
         divEl.innerHTML = tableHtml + `</tbody></table>`;
         elements.standingsContainer.appendChild(divEl);
@@ -1497,14 +1563,15 @@ function renderPlayerStatsTab(gameState) {
     const sortStat = elements.statsSort?.value || 'touchdowns';
     let playersToShow = gameState.players.filter(p => p && (teamIdFilter ? p.teamId === teamIdFilter : true));
     playersToShow.sort((a, b) => (b?.seasonStats?.[sortStat] || 0) - (a?.seasonStats?.[sortStat] || 0));
-    const stats = ['passYards', 'passCompletions', 'passAttempts', 'rushYards', 'recYards', 'receptions', 'touchdowns', 'tackles', 'sacks', 'interceptions', 'interceptionsThrown'];
+    const stats = ['passYards', 'passCompletions', 'passAttempts', 'rushYards', 'rushAttempts', 'recYards', 'receptions', 'touchdowns', 'tackles', 'sacks', 'interceptions', 'interceptionsThrown'];
     const statHeaders = stats.map(s => {
         if (s === 'passYards') return 'PASS YDS';
         if (s === 'passCompletions') return 'COMP';
         if (s === 'passAttempts') return 'ATT';
+        if (s === 'rushAttempts') return 'CAR';
         if (s === 'rushYards') return 'RUSH YDS';
-        if (s === 'recYards') return 'REC YDS';
         if (s === 'receptions') return 'REC';
+        if (s === 'recYards') return 'REC YDS';
         if (s === 'touchdowns') return 'TDS';
         if (s === 'tackles') return 'TKL';
         if (s === 'sacks') return 'SACK';
@@ -1687,6 +1754,39 @@ export function setupDepthChartTabs() {
         }
     });
 }
+/**
+ * 💡 FIX: Attach listeners to formation dropdowns.
+ * Call this inside setupElements() or renderDepthChartTab().
+ */
+export function setupFormationListeners() {
+    const offSelect = document.getElementById('offense-formation-select');
+    const defSelect = document.getElementById('defense-formation-select');
+
+    const handleFormationChange = (side, event) => {
+        const newFormation = event.target.value;
+        if (newFormation) {
+            changeFormation(side, newFormation);
+            // Re-render the tab to show new slots
+            const gs = getGameState();
+            // We need to find the depth chart tab function or re-trigger the tab switch
+            const depthChartTab = document.querySelector('[data-tab="depth-chart"]');
+            if (depthChartTab && depthChartTab.classList.contains('active')) {
+                // Trigger a re-render of the current tab
+                const event = new CustomEvent('refresh-ui'); 
+                document.dispatchEvent(event); 
+                // Note: You'll need to ensure your main loop handles 'refresh-ui' 
+                // or simply call renderDepthChartTab(gs) directly if accessible.
+            }
+        }
+    };
+
+    if (offSelect) {
+        offSelect.onchange = (e) => handleFormationChange('offense', e);
+    }
+    if (defSelect) {
+        defSelect.onchange = (e) => handleFormationChange('defense', e);
+    }
+}
 // ===================================
 // --- Live Game Sim UI Logic ---
 // ===================================
@@ -1856,7 +1956,7 @@ export function drawFieldVisualization(frameData) {
         let jiggleX = 0;
         let jiggleY = 0;
         if (player.isEngaged) {
-            const jiggleAmount = 1.5;
+            const jiggleAmount = 0.8;
             jiggleX = (Math.random() - 0.5) * jiggleAmount;
             jiggleY = (Math.random() - 0.5) * jiggleAmount;
         }
@@ -2466,11 +2566,18 @@ function runLiveGameTick() {
                         } else {
                             liveGameCurrentAwayScore += 6;
                         }
+                } else if (playLogEntry.includes('SAFETY') || playLogEntry.includes('Safety')) {
+                    // Safety = 2 points for the Defense (the team NOT with the ball)
+                    if (liveGamePossessionName === currentLiveGameResult.homeTeam.name) {
+                        liveGameCurrentAwayScore += 2;
+                    } else {
+                        liveGameCurrentHomeScore += 2;
                     }
-                    liveGameBallOn = 100; liveGameDriveActive = false;
-                    styleClass = 'font-semibold text-green-400';
-                    descriptiveText = playLogEntry;
-                    playHasEnded = true; // A TD ends the play
+                    
+                    liveGameDriveActive = false; // Ends the drive
+                    styleClass = 'font-bold text-red-500 text-lg';
+                    descriptiveText = `🚨 ${playLogEntry} (+2 Pts)`;
+                    playHasEnded = true;
 
                 } else if (playLogEntry.includes('conversion GOOD!')) {
                     const points = playLogEntry.includes('2-point') ? 2 : 1;
