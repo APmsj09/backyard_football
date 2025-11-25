@@ -2237,15 +2237,63 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
             }
         }
 
-        // --- C. BLITZ / RUSH / SPY ---
-        else if (assignment?.includes('rush') || assignment?.includes('blitz')) {
-            if (ballCarrierState) {
-                pState.targetX = ballCarrierState.x; pState.targetY = ballCarrierState.y;
-            } else if (qbState) {
-                pState.targetX = qbState.x; pState.targetY = qbState.y;
-            } else {
-                pState.targetX = pState.x; pState.targetY = pState.y + 2;
+        // --- HELPER: Simple Obstacle Avoidance ---
+        const getPathAroundObstacle = (currentPlayer, targetPoint) => {
+            // 1. Find the closest "stuck" obstacle in my direct path
+            const distToTarget = getDistance(currentPlayer, targetPoint);
+            
+            // Look for stunned players or opposing linemen strictly between me and the target
+            const obstacle = playState.activePlayers.find(ob => 
+                ob.id !== currentPlayer.id &&
+                ob.stunnedTicks > 0 && // It's a static obstacle
+                getDistance(currentPlayer, ob) < 2.5 && // It's close to me
+                getDistance(ob, targetPoint) < distToTarget // It's in front of me, not behind
+            );
+
+            if (obstacle) {
+                // 2. Calculate a sidestep
+                // If I'm slightly to the left, go further left. If right, go right.
+                // Default to the "open" side (away from center) if head-on.
+                const dx = currentPlayer.x - obstacle.x;
+                
+                // If perfectly head-on (dx=0), pick a side based on field position
+                const avoidDir = (Math.abs(dx) > 0.1) ? Math.sign(dx) : (currentPlayer.x < CENTER_X ? -1 : 1);
+                
+                // Target a point 1.5 yards to the side and 1 yard forward
+                return {
+                    x: obstacle.x + (avoidDir * 1.5),
+                    y: obstacle.y + (targetPoint.y > currentPlayer.y ? 1.0 : -1.0)
+                };
             }
+            return targetPoint; // No obstacle, go straight there
+        };
+
+        // --- C. BLITZ / RUSH / SPY / PURSUIT ---
+        const isBlitzOrRush = assignment?.includes('rush') || assignment?.includes('blitz');
+        const isPursuit = pState.action === 'pursuit';
+
+        if (isBlitzOrRush || isPursuit) {
+            let rawTarget = { x: pState.x, y: pState.y };
+
+            if (ballCarrierState) {
+                // If chasing ball carrier, allow for the lead/prediction logic you already have
+                // (Assuming you kept the prediction logic from previous fixes)
+                if (pState.targetX && pState.targetY && isPursuit) {
+                     rawTarget = { x: pState.targetX, y: pState.targetY };
+                } else {
+                     rawTarget = { x: ballCarrierState.x, y: ballCarrierState.y };
+                }
+            } else if (qbState) {
+                rawTarget = { x: qbState.x, y: qbState.y };
+            } else {
+                // Default rush straight ahead
+                rawTarget = { x: pState.x, y: pState.y + 2 };
+            }
+
+            // --- APPLY AVOIDANCE ---
+            const adjustedTarget = getPathAroundObstacle(pState, rawTarget);
+            pState.targetX = adjustedTarget.x;
+            pState.targetY = adjustedTarget.y;
         }
         else if (assignment === 'spy_QB') {
             if (qbState) {
