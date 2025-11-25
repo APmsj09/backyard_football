@@ -801,7 +801,8 @@ function resetGameStats(teamA, teamB) {
         player.gameStats = {
             receptions: 0, recYards: 0, passYards: 0, rushYards: 0, touchdowns: 0,
             tackles: 0, sacks: 0, interceptions: 0,
-            passAttempts: 0, passCompletions: 0, interceptionsThrown: 0
+            passAttempts: 0, passCompletions: 0, interceptionsThrown: 0,
+            rushAttempts: 0, targets: 0, returnYards: 0, drops: 0 // <--- ADDED MISSING ONES
         };
     });
 }
@@ -2431,21 +2432,27 @@ function checkTackleCollisions(playState, gameLog) {
                     // Sack Logic
                     const isBehindLOS = ballCarrierState.y < playState.lineOfScrimmage;
                     const isSackAction = (ballCarrierState.action === 'qb_setup' || ballCarrierState.action === 'qb_scramble');
-                    
-                    if (ballCarrierState.slot.startsWith('QB') && isBehindLOS && (playState.type === 'pass' || isSackAction)) {
+        
+                    // --- 💡 FIX: SAFETY DETECTION START ---
+                    // Defensive Endzone is Y=0 to Y=10.
+                    // If Offense is tackled here, it is a Safety.
+                    const isSafety = ballCarrierState.isOffense && ballCarrierState.y <= 10.0;
+        
+                    if (isSafety) {
+                        playState.safety = true;
+                        if (gameLog) gameLog.push(`🚨 SAFETY! ${ballCarrierState.name} tackled in the endzone by ${defender.name}!`);
+                        // Safety overrides Sack recording for yards, but we still credit the tackle
+                    } 
+                    else if (ballCarrierState.slot.startsWith('QB') && isBehindLOS && (playState.type === 'pass' || isSackAction)) {
                         playState.sack = true;
                         if (gameLog) gameLog.push(`💥 SACK! ${defender.name} drops ${ballCarrierState.name}!`);
                         tacklerPlayer.gameStats.sacks = (tacklerPlayer.gameStats.sacks || 0) + 1;
                     } else {
-                        // Safety Logic
-                        if (playState.safety) {
-                             if (gameLog) gameLog.push(`SAFETY! ${ballCarrierState.name} tackled in endzone by ${defender.name}!`);
-                        } else {
-                             // Normal Tackle
-                             const yards = playState.yards.toFixed(1);
-                             if (gameLog) gameLog.push(`✋ ${ballCarrierState.name} tackled by ${defender.name} for ${yards < 0 ? 'a loss of ' + Math.abs(yards) : 'a gain of ' + yards}.`);
-                        }
+                         // Normal Tackle
+                         const yards = playState.yards.toFixed(1);
+                         if (gameLog) gameLog.push(`✋ ${ballCarrierState.name} tackled by ${defender.name} for ${yards < 0 ? 'a loss of ' + Math.abs(yards) : 'a gain of ' + yards}.`);
                     }
+                    // --- 💡 FIX: SAFETY DETECTION END ---
                 }
                 return true; // Play ended
             } else { // Broken Tackle (Juke)
@@ -3316,7 +3323,7 @@ const ensureStats = (player) => {
             // Passing
             passAttempts: 0, passCompletions: 0, passYards: 0, interceptionsThrown: 0,
             // Rushing
-            rushYards: 0,
+            rushAttempts: 0, rushYards: 0, 
             // Receiving
             receptions: 0, recYards: 0, targets: 0, drops: 0,
             // Defense / Special Teams
@@ -3420,7 +3427,10 @@ function finalizeStats(playState, offense, defense) {
 
     // --- 4. Handle Sack (Negative Rush Yards for QB) ---
     if (playState.sack && carrierPlayer) {
-        // In simple stats, a sack counts as negative rushing yards for the QB
+        // In this game engine, Sacks count as negative QB Rushing yards (NCAA style rules)
+        // We do NOT increment rushAttempts here to avoid skewing "Carries" with sacks,
+        // unless you strictly follow NCAA rules where a sack is a rush attempt. 
+        // For gameplay clarity, we usually keep them separate.
         carrierPlayer.gameStats.rushYards += Math.round(playState.yards); 
         return; // Sack ends the stat processing for this play
     }
@@ -3430,7 +3440,8 @@ function finalizeStats(playState, offense, defense) {
     const finalYards = Math.round(playState.yards);
 
     if (playState.incomplete) {
-        // Track Drop? (Optional: You can add logic here if you have a 'dropped' flag)
+        // Track Drop? (Optional)
+        // if (playState.wasDrop && receiverPlayer) receiverPlayer.gameStats.drops++;
     } else if (carrierPlayer) {
         
         // --- A. Offensive Passing Play ---
@@ -3449,6 +3460,7 @@ function finalizeStats(playState, offense, defense) {
         } 
         // --- B. Offensive Rushing Play ---
         else if (carrierState.isOffense) {
+            carrierPlayer.gameStats.rushAttempts++; // <--- 💡 FIX: Track Carries
             carrierPlayer.gameStats.rushYards += finalYards;
             if (isTouchdown) carrierPlayer.gameStats.touchdowns++;
         } 
@@ -3468,6 +3480,12 @@ function finalizeStats(playState, offense, defense) {
             // If it was an INT, credit the thrower with an INT thrown
             if (playState.turnover && qbPlayer && playState.ballState.throwInitiated) {
                 qbPlayer.gameStats.interceptionsThrown++;
+            }
+
+            // --- 💡 FIX: Credit the Defender with the INT ---
+            // If it was a pass play, and it was a turnover, the carrier (defender) gets an INT.
+            if (playState.turnover && playState.ballState.throwInitiated) {
+                carrierPlayer.gameStats.interceptions++;
             }
         }
     }
@@ -5632,70 +5650,90 @@ export function substitutePlayers(teamId, outPlayerId, inPlayerId) {
 function autoMakeSubstitutions(team, options = {}) {
     if (!team || !team.depthChart || !team.roster) return 0;
     
-    // Default options
     const thresholdFatigue = options.thresholdFatigue || 50; 
+    const reEntryFatigue = 20; // Player must recover to this fatigue level to re-enter
     const maxSubs = options.maxSubs || 3;
     const chance = typeof options.chance === 'number' ? options.chance : 0.8; 
 
     if (Math.random() > chance) return 0; 
 
     const fullRoster = getRosterObjects(team);
-    
-    // Identify current starters
-    const sides = Object.keys(team.depthChart || {});
-    const starterIds = new Set();
-    sides.forEach(side => {
-        const chart = team.depthChart[side] || {};
-        Object.values(chart).forEach(id => { if (id) starterIds.add(id); });
-    });
-
     let subsDone = 0;
+    const sides = Object.keys(team.depthChart || {});
 
     for (const side of sides) {
         const chart = team.depthChart[side] || {};
-        for (const slot of Object.keys(chart)) {
+        const formationSlots = Object.keys(chart);
+
+        for (const slot of formationSlots) {
             if (subsDone >= maxSubs) break;
             
-            const starterId = chart[slot];
-            if (!starterId) continue;
+            const currentPlayerId = chart[slot];
+            if (!currentPlayerId) continue;
             
-            const starter = fullRoster.find(p => p && p.id === starterId);
-            if (!starter) continue;
-            
-            // Skip if starter is injured (handled elsewhere) or not tired enough
-            if (starter.status && starter.status.duration > 0) continue; 
-            const starterFat = starter.fatigue || 0;
+            const currentPlayer = fullRoster.find(p => p && p.id === currentPlayerId);
+            if (!currentPlayer) continue;
 
-            if (starterFat >= thresholdFatigue) {
-                // Find bench candidates
-                const candidates = fullRoster.filter(p => 
+            const currentFatigue = currentPlayer.fatigue || 0;
+
+            // --- SCENARIO A: Player is TIRED -> Sub Out ---
+            if (currentFatigue >= thresholdFatigue) {
+                // Find a replacement who is NOT currently starting
+                const currentStarters = new Set(Object.values(chart));
+                
+                const benchOptions = fullRoster.filter(p => 
                     p && 
-                    !starterIds.has(p.id) && 
-                    (!p.status || p.status.duration === 0) && 
-                    ((p.fatigue || 0) < (starterFat - 10)) 
+                    !currentStarters.has(p.id) && // On bench
+                    (!p.status || p.status.duration === 0) && // Healthy
+                    (p.fatigue || 0) < (thresholdFatigue - 15) // Fresh
                 );
 
-                if (candidates.length === 0) continue;
+                if (benchOptions.length > 0) {
+                    // Pick best fit
+                    const bestSub = benchOptions.reduce((best, curr) => 
+                        (calculateSlotSuitability(curr, slot, side, team) > calculateSlotSuitability(best, slot, side, team)) ? curr : best
+                    , benchOptions[0]);
 
-                let best = null; 
-                let bestScore = -Infinity;
-                
-                for (const cand of candidates) {
-                    const score = calculateSlotSuitability(cand, slot, side, team);
-                    if (score > bestScore) { bestScore = score; best = cand; }
-                }
-
-                if (best) {
-                    const res = substitutePlayers(team.id, starterId, best.id);
+                    const res = substitutePlayers(team.id, currentPlayerId, bestSub.id);
                     if (res && res.success) {
                         subsDone++;
-                        starterIds.delete(starterId);
-                        starterIds.add(best.id);
+                        // console.log(`SUB: ${currentPlayer.name} (Fatigue ${currentFatigue.toFixed(0)}) subbed OUT for ${bestSub.name}`);
+                    }
+                }
+            }
+            
+            // --- SCENARIO B: Current Player is a BACKUP, check if STARTER is Ready ---
+            // Heuristic: If this player's Overall is significantly lower than a benched player for this slot
+            else {
+                const currentSuitability = calculateSlotSuitability(currentPlayer, slot, side, team);
+                const currentStarters = new Set(Object.values(chart));
+
+                // Look for a "better" player on the bench who is fully rested
+                const restedStarters = fullRoster.filter(p => 
+                    p && 
+                    !currentStarters.has(p.id) && 
+                    (!p.status || p.status.duration === 0) &&
+                    (p.fatigue || 0) < reEntryFatigue // Must be very fresh to bump a player
+                );
+
+                if (restedStarters.length > 0) {
+                    const bestRested = restedStarters.reduce((best, curr) => 
+                        (calculateSlotSuitability(curr, slot, side, team) > calculateSlotSuitability(best, slot, side, team)) ? curr : best
+                    , restedStarters[0]);
+                    
+                    const bestRestedScore = calculateSlotSuitability(bestRested, slot, side, team);
+
+                    // If the guy on the bench is significantly better (meaning he's the starter), put him back in
+                    if (bestRestedScore > currentSuitability + 5) {
+                         const res = substitutePlayers(team.id, currentPlayerId, bestRested.id);
+                         if (res && res.success) {
+                             subsDone++;
+                             // console.log(`SUB: Starter ${bestRested.name} (Fatigue ${bestRested.fatigue.toFixed(0)}) returning for ${currentPlayer.name}`);
+                         }
                     }
                 }
             }
         }
-        if (subsDone >= maxSubs) break;
     }
     return subsDone;
 }
