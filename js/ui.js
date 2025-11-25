@@ -73,7 +73,7 @@ function debounce(func, delay) {
 /** Helper: Gets full player objects from a team's roster of IDs. */
 function getUIRosterObjects(team) {
     if (!team || !Array.isArray(team.roster)) return [];
-    
+
     const gs = getGameState(); // Get the master game state
     if (!gs || !Array.isArray(gs.players)) return [];
 
@@ -82,7 +82,7 @@ function getUIRosterObjects(team) {
         console.warn("Detected old save file format. Please start a new game.");
         return team.roster.filter(p => p);
     }
-    
+
     // New way: Look up IDs from the master list
     const rosterIds = new Set(team.roster);
     return gs.players.filter(p => p && rosterIds.has(p.id));
@@ -216,7 +216,7 @@ export function setupElements() {
         // Players / substitution panel
         simPlayersPanel: document.getElementById('sim-players-panel'),
         simPlayersList: document.getElementById('sim-players-list')
-        
+
     };
 
     // Log checks for missing elements
@@ -439,7 +439,7 @@ export function renderDraftScreen(gameState, onPlayerSelect, currentSelectedId, 
         if (elements.draftHeader) elements.draftHeader.innerHTML = `<h2 class="text-3xl font-bold text-red-500">Draft Error Occurred</h2>`;
         return;
     }
-    
+
     // --- 💡 FIX: Use .roster.length (array of IDs is fine for a count) ---
     const currentTeamRosterSize = pickingTeam.roster?.length || 0;
     const playerCanPick = pickingTeam.id === playerTeam.id && currentTeamRosterSize < ROSTER_LIMIT;
@@ -449,8 +449,8 @@ export function renderDraftScreen(gameState, onPlayerSelect, currentSelectedId, 
     if (elements.draftPickingTeam) elements.draftPickingTeam.textContent = pickingTeam.name || 'Unknown Team';
 
     renderDraftPool(gameState, onPlayerSelect, sortColumn, sortDirection);
-    renderPlayerRoster(gameState.playerTeam); 
-    updateDraftSortIndicators(sortColumn, sortDirection); 
+    renderPlayerRoster(gameState.playerTeam);
+    updateDraftSortIndicators(sortColumn, sortDirection);
 
     if (currentSelectedId) {
         // Find the player object from the master list (sorted or unsorted)
@@ -478,7 +478,7 @@ export function renderDraftPool(gameState, onPlayerSelect, sortColumn, sortDirec
 
     // --- 💡 FIX: Get roster objects for relationship calc ---
     const playerRoster = getUIRosterObjects(gameState.playerTeam);
-    
+
     const undraftedPlayers = gameState.players.filter(p => p && !p.teamId);
     const searchTerm = elements.draftSearch?.value.toLowerCase() || '';
     const posFilter = elements.draftFilterPos?.value || '';
@@ -497,7 +497,7 @@ export function renderDraftPool(gameState, onPlayerSelect, sortColumn, sortDirec
         // 1. Primary Sort (e.g., Speed)
         const valA = category ? (a?.attributes?.[category]?.[key] || 0) : (a?.[key] || 0);
         const valB = category ? (b?.attributes?.[category]?.[key] || 0) : (b?.[key] || 0);
-        
+
         if (valA !== valB) {
             return sortDirection === 'asc' ? valA - valB : valB - valA;
         }
@@ -506,8 +506,8 @@ export function renderDraftPool(gameState, onPlayerSelect, sortColumn, sortDirec
         // We want the best player at the top, even if we are sorting by age/height
         const ovrA = calculateOverall(a, estimateBestPosition(a));
         const ovrB = calculateOverall(b, estimateBestPosition(b));
-        
-        return ovrB - ovrA; 
+
+        return ovrB - ovrA;
     };
 
     switch (sortColumn) {
@@ -562,7 +562,7 @@ export function renderDraftPool(gameState, onPlayerSelect, sortColumn, sortDirec
             filteredPlayers.sort((a, b) => {
                 const valA = potentialOrder[a?.potential] || 0;
                 const valB = potentialOrder[b?.potential] || 0;
-                
+
                 if (valA !== valB) {
                     return sortDirection === 'asc' ? valA - valB : valB - valA;
                 }
@@ -656,7 +656,7 @@ export function renderSelectedPlayerCard(player, gameState) {
         if (elements.draftPlayerBtn) elements.draftPlayerBtn.disabled = true;
         return;
     }
-    
+
     // --- 💡 FIX: Get roster objects for relationship calc ---
     const playerRoster = getUIRosterObjects(gameState.playerTeam);
     const maxLevel = playerRoster.reduce(
@@ -718,11 +718,11 @@ export function renderPlayerRoster(playerTeam) {
         console.error("Cannot render player roster: Missing elements or playerTeam data.");
         return;
     }
-    
+
     // --- 💡 FIX: Get roster objects ---
     const roster = getUIRosterObjects(playerTeam);
     const ROSTER_LIMIT = 10;
-    
+
     elements.rosterCount.textContent = `${roster.length}/${ROSTER_LIMIT}`;
     elements.draftRosterList.innerHTML = '';
 
@@ -732,13 +732,13 @@ export function renderPlayerRoster(playerTeam) {
         roster.forEach(player => {
             if (!player) return;
             const li = document.createElement('li');
-            const estimatedPos = estimateBestPosition(player, positionOverallWeights); 
+            const estimatedPos = estimateBestPosition(player, positionOverallWeights);
             li.className = 'p-2';
-            li.textContent = `${player.name} (${estimatedPos ?? '?'})`; 
+            li.textContent = `${player.name} (${estimatedPos ?? '?'})`;
             elements.draftRosterList.appendChild(li);
         });
     }
-    
+
     // --- 💡 FIX: Pass the full roster objects ---
     renderRosterSummary(roster);
 }
@@ -753,7 +753,7 @@ function renderRosterSummary(roster) { // 💡 FIX: Now accepts the roster objec
     }
 
     let summaryHtml = '<h5 class="font-bold text-sm mb-1">Team Starters</h5><div class="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">';
-    
+
     let availablePlayers = roster.filter(p =>
         p &&
         p.attributes &&
@@ -814,8 +814,8 @@ export function renderDashboard(gameState) {
     const currentW = (typeof currentWeek === 'number' && currentWeek < WEEKS_IN_SEASON) ? `Week ${currentWeek + 1}` : 'Offseason';
 
     if (elements.dashboardTeamName) elements.dashboardTeamName.textContent = playerTeam.name || 'Your Team';
-    const recordText = `Record: ${playerTeam.wins || 0} - ${playerTeam.losses || 0}` + 
-                       ((playerTeam.ties && playerTeam.ties > 0) ? ` - ${playerTeam.ties}` : '');
+    const recordText = `Record: ${playerTeam.wins || 0} - ${playerTeam.losses || 0}` +
+        ((playerTeam.ties && playerTeam.ties > 0) ? ` - ${playerTeam.ties}` : '');
     if (elements.dashboardRecord) elements.dashboardRecord.textContent = `Record: ${playerTeam.wins || 0} - ${playerTeam.losses || 0}`;
     if (elements.dashboardYear) elements.dashboardYear.textContent = year || '?';
     if (elements.dashboardWeek) elements.dashboardWeek.textContent = currentW;
@@ -1014,10 +1014,10 @@ function renderDepthChartTab(gameState) {
         if (elements.defenseDepthChartPane) elements.defenseDepthChartPane.innerHTML = '<p class="text-red-500">Error loading defense data.</p>';
         return;
     }
-    
+
     // --- 💡 FIX: Get roster objects ---
     const permanentRoster = getUIRosterObjects(gameState.playerTeam)
-                                .filter(p => p && p.status?.type !== 'temporary');
+        .filter(p => p && p.status?.type !== 'temporary');
 
     renderPositionalOveralls(permanentRoster);
     renderFormationDropdown('offense', Object.values(offenseFormations), gameState.playerTeam.formations.offense);
@@ -1042,11 +1042,11 @@ function renderPositionalOveralls(roster) { // 💡 FIX: Accepts roster objects
     if (!elements.positionalOverallsContainer) return;
     const positions = Object.keys(positionOverallWeights);
     let table = `<table class="min-w-full text-sm text-left"><thead class="bg-gray-100"><tr><th scope="col" class="p-2 font-semibold sticky left-0 bg-gray-100 z-10">Player</th>${positions.map(p => `<th scope="col" class="p-2 font-semibold text-center">${p}</th>`).join('')}</tr></thead><tbody>`;
-    
+
     // --- 💡 FIX: roster is now the full object array ---
     if (roster && roster.length > 0) {
         roster.forEach(player => {
-    // --- 💡 END FIX ---
+            // --- 💡 END FIX ---
             if (!player) return;
             table += `<tr class="border-b"><th scope="row" class="p-2 font-bold sticky left-0 bg-white z-0">${player.name}</th>${positions.map(p => `<td class="p-2 text-center">${calculateOverall(player, p)}</td>`).join('')}</tr>`;
         });
@@ -1067,17 +1067,17 @@ function renderDepthChartSide(side, gameState) {
         if (benchTableContainer) benchTableContainer.innerHTML = '<p class="text-red-500">Error</p>';
         return;
     }
-    
+
     const { depthChart, formations } = gameState.playerTeam;
     // --- 💡 FIX: Get roster objects ---
     const roster = getUIRosterObjects(gameState.playerTeam);
-    
+
     const currentChart = depthChart[side] || {};
     const formationName = formations[side];
     const formationData = (side === 'offense' ? offenseFormations[formationName] : defenseFormations[formationName]);
 
     const playersStartingOnThisSide = new Set(Object.values(currentChart).filter(Boolean)); // Set of IDs
-    
+
     // --- 💡 FIX: Filter from our full roster object list ---
     const benchedPlayers = roster.filter(p => p && !playersStartingOnThisSide.has(p.id));
 
@@ -1092,7 +1092,7 @@ function renderDepthChartSide(side, gameState) {
  */
 function renderVisualFormationSlots(container, currentChart, formationData, benchedPlayers, allRoster, side) {
     container.innerHTML = '';
-    container.classList.add('visual-field-container'); 
+    container.classList.add('visual-field-container');
 
     if (!formationData || !formationData.slots || !formationData.coordinates) {
         container.innerHTML = '<div class="flex h-full items-center justify-center text-white/70 italic">Select a formation to view alignment.</div>';
@@ -1106,8 +1106,8 @@ function renderVisualFormationSlots(container, currentChart, formationData, benc
     losEl.style.top = `${LOS_PERCENT}%`;
     container.appendChild(losEl);
 
-    const X_SPACING_MULTIPLIER = 2.5; 
-    const Y_SPACING_MULTIPLIER = 4.5; 
+    const X_SPACING_MULTIPLIER = 2.5;
+    const Y_SPACING_MULTIPLIER = 4.5;
     const PADDING_OFFSET = 7;
 
     formationData.slots.forEach(slot => {
@@ -1116,7 +1116,7 @@ function renderVisualFormationSlots(container, currentChart, formationData, benc
         const relCoords = formationData.coordinates[slot] || [0, 0];
 
         // 1. Determine Position Context (e.g., "WR" from "WR1")
-        const basePosition = slot.replace(/\d/g, ''); 
+        const basePosition = slot.replace(/\d/g, '');
 
         // 2. Build Dropdown Options (FULL ROSTER)
         // Map every player to an option object with their OVR for THIS specific position
@@ -1143,7 +1143,7 @@ function renderVisualFormationSlots(container, currentChart, formationData, benc
 
         // Generate HTML for options
         let optionsHtml = '<option value="null">-- Empty --</option>';
-        
+
         rosterOptions.forEach(opt => {
             let label = `${opt.name} - ${opt.ovr}`;
             let styleClass = "";
@@ -1172,7 +1172,7 @@ function renderVisualFormationSlots(container, currentChart, formationData, benc
         const x_percent = 50 + (relCoords[0] * X_SPACING_MULTIPLIER);
         let y_percent;
         if (side === 'offense') {
-            y_percent = LOS_PERCENT + (relCoords[1] * Y_SPACING_MULTIPLIER); 
+            y_percent = LOS_PERCENT + (relCoords[1] * Y_SPACING_MULTIPLIER);
         } else {
             y_percent = LOS_PERCENT - (relCoords[1] * Y_SPACING_MULTIPLIER);
         }
@@ -1188,8 +1188,8 @@ function renderVisualFormationSlots(container, currentChart, formationData, benc
         slotEl.style.top = `${clampedY}%`;
 
         if (currentPlayer) {
-             slotEl.draggable = true;
-             slotEl.dataset.playerId = currentPlayer.id;
+            slotEl.draggable = true;
+            slotEl.dataset.playerId = currentPlayer.id;
         }
 
         // Badge Logic
@@ -1201,7 +1201,7 @@ function renderVisualFormationSlots(container, currentChart, formationData, benc
             else if (overall >= 80) colorClass = 'bg-blue-600';
             else if (overall >= 70) colorClass = 'bg-amber-600';
             else if (overall >= 60) colorClass = 'bg-red-600';
-            
+
             overallHtml = `<div class="slot-overall ${colorClass}">${overall}</div>`;
         } else {
             overallHtml = `<div class="slot-overall bg-gray-500">--</div>`;
@@ -1214,18 +1214,18 @@ function renderVisualFormationSlots(container, currentChart, formationData, benc
                 ${optionsHtml}
             </select>
         `;
-        
+
         const select = slotEl.querySelector('select');
         select.addEventListener('change', (e) => {
             const newPlayerId = e.target.value;
-            
+
             // Dispatch event to Main.js to handle the data update (and the swap logic)
-            const event = new CustomEvent('depth-chart-changed', { 
-                detail: { 
-                    playerId: newPlayerId === 'null' ? null : newPlayerId, 
-                    slot: slot, 
-                    side: side 
-                } 
+            const event = new CustomEvent('depth-chart-changed', {
+                detail: {
+                    playerId: newPlayerId === 'null' ? null : newPlayerId,
+                    slot: slot,
+                    side: side
+                }
             });
             document.dispatchEvent(event);
         });
@@ -1257,7 +1257,7 @@ function renderDepthChartBench(container, benchedPlayers, side) {
     } else {
         benchedPlayers.forEach(p => {
             if (!p || !p.attributes || !p.status) return;
-            
+
             const statusClass = p.status.duration > 0 ? 'text-red-500 font-semibold' : 'text-green-600';
             const statusText = p.status.description || 'Healthy';
 
@@ -1402,12 +1402,12 @@ function renderAvailablePlayerList(players, container, side) {
         playerEl.dataset.playerId = player.id;
         playerEl.dataset.side = side;
         playerEl.innerHTML = `${typeTag}${player.name ?? 'Unknown Player'}`;
-        
+
         // --- Unified Drag Logic ---
         // Always allow drag if player exists.
         playerEl.draggable = true;
         playerEl.setAttribute('title', `Drag ${player.name ?? 'Player'} to ${side} slot`);
-        
+
         // Optional: Visual distinction without disabling functionality
         if (player.status?.type === 'temporary') {
             playerEl.classList.add('text-amber-700', 'font-semibold');
@@ -1500,11 +1500,11 @@ function renderStandingsTab(gameState) {
         const divisionTeamIdsArray = gameState.divisions[divName];
         if (!Array.isArray(divisionTeamIdsArray)) { continue; }
         const divisionTeamIds = new Set(divisionTeamIdsArray);
-        
+
         const divEl = document.createElement('div');
         divEl.className = 'mb-6';
         let tableHtml = `<h4 class="text-xl font-bold mb-2">${divName} Division</h4><table class="min-w-full bg-white text-sm"><thead class="bg-gray-800 text-white"><tr><th scope="col" class="py-2 px-3 text-left">Team</th><th scope="col" class="py-2 px-3">W</th><th scope="col" class="py-2 px-3">L</th><th scope="col" class="py-2 px-3">T</th></tr></thead><tbody class="divide-y">`;
-        
+
         // --- 💡 FIX: Inserted New Sorting Logic Here ---
         const divTeams = gameState.teams
             .filter(t => t && divisionTeamIds.has(t.id))
@@ -1526,7 +1526,7 @@ function renderStandingsTab(gameState) {
 
                 // Tiebreaker: Most Wins
                 if ((b.wins || 0) !== (a.wins || 0)) return (b.wins || 0) - (a.wins || 0);
-                
+
                 // Tiebreaker: Alphabetical
                 return a.name.localeCompare(b.name);
             });
@@ -1537,7 +1537,7 @@ function renderStandingsTab(gameState) {
                 // Highlight player team
                 const isPlayer = t.id === gameState.playerTeam.id;
                 const rowClass = isPlayer ? 'bg-amber-100 font-bold border-l-4 border-amber-500' : '';
-                
+
                 tableHtml += `<tr class="${rowClass}">
                     <th scope="row" class="py-2 px-3 text-left">${t.name}</th>
                     <td class="text-center py-2 px-3">${t.wins || 0}</td>
@@ -1657,9 +1657,9 @@ export function renderOffseasonScreen(offseasonReport, year) {
 export function setupDragAndDrop(onDrop) {
     const container = document.getElementById('dashboard-content');
     if (!container) { console.error("Drag/drop container (dashboard-content) missing."); return; }
-    
+
     let draggedEl = null;
-    
+
     container.addEventListener('dragstart', e => {
         // --- 💡 FIX: Drag from bench row OR visual slot ---
         if (e.target.matches('.bench-player-row') || e.target.matches('.player-slot-visual[draggable="true"]')) {
@@ -1680,7 +1680,7 @@ export function setupDragAndDrop(onDrop) {
     });
 
     container.addEventListener('dragend', e => {
-        if (draggedEl) { 
+        if (draggedEl) {
             draggedEl.classList.remove('dragging');
         }
         draggedEl = null; dragPlayerId = null; dragSide = null;
@@ -1690,12 +1690,12 @@ export function setupDragAndDrop(onDrop) {
     container.addEventListener('dragover', e => {
         e.preventDefault();
         e.dataTransfer.dropEffect = 'move';
-        
+
         // --- 💡 FIX: Target the new visual slot ---
         const targetSlot = e.target.closest('.player-slot-visual');
-        
+
         document.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over'));
-        
+
         if (targetSlot && targetSlot.dataset.side === dragSide) {
             targetSlot.classList.add('drag-over');
         }
@@ -1703,7 +1703,7 @@ export function setupDragAndDrop(onDrop) {
 
     container.addEventListener('dragleave', e => {
         const targetSlot = e.target.closest('.player-slot-visual');
-        if (targetSlot) { 
+        if (targetSlot) {
             targetSlot.classList.remove('drag-over');
         }
         if (!e.relatedTarget || !container.contains(e.relatedTarget)) {
@@ -1714,15 +1714,15 @@ export function setupDragAndDrop(onDrop) {
     container.addEventListener('drop', e => {
         e.preventDefault();
         document.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over'));
-        
+
         // --- 💡 FIX: Target the new visual slot ---
         const dropSlot = e.target.closest('.player-slot-visual');
         const dropSide = dropSlot?.dataset.side;
-        
+
         if (dropSlot && dropSlot.dataset.positionSlot && dragPlayerId && dropSide === dragSide) {
             onDrop(dragPlayerId, dropSlot.dataset.positionSlot, dropSide);
-        } else { 
-            console.log("Invalid drop target."); 
+        } else {
+            console.log("Invalid drop target.");
         }
         draggedEl = null; dragPlayerId = null; dragSide = null;
     });
@@ -1773,8 +1773,8 @@ export function setupFormationListeners() {
             const depthChartTab = document.querySelector('[data-tab="depth-chart"]');
             if (depthChartTab && depthChartTab.classList.contains('active')) {
                 // Trigger a re-render of the current tab
-                const event = new CustomEvent('refresh-ui'); 
-                document.dispatchEvent(event); 
+                const event = new CustomEvent('refresh-ui');
+                document.dispatchEvent(event);
                 // Note: You'll need to ensure your main loop handles 'refresh-ui' 
                 // or simply call renderDepthChartTab(gs) directly if accessible.
             }
@@ -2163,7 +2163,7 @@ function renderLiveStatsBox(gameResult) {
         if (!team || !team.roster || team.roster.length === 0) return '<h5>No Player Data</h5>';
 
         // 💡 FIX: Convert Roster IDs to Player Objects so we can read stats
-        const fullRoster = getUIRosterObjects(team); 
+        const fullRoster = getUIRosterObjects(team);
 
         // Filters and sorts roster to find a specific stat leader
         const findTopStat = (statName) => fullRoster
@@ -2171,7 +2171,7 @@ function renderLiveStatsBox(gameResult) {
             .sort((a, b) => (b.gameStats[statName] || 0) - (a.gameStats[statName] || 0))[0];
 
         // --- OFFENSIVE LEADERS ---
-        const qb = fullRoster.find(p => p && p.gameStats && p.gameStats.passAttempts > 0); 
+        const qb = fullRoster.find(p => p && p.gameStats && p.gameStats.passAttempts > 0);
         const leadingRusher = findTopStat('rushYards');
         const leadingReceiver = findTopStat('recYards');
         const offensivePlayersLogged = new Set();
@@ -2201,7 +2201,7 @@ function renderLiveStatsBox(gameResult) {
 
         fullRoster.forEach(p => {
             if (p?.gameStats && (p.gameStats.tackles > 0 || p.gameStats.sacks > 0 || p.gameStats.interceptions > 0)) {
-                if (offensivePlayersLogged.has(p.id)) return; 
+                if (offensivePlayersLogged.has(p.id)) return;
                 defensiveLeaders.push(p);
             }
         });
@@ -2384,7 +2384,7 @@ function renderSimPlayers(frame) {
                     // Player IDs are strings (UUIDs), not integers.
                     const inId = document.getElementById('_sub_in_select')?.value;
                     // --- 💡💡💡 END OF FIX 💡💡💡 ---
-                    
+
                     if (!inId) return;
 
                     const result = substitutePlayers(team.id, outId, inId);
@@ -2526,8 +2526,8 @@ function runLiveGameTick() {
                     styleClass = 'font-semibold text-red-400';
                     descriptiveText = playLogEntry;
                     playHasEnded = true; // An incompletion ends the play
-                
-                // --- 💡💡💡 START PUNT LOGIC FIX 💡💡💡 ---
+
+                    // --- 💡💡💡 START PUNT LOGIC FIX 💡💡💡 ---
                 } else if (playLogEntry.includes('PUNT by')) {
                     styleClass = 'font-semibold text-blue-300'; // Special teams color
                     descriptiveText = playLogEntry;
@@ -2537,12 +2537,12 @@ function runLiveGameTick() {
                         playHasEnded = true;
                     }
                     // If it's just "PUNT by..." it's part of a muff sequence, so we don't end the play
-                
+
                 } else if (playLogEntry.includes('MUFFED PUNT')) {
                     styleClass = 'font-bold text-red-500';
                     descriptiveText = playLogEntry;
                     playHasEnded = false; // The muff itself doesn't pause, the recovery does
-                
+
                 } else if (playLogEntry.includes('recovers the muff')) {
                     // **CRITICAL FIX**: This logic was inverted.
                     // If the offense's name is in the log, they kept possession.
@@ -2550,23 +2550,26 @@ function runLiveGameTick() {
                     styleClass = 'font-semibold text-yellow-300';
                     descriptiveText = playLogEntry;
                     playHasEnded = true; // The recovery is the end of the play
-                
+
                 } else if (playLogEntry.includes('PUNT FAILED')) {
                     liveGameDriveActive = false;
                     styleClass = 'font-bold text-red-500';
                     descriptiveText = playLogEntry;
                     playHasEnded = true;
-                // --- 💡💡💡 END PUNT LOGIC FIX 💡💡💡 ---
+                    // --- 💡💡💡 END PUNT LOGIC FIX 💡💡💡 ---
 
                 } else if (playLogEntry.startsWith('🎉 TOUCHDOWN') || playLogEntry.startsWith('🎉 PUNT RETURN TOUCHDOWN')) {
                     if (!liveGameIsConversion) {
                         // 💡 FIX: Correctly attribute defensive/return TDs
                         const isHomeTD = playLogEntry.includes(currentLiveGameResult.homeTeam.name) || (liveGamePossessionName === currentLiveGameResult.homeTeam.name && !playLogEntry.includes(currentLiveGameResult.awayTeam.name));
+
                         if (isHomeTD) {
                             liveGameCurrentHomeScore += 6;
                         } else {
                             liveGameCurrentAwayScore += 6;
                         }
+                    } // <--- MISSING BRACE #1 (Closes !liveGameIsConversion)
+
                 } else if (playLogEntry.includes('SAFETY') || playLogEntry.includes('Safety')) {
                     // Safety = 2 points for the Defense (the team NOT with the ball)
                     if (liveGamePossessionName === currentLiveGameResult.homeTeam.name) {
@@ -2574,7 +2577,7 @@ function runLiveGameTick() {
                     } else {
                         liveGameCurrentHomeScore += 2;
                     }
-                    
+
                     liveGameDriveActive = false; // Ends the drive
                     styleClass = 'font-bold text-red-500 text-lg';
                     descriptiveText = `🚨 ${playLogEntry} (+2 Pts)`;
@@ -2609,11 +2612,11 @@ function runLiveGameTick() {
                     playHasEnded = true; // Turnover ends the play
                 }
                 else if (playLogEntry.includes('Play ends') || playLogEntry.includes('⏱️')) {
-                        // 💡 FIX: Catch-all for end of play
-                        styleClass = 'text-gray-400 italic';
-                        descriptiveText = playLogEntry;
-                        playHasEnded = true;
-                    }
+                    // 💡 FIX: Catch-all for end of play
+                    styleClass = 'text-gray-400 italic';
+                    descriptiveText = playLogEntry;
+                    playHasEnded = true;
+                }
 
                 if (liveGameDown > 4 && liveGameDriveActive) {
                     liveGameDriveActive = false;
@@ -2663,13 +2666,13 @@ function runLiveGameTick() {
         // The play is over! Stop the "action" clock.
         clearInterval(liveGameInterval);
         liveGameInterval = null;
-        clearTimeout(huddleTimeout); 
+        clearTimeout(huddleTimeout);
 
         // 💡 UPDATED TIMING:
         // 2.0 seconds to view the tackle (Post-Play)
         // + 2.5 seconds for the Huddle/Log reading
         // = 4.5 seconds Total Pause before the next lineup appears
-        const POST_PLAY_VIEWING_MS = 2000; 
+        const POST_PLAY_VIEWING_MS = 2000;
         const HUDDLE_TIME_MS = 2500;
         const TOTAL_PAUSE_MS = POST_PLAY_VIEWING_MS + HUDDLE_TIME_MS;
 
