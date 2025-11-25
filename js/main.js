@@ -64,7 +64,7 @@ function handleConfirmTeam() {
             gameState = Game.getGameState(); 
             
             UI.renderSelectedPlayerCard(null, gameState);
-            UI.renderDraftScreen(gameState, handlePlayerSelectInDraft, selectedPlayerId, currentSortColumn, currentSortDirection, positionOverallWeights);
+            UI.renderDraftScreen(gameState, handlePlayerSelectInDraft, selectedPlayerId, currentSortColumn, currentSortDirection);
             UI.showScreen('draft-screen');
             runAIDraftPicks();
         } catch (error) {
@@ -81,7 +81,7 @@ function handlePlayerSelectInDraft(playerId) {
     selectedPlayerId = playerId;
     const player = gameState.players.find(p => p.id === playerId);
     UI.updateSelectedPlayerRow(playerId);
-    UI.renderSelectedPlayerCard(player, gameState, positionOverallWeights);
+    UI.renderSelectedPlayerCard(player, gameState);
 }
 
 function handleDraftPlayer() {
@@ -97,7 +97,7 @@ function handleDraftPlayer() {
         if (player && Game.addPlayerToTeam(player, team)) {
             selectedPlayerId = null;
             gameState.currentPick++;
-            UI.renderSelectedPlayerCard(null, gameState, positionOverallWeights);
+            UI.renderSelectedPlayerCard(null, gameState);
             runAIDraftPicks(); 
         } else {
             UI.showModal("Draft Error", "Could not draft player.", null, '', null, 'Close');
@@ -142,7 +142,7 @@ async function runAIDraftPicks() {
             continue;
         }
 
-        UI.renderDraftScreen(gameState, handlePlayerSelectInDraft, selectedPlayerId, currentSortColumn, currentSortDirection, positionOverallWeights);
+        UI.renderDraftScreen(gameState, handlePlayerSelectInDraft, selectedPlayerId, currentSortColumn, currentSortDirection);
         await new Promise(resolve => setTimeout(resolve, 50));
 
         const result = Game.simulateAIPick(currentPickingTeam);
@@ -165,7 +165,7 @@ async function runAIDraftPicks() {
                 runAIDraftPicks(); 
             }
         } else { 
-            UI.renderDraftScreen(gameState, handlePlayerSelectInDraft, selectedPlayerId, currentSortColumn, currentSortDirection, positionOverallWeights);
+            UI.renderDraftScreen(gameState, handlePlayerSelectInDraft, selectedPlayerId, currentSortColumn, currentSortDirection);
         }
     } else { 
         handleDraftEnd();
@@ -240,8 +240,8 @@ async function handleLoadGame(saveKey) {
             UI.showScreen('dashboard-screen');
         } else {
             // In Draft
-            UI.renderSelectedPlayerCard(null, gameState, positionOverallWeights);
-            UI.renderDraftScreen(gameState, handlePlayerSelectInDraft, selectedPlayerId, currentSortColumn, currentSortDirection, positionOverallWeights);
+            UI.renderSelectedPlayerCard(null, gameState);
+            UI.renderDraftScreen(gameState, handlePlayerSelectInDraft, selectedPlayerId, currentSortColumn, currentSortDirection);
             UI.showScreen('draft-screen'); 
         }
     } catch (error) {
@@ -494,49 +494,6 @@ function finishWeekSimulation(results) {
         promptCallFriend();
     }
 }
-/** Builds HTML for weekly results modal. */
-function buildResultsModalHtml(results) {
-    if (!gameState || !gameState.playerTeam) return "<p>Error displaying results: Game state missing.</p>";
-    if (!Array.isArray(results)) return "<p>Error: Invalid results data.</p>";
-
-    const playerGame = results.find(r => r && (r.homeTeam?.id === gameState.playerTeam.id || r.awayTeam?.id === gameState.playerTeam.id));
-    
-    let playerTeamResultText = 'BYE / Error?';
-    if (playerGame) {
-        const isHome = playerGame.homeTeam.id === gameState.playerTeam.id;
-        const myScore = isHome ? playerGame.homeScore : playerGame.awayScore;
-        const oppScore = isHome ? playerGame.awayScore : playerGame.homeScore;
-        
-        if (myScore > oppScore) playerTeamResultText = 'WON';
-        else if (myScore < oppScore) playerTeamResultText = 'LOST';
-        else playerTeamResultText = 'TIED';
-    }
-
-    const breakthroughs = Game.getBreakthroughs() || [];
-
-    let html = `<h4>Your Result: ${playerTeamResultText}</h4>`;
-    if (playerGame) {
-        html += `<p>${playerGame.awayTeam?.name || '?'} ${playerGame.awayScore ?? '?'} @ ${playerGame.homeTeam?.name || '?'} ${playerGame.homeScore ?? '?'}</p>`;
-    }
-    html += '<h4 class="mt-4">All Weekly Results</h4><div class="space-y-1 text-sm mt-2">';
-    results.forEach(r => {
-        if (!r || !r.homeTeam || !r.awayTeam) return;
-        const isPlayerGame = r.homeTeam.id === gameState.playerTeam.id || r.awayTeam.id === gameState.playerTeam.id;
-        html += `<p class="${isPlayerGame ? 'font-bold text-amber-600' : ''}">${r.awayTeam.name} ${r.awayScore ?? '?'} @ ${r.homeTeam.name} ${r.homeScore ?? '?'}</p>`;
-    });
-    html += '</div>';
-
-    if (breakthroughs.length > 0) {
-        html += `<h4 class="font-bold mt-4 mb-2">Player Breakthroughs!</h4><div class="space-y-1 text-sm">`;
-        breakthroughs.forEach(b => {
-            if (!b || !b.player) return;
-            const isUserPlayer = b.player.teamId === gameState.playerTeam?.id;
-            html += `<p class=${isUserPlayer ? '"font-semibold"' : ''}><strong>${b.player.name}</strong> (${b.teamName || 'Your Team'}) improved their <strong>${b.attr}</strong>!</p>`;
-        });
-        html += `</div>`;
-    }
-    return html;
-}
 
 function handleSeasonEnd() {
     try {
@@ -554,8 +511,8 @@ function handleGoToNextDraft() {
         Game.setupDraft(); 
         gameState = Game.getGameState(); 
         selectedPlayerId = null; 
-        UI.renderSelectedPlayerCard(null, gameState, positionOverallWeights);
-        UI.renderDraftScreen(gameState, handlePlayerSelectInDraft, selectedPlayerId, currentSortColumn, currentSortDirection, positionOverallWeights); 
+        UI.renderSelectedPlayerCard(null, gameState);
+        UI.renderDraftScreen(gameState, handlePlayerSelectInDraft, selectedPlayerId, currentSortColumn, currentSortDirection); 
         UI.showScreen('draft-screen'); 
         runAIDraftPicks(); 
     } catch (error) {
@@ -713,57 +670,6 @@ window.app = {
 };
 
 // --- Initialization ---
-document.addEventListener('DOMContentLoaded', () => {
-    console.log("App init...");
-    UI.setupElements();
-
-    // Setup Listeners
-    document.getElementById('draft-search')?.addEventListener('input', () => {
-        if (gameState) UI.debouncedRenderDraftPool(gameState, handlePlayerSelectInDraft, currentSortColumn, currentSortDirection, positionOverallWeights);
-    });
-    document.getElementById('draft-filter-pos')?.addEventListener('change', () => {
-        if (gameState) UI.renderDraftPool(gameState, handlePlayerSelectInDraft, currentSortColumn, currentSortDirection, positionOverallWeights);
-    });
-    document.querySelector('#draft-screen thead tr')?.addEventListener('click', (e) => {
-        const headerCell = e.target.closest('th[data-sort]');
-        if (!headerCell || !gameState) return; 
-        const newSortColumn = headerCell.dataset.sort;
-        if (currentSortColumn === newSortColumn) {
-            currentSortDirection = (currentSortDirection === 'desc') ? 'asc' : 'desc';
-        } else {
-            currentSortColumn = newSortColumn;
-            currentSortDirection = 'desc';
-        }
-        UI.renderDraftPool(gameState, handlePlayerSelectInDraft, currentSortColumn, currentSortDirection, positionOverallWeights);
-        UI.updateDraftSortIndicators(currentSortColumn, currentSortDirection);
-    });
-
-    document.body.addEventListener('click', (e) => {
-        if (e.target.matches('.tab-button')) {
-            handleTabSwitch(e);
-        }
-        if (e.target.closest('.message-item')) {
-            const id = e.target.closest('.message-item').dataset.messageId;
-            handleMessageClick(id);
-        }
-    });
-
-    document.getElementById('offense-formation-select')?.addEventListener('change', handleFormationChange);
-    document.getElementById('defense-formation-select')?.addEventListener('change', handleFormationChange);
-    document.getElementById('dashboard-content')?.addEventListener('change', handleDepthChartSelect); 
-
-    document.getElementById('stats-filter-team')?.addEventListener('change', handleStatsChange);
-    document.getElementById('stats-sort')?.addEventListener('change', handleStatsChange);
-
-    UI.setupDragAndDrop(handleDepthChartDrop);
-    UI.setupDepthChartTabs();
-
-    if (Game.loadGameState()) {
-        handleLoadGame();
-    } else {
-        UI.showScreen('start-screen'); 
-    }
-});
 // =============================================================
 // --- INITIALIZATION & EVENT LISTENERS ---
 // =============================================================
@@ -815,10 +721,10 @@ function main() {
 
         // Draft Filters/Sorting
         document.getElementById('draft-search')?.addEventListener('input', () => {
-            if (gameState) UI.debouncedRenderDraftPool(gameState, handlePlayerSelectInDraft, currentSortColumn, currentSortDirection, positionOverallWeights);
+            if (gameState) UI.debouncedRenderDraftPool(gameState, handlePlayerSelectInDraft, currentSortColumn, currentSortDirection);
         });
         document.getElementById('draft-filter-pos')?.addEventListener('change', () => {
-            if (gameState) UI.renderDraftPool(gameState, handlePlayerSelectInDraft, currentSortColumn, currentSortDirection, positionOverallWeights);
+            if (gameState) UI.renderDraftPool(gameState, handlePlayerSelectInDraft, currentSortColumn, currentSortDirection);
         });
         document.querySelector('#draft-screen thead tr')?.addEventListener('click', (e) => {
             const headerCell = e.target.closest('th[data-sort]');
@@ -833,7 +739,7 @@ function main() {
                 currentSortDirection = 'desc'; 
             }
 
-            UI.renderDraftPool(gameState, handlePlayerSelectInDraft, currentSortColumn, currentSortDirection, positionOverallWeights);
+            UI.renderDraftPool(gameState, handlePlayerSelectInDraft, currentSortColumn, currentSortDirection);
             UI.updateDraftSortIndicators(currentSortColumn, currentSortDirection);
         });
 
