@@ -261,6 +261,10 @@ function checkFumble(ballCarrierState, tacklerState, playState, gameLog) {
 
         tacklerState.stunnedTicks = 20;
 
+        // Track fumble stats
+        ensureStats(ballCarrierState);
+        ballCarrierState.gameStats.fumbles = (ballCarrierState.gameStats.fumbles || 0) + 1;
+
         return true;
     }
     return false;
@@ -800,7 +804,7 @@ function resetGameStats(teamA, teamB) {
         player.fatigue = 0;
         player.gameStats = {
             receptions: 0, recYards: 0, passYards: 0, rushYards: 0, touchdowns: 0,
-            tackles: 0, sacks: 0, interceptions: 0,
+            tackles: 0, sacks: 0, interceptions: 0, fumbles: 0, fumblesLost: 0, fumblesRecovered: 0,
             passAttempts: 0, passCompletions: 0, interceptionsThrown: 0,
             rushAttempts: 0, targets: 0, returnYards: 0, drops: 0 // <--- ADDED MISSING ONES
         };
@@ -1454,6 +1458,627 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
     }
 }
 /**
+ * Detect gaps and provide intelligent gap assignment recommendations for defense
+ * 💡 ENHANCED: Sophisticated gap read logic for realistic run defense
+ */
+function getGapAssignmentForDefender(defenderSlot, defenderInitialX, runnerX, isBoxDefender) {
+    const CENTER_X = FIELD_WIDTH / 2;
+    
+    // A-gap = between center and guards (±4 yards from center)
+    // B-gap = between guard and tackle (±8 yards from center) 
+    // C-gap = edge assignments (±12+ yards from center)
+    
+    const distFromCenter = Math.abs(defenderInitialX - CENTER_X);
+    
+    if (distFromCenter < 4) return 'A'; // Inside gaps
+    if (distFromCenter < 8) return 'B'; // Shoulder gaps
+    return 'C'; // Edge
+}
+
+/**
+ * Calculate run play direction tendency based on offensive formation
+ */
+function detectRunDirection(offensiveAssignments, offenseStates) {
+    // Count pulling linemen and formation bias
+    const rbAssignment = offensiveAssignments['RB1'] || '';
+    
+    // Simple heuristic: assignment keywords indicate direction
+    if (rbAssignment.includes('toss_right') || rbAssignment.includes('sweep_right')) return 'right';
+    if (rbAssignment.includes('toss_left') || rbAssignment.includes('sweep_left')) return 'left';
+    if (rbAssignment.includes('dive')) return 'center';
+    
+    // Default based on run play type
+    return null;
+}
+
+/**
+ * Calculate defender pursuit angle efficiency
+ * Returns 0.0-1.0 (1.0 = perfect pursuit angle, 0.0 = terrible angle)
+ */
+function calculatePursuitEfficiency(defenderPos, ballCarrierPos, ballCarrierVelocity) {
+    const dist = getDistance(defenderPos, ballCarrierPos);
+    if (dist < 0.5) return 1.0; // Already on ball carrier
+    
+    // Calculate if defender is moving to intercept or chase from behind
+    const toBallCarrier = {
+        x: ballCarrierPos.x - defenderPos.x,
+        y: ballCarrierPos.y - defenderPos.y
+    };
+    
+    // Good angle = closing head-on or from side; Bad angle = behind ball carrier
+    if (ballCarrierVelocity.y > 0) {
+        // Ball carrier moving forward
+        if (toBallCarrier.y <= 0) return 0.3; // Defender is behind (bad pursuit)
+        if (Math.abs(toBallCarrier.x) < toBallCarrier.y) return 0.9; // Head-on (great)
+        return 0.6; // Angled pursuit (okay)
+    }
+    
+    return 0.5; // Neutral if ball carrier velocity unclear
+}
+
+
+
+/**
+ * Calculate intelligent safety help coordination
+ * 💡 ENHANCED: Safety assistance logic for pass coverage
+ * Returns positioning guidance for coverage coordination
+ */
+function calculateSafetyHelp(safetyState, defenseStates, offenseStates, ballCarrierState, playState, isBallInAir) {
+    if (!safetyState || !safetyState.slot.startsWith('S')) return null;
+    
+    const LOS = playState.lineOfScrimmage;
+    
+    // Find cornersacks and man coverage players this safety should help
+    const corners = defenseStates.filter(d => d.slot.startsWith('DB') && !d.slot.startsWith('S'));
+    const inManCoverage = corners.filter(d => d.assignment && d.assignment.startsWith('man_cover_'));
+    
+    // Decision 1: Identify high-pressure corners (being beaten badly)
+    let helpTarget = null;
+    let maxPressure = 0;
+    
+    inManCoverage.forEach(corner => {
+        const targetSlot = corner.assignment.replace('man_cover_', '');
+        const receiver = offenseStates.find(r => r.slot === targetSlot);
+        
+        if (receiver) {
+            const separationDist = getDistance(corner, receiver);
+            const isBallTargeted = isBallInAir && playState.ballState.targetPlayerId === receiver.id;
+            
+            // Calculate pressure score: closer receiver + ball in air = higher priority
+            let pressureScore = 10 - separationDist; // Closer = worse
+            if (isBallTargeted) pressureScore += 5; // Ball coming = high priority
+            
+            if (pressureScore > maxPressure) {
+                maxPressure = pressureScore;
+                helpTarget = { corner, receiver };
+            }
+        }
+    });
+    
+    // Decision 2: Should I help or stay in coverage?
+    const shouldHelp = maxPressure > 4.0; // Pressure threshold
+    
+    if (!shouldHelp) {
+        // No help needed - return null to use regular assignment
+        return null;
+    }
+    
+    // Decision 3: Calculate help position (top-down safety support)
+    if (helpTarget && helpTarget.receiver) {
+        // Position between corner and receiver, higher than receiver
+        const helpX = (helpTarget.corner.x * 0.3) + (helpTarget.receiver.x * 0.7); // Closer to receiver
+        const helpY = Math.max(helpTarget.receiver.y + 1.5, LOS + 10); // Stay on top
+        
+        return {
+            type: 'help',
+            helpX: helpX,
+            helpY: helpY,
+            targetReceiver: helpTarget.receiver,
+            targetCorner: helpTarget.corner,
+            pressureScore: maxPressure
+        };
+    }
+    
+    return null;
+}
+
+/**
+ * Evaluate defensive alignment for zone coverage placement
+ * Returns insight into coverage scheme depth and width
+ */
+function evaluateCoverageAlignment(defenseStates, playState) {
+    const LOS = playState.lineOfScrimmage;
+    
+    // Categorize defense by zone depth
+    const shallow = defenseStates.filter(d => d.y < LOS + 8); // Underneath
+    const intermediate = defenseStates.filter(d => d.y >= LOS + 8 && d.y < LOS + 16); // Intermediate
+    const deep = defenseStates.filter(d => d.y >= LOS + 16); // Deep
+    
+    // Single vs. two-high safety look
+    const safeties = defenseStates.filter(d => d.slot.startsWith('S'));
+    const safetyDepths = safeties.map(s => s.y - LOS);
+    const avgSafetyDepth = safetyDepths.length > 0 ? 
+        safetyDepths.reduce((a, b) => a + b) / safetyDepths.length : 15;
+    
+    const isTwoHigh = safeties.length >= 2 && Math.max(...safetyDepths) - Math.min(...safetyDepths) < 5;
+    const isSingleHigh = safeties.length === 1 || (safeties.length >= 2 && avgSafetyDepth > 12);
+    
+    return {
+        shallowCount: shallow.length,
+        intermediateCount: intermediate.length,
+        deepCount: deep.length,
+        safetyCount: safeties.length,
+        avgSafetyDepth: avgSafetyDepth,
+        isTwoHigh: isTwoHigh,
+        isSingleHigh: isSingleHigh,
+        defenseCoverage: isTwoHigh ? 'TWO_HIGH' : 'SINGLE_HIGH'
+    };
+}
+
+/**
+ * 💡 ADAPTIVE: Track offensive play success against defensive matchups
+ * Returns matchup performance data for play selection bias
+ */
+function analyzePlaySuccess(lastPlayState, offensiveTeam, defensiveTeam) {
+    if (!lastPlayState || !lastPlayState.result) {
+        return null;
+    }
+    
+    const result = lastPlayState.result;
+    
+    // Calculate success metrics
+    const gainedYards = result.yardsGained || 0;
+    const completionStatus = result.passComplete ? 1 : 0; // 0-1 scale
+    const wasTouchdown = result.isTouchdown ? 1 : 0;
+    const wasIntercepted = result.interception ? 1 : 0;
+    const wasFumbled = result.fumble ? 1 : 0;
+    
+    // Composite success score (0-100)
+    let successScore = 50; // Neutral baseline
+    
+    if (result.playType === 'pass') {
+        // Pass success: completion + yardage + no turnover
+        successScore = completionStatus * 60;
+        successScore += Math.min(20, gainedYards / 2); // Up to 20 points for yardage
+        successScore -= wasIntercepted * 25; // -25 for INT
+    } else if (result.playType === 'run') {
+        // Run success: positive yardage + no turnover
+        successScore = Math.min(40, gainedYards / 1.5); // 0-40 for yardage
+        successScore += 20 + (gainedYards > 4 ? 20 : 10); // Base + bonus
+        successScore -= wasFumbled * 20; // -20 for fumble
+    }
+    
+    // Bonus for touchdowns
+    successScore += wasTouchdown * 30;
+    
+    // Clamp to 0-100
+    successScore = Math.max(0, Math.min(100, successScore));
+    
+    return {
+        playKey: result.playKey || 'unknown',
+        playerSlot: result.ballCarrierSlot || 'unknown',
+        defenseMatchupKey: result.defenseCall || 'unknown',
+        successScore: successScore,
+        yardsGained: gainedYards,
+        playType: result.playType,
+        isSuccess: successScore > 50,
+        wasTouchdown: wasTouchdown,
+        turnover: wasIntercepted || wasFumbled
+    };
+}
+
+/**
+ * 💡 ADAPTIVE: Get next offensive play with exploitation bias
+ * Analyzes recent success and suggests plays to exploit weak matchups
+ */
+function getAdaptiveOffensivePlay(team, lastPlayState, playHistory = []) {
+    const coach = team.coach || {};
+    const basePlaybook = offensivePlaybook[coach.preferredOffense] || offensivePlaybook['Balanced'];
+    
+    if (!basePlaybook || !basePlaybook.plays) {
+        return getRandom(basePlaybook?.plays || []);
+    }
+    
+    // Analyze recent success
+    const recentSuccess = analyzePlaySuccess(lastPlayState, team, null);
+    
+    if (!recentSuccess) {
+        // No data - use coach preference
+        return getRandom(basePlaybook.plays);
+    }
+    
+    // Decision 1: If last play was successful, exploit it (70% chance if hot)
+    if (recentSuccess.successScore > 70 && Math.random() < 0.7) {
+        // Try similar play type (run/pass) with potentially different target
+        const similarPlays = basePlaybook.plays.filter(p => p.type === recentSuccess.playType);
+        
+        if (similarPlays.length > 0) {
+            return getRandom(similarPlays);
+        }
+    }
+    
+    // Decision 2: If success score is moderate (50-70), keep exploring (50% stay same type)
+    if (recentSuccess.successScore > 50 && Math.random() < 0.5) {
+        const sameTypePlays = basePlaybook.plays.filter(p => p.type === recentSuccess.playType);
+        
+        if (sameTypePlays.length > 0) {
+            return getRandom(sameTypePlays);
+        }
+    }
+    
+    // Decision 3: If last play failed, switch up (pass becomes run or vice versa)
+    if (recentSuccess.successScore < 40) {
+        const oppositeType = recentSuccess.playType === 'pass' ? 'run' : 'pass';
+        const oppositePlay = basePlaybook.plays.filter(p => p.type === oppositeType);
+        
+        if (oppositePlay.length > 0) {
+            return getRandom(oppositePlay);
+        }
+    }
+    
+    // Default: random from playbook
+    return getRandom(basePlaybook.plays);
+}
+
+/**
+ * 💡 ADAPTIVE: Analyze defensive vulnerability and suggest adjustments
+ * Returns assignment adjustments to counter offensive threats
+ */
+function analyzeDefensiveVulnerability(lastPlayState, defensiveTeam, offenseStates) {
+    if (!lastPlayState || !lastPlayState.result) {
+        return null;
+    }
+    
+    const result = lastPlayState.result;
+    const yardsGained = result.yardsGained || 0;
+    const ballCarrierSlot = result.ballCarrierSlot || 'RB1';
+    
+    // Decision 1: Was it a big play? (10+ yards)
+    if (yardsGained >= 10) {
+        return {
+            vulnerabilityType: 'BIG_PLAY',
+            targetSlot: ballCarrierSlot,
+            area: result.playType === 'run' ? 'run_defense' : 'pass_defense',
+            severity: Math.min(100, yardsGained * 10), // Higher yards = higher severity
+            suggestedAdjustment: result.playType === 'run' ? 'tighten_gaps' : 'increase_coverage_depth'
+        };
+    }
+    
+    // Decision 2: Was it a TD? (massive vulnerability)
+    if (result.isTouchdown) {
+        return {
+            vulnerabilityType: 'TOUCHDOWN',
+            targetSlot: ballCarrierSlot,
+            area: result.playType === 'run' ? 'run_defense' : 'pass_defense',
+            severity: 100,
+            suggestedAdjustment: 'swap_personnel'
+        };
+    }
+    
+    // Decision 3: Multiple completions to same receiver (coverage vulnerability)
+    if (result.playType === 'pass' && result.receiverSlot) {
+        return {
+            vulnerabilityType: 'RECEIVER_MISMATCH',
+            targetSlot: result.receiverSlot,
+            area: 'pass_defense',
+            severity: 60,
+            suggestedAdjustment: 'upgrade_coverage'
+        };
+    }
+    
+    // Decision 4: Run success (gap discipline issue)
+    if (result.playType === 'run' && yardsGained >= 5) {
+        return {
+            vulnerabilityType: 'RUN_GAP_BREACH',
+            targetSlot: ballCarrierSlot,
+            area: 'run_defense',
+            severity: 70,
+            suggestedAdjustment: 'add_box_player'
+        };
+    }
+    
+    return null;
+}
+
+/**
+ * 💡 ADAPTIVE: Get defensive play call with counter-strategy
+ * Analyzes offensive tendencies and suggests defensive adjustments
+ */
+function getAdaptiveDefensivePlay(team, lastPlayState, offenseTeam) {
+    const coach = team.coach || {};
+    const basePlaybook = defensivePlaybook[coach.preferredDefense] || defensivePlaybook['Cover_2_Zone_3-1-3'];
+    
+    if (!basePlaybook || !basePlaybook.plays) {
+        return getRandom(basePlaybook?.plays || []);
+    }
+    
+    // Analyze opponent's last play success
+    if (!lastPlayState || !lastPlayState.result) {
+        return getRandom(basePlaybook.plays);
+    }
+    
+    const result = lastPlayState.result;
+    const playType = result.playType;
+    
+    // Decision 1: If opponent just ran for big gains (10+), load the box
+    if (playType === 'run' && result.yardsGained >= 10) {
+        // Find defensive plays with more LBs/DL (run defense focus)
+        const runDefenses = basePlaybook.plays.filter(p => p.name && (p.name.includes('3-1-3') || p.name.includes('4-2-2')));
+        
+        if (runDefenses.length > 0) {
+            return getRandom(runDefenses);
+        }
+    }
+    
+    // Decision 2: If opponent just passed for big gains (10+), go coverage heavy
+    if (playType === 'pass' && result.yardsGained >= 10) {
+        // Find defensive plays with more DBs (coverage focus)
+        const coverageDefenses = basePlaybook.plays.filter(p => p.name && (p.name.includes('Cover_2') || p.name.includes('Cover_3')));
+        
+        if (coverageDefenses.length > 0) {
+            return getRandom(coverageDefenses);
+        }
+    }
+    
+    // Decision 3: If it was a TD, be aggressive on next play
+    if (result.isTouchdown) {
+        // Find blitz-heavy defenses
+        const aggressiveDefenses = basePlaybook.plays.filter(p => p.name && p.name.includes('Blitz'));
+        
+        if (aggressiveDefenses.length > 0) {
+            return getRandom(aggressiveDefenses);
+        }
+    }
+    
+    // Default: random from playbook
+    return getRandom(basePlaybook.plays);
+}
+
+/**
+ * 💡 ADAPTIVE: Pre-snap defensive audible system
+ * Allows defense to read offense pre-snap and adjust assignments
+ */
+function getDefensiveAudibleAssignments(defensivePlay, offensiveFormation, offenseStates, defenseStates, lineOfScrimmage) {
+    const baseAssignments = defensivePlay.assignments || {};
+    const audibleAssignments = { ...baseAssignments };
+    
+    // Get defensive alignment quality
+    const coverage = evaluateCoverageAlignment(defenseStates, { lineOfScrimmage });
+    
+    // Decision 1: Identify offensive formation tendencies
+    const wideReceiveres = offenseStates.filter(o => o.slot.includes('WR')).length;
+    const tightEnds = offenseStates.filter(o => o.slot.includes('TE')).length;
+    const backfield = offenseStates.filter(o => o.slot.includes('RB')).length;
+    
+    // Decision 2: If 3+ WRs (spread formation) - increase DB coverage
+    if (wideReceiveres >= 3) {
+        // Swap a LB assignment to DB assignment
+        const lbAssignments = Object.entries(audibleAssignments).filter(([slot, assign]) => 
+            slot.startsWith('LB') && assign && assign.includes('zone_')
+        );
+        
+        if (lbAssignments.length > 0) {
+            const [lbSlot] = lbAssignments[0];
+            // Move to more aggressive coverage
+            audibleAssignments[lbSlot] = 'zone_hook_curl_middle';
+        }
+    }
+    
+    // Decision 3: If 2+ RBs backfield (run formation) - load the box
+    if (backfield >= 2) {
+        // Swap a DB to a run support assignment
+        const dbAssignments = Object.entries(audibleAssignments).filter(([slot, assign]) =>
+            slot.startsWith('DB') && assign && assign.includes('deep_')
+        );
+        
+        if (dbAssignments.length > 0 && coverage.isTwoHigh) {
+            const [dbSlot] = dbAssignments[0];
+            // One safety can come down for run support
+            audibleAssignments[dbSlot] = 'run_support';
+        }
+    }
+    
+    // Decision 4: Mismatches detected - adjust help
+    const offenseMotion = offenseStates.filter(o => o.velocity && Math.abs(o.velocity.x) > 1.0).length;
+    if (offenseMotion >= 2) {
+        // Offense is shifting - stay flexible with zone coverage
+        // No aggressive audibles
+    }
+    
+    // Decision 5: If QB is clearly a runner (athletic), spy assignment
+    const qbState = offenseStates.find(o => o.slot?.startsWith('QB'));
+    if (qbState && (qbState.speed || 50) > 70) {
+        // Assign a fast LB to QB spy
+        const fastLBs = defenseStates.filter(d => d.slot.startsWith('LB') && (d.speed || 50) > 65);
+        
+        if (fastLBs.length > 0) {
+            const lbSlot = Object.keys(baseAssignments).find(s => s.startsWith('LB'));
+            if (lbSlot) {
+                audibleAssignments[lbSlot] = 'spy_QB';
+            }
+        }
+    }
+    
+    return audibleAssignments;
+}
+
+/**
+ * 💡 ADAPTIVE: Suggest coverage adjustments mid-game
+ * Based on play history and matchup performance
+ */
+function suggestCoverageAdjustments(team, offensiveTeam, gameStats) {
+    if (!gameStats || !gameStats.playHistory) {
+        return null;
+    }
+    
+    const recentPlays = gameStats.playHistory.slice(-5); // Last 5 plays
+    
+    // Analyze receiver production
+    const receiverStats = {};
+    recentPlays.forEach(play => {
+        if (play.receiverSlot) {
+            if (!receiverStats[play.receiverSlot]) {
+                receiverStats[play.receiverSlot] = { catches: 0, yards: 0 };
+            }
+            if (play.result && play.result.passComplete) {
+                receiverStats[play.receiverSlot].catches++;
+                receiverStats[play.receiverSlot].yards += play.result.yardsGained || 0;
+            }
+        }
+    });
+    
+    // Find hot receiver
+    let hotReceiver = null;
+    let maxProduction = 0;
+    
+    Object.entries(receiverStats).forEach(([slot, stats]) => {
+        const production = stats.catches * 10 + stats.yards; // Weight catches heavily
+        if (production > maxProduction) {
+            maxProduction = production;
+            hotReceiver = slot;
+        }
+    });
+    
+    // Suggest tight man coverage on hot receiver
+    if (hotReceiver) {
+        return {
+            suggestion: `Tighten coverage on ${hotReceiver}`,
+            targetSlot: hotReceiver,
+            adjustment: 'man_cover_tighter',
+            confidence: Math.min(100, maxProduction * 10)
+        };
+    }
+    
+    return null;
+}
+
+/**
+ * 💡 ADAPTIVE: Track matchup performance across plays
+ * Identifies which offense/defense combinations are succeeding
+ */
+function trackMatchupPerformance(gameState) {
+    if (!gameState) {
+        return null;
+    }
+    
+    // Initialize matchup database if needed
+    if (!gameState.matchupPerformance) {
+        gameState.matchupPerformance = {
+            offensive: {},  // playerSlot -> { successCount, totalPlays, avgYards }
+            defensive: {},  // playerSlot -> { stopsCount, totalPlays, avgYardsAllowed }
+            playTypeSuccess: { run: { wins: 0, total: 0 }, pass: { wins: 0, total: 0 } }
+        };
+    }
+    
+    return gameState.matchupPerformance;
+}
+
+/**
+ * 💡 ADAPTIVE: Get most productive offensive player/play combo
+ * Returns the best-performing option to exploit
+ */
+function getHottestOffensiveOption(gameState, team) {
+    const matchups = trackMatchupPerformance(gameState);
+    
+    if (!matchups || !matchups.offensive) {
+        return null;
+    }
+    
+    // Find player with highest success rate (minimum 2 plays)
+    let hottestPlayer = null;
+    let highestSuccessRate = 0;
+    
+    Object.entries(matchups.offensive).forEach(([playerSlot, stats]) => {
+        if (stats.totalPlays >= 2) {
+            const successRate = stats.successCount / stats.totalPlays;
+            if (successRate > highestSuccessRate) {
+                highestSuccessRate = successRate;
+                hottestPlayer = { slot: playerSlot, stats, successRate };
+            }
+        }
+    });
+    
+    return hottestPlayer;
+}
+
+/**
+ * 💡 ADAPTIVE: Identify defensive weakness by position
+ * Returns which defenders are vulnerable
+ */
+function getDefensiveWeaknesses(gameState, team) {
+    const matchups = trackMatchupPerformance(gameState);
+    
+    if (!matchups || !matchups.defensive) {
+        return [];
+    }
+    
+    // Find defenders with high yards allowed (>6 yards per play minimum 3 plays)
+    const weaknesses = [];
+    
+    Object.entries(matchups.defensive).forEach(([defenderSlot, stats]) => {
+        if (stats.totalPlays >= 3) {
+            const avgYardsAllowed = stats.avgYardsAllowed;
+            if (avgYardsAllowed > 6) {
+                weaknesses.push({
+                    slot: defenderSlot,
+                    avgYardsAllowed,
+                    totalPlays: stats.totalPlays,
+                    vulnerability: Math.min(100, avgYardsAllowed * 10)
+                });
+            }
+        }
+    });
+    
+    // Sort by vulnerability
+    return weaknesses.sort((a, b) => b.vulnerability - a.vulnerability);
+}
+
+/**
+ * 💡 ADAPTIVE: Create assignment strategy to exploit weakness
+ * Targets weak defenders with specific play types
+ */
+function createExploitationStrategy(hotOffensiveOption, defensiveWeaknesses, playbook) {
+    if (!hotOffensiveOption && defensiveWeaknesses.length === 0) {
+        return null;
+    }
+    
+    const strategy = {
+        focus: [],
+        priority: 'NORMAL'
+    };
+    
+    // Strategy 1: Exploit hot offensive player
+    if (hotOffensiveOption && hotOffensiveOption.successRate > 0.65) {
+        strategy.focus.push({
+            type: 'HOT_PLAYER',
+            playerSlot: hotOffensiveOption.slot,
+            confidence: hotOffensiveOption.successRate,
+            action: 'Feed the hot hand - keep targeting this player'
+        });
+        strategy.priority = 'HIGH';
+    }
+    
+    // Strategy 2: Attack weak defenders
+    if (defensiveWeaknesses.length > 0) {
+        const primaryWeakness = defensiveWeaknesses[0];
+        
+        strategy.focus.push({
+            type: 'EXPLOIT_WEAKNESS',
+            defenderSlot: primaryWeakness.slot,
+            vulnerability: primaryWeakness.vulnerability,
+            action: `Attack this defender - ${primaryWeakness.avgYardsAllowed.toFixed(1)} yards allowed per play`
+        });
+        
+        if (strategy.priority === 'NORMAL') {
+            strategy.priority = 'HIGH';
+        }
+    }
+    
+    return strategy;
+}
+
+
+/**
  * Updates player targets based on their current action, assignment, and game state. (Improved AI)
  * Modifies playerState objects within playState.activePlayers directly.
  */
@@ -1753,6 +2378,22 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                         const dy = currentTargetPoint.y - pState.y;
                         const distToTarget = Math.sqrt(dx * dx + dy * dy);
 
+                        // 💡 IMPROVED: Adjust route based on defender proximity (break/slant away from coverage)
+                        let targetPoint = currentTargetPoint;
+                        const nearbyDefenders = defenseStates.filter(d => 
+                            !d.isBlocked && !d.isEngaged && getDistance(pState, d) < 3.0
+                        ).sort((a, b) => getDistance(pState, a) - getDistance(pState, b));
+                        
+                        if (nearbyDefenders.length > 0 && pState.currentPathIndex >= Math.floor(pState.routePath.length * 0.5)) {
+                            // Mid-route adjustment: slant away from closest defender
+                            const closestDef = nearbyDefenders[0];
+                            const defOffset = getDistance(pState, closestDef) < 2.0 ? 1.5 : 0.75;
+                            targetPoint = {
+                                x: currentTargetPoint.x + (pState.x > closestDef.x ? defOffset : -defOffset),
+                                y: currentTargetPoint.y + (pState.y > closestDef.y ? defOffset : -defOffset)
+                            };
+                        }
+
                         if (distToTarget < ARRIVAL_RADIUS) {
                             pState.currentPathIndex++;
                             if (pState.currentPathIndex < pState.routePath.length) {
@@ -1764,6 +2405,9 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                                 pState.targetX = pState.x;
                                 pState.targetY = pState.y;
                             }
+                        } else {
+                            pState.targetX = targetPoint.x;
+                            pState.targetY = targetPoint.y;
                         }
                         break;
                     }
@@ -1961,39 +2605,64 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                     }
 
                 case 'qb_setup':
-                    // 
-                    // ⚡ POCKET PRESENCE LOGIC
+                    // 💡 ENHANCED: Realistic QB pocket management with pressure awareness
                     const POCKET_RADIUS = 6.0;
                     const STEP_DISTANCE = 0.75;
-
-                    const closestThreat = defenseStates
-                        .filter(d => !d.isBlocked && !d.isEngaged && d.stunnedTicks === 0 &&
-                            getDistance(pState, d) < POCKET_RADIUS && d.y < pState.y + 3.0
-                        )
-                        .sort((a, b) => getDistance(pState, a) - getDistance(pState, b))[0];
+                    
+                    // 💡 NEW: Count unblocked rushers (defenders closing on QB)
+                    const rushersClosing = defenseStates.filter(d => 
+                        !d.isBlocked && !d.isEngaged && d.stunnedTicks === 0 &&
+                        getDistance(pState, d) < POCKET_RADIUS && d.y < pState.y + 3.0
+                    );
+                    
+                    // 💡 NEW: QB decision-making based on pressure and experience
+                    const qbExperience = pState.playbookIQ || 50;
+                    const qbComposure = pState.attributes?.mental?.composure || 50;
+                    const pocketCollapsing = rushersClosing.length >= 2;
+                    
+                    // Find closest threat
+                    const closestThreat = rushersClosing.length > 0 
+                        ? rushersClosing.sort((a, b) => getDistance(pState, a) - getDistance(pState, b))[0]
+                        : null;
 
                     if (closestThreat) {
                         const dxThreat = closestThreat.x - pState.x;
                         const dyThreat = closestThreat.y - pState.y;
                         const distThreat = getDistance(pState, closestThreat);
-
+                        
+                        // 💡 IMPROVED: QB movement based on threat direction and experience
                         let escapeX = pState.x - (dxThreat / distThreat) * STEP_DISTANCE;
                         let escapeY = pState.y - (dyThreat / distThreat) * STEP_DISTANCE;
 
-                        // "Step Up" into pocket if edge rush
+                        // 💡 NEW: Experienced QBs step up into pressure (college/NFL style)
+                        // Inexperienced QBs retreat too far and take unnecessary sacks
                         if (Math.abs(dxThreat) > Math.abs(dyThreat) && escapeY > pState.initialY - 3) {
-                            escapeY = pState.y + STEP_DISTANCE * 0.5;
-                            escapeX = pState.x - Math.sign(dxThreat) * STEP_DISTANCE * 0.75;
+                            // Edge threat - step up in pocket if experienced
+                            const stepUpChance = qbExperience / 100; // Better QBs hold their ground
+                            if (Math.random() < stepUpChance) {
+                                escapeY = pState.y + STEP_DISTANCE * 0.3; // Subtle step up
+                                escapeX = pState.x - Math.sign(dxThreat) * STEP_DISTANCE * 0.5;
+                            } else {
+                                // Retreat - inexperienced QBs bail too early
+                                escapeY = pState.y - STEP_DISTANCE * 0.5;
+                            }
                         }
+                        
+                        // 💡 NEW: Panic threshold - if 2+ rushers and poor composure, scramble more drastically
+                        if (pocketCollapsing && qbComposure < 60) {
+                            escapeY = Math.min(pState.initialY + 2, escapeY - STEP_DISTANCE * 0.5);
+                            escapeX += (Math.random() < 0.5 ? -1 : 1); // More erratic movement
+                        }
+
                         escapeY = Math.max(pState.initialY - 5, escapeY); // Cap dropback depth
 
                         pState.targetX = escapeX;
                         pState.targetY = escapeY;
                     } else {
-                        // Drift slightly to look alive
+                        // 💡 IMPROVED: QB stands naturally when clean, not just drifting randomly
                         if (getDistance(pState, { x: pState.targetX, y: pState.targetY }) < 0.5) {
-                            pState.targetX = pState.x;
-                            pState.targetY = pState.y;
+                            pState.targetX = pState.initialX; // Return to base position
+                            pState.targetY = pState.initialY - 0.5; // Slight depth for vision
                         }
                     }
                     break;
@@ -2011,11 +2680,9 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
             return;
         }
 
-
         // ===========================================================
-    // DEFENSE AI (FIXED)
-    // ===========================================================
-    playState.activePlayers.forEach(pState => {
+        // DEFENSE AI (FIXED)
+        // ===========================================================
         if (pState.isOffense) return;
 
         // -- Status Checks --
@@ -2131,19 +2798,129 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
 
         // --- A. RUN SUPPORT (Run Read but QB has ball / Play Action) ---
         if (isRunRead && !isBallInAir) {
-            // DBs must stay deeper than LOS to avoid biting on PA
-            const limitY = isDB ? LOS + 2.0 : LOS - 2.0; 
-
-            // Move towards the ball carrier (or mesh point), but stopped by the "limitY"
-            let supportX = ballCarrierState ? ballCarrierState.x : pState.x;
-            let supportY = ballCarrierState ? ballCarrierState.y : pState.y;
-
-            // Blend current position with target (Hesitate)
-            pState.targetX = (pState.x + supportX) / 2;
-            pState.targetY = Math.max(limitY, supportY); 
+            // 💡 ENHANCED: Realistic gap assignments for run defense with DB/Safety intelligence
+            const isLB = pState.slot.startsWith('LB');
+            const isDL = pState.slot.startsWith('DL');
+            const isSafety = pState.slot.startsWith('S');
+            const isDB = pState.slot.includes('DB') || isSafety;
             
-            // If I am a LB, I can step up aggressively
-            if (!isDB) pState.targetY = Math.max(LOS - 1.0, pState.targetY);
+            if (ballCarrierState) {
+                // 💡 NEW: Gap assignment discipline
+                const runnerX = ballCarrierState.x;
+                const runnerY = ballCarrierState.y;
+                const CENTER_X = FIELD_WIDTH / 2;
+                
+                // For DL: Take assigned gap and hold it
+                if (isDL) {
+                    // DL reads flow: if runner goes away, pursue laterally but maintain gap
+                    const runnerFlow = runnerX - pState.initialX;
+                    
+                    if (Math.abs(runnerFlow) < 2.0) {
+                        // Runner at my gap - attack downhill
+                        pState.targetX = runnerX;
+                        pState.targetY = ballCarrierState.y;
+                    } else if (runnerFlow < -3.0) {
+                        // Runner going away to left - pursue laterally but don't get drawn too wide
+                        const pursuitX = pState.x + (runnerX - pState.initialX) * 0.6; // 60% pursuit
+                        pState.targetX = Math.max(CENTER_X - 15, pursuitX); // Don't go too far left
+                        pState.targetY = ballCarrierState.y;
+                    } else if (runnerFlow > 3.0) {
+                        // Runner going away to right - similar logic
+                        const pursuitX = pState.x + (runnerX - pState.initialX) * 0.6;
+                        pState.targetX = Math.min(CENTER_X + 15, pursuitX); // Don't go too far right
+                        pState.targetY = ballCarrierState.y;
+                    } else {
+                        // Angled run - move to interception point
+                        pState.targetX = (pState.x + runnerX) / 2;
+                        pState.targetY = ballCarrierState.y;
+                    }
+                    
+                    // DL always attack hard downhill
+                    pState.targetY = Math.max(LOS - 1.0, pState.targetY);
+                }
+                
+                // For LB: Follow gap with better anticipation
+                else if (isLB) {
+                    // LBs track downhill more than DL, but maintain discipline
+                    const lbAggressiveness = pState.awareness || 50; // Higher awareness = more downhill
+                    const downhillFactor = Math.min(3.0, lbAggressiveness / 30); // 0.5-3 yards ahead
+                    
+                    // LB reads the pulling guard or flow
+                    const flowAmount = ballCarrierState.velocity?.x || 0;
+                    
+                    if (Math.abs(flowAmount) < 1.0) {
+                        // Straight run - step up to mesh point
+                        pState.targetX = runnerX;
+                        pState.targetY = Math.max(LOS - 0.5, ballCarrierState.y - downhillFactor);
+                    } else {
+                        // Lateral flow - lead pursuit by staying ahead of runner
+                        const anticipatedX = runnerX + (flowAmount * 2.0);
+                        pState.targetX = Math.max(CENTER_X - 12, Math.min(CENTER_X + 12, anticipatedX));
+                        pState.targetY = Math.max(LOS - 1.5, ballCarrierState.y - downhillFactor);
+                    }
+                }
+                
+                // For DBs & Safeties: Intelligent run support with pass defense responsibility balance
+                else if (isDB) {
+                    // 💡 ENHANCED: DB run support decision tree
+                    const distToBall = getDistance(pState, ballCarrierState);
+                    const dbSpeed = pState.speed || 50;
+                    const runnerSpeed = ballCarrierState.speed || 50;
+                    
+                    // Decision 1: Can I get there in time?
+                    const estimatedTimeToRunner = distToBall / (dbSpeed / 100 * 8); // Rough time estimate
+                    
+                    // Decision 2: Safety vs Cornerback positioning
+                    if (isSafety) {
+                        // Safeties have dual responsibility - protect deep but support runs
+                        
+                        // If run is getting big (past LOS + 5), safety must commit
+                        if (runnerY > LOS + 5.0) {
+                            // Run is getting north - must flow down
+                            const supportDepth = Math.max(LOS + 2.0, runnerY - 2.0);
+                            pState.targetX = (pState.x + runnerX) * 0.6 + zoneCenter.x * 0.4; // Balance zone & run
+                            pState.targetY = supportDepth;
+                        } else {
+                            // Run is short/stalled - stay high for pass
+                            const safetyDepth = LOS + 3.0;
+                            pState.targetX = (pState.x * 0.7) + (runnerX * 0.3); // Only 30% commit to run
+                            pState.targetY = safetyDepth;
+                        }
+                        
+                        // Safety never gets closer than 2 yards to LOS (maintain top 2)
+                        pState.targetY = Math.max(LOS + 2.0, pState.targetY);
+                    } else {
+                        // Cornerback in run support (more aggressive than safety)
+                        const cbCautionDepth = 1.5; // CBs can come up tighter
+                        
+                        if (runnerSpeed > dbSpeed + 3) {
+                            // Runner is faster - take angle instead of pure pursuit
+                            const interceptX = runnerX - (dbSpeed / 100 * 2); // Lead the runner
+                            pState.targetX = Math.max(CENTER_X - 10, Math.min(CENTER_X + 10, interceptX));
+                            pState.targetY = Math.max(LOS + cbCautionDepth, runnerY + cbCautionDepth);
+                        } else {
+                            // Speed advantage or equal - get vertical
+                            pState.targetX = (pState.x * 0.5) + (runnerX * 0.5); // 50/50 pursuit
+                            pState.targetY = Math.max(LOS + cbCautionDepth, runnerY);
+                        }
+                    }
+                    
+                    // Decision 3: Lateral run vs dive - adjust positioning
+                    const ballVelX = ballCarrierState.velocity?.x || 0;
+                    if (Math.abs(ballVelX) > 2.0) {
+                        // Lateral run - get wider
+                        pState.targetX += (ballVelX > 0 ? 1.5 : -1.5);
+                    }
+                    
+                    // Decision 4: Never abandon pass responsibility too far
+                    const zoneCenter = pState.cachedZoneCenter || getZoneCenter(pState.assignment || 'zone_short_middle', LOS);
+                    if (zoneCenter && getDistance(pState, zoneCenter) > 12.0) {
+                        // Too far from zone - come back 20%
+                        pState.targetX = pState.targetX * 0.8 + zoneCenter.x * 0.2;
+                        pState.targetY = pState.targetY * 0.8 + zoneCenter.y * 0.2;
+                    }
+                }
+            }
             
             return; 
         }
@@ -2156,82 +2933,331 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
             pState.action = 'punt_return';
         }
 
-        // --- C. MAN COVERAGE ---
+        // --- 💡 ENHANCED: Safety Help Coordination (applies before specific assignments) ---
+        // Check if this is a safety that should provide help instead of normal assignment
+        if (!isBallInAir && pState.slot.startsWith('S')) {
+            const safetyHelp = calculateSafetyHelp(pState, defenseStates, offenseStates, ballCarrierState, playState, isBallInAir);
+            
+            if (safetyHelp && safetyHelp.type === 'help') {
+                // Override normal assignment to provide help
+                pState.targetX = safetyHelp.helpX;
+                pState.targetY = safetyHelp.helpY;
+                pState.assignment = 'safety_help'; // Track that we're helping
+                
+                // Final clamp
+                pState.targetX = Math.max(1, Math.min(52, pState.targetX));
+                pState.targetY = Math.max(1, Math.min(119, pState.targetY));
+                
+                return; // Skip normal assignment logic
+            }
+        }
+
+        // --- C. MAN COVERAGE (ENHANCED) ---
         else if (assignment?.startsWith('man_cover_')) {
             const targetSlot = assignment.replace('man_cover_', '');
             const targetRec = offenseStates.find(o => o.slot === targetSlot);
 
             if (targetRec) {
-                let offsetX = (targetRec.x < CENTER_X) ? 0.5 : -0.5; // Inside shade
-                let offsetY = 1.5; // Cushion
-                if (targetRec.y > LOS + 15) offsetY = 2.5; // Deep cushion
-
-                pState.targetX = targetRec.x + offsetX;
-                pState.targetY = targetRec.y + offsetY;
+                // 💡 ENHANCED: Intelligent man coverage positioning based on game state
+                const distToRec = getDistance(pState, targetRec);
+                const dbSpeed = pState.speed || 50;
+                const dbCoverage = pState.catchingHands || 50; // Use coverage awareness (could add new attribute)
+                const recSpeed = targetRec.speed || 50;
+                const isSafety = pState.slot.startsWith('S');
+                const isCornerback = pState.slot.startsWith('DB') && !pState.slot.startsWith('S');
+                
+                // Decision 1: Cushion based on receiver depth and speed differential
+                let cushion = 1.5; // Default cushion
+                
+                if (isBallInAir && playState.ballState.targetPlayerId === targetRec.id) {
+                    // Ball is in air and targeting this receiver - tighten up!
+                    cushion = 0.3;
+                } else if (targetRec.y > LOS + 20 && recSpeed > dbSpeed + 5) {
+                    // Deep receiver who's faster - need more cushion
+                    cushion = 2.5;
+                } else if (targetRec.y > LOS + 15) {
+                    // Deep route - deeper cushion
+                    cushion = 2.5;
+                } else if (targetRec.action === 'run_block' || targetRec.action === 'route_complete') {
+                    // Receiver coming back or stationary - tighter coverage
+                    cushion = 0.8;
+                } else if (isBallInAir && distToRec < 5.0) {
+                    // Ball in air and nearby - immediate tight coverage
+                    cushion = 0.2;
+                }
+                
+                // Decision 2: Shading based on receiver position and ball location
+                let shadeX = 0;
+                let shadeY = cushion;
+                
+                if (isBallInAir && qbState) {
+                    // Shade towards the ball if it's in flight
+                    const ballDist = getDistance(pState, playState.ballState);
+                    if (ballDist < 15.0) {
+                        // QB is throwing - shade ball-side for interception
+                        shadeX = (playState.ballState.x > targetRec.x) ? 1.0 : -1.0;
+                        shadeY = Math.max(0.3, cushion - 1.0); // Get tighter when ball is in air
+                    }
+                } else if (!isBallInAir && distToRec < 3.0) {
+                    // Receiver is close and no pass in air - press coverage
+                    shadeX = (targetRec.x < CENTER_X) ? 0.3 : -0.3; // Inside shade for leverage
+                    shadeY = 0.5; // Very tight
+                } else {
+                    // Normal coverage - inside shade (better leverage)
+                    shadeX = (targetRec.x < CENTER_X) ? 0.5 : -0.5;
+                }
+                
+                // Decision 3: Safety help consideration (safeties play more conservative)
+                if (isSafety) {
+                    // Safeties in man coverage help over the top
+                    cushion = Math.max(1.5, cushion + 1.0); // Keep deeper
+                    shadeY = Math.max(0.5, cushion); // Deeper positioning
+                }
+                
+                // Decision 4: Anticipation based on receiver depth and route type
+                let anticipatedX = targetRec.x;
+                let anticipatedY = targetRec.y;
+                
+                if (targetRec.routePath && targetRec.routePath.length > 0 && targetRec.currentPathIndex < targetRec.routePath.length) {
+                    // Read the route direction and anticipate next point
+                    const nextPathPoint = targetRec.routePath[Math.min(targetRec.currentPathIndex + 1, targetRec.routePath.length - 1)];
+                    if (nextPathPoint) {
+                        // Estimate where receiver will be in next 1-2 ticks
+                        const recVelX = (nextPathPoint.x - targetRec.x) * 0.3;
+                        const recVelY = (nextPathPoint.y - targetRec.y) * 0.3;
+                        anticipatedX = targetRec.x + recVelX;
+                        anticipatedY = targetRec.y + recVelY;
+                    }
+                }
+                
+                pState.targetX = anticipatedX + shadeX;
+                pState.targetY = anticipatedY + shadeY;
             } else {
-                // Target missing, default to zone spot
+                // Target missing or moved, default to zone spot
                 const z = getZoneCenter('zone_short_middle', LOS);
-                pState.targetX = z.x; pState.targetY = z.y;
+                pState.targetX = z.x; 
+                pState.targetY = z.y;
             }
         } 
         
-        // --- D. ZONE COVERAGE ---
+        // --- D. ZONE COVERAGE (ENHANCED with DB/Safety Logic) ---
         else if (assignment?.startsWith('zone_')) {
             const zoneCenter = pState.cachedZoneCenter || getZoneCenter(assignment, LOS);
+            const zone = zoneBoundaries[assignment];
+            const isSafety = pState.slot.startsWith('S');
+            const isDeepZone = assignment.includes('deep');
             
-            // Pattern Match: Look for receivers in my zone
-            const threats = offenseStates.filter(o => 
-                Math.abs(o.x - zoneCenter.x) < 6 && 
-                Math.abs(o.y - zoneCenter.y) < 8 &&
-                o.action.includes('route')
-            );
+            // 💡 ENHANCED: Advanced receiver detection with threat level assessment
+            const threats = offenseStates.filter(o => {
+                if (!o.action.includes('route') && o.action !== 'route_complete') return false;
+                
+                // For safeties: look wider area for threats
+                const searchRadius = isSafety ? 10 : 6;
+                const searchDepth = isSafety ? 12 : 8;
+                
+                return Math.abs(o.x - zoneCenter.x) < searchRadius && 
+                       Math.abs(o.y - zoneCenter.y) < searchDepth;
+            });
 
             if (threats.length > 0) {
-                threats.sort((a, b) => getDistance(zoneCenter, a) - getDistance(zoneCenter, b));
-                const target = threats[0];
-                // Latch on loosely (Drift towards them)
-                pState.targetX = (target.x * 0.6) + (zoneCenter.x * 0.4);
-                pState.targetY = (target.y * 0.6) + (zoneCenter.y * 0.4);
+                // 💡 ENHANCED: Threat prioritization by distance and speed
+                threats.sort((a, b) => {
+                    const distA = getDistance(zoneCenter, a);
+                    const distB = getDistance(zoneCenter, b);
+                    
+                    // Prioritize closer threats, but also consider speed differential
+                    const speedA = a.speed || 50;
+                    const speedB = b.speed || 50;
+                    const dbSpeed = pState.speed || 50;
+                    
+                    // Fast receivers close by are priority
+                    const threatScoreA = distA - (speedA > dbSpeed + 10 ? -3 : 0);
+                    const threatScoreB = distB - (speedB > dbSpeed + 10 ? -3 : 0);
+                    
+                    return threatScoreA - threatScoreB;
+                });
                 
-                // Deep Zone Rule: Stay deeper than the receiver
-                if (assignment.includes('deep')) {
-                    pState.targetY = Math.max(pState.targetY, target.y + 2.5);
+                const primaryThreat = threats[0];
+                
+                // 💡 ENHANCED: Decision tree for coverage positioning
+                let targetX = primaryThreat.x;
+                let targetY = primaryThreat.y;
+                
+                // Decision 1: How aggressive to play (zone vs press)
+                const distToThreat = getDistance(pState, primaryThreat);
+                const threatDepth = primaryThreat.y - LOS;
+                const dbCoverage = pState.blockShedding || 50; // Defensive awareness
+                
+                // Deeper threats = more aggressive (stay deeper)
+                // Closer threats = tighter coverage (press up)
+                const aggressiveness = distToThreat < 3.0 ? 0.4 : (isDeepZone ? 0.2 : 0.5);
+                
+                // Decision 2: Blend towards threat or stay in zone
+                const blendFactor = Math.max(0.3, Math.min(0.8, distToThreat / 10.0));
+                
+                targetX = (primaryThreat.x * blendFactor) + (zoneCenter.x * (1 - blendFactor));
+                targetY = (primaryThreat.y * blendFactor) + (zoneCenter.y * (1 - blendFactor));
+                
+                // Decision 3: Deep zone safeties have top-down responsibility
+                if (isDeepZone && isSafety) {
+                    // Stay deeper than the threat for deep ball interceptions
+                    targetY = Math.max(targetY, primaryThreat.y + 2.0);
+                    // Also drift towards the ball if in air
+                    if (isBallInAir && playState.ballState.targetY > LOS) {
+                        const ballToSafety = getDistance(pState, playState.ballState);
+                        if (ballToSafety < 20.0) {
+                            // Move 30% towards ball for interception
+                            targetX = pState.x + (playState.ballState.x - pState.x) * 0.3;
+                            targetY = pState.y + (playState.ballState.y - pState.y) * 0.3;
+                        }
+                    }
                 }
+                
+                // Decision 4: Underneath zones tighten on threats
+                if (!isDeepZone && !isSafety) {
+                    // DB in underneath zone - get tighter
+                    targetY = Math.min(targetY, primaryThreat.y + 0.5);
+                }
+                
+                // 💡 ENFORCE ZONE BOUNDARIES - don't chase too far
+                if (zone && zone.minX !== undefined && zone.maxX !== undefined) {
+                    const ZONE_BUFFER = isSafety ? 2.0 : 1.5; // Safeties get more freedom
+                    targetX = Math.max(zone.minX - ZONE_BUFFER, Math.min(zone.maxX + ZONE_BUFFER, targetX));
+                }
+                
+                if (zone && zone.minY !== undefined && zone.maxY !== undefined) {
+                    const BACK_WALL_Y = FIELD_LENGTH - 0.5;
+                    const idealMinY = LOS + (zone.minY || 0);
+                    const idealMaxY = Math.min(LOS + (zone.maxY || 20), BACK_WALL_Y);
+                    const ZONE_BUFFER = isSafety ? 1.5 : 1.0;
+                    targetY = Math.max(idealMinY - ZONE_BUFFER, Math.min(idealMaxY + ZONE_BUFFER, targetY));
+                }
+                
+                pState.targetX = targetX;
+                pState.targetY = targetY;
             } else {
-                // Drift slightly with QB eyes (simulated by ball X)
-                let shiftX = ballPos ? (ballPos.x - zoneCenter.x) * 0.15 : 0;
-                pState.targetX = zoneCenter.x + shiftX;
-                pState.targetY = zoneCenter.y;
+                // NO THREATS - Decision tree for empty zone positioning
+                
+                // Decision 1: Read ball position for visual cues
+                let shiftX = 0;
+                if (qbState) {
+                    // Drift with QB eyes to defend hot routes
+                    shiftX = (qbState.x - zoneCenter.x) * 0.2;
+                }
+                
+                let posX = zoneCenter.x + shiftX;
+                let posY = zoneCenter.y;
+                
+                // Decision 2: Safeties in empty zones play more conservative
+                if (isSafety) {
+                    // Stay deeper to defend vertical shots
+                    posY = Math.max(posY, zoneCenter.y + 2.0);
+                    // Also shift slightly based on coverage look (two-high vs single)
+                    // TODO: Could read defensive alignment for more sophisticated positioning
+                }
+                
+                // Decision 3: DBs in empty zones can move up in coverage
+                if (!isSafety) {
+                    // Creep up slightly looking for receiver windows
+                    posY = Math.min(posY, zoneCenter.y - 0.5);
+                }
+                
+                // Enforce zone bounds even in empty space
+                if (zone && zone.minX !== undefined && zone.maxX !== undefined) {
+                    posX = Math.max(zone.minX, Math.min(zone.maxX, posX));
+                }
+                if (zone && zone.minY !== undefined && zone.maxY !== undefined) {
+                    const BACK_WALL_Y = FIELD_LENGTH - 0.5;
+                    const idealMinY = LOS + (zone.minY || 0);
+                    const idealMaxY = Math.min(LOS + (zone.maxY || 20), BACK_WALL_Y);
+                    posY = Math.max(idealMinY, Math.min(idealMaxY, posY));
+                }
+                
+                pState.targetX = posX;
+                pState.targetY = posY;
             }
         }
 
-        // --- E. QB SPY ---
+        // --- E. QB SPY (ENHANCED) ---
         else if (assignment === 'spy_QB') {
             if (qbState) {
-                pState.targetX = qbState.x; // Mirror X
-                if (qbState.y > LOS) {
-                    pState.targetX = qbState.x; pState.targetY = qbState.y; // Attack if he runs
+                // 💡 ENHANCED: Intelligent QB spy positioning
+                const isSafety = pState.slot.startsWith('S');
+                const distToQB = getDistance(pState, qbState);
+                const qbSpeed = qbState.speed || 50;
+                const spySpeed = pState.speed || 50;
+                
+                // Decision 1: Aggressive vs Conservative spy
+                let spyDepth = LOS + 4; // Default depth
+                
+                if (qbState.action === 'qb_scramble' || qbState.y > LOS + 1.0) {
+                    // QB is already scrambling - attack vertically
+                    pState.targetX = qbState.x;
+                    pState.targetY = qbState.y;
                     pState.action = 'pursuit';
+                    return;
+                } else if (qbSpeed > spySpeed + 5 && !isSafety) {
+                    // QB is faster - take wider angle
+                    pState.targetX = qbState.x + (qbState.x > CENTER_X ? -2 : 2); // Cut off edge
+                    pState.targetY = LOS - 0.5; // Play just off LOS
+                } else if (isSafety) {
+                    // Safety spies keep deeper (help over top while monitoring)
+                    spyDepth = LOS + 3.5;
+                    pState.targetX = (pState.x * 0.6) + (qbState.x * 0.4); // Slight contribution
+                    pState.targetY = spyDepth;
                 } else {
-                    pState.targetY = LOS + 4; // Wait at depth
+                    // DB spy - stay tighter, ready to pounce
+                    pState.targetX = qbState.x + 0.5; // Slight offset
+                    pState.targetY = LOS + 0.5; // Very close to line
                 }
             }
         }
-        // --- F. BLITZ ---
+        // --- F. BLITZ / PASS RUSH (ENHANCED) ---
         else if (assignment?.includes('rush') || assignment?.includes('blitz')) {
-             let rushTarget = { x: qbState ? qbState.x : pState.x, y: qbState ? qbState.y : pState.y };
-             pState.targetX = rushTarget.x;
-             pState.targetY = rushTarget.y;
+            // 💡 ENHANCED: Sophisticated gap assignment for pass rushers
+            if (qbState && !playState.ballState.inAir) {
+                // 💡 NEW: Gap discipline for pass rush (edge vs interior)
+                const isEdgeRusher = pState.slot.startsWith('DL') && (assignment.includes('edge') || Math.abs(pState.initialX - CENTER_X) > 10);
+                const isInteriorRusher = pState.slot.startsWith('DL') && !isEdgeRusher;
+                
+                // Determine target based on gap assignment
+                let rushTarget = { x: qbState.x, y: qbState.y };
+                
+                if (isEdgeRusher) {
+                    // Edge rushers work around tackles, not straight line
+                    const tackleX = pState.initialX < CENTER_X ? 5 : 48; // Tackle position approximation
+                    rushTarget.x = qbState.x + (tackleX > CENTER_X ? 3 : -3); // Rush around edge
+                    rushTarget.y = qbState.y - 2; // Approach at angle
+                } else if (isInteriorRusher) {
+                    // Interior linemen attack upfield more directly
+                    rushTarget.y = qbState.initialY - 3; // Target QB's initial depth
+                }
+                
+                // 💡 NEW: Contain responsibility - DBs on blitz should take contain, not gap
+                if (pState.slot.includes('DB')) {
+                    rushTarget.x = pState.initialX < CENTER_X ? 2 : 51; // Wide contain
+                    rushTarget.y = qbState.y + 1; // Shallow to catch scrambles
+                }
+                
+                pState.targetX = rushTarget.x;
+                pState.targetY = rushTarget.y;
+            } else {
+                // Fallback if no QB state
+                let rushTarget = { x: pState.initialX, y: pState.initialY - 5 };
+                pState.targetX = rushTarget.x;
+                pState.targetY = rushTarget.y;
+            }
         }
 
         // Final Clamp
         pState.targetX = Math.max(1, Math.min(52, pState.targetX));
         pState.targetY = Math.max(1, Math.min(119, pState.targetY));
-    });
-}
+    }); // END DEFENSE FOREACH
+} // END UPDATEPLAYERTARGETS FUNCTION
 
 /**
  * Checks for block engagements based on proximity.
+ * 💡 IMPROVED: More realistic blocking interactions with strength calculations
  */
 function checkBlockCollisions(playState) {
     const offenseStates = playState.activePlayers.filter(p => p.isOffense);
@@ -2278,52 +3304,71 @@ function checkBlockCollisions(playState) {
                 );
 
                 if (defendersInRange.length > 0) {
-                    defendersInRange.sort((a, b) => getDistance(blocker, a) - getDistance(blocker, b));
+                    // 💡 IMPROVED: Sort by threat level, not just distance
+                    defendersInRange.sort((a, b) => {
+                        // Prioritize defenders closer to QB or RB
+                        const ballCarrier = playState.activePlayers.find(p => p.isBallCarrier || p.hasBall);
+                        if (ballCarrier && ballCarrier.isOffense) {
+                            const aQBDist = getDistance(a, ballCarrier);
+                            const bQBDist = getDistance(b, ballCarrier);
+                            const distDiff = aQBDist - bQBDist;
+                            if (Math.abs(distDiff) > 0.5) return distDiff; // Significant difference
+                        }
+                        return getDistance(blocker, a) - getDistance(blocker, b);
+                    });
                     targetDefender = defendersInRange[0];
                 }
             }
 
-            // 3. If we found a target, check for a "whiff" before engaging
+            // 3. If we found a target, check for realistic engagement conditions
             if (targetDefender) {
-
-                // --- 💡 NEW "HOLDING" PREVENTION LOGIC 💡 ---
+                // 💡 IMPROVED: "Whiff" logic - defender must not be far past blocker
                 if (isPassBlock) {
-                    // This is a pass play. Check if the defender is *already past* the blocker.
-                    // (i.e., defender's Y is less than the blocker's Y)
                     const WHIFF_BUFFER = 0.5; // 0.5 yard buffer
                     if (targetDefender.y < (blocker.y - WHIFF_BUFFER)) {
-                        // The defender has beaten the blocker!
-                        // Do NOT engage. This prevents "holding" from behind.
-
-                        // If this was our assigned target, we've lost them.
+                        // Defender has beaten the blocker - can't hold
                         if (blocker.dynamicTargetId === targetDefender.id) {
                             blocker.dynamicTargetId = null;
                         }
-
                         targetDefender = null; // Do not engage
                     }
                 }
-                // --- 💡 END "HOLDING" LOGIC 💡 ---
+                
+                // 💡 NEW: Strength-based win probability for engagement
+                if (targetDefender) {
+                    const blockerStrength = blocker.attributes?.physical?.strength || 50;
+                    const defenderStrength = targetDefender.attributes?.physical?.strength || 50;
+                    const strengthDiff = blockerStrength - defenderStrength;
+                    
+                    // Stronger defender has better chance to shed block
+                    const engagementSuccessChance = 0.5 + (strengthDiff / 200); // 0-1 range
+                    if (Math.random() > engagementSuccessChance && defenderStrength > blockerStrength + 10) {
+                        // Weak blocker can't engage strong defender
+                        targetDefender = null;
+                    }
+                }
             }
 
             // 4. If we *still* have a valid target, initiate the block
             if (targetDefender) {
-                if (blocker.slot.startsWith('OL')) {
-                    //console.log(`%c*** BLOCK ENGAGED (Tick: ${playState.tick}) ***: ${blocker.name} (${blocker.slot}) has engaged ${targetDefender.name} (${targetDefender.slot})`, 'color: #00dd00; font-weight: bold;');
-                }
                 blocker.engagedWith = targetDefender.id;
                 blocker.isEngaged = true;
                 blocker.dynamicTargetId = targetDefender.id; // Confirm the target
+                blocker.engagementStartTick = playState.tick; // 💡 NEW: Track when engagement started
 
                 targetDefender.isBlocked = true;
                 targetDefender.blockedBy = blocker.id;
                 targetDefender.isEngaged = true;
+                targetDefender.engagementStartTick = playState.tick; // 💡 NEW: Track engagement timing
 
                 playState.blockBattles.push({
-                    blockerId: blocker.id, defenderId: targetDefender.id,
+                    blockerId: blocker.id, 
+                    defenderId: targetDefender.id,
                     status: 'ongoing',
                     battleScore: 0,
-                    startTick: playState.tick
+                    startTick: playState.tick,
+                    blockerStrength: blocker.attributes?.physical?.strength || 50,
+                    defenderStrength: targetDefender.attributes?.physical?.strength || 50
                 });
             }
         }
@@ -3158,10 +4203,10 @@ function handleBallArrival(playState, gameLog, play) {
             });
 
             ensureStats(defenderPlayer);
-            //defenderPlayer.gameStats.interceptions = (defenderPlayer.gameStats.interceptions || 0) + 1;
+            defenderPlayer.gameStats.interceptions = (defenderPlayer.gameStats.interceptions || 0) + 1;
 
             if (throwerPlayer) {
-                //throwerPlayer.gameStats.interceptionsThrown = (throwerPlayer.gameStats.interceptionsThrown || 0) + 1;
+                throwerPlayer.gameStats.interceptionsThrown = (throwerPlayer.gameStats.interceptionsThrown || 0) + 1;
             }
         }
     }
@@ -3260,6 +4305,11 @@ function handleBallArrival(playState, gameLog, play) {
                 if (gameLog) gameLog.push(`❌ **CONTESTED DROP!** Pass was on target to ${targetPlayerState.name} (Catch: ${recCatchSkill})!`);
             } else {
                 if (gameLog) gameLog.push(`❌ **DROPPED!** Pass was on target to ${targetPlayerState.name} (Catch: ${recCatchSkill})!`);
+                // Track drop stat for receiver
+                if (receiverPlayer) {
+                    ensureStats(receiverPlayer);
+                    receiverPlayer.gameStats.drops = (receiverPlayer.gameStats.drops || 0) + 1;
+                }
             }
             playState.incomplete = true; playState.playIsLive = false;
         }
@@ -3301,7 +4351,7 @@ const ensureStats = (player) => {
             // Receiving
             receptions: 0, recYards: 0, targets: 0, drops: 0,
             // Defense / Special Teams
-            tackles: 0, sacks: 0, interceptions: 0, returnYards: 0,
+            tackles: 0, sacks: 0, interceptions: 0, fumbles: 0, fumblesLost: 0, fumblesRecovered: 0, returnYards: 0,
             // Scoring
             touchdowns: 0
         };
@@ -3728,6 +4778,8 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
                                 // --- OFFENSE RECOVERED ---
                                 playState.turnover = false;
                                 if (gameLog) gameLog.push(`👍 ${recoverer.name || 'player'} recovers the fumble!`);
+                                ensureStats(recoverer);
+                                recoverer.gameStats.fumblesRecovered = (recoverer.gameStats.fumblesRecovered || 0) + 1;
                                 playState.activePlayers.forEach(p => {
                                     if (p.isOffense && p.id !== recoverer.id) p.action = 'run_block';
                                     else if (!p.isOffense) p.action = 'pursuit';
@@ -3736,6 +4788,15 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
                                 // --- DEFENSE RECOVERED ---
                                 playState.turnover = true;
                                 if (gameLog) gameLog.push(`❗ ${recoverer.name || 'player'} recovers the fumble for the Defense!`);
+                                ensureStats(recoverer);
+                                recoverer.gameStats.fumblesRecovered = (recoverer.gameStats.fumblesRecovered || 0) + 1;
+                                // Track fumbleLost for any offensive player with the ball
+                                for (const p of playState.activePlayers) {
+                                    if (p.isOffense && (p.isBallCarrier || p.hasBall)) {
+                                        ensureStats(p);
+                                        p.gameStats.fumblesLost = (p.gameStats.fumblesLost || 0) + 1;
+                                    }
+                                }
                                 playState.activePlayers.forEach(p => {
                                     if (p.isOffense) p.action = 'pursuit';
                                     else if (p.id !== recoverer.id) p.action = 'run_block';
@@ -3875,14 +4936,11 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
                     const team = (game && game.teams) ? game.teams.find(tt => tt && tt.id === tid) : null;
                     if (!team) return;
                     
-                    // 💡 FIX: Allow player team to auto-sub if you want, or keep the check.
-                    // Currently skipping playerTeam so you have control.
-                    if (game.playerTeam && team.id === game.playerTeam.id) return;
-
-                    // 💡 FIX: Run with high chance (1.0) every ~2 seconds (tick % 40)
+                    // ✅ IMPROVED: Now all teams (including player team) can auto-sub
+                    // Run with high chance (1.0) every ~2 seconds (tick % 40)
                     // This prevents checking 20 times a second, but guarantees checks happen.
                     if (playState.tick % 40 === 0) {
-                        autoMakeSubstitutions(team, { thresholdFatigue: 50, maxSubs: 2, chance: 1.0 });
+                        autoMakeSubstitutions(team, { thresholdFatigue: 50, maxSubs: 2, chance: 1.0 }, gameLog);
                     }
                 });
             } catch (err) {
@@ -4421,44 +5479,69 @@ function aiCheckAudible(offense, offensivePlayKey, defense, defensivePlayKey, ga
     const offensePlay = offensivePlaybook[offensivePlayKey];
     const defensePlay = defensivePlaybook[defensivePlayKey];
 
-    // This find is now safe from the fix we applied earlier
     const roster = getRosterObjects(offense);
     const qb = roster.find(p => p && p.id === offense.depthChart.offense.QB1);
 
     const qbIQ = qb?.attributes?.mental?.playbookIQ ?? 50;
+    const qbToughness = qb?.attributes?.mental?.toughness ?? 50;
+    const qbDecision = qb?.attributes?.mental?.decisionMaking ?? 50;
 
     if (!offensePlay || !defensePlay || !qb) {
         return { playKey: offensivePlayKey, didAudible: false };
     }
 
-    const iqChance = qbIQ / 150;
+    const iqChance = (qbIQ + qbDecision) / 200; // 💡 ENHANCED: Include decision-making
     let newPlayKey = offensivePlayKey;
     let didAudible = false;
 
+    // 💡 THREAT ASSESSMENT: Categorize defensive aggression level
+    const getBoxThreatLevel = () => {
+        let threatLevel = 0;
+        if (defensePlay.concept === 'Run') threatLevel += 2;
+        if (defensePlay.blitz && defensePlay.concept !== 'Zone') threatLevel += 3;
+        if (defensePlay.concept === 'Man' && defensePlay.blitz) threatLevel += 2;
+        return threatLevel;
+    };
+
+    const boxThreatLevel = getBoxThreatLevel();
+
     // 1. Check: Run play vs. a stacked box (Run Stop or All-Out Blitz)
-    if (offensePlay.type === 'run' && (defensePlay.concept === 'Run' || (defensePlay.blitz && defensePlay.concept === 'Man'))) {
-        if (Math.random() < iqChance) {
+    if (offensePlay.type === 'run' && boxThreatLevel >= 2) {
+        const audibleProbability = Math.min(0.8, iqChance + (boxThreatLevel * 0.15) + (qbToughness / 500));
+        if (Math.random() < audibleProbability) {
             const audibleTo = findAudiblePlay(offense, 'pass', 'short');
             if (audibleTo) {
                 newPlayKey = audibleTo;
                 didAudible = true;
-                // --- 💡 FIX: Added a check to make sure gameLog is not null ---
                 if (gameLog) {
-                    gameLog.push(`[Audible]: 🧠 ${qb.name} sees the stacked box and audibles to a pass!`);
+                    const threatDesc = boxThreatLevel >= 4 ? 'aggressive blitz' : 'stacked box';
+                    gameLog.push(`[Audible]: 🧠 ${qb.name} (IQ:${qbIQ}) diagnoses ${threatDesc} and audibles to pass!`);
                 }
             }
         }
     }
     // 2. Check: Pass play vs. a safe zone (no blitz, 'Zone' concept)
-    else if (offensePlay.type === 'pass' && (defensePlay.blitz === false && defensePlay.concept === 'Zone')) {
-        if (offensePlay.tags?.includes('deep') && Math.random() < iqChance) {
+    else if (offensePlay.type === 'pass' && defensePlay.concept === 'Zone' && !defensePlay.blitz) {
+        if (offensePlay.tags?.includes('deep') && Math.random() < (iqChance * 0.7)) {
             const audibleTo = findAudiblePlay(offense, 'run', 'inside');
             if (audibleTo) {
                 newPlayKey = audibleTo;
                 didAudible = true;
-                // --- 💡 FIX: Added a check to make sure gameLog is not null ---
                 if (gameLog) {
-                    gameLog.push(`[Audible]: 🧠 ${qb.name} sees the soft zone and audibles to a run!`);
+                    gameLog.push(`[Audible]: 🧠 ${qb.name} (Tough:${qbToughness}) sees soft zone and audibles to run!`);
+                }
+            }
+        }
+    }
+    // 3. NEW: Man coverage with aggressive pass rush - might dump to checkdown
+    else if (offensePlay.type === 'pass' && defensePlay.concept === 'Man' && boxThreatLevel >= 3) {
+        if (offensePlay.tags?.includes('deep') && Math.random() < (iqChance * 0.5)) {
+            const shortAudible = findAudiblePlay(offense, 'pass', 'short');
+            if (shortAudible) {
+                newPlayKey = shortAudible;
+                didAudible = true;
+                if (gameLog) {
+                    gameLog.push(`[Audible]: 🧠 ${qb.name} sees aggressive man coverage, changes to checkdown!`);
                 }
             }
         }
@@ -4467,7 +5550,39 @@ function aiCheckAudible(offense, offensivePlayKey, defense, defensivePlayKey, ga
     return { playKey: newPlayKey, didAudible };
 }
 
+/**
+ * 💡 NEW: Checks play diversity and penalizes repetition to encourage variety.
+ * Tracks last N plays and suggests alternatives if too repetitive.
+ * @param {string} desiredPlayType - The play type to check ('pass', 'run', or 'deep', 'short', 'power', etc.)
+ * @param {array} recentPlaysHistory - Array of recent play types called (max 5 plays)
+ * @param {object} formationPlays - Available plays in formation keyed by their tags
+ * @returns {string} - Suggested play key or original if diversity is adequate
+ */
+function checkPlayDiversity(desiredPlayType, recentPlaysHistory, candidatePlayKeys) {
+    if (!Array.isArray(recentPlaysHistory) || recentPlaysHistory.length === 0) {
+        return candidatePlayKeys && candidatePlayKeys.length > 0 ? candidatePlayKeys[0] : null;
+    }
 
+    // Count frequency of recent calls
+    const frequency = {};
+    recentPlaysHistory.forEach(play => {
+        frequency[play] = (frequency[play] || 0) + 1;
+    });
+
+    // If the most common play appears too often, filter it out
+    const mostCommon = Object.entries(frequency).sort((a, b) => b[1] - a[1])[0];
+    const MAX_REPETITION = 3; // Same play max 3 times in last 5 plays
+    
+    if (mostCommon && mostCommon[1] >= MAX_REPETITION && candidatePlayKeys) {
+        // Filter out the most repeated play to encourage diversity
+        const diverseOptions = candidatePlayKeys.filter(p => p !== mostCommon[0]);
+        if (diverseOptions.length > 0) {
+            return diverseOptions[Math.floor(Math.random() * diverseOptions.length)];
+        }
+    }
+
+    return candidatePlayKeys && candidatePlayKeys.length > 0 ? candidatePlayKeys[0] : null;
+}
 
 /**
  * Simulates a full game between two teams.
@@ -4500,6 +5615,11 @@ function simulateGame(homeTeam, awayTeam, options = {}) {
         const totalDrivesPerHalf = getRandomInt(4, 5);
         let currentHalf = 1, drivesThisGame = 0;
         let nextDriveStartBallOn = 20;
+
+        // 💡 NEW: Track play calls for diversity checking (max 5 recent plays per team)
+        const homeTeamPlayHistory = [];
+        const awayTeamPlayHistory = [];
+        const maxHistoryLength = 5;
 
         if (!fastSim) gameLog.push("Coin toss to determine first possession...");
         const coinFlipWinner = Math.random() < 0.5 ? homeTeam : awayTeam;
@@ -4646,6 +5766,15 @@ function simulateGame(homeTeam, awayTeam, options = {}) {
                     defensivePlayKey = determineDefensivePlayCall(defense, offense, down, yardsToGo, ballOn, scoreDiff, fastSim ? null : gameLog, drivesRemainingInGame);
                     const audibleResult = aiCheckAudible(offense, offensivePlayKey_initial, defense, defensivePlayKey, fastSim ? null : gameLog);
                     offensivePlayKey = audibleResult.playKey;
+
+                    // 💡 NEW: Track play history for diversity checking
+                    const offensePlayHistory = offense.id === homeTeam.id ? homeTeamPlayHistory : awayTeamPlayHistory;
+                    if (!fastSim && offensivePlayKey) {
+                        offensePlayHistory.push(offensivePlayKey);
+                        if (offensePlayHistory.length > maxHistoryLength) {
+                            offensePlayHistory.shift(); // Keep max 5 recent plays
+                        }
+                    }
 
                     if (!fastSim) {
                         const offPlayName = offensivePlaybook[offensivePlayKey]?.name || offensivePlayKey.split('_').slice(1).join(' ');
@@ -5564,11 +6693,41 @@ function updateDepthChart(playerId, newPositionSlot, side) {
 }
 
 /**
+ * Validates the integrity of a team's depth chart and roster.
+ * Returns { valid: boolean, errors: string[] }
+ */
+function validateDepthChart(team) {
+    const errors = [];
+    if (!team || !team.depthChart || !team.roster) {
+        return { valid: false, errors: ['Team or depth chart invalid'] };
+    }
+    
+    const allRosterIds = new Set(team.roster.filter(id => id));
+    const assignedPlayerIds = new Set();
+    
+    Object.values(team.depthChart).forEach(sideChart => {
+        Object.values(sideChart).forEach(playerId => {
+            if (playerId) {
+                if (!allRosterIds.has(playerId)) {
+                    errors.push(`Player ${playerId} in depth chart but not on roster`);
+                }
+                if (assignedPlayerIds.has(playerId)) {
+                    errors.push(`Player ${playerId} assigned to multiple slots`);
+                }
+                assignedPlayerIds.add(playerId);
+            }
+        });
+    });
+    
+    return { valid: errors.length === 0, errors };
+}
+
+/**
  * Substitute two players on a team: put inPlayer into the starter slot occupied by outPlayer.
  * If inPlayer is currently assigned to another slot, the assignemnts will be swapped.
  * Returns an object { success: boolean, message: string }
  */
-export function substitutePlayers(teamId, outPlayerId, inPlayerId) {
+export function substitutePlayers(teamId, outPlayerId, inPlayerId, gameLog = null) {
     if (!game || !game.teams) return { success: false, message: 'Game state invalid.' };
     const team = game.teams.find(t => t && t.id === teamId) || game.playerTeam;
     if (!team || !team.depthChart) return { success: false, message: 'Team or depth chart invalid.' };
@@ -5581,39 +6740,51 @@ export function substitutePlayers(teamId, outPlayerId, inPlayerId) {
 
     // depthChart is organized by side (offense/defense). Find slots across both sides.
     const sides = Object.keys(team.depthChart || {});
-    const outSlots = [];
-    const inSlots = [];
+    let outSlot = null; // The ONLY slot outPlayer occupies
+    let inSlot = null;  // The ONLY slot inPlayer occupies (if any)
+    
     sides.forEach(side => {
         const chart = team.depthChart[side] || {};
         Object.keys(chart).forEach(slot => {
-            if (chart[slot] === outPlayerId) outSlots.push({ side, slot });
-            if (chart[slot] === inPlayerId) inSlots.push({ side, slot });
+            if (chart[slot] === outPlayerId) {
+                outSlot = { side, slot };
+            }
+            if (chart[slot] === inPlayerId) {
+                inSlot = { side, slot };
+            }
         });
     });
 
-    if (outSlots.length === 0) {
+    if (!outSlot) {
         return { success: false, message: 'Outgoing player is not currently a starter.' };
     }
 
-    // Use first found out slot as target
-    const target = outSlots[0];
-    team.depthChart[target.side][target.slot] = inPlayerId;
-
-    if (inSlots.length > 0) {
-        // If incoming player was a starter, swap them
-        const inSlot = inSlots[0];
+    // CASE 1: Both players are starters → swap them
+    if (inSlot) {
+        team.depthChart[outSlot.side][outSlot.slot] = inPlayerId;
         team.depthChart[inSlot.side][inSlot.slot] = outPlayerId;
-    } else {
-        // Incoming player was on bench. Remove any additional references to outPlayer in depth chart
-        sides.forEach(side => {
-            const chart = team.depthChart[side] || {};
-            Object.keys(chart).forEach(slot => {
-                if (chart[slot] === outPlayerId && !(side === target.side && slot === target.slot)) chart[slot] = null;
-            });
-        });
+        const logMsg = `🔄 SUBSTITUTION: ${inPlayer.name} and ${outPlayer.name} swap positions.`;
+        console.log(logMsg);
+        if (gameLog && Array.isArray(gameLog)) gameLog.push(logMsg);
+        return { success: true, message: 'Players swapped positions.' };
     }
+    
+    // CASE 2: inPlayer is a bench player → move them to outSlot, remove outPlayer from any other slots
+    team.depthChart[outSlot.side][outSlot.slot] = inPlayerId;
+    
+    // Remove outPlayer from ALL depth chart slots (he should go to bench)
+    sides.forEach(side => {
+        const chart = team.depthChart[side] || {};
+        Object.keys(chart).forEach(slot => {
+            if (chart[slot] === outPlayerId) {
+                chart[slot] = null;
+            }
+        });
+    });
 
-    console.log(`Substitution: ${inPlayer.name} -> ${target.side}/${target.slot} replacing ${outPlayer.name}`);
+    const logMsg = `🔄 SUBSTITUTION: ${inPlayer.name} enters for ${outPlayer.name}.`;
+    console.log(logMsg);
+    if (gameLog && Array.isArray(gameLog)) gameLog.push(logMsg);
     return { success: true, message: 'Substitution completed.' };
 }
 
@@ -5621,7 +6792,7 @@ export function substitutePlayers(teamId, outPlayerId, inPlayerId) {
  * AI: make intelligent substitutions for a team based on fatigue.
  * Will attempt up to `maxSubs` swaps.
  */
-function autoMakeSubstitutions(team, options = {}) {
+function autoMakeSubstitutions(team, options = {}, gameLog = null) {
     if (!team || !team.depthChart || !team.roster) return 0;
     
     const thresholdFatigue = options.thresholdFatigue || 50; 
@@ -5632,12 +6803,16 @@ function autoMakeSubstitutions(team, options = {}) {
     if (Math.random() > chance) return 0; 
 
     const fullRoster = getRosterObjects(team);
+    if (!fullRoster || fullRoster.length === 0) return 0;
+    
     let subsDone = 0;
     const sides = Object.keys(team.depthChart || {});
 
     for (const side of sides) {
+        if (subsDone >= maxSubs) break;
+        
         const chart = team.depthChart[side] || {};
-        const formationSlots = Object.keys(chart);
+        const formationSlots = Object.keys(chart).filter(slot => chart[slot]); // Only active starters
 
         for (const slot of formationSlots) {
             if (subsDone >= maxSubs) break;
@@ -5649,61 +6824,67 @@ function autoMakeSubstitutions(team, options = {}) {
             if (!currentPlayer) continue;
 
             const currentFatigue = currentPlayer.fatigue || 0;
+            
+            // Get all players currently on the depth chart (starters)
+            const allStarters = new Set();
+            Object.values(team.depthChart).forEach(sideChart => {
+                Object.values(sideChart).forEach(playerId => {
+                    if (playerId) allStarters.add(playerId);
+                });
+            });
+            
+            // Get all bench players (on roster but not in depth chart)
+            const benchPlayers = fullRoster.filter(p => 
+                p && 
+                !allStarters.has(p.id) && 
+                (!p.status || p.status.duration === 0) // Healthy
+            );
 
-            // --- SCENARIO A: Player is TIRED -> Sub Out ---
-            if (currentFatigue >= thresholdFatigue) {
-                // Find a replacement who is NOT currently starting
-                const currentStarters = new Set(Object.values(chart));
-                
-                const benchOptions = fullRoster.filter(p => 
-                    p && 
-                    !currentStarters.has(p.id) && // On bench
-                    (!p.status || p.status.duration === 0) && // Healthy
-                    (p.fatigue || 0) < (thresholdFatigue - 15) // Fresh
-                );
+            // --- SCENARIO A: Current player is TIRED -> Sub Out ---
+            if (currentFatigue >= thresholdFatigue && benchPlayers.length > 0) {
+                // Find freshest, most suitable bench player for this slot
+                const bestSub = benchPlayers.reduce((best, curr) => {
+                    const currFatigue = curr.fatigue || 0;
+                    const bestFatigue = best.fatigue || 0;
+                    const currSuitability = calculateSlotSuitability(curr, slot, side, team);
+                    const bestSuitability = calculateSlotSuitability(best, slot, side, team);
+                    
+                    // Prioritize: 1) Lower fatigue, 2) Better suitability
+                    if (currFatigue < bestFatigue - 10) return curr;
+                    if (bestFatigue < currFatigue - 10) return best;
+                    return currSuitability > bestSuitability ? curr : best;
+                }, benchPlayers[0]);
 
-                if (benchOptions.length > 0) {
-                    // Pick best fit
-                    const bestSub = benchOptions.reduce((best, curr) => 
-                        (calculateSlotSuitability(curr, slot, side, team) > calculateSlotSuitability(best, slot, side, team)) ? curr : best
-                    , benchOptions[0]);
-
-                    const res = substitutePlayers(team.id, currentPlayerId, bestSub.id);
+                if (bestSub) {
+                    const res = substitutePlayers(team.id, currentPlayerId, bestSub.id, gameLog);
                     if (res && res.success) {
                         subsDone++;
-                        // console.log(`SUB: ${currentPlayer.name} (Fatigue ${currentFatigue.toFixed(0)}) subbed OUT for ${bestSub.name}`);
                     }
                 }
             }
             
-            // --- SCENARIO B: Current Player is a BACKUP, check if STARTER is Ready ---
-            // Heuristic: If this player's Overall is significantly lower than a benched player for this slot
-            else {
+            // --- SCENARIO B: Check if a well-rested bench player should start ---
+            else if (benchPlayers.length > 0) {
                 const currentSuitability = calculateSlotSuitability(currentPlayer, slot, side, team);
-                const currentStarters = new Set(Object.values(chart));
-
-                // Look for a "better" player on the bench who is fully rested
-                const restedStarters = fullRoster.filter(p => 
-                    p && 
-                    !currentStarters.has(p.id) && 
-                    (!p.status || p.status.duration === 0) &&
-                    (p.fatigue || 0) < reEntryFatigue // Must be very fresh to bump a player
-                );
-
+                
+                // Find the best-rested, most-suitable bench player
+                const restedStarters = benchPlayers.filter(p => (p.fatigue || 0) < reEntryFatigue);
+                
                 if (restedStarters.length > 0) {
-                    const bestRested = restedStarters.reduce((best, curr) => 
-                        (calculateSlotSuitability(curr, slot, side, team) > calculateSlotSuitability(best, slot, side, team)) ? curr : best
-                    , restedStarters[0]);
+                    const bestRested = restedStarters.reduce((best, curr) => {
+                        const currSuitability = calculateSlotSuitability(curr, slot, side, team);
+                        const bestSuitability = calculateSlotSuitability(best, slot, side, team);
+                        return currSuitability > bestSuitability ? curr : best;
+                    }, restedStarters[0]);
                     
                     const bestRestedScore = calculateSlotSuitability(bestRested, slot, side, team);
 
-                    // If the guy on the bench is significantly better (meaning he's the starter), put him back in
-                    if (bestRestedScore > currentSuitability + 5) {
-                         const res = substitutePlayers(team.id, currentPlayerId, bestRested.id);
-                         if (res && res.success) {
-                             subsDone++;
-                             // console.log(`SUB: Starter ${bestRested.name} (Fatigue ${bestRested.fatigue.toFixed(0)}) returning for ${currentPlayer.name}`);
-                         }
+                    // If bench player is significantly more suitable, swap them in
+                    if (bestRestedScore > currentSuitability + 8) {
+                        const res = substitutePlayers(team.id, currentPlayerId, bestRested.id, gameLog);
+                        if (res && res.success) {
+                            subsDone++;
+                        }
                     }
                 }
             }
@@ -5883,5 +7064,5 @@ export {
     addPlayerToTeam, playerCut, playerSignFreeAgent, callFriend, aiManageRoster, aiSetDepthChart, updateDepthChart, changeFormation,
     getRosterObjects, getPlayer, simulateAIPick, simulateGame, simulateWeek, advanceToOffseason, generateWeeklyFreeAgents, generateSchedule,
     addMessage, markMessageAsRead, getScoutedPlayerInfo, getRelationshipLevel, calculateOverall, calculateSlotSuitability,
-    autoMakeSubstitutions // <--- CRITICAL EXPORT
+    substitutePlayers, autoMakeSubstitutions, aiCheckAudible // <--- CRITICAL EXPORTS
 };

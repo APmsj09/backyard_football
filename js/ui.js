@@ -1564,7 +1564,7 @@ function renderPlayerStatsTab(gameState) {
     const sortStat = elements.statsSort?.value || 'touchdowns';
     let playersToShow = gameState.players.filter(p => p && (teamIdFilter ? p.teamId === teamIdFilter : true));
     playersToShow.sort((a, b) => (b?.seasonStats?.[sortStat] || 0) - (a?.seasonStats?.[sortStat] || 0));
-    const stats = ['passYards', 'passCompletions', 'passAttempts', 'rushYards', 'rushAttempts', 'recYards', 'receptions', 'touchdowns', 'tackles', 'sacks', 'interceptions', 'interceptionsThrown'];
+    const stats = ['passYards', 'passCompletions', 'passAttempts', 'rushYards', 'rushAttempts', 'recYards', 'receptions', 'touchdowns', 'tackles', 'sacks', 'interceptions', 'interceptionsThrown', 'fumbles', 'fumblesLost', 'fumblesRecovered', 'drops'];
     const statHeaders = stats.map(s => {
         if (s === 'passYards') return 'PASS YDS';
         if (s === 'passCompletions') return 'COMP';
@@ -1578,6 +1578,10 @@ function renderPlayerStatsTab(gameState) {
         if (s === 'sacks') return 'SACK';
         if (s === 'interceptions') return 'INT';
         if (s === 'interceptionsThrown') return 'INT THR';
+        if (s === 'fumbles') return 'FUM';
+        if (s === 'fumblesLost') return 'FUM LOST';
+        if (s === 'fumblesRecovered') return 'FUM REC';
+        if (s === 'drops') return 'DROPS';
         return s.toUpperCase();
     });
 
@@ -1620,6 +1624,10 @@ function renderHallOfFameTab(gameState) {
                 <span>Tackles: <strong>${p.careerStats.tackles || 0}</strong></span>
                 <span>Sacks: <strong>${p.careerStats.sacks || 0}</strong></span>
                 <span>INTs: <strong>${p.careerStats.interceptions || 0}</strong></span>
+                <span>Fumbles: <strong>${p.careerStats.fumbles || 0}</strong></span>
+                <span>Fum Lost: <strong>${p.careerStats.fumblesLost || 0}</strong></span>
+                <span>Fum Rec: <strong>${p.careerStats.fumblesRecovered || 0}</strong></span>
+                <span>Drops: <strong>${p.careerStats.drops || 0}</strong></span>
             </div>
         </article>`;
     }).join('') + '</div>';
@@ -2192,32 +2200,44 @@ function renderLiveStatsBox(gameResult) {
 
         // 3. Receiving Leader
         if (leadingReceiver && !offensivePlayersLogged.has(leadingReceiver.id)) {
-            html += `<p class="text-sm">${leadingReceiver.name}: <strong>${leadingReceiver.gameStats.receptions} Rec, ${leadingReceiver.gameStats.recYards} Yds, ${leadingReceiver.gameStats.touchdowns} TD</strong></p>`;
+            let recHtml = `<p class="text-sm">${leadingReceiver.name}: <strong>${leadingReceiver.gameStats.receptions} Rec, ${leadingReceiver.gameStats.recYards} Yds, ${leadingReceiver.gameStats.touchdowns} TD`;
+            if (leadingReceiver.gameStats.drops > 0) recHtml += `, ${leadingReceiver.gameStats.drops} Drop`;
+            recHtml += `</strong></p>`;
+            html += recHtml;
             offensivePlayersLogged.add(leadingReceiver.id);
+        }
+
+        // 4. Fumble Leaders (offensive turnovers)
+        const fumbleLeader = fullRoster.filter(p => p && p.gameStats && p.gameStats.fumblesLost > 0)
+            .sort((a, b) => (b.gameStats.fumblesLost || 0) - (a.gameStats.fumblesLost || 0))[0];
+        if (fumbleLeader && !offensivePlayersLogged.has(fumbleLeader.id)) {
+            html += `<p class="text-sm text-red-300">${fumbleLeader.name}: <strong>${fumbleLeader.gameStats.fumblesLost} Fum Lost</strong></p>`;
+            offensivePlayersLogged.add(fumbleLeader.id);
         }
 
         // --- DEFENSIVE LEADERS ---
         const defensiveLeaders = [];
 
         fullRoster.forEach(p => {
-            if (p?.gameStats && (p.gameStats.tackles > 0 || p.gameStats.sacks > 0 || p.gameStats.interceptions > 0)) {
+            if (p?.gameStats && (p.gameStats.tackles > 0 || p.gameStats.sacks > 0 || p.gameStats.interceptions > 0 || p.gameStats.fumblesRecovered > 0)) {
                 if (offensivePlayersLogged.has(p.id)) return;
                 defensiveLeaders.push(p);
             }
         });
 
-        // Sort by "Impact" (Int > Sack > Tackle)
+        // Sort by "Impact" (Int > Sack > FumRec > Tackle)
         defensiveLeaders.sort((a, b) => {
-            const scoreA = (a.gameStats.interceptions * 10) + (a.gameStats.sacks * 5) + a.gameStats.tackles;
-            const scoreB = (b.gameStats.interceptions * 10) + (b.gameStats.sacks * 5) + b.gameStats.tackles;
+            const scoreA = (a.gameStats.interceptions * 10) + (a.gameStats.fumblesRecovered * 8) + (a.gameStats.sacks * 5) + a.gameStats.tackles;
+            const scoreB = (b.gameStats.interceptions * 10) + (b.gameStats.fumblesRecovered * 8) + (b.gameStats.sacks * 5) + b.gameStats.tackles;
             return scoreB - scoreA;
         });
 
-        // 4. Print Top 3 Defenders
+        // 5. Print Top 3 Defenders
         defensiveLeaders.slice(0, 3).forEach(d => {
             let defHtml = `<p class="text-sm">${d.name}: <strong>${d.gameStats.tackles} Tkl`;
             if (d.gameStats.sacks > 0) defHtml += `, ${d.gameStats.sacks} Sack`;
             if (d.gameStats.interceptions > 0) defHtml += `, ${d.gameStats.interceptions} INT`;
+            if (d.gameStats.fumblesRecovered > 0) defHtml += `, ${d.gameStats.fumblesRecovered} FR`;
             defHtml += `</strong></p>`;
             html += defHtml;
         });

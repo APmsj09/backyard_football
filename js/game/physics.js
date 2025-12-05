@@ -58,8 +58,15 @@ export function updatePlayerPosition(pState, timeDelta) {
     const stat = typeof pState.speed === 'number' ? pState.speed : 50;
     const speedYPS = MIN_SPEED_YPS + ((stat - 1) * (MAX_SPEED_YPS - MIN_SPEED_YPS)) / (99 - 1);
 
-    // --- 6. Apply fatigue/momentum ---
-    pState.currentSpeedYPS = speedYPS * (typeof pState.fatigueModifier === 'number' ? pState.fatigueModifier : 1);
+    // --- 6. 💡 ENHANCED: Apply fatigue modifier with dynamic scaling ---
+    // Update fatigueModifier based on current fatigue before speed calculation
+    // Fatigue range: 0-100, where 100 is fully rested, 0 is exhausted
+    const currentFatigue = typeof pState.fatigue === 'number' ? pState.fatigue : 100;
+    // Map fatigue 0-100 to modifier 0.4-1.0 (fatigued players are slower)
+    const dynamicFatigueMod = 0.4 + (currentFatigue / 100) * 0.6;
+    pState.fatigueModifier = dynamicFatigueMod;
+
+    pState.currentSpeedYPS = speedYPS * pState.fatigueModifier;
 
     // --- 7. Move towards target ---
     const moveDist = pState.currentSpeedYPS * timeDelta;
@@ -78,7 +85,7 @@ export function updatePlayerPosition(pState, timeDelta) {
         pState.y += vy * moveDist;
     }
 
-    // --- 8. 💡 FIX: Update Velocity for UI Trails ---
+    // --- 8. Update Velocity for UI Trails ---
     // UI uses this to draw the lines behind running players
     pState.velocity.x = vx * pState.currentSpeedYPS;
     pState.velocity.y = vy * pState.currentSpeedYPS;
