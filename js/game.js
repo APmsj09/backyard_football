@@ -6727,7 +6727,7 @@ function validateDepthChart(team) {
  * If inPlayer is currently assigned to another slot, the assignemnts will be swapped.
  * Returns an object { success: boolean, message: string }
  */
-export function substitutePlayers(teamId, outPlayerId, inPlayerId, gameLog = null) {
+function substitutePlayers(teamId, outPlayerId, inPlayerId, gameLog = null) {
     if (!game || !game.teams) return { success: false, message: 'Game state invalid.' };
     const team = game.teams.find(t => t && t.id === teamId) || game.playerTeam;
     if (!team || !team.depthChart) return { success: false, message: 'Team or depth chart invalid.' };
