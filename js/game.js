@@ -5383,11 +5383,11 @@ function determineDefensivePlayCall(defense, offense, down, yardsToGo, ballOn, s
         preferredPlays.push(...(categorizedPlays.blitz || [])); 
         preferredPlays.push(...(categorizedPlays.man || [])); 
     } else if (runThreat < 0.3) {
-        // High Pass Threat
+        // High Pass Threat - DO NOT blitz, focus on coverage
         preferredPlays.push(...(categorizedPlays.zone || [])); 
         preferredPlays.push(...(categorizedPlays.zone || [])); // Double weight
         preferredPlays.push(...(categorizedPlays.man || []));
-        preferredPlays.push(...(categorizedPlays.blitz || [])); 
+        // REMOVED: Blitz plays should not be selected on pass situations
         
         // Only add prevent on very long downs
         if (yardsToGo > 15) preferredPlays.push(...(categorizedPlays.prevent || []));

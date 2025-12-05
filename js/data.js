@@ -698,7 +698,7 @@ export const defensivePlaybook = {
             'DL2': 'pass_rush',
             'DL3': 'pass_rush',
             'DL4': 'pass_rush',
-            'DB1': 'blitz_edge',
+            'DB1': 'man_cover_WR3',
             'DB2': 'man_cover_WR1',
             'DB3': 'man_cover_WR2'
         }
