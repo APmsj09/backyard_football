@@ -1238,9 +1238,23 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
             } else { // Defense
                 assignment = defAssignments[slot];
 
+                // 💡 CRITICAL FIX: Validate man_cover assignments exist in formation
                 if (assignment && assignment.startsWith('man_cover_')) {
                     const targetName = assignment.replace('man_cover_', '');
-                    coveredManTargets.add(targetName);
+                    // Check if this receiver actually exists in the offense formation
+                    const receiverExists = initialOffenseStates.some(o => o.slot === targetName);
+                    if (!receiverExists) {
+                        // Receiver doesn't exist in this formation - find next available target
+                        const availableThreats = ['WR1', 'WR2', 'WR3', 'RB1', 'RB2'].filter(t => 
+                            initialOffenseStates.some(o => o.slot === t) && !coveredManTargets.has(t)
+                        );
+                        if (availableThreats.length > 0) {
+                            assignment = `man_cover_${availableThreats[0]}`;
+                        } else {
+                            assignment = 'zone_hook_curl_middle';
+                        }
+                    }
+                    coveredManTargets.add(assignment.replace('man_cover_', ''));
                 }
 
                 if (!assignment) {
@@ -1248,8 +1262,10 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
                         assignment = 'run_gap_A';
                     }
                     else if (slot.startsWith('DB')) {
-                        const threats = ['WR1', 'WR2', 'WR3', 'RB1', 'RB2'];
-                        const bestTarget = threats.find(t => !coveredManTargets.has(t));
+                        const availableThreats = ['WR1', 'WR2', 'WR3', 'RB1', 'RB2'].filter(t => 
+                            initialOffenseStates.some(o => o.slot === t) && !coveredManTargets.has(t)
+                        );
+                        const bestTarget = availableThreats[0];
                         if (bestTarget) {
                             assignment = `man_cover_${bestTarget}`;
                             coveredManTargets.add(bestTarget);
@@ -1258,8 +1274,10 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
                         }
                     }
                     else if (slot.startsWith('LB')) {
-                        const lbThreats = ['RB1', 'WR3', 'RB2'];
-                        const lbTarget = lbThreats.find(t => !coveredManTargets.has(t));
+                        const lbThreats = ['RB1', 'WR3', 'RB2'].filter(t => 
+                            initialOffenseStates.some(o => o.slot === t) && !coveredManTargets.has(t)
+                        );
+                        const lbTarget = lbThreats[0];
                         if (lbTarget) {
                             assignment = `man_cover_${lbTarget}`;
                             coveredManTargets.add(lbTarget);
