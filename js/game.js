@@ -1096,6 +1096,19 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
     // Get the selected defensive play call and its assignments
     const defPlay = defensivePlaybook[defensivePlayKey] || defensivePlaybook['Cover_2_Zone_3-1-3'];
     const defAssignments = defPlay.assignments || {};
+    
+    // 💡 TRACKING: Store defensive call for runtime logic (coverage type, blitz identification, etc.)
+    playState.defensiveCall = {
+        key: defensivePlayKey,
+        name: defPlay.name || 'Cover 2 Zone (3-1-3)',
+        concept: defPlay.concept || 'Zone',  // 'Man' or 'Zone'
+        isCover1: defensivePlayKey.includes('Cover_1'),
+        isCover2: defensivePlayKey.includes('Cover_2'),
+        isCover3: defensivePlayKey.includes('Cover_3'),
+        isCover4: defensivePlayKey.includes('Cover_4'),
+        hasBlitz: defPlay.blitz === true,
+        assignments: defAssignments
+    };
 
     // Set the line of scrimmage (adding 10 for the endzone offset)
     playState.lineOfScrimmage = ballOnYardLine + 10;
@@ -1323,10 +1336,33 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
                     const targetOffPlayer = initialOffenseStates.find(o => o.slot === targetSlot);
 
                     if (targetOffPlayer) {
-                        // 💡 ENHANCED: Tighter pre-snap positioning for better coverage
-                        // Start closer to the receiver to avoid easy separation on the snap
-                        const xOffset = targetOffPlayer.x < CENTER_X ? 0.8 : -0.8; // Reduced from 1.5 to 0.8
-                        const yOffset = 0.5; // Reduced from 1.5 to 0.5 for tighter pre-snap distance
+                        // 💡💡 ENHANCED Priority 3.3: Vary pre-snap positioning by receiver slot type
+                        // Different receiver types need different defensive positioning approaches
+                        // Slot receivers move in traffic - need tighter coverage
+                        // WRs on the perimeter - normal cushion
+                        // TEs - need more space due to size and route diversity
+                        
+                        let xOffset, yOffset;
+                        
+                        if (targetSlot.includes('SLOT') || targetSlot === 'RB') {
+                            // Slot receivers and RBs in passing routes - very tight pre-snap
+                            // These players work in congested areas, need to stay close
+                            xOffset = targetOffPlayer.x < CENTER_X ? 0.3 : -0.3;
+                            yOffset = 0.2;
+                        } else if (targetSlot.includes('WR') || targetSlot === 'WR1' || targetSlot === 'WR2' || targetSlot === 'WR3') {
+                            // Outside WRs - standard distance (tighter than pre-enhancement)
+                            xOffset = targetOffPlayer.x < CENTER_X ? 0.8 : -0.8;
+                            yOffset = 0.5;
+                        } else if (targetSlot.includes('TE') || targetSlot === 'TE') {
+                            // Tight ends - slightly looser due to size and unpredictable routes
+                            xOffset = targetOffPlayer.x < CENTER_X ? 1.0 : -1.0;
+                            yOffset = 0.7;
+                        } else {
+                            // Default positioning for unknown slots
+                            xOffset = targetOffPlayer.x < CENTER_X ? 0.8 : -0.8;
+                            yOffset = 0.5;
+                        }
+                        
                         startX = targetOffPlayer.x + xOffset;
                         startY = targetOffPlayer.y + yOffset;
                         targetX = startX; targetY = startY;
@@ -1568,8 +1604,18 @@ function calculateSafetyHelp(safetyState, defenseStates, offenseStates, ballCarr
     if (!safetyState || !safetyState.slot.startsWith('S')) return null;
     
     const LOS = playState.lineOfScrimmage;
+    const defensiveCall = playState.defensiveCall || {};
     
-    // Find cornersacks and man coverage players this safety should help
+    // 💡 ENHANCED: Coverage-type aware safety rotation
+    // In Cover 2: Safeties split halves - limited help
+    // In Cover 3: Middle safety can help weak side
+    // In Cover 1: Free safety roams and helps everywhere
+    
+    const isCover2 = defensiveCall.isCover2 || false;
+    const isCover3 = defensiveCall.isCover3 || false;
+    const isCover1 = defensiveCall.isCover1 || false;
+    
+    // Find cornersbacks and man coverage players this safety should help
     const corners = defenseStates.filter(d => d.slot.startsWith('DB') && !d.slot.startsWith('S'));
     const inManCoverage = corners.filter(d => d.assignment && d.assignment.startsWith('man_cover_'));
     
@@ -1596,11 +1642,49 @@ function calculateSafetyHelp(safetyState, defenseStates, offenseStates, ballCarr
         }
     });
     
-    // Decision 2: Should I help or stay in coverage?
-    const shouldHelp = maxPressure > 4.0; // Pressure threshold
+    // Decision 2: Coverage-type determines help eligibility
+    let shouldHelp = maxPressure > 4.0; // Base pressure threshold
+    
+    // Adjust help eligibility based on coverage type
+    if (isCover2) {
+        // In Cover 2, safeties split halves - minimal help
+        // Only help if corner is on their half and pressure is extreme
+        const helperHalf = safetyState.x < CENTER_X ? 'left' : 'right';
+        const cornerHalf = helpTarget?.corner.x < CENTER_X ? 'left' : 'right';
+        shouldHelp = shouldHelp && (helperHalf === cornerHalf) && (maxPressure > 6.0); // Higher threshold
+    } else if (isCover3) {
+        // In Cover 3, middle safety can help, outside corner depends on receiver
+        if (safetyState.x < CENTER_X || safetyState.x > FIELD_WIDTH - CENTER_X) {
+            // Outside safety - only help own half
+            shouldHelp = maxPressure > 5.0;
+        } else {
+            // Middle safety - can rotate
+            shouldHelp = maxPressure > 4.0;
+        }
+    } else if (isCover1) {
+        // In Cover 1, free safety roams and helps everywhere
+        shouldHelp = maxPressure > 3.0; // Aggressive, lower threshold
+    }
     
     if (!shouldHelp) {
         // No help needed - return null to use regular assignment
+        return null;
+    }
+    
+    // 💡 NEW: Safety help timing delay - don't help immediately
+    // Only provide help if ball is in air AND has been for enough ticks
+    // This prevents early commitment and allows coverage to work itself out
+    const ballFlightTime = isBallInAir ? playState.tick - playState.ballState.releaseeTick : 0;
+    const MIN_FLIGHT_TICKS = 5; // ~150ms delay before help is provided
+    
+    if (isBallInAir && ballFlightTime < MIN_FLIGHT_TICKS) {
+        // Ball in air but not long enough yet - let man coverage work
+        return null;
+    }
+    
+    // Additional timing check: if pressure is marginal, delay help even longer
+    if (isBallInAir && maxPressure < 6.0 && ballFlightTime < MIN_FLIGHT_TICKS + 3) {
+        // For borderline pressure situations, require longer flight time before helping
         return null;
     }
     
@@ -1616,7 +1700,8 @@ function calculateSafetyHelp(safetyState, defenseStates, offenseStates, ballCarr
             helpY: helpY,
             targetReceiver: helpTarget.receiver,
             targetCorner: helpTarget.corner,
-            pressureScore: maxPressure
+            pressureScore: maxPressure,
+            delayedHelp: true // Flag indicating this help was delayed
         };
     }
     
@@ -1707,417 +1792,6 @@ function analyzePlaySuccess(lastPlayState, offensiveTeam, defensiveTeam) {
         turnover: wasIntercepted || wasFumbled
     };
 }
-
-/**
- * 💡 ADAPTIVE: Get next offensive play with exploitation bias
- * Analyzes recent success and suggests plays to exploit weak matchups
- */
-function getAdaptiveOffensivePlay(team, lastPlayState, playHistory = []) {
-    const coach = team.coach || {};
-    const basePlaybook = offensivePlaybook[coach.preferredOffense] || offensivePlaybook['Balanced'];
-    
-    if (!basePlaybook || !basePlaybook.plays) {
-        return getRandom(basePlaybook?.plays || []);
-    }
-    
-    // Analyze recent success
-    const recentSuccess = analyzePlaySuccess(lastPlayState, team, null);
-    
-    if (!recentSuccess) {
-        // No data - use coach preference
-        return getRandom(basePlaybook.plays);
-    }
-    
-    // Decision 1: If last play was successful, exploit it (70% chance if hot)
-    if (recentSuccess.successScore > 70 && Math.random() < 0.7) {
-        // Try similar play type (run/pass) with potentially different target
-        const similarPlays = basePlaybook.plays.filter(p => p.type === recentSuccess.playType);
-        
-        if (similarPlays.length > 0) {
-            return getRandom(similarPlays);
-        }
-    }
-    
-    // Decision 2: If success score is moderate (50-70), keep exploring (50% stay same type)
-    if (recentSuccess.successScore > 50 && Math.random() < 0.5) {
-        const sameTypePlays = basePlaybook.plays.filter(p => p.type === recentSuccess.playType);
-        
-        if (sameTypePlays.length > 0) {
-            return getRandom(sameTypePlays);
-        }
-    }
-    
-    // Decision 3: If last play failed, switch up (pass becomes run or vice versa)
-    if (recentSuccess.successScore < 40) {
-        const oppositeType = recentSuccess.playType === 'pass' ? 'run' : 'pass';
-        const oppositePlay = basePlaybook.plays.filter(p => p.type === oppositeType);
-        
-        if (oppositePlay.length > 0) {
-            return getRandom(oppositePlay);
-        }
-    }
-    
-    // Default: random from playbook
-    return getRandom(basePlaybook.plays);
-}
-
-/**
- * 💡 ADAPTIVE: Analyze defensive vulnerability and suggest adjustments
- * Returns assignment adjustments to counter offensive threats
- */
-function analyzeDefensiveVulnerability(lastPlayState, defensiveTeam, offenseStates) {
-    if (!lastPlayState || !lastPlayState.result) {
-        return null;
-    }
-    
-    const result = lastPlayState.result;
-    const yardsGained = result.yardsGained || 0;
-    const ballCarrierSlot = result.ballCarrierSlot || 'RB1';
-    
-    // Decision 1: Was it a big play? (10+ yards)
-    if (yardsGained >= 10) {
-        return {
-            vulnerabilityType: 'BIG_PLAY',
-            targetSlot: ballCarrierSlot,
-            area: result.playType === 'run' ? 'run_defense' : 'pass_defense',
-            severity: Math.min(100, yardsGained * 10), // Higher yards = higher severity
-            suggestedAdjustment: result.playType === 'run' ? 'tighten_gaps' : 'increase_coverage_depth'
-        };
-    }
-    
-    // Decision 2: Was it a TD? (massive vulnerability)
-    if (result.isTouchdown) {
-        return {
-            vulnerabilityType: 'TOUCHDOWN',
-            targetSlot: ballCarrierSlot,
-            area: result.playType === 'run' ? 'run_defense' : 'pass_defense',
-            severity: 100,
-            suggestedAdjustment: 'swap_personnel'
-        };
-    }
-    
-    // Decision 3: Multiple completions to same receiver (coverage vulnerability)
-    if (result.playType === 'pass' && result.receiverSlot) {
-        return {
-            vulnerabilityType: 'RECEIVER_MISMATCH',
-            targetSlot: result.receiverSlot,
-            area: 'pass_defense',
-            severity: 60,
-            suggestedAdjustment: 'upgrade_coverage'
-        };
-    }
-    
-    // Decision 4: Run success (gap discipline issue)
-    if (result.playType === 'run' && yardsGained >= 5) {
-        return {
-            vulnerabilityType: 'RUN_GAP_BREACH',
-            targetSlot: ballCarrierSlot,
-            area: 'run_defense',
-            severity: 70,
-            suggestedAdjustment: 'add_box_player'
-        };
-    }
-    
-    return null;
-}
-
-/**
- * 💡 ADAPTIVE: Get defensive play call with counter-strategy
- * Analyzes offensive tendencies and suggests defensive adjustments
- */
-function getAdaptiveDefensivePlay(team, lastPlayState, offenseTeam) {
-    const coach = team.coach || {};
-    const basePlaybook = defensivePlaybook[coach.preferredDefense] || defensivePlaybook['Cover_2_Zone_3-1-3'];
-    
-    if (!basePlaybook || !basePlaybook.plays) {
-        return getRandom(basePlaybook?.plays || []);
-    }
-    
-    // Analyze opponent's last play success
-    if (!lastPlayState || !lastPlayState.result) {
-        return getRandom(basePlaybook.plays);
-    }
-    
-    const result = lastPlayState.result;
-    const playType = result.playType;
-    
-    // Decision 1: If opponent just ran for big gains (10+), load the box
-    if (playType === 'run' && result.yardsGained >= 10) {
-        // Find defensive plays with more LBs/DL (run defense focus)
-        const runDefenses = basePlaybook.plays.filter(p => p.name && (p.name.includes('3-1-3') || p.name.includes('4-2-2')));
-        
-        if (runDefenses.length > 0) {
-            return getRandom(runDefenses);
-        }
-    }
-    
-    // Decision 2: If opponent just passed for big gains (10+), go coverage heavy
-    if (playType === 'pass' && result.yardsGained >= 10) {
-        // Find defensive plays with more DBs (coverage focus)
-        const coverageDefenses = basePlaybook.plays.filter(p => p.name && (p.name.includes('Cover_2') || p.name.includes('Cover_3')));
-        
-        if (coverageDefenses.length > 0) {
-            return getRandom(coverageDefenses);
-        }
-    }
-    
-    // Decision 3: If it was a TD, be aggressive on next play
-    if (result.isTouchdown) {
-        // Find blitz-heavy defenses
-        const aggressiveDefenses = basePlaybook.plays.filter(p => p.name && p.name.includes('Blitz'));
-        
-        if (aggressiveDefenses.length > 0) {
-            return getRandom(aggressiveDefenses);
-        }
-    }
-    
-    // Default: random from playbook
-    return getRandom(basePlaybook.plays);
-}
-
-/**
- * 💡 ADAPTIVE: Pre-snap defensive audible system
- * Allows defense to read offense pre-snap and adjust assignments
- */
-function getDefensiveAudibleAssignments(defensivePlay, offensiveFormation, offenseStates, defenseStates, lineOfScrimmage) {
-    const baseAssignments = defensivePlay.assignments || {};
-    const audibleAssignments = { ...baseAssignments };
-    
-    // Get defensive alignment quality
-    const coverage = evaluateCoverageAlignment(defenseStates, { lineOfScrimmage });
-    
-    // Decision 1: Identify offensive formation tendencies
-    const wideReceiveres = offenseStates.filter(o => o.slot.includes('WR')).length;
-    const tightEnds = offenseStates.filter(o => o.slot.includes('TE')).length;
-    const backfield = offenseStates.filter(o => o.slot.includes('RB')).length;
-    
-    // Decision 2: If 3+ WRs (spread formation) - increase DB coverage
-    if (wideReceiveres >= 3) {
-        // Swap a LB assignment to DB assignment
-        const lbAssignments = Object.entries(audibleAssignments).filter(([slot, assign]) => 
-            slot.startsWith('LB') && assign && assign.includes('zone_')
-        );
-        
-        if (lbAssignments.length > 0) {
-            const [lbSlot] = lbAssignments[0];
-            // Move to more aggressive coverage
-            audibleAssignments[lbSlot] = 'zone_hook_curl_middle';
-        }
-    }
-    
-    // Decision 3: If 2+ RBs backfield (run formation) - load the box
-    if (backfield >= 2) {
-        // Swap a DB to a run support assignment
-        const dbAssignments = Object.entries(audibleAssignments).filter(([slot, assign]) =>
-            slot.startsWith('DB') && assign && assign.includes('deep_')
-        );
-        
-        if (dbAssignments.length > 0 && coverage.isTwoHigh) {
-            const [dbSlot] = dbAssignments[0];
-            // One safety can come down for run support
-            audibleAssignments[dbSlot] = 'run_support';
-        }
-    }
-    
-    // Decision 4: Mismatches detected - adjust help
-    const offenseMotion = offenseStates.filter(o => o.velocity && Math.abs(o.velocity.x) > 1.0).length;
-    if (offenseMotion >= 2) {
-        // Offense is shifting - stay flexible with zone coverage
-        // No aggressive audibles
-    }
-    
-    // Decision 5: If QB is clearly a runner (athletic), spy assignment
-    const qbState = offenseStates.find(o => o.slot?.startsWith('QB'));
-    if (qbState && (qbState.speed || 50) > 70) {
-        // Assign a fast LB to QB spy
-        const fastLBs = defenseStates.filter(d => d.slot.startsWith('LB') && (d.speed || 50) > 65);
-        
-        if (fastLBs.length > 0) {
-            const lbSlot = Object.keys(baseAssignments).find(s => s.startsWith('LB'));
-            if (lbSlot) {
-                audibleAssignments[lbSlot] = 'spy_QB';
-            }
-        }
-    }
-    
-    return audibleAssignments;
-}
-
-/**
- * 💡 ADAPTIVE: Suggest coverage adjustments mid-game
- * Based on play history and matchup performance
- */
-function suggestCoverageAdjustments(team, offensiveTeam, gameStats) {
-    if (!gameStats || !gameStats.playHistory) {
-        return null;
-    }
-    
-    const recentPlays = gameStats.playHistory.slice(-5); // Last 5 plays
-    
-    // Analyze receiver production
-    const receiverStats = {};
-    recentPlays.forEach(play => {
-        if (play.receiverSlot) {
-            if (!receiverStats[play.receiverSlot]) {
-                receiverStats[play.receiverSlot] = { catches: 0, yards: 0 };
-            }
-            if (play.result && play.result.passComplete) {
-                receiverStats[play.receiverSlot].catches++;
-                receiverStats[play.receiverSlot].yards += play.result.yardsGained || 0;
-            }
-        }
-    });
-    
-    // Find hot receiver
-    let hotReceiver = null;
-    let maxProduction = 0;
-    
-    Object.entries(receiverStats).forEach(([slot, stats]) => {
-        const production = stats.catches * 10 + stats.yards; // Weight catches heavily
-        if (production > maxProduction) {
-            maxProduction = production;
-            hotReceiver = slot;
-        }
-    });
-    
-    // Suggest tight man coverage on hot receiver
-    if (hotReceiver) {
-        return {
-            suggestion: `Tighten coverage on ${hotReceiver}`,
-            targetSlot: hotReceiver,
-            adjustment: 'man_cover_tighter',
-            confidence: Math.min(100, maxProduction * 10)
-        };
-    }
-    
-    return null;
-}
-
-/**
- * 💡 ADAPTIVE: Track matchup performance across plays
- * Identifies which offense/defense combinations are succeeding
- */
-function trackMatchupPerformance(gameState) {
-    if (!gameState) {
-        return null;
-    }
-    
-    // Initialize matchup database if needed
-    if (!gameState.matchupPerformance) {
-        gameState.matchupPerformance = {
-            offensive: {},  // playerSlot -> { successCount, totalPlays, avgYards }
-            defensive: {},  // playerSlot -> { stopsCount, totalPlays, avgYardsAllowed }
-            playTypeSuccess: { run: { wins: 0, total: 0 }, pass: { wins: 0, total: 0 } }
-        };
-    }
-    
-    return gameState.matchupPerformance;
-}
-
-/**
- * 💡 ADAPTIVE: Get most productive offensive player/play combo
- * Returns the best-performing option to exploit
- */
-function getHottestOffensiveOption(gameState, team) {
-    const matchups = trackMatchupPerformance(gameState);
-    
-    if (!matchups || !matchups.offensive) {
-        return null;
-    }
-    
-    // Find player with highest success rate (minimum 2 plays)
-    let hottestPlayer = null;
-    let highestSuccessRate = 0;
-    
-    Object.entries(matchups.offensive).forEach(([playerSlot, stats]) => {
-        if (stats.totalPlays >= 2) {
-            const successRate = stats.successCount / stats.totalPlays;
-            if (successRate > highestSuccessRate) {
-                highestSuccessRate = successRate;
-                hottestPlayer = { slot: playerSlot, stats, successRate };
-            }
-        }
-    });
-    
-    return hottestPlayer;
-}
-
-/**
- * 💡 ADAPTIVE: Identify defensive weakness by position
- * Returns which defenders are vulnerable
- */
-function getDefensiveWeaknesses(gameState, team) {
-    const matchups = trackMatchupPerformance(gameState);
-    
-    if (!matchups || !matchups.defensive) {
-        return [];
-    }
-    
-    // Find defenders with high yards allowed (>6 yards per play minimum 3 plays)
-    const weaknesses = [];
-    
-    Object.entries(matchups.defensive).forEach(([defenderSlot, stats]) => {
-        if (stats.totalPlays >= 3) {
-            const avgYardsAllowed = stats.avgYardsAllowed;
-            if (avgYardsAllowed > 6) {
-                weaknesses.push({
-                    slot: defenderSlot,
-                    avgYardsAllowed,
-                    totalPlays: stats.totalPlays,
-                    vulnerability: Math.min(100, avgYardsAllowed * 10)
-                });
-            }
-        }
-    });
-    
-    // Sort by vulnerability
-    return weaknesses.sort((a, b) => b.vulnerability - a.vulnerability);
-}
-
-/**
- * 💡 ADAPTIVE: Create assignment strategy to exploit weakness
- * Targets weak defenders with specific play types
- */
-function createExploitationStrategy(hotOffensiveOption, defensiveWeaknesses, playbook) {
-    if (!hotOffensiveOption && defensiveWeaknesses.length === 0) {
-        return null;
-    }
-    
-    const strategy = {
-        focus: [],
-        priority: 'NORMAL'
-    };
-    
-    // Strategy 1: Exploit hot offensive player
-    if (hotOffensiveOption && hotOffensiveOption.successRate > 0.65) {
-        strategy.focus.push({
-            type: 'HOT_PLAYER',
-            playerSlot: hotOffensiveOption.slot,
-            confidence: hotOffensiveOption.successRate,
-            action: 'Feed the hot hand - keep targeting this player'
-        });
-        strategy.priority = 'HIGH';
-    }
-    
-    // Strategy 2: Attack weak defenders
-    if (defensiveWeaknesses.length > 0) {
-        const primaryWeakness = defensiveWeaknesses[0];
-        
-        strategy.focus.push({
-            type: 'EXPLOIT_WEAKNESS',
-            defenderSlot: primaryWeakness.slot,
-            vulnerability: primaryWeakness.vulnerability,
-            action: `Attack this defender - ${primaryWeakness.avgYardsAllowed.toFixed(1)} yards allowed per play`
-        });
-        
-        if (strategy.priority === 'NORMAL') {
-            strategy.priority = 'HIGH';
-        }
-    }
-    
-    return strategy;
-}
-
 
 /**
  * Updates player targets based on their current action, assignment, and game state. (Improved AI)
@@ -2419,20 +2093,40 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                         const dy = currentTargetPoint.y - pState.y;
                         const distToTarget = Math.sqrt(dx * dx + dy * dy);
 
-                        // 💡 IMPROVED: Adjust route based on defender proximity (break/slant away from coverage)
+                        // 💡 ENHANCED 2.1 & 2.4: Adjust route depth & timing against tight coverage + receiver fatigue
                         let targetPoint = currentTargetPoint;
                         const nearbyDefenders = defenseStates.filter(d => 
                             !d.isBlocked && !d.isEngaged && getDistance(pState, d) < 3.0
                         ).sort((a, b) => getDistance(pState, a) - getDistance(pState, b));
                         
-                        if (nearbyDefenders.length > 0 && pState.currentPathIndex >= Math.floor(pState.routePath.length * 0.5)) {
-                            // Mid-route adjustment: slant away from closest defender
+                        if (nearbyDefenders.length > 0) {
                             const closestDef = nearbyDefenders[0];
-                            const defOffset = getDistance(pState, closestDef) < 2.0 ? 1.5 : 0.75;
-                            targetPoint = {
-                                x: currentTargetPoint.x + (pState.x > closestDef.x ? defOffset : -defOffset),
-                                y: currentTargetPoint.y + (pState.y > closestDef.y ? defOffset : -defOffset)
-                            };
+                            const defDistance = getDistance(pState, closestDef);
+                            
+                            // Tight coverage: break early (reduce route depth by 1-2 yards)
+                            if (defDistance < 1.0 && pState.currentPathIndex >= Math.floor(pState.routePath.length * 0.4)) {
+                                // Come back to ball on deep routes when tightly covered
+                                targetPoint = {
+                                    x: currentTargetPoint.x,
+                                    y: Math.max(currentTargetPoint.y - 2, pState.y)
+                                };
+                            }
+                            // Moderate coverage: slant away from defender
+                            else if (pState.currentPathIndex >= Math.floor(pState.routePath.length * 0.5)) {
+                                const defOffset = defDistance < 2.0 ? 1.5 : 0.75;
+                                targetPoint = {
+                                    x: currentTargetPoint.x + (pState.x > closestDef.x ? defOffset : -defOffset),
+                                    y: currentTargetPoint.y + (pState.y > closestDef.y ? defOffset : -defOffset)
+                                };
+                            }
+                            
+                            // 💡 ENHANCED 2.4: Reduce speed on subsequent routes or under coverage (receiver fatigue)
+                            const contactTicks = pState.lastContactTick ? playState.tick - pState.lastContactTick : 1000;
+                            if (contactTicks < 20) {
+                                pState.speedMultiplier = 0.85; // 15% slower after recent contact
+                            } else {
+                                pState.speedMultiplier = 1.0; // Full speed recovery
+                            }
                         }
 
                         if (distToTarget < ARRIVAL_RADIUS) {
@@ -2465,8 +2159,22 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                             pState.targetY = LOS + POCKET_DEPTH_PASS;
                         }
                     } else {
-                        pState.targetX = pState.initialX;
-                        pState.targetY = LOS + POCKET_DEPTH_PASS;
+                        // 💡 ENHANCED 1.4: OL adjusts to visible blitz assignments
+                        // Check if any nearby defender has blitz/rush assignment and adjust target
+                        const nearbyBlitzers = defenseStates.filter(d => 
+                            (d.assignment?.includes('blitz') || d.assignment?.includes('rush')) &&
+                            getDistance(pState, d) < 6.0
+                        ).sort((a, b) => getDistance(pState, a) - getDistance(pState, b));
+                        
+                        if (nearbyBlitzers.length > 0) {
+                            // Assign to nearest blitzer
+                            pState.dynamicTargetId = nearbyBlitzers[0].id;
+                            pState.targetX = nearbyBlitzers[0].x;
+                            pState.targetY = nearbyBlitzers[0].y;
+                        } else {
+                            pState.targetX = pState.initialX;
+                            pState.targetY = LOS + POCKET_DEPTH_PASS;
+                        }
                     }
                     target = null;
                     break;
@@ -2848,10 +2556,37 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
         // -- 4. PURSUIT LOGIC --
         // Strict checks to prevent instant blitzing
         let shouldPursue = false;
-
-        // 💡 CRITICAL FIX: If a DB with man coverage is already in pursuit,
-        // re-check whether they should still be pursuing. Don't let them stay locked in.
-        if (pState.action === 'pursuit') {
+        
+        // 💡 NEW: LB Key-Read Logic (Read blocks/flow before committing)
+        // LBs should key off offensive blocks to determine run vs. pass
+        const isLB = pState.slot.startsWith('LB');
+        if (isLB && isBallCaughtOrRun && !isBallInAir) {
+            // LB reads blocking action to confirm run
+            const offenseStates = playState.activePlayers.filter(p => p.isOffense);
+            const nearbyBlockers = offenseStates.filter(o => 
+                (o.action === 'run_block' || o.action === 'pass_block') && 
+                getDistance(pState, o) < 4.0
+            );
+            
+            // Count run blocks vs. pass blocks
+            const runBlockCount = nearbyBlockers.filter(b => b.action === 'run_block').length;
+            const passBlockCount = nearbyBlockers.filter(b => b.action === 'pass_block').length;
+            
+            // Decision: If more pass blocks, it's likely play action or pass - stay disciplined
+            if (passBlockCount >= 2 && runBlockCount < 2) {
+                // Play Action or Pass - LB should drop back, not pursue immediately
+                shouldPursue = false;
+            } else if (runBlockCount >= 1) {
+                // Run confirmed - commit to pursuit
+                shouldPursue = true;
+            } else {
+                // Ambiguous - use conservative approach for LBs
+                shouldPursue = false;
+            }
+        }
+        
+        // For other defenders (DBs, DL) use standard pursuit logic
+        else if (pState.action === 'pursuit') {
             const isManCovered = pState.assignment && pState.assignment.startsWith('man_cover_');
             const shouldStayInCoverage = isManCovered && isDB && isBallCaughtOrRun && carrierIsQB && qbInPocket && !isBallPastLOS;
             if (shouldStayInCoverage) {
@@ -2878,7 +2613,11 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                 // QB is currently in the pocket. Defensive backs (CB/S) should
                 // generally stay in their coverage and NOT abandon to chase the
                 // QB. Allow non-DB defenders (LB/DL or assigned spies) to pursue.
-                if (!isDB) shouldPursue = true;
+                // 💡 FIX: Also check if defender is in zone coverage - they should stay in zone
+                const isInZone = pState.assignment && pState.assignment.startsWith('zone_');
+                if (!isDB || !isInZone) {
+                    shouldPursue = true;
+                }
             }
         }
 
@@ -2899,19 +2638,13 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                     if (playState.tick < 5) console.debug(`ManCoverBreakPursuit: def=${pState.id} tick=${playState.tick} allowBreak=true`);
                 }
             } else {
-                // Non-man-coverage defenders (zone or blitz): DBs should be more disciplined
-                // and not rush the QB when they're supposed to be in coverage zones
-                const isZone = pState.assignment && pState.assignment.startsWith('zone_');
-                if (isDB && isZone && carrierIsQB && qbInPocket) {
-                    // Zone-covering DB in pocket should stay in zone, not rush QB
-                    // (they'll pursue if QB breaks containment or scrambles)
-                    // fall through to assignment handling below (don't set pursuit)
-                } else {
-                    pState.action = 'pursuit';
-                    // Debug non-man-cover pursuits on early ticks
-                    if (isDB && playState.tick < 5 && !(isZone && carrierIsQB && qbInPocket)) {
-                        console.debug(`DB_Pursuing_Early: def=${pState.id} tick=${playState.tick} assign=${pState.assignment} carrierSlot=${ballCarrierState?.slot}`);
-                    }
+                // Non-man-coverage defenders (zone or blitz): DBs in zones should stay in zones
+                // This check is here as a safety net, but shouldPursue should already be false
+                // for zone-covering DBs when QB is in pocket (set above)
+                pState.action = 'pursuit';
+                // Debug non-man-cover pursuits on early ticks
+                if (isDB && playState.tick < 5) {
+                    console.debug(`DB_Pursuing_Early: def=${pState.id} tick=${playState.tick} assign=${pState.assignment} carrierSlot=${ballCarrierState?.slot}`);
                 }
             }
 
@@ -3131,25 +2864,84 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
             if (targetRec) {
                 // 💡 ENHANCED: Intelligent man coverage positioning based on game state
                 const distToRec = getDistance(pState, targetRec);
-                const dbSpeed = pState.speed || 50;
-                const dbCoverage = pState.catchingHands || 50; // Use coverage awareness (could add new attribute)
+                const defenderSpeed = pState.speed || 50;
+                const defenderCoverage = pState.catchingHands || 50; // Use coverage awareness
                 const recSpeed = targetRec.speed || 50;
                 const isSafety = pState.slot.startsWith('S');
                 const isCornerback = pState.slot.startsWith('DB') && !pState.slot.startsWith('S');
+                const isLB = pState.slot.startsWith('LB');
                 
-                // Decision 1: Cushion based on receiver depth and speed differential
+                // 💡 NEW: LB Speed Mismatch Handling
+                // If LB is too slow for receiver, get safety help
+                let requestSafetyHelp = false;
+                let helpType = null;
+                
+                if (isLB && targetRec.action === 'run_route') {
+                    const speedDifference = recSpeed - defenderSpeed;
+                    const isDeepRoute = targetRec.y > LOS + 15;
+                    const isVerticalRoute = targetRec.routePath && 
+                                          targetRec.routePath.some(p => p.y > targetRec.initialY + 10);
+                    
+                    // If receiver is faster AND running deep or vertical route, LB needs help
+                    if (speedDifference > 8 && (isDeepRoute || isVerticalRoute)) {
+                        requestSafetyHelp = true;
+                        helpType = isVerticalRoute ? 'vertical' : 'deep';
+                    }
+                }
+                
+                // Decision 1: Cushion based on receiver depth and route type
+                // 💡 ENHANCED: More nuanced cushion based on exact depth, not just ranges
                 let cushion = 1.5; // Default cushion
+                
+                const receiverDepthFromLOS = targetRec.y - LOS;
+                const speedDifference = recSpeed - defenderSpeed;
+                
+                // Determine route type from assignment or action
+                const isQuickRoute = targetRec.action === 'run_route' && 
+                                    targetRec.routePath && 
+                                    targetRec.routePath.length > 0 &&
+                                    targetRec.routePath[Math.min(1, targetRec.routePath.length - 1)].y < LOS + 5;
                 
                 if (isBallInAir && playState.ballState.targetPlayerId === targetRec.id) {
                     // Ball is in air and targeting this receiver - tighten up!
                     cushion = 0.3;
-                } else if (targetRec.y > LOS + 20 && recSpeed > dbSpeed + 5) {
-                    // Deep receiver who's faster - need more cushion
-                    cushion = 2.5;
-                } else if (targetRec.y > LOS + 15) {
-                    // Deep route - deeper cushion
-                    cushion = 2.5;
-                } else if (targetRec.action === 'run_block' || targetRec.action === 'route_complete') {
+                } else if (isQuickRoute) {
+                    // Quick slant/bubble - play TIGHT (0.5 yards)
+                    cushion = 0.5;
+                    // Corner can be especially tight on quick routes
+                    if (isCornerback) cushion = 0.4;
+                } else if (receiverDepthFromLOS < 5) {
+                    // Short route (checkdown) - tight coverage
+                    cushion = 0.7;
+                    if (isCornerback) cushion = 0.6;
+                    if (isLB) cushion = 0.9; // LBs slightly deeper on short routes
+                } else if (receiverDepthFromLOS >= 5 && receiverDepthFromLOS < 10) {
+                    // Intermediate route - normal cushion with speed adjustment
+                    cushion = 1.2;
+                    if (speedDifference > 8) cushion = 1.5; // Faster receiver needs more space
+                    if (isLB && speedDifference > 8) cushion = 1.8; // LBs extra space
+                } else if (receiverDepthFromLOS >= 10 && receiverDepthFromLOS < 15) {
+                    // Mid-depth route (12-15 yards) - moderate cushion
+                    cushion = 1.5;
+                    if (speedDifference > 8) cushion = 2.0;
+                    if (isLB) cushion = 1.8;
+                    if (isLB && speedDifference > 8) cushion = 2.3;
+                } else if (receiverDepthFromLOS >= 15 && receiverDepthFromLOS < 25) {
+                    // Deep route (15-25 yards) - deeper cushion
+                    cushion = 2.2;
+                    if (speedDifference > 8) cushion = 2.5; // Significantly faster receiver
+                    if (speedDifference > 10) cushion = 2.8; // Very fast receiver
+                    if (isLB) cushion = 2.5; // LBs need more space
+                    if (isLB && speedDifference > 8) cushion = 3.0;
+                } else {
+                    // Very deep route (25+ yards) - maximum cushion
+                    cushion = 2.8;
+                    if (speedDifference > 5) cushion = 3.0;
+                    if (isLB) cushion = 3.2; // LBs very deep
+                }
+                
+                // Receiver coming back or stationary overrides depth logic
+                if (targetRec.action === 'run_block' || targetRec.action === 'route_complete') {
                     // Receiver coming back or stationary - tighter coverage
                     cushion = 0.8;
                 } else if (isBallInAir && distToRec < 5.0) {
@@ -3183,6 +2975,15 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                     // Safeties in man coverage help over the top
                     cushion = Math.max(1.5, cushion + 1.0); // Keep deeper
                     shadeY = Math.max(0.5, cushion); // Deeper positioning
+                }
+                
+                // Decision 4: LB get safety help for vertical routes
+                if (isLB && requestSafetyHelp) {
+                    // Shade back and play off receiver, waiting for safety help
+                    shadeY = Math.max(1.0, cushion + 0.5); // Deeper
+                    if (helpType === 'vertical') {
+                        shadeX = 0; // Play centered on receiver for help over top
+                    }
                 }
                 
                 // Decision 4: Anticipation based on receiver depth and route type
@@ -3387,8 +3188,23 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
         else if (assignment?.includes('rush') || assignment?.includes('blitz')) {
             // 💡 ENHANCED: Sophisticated gap assignment for pass rushers
             if (qbState && !playState.ballState.inAir) {
-                // 💡 NEW: Gap discipline for pass rush (edge vs interior)
-                const isEdgeRusher = pState.slot.startsWith('DL') && (assignment.includes('edge') || Math.abs(pState.initialX - CENTER_X) > 10);
+                // 💡 IMPROVED: Better edge rusher classification using slot position
+                // Edge positions: DE (Defensive End) typically have higher slot numbers on edges
+                // Interior positions: DT (Defensive Tackle) are in middle
+                const slotStr = pState.slot.toUpperCase();
+                const isDesignatedEdge = slotStr.includes('E') || slotStr.includes('END');
+                const isDesignatedInterior = slotStr.includes('T') || slotStr.includes('TACKLE') || slotStr.includes('NOSE');
+                
+                // Fallback to position-based detection if slot doesn't specify
+                let isEdgeRusher = false;
+                if (isDesignatedEdge) {
+                    isEdgeRusher = true;
+                } else if (!isDesignatedInterior && pState.slot.startsWith('DL')) {
+                    // Use position approximation: far from center = edge
+                    const distFromCenter = Math.abs(pState.initialX - CENTER_X);
+                    isEdgeRusher = distFromCenter > 10;
+                }
+                
                 const isInteriorRusher = pState.slot.startsWith('DL') && !isEdgeRusher;
                 
                 // Determine target based on gap assignment
@@ -3475,9 +3291,16 @@ function checkBlockCollisions(playState) {
                 );
 
                 if (defendersInRange.length > 0) {
-                    // 💡 IMPROVED: Sort by threat level, not just distance
+                    // 💡 IMPROVED: Sort by threat level, including blitz assignments
                     defendersInRange.sort((a, b) => {
-                        // Prioritize defenders closer to QB or RB
+                        // Priority 1: Blitzers should be picked up first
+                        const aIsBlitzer = a.assignment && (a.assignment.includes('blitz') || a.assignment.includes('rush'));
+                        const bIsBlitzer = b.assignment && (b.assignment.includes('blitz') || b.assignment.includes('rush'));
+                        
+                        if (aIsBlitzer && !bIsBlitzer) return -1; // a is blitzer, prioritize
+                        if (!aIsBlitzer && bIsBlitzer) return 1;  // b is blitzer, prioritize
+                        
+                        // Priority 2: Defenders closer to QB or RB (threat to ball carrier)
                         const ballCarrier = playState.activePlayers.find(p => p.isBallCarrier || p.hasBall);
                         if (ballCarrier && ballCarrier.isOffense) {
                             const aQBDist = getDistance(a, ballCarrier);
@@ -3485,6 +3308,8 @@ function checkBlockCollisions(playState) {
                             const distDiff = aQBDist - bQBDist;
                             if (Math.abs(distDiff) > 0.5) return distDiff; // Significant difference
                         }
+                        
+                        // Priority 3: Closer defenders (secondary tiebreaker)
                         return getDistance(blocker, a) - getDistance(blocker, b);
                     });
                     targetDefender = defendersInRange[0];
@@ -3934,11 +3759,8 @@ function updateQBDecision(playState, offenseStates, defenseStates, gameLog, aiTi
         requiredTimeOnRead = Math.max(25, 45 - Math.round(qbIQ / 5));
     }
 
-    // "Hesitation" Logic: If target is *almost* open, stare at them longer
-    const currentInfo = getTargetInfo(qbState.currentReadTargetSlot);
-    if (currentInfo && currentInfo.separation > 0.5 && currentInfo.separation < 1.5) {
-        requiredTimeOnRead += 15; // Add 0.75s hesitation
-    }
+    // 💡 ENHANCED 1.2: Remove hesitation on marginal reads
+    // "Almost open" receivers should be thrown to or progression advanced, not stared at
 
     // Pressure speeds up processing, but not drastically
     if (isPressured) requiredTimeOnRead = Math.round(requiredTimeOnRead * 0.7);
@@ -3984,7 +3806,14 @@ function updateQBDecision(playState, offenseStates, defenseStates, gameLog, aiTi
     let actionTaken = "None";
 
     const currentReadInfoResults = getTargetInfo(qbState.currentReadTargetSlot);
-    const checkdownInfo = getTargetInfo(progression[progression.length - 1]);
+    
+    // 💡 ENHANCED 1.1: Validate checkdown receiver is actually running a route
+    // Don't throw to RB if they're pass-blocking instead of running checkdown
+    const rawCheckdownSlot = progression[progression.length - 1];
+    const checkdownRecState = offenseStates.find(r => r.slot === rawCheckdownSlot);
+    const checkdownInfo = (checkdownRecState && (checkdownRecState.action.includes('route') || checkdownRecState.action === 'idle')) 
+        ? getTargetInfo(rawCheckdownSlot) 
+        : null; // Checkdown not available if blocking
 
     const OPEN_SEP = isPressured ? 0.8 : 1.2;
     const CHECKDOWN_SEP = 1.0;
@@ -3997,21 +3826,22 @@ function updateQBDecision(playState, offenseStates, defenseStates, gameLog, aiTi
     const canScramble = openLane && (isPressured || playState.tick > 80) && (Math.random() < (qbAgility / 100));
 
     // 1. Is Current Read Open? (AND have we finished dropping back?)
-    if (currentReadInfoResults && currentReadInfoResults.separation > OPEN_SEP && (canThrowStandard || isPressured)) {
+    // 💡 ENHANCED 2.3: Skip blocked/undercut reads (separation == 0)
+    if (currentReadInfoResults && currentReadInfoResults.separation > OPEN_SEP && currentReadInfoResults.separation > 0 && (canThrowStandard || isPressured)) {
         targetPlayerState = currentReadInfoResults.state;
         actionTaken = "Throw Read";
         decisionMade = true;
     }
-    // 2. Checkdown 
-    else if ((isPressured || !isPrimaryRead) && checkdownInfo && checkdownInfo.separation > CHECKDOWN_SEP && canThrowStandard) {
-        if (playState.tick > 50 || isPressured) {
-            targetPlayerState = checkdownInfo.state;
-            actionTaken = "Throw Checkdown";
-            decisionMade = true;
-        }
+    // 2. Checkdown
+    // 💡 ENHANCED 3.2: Natural checkdown timing - always available after 50 ticks
+    else if (checkdownInfo && checkdownInfo.separation > CHECKDOWN_SEP && (playState.tick > 50 || isPressured) && canThrowStandard) {
+        targetPlayerState = checkdownInfo.state;
+        actionTaken = "Throw Checkdown";
+        decisionMade = true;
     }
     // 3. Scramble?
-    else if (canScramble && decisionMade) {
+    // 💡 ENHANCED 1.3: Allow QB to check receivers while scrambling
+    else if (canScramble && !targetPlayerState && decisionMade) {
         actionTaken = "Scramble";
     }
     // 4. Forced Actions
@@ -4779,12 +4609,22 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
         play.assignments['RB1'] &&
         play.assignments['RB1'] !== 'pass_block' &&
         Math.random() < (qbIQ / 125)) {
-        play.assignments['RB1'] = 'pass_block';
-        assignments = play.assignments;
+        // 💡 ENHANCED 2.2: Check if RB would be open hot route before assigning block
+        // Only keep RB in if they wouldn't be wide open as checkdown
+        const rbState = playState.activePlayers.find(p => p.slot === 'RB1' && p.isOffense);
+        const rbWouldBeOpen = rbState && getDistance(rbState, qbState) < 5.0;
+        
+        if (!rbWouldBeOpen || Math.random() < 0.4) {
+            // RB not open, or small chance to block anyway - keep in to block
+            play.assignments['RB1'] = 'pass_block';
+            assignments = play.assignments;
 
-        const rbPlayer = playState.activePlayers.find(p => p.slot === 'RB1' && p.isOffense);
-        if (gameLog) { // Safe push
-            gameLog.push(`[Pre-Snap]: 🧠 ${qbPlayer?.name || 'QB'} sees the blitz and keeps ${rbPlayer?.name || 'RB'} in to block!`);
+            const rbPlayer = playState.activePlayers.find(p => p.slot === 'RB1' && p.isOffense);
+            if (gameLog) { // Safe push
+                gameLog.push(`[Pre-Snap]: 🧠 ${qbPlayer?.name || 'QB'} sees the blitz and keeps ${rbPlayer?.name || 'RB'} in to block!`);
+            }
+        } else if (gameLog) {
+            gameLog.push(`[Pre-Snap]: 🧠 ${qbPlayer?.name || 'QB'} sees the blitz but RB would be open as hot route!`);
         }
 
         if (rbPlayer) {
