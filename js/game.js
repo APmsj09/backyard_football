@@ -2764,7 +2764,22 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
             if (timeSinceThrow > reactionDelay) {
                 const landingSpot = { x: playState.ballState.targetX, y: playState.ballState.targetY };
                 const distToLanding = getDistance(pState, landingSpot);
-                const reactionRange = isDB ? 25 : 12; // DBs break on ball from further away
+
+                // Base reaction ranges
+                let reactionRange = isDB ? 25 : 12; // DBs normally break on ball from further away
+
+                // If I'm in direct man coverage, be conservative unless the pass is to my man
+                if (pState.assignment && pState.assignment.startsWith('man_cover_')) {
+                    const assignedSlot = pState.assignment.replace('man_cover_', '');
+                    const assignedRec = offenseStates.find(o => o.slot === assignedSlot);
+                    // If the QB is not targeting my man, reduce the reaction range sharply
+                    if (playState.ballState.targetPlayerId !== (assignedRec && assignedRec.id)) {
+                        reactionRange = 6; // stay with receiver unless ball is very close
+                    } else {
+                        // If the pass is to my man, keep DB sensitivity but still require a small delay
+                        reactionRange = Math.max(12, reactionRange);
+                    }
+                }
 
                 if (distToLanding < reactionRange) {
                     pState.targetX = landingSpot.x;
@@ -2782,9 +2797,21 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
         if (pState.action === 'pursuit') shouldPursue = true; // Keep pursuing if already started
         else if (pState.assignment?.includes('blitz') || pState.assignment?.includes('rush')) shouldPursue = true; // Assigned blitz
         else if (isBallCaughtOrRun) {
-            if (!carrierIsQB) shouldPursue = true; // Handoff or Catch -> Attack
-            else if (isBallPastLOS) shouldPursue = true; // QB Scramble past LOS -> Attack
-            else if (!qbInPocket) shouldPursue = true; // QB Scrambling behind LOS -> Attack
+            if (!carrierIsQB) {
+                // Handoff or Catch -> Attack
+                shouldPursue = true;
+            } else if (isBallPastLOS) {
+                // QB has crossed the line and is a runner now -> Attack
+                shouldPursue = true;
+            } else if (!qbInPocket) {
+                // QB is already scrambling (not in a clean pocket) -> Attack
+                shouldPursue = true;
+            } else {
+                // QB is currently in the pocket. Defensive backs (CB/S) should
+                // generally stay in their coverage and NOT abandon to chase the
+                // QB. Allow non-DB defenders (LB/DL or assigned spies) to pursue.
+                if (!isDB) shouldPursue = true;
+            }
         }
 
         if (shouldPursue && ballCarrierState) {
@@ -2943,12 +2970,29 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
             return; 
         }
 
-        // --- B. PUNT RETURN (Wait for catch) ---
+        // --- B. PUNT RETURN (Move to catch) ---
         if (assignment === 'punt_return') {
-            // Logic handled in ball arrival, just stand at initial pos
-            pState.targetX = pState.initialX;
-            pState.targetY = pState.initialY;
-            pState.action = 'punt_return';
+            // If punt is in the air, move toward the predicted landing spot
+            const ball = playState.ballState || {};
+            if (ball.inAir && typeof ball.targetX !== 'undefined' && typeof ball.targetY !== 'undefined') {
+                // Move to the landing/target coordinates so returner can field the punt
+                // Apply a small offset so the returner approaches from an angle
+                const approachOffsetX = (pState.x < ball.targetX) ? 0.5 : -0.5;
+                const approachOffsetY = 0; // No vertical offset; let arrival check determine catch
+                pState.targetX = Math.max(0.5, Math.min(FIELD_WIDTH - 0.5, ball.targetX + approachOffsetX));
+                pState.targetY = Math.max(10.5, Math.min(FIELD_LENGTH - 10.5, ball.targetY + approachOffsetY));
+                pState.action = 'punt_return';
+            } else if (ball.inAir && (typeof ball.targetX === 'undefined' || typeof ball.targetY === 'undefined')) {
+                // If the punt doesn't have a precise target, move toward the current ball position
+                pState.targetX = Math.max(0.5, Math.min(FIELD_WIDTH - 0.5, playState.ballState.x || pState.initialX));
+                pState.targetY = Math.max(10.5, Math.min(FIELD_LENGTH - 10.5, playState.ballState.y || pState.initialY));
+                pState.action = 'punt_return';
+            } else {
+                // Ball is not in flight (or already on ground) - hold at initial position until arrival handler resolves
+                pState.targetX = pState.initialX;
+                pState.targetY = pState.initialY;
+                pState.action = 'punt_return';
+            }
         }
 
         // --- 💡 ENHANCED: Safety Help Coordination (applies before specific assignments) ---
@@ -4068,6 +4112,7 @@ function handleBallArrival(playState, gameLog, play) {
 
         if (returnersInRange.length === 0) {
             // No returner is close enough yet. Let it keep flying/falling.
+            if (gameLog) gameLog.push(`🔍 DEBUG: returnersInRange=0 at z=${(playState.ballState.z||0).toFixed(1)} targetY=${(playState.ballState.targetY||0).toFixed(1)}`);
             return;
         }
 
@@ -4075,7 +4120,10 @@ function handleBallArrival(playState, gameLog, play) {
         const returnerState = returnersInRange.sort((a, b) => getDistance(a, ballPos) - getDistance(b, ballPos))[0];
         const returnerPlayer = getPlayer(returnerState.id); // Helper to get full object
         
-        if (!returnerPlayer) return; 
+        if (!returnerPlayer) {
+            if (gameLog) gameLog.push(`🔍 DEBUG: returnerState found but player object missing (id=${returnerState && returnerState.id})`);
+            return; 
+        }
 
         // Check for a muff
         const catchingHands = returnerPlayer.attributes?.technical?.catchingHands || 50;
@@ -4098,6 +4146,7 @@ function handleBallArrival(playState, gameLog, play) {
         } else {
             // --- CATCH SUCCESSFUL ---
             if (gameLog) gameLog.push(`🏈 Punt caught by ${returnerState.name}.`);
+            if (gameLog) gameLog.push(`🔍 DEBUG: returner chosen id=${returnerState.id} dist=${getDistance(returnerState, ballPos).toFixed(2)}`);
             
             // 💡 FIX: Explicitly set play state to live/turnover
             playState.turnover = true;
@@ -4873,7 +4922,7 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
                         if ((ballPos.x || 0) <= 0.1 || (ballPos.x || 0) >= (FIELD_WIDTH - 0.1) || (ballPos.y || 0) >= (FIELD_LENGTH - 0.1) || (ballPos.y || 0) <= 0.1) {
                             if (loopType === 'punt') {
                                 if ((ballPos.y || 0) >= FIELD_LENGTH - 10) { // Endzone
-                                    if (gameLog) gameLog.push(`🏈 Punt sails out of the endzone. Touchback.`);
+                                    if (gameLog) gameLog.push(`🏈 Punt sails out of the endzone. TOUCHBACK.`);
                                     playState.touchback = true;
                                 } else {
                                     if (gameLog) gameLog.push(`🏈 Punt goes out of bounds.`);

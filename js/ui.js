@@ -55,6 +55,11 @@ let liveGameDriveActive = false;
 let liveGamePossessionName = '';
 let liveGameDriveText = '';
 
+// --- Live stats counters (updated as logs are processed) ---
+let liveGameStats = { home: { yards: 0, td: 0, turnovers: 0, punts: 0, returns: 0 }, away: { yards: 0, td: 0, turnovers: 0, punts: 0, returns: 0 } };
+// Per-player live stat snapshots (id -> stats)
+let livePlayerStats = new Map();
+
 
 /**
  * Debounce function to limit rapid function calls (e.g., on input).
@@ -587,7 +592,7 @@ export function renderDraftPool(gameState, onPlayerSelect, sortColumn, sortDirec
             (max, rp) => Math.max(max, getRelationshipLevel(rp.id, player.id)),
             relationshipLevels.STRANGER.level
         );
-        const scoutedPlayer = getScoutedPlayerInfo(player, maxLevel);
+            const scoutedPlayer = getScoutedPlayerInfo(player, maxLevel);
         if (!scoutedPlayer) return;
 
         const relationshipInfo = Object.values(relationshipLevels).find(rl => rl.level === maxLevel) || relationshipLevels.STRANGER;
@@ -2253,6 +2258,176 @@ function renderLiveStatsBox(gameResult) {
     elements.simStatsHome.innerHTML = generateTeamStatsHtml(homeTeam);
 }
 
+// ------------------
+// Live stats helpers
+// ------------------
+function initLiveGameStats(gameResult) {
+    liveGameStats = { home: { yards: 0, td: 0, turnovers: 0, punts: 0, returns: 0 }, away: { yards: 0, td: 0, turnovers: 0, punts: 0, returns: 0 } };
+    // Optionally seed from gameResult if you want starting values
+}
+
+function initLivePlayerStats(gameResult) {
+    livePlayerStats = new Map();
+    if (!gameResult) return;
+    const homeRoster = getUIRosterObjects(gameResult.homeTeam || {});
+    const awayRoster = getUIRosterObjects(gameResult.awayTeam || {});
+    const all = [...homeRoster, ...awayRoster];
+    all.forEach(p => {
+        if (!p || !p.id) return;
+        livePlayerStats.set(p.id, {
+            passAttempts: 0, passCompletions: 0, passYards: 0, interceptionsThrown: 0,
+            receptions: 0, recYards: 0, drops: 0,
+            rushAttempts: 0, rushYards: 0,
+            returnYards: 0,
+            touchdowns: 0, interceptions: 0, fumbles: 0
+        });
+    });
+}
+
+function updateStatsFromLogEntry(entry) {
+    if (!entry || !currentLiveGameResult) return;
+    const homeName = currentLiveGameResult.homeTeam?.name || '';
+    const awayName = currentLiveGameResult.awayTeam?.name || '';
+
+    // Determine which logical team is on offense (possession)
+    const possName = liveGamePossessionName || '';
+    const possKey = possName === homeName ? 'home' : 'away';
+    const defKey = possKey === 'home' ? 'away' : 'home';
+
+    // Yards gained / lost
+    const yardsMatch = entry.match(/gain of (-?\d+\.?\d*)|loss of (\d+\.?\d*)/i);
+    if (yardsMatch) {
+        const yards = parseFloat(yardsMatch[1] || `-${yardsMatch[2] || 0}`) || 0;
+        if (possKey) liveGameStats[possKey].yards += Math.round(yards);
+    }
+
+    // Punts (simple detection)
+    if (entry.includes('PUNT by') || entry.includes('punts')) {
+        if (possKey) liveGameStats[possKey].punts += 1;
+    }
+
+    // Returns (e.g., "returns for X") -> attribute to defense/return team
+    const retMatch = entry.match(/returns for (\d+)\s*yd|returns for (\d+) yards?/i);
+    if (retMatch) {
+        const r = parseInt(retMatch[1] || retMatch[2] || '0', 10) || 0;
+        if (r > 0) {
+            // Return team is opposite of possession at time of punt
+            if (defKey) liveGameStats[defKey].returns += r;
+        }
+    }
+
+    // Touchdowns
+    if (entry.includes('TOUCHDOWN') || entry.includes('touchdown') || entry.startsWith('🎉')) {
+        // Attribute to whichever team is mentioned, else assume possession's opponent if turnover return
+        if (entry.includes(homeName)) liveGameStats.home.td += 1;
+        else if (entry.includes(awayName)) liveGameStats.away.td += 1;
+        else {
+            // fallback: if it appears to be a return/defensive TD, assign to defKey
+            if (defKey) liveGameStats[defKey].td += 1;
+        }
+    }
+
+    // Interceptions/Fumbles = turnovers for possession team
+    if (entry.includes('INTERCEPTION') || entry.includes('FUMBLE') || entry.includes('recovers the fumble') || entry.includes('FUM') ) {
+        if (possKey) liveGameStats[possKey].turnovers += 1;
+    }
+
+    // --- Per-player updates: try to attribute events to named players in the log ---
+    try {
+        const gs = getGameState();
+        if (!gs || !Array.isArray(gs.players)) return;
+
+        // For each player in the match rosters, if their name appears in the entry, update their live snapshot
+        const homeRoster = getUIRosterObjects(currentLiveGameResult?.homeTeam || {});
+        const awayRoster = getUIRosterObjects(currentLiveGameResult?.awayTeam || {});
+        const allPlayers = [...homeRoster, ...awayRoster];
+
+        allPlayers.forEach(player => {
+            if (!player || !player.name) return;
+            if (!entry.includes(player.name)) return;
+
+            const pid = player.id;
+            if (!livePlayerStats.has(pid)) {
+                livePlayerStats.set(pid, { passAttempts:0, passCompletions:0, passYards:0, interceptionsThrown:0, receptions:0, recYards:0, drops:0, rushAttempts:0, rushYards:0, returnYards:0, touchdowns:0, interceptions:0, fumbles:0 });
+            }
+            const s = livePlayerStats.get(pid);
+
+            // Catches / receptions
+            if (/caught by|CATCH|makes a tough contested reception|CATCH!/.test(entry)) {
+                s.receptions = (s.receptions || 0) + 1;
+                // attribute yards if mentioned in the same log block
+                const yardsMatch = entry.match(/gain of (-?\d+\.?\d*)|returns for (\d+)|for (\d+) yd/);
+                if (yardsMatch) {
+                    const y = Math.round(parseFloat(yardsMatch[1] || yardsMatch[2] || yardsMatch[3] || 0));
+                    if (y) s.recYards = (s.recYards || 0) + y;
+                }
+            }
+
+            // Interception (defender name will be present)
+            if (/INTERCEPTION|INTERCEPTED/.test(entry)) {
+                s.interceptions = (s.interceptions || 0) + 1;
+            }
+
+            // Muff / drop
+            if (/MUFFED PUNT|drops it|drops the ball|muffed/.test(entry)) {
+                s.drops = (s.drops || 0) + 1;
+            }
+
+            // Rush attempts / yards (look for "gain of X" near player)
+            if (/rush|rushed|rushes/.test(entry)) {
+                s.rushAttempts = (s.rushAttempts || 0) + 1;
+                const rmatch = entry.match(/gain of (-?\d+\.?\d*)|for (\d+) yd/);
+                if (rmatch) {
+                    const ry = Math.round(parseFloat(rmatch[1] || rmatch[2] || 0));
+                    if (ry) s.rushYards = (s.rushYards || 0) + ry;
+                }
+            }
+
+            // Returns
+            const ret = entry.match(/returns for (\d+)\s*yd|returns for (\d+) yards?/i);
+            if (ret) {
+                const ry = parseInt(ret[1] || ret[2] || '0', 10) || 0;
+                if (ry) s.returnYards = (s.returnYards || 0) + ry;
+            }
+
+            // Touchdown mention
+            if (/TOUCHDOWN|returns for a touchdown|return touchdown|TD|touchdown/i.test(entry)) {
+                s.touchdowns = (s.touchdowns || 0) + 1;
+            }
+        });
+    } catch (perr) {
+        console.error('Per-player live stat parsing error:', perr);
+    }
+}
+
+function renderLiveStatsLive() {
+    if (!elements.simLiveStats || !currentLiveGameResult) return;
+    const home = currentLiveGameResult.homeTeam || {};
+    const away = currentLiveGameResult.awayTeam || {};
+    const homeName = home.name || 'Home';
+    const awayName = away.name || 'Away';
+
+    const h = liveGameStats.home;
+    const a = liveGameStats.away;
+
+    const html = `
+        <div class="flex justify-between">
+            <div class="w-1/2 pr-2">
+                <h5 class="text-sm font-semibold">${homeName}</h5>
+                <p class="text-xs">Yds: <strong>${h.yards}</strong> • TDs: <strong>${h.td}</strong> • TOs: <strong>${h.turnovers}</strong></p>
+                <p class="text-xs">Punts: <strong>${h.punts}</strong> • Return Yds: <strong>${h.returns}</strong></p>
+            </div>
+            <div class="w-1/2 pl-2">
+                <h5 class="text-sm font-semibold">${awayName}</h5>
+                <p class="text-xs">Yds: <strong>${a.yards}</strong> • TDs: <strong>${a.td}</strong> • TOs: <strong>${a.turnovers}</strong></p>
+                <p class="text-xs">Punts: <strong>${a.punts}</strong> • Return Yds: <strong>${a.returns}</strong></p>
+            </div>
+        </div>
+    `;
+
+    elements.simLiveStats.innerHTML = html;
+}
+
 function renderSimPlayers(frame) {
     const findTeamInResult = (playerTeamId) => {
         if (!currentLiveGameResult) return null;
@@ -2443,6 +2618,8 @@ function runLiveGameTick() {
         drawFieldVisualization(null); // Clear field
 
         const finalResult = currentLiveGameResult; // Store before nulling
+        // Render final stats now that the sim has concluded
+        try { renderLiveStatsBox(finalResult); } catch (e) { console.error('renderLiveStatsBox final render error:', e); }
         currentLiveGameResult = null; // Clear game data
 
         if (liveGameCallback) {
@@ -2647,6 +2824,11 @@ function runLiveGameTick() {
                 console.error("Error parsing log entry for sim state:", playLogEntry, parseError);
             }
 
+            // Update lightweight live stats from this entry
+            try {
+                updateStatsFromLogEntry(playLogEntry);
+            } catch (err) { console.error('Error updating live stats from log:', err); }
+
             // --- 4. Append to Ticker ---
             p.className = styleClass;
             p.textContent = descriptiveText;
@@ -2661,6 +2843,8 @@ function runLiveGameTick() {
         elements.simAwayScore.textContent = liveGameCurrentAwayScore;
         elements.simHomeScore.textContent = liveGameCurrentHomeScore;
         elements.simGameDrive.textContent = liveGameDriveText;
+        // Render compact live stats summary
+        try { renderLiveStatsLive(); } catch (e) { console.error('renderLiveStatsLive error:', e); }
         let downText = `FINAL`;
         if (liveGameDriveActive) {
             const downSuffix = liveGameDown === 1 ? 'st' : liveGameDown === 2 ? 'nd' : liveGameDown === 3 ? 'rd' : 'th';
@@ -2786,7 +2970,10 @@ export function startLiveGameSim(gameResult, onComplete) {
     if (elements.simPossession) elements.simPossession.textContent = '';
 
     drawFieldVisualization(null); // Clear field
-    renderLiveStatsBox(gameResult); // Render the static "final" stats
+    // Don't render final stats at start of live sim — show a placeholder
+    if (elements.simLiveStats) elements.simLiveStats.innerHTML = '<p class="text-sm text-gray-400">Live stats will populate at game end.</p>';
+    // Initialize live stats counters for this game
+    initLiveGameStats(gameResult);
     try {
         renderSimPlayers(gameResult.visualizationFrames[0]);
     } catch (err) {
