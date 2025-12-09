@@ -1256,6 +1256,19 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
                     }
                     coveredManTargets.add(assignment.replace('man_cover_', ''));
                 }
+                
+                // 💡 NEW: Persist the intended target player ID for man_cover assignments early,
+                // before position setup, so it's always available even if assignment changes.
+                if (assignment && assignment.startsWith('man_cover_')) {
+                    const targetSlot = assignment.replace('man_cover_', '');
+                    const targetPlayer = initialOffenseStates.find(o => o.slot === targetSlot);
+                    if (targetPlayer) {
+                        pState.assignedPlayerId = targetPlayer.id;
+                    } else {
+                        // No player in that slot — will be handled by position setup fallback
+                        pState.assignedPlayerId = null;
+                    }
+                }
 
                 if (!assignment) {
                     if (slot.startsWith('DL')) {
@@ -1314,6 +1327,10 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
                         startX = targetOffPlayer.x + xOffset;
                         startY = targetOffPlayer.y + yOffset;
                         targetX = startX; targetY = startY;
+                        // Persist the assigned receiver's id on the defender so
+                        // later decision logic can reliably determine whether
+                        // the pass is targeted at "my man" regardless of route movement.
+                        pState.assignedPlayerId = targetOffPlayer.id;
                     } else {
                         // Fallback logic for man coverage target not found
                         const zoneCenter = getZoneCenter('zone_hook_curl_middle', playState.lineOfScrimmage);
@@ -2768,12 +2785,15 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                 // Base reaction ranges
                 let reactionRange = isDB ? 25 : 12; // DBs normally break on ball from further away
 
-                // If I'm in direct man coverage, be conservative unless the pass is to my man
+                // If I'm in direct man coverage, be conservative unless the pass is to my man.
+                // Use the persisted `assignedPlayerId` (stable) rather than searching
+                // offenseStates each tick, which can be unreliable if slot mapping
+                // or timing causes temporary misses.
                 if (pState.assignment && pState.assignment.startsWith('man_cover_')) {
-                    const assignedSlot = pState.assignment.replace('man_cover_', '');
-                    const assignedRec = offenseStates.find(o => o.slot === assignedSlot);
-                    // If the QB is not targeting my man, reduce the reaction range sharply
-                    if (playState.ballState.targetPlayerId !== (assignedRec && assignedRec.id)) {
+                    const assignedId = pState.assignedPlayerId || null;
+                    // If we know who we're covering and the pass isn't to them,
+                    // reduce the reaction range sharply so defenders stay with their man.
+                    if (!assignedId || playState.ballState.targetPlayerId !== assignedId) {
                         reactionRange = 6; // stay with receiver unless ball is very close
                     } else {
                         // If the pass is to my man, keep DB sensitivity but still require a small delay
@@ -2782,10 +2802,33 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                 }
 
                 if (distToLanding < reactionRange) {
-                    pState.targetX = landingSpot.x;
-                    pState.targetY = landingSpot.y;
-                    pState.action = 'pursuit';
-                    return; 
+                    // If I'm in man coverage and the reactionRange is small,
+                    // only break if the ball is explicitly to my assigned receiver
+                    // or the ball is extremely close.
+                    if (pState.assignment && pState.assignment.startsWith('man_cover_')) {
+                        const assignedId = pState.assignedPlayerId || null;
+                        const isToMyMan = assignedId && playState.ballState.targetPlayerId === assignedId;
+                        const veryClose = distToLanding < 3.0;
+                        if (!isToMyMan && !veryClose) {
+                            // Stay with receiver — do not start pursuit.
+                            // Debug: log when a man-coverage defender decides NOT to break.
+                            // (Can be enabled for deeper tracing.)
+                            // console.debug(`ManCoverageHold: def=${pState.id} assign=${pState.assignment} assignedId=${assignedId} target=${playState.ballState.targetPlayerId} dist=${distToLanding.toFixed(1)} react=${reactionRange}`);
+                        } else {
+                            // Break to the ball — log for debugging so we can tune thresholds.
+                            console.debug(`ManCoverBreak -> pursuit: def=${pState.id} assign=${pState.assignment} assignedId=${assignedId} target=${playState.ballState.targetPlayerId} dist=${distToLanding.toFixed(1)} react=${reactionRange}`);
+                            pState.targetX = landingSpot.x;
+                            pState.targetY = landingSpot.y;
+                            pState.action = 'pursuit';
+                            return;
+                        }
+                    } else {
+                        // Non man-coverage defenders break normally.
+                        pState.targetX = landingSpot.x;
+                        pState.targetY = landingSpot.y;
+                        pState.action = 'pursuit';
+                        return;
+                    }
                 }
             }
         }
@@ -2815,9 +2858,26 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
         }
 
         if (shouldPursue && ballCarrierState) {
-            pState.action = 'pursuit';
-            
-            const dist = getDistance(pState, ballCarrierState);
+            // Additional discipline: defenders assigned to man coverage (both DBs and LBs)
+            // should not abandon their man lightly. Require the carrier to be
+            // a true runner (QB past LOS or scrambling) or a non-QB ball carrier.
+            const isManCovered = pState.assignment && pState.assignment.startsWith('man_cover_');
+            const isManCoverEligible = isManCovered && (isDB || pState.slot.startsWith('LB'));
+            if (isManCoverEligible) {
+                const allowBreak = (!carrierIsQB && isBallCaughtOrRun) || (carrierIsQB && (isBallPastLOS || !qbInPocket));
+                if (!allowBreak) {
+                    // Refuse to switch into pursuit — stay with assignment.
+                    console.debug(`Prevented man-cover pursuit: def=${pState.id} assign=${pState.assignment} slot=${pState.slot} carrier=${ballCarrierState?.slot || 'unknown'} qbInPocket=${qbInPocket} isBallPastLOS=${isBallPastLOS}`);
+                    // fall through to assignment handling below (don't set pursuit)
+                } else {
+                    pState.action = 'pursuit';
+                }
+            } else {
+                pState.action = 'pursuit';
+            }
+
+            if (pState.action === 'pursuit') {
+                const dist = getDistance(pState, ballCarrierState);
             let predictionTime = Math.min(1.0, dist / 12.0);
             
             // DB Contain Logic: If I'm outside, stay outside
@@ -2833,9 +2893,10 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                 interceptY += 1.0; 
             }
 
-            pState.targetX = Math.max(0.5, Math.min(52.8, interceptX));
-            pState.targetY = Math.max(0.5, Math.min(119.5, interceptY));
-            return;
+                pState.targetX = Math.max(0.5, Math.min(52.8, interceptX));
+                pState.targetY = Math.max(0.5, Math.min(119.5, interceptY));
+                return;
+            }
         }
 
         // -- 5. ASSIGNMENT LOGIC --
@@ -3017,7 +3078,16 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
         // --- C. MAN COVERAGE (ENHANCED) ---
         else if (assignment?.startsWith('man_cover_')) {
             const targetSlot = assignment.replace('man_cover_', '');
-            const targetRec = offenseStates.find(o => o.slot === targetSlot);
+            // 💡 CRITICAL: Use the persisted assignedPlayerId instead of searching offenseStates,
+            // which can fail if receiver position or timing is out of sync.
+            let targetRec = null;
+            if (pState.assignedPlayerId) {
+                targetRec = offenseStates.find(o => o.id === pState.assignedPlayerId);
+            }
+            // Fallback: search by slot if id lookup fails
+            if (!targetRec) {
+                targetRec = offenseStates.find(o => o.slot === targetSlot);
+            }
 
             if (targetRec) {
                 // 💡 ENHANCED: Intelligent man coverage positioning based on game state
