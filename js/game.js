@@ -2772,6 +2772,11 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
         const qbSpeed = ballCarrierState?.velocity ? Math.abs(ballCarrierState.velocity.y) : 0;
         const qbInPocket = carrierIsQB && !isBallPastLOS && qbSpeed < 2.0;
 
+        // 💡 DEBUG: Log DBs with man coverage on early ticks to diagnose instant pursuit
+        if (isDB && pState.assignment && pState.assignment.startsWith('man_cover_') && playState.tick < 5) {
+            console.debug(`DB tick=${playState.tick} id=${pState.id} assign=${pState.assignment} ballInAir=${isBallInAir} isBallCaughtOrRun=${isBallCaughtOrRun} qbInPocket=${qbInPocket} action=${pState.action}`);
+        }
+
         // -- 3. BALL IN AIR (Reaction) --
         if (isBallInAir) {
             const timeSinceThrow = playState.tick - (playState.ballState.throwTick || playState.tick);
@@ -2837,9 +2842,22 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
         // Strict checks to prevent instant blitzing
         let shouldPursue = false;
 
-        if (pState.action === 'pursuit') shouldPursue = true; // Keep pursuing if already started
-        else if (pState.assignment?.includes('blitz') || pState.assignment?.includes('rush')) shouldPursue = true; // Assigned blitz
-        else if (isBallCaughtOrRun) {
+        // 💡 CRITICAL FIX: If a DB with man coverage is already in pursuit,
+        // re-check whether they should still be pursuing. Don't let them stay locked in.
+        if (pState.action === 'pursuit') {
+            const isManCovered = pState.assignment && pState.assignment.startsWith('man_cover_');
+            const shouldStayInCoverage = isManCovered && isDB && isBallCaughtOrRun && carrierIsQB && qbInPocket && !isBallPastLOS;
+            if (shouldStayInCoverage) {
+                // Reset pursuit status — they should return to man coverage
+                pState.action = 'man_cover';
+                shouldPursue = false;
+                console.debug(`Releasing from pursuit: def=${pState.id} back to man_cover (QB in pocket)`);
+            } else {
+                shouldPursue = true; // Keep pursuing if conditions still warrant it
+            }
+        } else if (pState.assignment?.includes('blitz') || pState.assignment?.includes('rush')) {
+            shouldPursue = true; // Assigned blitz
+        } else if (isBallCaughtOrRun) {
             if (!carrierIsQB) {
                 // Handoff or Catch -> Attack
                 shouldPursue = true;
@@ -2871,9 +2889,14 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                     // fall through to assignment handling below (don't set pursuit)
                 } else {
                     pState.action = 'pursuit';
+                    if (playState.tick < 5) console.debug(`ManCoverBreakPursuit: def=${pState.id} tick=${playState.tick} allowBreak=true`);
                 }
             } else {
                 pState.action = 'pursuit';
+                // Debug non-man-cover pursuits on early ticks
+                if (isDB && playState.tick < 5) {
+                    console.debug(`DB_Pursuing_Early: def=${pState.id} tick=${playState.tick} assign=${pState.assignment} carrierSlot=${ballCarrierState?.slot}`);
+                }
             }
 
             if (pState.action === 'pursuit') {
