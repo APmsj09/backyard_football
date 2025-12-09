@@ -2081,7 +2081,7 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
 
                 case 'run_route':
                     {
-                        // 1. Validation: If no path exists, finish immediately
+                        // 1. Validation
                         if (!pState.routePath || pState.routePath.length === 0) {
                             pState.action = 'route_complete';
                             pState.targetX = pState.x;
@@ -2089,90 +2089,71 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                             break;
                         }
 
-                        // 2. Get the current target waypoint from the route
                         const currentTargetPoint = pState.routePath[pState.currentPathIndex];
-                        const ARRIVAL_RADIUS = 0.5; // Slightly larger to prevent circling
+                        const ARRIVAL_RADIUS = 0.5;
 
-                        // 3. Start with the "Ideal" Target
+                        // 2. Start with the ideal route target
                         let targetX = currentTargetPoint.x;
                         let targetY = currentTargetPoint.y;
 
-                        // ---------------------------------------------------------
-                        // 🧠 AI LAYER 1: ROUTE INTELLIGENCE (Coverage Adjustments)
-                        // ---------------------------------------------------------
-                        // Find nearest defender to react to coverage
-                        const nearbyDefenders = defenseStates.filter(d =>
-                            !d.isBlocked && !d.isEngaged && getDistance(pState, d) < 4.0
-                        ).sort((a, b) => getDistance(pState, a) - getDistance(pState, b));
-
-                        if (nearbyDefenders.length > 0) {
-                            const closestDef = nearbyDefenders[0];
-                            const defDistance = getDistance(pState, closestDef);
-
-                            // A. Tight Coverage on Deep Routes: Break off early (Comeback logic)
-                            if (defDistance < 1.0 && pState.currentPathIndex >= Math.floor(pState.routePath.length * 0.4)) {
-                                // If defender is sticking tight, shorten the route slightly to create separation
-                                targetY = Math.max(currentTargetPoint.y - 2, pState.y);
+                        // 3. 🧠 SMART ROUTE ADJUSTMENT (Coverage Reaction)
+                        // If a defender is close, shift the route slightly away from them
+                        const nearbyDefender = defenseStates.find(d => 
+                            !d.isBlocked && !d.isEngaged && getDistance(pState, d) < 3.0
+                        );
+                        
+                        if (nearbyDefender) {
+                            const defDist = getDistance(pState, nearbyDefender);
+                            // If tight coverage, lean away slightly
+                            if (defDist < 1.5 && pState.currentPathIndex > 0) {
+                                const leanX = (pState.x > nearbyDefender.x) ? 0.5 : -0.5;
+                                targetX += leanX;
                             }
-                            // B. Moderate Coverage: Slant away to find open grass
-                            else if (pState.currentPathIndex >= Math.floor(pState.routePath.length * 0.5)) {
-                                const defOffset = defDistance < 2.0 ? 1.5 : 0.75;
-                                // Shift target away from the defender's position
-                                targetX = currentTargetPoint.x + (pState.x > closestDef.x ? defOffset : -defOffset);
-                                targetY = currentTargetPoint.y + (pState.y > closestDef.y ? defOffset : -defOffset);
-                            }
-
-                            // C. Fatigue/Contact Penalty
-                            const contactTicks = pState.lastContactTick ? playState.tick - pState.lastContactTick : 1000;
-                            pState.speedMultiplier = (contactTicks < 20) ? 0.85 : 1.0;
                         }
 
-                        // ---------------------------------------------------------
-                        // 🚧 AI LAYER 2: OBSTACLE AVOIDANCE (The Anti-Stuck Fix)
-                        // ---------------------------------------------------------
-                        // Detect if a defender is standing DIRECTLY in the running lane
-                        const obstacle = defenseStates.find(d =>
-                            !d.isBlocked && !d.isEngaged &&
-                            d.y > pState.y - 0.5 && d.y < targetY + 0.5 && // Is strictly between me and target vertically
-                            Math.abs(d.x - pState.x) < 0.8 // Is strictly in my lane horizontally
+                        // 4. 🚧 OBSTACLE AVOIDANCE (The Fix)
+                        // Only look for obstacles in the immediate vicinity (4 yards max)
+                        const obstacle = defenseStates.find(d => 
+                            !d.isBlocked && !d.isEngaged && 
+                            d.y >= pState.y - 0.5 &&       // Ahead of me (or alongside)
+                            d.y <= pState.y + 4.0 &&       // 💡 FIX: Only care about immediate threats (4y)
+                            d.y < targetY &&               // And strictly before my actual target
+                            Math.abs(d.x - pState.x) < 0.8 // Strictly in my lane width
                         );
 
                         if (obstacle) {
-                            // Determine which side is clearer (or default to inside/outside based on field position)
-                            // If I am to the right of the obstacle, go further right.
+                            // 💡 FIX: Soft Avoidance
+                            // Don't detour excessively. Just "stem" the route to the side.
                             const avoidanceDir = (pState.x >= obstacle.x) ? 1.0 : -1.0;
-
-                            // Force a temporary detour: Step 1.5 yards to the side
-                            targetX = obstacle.x + (avoidanceDir * 1.5);
-                            // Aim slightly past them so we don't stop in front of them
-                            targetY = obstacle.y + 0.5;
+                            
+                            // Step 1.0 yard to the side (reduced from 1.5 to prevent running out of bounds)
+                            targetX = obstacle.x + (avoidanceDir * 1.0);
+                            
+                            // 💡 CRITICAL FIX: Aim DEEP past the defender
+                            // Old code aimed at obstacle.y + 0.5, causing WRs to stop if DB backed up.
+                            // New code aims at obstacle.y + 3.0 or the original target, whichever is closer.
+                            // This forces the WR to sprint *past* the DB, not *to* the DB.
+                            targetY = Math.min(currentTargetPoint.y, obstacle.y + 3.0);
                         }
 
-                        // ---------------------------------------------------------
-                        // 4. EXECUTION & ARRIVAL
-                        // ---------------------------------------------------------
-
-                        // Apply Final Target to State
+                        // 5. Apply Target
                         pState.targetX = targetX;
                         pState.targetY = targetY;
 
-                        // Check if we reached the waypoint
+                        // 6. Arrival Check
                         const dx = targetX - pState.x;
                         const dy = targetY - pState.y;
                         const distToTarget = Math.sqrt(dx * dx + dy * dy);
 
                         if (distToTarget < ARRIVAL_RADIUS) {
                             pState.currentPathIndex++;
-                            // If we have more points, target the next one immediately
+                            // Immediate target update for smoothness
                             if (pState.currentPathIndex < pState.routePath.length) {
-                                const nextTargetPoint = pState.routePath[pState.currentPathIndex];
-                                pState.targetX = nextTargetPoint.x;
-                                pState.targetY = nextTargetPoint.y;
+                                const next = pState.routePath[pState.currentPathIndex];
+                                pState.targetX = next.x;
+                                pState.targetY = next.y;
                             } else {
-                                // Route finished
                                 pState.action = 'route_complete';
-                                pState.targetX = pState.x;
-                                pState.targetY = pState.y;
                             }
                         }
                         break;
