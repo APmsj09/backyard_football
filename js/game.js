@@ -3570,11 +3570,10 @@ function resolveBattle(powerA, powerB, battle) {
  */
 function resolveOngoingBlocks(playState, gameLog) {
     const battlesToRemove = [];
-
-    // Find the ball carrier once
     const ballCarrier = playState.activePlayers.find(p => p.isBallCarrier);
 
     playState.blockBattles.forEach((battle, index) => {
+        // Skip processing on the very first tick of engagement
         if (battle.startTick === playState.tick) return;
 
         if (battle.status !== 'ongoing') {
@@ -3585,47 +3584,39 @@ function resolveOngoingBlocks(playState, gameLog) {
         const blockerState = playState.activePlayers.find(p => p.id === battle.blockerId);
         const defenderState = playState.activePlayers.find(p => p.id === battle.defenderId);
 
-        // Validation check
-        if (!blockerState || !defenderState || blockerState.engagedWith !== defenderState.id || defenderState.blockedBy !== blockerState.id) {
+        // 1. Validation: Ensure players still exist and link to each other
+        if (!blockerState || !defenderState || 
+            blockerState.engagedWith !== defenderState.id || 
+            defenderState.blockedBy !== blockerState.id) {
             battle.status = 'disengaged';
             battlesToRemove.push(index);
+            // Cleanup just in case
             if (blockerState) { blockerState.engagedWith = null; blockerState.isEngaged = false; }
             if (defenderState) { defenderState.isBlocked = false; defenderState.blockedBy = null; defenderState.isEngaged = false; }
             return;
         }
 
-        // --- 💡 FIX: IMMEDIATE DISENGAGE IF STUNNED ---
-        // If either player is stunned, the block MUST break immediately.
+        // 2. Stun Check: If anyone got stunned (e.g. by impact), break immediately
         if (blockerState.stunnedTicks > 0 || defenderState.stunnedTicks > 0) {
             battle.status = 'disengaged';
             battlesToRemove.push(index);
-
-            blockerState.engagedWith = null;
-            blockerState.isEngaged = false;
-
-            defenderState.isBlocked = false;
-            defenderState.blockedBy = null;
-            defenderState.isEngaged = false;
+            blockerState.engagedWith = null; blockerState.isEngaged = false;
+            defenderState.isBlocked = false; defenderState.blockedBy = null; defenderState.isEngaged = false;
             return;
         }
-        // --- 💡 END FIX ---
 
-        // --- Smart Shedding (Runner Passed Me) ---
-        if (ballCarrier && ballCarrier.y > (defenderState.y + 2.0)) {
+        // 3. Play Context Checks
+        // If the runner has passed the blocker, the defender should shed to pursue
+        if (ballCarrier && ballCarrier.y > (defenderState.y + 1.0)) {
             battle.status = 'disengaged';
             battlesToRemove.push(index);
-
-            blockerState.engagedWith = null;
-            blockerState.isEngaged = false;
-
-            defenderState.isBlocked = false;
-            defenderState.blockedBy = null;
-            defenderState.isEngaged = false;
-            defenderState.action = 'pursuit';
+            blockerState.engagedWith = null; blockerState.isEngaged = false;
+            defenderState.isBlocked = false; defenderState.blockedBy = null; defenderState.isEngaged = false;
+            defenderState.action = 'pursuit'; 
             return;
         }
-
-        // Check for distance-based disengagement
+        
+        // If players drifted too far apart (physics glitch), break
         if (getDistance(blockerState, defenderState) > BLOCK_ENGAGE_RANGE + 0.5) {
             battle.status = 'disengaged';
             battlesToRemove.push(index);
@@ -3634,22 +3625,31 @@ function resolveOngoingBlocks(playState, gameLog) {
             return;
         }
 
+        // 4. Stats Calculation
         const blockPower = ((blockerState.blocking || 50) + (blockerState.strength || 50)) * blockerState.fatigueModifier;
         const shedPower = ((defenderState.blockShedding || 50) + (defenderState.strength || 50)) * defenderState.fatigueModifier;
 
-        // Every 10 ticks, check for a "move"
-        if (playState.tick % 60 === 0) {
-            const moveRoll = Math.random();
+        // 5. 💡 DYNAMIC SHED LOGIC (The Fix)
+        // Check every 10 ticks (0.5s) instead of 60
+        if (playState.tick % 10 === 0) {
             const agilityDiff = (defenderState.agility || 50) - (blockerState.agility || 50);
-            const breakChance = 0.01 + (Math.max(0, agilityDiff) / 1000);
+            
+            // Block Decay: Every second the block holds, the defender gets a +5% bonus to shed
+            const durationSeconds = (playState.tick - battle.startTick) * TICK_DURATION_SECONDS;
+            const decayBonus = durationSeconds * 0.05; 
 
-            if (moveRoll < breakChance) {
-                battle.status = 'win_B'; // Defender wins
+            // Base chance + Agility diff + Decay
+            const breakChance = 0.05 + (Math.max(0, agilityDiff) / 200) + decayBonus;
+
+            if (Math.random() < breakChance) {
+                battle.status = 'win_B'; // Defender wins (Shed)
                 battle.battleScore = -100;
-                if (gameLog) gameLog.push(`⚔️ ${defenderState.name} uses a swim move to beat ${blockerState.name}!`);
+                // Optional: Log big wins
+                // if (gameLog) gameLog.push(`⚔️ ${defenderState.name} sheds the block of ${blockerState.name}!`);
             }
         }
 
+        // 6. Physics Push
         const pushAmount = resolveBattle(blockPower, shedPower, battle);
 
         if (battle.status === 'ongoing') {
@@ -3667,21 +3667,27 @@ function resolveOngoingBlocks(playState, gameLog) {
             defenderState.x += pushDirX * moveDist;
             defenderState.y += pushDirY * moveDist;
 
-            // Clamp positions
+            // Clamp
             blockerState.x = Math.max(0.5, Math.min(FIELD_WIDTH - 0.5, blockerState.x));
-            blockerState.y = Math.max(0.5, Math.min(FIELD_LENGTH - 0.5, blockerState.y));
             defenderState.x = Math.max(0.5, Math.min(FIELD_WIDTH - 0.5, defenderState.x));
-            defenderState.y = Math.max(0.5, Math.min(FIELD_LENGTH - 0.5, defenderState.y));
         }
 
-        if (battle.status === 'win_B') { // Defender wins (sheds block)
-            blockerState.stunnedTicks = 60;
+        // 7. Resolution & "Cooldown" (Reduced Stun)
+        if (battle.status === 'win_B') { // Defender Sheds
+            // 💡 FIX: Only stun for 15 ticks (0.75s) instead of 60 (3.0s)
+            // This prevents the visual "holding" look where players freeze.
+            blockerState.stunnedTicks = 20; 
             blockerState.engagedWith = null; blockerState.isEngaged = false;
+            
+            defenderState.stunnedTicks = 0; // Defender is FREE to move immediately
             defenderState.isBlocked = false; defenderState.blockedBy = null; defenderState.isEngaged = false;
+            defenderState.action = 'pursuit'; // Force AI update
+            
             battlesToRemove.push(index);
-        } else if (battle.status === 'win_A') { // Blocker wins (pancake)
-            defenderState.stunnedTicks = 60;
+        } else if (battle.status === 'win_A') { // Pancake
+            defenderState.stunnedTicks = 40; // Defender gets knocked down (2s)
             blockerState.engagedWith = null; blockerState.isEngaged = false;
+            
             defenderState.isBlocked = false; defenderState.blockedBy = null; defenderState.isEngaged = false;
             battlesToRemove.push(index);
         }
