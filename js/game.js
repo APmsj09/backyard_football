@@ -2899,10 +2899,19 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                     if (playState.tick < 5) console.debug(`ManCoverBreakPursuit: def=${pState.id} tick=${playState.tick} allowBreak=true`);
                 }
             } else {
-                pState.action = 'pursuit';
-                // Debug non-man-cover pursuits on early ticks
-                if (isDB && playState.tick < 5) {
-                    console.debug(`DB_Pursuing_Early: def=${pState.id} tick=${playState.tick} assign=${pState.assignment} carrierSlot=${ballCarrierState?.slot}`);
+                // Non-man-coverage defenders (zone or blitz): DBs should be more disciplined
+                // and not rush the QB when they're supposed to be in coverage zones
+                const isZone = pState.assignment && pState.assignment.startsWith('zone_');
+                if (isDB && isZone && carrierIsQB && qbInPocket) {
+                    // Zone-covering DB in pocket should stay in zone, not rush QB
+                    // (they'll pursue if QB breaks containment or scrambles)
+                    // fall through to assignment handling below (don't set pursuit)
+                } else {
+                    pState.action = 'pursuit';
+                    // Debug non-man-cover pursuits on early ticks
+                    if (isDB && playState.tick < 5 && !(isZone && carrierIsQB && qbInPocket)) {
+                        console.debug(`DB_Pursuing_Early: def=${pState.id} tick=${playState.tick} assign=${pState.assignment} carrierSlot=${ballCarrierState?.slot}`);
+                    }
                 }
             }
 
