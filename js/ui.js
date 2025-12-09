@@ -819,9 +819,10 @@ export function renderDashboard(gameState) {
     const currentW = (typeof currentWeek === 'number' && currentWeek < WEEKS_IN_SEASON) ? `Week ${currentWeek + 1}` : 'Offseason';
 
     if (elements.dashboardTeamName) elements.dashboardTeamName.textContent = playerTeam.name || 'Your Team';
+    // 💡 FIXED: Include ties in the displayed record
     const recordText = `Record: ${playerTeam.wins || 0} - ${playerTeam.losses || 0}` +
         ((playerTeam.ties && playerTeam.ties > 0) ? ` - ${playerTeam.ties}` : '');
-    if (elements.dashboardRecord) elements.dashboardRecord.textContent = `Record: ${playerTeam.wins || 0} - ${playerTeam.losses || 0}`;
+    if (elements.dashboardRecord) elements.dashboardRecord.textContent = recordText;
     if (elements.dashboardYear) elements.dashboardYear.textContent = year || '?';
     if (elements.dashboardWeek) elements.dashboardWeek.textContent = currentW;
     if (elements.advanceWeekBtn) elements.advanceWeekBtn.textContent = (typeof currentWeek === 'number' && currentWeek < WEEKS_IN_SEASON) ? 'Advance Week' : 'Go to Offseason';
