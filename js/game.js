@@ -2081,73 +2081,74 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
 
                 case 'run_route':
                     {
-                        // 1. Validation
+                        // 1. Fallback: If no route exists, create a default "Go" route logic
+                        // This prevents them from stopping if the playbook is missing data
                         if (!pState.routePath || pState.routePath.length === 0) {
-                            pState.action = 'route_complete';
-                            pState.targetX = pState.x;
-                            pState.targetY = pState.y;
+                            // Default behavior: Run straight downfield
+                            pState.targetX = pState.initialX;
+                            pState.targetY = Math.min(FIELD_LENGTH - 10, pState.y + 10);
+                            
+                            // Check arrival at "end of field"
+                            if (pState.y > FIELD_LENGTH - 15) {
+                                pState.action = 'route_complete';
+                            }
                             break;
                         }
 
                         const currentTargetPoint = pState.routePath[pState.currentPathIndex];
                         const ARRIVAL_RADIUS = 0.5;
 
-                        // 2. Start with the ideal route target
+                        // 2. Base Target
                         let targetX = currentTargetPoint.x;
                         let targetY = currentTargetPoint.y;
 
-                        // 3. 🧠 SMART ROUTE ADJUSTMENT (Coverage Reaction)
-                        // If a defender is close, shift the route slightly away from them
+                        // 3. 🧠 SMART COVERAGE ADJUSTMENT
+                        // If defender is pressing (within 2 yards), adjust route slightly
                         const nearbyDefender = defenseStates.find(d => 
-                            !d.isBlocked && !d.isEngaged && getDistance(pState, d) < 3.0
+                            !d.isBlocked && !d.isEngaged && getDistance(pState, d) < 2.0
                         );
                         
                         if (nearbyDefender) {
-                            const defDist = getDistance(pState, nearbyDefender);
-                            // If tight coverage, lean away slightly
-                            if (defDist < 1.5 && pState.currentPathIndex > 0) {
-                                const leanX = (pState.x > nearbyDefender.x) ? 0.5 : -0.5;
-                                targetX += leanX;
-                            }
+                            // Stable Avoidance: Use INITIAL lineup position to decide direction
+                            // If I lined up outside the defender, stay outside.
+                            const leverageX = (pState.initialX > nearbyDefender.initialX) ? 0.5 : -0.5;
+                            targetX += leverageX; 
                         }
 
-                        // 4. 🚧 OBSTACLE AVOIDANCE (The Fix)
-                        // Only look for obstacles in the immediate vicinity (4 yards max)
+                        // 4. 🚧 STABLE OBSTACLE AVOIDANCE
+                        // Only avoid defenders who are physically blocking the path forward
                         const obstacle = defenseStates.find(d => 
                             !d.isBlocked && !d.isEngaged && 
-                            d.y >= pState.y - 0.5 &&       // Ahead of me (or alongside)
-                            d.y <= pState.y + 4.0 &&       // 💡 FIX: Only care about immediate threats (4y)
-                            d.y < targetY &&               // And strictly before my actual target
-                            Math.abs(d.x - pState.x) < 0.8 // Strictly in my lane width
+                            d.y >= pState.y - 0.5 &&       
+                            d.y <= pState.y + 3.0 &&       // Immediate threat only
+                            d.y < targetY &&               
+                            Math.abs(d.x - pState.x) < 0.8 // Strictly in lane
                         );
 
                         if (obstacle) {
-                            // 💡 FIX: Soft Avoidance
-                            // Don't detour excessively. Just "stem" the route to the side.
-                            const avoidanceDir = (pState.x >= obstacle.x) ? 1.0 : -1.0;
+                            // 💡 STABILITY FIX: Determine avoidance side based on INITIAL position
+                            // This prevents the "vibration" where they flip left/right every frame.
+                            // If I started to the right of this guy, I go right. Always.
+                            const avoidanceDir = (pState.initialX >= obstacle.initialX) ? 1.0 : -1.0;
                             
-                            // Step 1.0 yard to the side (reduced from 1.5 to prevent running out of bounds)
-                            targetX = obstacle.x + (avoidanceDir * 1.0);
+                            // Side step
+                            targetX = obstacle.x + (avoidanceDir * 1.2);
                             
-                            // 💡 CRITICAL FIX: Aim DEEP past the defender
-                            // Old code aimed at obstacle.y + 0.5, causing WRs to stop if DB backed up.
-                            // New code aims at obstacle.y + 3.0 or the original target, whichever is closer.
-                            // This forces the WR to sprint *past* the DB, not *to* the DB.
-                            targetY = Math.min(currentTargetPoint.y, obstacle.y + 3.0);
+                            // 💡 MOMENTUM FIX: Ensure we aim PAST the defender
+                            // Never aim directly at them. Aim at least 2 yards deeper.
+                            targetY = Math.max(pState.y + 2.0, obstacle.y + 2.0);
                         }
 
-                        // 5. Apply Target
+                        // 5. Apply & Clamp
                         pState.targetX = targetX;
                         pState.targetY = targetY;
 
                         // 6. Arrival Check
-                        const dx = targetX - pState.x;
-                        const dy = targetY - pState.y;
-                        const distToTarget = Math.sqrt(dx * dx + dy * dy);
+                        const distToTarget = getDistance(pState, {x: targetX, y: targetY});
 
                         if (distToTarget < ARRIVAL_RADIUS) {
                             pState.currentPathIndex++;
-                            // Immediate target update for smoothness
+                            // Immediate update for next point
                             if (pState.currentPathIndex < pState.routePath.length) {
                                 const next = pState.routePath[pState.currentPathIndex];
                                 pState.targetX = next.x;
