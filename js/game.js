@@ -1409,7 +1409,9 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
                 zoneCenter = getZoneCenter(assignment, playState.lineOfScrimmage);
             }
 
-            playState.activePlayers.push({
+            let assignedPlayerId = null;
+
+            const pState = {
                 id: player.id, name: player.name, number: player.number,
                 teamId: team.id, primaryColor: team.primaryColor, secondaryColor: team.secondaryColor,
                 isOffense: isOffense, slot: slot,
@@ -1444,8 +1446,11 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
                 isEngaged: false,
                 isBallCarrier: false,
                 hasBall: false,
-                stunnedTicks: 0
-            });
+                stunnedTicks: 0,
+                assignedPlayerId: assignedPlayerId
+            };
+
+            playState.activePlayers.push(pState);
         });
     };
 
