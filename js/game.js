@@ -2572,71 +2572,80 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
             }
         }
 
-        // -- 4. PURSUIT LOGIC --
-        // Strict checks to prevent instant blitzing
+        // -- 4. PURSUIT LOGIC (SMART LB CONTAINMENT) --
         let shouldPursue = false;
 
-        // 💡 NEW: LB Key-Read Logic (Read blocks/flow before committing)
-        // LBs should key off offensive blocks to determine run vs. pass
-        const isLB = pState.slot.startsWith('LB');
-        if (isLB && isBallCaughtOrRun && !isBallInAir) {
-            // LB reads blocking action to confirm run
-            const offenseStates = playState.activePlayers.filter(p => p.isOffense);
-            const nearbyBlockers = offenseStates.filter(o =>
-                (o.action === 'run_block' || o.action === 'pass_block') &&
-                getDistance(pState, o) < 4.0
-            );
-
-            // Count run blocks vs. pass blocks
-            const runBlockCount = nearbyBlockers.filter(b => b.action === 'run_block').length;
-            const passBlockCount = nearbyBlockers.filter(b => b.action === 'pass_block').length;
-
-            // Decision: If more pass blocks, it's likely play action or pass - stay disciplined
-            if (passBlockCount >= 2 && runBlockCount < 2) {
-                // Play Action or Pass - LB should drop back, not pursue immediately
-                shouldPursue = false;
-            } else if (runBlockCount >= 1) {
-                // Run confirmed - commit to pursuit
-                shouldPursue = true;
-            } else {
-                // Ambiguous - use conservative approach for LBs
-                shouldPursue = false;
-            }
+        // 1. Blitzers ALWAYS pursue (DL or LB assigned to blitz)
+        if (pState.assignment?.includes('blitz') || pState.assignment?.includes('rush')) {
+            shouldPursue = true;
         }
-
-        // For other defenders (DBs, DL) use standard pursuit logic
-        else if (pState.action === 'pursuit') {
-            const isManCovered = pState.assignment && pState.assignment.startsWith('man_cover_');
-            const shouldStayInCoverage = isManCovered && isDB && isBallCaughtOrRun && carrierIsQB && qbInPocket && !isBallPastLOS;
-            if (shouldStayInCoverage) {
-                // Reset pursuit status — they should return to man coverage
-                pState.action = 'man_cover';
-                shouldPursue = false;
-                console.debug(`Releasing from pursuit: def=${pState.id} back to man_cover (QB in pocket)`);
-            } else {
-                shouldPursue = true; // Keep pursuing if conditions still warrant it
-            }
-        } else if (pState.assignment?.includes('blitz') || pState.assignment?.includes('rush')) {
-            shouldPursue = true; // Assigned blitz
-        } else if (isBallCaughtOrRun) {
+        // 2. Ball Carrier Logic
+        else if (isBallCaughtOrRun) {
             if (!carrierIsQB) {
-                // Handoff or Catch -> Attack
-                shouldPursue = true;
+                // RB/WR has the ball -> Everyone chases
+                shouldPursue = true; 
             } else if (isBallPastLOS) {
-                // QB has crossed the line and is a runner now -> Attack
-                shouldPursue = true;
+                // QB has crossed the line -> Everyone chases immediately
+                shouldPursue = true; 
             } else if (!qbInPocket) {
-                // QB is already scrambling (not in a clean pocket) -> Attack
-                shouldPursue = true;
-            } else {
-                // QB is currently in the pocket. Defensive backs (CB/S) should
-                // generally stay in their coverage and NOT abandon to chase the
-                // QB. Allow non-DB defenders (LB/DL or assigned spies) to pursue.
-                // 💡 FIX: Also check if defender is in zone coverage - they should stay in zone
-                const isInZone = pState.assignment && pState.assignment.startsWith('zone_');
-                if (!isDB || !isInZone) {
+                // QB is scrambling BEHIND the line
+                
+                // A. DEFENSIVE BACKS (Safeties/Corners)
+                // Stay deep unless the QB is very close or running specifically at them
+                if (pState.slot.includes('DB') || pState.slot.includes('S')) {
+                    const distToQB = getDistance(pState, ballCarrierState);
+                    
+                    if (pState.assignment.startsWith('man_cover_')) {
+                        shouldPursue = false; // Stick to man
+                    } else if (distToQB < 10.0 || ballCarrierState.action === 'qb_scramble') {
+                        // Safety "Shadow" Logic (from previous fix)
+                        shouldPursue = false;
+                        pState.targetX = (pState.x * 0.4) + (ballCarrierState.x * 0.6);
+                        pState.targetY = Math.max(LOS + 2.0, ballCarrierState.y + 4.0);
+                        pState.action = 'zone_coverage'; 
+                        return; // Force update
+                    } else {
+                        shouldPursue = false;
+                    }
+                }
+                // B. LINEBACKERS IN COVERAGE (The Fix)
+                // Don't rush blindly! "Shadow" the QB to cut off lanes.
+                else if (pState.slot.startsWith('LB')) {
+                    if (pState.assignment.startsWith('man_cover_')) {
+                        // Man Coverage LB: Stick to the RB/TE until QB crosses LOS
+                        shouldPursue = false; 
+                    } else {
+                        // Zone Coverage LB: BECOME A SPY
+                        // Do not rush the QB yet (leaves zone open). 
+                        // Instead, mirror the QB's X position to contain the edge.
+                        shouldPursue = false; 
+                        
+                        // Move laterally with QB
+                        pState.targetX = ballCarrierState.x;
+                        
+                        // Hold depth! Don't let the ball go over your head.
+                        // Stay at least 2 yards deep or your current zone depth.
+                        const holdDepth = Math.max(LOS + 2.0, pState.y); 
+                        
+                        // But if QB gets too close (3 yards), attack!
+                        const distToQB = getDistance(pState, ballCarrierState);
+                        if (distToQB < 3.0) {
+                            shouldPursue = true; // Commit to tackle
+                        } else {
+                            pState.targetY = holdDepth;
+                            pState.action = 'spy_QB'; // Updates animation state
+                            return; // Force update
+                        }
+                    }
+                }
+                // C. DEFENSIVE LINEMEN
+                else {
+                    // DLs always chase a scrambling QB
                     shouldPursue = true;
                 }
+            } else {
+                // QB in pocket -> Everyone stays home
+                shouldPursue = false;
             }
         }
 
