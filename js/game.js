@@ -2081,68 +2081,99 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
 
                 case 'run_route':
                     {
+                        // 1. Validation: If no path exists, finish immediately
                         if (!pState.routePath || pState.routePath.length === 0) {
                             pState.action = 'route_complete';
                             pState.targetX = pState.x;
                             pState.targetY = pState.y;
                             break;
                         }
-                        const currentTargetPoint = pState.routePath[pState.currentPathIndex];
-                        const ARRIVAL_RADIUS = 0.3;
-                        const dx = currentTargetPoint.x - pState.x;
-                        const dy = currentTargetPoint.y - pState.y;
-                        const distToTarget = Math.sqrt(dx * dx + dy * dy);
 
-                        // 💡 ENHANCED 2.1 & 2.4: Adjust route depth & timing against tight coverage + receiver fatigue
-                        let targetPoint = currentTargetPoint;
+                        // 2. Get the current target waypoint from the route
+                        const currentTargetPoint = pState.routePath[pState.currentPathIndex];
+                        const ARRIVAL_RADIUS = 0.5; // Slightly larger to prevent circling
+
+                        // 3. Start with the "Ideal" Target
+                        let targetX = currentTargetPoint.x;
+                        let targetY = currentTargetPoint.y;
+
+                        // ---------------------------------------------------------
+                        // 🧠 AI LAYER 1: ROUTE INTELLIGENCE (Coverage Adjustments)
+                        // ---------------------------------------------------------
+                        // Find nearest defender to react to coverage
                         const nearbyDefenders = defenseStates.filter(d =>
-                            !d.isBlocked && !d.isEngaged && getDistance(pState, d) < 3.0
+                            !d.isBlocked && !d.isEngaged && getDistance(pState, d) < 4.0
                         ).sort((a, b) => getDistance(pState, a) - getDistance(pState, b));
 
                         if (nearbyDefenders.length > 0) {
                             const closestDef = nearbyDefenders[0];
                             const defDistance = getDistance(pState, closestDef);
 
-                            // Tight coverage: break early (reduce route depth by 1-2 yards)
+                            // A. Tight Coverage on Deep Routes: Break off early (Comeback logic)
                             if (defDistance < 1.0 && pState.currentPathIndex >= Math.floor(pState.routePath.length * 0.4)) {
-                                // Come back to ball on deep routes when tightly covered
-                                targetPoint = {
-                                    x: currentTargetPoint.x,
-                                    y: Math.max(currentTargetPoint.y - 2, pState.y)
-                                };
+                                // If defender is sticking tight, shorten the route slightly to create separation
+                                targetY = Math.max(currentTargetPoint.y - 2, pState.y);
                             }
-                            // Moderate coverage: slant away from defender
+                            // B. Moderate Coverage: Slant away to find open grass
                             else if (pState.currentPathIndex >= Math.floor(pState.routePath.length * 0.5)) {
                                 const defOffset = defDistance < 2.0 ? 1.5 : 0.75;
-                                targetPoint = {
-                                    x: currentTargetPoint.x + (pState.x > closestDef.x ? defOffset : -defOffset),
-                                    y: currentTargetPoint.y + (pState.y > closestDef.y ? defOffset : -defOffset)
-                                };
+                                // Shift target away from the defender's position
+                                targetX = currentTargetPoint.x + (pState.x > closestDef.x ? defOffset : -defOffset);
+                                targetY = currentTargetPoint.y + (pState.y > closestDef.y ? defOffset : -defOffset);
                             }
 
-                            // 💡 ENHANCED 2.4: Reduce speed on subsequent routes or under coverage (receiver fatigue)
+                            // C. Fatigue/Contact Penalty
                             const contactTicks = pState.lastContactTick ? playState.tick - pState.lastContactTick : 1000;
-                            if (contactTicks < 20) {
-                                pState.speedMultiplier = 0.85; // 15% slower after recent contact
-                            } else {
-                                pState.speedMultiplier = 1.0; // Full speed recovery
-                            }
+                            pState.speedMultiplier = (contactTicks < 20) ? 0.85 : 1.0;
                         }
+
+                        // ---------------------------------------------------------
+                        // 🚧 AI LAYER 2: OBSTACLE AVOIDANCE (The Anti-Stuck Fix)
+                        // ---------------------------------------------------------
+                        // Detect if a defender is standing DIRECTLY in the running lane
+                        const obstacle = defenseStates.find(d =>
+                            !d.isBlocked && !d.isEngaged &&
+                            d.y > pState.y - 0.5 && d.y < targetY + 0.5 && // Is strictly between me and target vertically
+                            Math.abs(d.x - pState.x) < 0.8 // Is strictly in my lane horizontally
+                        );
+
+                        if (obstacle) {
+                            // Determine which side is clearer (or default to inside/outside based on field position)
+                            // If I am to the right of the obstacle, go further right.
+                            const avoidanceDir = (pState.x >= obstacle.x) ? 1.0 : -1.0;
+
+                            // Force a temporary detour: Step 1.5 yards to the side
+                            targetX = obstacle.x + (avoidanceDir * 1.5);
+                            // Aim slightly past them so we don't stop in front of them
+                            targetY = obstacle.y + 0.5;
+                        }
+
+                        // ---------------------------------------------------------
+                        // 4. EXECUTION & ARRIVAL
+                        // ---------------------------------------------------------
+
+                        // Apply Final Target to State
+                        pState.targetX = targetX;
+                        pState.targetY = targetY;
+
+                        // Check if we reached the waypoint
+                        const dx = targetX - pState.x;
+                        const dy = targetY - pState.y;
+                        const distToTarget = Math.sqrt(dx * dx + dy * dy);
 
                         if (distToTarget < ARRIVAL_RADIUS) {
                             pState.currentPathIndex++;
+                            // If we have more points, target the next one immediately
                             if (pState.currentPathIndex < pState.routePath.length) {
                                 const nextTargetPoint = pState.routePath[pState.currentPathIndex];
                                 pState.targetX = nextTargetPoint.x;
                                 pState.targetY = nextTargetPoint.y;
                             } else {
+                                // Route finished
                                 pState.action = 'route_complete';
                                 pState.targetX = pState.x;
                                 pState.targetY = pState.y;
                             }
-                        } else {
-                            pState.targetX = targetPoint.x;
-                            pState.targetY = targetPoint.y;
                         }
                         break;
                     }
@@ -4364,20 +4395,17 @@ const ensureStats = (player) => {
  */
 function resolvePlayerCollisions(playState) {
     const players = playState.activePlayers;
-    const playerRadius = PLAYER_SEPARATION_RADIUS;
+    // 💡 TUNING: Slightly smaller radius for physics than visuals prevents "velcro" effect
+    const playerRadius = PLAYER_SEPARATION_RADIUS * 0.85;
 
-    // We must check every player against every other player
     for (let i = 0; i < players.length; i++) {
         const p1 = players[i];
 
         for (let j = i + 1; j < players.length; j++) {
             const p2 = players[j];
 
-            // --- CRITICAL: Skip collisions for interacting players ---
-            // We don't want to "nudge" a blocker off their defender,
-            // or a tackler away from the ball carrier.
+            // Skip players who are effectively "locked" together in gameplay events
             if (p1.engagedWith === p2.id || p2.engagedWith === p1.id ||
-                p1.isBallCarrier || p2.isBallCarrier ||
                 p1.stunnedTicks > 0 || p2.stunnedTicks > 0) {
                 continue;
             }
@@ -4386,37 +4414,30 @@ function resolvePlayerCollisions(playState) {
             let dy = p1.y - p2.y;
             let dist = Math.sqrt(dx * dx + dy * dy);
 
-            // Handle rare case where players are on the exact same spot
-            if (dist < 0.01) {
-                dx = 0.1; // Give a tiny horizontal nudge
-                dy = 0;
-                dist = 0.1;
-            }
+            // Prevent division by zero
+            if (dist < 0.05) { dx = 0.1; dist = 0.1; }
 
-            // Check if their "bubbles" are overlapping
             if (dist < playerRadius) {
+                // Calculate push force (softer = less stutter)
                 const overlap = playerRadius - dist;
+                const pushFactor = 0.4; // Only resolve 40% of overlap per tick (Smooths movement)
 
-                // Calculate how much to push each player (half the overlap)
-                const pushAmount = overlap / 2;
+                const pushX = (dx / dist) * overlap * pushFactor;
+                const pushY = (dy / dist) * overlap * pushFactor;
 
-                // Normalize the dx/dy vector and apply the push
-                const pushX = (dx / dist) * pushAmount;
-                const pushY = (dy / dist) * pushAmount;
+                // 💡 MASS WEIGHTING: Linemen are harder to push than WRs
+                const p1Weight = p1.weight || 200;
+                const p2Weight = p2.weight || 200;
+                const totalWeight = p1Weight + p2Weight;
 
-                // Nudge p1 away from p2
-                p1.x += pushX;
-                p1.y += pushY;
+                const p1Ratio = p2Weight / totalWeight; // Heavier p2 pushes p1 more
+                const p2Ratio = p1Weight / totalWeight;
 
-                // Nudge p2 away from p1
-                p2.x -= pushX;
-                p2.y -= pushY;
-
-                // --- Re-clamp positions to stay in-bounds ---
-                p1.x = Math.max(0.5, Math.min(FIELD_WIDTH - 0.5, p1.x));
-                p1.y = Math.max(0.5, Math.min(FIELD_LENGTH - 0.5, p1.y));
-                p2.x = Math.max(0.5, Math.min(FIELD_WIDTH - 0.5, p2.x));
-                p2.y = Math.max(0.5, Math.min(FIELD_LENGTH - 0.5, p2.y));
+                // Apply soft push
+                p1.x += pushX * p1Ratio;
+                p1.y += pushY * p1Ratio;
+                p2.x -= pushX * p2Ratio;
+                p2.y -= pushY * p2Ratio;
             }
         }
     }
