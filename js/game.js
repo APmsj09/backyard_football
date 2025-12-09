@@ -1153,6 +1153,7 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
             let targetX = 0;
             let targetY = 0;
             let routePath = null;
+            let assignedPlayerId = null;
 
             // QB specific variables
             let readProgression = [];
@@ -1263,10 +1264,10 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
                     const targetSlot = assignment.replace('man_cover_', '');
                     const targetPlayer = initialOffenseStates.find(o => o.slot === targetSlot);
                     if (targetPlayer) {
-                        pState.assignedPlayerId = targetPlayer.id;
+                        assignedPlayerId = targetPlayer.id;
                     } else {
                         // No player in that slot — will be handled by position setup fallback
-                        pState.assignedPlayerId = null;
+                        assignedPlayerId = null;
                     }
                 }
 
@@ -1332,7 +1333,7 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
                         // Persist the assigned receiver's id on the defender so
                         // later decision logic can reliably determine whether
                         // the pass is targeted at "my man" regardless of route movement.
-                        pState.assignedPlayerId = targetOffPlayer.id;
+                        assignedPlayerId = targetOffPlayer.id;
                     } else {
                         // Fallback logic for man coverage target not found
                         const zoneCenter = getZoneCenter('zone_hook_curl_middle', playState.lineOfScrimmage);
@@ -1408,8 +1409,6 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
             if (!isOffense && assignment && assignment.startsWith('zone_')) {
                 zoneCenter = getZoneCenter(assignment, playState.lineOfScrimmage);
             }
-
-            let assignedPlayerId = null;
 
             const pState = {
                 id: player.id, name: player.name, number: player.number,
