@@ -1322,8 +1322,10 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
                     const targetOffPlayer = initialOffenseStates.find(o => o.slot === targetSlot);
 
                     if (targetOffPlayer) {
-                        const xOffset = targetOffPlayer.x < CENTER_X ? 1.5 : -1.5;
-                        const yOffset = 1.5;
+                        // 💡 ENHANCED: Tighter pre-snap positioning for better coverage
+                        // Start closer to the receiver to avoid easy separation on the snap
+                        const xOffset = targetOffPlayer.x < CENTER_X ? 0.8 : -0.8; // Reduced from 1.5 to 0.8
+                        const yOffset = 0.5; // Reduced from 1.5 to 0.5 for tighter pre-snap distance
                         startX = targetOffPlayer.x + xOffset;
                         startY = targetOffPlayer.y + yOffset;
                         targetX = startX; targetY = startY;
@@ -2788,7 +2790,8 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                 const distToLanding = getDistance(pState, landingSpot);
 
                 // Base reaction ranges
-                let reactionRange = isDB ? 25 : 12; // DBs normally break on ball from further away
+                // 💡 TIGHTENED: DBs react from 20 yards (was 25) for better coverage
+                let reactionRange = isDB ? 20 : 12; // DBs break on ball from further away but more conservative
 
                 // If I'm in direct man coverage, be conservative unless the pass is to my man.
                 // Use the persisted `assignedPlayerId` (stable) rather than searching
@@ -2799,10 +2802,10 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                     // If we know who we're covering and the pass isn't to them,
                     // reduce the reaction range sharply so defenders stay with their man.
                     if (!assignedId || playState.ballState.targetPlayerId !== assignedId) {
-                        reactionRange = 6; // stay with receiver unless ball is very close
+                        reactionRange = 4; // Stay very tight with receiver unless ball is extremely close
                     } else {
-                        // If the pass is to my man, keep DB sensitivity but still require a small delay
-                        reactionRange = Math.max(12, reactionRange);
+                        // If the pass is to my man, be ready to react but not as loose as zone defenders
+                        reactionRange = Math.max(8, reactionRange - 5); // Tighter than default DB range
                     }
                 }
 
@@ -5841,6 +5844,9 @@ function simulateGame(homeTeam, awayTeam, options = {}) {
                     driveActive = false;
                     break;
                 }
+
+                // 💡 DEBUG: Track plays
+                const playCountBeforeResolve = gameLog ? gameLog.length : 0;
 
                 const shouldPunt = determinePuntDecision(down, yardsToGo, ballOn);
                 let result;
