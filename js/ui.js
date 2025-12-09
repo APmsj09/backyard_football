@@ -2254,6 +2254,7 @@ function renderLiveStatsBox(gameResult) {
         return html;
     };
 
+    // 💡 FIXED: Correctly assign away team stats to away stats box and home team to home stats box
     elements.simStatsAway.innerHTML = generateTeamStatsHtml(awayTeam);
     elements.simStatsHome.innerHTML = generateTeamStatsHtml(homeTeam);
 }
@@ -2757,15 +2758,35 @@ function runLiveGameTick() {
 
                 } else if (playLogEntry.startsWith('🎉 TOUCHDOWN') || playLogEntry.startsWith('🎉 PUNT RETURN TOUCHDOWN')) {
                     if (!liveGameIsConversion) {
-                        // 💡 FIX: Correctly attribute defensive/return TDs
-                        const isHomeTD = playLogEntry.includes(currentLiveGameResult.homeTeam.name) || (liveGamePossessionName === currentLiveGameResult.homeTeam.name && !playLogEntry.includes(currentLiveGameResult.awayTeam.name));
+                        // 💡 ENHANCED: Correctly attribute TDs to the team that just scored
+                        // Check which team's name appears in the log entry
+                        const homeName = currentLiveGameResult.homeTeam?.name || '';
+                        const awayName = currentLiveGameResult.awayTeam?.name || '';
+                        
+                        let isHomeTD = false;
+                        
+                        // First priority: check if either team name is explicitly mentioned
+                        if (playLogEntry.includes(homeName)) {
+                            isHomeTD = true;
+                        } else if (playLogEntry.includes(awayName)) {
+                            isHomeTD = false;
+                        }
+                        // Fallback: if return TD and no team mentioned, it's the opposing team
+                        else if (playLogEntry.includes('RETURN TOUCHDOWN')) {
+                            // Return TDs are scored by the team that's NOT on offense
+                            isHomeTD = liveGamePossessionName !== homeName;
+                        }
+                        // Last resort: attribute to team with possession (shouldn't reach here)
+                        else {
+                            isHomeTD = liveGamePossessionName === homeName;
+                        }
 
                         if (isHomeTD) {
                             liveGameCurrentHomeScore += 6;
                         } else {
                             liveGameCurrentAwayScore += 6;
                         }
-                    } // <--- MISSING BRACE #1 (Closes !liveGameIsConversion)
+                    }
 
                 } else if (playLogEntry.includes('SAFETY') || playLogEntry.includes('Safety')) {
                     // Safety = 2 points for the Defense (the team NOT with the ball)
