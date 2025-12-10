@@ -1794,21 +1794,50 @@ export function setupFormationListeners() {
     const defSelect = document.getElementById('defense-formation-select');
 
     const handleFormationChange = (side, event) => {
-        const newFormation = event.target.value;
-        if (newFormation) {
-            changeFormation(side, newFormation);
-            // Re-render the tab to show new slots
-            const gs = getGameState();
-            // We need to find the depth chart tab function or re-trigger the tab switch
-            const depthChartTab = document.querySelector('[data-tab="depth-chart"]');
-            if (depthChartTab && depthChartTab.classList.contains('active')) {
-                // Trigger a re-render of the current tab
-                const event = new CustomEvent('refresh-ui');
-                document.dispatchEvent(event);
-                // Note: You'll need to ensure your main loop handles 'refresh-ui' 
-                // or simply call renderDepthChartTab(gs) directly if accessible.
-            }
+        const newFormationName = event.target.value;
+        if (!newFormationName) return;
+
+        // --- 1. SMART PRESERVE LOGIC ---
+        // Grab the current state before we change anything
+        const gs = getGameState();
+        const oldChart = { ...gs.playerTeam.depthChart[side] }; // Copy current assignments
+
+        // --- 2. EXECUTE SWITCH ---
+        // This likely resets the backend depth chart for this side
+        changeFormation(side, newFormationName);
+
+        // --- 3. RESTORE PLAYERS ---
+        // Look up the definition of the NEW formation (imported from data.js)
+        const formationData = side === 'offense' 
+            ? offenseFormations[newFormationName] 
+            : defenseFormations[newFormationName];
+
+        if (formationData && formationData.slots) {
+            const validSlots = new Set(formationData.slots);
+
+            // Loop through the OLD assignments
+            Object.entries(oldChart).forEach(([slot, playerId]) => {
+                // If the player existed AND the new formation also has this slot (e.g. "QB1")
+                if (playerId && validSlots.has(slot)) {
+                    
+                    // Fire an event to put them back in that slot immediately
+                    // This relies on your main.js/game.js listening for 'depth-chart-changed'
+                    const restoreEvent = new CustomEvent('depth-chart-changed', {
+                        detail: {
+                            playerId: playerId,
+                            slot: slot,
+                            side: side
+                        }
+                    });
+                    document.dispatchEvent(restoreEvent);
+                }
+            });
         }
+
+        // --- 4. REFRESH UI ---
+        // Now that data is restored, trigger the render
+        const refreshEvent = new CustomEvent('refresh-ui');
+        document.dispatchEvent(refreshEvent);
     };
 
     if (offSelect) {
