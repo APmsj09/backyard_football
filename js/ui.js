@@ -3441,3 +3441,42 @@ export function applyDepthOrderToChart() {
 
     console.log("Depth Chart Updated:", newDepthChart);
 }
+/**
+ * Handles formation changes with "Snapshot & Restore" logic.
+ * This prevents the "Revert to Default" bug.
+ */
+export function changeFormationSmart(side, newFormationName) {
+    // 1. Snapshot the CURRENT (Old) assignments
+    const gs = getGameState();
+    const oldChart = { ...gs.playerTeam.depthChart[side] }; 
+
+    // 2. Execute the Formation Change (Resets backend to defaults)
+    changeFormation(side, newFormationName);
+
+    // 3. Restore Players (Delayed to ensure backend is done)
+    setTimeout(() => {
+        // Look up the definition of the NEW formation
+        const formationData = side === 'offense' 
+            ? offenseFormations[newFormationName] 
+            : defenseFormations[newFormationName];
+
+        if (formationData && formationData.slots) {
+            const validSlots = new Set(formationData.slots);
+
+            // Iterate through our saved Snapshot
+            Object.entries(oldChart).forEach(([slot, playerId]) => {
+                // If the player exists AND the new formation has this slot (e.g. "WR1")
+                if (playerId && validSlots.has(slot)) {
+                    // Dispatch the event to put them back
+                    document.dispatchEvent(new CustomEvent('depth-chart-changed', {
+                        detail: { playerId, slot, side }
+                    }));
+                }
+            });
+        }
+
+        // 4. Force a UI Refresh & Save (Main.js listens for this)
+        document.dispatchEvent(new CustomEvent('refresh-ui'));
+
+    }, 50); // Small delay to let the reset finish
+}

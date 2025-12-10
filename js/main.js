@@ -265,6 +265,18 @@ function handleTabSwitch(e) {
         if (gameState) UI.switchTab(tabId, gameState);
     }
 }
+function handleFormationChange(e) {
+    if (!gameState) return;
+    const side = e.target.id.includes('offense') ? 'offense' : 'defense';
+    const formationName = e.target.value;
+
+    // Use the smart function in UI that preserves player slots
+    UI.changeFormationSmart(side, formationName);
+    
+    // Note: We do NOT need to save/refresh here immediately.
+    // UI.changeFormationSmart emits 'refresh-ui' when it finishes,
+    // which triggers the save listener we added at the bottom of main.js.
+}
 
 // 💡 UPDATE: This function handles updates from Visual Drag & Drop
 function handleDepthChartDrop(playerId, newPositionSlot, side) {
@@ -287,6 +299,7 @@ function handleDepthChartSelect(e) {
         document.dispatchEvent(new CustomEvent('refresh-ui'));
     }
 }
+
 
 // 💡 REMOVED: handleFormationChange
 // Reason: UI.js now handles the "Revert to Default" fix logic internally 
@@ -734,10 +747,9 @@ function main() {
             UI.updateDraftSortIndicators(currentSortColumn, currentSortDirection);
         });
 
-        // 💡 UPDATED: Remove old formation listeners from main.js!
-        // The previous listeners were causing conflicts. UI.js now handles the "Revert Fix".
-        // document.getElementById('offense-formation-select')?.addEventListener('change', handleFormationChange);
-        // document.getElementById('defense-formation-select')?.addEventListener('change', handleFormationChange);
+        // Depth Chart Formation Changes
+        document.getElementById('offense-formation-select')?.addEventListener('change', handleFormationChange);
+        document.getElementById('defense-formation-select')?.addEventListener('change', handleFormationChange);
 
         // Player Stats Filters/Sorting
         document.getElementById('stats-filter-team')?.addEventListener('change', handleStatsChange);
