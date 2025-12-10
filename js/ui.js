@@ -252,6 +252,7 @@ export function setupElements() {
         });
     }
     setupFormationListeners();
+    setupDepthChartTabs();
 }
 
 /**
@@ -592,7 +593,7 @@ export function renderDraftPool(gameState, onPlayerSelect, sortColumn, sortDirec
             (max, rp) => Math.max(max, getRelationshipLevel(rp.id, player.id)),
             relationshipLevels.STRANGER.level
         );
-            const scoutedPlayer = getScoutedPlayerInfo(player, maxLevel);
+        const scoutedPlayer = getScoutedPlayerInfo(player, maxLevel);
         if (!scoutedPlayer) return;
 
         const relationshipInfo = Object.values(relationshipLevels).find(rl => rl.level === maxLevel) || relationshipLevels.STRANGER;
@@ -1013,7 +1014,11 @@ function getSlotContainerId(positionSlot, side) {
 
 /** Renders the 'Depth Chart' tab and its sub-components. */
 function renderDepthChartTab(gameState) {
-    if (!gameState || !gameState.playerTeam || !gameState.playerTeam.roster || !gameState.playerTeam.formations || !gameState.playerTeam.depthChart) {
+    // Ignore the argument and fetch fresh state to ensure 
+    // we capture changes made (like formation swaps) immediately.
+    const gs = getGameState() || gameState;
+
+    if (!gs || !gs.playerTeam || !gs.playerTeam.roster || !gs.playerTeam.formations || !gs.playerTeam.depthChart) {
         console.error("Cannot render depth chart: Invalid game state.");
         if (elements.positionalOverallsContainer) elements.positionalOverallsContainer.innerHTML = '<p class="text-red-500">Error loading depth chart data.</p>';
         if (elements.offenseDepthChartPane) elements.offenseDepthChartPane.innerHTML = '<p class="text-red-500">Error loading offense data.</p>';
@@ -1021,16 +1026,16 @@ function renderDepthChartTab(gameState) {
         return;
     }
 
-    // --- 💡 FIX: Get roster objects ---
-    const permanentRoster = getUIRosterObjects(gameState.playerTeam)
+    // Use 'gs' instead of 'gameState' for the rest of the function
+    const permanentRoster = getUIRosterObjects(gs.playerTeam)
         .filter(p => p && p.status?.type !== 'temporary');
 
     renderPositionalOveralls(permanentRoster);
-    renderFormationDropdown('offense', Object.values(offenseFormations), gameState.playerTeam.formations.offense);
-    renderFormationDropdown('defense', Object.values(defenseFormations), gameState.playerTeam.formations.defense);
+    renderFormationDropdown('offense', Object.values(offenseFormations), gs.playerTeam.formations.offense);
+    renderFormationDropdown('defense', Object.values(defenseFormations), gs.playerTeam.formations.defense);
 
-    renderDepthChartSide('offense', gameState);
-    renderDepthChartSide('defense', gameState);
+    renderDepthChartSide('offense', gs);
+    renderDepthChartSide('defense', gs);
 }
 
 /** Populates the formation selection dropdown. */
@@ -1112,7 +1117,9 @@ function renderVisualFormationSlots(container, currentChart, formationData, benc
     losEl.style.top = `${LOS_PERCENT}%`;
     container.appendChild(losEl);
 
-    const X_SPACING_MULTIPLIER = 2.5;
+    // --- 1. INCREASE SPACING ---
+    // Was 2.5, changed to 4.2 to spread players out horizontally
+    const X_SPACING_MULTIPLIER = 4.2; 
     const Y_SPACING_MULTIPLIER = 4.5;
     const PADDING_OFFSET = 7;
 
@@ -1174,7 +1181,7 @@ function renderVisualFormationSlots(container, currentChart, formationData, benc
             </option>`;
         });
 
-        // --- Coordinate Mapping (Visual Position) ---
+        // --- Coordinate Mapping ---
         const x_percent = 50 + (relCoords[0] * X_SPACING_MULTIPLIER);
         let y_percent;
         if (side === 'offense') {
@@ -1192,6 +1199,12 @@ function renderVisualFormationSlots(container, currentChart, formationData, benc
         slotEl.dataset.side = side;
         slotEl.style.left = `${clampedX}%`;
         slotEl.style.top = `${clampedY}%`;
+        
+        // --- 2. CENTER THE ELEMENT ---
+        // This ensures the box is centered on the coordinate, preventing left-side overlap
+        slotEl.style.transform = 'translate(-50%, -50%)'; 
+        // Optional: Ensure high z-index on hover so you can see overlapped cards
+        slotEl.style.zIndex = '10'; 
 
         if (currentPlayer) {
             slotEl.draggable = true;
@@ -1235,6 +1248,9 @@ function renderVisualFormationSlots(container, currentChart, formationData, benc
             });
             document.dispatchEvent(event);
         });
+
+        slotEl.onmouseenter = () => { slotEl.style.zIndex = '50'; };
+        slotEl.onmouseleave = () => { slotEl.style.zIndex = '10'; };
 
         container.appendChild(slotEl);
     });
@@ -1757,15 +1773,15 @@ export function setupDepthChartTabs() {
                 t.setAttribute('aria-selected', isSelected.toString());
             });
 
-            // --- 💡 FIX: Find all three panes ---
+            // 2. Toggle Panes
             const offensePane = document.getElementById('depth-chart-offense-pane');
             const defensePane = document.getElementById('depth-chart-defense-pane');
-            const overallsPane = document.getElementById('positional-overalls-container'); // <-- The missing pane
+            const overallsPane = document.getElementById('positional-overalls-container');
 
-            // --- 💡 FIX: Toggle all three panes correctly ---
+            // 💡 Logic: hide if the subTab does NOT match the pane's ID
             if (offensePane) offensePane.classList.toggle('hidden', subTab !== 'offense');
             if (defensePane) defensePane.classList.toggle('hidden', subTab !== 'defense');
-            if (overallsPane) overallsPane.classList.toggle('hidden', subTab !== 'overalls'); // <-- The new logic
+            if (overallsPane) overallsPane.classList.toggle('hidden', subTab !== 'overalls');
         }
     });
 }
@@ -2330,7 +2346,7 @@ function updateStatsFromLogEntry(entry) {
     }
 
     // Interceptions/Fumbles = turnovers for possession team
-    if (entry.includes('INTERCEPTION') || entry.includes('FUMBLE') || entry.includes('recovers the fumble') || entry.includes('FUM') ) {
+    if (entry.includes('INTERCEPTION') || entry.includes('FUMBLE') || entry.includes('recovers the fumble') || entry.includes('FUM')) {
         if (possKey) liveGameStats[possKey].turnovers += 1;
     }
 
@@ -2350,7 +2366,7 @@ function updateStatsFromLogEntry(entry) {
 
             const pid = player.id;
             if (!livePlayerStats.has(pid)) {
-                livePlayerStats.set(pid, { passAttempts:0, passCompletions:0, passYards:0, interceptionsThrown:0, receptions:0, recYards:0, drops:0, rushAttempts:0, rushYards:0, returnYards:0, touchdowns:0, interceptions:0, fumbles:0 });
+                livePlayerStats.set(pid, { passAttempts: 0, passCompletions: 0, passYards: 0, interceptionsThrown: 0, receptions: 0, recYards: 0, drops: 0, rushAttempts: 0, rushYards: 0, returnYards: 0, touchdowns: 0, interceptions: 0, fumbles: 0 });
             }
             const s = livePlayerStats.get(pid);
 
@@ -2763,9 +2779,9 @@ function runLiveGameTick() {
                         // Check which team's name appears in the log entry
                         const homeName = currentLiveGameResult.homeTeam?.name || '';
                         const awayName = currentLiveGameResult.awayTeam?.name || '';
-                        
+
                         let isHomeTD = false;
-                        
+
                         // First priority: check if either team name is explicitly mentioned
                         if (playLogEntry.includes(homeName)) {
                             isHomeTD = true;
