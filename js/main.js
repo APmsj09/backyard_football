@@ -193,7 +193,6 @@ async function handleDraftEnd() {
 
     UI.showModal("Draft Complete!", "<p>Finalizing rosters... Please wait.</p>", finalizeDraft, "Start Season");
 
-    // Disable modal button briefly
     const modalConfirmBtn = document.querySelector('#modal-actions button.bg-amber-500');
     if (modalConfirmBtn) {
         modalConfirmBtn.disabled = true;
@@ -239,7 +238,6 @@ async function handleLoadGame(saveKey) {
             UI.switchTab('my-team', gameState);
             UI.showScreen('dashboard-screen');
         } else {
-            // In Draft
             UI.renderSelectedPlayerCard(null, gameState);
             UI.renderDraftScreen(gameState, handlePlayerSelectInDraft, selectedPlayerId, currentSortColumn, currentSortDirection);
             UI.showScreen('draft-screen'); 
@@ -268,12 +266,13 @@ function handleTabSwitch(e) {
     }
 }
 
+// 💡 UPDATE: This function handles updates from Visual Drag & Drop
 function handleDepthChartDrop(playerId, newPositionSlot, side) {
     if (!gameState) return;
     Game.updateDepthChart(playerId, newPositionSlot, side);
     gameState = Game.getGameState();
     Game.saveGameState(activeSaveKey);
-    UI.switchTab('depth-chart', gameState); 
+    // UI.switchTab('depth-chart', gameState); // Removed: The UI now self-refreshes via events
 }
 
 function handleDepthChartSelect(e) {
@@ -284,18 +283,14 @@ function handleDepthChartSelect(e) {
     const side = selectEl.dataset.side;
     if (newPositionSlot && side && gameState) {
         handleDepthChartDrop(playerId, newPositionSlot, side);
+        // Force a UI refresh event so the visual field updates immediately
+        document.dispatchEvent(new CustomEvent('refresh-ui'));
     }
 }
 
-function handleFormationChange(e) {
-    if (!gameState) return;
-    const side = e.target.id.includes('offense') ? 'offense' : 'defense';
-    const formationName = e.target.value;
-    Game.changeFormation(side, formationName);
-    gameState = Game.getGameState();
-    Game.saveGameState(activeSaveKey);
-    UI.switchTab('depth-chart', gameState);
-}
+// 💡 REMOVED: handleFormationChange
+// Reason: UI.js now handles the "Revert to Default" fix logic internally 
+// via setupFormationListeners to prevent race conditions.
 
 // --- SIMULATION & WEEK ADVANCE ---
 
@@ -674,9 +669,6 @@ window.app = {
 // --- INITIALIZATION & EVENT LISTENERS ---
 // =============================================================
 
-/**
- * Main function to initialize the game and set up event listeners.
- */
 function main() {
     console.log("Game starting... Document loaded.");
     try {
@@ -695,7 +687,6 @@ function main() {
         document.getElementById('draft-player-btn')?.addEventListener('click', handleDraftPlayer);
         document.getElementById('advance-week-btn')?.addEventListener('click', handleAdvanceWeek);
         document.getElementById('go-to-next-draft-btn')?.addEventListener('click', handleGoToNextDraft);
-
 
         // Live Sim Controls
         document.getElementById('sim-skip-btn')?.addEventListener('click', () => {
@@ -743,9 +734,10 @@ function main() {
             UI.updateDraftSortIndicators(currentSortColumn, currentSortDirection);
         });
 
-        // Depth Chart Formation Changes
-        document.getElementById('offense-formation-select')?.addEventListener('change', handleFormationChange);
-        document.getElementById('defense-formation-select')?.addEventListener('change', handleFormationChange);
+        // 💡 UPDATED: Remove old formation listeners from main.js!
+        // The previous listeners were causing conflicts. UI.js now handles the "Revert Fix".
+        // document.getElementById('offense-formation-select')?.addEventListener('change', handleFormationChange);
+        // document.getElementById('defense-formation-select')?.addEventListener('change', handleFormationChange);
 
         // Player Stats Filters/Sorting
         document.getElementById('stats-filter-team')?.addEventListener('change', handleStatsChange);
@@ -754,6 +746,21 @@ function main() {
         // Setup Complex UI Interactions
         UI.setupDragAndDrop(handleDepthChartDrop);
         UI.setupDepthChartTabs();
+
+        // 💡 NEW: Listener for "Refresh UI" (fired by new Depth Order tab)
+        // Ensures game state is saved when you reorder the list
+        document.addEventListener('refresh-ui', () => {
+             gameState = Game.getGameState();
+             Game.saveGameState(activeSaveKey);
+             console.log("Game state saved on UI Refresh.");
+        });
+
+        // 💡 NEW: Listener for "Depth Chart Changed" (fired by Formation Revert Fix)
+        // Ensures specific player slot updates are processed and saved
+        document.addEventListener('depth-chart-changed', (e) => {
+             const { playerId, slot, side } = e.detail;
+             handleDepthChartDrop(playerId, slot, side);
+        });
 
         // Show the initial screen
         UI.showScreen('startScreen');

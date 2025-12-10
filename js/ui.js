@@ -3150,9 +3150,9 @@ function renderDepthOrderPane(gameState) {
         'QB': { side: 'offense', roles: ['QB'], slots: ['QB1'] },
         'RB': { side: 'offense', roles: ['RB', 'FB'], slots: ['RB1', 'RB2'] },
         // 7v7 is pass-heavy, so we allow ordering up to WR5
-        'WR': { side: 'offense', roles: ['WR'], slots: ['WR1', 'WR2', 'WR3', 'WR4', 'WR5'] }, 
+        'WR': { side: 'offense', roles: ['WR'], slots: ['WR1', 'WR2', 'WR3', 'WR4', 'WR5'] },
         // Explicitly 3 OL slots
-        'OL': { side: 'offense', roles: ['OL', 'OT', 'OG', 'C'], slots: ['OL1', 'OL2', 'OL3'] }, 
+        'OL': { side: 'offense', roles: ['OL', 'OT', 'OG', 'C'], slots: ['OL1', 'OL2', 'OL3'] },
         'DL': { side: 'defense', roles: ['DL', 'DE', 'DT'], slots: ['DL1', 'DL2', 'DL3'] },
         'LB': { side: 'defense', roles: ['LB', 'OLB', 'MLB'], slots: ['LB1', 'LB2', 'LB3'] },
         'DB': { side: 'defense', roles: ['DB', 'CB', 'S', 'FS', 'SS'], slots: ['DB1', 'DB2', 'DB3', 'DB4', 'DB5'] }
@@ -3245,7 +3245,11 @@ function isPlayerStarting(playerId, team) {
     return allStarters.includes(playerId);
 }
 
-/** Sets up drag-and-drop specifically for the sorting lists */
+
+/**
+ * Sets up drag-and-drop for the sorting lists.
+ * Triggers a full Depth Chart update immediately upon drop.
+ */
 function setupDepthOrderDragEvents() {
     const draggables = document.querySelectorAll('.depth-sortable-list [draggable="true"]');
     const containers = document.querySelectorAll('.depth-sortable-list');
@@ -3254,23 +3258,24 @@ function setupDepthOrderDragEvents() {
         draggable.addEventListener('dragstart', () => {
             draggable.classList.add('dragging');
             draggable.classList.add('opacity-50');
+            draggable.classList.add('ring-2');
+            draggable.classList.add('ring-amber-500');
         });
 
         draggable.addEventListener('dragend', () => {
             draggable.classList.remove('dragging');
             draggable.classList.remove('opacity-50');
+            draggable.classList.remove('ring-2');
+            draggable.classList.remove('ring-amber-500');
 
-            // Fire event to update backend state
-            const container = draggable.closest('.depth-sortable-list');
-            if (container) {
-                const group = container.dataset.group;
-                const newOrderIds = [...container.querySelectorAll('[draggable="true"]')]
-                    .map(el => el.dataset.playerId);
+            // --- THE KEY CONNECTION ---
+            // 1. Immediately apply this new order to the backend logic
+            applyDepthOrderToChart();
 
-                document.dispatchEvent(new CustomEvent('depth-order-reordered', {
-                    detail: { group, order: newOrderIds }
-                }));
-            }
+            // 2. Re-render this specific pane to update the rank numbers (1., 2., 3.) 
+            // and the "Target Slot" badges (WR1, Bench, etc.)
+            // We pass getGameState() to ensure it uses the fresh data we just updated.
+            renderDepthOrderPane(getGameState());
         });
     });
 
@@ -3287,7 +3292,8 @@ function setupDepthOrderDragEvents() {
                 container.insertBefore(draggable, afterElement);
             }
 
-            // Update rank numbers visually immediately
+            // Visual helper: update the rank numbers text immediately while dragging
+            // so the user sees "1. Name" move to "2. Name" in real time.
             updateRankNumbers(container);
         });
     });
@@ -3346,7 +3352,7 @@ export function applyDepthOrderToChart() {
         'QB': ['QB1'],
         'RB': ['RB1', 'RB2'],
         'WR': ['WR1', 'WR2', 'WR3', 'WR4', 'WR5'],
-        'OL': ['C', 'OL2', 'OL3'],
+        'OL': ['OL1', 'OL2', 'OL3'],
         'DL': ['DL1', 'DL2', 'DL3'],
         'LB': ['LB1', 'LB2', 'LB3'],
         'DB': ['DB1', 'DB2', 'DB3', 'DB4', 'DB5'],
@@ -3417,11 +3423,17 @@ export function applyDepthOrderToChart() {
         });
     });
 
-    // 5. Save & Refresh
-    // Update the game state (assuming you have a setter or direct access)
+    // 5. SPECIAL 7v7 RULE: Auto-Assign Punter
+    if (newDepthChart.offense['QB1']) {
+        newDepthChart.special['P'] = newDepthChart.offense['QB1'];
+    }
+
+    // 6. Save & Refresh
     gs.playerTeam.depthChart = newDepthChart;
 
-    // Dispatch event to update Visual Field and Main Depth Chart
+    // This event tells the Dashboard to re-read the gs.playerTeam.depthChart 
+    // and redraw the Visual Field and Bench tables.
     document.dispatchEvent(new CustomEvent('refresh-ui'));
-    console.log("Depth Chart Updated via Priority Logic:", newDepthChart);
+
+    console.log("Depth Chart Updated:", newDepthChart);
 }
