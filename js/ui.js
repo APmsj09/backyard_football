@@ -174,6 +174,11 @@ export function setupElements() {
         defenseBenchTable: document.getElementById('defense-bench-table'),
         positionalOverallsContainer: document.getElementById('positional-overalls-container'),
 
+        // --- NEW: Depth Order Elements ---
+        depthOrderContainer: document.getElementById('depth-order-container'),
+        depthOrderGrid: document.getElementById('depth-order-grid'),
+        autoReorderBtn: document.getElementById('auto-reorder-btn'), // New button
+
         // --- Game Sim Screen Elements ---
         gameSimScreen: document.getElementById('game-sim-screen'),
         simScoreboard: document.getElementById('sim-scoreboard'),
@@ -1014,23 +1019,22 @@ function getSlotContainerId(positionSlot, side) {
 
 /** Renders the 'Depth Chart' tab and its sub-components. */
 function renderDepthChartTab(gameState) {
-    // Ignore the argument and fetch fresh state to ensure 
-    // we capture changes made (like formation swaps) immediately.
-    const gs = getGameState() || gameState;
+    // FORCE fresh state retrieval. 
+    // This prevents stale props from overwriting recent drag-and-drop changes.
+    const gs = getGameState();
 
     if (!gs || !gs.playerTeam || !gs.playerTeam.roster || !gs.playerTeam.formations || !gs.playerTeam.depthChart) {
         console.error("Cannot render depth chart: Invalid game state.");
         if (elements.positionalOverallsContainer) elements.positionalOverallsContainer.innerHTML = '<p class="text-red-500">Error loading depth chart data.</p>';
-        if (elements.offenseDepthChartPane) elements.offenseDepthChartPane.innerHTML = '<p class="text-red-500">Error loading offense data.</p>';
-        if (elements.defenseDepthChartPane) elements.defenseDepthChartPane.innerHTML = '<p class="text-red-500">Error loading defense data.</p>';
         return;
     }
 
-    // Use 'gs' instead of 'gameState' for the rest of the function
     const permanentRoster = getUIRosterObjects(gs.playerTeam)
         .filter(p => p && p.status?.type !== 'temporary');
 
     renderPositionalOveralls(permanentRoster);
+
+    // Pass specific current formation names from the fresh state
     renderFormationDropdown('offense', Object.values(offenseFormations), gs.playerTeam.formations.offense);
     renderFormationDropdown('defense', Object.values(defenseFormations), gs.playerTeam.formations.defense);
 
@@ -1119,7 +1123,7 @@ function renderVisualFormationSlots(container, currentChart, formationData, benc
 
     // --- 1. INCREASE SPACING ---
     // Was 2.5, changed to 4.2 to spread players out horizontally
-    const X_SPACING_MULTIPLIER = 4.2; 
+    const X_SPACING_MULTIPLIER = 4.2;
     const Y_SPACING_MULTIPLIER = 4.5;
     const PADDING_OFFSET = 7;
 
@@ -1199,12 +1203,12 @@ function renderVisualFormationSlots(container, currentChart, formationData, benc
         slotEl.dataset.side = side;
         slotEl.style.left = `${clampedX}%`;
         slotEl.style.top = `${clampedY}%`;
-        
+
         // --- 2. CENTER THE ELEMENT ---
         // This ensures the box is centered on the coordinate, preventing left-side overlap
-        slotEl.style.transform = 'translate(-50%, -50%)'; 
+        slotEl.style.transform = 'translate(-50%, -50%)';
         // Optional: Ensure high z-index on hover so you can see overlapped cards
-        slotEl.style.zIndex = '10'; 
+        slotEl.style.zIndex = '10';
 
         if (currentPlayer) {
             slotEl.draggable = true;
@@ -1770,6 +1774,9 @@ export function setupDepthChartTabs() {
             elements.depthChartSubTabs.querySelectorAll('.depth-chart-tab').forEach(t => {
                 const isSelected = t === e.target;
                 t.classList.toggle('active', isSelected);
+                t.classList.toggle('border-b-2', isSelected);     // Add styling toggle
+                t.classList.toggle('border-amber-500', isSelected);
+                t.classList.toggle('text-amber-600', isSelected);
                 t.setAttribute('aria-selected', isSelected.toString());
             });
 
@@ -1777,13 +1784,31 @@ export function setupDepthChartTabs() {
             const offensePane = document.getElementById('depth-chart-offense-pane');
             const defensePane = document.getElementById('depth-chart-defense-pane');
             const overallsPane = document.getElementById('positional-overalls-container');
+            const depthOrderPane = document.getElementById('depth-order-container'); // NEW
 
-            // 💡 Logic: hide if the subTab does NOT match the pane's ID
             if (offensePane) offensePane.classList.toggle('hidden', subTab !== 'offense');
             if (defensePane) defensePane.classList.toggle('hidden', subTab !== 'defense');
             if (overallsPane) overallsPane.classList.toggle('hidden', subTab !== 'overalls');
+
+            // --- NEW: Handle Depth Order Pane ---
+            if (depthOrderPane) {
+                depthOrderPane.classList.toggle('hidden', subTab !== 'depth-order');
+                if (subTab === 'depth-order') {
+                    renderDepthOrderPane(getGameState());
+                }
+            }
         }
     });
+
+    // Setup the Auto-Reorder button listener here
+    if (elements.autoReorderBtn) {
+        elements.autoReorderBtn.onclick = () => {
+            // Dispatch event to main.js to handle the logic
+            document.dispatchEvent(new CustomEvent('auto-reorder-depth'));
+            // Re-render UI after a short delay to allow state update
+            setTimeout(() => renderDepthOrderPane(getGameState()), 50);
+        };
+    }
 }
 /**
  * 💡 FIX: Attach listeners to formation dropdowns.
@@ -1797,50 +1822,52 @@ export function setupFormationListeners() {
         const newFormationName = event.target.value;
         if (!newFormationName) return;
 
-        // --- 1. SMART PRESERVE LOGIC ---
-        // Grab the current state before we change anything
+        // 1. Snapshot the CURRENT (Old) assignments before they are wiped
         const gs = getGameState();
-        const oldChart = { ...gs.playerTeam.depthChart[side] }; // Copy current assignments
+        // Create a shallow copy so we don't reference the object that gets wiped
+        const oldChart = { ...gs.playerTeam.depthChart[side] };
 
-        // --- 2. EXECUTE SWITCH ---
-        // This likely resets the backend depth chart for this side
+        // 2. Execute the Formation Change (This resets the backend to defaults)
         changeFormation(side, newFormationName);
 
-        // --- 3. RESTORE PLAYERS ---
-        // Look up the definition of the NEW formation (imported from data.js)
-        const formationData = side === 'offense' 
-            ? offenseFormations[newFormationName] 
-            : defenseFormations[newFormationName];
+        // 3. Restore Players (Wrapped in setTimeout to run NEXT in the event loop)
+        // This ensures 'changeFormation' is 100% complete before we apply fixes.
+        setTimeout(() => {
+            // Look up the definition of the NEW formation to see which slots exist
+            const formationData = side === 'offense'
+                ? offenseFormations[newFormationName]
+                : defenseFormations[newFormationName];
 
-        if (formationData && formationData.slots) {
-            const validSlots = new Set(formationData.slots);
+            if (formationData && formationData.slots) {
+                const validSlots = new Set(formationData.slots);
 
-            // Loop through the OLD assignments
-            Object.entries(oldChart).forEach(([slot, playerId]) => {
-                // If the player existed AND the new formation also has this slot (e.g. "QB1")
-                if (playerId && validSlots.has(slot)) {
-                    
-                    // Fire an event to put them back in that slot immediately
-                    // This relies on your main.js/game.js listening for 'depth-chart-changed'
-                    const restoreEvent = new CustomEvent('depth-chart-changed', {
-                        detail: {
-                            playerId: playerId,
-                            slot: slot,
-                            side: side
-                        }
-                    });
-                    document.dispatchEvent(restoreEvent);
-                }
-            });
-        }
+                // Iterate through our saved Snapshot
+                Object.entries(oldChart).forEach(([slot, playerId]) => {
+                    // If the player exists AND the new formation allows this slot (e.g. "QB1" -> "QB1")
+                    if (playerId && validSlots.has(slot)) {
 
-        // --- 4. REFRESH UI ---
-        // Now that data is restored, trigger the render
-        const refreshEvent = new CustomEvent('refresh-ui');
-        document.dispatchEvent(refreshEvent);
+                        // Dispatch the event to put them back
+                        const restoreEvent = new CustomEvent('depth-chart-changed', {
+                            detail: {
+                                playerId: playerId,
+                                slot: slot,
+                                side: side
+                            }
+                        });
+                        document.dispatchEvent(restoreEvent);
+                    }
+                });
+            }
+
+            // 4. Force a UI Refresh only AFTER all restoration events have fired
+            const refreshEvent = new CustomEvent('refresh-ui');
+            document.dispatchEvent(refreshEvent);
+
+        }, 50); // 50ms delay is imperceptible to user but huge for the event loop
     };
 
     if (offSelect) {
+        // Remove old listeners to be safe (though usually not strictly necessary if elements are static)
         offSelect.onchange = (e) => handleFormationChange('offense', e);
     }
     if (defSelect) {
@@ -3110,4 +3137,164 @@ export function setSimSpeed(speed) {
         // Start new action clock immediately, effectively skipping the huddle
         liveGameInterval = setInterval(runLiveGameTick, liveGameSpeed);
     }
+}
+function renderDepthOrderPane(gameState) {
+    if (!elements.depthOrderGrid || !gameState?.playerTeam) return;
+
+    const roster = getUIRosterObjects(gameState.playerTeam);
+    elements.depthOrderGrid.innerHTML = '';
+
+    // Define the groups we want to show
+    const positionGroups = {
+        'QB': ['QB'],
+        'RB': ['RB', 'FB'],
+        'WR': ['WR'],
+        'TE': ['TE'],
+        'OL': ['OL', 'OT', 'OG', 'C'],
+        'DL': ['DL', 'DE', 'DT'],
+        'LB': ['LB', 'OLB', 'MLB'],
+        'DB': ['CB', 'S', 'FS', 'SS'],
+        'ST': ['K', 'P']
+    };
+
+    Object.entries(positionGroups).forEach(([groupName, positions]) => {
+        // Filter players who match these positions
+        // Note: This relies on player.position or player.favoriteOffensivePosition
+        const groupPlayers = roster.filter(p => {
+             const pos = p.position || p.favoriteOffensivePosition || p.favoriteDefensivePosition;
+             return positions.includes(pos);
+        });
+
+        // Sort them: First by current Depth Chart Status (Starters high), then by Overall
+        // We create a helper score: Assigned Slot = 1000, Bench = OVR
+        groupPlayers.sort((a, b) => {
+            const ovrA = calculateOverall(a, groupName === 'ST' ? 'K' : groupName); // Simplified mapping
+            const ovrB = calculateOverall(b, groupName === 'ST' ? 'K' : groupName);
+            
+            // Determine if they are currently starting to boost them to the top visually
+            const isStarterA = isPlayerStarting(a.id, gameState.playerTeam);
+            const isStarterB = isPlayerStarting(b.id, gameState.playerTeam);
+
+            if (isStarterA !== isStarterB) return isStarterB - isStarterA; // Starters first
+            return ovrB - ovrA; // Then by rating
+        });
+
+        // Create the Column HTML
+        const col = document.createElement('div');
+        col.className = 'bg-gray-100 p-3 rounded shadow-sm flex flex-col h-full';
+        
+        col.innerHTML = `
+            <h5 class="font-bold text-center border-b border-gray-300 pb-2 mb-2 text-gray-700">${groupName}</h5>
+            <div class="depth-sortable-list space-y-2 min-h-[50px] flex-grow" data-group="${groupName}">
+                ${groupPlayers.map((p, index) => {
+                    const ovr = calculateOverall(p, groupName === 'ST' ? 'K' : groupName); // Use the group name as proxy for OVR calc
+                    const isStarter = isPlayerStarting(p.id, gameState.playerTeam);
+                    const statusColor = isStarter ? 'border-l-4 border-green-500' : 'border-l-4 border-gray-300';
+                    
+                    return `
+                    <div class="bg-white p-2 rounded shadow flex justify-between items-center cursor-move hover:bg-blue-50 transition ${statusColor}" 
+                         draggable="true" 
+                         data-player-id="${p.id}"
+                         data-player-ovr="${ovr}">
+                        <div>
+                            <span class="font-bold text-sm block">${index + 1}. ${p.name}</span>
+                            <span class="text-xs text-gray-500">${p.position || '?'} • ${p.age}yo</span>
+                        </div>
+                        <div class="font-bold text-lg text-gray-800">${ovr}</div>
+                    </div>`;
+                }).join('')}
+            </div>
+        `;
+
+        elements.depthOrderGrid.appendChild(col);
+    });
+
+    setupDepthOrderDragEvents();
+}
+
+/** Helper to check if a player is in any starting slot */
+function isPlayerStarting(playerId, team) {
+    if (!team.depthChart) return false;
+    const allStarters = [
+        ...Object.values(team.depthChart.offense || {}), 
+        ...Object.values(team.depthChart.defense || {})
+    ];
+    return allStarters.includes(playerId);
+}
+
+/** Sets up drag-and-drop specifically for the sorting lists */
+function setupDepthOrderDragEvents() {
+    const draggables = document.querySelectorAll('.depth-sortable-list [draggable="true"]');
+    const containers = document.querySelectorAll('.depth-sortable-list');
+
+    draggables.forEach(draggable => {
+        draggable.addEventListener('dragstart', () => {
+            draggable.classList.add('dragging');
+            draggable.classList.add('opacity-50');
+        });
+
+        draggable.addEventListener('dragend', () => {
+            draggable.classList.remove('dragging');
+            draggable.classList.remove('opacity-50');
+            
+            // Fire event to update backend state
+            const container = draggable.closest('.depth-sortable-list');
+            if (container) {
+                const group = container.dataset.group;
+                const newOrderIds = [...container.querySelectorAll('[draggable="true"]')]
+                    .map(el => el.dataset.playerId);
+                
+                document.dispatchEvent(new CustomEvent('depth-order-reordered', {
+                    detail: { group, order: newOrderIds }
+                }));
+            }
+        });
+    });
+
+    containers.forEach(container => {
+        container.addEventListener('dragover', e => {
+            e.preventDefault();
+            const afterElement = getDragAfterElement(container, e.clientY);
+            const draggable = document.querySelector('.dragging');
+            if (!draggable) return;
+            
+            if (afterElement == null) {
+                container.appendChild(draggable);
+            } else {
+                container.insertBefore(draggable, afterElement);
+            }
+            
+            // Update rank numbers visually immediately
+            updateRankNumbers(container);
+        });
+    });
+}
+
+/** Helper for List Reordering Logic */
+function getDragAfterElement(container, y) {
+    const draggableElements = [...container.querySelectorAll('[draggable="true"]:not(.dragging)')];
+
+    return draggableElements.reduce((closest, child) => {
+        const box = child.getBoundingClientRect();
+        const offset = y - box.top - box.height / 2;
+        if (offset < 0 && offset > closest.offset) {
+            return { offset: offset, element: child };
+        } else {
+            return closest;
+        }
+    }, { offset: Number.NEGATIVE_INFINITY }).element;
+}
+
+/** Visually updates the "1.", "2." numbers in the list */
+function updateRankNumbers(container) {
+    const items = container.querySelectorAll('[draggable="true"]');
+    items.forEach((item, index) => {
+        const span = item.querySelector('span.font-bold');
+        if (span) {
+            // Keep the name, just change the number prefix
+            const text = span.textContent;
+            const name = text.includes('. ') ? text.split('. ')[1] : text;
+            span.textContent = `${index + 1}. ${name}`;
+        }
+    });
 }
