@@ -196,6 +196,8 @@ export function setupElements() {
         simLiveStats: document.getElementById('sim-live-stats'),
         simStatsAway: document.getElementById('sim-stats-away'),
         simStatsHome: document.getElementById('sim-stats-home'),
+        simPlayersPanel: document.getElementById('sim-players-panel'),
+        simPlayersList: document.getElementById('sim-players-list'),
 
         // --- Offseason Screen Elements ---
         offseasonYear: document.getElementById('offseason-year'),
@@ -250,12 +252,14 @@ export function setupElements() {
     }
     console.log("UI Elements setup check complete.");
 
-    // Wire up default modal close if present (helps when showModal isn't used to create buttons)
+    // Modal Close Wire-up
     if (elements.modalDefaultClose) {
         elements.modalDefaultClose.addEventListener('click', () => {
             try { hideModal(); } catch (e) { console.warn('hideModal unavailable', e); }
         });
     }
+
+    // Run Listeners setup
     setupFormationListeners();
     setupDepthChartTabs();
 }
