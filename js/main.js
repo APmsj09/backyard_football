@@ -278,13 +278,20 @@ function handleFormationChange(e) {
     // which triggers the save listener we added at the bottom of main.js.
 }
 
-// 💡 UPDATE: This function handles updates from Visual Drag & Drop
 function handleDepthChartDrop(playerId, newPositionSlot, side) {
     if (!gameState) return;
+    
+    // 1. Update the data
     Game.updateDepthChart(playerId, newPositionSlot, side);
+    
+    // 2. Refresh the global state object
     gameState = Game.getGameState();
+    
+    // 3. Save to browser storage
     Game.saveGameState(activeSaveKey);
-    // UI.switchTab('depth-chart', gameState); // Removed: The UI now self-refreshes via events
+    
+    // 4. RESTORED: Force the tab to re-render so you see the player appear in the slot
+    UI.switchTab('depth-chart', gameState); 
 }
 
 function handleDepthChartSelect(e) {
