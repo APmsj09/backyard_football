@@ -98,146 +98,125 @@ function getUIRosterObjects(team) {
  */
 export function setupElements() {
     console.log("Running setupElements...");
+
+    // Helper to grab ID and warn if missing (Helps debugging)
+    const getEl = (id) => {
+        const el = document.getElementById(id);
+        if (!el) console.warn(`⚠️ MISSING UI ELEMENT: ID "${id}" was not found in the HTML.`);
+        return el;
+    };
+
     elements = {
         // --- Screens ---
         screens: {
-            'start-screen': document.getElementById('start-screen'),
-            'loading-screen': document.getElementById('loading-screen'),
-            'team-creation-screen': document.getElementById('team-creation-screen'),
-            'draft-screen': document.getElementById('draft-screen'),
-            'dashboard-screen': document.getElementById('dashboard-screen'),
-            'offseason-screen': document.getElementById('offseason-screen'),
-            'game-sim-screen': document.getElementById('game-sim-screen'),
-            // Also store camelCase versions for backward compatibility
-            startScreen: document.getElementById('start-screen'),
-            loadingScreen: document.getElementById('loading-screen'),
-            teamCreationScreen: document.getElementById('team-creation-screen'),
-            draftScreen: document.getElementById('draft-screen'),
-            dashboardScreen: document.getElementById('dashboard-screen'),
-            offseasonScreen: document.getElementById('offseason-screen'),
-            gameSimScreen: document.getElementById('game-sim-screen'),
+            'start-screen': getEl('start-screen'),
+            'loading-screen': getEl('loading-screen'),
+            'team-creation-screen': getEl('team-creation-screen'),
+            'draft-screen': getEl('draft-screen'),
+            'dashboard-screen': getEl('dashboard-screen'),
+            'offseason-screen': getEl('offseason-screen'),
+            'game-sim-screen': getEl('game-sim-screen'),
+            // camelCase aliases for legacy support
+            startScreen: getEl('start-screen'),
+            loadingScreen: getEl('loading-screen'),
+            teamCreationScreen: getEl('team-creation-screen'),
+            draftScreen: getEl('draft-screen'),
+            dashboardScreen: getEl('dashboard-screen'),
+            offseasonScreen: getEl('offseason-screen'),
+            gameSimScreen: getEl('game-sim-screen'),
         },
 
-        // --- Other Common UI Elements ---
-        modal: document.getElementById('modal'),
-        modalTitle: document.getElementById('modal-title'),
-        modalBody: document.getElementById('modal-body'),
-        modalDefaultClose: document.getElementById('modal-default-close'),
-        loadingProgress: document.getElementById('loading-progress'),
-        teamNameSuggestions: document.getElementById('team-name-suggestions'),
-        customTeamName: document.getElementById('custom-team-name'),
-        confirmTeamBtn: document.getElementById('confirm-team-btn'),
+        // --- Common UI Elements ---
+        modal: getEl('modal'),
+        modalTitle: getEl('modal-title'),
+        modalBody: getEl('modal-body'),
+        modalDefaultClose: getEl('modal-default-close'),
+        loadingProgress: getEl('loading-progress'),
+        teamNameSuggestions: getEl('team-name-suggestions'),
+        customTeamName: getEl('custom-team-name'),
+        confirmTeamBtn: getEl('confirm-team-btn'),
 
         // --- Draft Screen Elements ---
-        draftHeader: document.getElementById('draft-header'),
-        draftYear: document.getElementById('draft-year'),
-        draftPickNumber: document.getElementById('draft-pick-number'),
-        draftPickingTeam: document.getElementById('draft-picking-team'),
-        draftPoolTbody: document.getElementById('draft-pool-tbody'),
-        selectedPlayerCard: document.getElementById('selected-player-card'),
-        draftPlayerBtn: document.getElementById('draft-player-btn'),
-        rosterCount: document.getElementById('roster-count'),
-        draftRosterList: document.getElementById('draft-roster-list'),
-        rosterSummary: document.getElementById('roster-summary'),
-        draftSearch: document.getElementById('draft-search'),
-        draftFilterPos: document.getElementById('draft-filter-pos'),
-        draftSort: document.getElementById('draft-sort'),
+        draftHeader: getEl('draft-header'),
+        draftYear: getEl('draft-year'),
+        draftPickNumber: getEl('draft-pick-number'),
+        draftPickingTeam: getEl('draft-picking-team'),
+        draftPoolTbody: getEl('draft-pool-tbody'),
+        selectedPlayerCard: getEl('selected-player-card'),
+        draftPlayerBtn: getEl('draft-player-btn'),
+        rosterCount: getEl('roster-count'),
+        draftRosterList: getEl('draft-roster-list'),
+        rosterSummary: getEl('roster-summary'),
+        draftSearch: getEl('draft-search'),
+        draftFilterPos: getEl('draft-filter-pos'),
+        draftSort: getEl('draft-sort'),
 
-        // --- Dashboard Elements ---
-        dashboardTeamName: document.getElementById('dashboard-team-name'),
-        dashboardRecord: document.getElementById('dashboard-record'),
-        dashboardYear: document.getElementById('dashboard-year'),
-        dashboardWeek: document.getElementById('dashboard-week'),
-        dashboardTabs: document.getElementById('dashboard-tabs'),
-        dashboardContent: document.getElementById('dashboard-content'),
-        advanceWeekBtn: document.getElementById('advance-week-btn'),
-        myTeamRoster: document.getElementById('my-team-roster'),
-        messagesList: document.getElementById('messages-list'),
-        messagesNotificationDot: document.getElementById('messages-notification-dot'),
-        scheduleList: document.getElementById('schedule-list'),
-        standingsContainer: document.getElementById('standings-container'),
-        playerStatsContainer: document.getElementById('player-stats-container'),
-        statsFilterTeam: document.getElementById('stats-filter-team'),
-        statsSort: document.getElementById('stats-sort'),
-        hallOfFameList: document.getElementById('hall-of-fame-list'),
-        depthChartSubTabs: document.getElementById('depth-chart-sub-tabs'),
-        offenseFormationSelect: document.getElementById('offense-formation-select'),
-        defenseFormationSelect: document.getElementById('defense-formation-select'),
-        offenseDepthChartPane: document.getElementById('depth-chart-offense-pane'),
-        defenseDepthChartPane: document.getElementById('depth-chart-defense-pane'),
-        // ✔ Correct visual field containers
-        offenseVisualField: document.getElementById('offense-visual-field'),
-        defenseVisualField: document.getElementById('defense-visual-field'),
+        // --- Dashboard Main ---
+        dashboardTeamName: getEl('dashboard-team-name'),
+        dashboardRecord: getEl('dashboard-record'),
+        dashboardYear: getEl('dashboard-year'),
+        dashboardWeek: getEl('dashboard-week'),
+        dashboardTabs: getEl('dashboard-tabs'),
+        dashboardContent: getEl('dashboard-content'),
+        advanceWeekBtn: getEl('advance-week-btn'),
 
-        // ✔ Correct bench table containers
-        offenseBenchTable: document.getElementById('offense-bench-table'),
-        defenseBenchTable: document.getElementById('defense-bench-table'),
-        positionalOverallsContainer: document.getElementById('positional-overalls-container'),
+        // --- Dashboard Tabs (THE MISSING LINKS) ---
+        myTeamRoster: getEl('my-team-roster'),          // <--- This was likely missing
+        scheduleList: getEl('schedule-list'),           // <--- This too
+        standingsContainer: getEl('standings-container'),
+        playerStatsContainer: getEl('player-stats-container'),
+        statsFilterTeam: getEl('stats-filter-team'),
+        statsSort: getEl('stats-sort'),
+        hallOfFameList: getEl('hall-of-fame-list'),
+        messagesList: getEl('messages-list'),
+        messagesNotificationDot: getEl('messages-notification-dot'),
 
-        // --- NEW: Depth Order Elements ---
-        depthOrderContainer: document.getElementById('depth-order-container'),
-        depthOrderGrid: document.getElementById('depth-order-grid'),
-        autoReorderBtn: document.getElementById('auto-reorder-btn'), // New button
+        // --- Depth Chart & Strategy ---
+        depthChartSubTabs: getEl('depth-chart-sub-tabs'),
+        offenseFormationSelect: getEl('offense-formation-select'),
+        defenseFormationSelect: getEl('defense-formation-select'),
+        offenseDepthChartPane: getEl('depth-chart-offense-pane'),
+        defenseDepthChartPane: getEl('depth-chart-defense-pane'),
+        offenseVisualField: getEl('offense-visual-field'),
+        defenseVisualField: getEl('defense-visual-field'),
+        offenseBenchTable: getEl('offense-bench-table'),
+        defenseBenchTable: getEl('defense-bench-table'),
+        positionalOverallsContainer: getEl('positional-overalls-container'),
+        depthOrderContainer: getEl('depth-order-container'),
+        depthOrderGrid: getEl('depth-order-grid'),
+        autoReorderBtn: getEl('auto-reorder-btn'),
 
-        // --- Game Sim Screen Elements ---
-        gameSimScreen: document.getElementById('game-sim-screen'),
-        simScoreboard: document.getElementById('sim-scoreboard'),
-        simAwayTeam: document.getElementById('sim-away-team'),
-        simAwayScore: document.getElementById('sim-away-score'),
-        simHomeTeam: document.getElementById('sim-home-team'),
-        simHomeScore: document.getElementById('sim-home-score'),
-        simGameDrive: document.getElementById('sim-game-drive'),
-        simGameDown: document.getElementById('sim-game-down'),
-        simPossession: document.getElementById('sim-possession'),
-        fieldCanvas: document.getElementById('field-canvas'),
-        simPlayLog: document.getElementById('sim-play-log'),
-        simSpeedBtns: document.querySelectorAll('.sim-speed-btn'),
-        simSkipBtn: document.getElementById('sim-skip-btn'),
-        simLiveStats: document.getElementById('sim-live-stats'),
-        simStatsAway: document.getElementById('sim-stats-away'),
-        simStatsHome: document.getElementById('sim-stats-home'),
-        simPlayersPanel: document.getElementById('sim-players-panel'),
-        simPlayersList: document.getElementById('sim-players-list'),
+        // --- Game Sim Screen ---
+        simScoreboard: getEl('sim-scoreboard'),
+        simAwayTeam: getEl('sim-away-team'),
+        simAwayScore: getEl('sim-away-score'),
+        simHomeTeam: getEl('sim-home-team'),
+        simHomeScore: getEl('sim-home-score'),
+        simGameDrive: getEl('sim-game-drive'),
+        simGameDown: getEl('sim-game-down'),
+        simPossession: getEl('sim-possession'),
+        fieldCanvas: getEl('field-canvas'),
+        // Context needs optional chaining in case canvas is missing
+        fieldCanvasCtx: getEl('field-canvas')?.getContext('2d'),
+        simPlayLog: getEl('sim-play-log'),
+        simSpeedBtns: document.querySelectorAll('.sim-speed-btn'), // Note: querySelectorAll
+        simSkipBtn: getEl('sim-skip-btn'),
+        simLiveStats: getEl('sim-live-stats'),
+        simStatsAway: getEl('sim-stats-away'),
+        simStatsHome: getEl('sim-stats-home'),
+        simPlayersPanel: getEl('sim-players-panel'),
+        simPlayersList: getEl('sim-players-list'),
 
-        // --- Offseason Screen Elements ---
-        offseasonYear: document.getElementById('offseason-year'),
-        playerDevelopmentContainer: document.getElementById('player-development-container'),
-        retirementsList: document.getElementById('retirements-list'),
-        hofInducteesList: document.getElementById('hof-inductees-list'),
-        leavingPlayersList: document.getElementById('leaving-players-list'),
-        goToNextDraftBtn: document.getElementById('go-to-next-draft-btn'),
-
-        // --- Live Game Sim Elements ---
-        simScoreboard: document.getElementById('sim-scoreboard'),
-        simAwayTeam: document.getElementById('sim-away-team'),
-        simAwayScore: document.getElementById('sim-away-score'),
-        simHomeTeam: document.getElementById('sim-home-team'),
-        simHomeScore: document.getElementById('sim-home-score'),
-        simGameDrive: document.getElementById('sim-game-drive'),
-        simGameDown: document.getElementById('sim-game-down'),
-        simPossession: document.getElementById('sim-possession'),
-        fieldCanvas: document.getElementById('field-canvas'),
-        fieldCanvasCtx: document.getElementById('field-canvas')?.getContext('2d'),
-        simPlayLog: document.getElementById('sim-play-log'),
-        simSpeedBtns: document.querySelectorAll('.sim-speed-btn'),
-        simSkipBtn: document.getElementById('sim-skip-btn'),
-        simLiveStats: document.getElementById('sim-live-stats'),
-        simStatsAway: document.getElementById('sim-stats-away'),
-        simStatsHome: document.getElementById('sim-stats-home')
-        ,
-        // Players / substitution panel
-        simPlayersPanel: document.getElementById('sim-players-panel'),
-        simPlayersList: document.getElementById('sim-players-list')
-
+        // --- Offseason ---
+        offseasonYear: getEl('offseason-year'),
+        playerDevelopmentContainer: getEl('player-development-container'),
+        retirementsList: getEl('retirements-list'),
+        hofInducteesList: getEl('hof-inductees-list'),
+        leavingPlayersList: getEl('leaving-players-list'),
+        goToNextDraftBtn: getEl('go-to-next-draft-btn'),
     };
 
-    // Log checks for missing elements
-    console.log("Screens registered explicitly:", Object.keys(elements.screens).filter(key => elements.screens[key]));
-    Object.keys(elements.screens).forEach(key => {
-        if (!elements.screens[key]) console.error(`!!! Screen element ID "${key}" NOT FOUND.`);
-    });
-
-    // Populate draft sort options
+    // Populate draft sort options (Safe check)
     if (elements.draftSort) {
         const sortOptions = `
             <option value="default">Potential (Default)</option>
@@ -250,7 +229,6 @@ export function setupElements() {
         `;
         elements.draftSort.innerHTML = sortOptions;
     }
-    console.log("UI Elements setup check complete.");
 
     // Modal Close Wire-up
     if (elements.modalDefaultClose) {
@@ -262,6 +240,8 @@ export function setupElements() {
     // Run Listeners setup
     setupFormationListeners();
     setupDepthChartTabs();
+    
+    console.log("UI Elements setup check complete.");
 }
 
 /**
@@ -856,64 +836,49 @@ export function renderDashboard(gameState) {
 }
 
 /** Handles switching between dashboard tabs and rendering content. */
+/** Handles switching between dashboard tabs and rendering content. */
 export function switchTab(tabId, gameState) {
-    console.log(`Switching to tab: ${tabId}, Game state:`, gameState ? 'valid' : 'invalid');
+    console.log(`Switching to tab: ${tabId}`);
 
     if (!elements.dashboardContent || !elements.dashboardTabs) {
         console.error("Dashboard elements missing.");
         return;
     }
 
-    // Hide all panes first
+    // 1. Hide all panes
     elements.dashboardContent.querySelectorAll('.tab-pane').forEach(p => p.classList.add('hidden'));
+    
+    // 2. Deactivate all tab buttons
     elements.dashboardTabs.querySelectorAll('.tab-button').forEach(b => {
-        b.classList.remove('active');
+        b.classList.remove('active', 'bg-gray-700', 'text-white');
         b.setAttribute('aria-selected', 'false');
     });
 
+    // 3. Find target pane and button
     const contentPane = document.getElementById(`tab-content-${tabId}`);
     const tabButton = elements.dashboardTabs.querySelector(`[data-tab="${tabId}"]`);
 
-    if (!contentPane) {
-        console.error(`Content pane "tab-content-${tabId}" not found.`);
-        return;
-    }
-    if (!tabButton) {
-        console.error(`Tab button for "${tabId}" not found.`);
-        return;
-    }
+    if (!contentPane) { console.error(`Pane ${tabId} not found`); return; }
 
-    // Show the selected tab
+    // 4. Show active state
     contentPane.classList.remove('hidden');
-    tabButton.classList.add('active');
-    tabButton.setAttribute('aria-selected', 'true');
-
-    if (!gameState) {
-        console.warn(`switchTab called for "${tabId}" without valid gameState.`);
-        contentPane.innerHTML = '<p class="text-red-500">Error: Game state not available.</p>';
-        return;
+    if (tabButton) {
+        tabButton.classList.add('active'); // Add your CSS active class here
+        tabButton.setAttribute('aria-selected', 'true');
     }
 
-    try {
-        switch (tabId) {
-            case 'my-team': renderMyTeamTab(gameState); break;
-            case 'depth-chart': renderDepthChartTab(gameState); break;
-            case 'messages': renderMessagesTab(gameState); break;
-            case 'schedule': renderScheduleTab(gameState); break;
-            case 'standings': renderStandingsTab(gameState); break;
-            case 'player-stats': renderPlayerStatsTab(gameState); break;
-            case 'hall-of-fame': renderHallOfFameTab(gameState); break;
-            default:
-                console.warn(`Unknown tab: ${tabId}`);
-                if (contentPane) contentPane.innerHTML = `<p>Content for tab "${tabId}" not implemented.</p>`;
-        }
-    } catch (error) {
-        console.error(`Error rendering tab "${tabId}":`, error);
-        if (contentPane) contentPane.innerHTML = `<p class="text-red-500">Error rendering ${tabId} content. Check console.</p>`;
-    }
+    if (!gameState) return;
 
-    if (tabId === 'messages' && Array.isArray(gameState.messages)) {
-        updateMessagesNotification(gameState.messages, true);
+    // 5. Route to the correct render function
+    switch (tabId) {
+        case 'my-team': renderMyTeamTab(gameState); break;
+        case 'depth-chart': renderDepthChartTab(gameState); break;
+        case 'messages': renderMessagesTab(gameState); break;
+        case 'schedule': renderScheduleTab(gameState); break;
+        case 'standings': renderStandingsTab(gameState); break;
+        case 'player-stats': renderPlayerStatsTab(gameState); break;
+        case 'hall-of-fame': renderHallOfFameTab(gameState); break;
+        default: console.warn(`Unknown tab: ${tabId}`);
     }
 }
 
@@ -932,10 +897,10 @@ function renderMyTeamTab(gameState) {
 
     let tableHtml = `<div class="overflow-x-auto"><table class="min-w-full bg-white text-sm"><thead class="bg-gray-800 text-white sticky top-0 z-10"><tr>
         <th scope="col" class="py-2 px-3 text-left sticky left-0 bg-gray-800 z-20">Name</th>
-        <th scope="col" class="py-2 px-3">#</th> {/* Number */}
+        <th scope="col" class="py-2 px-3">#</th>
         <th scope="col" class="py-2 px-3">Type</th>
         <th scope="col" class="py-2 px-3">Age</th>
-        <th scope="col" class="py-2 px-3">Pot</th> {/* Potential */}
+        <th scope="col" class="py-2 px-3">Pot</th>
         <th scope="col" class="py-2 px-3">Status</th>
         ${physicalAttrs.map(h => `<th scope="col" class="py-2 px-3 uppercase">${h.slice(0, 3)}</th>`).join('')}
         ${mentalAttrs.map(h => `<th scope="col" class="py-2 px-3 uppercase">${h.slice(0, 3)}</th>`).join('')}
