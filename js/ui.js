@@ -99,7 +99,7 @@ function getUIRosterObjects(team) {
 export function setupElements() {
     console.log("Running setupElements...");
 
-    // Helper to grab ID and warn if missing (Helps debugging)
+    // Helper to grab ID and warn if missing
     const getEl = (id) => {
         const el = document.getElementById(id);
         if (!el) console.warn(`⚠️ MISSING UI ELEMENT: ID "${id}" was not found in the HTML.`);
@@ -116,7 +116,7 @@ export function setupElements() {
             'dashboard-screen': getEl('dashboard-screen'),
             'offseason-screen': getEl('offseason-screen'),
             'game-sim-screen': getEl('game-sim-screen'),
-            // camelCase aliases for legacy support
+            // Aliases
             startScreen: getEl('start-screen'),
             loadingScreen: getEl('loading-screen'),
             teamCreationScreen: getEl('team-creation-screen'),
@@ -126,7 +126,7 @@ export function setupElements() {
             gameSimScreen: getEl('game-sim-screen'),
         },
 
-        // --- Common UI Elements ---
+        // --- Common ---
         modal: getEl('modal'),
         modalTitle: getEl('modal-title'),
         modalBody: getEl('modal-body'),
@@ -136,7 +136,7 @@ export function setupElements() {
         customTeamName: getEl('custom-team-name'),
         confirmTeamBtn: getEl('confirm-team-btn'),
 
-        // --- Draft Screen Elements ---
+        // --- Draft ---
         draftHeader: getEl('draft-header'),
         draftYear: getEl('draft-year'),
         draftPickNumber: getEl('draft-pick-number'),
@@ -160,9 +160,9 @@ export function setupElements() {
         dashboardContent: getEl('dashboard-content'),
         advanceWeekBtn: getEl('advance-week-btn'),
 
-        // --- Dashboard Tabs (THE MISSING LINKS) ---
-        myTeamRoster: getEl('my-team-roster'),          // <--- This was likely missing
-        scheduleList: getEl('schedule-list'),           // <--- This too
+        // --- Dashboard Tabs  ---
+        myTeamRoster: getEl('my-team-roster'),
+        scheduleList: getEl('schedule-list'),
         standingsContainer: getEl('standings-container'),
         playerStatsContainer: getEl('player-stats-container'),
         statsFilterTeam: getEl('stats-filter-team'),
@@ -171,7 +171,7 @@ export function setupElements() {
         messagesList: getEl('messages-list'),
         messagesNotificationDot: getEl('messages-notification-dot'),
 
-        // --- Depth Chart & Strategy ---
+        // --- Depth Chart ---
         depthChartSubTabs: getEl('depth-chart-sub-tabs'),
         offenseFormationSelect: getEl('offense-formation-select'),
         defenseFormationSelect: getEl('defense-formation-select'),
@@ -186,7 +186,7 @@ export function setupElements() {
         depthOrderGrid: getEl('depth-order-grid'),
         autoReorderBtn: getEl('auto-reorder-btn'),
 
-        // --- Game Sim Screen ---
+        // --- Game Sim ---
         simScoreboard: getEl('sim-scoreboard'),
         simAwayTeam: getEl('sim-away-team'),
         simAwayScore: getEl('sim-away-score'),
@@ -196,10 +196,9 @@ export function setupElements() {
         simGameDown: getEl('sim-game-down'),
         simPossession: getEl('sim-possession'),
         fieldCanvas: getEl('field-canvas'),
-        // Context needs optional chaining in case canvas is missing
         fieldCanvasCtx: getEl('field-canvas')?.getContext('2d'),
         simPlayLog: getEl('sim-play-log'),
-        simSpeedBtns: document.querySelectorAll('.sim-speed-btn'), // Note: querySelectorAll
+        simSpeedBtns: document.querySelectorAll('.sim-speed-btn'),
         simSkipBtn: getEl('sim-skip-btn'),
         simLiveStats: getEl('sim-live-stats'),
         simStatsAway: getEl('sim-stats-away'),
@@ -216,9 +215,8 @@ export function setupElements() {
         goToNextDraftBtn: getEl('go-to-next-draft-btn'),
     };
 
-    // Populate draft sort options (Safe check)
     if (elements.draftSort) {
-        const sortOptions = `
+        elements.draftSort.innerHTML = `
             <option value="default">Potential (Default)</option>
             <option value="age-asc">Age (Youngest)</option>
             <option value="age-desc">Age (Oldest)</option>
@@ -227,21 +225,17 @@ export function setupElements() {
             <option value="agility-desc">Agility (Most Agile)</option>
             <option value="potential-desc">Potential (Highest)</option>
         `;
-        elements.draftSort.innerHTML = sortOptions;
     }
 
-    // Modal Close Wire-up
     if (elements.modalDefaultClose) {
         elements.modalDefaultClose.addEventListener('click', () => {
-            try { hideModal(); } catch (e) { console.warn('hideModal unavailable', e); }
+            try { hideModal(); } catch (e) { }
         });
     }
 
-    // Run Listeners setup
     setupFormationListeners();
     setupDepthChartTabs();
-    
-    console.log("UI Elements setup check complete.");
+    console.log("UI Elements setup complete.");
 }
 
 /**
@@ -1413,23 +1407,30 @@ function renderAvailablePlayerList(players, container, side) {
 
 /** Renders the 'Messages' tab content. */
 export function renderMessagesTab(gameState) {
-    if (!elements.messagesList) { console.error("Messages list element not found."); return; }
-    if (!gameState?.messages || !Array.isArray(gameState.messages)) {
-        elements.messagesList.innerHTML = '<p class="text-gray-500">Messages unavailable.</p>';
+    if (!elements.messagesList) return;
+
+    if (!gameState?.messages || !Array.isArray(gameState.messages) || gameState.messages.length === 0) {
+        elements.messagesList.innerHTML = `<div class="p-8 text-center text-gray-400 flex flex-col items-center">
+            <svg class="w-12 h-12 mb-2 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4"></path></svg>
+            <p>No messages yet.</p>
+        </div>`;
         return;
     }
-    const messages = gameState.messages;
-    if (messages.length === 0) {
-        elements.messagesList.innerHTML = `<p class="text-gray-500">No messages yet.</p>`;
-        return;
-    }
-    elements.messagesList.innerHTML = messages.map(msg => {
-        if (!msg) return '';
-        const subject = msg.subject || '(No Subject)';
-        const readClass = msg.isRead ? 'bg-gray-100 text-gray-600' : 'bg-amber-100 font-semibold border-l-4 border-amber-400';
-        return `<div class="message-item ${readClass}" data-message-id="${msg.id}" role="button" tabindex="0" aria-label="View message: ${subject}">${subject}</div>`;
+
+    elements.messagesList.innerHTML = gameState.messages.map(msg => {
+        const readClass = msg.isRead ? 'bg-white text-gray-600' : 'bg-blue-50 border-l-4 border-blue-500 font-semibold text-gray-800';
+        return `
+            <div class="message-item ${readClass} p-3 rounded shadow-sm cursor-pointer hover:bg-gray-50 transition mb-2" 
+                 data-message-id="${msg.id}">
+                <div class="flex justify-between items-center">
+                    <span class="truncate">${msg.subject || '(No Subject)'}</span>
+                    <span class="text-xs text-gray-400">${msg.week ? 'Wk ' + msg.week : ''}</span>
+                </div>
+            </div>
+        `;
     }).join('');
-    updateMessagesNotification(messages);
+    
+    updateMessagesNotification(gameState.messages);
 }
 
 /** Updates the visibility of the unread messages notification dot. */
@@ -1444,38 +1445,71 @@ export function updateMessagesNotification(messages, markAllAsRead = false) {
 
 /** Renders the 'Schedule' tab content. */
 function renderScheduleTab(gameState) {
-    if (!elements.scheduleList || !gameState?.schedule || !Array.isArray(gameState.schedule) || !gameState.teams || !gameState.playerTeam) {
-        console.error("Cannot render schedule: Missing elements or invalid game state.");
-        if (elements.scheduleList) elements.scheduleList.innerHTML = '<p class="text-red-500">Error loading schedule data.</p>';
+    if (!elements.scheduleList) return;
+
+    if (!gameState?.schedule || !Array.isArray(gameState.schedule)) {
+        elements.scheduleList.innerHTML = '<p class="text-gray-500 p-4">No schedule data available.</p>';
         return;
     }
+
     let html = '';
-    const gamesPerWeek = gameState.teams.length > 0 ? gameState.teams.length / 2 : 0;
-    const numWeeks = 9;
+    const numTeams = gameState.teams?.length || 0;
+    const gamesPerWeek = numTeams > 0 ? Math.floor(numTeams / 2) : 0;
+    const numWeeks = 9; // Or gameState.totalWeeks if available
+
     for (let i = 0; i < numWeeks; i++) {
         const weekStartIndex = i * gamesPerWeek;
         const weekEndIndex = weekStartIndex + gamesPerWeek;
         const weekGames = gameState.schedule.slice(weekStartIndex, weekEndIndex);
-        const isPastWeek = i < gameState.currentWeek;
+        
         const isCurrentWeek = i === gameState.currentWeek;
-        let weekHtml = `<div class="p-4 rounded mb-4 ${isCurrentWeek ? 'bg-amber-100 border-2 border-amber-500' : 'bg-gray-100'}"><h4 class="font-bold text-lg mb-2">Week ${i + 1}</h4><div class="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm">`;
+        const isPastWeek = i < gameState.currentWeek;
+        
+        let weekHtml = `<div class="p-4 rounded mb-4 ${isCurrentWeek ? 'bg-amber-100 border-2 border-amber-500' : 'bg-gray-100'}">
+            <h4 class="font-bold text-lg mb-2">Week ${i + 1}</h4>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm">`;
+
         if (weekGames.length > 0) {
             weekGames.forEach(g => {
-                if (!g || !g.home || !g.away) { return; }
-                let content;
-                const result = isPastWeek ? (gameState.gameResults || []).find(r => r && r.homeTeam.id === g.home.id && r.awayTeam.id === g.away.id) : null;
-                let resultClass = '';
-                if (result) {
-                    content = `<span class="${result.awayScore > result.homeScore ? 'font-bold' : ''}">${g.away.name ?? '?'} ${result.awayScore ?? '?'}</span> @ <span class="${result.homeScore > result.awayScore ? 'font-bold' : ''}">${g.home.name ?? '?'} ${result.homeScore ?? '?'}</span>`;
-                    if (result.homeTeam?.id === gameState.playerTeam.id) { resultClass = result.homeScore > result.awayScore ? 'player-win' : (result.homeScore < result.awayScore ? 'player-loss' : ''); }
-                    else if (result.awayTeam?.id === gameState.playerTeam.id) { resultClass = result.awayScore > result.homeScore ? 'player-win' : (result.awayScore < result.homeScore ? 'player-loss' : ''); }
-                } else {
-                    content = `<span>${g.away.name ?? '?'}</span> @ <span>${g.home.name ?? '?'}</span>`;
+                if (!g || !g.home || !g.away) return;
+                
+                // Try to find the result for this specific game
+                let result = null;
+                if (isPastWeek && gameState.gameResults) {
+                    result = gameState.gameResults.find(r => 
+                        r && r.homeTeam.id === g.home.id && r.awayTeam.id === g.away.id
+                    );
                 }
+
+                let content;
+                let resultClass = '';
+
+                if (result) {
+                    // Game is finished, show score
+                    const homeWin = result.homeScore > result.awayScore;
+                    const awayWin = result.awayScore > result.homeScore;
+                    
+                    content = `
+                        <span class="${awayWin ? 'font-bold' : ''}">${g.away.name} ${result.awayScore}</span> 
+                        <span class="text-gray-400 mx-1">@</span> 
+                        <span class="${homeWin ? 'font-bold' : ''}">${g.home.name} ${result.homeScore}</span>
+                    `;
+
+                    // Highlight win/loss for player
+                    if (result.homeTeam.id === gameState.playerTeam.id) {
+                        resultClass = homeWin ? 'border-l-4 border-green-500 bg-green-50' : (result.homeScore < result.awayScore ? 'border-l-4 border-red-500 bg-red-50' : '');
+                    } else if (result.awayTeam.id === gameState.playerTeam.id) {
+                        resultClass = awayWin ? 'border-l-4 border-green-500 bg-green-50' : (result.awayScore < result.homeScore ? 'border-l-4 border-red-500 bg-red-50' : '');
+                    }
+                } else {
+                    // Game not played yet
+                    content = `<span>${g.away.name}</span> <span class="text-gray-400 mx-1">@</span> <span>${g.home.name}</span>`;
+                }
+
                 weekHtml += `<div class="bg-white p-2 rounded shadow-sm flex justify-center items-center ${resultClass}">${content}</div>`;
             });
         } else {
-            weekHtml += `<p class="text-gray-500 md:col-span-2">No games scheduled for this week.</p>`;
+            weekHtml += `<p class="text-gray-500 md:col-span-2 italic">Bye Week / No Games</p>`;
         }
         weekHtml += `</div></div>`;
         html += weekHtml;
@@ -1485,147 +1519,174 @@ function renderScheduleTab(gameState) {
 
 /** Renders the 'Standings' tab content. */
 function renderStandingsTab(gameState) {
-    if (!elements.standingsContainer || !gameState?.divisions || !gameState.teams || !Array.isArray(gameState.teams) || !gameState.playerTeam) {
-        console.error("Cannot render standings: Missing elements or invalid game state.");
-        if (elements.standingsContainer) elements.standingsContainer.innerHTML = '<p class="text-red-500">Error loading standings data.</p>';
+    if (!elements.standingsContainer) return;
+
+    if (!gameState?.divisions || !gameState.teams) {
+        elements.standingsContainer.innerHTML = '<p class="text-red-500 p-4">Standings data unavailable.</p>';
         return;
     }
+
     elements.standingsContainer.innerHTML = '';
-    for (const divName in gameState.divisions) {
-        const divisionTeamIdsArray = gameState.divisions[divName];
-        if (!Array.isArray(divisionTeamIdsArray)) { continue; }
+
+    for (const [divName, divisionTeamIdsArray] of Object.entries(gameState.divisions)) {
+        if (!Array.isArray(divisionTeamIdsArray)) continue;
+        
         const divisionTeamIds = new Set(divisionTeamIdsArray);
-
-        const divEl = document.createElement('div');
-        divEl.className = 'mb-6';
-        let tableHtml = `<h4 class="text-xl font-bold mb-2">${divName} Division</h4><table class="min-w-full bg-white text-sm"><thead class="bg-gray-800 text-white"><tr><th scope="col" class="py-2 px-3 text-left">Team</th><th scope="col" class="py-2 px-3">W</th><th scope="col" class="py-2 px-3">L</th><th scope="col" class="py-2 px-3">T</th></tr></thead><tbody class="divide-y">`;
-
-        // --- 💡 FIX: Inserted New Sorting Logic Here ---
+        
+        // Filter teams belonging to this division
         const divTeams = gameState.teams
             .filter(t => t && divisionTeamIds.has(t.id))
             .sort((a, b) => {
-                // --- WIN PERCENTAGE SORT ---
-                // (Wins + 0.5 * Ties) / Total Games
-                const getWinPct = (team) => {
-                    const w = team.wins || 0;
-                    const l = team.losses || 0;
-                    const t = team.ties || 0;
-                    const games = w + l + t;
-                    return games === 0 ? 0 : (w + 0.5 * t) / games;
+                // Sort by Win % -> Wins -> Name
+                const getWinPct = (t) => {
+                    const games = (t.wins || 0) + (t.losses || 0) + (t.ties || 0);
+                    return games === 0 ? 0 : ((t.wins || 0) + 0.5 * (t.ties || 0)) / games;
                 };
-
-                const pctA = getWinPct(a);
-                const pctB = getWinPct(b);
-
-                if (pctA !== pctB) return pctB - pctA; // Higher % first
-
-                // Tiebreaker: Most Wins
+                if (getWinPct(a) !== getWinPct(b)) return getWinPct(b) - getWinPct(a);
                 if ((b.wins || 0) !== (a.wins || 0)) return (b.wins || 0) - (a.wins || 0);
-
-                // Tiebreaker: Alphabetical
                 return a.name.localeCompare(b.name);
             });
-        // --- End Fix ---
 
-        if (divTeams.length > 0) {
-            divTeams.forEach(t => {
-                // Highlight player team
-                const isPlayer = t.id === gameState.playerTeam.id;
-                const rowClass = isPlayer ? 'bg-amber-100 font-bold border-l-4 border-amber-500' : '';
+        const divEl = document.createElement('div');
+        divEl.className = 'mb-6 bg-gray-50 rounded-lg overflow-hidden border border-gray-200';
+        
+        let tableHtml = `
+            <div class="bg-gray-200 px-4 py-2 font-bold text-gray-700 border-b border-gray-300">${divName} Division</div>
+            <table class="min-w-full text-sm">
+                <thead class="bg-gray-100 text-gray-600 text-xs uppercase">
+                    <tr>
+                        <th class="py-2 px-3 text-left">Team</th>
+                        <th class="py-2 px-3 text-center">W</th>
+                        <th class="py-2 px-3 text-center">L</th>
+                        <th class="py-2 px-3 text-center">T</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-gray-200">
+        `;
 
-                tableHtml += `<tr class="${rowClass}">
-                    <th scope="row" class="py-2 px-3 text-left">${t.name}</th>
-                    <td class="text-center py-2 px-3">${t.wins || 0}</td>
-                    <td class="text-center py-2 px-3">${t.losses || 0}</td>
-                    <td class="text-center py-2 px-3 text-gray-500">${t.ties || 0}</td>
+        divTeams.forEach(t => {
+            const isPlayer = t.id === gameState.playerTeam.id;
+            const rowClass = isPlayer ? 'bg-amber-100 font-bold' : 'bg-white';
+            
+            tableHtml += `
+                <tr class="${rowClass}">
+                    <td class="py-2 px-3 text-left">${t.name}</td>
+                    <td class="text-center py-2 px-3 font-semibold">${t.wins || 0}</td>
+                    <td class="text-center py-2 px-3 text-gray-600">${t.losses || 0}</td>
+                    <td class="text-center py-2 px-3 text-gray-400">${t.ties || 0}</td>
                 </tr>`;
-            });
-        } else {
-            tableHtml += '<tr><td colspan="4" class="p-4 text-center text-gray-500">No teams found.</td></tr>';
-        }
-        divEl.innerHTML = tableHtml + `</tbody></table>`;
+        });
+
+        tableHtml += `</tbody></table>`;
+        divEl.innerHTML = tableHtml;
         elements.standingsContainer.appendChild(divEl);
     }
 }
 
 /** Renders the 'Player Stats' tab content. */
 function renderPlayerStatsTab(gameState) {
-    if (!elements.playerStatsContainer || !gameState?.players || !Array.isArray(gameState.players)) {
-        console.error("Cannot render player stats: Missing element or invalid player data.");
-        if (elements.playerStatsContainer) elements.playerStatsContainer.innerHTML = '<p class="text-red-500">Error loading player stats.</p>';
+    if (!elements.playerStatsContainer) return;
+
+    if (!gameState?.players || !Array.isArray(gameState.players)) {
+        elements.playerStatsContainer.innerHTML = '<p class="text-red-500 p-4">Player stats unavailable.</p>';
         return;
     }
+
     const teamIdFilter = elements.statsFilterTeam?.value || '';
     const sortStat = elements.statsSort?.value || 'touchdowns';
+
+    // Filter and Sort
     let playersToShow = gameState.players.filter(p => p && (teamIdFilter ? p.teamId === teamIdFilter : true));
-    playersToShow.sort((a, b) => (b?.seasonStats?.[sortStat] || 0) - (a?.seasonStats?.[sortStat] || 0));
-    const stats = ['passYards', 'passCompletions', 'passAttempts', 'rushYards', 'rushAttempts', 'recYards', 'receptions', 'touchdowns', 'tackles', 'sacks', 'interceptions', 'interceptionsThrown', 'fumbles', 'fumblesLost', 'fumblesRecovered', 'drops'];
-    const statHeaders = stats.map(s => {
-        if (s === 'passYards') return 'PASS YDS';
-        if (s === 'passCompletions') return 'COMP';
-        if (s === 'passAttempts') return 'ATT';
-        if (s === 'rushAttempts') return 'CAR';
-        if (s === 'rushYards') return 'RUSH YDS';
-        if (s === 'receptions') return 'REC';
-        if (s === 'recYards') return 'REC YDS';
-        if (s === 'touchdowns') return 'TDS';
-        if (s === 'tackles') return 'TKL';
-        if (s === 'sacks') return 'SACK';
-        if (s === 'interceptions') return 'INT';
-        if (s === 'interceptionsThrown') return 'INT THR';
-        if (s === 'fumbles') return 'FUM';
-        if (s === 'fumblesLost') return 'FUM LOST';
-        if (s === 'fumblesRecovered') return 'FUM REC';
-        if (s === 'drops') return 'DROPS';
-        return s.toUpperCase();
+    
+    playersToShow.sort((a, b) => {
+        const valA = a.seasonStats?.[sortStat] || 0;
+        const valB = b.seasonStats?.[sortStat] || 0;
+        return valB - valA; // Descending
     });
 
-    let tableHtml = `<div class="overflow-x-auto"><table class="min-w-full bg-white text-sm"><thead class="bg-gray-800 text-white sticky top-0 z-10"><tr><th scope="col" class="py-2 px-3 text-left sticky left-0 bg-gray-800 z-20">Name</th>${statHeaders.map(h => `<th scope="col" class="py-2 px-3">${h}</th>`).join('')}</tr></thead><tbody class="divide-y">`;
-    const numStats = stats.length + 1; // +1 for name
+    // Limit to top 50 to improve performance
+    playersToShow = playersToShow.slice(0, 50);
+
+    const statsConfig = [
+        { key: 'passYards', label: 'PASS YDS' },
+        { key: 'passCompletions', label: 'COMP' },
+        { key: 'rushYards', label: 'RUSH YDS' },
+        { key: 'recYards', label: 'REC YDS' },
+        { key: 'receptions', label: 'REC' },
+        { key: 'touchdowns', label: 'TD' },
+        { key: 'tackles', label: 'TKL' },
+        { key: 'sacks', label: 'SACK' },
+        { key: 'interceptions', label: 'INT' }
+    ];
+
+    let tableHtml = `
+        <div class="overflow-x-auto">
+        <table class="min-w-full bg-white text-sm">
+            <thead class="bg-gray-800 text-white sticky top-0 z-10">
+                <tr>
+                    <th class="py-2 px-3 text-left sticky left-0 bg-gray-800 z-20">Name</th>
+                    <th class="py-2 px-3 text-left">Team</th>
+                    ${statsConfig.map(s => `<th class="py-2 px-3 text-center whitespace-nowrap">${s.label}</th>`).join('')}
+                </tr>
+            </thead>
+            <tbody class="divide-y divide-gray-200">
+    `;
+
     if (playersToShow.length === 0) {
-        tableHtml += `<tr><td colspan="${numStats}" class="p-4 text-center text-gray-500">No players match criteria.</td></tr>`;
+        tableHtml += `<tr><td colspan="${statsConfig.length + 2}" class="p-4 text-center text-gray-500">No stats found.</td></tr>`;
     } else {
         playersToShow.forEach(p => {
-            const playerTeamClass = p.teamId === gameState.playerTeam?.id ? 'bg-amber-50' : '';
-            const statCells = stats.map(s => `<td class="text-center py-2 px-3">${p.seasonStats?.[s] || 0}</td>`).join('');
-            tableHtml += `<tr class="${playerTeamClass}"><th scope="row" class="py-2 px-3 font-semibold sticky left-0 bg-white z-10 text-left">${p.name}</th>${statCells}</tr>`;
+            const isMyTeam = p.teamId === gameState.playerTeam.id;
+            const teamName = gameState.teams.find(t => t.id === p.teamId)?.name || 'FA';
+            
+            tableHtml += `
+                <tr class="${isMyTeam ? 'bg-amber-50' : 'hover:bg-gray-50'}">
+                    <td class="py-2 px-3 font-semibold sticky left-0 ${isMyTeam ? 'bg-amber-50' : 'bg-white'} z-10">${p.name}</td>
+                    <td class="py-2 px-3 text-gray-500 text-xs">${teamName}</td>
+                    ${statsConfig.map(s => `
+                        <td class="text-center py-2 px-3 ${s.key === sortStat ? 'font-bold text-black' : 'text-gray-600'}">
+                            ${p.seasonStats?.[s.key] || 0}
+                        </td>
+                    `).join('')}
+                </tr>`;
         });
     }
+    
     elements.playerStatsContainer.innerHTML = tableHtml + `</tbody></table></div>`;
 }
 
 /** Renders the 'Hall of Fame' tab content. */
 function renderHallOfFameTab(gameState) {
-    if (!elements.hallOfFameList || !gameState?.hallOfFame || !Array.isArray(gameState.hallOfFame)) {
-        console.error("Cannot render Hall of Fame: Missing element or invalid data.");
-        if (elements.hallOfFameList) elements.hallOfFameList.innerHTML = '<p class="text-red-500">Error loading Hall of Fame.</p>';
+    if (!elements.hallOfFameList) return;
+
+    if (!gameState?.hallOfFame || gameState.hallOfFame.length === 0) {
+        elements.hallOfFameList.innerHTML = `
+            <div class="p-8 text-center text-gray-400 border-2 border-dashed border-gray-300 rounded-lg">
+                <p>The Hall of Fame is currently empty.</p>
+                <p class="text-xs mt-2">Players are inducted upon retirement if they meet specific criteria.</p>
+            </div>`;
         return;
     }
-    const inductees = gameState.hallOfFame;
-    if (inductees.length === 0) {
-        elements.hallOfFameList.innerHTML = '<p class="text-gray-500">The Hall of Fame is empty.</p>';
-        return;
-    }
-    elements.hallOfFameList.innerHTML = '<div class="space-y-4">' + inductees.map(p => {
-        if (!p || !p.careerStats) return '';
-        return `<article class="bg-gray-100 p-4 rounded-lg shadow" aria-labelledby="hof-${p.id}">
-            <h4 id="hof-${p.id}" class="font-bold text-lg text-amber-600">${p.name ?? '?'}</h4>
-            <p class="text-sm">Seasons: ${p.careerStats.seasonsPlayed ?? '?'}</p>
-            <div class="grid grid-cols-2 sm:grid-cols-3 gap-2 mt-2 text-sm">
-                <span>TDs: <strong>${p.careerStats.touchdowns || 0}</strong></span>
-                <span>PassYds: <strong>${p.careerStats.passYards || 0}</strong></span>
-                <span>RushYds: <strong>${p.careerStats.rushYards || 0}</strong></span>
-                <span>RecYds: <strong>${p.careerStats.recYards || 0}</strong></span>
-                <span>Tackles: <strong>${p.careerStats.tackles || 0}</strong></span>
-                <span>Sacks: <strong>${p.careerStats.sacks || 0}</strong></span>
-                <span>INTs: <strong>${p.careerStats.interceptions || 0}</strong></span>
-                <span>Fumbles: <strong>${p.careerStats.fumbles || 0}</strong></span>
-                <span>Fum Lost: <strong>${p.careerStats.fumblesLost || 0}</strong></span>
-                <span>Fum Rec: <strong>${p.careerStats.fumblesRecovered || 0}</strong></span>
-                <span>Drops: <strong>${p.careerStats.drops || 0}</strong></span>
-            </div>
-        </article>`;
-    }).join('') + '</div>';
+
+    elements.hallOfFameList.innerHTML = '<div class="grid grid-cols-1 md:grid-cols-2 gap-4">' + 
+        gameState.hallOfFame.map(p => {
+            return `
+            <div class="bg-gradient-to-br from-amber-50 to-white p-4 rounded-lg shadow border border-amber-200">
+                <div class="flex justify-between items-start mb-2">
+                    <h4 class="font-bold text-lg text-amber-800">${p.name}</h4>
+                    <span class="text-xs bg-amber-200 text-amber-800 px-2 py-1 rounded-full">Inducted Year ${p.retiredYear || '?'}</span>
+                </div>
+                <div class="grid grid-cols-2 gap-x-4 gap-y-1 text-sm text-gray-700">
+                    <span>TDs: <strong>${p.careerStats?.touchdowns || 0}</strong></span>
+                    <span>Pass Yds: <strong>${p.careerStats?.passYards || 0}</strong></span>
+                    <span>Rush Yds: <strong>${p.careerStats?.rushYards || 0}</strong></span>
+                    <span>Rec Yds: <strong>${p.careerStats?.recYards || 0}</strong></span>
+                    <span>Tackles: <strong>${p.careerStats?.tackles || 0}</strong></span>
+                    <span>Sacks: <strong>${p.careerStats?.sacks || 0}</strong></span>
+                </div>
+            </div>`;
+        }).join('') + 
+    '</div>';
 }
 
 /** Renders the Offseason summary screen. */

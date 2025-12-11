@@ -259,10 +259,25 @@ function handleSaveTestRoster() {
 // --- DASHBOARD INTERACTION ---
 
 function handleTabSwitch(e) {
-    if (e.target.matches('.tab-button')) {
-        const tabId = e.target.dataset.tab;
+    // Use closest() to handle clicks on child elements (icons, spans, text)
+    const button = e.target.closest('.tab-button'); 
+    
+    if (button) {
+        const tabId = button.dataset.tab;
+        
+        // 1. Update visual active state immediately (Optional, improves perceived speed)
+        document.querySelectorAll('.tab-button').forEach(btn => {
+            btn.classList.remove('active');
+            btn.setAttribute('aria-selected', 'false');
+        });
+        button.classList.add('active');
+        button.setAttribute('aria-selected', 'true');
+
+        // 2. Refresh data and render
         gameState = Game.getGameState(); 
-        if (gameState) UI.switchTab(tabId, gameState);
+        if (gameState) {
+            UI.switchTab(tabId, gameState);
+        }
     }
 }
 function handleFormationChange(e) {
