@@ -2,21 +2,21 @@
 import * as Game from './game.js';
 import * as UI from './ui.js';
 import { positionOverallWeights } from './game/player.js';
-import { relationshipLevels } from './data.js'; 
+import { relationshipLevels } from './data.js';
 import { formatHeight } from './utils.js';
 
 // --- Global State ---
 let gameState = null;
 let selectedPlayerId = null;
-let currentLiveSimResult = null; 
-let currentSortColumn = 'potential'; 
-let currentSortDirection = 'desc';   
-let activeSaveKey = 'backyardFootballGameState'; 
+let currentLiveSimResult = null;
+let currentSortColumn = 'potential';
+let currentSortDirection = 'desc';
+let activeSaveKey = 'backyardFootballGameState';
 
 // --- Constants ---
 const ROSTER_LIMIT = 10;
 const MIN_HEALTHY_PLAYERS = 7;
-const WEEKS_IN_SEASON = 9; 
+const WEEKS_IN_SEASON = 9;
 
 function yieldToMain() { return new Promise(resolve => setTimeout(resolve, 0)); }
 
@@ -25,27 +25,27 @@ function yieldToMain() { return new Promise(resolve => setTimeout(resolve, 0)); 
 // =============================================================
 
 async function startNewGame() {
-  try {
-    UI.showScreen("loading-screen");
-    UI.startLoadingMessages();
-    await new Promise(resolve => setTimeout(resolve, 50));
-    
-    await Game.initializeLeague(UI.updateLoadingProgress);
-    UI.stopLoadingMessages();
+    try {
+        UI.showScreen("loading-screen");
+        UI.startLoadingMessages();
+        await new Promise(resolve => setTimeout(resolve, 50));
 
-    gameState = Game.getGameState();
-    if (!gameState) throw new Error("Failed to get game state.");
+        await Game.initializeLeague(UI.updateLoadingProgress);
+        UI.stopLoadingMessages();
 
-    UI.renderTeamNameSuggestions(
-      ['Jets', 'Sharks', 'Tigers', 'Bulldogs', 'Panthers', 'Giants'],
-      handleTeamNameSelection
-    );
-    UI.showScreen('team-creation-screen');
-  } catch (error) {
-    console.error("Error starting game:", error);
-    UI.stopLoadingMessages();
-    UI.showModal("Error", `Could not start game: ${error.message}`, null, '', null, 'Close');
-  }
+        gameState = Game.getGameState();
+        if (!gameState) throw new Error("Failed to get game state.");
+
+        UI.renderTeamNameSuggestions(
+            ['Jets', 'Sharks', 'Tigers', 'Bulldogs', 'Panthers', 'Giants'],
+            handleTeamNameSelection
+        );
+        UI.showScreen('team-creation-screen');
+    } catch (error) {
+        console.error("Error starting game:", error);
+        UI.stopLoadingMessages();
+        UI.showModal("Error", `Could not start game: ${error.message}`, null, '', null, 'Close');
+    }
 }
 
 function handleTeamNameSelection(name) {
@@ -61,8 +61,8 @@ function handleConfirmTeam() {
         try {
             Game.createPlayerTeam(customName);
             Game.setupDraft();
-            gameState = Game.getGameState(); 
-            
+            gameState = Game.getGameState();
+
             UI.renderSelectedPlayerCard(null, gameState);
             UI.renderDraftScreen(gameState, handlePlayerSelectInDraft, selectedPlayerId, currentSortColumn, currentSortDirection);
             UI.showScreen('draft-screen');
@@ -98,7 +98,7 @@ function handleDraftPlayer() {
             selectedPlayerId = null;
             gameState.currentPick++;
             UI.renderSelectedPlayerCard(null, gameState);
-            runAIDraftPicks(); 
+            runAIDraftPicks();
         } else {
             UI.showModal("Draft Error", "Could not draft player.", null, '', null, 'Close');
         }
@@ -107,7 +107,7 @@ function handleDraftPlayer() {
 
 async function runAIDraftPicks() {
     if (!gameState) return;
-    
+
     const checkDraftEnd = () => {
         const pickLimitReached = gameState.currentPick >= gameState.draftOrder.length;
         const noPlayersLeft = gameState.players.filter(p => p && !p.teamId).length === 0;
@@ -146,11 +146,11 @@ async function runAIDraftPicks() {
         await new Promise(resolve => setTimeout(resolve, 50));
 
         const result = Game.simulateAIPick(currentPickingTeam);
-        if (result) safetyCounter = 0; 
+        if (result) safetyCounter = 0;
         advancePick();
 
         if (checkDraftEnd()) {
-            handleDraftEnd(); 
+            handleDraftEnd();
             return;
         }
         currentPickingTeam = gameState.draftOrder[gameState.currentPick];
@@ -162,12 +162,12 @@ async function runAIDraftPicks() {
             if (checkDraftEnd()) {
                 handleDraftEnd();
             } else {
-                runAIDraftPicks(); 
+                runAIDraftPicks();
             }
-        } else { 
+        } else {
             UI.renderDraftScreen(gameState, handlePlayerSelectInDraft, selectedPlayerId, currentSortColumn, currentSortDirection);
         }
-    } else { 
+    } else {
         handleDraftEnd();
     }
 }
@@ -230,7 +230,7 @@ async function handleLoadGame(saveKey) {
         }
 
         gameState = loadedState;
-        selectedPlayerId = null; 
+        selectedPlayerId = null;
         activeSaveKey = keyToLoad;
 
         if (gameState.currentWeek >= 0) {
@@ -240,7 +240,7 @@ async function handleLoadGame(saveKey) {
         } else {
             UI.renderSelectedPlayerCard(null, gameState);
             UI.renderDraftScreen(gameState, handlePlayerSelectInDraft, selectedPlayerId, currentSortColumn, currentSortDirection);
-            UI.showScreen('draft-screen'); 
+            UI.showScreen('draft-screen');
         }
     } catch (error) {
         UI.showModal("Error", `Could not load game: ${error.message}`, null, '', null, 'Close');
@@ -252,7 +252,7 @@ async function handleLoadTestRoster() { await handleLoadGame('my_test_roster'); 
 function handleSaveTestRoster() {
     if (!gameState) return;
     Game.saveGameState('my_test_roster');
-    activeSaveKey = 'my_test_roster'; 
+    activeSaveKey = 'my_test_roster';
     UI.showModal("Saved", "<p>Game saved as 'Test Roster'.</p>");
 }
 
@@ -260,11 +260,11 @@ function handleSaveTestRoster() {
 
 function handleTabSwitch(e) {
     // Use closest() to handle clicks on child elements (icons, spans, text)
-    const button = e.target.closest('.tab-button'); 
-    
+    const button = e.target.closest('.tab-button');
+
     if (button) {
         const tabId = button.dataset.tab;
-        
+
         // 1. Update visual active state immediately (Optional, improves perceived speed)
         document.querySelectorAll('.tab-button').forEach(btn => {
             btn.classList.remove('active');
@@ -274,7 +274,7 @@ function handleTabSwitch(e) {
         button.setAttribute('aria-selected', 'true');
 
         // 2. Refresh data and render
-        gameState = Game.getGameState(); 
+        gameState = Game.getGameState();
         if (gameState) {
             UI.switchTab(tabId, gameState);
         }
@@ -287,7 +287,7 @@ function handleFormationChange(e) {
 
     // Use the smart function in UI that preserves player slots
     UI.changeFormationSmart(side, formationName);
-    
+
     // Note: We do NOT need to save/refresh here immediately.
     // UI.changeFormationSmart emits 'refresh-ui' when it finishes,
     // which triggers the save listener we added at the bottom of main.js.
@@ -295,18 +295,18 @@ function handleFormationChange(e) {
 
 function handleDepthChartDrop(playerId, newPositionSlot, side) {
     if (!gameState) return;
-    
+
     // 1. Update the data
     Game.updateDepthChart(playerId, newPositionSlot, side);
-    
+
     // 2. Refresh the global state object
     gameState = Game.getGameState();
-    
+
     // 3. Save to browser storage
     Game.saveGameState(activeSaveKey);
-    
+
     // 4. RESTORED: Force the tab to re-render so you see the player appear in the slot
-    UI.switchTab('depth-chart', gameState); 
+    UI.switchTab('depth-chart', gameState);
 }
 
 function handleDepthChartSelect(e) {
@@ -339,12 +339,12 @@ async function handleAdvanceWeek() {
         const hasFreeAgents = gameState.freeAgents && gameState.freeAgents.length > 0;
         if (hasFreeAgents) {
             console.log("Roster check failed: Prompting Call Friend.");
-            promptCallFriend(proceedWithAdvanceWeek); 
-            return; 
+            promptCallFriend(proceedWithAdvanceWeek);
+            return;
         } else {
-            UI.showModal("Warning: Short Roster", 
-               `<p>You only have ${healthyCount} healthy players. You need ${MIN_HEALTHY_PLAYERS} to avoid forfeiting.</p><p>No friends are available to call.</p>`,
-               () => proceedWithAdvanceWeek(), "Proceed Anyway"
+            UI.showModal("Warning: Short Roster",
+                `<p>You only have ${healthyCount} healthy players. You need ${MIN_HEALTHY_PLAYERS} to avoid forfeiting.</p><p>No friends are available to call.</p>`,
+                () => proceedWithAdvanceWeek(), "Proceed Anyway"
             );
             return;
         }
@@ -354,7 +354,7 @@ async function handleAdvanceWeek() {
 
 function proceedWithAdvanceWeek() {
     if (!gameState) return;
-    
+
     if (gameState.currentWeek >= WEEKS_IN_SEASON) {
         handleSeasonEnd();
         return;
@@ -362,7 +362,7 @@ function proceedWithAdvanceWeek() {
 
     if (gameState.currentWeek === 0 && (!gameState.schedule || gameState.schedule.length === 0)) {
         Game.generateSchedule();
-        gameState = Game.getGameState(); 
+        gameState = Game.getGameState();
     }
 
     const gamesPerWeek = gameState.teams.length / 2;
@@ -371,7 +371,7 @@ function proceedWithAdvanceWeek() {
     const playerGameMatch = gameState.schedule.slice(weekStartIndex, weekEndIndex)
         .find(g => g && g.home && g.away && (g.home.id === gameState.playerTeam.id || g.away.id === gameState.playerTeam.id));
 
-    if (playerGameMatch) { 
+    if (playerGameMatch) {
         UI.showModal("Game Day!",
             `<p>Week ${gameState.currentWeek + 1} vs <strong>${playerGameMatch.home.id === gameState.playerTeam.id ? playerGameMatch.away.name : playerGameMatch.home.name}</strong>.</p>`,
             () => startLiveGame(playerGameMatch), "Watch Game",
@@ -397,7 +397,7 @@ function startLiveGame(playerGameMatch) {
             if (!result) return;
 
             allResults.push(result);
-            
+
             if (result.breakthroughs && Array.isArray(result.breakthroughs)) {
                 result.breakthroughs.forEach(b => {
                     if (b && b.player && b.player.teamId === gameState.playerTeam?.id) {
@@ -426,12 +426,12 @@ function startLiveGame(playerGameMatch) {
 
     if (currentLiveSimResult) {
         UI.showScreen('game-sim-screen');
-        UI.startLiveGameSim(currentLiveSimResult, () => { 
-            finishWeekSimulation(allResults.filter(Boolean)); 
-            currentLiveSimResult = null; 
+        UI.startLiveGameSim(currentLiveSimResult, () => {
+            finishWeekSimulation(allResults.filter(Boolean));
+            currentLiveSimResult = null;
         });
     } else {
-        finishWeekSimulation(allResults.filter(Boolean)); 
+        finishWeekSimulation(allResults.filter(Boolean));
     }
 }
 
@@ -453,10 +453,10 @@ function simulateRestOfWeek() {
 
     if (results !== null) {
         finishWeekSimulation(results);
-    } else if (gameState && gameState.currentWeek >= WEEKS_IN_SEASON) { 
+    } else if (gameState && gameState.currentWeek >= WEEKS_IN_SEASON) {
         handleSeasonEnd();
     } else {
-        gameState = Game.getGameState(); 
+        gameState = Game.getGameState();
         if (gameState) {
             UI.renderDashboard(gameState);
             UI.showScreen('dashboard-screen');
@@ -474,7 +474,7 @@ function finishWeekSimulation(results) {
     const buildResultsModalHtml = (results) => {
         if (!gameState?.playerTeam || !Array.isArray(results)) return "<p>Error.</p>";
         const playerGame = results.find(r => r && (r.homeTeam?.id === gameState.playerTeam.id || r.awayTeam?.id === gameState.playerTeam.id));
-        
+
         let resultText = 'BYE';
         if (playerGame) {
             const myScore = playerGame.homeTeam.id === gameState.playerTeam.id ? playerGame.homeScore : playerGame.awayScore;
@@ -499,11 +499,11 @@ function finishWeekSimulation(results) {
     };
 
     if (results && results.length > 0) {
-        UI.showModal(`Week ${gameState.currentWeek} Results`, buildResultsModalHtml(results)); 
+        UI.showModal(`Week ${gameState.currentWeek} Results`, buildResultsModalHtml(results));
     }
 
     gameState.teams.filter(t => t && t.id !== gameState.playerTeam.id).forEach(team => {
-        try { Game.aiManageRoster(team); } catch (e) {}
+        try { Game.aiManageRoster(team); } catch (e) { }
     });
     Game.generateWeeklyFreeAgents();
 
@@ -538,13 +538,13 @@ function handleSeasonEnd() {
 
 function handleGoToNextDraft() {
     try {
-        Game.setupDraft(); 
-        gameState = Game.getGameState(); 
-        selectedPlayerId = null; 
+        Game.setupDraft();
+        gameState = Game.getGameState();
+        selectedPlayerId = null;
         UI.renderSelectedPlayerCard(null, gameState);
-        UI.renderDraftScreen(gameState, handlePlayerSelectInDraft, selectedPlayerId, currentSortColumn, currentSortDirection); 
-        UI.showScreen('draft-screen'); 
-        runAIDraftPicks(); 
+        UI.renderDraftScreen(gameState, handlePlayerSelectInDraft, selectedPlayerId, currentSortColumn, currentSortDirection);
+        UI.showScreen('draft-screen');
+        runAIDraftPicks();
     } catch (error) {
         console.error(error);
     }
@@ -593,12 +593,12 @@ function handleStatsChange() {
 
 function handleMessageClick(messageId) {
     if (!gameState || !gameState.messages) return;
-    const message = gameState.messages.find(m => m && m.id === messageId); 
+    const message = gameState.messages.find(m => m && m.id === messageId);
     if (message) {
         UI.showModal(message.subject, `<p class="whitespace-pre-wrap">${message.body}</p>`);
         Game.markMessageAsRead(messageId);
-        UI.renderMessagesTab(gameState); 
-        UI.updateMessagesNotification(gameState.messages); 
+        UI.renderMessagesTab(gameState);
+        UI.updateMessagesNotification(gameState.messages);
     }
 }
 
@@ -606,9 +606,9 @@ function buildCallFriendModalHtml(freeAgents) {
     let html = '<div class="mt-4 space-y-2">';
     if (!Array.isArray(freeAgents)) return '<p>Error.</p>';
     if (freeAgents.length === 0) return '<p>No friends available.</p>';
-    
+
     freeAgents.forEach(p => {
-        if (!p) return; 
+        if (!p) return;
         const bestPos = Object.keys(positionOverallWeights).reduce((best, pos) => {
             const currentOvr = Game.calculateOverall(p, pos);
             return currentOvr > best.ovr ? { pos, ovr: currentOvr } : best;
@@ -629,7 +629,7 @@ function buildCallFriendModalHtml(freeAgents) {
 }
 
 function promptCallFriend(onIgnore = null) {
-    gameState = Game.getGameState(); 
+    gameState = Game.getGameState();
     if (!gameState) return;
 
     const { freeAgents, playerTeam } = gameState;
@@ -639,16 +639,16 @@ function promptCallFriend(onIgnore = null) {
     if (!onIgnore && (healthyCount >= MIN_HEALTHY_PLAYERS || !Array.isArray(freeAgents) || freeAgents.length === 0)) return;
 
     const modalBodyIntro = `<p>Only ${healthyCount} healthy players! Call a friend?</p>`;
-    
+
     const freeAgentsWithRel = (freeAgents || []).map(p => {
         if (!p) return null;
         const maxLevel = rosterObjects.reduce(
-            (max, rp) => Math.max(max, Game.getRelationshipLevel(rp?.id, p.id)), 
+            (max, rp) => Math.max(max, Game.getRelationshipLevel(rp?.id, p.id)),
             relationshipLevels.STRANGER.level
         );
         const relInfo = Object.values(relationshipLevels).find(rl => rl.level === maxLevel) || relationshipLevels.STRANGER;
         return { ...p, relationshipName: relInfo.name };
-    }).filter(Boolean); 
+    }).filter(Boolean);
 
     const friendListHtml = buildCallFriendModalHtml(freeAgentsWithRel);
     const cancelText = onIgnore ? "Proceed Shorthanded" : "Later";
@@ -663,18 +663,18 @@ function promptCallFriend(onIgnore = null) {
         if (e.target.matches('.call-friend-btn')) {
             const playerId = e.target.dataset.playerId;
             if (!playerId) return;
-            
+
             const result = Game.callFriend(playerId);
             UI.hideModal();
 
             setTimeout(() => {
                 UI.showModal("Call Result", `<p>${result.message}</p>`);
-                gameState = Game.getGameState(); 
-                if (gameState) UI.switchTab('my-team', gameState); 
+                gameState = Game.getGameState();
+                if (gameState) UI.switchTab('my-team', gameState);
             }, 100);
         }
     };
-    modalBodyElement.addEventListener('click', callButtonDelegationHandler, {once:true});
+    modalBodyElement.addEventListener('click', callButtonDelegationHandler, { once: true });
 }
 
 // --- Public API ---
@@ -690,7 +690,7 @@ window.app = {
     skipSim: UI.skipLiveGameSim,
     setSpeed: UI.setSimSpeed,
     cutPlayer: (id) => {
-        if(confirm("Cut this player?")) {
+        if (confirm("Cut this player?")) {
             Game.playerCut(id);
             UI.hideModal();
             gameState = Game.getGameState();
@@ -725,22 +725,22 @@ function main() {
 
         // Live Sim Controls
         document.getElementById('sim-skip-btn')?.addEventListener('click', () => {
-            UI.skipLiveGameSim(); 
+            UI.skipLiveGameSim();
             UI.drawFieldVisualization(null);
         });
-        document.getElementById('sim-speed-play')?.addEventListener('click', () => UI.setSimSpeed(50));  
-        document.getElementById('sim-speed-fast')?.addEventListener('click', () => UI.setSimSpeed(20));  
-        document.getElementById('sim-speed-faster')?.addEventListener('click', () => UI.setSimSpeed(150)); 
-        
+        document.getElementById('sim-speed-play')?.addEventListener('click', () => UI.setSimSpeed(50));
+        document.getElementById('sim-speed-fast')?.addEventListener('click', () => UI.setSimSpeed(20));
+        document.getElementById('sim-speed-faster')?.addEventListener('click', () => UI.setSimSpeed(150));
+
         // Dashboard Navigation and Content Interaction
         document.getElementById('dashboard-tabs')?.addEventListener('click', handleTabSwitch);
         document.getElementById('dashboard-content')?.addEventListener('click', handleDashboardClicks);
         document.getElementById('dashboard-content')?.addEventListener('change', handleDepthChartSelect);
-        
+
         // Messages List (Event Delegation)
         document.getElementById('messages-list')?.addEventListener('click', (e) => {
             const messageItem = e.target.closest('.message-item');
-            if (messageItem?.dataset.messageId) { 
+            if (messageItem?.dataset.messageId) {
                 handleMessageClick(messageItem.dataset.messageId);
             }
         });
@@ -754,7 +754,7 @@ function main() {
         });
         document.querySelector('#draft-screen thead tr')?.addEventListener('click', (e) => {
             const headerCell = e.target.closest('th[data-sort]');
-            if (!headerCell || !gameState) return; 
+            if (!headerCell || !gameState) return;
 
             const newSortColumn = headerCell.dataset.sort;
 
@@ -762,7 +762,7 @@ function main() {
                 currentSortDirection = (currentSortDirection === 'desc') ? 'asc' : 'desc';
             } else {
                 currentSortColumn = newSortColumn;
-                currentSortDirection = 'desc'; 
+                currentSortDirection = 'desc';
             }
 
             UI.renderDraftPool(gameState, handlePlayerSelectInDraft, currentSortColumn, currentSortDirection);
@@ -784,16 +784,29 @@ function main() {
         // 💡 NEW: Listener for "Refresh UI" (fired by new Depth Order tab)
         // Ensures game state is saved when you reorder the list
         document.addEventListener('refresh-ui', () => {
-             gameState = Game.getGameState();
-             Game.saveGameState(activeSaveKey);
-             console.log("Game state saved on UI Refresh.");
+            // 1. Get fresh data from the game logic
+            gameState = Game.getGameState();
+
+            // 2. Save to browser storage so progress isn't lost
+            Game.saveGameState(activeSaveKey);
+
+            // 3. FORCE RE-RENDER of the currently visible tab
+            // This ensures that if you cut a player or change a setting, 
+            // the table updates instantly without needing a page reload.
+            const activeTabEl = document.querySelector('.tab-button.active');
+            if (activeTabEl) {
+                const tabId = activeTabEl.dataset.tab;
+                UI.switchTab(tabId, gameState);
+            }
+
+            console.log("Game state saved and UI refreshed.");
         });
 
         // 💡 NEW: Listener for "Depth Chart Changed" (fired by Formation Revert Fix)
         // Ensures specific player slot updates are processed and saved
         document.addEventListener('depth-chart-changed', (e) => {
-             const { playerId, slot, side } = e.detail;
-             handleDepthChartDrop(playerId, slot, side);
+            const { playerId, slot, side } = e.detail;
+            handleDepthChartDrop(playerId, slot, side);
         });
 
         // Show the initial screen

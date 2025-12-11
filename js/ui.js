@@ -830,49 +830,78 @@ export function renderDashboard(gameState) {
 }
 
 /** Handles switching between dashboard tabs and rendering content. */
-/** Handles switching between dashboard tabs and rendering content. */
 export function switchTab(tabId, gameState) {
-    console.log(`Switching to tab: ${tabId}`);
+    console.log(`🖱️ Switching to tab: "${tabId}"`);
 
     if (!elements.dashboardContent || !elements.dashboardTabs) {
-        console.error("Dashboard elements missing.");
+        console.error("CRITICAL: Dashboard containers not found in setupElements.");
         return;
     }
 
-    // 1. Hide all panes
+    // 1. Visual Toggle: Hide all panes, Show selected pane
     elements.dashboardContent.querySelectorAll('.tab-pane').forEach(p => p.classList.add('hidden'));
     
-    // 2. Deactivate all tab buttons
+    // Deactivate all buttons
     elements.dashboardTabs.querySelectorAll('.tab-button').forEach(b => {
-        b.classList.remove('active', 'bg-gray-700', 'text-white');
+        b.classList.remove('active');
         b.setAttribute('aria-selected', 'false');
     });
 
-    // 3. Find target pane and button
+    // Activate the specific DOM elements
     const contentPane = document.getElementById(`tab-content-${tabId}`);
     const tabButton = elements.dashboardTabs.querySelector(`[data-tab="${tabId}"]`);
 
-    if (!contentPane) { console.error(`Pane ${tabId} not found`); return; }
+    if (contentPane) contentPane.classList.remove('hidden');
+    else console.error(`❌ HTML Error: ID "tab-content-${tabId}" not found in index.html`);
 
-    // 4. Show active state
-    contentPane.classList.remove('hidden');
     if (tabButton) {
-        tabButton.classList.add('active'); // Add your CSS active class here
+        tabButton.classList.add('active');
         tabButton.setAttribute('aria-selected', 'true');
     }
 
-    if (!gameState) return;
+    // 2. Data Check
+    if (!gameState) {
+        console.warn("⚠️ No GameState provided to switchTab.");
+        if (contentPane) contentPane.innerHTML = '<p class="p-4 text-red-500">Game data is missing.</p>';
+        return;
+    }
 
-    // 5. Route to the correct render function
-    switch (tabId) {
-        case 'my-team': renderMyTeamTab(gameState); break;
-        case 'depth-chart': renderDepthChartTab(gameState); break;
-        case 'messages': renderMessagesTab(gameState); break;
-        case 'schedule': renderScheduleTab(gameState); break;
-        case 'standings': renderStandingsTab(gameState); break;
-        case 'player-stats': renderPlayerStatsTab(gameState); break;
-        case 'hall-of-fame': renderHallOfFameTab(gameState); break;
-        default: console.warn(`Unknown tab: ${tabId}`);
+    // 3. Routing: Call the correct render function
+    try {
+        switch (tabId) {
+            case 'my-team': 
+                renderMyTeamTab(gameState); 
+                break;
+            case 'depth-chart': 
+                // Depth chart handles its own sub-logic
+                if (typeof renderDepthChartTab === 'function') renderDepthChartTab(gameState);
+                break;
+            case 'schedule': 
+                console.log("📅 Rendering Schedule...");
+                renderScheduleTab(gameState); 
+                break;
+            case 'standings': 
+                console.log("🏆 Rendering Standings...");
+                renderStandingsTab(gameState); 
+                break;
+            case 'player-stats': 
+                console.log("📊 Rendering Stats...");
+                renderPlayerStatsTab(gameState); 
+                break;
+            case 'hall-of-fame': 
+                console.log("🏛️ Rendering Hall of Fame...");
+                renderHallOfFameTab(gameState); 
+                break;
+            case 'messages': 
+                console.log("📩 Rendering Messages...");
+                renderMessagesTab(gameState); 
+                break;
+            default:
+                console.warn(`❓ Unknown tab ID: ${tabId}`);
+        }
+    } catch (error) {
+        console.error(`💥 CRASH in switchTab for "${tabId}":`, error);
+        if (contentPane) contentPane.innerHTML = `<p class="p-4 text-red-500">Error rendering this tab: ${error.message}</p>`;
     }
 }
 
