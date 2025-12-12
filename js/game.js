@@ -6725,25 +6725,27 @@ function advanceToOffseason() {
 /** Updates the player's depth chart based on drag-and-drop. */
 function updateDepthChart(playerId, newPositionSlot, side) {
     const team = game?.playerTeam;
-    if (!team || !team.depthChart || !team.depthChart[side]) {
-        console.error("updateDepthChart: Invalid state.");
-        return;
+    if (!team || !team.depthChart || !team.depthChart[side]) { 
+        console.error("updateDepthChart: Invalid state."); 
+        return; 
     }
-
+    
+    // 1. Update the specific slot (The Visual Change)
     const chart = team.depthChart[side];
-    const player = game.players.find(p => p && p.id === playerId);
-
-    if (player && player.status?.type === 'temporary') {
-        console.warn("Cannot move temporary players in depth chart.");
-        return;
-    }
-
-    // --- NEW LOGIC: Allow Multi-Assignment ---
-    // We simply assign the player to the new slot.
-    // We do NOT clear their previous slot.
     chart[newPositionSlot] = playerId;
 
-    console.log(`Player ${playerId} assigned to ${newPositionSlot}`);
+    // 2. Sync to Depth Order (The Priority Fix)
+    // We move this player to the VERY FRONT of the master depthOrder list.
+    // This guarantees they are seen as "Rank 1" for their position group.
+    if (!team.depthOrder) team.depthOrder = [];
+
+    const index = team.depthOrder.indexOf(playerId);
+    if (index > -1) {
+        team.depthOrder.splice(index, 1); // Remove from old spot
+    }
+    team.depthOrder.unshift(playerId); // Add to front (High Priority)
+
+    console.log(`Player ${playerId} assigned to ${newPositionSlot} and set as Priority #1.`);
 }
 
 // -----------------------------

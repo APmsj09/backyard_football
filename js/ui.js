@@ -3784,9 +3784,9 @@ export function applyDepthOrderToChart() {
     console.log("Saving Depth Chart & Order...");
     const gs = getGameState();
     const newDepthChart = { offense: {}, defense: {}, special: {} };
-    const newDepthOrder = []; // <--- NEW: Master list to persist the sort order
+    const newDepthOrder = []; // Master list
 
-    // 1. Gather all lists from the DOM
+    // 1. Scrape lists from DOM
     const lists = document.querySelectorAll('.depth-sortable-list');
     const orderMap = {}; 
 
@@ -3794,13 +3794,10 @@ export function applyDepthOrderToChart() {
         const group = list.dataset.group;
         const ids = [...list.querySelectorAll('.depth-order-item')].map(el => el.dataset.playerId);
         orderMap[group] = ids;
-        
-        // Add these IDs to our master list in the new order
-        // This ensures that when we re-render, the sort order is preserved.
-        newDepthOrder.push(...ids); 
+        newDepthOrder.push(...ids); // Preserve the new order
     });
 
-    // 2. Define Slot Mappings
+    // 2. Define Slots & Sides
     const slotDefinitions = {
         'QB': ['QB1'],
         'RB': ['RB1', 'RB2'],
@@ -3817,7 +3814,7 @@ export function applyDepthOrderToChart() {
         'DL': 'defense', 'LB': 'defense', 'DB': 'defense', 'ST': 'special'
     };
 
-    // 3. PRIORITY ALGORITHM (Fill Slots based on Rank)
+    // 3. Priority Fill Algorithm
     const maxDepth = 6; 
     const assignedPlayers = { offense: new Set(), defense: new Set(), special: new Set() };
 
@@ -3839,7 +3836,7 @@ export function applyDepthOrderToChart() {
         });
     }
 
-    // 4. Backfill Holes
+    // 4. Backfill
     Object.keys(slotDefinitions).forEach(group => {
         const side = sides[group];
         const targetSlots = slotDefinitions[group];
@@ -3856,16 +3853,15 @@ export function applyDepthOrderToChart() {
         });
     });
 
-    // 5. Special Rules
+    // 5. Special Teams
     if (newDepthChart.offense['QB1']) {
         newDepthChart.special['P'] = newDepthChart.offense['QB1'];
     }
 
-    // 6. SAVE EVERYTHING
+    // 6. Save & Refresh
     gs.playerTeam.depthChart = newDepthChart;
-    gs.playerTeam.depthOrder = newDepthOrder; // <--- The critical fix!
+    gs.playerTeam.depthOrder = newDepthOrder; // <--- This must be here!
 
-    // Force UI Refresh (which triggers Main.js to save to localStorage)
     document.dispatchEvent(new CustomEvent('refresh-ui'));
 }
 
