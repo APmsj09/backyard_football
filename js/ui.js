@@ -3781,28 +3781,32 @@ function updateRankNumbers(container) {
  * Implements the "Rank 1 > Rank 2" priority rule.
  */
 export function applyDepthOrderToChart() {
-    console.log("Applying Depth Order with Priority Logic...");
+    console.log("Saving Depth Chart & Order...");
     const gs = getGameState();
     const newDepthChart = { offense: {}, defense: {}, special: {} };
+    const newDepthOrder = []; // <--- NEW: Master list to persist the sort order
 
     // 1. Gather all lists from the DOM
-    // We scrape the current order directly from the UI to capture user drags
     const lists = document.querySelectorAll('.depth-sortable-list');
-    const orderMap = {}; // { 'QB': [id1, id2], 'WR': [id1, id2, id3] }
+    const orderMap = {}; 
 
     lists.forEach(list => {
         const group = list.dataset.group;
-        const ids = [...list.querySelectorAll('[draggable="true"]')].map(el => el.dataset.playerId);
+        const ids = [...list.querySelectorAll('.depth-order-item')].map(el => el.dataset.playerId);
         orderMap[group] = ids;
+        
+        // Add these IDs to our master list in the new order
+        // This ensures that when we re-render, the sort order is preserved.
+        newDepthOrder.push(...ids); 
     });
 
-    // 2. Define Slot Mappings (Must match the UI rendering logic)
+    // 2. Define Slot Mappings
     const slotDefinitions = {
         'QB': ['QB1'],
         'RB': ['RB1', 'RB2'],
         'WR': ['WR1', 'WR2', 'WR3', 'WR4', 'WR5'],
         'OL': ['OL1', 'OL2', 'OL3'],
-        'DL': ['DL1', 'DL2', 'DL3'],
+        'DL': ['DL1', 'DL2', 'DL3', 'DL4'],
         'LB': ['LB1', 'LB2', 'LB3'],
         'DB': ['DB1', 'DB2', 'DB3', 'DB4', 'DB5'],
         'ST': ['K', 'P']
@@ -3813,56 +3817,36 @@ export function applyDepthOrderToChart() {
         'DL': 'defense', 'LB': 'defense', 'DB': 'defense', 'ST': 'special'
     };
 
-    // 3. PRIORITY ALGORITHM
-    // We iterate by RANK (index), filling all #1 slots, then all #2 slots.
-    // This ensures a Rank 1 QB always beats a Rank 2 WR for an offensive slot.
-
-    const maxDepth = 6; // Check up to 6 players deep
+    // 3. PRIORITY ALGORITHM (Fill Slots based on Rank)
+    const maxDepth = 6; 
     const assignedPlayers = { offense: new Set(), defense: new Set(), special: new Set() };
 
     for (let rank = 0; rank < maxDepth; rank++) {
-
-        // Look at every position group (QB, RB, WR...) for this specific Rank
         Object.keys(slotDefinitions).forEach(group => {
             const playerList = orderMap[group] || [];
             const targetSlots = slotDefinitions[group];
             const side = sides[group];
 
-            // If this group has a slot for this rank (e.g., WR has a WR3, but QB doesn't have a QB3)
             if (rank < targetSlots.length && rank < playerList.length) {
                 const playerId = playerList[rank];
                 const slotName = targetSlots[rank];
 
-                // CHECK CONFLICTS:
-                // Is this player already assigned to a slot on THIS SIDE?
                 if (!assignedPlayers[side].has(playerId)) {
-
-                    // Assign them
                     newDepthChart[side][slotName] = playerId;
                     assignedPlayers[side].add(playerId);
-
-                } else {
-                    // CONFLICT: Player is already assigned on this side (e.g. playing QB1).
-                    // Logic: Since we process Rank 0 before Rank 1, the higher priority slot was already filled.
-                    // We simply skip this assignment. The slot remains empty for now.
-                    // (Optional: You could try to fill this slot with the NEXT available player in the list immediately,
-                    // but simply skipping allows the next Rank loop to catch it naturally).
                 }
             }
         });
     }
 
-    // 4. Fill Holes (Backfill)
-    // If a slot was skipped because the #1 guy was busy, we need to find the next best available guy.
+    // 4. Backfill Holes
     Object.keys(slotDefinitions).forEach(group => {
         const side = sides[group];
         const targetSlots = slotDefinitions[group];
         const playerList = orderMap[group] || [];
 
         targetSlots.forEach(slot => {
-            // If slot is empty
             if (!newDepthChart[side][slot]) {
-                // Find first player in list NOT assigned on this side
                 const filler = playerList.find(pid => !assignedPlayers[side].has(pid));
                 if (filler) {
                     newDepthChart[side][slot] = filler;
@@ -3872,20 +3856,20 @@ export function applyDepthOrderToChart() {
         });
     });
 
-    // 5. SPECIAL 7v7 RULE: Auto-Assign Punter
+    // 5. Special Rules
     if (newDepthChart.offense['QB1']) {
         newDepthChart.special['P'] = newDepthChart.offense['QB1'];
     }
 
-    // 6. Save & Refresh
+    // 6. SAVE EVERYTHING
     gs.playerTeam.depthChart = newDepthChart;
+    gs.playerTeam.depthOrder = newDepthOrder; // <--- The critical fix!
 
-    // This event tells the Dashboard to re-read the gs.playerTeam.depthChart 
-    // and redraw the Visual Field and Bench tables.
+    // Force UI Refresh (which triggers Main.js to save to localStorage)
     document.dispatchEvent(new CustomEvent('refresh-ui'));
-
-    console.log("Depth Chart Updated:", newDepthChart);
 }
+
+
 /**
  * Handles formation changes with "Snapshot & Restore" logic.
  * This prevents the "Revert to Default" bug.

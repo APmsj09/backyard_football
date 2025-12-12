@@ -3074,141 +3074,108 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
             }
         }
 
-        // --- D. ZONE COVERAGE (ENHANCED with DB/Safety Logic) ---
+        // --- D. ZONE COVERAGE (ENHANCED WITH SAFETY VISION) ---
         else if (assignment?.startsWith('zone_')) {
-            const zoneCenter = pState.cachedZoneCenter || getZoneCenter(assignment, LOS);
+            const originalZoneCenter = pState.cachedZoneCenter || getZoneCenter(assignment, LOS);
             const zone = zoneBoundaries[assignment];
-            const isSafety = pState.slot.startsWith('S');
-            const isDeepZone = assignment.includes('deep');
+            
+            // Is this player a Deep Safety/Corner?
+            const isDeepDefender = pState.slot.includes('S') || assignment.includes('deep');
+            
+            let targetX = originalZoneCenter.x;
+            let targetY = originalZoneCenter.y;
+            let foundUrgentThreat = false;
 
-            // 💡 ENHANCED: Advanced receiver detection with threat level assessment
-            const threats = offenseStates.filter(o => {
-                if (!o.action.includes('route') && o.action !== 'route_complete') return false;
+            // 1. SAFETY VISION: Scan for "Busted Coverages"
+            // If I am a deep defender, look for ANY deep, open receiver in my half of the field.
+            if (isDeepDefender && !playState.ballState.inAir) {
+                const deepOpenReceivers = offenseStates.filter(o => 
+                    o.action.includes('route') && 
+                    o.y > LOS + 10 && // Deep
+                    Math.abs(o.x - pState.x) < 25 && // On my side of the field
+                    !o.isBlocked
+                );
 
-                // For safeties: look wider area for threats
-                const searchRadius = isSafety ? 10 : 6;
-                const searchDepth = isSafety ? 12 : 8;
+                let mostDangerousRec = null;
+                let maxDangerScore = -1;
 
-                return Math.abs(o.x - zoneCenter.x) < searchRadius &&
-                    Math.abs(o.y - zoneCenter.y) < searchDepth;
-            });
+                deepOpenReceivers.forEach(rec => {
+                    // Check how "Open" this receiver is (distance to nearest OTHER defender)
+                    const distToNearestDefender = defenseStates
+                        .filter(d => d.id !== pState.id) // Don't count myself
+                        .reduce((min, d) => Math.min(min, getDistance(rec, d)), 100);
 
-            if (threats.length > 0) {
-                // 💡 ENHANCED: Threat prioritization by distance and speed
-                threats.sort((a, b) => {
-                    const distA = getDistance(zoneCenter, a);
-                    const distB = getDistance(zoneCenter, b);
-
-                    // Prioritize closer threats, but also consider speed differential
-                    const speedA = a.speed || 50;
-                    const speedB = b.speed || 50;
-                    const dbSpeed = pState.speed || 50;
-
-                    // Fast receivers close by are priority
-                    const threatScoreA = distA - (speedA > dbSpeed + 10 ? -3 : 0);
-                    const threatScoreB = distB - (speedB > dbSpeed + 10 ? -3 : 0);
-
-                    return threatScoreA - threatScoreB;
-                });
-
-                const primaryThreat = threats[0];
-
-                // 💡 ENHANCED: Decision tree for coverage positioning
-                let targetX = primaryThreat.x;
-                let targetY = primaryThreat.y;
-
-                // Decision 1: How aggressive to play (zone vs press)
-                const distToThreat = getDistance(pState, primaryThreat);
-                const threatDepth = primaryThreat.y - LOS;
-                const dbCoverage = pState.blockShedding || 50; // Defensive awareness
-
-                // Deeper threats = more aggressive (stay deeper)
-                // Closer threats = tighter coverage (press up)
-                const aggressiveness = distToThreat < 3.0 ? 0.4 : (isDeepZone ? 0.2 : 0.5);
-
-                // Decision 2: Blend towards threat or stay in zone
-                const blendFactor = Math.max(0.3, Math.min(0.8, distToThreat / 10.0));
-
-                targetX = (primaryThreat.x * blendFactor) + (zoneCenter.x * (1 - blendFactor));
-                targetY = (primaryThreat.y * blendFactor) + (zoneCenter.y * (1 - blendFactor));
-
-                // Decision 3: Deep zone safeties have top-down responsibility
-                if (isDeepZone && isSafety) {
-                    // Stay deeper than the threat for deep ball interceptions
-                    targetY = Math.max(targetY, primaryThreat.y + 2.0);
-                    // Also drift towards the ball if in air
-                    if (isBallInAir && playState.ballState.targetY > LOS) {
-                        const ballToSafety = getDistance(pState, playState.ballState);
-                        if (ballToSafety < 20.0) {
-                            // Move 30% towards ball for interception
-                            targetX = pState.x + (playState.ballState.x - pState.x) * 0.3;
-                            targetY = pState.y + (playState.ballState.y - pState.y) * 0.3;
+                    // If nobody is within 5 yards of this deep receiver, that's an EMERGENCY.
+                    if (distToNearestDefender > 5.0) {
+                        // Danger = Depth + Openness
+                        const score = rec.y + distToNearestDefender;
+                        if (score > maxDangerScore) {
+                            maxDangerScore = score;
+                            mostDangerousRec = rec;
                         }
                     }
+                });
+
+                // If we found a guy running free...
+                if (mostDangerousRec) {
+                    foundUrgentThreat = true;
+                    // ABANDON ZONE -> HELP OVER THE TOP
+                    // Target: Match his X, but stay 4 yards deeper (Goalie logic)
+                    const helpX = mostDangerousRec.x;
+                    const helpY = Math.max(originalZoneCenter.y, mostDangerousRec.y + 4.0);
+                    
+                    // Blend: 70% towards the threat, 30% stay near zone center (to not get completely baited)
+                    targetX = (helpX * 0.7) + (originalZoneCenter.x * 0.3);
+                    targetY = helpY;
                 }
+            }
+            // 2. STANDARD ZONE LOGIC (If no emergency)
+            if (!foundUrgentThreat) {
+                // Look for threats inside my normal zone radius
+                const searchRadius = isDeepDefender ? 12.0 : 6.0;
+                const localThreats = offenseStates.filter(o => {
+                    if (!o.action.includes('route') && o.action !== 'route_complete') return false;
+                    return Math.abs(o.x - originalZoneCenter.x) < searchRadius &&
+                           Math.abs(o.y - originalZoneCenter.y) < searchRadius + 2;
+                });
 
-                // Decision 4: Underneath zones tighten on threats
-                if (!isDeepZone && !isSafety) {
-                    // DB in underneath zone - get tighter
-                    targetY = Math.min(targetY, primaryThreat.y + 0.5);
+                if (localThreats.length > 0) {
+                    // Sort by threat level (closest + deepest)
+                    localThreats.sort((a, b) => {
+                        const distA = getDistance(originalZoneCenter, a);
+                        const distB = getDistance(originalZoneCenter, b);
+                        return distA - distB;
+                    });
+
+                    const primaryThreat = localThreats[0];
+                    const distToThreat = getDistance(pState, primaryThreat);
+                    
+                    // Blend towards threat
+                    const blendFactor = Math.max(0.3, Math.min(0.8, distToThreat / 8.0));
+                    targetX = (primaryThreat.x * blendFactor) + (originalZoneCenter.x * (1 - blendFactor));
+                    targetY = (primaryThreat.y * blendFactor) + (originalZoneCenter.y * (1 - blendFactor));
+
+                    // Deep defenders always stay on top
+                    if (isDeepDefender) {
+                        targetY = Math.max(targetY, primaryThreat.y + 2.0);
+                    }
+                } else {
+                    // Empty Zone: Read QB Eyes
+                    if (qbState) {
+                        const shiftX = (qbState.x - originalZoneCenter.x) * 0.2;
+                        targetX += shiftX;
+                    }
                 }
-
-                // 💡 ENFORCE ZONE BOUNDARIES - don't chase too far
-                if (zone && zone.minX !== undefined && zone.maxX !== undefined) {
-                    const ZONE_BUFFER = isSafety ? 2.0 : 1.5; // Safeties get more freedom
-                    targetX = Math.max(zone.minX - ZONE_BUFFER, Math.min(zone.maxX + ZONE_BUFFER, targetX));
+            }
+            // 3. CLAMP BOUNDARIES
+            // Ensure they don't run out of their assigned zone boundaries too far
+            if (zone && !foundUrgentThreat) { // Allow breaking zone for urgent threats
+                if (zone.minX !== undefined) targetX = Math.max(zone.minX - 2, Math.min(zone.maxX + 2, targetX));
+                if (zone.minY !== undefined) {
+                    const absMinY = LOS + zone.minY;
+                    const absMaxY = Math.min(119, LOS + zone.maxY);
+                    targetY = Math.max(absMinY - 2, Math.min(absMaxY + 5, targetY));
                 }
-
-                if (zone && zone.minY !== undefined && zone.maxY !== undefined) {
-                    const BACK_WALL_Y = FIELD_LENGTH - 0.5;
-                    const idealMinY = LOS + (zone.minY || 0);
-                    const idealMaxY = Math.min(LOS + (zone.maxY || 20), BACK_WALL_Y);
-                    const ZONE_BUFFER = isSafety ? 1.5 : 1.0;
-                    targetY = Math.max(idealMinY - ZONE_BUFFER, Math.min(idealMaxY + ZONE_BUFFER, targetY));
-                }
-
-                pState.targetX = targetX;
-                pState.targetY = targetY;
-            } else {
-                // NO THREATS - Decision tree for empty zone positioning
-
-                // Decision 1: Read ball position for visual cues
-                let shiftX = 0;
-                if (qbState) {
-                    // Drift with QB eyes to defend hot routes
-                    shiftX = (qbState.x - zoneCenter.x) * 0.2;
-                }
-
-                let posX = zoneCenter.x + shiftX;
-                let posY = zoneCenter.y;
-
-                // Decision 2: Safeties in empty zones play more conservative
-                if (isSafety) {
-                    // Stay deeper to defend vertical shots
-                    posY = Math.max(posY, zoneCenter.y + 2.0);
-                    // Also shift slightly based on coverage look (two-high vs single)
-                    // TODO: Could read defensive alignment for more sophisticated positioning
-                }
-
-                // Decision 3: DBs in empty zones can move up in coverage
-                if (!isSafety) {
-                    // Creep up slightly looking for receiver windows
-                    posY = Math.min(posY, zoneCenter.y - 0.5);
-                }
-
-                // Enforce zone bounds even in empty space
-                if (zone && zone.minX !== undefined && zone.maxX !== undefined) {
-                    posX = Math.max(zone.minX, Math.min(zone.maxX, posX));
-                }
-                if (zone && zone.minY !== undefined && zone.maxY !== undefined) {
-                    const BACK_WALL_Y = FIELD_LENGTH - 0.5;
-                    const idealMinY = LOS + (zone.minY || 0);
-                    const idealMaxY = Math.min(LOS + (zone.maxY || 20), BACK_WALL_Y);
-                    posY = Math.max(idealMinY, Math.min(idealMaxY, posY));
-                }
-
-                pState.targetX = posX;
-                pState.targetY = posY;
             }
         }
 
