@@ -1194,13 +1194,13 @@ function renderVisualFormationSlots(container, currentChart, formationData, benc
                 suffix = " (Current)";
                 styleClass = "font-bold bg-gray-200 text-black";
             } else if (opt.isAssignedElsewhere) {
-                // SWAP SCENARIO
-                suffix = ` (Starts at ${opt.assignedSlot})`;
-                styleClass = "text-amber-600 font-semibold bg-amber-50"; // Orange/Amber for swap warning
+                // SWAP SCENARIO -> Change this to "Also playing..."
+                suffix = ` (Also at ${opt.assignedSlot})`;
+                styleClass = "text-blue-700 font-semibold bg-blue-50"; // Changed color to blue/info
             } else {
                 // BENCH SCENARIO
                 suffix = " (Bench)";
-                styleClass = "text-green-600 bg-white"; // Green for available
+                styleClass = "text-green-600 bg-white"; 
             }
 
             // Add the option
@@ -3281,6 +3281,8 @@ export function setSimSpeed(speed) {
         liveGameInterval = setInterval(runLiveGameTick, liveGameSpeed);
     }
 }
+
+
 function renderDepthOrderPane(gameState) {
     const pane = document.getElementById("depth-order-container");
     if (!pane || !gameState) return;
@@ -3292,69 +3294,120 @@ function renderDepthOrderPane(gameState) {
         return;
     }
 
-    // 1. Group players by their best position
+    // 1. Group players
     const groups = {
         'QB': [], 'RB': [], 'WR': [], 'OL': [],
         'DL': [], 'LB': [], 'DB': [], 'ST': []
     };
 
     roster.forEach(p => {
-        // Use estimated position to categorize them initially
         let pos = p.pos || estimateBestPosition(p);
-        if (pos === 'TE') pos = 'WR'; // Group TEs with WRs for depth purposes
-        if (pos === 'K' || pos === 'P') pos = 'ST'; // Group Kickers/Punters
-
+        if (pos === 'TE') pos = 'WR';
+        if (pos === 'K' || pos === 'P') pos = 'ST';
         if (!groups[pos]) groups[pos] = [];
         groups[pos].push(p);
     });
 
-    // 2. Sort each group by overall (default order)
+    // 2. Sort groups by current Depth Order (if it exists), otherwise Overall
+    const currentOrder = gameState.playerTeam.depthOrder || [];
     Object.keys(groups).forEach(key => {
-        groups[key].sort((a, b) => calculateOverall(b, key) - calculateOverall(a, key));
+        groups[key].sort((a, b) => {
+            const idxA = currentOrder.indexOf(a.id);
+            const idxB = currentOrder.indexOf(b.id);
+            // If both are in the saved order, sort by that index
+            if (idxA !== -1 && idxB !== -1) return idxA - idxB;
+            // If one is missing (new player), put them at the end
+            if (idxA === -1) return 1;
+            if (idxB === -1) return -1;
+            // Fallback to Overall
+            return calculateOverall(b, key === 'ST' ? 'K' : key) - calculateOverall(a, key === 'ST' ? 'K' : key);
+        });
     });
 
-    // 3. Generate HTML for columns
-    let html = '<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 pb-10">';
-
-    // Order of columns
+    // 3. Build Tab Navigation
     const displayOrder = ['QB', 'RB', 'WR', 'OL', 'DL', 'LB', 'DB', 'ST'];
+    let tabsHtml = `<div class="flex flex-wrap gap-2 mb-4 border-b border-gray-200 pb-2">`;
+    displayOrder.forEach((pos, index) => {
+        const isActive = index === 0 ? 'bg-amber-500 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300';
+        tabsHtml += `<button class="depth-pos-tab px-4 py-2 rounded font-bold text-sm transition ${isActive}" data-target="${pos}">${pos}</button>`;
+    });
+    tabsHtml += `</div>`;
 
-    displayOrder.forEach(groupKey => {
+    // 4. Build Sortable Lists (Hidden/Shown by CSS)
+    let listsHtml = `<div id="depth-lists-container" class="mb-8">`;
+    displayOrder.forEach((groupKey, index) => {
+        const isHidden = index !== 0 ? 'hidden' : '';
         const players = groups[groupKey] || [];
 
-        html += `
-            <div class="bg-gray-100 rounded-lg p-3 border border-gray-300 flex flex-col h-full">
-                <h4 class="font-bold text-center text-gray-700 mb-3 bg-gray-200 p-1 rounded">${groupKey} Depth</h4>
+        listsHtml += `
+            <div id="group-${groupKey}" class="depth-group-container ${isHidden}">
+                <h4 class="font-bold text-lg text-gray-800 mb-2">${groupKey} Depth Chart</h4>
+                <p class="text-xs text-gray-500 mb-2 italic">Drag top players to #1 and #2 slots.</p>
                 
-                <div class="depth-sortable-list space-y-2 min-h-[100px]" data-group="${groupKey}">
-                    ${players.map((p, index) => {
-            const ovr = calculateOverall(p, groupKey === 'ST' ? 'K' : groupKey);
-            return `
-                        <div class="depth-order-item bg-white p-2 rounded shadow-sm border border-gray-200 cursor-move hover:shadow-md flex justify-between items-center"
+                <div class="depth-sortable-list space-y-2 bg-gray-50 p-2 rounded border border-gray-200 min-h-[150px]" data-group="${groupKey}">
+                    ${players.map((p, i) => {
+                        const ovr = calculateOverall(p, groupKey === 'ST' ? 'K' : groupKey);
+                        // Rank 1/2 styling
+                        const rankStyle = i === 0 ? 'border-l-4 border-green-500' : (i === 1 ? 'border-l-4 border-blue-500' : 'border-l-4 border-transparent');
+                        const rankBadge = i === 0 ? '<span class="bg-green-100 text-green-800 text-xs px-1 rounded ml-2">Starter</span>' : '';
+
+                        return `
+                        <div class="depth-order-item bg-white p-3 rounded shadow-sm border border-gray-200 cursor-move hover:bg-amber-50 flex justify-between items-center ${rankStyle}"
                              draggable="true" 
                              data-player-id="${p.id}">
-                            <div class="flex items-center gap-2 overflow-hidden">
-                                <span class="font-bold text-amber-600 w-4 text-center">${index + 1}.</span>
-                                <span class="truncate text-sm font-medium text-gray-800">${p.name}</span>
+                            <div class="flex items-center gap-3">
+                                <span class="font-bold text-gray-400 w-4 text-center">${i + 1}</span>
+                                <div>
+                                    <span class="font-bold text-gray-800">${p.name}</span>
+                                    ${rankBadge}
+                                </div>
                             </div>
-                            <span class="text-xs font-bold text-gray-500 bg-gray-100 px-1 rounded">${ovr}</span>
+                            <div class="text-right">
+                                <span class="text-sm font-bold text-gray-600">OVR: ${ovr}</span>
+                            </div>
                         </div>
                         `;
-        }).join('')}
-                    ${players.length === 0 ? '<div class="text-xs text-gray-400 text-center italic p-2">Empty</div>' : ''}
+                    }).join('')}
+                    ${players.length === 0 ? '<div class="text-gray-400 text-center p-4">No players</div>' : ''}
                 </div>
             </div>
         `;
     });
+    listsHtml += `</div>`;
 
-    html += '</div>';
+    // 5. Build Full Roster Table (Read-only reference)
+    let rosterHtml = `
+        <div class="mt-8 border-t pt-4">
+            <h4 class="font-bold text-lg text-gray-800 mb-3">Full Roster Reference</h4>
+            <div class="overflow-x-auto max-h-60 overflow-y-auto border rounded">
+                <table class="min-w-full text-sm bg-white">
+                    <thead class="bg-gray-100 sticky top-0">
+                        <tr>
+                            <th class="py-2 px-3 text-left">Name</th>
+                            <th class="py-2 px-3 text-center">Pos</th>
+                            <th class="py-2 px-3 text-center">Age</th>
+                            <th class="py-2 px-3 text-center">Ovr</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y">
+                        ${roster.map(p => `
+                            <tr>
+                                <td class="py-1 px-3">${p.name}</td>
+                                <td class="py-1 px-3 text-center">${p.pos || estimateBestPosition(p)}</td>
+                                <td class="py-1 px-3 text-center">${p.age}</td>
+                                <td class="py-1 px-3 text-center font-bold">${calculateOverall(p, estimateBestPosition(p))}</td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    `;
 
-    // Add instruction text
-    html = `<p class="text-sm text-gray-500 mb-4 italic">Drag and drop players within their position groups to set starters (Rank 1 & 2).</p>` + html;
+    pane.innerHTML = tabsHtml + listsHtml + rosterHtml;
 
-    pane.innerHTML = html;
-
-    // 4. Re-attach Drag Events for the new lists
+    // 6. Setup Interactions
+    setupDepthTabs();
     setupDepthOrderDragEvents();
 }
 
@@ -3368,56 +3421,76 @@ function isPlayerStarting(playerId, team) {
     return allStarters.includes(playerId);
 }
 
+/** Handles the hiding/showing of position tabs in Depth Order. */
+function setupDepthTabs() {
+    const tabs = document.querySelectorAll('.depth-pos-tab');
+    const groups = document.querySelectorAll('.depth-group-container');
+
+    tabs.forEach(tab => {
+        tab.addEventListener('click', () => {
+            // Update Tab Styles
+            tabs.forEach(t => t.classList.replace('bg-amber-500', 'bg-gray-200'));
+            tabs.forEach(t => t.classList.replace('text-white', 'text-gray-700'));
+            tab.classList.replace('bg-gray-200', 'bg-amber-500');
+            tab.classList.replace('text-gray-700', 'text-white');
+
+            // Show/Hide Content
+            const target = tab.dataset.target;
+            groups.forEach(g => {
+                if (g.id === `group-${target}`) {
+                    g.classList.remove('hidden');
+                } else {
+                    g.classList.add('hidden');
+                }
+            });
+        });
+    });
+}
+
 
 /**
  * Sets up drag-and-drop for the sorting lists.
  * Triggers a full Depth Chart update immediately upon drop.
  */
 function setupDepthOrderDragEvents() {
-    const draggables = document.querySelectorAll('.depth-sortable-list [draggable="true"]');
+    const draggables = document.querySelectorAll('.depth-order-item');
     const containers = document.querySelectorAll('.depth-sortable-list');
 
     draggables.forEach(draggable => {
         draggable.addEventListener('dragstart', () => {
             draggable.classList.add('dragging');
             draggable.classList.add('opacity-50');
-            draggable.classList.add('ring-2');
-            draggable.classList.add('ring-amber-500');
         });
 
         draggable.addEventListener('dragend', () => {
             draggable.classList.remove('dragging');
             draggable.classList.remove('opacity-50');
-            draggable.classList.remove('ring-2');
-            draggable.classList.remove('ring-amber-500');
-
-            // --- THE KEY CONNECTION ---
-            // 1. Immediately apply this new order to the backend logic
-            applyDepthOrderToChart();
-
-            // 2. Re-render this specific pane to update the rank numbers (1., 2., 3.) 
-            // and the "Target Slot" badges (WR1, Bench, etc.)
-            // We pass getGameState() to ensure it uses the fresh data we just updated.
-            renderDepthOrderPane(getGameState());
+            
+            // On drop finish, save the data
+            // We use a short timeout to let the DOM settle
+            setTimeout(() => {
+                applyDepthOrderToChart();
+                // We do NOT re-render immediately to prevent UI flash, 
+                // but we update the rank numbers visually
+                containers.forEach(container => updateRankNumbers(container));
+            }, 50);
         });
     });
 
     containers.forEach(container => {
         container.addEventListener('dragover', e => {
-            e.preventDefault();
+            e.preventDefault(); // Enable dropping
             const afterElement = getDragAfterElement(container, e.clientY);
             const draggable = document.querySelector('.dragging');
-            if (!draggable) return;
+            
+            // Only allow sorting within the SAME list
+            if (!draggable || !container.contains(draggable)) return;
 
             if (afterElement == null) {
                 container.appendChild(draggable);
             } else {
                 container.insertBefore(draggable, afterElement);
             }
-
-            // Visual helper: update the rank numbers text immediately while dragging
-            // so the user sees "1. Name" move to "2. Name" in real time.
-            updateRankNumbers(container);
         });
     });
 }
@@ -3467,7 +3540,7 @@ function setupDepthOrderDrag() {
 
 /** Helper for List Reordering Logic */
 function getDragAfterElement(container, y) {
-    const draggableElements = [...container.querySelectorAll('[draggable="true"]:not(.dragging)')];
+    const draggableElements = [...container.querySelectorAll('.depth-order-item:not(.dragging)')];
 
     return draggableElements.reduce((closest, child) => {
         const box = child.getBoundingClientRect();
@@ -3480,17 +3553,18 @@ function getDragAfterElement(container, y) {
     }, { offset: Number.NEGATIVE_INFINITY }).element;
 }
 
-/** Visually updates the "1.", "2." numbers in the list */
+/** Helper to update the "1, 2, 3" visual numbers after a drop */
 function updateRankNumbers(container) {
-    const items = container.querySelectorAll('[draggable="true"]');
+    const items = container.querySelectorAll('.depth-order-item');
     items.forEach((item, index) => {
-        const span = item.querySelector('span.font-bold');
-        if (span) {
-            // Keep the name, just change the number prefix
-            const text = span.textContent;
-            const name = text.includes('. ') ? text.split('. ')[1] : text;
-            span.textContent = `${index + 1}. ${name}`;
-        }
+        const numberSpan = item.querySelector('span.text-center');
+        if (numberSpan) numberSpan.textContent = index + 1;
+        
+        // Update styling for top 2
+        item.classList.remove('border-green-500', 'border-blue-500', 'border-transparent');
+        if (index === 0) item.classList.add('border-green-500');
+        else if (index === 1) item.classList.add('border-blue-500');
+        else item.classList.add('border-transparent');
     });
 }
 /**

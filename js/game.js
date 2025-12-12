@@ -6793,21 +6793,25 @@ function advanceToOffseason() {
 /** Updates the player's depth chart based on drag-and-drop. */
 function updateDepthChart(playerId, newPositionSlot, side) {
     const team = game?.playerTeam;
-    if (!team || !team.depthChart || !team.depthChart[side]) { console.error("updateDepthChart: Invalid state."); return; }
+    if (!team || !team.depthChart || !team.depthChart[side]) { 
+        console.error("updateDepthChart: Invalid state."); 
+        return; 
+    }
+    
     const chart = team.depthChart[side];
     const player = game.players.find(p => p && p.id === playerId);
+
     if (player && player.status?.type === 'temporary') {
         console.warn("Cannot move temporary players in depth chart.");
         return;
     }
-    const oldSlot = Object.keys(chart).find(key => chart[key] === playerId);
-    const displacedPlayerId = chart[newPositionSlot];
+
+    // --- NEW LOGIC: Allow Multi-Assignment ---
+    // We simply assign the player to the new slot.
+    // We do NOT clear their previous slot.
     chart[newPositionSlot] = playerId;
-    if (oldSlot) {
-        chart[oldSlot] = displacedPlayerId || null;
-    } else if (displacedPlayerId) {
-        console.log(`Player ${displacedPlayerId} moved to bench from ${newPositionSlot}`);
-    }
+
+    console.log(`Player ${playerId} assigned to ${newPositionSlot}`);
 }
 
 // -----------------------------
