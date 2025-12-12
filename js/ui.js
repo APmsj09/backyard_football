@@ -5,7 +5,8 @@ import {
     getGameState,
     substitutePlayers,
     getRosterObjects,
-    changeFormation
+    changeFormation,
+    getPlayer
 } from './game.js';
 import {
     offenseFormations,
@@ -85,10 +86,9 @@ function getUIRosterObjects(team) {
     }
 
     // 2. Optimized Lookup: Map IDs directly to players
-    // This is faster than filtering the whole league list
     return team.roster
-        .map(id => getPlayer(id))
-        .filter(p => p); // Filter out any nulls (cut/retired players)
+        .map(id => getPlayer(id)) 
+        .filter(p => p); 
 }
 
 /**
