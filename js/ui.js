@@ -170,7 +170,7 @@ export function setupElements() {
         messagesNotificationDot: getEl('messages-notification-dot'),
 
         // --- Depth Chart ---
-        depthChartSubTabs: getEl('depth-chart-sub-tabs'),
+        depthChartSubTabs: getEl('depth-chart-subtabs'),
         offenseFormationSelect: getEl('offense-formation-select'),
         defenseFormationSelect: getEl('defense-formation-select'),
         offenseDepthChartPane: getEl('depth-chart-offense-pane'),
@@ -181,7 +181,7 @@ export function setupElements() {
         defenseBenchTable: getEl('defense-bench-table'),
         positionalOverallsContainer: getEl('positional-overalls-container'),
         depthOrderContainer: getEl('depth-order-container'),
-        depthOrderGrid: getEl('depth-order-grid'),
+        depthOrderGrid: getEl('depth-order-list'),
         autoReorderBtn: getEl('auto-reorder-btn'),
 
         // --- Game Sim ---
@@ -3539,36 +3539,40 @@ function setupDepthTabs() {
  * Triggers a full Depth Chart update immediately upon drop.
  */
 function setupDepthOrderDragEvents() {
-    // 1. Target both types of draggable items
     const draggables = document.querySelectorAll('.depth-order-item, .roster-row-item');
     const containers = document.querySelectorAll('.depth-sortable-list');
 
     draggables.forEach(draggable => {
         draggable.addEventListener('dragstart', (e) => {
-            // Add identifying class
-            draggable.classList.add('dragging');
-            draggable.classList.add('opacity-50');
-
-            // Set data for the drop
+            // 1. Set Data Transfer Payload
+            e.dataTransfer.effectAllowed = 'copyMove';
             e.dataTransfer.setData('text/plain', draggable.dataset.playerId);
             e.dataTransfer.setData('player-name', draggable.dataset.playerName);
             e.dataTransfer.setData('player-ovr', draggable.dataset.playerOvr);
-
-            // Mark if it came from the roster table
+            
+            // Mark source
             if (draggable.classList.contains('roster-row-item')) {
                 draggable.dataset.source = 'roster';
             } else {
                 draggable.dataset.source = 'list';
             }
+
+            // 2. TIMING FIX: Delay the visual styling!
+            // This ensures the browser captures the full-opacity element as the drag image
+            // BEFORE we turn it grey.
+            setTimeout(() => {
+                draggable.classList.add('dragging');
+                draggable.classList.add('opacity-50');
+            }, 0);
         });
 
         draggable.addEventListener('dragend', () => {
+            // Remove styles immediately
             draggable.classList.remove('dragging');
             draggable.classList.remove('opacity-50');
             delete draggable.dataset.source;
-
-            // Cleanup: The 'drop' event on the container handles the DOM manipulation.
-            // This just triggers the save.
+            
+            // Trigger save/refresh
             setTimeout(() => {
                 applyDepthOrderToChart();
                 containers.forEach(c => updateRankNumbers(c));
@@ -3578,26 +3582,24 @@ function setupDepthOrderDragEvents() {
 
     containers.forEach(container => {
         container.addEventListener('dragover', e => {
-            e.preventDefault();
-            const afterElement = getDragAfterElement(container, e.clientY);
+            e.preventDefault(); // Necessary to allow dropping
+            
             const draggable = document.querySelector('.dragging');
-
             if (!draggable) return;
 
-            // If dragging from roster, we create a visual placeholder (or move the dragged clone if implemented)
-            // But standard HTML5 drag/drop moves the original element. 
-            // PROBLEM: We don't want to move the TR from the table into the DIV list. 
-
+            // Logic A: Dragging from Full Roster Table (Copy behavior)
             if (draggable.classList.contains('roster-row-item')) {
-                // We are dragging a table row. We can't insert a TR into a DIV.
-                // We allow the drop, but we don't move the element visibly during drag
-                // (The default ghost image handles the visual).
-                e.dataTransfer.dropEffect = 'copy';
-                return;
+                e.dataTransfer.dropEffect = 'copy'; 
+                // We do NOT move the DOM element here because we can't put a <tr> inside a <div>.
+                // We just allow the drop.
+                return; 
             }
 
-            // Normal sorting behavior for list items
+            // Logic B: Sorting within the lists (Move behavior)
+            // Only allow sorting if we are hovering over the list container
             if (container.contains(draggable)) {
+                e.dataTransfer.dropEffect = 'move';
+                const afterElement = getDragAfterElement(container, e.clientY);
                 if (afterElement == null) {
                     container.appendChild(draggable);
                 } else {
@@ -3608,26 +3610,27 @@ function setupDepthOrderDragEvents() {
 
         container.addEventListener('drop', e => {
             e.preventDefault();
-            const draggable = document.querySelector('.dragging');
-            if (!draggable) return;
-
-            // HANDLE ROSTER -> LIST DROP
-            if (draggable.classList.contains('roster-row-item')) {
+            
+            // If we dropped a Roster Item, we need to MANUALLY create the new card
+            const source = document.querySelector('.dragging')?.dataset.source;
+            
+            if (source === 'roster') {
                 const playerId = e.dataTransfer.getData('text/plain');
                 const name = e.dataTransfer.getData('player-name');
                 const ovr = e.dataTransfer.getData('player-ovr');
 
-                // 1. Check if player is already in this list
+                // 1. Remove if already in this specific list to prevent duplicates
                 const existing = container.querySelector(`[data-player-id="${playerId}"]`);
-                if (existing) {
-                    existing.remove(); // Remove old position so we can move it to new spot
-                }
+                if (existing) existing.remove();
 
-                // 2. Create new List Item
+                // 2. Create the new card element
                 const newItem = document.createElement('div');
                 newItem.className = "depth-order-item bg-white p-3 rounded shadow-sm border border-gray-200 cursor-move hover:bg-amber-50 flex justify-between items-center";
                 newItem.draggable = true;
                 newItem.dataset.playerId = playerId;
+                newItem.dataset.playerName = name;
+                newItem.dataset.playerOvr = ovr;
+                
                 newItem.innerHTML = `
                     <div class="flex items-center gap-3">
                         <span class="rank-number font-bold text-gray-400 w-4 text-center">-</span>
@@ -3636,7 +3639,7 @@ function setupDepthOrderDragEvents() {
                     <div class="text-right"><span class="text-sm font-bold text-gray-600">OVR: ${ovr}</span></div>
                 `;
 
-                // 3. Insert at Drop Position
+                // 3. Insert it where the mouse is
                 const afterElement = getDragAfterElement(container, e.clientY);
                 if (afterElement == null) {
                     container.appendChild(newItem);
@@ -3644,15 +3647,25 @@ function setupDepthOrderDragEvents() {
                     container.insertBefore(newItem, afterElement);
                 }
 
-                // 4. Re-attach drag events to new item immediately
-                newItem.addEventListener('dragstart', (e) => {
-                    newItem.classList.add('dragging');
-                    e.dataTransfer.setData('text/plain', playerId);
+                // 4. Important: Make the new item draggable immediately
+                newItem.addEventListener('dragstart', (ev) => {
+                    setTimeout(() => {
+                        newItem.classList.add('dragging');
+                        newItem.classList.add('opacity-50');
+                    }, 0);
+                    ev.dataTransfer.setData('text/plain', playerId);
                 });
                 newItem.addEventListener('dragend', () => {
                     newItem.classList.remove('dragging');
+                    newItem.classList.remove('opacity-50');
                     setTimeout(() => { applyDepthOrderToChart(); containers.forEach(c => updateRankNumbers(c)); }, 50);
                 });
+                
+                // 5. Trigger update immediately
+                setTimeout(() => {
+                    applyDepthOrderToChart(); 
+                    containers.forEach(c => updateRankNumbers(c));
+                }, 50);
             }
         });
     });
