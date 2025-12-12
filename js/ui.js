@@ -921,7 +921,7 @@ function renderMyTeamTab(gameState) {
 
     let tableHtml = `<div class="overflow-x-auto"><table class="min-w-full bg-white text-sm"><thead class="bg-gray-800 text-white sticky top-0 z-10"><tr>
         <th scope="col" class="py-2 px-3 text-left sticky left-0 bg-gray-800 z-20">Name</th>
-        <th scope="col" class="py-2 px-3">#</th>
+        <th scope="col" class="py-2 px-3 text-center" title="Captain">C</th> <th scope="col" class="py-2 px-3">#</th>
         <th scope="col" class="py-2 px-3">Type</th>
         <th scope="col" class="py-2 px-3">Age</th>
         <th scope="col" class="py-2 px-3">Pot</th>
@@ -929,10 +929,10 @@ function renderMyTeamTab(gameState) {
         ${physicalAttrs.map(h => `<th scope="col" class="py-2 px-3 uppercase">${h.slice(0, 3)}</th>`).join('')}
         ${mentalAttrs.map(h => `<th scope="col" class="py-2 px-3 uppercase">${h.slice(0, 3)}</th>`).join('')}
         ${technicalAttrs.map(h => `<th scope="col" class="py-2 px-3 uppercase">${h.slice(0, 3)}</th>`).join('')}
-    </tr></thead><tbody class="divide-y">`; // Total columns: 6 + 6 + 4 + 5 = 21
+    </tr></thead><tbody class="divide-y">`;
 
     if (roster.length === 0) {
-        tableHtml += `<tr><td colspan="21" class="p-4 text-center text-gray-500">Your roster is empty.</td></tr>`; // Updated colspan
+        tableHtml += `<tr><td colspan="22" class="p-4 text-center text-gray-500">Your roster is empty.</td></tr>`;
     } else {
         roster.forEach(p => {
             if (!p || !p.attributes || !p.status) return;
@@ -940,19 +940,23 @@ function renderMyTeamTab(gameState) {
             const statusText = p.status.description || 'Healthy';
             const typeTag = p.status.type === 'temporary' ? '<span class="status-tag temporary" title="Temporary Friend">[T]</span>' : '<span class="status-tag permanent" title="Permanent Roster">[P]</span>';
 
+            // --- CAPTAIN LOGIC ---
+            const isCaptain = gameState.playerTeam.captainId === p.id;
+            const captainBtn = isCaptain 
+                ? '<span class="text-amber-500 font-bold text-lg" title="Current Captain">★</span>' 
+                : `<button onclick="app.setCaptain('${p.id}')" class="text-gray-300 hover:text-amber-400 font-bold text-lg transition" title="Make Captain">☆</button>`;
+
             tableHtml += `<tr data-player-id="${p.id}" class="cursor-pointer hover:bg-amber-100">
                  <th scope="row" class="py-2 px-3 font-semibold sticky left-0 bg-white z-10">${p.name}</th>
-                 <td class="text-center py-2 px-3 font-medium">${p.number || '?'}</td> {/* Number */}
+                 <td class="text-center py-2 px-3">${captainBtn}</td> <td class="text-center py-2 px-3 font-medium">${p.number || '?'}</td>
                  <td class="text-center py-2 px-3">${typeTag}</td>
                  <td class="text-center py-2 px-3">${p.age}</td>
-                 <td class="text-center py-2 px-3 font-medium">${p.potential || '?'}</td> {/* Potential */}
+                 <td class="text-center py-2 px-3 font-medium">${p.potential || '?'}</td>
                  <td class="text-center py-2 px-3 ${statusClass}" title="${statusText}">${statusText} ${p.status.duration > 0 ? `(${p.status.duration}w)` : ''}</td>`;
 
             const renderAttr = (val, attrName) => {
                 const breakthroughClass = p.breakthroughAttr === attrName ? ' breakthrough font-bold text-green-600' : '';
                 const displayValue = attrName === 'height' ? formatHeight(val) : (val ?? '?');
-
-                // FIX: Change 'val' to 'displayValue' here
                 return `<td class="text-center py-2 px-3${breakthroughClass}" title="${attrName}">${displayValue}</td>`;
             };
 

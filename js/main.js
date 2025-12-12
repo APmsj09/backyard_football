@@ -676,6 +676,15 @@ function promptCallFriend(onIgnore = null) {
     };
     modalBodyElement.addEventListener('click', callButtonDelegationHandler, { once: true });
 }
+function handleSetCaptain(playerId) {
+    if (!gameState) return;
+
+    if (Game.setTeamCaptain(gameState.playerTeam, playerId)) {
+        // Refresh the UI to show the new "C" badge
+        UI.switchTab('my-team', gameState);
+        Game.saveGameState(activeSaveKey); // Save the change
+    }
+}
 
 // --- Public API ---
 window.app = {
@@ -686,6 +695,7 @@ window.app = {
     handleConfirmTeam,
     handleDraftPlayer,
     onDraftSelect: handlePlayerSelectInDraft,
+    setCaptain: handleSetCaptain,
     handleAdvanceWeek,
     skipSim: UI.skipLiveGameSim,
     setSpeed: UI.setSimSpeed,
