@@ -2795,133 +2795,74 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
         // -- 5. ASSIGNMENT LOGIC --
         const assignment = pState.assignment;
 
-        // --- A. RUN SUPPORT (Run Read but QB has ball / Play Action) ---
+        // --- A. RUN SUPPORT (SMART CONTAIN & GAP) ---
         if (isRunRead && !isBallInAir) {
-            // 💡 ENHANCED: Realistic gap assignments for run defense with DB/Safety intelligence
-            const isLB = pState.slot.startsWith('LB');
             const isDL = pState.slot.startsWith('DL');
-            const isSafety = pState.slot.startsWith('S');
-            const isDB = pState.slot.includes('DB') || isSafety;
+            const isLB = pState.slot.startsWith('LB');
+            const isDB = pState.slot.includes('DB') || pState.slot.startsWith('S');
 
             if (ballCarrierState) {
-                // 💡 NEW: Gap assignment discipline
                 const runnerX = ballCarrierState.x;
                 const runnerY = ballCarrierState.y;
-                const CENTER_X = FIELD_WIDTH / 2;
+                const distToBall = getDistance(pState, ballCarrierState);
 
-                // For DL: Take assigned gap and hold it
-                if (isDL) {
-                    // DL reads flow: if runner goes away, pursue laterally but maintain gap
-                    const runnerFlow = runnerX - pState.initialX;
+                // 1. IDENTIFY FORCE PLAYERS (Edge Defenders)
+                // Wide DLs or Outside LBs must "Set the Edge"
+                const isEdgeDefender = Math.abs(pState.initialX - CENTER_X) > 6.0 && (isDL || isLB);
+                const assignmentIsEdge = assignment?.includes('edge') || assignment?.includes('contain');
 
-                    if (Math.abs(runnerFlow) < 2.0) {
-                        // Runner at my gap - attack downhill
-                        pState.targetX = runnerX;
-                        pState.targetY = ballCarrierState.y;
-                    } else if (runnerFlow < -3.0) {
-                        // Runner going away to left - pursue laterally but don't get drawn too wide
-                        const pursuitX = pState.x + (runnerX - pState.initialX) * 0.6; // 60% pursuit
-                        pState.targetX = Math.max(CENTER_X - 15, pursuitX); // Don't go too far left
-                        pState.targetY = ballCarrierState.y;
-                    } else if (runnerFlow > 3.0) {
-                        // Runner going away to right - similar logic
-                        const pursuitX = pState.x + (runnerX - pState.initialX) * 0.6;
-                        pState.targetX = Math.min(CENTER_X + 15, pursuitX); // Don't go too far right
-                        pState.targetY = ballCarrierState.y;
-                    } else {
-                        // Angled run - move to interception point
-                        pState.targetX = (pState.x + runnerX) / 2;
-                        pState.targetY = ballCarrierState.y;
-                    }
+                if (isEdgeDefender || assignmentIsEdge) {
+                    // CONTAIN LOGIC:
+                    // Goal: Stay "Outside" the runner to force them back inside.
+                    
+                    const isLeftEdge = pState.initialX < CENTER_X;
+                    
+                    // Target a point 2 yards OUTSIDE the runner (Leverage)
+                    const leveragePoint = isLeftEdge ? runnerX - 2.0 : runnerX + 2.0;
+                    
+                    // Panic Check: Did the runner get outside me?
+                    // If I'm on the left, and runner is further left -> Sprint wide!
+                    let targetX = leveragePoint;
+                    if (isLeftEdge && runnerX < pState.x) targetX = runnerX - 3.0;
+                    if (!isLeftEdge && runnerX > pState.x) targetX = runnerX + 3.0;
 
-                    // DL always attack hard downhill
-                    pState.targetY = Math.max(LOS - 1.0, pState.targetY);
+                    pState.targetX = targetX;
+                    // Stay slightly deeper to prevent cutback
+                    pState.targetY = Math.max(LOS - 0.5, runnerY); 
                 }
 
-                // For LB: Follow gap with better anticipation
-                else if (isLB) {
-                    // LBs track downhill more than DL, but maintain discipline
-                    const lbAggressiveness = pState.awareness || 50; // Higher awareness = more downhill
-                    const downhillFactor = Math.min(3.0, lbAggressiveness / 30); // 0.5-3 yards ahead
-
-                    // LB reads the pulling guard or flow
-                    const flowAmount = ballCarrierState.velocity?.x || 0;
-
-                    if (Math.abs(flowAmount) < 1.0) {
-                        // Straight run - step up to mesh point
+                // 2. GAP FILL LOGIC (Interior Linemen & LBs)
+                else if (isDL) {
+                    // Interior DL: Fight pressure.
+                    // If runner is right in front (2 yds), attack.
+                    const flow = runnerX - pState.x;
+                    if (Math.abs(flow) < 2.0) {
                         pState.targetX = runnerX;
-                        pState.targetY = Math.max(LOS - 0.5, ballCarrierState.y - downhillFactor);
                     } else {
-                        // Lateral flow - lead pursuit by staying ahead of runner
-                        const anticipatedX = runnerX + (flowAmount * 2.0);
-                        pState.targetX = Math.max(CENTER_X - 12, Math.min(CENTER_X + 12, anticipatedX));
-                        pState.targetY = Math.max(LOS - 1.5, ballCarrierState.y - downhillFactor);
+                        // If runner moves laterally, slide but don't over-pursue (Gap Integrity)
+                        pState.targetX = pState.x + (flow * 0.6); 
                     }
+                    pState.targetY = ballCarrierState.y; 
                 }
 
-                // For DBs & Safeties: Intelligent run support with pass defense responsibility balance
-                else if (isDB) {
-                    // 💡 ENHANCED: DB run support decision tree
-                    const distToBall = getDistance(pState, ballCarrierState);
-                    const dbSpeed = pState.speed || 50;
-                    const runnerSpeed = ballCarrierState.speed || 50;
+                // 3. PURSUIT LOGIC (Linebackers/DBs)
+                else if (isLB || isDB) {
+                    // LBs/DBs calculate interception angles (lead the target)
+                    const leadFactor = 0.5; // seconds
+                    const anticipatedX = runnerX + ((ballCarrierState.velocity?.x || 0) * leadFactor);
+                    const anticipatedY = runnerY + ((ballCarrierState.velocity?.y || 0) * leadFactor);
 
-                    // Decision 1: Can I get there in time?
-                    const estimatedTimeToRunner = distToBall / (dbSpeed / 100 * 8); // Rough time estimate
-
-                    // Decision 2: Safety vs Cornerback positioning
-                    if (isSafety) {
-                        // Safeties have dual responsibility - protect deep but support runs
-
-                        // If run is getting big (past LOS + 5), safety must commit
-                        if (runnerY > LOS + 5.0) {
-                            // Run is getting north - must flow down
-                            const supportDepth = Math.max(LOS + 2.0, runnerY - 2.0);
-                            pState.targetX = (pState.x + runnerX) * 0.6 + zoneCenter.x * 0.4; // Balance zone & run
-                            pState.targetY = supportDepth;
-                        } else {
-                            // Run is short/stalled - stay high for pass
-                            const safetyDepth = LOS + 3.0;
-                            pState.targetX = (pState.x * 0.7) + (runnerX * 0.3); // Only 30% commit to run
-                            pState.targetY = safetyDepth;
-                        }
-
-                        // Safety never gets closer than 2 yards to LOS (maintain top 2)
-                        pState.targetY = Math.max(LOS + 2.0, pState.targetY);
+                    // Safety Valve: Don't bite too hard on Play Action deep
+                    if (isDB && runnerY < LOS + 3.0) {
+                        pState.targetX = anticipatedX;
+                        pState.targetY = Math.max(LOS + 4.0, anticipatedY);
                     } else {
-                        // Cornerback in run support (more aggressive than safety)
-                        const cbCautionDepth = 1.5; // CBs can come up tighter
-
-                        if (runnerSpeed > dbSpeed + 3) {
-                            // Runner is faster - take angle instead of pure pursuit
-                            const interceptX = runnerX - (dbSpeed / 100 * 2); // Lead the runner
-                            pState.targetX = Math.max(CENTER_X - 10, Math.min(CENTER_X + 10, interceptX));
-                            pState.targetY = Math.max(LOS + cbCautionDepth, runnerY + cbCautionDepth);
-                        } else {
-                            // Speed advantage or equal - get vertical
-                            pState.targetX = (pState.x * 0.5) + (runnerX * 0.5); // 50/50 pursuit
-                            pState.targetY = Math.max(LOS + cbCautionDepth, runnerY);
-                        }
-                    }
-
-                    // Decision 3: Lateral run vs dive - adjust positioning
-                    const ballVelX = ballCarrierState.velocity?.x || 0;
-                    if (Math.abs(ballVelX) > 2.0) {
-                        // Lateral run - get wider
-                        pState.targetX += (ballVelX > 0 ? 1.5 : -1.5);
-                    }
-
-                    // Decision 4: Never abandon pass responsibility too far
-                    const zoneCenter = pState.cachedZoneCenter || getZoneCenter(pState.assignment || 'zone_short_middle', LOS);
-                    if (zoneCenter && getDistance(pState, zoneCenter) > 12.0) {
-                        // Too far from zone - come back 20%
-                        pState.targetX = pState.targetX * 0.8 + zoneCenter.x * 0.2;
-                        pState.targetY = pState.targetY * 0.8 + zoneCenter.y * 0.2;
+                        pState.targetX = anticipatedX;
+                        pState.targetY = anticipatedY;
                     }
                 }
             }
-
-            return;
+            return; 
         }
 
         // --- B. PUNT RETURN (Move to catch) ---
@@ -3686,7 +3627,7 @@ function resolveOngoingBlocks(playState, gameLog) {
     const ballCarrier = playState.activePlayers.find(p => p.isBallCarrier);
 
     playState.blockBattles.forEach((battle, index) => {
-        // Skip processing on the very first tick of engagement
+        // Skip first tick
         if (battle.startTick === playState.tick) return;
 
         if (battle.status !== 'ongoing') {
@@ -3694,114 +3635,87 @@ function resolveOngoingBlocks(playState, gameLog) {
             return;
         }
 
-        const blockerState = playState.activePlayers.find(p => p.id === battle.blockerId);
-        const defenderState = playState.activePlayers.find(p => p.id === battle.defenderId);
+        const blocker = playState.activePlayers.find(p => p.id === battle.blockerId);
+        const defender = playState.activePlayers.find(p => p.id === battle.defenderId);
 
-        // 1. Validation: Ensure players still exist and link to each other
-        if (!blockerState || !defenderState ||
-            blockerState.engagedWith !== defenderState.id ||
-            defenderState.blockedBy !== blockerState.id) {
+        // 1. Validation Checks
+        if (!blocker || !defender || 
+            blocker.engagedWith !== defender.id || 
+            defender.blockedBy !== blocker.id ||
+            blocker.stunnedTicks > 0 || defender.stunnedTicks > 0) {
+            
+            // Force disengage
+            if (blocker) { blocker.engagedWith = null; blocker.isEngaged = false; }
+            if (defender) { defender.isBlocked = false; defender.blockedBy = null; defender.isEngaged = false; }
+            
             battle.status = 'disengaged';
             battlesToRemove.push(index);
-            // Cleanup just in case
-            if (blockerState) { blockerState.engagedWith = null; blockerState.isEngaged = false; }
-            if (defenderState) { defenderState.isBlocked = false; defenderState.blockedBy = null; defenderState.isEngaged = false; }
             return;
         }
 
-        // 2. Stun Check: If anyone got stunned (e.g. by impact), break immediately
-        if (blockerState.stunnedTicks > 0 || defenderState.stunnedTicks > 0) {
-            battle.status = 'disengaged';
-            battlesToRemove.push(index);
-            blockerState.engagedWith = null; blockerState.isEngaged = false;
-            defenderState.isBlocked = false; defenderState.blockedBy = null; defenderState.isEngaged = false;
-            return;
-        }
-
-        // 3. Play Context Checks
-        // If the runner has passed the blocker, the defender should shed to pursue
-        if (ballCarrier && ballCarrier.y > (defenderState.y + 1.0)) {
-            battle.status = 'disengaged';
-            battlesToRemove.push(index);
-            blockerState.engagedWith = null; blockerState.isEngaged = false;
-            defenderState.isBlocked = false; defenderState.blockedBy = null; defenderState.isEngaged = false;
-            defenderState.action = 'pursuit';
-            return;
-        }
-
-        // If players drifted too far apart (physics glitch), break
-        if (getDistance(blockerState, defenderState) > BLOCK_ENGAGE_RANGE + 0.5) {
-            battle.status = 'disengaged';
-            battlesToRemove.push(index);
-            blockerState.engagedWith = null; blockerState.isEngaged = false;
-            defenderState.isBlocked = false; defenderState.blockedBy = null; defenderState.isEngaged = false;
-            return;
-        }
-
-        // 4. Stats Calculation
-        const blockPower = ((blockerState.blocking || 50) + (blockerState.strength || 50)) * blockerState.fatigueModifier;
-        const shedPower = ((defenderState.blockShedding || 50) + (defenderState.strength || 50)) * defenderState.fatigueModifier;
-
-        // 5. 💡 DYNAMIC SHED LOGIC (The Fix)
-        // Check every 10 ticks (0.5s) instead of 60
-        if (playState.tick % 10 === 0) {
-            const agilityDiff = (defenderState.agility || 50) - (blockerState.agility || 50);
-
-            // Block Decay: Every second the block holds, the defender gets a +5% bonus to shed
-            const durationSeconds = (playState.tick - battle.startTick) * TICK_DURATION_SECONDS;
-            const decayBonus = durationSeconds * 0.05;
-
-            // Base chance + Agility diff + Decay
-            const breakChance = 0.05 + (Math.max(0, agilityDiff) / 200) + decayBonus;
-
-            if (Math.random() < breakChance) {
-                battle.status = 'win_B'; // Defender wins (Shed)
-                battle.battleScore = -100;
-                // Optional: Log big wins
-                // if (gameLog) gameLog.push(`⚔️ ${defenderState.name} sheds the block of ${blockerState.name}!`);
+        // 2. --- 💡 NEW: SHED-TO-TACKLE LOGIC ---
+        // If the ball carrier runs past the defender within "Arm's Reach" (1.5 yds),
+        // the defender abandons the block to make the tackle.
+        if (ballCarrier) {
+            const distToCarrier = getDistance(defender, ballCarrier);
+            
+            // If carrier is close AND defender has eyes on them (carrier is not behind defender)
+            if (distToCarrier < 1.5) {
+                // "Reach" Attempt: Defender tries to grab the runner
+                // Bonus if defender has high Play Recognition (IQ) or Shedding
+                const reactionScore = (defender.playbookIQ || 50) + (defender.blockShedding || 50);
+                
+                // 80% chance for a decent defender to disengage
+                if (reactionScore + getRandomInt(0, 50) > 100) {
+                    // SUCCESS: Shed immediately!
+                    battle.status = 'win_B'; // Defender wins
+                    defender.action = 'pursuit'; // Switch AI to tackle mode
+                    
+                    // Log it sometimes
+                    // if (gameLog && Math.random() < 0.1) gameLog.push(`${defender.name} sheds block to grab runner!`);
+                    
+                    // Apply small slow-down to blocker (he got swim-moved)
+                    blocker.stunnedTicks = 10;
+                    
+                    // We process the "win_B" logic below
+                }
             }
         }
 
-        // 6. Physics Push
+        // 3. Stats Calculation (Standard Block Battle)
+        const blockPower = ((blocker.blocking || 50) + (blocker.strength || 50)) * blocker.fatigueModifier;
+        const shedPower = ((defender.blockShedding || 50) + (defender.strength || 50)) * defender.fatigueModifier;
+
+        // 4. Physics Push (The "Trenches")
         const pushAmount = resolveBattle(blockPower, shedPower, battle);
 
         if (battle.status === 'ongoing') {
-            const dx = defenderState.x - blockerState.x;
-            const dy = defenderState.y - blockerState.y;
+            const dx = defender.x - blocker.x;
+            const dy = defender.y - blocker.y;
             const dist = Math.max(0.1, Math.sqrt(dx * dx + dy * dy));
-            const pushDirX = dx / dist;
-            const pushDirY = dy / dist;
+            
+            // Standardize push vector
+            const pushX = (dx / dist) * pushAmount * 0.5;
+            const pushY = (dy / dist) * pushAmount * 0.5;
 
-            const PUSH_SCALING_FACTOR = 0.5;
-            const moveDist = pushAmount * PUSH_SCALING_FACTOR;
-
-            blockerState.x += pushDirX * moveDist;
-            blockerState.y += pushDirY * moveDist;
-            defenderState.x += pushDirX * moveDist;
-            defenderState.y += pushDirY * moveDist;
-
-            // Clamp
-            blockerState.x = Math.max(0.5, Math.min(FIELD_WIDTH - 0.5, blockerState.x));
-            defenderState.x = Math.max(0.5, Math.min(FIELD_WIDTH - 0.5, defenderState.x));
+            blocker.x += pushX; blocker.y += pushY;
+            defender.x += pushX; defender.y += pushY;
         }
 
-        // 7. Resolution & "Cooldown" (Reduced Stun)
+        // 5. Resolution
         if (battle.status === 'win_B') { // Defender Sheds
-            // 💡 FIX: Only stun for 15 ticks (0.75s) instead of 60 (3.0s)
-            // This prevents the visual "holding" look where players freeze.
-            blockerState.stunnedTicks = 20;
-            blockerState.engagedWith = null; blockerState.isEngaged = false;
+            blocker.engagedWith = null; blocker.isEngaged = false;
+            blocker.stunnedTicks = 15; // Blocker loses balance
 
-            defenderState.stunnedTicks = 0; // Defender is FREE to move immediately
-            defenderState.isBlocked = false; defenderState.blockedBy = null; defenderState.isEngaged = false;
-            defenderState.action = 'pursuit'; // Force AI update
+            defender.stunnedTicks = 0; // Ready immediately
+            defender.isBlocked = false; defender.blockedBy = null; defender.isEngaged = false;
+            defender.action = 'pursuit'; 
 
             battlesToRemove.push(index);
         } else if (battle.status === 'win_A') { // Pancake
-            defenderState.stunnedTicks = 40; // Defender gets knocked down (2s)
-            blockerState.engagedWith = null; blockerState.isEngaged = false;
-
-            defenderState.isBlocked = false; defenderState.blockedBy = null; defenderState.isEngaged = false;
+            defender.stunnedTicks = 40; // Knocked down
+            blocker.engagedWith = null; blocker.isEngaged = false;
+            defender.isBlocked = false; defender.blockedBy = null; defender.isEngaged = false;
             battlesToRemove.push(index);
         }
     });
@@ -5405,19 +5319,24 @@ function determineDefensiveFormation(defense, offenseFormationName, down, yardsT
             return wrCount >= 3 ? '2-3-2' : '4-1-2'; // Passing Down -> Coverage
         }
 
-        // 2. Personnel Matching
-        if (wrCount >= 3) {
-            // Spread Offense -> Nickel or Dime
-            if (coachPref === '2-3-2' || coachPref === '4-1-2') return coachPref;
-            return '4-1-2'; // Default Smart Counter
+        // 4. Personnel Matching
+        if (wrCount >= 4) {
+            // EMPTY SET (4+ WRs) -> MUST use Dime (3-0-4)
+            // Anything else is a mismatch.
+            return '3-0-4';
+        }
+
+        if (wrCount === 3) {
+            // SPREAD (3 WRs) -> Nickel (4-1-2) or Dime (3-0-4)
+            if (coachPref === '3-0-4' || coachPref === '4-1-2') return coachPref;
+            return '4-1-2'; // Default to Nickel
         } 
         
         if (heavyCount >= 2) {
-            // Power Offense -> Heavy Front
+            // POWER (2 RBs) -> Heavy Front
             if (coachPref === '4-2-1') return coachPref;
-            return '4-2-1'; // Default Smart Counter
+            return '4-2-1';
         }
-
         // Standard -> Coach's Base
         return coachPref;
     }
