@@ -61,6 +61,13 @@ let liveGameStats = { home: { yards: 0, td: 0, turnovers: 0, punts: 0, returns: 
 // Per-player live stat snapshots (id -> stats)
 let livePlayerStats = new Map();
 
+let livePlayContext = { 
+    type: 'run', 
+    passerId: null, 
+    receiverId: null, 
+    catchMade: false 
+};
+
 
 /**
  * Debounce function to limit rapid function calls (e.g., on input).
@@ -1803,77 +1810,95 @@ export function renderOffseasonScreen(offseasonReport, year) {
 /** Sets up drag and drop event listeners for depth chart. */
 export function setupDragAndDrop(onDrop) {
     const container = document.getElementById('dashboard-content');
-    if (!container) { console.error("Drag/drop container (dashboard-content) missing."); return; }
+    if (!container) { console.error("Drag/drop container missing."); return; }
 
     let draggedEl = null;
 
-    container.addEventListener('dragstart', e => {
-        // FIX: Use closest()
-        const target = e.target.closest('.bench-player-row') || e.target.closest('.player-slot-visual[draggable="true"]');
+    // Helper to find the draggable source
+    const getDraggable = (target) => {
+        return target.closest('.bench-player-row') || 
+               target.closest('.player-slot-visual[draggable="true"]') ||
+               target.closest('.roster-row-item'); // <--- Added this
+    };
 
+    container.addEventListener('dragstart', e => {
+        const target = getDraggable(e.target);
+        
         if (target) {
             draggedEl = target;
             dragPlayerId = target.dataset.playerId;
-            dragSide = target.dataset.side;
+            // If dragging from Bench/Field, we know the side. 
+            // If from Roster list, side is undefined (neutral).
+            dragSide = target.dataset.side || null; 
 
-            if (dragPlayerId && dragSide) {
-                e.dataTransfer.effectAllowed = 'move';
+            if (dragPlayerId) {
+                e.dataTransfer.effectAllowed = 'copyMove'; // Allow copy behavior
                 e.dataTransfer.setData('text/plain', dragPlayerId);
-                setTimeout(() => draggedEl?.classList.add('dragging'), 0);
+                
+                // Visual feedback
+                setTimeout(() => target.classList.add('dragging'), 0);
             } else {
                 e.preventDefault();
             }
-        } else {
-            e.preventDefault();
         }
     });
 
     container.addEventListener('dragend', e => {
-        if (draggedEl) {
-            draggedEl.classList.remove('dragging');
-        }
-        draggedEl = null; dragPlayerId = null; dragSide = null;
+        if (draggedEl) draggedEl.classList.remove('dragging');
+        draggedEl = null; 
+        dragPlayerId = null; 
+        dragSide = null;
         document.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over'));
     });
 
     container.addEventListener('dragover', e => {
-        e.preventDefault();
-        e.dataTransfer.dropEffect = 'move';
-
-        // --- 💡 FIX: Target the new visual slot ---
+        // We only care if we are hovering over a Visual Slot
         const targetSlot = e.target.closest('.player-slot-visual');
+        
+        if (targetSlot) {
+            e.preventDefault(); // Allow dropping
+            e.dataTransfer.dropEffect = 'move';
 
-        document.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over'));
-
-        if (targetSlot && targetSlot.dataset.side === dragSide) {
-            targetSlot.classList.add('drag-over');
+            // Visual feedback
+            document.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over'));
+            
+            // STRICT CHECK:
+            // 1. If source has a side (e.g. Offense Bench), target must match.
+            // 2. If source is neutral (Full Roster), allow it anywhere.
+            const slotSide = targetSlot.dataset.side;
+            if (!dragSide || dragSide === slotSide) {
+                targetSlot.classList.add('drag-over');
+            }
         }
     });
 
     container.addEventListener('dragleave', e => {
         const targetSlot = e.target.closest('.player-slot-visual');
-        if (targetSlot) {
-            targetSlot.classList.remove('drag-over');
-        }
-        if (!e.relatedTarget || !container.contains(e.relatedTarget)) {
-            document.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over'));
-        }
+        if (targetSlot) targetSlot.classList.remove('drag-over');
     });
 
     container.addEventListener('drop', e => {
+        // Prevent default browser behavior (opening file)
         e.preventDefault();
         document.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over'));
 
-        // --- 💡 FIX: Target the new visual slot ---
         const dropSlot = e.target.closest('.player-slot-visual');
-        const dropSide = dropSlot?.dataset.side;
+        
+        if (dropSlot && dropSlot.dataset.positionSlot && dragPlayerId) {
+            const dropSide = dropSlot.dataset.side;
 
-        if (dropSlot && dropSlot.dataset.positionSlot && dragPlayerId && dropSide === dragSide) {
-            onDrop(dragPlayerId, dropSlot.dataset.positionSlot, dropSide);
-        } else {
-            console.log("Invalid drop target.");
+            // Final Validation before processing
+            if (!dragSide || dragSide === dropSide) {
+                onDrop(dragPlayerId, dropSlot.dataset.positionSlot, dropSide);
+            } else {
+                console.warn(`Cannot move player from ${dragSide} to ${dropSide}`);
+            }
         }
-        draggedEl = null; dragPlayerId = null; dragSide = null;
+        
+        // Cleanup
+        draggedEl = null; 
+        dragPlayerId = null; 
+        dragSide = null;
     });
 }
 
@@ -2491,12 +2516,15 @@ function updateStatsFromLogEntry(entry) {
 
     // --- 3. Parse Logic ---
 
-    // A. New Play / Context Reset
+    // --- A. New Play / Context Reset ---
+    // Resets context when a new play starts in the logs
     if (entry.includes('---') || entry.includes('Offense:')) {
         livePlayContext = { type: 'run', passerId: null, receiverId: null, catchMade: false };
+        
         if (entry.includes('Offense:')) {
-            // Try to detect play type from name (e.g., "Offense: Spread_Three_Verts")
-            if (entry.toLowerCase().includes('pass') || entry.toLowerCase().includes('verts') || entry.toLowerCase().includes('slants')) {
+            // Simple keyword detection for pass plays
+            const lower = entry.toLowerCase();
+            if (lower.includes('pass') || lower.includes('verts') || lower.includes('slants') || lower.includes('curl') || lower.includes('mesh')) {
                 livePlayContext.type = 'pass';
             }
         }
@@ -3144,8 +3172,9 @@ function runLiveGameTick() {
             // Update lightweight live stats from this entry
             try {
                 updateStatsFromLogEntry(playLogEntry);
-            } catch (err) { console.error('Error updating live stats from log:', err); }
-
+            } catch (err) { 
+                console.error('Error updating live stats from log:', err); 
+            }
             // --- 4. Append to Ticker ---
             p.className = styleClass;
             p.textContent = descriptiveText;
