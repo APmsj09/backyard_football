@@ -840,7 +840,7 @@ export function switchTab(tabId, gameState) {
 
     // 1. Visual Toggle: Hide all panes, Show selected pane
     elements.dashboardContent.querySelectorAll('.tab-pane').forEach(p => p.classList.add('hidden'));
-    
+
     // Deactivate all buttons
     elements.dashboardTabs.querySelectorAll('.tab-button').forEach(b => {
         b.classList.remove('active');
@@ -869,32 +869,32 @@ export function switchTab(tabId, gameState) {
     // 3. Routing: Call the correct render function
     try {
         switch (tabId) {
-            case 'my-team': 
-                renderMyTeamTab(gameState); 
+            case 'my-team':
+                renderMyTeamTab(gameState);
                 break;
-            case 'depth-chart': 
+            case 'depth-chart':
                 // Depth chart handles its own sub-logic
                 if (typeof renderDepthChartTab === 'function') renderDepthChartTab(gameState);
                 break;
-            case 'schedule': 
+            case 'schedule':
                 console.log("📅 Rendering Schedule...");
-                renderScheduleTab(gameState); 
+                renderScheduleTab(gameState);
                 break;
-            case 'standings': 
+            case 'standings':
                 console.log("🏆 Rendering Standings...");
-                renderStandingsTab(gameState); 
+                renderStandingsTab(gameState);
                 break;
-            case 'player-stats': 
+            case 'player-stats':
                 console.log("📊 Rendering Stats...");
-                renderPlayerStatsTab(gameState); 
+                renderPlayerStatsTab(gameState);
                 break;
-            case 'hall-of-fame': 
+            case 'hall-of-fame':
                 console.log("🏛️ Rendering Hall of Fame...");
-                renderHallOfFameTab(gameState); 
+                renderHallOfFameTab(gameState);
                 break;
-            case 'messages': 
+            case 'messages':
                 console.log("📩 Rendering Messages...");
-                renderMessagesTab(gameState); 
+                renderMessagesTab(gameState);
                 break;
             default:
                 console.warn(`❓ Unknown tab ID: ${tabId}`);
@@ -1054,21 +1054,42 @@ function renderPositionalOveralls() {
     const roster = getUIRosterObjects(gameState.playerTeam);
 
     for (const p of roster) {
-        if (!positions[p.pos]) positions[p.pos] = [];
-        positions[p.pos].push(p);
+        // FIX: Use estimated position if p.pos is missing
+        const pos = p.pos || estimateBestPosition(p);
+        if (!positions[pos]) positions[pos] = [];
+        positions[pos].push(p);
     }
 
-    const html = Object.keys(positions).map(pos => `
-        <div class="mb-4 p-4 bg-gray-50 rounded border">
-            <h4 class="font-bold text-gray-700 mb-2">${pos}</h4>
-            <div class="space-y-1">
+    // Sort position groups alphabetically or by standard order
+    const order = ['QB', 'RB', 'WR', 'OL', 'DL', 'LB', 'DB', 'K', 'P'];
+    const sortedKeys = Object.keys(positions).sort((a, b) => {
+        return order.indexOf(a) - order.indexOf(b);
+    });
+
+    const html = `<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">` +
+        sortedKeys.map(pos => `
+        <div class="mb-4 p-4 bg-gray-50 rounded border shadow-sm">
+            <h4 class="font-bold text-gray-700 mb-2 border-b pb-1 flex justify-between">
+                <span>${pos}</span>
+                <span class="text-xs font-normal text-gray-500 self-center">${positions[pos].length} Players</span>
+            </h4>
+            <div class="space-y-1 max-h-60 overflow-y-auto">
                 ${positions[pos]
-                    .sort((a, b) => b.overall - a.overall)
-                    .map(x => `<div class="text-sm">${x.name} — <span class="font-bold">${x.overall}</span></div>`)
-                    .join("")}
+                .sort((a, b) => calculateOverall(b, pos) - calculateOverall(a, pos))
+                .map(x => {
+                    const ovr = calculateOverall(x, pos);
+                    // Highlight high overalls
+                    const colorClass = ovr >= 80 ? 'text-green-600 font-bold' : (ovr >= 70 ? 'text-blue-600' : 'text-gray-600');
+                    return `
+                        <div class="flex justify-between text-sm hover:bg-gray-100 p-1 rounded">
+                            <span>${x.name}</span>
+                            <span class="${colorClass}">${ovr}</span>
+                        </div>`;
+                })
+                .join("")}
             </div>
         </div>
-    `).join("");
+    `).join("") + `</div>`;
 
     pane.innerHTML = html;
 }
@@ -1469,7 +1490,7 @@ export function renderMessagesTab(gameState) {
             </div>
         `;
     }).join('');
-    
+
     updateMessagesNotification(gameState.messages);
 }
 
@@ -1501,10 +1522,10 @@ function renderScheduleTab(gameState) {
         const weekStartIndex = i * gamesPerWeek;
         const weekEndIndex = weekStartIndex + gamesPerWeek;
         const weekGames = gameState.schedule.slice(weekStartIndex, weekEndIndex);
-        
+
         const isCurrentWeek = i === gameState.currentWeek;
         const isPastWeek = i < gameState.currentWeek;
-        
+
         let weekHtml = `<div class="p-4 rounded mb-4 ${isCurrentWeek ? 'bg-amber-100 border-2 border-amber-500' : 'bg-gray-100'}">
             <h4 class="font-bold text-lg mb-2">Week ${i + 1}</h4>
             <div class="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm">`;
@@ -1512,11 +1533,11 @@ function renderScheduleTab(gameState) {
         if (weekGames.length > 0) {
             weekGames.forEach(g => {
                 if (!g || !g.home || !g.away) return;
-                
+
                 // Try to find the result for this specific game
                 let result = null;
                 if (isPastWeek && gameState.gameResults) {
-                    result = gameState.gameResults.find(r => 
+                    result = gameState.gameResults.find(r =>
                         r && r.homeTeam.id === g.home.id && r.awayTeam.id === g.away.id
                     );
                 }
@@ -1528,7 +1549,7 @@ function renderScheduleTab(gameState) {
                     // Game is finished, show score
                     const homeWin = result.homeScore > result.awayScore;
                     const awayWin = result.awayScore > result.homeScore;
-                    
+
                     content = `
                         <span class="${awayWin ? 'font-bold' : ''}">${g.away.name} ${result.awayScore}</span> 
                         <span class="text-gray-400 mx-1">@</span> 
@@ -1570,9 +1591,9 @@ function renderStandingsTab(gameState) {
 
     for (const [divName, divisionTeamIdsArray] of Object.entries(gameState.divisions)) {
         if (!Array.isArray(divisionTeamIdsArray)) continue;
-        
+
         const divisionTeamIds = new Set(divisionTeamIdsArray);
-        
+
         // Filter teams belonging to this division
         const divTeams = gameState.teams
             .filter(t => t && divisionTeamIds.has(t.id))
@@ -1589,7 +1610,7 @@ function renderStandingsTab(gameState) {
 
         const divEl = document.createElement('div');
         divEl.className = 'mb-6 bg-gray-50 rounded-lg overflow-hidden border border-gray-200';
-        
+
         let tableHtml = `
             <div class="bg-gray-200 px-4 py-2 font-bold text-gray-700 border-b border-gray-300">${divName} Division</div>
             <table class="min-w-full text-sm">
@@ -1607,7 +1628,7 @@ function renderStandingsTab(gameState) {
         divTeams.forEach(t => {
             const isPlayer = t.id === gameState.playerTeam.id;
             const rowClass = isPlayer ? 'bg-amber-100 font-bold' : 'bg-white';
-            
+
             tableHtml += `
                 <tr class="${rowClass}">
                     <td class="py-2 px-3 text-left">${t.name}</td>
@@ -1637,7 +1658,7 @@ function renderPlayerStatsTab(gameState) {
 
     // Filter and Sort
     let playersToShow = gameState.players.filter(p => p && (teamIdFilter ? p.teamId === teamIdFilter : true));
-    
+
     playersToShow.sort((a, b) => {
         const valA = a.seasonStats?.[sortStat] || 0;
         const valB = b.seasonStats?.[sortStat] || 0;
@@ -1678,7 +1699,7 @@ function renderPlayerStatsTab(gameState) {
         playersToShow.forEach(p => {
             const isMyTeam = p.teamId === gameState.playerTeam.id;
             const teamName = gameState.teams.find(t => t.id === p.teamId)?.name || 'FA';
-            
+
             tableHtml += `
                 <tr class="${isMyTeam ? 'bg-amber-50' : 'hover:bg-gray-50'}">
                     <td class="py-2 px-3 font-semibold sticky left-0 ${isMyTeam ? 'bg-amber-50' : 'bg-white'} z-10">${p.name}</td>
@@ -1691,7 +1712,7 @@ function renderPlayerStatsTab(gameState) {
                 </tr>`;
         });
     }
-    
+
     elements.playerStatsContainer.innerHTML = tableHtml + `</tbody></table></div>`;
 }
 
@@ -1708,7 +1729,7 @@ function renderHallOfFameTab(gameState) {
         return;
     }
 
-    elements.hallOfFameList.innerHTML = '<div class="grid grid-cols-1 md:grid-cols-2 gap-4">' + 
+    elements.hallOfFameList.innerHTML = '<div class="grid grid-cols-1 md:grid-cols-2 gap-4">' +
         gameState.hallOfFame.map(p => {
             return `
             <div class="bg-gradient-to-br from-amber-50 to-white p-4 rounded-lg shadow border border-amber-200">
@@ -1725,8 +1746,8 @@ function renderHallOfFameTab(gameState) {
                     <span>Sacks: <strong>${p.careerStats?.sacks || 0}</strong></span>
                 </div>
             </div>`;
-        }).join('') + 
-    '</div>';
+        }).join('') +
+        '</div>';
 }
 
 /** Renders the Offseason summary screen. */
@@ -1765,11 +1786,13 @@ export function setupDragAndDrop(onDrop) {
     let draggedEl = null;
 
     container.addEventListener('dragstart', e => {
-        // --- 💡 FIX: Drag from bench row OR visual slot ---
-        if (e.target.matches('.bench-player-row') || e.target.matches('.player-slot-visual[draggable="true"]')) {
-            draggedEl = e.target;
-            dragPlayerId = e.target.dataset.playerId;
-            dragSide = e.target.dataset.side;
+        // FIX: Use closest()
+        const target = e.target.closest('.bench-player-row') || e.target.closest('.player-slot-visual[draggable="true"]');
+
+        if (target) {
+            draggedEl = target;
+            dragPlayerId = target.dataset.playerId;
+            dragSide = target.dataset.side;
 
             if (dragPlayerId && dragSide) {
                 e.dataTransfer.effectAllowed = 'move';
@@ -2541,17 +2564,80 @@ function renderLiveStatsLive() {
     const h = liveGameStats.home;
     const a = liveGameStats.away;
 
+    // --- Helper to build individual stats lines ---
+    const getTopPerformersHtml = (team) => {
+        if (!team) return '';
+        const roster = getUIRosterObjects(team);
+        const playersWithStats = roster.map(p => {
+            const stats = livePlayerStats.get(p.id);
+            // Return player object merged with their live stats if they exist
+            return stats ? { name: p.name, ...stats } : null;
+        }).filter(p => p); // Remove nulls
+
+        let html = '';
+
+        // 1. Passing Leader (Current QB)
+        const qb = playersWithStats.find(p => p.passAttempts > 0);
+        if (qb) {
+            html += `<div class="text-xs text-gray-300 mt-1 truncate">
+                <span class="text-amber-400">${qb.name}</span>: ${qb.passCompletions}/${qb.passAttempts}, ${qb.passYards} yds
+                ${qb.touchdowns > 0 ? `, ${qb.touchdowns} TD` : ''}
+                ${qb.interceptionsThrown > 0 ? `, ${qb.interceptionsThrown} INT` : ''}
+            </div>`;
+        }
+
+        // 2. Rushing Leader
+        const rusher = playersWithStats
+            .filter(p => p.rushAttempts > 0)
+            .sort((a, b) => b.rushYards - a.rushYards)[0];
+        
+        if (rusher) {
+            html += `<div class="text-xs text-gray-300 truncate">
+                <span class="text-blue-300">${rusher.name}</span>: ${rusher.rushAttempts} car, ${rusher.rushYards} yds
+                ${rusher.touchdowns > 0 ? `, ${rusher.touchdowns} TD` : ''}
+            </div>`;
+        }
+
+        // 3. Receiving Leader
+        const receiver = playersWithStats
+            .filter(p => p.receptions > 0)
+            .sort((a, b) => b.recYards - a.recYards)[0];
+
+        if (receiver) {
+            html += `<div class="text-xs text-gray-300 truncate">
+                <span class="text-green-300">${receiver.name}</span>: ${receiver.receptions} rec, ${receiver.recYards} yds
+                ${receiver.touchdowns > 0 ? `, ${receiver.touchdowns} TD` : ''}
+            </div>`;
+        }
+        
+        return html;
+    };
+
+    // --- Build Final HTML ---
     const html = `
-        <div class="flex justify-between">
-            <div class="w-1/2 pr-2">
-                <h5 class="text-sm font-semibold">${homeName}</h5>
-                <p class="text-xs">Yds: <strong>${h.yards}</strong> • TDs: <strong>${h.td}</strong> • TOs: <strong>${h.turnovers}</strong></p>
-                <p class="text-xs">Punts: <strong>${h.punts}</strong> • Return Yds: <strong>${h.returns}</strong></p>
+        <div class="flex justify-between h-full">
+            <div class="w-1/2 pr-2 border-r border-gray-700">
+                <h5 class="text-sm font-bold text-white mb-1">${awayName}</h5>
+                <p class="text-xs text-gray-400 mb-2">
+                    Yds: <strong class="text-white">${a.yards}</strong> • 
+                    TOs: <strong class="text-white">${a.turnovers}</strong>
+                </p>
+                
+                <div class="space-y-1">
+                    ${getTopPerformersHtml(away)}
+                </div>
             </div>
+
             <div class="w-1/2 pl-2">
-                <h5 class="text-sm font-semibold">${awayName}</h5>
-                <p class="text-xs">Yds: <strong>${a.yards}</strong> • TDs: <strong>${a.td}</strong> • TOs: <strong>${a.turnovers}</strong></p>
-                <p class="text-xs">Punts: <strong>${a.punts}</strong> • Return Yds: <strong>${a.returns}</strong></p>
+                <h5 class="text-sm font-bold text-white mb-1">${homeName}</h5>
+                <p class="text-xs text-gray-400 mb-2">
+                    Yds: <strong class="text-white">${h.yards}</strong> • 
+                    TOs: <strong class="text-white">${h.turnovers}</strong>
+                </p>
+
+                <div class="space-y-1">
+                    ${getTopPerformersHtml(home)}
+                </div>
             </div>
         </div>
     `;
@@ -3202,30 +3288,74 @@ function renderDepthOrderPane(gameState) {
     const roster = getUIRosterObjects(gameState.playerTeam);
 
     if (!roster || roster.length === 0) {
-        pane.innerHTML = "<p>No roster data found.</p>";
+        pane.innerHTML = "<p class='p-4 text-gray-500'>No roster data found.</p>";
         return;
     }
 
-    // Sort by overall descending
-    roster.sort((a, b) => b.overall - a.overall);
+    // 1. Group players by their best position
+    const groups = {
+        'QB': [], 'RB': [], 'WR': [], 'OL': [],
+        'DL': [], 'LB': [], 'DB': [], 'ST': []
+    };
 
-    const html = `
-        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4" id="depth-order-list">
-            ${roster.map(player => `
-                <div 
-                    class="depth-order-item p-3 bg-gray-100 rounded shadow flex items-center gap-3 cursor-move"
-                    draggable="true"
-                    data-player-id="${player.id}">
-                    <div class="font-bold text-gray-900">${player.name}</div>
-                    <div class="text-sm text-gray-500">OVR: ${player.overall}</div>
+    roster.forEach(p => {
+        // Use estimated position to categorize them initially
+        let pos = p.pos || estimateBestPosition(p);
+        if (pos === 'TE') pos = 'WR'; // Group TEs with WRs for depth purposes
+        if (pos === 'K' || pos === 'P') pos = 'ST'; // Group Kickers/Punters
+
+        if (!groups[pos]) groups[pos] = [];
+        groups[pos].push(p);
+    });
+
+    // 2. Sort each group by overall (default order)
+    Object.keys(groups).forEach(key => {
+        groups[key].sort((a, b) => calculateOverall(b, key) - calculateOverall(a, key));
+    });
+
+    // 3. Generate HTML for columns
+    let html = '<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 pb-10">';
+
+    // Order of columns
+    const displayOrder = ['QB', 'RB', 'WR', 'OL', 'DL', 'LB', 'DB', 'ST'];
+
+    displayOrder.forEach(groupKey => {
+        const players = groups[groupKey] || [];
+
+        html += `
+            <div class="bg-gray-100 rounded-lg p-3 border border-gray-300 flex flex-col h-full">
+                <h4 class="font-bold text-center text-gray-700 mb-3 bg-gray-200 p-1 rounded">${groupKey} Depth</h4>
+                
+                <div class="depth-sortable-list space-y-2 min-h-[100px]" data-group="${groupKey}">
+                    ${players.map((p, index) => {
+            const ovr = calculateOverall(p, groupKey === 'ST' ? 'K' : groupKey);
+            return `
+                        <div class="depth-order-item bg-white p-2 rounded shadow-sm border border-gray-200 cursor-move hover:shadow-md flex justify-between items-center"
+                             draggable="true" 
+                             data-player-id="${p.id}">
+                            <div class="flex items-center gap-2 overflow-hidden">
+                                <span class="font-bold text-amber-600 w-4 text-center">${index + 1}.</span>
+                                <span class="truncate text-sm font-medium text-gray-800">${p.name}</span>
+                            </div>
+                            <span class="text-xs font-bold text-gray-500 bg-gray-100 px-1 rounded">${ovr}</span>
+                        </div>
+                        `;
+        }).join('')}
+                    ${players.length === 0 ? '<div class="text-xs text-gray-400 text-center italic p-2">Empty</div>' : ''}
                 </div>
-            `).join("")}
-        </div>
-    `;
+            </div>
+        `;
+    });
+
+    html += '</div>';
+
+    // Add instruction text
+    html = `<p class="text-sm text-gray-500 mb-4 italic">Drag and drop players within their position groups to set starters (Rank 1 & 2).</p>` + html;
 
     pane.innerHTML = html;
 
-    setupDepthOrderDrag();
+    // 4. Re-attach Drag Events for the new lists
+    setupDepthOrderDragEvents();
 }
 
 /** Helper to check if a player is in any starting slot */
@@ -3480,7 +3610,7 @@ export function applyDepthOrderToChart() {
 export function changeFormationSmart(side, newFormationName) {
     // 1. Snapshot the CURRENT (Old) assignments
     const gs = getGameState();
-    const oldChart = { ...gs.playerTeam.depthChart[side] }; 
+    const oldChart = { ...gs.playerTeam.depthChart[side] };
 
     // 2. Execute the Formation Change (Resets backend to defaults)
     changeFormation(side, newFormationName);
@@ -3488,8 +3618,8 @@ export function changeFormationSmart(side, newFormationName) {
     // 3. Restore Players (Delayed to ensure backend is done)
     setTimeout(() => {
         // Look up the definition of the NEW formation
-        const formationData = side === 'offense' 
-            ? offenseFormations[newFormationName] 
+        const formationData = side === 'offense'
+            ? offenseFormations[newFormationName]
             : defenseFormations[newFormationName];
 
         if (formationData && formationData.slots) {
