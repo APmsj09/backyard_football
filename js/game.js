@@ -553,97 +553,162 @@ function setupDraft() {
     console.log(`Draft setup with ${maxNeeds} rounds, total picks: ${game.draftOrder.length}`);
 }
 
-/** Automatically sets depth chart for an AI team. */
+/**
+ * Automatically sets depth chart for an AI-controlled team.
+ * Produces both a valid depthChart and a complete depthOrder (starter → bench list).
+ */
 function aiSetDepthChart(team) {
-    const roster = getRosterObjects(team);
-
-    if (!team || !roster || !team.depthChart || !team.formations) {
-        console.error(`aiSetDepthChart: Invalid team data for ${team?.name || 'unknown team'}.`); return;
-    }
-    const { depthChart, formations } = team; // roster is now defined above
-    if (roster.length === 0) return;
-
-    // Initialize all slots to null
-    for (const side in depthChart) {
-        if (!depthChart[side]) depthChart[side] = {};
-        const formationSlots = (side === 'offense' ? offenseFormations[formations.offense]?.slots : defenseFormations[formations.defense]?.slots) || [];
-        const newChartSide = {};
-        formationSlots.forEach(slot => newChartSide[slot] = null);
-        depthChart[side] = newChartSide;
+    const rosterObjs = getRosterObjects(team);
+    if (!team || !team.depthChart || !team.formations || !Array.isArray(rosterObjs)) {
+        console.error("aiSetDepthChart: Invalid team object:", team?.name);
+        return;
     }
 
+    if (rosterObjs.length === 0) return;
 
-    const sides = ['defense', 'offense'];
-    const alreadyAssignedPlayerIds = new Set(); // Tracks players who have a starting job
+    const { depthChart, formations } = team;
+
+    // ----------------------------------------------------
+    // 1. Initialize depthChart structure for offense/defense
+    // ----------------------------------------------------
+    for (const side of ["offense", "defense"]) {
+        const formKey = side === "offense" ? formations.offense : formations.defense;
+        const formDef = side === "offense"
+            ? offenseFormations[formKey]
+            : defenseFormations[formKey];
+
+        const slots = Array.isArray(formDef?.slots) ? formDef.slots : [];
+
+        const newSideChart = {};
+        slots.forEach(slot => (newSideChart[slot] = null));
+        depthChart[side] = newSideChart;
+    }
+
+    // ----------------------------------------------------
+    // 2. Assign starters using suitability + best-position logic
+    // ----------------------------------------------------
+    const sides = ["offense", "defense"];
+    const alreadyAssigned = new Set();
 
     for (const side of sides) {
         const slots = Object.keys(depthChart[side]);
-        let availablePlayers = roster.filter(p => p && p.attributes && p.status?.duration === 0);
 
-        // Sort slots to prioritize key positions
+        // PRIORITIZE KEY POSITIONS
         slots.sort((a, b) => {
-            if (side === 'defense') {
-                if (a.startsWith('DB1')) return -1; if (b.startsWith('DB1')) return 1;
-                if (a.startsWith('LB2')) return -1; if (b.startsWith('LB2')) return 1;
-                if (a.startsWith('DL2')) return -1; if (b.startsWith('DL2')) return 1;
-            } else { // offense
-                if (a.startsWith('QB1')) return -1; if (b.startsWith('QB1')) return 1;
-                if (a.startsWith('RB1')) return -1; if (b.startsWith('RB1')) return 1;
-                if (a.startsWith('WR1')) return -1; if (b.startsWith('WR1')) return 1;
+            if (side === "offense") {
+                if (a.startsWith("QB1")) return -1;
+                if (b.startsWith("QB1")) return 1;
+                if (a.startsWith("RB1")) return -1;
+                if (b.startsWith("RB1")) return 1;
+                if (a.startsWith("WR1")) return -1;
+                if (b.startsWith("WR1")) return 1;
+            } else {
+                if (a.startsWith("DB1")) return -1;
+                if (b.startsWith("DB1")) return 1;
+                if (a.startsWith("LB2")) return -1;
+                if (b.startsWith("LB2")) return 1;
+                if (a.startsWith("DL2")) return -1;
+                if (b.startsWith("DL2")) return 1;
             }
             return 0;
         });
 
-        slots.forEach(slot => {
-            if (availablePlayers.length > 0) {
-                // Find the best player for this slot
-                const bestPlayerForSlot = availablePlayers.reduce((best, current) => {
-                    if (!best) return current;
-                    const basePosition = slot.replace(/\d/g, '');
+        // Available players: healthy + not already used
+        let available = rosterObjs.filter(p => p && (!p.status || p.status.duration === 0));
 
-                    // Base suitability using existing slot/formula
-                    let bestSuitability = calculateSlotSuitability(best, slot, side, team);
-                    let currentSuitability = calculateSlotSuitability(current, slot, side, team);
+        // Assign best player for each slot
+        for (const slot of slots) {
+            if (available.length === 0) break;
 
-                    // Boost players whose estimated best position matches the slot
-                    try {
-                        const bestEst = estimateBestPosition(best);
-                        const currEst = estimateBestPosition(current);
-                        if (bestEst === basePosition) bestSuitability += 12;
-                        if (currEst === basePosition) currentSuitability += 12;
+            const basePosition = slot.replace(/\d/g, ""); // WR1 → "WR"
 
-                        // Boost players who list this as a favorite/primary position
-                        if (best.favoriteOffensivePosition === basePosition || best.favoriteDefensivePosition === basePosition) bestSuitability += 8;
-                        if (current.favoriteOffensivePosition === basePosition || current.favoriteDefensivePosition === basePosition) currentSuitability += 8;
+            // Pick best match
+            const best = available.reduce((bestSoFar, cur) => {
+                if (!bestSoFar) return cur;
 
-                        // Penalize if player's estimated position is strongly on the opposite side
-                        const offensePositions = ['QB', 'RB', 'WR', 'OL'];
-                        const defensePositions = ['DL', 'LB', 'DB'];
-                        const bestSideMismatch = (side === 'offense' && defensePositions.includes(bestEst)) || (side === 'defense' && offensePositions.includes(bestEst));
-                        const currSideMismatch = (side === 'offense' && defensePositions.includes(currEst)) || (side === 'defense' && offensePositions.includes(currEst));
-                        if (bestSideMismatch) bestSuitability -= 20;
-                        if (currSideMismatch) currentSuitability -= 20;
-                    } catch (e) {
-                        // If estimateBestPosition fails for any player, ignore bonuses
-                    }
+                let bestScore = calculateSlotSuitability(bestSoFar, slot, side, team);
+                let curScore = calculateSlotSuitability(cur, slot, side, team);
 
-                    // Penalize players who already have a starting job so we spread starters
-                    if (alreadyAssignedPlayerIds.has(best.id)) bestSuitability -= 50;
-                    if (alreadyAssignedPlayerIds.has(current.id)) currentSuitability -= 50;
+                try {
+                    const bestEst = estimateBestPosition(bestSoFar);
+                    const curEst = estimateBestPosition(cur);
 
-                    return currentSuitability > bestSuitability ? current : best;
-                }, availablePlayers[0]);
+                    // bonus if estimated best matches slot
+                    if (bestEst === basePosition) bestScore += 12;
+                    if (curEst === basePosition) curScore += 12;
 
-                if (bestPlayerForSlot) {
-                    depthChart[side][slot] = bestPlayerForSlot.id;
-                    alreadyAssignedPlayerIds.add(bestPlayerForSlot.id);
-                    // 
-                    availablePlayers = availablePlayers.filter(p => p.id !== bestPlayerForSlot.id);
+                    // bonus if favorite O/D position matches
+                    if (bestSoFar.favoriteOffensivePosition === basePosition ||
+                        bestSoFar.favoriteDefensivePosition === basePosition)
+                        bestScore += 8;
+
+                    if (cur.favoriteOffensivePosition === basePosition ||
+                        cur.favoriteDefensivePosition === basePosition)
+                        curScore += 8;
+
+                    // side mismatch penalty
+                    const off = ["QB", "RB", "WR", "OL"];
+                    const def = ["DL", "LB", "DB"];
+                    if ((side === "offense" && def.includes(bestEst)) ||
+                        (side === "defense" && off.includes(bestEst)))
+                        bestScore -= 20;
+                    if ((side === "offense" && def.includes(curEst)) ||
+                        (side === "defense" && off.includes(curEst)))
+                        curScore -= 20;
+                } catch (e) {
+                    // ignore if estimateBestPosition fails
                 }
+
+                // penalty if already used somewhere else
+                if (alreadyAssigned.has(bestSoFar.id)) bestScore -= 50;
+                if (alreadyAssigned.has(cur.id)) curScore -= 50;
+
+                return curScore > bestScore ? cur : bestSoFar;
+            }, available[0]);
+
+            if (best) {
+                depthChart[side][slot] = best.id;
+                alreadyAssigned.add(best.id);
+                available = available.filter(p => p.id !== best.id);
             }
-        });
+        }
+    }
+
+    // ----------------------------------------------------
+    // 3. Build AI depthOrder
+    // ----------------------------------------------------
+    try {
+        const roster = rosterObjs;
+        const starterSet = new Set();
+
+        // Collect all starters (offense + defense)
+        for (const side of ["offense", "defense"]) {
+            Object.values(depthChart[side]).forEach(pid => pid && starterSet.add(pid));
+        }
+
+        // Starter list in slot order (consistent!)
+        const startersList = [];
+        for (const side of ["offense", "defense"]) {
+            const sideChart = depthChart[side];
+            for (const slot of Object.keys(sideChart)) {
+                const pid = sideChart[slot];
+                if (pid && !startersList.includes(pid)) startersList.push(pid);
+            }
+        }
+
+        // Remaining players sorted by overall
+        const benchList = roster
+            .filter(p => !starterSet.has(p.id))
+            .sort((a, b) => calculateOverall(b) - calculateOverall(a))
+            .map(p => p.id);
+
+        team.depthOrder = [...startersList, ...benchList];
+    } catch (err) {
+        console.error("Error building AI depthOrder:", err);
+        team.depthOrder = team.roster ? [...team.roster] : [];
     }
 }
+
 
 /** Simulates an AI team's draft pick. */
 function simulateAIPick(team) {
@@ -744,6 +809,8 @@ function addPlayerToTeam(player, team) {
     player.teamId = team.id;
     // --- 💡 FIX: Push the ID, not the full object ---
     team.roster.push(player.id);
+    if (!Array.isArray(team.depthOrder)) team.depthOrder = [];
+    if (!team.depthOrder.includes(player.id)) team.depthOrder.push(player.id);
     return true;
 }
 
@@ -875,57 +942,72 @@ function getPlayersForSlots(team, side, slotPrefix, usedPlayerIdsThisPlay, gameL
 // game.js
 
 function getPlayerBySlot(team, side, slot, usedPlayerIdsThisPlay) {
+    // Defensive guards
     const roster = getRosterObjects(team);
     if (!team || !team.depthChart || !team.depthChart[side] || !roster) {
-        console.error(`getPlayerBySlot: Invalid team data for ${slot} on ${side}.`);
+        console.error(`getPlayerBySlot: Invalid team/roster/depthChart for slot=${slot}, side=${side}`);
         return null;
     }
 
     usedPlayerIdsThisPlay = ensureSet(usedPlayerIdsThisPlay);
 
-    const sideDepthChart = team.depthChart[side];
+    const sideDepthChart = team.depthChart[side] || {};
     const starterId = sideDepthChart[slot];
 
-    // --- STEP 1: Try to get the designated starter ---
-    // ---  Find from our full roster object list ---
-    let player = roster.find(p => p && p.id === starterId);
-
-    if (player && (player.status?.duration > 0 || usedPlayerIdsThisPlay.has(player.id))) {
-        player = null;
-    }
-
-    // --- STEP 2: If starter is ineligible, find the BEST possible substitute ---
-    if (!player) {
-        // ---  Filter from our full roster object list ---
-        const availableSubs = roster.filter(p =>
-            p && p.status?.duration === 0 && !usedPlayerIdsThisPlay.has(p.id)
-        );
-
-        if (availableSubs.length > 0) {
-            player = availableSubs.reduce((best, current) => {
-                const bestScore = calculateSlotSuitability(best, slot, side, team);
-                const currentScore = calculateSlotSuitability(current, slot, side, team);
-                return (currentScore > bestScore) ? current : best;
-            }, availableSubs[0]);
+    // 1) If a starter is explicitly assigned in depthChart, try to use them (if healthy & not used)
+    if (starterId) {
+        const starter = roster.find(p => p && p.id === starterId);
+        if (starter && (!starter.status || starter.status.duration === 0) && !usedPlayerIdsThisPlay.has(starter.id)) {
+            usedPlayerIdsThisPlay.add(starter.id);
+            return starter;
         }
     }
 
-    // --- STEP 3: Finalize Player Usage ---
-    if (player) {
-        usedPlayerIdsThisPlay.add(player.id);
-        return player;
+    // 2) If no explicit starter or starter unavailable, consult team's depthOrder (if present)
+    const basePosition = slot.replace(/\d/g, '');
+    const depthOrder = Array.isArray(team.depthOrder) ? team.depthOrder : (team.roster || []);
+    if (Array.isArray(depthOrder) && depthOrder.length > 0) {
+        for (const id of depthOrder) {
+            if (usedPlayerIdsThisPlay.has(id)) continue;
+            const candidate = roster.find(p => p && p.id === id);
+            if (!candidate) continue;
+            // match position heuristics (favorite position, pos property, or estimated)
+            if (candidate.favoriteOffensivePosition === basePosition || candidate.favoriteDefensivePosition === basePosition || candidate.pos === basePosition) {
+                if (!candidate.status || candidate.status.duration === 0) {
+                    usedPlayerIdsThisPlay.add(candidate.id);
+                    return candidate;
+                }
+            }
+        }
     }
 
-    // --- STEP 4: Absolute fallback ---
-    const position = slot.replace(/\d/g, '');
-    const emergencySub = getBestSub(team, position, usedPlayerIdsThisPlay); // getBestSub also needs fix
+    // 3) Fallback: original behavior — find best suitable available player from roster
+    // Filter available players (healthy & not used)
+    const availableSubs = roster.filter(p => p && (!p.status || p.status.duration === 0) && !usedPlayerIdsThisPlay.has(p.id));
+    if (availableSubs.length > 0) {
+        // Use existing suitability-based selection (calculateSlotSuitability)
+        const best = availableSubs.reduce((bestSoFar, current) => {
+            const bestScore = calculateSlotSuitability(bestSoFar, slot, side, team);
+            const curScore = calculateSlotSuitability(current, slot, side, team);
+            return curScore > bestScore ? current : bestSoFar;
+        }, availableSubs[0]);
+        if (best) {
+            usedPlayerIdsThisPlay.add(best.id);
+            return best;
+        }
+    }
+
+    // 4) Final emergency fallback (previous emergency function)
+    const positionOnly = basePosition;
+    const emergencySub = getBestSub(team, positionOnly, usedPlayerIdsThisPlay);
     if (emergencySub) {
         usedPlayerIdsThisPlay.add(emergencySub.id);
         return emergencySub;
     }
 
-    return null; // No one is available
+    return null;
 }
+
 
 // game.js
 
@@ -2087,7 +2169,7 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                             // Default behavior: Run straight downfield
                             pState.targetX = pState.initialX;
                             pState.targetY = Math.min(FIELD_LENGTH - 10, pState.y + 10);
-                            
+
                             // Check arrival at "end of field"
                             if (pState.y > FIELD_LENGTH - 15) {
                                 pState.action = 'route_complete';
@@ -2104,24 +2186,24 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
 
                         // 3. 🧠 SMART COVERAGE ADJUSTMENT
                         // If defender is pressing (within 2 yards), adjust route slightly
-                        const nearbyDefender = defenseStates.find(d => 
+                        const nearbyDefender = defenseStates.find(d =>
                             !d.isBlocked && !d.isEngaged && getDistance(pState, d) < 2.0
                         );
-                        
+
                         if (nearbyDefender) {
                             // Stable Avoidance: Use INITIAL lineup position to decide direction
                             // If I lined up outside the defender, stay outside.
                             const leverageX = (pState.initialX > nearbyDefender.initialX) ? 0.5 : -0.5;
-                            targetX += leverageX; 
+                            targetX += leverageX;
                         }
 
                         // 4. 🚧 STABLE OBSTACLE AVOIDANCE
                         // Only avoid defenders who are physically blocking the path forward
-                        const obstacle = defenseStates.find(d => 
-                            !d.isBlocked && !d.isEngaged && 
-                            d.y >= pState.y - 0.5 &&       
+                        const obstacle = defenseStates.find(d =>
+                            !d.isBlocked && !d.isEngaged &&
+                            d.y >= pState.y - 0.5 &&
                             d.y <= pState.y + 3.0 &&       // Immediate threat only
-                            d.y < targetY &&               
+                            d.y < targetY &&
                             Math.abs(d.x - pState.x) < 0.8 // Strictly in lane
                         );
 
@@ -2130,10 +2212,10 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                             // This prevents the "vibration" where they flip left/right every frame.
                             // If I started to the right of this guy, I go right. Always.
                             const avoidanceDir = (pState.initialX >= obstacle.initialX) ? 1.0 : -1.0;
-                            
+
                             // Side step
                             targetX = obstacle.x + (avoidanceDir * 1.2);
-                            
+
                             // 💡 MOMENTUM FIX: Ensure we aim PAST the defender
                             // Never aim directly at them. Aim at least 2 yards deeper.
                             targetY = Math.max(pState.y + 2.0, obstacle.y + 2.0);
@@ -2144,7 +2226,7 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                         pState.targetY = targetY;
 
                         // 6. Arrival Check
-                        const distToTarget = getDistance(pState, {x: targetX, y: targetY});
+                        const distToTarget = getDistance(pState, { x: targetX, y: targetY });
 
                         if (distToTarget < ARRIVAL_RADIUS) {
                             pState.currentPathIndex++;
@@ -2583,18 +2665,18 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
         else if (isBallCaughtOrRun) {
             if (!carrierIsQB) {
                 // RB/WR has the ball -> Everyone chases
-                shouldPursue = true; 
+                shouldPursue = true;
             } else if (isBallPastLOS) {
                 // QB has crossed the line -> Everyone chases immediately
-                shouldPursue = true; 
+                shouldPursue = true;
             } else if (!qbInPocket) {
                 // QB is scrambling BEHIND the line
-                
+
                 // A. DEFENSIVE BACKS (Safeties/Corners)
                 // Stay deep unless the QB is very close or running specifically at them
                 if (pState.slot.includes('DB') || pState.slot.includes('S')) {
                     const distToQB = getDistance(pState, ballCarrierState);
-                    
+
                     if (pState.assignment.startsWith('man_cover_')) {
                         shouldPursue = false; // Stick to man
                     } else if (distToQB < 10.0 || ballCarrierState.action === 'qb_scramble') {
@@ -2602,7 +2684,7 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                         shouldPursue = false;
                         pState.targetX = (pState.x * 0.4) + (ballCarrierState.x * 0.6);
                         pState.targetY = Math.max(LOS + 2.0, ballCarrierState.y + 4.0);
-                        pState.action = 'zone_coverage'; 
+                        pState.action = 'zone_coverage';
                         return; // Force update
                     } else {
                         shouldPursue = false;
@@ -2613,20 +2695,20 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                 else if (pState.slot.startsWith('LB')) {
                     if (pState.assignment.startsWith('man_cover_')) {
                         // Man Coverage LB: Stick to the RB/TE until QB crosses LOS
-                        shouldPursue = false; 
+                        shouldPursue = false;
                     } else {
                         // Zone Coverage LB: BECOME A SPY
                         // Do not rush the QB yet (leaves zone open). 
                         // Instead, mirror the QB's X position to contain the edge.
-                        shouldPursue = false; 
-                        
+                        shouldPursue = false;
+
                         // Move laterally with QB
                         pState.targetX = ballCarrierState.x;
-                        
+
                         // Hold depth! Don't let the ball go over your head.
                         // Stay at least 2 yards deep or your current zone depth.
-                        const holdDepth = Math.max(LOS + 2.0, pState.y); 
-                        
+                        const holdDepth = Math.max(LOS + 2.0, pState.y);
+
                         // But if QB gets too close (3 yards), attack!
                         const distToQB = getDistance(pState, ballCarrierState);
                         if (distToQB < 3.0) {
@@ -3594,8 +3676,8 @@ function resolveOngoingBlocks(playState, gameLog) {
         const defenderState = playState.activePlayers.find(p => p.id === battle.defenderId);
 
         // 1. Validation: Ensure players still exist and link to each other
-        if (!blockerState || !defenderState || 
-            blockerState.engagedWith !== defenderState.id || 
+        if (!blockerState || !defenderState ||
+            blockerState.engagedWith !== defenderState.id ||
             defenderState.blockedBy !== blockerState.id) {
             battle.status = 'disengaged';
             battlesToRemove.push(index);
@@ -3621,10 +3703,10 @@ function resolveOngoingBlocks(playState, gameLog) {
             battlesToRemove.push(index);
             blockerState.engagedWith = null; blockerState.isEngaged = false;
             defenderState.isBlocked = false; defenderState.blockedBy = null; defenderState.isEngaged = false;
-            defenderState.action = 'pursuit'; 
+            defenderState.action = 'pursuit';
             return;
         }
-        
+
         // If players drifted too far apart (physics glitch), break
         if (getDistance(blockerState, defenderState) > BLOCK_ENGAGE_RANGE + 0.5) {
             battle.status = 'disengaged';
@@ -3642,10 +3724,10 @@ function resolveOngoingBlocks(playState, gameLog) {
         // Check every 10 ticks (0.5s) instead of 60
         if (playState.tick % 10 === 0) {
             const agilityDiff = (defenderState.agility || 50) - (blockerState.agility || 50);
-            
+
             // Block Decay: Every second the block holds, the defender gets a +5% bonus to shed
             const durationSeconds = (playState.tick - battle.startTick) * TICK_DURATION_SECONDS;
-            const decayBonus = durationSeconds * 0.05; 
+            const decayBonus = durationSeconds * 0.05;
 
             // Base chance + Agility diff + Decay
             const breakChance = 0.05 + (Math.max(0, agilityDiff) / 200) + decayBonus;
@@ -3685,18 +3767,18 @@ function resolveOngoingBlocks(playState, gameLog) {
         if (battle.status === 'win_B') { // Defender Sheds
             // 💡 FIX: Only stun for 15 ticks (0.75s) instead of 60 (3.0s)
             // This prevents the visual "holding" look where players freeze.
-            blockerState.stunnedTicks = 20; 
+            blockerState.stunnedTicks = 20;
             blockerState.engagedWith = null; blockerState.isEngaged = false;
-            
+
             defenderState.stunnedTicks = 0; // Defender is FREE to move immediately
             defenderState.isBlocked = false; defenderState.blockedBy = null; defenderState.isEngaged = false;
             defenderState.action = 'pursuit'; // Force AI update
-            
+
             battlesToRemove.push(index);
         } else if (battle.status === 'win_A') { // Pancake
             defenderState.stunnedTicks = 40; // Defender gets knocked down (2s)
             blockerState.engagedWith = null; blockerState.isEngaged = false;
-            
+
             defenderState.isBlocked = false; defenderState.blockedBy = null; defenderState.isEngaged = false;
             battlesToRemove.push(index);
         }
@@ -6727,6 +6809,131 @@ function updateDepthChart(playerId, newPositionSlot, side) {
         console.log(`Player ${displacedPlayerId} moved to bench from ${newPositionSlot}`);
     }
 }
+
+// -----------------------------
+// Depth Order API / Helpers
+// -----------------------------
+
+/**
+ * Update roster depth order based on newOrder[] (array of player IDs).
+ * Persists to the player's team object and dispatches a UI refresh.
+ */
+export function updateDepthOrder(newOrder) {
+    if (!game || !game.playerTeam) {
+        console.warn("updateDepthOrder: game or playerTeam missing.");
+        return;
+    }
+    const team = game.playerTeam;
+    if (!Array.isArray(team.roster)) {
+        console.warn("updateDepthOrder: roster missing.");
+        return;
+    }
+
+    // Build lookup: id -> player object
+    const rosterObjects = getRosterObjects(team);
+    const map = {};
+    rosterObjects.forEach(p => { if (p && p.id) map[p.id] = p; });
+
+    // Rebuild roster in the requested order (preserve objects)
+    const reordered = [];
+    for (const id of (Array.isArray(newOrder) ? newOrder : [])) {
+        if (map[id]) reordered.push(map[id].id);
+    }
+
+    // Append any missing players (safety)
+    rosterObjects.forEach(p => {
+        if (!reordered.includes(p.id)) reordered.push(p.id);
+    });
+
+    // Apply the new roster order (IDs)
+    team.roster = reordered.slice();
+
+    // Persist `depthOrder` as the authoritative order for starter selection
+    team.depthOrder = reordered.slice();
+
+    // Notify UI/consumers
+    try { document.dispatchEvent(new CustomEvent("refresh-ui")); } catch (e) { /* ignore */ }
+
+    console.log("updateDepthOrder applied:", reordered);
+}
+
+/**
+ * Returns the highest-priority player object for a given position based on depthOrder.
+ * If no explicit depthOrder exists, falls back to roster order or suitability.
+ */
+export function getStarterForPosition(team, position) {
+    if (!team || !Array.isArray(team.roster)) return null;
+
+    const rosterObjects = getRosterObjects(team);
+
+    // Use explicit depthOrder if present
+    const order = Array.isArray(team.depthOrder) ? team.depthOrder : (team.roster || []);
+
+    for (const id of order) {
+        const p = rosterObjects.find(r => r && r.id === id);
+        if (!p) continue;
+        // match by primary positions or estimated best fit
+        // assume p.favoriteOffensivePosition / favoriteDefensivePosition or pos field exists
+        const basePos = position.replace(/\d/g, '');
+        if (p.favoriteOffensivePosition === basePos || p.favoriteDefensivePosition === basePos || p.pos === basePos) {
+            // Only return healthy players by default
+            if (!p.status || p.status.duration === 0) return p;
+        }
+    }
+
+    // Fallback: find best available by suitability
+    const candidates = rosterObjects.filter(p => p && (!p.status || p.status.duration === 0));
+    if (candidates.length === 0) return null;
+
+    const best = candidates.reduce((bestSoFar, cur) => {
+        try {
+            const bestScore = calculateSlotSuitability(bestSoFar, position, position.startsWith('DL') ? 'defense' : 'offense', team);
+            const curScore = calculateSlotSuitability(cur, position, position.startsWith('DL') ? 'defense' : 'offense', team);
+            return curScore > bestScore ? cur : bestSoFar;
+        } catch (e) {
+            return bestSoFar;
+        }
+    }, candidates[0]);
+
+    return best || null;
+}
+
+/**
+ * Returns the next available player (backup) for a given position based on depthOrder.
+ * `excludeId` is typically the starter's id so we return the next one.
+ */
+export function getBackupForPosition(team, position, excludeId = null) {
+    if (!team || !Array.isArray(team.roster)) return null;
+    const rosterObjects = getRosterObjects(team);
+    const order = Array.isArray(team.depthOrder) ? team.depthOrder : (team.roster || []);
+
+    let foundStarter = excludeId ? false : true;
+
+    for (const id of order) {
+        const p = rosterObjects.find(r => r && r.id === id);
+        if (!p) continue;
+        const basePos = position.replace(/\d/g, '');
+        if (!(p.favoriteOffensivePosition === basePos || p.favoriteDefensivePosition === basePos || p.pos === basePos)) continue;
+        if (!p.status || p.status.duration === 0) {
+            if (!excludeId) return p;
+            if (!foundStarter) {
+                if (p.id === excludeId) {
+                    foundStarter = true;
+                }
+                continue;
+            } else {
+                if (p.id !== excludeId) return p;
+            }
+        }
+    }
+
+    // Fallback: simple search through roster objects
+    const candidates = rosterObjects.filter(p => p && p.id !== excludeId && (!p.status || p.status.duration === 0) &&
+        (p.favoriteOffensivePosition === position.replace(/\d/g, '') || p.favoriteDefensivePosition === position.replace(/\d/g, '') || p.pos === position.replace(/\d/g, ''))
+    );
+    return candidates.length > 0 ? candidates[0] : null;
+}
+
 
 /**
  * Validates the integrity of a team's depth chart and roster.

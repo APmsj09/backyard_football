@@ -1045,23 +1045,34 @@ function renderFormationDropdown(side, formations, currentFormationName) {
 }
 
 /** Renders the table showing overall ratings for each player at each position. */
-function renderPositionalOveralls(roster) { // 💡 FIX: Accepts roster objects
-    if (!elements.positionalOverallsContainer) return;
-    const positions = Object.keys(positionOverallWeights);
-    let table = `<table class="min-w-full text-sm text-left"><thead class="bg-gray-100"><tr><th scope="col" class="p-2 font-semibold sticky left-0 bg-gray-100 z-10">Player</th>${positions.map(p => `<th scope="col" class="p-2 font-semibold text-center">${p}</th>`).join('')}</tr></thead><tbody>`;
+function renderPositionalOveralls() {
+    const pane = document.getElementById("positional-overalls-container");
+    const gameState = getGameState();
+    if (!pane || !gameState) return;
 
-    // --- 💡 FIX: roster is now the full object array ---
-    if (roster && roster.length > 0) {
-        roster.forEach(player => {
-            // --- 💡 END FIX ---
-            if (!player) return;
-            table += `<tr class="border-b"><th scope="row" class="p-2 font-bold sticky left-0 bg-white z-0">${player.name}</th>${positions.map(p => `<td class="p-2 text-center">${calculateOverall(player, p)}</td>`).join('')}</tr>`;
-        });
-    } else {
-        table += `<tr><td colspan="${positions.length + 1}" class="text-center p-4 text-gray-500">No players on roster for positional overalls.</td></tr>`;
+    const positions = {};
+    const roster = getUIRosterObjects(gameState.playerTeam);
+
+    for (const p of roster) {
+        if (!positions[p.pos]) positions[p.pos] = [];
+        positions[p.pos].push(p);
     }
-    elements.positionalOverallsContainer.innerHTML = table + '</tbody></table>';
+
+    const html = Object.keys(positions).map(pos => `
+        <div class="mb-4 p-4 bg-gray-50 rounded border">
+            <h4 class="font-bold text-gray-700 mb-2">${pos}</h4>
+            <div class="space-y-1">
+                ${positions[pos]
+                    .sort((a, b) => b.overall - a.overall)
+                    .map(x => `<div class="text-sm">${x.name} — <span class="font-bold">${x.overall}</span></div>`)
+                    .join("")}
+            </div>
+        </div>
+    `).join("");
+
+    pane.innerHTML = html;
 }
+
 
 /** Renders the depth chart slots and available players for one side. */
 function renderDepthChartSide(side, gameState) {
@@ -1823,52 +1834,39 @@ export function setupDragAndDrop(onDrop) {
 
 /** Sets up event listener for depth chart sub-tabs (Offense/Defense/Overalls). */
 export function setupDepthChartTabs() {
-    if (!elements.depthChartSubTabs) { console.error("Depth chart tabs container missing."); return; }
+    const subTabs = document.querySelectorAll(".depth-chart-tab");
 
-    elements.depthChartSubTabs.addEventListener('click', e => {
-        if (e.target.matches('.depth-chart-tab')) {
-            const subTab = e.target.dataset.subTab;
+    subTabs.forEach(tab => {
+        tab.addEventListener("click", () => {
+            const subTab = tab.dataset.subTab;
 
-            // 1. Update button active states
-            elements.depthChartSubTabs.querySelectorAll('.depth-chart-tab').forEach(t => {
-                const isSelected = t === e.target;
-                t.classList.toggle('active', isSelected);
-                t.classList.toggle('border-b-2', isSelected);     // Add styling toggle
-                t.classList.toggle('border-amber-500', isSelected);
-                t.classList.toggle('text-amber-600', isSelected);
-                t.setAttribute('aria-selected', isSelected.toString());
+            // Update active class
+            subTabs.forEach(t => {
+                if (t.dataset.subTab === subTab) {
+                    t.classList.add("active", "text-amber-600", "border-amber-500");
+                } else {
+                    t.classList.remove("active", "text-amber-600", "border-amber-500");
+                }
             });
 
-            // 2. Toggle Panes
-            const offensePane = document.getElementById('depth-chart-offense-pane');
-            const defensePane = document.getElementById('depth-chart-defense-pane');
-            const overallsPane = document.getElementById('positional-overalls-container');
-            const depthOrderPane = document.getElementById('depth-order-container'); // NEW
+            // Show / hide sub-panes
+            const offensePane = document.getElementById("depth-chart-offense-pane");
+            const defensePane = document.getElementById("depth-chart-defense-pane");
+            const overallsPane = document.getElementById("positional-overalls-container");
+            const depthOrderPane = document.getElementById("depth-order-container");
 
-            if (offensePane) offensePane.classList.toggle('hidden', subTab !== 'offense');
-            if (defensePane) defensePane.classList.toggle('hidden', subTab !== 'defense');
-            if (overallsPane) overallsPane.classList.toggle('hidden', subTab !== 'overalls');
+            offensePane.classList.toggle("hidden", subTab !== "offense");
+            defensePane.classList.toggle("hidden", subTab !== "defense");
+            overallsPane.classList.toggle("hidden", subTab !== "overalls");
+            depthOrderPane.classList.toggle("hidden", subTab !== "depth-order");
 
-            // --- NEW: Handle Depth Order Pane ---
-            if (depthOrderPane) {
-                depthOrderPane.classList.toggle('hidden', subTab !== 'depth-order');
-                if (subTab === 'depth-order') {
-                    renderDepthOrderPane(getGameState());
-                }
-            }
-        }
+            // Render tab content as needed
+            if (subTab === "overalls") renderPositionalOveralls();
+            if (subTab === "depth-order") renderDepthOrderPane(getGameState());
+        });
     });
-
-    // Setup the Auto-Reorder button listener here
-    if (elements.autoReorderBtn) {
-        elements.autoReorderBtn.onclick = () => {
-            // Run the priority logic immediately
-            applyDepthOrderToChart();
-            // Re-render the pane to show any status updates (optional visual refresh)
-            renderDepthOrderPane(getGameState());
-        };
-    }
 }
+
 /**
  * 💡 FIX: Attach listeners to formation dropdowns.
  * Call this inside setupElements() or renderDepthChartTab().
@@ -3198,100 +3196,36 @@ export function setSimSpeed(speed) {
     }
 }
 function renderDepthOrderPane(gameState) {
-    if (!elements.depthOrderGrid || !gameState?.playerTeam) return;
+    const pane = document.getElementById("depth-order-container");
+    if (!pane || !gameState) return;
 
     const roster = getUIRosterObjects(gameState.playerTeam);
-    elements.depthOrderGrid.innerHTML = '';
 
-    // 1. Define Groups 
-    // We map the list index (0, 1, 2) to specific game slots (WR1, WR2, etc.)
-    const positionGroups = {
-        'QB': { side: 'offense', roles: ['QB'], slots: ['QB1'] },
-        'RB': { side: 'offense', roles: ['RB', 'FB'], slots: ['RB1', 'RB2'] },
-        // 7v7 is pass-heavy, so we allow ordering up to WR5
-        'WR': { side: 'offense', roles: ['WR'], slots: ['WR1', 'WR2', 'WR3', 'WR4', 'WR5'] },
-        // Explicitly 3 OL slots
-        'OL': { side: 'offense', roles: ['OL', 'OT', 'OG', 'C'], slots: ['OL1', 'OL2', 'OL3'] },
-        'DL': { side: 'defense', roles: ['DL', 'DE', 'DT'], slots: ['DL1', 'DL2', 'DL3'] },
-        'LB': { side: 'defense', roles: ['LB', 'OLB', 'MLB'], slots: ['LB1', 'LB2', 'LB3'] },
-        'DB': { side: 'defense', roles: ['DB', 'CB', 'S', 'FS', 'SS'], slots: ['DB1', 'DB2', 'DB3', 'DB4', 'DB5'] }
-    };
+    if (!roster || roster.length === 0) {
+        pane.innerHTML = "<p>No roster data found.</p>";
+        return;
+    }
 
-    Object.entries(positionGroups).forEach(([groupName, config]) => {
+    // Sort by overall descending
+    roster.sort((a, b) => b.overall - a.overall);
 
-        // 2. Filter Players (Include if they play this position on EITHER side)
-        const groupPlayers = roster.filter(p => {
-            if (config.side === 'offense') return config.roles.includes(p.favoriteOffensivePosition);
-            if (config.side === 'defense') return config.roles.includes(p.favoriteDefensivePosition);
-            return config.roles.includes(p.position);
-        });
+    const html = `
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4" id="depth-order-list">
+            ${roster.map(player => `
+                <div 
+                    class="depth-order-item p-3 bg-gray-100 rounded shadow flex items-center gap-3 cursor-move"
+                    draggable="true"
+                    data-player-id="${player.id}">
+                    <div class="font-bold text-gray-900">${player.name}</div>
+                    <div class="text-sm text-gray-500">OVR: ${player.overall}</div>
+                </div>
+            `).join("")}
+        </div>
+    `;
 
-        // 3. Sort Logic:
-        // If the user has ALREADY ordered this list (stored in a custom property or temp state), use that.
-        // Otherwise, default to Overall.
-        // For now, we sort by OVR to give a good starting point.
-        groupPlayers.sort((a, b) => {
-            const ovrA = calculateOverall(a, groupName === 'ST' ? 'K' : groupName);
-            const ovrB = calculateOverall(b, groupName === 'ST' ? 'K' : groupName);
-            // Boost currently assigned starters to the top
-            const isStarterA = isPlayerStarting(a.id, gameState.playerTeam, config.side);
-            const isStarterB = isPlayerStarting(b.id, gameState.playerTeam, config.side);
-            if (isStarterA !== isStarterB) return isStarterB - isStarterA;
-            return ovrB - ovrA;
-        });
+    pane.innerHTML = html;
 
-        // 4. Create Column
-        const col = document.createElement('div');
-        col.className = 'bg-gray-100 p-3 rounded shadow-sm flex flex-col h-full border border-gray-200';
-
-        const headerColor = config.side === 'offense' ? 'text-blue-800'
-            : config.side === 'defense' ? 'text-red-800'
-                : 'text-gray-700';
-
-        col.innerHTML = `
-            <div class="flex justify-between items-center border-b border-gray-300 pb-2 mb-2">
-                <h5 class="font-bold ${headerColor} uppercase text-sm">${groupName}</h5>
-                <span class="text-[10px] text-gray-400 font-mono">${config.side.substring(0, 3).toUpperCase()}</span>
-            </div>
-            <div class="depth-sortable-list space-y-2 min-h-[50px] flex-grow" data-group="${groupName}" data-side="${config.side}">
-                ${groupPlayers.map((p, index) => {
-            const ovr = calculateOverall(p, groupName === 'ST' ? 'K' : groupName);
-
-            // Determine target slot based on index (0 -> WR1, 1 -> WR2)
-            const targetSlot = config.slots[index] || 'Bench';
-            const isStarter = targetSlot !== 'Bench';
-
-            // Visual Styling
-            const slotBadgeColor = isStarter
-                ? (config.side === 'offense' ? 'bg-blue-100 text-blue-800' : 'bg-red-100 text-red-800')
-                : 'bg-gray-200 text-gray-500';
-
-            return `
-                    <div class="p-2 bg-white rounded shadow-sm flex items-center justify-between cursor-move hover:ring-2 hover:ring-amber-300 transition group relative" 
-                         draggable="true" 
-                         data-player-id="${p.id}"
-                         data-group="${groupName}">
-                        
-                        <div class="text-xs font-bold text-gray-400 w-4">${index + 1}</div>
-
-                        <div class="flex-grow pl-2">
-                            <span class="font-bold text-sm block text-gray-800">${p.name}</span>
-                            <span class="text-[10px] text-gray-500 uppercase">${p.favoriteOffensivePosition} / ${p.favoriteDefensivePosition}</span>
-                        </div>
-
-                        <div class="text-xs font-bold px-2 py-1 rounded ${slotBadgeColor} mr-2 w-12 text-center">
-                            ${targetSlot}
-                        </div>
-
-                        <div class="text-lg font-bold text-gray-700 w-8 text-right">${ovr}</div>
-                    </div>`;
-        }).join('')}
-            </div>
-        `;
-        elements.depthOrderGrid.appendChild(col);
-    });
-
-    setupDepthOrderDragEvents();
+    setupDepthOrderDrag();
 }
 
 /** Helper to check if a player is in any starting slot */
@@ -3355,6 +3289,49 @@ function setupDepthOrderDragEvents() {
             // so the user sees "1. Name" move to "2. Name" in real time.
             updateRankNumbers(container);
         });
+    });
+}
+
+function setupDepthOrderDrag() {
+    const list = document.getElementById("depth-order-list");
+    if (!list) return;
+
+    const items = list.querySelectorAll(".depth-order-item");
+    let dragged = null;
+
+    items.forEach(item => {
+        item.addEventListener("dragstart", () => {
+            dragged = item;
+            item.classList.add("opacity-50");
+        });
+
+        item.addEventListener("dragend", () => {
+            dragged = null;
+            item.classList.remove("opacity-50");
+        });
+
+        item.addEventListener("dragover", e => {
+            e.preventDefault();
+            const rect = item.getBoundingClientRect();
+            const offset = e.clientY - rect.top;
+
+            if (offset > rect.height / 2) {
+                item.after(dragged);
+            } else {
+                item.before(dragged);
+            }
+        });
+    });
+
+    list.addEventListener("drop", () => {
+        const newOrder = [...list.querySelectorAll(".depth-order-item")]
+            .map(el => el.dataset.playerId);
+
+        if (typeof Game.updateDepthOrder === "function") {
+            Game.updateDepthOrder(newOrder);
+        }
+
+        document.dispatchEvent(new CustomEvent("refresh-ui"));
     });
 }
 
