@@ -203,6 +203,9 @@ export function setupElements() {
         simStatsHome: getEl('sim-stats-home'),
         simPlayersPanel: getEl('sim-players-panel'),
         simPlayersList: getEl('sim-players-list'),
+        simMatchupBanner: getEl('sim-matchup-banner'),
+        simBannerOffense: getEl('sim-banner-offense'),
+        simBannerDefense: getEl('sim-banner-defense'),
 
         // --- Offseason ---
         offseasonYear: getEl('offseason-year'),
@@ -1036,10 +1039,27 @@ function renderDepthChartTab(gameState) {
 function renderFormationDropdown(side, formations, currentFormationName) {
     const selectEl = elements[`${side}FormationSelect`];
     if (!selectEl) { console.error(`Formation select element for "${side}" not found.`); return; }
-    if (!Array.isArray(formations)) { console.error(`Invalid formations data for "${side}".`); selectEl.innerHTML = '<option value="">Error</option>'; return; }
-    selectEl.innerHTML = formations
-        .map(f => `<option value="${f.name}" ${f.name === currentFormationName ? 'selected' : ''}>${f.name}</option>`)
-        .join('');
+
+    // Sort formations by name for consistency
+    const sortedFormations = Object.values(formations).sort((a, b) => a.name.localeCompare(b.name));
+
+    selectEl.innerHTML = sortedFormations.map(f => {
+        let label = f.name;
+
+        // SMART UI: Add Personnel Counts (e.g., "3 WR, 1 RB")
+        if (f.personnel) {
+            const parts = [];
+            if (f.personnel.RB > 0) parts.push(`${f.personnel.RB} RB`);
+            if (f.personnel.WR > 0) parts.push(`${f.personnel.WR} WR`);
+            if (f.personnel.TE > 0) parts.push(`${f.personnel.TE} TE`);
+            if (f.personnel.LB > 0) parts.push(`${f.personnel.LB} LB`);
+            if (f.personnel.DB > 0) parts.push(`${f.personnel.DB} DB`);
+
+            if (parts.length > 0) label += ` (${parts.join(', ')})`;
+        }
+
+        return `<option value="${f.name}" ${f.name === currentFormationName ? 'selected' : ''}>${label}</option>`;
+    }).join('');
 }
 
 /** Renders the table showing overall ratings for each player at each position. */
@@ -1198,7 +1218,7 @@ function renderVisualFormationSlots(container, currentChart, formationData, benc
             } else {
                 // BENCH SCENARIO
                 suffix = " (Bench)";
-                styleClass = "text-green-600 bg-white"; 
+                styleClass = "text-green-600 bg-white";
             }
 
             // Add the option
@@ -2453,7 +2473,7 @@ function updateStatsFromLogEntry(entry) {
     const getStats = (pid) => {
         if (!pid) return null;
         if (!livePlayerStats.has(pid)) {
-            livePlayerStats.set(pid, { 
+            livePlayerStats.set(pid, {
                 passAttempts: 0, passCompletions: 0, passYards: 0, interceptionsThrown: 0,
                 receptions: 0, recYards: 0, drops: 0,
                 rushAttempts: 0, rushYards: 0,
@@ -2513,7 +2533,7 @@ function updateStatsFromLogEntry(entry) {
     // We look for the player name at the start of the interaction
     const gainMatch = entry.match(/(?:✋|🎉) (.*?) (?:tackled|ran out|scores|returns)/);
     const yardsMatch = entry.match(/gain of (-?\d+\.?\d*)|loss of (\d+\.?\d*)/);
-    
+
     if (gainMatch && yardsMatch) {
         const carrierName = gainMatch[1];
         const carrierId = findIdByName(carrierName);
@@ -2525,7 +2545,7 @@ function updateStatsFromLogEntry(entry) {
             if (livePlayContext.type === 'pass' && livePlayContext.catchMade) {
                 // It's a catch -> Receiving Yards
                 s.recYards += Math.round(yards);
-                
+
                 // Credit Passing Yards to QB
                 if (livePlayContext.passerId) {
                     getStats(livePlayContext.passerId).passYards += Math.round(yards);
@@ -2537,7 +2557,7 @@ function updateStatsFromLogEntry(entry) {
                     s.rushYards += Math.round(yards);
                     // Avoid double counting carries on the same play (logs sometimes duplicate context)
                     // We assume 1 carry per log entry with "gain of" for simplicity in live sim
-                    s.rushAttempts++; 
+                    s.rushAttempts++;
                 }
             }
         }
@@ -2551,7 +2571,7 @@ function updateStatsFromLogEntry(entry) {
             const scorerId = findIdByName(tdMatch[1]);
             if (scorerId) {
                 getStats(scorerId).touchdowns++;
-                
+
                 // If it was a pass, credit QB
                 if (livePlayContext.type === 'pass' && livePlayContext.catchMade && livePlayContext.passerId) {
                     getStats(livePlayContext.passerId).touchdowns++;
@@ -2567,7 +2587,7 @@ function updateStatsFromLogEntry(entry) {
         if (intMatch) {
             const defId = findIdByName(intMatch[1]);
             if (defId) getStats(defId).interceptions++;
-            
+
             // Credit QB with INT thrown
             if (livePlayContext.passerId) {
                 getStats(livePlayContext.passerId).interceptionsThrown++;
@@ -2626,7 +2646,7 @@ function renderLiveStatsLive() {
         const rusher = playersWithStats
             .filter(p => p.rushAttempts > 0)
             .sort((a, b) => b.rushYards - a.rushYards)[0];
-        
+
         if (rusher) {
             html += `<div class="text-xs text-gray-300 truncate">
                 <span class="text-blue-300">${rusher.name}</span>: ${rusher.rushAttempts} car, ${rusher.rushYards} yds
@@ -2645,7 +2665,7 @@ function renderLiveStatsLive() {
                 ${receiver.touchdowns > 0 ? `, ${receiver.touchdowns} TD` : ''}
             </div>`;
         }
-        
+
         return html;
     };
 
@@ -2913,6 +2933,26 @@ function runLiveGameTick() {
                     liveGameIsConversion = true; // Set the flag
                     styleClass = 'font-bold text-amber-400 mt-2';
                     descriptiveText = `🏈 ${playLogEntry} 🏈`;
+                }
+                // --- SMART UI: Update Broadcast Banner from Logs ---
+                if (playLogEntry.includes('**Offense:**')) {
+                    // Strip the emoji and bold markdown to get clean text
+                    const cleanText = playLogEntry.replace('🏈', '').replace(/\*\*/g, '').replace('Offense:', '').trim();
+                    if (elements.simBannerOffense) elements.simBannerOffense.textContent = cleanText;
+
+                    // Reset defense text when new play starts
+                    if (elements.simBannerDefense) elements.simBannerDefense.textContent = "...";
+
+                    // Visual Pulse Effect
+                    if (elements.simMatchupBanner) {
+                        elements.simMatchupBanner.classList.add('bg-gray-800');
+                        setTimeout(() => elements.simMatchupBanner?.classList.remove('bg-gray-800'), 200);
+                    }
+                }
+
+                if (playLogEntry.includes('**Defense:**')) {
+                    const cleanText = playLogEntry.replace('🛡️', '').replace(/\*\*/g, '').replace('Defense:', '').trim();
+                    if (elements.simBannerDefense) elements.simBannerDefense.textContent = cleanText;
                 }
 
                 else if (playLogEntry.startsWith('-- Drive')) {
@@ -3242,6 +3282,10 @@ export function startLiveGameSim(gameResult, onComplete) {
     if (elements.simGameDown) elements.simGameDown.textContent = "1st & 10";
     if (elements.simPossession) elements.simPossession.textContent = '';
 
+    // Reset Banner
+    if (elements.simBannerOffense) elements.simBannerOffense.textContent = "Waiting for snap...";
+    if (elements.simBannerDefense) elements.simBannerDefense.textContent = "Reading offense...";
+
     drawFieldVisualization(null); // Clear field
     // Don't render final stats at start of live sim — show a placeholder
     if (elements.simLiveStats) elements.simLiveStats.innerHTML = '<p class="text-sm text-gray-400">Live stats will populate at game end.</p>';
@@ -3256,6 +3300,8 @@ export function startLiveGameSim(gameResult, onComplete) {
 
     // --- 6. Start the Interval Timer ---
     liveGameInterval = setInterval(runLiveGameTick, liveGameSpeed);
+
+
 }
 
 export function skipLiveGameSim() {
@@ -3379,11 +3425,11 @@ function renderDepthOrderPane(gameState) {
                 
                 <div class="depth-sortable-list space-y-2 bg-gray-50 p-2 rounded border border-gray-200 min-h-[150px]" data-group="${groupKey}">
                     ${players.map((p, i) => {
-                        const ovr = calculateOverall(p, groupKey === 'ST' ? 'K' : groupKey);
-                        const rankStyle = i === 0 ? 'border-l-4 border-green-500' : (i === 1 ? 'border-l-4 border-blue-500' : 'border-l-4 border-transparent');
-                        const rankBadge = i === 0 ? '<span class="bg-green-100 text-green-800 text-xs px-1 rounded ml-2">Starter</span>' : '';
+            const ovr = calculateOverall(p, groupKey === 'ST' ? 'K' : groupKey);
+            const rankStyle = i === 0 ? 'border-l-4 border-green-500' : (i === 1 ? 'border-l-4 border-blue-500' : 'border-l-4 border-transparent');
+            const rankBadge = i === 0 ? '<span class="bg-green-100 text-green-800 text-xs px-1 rounded ml-2">Starter</span>' : '';
 
-                        return `
+            return `
                         <div class="depth-order-item bg-white p-3 rounded shadow-sm border border-gray-200 cursor-move hover:bg-amber-50 flex justify-between items-center ${rankStyle}"
                              draggable="true" 
                              data-player-id="${p.id}"
@@ -3401,7 +3447,7 @@ function renderDepthOrderPane(gameState) {
                             </div>
                         </div>
                         `;
-                    }).join('')}
+        }).join('')}
                 </div>
             </div>
         `;
@@ -3424,9 +3470,9 @@ function renderDepthOrderPane(gameState) {
                     </thead>
                     <tbody class="divide-y">
                         ${roster.map(p => {
-                            const pos = p.pos || estimateBestPosition(p);
-                            const ovr = calculateOverall(p, pos);
-                            return `
+        const pos = p.pos || estimateBestPosition(p);
+        const ovr = calculateOverall(p, pos);
+        return `
                             <tr class="roster-row-item cursor-move hover:bg-blue-50" 
                                 draggable="true" 
                                 data-player-id="${p.id}" 
@@ -3438,7 +3484,7 @@ function renderDepthOrderPane(gameState) {
                                 <td class="py-1 px-3 text-center font-bold">${ovr}</td>
                             </tr>
                             `;
-                        }).join('')}
+    }).join('')}
                     </tbody>
                 </table>
             </div>
@@ -3502,12 +3548,12 @@ function setupDepthOrderDragEvents() {
             // Add identifying class
             draggable.classList.add('dragging');
             draggable.classList.add('opacity-50');
-            
+
             // Set data for the drop
             e.dataTransfer.setData('text/plain', draggable.dataset.playerId);
             e.dataTransfer.setData('player-name', draggable.dataset.playerName);
             e.dataTransfer.setData('player-ovr', draggable.dataset.playerOvr);
-            
+
             // Mark if it came from the roster table
             if (draggable.classList.contains('roster-row-item')) {
                 draggable.dataset.source = 'roster';
@@ -3520,7 +3566,7 @@ function setupDepthOrderDragEvents() {
             draggable.classList.remove('dragging');
             draggable.classList.remove('opacity-50');
             delete draggable.dataset.source;
-            
+
             // Cleanup: The 'drop' event on the container handles the DOM manipulation.
             // This just triggers the save.
             setTimeout(() => {
@@ -3535,19 +3581,19 @@ function setupDepthOrderDragEvents() {
             e.preventDefault();
             const afterElement = getDragAfterElement(container, e.clientY);
             const draggable = document.querySelector('.dragging');
-            
+
             if (!draggable) return;
 
             // If dragging from roster, we create a visual placeholder (or move the dragged clone if implemented)
             // But standard HTML5 drag/drop moves the original element. 
             // PROBLEM: We don't want to move the TR from the table into the DIV list. 
-            
+
             if (draggable.classList.contains('roster-row-item')) {
                 // We are dragging a table row. We can't insert a TR into a DIV.
                 // We allow the drop, but we don't move the element visibly during drag
                 // (The default ghost image handles the visual).
                 e.dataTransfer.dropEffect = 'copy';
-                return; 
+                return;
             }
 
             // Normal sorting behavior for list items
@@ -3676,7 +3722,7 @@ function updateRankNumbers(container) {
     items.forEach((item, index) => {
         const numberSpan = item.querySelector('span.text-center');
         if (numberSpan) numberSpan.textContent = index + 1;
-        
+
         // Update styling for top 2
         item.classList.remove('border-green-500', 'border-blue-500', 'border-transparent');
         if (index === 0) item.classList.add('border-green-500');
