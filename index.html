@@ -79,7 +79,6 @@
       </p>
     </section>
 
-
     <section id="team-creation-screen" class="screen hidden p-8 bg-white rounded-lg shadow-lg max-w-2xl mx-auto mt-10">
       <h2 class="text-3xl font-bold mb-6 text-center text-gray-800">Create Your Team</h2>
       <div class="mb-6">
@@ -214,6 +213,7 @@
       </div>
     </section>
 
+    <!-- BEGIN DASHBOARD SCREEN -->
     <section id="dashboard-screen" class="screen hidden">
 
       <div class="flex justify-between items-center p-4 bg-gray-800 text-white rounded-lg shadow-md mb-4">
@@ -272,14 +272,16 @@
         <main id="dashboard-content"
           class="md:w-4/5 lg:w-5/6 bg-white rounded-lg shadow p-6 min-h-[60vh] border border-gray-200">
 
+          <!-- MY TEAM TAB -->
           <div id="tab-content-my-team" class="tab-pane">
             <h3 class="text-2xl font-bold mb-4 text-gray-800 border-b pb-2">My Team Roster</h3>
-            <div id="my-team-roster">
-            </div>
+            <div id="my-team-roster"></div>
           </div>
 
+          <!-- DEPTH CHART TAB -->
           <div id="tab-content-depth-chart" class="tab-pane hidden">
             <h3 class="text-2xl font-bold mb-4 text-gray-800 border-b pb-2">Depth Chart & Strategy</h3>
+
             <div id="depth-chart-sub-tabs" class="flex gap-2 border-b border-gray-200 mb-4">
               <button
                 class="depth-chart-tab sub-tab active px-4 py-2 font-semibold border-b-2 border-amber-500 text-amber-600"
@@ -292,6 +294,7 @@
                 data-sub-tab="depth-order" aria-selected="false">Depth Order</button>
             </div>
 
+            <!-- OFFENSE SUB-PANE -->
             <div id="depth-chart-offense-pane" class="depth-chart-sub-pane">
               <div class="flex items-center gap-2 mb-4">
                 <label for="offense-formation-select" class="font-bold text-gray-700">Offensive Scheme:</label>
@@ -305,18 +308,17 @@
                 <div
                   class="visual-field-header absolute top-2 left-1/2 transform -translate-x-1/2 bg-black bg-opacity-50 text-white px-3 py-1 rounded text-xs font-bold tracking-widest z-10">
                   OFFENSE</div>
-                <div id="offense-visual-field" class="visual-field offense-field w-full h-full absolute inset-0">
-                </div>
+                <div id="offense-visual-field" class="visual-field offense-field w-full h-full absolute inset-0"></div>
               </div>
 
               <div class="bench-container bg-gray-50 p-4 rounded-lg border">
                 <h4 class="text-lg font-bold mb-2 text-gray-700">Offensive Bench</h4>
                 <p class="text-xs text-gray-500 mb-2 italic">Drag players to the field to sub them in.</p>
-                <div id="offense-bench-table" class="bench-table-container">
-                </div>
+                <div id="offense-bench-table" class="bench-table-container"></div>
               </div>
             </div>
 
+            <!-- DEFENSE SUB-PANE -->
             <div id="depth-chart-defense-pane" class="depth-chart-sub-pane hidden">
               <div class="flex items-center gap-2 mb-4">
                 <label for="defense-formation-select" class="font-bold text-gray-700">Defensive Scheme:</label>
@@ -330,20 +332,20 @@
                 <div
                   class="visual-field-header absolute top-2 left-1/2 transform -translate-x-1/2 bg-black bg-opacity-50 text-white px-3 py-1 rounded text-xs font-bold tracking-widest z-10">
                   DEFENSE</div>
-                <div id="defense-visual-field" class="visual-field defense-field w-full h-full absolute inset-0">
-                </div>
+                <div id="defense-visual-field" class="visual-field defense-field w-full h-full absolute inset-0"></div>
               </div>
 
               <div class="bench-container bg-gray-50 p-4 rounded-lg border">
                 <h4 class="text-lg font-bold mb-2 text-gray-700">Defensive Bench</h4>
                 <p class="text-xs text-gray-500 mb-2 italic">Drag players to the field to sub them in.</p>
-                <div id="defense-bench-table" class="bench-table-container">
-                </div>
+                <div id="defense-bench-table" class="bench-table-container"></div>
               </div>
             </div>
 
-            <div id="positional-overalls-container" class="depth-chart-sub-pane hidden overflow-x-auto">
-            </div>
+            <!-- POSITIONAL OVERALLS SUB-PANE -->
+            <div id="positional-overalls-container" class="depth-chart-sub-pane hidden overflow-x-auto"></div>
+
+            <!-- DEPTH ORDER SUB-PANE -->
             <div id="depth-order-container" class="depth-chart-sub-pane hidden">
               <div
                 class="mb-6 bg-blue-50 border border-blue-200 rounded-lg p-4 flex flex-col sm:flex-row justify-between items-center gap-4">
@@ -358,57 +360,59 @@
                 </button>
               </div>
 
-              <div id="depth-order-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-              </div>
+              <div id="depth-order-grid"
+                class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4"></div>
+            </div>
+          </div>
+
+          <!-- MESSAGES TAB -->
+          <div id="tab-content-messages" class="tab-pane hidden">
+            <h3 class="text-2xl font-bold mb-4 text-gray-800 border-b pb-2">Inbox</h3>
+            <div id="messages-list" class="space-y-2"></div>
+          </div>
+
+          <!-- SCHEDULE TAB -->
+          <div id="tab-content-schedule" class="tab-pane hidden">
+            <h3 class="text-2xl font-bold mb-4 text-gray-800 border-b pb-2">Season Schedule</h3>
+            <div id="schedule-list"></div>
+          </div>
+
+          <!-- STANDINGS TAB -->
+          <div id="tab-content-standings" class="tab-pane hidden">
+            <h3 class="text-2xl font-bold mb-4 text-gray-800 border-b pb-2">League Standings</h3>
+            <div id="standings-container" class="grid grid-cols-1 md:grid-cols-2 gap-6"></div>
+          </div>
+
+          <!-- PLAYER STATS TAB -->
+          <div id="tab-content-player-stats" class="tab-pane hidden">
+            <h3 class="text-2xl font-bold mb-4 text-gray-800 border-b pb-2">League Leaders</h3>
+
+            <div class="flex gap-4 mb-4">
+              <select id="stats-filter-team" class="p-2 border rounded text-sm"></select>
+              <select id="stats-sort" class="p-2 border rounded text-sm">
+                <option value="touchdowns">Sort by: TDs</option>
+                <option value="passYards">Sort by: Pass Yds</option>
+                <option value="rushYards">Sort by: Rush Yds</option>
+                <option value="recYards">Sort by: Rec Yds</option>
+                <option value="tackles">Sort by: Tackles</option>
+                <option value="sacks">Sort by: Sacks</option>
+                <option value="interceptions">Sort by: INTs</option>
+              </select>
             </div>
 
-            <div id="tab-content-messages" class="tab-pane hidden">
-              <h3 class="text-2xl font-bold mb-4 text-gray-800 border-b pb-2">Inbox</h3>
-              <div id="messages-list" class="space-y-2">
-              </div>
-            </div>
+            <div id="player-stats-container"></div>
+          </div>
 
-            <div id="tab-content-schedule" class="tab-pane hidden">
-              <h3 class="text-2xl font-bold mb-4 text-gray-800 border-b pb-2">Season Schedule</h3>
-              <div id="schedule-list">
-              </div>
-            </div>
-
-            <div id="tab-content-standings" class="tab-pane hidden">
-              <h3 class="text-2xl font-bold mb-4 text-gray-800 border-b pb-2">League Standings</h3>
-              <div id="standings-container" class="grid grid-cols-1 md:grid-cols-2 gap-6">
-              </div>
-            </div>
-
-            <div id="tab-content-player-stats" class="tab-pane hidden">
-              <h3 class="text-2xl font-bold mb-4 text-gray-800 border-b pb-2">League Leaders</h3>
-              <div class="flex gap-4 mb-4">
-                <select id="stats-filter-team" class="p-2 border rounded text-sm">
-                </select>
-                <select id="stats-sort" class="p-2 border rounded text-sm">
-                  <option value="touchdowns">Sort by: TDs</option>
-                  <option value="passYards">Sort by: Pass Yds</option>
-                  <option value="rushYards">Sort by: Rush Yds</option>
-                  <option value="recYards">Sort by: Rec Yds</option>
-                  <option value="tackles">Sort by: Tackles</option>
-                  <option value="sacks">Sort by: Sacks</option>
-                  <option value="interceptions">Sort by: INTs</option>
-                </select>
-              </div>
-              <div id="player-stats-container">
-              </div>
-            </div>
-
-            <div id="tab-content-hall-of-fame" class="tab-pane hidden">
-              <h3 class="text-2xl font-bold mb-4 text-gray-800 border-b pb-2">Hall of Fame</h3>
-              <div id="hall-of-fame-list">
-              </div>
-            </div>
+          <!-- HALL OF FAME TAB -->
+          <div id="tab-content-hall-of-fame" class="tab-pane hidden">
+            <h3 class="text-2xl font-bold mb-4 text-gray-800 border-b pb-2">Hall of Fame</h3>
+            <div id="hall-of-fame-list"></div>
+          </div>
 
         </main>
       </div>
     </section>
-
+    <!-- GAME SIMULATION SCREEN -->
     <section id="game-sim-screen"
       class="screen hidden bg-gray-900 text-gray-200 p-4 rounded-lg shadow-2xl max-w-6xl mx-auto">
 
@@ -432,8 +436,7 @@
           <div class="bg-black bg-opacity-60 px-4 py-1 rounded-full border border-gray-700 mb-1">
             <div id="sim-game-down" class="text-lg font-mono text-amber-400 font-bold tracking-widest">1st & 10</div>
           </div>
-          <div id="sim-possession" class="text-xs font-bold text-gray-400 uppercase tracking-widest mb-1">POSSESSION
-          </div>
+          <div id="sim-possession" class="text-xs font-bold text-gray-400 uppercase tracking-widest mb-1">POSSESSION</div>
           <div id="sim-game-drive" class="text-xs text-gray-500">Kickoff</div>
         </div>
 
@@ -470,8 +473,7 @@
             <div class="bg-gray-900 px-4 py-2 border-b border-gray-700 font-bold text-amber-400 text-sm">
               YOUR PLAYERS
             </div>
-            <div id="sim-players-list" class="h-48 overflow-y-auto p-2">
-            </div>
+            <div id="sim-players-list" class="h-48 overflow-y-auto p-2"></div>
           </div>
         </div>
 
@@ -498,16 +500,15 @@
 
           <div id="sim-live-stats"
             class="bg-gray-800 p-4 rounded-lg text-xs space-y-4 h-80 overflow-y-auto border border-gray-700 scrollbar-thin">
-            <div id="sim-stats-away">
-            </div>
+            <div id="sim-stats-away"></div>
             <div class="border-t border-gray-700 my-2"></div>
-            <div id="sim-stats-home">
-            </div>
+            <div id="sim-stats-home"></div>
           </div>
         </div>
       </div>
     </section>
 
+    <!-- OFFSEASON SCREEN -->
     <section id="offseason-screen" class="screen hidden p-8 bg-white rounded-lg shadow-lg">
       <div class="border-b pb-4 mb-6">
         <h2 class="text-4xl font-bold text-gray-800">Offseason Report</h2>
@@ -525,8 +526,7 @@
             </svg>
             Development
           </h3>
-          <div id="player-development-container" class="space-y-3 max-h-96 overflow-y-auto pr-2">
-          </div>
+          <div id="player-development-container" class="space-y-3 max-h-96 overflow-y-auto pr-2"></div>
         </div>
 
         <div class="bg-gray-50 p-6 rounded-xl border border-gray-200 shadow-sm">
@@ -540,12 +540,10 @@
           </h3>
 
           <h4 class="text-sm font-bold text-gray-500 uppercase tracking-wider mb-2">Graduated / Retired</h4>
-          <ul id="retirements-list" class="list-disc list-inside space-y-1 text-sm mb-6 text-gray-700 pl-2">
-          </ul>
+          <ul id="retirements-list" class="list-disc list-inside space-y-1 text-sm mb-6 text-gray-700 pl-2"></ul>
 
           <h4 class="text-sm font-bold text-gray-500 uppercase tracking-wider mb-2">Transfers / Cuts</h4>
-          <ul id="leaving-players-list" class="list-disc list-inside space-y-1 text-sm text-red-600 pl-2">
-          </ul>
+          <ul id="leaving-players-list" class="list-disc list-inside space-y-1 text-sm text-red-600 pl-2"></ul>
         </div>
 
         <div class="bg-amber-50 p-6 rounded-xl border border-amber-200 shadow-sm">
@@ -557,8 +555,7 @@
             </svg>
             Hall of Fame
           </h3>
-          <ul id="hof-inductees-list" class="list-none space-y-2 text-sm font-semibold text-amber-900">
-          </ul>
+          <ul id="hof-inductees-list" class="list-none space-y-2 text-sm font-semibold text-amber-900"></ul>
         </div>
       </div>
 
@@ -571,6 +568,8 @@
     </section>
 
   </div>
+
+  <!-- MODAL -->
   <div id="modal"
     class="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center p-4 hidden z-[100] backdrop-blur-sm">
     <div id="modal-content"
@@ -580,13 +579,11 @@
         <button id="modal-default-close"
           class="text-gray-400 hover:text-gray-600 text-3xl leading-none">&times;</button>
       </div>
-      <div id="modal-body" class="text-gray-700">
-      </div>
+      <div id="modal-body" class="text-gray-700"></div>
     </div>
   </div>
 
   <script type="module" src="js/main.js" defer></script>
 
 </body>
-
 </html>
