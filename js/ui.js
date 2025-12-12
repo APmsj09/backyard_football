@@ -79,18 +79,16 @@ function debounce(func, delay) {
 function getUIRosterObjects(team) {
     if (!team || !Array.isArray(team.roster)) return [];
 
-    const gs = getGameState(); // Get the master game state
-    if (!gs || !Array.isArray(gs.players)) return [];
-
-    // Handle old save files or non-ID rosters
-    if (team.roster.length > 0 && typeof team.roster[0] === 'object' && team.roster[0] !== null) {
-        console.warn("Detected old save file format. Please start a new game.");
+    // 1. Legacy Support: Handle old saves where roster has full objects
+    if (team.roster.length > 0 && typeof team.roster[0] === 'object') {
         return team.roster.filter(p => p);
     }
 
-    // New way: Look up IDs from the master list
-    const rosterIds = new Set(team.roster);
-    return gs.players.filter(p => p && rosterIds.has(p.id));
+    // 2. Optimized Lookup: Map IDs directly to players
+    // This is faster than filtering the whole league list
+    return team.roster
+        .map(id => getPlayer(id))
+        .filter(p => p); // Filter out any nulls (cut/retired players)
 }
 
 /**
@@ -2440,117 +2438,155 @@ function initLivePlayerStats(gameResult) {
 
 function updateStatsFromLogEntry(entry) {
     if (!entry || !currentLiveGameResult) return;
-    const homeName = currentLiveGameResult.homeTeam?.name || '';
-    const awayName = currentLiveGameResult.awayTeam?.name || '';
 
-    // Determine which logical team is on offense (possession)
-    const possName = liveGamePossessionName || '';
-    const possKey = possName === homeName ? 'home' : 'away';
-    const defKey = possKey === 'home' ? 'away' : 'home';
+    // --- 1. Helper: Find Player ID by Name ---
+    // We need this because logs contain Names ("Tom Brady"), but stats are keyed by ID.
+    const findIdByName = (name) => {
+        if (!name) return null;
+        const homeRoster = getUIRosterObjects(currentLiveGameResult.homeTeam);
+        const awayRoster = getUIRosterObjects(currentLiveGameResult.awayTeam);
+        const p = [...homeRoster, ...awayRoster].find(pl => pl.name === name);
+        return p ? p.id : null;
+    };
 
-    // Yards gained / lost
-    const yardsMatch = entry.match(/gain of (-?\d+\.?\d*)|loss of (\d+\.?\d*)/i);
-    if (yardsMatch) {
-        const yards = parseFloat(yardsMatch[1] || `-${yardsMatch[2] || 0}`) || 0;
-        if (possKey) liveGameStats[possKey].yards += Math.round(yards);
-    }
+    // --- 2. Helper: Get Stats Object ---
+    const getStats = (pid) => {
+        if (!pid) return null;
+        if (!livePlayerStats.has(pid)) {
+            livePlayerStats.set(pid, { 
+                passAttempts: 0, passCompletions: 0, passYards: 0, interceptionsThrown: 0,
+                receptions: 0, recYards: 0, drops: 0,
+                rushAttempts: 0, rushYards: 0,
+                returnYards: 0,
+                touchdowns: 0, interceptions: 0, fumbles: 0, fumblesLost: 0, fumblesRecovered: 0,
+                tackles: 0, sacks: 0
+            });
+        }
+        return livePlayerStats.get(pid);
+    };
 
-    // Punts (simple detection)
-    if (entry.includes('PUNT by') || entry.includes('punts')) {
-        if (possKey) liveGameStats[possKey].punts += 1;
-    }
+    // --- 3. Parse Logic ---
 
-    // Returns (e.g., "returns for X") -> attribute to defense/return team
-    const retMatch = entry.match(/returns for (\d+)\s*yd|returns for (\d+) yards?/i);
-    if (retMatch) {
-        const r = parseInt(retMatch[1] || retMatch[2] || '0', 10) || 0;
-        if (r > 0) {
-            // Return team is opposite of possession at time of punt
-            if (defKey) liveGameStats[defKey].returns += r;
+    // A. New Play / Context Reset
+    if (entry.includes('---') || entry.includes('Offense:')) {
+        livePlayContext = { type: 'run', passerId: null, receiverId: null, catchMade: false };
+        if (entry.includes('Offense:')) {
+            // Try to detect play type from name (e.g., "Offense: Spread_Three_Verts")
+            if (entry.toLowerCase().includes('pass') || entry.toLowerCase().includes('verts') || entry.toLowerCase().includes('slants')) {
+                livePlayContext.type = 'pass';
+            }
         }
     }
 
-    // Touchdowns
-    if (entry.includes('TOUCHDOWN') || entry.includes('touchdown') || entry.startsWith('🎉')) {
-        // Attribute to whichever team is mentioned, else assume possession's opponent if turnover return
-        if (entry.includes(homeName)) liveGameStats.home.td += 1;
-        else if (entry.includes(awayName)) liveGameStats.away.td += 1;
-        else {
-            // fallback: if it appears to be a return/defensive TD, assign to defKey
-            if (defKey) liveGameStats[defKey].td += 1;
+    // B. Pass Attempt
+    // Log: "🏈 [Name] throws to..."
+    const throwMatch = entry.match(/🏈 (.*?) throws to/);
+    if (throwMatch) {
+        livePlayContext.type = 'pass'; // Confirm it's a pass
+        const qbId = findIdByName(throwMatch[1]);
+        if (qbId) {
+            livePlayContext.passerId = qbId;
+            const s = getStats(qbId);
+            s.passAttempts++;
         }
     }
 
-    // Interceptions/Fumbles = turnovers for possession team
-    if (entry.includes('INTERCEPTION') || entry.includes('FUMBLE') || entry.includes('recovers the fumble') || entry.includes('FUM')) {
-        if (possKey) liveGameStats[possKey].turnovers += 1;
+    // C. Reception
+    // Log: "👍 CATCH! [Name] makes the reception!"
+    const catchMatch = entry.match(/CATCH! (.*?) makes/);
+    if (catchMatch) {
+        livePlayContext.catchMade = true;
+        const recId = findIdByName(catchMatch[1]);
+        if (recId) {
+            livePlayContext.receiverId = recId;
+            const s = getStats(recId);
+            s.receptions++;
+        }
+        // Credit Completion to QB immediately
+        if (livePlayContext.passerId) {
+            getStats(livePlayContext.passerId).passCompletions++;
+        }
     }
 
-    // --- Per-player updates: try to attribute events to named players in the log ---
-    try {
-        const gs = getGameState();
-        if (!gs || !Array.isArray(gs.players)) return;
+    // D. Yards Gained (The big one)
+    // Log: "✋ [Name] tackled by ... for a gain of X" OR "run out of bounds after a gain of X"
+    // We look for the player name at the start of the interaction
+    const gainMatch = entry.match(/(?:✋|🎉) (.*?) (?:tackled|ran out|scores|returns)/);
+    const yardsMatch = entry.match(/gain of (-?\d+\.?\d*)|loss of (\d+\.?\d*)/);
+    
+    if (gainMatch && yardsMatch) {
+        const carrierName = gainMatch[1];
+        const carrierId = findIdByName(carrierName);
+        const yards = parseFloat(yardsMatch[1] || `-${yardsMatch[2]}`);
 
-        // For each player in the match rosters, if their name appears in the entry, update their live snapshot
-        const homeRoster = getUIRosterObjects(currentLiveGameResult?.homeTeam || {});
-        const awayRoster = getUIRosterObjects(currentLiveGameResult?.awayTeam || {});
-        const allPlayers = [...homeRoster, ...awayRoster];
+        if (carrierId) {
+            const s = getStats(carrierId);
 
-        allPlayers.forEach(player => {
-            if (!player || !player.name) return;
-            if (!entry.includes(player.name)) return;
-
-            const pid = player.id;
-            if (!livePlayerStats.has(pid)) {
-                livePlayerStats.set(pid, { passAttempts: 0, passCompletions: 0, passYards: 0, interceptionsThrown: 0, receptions: 0, recYards: 0, drops: 0, rushAttempts: 0, rushYards: 0, returnYards: 0, touchdowns: 0, interceptions: 0, fumbles: 0 });
-            }
-            const s = livePlayerStats.get(pid);
-
-            // Catches / receptions
-            if (/caught by|CATCH|makes a tough contested reception|CATCH!/.test(entry)) {
-                s.receptions = (s.receptions || 0) + 1;
-                // attribute yards if mentioned in the same log block
-                const yardsMatch = entry.match(/gain of (-?\d+\.?\d*)|returns for (\d+)|for (\d+) yd/);
-                if (yardsMatch) {
-                    const y = Math.round(parseFloat(yardsMatch[1] || yardsMatch[2] || yardsMatch[3] || 0));
-                    if (y) s.recYards = (s.recYards || 0) + y;
+            if (livePlayContext.type === 'pass' && livePlayContext.catchMade) {
+                // It's a catch -> Receiving Yards
+                s.recYards += Math.round(yards);
+                
+                // Credit Passing Yards to QB
+                if (livePlayContext.passerId) {
+                    getStats(livePlayContext.passerId).passYards += Math.round(yards);
+                }
+            } else if (livePlayContext.type === 'run' || (livePlayContext.type === 'pass' && !livePlayContext.passerId)) {
+                // It's a run (or a scramble where 'throws to' never happened)
+                // Only credit rush attempt if it wasn't a sack (sacks handled below)
+                if (!entry.includes('SACK')) {
+                    s.rushYards += Math.round(yards);
+                    // Avoid double counting carries on the same play (logs sometimes duplicate context)
+                    // We assume 1 carry per log entry with "gain of" for simplicity in live sim
+                    s.rushAttempts++; 
                 }
             }
+        }
+    }
 
-            // Interception (defender name will be present)
-            if (/INTERCEPTION|INTERCEPTED/.test(entry)) {
-                s.interceptions = (s.interceptions || 0) + 1;
-            }
-
-            // Muff / drop
-            if (/MUFFED PUNT|drops it|drops the ball|muffed/.test(entry)) {
-                s.drops = (s.drops || 0) + 1;
-            }
-
-            // Rush attempts / yards (look for "gain of X" near player)
-            if (/rush|rushed|rushes/.test(entry)) {
-                s.rushAttempts = (s.rushAttempts || 0) + 1;
-                const rmatch = entry.match(/gain of (-?\d+\.?\d*)|for (\d+) yd/);
-                if (rmatch) {
-                    const ry = Math.round(parseFloat(rmatch[1] || rmatch[2] || 0));
-                    if (ry) s.rushYards = (s.rushYards || 0) + ry;
+    // E. Touchdowns
+    if (entry.includes('TOUCHDOWN')) {
+        // Log: "🎉 TOUCHDOWN [Name]!"
+        const tdMatch = entry.match(/TOUCHDOWN (.*?)!/);
+        if (tdMatch) {
+            const scorerId = findIdByName(tdMatch[1]);
+            if (scorerId) {
+                getStats(scorerId).touchdowns++;
+                
+                // If it was a pass, credit QB
+                if (livePlayContext.type === 'pass' && livePlayContext.catchMade && livePlayContext.passerId) {
+                    getStats(livePlayContext.passerId).touchdowns++;
                 }
             }
+        }
+    }
 
-            // Returns
-            const ret = entry.match(/returns for (\d+)\s*yd|returns for (\d+) yards?/i);
-            if (ret) {
-                const ry = parseInt(ret[1] || ret[2] || '0', 10) || 0;
-                if (ry) s.returnYards = (s.returnYards || 0) + ry;
+    // F. Interceptions
+    if (entry.includes('INTERCEPTION')) {
+        // Log: "❗ INTERCEPTION! [Name] jumps the route!"
+        const intMatch = entry.match(/INTERCEPTION! (.*?) jumps/);
+        if (intMatch) {
+            const defId = findIdByName(intMatch[1]);
+            if (defId) getStats(defId).interceptions++;
+            
+            // Credit QB with INT thrown
+            if (livePlayContext.passerId) {
+                getStats(livePlayContext.passerId).interceptionsThrown++;
             }
+        }
+    }
 
-            // Touchdown mention
-            if (/TOUCHDOWN|returns for a touchdown|return touchdown|TD|touchdown/i.test(entry)) {
-                s.touchdowns = (s.touchdowns || 0) + 1;
-            }
-        });
-    } catch (perr) {
-        console.error('Per-player live stat parsing error:', perr);
+    // G. Sacks
+    if (entry.includes('SACK!')) {
+        // Log: "💥 SACK! [Defender] drops [QB]!"
+        const sackMatch = entry.match(/SACK! (.*?) drops (.*?)!/);
+        if (sackMatch) {
+            const defId = findIdByName(sackMatch[1]);
+            const qbId = findIdByName(sackMatch[2]);
+            if (defId) getStats(defId).sacks++;
+            // Sacks count as negative rush yards in this engine usually, 
+            // handled by the "gain/loss" logic if the log line appears, 
+            // but we don't add a rush attempt.
+        }
     }
 }
 
@@ -3294,7 +3330,7 @@ function renderDepthOrderPane(gameState) {
         return;
     }
 
-    // 1. Group players
+    // 1. Group players for the top panes
     const groups = {
         'QB': [], 'RB': [], 'WR': [], 'OL': [],
         'DL': [], 'LB': [], 'DB': [], 'ST': []
@@ -3308,18 +3344,15 @@ function renderDepthOrderPane(gameState) {
         groups[pos].push(p);
     });
 
-    // 2. Sort groups by current Depth Order (if it exists), otherwise Overall
+    // 2. Sort groups by current Depth Order
     const currentOrder = gameState.playerTeam.depthOrder || [];
     Object.keys(groups).forEach(key => {
         groups[key].sort((a, b) => {
             const idxA = currentOrder.indexOf(a.id);
             const idxB = currentOrder.indexOf(b.id);
-            // If both are in the saved order, sort by that index
             if (idxA !== -1 && idxB !== -1) return idxA - idxB;
-            // If one is missing (new player), put them at the end
             if (idxA === -1) return 1;
             if (idxB === -1) return -1;
-            // Fallback to Overall
             return calculateOverall(b, key === 'ST' ? 'K' : key) - calculateOverall(a, key === 'ST' ? 'K' : key);
         });
     });
@@ -3333,7 +3366,7 @@ function renderDepthOrderPane(gameState) {
     });
     tabsHtml += `</div>`;
 
-    // 4. Build Sortable Lists (Hidden/Shown by CSS)
+    // 4. Build Sortable Lists
     let listsHtml = `<div id="depth-lists-container" class="mb-8">`;
     displayOrder.forEach((groupKey, index) => {
         const isHidden = index !== 0 ? 'hidden' : '';
@@ -3342,21 +3375,22 @@ function renderDepthOrderPane(gameState) {
         listsHtml += `
             <div id="group-${groupKey}" class="depth-group-container ${isHidden}">
                 <h4 class="font-bold text-lg text-gray-800 mb-2">${groupKey} Depth Chart</h4>
-                <p class="text-xs text-gray-500 mb-2 italic">Drag top players to #1 and #2 slots.</p>
+                <p class="text-xs text-gray-500 mb-2 italic">Drag from list or bottom table to reorder.</p>
                 
                 <div class="depth-sortable-list space-y-2 bg-gray-50 p-2 rounded border border-gray-200 min-h-[150px]" data-group="${groupKey}">
                     ${players.map((p, i) => {
                         const ovr = calculateOverall(p, groupKey === 'ST' ? 'K' : groupKey);
-                        // Rank 1/2 styling
                         const rankStyle = i === 0 ? 'border-l-4 border-green-500' : (i === 1 ? 'border-l-4 border-blue-500' : 'border-l-4 border-transparent');
                         const rankBadge = i === 0 ? '<span class="bg-green-100 text-green-800 text-xs px-1 rounded ml-2">Starter</span>' : '';
 
                         return `
                         <div class="depth-order-item bg-white p-3 rounded shadow-sm border border-gray-200 cursor-move hover:bg-amber-50 flex justify-between items-center ${rankStyle}"
                              draggable="true" 
-                             data-player-id="${p.id}">
+                             data-player-id="${p.id}"
+                             data-player-name="${p.name}"
+                             data-player-ovr="${ovr}">
                             <div class="flex items-center gap-3">
-                                <span class="font-bold text-gray-400 w-4 text-center">${i + 1}</span>
+                                <span class="rank-number font-bold text-gray-400 w-4 text-center">${i + 1}</span>
                                 <div>
                                     <span class="font-bold text-gray-800">${p.name}</span>
                                     ${rankBadge}
@@ -3368,20 +3402,19 @@ function renderDepthOrderPane(gameState) {
                         </div>
                         `;
                     }).join('')}
-                    ${players.length === 0 ? '<div class="text-gray-400 text-center p-4">No players</div>' : ''}
                 </div>
             </div>
         `;
     });
     listsHtml += `</div>`;
 
-    // 5. Build Full Roster Table (Read-only reference)
+    // 5. Build Full Roster Table (NOW DRAGGABLE)
     let rosterHtml = `
         <div class="mt-8 border-t pt-4">
-            <h4 class="font-bold text-lg text-gray-800 mb-3">Full Roster Reference</h4>
+            <h4 class="font-bold text-lg text-gray-800 mb-3">Full Roster (Drag to Above)</h4>
             <div class="overflow-x-auto max-h-60 overflow-y-auto border rounded">
                 <table class="min-w-full text-sm bg-white">
-                    <thead class="bg-gray-100 sticky top-0">
+                    <thead class="bg-gray-100 sticky top-0 z-10">
                         <tr>
                             <th class="py-2 px-3 text-left">Name</th>
                             <th class="py-2 px-3 text-center">Pos</th>
@@ -3390,14 +3423,22 @@ function renderDepthOrderPane(gameState) {
                         </tr>
                     </thead>
                     <tbody class="divide-y">
-                        ${roster.map(p => `
-                            <tr>
-                                <td class="py-1 px-3">${p.name}</td>
-                                <td class="py-1 px-3 text-center">${p.pos || estimateBestPosition(p)}</td>
+                        ${roster.map(p => {
+                            const pos = p.pos || estimateBestPosition(p);
+                            const ovr = calculateOverall(p, pos);
+                            return `
+                            <tr class="roster-row-item cursor-move hover:bg-blue-50" 
+                                draggable="true" 
+                                data-player-id="${p.id}" 
+                                data-player-name="${p.name}" 
+                                data-player-ovr="${ovr}">
+                                <td class="py-1 px-3 font-medium">${p.name}</td>
+                                <td class="py-1 px-3 text-center">${pos}</td>
                                 <td class="py-1 px-3 text-center">${p.age}</td>
-                                <td class="py-1 px-3 text-center font-bold">${calculateOverall(p, estimateBestPosition(p))}</td>
+                                <td class="py-1 px-3 text-center font-bold">${ovr}</td>
                             </tr>
-                        `).join('')}
+                            `;
+                        }).join('')}
                     </tbody>
                 </table>
             </div>
@@ -3406,7 +3447,6 @@ function renderDepthOrderPane(gameState) {
 
     pane.innerHTML = tabsHtml + listsHtml + rosterHtml;
 
-    // 6. Setup Interactions
     setupDepthTabs();
     setupDepthOrderDragEvents();
 }
@@ -3453,43 +3493,120 @@ function setupDepthTabs() {
  * Triggers a full Depth Chart update immediately upon drop.
  */
 function setupDepthOrderDragEvents() {
-    const draggables = document.querySelectorAll('.depth-order-item');
+    // 1. Target both types of draggable items
+    const draggables = document.querySelectorAll('.depth-order-item, .roster-row-item');
     const containers = document.querySelectorAll('.depth-sortable-list');
 
     draggables.forEach(draggable => {
-        draggable.addEventListener('dragstart', () => {
+        draggable.addEventListener('dragstart', (e) => {
+            // Add identifying class
             draggable.classList.add('dragging');
             draggable.classList.add('opacity-50');
+            
+            // Set data for the drop
+            e.dataTransfer.setData('text/plain', draggable.dataset.playerId);
+            e.dataTransfer.setData('player-name', draggable.dataset.playerName);
+            e.dataTransfer.setData('player-ovr', draggable.dataset.playerOvr);
+            
+            // Mark if it came from the roster table
+            if (draggable.classList.contains('roster-row-item')) {
+                draggable.dataset.source = 'roster';
+            } else {
+                draggable.dataset.source = 'list';
+            }
         });
 
         draggable.addEventListener('dragend', () => {
             draggable.classList.remove('dragging');
             draggable.classList.remove('opacity-50');
+            delete draggable.dataset.source;
             
-            // On drop finish, save the data
-            // We use a short timeout to let the DOM settle
+            // Cleanup: The 'drop' event on the container handles the DOM manipulation.
+            // This just triggers the save.
             setTimeout(() => {
                 applyDepthOrderToChart();
-                // We do NOT re-render immediately to prevent UI flash, 
-                // but we update the rank numbers visually
-                containers.forEach(container => updateRankNumbers(container));
+                containers.forEach(c => updateRankNumbers(c));
             }, 50);
         });
     });
 
     containers.forEach(container => {
         container.addEventListener('dragover', e => {
-            e.preventDefault(); // Enable dropping
+            e.preventDefault();
             const afterElement = getDragAfterElement(container, e.clientY);
             const draggable = document.querySelector('.dragging');
             
-            // Only allow sorting within the SAME list
-            if (!draggable || !container.contains(draggable)) return;
+            if (!draggable) return;
 
-            if (afterElement == null) {
-                container.appendChild(draggable);
-            } else {
-                container.insertBefore(draggable, afterElement);
+            // If dragging from roster, we create a visual placeholder (or move the dragged clone if implemented)
+            // But standard HTML5 drag/drop moves the original element. 
+            // PROBLEM: We don't want to move the TR from the table into the DIV list. 
+            
+            if (draggable.classList.contains('roster-row-item')) {
+                // We are dragging a table row. We can't insert a TR into a DIV.
+                // We allow the drop, but we don't move the element visibly during drag
+                // (The default ghost image handles the visual).
+                e.dataTransfer.dropEffect = 'copy';
+                return; 
+            }
+
+            // Normal sorting behavior for list items
+            if (container.contains(draggable)) {
+                if (afterElement == null) {
+                    container.appendChild(draggable);
+                } else {
+                    container.insertBefore(draggable, afterElement);
+                }
+            }
+        });
+
+        container.addEventListener('drop', e => {
+            e.preventDefault();
+            const draggable = document.querySelector('.dragging');
+            if (!draggable) return;
+
+            // HANDLE ROSTER -> LIST DROP
+            if (draggable.classList.contains('roster-row-item')) {
+                const playerId = e.dataTransfer.getData('text/plain');
+                const name = e.dataTransfer.getData('player-name');
+                const ovr = e.dataTransfer.getData('player-ovr');
+
+                // 1. Check if player is already in this list
+                const existing = container.querySelector(`[data-player-id="${playerId}"]`);
+                if (existing) {
+                    existing.remove(); // Remove old position so we can move it to new spot
+                }
+
+                // 2. Create new List Item
+                const newItem = document.createElement('div');
+                newItem.className = "depth-order-item bg-white p-3 rounded shadow-sm border border-gray-200 cursor-move hover:bg-amber-50 flex justify-between items-center";
+                newItem.draggable = true;
+                newItem.dataset.playerId = playerId;
+                newItem.innerHTML = `
+                    <div class="flex items-center gap-3">
+                        <span class="rank-number font-bold text-gray-400 w-4 text-center">-</span>
+                        <div><span class="font-bold text-gray-800">${name}</span></div>
+                    </div>
+                    <div class="text-right"><span class="text-sm font-bold text-gray-600">OVR: ${ovr}</span></div>
+                `;
+
+                // 3. Insert at Drop Position
+                const afterElement = getDragAfterElement(container, e.clientY);
+                if (afterElement == null) {
+                    container.appendChild(newItem);
+                } else {
+                    container.insertBefore(newItem, afterElement);
+                }
+
+                // 4. Re-attach drag events to new item immediately
+                newItem.addEventListener('dragstart', (e) => {
+                    newItem.classList.add('dragging');
+                    e.dataTransfer.setData('text/plain', playerId);
+                });
+                newItem.addEventListener('dragend', () => {
+                    newItem.classList.remove('dragging');
+                    setTimeout(() => { applyDepthOrderToChart(); containers.forEach(c => updateRankNumbers(c)); }, 50);
+                });
             }
         });
     });
