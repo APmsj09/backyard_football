@@ -245,9 +245,6 @@ function getScoutedPlayerInfo(player, relationshipLevelNum) {
 
 /** Checks for a fumble during a tackle attempt. */
 function checkFumble(ballCarrierState, tacklerState, playState, gameLog) {
-    // 💡 Update: Use flattened properties from pState directly
-    // Note: ballCarrierState and tacklerState are now the pState objects from activePlayers
-
     const toughness = ballCarrierState.toughness || 50;
     const strength = tacklerState.strength || 50;
     const tackling = tacklerState.tackling || 50;
@@ -255,19 +252,21 @@ function checkFumble(ballCarrierState, tacklerState, playState, gameLog) {
     const carrierModifier = toughness / 100;
     const tacklerModifier = (strength + tackling) / 100;
 
-    const fumbleChance = FUMBLE_CHANCE_BASE * (tacklerModifier / (carrierModifier + 0.5));
+    const fumbleChance =
+        FUMBLE_CHANCE_BASE * (tacklerModifier / (carrierModifier + 0.5));
 
     if (Math.random() < fumbleChance) {
-        if (gameLog) gameLog.push(`❗ FUMBLE! Ball knocked loose by ${tacklerState.name}!`);
-        playState.turnover = true;
+        if (gameLog) {
+            gameLog.push(`❗ FUMBLE! Ball knocked loose by ${tacklerState.name}!`);
+        }
+
+        playState.fumbleOccurred = true;
 
         playState.ballState.isLoose = true;
         playState.ballState.inAir = false;
         playState.ballState.z = 0.1;
         playState.ballState.vx = 0;
         playState.ballState.vy = 0;
-
-        // Drop ball at carrier's location
         playState.ballState.x = ballCarrierState.x;
         playState.ballState.y = ballCarrierState.y;
 
@@ -277,14 +276,17 @@ function checkFumble(ballCarrierState, tacklerState, playState, gameLog) {
 
         tacklerState.stunnedTicks = 20;
 
-        // Track fumble stats
-        ensureStats(ballCarrierState);
-        ballCarrierState.gameStats.fumbles = (ballCarrierState.gameStats.fumbles || 0) + 1;
+        // ✅ Step-3: defer stats
+        playState.statEvents.push({
+            type: 'fumble',
+            playerId: ballCarrierState.id
+        });
 
         return true;
     }
     return false;
 }
+
 
 /**
  * Simulates a defender's ability to "read" the play.
@@ -1915,7 +1917,7 @@ function analyzePlaySuccess(lastPlayState, offensiveTeam, defensiveTeam) {
     const result = lastPlayState.result;
 
     // Calculate success metrics
-    const gainedYards = result.yardsGained || 0;
+    const gainedYards = playResult.yards || 0;
     const completionStatus = result.passComplete ? 1 : 0; // 0-1 scale
     const wasTouchdown = result.isTouchdown ? 1 : 0;
     const wasIntercepted = result.interception ? 1 : 0;
@@ -2411,40 +2413,51 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                         !d.isBlocked && !d.isEngaged && getDistance(pState, d) < FIND_SPACE_RADIUS
                     ).sort((a, b) => getDistance(pState, a) - getDistance(pState, b));
 
-                    if (qbState?.action === 'qb_scramble') {
-                        pState.targetX = qbState.targetX > CENTER_X ? FIELD_WIDTH - 5 : 5;
+                    if (
+                        qbState?.action === 'qb_scramble' &&
+                        qbState.hasBall &&
+                        qbState.isBallCarrier
+                    ) {
+                        const escapeRight = qbState.x > CENTER_X;
+                        pState.targetX = escapeRight ? FIELD_WIDTH - 5 : 5;
                         pState.targetY = Math.max(playState.lineOfScrimmage + 3, qbState.y + 2);
-                    } else if (nearbyDefenders.length === 0) {
+                    }
+                    else if (nearbyDefenders.length === 0) {
                         pState.targetX = pState.x + (pState.x < CENTER_X ? -0.1 : 0.1);
                         pState.targetY = pState.y;
-                    } else {
+                    }
+                    else {
                         let bestX = pState.x;
                         let bestY = pState.y;
                         let maxMinDist = 0;
+
                         const potentialSpots = [
                             { x: pState.x + 3, y: pState.y }, { x: pState.x - 3, y: pState.y },
                             { x: pState.x, y: pState.y + 2 }, { x: pState.x, y: pState.y - 2 },
                             { x: pState.x + 2, y: pState.y + 2 }, { x: pState.x - 2, y: pState.y + 2 },
                             { x: pState.x + 2, y: pState.y - 2 }, { x: pState.x - 2, y: pState.y - 2 },
                         ];
+
                         potentialSpots.forEach(spot => {
                             if (spot.y < playState.lineOfScrimmage + 1) return;
+
                             let minDistToDefender = FIND_SPACE_RADIUS;
                             nearbyDefenders.forEach(def => {
                                 const dist = getDistance(spot, def);
-                                if (dist < minDistToDefender) {
-                                    minDistToDefender = dist;
-                                }
+                                if (dist < minDistToDefender) minDistToDefender = dist;
                             });
+
                             if (minDistToDefender > maxMinDist) {
                                 maxMinDist = minDistToDefender;
                                 bestX = spot.x;
                                 bestY = spot.y;
                             }
                         });
+
                         pState.targetX = bestX;
                         pState.targetY = bestY;
                     }
+
                     break;
 
                 case 'run_path':
@@ -3506,7 +3519,7 @@ function checkTackleCollisions(playState, gameLog) {
     if (!ballCarrierState) return false;
 
     // 2. Find Defenders in Range
-    const TACKLE_RANGE_CHECK = 1.8; 
+    const TACKLE_RANGE_CHECK = 1.8;
     const activeDefenders = playState.activePlayers.filter(p =>
         p.teamId !== ballCarrierState.teamId &&
         !p.isBlocked && !p.isEngaged && p.stunnedTicks === 0 &&
@@ -3524,21 +3537,21 @@ function checkTackleCollisions(playState, gameLog) {
             // A. Fumble Check (Keep this!)
             if (typeof checkFumble === 'function' && checkFumble(ballCarrierState, defender, playState, gameLog)) {
                 ballCarrierState.stunnedTicks = 40;
-                return false; 
+                return false;
             }
 
             // --- B. NEW STAT-BASED TACKLE LOGIC ---
-            
+
             // 1. Calculate Skills
             const tacklerSkill = (defender.tackling || 50) * defender.fatigueModifier;
             const runnerAgility = (ballCarrierState.agility || 50);
             const runnerStrength = (ballCarrierState.strength || 50);
-            
+
             // 2. Momentum Bonus (The "Truck Stick" Factor)
             // Heavier runners get a small bonus to breaking tackles.
             // 250lbs vs 200lbs = +5% break chance.
             const weightDiff = (ballCarrierState.weight || 200) - (defender.weight || 200);
-            const momentumBonus = Math.max(0, weightDiff / 1000); 
+            const momentumBonus = Math.max(0, weightDiff / 1000);
 
             // 3. Combined Runner Score
             // Agility helps dodge (60%), Strength helps run through (40%)
@@ -3557,41 +3570,68 @@ function checkTackleCollisions(playState, gameLog) {
                 playState.yards = ballCarrierState.y - playState.lineOfScrimmage;
                 playState.playIsLive = false;
 
-                const tacklerPlayer = getPlayer(defender.id);
-                if (tacklerPlayer) {
-                    ensureStats(tacklerPlayer);
-                    tacklerPlayer.gameStats.tackles = (tacklerPlayer.gameStats.tackles || 0) + 1;
+                // ✅ Defer tackle stat
+                playState.statEvents.push({
+                    type: 'tackle',
+                    playerId: defender.id
+                });
 
-                    // Sack / Safety Checks
-                    const isBehindLOS = ballCarrierState.y < playState.lineOfScrimmage;
-                    const isSackAction = (ballCarrierState.action === 'qb_setup' || ballCarrierState.action === 'qb_scramble');
-                    const isDesignedRun = playState.type === 'run' || (playState.type === 'pass' && ballCarrierState.action === 'qb_scramble' && ballCarrierState.y > playState.lineOfScrimmage - 1);
+                const isBehindLOS = ballCarrierState.y < playState.lineOfScrimmage;
+                const isDesignedRun =
+                    playState.type === 'run' ||
+                    (playState.type === 'pass' &&
+                        ballCarrierState.action === 'qb_scramble' &&
+                        ballCarrierState.y > playState.lineOfScrimmage - 1);
 
-                    if (ballCarrierState.isOffense && ballCarrierState.y <= 10.0) {
-                        playState.safety = true;
-                        if (gameLog) gameLog.push(`🚨 SAFETY! ${ballCarrierState.name} tackled in the endzone by ${defender.name}!`);
-                    } else if (ballCarrierState.slot.startsWith('QB') && isBehindLOS && !isDesignedRun) {
-                        playState.sack = true;
-                        if (gameLog) gameLog.push(`💥 SACK! ${defender.name} drops ${ballCarrierState.name}!`);
-                        tacklerPlayer.gameStats.sacks = (tacklerPlayer.gameStats.sacks || 0) + 1;
-                    } else {
-                        const yards = playState.yards.toFixed(1);
-                        if (gameLog) gameLog.push(`✋ ${ballCarrierState.name} tackled by ${defender.name} for ${yards < 0 ? 'a loss of ' + Math.abs(yards) : 'a gain of ' + yards}.`);
+                if (ballCarrierState.isOffense && ballCarrierState.y <= 10.0) {
+                    playState.safety = true;
+                    if (gameLog) {
+                        gameLog.push(`🚨 SAFETY! ${ballCarrierState.name} tackled in the endzone by ${defender.name}!`);
+                    }
+
+                } else if (
+                    ballCarrierState.slot.startsWith('QB') &&
+                    isBehindLOS &&
+                    !isDesignedRun
+                ) {
+                    playState.sack = true;
+                    playState.playIsLive = false;
+                    playState.outcome = 'sack';
+
+                    // ✅ Defer sack stat
+                    playState.statEvents.push({
+                        type: 'sack',
+                        playerId: defender.id,
+                        qbId: ballCarrierState.id
+                    });
+
+                    if (gameLog) {
+                        gameLog.push(`💥 SACK! ${defender.name} drops ${ballCarrierState.name}!`);
+                    }
+
+                } else {
+                    const yards = playState.yards.toFixed(1);
+                    if (gameLog) {
+                        gameLog.push(
+                            `✋ ${ballCarrierState.name} tackled by ${defender.name} for ${yards < 0 ? `a loss of ${Math.abs(yards)}` : `a gain of ${yards}`
+                            }.`
+                        );
                     }
                 }
-                return true; // End Play
+
+                return true;
 
             } else {
                 // --- BROKEN TACKLE ---
                 ballCarrierState.tacklesBrokenThisPlay++;
                 ballCarrierState.action = 'juke';
-                
+
                 // Stumble Penalty (Runner slows down)
-                ballCarrierState.jukeTicks = 10; 
+                ballCarrierState.jukeTicks = 10;
                 ballCarrierState.currentSpeedYPS *= 0.5; // Loses 50% speed
 
                 if (gameLog) gameLog.push(`💥 ${ballCarrierState.name} breaks the tackle from ${defender.name}!`);
-                
+
                 // Defender falls
                 defender.stunnedTicks = 20;
             }
@@ -3609,7 +3649,6 @@ function checkFumbleRecovery(playState, gameLog, TACKLE_RANGE) {
 
     const ballPos = playState.ballState;
 
-    // Find all active, non-stunned players within recovery range
     const playersInRange = playState.activePlayers.filter(p =>
         p.stunnedTicks === 0 &&
         !p.isEngaged &&
@@ -3617,23 +3656,22 @@ function checkFumbleRecovery(playState, gameLog, TACKLE_RANGE) {
     );
 
     if (playersInRange.length === 0) {
-        return null; // No one is close enough, ball is still loose
+        return null;
     }
 
-    // --- A "Battle" happens! ---
-    // Every player in range gets a "recovery score"
     let bestPlayer = null;
     let maxScore = -Infinity;
 
     playersInRange.forEach(p => {
-        // Agility, Hands, and Toughness matter
-        const skill = (p.agility * 0.4) + (p.catchingHands * 0.4) + (p.toughness * 0.2);
+        const skill =
+            (p.agility * 0.4) +
+            (p.catchingHands * 0.4) +
+            (p.toughness * 0.2);
 
-        // Proximity is the most important factor
         const distance = getDistance(p, ballPos);
-        const proximityBonus = (TACKLE_RANGE - distance) * 50; // Huge bonus for being on top of it
-
+        const proximityBonus = (TACKLE_RANGE - distance) * 50;
         const roll = getRandomInt(-10, 10);
+
         const finalScore = skill + proximityBonus + roll;
 
         if (finalScore > maxScore) {
@@ -3642,8 +3680,16 @@ function checkFumbleRecovery(playState, gameLog, TACKLE_RANGE) {
         }
     });
 
-    // We have a winner
-    return bestPlayer;
+    if (!bestPlayer) return null;
+
+    const offenseTeamId = playState.activePlayers.find(p => p.isOffense)?.teamId;
+    const possessionChange = bestPlayer.teamId !== offenseTeamId;
+
+    return {
+        playerState: bestPlayer,
+        possessionChange,
+        recoveryTeamId: bestPlayer.teamId
+    };
 }
 
 /**
@@ -3971,21 +4017,25 @@ function updateQBDecision(playState, offenseStates, defenseStates, gameLog, aiTi
     // --- EXECUTE ---
     if (actionTaken === "Scramble") {
         qbState.action = 'qb_scramble';
-        qbState.scrambleDirection = 0;
-        qbState.hasBall = false;
-        qbState.isBallCarrier = true;
-        playState.ballState.x = qbState.x;
-        playState.ballState.y = qbState.y;
+        playState.qbIntent = 'scramble';
+
         if (gameLog) gameLog.push(`🏃 ${qbState.name} takes off running!`);
         return;
     }
     else if (actionTaken === "Throw Away") {
         if (gameLog) gameLog.push(`👋 ${qbState.name} throws it away.`);
-        playState.incomplete = true;
-        playState.playIsLive = false;
-        playState.ballState.inAir = false;
+
+        playState.qbIntent = 'throwaway';
+
+        playState.ballState.inAir = true;
         playState.ballState.throwInitiated = true;
         playState.ballState.throwerId = qbState.id;
+
+        // Aim out of bounds
+        playState.ballState.targetX = qbState.x + (Math.random() > 0.5 ? 15 : -15);
+        playState.ballState.targetY = qbState.y + 10;
+
+        qbState.hasBall = false;
         return;
     }
     else if (targetPlayerState && actionTaken.includes("Throw")) {
@@ -4009,10 +4059,10 @@ function updateQBDecision(playState, offenseStates, defenseStates, gameLog, aiTi
 
             if (destDist > 0.1) {
                 // Lead factor: how much to throw ahead (0.85 = slightly underthrow to be safe)
-                const leadFactor = 0.9; 
+                const leadFactor = 0.9;
                 const normX = destDx / destDist;
                 const normY = destDy / destDist;
-                
+
                 aimX += (normX * recSpeedYPS * airTime * leadFactor);
                 aimY += (normY * recSpeedYPS * airTime * leadFactor);
             }
@@ -4020,10 +4070,10 @@ function updateQBDecision(playState, offenseStates, defenseStates, gameLog, aiTi
 
         // 3. Apply Accuracy Error (The "Wobble")
         const accuracyRating = qbState.throwingAccuracy || 50;
-        const pressurePenalty = qbState.isPressure ? 2.0 : 1.0; 
+        const pressurePenalty = qbState.isPressure ? 2.0 : 1.0;
 
         // Formula: 100 Acc = 0.5y error, 50 Acc = 4.5y error
-        const maxError = (100 - accuracyRating) / 12; 
+        const maxError = (100 - accuracyRating) / 12;
         const actualError = (Math.random() * maxError) * pressurePenalty;
 
         // Apply error in a random direction
@@ -4034,7 +4084,7 @@ function updateQBDecision(playState, offenseStates, defenseStates, gameLog, aiTi
         // 4. "Lead Open" Skill Bonus
         // Elite QBs automatically adjust aim slightly away from defenders (simplified as 'downfield')
         if (accuracyRating > 85) {
-            aimY += 0.5; 
+            aimY += 0.5;
         }
 
         // 5. Clamp to Field
@@ -4047,7 +4097,7 @@ function updateQBDecision(playState, offenseStates, defenseStates, gameLog, aiTi
         playState.ballState.throwTick = playState.tick;
         playState.ballState.throwerId = qbState.id;
         playState.ballState.targetPlayerId = targetPlayerState.id;
-        
+
         // IMPORTANT: The target is the Calculated Aim Point, not the Player Position
         playState.ballState.targetX = aimX;
         playState.ballState.targetY = aimY;
@@ -4057,13 +4107,13 @@ function updateQBDecision(playState, offenseStates, defenseStates, gameLog, aiTi
         const finalDy = aimY - qbState.y;
         const finalDist = Math.sqrt(finalDx * finalDx + finalDy * finalDy);
         // Recalculate exact airTime for the actual distance thrown
-        const finalAirTime = finalDist / velocity; 
+        const finalAirTime = finalDist / velocity;
 
         playState.ballState.vx = finalDx / finalAirTime;
         playState.ballState.vy = finalDy / finalAirTime;
         // Arc calculation (vz)
-        playState.ballState.vz = (9.8 * finalAirTime) / 2; 
-        
+        playState.ballState.vz = (9.8 * finalAirTime) / 2;
+
         playState.ballState.x = qbState.x;
         playState.ballState.y = qbState.y;
 
@@ -4196,7 +4246,7 @@ function handleBallArrival(playState, gameLog, play) {
             returnerState.stunnedTicks = 30;
         } else {
             if (gameLog) gameLog.push(`🏈 Punt caught by ${returnerState.name}.`);
-            
+
             playState.turnover = true;
             playState.ballState.inAir = false;
             playState.ballState.isLoose = false;
@@ -4254,7 +4304,7 @@ function handleBallArrival(playState, gameLog, play) {
     const CATCH_CHECK_RADIUS = 2.0;
     const receiverPlayer = getPlayer(targetPlayerState.id);
     const throwerPlayer = getPlayer(playState.ballState.throwerId);
-    
+
     // Find closest defender
     const closestDefenderState = playState.activePlayers
         .filter(p => !p.isOffense && !p.isBlocked && !p.isEngaged)
@@ -4280,28 +4330,32 @@ function handleBallArrival(playState, gameLog, play) {
 
         const distToBall = getDistance(closestDefenderState, playState.ballState);
         const positionBonus = (CATCH_CHECK_RADIUS - distToBall) * 10;
-        
-        // 💡 FIX: High threshold (92) prevents constant INTs
+
         if ((defenderPower + positionBonus + getRandomInt(0, 30)) > 92) {
             eventResolved = true;
             if (gameLog) gameLog.push(`❗ INTERCEPTION! ${closestDefenderState.name} jumps the route!`);
-            
-            playState.turnover = true;
+
+            playState.interceptionOccurred = true;
+            playState.possessionChanged = true;
+
+            playResult.outcome = 'turnover';
+            playResult.turnoverType = 'interception';
+            playResult.possessionChange = true;
+
             playState.ballState.inAir = false;
             playState.ballState.caught = true;
-            
-            // Assign to Defender
+
             closestDefenderState.hasBall = true;
             closestDefenderState.isBallCarrier = true;
             closestDefenderState.action = 'run_path';
-            
-            // Stats
-            ensureStats(defenderPlayer);
-            defenderPlayer.gameStats.interceptions = (defenderPlayer.gameStats.interceptions || 0) + 1;
-            if (throwerPlayer) {
-                ensureStats(throwerPlayer);
-                throwerPlayer.gameStats.interceptionsThrown = (throwerPlayer.gameStats.interceptionsThrown || 0) + 1;
-            }
+
+            playState.returnStartY = closestDefenderState.y;
+
+            playState.statEvents.push({
+                type: 'interception',
+                interceptorId: closestDefenderState.id,
+                throwerId: playState.ballState.throwerId
+            });
             return;
         }
     }
@@ -4313,10 +4367,13 @@ function handleBallArrival(playState, gameLog, play) {
 
         // If defender is closer or equally close
         if (distDef <= distRec) {
-            if (getRandomInt(0, 100) > 40) { // 60% chance to swat if positioned well
+            if (getRandomInt(0, 100) > 40) {
                 eventResolved = true;
                 if (gameLog) gameLog.push(`🚫 **SWATTED!** ${closestDefenderState.name} breaks up the pass!`);
-                playState.incomplete = true; playState.playIsLive = false;
+
+                playResult.outcome = 'incomplete';
+                playState.playIsLive = false;
+                return;
             }
         }
     }
@@ -4326,58 +4383,72 @@ function handleBallArrival(playState, gameLog, play) {
         eventResolved = true;
         const recHands = receiverPlayer.attributes.technical?.catchingHands || 50;
         const recFocus = receiverPlayer.attributes.mental?.consistency || 50;
-        
+
         // Base: 50 hands = 60%, 99 hands = 90%
-        let catchChance = 60 + ((recHands - 50) * 0.6); 
+        let catchChance = 60 + ((recHands - 50) * 0.6);
         catchChance += ((recFocus - 50) * 0.1);
 
         // Penalties
         if (defenderInRange) catchChance -= 30; // Heavy traffic penalty
-        
+
         // Roll
         if (getRandomInt(0, 100) < catchChance) {
             // SUCCESS
-            if (gameLog) gameLog.push(`👍 CATCH! ${targetPlayerState.name} (Catch: ${recHands}) secures it!`);
-            
+            if (gameLog) {
+                gameLog.push(`👍 CATCH! ${targetPlayerState.name} (Catch: ${recHands}) secures it!`);
+            }
+
+            playResult.outcome = 'complete';
+
             playState.ballState.inAir = false;
             playState.ballState.caught = true;
-            
+
             targetPlayerState.hasBall = true;
             targetPlayerState.isBallCarrier = true;
             targetPlayerState.action = 'run_path';
 
-            // 💡 STATS FIX: Double-Count Protection
-            // We check a flag on the playState to ensure we only credit this catch once.
-            if (!playState.statsRecorded) {
-                ensureStats(receiverPlayer);
-                receiverPlayer.gameStats.receptions = (receiverPlayer.gameStats.receptions || 0) + 1;
-                if (throwerPlayer) {
-                    ensureStats(throwerPlayer);
-                    throwerPlayer.gameStats.passCompletions = (throwerPlayer.gameStats.passCompletions || 0) + 1;
-                }
-                playState.statsRecorded = true;
-            }
+            playState.statEvents.push({
+                type: 'reception',
+                receiverId: targetPlayerState.id,
+                throwerId: playState.ballState.throwerId
+            });
 
             // Update blockers
             playState.activePlayers.forEach(p => {
-                if (p.isOffense && p.id !== targetPlayerState.id) p.action = 'run_block';
+                if (p.isOffense && p.id !== targetPlayerState.id) {
+                    p.action = 'run_block';
+                }
             });
+
+            return;
 
         } else {
             // DROP
-            if (gameLog) gameLog.push(`❌ DROPPED! Pass was on target to ${targetPlayerState.name}!`);
-            if (receiverPlayer) {
-                ensureStats(receiverPlayer);
-                receiverPlayer.gameStats.drops = (receiverPlayer.gameStats.drops || 0) + 1;
+            if (gameLog) {
+                gameLog.push(`❌ DROPPED! Pass was on target to ${targetPlayerState.name}!`);
             }
-            playState.incomplete = true; playState.playIsLive = false;
+
+            playState.statEvents.push({
+                type: 'drop',
+                playerId: targetPlayerState.id
+            });
+
+            playResult.outcome = 'incomplete';
+            playState.playIsLive = false;
+            return;
         }
+
     }
 
     // --- D. INACCURATE PASS ---
     if (!eventResolved) {
-        if (gameLog) gameLog.push(`👋 Pass sails harmlessly incomplete.`);
-        playState.incomplete = true; playState.playIsLive = false;
+        if (gameLog) {
+            gameLog.push(`👋 Pass sails harmlessly incomplete.`);
+        }
+
+        playResult.outcome = 'incomplete';
+        playState.playIsLive = false;
+        return;
     }
 
     // Cleanup Ball Physics
@@ -4459,95 +4530,21 @@ function resolvePlayerCollisions(playState) {
 /**
  * Updates player game stats based on the final play outcome.
  */
-function finalizeStats(playState, offense, defense) {
-    // --- 1. Find all players involved ---
-    const carrierState = playState.activePlayers.find(p => p.isBallCarrier);
-    const throwerState = playState.activePlayers.find(p => p.id === playState.ballState.throwerId);
-    const receiverState = playState.activePlayers.find(p => p.id === playState.ballState.targetPlayerId && p.isOffense);
+function finalizeStats(playState) {
+    applyStatEvents(playState.statEvents);
+}
 
-    const qbPlayer = throwerState ? game.players.find(p => p && p.id === throwerState.id) : null;
-    const carrierPlayer = carrierState ? game.players.find(p => p && p.id === carrierState.id) : null;
-    const receiverPlayer = receiverState ? game.players.find(p => p && p.id === receiverState.id) : null;
 
-    // --- 2. Ensure stats objects exist ---
-    ensureStats(qbPlayer);
-    ensureStats(carrierPlayer);
-    ensureStats(receiverPlayer);
-
-    // --- 3. Handle Pass Attempt Stats ---
-    if (qbPlayer && playState.ballState.throwInitiated) {
-        qbPlayer.gameStats.passAttempts++;
-
-        // Track Target
-        if (receiverPlayer) {
-            receiverPlayer.gameStats.targets = (receiverPlayer.gameStats.targets || 0) + 1;
-        }
-    }
-
-    // --- 4. Handle Sack (Negative Rush Yards for QB) ---
-    if (playState.sack && carrierPlayer) {
-        // In this game engine, Sacks count as negative QB Rushing yards (NCAA style rules)
-        // We do NOT increment rushAttempts here to avoid skewing "Carries" with sacks,
-        // unless you strictly follow NCAA rules where a sack is a rush attempt. 
-        // For gameplay clarity, we usually keep them separate.
-        carrierPlayer.gameStats.rushYards += Math.round(playState.yards);
-        return; // Sack ends the stat processing for this play
-    }
-
-    // --- 5. Handle Play Result ---
-    const isTouchdown = playState.touchdown;
-    const finalYards = Math.round(playState.yards);
-
-    if (playState.incomplete) {
-        // Track Drop? (Optional)
-        // if (playState.wasDrop && receiverPlayer) receiverPlayer.gameStats.drops++;
-    } else if (carrierPlayer) {
-
-        // --- A. Offensive Passing Play ---
-        const wasPassCaught = carrierState.id === receiverState?.id && playState.ballState.throwInitiated;
-
-        if (wasPassCaught && receiverPlayer) {
-            receiverPlayer.gameStats.receptions++;
-            receiverPlayer.gameStats.recYards += finalYards;
-            if (isTouchdown) receiverPlayer.gameStats.touchdowns++;
-
-            if (qbPlayer) {
-                qbPlayer.gameStats.passCompletions++;
-                qbPlayer.gameStats.passYards += finalYards;
-                if (isTouchdown) qbPlayer.gameStats.touchdowns++;
-            }
-        }
-        // --- B. Offensive Rushing Play ---
-        else if (carrierState.isOffense) {
-            carrierPlayer.gameStats.rushAttempts++; // <--- 💡 FIX: Track Carries
-            carrierPlayer.gameStats.rushYards += finalYards;
-            if (isTouchdown) carrierPlayer.gameStats.touchdowns++;
-        }
-        // --- C. Defensive/Special Teams Return (INT, Punt, Fumble) ---
-        else if (!carrierState.isOffense) {
-            if (isTouchdown) {
-                carrierPlayer.gameStats.touchdowns++;
-            }
-
-            // Calculate Return Yards
-            // Return Yards = |End Y - Start Y|
-            if (playState.returnStartY !== null) {
-                const returnYards = Math.round(Math.abs(carrierState.y - playState.returnStartY));
-                carrierPlayer.gameStats.returnYards += returnYards;
-            }
-
-            // If it was an INT, credit the thrower with an INT thrown
-            if (playState.turnover && qbPlayer && playState.ballState.throwInitiated) {
-                qbPlayer.gameStats.interceptionsThrown++;
-            }
-
-            // --- 💡 FIX: Credit the Defender with the INT ---
-            // If it was a pass play, and it was a turnover, the carrier (defender) gets an INT.
-            if (playState.turnover && playState.ballState.throwInitiated) {
-                carrierPlayer.gameStats.interceptions++;
-            }
-        }
-    }
+function resetPlayerRuntimeState(playerState) {
+    playerState.isBallCarrier = false;
+    playerState.hasBall = false;
+    playerState.isEngaged = false;
+    playerState.engagedWith = null;
+    playerState.blockedBy = null;
+    playerState.action = 'idle';
+    playerState.stunnedTicks = 0;
+    playerState.jukeTicks = 0;
+    playerState.fatigueModifier = 1.0;
 }
 
 // =============================================================
@@ -4567,7 +4564,16 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
     if (!play) {
         console.error(`Play key "${offensivePlayKey}" not found.`);
         if (gameLog) gameLog.push("CRITICAL ERROR: Play definition missing!");
-        return { yards: 0, turnover: true, incomplete: false, log: gameLog, visualizationFrames: [] };
+
+        playResult.outcome = 'turnover';
+        playResult.possessionChange = true;
+
+        return {
+            playResult,
+            finalBallY: ballOn,
+            log: gameLog,
+            visualizationFrames: []
+        };
     }
 
     // --- 2. INITIALIZE STATE ---
@@ -4575,33 +4581,91 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
     let { assignments } = play;
 
     const playState = {
-        playIsLive: true, tick: 0, maxTicks: 1000,
-        type: type, assignments: assignments,
-        yards: 0, touchdown: false, turnover: false, incomplete: false, sack: false, safety: false,
+        playIsLive: true,
+        tick: 0,
+        maxTicks: 1000,
+
+        type: type,
+        assignments: assignments,
+
+        // --- Legacy outcome fields (kept for now) ---
+        yards: 0,
+        touchdown: false,
+        turnover: false,
+        incomplete: false,
+        sack: false,
+        safety: false,
         touchback: false,
+
         finalBallY: 0,
         returnStartY: null,
+
+        // --- NEW: Step 1 deferred outcome flags ---
+        possessionChanged: false,        // punt / INT / recovered fumble
+        fumbleOccurred: false,
+        interceptionOccurred: false,
+
+        // --- NEW: deferred stat events ---
+        statEvents: [],                  // [{ type, playerId, ... }]
+
         ballState: {
-            x: 0, y: 0, z: 1.0, vx: 0, vy: 0, vz: 0,
-            targetPlayerId: null, inAir: false, isLoose: false,
-            throwerId: null, throwInitiated: false,
-            targetX: 0, targetY: 0
+            x: 0, y: 0, z: 1.0,
+            vx: 0, vy: 0, vz: 0,
+
+            targetPlayerId: null,
+            inAir: false,
+            isLoose: false,
+
+            throwerId: null,
+            throwInitiated: false,
+
+            targetX: 0,
+            targetY: 0
         },
+
         lineOfScrimmage: ballOn + 10,
-        activePlayers: [], 
-        blockBattles: [], 
+        activePlayers: [],
+        blockBattles: [],
         visualizationFrames: [],
-        statsRecorded: false // Double-count protection
+
+
     };
+    const playResult = {
+        yards: 0,
+        outcome: 'live',           // live | complete | incomplete | turnover | sack
+        possessionChange: false,
+        score: null,               // 'TD' | null
+        safety: false,
+        touchback: false,
+        turnoverType: null         // 'interception' | 'fumble' | 'punt'
+    };
+
 
     let firstDownY = 0;
 
     // --- 3. SETUP PLAYERS ---
     try {
         const goalLineY = FIELD_LENGTH - 10;
-        firstDownY = Math.min(playState.lineOfScrimmage + (yardsToGo || 10), goalLineY);
+        const effectiveYardsToGo = (yardsToGo <= 0 || ballOn >= 90)
+            ? (goalLineY - playState.lineOfScrimmage)
+            : yardsToGo;
 
-        setupInitialPlayerStates(playState, offense, defense, play, assignments, ballOn, defensivePlayKey, ballHash, offensivePlayKey);
+        firstDownY = Math.min(
+            playState.lineOfScrimmage + effectiveYardsToGo,
+            goalLineY
+        );
+
+        setupInitialPlayerStates({
+            playState,
+            offense,
+            defense,
+            play,
+            assignments,
+            ballOn,
+            ballHash,
+            offensivePlayKey,
+            defensivePlayKey
+        });
 
         // Initial Frame
         if (playState.playIsLive && gameLog) {
@@ -4632,6 +4696,7 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
             const rbPlayer = playState.activePlayers.find(p => p.slot === 'RB1' && p.isOffense);
             if (rbPlayer) {
                 if (gameLog) gameLog.push(`[Pre-Snap]: 🧠 ${qbPlayer.name} audibles RB to block!`);
+                play.assignments['RB1'] = 'pass_block';
                 rbPlayer.assignment = 'pass_block';
                 rbPlayer.action = 'pass_block';
                 rbPlayer.targetX = rbPlayer.initialX;
@@ -4644,7 +4709,7 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
     // --- 5. THE PHYSICS LOOP (Tick by Tick) ---
     // ===========================================================
     let ballCarrierState = null;
-    
+
     try {
         const timeDelta = fastSim ? TICK_DURATION_SECONDS * 10 : TICK_DURATION_SECONDS;
         const loopType = playState.type || 'pass';
@@ -4657,10 +4722,12 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
             const ballPos = playState.ballState;
             const offenseStates = playState.activePlayers.filter(p => p?.isOffense);
             const defenseStates = playState.activePlayers.filter(p => !p?.isOffense);
-            
+
             // Find Carrier
-            ballCarrierState = playState.activePlayers.find(p => p?.hasBall && p.isOffense) || 
-                               playState.activePlayers.find(p => p?.isBallCarrier && p.isOffense) || null;
+            ballCarrierState =
+                playState.activePlayers.find(p => p?.hasBall) ||
+                playState.activePlayers.find(p => p?.isBallCarrier) ||
+                null;
 
             // --- B. DECISION MAKING ---
             // If ball is not in air and not loose, QB/Punter makes decisions
@@ -4679,8 +4746,8 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
             }
 
             // --- D. PLAYER MOVEMENT ---
-            playState.activePlayers.forEach(p => { 
-                try { updatePlayerPosition(p, timeDelta); } catch (e) { /* ignore */ } 
+            playState.activePlayers.forEach(p => {
+                try { updatePlayerPosition(p, timeDelta); } catch (e) { /* ignore */ }
             });
 
             // --- E. BALL PHYSICS ---
@@ -4690,11 +4757,11 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
                 ballPos.y += (ballPos.vy || 0) * timeDelta;
                 ballPos.z += (ballPos.vz || 0) * timeDelta;
                 ballPos.vz = (ballPos.vz || 0) - 9.8 * timeDelta; // Gravity
-                
+
                 // Ground Impact
-                if (ballPos.z < 0) { 
-                    ballPos.z = 0; 
-                    ballPos.vz = 0; 
+                if (ballPos.z < 0) {
+                    ballPos.z = 0;
+                    ballPos.vz = 0;
                 }
             } else if (ballCarrierState) {
                 // Carrier Logic: Ball stuck to player
@@ -4710,7 +4777,7 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
             if (playState.playIsLive) {
                 // Re-check carrier
                 ballCarrierState = playState.activePlayers.find(p => p?.isBallCarrier) || null;
-                
+
                 if (ballCarrierState) {
                     const offenseEndzoneY = FIELD_LENGTH - 10;
                     const defenseEndzoneY = 10;
@@ -4726,19 +4793,13 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
                     // 2. Defensive TD (Pick 6 / Fumble Return)
                     if (!ballCarrierState.isOffense && ballCarrierState.y <= defenseEndzoneY + 0.1) {
                         playState.touchdown = true; playState.playIsLive = false;
+                        playState.possessionChanged = true;
                         playState.yards = 0; // Defense yards logic separate
                         playState.finalBallY = ballCarrierState.y;
                         if (gameLog) gameLog.push(`🎉 DEFENSIVE TOUCHDOWN!`);
                         break;
                     }
-                    // 3. Safety
-                    if (ballCarrierState.isOffense && ballCarrierState.y <= defenseEndzoneY + 0.1) {
-                        playState.safety = true; playState.playIsLive = false;
-                        playState.yards = 0;
-                        playState.finalBallY = ballCarrierState.y;
-                        if (gameLog) gameLog.push(`🚨 SAFETY! ${ballCarrierState.name} tackled in endzone!`);
-                        break;
-                    }
+
                     // 4. Out of Bounds
                     if (ballCarrierState.x <= 0.1 || ballCarrierState.x >= FIELD_WIDTH - 0.1) {
                         playState.playIsLive = false;
@@ -4762,7 +4823,7 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
                     // checkTackleCollisions returns TRUE if play ends (tackle made)
                     if (typeof checkTackleCollisions === 'function' && checkTackleCollisions(playState, gameLog)) {
                         playState.finalBallY = ballCarrierState.y;
-                        break; 
+                        break;
                     }
                 }
 
@@ -4771,8 +4832,23 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
                     if (typeof checkFumbleRecovery === 'function') {
                         const recoverer = checkFumbleRecovery(playState, gameLog, 2.0);
                         if (recoverer) {
-                            // Logic handled inside checkFumbleRecovery, we just need to know it happened
-                            // Reset local flags if needed or let loop continue
+                            playState.ballState.isLoose = false;
+                            playState.ballState.inAir = false;
+
+                            recoverer.hasBall = true;
+                            recoverer.isBallCarrier = true;
+                            recoverer.action = 'run_path';
+
+                            playState.possessionChanged = (recoverer.isOffense !== ballCarrierState?.isOffense);
+                            playState.returnStartY = recoverer.y;
+
+                            // Optional stat event
+                            playState.statEvents.push({
+                                type: 'fumbleRecovery',
+                                playerId: recoverer.id
+                            });
+
+                            if (gameLog) gameLog.push(`🏈 ${recoverer.name} recovers the fumble!`);
                         }
                     }
                 }
@@ -4783,7 +4859,7 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
                         // This handles Catch, Drop, INT, Muffed Punt, etc.
                         handleBallArrival(playState, gameLog, play);
                     }
-                    
+
                     if (!playState.playIsLive) {
                         playState.finalBallY = ballPos.y;
                         break;
@@ -4824,7 +4900,7 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
     // ===========================================================
     // --- 6. POST-PLAY CALCULATION ---
     // ===========================================================
-    
+
     // Clean up "clean" plays (ran out of time or simple tackle)
     if (playState.playIsLive && !playState.touchdown && !playState.safety) {
         ballCarrierState = playState.activePlayers.find(p => p.isBallCarrier);
@@ -4851,9 +4927,12 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
         const yardsToGoal = (FIELD_LENGTH - 10) - (ballOn + 10);
         playState.yards = Math.max(yardsToGoal, playState.yards); // Ensure they get credit for the full distance
     }
+    if (playState.possessionChanged) {
+        playState.turnover = true;
+    }
 
     // Update historical stats
-    finalizeStats(playState, offense, defense);
+    //finalizeStats(playState, offense, defense);
 
     // Final Frame for smoothness
     if (gameLog) {
@@ -4866,18 +4945,202 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
         });
     }
 
+
+    // ===================================
+    // FINALIZE PLAY RESULT (AUTHORITATIVE)
+    // ===================================
+
+    // Yardage
+    playResult.yards = playState.yards;
+
+    // Incomplete
+    if (playState.incomplete) {
+        playResult.outcome = 'incomplete';
+    }
+
+    // Possession change
+    if (playState.possessionChanged) {
+        playResult.outcome = 'turnover';
+        playResult.possessionChange = true;
+
+        if (playState.interceptionOccurred) playResult.turnoverType = 'interception';
+        else if (playState.fumbleOccurred) playResult.turnoverType = 'fumble';
+        else if (playState.type === 'punt') playResult.turnoverType = 'punt';
+    }
+
+    // Touchdown
+    if (playState.touchdown) {
+        playResult.outcome = 'complete';
+        playResult.score = 'TD';
+    }
+
+    // Safety
+    if (playState.safety) {
+        playResult.safety = true;
+        playResult.score = 'SAFETY';
+    }
+
+    // Touchback
+    if (playState.touchback) {
+        playResult.touchback = true;
+    }
+
+    // ===================================
+    // APPLY STAT EVENTS (ONCE)
+    // ===================================
+    applyStatEvents(playState.statEvents);
+
+    // ===================================
+    // CLEANUP RUNTIME STATE
+    // ===================================
+    playState.activePlayers.forEach(p => resetPlayerRuntimeState(p));
+
+    // ===================================
+    // RETURN
+    // ===================================
     return {
-        yards: playState.yards,
-        touchdown: playState.touchdown,
-        turnover: playState.turnover,
-        incomplete: playState.incomplete,
-        safety: playState.safety,
-        touchback: playState.touchback,
+        playResult,
         finalBallY: playState.finalBallY,
         log: gameLog,
         visualizationFrames: playState.visualizationFrames
     };
 }
+
+function applyStatEvents(statEvents) {
+    statEvents.forEach(evt => {
+        switch (evt.type) {
+
+            // --- PASSING ---
+            case 'pass_attempt': {
+                const qb = getPlayer(evt.qbId);
+                if (qb) {
+                    ensureStats(qb);
+                    qb.gameStats.passAttempts++;
+                }
+                break;
+            }
+
+            case 'completion': {
+                const qb = getPlayer(evt.qbId);
+                const rec = getPlayer(evt.receiverId);
+                const yards = Math.round(evt.yards || 0);
+
+                if (qb) {
+                    ensureStats(qb);
+                    qb.gameStats.passCompletions++;
+                    qb.gameStats.passYards += yards;
+                }
+
+                if (rec) {
+                    ensureStats(rec);
+                    rec.gameStats.receptions++;
+                    rec.gameStats.recYards += yards;
+                }
+                break;
+            }
+
+            case 'drop': {
+                const p = getPlayer(evt.playerId);
+                if (p) {
+                    ensureStats(p);
+                    p.gameStats.drops = (p.gameStats.drops || 0) + 1;
+                }
+                break;
+            }
+
+            case 'interception': {
+                const def = getPlayer(evt.interceptorId);
+                const qb = getPlayer(evt.throwerId);
+
+                if (def) {
+                    ensureStats(def);
+                    def.gameStats.interceptions++;
+                }
+
+                if (qb) {
+                    ensureStats(qb);
+                    qb.gameStats.interceptionsThrown++;
+                }
+                break;
+            }
+
+            // --- RUSHING ---
+            case 'rush': {
+                const runner = getPlayer(evt.runnerId);
+                const yards = Math.round(evt.yards || 0);
+
+                if (runner) {
+                    ensureStats(runner);
+                    runner.gameStats.rushAttempts++;
+                    runner.gameStats.rushYards += yards;
+                }
+                break;
+            }
+
+            // --- RETURNS ---
+            case 'return': {
+                const p = getPlayer(evt.playerId);
+                const yards = Math.round(evt.yards || 0);
+
+                if (p) {
+                    ensureStats(p);
+                    p.gameStats.returnYards += yards;
+                }
+                break;
+            }
+
+            // --- SCORING ---
+            case 'touchdown': {
+                const p = getPlayer(evt.playerId);
+                if (p) {
+                    ensureStats(p);
+                    p.gameStats.touchdowns++;
+                }
+                break;
+            }
+
+            case 'safety': {
+                const p = getPlayer(evt.playerId);
+                if (p) {
+                    ensureStats(p);
+                    p.gameStats.safeties = (p.gameStats.safeties || 0) + 1;
+                }
+                break;
+            }
+
+            // --- TURNOVERS ---
+            case 'fumble': {
+                const p = getPlayer(evt.playerId);
+                if (p) {
+                    ensureStats(p);
+                    p.gameStats.fumbles++;
+                }
+                break;
+            }
+
+            case 'tackle': {
+                const p = getPlayer(evt.playerId);
+                if (p) {
+                    ensureStats(p);
+                    p.gameStats.tackles = (p.gameStats.tackles || 0) + 1;
+                }
+                break;
+            }
+
+            case 'sack': {
+                const p = getPlayer(evt.playerId);
+                if (p) {
+                    ensureStats(p);
+                    p.gameStats.sacks = (p.gameStats.sacks || 0) + 1;
+                }
+                break;
+            }
+
+        }
+    });
+}
+
+
 /**
  * Resolves a punt play. Calculates distance, simulates a potential return,
  * and handles muffs or touchdowns.
@@ -5531,27 +5794,41 @@ function simulateGame(homeTeam, awayTeam, options = {}) {
                     }
 
                     // --- It was a punt, handle the result ---
-                    driveActive = false; // A punt always ends the offensive possession (unless muffed)
+                    driveActive = false; // Punt always ends offensive possession
 
-                    if (result.touchdown && !result.turnover) {
-                        // Blocked punt TD by Offense
-                        if (offense.id === homeTeam.id) homeScore += 6; else awayScore += 6;
-                        currentOffense = defense; // Kickoff to other team
+                    const isTD = playResult.score === 'TD';
+                    const isDefensiveTD = isTD && playResult.possessionChange;
+
+                    if (isTD && !playResult.possessionChange) {
+                        // Blocked punt TD by offense
+                        if (offense.id === homeTeam.id) homeScore += 6;
+                        else awayScore += 6;
+
+                        currentOffense = defense; // Kickoff
                         nextDriveStartBallOn = 20;
-                    } else if (result.touchdown && result.turnover) {
-                        // Punt Return TD
-                        if (defense.id === homeTeam.id) homeScore += 6; else awayScore += 6;
+
+                    } else if (isDefensiveTD) {
+                        // Punt return TD
+                        if (defense.id === homeTeam.id) homeScore += 6;
+                        else awayScore += 6;
+
                         currentOffense = offense; // Kickoff to original offense
                         nextDriveStartBallOn = 20;
-                    } else if (result.touchback) {
+
+                    } else if (playResult.outcome === 'touchback') {
+                        // Punt touchback
                         currentOffense = defense;
                         nextDriveStartBallOn = 20;
+
                     } else {
-                        // Normal punt
-                        const finalY = result.finalBallY || (ballOn + 40 + 10);
+                        // Normal punt or muffed recovery without TD
+                        const finalY = finalBallY ?? (ballOn + 50); // safe fallback
                         const absoluteBallOn = finalY - 10;
-                        currentOffense = defense; // Possession flips
-                        nextDriveStartBallOn = Math.round(Math.max(1, Math.min(99, 100 - absoluteBallOn)));
+
+                        currentOffense = defense;
+                        nextDriveStartBallOn = Math.round(
+                            Math.max(1, Math.min(99, 100 - absoluteBallOn))
+                        );
                     }
 
                 } else {
@@ -5606,13 +5883,13 @@ function simulateGame(homeTeam, awayTeam, options = {}) {
                     if (!fastSim && result.visualizationFrames) {
                         allVisualizationFrames.push(...result.visualizationFrames);
                     }
-                    if (!fastSim && !result.incomplete && result.visualizationFrames?.length > 0) {
+                    if (!fastSim && !playResult.outcome === 'incomplete' && result.visualizationFrames?.length > 0) {
                         const finalBallX = result.visualizationFrames[result.visualizationFrames.length - 1].ball.x;
                         if (finalBallX < HASH_LEFT_X) ballHash = 'L';
                         else if (finalBallX > HASH_RIGHT_X) ballHash = 'R';
                         else ballHash = 'M';
                     }
-                    ballOn += result.yards;
+                    ballOn += playResult.yards;
                     ballOn = Math.max(0, Math.min(100, ballOn));
                 }
                 // --- 💡 NEW LOCATION: BETWEEN PLAYS SUBSTITUTION ---
@@ -5626,8 +5903,8 @@ function simulateGame(homeTeam, awayTeam, options = {}) {
                 // --- 5. PROCESS PLAY RESULT (Corrected Logic) ---
 
                 // --- 1. CHECK FOR TOUCHDOWN (OFFENSIVE OR DEFENSIVE) ---
-                if (result.touchdown && !shouldPunt) {
-                    const wasOffensiveTD = !result.turnover;
+                if (playResult.score === 'TD' && !shouldPunt) {
+                    const wasOffensiveTD = !playResult.possessionChange;
 
                     if (wasOffensiveTD) {
                         // --- Offensive TD ---
@@ -5661,18 +5938,41 @@ function simulateGame(homeTeam, awayTeam, options = {}) {
                             allVisualizationFrames.push(...conversionResult.visualizationFrames);
                         }
 
-                        // Score Conversion
-                        if (conversionResult.touchdown && !conversionResult.turnover) {
-                            if (!fastSim) gameLog.push(`✅ ${points}-point conversion GOOD! Points are good!`);
-                            if (offense.id === homeTeam.id) homeScore += (6 + points); else awayScore += (6 + points);
-                        } else if (conversionResult.touchdown && conversionResult.turnover) {
-                            // Returned conversion (very rare 2 points for defense)
+                        // Score Conversion (Step 2 compliant)
+                        const isTD = conversionResult.playResult.score === 'TD';
+                        const isDefensiveScore = isTD && conversionResult.playResult.possessionChange;
+
+                        if (isTD && !isDefensiveScore) {
+                            // Offensive conversion good
+                            if (!fastSim) gameLog.push(`✅ ${points}-point conversion GOOD!`);
+                            if (offense.id === homeTeam.id) {
+                                homeScore += (6 + points);
+                            } else {
+                                awayScore += (6 + points);
+                            }
+
+                        } else if (isDefensiveScore) {
+                            // Returned conversion (very rare)
                             if (!fastSim) gameLog.push(`❌ Conversion FAILED... AND RETURNED!`);
-                            if (offense.id === homeTeam.id) homeScore += 6; else awayScore += 6;
-                            if (defense.id === homeTeam.id) homeScore += 2; else awayScore += 2;
+                            if (offense.id === homeTeam.id) {
+                                homeScore += 6;
+                            } else {
+                                awayScore += 6;
+                            }
+                            if (defense.id === homeTeam.id) {
+                                homeScore += 2;
+                            } else {
+                                awayScore += 2;
+                            }
+
                         } else {
+                            // Conversion failed
                             if (!fastSim) gameLog.push(`❌ ${points}-point conversion FAILED!`);
-                            if (offense.id === homeTeam.id) homeScore += 6; else awayScore += 6;
+                            if (offense.id === homeTeam.id) {
+                                homeScore += 6;
+                            } else {
+                                awayScore += 6;
+                            }
                         }
 
                         scoreDiff = offense.id === homeTeam.id ? homeScore - awayScore : awayScore - homeScore;
@@ -5695,7 +5995,7 @@ function simulateGame(homeTeam, awayTeam, options = {}) {
                     nextDriveStartBallOn = 20;
 
                     // --- 2. CHECK FOR SAFETY ---
-                } else if (result.safety && !shouldPunt) {
+                } else if (playResult.safety && !shouldPunt) {
                     if (!fastSim) gameLog.push(`SAFETY! 2 points for ${defense.name}!`);
                     if (defense.id === homeTeam.id) homeScore += 2; else awayScore += 2;
                     scoreDiff = offense.id === homeTeam.id ? homeScore - awayScore : awayScore - homeScore;
@@ -5705,7 +6005,7 @@ function simulateGame(homeTeam, awayTeam, options = {}) {
                     nextDriveStartBallOn = 20;
 
                     // --- 3. CHECK FOR NON-TD TURNOVER ---
-                } else if (result.turnover && !shouldPunt) {
+                } else if (playResult.possessionChange && !shouldPunt) {
                     driveActive = false;
 
                     currentOffense = defense;
@@ -5723,8 +6023,8 @@ function simulateGame(homeTeam, awayTeam, options = {}) {
 
                     if (!fastSim) {
                         const spotText = nextDriveStartBallOn <= 50 ? `own ${nextDriveStartBallOn}` : `opponent ${100 - nextDriveStartBallOn}`;
-                        if (result.incomplete && down > 4) {
-                            if (result.incomplete) nextDriveStartBallOn = 100 - ballOn; // Reset to LOS
+                        if (playResult.outcome === 'incomplete' && down > 4) {
+                            if (playResult.outcome === 'incomplete') nextDriveStartBallOn = 100 - ballOn; // Reset to LOS
                             gameLog.push(`✋ Turnover on downs! ${defense.name} takes over.`);
                         } else {
                             gameLog.push(`🔄 Possession changes! Ball spotted at ${spotText}.`);
@@ -5732,18 +6032,18 @@ function simulateGame(homeTeam, awayTeam, options = {}) {
                     }
 
                     // --- 4. CHECK FOR INCOMPLETE PASS ---
-                } else if (result.incomplete && !shouldPunt) {
+                } else if (playResult.outcome === 'incomplete' && !shouldPunt) {
                     down++;
 
                     // --- 5. REGULAR PLAY (GAIN/LOSS) ---
                 } else if (!shouldPunt) { // Completed play, not a punt
                     const goalLineY = FIELD_LENGTH - 10;
-                    const absoluteLoS_Y = (ballOn - result.yards) + 10; // ballOn is yardline relative to offense direction
+                    const absoluteLoS_Y = (ballOn - playResult.yards) + 10; // ballOn is yardline relative to offense direction
                     const yardsToGoalLine = goalLineY - absoluteLoS_Y; // Recalculate relative to field coords if needed, but simplified logic uses yardsToGo
                     // Actually, simplified logic:
                     const wasGoalToGo = ((ballOn + 10) + yardsToGo) >= (FIELD_LENGTH - 10);
 
-                    yardsToGo -= result.yards;
+                    yardsToGo -= playResult.yards;
 
                     if (yardsToGo <= 0) { // First down
                         down = 1;
@@ -5825,137 +6125,187 @@ function simulateGame(homeTeam, awayTeam, options = {}) {
                             if (gameLog) gameLog.push(`--- ${down} & ${yardsToGo <= 0 ? 'Goal' : yardsToGo} from the ${yardLineText} ---`);
                         }
 
-                        // ✅ **FIX (OT):** Assign scoreDiff
-                        scoreDiff = offense.id === homeTeam.id ? homeScore - awayScore : awayScore - homeScore;
+                        // ✅ Assign scoreDiff (OT)
+                        scoreDiff = offense.id === homeTeam.id
+                            ? homeScore - awayScore
+                            : awayScore - homeScore;
+
                         const drivesRemainingInGame = 0;
 
-                        const offensivePlayKey_initial = determinePlayCall(offense, defense, down, yardsToGo, ballOn, scoreDiff, fastSim ? null : gameLog, drivesRemainingInGame);
+                        // --- Play selection ---
+                        const offensivePlayKey_initial = determinePlayCall(
+                            offense, defense, down, yardsToGo, ballOn,
+                            scoreDiff, fastSim ? null : gameLog, drivesRemainingInGame
+                        );
+
                         const offenseFormationName = offense.formations.offense;
-                        const defensiveFormationName = determineDefensiveFormation(defense, offenseFormationName, down, yardsToGo);
-                        defense.formations.defense = defensiveFormationName;
-                        const defensivePlayKey = determineDefensivePlayCall(defense, offense, down, yardsToGo, ballOn, scoreDiff, fastSim ? null : gameLog, drivesRemainingInGame);
-                        const audibleResult = aiCheckAudible(offense, offensivePlayKey_initial, defense, defensivePlayKey, fastSim ? null : gameLog);
+                        defense.formations.defense = determineDefensiveFormation(
+                            defense, offenseFormationName, down, yardsToGo
+                        );
+
+                        const defensivePlayKey = determineDefensivePlayCall(
+                            defense, offense, down, yardsToGo, ballOn,
+                            scoreDiff, fastSim ? null : gameLog, drivesRemainingInGame
+                        );
+
+                        const audibleResult = aiCheckAudible(
+                            offense, offensivePlayKey_initial,
+                            defense, defensivePlayKey,
+                            fastSim ? null : gameLog
+                        );
+
                         const offensivePlayKey = audibleResult.playKey;
 
                         if (!fastSim) {
-                            const offPlayName = offensivePlaybook[offensivePlayKey]?.name || offensivePlayKey.split('_').slice(1).join(' ');
-                            const defPlayName = defensivePlaybook[defensivePlayKey]?.name || defensivePlayKey;
-                            if (gameLog) gameLog.push(`🏈 **Offense:** ${offPlayName} ${audibleResult.didAudible ? '(Audible)' : ''}`);
-                            if (gameLog) gameLog.push(`🛡️ **Defense:** ${defPlayName}`);
+                            gameLog.push(`🏈 **Offense:** ${offensivePlaybook[offensivePlayKey]?.name || offensivePlayKey}`);
+                            gameLog.push(`🛡️ **Defense:** ${defensivePlaybook[defensivePlayKey]?.name || defensivePlayKey}`);
                         }
 
-                        const result = resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey,
+                        // --- RESOLVE PLAY ---
+                        const result = resolvePlay(
+                            offense,
+                            defense,
+                            offensivePlayKey,
+                            defensivePlayKey,
                             { gameLog: fastSim ? null : gameLog, weather, ballOn, ballHash, down, yardsToGo },
                             options
                         );
 
-                        if (!fastSim && result.visualizationFrames) allVisualizationFrames.push(...result.visualizationFrames);
-                        if (!fastSim && !result.incomplete && result.visualizationFrames?.length > 0) {
-                            const finalBallX = result.visualizationFrames[result.visualizationFrames.length - 1].ball.x;
-                            if (finalBallX < HASH_LEFT_X) ballHash = 'L';
-                            else if (finalBallX > HASH_RIGHT_X) ballHash = 'R';
-                            else ballHash = 'M';
+                        const playResult = result.playResult;
+
+                        // Frames
+                        if (!fastSim && result.visualizationFrames) {
+                            allVisualizationFrames.push(...result.visualizationFrames);
                         }
-                        ballOn += result.yards;
+
+                        // Ball movement (ONCE)
+                        ballOn += playResult.yards;
                         ballOn = Math.max(0, Math.min(100, ballOn));
 
-                        if (result.turnover) {
-                            driveActive = false;
-                            if (!fastSim) gameLog.push(`Turnover! Drive ends.`);
-                            if (result.touchdown) {
-                                if (!fastSim) gameLog.push(`DEFENSIVE TOUCHDOWN! Game Over!`);
-                                if (defense.id === homeTeam.id) homeScore += 6; else awayScore += 6;
-                                // ✅ **FIX (OT):** Update scoreDiff
-                                scoreDiff = offense.id === homeTeam.id ? homeScore - awayScore : awayScore - homeScore;
-                                isStillTied = false;
-                            }
-                        } else if (result.safety) {
-                            if (!fastSim) gameLog.push(`SAFETY! Game Over!`);
-                            if (defense.id === homeTeam.id) homeScore += 2; else awayScore += 2;
-                            // ✅ **FIX (OT):** Update scoreDiff
-                            scoreDiff = offense.id === homeTeam.id ? homeScore - awayScore : awayScore - homeScore;
-                            driveActive = false;
+                        // --- TERMINAL OUTCOMES ---
+
+                        // 1️⃣ Defensive TD (INT / fumble return)
+                        if (playResult.score === 'TD' && playResult.possessionChange) {
+                            if (!fastSim) gameLog.push(`🎉 DEFENSIVE TOUCHDOWN! Game Over!`);
+                            if (defense.id === homeTeam.id) homeScore += 6;
+                            else awayScore += 6;
                             isStillTied = false;
-                        } else if (result.touchdown) {
-                            ballOn = 100;
-                            const wasOffensiveTD = !result.turnover;
-
-                            if (wasOffensiveTD) {
-                                const goesForTwo = Math.random() > 0.85;
-                                const points = goesForTwo ? 2 : 1;
-                                const conversionBallOn = goesForTwo ? 95 : 98;
-                                const conversionYardsToGo = 100 - conversionBallOn;
-                                if (!fastSim) gameLog.push(`--- ${points}-Point Conversion Attempt ---`);
-
-                                // ✅ **FIX (OT):** scoreDiff is in scope
-                                const conversionOffensePlayKey = determinePlayCall(offense, defense, 1, conversionYardsToGo, conversionBallOn, scoreDiff, fastSim ? null : gameLog, drivesRemainingInGame);
-                                const conversionDefenseFormation = determineDefensiveFormation(defense, offense.formations.offense, 1, conversionYardsToGo);
-                                defense.formations.defense = conversionDefenseFormation;
-                                const conversionDefensePlayKey = determineDefensivePlayCall(defense, offense, 1, conversionYardsToGo, conversionBallOn, scoreDiff, fastSim ? null : gameLog, drivesRemainingInGame);
-
-                                if (!fastSim) {
-                                    const convOffPlayName = offensivePlaybook[conversionOffensePlayKey]?.name || conversionOffensePlayKey.split('_').slice(1).join(' ');
-                                    const convDefPlayName = defensivePlaybook[conversionDefensePlayKey]?.name || defensivePlayKey;
-                                    if (gameLog) gameLog.push(`🏈 **Offense:** ${convOffPlayName}`);
-                                    if (gameLog) gameLog.push(`🛡️ **Defense:** ${convDefPlayName}`);
-                                }
-
-                                const conversionResult = resolvePlay(offense, defense, conversionOffensePlayKey, conversionDefensePlayKey,
-                                    { gameLog: fastSim ? null : gameLog, weather, ballOn: conversionBallOn, ballHash: 'M', down: 1, yardsToGo: conversionYardsToGo },
-                                    options // <-- ADD THIS
-                                );
-
-                                if (!fastSim && conversionResult.visualizationFrames) allVisualizationFrames.push(...conversionResult.visualizationFrames);
-
-                                if (conversionResult.touchdown) {
-                                    if (!conversionResult.turnover) {
-                                        if (!fastSim) gameLog.push(`✅ ${points}-point conversion GOOD!`);
-                                        if (offense.id === homeTeam.id) homeScore += (6 + points); else awayScore += (6 + points);
-                                        // ✅ **FIX (OT):** Update scoreDiff
-                                        scoreDiff = offense.id === homeTeam.id ? homeScore - awayScore : awayScore - homeScore;
-                                    } else {
-                                        if (!fastSim) gameLog.push(`❌ Conversion FAILED... AND RETURNED! Game Over!`);
-                                        if (offense.id === homeTeam.id) homeScore += 6; else awayScore += 6;
-                                        if (defense.id === homeTeam.id) homeScore += 2; else awayScore += 2;
-                                        // ✅ **FIX (OT):** Update scoreDiff
-                                        scoreDiff = offense.id === homeTeam.id ? homeScore - awayScore : awayScore - homeScore;
-                                        isStillTied = false;
-                                    }
-                                } else {
-                                    if (!fastSim) gameLog.push(`❌ ${points}-point conversion FAILED!`);
-                                    if (offense.id === homeTeam.id) homeScore += 6; else awayScore += 6;
-                                    // ✅ **FIX (OT):** Update scoreDiff
-                                    scoreDiff = offense.id === homeTeam.id ? homeScore - awayScore : awayScore - homeScore;
-                                }
-                            }
                             driveActive = false;
-                        } else if (result.incomplete) {
+                            break;
+                        }
+
+                        // 2️⃣ Safety
+                        if (playResult.safety) {
+                            if (!fastSim) gameLog.push(`SAFETY! Game Over!`);
+                            if (defense.id === homeTeam.id) homeScore += 2;
+                            else awayScore += 2;
+                            isStillTied = false;
+                            driveActive = false;
+                            break;
+                        }
+
+                        // 3️⃣ Offensive TD → Conversion
+                        if (playResult.score === 'TD') {
+                            ballOn = 100;
+                            driveActive = false;
+
+                            const goesForTwo = Math.random() > 0.85;
+                            const points = goesForTwo ? 2 : 1;
+                            const conversionBallOn = goesForTwo ? 95 : 98;
+                            const conversionYardsToGo = 100 - conversionBallOn;
+
+                            if (!fastSim) gameLog.push(`🏈 --- ${points}-Point Conversion Attempt ---`);
+
+                            // Conversion play calls
+                            const conversionOffensePlayKey = determinePlayCall(
+                                offense, defense, 1, conversionYardsToGo, conversionBallOn,
+                                scoreDiff, fastSim ? null : gameLog, drivesRemainingInGame
+                            );
+
+                            defense.formations.defense = determineDefensiveFormation(
+                                defense, offense.formations.offense, 1, conversionYardsToGo
+                            );
+
+                            const conversionDefensePlayKey = determineDefensivePlayCall(
+                                defense, offense, 1, conversionYardsToGo, conversionBallOn,
+                                scoreDiff, fastSim ? null : gameLog, drivesRemainingInGame
+                            );
+
+                            if (!fastSim) {
+                                gameLog.push(`🏈 **Offense:** ${offensivePlaybook[conversionOffensePlayKey]?.name || conversionOffensePlayKey}`);
+                                gameLog.push(`🛡️ **Defense:** ${defensivePlaybook[conversionDefensePlayKey]?.name || conversionDefensePlayKey}`);
+                            }
+
+                            const conversionResult = resolvePlay(
+                                offense,
+                                defense,
+                                conversionOffensePlayKey,
+                                conversionDefensePlayKey,
+                                {
+                                    gameLog: fastSim ? null : gameLog,
+                                    weather,
+                                    ballOn: conversionBallOn,
+                                    ballHash: 'M',
+                                    down: 1,
+                                    yardsToGo: conversionYardsToGo
+                                },
+                                options
+                            );
+
+                            if (!fastSim && conversionResult.visualizationFrames) {
+                                allVisualizationFrames.push(...conversionResult.visualizationFrames);
+                            }
+
+                            const convPlayResult = conversionResult.playResult;
+                            const isTD = convPlayResult.score === 'TD';
+                            const isDefensiveScore = isTD && convPlayResult.possessionChange;
+
+                            if (isTD && !isDefensiveScore) {
+                                if (!fastSim) gameLog.push(`✅ ${points}-point conversion GOOD!`);
+                                if (offense.id === homeTeam.id) homeScore += (6 + points);
+                                else awayScore += (6 + points);
+
+                                isStillTied = false;
+                            } else if (isDefensiveScore) {
+                                if (!fastSim) gameLog.push(`❌ Conversion FAILED... AND RETURNED! Game Over!`);
+                                if (offense.id === homeTeam.id) homeScore += 6;
+                                else awayScore += 6;
+                                if (defense.id === homeTeam.id) homeScore += 2;
+                                else awayScore += 2;
+                                isStillTied = false;
+
+                            } else {
+                                if (!fastSim) gameLog.push(`❌ ${points}-point conversion FAILED!`);
+                                if (offense.id === homeTeam.id) homeScore += 6;
+                                else awayScore += 6;
+                            }
+
+                            scoreDiff = offense.id === homeTeam.id
+                                ? homeScore - awayScore
+                                : awayScore - homeScore;
+
+                            break;
+                        }
+
+                        // --- NON-TERMINAL ---
+                        if (playResult.outcome === 'incomplete') {
                             down++;
-                        } else { // Completed play
-                            yardsToGo -= result.yards;
+                        } else {
+                            yardsToGo -= playResult.yards;
                             if (yardsToGo <= 0) {
                                 down = 1;
-                                if (ballOn >= 90) {
-                                    yardsToGo = 100 - ballOn;
-                                } else {
-                                    yardsToGo = 10;
-                                }
-                                if (yardsToGo <= 0) {
-                                    yardsToGo = 1;
-
-                                }
-                                if (!fastSim) {
-                                    const newYardLineText = ballOn <= 50 ? `own ${ballOn}` : `opponent ${100 - ballOn}`;
-                                    if (gameLog) gameLog.push(`➡️ First down ${offense.name}! ${ballOn >= 90 ? `1st & Goal at the ${100 - ballOn}` : `1st & 10 at the ${newYardLineText}`}.`);
-                                }
+                                yardsToGo = ballOn >= 90 ? 100 - ballOn : 10;
+                                if (yardsToGo <= 0) yardsToGo = 1;
                             } else {
                                 down++;
                             }
                         }
-                        if (down > 4 && driveActive) {
+
+                        if (down > 4) {
                             if (!fastSim) gameLog.push(`✋ Turnover on downs! Drive ends.`);
                             driveActive = false;
                         }
+
                     } // --- End OT Play Loop ---
                 } // --- End OT `for` loop ---
 
