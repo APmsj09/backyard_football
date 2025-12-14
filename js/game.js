@@ -1347,7 +1347,7 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
 
             // --- A. Find Player ID from Resolved Depth ---
             const playerId = playState.resolvedDepth[side]?.[slot];
-            const player = team.roster.find(p => p.id === playerId);
+            const player = getRosterObjects(team).find(p => p.id === playerId);
 
             if (!player) return; // Skip empty slots
 
