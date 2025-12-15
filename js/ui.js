@@ -1,5 +1,5 @@
 import {
-    saveGameState, 
+    saveGameState,
     calculateOverall,
     getRelationshipLevel,
     getScoutedPlayerInfo,
@@ -63,11 +63,11 @@ let liveGameStats = { home: { yards: 0, td: 0, turnovers: 0, punts: 0, returns: 
 // Per-player live stat snapshots (id -> stats)
 let livePlayerStats = new Map();
 
-let livePlayContext = { 
-    type: 'run', 
-    passerId: null, 
-    receiverId: null, 
-    catchMade: false 
+let livePlayContext = {
+    type: 'run',
+    passerId: null,
+    receiverId: null,
+    catchMade: false
 };
 
 
@@ -101,10 +101,10 @@ function getUIRosterObjects(team) {
         if (!p && gs && gs.players) {
             p = gs.players.find(pl => pl.id === id);
         }
-        
+
         // C. Legacy Support: If roster contained objects instead of IDs
         if (!p && typeof id === 'object' && id.id) {
-            p = id; 
+            p = id;
         }
 
         return p;
@@ -962,8 +962,8 @@ function renderMyTeamTab(gameState) {
 
             // --- CAPTAIN LOGIC ---
             const isCaptain = gameState.playerTeam.captainId === p.id;
-            const captainBtn = isCaptain 
-                ? '<span class="text-amber-500 font-bold text-lg" title="Current Captain">★</span>' 
+            const captainBtn = isCaptain
+                ? '<span class="text-amber-500 font-bold text-lg" title="Current Captain">★</span>'
                 : `<button onclick="app.setCaptain('${p.id}')" class="text-gray-300 hover:text-amber-400 font-bold text-lg transition" title="Make Captain">☆</button>`;
 
             tableHtml += `<tr data-player-id="${p.id}" class="cursor-pointer hover:bg-amber-100">
@@ -1052,38 +1052,50 @@ function renderDepthChartTab(gameState) {
     renderPositionalOveralls(permanentRoster);
 
     // Pass specific current formation names from the fresh state
-    renderFormationDropdown('offense', Object.values(offenseFormations), gs.playerTeam.formations.offense);
-    renderFormationDropdown('defense', Object.values(defenseFormations), gs.playerTeam.formations.defense);
+    renderFormationDropdown(
+        'offense',
+        offenseFormations,
+        gs.playerTeam.formations.offense
+    );
+    renderFormationDropdown(
+        'defense',
+        defenseFormations,
+        gs.playerTeam.formations.defense
+    );
 
     renderDepthChartSide('offense', gs);
     renderDepthChartSide('defense', gs);
 }
 
 /** Populates the formation selection dropdown. */
-function renderFormationDropdown(side, formations, currentFormationName) {
-    const selectEl = elements[`${side}FormationSelect`];
-    if (!selectEl) { console.error(`Formation select element for "${side}" not found.`); return; }
+function renderFormationDropdown(side, formationMap, selectedKey) {
+    const select = document.getElementById(`${side}-formation-select`);
+    if (!select) return;
 
-    // Sort formations by name for consistency
-    const sortedFormations = Object.values(formations).sort((a, b) => a.name.localeCompare(b.name));
+    select.innerHTML = '';
 
-    selectEl.innerHTML = sortedFormations.map(f => {
-        let label = f.name;
+    Object.entries(formationMap).forEach(([key, formation]) => {
+        const option = document.createElement('option');
 
-        // SMART UI: Add Personnel Counts (e.g., "3 WR, 1 RB")
-        if (f.personnel) {
-            const parts = [];
-            if (f.personnel.RB > 0) parts.push(`${f.personnel.RB} RB`);
-            if (f.personnel.WR > 0) parts.push(`${f.personnel.WR} WR`);
-            if (f.personnel.TE > 0) parts.push(`${f.personnel.TE} TE`);
-            if (f.personnel.LB > 0) parts.push(`${f.personnel.LB} LB`);
-            if (f.personnel.DB > 0) parts.push(`${f.personnel.DB} DB`);
+        option.value = key;                 // ✅ KEY
+        option.textContent = formation.name; // 👀 NAME
 
-            if (parts.length > 0) label += ` (${parts.join(', ')})`;
+        if (key === selectedKey) {
+            option.selected = true;
         }
 
-        return `<option value="${f.name}" ${f.name === currentFormationName ? 'selected' : ''}>${label}</option>`;
-    }).join('');
+        select.appendChild(option);
+    });
+
+    select.onchange = (e) => {
+        const team = getGameState().playerTeam;
+
+        // 🔒 HARD GUARANTEE
+        team.formations[side] = e.target.value; // ALWAYS a key
+
+        rebuildDepthChartFromOrder(team);
+        renderDepthChartTab();
+    };
 }
 
 /** Renders the table showing overall ratings for each player at each position. */
@@ -1099,10 +1111,10 @@ function renderPositionalOveralls() {
         let pos = p.pos || estimateBestPosition(p);
         // Normalize for display
         if (['FB'].includes(pos)) pos = 'RB';
-        if (['TE', 'ATH', 'K', 'P'].includes(pos)) pos = 'WR'; 
-        if (['OT','OG','C'].includes(pos)) pos = 'OL';
-        if (['DE','DT','NT'].includes(pos)) pos = 'DL';
-        if (['CB','S','FS','SS'].includes(pos)) pos = 'DB';
+        if (['TE', 'ATH', 'K', 'P'].includes(pos)) pos = 'WR';
+        if (['OT', 'OG', 'C'].includes(pos)) pos = 'OL';
+        if (['DE', 'DT', 'NT'].includes(pos)) pos = 'DL';
+        if (['CB', 'S', 'FS', 'SS'].includes(pos)) pos = 'DB';
 
         if (!positions[pos]) positions[pos] = [];
         positions[pos].push(p);
@@ -1161,17 +1173,17 @@ function renderDepthChartSide(side, gameState) {
     }
 
     const { depthChart, formations } = gameState.playerTeam;
-    
+
     // 3. Get Roster Objects (using the helper that handles ID mapping)
     const roster = getUIRosterObjects(gameState.playerTeam);
 
     const currentChart = depthChart[side] || {};
     const formationName = formations[side];
-    
+
     // 4. 💡 SAFETY FIX: Formation Fallback
     // If the formation name from the save file doesn't exist in our data, fall back to a default.
     let formationData = (side === 'offense' ? offenseFormations[formationName] : defenseFormations[formationName]);
-    
+
     if (!formationData) {
         console.warn(`Formation '${formationName}' not found. Defaulting to base formation.`);
         formationData = side === 'offense' ? offenseFormations['Balanced'] : defenseFormations['3-1-3'];
@@ -1179,7 +1191,7 @@ function renderDepthChartSide(side, gameState) {
 
     // 5. Calculate Starters vs Bench
     // We filter Boolean to remove nulls (empty slots)
-    const playersStartingOnThisSide = new Set(Object.values(currentChart).filter(Boolean)); 
+    const playersStartingOnThisSide = new Set(Object.values(currentChart).filter(Boolean));
 
     // Filter from our full roster object list
     const benchedPlayers = roster.filter(p => p && !playersStartingOnThisSide.has(p.id));
@@ -1194,154 +1206,109 @@ function renderDepthChartSide(side, gameState) {
  * Renders the visual, on-field player slots and their assignment dropdowns.
  * UPDATED: Shows full roster, contextual overalls, and swap indicators.
  */
-function renderVisualFormationSlots(container, currentChart, formationData, benchedPlayers, allRoster, side) {
-    container.innerHTML = '';
-    container.classList.add('visual-field-container');
+function renderVisualFormationSlots(container, currentDepthChart, formationData, benchedPlayers, roster, side) {
+    container.innerHTML = ''; // Clear previous
 
-    if (!formationData || !formationData.slots || !formationData.coordinates) {
-        container.innerHTML = '<div class="flex h-full items-center justify-center text-white/70 italic">Select a formation to view alignment.</div>';
-        return;
-    }
+    // 1. Draw Line of Scrimmage (Blue Line)
+    const losMarker = document.createElement('div');
+    losMarker.className = 'los-marker';
+    // For Offense, LOS is near the top (driving up/forward from bottom? No, usually static view).
+    // Let's standardize: 
+    // Offense View: LOS is at top (20%), Backfield is below.
+    // Defense View: LOS is at bottom (80%), Secondary is above.
+    const losPosition = side === 'offense' ? '20%' : '80%';
+    losMarker.style.top = losPosition;
+    container.appendChild(losMarker);
 
-    // Add Line of Scrimmage
-    const LOS_PERCENT = side === 'offense' ? 60 : 40;
-    const losEl = document.createElement('div');
-    losEl.className = 'los-marker';
-    losEl.style.top = `${LOS_PERCENT}%`;
-    container.appendChild(losEl);
+    // 2. Iterate through defined slots in the formation
+    formationData.slots.forEach(slotId => {
+        // Get coordinates from the data map
+        const coords = formationData.coordinates[slotId];
+        if (!coords) return;
 
-    // --- 1. INCREASE SPACING ---
-    // Was 2.5, changed to 4.2 to spread players out horizontally
-    const X_SPACING_MULTIPLIER = 4.2;
-    const Y_SPACING_MULTIPLIER = 4.5;
-    const PADDING_OFFSET = 7;
+        const [yardsX, yardsY] = coords; // e.g. [0, -5]
 
-    formationData.slots.forEach(slot => {
-        const playerId = currentChart[slot];
-        const currentPlayer = allRoster.find(p => p && p.id === playerId);
-        
-        const relCoords = formationData.coordinates[slot] || [0, 0];
-        const basePosition = slot.replace(/\d/g, '');
+        // 3. Calculate CSS Position
+        // Horizontal: 0 is center. Field width is ~53 yards. 
+        // 50% is center. 1 yard is approx 1.8%.
+        const leftPercent = 50 + (yardsX * 1.8);
 
-        // 2. Build Dropdown Options (FULL ROSTER)
-        // Map every player to an option object with their OVR for THIS specific position
-        const rosterOptions = allRoster
-            .filter(p => p) 
-            .map(p => {
-                const assignedSlot = Object.keys(currentChart).find(key => currentChart[key] === p.id);
-                const isAssignedHere = assignedSlot === slot;
-                const isAssignedElsewhere = assignedSlot && !isAssignedHere;
+        // Vertical: Depends on side
+        let topPercent;
+        const Y_SCALE = 3.5; // Percent per yard
 
-                return {
-                    id: p.id,
-                    name: p.name,
-                    ovr: calculateOverall(p, basePosition),
-                    assignedSlot: assignedSlot,
-                    isAssignedHere: isAssignedHere,
-                    isAssignedElsewhere: isAssignedElsewhere
-                };
-            });
-
-        // Sort by OVR descending (Best fit for this slot at the top)
-        rosterOptions.sort((a, b) => b.ovr - a.ovr);
-
-        // Generate HTML for options
-        let optionsHtml = '<option value="null">-- Empty --</option>';
-
-        rosterOptions.forEach(opt => {
-            let label = `${opt.name} - ${opt.ovr}`;
-            let styleClass = "";
-            let suffix = "";
-
-            if (opt.isAssignedHere) {
-                suffix = " (Current)";
-                styleClass = "font-bold bg-gray-200 text-black";
-            } else if (opt.isAssignedElsewhere) {
-                // SWAP SCENARIO -> Change this to "Also playing..."
-                suffix = ` (Also at ${opt.assignedSlot})`;
-                styleClass = "text-blue-700 font-semibold bg-blue-50"; // Changed color to blue/info
-            } else {
-                // BENCH SCENARIO
-                suffix = " (Bench)";
-                styleClass = "text-green-600 bg-white";
-            }
-
-            // Add the option
-            optionsHtml += `<option value="${opt.id}" ${opt.isAssignedHere ? 'selected' : ''} class="${styleClass}">
-                ${label}${suffix}
-            </option>`;
-        });
-
-        // --- Coordinate Mapping ---
-        const x_percent = 50 + (relCoords[0] * X_SPACING_MULTIPLIER);
-        let y_percent;
         if (side === 'offense') {
-            y_percent = LOS_PERCENT + (relCoords[1] * Y_SPACING_MULTIPLIER);
+            // Offense: LOS at 20%. Negative Y (QB @ -5) means "back" (down screen).
+            // Formula: LOS + (DistanceBack * Scale)
+            // Since QB is -5, we want 20 + 17.5 = 37.5% (Lower)
+            topPercent = 20 + (Math.abs(yardsY) * Y_SCALE);
+
+            // If receiver is positive (0.5), they are slightly above line? 
+            // Usually standard depth charts show offense going UP or just static.
+            // Let's keep it simple: Negative is down-screen. Positive is up-screen.
+            topPercent = 20 - (yardsY * Y_SCALE);
         } else {
-            y_percent = LOS_PERCENT - (relCoords[1] * Y_SPACING_MULTIPLIER);
+            // Defense: LOS at 80%. Positive Y (Safety @ +12) means "deep" (up screen).
+            topPercent = 80 - (yardsY * Y_SCALE);
         }
 
-        const clampedX = Math.max(PADDING_OFFSET, Math.min(100 - PADDING_OFFSET, x_percent));
-        const clampedY = Math.max(PADDING_OFFSET, Math.min(100 - PADDING_OFFSET, y_percent));
-
+        // 4. Create the Visual Slot
         const slotEl = document.createElement('div');
         slotEl.className = 'player-slot-visual';
-        slotEl.dataset.positionSlot = slot;
-        slotEl.dataset.side = side;
-        slotEl.style.left = `${clampedX}%`;
-        slotEl.style.top = `${clampedY}%`;
+        slotEl.style.left = `${leftPercent}%`;
+        slotEl.style.top = `${topPercent}%`;
 
-        // --- 2. CENTER THE ELEMENT ---
-        // This ensures the box is centered on the coordinate, preventing left-side overlap
-        slotEl.style.transform = 'translate(-50%, -50%)';
-        // Optional: Ensure high z-index on hover so you can see overlapped cards
-        slotEl.style.zIndex = '10';
+        // 5. Determine who is in this slot
+        const playerId = currentDepthChart[slotId];
+        const player = roster.find(p => p.id === playerId);
 
-        if (currentPlayer) {
-            slotEl.draggable = true;
-            slotEl.dataset.playerId = currentPlayer.id;
-        }
+        // Color coding based on position
+        let badgeColor = 'bg-gray-500';
+        if (slotId.startsWith('QB')) badgeColor = 'bg-amber-600';
+        else if (slotId.startsWith('RB') || slotId.startsWith('WR')) badgeColor = 'bg-blue-600';
+        else if (slotId.startsWith('DL') || slotId.startsWith('LB')) badgeColor = 'bg-red-500';
+        else if (slotId.startsWith('DB')) badgeColor = 'bg-purple-600';
+        else if (slotId.startsWith('OL')) badgeColor = 'bg-emerald-600';
 
-        // Badge Logic
-        let overallHtml = '';
-        if (currentPlayer) {
-            const overall = calculateOverall(currentPlayer, basePosition);
-            let colorClass = 'bg-gray-500';
-            if (overall >= 90) colorClass = 'bg-green-600';
-            else if (overall >= 80) colorClass = 'bg-blue-600';
-            else if (overall >= 70) colorClass = 'bg-amber-600';
-            else if (overall >= 60) colorClass = 'bg-red-600';
-
-            overallHtml = `<div class="slot-overall ${colorClass}">${overall}</div>`;
-        } else {
-            overallHtml = `<div class="slot-overall bg-gray-500">--</div>`;
-        }
+        // 6. Build the Inner HTML
+        const overall = player ? calculateOverall(player) : '-';
 
         slotEl.innerHTML = `
-            <span class="slot-label">${slot}</span>
-            ${overallHtml}
-            <select class="slot-select" data-slot="${slot}" data-side="${side}">
-                ${optionsHtml}
+            <div class="slot-overall ${badgeColor}">${overall}</div>
+            <div class="slot-label">${slotId}</div>
+            <select class="slot-select" data-slot-id="${slotId}" data-side="${side}">
+                <option value="">Empty</option>
+                ${player ? `<option value="${player.id}" selected>${player.firstName.charAt(0)}. ${player.lastName}</option>` : ''}
+                <option disabled>--- Bench ---</option>
+                ${benchedPlayers.map(p => `
+                    <option value="${p.id}">
+                        (${calculateOverall(p)}) ${p.firstName.charAt(0)}. ${p.lastName} - ${p.position}
+                    </option>
+                `).join('')}
             </select>
         `;
 
+        // 7. Add Event Listener for changing players
         const select = slotEl.querySelector('select');
         select.addEventListener('change', (e) => {
             const newPlayerId = e.target.value;
-
-            // Dispatch event to Main.js to handle the data update (and the swap logic)
-            const event = new CustomEvent('depth-chart-changed', {
-                detail: {
-                    playerId: newPlayerId === 'null' ? null : newPlayerId,
-                    slot: slot,
-                    side: side
-                }
-            });
-            document.dispatchEvent(event);
+            handleDepthChartChange(side, slotId, newPlayerId);
         });
 
-        slotEl.onmouseenter = () => { slotEl.style.zIndex = '50'; };
-        slotEl.onmouseleave = () => { slotEl.style.zIndex = '10'; };
+        // 8. Add Drag-Over Visuals (Optional/Advanced)
+        slotEl.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            slotEl.classList.add('drag-over');
+        });
+        slotEl.addEventListener('dragleave', () => slotEl.classList.remove('drag-over'));
+        slotEl.addEventListener('drop', (e) => {
+            e.preventDefault();
+            slotEl.classList.remove('drag-over');
+            const draggedPlayerId = e.dataTransfer.getData('text/plain');
+            if (draggedPlayerId) {
+                handleDepthChartChange(side, slotId, draggedPlayerId);
+            }
+        });
 
         container.appendChild(slotEl);
     });
@@ -1850,25 +1817,25 @@ export function setupDragAndDrop(onDrop) {
 
     // Helper to find the draggable source
     const getDraggable = (target) => {
-        return target.closest('.bench-player-row') || 
-               target.closest('.player-slot-visual[draggable="true"]') ||
-               target.closest('.roster-row-item'); // <--- Added this
+        return target.closest('.bench-player-row') ||
+            target.closest('.player-slot-visual[draggable="true"]') ||
+            target.closest('.roster-row-item'); // <--- Added this
     };
 
     container.addEventListener('dragstart', e => {
         const target = getDraggable(e.target);
-        
+
         if (target) {
             draggedEl = target;
             dragPlayerId = target.dataset.playerId;
             // If dragging from Bench/Field, we know the side. 
             // If from Roster list, side is undefined (neutral).
-            dragSide = target.dataset.side || null; 
+            dragSide = target.dataset.side || null;
 
             if (dragPlayerId) {
                 e.dataTransfer.effectAllowed = 'copyMove'; // Allow copy behavior
                 e.dataTransfer.setData('text/plain', dragPlayerId);
-                
+
                 // Visual feedback
                 setTimeout(() => target.classList.add('dragging'), 0);
             } else {
@@ -1879,8 +1846,8 @@ export function setupDragAndDrop(onDrop) {
 
     container.addEventListener('dragend', e => {
         if (draggedEl) draggedEl.classList.remove('dragging');
-        draggedEl = null; 
-        dragPlayerId = null; 
+        draggedEl = null;
+        dragPlayerId = null;
         dragSide = null;
         document.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over'));
     });
@@ -1888,14 +1855,14 @@ export function setupDragAndDrop(onDrop) {
     container.addEventListener('dragover', e => {
         // We only care if we are hovering over a Visual Slot
         const targetSlot = e.target.closest('.player-slot-visual');
-        
+
         if (targetSlot) {
             e.preventDefault(); // Allow dropping
             e.dataTransfer.dropEffect = 'move';
 
             // Visual feedback
             document.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over'));
-            
+
             // STRICT CHECK:
             // 1. If source has a side (e.g. Offense Bench), target must match.
             // 2. If source is neutral (Full Roster), allow it anywhere.
@@ -1917,7 +1884,7 @@ export function setupDragAndDrop(onDrop) {
         document.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over'));
 
         const dropSlot = e.target.closest('.player-slot-visual');
-        
+
         if (dropSlot && dropSlot.dataset.positionSlot && dragPlayerId) {
             const dropSide = dropSlot.dataset.side;
 
@@ -1928,10 +1895,10 @@ export function setupDragAndDrop(onDrop) {
                 console.warn(`Cannot move player from ${dragSide} to ${dropSide}`);
             }
         }
-        
+
         // Cleanup
-        draggedEl = null; 
-        dragPlayerId = null; 
+        draggedEl = null;
+        dragPlayerId = null;
         dragSide = null;
     });
 }
@@ -2554,7 +2521,7 @@ function updateStatsFromLogEntry(entry) {
     // Resets context when a new play starts in the logs
     if (entry.includes('---') || entry.includes('Offense:')) {
         livePlayContext = { type: 'run', passerId: null, receiverId: null, catchMade: false };
-        
+
         if (entry.includes('Offense:')) {
             // Simple keyword detection for pass plays
             const lower = entry.toLowerCase();
@@ -3206,8 +3173,8 @@ function runLiveGameTick() {
             // Update lightweight live stats from this entry
             try {
                 updateStatsFromLogEntry(playLogEntry);
-            } catch (err) { 
-                console.error('Error updating live stats from log:', err); 
+            } catch (err) {
+                console.error('Error updating live stats from log:', err);
             }
             // --- 4. Append to Ticker ---
             p.className = styleClass;
@@ -3447,30 +3414,30 @@ function renderDepthOrderPane(gameState) {
 
     roster.forEach(p => {
         let pos = p.pos || estimateBestPosition(p);
-        
+
         // --- NORMALIZATION: Force everything into the 7 Buckets ---
         if (pos === 'FB') pos = 'RB';
         if (['TE', 'ATH', 'K', 'P'].includes(pos)) pos = 'WR'; // Merge misc into WR
         if (['OT', 'OG', 'C'].includes(pos)) pos = 'OL';
         if (['DE', 'DT', 'NT'].includes(pos)) pos = 'DL';
         if (['CB', 'S', 'FS', 'SS'].includes(pos)) pos = 'DB';
-        
+
         // Safety check: if somehow still unknown, put in WR
-        if (!pool[pos]) pos = 'WR'; 
+        if (!pool[pos]) pos = 'WR';
 
         pool[pos].push(p);
     });
 
     // 2. Build Sorted Lists based on Saved Order + Overalls
     const sortedGroups = {};
-    const displayOrder = ['QB', 'RB', 'WR', 'OL', 'DL', 'LB', 'DB']; 
+    const displayOrder = ['QB', 'RB', 'WR', 'OL', 'DL', 'LB', 'DB'];
 
     displayOrder.forEach(pos => {
         const savedIds = savedOrder[pos] || [];
         const playersInGroup = pool[pos] || [];
-        
+
         const ordered = [];
-        
+
         // A. Add players who are explicitly ranked in savedOrder
         savedIds.forEach(id => {
             const p = playersInGroup.find(pl => pl.id === id);
@@ -3501,25 +3468,25 @@ function renderDepthOrderPane(gameState) {
     displayOrder.forEach((groupKey, index) => {
         const isHidden = index !== 0 ? 'hidden' : '';
         const players = sortedGroups[groupKey] || [];
-        
+
         listsHtml += `
             <div id="group-${groupKey}" class="depth-group-container ${isHidden}">
                 <div class="depth-sortable-list flex-grow p-2 space-y-1 min-h-[200px]" data-group="${groupKey}">
                     ${players.map((p, i) => {
-                        const ovr = calculateOverall(p, groupKey);
-                        let isStarterZone = false;
-                        
-                        // Backyard 7v7 Logic
-                        if (groupKey === 'QB' && i === 0) isStarterZone = true; 
-                        else if (groupKey === 'RB' && i === 0) isStarterZone = true; 
-                        else if (groupKey === 'WR' && i <= 2) isStarterZone = true; 
-                        else if (groupKey === 'OL' && i === 0) isStarterZone = true; 
-                        else if (['DL','LB','DB'].includes(groupKey) && i === 0) isStarterZone = true; // 1 of each base
+            const ovr = calculateOverall(p, groupKey);
+            let isStarterZone = false;
 
-                        const rankStyle = isStarterZone ? 'border-l-4 border-green-500' : 'border-l-4 border-gray-300';
-                        const badge = isStarterZone ? '<span class="ml-2 text-[10px] bg-green-100 text-green-800 px-1 rounded font-bold">START</span>' : '';
+            // Backyard 7v7 Logic
+            if (groupKey === 'QB' && i === 0) isStarterZone = true;
+            else if (groupKey === 'RB' && i === 0) isStarterZone = true;
+            else if (groupKey === 'WR' && i <= 2) isStarterZone = true;
+            else if (groupKey === 'OL' && i === 0) isStarterZone = true;
+            else if (['DL', 'LB', 'DB'].includes(groupKey) && i === 0) isStarterZone = true; // 1 of each base
 
-                        return `
+            const rankStyle = isStarterZone ? 'border-l-4 border-green-500' : 'border-l-4 border-gray-300';
+            const badge = isStarterZone ? '<span class="ml-2 text-[10px] bg-green-100 text-green-800 px-1 rounded font-bold">START</span>' : '';
+
+            return `
                         <div class="depth-order-item bg-white hover:bg-amber-50 p-2 rounded border border-gray-100 shadow-sm cursor-move flex justify-between items-center ${rankStyle}"
                              draggable="true"
                              data-player-id="${p.id}">
@@ -3534,7 +3501,7 @@ function renderDepthOrderPane(gameState) {
                                 <span class="text-xs font-bold ${ovr >= 80 ? 'text-green-600' : 'text-gray-500'}">${ovr}</span>
                             </div>
                         </div>`;
-                    }).join('')}
+        }).join('')}
                 </div>
             </div>`;
     });
@@ -3556,18 +3523,18 @@ function renderDepthOrderPane(gameState) {
                     </thead>
                     <tbody class="divide-y">
                         ${roster.map(p => {
-                            let pos = p.pos || estimateBestPosition(p);
-                            if (pos === 'FB') pos = 'RB';
-                            if (['TE','ATH','K','P'].includes(pos)) pos = 'WR';
-                            const ovr = calculateOverall(p, pos);
-                            return `
+        let pos = p.pos || estimateBestPosition(p);
+        if (pos === 'FB') pos = 'RB';
+        if (['TE', 'ATH', 'K', 'P'].includes(pos)) pos = 'WR';
+        const ovr = calculateOverall(p, pos);
+        return `
                             <tr class="roster-row-item cursor-move hover:bg-blue-50" draggable="true" 
                                 data-player-id="${p.id}" data-player-name="${p.name}" data-player-ovr="${ovr}">
                                 <td class="py-1 px-3 font-medium">${p.name}</td>
                                 <td class="py-1 px-3 text-center">${pos}</td>
                                 <td class="py-1 px-3 text-center font-bold">${ovr}</td>
                             </tr>`;
-                        }).join('')}
+    }).join('')}
                     </tbody>
                 </table>
             </div>
@@ -3575,7 +3542,7 @@ function renderDepthOrderPane(gameState) {
     `;
 
     pane.innerHTML = tabsHtml + listsHtml + rosterHtml;
-    
+
     setupDepthTabs();
     setupDepthOrderDragEvents();
 }
@@ -3632,7 +3599,7 @@ function setupDepthOrderDragEvents() {
             e.dataTransfer.setData('text/plain', draggable.dataset.playerId);
             e.dataTransfer.setData('player-name', draggable.dataset.playerName);
             e.dataTransfer.setData('player-ovr', draggable.dataset.playerOvr);
-            
+
             // Mark source
             if (draggable.classList.contains('roster-row-item')) {
                 draggable.dataset.source = 'roster';
@@ -3654,7 +3621,7 @@ function setupDepthOrderDragEvents() {
             draggable.classList.remove('dragging');
             draggable.classList.remove('opacity-50');
             delete draggable.dataset.source;
-            
+
             // Trigger save/refresh
             setTimeout(() => {
                 applyDepthOrderToChart();
@@ -3666,16 +3633,16 @@ function setupDepthOrderDragEvents() {
     containers.forEach(container => {
         container.addEventListener('dragover', e => {
             e.preventDefault(); // Necessary to allow dropping
-            
+
             const draggable = document.querySelector('.dragging');
             if (!draggable) return;
 
             // Logic A: Dragging from Full Roster Table (Copy behavior)
             if (draggable.classList.contains('roster-row-item')) {
-                e.dataTransfer.dropEffect = 'copy'; 
+                e.dataTransfer.dropEffect = 'copy';
                 // We do NOT move the DOM element here because we can't put a <tr> inside a <div>.
                 // We just allow the drop.
-                return; 
+                return;
             }
 
             // Logic B: Sorting within the lists (Move behavior)
@@ -3693,10 +3660,10 @@ function setupDepthOrderDragEvents() {
 
         container.addEventListener('drop', e => {
             e.preventDefault();
-            
+
             // If we dropped a Roster Item, we need to MANUALLY create the new card
             const source = document.querySelector('.dragging')?.dataset.source;
-            
+
             if (source === 'roster') {
                 const playerId = e.dataTransfer.getData('text/plain');
                 const name = e.dataTransfer.getData('player-name');
@@ -3713,7 +3680,7 @@ function setupDepthOrderDragEvents() {
                 newItem.dataset.playerId = playerId;
                 newItem.dataset.playerName = name;
                 newItem.dataset.playerOvr = ovr;
-                
+
                 newItem.innerHTML = `
                     <div class="flex items-center gap-3">
                         <span class="rank-number font-bold text-gray-400 w-4 text-center">-</span>
@@ -3743,10 +3710,10 @@ function setupDepthOrderDragEvents() {
                     newItem.classList.remove('opacity-50');
                     setTimeout(() => { applyDepthOrderToChart(); containers.forEach(c => updateRankNumbers(c)); }, 50);
                 });
-                
+
                 // 5. Trigger update immediately
                 setTimeout(() => {
-                    applyDepthOrderToChart(); 
+                    applyDepthOrderToChart();
                     containers.forEach(c => updateRankNumbers(c));
                 }, 50);
             }
@@ -3834,10 +3801,10 @@ export function applyDepthOrderToChart() {
     console.log("Saving Definitive Depth Order...");
     const gs = getGameState();
     if (!gs || !gs.playerTeam) return;
-    
+
     // Initialize if missing
     if (!gs.playerTeam.depthOrder || Array.isArray(gs.playerTeam.depthOrder)) {
-        gs.playerTeam.depthOrder = {}; 
+        gs.playerTeam.depthOrder = {};
     }
 
     const lists = document.querySelectorAll('.depth-sortable-list');
@@ -3849,7 +3816,7 @@ export function applyDepthOrderToChart() {
         const ids = [...list.querySelectorAll('.depth-order-item')]
             .map(el => el.dataset.playerId)
             .filter(id => id); // Filter out empty IDs
-            
+
         gs.playerTeam.depthOrder[groupKey] = ids;
     });
 
@@ -3858,7 +3825,7 @@ export function applyDepthOrderToChart() {
     rebuildDepthChartFromOrder(gs.playerTeam);
 
     // 3. Persist
-    saveGameState(); 
+    saveGameState();
 
     // 4. Refresh UI
     document.dispatchEvent(new CustomEvent('refresh-ui'));

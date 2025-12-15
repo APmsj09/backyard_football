@@ -1,3 +1,5 @@
+/* js/data.js */
+
 import { getRandom, getRandomInt } from './utils.js';
 
 // --- Relationship Levels ---
@@ -9,7 +11,7 @@ export const relationshipLevels = {
     BEST_FRIEND: { level: 4, name: 'Best Friend', callChance: 0.95, scoutAccuracy: 1.0, color: 'text-amber-500 font-bold' }
 };
 
-// --- Name Data (Shortened for brevity, keep your full lists if you prefer) ---
+// --- Name Data ---
 export const firstNames = [
     "Alex", "Ben", "Casey", "Dakota", "Eli", "Frankie", "Gabby", "Hayden", "Izzy", "Jordan",
     "Kai", "Leo", "Morgan", "Nico", "Olive", "Pat", "Quinn", "Riley", "Sam", "Taylor", "Vic",
@@ -26,6 +28,7 @@ export const firstNames = [
     "Leigh", "Merle", "Robin", "Stacy", "Tony", "Claude", "Daryl", "Jaden", "Jan", "Jimmie", "Johnny",
     "Ray", "Rene", "Stevie", "Willie", "Frankie", "Jessie"
 ];
+
 export const lastNames = [
     "Smith", "Jones", "Williams", "Brown", "Davis", "Miller", "Wilson", "Moore", "Taylor",
     "Anderson", "Thomas", "Jackson", "White", "Harris", "Martin", "Thompson", "Garcia",
@@ -43,6 +46,7 @@ export const lastNames = [
     "Tucker", "Porter", "Hunter", "Hicks", "Crawford", "Henry", "Boyd", "Mason", "Morales", "Kennedy", "Warren",
     "Dixon", "Ramos", "Reyes", "Burns", "Gordon", "Shaw"
 ];
+
 export const nicknames = [
     "'The Jet'", "'Rocket'", "'Sticks'", "'Wheels'", "'Flash'", "'Smiley'", "'Scout'", "'Ace'",
     "'Blaze'", "'Champ'", "'Dash'", "'Giggles'", "'Sonic'", "'Tiny'", "'Biggie'", "'Ghost'",
@@ -59,11 +63,13 @@ export const nicknames = [
     "'Volt'", "'Wolf'", "'Zapper'", "'Bandit'", "'Crusher'", "'Demon'", "'Fireball'", "'Grinder'",
     "'Hound'", "'Iceman'", "'Jackal'", "'Lightning'", "'Mad Dog'"
 ];
+
 export const teamNames = [
     "Comets", "Jets", "Rockets", "Sharks", "Tigers", "Lions", "Bears", "Eagles",
     "Hornets", "Bulldogs", "Panthers", "Giants", "Wolves", "Vipers", "Pythons", "Cobras",
     "Scorpions", "Spartans", "Cyclones", "Gladiators", "Raptors", "Hawks", "Falcons", "Rebels"
 ];
+
 export const positions = ["QB", "RB", "WR", "OL", "DL", "LB", "DB"];
 export const divisionNames = ["North", "South"];
 
@@ -259,6 +265,7 @@ export const offenseFormations = {
         }
     }
 };
+
 // --- OFFENSIVE PLAYBOOK ---
 export const offensivePlaybook = {
     // ===================================

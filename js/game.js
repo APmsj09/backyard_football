@@ -101,6 +101,16 @@ function ensureSet(val) {
     if (Array.isArray(val)) return new Set(val);
     return new Set();
 }
+function normalizeFormationKey(formations, storedValue, fallbackKey) {
+    if (formations[storedValue]) return storedValue;
+
+    const match = Object.entries(formations)
+        .find(([_, f]) => f.name === storedValue);
+
+    if (match) return match[0];
+
+    return fallbackKey;
+}
 
 /**
  * REBUILDS the Depth Chart slots (QB1, WR1, etc.) strictly based on the
@@ -157,8 +167,15 @@ export function rebuildDepthChartFromOrder(team) {
     };
 
     // 4. Fill Offense
-    const offFormKey = team.formations.offense;
-    const offSlots = offenseFormations[offFormKey]?.slots || [];
+    const offFormKey = normalizeFormationKey(
+        offenseFormations,
+        team.formations.offense,
+        'Balanced' // your offensive base
+    );
+
+    team.formations.offense = offFormKey; // 🔒 fix state permanently
+
+    const offSlots = offenseFormations[offFormKey].slots;
 
     offSlots.forEach(slot => {
         let posKey = slot.replace(/\d+/g, '');
@@ -179,9 +196,15 @@ export function rebuildDepthChartFromOrder(team) {
     });
 
     // 5. Fill Defense
-    const defFormKey = team.formations.defense;
-    const defSlots = defenseFormations[defFormKey]?.slots || [];
+    const defFormKey = normalizeFormationKey(
+        defenseFormations,
+        team.formations.defense,
+        '3-1-3' // your defensive base
+    );
 
+    team.formations.defense = defFormKey; // 🔒 fix state permanently
+
+    const defSlots = defenseFormations[defFormKey].slots;
     defSlots.forEach(slot => {
         let posKey = slot.replace(/\d+/g, '');
 
@@ -5761,7 +5784,7 @@ function simulateGame(homeTeam, awayTeam, options = {}) {
                 let drivesRemainingInGame;
                 let offensivePlayKey = ''; // Default to empty string to fix diagnosePlay crash
                 let defensivePlayKey = ''; // Default to empty string
-                let playResult; 
+                let playResult;
 
                 if (shouldPunt) {
                     offense.formations.offense = 'Punt';
@@ -5829,13 +5852,13 @@ function simulateGame(homeTeam, awayTeam, options = {}) {
                     drivesRemainingInGame = (currentHalf === 1 ? totalDrivesPerHalf : 0) + drivesRemainingInHalf;
 
                     const offensivePlayKey_initial = determinePlayCall(offense, defense, down, yardsToGo, ballOn, scoreDiff, fastSim ? null : gameLog, drivesRemainingInGame);
-                    
+
                     const offenseFormationName = offense.formations.offense;
                     const defensiveFormationName = determineDefensiveFormation(defense, offenseFormationName, down, yardsToGo);
                     defense.formations.defense = defensiveFormationName;
-                    
+
                     defensivePlayKey = determineDefensivePlayCall(defense, offense, down, yardsToGo, ballOn, scoreDiff, fastSim ? null : gameLog, drivesRemainingInGame);
-                    
+
                     const audibleResult = aiCheckAudible(offense, offensivePlayKey_initial, defense, defensivePlayKey, fastSim ? null : gameLog);
                     offensivePlayKey = audibleResult.playKey;
 
@@ -5894,13 +5917,13 @@ function simulateGame(homeTeam, awayTeam, options = {}) {
                         if (!fastSim) gameLog.push(`🏈 --- ${points}-Point Conversion Attempt ---`);
 
                         offense.formations.offense = offense.coach.preferredOffense || 'Balanced';
-                        
+
                         // Variables reused for conversion
                         const conversionOffensePlayKey = determinePlayCall(offense, defense, 1, conversionYardsToGo, conversionBallOn, scoreDiff, fastSim ? null : gameLog, drivesRemainingInGame);
-                        
+
                         const conversionDefenseFormation = determineDefensiveFormation(defense, offense.formations.offense, 1, conversionYardsToGo);
                         defense.formations.defense = conversionDefenseFormation;
-                        
+
                         const conversionDefensePlayKey = determineDefensivePlayCall(defense, offense, 1, conversionYardsToGo, conversionBallOn, scoreDiff, fastSim ? null : gameLog, drivesRemainingInGame);
 
                         const conversionResult = resolvePlay(offense, defense, conversionOffensePlayKey, conversionDefensePlayKey,
