@@ -1096,14 +1096,20 @@ function renderPositionalOveralls() {
     const roster = getUIRosterObjects(gameState.playerTeam);
 
     for (const p of roster) {
-        // FIX: Use estimated position if p.pos is missing
-        const pos = p.pos || estimateBestPosition(p);
+        let pos = p.pos || estimateBestPosition(p);
+        // Normalize for display
+        if (['FB'].includes(pos)) pos = 'RB';
+        if (['TE', 'ATH', 'K', 'P'].includes(pos)) pos = 'WR'; 
+        if (['OT','OG','C'].includes(pos)) pos = 'OL';
+        if (['DE','DT','NT'].includes(pos)) pos = 'DL';
+        if (['CB','S','FS','SS'].includes(pos)) pos = 'DB';
+
         if (!positions[pos]) positions[pos] = [];
         positions[pos].push(p);
     }
 
-    // Sort position groups alphabetically or by standard order
-    const order = ['QB', 'RB', 'WR', 'OL', 'DL', 'LB', 'DB', 'K', 'P'];
+    // Strict 7v7 Order
+    const order = ['QB', 'RB', 'WR', 'OL', 'DL', 'LB', 'DB'];
     const sortedKeys = Object.keys(positions).sort((a, b) => {
         return order.indexOf(a) - order.indexOf(b);
     });
@@ -3416,120 +3422,144 @@ function renderDepthOrderPane(gameState) {
     const roster = getUIRosterObjects(gameState.playerTeam);
     const savedOrder = gameState.playerTeam.depthOrder || {};
 
-    // 1. Group all roster players by position
+    // 1. Group players (Strictly 7 Buckets)
     const pool = {
-        'QB': [], 'RB': [], 'WR': [], 'TE': [], 'OL': [],
-        'DL': [], 'LB': [], 'DB': [], 'K': [], 'P': []
+        'QB': [], 'RB': [], 'WR': [], 'OL': [],
+        'DL': [], 'LB': [], 'DB': []
     };
 
-    // Helper to add player to pool
     roster.forEach(p => {
         let pos = p.pos || estimateBestPosition(p);
         
-        // 🛑 FIX: Normalize Positions to match your Depth Order Tabs
-        if (['FB'].includes(pos)) pos = 'RB';
+        // --- NORMALIZATION: Force everything into the 7 Buckets ---
+        if (pos === 'FB') pos = 'RB';
+        if (['TE', 'ATH', 'K', 'P'].includes(pos)) pos = 'WR'; // Merge misc into WR
         if (['OT', 'OG', 'C'].includes(pos)) pos = 'OL';
         if (['DE', 'DT', 'NT'].includes(pos)) pos = 'DL';
         if (['CB', 'S', 'FS', 'SS'].includes(pos)) pos = 'DB';
-        if (pos === 'TE') pos = 'WR'; // Or keep TE separate if you have a tab for it
+        
+        // Safety check: if somehow still unknown, put in WR
+        if (!pool[pos]) pos = 'WR'; 
 
-        if (!pool[pos]) pool[pos] = [];
         pool[pos].push(p);
     });
 
-    // 2. Build the "Sorted" lists based on savedOrder
+    // 2. Build Sorted Lists based on Saved Order + Overalls
     const sortedGroups = {};
-    const displayOrder = ['QB', 'RB', 'WR', 'TE', 'OL', 'DL', 'LB', 'DB', 'K', 'P'];
+    const displayOrder = ['QB', 'RB', 'WR', 'OL', 'DL', 'LB', 'DB']; 
 
     displayOrder.forEach(pos => {
         const savedIds = savedOrder[pos] || [];
         const playersInGroup = pool[pos] || [];
         
-        // A. Add players in the saved order
         const ordered = [];
+        
+        // A. Add players who are explicitly ranked in savedOrder
         savedIds.forEach(id => {
             const p = playersInGroup.find(pl => pl.id === id);
             if (p) {
                 ordered.push(p);
-                // Remove from pool so we don't duplicate
                 const idx = playersInGroup.indexOf(p);
                 if (idx > -1) playersInGroup.splice(idx, 1);
             }
         });
 
-        // B. Append any new/remaining players (sorted by Overall)
+        // B. Add any remaining players (sorted by Overall)
         playersInGroup.sort((a, b) => calculateOverall(b, pos) - calculateOverall(a, pos));
         ordered.push(...playersInGroup);
 
         sortedGroups[pos] = ordered;
     });
 
-    // 3. Render HTML
-    let html = `<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">`;
-
-    displayOrder.forEach(pos => {
-        const players = sortedGroups[pos];
-        const minDepth = 6; // Requirement: At least 6 slots visible (even if empty)
-        
-        html += `
-            <div class="depth-group-card bg-white rounded-lg shadow border border-gray-200 overflow-hidden flex flex-col h-full">
-                <div class="bg-gray-100 px-3 py-2 border-b border-gray-200 flex justify-between items-center">
-                    <h4 class="font-bold text-gray-700">${pos} Depth</h4>
-                    <span class="text-xs bg-gray-200 px-2 py-1 rounded text-gray-600">${players.length} Players</span>
-                </div>
-                
-                <div class="depth-sortable-list flex-grow p-2 space-y-1 min-h-[200px]" data-group="${pos}">
-        `;
-
-        players.forEach((p, index) => {
-            const ovr = calculateOverall(p, pos);
-            // Visual cue for likely starters (Top 1 for QB/K/P, Top 2-3 for others)
-            let isStarterZone = false;
-            if (['QB','K','P'].includes(pos) && index === 0) isStarterZone = true;
-            else if (['RB','TE','S'].includes(pos) && index <= 1) isStarterZone = true;
-            else if (['WR','LB','DL','OL','DB'].includes(pos) && index <= 2) isStarterZone = true;
-
-            const rankStyle = isStarterZone ? 'border-l-4 border-green-500' : 'border-l-4 border-gray-300';
-            const starterBadge = isStarterZone ? '<span class="ml-2 text-[10px] uppercase font-bold text-green-600 bg-green-50 px-1 rounded">Start</span>' : '';
-
-            html += `
-                <div class="depth-order-item bg-white hover:bg-amber-50 p-2 rounded border border-gray-100 shadow-sm cursor-move flex justify-between items-center ${rankStyle}"
-                     draggable="true"
-                     data-player-id="${p.id}">
-                    <div class="flex items-center gap-2 overflow-hidden">
-                        <span class="text-xs font-bold text-gray-400 w-4">${index + 1}</span>
-                        <div class="truncate">
-                            <span class="font-semibold text-sm text-gray-800">${p.name}</span>
-                            ${starterBadge}
-                        </div>
-                    </div>
-                    <div class="text-right pl-2">
-                        <span class="text-xs font-bold ${ovr >= 80 ? 'text-green-600' : 'text-gray-500'}">${ovr}</span>
-                    </div>
-                </div>
-            `;
-        });
-
-        // Add empty placeholders if less than 6
-        if (players.length < minDepth) {
-            for(let i = players.length; i < minDepth; i++) {
-                html += `
-                    <div class="p-2 rounded border border-dashed border-gray-200 flex items-center gap-2 opacity-50">
-                        <span class="text-xs font-bold text-gray-300 w-4">${i + 1}</span>
-                        <span class="text-xs text-gray-400 italic">-- Empty Slot --</span>
-                    </div>
-                `;
-            }
-        }
-
-        html += `   </div>
-                </div>`;
+    // 3. Render Tabs
+    let tabsHtml = `<div class="flex flex-wrap gap-2 mb-4 border-b border-gray-200 pb-2">`;
+    displayOrder.forEach((pos, index) => {
+        const isActive = index === 0 ? 'bg-amber-500 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300';
+        tabsHtml += `<button class="depth-pos-tab px-4 py-2 rounded font-bold text-sm transition ${isActive}" data-target="${pos}">${pos}</button>`;
     });
+    tabsHtml += `</div>`;
 
-    html += `</div>`;
-    pane.innerHTML = html;
+    // 4. Render Lists
+    let listsHtml = `<div id="depth-lists-container" class="mb-8">`;
+    displayOrder.forEach((groupKey, index) => {
+        const isHidden = index !== 0 ? 'hidden' : '';
+        const players = sortedGroups[groupKey] || [];
+        
+        listsHtml += `
+            <div id="group-${groupKey}" class="depth-group-container ${isHidden}">
+                <div class="depth-sortable-list flex-grow p-2 space-y-1 min-h-[200px]" data-group="${groupKey}">
+                    ${players.map((p, i) => {
+                        const ovr = calculateOverall(p, groupKey);
+                        let isStarterZone = false;
+                        
+                        // Backyard 7v7 Logic
+                        if (groupKey === 'QB' && i === 0) isStarterZone = true; 
+                        else if (groupKey === 'RB' && i === 0) isStarterZone = true; 
+                        else if (groupKey === 'WR' && i <= 2) isStarterZone = true; 
+                        else if (groupKey === 'OL' && i === 0) isStarterZone = true; 
+                        else if (['DL','LB','DB'].includes(groupKey) && i === 0) isStarterZone = true; // 1 of each base
 
-    // Re-initialize drag events for the new elements
+                        const rankStyle = isStarterZone ? 'border-l-4 border-green-500' : 'border-l-4 border-gray-300';
+                        const badge = isStarterZone ? '<span class="ml-2 text-[10px] bg-green-100 text-green-800 px-1 rounded font-bold">START</span>' : '';
+
+                        return `
+                        <div class="depth-order-item bg-white hover:bg-amber-50 p-2 rounded border border-gray-100 shadow-sm cursor-move flex justify-between items-center ${rankStyle}"
+                             draggable="true"
+                             data-player-id="${p.id}">
+                            <div class="flex items-center gap-2 overflow-hidden">
+                                <span class="text-xs font-bold text-gray-400 w-4">${i + 1}</span>
+                                <div class="truncate">
+                                    <span class="font-semibold text-sm text-gray-800">${p.name}</span>
+                                    ${badge}
+                                </div>
+                            </div>
+                            <div class="text-right pl-2">
+                                <span class="text-xs font-bold ${ovr >= 80 ? 'text-green-600' : 'text-gray-500'}">${ovr}</span>
+                            </div>
+                        </div>`;
+                    }).join('')}
+                </div>
+            </div>`;
+    });
+    listsHtml += `</div>`;
+
+    // 5. Render Full Roster Table (Bottom)
+    // Same logic as before, just ensuring we don't display FB/ATH there either
+    let rosterHtml = `
+        <div class="mt-8 border-t pt-4">
+            <h4 class="font-bold text-lg text-gray-800 mb-3">Full Roster (Drag to Reorder)</h4>
+            <div class="overflow-x-auto max-h-60 overflow-y-auto border rounded">
+                <table class="min-w-full text-sm bg-white">
+                    <thead class="bg-gray-100 sticky top-0 z-10">
+                        <tr>
+                            <th class="py-2 px-3 text-left">Name</th>
+                            <th class="py-2 px-3 text-center">Pos</th>
+                            <th class="py-2 px-3 text-center">Ovr</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y">
+                        ${roster.map(p => {
+                            let pos = p.pos || estimateBestPosition(p);
+                            if (pos === 'FB') pos = 'RB';
+                            if (['TE','ATH','K','P'].includes(pos)) pos = 'WR';
+                            const ovr = calculateOverall(p, pos);
+                            return `
+                            <tr class="roster-row-item cursor-move hover:bg-blue-50" draggable="true" 
+                                data-player-id="${p.id}" data-player-name="${p.name}" data-player-ovr="${ovr}">
+                                <td class="py-1 px-3 font-medium">${p.name}</td>
+                                <td class="py-1 px-3 text-center">${pos}</td>
+                                <td class="py-1 px-3 text-center font-bold">${ovr}</td>
+                            </tr>`;
+                        }).join('')}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    `;
+
+    pane.innerHTML = tabsHtml + listsHtml + rosterHtml;
+    
+    setupDepthTabs();
     setupDepthOrderDragEvents();
 }
 
