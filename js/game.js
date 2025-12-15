@@ -4120,7 +4120,7 @@ function updatePunterDecision(playState, offenseStates, gameLog) {
 /**
  * Handles ball arrival at target coordinates. (MODIFIED)
  */
-function handleBallArrival(playState, ballCarrier, playResult) {
+function handleBallArrival(playState, ballCarrierState, playResult) {
     // ===========================================================
     // --- 1. PUNT CATCH LOGIC (Fixed) ---
     // ===========================================================
@@ -4735,7 +4735,7 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
                 if (ballPos.inAir) {
                     if (typeof handleBallArrival === 'function') {
                         // This handles Catch, Drop, INT, Muffed Punt, etc.
-                        handleBallArrival(playState, ballCarrier, playResult);
+                        handleBallArrival(playState, ballCarrierState, playResult);
                     }
 
                     if (!playState.playIsLive) {
