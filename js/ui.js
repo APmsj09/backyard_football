@@ -118,9 +118,11 @@ export function setupElements() {
     console.log("Running setupElements...");
 
     // Helper to grab ID and warn if missing
-    const getEl = (id) => {
+    const getEl = (id, optional = false) => {
         const el = document.getElementById(id);
-        if (!el) console.warn(`⚠️ MISSING UI ELEMENT: ID "${id}" was not found in the HTML.`);
+        if (!el && !optional) {
+            console.warn(`⚠️ MISSING UI ELEMENT: ID "${id}" was not found in the HTML.`);
+        }
         return el;
     };
 
@@ -213,17 +215,14 @@ export function setupElements() {
         simGameDrive: getEl('sim-game-drive'),
         simGameDown: getEl('sim-game-down'),
         simPossession: getEl('sim-possession'),
-        fieldCanvas: getEl('field-canvas'),
-        fieldCanvasCtx: getEl('field-canvas')?.getContext('2d'),
+
+        simFieldSurface: getEl('sim-field-surface'),
+        simFieldPlayers: getEl('sim-field-players'),
+
         simPlayLog: getEl('sim-play-log'),
         simSpeedBtns: document.querySelectorAll('.sim-speed-btn'),
         simSkipBtn: getEl('sim-skip-btn'),
-        simLiveStats: getEl('sim-live-stats'),
-        simStatsAway: getEl('sim-stats-away'),
-        simStatsHome: getEl('sim-stats-home'),
-        simPlayersPanel: getEl('sim-players-panel'),
-        simPlayersList: getEl('sim-players-list'),
-        simMatchupBanner: getEl('sim-matchup-banner'),
+
         simBannerOffense: getEl('sim-banner-offense'),
         simBannerDefense: getEl('sim-banner-defense'),
 
@@ -3260,17 +3259,32 @@ export function startLiveGameSim(gameResult, onComplete) {
     const scoreboard = elements.simScoreboard;
 
     // --- 1. Validate Elements ---
-    if (!ticker || !scoreboard || !elements.simAwayScore || !elements.simHomeScore || !elements.simGameDrive || !elements.simGameDown || !elements.simPossession || !elements.fieldCanvasCtx || !elements.simLiveStats) {
-        console.error("Live sim UI elements missing!");
-        if (onComplete) onComplete(gameResult); // Pass back result immediately
+    if (
+        !ticker ||
+        !scoreboard ||
+        !elements.simAwayScore ||
+        !elements.simHomeScore ||
+        !elements.simGameDrive ||
+        !elements.simGameDown ||
+        !elements.simPossession ||
+        !elements.simFieldSurface ||
+        !elements.simFieldPlayers
+    ) {
+        console.error("Live sim UI elements missing (critical).");
+        if (onComplete) onComplete(gameResult);
         return;
     }
 
     // --- 2. Validate Data ---
-    if (!gameResult || !Array.isArray(gameResult.gameLog) || !gameResult.homeTeam || !gameResult.awayTeam || !Array.isArray(gameResult.visualizationFrames) || gameResult.visualizationFrames.length === 0) {
-        console.warn("startLiveGameSim: invalid gameResult or missing frames.");
-        if (ticker) ticker.innerHTML = '<p>No game events to display.</p>';
-        if (onComplete) onComplete(gameResult); // Pass back result immediately
+    if (
+        !gameResult ||
+        !Array.isArray(gameResult.gameLog) ||
+        !Array.isArray(gameResult.visualizationFrames) ||
+        gameResult.visualizationFrames.length === 0
+    ) {
+        console.warn("startLiveGameSim: invalid gameResult.");
+        ticker.innerHTML = '<p>No game events to display.</p>';
+        if (onComplete) onComplete(gameResult);
         return;
     }
 
@@ -3280,62 +3294,39 @@ export function startLiveGameSim(gameResult, onComplete) {
         liveGameInterval = null;
     }
 
-    // --- 4. Reset Global State ---
+    // --- 4. Reset State ---
     liveGameCallback = onComplete;
-    currentLiveGameResult = gameResult; // The full result object
-    liveGameCurrentIndex = 0;           // Start from the first frame
-    liveGameLogIndex = 0;               // Start from the first log
+    currentLiveGameResult = gameResult;
+    liveGameCurrentIndex = 0;
+    liveGameLogIndex = 0;
 
-    // Reset scoreboard state
     liveGameCurrentHomeScore = 0;
     liveGameCurrentAwayScore = 0;
     liveGameBallOn = 20;
     liveGameDown = 1;
     liveGameToGo = 10;
-    liveGameDriveActive = false; // Will be set true by the first drive log
-    liveGamePossessionName = ''; // Will be set by the first drive log
-    liveGameDriveText = "Kickoff"; // Default text
-    liveGameIsConversion = false;
+    liveGameDriveText = "Kickoff";
 
-    // --- 5. Render Initial/Static UI ---
-    if (ticker) ticker.innerHTML = '';
-    if (elements.simAwayTeam) elements.simAwayTeam.textContent = gameResult.awayTeam.name;
-    if (elements.simHomeTeam) elements.simHomeTeam.textContent = gameResult.homeTeam.name;
-    if (elements.simAwayScore) {
-        elements.simAwayScore.textContent = liveGameCurrentAwayScore;
-        elements.simAwayScore.classList.add('away');
-        // optional: color by team primary color if available
-        try { if (gameResult.awayTeam?.primaryColor) elements.simAwayScore.style.color = gameResult.awayTeam.primaryColor; } catch (e) { }
-    }
-    if (elements.simHomeScore) {
-        elements.simHomeScore.textContent = liveGameCurrentHomeScore;
-        elements.simHomeScore.classList.add('home');
-        try { if (gameResult.homeTeam?.primaryColor) elements.simHomeScore.style.color = gameResult.homeTeam.primaryColor; } catch (e) { }
-    }
-    if (elements.simGameDrive) elements.simGameDrive.textContent = liveGameDriveText;
-    if (elements.simGameDown) elements.simGameDown.textContent = "1st & 10";
-    if (elements.simPossession) elements.simPossession.textContent = '';
+    // --- 5. Initial Render ---
+    ticker.innerHTML = '';
+    elements.simAwayTeam.textContent = gameResult.awayTeam.name;
+    elements.simHomeTeam.textContent = gameResult.homeTeam.name;
+    elements.simAwayScore.textContent = '0';
+    elements.simHomeScore.textContent = '0';
+    elements.simGameDrive.textContent = liveGameDriveText;
+    elements.simGameDown.textContent = "1st & 10";
+    elements.simPossession.textContent = '';
 
-    // Reset Banner
-    if (elements.simBannerOffense) elements.simBannerOffense.textContent = "Waiting for snap...";
-    if (elements.simBannerDefense) elements.simBannerDefense.textContent = "Reading offense...";
+    elements.simBannerOffense.textContent = "Waiting for snap...";
+    elements.simBannerDefense.textContent = "Reading offense...";
 
-    drawFieldVisualization(null); // Clear field
-    // Don't render final stats at start of live sim — show a placeholder
-    if (elements.simLiveStats) elements.simLiveStats.innerHTML = '<p class="text-sm text-gray-400">Live stats will populate at game end.</p>';
-    // Initialize live stats counters for this game
-    initLiveGameStats(gameResult);
-    try {
-        renderSimPlayers(gameResult.visualizationFrames[0]);
-    } catch (err) {
-        console.error('renderSimPlayers init error:', err);
-    }
-    setSimSpeed(liveGameSpeed); // Set default button style
+    elements.simFieldPlayers.innerHTML = '';
 
-    // --- 6. Start the Interval Timer ---
+    renderSimPlayers(gameResult.visualizationFrames[0]);
+    setSimSpeed(liveGameSpeed);
+
+    // --- 6. Start ---
     liveGameInterval = setInterval(runLiveGameTick, liveGameSpeed);
-
-
 }
 
 export function skipLiveGameSim() {
