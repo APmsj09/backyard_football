@@ -233,6 +233,12 @@ async function handleLoadGame(saveKey) {
         selectedPlayerId = null;
         activeSaveKey = keyToLoad;
 
+        // 💡 NEW: Force the Depth Chart to rebuild from the saved Order immediately.
+        // This fixes the "Ghost Players" issue on load.
+        if (gameState.playerTeam) {
+            Game.rebuildDepthChartFromOrder(gameState.playerTeam);
+        }
+
         if (gameState.currentWeek >= 0) {
             UI.renderDashboard(gameState);
             UI.switchTab('my-team', gameState);
@@ -243,6 +249,7 @@ async function handleLoadGame(saveKey) {
             UI.showScreen('draft-screen');
         }
     } catch (error) {
+        console.error("Load Error:", error);
         UI.showModal("Error", `Could not load game: ${error.message}`, null, '', null, 'Close');
     }
 }
@@ -285,28 +292,33 @@ function handleFormationChange(e) {
     const side = e.target.id.includes('offense') ? 'offense' : 'defense';
     const formationName = e.target.value;
 
-    // Use the smart function in UI that preserves player slots
-    UI.changeFormationSmart(side, formationName);
+    // 1. Update Game Logic (This now auto-triggers rebuildDepthChartFromOrder)
+    Game.changeFormation(side, formationName);
 
-    // Note: We do NOT need to save/refresh here immediately.
-    // UI.changeFormationSmart emits 'refresh-ui' when it finishes,
-    // which triggers the save listener we added at the bottom of main.js.
+    // 2. Save
+    Game.saveGameState(activeSaveKey);
+
+    // 3. Refresh UI to show the new slots
+    // We use the event dispatcher so UI.js knows to re-render the visual field
+    document.dispatchEvent(new CustomEvent('refresh-ui'));
 }
 
 function handleDepthChartDrop(playerId, newPositionSlot, side) {
     if (!gameState) return;
 
-    // 1. Update the data
+    // 1. Update the specific slot in Game Logic
     Game.updateDepthChart(playerId, newPositionSlot, side);
 
-    // 2. Refresh the global state object
+    // 2. Refresh local state reference
     gameState = Game.getGameState();
 
-    // 3. Save to browser storage
+    // 3. Save immediately
     Game.saveGameState(activeSaveKey);
 
-    // 4. RESTORED: Force the tab to re-render so you see the player appear in the slot
-    UI.switchTab('depth-chart', gameState);
+    // 4. Force UI Refresh
+    // We trigger the event instead of calling switchTab manually, 
+    // which ensures all parts of the UI (lists + field) stay in sync.
+    document.dispatchEvent(new CustomEvent('refresh-ui'));
 }
 
 function handleDepthChartSelect(e) {
