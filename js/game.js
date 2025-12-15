@@ -4128,14 +4128,32 @@ function updatePunterDecision(playState, offenseStates, gameLog) {
 /**
  * Handles ball arrival at target coordinates. (MODIFIED)
  */
-function handleBallArrival(playState, ballCarrierState, playResult) {
+/**
+ * Handles ball arrival at target coordinates.
+ * Handles Catches, Drops, Interceptions, Swats, and Muffed Punts.
+ */
+function handleBallArrival(playState, ballCarrierState, playResult, gameLog) {
     // ===========================================================
-    // --- 1. PUNT CATCH LOGIC (Fixed) ---
+    // --- 1. PUNT CATCH LOGIC ---
     // ===========================================================
     if (playState.type === 'punt' && playState.ballState.inAir && playState.ballState.targetPlayerId === null) {
-        // Wait for ball to come down
+
+        // --- 1a. Ground/Dead Ball Check ---
+        if (playState.ballState.z <= 0.1) {
+            // Ball is on the ground.
+            // If it has effectively stopped moving, end the play (Downed punt).
+            const speed = Math.sqrt(playState.ballState.vx ** 2 + playState.ballState.vy ** 2);
+            if (speed < 0.5) {
+                if (gameLog) gameLog.push(`🛑 Punt downed by the kicking team.`);
+                playState.playIsLive = false;
+                playState.finalBallY = playState.ballState.y;
+                playState.touchback = false; // Logic elsewhere handles touchbacks based on Y position
+            }
+            return;
+        }
+
+        // Wait for ball to come down for catch attempt
         if (playState.ballState.z > 3.0) return;
-        if (playState.ballState.z <= 0.1) return; // Hit ground (handled by tick loop)
 
         const CATCH_CHECK_RADIUS = 4.0;
         const ballPos = playState.ballState;
@@ -4148,10 +4166,7 @@ function handleBallArrival(playState, ballCarrierState, playResult) {
             getDistance(p, ballPos) < CATCH_CHECK_RADIUS
         );
 
-        if (returnersInRange.length === 0) {
-            // No one close enough yet
-            return;
-        }
+        if (returnersInRange.length === 0) return;
 
         // Closest man takes it
         const returnerState = returnersInRange.sort((a, b) => getDistance(a, ballPos) - getDistance(b, ballPos))[0];
@@ -4171,6 +4186,11 @@ function handleBallArrival(playState, ballCarrierState, playResult) {
             playState.ballState.vx = (Math.random() - 0.5) * 5;
             playState.ballState.vy = (Math.random() - 0.5) * 5;
             returnerState.stunnedTicks = 30;
+
+            playState.statEvents.push({
+                type: 'fumble',
+                playerId: returnerState.id
+            });
         } else {
             if (gameLog) gameLog.push(`🏈 Punt caught by ${returnerState.name}.`);
 
@@ -4197,9 +4217,9 @@ function handleBallArrival(playState, ballCarrierState, playResult) {
                     p.action = 'pursuit'; // Gunners tackle
                 } else if (p.id !== returnerState.id) {
                     p.action = 'run_block'; // Return team blocks
-                    // Assign dynamic blocks logic here if needed
                 }
             });
+
         }
         return;
     }
@@ -4210,7 +4230,8 @@ function handleBallArrival(playState, ballCarrierState, playResult) {
     if (!playState.ballState.inAir) return;
 
     // Height Checks
-    if (playState.ballState.z > 2.5) {
+    if (playState.ballState.z > 2.5 && !receiverInRange && !defenderInRange) {
+
         if (gameLog) gameLog.push(`‹‹ Pass is thrown **too high**. Incomplete.`);
         playState.incomplete = true; playState.playIsLive = false; playState.ballState.inAir = false;
         return;
@@ -4223,6 +4244,7 @@ function handleBallArrival(playState, ballCarrierState, playResult) {
 
     const targetPlayerState = playState.activePlayers.find(p => p.id === playState.ballState.targetPlayerId);
     if (!targetPlayerState) {
+        // Ball has no target? Treat as throwaway landing.
         playState.incomplete = true; playState.playIsLive = false; playState.ballState.inAir = false;
         return;
     }
@@ -4230,7 +4252,6 @@ function handleBallArrival(playState, ballCarrierState, playResult) {
     // Context
     const CATCH_CHECK_RADIUS = 2.0;
     const receiverPlayer = getPlayer(targetPlayerState.id);
-    const throwerPlayer = getPlayer(playState.ballState.throwerId);
 
     // Find closest defender
     const closestDefenderState = playState.activePlayers
@@ -4258,12 +4279,13 @@ function handleBallArrival(playState, ballCarrierState, playResult) {
         const distToBall = getDistance(closestDefenderState, playState.ballState);
         const positionBonus = (CATCH_CHECK_RADIUS - distToBall) * 10;
 
-        if ((defenderPower + positionBonus + getRandomInt(0, 30)) > 92) {
+        if ((defenderPower + positionBonus + getRandomInt(0, 30)) > 95) { // Tuned: 95 threshold
             eventResolved = true;
             if (gameLog) gameLog.push(`❗ INTERCEPTION! ${closestDefenderState.name} jumps the route!`);
 
             playState.interceptionOccurred = true;
             playState.possessionChanged = true;
+            playState.turnover = true;
 
             playResult.outcome = 'turnover';
             playResult.turnoverType = 'interception';
@@ -4322,7 +4344,7 @@ function handleBallArrival(playState, ballCarrierState, playResult) {
         if (getRandomInt(0, 100) < catchChance) {
             // SUCCESS
             if (gameLog) {
-                gameLog.push(`👍 CATCH! ${targetPlayerState.name} (Catch: ${recHands}) secures it!`);
+                gameLog.push(`👍 CATCH! ${targetPlayerState.name} secures it!`);
             }
 
             playResult.outcome = 'complete';
@@ -4334,10 +4356,12 @@ function handleBallArrival(playState, ballCarrierState, playResult) {
             targetPlayerState.isBallCarrier = true;
             targetPlayerState.action = 'run_path';
 
+            // Corrected Type: 'completion' to match applyStatEvents
             playState.statEvents.push({
-                type: 'reception',
+                type: 'completion',
                 receiverId: targetPlayerState.id,
-                throwerId: playState.ballState.throwerId
+                qbId: playState.ballState.throwerId,
+                yards: 0 // Yards accumulated at end of play
             });
 
             // Update blockers
@@ -4364,7 +4388,6 @@ function handleBallArrival(playState, ballCarrierState, playResult) {
             playState.playIsLive = false;
             return;
         }
-
     }
 
     // --- D. INACCURATE PASS ---
@@ -4378,7 +4401,7 @@ function handleBallArrival(playState, ballCarrierState, playResult) {
         return;
     }
 
-    // Cleanup Ball Physics
+    // Cleanup Ball Physics (shouldn't reach here if play ends, but safety measure)
     playState.ballState.inAir = false;
     playState.ballState.z = playState.playIsLive ? 1.0 : 0.1;
 }
@@ -4755,7 +4778,7 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
                 if (ballPos.inAir) {
                     if (typeof handleBallArrival === 'function') {
                         // This handles Catch, Drop, INT, Muffed Punt, etc.
-                        handleBallArrival(playState, ballCarrierState, playResult);
+                        handleBallArrival(playState, ballCarrierState, playResult, gameLog);
                     }
 
                     if (!playState.playIsLive) {
