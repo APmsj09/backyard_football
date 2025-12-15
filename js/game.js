@@ -102,6 +102,89 @@ function ensureSet(val) {
     return new Set();
 }
 
+/**
+ * REBUILDS the Depth Chart slots (QB1, WR1, etc.) strictly based on the
+ * team's 'depthOrder' lists.
+ * This is the "Source of Truth" logic.
+ */
+export function rebuildDepthChartFromOrder(team) {
+    if (!team || !team.depthOrder || !team.formations) return;
+
+    // 1. Reset Depth Chart
+    team.depthChart = {
+        offense: {},
+        defense: {},
+        special: {}
+    };
+
+    // 2. Create a DEEP COPY of the depth order to work with.
+    // 🛑 CRITICAL FIX: We must map the arrays to new arrays so .shift() doesn't destroy the saved state.
+    const workingOrder = {};
+    Object.keys(team.depthOrder).forEach(key => {
+        if (Array.isArray(team.depthOrder[key])) {
+            workingOrder[key] = [...team.depthOrder[key]]; // Spread creates a copy
+        } else {
+            workingOrder[key] = [];
+        }
+    });
+
+    // Helper to safely pull next player
+    const getNext = (posKey) => {
+        if (workingOrder[posKey] && workingOrder[posKey].length > 0) {
+            return workingOrder[posKey].shift();
+        }
+        return null;
+    };
+
+    // 3. Fill Offense
+    const offFormKey = team.formations.offense;
+    const offSlots = offenseFormations[offFormKey]?.slots || [];
+    
+    offSlots.forEach(slot => {
+        let posKey = slot.replace(/\d+/g, '');
+        // Map formation slots to depth order keys
+        if (['OT','OG','C'].includes(posKey)) posKey = 'OL';
+        if (posKey === 'FB') posKey = 'RB';
+
+        let pid = getNext(posKey);
+
+        // Fallbacks
+        if (!pid) {
+            if (posKey === 'WR') pid = getNext('TE') || getNext('RB');
+            else if (posKey === 'TE') pid = getNext('WR');
+            else if (posKey === 'RB') pid = getNext('WR');
+        }
+        
+        team.depthChart.offense[slot] = pid || null;
+    });
+
+    // 4. Fill Defense
+    const defFormKey = team.formations.defense;
+    const defSlots = defenseFormations[defFormKey]?.slots || [];
+
+    defSlots.forEach(slot => {
+        const posKey = slot.replace(/\d+/g, '');
+        let pid = getNext(posKey);
+
+        // Fallbacks
+        if (!pid) {
+            if (posKey === 'CB' || posKey === 'S') pid = getNext('DB');
+            if (posKey === 'DL') pid = getNext('LB');
+            if (posKey === 'LB') pid = getNext('DL');
+        }
+
+        team.depthChart.defense[slot] = pid || null;
+    });
+
+    // 5. Fill Special Teams (use NEW copies, don't consume from workingOrder)
+    // We want the starters to also be kickers if they are best at it
+    const kickers = team.depthOrder['K'] || [];
+    const punters = team.depthOrder['P'] || [];
+    
+    team.depthChart.special['K'] = kickers.length > 0 ? kickers[0] : null;
+    team.depthChart.special['P'] = punters.length > 0 ? punters[0] : null;
+}
+
 /** Helper: Gets full player objects from a team's roster of IDs. */
 function getRosterObjects(team) {
     if (!team || !Array.isArray(team.roster)) return [];
@@ -6689,31 +6772,7 @@ function advanceToOffseason() {
 // --- DEPTH CHART & PLAYER MANAGEMENT ---
 // =============================================================
 
-/** Updates the player's depth chart based on drag-and-drop. */
-function updateDepthChart(playerId, newPositionSlot, side) {
-    const team = game?.playerTeam;
-    if (!team || !team.depthChart || !team.depthChart[side]) {
-        console.error("updateDepthChart: Invalid state.");
-        return;
-    }
 
-    // 1. Update the specific slot (The Visual Change)
-    const chart = team.depthChart[side];
-    chart[newPositionSlot] = playerId;
-
-    // 2. Sync to Depth Order (The Priority Fix)
-    // We move this player to the VERY FRONT of the master depthOrder list.
-    // This guarantees they are seen as "Rank 1" for their position group.
-    if (!team.depthOrder) team.depthOrder = [];
-
-    const index = team.depthOrder.indexOf(playerId);
-    if (index > -1) {
-        team.depthOrder.splice(index, 1); // Remove from old spot
-    }
-    team.depthOrder.unshift(playerId); // Add to front (High Priority)
-
-    console.log(`Player ${playerId} assigned to ${newPositionSlot} and set as Priority #1.`);
-}
 
 // -----------------------------
 // Depth Order API / Helpers
@@ -7041,17 +7100,14 @@ function autoMakeSubstitutions(team, options = {}, gameLog = null) {
     return subsDone;
 }
 /** Changes the player team's formation for offense or defense. */
-function changeFormation(side, formationName) {
+export function changeFormation(side, formationName) {
     const team = game?.playerTeam;
-    const formations = side === 'offense' ? offenseFormations : defenseFormations;
-    const formation = formations[formationName];
-    if (!formation || !team || !team.formations || !team.depthChart) { console.error("changeFormation: Invalid state."); return; }
+    if (!team) return;
 
     team.formations[side] = formationName;
-    const newChart = Object.fromEntries((formation.slots || []).map(slot => [slot, null]));
-    team.depthChart[side] = newChart;
-    aiSetDepthChart(team);
-    console.log(`${side} formation changed to ${formationName}, depth chart reset and refilled.`);
+    
+    // Instead of resetting to null, we REBUILD from the definitive order
+    rebuildDepthChartFromOrder(team);
 }
 
 /** Cuts a player from the player's team roster. */

@@ -1,4 +1,5 @@
 import {
+    saveGameState, getGameState,
     calculateOverall,
     getRelationshipLevel,
     getScoutedPlayerInfo,
@@ -87,15 +88,26 @@ function debounce(func, delay) {
 function getUIRosterObjects(team) {
     if (!team || !Array.isArray(team.roster)) return [];
 
-    // 1. Legacy Support: Handle old saves where roster has full objects
-    if (team.roster.length > 0 && typeof team.roster[0] === 'object') {
-        return team.roster.filter(p => p);
-    }
+    // 1. Get Game State for fallback lookup
+    const gs = getGameState();
 
-    // 2. Optimized Lookup: Map IDs directly to players
-    return team.roster
-        .map(id => getPlayer(id)) 
-        .filter(p => p); 
+    // 2. Map IDs to Players with a fail-safe fallback
+    return team.roster.map(id => {
+        // A. Try the standard getter (fastest)
+        let p = getPlayer(id);
+
+        // B. Fallback: If Map isn't ready yet, search the raw array
+        if (!p && gs && gs.players) {
+            p = gs.players.find(pl => pl.id === id);
+        }
+        
+        // C. Legacy Support: If roster contained objects instead of IDs
+        if (!p && typeof id === 'object' && id.id) {
+            p = id; 
+        }
+
+        return p;
+    }).filter(p => p); // Remove any nulls/undefineds
 }
 
 /**
@@ -1183,17 +1195,15 @@ function renderVisualFormationSlots(container, currentChart, formationData, benc
     formationData.slots.forEach(slot => {
         const playerId = currentChart[slot];
         const currentPlayer = allRoster.find(p => p && p.id === playerId);
+        
         const relCoords = formationData.coordinates[slot] || [0, 0];
-
-        // 1. Determine Position Context (e.g., "WR" from "WR1")
         const basePosition = slot.replace(/\d/g, '');
 
         // 2. Build Dropdown Options (FULL ROSTER)
         // Map every player to an option object with their OVR for THIS specific position
         const rosterOptions = allRoster
-            .filter(p => p) // Filter out temporary/helping friends if desired
+            .filter(p => p) 
             .map(p => {
-                // Check if this player is assigned to ANY slot in the current chart
                 const assignedSlot = Object.keys(currentChart).find(key => currentChart[key] === p.id);
                 const isAssignedHere = assignedSlot === slot;
                 const isAssignedElsewhere = assignedSlot && !isAssignedHere;
@@ -1201,7 +1211,7 @@ function renderVisualFormationSlots(container, currentChart, formationData, benc
                 return {
                     id: p.id,
                     name: p.name,
-                    ovr: calculateOverall(p, basePosition), // Context-aware rating
+                    ovr: calculateOverall(p, basePosition),
                     assignedSlot: assignedSlot,
                     isAssignedHere: isAssignedHere,
                     isAssignedElsewhere: isAssignedElsewhere
@@ -3403,130 +3413,122 @@ function renderDepthOrderPane(gameState) {
     if (!pane || !gameState) return;
 
     const roster = getUIRosterObjects(gameState.playerTeam);
+    const savedOrder = gameState.playerTeam.depthOrder || {};
 
-    if (!roster || roster.length === 0) {
-        pane.innerHTML = "<p class='p-4 text-gray-500'>No roster data found.</p>";
-        return;
-    }
-
-    // 1. Group players for the top panes
-    const groups = {
-        'QB': [], 'RB': [], 'WR': [], 'OL': [],
-        'DL': [], 'LB': [], 'DB': [], 'ST': []
+    // 1. Group all roster players by position
+    const pool = {
+        'QB': [], 'RB': [], 'WR': [], 'TE': [], 'OL': [],
+        'DL': [], 'LB': [], 'DB': [], 'K': [], 'P': []
     };
 
+    // Helper to add player to pool
     roster.forEach(p => {
         let pos = p.pos || estimateBestPosition(p);
-        if (pos === 'TE') pos = 'WR';
-        if (pos === 'K' || pos === 'P') pos = 'ST';
-        if (!groups[pos]) groups[pos] = [];
-        groups[pos].push(p);
+        
+        // 🛑 FIX: Normalize Positions to match your Depth Order Tabs
+        if (['FB'].includes(pos)) pos = 'RB';
+        if (['OT', 'OG', 'C'].includes(pos)) pos = 'OL';
+        if (['DE', 'DT', 'NT'].includes(pos)) pos = 'DL';
+        if (['CB', 'S', 'FS', 'SS'].includes(pos)) pos = 'DB';
+        if (pos === 'TE') pos = 'WR'; // Or keep TE separate if you have a tab for it
+
+        if (!pool[pos]) pool[pos] = [];
+        pool[pos].push(p);
     });
 
-    // 2. Sort groups by current Depth Order
-    const currentOrder = gameState.playerTeam.depthOrder || [];
-    Object.keys(groups).forEach(key => {
-        groups[key].sort((a, b) => {
-            const idxA = currentOrder.indexOf(a.id);
-            const idxB = currentOrder.indexOf(b.id);
-            if (idxA !== -1 && idxB !== -1) return idxA - idxB;
-            if (idxA === -1) return 1;
-            if (idxB === -1) return -1;
-            return calculateOverall(b, key === 'ST' ? 'K' : key) - calculateOverall(a, key === 'ST' ? 'K' : key);
+    // 2. Build the "Sorted" lists based on savedOrder
+    const sortedGroups = {};
+    const displayOrder = ['QB', 'RB', 'WR', 'TE', 'OL', 'DL', 'LB', 'DB', 'K', 'P'];
+
+    displayOrder.forEach(pos => {
+        const savedIds = savedOrder[pos] || [];
+        const playersInGroup = pool[pos] || [];
+        
+        // A. Add players in the saved order
+        const ordered = [];
+        savedIds.forEach(id => {
+            const p = playersInGroup.find(pl => pl.id === id);
+            if (p) {
+                ordered.push(p);
+                // Remove from pool so we don't duplicate
+                const idx = playersInGroup.indexOf(p);
+                if (idx > -1) playersInGroup.splice(idx, 1);
+            }
         });
+
+        // B. Append any new/remaining players (sorted by Overall)
+        playersInGroup.sort((a, b) => calculateOverall(b, pos) - calculateOverall(a, pos));
+        ordered.push(...playersInGroup);
+
+        sortedGroups[pos] = ordered;
     });
 
-    // 3. Build Tab Navigation
-    const displayOrder = ['QB', 'RB', 'WR', 'OL', 'DL', 'LB', 'DB', 'ST'];
-    let tabsHtml = `<div class="flex flex-wrap gap-2 mb-4 border-b border-gray-200 pb-2">`;
-    displayOrder.forEach((pos, index) => {
-        const isActive = index === 0 ? 'bg-amber-500 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300';
-        tabsHtml += `<button class="depth-pos-tab px-4 py-2 rounded font-bold text-sm transition ${isActive}" data-target="${pos}">${pos}</button>`;
-    });
-    tabsHtml += `</div>`;
+    // 3. Render HTML
+    let html = `<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">`;
 
-    // 4. Build Sortable Lists
-    let listsHtml = `<div id="depth-lists-container" class="mb-8">`;
-    displayOrder.forEach((groupKey, index) => {
-        const isHidden = index !== 0 ? 'hidden' : '';
-        const players = groups[groupKey] || [];
-
-        listsHtml += `
-            <div id="group-${groupKey}" class="depth-group-container ${isHidden}">
-                <h4 class="font-bold text-lg text-gray-800 mb-2">${groupKey} Depth Chart</h4>
-                <p class="text-xs text-gray-500 mb-2 italic">Drag from list or bottom table to reorder.</p>
-                
-                <div class="depth-sortable-list space-y-2 bg-gray-50 p-2 rounded border border-gray-200 min-h-[150px]" data-group="${groupKey}">
-                    ${players.map((p, i) => {
-            const ovr = calculateOverall(p, groupKey === 'ST' ? 'K' : groupKey);
-            const rankStyle = i === 0 ? 'border-l-4 border-green-500' : (i === 1 ? 'border-l-4 border-blue-500' : 'border-l-4 border-transparent');
-            const rankBadge = i === 0 ? '<span class="bg-green-100 text-green-800 text-xs px-1 rounded ml-2">Starter</span>' : '';
-
-            return `
-                        <div class="depth-order-item bg-white p-3 rounded shadow-sm border border-gray-200 cursor-move hover:bg-amber-50 flex justify-between items-center ${rankStyle}"
-                             draggable="true" 
-                             data-player-id="${p.id}"
-                             data-player-name="${p.name}"
-                             data-player-ovr="${ovr}">
-                            <div class="flex items-center gap-3">
-                                <span class="rank-number font-bold text-gray-400 w-4 text-center">${i + 1}</span>
-                                <div>
-                                    <span class="font-bold text-gray-800">${p.name}</span>
-                                    ${rankBadge}
-                                </div>
-                            </div>
-                            <div class="text-right">
-                                <span class="text-sm font-bold text-gray-600">OVR: ${ovr}</span>
-                            </div>
-                        </div>
-                        `;
-        }).join('')}
+    displayOrder.forEach(pos => {
+        const players = sortedGroups[pos];
+        const minDepth = 6; // Requirement: At least 6 slots visible (even if empty)
+        
+        html += `
+            <div class="depth-group-card bg-white rounded-lg shadow border border-gray-200 overflow-hidden flex flex-col h-full">
+                <div class="bg-gray-100 px-3 py-2 border-b border-gray-200 flex justify-between items-center">
+                    <h4 class="font-bold text-gray-700">${pos} Depth</h4>
+                    <span class="text-xs bg-gray-200 px-2 py-1 rounded text-gray-600">${players.length} Players</span>
                 </div>
-            </div>
+                
+                <div class="depth-sortable-list flex-grow p-2 space-y-1 min-h-[200px]" data-group="${pos}">
         `;
+
+        players.forEach((p, index) => {
+            const ovr = calculateOverall(p, pos);
+            // Visual cue for likely starters (Top 1 for QB/K/P, Top 2-3 for others)
+            let isStarterZone = false;
+            if (['QB','K','P'].includes(pos) && index === 0) isStarterZone = true;
+            else if (['RB','TE','S'].includes(pos) && index <= 1) isStarterZone = true;
+            else if (['WR','LB','DL','OL','DB'].includes(pos) && index <= 2) isStarterZone = true;
+
+            const rankStyle = isStarterZone ? 'border-l-4 border-green-500' : 'border-l-4 border-gray-300';
+            const starterBadge = isStarterZone ? '<span class="ml-2 text-[10px] uppercase font-bold text-green-600 bg-green-50 px-1 rounded">Start</span>' : '';
+
+            html += `
+                <div class="depth-order-item bg-white hover:bg-amber-50 p-2 rounded border border-gray-100 shadow-sm cursor-move flex justify-between items-center ${rankStyle}"
+                     draggable="true"
+                     data-player-id="${p.id}">
+                    <div class="flex items-center gap-2 overflow-hidden">
+                        <span class="text-xs font-bold text-gray-400 w-4">${index + 1}</span>
+                        <div class="truncate">
+                            <span class="font-semibold text-sm text-gray-800">${p.name}</span>
+                            ${starterBadge}
+                        </div>
+                    </div>
+                    <div class="text-right pl-2">
+                        <span class="text-xs font-bold ${ovr >= 80 ? 'text-green-600' : 'text-gray-500'}">${ovr}</span>
+                    </div>
+                </div>
+            `;
+        });
+
+        // Add empty placeholders if less than 6
+        if (players.length < minDepth) {
+            for(let i = players.length; i < minDepth; i++) {
+                html += `
+                    <div class="p-2 rounded border border-dashed border-gray-200 flex items-center gap-2 opacity-50">
+                        <span class="text-xs font-bold text-gray-300 w-4">${i + 1}</span>
+                        <span class="text-xs text-gray-400 italic">-- Empty Slot --</span>
+                    </div>
+                `;
+            }
+        }
+
+        html += `   </div>
+                </div>`;
     });
-    listsHtml += `</div>`;
 
-    // 5. Build Full Roster Table (NOW DRAGGABLE)
-    let rosterHtml = `
-        <div class="mt-8 border-t pt-4">
-            <h4 class="font-bold text-lg text-gray-800 mb-3">Full Roster (Drag to Above)</h4>
-            <div class="overflow-x-auto max-h-60 overflow-y-auto border rounded">
-                <table class="min-w-full text-sm bg-white">
-                    <thead class="bg-gray-100 sticky top-0 z-10">
-                        <tr>
-                            <th class="py-2 px-3 text-left">Name</th>
-                            <th class="py-2 px-3 text-center">Pos</th>
-                            <th class="py-2 px-3 text-center">Age</th>
-                            <th class="py-2 px-3 text-center">Ovr</th>
-                        </tr>
-                    </thead>
-                    <tbody class="divide-y">
-                        ${roster.map(p => {
-        const pos = p.pos || estimateBestPosition(p);
-        const ovr = calculateOverall(p, pos);
-        return `
-                            <tr class="roster-row-item cursor-move hover:bg-blue-50" 
-                                draggable="true" 
-                                data-player-id="${p.id}" 
-                                data-player-name="${p.name}" 
-                                data-player-ovr="${ovr}">
-                                <td class="py-1 px-3 font-medium">${p.name}</td>
-                                <td class="py-1 px-3 text-center">${pos}</td>
-                                <td class="py-1 px-3 text-center">${p.age}</td>
-                                <td class="py-1 px-3 text-center font-bold">${ovr}</td>
-                            </tr>
-                            `;
-    }).join('')}
-                    </tbody>
-                </table>
-            </div>
-        </div>
-    `;
+    html += `</div>`;
+    pane.innerHTML = html;
 
-    pane.innerHTML = tabsHtml + listsHtml + rosterHtml;
-
-    setupDepthTabs();
+    // Re-initialize drag events for the new elements
     setupDepthOrderDragEvents();
 }
 
@@ -3781,87 +3783,30 @@ function updateRankNumbers(container) {
  * Implements the "Rank 1 > Rank 2" priority rule.
  */
 export function applyDepthOrderToChart() {
-    console.log("Saving Depth Chart & Order...");
+    console.log("Saving Definitive Depth Order...");
     const gs = getGameState();
-    const newDepthChart = { offense: {}, defense: {}, special: {} };
-    const newDepthOrder = []; // Master list
+    if (!gs.playerTeam.depthOrder) gs.playerTeam.depthOrder = {};
 
-    // 1. Scrape lists from DOM
     const lists = document.querySelectorAll('.depth-sortable-list');
-    const orderMap = {}; 
 
+    // 1. Scrape Lists
     lists.forEach(list => {
-        const group = list.dataset.group;
+        const groupKey = list.dataset.group;
         const ids = [...list.querySelectorAll('.depth-order-item')].map(el => el.dataset.playerId);
-        orderMap[group] = ids;
-        newDepthOrder.push(...ids); // Preserve the new order
+        gs.playerTeam.depthOrder[groupKey] = ids;
     });
 
-    // 2. Define Slots & Sides
-    const slotDefinitions = {
-        'QB': ['QB1'],
-        'RB': ['RB1', 'RB2'],
-        'WR': ['WR1', 'WR2', 'WR3', 'WR4', 'WR5'],
-        'OL': ['OL1', 'OL2', 'OL3'],
-        'DL': ['DL1', 'DL2', 'DL3', 'DL4'],
-        'LB': ['LB1', 'LB2', 'LB3'],
-        'DB': ['DB1', 'DB2', 'DB3', 'DB4', 'DB5'],
-        'ST': ['K', 'P']
-    };
+    // 2. Rebuild Logic (Sync slots to this new order)
+    if (typeof Game.rebuildDepthChartFromOrder === 'function') {
+        Game.rebuildDepthChartFromOrder(gs.playerTeam);
+    } 
+    // Or if accessing via module import:
+    // rebuildDepthChartFromOrder(gs.playerTeam);
 
-    const sides = {
-        'QB': 'offense', 'RB': 'offense', 'WR': 'offense', 'OL': 'offense',
-        'DL': 'defense', 'LB': 'defense', 'DB': 'defense', 'ST': 'special'
-    };
+    // 3. 🛑 CRITICAL FIX: Persist to Storage Immediately
+    saveGameState(); 
 
-    // 3. Priority Fill Algorithm
-    const maxDepth = 6; 
-    const assignedPlayers = { offense: new Set(), defense: new Set(), special: new Set() };
-
-    for (let rank = 0; rank < maxDepth; rank++) {
-        Object.keys(slotDefinitions).forEach(group => {
-            const playerList = orderMap[group] || [];
-            const targetSlots = slotDefinitions[group];
-            const side = sides[group];
-
-            if (rank < targetSlots.length && rank < playerList.length) {
-                const playerId = playerList[rank];
-                const slotName = targetSlots[rank];
-
-                if (!assignedPlayers[side].has(playerId)) {
-                    newDepthChart[side][slotName] = playerId;
-                    assignedPlayers[side].add(playerId);
-                }
-            }
-        });
-    }
-
-    // 4. Backfill
-    Object.keys(slotDefinitions).forEach(group => {
-        const side = sides[group];
-        const targetSlots = slotDefinitions[group];
-        const playerList = orderMap[group] || [];
-
-        targetSlots.forEach(slot => {
-            if (!newDepthChart[side][slot]) {
-                const filler = playerList.find(pid => !assignedPlayers[side].has(pid));
-                if (filler) {
-                    newDepthChart[side][slot] = filler;
-                    assignedPlayers[side].add(filler);
-                }
-            }
-        });
-    });
-
-    // 5. Special Teams
-    if (newDepthChart.offense['QB1']) {
-        newDepthChart.special['P'] = newDepthChart.offense['QB1'];
-    }
-
-    // 6. Save & Refresh
-    gs.playerTeam.depthChart = newDepthChart;
-    gs.playerTeam.depthOrder = newDepthOrder; // <--- This must be here!
-
+    // 4. Refresh UI to show the new "Starter" badges
     document.dispatchEvent(new CustomEvent('refresh-ui'));
 }
 
