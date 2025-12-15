@@ -1639,7 +1639,7 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
     };
 
     // --- Execute Setup ---
-    const defenseFormationData = defenseFormations[defense.formations.defense];
+    const defenseFormationData = defenseFormations[defense.formations.defense] || defenseFormations['3-1-3'];
     setupSide(offense, 'offense', offenseFormationData, true, initialOffenseStates);
     setupSide(defense, 'defense', defenseFormationData, false, initialOffenseStates);
 
@@ -1844,7 +1844,7 @@ function analyzePlaySuccess(lastPlayState, offensiveTeam, defensiveTeam) {
     const result = lastPlayState.result;
 
     // Calculate success metrics
-    const gainedYards = playResult.yards || 0;
+    const gainedYards = result.yards || 0;
     const completionStatus = result.passComplete ? 1 : 0; // 0-1 scale
     const wasTouchdown = result.isTouchdown ? 1 : 0;
     const wasIntercepted = result.interception ? 1 : 0;
@@ -4406,7 +4406,7 @@ const ensureStats = (player) => {
  */
 function resolvePlayerCollisions(playState) {
     const players = playState.activePlayers;
-    // 💡 TUNING: Slightly smaller radius for physics than visuals prevents "velcro" effect
+    //  Slightly smaller radius for physics than visuals prevents "velcro" effect
     const playerRadius = PLAYER_SEPARATION_RADIUS * 0.85;
 
     for (let i = 0; i < players.length; i++) {
@@ -4426,7 +4426,12 @@ function resolvePlayerCollisions(playState) {
             let dist = Math.sqrt(dx * dx + dy * dy);
 
             // Prevent division by zero
-            if (dist < 0.05) { dx = 0.1; dist = 0.1; }
+            if (dist < 0.05) {
+                // Add random noise to separate them naturally
+                dx = (Math.random() - 0.5) * 0.1;
+                dy = (Math.random() - 0.5) * 0.1;
+                dist = Math.sqrt(dx * dx + dy * dy);
+            }
 
             if (dist < playerRadius) {
                 // Calculate push force (softer = less stutter)
@@ -4522,7 +4527,7 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
         tick: 0,
         maxTicks: 1000,
         type: type,
-        assignments: assignments,
+        assignments: deepClone(play.assignments || {}),
         // ... legacy flags ...
         yards: 0, touchdown: false, turnover: false, incomplete: false,
         sack: false, safety: false, touchback: false,
@@ -4536,7 +4541,7 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
         visualizationFrames: [],
         resolvedDepth: null // Will be populated in setupInitialPlayerStates
     };
-    playState.assignments = deepClone(play.assignments || {});
+
 
 
     let firstDownY = 0;
@@ -4599,7 +4604,7 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
     try {
         const timeDelta = fastSim ? TICK_DURATION_SECONDS * 10 : TICK_DURATION_SECONDS;
         const loopType = playState.type || 'pass';
-        
+
 
         while (playState.playIsLive && playState.tick < playState.maxTicks) {
             playState.tick++;
@@ -4732,7 +4737,7 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
                             recoverer.isBallCarrier = true;
                             recoverer.action = 'run_path';
 
-                            playState.possessionChanged = (recoverer.isOffense !== ballCarrierState?.isOffense);
+                            playState.possessionChanged = !recoverer.isOffense;
                             playState.returnStartY = recoverer.y;
 
                             // Optional stat event
@@ -4793,6 +4798,23 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
     // ===========================================================
     // --- 6. POST-PLAY CALCULATION ---
     // ===========================================================
+
+    // Calculate Return Yards 
+    if (playState.returnStartY !== null && ballCarrierState) {
+        // Return goes opposite direction of offense? 
+        // Actually, in your engine, everyone moves on Absolute Y. 
+        // If possession changed, they are running towards Y=0 or Y=120 depending on team.
+        // Simplified: Just take the absolute difference traveled.
+        const returnYards = Math.abs(ballCarrierState.y - playState.returnStartY);
+
+        if (returnYards > 0) {
+            playState.statEvents.push({
+                type: 'return',
+                playerId: ballCarrierState.id,
+                yards: returnYards
+            });
+        }
+    }
 
     // Clean up "clean" plays (ran out of time or simple tackle)
     if (playState.playIsLive && !playState.touchdown && !playState.safety) {
@@ -5919,7 +5941,7 @@ function simulateGame(homeTeam, awayTeam, options = {}) {
                             fastSim ? null : gameLog
                         );
 
-                        const offensivePlayKey = audibleResult.playKey;
+                        offensivePlayKey = audibleResult.playKey;
 
                         if (!fastSim) {
                             gameLog.push(`🏈 **Offense:** ${offensivePlaybook[offensivePlayKey]?.name || offensivePlayKey}`);
