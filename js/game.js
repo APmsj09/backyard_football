@@ -6806,43 +6806,38 @@ function advanceToOffseason() {
  * Update roster depth order based on newOrder[] (array of player IDs).
  * Persists to the player's team object and dispatches a UI refresh.
  */
-export function updateDepthOrder(newOrder) {
-    if (!game || !game.playerTeam) {
-        console.warn("updateDepthOrder: game or playerTeam missing.");
-        return;
+function updateDepthChart(playerId, slotName, side) {
+    const team = game?.playerTeam;
+    if (!team || !team.depthOrder) return;
+
+    // 1. Identify the Position Group (e.g., "QB" from "QB1")
+    let posKey = slotName.replace(/\d+/g, '');
+    
+    // Normalize to your 7 buckets
+    if (['OT','OG','C'].includes(posKey)) posKey = 'OL';
+    if (posKey === 'FB') posKey = 'RB';
+    if (posKey === 'TE') posKey = 'WR';
+    if (['CB','S'].includes(posKey)) posKey = 'DB';
+    if (['DE','DT'].includes(posKey)) posKey = 'DL';
+
+    // 2. Update the Master List (depthOrder)
+    // We move the dragged player to the #1 spot in their group list
+    const groupList = team.depthOrder[posKey] || [];
+    
+    // Remove if existing
+    const existingIndex = groupList.indexOf(playerId);
+    if (existingIndex > -1) {
+        groupList.splice(existingIndex, 1);
     }
-    const team = game.playerTeam;
-    if (!Array.isArray(team.roster)) {
-        console.warn("updateDepthOrder: roster missing.");
-        return;
-    }
+    
+    // Add to front (Priority 1)
+    groupList.unshift(playerId);
+    team.depthOrder[posKey] = groupList;
 
-    // Build lookup: id -> player object
-    const rosterObjects = getRosterObjects(team);
-    const map = {};
-    rosterObjects.forEach(p => { if (p && p.id) map[p.id] = p; });
-
-    // Rebuild roster in the requested order (preserve objects)
-    const reordered = [];
-    for (const id of (Array.isArray(newOrder) ? newOrder : [])) {
-        if (map[id]) reordered.push(map[id].id);
-    }
-
-    // Append any missing players (safety)
-    rosterObjects.forEach(p => {
-        if (!reordered.includes(p.id)) reordered.push(p.id);
-    });
-
-    // Apply the new roster order (IDs)
-    team.roster = reordered.slice();
-
-    // Persist `depthOrder` as the authoritative order for starter selection
-    team.depthOrder = reordered.slice();
-
-    // Notify UI/consumers
-    try { document.dispatchEvent(new CustomEvent("refresh-ui")); } catch (e) { /* ignore */ }
-
-    console.log("updateDepthOrder applied:", reordered);
+    // 3. Trigger Rebuild to sync everything
+    rebuildDepthChartFromOrder(team);
+    
+    console.log(`Moved ${playerId} to top of ${posKey} depth via visual drag.`);
 }
 
 /**
