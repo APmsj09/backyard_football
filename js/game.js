@@ -126,14 +126,14 @@ export function rebuildDepthChartFromOrder(team) {
                 const p = getPlayer(pid);
                 if (p) {
                     let pos = p.pos || p.favoriteOffensivePosition || 'WR'; // Default to WR, not ATH
-                    
+
                     // Normalize Logic: Map EVERYTHING to the 7 Allowed Positions
                     if (['FB'].includes(pos)) pos = 'RB';
-                    if (['TE', 'ATH', 'K', 'P'].includes(pos)) pos = 'WR'; 
-                    if (['OT','OG','C'].includes(pos)) pos = 'OL';
-                    if (['DE','DT','NT'].includes(pos)) pos = 'DL';
-                    if (['CB','S','FS','SS'].includes(pos)) pos = 'DB';
-                    
+                    if (['TE', 'ATH', 'K', 'P'].includes(pos)) pos = 'WR';
+                    if (['OT', 'OG', 'C'].includes(pos)) pos = 'OL';
+                    if (['DE', 'DT', 'NT'].includes(pos)) pos = 'DL';
+                    if (['CB', 'S', 'FS', 'SS'].includes(pos)) pos = 'DB';
+
                     if (team.depthOrder[pos]) team.depthOrder[pos].push(pid);
                 }
             });
@@ -159,17 +159,17 @@ export function rebuildDepthChartFromOrder(team) {
     // 4. Fill Offense
     const offFormKey = team.formations.offense;
     const offSlots = offenseFormations[offFormKey]?.slots || [];
-    
+
     offSlots.forEach(slot => {
         let posKey = slot.replace(/\d+/g, '');
-        
+
         // Normalize Slot Names to the 7 Allowed Keys
-        if (['OT','OG','C'].includes(posKey)) posKey = 'OL';
+        if (['OT', 'OG', 'C'].includes(posKey)) posKey = 'OL';
         if (posKey === 'FB') posKey = 'RB';
-        if (posKey === 'TE') posKey = 'WR'; 
+        if (posKey === 'TE') posKey = 'WR';
 
         let pid = getNext(posKey);
-        
+
         // Fallbacks
         if (!pid) {
             if (posKey === 'WR') pid = getNext('RB');
@@ -184,10 +184,10 @@ export function rebuildDepthChartFromOrder(team) {
 
     defSlots.forEach(slot => {
         let posKey = slot.replace(/\d+/g, '');
-        
+
         // Normalize Slot Names
-        if (['CB','S'].includes(posKey)) posKey = 'DB';
-        if (['DE','DT'].includes(posKey)) posKey = 'DL';
+        if (['CB', 'S'].includes(posKey)) posKey = 'DB';
+        if (['DE', 'DT'].includes(posKey)) posKey = 'DL';
 
         let pid = getNext(posKey);
 
@@ -204,7 +204,7 @@ export function rebuildDepthChartFromOrder(team) {
     // No K/P buckets exist, so we use an Athlete (usually QB or RB)
     const qb1 = team.depthChart.offense['QB1'];
     const rb1 = team.depthChart.offense['RB1'];
-    
+
     team.depthChart.special['K'] = null; // No kicking
     team.depthChart.special['P'] = qb1 || rb1 || null; // QB Punts
 }
@@ -408,8 +408,6 @@ function diagnosePlay(pState, truePlayType, offensivePlayKey, tick) {
     const iq = pState.playbookIQ || 50;
 
     // 1. Minimum Ticks to Read
-    // Higher IQ = fewer ticks. 99 IQ = 2 ticks. 50 IQ = 4 ticks.
-    // This formula can be tuned, but it creates a 2-4 tick "read" window.
     const minTicksToRead = Math.max(30, Math.round((100 - iq) / 20) * 5 + 10);
 
     if (tick < minTicksToRead) {
@@ -417,21 +415,17 @@ function diagnosePlay(pState, truePlayType, offensivePlayKey, tick) {
     }
 
     // 2. Play-Action Check (The "Inaccuracy" part)
-    const isPlayAction = (truePlayType === 'pass' && offensivePlayKey.includes('PA_'));
+    // FIX: Safely handle null/undefined offensivePlayKey
+    const safeKey = offensivePlayKey || '';
+    const isPlayAction = (truePlayType === 'pass' && safeKey.includes('PA_'));
 
     if (isPlayAction) {
-        // Higher IQ = lower chance to be fooled
-        // 99 IQ: (100 - 99) / 100 = 1% chance
-        // 50 IQ: (100 - 50) / 100 = 50% chance
         const fooledChance = (100 - iq) / 100;
-
         if (Math.random() < fooledChance) {
             return 'run'; // --- FOOLED! --- Thinks it's a run.
         }
     }
 
-    // 3. Not fooled, or not a PA pass.
-    // (We could add logic for "Draw" plays fooling them, but this is a great start)
     return truePlayType; // Returns the correct play ('run' or 'pass')
 }
 
@@ -5695,7 +5689,7 @@ function simulateGame(homeTeam, awayTeam, options = {}) {
         let currentHalf = 1, drivesThisGame = 0;
         let nextDriveStartBallOn = 20;
 
-        // 💡 NEW: Track play calls for diversity checking (max 5 recent plays per team)
+        // Track play calls
         const homeTeamPlayHistory = [];
         const awayTeamPlayHistory = [];
         const maxHistoryLength = 5;
@@ -5704,21 +5698,17 @@ function simulateGame(homeTeam, awayTeam, options = {}) {
         const coinFlipWinner = Math.random() < 0.5 ? homeTeam : awayTeam;
         let possessionTeam = coinFlipWinner;
         let receivingTeamSecondHalf = (possessionTeam.id === homeTeam.id) ? awayTeam : homeTeam;
-
-        // Track the current offense explicitly
         let currentOffense = coinFlipWinner;
         let gameForfeited = false;
 
         while (drivesThisGame < totalDrivesPerHalf * 2 && !gameForfeited) {
 
-            // --- HALFTIME LOGIC ---
+            // --- HALFTIME ---
             if (drivesThisGame === totalDrivesPerHalf) {
                 currentHalf = 2;
                 if (!fastSim) gameLog.push(`==== HALFTIME ==== Score: ${awayTeam.name} ${awayScore} - ${homeTeam.name} ${homeScore}`);
-
                 const allGamePlayers = [...getRosterObjects(homeTeam), ...getRosterObjects(awayTeam)];
                 allGamePlayers.forEach(p => { if (p) p.fatigue = Math.max(0, (p.fatigue || 0) - 40); });
-
                 currentOffense = receivingTeamSecondHalf;
                 nextDriveStartBallOn = 20;
                 if (!fastSim) gameLog.push(`-- Second Half Kickoff: ${currentOffense.name} receives --`);
@@ -5727,6 +5717,7 @@ function simulateGame(homeTeam, awayTeam, options = {}) {
             const offense = currentOffense;
             const defense = (offense.id === homeTeam.id) ? awayTeam : homeTeam;
 
+            // Check Rosters
             const checkRoster = (team) => {
                 const roster = getRosterObjects(team);
                 return roster.filter(p => p && p.status?.duration === 0).length < MIN_HEALTHY_PLAYERS;
@@ -5747,6 +5738,7 @@ function simulateGame(homeTeam, awayTeam, options = {}) {
             if (!fastSim) gameLog.push(`-- Drive ${drivesThisGame + 1} (H${currentHalf}): ${offense.name} ball on ${yardLineText} --`);
 
             while (driveActive && down <= 4) {
+                // Safety check inside drive
                 const healthyOffense = getRosterObjects(offense).filter(p => p && p.status?.duration === 0).length;
                 const healthyDefense = getRosterObjects(defense).filter(p => p && p.status?.duration === 0).length;
 
@@ -5757,14 +5749,16 @@ function simulateGame(homeTeam, awayTeam, options = {}) {
                     break;
                 }
 
+                // 🛑 DEFINE VARIABLES HERE (Outer Scope of the Play Loop)
                 const shouldPunt = determinePuntDecision(down, yardsToGo, ballOn);
                 let result;
                 let scoreDiff;
                 let drivesRemainingInGame;
-                let offensivePlayKey;
-                let defensivePlayKey;
-                let playResult; // 💡 Define playResult in outer scope
+                let offensivePlayKey = ''; // Default to empty string
+                let defensivePlayKey = ''; // Default to empty string
+                let playResult;
 
+                // --- PUNT LOGIC ---
                 if (shouldPunt) {
                     offense.formations.offense = 'Punt';
                     offensivePlayKey = 'Punt_Punt';
@@ -5783,12 +5777,8 @@ function simulateGame(homeTeam, awayTeam, options = {}) {
                         options
                     );
 
-                    // 💡 FIX: Extract playResult here
                     playResult = result.playResult;
-
-                    if (!fastSim && result.visualizationFrames) {
-                        allVisualizationFrames.push(...result.visualizationFrames);
-                    }
+                    if (!fastSim && result.visualizationFrames) allVisualizationFrames.push(...result.visualizationFrames);
 
                     driveActive = false;
 
@@ -5796,13 +5786,11 @@ function simulateGame(homeTeam, awayTeam, options = {}) {
                     const isDefensiveTD = isTD && playResult.possessionChange;
 
                     if (isTD && !playResult.possessionChange) {
-                        if (offense.id === homeTeam.id) homeScore += 6;
-                        else awayScore += 6;
+                        if (offense.id === homeTeam.id) homeScore += 6; else awayScore += 6;
                         currentOffense = defense;
                         nextDriveStartBallOn = 20;
                     } else if (isDefensiveTD) {
-                        if (defense.id === homeTeam.id) homeScore += 6;
-                        else awayScore += 6;
+                        if (defense.id === homeTeam.id) homeScore += 6; else awayScore += 6;
                         currentOffense = offense;
                         nextDriveStartBallOn = 20;
                     } else if (playResult.outcome === 'touchback') {
@@ -5816,7 +5804,7 @@ function simulateGame(homeTeam, awayTeam, options = {}) {
                     }
 
                 } else {
-                    // --- NORMAL PLAY ---
+                    // --- NORMAL PLAY LOGIC ---
                     if (!fastSim) {
                         const yardLineText = ballOn <= 50 ? `own ${ballOn}` : `opponent ${100 - ballOn}`;
                         const isGoalToGo = (ballOn + 10) + yardsToGo >= (FIELD_LENGTH - 10);
@@ -5832,19 +5820,21 @@ function simulateGame(homeTeam, awayTeam, options = {}) {
                     drivesRemainingInGame = (currentHalf === 1 ? totalDrivesPerHalf : 0) + drivesRemainingInHalf;
 
                     const offensivePlayKey_initial = determinePlayCall(offense, defense, down, yardsToGo, ballOn, scoreDiff, fastSim ? null : gameLog, drivesRemainingInGame);
+
                     const offenseFormationName = offense.formations.offense;
                     const defensiveFormationName = determineDefensiveFormation(defense, offenseFormationName, down, yardsToGo);
                     defense.formations.defense = defensiveFormationName;
-                    defensivePlayKey = determineDefensivePlayCall(defense, offense, down, yardsToGo, ballOn, scoreDiff, fastSim ? null : gameLog, drivesRemainingInGame);
-                    const audibleResult = aiCheckAudible(offense, offensivePlayKey_initial, defense, defensivePlayKey, fastSim ? null : gameLog);
-                    offensivePlayKey = audibleResult.playKey;
 
+                    defensivePlayKey = determineDefensivePlayCall(defense, offense, down, yardsToGo, ballOn, scoreDiff, fastSim ? null : gameLog, drivesRemainingInGame);
+
+                    const audibleResult = aiCheckAudible(offense, offensivePlayKey_initial, defense, defensivePlayKey, fastSim ? null : gameLog);
+                    offensivePlayKey = audibleResult.playKey; // ✅ Assigned correctly here
+
+                    // Log history
                     const offensePlayHistory = offense.id === homeTeam.id ? homeTeamPlayHistory : awayTeamPlayHistory;
                     if (!fastSim && offensivePlayKey) {
                         offensePlayHistory.push(offensivePlayKey);
-                        if (offensePlayHistory.length > maxHistoryLength) {
-                            offensePlayHistory.shift();
-                        }
+                        if (offensePlayHistory.length > maxHistoryLength) offensePlayHistory.shift();
                     }
 
                     if (!fastSim) {
@@ -5854,12 +5844,12 @@ function simulateGame(homeTeam, awayTeam, options = {}) {
                         if (gameLog) gameLog.push(`🛡️ **Defense:** ${defPlayName}`);
                     }
 
+                    // ✅ NOW CALL RESOLVE PLAY WITH DEFINED KEY
                     result = resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey,
                         { gameLog: fastSim ? null : gameLog, weather, ballOn, ballHash, down, yardsToGo },
                         options
                     );
 
-                    // 💡 FIX: Extract playResult here
                     playResult = result.playResult;
 
                     if (!fastSim && result.visualizationFrames) {
@@ -5879,13 +5869,11 @@ function simulateGame(homeTeam, awayTeam, options = {}) {
                     autoMakeSubstitutions(offense, { thresholdFatigue: 40, maxSubs: 1, chance: 0.8 }, gameLog);
                     autoMakeSubstitutions(defense, { thresholdFatigue: 40, maxSubs: 1, chance: 0.8 }, gameLog);
                 }
-
                 // --- 5. PROCESS PLAY RESULT (With Fixed playResult Variable) ---
 
                 // --- 1. TOUCHDOWN ---
                 if (playResult.score === 'TD' && !shouldPunt) {
                     const wasOffensiveTD = !playResult.possessionChange;
-
                     if (wasOffensiveTD) {
                         ballOn = 100;
                         const goesForTwo = Math.random() > 0.85;
@@ -5893,7 +5881,6 @@ function simulateGame(homeTeam, awayTeam, options = {}) {
                         const conversionBallOn = goesForTwo ? 95 : 98;
                         const conversionYardsToGo = 100 - conversionBallOn;
                         if (!fastSim) gameLog.push(`🏈 --- ${points}-Point Conversion Attempt ---`);
-
                         offense.formations.offense = offense.coach.preferredOffense || 'Balanced';
                         const conversionOffensePlayKey = determinePlayCall(offense, defense, 1, conversionYardsToGo, conversionBallOn, scoreDiff, fastSim ? null : gameLog, drivesRemainingInGame);
                         const conversionDefenseFormation = determineDefensiveFormation(defense, offense.formations.offense, 1, conversionYardsToGo);
@@ -5904,14 +5891,9 @@ function simulateGame(homeTeam, awayTeam, options = {}) {
                             { gameLog: fastSim ? null : gameLog, weather, ballOn: conversionBallOn, ballHash: 'M', down: 1, yardsToGo: conversionYardsToGo },
                             options
                         );
-
-                        if (!fastSim && conversionResult.visualizationFrames) {
-                            allVisualizationFrames.push(...conversionResult.visualizationFrames);
-                        }
-
+                        if (!fastSim && conversionResult.visualizationFrames) allVisualizationFrames.push(...conversionResult.visualizationFrames);
                         const convIsTD = conversionResult.playResult.score === 'TD';
                         const convIsDefensiveScore = convIsTD && conversionResult.playResult.possessionChange;
-
                         if (convIsTD && !convIsDefensiveScore) {
                             if (!fastSim) gameLog.push(`✅ ${points}-point conversion GOOD!`);
                             if (offense.id === homeTeam.id) homeScore += (6 + points); else awayScore += (6 + points);
@@ -5924,25 +5906,19 @@ function simulateGame(homeTeam, awayTeam, options = {}) {
                             if (offense.id === homeTeam.id) homeScore += 6; else awayScore += 6;
                         }
                         scoreDiff = offense.id === homeTeam.id ? homeScore - awayScore : awayScore - homeScore;
-
                     } else {
                         if (!fastSim) gameLog.push(`🎉 DEFENSIVE TOUCHDOWN! 6 points for ${defense.name}!`);
                         if (defense.id === homeTeam.id) homeScore += 6; else awayScore += 6;
                         scoreDiff = offense.id === homeTeam.id ? homeScore - awayScore : awayScore - homeScore;
                     }
-
                     if (wasOffensiveTD) currentOffense = defense; else currentOffense = offense;
                     driveActive = false;
                     nextDriveStartBallOn = 20;
-
-                    // --- 2. SAFETY ---
                 } else if (playResult.safety && !shouldPunt) {
                     if (!fastSim) gameLog.push(`SAFETY! 2 points for ${defense.name}!`);
                     if (defense.id === homeTeam.id) homeScore += 2; else awayScore += 2;
                     driveActive = false;
                     nextDriveStartBallOn = 20;
-
-                    // --- 3. TURNOVER ---
                 } else if (playResult.possessionChange && !shouldPunt) {
                     driveActive = false;
                     currentOffense = defense;
@@ -5951,7 +5927,6 @@ function simulateGame(homeTeam, awayTeam, options = {}) {
                     let turnoverSpot = 100 - absoluteBallOn;
                     turnoverSpot = Math.round(Math.max(1, Math.min(99, turnoverSpot)));
                     nextDriveStartBallOn = turnoverSpot;
-
                     if (!fastSim) {
                         const spotText = nextDriveStartBallOn <= 50 ? `own ${nextDriveStartBallOn}` : `opponent ${100 - nextDriveStartBallOn}`;
                         if (playResult.outcome === 'incomplete' && down > 4) {
@@ -5961,16 +5936,11 @@ function simulateGame(homeTeam, awayTeam, options = {}) {
                             gameLog.push(`🔄 Possession changes! Ball spotted at ${spotText}.`);
                         }
                     }
-
-                    // --- 4. INCOMPLETE ---
                 } else if (playResult.outcome === 'incomplete' && !shouldPunt) {
                     down++;
-
-                    // --- 5. REGULAR GAIN ---
                 } else if (!shouldPunt) {
                     const wasGoalToGo = ((ballOn + 10) + yardsToGo) >= (FIELD_LENGTH - 10);
                     yardsToGo -= playResult.yards;
-
                     if (yardsToGo <= 0) {
                         down = 1;
                         const newYardsToGoalLine = 100 - ballOn;
@@ -6812,31 +6782,31 @@ function updateDepthChart(playerId, slotName, side) {
 
     // 1. Identify the Position Group (e.g., "QB" from "QB1")
     let posKey = slotName.replace(/\d+/g, '');
-    
+
     // Normalize to your 7 buckets
-    if (['OT','OG','C'].includes(posKey)) posKey = 'OL';
+    if (['OT', 'OG', 'C'].includes(posKey)) posKey = 'OL';
     if (posKey === 'FB') posKey = 'RB';
     if (posKey === 'TE') posKey = 'WR';
-    if (['CB','S'].includes(posKey)) posKey = 'DB';
-    if (['DE','DT'].includes(posKey)) posKey = 'DL';
+    if (['CB', 'S'].includes(posKey)) posKey = 'DB';
+    if (['DE', 'DT'].includes(posKey)) posKey = 'DL';
 
     // 2. Update the Master List (depthOrder)
     // We move the dragged player to the #1 spot in their group list
     const groupList = team.depthOrder[posKey] || [];
-    
+
     // Remove if existing
     const existingIndex = groupList.indexOf(playerId);
     if (existingIndex > -1) {
         groupList.splice(existingIndex, 1);
     }
-    
+
     // Add to front (Priority 1)
     groupList.unshift(playerId);
     team.depthOrder[posKey] = groupList;
 
     // 3. Trigger Rebuild to sync everything
     rebuildDepthChartFromOrder(team);
-    
+
     console.log(`Moved ${playerId} to top of ${posKey} depth via visual drag.`);
 }
 

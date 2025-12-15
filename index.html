@@ -4,7 +4,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>My Football GM</title>
+  <title>Backyard Football GM</title>
 
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -23,16 +23,129 @@
             sans: ['Inter', 'sans-serif'],
             display: ['Bangers', 'cursive'],
           },
-          gridTemplateColumns: {
-            '17': 'repeat(17, minmax(0, 1fr))',
-          },
-          gridColumn: {
-            'span-17': 'span 17 / span 17',
+          colors: {
+            field: '#059669',
+            'field-dark': '#047857',
           }
         }
       }
     }
   </script>
+
+  <style>
+    /* Custom Scrollbar for nicer UI */
+    ::-webkit-scrollbar {
+      width: 8px;
+      height: 8px;
+    }
+
+    ::-webkit-scrollbar-track {
+      background: #f1f1f1;
+    }
+
+    ::-webkit-scrollbar-thumb {
+      background: #cbd5e1;
+      border-radius: 4px;
+    }
+
+    ::-webkit-scrollbar-thumb:hover {
+      background: #94a3b8;
+    }
+
+    .screen {
+      animation: fadeIn 0.3s ease-out;
+    }
+
+    @keyframes fadeIn {
+      from {
+        opacity: 0;
+      }
+
+      to {
+        opacity: 1;
+      }
+    }
+
+    /* Dragging Visuals */
+    .dragging {
+      opacity: 0.5;
+      border: 2px dashed #f59e0b;
+    }
+
+    .drag-over {
+      background-color: rgba(251, 191, 36, 0.2);
+      border: 2px dashed #d97706;
+    }
+
+    /* Player Slot Visuals */
+    .visual-field-container {
+      position: relative;
+      width: 100%;
+      height: 100%;
+      background: #15803d;
+      overflow: hidden;
+    }
+
+    .los-marker {
+      position: absolute;
+      left: 0;
+      width: 100%;
+      height: 2px;
+      background-color: #3b82f6;
+      z-index: 5;
+      pointer-events: none;
+    }
+
+    .player-slot-visual {
+      position: absolute;
+      width: 80px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      cursor: pointer;
+      transition: transform 0.1s;
+    }
+
+    .player-slot-visual:hover {
+      transform: translate(-50%, -50%) scale(1.1);
+      z-index: 50;
+    }
+
+    .slot-label {
+      font-size: 10px;
+      font-weight: bold;
+      color: rgba(255, 255, 255, 0.8);
+      text-shadow: 1px 1px 2px black;
+      margin-bottom: 2px;
+    }
+
+    .slot-overall {
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: bold;
+      color: white;
+      border: 2px solid white;
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+      /* <--- FIXED */
+      font-size: 14px;
+      margin-bottom: 2px;
+      background-color: #6b7280;
+    }
+
+    .slot-select {
+      width: 100%;
+      font-size: 10px;
+      padding: 2px;
+      border-radius: 4px;
+      border: 1px solid #ccc;
+      opacity: 0.9;
+      cursor: pointer;
+    }
+  </style>
 </head>
 
 <body class="bg-gray-100 text-gray-900 antialiased h-screen overflow-hidden flex flex-col">
@@ -40,8 +153,8 @@
   <div class="container mx-auto p-4 flex-grow flex flex-col overflow-hidden">
 
     <section id="start-screen" class="screen text-center flex flex-col items-center justify-center h-full">
-      <h1 class="font-display text-7xl text-amber-600 mb-6 tracking-wider drop-shadow-md">Football GM</h1>
-      <p class="text-xl text-gray-600 mb-10 font-medium">Build your dynasty. Win the championship.</p>
+      <h1 class="font-display text-7xl text-amber-600 mb-6 tracking-wider drop-shadow-md">Backyard GM</h1>
+      <p class="text-xl text-gray-600 mb-10 font-medium">Build your 7v7 dynasty. Win the championship.</p>
 
       <div class="flex flex-col items-center gap-6 w-full max-w-md">
         <button id="start-game-btn"
@@ -68,25 +181,26 @@
       <p class="text-gray-400 mb-8 text-xl">Please wait while we create players, teams, and rivalries.</p>
 
       <div class="w-full max-w-lg bg-gray-800 rounded-full h-8 overflow-hidden shadow-inner border border-gray-700">
-        <div id="loading-progress" class="h-full bg-gradient-to-r from-amber-500 to-yellow-400 rounded-full transition-all duration-300 ease-out relative"
+        <div id="loading-progress"
+          class="h-full bg-gradient-to-r from-amber-500 to-yellow-400 rounded-full transition-all duration-300 ease-out relative"
           style="width: 0%;" role="progressbar" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">
-            <div class="absolute inset-0 bg-white opacity-20 animate-pulse"></div>
+          <div class="absolute inset-0 bg-white opacity-20 animate-pulse"></div>
         </div>
       </div>
 
       <p id="loading-progress-text" class="mt-4 text-amber-400 text-2xl font-bold tracking-wide font-mono">0%</p>
-
       <p id="loading-message" class="mt-8 text-gray-500 italic text-lg transition-opacity duration-500 h-8">
-        Initializing draft data...
+        Initializing data...
       </p>
     </section>
 
     <section id="team-creation-screen" class="screen hidden flex flex-col items-center justify-center h-full">
       <div class="bg-white p-10 rounded-2xl shadow-2xl max-w-2xl w-full border border-gray-100">
         <h2 class="text-4xl font-bold mb-8 text-center text-gray-800">Create Your Team</h2>
-        
+
         <div class="mb-8">
-          <label for="custom-team-name" class="block text-sm font-bold text-gray-700 mb-2 uppercase tracking-wider">Team Name</label>
+          <label for="custom-team-name" class="block text-sm font-bold text-gray-700 mb-2 uppercase tracking-wider">Team
+            Name</label>
           <input type="text" id="custom-team-name"
             class="w-full p-4 text-lg border-2 border-gray-300 rounded-xl focus:ring-4 focus:ring-amber-500/20 focus:border-amber-500 outline-none transition font-bold text-gray-800 placeholder-gray-400"
             placeholder="e.g. The Mighty Ducks">
@@ -94,8 +208,7 @@
 
         <div class="mb-10">
           <p class="text-sm font-bold text-gray-500 mb-3 uppercase tracking-wider">Suggestions</p>
-          <div id="team-name-suggestions" class="flex flex-wrap gap-3">
-            </div>
+          <div id="team-name-suggestions" class="flex flex-wrap gap-3"></div>
         </div>
 
         <button id="confirm-team-btn"
@@ -106,7 +219,8 @@
     </section>
 
     <section id="draft-screen" class="screen hidden h-full flex flex-col overflow-hidden">
-      <div id="draft-header" class="flex-shrink-0 p-4 bg-gray-900 text-white rounded-xl shadow-lg mb-4 flex justify-between items-center border-b-4 border-amber-500">
+      <div id="draft-header"
+        class="flex-shrink-0 p-4 bg-gray-900 text-white rounded-xl shadow-lg mb-4 flex justify-between items-center border-b-4 border-amber-500">
         <div>
           <h2 class="text-3xl font-display tracking-wide">Season <span id="draft-year">?</span> Draft</h2>
           <p class="text-sm text-gray-400 font-medium">Select your future stars.</p>
@@ -114,67 +228,83 @@
         <div class="text-right bg-gray-800 px-6 py-2 rounded-lg border border-gray-700">
           <p class="text-xs text-gray-500 uppercase tracking-widest font-bold mb-1">On The Clock</p>
           <div class="flex items-baseline justify-end gap-3">
-             <span class="text-3xl font-black text-white" id="draft-pick-number">#1</span>
-             <span class="text-xl text-amber-400 font-bold truncate max-w-[200px]" id="draft-picking-team">?</span>
+            <span class="text-3xl font-black text-white" id="draft-pick-number">#1</span>
+            <span class="text-xl text-amber-400 font-bold truncate max-w-[200px]" id="draft-picking-team">?</span>
           </div>
         </div>
       </div>
 
       <div class="flex-grow grid grid-cols-1 lg:grid-cols-12 gap-4 min-h-0">
-        
         <div class="lg:col-span-9 bg-white rounded-xl shadow-md flex flex-col overflow-hidden border border-gray-200">
           <div class="p-3 border-b border-gray-100 flex justify-between items-center bg-gray-50">
             <h3 class="text-lg font-bold text-gray-700">Available Players</h3>
             <div class="flex gap-2">
-              <input type="text" id="draft-search" placeholder="Search..." class="p-2 border border-gray-300 rounded-lg text-sm w-48 focus:border-amber-500 outline-none">
-              <select id="draft-filter-pos" class="p-2 border border-gray-300 rounded-lg text-sm bg-white focus:border-amber-500 outline-none">
+              <input type="text" id="draft-search" placeholder="Search..."
+                class="p-2 border border-gray-300 rounded-lg text-sm w-48 focus:border-amber-500 outline-none">
+              <select id="draft-filter-pos"
+                class="p-2 border border-gray-300 rounded-lg text-sm bg-white focus:border-amber-500 outline-none">
                 <option value="">All Positions</option>
                 <option value="QB">QB</option>
                 <option value="RB">RB</option>
                 <option value="WR">WR</option>
-                <option value="TE">TE</option>
                 <option value="OL">OL</option>
                 <option value="DL">DL</option>
                 <option value="LB">LB</option>
                 <option value="DB">DB</option>
               </select>
-              <select id="draft-sort" class="p-2 border border-gray-300 rounded-lg text-sm bg-white focus:border-amber-500 outline-none"></select>
+              <select id="draft-sort"
+                class="p-2 border border-gray-300 rounded-lg text-sm bg-white focus:border-amber-500 outline-none"></select>
             </div>
           </div>
-
           <div class="overflow-auto flex-grow">
             <table class="min-w-full text-sm w-full">
               <thead class="bg-gray-100 text-gray-600 sticky top-0 z-10 shadow-sm text-xs uppercase">
                 <tr>
-                  <th class="py-3 px-3 text-left font-bold border-b cursor-pointer hover:bg-gray-200" data-sort="name">Name<span class="sort-indicator"></span></th>
-                  <th class="py-3 px-3 text-center font-bold border-b cursor-pointer hover:bg-gray-200" data-sort="age">Age<span class="sort-indicator"></span></th>
-                  <th class="py-3 px-3 text-center font-bold border-b cursor-pointer hover:bg-gray-200" data-sort="potential">Pot<span class="sort-indicator"></span></th>
+                  <th class="py-3 px-3 text-left font-bold border-b cursor-pointer hover:bg-gray-200" data-sort="name">
+                    Name<span class="sort-indicator"></span></th>
+                  <th class="py-3 px-3 text-center font-bold border-b cursor-pointer hover:bg-gray-200" data-sort="age">
+                    Age<span class="sort-indicator"></span></th>
+                  <th class="py-3 px-3 text-center font-bold border-b cursor-pointer hover:bg-gray-200"
+                    data-sort="potential">Pot<span class="sort-indicator"></span></th>
                   <th class="py-3 px-3 text-center font-bold border-b">Rel</th>
-                  <th class="py-3 px-3 text-center font-bold border-b cursor-pointer hover:bg-gray-200" data-sort="position">Pos<span class="sort-indicator"></span></th>
-                  <th class="py-3 px-3 text-center font-bold border-b cursor-pointer hover:bg-gray-200" data-sort="height">H<span class="sort-indicator"></span></th>
-                  <th class="py-3 px-3 text-center font-bold border-b cursor-pointer hover:bg-gray-200" data-sort="weight">W<span class="sort-indicator"></span></th>
-                  <th class="py-3 px-3 text-center font-bold border-b cursor-pointer hover:bg-gray-200 text-blue-600" data-sort="speed">Spd<span class="sort-indicator"></span></th>
-                  <th class="py-3 px-3 text-center font-bold border-b cursor-pointer hover:bg-gray-200" data-sort="strength">Str<span class="sort-indicator"></span></th>
-                  <th class="py-3 px-3 text-center font-bold border-b cursor-pointer hover:bg-gray-200" data-sort="agility">Agi<span class="sort-indicator"></span></th>
-                  <th class="py-3 px-3 text-center font-bold border-b cursor-pointer hover:bg-gray-200" data-sort="stamina">Sta<span class="sort-indicator"></span></th>
-                  <th class="py-3 px-3 text-center font-bold border-b cursor-pointer hover:bg-gray-200" data-sort="playbookIQ">IQ<span class="sort-indicator"></span></th>
-                  <th class="py-3 px-3 text-center font-bold border-b cursor-pointer hover:bg-gray-200" data-sort="toughness">Tgh<span class="sort-indicator"></span></th>
-                  <th class="py-3 px-3 text-center font-bold border-b cursor-pointer hover:bg-gray-200" data-sort="throwingAccuracy">Thr<span class="sort-indicator"></span></th>
-                  <th class="py-3 px-3 text-center font-bold border-b cursor-pointer hover:bg-gray-200" data-sort="catchingHands">Hnd<span class="sort-indicator"></span></th>
-                  <th class="py-3 px-3 text-center font-bold border-b cursor-pointer hover:bg-gray-200" data-sort="blocking">Blk<span class="sort-indicator"></span></th>
-                  <th class="py-3 px-3 text-center font-bold border-b cursor-pointer hover:bg-gray-200" data-sort="tackling">Tkl<span class="sort-indicator"></span></th>
-                  <th class="py-3 px-3 text-center font-bold border-b cursor-pointer hover:bg-gray-200" data-sort="blockShedding">BSh<span class="sort-indicator"></span></th>
+                  <th class="py-3 px-3 text-center font-bold border-b cursor-pointer hover:bg-gray-200"
+                    data-sort="position">Pos<span class="sort-indicator"></span></th>
+                  <th class="py-3 px-3 text-center font-bold border-b cursor-pointer hover:bg-gray-200"
+                    data-sort="height">H<span class="sort-indicator"></span></th>
+                  <th class="py-3 px-3 text-center font-bold border-b cursor-pointer hover:bg-gray-200"
+                    data-sort="weight">W<span class="sort-indicator"></span></th>
+                  <th class="py-3 px-3 text-center font-bold border-b cursor-pointer hover:bg-gray-200 text-blue-600"
+                    data-sort="speed">Spd<span class="sort-indicator"></span></th>
+                  <th class="py-3 px-3 text-center font-bold border-b cursor-pointer hover:bg-gray-200"
+                    data-sort="strength">Str<span class="sort-indicator"></span></th>
+                  <th class="py-3 px-3 text-center font-bold border-b cursor-pointer hover:bg-gray-200"
+                    data-sort="agility">Agi<span class="sort-indicator"></span></th>
+                  <th class="py-3 px-3 text-center font-bold border-b cursor-pointer hover:bg-gray-200"
+                    data-sort="stamina">Sta<span class="sort-indicator"></span></th>
+                  <th class="py-3 px-3 text-center font-bold border-b cursor-pointer hover:bg-gray-200"
+                    data-sort="playbookIQ">IQ<span class="sort-indicator"></span></th>
+                  <th class="py-3 px-3 text-center font-bold border-b cursor-pointer hover:bg-gray-200"
+                    data-sort="toughness">Tgh<span class="sort-indicator"></span></th>
+                  <th class="py-3 px-3 text-center font-bold border-b cursor-pointer hover:bg-gray-200"
+                    data-sort="throwingAccuracy">Thr<span class="sort-indicator"></span></th>
+                  <th class="py-3 px-3 text-center font-bold border-b cursor-pointer hover:bg-gray-200"
+                    data-sort="catchingHands">Hnd<span class="sort-indicator"></span></th>
+                  <th class="py-3 px-3 text-center font-bold border-b cursor-pointer hover:bg-gray-200"
+                    data-sort="blocking">Blk<span class="sort-indicator"></span></th>
+                  <th class="py-3 px-3 text-center font-bold border-b cursor-pointer hover:bg-gray-200"
+                    data-sort="tackling">Tkl<span class="sort-indicator"></span></th>
+                  <th class="py-3 px-3 text-center font-bold border-b cursor-pointer hover:bg-gray-200"
+                    data-sort="blockShedding">BSh<span class="sort-indicator"></span></th>
                 </tr>
               </thead>
-              <tbody id="draft-pool-tbody" class="divide-y divide-gray-100">
-                </tbody>
+              <tbody id="draft-pool-tbody" class="divide-y divide-gray-100"></tbody>
             </table>
           </div>
         </div>
 
         <div class="lg:col-span-3 flex flex-col gap-4 min-h-0">
-          
-          <div class="bg-white rounded-xl shadow-md p-4 border border-amber-100 bg-gradient-to-b from-white to-amber-50 flex-shrink-0">
+          <div
+            class="bg-white rounded-xl shadow-md p-4 border border-amber-100 bg-gradient-to-b from-white to-amber-50 flex-shrink-0">
             <h4 class="text-xs font-bold uppercase tracking-widest text-amber-600 mb-2">Scouting Report</h4>
             <div id="selected-player-card" class="min-h-[120px]">
               <p class="text-gray-400 text-sm italic text-center py-8">Select a player to view details.</p>
@@ -185,27 +315,25 @@
               Draft Player
             </button>
           </div>
-
           <div class="bg-white rounded-xl shadow-md flex-grow flex flex-col overflow-hidden border border-gray-200">
             <div class="flex justify-between items-center p-3 border-b bg-gray-50">
               <h4 class="font-bold text-gray-700">Your Roster</h4>
-              <span id="roster-count" class="bg-gray-200 text-gray-600 px-2 py-0.5 rounded text-xs font-bold">0/10</span>
+              <span id="roster-count"
+                class="bg-gray-200 text-gray-600 px-2 py-0.5 rounded text-xs font-bold">0/10</span>
             </div>
-            <ul id="draft-roster-list" class="divide-y divide-gray-100 text-sm overflow-y-auto flex-grow p-0">
-              </ul>
-            <div id="roster-summary" class="p-3 border-t bg-gray-50 text-xs">
-              </div>
+            <ul id="draft-roster-list" class="divide-y divide-gray-100 text-sm overflow-y-auto flex-grow p-0"></ul>
+            <div id="roster-summary" class="p-3 border-t bg-gray-50 text-xs"></div>
           </div>
         </div>
-
       </div>
     </section>
 
     <section id="dashboard-screen" class="screen hidden h-full flex flex-col overflow-hidden">
-
-      <div class="flex-shrink-0 flex flex-col md:flex-row justify-between items-center p-4 bg-gray-900 text-white rounded-xl shadow-md mb-4 border-b-4 border-amber-500">
+      <div
+        class="flex-shrink-0 flex flex-col md:flex-row justify-between items-center p-4 bg-gray-900 text-white rounded-xl shadow-md mb-4 border-b-4 border-amber-500">
         <div class="mb-4 md:mb-0 text-center md:text-left">
-          <h2 id="dashboard-team-name" class="text-3xl font-display tracking-wider text-white drop-shadow-md">Your Team</h2>
+          <h2 id="dashboard-team-name" class="text-3xl font-display tracking-wider text-white drop-shadow-md">Your Team
+          </h2>
           <div class="flex items-center gap-3 mt-1 justify-center md:justify-start text-sm text-gray-300 font-mono">
             <span id="dashboard-record" class="bg-gray-800 px-2 py-0.5 rounded">0-0-0</span>
             <span class="text-gray-600">|</span>
@@ -214,46 +342,47 @@
             <span id="dashboard-week" class="text-amber-400 font-bold">Week 1</span>
           </div>
         </div>
-
         <div class="flex gap-3">
-          <button id="save-test-roster-btn" class="btn bg-gray-700 hover:bg-gray-600 text-white font-semibold py-2 px-4 rounded-lg text-sm transition">
-            Save
-          </button>
-          <button id="advance-week-btn" class="btn bg-amber-500 hover:bg-amber-600 text-white font-bold py-2 px-6 rounded-lg text-lg transition shadow-lg flex items-center gap-2 transform hover:-translate-y-0.5 active:translate-y-0">
+          <button id="save-test-roster-btn"
+            class="btn bg-gray-700 hover:bg-gray-600 text-white font-semibold py-2 px-4 rounded-lg text-sm transition">Save</button>
+          <button id="advance-week-btn"
+            class="btn bg-amber-500 hover:bg-amber-600 text-white font-bold py-2 px-6 rounded-lg text-lg transition shadow-lg flex items-center gap-2 transform hover:-translate-y-0.5 active:translate-y-0">
             <span>Play Week</span>
-            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10.293 3.293a1 1 0 011.414 0l6 6a1 1 0 010 1.414l-6 6a1 1 0 01-1.414-1.414L14.586 11H3a1 1 0 110-2h11.586l-4.293-4.293a1 1 0 010-1.414z" clip-rule="evenodd" /></svg>
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+              <path fill-rule="evenodd"
+                d="M10.293 3.293a1 1 0 011.414 0l6 6a1 1 0 010 1.414l-6 6a1 1 0 01-1.414-1.414L14.586 11H3a1 1 0 110-2h11.586l-4.293-4.293a1 1 0 010-1.414z"
+                clip-rule="evenodd" />
+            </svg>
           </button>
         </div>
       </div>
 
       <div class="flex-grow flex flex-col md:flex-row gap-4 min-h-0">
-
         <nav id="dashboard-tabs" class="md:w-64 flex-shrink-0 flex flex-col gap-1 overflow-y-auto">
-          <button class="tab-button active flex items-center gap-3 px-4 py-3 rounded-lg font-semibold transition-all text-sm" data-tab="my-team">
-            <span class="text-lg">📋</span> Roster
-          </button>
-          <button class="tab-button flex items-center gap-3 px-4 py-3 rounded-lg font-semibold transition-all text-sm" data-tab="depth-chart">
-            <span class="text-lg">♟️</span> Strategy
-          </button>
-          <button class="tab-button flex items-center gap-3 px-4 py-3 rounded-lg font-semibold transition-all text-sm" data-tab="schedule">
-            <span class="text-lg">📅</span> Schedule
-          </button>
-          <button class="tab-button flex items-center gap-3 px-4 py-3 rounded-lg font-semibold transition-all text-sm" data-tab="standings">
-            <span class="text-lg">🏆</span> Standings
-          </button>
-          <button class="tab-button flex items-center gap-3 px-4 py-3 rounded-lg font-semibold transition-all text-sm" data-tab="player-stats">
-            <span class="text-lg">📊</span> League Leaders
-          </button>
-          <button class="tab-button flex items-center gap-3 px-4 py-3 rounded-lg font-semibold transition-all text-sm" data-tab="hall-of-fame">
-            <span class="text-lg">🏛️</span> Hall of Fame
-          </button>
-          <button class="tab-button relative flex items-center gap-3 px-4 py-3 rounded-lg font-semibold transition-all text-sm" data-tab="messages">
+          <button
+            class="tab-button active flex items-center gap-3 px-4 py-3 rounded-lg font-semibold transition-all text-sm"
+            data-tab="my-team"><span class="text-lg">📋</span> Roster</button>
+          <button class="tab-button flex items-center gap-3 px-4 py-3 rounded-lg font-semibold transition-all text-sm"
+            data-tab="depth-chart"><span class="text-lg">♟️</span> Strategy</button>
+          <button class="tab-button flex items-center gap-3 px-4 py-3 rounded-lg font-semibold transition-all text-sm"
+            data-tab="schedule"><span class="text-lg">📅</span> Schedule</button>
+          <button class="tab-button flex items-center gap-3 px-4 py-3 rounded-lg font-semibold transition-all text-sm"
+            data-tab="standings"><span class="text-lg">🏆</span> Standings</button>
+          <button class="tab-button flex items-center gap-3 px-4 py-3 rounded-lg font-semibold transition-all text-sm"
+            data-tab="player-stats"><span class="text-lg">📊</span> League Leaders</button>
+          <button class="tab-button flex items-center gap-3 px-4 py-3 rounded-lg font-semibold transition-all text-sm"
+            data-tab="hall-of-fame"><span class="text-lg">🏛️</span> Hall of Fame</button>
+          <button
+            class="tab-button relative flex items-center gap-3 px-4 py-3 rounded-lg font-semibold transition-all text-sm"
+            data-tab="messages">
             <span class="text-lg">📩</span> Messages
-            <span id="messages-notification-dot" class="absolute top-3 right-3 w-2.5 h-2.5 bg-red-500 rounded-full border-2 border-gray-100 hidden shadow-sm animate-pulse"></span>
+            <span id="messages-notification-dot"
+              class="absolute top-3 right-3 w-2.5 h-2.5 bg-red-500 rounded-full border-2 border-gray-100 hidden shadow-sm animate-pulse"></span>
           </button>
         </nav>
 
-        <main id="dashboard-content" class="flex-grow bg-white rounded-xl shadow-sm p-0 overflow-hidden flex flex-col border border-gray-200 relative">
+        <main id="dashboard-content"
+          class="flex-grow bg-white rounded-xl shadow-sm p-0 overflow-hidden flex flex-col border border-gray-200 relative">
 
           <div id="tab-content-my-team" class="tab-pane flex flex-col h-full">
             <div class="p-4 border-b border-gray-100 bg-gray-50">
@@ -265,54 +394,88 @@
           <div id="tab-content-depth-chart" class="tab-pane hidden flex flex-col h-full">
             <div class="p-4 border-b border-gray-100 bg-gray-50 flex flex-wrap gap-2 items-center justify-between">
               <h3 class="text-xl font-bold text-gray-800 mr-4">Strategy</h3>
-              
               <div id="depth-chart-subtabs" class="flex bg-white rounded-lg p-1 border shadow-sm">
-                <button class="depth-chart-tab active px-4 py-1.5 rounded-md text-sm font-semibold transition-colors" data-sub-tab="offense">Offense</button>
-                <button class="depth-chart-tab px-4 py-1.5 rounded-md text-sm font-semibold transition-colors" data-sub-tab="defense">Defense</button>
-                <button class="depth-chart-tab px-4 py-1.5 rounded-md text-sm font-semibold transition-colors" data-sub-tab="overalls">Ratings</button>
-                <button class="depth-chart-tab px-4 py-1.5 rounded-md text-sm font-semibold transition-colors text-amber-700 bg-amber-50 border border-amber-200" data-sub-tab="depth-order">Depth Order</button>
+                <button class="depth-chart-tab active px-4 py-1.5 rounded-md text-sm font-semibold transition-colors"
+                  data-sub-tab="offense">Offense</button>
+                <button class="depth-chart-tab px-4 py-1.5 rounded-md text-sm font-semibold transition-colors"
+                  data-sub-tab="defense">Defense</button>
+                <button class="depth-chart-tab px-4 py-1.5 rounded-md text-sm font-semibold transition-colors"
+                  data-sub-tab="overalls">Ratings</button>
+                <button
+                  class="depth-chart-tab px-4 py-1.5 rounded-md text-sm font-semibold transition-colors text-amber-700 bg-amber-50 border border-amber-200"
+                  data-sub-tab="depth-order">Depth Order</button>
               </div>
             </div>
 
             <div class="flex-grow overflow-y-auto p-4 bg-gray-50">
-              
               <div id="depth-chart-offense-pane" class="depth-chart-sub-pane space-y-4">
                 <div class="bg-white p-3 rounded-lg border shadow-sm flex items-center justify-between">
                   <label class="font-bold text-gray-700 text-sm">Formation:</label>
-                  <select id="offense-formation-select" class="p-2 border rounded bg-gray-50 text-sm font-medium w-64"></select>
+                  <select id="offense-formation-select"
+                    class="p-2 border rounded bg-gray-50 text-sm font-medium w-64"></select>
                 </div>
-                <div class="bg-green-700 rounded-lg overflow-hidden border-4 border-green-800 shadow-inner relative h-[450px]">
-                  <div class="absolute top-2 left-1/2 -translate-x-1/2 bg-black/40 text-white px-3 py-1 rounded text-xs font-bold tracking-widest z-20">OFFENSE</div>
+                <div
+                  class="bg-green-700 rounded-lg overflow-hidden border-4 border-green-800 shadow-inner relative h-[450px]">
+                  <div
+                    class="absolute top-2 left-1/2 -translate-x-1/2 bg-black/40 text-white px-3 py-1 rounded text-xs font-bold tracking-widest z-20">
+                    OFFENSE</div>
                   <div id="offense-visual-field" class="w-full h-full relative"></div>
+                </div>
+                <div class="bg-white p-4 rounded-lg border shadow-sm">
+                  <h4 class="font-bold text-gray-700 mb-2">Offensive Bench</h4>
+                  <div id="offense-bench-table"></div>
                 </div>
               </div>
 
               <div id="depth-chart-defense-pane" class="depth-chart-sub-pane hidden space-y-4">
                 <div class="bg-white p-3 rounded-lg border shadow-sm flex items-center justify-between">
                   <label class="font-bold text-gray-700 text-sm">Formation:</label>
-                  <select id="defense-formation-select" class="p-2 border rounded bg-gray-50 text-sm font-medium w-64"></select>
+                  <select id="defense-formation-select"
+                    class="p-2 border rounded bg-gray-50 text-sm font-medium w-64"></select>
                 </div>
-                <div class="bg-green-700 rounded-lg overflow-hidden border-4 border-green-800 shadow-inner relative h-[450px]">
-                  <div class="absolute top-2 left-1/2 -translate-x-1/2 bg-black/40 text-white px-3 py-1 rounded text-xs font-bold tracking-widest z-20">DEFENSE</div>
+                <div
+                  class="bg-green-700 rounded-lg overflow-hidden border-4 border-green-800 shadow-inner relative h-[450px]">
+                  <div
+                    class="absolute top-2 left-1/2 -translate-x-1/2 bg-black/40 text-white px-3 py-1 rounded text-xs font-bold tracking-widest z-20">
+                    DEFENSE</div>
                   <div id="defense-visual-field" class="w-full h-full relative"></div>
+                </div>
+                <div class="bg-white p-4 rounded-lg border shadow-sm">
+                  <h4 class="font-bold text-gray-700 mb-2">Defensive Bench</h4>
+                  <div id="defense-bench-table"></div>
                 </div>
               </div>
 
               <div id="positional-overalls-container" class="depth-chart-sub-pane hidden"></div>
 
               <div id="depth-order-container" class="depth-chart-sub-pane hidden">
+                <div
+                  class="mb-6 bg-blue-50 border border-blue-200 rounded-lg p-4 flex flex-col sm:flex-row justify-between items-center gap-4">
+                  <div>
+                    <h4 class="font-bold text-lg text-blue-900">Set Positional Hierarchy</h4>
+                    <p class="text-sm text-blue-700">Drag players up or down to set the starter (top) and backup order.
+                    </p>
+                  </div>
+                  <button id="auto-reorder-btn"
+                    class="btn bg-white border border-gray-300 text-gray-700 hover:bg-gray-100 font-bold py-2 px-4 rounded shadow-sm text-sm">Auto-Sort
+                    by Overall</button>
                 </div>
-
+                <div id="depth-order-list"></div>
+              </div>
             </div>
           </div>
 
           <div id="tab-content-schedule" class="tab-pane hidden flex-col h-full">
-            <div class="p-4 border-b bg-gray-50"><h3 class="text-xl font-bold">Schedule</h3></div>
+            <div class="p-4 border-b bg-gray-50">
+              <h3 class="text-xl font-bold">Schedule</h3>
+            </div>
             <div id="schedule-list" class="p-4 overflow-y-auto"></div>
           </div>
 
           <div id="tab-content-standings" class="tab-pane hidden flex-col h-full">
-            <div class="p-4 border-b bg-gray-50"><h3 class="text-xl font-bold">Standings</h3></div>
+            <div class="p-4 border-b bg-gray-50">
+              <h3 class="text-xl font-bold">Standings</h3>
+            </div>
             <div id="standings-container" class="p-4 overflow-y-auto grid md:grid-cols-2 gap-6"></div>
           </div>
 
@@ -334,12 +497,16 @@
           </div>
 
           <div id="tab-content-hall-of-fame" class="tab-pane hidden flex-col h-full">
-            <div class="p-4 border-b bg-gray-50"><h3 class="text-xl font-bold text-amber-700">Hall of Fame</h3></div>
+            <div class="p-4 border-b bg-gray-50">
+              <h3 class="text-xl font-bold text-amber-700">Hall of Fame</h3>
+            </div>
             <div id="hall-of-fame-list" class="p-4 overflow-y-auto"></div>
           </div>
 
           <div id="tab-content-messages" class="tab-pane hidden flex-col h-full">
-            <div class="p-4 border-b bg-gray-50"><h3 class="text-xl font-bold">Inbox</h3></div>
+            <div class="p-4 border-b bg-gray-50">
+              <h3 class="text-xl font-bold">Inbox</h3>
+            </div>
             <div id="messages-list" class="p-4 overflow-y-auto space-y-2"></div>
           </div>
 
@@ -348,13 +515,15 @@
     </section>
 
     <section id="game-sim-screen" class="screen hidden bg-gray-900 text-white p-4 h-full flex flex-col">
-      <div id="sim-scoreboard" class="flex-shrink-0 bg-black rounded-xl p-4 flex justify-between items-center border-b-4 border-amber-500 shadow-2xl relative overflow-hidden mb-4">
+      <div id="sim-scoreboard"
+        class="flex-shrink-0 bg-black rounded-xl p-4 flex justify-between items-center border-b-4 border-amber-500 shadow-2xl relative overflow-hidden mb-4">
         <div class="flex items-center gap-6 w-5/12 z-10">
           <span id="sim-away-score" class="text-5xl font-display text-white">0</span>
           <span id="sim-away-team" class="text-2xl font-black uppercase text-gray-300">Away</span>
         </div>
         <div class="flex flex-col items-center justify-center w-2/12 z-10">
           <div id="sim-game-down" class="text-xl font-mono text-amber-400 font-bold">1st & 10</div>
+          <div id="sim-game-drive" class="text-xs text-gray-500 mt-1">Kickoff</div>
           <div id="sim-possession" class="text-xs text-gray-500 mt-1 uppercase tracking-widest">Possession</div>
         </div>
         <div class="flex items-center gap-6 w-5/12 justify-end z-10">
@@ -364,7 +533,8 @@
       </div>
 
       <div class="flex-grow bg-green-800 rounded-xl relative shadow-inner overflow-hidden border-4 border-gray-800">
-        <div id="sim-matchup-banner" class="absolute top-0 left-0 w-full bg-black/80 text-white text-xs py-1 px-4 flex justify-between z-20 font-mono">
+        <div id="sim-matchup-banner"
+          class="absolute top-0 left-0 w-full bg-black/80 text-white text-xs py-1 px-4 flex justify-between z-20 font-mono">
           <span id="sim-banner-offense" class="text-blue-300">Waiting...</span>
           <span id="sim-banner-defense" class="text-red-300">Waiting...</span>
         </div>
@@ -373,25 +543,40 @@
 
       <div class="h-48 flex-shrink-0 grid grid-cols-1 lg:grid-cols-3 gap-4 mt-4">
         <div class="lg:col-span-2 bg-gray-800 rounded-xl overflow-hidden flex flex-col border border-gray-700">
-          <div class="bg-black/50 px-3 py-1 text-xs font-bold text-gray-400 uppercase">Play Log</div>
+          <div class="bg-black/50 px-3 py-1 text-xs font-bold text-gray-400 uppercase flex justify-between">
+            <span>Play Log</span>
+            <span class="text-amber-500">LIVE</span>
+          </div>
           <div id="sim-play-log" class="flex-grow p-3 font-mono text-sm overflow-y-auto space-y-1"></div>
         </div>
-        
-        <div class="bg-gray-800 rounded-xl p-3 flex flex-col gap-2 border border-gray-700">
+
+        <div class="bg-gray-800 rounded-xl p-3 flex flex-col gap-2 border border-gray-700 relative">
+          <div id="sim-live-stats" class="hidden">
+            <div id="sim-stats-away"></div>
+            <div id="sim-stats-home"></div>
+          </div>
+          <div id="sim-players-panel" class="hidden">
+            <div id="sim-players-list"></div>
+          </div>
+
           <div class="grid grid-cols-3 gap-2">
             <button id="sim-speed-faster" class="sim-speed-btn btn bg-gray-700 text-xs py-2 rounded">Slow</button>
-            <button id="sim-speed-play" class="sim-speed-btn btn bg-blue-600 text-xs py-2 rounded font-bold">Normal</button>
+            <button id="sim-speed-play"
+              class="sim-speed-btn btn bg-blue-600 text-xs py-2 rounded font-bold">Normal</button>
             <button id="sim-speed-fast" class="sim-speed-btn btn bg-gray-700 text-xs py-2 rounded">Fast</button>
           </div>
-          <button id="sim-skip-btn" class="btn bg-red-600 hover:bg-red-500 text-white w-full py-2 rounded font-bold text-sm mt-auto">Skip to End</button>
-          <div id="sim-live-stats" class="hidden"></div> </div>
+          <button id="sim-skip-btn"
+            class="btn bg-red-600 hover:bg-red-500 text-white w-full py-2 rounded font-bold text-sm mt-auto">Skip to
+            End</button>
+        </div>
       </div>
     </section>
 
     <section id="offseason-screen" class="screen hidden h-full flex flex-col p-8 bg-white overflow-y-auto">
       <div class="max-w-4xl mx-auto w-full">
-        <h2 class="text-4xl font-bold mb-6 text-gray-800 border-b pb-4">Offseason Report: Year <span id="offseason-year">?</span></h2>
-        
+        <h2 class="text-4xl font-bold mb-6 text-gray-800 border-b pb-4">Offseason Report: Year <span
+            id="offseason-year">?</span></h2>
+
         <div class="space-y-8">
           <div class="bg-green-50 p-6 rounded-xl border border-green-100">
             <h3 class="text-xl font-bold text-green-800 mb-4">Player Development</h3>
@@ -404,7 +589,7 @@
               <ul id="retirements-list" class="text-sm space-y-1 text-gray-600 mb-4"></ul>
               <ul id="leaving-players-list" class="text-sm space-y-1 text-red-600"></ul>
             </div>
-            
+
             <div class="bg-amber-50 p-6 rounded-xl border border-amber-100">
               <h3 class="text-lg font-bold text-amber-800 mb-3">Hall of Fame Inductees</h3>
               <ul id="hof-inductees-list" class="text-sm font-semibold text-amber-900 space-y-1"></ul>
@@ -412,7 +597,8 @@
           </div>
 
           <div class="text-center pt-8">
-            <button id="go-to-next-draft-btn" class="btn bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 px-12 rounded-full text-xl shadow-xl transition transform hover:-translate-y-1">
+            <button id="go-to-next-draft-btn"
+              class="btn bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 px-12 rounded-full text-xl shadow-xl transition transform hover:-translate-y-1">
               Start Next Season Draft →
             </button>
           </div>
@@ -422,16 +608,19 @@
 
   </div>
 
-  <div id="modal" class="fixed inset-0 bg-black/60 z-[100] hidden flex items-center justify-center backdrop-blur-sm p-4">
-    <div id="modal-content" class="bg-white rounded-xl shadow-2xl w-full max-w-md overflow-hidden transform transition-all scale-100 flex flex-col max-h-[90vh]">
+  <div id="modal"
+    class="fixed inset-0 bg-black/60 z-[100] hidden flex items-center justify-center backdrop-blur-sm p-4">
+    <div id="modal-content"
+      class="bg-white rounded-xl shadow-2xl w-full max-w-md overflow-hidden transform transition-all scale-100 flex flex-col max-h-[90vh]">
       <div class="p-4 border-b flex justify-between items-center bg-gray-50">
         <h3 id="modal-title" class="text-xl font-bold text-gray-800">Title</h3>
         <button id="modal-default-close" class="text-gray-400 hover:text-gray-600 text-2xl">&times;</button>
       </div>
       <div id="modal-body" class="p-6 overflow-y-auto text-gray-700"></div>
-      </div>
+    </div>
   </div>
 
   <script type="module" src="js/main.js"></script>
 </body>
+
 </html>

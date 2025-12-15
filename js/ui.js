@@ -1148,26 +1148,43 @@ function renderDepthChartSide(side, gameState) {
     const visualFieldContainer = document.getElementById(`${side}-visual-field`);
     const benchTableContainer = document.getElementById(`${side}-bench-table`);
 
-    if (!visualFieldContainer || !benchTableContainer || !gameState?.playerTeam?.roster || !gameState?.playerTeam?.depthChart) {
-        console.error(`Cannot render depth chart side "${side}": Missing elements or game state.`);
-        if (visualFieldContainer) visualFieldContainer.innerHTML = '<p class="text-red-500">Error</p>';
-        if (benchTableContainer) benchTableContainer.innerHTML = '<p class="text-red-500">Error</p>';
+    // 1. Safety Check: Elements
+    if (!visualFieldContainer || !benchTableContainer) {
+        // This is normal when the tab is hidden, so we just return silently
+        return;
+    }
+
+    // 2. Safety Check: Data
+    if (!gameState?.playerTeam?.roster || !gameState?.playerTeam?.depthChart) {
+        visualFieldContainer.innerHTML = '<div class="flex h-full items-center justify-center text-white/50 italic">Data loading...</div>';
         return;
     }
 
     const { depthChart, formations } = gameState.playerTeam;
-    // --- 💡 FIX: Get roster objects ---
+    
+    // 3. Get Roster Objects (using the helper that handles ID mapping)
     const roster = getUIRosterObjects(gameState.playerTeam);
 
     const currentChart = depthChart[side] || {};
     const formationName = formations[side];
-    const formationData = (side === 'offense' ? offenseFormations[formationName] : defenseFormations[formationName]);
+    
+    // 4. 💡 SAFETY FIX: Formation Fallback
+    // If the formation name from the save file doesn't exist in our data, fall back to a default.
+    let formationData = (side === 'offense' ? offenseFormations[formationName] : defenseFormations[formationName]);
+    
+    if (!formationData) {
+        console.warn(`Formation '${formationName}' not found. Defaulting to base formation.`);
+        formationData = side === 'offense' ? offenseFormations['Balanced'] : defenseFormations['3-1-3'];
+    }
 
-    const playersStartingOnThisSide = new Set(Object.values(currentChart).filter(Boolean)); // Set of IDs
+    // 5. Calculate Starters vs Bench
+    // We filter Boolean to remove nulls (empty slots)
+    const playersStartingOnThisSide = new Set(Object.values(currentChart).filter(Boolean)); 
 
-    // --- 💡 FIX: Filter from our full roster object list ---
+    // Filter from our full roster object list
     const benchedPlayers = roster.filter(p => p && !playersStartingOnThisSide.has(p.id));
 
+    // 6. Render Components
     renderVisualFormationSlots(visualFieldContainer, currentChart, formationData, benchedPlayers, roster, side);
     renderDepthChartBench(benchTableContainer, benchedPlayers, side);
 }
