@@ -4526,7 +4526,7 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
         playIsLive: true,
         tick: 0,
         maxTicks: 1000,
-        type: type,
+        type: play.type,
         assignments: deepClone(play.assignments || {}),
         // ... legacy flags ...
         yards: 0, touchdown: false, turnover: false, incomplete: false,
