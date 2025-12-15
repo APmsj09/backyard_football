@@ -107,9 +107,7 @@ function normalizeFormationKey(side, formationKey) {
         : defenseFormations;
 
     // 1️⃣ Fallback to default
-    if (!formationKey || typeof formationKey !== 'string') {
-        return Object.keys(formations)[0];
-    }
+    
 
     // 2️⃣ If key exists, use it
     if (formations[formationKey]) {

@@ -1208,14 +1208,13 @@ function renderDepthChartSide(side, gameState) {
 
     // 6. Render Components
     renderVisualFormationSlots(
-        visualFieldContainer,
-        currentChart,
-        formationKey,     // ✅ STRING (safe for charAt)
-        formationData,    // ✅ OBJECT
-        benchedPlayers,
-        roster,
-        side
-    );
+    visualFieldContainer,
+    currentChart,
+    formationData,
+    benchedPlayers,
+    roster,
+    side
+);
     renderDepthChartBench(benchTableContainer, benchedPlayers, side);
 }
 
@@ -1227,7 +1226,6 @@ function renderDepthChartSide(side, gameState) {
 function renderVisualFormationSlots(
     container,
     currentChart,
-    formationKey,
     formationData,
     benchedPlayers,
     roster,
