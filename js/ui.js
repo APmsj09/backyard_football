@@ -7,7 +7,8 @@ import {
     substitutePlayers,
     getRosterObjects,
     changeFormation,
-    getPlayer
+    getPlayer,
+    rebuildDepthChartFromOrder
 } from './game.js';
 import {
     offenseFormations,
@@ -3785,28 +3786,34 @@ function updateRankNumbers(container) {
 export function applyDepthOrderToChart() {
     console.log("Saving Definitive Depth Order...");
     const gs = getGameState();
-    if (!gs.playerTeam.depthOrder) gs.playerTeam.depthOrder = {};
+    if (!gs || !gs.playerTeam) return;
+    
+    // Initialize if missing
+    if (!gs.playerTeam.depthOrder || Array.isArray(gs.playerTeam.depthOrder)) {
+        gs.playerTeam.depthOrder = {}; 
+    }
 
     const lists = document.querySelectorAll('.depth-sortable-list');
 
     // 1. Scrape Lists
     lists.forEach(list => {
         const groupKey = list.dataset.group;
-        const ids = [...list.querySelectorAll('.depth-order-item')].map(el => el.dataset.playerId);
+        // Map elements to IDs
+        const ids = [...list.querySelectorAll('.depth-order-item')]
+            .map(el => el.dataset.playerId)
+            .filter(id => id); // Filter out empty IDs
+            
         gs.playerTeam.depthOrder[groupKey] = ids;
     });
 
-    // 2. Rebuild Logic (Sync slots to this new order)
-    if (typeof Game.rebuildDepthChartFromOrder === 'function') {
-        Game.rebuildDepthChartFromOrder(gs.playerTeam);
-    } 
-    // Or if accessing via module import:
-    // rebuildDepthChartFromOrder(gs.playerTeam);
+    // 2. Rebuild Logic (Call directly)
+    // This fills the QB1, RB1 slots based on the list you just scraped
+    rebuildDepthChartFromOrder(gs.playerTeam);
 
-    // 3. 🛑 CRITICAL FIX: Persist to Storage Immediately
+    // 3. Persist
     saveGameState(); 
 
-    // 4. Refresh UI to show the new "Starter" badges
+    // 4. Refresh UI
     document.dispatchEvent(new CustomEvent('refresh-ui'));
 }
 

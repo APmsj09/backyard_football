@@ -108,27 +108,51 @@ function ensureSet(val) {
  * This is the "Source of Truth" logic.
  */
 export function rebuildDepthChartFromOrder(team) {
-    if (!team || !team.depthOrder || !team.formations) return;
+    if (!team || !team.formations) return;
 
-    // 1. Reset Depth Chart
+    // 1. Safety Initialization
+    // If depthOrder doesn't exist or is the old Array format, reset it to an object
+    if (!team.depthOrder || Array.isArray(team.depthOrder)) {
+        team.depthOrder = {
+            'QB': [], 'RB': [], 'WR': [], 'TE': [], 'OL': [],
+            'DL': [], 'LB': [], 'DB': [], 'K': [], 'P': []
+        };
+        // Auto-fill it with roster if empty (fallback)
+        if (team.roster) {
+            team.roster.forEach(pid => {
+                const p = getPlayer(pid);
+                if (p) {
+                    let pos = p.pos || p.favoriteOffensivePosition || 'ATH';
+                    // Normalize
+                    if (['FB'].includes(pos)) pos = 'RB';
+                    if (['OT','OG','C'].includes(pos)) pos = 'OL';
+                    if (['CB','S','FS','SS'].includes(pos)) pos = 'DB';
+                    if (['DE','DT','NT'].includes(pos)) pos = 'DL';
+                    
+                    if (team.depthOrder[pos]) team.depthOrder[pos].push(pid);
+                }
+            });
+        }
+    }
+
+    // 2. Reset Depth Chart slots
     team.depthChart = {
         offense: {},
         defense: {},
         special: {}
     };
 
-    // 2. Create a DEEP COPY of the depth order to work with.
-    // 🛑 CRITICAL FIX: We must map the arrays to new arrays so .shift() doesn't destroy the saved state.
+    // 3. Create a Working Copy (Critical: Do not modify team.depthOrder directly)
     const workingOrder = {};
     Object.keys(team.depthOrder).forEach(key => {
         if (Array.isArray(team.depthOrder[key])) {
-            workingOrder[key] = [...team.depthOrder[key]]; // Spread creates a copy
+            workingOrder[key] = [...team.depthOrder[key]];
         } else {
             workingOrder[key] = [];
         }
     });
 
-    // Helper to safely pull next player
+    // Helper: Pull next ID strictly from the list
     const getNext = (posKey) => {
         if (workingOrder[posKey] && workingOrder[posKey].length > 0) {
             return workingOrder[posKey].shift();
@@ -136,13 +160,13 @@ export function rebuildDepthChartFromOrder(team) {
         return null;
     };
 
-    // 3. Fill Offense
+    // 4. Fill Offense
     const offFormKey = team.formations.offense;
+    // Import check: ensure offenseFormations is imported in game.js
     const offSlots = offenseFormations[offFormKey]?.slots || [];
     
     offSlots.forEach(slot => {
         let posKey = slot.replace(/\d+/g, '');
-        // Map formation slots to depth order keys
         if (['OT','OG','C'].includes(posKey)) posKey = 'OL';
         if (posKey === 'FB') posKey = 'RB';
 
@@ -154,11 +178,10 @@ export function rebuildDepthChartFromOrder(team) {
             else if (posKey === 'TE') pid = getNext('WR');
             else if (posKey === 'RB') pid = getNext('WR');
         }
-        
         team.depthChart.offense[slot] = pid || null;
     });
 
-    // 4. Fill Defense
+    // 5. Fill Defense
     const defFormKey = team.formations.defense;
     const defSlots = defenseFormations[defFormKey]?.slots || [];
 
@@ -172,15 +195,12 @@ export function rebuildDepthChartFromOrder(team) {
             if (posKey === 'DL') pid = getNext('LB');
             if (posKey === 'LB') pid = getNext('DL');
         }
-
         team.depthChart.defense[slot] = pid || null;
     });
 
-    // 5. Fill Special Teams (use NEW copies, don't consume from workingOrder)
-    // We want the starters to also be kickers if they are best at it
+    // 6. Fill Special Teams (Reuse original list, kickers can be anyone)
     const kickers = team.depthOrder['K'] || [];
     const punters = team.depthOrder['P'] || [];
-    
     team.depthChart.special['K'] = kickers.length > 0 ? kickers[0] : null;
     team.depthChart.special['P'] = punters.length > 0 ? punters[0] : null;
 }
