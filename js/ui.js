@@ -8,7 +8,8 @@ import {
     getRosterObjects,
     changeFormation,
     getPlayer,
-    rebuildDepthChartFromOrder
+    rebuildDepthChartFromOrder,
+    normalizeFormationKey
 } from './game.js';
 import {
     offenseFormations,
@@ -1177,16 +1178,26 @@ function renderDepthChartSide(side, gameState) {
     const roster = getUIRosterObjects(gameState.playerTeam);
 
     const currentChart = depthChart[side] || {};
-    const formationName = formations[side];
+    const rawFormationKey = formations[side];
 
-    // 4. 💡 SAFETY FIX: Formation Fallback
-    // If the formation name from the save file doesn't exist in our data, fall back to a default.
-    let formationData = (side === 'offense' ? offenseFormations[formationName] : defenseFormations[formationName]);
+    const formationsMap = side === 'offense'
+        ? offenseFormations
+        : defenseFormations;
 
-    if (!formationData) {
-        console.warn(`Formation '${formationName}' not found. Defaulting to base formation.`);
-        formationData = side === 'offense' ? offenseFormations['Balanced'] : defenseFormations['3-1-3'];
+    // Normalize to a VALID KEY
+    let formationKey = rawFormationKey;
+
+    if (!formationKey || !formationsMap[formationKey]) {
+        console.warn(
+            `Invalid formation "${rawFormationKey}" for ${side}. Falling back to default.`
+        );
+        formationKey = side === 'offense'
+            ? Object.keys(offenseFormations)[0]
+            : Object.keys(defenseFormations)[0];
     }
+
+    const formationData = formationsMap[formationKey];
+
 
     // 5. Calculate Starters vs Bench
     // We filter Boolean to remove nulls (empty slots)
@@ -1196,7 +1207,15 @@ function renderDepthChartSide(side, gameState) {
     const benchedPlayers = roster.filter(p => p && !playersStartingOnThisSide.has(p.id));
 
     // 6. Render Components
-    renderVisualFormationSlots(visualFieldContainer, currentChart, formationData, benchedPlayers, roster, side);
+    renderVisualFormationSlots(
+        visualFieldContainer,
+        currentChart,
+        formationKey,     // ✅ STRING (safe for charAt)
+        formationData,    // ✅ OBJECT
+        benchedPlayers,
+        roster,
+        side
+    );
     renderDepthChartBench(benchTableContainer, benchedPlayers, side);
 }
 
@@ -1205,63 +1224,58 @@ function renderDepthChartSide(side, gameState) {
  * Renders the visual, on-field player slots and their assignment dropdowns.
  * UPDATED: Shows full roster, contextual overalls, and swap indicators.
  */
-function renderVisualFormationSlots(container, currentDepthChart, formationData, benchedPlayers, roster, side) {
-    container.innerHTML = ''; // Clear previous
+function renderVisualFormationSlots(
+    container,
+    currentChart,
+    formationKey,
+    formationData,
+    benchedPlayers,
+    roster,
+    side
+) {
+    if (!formationKey || typeof formationKey !== 'string') {
+        console.error('Invalid formationKey:', formationKey);
+        return;
+    }
 
-    // 1. Draw Line of Scrimmage (Blue Line)
+    if (!formationData || !Array.isArray(formationData.slots)) {
+        console.error('Invalid formationData:', formationData);
+        return;
+    }
+
+    container.innerHTML = '';
+
+    // --- Line of Scrimmage ---
     const losMarker = document.createElement('div');
     losMarker.className = 'los-marker';
-    // For Offense, LOS is near the top (driving up/forward from bottom? No, usually static view).
-    // Let's standardize: 
-    // Offense View: LOS is at top (20%), Backfield is below.
-    // Defense View: LOS is at bottom (80%), Secondary is above.
-    const losPosition = side === 'offense' ? '20%' : '80%';
-    losMarker.style.top = losPosition;
+    losMarker.style.top = side === 'offense' ? '20%' : '80%';
     container.appendChild(losMarker);
 
-    // 2. Iterate through defined slots in the formation
     formationData.slots.forEach(slotId => {
-        // Get coordinates from the data map
-        const coords = formationData.coordinates[slotId];
+        const coords = formationData.coordinates?.[slotId];
         if (!coords) return;
 
-        const [yardsX, yardsY] = coords; // e.g. [0, -5]
+        const [yardsX, yardsY] = coords;
 
-        // 3. Calculate CSS Position
-        // Horizontal: 0 is center. Field width is ~53 yards. 
-        // 50% is center. 1 yard is approx 1.8%.
         const leftPercent = 50 + (yardsX * 1.8);
+        const Y_SCALE = 3.5;
 
-        // Vertical: Depends on side
         let topPercent;
-        const Y_SCALE = 3.5; // Percent per yard
-
         if (side === 'offense') {
-            // Offense: LOS at 20%. Negative Y (QB @ -5) means "back" (down screen).
-            // Formula: LOS + (DistanceBack * Scale)
-            // Since QB is -5, we want 20 + 17.5 = 37.5% (Lower)
-            topPercent = 20 + (Math.abs(yardsY) * Y_SCALE);
-
-            // If receiver is positive (0.5), they are slightly above line? 
-            // Usually standard depth charts show offense going UP or just static.
-            // Let's keep it simple: Negative is down-screen. Positive is up-screen.
             topPercent = 20 - (yardsY * Y_SCALE);
         } else {
-            // Defense: LOS at 80%. Positive Y (Safety @ +12) means "deep" (up screen).
             topPercent = 80 - (yardsY * Y_SCALE);
         }
 
-        // 4. Create the Visual Slot
         const slotEl = document.createElement('div');
         slotEl.className = 'player-slot-visual';
         slotEl.style.left = `${leftPercent}%`;
         slotEl.style.top = `${topPercent}%`;
 
-        // 5. Determine who is in this slot
-        const playerId = currentDepthChart[slotId];
+        // ✅ FIXED LINE
+        const playerId = currentChart[slotId];
         const player = roster.find(p => p.id === playerId);
 
-        // Color coding based on position
         let badgeColor = 'bg-gray-500';
         if (slotId.startsWith('QB')) badgeColor = 'bg-amber-600';
         else if (slotId.startsWith('RB') || slotId.startsWith('WR')) badgeColor = 'bg-blue-600';
@@ -1269,7 +1283,6 @@ function renderVisualFormationSlots(container, currentDepthChart, formationData,
         else if (slotId.startsWith('DB')) badgeColor = 'bg-purple-600';
         else if (slotId.startsWith('OL')) badgeColor = 'bg-emerald-600';
 
-        // 6. Build the Inner HTML
         const overall = player ? calculateOverall(player) : '-';
 
         slotEl.innerHTML = `
@@ -1287,26 +1300,9 @@ function renderVisualFormationSlots(container, currentDepthChart, formationData,
             </select>
         `;
 
-        // 7. Add Event Listener for changing players
         const select = slotEl.querySelector('select');
-        select.addEventListener('change', (e) => {
-            const newPlayerId = e.target.value;
-            handleDepthChartChange(side, slotId, newPlayerId);
-        });
-
-        // 8. Add Drag-Over Visuals (Optional/Advanced)
-        slotEl.addEventListener('dragover', (e) => {
-            e.preventDefault();
-            slotEl.classList.add('drag-over');
-        });
-        slotEl.addEventListener('dragleave', () => slotEl.classList.remove('drag-over'));
-        slotEl.addEventListener('drop', (e) => {
-            e.preventDefault();
-            slotEl.classList.remove('drag-over');
-            const draggedPlayerId = e.dataTransfer.getData('text/plain');
-            if (draggedPlayerId) {
-                handleDepthChartChange(side, slotId, draggedPlayerId);
-            }
+        select.addEventListener('change', e => {
+            handleDepthChartChange(side, slotId, e.target.value);
         });
 
         container.appendChild(slotEl);

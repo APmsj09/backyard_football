@@ -101,15 +101,33 @@ function ensureSet(val) {
     if (Array.isArray(val)) return new Set(val);
     return new Set();
 }
-function normalizeFormationKey(formations, storedValue, fallbackKey) {
-    if (formations[storedValue]) return storedValue;
+function normalizeFormationKey(side, formationKey) {
+    const formations = side === 'offense'
+        ? offenseFormations
+        : defenseFormations;
 
-    const match = Object.entries(formations)
-        .find(([_, f]) => f.name === storedValue);
+    // 1️⃣ Fallback to default
+    if (!formationKey || typeof formationKey !== 'string') {
+        return Object.keys(formations)[0];
+    }
 
-    if (match) return match[0];
+    // 2️⃣ If key exists, use it
+    if (formations[formationKey]) {
+        return formationKey;
+    }
 
-    return fallbackKey;
+    // 3️⃣ Legacy save fix: match by display name
+    const match = Object.entries(formations).find(
+        ([, f]) => f.name === formationKey
+    );
+
+    if (match) {
+        console.warn(`⚠️ Legacy formation name detected: "${formationKey}" → "${match[0]}"`);
+        return match[0];
+    }
+
+    // 4️⃣ Absolute fallback
+    return Object.keys(formations)[0];
 }
 
 /**
@@ -7312,5 +7330,5 @@ export {
     addPlayerToTeam, playerCut, playerSignFreeAgent, callFriend, aiManageRoster, aiSetDepthChart, updateDepthChart, changeFormation,
     getRosterObjects, getPlayer, simulateAIPick, simulateGame, simulateWeek, advanceToOffseason, generateWeeklyFreeAgents, generateSchedule,
     addMessage, markMessageAsRead, getScoutedPlayerInfo, getRelationshipLevel, calculateOverall, calculateSlotSuitability,
-    substitutePlayers, autoMakeSubstitutions, aiCheckAudible, setTeamCaptain // <--- CRITICAL EXPORTS
+    substitutePlayers, autoMakeSubstitutions, aiCheckAudible, setTeamCaptain, normalizeFormationKey // <--- CRITICAL EXPORTS
 };
