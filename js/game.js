@@ -7124,7 +7124,7 @@ function autoMakeSubstitutions(team, options = {}, gameLog = null) {
     return subsDone;
 }
 /** Changes the player team's formation for offense or defense. */
-export function changeFormation(side, formationName) {
+function changeFormation(side, formationName) {
     const team = game?.playerTeam;
     if (!team) return;
 
