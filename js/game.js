@@ -1254,6 +1254,11 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
     const usedPlayerIds_D = new Set();
     const isPlayAction = offensivePlayKey.includes('PA_');
 
+    // --- Normalize play intent onto playState (snap boundary) ---
+    playState.type = play.type;
+    playState.readProgression = play.readProgression || [];
+    playState.playKey = play.key || null;
+
     // --- FIX: Robust Defensive Play Lookup ---
     let defPlay = defensivePlaybook[defensivePlayKey];
 
@@ -1375,7 +1380,8 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
                         if (routePath && routePath.length > 0) { targetX = routePath[0].x; targetY = routePath[0].y; }
                     }
                 } else if (slot.startsWith('OL')) {
-                    assignment = play.type === 'pass' ? 'pass_block' : 'run_block';
+                    assignment = playState.type === 'pass' ? 'pass_block' : 'run_block';
+
                     if (isPlayAction && assignment === 'pass_block') {
                         action = 'run_block';
                     } else {
@@ -1482,7 +1488,7 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
                     targetY = startY;
                     targetX = startX;
                 }
-                
+
                 // --- 🛡️ APPLY DOUBLE TEAM OVERRIDE ---
                 if (!isOffense && slot === doubleTeamDefenderSlot && doubleTeamTargetSlot) {
                     assignment = `man_cover_${doubleTeamTargetSlot}`;
@@ -1638,7 +1644,9 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
     setupSide(defense, 'defense', defenseFormationData, false, initialOffenseStates);
 
     // --- Set Initial Ball Position & Carrier ---
-    const qbState = playState.activePlayers.find(p => p.slot === 'QB1' && p.isOffense);
+    const qbState = playState.activePlayers.find(
+        p => p.isOffense && p.slot.startsWith('QB')
+    );
     const rbState = playState.activePlayers.find(p => p.slot === 'RB1' && p.isOffense);
 
     const isQBRun = qbState && assignments[qbState.slot]?.includes('run_');
@@ -4124,7 +4132,7 @@ function handleBallArrival(playState, ballCarrierState, playResult) {
     // ===========================================================
     // --- 1. PUNT CATCH LOGIC (Fixed) ---
     // ===========================================================
-    if (play.type === 'punt' && playState.ballState.inAir && playState.ballState.targetPlayerId === null) {
+    if (playState.type === 'punt' && playState.ballState.inAir && playState.ballState.targetPlayerId === null) {
         // Wait for ball to come down
         if (playState.ballState.z > 3.0) return;
         if (playState.ballState.z <= 0.1) return; // Hit ground (handled by tick loop)
@@ -4467,7 +4475,7 @@ function resetPlayerRuntimeState(playerState) {
 }
 
 // =============================================================
-// --- UPDATED resolvePlay FUNCTION ---
+// --- resolvePlay FUNCTION ---
 // =============================================================
 
 /**
@@ -4478,7 +4486,7 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
     const { gameLog = [], ballOn, ballHash = 'M', yardsToGo } = gameState;
     const fastSim = options.fastSim === true;
 
-    // --- FIX: Define playResult IMMEDIATELY ---
+    // --- Define playResult ---
     const playResult = {
         yards: 0,
         outcome: 'live',
@@ -4508,8 +4516,6 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
     }
 
     // --- 2. INITIALIZE STATE ---
-    const { type } = play;
-    let { assignments } = play;
 
     const playState = {
         playIsLive: true,
@@ -4530,6 +4536,8 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
         visualizationFrames: [],
         resolvedDepth: null // Will be populated in setupInitialPlayerStates
     };
+    playState.assignments = deepClone(play.assignments || {});
+
 
     let firstDownY = 0;
 
@@ -4540,7 +4548,7 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
 
         firstDownY = Math.min(playState.lineOfScrimmage + effectiveYardsToGo, goalLineY);
 
-        setupInitialPlayerStates(playState, offense, defense, play, assignments, ballOn, defensivePlayKey, ballHash, offensivePlayKey);
+        setupInitialPlayerStates(playState, offense, defense, play, playState.assignments, ballOn, defensivePlayKey, ballHash, offensivePlayKey);
 
         // Initial Frame
         if (playState.playIsLive && gameLog) {
@@ -4568,13 +4576,13 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
     const qbPlayer = qbState ? game.players.find(p => p.id === qbState.id) : null;
     const qbIQ = qbPlayer?.attributes?.mental?.playbookIQ || 50;
 
-    if (play.type === 'pass' && defensePlay?.blitz === true && play.assignments['RB1'] && play.assignments['RB1'] !== 'pass_block') {
-        // Smart QB Check
+    if (playState.type === 'pass' && defensePlay?.blitz === true && playState.assignments['RB1']) {
         if (Math.random() < (qbIQ / 125)) {
             const rbPlayer = playState.activePlayers.find(p => p.slot === 'RB1' && p.isOffense);
             if (rbPlayer) {
-                if (gameLog) gameLog.push(`[Pre-Snap]: 🧠 ${qbPlayer.name} audibles RB to block!`);
-                play.assignments['RB1'] = 'pass_block';
+                gameLog?.push(`[Pre-Snap]: 🧠 ${qbPlayer.name} audibles RB to block!`);
+
+                playState.assignments['RB1'] = 'pass_block';
                 rbPlayer.assignment = 'pass_block';
                 rbPlayer.action = 'pass_block';
                 rbPlayer.targetX = rbPlayer.initialX;
@@ -4591,7 +4599,7 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
     try {
         const timeDelta = fastSim ? TICK_DURATION_SECONDS * 10 : TICK_DURATION_SECONDS;
         const loopType = playState.type || 'pass';
-        const assignmentsLocal = playState.assignments || {};
+        
 
         while (playState.playIsLive && playState.tick < playState.maxTicks) {
             playState.tick++;
@@ -4620,7 +4628,14 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
 
             // --- C. AI TARGETING (Where to run?) ---
             if (typeof updatePlayerTargets === 'function') {
-                updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrierState, loopType, offensivePlayKey, assignmentsLocal, defensivePlayKey, gameLog);
+                updatePlayerTargets(
+                    playState,
+                    offenseStates,
+                    defenseStates,
+                    ballCarrierState,
+                    loopType,
+                    gameLog
+                );
             }
 
             // --- D. PLAYER MOVEMENT ---
@@ -5768,14 +5783,14 @@ function simulateGame(homeTeam, awayTeam, options = {}) {
                     driveActive = false;
                     nextDriveStartBallOn = 20;
 
-                // --- 2. SAFETY ---
+                    // --- 2. SAFETY ---
                 } else if (playResult.safety && !shouldPunt) {
                     if (!fastSim) gameLog.push(`SAFETY! 2 points for ${defense.name}!`);
                     if (defense.id === homeTeam.id) homeScore += 2; else awayScore += 2;
                     driveActive = false;
                     nextDriveStartBallOn = 20;
 
-                // --- 3. TURNOVER ---
+                    // --- 3. TURNOVER ---
                 } else if (playResult.possessionChange && !shouldPunt) {
                     driveActive = false;
                     currentOffense = defense;
@@ -5795,11 +5810,11 @@ function simulateGame(homeTeam, awayTeam, options = {}) {
                         }
                     }
 
-                // --- 4. INCOMPLETE ---
+                    // --- 4. INCOMPLETE ---
                 } else if (playResult.outcome === 'incomplete' && !shouldPunt) {
                     down++;
 
-                // --- 5. REGULAR GAIN ---
+                    // --- 5. REGULAR GAIN ---
                 } else if (!shouldPunt) {
                     const wasGoalToGo = ((ballOn + 10) + yardsToGo) >= (FIELD_LENGTH - 10);
                     yardsToGo -= playResult.yards;
