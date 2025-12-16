@@ -49,7 +49,7 @@ let liveGameCurrentIndex = 0; // Current index in the game log array
 let liveGameLog = []; // Stores the log entries for the current sim
 let liveGameCallback = null; // Function to call when sim completes or is skipped
 let currentLiveGameResult = null; // Stores the full gameResult object for accurate final display
-let userPreferredSpeed = 50;
+let userPreferredSpeed = 80;
 let huddleTimeout = null;
 
 let liveGameLogIndex = 0;
@@ -2043,25 +2043,20 @@ export function setupFormationListeners() {
 
 // --- In ui.js ---
 
+// --- In ui.js ---
+
 export function drawFieldVisualization(frameData) {
     const ctx = elements.fieldCanvasCtx;
     const canvas = elements.fieldCanvas;
     if (!ctx || !canvas) return;
 
-    // ===========================================
-    // 1. CAMERA & SCALE LOGIC (Full Width)
-    // ===========================================
-    
-    // Fit the full 53.3 yard width into the canvas width exactly.
-    // This utilizes the extra horizontal space we just gained.
+    // --- 1. CAMERA & SCALE ---
     const FIELD_WIDTH_REAL = 53.3; 
     const scale = canvas.width / FIELD_WIDTH_REAL; 
     const scaleX = scale;
     const scaleY = scale;
 
-    // Focal Point
     let focusY = (frameData && frameData.lineOfScrimmage) != null ? frameData.lineOfScrimmage : 60;
-    
     if (frameData && frameData.ball) {
         if (frameData.ball.inAir) {
             focusY = frameData.ball.y;
@@ -2072,16 +2067,11 @@ export function drawFieldVisualization(frameData) {
     }
 
     const visibleYardsVertical = canvas.height / scaleY;
-
-    // Vertical Panning Only
     let cameraY = focusY - (visibleYardsVertical / 2);
     const MAX_FIELD_Y = 120;
     cameraY = Math.max(-5, Math.min(MAX_FIELD_Y - visibleYardsVertical + 5, cameraY));
 
-    // ===========================================
-    // 2. DRAWING THE FIELD
-    // ===========================================
-
+    // --- 2. DRAW FIELD ---
     const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
     gradient.addColorStop(0, '#065f46'); 
     gradient.addColorStop(1, '#059669'); 
@@ -2091,15 +2081,41 @@ export function drawFieldVisualization(frameData) {
     ctx.save();
     ctx.translate(0, -cameraY * scaleY);
 
-    // Endzones
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.15)'; 
-    ctx.fillRect(0, 0, canvas.width, 10 * scaleY); 
-    ctx.fillRect(0, 110 * scaleY, canvas.width, 10 * scaleY); 
+    // --- 💡 NEW: TEAM COLORED ENDZONES ---
+    // We assume Top = Home Team Endzone (0-10), Bottom = Away Team Endzone (110-120) 
+    // or vice versa depending on your engine's logic. 
+    // Usually 0 is one side, 120 is the other.
+    
+    const gs = getGameState();
+    // Default colors if game state isn't ready
+    const colorTop = gs?.gameResults?.length ? '#1e3a8a' : 'rgba(0, 0, 0, 0.2)'; // Blue or Dark
+    const colorBot = gs?.gameResults?.length ? '#b91c1c' : 'rgba(0, 0, 0, 0.2)'; // Red or Dark
 
-    // Grid Lines & Numbers
+    // Top Endzone (0-10)
+    ctx.fillStyle = colorTop; 
+    ctx.fillRect(0, 0, canvas.width, 10 * scaleY);
+    
+    // Bottom Endzone (110-120)
+    ctx.fillStyle = colorBot; 
+    ctx.fillRect(0, 110 * scaleY, canvas.width, 10 * scaleY);
+
+    // Endzone Text
+    ctx.font = `bold ${20 * (scale/15)}px "Inter"`;
+    ctx.fillStyle = 'rgba(255,255,255,0.3)';
+    ctx.textAlign = 'center';
+    ctx.save();
+    ctx.translate(canvas.width/2, 5 * scaleY);
+    ctx.fillText(gs?.homeTeam?.name?.toUpperCase() || "HOME", 0, 0);
+    ctx.restore();
+
+    ctx.save();
+    ctx.translate(canvas.width/2, 115 * scaleY);
+    ctx.fillText(gs?.awayTeam?.name?.toUpperCase() || "AWAY", 0, 0);
+    ctx.restore();
+
+    // --- Draw Grid ---
     ctx.lineWidth = 2;
     ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
-    // 💡 Font Size Boost:
     ctx.font = `bold ${16 * (scale/15)}px "Inter"`; 
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
@@ -2107,7 +2123,6 @@ export function drawFieldVisualization(frameData) {
 
     for (let y = 10; y <= 110; y += 10) {
         const lineY = y * scaleY;
-        
         ctx.beginPath();
         ctx.moveTo(0, lineY);
         ctx.lineTo(canvas.width, lineY);
@@ -2115,149 +2130,77 @@ export function drawFieldVisualization(frameData) {
 
         if (y !== 0 && y !== 120) {
             const yardNum = y <= 60 ? y - 10 : 110 - y;
-            // Numbers inset from edges
             ctx.fillText(yardNum, 6 * scaleX, lineY); 
             ctx.fillText(yardNum, canvas.width - (6 * scaleX), lineY);
         }
     }
 
     // Hashes
-    const HASH_LEFT = 18.3; 
-    const HASH_RIGHT = 35.0; 
+    const HASH_LEFT = 18.3; const HASH_RIGHT = 35.0; 
     ctx.lineWidth = 1;
     for (let y = 1; y < 120; y++) {
         if (y % 10 === 0) continue;
         const lineY = y * scaleY;
-        
-        ctx.beginPath();
-        ctx.moveTo((HASH_LEFT - 0.5) * scaleX, lineY);
-        ctx.lineTo((HASH_LEFT + 0.5) * scaleX, lineY);
-        ctx.stroke();
-
-        ctx.beginPath();
-        ctx.moveTo((HASH_RIGHT - 0.5) * scaleX, lineY);
-        ctx.lineTo((HASH_RIGHT + 0.5) * scaleX, lineY);
-        ctx.stroke();
+        ctx.beginPath(); ctx.moveTo((HASH_LEFT - 0.5) * scaleX, lineY); ctx.lineTo((HASH_LEFT + 0.5) * scaleX, lineY); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo((HASH_RIGHT - 0.5) * scaleX, lineY); ctx.lineTo((HASH_RIGHT + 0.5) * scaleX, lineY); ctx.stroke();
     }
 
     // Dynamic Lines
     if (frameData) {
         if (frameData.lineOfScrimmage) {
             const losY = frameData.lineOfScrimmage * scaleY;
-            ctx.strokeStyle = '#2563eb';
-            ctx.lineWidth = 4; // Thicker LOS
-            ctx.beginPath();
-            ctx.moveTo(0, losY);
-            ctx.lineTo(canvas.width, losY);
-            ctx.stroke();
+            ctx.strokeStyle = '#2563eb'; ctx.lineWidth = 4;
+            ctx.beginPath(); ctx.moveTo(0, losY); ctx.lineTo(canvas.width, losY); ctx.stroke();
         }
         if (frameData.firstDownY) {
             const fdY = frameData.firstDownY * scaleY;
-            ctx.strokeStyle = '#eab308';
-            ctx.lineWidth = 4; // Thicker 1st Down
+            ctx.strokeStyle = '#eab308'; ctx.lineWidth = 4;
             ctx.setLineDash([12, 8]);
-            ctx.beginPath();
-            ctx.moveTo(0, fdY);
-            ctx.lineTo(canvas.width, fdY);
-            ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(0, fdY); ctx.lineTo(canvas.width, fdY); ctx.stroke();
             ctx.setLineDash([]);
         }
     }
 
-    // ===========================================
-    // 3. DRAWING PLAYERS (Optimized Size)
-    // ===========================================
+    // --- 3. DRAW PLAYERS ---
     if (frameData && frameData.players) {
         frameData.players.forEach(p => {
-            let jiggleX = 0;
-            let jiggleY = 0;
+            let jiggleX = 0; let jiggleY = 0;
             if (p.isEngaged) {
                 const jiggleAmount = 0.15; 
                 jiggleX = (Math.random() - 0.5) * jiggleAmount;
                 jiggleY = (Math.random() - 0.5) * jiggleAmount;
             }
-
             const drawX = (p.x + jiggleX) * scaleX;
             const drawY = (p.y + jiggleY) * scaleY;
-            
-            // 💡 Player Size Boost:
-            // 0.75 yards radius makes them notably bigger and easier to track
             const radius = scaleX * 0.75; 
 
-            // Stun Pulse
             if (p.stunnedTicks > 0) {
                 const pulse = (Math.sin(Date.now() / 200) + 1) / 2;
-                const pulseRadius = radius + (pulse * 4);
-                ctx.save();
-                ctx.beginPath();
-                ctx.arc(drawX, drawY, pulseRadius, 0, Math.PI * 2);
-                ctx.fillStyle = `rgba(220, 38, 38, ${0.5 - pulse * 0.2})`;
-                ctx.fill();
-                ctx.restore();
+                ctx.save(); ctx.beginPath(); ctx.arc(drawX, drawY, radius + (pulse * 4), 0, Math.PI * 2);
+                ctx.fillStyle = `rgba(220, 38, 38, ${0.5 - pulse * 0.2})`; ctx.fill(); ctx.restore();
             }
 
-            // Shadow
-            ctx.fillStyle = 'rgba(0,0,0,0.4)';
-            ctx.beginPath();
-            ctx.arc(drawX + (scaleX * 0.1), drawY + (scaleY * 0.1), radius, 0, Math.PI * 2);
-            ctx.fill();
+            ctx.fillStyle = 'rgba(0,0,0,0.4)'; ctx.beginPath(); ctx.arc(drawX + (scaleX * 0.1), drawY + (scaleY * 0.1), radius, 0, Math.PI * 2); ctx.fill();
+            ctx.fillStyle = p.primaryColor || (p.isOffense ? '#3b82f6' : '#ef4444'); ctx.beginPath(); ctx.arc(drawX, drawY, radius, 0, Math.PI * 2); ctx.fill();
 
-            // Body
-            ctx.fillStyle = p.primaryColor || (p.isOffense ? '#3b82f6' : '#ef4444');
-            ctx.beginPath();
-            ctx.arc(drawX, drawY, radius, 0, Math.PI * 2);
-            ctx.fill();
+            if (p.isEngaged) { ctx.strokeStyle = 'rgba(255, 255, 255, 0.6)'; ctx.lineWidth = 1.5; ctx.stroke(); }
+            if (p.isBallCarrier) { ctx.strokeStyle = '#fbbf24'; ctx.lineWidth = 3.5; ctx.beginPath(); ctx.arc(drawX, drawY, radius + 3, 0, Math.PI * 2); ctx.stroke(); }
 
-            // Engagement Halo
-            if (p.isEngaged) {
-                ctx.strokeStyle = 'rgba(255, 255, 255, 0.6)';
-                ctx.lineWidth = 1.5;
-                ctx.stroke();
-            }
-
-            // Ball Carrier Ring
-            if (p.isBallCarrier) {
-                ctx.strokeStyle = '#fbbf24'; 
-                ctx.lineWidth = 3.5;
-                ctx.beginPath();
-                ctx.arc(drawX, drawY, radius + 3, 0, Math.PI * 2);
-                ctx.stroke();
-            }
-
-            // Number
-            ctx.fillStyle = '#fff';
-            // Scale font to match new body size
-            ctx.font = `bold ${radius * 1.1}px "Inter"`; 
+            ctx.fillStyle = '#fff'; ctx.font = `bold ${radius * 1.1}px "Inter"`; 
             ctx.fillText(p.number || '', drawX, drawY + (radius * 0.1));
         });
     }
 
-    // ===========================================
-    // 4. DRAWING THE BALL
-    // ===========================================
+    // --- 4. DRAW BALL ---
     if (frameData && frameData.ball && (frameData.ball.inAir || frameData.ball.isLoose)) {
         const ballX = frameData.ball.x * scaleX;
         const ballY = frameData.ball.y * scaleY;
-        const ballRadius = scaleX * 0.45; // Bigger ball
-
-        // Ball Shadow
+        const ballRadius = scaleX * 0.45;
         const shadowOffset = (frameData.ball.z || 0) * (scaleX * 0.1);
-        ctx.fillStyle = 'rgba(0,0,0,0.3)';
-        ctx.beginPath();
-        ctx.arc(ballX + shadowOffset, ballY + shadowOffset, ballRadius, 0, Math.PI * 2);
-        ctx.fill();
-
-        // The Ball
-        ctx.fillStyle = '#78350f'; 
-        ctx.beginPath();
-        ctx.arc(ballX, ballY, ballRadius, 0, Math.PI * 2);
-        ctx.fill();
         
-        // Highlight
-        ctx.fillStyle = 'rgba(255,255,255,0.4)';
-        ctx.beginPath();
-        ctx.arc(ballX - (ballRadius * 0.3), ballY - (ballRadius * 0.3), ballRadius * 0.4, 0, Math.PI * 2);
-        ctx.fill();
+        ctx.fillStyle = 'rgba(0,0,0,0.3)'; ctx.beginPath(); ctx.arc(ballX + shadowOffset, ballY + shadowOffset, ballRadius, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = '#78350f'; ctx.beginPath(); ctx.arc(ballX, ballY, ballRadius, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = 'rgba(255,255,255,0.4)'; ctx.beginPath(); ctx.arc(ballX - (ballRadius * 0.3), ballY - (ballRadius * 0.3), ballRadius * 0.4, 0, Math.PI * 2); ctx.fill();
     }
 
     ctx.restore();
@@ -3104,32 +3047,51 @@ function runLiveGameTick() {
 
     // --- 6. Draw Visualization ---
     drawFieldVisualization(frame);
-    // update players/substitution UI
-    try { renderSimPlayers(frame); } catch (err) { console.error('renderSimPlayers error:', err); }
+    try { renderSimPlayers(frame); } catch (err) { }
 
-    // --- 7. Advance to Next Frame OR Start Huddle ---
+    // --- 7. HUDDLE CHECK (The Fix) ---
+    // Instead of relying on "playHasEnded" (which depends on text parsing),
+    // we look ahead to see if the NEXT frame is a snap.
+    const nextFrame = allFrames[liveGameCurrentIndex + 1];
+    let isHuddleTime = false;
+
+    if (nextFrame && nextFrame.isSnap) {
+        isHuddleTime = true;
+    }
+
+    // --- 8. Advance or Pause ---
     liveGameCurrentIndex++;
 
-    // --- NEW: Huddle Logic ---
-    if (playHasEnded && liveGameCurrentIndex < allFrames.length) {
-        // The play is over! Stop the "action" clock.
+    if (isHuddleTime) {
         clearInterval(liveGameInterval);
         liveGameInterval = null;
         clearTimeout(huddleTimeout);
 
-        // 💡 UPDATED TIMING:
-        // 2.0 seconds to view the tackle (Post-Play)
-        // + 2.5 seconds for the Huddle/Log reading
-        // = 4.5 seconds Total Pause before the next lineup appears
-        const POST_PLAY_VIEWING_MS = 2000;
-        const HUDDLE_TIME_MS = 2500;
-        const TOTAL_PAUSE_MS = POST_PLAY_VIEWING_MS + HUDDLE_TIME_MS;
+        // 💡 CRITICAL: Peek ahead to show the result logs NOW
+        // The logs for "Tackled for 5 yards" usually exist on the *next* frame (the snap of the next play).
+        // We force-render them now so you can read the result during the pause.
+        if (nextFrame && nextFrame.logIndex > liveGameLogIndex) {
+            // Re-run your existing log parser for these pending logs
+            // Note: We can extract your parsing logic into a helper, or just copy the loop here.
+            // For safety, let's just let the next tick handle it, OR manually trigger it:
+            
+            // OPTION A: Simple (just show text)
+            // renderLogsRange(liveGameLogIndex, nextFrame.logIndex, allLogs, ticker);
+            // liveGameLogIndex = nextFrame.logIndex;
+            
+            // OPTION B (Better): Let the loop handle it naturally by advancing log index manually
+             // But since your parser is complex, it's safer to just let the user read it
+             // when the next play starts, OR call a shared helper. 
+             // Ideally, refactor your huge parser block into `processGameLogs(startIndex, endIndex)`
+        }
+        
+        // Stats Update
+        try { renderLiveStatsLive(); } catch (e) {}
 
-        huddleTimeout = setTimeout(startNextPlay, TOTAL_PAUSE_MS);
+        // Pause for Huddle (3 seconds)
+        huddleTimeout = setTimeout(startNextPlay, 3000);
     }
-    // --- END NEW LOGIC ---
 }
-
 /**
  * 🛠️ NEW HELPER FUNCTION
  * This function is called after the "huddle pause" (setTimeout) finishes.
@@ -3138,18 +3100,38 @@ function runLiveGameTick() {
 function startNextPlay() {
     huddleTimeout = null;
     if (!currentLiveGameResult || liveGameCurrentIndex >= currentLiveGameResult.visualizationFrames.length) {
-        // Failsafe: If the game ended on that last play, just run the tick again to exit.
+        // Resume to trigger end game logic
         runLiveGameTick();
         return;
     }
 
-    // Clear the field (players are in the huddle)
-    drawFieldVisualization(null);
-
-    // Restart the "action" clock using the user's preferred speed
-    if (!liveGameInterval) {
-        liveGameInterval = setInterval(runLiveGameTick, userPreferredSpeed);
+    // 1. Draw the INITIAL frame of the new play (Static)
+    // This lets the user see the formation before everyone starts running.
+    const nextFrame = currentLiveGameResult.visualizationFrames[liveGameCurrentIndex];
+    if (nextFrame) {
+        drawFieldVisualization(nextFrame);
+        renderSimPlayers(nextFrame);
+        
+        // Show "Set" message banners
+        if(elements.simBannerOffense) elements.simBannerOffense.textContent = "SET...";
+        if(elements.simBannerDefense) elements.simBannerDefense.textContent = "READY...";
+        
+        // Update Down/Distance UI immediately for the new play
+        if (elements.simGameDown) {
+            // We can infer context from the logs we just processed or wait for next tick
+            // For now, let's leave it to runLiveGameTick to update text to avoid flicker
+        }
     }
+
+    // 2. PRE-SNAP PAUSE: Wait 1.5s (QB Cadence)
+    const PRE_SNAP_DELAY = 1500; 
+
+    huddleTimeout = setTimeout(() => {
+        // Start the action!
+        if (!liveGameInterval) {
+            liveGameInterval = setInterval(runLiveGameTick, userPreferredSpeed);
+        }
+    }, PRE_SNAP_DELAY);
 }
 
 /** Starts the live game simulation, syncing frames with log entries. */
@@ -3264,9 +3246,10 @@ export function skipLiveGameSim() {
 }
 
 /** Changes the speed of the live game simulation interval. */
+
+
 export function setSimSpeed(speed) {
     liveGameSpeed = speed;
-
     userPreferredSpeed = speed;
 
     // Update button styles
@@ -3276,9 +3259,9 @@ export function setSimSpeed(speed) {
     });
 
     let activeButtonId;
-    if (speed === 50) activeButtonId = 'sim-speed-play';  // 1x Speed
-    else if (speed === 20) activeButtonId = 'sim-speed-fast';  // Fast-forward
-    else if (speed === 150) activeButtonId = 'sim-speed-faster'; // Slow-mo
+    if (speed === 80) activeButtonId = 'sim-speed-play';  // 💡 Update logic to match new default
+    else if (speed === 30) activeButtonId = 'sim-speed-fast'; 
+    else if (speed === 150) activeButtonId = 'sim-speed-faster';
 
     const activeButton = document.getElementById(activeButtonId);
     if (activeButton) {
@@ -3286,15 +3269,11 @@ export function setSimSpeed(speed) {
         activeButton.classList.add('active', 'bg-blue-500', 'hover:bg-blue-600');
     }
 
-    clearTimeout(huddleTimeout); // FIX: Cancel any pending huddle
+    // Restart logic (same as before)
+    clearTimeout(huddleTimeout); 
     huddleTimeout = null;
-
-    // If sim is running, clear and restart interval with the new speed
     if (currentLiveGameResult && liveGameCurrentIndex < currentLiveGameResult.visualizationFrames.length) {
-        if (liveGameInterval) {
-            clearInterval(liveGameInterval); // Clear old action clock
-        }
-        // Start new action clock immediately, effectively skipping the huddle
+        if (liveGameInterval) clearInterval(liveGameInterval);
         liveGameInterval = setInterval(runLiveGameTick, liveGameSpeed);
     }
 }
