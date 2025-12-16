@@ -4569,7 +4569,7 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
 
     // 2. Extract values from the context object
     const { gameLog = [], weather, ballOn, ballHash = 'M', down, yardsToGo } = context;
-    const fastSim = options.fastSim === true && !isLive; // Force slow sim if Live
+    const fastSim = (options.fastSim === true) && !isLive;
 
     // --- Define playResult ---
     const playResult = {
@@ -4582,21 +4582,22 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
         turnoverType: null
     };
 
-    // --- 1. VALIDATION ---
-    const play = deepClone(offensivePlaybook[offensivePlayKey]);
-    if (!play) {
-        console.error(`Play key "${offensivePlayKey}" not found.`);
-        if (gameLog) gameLog.push("CRITICAL ERROR: Play definition missing!");
+    // --- 3. VALIDATION ---
+    // If offensivePlayKey is undefined, the arguments are likely misaligned
+    if (!offensivePlaybook || !offensivePlaybook[offensivePlayKey]) {
+        console.error(`CRITICAL: Play key "${offensivePlayKey}" not found. Check arguments.`);
         playResult.outcome = 'turnover';
         playResult.possessionChange = true;
         return { playResult, finalBallY: ballOn, log: gameLog, visualizationFrames: [] };
     }
 
-    // --- 2. INITIALIZE STATE ---
+    const play = deepClone(offensivePlaybook[offensivePlayKey]);
+
+    // --- 4. INITIALIZE STATE ---
     let playState = {
         playIsLive: true,
         tick: 0,
-        // 💡 OPTIMIZATION: Only create array if Live
+        // 💡 OPTIMIZATION: Only create frames array if Live
         visualizationFrames: isLive ? [] : null,
         maxTicks: 1000,
         type: play.type,
@@ -5616,21 +5617,10 @@ function checkPlayDiversity(desiredPlayType, recentPlaysHistory, candidatePlayKe
 /**
  * Simulates a full game between two teams.
  */
-function simulateGame(homeTeam, awayTeam, optionsOrIsLive = {}) {
-    // 1. Initialize variables
-    let isLive = false;
-    let options = {};
-
-    // 2. Check what TYPE the argument is
-    if (typeof optionsOrIsLive === 'boolean') {
-        // "Old Way" detected: The argument IS the boolean flag
-        isLive = optionsOrIsLive;
-        options = { isLive: isLive }; // Create the object manually
-    } else {
-        // "New Way" detected: The argument is an object (or the default {})
-        options = optionsOrIsLive || {};
-        isLive = options.isLive === true;
-    }
+function simulateGame(homeTeam, awayTeam, options = {}) {
+    // 1. Simple Extraction
+    const isLive = options.isLive === true;
+    const fastSim = isLive ? false : (options.fastSim === true);
 
     let originalTickDuration = TICK_DURATION_SECONDS;
     let gameResult;
@@ -5748,10 +5738,19 @@ function simulateGame(homeTeam, awayTeam, optionsOrIsLive = {}) {
                         defense,
                         offensivePlayKey,
                         defensivePlayKey,
-                        // Context Object
-                        { gameLog: fastSim ? null : gameLog, weather, ballOn, ballHash, down, yardsToGo },
+                        // THE CONTEXT OBJECT
+                        {
+                            gameLog: fastSim ? null : gameLog,
+                            weather,
+                            ballOn,
+                            ballHash,
+                            down,
+                            yardsToGo
+                        },
+                        // OPTIONS
                         options,
-                        isLive // <--- Pass as LAST argument
+                        // ISLIVE FLAG
+                        isLive
                     );
 
                     playResult = result.playResult;

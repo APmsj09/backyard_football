@@ -3168,7 +3168,7 @@ export function startLiveGameSim(gameResult, onComplete) {
         liveGameInterval = null;
     }
 
-    // --- 4. Reset State ---
+    // --- 4. Reset Global State ---
     liveGameCallback = onComplete;
     currentLiveGameResult = gameResult;
     liveGameCurrentIndex = 0;
@@ -3179,7 +3179,7 @@ export function startLiveGameSim(gameResult, onComplete) {
     liveGameDriveText = "Kickoff";
 
     // ===============================================
-    // 💡 NEW: RESIZE CANVAS TO FILL CONTAINER
+    // 💡 CANVAS RESIZE LOGIC (Fixes "Wasted Space")
     // ===============================================
     const canvas = elements.fieldCanvas;
     if (canvas && canvas.parentElement) {
@@ -3196,12 +3196,16 @@ export function startLiveGameSim(gameResult, onComplete) {
     }
     // ===============================================
 
-    // --- 5. Initial Render ---
+    // --- 5. Initial UI Render ---
     ticker.innerHTML = '';
+    
+    // Set Team Names & Reset Scores
     elements.simAwayTeam.textContent = gameResult.awayTeam.name;
     elements.simHomeTeam.textContent = gameResult.homeTeam.name;
     elements.simAwayScore.textContent = '0';
     elements.simHomeScore.textContent = '0';
+    
+    // Set Drive Info
     elements.simGameDrive.textContent = liveGameDriveText;
     elements.simGameDown.textContent = "1st & 10";
     elements.simPossession.textContent = '';
@@ -3209,15 +3213,22 @@ export function startLiveGameSim(gameResult, onComplete) {
     elements.simBannerDefense.textContent = "Reading offense...";
     elements.simFieldPlayers.innerHTML = '';
 
-    renderSimPlayers(gameResult.visualizationFrames[0]);
-    setSimSpeed(liveGameSpeed);
-
-    // Force an immediate draw so the field appears instantly (not white)
-    if(elements.fieldCanvasCtx) {
-        drawFieldVisualization(gameResult.visualizationFrames[0]);
+    // --- 6. Initial Field Draw ---
+    // Draw the very first frame immediately so the user doesn't see a blank screen
+    if (gameResult.visualizationFrames.length > 0) {
+        const initialFrame = gameResult.visualizationFrames[0];
+        
+        renderSimPlayers(initialFrame);
+        
+        if (elements.fieldCanvasCtx) {
+            drawFieldVisualization(initialFrame);
+        }
     }
 
-    // --- 6. Start ---
+    // Apply speed settings
+    setSimSpeed(liveGameSpeed);
+
+    // --- 7. Start the Loop ---
     liveGameInterval = setInterval(runLiveGameTick, liveGameSpeed);
 }
 
