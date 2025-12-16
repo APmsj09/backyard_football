@@ -2048,58 +2048,55 @@ export function drawFieldVisualization(frameData) {
     // --- 1. SETUP & SCALING ---
     const pad = 20;
 
-    // A. Sideline Width Maxed (Lock Width)
-    const FIELD_WIDTH_REAL = 53.3;
+    // A. Width Scaling (Maxed Sidelines)
+    const FIELD_WIDTH_REAL = 53.3; 
     const scaleX = (canvas.width - (pad * 2)) / FIELD_WIDTH_REAL;
+    
+    // B. Aspect Ratio (Squashed vertical to see more downfield)
+    const scaleY = scaleX * 0.85; 
 
-    // B. "Zoom Out" Trick (Vertical Compression)
-    // We scale Y at 85% of X. This lets us see 15% more downfield 
-    // without shrinking the width (sidelines stay at the edge).
-    const scaleY = scaleX * 0.85;
+    // ===============================================
+    // 2. CAMERA LOGIC (The Fix)
+    // ===============================================
+    let focusY = 50; // Default center field
 
-    // --- 2. CAMERA LOGIC (Look-Ahead) ---
-    let focusY = 50;
-    if (frameData && frameData.lineOfScrimmage) focusY = frameData.lineOfScrimmage;
+    // Priority 1: Is someone holding the ball? (Runners, QB, etc.)
+    const ballCarrier = frameData.players ? frameData.players.find(p => p.isBallCarrier) : null;
 
-    if (frameData && frameData.ball) {
-        // If ball is in air, follow it perfectly
-        if (frameData.ball.inAir) {
-            focusY = frameData.ball.y;
-        }
-        // If pre-snap or running, look ahead
-        else {
-            const ballCarrier = frameData.players?.find(p => p.isBallCarrier);
-            if (ballCarrier) focusY = ballCarrier.y;
-        }
+    if (ballCarrier) {
+        focusY = ballCarrier.y;
+    } 
+    // Priority 2: Is the ball flying through the air?
+    else if (frameData.ball && frameData.ball.inAir) {
+        focusY = frameData.ball.y;
+    } 
+    // Priority 3: Default to Line of Scrimmage (Pre-snap)
+    else if (frameData.lineOfScrimmage) {
+        focusY = frameData.lineOfScrimmage;
     }
 
-    // C. Offset Camera (The "TV View")
-    // Instead of centering the ball (0.5), we position it at 0.75 (lower on screen)
-    // This implies we want the "Top" of the screen (cameraY) to be far ahead of the ball.
+    // Calculate how many yards fit vertically on screen
     const visibleYardsVertical = canvas.height / scaleY;
 
-    // "Look Ahead" Offset: Show more of the field *in front* of the ball
-    // We subtract approx 70% of the screen height from the focus point to find the top yard
-    // Note: Since 0 is bottom in typical field coords (if you simulate 0->100), 
-    // or if 0 is top... assuming typical math:
-    // If toScreenY does (y - cameraY), then cameraY is the yard at the TOP.
-    // We want the ball to be at the BOTTOM (Higher Yard number in viewport relative to top).
-    // So CameraY should be (BallY - (VisibleYards * 0.7))
-    let cameraY = focusY - (visibleYardsVertical * 0.7);
+    // "Look Ahead" Logic:
+    // We position the Focus Point (Ball/Player) at the BOTTOM 30% of the screen.
+    // This allows you to see the 70% of the field AHEAD of the player.
+    let cameraBottomYard = focusY - (visibleYardsVertical * 0.3); 
 
-    // Clamp Camera (Don't scroll past endzones)
-    // Viewport: -10 (Top Endzone) to 110 (Bottom Endzone)
-    const MIN_VIEW_Y = -12;
-    const MAX_VIEW_Y = 112;
-    cameraY = Math.max(MIN_VIEW_Y, Math.min(MAX_VIEW_Y - visibleYardsVertical, cameraY));
+    // Clamp Camera (Keep endzones in view)
+    const MIN_FIELD_Y = -5; 
+    const MAX_FIELD_Y = 105 - visibleYardsVertical; 
+    cameraBottomYard = Math.max(MIN_FIELD_Y, Math.min(MAX_FIELD_Y, cameraBottomYard));
 
     // --- HELPER: Coordinate Conversion ---
     const toScreenX = (x) => pad + (x * scaleX);
-    const toScreenY = (y) => (y - cameraY) * scaleY; // Top-Down view
+    
+    // Inverted Y Logic (0 at Bottom, 100 at Top)
+    const toScreenY = (y) => canvas.height - ((y - cameraBottomYard) * scaleY);
 
     // Clear & Background
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.fillStyle = "#2e4a28";
+    ctx.fillStyle = "#2e4a28"; 
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
     // ===============================================
@@ -2116,20 +2113,20 @@ export function drawFieldVisualization(frameData) {
     ctx.strokeStyle = "white";
     ctx.lineWidth = 3;
 
-    // Top Endzone (Approx -10 to 0)
-    const topGoalLineY = toScreenY(0);
-    const topBackLineY = toScreenY(-10);
-    ctx.strokeRect(pad, topBackLineY, canvas.width - (pad * 2), topGoalLineY - topBackLineY);
+    // Top Goal Line (Yard 100)
+    const topGoalY = toScreenY(100);
+    const topBackY = toScreenY(110);
+    ctx.strokeRect(pad, topBackY, canvas.width - (pad * 2), topGoalY - topBackY);
 
-    // Bottom Endzone (Approx 100 to 110)
-    const bottomGoalLineY = toScreenY(100);
-    const bottomBackLineY = toScreenY(110);
-    ctx.strokeRect(pad, bottomGoalLineY, canvas.width - (pad * 2), bottomBackLineY - bottomGoalLineY);
+    // Bottom Goal Line (Yard 0)
+    const botGoalY = toScreenY(0);
+    const botBackY = toScreenY(-10);
+    ctx.strokeRect(pad, botGoalY, canvas.width - (pad * 2), botBackY - botGoalY);
 
     // C. Yard Lines
     for (let i = 1; i < 100; i++) {
         const y = toScreenY(i);
-        if (y < -10 || y > canvas.height + 10) continue; // Optimization
+        if (y < -10 || y > canvas.height + 10) continue; 
 
         if (i % 10 === 0) {
             // 10-Yard Lines
@@ -2155,12 +2152,12 @@ export function drawFieldVisualization(frameData) {
             // Hashes
             ctx.strokeStyle = "rgba(255, 255, 255, 0.5)";
             ctx.lineWidth = 1;
-
+            
             ctx.beginPath(); ctx.moveTo(pad, y); ctx.lineTo(pad + 5, y); ctx.stroke();
             ctx.beginPath(); ctx.moveTo(canvas.width - pad - 5, y); ctx.lineTo(canvas.width - pad, y); ctx.stroke();
 
-            const leftHashX = toScreenX(20);
-            const rightHashX = toScreenX(33.3);
+            const leftHashX = toScreenX(20); 
+            const rightHashX = toScreenX(33.3); 
             ctx.beginPath(); ctx.moveTo(leftHashX, y); ctx.lineTo(leftHashX + 4, y); ctx.stroke();
             ctx.beginPath(); ctx.moveTo(rightHashX, y); ctx.lineTo(rightHashX + 4, y); ctx.stroke();
         }
@@ -2173,7 +2170,7 @@ export function drawFieldVisualization(frameData) {
         ctx.lineWidth = 2;
         ctx.beginPath(); ctx.moveTo(pad, y); ctx.lineTo(canvas.width - pad, y); ctx.stroke();
     }
-
+    
     if (frameData.firstDownY > 0 && frameData.firstDownY < 100) {
         const y = toScreenY(frameData.firstDownY);
         ctx.strokeStyle = "#eab308"; // Yellow
@@ -2211,48 +2208,33 @@ export function drawFieldVisualization(frameData) {
         });
     }
 
-    // =======================================================
-    // 💡 3. DRAW THE BALL (Fixed to match your coordinates)
-    // =======================================================
-    // Use 'frameData.ball' to match your 'frameData.players' variable
-    if (frameData.ball) {
+    // ===============================================
+    // 5. DRAW BALL (STRICT VISIBILITY)
+    // ===============================================
+    // 💡 ONLY draw if the ball is actually IN THE AIR
+    if (frameData.ball && frameData.ball.inAir) {
         const ball = frameData.ball;
+        const bx = toScreenX(ball.x);
+        const by = toScreenY(ball.y);
+        
+        // Height Logic (Ball flies "Up" towards top of screen relative to shadow)
+        const visualHeightOffset = (ball.z || 0) * scaleY * 1.5; 
 
-        // 1. Calculate Screen Position (Matching your player logic)
-        const bx = ball.x * scaleX;
-        const by = ball.y * scaleY;
-
-        // 2. Height Logic (Z-Axis)
-        // We subtract from Y to make the ball go "up" visually
-        // scaleY is typically pixels-per-yard, so we multiply Z (yards) by scaleY
-        const visualHeightOffset = (ball.z || 0) * scaleY * 1.5; // 1.5 exaggerates height slightly for visibility
-
-        // A. Draw Shadow (Stays on the ground at by)
-        // Shadow gets smaller and more transparent as ball goes higher
+        // Shadow
         const shadowAlpha = Math.max(0.1, 0.4 - ((ball.z || 0) * 0.1));
         const shadowSize = Math.max(scaleX * 0.2, (scaleX * 0.4) - ((ball.z || 0) * 0.05));
-
+        
         ctx.fillStyle = `rgba(0,0,0,${shadowAlpha})`;
-        ctx.beginPath();
-        ctx.ellipse(bx, by, shadowSize, shadowSize * 0.5, 0, 0, Math.PI * 2);
-        ctx.fill();
+        ctx.beginPath(); ctx.ellipse(bx, by, shadowSize, shadowSize * 0.5, 0, 0, Math.PI * 2); ctx.fill();
 
-        // B. Draw Ball (Offset by height)
-        const ballY = by - visualHeightOffset;
-
-        ctx.fillStyle = "#854d0e"; // Football Brown
-        ctx.beginPath();
-        // Ellipse shape: (x, y, radiusX, radiusY, rotation...)
-        ctx.ellipse(bx, ballY, scaleX * 0.35, scaleY * 0.5, 0, 0, Math.PI * 2);
-        ctx.fill();
-
-        // C. Ball Laces (Visual detail)
-        ctx.strokeStyle = "white";
-        ctx.lineWidth = 1.5;
-        ctx.beginPath();
-        ctx.moveTo(bx, ballY - (scaleY * 0.25));
-        ctx.lineTo(bx, ballY + (scaleY * 0.25));
-        ctx.stroke();
+        // Ball
+        const ballDrawY = by - visualHeightOffset;
+        ctx.fillStyle = "#854d0e"; 
+        ctx.beginPath(); ctx.ellipse(bx, ballDrawY, scaleX * 0.35, scaleY * 0.5, 0, 0, Math.PI * 2); ctx.fill();
+        
+        // Laces
+        ctx.strokeStyle = "white"; ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.moveTo(bx, ballDrawY - (scaleY * 0.25)); ctx.lineTo(bx, ballDrawY + (scaleY * 0.25)); ctx.stroke();
     }
 
     ctx.restore();
