@@ -5616,14 +5616,21 @@ function checkPlayDiversity(desiredPlayType, recentPlaysHistory, candidatePlayKe
 /**
  * Simulates a full game between two teams.
  */
-function simulateGame(homeTeam, awayTeam, options = {}) {
+function simulateGame(homeTeam, awayTeam, optionsOrIsLive = {}) {
+    // 1. Initialize variables
+    let isLive = false;
+    let options = {};
 
-    // 2. Extract isLive from options (default to false)
-    const isLive = options.isLive === true;
-
-    // 3. Force fastSim to false if we are watching Live
-    //    (otherwise use the value passed in options)
-    const fastSim = isLive ? false : (options.fastSim === true);
+    // 2. Check what TYPE the argument is
+    if (typeof optionsOrIsLive === 'boolean') {
+        // "Old Way" detected: The argument IS the boolean flag
+        isLive = optionsOrIsLive;
+        options = { isLive: isLive }; // Create the object manually
+    } else {
+        // "New Way" detected: The argument is an object (or the default {})
+        options = optionsOrIsLive || {};
+        isLive = options.isLive === true;
+    }
 
     let originalTickDuration = TICK_DURATION_SECONDS;
     let gameResult;
