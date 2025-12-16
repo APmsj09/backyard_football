@@ -2045,227 +2045,229 @@ export function drawFieldVisualization(frameData) {
     const canvas = elements.fieldCanvas;
     if (!ctx || !canvas) return;
 
-    // --- 1. SETUP & SCALING (LANDSCAPE MODE) ---
-    const pad = 20;
-
-    // A. Height Scaling (Fit 53.3 yards into canvas Height)
-    const FIELD_WIDTH_REAL = 53.3; 
-    // We scale based on HEIGHT now because sidelines are top/bottom
-    const scaleY = (canvas.height - (pad * 2)) / FIELD_WIDTH_REAL;
+    // ===============================================
+    // 1. FIX BLUR (High-DPI Scaling)
+    // ===============================================
+    // We only need to do this once or when window resizes, but checking here ensures it's crisp.
+    const dpr = window.devicePixelRatio || 1;
+    const rect = canvas.getBoundingClientRect();
     
-    // B. Aspect Ratio
-    // yards are square, so scaleX should equal scaleY.
-    // However, you can multiply scaleX by 0.9 if you want to compress length slightly to see more.
-    const scaleX = scaleY; 
+    // Set actual render size to match screen pixels
+    if (canvas.width !== rect.width * dpr || canvas.height !== rect.height * dpr) {
+        canvas.width = rect.width * dpr;
+        canvas.height = rect.height * dpr;
+        // Reset scale because changing width/height resets context
+        ctx.scale(dpr, dpr); 
+    }
 
-    // --- 2. CAMERA LOGIC (Horizontal Pan) ---
-    // Goal: Track X position (Yard Lines)
+    // Since we scaled the context by dpr, we can use logical pixels (rect.width/height) for math
+    const width = rect.width;
+    const height = rect.height;
+
+    // ===============================================
+    // 2. SCALING (Fit Field Width to Screen Height)
+    // ===============================================
+    const pad = 20; // Padding in pixels
+
+    // Real Field Dimensions
+    const FIELD_WIDTH_YARDS = 53.3; 
     
-    let focusX = 50; // Default center field
+    // We want the Top and Bottom sidelines to fit exactly in the canvas height
+    // Scale = Available Height (pixels) / Real Width (yards)
+    const scale = (height - (pad * 2)) / FIELD_WIDTH_YARDS;
+
+    // ===============================================
+    // 3. CAMERA LOGIC (Horizontal Pan)
+    // ===============================================
+    let focusGameY = 50; // Center of field (50 yard line)
 
     // Priority 1: Ball Carrier
     const ballCarrier = frameData.players ? frameData.players.find(p => p.isBallCarrier) : null;
     if (ballCarrier) {
-        focusX = ballCarrier.y; // Note: Game logic uses 'y' for yard lines, 'x' for width. We map Game-Y to Screen-X.
+        focusGameY = ballCarrier.y; 
     } 
-    // Priority 2: Flying Ball
+    // Priority 2: Ball in Air
     else if (frameData.ball && frameData.ball.inAir) {
-        focusX = frameData.ball.y; 
+        focusGameY = frameData.ball.y; 
     } 
-    // Priority 3: Line of Scrimmage
+    // Priority 3: LOS
     else if (frameData.lineOfScrimmage) {
-        focusX = frameData.lineOfScrimmage;
+        focusGameY = frameData.lineOfScrimmage;
     }
 
-    // Calculate how many yards fit horizontally on screen
-    const visibleYardsHorizontal = canvas.width / scaleX;
+    // Calculate how many yards fit horizontally on the screen
+    const visibleYards = width / scale;
 
-    // "Look Ahead" Logic:
-    // Position focus point at the LEFT 30% of screen to see open field to the RIGHT.
-    // (Assuming offense moves Left -> Right. If possession flips, you might want to invert this logic later)
-    let cameraLeftYard = focusX - (visibleYardsHorizontal * 0.3);
+    // "Look Ahead" Camera
+    // Position the ball on the LEFT side (30%) so we see the field to the RIGHT
+    let cameraLeftYard = focusGameY - (visibleYards * 0.3);
 
-    // Clamp Camera (Don't scroll past endzones)
-    // -10 (Left Endzone) to 110 (Right Endzone)
-    const MIN_FIELD_X = -12;
-    const MAX_FIELD_X = 112 - visibleYardsHorizontal;
-    cameraLeftYard = Math.max(MIN_FIELD_X, Math.min(MAX_FIELD_X, cameraLeftYard));
+    // Clamp Camera (Don't scroll past Endzones)
+    // Field runs from -10 to 110. 
+    cameraLeftYard = Math.max(-12, Math.min(112 - visibleYards, cameraLeftYard));
 
-    // --- HELPER: Coordinate Conversion ---
-    // Game Logic: X = Width (0-53.3), Y = Length (0-100)
-    // Screen Logic: X = Length, Y = Width
-    
-    // Convert Game Y (Length) -> Screen X
-    const toScreenX = (gameY) => (gameY - cameraLeftYard) * scaleX;
+    // ===============================================
+    // 4. COORDINATE CONVERSION (Rotation Logic)
+    // ===============================================
+    // Game Logic: X = Width (Side-to-Side), Y = Length (Endzone-to-Endzone)
+    // Visual:     X = Length (Left-to-Right), Y = Width (Top-to-Bottom)
 
-    // Convert Game X (Width) -> Screen Y
-    // Invert Game X so sideline 0 is top or bottom? 
-    // Usually 0 is Left Sideline (Top on screen)
-    const toScreenY = (gameX) => pad + (gameX * scaleY);
+    // Convert Game Y (Yard Line) -> Screen X
+    const toScreenX = (gameY) => (gameY - cameraLeftYard) * scale;
 
-    // Clear & Background
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    // Convert Game X (Sideline Position) -> Screen Y
+    // Invert X so 0 is Top, 53.3 is Bottom (standard reading order)
+    const toScreenY = (gameX) => pad + (gameX * scale);
+
+    // ===============================================
+    // 5. DRAW FIELD
+    // ===============================================
+    // Clear (Use logical size)
+    ctx.clearRect(0, 0, width, height);
     ctx.fillStyle = "#2e4a28"; 
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillRect(0, 0, width, height);
 
-    // ===============================================
-    // 3. DRAW FIELD MARKINGS
-    // ===============================================
-
-    // A. Sidelines (Top and Bottom)
-    const sidelineWidth = 4;
+    // A. Sidelines (Top & Bottom)
     ctx.fillStyle = "white";
-    // Top Sideline
-    ctx.fillRect(0, pad - sidelineWidth, canvas.width, sidelineWidth);
-    // Bottom Sideline
-    ctx.fillRect(0, canvas.height - pad, canvas.width, sidelineWidth);
+    ctx.fillRect(0, pad - 4, width, 4); // Top Sideline
+    ctx.fillRect(0, height - pad, width, 4); // Bottom Sideline
 
-    // B. Endzones (Left and Right)
+    // B. Endzones (Left & Right)
     ctx.strokeStyle = "white";
     ctx.lineWidth = 3;
+    
+    // Left Endzone (-10 to 0)
+    const xZero = toScreenX(0);
+    const xMinusTen = toScreenX(-10);
+    ctx.strokeRect(xMinusTen, pad, xZero - xMinusTen, height - (pad * 2));
 
-    // Left Endzone (Yard 0 to -10)
-    const leftGoalX = toScreenX(0);
-    const leftBackX = toScreenX(-10);
-    ctx.strokeRect(leftBackX, pad, leftGoalX - leftBackX, canvas.height - (pad * 2));
+    // Right Endzone (100 to 110)
+    const xHundred = toScreenX(100);
+    const xOneTen = toScreenX(110);
+    ctx.strokeRect(xHundred, pad, xOneTen - xHundred, height - (pad * 2));
 
-    // Right Endzone (Yard 100 to 110)
-    const rightGoalX = toScreenX(100);
-    const rightBackX = toScreenX(110);
-    ctx.strokeRect(rightGoalX, pad, rightBackX - rightGoalX, canvas.height - (pad * 2));
-
-    // C. Yard Lines (Vertical Lines)
+    // C. Yard Lines
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.font = "bold 12px Arial";
+    
     for (let i = 1; i < 100; i++) {
         const x = toScreenX(i);
-        // Optimization
-        if (x < -10 || x > canvas.width + 10) continue;
+        if (x < -10 || x > width + 10) continue;
 
         if (i % 10 === 0) {
-            // 10-Yard Lines
+            // 10-Yard Line (Thick)
             ctx.strokeStyle = "rgba(255, 255, 255, 0.8)";
             ctx.lineWidth = 2;
-            ctx.beginPath(); ctx.moveTo(x, pad); ctx.lineTo(x, canvas.height - pad); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(x, pad); ctx.lineTo(x, height - pad); ctx.stroke();
 
             // Numbers
-            if (scaleY > 3) {
-                ctx.fillStyle = "rgba(255, 255, 255, 0.5)";
-                ctx.font = "10px Arial";
-                ctx.textAlign = "center";
-                const num = i <= 50 ? i : 100 - i;
-                ctx.fillText(num, x, pad + 15); // Top Number
-                ctx.fillText(num, x, canvas.height - pad - 5); // Bottom Number
-            }
+            ctx.fillStyle = "rgba(255, 255, 255, 0.6)";
+            const num = i <= 50 ? i : 100 - i;
+            ctx.fillText(num, x, pad + 15); // Top Number
+            ctx.fillText(num, x, height - pad - 15); // Bottom Number
+
         } else if (i % 5 === 0) {
-            // 5-Yard Lines
+            // 5-Yard Line (Thin)
             ctx.strokeStyle = "rgba(255, 255, 255, 0.4)";
             ctx.lineWidth = 1;
-            ctx.beginPath(); ctx.moveTo(x, pad); ctx.lineTo(x, canvas.height - pad); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(x, pad); ctx.lineTo(x, height - pad); ctx.stroke();
         } else {
-            // Hashes
+            // Hashes (Small Ticks)
             ctx.strokeStyle = "rgba(255, 255, 255, 0.5)";
             ctx.lineWidth = 1;
-            
             // Sideline Hashes
             ctx.beginPath(); ctx.moveTo(x, pad); ctx.lineTo(x, pad + 5); ctx.stroke();
-            ctx.beginPath(); ctx.moveTo(x, canvas.height - pad - 5); ctx.lineTo(x, canvas.height - pad); ctx.stroke();
-
-            // Center Hashes (Map 20 and 33.3 width to Screen Y)
-            const topHashY = toScreenY(20); 
-            const botHashY = toScreenY(33.3); 
-            ctx.beginPath(); ctx.moveTo(x, topHashY); ctx.lineTo(x, topHashY + 4); ctx.stroke();
-            ctx.beginPath(); ctx.moveTo(x, botHashY); ctx.lineTo(x, botHashY + 4); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(x, height - pad - 5); ctx.lineTo(x, height - pad); ctx.stroke();
+            
+            // Center Hashes (Pro Width approx 20 & 33)
+            const yHash1 = toScreenY(20);
+            const yHash2 = toScreenY(33.3);
+            ctx.beginPath(); ctx.moveTo(x, yHash1); ctx.lineTo(x, yHash1 + 4); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(x, yHash2); ctx.lineTo(x, yHash2 + 4); ctx.stroke();
         }
     }
 
-    // --- Dynamic Lines ---
+    // D. Dynamic Lines
     if (frameData.lineOfScrimmage > 0 && frameData.lineOfScrimmage < 100) {
         const x = toScreenX(frameData.lineOfScrimmage);
         ctx.strokeStyle = "#3b82f6"; // Blue
         ctx.lineWidth = 2;
-        ctx.beginPath(); ctx.moveTo(x, pad); ctx.lineTo(x, canvas.height - pad); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(x, pad); ctx.lineTo(x, height - pad); ctx.stroke();
     }
-    
     if (frameData.firstDownY > 0 && frameData.firstDownY < 100) {
         const x = toScreenX(frameData.firstDownY);
         ctx.strokeStyle = "#eab308"; // Yellow
         ctx.lineWidth = 2;
-        ctx.beginPath(); ctx.moveTo(x, pad); ctx.lineTo(x, canvas.height - pad); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(x, pad); ctx.lineTo(x, height - pad); ctx.stroke();
     }
 
     // ===============================================
-    // 4. DRAW PLAYERS
+    // 6. DRAW PLAYERS
     // ===============================================
     if (frameData.players) {
         frameData.players.forEach(p => {
-            let jiggleX = 0, jiggleY = 0;
-            if (p.isEngaged) {
-                jiggleX = (Math.random() - 0.5) * 0.15;
-                jiggleY = (Math.random() - 0.5) * 0.15;
-            }
-            
-            // 💡 ROTATION LOGIC:
-            // Game X (Width) -> Screen Y
-            // Game Y (Length) -> Screen X
-            const drawX = toScreenX(p.y + jiggleY); // Use p.y for Screen X
-            const drawY = toScreenY(p.x + jiggleX); // Use p.x for Screen Y
-            
-            const radius = scaleY * 0.75; // Scale based on width/height ratio
+            // Jiggle
+            let jx = 0, jy = 0;
+            if (p.isEngaged) { jx = (Math.random()-0.5)*0.2; jy = (Math.random()-0.5)*0.2; }
 
-            // Stunned
-            if (p.stunnedTicks > 0) {
-                const pulse = (Math.sin(Date.now() / 200) + 1) / 2;
-                ctx.save(); ctx.beginPath(); ctx.arc(drawX, drawY, radius + (pulse * 4), 0, Math.PI * 2);
-                ctx.fillStyle = `rgba(220, 38, 38, ${0.5 - pulse * 0.2})`; ctx.fill(); ctx.restore();
-            }
+            // ROTATION: Game Y -> Screen X, Game X -> Screen Y
+            const drawX = toScreenX(p.y + jy);
+            const drawY = toScreenY(p.x + jx);
+            
+            const radius = scale * 0.7; // Player size relative to field scale
 
             // Shadow
-            ctx.fillStyle = 'rgba(0,0,0,0.4)'; ctx.beginPath(); ctx.arc(drawX + (scaleX * 0.1), drawY + (scaleY * 0.1), radius, 0, Math.PI * 2); ctx.fill();
+            ctx.fillStyle = 'rgba(0,0,0,0.3)';
+            ctx.beginPath(); ctx.arc(drawX + 2, drawY + 2, radius, 0, Math.PI*2); ctx.fill();
 
             // Body
-            ctx.fillStyle = p.primaryColor || (p.isOffense ? '#3b82f6' : '#ef4444'); 
-            ctx.beginPath(); ctx.arc(drawX, drawY, radius, 0, Math.PI * 2); ctx.fill();
+            ctx.fillStyle = p.primaryColor || (p.isOffense ? '#3b82f6' : '#ef4444');
+            ctx.beginPath(); ctx.arc(drawX, drawY, radius, 0, Math.PI*2); ctx.fill();
 
-            // Accents
-            if (p.isEngaged) { ctx.strokeStyle = 'rgba(255, 255, 255, 0.6)'; ctx.lineWidth = 1.5; ctx.stroke(); }
-            if (p.isBallCarrier) { ctx.strokeStyle = '#fbbf24'; ctx.lineWidth = 3.5; ctx.beginPath(); ctx.arc(drawX, drawY, radius + 3, 0, Math.PI * 2); ctx.stroke(); }
+            // Ball Carrier Highlight
+            if (p.isBallCarrier) {
+                ctx.strokeStyle = '#fbbf24'; ctx.lineWidth = 2;
+                ctx.beginPath(); ctx.arc(drawX, drawY, radius + 2, 0, Math.PI*2); ctx.stroke();
+            }
 
             // Number
-            ctx.fillStyle = '#fff'; ctx.font = `bold ${radius * 1.1}px "Inter"`; ctx.textAlign = "center";
-            ctx.fillText(p.number || '', drawX, drawY + (radius * 0.4));
+            ctx.fillStyle = '#fff';
+            ctx.font = `bold ${Math.max(8, radius)}px Arial`;
+            ctx.fillText(p.number || '', drawX, drawY);
         });
     }
 
     // ===============================================
-    // 5. DRAW BALL (STRICT VISIBILITY)
+    // 7. DRAW BALL (STRICT VISIBILITY)
     // ===============================================
     if (frameData.ball && frameData.ball.inAir) {
-        const ball = frameData.ball;
-        
-        // ROTATION LOGIC:
-        const bx = toScreenX(ball.y); // Game Y -> Screen X
-        const by = toScreenY(ball.x); // Game X -> Screen Y
-        
-        // Height Logic (Ball flies "Up" towards Top of screen? Or grows larger?)
-        // Standard TV view: Height makes ball go "Up" (Screen Y decreases)
-        const visualHeightOffset = (ball.z || 0) * scaleY * 1.5; 
+        const b = frameData.ball;
+        const bx = toScreenX(b.y); // Game Y -> Screen X
+        const by = toScreenY(b.x); // Game X -> Screen Y
+
+        // Visual Height: Ball goes "Up" (Negative Y)
+        const zOffset = (b.z || 0) * scale * 1.5;
 
         // Shadow
-        const shadowAlpha = Math.max(0.1, 0.4 - ((ball.z || 0) * 0.1));
-        const shadowSize = Math.max(scaleY * 0.2, (scaleY * 0.4) - ((ball.z || 0) * 0.05));
-        
-        ctx.fillStyle = `rgba(0,0,0,${shadowAlpha})`;
-        ctx.beginPath(); ctx.ellipse(bx, by, shadowSize, shadowSize * 0.5, 0, 0, Math.PI * 2); ctx.fill();
+        const shadowSize = scale * 0.4;
+        ctx.fillStyle = "rgba(0,0,0,0.4)";
+        ctx.beginPath(); ctx.ellipse(bx, by, shadowSize, shadowSize * 0.5, 0, 0, Math.PI*2); ctx.fill();
 
         // Ball
-        const ballDrawY = by - visualHeightOffset;
-        ctx.fillStyle = "#854d0e"; 
-        ctx.beginPath(); ctx.ellipse(bx, ballDrawY, scaleY * 0.5, scaleY * 0.35, 0, 0, Math.PI * 2); ctx.fill();
-        
+        ctx.fillStyle = "#854d0e";
+        ctx.beginPath(); 
+        // Football shape (Ellipse)
+        ctx.ellipse(bx, by - zOffset, scale * 0.5, scale * 0.3, 0, 0, Math.PI*2); 
+        ctx.fill();
+
         // Laces
         ctx.strokeStyle = "white"; ctx.lineWidth = 1.5;
-        ctx.beginPath(); ctx.moveTo(bx - (scaleY * 0.25), ballDrawY); ctx.lineTo(bx + (scaleY * 0.25), ballDrawY); ctx.stroke();
+        ctx.beginPath(); 
+        ctx.moveTo(bx - (scale*0.2), by - zOffset); 
+        ctx.lineTo(bx + (scale*0.2), by - zOffset); 
+        ctx.stroke();
     }
-
     ctx.restore();
 }
 
