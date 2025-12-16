@@ -396,8 +396,13 @@ function startLiveGame(playerGameMatch) {
     allGames.forEach(match => {
         try {
             if (!match || !match.home || !match.away) return;
+            
             const isPlayerGame = match.home.id === playerGameMatch.home.id && match.away.id === playerGameMatch.away.id;
-            const result = Game.simulateGame(match.home, match.away, { fastSim: !isPlayerGame });
+            
+            // 💡 THE FIX: Explicitly set 'isLive: true' if it's the player's game
+            const simOptions = isPlayerGame ? { isLive: true } : { fastSim: true };
+
+            const result = Game.simulateGame(match.home, match.away, simOptions);
             if (!result) return;
 
             allResults.push(result);
