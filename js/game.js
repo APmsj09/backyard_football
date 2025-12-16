@@ -4119,13 +4119,27 @@ function updateQBDecision(playState, offenseStates, defenseStates, gameLog, aiTi
 
         playState.qbIntent = 'throwaway';
 
+        // 1. Set Targets (Out of bounds)
+        const targetX = qbState.x + (Math.random() > 0.5 ? 15 : -15);
+        const targetY = qbState.y + 10;
+
+        // 2. Calculate Physics 
+        const dx = targetX - qbState.x;
+        const dy = targetY - qbState.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        const speed = 20; // Fast throw away
+        const time = dist / speed;
+
         playState.ballState.inAir = true;
         playState.ballState.throwInitiated = true;
         playState.ballState.throwerId = qbState.id;
+        playState.ballState.targetX = targetX;
+        playState.ballState.targetY = targetY;
 
-        // Aim out of bounds
-        playState.ballState.targetX = qbState.x + (Math.random() > 0.5 ? 15 : -15);
-        playState.ballState.targetY = qbState.y + 10;
+        // 3. 💡 ADD VELOCITY (This was missing)
+        playState.ballState.vx = dx / time;
+        playState.ballState.vy = dy / time;
+        playState.ballState.vz = (9.8 * time) / 2; // Loft it slightly
 
         qbState.hasBall = false;
         return;
@@ -4718,17 +4732,29 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
 
             // --- E. BALL PHYSICS ---
             if (ballPos.inAir) {
-                // Apply Velocity & Gravity
+                // 1. Apply Velocity & Gravity
                 ballPos.x += (ballPos.vx || 0) * timeDelta;
                 ballPos.y += (ballPos.vy || 0) * timeDelta;
                 ballPos.z += (ballPos.vz || 0) * timeDelta;
                 ballPos.vz = (ballPos.vz || 0) - 9.8 * timeDelta; // Gravity
 
-                // Ground Impact
+                // 2. 💡 INSERT CALL HERE
+                // This function checks for mid-air catches OR ground hits every single tick.
+                // It handles setting inAir = false if a catch/drop happens.
+                if (typeof handleBallArrival === 'function') {
+                    handleBallArrival(playState, ballCarrierState, playResult, gameLog);
+                }
+
+                // 3. Safety Clamp / Fallback
+                // If handleBallArrival didn't kill the play (e.g., ball is at z=-0.01 but logic missed it),
+                // this ensures it doesn't fall through the earth.
                 if (ballPos.z < 0) {
                     ballPos.z = 0;
                     ballPos.vz = 0;
+                    // Force stop if it hit ground and wasn't caught
+                    if (ballPos.inAir) ballPos.inAir = false;
                 }
+
             } else if (ballCarrierState) {
                 // Carrier Logic: Ball stuck to player
                 ballPos.x = ballCarrierState.x;
