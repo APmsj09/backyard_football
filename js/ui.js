@@ -2041,22 +2041,26 @@ export function setupFormationListeners() {
  */
 // --- In ui.js ---
 
+// --- In ui.js ---
+
 export function drawFieldVisualization(frameData) {
     const ctx = elements.fieldCanvasCtx;
     const canvas = elements.fieldCanvas;
     if (!ctx || !canvas) return;
 
     // ===========================================
-    // 1. CAMERA & SCALE LOGIC
+    // 1. CAMERA & SCALE LOGIC (Full Width, Vertical Scroll)
     // ===========================================
     
-    // Fit the full 53.3 yard width into the canvas
-    const FIELD_WIDTH_YARDS = 53.3; 
-    const scale = canvas.width / (FIELD_WIDTH_YARDS + 2); // +2 yards buffer
+    const FIELD_WIDTH_REAL = 53.3; // Standard width
+    
+    // SCALE: Fit the entire 53.3 yards into the canvas width exactly.
+    // This removes unused space on the sides.
+    const scale = canvas.width / FIELD_WIDTH_REAL; 
     const scaleX = scale;
     const scaleY = scale;
 
-    // Determine Focal Point
+    // Determine Vertical Focal Point (Follow the Ball/Action)
     let focusY = (frameData && frameData.lineOfScrimmage) != null ? frameData.lineOfScrimmage : 60;
     
     if (frameData && frameData.ball) {
@@ -2068,12 +2072,16 @@ export function drawFieldVisualization(frameData) {
         }
     }
 
+    // Calculate vertical view range (how many yards fit on screen height)
     const visibleYardsVertical = canvas.height / scaleY;
 
-    // Camera Panning
+    // Camera Panning Y (Vertical Only)
+    // Center on action, but clamp to endzones so we don't see black void at top/bottom
     let cameraY = focusY - (visibleYardsVertical / 2);
     const MAX_FIELD_Y = 120;
-    cameraY = Math.max(-2, Math.min(MAX_FIELD_Y - visibleYardsVertical + 2, cameraY));
+    
+    // Clamp camera. (-5 allows seeing just past the back of the endzone)
+    cameraY = Math.max(-5, Math.min(MAX_FIELD_Y - visibleYardsVertical + 5, cameraY));
 
     // ===========================================
     // 2. DRAWING THE FIELD
@@ -2086,35 +2094,36 @@ export function drawFieldVisualization(frameData) {
     ctx.fillStyle = gradient;
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-    // Apply Camera Transform
+    // Apply Camera Transform (Vertical Only)
     ctx.save();
     ctx.translate(0, -cameraY * scaleY);
 
-    // Draw Endzones
+    // Draw Endzones (0-10 and 110-120)
     ctx.fillStyle = 'rgba(0, 0, 0, 0.15)'; 
-    ctx.fillRect(0, 0, FIELD_WIDTH_YARDS * scaleX, 10 * scaleY);
-    ctx.fillRect(0, 110 * scaleY, FIELD_WIDTH_YARDS * scaleX, 10 * scaleY);
+    ctx.fillRect(0, 0, canvas.width, 10 * scaleY); // Top Endzone fills width
+    ctx.fillRect(0, 110 * scaleY, canvas.width, 10 * scaleY); // Bottom Endzone fills width
 
     // Draw Grid Lines & Numbers
     ctx.lineWidth = 2;
     ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
-    ctx.font = `bold ${12 * (scale/12)}px "Inter"`;
+    ctx.font = `bold ${14 * (scale/15)}px "Inter"`; // Slightly larger font
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
 
     for (let y = 10; y <= 110; y += 10) {
         const lineY = y * scaleY;
         
         ctx.beginPath();
         ctx.moveTo(0, lineY);
-        ctx.lineTo(FIELD_WIDTH_YARDS * scaleX, lineY);
+        ctx.lineTo(canvas.width, lineY);
         ctx.stroke();
 
         if (y !== 0 && y !== 120) {
             const yardNum = y <= 60 ? y - 10 : 110 - y;
-            ctx.fillText(yardNum, 4 * scaleX, lineY);
-            ctx.fillText(yardNum, (FIELD_WIDTH_YARDS - 4) * scaleX, lineY);
+            // Numbers inset slightly from edges
+            ctx.fillText(yardNum, 6 * scaleX, lineY); 
+            ctx.fillText(yardNum, canvas.width - (6 * scaleX), lineY);
         }
     }
 
@@ -2145,7 +2154,7 @@ export function drawFieldVisualization(frameData) {
             ctx.lineWidth = 3;
             ctx.beginPath();
             ctx.moveTo(0, losY);
-            ctx.lineTo(FIELD_WIDTH_YARDS * scaleX, losY);
+            ctx.lineTo(canvas.width, losY);
             ctx.stroke();
         }
         if (frameData.firstDownY) {
@@ -2155,28 +2164,31 @@ export function drawFieldVisualization(frameData) {
             ctx.setLineDash([10, 5]);
             ctx.beginPath();
             ctx.moveTo(0, fdY);
-            ctx.lineTo(FIELD_WIDTH_YARDS * scaleX, fdY);
+            ctx.lineTo(canvas.width, fdY);
             ctx.stroke();
             ctx.setLineDash([]);
         }
     }
 
     // ===========================================
-    // 3. DRAWING PLAYERS
+    // 3. DRAWING PLAYERS (Adjusted Size)
     // ===========================================
     if (frameData && frameData.players) {
         frameData.players.forEach(p => {
+            // Subtle Jiggle (0.15)
             let jiggleX = 0;
             let jiggleY = 0;
             if (p.isEngaged) {
-                const jiggleAmount = 0.4;
+                const jiggleAmount = 0.15; 
                 jiggleX = (Math.random() - 0.5) * jiggleAmount;
                 jiggleY = (Math.random() - 0.5) * jiggleAmount;
             }
 
             const drawX = (p.x + jiggleX) * scaleX;
             const drawY = (p.y + jiggleY) * scaleY;
-            const radius = 6 * (scale/12);
+            
+            // Player Size: Increased multiplier (0.6) so they look big even on full-width view
+            const radius = scaleX * 0.6; 
 
             // Stun Pulse
             if (p.stunnedTicks > 0) {
@@ -2193,7 +2205,7 @@ export function drawFieldVisualization(frameData) {
             // Shadow
             ctx.fillStyle = 'rgba(0,0,0,0.4)';
             ctx.beginPath();
-            ctx.arc(drawX + 1, drawY + 1, radius, 0, Math.PI * 2);
+            ctx.arc(drawX + (scaleX * 0.1), drawY + (scaleY * 0.1), radius, 0, Math.PI * 2);
             ctx.fill();
 
             // Body
@@ -2212,7 +2224,7 @@ export function drawFieldVisualization(frameData) {
             // Ball Carrier Ring
             if (p.isBallCarrier) {
                 ctx.strokeStyle = '#fbbf24'; 
-                ctx.lineWidth = 2.5;
+                ctx.lineWidth = 3;
                 ctx.beginPath();
                 ctx.arc(drawX, drawY, radius + 2, 0, Math.PI * 2);
                 ctx.stroke();
@@ -2220,21 +2232,21 @@ export function drawFieldVisualization(frameData) {
 
             // Number
             ctx.fillStyle = '#fff';
-            ctx.font = `bold ${8 * (scale/12)}px "Inter"`;
-            ctx.fillText(p.number || '', drawX, drawY);
+            ctx.font = `bold ${radius}px "Inter"`; 
+            ctx.fillText(p.number || '', drawX, drawY + (radius * 0.1));
         });
     }
 
     // ===========================================
-    // 4. DRAWING THE BALL (No Trail)
+    // 4. DRAWING THE BALL
     // ===========================================
     if (frameData && frameData.ball && (frameData.ball.inAir || frameData.ball.isLoose)) {
         const ballX = frameData.ball.x * scaleX;
         const ballY = frameData.ball.y * scaleY;
-        const ballRadius = 4 * (scale/12);
+        const ballRadius = scaleX * 0.35; // Readable ball size
 
-        // Ball Shadow (Height based offset)
-        const shadowOffset = (frameData.ball.z || 0) * 2;
+        // Ball Shadow
+        const shadowOffset = (frameData.ball.z || 0) * (scaleX * 0.1);
         ctx.fillStyle = 'rgba(0,0,0,0.3)';
         ctx.beginPath();
         ctx.arc(ballX + shadowOffset, ballY + shadowOffset, ballRadius, 0, Math.PI * 2);
@@ -2249,7 +2261,7 @@ export function drawFieldVisualization(frameData) {
         // Highlight
         ctx.fillStyle = 'rgba(255,255,255,0.4)';
         ctx.beginPath();
-        ctx.arc(ballX - 1, ballY - 1, 1, 0, Math.PI * 2);
+        ctx.arc(ballX - (ballRadius * 0.3), ballY - (ballRadius * 0.3), ballRadius * 0.4, 0, Math.PI * 2);
         ctx.fill();
     }
 
