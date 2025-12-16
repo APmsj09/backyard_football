@@ -40,6 +40,7 @@ let debounceTimeout = null; // For debouncing input
 let liveGameIsConversion = false;
 let depthOrderSortCol = 'overall'; // Default sort column
 let depthOrderSortDir = 'desc';    // Default sort direction
+let activeDepthOrderTab = 'QB';
 
 // --- Live Game Sim State ---
 let liveGameInterval = null; // Holds interval ID for stopping/starting
@@ -3423,102 +3424,102 @@ export function setSimSpeed(speed) {
 }
 
 
-// --- In ui.js ---
+/** Helper to generate the HTML for a depth chart card (used by render AND drop) */
+function createDepthCardHTML(player, index, groupKey) {
+    const ovr = calculateOverall(player, groupKey);
+    let isStarterZone = false;
+
+    // Starter Thresholds
+    if (groupKey === 'QB' && index === 0) isStarterZone = true;
+    else if (groupKey === 'RB' && index === 0) isStarterZone = true;
+    else if (groupKey === 'WR' && index <= 2) isStarterZone = true;
+    else if (groupKey === 'OL' && index === 0) isStarterZone = true;
+    else if (['DL', 'LB', 'DB'].includes(groupKey) && index === 0) isStarterZone = true;
+
+    const rankStyle = isStarterZone ? 'border-l-4 border-green-500' : 'border-l-4 border-gray-300';
+    const badge = isStarterZone ? '<span class="ml-2 text-[10px] bg-green-100 text-green-800 px-1 rounded font-bold">START</span>' : '';
+
+    // Determine Key Attributes for this Position Group
+    let keyAttrs = [];
+    if (positionOverallWeights && positionOverallWeights[groupKey]) {
+        keyAttrs = Object.entries(positionOverallWeights[groupKey])
+            .sort((a, b) => b[1] - a[1]) // Sort by weight desc
+            .slice(0, 3) // Take top 3
+            .map(entry => entry[0]);
+    }
+
+    const attrMap = {
+        throwingAccuracy: 'THR', playbookIQ: 'IQ', strength: 'STR', 
+        speed: 'SPD', agility: 'AGI', catchingHands: 'HND', 
+        blocking: 'BLK', tackling: 'TKL', blockShedding: 'BSH',
+        stamina: 'STA', toughness: 'TGH'
+    };
+
+    const attrString = keyAttrs.map(k => {
+        const val = getStat(player, k);
+        return `<span class="mr-2"><span class="text-gray-400 font-semibold">${attrMap[k] || k.substring(0,3).toUpperCase()}:</span> <span class="text-gray-700 font-medium">${val}</span></span>`;
+    }).join('');
+
+    // Return the inner content AND the class string for the container
+    return {
+        className: `depth-order-item bg-white hover:bg-amber-50 p-2 rounded border border-gray-200 shadow-sm cursor-move flex items-center justify-between ${rankStyle}`,
+        innerHTML: `
+            <div class="flex items-center gap-3 flex-grow overflow-hidden">
+                <span class="text-lg font-bold text-gray-400 w-6 text-center rank-number">${index + 1}</span>
+                <div class="flex flex-col truncate">
+                    <div class="flex items-center">
+                        <span class="font-bold text-gray-800 text-sm truncate">${player.name}</span>
+                        ${badge}
+                    </div>
+                    <div class="text-[10px] flex mt-0.5">
+                        ${attrString}
+                    </div>
+                </div>
+            </div>
+            <div class="text-right pl-3 flex-shrink-0">
+                <span class="text-lg font-bold ${ovr >= 80 ? 'text-green-600' : 'text-gray-600'}">${ovr}</span>
+                <div class="text-[9px] text-gray-400 uppercase font-bold">OVR</div>
+            </div>`
+    };
+}
 
 function renderDepthOrderPane(gameState) {
     const pane = document.getElementById("depth-order-container");
     if (!pane || !gameState) return;
 
-    // Ensure the data is clean before we render
     rebuildDepthChartFromOrder(gameState.playerTeam);
 
     const team = gameState.playerTeam;
     let roster = getUIRosterObjects(team);
     const depthOrder = team.depthOrder || {};
-
     const displayOrder = ['QB', 'RB', 'WR', 'OL', 'DL', 'LB', 'DB'];
 
     // --- 1. Render Tabs (Top) ---
+    // Fix: Use activeDepthOrderTab variable
     let tabsHtml = `<div class="flex flex-wrap gap-2 mb-4 border-b border-gray-200 pb-2">`;
-    displayOrder.forEach((pos, index) => {
-        const isActive = index === 0 ? 'bg-amber-500 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300';
-        tabsHtml += `<button class="depth-pos-tab px-4 py-2 rounded font-bold text-sm transition ${isActive}" data-target="${pos}">${pos}</button>`;
+    displayOrder.forEach((pos) => {
+        const isActive = pos === activeDepthOrderTab;
+        const colorClass = isActive ? 'bg-amber-500 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300';
+        tabsHtml += `<button class="depth-pos-tab px-4 py-2 rounded font-bold text-sm transition ${colorClass}" data-target="${pos}">${pos}</button>`;
     });
     tabsHtml += `</div>`;
 
-    // --- 2. Render Sortable Lists (Middle) ---
+    // --- 2. Render Lists (Middle) ---
     let listsHtml = `<div id="depth-lists-container" class="mb-8">`;
-    
-    displayOrder.forEach((groupKey, index) => {
-        const isHidden = index !== 0 ? 'hidden' : '';
+    displayOrder.forEach((groupKey) => {
+        // Fix: Use activeDepthOrderTab to determine visibility
+        const isHidden = groupKey !== activeDepthOrderTab ? 'hidden' : '';
         const idList = depthOrder[groupKey] || [];
         const players = idList.map(id => roster.find(p => p.id === id)).filter(p => p);
-
-        // 💡 NEW: Determine Key Attributes for this Position Group
-        // We grab the top 3 weighted attributes from the calc engine
-        let keyAttrs = [];
-        if (positionOverallWeights && positionOverallWeights[groupKey]) {
-            keyAttrs = Object.entries(positionOverallWeights[groupKey])
-                .sort((a, b) => b[1] - a[1]) // Sort by weight desc
-                .slice(0, 3) // Take top 3
-                .map(entry => entry[0]); // Keep keys
-        }
-
-        // Helper Map for nicer display names
-        const attrMap = {
-            throwingAccuracy: 'THR', playbookIQ: 'IQ', strength: 'STR', 
-            speed: 'SPD', agility: 'AGI', catchingHands: 'HND', 
-            blocking: 'BLK', tackling: 'TKL', blockShedding: 'BSH',
-            stamina: 'STA', toughness: 'TGH'
-        };
 
         listsHtml += `
             <div id="group-${groupKey}" class="depth-group-container ${isHidden}">
                 <div class="depth-sortable-list flex-grow p-2 space-y-2 min-h-[200px]" data-group="${groupKey}">
                     ${players.map((p, i) => {
-                        const ovr = calculateOverall(p, groupKey);
-                        let isStarterZone = false;
-
-                        // Starter Thresholds
-                        if (groupKey === 'QB' && i === 0) isStarterZone = true;
-                        else if (groupKey === 'RB' && i === 0) isStarterZone = true;
-                        else if (groupKey === 'WR' && i <= 2) isStarterZone = true;
-                        else if (groupKey === 'OL' && i === 0) isStarterZone = true;
-                        else if (['DL', 'LB', 'DB'].includes(groupKey) && i === 0) isStarterZone = true;
-
-                        const rankStyle = isStarterZone ? 'border-l-4 border-green-500' : 'border-l-4 border-gray-300';
-                        const badge = isStarterZone ? '<span class="ml-2 text-[10px] bg-green-100 text-green-800 px-1 rounded font-bold">START</span>' : '';
-
-                        // 💡 NEW: Build the attribute string
-                        const attrString = keyAttrs.map(k => {
-                            const val = getStat(p, k);
-                            return `<span class="mr-2"><span class="text-gray-400 font-semibold">${attrMap[k] || k.substring(0,3).toUpperCase()}:</span> <span class="text-gray-700 font-medium">${val}</span></span>`;
-                        }).join('');
-
-                        return `
-                            <div class="depth-order-item bg-white hover:bg-amber-50 p-2 rounded border border-gray-200 shadow-sm cursor-move flex items-center justify-between ${rankStyle}"
-                                 draggable="true"
-                                 data-player-id="${p.id}">
-                                
-                                <div class="flex items-center gap-3 flex-grow overflow-hidden">
-                                    <span class="text-lg font-bold text-gray-400 w-6 text-center">${i + 1}</span>
-                                    
-                                    <div class="flex flex-col truncate">
-                                        <div class="flex items-center">
-                                            <span class="font-bold text-gray-800 text-sm truncate">${p.name}</span>
-                                            ${badge}
-                                        </div>
-                                        <div class="text-[10px] flex mt-0.5">
-                                            ${attrString}
-                                        </div>
-                                    </div>
-                                </div>
-
-                                <div class="text-right pl-3 flex-shrink-0">
-                                    <span class="text-lg font-bold ${ovr >= 80 ? 'text-green-600' : 'text-gray-600'}">${ovr}</span>
-                                    <div class="text-[9px] text-gray-400 uppercase font-bold">OVR</div>
-                                </div>
-                            </div>`;
+                        const cardData = createDepthCardHTML(p, i, groupKey);
+                        return `<div class="${cardData.className}" draggable="true" data-player-id="${p.id}">
+                                    ${cardData.innerHTML}
+                                </div>`;
                     }).join('')}
                 </div>
             </div>`;
@@ -3526,7 +3527,6 @@ function renderDepthOrderPane(gameState) {
     listsHtml += `</div>`;
 
     // --- 3. Render Full Sortable Roster (Bottom) ---
-    // (Sort Logic - kept same as previous step)
     roster.sort((a, b) => {
         let valA, valB;
         const getVal = (p, key) => {
@@ -3623,7 +3623,7 @@ function renderDepthOrderPane(gameState) {
 
     pane.innerHTML = tabsHtml + listsHtml + rosterHtml;
 
-    setupDepthTabs();
+    setupDepthTabs(); 
     setupDepthOrderDragEvents();
 }
 
@@ -3663,21 +3663,138 @@ function setupDepthTabs() {
 
     tabs.forEach(tab => {
         tab.addEventListener('click', () => {
+            const target = tab.dataset.target;
+            
+            // Fix: Update global state so sort/re-render remembers where we were
+            activeDepthOrderTab = target;
+
             // Update Tab Styles
-            tabs.forEach(t => t.classList.replace('bg-amber-500', 'bg-gray-200'));
-            tabs.forEach(t => t.classList.replace('text-white', 'text-gray-700'));
-            tab.classList.replace('bg-gray-200', 'bg-amber-500');
-            tab.classList.replace('text-gray-700', 'text-white');
+            tabs.forEach(t => {
+                const isTarget = t.dataset.target === target;
+                t.classList.toggle('bg-amber-500', isTarget);
+                t.classList.toggle('text-white', isTarget);
+                t.classList.toggle('bg-gray-200', !isTarget);
+                t.classList.toggle('text-gray-700', !isTarget);
+            });
 
             // Show/Hide Content
-            const target = tab.dataset.target;
             groups.forEach(g => {
-                if (g.id === `group-${target}`) {
-                    g.classList.remove('hidden');
-                } else {
-                    g.classList.add('hidden');
-                }
+                g.classList.toggle('hidden', g.id !== `group-${target}`);
             });
+        });
+    });
+}
+
+function setupDepthOrderDragEvents() {
+    const draggables = document.querySelectorAll('.depth-order-item, .roster-row-item');
+    const containers = document.querySelectorAll('.depth-sortable-list');
+
+    // ... (Keep existing dragstart / dragend logic) ...
+    draggables.forEach(draggable => {
+        draggable.addEventListener('dragstart', (e) => {
+            e.dataTransfer.effectAllowed = 'copyMove';
+            e.dataTransfer.setData('text/plain', draggable.dataset.playerId);
+            // We set source so we know if we need to CREATE a new element on drop
+            if (draggable.classList.contains('roster-row-item')) {
+                draggable.dataset.source = 'roster';
+            } else {
+                draggable.dataset.source = 'list';
+            }
+            setTimeout(() => {
+                draggable.classList.add('dragging');
+                draggable.classList.add('opacity-50');
+            }, 0);
+        });
+
+        draggable.addEventListener('dragend', () => {
+            draggable.classList.remove('dragging');
+            draggable.classList.remove('opacity-50');
+            delete draggable.dataset.source;
+            setTimeout(() => {
+                applyDepthOrderToChart();
+                // We re-render full logic inside applyDepthOrderToChart -> renderDepthOrderPane
+                // But if we want instant feedback before save:
+                containers.forEach(c => updateRankNumbers(c));
+            }, 50);
+        });
+    });
+
+    containers.forEach(container => {
+        container.addEventListener('dragover', e => {
+            e.preventDefault();
+            const draggable = document.querySelector('.dragging');
+            if (!draggable) return;
+
+            if (draggable.classList.contains('roster-row-item')) {
+                e.dataTransfer.dropEffect = 'copy';
+                return;
+            }
+
+            if (container.contains(draggable)) {
+                e.dataTransfer.dropEffect = 'move';
+                const afterElement = getDragAfterElement(container, e.clientY);
+                if (afterElement == null) {
+                    container.appendChild(draggable);
+                } else {
+                    container.insertBefore(draggable, afterElement);
+                }
+            }
+        });
+
+        container.addEventListener('drop', e => {
+            e.preventDefault();
+            const source = document.querySelector('.dragging')?.dataset.source;
+
+            if (source === 'roster') {
+                const playerId = e.dataTransfer.getData('text/plain');
+                const groupKey = container.dataset.group; // e.g. "WR"
+
+                // 1. Remove if already exists in this list
+                const existing = container.querySelector(`[data-player-id="${playerId}"]`);
+                if (existing) existing.remove();
+
+                // 2. Fetch Data needed to build card
+                const player = getPlayer(playerId);
+                if (!player) return;
+
+                // 3. Determine index (where we dropped it)
+                const afterElement = getDragAfterElement(container, e.clientY);
+                // Temporarily calculate index based on siblings
+                const allItems = [...container.querySelectorAll('.depth-order-item')];
+                const dropIndex = afterElement ? allItems.indexOf(afterElement) : allItems.length;
+
+                // 4. Generate Full HTML using shared helper
+                // (Using dropIndex as 'rank' is an approximation, real rank updates on refresh)
+                const cardData = createDepthCardHTML(player, dropIndex, groupKey);
+
+                const newItem = document.createElement('div');
+                newItem.className = cardData.className;
+                newItem.innerHTML = cardData.innerHTML;
+                newItem.draggable = true;
+                newItem.dataset.playerId = playerId;
+
+                // 5. Insert
+                if (afterElement == null) {
+                    container.appendChild(newItem);
+                } else {
+                    container.insertBefore(newItem, afterElement);
+                }
+
+                // 6. Re-attach drag events to new item immediately
+                newItem.addEventListener('dragstart', (ev) => {
+                    setTimeout(() => { newItem.classList.add('dragging', 'opacity-50'); }, 0);
+                    ev.dataTransfer.setData('text/plain', playerId);
+                });
+                newItem.addEventListener('dragend', () => {
+                    newItem.classList.remove('dragging', 'opacity-50');
+                    setTimeout(() => { applyDepthOrderToChart(); }, 50);
+                });
+
+                // 7. Save & Refresh
+                setTimeout(() => {
+                    applyDepthOrderToChart(); // This saves and re-renders properly
+                }, 50);
+            }
         });
     });
 }
