@@ -220,8 +220,9 @@ export function setupElements() {
         simGameDown: getEl('sim-game-down'),
         simPossession: getEl('sim-possession'),
 
-        simFieldSurface: getEl('sim-field-surface'),
+
         simFieldPlayers: getEl('sim-field-players'),
+        fieldCanvas: getEl('field-canvas'),
 
         simPlayLog: getEl('sim-play-log'),
         simSpeedBtns: document.querySelectorAll('.sim-speed-btn'),
@@ -238,6 +239,10 @@ export function setupElements() {
         leavingPlayersList: getEl('leaving-players-list'),
         goToNextDraftBtn: getEl('go-to-next-draft-btn'),
     };
+
+    if (elements.fieldCanvas) {
+        elements.fieldCanvasCtx = elements.fieldCanvas.getContext('2d');
+    }
 
     if (elements.draftSort) {
         elements.draftSort.innerHTML = `
@@ -1304,9 +1309,9 @@ function renderVisualFormationSlots(
         // 💡 FIX: Extract position from slotId (e.g. "QB1" -> "QB")
         let positionKey = slotId.replace(/\d+/g, '');
         // Map formation slots to calculation keys if necessary (e.g. C -> OL)
-        if (['OT','OG','C'].includes(positionKey)) positionKey = 'OL';
-        if (['DE','DT','NT'].includes(positionKey)) positionKey = 'DL';
-        if (['CB','S','FS','SS'].includes(positionKey)) positionKey = 'DB';
+        if (['OT', 'OG', 'C'].includes(positionKey)) positionKey = 'OL';
+        if (['DE', 'DT', 'NT'].includes(positionKey)) positionKey = 'DL';
+        if (['CB', 'S', 'FS', 'SS'].includes(positionKey)) positionKey = 'DB';
         if (['FB'].includes(positionKey)) positionKey = 'RB';
         if (['TE'].includes(positionKey)) positionKey = 'WR';
 
@@ -3291,7 +3296,7 @@ export function startLiveGameSim(gameResult, onComplete) {
         !elements.simGameDrive ||
         !elements.simGameDown ||
         !elements.simPossession ||
-        !elements.simFieldSurface ||
+        
         !elements.simFieldPlayers
     ) {
         console.error("Live sim UI elements missing (critical).");
@@ -3433,21 +3438,21 @@ function createDepthCardHTML(player, index, groupKey) {
     let keyAttrs = [];
     if (typeof positionOverallWeights !== 'undefined' && positionOverallWeights[groupKey]) {
         keyAttrs = Object.entries(positionOverallWeights[groupKey])
-            .sort((a, b) => b[1] - a[1]) 
-            .slice(0, 3) 
+            .sort((a, b) => b[1] - a[1])
+            .slice(0, 3)
             .map(entry => entry[0]);
     }
 
     const attrMap = {
-        throwingAccuracy: 'THR', playbookIQ: 'IQ', strength: 'STR', 
-        speed: 'SPD', agility: 'AGI', catchingHands: 'HND', 
+        throwingAccuracy: 'THR', playbookIQ: 'IQ', strength: 'STR',
+        speed: 'SPD', agility: 'AGI', catchingHands: 'HND',
         blocking: 'BLK', tackling: 'TKL', blockShedding: 'BSH',
         stamina: 'STA', toughness: 'TGH'
     };
 
     const attrString = keyAttrs.map(k => {
-        const val = getStat(player, k); 
-        return `<span class="mr-2"><span class="text-gray-400 font-semibold">${attrMap[k] || k.substring(0,3).toUpperCase()}:</span> <span class="text-gray-700 font-medium">${val}</span></span>`;
+        const val = getStat(player, k);
+        return `<span class="mr-2"><span class="text-gray-400 font-semibold">${attrMap[k] || k.substring(0, 3).toUpperCase()}:</span> <span class="text-gray-700 font-medium">${val}</span></span>`;
     }).join('');
 
     return {
@@ -3515,11 +3520,11 @@ function renderDepthOrderPane(gameState) {
             <div id="group-${groupKey}" class="depth-group-container ${isHidden}">
                 <div class="depth-sortable-list flex-grow p-2 space-y-2 min-h-[200px]" data-group="${groupKey}">
                     ${players.map((p, i) => {
-                        const cardData = createDepthCardHTML(p, i, groupKey);
-                        return `<div class="${cardData.className}" draggable="true" data-player-id="${p.id}">
+            const cardData = createDepthCardHTML(p, i, groupKey);
+            return `<div class="${cardData.className}" draggable="true" data-player-id="${p.id}">
                                     ${cardData.innerHTML}
                                 </div>`;
-                    }).join('')}
+        }).join('')}
                 </div>
             </div>`;
     });
@@ -3575,36 +3580,36 @@ function renderDepthOrderPane(gameState) {
                     <thead class="bg-gray-800 text-white sticky top-0 z-10">
                         <tr>
                             ${columns.map(col => {
-                                const active = depthOrderSortCol === col.key;
-                                const arrow = active ? (depthOrderSortDir === 'asc' ? '▲' : '▼') : '';
-                                return `<th class="py-2 px-2 text-left whitespace-nowrap cursor-pointer hover:bg-gray-700 select-none" 
+        const active = depthOrderSortCol === col.key;
+        const arrow = active ? (depthOrderSortDir === 'asc' ? '▲' : '▼') : '';
+        return `<th class="py-2 px-2 text-left whitespace-nowrap cursor-pointer hover:bg-gray-700 select-none" 
                                             onclick="window.app_handleDepthSort('${col.key}')">
                                             ${col.label} <span class="text-[10px] ml-1">${arrow}</span>
                                         </th>`;
-                            }).join('')}
+    }).join('')}
                         </tr>
                     </thead>
                     <tbody class="divide-y divide-gray-200">
                         ${roster.map(p => {
-                            let pos = p.pos || estimateBestPosition(p);
-                            if (pos === 'FB') pos = 'RB';
-                            if (['TE', 'ATH', 'K', 'P'].includes(pos)) pos = 'WR';
-                            const ovr = calculateOverall(p, pos);
-                            const vals = {
-                                height: formatHeight(p.attributes?.physical?.height),
-                                weight: p.attributes?.physical?.weight,
-                                speed: p.attributes?.physical?.speed,
-                                strength: p.attributes?.physical?.strength,
-                                agility: p.attributes?.physical?.agility,
-                                stamina: p.attributes?.physical?.stamina,
-                                playbookIQ: p.attributes?.mental?.playbookIQ,
-                                catchingHands: p.attributes?.technical?.catchingHands,
-                                throwingAccuracy: p.attributes?.technical?.throwingAccuracy,
-                                blocking: p.attributes?.technical?.blocking,
-                                tackling: p.attributes?.technical?.tackling,
-                                blockShedding: p.attributes?.technical?.blockShedding
-                            };
-                            return `
+        let pos = p.pos || estimateBestPosition(p);
+        if (pos === 'FB') pos = 'RB';
+        if (['TE', 'ATH', 'K', 'P'].includes(pos)) pos = 'WR';
+        const ovr = calculateOverall(p, pos);
+        const vals = {
+            height: formatHeight(p.attributes?.physical?.height),
+            weight: p.attributes?.physical?.weight,
+            speed: p.attributes?.physical?.speed,
+            strength: p.attributes?.physical?.strength,
+            agility: p.attributes?.physical?.agility,
+            stamina: p.attributes?.physical?.stamina,
+            playbookIQ: p.attributes?.mental?.playbookIQ,
+            catchingHands: p.attributes?.technical?.catchingHands,
+            throwingAccuracy: p.attributes?.technical?.throwingAccuracy,
+            blocking: p.attributes?.technical?.blocking,
+            tackling: p.attributes?.technical?.tackling,
+            blockShedding: p.attributes?.technical?.blockShedding
+        };
+        return `
                             <tr class="roster-row-item cursor-move hover:bg-blue-50" draggable="true" 
                                 data-player-id="${p.id}" data-player-name="${p.name}" data-player-ovr="${ovr}">
                                 <td class="py-1 px-2 font-medium truncate max-w-[120px]" title="${p.name}">${p.name}</td>
@@ -3613,7 +3618,7 @@ function renderDepthOrderPane(gameState) {
                                 <td class="py-1 px-2 text-gray-600">${p.age}</td>
                                 ${columns.slice(4).map(c => `<td class="py-1 px-2 text-center text-gray-600 border-l border-gray-100">${vals[c.key] ?? '-'}</td>`).join('')}
                             </tr>`;
-                        }).join('')}
+    }).join('')}
                     </tbody>
                 </table>
             </div>
@@ -3622,7 +3627,7 @@ function renderDepthOrderPane(gameState) {
 
     pane.innerHTML = tabsHtml + listsHtml + rosterHtml;
 
-    setupDepthTabs(); 
+    setupDepthTabs();
     setupDepthOrderDragEvents();
 }
 
@@ -3630,7 +3635,7 @@ function renderDepthOrderPane(gameState) {
  * Global handler for depth order table sorting.
  * Needs to be attached to window to work with inline onclick strings.
  */
-window.app_handleDepthSort = function(colKey) {
+window.app_handleDepthSort = function (colKey) {
     if (depthOrderSortCol === colKey) {
         // Toggle direction
         depthOrderSortDir = depthOrderSortDir === 'asc' ? 'desc' : 'asc';
@@ -3639,7 +3644,7 @@ window.app_handleDepthSort = function(colKey) {
         depthOrderSortCol = colKey;
         depthOrderSortDir = ['name', 'pos', 'height'].includes(colKey) ? 'asc' : 'desc';
     }
-    
+
     // Re-render
     const gs = getGameState();
     if (gs) renderDepthOrderPane(gs);
@@ -3663,7 +3668,7 @@ function setupDepthTabs() {
     tabs.forEach(tab => {
         tab.addEventListener('click', () => {
             const target = tab.dataset.target;
-            
+
             // Fix: Update global state so sort/re-render remembers where we were
             activeDepthOrderTab = target;
 
@@ -3695,16 +3700,16 @@ function setupDepthOrderDragEvents() {
         // Remove old listener to prevent duplicates if function called multiple times
         const newContainer = mainContainer.cloneNode(true);
         mainContainer.parentNode.replaceChild(newContainer, mainContainer);
-        
+
         // Re-select containers after clone
         const reselectedContainers = newContainer.querySelectorAll('.depth-sortable-list');
-        
+
         // Attach listener
         newContainer.addEventListener('click', (e) => {
             if (e.target.classList.contains('remove-depth-item')) {
                 e.preventDefault();
                 e.stopPropagation();
-                
+
                 const btn = e.target;
                 const pid = btn.dataset.playerId;
                 const group = btn.dataset.group;
@@ -3717,7 +3722,7 @@ function setupDepthOrderDragEvents() {
                 }
             }
         });
-        
+
         // Update local references for the drag logic below
         // Note: Cloning the container broke the previous references, so we map the drag logic to the NEW DOM
         setupDragLogic(newContainer.querySelectorAll('.depth-order-item, .roster-row-item'), reselectedContainers);
@@ -3732,7 +3737,7 @@ function setupDragLogic(draggables, containers) {
         draggable.addEventListener('dragstart', (e) => {
             e.dataTransfer.effectAllowed = 'copyMove';
             e.dataTransfer.setData('text/plain', draggable.dataset.playerId);
-            
+
             // 💡 FIX: Store source type in dataTransfer (Reliable)
             if (draggable.classList.contains('roster-row-item')) {
                 e.dataTransfer.setData('source-type', 'roster');
@@ -3750,7 +3755,7 @@ function setupDragLogic(draggables, containers) {
         draggable.addEventListener('dragend', () => {
             draggable.classList.remove('dragging');
             draggable.classList.remove('opacity-50');
-            
+
             // Update rank numbers visually (instant feedback)
             containers.forEach(c => updateRankNumbers(c));
         });
@@ -3759,7 +3764,7 @@ function setupDragLogic(draggables, containers) {
     containers.forEach(container => {
         container.addEventListener('dragover', e => {
             e.preventDefault(); // Allow dropping
-            
+
             // Visual cursor feedback
             // We can't read 'source-type' here in Chrome/Firefox for security during dragover,
             // so we rely on the class presence for the cursor style only.
@@ -3783,7 +3788,7 @@ function setupDragLogic(draggables, containers) {
 
         container.addEventListener('drop', e => {
             e.preventDefault();
-            
+
             // 💡 FIX: Read from dataTransfer
             const sourceType = e.dataTransfer.getData('source-type');
             const playerId = e.dataTransfer.getData('text/plain');
@@ -3804,7 +3809,7 @@ function setupDragLogic(draggables, containers) {
                 const afterElement = getDragAfterElement(container, e.clientY);
                 const allItems = [...container.querySelectorAll('.depth-order-item')];
                 let dropIndex = afterElement ? allItems.indexOf(afterElement) : allItems.length;
-                
+
                 // If appending to end
                 if (dropIndex === -1) dropIndex = allItems.length;
 
