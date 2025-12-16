@@ -2039,357 +2039,220 @@ export function setupFormationListeners() {
  * Uses a zoomed camera that follows the play action.
  * @param {object} frameData - A single frame from resolvePlay.visualizationFrames.
  */
+// --- In ui.js ---
+
 export function drawFieldVisualization(frameData) {
     const ctx = elements.fieldCanvasCtx;
     const canvas = elements.fieldCanvas;
     if (!ctx || !canvas) return;
 
-    // Create field gradient
-    const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
-    gradient.addColorStop(0, '#059669');   // Grass base color
-    gradient.addColorStop(0.3, '#047857'); // Darker middle bands
-    gradient.addColorStop(0.7, '#047857');
-    gradient.addColorStop(1, '#059669');
-
-    // Clear and fill with gradient
-    ctx.fillStyle = gradient;
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-    // Draw field texture (subtle noise pattern)
-    ctx.save();
-    ctx.globalAlpha = 0.05;
-    for (let i = 0; i < canvas.width; i += 4) {
-        for (let j = 0; j < canvas.height; j += 4) {
-            if (Math.random() > 0.5) {
-                ctx.fillStyle = '#ffffff';
-                ctx.fillRect(i, j, 2, 2);
-            }
-        }
-    }
-    ctx.restore();
-
-    // --- Camera Logic: Zoomable camera that keeps sidelines clamped and pans left/right only ---
-    // Base scale that fits the full field width vertically
-    const baseScale = canvas.height / FIELD_WIDTH;
-    // Zoom multiplier: increase to make models larger; keep conservative default
-    const ZOOM_MULTIPLIER = 1.0; // tweakable (1.0 = fit vertical exactly)
-    const scale = baseScale * ZOOM_MULTIPLIER;
+    // ===========================================
+    // 1. CAMERA & SCALE LOGIC
+    // ===========================================
+    
+    // Fit the full 53.3 yard width into the canvas
+    const FIELD_WIDTH_YARDS = 53.3; 
+    const scale = canvas.width / (FIELD_WIDTH_YARDS + 2); // +2 yards buffer
     const scaleX = scale;
     const scaleY = scale;
 
-    // Find focal point along the field-length axis (y in world coords)
-    let cameraFocusYField = (frameData && frameData.lineOfScrimmage) != null ? frameData.lineOfScrimmage : 60;
+    // Determine Focal Point
+    let focusY = (frameData && frameData.lineOfScrimmage) != null ? frameData.lineOfScrimmage : 60;
+    
     if (frameData && frameData.ball) {
         if (frameData.ball.inAir) {
-            cameraFocusYField = frameData.ball.y;
+            focusY = frameData.ball.y;
         } else {
             const ballCarrier = frameData.players?.find(p => p.isBallCarrier);
-            if (ballCarrier) cameraFocusYField = ballCarrier.y;
+            if (ballCarrier) focusY = ballCarrier.y;
         }
     }
 
-    // Compute camera offset so the focusYField is horizontally centered.
-    let cameraOffsetX = (canvas.width / 2) - (cameraFocusYField * scaleX);
-    // If the scaled field length is wider than the canvas, allow negative translate (pan). Otherwise clamp to 0.
-    const minOffsetX = Math.min(0, canvas.width - (FIELD_LENGTH * scaleX));
-    const maxOffsetX = 0;
-    cameraOffsetX = Math.max(minOffsetX, Math.min(maxOffsetX, cameraOffsetX));
+    const visibleYardsVertical = canvas.height / scaleY;
 
-    // Vertical offset: try to center on field sideline midpoint, but clamp so we never show beyond sidelines.
-    let cameraOffsetY = (canvas.height / 2) - (CENTER_X * scaleY);
-    const minOffsetY = Math.min(0, canvas.height - (FIELD_WIDTH * scaleY));
-    const maxOffsetY = 0;
-    cameraOffsetY = Math.max(minOffsetY, Math.min(maxOffsetY, cameraOffsetY));
+    // Camera Panning
+    let cameraY = focusY - (visibleYardsVertical / 2);
+    const MAX_FIELD_Y = 120;
+    cameraY = Math.max(-2, Math.min(MAX_FIELD_Y - visibleYardsVertical + 2, cameraY));
 
-    // Apply camera transform (we translate only; positions are multiplied by scaleX/scaleY elsewhere)
+    // ===========================================
+    // 2. DRAWING THE FIELD
+    // ===========================================
+
+    // Clear background
+    const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
+    gradient.addColorStop(0, '#065f46'); 
+    gradient.addColorStop(1, '#059669'); 
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // Apply Camera Transform
     ctx.save();
-    ctx.translate(cameraOffsetX, cameraOffsetY);
+    ctx.translate(0, -cameraY * scaleY);
 
-    // Draw endzone areas with different shading
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.1)';
-    ctx.fillRect(0, 0, 10 * scaleX, FIELD_WIDTH * scaleY);
-    ctx.fillRect(110 * scaleX, 0, 10 * scaleX, FIELD_WIDTH * scaleY);
+    // Draw Endzones
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.15)'; 
+    ctx.fillRect(0, 0, FIELD_WIDTH_YARDS * scaleX, 10 * scaleY);
+    ctx.fillRect(0, 110 * scaleY, FIELD_WIDTH_YARDS * scaleX, 10 * scaleY);
 
-    // Draw field markings with enhanced style
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
-    ctx.lineWidth = 1.5;
-    ctx.font = 'bold 14px "Inter"';
+    // Draw Grid Lines & Numbers
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+    ctx.font = `bold ${12 * (scale/12)}px "Inter"`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
 
-    // Draw yard lines with enhanced visibility
     for (let y = 10; y <= 110; y += 10) {
-        const drawX = y * scaleX;
-
-        // Main yard lines (brighter)
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
-        ctx.lineWidth = 1.5;
+        const lineY = y * scaleY;
+        
         ctx.beginPath();
-        ctx.moveTo(drawX, 0);
-        ctx.lineTo(drawX, FIELD_WIDTH * scaleY);
+        ctx.moveTo(0, lineY);
+        ctx.lineTo(FIELD_WIDTH_YARDS * scaleX, lineY);
         ctx.stroke();
 
-        if (y > 10 && y < 110) {
-            // Enhanced yard numbers with shadow effect
-            const yardLineNum = y <= 60 ? y - 10 : 120 - y - 10;
-            const numX = drawX;
-
-            // Draw number shadows
-            ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
-            ctx.fillText(yardLineNum.toString(), numX + 1, 16);
-            ctx.fillText(yardLineNum.toString(), numX + 1, FIELD_WIDTH * scaleY - 14);
-
-            // Draw numbers
-            ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
-            ctx.fillText(yardLineNum.toString(), numX, 15);
-            ctx.fillText(yardLineNum.toString(), numX, FIELD_WIDTH * scaleY - 15);
+        if (y !== 0 && y !== 120) {
+            const yardNum = y <= 60 ? y - 10 : 110 - y;
+            ctx.fillText(yardNum, 4 * scaleX, lineY);
+            ctx.fillText(yardNum, (FIELD_WIDTH_YARDS - 4) * scaleX, lineY);
         }
     }
 
-    // Draw Hash Marks (now horizontal)
-    const hashTopY = HASH_LEFT_X * scaleY; // Use X-hash for Y-coordinate
-    const hashBottomY = HASH_RIGHT_X * scaleY;
-    for (let y = 11; y < 110; y++) { // Every yard
-        if (y % 10 === 0) continue; // Skip main lines
-        const drawX = y * scaleX;
+    // Draw Hashes
+    const HASH_LEFT = 18.3; 
+    const HASH_RIGHT = 35.0; 
+    ctx.lineWidth = 1;
+    for (let y = 1; y < 120; y++) {
+        if (y % 10 === 0) continue;
+        const lineY = y * scaleY;
+        
         ctx.beginPath();
-        ctx.moveTo(drawX, hashTopY - 3);
-        ctx.lineTo(drawX, hashTopY + 3);
-        ctx.moveTo(drawX, hashBottomY - 3);
-        ctx.lineTo(drawX, hashBottomY + 3);
+        ctx.moveTo((HASH_LEFT - 0.5) * scaleX, lineY);
+        ctx.lineTo((HASH_LEFT + 0.5) * scaleX, lineY);
+        ctx.stroke();
+
+        ctx.beginPath();
+        ctx.moveTo((HASH_RIGHT - 0.5) * scaleX, lineY);
+        ctx.lineTo((HASH_RIGHT + 0.5) * scaleX, lineY);
         ctx.stroke();
     }
-    // --- End Field Markings ---
 
-    // --- Draw LOS and First Down Lines ---
-    if (frameData && frameData.lineOfScrimmage) {
-        // Line of Scrimmage (Blue)
-        const losX = frameData.lineOfScrimmage * scaleX;
-        ctx.strokeStyle = '#3b82f6'; // Blue-500
-        ctx.lineWidth = 3;
-        ctx.beginPath();
-        ctx.moveTo(losX, 0);
-        ctx.lineTo(losX, canvas.height);
-        ctx.stroke();
-
-        // First Down Line (Yellow)
-        if (frameData.firstDownY < FIELD_LENGTH - 10) { // Only draw if not in endzone
-            const firstDownX = frameData.firstDownY * scaleX;
-            ctx.strokeStyle = '#eab308'; // Yellow-500
+    // Draw Dynamic Lines
+    if (frameData) {
+        if (frameData.lineOfScrimmage) {
+            const losY = frameData.lineOfScrimmage * scaleY;
+            ctx.strokeStyle = '#2563eb';
             ctx.lineWidth = 3;
-            ctx.setLineDash([8, 8]); // Make it dashed
             ctx.beginPath();
-            ctx.moveTo(firstDownX, 0);
-            ctx.lineTo(firstDownX, canvas.height);
+            ctx.moveTo(0, losY);
+            ctx.lineTo(FIELD_WIDTH_YARDS * scaleX, losY);
             ctx.stroke();
-            ctx.setLineDash([]); // Reset for other lines
+        }
+        if (frameData.firstDownY) {
+            const fdY = frameData.firstDownY * scaleY;
+            ctx.strokeStyle = '#eab308';
+            ctx.lineWidth = 3;
+            ctx.setLineDash([10, 5]);
+            ctx.beginPath();
+            ctx.moveTo(0, fdY);
+            ctx.lineTo(FIELD_WIDTH_YARDS * scaleX, fdY);
+            ctx.stroke();
+            ctx.setLineDash([]);
         }
     }
 
-    if (!frameData || !frameData.players) {
-        ctx.restore(); // Don't forget to restore context
-        return; // If no frame, just show empty field
+    // ===========================================
+    // 3. DRAWING PLAYERS
+    // ===========================================
+    if (frameData && frameData.players) {
+        frameData.players.forEach(p => {
+            let jiggleX = 0;
+            let jiggleY = 0;
+            if (p.isEngaged) {
+                const jiggleAmount = 0.4;
+                jiggleX = (Math.random() - 0.5) * jiggleAmount;
+                jiggleY = (Math.random() - 0.5) * jiggleAmount;
+            }
+
+            const drawX = (p.x + jiggleX) * scaleX;
+            const drawY = (p.y + jiggleY) * scaleY;
+            const radius = 6 * (scale/12);
+
+            // Stun Pulse
+            if (p.stunnedTicks > 0) {
+                const pulse = (Math.sin(Date.now() / 200) + 1) / 2;
+                const pulseRadius = radius + (pulse * 4);
+                ctx.save();
+                ctx.beginPath();
+                ctx.arc(drawX, drawY, pulseRadius, 0, Math.PI * 2);
+                ctx.fillStyle = `rgba(220, 38, 38, ${0.5 - pulse * 0.2})`;
+                ctx.fill();
+                ctx.restore();
+            }
+
+            // Shadow
+            ctx.fillStyle = 'rgba(0,0,0,0.4)';
+            ctx.beginPath();
+            ctx.arc(drawX + 1, drawY + 1, radius, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Body
+            ctx.fillStyle = p.primaryColor || (p.isOffense ? '#3b82f6' : '#ef4444');
+            ctx.beginPath();
+            ctx.arc(drawX, drawY, radius, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Engagement Halo
+            if (p.isEngaged) {
+                ctx.strokeStyle = 'rgba(255, 255, 255, 0.6)';
+                ctx.lineWidth = 1;
+                ctx.stroke();
+            }
+
+            // Ball Carrier Ring
+            if (p.isBallCarrier) {
+                ctx.strokeStyle = '#fbbf24'; 
+                ctx.lineWidth = 2.5;
+                ctx.beginPath();
+                ctx.arc(drawX, drawY, radius + 2, 0, Math.PI * 2);
+                ctx.stroke();
+            }
+
+            // Number
+            ctx.fillStyle = '#fff';
+            ctx.font = `bold ${8 * (scale/12)}px "Inter"`;
+            ctx.fillText(p.number || '', drawX, drawY);
+        });
     }
 
-    // --- Draw Players (Enhanced) ---
-    frameData.players.forEach(player => {
-        if (player.x === undefined || player.y === undefined) return;
+    // ===========================================
+    // 4. DRAWING THE BALL (No Trail)
+    // ===========================================
+    if (frameData && frameData.ball && (frameData.ball.inAir || frameData.ball.isLoose)) {
+        const ballX = frameData.ball.x * scaleX;
+        const ballY = frameData.ball.y * scaleY;
+        const ballRadius = 4 * (scale/12);
 
-        // Jiggle logic for engagement
-        let jiggleX = 0;
-        let jiggleY = 0;
-        if (player.isEngaged) {
-            const jiggleAmount = 0.8;
-            jiggleX = (Math.random() - 0.5) * jiggleAmount;
-            jiggleY = (Math.random() - 0.5) * jiggleAmount;
-        }
-
-        const drawX = player.y * scaleX + jiggleX;
-        const drawY = player.x * scaleY + jiggleY;
-
-        // Draw engagement halo
-        if (player.isEngaged) {
-            const gradient = ctx.createRadialGradient(drawX, drawY, 3, drawX, drawY, 10);
-            gradient.addColorStop(0, 'rgba(255,255,255,0.12)');
-            gradient.addColorStop(1, 'rgba(255,255,255,0)');
-            ctx.fillStyle = gradient;
-            ctx.beginPath();
-            ctx.arc(drawX, drawY, 10, 0, Math.PI * 2);
-            ctx.fill();
-        }
-
-        // Draw stun effect
-        if (player.stunnedTicks > 0) {
-            const pulse = (Math.sin(Date.now() / 200) + 1) / 2;
-            const pulseRadius = 8 + (pulse * 6);
-            const pulseAlpha = 0.5 + (pulse * 0.4);
-
-            ctx.save();
-            ctx.beginPath();
-            ctx.arc(drawX, drawY, pulseRadius, 0, Math.PI * 2);
-            const stunGradient = ctx.createRadialGradient(drawX, drawY, 3, drawX, drawY, pulseRadius);
-            stunGradient.addColorStop(0, `rgba(220, 38, 38, ${pulseAlpha})`);
-            stunGradient.addColorStop(1, 'rgba(220, 38, 38, 0)');
-            ctx.fillStyle = stunGradient;
-            ctx.fill();
-            ctx.restore();
-        }
-
-        // Draw player body
-        const playerColor = player.primaryColor || (player.isOffense ? '#3b82f6' : '#ef4444');
-
-        // Shadow
+        // Ball Shadow (Height based offset)
+        const shadowOffset = (frameData.ball.z || 0) * 2;
+        ctx.fillStyle = 'rgba(0,0,0,0.3)';
         ctx.beginPath();
-        ctx.arc(drawX + 1, drawY + 1, 8, 0, Math.PI * 2);
-        ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
+        ctx.arc(ballX + shadowOffset, ballY + shadowOffset, ballRadius, 0, Math.PI * 2);
         ctx.fill();
 
-        // Main body
+        // The Ball
+        ctx.fillStyle = '#78350f'; 
         ctx.beginPath();
-        ctx.arc(drawX, drawY, 8, 0, Math.PI * 2);
-        ctx.fillStyle = playerColor;
+        ctx.arc(ballX, ballY, ballRadius, 0, Math.PI * 2);
         ctx.fill();
-
+        
         // Highlight
+        ctx.fillStyle = 'rgba(255,255,255,0.4)';
         ctx.beginPath();
-        ctx.arc(drawX - 2, drawY - 2, 3, 0, Math.PI * 2);
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
+        ctx.arc(ballX - 1, ballY - 1, 1, 0, Math.PI * 2);
         ctx.fill();
-
-        // Ball carrier indicator
-        if (player.isBallCarrier) {
-            ctx.save();
-            ctx.beginPath();
-            ctx.arc(drawX, drawY, 12, 0, Math.PI * 2);
-            ctx.lineWidth = 3;
-            ctx.strokeStyle = player.secondaryColor || 'rgba(251, 191, 36, 0.95)';
-            ctx.stroke();
-            ctx.restore();
-        }
-
-        // --- 💡 MOVEMENT TRAIL REMOVED HERE --- 
-
-        // Draw player number/position text
-        const displayPosition = (player.slot ? player.slot.replace(/\d+/g, '') : '') || player.position || player.favoriteOffensivePosition || player.favoriteDefensivePosition || '';
-
-        let displayNumber;
-        if (player.number != null && player.number !== '') {
-            displayNumber = player.number.toString();
-        } else {
-            const seed = (player.name || player.id || 'player').toString();
-            let sum = 0;
-            for (let i = 0; i < seed.length; i++) sum += seed.charCodeAt(i);
-            displayNumber = ((sum % 99) + 1).toString();
-        }
-
-        if (displayPosition) {
-            ctx.font = '9px "Inter"';
-            ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
-            ctx.fillText(displayPosition, drawX + 1, drawY - 11);
-
-            ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
-            ctx.fillText(displayPosition, drawX, drawY - 12);
-        }
-
-        ctx.font = 'bold 11px "Inter"';
-        ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(displayNumber, drawX + 1, drawY + 1);
-
-        ctx.fillStyle = '#ffffff';
-        ctx.fillText(displayNumber, drawX, drawY);
-    });
-
-    // Draw ball only if it's in the air or this frame is the snap frame
-    if (frameData.ball && (frameData.ball.inAir || frameData.isSnap || frameData.ball.isLoose)) {
-        const drawX = frameData.ball.y * scaleX;
-        const drawY = frameData.ball.x * scaleY;
-
-        // Enhanced ball visualization (same as before, but only when visible)
-        const ballX = drawX;
-        const ballY = drawY;
-
-        if (frameData.ball.inAir) {
-            ctx.save();
-            ctx.beginPath();
-            ctx.arc(ballX + 2, ballY + 2, 6, 0, Math.PI * 2);
-            ctx.fillStyle = 'rgba(0, 0, 0, 0.2)';
-            ctx.fill();
-            ctx.restore();
-
-            const glowGradient = ctx.createRadialGradient(
-                ballX, ballY, 2,
-                ballX, ballY, 12
-            );
-            glowGradient.addColorStop(0, 'rgba(146, 64, 14, 0.6)');
-            glowGradient.addColorStop(1, 'rgba(146, 64, 14, 0)');
-
-            ctx.beginPath();
-            ctx.arc(ballX, ballY, 12, 0, Math.PI * 2);
-            ctx.fillStyle = glowGradient;
-            ctx.fill();
-        }
-
-        // Ball shadow
-        ctx.beginPath();
-        ctx.arc(ballX + 1, ballY + 1, frameData.ball.inAir ? 5 : 3, 0, Math.PI * 2);
-        ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
-        ctx.fill();
-
-        // Main ball
-        ctx.beginPath();
-        ctx.arc(ballX, ballY, frameData.ball.inAir ? 5 : 3, 0, Math.PI * 2);
-        ctx.fillStyle = '#92400e';
-        ctx.fill();
-
-        // Ball highlight
-        ctx.beginPath();
-        ctx.arc(ballX - 1, ballY - 1, frameData.ball.inAir ? 2 : 1, 0, Math.PI * 2);
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
-        ctx.fill();
-
-        // Draw enhanced trajectory for passes
-        if (frameData.ball.inAir && frameData.ball.velocity) {
-            const angle = Math.atan2(frameData.ball.velocity.y, frameData.ball.velocity.x);
-            const speed = Math.sqrt(frameData.ball.velocity.x ** 2 + frameData.ball.velocity.y ** 2);
-            const trailLength = 20 + speed * 4;
-
-            // Draw trail shadow
-            ctx.beginPath();
-            ctx.moveTo(ballX + 1, ballY + 1);
-            ctx.lineTo(
-                ballX + Math.cos(angle) * trailLength + 1,
-                ballY + Math.sin(angle) * trailLength + 1
-            );
-            ctx.strokeStyle = 'rgba(0, 0, 0, 0.2)';
-            ctx.lineWidth = 3;
-            ctx.stroke();
-
-            // Draw main trail with gradient
-            const trailGradient = ctx.createLinearGradient(
-                ballX, ballY,
-                ballX + Math.cos(angle) * trailLength,
-                ballY + Math.sin(angle) * trailLength
-            );
-            trailGradient.addColorStop(0, '#92400e');
-            trailGradient.addColorStop(1, 'rgba(146, 64, 14, 0)');
-
-            ctx.beginPath();
-            ctx.moveTo(ballX, ballY);
-            ctx.lineTo(
-                ballX + Math.cos(angle) * trailLength,
-                ballY + Math.sin(angle) * trailLength
-            );
-            ctx.strokeStyle = trailGradient;
-            ctx.lineWidth = 2;
-            ctx.stroke();
-        }
     }
 
-    // Restore context to remove camera transform
     ctx.restore();
 }
 
