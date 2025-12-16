@@ -148,7 +148,7 @@ function normalizeFormationKey(formations, formationKey, defaultKey) {
 
 export function rebuildDepthChartFromOrder(team) {
     if (!team || !team.formations) return;
-    
+
     // 1. Ensure Depth Order Object Exists with correct keys
     if (!team.depthOrder || Array.isArray(team.depthOrder)) {
         team.depthOrder = {
@@ -180,7 +180,7 @@ export function rebuildDepthChartFromOrder(team) {
             if (p) {
                 // Determine bucket
                 let pos = p.pos || p.favoriteOffensivePosition || 'WR';
-                
+
                 // Normalize positions
                 if (['FB'].includes(pos)) pos = 'RB';
                 if (['TE', 'ATH', 'K', 'P'].includes(pos)) pos = 'WR';
@@ -4131,87 +4131,92 @@ function updateQBDecision(playState, offenseStates, defenseStates, gameLog, aiTi
         return;
     }
     else if (targetPlayerState && actionTaken.includes("Throw")) {
-        if (gameLog) gameLog.push(`🏈 ${qbState.name} throws to ${targetPlayerState.name} (${actionTaken})...`);
+        if (gameLog) gameLog.push(`🏈 ${qbState.name} throws to ${targetPlayerState.name}...`);
 
-        // 1. Calculate Base Flight Parameters
-        const velocity = 20 + (qbStrength / 4);
-        const rawDist = getDistance(qbState, targetPlayerState);
-        const airTime = Math.max(0.4, rawDist / velocity);
+        // 1. ORIGIN: Use QB's CURRENT position (supports throwing on the run)
+        const startX = qbState.x;
+        const startY = qbState.y;
 
-        // 2. Calculate "Perfect" Aim Point (Leading the Receiver)
+        // 2. BALL SPEED (Yards per second)
+        // 50 Str = ~20y/s, 99 Str = ~32y/s
+        const ballSpeed = 20 + (qbStrength * 0.15);
+
+        // 3. LEAD CALCULATION (Predictive)
         let aimX = targetPlayerState.x;
         let aimY = targetPlayerState.y;
 
         if (targetPlayerState.action.includes('route')) {
-            // Estimate receiver movement during airTime
-            const recSpeedYPS = (targetPlayerState.speed / 100) * 8.0; // Approx yards per second
-            const destDx = targetPlayerState.targetX - targetPlayerState.x;
-            const destDy = targetPlayerState.targetY - targetPlayerState.y;
-            const destDist = Math.sqrt(destDx * destDx + destDy * destDy);
+            // Calculate distance to current spot to estimate flight time
+            const rawDist = Math.sqrt(Math.pow(aimX - startX, 2) + Math.pow(aimY - startY, 2));
+            const estimatedAirTime = rawDist / ballSpeed;
 
-            if (destDist > 0.1) {
-                // Lead factor: how much to throw ahead (0.85 = slightly underthrow to be safe)
-                const leadFactor = 0.9;
-                const normX = destDx / destDist;
-                const normY = destDy / destDist;
+            // Receiver Velocity Vector
+            // We approximate based on their current target destination
+            const rDx = targetPlayerState.targetX - targetPlayerState.x;
+            const rDy = targetPlayerState.targetY - targetPlayerState.y;
+            const rDist = Math.sqrt(rDx * rDx + rDy * rDy);
 
-                aimX += (normX * recSpeedYPS * airTime * leadFactor);
-                aimY += (normY * recSpeedYPS * airTime * leadFactor);
+            if (rDist > 0.1) {
+                // Receiver Speed in Yards/Sec (approx)
+                const recSpeedYPS = (targetPlayerState.speed / 100) * 8.5;
+
+                // Normalize direction * speed * time
+                const leadX = (rDx / rDist) * recSpeedYPS * estimatedAirTime;
+                const leadY = (rDy / rDist) * recSpeedYPS * estimatedAirTime;
+
+                // Apply Lead
+                aimX += leadX;
+                aimY += leadY;
             }
         }
 
-        // 3. Apply Accuracy Error (The "Wobble")
-        const accuracyRating = qbState.throwingAccuracy || 50;
-        const pressurePenalty = qbState.isPressure ? 2.0 : 1.0;
-
-        // Formula: 100 Acc = 0.5y error, 50 Acc = 4.5y error
-        const maxError = (100 - accuracyRating) / 12;
-        const actualError = (Math.random() * maxError) * pressurePenalty;
-
-        // Apply error in a random direction
+        // 4. ACCURACY VARIANCE (Wobble)
+        const errorMargin = (100 - qbAcc) / 25; // 100 acc = 0 error, 50 acc = 2.0y error
         const angle = Math.random() * Math.PI * 2;
-        aimX += Math.cos(angle) * actualError;
-        aimY += Math.sin(angle) * actualError;
+        const distError = Math.random() * errorMargin;
+        aimX += Math.cos(angle) * distError;
+        aimY += Math.sin(angle) * distError;
 
-        // 4. "Lead Open" Skill Bonus
-        // Elite QBs automatically adjust aim slightly away from defenders (simplified as 'downfield')
-        if (accuracyRating > 85) {
-            aimY += 0.5;
-        }
+        // 5. CLAMP (Stay in bounds)
+        aimX = Math.max(0.5, Math.min(52.8, aimX));
+        aimY = Math.max(0.5, Math.min(119.5, aimY));
 
-        // 5. Clamp to Field
-        aimX = Math.max(1, Math.min(FIELD_WIDTH - 1, aimX));
-        aimY = Math.max(1, Math.min(FIELD_LENGTH - 1, aimY));
+        // 6. FINAL PHYSICS VECTORS
+        const dx = aimX - startX;
+        const dy = aimY - startY;
+        const totalDist = Math.sqrt(dx * dx + dy * dy);
+        const flightTime = totalDist / ballSpeed;
 
-        // 6. Set Ball State
+        // Set Ball State
         playState.ballState.inAir = true;
         playState.ballState.throwInitiated = true;
         playState.ballState.throwTick = playState.tick;
         playState.ballState.throwerId = qbState.id;
         playState.ballState.targetPlayerId = targetPlayerState.id;
 
-        // IMPORTANT: The target is the Calculated Aim Point, not the Player Position
-        playState.ballState.targetX = aimX;
-        playState.ballState.targetY = aimY;
+        // Exact start point
+        playState.ballState.x = startX;
+        playState.ballState.y = startY;
+        playState.ballState.z = 1.8; // Release height (approx 6ft)
 
-        // 7. Physics Vectors
-        const finalDx = aimX - qbState.x;
-        const finalDy = aimY - qbState.y;
-        const finalDist = Math.sqrt(finalDx * finalDx + finalDy * finalDy);
-        // Recalculate exact airTime for the actual distance thrown
-        const finalAirTime = finalDist / velocity;
+        // Velocity components
+        playState.ballState.vx = dx / flightTime;
+        playState.ballState.vy = dy / flightTime;
 
-        playState.ballState.vx = finalDx / finalAirTime;
-        playState.ballState.vy = finalDy / finalAirTime;
-        // Arc calculation (vz)
-        playState.ballState.vz = (9.8 * finalAirTime) / 2;
+        // Z-Velocity (Arc)
+        // Physics: d = v*t - 0.5*g*t^2
+        // We want Z to be ~1.5 (chest height) at arrival time t
+        // 1.5 = 1.8 + vz*t - 0.5*9.8*t^2
+        // vz = (1.5 - 1.8 + 4.9*t^2) / t
+        playState.ballState.vz = (-0.3 + (4.9 * flightTime * flightTime)) / flightTime;
 
-        playState.ballState.x = qbState.x;
-        playState.ballState.y = qbState.y;
-
-        // Cleanup QB state
+        // Cleanup
         qbState.hasBall = false;
         qbState.isBallCarrier = false;
+
+        // Store intended target location for debug/AI
+        playState.ballState.targetX = aimX;
+        playState.ballState.targetY = aimY;
     }
 
     // --- 6. Setup Movement (Drift) ---
@@ -4302,273 +4307,158 @@ function handleBallArrival(playState, ballCarrierState, playResult, gameLog) {
     // --- 1. PUNT CATCH LOGIC ---
     // ===========================================================
     if (playState.type === 'punt' && playState.ballState.inAir && playState.ballState.targetPlayerId === null) {
-
-        // --- 1a. Ground/Dead Ball Check ---
+       
         if (playState.ballState.z <= 0.1) {
-            // Ball is on the ground.
-            // If it has effectively stopped moving, end the play (Downed punt).
             const speed = Math.sqrt(playState.ballState.vx ** 2 + playState.ballState.vy ** 2);
             if (speed < 0.5) {
                 if (gameLog) gameLog.push(`🛑 Punt downed by the kicking team.`);
                 playState.playIsLive = false;
                 playState.finalBallY = playState.ballState.y;
-                playState.touchback = false; // Logic elsewhere handles touchbacks based on Y position
+                playState.touchback = false;
             }
             return;
         }
-
-        // Wait for ball to come down for catch attempt
         if (playState.ballState.z > 3.0) return;
 
         const CATCH_CHECK_RADIUS = 4.0;
         const ballPos = playState.ballState;
-
-        // Find any unblocked defender (returner) near the ball
-        const returnersInRange = playState.activePlayers.filter(p =>
-            !p.isOffense &&
-            !p.isEngaged &&
-            p.stunnedTicks === 0 &&
-            getDistance(p, ballPos) < CATCH_CHECK_RADIUS
-        );
+        const returnersInRange = playState.activePlayers.filter(p => !p.isOffense && !p.isEngaged && p.stunnedTicks === 0 && getDistance(p, ballPos) < CATCH_CHECK_RADIUS);
 
         if (returnersInRange.length === 0) return;
 
-        // Closest man takes it
         const returnerState = returnersInRange.sort((a, b) => getDistance(a, ballPos) - getDistance(b, ballPos))[0];
         const returnerPlayer = getPlayer(returnerState.id);
-
         if (!returnerPlayer) return;
 
-        // Muff Check
         const catchingHands = returnerPlayer.attributes?.technical?.catchingHands || 50;
-        const muffChance = 0.05 + (1 - (catchingHands / 100)) * 0.15; // 5-20% chance
+        const muffChance = 0.05 + (1 - (catchingHands / 100)) * 0.15;
 
         if (Math.random() < muffChance) {
             if (gameLog) gameLog.push(`❗ MUFFED PUNT! ${returnerState.name} drops it!`);
             playState.ballState.isLoose = true;
             playState.ballState.inAir = false;
             playState.ballState.z = 0.1;
-            playState.ballState.vx = (Math.random() - 0.5) * 5;
-            playState.ballState.vy = (Math.random() - 0.5) * 5;
             returnerState.stunnedTicks = 30;
-
-            playState.statEvents.push({
-                type: 'fumble',
-                playerId: returnerState.id
-            });
+            playState.statEvents.push({ type: 'fumble', playerId: returnerState.id });
         } else {
             if (gameLog) gameLog.push(`🏈 Punt caught by ${returnerState.name}.`);
-
             playState.turnover = true;
             playState.ballState.inAir = false;
             playState.ballState.isLoose = false;
-
-            // Assign Carrier
             returnerState.isBallCarrier = true;
             returnerState.hasBall = true;
             returnerState.action = 'run_path';
             playState.returnStartY = returnerState.y;
-
-            // Snap Ball
             playState.ballState.x = returnerState.x;
             playState.ballState.y = returnerState.y;
             playState.ballState.z = 1.0;
-
-            // Switch AI Modes
+            
+            // Switch AI
             playState.activePlayers.forEach(p => {
                 p.hasBall = (p.id === returnerState.id);
                 p.isBallCarrier = (p.id === returnerState.id);
-                if (p.isOffense) {
-                    p.action = 'pursuit'; // Gunners tackle
-                } else if (p.id !== returnerState.id) {
-                    p.action = 'run_block'; // Return team blocks
-                }
+                if (p.isOffense) p.action = 'pursuit';
+                else if (p.id !== returnerState.id) p.action = 'run_block';
             });
-
         }
         return;
     }
 
     // ===========================================================
-    // --- 2. PASS ARRIVAL LOGIC ---
+    // --- 2. PASS ARRIVAL LOGIC  ---
     // ===========================================================
     if (!playState.ballState.inAir) return;
 
-    // Height Checks
-    if (playState.ballState.z > 2.5 && !receiverInRange && !defenderInRange) {
+    const ball = playState.ballState;
 
-        if (gameLog) gameLog.push(`‹‹ Pass is thrown **too high**. Incomplete.`);
-        playState.incomplete = true; playState.playIsLive = false; playState.ballState.inAir = false;
-        return;
-    }
-    if (playState.ballState.z < 0.1) {
-        if (gameLog) gameLog.push(`‹‹ Pass is thrown **too low**. Incomplete.`);
-        playState.incomplete = true; playState.playIsLive = false; playState.ballState.inAir = false;
-        return;
-    }
-
-    const targetPlayerState = playState.activePlayers.find(p => p.id === playState.ballState.targetPlayerId);
-    if (!targetPlayerState) {
-        // Ball has no target? Treat as throwaway landing.
-        playState.incomplete = true; playState.playIsLive = false; playState.ballState.inAir = false;
+    // --- A. GROUND CHECK ---
+    // If the ball hits the ground (z <= 0), it's dead.
+    if (ball.z <= 0) {
+        if (gameLog) gameLog.push(`👋 Pass hits the turf. Incomplete.`);
+        playState.incomplete = true;
+        playState.playIsLive = false;
+        ball.inAir = false;
         return;
     }
 
-    // Context
-    const CATCH_CHECK_RADIUS = 2.0;
-    const receiverPlayer = getPlayer(targetPlayerState.id);
+    // --- B. CATCHABLE ZONE CHECK ---
+    // A ball is only catchable if it is reachable vertically (0 to ~2.8 yards)
+    // We REMOVED the check that auto-fails high balls mid-flight. 
+    // Now we just ignore them until they come down to a reachable height.
+    const MAX_JUMP_HEIGHT = 2.8; 
+    if (ball.z > MAX_JUMP_HEIGHT) {
+        return; // Ball is soaring overhead, wait for it to drop
+    }
 
-    // Find closest defender
-    const closestDefenderState = playState.activePlayers
-        .filter(p => !p.isOffense && !p.isBlocked && !p.isEngaged)
-        .sort((a, b) => getDistance(a, playState.ballState) - getDistance(b, playState.ballState))[0];
-    const defenderPlayer = closestDefenderState ? getPlayer(closestDefenderState.id) : null;
+    // --- C. FIND PLAYERS IN 3D RANGE ---
+    const CATCH_RADIUS = 1.2; // Tight radius for actual catch (must be close to body)
+    
+    // Find all players close enough to the ball (XY distance)
+    const playersInRange = playState.activePlayers.filter(p => {
+        const dist = getDistance(p, ball);
+        return dist <= CATCH_RADIUS;
+    });
 
-    const receiverInRange = getDistance(targetPlayerState, playState.ballState) < CATCH_CHECK_RADIUS;
-    const defenderInRange = closestDefenderState && getDistance(closestDefenderState, playState.ballState) < CATCH_CHECK_RADIUS;
+    if (playersInRange.length === 0) return; // No one close enough yet
 
-    let eventResolved = false;
+    // Sort by closeness to ball
+    playersInRange.sort((a, b) => getDistance(a, ball) - getDistance(b, ball));
+    
+    const bestCandidate = playersInRange[0];
+    const playerObj = getPlayer(bestCandidate.id);
+    if (!playerObj) return;
 
-    // --- A. INTERCEPTION CHECK ---
-    if (defenderInRange && defenderPlayer?.attributes) {
-        const defCatch = defenderPlayer.attributes.technical?.catchingHands || 30;
-        const defAgility = defenderPlayer.attributes.physical?.agility || 50;
-        let defenderPower = (defCatch * 0.6 + defAgility * 0.4) * closestDefenderState.fatigueModifier;
+    // --- D. RESOLVE CATCH ---
+    const isDefense = !bestCandidate.isOffense;
+    const catching = playerObj.attributes?.technical?.catchingHands || 50;
+    const agility = playerObj.attributes?.physical?.agility || 50;
+    
+    // Base Chance Calculation
+    let catchScore = (catching * 0.7) + (agility * 0.3);
+    
+    // Modifiers
+    if (isDefense) catchScore -= 25; // Defenders naturally have worse hands
+    if (playersInRange.length > 1) catchScore -= 30; // Contested catch penalty
+    
+    // Random Roll
+    const roll = getRandomInt(0, 100);
 
-        // Contested Penalty
-        if (receiverInRange) {
-            const recStrength = receiverPlayer?.attributes?.physical?.strength || 50;
-            defenderPower -= (recStrength * 0.3); // Harder to INT if receiver is fighting for it
-        }
+    if (roll < catchScore) {
+        // --- SUCCESSFUL CATCH / INT ---
+        ball.inAir = false;
+        ball.caught = true;
+        bestCandidate.hasBall = true;
+        bestCandidate.isBallCarrier = true;
+        bestCandidate.action = 'run_path'; // Switch to running
 
-        const distToBall = getDistance(closestDefenderState, playState.ballState);
-        const positionBonus = (CATCH_CHECK_RADIUS - distToBall) * 10;
-
-        if ((defenderPower + positionBonus + getRandomInt(0, 30)) > 95) { // Tuned: 95 threshold
-            eventResolved = true;
-            if (gameLog) gameLog.push(`❗ INTERCEPTION! ${closestDefenderState.name} jumps the route!`);
-
+        if (isDefense) {
+            if (gameLog) gameLog.push(`❗ INTERCEPTION! ${bestCandidate.name} picks it off!`);
             playState.interceptionOccurred = true;
             playState.possessionChanged = true;
             playState.turnover = true;
-
             playResult.outcome = 'turnover';
             playResult.turnoverType = 'interception';
-            playResult.possessionChange = true;
-
-            playState.ballState.inAir = false;
-            playState.ballState.caught = true;
-
-            closestDefenderState.hasBall = true;
-            closestDefenderState.isBallCarrier = true;
-            closestDefenderState.action = 'run_path';
-
-            playState.returnStartY = closestDefenderState.y;
-
-            playState.statEvents.push({
-                type: 'interception',
-                interceptorId: closestDefenderState.id,
-                throwerId: playState.ballState.throwerId
-            });
-            return;
-        }
-    }
-
-    // --- B. PASS BREAKUP (SWAT) CHECK ---
-    if (!eventResolved && defenderInRange) {
-        const distDef = getDistance(closestDefenderState, playState.ballState);
-        const distRec = receiverInRange ? getDistance(targetPlayerState, playState.ballState) : 100;
-
-        // If defender is closer or equally close
-        if (distDef <= distRec) {
-            if (getRandomInt(0, 100) > 40) {
-                eventResolved = true;
-                if (gameLog) gameLog.push(`🚫 **SWATTED!** ${closestDefenderState.name} breaks up the pass!`);
-
-                playResult.outcome = 'incomplete';
-                playState.playIsLive = false;
-                return;
-            }
-        }
-    }
-
-    // --- C. CATCH ATTEMPT ---
-    if (!eventResolved && receiverInRange && receiverPlayer) {
-        eventResolved = true;
-        const recHands = receiverPlayer.attributes.technical?.catchingHands || 50;
-        const recFocus = receiverPlayer.attributes.mental?.consistency || 50;
-
-        // Base: 50 hands = 60%, 99 hands = 90%
-        let catchChance = 60 + ((recHands - 50) * 0.6);
-        catchChance += ((recFocus - 50) * 0.1);
-
-        // Penalties
-        if (defenderInRange) catchChance -= 30; // Heavy traffic penalty
-
-        // Roll
-        if (getRandomInt(0, 100) < catchChance) {
-            // SUCCESS
-            if (gameLog) {
-                gameLog.push(`👍 CATCH! ${targetPlayerState.name} secures it!`);
-            }
-
-            playResult.outcome = 'complete';
-
-            playState.ballState.inAir = false;
-            playState.ballState.caught = true;
-
-            targetPlayerState.hasBall = true;
-            targetPlayerState.isBallCarrier = true;
-            targetPlayerState.action = 'run_path';
-
-            // Corrected Type: 'completion' to match applyStatEvents
-            playState.statEvents.push({
-                type: 'completion',
-                receiverId: targetPlayerState.id,
-                qbId: playState.ballState.throwerId,
-                yards: 0 // Yards accumulated at end of play
-            });
-
-            // Update blockers
-            playState.activePlayers.forEach(p => {
-                if (p.isOffense && p.id !== targetPlayerState.id) {
-                    p.action = 'run_block';
-                }
-            });
-
-            return;
-
+            
+            playState.statEvents.push({ type: 'interception', interceptorId: bestCandidate.id, throwerId: ball.throwerId });
         } else {
-            // DROP
-            if (gameLog) {
-                gameLog.push(`❌ DROPPED! Pass was on target to ${targetPlayerState.name}!`);
-            }
-
-            playState.statEvents.push({
-                type: 'drop',
-                playerId: targetPlayerState.id
-            });
-
-            playResult.outcome = 'incomplete';
-            playState.playIsLive = false;
-            return;
+            if (gameLog) gameLog.push(`👍 CATCH! ${bestCandidate.name} grabs it!`);
+            playResult.outcome = 'complete';
+            
+            playState.statEvents.push({ type: 'completion', receiverId: bestCandidate.id, qbId: ball.throwerId, yards: 0 });
         }
-    }
-
-    // --- D. INACCURATE PASS ---
-    if (!eventResolved) {
-        if (gameLog) {
-            gameLog.push(`👋 Pass sails harmlessly incomplete.`);
+    } else {
+        // --- DROP / SWAT ---
+        if (isDefense) {
+            if (gameLog) gameLog.push(`🚫 ${bestCandidate.name} swats the pass away!`);
+        } else {
+            if (gameLog) gameLog.push(`❌ ${bestCandidate.name} drops the pass!`);
+            playState.statEvents.push({ type: 'drop', playerId: bestCandidate.id });
         }
-
-        playResult.outcome = 'incomplete';
+        
+        playState.incomplete = true;
         playState.playIsLive = false;
-        return;
+        ball.inAir = false;
     }
-
-    // Cleanup Ball Physics (shouldn't reach here if play ends, but safety measure)
-    playState.ballState.inAir = false;
-    playState.ballState.z = playState.playIsLive ? 1.0 : 0.1;
 }
 
 /** Helper to ensure gameStats object exists before writing. */
@@ -4916,8 +4806,11 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
                 // 3. Fumbles (Loose Ball)
                 if (playState.ballState?.isLoose) {
                     if (typeof checkFumbleRecovery === 'function') {
-                        const recoverer = checkFumbleRecovery(playState, gameLog, 2.0);
-                        if (recoverer) {
+                        const recoveryResult = checkFumbleRecovery(playState, gameLog, 2.0); // Renamed variable for clarity
+
+                        if (recoveryResult) {
+                            const recoverer = recoveryResult.playerState; // Extract the actual player state
+
                             playState.ballState.isLoose = false;
                             playState.ballState.inAir = false;
 
@@ -4925,15 +4818,15 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
                             recoverer.isBallCarrier = true;
                             recoverer.action = 'run_path';
 
-                            playState.possessionChanged = !recoverer.isOffense;
+                            playState.possessionChanged = recoveryResult.possessionChange;
                             playState.returnStartY = recoverer.y;
 
-                            // Optional stat event
                             playState.statEvents.push({
                                 type: 'fumbleRecovery',
                                 playerId: recoverer.id
                             });
 
+                            // 💡 FIX: Use the extracted 'recoverer' object for the name
                             if (gameLog) gameLog.push(`🏈 ${recoverer.name} recovers the fumble!`);
                         }
                     }
@@ -5365,20 +5258,20 @@ function determinePlayCall(offense, defense, down, yardsToGo, ballOn, scoreDiff,
     }
 
     // --- 4. SELECT PLAY ---
-    // Clamp bias
     passBias = Math.max(0.05, Math.min(0.95, passBias));
-
-    // Determine Type
     let desiredType = Math.random() < passBias ? 'pass' : 'run';
 
-    // Get Plays in Formation
     const formationPlays = Object.keys(offensivePlaybook).filter(key => key.startsWith(offenseFormationName));
-    if (formationPlays.length === 0) return 'Balanced_InsideRun';
 
-    // Filter by Type
-    let pool = formationPlays.filter(key => offensivePlaybook[key].type === desiredType);
+    // 💡 NEW: Filter out the specific play used previously to force variety
+    // (previousPlayAnalysis comes from analyzePlaySuccess)
+    let pool = formationPlays.filter(key => {
+        const p = offensivePlaybook[key];
+        return p.type === desiredType && key !== previousPlayAnalysis?.playKey;
+    });
+
+    // Fallback if pool is empty (e.g. only 1 play exists)
     if (pool.length === 0) {
-        desiredType = desiredType === 'pass' ? 'run' : 'pass';
         pool = formationPlays.filter(key => offensivePlaybook[key].type === desiredType);
     }
 
