@@ -5614,9 +5614,6 @@ function checkPlayDiversity(desiredPlayType, recentPlaysHistory, candidatePlayKe
 /**
  * Simulates a full game between two teams.
  */
-/**
- * Simulates a full game between two teams.
- */
 function simulateGame(homeTeam, awayTeam, options = {}) {
     // 1. Simple Extraction
     const isLive = options.isLive === true;
@@ -5826,9 +5823,11 @@ function simulateGame(homeTeam, awayTeam, options = {}) {
                         if (gameLog) gameLog.push(`🛡️ **Defense:** ${defPlayName}`);
                     }
 
+                    // 💡 FIXED: Added isLive as the last argument
                     result = resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey,
                         { gameLog: fastSim ? null : gameLog, weather, ballOn, ballHash, down, yardsToGo },
-                        options
+                        options,
+                        isLive // <--- THIS WAS MISSING
                     );
 
                     playResult = result.playResult;
@@ -6060,7 +6059,8 @@ function simulateGame(homeTeam, awayTeam, options = {}) {
                             offensivePlayKey,
                             defensivePlayKey,
                             { gameLog: fastSim ? null : gameLog, weather, ballOn, ballHash, down, yardsToGo },
-                            options
+                            options,
+                            isLive // <--- ADD THIS!
                         );
 
                         const playResult = result.playResult;
@@ -6141,7 +6141,8 @@ function simulateGame(homeTeam, awayTeam, options = {}) {
                                     down: 1,
                                     yardsToGo: conversionYardsToGo
                                 },
-                                options
+                                options,
+                                isLive // <--- ADD THIS!
                             );
 
                             if (!fastSim && conversionResult.visualizationFrames) {
