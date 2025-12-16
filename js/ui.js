@@ -44,7 +44,7 @@ let activeDepthOrderTab = 'QB';
 
 // --- Live Game Sim State ---
 let liveGameInterval = null; // Holds interval ID for stopping/starting
-let liveGameSpeed = 100; // Current sim speed in milliseconds
+let liveGameSpeed = 80; // Current sim speed in milliseconds
 let liveGameCurrentIndex = 0; // Current index in the game log array
 let liveGameLog = []; // Stores the log entries for the current sim
 let liveGameCallback = null; // Function to call when sim completes or is skipped
@@ -3163,7 +3163,7 @@ function startNextPlay() {
     huddleTimeout = setTimeout(() => {
         // Start the action!
         if (!liveGameInterval) {
-            liveGameInterval = setInterval(runLiveGameTick, userPreferredSpeed);
+            liveGameInterval = setInterval(runLiveGameTick, liveGameSpeed);
         }
     }, PRE_SNAP_DELAY);
 }
@@ -3303,7 +3303,7 @@ export function setSimSpeed(speed) {
     });
 
     let activeButtonId;
-    if (speed === 100) activeButtonId = 'sim-speed-play';  // 💡 Update logic to match new default
+    if (speed === 80) activeButtonId = 'sim-speed-play';  // 💡 Update logic to match new default
     else if (speed === 50) activeButtonId = 'sim-speed-fast';
     else if (speed === 30) activeButtonId = 'sim-speed-faster';
 
