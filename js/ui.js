@@ -2049,18 +2049,17 @@ export function drawFieldVisualization(frameData) {
     if (!ctx || !canvas) return;
 
     // ===========================================
-    // 1. CAMERA & SCALE LOGIC (Full Width, Vertical Scroll)
+    // 1. CAMERA & SCALE LOGIC (Full Width)
     // ===========================================
     
-    const FIELD_WIDTH_REAL = 53.3; // Standard width
-    
-    // SCALE: Fit the entire 53.3 yards into the canvas width exactly.
-    // This removes unused space on the sides.
+    // Fit the full 53.3 yard width into the canvas width exactly.
+    // This utilizes the extra horizontal space we just gained.
+    const FIELD_WIDTH_REAL = 53.3; 
     const scale = canvas.width / FIELD_WIDTH_REAL; 
     const scaleX = scale;
     const scaleY = scale;
 
-    // Determine Vertical Focal Point (Follow the Ball/Action)
+    // Focal Point
     let focusY = (frameData && frameData.lineOfScrimmage) != null ? frameData.lineOfScrimmage : 60;
     
     if (frameData && frameData.ball) {
@@ -2072,41 +2071,36 @@ export function drawFieldVisualization(frameData) {
         }
     }
 
-    // Calculate vertical view range (how many yards fit on screen height)
     const visibleYardsVertical = canvas.height / scaleY;
 
-    // Camera Panning Y (Vertical Only)
-    // Center on action, but clamp to endzones so we don't see black void at top/bottom
+    // Vertical Panning Only
     let cameraY = focusY - (visibleYardsVertical / 2);
     const MAX_FIELD_Y = 120;
-    
-    // Clamp camera. (-5 allows seeing just past the back of the endzone)
     cameraY = Math.max(-5, Math.min(MAX_FIELD_Y - visibleYardsVertical + 5, cameraY));
 
     // ===========================================
     // 2. DRAWING THE FIELD
     // ===========================================
 
-    // Clear background
     const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
     gradient.addColorStop(0, '#065f46'); 
     gradient.addColorStop(1, '#059669'); 
     ctx.fillStyle = gradient;
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-    // Apply Camera Transform (Vertical Only)
     ctx.save();
     ctx.translate(0, -cameraY * scaleY);
 
-    // Draw Endzones (0-10 and 110-120)
+    // Endzones
     ctx.fillStyle = 'rgba(0, 0, 0, 0.15)'; 
-    ctx.fillRect(0, 0, canvas.width, 10 * scaleY); // Top Endzone fills width
-    ctx.fillRect(0, 110 * scaleY, canvas.width, 10 * scaleY); // Bottom Endzone fills width
+    ctx.fillRect(0, 0, canvas.width, 10 * scaleY); 
+    ctx.fillRect(0, 110 * scaleY, canvas.width, 10 * scaleY); 
 
-    // Draw Grid Lines & Numbers
+    // Grid Lines & Numbers
     ctx.lineWidth = 2;
     ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
-    ctx.font = `bold ${14 * (scale/15)}px "Inter"`; // Slightly larger font
+    // 💡 Font Size Boost:
+    ctx.font = `bold ${16 * (scale/15)}px "Inter"`; 
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
@@ -2121,13 +2115,13 @@ export function drawFieldVisualization(frameData) {
 
         if (y !== 0 && y !== 120) {
             const yardNum = y <= 60 ? y - 10 : 110 - y;
-            // Numbers inset slightly from edges
+            // Numbers inset from edges
             ctx.fillText(yardNum, 6 * scaleX, lineY); 
             ctx.fillText(yardNum, canvas.width - (6 * scaleX), lineY);
         }
     }
 
-    // Draw Hashes
+    // Hashes
     const HASH_LEFT = 18.3; 
     const HASH_RIGHT = 35.0; 
     ctx.lineWidth = 1;
@@ -2146,12 +2140,12 @@ export function drawFieldVisualization(frameData) {
         ctx.stroke();
     }
 
-    // Draw Dynamic Lines
+    // Dynamic Lines
     if (frameData) {
         if (frameData.lineOfScrimmage) {
             const losY = frameData.lineOfScrimmage * scaleY;
             ctx.strokeStyle = '#2563eb';
-            ctx.lineWidth = 3;
+            ctx.lineWidth = 4; // Thicker LOS
             ctx.beginPath();
             ctx.moveTo(0, losY);
             ctx.lineTo(canvas.width, losY);
@@ -2160,8 +2154,8 @@ export function drawFieldVisualization(frameData) {
         if (frameData.firstDownY) {
             const fdY = frameData.firstDownY * scaleY;
             ctx.strokeStyle = '#eab308';
-            ctx.lineWidth = 3;
-            ctx.setLineDash([10, 5]);
+            ctx.lineWidth = 4; // Thicker 1st Down
+            ctx.setLineDash([12, 8]);
             ctx.beginPath();
             ctx.moveTo(0, fdY);
             ctx.lineTo(canvas.width, fdY);
@@ -2171,11 +2165,10 @@ export function drawFieldVisualization(frameData) {
     }
 
     // ===========================================
-    // 3. DRAWING PLAYERS (Adjusted Size)
+    // 3. DRAWING PLAYERS (Optimized Size)
     // ===========================================
     if (frameData && frameData.players) {
         frameData.players.forEach(p => {
-            // Subtle Jiggle (0.15)
             let jiggleX = 0;
             let jiggleY = 0;
             if (p.isEngaged) {
@@ -2187,8 +2180,9 @@ export function drawFieldVisualization(frameData) {
             const drawX = (p.x + jiggleX) * scaleX;
             const drawY = (p.y + jiggleY) * scaleY;
             
-            // Player Size: Increased multiplier (0.6) so they look big even on full-width view
-            const radius = scaleX * 0.6; 
+            // 💡 Player Size Boost:
+            // 0.75 yards radius makes them notably bigger and easier to track
+            const radius = scaleX * 0.75; 
 
             // Stun Pulse
             if (p.stunnedTicks > 0) {
@@ -2217,22 +2211,23 @@ export function drawFieldVisualization(frameData) {
             // Engagement Halo
             if (p.isEngaged) {
                 ctx.strokeStyle = 'rgba(255, 255, 255, 0.6)';
-                ctx.lineWidth = 1;
+                ctx.lineWidth = 1.5;
                 ctx.stroke();
             }
 
             // Ball Carrier Ring
             if (p.isBallCarrier) {
                 ctx.strokeStyle = '#fbbf24'; 
-                ctx.lineWidth = 3;
+                ctx.lineWidth = 3.5;
                 ctx.beginPath();
-                ctx.arc(drawX, drawY, radius + 2, 0, Math.PI * 2);
+                ctx.arc(drawX, drawY, radius + 3, 0, Math.PI * 2);
                 ctx.stroke();
             }
 
             // Number
             ctx.fillStyle = '#fff';
-            ctx.font = `bold ${radius}px "Inter"`; 
+            // Scale font to match new body size
+            ctx.font = `bold ${radius * 1.1}px "Inter"`; 
             ctx.fillText(p.number || '', drawX, drawY + (radius * 0.1));
         });
     }
@@ -2243,7 +2238,7 @@ export function drawFieldVisualization(frameData) {
     if (frameData && frameData.ball && (frameData.ball.inAir || frameData.ball.isLoose)) {
         const ballX = frameData.ball.x * scaleX;
         const ballY = frameData.ball.y * scaleY;
-        const ballRadius = scaleX * 0.35; // Readable ball size
+        const ballRadius = scaleX * 0.45; // Bigger ball
 
         // Ball Shadow
         const shadowOffset = (frameData.ball.z || 0) * (scaleX * 0.1);
@@ -3171,7 +3166,6 @@ export function startLiveGameSim(gameResult, onComplete) {
         !elements.simGameDrive ||
         !elements.simGameDown ||
         !elements.simPossession ||
-        
         !elements.simFieldPlayers
     ) {
         console.error("Live sim UI elements missing (critical).");
@@ -3180,14 +3174,8 @@ export function startLiveGameSim(gameResult, onComplete) {
     }
 
     // --- 2. Validate Data ---
-    if (
-        !gameResult ||
-        !Array.isArray(gameResult.gameLog) ||
-        !Array.isArray(gameResult.visualizationFrames) ||
-        gameResult.visualizationFrames.length === 0
-    ) {
+    if (!gameResult || !Array.isArray(gameResult.gameLog) || !Array.isArray(gameResult.visualizationFrames)) {
         console.warn("startLiveGameSim: invalid gameResult.");
-        ticker.innerHTML = '<p>No game events to display.</p>';
         if (onComplete) onComplete(gameResult);
         return;
     }
@@ -3203,13 +3191,28 @@ export function startLiveGameSim(gameResult, onComplete) {
     currentLiveGameResult = gameResult;
     liveGameCurrentIndex = 0;
     liveGameLogIndex = 0;
-
     liveGameCurrentHomeScore = 0;
     liveGameCurrentAwayScore = 0;
     liveGameBallOn = 20;
-    liveGameDown = 1;
-    liveGameToGo = 10;
     liveGameDriveText = "Kickoff";
+
+    // ===============================================
+    // 💡 NEW: RESIZE CANVAS TO FILL CONTAINER
+    // ===============================================
+    const canvas = elements.fieldCanvas;
+    if (canvas && canvas.parentElement) {
+        // Remove CSS classes that constrain width/height
+        canvas.classList.remove('h-full', 'w-auto');
+        canvas.classList.add('w-full', 'h-full'); // Force full fill
+
+        // 1. Read the actual pixel size of the container
+        const rect = canvas.parentElement.getBoundingClientRect();
+        
+        // 2. Set the internal resolution to match (crisp graphics)
+        canvas.width = rect.width;
+        canvas.height = rect.height;
+    }
+    // ===============================================
 
     // --- 5. Initial Render ---
     ticker.innerHTML = '';
@@ -3220,14 +3223,17 @@ export function startLiveGameSim(gameResult, onComplete) {
     elements.simGameDrive.textContent = liveGameDriveText;
     elements.simGameDown.textContent = "1st & 10";
     elements.simPossession.textContent = '';
-
     elements.simBannerOffense.textContent = "Waiting for snap...";
     elements.simBannerDefense.textContent = "Reading offense...";
-
     elements.simFieldPlayers.innerHTML = '';
 
     renderSimPlayers(gameResult.visualizationFrames[0]);
     setSimSpeed(liveGameSpeed);
+
+    // Force an immediate draw so the field appears instantly (not white)
+    if(elements.fieldCanvasCtx) {
+        drawFieldVisualization(gameResult.visualizationFrames[0]);
+    }
 
     // --- 6. Start ---
     liveGameInterval = setInterval(runLiveGameTick, liveGameSpeed);
