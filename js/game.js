@@ -4565,9 +4565,11 @@ function resetPlayerRuntimeState(playerState) {
  * Simulates a single play tick-by-tick.
  * The "Main Loop" of the physics engine.
  */
-function resolvePlay(offense, defense, down, yardsToGo, ballOn, scoreDiff, gameLog, drivesRemaining, previousPlayAnalysis, isLive = false) {
-    const { gameLog = [], ballOn, ballHash = 'M', yardsToGo } = gameState;
-    const fastSim = isLive ? false : (options.fastSim === true);
+function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, context, options, isLive = false) {
+
+    // 2. Extract values from the context object
+    const { gameLog = [], weather, ballOn, ballHash = 'M', down, yardsToGo } = context;
+    const fastSim = options.fastSim === true && !isLive; // Force slow sim if Live
 
     // --- Define playResult ---
     const playResult = {
@@ -4585,25 +4587,17 @@ function resolvePlay(offense, defense, down, yardsToGo, ballOn, scoreDiff, gameL
     if (!play) {
         console.error(`Play key "${offensivePlayKey}" not found.`);
         if (gameLog) gameLog.push("CRITICAL ERROR: Play definition missing!");
-
-        // Now safe to use playResult
         playResult.outcome = 'turnover';
         playResult.possessionChange = true;
-
-        return {
-            playResult,
-            finalBallY: ballOn,
-            log: gameLog,
-            visualizationFrames: []
-        };
+        return { playResult, finalBallY: ballOn, log: gameLog, visualizationFrames: [] };
     }
-
-    // --- 2. INITIALIZE STATE ---
 
     // --- 2. INITIALIZE STATE ---
     let playState = {
         playIsLive: true,
         tick: 0,
+        // 💡 OPTIMIZATION: Only create array if Live
+        visualizationFrames: isLive ? [] : null,
         maxTicks: 1000,
         type: play.type,
         assignments: deepClone(play.assignments || {}),
@@ -4616,14 +4610,8 @@ function resolvePlay(offense, defense, down, yardsToGo, ballOn, scoreDiff, gameL
         lineOfScrimmage: ballOn + 10,
         activePlayers: [],
         blockBattles: [],
-
-        // 💡 OPTIMIZATION FIX: Only create array if Live
-        visualizationFrames: isLive ? [] : null,
-
         resolvedDepth: null
     };
-
-
 
     let firstDownY = 0;
 
@@ -4631,25 +4619,23 @@ function resolvePlay(offense, defense, down, yardsToGo, ballOn, scoreDiff, gameL
     try {
         const goalLineY = FIELD_LENGTH - 10;
         const effectiveYardsToGo = (yardsToGo <= 0 || ballOn >= 90) ? (goalLineY - playState.lineOfScrimmage) : yardsToGo;
-
         firstDownY = Math.min(playState.lineOfScrimmage + effectiveYardsToGo, goalLineY);
 
         setupInitialPlayerStates(playState, offense, defense, play, playState.assignments, ballOn, defensivePlayKey, ballHash, offensivePlayKey);
 
-        // Initial Frame
-        if (playState.playIsLive && gameLog) {
+        // Initial Frame (Only if Live)
+        if (isLive && gameLog) {
             playState.visualizationFrames.push({
                 players: deepClone(playState.activePlayers),
                 ball: deepClone(playState.ballState),
                 logIndex: gameLog.length,
                 lineOfScrimmage: playState.lineOfScrimmage,
                 firstDownY: firstDownY,
-                isSnap: true
+                isSnap: true // 💡 Mark Start for UI Huddle
             });
         }
     } catch (setupError) {
         console.error("CRITICAL ERROR during setup:", setupError);
-        // Safe to return playResult now
         playResult.outcome = 'turnover';
         playResult.possessionChange = true;
         return { playResult, finalBallY: ballOn, log: gameLog, visualizationFrames: [] };
@@ -4862,7 +4848,8 @@ function resolvePlay(offense, defense, down, yardsToGo, ballOn, scoreDiff, gameL
                 }
             });
 
-            // 💡 OPTIMIZATION FIX: Only record if isLive is true
+            // --- J. VISUALIZER RECORDING ---
+            // 💡 OPTIMIZATION: Check isLive flag
             if (isLive && gameLog) {
                 playState.visualizationFrames.push({
                     players: deepClone(playState.activePlayers),
@@ -4926,7 +4913,7 @@ function resolvePlay(offense, defense, down, yardsToGo, ballOn, scoreDiff, gameL
     }
 
     // ===================================
-    // FINALIZE PLAY RESULT (AUTHORITATIVE)
+    // FINALIZE PLAY RESULT 
     // ===================================
     playResult.yards = playState.yards;
 
@@ -4966,7 +4953,6 @@ function resolvePlay(offense, defense, down, yardsToGo, ballOn, scoreDiff, gameL
         playResult,
         finalBallY: playState.finalBallY,
         log: gameLog,
-        // Return frames if Live, otherwise empty array (saves memory in fast sim)
         visualizationFrames: isLive ? playState.visualizationFrames : []
     };
 }
@@ -5631,14 +5617,14 @@ function checkPlayDiversity(desiredPlayType, recentPlaysHistory, candidatePlayKe
  * Simulates a full game between two teams.
  */
 function simulateGame(homeTeam, awayTeam, options = {}) {
-    
+
     // 2. Extract isLive from options (default to false)
     const isLive = options.isLive === true;
-    
+
     // 3. Force fastSim to false if we are watching Live
     //    (otherwise use the value passed in options)
     const fastSim = isLive ? false : (options.fastSim === true);
-    
+
     let originalTickDuration = TICK_DURATION_SECONDS;
     let gameResult;
 
@@ -5750,12 +5736,15 @@ function simulateGame(homeTeam, awayTeam, options = {}) {
                         gameLog.push(`🛡️ **Defense:** ${defPlayName}`);
                     }
 
-                    result = resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey,
+                    result = resolvePlay(
+                        offense,
+                        defense,
+                        offensivePlayKey,
+                        defensivePlayKey,
+                        // Context Object
                         { gameLog: fastSim ? null : gameLog, weather, ballOn, ballHash, down, yardsToGo },
                         options,
-                        null, // drivesRemaining (if your signature uses it)
-                        null, // previousPlayAnalysis
-                        isLive // <--- PASS IT HERE
+                        isLive // <--- Pass as LAST argument
                     );
 
                     playResult = result.playResult;
