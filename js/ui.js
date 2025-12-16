@@ -1262,14 +1262,9 @@ function renderVisualFormationSlots(
     benchedPlayers,
     roster,
     side,
-    formationKey // <--- 💡 FIX: ADD THIS PARAMETER HERE
+    formationKey
 ) {
-    // Now this check will work because formationKey is defined in scope
-    if (!formationKey || typeof formationKey !== 'string') {
-        console.error('Invalid formationKey:', formationKey);
-        return;
-    }
-
+    if (!formationKey || typeof formationKey !== 'string') return;
     if (!formationData || !Array.isArray(formationData.slots)) {
         console.error('Invalid formationData:', formationData);
         return;
@@ -1277,7 +1272,6 @@ function renderVisualFormationSlots(
 
     container.innerHTML = '';
 
-    // --- Line of Scrimmage ---
     const losMarker = document.createElement('div');
     losMarker.className = 'los-marker';
     losMarker.style.top = side === 'offense' ? '20%' : '80%';
@@ -1288,16 +1282,9 @@ function renderVisualFormationSlots(
         if (!coords) return;
 
         const [yardsX, yardsY] = coords;
-
         const leftPercent = 50 + (yardsX * 1.8);
         const Y_SCALE = 3.5;
-
-        let topPercent;
-        if (side === 'offense') {
-            topPercent = 20 - (yardsY * Y_SCALE);
-        } else {
-            topPercent = 80 - (yardsY * Y_SCALE);
-        }
+        let topPercent = side === 'offense' ? 20 - (yardsY * Y_SCALE) : 80 - (yardsY * Y_SCALE);
 
         const slotEl = document.createElement('div');
         slotEl.className = 'player-slot-visual';
@@ -1314,18 +1301,28 @@ function renderVisualFormationSlots(
         else if (slotId.startsWith('DB')) badgeColor = 'bg-purple-600';
         else if (slotId.startsWith('OL')) badgeColor = 'bg-emerald-600';
 
-        const overall = player ? calculateOverall(player) : '-';
+        // 💡 FIX: Extract position from slotId (e.g. "QB1" -> "QB")
+        let positionKey = slotId.replace(/\d+/g, '');
+        // Map formation slots to calculation keys if necessary (e.g. C -> OL)
+        if (['OT','OG','C'].includes(positionKey)) positionKey = 'OL';
+        if (['DE','DT','NT'].includes(positionKey)) positionKey = 'DL';
+        if (['CB','S','FS','SS'].includes(positionKey)) positionKey = 'DB';
+        if (['FB'].includes(positionKey)) positionKey = 'RB';
+        if (['TE'].includes(positionKey)) positionKey = 'WR';
+
+        // Pass positionKey to calculateOverall
+        const overall = player ? calculateOverall(player, positionKey) : '-';
 
         slotEl.innerHTML = `
             <div class="slot-overall ${badgeColor}">${overall}</div>
             <div class="slot-label">${slotId}</div>
-            <select class="slot-select" data-slot-id="${slotId}" data-side="${side}">
+            <select class="slot-select pointer-events-auto" data-slot-id="${slotId}" data-side="${side}">
                 <option value="">Empty</option>
                 ${player ? `<option value="${player.id}" selected>${player.firstName ? player.firstName.charAt(0) : ''}. ${player.lastName || player.name}</option>` : ''}
                 <option disabled>--- Bench ---</option>
                 ${benchedPlayers.map(p => `
                     <option value="${p.id}">
-                        (${calculateOverall(p)}) ${p.firstName ? p.firstName.charAt(0) : ''}. ${p.lastName || p.name} - ${p.position || '?'}
+                        (${calculateOverall(p, positionKey)}) ${p.firstName ? p.firstName.charAt(0) : ''}. ${p.lastName || p.name}
                     </option>
                 `).join('')}
             </select>
@@ -1333,14 +1330,7 @@ function renderVisualFormationSlots(
 
         const select = slotEl.querySelector('select');
         select.addEventListener('change', e => {
-            // Ensure handleDepthChartChange is imported or defined in ui.js
-            // If it's not defined, you might need to implement it or import it.
-            // Based on your previous code structure, it likely handles the logic.
-            if(typeof handleDepthChartChange === 'function') {
-                 handleDepthChartChange(side, slotId, e.target.value);
-            } else {
-                 console.warn("handleDepthChartChange not defined in ui.js");
-            }
+            handleDepthChartChange(side, slotId, e.target.value);
         });
 
         container.appendChild(slotEl);
@@ -3429,7 +3419,7 @@ function createDepthCardHTML(player, index, groupKey) {
     const ovr = calculateOverall(player, groupKey);
     let isStarterZone = false;
 
-    // Starter Thresholds
+    // Visual Starter Thresholds
     if (groupKey === 'QB' && index === 0) isStarterZone = true;
     else if (groupKey === 'RB' && index === 0) isStarterZone = true;
     else if (groupKey === 'WR' && index <= 2) isStarterZone = true;
@@ -3439,12 +3429,12 @@ function createDepthCardHTML(player, index, groupKey) {
     const rankStyle = isStarterZone ? 'border-l-4 border-green-500' : 'border-l-4 border-gray-300';
     const badge = isStarterZone ? '<span class="ml-2 text-[10px] bg-green-100 text-green-800 px-1 rounded font-bold">START</span>' : '';
 
-    // Determine Key Attributes for this Position Group
+    // Key Attributes Logic
     let keyAttrs = [];
-    if (positionOverallWeights && positionOverallWeights[groupKey]) {
+    if (typeof positionOverallWeights !== 'undefined' && positionOverallWeights[groupKey]) {
         keyAttrs = Object.entries(positionOverallWeights[groupKey])
-            .sort((a, b) => b[1] - a[1]) // Sort by weight desc
-            .slice(0, 3) // Take top 3
+            .sort((a, b) => b[1] - a[1]) 
+            .slice(0, 3) 
             .map(entry => entry[0]);
     }
 
@@ -3456,13 +3446,12 @@ function createDepthCardHTML(player, index, groupKey) {
     };
 
     const attrString = keyAttrs.map(k => {
-        const val = getStat(player, k);
+        const val = getStat(player, k); 
         return `<span class="mr-2"><span class="text-gray-400 font-semibold">${attrMap[k] || k.substring(0,3).toUpperCase()}:</span> <span class="text-gray-700 font-medium">${val}</span></span>`;
     }).join('');
 
-    // Return the inner content AND the class string for the container
     return {
-        className: `depth-order-item bg-white hover:bg-amber-50 p-2 rounded border border-gray-200 shadow-sm cursor-move flex items-center justify-between ${rankStyle}`,
+        className: `depth-order-item bg-white hover:bg-amber-50 p-2 rounded border border-gray-200 shadow-sm cursor-move flex items-center justify-between relative group ${rankStyle}`,
         innerHTML: `
             <div class="flex items-center gap-3 flex-grow overflow-hidden">
                 <span class="text-lg font-bold text-gray-400 w-6 text-center rank-number">${index + 1}</span>
@@ -3476,9 +3465,19 @@ function createDepthCardHTML(player, index, groupKey) {
                     </div>
                 </div>
             </div>
-            <div class="text-right pl-3 flex-shrink-0">
-                <span class="text-lg font-bold ${ovr >= 80 ? 'text-green-600' : 'text-gray-600'}">${ovr}</span>
-                <div class="text-[9px] text-gray-400 uppercase font-bold">OVR</div>
+            
+            <div class="flex flex-col items-end pl-2">
+                <button class="remove-depth-item text-gray-300 hover:text-red-500 font-bold text-lg leading-none mb-1 opacity-0 group-hover:opacity-100 transition-opacity" 
+                        title="Remove from depth chart"
+                        data-player-id="${player.id}" 
+                        data-group="${groupKey}">
+                    &times;
+                </button>
+                
+                <div class="text-right">
+                    <span class="text-lg font-bold ${ovr >= 80 ? 'text-green-600' : 'text-gray-600'}">${ovr}</span>
+                    <div class="text-[9px] text-gray-400 uppercase font-bold">OVR</div>
+                </div>
             </div>`
     };
 }
@@ -3688,16 +3687,38 @@ function setupDepthTabs() {
 function setupDepthOrderDragEvents() {
     const draggables = document.querySelectorAll('.depth-order-item, .roster-row-item');
     const containers = document.querySelectorAll('.depth-sortable-list');
+    const removeButtons = document.querySelectorAll('.remove-depth-item');
 
+    // --- 1. Setup Remove Buttons ---
+    removeButtons.forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation(); // Prevent drag start
+            const pid = btn.dataset.playerId;
+            const group = btn.dataset.group;
+            const gs = getGameState();
+            
+            if (gs.playerTeam.depthOrder && gs.playerTeam.depthOrder[group]) {
+                // Remove ID from array
+                gs.playerTeam.depthOrder[group] = gs.playerTeam.depthOrder[group].filter(id => id !== pid);
+                applyDepthOrderToChart(); // Save & Render
+            }
+        });
+    });
+
+    // --- 2. Setup Draggables ---
     draggables.forEach(draggable => {
         draggable.addEventListener('dragstart', (e) => {
             e.dataTransfer.effectAllowed = 'copyMove';
             e.dataTransfer.setData('text/plain', draggable.dataset.playerId);
+            
+            // 💡 Fix: Explicitly mark if coming from roster vs list
             if (draggable.classList.contains('roster-row-item')) {
-                draggable.dataset.source = 'roster';
+                // Mark the GLOBAL dragging element so 'drop' can find it
+                draggable.setAttribute('data-source-type', 'roster'); 
             } else {
-                draggable.dataset.source = 'list';
+                draggable.setAttribute('data-source-type', 'list');
             }
+
             setTimeout(() => {
                 draggable.classList.add('dragging');
                 draggable.classList.add('opacity-50');
@@ -3707,28 +3728,32 @@ function setupDepthOrderDragEvents() {
         draggable.addEventListener('dragend', () => {
             draggable.classList.remove('dragging');
             draggable.classList.remove('opacity-50');
-            delete draggable.dataset.source;
+            draggable.removeAttribute('data-source-type'); // Cleanup
+            
+            // Only refresh visuals if it was a reorder (list-to-list)
+            // If it was a drop, the drop handler handles the refresh
             setTimeout(() => {
-                applyDepthOrderToChart();
-                const container = draggable.closest('.depth-sortable-list');
-                if (container) updateRankNumbers(container);
+               const container = draggable.closest('.depth-sortable-list');
+               if(container) updateRankNumbers(container);
             }, 50);
         });
     });
 
+    // --- 3. Setup Drop Zones ---
     containers.forEach(container => {
         container.addEventListener('dragover', e => {
             e.preventDefault();
             const draggable = document.querySelector('.dragging');
             if (!draggable) return;
 
-            if (draggable.classList.contains('roster-row-item')) {
+            // If coming from roster, show "Copy" cursor
+            if (draggable.getAttribute('data-source-type') === 'roster') {
                 e.dataTransfer.dropEffect = 'copy';
-                return;
+            } else {
+                e.dataTransfer.dropEffect = 'move';
             }
 
             if (container.contains(draggable)) {
-                e.dataTransfer.dropEffect = 'move';
                 const afterElement = getDragAfterElement(container, e.clientY);
                 if (afterElement == null) {
                     container.appendChild(draggable);
@@ -3740,13 +3765,16 @@ function setupDepthOrderDragEvents() {
 
         container.addEventListener('drop', e => {
             e.preventDefault();
-            const source = document.querySelector('.dragging')?.dataset.source;
+            
+            // 💡 Fix: Get the source type from the dragging element directly
+            const draggingEl = document.querySelector('.dragging');
+            const sourceType = draggingEl ? draggingEl.getAttribute('data-source-type') : null;
 
-            // 💡 Fix: Specifically handle dropping from the Roster Table to the Buckets
-            if (source === 'roster') {
+            if (sourceType === 'roster') {
                 const playerId = e.dataTransfer.getData('text/plain');
                 const groupKey = container.dataset.group;
 
+                // Remove existing instance in this list to prevent duplicates
                 const existing = container.querySelector(`[data-player-id="${playerId}"]`);
                 if (existing) existing.remove();
 
@@ -3757,7 +3785,7 @@ function setupDepthOrderDragEvents() {
                 const allItems = [...container.querySelectorAll('.depth-order-item')];
                 const dropIndex = afterElement ? allItems.indexOf(afterElement) : allItems.length;
 
-                // 💡 Fix: Use the helper to create a FULL card with attributes
+                // Create Full HTML Card
                 const cardData = createDepthCardHTML(player, dropIndex, groupKey);
 
                 const newItem = document.createElement('div');
@@ -3772,17 +3800,15 @@ function setupDepthOrderDragEvents() {
                     container.insertBefore(newItem, afterElement);
                 }
 
-                // Re-attach listeners for the new item immediately
-                newItem.addEventListener('dragstart', (ev) => {
-                    setTimeout(() => { newItem.classList.add('dragging', 'opacity-50'); }, 0);
-                    ev.dataTransfer.setData('text/plain', playerId);
-                });
-                newItem.addEventListener('dragend', () => {
-                    newItem.classList.remove('dragging', 'opacity-50');
-                    setTimeout(() => { applyDepthOrderToChart(); }, 50);
-                });
-
-                setTimeout(() => { applyDepthOrderToChart(); }, 50);
+                // IMPORTANT: Trigger the save immediately
+                setTimeout(() => {
+                    applyDepthOrderToChart(); 
+                }, 50);
+            } else {
+                // Just reordering existing items
+                setTimeout(() => {
+                    applyDepthOrderToChart();
+                }, 50);
             }
         });
     });
