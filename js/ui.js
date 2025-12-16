@@ -2039,126 +2039,146 @@ export function setupFormationListeners() {
  * Uses a zoomed camera that follows the play action.
  * @param {object} frameData - A single frame from resolvePlay.visualizationFrames.
  */
-// --- In ui.js ---
-
-// --- In ui.js ---
-
-// --- In ui.js ---
 
 export function drawFieldVisualization(frameData) {
     const ctx = elements.fieldCanvasCtx;
     const canvas = elements.fieldCanvas;
     if (!ctx || !canvas) return;
 
-    // --- 1. CAMERA & SCALE ---
-    const FIELD_WIDTH_REAL = 53.3; 
-    const scale = canvas.width / FIELD_WIDTH_REAL; 
-    const scaleX = scale;
-    const scaleY = scale;
+    // --- 1. SETUP & SCALING ---
+    const pad = 20;
 
-    let focusY = (frameData && frameData.lineOfScrimmage) != null ? frameData.lineOfScrimmage : 60;
+    // A. Sideline Width Maxed (Lock Width)
+    const FIELD_WIDTH_REAL = 53.3;
+    const scaleX = (canvas.width - (pad * 2)) / FIELD_WIDTH_REAL;
+
+    // B. "Zoom Out" Trick (Vertical Compression)
+    // We scale Y at 85% of X. This lets us see 15% more downfield 
+    // without shrinking the width (sidelines stay at the edge).
+    const scaleY = scaleX * 0.85;
+
+    // --- 2. CAMERA LOGIC (Look-Ahead) ---
+    let focusY = 50;
+    if (frameData && frameData.lineOfScrimmage) focusY = frameData.lineOfScrimmage;
+
     if (frameData && frameData.ball) {
+        // If ball is in air, follow it perfectly
         if (frameData.ball.inAir) {
             focusY = frameData.ball.y;
-        } else {
+        }
+        // If pre-snap or running, look ahead
+        else {
             const ballCarrier = frameData.players?.find(p => p.isBallCarrier);
             if (ballCarrier) focusY = ballCarrier.y;
         }
     }
 
+    // C. Offset Camera (The "TV View")
+    // Instead of centering the ball (0.5), we position it at 0.75 (lower on screen)
+    // This implies we want the "Top" of the screen (cameraY) to be far ahead of the ball.
     const visibleYardsVertical = canvas.height / scaleY;
-    let cameraY = focusY - (visibleYardsVertical / 2);
-    const MAX_FIELD_Y = 120;
-    cameraY = Math.max(-5, Math.min(MAX_FIELD_Y - visibleYardsVertical + 5, cameraY));
 
-    // --- 2. DRAW FIELD ---
-    const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
-    gradient.addColorStop(0, '#065f46'); 
-    gradient.addColorStop(1, '#059669'); 
-    ctx.fillStyle = gradient;
+    // "Look Ahead" Offset: Show more of the field *in front* of the ball
+    // We subtract approx 70% of the screen height from the focus point to find the top yard
+    // Note: Since 0 is bottom in typical field coords (if you simulate 0->100), 
+    // or if 0 is top... assuming typical math:
+    // If toScreenY does (y - cameraY), then cameraY is the yard at the TOP.
+    // We want the ball to be at the BOTTOM (Higher Yard number in viewport relative to top).
+    // So CameraY should be (BallY - (VisibleYards * 0.7))
+    let cameraY = focusY - (visibleYardsVertical * 0.7);
+
+    // Clamp Camera (Don't scroll past endzones)
+    // Viewport: -10 (Top Endzone) to 110 (Bottom Endzone)
+    const MIN_VIEW_Y = -12;
+    const MAX_VIEW_Y = 112;
+    cameraY = Math.max(MIN_VIEW_Y, Math.min(MAX_VIEW_Y - visibleYardsVertical, cameraY));
+
+    // --- HELPER: Coordinate Conversion ---
+    const toScreenX = (x) => pad + (x * scaleX);
+    const toScreenY = (y) => (y - cameraY) * scaleY; // Top-Down view
+
+    // Clear & Background
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = "#2e4a28";
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-    ctx.save();
-    ctx.translate(0, -cameraY * scaleY);
+    // ===============================================
+    // 3. DRAW FIELD MARKINGS
+    // ===============================================
 
-    // --- 💡 NEW: TEAM COLORED ENDZONES ---
-    // We assume Top = Home Team Endzone (0-10), Bottom = Away Team Endzone (110-120) 
-    // or vice versa depending on your engine's logic. 
-    // Usually 0 is one side, 120 is the other.
-    
-    const gs = getGameState();
-    // Default colors if game state isn't ready
-    const colorTop = gs?.gameResults?.length ? '#1e3a8a' : 'rgba(0, 0, 0, 0.2)'; // Blue or Dark
-    const colorBot = gs?.gameResults?.length ? '#b91c1c' : 'rgba(0, 0, 0, 0.2)'; // Red or Dark
+    // A. Sidelines
+    const sidelineWidth = 4;
+    ctx.fillStyle = "white";
+    ctx.fillRect(pad - sidelineWidth, 0, sidelineWidth, canvas.height);
+    ctx.fillRect(canvas.width - pad, 0, sidelineWidth, canvas.height);
 
-    // Top Endzone (0-10)
-    ctx.fillStyle = colorTop; 
-    ctx.fillRect(0, 0, canvas.width, 10 * scaleY);
-    
-    // Bottom Endzone (110-120)
-    ctx.fillStyle = colorBot; 
-    ctx.fillRect(0, 110 * scaleY, canvas.width, 10 * scaleY);
+    // B. Endzones
+    ctx.strokeStyle = "white";
+    ctx.lineWidth = 3;
 
-    // Endzone Text
-    ctx.font = `bold ${20 * (scale/15)}px "Inter"`;
-    ctx.fillStyle = 'rgba(255,255,255,0.3)';
-    ctx.textAlign = 'center';
-    ctx.save();
-    ctx.translate(canvas.width/2, 5 * scaleY);
-    ctx.fillText(gs?.homeTeam?.name?.toUpperCase() || "HOME", 0, 0);
-    ctx.restore();
+    // Top Endzone (Approx -10 to 0)
+    const topGoalLineY = toScreenY(0);
+    const topBackLineY = toScreenY(-10);
+    ctx.strokeRect(pad, topBackLineY, canvas.width - (pad * 2), topGoalLineY - topBackLineY);
 
-    ctx.save();
-    ctx.translate(canvas.width/2, 115 * scaleY);
-    ctx.fillText(gs?.awayTeam?.name?.toUpperCase() || "AWAY", 0, 0);
-    ctx.restore();
+    // Bottom Endzone (Approx 100 to 110)
+    const bottomGoalLineY = toScreenY(100);
+    const bottomBackLineY = toScreenY(110);
+    ctx.strokeRect(pad, bottomGoalLineY, canvas.width - (pad * 2), bottomBackLineY - bottomGoalLineY);
 
-    // --- Draw Grid ---
-    ctx.lineWidth = 2;
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
-    ctx.font = `bold ${16 * (scale/15)}px "Inter"`; 
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
+    // C. Yard Lines
+    for (let i = 1; i < 100; i++) {
+        const y = toScreenY(i);
+        if (y < -10 || y > canvas.height + 10) continue; // Optimization
 
-    for (let y = 10; y <= 110; y += 10) {
-        const lineY = y * scaleY;
-        ctx.beginPath();
-        ctx.moveTo(0, lineY);
-        ctx.lineTo(canvas.width, lineY);
-        ctx.stroke();
+        if (i % 10 === 0) {
+            // 10-Yard Lines
+            ctx.strokeStyle = "rgba(255, 255, 255, 0.8)";
+            ctx.lineWidth = 2;
+            ctx.beginPath(); ctx.moveTo(pad, y); ctx.lineTo(canvas.width - pad, y); ctx.stroke();
 
-        if (y !== 0 && y !== 120) {
-            const yardNum = y <= 60 ? y - 10 : 110 - y;
-            ctx.fillText(yardNum, 6 * scaleX, lineY); 
-            ctx.fillText(yardNum, canvas.width - (6 * scaleX), lineY);
+            // Numbers
+            if (scaleX > 3) {
+                ctx.fillStyle = "rgba(255, 255, 255, 0.5)";
+                ctx.font = "10px Arial";
+                ctx.textAlign = "center";
+                const num = i <= 50 ? i : 100 - i;
+                ctx.fillText(num, pad + 15, y + 4);
+                ctx.fillText(num, canvas.width - pad - 15, y + 4);
+            }
+        } else if (i % 5 === 0) {
+            // 5-Yard Lines
+            ctx.strokeStyle = "rgba(255, 255, 255, 0.4)";
+            ctx.lineWidth = 1;
+            ctx.beginPath(); ctx.moveTo(pad, y); ctx.lineTo(canvas.width - pad, y); ctx.stroke();
+        } else {
+            // Hashes
+            ctx.strokeStyle = "rgba(255, 255, 255, 0.5)";
+            ctx.lineWidth = 1;
+
+            ctx.beginPath(); ctx.moveTo(pad, y); ctx.lineTo(pad + 5, y); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(canvas.width - pad - 5, y); ctx.lineTo(canvas.width - pad, y); ctx.stroke();
+
+            const leftHashX = toScreenX(20);
+            const rightHashX = toScreenX(33.3);
+            ctx.beginPath(); ctx.moveTo(leftHashX, y); ctx.lineTo(leftHashX + 4, y); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(rightHashX, y); ctx.lineTo(rightHashX + 4, y); ctx.stroke();
         }
     }
 
-    // Hashes
-    const HASH_LEFT = 18.3; const HASH_RIGHT = 35.0; 
-    ctx.lineWidth = 1;
-    for (let y = 1; y < 120; y++) {
-        if (y % 10 === 0) continue;
-        const lineY = y * scaleY;
-        ctx.beginPath(); ctx.moveTo((HASH_LEFT - 0.5) * scaleX, lineY); ctx.lineTo((HASH_LEFT + 0.5) * scaleX, lineY); ctx.stroke();
-        ctx.beginPath(); ctx.moveTo((HASH_RIGHT - 0.5) * scaleX, lineY); ctx.lineTo((HASH_RIGHT + 0.5) * scaleX, lineY); ctx.stroke();
+    // --- Dynamic Lines ---
+    if (frameData.lineOfScrimmage > 0 && frameData.lineOfScrimmage < 100) {
+        const y = toScreenY(frameData.lineOfScrimmage);
+        ctx.strokeStyle = "#3b82f6"; // Blue
+        ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.moveTo(pad, y); ctx.lineTo(canvas.width - pad, y); ctx.stroke();
     }
 
-    // Dynamic Lines
-    if (frameData) {
-        if (frameData.lineOfScrimmage) {
-            const losY = frameData.lineOfScrimmage * scaleY;
-            ctx.strokeStyle = '#2563eb'; ctx.lineWidth = 4;
-            ctx.beginPath(); ctx.moveTo(0, losY); ctx.lineTo(canvas.width, losY); ctx.stroke();
-        }
-        if (frameData.firstDownY) {
-            const fdY = frameData.firstDownY * scaleY;
-            ctx.strokeStyle = '#eab308'; ctx.lineWidth = 4;
-            ctx.setLineDash([12, 8]);
-            ctx.beginPath(); ctx.moveTo(0, fdY); ctx.lineTo(canvas.width, fdY); ctx.stroke();
-            ctx.setLineDash([]);
-        }
+    if (frameData.firstDownY > 0 && frameData.firstDownY < 100) {
+        const y = toScreenY(frameData.firstDownY);
+        ctx.strokeStyle = "#eab308"; // Yellow
+        ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.moveTo(pad, y); ctx.lineTo(canvas.width - pad, y); ctx.stroke();
     }
 
     // --- 3. DRAW PLAYERS ---
@@ -2166,13 +2186,13 @@ export function drawFieldVisualization(frameData) {
         frameData.players.forEach(p => {
             let jiggleX = 0; let jiggleY = 0;
             if (p.isEngaged) {
-                const jiggleAmount = 0.15; 
+                const jiggleAmount = 0.15;
                 jiggleX = (Math.random() - 0.5) * jiggleAmount;
                 jiggleY = (Math.random() - 0.5) * jiggleAmount;
             }
             const drawX = (p.x + jiggleX) * scaleX;
             const drawY = (p.y + jiggleY) * scaleY;
-            const radius = scaleX * 0.75; 
+            const radius = scaleX * 0.75;
 
             if (p.stunnedTicks > 0) {
                 const pulse = (Math.sin(Date.now() / 200) + 1) / 2;
@@ -2186,21 +2206,53 @@ export function drawFieldVisualization(frameData) {
             if (p.isEngaged) { ctx.strokeStyle = 'rgba(255, 255, 255, 0.6)'; ctx.lineWidth = 1.5; ctx.stroke(); }
             if (p.isBallCarrier) { ctx.strokeStyle = '#fbbf24'; ctx.lineWidth = 3.5; ctx.beginPath(); ctx.arc(drawX, drawY, radius + 3, 0, Math.PI * 2); ctx.stroke(); }
 
-            ctx.fillStyle = '#fff'; ctx.font = `bold ${radius * 1.1}px "Inter"`; 
+            ctx.fillStyle = '#fff'; ctx.font = `bold ${radius * 1.1}px "Inter"`;
             ctx.fillText(p.number || '', drawX, drawY + (radius * 0.1));
         });
     }
 
-    // --- 4. DRAW BALL ---
-    if (frameData && frameData.ball && (frameData.ball.inAir || frameData.ball.isLoose)) {
-        const ballX = frameData.ball.x * scaleX;
-        const ballY = frameData.ball.y * scaleY;
-        const ballRadius = scaleX * 0.45;
-        const shadowOffset = (frameData.ball.z || 0) * (scaleX * 0.1);
-        
-        ctx.fillStyle = 'rgba(0,0,0,0.3)'; ctx.beginPath(); ctx.arc(ballX + shadowOffset, ballY + shadowOffset, ballRadius, 0, Math.PI * 2); ctx.fill();
-        ctx.fillStyle = '#78350f'; ctx.beginPath(); ctx.arc(ballX, ballY, ballRadius, 0, Math.PI * 2); ctx.fill();
-        ctx.fillStyle = 'rgba(255,255,255,0.4)'; ctx.beginPath(); ctx.arc(ballX - (ballRadius * 0.3), ballY - (ballRadius * 0.3), ballRadius * 0.4, 0, Math.PI * 2); ctx.fill();
+    // =======================================================
+    // 💡 3. DRAW THE BALL (Fixed to match your coordinates)
+    // =======================================================
+    // Use 'frameData.ball' to match your 'frameData.players' variable
+    if (frameData.ball) {
+        const ball = frameData.ball;
+
+        // 1. Calculate Screen Position (Matching your player logic)
+        const bx = ball.x * scaleX;
+        const by = ball.y * scaleY;
+
+        // 2. Height Logic (Z-Axis)
+        // We subtract from Y to make the ball go "up" visually
+        // scaleY is typically pixels-per-yard, so we multiply Z (yards) by scaleY
+        const visualHeightOffset = (ball.z || 0) * scaleY * 1.5; // 1.5 exaggerates height slightly for visibility
+
+        // A. Draw Shadow (Stays on the ground at by)
+        // Shadow gets smaller and more transparent as ball goes higher
+        const shadowAlpha = Math.max(0.1, 0.4 - ((ball.z || 0) * 0.1));
+        const shadowSize = Math.max(scaleX * 0.2, (scaleX * 0.4) - ((ball.z || 0) * 0.05));
+
+        ctx.fillStyle = `rgba(0,0,0,${shadowAlpha})`;
+        ctx.beginPath();
+        ctx.ellipse(bx, by, shadowSize, shadowSize * 0.5, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        // B. Draw Ball (Offset by height)
+        const ballY = by - visualHeightOffset;
+
+        ctx.fillStyle = "#854d0e"; // Football Brown
+        ctx.beginPath();
+        // Ellipse shape: (x, y, radiusX, radiusY, rotation...)
+        ctx.ellipse(bx, ballY, scaleX * 0.35, scaleY * 0.5, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        // C. Ball Laces (Visual detail)
+        ctx.strokeStyle = "white";
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.moveTo(bx, ballY - (scaleY * 0.25));
+        ctx.lineTo(bx, ballY + (scaleY * 0.25));
+        ctx.stroke();
     }
 
     ctx.restore();
@@ -3074,19 +3126,19 @@ function runLiveGameTick() {
             // Re-run your existing log parser for these pending logs
             // Note: We can extract your parsing logic into a helper, or just copy the loop here.
             // For safety, let's just let the next tick handle it, OR manually trigger it:
-            
+
             // OPTION A: Simple (just show text)
             // renderLogsRange(liveGameLogIndex, nextFrame.logIndex, allLogs, ticker);
             // liveGameLogIndex = nextFrame.logIndex;
-            
+
             // OPTION B (Better): Let the loop handle it naturally by advancing log index manually
-             // But since your parser is complex, it's safer to just let the user read it
-             // when the next play starts, OR call a shared helper. 
-             // Ideally, refactor your huge parser block into `processGameLogs(startIndex, endIndex)`
+            // But since your parser is complex, it's safer to just let the user read it
+            // when the next play starts, OR call a shared helper. 
+            // Ideally, refactor your huge parser block into `processGameLogs(startIndex, endIndex)`
         }
-        
+
         // Stats Update
-        try { renderLiveStatsLive(); } catch (e) {}
+        try { renderLiveStatsLive(); } catch (e) { }
 
         // Pause for Huddle (3 seconds)
         huddleTimeout = setTimeout(startNextPlay, 3000);
@@ -3111,11 +3163,11 @@ function startNextPlay() {
     if (nextFrame) {
         drawFieldVisualization(nextFrame);
         renderSimPlayers(nextFrame);
-        
+
         // Show "Set" message banners
-        if(elements.simBannerOffense) elements.simBannerOffense.textContent = "SET...";
-        if(elements.simBannerDefense) elements.simBannerDefense.textContent = "READY...";
-        
+        if (elements.simBannerOffense) elements.simBannerOffense.textContent = "SET...";
+        if (elements.simBannerDefense) elements.simBannerDefense.textContent = "READY...";
+
         // Update Down/Distance UI immediately for the new play
         if (elements.simGameDown) {
             // We can infer context from the logs we just processed or wait for next tick
@@ -3124,7 +3176,7 @@ function startNextPlay() {
     }
 
     // 2. PRE-SNAP PAUSE: Wait 1.5s (QB Cadence)
-    const PRE_SNAP_DELAY = 1500; 
+    const PRE_SNAP_DELAY = 1500;
 
     huddleTimeout = setTimeout(() => {
         // Start the action!
@@ -3189,7 +3241,7 @@ export function startLiveGameSim(gameResult, onComplete) {
 
         // 1. Read the actual pixel size of the container
         const rect = canvas.parentElement.getBoundingClientRect();
-        
+
         // 2. Set the internal resolution to match (crisp graphics)
         canvas.width = rect.width;
         canvas.height = rect.height;
@@ -3198,13 +3250,13 @@ export function startLiveGameSim(gameResult, onComplete) {
 
     // --- 5. Initial UI Render ---
     ticker.innerHTML = '';
-    
+
     // Set Team Names & Reset Scores
     elements.simAwayTeam.textContent = gameResult.awayTeam.name;
     elements.simHomeTeam.textContent = gameResult.homeTeam.name;
     elements.simAwayScore.textContent = '0';
     elements.simHomeScore.textContent = '0';
-    
+
     // Set Drive Info
     elements.simGameDrive.textContent = liveGameDriveText;
     elements.simGameDown.textContent = "1st & 10";
@@ -3217,9 +3269,9 @@ export function startLiveGameSim(gameResult, onComplete) {
     // Draw the very first frame immediately so the user doesn't see a blank screen
     if (gameResult.visualizationFrames.length > 0) {
         const initialFrame = gameResult.visualizationFrames[0];
-        
+
         renderSimPlayers(initialFrame);
-        
+
         if (elements.fieldCanvasCtx) {
             drawFieldVisualization(initialFrame);
         }
@@ -3270,7 +3322,7 @@ export function setSimSpeed(speed) {
 
     let activeButtonId;
     if (speed === 100) activeButtonId = 'sim-speed-play';  // 💡 Update logic to match new default
-    else if (speed === 50) activeButtonId = 'sim-speed-fast'; 
+    else if (speed === 50) activeButtonId = 'sim-speed-fast';
     else if (speed === 30) activeButtonId = 'sim-speed-faster';
 
     const activeButton = document.getElementById(activeButtonId);
@@ -3280,7 +3332,7 @@ export function setSimSpeed(speed) {
     }
 
     // Restart logic (same as before)
-    clearTimeout(huddleTimeout); 
+    clearTimeout(huddleTimeout);
     huddleTimeout = null;
     if (currentLiveGameResult && liveGameCurrentIndex < currentLiveGameResult.visualizationFrames.length) {
         if (liveGameInterval) clearInterval(liveGameInterval);
@@ -3375,10 +3427,10 @@ function renderDepthOrderPane(gameState) {
     let tabsHtml = `<div class="flex flex-wrap gap-2 mb-4 border-b border-gray-200 pb-2">`;
     displayOrder.forEach((pos) => {
         const isActive = pos === activeDepthOrderTab;
-        const colorClass = isActive 
-            ? 'bg-amber-500 text-white shadow-md transform scale-105' 
+        const colorClass = isActive
+            ? 'bg-amber-500 text-white shadow-md transform scale-105'
             : 'bg-gray-200 text-gray-700 hover:bg-gray-300';
-            
+
         tabsHtml += `<button class="px-4 py-2 rounded font-bold text-sm transition-all ${colorClass}" 
                              onclick="window.app_switchDepthTab('${pos}')">
                              ${pos}
@@ -3398,11 +3450,11 @@ function renderDepthOrderPane(gameState) {
             <div id="group-${groupKey}" class="depth-group-container ${isHidden}">
                 <div class="depth-sortable-list flex-grow p-2 space-y-2 min-h-[200px]" data-group="${groupKey}">
                     ${players.map((p, i) => {
-                        const cardData = createDepthCardHTML(p, i, groupKey);
-                        return `<div class="${cardData.className}" draggable="true" data-player-id="${p.id}">
+            const cardData = createDepthCardHTML(p, i, groupKey);
+            return `<div class="${cardData.className}" draggable="true" data-player-id="${p.id}">
                                     ${cardData.innerHTML}
                                 </div>`;
-                    }).join('')}
+        }).join('')}
                     ${players.length === 0 ? '<div class="text-gray-400 text-sm italic p-4 text-center border-2 border-dashed rounded">Drag players here from the roster below</div>' : ''}
                 </div>
             </div>`;
@@ -3424,13 +3476,13 @@ function renderDepthOrderPane(gameState) {
             }
             return 0;
         };
-        
+
         const sortCol = typeof depthOrderSortCol !== 'undefined' ? depthOrderSortCol : 'overall';
         const sortDir = typeof depthOrderSortDir !== 'undefined' ? depthOrderSortDir : 'desc';
 
         valA = getVal(a, sortCol);
         valB = getVal(b, sortCol);
-        
+
         if (valA < valB) return sortDir === 'asc' ? -1 : 1;
         if (valA > valB) return sortDir === 'asc' ? 1 : -1;
         return 0;
@@ -3463,38 +3515,38 @@ function renderDepthOrderPane(gameState) {
                     <thead class="bg-gray-800 text-white sticky top-0 z-10">
                         <tr>
                             ${columns.map(col => {
-                                const currentSortCol = typeof depthOrderSortCol !== 'undefined' ? depthOrderSortCol : 'overall';
-                                const currentSortDir = typeof depthOrderSortDir !== 'undefined' ? depthOrderSortDir : 'desc';
-                                const active = currentSortCol === col.key;
-                                const arrow = active ? (currentSortDir === 'asc' ? '▲' : '▼') : '';
-                                return `<th class="py-2 px-2 text-left whitespace-nowrap cursor-pointer hover:bg-gray-700 select-none" 
+        const currentSortCol = typeof depthOrderSortCol !== 'undefined' ? depthOrderSortCol : 'overall';
+        const currentSortDir = typeof depthOrderSortDir !== 'undefined' ? depthOrderSortDir : 'desc';
+        const active = currentSortCol === col.key;
+        const arrow = active ? (currentSortDir === 'asc' ? '▲' : '▼') : '';
+        return `<th class="py-2 px-2 text-left whitespace-nowrap cursor-pointer hover:bg-gray-700 select-none" 
                                             onclick="window.app_handleDepthSort('${col.key}')">
                                             ${col.label} <span class="text-[10px] ml-1">${arrow}</span>
                                         </th>`;
-                            }).join('')}
+    }).join('')}
                         </tr>
                     </thead>
                     <tbody class="divide-y divide-gray-200">
                         ${roster.map(p => {
-                            let pos = p.pos || estimateBestPosition(p);
-                            if (pos === 'FB') pos = 'RB';
-                            if (['TE', 'ATH', 'K', 'P'].includes(pos)) pos = 'WR';
-                            const ovr = calculateOverall(p, pos);
-                            const vals = {
-                                height: formatHeight(p.attributes?.physical?.height),
-                                weight: p.attributes?.physical?.weight,
-                                speed: p.attributes?.physical?.speed,
-                                strength: p.attributes?.physical?.strength,
-                                agility: p.attributes?.physical?.agility,
-                                stamina: p.attributes?.physical?.stamina,
-                                playbookIQ: p.attributes?.mental?.playbookIQ,
-                                catchingHands: p.attributes?.technical?.catchingHands,
-                                throwingAccuracy: p.attributes?.technical?.throwingAccuracy,
-                                blocking: p.attributes?.technical?.blocking,
-                                tackling: p.attributes?.technical?.tackling,
-                                blockShedding: p.attributes?.technical?.blockShedding
-                            };
-                            return `
+        let pos = p.pos || estimateBestPosition(p);
+        if (pos === 'FB') pos = 'RB';
+        if (['TE', 'ATH', 'K', 'P'].includes(pos)) pos = 'WR';
+        const ovr = calculateOverall(p, pos);
+        const vals = {
+            height: formatHeight(p.attributes?.physical?.height),
+            weight: p.attributes?.physical?.weight,
+            speed: p.attributes?.physical?.speed,
+            strength: p.attributes?.physical?.strength,
+            agility: p.attributes?.physical?.agility,
+            stamina: p.attributes?.physical?.stamina,
+            playbookIQ: p.attributes?.mental?.playbookIQ,
+            catchingHands: p.attributes?.technical?.catchingHands,
+            throwingAccuracy: p.attributes?.technical?.throwingAccuracy,
+            blocking: p.attributes?.technical?.blocking,
+            tackling: p.attributes?.technical?.tackling,
+            blockShedding: p.attributes?.technical?.blockShedding
+        };
+        return `
                             <tr class="roster-row-item cursor-move hover:bg-blue-50" draggable="true" 
                                 data-player-id="${p.id}" data-player-name="${p.name}" data-player-ovr="${ovr}">
                                 <td class="py-1 px-2 font-medium truncate max-w-[120px]" title="${p.name}">${p.name}</td>
@@ -3503,7 +3555,7 @@ function renderDepthOrderPane(gameState) {
                                 <td class="py-1 px-2 text-gray-600">${p.age}</td>
                                 ${columns.slice(4).map(c => `<td class="py-1 px-2 text-center text-gray-600 border-l border-gray-100">${vals[c.key] ?? '-'}</td>`).join('')}
                             </tr>`;
-                        }).join('')}
+    }).join('')}
                     </tbody>
                 </table>
             </div>
@@ -3536,7 +3588,7 @@ window.app_handleDepthSort = function (colKey) {
 };
 
 /** Global handler for switching Depth Order tabs */
-window.app_switchDepthTab = function(pos) {
+window.app_switchDepthTab = function (pos) {
     activeDepthOrderTab = pos;
     const gs = getGameState();
     if (gs) renderDepthOrderPane(gs);
