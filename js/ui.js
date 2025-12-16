@@ -3354,27 +3354,35 @@ function renderDepthOrderPane(gameState) {
     const pane = document.getElementById("depth-order-container");
     if (!pane || !gameState) return;
 
+    // Ensure data is synced
     rebuildDepthChartFromOrder(gameState.playerTeam);
 
     const team = gameState.playerTeam;
+    // Get full roster objects
     let roster = getUIRosterObjects(team);
     const depthOrder = team.depthOrder || {};
     const displayOrder = ['QB', 'RB', 'WR', 'OL', 'DL', 'LB', 'DB'];
 
     // --- 1. Render Tabs (Top) ---
-    // Fix: Use activeDepthOrderTab variable
+    // Uses inline onclick to trigger re-render with new active tab
     let tabsHtml = `<div class="flex flex-wrap gap-2 mb-4 border-b border-gray-200 pb-2">`;
     displayOrder.forEach((pos) => {
         const isActive = pos === activeDepthOrderTab;
-        const colorClass = isActive ? 'bg-amber-500 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300';
-        tabsHtml += `<button class="depth-pos-tab px-4 py-2 rounded font-bold text-sm transition ${colorClass}" data-target="${pos}">${pos}</button>`;
+        const colorClass = isActive 
+            ? 'bg-amber-500 text-white shadow-md transform scale-105' 
+            : 'bg-gray-200 text-gray-700 hover:bg-gray-300';
+            
+        tabsHtml += `<button class="px-4 py-2 rounded font-bold text-sm transition-all ${colorClass}" 
+                             onclick="window.app_switchDepthTab('${pos}')">
+                             ${pos}
+                     </button>`;
     });
     tabsHtml += `</div>`;
 
-    // --- 2. Render Lists (Middle) ---
+    // --- 2. Render Buckets (Middle) ---
     let listsHtml = `<div id="depth-lists-container" class="mb-8">`;
     displayOrder.forEach((groupKey) => {
-        // Fix: Use activeDepthOrderTab to determine visibility
+        // Pure state-based visibility
         const isHidden = groupKey !== activeDepthOrderTab ? 'hidden' : '';
         const idList = depthOrder[groupKey] || [];
         const players = idList.map(id => roster.find(p => p.id === id)).filter(p => p);
@@ -3383,17 +3391,19 @@ function renderDepthOrderPane(gameState) {
             <div id="group-${groupKey}" class="depth-group-container ${isHidden}">
                 <div class="depth-sortable-list flex-grow p-2 space-y-2 min-h-[200px]" data-group="${groupKey}">
                     ${players.map((p, i) => {
-            const cardData = createDepthCardHTML(p, i, groupKey);
-            return `<div class="${cardData.className}" draggable="true" data-player-id="${p.id}">
+                        const cardData = createDepthCardHTML(p, i, groupKey);
+                        return `<div class="${cardData.className}" draggable="true" data-player-id="${p.id}">
                                     ${cardData.innerHTML}
                                 </div>`;
-        }).join('')}
+                    }).join('')}
+                    ${players.length === 0 ? '<div class="text-gray-400 text-sm italic p-4 text-center border-2 border-dashed rounded">Drag players here from the roster below</div>' : ''}
                 </div>
             </div>`;
     });
     listsHtml += `</div>`;
 
     // --- 3. Render Full Sortable Roster (Bottom) ---
+    // (Existing sort logic preserved)
     roster.sort((a, b) => {
         let valA, valB;
         const getVal = (p, key) => {
@@ -3401,18 +3411,21 @@ function renderDepthOrderPane(gameState) {
             if (key === 'name') return p.name;
             if (key === 'pos') return p.pos || p.favoriteOffensivePosition;
             if (key === 'age') return p.age;
-            if (key === 'height') return p.attributes?.physical?.height || 0;
-            if (key === 'weight') return p.attributes?.physical?.weight || 0;
             const cats = ['physical', 'mental', 'technical'];
             for (const c of cats) {
                 if (p.attributes?.[c]?.[key] !== undefined) return p.attributes[c][key];
             }
             return 0;
         };
-        valA = getVal(a, depthOrderSortCol);
-        valB = getVal(b, depthOrderSortCol);
-        if (valA < valB) return depthOrderSortDir === 'asc' ? -1 : 1;
-        if (valA > valB) return depthOrderSortDir === 'asc' ? 1 : -1;
+        
+        const sortCol = typeof depthOrderSortCol !== 'undefined' ? depthOrderSortCol : 'overall';
+        const sortDir = typeof depthOrderSortDir !== 'undefined' ? depthOrderSortDir : 'desc';
+
+        valA = getVal(a, sortCol);
+        valB = getVal(b, sortCol);
+        
+        if (valA < valB) return sortDir === 'asc' ? -1 : 1;
+        if (valA > valB) return sortDir === 'asc' ? 1 : -1;
         return 0;
     });
 
@@ -3443,36 +3456,38 @@ function renderDepthOrderPane(gameState) {
                     <thead class="bg-gray-800 text-white sticky top-0 z-10">
                         <tr>
                             ${columns.map(col => {
-        const active = depthOrderSortCol === col.key;
-        const arrow = active ? (depthOrderSortDir === 'asc' ? '▲' : '▼') : '';
-        return `<th class="py-2 px-2 text-left whitespace-nowrap cursor-pointer hover:bg-gray-700 select-none" 
+                                const currentSortCol = typeof depthOrderSortCol !== 'undefined' ? depthOrderSortCol : 'overall';
+                                const currentSortDir = typeof depthOrderSortDir !== 'undefined' ? depthOrderSortDir : 'desc';
+                                const active = currentSortCol === col.key;
+                                const arrow = active ? (currentSortDir === 'asc' ? '▲' : '▼') : '';
+                                return `<th class="py-2 px-2 text-left whitespace-nowrap cursor-pointer hover:bg-gray-700 select-none" 
                                             onclick="window.app_handleDepthSort('${col.key}')">
                                             ${col.label} <span class="text-[10px] ml-1">${arrow}</span>
                                         </th>`;
-    }).join('')}
+                            }).join('')}
                         </tr>
                     </thead>
                     <tbody class="divide-y divide-gray-200">
                         ${roster.map(p => {
-        let pos = p.pos || estimateBestPosition(p);
-        if (pos === 'FB') pos = 'RB';
-        if (['TE', 'ATH', 'K', 'P'].includes(pos)) pos = 'WR';
-        const ovr = calculateOverall(p, pos);
-        const vals = {
-            height: formatHeight(p.attributes?.physical?.height),
-            weight: p.attributes?.physical?.weight,
-            speed: p.attributes?.physical?.speed,
-            strength: p.attributes?.physical?.strength,
-            agility: p.attributes?.physical?.agility,
-            stamina: p.attributes?.physical?.stamina,
-            playbookIQ: p.attributes?.mental?.playbookIQ,
-            catchingHands: p.attributes?.technical?.catchingHands,
-            throwingAccuracy: p.attributes?.technical?.throwingAccuracy,
-            blocking: p.attributes?.technical?.blocking,
-            tackling: p.attributes?.technical?.tackling,
-            blockShedding: p.attributes?.technical?.blockShedding
-        };
-        return `
+                            let pos = p.pos || estimateBestPosition(p);
+                            if (pos === 'FB') pos = 'RB';
+                            if (['TE', 'ATH', 'K', 'P'].includes(pos)) pos = 'WR';
+                            const ovr = calculateOverall(p, pos);
+                            const vals = {
+                                height: formatHeight(p.attributes?.physical?.height),
+                                weight: p.attributes?.physical?.weight,
+                                speed: p.attributes?.physical?.speed,
+                                strength: p.attributes?.physical?.strength,
+                                agility: p.attributes?.physical?.agility,
+                                stamina: p.attributes?.physical?.stamina,
+                                playbookIQ: p.attributes?.mental?.playbookIQ,
+                                catchingHands: p.attributes?.technical?.catchingHands,
+                                throwingAccuracy: p.attributes?.technical?.throwingAccuracy,
+                                blocking: p.attributes?.technical?.blocking,
+                                tackling: p.attributes?.technical?.tackling,
+                                blockShedding: p.attributes?.technical?.blockShedding
+                            };
+                            return `
                             <tr class="roster-row-item cursor-move hover:bg-blue-50" draggable="true" 
                                 data-player-id="${p.id}" data-player-name="${p.name}" data-player-ovr="${ovr}">
                                 <td class="py-1 px-2 font-medium truncate max-w-[120px]" title="${p.name}">${p.name}</td>
@@ -3481,7 +3496,7 @@ function renderDepthOrderPane(gameState) {
                                 <td class="py-1 px-2 text-gray-600">${p.age}</td>
                                 ${columns.slice(4).map(c => `<td class="py-1 px-2 text-center text-gray-600 border-l border-gray-100">${vals[c.key] ?? '-'}</td>`).join('')}
                             </tr>`;
-    }).join('')}
+                        }).join('')}
                     </tbody>
                 </table>
             </div>
@@ -3490,7 +3505,7 @@ function renderDepthOrderPane(gameState) {
 
     pane.innerHTML = tabsHtml + listsHtml + rosterHtml;
 
-    setupDepthTabs();
+    // NOTE: setupDepthTabs is REMOVED. The onclick handles the logic now.
     setupDepthOrderDragEvents();
 }
 
@@ -3509,6 +3524,13 @@ window.app_handleDepthSort = function (colKey) {
     }
 
     // Re-render
+    const gs = getGameState();
+    if (gs) renderDepthOrderPane(gs);
+};
+
+/** Global handler for switching Depth Order tabs */
+window.app_switchDepthTab = function(pos) {
+    activeDepthOrderTab = pos;
     const gs = getGameState();
     if (gs) renderDepthOrderPane(gs);
 };
