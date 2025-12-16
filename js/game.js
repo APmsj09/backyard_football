@@ -4307,7 +4307,7 @@ function handleBallArrival(playState, ballCarrierState, playResult, gameLog) {
     // --- 1. PUNT CATCH LOGIC ---
     // ===========================================================
     if (playState.type === 'punt' && playState.ballState.inAir && playState.ballState.targetPlayerId === null) {
-       
+
         if (playState.ballState.z <= 0.1) {
             const speed = Math.sqrt(playState.ballState.vx ** 2 + playState.ballState.vy ** 2);
             if (speed < 0.5) {
@@ -4352,7 +4352,7 @@ function handleBallArrival(playState, ballCarrierState, playResult, gameLog) {
             playState.ballState.x = returnerState.x;
             playState.ballState.y = returnerState.y;
             playState.ballState.z = 1.0;
-            
+
             // Switch AI
             playState.activePlayers.forEach(p => {
                 p.hasBall = (p.id === returnerState.id);
@@ -4385,14 +4385,14 @@ function handleBallArrival(playState, ballCarrierState, playResult, gameLog) {
     // A ball is only catchable if it is reachable vertically (0 to ~2.8 yards)
     // We REMOVED the check that auto-fails high balls mid-flight. 
     // Now we just ignore them until they come down to a reachable height.
-    const MAX_JUMP_HEIGHT = 2.8; 
+    const MAX_JUMP_HEIGHT = 2.8;
     if (ball.z > MAX_JUMP_HEIGHT) {
         return; // Ball is soaring overhead, wait for it to drop
     }
 
     // --- C. FIND PLAYERS IN 3D RANGE ---
     const CATCH_RADIUS = 1.2; // Tight radius for actual catch (must be close to body)
-    
+
     // Find all players close enough to the ball (XY distance)
     const playersInRange = playState.activePlayers.filter(p => {
         const dist = getDistance(p, ball);
@@ -4403,7 +4403,7 @@ function handleBallArrival(playState, ballCarrierState, playResult, gameLog) {
 
     // Sort by closeness to ball
     playersInRange.sort((a, b) => getDistance(a, ball) - getDistance(b, ball));
-    
+
     const bestCandidate = playersInRange[0];
     const playerObj = getPlayer(bestCandidate.id);
     if (!playerObj) return;
@@ -4412,14 +4412,14 @@ function handleBallArrival(playState, ballCarrierState, playResult, gameLog) {
     const isDefense = !bestCandidate.isOffense;
     const catching = playerObj.attributes?.technical?.catchingHands || 50;
     const agility = playerObj.attributes?.physical?.agility || 50;
-    
+
     // Base Chance Calculation
     let catchScore = (catching * 0.7) + (agility * 0.3);
-    
+
     // Modifiers
     if (isDefense) catchScore -= 25; // Defenders naturally have worse hands
     if (playersInRange.length > 1) catchScore -= 30; // Contested catch penalty
-    
+
     // Random Roll
     const roll = getRandomInt(0, 100);
 
@@ -4438,12 +4438,12 @@ function handleBallArrival(playState, ballCarrierState, playResult, gameLog) {
             playState.turnover = true;
             playResult.outcome = 'turnover';
             playResult.turnoverType = 'interception';
-            
+
             playState.statEvents.push({ type: 'interception', interceptorId: bestCandidate.id, throwerId: ball.throwerId });
         } else {
             if (gameLog) gameLog.push(`👍 CATCH! ${bestCandidate.name} grabs it!`);
             playResult.outcome = 'complete';
-            
+
             playState.statEvents.push({ type: 'completion', receiverId: bestCandidate.id, qbId: ball.throwerId, yards: 0 });
         }
     } else {
@@ -4454,7 +4454,7 @@ function handleBallArrival(playState, ballCarrierState, playResult, gameLog) {
             if (gameLog) gameLog.push(`❌ ${bestCandidate.name} drops the pass!`);
             playState.statEvents.push({ type: 'drop', playerId: bestCandidate.id });
         }
-        
+
         playState.incomplete = true;
         playState.playIsLive = false;
         ball.inAir = false;
@@ -4565,9 +4565,9 @@ function resetPlayerRuntimeState(playerState) {
  * Simulates a single play tick-by-tick.
  * The "Main Loop" of the physics engine.
  */
-function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameState, options = {}) {
+function resolvePlay(offense, defense, down, yardsToGo, ballOn, scoreDiff, gameLog, drivesRemaining, previousPlayAnalysis, isLive = false) {
     const { gameLog = [], ballOn, ballHash = 'M', yardsToGo } = gameState;
-    const fastSim = options.fastSim === true;
+    const fastSim = isLive ? false : (options.fastSim === true);
 
     // --- Define playResult ---
     const playResult = {
@@ -4600,13 +4600,13 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
 
     // --- 2. INITIALIZE STATE ---
 
-    const playState = {
+    // --- 2. INITIALIZE STATE ---
+    let playState = {
         playIsLive: true,
         tick: 0,
         maxTicks: 1000,
         type: play.type,
         assignments: deepClone(play.assignments || {}),
-        // ... legacy flags ...
         yards: 0, touchdown: false, turnover: false, incomplete: false,
         sack: false, safety: false, touchback: false,
         finalBallY: 0, returnStartY: null,
@@ -4616,8 +4616,11 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
         lineOfScrimmage: ballOn + 10,
         activePlayers: [],
         blockBattles: [],
-        visualizationFrames: [],
-        resolvedDepth: null // Will be populated in setupInitialPlayerStates
+
+        // 💡 OPTIMIZATION FIX: Only create array if Live
+        visualizationFrames: isLive ? [] : null,
+
+        resolvedDepth: null
     };
 
 
@@ -4859,8 +4862,8 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
                 }
             });
 
-            // --- J. VISUALIZER RECORDING ---
-            if (gameLog) {
+            // 💡 OPTIMIZATION FIX: Only record if isLive is true
+            if (isLive && gameLog) {
                 playState.visualizationFrames.push({
                     players: deepClone(playState.activePlayers),
                     ball: deepClone(playState.ballState || {}),
@@ -4953,11 +4956,18 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, gameS
     applyStatEvents(playState.statEvents);
     playState.activePlayers.forEach(p => resetPlayerRuntimeState(p));
 
+    // 💡 NEW: Set the 'isSnap' flag on the first frame (Required for Pre-Snap Huddle)
+    if (isLive && playState.visualizationFrames && playState.visualizationFrames.length > 0) {
+        // Mark the very first frame of this play as the snap
+        playState.visualizationFrames[0].isSnap = true;
+    }
+
     return {
         playResult,
         finalBallY: playState.finalBallY,
         log: gameLog,
-        visualizationFrames: playState.visualizationFrames
+        // Return frames if Live, otherwise empty array (saves memory in fast sim)
+        visualizationFrames: isLive ? playState.visualizationFrames : []
     };
 }
 
@@ -5621,7 +5631,14 @@ function checkPlayDiversity(desiredPlayType, recentPlaysHistory, candidatePlayKe
  * Simulates a full game between two teams.
  */
 function simulateGame(homeTeam, awayTeam, options = {}) {
-    const fastSim = options.fastSim === true;
+    
+    // 2. Extract isLive from options (default to false)
+    const isLive = options.isLive === true;
+    
+    // 3. Force fastSim to false if we are watching Live
+    //    (otherwise use the value passed in options)
+    const fastSim = isLive ? false : (options.fastSim === true);
+    
     let originalTickDuration = TICK_DURATION_SECONDS;
     let gameResult;
 
@@ -5735,7 +5752,10 @@ function simulateGame(homeTeam, awayTeam, options = {}) {
 
                     result = resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey,
                         { gameLog: fastSim ? null : gameLog, weather, ballOn, ballHash, down, yardsToGo },
-                        options
+                        options,
+                        null, // drivesRemaining (if your signature uses it)
+                        null, // previousPlayAnalysis
+                        isLive // <--- PASS IT HERE
                     );
 
                     playResult = result.playResult;
