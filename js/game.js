@@ -101,31 +101,42 @@ function ensureSet(val) {
     if (Array.isArray(val)) return new Set(val);
     return new Set();
 }
-function normalizeFormationKey(side, formationKey) {
-    const formations = side === 'offense'
-        ? offenseFormations
-        : defenseFormations;
+/**
+ * Normalizes formation keys to ensure they exist in the provided formations object.
+ * @param {object} formations - The dictionary of formations (e.g. offenseFormations)
+ * @param {string} formationKey - The key currently stored in the team data
+ * @param {string} defaultKey - A safe fallback key (e.g. 'Balanced')
+ */
+function normalizeFormationKey(formations, formationKey, defaultKey) {
+    // 1. Safety check: if formations object is missing, return default
+    if (!formations || typeof formations !== 'object') {
+        return defaultKey;
+    }
 
-    // 1️⃣ Fallback to default
-    
-
-    // 2️⃣ If key exists, use it
-    if (formations[formationKey]) {
+    // 2. Exact Match: If the key exists in the object, it's valid. Use it.
+    if (formationKey && formations[formationKey]) {
         return formationKey;
     }
 
-    // 3️⃣ Legacy save fix: match by display name
+    // 3. Legacy/Name Match: Check if we have the "Name" instead of the "Key"
+    // (Useful if you changed keys in data.js but loaded an old save)
     const match = Object.entries(formations).find(
-        ([, f]) => f.name === formationKey
+        ([key, f]) => f.name === formationKey || key === formationKey
     );
 
     if (match) {
-        console.warn(`⚠️ Legacy formation name detected: "${formationKey}" → "${match[0]}"`);
+        console.warn(`⚠️ Legacy formation detected: "${formationKey}" → "${match[0]}"`);
         return match[0];
     }
 
-    // 4️⃣ Absolute fallback
-    return Object.keys(formations)[0];
+    // 4. Default Fallback: Check if the default key exists
+    if (defaultKey && formations[defaultKey]) {
+        return defaultKey;
+    }
+
+    // 5. Nuclear Fallback: Return the very first key in the object
+    const keys = Object.keys(formations);
+    return keys.length > 0 ? keys[0] : null;
 }
 
 /**
