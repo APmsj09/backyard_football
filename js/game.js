@@ -272,6 +272,20 @@ export function rebuildDepthChartFromOrder(team) {
     team.depthChart.special['P'] = bestPunter || null;
 }
 
+/** Helper: Gets full player objects from a team's roster of IDs. */
+function getRosterObjects(team) {
+    if (!team || !Array.isArray(team.roster)) return [];
+
+    // Safety check: if map is empty (e.g. after load), rebuild it
+    if (playerMap.size === 0 && game && game.players) {
+        game.players.forEach(p => playerMap.set(p.id, p));
+    }
+
+    // Map roster IDs directly to player objects
+    return team.roster
+        .map(id => playerMap.get(id))
+        .filter(p => p); // Filter out any undefineds (deleted players)
+}
 
 /**
  * Sets the captain for a specific team.
