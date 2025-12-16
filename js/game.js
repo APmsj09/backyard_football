@@ -148,42 +148,62 @@ function normalizeFormationKey(formations, formationKey, defaultKey) {
 
 export function rebuildDepthChartFromOrder(team) {
     if (!team || !team.formations) return;
-    if (typeof offenseFormations === 'undefined' || typeof defenseFormations === 'undefined') return;
-
-    // 1. Initialize Depth Order Buckets (Strictly the 7 Allowed Types)
+    
+    // 1. Ensure Depth Order Object Exists with correct keys
     if (!team.depthOrder || Array.isArray(team.depthOrder)) {
         team.depthOrder = {
             'QB': [], 'RB': [], 'WR': [], 'OL': [],
             'DL': [], 'LB': [], 'DB': []
         };
-
-        // Migration: If we are converting from an old save, fill buckets now
-        if (team.roster) {
-            team.roster.forEach(pid => {
-                const p = getPlayer(pid);
-                if (p) {
-                    let pos = p.pos || p.favoriteOffensivePosition || 'WR'; // Default to WR, not ATH
-
-                    // Normalize Logic: Map EVERYTHING to the 7 Allowed Positions
-                    if (['FB'].includes(pos)) pos = 'RB';
-                    if (['TE', 'ATH', 'K', 'P'].includes(pos)) pos = 'WR';
-                    if (['OT', 'OG', 'C'].includes(pos)) pos = 'OL';
-                    if (['DE', 'DT', 'NT'].includes(pos)) pos = 'DL';
-                    if (['CB', 'S', 'FS', 'SS'].includes(pos)) pos = 'DB';
-
-                    if (team.depthOrder[pos]) team.depthOrder[pos].push(pid);
-                }
-            });
-        }
     }
 
-    // 2. Reset Chart
+    // 2. SYNC ROSTER: Ensure every player is in the order, and no ghosts exist
+    // Get all current valid player IDs on the roster
+    const rosterIds = new Set(team.roster);
+    const assignedIds = new Set();
+
+    // Clean up existing lists (Remove deleted players)
+    Object.keys(team.depthOrder).forEach(posKey => {
+        team.depthOrder[posKey] = team.depthOrder[posKey].filter(id => {
+            if (rosterIds.has(id)) {
+                assignedIds.add(id);
+                return true;
+            }
+            return false;
+        });
+    });
+
+    // Add missing players (Drafted/Signed) to the END of their bucket
+    team.roster.forEach(pid => {
+        if (!assignedIds.has(pid)) {
+            const p = getPlayer(pid);
+            if (p) {
+                // Determine bucket
+                let pos = p.pos || p.favoriteOffensivePosition || 'WR';
+                
+                // Normalize positions
+                if (['FB'].includes(pos)) pos = 'RB';
+                if (['TE', 'ATH', 'K', 'P'].includes(pos)) pos = 'WR';
+                if (['OT', 'OG', 'C'].includes(pos)) pos = 'OL';
+                if (['DE', 'DT', 'NT'].includes(pos)) pos = 'DL';
+                if (['CB', 'S', 'FS', 'SS'].includes(pos)) pos = 'DB';
+
+                // Safety fallback
+                if (!team.depthOrder[pos]) pos = 'WR';
+
+                // Append to end of list (Bench)
+                team.depthOrder[pos].push(pid);
+            }
+        }
+    });
+
+    // 3. Reset Visual Depth Chart Slots
     team.depthChart = { offense: {}, defense: {}, special: {} };
 
-    // 3. Create Working Copy
+    // 4. Create a working copy to "deal cards" into slots
     const workingOrder = {};
     Object.keys(team.depthOrder).forEach(key => {
-        workingOrder[key] = Array.isArray(team.depthOrder[key]) ? [...team.depthOrder[key]] : [];
+        workingOrder[key] = [...team.depthOrder[key]]; // Copy list
     });
 
     const getNext = (posKey) => {
@@ -193,28 +213,26 @@ export function rebuildDepthChartFromOrder(team) {
         return null;
     };
 
-    // 4. Fill Offense
+    // 5. Fill Offense Slots
     const offFormKey = normalizeFormationKey(
         offenseFormations,
         team.formations.offense,
-        'Balanced' // your offensive base
+        'Balanced'
     );
-
-    team.formations.offense = offFormKey; // 🔒 fix state permanently
+    team.formations.offense = offFormKey; // 🔒 Fix state
 
     const offSlots = offenseFormations[offFormKey].slots;
 
     offSlots.forEach(slot => {
         let posKey = slot.replace(/\d+/g, '');
-
-        // Normalize Slot Names to the 7 Allowed Keys
+        // Normalize Slot Names
         if (['OT', 'OG', 'C'].includes(posKey)) posKey = 'OL';
         if (posKey === 'FB') posKey = 'RB';
         if (posKey === 'TE') posKey = 'WR';
 
         let pid = getNext(posKey);
 
-        // Fallbacks
+        // Fallbacks if position bucket is empty
         if (!pid) {
             if (posKey === 'WR') pid = getNext('RB');
             else if (posKey === 'RB') pid = getNext('WR');
@@ -222,19 +240,17 @@ export function rebuildDepthChartFromOrder(team) {
         team.depthChart.offense[slot] = pid || null;
     });
 
-    // 5. Fill Defense
+    // 6. Fill Defense Slots
     const defFormKey = normalizeFormationKey(
         defenseFormations,
         team.formations.defense,
-        '3-1-3' // your defensive base
+        '3-1-3'
     );
-
-    team.formations.defense = defFormKey; // 🔒 fix state permanently
+    team.formations.defense = defFormKey; // 🔒 Fix state
 
     const defSlots = defenseFormations[defFormKey].slots;
     defSlots.forEach(slot => {
         let posKey = slot.replace(/\d+/g, '');
-
         // Normalize Slot Names
         if (['CB', 'S'].includes(posKey)) posKey = 'DB';
         if (['DE', 'DT'].includes(posKey)) posKey = 'DL';
@@ -244,35 +260,19 @@ export function rebuildDepthChartFromOrder(team) {
         // Fallbacks
         if (!pid) {
             if (posKey === 'DB') pid = getNext('LB');
-            if (posKey === 'DL') pid = getNext('LB');
-            if (posKey === 'LB') pid = getNext('DL');
+            else if (posKey === 'DL') pid = getNext('LB');
+            else if (posKey === 'LB') pid = getNext('DL');
         }
         team.depthChart.defense[slot] = pid || null;
     });
 
-    // 6. Special Teams (Hardcoded to QB/WR/RB)
-    // No K/P buckets exist, so we use an Athlete (usually QB or RB)
-    const qb1 = team.depthChart.offense['QB1'];
-    const rb1 = team.depthChart.offense['RB1'];
-
-    team.depthChart.special['K'] = null; // No kicking
-    team.depthChart.special['P'] = qb1 || rb1 || null; // QB Punts
+    // 7. Special Teams (Punter = Backup QB or Best Athlete)
+    const qbBucket = team.depthOrder['QB'] || [];
+    const bestPunter = qbBucket.length > 1 ? qbBucket[1] : qbBucket[0]; // QB2 or QB1
+    team.depthChart.special['P'] = bestPunter || null;
 }
 
-/** Helper: Gets full player objects from a team's roster of IDs. */
-function getRosterObjects(team) {
-    if (!team || !Array.isArray(team.roster)) return [];
 
-    // Safety check: if map is empty (e.g. after load), rebuild it
-    if (playerMap.size === 0 && game && game.players) {
-        game.players.forEach(p => playerMap.set(p.id, p));
-    }
-
-    // Map roster IDs directly to player objects
-    return team.roster
-        .map(id => playerMap.get(id))
-        .filter(p => p); // Filter out any undefineds (deleted players)
-}
 /**
  * Sets the captain for a specific team.
  * @param {object} team - The team object.

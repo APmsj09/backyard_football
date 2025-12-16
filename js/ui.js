@@ -38,6 +38,8 @@ let dragPlayerId = null; // ID of player being dragged in depth chart
 let dragSide = null; // 'offense' or 'defense' being dragged from/to
 let debounceTimeout = null; // For debouncing input
 let liveGameIsConversion = false;
+let depthOrderSortCol = 'overall'; // Default sort column
+let depthOrderSortDir = 'desc';    // Default sort direction
 
 // --- Live Game Sim State ---
 let liveGameInterval = null; // Holds interval ID for stopping/starting
@@ -3421,63 +3423,22 @@ export function setSimSpeed(speed) {
 }
 
 
+// --- In ui.js ---
+
 function renderDepthOrderPane(gameState) {
     const pane = document.getElementById("depth-order-container");
     if (!pane || !gameState) return;
 
-    const roster = getUIRosterObjects(gameState.playerTeam);
-    const savedOrder = gameState.playerTeam.depthOrder || {};
+    // Ensure the data is clean before we render
+    rebuildDepthChartFromOrder(gameState.playerTeam);
 
-    // 1. Group players (Strictly 7 Buckets)
-    const pool = {
-        'QB': [], 'RB': [], 'WR': [], 'OL': [],
-        'DL': [], 'LB': [], 'DB': []
-    };
+    const team = gameState.playerTeam;
+    let roster = getUIRosterObjects(team);
+    const depthOrder = team.depthOrder || {};
 
-    roster.forEach(p => {
-        let pos = p.pos || estimateBestPosition(p);
-
-        // --- NORMALIZATION: Force everything into the 7 Buckets ---
-        if (pos === 'FB') pos = 'RB';
-        if (['TE', 'ATH', 'K', 'P'].includes(pos)) pos = 'WR'; // Merge misc into WR
-        if (['OT', 'OG', 'C'].includes(pos)) pos = 'OL';
-        if (['DE', 'DT', 'NT'].includes(pos)) pos = 'DL';
-        if (['CB', 'S', 'FS', 'SS'].includes(pos)) pos = 'DB';
-
-        // Safety check: if somehow still unknown, put in WR
-        if (!pool[pos]) pos = 'WR';
-
-        pool[pos].push(p);
-    });
-
-    // 2. Build Sorted Lists based on Saved Order + Overalls
-    const sortedGroups = {};
     const displayOrder = ['QB', 'RB', 'WR', 'OL', 'DL', 'LB', 'DB'];
 
-    displayOrder.forEach(pos => {
-        const savedIds = savedOrder[pos] || [];
-        const playersInGroup = pool[pos] || [];
-
-        const ordered = [];
-
-        // A. Add players who are explicitly ranked in savedOrder
-        savedIds.forEach(id => {
-            const p = playersInGroup.find(pl => pl.id === id);
-            if (p) {
-                ordered.push(p);
-                const idx = playersInGroup.indexOf(p);
-                if (idx > -1) playersInGroup.splice(idx, 1);
-            }
-        });
-
-        // B. Add any remaining players (sorted by Overall)
-        playersInGroup.sort((a, b) => calculateOverall(b, pos) - calculateOverall(a, pos));
-        ordered.push(...playersInGroup);
-
-        sortedGroups[pos] = ordered;
-    });
-
-    // 3. Render Tabs
+    // --- 1. Render Tabs (Top) ---
     let tabsHtml = `<div class="flex flex-wrap gap-2 mb-4 border-b border-gray-200 pb-2">`;
     displayOrder.forEach((pos, index) => {
         const isActive = index === 0 ? 'bg-amber-500 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300';
@@ -3485,78 +3446,175 @@ function renderDepthOrderPane(gameState) {
     });
     tabsHtml += `</div>`;
 
-    // 4. Render Lists
+    // --- 2. Render Sortable Lists (Middle) ---
     let listsHtml = `<div id="depth-lists-container" class="mb-8">`;
+    
     displayOrder.forEach((groupKey, index) => {
         const isHidden = index !== 0 ? 'hidden' : '';
-        const players = sortedGroups[groupKey] || [];
+        const idList = depthOrder[groupKey] || [];
+        const players = idList.map(id => roster.find(p => p.id === id)).filter(p => p);
+
+        // 💡 NEW: Determine Key Attributes for this Position Group
+        // We grab the top 3 weighted attributes from the calc engine
+        let keyAttrs = [];
+        if (positionOverallWeights && positionOverallWeights[groupKey]) {
+            keyAttrs = Object.entries(positionOverallWeights[groupKey])
+                .sort((a, b) => b[1] - a[1]) // Sort by weight desc
+                .slice(0, 3) // Take top 3
+                .map(entry => entry[0]); // Keep keys
+        }
+
+        // Helper Map for nicer display names
+        const attrMap = {
+            throwingAccuracy: 'THR', playbookIQ: 'IQ', strength: 'STR', 
+            speed: 'SPD', agility: 'AGI', catchingHands: 'HND', 
+            blocking: 'BLK', tackling: 'TKL', blockShedding: 'BSH',
+            stamina: 'STA', toughness: 'TGH'
+        };
 
         listsHtml += `
             <div id="group-${groupKey}" class="depth-group-container ${isHidden}">
-                <div class="depth-sortable-list flex-grow p-2 space-y-1 min-h-[200px]" data-group="${groupKey}">
+                <div class="depth-sortable-list flex-grow p-2 space-y-2 min-h-[200px]" data-group="${groupKey}">
                     ${players.map((p, i) => {
-            const ovr = calculateOverall(p, groupKey);
-            let isStarterZone = false;
+                        const ovr = calculateOverall(p, groupKey);
+                        let isStarterZone = false;
 
-            // Backyard 7v7 Logic
-            if (groupKey === 'QB' && i === 0) isStarterZone = true;
-            else if (groupKey === 'RB' && i === 0) isStarterZone = true;
-            else if (groupKey === 'WR' && i <= 2) isStarterZone = true;
-            else if (groupKey === 'OL' && i === 0) isStarterZone = true;
-            else if (['DL', 'LB', 'DB'].includes(groupKey) && i === 0) isStarterZone = true; // 1 of each base
+                        // Starter Thresholds
+                        if (groupKey === 'QB' && i === 0) isStarterZone = true;
+                        else if (groupKey === 'RB' && i === 0) isStarterZone = true;
+                        else if (groupKey === 'WR' && i <= 2) isStarterZone = true;
+                        else if (groupKey === 'OL' && i === 0) isStarterZone = true;
+                        else if (['DL', 'LB', 'DB'].includes(groupKey) && i === 0) isStarterZone = true;
 
-            const rankStyle = isStarterZone ? 'border-l-4 border-green-500' : 'border-l-4 border-gray-300';
-            const badge = isStarterZone ? '<span class="ml-2 text-[10px] bg-green-100 text-green-800 px-1 rounded font-bold">START</span>' : '';
+                        const rankStyle = isStarterZone ? 'border-l-4 border-green-500' : 'border-l-4 border-gray-300';
+                        const badge = isStarterZone ? '<span class="ml-2 text-[10px] bg-green-100 text-green-800 px-1 rounded font-bold">START</span>' : '';
 
-            return `
-                        <div class="depth-order-item bg-white hover:bg-amber-50 p-2 rounded border border-gray-100 shadow-sm cursor-move flex justify-between items-center ${rankStyle}"
-                             draggable="true"
-                             data-player-id="${p.id}">
-                            <div class="flex items-center gap-2 overflow-hidden">
-                                <span class="text-xs font-bold text-gray-400 w-4">${i + 1}</span>
-                                <div class="truncate">
-                                    <span class="font-semibold text-sm text-gray-800">${p.name}</span>
-                                    ${badge}
+                        // 💡 NEW: Build the attribute string
+                        const attrString = keyAttrs.map(k => {
+                            const val = getStat(p, k);
+                            return `<span class="mr-2"><span class="text-gray-400 font-semibold">${attrMap[k] || k.substring(0,3).toUpperCase()}:</span> <span class="text-gray-700 font-medium">${val}</span></span>`;
+                        }).join('');
+
+                        return `
+                            <div class="depth-order-item bg-white hover:bg-amber-50 p-2 rounded border border-gray-200 shadow-sm cursor-move flex items-center justify-between ${rankStyle}"
+                                 draggable="true"
+                                 data-player-id="${p.id}">
+                                
+                                <div class="flex items-center gap-3 flex-grow overflow-hidden">
+                                    <span class="text-lg font-bold text-gray-400 w-6 text-center">${i + 1}</span>
+                                    
+                                    <div class="flex flex-col truncate">
+                                        <div class="flex items-center">
+                                            <span class="font-bold text-gray-800 text-sm truncate">${p.name}</span>
+                                            ${badge}
+                                        </div>
+                                        <div class="text-[10px] flex mt-0.5">
+                                            ${attrString}
+                                        </div>
+                                    </div>
                                 </div>
-                            </div>
-                            <div class="text-right pl-2">
-                                <span class="text-xs font-bold ${ovr >= 80 ? 'text-green-600' : 'text-gray-500'}">${ovr}</span>
-                            </div>
-                        </div>`;
-        }).join('')}
+
+                                <div class="text-right pl-3 flex-shrink-0">
+                                    <span class="text-lg font-bold ${ovr >= 80 ? 'text-green-600' : 'text-gray-600'}">${ovr}</span>
+                                    <div class="text-[9px] text-gray-400 uppercase font-bold">OVR</div>
+                                </div>
+                            </div>`;
+                    }).join('')}
                 </div>
             </div>`;
     });
     listsHtml += `</div>`;
 
-    // 5. Render Full Roster Table (Bottom)
-    // Same logic as before, just ensuring we don't display FB/ATH there either
+    // --- 3. Render Full Sortable Roster (Bottom) ---
+    // (Sort Logic - kept same as previous step)
+    roster.sort((a, b) => {
+        let valA, valB;
+        const getVal = (p, key) => {
+            if (key === 'overall') return calculateOverall(p, p.pos || 'ATH');
+            if (key === 'name') return p.name;
+            if (key === 'pos') return p.pos || p.favoriteOffensivePosition;
+            if (key === 'age') return p.age;
+            if (key === 'height') return p.attributes?.physical?.height || 0;
+            if (key === 'weight') return p.attributes?.physical?.weight || 0;
+            const cats = ['physical', 'mental', 'technical'];
+            for (const c of cats) {
+                if (p.attributes?.[c]?.[key] !== undefined) return p.attributes[c][key];
+            }
+            return 0;
+        };
+        valA = getVal(a, depthOrderSortCol);
+        valB = getVal(b, depthOrderSortCol);
+        if (valA < valB) return depthOrderSortDir === 'asc' ? -1 : 1;
+        if (valA > valB) return depthOrderSortDir === 'asc' ? 1 : -1;
+        return 0;
+    });
+
+    const columns = [
+        { key: 'name', label: 'Name', width: 'w-32' },
+        { key: 'pos', label: 'Pos', width: 'w-12' },
+        { key: 'overall', label: 'Ovr', width: 'w-12' },
+        { key: 'age', label: 'Age', width: 'w-12' },
+        { key: 'height', label: 'Hgt', width: 'w-16' },
+        { key: 'weight', label: 'Wgt', width: 'w-16' },
+        { key: 'speed', label: 'Spd', width: 'w-12' },
+        { key: 'strength', label: 'Str', width: 'w-12' },
+        { key: 'agility', label: 'Agi', width: 'w-12' },
+        { key: 'stamina', label: 'Sta', width: 'w-12' },
+        { key: 'playbookIQ', label: 'IQ', width: 'w-12' },
+        { key: 'catchingHands', label: 'Hnd', width: 'w-12' },
+        { key: 'throwingAccuracy', label: 'Thr', width: 'w-12' },
+        { key: 'blocking', label: 'Blk', width: 'w-12' },
+        { key: 'tackling', label: 'Tkl', width: 'w-12' },
+        { key: 'blockShedding', label: 'Bsh', width: 'w-12' }
+    ];
+
     let rosterHtml = `
         <div class="mt-8 border-t pt-4">
             <h4 class="font-bold text-lg text-gray-800 mb-3">Full Roster (Drag to Reorder)</h4>
-            <div class="overflow-x-auto max-h-60 overflow-y-auto border rounded">
-                <table class="min-w-full text-sm bg-white">
-                    <thead class="bg-gray-100 sticky top-0 z-10">
+            <div class="overflow-x-auto max-h-80 overflow-y-auto border rounded shadow-inner">
+                <table class="min-w-full text-xs bg-white">
+                    <thead class="bg-gray-800 text-white sticky top-0 z-10">
                         <tr>
-                            <th class="py-2 px-3 text-left">Name</th>
-                            <th class="py-2 px-3 text-center">Pos</th>
-                            <th class="py-2 px-3 text-center">Ovr</th>
+                            ${columns.map(col => {
+                                const active = depthOrderSortCol === col.key;
+                                const arrow = active ? (depthOrderSortDir === 'asc' ? '▲' : '▼') : '';
+                                return `<th class="py-2 px-2 text-left whitespace-nowrap cursor-pointer hover:bg-gray-700 select-none" 
+                                            onclick="window.app_handleDepthSort('${col.key}')">
+                                            ${col.label} <span class="text-[10px] ml-1">${arrow}</span>
+                                        </th>`;
+                            }).join('')}
                         </tr>
                     </thead>
-                    <tbody class="divide-y">
+                    <tbody class="divide-y divide-gray-200">
                         ${roster.map(p => {
-        let pos = p.pos || estimateBestPosition(p);
-        if (pos === 'FB') pos = 'RB';
-        if (['TE', 'ATH', 'K', 'P'].includes(pos)) pos = 'WR';
-        const ovr = calculateOverall(p, pos);
-        return `
+                            let pos = p.pos || estimateBestPosition(p);
+                            if (pos === 'FB') pos = 'RB';
+                            if (['TE', 'ATH', 'K', 'P'].includes(pos)) pos = 'WR';
+                            const ovr = calculateOverall(p, pos);
+                            const vals = {
+                                height: formatHeight(p.attributes?.physical?.height),
+                                weight: p.attributes?.physical?.weight,
+                                speed: p.attributes?.physical?.speed,
+                                strength: p.attributes?.physical?.strength,
+                                agility: p.attributes?.physical?.agility,
+                                stamina: p.attributes?.physical?.stamina,
+                                playbookIQ: p.attributes?.mental?.playbookIQ,
+                                catchingHands: p.attributes?.technical?.catchingHands,
+                                throwingAccuracy: p.attributes?.technical?.throwingAccuracy,
+                                blocking: p.attributes?.technical?.blocking,
+                                tackling: p.attributes?.technical?.tackling,
+                                blockShedding: p.attributes?.technical?.blockShedding
+                            };
+                            return `
                             <tr class="roster-row-item cursor-move hover:bg-blue-50" draggable="true" 
                                 data-player-id="${p.id}" data-player-name="${p.name}" data-player-ovr="${ovr}">
-                                <td class="py-1 px-3 font-medium">${p.name}</td>
-                                <td class="py-1 px-3 text-center">${pos}</td>
-                                <td class="py-1 px-3 text-center font-bold">${ovr}</td>
+                                <td class="py-1 px-2 font-medium truncate max-w-[120px]" title="${p.name}">${p.name}</td>
+                                <td class="py-1 px-2">${pos}</td>
+                                <td class="py-1 px-2 font-bold ${ovr >= 80 ? 'text-green-600' : ''}">${ovr}</td>
+                                <td class="py-1 px-2 text-gray-600">${p.age}</td>
+                                ${columns.slice(4).map(c => `<td class="py-1 px-2 text-center text-gray-600 border-l border-gray-100">${vals[c.key] ?? '-'}</td>`).join('')}
                             </tr>`;
-    }).join('')}
+                        }).join('')}
                     </tbody>
                 </table>
             </div>
@@ -3568,6 +3626,25 @@ function renderDepthOrderPane(gameState) {
     setupDepthTabs();
     setupDepthOrderDragEvents();
 }
+
+/**
+ * Global handler for depth order table sorting.
+ * Needs to be attached to window to work with inline onclick strings.
+ */
+window.app_handleDepthSort = function(colKey) {
+    if (depthOrderSortCol === colKey) {
+        // Toggle direction
+        depthOrderSortDir = depthOrderSortDir === 'asc' ? 'desc' : 'asc';
+    } else {
+        // New column, default to desc for stats/ratings, asc for text
+        depthOrderSortCol = colKey;
+        depthOrderSortDir = ['name', 'pos', 'height'].includes(colKey) ? 'asc' : 'desc';
+    }
+    
+    // Re-render
+    const gs = getGameState();
+    if (gs) renderDepthOrderPane(gs);
+};
 
 /** Helper to check if a player is in any starting slot */
 function isPlayerStarting(playerId, team) {
