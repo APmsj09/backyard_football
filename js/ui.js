@@ -1162,7 +1162,6 @@ function renderDepthChartSide(side, gameState) {
 
     // 1. Safety Check: Elements
     if (!visualFieldContainer || !benchTableContainer) {
-        // This is normal when the tab is hidden, so we just return silently
         return;
     }
 
@@ -1174,7 +1173,7 @@ function renderDepthChartSide(side, gameState) {
 
     const { depthChart, formations } = gameState.playerTeam;
 
-    // 3. Get Roster Objects (using the helper that handles ID mapping)
+    // 3. Get Roster Objects
     const roster = getUIRosterObjects(gameState.playerTeam);
 
     const currentChart = depthChart[side] || {};
@@ -1198,24 +1197,54 @@ function renderDepthChartSide(side, gameState) {
 
     const formationData = formationsMap[formationKey];
 
-
     // 5. Calculate Starters vs Bench
-    // We filter Boolean to remove nulls (empty slots)
     const playersStartingOnThisSide = new Set(Object.values(currentChart).filter(Boolean));
-
-    // Filter from our full roster object list
     const benchedPlayers = roster.filter(p => p && !playersStartingOnThisSide.has(p.id));
 
     // 6. Render Components
     renderVisualFormationSlots(
-    visualFieldContainer,
-    currentChart,
-    formationData,
-    benchedPlayers,
-    roster,
-    side
-);
+        visualFieldContainer,
+        currentChart,
+        formationData,
+        benchedPlayers,
+        roster,
+        side,
+        formationKey // <--- 💡 FIX: ADD THIS ARGUMENT HERE
+    );
     renderDepthChartBench(benchTableContainer, benchedPlayers, side);
+}
+
+/**
+ * Handles logic when a user selects a player from the depth chart dropdown.
+ * @param {string} side - 'offense' or 'defense'
+ * @param {string} slot - The specific slot ID (e.g., 'QB1')
+ * @param {string} newPlayerId - The ID of the selected player (or empty string)
+ */
+function handleDepthChartChange(side, slot, newPlayerId) {
+    const gs = getGameState();
+    if (!gs || !gs.playerTeam) return;
+
+    const team = gs.playerTeam;
+    const currentChart = team.depthChart[side];
+
+    // 1. Logic: If selecting a player who is ALREADY starting in a different slot,
+    // remove them from that old slot (prevent cloning).
+    if (newPlayerId) {
+        Object.keys(currentChart).forEach(existingSlot => {
+            if (currentChart[existingSlot] === newPlayerId) {
+                currentChart[existingSlot] = null;
+            }
+        });
+    }
+
+    // 2. Assign the new player (or null if "Empty" was selected)
+    currentChart[slot] = newPlayerId || null;
+
+    // 3. Save the new state
+    saveGameState();
+
+    // 4. Refresh the tab to update visuals (remove duplicate options, update overalls)
+    renderDepthChartTab(gs);
 }
 
 
@@ -1229,8 +1258,10 @@ function renderVisualFormationSlots(
     formationData,
     benchedPlayers,
     roster,
-    side
+    side,
+    formationKey // <--- 💡 FIX: ADD THIS PARAMETER HERE
 ) {
+    // Now this check will work because formationKey is defined in scope
     if (!formationKey || typeof formationKey !== 'string') {
         console.error('Invalid formationKey:', formationKey);
         return;
@@ -1270,7 +1301,6 @@ function renderVisualFormationSlots(
         slotEl.style.left = `${leftPercent}%`;
         slotEl.style.top = `${topPercent}%`;
 
-        // ✅ FIXED LINE
         const playerId = currentChart[slotId];
         const player = roster.find(p => p.id === playerId);
 
@@ -1288,11 +1318,11 @@ function renderVisualFormationSlots(
             <div class="slot-label">${slotId}</div>
             <select class="slot-select" data-slot-id="${slotId}" data-side="${side}">
                 <option value="">Empty</option>
-                ${player ? `<option value="${player.id}" selected>${player.firstName.charAt(0)}. ${player.lastName}</option>` : ''}
+                ${player ? `<option value="${player.id}" selected>${player.firstName ? player.firstName.charAt(0) : ''}. ${player.lastName || player.name}</option>` : ''}
                 <option disabled>--- Bench ---</option>
                 ${benchedPlayers.map(p => `
                     <option value="${p.id}">
-                        (${calculateOverall(p)}) ${p.firstName.charAt(0)}. ${p.lastName} - ${p.position}
+                        (${calculateOverall(p)}) ${p.firstName ? p.firstName.charAt(0) : ''}. ${p.lastName || p.name} - ${p.position || '?'}
                     </option>
                 `).join('')}
             </select>
@@ -1300,7 +1330,14 @@ function renderVisualFormationSlots(
 
         const select = slotEl.querySelector('select');
         select.addEventListener('change', e => {
-            handleDepthChartChange(side, slotId, e.target.value);
+            // Ensure handleDepthChartChange is imported or defined in ui.js
+            // If it's not defined, you might need to implement it or import it.
+            // Based on your previous code structure, it likely handles the logic.
+            if(typeof handleDepthChartChange === 'function') {
+                 handleDepthChartChange(side, slotId, e.target.value);
+            } else {
+                 console.warn("handleDepthChartChange not defined in ui.js");
+            }
         });
 
         container.appendChild(slotEl);
