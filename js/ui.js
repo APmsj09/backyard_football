@@ -2043,232 +2043,182 @@ export function setupFormationListeners() {
 export function drawFieldVisualization(frameData) {
     const ctx = elements.fieldCanvasCtx;
     const canvas = elements.fieldCanvas;
-    if (!ctx || !canvas) return;
+    let isQBShouting = false;
+    if (!ctx || !canvas || !frameData) return;
 
-    // ===============================================
     // 1. FIX BLUR (High-DPI Scaling)
-    // ===============================================
-    // We only need to do this once or when window resizes, but checking here ensures it's crisp.
     const dpr = window.devicePixelRatio || 1;
     const rect = canvas.getBoundingClientRect();
-    
-    // Set actual render size to match screen pixels
     if (canvas.width !== rect.width * dpr || canvas.height !== rect.height * dpr) {
         canvas.width = rect.width * dpr;
         canvas.height = rect.height * dpr;
-        // Reset scale because changing width/height resets context
-        ctx.scale(dpr, dpr); 
+        ctx.scale(dpr, dpr);
     }
 
-    // Since we scaled the context by dpr, we can use logical pixels (rect.width/height) for math
     const width = rect.width;
     const height = rect.height;
+    const pad = 20; // Grass padding
 
-    // ===============================================
-    // 2. SCALING (Fit Field Width to Screen Height)
-    // ===============================================
-    const pad = 20; // Padding in pixels
+    // 2. SCALING (Core Calibration)
+    const FIELD_WIDTH_YARDS = 53.3;
+    const usableHeight = height - (pad * 2);
+    const scale = usableHeight / FIELD_WIDTH_YARDS;
 
-    // Real Field Dimensions
-    const FIELD_WIDTH_YARDS = 53.3; 
-    
-    // We want the Top and Bottom sidelines to fit exactly in the canvas height
-    // Scale = Available Height (pixels) / Real Width (yards)
-    const scale = (height - (pad * 2)) / FIELD_WIDTH_YARDS;
+    // 3. CAMERA LOGIC (Clamped Pan)
+    let focusGameY = frameData.lineOfScrimmage || 50;
+    const ballCarrier = frameData.players?.find(p => p.isBallCarrier);
+    if (ballCarrier) focusGameY = ballCarrier.y;
+    else if (frameData.ball?.inAir) focusGameY = frameData.ball.y;
 
-    // ===============================================
-    // 3. CAMERA LOGIC (Horizontal Pan)
-    // ===============================================
-    let focusGameY = 50; // Center of field (50 yard line)
-
-    // Priority 1: Ball Carrier
-    const ballCarrier = frameData.players ? frameData.players.find(p => p.isBallCarrier) : null;
-    if (ballCarrier) {
-        focusGameY = ballCarrier.y; 
-    } 
-    // Priority 2: Ball in Air
-    else if (frameData.ball && frameData.ball.inAir) {
-        focusGameY = frameData.ball.y; 
-    } 
-    // Priority 3: LOS
-    else if (frameData.lineOfScrimmage) {
-        focusGameY = frameData.lineOfScrimmage;
-    }
-
-    // Calculate how many yards fit horizontally on the screen
     const visibleYards = width / scale;
+    let cameraLeftYard = focusGameY - (visibleYards * 0.35);
+    // STRICTOR CLAMP: Prevents showing "empty space" outside -10 to 110 yards
+    cameraLeftYard = Math.max(-10, Math.min(110 - visibleYards, cameraLeftYard));
 
-    // "Look Ahead" Camera
-    // Position the ball on the LEFT side (30%) so we see the field to the RIGHT
-    let cameraLeftYard = focusGameY - (visibleYards * 0.3);
-
-    // Clamp Camera (Don't scroll past Endzones)
-    // Field runs from -10 to 110. 
-    cameraLeftYard = Math.max(-12, Math.min(112 - visibleYards, cameraLeftYard));
-
-    // ===============================================
-    // 4. COORDINATE CONVERSION (Rotation Logic)
-    // ===============================================
-    // Game Logic: X = Width (Side-to-Side), Y = Length (Endzone-to-Endzone)
-    // Visual:     X = Length (Left-to-Right), Y = Width (Top-to-Bottom)
-
-    // Convert Game Y (Yard Line) -> Screen X
+    // 4. COORDINATE CONVERSION
     const toScreenX = (gameY) => (gameY - cameraLeftYard) * scale;
-
-    // Convert Game X (Sideline Position) -> Screen Y
-    // Invert X so 0 is Top, 53.3 is Bottom (standard reading order)
     const toScreenY = (gameX) => pad + (gameX * scale);
 
-    // ===============================================
     // 5. DRAW FIELD
-    // ===============================================
-    // Clear (Use logical size)
     ctx.clearRect(0, 0, width, height);
-    ctx.fillStyle = "#2e4a28"; 
+    ctx.fillStyle = "#2e4a28"; // Dark Grass
     ctx.fillRect(0, 0, width, height);
 
     // A. Sidelines (Top & Bottom)
     ctx.fillStyle = "white";
-    ctx.fillRect(0, pad - 4, width, 4); // Top Sideline
-    ctx.fillRect(0, height - pad, width, 4); // Bottom Sideline
+    ctx.fillRect(0, pad - 2, width, 2);
+    ctx.fillRect(0, height - pad, width, 2);
 
-    // B. Endzones (Left & Right)
-    ctx.strokeStyle = "white";
-    ctx.lineWidth = 3;
-    
-    // Left Endzone (-10 to 0)
-    const xZero = toScreenX(0);
-    const xMinusTen = toScreenX(-10);
-    ctx.strokeRect(xMinusTen, pad, xZero - xMinusTen, height - (pad * 2));
+    // B. Branded Endzones (Fixed to Boundaries)
+    const homeColor = currentLiveGameResult?.homeTeam?.primaryColor || "#3b82f6";
+    const awayColor = currentLiveGameResult?.awayTeam?.primaryColor || "#ef4444";
 
-    // Right Endzone (100 to 110)
-    const xHundred = toScreenX(100);
-    const xOneTen = toScreenX(110);
-    ctx.strokeRect(xHundred, pad, xOneTen - xHundred, height - (pad * 2));
+    const drawEndzone = (yStart, yEnd, color, name, isHome) => {
+        const x = toScreenX(yStart);
+        const w = (yEnd - yStart) * scale;
+        if (x + w < 0 || x > width) return; // Don't draw if off-screen
 
-    // C. Yard Lines
+        ctx.fillStyle = color;
+        ctx.fillRect(x, pad, w, usableHeight);
+
+        // Name Text
+        ctx.save();
+        ctx.translate(x + w / 2, pad + usableHeight / 2);
+        ctx.rotate(isHome ? Math.PI / 2 : -Math.PI / 2);
+        ctx.fillStyle = "rgba(255,255,255,0.7)";
+        ctx.font = `bold ${Math.max(18, scale * 2)}px Bangers`;
+        ctx.textAlign = "center";
+        ctx.fillText(name.toUpperCase(), 0, 0);
+        ctx.restore();
+
+        ctx.strokeStyle = "rgba(255,255,255,0.5)";
+        ctx.lineWidth = 2;
+        ctx.strokeRect(x, pad, w, usableHeight);
+    };
+
+    drawEndzone(-10, 0, awayColor, currentLiveGameResult?.awayTeam?.name || "AWAY", false);
+    drawEndzone(100, 110, homeColor, currentLiveGameResult?.homeTeam?.name || "HOME", true);
+
+    // C. Yard Lines & Hashes
     ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.font = "bold 12px Arial";
-    
+    ctx.font = "bold 11px Arial";
     for (let i = 1; i < 100; i++) {
         const x = toScreenX(i);
         if (x < -10 || x > width + 10) continue;
 
         if (i % 10 === 0) {
-            // 10-Yard Line (Thick)
-            ctx.strokeStyle = "rgba(255, 255, 255, 0.8)";
-            ctx.lineWidth = 2;
+            ctx.strokeStyle = "rgba(255,255,255,0.5)";
             ctx.beginPath(); ctx.moveTo(x, pad); ctx.lineTo(x, height - pad); ctx.stroke();
-
-            // Numbers
-            ctx.fillStyle = "rgba(255, 255, 255, 0.6)";
+            ctx.fillStyle = "rgba(255,255,255,0.4)";
             const num = i <= 50 ? i : 100 - i;
-            ctx.fillText(num, x, pad + 15); // Top Number
-            ctx.fillText(num, x, height - pad - 15); // Bottom Number
-
+            ctx.fillText(num, x, pad + 15);
+            ctx.fillText(num, x, height - pad - 10);
         } else if (i % 5 === 0) {
-            // 5-Yard Line (Thin)
-            ctx.strokeStyle = "rgba(255, 255, 255, 0.4)";
-            ctx.lineWidth = 1;
+            ctx.strokeStyle = "rgba(255,255,255,0.2)";
             ctx.beginPath(); ctx.moveTo(x, pad); ctx.lineTo(x, height - pad); ctx.stroke();
-        } else {
-            // Hashes (Small Ticks)
-            ctx.strokeStyle = "rgba(255, 255, 255, 0.5)";
-            ctx.lineWidth = 1;
-            // Sideline Hashes
-            ctx.beginPath(); ctx.moveTo(x, pad); ctx.lineTo(x, pad + 5); ctx.stroke();
-            ctx.beginPath(); ctx.moveTo(x, height - pad - 5); ctx.lineTo(x, height - pad); ctx.stroke();
-            
-            // Center Hashes (Pro Width approx 20 & 33)
-            const yHash1 = toScreenY(20);
-            const yHash2 = toScreenY(33.3);
-            ctx.beginPath(); ctx.moveTo(x, yHash1); ctx.lineTo(x, yHash1 + 4); ctx.stroke();
-            ctx.beginPath(); ctx.moveTo(x, yHash2); ctx.lineTo(x, yHash2 + 4); ctx.stroke();
         }
     }
 
-    // D. Dynamic Lines
-    if (frameData.lineOfScrimmage > 0 && frameData.lineOfScrimmage < 100) {
-        const x = toScreenX(frameData.lineOfScrimmage);
-        ctx.strokeStyle = "#3b82f6"; // Blue
-        ctx.lineWidth = 2;
-        ctx.beginPath(); ctx.moveTo(x, pad); ctx.lineTo(x, height - pad); ctx.stroke();
-    }
-    if (frameData.firstDownY > 0 && frameData.firstDownY < 100) {
-        const x = toScreenX(frameData.firstDownY);
-        ctx.strokeStyle = "#eab308"; // Yellow
-        ctx.lineWidth = 2;
-        ctx.beginPath(); ctx.moveTo(x, pad); ctx.lineTo(x, height - pad); ctx.stroke();
-    }
+    // D. LOS & First Down Lines
+    const drawDynamicLine = (y, color) => {
+        const x = toScreenX(y);
+        if (x >= 0 && x <= width) {
+            ctx.strokeStyle = color;
+            ctx.lineWidth = 2;
+            ctx.beginPath(); ctx.moveTo(x, pad); ctx.lineTo(x, height - pad); ctx.stroke();
+        }
+    };
+    drawDynamicLine(frameData.lineOfScrimmage, "#3b82f6"); // Blue LOS
+    drawDynamicLine(frameData.firstDownY, "#eab308");     // Yellow 1st Down
 
-    // ===============================================
-    // 6. DRAW PLAYERS
-    // ===============================================
+    // 6. DRAW PLAYERS (With Boundary Clipping)
     if (frameData.players) {
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(0, pad, width, usableHeight); // Clip to sidelines
+        ctx.clip();
+
         frameData.players.forEach(p => {
-            // Jiggle
-            let jx = 0, jy = 0;
-            if (p.isEngaged) { jx = (Math.random()-0.5)*0.2; jy = (Math.random()-0.5)*0.2; }
+            const drawX = toScreenX(p.y);
+            const drawY = toScreenY(p.x);
 
-            // ROTATION: Game Y -> Screen X, Game X -> Screen Y
-            const drawX = toScreenX(p.y + jy);
-            const drawY = toScreenY(p.x + jx);
-            
-            const radius = scale * 0.7; // Player size relative to field scale
+            // Determine base radius
+            let radius = scale * 0.7;
 
-            // Shadow
-            ctx.fillStyle = 'rgba(0,0,0,0.3)';
-            ctx.beginPath(); ctx.arc(drawX + 2, drawY + 2, radius, 0, Math.PI*2); ctx.fill();
+            // VISUAL JUICE: If it's the QB and they are shouting, make them pulse/grow
+            if (p.role === 'QB' && p.isOffense && isQBShouting) {
+                radius *= 1.3; // Grow 30% for emphasis
+            }
 
-            // Body
-            ctx.fillStyle = p.primaryColor || (p.isOffense ? '#3b82f6' : '#ef4444');
-            ctx.beginPath(); ctx.arc(drawX, drawY, radius, 0, Math.PI*2); ctx.fill();
+            // Player Body
+            ctx.fillStyle = p.isOffense ? '#3b82f6' : '#ef4444';
+            ctx.beginPath();
+            ctx.arc(drawX, drawY, radius, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Number
+            ctx.fillStyle = "white";
+            ctx.font = `bold ${Math.max(6, radius * 0.5)}px sans-serif`;
+            ctx.textAlign = "center";
+            ctx.textBaseline = "middle";
+            ctx.fillText(p.number || '', drawX, drawY);
+
+            // Floating Position Label
+            if (p.role) {
+                const labelX = drawX + radius + 3;
+                ctx.font = `bold ${Math.max(8, scale * 0.4)}px sans-serif`;
+                const labelW = ctx.measureText(p.role).width + 4;
+
+                ctx.fillStyle = "rgba(0, 0, 0, 0.6)";
+                ctx.fillRect(labelX - 2, drawY - 6, labelW, 12);
+
+                ctx.fillStyle = "white";
+                ctx.textAlign = "left";
+                ctx.fillText(p.role, labelX, drawY + 1);
+            }
 
             // Ball Carrier Highlight
             if (p.isBallCarrier) {
-                ctx.strokeStyle = '#fbbf24'; ctx.lineWidth = 2;
-                ctx.beginPath(); ctx.arc(drawX, drawY, radius + 2, 0, Math.PI*2); ctx.stroke();
+                ctx.strokeStyle = "#fbbf24";
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.arc(drawX, drawY, radius + 2, 0, Math.PI * 2);
+                ctx.stroke();
             }
-
-            // Number
-            ctx.fillStyle = '#fff';
-            ctx.font = `bold ${Math.max(8, radius)}px Arial`;
-            ctx.fillText(p.number || '', drawX, drawY);
         });
+        ctx.restore();
     }
 
-    // ===============================================
-    // 7. DRAW BALL (STRICT VISIBILITY)
-    // ===============================================
-    if (frameData.ball && frameData.ball.inAir) {
-        const b = frameData.ball;
-        const bx = toScreenX(b.y); // Game Y -> Screen X
-        const by = toScreenY(b.x); // Game X -> Screen Y
-
-        // Visual Height: Ball goes "Up" (Negative Y)
-        const zOffset = (b.z || 0) * scale * 1.5;
-
-        // Shadow
-        const shadowSize = scale * 0.4;
-        ctx.fillStyle = "rgba(0,0,0,0.4)";
-        ctx.beginPath(); ctx.ellipse(bx, by, shadowSize, shadowSize * 0.5, 0, 0, Math.PI*2); ctx.fill();
-
-        // Ball
+    // 7. DRAW BALL
+    if (frameData.ball?.inAir) {
+        const bx = toScreenX(frameData.ball.y);
+        const by = toScreenY(frameData.ball.x);
+        const zOffset = (frameData.ball.z || 0) * scale * 1.5;
         ctx.fillStyle = "#854d0e";
-        ctx.beginPath(); 
-        // Football shape (Ellipse)
-        ctx.ellipse(bx, by - zOffset, scale * 0.5, scale * 0.3, 0, 0, Math.PI*2); 
+        ctx.beginPath();
+        ctx.ellipse(bx, by - zOffset, scale * 0.5, scale * 0.3, 0, 0, Math.PI * 2);
         ctx.fill();
-
-        // Laces
-        ctx.strokeStyle = "white"; ctx.lineWidth = 1.5;
-        ctx.beginPath(); 
-        ctx.moveTo(bx - (scale*0.2), by - zOffset); 
-        ctx.lineTo(bx + (scale*0.2), by - zOffset); 
-        ctx.stroke();
     }
-    ctx.restore();
 }
 
 /** Renders the live stats box with key player performances for the game. */
@@ -2854,9 +2804,10 @@ function runLiveGameTick() {
         return;
     }
 
-    let playHasEnded = false; // Flag to track end of play
+    const nextFrame = allFrames[liveGameCurrentIndex + 1];
+    const isPlayEnding = nextFrame && nextFrame.isSnap;
 
-    // --- 3. Sync Log Entries & Update State (The Combined Step) ---
+    // --- 3. Sync Log Entries (Text Processing) ---
     if (ticker && frame.logIndex > liveGameLogIndex) {
         for (let i = liveGameLogIndex; i < frame.logIndex; i++) {
             const playLogEntry = allLogs[i];
@@ -3087,74 +3038,42 @@ function runLiveGameTick() {
             p.textContent = descriptiveText;
             ticker.appendChild(p);
 
-        } // End FOR loop
-
-        liveGameLogIndex = frame.logIndex;
-        if (ticker) ticker.scrollTop = ticker.scrollHeight;
-
-        // --- 5. Update Scoreboard UI ---
-        elements.simAwayScore.textContent = liveGameCurrentAwayScore;
-        elements.simHomeScore.textContent = liveGameCurrentHomeScore;
-        elements.simGameDrive.textContent = liveGameDriveText;
-        // Render compact live stats summary
-        try { renderLiveStatsLive(); } catch (e) { console.error('renderLiveStatsLive error:', e); }
-        let downText = `FINAL`;
-        if (liveGameDriveActive) {
-            const downSuffix = liveGameDown === 1 ? 'st' : liveGameDown === 2 ? 'nd' : liveGameDown === 3 ? 'rd' : 'th';
-            downText = `${liveGameDown}${downSuffix} & ${liveGameToGo <= 0 ? 'Goal' : liveGameToGo}`;
-        } else if (liveGameCurrentIndex < allFrames.length - 1) {
-            downText = 'Change of Possession';
+            liveGameLogIndex = frame.logIndex;
+            if (ticker) ticker.scrollTop = ticker.scrollHeight;
         }
-        elements.simGameDown.textContent = downText;
-        elements.simPossession.textContent = liveGamePossessionName ? `${liveGamePossessionName} Ball` : '';
-    }
-    // --- End Log Sync ---
 
-    // --- 6. Draw Visualization ---
+    }
+
+    // 4. UPDATE SCOREBOARD & STATS
+    elements.simAwayScore.textContent = liveGameCurrentAwayScore;
+    elements.simHomeScore.textContent = liveGameCurrentHomeScore;
+    renderLiveStatsLive();
+
+    // 5. DRAW THE FRAME
     drawFieldVisualization(frame);
-    try { renderSimPlayers(frame); } catch (err) { }
+    renderSimPlayers(frame);
 
-    // --- 7. HUDDLE CHECK (The Fix) ---
-    // Instead of relying on "playHasEnded" (which depends on text parsing),
-    // we look ahead to see if the NEXT frame is a snap.
-    const nextFrame = allFrames[liveGameCurrentIndex + 1];
-    let isHuddleTime = false;
-
-    if (nextFrame && nextFrame.isSnap) {
-        isHuddleTime = true;
-    }
-
-    // --- 8. Advance or Pause ---
-    liveGameCurrentIndex++;
-
-    if (isHuddleTime) {
+    // 6. THE PROCESSING PAUSE
+    if (isPlayEnding) {
+        // STOP the clock
         clearInterval(liveGameInterval);
         liveGameInterval = null;
-        clearTimeout(huddleTimeout);
 
-        // 💡 CRITICAL: Peek ahead to show the result logs NOW
-        // The logs for "Tackled for 5 yards" usually exist on the *next* frame (the snap of the next play).
-        // We force-render them now so you can read the result during the pause.
-        if (nextFrame && nextFrame.logIndex > liveGameLogIndex) {
-            // Re-run your existing log parser for these pending logs
-            // Note: We can extract your parsing logic into a helper, or just copy the loop here.
-            // For safety, let's just let the next tick handle it, OR manually trigger it:
-
-            // OPTION A: Simple (just show text)
-            // renderLogsRange(liveGameLogIndex, nextFrame.logIndex, allLogs, ticker);
-            // liveGameLogIndex = nextFrame.logIndex;
-
-            // OPTION B (Better): Let the loop handle it naturally by advancing log index manually
-            // But since your parser is complex, it's safer to just let the user read it
-            // when the next play starts, OR call a shared helper. 
-            // Ideally, refactor your huge parser block into `processGameLogs(startIndex, endIndex)`
+        // Show the result in the broadcast banner
+        const lastPlayResult = allLogs[frame.logIndex - 1] || "Play Complete";
+        if (elements.simBannerOffense) {
+            elements.simBannerOffense.textContent = lastPlayResult.replace('**', '').replace('**', '');
         }
 
-        // Stats Update
-        try { renderLiveStatsLive(); } catch (e) { }
-
-        // Pause for Huddle (3 seconds)
-        huddleTimeout = setTimeout(startNextPlay, 3000);
+        // --- THE "BREATHER" PAUSE ---
+        // We wait 3.5 seconds so the user can actually see where the ball landed
+        huddleTimeout = setTimeout(() => {
+            liveGameCurrentIndex++; // Move to the next play index
+            startNextPlay(); // This handles the pre-snap cadence
+        }, 3500);
+    } else {
+        // Normal progression
+        liveGameCurrentIndex++;
     }
 }
 /**
@@ -3164,39 +3083,74 @@ function runLiveGameTick() {
  */
 function startNextPlay() {
     huddleTimeout = null;
+
     if (!currentLiveGameResult || liveGameCurrentIndex >= currentLiveGameResult.visualizationFrames.length) {
-        // Resume to trigger end game logic
         runLiveGameTick();
         return;
     }
 
-    // 1. Draw the INITIAL frame of the new play (Static)
-    // This lets the user see the formation before everyone starts running.
-    const nextFrame = currentLiveGameResult.visualizationFrames[liveGameCurrentIndex];
-    if (nextFrame) {
-        drawFieldVisualization(nextFrame);
-        renderSimPlayers(nextFrame);
+    const allFrames = currentLiveGameResult.visualizationFrames;
+    const snapFrame = allFrames[liveGameCurrentIndex];
 
-        // Show "Set" message banners
+    if (snapFrame) {
+        // 1. Move everyone to new LOS
+        drawFieldVisualization(snapFrame);
+        renderSimPlayers(snapFrame);
+
+        // 2. Initial "SET" Phase
         if (elements.simBannerOffense) elements.simBannerOffense.textContent = "SET...";
-        if (elements.simBannerDefense) elements.simBannerDefense.textContent = "READY...";
 
-        // Update Down/Distance UI immediately for the new play
-        if (elements.simGameDown) {
-            // We can infer context from the logs we just processed or wait for next tick
-            // For now, let's leave it to runLiveGameTick to update text to avoid flicker
-        }
+        // 3. START THE SNAP COUNT SEQUENCE
+        // We chain timeouts to create the "Blue 42... Hut! Hut!" feel
+
+        // Sequence: 0ms (SET) -> 800ms (HIKE 1) -> 1600ms (HIKE 2) -> 2000ms (SNAP)
+
+        // --- Count 1 ---
+        setTimeout(() => {
+            if (elements.simBannerOffense) elements.simBannerOffense.textContent = "BLUE 42...";
+            animateQBShout(snapFrame); // Adds visual "shake" to the QB
+        }, 800);
+
+        // --- Count 2 ---
+        setTimeout(() => {
+            if (elements.simBannerOffense) elements.simBannerOffense.textContent = "SET, HUT!!";
+            animateQBShout(snapFrame);
+        }, 1600);
+
+        // --- THE SNAP ---
+        huddleTimeout = setTimeout(() => {
+            if (elements.simBannerOffense) elements.simBannerOffense.textContent = "BALL SNAPPED!";
+
+            if (!liveGameInterval) {
+                liveGameInterval = setInterval(runLiveGameTick, liveGameSpeed);
+            }
+        }, 2000);
     }
+}
 
-    // 2. PRE-SNAP PAUSE: Wait 1.5s (QB Cadence)
-    const PRE_SNAP_DELAY = 1500;
+/**
+ * Visual Juice: Makes the QB dot "pulse" or jitter when shouting signals
+ */
+function animateQBShout(frame) {
+    const qb = frame.players?.find(p => p.role === 'QB' && p.isOffense);
+    if (!qb) return;
 
-    huddleTimeout = setTimeout(() => {
-        // Start the action!
-        if (!liveGameInterval) {
-            liveGameInterval = setInterval(runLiveGameTick, liveGameSpeed);
+    // We do a very fast "mini-loop" to shake the QB dot for 200ms
+    let startTime = Date.now();
+    const duration = 200;
+
+    const shake = () => {
+        let elapsed = Date.now() - startTime;
+        if (elapsed < duration) {
+            // Re-draw field with a tiny random offset only for the QB
+            // (Alternative: Simple scale pulse)
+            drawFieldVisualization(frame);
+            requestAnimationFrame(shake);
+        } else {
+            drawFieldVisualization(frame); // Final clean draw
         }
-    }, PRE_SNAP_DELAY);
+    };
+    shake();
 }
 
 /** Starts the live game simulation, syncing frames with log entries. */
