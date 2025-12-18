@@ -1762,6 +1762,7 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
 
             const pState = {
                 id: player.id, name: player.name, number: player.number,
+                role: slot.replace(/\d+/g, ''),
                 teamId: team.id, primaryColor: team.primaryColor, secondaryColor: team.secondaryColor,
                 isOffense: isOffense, slot: slot,
                 x: startX, y: startY, initialX: startX, initialY: startY,

@@ -3053,29 +3053,32 @@ function runLiveGameTick() {
     drawFieldVisualization(frame);
     renderSimPlayers(frame);
 
-    // 6. THE PROCESSING PAUSE
-    if (isPlayEnding) {
-        // STOP the clock
+    // --- 6. THE PROCESSING PAUSE / PROGRESSION ---
+
+    if (nextFrame && nextFrame.isSnap) {
+        // 🛑 STOP: The current action is finished.
         clearInterval(liveGameInterval);
         liveGameInterval = null;
 
-        // Show the result in the broadcast banner
-        const lastPlayResult = allLogs[frame.logIndex - 1] || "Play Complete";
+        // A. Show the result of the play (the last thing in the log)
+        // This gives the user time to read "Gain of 5 yards" while looking at the field
+        const playResultLog = allLogs[frame.logIndex - 1] || "Play Complete";
         if (elements.simBannerOffense) {
-            elements.simBannerOffense.textContent = lastPlayResult.replace('**', '').replace('**', '');
+            elements.simBannerOffense.textContent = playResultLog.replace(/\*\*/g, '');
         }
 
-        // --- THE "BREATHER" PAUSE ---
-        // We wait 3.5 seconds so the user can actually see where the ball landed
+        // B. The "Breather" Pause
+        // We wait 3.5 seconds so the user isn't disoriented by a sudden "teleport"
         huddleTimeout = setTimeout(() => {
-            liveGameCurrentIndex++; // Move to the next play index
-            startNextPlay(); // This handles the pre-snap cadence
+            liveGameCurrentIndex++; // Move to the "Snap Frame" (new formation)
+            startNextPlay();        // Triggers the "SET... HUT!" sequence
         }, 3500);
+
     } else {
-        // Normal progression
+        // No new play starting? Just keep moving to the next animation frame.
         liveGameCurrentIndex++;
     }
-}
+} // End of runLiveGameTick
 /**
  * 🛠️ NEW HELPER FUNCTION
  * This function is called after the "huddle pause" (setTimeout) finishes.
