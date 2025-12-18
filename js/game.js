@@ -747,155 +747,39 @@ function setupDraft() {
  */
 function aiSetDepthChart(team) {
     const rosterObjs = getRosterObjects(team);
-    if (!team || !team.depthChart || !team.formations || !Array.isArray(rosterObjs)) {
-        console.error("aiSetDepthChart: Invalid team object:", team?.name);
-        return;
-    }
-
+    if (!team || !team.formations || !Array.isArray(rosterObjs)) return;
     if (rosterObjs.length === 0) return;
 
-    const { depthChart, formations } = team;
+    // 1. Initialize Depth Order Buckets (The Source of Truth)
+    team.depthOrder = {
+        'QB': [], 'RB': [], 'WR': [], 'OL': [],
+        'DL': [], 'LB': [], 'DB': []
+    };
 
-    // ----------------------------------------------------
-    // 1. Initialize depthChart structure for offense/defense
-    // ----------------------------------------------------
-    for (const side of ["offense", "defense"]) {
-        const formKey = side === "offense" ? formations.offense : formations.defense;
-        const formDef = side === "offense"
-            ? offenseFormations[formKey]
-            : defenseFormations[formKey];
+    // 2. Sort Roster by Overall (Best players first)
+    // We use a generic 'ATH' position to just get raw talent
+    const sortedRoster = [...rosterObjs].sort((a, b) =>
+        calculateOverall(b, estimateBestPosition(b)) - calculateOverall(a, estimateBestPosition(a))
+    );
 
-        const slots = Array.isArray(formDef?.slots) ? formDef.slots : [];
+    // 3. Distribute into Buckets
+    sortedRoster.forEach(p => {
+        let pos = p.pos || p.favoriteOffensivePosition || 'WR';
+        // Normalize
+        if (['FB'].includes(pos)) pos = 'RB';
+        if (['TE', 'ATH', 'K', 'P'].includes(pos)) pos = 'WR';
+        if (['OT', 'OG', 'C'].includes(pos)) pos = 'OL';
+        if (['DE', 'DT', 'NT'].includes(pos)) pos = 'DL';
+        if (['CB', 'S', 'FS', 'SS'].includes(pos)) pos = 'DB';
 
-        const newSideChart = {};
-        slots.forEach(slot => (newSideChart[slot] = null));
-        depthChart[side] = newSideChart;
-    }
+        // Safety Fallback
+        if (!team.depthOrder[pos]) pos = 'WR';
 
-    // ----------------------------------------------------
-    // 2. Assign starters using suitability + best-position logic
-    // ----------------------------------------------------
-    const sides = ["offense", "defense"];
-    const alreadyAssigned = new Set();
+        team.depthOrder[pos].push(p.id);
+    });
 
-    for (const side of sides) {
-        const slots = Object.keys(depthChart[side]);
-
-        // PRIORITIZE KEY POSITIONS
-        slots.sort((a, b) => {
-            if (side === "offense") {
-                if (a.startsWith("QB1")) return -1;
-                if (b.startsWith("QB1")) return 1;
-                if (a.startsWith("RB1")) return -1;
-                if (b.startsWith("RB1")) return 1;
-                if (a.startsWith("WR1")) return -1;
-                if (b.startsWith("WR1")) return 1;
-            } else {
-                if (a.startsWith("DB1")) return -1;
-                if (b.startsWith("DB1")) return 1;
-                if (a.startsWith("LB2")) return -1;
-                if (b.startsWith("LB2")) return 1;
-                if (a.startsWith("DL2")) return -1;
-                if (b.startsWith("DL2")) return 1;
-            }
-            return 0;
-        });
-
-        // Available players: healthy + not already used
-        let available = rosterObjs.filter(p => p && (!p.status || p.status.duration === 0));
-
-        // Assign best player for each slot
-        for (const slot of slots) {
-            if (available.length === 0) break;
-
-            const basePosition = slot.replace(/\d/g, ""); // WR1 → "WR"
-
-            // Pick best match
-            const best = available.reduce((bestSoFar, cur) => {
-                if (!bestSoFar) return cur;
-
-                let bestScore = calculateSlotSuitability(bestSoFar, slot, side, team);
-                let curScore = calculateSlotSuitability(cur, slot, side, team);
-
-                try {
-                    const bestEst = estimateBestPosition(bestSoFar);
-                    const curEst = estimateBestPosition(cur);
-
-                    // bonus if estimated best matches slot
-                    if (bestEst === basePosition) bestScore += 12;
-                    if (curEst === basePosition) curScore += 12;
-
-                    // bonus if favorite O/D position matches
-                    if (bestSoFar.favoriteOffensivePosition === basePosition ||
-                        bestSoFar.favoriteDefensivePosition === basePosition)
-                        bestScore += 8;
-
-                    if (cur.favoriteOffensivePosition === basePosition ||
-                        cur.favoriteDefensivePosition === basePosition)
-                        curScore += 8;
-
-                    // side mismatch penalty
-                    const off = ["QB", "RB", "WR", "OL"];
-                    const def = ["DL", "LB", "DB"];
-                    if ((side === "offense" && def.includes(bestEst)) ||
-                        (side === "defense" && off.includes(bestEst)))
-                        bestScore -= 20;
-                    if ((side === "offense" && def.includes(curEst)) ||
-                        (side === "defense" && off.includes(curEst)))
-                        curScore -= 20;
-                } catch (e) {
-                    // ignore if estimateBestPosition fails
-                }
-
-                // penalty if already used somewhere else
-                if (alreadyAssigned.has(bestSoFar.id)) bestScore -= 50;
-                if (alreadyAssigned.has(cur.id)) curScore -= 50;
-
-                return curScore > bestScore ? cur : bestSoFar;
-            }, available[0]);
-
-            if (best) {
-                depthChart[side][slot] = best.id;
-                alreadyAssigned.add(best.id);
-                available = available.filter(p => p.id !== best.id);
-            }
-        }
-    }
-
-    // ----------------------------------------------------
-    // 3. Build AI depthOrder
-    // ----------------------------------------------------
-    try {
-        const roster = rosterObjs;
-        const starterSet = new Set();
-
-        // Collect all starters (offense + defense)
-        for (const side of ["offense", "defense"]) {
-            Object.values(depthChart[side]).forEach(pid => pid && starterSet.add(pid));
-        }
-
-        // Starter list in slot order (consistent!)
-        const startersList = [];
-        for (const side of ["offense", "defense"]) {
-            const sideChart = depthChart[side];
-            for (const slot of Object.keys(sideChart)) {
-                const pid = sideChart[slot];
-                if (pid && !startersList.includes(pid)) startersList.push(pid);
-            }
-        }
-
-        // Remaining players sorted by overall
-        const benchList = roster
-            .filter(p => !starterSet.has(p.id))
-            .sort((a, b) => calculateOverall(b) - calculateOverall(a))
-            .map(p => p.id);
-
-        team.depthOrder = [...startersList, ...benchList];
-    } catch (err) {
-        console.error("Error building AI depthOrder:", err);
-        team.depthOrder = team.roster ? [...team.roster] : [];
-    }
-
+    // 4. Now that depthOrder is correct, let the rebuilder handle the slot assignments
+    rebuildDepthChartFromOrder(team);
 }
 
 
@@ -929,10 +813,7 @@ function simulateAIPick(team) {
  * and updates the player's teamId.
  */
 function addPlayerToTeam(player, team) {
-    if (!player || !team || !team.roster || typeof player.id === 'undefined') {
-        console.error("addPlayerToTeam: Invalid player or team object provided.");
-        return false;
-    }
+    if (!player || !team || !team.roster || typeof player.id === 'undefined') return false;
 
     // --- Position-Based Number Assignment ---
     if (player.number == null) {
@@ -996,10 +877,28 @@ function addPlayerToTeam(player, team) {
     // --- END NEW ---
 
     player.teamId = team.id;
-    // --- 💡 FIX: Push the ID, not the full object ---
-    team.roster.push(player.id);
-    if (!Array.isArray(team.depthOrder)) team.depthOrder = [];
-    if (!team.depthOrder.includes(player.id)) team.depthOrder.push(player.id);
+    team.roster.push(player.id); // Add to ID list
+
+    // 💡 FIX: Add to Depth Order Bucket
+    if (!team.depthOrder || Array.isArray(team.depthOrder)) {
+        // Fix bad state if it exists
+        team.depthOrder = { 'QB': [], 'RB': [], 'WR': [], 'OL': [], 'DL': [], 'LB': [], 'DB': [] };
+    }
+
+    let pos = player.favoriteOffensivePosition || 'WR';
+    // Normalize
+    if (['FB'].includes(pos)) pos = 'RB';
+    if (['TE', 'ATH', 'K', 'P'].includes(pos)) pos = 'WR';
+    if (['OT', 'OG', 'C'].includes(pos)) pos = 'OL';
+    if (['DE', 'DT', 'NT'].includes(pos)) pos = 'DL';
+    if (['CB', 'S', 'FS', 'SS'].includes(pos)) pos = 'DB';
+
+    if (team.depthOrder[pos]) {
+        team.depthOrder[pos].push(player.id);
+    } else {
+        team.depthOrder['WR'].push(player.id); // Fallback
+    }
+
     return true;
 }
 
@@ -4841,21 +4740,11 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
                     }
                 }
 
-                // 4. Ball Arrival (Catch/Pass/Punt)
-                if (ballPos.inAir) {
-                    if (typeof handleBallArrival === 'function') {
-                        // This handles Catch, Drop, INT, Muffed Punt, etc.
-                        handleBallArrival(playState, ballCarrierState, playResult, gameLog);
-                    }
-
-                    if (!playState.playIsLive) {
-                        playState.finalBallY = ballPos.y;
-                        break;
-                    }
-                }
-            }
-
-            // --- I. FATIGUE ---
+                
+            } // END INTERACTIONS
+             
+            // --- I. UPDATE FATIGUE & MODIFIERS ---
+            
             playState.activePlayers.forEach(p => {
                 // Simple fatigue accumulation based on action
                 let drain = (p.action.includes('run') || p.action.includes('rush')) ? 0.03 : 0.01;
@@ -7255,21 +7144,24 @@ function loadGameState(saveKey = DEFAULT_SAVE_KEY) {
         const saved = localStorage.getItem(saveKey);
         if (saved) {
             const loaded = JSON.parse(saved);
-
-            // Set 'game' to the loaded object
             game = loaded;
 
-            // Check if relationships is a plain object and convert it back to a Map
+            // Restore Relationships Map
             if (game.relationships && !(game.relationships instanceof Map)) {
                 game.relationships = new Map(Object.entries(game.relationships));
             }
 
-            return game; // Return the loaded game
+            // 💡 FIX: Repopulate the Global Player Map
+            playerMap.clear();
+            if (Array.isArray(game.players)) {
+                game.players.forEach(p => playerMap.set(p.id, p));
+            }
+
+            return game;
         }
     } catch (e) {
         console.error('Error loading game state:', e);
     }
-    // If no save was found, return null
     return null;
 }
 function getPlayer(id) {

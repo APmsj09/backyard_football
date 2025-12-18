@@ -1848,17 +1848,22 @@ export function setupDragAndDrop(onDrop) {
     const getDraggable = (target) => {
         return target.closest('.bench-player-row') ||
             target.closest('.player-slot-visual[draggable="true"]') ||
-            target.closest('.roster-row-item'); // <--- Added this
+            target.closest('.roster-row-item');
     };
 
     container.addEventListener('dragstart', e => {
+        // 💡 FIX: Ignore drag events if they originated inside the Depth Order Manager.
+        // This lets 'setupDepthOrderDragEvents' handle those exclusively without conflict.
+        if (e.target.closest('#depth-order-container')) return;
+
         const target = getDraggable(e.target);
 
         if (target) {
             draggedEl = target;
             dragPlayerId = target.dataset.playerId;
-            // If dragging from Bench/Field, we know the side. 
-            // If from Roster list, side is undefined (neutral).
+
+            // If dragging from Bench/Field, we know the side (offense/defense). 
+            // If from Roster list, side is undefined (neutral), allowing drop anywhere.
             dragSide = target.dataset.side || null;
 
             if (dragPlayerId) {
@@ -1882,7 +1887,7 @@ export function setupDragAndDrop(onDrop) {
     });
 
     container.addEventListener('dragover', e => {
-        // We only care if we are hovering over a Visual Slot
+        // We only care if we are hovering over a Visual Slot on the field
         const targetSlot = e.target.closest('.player-slot-visual');
 
         if (targetSlot) {
@@ -1893,7 +1898,7 @@ export function setupDragAndDrop(onDrop) {
             document.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over'));
 
             // STRICT CHECK:
-            // 1. If source has a side (e.g. Offense Bench), target must match.
+            // 1. If source has a side (e.g. Offense Bench), target must match (Offense Field).
             // 2. If source is neutral (Full Roster), allow it anywhere.
             const slotSide = targetSlot.dataset.side;
             if (!dragSide || dragSide === slotSide) {
@@ -1975,60 +1980,11 @@ export function setupFormationListeners() {
     const offSelect = document.getElementById('offense-formation-select');
     const defSelect = document.getElementById('defense-formation-select');
 
-    const handleFormationChange = (side, event) => {
-        const newFormationName = event.target.value;
-        if (!newFormationName) return;
-
-        // 1. Snapshot the CURRENT (Old) assignments before they are wiped
-        const gs = getGameState();
-        // Create a shallow copy so we don't reference the object that gets wiped
-        const oldChart = { ...gs.playerTeam.depthChart[side] };
-
-        // 2. Execute the Formation Change (This resets the backend to defaults)
-        changeFormation(side, newFormationName);
-
-        // 3. Restore Players (Wrapped in setTimeout to run NEXT in the event loop)
-        // This ensures 'changeFormation' is 100% complete before we apply fixes.
-        setTimeout(() => {
-            // Look up the definition of the NEW formation to see which slots exist
-            const formationData = side === 'offense'
-                ? offenseFormations[newFormationName]
-                : defenseFormations[newFormationName];
-
-            if (formationData && formationData.slots) {
-                const validSlots = new Set(formationData.slots);
-
-                // Iterate through our saved Snapshot
-                Object.entries(oldChart).forEach(([slot, playerId]) => {
-                    // If the player exists AND the new formation allows this slot (e.g. "QB1" -> "QB1")
-                    if (playerId && validSlots.has(slot)) {
-
-                        // Dispatch the event to put them back
-                        const restoreEvent = new CustomEvent('depth-chart-changed', {
-                            detail: {
-                                playerId: playerId,
-                                slot: slot,
-                                side: side
-                            }
-                        });
-                        document.dispatchEvent(restoreEvent);
-                    }
-                });
-            }
-
-            // 4. Force a UI Refresh only AFTER all restoration events have fired
-            const refreshEvent = new CustomEvent('refresh-ui');
-            document.dispatchEvent(refreshEvent);
-
-        }, 50); // 50ms delay is imperceptible to user but huge for the event loop
-    };
-
     if (offSelect) {
-        // Remove old listeners to be safe (though usually not strictly necessary if elements are static)
-        offSelect.onchange = (e) => handleFormationChange('offense', e);
+        offSelect.onchange = (e) => changeFormationSmart('offense', e.target.value);
     }
     if (defSelect) {
-        defSelect.onchange = (e) => handleFormationChange('defense', e);
+        defSelect.onchange = (e) => changeFormationSmart('defense', e.target.value);
     }
 }
 // ===================================
@@ -2050,14 +2006,14 @@ function drawFieldVisualization(frameData) {
     const width = canvas.width;
     const height = canvas.height;
     const fieldWidthYards = 53.3;
-    
+
     // --- 2. CAMERA & SCALE ---
     // This scale fits the width of the field (53.3 yards) to the canvas width
-    const scale = width / fieldWidthYards; 
+    const scale = width / fieldWidthYards;
     const visibleLengthYards = 35; // How many yards of length to see at once
-    
+
     const ballY = frameData.ball ? frameData.ball.y : 60;
-    
+
     // Camera centers on ball but stays within field bounds (0 to 120)
     let cameraY = ballY - (visibleLengthYards / 2);
     cameraY = Math.max(0, Math.min(120 - visibleLengthYards, cameraY));
@@ -2105,7 +2061,7 @@ function drawFieldVisualization(frameData) {
         const sY = toScreenY(isBottom ? yStart : yEnd);
         const eY = toScreenY(isBottom ? yEnd : yStart);
         const h = Math.abs(eY - sY);
-        
+
         ctx.fillStyle = color;
         ctx.fillRect(0, sY, width, h);
 
@@ -2159,7 +2115,7 @@ function drawFieldVisualization(frameData) {
                 ctx.lineWidth = 3;
                 ctx.beginPath(); ctx.arc(px, py, radius + 3, 0, Math.PI * 2); ctx.stroke();
             }
-            
+
             // Player Role Text
             ctx.fillStyle = "white";
             ctx.font = `bold ${Math.max(8, scale * 0.4)}px sans-serif`;
@@ -3044,25 +3000,24 @@ function startNextPlay() {
 
         if (elements.simBannerOffense) elements.simBannerOffense.textContent = "SET...";
 
-        // 2. The Cadence sequence
+        // 1. "BLUE 42..."
         setTimeout(() => {
             if (elements.simBannerOffense) elements.simBannerOffense.textContent = "BLUE 42...";
+            // 💡 TRIGGER SHAKE
+            animateQBShout(snapFrame);
         }, 700);
 
+        // 2. "SET, HUT!!"
         setTimeout(() => {
             if (elements.simBannerOffense) elements.simBannerOffense.textContent = "SET, HUT!!";
+            // 💡 TRIGGER SHAKE AGAIN
+            animateQBShout(snapFrame);
         }, 1400);
 
-        // 3. THE HIKE: This MUST start the interval
+        // 3. "HIKE!"
         huddleTimeout = setTimeout(() => {
-            if (elements.simBannerOffense) elements.simBannerOffense.textContent = "HIKE!";
-
-            // Start the movement loop
-            if (!liveGameInterval) {
-                const speed = liveGameSpeed || 80; // Fallback to 80ms if speed is missing
-                liveGameInterval = setInterval(runLiveGameTick, speed);
-            }
-        }, 2000); // 2 second huddle
+            // ... existing hike logic ...
+        }, 2000);
     }
 }
 

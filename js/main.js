@@ -105,8 +105,11 @@ function handleDraftPlayer() {
     }
 }
 
+let isDraftingLocked = false;
+
 async function runAIDraftPicks() {
-    if (!gameState) return;
+    if (!gameState || isDraftingLocked) return; // Block double execution
+    isDraftingLocked = true;
 
     const checkDraftEnd = () => {
         const pickLimitReached = gameState.currentPick >= gameState.draftOrder.length;
@@ -170,6 +173,7 @@ async function runAIDraftPicks() {
     } else {
         handleDraftEnd();
     }
+    isDraftingLocked = false;
 }
 
 async function handleDraftEnd() {
@@ -318,11 +322,11 @@ function handleDepthChartDrop(playerId, newPositionSlot, side) {
 function handleDepthChartSelect(e) {
     if (!e.target.matches('.slot-select')) return;
     const selectEl = e.target;
-    
+
     // 💡 FIXED: Handle both "null" string AND empty string ""
     const val = selectEl.value;
     const playerId = (val === 'null' || val === '') ? null : val;
-    
+
     const newPositionSlot = selectEl.dataset.slotId || selectEl.dataset.slot; // Check both just in case
     const side = selectEl.dataset.side;
 
@@ -396,9 +400,9 @@ function startLiveGame(playerGameMatch) {
     allGames.forEach(match => {
         try {
             if (!match || !match.home || !match.away) return;
-            
+
             const isPlayerGame = match.home.id === playerGameMatch.home.id && match.away.id === playerGameMatch.away.id;
-            
+
             // 💡 THE FIX: Explicitly set 'isLive: true' if it's the player's game
             const simOptions = isPlayerGame ? { isLive: true } : { fastSim: true };
 
@@ -423,6 +427,9 @@ function startLiveGame(playerGameMatch) {
     });
 
     if (!gameState.gameResults) gameState.gameResults = [];
+    if (gameState.currentWeek === 0) {
+        gameState.gameResults = [];
+    }
     const minimalResults = allResults.filter(Boolean).map(r => ({
         homeTeam: { id: r.homeTeam.id, name: r.homeTeam.name },
         awayTeam: { id: r.awayTeam.id, name: r.awayTeam.name },
@@ -744,11 +751,10 @@ function main() {
         // Live Sim Controls
         document.getElementById('sim-skip-btn')?.addEventListener('click', () => {
             UI.skipLiveGameSim();
-            UI.drawFieldVisualization(null);
         });
-        document.getElementById('sim-speed-play')?.addEventListener('click', () => UI.setSimSpeed(50));
-        document.getElementById('sim-speed-fast')?.addEventListener('click', () => UI.setSimSpeed(20));
-        document.getElementById('sim-speed-faster')?.addEventListener('click', () => UI.setSimSpeed(150));
+        document.getElementById('sim-speed-play')?.addEventListener('click', () => UI.setSimSpeed(80));   // Normal
+        document.getElementById('sim-speed-fast')?.addEventListener('click', () => UI.setSimSpeed(40));   // Fast
+        document.getElementById('sim-speed-faster')?.addEventListener('click', () => UI.setSimSpeed(10)); // Max Speed
 
         // Dashboard Navigation
         document.getElementById('dashboard-tabs')?.addEventListener('click', handleTabSwitch);
@@ -817,7 +823,7 @@ function main() {
         });
 
         // Show the initial screen
-        UI.showScreen('startScreen');
+        UI.showScreen('start-screen')
 
     } catch (error) {
         console.error("Fatal error during initialization:", error);
