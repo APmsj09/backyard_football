@@ -1,20 +1,18 @@
-/* style.css - COMPLETE & FIXED */
-
-/* --- Global & Fonts --- */
+/* --- 1. GLOBAL & FONTS --- */
 body {
   font-family: 'Inter', sans-serif;
+  background-color: #f3f4f6;
 }
-
-.font-bangers {
+.font-display {
   font-family: 'Bangers', cursive;
 }
 
-/* --- Screen Management --- */
+/* --- 2. SCREEN MANAGEMENT --- */
 .screen.hidden {
   display: none !important;
 }
 
-/* --- Status Tags --- */
+/* --- 3. STATUS TAGS & BREAKTHROUGHS --- */
 .status-tag {
   display: inline-block;
   font-size: 0.75rem;
@@ -23,477 +21,171 @@ body {
   border-radius: 0.25rem;
   line-height: 1.2;
 }
-.status-tag.temporary {
-  background-color: #f87171; /* red-400 */
-  color: #fff;
-}
-.status-tag.permanent {
-  background-color: #4ade80; /* green-400 */
-  color: #166534; /* green-800 */
+.status-tag.temporary { background-color: #f87171; color: #fff; }
+.status-tag.permanent { background-color: #4ade80; color: #166534; }
+
+.breakthrough {
+    color: #16a34a;
+    font-weight: bold;
 }
 
-/* --- Player Card & Interactivity --- */
-.player-card {
-  transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
-}
-
-.player-card:hover {
-  transform: translateY(-5px);
-  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
-}
-
-.player-card.selected {
-  transform: translateY(-5px);
-  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
-  border: 2px solid #f59e0b; /* amber-500 */
-}
-
-/* --- Dashboard Tabs --- */
+/* --- 4. DASHBOARD TABS --- */
 .tab-button {
   padding: 0.5rem 0.75rem;
   border-radius: 0.25rem;
   font-weight: 600;
   font-size: 0.875rem;
-  color: #4b5563; /* gray-600 */
+  color: #4b5563;
   text-align: left;
-  transition: background-color 0.2s, color 0.2s;
+  transition: all 0.2s;
   margin-bottom: 0.25rem;
   display: flex;
   align-items: center;
   gap: 0.5rem;
 }
-
-.tab-button:hover {
-  background-color: #f3f4f6; /* gray-100 */
-}
-
+.tab-button:hover { background-color: #f3f4f6; }
 .tab-button.active {
-  background-color: #fbbf24; /* amber-400 */
+  background-color: #fbbf24;
   color: white;
 }
 
-.tab-button svg {
-  width: 1.25rem;
-  height: 1.25rem;
-}
-
-/* --- Schedule Results (Added Fix) --- */
-.player-win {
-    border-left: 4px solid #22c55e; /* Green */
-}
-.player-loss {
-    border-left: 4px solid #ef4444; /* Red */
-}
-
-/* --- Player Breakthrough (Added Fix) --- */
-.breakthrough {
-    color: #16a34a; /* Green-600 */
-    font-weight: bold;
-}
-
-/* --- Depth Chart --- */
-.depth-chart-content {
-  display: grid;
-  grid-template-columns: 2fr 1fr;
-  gap: 1rem;
-}
-
-.depth-chart-starters {
-  background-color: white;
-  border-radius: 0.5rem;
-  padding: 1rem;
-  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1);
-}
-
-.depth-chart-bench {
-  background-color: #f9fafb;
-  border-radius: 0.5rem;
-  padding: 1rem;
-  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1);
-}
-
-.roster-list {
-  min-height: 200px;
-  background-color: white;
-  border-radius: 0.5rem;
-  padding: 0.75rem;
-  border: 1px solid #e5e7eb;
-}
-
-.player-group {
-  border: 1px solid #e5e7eb;
-  border-radius: 0.5rem;
-  padding: 0.75rem;
-  margin-bottom: 1rem;
-}
-
-.player-group-title {
-  font-weight: 600;
-  color: #374151;
-  margin-bottom: 0.5rem;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.sub-tabs {
-  display: flex;
-  gap: 1rem;
-  margin-bottom: 1rem;
-  border-bottom: 1px solid #e5e7eb;
-  padding-bottom: 0.5rem;
-}
-
-.sub-tab {
-  padding: 0.5rem 1rem;
-  font-weight: 500;
-  color: #4b5563;
-  border-radius: 0.25rem 0.25rem 0 0;
-  transition: all 0.2s;
-}
-
-.sub-tab.active {
-  color: #d97706;
-  background-color: #fff;
-  border-bottom: 2px solid #d97706;
-}
-
-.sub-tab:hover {
-  color: #d97706;
-}
-
-.draggable-player {
-  background-color: white;
-  padding: 0.75rem;
-  margin-bottom: 0.5rem;
-  border-radius: 0.375rem;
-  border: 1px solid #e5e7eb; /* gray-200 */
-  cursor: grab;
-  transition: all 0.2s;
-  display: grid;
-  gap: 0.5rem;
-}
-
-.draggable-player:hover {
-  background-color: #fef3c7; /* amber-100 */
-  transform: translateY(-1px);
-  box-shadow: 0 2px 4px rgba(0,0,0,0.05);
-}
-
-.player-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.player-name {
-  font-weight: 600;
-  color: #1f2937; /* gray-800 */
-}
-
-.player-position {
-  font-size: 0.875rem;
-  color: #6b7280; /* gray-500 */
-  font-weight: 500;
-}
-
-.player-stats {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 0.75rem;
-  padding-top: 0.5rem;
-  border-top: 1px solid #f3f4f6; /* gray-100 */
-}
-
-.stat-item {
-  text-align: center;
-}
-
-.stat-label {
-  font-size: 0.75rem;
-  color: #6b7280; /* gray-500 */
-  margin-bottom: 0.25rem;
-}
-
-.stat-value {
-  font-weight: 600;
-  color: #374151; /* gray-700 */
-}
-
-.depth-chart-slot {
-  background-color: white;
-  border: 1px solid #e5e7eb; /* gray-200 */
-  border-radius: 0.375rem;
-  padding: 0.75rem;
-  transition: all 0.2s;
-}
-
-.depth-chart-slot:hover {
-  background-color: #f9fafb; /* gray-50 */
-}
-
-.depth-chart-slot.empty {
-  background-color: #f9fafb;
-  border: 2px dashed #e5e7eb;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: #9ca3af; /* gray-400 */
-  font-weight: 500;
-}
-
-.fatigue-bar {
-  width: 100%;
-  height: 4px;
-  background-color: #e5e7eb; /* gray-200 */
-  border-radius: 2px;
-  overflow: hidden;
-  margin-top: 0.5rem;
-}
-
-.fatigue-fill {
-  height: 100%;
-  background-color: #84cc16; /* green-500 */
-  transition: width 0.3s ease;
-}
-
-.player-actions {
-  display: flex;
-  gap: 0.5rem;
-  margin-top: 0.5rem;
-}
-
-.player-action-btn {
-  font-size: 0.875rem;
-  padding: 0.25rem 0.75rem;
-  border-radius: 0.25rem;
-  font-weight: 500;
-  transition: all 0.2s;
-}
-
-.sub-btn {
-  color: #d97706; /* amber-600 */
-  background-color: #fffbeb; /* amber-50 */
-}
-
-.sub-btn:hover {
-  background-color: #fef3c7; /* amber-100 */
-}
-
-.view-btn {
-  color: #4b5563; /* gray-600 */
-  background-color: #f3f4f6; /* gray-100 */
-}
-
-.view-btn:hover {
-  background-color: #e5e7eb; /* gray-200 */
-}
-
-
-/* --- Drag and Drop States --- */
-.dragging {
-  opacity: 0.5;
-  cursor: grabbing;
-}
-
-.drag-over {
-  background-color: #fef3c7 !important; /* amber-100 */
-  border-style: dashed !important;
-}
-
-/* Modal Game Log */
-.game-log {
-  font-family: 'Courier New', Courier, monospace;
-}
-
-/* --- Field Visualization --- */
-canvas#field-canvas {
-  background-color: #059669; /* green-700 */
-  /* Endzones are now top and bottom */
-  border-top: 2px solid rgba(255,255,255,0.5);
-  border-bottom: 2px solid rgba(255,255,255,0.5);
-  max-width: 100%;
-  height: auto;
-  margin: 0 auto;
-  display: block;
-}
-
-/* --- Broadcast-style scoreboard --- */
-.broadcast-scoreboard {
-  box-shadow: 0 6px 18px rgba(0,0,0,0.4);
-  font-family: 'Inter', sans-serif;
-}
-.broadcast-scoreboard .team-name { color: #e5e7eb; }
-.broadcast-scoreboard .team-score { color: #fff; }
-.broadcast-scoreboard .team-score.home { color: #fbbf24; }
-.broadcast-scoreboard .team-score.away { color: #93c5fd; }
-
-
-/* --- Draft Screen Table Sorting --- */
-#draft-screen thead th[data-sort] {
-  cursor: pointer;
-  user-select: none; /* Prevents text selection on click */
-}
-
-#draft-screen thead th[data-sort]:hover {
-  background-color: #374151; /* gray-700 */
-}
-
-.sort-indicator {
-  font-size: 0.8em;
-  padding-left: 4px;
-  vertical-align: middle;
-  /* Set a fixed width to prevent table jitter */
-  display: inline-block;
-  width: 1em;
-}
-
-/* --- NEW DEPTH CHART STYLES (v2) --- */
-
-/* The main container created by JS */
+/* --- 5. DEPTH CHART VISUAL FIELD (Strategy Screen) --- */
 .visual-field-container {
-    position: relative; /* Essential for absolute children */
+    position: relative;
     width: 100%;
-    height: 500px;      /* Fixed height is required */
-    background-color: #059669; /* Grass Green */
-    
-    /* Grid lines to make it look like a field */
+    height: 500px;
+    background-color: #059669;
     background-image: 
         linear-gradient(rgba(255,255,255,0.2) 2px, transparent 2px),
         linear-gradient(90deg, rgba(255,255,255,0.2) 2px, transparent 2px);
     background-size: 100% 10%, 10% 100%;
-    
-    border: 4px solid #064e3b; /* Dark green border */
+    border: 4px solid #064e3b;
     border-radius: 8px;
     overflow: hidden;
     margin-bottom: 1rem;
     box-shadow: inset 0 0 20px rgba(0,0,0,0.3);
 }
 
-/* The blue line of scrimmage marker */
 .los-marker {
     position: absolute;
     left: 0;
     width: 100%;
     height: 4px;
-    background-color: #3b82f6; /* Blue-500 */
+    background-color: #3b82f6;
     box-shadow: 0 0 8px #2563eb;
     z-index: 1;
-    pointer-events: none; /* Let clicks pass through */
+    pointer-events: none;
 }
 
-/* The individual player slot (dot/card) */
 .player-slot-visual {
     position: absolute;
-    transform: translate(-50%, -50%); /* Centers the dot on the X/Y coordinate */
+    transform: translate(-50%, -50%);
     display: flex;
     flex-direction: column;
     align-items: center;
-    width: 110px; /* Width of the card */
+    width: 110px;
     z-index: 10;
     transition: all 0.2s ease;
-    
-    /* Glassmorphism background */
-    background: rgba(31, 41, 55, 0.85); /* Gray-800 with opacity */
+    background: rgba(31, 41, 55, 0.85);
     padding: 6px;
     border-radius: 6px;
     border: 1px solid rgba(255, 255, 255, 0.1);
     box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
 }
 
-/* Highlight when dragging over */
 .player-slot-visual.drag-over {
     transform: translate(-50%, -50%) scale(1.1);
-    background: rgba(251, 191, 36, 0.9); /* Amber-400 */
+    background: rgba(251, 191, 36, 0.9);
     border-color: #f59e0b;
-    z-index: 20;
 }
 
-/* Position Name Label (e.g. "QB") */
-.slot-label {
-    font-size: 0.7rem;
-    font-weight: 800;
-    text-transform: uppercase;
-    color: #9ca3af; /* Gray-400 */
-    margin-bottom: 2px;
-}
-
-/* Overall Rating Badge */
 .slot-overall {
     position: absolute;
     top: -8px;
     right: -8px;
-    background-color: #d97706; /* Amber-600 */
+    background-color: #d97706;
     color: white;
     font-size: 0.7rem;
     font-weight: bold;
     padding: 2px 6px;
     border-radius: 999px;
     box-shadow: 0 2px 4px rgba(0,0,0,0.2);
-    z-index: 12;
 }
 
-.slot-overall.bg-red-500 { background-color: #ef4444; }
-.slot-overall.bg-green-600 { background-color: #16a34a; }
-.slot-overall.bg-blue-600 { background-color: #2563eb; }
-.slot-overall.bg-amber-600 { background-color: #d97706; }
-.slot-overall.bg-gray-500 { background-color: #6b7280; }
-
-/* The Dropdown inside the slot */
-.slot-select {
-    width: 100%;
-    font-size: 0.75rem;
-    padding: 2px 4px;
-    border-radius: 4px;
-    border: 1px solid #4b5563;
-    background-color: #111827; /* Gray-900 */
-    color: #f3f4f6; /* Gray-100 */
-    cursor: pointer;
-    text-overflow: ellipsis;
-    z-index: 11; /* Ensure clicking dropdown works */
+/* --- 6. INTEGRATED SIM SCOREBOARD (Live Broadcast Look) --- */
+#sim-scoreboard {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: linear-gradient(180deg, #1f2937 0%, #0f172a 100%);
+  border-bottom: 1px solid #374151;
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.6);
+  height: 6rem;
+  z-index: 50;
 }
 
-.slot-select:hover {
-    background-color: #374151;
+#sim-banner-defense, #sim-banner-offense {
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  min-height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  letter-spacing: 0.05em;
+  font-size: 10px;
+  border-radius: 4px;
+  padding: 2px 8px;
+  margin-top: 4px;
+  box-shadow: inset 0 1px 3px rgba(0,0,0,0.5);
+  text-transform: uppercase;
 }
 
-/* Ensure options inside dropdown are readable */
-.slot-select option {
-    background-color: #1f2937; /* Gray-800 */
-    color: #f3f4f6; /* Gray-100 */
-    padding: 4px;
+#sim-banner-offense { background-color: rgba(30, 58, 138, 0.8); color: #bfdbfe; border: 1px solid #2563eb; }
+#sim-banner-defense { background-color: rgba(127, 29, 29, 0.8); color: #fecaca; border: 1px solid #dc2626; }
+
+#sim-game-down {
+  text-shadow: 0 0 12px rgba(251, 191, 36, 0.6);
 }
 
-.slot-select option.bg-gray-200 {
-    background-color: #e5e7eb;
-    color: #000;
+/* --- 7. FIELD ANIMATION WRAPPER (Centered & Clear) --- */
+#game-sim-screen .flex-grow.relative {
+  background-color: #064e3b; 
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  overflow: hidden;
 }
 
-.slot-select option.bg-amber-50 {
-    background-color: #fffbeb;
-    color: #d97706;
+canvas#field-canvas {
+  background-color: #059669; 
+  box-shadow: 0 0 60px rgba(0,0,0,0.5);
+  max-height: 100%;
+  max-width: 100%;
+  object-fit: contain;
+  display: block;
 }
 
-.slot-select option.bg-white {
-    background-color: #ffffff;
-    color: #16a34a;
+/* --- 8. SIDEBAR & LOGS --- */
+.w-80 {
+  background-color: #0f172a;
+  border-left: 1px solid #374151;
 }
 
-/* (Bench styles) */
-.bench-table-container {
-    max-height: 400px;
-    overflow-y: auto;
-    border: 1px solid #e5e7eb;
-    border-radius: 8px;
+#sim-play-log p {
+  padding: 6px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+  line-height: 1.5;
 }
-.bench-player-row {
-    cursor: move; 
-    transition: background-color 0.1s ease;
+
+.stat-flash {
+  animation: statPulse 0.8s ease-out;
 }
-.bench-player-row:hover {
-    background-color: #fef3c7; /* amber-100 */
+@keyframes statPulse {
+  0% { color: #fbbf24; transform: scale(1.2); }
+  100% { color: inherit; transform: scale(1); }
 }
-.bench-player-row.dragging {
-    opacity: 0.4;
-    background-color: #eab308;
+
+/* --- 9. GLOBAL DRAG & DROP --- */
+.dragging {
+  opacity: 0.5;
+  cursor: grabbing;
 }

@@ -3033,13 +3033,29 @@ function runLiveGameTick() {
             } catch (err) {
                 console.error('Error updating live stats from log:', err);
             }
-            // --- 4. Append to Ticker ---
-            p.className = styleClass;
-            p.textContent = descriptiveText;
-            ticker.appendChild(p);
 
-            liveGameLogIndex = frame.logIndex;
-            if (ticker) ticker.scrollTop = ticker.scrollHeight;
+            // 2. Append to Ticker UI
+            logEl.className = styleClass;
+            logEl.textContent = descriptiveText.replace(/\*\*/g, ''); // Remove bold markdown for UI
+            ticker.appendChild(logEl);
+
+            // 3. Update pointer
+            liveGameLogIndex = i + 1;
+
+            // 4. THE INTERRUPTOR: Prevents jerky resets by stopping the loop on major events
+            // If the ball is thrown, fumbled, or tackled, we stop here to let the visual play out.
+            const isInterruptor =
+                playLogEntry.includes('throws to') ||     // Pass start
+                playLogEntry.includes('throws it away') || // Throw away
+                playLogEntry.includes('tackled by') ||    // Tackle/Play end
+                playLogEntry.includes('TOUCHDOWN') ||     // Score
+                playLogEntry.includes('INTERCEPTION') ||  // Turnover
+                playLogEntry.includes('FUMBLE') ||        // Loose ball
+                playLogEntry.includes('punts the ball');  // Punt start
+
+            if (isInterruptor) {
+                break; // Stop processing logs for this frame
+            }
         }
 
     }
