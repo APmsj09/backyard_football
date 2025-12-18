@@ -4633,7 +4633,8 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
 
     // --- 3. SETUP PLAYERS ---
     try {
-        const goalLineY = FIELD_LENGTH - 10;
+        const goalLineY = 110.0; // Hardcoded goal line (Endzone starts at 110)
+        const backOfEndzoneY = 120.0;
         const effectiveYardsToGo = (yardsToGo <= 0 || ballOn >= 90) ? (goalLineY - playState.lineOfScrimmage) : yardsToGo;
         firstDownY = Math.min(playState.lineOfScrimmage + effectiveYardsToGo, goalLineY);
 
@@ -4768,37 +4769,26 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
 
             // --- G. SCORING & BOUNDARIES ---
             if (playState.playIsLive) {
-                // Re-check carrier
                 ballCarrierState = playState.activePlayers.find(p => p?.isBallCarrier) || null;
 
                 if (ballCarrierState) {
-                    const offenseEndzoneY = FIELD_LENGTH - 10;
-                    const defenseEndzoneY = 10;
-
-                    // 1. Touchdown
-                    if (ballCarrierState.isOffense && ballCarrierState.y >= offenseEndzoneY - 0.1) {
-                        playState.touchdown = true; playState.playIsLive = false;
-                        playState.finalBallY = ballCarrierState.y;
-                        playState.yards = ballCarrierState.y - playState.lineOfScrimmage;
+                    // 1. Offensive Touchdown
+                    if (ballCarrierState.isOffense && ballCarrierState.y >= goalLineY) {
+                        playState.touchdown = true;
+                        playState.playIsLive = false;
+                        // CLAMP to goal line for visual accuracy
+                        playState.finalBallY = goalLineY;
+                        playState.yards = goalLineY - playState.lineOfScrimmage;
                         if (gameLog) gameLog.push(`🎉 TOUCHDOWN ${ballCarrierState.name}!`);
                         break;
                     }
-                    // 2. Defensive TD (Pick 6 / Fumble Return)
-                    if (!ballCarrierState.isOffense && ballCarrierState.y <= defenseEndzoneY + 0.1) {
-                        playState.touchdown = true; playState.playIsLive = false;
-                        playState.possessionChanged = true;
-                        playState.yards = 0; // Defense yards logic separate
-                        playState.finalBallY = ballCarrierState.y;
-                        if (gameLog) gameLog.push(`🎉 DEFENSIVE TOUCHDOWN!`);
-                        break;
-                    }
-
-                    // 4. Out of Bounds
-                    if (ballCarrierState.x <= 0.1 || ballCarrierState.x >= FIELD_WIDTH - 0.1) {
+                    // 2. Defensive TD
+                    if (!ballCarrierState.isOffense && ballCarrierState.y <= 10.0) {
+                        playState.touchdown = true;
                         playState.playIsLive = false;
-                        playState.yards = ballCarrierState.y - playState.lineOfScrimmage;
-                        playState.finalBallY = ballCarrierState.y;
-                        if (gameLog) gameLog.push(`${ballCarrierState.name} steps out of bounds.`);
+                        playState.possessionChanged = true;
+                        playState.finalBallY = 10.0;
+                        if (gameLog) gameLog.push(`🎉 DEFENSIVE TOUCHDOWN!`);
                         break;
                     }
                 }
@@ -4813,9 +4803,11 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
                 // 2. Tackles (Check if carrier is caught)
                 ballCarrierState = playState.activePlayers.find(p => p?.isBallCarrier) || null;
                 if (ballCarrierState) {
-                    // checkTackleCollisions returns TRUE if play ends (tackle made)
                     if (typeof checkTackleCollisions === 'function' && checkTackleCollisions(playState, gameLog)) {
                         playState.finalBallY = ballCarrierState.y;
+                        // 💡 Capture yards exactly where tackle happened
+                        playState.yards = ballCarrierState.y - playState.lineOfScrimmage;
+                        playState.playIsLive = false; // Ensure loop stops
                         break;
                     }
                 }
@@ -4945,7 +4937,11 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
     // ===================================
     playResult.yards = playState.yards;
 
-    if (playState.incomplete) playResult.outcome = 'incomplete';
+    if (playState.incomplete) {
+        playResult.outcome = 'incomplete';
+        playResult.yards = 0;
+        // Do NOT change playState.finalBallY here; keep it where the ball landed for the camera.
+    }
 
     if (playState.possessionChanged || playState.turnover) {
         playResult.outcome = 'turnover';

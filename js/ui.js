@@ -66,6 +66,7 @@ let liveGameDriveText = '';
 let liveGameStats = { home: { yards: 0, td: 0, turnovers: 0, punts: 0, returns: 0 }, away: { yards: 0, td: 0, turnovers: 0, punts: 0, returns: 0 } };
 // Per-player live stat snapshots (id -> stats)
 let livePlayerStats = new Map();
+let playerNameIdMap = new Map();
 
 let livePlayContext = {
     type: 'run',
@@ -2040,183 +2041,141 @@ export function setupFormationListeners() {
  * @param {object} frameData - A single frame from resolvePlay.visualizationFrames.
  */
 
-export function drawFieldVisualization(frameData) {
-    const ctx = elements.fieldCanvasCtx;
+function drawFieldVisualization(frameData) {
     const canvas = elements.fieldCanvas;
-    let isQBShouting = false;
-    if (!ctx || !canvas || !frameData) return;
+    const ctx = elements.fieldCanvasCtx;
+    if (!canvas || !ctx) return;
 
-    // 1. FIX BLUR (High-DPI Scaling)
-    const dpr = window.devicePixelRatio || 1;
-    const rect = canvas.getBoundingClientRect();
-    if (canvas.width !== rect.width * dpr || canvas.height !== rect.height * dpr) {
-        canvas.width = rect.width * dpr;
-        canvas.height = rect.height * dpr;
-        ctx.scale(dpr, dpr);
-    }
+    // --- 1. DEFINE DIMENSIONS ---
+    const width = canvas.width;
+    const height = canvas.height;
+    const fieldWidthYards = 53.3;
+    
+    // --- 2. CAMERA & SCALE ---
+    // This scale fits the width of the field (53.3 yards) to the canvas width
+    const scale = width / fieldWidthYards; 
+    const visibleLengthYards = 35; // How many yards of length to see at once
+    
+    const ballY = frameData.ball ? frameData.ball.y : 60;
+    
+    // Camera centers on ball but stays within field bounds (0 to 120)
+    let cameraY = ballY - (visibleLengthYards / 2);
+    cameraY = Math.max(0, Math.min(120 - visibleLengthYards, cameraY));
 
-    const width = rect.width;
-    const height = rect.height;
-    const pad = 20; // Grass padding
+    // --- 3. MAPPING FUNCTIONS ---
+    // Convert yard coordinates to pixel coordinates
+    const toScreenX = (x) => x * scale;
+    // We subtract from height because canvas (0,0) is top-left, but we want higher Y to be "up"
+    const toScreenY = (y) => height - ((y - cameraY) * (height / visibleLengthYards));
 
-    // 2. SCALING (Core Calibration)
-    const FIELD_WIDTH_YARDS = 53.3;
-    const usableHeight = height - (pad * 2);
-    const scale = usableHeight / FIELD_WIDTH_YARDS;
-
-    // 3. CAMERA LOGIC (Clamped Pan)
-    let focusGameY = frameData.lineOfScrimmage || 50;
-    const ballCarrier = frameData.players?.find(p => p.isBallCarrier);
-    if (ballCarrier) focusGameY = ballCarrier.y;
-    else if (frameData.ball?.inAir) focusGameY = frameData.ball.y;
-
-    const visibleYards = width / scale;
-    let cameraLeftYard = focusGameY - (visibleYards * 0.35);
-    // STRICTOR CLAMP: Prevents showing "empty space" outside -10 to 110 yards
-    cameraLeftYard = Math.max(-10, Math.min(110 - visibleYards, cameraLeftYard));
-
-    // 4. COORDINATE CONVERSION
-    const toScreenX = (gameY) => (gameY - cameraLeftYard) * scale;
-    const toScreenY = (gameX) => pad + (gameX * scale);
-
-    // 5. DRAW FIELD
-    ctx.clearRect(0, 0, width, height);
-    ctx.fillStyle = "#2e4a28"; // Dark Grass
+    // --- 4. DRAW BACKGROUND ---
+    ctx.fillStyle = "#264624"; // Deep Field Green
     ctx.fillRect(0, 0, width, height);
 
-    // A. Sidelines (Top & Bottom)
-    ctx.fillStyle = "white";
-    ctx.fillRect(0, pad - 2, width, 2);
-    ctx.fillRect(0, height - pad, width, 2);
+    // --- 5. DRAW YARD LINES ---
+    ctx.strokeStyle = "rgba(255,255,255,0.3)";
+    ctx.lineWidth = 1;
+    ctx.textAlign = "center";
+    ctx.font = `bold ${Math.max(10, scale * 0.8)}px Arial`;
 
-    // B. Branded Endzones (Fixed to Boundaries)
+    for (let i = 0; i <= 120; i += 5) {
+        const screenY = toScreenY(i);
+        if (screenY < 0 || screenY > height) continue;
+
+        // Draw line
+        ctx.beginPath();
+        ctx.moveTo(0, screenY);
+        ctx.lineTo(width, screenY);
+        ctx.stroke();
+
+        // Draw numbers every 10 yards (ignoring endzones for numbers)
+        if (i % 10 === 0 && i > 10 && i < 110) {
+            const displayNum = i <= 60 ? i - 10 : 110 - i;
+            ctx.fillStyle = "rgba(255,255,255,0.2)";
+            ctx.fillText(displayNum, 20, screenY + 4);
+            ctx.fillText(displayNum, width - 20, screenY + 4);
+        }
+    }
+
+    // --- 6. DRAW ENDZONES ---
     const homeColor = currentLiveGameResult?.homeTeam?.primaryColor || "#3b82f6";
     const awayColor = currentLiveGameResult?.awayTeam?.primaryColor || "#ef4444";
 
-    const drawEndzone = (yStart, yEnd, color, name, isHome) => {
-        const x = toScreenX(yStart);
-        const w = (yEnd - yStart) * scale;
-        if (x + w < 0 || x > width) return; // Don't draw if off-screen
-
+    const drawEndzone = (yStart, yEnd, color, name, isBottom) => {
+        const sY = toScreenY(isBottom ? yStart : yEnd);
+        const eY = toScreenY(isBottom ? yEnd : yStart);
+        const h = Math.abs(eY - sY);
+        
         ctx.fillStyle = color;
-        ctx.fillRect(x, pad, w, usableHeight);
+        ctx.fillRect(0, sY, width, h);
 
-        // Name Text
+        // Endzone Text
         ctx.save();
-        ctx.translate(x + w / 2, pad + usableHeight / 2);
-        ctx.rotate(isHome ? Math.PI / 2 : -Math.PI / 2);
-        ctx.fillStyle = "rgba(255,255,255,0.7)";
-        ctx.font = `bold ${Math.max(18, scale * 2)}px Bangers`;
-        ctx.textAlign = "center";
-        ctx.fillText(name.toUpperCase(), 0, 0);
+        ctx.translate(width / 2, sY + h / 2);
+        ctx.fillStyle = "rgba(255,255,255,0.5)";
+        ctx.font = `bold ${Math.max(24, scale * 3)}px Bangers`;
+        ctx.fillText(name.toUpperCase(), 0, 10);
         ctx.restore();
-
-        ctx.strokeStyle = "rgba(255,255,255,0.5)";
-        ctx.lineWidth = 2;
-        ctx.strokeRect(x, pad, w, usableHeight);
     };
 
-    drawEndzone(-10, 0, awayColor, currentLiveGameResult?.awayTeam?.name || "AWAY", false);
-    drawEndzone(100, 110, homeColor, currentLiveGameResult?.homeTeam?.name || "HOME", true);
+    drawEndzone(0, 10, awayColor, currentLiveGameResult?.awayTeam?.name || "AWAY", false);
+    drawEndzone(110, 120, homeColor, currentLiveGameResult?.homeTeam?.name || "HOME", true);
 
-    // C. Yard Lines & Hashes
-    ctx.textAlign = "center";
-    ctx.font = "bold 11px Arial";
-    for (let i = 1; i < 100; i++) {
-        const x = toScreenX(i);
-        if (x < -10 || x > width + 10) continue;
-
-        if (i % 10 === 0) {
-            ctx.strokeStyle = "rgba(255,255,255,0.5)";
-            ctx.beginPath(); ctx.moveTo(x, pad); ctx.lineTo(x, height - pad); ctx.stroke();
-            ctx.fillStyle = "rgba(255,255,255,0.4)";
-            const num = i <= 50 ? i : 100 - i;
-            ctx.fillText(num, x, pad + 15);
-            ctx.fillText(num, x, height - pad - 10);
-        } else if (i % 5 === 0) {
-            ctx.strokeStyle = "rgba(255,255,255,0.2)";
-            ctx.beginPath(); ctx.moveTo(x, pad); ctx.lineTo(x, height - pad); ctx.stroke();
-        }
-    }
-
-    // D. LOS & First Down Lines
-    const drawDynamicLine = (y, color) => {
-        const x = toScreenX(y);
-        if (x >= 0 && x <= width) {
+    // --- 7. LOS & FIRST DOWN LINES ---
+    const drawLine = (y, color) => {
+        const sY = toScreenY(y);
+        if (sY >= 0 && sY <= height) {
             ctx.strokeStyle = color;
-            ctx.lineWidth = 2;
-            ctx.beginPath(); ctx.moveTo(x, pad); ctx.lineTo(x, height - pad); ctx.stroke();
+            ctx.lineWidth = 3;
+            ctx.beginPath(); ctx.moveTo(0, sY); ctx.lineTo(width, sY); ctx.stroke();
         }
     };
-    drawDynamicLine(frameData.lineOfScrimmage, "#3b82f6"); // Blue LOS
-    drawDynamicLine(frameData.firstDownY, "#eab308");     // Yellow 1st Down
+    drawLine(frameData.lineOfScrimmage, "#3b82f6"); // Blue line
+    drawLine(frameData.firstDownY, "#eab308");      // Yellow line
 
-    // 6. DRAW PLAYERS (With Boundary Clipping)
+    // --- 8. DRAW PLAYERS ---
     if (frameData.players) {
-        ctx.save();
-        ctx.beginPath();
-        ctx.rect(0, pad, width, usableHeight); // Clip to sidelines
-        ctx.clip();
-
         frameData.players.forEach(p => {
-            const drawX = toScreenX(p.y);
-            const drawY = toScreenY(p.x);
+            const px = toScreenX(p.x);
+            const py = toScreenY(p.y);
+            const radius = scale * 0.6;
 
-            // Determine base radius
-            let radius = scale * 0.7;
+            if (py < -20 || py > height + 20) return;
 
-            // VISUAL JUICE: If it's the QB and they are shouting, make them pulse/grow
-            if (p.role === 'QB' && p.isOffense && isQBShouting) {
-                radius *= 1.3; // Grow 30% for emphasis
-            }
+            // Player Shadow
+            ctx.fillStyle = "rgba(0,0,0,0.2)";
+            ctx.beginPath(); ctx.arc(px, py + 2, radius, 0, Math.PI * 2); ctx.fill();
 
             // Player Body
             ctx.fillStyle = p.isOffense ? '#3b82f6' : '#ef4444';
-            ctx.beginPath();
-            ctx.arc(drawX, drawY, radius, 0, Math.PI * 2);
-            ctx.fill();
-
-            // Number
-            ctx.fillStyle = "white";
-            ctx.font = `bold ${Math.max(6, radius * 0.5)}px sans-serif`;
-            ctx.textAlign = "center";
-            ctx.textBaseline = "middle";
-            ctx.fillText(p.number || '', drawX, drawY);
-
-            // Floating Position Label
-            if (p.role) {
-                const labelX = drawX + radius + 3;
-                ctx.font = `bold ${Math.max(8, scale * 0.4)}px sans-serif`;
-                const labelW = ctx.measureText(p.role).width + 4;
-
-                ctx.fillStyle = "rgba(0, 0, 0, 0.6)";
-                ctx.fillRect(labelX - 2, drawY - 6, labelW, 12);
-
-                ctx.fillStyle = "white";
-                ctx.textAlign = "left";
-                ctx.fillText(p.role, labelX, drawY + 1);
-            }
+            ctx.beginPath(); ctx.arc(px, py, radius, 0, Math.PI * 2); ctx.fill();
+            ctx.strokeStyle = "white";
+            ctx.lineWidth = 1;
+            ctx.stroke();
 
             // Ball Carrier Highlight
             if (p.isBallCarrier) {
                 ctx.strokeStyle = "#fbbf24";
-                ctx.lineWidth = 2;
-                ctx.beginPath();
-                ctx.arc(drawX, drawY, radius + 2, 0, Math.PI * 2);
-                ctx.stroke();
+                ctx.lineWidth = 3;
+                ctx.beginPath(); ctx.arc(px, py, radius + 3, 0, Math.PI * 2); ctx.stroke();
             }
+            
+            // Player Role Text
+            ctx.fillStyle = "white";
+            ctx.font = `bold ${Math.max(8, scale * 0.4)}px sans-serif`;
+            ctx.fillText(p.role || '', px, py + radius + 10);
         });
-        ctx.restore();
     }
 
-    // 7. DRAW BALL
-    if (frameData.ball?.inAir) {
-        const bx = toScreenX(frameData.ball.y);
-        const by = toScreenY(frameData.ball.x);
-        const zOffset = (frameData.ball.z || 0) * scale * 1.5;
-        ctx.fillStyle = "#854d0e";
+    // --- 9. DRAW BALL ---
+    if (frameData.ball) {
+        const bx = toScreenX(frameData.ball.x);
+        const by = toScreenY(frameData.ball.y);
+        const bz = (frameData.ball.z || 0) * scale;
+
+        ctx.fillStyle = "#451a03"; // Football Brown
         ctx.beginPath();
-        ctx.ellipse(bx, by - zOffset, scale * 0.5, scale * 0.3, 0, 0, Math.PI * 2);
+        ctx.ellipse(bx, by - bz, scale * 0.4, scale * 0.25, 0, 0, Math.PI * 2);
         ctx.fill();
     }
 }
@@ -2342,28 +2301,32 @@ function initLivePlayerStats(gameResult) {
     });
 }
 
+/**
+ * REFINED: Synchronizes sidebar stats with the text log entries.
+ * Specifically tuned for the Backyard Football GM log format.
+ */
 function updateStatsFromLogEntry(entry) {
     if (!entry || !currentLiveGameResult) return;
 
-    // --- 1. Helper: Find Player ID by Name ---
-    // We need this because logs contain Names ("Tom Brady"), but stats are keyed by ID.
+    // --- 1. OPTIMIZED LOOKUP ---
+    // Using a simple cache to avoid looping through rosters 60 times a second
     const findIdByName = (name) => {
         if (!name) return null;
-        const homeRoster = getUIRosterObjects(currentLiveGameResult.homeTeam);
-        const awayRoster = getUIRosterObjects(currentLiveGameResult.awayTeam);
-        const p = [...homeRoster, ...awayRoster].find(pl => pl.name === name);
+        const cleanName = name.trim();
+        // Search current simulation team rosters
+        const p = [...currentLiveGameResult.homeTeam.roster, ...currentLiveGameResult.awayTeam.roster]
+            .map(id => getPlayer(id))
+            .find(pl => pl && pl.name === cleanName);
         return p ? p.id : null;
     };
 
-    // --- 2. Helper: Get Stats Object ---
     const getStats = (pid) => {
         if (!pid) return null;
         if (!livePlayerStats.has(pid)) {
             livePlayerStats.set(pid, {
                 passAttempts: 0, passCompletions: 0, passYards: 0, interceptionsThrown: 0,
                 receptions: 0, recYards: 0, drops: 0,
-                rushAttempts: 0, rushYards: 0,
-                returnYards: 0,
+                rushAttempts: 0, rushYards: 0, returnYards: 0,
                 touchdowns: 0, interceptions: 0, fumbles: 0, fumblesLost: 0, fumblesRecovered: 0,
                 tackles: 0, sacks: 0
             });
@@ -2371,13 +2334,11 @@ function updateStatsFromLogEntry(entry) {
         return livePlayerStats.get(pid);
     };
 
-    // --- 3. Parse Logic ---
+    // --- 2. PARSE LOGIC ---
 
-    // --- A. New Play / Context Reset ---
-    // Resets context when a new play starts in the logs
+    // A. Context Reset (New Play or Down)
     if (entry.includes('---') || entry.includes('Offense:')) {
         livePlayContext = { type: 'run', passerId: null, receiverId: null, catchMade: false };
-
         if (entry.includes('Offense:')) {
             // Simple keyword detection for pass plays
             const lower = entry.toLowerCase();
@@ -2387,207 +2348,176 @@ function updateStatsFromLogEntry(entry) {
         }
     }
 
-    // B. Pass Attempt
-    // Log: "🏈 [Name] throws to..."
+    // B. Pass Attempt (Matches: 🏈 Reese 'Slinger' throws to...)
     const throwMatch = entry.match(/🏈 (.*?) throws to/);
     if (throwMatch) {
-        livePlayContext.type = 'pass'; // Confirm it's a pass
+        livePlayContext.type = 'pass';
         const qbId = findIdByName(throwMatch[1]);
         if (qbId) {
             livePlayContext.passerId = qbId;
-            const s = getStats(qbId);
-            s.passAttempts++;
+            getStats(qbId).passAttempts++;
         }
     }
 
-    // C. Reception
-    // Log: "👍 CATCH! [Name] makes the reception!"
-    const catchMatch = entry.match(/CATCH! (.*?) makes/);
+    // C. Completion (Matches: 👍 CATCH! Tom Freeman grabs it!)
+    const catchMatch = entry.match(/CATCH! (.*?) grabs/);
     if (catchMatch) {
         livePlayContext.catchMade = true;
         const recId = findIdByName(catchMatch[1]);
         if (recId) {
             livePlayContext.receiverId = recId;
-            const s = getStats(recId);
-            s.receptions++;
-        }
-        // Credit Completion to QB immediately
-        if (livePlayContext.passerId) {
-            getStats(livePlayContext.passerId).passCompletions++;
+            getStats(recId).receptions++;
+            if (livePlayContext.passerId) getStats(livePlayContext.passerId).passCompletions++;
         }
     }
 
-    // D. Yards Gained (The big one)
-    // Log: "✋ [Name] tackled by ... for a gain of X" OR "run out of bounds after a gain of X"
-    // We look for the player name at the start of the interaction
-    const gainMatch = entry.match(/(?:✋|🎉) (.*?) (?:tackled|ran out|scores|returns)/);
+    // D. Yards Gained (Matches: 💨 ✋ Tom Freeman tackled by... gain of 15.8)
+    // Also matches: ✋ Harper 'Gizmo' tackled by... loss of 2.7
+    const gainMatch = entry.match(/(?:✋|🎉|💨) (.*?) (?:tackled|scores|returns|breaks)/);
     const yardsMatch = entry.match(/gain of (-?\d+\.?\d*)|loss of (\d+\.?\d*)/);
 
     if (gainMatch && yardsMatch) {
-        const carrierName = gainMatch[1];
-        const carrierId = findIdByName(carrierName);
-        const yards = parseFloat(yardsMatch[1] || `-${yardsMatch[2]}`);
+        const carrierId = findIdByName(gainMatch[1]);
+        const yards = Math.round(parseFloat(yardsMatch[1] || `-${yardsMatch[2]}`));
 
         if (carrierId) {
             const s = getStats(carrierId);
-
             if (livePlayContext.type === 'pass' && livePlayContext.catchMade) {
-                // It's a catch -> Receiving Yards
-                s.recYards += Math.round(yards);
-
-                // Credit Passing Yards to QB
-                if (livePlayContext.passerId) {
-                    getStats(livePlayContext.passerId).passYards += Math.round(yards);
-                }
-            } else if (livePlayContext.type === 'run' || (livePlayContext.type === 'pass' && !livePlayContext.passerId)) {
-                // It's a run (or a scramble where 'throws to' never happened)
-                // Only credit rush attempt if it wasn't a sack (sacks handled below)
-                if (!entry.includes('SACK')) {
-                    s.rushYards += Math.round(yards);
-                    // Avoid double counting carries on the same play (logs sometimes duplicate context)
-                    // We assume 1 carry per log entry with "gain of" for simplicity in live sim
+                s.recYards += yards;
+                if (livePlayContext.passerId) getStats(livePlayContext.passerId).passYards += yards;
+            } else if (!entry.includes('SACK') && !entry.includes('INTERCEPTION')) {
+                // It's a run (scramble or designed)
+                s.rushYards += yards;
+                // Only count 1 attempt per play context
+                if (!livePlayContext.rushCounted) {
                     s.rushAttempts++;
+                    livePlayContext.rushCounted = true;
                 }
             }
         }
     }
 
-    // E. Touchdowns
-    if (entry.includes('TOUCHDOWN')) {
-        // Log: "🎉 TOUCHDOWN [Name]!"
-        const tdMatch = entry.match(/TOUCHDOWN (.*?)!/);
-        if (tdMatch) {
-            const scorerId = findIdByName(tdMatch[1]);
-            if (scorerId) {
-                getStats(scorerId).touchdowns++;
-
-                // If it was a pass, credit QB
-                if (livePlayContext.type === 'pass' && livePlayContext.catchMade && livePlayContext.passerId) {
-                    getStats(livePlayContext.passerId).touchdowns++;
-                }
-            }
-        }
-    }
-
-    // F. Interceptions
-    if (entry.includes('INTERCEPTION')) {
-        // Log: "❗ INTERCEPTION! [Name] jumps the route!"
-        const intMatch = entry.match(/INTERCEPTION! (.*?) jumps/);
-        if (intMatch) {
-            const defId = findIdByName(intMatch[1]);
-            if (defId) getStats(defId).interceptions++;
-
-            // Credit QB with INT thrown
-            if (livePlayContext.passerId) {
-                getStats(livePlayContext.passerId).interceptionsThrown++;
-            }
-        }
-    }
-
-    // G. Sacks
+    // E. Sacks (Matches: 💥 SACK! [Def] drops [QB]!)
     if (entry.includes('SACK!')) {
-        // Log: "💥 SACK! [Defender] drops [QB]!"
         const sackMatch = entry.match(/SACK! (.*?) drops (.*?)!/);
         if (sackMatch) {
             const defId = findIdByName(sackMatch[1]);
-            const qbId = findIdByName(sackMatch[2]);
             if (defId) getStats(defId).sacks++;
-            // Sacks count as negative rush yards in this engine usually, 
-            // handled by the "gain/loss" logic if the log line appears, 
-            // but we don't add a rush attempt.
+        }
+    }
+
+    // F. Interceptions (Matches: ❗ INTERCEPTION! Justice 'Joker' picks it off!)
+    if (entry.includes('INTERCEPTION')) {
+        const intMatch = entry.match(/INTERCEPTION! (.*?) picks/);
+        if (intMatch) {
+            const defId = findIdByName(intMatch[1]);
+            if (defId) getStats(defId).interceptions++;
+            if (livePlayContext.passerId) getStats(livePlayContext.passerId).interceptionsThrown++;
+        }
+    }
+
+    // G. Drops (Matches: ❌ Sam 'Wizard' drops the pass!)
+    if (entry.includes('drops the pass')) {
+        const dropMatch = entry.match(/❌ (.*?) drops/);
+        if (dropMatch) {
+            const dropperId = findIdByName(dropMatch[1]);
+            if (dropperId) getStats(dropperId).drops++;
         }
     }
 }
 
 function renderLiveStatsLive() {
     if (!elements.simLiveStats || !currentLiveGameResult) return;
+
     const home = currentLiveGameResult.homeTeam || {};
     const away = currentLiveGameResult.awayTeam || {};
-    const homeName = home.name || 'Home';
-    const awayName = away.name || 'Away';
 
-    const h = liveGameStats.home;
-    const a = liveGameStats.away;
+    // 💡 NEW: Calculate team totals dynamically from livePlayerStats
+    const getTeamTotals = (team) => {
+        let yards = 0;
+        let turnovers = 0;
+        team.roster.forEach(pid => {
+            const s = livePlayerStats.get(pid);
+            if (s) {
+                // Team yards = Passing + Rushing (to avoid double counting receiving)
+                yards += (s.passYards + s.rushYards);
+                turnovers += (s.interceptionsThrown + s.fumblesLost);
+            }
+        });
+        return { yards: Math.round(yards), turnovers };
+    };
+
+    const hTotals = getTeamTotals(home);
+    const aTotals = getTeamTotals(away);
 
     // --- Helper to build individual stats lines ---
     const getTopPerformersHtml = (team) => {
-        if (!team) return '';
-        const roster = getUIRosterObjects(team);
-        const playersWithStats = roster.map(p => {
-            const stats = livePlayerStats.get(p.id);
-            // Return player object merged with their live stats if they exist
-            return stats ? { name: p.name, ...stats } : null;
-        }).filter(p => p); // Remove nulls
+        if (!team || !team.roster) return '';
 
-        let html = '';
+        // Map roster IDs to their live stats objects
+        const playersWithStats = team.roster.map(pid => {
+            const stats = livePlayerStats.get(pid);
+            if (!stats) return null;
+            const pData = getPlayer(pid);
 
-        // 1. Passing Leader (Current QB)
-        const qb = playersWithStats.find(p => p.passAttempts > 0);
-        if (qb) {
-            html += `<div class="text-xs text-gray-300 mt-1 truncate">
-                <span class="text-amber-400">${qb.name}</span>: ${qb.passCompletions}/${qb.passAttempts}, ${qb.passYards} yds
-                ${qb.touchdowns > 0 ? `, ${qb.touchdowns} TD` : ''}
-                ${qb.interceptionsThrown > 0 ? `, ${qb.interceptionsThrown} INT` : ''}
-            </div>`;
-        }
+            // Calculate an "Impact Score" to decide who to show in the limited sidebar space
+            const impact = stats.passYards + stats.rushYards + stats.recYards + (stats.touchdowns * 20);
 
-        // 2. Rushing Leader
-        const rusher = playersWithStats
-            .filter(p => p.rushAttempts > 0)
-            .sort((a, b) => b.rushYards - a.rushYards)[0];
+            return impact > 0 ? { name: pData.name, id: pid, impact, ...stats } : null;
+        }).filter(p => p !== null);
 
-        if (rusher) {
-            html += `<div class="text-xs text-gray-300 truncate">
-                <span class="text-blue-300">${rusher.name}</span>: ${rusher.rushAttempts} car, ${rusher.rushYards} yds
-                ${rusher.touchdowns > 0 ? `, ${rusher.touchdowns} TD` : ''}
-            </div>`;
-        }
+        // Sort by impact (highest first) and take the top 3
+        const top3 = playersWithStats.sort((a, b) => b.impact - a.impact).slice(0, 3);
 
-        // 3. Receiving Leader
-        const receiver = playersWithStats
-            .filter(p => p.receptions > 0)
-            .sort((a, b) => b.recYards - a.recYards)[0];
+        if (top3.length === 0) return '<div class="text-[10px] text-gray-500 italic">No stats yet...</div>';
 
-        if (receiver) {
-            html += `<div class="text-xs text-gray-300 truncate">
-                <span class="text-green-300">${receiver.name}</span>: ${receiver.receptions} rec, ${receiver.recYards} yds
-                ${receiver.touchdowns > 0 ? `, ${receiver.touchdowns} TD` : ''}
-            </div>`;
-        }
+        return top3.map(p => {
+            let statLine = "";
+            // Determine the primary stat to show for this player
+            if (p.passAttempts > 0) {
+                statLine = `${p.passCompletions}/${p.passAttempts}, ${p.passYards} pass`;
+            } else if (p.rushYards >= p.recYards) {
+                statLine = `${p.rushYards} rush, ${p.rushAttempts} car`;
+            } else {
+                statLine = `${p.recYards} rec, ${p.receptions} ctch`;
+            }
 
-        return html;
+            return `
+                <div class="mb-2 animate-fadeIn">
+                    <div class="flex justify-between items-baseline">
+                        <span class="text-[11px] font-bold text-gray-200 truncate w-24">${p.name}</span>
+                        <span class="text-[10px] font-bold text-amber-400">${p.touchdowns > 0 ? p.touchdowns + ' TD' : ''}</span>
+                    </div>
+                    <div class="text-[10px] text-gray-400 font-mono">${statLine}</div>
+                </div>
+            `;
+        }).join('');
     };
 
-    // --- Build Final HTML ---
-    const html = `
-        <div class="flex justify-between h-full">
-            <div class="w-1/2 pr-2 border-r border-gray-700">
-                <h5 class="text-sm font-bold text-white mb-1">${awayName}</h5>
-                <p class="text-xs text-gray-400 mb-2">
-                    Yds: <strong class="text-white">${a.yards}</strong> • 
-                    TOs: <strong class="text-white">${a.turnovers}</strong>
-                </p>
-                
+    // --- Build Final Layout ---
+    elements.simLiveStats.innerHTML = `
+        <div class="flex gap-4 h-full">
+            <div class="flex-1">
+                <div class="flex justify-between items-end border-b border-red-900/30 pb-1 mb-2">
+                    <h5 class="text-xs font-black text-red-400 uppercase truncate max-w-[80px]">${away.name}</h5>
+                    <span class="text-[10px] text-gray-500 font-mono">${aTotals.yards} YDS</span>
+                </div>
                 <div class="space-y-1">
                     ${getTopPerformersHtml(away)}
                 </div>
             </div>
 
-            <div class="w-1/2 pl-2">
-                <h5 class="text-sm font-bold text-white mb-1">${homeName}</h5>
-                <p class="text-xs text-gray-400 mb-2">
-                    Yds: <strong class="text-white">${h.yards}</strong> • 
-                    TOs: <strong class="text-white">${h.turnovers}</strong>
-                </p>
-
+            <div class="flex-1">
+                <div class="flex justify-between items-end border-b border-blue-900/30 pb-1 mb-2">
+                    <h5 class="text-xs font-black text-blue-400 uppercase truncate max-w-[80px]">${home.name}</h5>
+                    <span class="text-[10px] text-gray-500 font-mono">${hTotals.yards} YDS</span>
+                </div>
                 <div class="space-y-1">
                     ${getTopPerformersHtml(home)}
                 </div>
             </div>
         </div>
     `;
-
-    elements.simLiveStats.innerHTML = html;
 }
 
 function renderSimPlayers(frame) {
@@ -3101,49 +3031,38 @@ function runLiveGameTick() {
  * It clears the field and restarts the fast "action" clock.
  */
 function startNextPlay() {
-    huddleTimeout = null;
-
-    if (!currentLiveGameResult || liveGameCurrentIndex >= currentLiveGameResult.visualizationFrames.length) {
-        runLiveGameTick();
-        return;
-    }
+    // 1. Clear everything to prevent "Double Loop" freezes
+    if (liveGameInterval) { clearInterval(liveGameInterval); liveGameInterval = null; }
+    if (huddleTimeout) { clearTimeout(huddleTimeout); huddleTimeout = null; }
 
     const allFrames = currentLiveGameResult.visualizationFrames;
     const snapFrame = allFrames[liveGameCurrentIndex];
 
     if (snapFrame) {
-        // 1. Move everyone to new LOS
         drawFieldVisualization(snapFrame);
         renderSimPlayers(snapFrame);
 
-        // 2. Initial "SET" Phase
         if (elements.simBannerOffense) elements.simBannerOffense.textContent = "SET...";
 
-        // 3. START THE SNAP COUNT SEQUENCE
-        // We chain timeouts to create the "Blue 42... Hut! Hut!" feel
-
-        // Sequence: 0ms (SET) -> 800ms (HIKE 1) -> 1600ms (HIKE 2) -> 2000ms (SNAP)
-
-        // --- Count 1 ---
+        // 2. The Cadence sequence
         setTimeout(() => {
             if (elements.simBannerOffense) elements.simBannerOffense.textContent = "BLUE 42...";
-            animateQBShout(snapFrame); // Adds visual "shake" to the QB
-        }, 800);
+        }, 700);
 
-        // --- Count 2 ---
         setTimeout(() => {
             if (elements.simBannerOffense) elements.simBannerOffense.textContent = "SET, HUT!!";
-            animateQBShout(snapFrame);
-        }, 1600);
+        }, 1400);
 
-        // --- THE SNAP ---
+        // 3. THE HIKE: This MUST start the interval
         huddleTimeout = setTimeout(() => {
-            if (elements.simBannerOffense) elements.simBannerOffense.textContent = "BALL SNAPPED!";
+            if (elements.simBannerOffense) elements.simBannerOffense.textContent = "HIKE!";
 
+            // Start the movement loop
             if (!liveGameInterval) {
-                liveGameInterval = setInterval(runLiveGameTick, liveGameSpeed);
+                const speed = liveGameSpeed || 80; // Fallback to 80ms if speed is missing
+                liveGameInterval = setInterval(runLiveGameTick, speed);
             }
-        }, 2000);
+        }, 2000); // 2 second huddle
     }
 }
 
@@ -3178,16 +3097,8 @@ export function startLiveGameSim(gameResult, onComplete) {
     const scoreboard = elements.simScoreboard;
 
     // --- 1. Validate Elements ---
-    if (
-        !ticker ||
-        !scoreboard ||
-        !elements.simAwayScore ||
-        !elements.simHomeScore ||
-        !elements.simGameDrive ||
-        !elements.simGameDown ||
-        !elements.simPossession ||
-        !elements.simFieldPlayers
-    ) {
+    if (!ticker || !scoreboard || !elements.simAwayScore || !elements.simHomeScore ||
+        !elements.simGameDrive || !elements.simGameDown || !elements.simPossession || !elements.simFieldPlayers) {
         console.error("Live sim UI elements missing (critical).");
         if (onComplete) onComplete(gameResult);
         return;
@@ -3205,6 +3116,8 @@ export function startLiveGameSim(gameResult, onComplete) {
         clearInterval(liveGameInterval);
         liveGameInterval = null;
     }
+    clearTimeout(huddleTimeout);
+    huddleTimeout = null;
 
     // --- 4. Reset Global State ---
     liveGameCallback = onComplete;
@@ -3216,58 +3129,58 @@ export function startLiveGameSim(gameResult, onComplete) {
     liveGameBallOn = 20;
     liveGameDriveText = "Kickoff";
 
-    // ===============================================
-    // 💡 CANVAS RESIZE LOGIC (Fixes "Wasted Space")
-    // ===============================================
+    // 💡 CLEAR AND REFILL THE ID LOOKUP MAP
+    playerNameIdMap.clear();
+    livePlayerStats.clear(); // Ensure fresh stats for this game
+
+    // Populate Map with Home & Away rosters
+    const allPlayersInGame = [
+        ...getUIRosterObjects(gameResult.homeTeam),
+        ...getUIRosterObjects(gameResult.awayTeam)
+    ];
+
+    allPlayersInGame.forEach(p => {
+        if (p && p.name && p.id) {
+            playerNameIdMap.set(p.name, p.id);
+        }
+    });
+
+    // --- 5. Canvas Resize Logic ---
     const canvas = elements.fieldCanvas;
     if (canvas && canvas.parentElement) {
-        // Remove CSS classes that constrain width/height
         canvas.classList.remove('h-full', 'w-auto');
-        canvas.classList.add('w-full', 'h-full'); // Force full fill
-
-        // 1. Read the actual pixel size of the container
+        canvas.classList.add('w-full', 'h-full');
         const rect = canvas.parentElement.getBoundingClientRect();
-
-        // 2. Set the internal resolution to match (crisp graphics)
         canvas.width = rect.width;
         canvas.height = rect.height;
     }
-    // ===============================================
 
-    // --- 5. Initial UI Render ---
+    // --- 6. Initial UI Render ---
     ticker.innerHTML = '';
-
-    // Set Team Names & Reset Scores
     elements.simAwayTeam.textContent = gameResult.awayTeam.name;
     elements.simHomeTeam.textContent = gameResult.homeTeam.name;
     elements.simAwayScore.textContent = '0';
     elements.simHomeScore.textContent = '0';
-
-    // Set Drive Info
     elements.simGameDrive.textContent = liveGameDriveText;
     elements.simGameDown.textContent = "1st & 10";
     elements.simPossession.textContent = '';
-    elements.simBannerOffense.textContent = "Waiting for snap...";
-    elements.simBannerDefense.textContent = "Reading offense...";
+    elements.simBannerOffense.textContent = "SET...";
+    elements.simBannerDefense.textContent = "READY...";
     elements.simFieldPlayers.innerHTML = '';
 
-    // --- 6. Initial Field Draw ---
-    // Draw the very first frame immediately so the user doesn't see a blank screen
+    // --- 7. Initial Field Draw ---
     if (gameResult.visualizationFrames.length > 0) {
         const initialFrame = gameResult.visualizationFrames[0];
-
         renderSimPlayers(initialFrame);
-
         if (elements.fieldCanvasCtx) {
             drawFieldVisualization(initialFrame);
         }
     }
 
-    // Apply speed settings
-    setSimSpeed(liveGameSpeed);
-
-    // --- 7. Start the Loop ---
-    liveGameInterval = setInterval(runLiveGameTick, liveGameSpeed);
+    // --- 8. START THE HUDDLE SEQUENCE (Not the interval!) ---
+    // 💡 IMPORTANT: We call startNextPlay() which handles the "Cadence" 
+    // and then starts the interval automatically after "Hike!"
+    startNextPlay();
 }
 
 export function skipLiveGameSim() {
