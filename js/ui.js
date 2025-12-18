@@ -2981,42 +2981,71 @@ function runLiveGameTick() {
         liveGameCurrentIndex++;
     }
 } // End of runLiveGameTick
-/**
- * 🛠️ NEW HELPER FUNCTION
- * This function is called after the "huddle pause" (setTimeout) finishes.
- * It clears the field and restarts the fast "action" clock.
- */
+
+
+function updateSimPlayerUI(pState) {
+    const energyBar = document.getElementById(`sim-energy-${pState.id}`);
+    const fatigueText = document.getElementById(`sim-fatigue-${pState.id}`);
+    
+    if (energyBar) {
+        // Calculate percentages locally
+        const stamina = pState.stamina || 50; 
+        const energyPct = Math.max(0, Math.round(100 - (pState.fatigue / stamina * 100)));
+        energyBar.style.width = `${energyPct}%`;
+    }
+    if (fatigueText) {
+        fatigueText.textContent = `Fatigue: ${Math.round(pState.fatigue)}`;
+    }
+}
+
+// In runLiveGameTick, replace renderSimPlayers(frame) with:
+if (frame.players) {
+    frame.players.forEach(p => updateSimPlayerUI(p));
+}
+
 function startNextPlay() {
     // 1. Clear everything to prevent "Double Loop" freezes
     if (liveGameInterval) { clearInterval(liveGameInterval); liveGameInterval = null; }
     if (huddleTimeout) { clearTimeout(huddleTimeout); huddleTimeout = null; }
+
+    // Safety check: ensure game data still exists
+    if (!currentLiveGameResult || !currentLiveGameResult.visualizationFrames) return;
 
     const allFrames = currentLiveGameResult.visualizationFrames;
     const snapFrame = allFrames[liveGameCurrentIndex];
 
     if (snapFrame) {
         drawFieldVisualization(snapFrame);
-        renderSimPlayers(snapFrame);
+        
+        // ⚡ PERFORMANCE FIX: Update UI without rebuilding DOM
+        if (typeof updateSimPlayerUI === 'function') {
+             if (snapFrame.players) snapFrame.players.forEach(p => updateSimPlayerUI(p));
+        } else {
+             renderSimPlayers(snapFrame); // Fallback to slow render if optimized function not added yet
+        }
 
         if (elements.simBannerOffense) elements.simBannerOffense.textContent = "SET...";
 
-        // 1. "BLUE 42..."
+        // 1. "BLUE 42..." (0.7s delay)
         setTimeout(() => {
             if (elements.simBannerOffense) elements.simBannerOffense.textContent = "BLUE 42...";
-            // 💡 TRIGGER SHAKE
             animateQBShout(snapFrame);
         }, 700);
 
-        // 2. "SET, HUT!!"
+        // 2. "SET, HUT!!" (1.4s delay)
         setTimeout(() => {
             if (elements.simBannerOffense) elements.simBannerOffense.textContent = "SET, HUT!!";
-            // 💡 TRIGGER SHAKE AGAIN
             animateQBShout(snapFrame);
         }, 1400);
 
-        // 3. "HIKE!"
+        // 3. "HIKE!" -> RESTART SIMULATION (2.0s delay)
         huddleTimeout = setTimeout(() => {
-            // ... existing hike logic ...
+            if (elements.simBannerOffense) elements.simBannerOffense.textContent = ""; // Clear banner
+            
+            // Resume the game loop!
+            if (!liveGameInterval) {
+                liveGameInterval = setInterval(runLiveGameTick, liveGameSpeed);
+            }
         }, 2000);
     }
 }
