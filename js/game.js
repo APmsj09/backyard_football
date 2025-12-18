@@ -63,6 +63,7 @@ const TACKLE_RANGE = 1.8;
 const CATCH_RADIUS = 0.8;
 const SEPARATION_THRESHOLD = 2.0;
 const PLAYER_SEPARATION_RADIUS = 0.6;
+const FUMBLE_CHANCE_BASE = 0.015;
 
 // --- Event/Balance Constants ---
 const weeklyEvents = [
@@ -79,7 +80,8 @@ const offseasonDepartureEvents = [
 ];
 const transferEventChance = 0.02;
 const joinRequestChance = 0.03;
-const FUMBLE_CHANCE_BASE = 0.03;
+
+
 
 // --- Attribute Weights ---
 // Player rating/generation helpers moved to ./game/player.js
@@ -416,38 +418,51 @@ function getScoutedPlayerInfo(player, relationshipLevelNum) {
 
 /** Checks for a fumble during a tackle attempt. */
 function checkFumble(ballCarrierState, tacklerState, playState, gameLog) {
+    if (!ballCarrierState.hasBall) return false;
+
+    // Attribute Lookups (Safety check if attributes missing)
     const toughness = ballCarrierState.toughness || 50;
     const strength = tacklerState.strength || 50;
     const tackling = tacklerState.tackling || 50;
 
-    const carrierModifier = toughness / 100;
-    const tacklerModifier = (strength + tackling) / 100;
+    // Modifiers: Fatigue makes fumbles more likely
+    const carrierMod = (toughness / 100) * (ballCarrierState.fatigueModifier || 1);
+    const tacklerMod = ((strength + tackling) / 200) * (tacklerState.fatigueModifier || 1);
 
-    const fumbleChance =
-        FUMBLE_CHANCE_BASE * (tacklerModifier / (carrierModifier + 0.5));
+    // Formula: Harder hit (tacklerMod) vs Tougher carrier (carrierMod)
+    let fumbleChance = FUMBLE_CHANCE_BASE * (tacklerMod / (carrierMod + 0.2));
+
+    // QB Sacks have higher fumble chance (blindside logic)
+    if (ballCarrierState.role === 'QB' && ballCarrierState.action === 'qb_setup') {
+        fumbleChance *= 2.5; 
+    }
 
     if (Math.random() < fumbleChance) {
         if (gameLog) {
             gameLog.push(`❗ FUMBLE! Ball knocked loose by ${tacklerState.name}!`);
         }
 
+        // Logic: Drop ball at current spot
         playState.fumbleOccurred = true;
-
         playState.ballState.isLoose = true;
-        playState.ballState.inAir = false;
-        playState.ballState.z = 0.1;
-        playState.ballState.vx = 0;
-        playState.ballState.vy = 0;
+        playState.ballState.inAir = false; // It's on the ground
+        
+        // Physics: Small bounce vector based on tackler direction
+        const dx = ballCarrierState.x - tacklerState.x;
+        const dy = ballCarrierState.y - tacklerState.y;
+        playState.ballState.vx = dx * 2; 
+        playState.ballState.vy = dy * 2;
         playState.ballState.x = ballCarrierState.x;
         playState.ballState.y = ballCarrierState.y;
+        playState.ballState.z = 0.5; // Bounce height
 
+        // State Updates
         ballCarrierState.isBallCarrier = false;
         ballCarrierState.hasBall = false;
-        ballCarrierState.stunnedTicks = 40;
+        ballCarrierState.stunnedTicks = 40; // Stunned
+        tacklerState.stunnedTicks = 10;     // Brief recovery
 
-        tacklerState.stunnedTicks = 20;
-
-        // ✅ Step-3: defer stats
+        // Stats
         playState.statEvents.push({
             type: 'fumble',
             playerId: ballCarrierState.id
@@ -3377,256 +3392,125 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
  * 💡 IMPROVED: More realistic blocking interactions with strength calculations
  */
 function checkBlockCollisions(playState) {
-    const offenseStates = playState.activePlayers.filter(p => p.isOffense);
-    const defenseStates = playState.activePlayers.filter(p => !p.isOffense);
+    const blockers = playState.activePlayers.filter(p => p.isOffense && !p.isEngaged && p.stunnedTicks === 0);
+    const defenders = playState.activePlayers.filter(p => !p.isOffense && !p.isEngaged && p.stunnedTicks === 0);
 
-    offenseStates.forEach(blocker => {
-        // Skip if blocker is stunned or already engaged
-        if (blocker.stunnedTicks > 0 || blocker.isEngaged) {
-            return;
+    blockers.forEach(blocker => {
+        // 1. Valid Actions Only
+        if (blocker.action !== 'pass_block' && blocker.action !== 'run_block') return;
+
+        let target = null;
+
+        // 2. Priority: Assigned Target (from AI targeting)
+        if (blocker.dynamicTargetId) {
+            target = defenders.find(d => d.id === blocker.dynamicTargetId);
+            // Verify target is still valid/close
+            if (!target || target.isEngaged || getDistance(blocker, target) > BLOCK_ENGAGE_RANGE) {
+                target = null; // Lost him
+            }
         }
 
-        const isRunBlock = blocker.action === 'run_block';
-        const isPassBlock = blocker.action === 'pass_block';
+        // 3. Fallback: Any Defender in Range (Gap help)
+        if (!target) {
+            // Sort by proximity
+            target = defenders
+                .filter(d => getDistance(blocker, d) < BLOCK_ENGAGE_RANGE)
+                .sort((a, b) => getDistance(blocker, a) - getDistance(blocker, b))[0];
+        }
 
-        if (isPassBlock || isRunBlock) {
-            let targetDefender = null;
+        // 4. Engage
+        if (target) {
+            // Calculate Strength Win/Loss immediately to set initial momentum
+            const strDiff = (blocker.strength || 50) - (target.strength || 50);
+            
+            // Link them
+            blocker.isEngaged = true;
+            blocker.engagedWith = target.id;
+            target.isEngaged = true;
+            target.isBlocked = true;
+            target.blockedBy = blocker.id;
 
-            // 1. Check if the assigned target is valid and in range
-            if (blocker.dynamicTargetId) {
-                const assignedTarget = defenseStates.find(d =>
-                    d.id === blocker.dynamicTargetId &&
-                    !d.isBlocked &&
-                    !d.isEngaged &&
-                    d.stunnedTicks === 0
-                );
-
-                if (assignedTarget && getDistance(blocker, assignedTarget) < BLOCK_ENGAGE_RANGE) {
-                    targetDefender = assignedTarget;
-                }
-            }
-
-            // 2. Fallback: Check for "help" or "scrape" blocks
-            if (!targetDefender) {
-                const engagedDefenderIds = new Set(
-                    offenseStates.map(o => o.engagedWith).filter(Boolean)
-                );
-
-                const defendersInRange = defenseStates.filter(d =>
-                    !engagedDefenderIds.has(d.id) &&
-                    !d.isBlocked &&
-                    !d.isEngaged &&
-                    d.stunnedTicks === 0 &&
-                    getDistance(blocker, d) < BLOCK_ENGAGE_RANGE
-                );
-
-                if (defendersInRange.length > 0) {
-                    // 💡 IMPROVED: Sort by threat level, including blitz assignments
-                    defendersInRange.sort((a, b) => {
-                        // Priority 1: Blitzers should be picked up first
-                        const aIsBlitzer = a.assignment && (a.assignment.includes('blitz') || a.assignment.includes('rush'));
-                        const bIsBlitzer = b.assignment && (b.assignment.includes('blitz') || b.assignment.includes('rush'));
-
-                        if (aIsBlitzer && !bIsBlitzer) return -1; // a is blitzer, prioritize
-                        if (!aIsBlitzer && bIsBlitzer) return 1;  // b is blitzer, prioritize
-
-                        // Priority 2: Defenders closer to QB or RB (threat to ball carrier)
-                        const ballCarrier = playState.activePlayers.find(p => p.isBallCarrier || p.hasBall);
-                        if (ballCarrier && ballCarrier.isOffense) {
-                            const aQBDist = getDistance(a, ballCarrier);
-                            const bQBDist = getDistance(b, ballCarrier);
-                            const distDiff = aQBDist - bQBDist;
-                            if (Math.abs(distDiff) > 0.5) return distDiff; // Significant difference
-                        }
-
-                        // Priority 3: Closer defenders (secondary tiebreaker)
-                        return getDistance(blocker, a) - getDistance(blocker, b);
-                    });
-                    targetDefender = defendersInRange[0];
-                }
-            }
-
-            // 3. If we found a target, check for realistic engagement conditions
-            if (targetDefender) {
-                // 💡 IMPROVED: "Whiff" logic - defender must not be far past blocker
-                if (isPassBlock) {
-                    const WHIFF_BUFFER = 0.5; // 0.5 yard buffer
-                    if (targetDefender.y < (blocker.y - WHIFF_BUFFER)) {
-                        // Defender has beaten the blocker - can't hold
-                        if (blocker.dynamicTargetId === targetDefender.id) {
-                            blocker.dynamicTargetId = null;
-                        }
-                        targetDefender = null; // Do not engage
-                    }
-                }
-
-                // 💡 NEW: Strength-based win probability for engagement
-                if (targetDefender) {
-                    const blockerStrength = blocker.attributes?.physical?.strength || 50;
-                    const defenderStrength = targetDefender.attributes?.physical?.strength || 50;
-                    const strengthDiff = blockerStrength - defenderStrength;
-
-                    // Stronger defender has better chance to shed block
-                    const engagementSuccessChance = 0.5 + (strengthDiff / 200); // 0-1 range
-                    if (Math.random() > engagementSuccessChance && defenderStrength > blockerStrength + 10) {
-                        // Weak blocker can't engage strong defender
-                        targetDefender = null;
-                    }
-                }
-            }
-
-            // 4. If we *still* have a valid target, initiate the block
-            if (targetDefender) {
-                blocker.engagedWith = targetDefender.id;
-                blocker.isEngaged = true;
-                blocker.dynamicTargetId = targetDefender.id; // Confirm the target
-                blocker.engagementStartTick = playState.tick; // 💡 NEW: Track when engagement started
-
-                targetDefender.isBlocked = true;
-                targetDefender.blockedBy = blocker.id;
-                targetDefender.isEngaged = true;
-                targetDefender.engagementStartTick = playState.tick; // 💡 NEW: Track engagement timing
-
-                playState.blockBattles.push({
-                    blockerId: blocker.id,
-                    defenderId: targetDefender.id,
-                    status: 'ongoing',
-                    battleScore: 0,
-                    startTick: playState.tick,
-                    blockerStrength: blocker.attributes?.physical?.strength || 50,
-                    defenderStrength: targetDefender.attributes?.physical?.strength || 50
-                });
-            }
+            // Add to Battle Queue
+            playState.blockBattles.push({
+                blockerId: blocker.id,
+                defenderId: target.id,
+                status: 'ongoing',
+                battleScore: strDiff / 10, // Initial advantage
+                startTick: playState.tick
+            });
         }
     });
 }
 function checkTackleCollisions(playState, gameLog) {
-    // 1. Identify Ball Carrier
-    const ballCarrierState = playState.activePlayers.find(p =>
-        (p.isBallCarrier || p.hasBall) &&
-        !playState.ballState.inAir &&
-        !playState.ballState.isLoose
+    // 1. Find Ball Carrier
+    const carrier = playState.activePlayers.find(p => p.hasBall && !playState.ballState.isLoose);
+    if (!carrier) return false;
+
+    // 2. Find Active Defenders in Range
+    // Note: We filter out stunned/blocked defenders
+    const defenders = playState.activePlayers.filter(p => 
+        p.teamId !== carrier.teamId && 
+        !p.isBlocked && 
+        p.stunnedTicks === 0 &&
+        getDistance(p, carrier) < TACKLE_RANGE
     );
 
-    if (!ballCarrierState) return false;
+    for (const defender of defenders) {
+        // A. Check Fumble First
+        if (checkFumble(carrier, defender, playState, gameLog)) {
+            return false; // Play continues as loose ball
+        }
 
-    // 2. Find Defenders in Range
-    const TACKLE_RANGE_CHECK = 1.8;
-    const activeDefenders = playState.activePlayers.filter(p =>
-        p.teamId !== ballCarrierState.teamId &&
-        !p.isBlocked && !p.isEngaged && p.stunnedTicks === 0 &&
-        Math.abs(p.x - ballCarrierState.x) < TACKLE_RANGE_CHECK &&
-        Math.abs(p.y - ballCarrierState.y) < TACKLE_RANGE_CHECK
-    );
+        // B. Calculate Tackle Probability (The "Truck Stick" Check)
+        const tacklerSkill = ((defender.tackling || 50) + (defender.strength || 50)) / 2;
+        const runnerSkill  = ((carrier.agility || 50)  + (carrier.strength || 50)) / 2;
+        
+        // Momentum: Heavier runner harder to tackle
+        const weightDiff = (carrier.weight || 200) - (defender.weight || 200);
+        const momentumBonus = Math.max(0, weightDiff / 1000); 
 
-    if (ballCarrierState.tacklesBrokenThisPlay === undefined) {
-        ballCarrierState.tacklesBrokenThisPlay = 0;
-    }
+        // Diminishing returns on broken tackles in same play
+        const fatigueFactor = 1.0 - ((carrier.tacklesBrokenThisPlay || 0) * 0.2);
 
-    for (const defender of activeDefenders) {
-        if (getDistance(ballCarrierState, defender) < TACKLE_RANGE_CHECK) {
+        let successChance = 0.70 + ((tacklerSkill - runnerSkill) * 0.01) - momentumBonus;
+        successChance = Math.max(0.30, Math.min(0.98, successChance)); // Clamp 30%-98%
 
-            // A. Fumble Check (Keep this!)
-            if (typeof checkFumble === 'function' && checkFumble(ballCarrierState, defender, playState, gameLog)) {
-                ballCarrierState.stunnedTicks = 40;
-                return false;
-            }
+        if (Math.random() < successChance) {
+            // --- TACKLE SUCCESS ---
+            playState.yards = carrier.y - playState.lineOfScrimmage;
+            playState.playIsLive = false; // Stop Game Loop
 
-            // --- B. NEW STAT-BASED TACKLE LOGIC ---
+            // Defer Stat
+            playState.statEvents.push({ type: 'tackle', playerId: defender.id });
 
-            // 1. Calculate Skills
-            const tacklerSkill = (defender.tackling || 50) * defender.fatigueModifier;
-            const runnerAgility = (ballCarrierState.agility || 50);
-            const runnerStrength = (ballCarrierState.strength || 50);
+            // Logic: Scoring / Outcomes
+            const isSack = carrier.role === 'QB' && carrier.y < playState.lineOfScrimmage && playState.type === 'pass';
+            const isSafety = (carrier.isOffense && carrier.y <= 10.0) || (!carrier.isOffense && carrier.y >= 110.0);
 
-            // 2. Momentum Bonus (The "Truck Stick" Factor)
-            // Heavier runners get a small bonus to breaking tackles.
-            // 250lbs vs 200lbs = +5% break chance.
-            const weightDiff = (ballCarrierState.weight || 200) - (defender.weight || 200);
-            const momentumBonus = Math.max(0, weightDiff / 1000);
-
-            // 3. Combined Runner Score
-            // Agility helps dodge (60%), Strength helps run through (40%)
-            const runnerSkill = (runnerAgility * 0.6 + runnerStrength * 0.4) * (1.0 - (ballCarrierState.tacklesBrokenThisPlay * 0.2));
-
-            // 4. Calculate Success Chance
-            // Base 70% + (Tackler Advantage * 1%) - Momentum Penalty
-            let tackleChance = 0.70 + ((tacklerSkill - runnerSkill) * 0.01) - momentumBonus;
-
-            // 5. Clamp (Min 40%, Max 98%)
-            tackleChance = Math.max(0.40, Math.min(0.98, tackleChance));
-
-            // --- C. RESOLUTION ---
-            if (Math.random() < tackleChance) {
-                // --- TACKLE MADE ---
-                playState.yards = ballCarrierState.y - playState.lineOfScrimmage;
-                playState.playIsLive = false;
-
-                // ✅ Defer tackle stat
-                playState.statEvents.push({
-                    type: 'tackle',
-                    playerId: defender.id
-                });
-
-                const isBehindLOS = ballCarrierState.y < playState.lineOfScrimmage;
-                const isDesignedRun =
-                    playState.type === 'run' ||
-                    (playState.type === 'pass' &&
-                        ballCarrierState.action === 'qb_scramble' &&
-                        ballCarrierState.y > playState.lineOfScrimmage - 1);
-
-                if (ballCarrierState.isOffense && ballCarrierState.y <= 10.0) {
-                    playState.safety = true;
-                    if (gameLog) {
-                        gameLog.push(`🚨 SAFETY! ${ballCarrierState.name} tackled in the endzone by ${defender.name}!`);
-                    }
-
-                } else if (
-                    ballCarrierState.slot.startsWith('QB') &&
-                    isBehindLOS &&
-                    !isDesignedRun
-                ) {
-                    playState.sack = true;
-                    playState.playIsLive = false;
-                    playState.outcome = 'sack';
-
-                    // ✅ Defer sack stat
-                    playState.statEvents.push({
-                        type: 'sack',
-                        playerId: defender.id,
-                        qbId: ballCarrierState.id
-                    });
-
-                    if (gameLog) {
-                        gameLog.push(`💥 SACK! ${defender.name} drops ${ballCarrierState.name}!`);
-                    }
-
-                } else {
-                    const yards = playState.yards.toFixed(1);
-                    if (gameLog) {
-                        gameLog.push(
-                            `✋ ${ballCarrierState.name} tackled by ${defender.name} for ${yards < 0 ? `a loss of ${Math.abs(yards)}` : `a gain of ${yards}`
-                            }.`
-                        );
-                    }
-                }
-
-                return true;
-
+            if (isSafety) {
+                playState.safety = true;
+                if (gameLog) gameLog.push(`🚨 SAFETY! ${carrier.name} tackled in endzone by ${defender.name}!`);
+            } else if (isSack) {
+                playState.sack = true;
+                playState.yards = Math.floor(playState.yards); // Round down sacks
+                playState.statEvents.push({ type: 'sack', playerId: defender.id, qbId: carrier.id });
+                if (gameLog) gameLog.push(`💥 SACK! ${defender.name} drops ${carrier.name} for loss of ${Math.abs(playState.yards)}!`);
             } else {
-                // --- BROKEN TACKLE ---
-                ballCarrierState.tacklesBrokenThisPlay++;
-                ballCarrierState.action = 'juke';
-
-                // Stumble Penalty (Runner slows down)
-                ballCarrierState.jukeTicks = 10;
-                ballCarrierState.currentSpeedYPS *= 0.5; // Loses 50% speed
-
-                if (gameLog) gameLog.push(`💥 ${ballCarrierState.name} breaks the tackle from ${defender.name}!`);
-
-                // Defender falls
-                defender.stunnedTicks = 20;
+                if (gameLog) gameLog.push(`✋ ${carrier.name} tackled by ${defender.name}.`);
             }
+            return true; // End Play
+
+        } else {
+            // --- BROKEN TACKLE ---
+            if (!carrier.tacklesBrokenThisPlay) carrier.tacklesBrokenThisPlay = 0;
+            carrier.tacklesBrokenThisPlay++;
+            
+            // Visuals
+            carrier.action = 'juke'; 
+            carrier.jukeTicks = 10; // Visual flair duration
+            defender.stunnedTicks = 30; // Defender falls down
+
+            if (gameLog) gameLog.push(`💪 ${carrier.name} breaks the tackle from ${defender.name}!`);
         }
     }
     return false;
@@ -4398,54 +4282,32 @@ const ensureStats = (player) => {
  */
 function resolvePlayerCollisions(playState) {
     const players = playState.activePlayers;
-    //  Slightly smaller radius for physics than visuals prevents "velcro" effect
-    const playerRadius = PLAYER_SEPARATION_RADIUS * 0.85;
+    const RADIUS = 0.5; // Yards
 
     for (let i = 0; i < players.length; i++) {
         const p1 = players[i];
-
         for (let j = i + 1; j < players.length; j++) {
             const p2 = players[j];
 
-            // Skip players who are effectively "locked" together in gameplay events
-            if (p1.engagedWith === p2.id || p2.engagedWith === p1.id ||
-                p1.stunnedTicks > 0 || p2.stunnedTicks > 0) {
-                continue;
-            }
+            // Ignore if they are engaged in a block (block logic handles their position)
+            if (p1.engagedWith === p2.id) continue;
 
-            let dx = p1.x - p2.x;
-            let dy = p1.y - p2.y;
-            let dist = Math.sqrt(dx * dx + dy * dy);
+            const dx = p1.x - p2.x;
+            const dy = p1.y - p2.y;
+            const dist = Math.sqrt(dx*dx + dy*dy);
 
-            // Prevent division by zero
-            if (dist < 0.05) {
-                // Add random noise to separate them naturally
-                dx = (Math.random() - 0.5) * 0.1;
-                dy = (Math.random() - 0.5) * 0.1;
-                dist = Math.sqrt(dx * dx + dy * dy);
-            }
+            if (dist < RADIUS * 2 && dist > 0.01) {
+                const overlap = (RADIUS * 2) - dist;
+                const pushX = (dx / dist) * overlap * 0.5;
+                const pushY = (dy / dist) * overlap * 0.5;
 
-            if (dist < playerRadius) {
-                // Calculate push force (softer = less stutter)
-                const overlap = playerRadius - dist;
-                const pushFactor = 0.4; // Only resolve 40% of overlap per tick (Smooths movement)
-
-                const pushX = (dx / dist) * overlap * pushFactor;
-                const pushY = (dy / dist) * overlap * pushFactor;
-
-                // 💡 MASS WEIGHTING: Linemen are harder to push than WRs
-                const p1Weight = p1.weight || 200;
-                const p2Weight = p2.weight || 200;
-                const totalWeight = p1Weight + p2Weight;
-
-                const p1Ratio = p2Weight / totalWeight; // Heavier p2 pushes p1 more
-                const p2Ratio = p1Weight / totalWeight;
-
-                // Apply soft push
-                p1.x += pushX * p1Ratio;
-                p1.y += pushY * p1Ratio;
-                p2.x -= pushX * p2Ratio;
-                p2.y -= pushY * p2Ratio;
+                // Push p1
+                p1.x += pushX;
+                p1.y += pushY;
+                
+                // Push p2 opposite
+                p2.x -= pushX;
+                p2.y -= pushY;
             }
         }
     }
