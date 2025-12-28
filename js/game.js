@@ -3213,59 +3213,54 @@ function executeThrow(qbState, target, strength, accuracy, playState, gameLog, a
  * This runs INSTEAD of updateQBDecision on punt plays.
  */
 function updatePunterDecision(playState, offenseStates, gameLog) {
-    // 💡 FIX: Relaxed find condition. If action is punt_kick, he's the punter.
-    // We rely on action, not just hasBall, to ensure we find him.
-    const punterState = offenseStates.find(p => p.action === 'punt_kick');
+    const punter = offenseStates.find(p => p.slot === 'P' || p.slot === 'QB1'); // Fallback to QB if no Punter
+    if (!punter || !punter.hasBall) return;
 
-    if (!punterState) return;
-    if (!punterState.hasBall) return; // If he lost the ball (fumble), stop.
+    // 1. Wait for "snap" (a few ticks to simulate catching the snap)
+    // The delay also ensures blockers separate so he doesn't kick it into his own lineman.
+    if (playState.tick < 25) return;
 
-    const KICK_TICK = 50; // 2.5 seconds
+    // 2. Calculate Punt Physics
+    // Aim deep (Y=100) and towards a sideline (width 0-53.3)
+    const punterPower = punter.attributes?.physical?.strength || 50;
+    const punterAcc = punter.attributes?.technical?.kickingAccuracy || 50;
 
-    if (playState.tick < KICK_TICK) {
-        // Freeze him in place (charging up)
-        punterState.targetX = punterState.x;
-        punterState.targetY = punterState.y;
-        return;
-    }
+    // Target Logic: Aim for the "Coffin Corner"
+    const isLeftHash = punter.x < 26.6;
+    const targetX = isLeftHash ? 48.0 : 5.0; // Kick across body or to nearest corner
+    const targetY = playState.lineOfScrimmage + 40 + (punterPower * 0.4); // 40-80 yard punt range
 
-    if (playState.tick >= KICK_TICK) { // Execute once
-        if (gameLog) gameLog.push(`🏈 ${punterState.name} punts the ball!`);
+    // Add Variance (Accuracy)
+    const errorX = (Math.random() - 0.5) * (100 - punterAcc) * 0.5;
+    const errorY = (Math.random() - 0.5) * (100 - punterAcc) * 0.5;
 
-        const pPlayer = getPlayer(punterState.id);
-        const strength = pPlayer?.attributes?.physical?.strength || 50;
+    const finalTargetX = Math.max(0, Math.min(53.3, targetX + errorX));
+    const finalTargetY = Math.min(115, targetY + errorY); // Cap at back of endzone
 
-        // Calculate Kick
-        const baseDist = 35 + (strength * 0.4); // 35 to 75 yards
-        const distance = baseDist + getRandomInt(-5, 5);
-        const hangTime = 3.0 + (strength / 50); // Seconds
+    // 3. Execute Kick
+    const dist = Math.sqrt((finalTargetX - punter.x) ** 2 + (finalTargetY - punter.y) ** 2);
+    const hangTime = 3.5 + (punterPower / 50); // 3.5s - 5.5s hangtime
 
-        const aimX = CENTER_X + getRandomInt(-5, 5);
-        const aimY = punterState.y + distance; // Punting UP field
+    // Physics Vectors
+    playState.ballState.vx = (finalTargetX - punter.x) / hangTime;
+    playState.ballState.vy = (finalTargetY - punter.y) / hangTime;
 
-        const clampedAimY = Math.min(FIELD_LENGTH - 5, aimY); // Don't kick out of stadium
+    // Vertical Velocity (High Arc)
+    // z = z0 + vz*t - 0.5*g*t^2 => 0 = 0 + vz*t - 4.9t^2 => vz = 4.9 * t
+    playState.ballState.vz = 4.9 * hangTime;
 
-        const dx = aimX - punterState.x;
-        const dy = clampedAimY - punterState.y;
+    // 4. Update State
+    playState.ballState.inAir = true;
+    playState.ballState.throwerId = punter.id; // Mark him so he can't catch it
+    playState.ballState.x = punter.x;
+    playState.ballState.y = punter.y;
+    playState.ballState.z = 1.5; // Kick from waist height
 
-        // 💡 FIX: Use hangTime (Seconds) for velocity, NOT airTicks.
-        // This calculates Yards Per Second.
-        playState.ballState.vx = dx / hangTime;
-        playState.ballState.vy = dy / hangTime;
+    punter.hasBall = false;
+    punter.isBallCarrier = false;
+    punter.action = 'idle'; // Punter watches the play
 
-        // Vertical velocity (Z)
-        playState.ballState.vz = (9.8 * hangTime) / 2;
-
-        playState.ballState.inAir = true;
-        playState.ballState.throwerId = punterState.id;
-        playState.ballState.targetX = aimX;
-        playState.ballState.targetY = clampedAimY;
-
-        // Release Ball
-        punterState.hasBall = false;
-        punterState.isBallCarrier = false;
-        punterState.action = 'idle'; // Done
-    }
+    if (gameLog) gameLog.push(`👟 ${punter.name} punts the ball!`);
 }
 /**
  * Handles ball arrival at target coordinates. (MODIFIED)
@@ -3274,189 +3269,189 @@ function updatePunterDecision(playState, offenseStates, gameLog) {
  * Handles ball arrival at target coordinates.
  * Handles Catches, Drops, Interceptions, Swats, and Muffed Punts.
  */
-function handleBallArrival(playState, ballCarrierState, playResult, gameLog) {
-    // ===========================================================
-    // --- 1. PUNT CATCH LOGIC ---
-    // ===========================================================
-    if (playState.type === 'punt' && playState.ballState.inAir && playState.ballState.targetPlayerId === null) {
-
-        const ball = playState.ballState;
-
-        // A. GROUND CHECK (Ball hit the floor)
-        // 💡 FIX: Use a larger threshold or check velocity direction to catch "through-the-floor" frames
-        if (ball.z <= 0.5) {
-            // Ball is low enough to be downed or muffed
-
-            // Check if anyone is close enough to touch it (Catch/Muff)
-            const CATCH_CHECK_RADIUS = 3.0; // Generous radius for punt catching
-            const returnersInRange = playState.activePlayers.filter(p => !p.isOffense && !p.isEngaged && p.stunnedTicks === 0 && getDistance(p, ball) < CATCH_CHECK_RADIUS);
-
-            if (returnersInRange.length > 0) {
-                // Someone is there! Try to catch.
-                const returnerState = returnersInRange.sort((a, b) => getDistance(a, ball) - getDistance(b, ball))[0];
-                const returnerPlayer = getPlayer(returnerState.id);
-
-                // Muff calculation
-                const catchingHands = returnerPlayer?.attributes?.technical?.catchingHands || 50;
-                const muffChance = 0.05 + (1 - (catchingHands / 100)) * 0.15;
-
-                if (Math.random() < muffChance) {
-                    if (gameLog) gameLog.push(`❗ MUFFED PUNT! ${returnerState.name} drops it!`);
-                    ball.isLoose = true;
-                    ball.inAir = false;
-                    ball.z = 0.1;
-                    ball.vx *= 0.5; // Slow down bounce
-                    ball.vy *= 0.5;
-                    returnerState.stunnedTicks = 20;
-                    playState.statEvents.push({ type: 'fumble', playerId: returnerState.id });
-                    return;
-                } else {
-                    if (gameLog) gameLog.push(`🏈 Punt caught by ${returnerState.name}.`);
-                    playState.turnover = true;
-                    ball.inAir = false;
-                    ball.isLoose = false;
-
-                    returnerState.isBallCarrier = true;
-                    returnerState.hasBall = true;
-                    returnerState.action = 'run_path';
-
-                    playState.returnStartY = returnerState.y;
-
-                    // Snap ball to player
-                    ball.x = returnerState.x;
-                    ball.y = returnerState.y;
-                    ball.z = 1.0;
-
-                    // Switch AI Roles
-                    playState.activePlayers.forEach(p => {
-                        p.hasBall = (p.id === returnerState.id);
-                        p.isBallCarrier = (p.id === returnerState.id);
-                        if (p.isOffense) p.action = 'pursuit'; // Gunners hunt
-                        else if (p.id !== returnerState.id) p.action = 'run_block'; // Blockers block
-                    });
-                    return;
-                }
-            }
-
-            // No one caught it? It hit the ground.
-            // Slow it down (friction)
-            ball.vx *= 0.8;
-            ball.vy *= 0.8;
-            ball.vz *= -0.5; // Small bounce
-
-            // If it stops moving, blow the whistle
-            const speed = Math.sqrt(ball.vx ** 2 + ball.vy ** 2);
-            if (speed < 0.5) {
-                if (gameLog) gameLog.push(`🛑 Punt downed by gravity.`);
-                playState.playIsLive = false;
-                playState.finalBallY = ball.y;
-                playState.touchback = false;
-
-                // Touchback check
-                if (ball.y <= 0) {
-                    playState.touchback = true;
-                    playState.finalBallY = 20;
-                    if (gameLog) gameLog.push("Touchback!");
-                }
-            }
-            return;
-        }
-    }
-
-    // ===========================================================
-    // --- 2. PASS ARRIVAL LOGIC  ---
-    // ===========================================================
-    if (!playState.ballState.inAir) return;
-
+/**
+ * HANDLES BALL ARRIVAL (Catches, Drops, Punts, Ground Hits)
+ * Unified: Combines Advanced Catch Physics with Special Teams Logic.
+ */
+function handleBallArrival(playState, carrier, playResult, gameLog) {
     const ball = playState.ballState;
+    if (!ball.inAir && !ball.isLoose) return; // Nothing to handle
 
-    // --- A. GROUND CHECK ---
-    // If the ball hits the ground (z <= 0), it's dead.
-    if (ball.z <= 0) {
-        if (gameLog) gameLog.push(`👋 Pass hits the turf. Incomplete.`);
-        playState.incomplete = true;
-        playState.playIsLive = false;
-        ball.inAir = false;
-        return;
-    }
-
-    // --- B. CATCHABLE ZONE CHECK ---
+    // --- A. Z-AXIS CATCHABLE ZONE ---
     // A ball is only catchable if it is reachable vertically (0 to ~2.8 yards)
-    // We REMOVED the check that auto-fails high balls mid-flight. 
-    // Now we just ignore them until they come down to a reachable height.
+    // We ignore high balls until they drop to jump height.
     const MAX_JUMP_HEIGHT = 2.8;
-    if (ball.z > MAX_JUMP_HEIGHT) {
-        return; // Ball is soaring overhead, wait for it to drop
+    
+    // EXCEPTION: Punt returners camp under the ball, so we trust X/Y more than Z for punts
+    if (playState.type !== 'punt' && ball.z > MAX_JUMP_HEIGHT) {
+        return; // Ball is soaring overhead
     }
 
-    // --- C. FIND PLAYERS IN 3D RANGE ---
-    const CATCH_RADIUS = 1.2; // Tight radius for actual catch (must be close to body)
+    // --- B. FIND PLAYERS IN RANGE ---
+    const CATCH_RADIUS = 1.2; // Tight radius for actual hands catch
 
-    // Find all players close enough to the ball (XY distance)
+    // Find all players close enough (XY distance)
     const playersInRange = playState.activePlayers.filter(p => {
-        const dist = getDistance(p, ball);
+        // 🛑 RULE: Thrower cannot catch their own pass immediately (Wait 50 ticks)
+        if (p.id === ball.throwerId && playState.tick < 50) return false;
+        
+        // 🛑 RULE: Kicking team cannot catch a punt in the air (Interference/Downing rule)
+        if (playState.type === 'punt' && p.isOffense) return false;
+
+        const dist = Math.sqrt((p.x - ball.x)**2 + (p.y - ball.y)**2);
         return dist <= CATCH_RADIUS;
     });
 
-    if (playersInRange.length === 0) return; // No one close enough yet
+    // --- C. RESOLVE CATCH ATTEMPT ---
+    if (playersInRange.length > 0) {
+        // Sort by closeness to ball (XY)
+        playersInRange.sort((a, b) => getDistance(a, ball) - getDistance(b, ball));
 
-    // Sort by closeness to ball
-    playersInRange.sort((a, b) => getDistance(a, ball) - getDistance(b, ball));
-
-    const bestCandidate = playersInRange[0];
-    const playerObj = getPlayer(bestCandidate.id);
-    if (!playerObj) return;
-
-    // --- D. RESOLVE CATCH ---
-    const isDefense = !bestCandidate.isOffense;
-    const catching = playerObj.attributes?.technical?.catchingHands || 50;
-    const agility = playerObj.attributes?.physical?.agility || 50;
-
-    // Base Chance Calculation
-    let catchScore = (catching * 0.7) + (agility * 0.3);
-
-    // Modifiers
-    if (isDefense) catchScore -= 25; // Defenders naturally have worse hands
-    if (playersInRange.length > 1) catchScore -= 30; // Contested catch penalty
-
-    // Random Roll
-    const roll = getRandomInt(0, 100);
-
-    if (roll < catchScore) {
-        // --- SUCCESSFUL CATCH / INT ---
-        ball.inAir = false;
-        ball.caught = true;
-        bestCandidate.hasBall = true;
-        bestCandidate.isBallCarrier = true;
-        bestCandidate.action = 'run_path'; // Switch to running
-
-        if (isDefense) {
-            if (gameLog) gameLog.push(`❗ INTERCEPTION! ${bestCandidate.name} picks it off!`);
-            playState.interceptionOccurred = true;
-            playState.possessionChanged = true;
-            playState.turnover = true;
-            playResult.outcome = 'turnover';
-            playResult.turnoverType = 'interception';
-
-            playState.statEvents.push({ type: 'interception', interceptorId: bestCandidate.id, throwerId: ball.throwerId });
+        const bestCandidate = playersInRange[0];
+        
+        // Retrieve RPG Stats
+        // We use the cache if available, or fetch from game.players
+        let catching = 50;
+        let agility = 50;
+        
+        // Safe attribute lookup
+        if (bestCandidate.attributes) {
+             catching = bestCandidate.attributes.technical?.catchingHands || 50;
+             agility = bestCandidate.attributes.physical?.agility || 50;
         } else {
+             const pObj = getPlayer(bestCandidate.id);
+             if (pObj) {
+                 catching = pObj.attributes?.technical?.catchingHands || 50;
+                 agility = pObj.attributes?.physical?.agility || 50;
+             }
+        }
+
+        const isDefense = !bestCandidate.isOffense;
+
+        // Base Chance Calculation
+        let catchScore = (catching * 0.7) + (agility * 0.3);
+
+        // Modifiers
+        if (isDefense) catchScore -= 25; // Defenders have worse hands (usually)
+        if (playersInRange.length > 1) catchScore -= 30; // Contested catch penalty
+        if (playState.type === 'punt') catchScore += 15; // Fair catches are easier (camping)
+
+        // Roll
+        const roll = Math.random() * 100;
+
+        if (roll < catchScore) {
+            // --- SUCCESSFUL CATCH ---
+            ball.inAir = false;
+            ball.isLoose = false;
+            bestCandidate.hasBall = true;
+            bestCandidate.isBallCarrier = true;
+
+            // 1. PUNT RETURN LOGIC
+            if (playState.type === 'punt' && !bestCandidate.isOffense) {
+                if (gameLog) gameLog.push(`🏈 ${bestCandidate.name} catches the punt! Return started.`);
+                playState.possessionChanged = true;
+                playState.returnStartY = bestCandidate.y;
+                bestCandidate.action = 'run_path';
+                // Switch everyone else to pursuit
+                playState.activePlayers.forEach(p => { if (p.id !== bestCandidate.id) p.action = 'pursuit'; });
+                return;
+            }
+
+            // 2. INTERCEPTION LOGIC
+            if (isDefense) {
+                if (gameLog) gameLog.push(`❗ INTERCEPTION! ${bestCandidate.name} picks it off!`);
+                
+                playState.interceptionOccurred = true;
+                playState.possessionChanged = true;
+                playState.turnover = true;
+                playState.returnStartY = bestCandidate.y; // Return yards count here too
+                
+                // Stat Tracking
+                playState.statEvents.push({ type: 'interception', interceptorId: bestCandidate.id, throwerId: ball.throwerId });
+                
+                // Turn into runner
+                bestCandidate.action = 'run_path';
+                return;
+            }
+
+            // 3. OFFENSIVE CATCH LOGIC
             if (gameLog) gameLog.push(`👍 CATCH! ${bestCandidate.name} grabs it!`);
-            playResult.outcome = 'complete';
+            bestCandidate.action = 'run_path';
+            
+            // Calculate pass yards (from LOS to catch point)
+            const yardsGain = bestCandidate.y - playState.lineOfScrimmage;
+            playState.statEvents.push({ 
+                type: 'completion', 
+                receiverId: bestCandidate.id, 
+                qbId: ball.throwerId, 
+                yards: yardsGain 
+            });
 
-            playState.statEvents.push({ type: 'completion', receiverId: bestCandidate.id, qbId: ball.throwerId, yards: 0 });
-        }
-    } else {
-        // --- DROP / SWAT ---
-        if (isDefense) {
-            if (gameLog) gameLog.push(`🚫 ${bestCandidate.name} swats the pass away!`);
         } else {
-            if (gameLog) gameLog.push(`❌ ${bestCandidate.name} drops the pass!`);
-            playState.statEvents.push({ type: 'drop', playerId: bestCandidate.id });
-        }
+            // --- DROP / SWAT ---
+            // Ball bounces off hands
+            ball.isLoose = true; // Briefly loose? Or dead?
+            // Usually drops hit ground immediately. 
+            // We give it a small bump velocity to simulate the bounce off pads
+            ball.vz = 2.0; 
+            ball.vx += (Math.random() - 0.5) * 2;
+            ball.vy += (Math.random() - 0.5) * 2;
 
-        playState.incomplete = true;
-        playState.playIsLive = false;
-        ball.inAir = false;
+            if (isDefense) {
+                if (gameLog) gameLog.push(`🚫 ${bestCandidate.name} swats the pass away!`);
+                // Swats on 4th down? Handled by ground logic below.
+            } else {
+                if (gameLog) gameLog.push(`❌ ${bestCandidate.name} drops the pass!`);
+                playState.statEvents.push({ type: 'drop', playerId: bestCandidate.id });
+            }
+            // Note: We do NOT set playIsLive=false here. We wait for it to hit ground below.
+        }
+        return; // Interaction handled
+    }
+
+    // --- D. GROUND PHYSICS (Ball hit turf) ---
+    if (ball.z <= 0) {
+        ball.z = 0;
+        
+        // PUNT DOWNING RULE (Stops when velocity is low)
+        if (playState.type === 'punt') {
+            ball.vz = -ball.vz * 0.5;
+            ball.vx *= 0.8;
+            ball.vy *= 0.8;
+
+            // If stopped
+            if (Math.abs(ball.vx) < 0.5 && Math.abs(ball.vy) < 0.5) {
+                if (gameLog && playState.playIsLive) gameLog.push("⏱️ Punt downed.");
+                playState.playIsLive = false;
+                playState.possessionChanged = true;
+                playState.finalBallY = ball.y;
+            }
+            // If kicking team touches it
+            const downingPlayer = playState.activePlayers.find(p => p.isOffense && getDistance(p, ball) < 1.0);
+            if (downingPlayer) {
+                if (gameLog) gameLog.push(`🛑 ${downingPlayer.name} downs the punt.`);
+                playState.playIsLive = false;
+                playState.possessionChanged = true;
+                playState.finalBallY = ball.y;
+            }
+        } 
+        // PASSING RULE (Incomplete immediately on contact)
+        else if (playState.type === 'pass' && !ball.isLoose) {
+             if (playState.playIsLive) {
+                 playState.playIsLive = false; // Stop sim
+                 playState.incomplete = true;
+                 
+                 // Physics cleanup for visual cooldown
+                 ball.vz = -ball.vz * 0.4; // Small bounce
+                 ball.vx *= 0.6;
+             }
+        }
+        // FUMBLE RULE (Bounce)
+        else {
+             ball.vz = -ball.vz * 0.6;
+             ball.vx *= 0.8;
+             ball.vy *= 0.8;
+        }
     }
 }
 
@@ -3769,7 +3764,6 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
 
             // --- G. SCORING & BOUNDARIES ---
             if (playState.playIsLive) {
-                // Find carrier again to be safe
                 ballCarrierState = playState.activePlayers.find(p => p.isBallCarrier);
 
                 if (ballCarrierState) {
@@ -3777,34 +3771,25 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
                     if (ballCarrierState.isOffense && ballCarrierState.y >= 110.0) {
                         playState.touchdown = true;
                         playState.playIsLive = false;
-
-                        // Clamp visuals to the goal line
                         playState.finalBallY = 110.0;
                         playState.ballState.y = 110.0;
-
-                        // Calculate final yards
                         playState.yards = 110.0 - playState.lineOfScrimmage;
-
                         if (gameLog) gameLog.push(`🎉 TOUCHDOWN ${ballCarrierState.name}!`);
-                        break; // Stop the loop immediately
+                        break;
                     }
 
-                    // 2. DEFENSIVE TOUCHDOWN (Crosses 10 yard line going the other way)
-                    // Defense runs "Down" towards Y=10 (The Goal Line they defend is behind them at 110, they score at 10)
+                    // 2. DEFENSIVE TOUCHDOWN (Crosses 10 yard line going other way)
                     if (!ballCarrierState.isOffense && ballCarrierState.y <= 10.0) {
                         playState.touchdown = true;
                         playState.playIsLive = false;
-                        playState.possessionChanged = true; // Mark as turnover score
-
+                        playState.possessionChanged = true;
                         playState.finalBallY = 10.0;
                         playState.ballState.y = 10.0;
-
                         if (gameLog) gameLog.push(`🎉 DEFENSIVE TOUCHDOWN!`);
                         break;
                     }
 
-                    // 3. SAFETY (Offense runs out the back of their OWN endzone)
-                    // Endzone is 0-10. If they go below 0, it's a safety.
+                    // 3. SAFETY
                     if (ballCarrierState.isOffense && ballCarrierState.y <= 0) {
                         playState.safety = true;
                         playState.playIsLive = false;
@@ -3813,19 +3798,14 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
                         break;
                     }
 
-                    // 4. OUT OF BOUNDS (Sidelines)
-                    // Field width is 53.3. 
-                    // Buffer of 0.5 yards allows stepping on the line.
+                    // 4. OUT OF BOUNDS
                     if (ballCarrierState.x <= 0.5 || ballCarrierState.x >= 52.8) {
                         playState.playIsLive = false;
-
-                        // Calculate yards at the spot they went out
                         playState.yards = ballCarrierState.y - playState.lineOfScrimmage;
                         playState.finalBallY = ballCarrierState.y;
-
                         if (gameLog) gameLog.push(`💨 ${ballCarrierState.name} steps out of bounds.`);
 
-                        // Check if it was a sack (QB behind line)
+                        // Check Sack
                         if (ballCarrierState.role === 'QB' && playState.yards < 0 && playState.type === 'pass') {
                             playState.sack = true;
                             if (gameLog) gameLog.push(`(Sack recorded)`);
@@ -3835,12 +3815,11 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
                 }
             }
 
-            // --- H. INTERACTIONS (Blocks/Tackles/Fumbles) ---
+            // --- H. INTERACTIONS ---
             if (playState.playIsLive) {
                 if (typeof checkBlockCollisions === 'function') checkBlockCollisions(playState);
                 if (typeof resolveOngoingBlocks === 'function') resolveOngoingBlocks(playState, gameLog);
 
-                // Tackles
                 if (ballCarrierState) {
                     if (typeof checkTackleCollisions === 'function' && checkTackleCollisions(playState, gameLog)) {
                         playState.finalBallY = ballCarrierState.y;
@@ -3850,7 +3829,6 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
                     }
                 }
 
-                // Fumbles
                 if (playState.ballState?.isLoose) {
                     if (typeof checkFumbleRecovery === 'function') {
                         const recovery = checkFumbleRecovery(playState, gameLog, 2.0);
@@ -3869,32 +3847,19 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
                 }
             }
 
+            // --- I. UPDATE FATIGUE (Optimized) ---
             playState.activePlayers.forEach(p => {
-                // 1. Calculate Drain based on intensity
-                // Running/Rushing drains 3x faster than standing/blocking
                 let drain = (p.action.includes('run') || p.action.includes('rush') || p.action === 'pursuit') ? 0.03 : 0.01;
-
-                // 2. Retrieve Cached RPG Object (O(1) lookup)
                 const player = playerCache.get(p.id);
-
                 if (player) {
-                    // Update persistent fatigue
                     player.fatigue = Math.min(100, (player.fatigue || 0) + drain);
-
-                    // 3. Recalculate Speed Modifier
-                    // If Fatigue > Stamina, you slow down. Max penalty is 25% speed loss.
                     const stamina = player.attributes?.physical?.stamina || 50;
-
-                    // Calculate ratio: How tired are you relative to your tank?
-                    // Example: 50 Fatigue / 50 Stamina = 1.0 (Full penalty)
-                    // Example: 50 Fatigue / 100 Stamina = 0.5 (Half penalty)
                     const fatigueRatio = player.fatigue / Math.max(1, stamina);
-
                     p.fatigueModifier = Math.max(0.75, 1.0 - (fatigueRatio * 0.25));
                 }
             });
 
-            // --- I. VISUALIZER ---
+            // --- J. VISUALIZER RECORDING ---
             if (isLive && gameLog) {
                 playState.visualizationFrames.push({
                     players: deepClone(playState.activePlayers),
@@ -3907,15 +3872,58 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
 
         } // END TICK LOOP
 
+        // ===========================================================
+        // --- 7.5 POST-PLAY "COOL DOWN" (Visuals Only) ---
+        // ===========================================================
+        // 💡 NEW: Let the ball bounce/roll after the whistle so it doesn't vanish in mid-air.
+        if (isLive && gameLog && (playState.incomplete || playState.ballState.isLoose || playState.type === 'punt')) {
+            let cooldownTicks = 0;
+            const POST_PLAY_TICKS = 30; // 1.5 seconds
+
+            while (cooldownTicks < POST_PLAY_TICKS) {
+                cooldownTicks++;
+                const ballPos = playState.ballState;
+                const timeDelta = 0.05;
+
+                // Stop if ball is still
+                if (!ballPos.inAir && ballPos.z <= 0.1 && Math.abs(ballPos.vx) < 0.5 && Math.abs(ballPos.vy) < 0.5) {
+                    if (cooldownTicks > 5) break;
+                }
+
+                // Move Ball
+                ballPos.x += ballPos.vx * timeDelta;
+                ballPos.y += ballPos.vy * timeDelta;
+                ballPos.z += ballPos.vz * timeDelta;
+                if (ballPos.z > 0) ballPos.vz -= 9.8 * timeDelta; // Gravity
+
+                // Bounce
+                if (ballPos.z <= 0) {
+                    ballPos.z = 0;
+                    ballPos.vz *= -0.6;
+                    ballPos.vx *= 0.8;
+                    ballPos.vy *= 0.8;
+                }
+
+                // Record Frame
+                playState.visualizationFrames.push({
+                    players: deepClone(playState.activePlayers),
+                    ball: deepClone(playState.ballState),
+                    logIndex: gameLog.length,
+                    lineOfScrimmage: playState.lineOfScrimmage,
+                    firstDownY: firstDownY
+                });
+            }
+        }
+
     } catch (e) {
         console.error("Simulation Loop Crash:", e);
     }
 
     // ===========================================================
-    // --- 8. POST-PLAY CALCULATION (Results) ---
+    // --- 8. POST-PLAY CALCULATION (Final Results) ---
     // ===========================================================
 
-    // Return Yards
+    // Calculate Return Yards 
     if (playState.returnStartY !== null && ballCarrierState) {
         const returnYards = Math.abs(ballCarrierState.y - playState.returnStartY);
         if (returnYards > 0) {
@@ -3923,7 +3931,7 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
         }
     }
 
-    // End of Play Cleanup
+    // End of Play Cleanup / Incomplete Logic
     if (playState.playIsLive && !playState.touchdown && !playState.safety) {
         ballCarrierState = playState.activePlayers.find(p => p.isBallCarrier);
         if (ballCarrierState) {
@@ -3938,7 +3946,19 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
         }
     }
 
-    // Result Object Construction
+    // 💡 ROBUST TURNOVER ON DOWNS CHECK
+    if (down === 4 && !playState.touchdown && !playState.possessionChanged && !playState.safety && playState.type !== 'punt') {
+        if (playState.yards < yardsToGo) {
+            playState.possessionChanged = true;
+            playResult.turnoverType = 'downs'; // Explicitly set type
+            if (gameLog) gameLog.push("🛑 Turnover on Downs!");
+        }
+    }
+
+    // Normalize Final Ball Position (Clamp to Field)
+    playState.finalBallY = Math.max(0, Math.min(110, playState.finalBallY));
+
+    // --- Build Result Object ---
     playResult.yards = Math.round(playState.yards);
     if (playState.sack) playResult.yards = Math.min(0, playResult.yards);
 
@@ -3954,10 +3974,17 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
         playResult.safety = true;
         playResult.score = 'SAFETY';
     }
-    else if (playState.possessionChanged) {
+
+    // Possession Change Handling
+    if (playState.possessionChanged || playState.turnover) {
         playResult.outcome = 'turnover';
         playResult.possessionChange = true;
-        playResult.turnoverType = playState.interceptionOccurred ? 'interception' : 'fumble';
+
+        // 💡 FIX: Prioritize specific types
+        if (playState.interceptionOccurred) playResult.turnoverType = 'interception';
+        else if (playState.fumbleOccurred) playResult.turnoverType = 'fumble';
+        else if (playState.type === 'punt') playResult.turnoverType = 'punt';
+        else if (!playResult.turnoverType && down === 4) playResult.turnoverType = 'downs';
     }
 
     // Apply Stats
