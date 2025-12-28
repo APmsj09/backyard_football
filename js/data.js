@@ -407,24 +407,43 @@ export const defenseFormations = {
         personnel: { DL: 3, LB: 1, DB: 3 },
         coordinates: { DL1: [-5, 1], DL2: [0, 1], DL3: [5, 1], LB1: [0, 5], DB1: [-18, 2], DB2: [18, 2], DB3: [0, 12] }
     },
-    '4-2-1': {
-        name: '4-2-1 (Run Stop)',
-        slots: ['DL1', 'DL2', 'DL3', 'DL4', 'LB1', 'LB2', 'DB1'],
-        personnel: { DL: 4, LB: 2, DB: 1 },
-        coordinates: { DL1: [-7, 1], DL2: [-2, 1], DL3: [2, 1], DL4: [7, 1], LB1: [-4, 5], LB2: [4, 5], DB1: [0, 12] }
-    },
+    
     '2-3-2': {
         name: '2-3-2 (Nickel)',
         slots: ['DL1', 'DL2', 'LB1', 'LB2', 'LB3', 'DB1', 'DB2'],
         personnel: { DL: 2, LB: 3, DB: 2 },
         coordinates: { DL1: [-3, 1], DL2: [3, 1], LB1: [-8, 5], LB2: [0, 5], LB3: [8, 5], DB1: [-20, 6], DB2: [20, 6] }
     },
+    '4-2-1': {
+        name: '4-2-1 (Run Stop)',
+        slots: ['DL1', 'DL2', 'DL3', 'DL4', 'LB1', 'LB2', 'DB1'],
+        personnel: { DL: 4, LB: 2, DB: 1 },
+        coordinates: { 
+            // 💡 FIX: Pull Ends from +/- 7 to +/- 5
+            DL1: [-5.0, 1], // Left End
+            DL2: [-1.5, 1], // Left Tackle (Pinch inside)
+            DL3: [1.5, 1],  // Right Tackle (Pinch inside)
+            DL4: [5.0, 1],  // Right End
+            LB1: [-4, 5], 
+            LB2: [4, 5], 
+            DB1: [0, 12] 
+        }
+    },
     '4-0-3': {
         name: '4-0-3 (Dime/Prevent)',
         slots: ['DL1', 'DL2', 'DL3', 'DL4', 'DB1', 'DB2', 'DB3'],
         personnel: { DL: 4, LB: 0, DB: 3 },
-        coordinates: { DL1: [-8, 1], DL2: [-3, 1], DL3: [3, 1], DL4: [8, 1], DB1: [-20, 10], DB2: [20, 10], DB3: [0, 18] }
-    },
+        coordinates: { 
+            // 💡 FIX: Pull Ends from +/- 8 to +/- 5.5
+            DL1: [-5.5, 1], 
+            DL2: [-2.0, 1], 
+            DL3: [2.0, 1], 
+            DL4: [5.5, 1], 
+            DB1: [-20, 10], 
+            DB2: [20, 10], 
+            DB3: [0, 18] 
+        }
+    },    
     'Punt_Return': {
         name: 'Punt Return',
         slots: ['DL1', 'DL2', 'LB1', 'LB2', 'DB1', 'DB2', 'DB3'],
@@ -435,18 +454,13 @@ export const defenseFormations = {
         slots: ['DL1', 'DL2', 'DL3', 'DL4', 'LB1', 'DB1', 'DB2'],
         personnel: { DL: 4, LB: 1, DB: 2 },
         coordinates: {
-            // Spread defensive line to stress blocking angles
-            'DL1': [-7, 1.0],  // Wide End
-            'DL2': [-2, 1.0],  // Tackle
-            'DL3': [2, 1.0],   // Tackle
-            'DL4': [7, 1.0],   // Wide End
-
-            // The "Mike" (Middle Linebacker) patrols the center
-            'LB1': [0, 5.0],
-
-            // Two high safeties (Split look)
-            'DB1': [-10, 8.0], // Strong Safety / Hybrid
-            'DB2': [10, 8.0]   // Free Safety
+            DL1: [-5.5, 1.0], 
+            DL2: [-2.0, 1.0], 
+            DL3: [2.0, 1.0], 
+            DL4: [5.5, 1.0],
+            LB1: [0, 5.0],
+            DB1: [-10, 8.0],
+            DB2: [10, 8.0]
         },
         slotPriorities: {
             'DL1': { speed: 3, blockShedding: 2 }, // Pass rusher

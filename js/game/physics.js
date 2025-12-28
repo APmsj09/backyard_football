@@ -49,14 +49,17 @@ export function updatePlayerPosition(pState, timeDelta) {
     const fatigueMod = pState.fatigueModifier || 1.0;
     const maxSpeed = baseSpeed * fatigueMod * speedMult;
 
-    // --- 4. Acceleration Physics (Realism Upgrade) ---
-    
-    // A. Dynamic Acceleration based on Agility
-    // High Agility (99) = 14.0 (Snappy)
-    // Low Agility (20) = 6.0 (Heavy/Drifty)
+    // Dynamic Acceleration based on Agility
+    // 99 Agility = 14.0 force (Cuts on a dime)
+    // 50 Agility = 9.0 force (Standard)
+    // 20 Agility = 6.0 force (Drifts like a truck)
     const agilityStat = pState.agility || 50;
-    let acceleration = 4.0 + (agilityStat * 0.1);
+    let acceleration = 4.0 + (agilityStat * 0.1); 
 
+    // Bonus: If carrying ball, slightly reduce acceleration (carrying weight)
+    if (pState.hasBall) acceleration *= 0.9;
+
+    
     // B. Arrival Deceleration (The "Braking" Logic)
     // Start slowing down when within 3 yards of target
     const SLOW_RADIUS = 3.0;
