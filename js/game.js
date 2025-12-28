@@ -4403,10 +4403,12 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
     let firstDownY = 0;
 
     // --- 3. SETUP PLAYERS ---
+
+    const goalLineY = 110.0; // Hardcoded goal line (Endzone starts at 110)
+    const backOfEndzoneY = 120.0;
+    const effectiveYardsToGo = (yardsToGo <= 0 || ballOn >= 90) ? (goalLineY - playState.lineOfScrimmage) : yardsToGo;
     try {
-        const goalLineY = 110.0; // Hardcoded goal line (Endzone starts at 110)
-        const backOfEndzoneY = 120.0;
-        const effectiveYardsToGo = (yardsToGo <= 0 || ballOn >= 90) ? (goalLineY - playState.lineOfScrimmage) : yardsToGo;
+
         firstDownY = Math.min(playState.lineOfScrimmage + effectiveYardsToGo, goalLineY);
 
         setupInitialPlayerStates(playState, offense, defense, play, playState.assignments, ballOn, defensivePlayKey, ballHash, offensivePlayKey);

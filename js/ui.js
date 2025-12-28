@@ -2706,6 +2706,8 @@ function runLiveGameTick() {
             let descriptiveText = playLogEntry;
 
             // --- COMBINED LOGIC: Parse log AND set styles ---
+
+            const logEl = document.createElement('p');
             try {
                 if (playLogEntry.includes('Conversion Attempt')) {
                     liveGameIsConversion = true; // Set the flag
