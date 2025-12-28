@@ -3174,6 +3174,9 @@ export function startLiveGameSim(gameResult, onComplete) {
 }
 
 export function skipLiveGameSim() {
+    if (qbTimer1) clearTimeout(qbTimer1);
+    if (qbTimer2) clearTimeout(qbTimer2);
+    if (qbTimer3) clearTimeout(qbTimer3);
     if (liveGameInterval) { clearInterval(liveGameInterval); liveGameInterval = null; }
 
     clearTimeout(huddleTimeout); // FIX: Cancel any pending huddle
