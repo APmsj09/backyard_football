@@ -2955,7 +2955,11 @@ function runLiveGameTick() {
 
     // 5. DRAW THE FRAME
     drawFieldVisualization(frame);
-    renderSimPlayers(frame);
+    // In runLiveGameTick, replace renderSimPlayers(frame) with:
+    if (frame.players) {
+        frame.players.forEach(p => updateSimPlayerUI(p));
+    }
+
 
     // --- 6. THE PROCESSING PAUSE / PROGRESSION ---
 
@@ -3000,10 +3004,6 @@ function updateSimPlayerUI(pState) {
     }
 }
 
-// In runLiveGameTick, replace renderSimPlayers(frame) with:
-if (frame.players) {
-    frame.players.forEach(p => updateSimPlayerUI(p));
-}
 
 let qbShoutTimeout1 = null;
 let qbShoutTimeout2 = null;
@@ -3763,7 +3763,7 @@ export function applyDepthOrderToChart() {
  */
 export function changeFormationSmart(side, newFormationName) {
     const gs = getGameState();
-    
+
     // 1. Snapshot the CURRENT (Old) assignments
     const oldChart = { ...gs.playerTeam.depthChart[side] };
 
