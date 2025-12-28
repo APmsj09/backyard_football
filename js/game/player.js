@@ -153,6 +153,9 @@ export function calculateSlotSuitability(player, slot, side, team) {
 /**
  * Generates a new player object.
  */
+/**
+ * Generates a new player object with balanced stats.
+ */
 export function generatePlayer(minAge = 10, maxAge = 16) {
     const firstName = getRandom(firstNames);
     const lastName = Math.random() < 0.4 ? getRandom(nicknames) : getRandom(lastNames);
@@ -164,7 +167,7 @@ export function generatePlayer(minAge = 10, maxAge = 16) {
     const isOffenseStar = Math.random() < 0.5;
     const bestPosition = isOffenseStar ? favoriteOffensivePosition : favoriteDefensivePosition;
 
-    // 2. Define Attribute Tiers
+    // 2. Define Attribute Tiers (0-99 Scale)
     const tiers = {
         'Elite': { min: 90, max: 99 },
         'Great': { min: 80, max: 89 },
@@ -174,8 +177,7 @@ export function generatePlayer(minAge = 10, maxAge = 16) {
         'Terrible': { min: 20, max: 39 }
     };
 
-    // 3. Define "Key Attributes" per position
-    // These attributes get a statistical advantage during generation
+    // 3. Define Key Attributes (Higher chance of good rolls)
     const getKeyAttributes = (pos) => {
         switch (pos) {
             case 'QB': return ['throwingAccuracy', 'playbookIQ', 'consistency'];
@@ -183,54 +185,48 @@ export function generatePlayer(minAge = 10, maxAge = 16) {
             case 'WR': return ['speed', 'catchingHands', 'agility'];
             case 'OL': return ['strength', 'blocking', 'toughness'];
             case 'DL': return ['strength', 'blockShedding', 'tackling'];
-            case 'LB': return ['tackling', 'playbookIQ', 'strength'];
+            case 'LB': return ['tackling', 'playbookIQ', 'strength', 'speed'];
             case 'DB': return ['speed', 'agility', 'catchingHands'];
             default: return [];
         }
     };
     const keyAttrs = new Set(getKeyAttributes(bestPosition));
 
-    // 4. The Core Generator Function
-    // Generates a specific value based on whether it is a "Key" stat for this player
+    // 4. Base Generator
     const generateAttributeValue = (attributeName) => {
         const isKey = keyAttrs.has(attributeName);
         const roll = Math.random();
-
         let tier;
 
         if (isKey) {
-            // Weighted towards greatness for key position stats
             if (roll < 0.15) tier = 'Elite';       // 15%
             else if (roll < 0.40) tier = 'Great';  // 25%
             else if (roll < 0.75) tier = 'Good';   // 35%
             else if (roll < 0.95) tier = 'Average';// 20%
-            else tier = 'Poor';                    // 5% (Bust factor)
+            else tier = 'Poor';                    // 5%
         } else {
-            // Bell curve-ish for non-key stats
-            if (roll < 0.02) tier = 'Elite';       // 2% (Random freak athlete)
+            if (roll < 0.02) tier = 'Elite';       // 2% (Freak)
             else if (roll < 0.10) tier = 'Great';  // 8%
             else if (roll < 0.30) tier = 'Good';   // 20%
             else if (roll < 0.70) tier = 'Average';// 40%
             else if (roll < 0.90) tier = 'Poor';   // 20%
             else tier = 'Terrible';                // 10%
         }
-
         return getRandomInt(tiers[tier].min, tiers[tier].max);
     };
 
-    // 5. Generate Raw Attributes (Before Age/Weight scaling)
+    // 5. Generate Raw Attributes
     let attributes = {
         physical: {
             speed: generateAttributeValue('speed'),
             strength: generateAttributeValue('strength'),
             agility: generateAttributeValue('agility'),
             stamina: generateAttributeValue('stamina'),
-            // Height/Weight calc comes later
-            height: 0, weight: 0 
+            height: 0, weight: 0
         },
         mental: {
             playbookIQ: generateAttributeValue('playbookIQ'),
-            clutch: getRandomInt(20, 99), // Clutch is purely random regardless of position
+            clutch: getRandomInt(20, 99),
             consistency: generateAttributeValue('consistency'),
             toughness: generateAttributeValue('toughness')
         },
@@ -243,92 +239,93 @@ export function generatePlayer(minAge = 10, maxAge = 16) {
         }
     };
 
-    // 6. Calculate Height/Weight
-    // Physics logic: We want weight to roughly correlate with strength, 
-    // but we also want variance (fat/slow vs lean/strong)
+    // 6. BALANCE FIX: Apply Position Archetype Multipliers
+    // This ensures a 99 Speed Lineman is still slower than a 99 Speed WR.
+    const applyArchetypeModifiers = () => {
+        // Speed & Agility Modifiers
+        if (['OL', 'DL'].includes(bestPosition)) {
+            // Linemen are heavy
+            attributes.physical.speed *= 0.65; 
+            attributes.physical.agility *= 0.60;
+            attributes.physical.strength *= 1.2; // Bonus strength
+        } else if (['LB', 'QB'].includes(bestPosition)) {
+            // Hybrids
+            attributes.physical.speed *= 0.85;
+            attributes.physical.agility *= 0.80;
+        } else {
+            // Skill Positions (WR, DB, RB) - Pure speed
+            attributes.physical.speed *= 1.05; 
+            attributes.physical.agility *= 1.05;
+        }
+
+        // Skill Modifiers
+        if (['WR', 'DB', 'RB'].includes(bestPosition)) {
+            attributes.technical.blocking *= 0.5; // Skill guys can't block well
+        }
+    };
+    
+    applyArchetypeModifiers();
+
+    // 7. Calculate Body Type
     const ageProgress = (age - 10) / (16 - 10);
     
-    // Base size based on age
-    let height = 55 + (ageProgress * 15) + getRandomInt(-3, 5); // Inches
-    let weight = 70 + (ageProgress * 90) + getRandomInt(-15, 20); // Lbs
+    let height = 55 + (ageProgress * 15) + getRandomInt(-3, 5); 
+    let weight = 70 + (ageProgress * 90) + getRandomInt(-15, 20); 
 
-    // Position adjustments
     if (['OL', 'DL'].includes(bestPosition)) {
-        weight += getRandomInt(20, 50);
-        attributes.physical.strength += 10; // Bonus for pure mass
+        weight *= 1.4; // 40% heavier
+        attributes.physical.strength += 10;
     } else if (['WR', 'DB'].includes(bestPosition)) {
-        weight -= getRandomInt(5, 15);
+        weight *= 0.9; // 10% lighter
     }
 
     attributes.physical.height = Math.round(height);
     attributes.physical.weight = Math.round(weight);
 
-    // 7. Physics Constraints
-    // If player is heavy, penalize speed/agility. If light, penalize strength.
-    // We check relative to "expected" weight for their age.
-    const expectedWeight = 70 + (ageProgress * 90);
-    const weightDiff = attributes.physical.weight - expectedWeight;
-
-    if (weightDiff > 20) {
-        // Heavy player
-        attributes.physical.speed -= Math.round(weightDiff * 0.4);
-        attributes.physical.agility -= Math.round(weightDiff * 0.3);
-        attributes.physical.strength += Math.round(weightDiff * 0.2);
-    } else if (weightDiff < -10) {
-        // Skinny player
-        attributes.physical.strength -= Math.round(Math.abs(weightDiff) * 0.5);
-        attributes.physical.speed += Math.round(Math.abs(weightDiff) * 0.2);
-    }
-
-    // 8. Age Scaling
-    // A 10-year-old with "99 speed" isn't actually running a 4.2 40yd dash.
-    // They are 99 *relative to their age group*. 
-    // We scale stats down so they grow into them over seasons.
-    const ageScalingFactor = 0.60 + (ageProgress * 0.40); // 10yo = 60%, 16yo = 100%
+    // 8. Age Scaling (Tweaked for Balance)
+    // Physical stats scale differently than Mental
+    const physicalScale = 0.70 + (ageProgress * 0.30); // Kids are 70% of adult speed (was 60%)
+    const mentalScale = 0.50 + (ageProgress * 0.50);   // Kids are dumb (50% IQ) compared to adults
     
     Object.keys(attributes).forEach(cat => {
         Object.keys(attributes[cat]).forEach(attr => {
-            // Don't scale height/weight/clutch
             if (['height', 'weight', 'clutch'].includes(attr)) return;
             
-            // Scale it
-            let val = attributes[cat][attr] * ageScalingFactor;
+            // Choose scaler
+            let factor = (cat === 'physical') ? physicalScale : mentalScale;
             
-            // Clamp between 1 and 99
-            attributes[cat][attr] = Math.max(1, Math.min(99, Math.round(val)));
+            // Special Case: Speed peaks early.
+            if (attr === 'speed' || attr === 'agility') factor += 0.1; 
+
+            let val = attributes[cat][attr] * factor;
+            attributes[cat][attr] = Math.max(20, Math.min(99, Math.round(val)));
         });
     });
 
-    // 9. Determine Potential
-    // Potential is based on how high their "natural rolls" were before age scaling
-    // We look at the average of their key attributes vs global average
-    let rawSum = 0;
-    let count = 0;
+    // 9. Determine Potential (Same as before)
+    let rawSum = 0; let count = 0;
     Object.keys(attributes).forEach(cat => {
         Object.keys(attributes[cat]).forEach(attr => {
             if (['height', 'weight', 'clutch'].includes(attr)) return;
-            // Reverse the age scaling to peek at their "true talent"
-            const trueTalent = attributes[cat][attr] / ageScalingFactor;
-            rawSum += trueTalent;
+            // Compare current stat vs the scaling factor to see "True Talent"
+            const scaler = (cat === 'physical') ? physicalScale : mentalScale;
+            rawSum += attributes[cat][attr] / scaler;
             count++;
         });
     });
 
-    const avgTalent = rawSum / count; // 0-99
+    const avgTalent = rawSum / count; 
     let potential = 'F';
+    const potentialRoll = avgTalent + getRandomInt(-5, 20); // Skew higher for fun
 
-    // Add variance so a low current-skill player might still have high potential
-    const potentialRoll = avgTalent + getRandomInt(-10, 15); 
-
-    if (potentialRoll >= 85) potential = 'A';
-    else if (potentialRoll >= 75) potential = 'B';
-    else if (potentialRoll >= 65) potential = 'C';
-    else if (potentialRoll >= 50) potential = 'D';
+    if (potentialRoll >= 90) potential = 'A';
+    else if (potentialRoll >= 80) potential = 'B';
+    else if (potentialRoll >= 70) potential = 'C';
+    else if (potentialRoll >= 60) potential = 'D';
     
     const initialStats = {
         receptions: 0, recYards: 0, passYards: 0, rushYards: 0, touchdowns: 0,
-        tackles: 0, sacks: 0, interceptions: 0,
-        passAttempts: 0, passCompletions: 0, interceptionsThrown: 0
+        tackles: 0, sacks: 0, interceptions: 0, passAttempts: 0, passCompletions: 0, interceptionsThrown: 0
     };
 
     return {
@@ -337,7 +334,7 @@ export function generatePlayer(minAge = 10, maxAge = 16) {
         age,
         favoriteOffensivePosition,
         favoriteDefensivePosition,
-        number: null,
+        number: getRandomInt(1, 99),
         potential,
         attributes,
         teamId: null,
