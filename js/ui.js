@@ -2784,7 +2784,7 @@ function runLiveGameTick() {
         }
         elements.simGameDown.textContent = "FINAL";
         elements.simPossession.textContent = "";
-        drawFieldVisualization(null); // Clear field
+        drawFieldVisualization({}); // Clear field
 
         const finalResult = currentLiveGameResult; // Store before nulling
         // Render final stats now that the sim has concluded
@@ -2812,21 +2812,22 @@ function runLiveGameTick() {
     }
 
     const nextFrame = allFrames[liveGameCurrentIndex + 1];
-    const isPlayEnding = nextFrame && nextFrame.isSnap;
-
+    
     // --- 3. Sync Log Entries (Text Processing) ---
     if (ticker && frame.logIndex > liveGameLogIndex) {
+        
+        // 💡 FIX: Declare this variable outside the loop so it is accessible!
+        let playHasEnded = false; 
+
         for (let i = liveGameLogIndex; i < frame.logIndex; i++) {
             const playLogEntry = allLogs[i];
             if (!playLogEntry) continue;
 
-            const p = document.createElement('p');
+            const logEl = document.createElement('p');
             let styleClass = '';
             let descriptiveText = playLogEntry;
 
             // --- COMBINED LOGIC: Parse log AND set styles ---
-
-            const logEl = document.createElement('p');
             try {
                 if (playLogEntry.includes('Conversion Attempt')) {
                     liveGameIsConversion = true; // Set the flag
@@ -2835,11 +2836,8 @@ function runLiveGameTick() {
                 }
                 // --- SMART UI: Update Broadcast Banner from Logs ---
                 if (playLogEntry.includes('**Offense:**')) {
-                    // Strip the emoji and bold markdown to get clean text
                     const cleanText = playLogEntry.replace('🏈', '').replace(/\*\*/g, '').replace('Offense:', '').trim();
                     if (elements.simBannerOffense) elements.simBannerOffense.textContent = cleanText;
-
-                    // Reset defense text when new play starts
                     if (elements.simBannerDefense) elements.simBannerDefense.textContent = "...";
 
                     // Visual Pulse Effect
@@ -2867,7 +2865,7 @@ function runLiveGameTick() {
                     liveGameDriveActive = false;
                     styleClass = 'font-bold text-amber-400 mt-2 text-lg';
                     descriptiveText = `⏱️ ${playLogEntry} ⏱️`;
-                    playHasEnded = true; // Treat halftime/final as a "pause"
+                    playHasEnded = true; 
 
                 } else if (playLogEntry.startsWith('➡️ First down')) {
                     liveGameDown = 1;
@@ -2878,11 +2876,11 @@ function runLiveGameTick() {
                         liveGameBallOn = (side === 'own') ? line : 100 - line;
                     }
                     liveGameToGo = goalMatch ? parseInt(goalMatch[1], 10) : Math.min(10, 100 - liveGameBallOn);
-                    if (liveGameToGo <= 0) liveGameToGo = 1; // Goal line fix
+                    if (liveGameToGo <= 0) liveGameToGo = 1;
 
                     styleClass = 'text-yellow-300 font-semibold';
                     descriptiveText = playLogEntry;
-                    playHasEnded = true; // A first down pauses the game
+                    playHasEnded = true;
 
                 } else if (playLogEntry.match(/gain of (-?\d+\.?\d*)|loss of (\d+\.?\d*)/)) {
                     const yardsMatch = playLogEntry.match(/gain of (-?\d+\.?\d*)|loss of (\d+\.?\d*)/);
@@ -2908,86 +2906,59 @@ function runLiveGameTick() {
                     } else if (yards > 0) {
                         styleClass = 'text-cyan-300';
                     }
-                    playHasEnded = true; // A tackle/run ends the play
+                    playHasEnded = true;
 
                 } else if (playLogEntry.includes('incomplete') || playLogEntry.includes('INCOMPLETE') || playLogEntry.startsWith('❌') || playLogEntry.startsWith('🚫') || playLogEntry.startsWith('‹‹')) {
                     if (liveGameDriveActive) liveGameDown++;
                     styleClass = 'font-semibold text-red-400';
                     descriptiveText = playLogEntry;
-                    playHasEnded = true; // An incompletion ends the play
+                    playHasEnded = true;
 
-                    // --- 💡💡💡 START PUNT LOGIC FIX 💡💡💡 ---
                 } else if (playLogEntry.includes('PUNT by')) {
-                    styleClass = 'font-semibold text-blue-300'; // Special teams color
+                    styleClass = 'font-semibold text-blue-300';
                     descriptiveText = playLogEntry;
-                    // This log is an *outcome* if it includes one of these phrases
                     if (playLogEntry.includes('TOUCHBACK') || playLogEntry.includes('FAIR CATCH') || playLogEntry.includes('returns for') || playLogEntry.includes('No healthy returner')) {
                         liveGameDriveActive = false;
                         playHasEnded = true;
                     }
-                    // If it's just "PUNT by..." it's part of a muff sequence, so we don't end the play
 
                 } else if (playLogEntry.includes('MUFFED PUNT')) {
                     styleClass = 'font-bold text-red-500';
                     descriptiveText = playLogEntry;
-                    playHasEnded = false; // The muff itself doesn't pause, the recovery does
+                    playHasEnded = false;
 
                 } else if (playLogEntry.includes('recovers the muff')) {
-                    // **CRITICAL FIX**: This logic was inverted.
-                    // If the offense's name is in the log, they kept possession.
                     liveGameDriveActive = playLogEntry.includes(liveGamePossessionName);
                     styleClass = 'font-semibold text-yellow-300';
                     descriptiveText = playLogEntry;
-                    playHasEnded = true; // The recovery is the end of the play
+                    playHasEnded = true;
 
                 } else if (playLogEntry.includes('PUNT FAILED')) {
                     liveGameDriveActive = false;
                     styleClass = 'font-bold text-red-500';
                     descriptiveText = playLogEntry;
                     playHasEnded = true;
-                    // --- 💡💡💡 END PUNT LOGIC FIX 💡💡💡 ---
 
                 } else if (playLogEntry.startsWith('🎉 TOUCHDOWN') || playLogEntry.startsWith('🎉 PUNT RETURN TOUCHDOWN')) {
                     if (!liveGameIsConversion) {
-                        // 💡 ENHANCED: Correctly attribute TDs to the team that just scored
-                        // Check which team's name appears in the log entry
                         const homeName = currentLiveGameResult.homeTeam?.name || '';
                         const awayName = currentLiveGameResult.awayTeam?.name || '';
-
                         let isHomeTD = false;
 
-                        // First priority: check if either team name is explicitly mentioned
-                        if (playLogEntry.includes(homeName)) {
-                            isHomeTD = true;
-                        } else if (playLogEntry.includes(awayName)) {
-                            isHomeTD = false;
-                        }
-                        // Fallback: if return TD and no team mentioned, it's the opposing team
-                        else if (playLogEntry.includes('RETURN TOUCHDOWN')) {
-                            // Return TDs are scored by the team that's NOT on offense
-                            isHomeTD = liveGamePossessionName !== homeName;
-                        }
-                        // Last resort: attribute to team with possession (shouldn't reach here)
-                        else {
-                            isHomeTD = liveGamePossessionName === homeName;
-                        }
+                        if (playLogEntry.includes(homeName)) isHomeTD = true;
+                        else if (playLogEntry.includes(awayName)) isHomeTD = false;
+                        else if (playLogEntry.includes('RETURN TOUCHDOWN')) isHomeTD = liveGamePossessionName !== homeName;
+                        else isHomeTD = liveGamePossessionName === homeName;
 
-                        if (isHomeTD) {
-                            liveGameCurrentHomeScore += 6;
-                        } else {
-                            liveGameCurrentAwayScore += 6;
-                        }
+                        if (isHomeTD) liveGameCurrentHomeScore += 6;
+                        else liveGameCurrentAwayScore += 6;
                     }
 
                 } else if (playLogEntry.includes('SAFETY') || playLogEntry.includes('Safety')) {
-                    // Safety = 2 points for the Defense (the team NOT with the ball)
-                    if (liveGamePossessionName === currentLiveGameResult.homeTeam.name) {
-                        liveGameCurrentAwayScore += 2;
-                    } else {
-                        liveGameCurrentHomeScore += 2;
-                    }
+                    if (liveGamePossessionName === currentLiveGameResult.homeTeam.name) liveGameCurrentAwayScore += 2;
+                    else liveGameCurrentHomeScore += 2;
 
-                    liveGameDriveActive = false; // Ends the drive
+                    liveGameDriveActive = false;
                     styleClass = 'font-bold text-red-500 text-lg';
                     descriptiveText = `🚨 ${playLogEntry} (+2 Pts)`;
                     playHasEnded = true;
@@ -2997,17 +2968,16 @@ function runLiveGameTick() {
                     if (liveGamePossessionName === currentLiveGameResult.homeTeam.name) liveGameCurrentHomeScore += points; else liveGameCurrentAwayScore += points;
                     liveGameIsConversion = false;
                     liveGameDriveActive = false;
-
                     styleClass = 'font-semibold text-green-400';
                     descriptiveText = `✅ ${playLogEntry} Points are good!`;
-                    playHasEnded = true; // Conversion ends
+                    playHasEnded = true;
 
                 } else if (playLogEntry.includes('Conversion FAILED!')) {
                     liveGameIsConversion = false;
                     liveGameDriveActive = false;
                     styleClass = 'font-semibold text-red-400';
                     descriptiveText = `❌ ${playLogEntry} No good!`;
-                    playHasEnded = true; // Conversion ends
+                    playHasEnded = true;
 
                 } else if (playLogEntry.startsWith('Turnover') || playLogEntry.startsWith('❗ INTERCEPTION') || playLogEntry.startsWith('❗ FUMBLE')) {
                     liveGameDriveActive = false;
@@ -3018,10 +2988,9 @@ function runLiveGameTick() {
                     }
                     styleClass = 'font-semibold text-red-400';
                     descriptiveText = playLogEntry;
-                    playHasEnded = true; // Turnover ends the play
+                    playHasEnded = true;
                 }
                 else if (playLogEntry.includes('Play ends') || playLogEntry.includes('⏱️')) {
-                    // 💡 FIX: Catch-all for end of play
                     styleClass = 'text-gray-400 italic';
                     descriptiveText = playLogEntry;
                     playHasEnded = true;
@@ -3029,44 +2998,37 @@ function runLiveGameTick() {
 
                 if (liveGameDown > 4 && liveGameDriveActive) {
                     liveGameDriveActive = false;
-                    // Note: The "Turnover on downs!" log will trigger 'playHasEnded' on its own
                 }
 
             } catch (parseError) {
                 console.error("Error parsing log entry for sim state:", playLogEntry, parseError);
             }
 
-            // Update lightweight live stats from this entry
-            try {
-                updateStatsFromLogEntry(playLogEntry);
-            } catch (err) {
-                console.error('Error updating live stats from log:', err);
-            }
+            // Update stats
+            try { updateStatsFromLogEntry(playLogEntry); } catch (err) { console.error('Error updating live stats:', err); }
 
-            // 2. Append to Ticker UI
+            // Append Log
             logEl.className = styleClass;
-            logEl.textContent = descriptiveText.replace(/\*\*/g, ''); // Remove bold markdown for UI
+            logEl.textContent = descriptiveText.replace(/\*\*/g, ''); 
             ticker.appendChild(logEl);
+            ticker.scrollTop = ticker.scrollHeight;
 
-            // 3. Update pointer
             liveGameLogIndex = i + 1;
 
-            // 4. THE INTERRUPTOR: Prevents jerky resets by stopping the loop on major events
-            // If the ball is thrown, fumbled, or tackled, we stop here to let the visual play out.
+            // THE INTERRUPTOR: Stop loop if specific events occur to let animation catch up
             const isInterruptor =
-                playLogEntry.includes('throws to') ||     // Pass start
-                playLogEntry.includes('throws it away') || // Throw away
-                playLogEntry.includes('tackled by') ||    // Tackle/Play end
-                playLogEntry.includes('TOUCHDOWN') ||     // Score
-                playLogEntry.includes('INTERCEPTION') ||  // Turnover
-                playLogEntry.includes('FUMBLE') ||        // Loose ball
-                playLogEntry.includes('punts the ball');  // Punt start
+                playLogEntry.includes('throws to') || 
+                playLogEntry.includes('throws it away') || 
+                playLogEntry.includes('tackled by') || 
+                playLogEntry.includes('TOUCHDOWN') || 
+                playLogEntry.includes('INTERCEPTION') || 
+                playLogEntry.includes('FUMBLE') || 
+                playLogEntry.includes('punts the ball'); 
 
             if (isInterruptor) {
-                break; // Stop processing logs for this frame
+                break; 
             }
         }
-
     }
 
     // 4. UPDATE SCOREBOARD & STATS
@@ -3076,38 +3038,33 @@ function runLiveGameTick() {
 
     // 5. DRAW THE FRAME
     drawFieldVisualization(frame);
-    // In runLiveGameTick, replace renderSimPlayers(frame) with:
     if (frame.players) {
         frame.players.forEach(p => updateSimPlayerUI(p));
     }
 
 
     // --- 6. THE PROCESSING PAUSE / PROGRESSION ---
-
     if (nextFrame && nextFrame.isSnap) {
         // 🛑 STOP: The current action is finished.
         clearInterval(liveGameInterval);
         liveGameInterval = null;
 
-        // A. Show the result of the play (the last thing in the log)
-        // This gives the user time to read "Gain of 5 yards" while looking at the field
+        // Display Result in Banner
         const playResultLog = allLogs[frame.logIndex - 1] || "Play Complete";
         if (elements.simBannerOffense) {
             elements.simBannerOffense.textContent = playResultLog.replace(/\*\*/g, '');
         }
 
-        // B. The "Breather" Pause
-        // We wait 3.5 seconds so the user isn't disoriented by a sudden "teleport"
+        // Huddle Delay
         huddleTimeout = setTimeout(() => {
-            liveGameCurrentIndex++; // Move to the "Snap Frame" (new formation)
-            startNextPlay();        // Triggers the "SET... HUT!" sequence
+            liveGameCurrentIndex++; 
+            startNextPlay(); 
         }, 3500);
 
     } else {
-        // No new play starting? Just keep moving to the next animation frame.
         liveGameCurrentIndex++;
     }
-} // End of runLiveGameTick
+}
 
 
 function updateSimPlayerUI(pState) {
