@@ -2005,13 +2005,19 @@ function drawFieldVisualization(frameData) {
     // --- 1. SETUP DIMENSIONS ---
     const width = canvas.width;
     const height = canvas.height;
-    
+
     // Prevent crash on hidden tabs
     if (width === 0 || height === 0) return;
 
-    const fieldWidthYards = 53.3;
-    const scale = width / fieldWidthYards;
-    const visibleLengthYards = 35; 
+    // ZOOM FIX: Add padding to the "visible width"
+    // Real field is 53.3. We pretend it's 64 yards wide so we have ~5 yards buffer on each side.
+    const VIRTUAL_WIDTH = 64;
+    const scale = width / VIRTUAL_WIDTH;
+
+    const visibleLengthYards = 35;
+
+    // Center the 53.3 yard field within our 64 yard view
+    const xPad = (VIRTUAL_WIDTH - 53.3) / 2;
 
     // Camera Logic (Follow Ball)
     const ballY = frameData.ball ? frameData.ball.y : 60;
@@ -2019,12 +2025,13 @@ function drawFieldVisualization(frameData) {
     cameraY = Math.max(0, Math.min(120 - visibleLengthYards, cameraY));
 
     // Coordinate Mappers
-    const toScreenX = (x) => x * scale;
+    // We add xPad to shift the drawing right, creating the left margin
+    const toScreenX = (x) => (x + xPad) * scale;
     const toScreenY = (y) => height - ((y - cameraY) * (height / visibleLengthYards));
 
     // --- 2. DRAW FIELD TEXTURE (Striped Grass) ---
     // Base grass color
-    ctx.fillStyle = "#3a6b35"; 
+    ctx.fillStyle = "#3a6b35";
     ctx.fillRect(0, 0, width, height);
 
     // Draw alternating stripes every 5 yards
@@ -2049,7 +2056,7 @@ function drawFieldVisualization(frameData) {
     const drawEndzonePattern = (yStart, yEnd, color, name) => {
         const sY = toScreenY(yStart);
         const eY = toScreenY(yEnd);
-        
+
         if (sY < 0 && eY < 0) return;
         if (sY > height && eY > height) return;
 
@@ -2071,7 +2078,7 @@ function drawFieldVisualization(frameData) {
             ctx.lineTo(j - h, topY + h);
         }
         ctx.stroke();
-        
+
         // Team Name Text
         ctx.translate(width / 2, topY + h / 2);
         ctx.fillStyle = "rgba(255,255,255,0.9)";
@@ -2086,7 +2093,7 @@ function drawFieldVisualization(frameData) {
 
     const homeColor = currentLiveGameResult?.homeTeam?.primaryColor || "#1d4ed8";
     const awayColor = currentLiveGameResult?.awayTeam?.primaryColor || "#b91c1c";
-    
+
     // Bottom Endzone (Home)
     drawEndzonePattern(0, 10, awayColor, currentLiveGameResult?.awayTeam?.name || "AWAY");
     // Top Endzone (Away)
@@ -2160,37 +2167,47 @@ function drawFieldVisualization(frameData) {
     drawSpecialLine(frameData.lineOfScrimmage, "#3b82f6", "#60a5fa"); // Blue LOS
     drawSpecialLine(frameData.firstDownY, "#eab308", "#fde047");     // Yellow First Down
 
-    // --- 6. DRAW PLAYERS (With Jersey Numbers) ---
+    // --- 5. DRAW PLAYERS (With Ball Carrier Logic) ---
     if (frameData.players) {
         frameData.players.forEach(p => {
             const px = toScreenX(p.x);
             const py = toScreenY(p.y);
-            const r = scale * 0.8; // Player radius
+            const r = scale * 0.8;
 
             if (py < -r || py > height + r) return;
 
-            // Drop Shadow
+            // Check if holding ball (QB in pocket OR Runner)
+            const holdingBall = p.hasBall || p.isBallCarrier;
+
+            // Shadow
             ctx.fillStyle = "rgba(0,0,0,0.4)";
             ctx.beginPath();
             ctx.ellipse(px, py + r * 0.5, r, r * 0.6, 0, 0, Math.PI * 2);
             ctx.fill();
 
-            // Player Circle
-            const pColor = p.isOffense ? '#2563eb' : '#dc2626'; // Blue / Red
-            const ringColor = p.isBallCarrier ? '#f59e0b' : '#ffffff'; // Gold ring if ball carrier
-
-            // Base
+            // Body
+            const pColor = p.isOffense ? '#2563eb' : '#dc2626';
             ctx.fillStyle = pColor;
-            ctx.beginPath();
-            ctx.arc(px, py, r, 0, Math.PI * 2);
-            ctx.fill();
+            ctx.beginPath(); ctx.arc(px, py, r, 0, Math.PI * 2); ctx.fill();
 
-            // Ring (Thick if ball carrier)
-            ctx.strokeStyle = ringColor;
-            ctx.lineWidth = p.isBallCarrier ? scale * 0.3 : scale * 0.1;
-            ctx.stroke();
+            // Ring / Highlight (GOLD if holding ball)
+            if (holdingBall) {
+                ctx.strokeStyle = "#fbbf24"; // Gold
+                ctx.lineWidth = scale * 0.35; // Thick
+                ctx.stroke();
 
-            // Jersey Number
+                // Extra Glow for visibility
+                ctx.shadowColor = "#fbbf24";
+                ctx.shadowBlur = 10;
+                ctx.stroke();
+                ctx.shadowBlur = 0;
+            } else {
+                ctx.strokeStyle = "#ffffff";
+                ctx.lineWidth = scale * 0.1;
+                ctx.stroke();
+            }
+
+            // Number
             if (p.number) {
                 ctx.fillStyle = "#ffffff";
                 ctx.font = `bold ${Math.max(8, scale * 0.9)}px 'Inter', sans-serif`;
@@ -2201,29 +2218,29 @@ function drawFieldVisualization(frameData) {
         });
     }
 
-    // --- 7. DRAW BALL ---
-    if (frameData.ball) {
+    // --- 6. DRAW BALL (Conditional) ---
+    // Only draw if NOT held by a player (In Air, Loose, or Kick)
+    const ballVisible = frameData.ball && (frameData.ball.inAir || frameData.ball.isLoose);
+
+    if (ballVisible) {
         const bx = toScreenX(frameData.ball.x);
         const by = toScreenY(frameData.ball.y);
-        
-        // Ball Size calculates arc height logic (z)
-        // We simulate "height" by scaling the shadow and the ball slightly
-        const bz = frameData.ball.z || 0; 
-        const ballSize = scale * 0.5 * (1 + (bz * 0.1)); 
+        const bz = frameData.ball.z || 0;
+        const ballSize = scale * 0.5 * (1 + (bz * 0.1));
         const shadowOffset = bz * scale * 2;
 
-        // Shadow (moves away as ball goes higher)
+        // Shadow
         ctx.fillStyle = "rgba(0,0,0,0.3)";
         ctx.beginPath();
         ctx.ellipse(bx + (scale * 0.2), by + (scale * 0.2) + shadowOffset, ballSize, ballSize * 0.6, 0, 0, Math.PI * 2);
         ctx.fill();
 
-        // Ball Shape (Brown football)
-        ctx.fillStyle = "#713f12"; 
+        // Ball
+        ctx.fillStyle = "#713f12";
         ctx.beginPath();
-        ctx.ellipse(bx, by, ballSize * 0.8, ballSize * 1.2, 0, 0, Math.PI * 2); // Vertical ellipse for top-down view
+        ctx.ellipse(bx, by, ballSize * 0.8, ballSize * 1.2, 0, 0, Math.PI * 2);
         ctx.fill();
-        
+
         // Laces
         ctx.strokeStyle = "rgba(255,255,255,0.8)";
         ctx.lineWidth = 2;
