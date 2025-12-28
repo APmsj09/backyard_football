@@ -2118,20 +2118,40 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                 return; // Stop processing normal offense logic
             }
 
-            // B. RETURN TEAM AI (The Blockers)
+            // B. RETURN TEAM AI
             if (isReturnTeam) {
-                // 1. The Returner (Already handled by "Ball Carrier" logic below, but explicit safety here)
-                if (pState.isBallCarrier) {
-                    // Logic handled by "0. TURNOVER RETURN" block, let it pass through or handle here
-                    // Passing through allows the "Lane Logic" to work.
+                // 1. THE RETURNER (The guy supposed to catch it)
+                // We identify them by their assignment OR if they already have the ball
+                if (pState.assignment === 'punt_return' || pState.isBallCarrier) {
+
+                    if (pState.isBallCarrier) {
+                        // Phase 2: RUN! (Handled by the "0. TURNOVER RETURN" block at the start of the function)
+                        // We return here to let that specific logic take over.
+                        return;
+                    }
+                    else if (ballInAir) {
+                        // Phase 1: Go to Landing Spot
+                        // 💡 FIX: Don't block! Run to where the ball is going!
+                        const landX = ballPos.targetX || ballPos.x;
+                        const landY = ballPos.targetY || ballPos.y;
+
+                        pState.targetX = landX;
+                        pState.targetY = landY;
+                        pState.action = 'pursuit'; // Use pursuit speed/animation
+
+                        // "Camping" logic: If close, stop and wait
+                        if (getDistance(pState, { x: landX, y: landY }) < 1.0) {
+                            pState.targetX = pState.x;
+                            pState.targetY = pState.y;
+                        }
+                        return;
+                    }
                 }
                 // 2. The Blockers
                 else {
                     if (returnerHasBall) {
-                        // LEAD BLOCK: Find nearest Kicking Team player and hit them
-                        // Look for enemies *ahead* of the returner (between returner and goal)
+                        // LEAD BLOCK logic...
                         const returnerY = ballCarrierState.y;
-
                         const threat = offenseStates
                             .filter(e => !e.isBlocked && !e.isEngaged && e.y < returnerY + 15 && e.y > returnerY - 5)
                             .sort((a, b) => getDistance(pState, a) - getDistance(pState, b))[0];
@@ -2139,8 +2159,6 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                         if (threat) {
                             pState.targetX = threat.x;
                             pState.targetY = threat.y;
-
-                            // Auto-engage if close
                             if (getDistance(pState, threat) < 2.0) {
                                 pState.isEngaged = true;
                                 pState.engagedWith = threat.id;
@@ -2149,24 +2167,20 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                                 threat.blockedBy = pState.id;
                             }
                         } else {
-                            // No threat? Run alongside returner (Escort)
+                            // Escort
                             pState.targetX = ballCarrierState.x + (pState.x < ballCarrierState.x ? -3 : 3);
                             pState.targetY = ballCarrierState.y - 2;
                         }
                     } else {
-                        // Ball in air: Drop back to set up wall
-                        // Calculate a "Block Point" 10 yards ahead of landing spot
+                        // WALL BUILDING (Ball in air)
                         const landY = ballPos.targetY || 20;
                         const landX = ballPos.targetX || CENTER_X;
-
-                        // Spread out horizontally based on initial position relative to center
                         const xOffset = (pState.initialX - CENTER_X) * 0.8;
-
                         pState.targetX = landX + xOffset;
-                        pState.targetY = Math.max(landY - 10, 10);
+                        pState.targetY = Math.max(landY - 15, 10); // Set wall 15 yards in front of returner
                     }
                     pState.action = 'run_block';
-                    return; // Stop processing normal defense logic
+                    return;
                 }
             }
         }
@@ -3179,60 +3193,87 @@ function handleBallArrival(playState, ballCarrierState, playResult, gameLog) {
     // ===========================================================
     if (playState.type === 'punt' && playState.ballState.inAir && playState.ballState.targetPlayerId === null) {
 
-        if (playState.ballState.z <= 0.1) {
-            const speed = Math.sqrt(playState.ballState.vx ** 2 + playState.ballState.vy ** 2);
+        const ball = playState.ballState;
+
+        // A. GROUND CHECK (Ball hit the floor)
+        // 💡 FIX: Use a larger threshold or check velocity direction to catch "through-the-floor" frames
+        if (ball.z <= 0.5) {
+            // Ball is low enough to be downed or muffed
+            
+            // Check if anyone is close enough to touch it (Catch/Muff)
+            const CATCH_CHECK_RADIUS = 3.0; // Generous radius for punt catching
+            const returnersInRange = playState.activePlayers.filter(p => !p.isOffense && !p.isEngaged && p.stunnedTicks === 0 && getDistance(p, ball) < CATCH_CHECK_RADIUS);
+
+            if (returnersInRange.length > 0) {
+                // Someone is there! Try to catch.
+                const returnerState = returnersInRange.sort((a, b) => getDistance(a, ball) - getDistance(b, ball))[0];
+                const returnerPlayer = getPlayer(returnerState.id);
+                
+                // Muff calculation
+                const catchingHands = returnerPlayer?.attributes?.technical?.catchingHands || 50;
+                const muffChance = 0.05 + (1 - (catchingHands / 100)) * 0.15;
+
+                if (Math.random() < muffChance) {
+                    if (gameLog) gameLog.push(`❗ MUFFED PUNT! ${returnerState.name} drops it!`);
+                    ball.isLoose = true;
+                    ball.inAir = false;
+                    ball.z = 0.1;
+                    ball.vx *= 0.5; // Slow down bounce
+                    ball.vy *= 0.5;
+                    returnerState.stunnedTicks = 20;
+                    playState.statEvents.push({ type: 'fumble', playerId: returnerState.id });
+                    return;
+                } else {
+                    if (gameLog) gameLog.push(`🏈 Punt caught by ${returnerState.name}.`);
+                    playState.turnover = true;
+                    ball.inAir = false;
+                    ball.isLoose = false;
+                    
+                    returnerState.isBallCarrier = true;
+                    returnerState.hasBall = true;
+                    returnerState.action = 'run_path';
+                    
+                    playState.returnStartY = returnerState.y;
+                    
+                    // Snap ball to player
+                    ball.x = returnerState.x;
+                    ball.y = returnerState.y;
+                    ball.z = 1.0;
+
+                    // Switch AI Roles
+                    playState.activePlayers.forEach(p => {
+                        p.hasBall = (p.id === returnerState.id);
+                        p.isBallCarrier = (p.id === returnerState.id);
+                        if (p.isOffense) p.action = 'pursuit'; // Gunners hunt
+                        else if (p.id !== returnerState.id) p.action = 'run_block'; // Blockers block
+                    });
+                    return;
+                }
+            } 
+            
+            // No one caught it? It hit the ground.
+            // Slow it down (friction)
+            ball.vx *= 0.8;
+            ball.vy *= 0.8;
+            ball.vz *= -0.5; // Small bounce
+            
+            // If it stops moving, blow the whistle
+            const speed = Math.sqrt(ball.vx**2 + ball.vy**2);
             if (speed < 0.5) {
-                if (gameLog) gameLog.push(`🛑 Punt downed by the kicking team.`);
+                if (gameLog) gameLog.push(`🛑 Punt downed by gravity.`);
                 playState.playIsLive = false;
-                playState.finalBallY = playState.ballState.y;
+                playState.finalBallY = ball.y;
                 playState.touchback = false;
+                
+                // Touchback check
+                if (ball.y <= 0) {
+                    playState.touchback = true; 
+                    playState.finalBallY = 20; 
+                    if(gameLog) gameLog.push("Touchback!");
+                }
             }
             return;
         }
-        if (playState.ballState.z > 3.0) return;
-
-        const CATCH_CHECK_RADIUS = 4.0;
-        const ballPos = playState.ballState;
-        const returnersInRange = playState.activePlayers.filter(p => !p.isOffense && !p.isEngaged && p.stunnedTicks === 0 && getDistance(p, ballPos) < CATCH_CHECK_RADIUS);
-
-        if (returnersInRange.length === 0) return;
-
-        const returnerState = returnersInRange.sort((a, b) => getDistance(a, ballPos) - getDistance(b, ballPos))[0];
-        const returnerPlayer = getPlayer(returnerState.id);
-        if (!returnerPlayer) return;
-
-        const catchingHands = returnerPlayer.attributes?.technical?.catchingHands || 50;
-        const muffChance = 0.05 + (1 - (catchingHands / 100)) * 0.15;
-
-        if (Math.random() < muffChance) {
-            if (gameLog) gameLog.push(`❗ MUFFED PUNT! ${returnerState.name} drops it!`);
-            playState.ballState.isLoose = true;
-            playState.ballState.inAir = false;
-            playState.ballState.z = 0.1;
-            returnerState.stunnedTicks = 30;
-            playState.statEvents.push({ type: 'fumble', playerId: returnerState.id });
-        } else {
-            if (gameLog) gameLog.push(`🏈 Punt caught by ${returnerState.name}.`);
-            playState.turnover = true;
-            playState.ballState.inAir = false;
-            playState.ballState.isLoose = false;
-            returnerState.isBallCarrier = true;
-            returnerState.hasBall = true;
-            returnerState.action = 'run_path';
-            playState.returnStartY = returnerState.y;
-            playState.ballState.x = returnerState.x;
-            playState.ballState.y = returnerState.y;
-            playState.ballState.z = 1.0;
-
-            // Switch AI
-            playState.activePlayers.forEach(p => {
-                p.hasBall = (p.id === returnerState.id);
-                p.isBallCarrier = (p.id === returnerState.id);
-                if (p.isOffense) p.action = 'pursuit';
-                else if (p.id !== returnerState.id) p.action = 'run_block';
-            });
-        }
-        return;
     }
 
     // ===========================================================

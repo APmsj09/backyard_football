@@ -2219,28 +2219,34 @@ function drawFieldVisualization(frameData) {
     }
 
     // --- 6. DRAW BALL (Conditional) ---
-    // Only draw if NOT held by a player (In Air, Loose, or Kick)
-    const ballVisible = frameData.ball && (frameData.ball.inAir || frameData.ball.isLoose);
+    // Rule: Hide ball if a player is holding it. Show it otherwise (Air, Ground, Tee).
+    let isHeld = false;
+    if (frameData.players) {
+        isHeld = frameData.players.some(p => p.hasBall || p.isBallCarrier);
+    }
 
-    if (ballVisible) {
+    if (frameData.ball && !isHeld) {
         const bx = toScreenX(frameData.ball.x);
         const by = toScreenY(frameData.ball.y);
-        const bz = frameData.ball.z || 0;
-        const ballSize = scale * 0.5 * (1 + (bz * 0.1));
+        
+        // Ball Size calculates arc height logic (z)
+        // We simulate "height" by scaling the shadow and the ball slightly
+        const bz = frameData.ball.z || 0; 
+        const ballSize = scale * 0.5 * (1 + (bz * 0.1)); 
         const shadowOffset = bz * scale * 2;
 
-        // Shadow
+        // Shadow (moves away as ball goes higher)
         ctx.fillStyle = "rgba(0,0,0,0.3)";
         ctx.beginPath();
         ctx.ellipse(bx + (scale * 0.2), by + (scale * 0.2) + shadowOffset, ballSize, ballSize * 0.6, 0, 0, Math.PI * 2);
         ctx.fill();
 
-        // Ball
-        ctx.fillStyle = "#713f12";
+        // Ball Shape (Brown football)
+        ctx.fillStyle = "#713f12"; 
         ctx.beginPath();
-        ctx.ellipse(bx, by, ballSize * 0.8, ballSize * 1.2, 0, 0, Math.PI * 2);
+        ctx.ellipse(bx, by, ballSize * 0.8, ballSize * 1.2, 0, 0, Math.PI * 2); // Vertical ellipse for top-down view
         ctx.fill();
-
+        
         // Laces
         ctx.strokeStyle = "rgba(255,255,255,0.8)";
         ctx.lineWidth = 2;
