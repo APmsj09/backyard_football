@@ -2005,6 +2005,8 @@ function drawFieldVisualization(frameData) {
     // --- 1. DEFINE DIMENSIONS ---
     const width = canvas.width;
     const height = canvas.height;
+    if (width === 0 || height === 0) return;
+
     const fieldWidthYards = 53.3;
 
     // --- 2. CAMERA & SCALE ---
@@ -2986,10 +2988,10 @@ function runLiveGameTick() {
 function updateSimPlayerUI(pState) {
     const energyBar = document.getElementById(`sim-energy-${pState.id}`);
     const fatigueText = document.getElementById(`sim-fatigue-${pState.id}`);
-    
+
     if (energyBar) {
         // Calculate percentages locally
-        const stamina = pState.stamina || 50; 
+        const stamina = pState.stamina || 50;
         const energyPct = Math.max(0, Math.round(100 - (pState.fatigue / stamina * 100)));
         energyBar.style.width = `${energyPct}%`;
     }
@@ -3003,10 +3005,17 @@ if (frame.players) {
     frame.players.forEach(p => updateSimPlayerUI(p));
 }
 
+let qbShoutTimeout1 = null;
+let qbShoutTimeout2 = null;
+let qbShoutTimeout3 = null;
+
 function startNextPlay() {
-    // 1. Clear everything to prevent "Double Loop" freezes
+    // 1. Clear ALL potential timers
     if (liveGameInterval) { clearInterval(liveGameInterval); liveGameInterval = null; }
     if (huddleTimeout) { clearTimeout(huddleTimeout); huddleTimeout = null; }
+    if (qbShoutTimeout1) { clearTimeout(qbShoutTimeout1); qbShoutTimeout1 = null; }
+    if (qbShoutTimeout2) { clearTimeout(qbShoutTimeout2); qbShoutTimeout2 = null; }
+    if (qbShoutTimeout3) { clearTimeout(qbShoutTimeout3); qbShoutTimeout3 = null; }
 
     // Safety check: ensure game data still exists
     if (!currentLiveGameResult || !currentLiveGameResult.visualizationFrames) return;
@@ -3016,32 +3025,29 @@ function startNextPlay() {
 
     if (snapFrame) {
         drawFieldVisualization(snapFrame);
-        
-        // ⚡ PERFORMANCE FIX: Update UI without rebuilding DOM
+
         if (typeof updateSimPlayerUI === 'function') {
-             if (snapFrame.players) snapFrame.players.forEach(p => updateSimPlayerUI(p));
-        } else {
-             renderSimPlayers(snapFrame); // Fallback to slow render if optimized function not added yet
+            if (snapFrame.players) snapFrame.players.forEach(p => updateSimPlayerUI(p));
         }
 
         if (elements.simBannerOffense) elements.simBannerOffense.textContent = "SET...";
 
-        // 1. "BLUE 42..." (0.7s delay)
-        setTimeout(() => {
+        // 1. "BLUE 42..." (Store ID to clear later)
+        qbShoutTimeout1 = setTimeout(() => {
             if (elements.simBannerOffense) elements.simBannerOffense.textContent = "BLUE 42...";
             animateQBShout(snapFrame);
         }, 700);
 
-        // 2. "SET, HUT!!" (1.4s delay)
-        setTimeout(() => {
+        // 2. "SET, HUT!!"
+        qbShoutTimeout2 = setTimeout(() => {
             if (elements.simBannerOffense) elements.simBannerOffense.textContent = "SET, HUT!!";
             animateQBShout(snapFrame);
         }, 1400);
 
-        // 3. "HIKE!" -> RESTART SIMULATION (2.0s delay)
-        huddleTimeout = setTimeout(() => {
-            if (elements.simBannerOffense) elements.simBannerOffense.textContent = ""; // Clear banner
-            
+        // 3. "HIKE!" -> RESTART SIMULATION
+        qbShoutTimeout3 = setTimeout(() => {
+            if (elements.simBannerOffense) elements.simBannerOffense.textContent = "";
+
             // Resume the game loop!
             if (!liveGameInterval) {
                 liveGameInterval = setInterval(runLiveGameTick, liveGameSpeed);
@@ -3226,6 +3232,14 @@ export function setSimSpeed(speed) {
 
 /** Helper to generate the HTML for a depth chart card (used by render AND drop) */
 function createDepthCardHTML(player, index, groupKey) {
+
+    if (!player || !player.attributes) {
+        return {
+            className: 'hidden', // Hide it visually so it doesn't break layout
+            innerHTML: ''
+        };
+    }
+
     const ovr = calculateOverall(player, groupKey);
     let isStarterZone = false;
 
@@ -3670,48 +3684,7 @@ function setupDragLogic(draggables, containers) {
     });
 }
 
-function setupDepthOrderDrag() {
-    const list = document.getElementById("depth-order-list");
-    if (!list) return;
 
-    const items = list.querySelectorAll(".depth-order-item");
-    let dragged = null;
-
-    items.forEach(item => {
-        item.addEventListener("dragstart", () => {
-            dragged = item;
-            item.classList.add("opacity-50");
-        });
-
-        item.addEventListener("dragend", () => {
-            dragged = null;
-            item.classList.remove("opacity-50");
-        });
-
-        item.addEventListener("dragover", e => {
-            e.preventDefault();
-            const rect = item.getBoundingClientRect();
-            const offset = e.clientY - rect.top;
-
-            if (offset > rect.height / 2) {
-                item.after(dragged);
-            } else {
-                item.before(dragged);
-            }
-        });
-    });
-
-    list.addEventListener("drop", () => {
-        const newOrder = [...list.querySelectorAll(".depth-order-item")]
-            .map(el => el.dataset.playerId);
-
-        if (typeof Game.updateDepthOrder === "function") {
-            Game.updateDepthOrder(newOrder);
-        }
-
-        document.dispatchEvent(new CustomEvent("refresh-ui"));
-    });
-}
 
 /** Helper for List Reordering Logic */
 function getDragAfterElement(container, y) {

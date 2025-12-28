@@ -28,9 +28,14 @@ async function startNewGame() {
     try {
         UI.showScreen("loading-screen");
         UI.startLoadingMessages();
+        // Give the UI a moment to render the screen before heavy lifting
         await new Promise(resolve => setTimeout(resolve, 50));
 
-        await Game.initializeLeague(UI.updateLoadingProgress);
+        // 💡 FIX: Adapter to convert 0.0-1.0 (Game) to 0-100 (UI)
+        await Game.initializeLeague((progress) => {
+            UI.updateLoadingProgress(Math.round(progress * 100));
+        });
+
         UI.stopLoadingMessages();
 
         gameState = Game.getGameState();
@@ -108,72 +113,58 @@ function handleDraftPlayer() {
 let isDraftingLocked = false;
 
 async function runAIDraftPicks() {
-    if (!gameState || isDraftingLocked) return; // Block double execution
+    if (!gameState || isDraftingLocked) return;
     isDraftingLocked = true;
 
-    const checkDraftEnd = () => {
-        const pickLimitReached = gameState.currentPick >= gameState.draftOrder.length;
-        const noPlayersLeft = gameState.players.filter(p => p && !p.teamId).length === 0;
-        const allTeamsFull = gameState.teams.every(t => !t || !t.roster || t.roster.length >= ROSTER_LIMIT);
-        return pickLimitReached || noPlayersLeft || allTeamsFull;
-    };
+    try {
+        // Use a loop instead of recursion to prevent locking issues
+        while (true) {
+            // 1. Check End Conditions
+            const pickLimitReached = gameState.currentPick >= gameState.draftOrder.length;
+            const noPlayersLeft = gameState.players.filter(p => p && !p.teamId).length === 0;
+            const allTeamsFull = gameState.teams.every(t => !t || !t.roster || t.roster.length >= ROSTER_LIMIT);
 
-    let safetyCounter = 0;
-    const MAX_PICKS_WITHOUT_PROGRESS = 50;
-
-    const advancePick = () => {
-        gameState.currentPick = (gameState.currentPick || 0) + 1;
-        if (gameState.draftOrder && gameState.currentPick > gameState.draftOrder.length) gameState.currentPick = gameState.draftOrder.length;
-    };
-
-    if (checkDraftEnd()) {
-        handleDraftEnd();
-        return;
-    }
-
-    let currentPickingTeam = gameState.draftOrder[gameState.currentPick];
-
-    while (currentPickingTeam && currentPickingTeam.id !== gameState.playerTeam.id) {
-        if (safetyCounter++ > MAX_PICKS_WITHOUT_PROGRESS) {
-            handleDraftEnd();
-            return;
-        }
-
-        if (!currentPickingTeam || !currentPickingTeam.roster || currentPickingTeam.roster.length >= ROSTER_LIMIT) {
-            advancePick();
-            currentPickingTeam = gameState.draftOrder[gameState.currentPick];
-            continue;
-        }
-
-        UI.renderDraftScreen(gameState, handlePlayerSelectInDraft, selectedPlayerId, currentSortColumn, currentSortDirection);
-        await new Promise(resolve => setTimeout(resolve, 50));
-
-        const result = Game.simulateAIPick(currentPickingTeam);
-        if (result) safetyCounter = 0;
-        advancePick();
-
-        if (checkDraftEnd()) {
-            handleDraftEnd();
-            return;
-        }
-        currentPickingTeam = gameState.draftOrder[gameState.currentPick];
-    }
-
-    if (!checkDraftEnd()) {
-        if (gameState.playerTeam.roster.length >= ROSTER_LIMIT) {
-            advancePick();
-            if (checkDraftEnd()) {
-                handleDraftEnd();
-            } else {
-                runAIDraftPicks();
+            if (pickLimitReached || noPlayersLeft || allTeamsFull) {
+                await handleDraftEnd();
+                break; 
             }
-        } else {
-            UI.renderDraftScreen(gameState, handlePlayerSelectInDraft, selectedPlayerId, currentSortColumn, currentSortDirection);
+
+            // 2. Get Current Team
+            let currentPickingTeam = gameState.draftOrder[gameState.currentPick];
+
+            // 3. If it's the PLAYER'S turn, stop the loop and let them click UI
+            if (currentPickingTeam && currentPickingTeam.id === gameState.playerTeam.id) {
+                // If player is full, skip them automatically
+                if (gameState.playerTeam.roster.length >= ROSTER_LIMIT) {
+                    gameState.currentPick++;
+                    UI.renderSelectedPlayerCard(null, gameState);
+                    // Continue loop to let AI pick
+                    continue; 
+                } else {
+                    // Unlock and wait for user input
+                    UI.renderDraftScreen(gameState, handlePlayerSelectInDraft, selectedPlayerId, currentSortColumn, currentSortDirection);
+                    break; 
+                }
+            }
+
+            // 4. AI Turn
+            if (!currentPickingTeam || !currentPickingTeam.roster || currentPickingTeam.roster.length >= ROSTER_LIMIT) {
+                // Skip if invalid or full
+                gameState.currentPick++;
+            } else {
+                // Visualize the draft board updating
+                UI.renderDraftScreen(gameState, handlePlayerSelectInDraft, selectedPlayerId, currentSortColumn, currentSortDirection);
+                await new Promise(resolve => setTimeout(resolve, 50)); // Visual delay
+
+                Game.simulateAIPick(currentPickingTeam);
+                gameState.currentPick++;
+            }
         }
-    } else {
-        handleDraftEnd();
+    } catch (e) {
+        console.error("Draft loop error:", e);
+    } finally {
+        isDraftingLocked = false;
     }
-    isDraftingLocked = false;
 }
 
 async function handleDraftEnd() {
@@ -323,16 +314,21 @@ function handleDepthChartSelect(e) {
     if (!e.target.matches('.slot-select')) return;
     const selectEl = e.target;
 
-    // 💡 FIXED: Handle both "null" string AND empty string ""
     const val = selectEl.value;
+    // FIX: Ensure we never pass empty strings, only valid IDs or null
     const playerId = (val === 'null' || val === '') ? null : val;
 
-    const newPositionSlot = selectEl.dataset.slotId || selectEl.dataset.slot; // Check both just in case
+    const newPositionSlot = selectEl.dataset.slotId || selectEl.dataset.slot;
     const side = selectEl.dataset.side;
 
     if (newPositionSlot && side && gameState) {
-        handleDepthChartDrop(playerId, newPositionSlot, side);
-        document.dispatchEvent(new CustomEvent('refresh-ui'));
+        // FIX: Prevent updating if the ID is null (clearing a slot is handled differently in drag/drop logic usually)
+        // If you intended to clear the slot, ensure game.js handles nulls gracefully.
+        // For now, only update if we have a valid player ID.
+        if (playerId) {
+            handleDepthChartDrop(playerId, newPositionSlot, side);
+            document.dispatchEvent(new CustomEvent('refresh-ui'));
+        }
     }
 }
 
@@ -713,14 +709,16 @@ window.app = {
     onDraftSelect: handlePlayerSelectInDraft,
     setCaptain: handleSetCaptain,
     handleAdvanceWeek,
-    skipSim: UI.skipLiveGameSim,
-    setSpeed: UI.setSimSpeed,
+    // Note: Use getters for UI functions if they aren't defined yet at top level
+    skipSim: () => UI.skipLiveGameSim(), 
+    setSpeed: (s) => UI.setSimSpeed(s),
     cutPlayer: (id) => {
         if (confirm("Cut this player?")) {
             Game.playerCut(id);
-            UI.hideModal();
+            // Safety check for UI
+            if (typeof UI.hideModal === 'function') UI.hideModal();
             gameState = Game.getGameState();
-            UI.switchTab('my-team', gameState);
+            if (typeof UI.switchTab === 'function') UI.switchTab('my-team', gameState);
         }
     }
 };

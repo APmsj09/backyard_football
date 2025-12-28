@@ -166,6 +166,12 @@ export function rebuildDepthChartFromOrder(team) {
 
     // Clean up existing lists (Remove deleted players)
     Object.keys(team.depthOrder).forEach(posKey => {
+        // FIX: Safety check if array exists before filtering
+        if (!Array.isArray(team.depthOrder[posKey])) {
+            team.depthOrder[posKey] = [];
+            return;
+        }
+
         team.depthOrder[posKey] = team.depthOrder[posKey].filter(id => {
             if (rosterIds.has(id)) {
                 assignedIds.add(id);
@@ -434,7 +440,7 @@ function checkFumble(ballCarrierState, tacklerState, playState, gameLog) {
 
     // QB Sacks have higher fumble chance (blindside logic)
     if (ballCarrierState.role === 'QB' && ballCarrierState.action === 'qb_setup') {
-        fumbleChance *= 2.5; 
+        fumbleChance *= 2.5;
     }
 
     if (Math.random() < fumbleChance) {
@@ -446,11 +452,11 @@ function checkFumble(ballCarrierState, tacklerState, playState, gameLog) {
         playState.fumbleOccurred = true;
         playState.ballState.isLoose = true;
         playState.ballState.inAir = false; // It's on the ground
-        
+
         // Physics: Small bounce vector based on tackler direction
         const dx = ballCarrierState.x - tacklerState.x;
         const dy = ballCarrierState.y - tacklerState.y;
-        playState.ballState.vx = dx * 2; 
+        playState.ballState.vx = dx * 2;
         playState.ballState.vy = dy * 2;
         playState.ballState.x = ballCarrierState.x;
         playState.ballState.y = ballCarrierState.y;
@@ -2252,14 +2258,18 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
 
                 case 'run_route':
                     {
-                        // 1. Fallback: If no route exists, create a default "Go" route logic
-                        // This prevents them from stopping if the playbook is missing data
-                        if (!pState.routePath || pState.routePath.length === 0) {
+                        // 1. Fallback: If no route exists OR index is out of bounds
+                        if (!pState.routePath || pState.routePath.length === 0 || pState.currentPathIndex >= pState.routePath.length) {
+                            // Force completion if we ran out of points
+                            if (pState.routePath && pState.routePath.length > 0) {
+                                pState.action = 'route_complete';
+                                break;
+                            }
+
                             // Default behavior: Run straight downfield
                             pState.targetX = pState.initialX;
                             pState.targetY = Math.min(FIELD_LENGTH - 10, pState.y + 10);
 
-                            // Check arrival at "end of field"
                             if (pState.y > FIELD_LENGTH - 15) {
                                 pState.action = 'route_complete';
                             }
@@ -3422,7 +3432,7 @@ function checkBlockCollisions(playState) {
         if (target) {
             // Calculate Strength Win/Loss immediately to set initial momentum
             const strDiff = (blocker.strength || 50) - (target.strength || 50);
-            
+
             // Link them
             blocker.isEngaged = true;
             blocker.engagedWith = target.id;
@@ -3448,9 +3458,9 @@ function checkTackleCollisions(playState, gameLog) {
 
     // 2. Find Active Defenders in Range
     // Note: We filter out stunned/blocked defenders
-    const defenders = playState.activePlayers.filter(p => 
-        p.teamId !== carrier.teamId && 
-        !p.isBlocked && 
+    const defenders = playState.activePlayers.filter(p =>
+        p.teamId !== carrier.teamId &&
+        !p.isBlocked &&
         p.stunnedTicks === 0 &&
         getDistance(p, carrier) < TACKLE_RANGE
     );
@@ -3463,11 +3473,11 @@ function checkTackleCollisions(playState, gameLog) {
 
         // B. Calculate Tackle Probability (The "Truck Stick" Check)
         const tacklerSkill = ((defender.tackling || 50) + (defender.strength || 50)) / 2;
-        const runnerSkill  = ((carrier.agility || 50)  + (carrier.strength || 50)) / 2;
-        
+        const runnerSkill = ((carrier.agility || 50) + (carrier.strength || 50)) / 2;
+
         // Momentum: Heavier runner harder to tackle
         const weightDiff = (carrier.weight || 200) - (defender.weight || 200);
-        const momentumBonus = Math.max(0, weightDiff / 1000); 
+        const momentumBonus = Math.max(0, weightDiff / 1000);
 
         // Diminishing returns on broken tackles in same play
         const fatigueFactor = 1.0 - ((carrier.tacklesBrokenThisPlay || 0) * 0.2);
@@ -3504,9 +3514,9 @@ function checkTackleCollisions(playState, gameLog) {
             // --- BROKEN TACKLE ---
             if (!carrier.tacklesBrokenThisPlay) carrier.tacklesBrokenThisPlay = 0;
             carrier.tacklesBrokenThisPlay++;
-            
+
             // Visuals
-            carrier.action = 'juke'; 
+            carrier.action = 'juke';
             carrier.jukeTicks = 10; // Visual flair duration
             defender.stunnedTicks = 30; // Defender falls down
 
@@ -4294,7 +4304,7 @@ function resolvePlayerCollisions(playState) {
 
             const dx = p1.x - p2.x;
             const dy = p1.y - p2.y;
-            const dist = Math.sqrt(dx*dx + dy*dy);
+            const dist = Math.sqrt(dx * dx + dy * dy);
 
             if (dist < RADIUS * 2 && dist > 0.01) {
                 const overlap = (RADIUS * 2) - dist;
@@ -4304,7 +4314,7 @@ function resolvePlayerCollisions(playState) {
                 // Push p1
                 p1.x += pushX;
                 p1.y += pushY;
-                
+
                 // Push p2 opposite
                 p2.x -= pushX;
                 p2.y -= pushY;
@@ -4602,11 +4612,11 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
                     }
                 }
 
-                
+
             } // END INTERACTIONS
-             
+
             // --- I. UPDATE FATIGUE & MODIFIERS ---
-            
+
             playState.activePlayers.forEach(p => {
                 // Simple fatigue accumulation based on action
                 let drain = (p.action.includes('run') || p.action.includes('rush')) ? 0.03 : 0.01;
@@ -7039,5 +7049,5 @@ export {
     addPlayerToTeam, playerCut, playerSignFreeAgent, callFriend, aiManageRoster, aiSetDepthChart, updateDepthChart, changeFormation,
     getRosterObjects, getPlayer, simulateAIPick, simulateGame, simulateWeek, advanceToOffseason, generateWeeklyFreeAgents, generateSchedule,
     addMessage, markMessageAsRead, getScoutedPlayerInfo, getRelationshipLevel, calculateOverall, calculateSlotSuitability,
-    substitutePlayers, autoMakeSubstitutions, aiCheckAudible, setTeamCaptain, normalizeFormationKey // <--- CRITICAL EXPORTS
+    substitutePlayers, autoMakeSubstitutions, aiCheckAudible, setTeamCaptain, normalizeFormationKey
 };
