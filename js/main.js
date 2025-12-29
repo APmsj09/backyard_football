@@ -126,7 +126,7 @@ async function runAIDraftPicks() {
 
             if (pickLimitReached || noPlayersLeft || allTeamsFull) {
                 await handleDraftEnd();
-                break; 
+                break;
             }
 
             // 2. Get Current Team
@@ -139,11 +139,11 @@ async function runAIDraftPicks() {
                     gameState.currentPick++;
                     UI.renderSelectedPlayerCard(null, gameState);
                     // Continue loop to let AI pick
-                    continue; 
+                    continue;
                 } else {
                     // Unlock and wait for user input
                     UI.renderDraftScreen(gameState, handlePlayerSelectInDraft, selectedPlayerId, currentSortColumn, currentSortDirection);
-                    break; 
+                    break;
                 }
             }
 
@@ -389,62 +389,69 @@ function proceedWithAdvanceWeek() {
 function startLiveGame(playerGameMatch) {
     if (!gameState) return;
     currentLiveSimResult = null;
+
+    // 1. Simulate the OTHER games (Fast Sim)
     const gamesPerWeek = gameState.teams.length / 2;
     const allGames = gameState.schedule.slice(gameState.currentWeek * gamesPerWeek, (gameState.currentWeek + 1) * gamesPerWeek);
-    let allResults = [];
+    const otherResults = [];
 
     allGames.forEach(match => {
+        // Skip the player's game for now
+        if (match.home.id === playerGameMatch.home.id && match.away.id === playerGameMatch.away.id) return;
+
         try {
-            if (!match || !match.home || !match.away) return;
-
-            const isPlayerGame = match.home.id === playerGameMatch.home.id && match.away.id === playerGameMatch.away.id;
-
-            // 💡 THE FIX: Explicitly set 'isLive: true' if it's the player's game
-            const simOptions = isPlayerGame ? { isLive: true } : { fastSim: true };
-
-            const result = Game.simulateGame(match.home, match.away, simOptions);
-            if (!result) return;
-
-            allResults.push(result);
-
-            if (result.breakthroughs && Array.isArray(result.breakthroughs)) {
-                result.breakthroughs.forEach(b => {
-                    if (b && b.player && b.player.teamId === gameState.playerTeam?.id) {
-                        if (typeof Game.addMessage === 'function') {
-                            Game.addMessage("Player Breakthrough!", `${b.player.name} improved ${b.attr}!`);
-                        }
-                    }
-                });
+            // Fast sim the CPU games
+            // Check if function exists first to prevent crashes during the transition
+            if (typeof Game.simulateMatchFast === 'function') {
+                const result = Game.simulateMatchFast(match.home, match.away);
+                otherResults.push(result);
             }
-            if (isPlayerGame) currentLiveSimResult = result;
+            
         } catch (error) {
-            console.error(`Sim error:`, error);
+            console.error(`Sim error for CPU game:`, error);
         }
     });
 
-    if (!gameState.gameResults) gameState.gameResults = [];
-    if (gameState.currentWeek === 0) {
-        gameState.gameResults = [];
-    }
-    const minimalResults = allResults.filter(Boolean).map(r => ({
-        homeTeam: { id: r.homeTeam.id, name: r.homeTeam.name },
-        awayTeam: { id: r.awayTeam.id, name: r.awayTeam.name },
-        homeScore: r.homeScore,
-        awayScore: r.awayScore
-    }));
-    gameState.gameResults.push(...minimalResults);
+    // 2. Initialize Player's Live Game Object
+    // We do NOT call simulateGame here. We create the state container.
+    const liveGameParams = {
+        homeTeam: playerGameMatch.home,
+        awayTeam: playerGameMatch.away,
+        homeScore: 0,
+        awayScore: 0,
+        possession: Math.random() < 0.5 ? playerGameMatch.home : playerGameMatch.away, // Coin toss
+        ballOn: 35, // Kickoff
+        down: 1,
+        yardsToGo: 10,
+        gameLog: [`Coin Toss! ${playerGameMatch.home.name} vs ${playerGameMatch.away.name}`],
+        isConversionAttempt: false,
+        isGameOver: false,
+        weather: 'Sunny',
+        quarter: 1
+    };
 
-    gameState.currentWeek++;
+    // 3. Hand over control to UI
+    UI.showScreen('game-sim-screen');
 
-    if (currentLiveSimResult) {
-        UI.showScreen('game-sim-screen');
-        UI.startLiveGameSim(currentLiveSimResult, () => {
-            finishWeekSimulation(allResults.filter(Boolean));
-            currentLiveSimResult = null;
-        });
-    } else {
-        finishWeekSimulation(allResults.filter(Boolean));
-    }
+    // UI.startLiveGameLoop will handle the "Step -> Animate -> Step" cycle
+    UI.startLiveGameLoop(liveGameParams, (finalResult) => {
+
+        // This callback runs when the game is fully over (Quarters done)
+        const combinedResults = [...otherResults, finalResult];
+
+        // Add results to history
+        if (!gameState.gameResults) gameState.gameResults = [];
+        const minimalResults = combinedResults.filter(Boolean).map(r => ({
+            homeTeam: { id: r.homeTeam.id, name: r.homeTeam.name },
+            awayTeam: { id: r.awayTeam.id, name: r.awayTeam.name },
+            homeScore: r.homeScore,
+            awayScore: r.awayScore
+        }));
+        gameState.gameResults.push(...minimalResults);
+
+        gameState.currentWeek++;
+        finishWeekSimulation(combinedResults);
+    });
 }
 
 function simulateRestOfWeek() {
@@ -710,7 +717,7 @@ window.app = {
     setCaptain: handleSetCaptain,
     handleAdvanceWeek,
     // Note: Use getters for UI functions if they aren't defined yet at top level
-    skipSim: () => UI.skipLiveGameSim(), 
+    skipSim: () => UI.skipLiveGameSim(),
     setSpeed: (s) => UI.setSimSpeed(s),
     cutPlayer: (id) => {
         if (confirm("Cut this player?")) {

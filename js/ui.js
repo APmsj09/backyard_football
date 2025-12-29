@@ -1,3 +1,4 @@
+import * as Game from './game.js';
 import {
     saveGameState,
     calculateOverall,
@@ -43,11 +44,9 @@ let depthOrderSortDir = 'desc';    // Default sort direction
 let activeDepthOrderTab = 'QB';
 
 // --- Live Game Sim State ---
-let liveGameInterval = null; // Holds interval ID for stopping/starting
 let liveGameSpeed = 80; // Current sim speed in milliseconds
 let liveGameCurrentIndex = 0; // Current index in the game log array
 let liveGameLog = []; // Stores the log entries for the current sim
-let liveGameCallback = null; // Function to call when sim completes or is skipped
 let currentLiveGameResult = null; // Stores the full gameResult object for accurate final display
 let userPreferredSpeed = 80;
 let huddleTimeout = null;
@@ -2619,30 +2618,33 @@ function renderLiveStatsLive() {
 }
 
 function renderSimPlayers(frame) {
-    const findTeamInResult = (playerTeamId) => {
-        if (!currentLiveGameResult) return null;
-        if (currentLiveGameResult.homeTeam?.id === playerTeamId) return currentLiveGameResult.homeTeam;
-        if (currentLiveGameResult.awayTeam?.id === playerTeamId) return currentLiveGameResult.awayTeam;
+    // 1. HELPERS
+    const findTeamInGame = (playerTeamId) => {
+        if (!activeLiveGame) return null;
+        if (activeLiveGame.homeTeam?.id === playerTeamId) return activeLiveGame.homeTeam;
+        if (activeLiveGame.awayTeam?.id === playerTeamId) return activeLiveGame.awayTeam;
         return null;
     };
 
     try {
-        if (!elements.simPlayersList || !currentLiveGameResult) {
-            return;
-        }
+        if (!elements.simPlayersList || !activeLiveGame) return;
 
-        const gs = getGameState();
+        // 2. IDENTIFY USER TEAM
+        // We need to know which team is the user's so we only show subs for them
+        // (Assuming 'Game' is imported or getGameState is global)
+        const gs = Game.getGameState(); 
         const playerTeamId = gs?.playerTeam?.id;
-        const team = findTeamInResult(playerTeamId); // This is the team object with roster IDs
+        
+        if (!playerTeamId) return;
 
-        if (!team || !playerTeamId) {
-            elements.simPlayersList.innerHTML = '<p class="text-gray-400">No team data available for this game.</p>';
+        const team = findTeamInGame(playerTeamId); 
+        if (!team) {
+            elements.simPlayersList.innerHTML = '<p class="text-gray-400 p-4">You are watching a CPU vs CPU game.</p>';
             return;
         }
 
-        const roster = getUIRosterObjects(team);
-        const depth = team.depthChart || {};
-
+        // 3. MAP FATIGUE FROM FRAME DATA
+        // The frame contains the live physics state (current x,y, fatigue)
         const fatigueMap = new Map();
         if (frame && frame.players) {
             frame.players.forEach(pState => {
@@ -2652,22 +2654,30 @@ function renderSimPlayers(frame) {
             });
         }
 
-        // Build list grouped by starters and bench
+        const roster = Game.getUIRosterObjects(team); // Ensure Game.js exports this or it's available
+        const depth = team.depthChart || {};
+
+        // 4. SORT STARTERS VS BENCH
         const starterIds = new Set();
         Object.keys(depth).forEach(side => {
             const chart = depth[side] || {};
             Object.values(chart).forEach(id => { if (id) starterIds.add(id); });
         });
+        
         const starters = roster.filter(p => p && starterIds.has(p.id));
         const bench = roster.filter(p => p && !starterIds.has(p.id));
 
+        // 5. ROW BUILDER
         const buildRow = (p, isStarter) => {
             const stamina = p.attributes?.physical?.stamina || 50;
-            const currentFatigue = fatigueMap.get(p.id) || 0;
+            
+            // Use live fatigue if available, else static
+            const currentFatigue = fatigueMap.has(p.id) ? fatigueMap.get(p.id) : (p.fatigue || 0);
+            
             const fatigue = Math.max(0, Math.min(100, Math.round(currentFatigue)));
             const energyPct = Math.max(0, Math.round(100 - (fatigue / Math.max(1, stamina)) * 100));
 
-            // 💡 FIX: Find the player's current slot from the depth chart
+            // Find specific slot name (e.g., "QB1")
             let currentSlot = 'Bench';
             if (isStarter) {
                 for (const side in depth) {
@@ -2680,108 +2690,55 @@ function renderSimPlayers(frame) {
                     if (currentSlot !== 'Bench') break;
                 }
             }
-            // 💡 END FIX
 
-            // 💡 FIX: Use the 'status' object from the main player object in 'roster'
             const statusText = (p.status?.duration > 0) ? `${p.status.description} (${p.status.duration}w)` : 'Healthy';
             const statusClass = (p.status?.duration > 0) ? 'text-red-400' : 'text-gray-300';
-            // 💡 END FIX
+
+            // Color code energy bar
+            let barColor = 'bg-green-500';
+            if (energyPct < 50) barColor = 'bg-yellow-500';
+            if (energyPct < 25) barColor = 'bg-red-500';
 
             return `
-                <div class="flex items-center justify-between p-2 border-b border-gray-600">
+                <div class="flex items-center justify-between p-2 border-b border-gray-700 bg-gray-800/50">
                     <div class="flex items-center gap-3">
-                        <div class="w-36">
-                            <div class="text-sm font-semibold">${p.name}</div>
-                            <div class="text-xs text-gray-300">#${p.number || '—'} • ${currentSlot}</div>
+                        <div class="w-32">
+                            <div class="text-sm font-bold text-white">${p.name}</div>
+                            <div class="text-xs text-gray-400">#${p.number || '00'} • ${currentSlot}</div>
                         </div>
-                        <div class="w-40">
-                            <div class="relative h-3 bg-gray-600 rounded">
-                                <div style="width:${energyPct}%" class="absolute left-0 top-0 h-3 bg-amber-400 rounded"></div>
+                        <div class="w-32">
+                            <div class="relative h-2 bg-gray-600 rounded overflow-hidden">
+                                <div style="width:${energyPct}%" class="absolute left-0 top-0 h-full ${barColor}"></div>
                             </div>
-                            <div class="text-xs text-gray-300">Energy: ${energyPct}% • Fatigue: ${fatigue.toFixed(1)}</div>
+                            <div class="text-[10px] text-gray-400 mt-1">Energy: ${energyPct}%</div>
                         </div>
-                        <div class="text-xs ${statusClass} w-28">Status: ${statusText}</div>
+                        <div class="text-[10px] ${statusClass} w-20 text-right">${statusText}</div>
                     </div>
                     <div>
-                        ${isStarter ? `<button data-player-id="${p.id}" class="sub-out-btn btn bg-red-600 hover:bg-red-700 text-white text-xs py-1 px-2 rounded">Sub Out</button>` : `<button data-player-id="${p.id}" class="sub-in-btn btn bg-green-600 hover:bg-green-700 text-white text-xs py-1 px-2 rounded">Sub In</button>`}
+                        ${isStarter 
+                            ? `<button data-player-id="${p.id}" class="sub-out-btn bg-red-900/80 hover:bg-red-700 text-red-100 text-xs py-1 px-3 rounded border border-red-700 transition">Out</button>` 
+                            : `<button data-player-id="${p.id}" class="sub-in-btn bg-green-900/80 hover:bg-green-700 text-green-100 text-xs py-1 px-3 rounded border border-green-700 transition">In</button>`
+                        }
                     </div>
                 </div>
             `;
         };
 
+        // 6. BUILD HTML
         let html = '';
         if (starters.length > 0) {
-            html += '<div class="mb-2"><div class="text-sm font-semibold text-amber-300 mb-1">Starters</div>';
+            html += '<div class="mb-4"><div class="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2 px-2">On Field</div>';
             starters.forEach(s => { html += buildRow(s, true); });
             html += '</div>';
         }
-        html += '<div><div class="text-sm font-semibold text-amber-300 mb-1">Bench</div>';
+        html += '<div><div class="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2 px-2">Bench</div>';
         bench.forEach(b => { html += buildRow(b, false); });
         html += '</div>';
 
         elements.simPlayersList.innerHTML = html;
 
-        // Attach handlers
-        elements.simPlayersList.querySelectorAll('.sub-in-btn').forEach(btn => {
-            btn.onclick = (e) => {
-                const inId = btn.dataset.playerId;
-                // Build select of available starter slots (with side + slot)
-                const slotOptions = [];
-                Object.keys(depth).forEach(side => {
-                    const chart = depth[side] || {};
-                    Object.keys(chart).forEach(slot => {
-                        const occupantId = chart[slot];
-                        const occupant = roster.find(p => p && p.id === occupantId);
-                        slotOptions.push({ value: `${side}|${slot}`, label: `${side.toUpperCase()} ${slot} (${occupant ? occupant.name : 'Vacant'})` });
-                    });
-                });
-                const selectHtml = `<select id="_sub_slot_select" class="w-full p-2 bg-white text-black">${slotOptions.map(s => `<option value="${s.value}">${s.label}</option>`).join('')}</select>`;
-                showModal('Select Slot to Sub Into', selectHtml, () => {
-                    const chosen = document.getElementById('_sub_slot_select')?.value;
-                    if (!chosen) return;
-                    const [side, slot] = chosen.split('|');
-                    const outId = team.depthChart?.[side]?.[slot];
-
-                    const result = substitutePlayers(team.id, outId, inId);
-
-                    if (!result.success) {
-                        showModal('Sub Failed', `<p>${result.message}</p>`, null, 'OK');
-                    } else {
-                        renderSimPlayers(frame); // Re-render with current frame
-                    }
-                }, 'Confirm');
-            };
-        });
-
-        elements.simPlayersList.querySelectorAll('.sub-out-btn').forEach(btn => {
-            btn.onclick = (e) => {
-                const outId = btn.dataset.playerId;
-                // Choose incoming bench player to swap with
-                const benchPlayers = roster.filter(p => p && !starterIds.has(p.id));
-                if (benchPlayers.length === 0) {
-                    showModal('No Bench', '<p>No bench players available to sub in.</p>', null, 'OK');
-                    return;
-                }
-                const options = benchPlayers.map(b => `<option value="${b.id}">${b.name} (#${b.number || '—'})</option>`).join('');
-                const selectHtml = `<select id="_sub_in_select" class="w-full p-2 bg-white text-black">${options}</select>`;
-                showModal('Select Bench Player to Sub In', selectHtml, () => {
-                    // --- 💡💡💡 THIS IS THE FIX 💡💡💡 ---
-                    // Player IDs are strings (UUIDs), not integers.
-                    const inId = document.getElementById('_sub_in_select')?.value;
-                    // --- 💡💡💡 END OF FIX 💡💡💡 ---
-
-                    if (!inId) return;
-
-                    const result = substitutePlayers(team.id, outId, inId);
-
-                    if (!result.success) {
-                        showModal('Sub Failed', `<p>${result.message}</p>`, null, 'OK');
-                    } else {
-                        renderSimPlayers(frame); // Re-render with current frame
-                    }
-                }, 'Confirm');
-            };
-        });
+        // 7. ATTACH HANDLERS (Delegation or Direct)
+        attachSubHandlers(team, roster, depth, frame);
 
     } catch (err) {
         console.error('renderSimPlayers failed:', err);
@@ -2789,319 +2746,88 @@ function renderSimPlayers(frame) {
 }
 
 /**
- * Executes a single frame/tick of the live game simulation.
- * This is the core loop called by setInterval.
+ * Helper to attach click listeners for substitution buttons.
  */
-function runLiveGameTick() {
-    // --- 1. End Condition Check ---
-    if (!currentLiveGameResult || !currentLiveGameResult.visualizationFrames || liveGameCurrentIndex >= currentLiveGameResult.visualizationFrames.length) {
-        clearInterval(liveGameInterval);
-        liveGameInterval = null;
+function attachSubHandlers(team, roster, depth, frame) {
+    // SUB IN
+    elements.simPlayersList.querySelectorAll('.sub-in-btn').forEach(btn => {
+        btn.onclick = () => {
+            const inId = btn.dataset.playerId;
+            const slotOptions = [];
 
-        // Use final result for absolute accuracy
-        if (currentLiveGameResult) {
-            elements.simAwayScore.textContent = currentLiveGameResult.awayScore;
-            elements.simHomeScore.textContent = currentLiveGameResult.homeScore;
-        }
-        elements.simGameDown.textContent = "FINAL";
-        elements.simPossession.textContent = "";
-        drawFieldVisualization({}); // Clear field
+            // Find all possible slots to sub into
+            Object.keys(depth).forEach(side => {
+                const chart = depth[side] || {};
+                Object.keys(chart).forEach(slot => {
+                    const occupantId = chart[slot];
+                    const occupant = roster.find(p => p && p.id === occupantId);
+                    slotOptions.push({ 
+                        value: `${side}|${slot}`, 
+                        label: `${side.toUpperCase()} - ${slot} (${occupant ? occupant.name : 'Vacant'})` 
+                    });
+                });
+            });
 
-        const finalResult = currentLiveGameResult; // Store before nulling
-        // Render final stats now that the sim has concluded
-        try { renderLiveStatsBox(finalResult); } catch (e) { console.error('renderLiveStatsBox final render error:', e); }
-        currentLiveGameResult = null; // Clear game data
+            const selectHtml = `
+                <div class="p-2">
+                    <p class="mb-2 text-sm text-gray-300">Choose a position to take over:</p>
+                    <select id="_sub_slot_select" class="w-full p-2 bg-gray-700 text-white border border-gray-600 rounded">
+                        ${slotOptions.map(s => `<option value="${s.value}">${s.label}</option>`).join('')}
+                    </select>
+                </div>
+            `;
 
-        if (liveGameCallback) {
-            const cb = liveGameCallback;
-            liveGameCallback = null;
-            cb(finalResult); // Pass final result to callback
-        }
-        return;
-    }
+            showModal('Substitution', selectHtml, () => {
+                const chosen = document.getElementById('_sub_slot_select')?.value;
+                if (!chosen) return;
+                const [side, slot] = chosen.split('|');
+                const outId = team.depthChart?.[side]?.[slot];
 
-    // --- 2. Process Current Frame ---
-    const allFrames = currentLiveGameResult.visualizationFrames;
-    const allLogs = currentLiveGameResult.gameLog;
-    const ticker = elements.simPlayLog;
-    const frame = allFrames[liveGameCurrentIndex];
+                // Call Game Logic to perform swap
+                const result = Game.substitutePlayers(team.id, outId, inId);
 
-    if (!frame) {
-        console.warn(`Skipping potentially empty frame at index ${liveGameCurrentIndex}`);
-        liveGameCurrentIndex++;
-        return;
-    }
-
-    const nextFrame = allFrames[liveGameCurrentIndex + 1];
-
-    // --- 3. Sync Log Entries (Text Processing) ---
-    if (ticker && frame.logIndex > liveGameLogIndex) {
-
-        // 💡 FIX: Declare this variable outside the loop so it is accessible!
-        let playHasEnded = false;
-
-        for (let i = liveGameLogIndex; i < frame.logIndex; i++) {
-            const playLogEntry = allLogs[i];
-            if (!playLogEntry) continue;
-
-            const logEl = document.createElement('p');
-            let styleClass = '';
-            let descriptiveText = playLogEntry;
-
-            // --- COMBINED LOGIC: Parse log AND set styles ---
-            try {
-                if (playLogEntry.includes('Conversion Attempt')) {
-                    liveGameIsConversion = true; // Set the flag
-                    styleClass = 'font-bold text-amber-400 mt-2';
-                    descriptiveText = `🏈 ${playLogEntry} 🏈`;
+                if (!result.success) {
+                    alert(result.message); // Simple alert for fallback
+                } else {
+                    renderSimPlayers(frame); // Refresh UI
                 }
-                // --- SMART UI: Update Broadcast Banner from Logs ---
-                if (playLogEntry.includes('**Offense:**')) {
-                    const cleanText = playLogEntry.replace('🏈', '').replace(/\*\*/g, '').replace('Offense:', '').trim();
-                    if (elements.simBannerOffense) elements.simBannerOffense.textContent = cleanText;
-                    if (elements.simBannerDefense) elements.simBannerDefense.textContent = "...";
+            }, 'Confirm Sub');
+        };
+    });
 
-                    // Visual Pulse Effect
-                    if (elements.simMatchupBanner) {
-                        elements.simMatchupBanner.classList.add('bg-gray-800');
-                        setTimeout(() => elements.simMatchupBanner?.classList.remove('bg-gray-800'), 200);
-                    }
-                }
+    // SUB OUT
+    elements.simPlayersList.querySelectorAll('.sub-out-btn').forEach(btn => {
+        btn.onclick = () => {
+            const outId = btn.dataset.playerId;
+            const benchPlayers = roster.filter(p => p && !Object.values(depth.offense || {}).includes(p.id) && !Object.values(depth.defense || {}).includes(p.id));
 
-                if (playLogEntry.includes('**Defense:**')) {
-                    const cleanText = playLogEntry.replace('🛡️', '').replace(/\*\*/g, '').replace('Defense:', '').trim();
-                    if (elements.simBannerDefense) elements.simBannerDefense.textContent = cleanText;
-                }
-
-                else if (playLogEntry.startsWith('-- Drive')) {
-                    liveGameBallOn = 20; liveGameDown = 1; liveGameToGo = 10; liveGameDriveActive = true;
-                    const driveMatch = playLogEntry.match(/(Drive \d+ \(H\d+\))/);
-                    liveGamePossessionName = playLogEntry.includes(currentLiveGameResult.homeTeam.name) ? currentLiveGameResult.homeTeam.name : currentLiveGameResult.awayTeam.name;
-                    if (driveMatch) liveGameDriveText = driveMatch[0];
-
-                    styleClass = 'font-bold text-amber-400 mt-2';
-                    descriptiveText = `🏈 ${playLogEntry.replace('-- Drive', 'New Drive:')} 🏈`;
-
-                } else if (playLogEntry.startsWith('==== HALFTIME') || playLogEntry.startsWith('==== FINAL')) {
-                    liveGameDriveActive = false;
-                    styleClass = 'font-bold text-amber-400 mt-2 text-lg';
-                    descriptiveText = `⏱️ ${playLogEntry} ⏱️`;
-                    playHasEnded = true;
-
-                } else if (playLogEntry.startsWith('➡️ First down')) {
-                    liveGameDown = 1;
-                    const goalMatch = playLogEntry.match(/Goal at the (\d+)/);
-                    const yardLineMatch = playLogEntry.match(/at the (own|opponent) (\d+)/);
-                    if (yardLineMatch) {
-                        const side = yardLineMatch[1]; const line = parseInt(yardLineMatch[2], 10);
-                        liveGameBallOn = (side === 'own') ? line : 100 - line;
-                    }
-                    liveGameToGo = goalMatch ? parseInt(goalMatch[1], 10) : Math.min(10, 100 - liveGameBallOn);
-                    if (liveGameToGo <= 0) liveGameToGo = 1;
-
-                    styleClass = 'text-yellow-300 font-semibold';
-                    descriptiveText = playLogEntry;
-                    playHasEnded = true;
-
-                } else if (playLogEntry.match(/gain of (-?\d+\.?\d*)|loss of (\d+\.?\d*)/)) {
-                    const yardsMatch = playLogEntry.match(/gain of (-?\d+\.?\d*)|loss of (\d+\.?\d*)/);
-                    let yards = 0;
-                    if (yardsMatch) { yards = parseFloat(yardsMatch[1] || `-${yardsMatch[2]}`); }
-
-                    if (liveGameDriveActive) {
-                        liveGameBallOn += yards;
-                        liveGameToGo -= yards;
-                        liveGameBallOn = Math.round(Math.max(0, Math.min(100, liveGameBallOn)));
-                        liveGameToGo = Math.round(liveGameToGo);
-                        if (liveGameToGo > 0) liveGameDown++;
-                    }
-
-                    const fieldSide = liveGameBallOn <= 50 ? "own" : "opponent";
-                    const yardLine = liveGameBallOn <= 50 ? liveGameBallOn : 100 - liveGameBallOn;
-                    descriptiveText = `${playLogEntry} Ball at the ${fieldSide} ${yardLine}.`;
-                    if (playLogEntry.startsWith('💥 SACK')) {
-                        styleClass = 'text-orange-400';
-                    } else if (yards >= 10) {
-                        descriptiveText = `💨 ${playLogEntry}! Great play! Ball at the ${fieldSide} ${yardLine}.`;
-                        styleClass = 'text-cyan-300';
-                    } else if (yards > 0) {
-                        styleClass = 'text-cyan-300';
-                    }
-                    playHasEnded = true;
-
-                } else if (playLogEntry.includes('incomplete') || playLogEntry.includes('INCOMPLETE') || playLogEntry.startsWith('❌') || playLogEntry.startsWith('🚫') || playLogEntry.startsWith('‹‹')) {
-                    if (liveGameDriveActive) liveGameDown++;
-                    styleClass = 'font-semibold text-red-400';
-                    descriptiveText = playLogEntry;
-                    playHasEnded = true;
-
-                } else if (playLogEntry.includes('PUNT by')) {
-                    styleClass = 'font-semibold text-blue-300';
-                    descriptiveText = playLogEntry;
-                    if (playLogEntry.includes('TOUCHBACK') || playLogEntry.includes('FAIR CATCH') || playLogEntry.includes('returns for') || playLogEntry.includes('No healthy returner')) {
-                        liveGameDriveActive = false;
-                        playHasEnded = true;
-                    }
-
-                } else if (playLogEntry.includes('MUFFED PUNT')) {
-                    styleClass = 'font-bold text-red-500';
-                    descriptiveText = playLogEntry;
-                    playHasEnded = false;
-
-                } else if (playLogEntry.includes('recovers the muff')) {
-                    liveGameDriveActive = playLogEntry.includes(liveGamePossessionName);
-                    styleClass = 'font-semibold text-yellow-300';
-                    descriptiveText = playLogEntry;
-                    playHasEnded = true;
-
-                } else if (playLogEntry.includes('PUNT FAILED')) {
-                    liveGameDriveActive = false;
-                    styleClass = 'font-bold text-red-500';
-                    descriptiveText = playLogEntry;
-                    playHasEnded = true;
-
-                } else if (playLogEntry.startsWith('🎉 TOUCHDOWN') || playLogEntry.startsWith('🎉 PUNT RETURN TOUCHDOWN')) {
-                    if (!liveGameIsConversion) {
-                        const homeName = currentLiveGameResult.homeTeam?.name || '';
-                        const awayName = currentLiveGameResult.awayTeam?.name || '';
-                        let isHomeTD = false;
-
-                        if (playLogEntry.includes(homeName)) isHomeTD = true;
-                        else if (playLogEntry.includes(awayName)) isHomeTD = false;
-                        else if (playLogEntry.includes('RETURN TOUCHDOWN')) isHomeTD = liveGamePossessionName !== homeName;
-                        else isHomeTD = liveGamePossessionName === homeName;
-
-                        if (isHomeTD) liveGameCurrentHomeScore += 6;
-                        else liveGameCurrentAwayScore += 6;
-                    }
-
-                } else if (playLogEntry.includes('SAFETY') || playLogEntry.includes('Safety')) {
-                    if (liveGamePossessionName === currentLiveGameResult.homeTeam.name) liveGameCurrentAwayScore += 2;
-                    else liveGameCurrentHomeScore += 2;
-
-                    liveGameDriveActive = false;
-                    styleClass = 'font-bold text-red-500 text-lg';
-                    descriptiveText = `🚨 ${playLogEntry} (+2 Pts)`;
-                    playHasEnded = true;
-
-                } else if (playLogEntry.includes('conversion GOOD!')) {
-                    const points = playLogEntry.includes('2-point') ? 2 : 1;
-                    if (liveGamePossessionName === currentLiveGameResult.homeTeam.name) liveGameCurrentHomeScore += points; else liveGameCurrentAwayScore += points;
-                    liveGameIsConversion = false;
-                    liveGameDriveActive = false;
-                    styleClass = 'font-semibold text-green-400';
-                    descriptiveText = `✅ ${playLogEntry} Points are good!`;
-                    playHasEnded = true;
-
-                } else if (playLogEntry.includes('Conversion FAILED!')) {
-                    liveGameIsConversion = false;
-                    liveGameDriveActive = false;
-                    styleClass = 'font-semibold text-red-400';
-                    descriptiveText = `❌ ${playLogEntry} No good!`;
-                    playHasEnded = true;
-
-                } else if (playLogEntry.startsWith('Turnover') || playLogEntry.startsWith('❗ INTERCEPTION') || playLogEntry.startsWith('❗ FUMBLE')) {
-                    liveGameDriveActive = false;
-                    const yardLineMatch = playLogEntry.match(/at the (own|opponent) (\d+)/);
-                    if (yardLineMatch) {
-                        const side = yardLineMatch[1]; const line = parseInt(yardLineMatch[2], 10);
-                        liveGameBallOn = (side === 'own') ? line : 100 - line;
-                    }
-                    styleClass = 'font-semibold text-red-400';
-                    descriptiveText = playLogEntry;
-                    playHasEnded = true;
-                }
-                else if (playLogEntry.includes('Play ends') || playLogEntry.includes('⏱️')) {
-                    styleClass = 'text-gray-400 italic';
-                    descriptiveText = playLogEntry;
-                    playHasEnded = true;
-                }
-
-                if (liveGameDown > 4 && liveGameDriveActive) {
-                    liveGameDriveActive = false;
-                }
-
-            } catch (parseError) {
-                console.error("Error parsing log entry for sim state:", playLogEntry, parseError);
+            if (benchPlayers.length === 0) {
+                alert("No bench players available.");
+                return;
             }
 
-            // Update stats
-            try { updateStatsFromLogEntry(playLogEntry); } catch (err) { console.error('Error updating live stats:', err); }
+            const options = benchPlayers.map(b => `<option value="${b.id}">${b.name}</option>`).join('');
+            const selectHtml = `
+                 <div class="p-2">
+                    <p class="mb-2 text-sm text-gray-300">Who should replace them?</p>
+                    <select id="_sub_in_select" class="w-full p-2 bg-gray-700 text-white border border-gray-600 rounded">
+                        ${options}
+                    </select>
+                </div>
+            `;
 
-            // Append Log
-            logEl.className = styleClass;
-            logEl.textContent = descriptiveText.replace(/\*\*/g, '');
-            ticker.appendChild(logEl);
-            ticker.scrollTop = ticker.scrollHeight;
+            showModal('Substitution', selectHtml, () => {
+                const inId = document.getElementById('_sub_in_select')?.value;
+                if (!inId) return;
 
-            liveGameLogIndex = i + 1;
-
-            // THE INTERRUPTOR: Stop loop if specific events occur to let animation catch up
-            const isInterruptor =
-                playLogEntry.includes('throws to') ||
-                playLogEntry.includes('throws it away') ||
-                playLogEntry.includes('tackled by') ||
-                playLogEntry.includes('TOUCHDOWN') ||
-                playLogEntry.includes('INTERCEPTION') ||
-                playLogEntry.includes('FUMBLE') ||
-                playLogEntry.includes('punts the ball');
-
-            if (isInterruptor) {
-                break;
-            }
-        }
-    }
-
-    // 4. UPDATE SCOREBOARD & STATS
-    elements.simAwayScore.textContent = liveGameCurrentAwayScore;
-    elements.simHomeScore.textContent = liveGameCurrentHomeScore;
-    renderLiveStatsLive();
-
-    // 5. DRAW THE FRAME
-    drawFieldVisualization(frame);
-    if (frame.players) {
-        frame.players.forEach(p => updateSimPlayerUI(p));
-    }
-
-
-    // --- 6. THE PROCESSING PAUSE / PROGRESSION ---
-    if (nextFrame && nextFrame.isSnap) {
-        // 🛑 STOP: The current action is finished.
-        clearInterval(liveGameInterval);
-        liveGameInterval = null;
-
-        // Display Result in Banner
-        const playResultLog = allLogs[frame.logIndex - 1] || "Play Complete";
-        if (elements.simBannerOffense) {
-            elements.simBannerOffense.textContent = playResultLog.replace(/\*\*/g, '');
-        }
-
-        // Huddle Delay
-        huddleTimeout = setTimeout(() => {
-            liveGameCurrentIndex++;
-            startNextPlay();
-        }, 3500);
-
-    } else {
-        liveGameCurrentIndex++;
-    }
+                const result = Game.substitutePlayers(team.id, outId, inId);
+                if (result.success) renderSimPlayers(frame);
+            }, 'Confirm Sub');
+        };
+    });
 }
 
 
-function updateSimPlayerUI(pState) {
-    const energyBar = document.getElementById(`sim-energy-${pState.id}`);
-    const fatigueText = document.getElementById(`sim-fatigue-${pState.id}`);
-
-    if (energyBar) {
-        // Calculate percentages locally
-        const stamina = pState.stamina || 50;
-        const energyPct = Math.max(0, Math.round(100 - (pState.fatigue / stamina * 100)));
-        energyBar.style.width = `${energyPct}%`;
-    }
-    if (fatigueText) {
-        fatigueText.textContent = `Fatigue: ${Math.round(pState.fatigue)}`;
-    }
-}
 
 
 let qbShoutTimeout1 = null;
@@ -3172,7 +2898,7 @@ function animateQBShout(frame) {
             // Re-draw field with a tiny random offset only for the QB
             // (Alternative: Simple scale pulse)
             drawFieldVisualization(frame);
-            requestAnimationFrame(shake);
+            requestAnimationFrame(shake);f
         } else {
             drawFieldVisualization(frame); // Final clean draw
         }
@@ -3180,123 +2906,134 @@ function animateQBShout(frame) {
     shake();
 }
 
-/** Starts the live game simulation, syncing frames with log entries. */
-export function startLiveGameSim(gameResult, onComplete) {
-    const ticker = elements.simPlayLog;
-    const scoreboard = elements.simScoreboard;
-
-    // --- 1. Validate Elements ---
-    if (!ticker || !scoreboard || !elements.simAwayScore || !elements.simHomeScore ||
-        !elements.simGameDrive || !elements.simGameDown || !elements.simPossession || !elements.simFieldPlayers) {
-        console.error("Live sim UI elements missing (critical).");
-        if (onComplete) onComplete(gameResult);
-        return;
-    }
-
-    // --- 2. Validate Data ---
-    if (!gameResult || !Array.isArray(gameResult.gameLog) || !Array.isArray(gameResult.visualizationFrames)) {
-        console.warn("startLiveGameSim: invalid gameResult.");
-        if (onComplete) onComplete(gameResult);
-        return;
-    }
-
-    // --- 3. Clear Previous Simulation ---
-    if (liveGameInterval) {
-        clearInterval(liveGameInterval);
-        liveGameInterval = null;
-    }
-    clearTimeout(huddleTimeout);
-    huddleTimeout = null;
-
-    // --- 4. Reset Global State ---
+/**
+ * STARTS THE LOOP
+ * This replaces your old 'startLiveGameSim'
+ */
+export function startLiveGameLoop(initialGameState, onComplete) {
+    activeLiveGame = initialGameState;
     liveGameCallback = onComplete;
-    currentLiveGameResult = gameResult;
-    liveGameCurrentIndex = 0;
-    liveGameLogIndex = 0;
-    liveGameCurrentHomeScore = 0;
-    liveGameCurrentAwayScore = 0;
-    liveGameBallOn = 20;
-    liveGameDriveText = "Kickoff";
+    isSkipping = false;
 
-    // 💡 CLEAR AND REFILL THE ID LOOKUP MAP
-    playerNameIdMap.clear();
-    livePlayerStats.clear(); // Ensure fresh stats for this game
+    // Reset Scoreboard UI
+    const ticker = elements.simPlayLog;
+    if (ticker) ticker.innerHTML = '';
+    updateLiveScoreboard();
 
-    // Populate Map with Home & Away rosters
-    const allPlayersInGame = [
-        ...getUIRosterObjects(gameResult.homeTeam),
-        ...getUIRosterObjects(gameResult.awayTeam)
-    ];
+    // Resize Canvas (Keep your existing resizing logic here if needed)
+    // ...
 
-    allPlayersInGame.forEach(p => {
-        if (p && p.name && p.id) {
-            playerNameIdMap.set(p.name, p.id);
-        }
-    });
+    // Start!
+    runLiveGameStep();
+}
 
-    // --- 5. Canvas Resize Logic ---
-    const canvas = elements.fieldCanvas;
-    if (canvas && canvas.parentElement) {
-        canvas.classList.remove('h-full', 'w-auto');
-        canvas.classList.add('w-full', 'h-full');
-        const rect = canvas.parentElement.getBoundingClientRect();
-        canvas.width = rect.width;
-        canvas.height = rect.height;
+/**
+ * THE STEP FUNCTION
+ * Calculates one play -> Plays Animation -> Waits -> Repeats
+ */
+// js/ui.js
+
+function runLiveGameStep() {
+    if (!activeLiveGame) return;
+
+    // 1. Check End Condition
+    if (activeLiveGame.isGameOver || activeLiveGame.drivesThisHalf > 24) { 
+        finishLiveGame();
+        return;
     }
 
-    // --- 6. Initial UI Render ---
-    ticker.innerHTML = '';
-    elements.simAwayTeam.textContent = gameResult.awayTeam.name;
-    elements.simHomeTeam.textContent = gameResult.homeTeam.name;
-    elements.simAwayScore.textContent = '0';
-    elements.simHomeScore.textContent = '0';
-    elements.simGameDrive.textContent = liveGameDriveText;
-    elements.simGameDown.textContent = "1st & 10";
-    elements.simPossession.textContent = '';
-    elements.simBannerOffense.textContent = "SET...";
-    elements.simBannerDefense.textContent = "READY...";
-    elements.simFieldPlayers.innerHTML = '';
+    // 2. CALCULATE PLAY (Call Game.js)
+    const stepResult = Game.simulateLivePlayStep(activeLiveGame);
 
-    // --- 7. Initial Field Draw ---
-    if (gameResult.visualizationFrames.length > 0) {
-        const initialFrame = gameResult.visualizationFrames[0];
-        renderSimPlayers(initialFrame);
-        if (elements.fieldCanvasCtx) {
-            drawFieldVisualization(initialFrame);
-        }
+    // 3. UPDATE UI
+    updateLiveScoreboard();
+    if (stepResult.playResult.logEntry) addLiveLogEntry(stepResult.playResult.logEntry);
+    
+    // Update the Player Roster UI (Fatigue bars)
+    if (stepResult.visualizationFrames && stepResult.visualizationFrames.length > 0) {
+        renderSimPlayers(stepResult.visualizationFrames[0]);
     }
 
-    // --- 8. START THE HUDDLE SEQUENCE (Not the interval!) ---
-    // 💡 IMPORTANT: We call startNextPlay() which handles the "Cadence" 
-    // and then starts the interval automatically after "Hike!"
-    startNextPlay();
+    // --- 4. ANIMATE (The block you pasted goes here) ---
+    if (stepResult.visualizationFrames && stepResult.visualizationFrames.length > 0) {
+        playVisualization(stepResult.visualizationFrames, () => {
+            // Animation Done.
+            
+            if (isSkipping) {
+                runLiveGameStep(); // Instant loop
+            } else {
+                // HUDDLE DELAY
+                // Fast for extra points (1s), Normal for plays (3.5s)
+                const delay = activeLiveGame.isConversionAttempt ? 1000 : 3500;
+                
+                // Optional: You could update UI text here to say "Huddle..."
+                
+                setTimeout(runLiveGameStep, delay);
+            }
+        });
+    } else {
+        // No frames (e.g. timeout or weird logic edge case)? Just continue.
+        setTimeout(runLiveGameStep, 500);
+    }
+}
+
+/**
+ * ANIMATOR
+ * Plays the array of frames on the canvas.
+ */
+function playVisualization(frames, onComplete) {
+    let index = 0;
+    if (liveGameInterval) clearInterval(liveGameInterval);
+
+    // Render first frame immediately
+    drawFieldVisualization(frames[0]);
+
+    liveGameInterval = setInterval(() => {
+        index++;
+        if (index >= frames.length) {
+            clearInterval(liveGameInterval);
+            if (onComplete) onComplete();
+            return;
+        }
+        drawFieldVisualization(frames[index]);
+    }, isSkipping ? 5 : 50); // Fast forward if skipping
+}
+
+function updateLiveScoreboard() {
+    if (!activeLiveGame) return;
+    elements.simHomeScore.textContent = activeLiveGame.homeScore;
+    elements.simAwayScore.textContent = activeLiveGame.awayScore;
+    
+    // Context-aware text
+    if (activeLiveGame.isConversionAttempt) {
+        elements.simGameDown.textContent = "Conversion";
+        elements.simGameDrive.textContent = "PAT";
+    } else {
+        elements.simGameDown.textContent = `${activeLiveGame.down} & ${activeLiveGame.yardsToGo}`;
+        elements.simGameDrive.textContent = `Drive ${activeLiveGame.drivesThisHalf}`;
+    }
+}
+
+function addLiveLogEntry(text) {
+    const p = document.createElement('p');
+    p.className = "text-sm border-b border-gray-700 pb-1 mb-1";
+    p.textContent = text;
+    elements.simPlayLog.appendChild(p);
+    elements.simPlayLog.scrollTop = elements.simPlayLog.scrollHeight;
+}
+
+function finishLiveGame() {
+    if (liveGameInterval) clearInterval(liveGameInterval);
+    addLiveLogEntry(`FINAL: ${activeLiveGame.homeScore} - ${activeLiveGame.awayScore}`);
+    
+    // Call Main.js back to save results
+    if (liveGameCallback) {
+        setTimeout(() => liveGameCallback(activeLiveGame), 2000);
+    }
 }
 
 export function skipLiveGameSim() {
-    if (qbTimer1) clearTimeout(qbTimer1);
-    if (qbTimer2) clearTimeout(qbTimer2);
-    if (qbTimer3) clearTimeout(qbTimer3);
-    if (liveGameInterval) { clearInterval(liveGameInterval); liveGameInterval = null; }
-
-    clearTimeout(huddleTimeout); // FIX: Cancel any pending huddle
-    huddleTimeout = null;
-    const finalResult = currentLiveGameResult; // Get the result before we clear it
-
-    // Call the end-state of the tick function immediately to show the final frame
-    liveGameCurrentIndex = finalResult?.visualizationFrames?.length || 9999;
-    runLiveGameTick(); // This will run the "End Condition Check" block
-
-    // runLiveGameTick() now handles clearing state and calling the callback
-    // with the finalResult, so this function is much simpler.
-
-    const ticker = elements.simPlayLog;
-    if (ticker) {
-        const p = document.createElement('p');
-        p.className = 'italic text-gray-400 mt-2';
-        p.textContent = '--- Simulation skipped to end ---';
-        ticker.appendChild(p);
-        ticker.scrollTop = ticker.scrollHeight;
-    }
+    isSkipping = true;
 }
 
 /** Changes the speed of the live game simulation interval. */
