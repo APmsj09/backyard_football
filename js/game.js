@@ -607,10 +607,11 @@ async function initializeLeague(onProgress) {
         const division = divisionNames[i % divisionNames.length];
         const coach = getRandom(coachPersonalities);
 
-        const offenseFormationData = offenseFormations[coach.preferredOffense] || offenseFormations['Balanced'];
-        const defenseFormationData = defenseFormations[coach.preferredDefense] || defenseFormations['3-1-3'];
-        const offenseSlots = offenseFormationData.slots;
-        const defenseSlots = defenseFormationData.slots;
+        const prefOff = offenseFormations[coach.preferredOffense] ? coach.preferredOffense : 'Balanced';
+        const prefDef = defenseFormations[coach.preferredDefense] ? coach.preferredDefense : '3-1-3';
+
+        const offenseFormationData = offenseFormations[prefOff];
+        const defenseFormationData = defenseFormations[prefDef];
 
         if (availableColors.length === 0) availableColors = [...teamColors];
         const colorSet = availableColors.splice(getRandomInt(0, availableColors.length - 1), 1)[0];
@@ -676,8 +677,16 @@ function createPlayerTeam(teamName) {
     const div1Count = game.divisions[divisionNames[1]]?.length || 0;
     const division = div0Count <= div1Count ? divisionNames[0] : divisionNames[1];
 
+    // 💡 FIX: Updated to match data.js keys
     const defaultOffense = 'Balanced';
     const defaultDefense = '3-1-3';
+    
+    // Safety check in case data.js isn't loaded yet
+    if (!offenseFormations[defaultOffense]) {
+        console.error(`Critical: Formation ${defaultOffense} not found in data.js`);
+        return;
+    }
+
     const defaultOffenseSlots = offenseFormations[defaultOffense].slots;
     const defaultDefenseSlots = defenseFormations[defaultDefense].slots;
 
@@ -4038,12 +4047,21 @@ function determinePuntDecision(down, yardsToGo, ballOn) {
 // game.js
 
 function determinePlayCall(offense, defense, down, yardsToGo, ballOn, scoreDiff, gameLog, drivesRemaining, previousPlayAnalysis) {
+    
+    if (!offense || !offense.formations) {
+        return 'Balanced_InsideZone'; // 💡 FIX: Valid fallback
+    }
+    
     const offenseRoster = getRosterObjects(offense);
     const defenseRoster = getRosterObjects(defense);
 
+    if (formationPlays.length === 0) {
+        return 'Balanced_InsideZone'; // 
+    }
+
     if (!offenseRoster || !defenseRoster || !offense?.formations?.offense || !defense?.formations?.defense) {
         console.error("determinePlayCall: Invalid team data.");
-        return 'Balanced_InsideRun';
+        return 'Balanced_InsideZone';
     }
 
     const { coach } = offense;
@@ -4490,7 +4508,7 @@ function aiCheckAudible(offense, offensivePlayKey, defense, defensivePlayKey, ga
 // game.js - REPLACE simulateLivePlayStep function (approx line 4520)
 
 function simulateLivePlayStep(game) {
-    // --- 1. SAFETY CHECKS (Fixes the TypeError) ---
+    // --- 1. SAFETY CHECKS ---
     if (!game || !game.possession || !game.homeTeam || !game.awayTeam) {
         console.error("simulateLivePlayStep: Critical Error - Invalid game state.", game);
         return { playResult: { outcome: 'error' }, finalBallY: 35, log: [], visualizationFrames: [] };
@@ -4500,7 +4518,7 @@ function simulateLivePlayStep(game) {
     const offense = game.possession;
     const defense = (offense.id === game.homeTeam.id) ? game.awayTeam : game.homeTeam;
 
-    // Ensure formations exist to prevent crashes
+    // Ensure formations exist
     if (!offense.formations) offense.formations = { offense: 'Balanced', defense: '3-1-3' };
     if (!defense.formations) defense.formations = { offense: 'Balanced', defense: '3-1-3' };
     
@@ -4508,51 +4526,54 @@ function simulateLivePlayStep(game) {
     let offPlayKey = '';
     let defPlayKey = '';
     
-    // A. CONVERSION LOGIC (The overriding priority)
+    // A. CONVERSION LOGIC
     if (game.isConversionAttempt) {
         game.down = 1;
         game.yardsToGo = 3;
-        game.ballOn = 97; // Opponent's 3-yard line
+        game.ballOn = 97; 
         
-        // Simple/Specific play calls for conversion
-        // You can use determinePlayCall here too, but forcing short plays is safer
-        offPlayKey = 'Pro_Set_Pass_Slant'; 
-        defPlayKey = 'GoalLine_Blitz_Man';
+        // 💡 FIX: Updated to valid keys from data.js
+        offPlayKey = 'Balanced_Slants'; // Was 'Pro_Set_Pass_Slant'
+        defPlayKey = 'GoalLine_RunStuff'; // Was 'GoalLine_Blitz_Man'
     } 
     // B. PUNT DECISION
     else if (determinePuntDecision(game.down, game.yardsToGo, game.ballOn)) {
+        // 💡 FIX: Updated to valid keys from data.js
         offPlayKey = 'Punt_Punt';
         defPlayKey = 'Punt_Return_Return';
     } 
     // C. NORMAL PLAY CALLING
     else {
-        const scoreDiff = (offense.id === game.homeTeam.id) ? 
-                          (game.homeScore - game.awayScore) : 
-                          (game.awayScore - game.homeScore);
-        
+        const scoreDiff = (offense.id === game.homeTeam.id) ? (game.homeScore - game.awayScore) : (game.awayScore - game.homeScore);
         const drivesRemaining = 10; 
         
         // 1. Get Play Call
         offPlayKey = determinePlayCall(offense, defense, game.down, game.yardsToGo, game.ballOn, scoreDiff, game.gameLog, drivesRemaining);
         
-        // --- 💡 FIX: Safety Check ---
-        // If the AI returned a bad key, default to a safe play to prevent the crash
+        // --- SAFETY CHECK ---
+        // If the AI returned a bad key (or undefined), default to a safe play
         if (!offPlayKey || !offensivePlaybook[offPlayKey]) {
-            console.warn(`Invalid play key '${offPlayKey}' selected. Defaulting to Pro_Set_Run_Inside.`);
-            offPlayKey = 'Pro_Set_Run_Inside'; 
+            console.warn(`Invalid play key '${offPlayKey}' selected. Defaulting to Balanced_InsideZone.`);
+            offPlayKey = 'Balanced_InsideZone'; // 💡 FIX: Updated default
         }
 
-        // 2. Set Formation (Now safe because we checked offPlayKey)
-        const selectedFormation = offensivePlaybook[offPlayKey].formation || 'Pro_Set';
+        // 2. Set Formation
+        const selectedFormation = offensivePlaybook[offPlayKey].formation || 
+                                  // Extract formation from key string (e.g., "Balanced_InsideZone" -> "Balanced")
+                                  offPlayKey.split('_')[0]; 
+                                  
         offense.formations.offense = selectedFormation;
         
+        // Update Defense based on Offense
         const defFormation = determineDefensiveFormation(defense, offense.formations.offense, game.down, game.yardsToGo, game.gameLog);
         defense.formations.defense = defFormation;
         
         defPlayKey = determineDefensivePlayCall(defense, offense, game.down, game.yardsToGo, game.ballOn, scoreDiff, game.gameLog, drivesRemaining);
         
         const audible = aiCheckAudible(offense, offPlayKey, defense, defPlayKey, game.gameLog);
-        offPlayKey = audible.playKey;
+        if (audible.playKey && offensivePlaybook[audible.playKey]) {
+            offPlayKey = audible.playKey;
+        }
     }
 
     // --- 3. CONTEXT SETUP ---
@@ -4572,65 +4593,49 @@ function simulateLivePlayStep(game) {
         offPlayKey,
         defPlayKey,
         context,
-        { isLive: true }, // Options
-        true // isLive flag (Crucial for generating frames)
+        { isLive: true }, 
+        true 
     );
 
-    // --- 5. UPDATE GAME STATE (Post-Play Logic) ---
+    // --- 5. UPDATE GAME STATE ---
     const { playResult, finalBallY } = result;
 
-    // A. HANDLE SCORING
     if (playResult.score === 'TD') {
-        // Award Points
         if (offense.id === game.homeTeam.id) game.homeScore += 6; else game.awayScore += 6;
-
-        // LOGIC FORK: Are we already in a conversion?
         if (game.isConversionAttempt) {
-            // Conversion Successful!
-            if (offense.id === game.homeTeam.id) game.homeScore += 2; else game.awayScore += 2; // Assume 2pt for now
+            if (offense.id === game.homeTeam.id) game.homeScore += 2; else game.awayScore += 2; 
             game.isConversionAttempt = false;
             game.gameLog.push("✅ Conversion GOOD!");
-            
-            // Setup Kickoff (Next play)
-            game.possession = offense; // Kickoff team
+            game.possession = offense; 
             game.ballOn = 35;
             game.down = 1; game.yardsToGo = 10;
         } else {
-            // Touchdown Scored -> Trigger Conversion Next
             game.isConversionAttempt = true;
-            // Possession stays with offense for the conversion
         }
     } 
     else if (playResult.safety) {
         if (defense.id === game.homeTeam.id) game.homeScore += 2; else game.awayScore += 2;
-        game.possession = offense; // Safety kick
+        game.possession = offense;
         game.ballOn = 20;
     }
-    // B. HANDLE TURNOVERS / POSSESSION CHANGE
     else if (playResult.possessionChange) {
-        // If it was a conversion fail
         if (game.isConversionAttempt) {
             game.gameLog.push("❌ Conversion FAILED!");
             game.isConversionAttempt = false;
-            game.possession = offense; // Kickoff team
+            game.possession = offense;
             game.ballOn = 35;
         } else {
-            // Normal Turnover
             game.possession = defense;
-            game.ballOn = 100 - finalBallY; // Flip field
+            game.ballOn = 100 - finalBallY;
             game.ballOn = Math.max(1, Math.min(99, game.ballOn));
             game.down = 1;
             game.yardsToGo = 10;
         }
     }
-    // C. NORMAL PLAY ADVANCE
     else {
-        // Update Yardage
         game.ballOn += playResult.yards;
         game.ballOn = Math.max(1, Math.min(99, game.ballOn));
         game.yardsToGo -= playResult.yards;
-
-        // Check First Down
         if (game.yardsToGo <= 0) {
             game.down = 1;
             const distToGoal = 100 - game.ballOn;
@@ -4640,7 +4645,7 @@ function simulateLivePlayStep(game) {
         }
     }
 
-    return result; // Return frames to UI
+    return result; 
 }
 
 
