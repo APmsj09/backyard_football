@@ -4047,57 +4047,37 @@ function determinePuntDecision(down, yardsToGo, ballOn) {
 // game.js
 
 function determinePlayCall(offense, defense, down, yardsToGo, ballOn, scoreDiff, gameLog, drivesRemaining, previousPlayAnalysis) {
-    
+    // 1. Critical Safety Check: Ensure Offense Exists
     if (!offense || !offense.formations) {
-        return 'Balanced_InsideZone'; // 💡 FIX: Valid fallback
-    }
-    
-    const offenseRoster = getRosterObjects(offense);
-    const defenseRoster = getRosterObjects(defense);
-
-    if (formationPlays.length === 0) {
-        return 'Balanced_InsideZone'; // 
+        // If data is missing, return a safe default immediately to prevent crashes
+        return 'Balanced_InsideZone'; 
     }
 
-    if (!offenseRoster || !defenseRoster || !offense?.formations?.offense || !defense?.formations?.defense) {
-        console.error("determinePlayCall: Invalid team data.");
-        return 'Balanced_InsideZone';
-    }
-
-    const { coach } = offense;
     const offenseFormationName = offense.formations.offense;
+    
+    // 2. Define formationPlays FIRST (This fixes the Initialization Error)
+    // We filter the playbook to find all plays that match the current formation name
+    const formationPlays = Object.keys(offensivePlaybook).filter(key => key.startsWith(offenseFormationName));
 
-    // --- 1. CAPTAIN CHECK ---
-    // Does the captain make the smart read, or do they panic?
+    // 3. Fallback Check: Did we find any plays?
+    if (formationPlays.length === 0) {
+        // If the formation name doesn't match any plays (e.g. mismatch in data.js), return safe default
+        return 'Balanced_InsideZone'; 
+    }
+
+    // --- STRATEGY LOGIC STARTS HERE ---
+    const { coach } = offense;
+    
+    // Determine if the captain is smart enough to make adjustments
+    // (This function relies on your existing helper)
     const captainIsSharp = checkCaptainDiscipline(offense, gameLog);
-
-    // --- 2. ANALYZE MATCHUPS (Base Strategy) ---
-    const getAvg = (roster, pos, attrCategory, attrKey) => {
-        const players = roster.filter(p => p && (p.favoriteOffensivePosition === pos || p.favoriteDefensivePosition === pos));
-        if (players.length === 0) return 50;
-        const sum = players.reduce((acc, p) => acc + (p.attributes?.[attrCategory]?.[attrKey] || 50), 0);
-        return sum / players.length;
-    };
-
-    const avgOLStrength = getAvg(offenseRoster, 'OL', 'physical', 'strength');
-    const avgDLStrength = getAvg(defenseRoster, 'DL', 'physical', 'strength');
-    const avgWRSpeed = getAvg(offenseRoster, 'WR', 'physical', 'speed');
-    const avgDBSpeed = getAvg(defenseRoster, 'DB', 'physical', 'speed');
-
-    // Advantage Calculation (> 5 is significant)
-    const trenchAdvantage = avgOLStrength - avgDLStrength;
-    const speedAdvantage = avgWRSpeed - avgDBSpeed;
-
-    // --- 3. SITUATIONAL FACTORS ---
-    // 0.0 = 100% Run, 1.0 = 100% Pass
+    
+    // Base Pass/Run Bias (0.0 = Run, 1.0 = Pass)
     let passBias = 0.50;
-    let preferredTag = null; // Forces a specific type of play (e.g., 'pa', 'screen')
+    let preferredTag = null; 
 
-    // If Captain is sharp, apply all smart logic.
-    // If not, skip most of this and add random noise.
     if (captainIsSharp) {
-
-        // A. Down & Distance
+        // A. Down & Distance Logic
         if (down === 1) passBias = 0.45; // 1st Down: Slight run lean
         if (down === 2) {
             if (yardsToGo > 7) passBias = 0.65; // 2nd & Long: Pass
@@ -4111,126 +4091,59 @@ function determinePlayCall(offense, defense, down, yardsToGo, ballOn, scoreDiff,
         if (down === 4) {
             passBias = yardsToGo > 3 ? 0.90 : 0.40;
         }
-
-        // B. Field Position
-        if (ballOn > 90) passBias -= 0.15; // Red zone (cramped): Run more
+        
+        // B. Field Position Logic
+        if (ballOn > 90) passBias -= 0.15; // Red zone: Run more
         if (ballOn < 10) passBias -= 0.10; // Backed up: Conservative run
 
-        // C. POSSESSION MANAGEMENT
-        const isLateGame = drivesRemaining <= 2;
-        const isTrailing = scoreDiff < 0;
-        const isLeading = scoreDiff > 0;
+        // C. Game Situation Logic
+        if (drivesRemaining <= 2 && scoreDiff < 0) passBias += 0.25; // Late game trailing
 
-        if (isLateGame) {
-            if (isTrailing) {
-                passBias += 0.25; // Desperation
-                if (scoreDiff < -8) passBias += 0.25; // Hail Mary mode
-            } else if (isLeading) {
-                passBias -= 0.20; // Protect Lead
-                if (scoreDiff > 8) passBias -= 0.15;
-            }
-        }
-
-        // D. Matchup Adjustments
-        if (trenchAdvantage > 5) passBias -= 0.10;
-        if (trenchAdvantage < -5) passBias += 0.10;
-        if (speedAdvantage > 5) passBias += 0.15;
-
-        // E. ADAPTIVE REACTION (React to previous play)
-        if (previousPlayAnalysis) {
-            const { isSuccess, score, type } = previousPlayAnalysis;
-
-            if (isSuccess && type === 'run') {
-                if (score >= 4 && Math.random() < 0.30) {
-                    passBias = 0.9;
-                    preferredTag = 'pa'; // Play Action!
-                    if (gameLog) gameLog.push(`🧠 Captain leverages the run game for Play Action!`);
-                } else {
-                    passBias -= 0.15; // Keep running
-                }
-            }
-            else if (!isSuccess && type === 'run' && score <= -2) {
-                passBias += 0.15; // TFL -> Try screen
-                if (Math.random() < 0.4) preferredTag = 'screen';
-            }
-            else if (!isSuccess && type === 'pass' && score <= -3) {
-                if (Math.random() < 0.5) {
-                    passBias = 1.0;
-                    preferredTag = 'quick'; // Sack -> Quick pass
-                } else {
-                    passBias -= 0.20; // Sack -> Draw
-                }
-            }
-        }
-
-        // F. Coach Personality
-        if (coach.type === 'Air Raid') passBias += 0.20;
-        if (coach.type === 'Ground and Pound') passBias -= 0.20;
-
+        // D. Coach Personality
+        if (coach?.type === 'Air Raid') passBias += 0.20;
+        if (coach?.type === 'Ground and Pound') passBias -= 0.20;
     } else {
-        // --- CAPTAIN CONFUSED ---
-        // Ignore situation, pick randomly or erroneously
-        passBias = 0.50 + ((Math.random() - 0.5) * 0.6); // Wild swings (+/- 30%)
-
-        // Sometimes they do the exact opposite of what they should
-        if (yardsToGo > 10 && Math.random() < 0.3) {
-            passBias = 0.1; // Run on 3rd & Long?
-        }
+        // Captain is confused: Randomize bias slightly
+        passBias = 0.50 + ((Math.random() - 0.5) * 0.6); 
     }
 
-    // --- 4. SELECT PLAY ---
+    // --- 4. SELECT PLAY TYPE ---
     passBias = Math.max(0.05, Math.min(0.95, passBias));
     let desiredType = Math.random() < passBias ? 'pass' : 'run';
 
-    const formationPlays = Object.keys(offensivePlaybook).filter(key => key.startsWith(offenseFormationName));
-
-    // 💡 NEW: Filter out the specific play used previously to force variety
-    // (previousPlayAnalysis comes from analyzePlaySuccess)
+    // Filter the formation plays by the desired type (Run/Pass)
     let pool = formationPlays.filter(key => {
         const p = offensivePlaybook[key];
+        // Don't repeat the exact same play if we have analysis data
         return p.type === desiredType && key !== previousPlayAnalysis?.playKey;
     });
 
-    // Fallback if pool is empty (e.g. only 1 play exists)
+    // If pool is empty (e.g. no runs in this formation), relax the filter
     if (pool.length === 0) {
         pool = formationPlays.filter(key => offensivePlaybook[key].type === desiredType);
     }
-
-    // --- 5. TAG REFINEMENT ---
-    // Only apply smart tag filtering if Captain is sharp
-    let refinedPool = [];
-
-    if (captainIsSharp) {
-        if (preferredTag) {
-            const taggedPool = pool.filter(k => offensivePlaybook[k].tags.includes(preferredTag));
-            if (taggedPool.length > 0) pool = taggedPool;
-        }
-
-        if (!preferredTag) {
-            if (desiredType === 'pass') {
-                if (yardsToGo > 12 || (drivesRemaining <= 2 && scoreDiff < 0)) {
-                    refinedPool = pool.filter(k => offensivePlaybook[k].tags.includes('deep'));
-                } else if (yardsToGo < 4) {
-                    refinedPool = pool.filter(k => offensivePlaybook[k].tags.includes('short') || offensivePlaybook[k].tags.includes('quick'));
-                } else {
-                    refinedPool = pool.filter(k => offensivePlaybook[k].tags.includes('medium') || offensivePlaybook[k].tags.includes('screen'));
-                }
-            } else { // Run
-                if (yardsToGo <= 2) {
-                    refinedPool = pool.filter(k => offensivePlaybook[k].tags.includes('inside') || offensivePlaybook[k].tags.includes('power'));
-                } else if (speedAdvantage > 5) {
-                    refinedPool = pool.filter(k => offensivePlaybook[k].tags.includes('outside'));
-                } else {
-                    refinedPool = pool.filter(k => offensivePlaybook[k].tags.includes(trenchAdvantage > 0 ? 'inside' : 'outside'));
-                }
-            }
-        }
+    
+    // If STILL empty, just use whatever plays exist for this formation
+    if (pool.length === 0) {
+        pool = formationPlays;
     }
 
-    // If refinement found nothing (or captain wasn't sharp), revert to base pool
+    // --- 5. TAG REFINEMENT (Optional) ---
+    // If smart captain wants a specific type of play (e.g. "short" or "screen")
+    let refinedPool = [];
+    if (captainIsSharp && preferredTag) {
+        const taggedPool = pool.filter(k => offensivePlaybook[k].tags.includes(preferredTag));
+        if (taggedPool.length > 0) refinedPool = taggedPool;
+    }
+
+    // If tag refinement found nothing, revert to the type-based pool
     if (refinedPool.length === 0) refinedPool = pool;
 
-    return getRandom(refinedPool) || formationPlays[0];
+    // --- 6. FINAL SELECTION ---
+    const selectedKey = getRandom(refinedPool);
+
+    // Final safety fallback: Return selected key OR first available play OR default
+    return selectedKey || formationPlays[0] || 'Balanced_InsideZone';
 }
 
 /**
