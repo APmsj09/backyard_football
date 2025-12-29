@@ -1550,17 +1550,30 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
             const fatigueMod = Math.max(0.3, 1.0 - fatigueRatio);
 
             const pState = {
-                id: player.id, name: player.name, number: player.number,
-                role: slot.replace(/\d+/g, ''), teamId: team.id,
-                isOffense: isOffense, slot: slot,
+                id: player.id, 
+                name: player.name, 
+                number: player.number,
+                role: slot.replace(/\d+/g, ''), 
+                teamId: team.id,
+                
+                // 💡 FIX 1: RESTORE COLORS
+                primaryColor: team.primaryColor, 
+                secondaryColor: team.secondaryColor,
+
+                isOffense: isOffense, 
+                slot: slot,
                 x: startX, y: startY, initialX: startX, initialY: startY,
                 targetX: targetX, targetY: targetY,
                 
-                // Stats Cache
-                speed: player.attributes.physical?.speed || 50,
-                agility: player.attributes.physical?.agility || 50,
-                strength: player.attributes.physical?.strength || 50,
-                playbookIQ: player.attributes.mental?.playbookIQ || 50,
+                // 💡 FIX 2: ENSURE ATTRIBUTES EXIST (Prevent NaN errors)
+                // Use optional chaining (?.) and strict defaults
+                speed: player.attributes?.physical?.speed || 50,
+                agility: player.attributes?.physical?.agility || 50,
+                strength: player.attributes?.physical?.strength || 50,
+                weight: player.attributes?.physical?.weight || 150, // Default to 150lb if missing
+                height: player.attributes?.physical?.height || 68,  // Default to 5'8"
+                
+                playbookIQ: player.attributes?.mental?.playbookIQ || 50,
                 fatigueModifier: fatigueMod,
 
                 // Logic State
@@ -1575,7 +1588,7 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
                 ticksOnCurrentRead: 0,
 
                 // Physics State
-                vx: 0, vy: 0,
+                vx: 0, vy: 0, vz: 0, // Ensure Z exists
                 isEngaged: false, engagedWith: null,
                 isBlocked: false, blockedBy: null,
                 hasBall: false, isBallCarrier: false,

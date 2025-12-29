@@ -2167,80 +2167,70 @@ function drawFieldVisualization(frameData) {
     drawSpecialLine(frameData.lineOfScrimmage, "#3b82f6", "#60a5fa"); // Blue LOS
     drawSpecialLine(frameData.firstDownY, "#eab308", "#fde047");     // Yellow First Down
 
-    // --- 3. DRAW PLAYERS (Oval Shapes based on Ht/Wt) ---
+    // --- 3. DRAW PLAYERS (Safe Oval Rendering) ---
     if (frameData.players) {
         frameData.players.forEach(p => {
             const px = toScreenX(p.x);
             const py = toScreenY(p.y);
 
-            // --- A. CALCULATE DIMENSIONS (Youth Scale: 12-16 Years Old) ---
-
-            // 1. Establish the "Average" Kid
-            // A typical 14-year-old athlete might be ~5'7" (67in) and ~140 lbs.
+            // 1. SAFE DIMENSION CALCULATION
+            // Fallback to "Average 14yo" if data is missing/corrupt
             const baseWeight = 140;
-            const baseHeight = 67; // 5'7"
+            const baseHeight = 67;
 
-            // Fallbacks for missing data
-            const pWeight = p.weight || baseWeight;
-            const pHeight = p.height || baseHeight;
+            // Strict check: Is p.weight a valid number? If not, use base.
+            const validWeight = (typeof p.weight === 'number' && !isNaN(p.weight)) ? p.weight : baseWeight;
+            const validHeight = (typeof p.height === 'number' && !isNaN(p.height)) ? p.height : baseHeight;
 
-            // 2. Weight Scaling (Girth/Width)
-            // In youth leagues, size disparities are huge. A 220lb kid is a GIANT vs a 100lb kid.
-            // We use a smaller divisor (150 instead of 450) to make weight differences pop visually.
-            // Example: 
-            // - 100 lb kid -> 0.73x width (Skinny)
-            // - 220 lb kid -> 1.53x width (Massive)
-            const widthMod = 1 + ((pWeight - baseWeight) / 150);
-            const radiusX = scale * widthMod;
+            // Youth Scale Divisors (Smaller = More visible difference)
+            const widthMod = 1 + ((validWeight - baseWeight) / 150);
+            const heightMod = 1 + ((validHeight - baseHeight) / 60);
 
-            // 3. Height Scaling (Length/Tallness)
-            // We scale this slightly less aggressively than weight, but still distinct.
-            // Example:
-            // - 5'0" (60in) -> 0.88x height
-            // - 6'2" (74in) -> 1.12x height
-            const heightMod = 1 + ((pHeight - baseHeight) / 60);
-            const radiusY = scale * heightMod;
+            // Ensure radius is never negative or zero
+            const radiusX = Math.max(scale * 0.5, scale * widthMod);
+            const radiusY = Math.max(scale * 0.5, scale * heightMod);
 
-            // --- B. SHADOW ---
+            // 2. DRAW SHADOW
             ctx.fillStyle = "rgba(0,0,0,0.3)";
             ctx.beginPath();
-            ctx.ellipse(px, py + (radiusY * 0.5), radiusX * 0.9, radiusY * 0.25, 0, 0, Math.PI * 2);
+            try {
+                // Try Ellipse (Modern Browsers)
+                ctx.ellipse(px, py + (radiusY * 0.5), radiusX * 0.9, radiusY * 0.25, 0, 0, Math.PI * 2);
+            } catch (e) {
+                // Fallback for very old browsers or edge cases
+                ctx.arc(px, py + (radiusY * 0.5), radiusX, 0, Math.PI * 2);
+            }
             ctx.fill();
 
-            // --- C. HIGHLIGHT (Ball Carrier) ---
+            // 3. HIGHLIGHT (Ball Carrier)
             if (p.hasBall || p.isBallCarrier) {
                 ctx.beginPath();
-                // Gold ring scales with the kid's specific size
                 ctx.ellipse(px, py, radiusX * 1.3, radiusY * 1.3, 0, 0, Math.PI * 2);
                 ctx.fillStyle = "#FFD700";
                 ctx.fill();
             }
 
-            // --- D. JERSEY (Main Body) ---
+            // 4. JERSEY
             ctx.beginPath();
             ctx.ellipse(px, py, radiusX, radiusY, 0, 0, Math.PI * 2);
-            // 💡 TIP: Youth jerseys are often loose. We don't change shape for that, 
-            // but the size variance helps sell the "awkward growth spurt" vibe.
-            ctx.fillStyle = p.primaryColor || "#999";
+            // 💡 FIX: Fallback color if primaryColor is missing (e.g., Red vs Blue default)
+            ctx.fillStyle = p.primaryColor || (p.isOffense ? "#cc0000" : "#0000cc");
             ctx.fill();
 
-            // --- E. HELMET/PADS ---
-            // Youth pads often look slightly "too big" for the player.
-            // We keep the line thick relative to their body size.
+            // 5. OUTLINE
             ctx.lineWidth = 2.0;
             ctx.strokeStyle = p.secondaryColor || "#fff";
             ctx.stroke();
 
-            // --- F. NUMBER ---
+            // 6. NUMBER
             ctx.fillStyle = "#fff";
-            // Font matches their physical size
             const fontSize = Math.min(radiusX, radiusY) * 1.5;
-            ctx.font = `bold ${Math.max(10, fontSize)}px sans-serif`; // Minimum size 10 so tiny kids still have readable numbers
+            ctx.font = `bold ${Math.max(10, fontSize)}px sans-serif`;
             ctx.textAlign = "center";
             ctx.textBaseline = "middle";
             ctx.fillText(p.number || p.role.substring(0, 2), px, py);
 
-            // --- G. STATUS ICONS ---
+            // 7. STATUS ICONS
             if (p.stunnedTicks > 0) {
                 ctx.fillStyle = "#ffff00";
                 ctx.font = `${radiusX}px sans-serif`;
