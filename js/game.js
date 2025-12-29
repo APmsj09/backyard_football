@@ -4518,21 +4518,27 @@ function simulateLivePlayStep(game) {
                           (game.homeScore - game.awayScore) : 
                           (game.awayScore - game.homeScore);
         
-        const drivesRemaining = 10; // Estimation for live game
+        const drivesRemaining = 10; 
         
-        // Use your existing helper functions
+        // 1. Get Play Call
         offPlayKey = determinePlayCall(offense, defense, game.down, game.yardsToGo, game.ballOn, scoreDiff, game.gameLog, drivesRemaining);
         
-        // Set Formation
+        // --- 💡 FIX START: Safety Check ---
+        // If the AI returned a bad key, default to a safe play to prevent the crash
+        if (!offPlayKey || !offensivePlaybook[offPlayKey]) {
+            console.warn(`Invalid play key '${offPlayKey}' selected. Defaulting to Pro_Set_Run_Inside.`);
+            offPlayKey = 'Pro_Set_Run_Inside'; // Ensure this key exists in your data.js
+        }
+        // --- 💡 FIX END ---
+
+        // 2. Set Formation (Now safe because we checked offPlayKey)
         offense.formations.offense = offensivePlaybook[offPlayKey].formation || 'Pro_Set';
         
-        // Defense reacts
         const defFormation = determineDefensiveFormation(defense, offense.formations.offense, game.down, game.yardsToGo, game.gameLog);
         defense.formations.defense = defFormation;
         
         defPlayKey = determineDefensivePlayCall(defense, offense, game.down, game.yardsToGo, game.ballOn, scoreDiff, game.gameLog, drivesRemaining);
         
-        // Check Audible
         const audible = aiCheckAudible(offense, offPlayKey, defense, defPlayKey, game.gameLog);
         offPlayKey = audible.playKey;
     }

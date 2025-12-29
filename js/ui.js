@@ -51,6 +51,11 @@ let currentLiveGameResult = null; // Stores the full gameResult object for accur
 let userPreferredSpeed = 80;
 let huddleTimeout = null;
 
+let activeLiveGame = null;      
+let liveGameCallback = null;    
+let liveGameInterval = null;    
+let isSkipping = false;
+
 let liveGameLogIndex = 0;
 let liveGameCurrentHomeScore = 0;
 let liveGameCurrentAwayScore = 0;
