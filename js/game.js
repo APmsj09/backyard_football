@@ -4487,10 +4487,22 @@ function aiCheckAudible(offense, offensivePlayKey, defense, defensivePlayKey, ga
  * SIMULATES EXACTLY ONE PLAY STEP (For Live Game View)
  * This replaces 'simulateGame' when watching the game.
  */
+// game.js - REPLACE simulateLivePlayStep function (approx line 4520)
+
 function simulateLivePlayStep(game) {
-    // 1. Setup References from the persistent 'game' object
+    // --- 1. SAFETY CHECKS (Fixes the TypeError) ---
+    if (!game || !game.possession || !game.homeTeam || !game.awayTeam) {
+        console.error("simulateLivePlayStep: Critical Error - Invalid game state.", game);
+        return { playResult: { outcome: 'error' }, finalBallY: 35, log: [], visualizationFrames: [] };
+    }
+
+    // Setup References
     const offense = game.possession;
     const defense = (offense.id === game.homeTeam.id) ? game.awayTeam : game.homeTeam;
+
+    // Ensure formations exist to prevent crashes
+    if (!offense.formations) offense.formations = { offense: 'Balanced', defense: '3-1-3' };
+    if (!defense.formations) defense.formations = { offense: 'Balanced', defense: '3-1-3' };
     
     // --- 2. DETERMINE PLAY CALLS ---
     let offPlayKey = '';
@@ -4523,16 +4535,16 @@ function simulateLivePlayStep(game) {
         // 1. Get Play Call
         offPlayKey = determinePlayCall(offense, defense, game.down, game.yardsToGo, game.ballOn, scoreDiff, game.gameLog, drivesRemaining);
         
-        // --- 💡 FIX START: Safety Check ---
+        // --- 💡 FIX: Safety Check ---
         // If the AI returned a bad key, default to a safe play to prevent the crash
         if (!offPlayKey || !offensivePlaybook[offPlayKey]) {
             console.warn(`Invalid play key '${offPlayKey}' selected. Defaulting to Pro_Set_Run_Inside.`);
-            offPlayKey = 'Pro_Set_Run_Inside'; // Ensure this key exists in your data.js
+            offPlayKey = 'Pro_Set_Run_Inside'; 
         }
-        // --- 💡 FIX END ---
 
         // 2. Set Formation (Now safe because we checked offPlayKey)
-        offense.formations.offense = offensivePlaybook[offPlayKey].formation || 'Pro_Set';
+        const selectedFormation = offensivePlaybook[offPlayKey].formation || 'Pro_Set';
+        offense.formations.offense = selectedFormation;
         
         const defFormation = determineDefensiveFormation(defense, offense.formations.offense, game.down, game.yardsToGo, game.gameLog);
         defense.formations.defense = defFormation;
@@ -4554,7 +4566,6 @@ function simulateLivePlayStep(game) {
     };
 
     // --- 4. EXECUTE THE PLAY ---
-    // We call resolvePlay exactly once.
     const result = resolvePlay(
         offense,
         defense,
@@ -4566,8 +4577,6 @@ function simulateLivePlayStep(game) {
     );
 
     // --- 5. UPDATE GAME STATE (Post-Play Logic) ---
-    // This logic replaces the flow control of the 'while' loop
-    
     const { playResult, finalBallY } = result;
 
     // A. HANDLE SCORING
@@ -4642,10 +4651,15 @@ function simulateLivePlayStep(game) {
  * No visualization frames, no delays. Pure stats.
  */
 function simulateMatchFast(homeTeam, awayTeam) {
-    // 1. Validation
-    if (!homeTeam || !awayTeam || !homeTeam.roster || !awayTeam.roster) {
-        console.error("simulateMatchFast: Invalid team data.");
+    // 1. Validation (Strict checks to prevent undefined errors later)
+    if (!homeTeam || !awayTeam) {
+        console.error("simulateMatchFast: Missing team data", { homeTeam, awayTeam });
         return null;
+    }
+    // Ensure roster exists
+    if (!homeTeam.roster || !awayTeam.roster) {
+        console.error("simulateMatchFast: Teams exist but missing rosters.");
+        return null; 
     }
 
     // 2. Reset Stats for this game
@@ -4653,7 +4667,7 @@ function simulateMatchFast(homeTeam, awayTeam) {
     aiSetDepthChart(homeTeam);
     aiSetDepthChart(awayTeam);
 
-    // 3. Initialize State (Compatible with simulateLivePlayStep)
+    // 3. Initialize State
     const game = {
         homeTeam, awayTeam,
         homeScore: 0, awayScore: 0,
@@ -4664,23 +4678,21 @@ function simulateMatchFast(homeTeam, awayTeam) {
         quarter: 1,
         isConversionAttempt: false,
         isGameOver: false,
-        // Config
         weather: getRandom(['Sunny', 'Windy', 'Rain']),
         homeTeamPlayHistory: [],
         awayTeamPlayHistory: []
     };
 
     // 4. THE FAST LOOP
-    // We simulate 2 Halves. Each half has ~5-6 drives per team.
-    // We use the same engine as the live game, just looping it instantly.
-    
     const TOTAL_DRIVES_PER_HALF = getRandomInt(5, 6);
     let currentHalf = 1;
-    let drivesTotal = 0;
 
     // --- FIRST HALF ---
     while (game.drivesThisHalf < TOTAL_DRIVES_PER_HALF * 2) {
-        simulateLivePlayStep(game); // Re-use the new engine!
+        simulateLivePlayStep(game);
+        // Simple counter increment - in a real game this is time based, 
+        // but for fast sim we just ensure plays happen.
+        game.drivesThisHalf += 0.2; 
     }
 
     // --- HALFTIME ---
@@ -4693,35 +4705,34 @@ function simulateMatchFast(homeTeam, awayTeam) {
         if (p) p.fatigue = Math.max(0, (p.fatigue || 0) - 30);
     });
 
-    // Second Half Kickoff (Simple logic: Flip possession from start or random)
+    // Second Half Kickoff
     game.possession = (game.possession.id === homeTeam.id) ? awayTeam : homeTeam; 
     game.ballOn = 35; game.down = 1; game.yardsToGo = 10;
 
     // --- SECOND HALF ---
     while (game.drivesThisHalf < TOTAL_DRIVES_PER_HALF * 2) {
         simulateLivePlayStep(game);
+        game.drivesThisHalf += 0.2;
     }
 
     // --- OVERTIME (Simple) ---
     if (game.homeScore === game.awayScore) {
         let otPossessions = 0;
-        game.ballOn = 75; // Start at opponent 25 (NCAA rules style for speed)
+        game.ballOn = 75; 
         while (game.homeScore === game.awayScore && otPossessions < 6) {
             simulateLivePlayStep(game);
-            // Rough check for possession flips to count "rounds"
             otPossessions += 0.1; 
         }
     }
 
-    // 5. POST-GAME RPG LOGIC (Breakthroughs & Stats)
-    // This logic is preserved from your original code
+    // 5. POST-GAME RPG LOGIC
     const breakthroughs = [];
     const allPlayers = [...getRosterObjects(homeTeam), ...getRosterObjects(awayTeam)];
 
     allPlayers.forEach(p => {
         if (!p || !p.gameStats) return;
 
-        // A. Check Breakthroughs (Level Up)
+        // A. Check Breakthroughs
         const s = p.gameStats;
         const perfThreshold = s.touchdowns >= 1 || s.passYards > 100 || s.rushYards > 50 || s.tackles > 4 || s.sacks >= 1 || s.interceptions >= 1;
 

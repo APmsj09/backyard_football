@@ -44,16 +44,16 @@ let depthOrderSortDir = 'desc';    // Default sort direction
 let activeDepthOrderTab = 'QB';
 
 // --- Live Game Sim State ---
-let liveGameSpeed = 80; // Current sim speed in milliseconds
-let liveGameCurrentIndex = 0; // Current index in the game log array
-let liveGameLog = []; // Stores the log entries for the current sim
-let currentLiveGameResult = null; // Stores the full gameResult object for accurate final display
+let liveGameSpeed = 80; 
+let liveGameCurrentIndex = 0; 
+let liveGameLog = []; 
+let currentLiveGameResult = null; 
 let userPreferredSpeed = 80;
 let huddleTimeout = null;
 
-let activeLiveGame = null;      
-let liveGameCallback = null;    
-let liveGameInterval = null;    
+let activeLiveGame = null;       
+let liveGameCallback = null;     
+let liveGameInterval = null;     
 let isSkipping = false;
 
 let liveGameLogIndex = 0;
@@ -2916,6 +2916,15 @@ function animateQBShout(frame) {
  * This replaces your old 'startLiveGameSim'
  */
 export function startLiveGameLoop(initialGameState, onComplete) {
+    console.log("Starting Live Game Loop...");
+
+    // 💡 FIX: Safety Check
+    if (!initialGameState) {
+        console.error("startLiveGameLoop: Initial game state is missing/null.");
+        return;
+    }
+
+    // 💡 FIX: Assign to the global scope variable defined at the top
     activeLiveGame = initialGameState;
     liveGameCallback = onComplete;
     isSkipping = false;
@@ -2923,12 +2932,11 @@ export function startLiveGameLoop(initialGameState, onComplete) {
     // Reset Scoreboard UI
     const ticker = elements.simPlayLog;
     if (ticker) ticker.innerHTML = '';
+    
+    // Initial UI Update
     updateLiveScoreboard();
 
-    // Resize Canvas (Keep your existing resizing logic here if needed)
-    // ...
-
-    // Start!
+    // Start the first step
     runLiveGameStep();
 }
 
@@ -2939,45 +2947,66 @@ export function startLiveGameLoop(initialGameState, onComplete) {
 // js/ui.js
 
 function runLiveGameStep() {
-    if (!activeLiveGame) return;
+    // 💡 FIX: Check if variable exists
+    if (!activeLiveGame) {
+        console.warn("runLiveGameStep: activeLiveGame is null. Stopping loop.");
+        return;
+    }
 
-    // 1. Check End Condition
-    if (activeLiveGame.isGameOver || activeLiveGame.drivesThisHalf > 24) { 
+    // 1. Check End Condition (Game Over or Halftime safety break)
+    if (activeLiveGame.isGameOver || activeLiveGame.drivesThisHalf > 30) { 
         finishLiveGame();
         return;
     }
 
     // 2. CALCULATE PLAY (Call Game.js)
-    const stepResult = Game.simulateLivePlayStep(activeLiveGame);
+    // 💡 FIX: Wrap in try/catch to prevent UI freezing if Game.js crashes
+    let stepResult;
+    try {
+        stepResult = Game.simulateLivePlayStep(activeLiveGame);
+    } catch (e) {
+        console.error("CRITICAL: Game Simulation Crash", e);
+        finishLiveGame();
+        return;
+    }
 
-    // 3. UPDATE UI
+    // 3. Safety Check on Result
+    if (!stepResult || !stepResult.playResult) {
+        console.error("runLiveGameStep: Invalid step result received.");
+        return;
+    }
+
+    // 4. UPDATE UI
     updateLiveScoreboard();
-    if (stepResult.playResult.logEntry) addLiveLogEntry(stepResult.playResult.logEntry);
+    if (stepResult.playResult.logEntry) {
+        addLiveLogEntry(stepResult.playResult.logEntry);
+    }
     
-    // Update the Player Roster UI (Fatigue bars)
+    // Update the Player Roster UI (Fatigue bars) - using the first frame of animation
     if (stepResult.visualizationFrames && stepResult.visualizationFrames.length > 0) {
         renderSimPlayers(stepResult.visualizationFrames[0]);
     }
 
-    // --- 4. ANIMATE (The block you pasted goes here) ---
+    // 5. ANIMATE OR SKIP
     if (stepResult.visualizationFrames && stepResult.visualizationFrames.length > 0) {
         playVisualization(stepResult.visualizationFrames, () => {
-            // Animation Done.
+            // -- Animation Complete Callback --
             
             if (isSkipping) {
-                runLiveGameStep(); // Instant loop
+                runLiveGameStep(); // Run next immediately
             } else {
                 // HUDDLE DELAY
                 // Fast for extra points (1s), Normal for plays (3.5s)
                 const delay = activeLiveGame.isConversionAttempt ? 1000 : 3500;
                 
-                // Optional: You could update UI text here to say "Huddle..."
+                // Clear any existing timeout just in case
+                if (huddleTimeout) clearTimeout(huddleTimeout);
                 
-                setTimeout(runLiveGameStep, delay);
+                huddleTimeout = setTimeout(runLiveGameStep, delay);
             }
         });
     } else {
-        // No frames (e.g. timeout or weird logic edge case)? Just continue.
+        // No frames generated (rare, e.g. timeouts or errors) -> Just continue
         setTimeout(runLiveGameStep, 500);
     }
 }

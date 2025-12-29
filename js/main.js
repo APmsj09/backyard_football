@@ -31,7 +31,7 @@ async function startNewGame() {
         // Give the UI a moment to render the screen before heavy lifting
         await new Promise(resolve => setTimeout(resolve, 50));
 
-        // 💡 FIX: Adapter to convert 0.0-1.0 (Game) to 0-100 (UI)
+        // Adapter to convert 0.0-1.0 (Game) to 0-100 (UI)
         await Game.initializeLeague((progress) => {
             UI.updateLoadingProgress(Math.round(progress * 100));
         });
@@ -322,9 +322,6 @@ function handleDepthChartSelect(e) {
     const side = selectEl.dataset.side;
 
     if (newPositionSlot && side && gameState) {
-        // FIX: Prevent updating if the ID is null (clearing a slot is handled differently in drag/drop logic usually)
-        // If you intended to clear the slot, ensure game.js handles nulls gracefully.
-        // For now, only update if we have a valid player ID.
         if (playerId) {
             handleDepthChartDrop(playerId, newPositionSlot, side);
             document.dispatchEvent(new CustomEvent('refresh-ui'));
@@ -427,7 +424,11 @@ function startLiveGame(playerGameMatch) {
         isConversionAttempt: false,
         isGameOver: false,
         weather: 'Sunny',
-        quarter: 1
+        quarter: 1,
+        // 💡 FIX: Added missing counters to prevent NaN errors in game loop
+        drivesThisHalf: 0,
+        homeTeamPlayHistory: [],
+        awayTeamPlayHistory: []
     };
 
     // 3. Hand over control to UI
