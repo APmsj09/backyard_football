@@ -2009,275 +2009,219 @@ function drawFieldVisualization(frameData) {
     // --- 1. SETUP DIMENSIONS ---
     const width = canvas.width;
     const height = canvas.height;
-
-    // Prevent crash on hidden tabs
     if (width === 0 || height === 0) return;
 
-    // ZOOM FIX: Add padding to the "visible width"
-    // Real field is 53.3. We pretend it's 64 yards wide so we have ~5 yards buffer on each side.
-    const VIRTUAL_WIDTH = 64;
+    // ZOOM SETTINGS
+    // We render a 58-yard wide view (field is 53.3, so ~2.3yds padding on sides)
+    const VIRTUAL_WIDTH = 58; 
     const scale = width / VIRTUAL_WIDTH;
 
-    const visibleLengthYards = 35;
-
-    // Center the 53.3 yard field within our 64 yard view
-    const xPad = (VIRTUAL_WIDTH - 53.3) / 2;
-
-    // Camera Logic (Follow Ball)
+    // CAMERA SETTINGS
+    // Visible vertical yards. Lower = More Zoomed In.
+    const VISIBLE_YARDS = 24; 
+    
+    // Camera Tracking (Follow Ball)
     const ballY = frameData.ball ? frameData.ball.y : 60;
-    let cameraY = ballY - (visibleLengthYards / 2);
-    cameraY = Math.max(0, Math.min(120 - visibleLengthYards, cameraY));
+    // Keep camera bounded so we don't see past endzones too much
+    let cameraY = ballY - (VISIBLE_YARDS / 2);
+    cameraY = Math.max(-5, Math.min(125 - VISIBLE_YARDS, cameraY));
 
     // Coordinate Mappers
-    // We add xPad to shift the drawing right, creating the left margin
+    const xPad = (VIRTUAL_WIDTH - 53.3) / 2;
     const toScreenX = (x) => (x + xPad) * scale;
-    const toScreenY = (y) => height - ((y - cameraY) * (height / visibleLengthYards));
+    // Invert Y because canvas 0 is top, but football field 0 is bottom
+    const toScreenY = (y) => height - ((y - cameraY) * (height / VISIBLE_YARDS));
 
-    // --- 2. DRAW FIELD TEXTURE (Striped Grass) ---
-    // Base grass color
-    ctx.fillStyle = "#3a6b35";
+    // Scale reference for player size (Yards to Pixels)
+    const yardsToPx = height / VISIBLE_YARDS;
+
+    // --- 2. DRAW FIELD TEXTURE ---
+    // Deep Green Grass
+    ctx.fillStyle = "#2d5a27";
     ctx.fillRect(0, 0, width, height);
 
-    // Draw alternating stripes every 5 yards
-    for (let i = 0; i <= 120; i += 5) {
+    // Draw Stripes (Every 5 yards)
+    for (let i = -10; i <= 130; i += 5) {
         const yStart = toScreenY(i);
         const yEnd = toScreenY(i + 5);
-        const h = yStart - yEnd; // Canvas Y is inverted
+        const h = yStart - yEnd;
 
-        if (yStart < 0 || yEnd > height) continue;
+        // Skip off-screen lines
+        if (yStart < -10 || yEnd > height + 10) continue;
 
-        // Alternate color for striping effect
-        if ((i / 5) % 2 === 0) {
-            ctx.fillStyle = "rgba(255, 255, 255, 0.05)"; // Lighten stripe
-            ctx.fillRect(0, yEnd, width, h);
-        } else {
-            ctx.fillStyle = "rgba(0, 0, 0, 0.05)"; // Darken stripe
-            ctx.fillRect(0, yEnd, width, h);
+        // Alternate stripe color
+        ctx.fillStyle = (i / 5) % 2 === 0 
+            ? "rgba(255, 255, 255, 0.07)" 
+            : "rgba(0, 0, 0, 0.07)";
+        ctx.fillRect(0, yEnd, width, h);
+        
+        // Yard Lines (White)
+        if (i > 0 && i < 120 && i % 5 === 0) {
+            ctx.beginPath();
+            ctx.moveTo(0, yStart);
+            ctx.lineTo(width, yStart);
+            ctx.strokeStyle = "rgba(255, 255, 255, 0.4)";
+            ctx.lineWidth = 2;
+            ctx.stroke();
         }
-    }
-
-    // --- 3. DRAW ENDZONES (With Patterns) ---
-    const drawEndzonePattern = (yStart, yEnd, color, name) => {
-        const sY = toScreenY(yStart);
-        const eY = toScreenY(yEnd);
-
-        if (sY < 0 && eY < 0) return;
-        if (sY > height && eY > height) return;
-
-        // Base Endzone Color
-        ctx.fillStyle = color;
-        const topY = Math.min(sY, eY);
-        const h = Math.abs(sY - eY);
-        ctx.fillRect(0, topY, width, h);
-
-        // Diagonal Hatching Pattern
-        ctx.save();
-        ctx.beginPath();
-        ctx.rect(0, topY, width, h);
-        ctx.clip();
-        ctx.strokeStyle = "rgba(255,255,255,0.15)";
-        ctx.lineWidth = 4 * scale;
-        for (let j = -height; j < width + height; j += (20 * scale)) {
-            ctx.moveTo(j, topY);
-            ctx.lineTo(j - h, topY + h);
-        }
-        ctx.stroke();
-
-        // Team Name Text
-        ctx.translate(width / 2, topY + h / 2);
-        ctx.fillStyle = "rgba(255,255,255,0.9)";
-        ctx.font = `900 ${Math.max(24, scale * 8)}px 'Inter', sans-serif`; // Big, blocky font
-        ctx.textAlign = "center";
-        ctx.textBaseline = "middle";
-        ctx.shadowColor = "rgba(0,0,0,0.5)";
-        ctx.shadowBlur = 10;
-        ctx.fillText(name.toUpperCase(), 0, 0);
-        ctx.restore();
-    };
-
-    const homeColor = currentLiveGameResult?.homeTeam?.primaryColor || "#1d4ed8";
-    const awayColor = currentLiveGameResult?.awayTeam?.primaryColor || "#b91c1c";
-
-    // Bottom Endzone (Home)
-    drawEndzonePattern(0, 10, awayColor, currentLiveGameResult?.awayTeam?.name || "AWAY");
-    // Top Endzone (Away)
-    drawEndzonePattern(110, 120, homeColor, currentLiveGameResult?.homeTeam?.name || "HOME");
-
-    // --- 4. DRAW FIELD MARKINGS ---
-    ctx.lineWidth = Math.max(1, scale * 0.15);
-    ctx.strokeStyle = "rgba(255,255,255,0.6)";
-    ctx.fillStyle = "rgba(255,255,255,0.7)";
-    ctx.textAlign = "center";
-    ctx.font = `bold ${Math.max(10, scale * 2)}px 'Inter', sans-serif`;
-
-    for (let i = 10; i <= 110; i += 5) {
-        const y = toScreenY(i);
-        if (y < -20 || y > height + 20) continue;
-
-        // Yard Line
-        ctx.beginPath();
-        ctx.moveTo(0, y);
-        ctx.lineTo(width, y);
-        ctx.stroke();
-
-        // Hash Marks (College Width: ~18 and ~35 yards from left)
-        const hashLeft = toScreenX(18);
-        const hashRight = toScreenX(35.3);
-        const hashSize = scale * 0.8; // Length of hash tick
-
-        ctx.lineWidth = Math.max(1, scale * 0.3);
-        ctx.beginPath();
-        // Left Hash
-        ctx.moveTo(hashLeft - hashSize, y); ctx.lineTo(hashLeft + hashSize, y);
-        // Right Hash
-        ctx.moveTo(hashRight - hashSize, y); ctx.lineTo(hashRight + hashSize, y);
-        ctx.stroke();
-        ctx.lineWidth = Math.max(1, scale * 0.15); // Reset
-
-        // Yard Numbers (Every 10 yards)
-        if (i % 10 === 0 && i !== 110 && i !== 0) {
-            const num = i <= 50 ? i : 100 - i;
-            // Draw numbers near sidelines with rotation
+        
+        // Numbers
+        if (i % 10 === 0 && i !== 0 && i !== 120 && i > 0 && i < 120) {
+            const num = i <= 60 ? i : 120 - i; // 10-50-10 logic
+            ctx.fillStyle = "rgba(255, 255, 255, 0.5)";
+            ctx.font = `bold ${yardsToPx * 0.4}px 'Inter', sans-serif`;
+            ctx.textAlign = "center";
+            ctx.textBaseline = "middle";
+            
+            // Left Number
             ctx.save();
-            ctx.translate(toScreenX(6), y);
+            ctx.translate(toScreenX(6), yStart);
             ctx.rotate(-Math.PI / 2);
             ctx.fillText(num, 0, 0);
             ctx.restore();
 
-            ctx.save();
-            ctx.translate(toScreenX(47), y);
+            // Right Number
+            ctx.translate(toScreenX(47.3), yStart);
             ctx.rotate(Math.PI / 2);
             ctx.fillText(num, 0, 0);
             ctx.restore();
         }
     }
 
-    // --- 5. LINE OF SCRIMMAGE & FIRST DOWN ---
-    const drawSpecialLine = (y, color, glow) => {
-        const sy = toScreenY(y);
-        if (sy > 0 && sy < height) {
-            ctx.shadowColor = glow;
-            ctx.shadowBlur = 10;
-            ctx.strokeStyle = color;
-            ctx.lineWidth = Math.max(2, scale * 0.4);
-            ctx.beginPath();
-            ctx.moveTo(0, sy);
-            ctx.lineTo(width, sy);
-            ctx.stroke();
-            ctx.shadowBlur = 0; // Reset
+    // --- 3. ENDZONES ---
+    const drawEndzone = (yStart, yEnd, color, text) => {
+        const sY = toScreenY(yStart);
+        const eY = toScreenY(yEnd);
+        if (sY < 0 && eY < 0) return;
+        if (sY > height && eY > height) return;
+
+        ctx.fillStyle = color;
+        const topY = Math.min(sY, eY);
+        const h = Math.abs(sY - eY);
+        ctx.fillRect(0, topY, width, h);
+        
+        // Pattern
+        ctx.save();
+        ctx.beginPath(); ctx.rect(0, topY, width, h); ctx.clip();
+        ctx.strokeStyle = "rgba(255,255,255,0.2)";
+        ctx.lineWidth = 10;
+        for(let k=-height; k<width+height; k+=60) {
+            ctx.moveTo(k, topY); ctx.lineTo(k-h, topY+h);
         }
+        ctx.stroke();
+        
+        // Text
+        ctx.translate(width/2, topY + h/2);
+        ctx.fillStyle = "rgba(255,255,255,0.8)";
+        ctx.font = `900 ${yardsToPx * 0.5}px 'Inter', sans-serif`;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.shadowColor = "black"; ctx.shadowBlur = 5;
+        ctx.fillText(text.toUpperCase(), 0, 0);
+        ctx.restore();
     };
 
-    drawSpecialLine(frameData.lineOfScrimmage, "#3b82f6", "#60a5fa"); // Blue LOS
-    drawSpecialLine(frameData.firstDownY, "#eab308", "#fde047");     // Yellow First Down
+    const homeColor = currentLiveGameResult?.homeTeam?.primaryColor || "#1d4ed8";
+    const awayColor = currentLiveGameResult?.awayTeam?.primaryColor || "#b91c1c";
+    
+    drawEndzone(0, 10, awayColor, currentLiveGameResult?.awayTeam?.name || "AWAY");
+    drawEndzone(110, 120, homeColor, currentLiveGameResult?.homeTeam?.name || "HOME");
 
-    // --- 3. DRAW PLAYERS (Safe Oval Rendering) ---
+    // --- 4. MARKERS ---
+    const drawLine = (y, color) => {
+        const sy = toScreenY(y);
+        if (sy < 0 || sy > height) return;
+        ctx.shadowColor = color; ctx.shadowBlur = 10;
+        ctx.strokeStyle = color; ctx.lineWidth = 4;
+        ctx.beginPath(); ctx.moveTo(0, sy); ctx.lineTo(width, sy); ctx.stroke();
+        ctx.shadowBlur = 0;
+    };
+    drawLine(frameData.lineOfScrimmage, "#3b82f6"); // Blue LOS
+    drawLine(frameData.firstDownY, "#eab308");      // Yellow First Down
+
+    // --- 5. DRAW PLAYERS (Big & Detailed) ---
     if (frameData.players) {
         frameData.players.forEach(p => {
             const px = toScreenX(p.x);
             const py = toScreenY(p.y);
 
-            // 1. SAFE DIMENSION CALCULATION
-            // Fallback to "Average 14yo" if data is missing/corrupt
-            const baseWeight = 140;
-            const baseHeight = 67;
+            // Calculate Size
+            // Base radius in yards (0.4 yards radius = ~2.5ft width)
+            const sizeMod = 1 + ((p.weight || 150) - 150) / 400; 
+            const radius = yardsToPx * 0.4 * sizeMod; 
 
-            // Strict check: Is p.weight a valid number? If not, use base.
-            const validWeight = (typeof p.weight === 'number' && !isNaN(p.weight)) ? p.weight : baseWeight;
-            const validHeight = (typeof p.height === 'number' && !isNaN(p.height)) ? p.height : baseHeight;
-
-            // Youth Scale Divisors (Smaller = More visible difference)
-            const widthMod = 1 + ((validWeight - baseWeight) / 150);
-            const heightMod = 1 + ((validHeight - baseHeight) / 60);
-
-            // Ensure radius is never negative or zero
-            const radiusX = Math.max(scale * 0.5, scale * widthMod);
-            const radiusY = Math.max(scale * 0.5, scale * heightMod);
-
-            // 2. DRAW SHADOW
-            ctx.fillStyle = "rgba(0,0,0,0.3)";
+            // Shadow
+            ctx.fillStyle = "rgba(0,0,0,0.4)";
             ctx.beginPath();
-            try {
-                // Try Ellipse (Modern Browsers)
-                ctx.ellipse(px, py + (radiusY * 0.5), radiusX * 0.9, radiusY * 0.25, 0, 0, Math.PI * 2);
-            } catch (e) {
-                // Fallback for very old browsers or edge cases
-                ctx.arc(px, py + (radiusY * 0.5), radiusX, 0, Math.PI * 2);
-            }
+            ctx.ellipse(px, py + radius*0.2, radius, radius*0.6, 0, 0, Math.PI*2);
             ctx.fill();
 
-            // 3. HIGHLIGHT (Ball Carrier)
-            if (p.hasBall || p.isBallCarrier) {
-                ctx.beginPath();
-                ctx.ellipse(px, py, radiusX * 1.3, radiusY * 1.3, 0, 0, Math.PI * 2);
-                ctx.fillStyle = "#FFD700";
-                ctx.fill();
-            }
-
-            // 4. JERSEY
-            ctx.beginPath();
-            ctx.ellipse(px, py, radiusX, radiusY, 0, 0, Math.PI * 2);
-            // 💡 FIX: Fallback color if primaryColor is missing (e.g., Red vs Blue default)
+            // JERSEY (Shoulders)
             ctx.fillStyle = p.primaryColor || (p.isOffense ? "#cc0000" : "#0000cc");
+            ctx.beginPath();
+            ctx.arc(px, py, radius, 0, Math.PI*2);
             ctx.fill();
-
-            // 5. OUTLINE
-            ctx.lineWidth = 2.0;
+            
+            // Outline
             ctx.strokeStyle = p.secondaryColor || "#fff";
+            ctx.lineWidth = 2;
             ctx.stroke();
 
-            // 6. NUMBER
+            // HELMET (Head)
+            ctx.fillStyle = p.secondaryColor || "#fff";
+            ctx.beginPath();
+            ctx.arc(px, py, radius * 0.5, 0, Math.PI*2);
+            ctx.fill();
+
+            // Number (on shoulders/back if visible, otherwise simpler)
+            // Just draw role/number over player
             ctx.fillStyle = "#fff";
-            const fontSize = Math.min(radiusX, radiusY) * 1.5;
-            ctx.font = `bold ${Math.max(10, fontSize)}px sans-serif`;
+            ctx.font = `bold ${radius * 0.7}px sans-serif`;
             ctx.textAlign = "center";
             ctx.textBaseline = "middle";
-            ctx.fillText(p.number || p.role.substring(0, 2), px, py);
+            ctx.shadowColor = "black"; ctx.shadowBlur = 2;
+            ctx.fillText(p.number || p.role.substring(0,1), px, py + radius * 1.4);
+            ctx.shadowBlur = 0;
 
-            // 7. STATUS ICONS
-            if (p.stunnedTicks > 0) {
-                ctx.fillStyle = "#ffff00";
-                ctx.font = `${radiusX}px sans-serif`;
-                ctx.fillText("💫", px, py - radiusY * 1.5);
+            // Highlight Carrier
+            if (p.hasBall || p.isBallCarrier) {
+                ctx.strokeStyle = "#FFD700";
+                ctx.lineWidth = 3;
+                ctx.beginPath(); ctx.arc(px, py, radius * 1.2, 0, Math.PI*2); ctx.stroke();
             }
         });
     }
 
-    // --- 6. DRAW BALL (Conditional) ---
-    // Rule: Hide ball if a player is holding it. Show it otherwise (Air, Ground, Tee).
-    let isHeld = false;
-    if (frameData.players) {
-        isHeld = frameData.players.some(p => p.hasBall || p.isBallCarrier);
-    }
-
+    // --- 6. DRAW BALL ---
+    let isHeld = frameData.players ? frameData.players.some(p => p.hasBall) : false;
+    
     if (frameData.ball && !isHeld) {
         const bx = toScreenX(frameData.ball.x);
         const by = toScreenY(frameData.ball.y);
-
-        // Ball Size calculates arc height logic (z)
-        // We simulate "height" by scaling the shadow and the ball slightly
         const bz = frameData.ball.z || 0;
-        const ballSize = scale * 0.5 * (1 + (bz * 0.1));
-        const shadowOffset = bz * scale * 2;
+        
+        // Ball grows slightly as it goes higher
+        const ballRadius = (yardsToPx * 0.25) * (1 + bz * 0.1); 
+        const shadowOffset = bz * yardsToPx * 0.5;
 
-        // Shadow (moves away as ball goes higher)
+        // Shadow
         ctx.fillStyle = "rgba(0,0,0,0.3)";
         ctx.beginPath();
-        ctx.ellipse(bx + (scale * 0.2), by + (scale * 0.2) + shadowOffset, ballSize, ballSize * 0.6, 0, 0, Math.PI * 2);
+        ctx.ellipse(bx, by + shadowOffset, ballRadius, ballRadius * 0.6, 0, 0, Math.PI*2);
         ctx.fill();
 
-        // Ball Shape (Brown football)
-        ctx.fillStyle = "#713f12";
+        // Ball
+        ctx.fillStyle = "#8B4513"; // SaddleBrown
         ctx.beginPath();
-        ctx.ellipse(bx, by, ballSize * 0.8, ballSize * 1.2, 0, 0, Math.PI * 2); // Vertical ellipse for top-down view
+        ctx.ellipse(bx, by, ballRadius * 0.7, ballRadius, 0, 0, Math.PI*2); // Vertical spiral
         ctx.fill();
-
+        
         // Laces
-        ctx.strokeStyle = "rgba(255,255,255,0.8)";
+        ctx.strokeStyle = "rgba(255,255,255,0.9)";
         ctx.lineWidth = 2;
         ctx.beginPath();
-        ctx.moveTo(bx, by - ballSize * 0.6);
-        ctx.lineTo(bx, by + ballSize * 0.6);
+        ctx.moveTo(bx, by - ballRadius * 0.6);
+        ctx.lineTo(bx, by + ballRadius * 0.6);
         ctx.stroke();
     }
 }
@@ -2918,25 +2862,35 @@ function animateQBShout(frame) {
 export function startLiveGameLoop(initialGameState, onComplete) {
     console.log("Starting Live Game Loop...");
 
-    // 💡 FIX: Safety Check
     if (!initialGameState) {
         console.error("startLiveGameLoop: Initial game state is missing/null.");
         return;
     }
 
-    // 💡 FIX: Assign to the global scope variable defined at the top
     activeLiveGame = initialGameState;
+    currentLiveGameResult = { 
+        homeTeam: activeLiveGame.homeTeam, 
+        awayTeam: activeLiveGame.awayTeam,
+        visualizationFrames: [] // Stub for visualizer
+    }; 
+    
     liveGameCallback = onComplete;
     isSkipping = false;
 
-    // Reset Scoreboard UI
+    // Reset UI
     const ticker = elements.simPlayLog;
     if (ticker) ticker.innerHTML = '';
     
-    // Initial UI Update
+    // IMPORTANT: Sync log index to current log length
+    // If the game object already has "Coin toss" in it, we want to print that.
+    liveGameCurrentIndex = 0; 
+    
     updateLiveScoreboard();
+    
+    // Initial Render of logs
+    flushLiveLogs(); 
 
-    // Start the first step
+    // Start Step
     runLiveGameStep();
 }
 
@@ -2947,67 +2901,71 @@ export function startLiveGameLoop(initialGameState, onComplete) {
 // js/ui.js
 
 function runLiveGameStep() {
-    // 💡 FIX: Check if variable exists
-    if (!activeLiveGame) {
-        console.warn("runLiveGameStep: activeLiveGame is null. Stopping loop.");
-        return;
-    }
+    if (!activeLiveGame) return;
 
-    // 1. Check End Condition (Game Over or Halftime safety break)
+    // 1. End Check
     if (activeLiveGame.isGameOver || activeLiveGame.drivesThisHalf > 30) { 
         finishLiveGame();
         return;
     }
 
-    // 2. CALCULATE PLAY (Call Game.js)
-    // 💡 FIX: Wrap in try/catch to prevent UI freezing if Game.js crashes
+    // 2. Run Physics Step
     let stepResult;
     try {
         stepResult = Game.simulateLivePlayStep(activeLiveGame);
     } catch (e) {
-        console.error("CRITICAL: Game Simulation Crash", e);
+        console.error("Game Sim Crash:", e);
         finishLiveGame();
         return;
     }
 
-    // 3. Safety Check on Result
-    if (!stepResult || !stepResult.playResult) {
-        console.error("runLiveGameStep: Invalid step result received.");
-        return;
-    }
-
-    // 4. UPDATE UI
+    // 3. UI Update
     updateLiveScoreboard();
-    if (stepResult.playResult.logEntry) {
-        addLiveLogEntry(stepResult.playResult.logEntry);
-    }
     
-    // Update the Player Roster UI (Fatigue bars) - using the first frame of animation
+    // 💡 NEW LOGGING LOGIC: Flush any new lines added to game.gameLog
+    flushLiveLogs(); 
+
+    // Update Sidebars (Fatigue/Stats) using the first frame of the new data
     if (stepResult.visualizationFrames && stepResult.visualizationFrames.length > 0) {
         renderSimPlayers(stepResult.visualizationFrames[0]);
+        // Also update live stats box if available
+        renderLiveStatsLive(); // Uncomment if you have this function
     }
 
-    // 5. ANIMATE OR SKIP
+    // 4. Animate
     if (stepResult.visualizationFrames && stepResult.visualizationFrames.length > 0) {
         playVisualization(stepResult.visualizationFrames, () => {
-            // -- Animation Complete Callback --
-            
             if (isSkipping) {
-                runLiveGameStep(); // Run next immediately
+                runLiveGameStep(); 
             } else {
-                // HUDDLE DELAY
-                // Fast for extra points (1s), Normal for plays (3.5s)
                 const delay = activeLiveGame.isConversionAttempt ? 1000 : 3500;
-                
-                // Clear any existing timeout just in case
                 if (huddleTimeout) clearTimeout(huddleTimeout);
-                
                 huddleTimeout = setTimeout(runLiveGameStep, delay);
             }
         });
     } else {
-        // No frames generated (rare, e.g. timeouts or errors) -> Just continue
         setTimeout(runLiveGameStep, 500);
+    }
+}
+
+/**
+ * Helper to print any new lines from the game state log to the UI.
+ */
+function flushLiveLogs() {
+    if (!activeLiveGame || !activeLiveGame.gameLog) return;
+    
+    const fullLog = activeLiveGame.gameLog;
+    
+    // If we have new entries
+    if (fullLog.length > liveGameCurrentIndex) {
+        const newEntries = fullLog.slice(liveGameCurrentIndex);
+        
+        newEntries.forEach(entry => {
+            addLiveLogEntry(entry);
+        });
+        
+        // Update tracker
+        liveGameCurrentIndex = fullLog.length;
     }
 }
 
