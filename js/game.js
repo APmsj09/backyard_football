@@ -4635,7 +4635,7 @@ function simulateLivePlayStep(game) {
  * Used for simulating the rest of the league instantly.
  * No visualization frames, no delays. Pure stats.
  */
-export function simulateMatchFast(homeTeam, awayTeam) {
+function simulateMatchFast(homeTeam, awayTeam) {
     // 1. Validation
     if (!homeTeam || !awayTeam || !homeTeam.roster || !awayTeam.roster) {
         console.error("simulateMatchFast: Invalid team data.");
