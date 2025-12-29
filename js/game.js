@@ -1356,438 +1356,262 @@ function resolveDepthForPlay(offense, defense) {
  */
 function setupInitialPlayerStates(playState, offense, defense, play, assignments, ballOnYardLine, defensivePlayKey, ballHash = 'M', offensivePlayKey = '') {
     playState.activePlayers = [];
-    const usedPlayerIds_O = new Set();
-    const usedPlayerIds_D = new Set();
     const isPlayAction = offensivePlayKey.includes('PA_');
 
-    // --- Normalize play intent onto playState (snap boundary) ---
+    // --- 1. NORMALIZE PLAY INTENT ---
     playState.type = play.type;
     playState.readProgression = play.readProgression || [];
     playState.playKey = play.key || null;
 
-    // --- FIX: Robust Defensive Play Lookup ---
+    // --- 2. DEFENSIVE PLAY LOOKUP (Robust Fallback) ---
     let defPlay = defensivePlaybook[defensivePlayKey];
-
-    // Fallback 1: Try a default safe zone
-    if (!defPlay) defPlay = defensivePlaybook['Cover_2_Zone_3-1-3'];
-
-    // Fallback 2: Hardcoded safety object if playbook is broken
     if (!defPlay) {
-        console.warn(`Defensive play key '${defensivePlayKey}' invalid and default missing. Using empty shell.`);
-        defPlay = { name: 'Emergency Default', assignments: {} };
+        console.warn(`Defensive play key '${defensivePlayKey}' invalid. Defaulting to Cover 2.`);
+        defPlay = defensivePlaybook['Cover_2_Zone_3-1-3'] || { name: 'Emergency Default', assignments: {} };
     }
-
     const defAssignments = defPlay.assignments || {};
 
-    // --- Ensure Depth is Resolved ---
-    if (!playState.resolvedDepth) {
-        playState.resolvedDepth = resolveDepthForPlay(offense, defense);
-    }
-
-    // Tracking Logic
-    playState.defensiveCall = {
-        key: defensivePlayKey,
-        name: defPlay.name || 'Unknown',
-        concept: defPlay.concept || 'Zone',
-        isCover1: defensivePlayKey?.includes('Cover_1') || false,
-        isCover2: defensivePlayKey?.includes('Cover_2') || false,
-        isCover3: defensivePlayKey?.includes('Cover_3') || false,
-        isCover4: defensivePlayKey?.includes('Cover_4') || false,
-        hasBlitz: defPlay.blitz === true,
-        assignments: defAssignments
-    };
-
-    // Set the line of scrimmage
+    // --- 3. FIELD SETUP ---
     playState.lineOfScrimmage = ballOnYardLine + 10;
     let ballX = CENTER_X;
     if (ballHash === 'L') ballX = HASH_LEFT_X;
     else if (ballHash === 'R') ballX = HASH_RIGHT_X;
 
-    // --- STEP 1: Calculate initial OFFENSIVE positions FIRST ---
+    // --- 4. PRE-CALCULATE OFFENSIVE POSITIONS ---
+    // We need to know where the Offense IS so the Defense can line up properly.
     const offenseFormationData = offenseFormations[offense.formations.offense];
     const initialOffenseStates = [];
 
-    if (offenseFormationData?.slots && offenseFormationData?.coordinates) {
+    if (offenseFormationData?.slots) {
         offenseFormationData.slots.forEach(slot => {
             const relCoords = offenseFormationData.coordinates[slot] || [0, 0];
             let startX = ballX + relCoords[0];
             let startY = playState.lineOfScrimmage + relCoords[1];
-            startX = Math.max(0.5, Math.min(FIELD_WIDTH - 0.5, startX));
-            startY = Math.max(10.5, Math.min(FIELD_LENGTH - 10.5, startY));
+            
+            // Clamp to field
+            startX = Math.max(0.5, Math.min(53.3 - 0.5, startX));
+            startY = Math.max(10.5, Math.min(110.0 - 0.5, startY));
 
-            // We need to temporarily resolve ID here to help Defense setup logic
-            const pid = playState.resolvedDepth.offense[slot];
-            initialOffenseStates.push({ slot, x: startX, y: startY, id: pid });
+            initialOffenseStates.push({ slot, x: startX, y: startY });
         });
     }
 
-    // --- Helper function to set up players for one side ---
-    const setupSide = (team, side, formationData, isOffense, initialOffenseStates) => {
-        if (!team || !team.roster || !formationData || !formationData.slots || !formationData.coordinates) {
-            console.error(`setupInitialPlayerStates: Invalid data for ${side} team ${team?.name}`);
-            return;
-        }
+    // --- 5. HELPER: SETUP SIDE ---
+    const setupSide = (team, side, formationData, isOffense) => {
+        if (!team || !formationData) return;
 
+        // Sort slots (Line first, then QBs, then skill)
         const sortedSlots = [...formationData.slots].sort((a, b) => {
-            if (a.startsWith('QB')) return -1;
-            if (b.startsWith('QB')) return 1;
             if (a.startsWith('C') || a.startsWith('OL')) return -1;
-            if (b.startsWith('C') || b.startsWith('OL')) return 1;
+            if (a.startsWith('QB')) return -1;
             return 0;
         });
 
-        const coveredManTargets = new Set();
+        // Track who is covered to prevent unintentional double teams
+        const coveredOffensiveSlots = new Set();
 
-        // 💡 DEFINE STAR STOPPER VARIABLES HERE TO PREVENT REFERENCE ERRORS
-        let doubleTeamTargetSlot = null;
-        let doubleTeamDefenderSlot = null;
-
-        // Loop through slots and create player states
         sortedSlots.forEach(slot => {
-            let action = 'idle';
-            let assignment = isOffense ? (assignments?.[slot]) : (defAssignments[slot] || 'def_read');
-            let targetX = 0;
-            let targetY = 0;
-            let routePath = null;
-            let assignedPlayerId = null;
-
-            // 💡 FIX: Define these outside the QB check so they are available for pState
-            let readProgression = [];
-            let currentReadTargetSlot = null;
-            let ticksOnCurrentRead = 0;
-
-            // --- A. Find Player ID from Resolved Depth ---
+            // Get Player ID from Depth Chart
+            if (!playState.resolvedDepth) playState.resolvedDepth = resolveDepthForPlay(offense, defense);
             const playerId = playState.resolvedDepth[side]?.[slot];
             const player = getRosterObjects(team).find(p => p.id === playerId);
+            if (!player) return;
 
-            if (!player) return; // Skip empty slots
-
-            // Initial Coords
+            // Initial Coordinates
             const relCoords = formationData.coordinates[slot] || [0, 0];
             let startX = ballX + relCoords[0];
             let startY = playState.lineOfScrimmage + relCoords[1];
 
-            // --- B. Determine Alignment and Action ---
+            let action = 'idle';
+            let assignment = isOffense ? assignments?.[slot] : defAssignments[slot];
+            let targetX = startX;
+            let targetY = startY;
+            let routePath = null;
+            let readProgression = [];
+            
+            // --- A. OFFENSE SETUP ---
             if (isOffense) {
-                assignment = assignments?.[slot];
-                if (assignment) {
-                    if (assignment.toLowerCase() === 'punt') {
-                        action = 'punt_kick';
-                        targetY = startY - 2;
+                if (slot.startsWith('QB')) {
+                    if (play.type === 'punt') {
+                        assignment = 'punt'; action = 'punt_kick'; targetY = startY - 5;
+                    } else if (play.type === 'run') {
+                        assignment = 'run_fake'; action = 'run_fake'; // Holds QB in place
+                    } else {
+                        assignment = 'qb_setup'; action = 'qb_setup'; targetY = startY - 2;
+                        // Init QB Reads
+                        const rawReads = play.readProgression || [];
+                        readProgression = rawReads.length > 0 ? [...rawReads] : ['WR1', 'WR2', 'TE1', 'RB1'];
                     }
-                    else if (assignment.toLowerCase().includes('pass_block')) { action = 'pass_block'; targetY = startY - 0.5; }
-                    else if (assignment.toLowerCase().includes('run_block')) { action = 'run_block'; targetY = startY + 0.5; }
-                    else if (assignment.toLowerCase().includes('run_')) {
-                        action = 'run_path'; targetY = startY + 5;
-                        if (assignment.includes('outside')) targetX = startX + (startX < CENTER_X ? -2 : 2); else targetX = startX + getRandomInt(-1, 1);
-                    } else if (routeTree[assignment]) {
+                } 
+                else if (slot.startsWith('OL')) {
+                    assignment = (play.type === 'pass' && !isPlayAction) ? 'pass_block' : 'run_block';
+                    action = assignment;
+                    targetY = startY + (action === 'pass_block' ? -0.5 : 0.5);
+                } 
+                else if (assignment) {
+                    // Skill Position Assignments
+                    if (assignment.includes('block')) { 
+                        action = assignment; 
+                        targetY = startY + 0.5; 
+                    } 
+                    else if (assignment.includes('run_')) { 
+                        action = 'run_path'; 
+                        targetY = startY + 5; // Default run target
+                    } 
+                    else if (routeTree[assignment]) { 
                         action = 'run_route';
                         routePath = calculateRoutePath(assignment, startX, startY);
-                        if (routePath && routePath.length > 0) { targetX = routePath[0].x; targetY = routePath[0].y; }
-                    }
-                } else if (slot.startsWith('OL')) {
-                    assignment = playState.type === 'pass' ? 'pass_block' : 'run_block';
-
-                    if (isPlayAction && assignment === 'pass_block') {
-                        action = 'run_block';
-                    } else {
-                        action = assignment;
-                    }
-                    targetY = startY + (action === 'pass_block' ? -0.5 : 0.5);
-                } else if (slot.startsWith('QB')) {
-                    if (play.type === 'punt') {
-                        assignment = 'punt';
-                        action = 'punt_kick';
-                        targetY = startY - 5;
-                        targetX = startX;
-                    }
-                    else {
-                        assignment = 'qb_setup';
-                        action = assignment;
-                        if (play.type === 'pass') {
-                            targetY = startY - 2;
-                            const rawReads = play.readProgression || [];
-                            readProgression = rawReads.length > 0 ? [...rawReads] : ['WR1', 'WR2', 'RB1', 'WR3'];
-                            currentReadTargetSlot = readProgression[0];
-                        }
+                        if (routePath.length) { targetX = routePath[0].x; targetY = routePath[0].y; }
                     }
                 }
-                else {
-                    if (play.type === 'run') {
-                        assignment = 'run_block';
-                        action = 'run_block';
-                        targetY = startY + 0.5;
-                    } else {
-                        assignment = 'idle';
-                        action = 'idle';
-                    }
-                }
-
-            } else { // Defense
-                assignment = defAssignments[slot];
-
-                // 💡 CRITICAL FIX: Validate man_cover assignments exist in formation
-                if (assignment && assignment.startsWith('man_cover_')) {
-                    const targetName = assignment.replace('man_cover_', '');
-                    // Check if this receiver actually exists in the offense formation
-                    const receiverExists = initialOffenseStates.some(o => o.slot === targetName);
-                    if (!receiverExists) {
-                        const availableThreats = ['WR1', 'WR2', 'WR3', 'RB1', 'RB2'].filter(t =>
-                            initialOffenseStates.some(o => o.slot === t) && !coveredManTargets.has(t)
-                        );
-                        if (availableThreats.length > 0) {
-                            assignment = `man_cover_${availableThreats[0]}`;
-                        } else {
-                            assignment = 'zone_hook_curl_middle';
-                        }
-                    }
-                    coveredManTargets.add(assignment.replace('man_cover_', ''));
-                }
-
-                if (assignment && assignment.startsWith('man_cover_')) {
-                    const targetSlot = assignment.replace('man_cover_', '');
-                    const targetPlayer = initialOffenseStates.find(o => o.slot === targetSlot);
-                    if (targetPlayer) {
-                        assignedPlayerId = targetPlayer.id;
-                    } else {
-                        assignedPlayerId = null;
-                    }
-                }
-
+            } 
+            
+            // --- B. DEFENSE SETUP (The Threat Board Logic) ---
+            else {
+                // If assignment missing, default based on position
                 if (!assignment) {
-                    if (slot.startsWith('DL')) {
-                        assignment = 'run_gap_A';
-                    }
-                    else if (slot.startsWith('DB')) {
-                        const availableThreats = ['WR1', 'WR2', 'WR3', 'RB1', 'RB2'].filter(t =>
-                            initialOffenseStates.some(o => o.slot === t) && !coveredManTargets.has(t)
+                    if (slot.startsWith('DL')) assignment = 'run_gap_A';
+                    else if (slot.startsWith('LB')) assignment = 'def_read'; // Will turn into zone/man
+                    else if (slot.startsWith('DB')) assignment = 'zone_deep_middle';
+                }
+
+                // 1. INTELLIGENT MAN MATCHING
+                // If assigned 'man_cover_X', verify X exists. If not, find new target.
+                // If assigned 'def_read', find an uncovered target.
+                if (assignment.startsWith('man_cover_') || assignment === 'def_read') {
+                    
+                    let targetSlot = assignment.replace('man_cover_', '');
+                    
+                    // If target doesn't exist or vague assignment, find OPEN threat
+                    const targetExists = initialOffenseStates.some(o => o.slot === targetSlot);
+                    
+                    if (!targetExists || assignment === 'def_read') {
+                        // Priority list for this position type
+                        let priorities = [];
+                        if (slot.startsWith('DB')) priorities = ['WR1', 'WR2', 'WR3', 'TE1', 'RB1'];
+                        else if (slot.startsWith('LB')) priorities = ['RB1', 'TE1', 'RB2', 'WR3'];
+                        else priorities = ['RB1'];
+
+                        // Find first priority that isn't covered yet
+                        const bestTarget = priorities.find(t => 
+                            initialOffenseStates.some(o => o.slot === t) && !coveredOffensiveSlots.has(t)
                         );
-                        const bestTarget = availableThreats[0];
+
                         if (bestTarget) {
                             assignment = `man_cover_${bestTarget}`;
-                            coveredManTargets.add(bestTarget);
+                            targetSlot = bestTarget;
                         } else {
-                            assignment = 'zone_deep_middle';
+                            // No one left to cover? Zone Fallback.
+                            assignment = slot.startsWith('DB') ? 'zone_deep_halves' : 'zone_hook_curl_middle';
                         }
                     }
-                    else if (slot.startsWith('LB')) {
-                        const lbThreats = ['RB1', 'WR3', 'RB2'].filter(t =>
-                            initialOffenseStates.some(o => o.slot === t) && !coveredManTargets.has(t)
-                        );
-                        const lbTarget = lbThreats[0];
-                        if (lbTarget) {
-                            assignment = `man_cover_${lbTarget}`;
-                            coveredManTargets.add(lbTarget);
-                        } else {
-                            assignment = 'spy_QB';
-                        }
-                    }
-                    else {
-                        assignment = 'def_read';
+                    
+                    // Mark target as covered
+                    if (assignment.startsWith('man_cover_')) {
+                        coveredOffensiveSlots.add(targetSlot);
                     }
                 }
 
                 action = assignment;
 
-                if (assignment.toLowerCase() === 'punt_return') {
-                    action = 'punt_return';
-                    targetY = startY;
-                    targetX = startX;
-                }
-
-                // --- 🛡️ APPLY DOUBLE TEAM OVERRIDE ---
-                if (!isOffense && slot === doubleTeamDefenderSlot && doubleTeamTargetSlot) {
-                    assignment = `man_cover_${doubleTeamTargetSlot}`;
-                }
-
-                // 1. Man Coverage
+                // 2. Set Initial Stance based on Assignment
                 if (assignment.startsWith('man_cover_')) {
-                    const targetSlot = assignment.split('man_cover_')[1];
-                    const targetOffPlayer = initialOffenseStates.find(o => o.slot === targetSlot);
-
-                    if (targetOffPlayer) {
-                        let xOffset, yOffset;
-
-                        if (targetSlot.includes('SLOT') || targetSlot === 'RB') {
-                            xOffset = targetOffPlayer.x < CENTER_X ? 0.3 : -0.3;
-                            yOffset = 0.2;
-                        } else if (targetSlot.includes('WR') || targetSlot === 'WR1' || targetSlot === 'WR2' || targetSlot === 'WR3') {
-                            xOffset = targetOffPlayer.x < CENTER_X ? 0.8 : -0.8;
-                            yOffset = 0.5;
-                        } else if (targetSlot.includes('TE') || targetSlot === 'TE') {
-                            xOffset = targetOffPlayer.x < CENTER_X ? 1.0 : -1.0;
-                            yOffset = 0.7;
-                        } else {
-                            xOffset = targetOffPlayer.x < CENTER_X ? 0.8 : -0.8;
-                            yOffset = 0.5;
-                        }
-
-                        startX = targetOffPlayer.x + xOffset;
-                        startY = targetOffPlayer.y + yOffset;
-                        targetX = startX; targetY = startY;
-                        assignedPlayerId = targetOffPlayer.id;
-                    } else {
-                        const zoneCenter = getZoneCenter('zone_hook_curl_middle', playState.lineOfScrimmage);
-                        targetX = zoneCenter.x; targetY = zoneCenter.y;
+                    const tSlot = assignment.split('_')[2];
+                    const tState = initialOffenseStates.find(o => o.slot === tSlot);
+                    if (tState) {
+                        // Align 2 yards off the receiver
+                        // Inside leverage for slot, Outside for wide
+                        const isSlot = tSlot.includes('TE') || tSlot === 'WR3';
+                        const xOffset = (tState.x < CENTER_X) ? (isSlot ? 1.0 : -0.5) : (isSlot ? -1.0 : 0.5);
+                        
+                        startX = tState.x + xOffset;
+                        startY = tState.y + 2.0; 
+                        targetX = tState.x;
+                        targetY = tState.y;
                     }
-                }
-                // 2. Zone Coverage
+                } 
                 else if (assignment.startsWith('zone_')) {
-                    const zoneTarget = getZoneCenter(assignment, playState.lineOfScrimmage);
-                    targetX = zoneTarget.x;
-                    targetY = zoneTarget.y;
-                    if (assignment.includes('deep') && startY < zoneTarget.y - 5) {
-                        startY = zoneTarget.y;
-                        startX = zoneTarget.x;
-                    } else {
-                        if (slot.startsWith('DB')) {
-                            const wideOffset = startX < CENTER_X ? -2 : 2;
-                            startX += wideOffset;
-                            startY = Math.min(playState.lineOfScrimmage + 1.0, startY);
-                        }
-                    }
-                }
-                // 3. Run/Blitz
-                else if (assignment.includes('run_gap_') || assignment.includes('blitz_gap') || assignment.includes('blitz_edge')) {
-                    const gapTarget = zoneBoundaries[assignment];
-                    if (gapTarget) {
-                        targetX = ballX + (gapTarget.xOffset || 0);
-                        targetY = playState.lineOfScrimmage + (gapTarget.yOffset || 1.0);
-                    } else {
-                        targetX = ballX;
-                        targetY = playState.lineOfScrimmage + 1.0;
-                    }
-                    if (slot.startsWith('DL')) {
-                        startY = Math.min(startY, playState.lineOfScrimmage + 2.5);
-                    }
+                    // Zones are static points on field
+                    // We let the AI move them there, but start them generally correct
+                    if (assignment.includes('deep')) startY = Math.max(startY, playState.lineOfScrimmage + 8);
                 }
             }
 
-            // --- Clamp final starting position ---
-            startX = Math.max(0.5, Math.min(FIELD_WIDTH - 0.5, startX));
-            startY = Math.max(10.5, Math.min(FIELD_LENGTH - 10.5, startY));
+            // --- 6. CLAMP & SPAWN ---
+            startX = Math.max(0.5, Math.min(53.3 - 0.5, startX));
+            startY = Math.max(10.5, Math.min(110.0 - 10.5, startY));
+            
+            // Neutral Zone Enforcement
+            if (!isOffense && startY < playState.lineOfScrimmage + 1.0) startY = playState.lineOfScrimmage + 1.0;
+            if (isOffense && startY > playState.lineOfScrimmage - 0.5) startY = playState.lineOfScrimmage - 0.5;
 
-            // --- NEUTRAL ZONE CLAMP ---
-            const LOS = playState.lineOfScrimmage;
-            const NEUTRAL_ZONE_WIDTH = 1.0;
-
-            if (!isOffense) {
-                let attempts = 0;
-                let isStacked = playState.activePlayers.some(p => !p.isOffense && p.x === startX && p.y === startY);
-
-                while (isStacked && attempts < 10) {
-                    startX += (Math.random() < 0.5 ? -0.5 : 0.5);
-                    isStacked = playState.activePlayers.some(p => !p.isOffense && p.x === startX && p.y === startY);
-                    attempts++;
-                }
-                if (slot.startsWith('DL')) {
-                    startY = LOS + NEUTRAL_ZONE_WIDTH;
-                } else {
-                    startY = Math.max(LOS + NEUTRAL_ZONE_WIDTH, startY);
-                }
-            } else {
-                if (slot.startsWith('OL')) {
-                    startY = LOS;
-                } else {
-                    startY = Math.min(LOS, startY);
-                }
-            }
-
-            const fatigueRatio = player ? (player.fatigue / (player.attributes?.physical?.stamina || 50)) : 0;
-            const fatigueModifier = Math.max(0.3, 1.0 - fatigueRatio);
-
-            let zoneCenter = null;
-            if (!isOffense && assignment && assignment.startsWith('zone_')) {
-                zoneCenter = getZoneCenter(assignment, playState.lineOfScrimmage);
-            }
+            // RPG Attributes
+            const fatigueRatio = player.fatigue / (player.attributes?.physical?.stamina || 50);
+            const fatigueMod = Math.max(0.3, 1.0 - fatigueRatio);
 
             const pState = {
                 id: player.id, name: player.name, number: player.number,
-                role: slot.replace(/\d+/g, ''),
-                teamId: team.id, primaryColor: team.primaryColor, secondaryColor: team.secondaryColor,
+                role: slot.replace(/\d+/g, ''), teamId: team.id,
                 isOffense: isOffense, slot: slot,
                 x: startX, y: startY, initialX: startX, initialY: startY,
                 targetX: targetX, targetY: targetY,
+                
+                // Stats Cache
                 speed: player.attributes.physical?.speed || 50,
-                strength: player.attributes.physical?.strength || 50,
                 agility: player.attributes.physical?.agility || 50,
-                weight: player.attributes.physical?.weight || 200,
-                height: player.attributes.physical?.height || 70,
-                clutch: player.attributes.mental?.clutch || 50,
-                blocking: player.attributes.technical?.blocking || 50,
-                blockShedding: player.attributes.technical?.blockShedding || 50,
-                tackling: player.attributes.technical?.tackling || 50,
-                catchingHands: player.attributes.technical?.catchingHands || 50,
-                throwingAccuracy: player.attributes.technical?.throwingAccuracy || 50,
+                strength: player.attributes.physical?.strength || 50,
                 playbookIQ: player.attributes.mental?.playbookIQ || 50,
-                toughness: player.attributes.mental?.toughness || 50,
-                consistency: player.attributes.mental?.consistency || 50,
-                fatigueModifier: fatigueModifier,
+                fatigueModifier: fatigueMod,
+
+                // Logic State
                 action: action,
                 assignment: assignment,
-                cachedZoneCenter: zoneCenter,
                 routePath: routePath,
                 currentPathIndex: 0,
+                
+                // QB Specific
                 readProgression: readProgression,
-                currentReadTargetSlot: currentReadTargetSlot,
-                ticksOnCurrentRead: ticksOnCurrentRead,
-                engagedWith: null,
-                isBlocked: false,
-                blockedBy: null,
-                isEngaged: false,
-                isBallCarrier: false,
-                hasBall: false,
-                stunnedTicks: 0,
-                assignedPlayerId: assignedPlayerId
+                currentReadTargetSlot: readProgression[0] || null,
+                ticksOnCurrentRead: 0,
+
+                // Physics State
+                vx: 0, vy: 0,
+                isEngaged: false, engagedWith: null,
+                isBlocked: false, blockedBy: null,
+                hasBall: false, isBallCarrier: false,
+                stunnedTicks: 0
             };
 
             playState.activePlayers.push(pState);
         });
     };
 
-    // --- Execute Setup ---
+    // --- 7. RUN SETUP ---
     const defenseFormationData = defenseFormations[defense.formations.defense] || defenseFormations['3-1-3'];
-    setupSide(offense, 'offense', offenseFormationData, true, initialOffenseStates);
-    setupSide(defense, 'defense', defenseFormationData, false, initialOffenseStates);
+    setupSide(offense, 'offense', offenseFormationData, true);
+    setupSide(defense, 'defense', defenseFormationData, false);
 
-    // --- Set Initial Ball Position & Carrier ---
-    const qbState = playState.activePlayers.find(
-        p => p.isOffense && p.slot.startsWith('QB')
-    );
+    // --- 8. INITIALIZE BALL ---
+    const qbState = playState.activePlayers.find(p => p.slot === 'QB1' && p.isOffense);
     const rbState = playState.activePlayers.find(p => p.slot === 'RB1' && p.isOffense);
+    
+    // Default Ball State
+    playState.ballState.x = qbState ? qbState.x : CENTER_X;
+    playState.ballState.y = qbState ? qbState.y : playState.lineOfScrimmage;
+    playState.ballState.z = 1.0;
 
-    const isQBRun = qbState && assignments[qbState.slot]?.includes('run_');
-    const isRBRun = rbState && assignments[rbState.slot]?.includes('run_');
-
-    if (play.type === 'run' && isRBRun && !isQBRun) {
-        if (rbState) {
-            rbState.hasBall = true;
-            rbState.isBallCarrier = true;
-            playState.ballState.x = rbState.x;
-            playState.ballState.y = rbState.y;
-            playState.ballState.z = 1.0;
-        }
-        if (qbState) { qbState.action = 'run_fake'; }
+    // Give ball to correct person based on play type
+    if (play.type === 'run' && rbState && !assignments['QB1']?.includes('run_')) {
+        // Direct Handoff / Sim Handoff
+        rbState.hasBall = true;
+        rbState.isBallCarrier = true;
+        playState.ballState.x = rbState.x;
+        playState.ballState.y = rbState.y;
+        if (qbState) qbState.action = 'run_fake';
     } else if (qbState) {
+        // QB Pass or QB Run
         qbState.hasBall = true;
-        playState.ballState.x = qbState.x;
-        playState.ballState.y = qbState.y;
-        playState.ballState.z = 1.0;
-
-        qbState.isBallCarrier = !!isQBRun;
-
-        if (play.type === 'punt') {
-            qbState.isBallCarrier = false;
-            const playReads = play.readProgression || [];
-            let finalProgression = playReads.length > 0 ? [...playReads] : ['WR1', 'WR2', 'RB1'];
-            qbState.readProgression = finalProgression;
-            qbState.currentReadTargetSlot = finalProgression[0];
-            qbState.ticksOnCurrentRead = 0;
-        }
-    } else {
-        console.error("CRITICAL: QB not found during setup! Ending play.");
-        playState.playIsLive = false;
-        playState.turnover = true;
+        qbState.isBallCarrier = (play.type === 'run'); // Only carrier on designated QB runs
     }
 }
 
@@ -2961,32 +2785,46 @@ function resolveOngoingBlocks(playState, gameLog) {
  * Corrected: Helper functions defined BEFORE use to prevent crashes.
  */
 function updateQBDecision(qbState, offenseStates, defenseStates, playState, offensiveAssignments, gameLog) {
-
+    
     // --- 0. VALIDATION CHECKS ---
     if (!qbState || !qbState.hasBall || playState.ballState.inAir) return;
-
-    // 🛑 STOP: If already tackled/engaged, DO NOT THROW.
     if (qbState.isEngaged || qbState.stunnedTicks > 0) return;
 
     // Get Attributes
-    const qbPlayer = getPlayer(qbState.id);
+    const qbPlayer = getPlayer(qbState.id); 
     const qbAttrs = qbPlayer?.attributes || { mental: { playbookIQ: 50 }, physical: { agility: 50, strength: 50 }, technical: { throwingAccuracy: 50 } };
-
+    
     const qbIQ = Math.max(20, Math.min(99, qbAttrs.mental?.playbookIQ ?? 50));
     const qbAgility = qbAttrs.physical?.agility || 50;
     const qbStrength = qbAttrs.physical?.strength || 50;
     const qbAcc = qbAttrs.technical?.throwingAccuracy || 50;
 
-    // Ensure Progression
-    const progression = Array.isArray(qbState.readProgression) && qbState.readProgression.length > 0
-        ? qbState.readProgression
-        : offenseStates.filter(p => p.slot.startsWith('WR') || p.slot.startsWith('RB')).map(p => p.slot);
+    // --- 1. BUILD PROGRESSION (The Fix) ---
+    // Ensure we don't look at RBs first. 
+    // Sort Order: WRs -> TEs -> RBs
+    if (!qbState.readProgression || qbState.readProgression.length === 0) {
+        qbState.readProgression = offenseStates
+            .filter(p => p.slot !== 'QB1' && (p.action.includes('route') || p.action === 'idle'))
+            .sort((a, b) => {
+                // Assign priorities
+                const getPriority = (slot) => {
+                    if (slot.startsWith('WR')) return 1;
+                    if (slot.startsWith('TE')) return 2;
+                    if (slot.startsWith('RB')) return 3; // Look at RBs last
+                    return 4;
+                };
+                return getPriority(a.slot) - getPriority(b.slot);
+            })
+            .map(p => p.slot);
+    }
+    
+    const progression = qbState.readProgression;
 
     if (typeof qbState.ticksOnCurrentRead === 'undefined') qbState.ticksOnCurrentRead = 0;
     if (typeof qbState.currentReadTargetSlot === 'undefined') qbState.currentReadTargetSlot = progression[0];
 
 
-    // --- 1. HELPER: GEOMETRIC TARGET ANALYSIS ---
+    // --- 2. HELPER: GEOMETRIC TARGET ANALYSIS ---
     const getTargetInfo = (slot) => {
         if (!slot) return null;
         const recState = offenseStates.find(r => r.slot === slot);
@@ -2998,34 +2836,34 @@ function updateQBDecision(qbState, offenseStates, defenseStates, playState, offe
         defenseStates.forEach(d => {
             if (!d.isBlocked && !d.isEngaged && d.stunnedTicks === 0) {
                 let dist = getDistance(recState, d);
-                // Undercut Check
+                
+                // Undercut Check (Defender between QB and WR)
                 const distDefenderToQB = getDistance(qbState, d);
                 if (distDefenderToQB < distFromQB - 1.0) {
                     const area = Math.abs((d.x - qbState.x) * (recState.y - qbState.y) - (d.y - qbState.y) * (recState.x - qbState.x));
-                    const distToLane = area / distFromQB;
-                    if (distToLane < 1.5) dist = 0.0;
+                    const distToLane = area / distFromQB; 
+                    if (distToLane < 1.5) dist = 0.0; // Lane blocked
                 }
-                if (recState.action === 'run_route' && d.y < recState.y - 1.0 && dist > 0.1) dist += 2.0;
+                
+                // Trailing Bonus
+                if (recState.action === 'run_route' && d.y < recState.y - 1.0 && dist > 0.1) dist += 2.0; 
+                
                 if (dist < minSeparation) minSeparation = dist;
             }
         });
         return { state: recState, separation: minSeparation, distFromQB };
     };
 
-    // --- 2. ASSESS PRESSURE (CRITICAL FIX) ---
-    const pressureDefender = defenseStates.find(d => !d.isBlocked && !d.isEngaged && getDistance(qbState, d) < 5.0);
+    // --- 3. ASSESS PRESSURE ---
+    // Pressure only counts if they are REALLY close (4.5 yds)
+    const pressureDefender = defenseStates.find(d => !d.isBlocked && !d.isEngaged && getDistance(qbState, d) < 4.5);
     const isPressured = !!pressureDefender;
     const imminentSackDefender = isPressured && getDistance(qbState, pressureDefender) < 2.0;
 
-    // 🛑 CRITICAL FIX: TOO LATE TO THROW
-    // If defender is literally touching (1.0 yd), stop processing. 
-    // This prevents the "Teleport-Throw" bug. The physics loop will register the sack in the next millisecond.
-    if (isPressured && getDistance(qbState, pressureDefender) < 1.2) {
-        // Optional: Tuck ball animation logic here
-        return;
-    }
+    // Sack Prevention (Stop Teleporting)
+    if (isPressured && getDistance(qbState, pressureDefender) < 1.2) return; 
 
-    // --- 3. SCRAMBLE DRILL (Run n Gun) ---
+    // --- 4. SCRAMBLE DRILL ---
     if (qbState.action === 'qb_scramble') {
         const allReceivers = offenseStates.filter(p => p.slot !== 'QB1' && p.action.includes('route'));
         let bestTarget = null;
@@ -3040,17 +2878,15 @@ function updateQBDecision(qbState, offenseStates, defenseStates, playState, offe
             }
         });
 
-        if (bestTarget && bestScore > 15) {
+        if (bestTarget && bestScore > 15) { 
             const onTheRunMod = (qbAgility / 100) * 0.9;
             executeThrow(qbState, bestTarget, qbStrength, qbAcc * onTheRunMod, playState, gameLog, "Throw on Run");
             return;
-        } else {
-            return; // Keep running
-        }
+        } else return; 
     }
 
-    // --- 4. STANDARD POCKET LOGIC ---
-
+    // --- 5. PROGRESSION LOGIC ---
+    
     // Update Read Timer
     const isPrimaryRead = qbState.currentReadTargetSlot === progression[0];
     let requiredTimeOnRead = Math.round((isPrimaryRead ? 60 : 30) * (1.5 - (qbIQ / 100)));
@@ -3066,15 +2902,14 @@ function updateQBDecision(qbState, offenseStates, defenseStates, playState, offe
         }
     }
 
-    // Constraints
-    const MIN_DROPBACK_TICKS = 35;
+    // Time Constraints
+    const MIN_DROPBACK_TICKS = 45; // Increased to ~2.2s to stop instant dumps
     const canThrowStandard = playState.tick > MIN_DROPBACK_TICKS;
-    const maxDecisionTimeTicks = 160;
+    const maxDecisionTimeTicks = 160; 
 
     let decisionMade = false;
     let reason = "";
 
-    // Forced Decisions
     if (imminentSackDefender) { decisionMade = true; reason = "Imminent Sack"; }
     else if (playState.tick >= maxDecisionTimeTicks) { decisionMade = true; reason = "Time Expired"; }
     else if (isPressured && playState.tick >= 50 && Math.random() < Math.max(0.05, 0.4 - qbIQ / 200)) { decisionMade = true; reason = "Pressure Panic"; }
@@ -3093,33 +2928,50 @@ function updateQBDecision(qbState, offenseStates, defenseStates, playState, offe
     let targetPlayerState = null;
     let actionTaken = "None";
 
-    if (!decisionMade && currentReadInfo && currentReadInfo.separation > OPEN_SEP && currentReadInfo.separation > 0.1 && (canThrowStandard || isPressured)) {
-        targetPlayerState = currentReadInfo.state;
-        actionTaken = "Throw Read";
+    // --- DECISION FILTER (The Fix) ---
+    // Don't throw to guys behind the Line of Scrimmage (LOS) unless pressured or late in play
+    const isBackfieldTarget = (info) => info && info.state.y < playState.lineOfScrimmage + 2.0;
+    
+    // 1. PRIMARY READ
+    if (!decisionMade && currentReadInfo && currentReadInfo.separation > OPEN_SEP && currentReadInfo.separation > 0.1) {
+        // Gating Logic:
+        const validTiming = canThrowStandard || isPressured;
+        const validDepth = !isBackfieldTarget(currentReadInfo) || isPressured || playState.tick > 60;
+        
+        if (validTiming && validDepth) {
+            targetPlayerState = currentReadInfo.state;
+            actionTaken = "Throw Read";
+            decisionMade = true;
+        }
     }
-    else if (!decisionMade && checkdownInfo && checkdownInfo.separation > 1.0 && (playState.tick > 60 || isPressured) && canThrowStandard) {
-        targetPlayerState = checkdownInfo.state;
-        actionTaken = "Throw Checkdown";
+    
+    // 2. CHECKDOWN
+    else if (!decisionMade && checkdownInfo && checkdownInfo.separation > 1.0) {
+        // Only take checkdown if pressured OR late in the play (3s+)
+        if (canThrowStandard && (playState.tick > 70 || isPressured)) {
+            targetPlayerState = checkdownInfo.state;
+            actionTaken = "Throw Checkdown";
+            decisionMade = true;
+        }
     }
+    
+    // 3. SCRAMBLE
     else if (!decisionMade && canScramble) {
         qbState.action = 'qb_scramble';
         playState.qbIntent = 'scramble';
         if (gameLog) gameLog.push(`🏃 ${qbState.name} tucks it and runs!`);
         return;
     }
+    
+    // 4. FORCED (Sack/Panic)
     else if (decisionMade) {
         if (reason === "Imminent Sack") {
-            // 💡 NEW LOGIC: Eat the sack?
-            // If IQ is decent, just take the sack instead of forcing a bad throw
-            const chanceToEatSack = qbIQ / 120; // 50 IQ = 41% chance to hold it. 99 IQ = 82% chance.
-            if (Math.random() < chanceToEatSack) {
-                return; // DO NOTHING. Let the defender tackle me.
-            }
+            const chanceToEatSack = qbIQ / 120; 
+            if (Math.random() < chanceToEatSack) return; // Eat sack
 
-            // Hero Throw?
             if (Math.random() > 0.7 && qbAttrs.mental?.clutch > 60) {
-                targetPlayerState = offenseStates.find(o => o.slot !== 'QB1' && o.action.includes('route'));
-                actionTaken = targetPlayerState ? "Forced Throw" : "Throw Away";
+                 targetPlayerState = offenseStates.find(o => o.slot !== 'QB1' && o.action.includes('route'));
+                 actionTaken = targetPlayerState ? "Forced Throw" : "Throw Away";
             } else {
                 actionTaken = "Throw Away";
             }

@@ -2167,53 +2167,84 @@ function drawFieldVisualization(frameData) {
     drawSpecialLine(frameData.lineOfScrimmage, "#3b82f6", "#60a5fa"); // Blue LOS
     drawSpecialLine(frameData.firstDownY, "#eab308", "#fde047");     // Yellow First Down
 
-    // --- 5. DRAW PLAYERS (With Ball Carrier Logic) ---
+    // --- 3. DRAW PLAYERS (Oval Shapes based on Ht/Wt) ---
     if (frameData.players) {
         frameData.players.forEach(p => {
             const px = toScreenX(p.x);
             const py = toScreenY(p.y);
-            const r = scale * 0.8;
 
-            if (py < -r || py > height + r) return;
+            // --- A. CALCULATE DIMENSIONS (Youth Scale: 12-16 Years Old) ---
 
-            // Check if holding ball (QB in pocket OR Runner)
-            const holdingBall = p.hasBall || p.isBallCarrier;
+            // 1. Establish the "Average" Kid
+            // A typical 14-year-old athlete might be ~5'7" (67in) and ~140 lbs.
+            const baseWeight = 140;
+            const baseHeight = 67; // 5'7"
 
-            // Shadow
-            ctx.fillStyle = "rgba(0,0,0,0.4)";
+            // Fallbacks for missing data
+            const pWeight = p.weight || baseWeight;
+            const pHeight = p.height || baseHeight;
+
+            // 2. Weight Scaling (Girth/Width)
+            // In youth leagues, size disparities are huge. A 220lb kid is a GIANT vs a 100lb kid.
+            // We use a smaller divisor (150 instead of 450) to make weight differences pop visually.
+            // Example: 
+            // - 100 lb kid -> 0.73x width (Skinny)
+            // - 220 lb kid -> 1.53x width (Massive)
+            const widthMod = 1 + ((pWeight - baseWeight) / 150);
+            const radiusX = scale * widthMod;
+
+            // 3. Height Scaling (Length/Tallness)
+            // We scale this slightly less aggressively than weight, but still distinct.
+            // Example:
+            // - 5'0" (60in) -> 0.88x height
+            // - 6'2" (74in) -> 1.12x height
+            const heightMod = 1 + ((pHeight - baseHeight) / 60);
+            const radiusY = scale * heightMod;
+
+            // --- B. SHADOW ---
+            ctx.fillStyle = "rgba(0,0,0,0.3)";
             ctx.beginPath();
-            ctx.ellipse(px, py + r * 0.5, r, r * 0.6, 0, 0, Math.PI * 2);
+            ctx.ellipse(px, py + (radiusY * 0.5), radiusX * 0.9, radiusY * 0.25, 0, 0, Math.PI * 2);
             ctx.fill();
 
-            // Body
-            const pColor = p.isOffense ? '#2563eb' : '#dc2626';
-            ctx.fillStyle = pColor;
-            ctx.beginPath(); ctx.arc(px, py, r, 0, Math.PI * 2); ctx.fill();
-
-            // Ring / Highlight (GOLD if holding ball)
-            if (holdingBall) {
-                ctx.strokeStyle = "#fbbf24"; // Gold
-                ctx.lineWidth = scale * 0.35; // Thick
-                ctx.stroke();
-
-                // Extra Glow for visibility
-                ctx.shadowColor = "#fbbf24";
-                ctx.shadowBlur = 10;
-                ctx.stroke();
-                ctx.shadowBlur = 0;
-            } else {
-                ctx.strokeStyle = "#ffffff";
-                ctx.lineWidth = scale * 0.1;
-                ctx.stroke();
+            // --- C. HIGHLIGHT (Ball Carrier) ---
+            if (p.hasBall || p.isBallCarrier) {
+                ctx.beginPath();
+                // Gold ring scales with the kid's specific size
+                ctx.ellipse(px, py, radiusX * 1.3, radiusY * 1.3, 0, 0, Math.PI * 2);
+                ctx.fillStyle = "#FFD700";
+                ctx.fill();
             }
 
-            // Number
-            if (p.number) {
-                ctx.fillStyle = "#ffffff";
-                ctx.font = `bold ${Math.max(8, scale * 0.9)}px 'Inter', sans-serif`;
-                ctx.textAlign = "center";
-                ctx.textBaseline = "middle";
-                ctx.fillText(p.number, px, py + (scale * 0.1));
+            // --- D. JERSEY (Main Body) ---
+            ctx.beginPath();
+            ctx.ellipse(px, py, radiusX, radiusY, 0, 0, Math.PI * 2);
+            // 💡 TIP: Youth jerseys are often loose. We don't change shape for that, 
+            // but the size variance helps sell the "awkward growth spurt" vibe.
+            ctx.fillStyle = p.primaryColor || "#999";
+            ctx.fill();
+
+            // --- E. HELMET/PADS ---
+            // Youth pads often look slightly "too big" for the player.
+            // We keep the line thick relative to their body size.
+            ctx.lineWidth = 2.0;
+            ctx.strokeStyle = p.secondaryColor || "#fff";
+            ctx.stroke();
+
+            // --- F. NUMBER ---
+            ctx.fillStyle = "#fff";
+            // Font matches their physical size
+            const fontSize = Math.min(radiusX, radiusY) * 1.5;
+            ctx.font = `bold ${Math.max(10, fontSize)}px sans-serif`; // Minimum size 10 so tiny kids still have readable numbers
+            ctx.textAlign = "center";
+            ctx.textBaseline = "middle";
+            ctx.fillText(p.number || p.role.substring(0, 2), px, py);
+
+            // --- G. STATUS ICONS ---
+            if (p.stunnedTicks > 0) {
+                ctx.fillStyle = "#ffff00";
+                ctx.font = `${radiusX}px sans-serif`;
+                ctx.fillText("💫", px, py - radiusY * 1.5);
             }
         });
     }
@@ -2228,11 +2259,11 @@ function drawFieldVisualization(frameData) {
     if (frameData.ball && !isHeld) {
         const bx = toScreenX(frameData.ball.x);
         const by = toScreenY(frameData.ball.y);
-        
+
         // Ball Size calculates arc height logic (z)
         // We simulate "height" by scaling the shadow and the ball slightly
-        const bz = frameData.ball.z || 0; 
-        const ballSize = scale * 0.5 * (1 + (bz * 0.1)); 
+        const bz = frameData.ball.z || 0;
+        const ballSize = scale * 0.5 * (1 + (bz * 0.1));
         const shadowOffset = bz * scale * 2;
 
         // Shadow (moves away as ball goes higher)
@@ -2242,11 +2273,11 @@ function drawFieldVisualization(frameData) {
         ctx.fill();
 
         // Ball Shape (Brown football)
-        ctx.fillStyle = "#713f12"; 
+        ctx.fillStyle = "#713f12";
         ctx.beginPath();
         ctx.ellipse(bx, by, ballSize * 0.8, ballSize * 1.2, 0, 0, Math.PI * 2); // Vertical ellipse for top-down view
         ctx.fill();
-        
+
         // Laces
         ctx.strokeStyle = "rgba(255,255,255,0.8)";
         ctx.lineWidth = 2;
@@ -2812,12 +2843,12 @@ function runLiveGameTick() {
     }
 
     const nextFrame = allFrames[liveGameCurrentIndex + 1];
-    
+
     // --- 3. Sync Log Entries (Text Processing) ---
     if (ticker && frame.logIndex > liveGameLogIndex) {
-        
+
         // 💡 FIX: Declare this variable outside the loop so it is accessible!
-        let playHasEnded = false; 
+        let playHasEnded = false;
 
         for (let i = liveGameLogIndex; i < frame.logIndex; i++) {
             const playLogEntry = allLogs[i];
@@ -2865,7 +2896,7 @@ function runLiveGameTick() {
                     liveGameDriveActive = false;
                     styleClass = 'font-bold text-amber-400 mt-2 text-lg';
                     descriptiveText = `⏱️ ${playLogEntry} ⏱️`;
-                    playHasEnded = true; 
+                    playHasEnded = true;
 
                 } else if (playLogEntry.startsWith('➡️ First down')) {
                     liveGameDown = 1;
@@ -3009,7 +3040,7 @@ function runLiveGameTick() {
 
             // Append Log
             logEl.className = styleClass;
-            logEl.textContent = descriptiveText.replace(/\*\*/g, ''); 
+            logEl.textContent = descriptiveText.replace(/\*\*/g, '');
             ticker.appendChild(logEl);
             ticker.scrollTop = ticker.scrollHeight;
 
@@ -3017,16 +3048,16 @@ function runLiveGameTick() {
 
             // THE INTERRUPTOR: Stop loop if specific events occur to let animation catch up
             const isInterruptor =
-                playLogEntry.includes('throws to') || 
-                playLogEntry.includes('throws it away') || 
-                playLogEntry.includes('tackled by') || 
-                playLogEntry.includes('TOUCHDOWN') || 
-                playLogEntry.includes('INTERCEPTION') || 
-                playLogEntry.includes('FUMBLE') || 
-                playLogEntry.includes('punts the ball'); 
+                playLogEntry.includes('throws to') ||
+                playLogEntry.includes('throws it away') ||
+                playLogEntry.includes('tackled by') ||
+                playLogEntry.includes('TOUCHDOWN') ||
+                playLogEntry.includes('INTERCEPTION') ||
+                playLogEntry.includes('FUMBLE') ||
+                playLogEntry.includes('punts the ball');
 
             if (isInterruptor) {
-                break; 
+                break;
             }
         }
     }
@@ -3057,8 +3088,8 @@ function runLiveGameTick() {
 
         // Huddle Delay
         huddleTimeout = setTimeout(() => {
-            liveGameCurrentIndex++; 
-            startNextPlay(); 
+            liveGameCurrentIndex++;
+            startNextPlay();
         }, 3500);
 
     } else {
