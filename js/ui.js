@@ -2006,115 +2006,106 @@ function drawFieldVisualization(frameData) {
     const ctx = elements.fieldCanvasCtx;
     if (!canvas || !ctx) return;
 
-    // --- 1. DYNAMIC SCALING (Fit Width Strategy) ---
+    // --- 1. CANVAS DIMENSIONS ---
     const w = canvas.width;
     const h = canvas.height;
     if (w === 0 || h === 0) return;
 
-    // The football field is 53.3 yards wide.
-    // We define a "View Width" that includes the field + padding.
-    const FIELD_WIDTH_YARDS = 53.3;
-    const PADDING_X_YARDS = 2.5; // Buffer on left/right
-    const VIEW_WIDTH_YARDS = FIELD_WIDTH_YARDS + (PADDING_X_YARDS * 2);
+    // --- 2. FIELD DIMENSIONS (LANDSCAPE ORIENTED) ---
+    // Field is 120 yards long (0-120, with 10-yard endzones at each end)
+    // Field is 53.3 yards wide
+    const FIELD_LENGTH_YARDS = 120;    // Horizontal (left-right)
+    const FIELD_WIDTH_YARDS = 53.3;    // Vertical (top-bottom)
+    const PADDING_Y_YARDS = 2.0;       // Buffer on top/bottom (to see both sidelines)
+    const VIEW_HEIGHT_YARDS = FIELD_WIDTH_YARDS + (PADDING_Y_YARDS * 2);
 
-    // Calculate "Pixels Per Yard" (ppY) based on the CANVAS WIDTH.
-    // This locks the zoom so the sidelines are always visible.
-    const ppY = w / VIEW_WIDTH_YARDS;
+    // Calculate "Pixels Per Yard" based on canvas HEIGHT to fit full width
+    const ppY = h / VIEW_HEIGHT_YARDS;
 
-    // --- 2. CAMERA LOGIC (Vertical Tracking) ---
-    // Calculate how many vertical yards fit on screen based on the Aspect Ratio
-    const VIEW_HEIGHT_YARDS = h / ppY;
+    // --- 3. CAMERA LOGIC (HORIZONTAL TRACKING) ---
+    // Calculate how many yards fit horizontally on screen
+    const VIEW_LENGTH_YARDS = w / ppY;
 
     // Track the ball
-    const ballY = frameData.ball ? frameData.ball.y : 50;
+    const ballX = frameData.ball ? frameData.ball.x : 60;
     
-    // Center camera on ball, but clamp to field boundaries
-    // We want to see from -5 (back of endzone) to 125.
-    const MIN_CAM_Y = -5;
-    const MAX_CAM_Y = 125 - VIEW_HEIGHT_YARDS;
+    // Center camera on ball horizontally, but clamp to field boundaries
+    const MIN_CAM_X = 0;
+    const MAX_CAM_X = FIELD_LENGTH_YARDS - VIEW_LENGTH_YARDS;
     
-    let camBottomY = ballY - (VIEW_HEIGHT_YARDS / 2);
-    camBottomY = Math.max(MIN_CAM_Y, Math.min(MAX_CAM_Y, camBottomY));
+    let camLeftX = ballX - (VIEW_LENGTH_YARDS / 2);
+    camLeftX = Math.max(MIN_CAM_X, Math.min(MAX_CAM_X, camLeftX));
 
-    // Coordinate Mappers
-    // X: Shift right by padding, then scale
-    const toScreenX = (fieldX) => (fieldX + PADDING_X_YARDS) * ppY;
+    // Coordinate Mappers (ROTATED)
+    // X (field): Subtract camera offset, then scale (left-right on canvas)
+    const toScreenX = (fieldX) => (fieldX - camLeftX) * ppY;
     
-    // Y: Subtract camera offset, then invert (Canvas 0 is Top)
-    const toScreenY = (fieldY) => h - ((fieldY - camBottomY) * ppY);
+    // Y (field): Shift down by padding, then scale (top-bottom on canvas)
+    const toScreenY = (fieldY) => (fieldY + PADDING_Y_YARDS) * ppY;
 
-    // --- 3. DRAW FIELD ---
+    // --- 4. DRAW FIELD ---
     // Grass
     ctx.fillStyle = "#2d5a27"; // Rich Turf Green
     ctx.fillRect(0, 0, w, h);
 
-    // Grid Lines & Numbers
+    // Grid Lines & Numbers (Vertical 10-yard markers)
     ctx.lineWidth = Math.max(1, ppY * 0.05);
-    ctx.font = `bold ${ppY * 1.5}px monospace`;
+    ctx.font = `bold ${ppY * 0.8}px monospace`;
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
 
     // Optimize loop: only draw lines visible in camera
-    const startYard = Math.floor(camBottomY / 5) * 5;
-    const endYard = Math.floor((camBottomY + VIEW_HEIGHT_YARDS) / 5) * 5 + 5;
+    const startYard = Math.floor(camLeftX / 10) * 10;
+    const endYard = Math.floor((camLeftX + VIEW_LENGTH_YARDS) / 10) * 10 + 10;
 
-    for (let y = startYard; y <= endYard; y += 5) {
-        const sy = toScreenY(y);
+    for (let x = startYard; x <= endYard; x += 10) {
+        const sx = toScreenX(x);
         
         // Stripe Opacity
-        if (y % 10 === 0) {
+        if (x % 20 === 0) {
             ctx.strokeStyle = "rgba(255, 255, 255, 0.4)"; // Major line
         } else {
             ctx.strokeStyle = "rgba(255, 255, 255, 0.1)"; // Minor line
         }
 
-        // Draw Line
+        // Draw Vertical Line
         ctx.beginPath();
-        ctx.moveTo(0, sy);
-        ctx.lineTo(w, sy);
+        ctx.moveTo(sx, 0);
+        ctx.lineTo(sx, h);
         ctx.stroke();
 
-        // Draw Numbers (10, 20, 30...)
-        if (y % 10 === 0 && y > 0 && y < 120) {
-            const num = y <= 60 ? y - 10 : 110 - y; // Adjust for 10-yard endzones
-            if (num <= 0) continue;
-
-            ctx.fillStyle = "rgba(255, 255, 255, 0.5)";
-            
-            // Left Number
-            ctx.save();
-            ctx.translate(toScreenX(6), sy);
-            ctx.rotate(-Math.PI/2);
-            ctx.fillText(num, 0, 0);
-            ctx.restore();
-
-            // Right Number
-            ctx.translate(toScreenX(FIELD_WIDTH_YARDS - 6), sy);
-            ctx.rotate(Math.PI/2);
-            ctx.fillText(num, 0, 0);
-            ctx.restore();
+        // Draw Numbers (10, 20, 30... 40-50-40...)
+        if (x >= 10 && x < 110 && x % 10 === 0) {
+            const num = x <= 50 ? x - 10 : 110 - x; // Adjust for 10-yard endzones
+            if (num > 0) {
+                ctx.fillStyle = "rgba(255, 255, 255, 0.6)";
+                // Top number
+                ctx.fillText(num, sx, toScreenY(0) + ppY * 1.2);
+                // Bottom number
+                ctx.fillText(num, sx, toScreenY(FIELD_WIDTH_YARDS) - ppY * 0.8);
+            }
         }
     }
 
-    // --- 4. ENDZONES ---
-    const drawEndzone = (yStart, yEnd, color, label) => {
-        const sY = toScreenY(yStart);
-        const eY = toScreenY(yEnd);
-        // Note: sY will be larger (lower on screen) than eY because Y is inverted
-        const topY = Math.min(sY, eY);
-        const heightPx = Math.abs(sY - eY);
+    // --- 5. ENDZONES ---
+    const drawEndzone = (xStart, xEnd, color, label) => {
+        const sX = toScreenX(xStart);
+        const eX = toScreenX(xEnd);
+        const topX = Math.min(sX, eX);
+        const widthPx = Math.abs(sX - eX);
 
         ctx.fillStyle = color;
-        ctx.fillRect(0, topY, w, heightPx);
+        ctx.fillRect(topX, 0, widthPx, h);
 
         // Label
         ctx.save();
-        ctx.translate(w/2, topY + heightPx/2);
-        ctx.fillStyle = "rgba(255,255,255,0.6)";
-        ctx.font = `900 ${ppY * 4}px sans-serif`;
+        ctx.translate(topX + widthPx / 2, h / 2);
+        ctx.fillStyle = "rgba(255,255,255,0.5)";
+        ctx.font = `900 ${ppY * 2}px sans-serif`;
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
-        ctx.shadowColor = "black"; ctx.shadowBlur = 4;
+        ctx.shadowColor = "black"; 
+        ctx.shadowBlur = 4;
         ctx.fillText(label, 0, 0);
         ctx.restore();
     };
@@ -2122,19 +2113,20 @@ function drawFieldVisualization(frameData) {
     const homeColor = currentLiveGameResult?.homeTeam?.primaryColor || "#0000aa";
     const awayColor = currentLiveGameResult?.awayTeam?.primaryColor || "#aa0000";
 
-    // Field is 0-120. Play area is 10-110.
+    // Field is 0-120. Endzones are 0-10 and 110-120.
     drawEndzone(0, 10, awayColor, currentLiveGameResult?.awayTeam?.name || "AWAY");
     drawEndzone(110, 120, homeColor, currentLiveGameResult?.homeTeam?.name || "HOME");
 
-    // --- 5. SPECIAL LINES (LOS / First Down) ---
-    const drawSpecialLine = (y, color) => {
-        const sy = toScreenY(y);
+    // --- 6. SPECIAL LINES (LOS / First Down) ---
+    const drawSpecialLine = (x, color) => {
+        const sx = toScreenX(x);
         ctx.beginPath();
-        ctx.moveTo(0, sy);
-        ctx.lineTo(w, sy);
-        ctx.lineWidth = ppY * 0.2; // Thicker line
+        ctx.moveTo(sx, 0);
+        ctx.lineTo(sx, h);
+        ctx.lineWidth = ppY * 0.15;
         ctx.strokeStyle = color;
-        ctx.shadowColor = color; ctx.shadowBlur = 10;
+        ctx.shadowColor = color; 
+        ctx.shadowBlur = 8;
         ctx.stroke();
         ctx.shadowBlur = 0;
     };
@@ -2142,80 +2134,88 @@ function drawFieldVisualization(frameData) {
     drawSpecialLine(frameData.lineOfScrimmage, "#3b82f6"); // Blue LOS
     drawSpecialLine(frameData.firstDownY, "#eab308");      // Yellow First Down
 
-    // Sidelines (Visual Border)
+    // Sidelines (Visual Border - Top & Bottom)
     ctx.lineWidth = ppY * 0.1;
     ctx.strokeStyle = "white";
     ctx.beginPath();
-    ctx.moveTo(toScreenX(0), 0); ctx.lineTo(toScreenX(0), h);
-    ctx.moveTo(toScreenX(FIELD_WIDTH_YARDS), 0); ctx.lineTo(toScreenX(FIELD_WIDTH_YARDS), h);
+    ctx.moveTo(0, toScreenY(0)); 
+    ctx.lineTo(w, toScreenY(0));
+    ctx.moveTo(0, toScreenY(FIELD_WIDTH_YARDS)); 
+    ctx.lineTo(w, toScreenY(FIELD_WIDTH_YARDS));
     ctx.stroke();
 
-    // --- 6. DRAW PLAYERS ---
+    // --- 7. DRAW PLAYERS ---
     if (frameData.players) {
         frameData.players.forEach(p => {
             const px = toScreenX(p.x);
             const py = toScreenY(p.y);
             
             // Player size relative to yards (approx 1 yard diameter)
-            const radius = ppY * 0.45; 
+            const radius = ppY * 0.35; 
 
             // Shadow
             ctx.fillStyle = "rgba(0,0,0,0.5)";
-            ctx.beginPath(); ctx.ellipse(px, py + radius*0.2, radius, radius*0.6, 0, 0, Math.PI*2); ctx.fill();
+            ctx.beginPath(); 
+            ctx.ellipse(px, py + radius*0.2, radius * 0.8, radius * 0.4, 0, 0, Math.PI*2); 
+            ctx.fill();
 
             // Jersey Body
             ctx.fillStyle = p.primaryColor || (p.isOffense ? "#c00" : "#00c");
-            ctx.beginPath(); ctx.arc(px, py, radius, 0, Math.PI*2); ctx.fill();
+            ctx.beginPath(); 
+            ctx.arc(px, py, radius, 0, Math.PI*2); 
+            ctx.fill();
             
             // Outline/Shoulder Pads
-            ctx.lineWidth = ppY * 0.08;
+            ctx.lineWidth = ppY * 0.06;
             ctx.strokeStyle = p.secondaryColor || "white";
             ctx.stroke();
 
             // Helmet (Inner Circle)
             ctx.fillStyle = p.secondaryColor || "white";
-            ctx.beginPath(); ctx.arc(px, py, radius * 0.4, 0, Math.PI*2); ctx.fill();
-
-            // Number
-            // ctx.fillStyle = "black";
-            // ctx.font = `bold ${radius * 0.6}px sans-serif`;
-            // ctx.fillText(p.number || "", px, py);
+            ctx.beginPath(); 
+            ctx.arc(px, py, radius * 0.35, 0, Math.PI*2); 
+            ctx.fill();
 
             // Ball Carrier Highlight
             if (p.hasBall || p.isBallCarrier) {
                 ctx.strokeStyle = "#FFD700"; // Gold
-                ctx.lineWidth = ppY * 0.1;
-                ctx.beginPath(); ctx.arc(px, py, radius * 1.3, 0, Math.PI*2); ctx.stroke();
+                ctx.lineWidth = ppY * 0.08;
+                ctx.beginPath(); 
+                ctx.arc(px, py, radius * 1.25, 0, Math.PI*2); 
+                ctx.stroke();
             }
         });
     }
 
-    // --- 7. DRAW BALL ---
+    // --- 8. DRAW BALL ---
     if (frameData.ball) {
         const bx = toScreenX(frameData.ball.x);
         const by = toScreenY(frameData.ball.y);
         const bz = frameData.ball.z || 0;
 
         // Ball gets bigger as it goes higher (Pseudo-3D)
-        const ballRadius = ppY * 0.25 * (1 + bz * 0.15); 
+        const ballRadius = ppY * 0.2 * (1 + bz * 0.15); 
         
         // Shadow (stays on ground, fades with height)
-        const shadowOffset = bz * ppY * 0.5;
+        const shadowOffset = bz * ppY * 0.4;
         ctx.fillStyle = `rgba(0,0,0,${Math.max(0.1, 0.5 - bz*0.1)})`;
         ctx.beginPath(); 
-        ctx.ellipse(bx, by + shadowOffset, ballRadius, ballRadius*0.6, 0, 0, Math.PI*2); 
+        ctx.ellipse(bx, by + shadowOffset, ballRadius * 0.9, ballRadius * 0.5, 0, 0, Math.PI*2); 
         ctx.fill();
 
         // Ball Body
         ctx.fillStyle = "#8B4513"; // Brown
         ctx.beginPath(); 
-        ctx.ellipse(bx, by, ballRadius*0.7, ballRadius, 0, 0, Math.PI*2); 
+        ctx.ellipse(bx, by, ballRadius * 0.6, ballRadius * 0.85, 0, 0, Math.PI*2); 
         ctx.fill();
         
         // Laces
         ctx.strokeStyle = "rgba(255,255,255,0.9)";
-        ctx.lineWidth = 2;
-        ctx.beginPath(); ctx.moveTo(bx, by - ballRadius*0.5); ctx.lineTo(bx, by + ballRadius*0.5); ctx.stroke();
+        ctx.lineWidth = 1.5;
+        ctx.beginPath(); 
+        ctx.moveTo(bx, by - ballRadius*0.4); 
+        ctx.lineTo(bx, by + ballRadius*0.4); 
+        ctx.stroke();
     }
 }
 

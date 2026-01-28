@@ -4506,8 +4506,8 @@ function simulateLivePlayStep(game) {
         offPlayKey,
         defPlayKey,
         context,
-        { isLive: true }, 
-        true 
+        {},
+        true
     );
 
     // --- 5. UPDATE GAME STATE ---
