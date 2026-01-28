@@ -2809,8 +2809,10 @@ function resolveOngoingBlocks(playState, gameLog) {
 function updateQBDecision(qbState, offenseStates, defenseStates, playState, offensiveAssignments, gameLog) {
     
     // --- 0. VALIDATION CHECKS ---
-    if (!qbState || !qbState.hasBall || playState.ballState.inAir) return;
+    if (!qbState || !qbState.hasBall || playState.ballState.inAir || playState.ballState.throwInitiated) return;
     if (qbState.isEngaged || qbState.stunnedTicks > 0) return;
+    // Don't make a new decision if QB is already scrambling
+    if (qbState.action === 'qb_scramble') return;
 
     // Get Attributes
     const qbPlayer = getPlayer(qbState.id); 
