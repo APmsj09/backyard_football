@@ -622,8 +622,8 @@ async function initializeLeague(onProgress) {
             secondaryColor: colorSet.secondary,
             formations: { offense: offenseFormationData.name, defense: defenseFormationData.name },
             depthChart: {
-                offense: Object.fromEntries(offenseSlots.map(slot => [slot, null])),
-                defense: Object.fromEntries(defenseSlots.map(slot => [slot, null]))
+                offense: Object.fromEntries(offenseFormationData.slots.map(slot => [slot, null])),
+                defense: Object.fromEntries(defenseFormationData.slots.map(slot => [slot, null]))
             },
             draftNeeds: 0
         };
