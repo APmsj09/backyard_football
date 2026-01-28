@@ -525,7 +525,7 @@ export const defenseFormations = {
             'DB2': [18, 5.0],
             'DB3': [-6, 9.0],
             'DB4': [6, 9.0],
-            'DB5': [0, 14.0]
+            'DB5': [0, 14.0],
             'DL1': { speed: 2, strength: 2 },
             'DL2': { strength: 3, weight: 2 },
             'DL3': { speed: 2, strength: 2 },
