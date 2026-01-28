@@ -445,7 +445,7 @@ export function renderDraftScreen(gameState, onPlayerSelect, currentSelectedId, 
         return;
     }
     const { year, draftOrder, currentPick, playerTeam, players, teams } = gameState;
-    const ROSTER_LIMIT = 10;
+    const ROSTER_LIMIT = 12;
 
     if (currentPick >= draftOrder.length) {
         if (elements.draftHeader) elements.draftHeader.innerHTML = `<h2 class="text-3xl font-bold">Season ${year} Draft Complete</h2>`;
@@ -725,7 +725,7 @@ export function renderSelectedPlayerCard(player, gameState) {
         ${overallsHtml}`;
 
     const { draftOrder, currentPick, playerTeam } = gameState;
-    const ROSTER_LIMIT = 10;
+    const ROSTER_LIMIT = 12;
     if (draftOrder && currentPick >= 0 && currentPick < draftOrder.length && playerTeam && draftOrder[currentPick]) {
         const pickingTeam = draftOrder[currentPick];
         const playerCanPick = pickingTeam.id === playerTeam.id && (playerTeam.roster?.length || 0) < ROSTER_LIMIT;
@@ -744,7 +744,7 @@ export function renderPlayerRoster(playerTeam) {
 
     // --- 💡 FIX: Get roster objects ---
     const roster = getUIRosterObjects(playerTeam);
-    const ROSTER_LIMIT = 10;
+    const ROSTER_LIMIT = 12;
 
     elements.rosterCount.textContent = `${roster.length}/${ROSTER_LIMIT}`;
     elements.draftRosterList.innerHTML = '';
@@ -2012,57 +2012,54 @@ function drawFieldVisualization(frameData) {
     if (w === 0 || h === 0) return;
 
     // --- 2. FIELD DIMENSIONS (LANDSCAPE ORIENTED - ZOOMED IN) ---
-    // Show only ~30 yards horizontally for better detail
-    // Show full 53.3 yards vertically so we see both sidelines
-    const FIELD_LENGTH_YARDS = 120;    // Full field length
-    const FIELD_WIDTH_YARDS = 53.3;    // Full field width
-    const PADDING_Y_YARDS = 1.0;       // Minimal buffer
+    // Game logic uses: X = 0-53.3 (sideline to sideline), Y = 0-120 (endzone to endzone)
+    // We want landscape: Y runs left-right (field length), X runs top-bottom (field width)
+    const FIELD_WIDTH_YARDS = 53.3;    // Game X-axis (sideline to sideline)
+    const FIELD_LENGTH_YARDS = 120;    // Game Y-axis (endzone to endzone)
+    const PADDING_Y_YARDS = 1.0;       // Buffer on top/bottom (to see both sidelines)
     const VIEW_HEIGHT_YARDS = FIELD_WIDTH_YARDS + (PADDING_Y_YARDS * 2);
 
-    // Calculate "Pixels Per Yard" based on canvas HEIGHT 
+    // Calculate "Pixels Per Yard" based on canvas HEIGHT (this is field width)
     const ppY = h / VIEW_HEIGHT_YARDS;
 
     // --- 3. CAMERA LOGIC (HORIZONTAL TRACKING - ZOOMED IN) ---
-    // Show ~25-30 yard window horizontally (3x zoom)
-    const VIEW_LENGTH_YARDS = w / ppY;  // This will be ~30 yards at this ppY
+    // Show ~25-30 yard window horizontally (this is field length)
+    const VIEW_LENGTH_YARDS = w / ppY;
 
     // Track the ball
-    const ballX = frameData.ball ? frameData.ball.x : 60;
+    const ballY = frameData.ball ? frameData.ball.y : 60;
     
     // Center camera on ball horizontally, but clamp to field boundaries
-    const MIN_CAM_X = 0;
-    const MAX_CAM_X = FIELD_LENGTH_YARDS - VIEW_LENGTH_YARDS;
+    const MIN_CAM_Y = 0;
+    const MAX_CAM_Y = FIELD_LENGTH_YARDS - VIEW_LENGTH_YARDS;
     
-    let camLeftX = ballX - (VIEW_LENGTH_YARDS / 2);
-    camLeftX = Math.max(MIN_CAM_X, Math.min(MAX_CAM_X, camLeftX));
+    let camBottomY = ballY - (VIEW_LENGTH_YARDS / 2);
+    camBottomY = Math.max(MIN_CAM_Y, Math.min(MAX_CAM_Y, camBottomY));
 
-    // Coordinate Mappers (ROTATED)
-    // X (field): Subtract camera offset, then scale (left-right on canvas)
-    const toScreenX = (fieldX) => (fieldX - camLeftX) * ppY;
-    
-    // Y (field): Shift down by padding, then scale (top-bottom on canvas)
-    const toScreenY = (fieldY) => (fieldY + PADDING_Y_YARDS) * ppY;
+    // Coordinate mapping: swap X/Y since field is rotated
+    const toScreenX = (fieldY) => (fieldY - camBottomY) * ppY;  // Field length → horizontal
+    const toScreenY = (fieldX) => (fieldX + PADDING_Y_YARDS) * ppY;  // Field width → vertical
 
     // --- 4. DRAW FIELD ---
     // Grass
     ctx.fillStyle = "#2d5a27"; // Rich Turf Green
     ctx.fillRect(0, 0, w, h);
 
-    // Grid Lines & Numbers (Vertical 10-yard markers)
+    // Grid Lines & Numbers (Vertical 10-yard markers along field length)
     ctx.lineWidth = Math.max(1, ppY * 0.05);
     ctx.font = `bold ${ppY * 0.8}px monospace`;
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
 
     // Optimize loop: only draw lines visible in camera
-    const startYard = Math.floor(camLeftX / 10) * 10;
-    const endYard = Math.floor((camLeftX + VIEW_LENGTH_YARDS) / 10) * 10 + 10;
+    const startYard = Math.floor(camBottomY / 10) * 10;
+    const endYard = Math.floor((camBottomY + VIEW_LENGTH_YARDS) / 10) * 10 + 10;
 
-    for (let x = startYard; x <= endYard; x += 10) {
-        const sx = toScreenX(x);
+    for (let y = startYard; y <= endYard; y += 10) {
+        const sy = toScreenX(y);
         
         // Stripe Opacity
-        if (x % 20 === 0) {
+        if (y % 20 === 0) {
             ctx.strokeStyle = "rgba(255, 255, 255, 0.4)"; // Major line
         } else {
             ctx.strokeStyle = "rgba(255, 255, 255, 0.1)"; // Minor line
@@ -2070,36 +2067,36 @@ function drawFieldVisualization(frameData) {
 
         // Draw Vertical Line
         ctx.beginPath();
-        ctx.moveTo(sx, 0);
-        ctx.lineTo(sx, h);
+        ctx.moveTo(sy, 0);
+        ctx.lineTo(sy, h);
         ctx.stroke();
 
         // Draw Numbers (10, 20, 30... 40-50-40...)
-        if (x >= 10 && x < 110 && x % 10 === 0) {
-            const num = x <= 50 ? x - 10 : 110 - x; // Adjust for 10-yard endzones
+        if (y >= 10 && y < 110 && y % 10 === 0) {
+            const num = y <= 50 ? y - 10 : 110 - y; // Adjust for 10-yard endzones
             if (num > 0) {
                 ctx.fillStyle = "rgba(255, 255, 255, 0.6)";
                 // Top number
-                ctx.fillText(num, sx, toScreenY(0) + ppY * 1.2);
+                ctx.fillText(num, sy, toScreenY(0) + ppY * 1.2);
                 // Bottom number
-                ctx.fillText(num, sx, toScreenY(FIELD_WIDTH_YARDS) - ppY * 0.8);
+                ctx.fillText(num, sy, toScreenY(FIELD_WIDTH_YARDS) - ppY * 0.8);
             }
         }
     }
 
     // --- 5. ENDZONES ---
-    const drawEndzone = (xStart, xEnd, color, label) => {
-        const sX = toScreenX(xStart);
-        const eX = toScreenX(xEnd);
-        const topX = Math.min(sX, eX);
-        const widthPx = Math.abs(sX - eX);
+    const drawEndzone = (yStart, yEnd, color, label) => {
+        const sY = toScreenX(yStart);
+        const eY = toScreenX(yEnd);
+        const topY = Math.min(sY, eY);
+        const heightPx = Math.abs(sY - eY);
 
         ctx.fillStyle = color;
-        ctx.fillRect(topX, 0, widthPx, h);
+        ctx.fillRect(topY, 0, heightPx, h);
 
         // Label
         ctx.save();
-        ctx.translate(topX + widthPx / 2, h / 2);
+        ctx.translate(topY + heightPx / 2, h / 2);
         ctx.fillStyle = "rgba(255,255,255,0.5)";
         ctx.font = `900 ${ppY * 2}px sans-serif`;
         ctx.textAlign = "center";
@@ -2118,11 +2115,11 @@ function drawFieldVisualization(frameData) {
     drawEndzone(110, 120, homeColor, currentLiveGameResult?.homeTeam?.name || "HOME");
 
     // --- 6. SPECIAL LINES (LOS / First Down) ---
-    const drawSpecialLine = (x, color) => {
-        const sx = toScreenX(x);
+    const drawSpecialLine = (y, color) => {
+        const sy = toScreenX(y);
         ctx.beginPath();
-        ctx.moveTo(sx, 0);
-        ctx.lineTo(sx, h);
+        ctx.moveTo(sy, 0);
+        ctx.lineTo(sy, h);
         ctx.lineWidth = ppY * 0.15;
         ctx.strokeStyle = color;
         ctx.shadowColor = color; 
@@ -2147,11 +2144,11 @@ function drawFieldVisualization(frameData) {
     // --- 7. DRAW PLAYERS ---
     if (frameData.players) {
         frameData.players.forEach(p => {
-            const px = toScreenX(p.x);
-            const py = toScreenY(p.y);
+            const px = toScreenX(p.y);  // p.y is field length (0-120)
+            const py = toScreenY(p.x);  // p.x is field width (0-53.3)
             
-            // BIGGER PLAYER SIZE for better visibility
-            const radius = ppY * 0.65; 
+            // PLAYER SIZE scaled for visibility
+            const radius = ppY * 1.2; 
 
             // Shadow (elliptical, under the player)
             ctx.fillStyle = "rgba(0,0,0,0.4)";
@@ -2217,8 +2214,8 @@ function drawFieldVisualization(frameData) {
 
     // --- 8. DRAW BALL ---
     if (frameData.ball) {
-        const bx = toScreenX(frameData.ball.x);
-        const by = toScreenY(frameData.ball.y);
+        const bx = toScreenX(frameData.ball.y);  // ball.y is field length
+        const by = toScreenY(frameData.ball.x);  // ball.x is field width
         const bz = frameData.ball.z || 0;
 
         // Ball gets bigger as it goes higher (Pseudo-3D)

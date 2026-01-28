@@ -14,8 +14,8 @@ let currentSortDirection = 'desc';
 let activeSaveKey = 'backyardFootballGameState';
 
 // --- Constants ---
-const ROSTER_LIMIT = 10;
-const MIN_HEALTHY_PLAYERS = 7;
+const ROSTER_LIMIT = 12;
+const MIN_HEALTHY_PLAYERS = 9;
 const WEEKS_IN_SEASON = 9;
 
 function yieldToMain() { return new Promise(resolve => setTimeout(resolve, 0)); }

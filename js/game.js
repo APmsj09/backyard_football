@@ -760,7 +760,7 @@ function setupDraft() {
             .sort((a, b) => (a.wins || 0) - (b.wins || 0) || (b.losses || 0) - (a.losses || 0));
     }
 
-    const ROSTER_LIMIT = 10;
+    const ROSTER_LIMIT = 12;
     console.log("Setting draft needs based on current rosters...");
     game.teams.forEach(team => {
         if (team) team.draftNeeds = Math.max(0, ROSTER_LIMIT - (team.roster?.length || 0));
@@ -5557,7 +5557,7 @@ function playerSignFreeAgent(playerId) {
         return { success: false, message: "Game state error." };
     }
     const team = game.playerTeam;
-    const ROSTER_LIMIT = 10;
+    const ROSTER_LIMIT = 12;
 
     // --- 💡 FIX: Get roster objects ---
     const roster = getRosterObjects(team);
