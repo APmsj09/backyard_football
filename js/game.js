@@ -1,4 +1,4 @@
-// game.js - COMPLETE FILE
+  // game.js - COMPLETE FILE
 
 // --- Imports ---
 import { getRandom, getRandomInt } from './utils.js';
@@ -347,7 +347,9 @@ function getRosterObjects(team) {
 
     // Safety check: if map is empty (e.g. after load), rebuild it
     if (playerMap.size === 0 && game && game.players) {
-        game.players.forEach(p => playerMap.set(p.id, p));
+        game.players.forEach(p => {
+            if (p && p.id) playerMap.set(p.id, p);
+        });
     }
 
     // 🔧 CRITICAL FIX: Remove any non-existent players from roster
@@ -635,7 +637,9 @@ async function initializeLeague(onProgress) {
     onProgress(0.7); await yieldToMain();
 
     playerMap.clear();
-    game.players.forEach(p => playerMap.set(p.id, p));
+    game.players.forEach(p => {
+        if (p && p.id) playerMap.set(p.id, p);
+    });
 
     // --- 💡 NEW: Generate sparse, non-stranger relationships ---
     console.log("Assigning initial non-stranger relationships...");
@@ -719,12 +723,14 @@ async function initializeLeague(onProgress) {
 
     console.log("Assigning Team Captains...");
     game.teams.forEach(team => {
-        assignTeamCaptain(team);
+        if (team) {
+            assignTeamCaptain(team);
+        }
     });
 }
 
 function refillAvailableColors() {
-    const usedColorHexes = new Set(game.teams.map(t => t.primaryColor));
+    const usedColorHexes = new Set(game.teams.filter(t => t).map(t => t.primaryColor));
     availableColors = teamColors.filter(c => !usedColorHexes.has(c.primary));
     if (availableColors.length === 0) {
         console.warn("All colors used! Resetting full color pool.");
@@ -997,7 +1003,9 @@ function addPlayerToTeam(player, team) {
         }
 
         if (!numberAssigned) {
-            console.warn(`Could not find preferred number for ${player.name} (${primaryPos}). Assigning random fallback.`);
+            const playerName = player?.name || 'Unknown Player';
+            const primaryPosName = primaryPos || 'Unknown';
+            console.warn(`Could not find preferred number for ${playerName} (${primaryPosName}). Assigning random fallback.`);
             let fallbackNumber;
             let attempts = 0;
             do {
@@ -5008,7 +5016,7 @@ function simulateWeek(options = {}) {
             const result = simulateMatchFast(match.home, match.away, options);
             if (result?.breakthroughs) {
                 result.breakthroughs.forEach(b => {
-                    if (b?.player?.teamId === game.playerTeam?.id) {
+                    if (b?.player?.teamId === game.playerTeam?.id && b?.player?.name) {
                         addMessage("Player Breakthrough!", `${b.player.name} improved ${b.attr}!`);
                     }
                 });
@@ -5128,10 +5136,12 @@ function aiManageRoster(team) {
                 // --- 💡 FIX: Re-get roster objects to check count ---
                 const newRoster = getRosterObjects(team);
                 healthyCount = newRoster.filter(p => p && p.status?.duration === 0).length;
-                console.log(`${team.name} signed temporary player ${bestFA.name}`);
+                const bestFAName = bestFA?.name || 'Unknown Player';
+                console.log(`${team.name} signed temporary player ${bestFAName}`);
             }
         } else {
-            console.log(`${team.name} failed to sign temporary player ${bestFA.name}.`);
+            const bestFAName = bestFA?.name || 'Unknown Player';
+            console.log(`${team.name} failed to sign temporary player ${bestFAName}.`);
         }
     }
     aiSetDepthChart(team);
@@ -5568,7 +5578,9 @@ function substitutePlayers(teamId, outPlayerId, inPlayerId, gameLog = null) {
     if (inSlot) {
         team.depthChart[outSlot.side][outSlot.slot] = inPlayerId;
         team.depthChart[inSlot.side][inSlot.slot] = outPlayerId;
-        const logMsg = `🔄 SUBSTITUTION: ${inPlayer.name} and ${outPlayer.name} swap positions.`;
+        const inPlayerName = inPlayer?.name || 'Unknown Player';
+        const outPlayerName = outPlayer?.name || 'Unknown Player';
+        const logMsg = `🔄 SUBSTITUTION: ${inPlayerName} and ${outPlayerName} swap positions.`;
         console.log(logMsg);
         if (gameLog && Array.isArray(gameLog)) gameLog.push(logMsg);
         return { success: true, message: 'Players swapped positions.' };
@@ -5587,7 +5599,9 @@ function substitutePlayers(teamId, outPlayerId, inPlayerId, gameLog = null) {
         });
     });
 
-    const logMsg = `🔄 SUBSTITUTION: ${inPlayer.name} enters for ${outPlayer.name}.`;
+    const inPlayerName = inPlayer?.name || 'Unknown Player';
+    const outPlayerName = outPlayer?.name || 'Unknown Player';
+    const logMsg = `🔄 SUBSTITUTION: ${inPlayerName} enters for ${outPlayerName}.`;
     console.log(logMsg);
     if (gameLog && Array.isArray(gameLog)) gameLog.push(logMsg);
     return { success: true, message: 'Substitution completed.' };
@@ -5915,7 +5929,9 @@ function loadGameState(saveKey = DEFAULT_SAVE_KEY) {
             // 💡 FIX: Repopulate the Global Player Map
             playerMap.clear();
             if (Array.isArray(game.players)) {
-                game.players.forEach(p => playerMap.set(p.id, p));
+                game.players.forEach(p => {
+                    if (p && p.id) playerMap.set(p.id, p);
+                });
             }
 
             return game;
