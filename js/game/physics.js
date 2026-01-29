@@ -18,6 +18,13 @@ export function updatePlayerPosition(pState, timeDelta) {
     // --- 0. Safety Checks ---
     if (!pState || typeof pState.x !== 'number' || typeof pState.y !== 'number') return;
     
+    // 🔧 HIGH FIX: Sanitize position from NaN/Infinity
+    if (!isFinite(pState.x) || !isFinite(pState.y)) {
+        console.warn(`⚠️ Player ${pState.id} has invalid position (${pState.x}, ${pState.y}). Resetting to (26.65, 60).`);
+        pState.x = 26.65;  // Center field
+        pState.y = 60;     // Mid-field
+    }
+    
     // Initialize vectors if missing
     if (!pState.velocity) pState.velocity = { x: 0, y: 0 };
     if (!pState.vx) pState.vx = 0; 
@@ -33,9 +40,27 @@ export function updatePlayerPosition(pState, timeDelta) {
     }
 
     // --- 2. Calculate Desired Vector ---
-    const dx = (pState.targetX || pState.x) - pState.x;
-    const dy = (pState.targetY || pState.y) - pState.y;
+    let targetX = pState.targetX || pState.x;
+    let targetY = pState.targetY || pState.y;
+    
+    // 🔧 HIGH FIX: Sanitize target coordinates
+    if (!isFinite(targetX) || !isFinite(targetY)) {
+        console.warn(`⚠️ Player ${pState.id} has invalid target (${targetX}, ${targetY}). Using current position.`);
+        targetX = pState.x;
+        targetY = pState.y;
+    }
+    
+    const dx = targetX - pState.x;
+    const dy = targetY - pState.y;
     const distToTarget = Math.sqrt(dx * dx + dy * dy);
+
+    // 🔧 HIGH FIX: Check for NaN distance
+    if (!isFinite(distToTarget)) {
+        console.warn(`⚠️ Player ${pState.id} has invalid distance calculation. Stopping movement.`);
+        pState.vx = 0;
+        pState.vy = 0;
+        return;
+    }
 
     // --- 3. Determine Max Speed ---
     // Stat 0-99 maps to approx 5.0 - 9.5 yards/sec
@@ -84,8 +109,8 @@ export function updatePlayerPosition(pState, timeDelta) {
     } else {
         // Snap if incredibly close to prevent jitter
         if (distToTarget < 0.05) {
-            pState.x = pState.targetX;
-            pState.y = pState.targetY;
+            pState.x = targetX;
+            pState.y = targetY;
             pState.vx = 0;
             pState.vy = 0;
             return;
@@ -98,9 +123,25 @@ export function updatePlayerPosition(pState, timeDelta) {
     pState.vx += (targetVx - pState.vx) * acceleration * timeDelta;
     pState.vy += (targetVy - pState.vy) * acceleration * timeDelta;
 
+    // 🔧 HIGH FIX: Sanitize velocity before applying
+    if (!isFinite(pState.vx) || !isFinite(pState.vy)) {
+        console.warn(`⚠️ Player ${pState.id} has invalid velocity (${pState.vx}, ${pState.vy}). Resetting to 0.`);
+        pState.vx = 0;
+        pState.vy = 0;
+    }
+
     // --- 6. Apply Movement ---
     pState.x += pState.vx * timeDelta;
     pState.y += pState.vy * timeDelta;
+
+    // 🔧 HIGH FIX: Final sanity check on position
+    if (!isFinite(pState.x) || !isFinite(pState.y)) {
+        console.warn(`⚠️ Player ${pState.id} moved to invalid position (${pState.x}, ${pState.y}). Reverting.`);
+        pState.x = targetX;
+        pState.y = targetY;
+        pState.vx = 0;
+        pState.vy = 0;
+    }
 
     // Update UI velocity helper
     pState.currentSpeedYPS = Math.sqrt(pState.vx * pState.vx + pState.vy * pState.vy);

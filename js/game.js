@@ -179,6 +179,22 @@ function normalizeFormationKey(formations, formationKey, defaultKey) {
 export function rebuildDepthChartFromOrder(team) {
     if (!team || !team.formations) return;
 
+    // 🔧 CRITICAL FIX: Clean up roster of non-existent players FIRST
+    if (Array.isArray(team.roster)) {
+        const validRosterBefore = team.roster.length;
+        team.roster = team.roster.filter(id => {
+            const p = getPlayer(id);
+            if (!p) {
+                console.warn(`⚠️ Removing non-existent player ${id} from ${team.name} roster`);
+                return false;
+            }
+            return true;
+        });
+        if (team.roster.length < validRosterBefore) {
+            console.log(`Roster cleanup: Removed ${validRosterBefore - team.roster.length} deleted players from ${team.name}`);
+        }
+    }
+
     // 1. Ensure Depth Order Object Exists with correct keys
     if (!team.depthOrder || Array.isArray(team.depthOrder)) {
         team.depthOrder = {
@@ -259,6 +275,12 @@ export function rebuildDepthChartFromOrder(team) {
 
     const offSlots = offenseFormations[offFormKey].slots;
 
+    // 🔧 CRITICAL FIX: Validate formation slot count matches expected structure
+    const prevOffSlots = Object.keys(team.depthChart.offense || {}).length;
+    if (prevOffSlots > 0 && prevOffSlots !== offSlots.length) {
+        console.warn(`⚠️ FORMATION DESYNC for ${team.name}: offense had ${prevOffSlots} slots, new formation has ${offSlots.length}. Resetting depth chart.`);
+    }
+
     offSlots.forEach(slot => {
         let posKey = slot.replace(/\d+/g, '');
         // Normalize Slot Names
@@ -285,6 +307,13 @@ export function rebuildDepthChartFromOrder(team) {
     team.formations.defense = defFormKey; // 🔒 Fix state
 
     const defSlots = defenseFormations[defFormKey].slots;
+
+    // 🔧 CRITICAL FIX: Validate formation slot count matches expected structure
+    const prevDefSlots = Object.keys(team.depthChart.defense || {}).length;
+    if (prevDefSlots > 0 && prevDefSlots !== defSlots.length) {
+        console.warn(`⚠️ FORMATION DESYNC for ${team.name}: defense had ${prevDefSlots} slots, new formation has ${defSlots.length}. Resetting depth chart.`);
+    }
+
     defSlots.forEach(slot => {
         let posKey = slot.replace(/\d+/g, '');
         // Normalize Slot Names
@@ -315,6 +344,24 @@ function getRosterObjects(team) {
     // Safety check: if map is empty (e.g. after load), rebuild it
     if (playerMap.size === 0 && game && game.players) {
         game.players.forEach(p => playerMap.set(p.id, p));
+    }
+
+    // 🔧 CRITICAL FIX: Remove any non-existent players from roster
+    const validIds = [];
+    const invalidIds = [];
+    
+    team.roster.forEach(id => {
+        const p = playerMap.get(id);
+        if (p) {
+            validIds.push(id);
+        } else {
+            invalidIds.push(id);
+        }
+    });
+    
+    if (invalidIds.length > 0) {
+        console.warn(`⚠️ Removing ${invalidIds.length} non-existent player IDs from ${team.name}: ${invalidIds.join(', ')}`);
+        team.roster = validIds;  // Update roster to only valid players
     }
 
     // Map roster IDs directly to player objects
@@ -821,9 +868,27 @@ function aiSetDepthChart(team) {
         'DL': [], 'LB': [], 'DB': []
     };
 
+    // 🔧 HIGH FIX: Filter out injured/busy players before sorting
+    const healthyPlayers = rosterObjs.filter(p => {
+        // Player is healthy if they have no status OR status duration is 0
+        if (!p.status || p.status.duration === 0) {
+            return true;  // Healthy
+        }
+        // Injured, busy, or suspended
+        return false;
+    });
+
+    // If all players are injured, fall back to full roster
+    const sortRoster = healthyPlayers.length > 0 ? healthyPlayers : rosterObjs;
+    
+    if (healthyPlayers.length < rosterObjs.length) {
+        const injuredCount = rosterObjs.length - healthyPlayers.length;
+        console.log(`⚠️ ${team.name}: ${injuredCount} player(s) injured/unavailable. Using depth chart with ${healthyPlayers.length} healthy players.`);
+    }
+
     // 2. Sort Roster by Overall (Best players first)
     // We use a generic 'ATH' position to just get raw talent
-    const sortedRoster = [...rosterObjs].sort((a, b) =>
+    const sortedRoster = [...sortRoster].sort((a, b) =>
         calculateOverall(b, estimateBestPosition(b)) - calculateOverall(a, estimateBestPosition(a))
     );
 
@@ -1617,6 +1682,7 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
                 height: player.attributes?.physical?.height || 68,  // Default to 5'8"
                 
                 playbookIQ: player.attributes?.mental?.playbookIQ || 50,
+                // 🔧 HIGH FIX: Initialize fatigue modifier based on stamina stat
                 fatigueModifier: fatigueMod,
 
                 // Logic State
@@ -2881,11 +2947,24 @@ function updateQBDecision(qbState, offenseStates, defenseStates, playState, offe
     if (typeof qbState.ticksOnCurrentRead === 'undefined') qbState.ticksOnCurrentRead = 0;
     if (typeof qbState.currentReadTargetSlot === 'undefined') qbState.currentReadTargetSlot = progression[0];
 
-    // --- 🔧 FIX: Safety check for empty progression ---
+    // --- 🔧 CRITICAL FIX: Safety check for empty progression with forced fallback ---
     if (!progression || progression.length === 0) {
-        // No valid targets found - QB must eat sack
-        if (gameLog) gameLog.push(`${qbState.name} has no targets and takes the sack.`);
-        return;
+        // No receivers running routes - force include ALL non-QB players as emergency fallback
+        const emergencyProgression = offenseStates
+            .filter(p => p.slot !== 'QB1')
+            .map(p => p.slot);
+        
+        if (emergencyProgression.length === 0) {
+            // Truly no receivers exist - QB takes sack
+            if (gameLog) gameLog.push(`${qbState.name} has no targets and takes the sack.`);
+            qbState.action = 'sacked';
+            return;
+        }
+        
+        // Use emergency progression (including blockers as last resort)
+        qbState.readProgression = emergencyProgression;
+        qbState.currentReadTargetSlot = emergencyProgression[0];
+        if (gameLog) gameLog.push(`⚠️ ${qbState.name} forced to use emergency read options.`);
     }
 
 
@@ -4361,14 +4440,33 @@ function findAudiblePlay(offense, desiredType, desiredTag = null) {
         offensivePlaybook[key]?.type === desiredType
     );
 
-    // --- 🔧 FIX: If no plays of desired type exist, relax constraint to ANY play in formation ---
+    // --- 🔧 HIGH FIX: Enhanced fallback logic for edge cases ---
     if (possiblePlays.length === 0) {
+        // Formation has no plays of desired type - try any play in formation
         possiblePlays = Object.keys(offensivePlaybook).filter(key =>
             key.startsWith(offenseFormationName)
         );
-        if (possiblePlays.length === 0) return null; // Formation has no plays at all (shouldn't happen)
+        
+        // If formation has no plays at all, try Balanced formation as emergency
+        if (possiblePlays.length === 0) {
+            console.warn(`⚠️ Formation "${offenseFormationName}" has no plays defined. Falling back to Balanced formation.`);
+            possiblePlays = Object.keys(offensivePlaybook).filter(key =>
+                key.startsWith('Balanced')
+            );
+        }
+        
+        // Last resort: return ANY available play
+        if (possiblePlays.length === 0) {
+            const allPlays = Object.keys(offensivePlaybook);
+            if (allPlays.length > 0) {
+                console.warn(`⚠️ No plays found for formation "${offenseFormationName}". Using random play from playbook.`);
+                return getRandom(allPlays);
+            }
+            return null; // Truly no valid plays exist (shouldn't happen in a complete game)
+        }
     }
 
+    // Try to find plays with desired tag
     if (desiredTag) {
         const taggedPlays = possiblePlays.filter(key =>
             offensivePlaybook[key]?.tags?.includes(desiredTag)
@@ -4376,7 +4474,7 @@ function findAudiblePlay(offense, desiredType, desiredTag = null) {
         if (taggedPlays.length > 0) return getRandom(taggedPlays);
     }
 
-    // Fallback to any play of the desired type
+    // Fallback to any play from the possible list
     return getRandom(possiblePlays);
 }
 
@@ -4430,6 +4528,14 @@ function aiCheckAudible(offense, offensivePlayKey, defense, defensivePlayKey, ga
                     const threatDesc = boxThreatLevel >= 4 ? 'aggressive blitz' : 'stacked box';
                     gameLog.push(`[Audible]: 🧠 ${qb.name} (IQ:${qbIQ}) diagnoses ${threatDesc} and audibles to pass!`);
                 }
+            } else {
+                // 🔧 HIGH FIX: No pass plays available - try any play as fallback
+                const fallbackPlay = findAudiblePlay(offense, null);  // Any play
+                if (fallbackPlay) {
+                    newPlayKey = fallbackPlay;
+                    didAudible = true;
+                    if (gameLog) gameLog.push(`[Audible]: ${qb.name} can't find pass option, adjusting to available play.`);
+                }
             }
         }
     }
@@ -4443,6 +4549,14 @@ function aiCheckAudible(offense, offensivePlayKey, defense, defensivePlayKey, ga
                 if (gameLog) {
                     gameLog.push(`[Audible]: 🧠 ${qb.name} (Tough:${qbToughness}) sees soft zone and audibles to run!`);
                 }
+            } else {
+                // 🔧 HIGH FIX: No run plays available - stick with pass or find any play
+                const fallbackPlay = findAudiblePlay(offense, 'pass') || findAudiblePlay(offense, null);
+                if (fallbackPlay && fallbackPlay !== offensivePlayKey) {
+                    newPlayKey = fallbackPlay;
+                    didAudible = true;
+                    if (gameLog) gameLog.push(`[Audible]: ${qb.name} can't find run option, adjusting pass play.`);
+                }
             }
         }
     }
@@ -4455,6 +4569,14 @@ function aiCheckAudible(offense, offensivePlayKey, defense, defensivePlayKey, ga
                 didAudible = true;
                 if (gameLog) {
                     gameLog.push(`[Audible]: 🧠 ${qb.name} sees aggressive man coverage, changes to checkdown!`);
+                }
+            } else {
+                // 🔧 HIGH FIX: No short pass available - try any pass play
+                const anyPassPlay = findAudiblePlay(offense, 'pass');
+                if (anyPassPlay && anyPassPlay !== offensivePlayKey) {
+                    newPlayKey = anyPassPlay;
+                    didAudible = true;
+                    if (gameLog) gameLog.push(`[Audible]: ${qb.name} adjusts to available pass option.`);
                 }
             }
         }
