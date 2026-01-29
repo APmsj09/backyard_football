@@ -87,6 +87,34 @@ const joinRequestChance = 0.03;
 // Player rating/generation helpers moved to ./game/player.js
 // (calculateOverall, calculateSlotSuitability, generatePlayer, positionOverallWeights)
 
+/**
+ * Validates and clamps formation coordinates to be within field bounds.
+ * Prevents players from spawning outside the playable field.
+ * 
+ * @param {number} x - Field width coordinate (0-53.3 yards)
+ * @param {number} y - Field length coordinate (0-120 yards)
+ * @param {string} slot - Slot name for logging (e.g., "WR1")
+ * @returns {object} {x, y} - Clamped coordinates
+ */
+function validateFormationCoordinate(x, y, slot = '') {
+    // Pre-snap players can be slightly behind the line (y can go negative by up to 10 yards)
+    // But they can't be beyond the far endzone
+    const minX = 0;
+    const maxX = FIELD_WIDTH;
+    const minY = -10;  // Pre-snap positions
+    const maxY = FIELD_LENGTH;
+    
+    const clampedX = Math.max(minX, Math.min(maxX, x));
+    const clampedY = Math.max(minY, Math.min(maxY, y));
+    
+    // Log if coordinates were out of bounds
+    if (clampedX !== x || clampedY !== y) {
+        console.warn(`⚠️ Formation coordinate out of bounds for ${slot}: (${x.toFixed(1)}, ${y.toFixed(1)}) → (${clampedX.toFixed(1)}, ${clampedY.toFixed(1)})`);
+    }
+    
+    return { x: clampedX, y: clampedY };
+}
+
 // Deep clone helper with structuredClone fallback
 function deepClone(obj) {
     try {
@@ -825,7 +853,7 @@ function simulateAIPick(team) {
     if (!team || !team.roster || !game || !game.players || !team.coach) {
         console.error(`simulateAIPick: Invalid team data or game state.`); return null;
     }
-    const ROSTER_LIMIT = 10;
+    const ROSTER_LIMIT = 12;
     if (team.roster.length >= ROSTER_LIMIT) return null;
 
     const undraftedPlayers = game.players.filter(p => p && !p.teamId);
@@ -1397,9 +1425,10 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
             let startX = ballX + relCoords[0];
             let startY = playState.lineOfScrimmage + relCoords[1];
             
-            // Clamp to field
-            startX = Math.max(0.5, Math.min(53.3 - 0.5, startX));
-            startY = Math.max(10.5, Math.min(110.0 - 0.5, startY));
+            // 🔧 FIXED: Use coordinate validation function
+            const validated = validateFormationCoordinate(startX, startY, slot);
+            startX = validated.x;
+            startY = validated.y;
 
             initialOffenseStates.push({ slot, x: startX, y: startY });
         });
@@ -1430,6 +1459,11 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
             const relCoords = formationData.coordinates[slot] || [0, 0];
             let startX = ballX + relCoords[0];
             let startY = playState.lineOfScrimmage + relCoords[1];
+            
+            // 🔧 FIXED: Validate coordinates are within field bounds
+            const validated = validateFormationCoordinate(startX, startY, slot);
+            startX = validated.x;
+            startY = validated.y;
 
             let action = 'idle';
             let assignment = isOffense ? assignments?.[slot] : defAssignments[slot];
@@ -2846,6 +2880,13 @@ function updateQBDecision(qbState, offenseStates, defenseStates, playState, offe
 
     if (typeof qbState.ticksOnCurrentRead === 'undefined') qbState.ticksOnCurrentRead = 0;
     if (typeof qbState.currentReadTargetSlot === 'undefined') qbState.currentReadTargetSlot = progression[0];
+
+    // --- 🔧 FIX: Safety check for empty progression ---
+    if (!progression || progression.length === 0) {
+        // No valid targets found - QB must eat sack
+        if (gameLog) gameLog.push(`${qbState.name} has no targets and takes the sack.`);
+        return;
+    }
 
 
     // --- 2. HELPER: GEOMETRIC TARGET ANALYSIS ---
@@ -4315,12 +4356,18 @@ function determineDefensivePlayCall(defense, offense, down, yardsToGo, ballOn, s
 function findAudiblePlay(offense, desiredType, desiredTag = null) {
     const offenseFormationName = offense.formations.offense;
 
-    const possiblePlays = Object.keys(offensivePlaybook).filter(key =>
+    let possiblePlays = Object.keys(offensivePlaybook).filter(key =>
         key.startsWith(offenseFormationName) &&
         offensivePlaybook[key]?.type === desiredType
     );
 
-    if (possiblePlays.length === 0) return null; // No plays of that type in this formation
+    // --- 🔧 FIX: If no plays of desired type exist, relax constraint to ANY play in formation ---
+    if (possiblePlays.length === 0) {
+        possiblePlays = Object.keys(offensivePlaybook).filter(key =>
+            key.startsWith(offenseFormationName)
+        );
+        if (possiblePlays.length === 0) return null; // Formation has no plays at all (shouldn't happen)
+    }
 
     if (desiredTag) {
         const taggedPlays = possiblePlays.filter(key =>
@@ -4985,6 +5032,8 @@ function assignTeamCaptain(team) {
  * Determines if the Captain makes the "Smart" call or a "Rookie" mistake.
  * Returns TRUE if the smart logic should be used.
  * Returns FALSE if the logic should degrade to random/basic.
+ * 
+ * Fixed: Uses proper probability weighting where IQ dominates (70%) and Consistency is safety (30%)
  */
 function checkCaptainDiscipline(team, gameLog) {
     const roster = getRosterObjects(team);
@@ -4995,15 +5044,22 @@ function checkCaptainDiscipline(team, gameLog) {
     const iq = captain.attributes?.mental?.playbookIQ || 50;
     const consistency = captain.attributes?.mental?.consistency || 50;
 
-    // Base mistake chance: 
-    // 99 IQ = ~1% mistake chance
-    // 50 IQ = ~15% mistake chance
-    // 20 IQ = ~40% mistake chance
-    // Modified by Consistency
+    // --- 🔧 FIXED PROBABILITY FORMULA ---
+    // IQ dominates decision-making (70% weight), Consistency is safety net (30% weight)
+    // 
+    // Examples:
+    // - QB with IQ 99, Consistency 1: 0.007 * 0.07 = 0.49% error (good decisions, unreliable)
+    // - QB with IQ 50, Consistency 50: 0.5 * 0.5 = 25% error (mediocre all around)
+    // - QB with IQ 20, Consistency 20: 0.8 * 0.8 = 64% error (poor decisions and inconsistent)
+    // - QB with IQ 99, Consistency 99: 0.007 * 0.007 = 0.005% error (elite)
+    
+    const iqErrorFactor = (100 - iq) / 100;       // Inverse: 99 IQ = 0.01, 50 IQ = 0.5, 20 IQ = 0.8
+    const consistencyErrorFactor = (100 - consistency) / 100;  // Same scale
+    
+    const mentalErrorChance = (iqErrorFactor * 0.7) + (consistencyErrorFactor * 0.3);
+    const mentalErrorChanceClamped = Math.max(0.001, Math.min(0.95, mentalErrorChance)); // Clamp to reasonable range
 
-    const mentalErrorChance = Math.max(0.01, (100 - iq) / 300) * (1 + (100 - consistency) / 100);
-
-    const isSmart = Math.random() > mentalErrorChance;
+    const isSmart = Math.random() > mentalErrorChanceClamped;
 
     if (!isSmart && gameLog && Math.random() < 0.2) {
         // Flavor text for bad calls (20% of the time they fail)
@@ -5068,7 +5124,7 @@ function advanceToOffseason() {
     console.log(`Advancing to Offseason for Year ${game.year}`);
     const retiredPlayers = []; const hofInductees = []; const developmentResults = []; const leavingPlayers = [];
     let totalVacancies = 0;
-    const ROSTER_LIMIT = 10;
+    const ROSTER_LIMIT = 12;
 
     console.log("Processing teammate relationship improvements...");
     const teammateImproveChance = 0.15;
@@ -5508,6 +5564,67 @@ function autoMakeSubstitutions(team, options = {}, gameLog = null) {
     return subsDone;
 }
 /** Changes the player team's formation for offense or defense. */
+/**
+ * Validates that formation slots match depth chart structure.
+ * Detects and logs any mismatches that could cause gameplay issues.
+ * 
+ * @param {object} team - Team object to validate
+ * @returns {object} {valid: boolean, issues: [string]}
+ */
+function validateFormationDepthChartSync(team) {
+    const issues = [];
+    
+    if (!team || !team.formations || !team.depthChart) {
+        return { valid: false, issues: ['Team missing formations or depthChart'] };
+    }
+    
+    // Check offense
+    const offFormation = team.formations.offense;
+    const offFormationData = offenseFormations[offFormation];
+    if (offFormationData && offFormationData.slots) {
+        const expectedSlots = new Set(offFormationData.slots);
+        const actualSlots = new Set(Object.keys(team.depthChart.offense || {}));
+        
+        for (const slot of expectedSlots) {
+            if (!actualSlots.has(slot)) {
+                issues.push(`Offense slot '${slot}' missing from depthChart`);
+            }
+        }
+        
+        for (const slot of actualSlots) {
+            if (!expectedSlots.has(slot)) {
+                issues.push(`Offense depthChart has extra slot '${slot}' not in formation`);
+            }
+        }
+    }
+    
+    // Check defense
+    const defFormation = team.formations.defense;
+    const defFormationData = defenseFormations[defFormation];
+    if (defFormationData && defFormationData.slots) {
+        const expectedSlots = new Set(defFormationData.slots);
+        const actualSlots = new Set(Object.keys(team.depthChart.defense || {}));
+        
+        for (const slot of expectedSlots) {
+            if (!actualSlots.has(slot)) {
+                issues.push(`Defense slot '${slot}' missing from depthChart`);
+            }
+        }
+        
+        for (const slot of actualSlots) {
+            if (!expectedSlots.has(slot)) {
+                issues.push(`Defense depthChart has extra slot '${slot}' not in formation`);
+            }
+        }
+    }
+    
+    if (issues.length > 0) {
+        console.warn(`❌ Depth Chart Sync Issues for ${team.name}:`, issues);
+    }
+    
+    return { valid: issues.length === 0, issues };
+}
+
 function changeFormation(side, formationName) {
     const team = game?.playerTeam;
     if (!team) return;
@@ -5516,6 +5633,14 @@ function changeFormation(side, formationName) {
 
     // Instead of resetting to null, we REBUILD from the definitive order
     rebuildDepthChartFromOrder(team);
+    
+    // 🔧 FIXED: Validate sync after changing formation
+    const syncCheck = validateFormationDepthChartSync(team);
+    if (!syncCheck.valid) {
+        console.warn(`⚠️ Formation/depth chart sync issues detected after changing to ${formationName}`);
+        // Attempt recovery: rebuild again
+        rebuildDepthChartFromOrder(team);
+    }
 }
 
 /** Cuts a player from the player's team roster. */
@@ -5692,5 +5817,8 @@ export {
     // Helpers
     advanceToOffseason, generateWeeklyFreeAgents, generateSchedule,
     addMessage, markMessageAsRead, getScoutedPlayerInfo, getRelationshipLevel, calculateOverall, calculateSlotSuitability,
-    substitutePlayers, autoMakeSubstitutions, aiCheckAudible, setTeamCaptain, normalizeFormationKey
+    substitutePlayers, autoMakeSubstitutions, aiCheckAudible, setTeamCaptain, normalizeFormationKey,
+    
+    // 🔧 NEW: Validation
+    validateFormationDepthChartSync
 };
