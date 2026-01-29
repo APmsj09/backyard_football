@@ -185,13 +185,15 @@ export function rebuildDepthChartFromOrder(team) {
         team.roster = team.roster.filter(id => {
             const p = getPlayer(id);
             if (!p) {
-                console.warn(`⚠️ Removing non-existent player ${id} from ${team.name} roster`);
+                const teamName = team?.name || 'Unknown Team';
+                console.warn(`⚠️ Removing non-existent player ${id} from ${teamName} roster`);
                 return false;
             }
             return true;
         });
         if (team.roster.length < validRosterBefore) {
-            console.log(`Roster cleanup: Removed ${validRosterBefore - team.roster.length} deleted players from ${team.name}`);
+            const teamName = team?.name || 'Unknown Team';
+            console.log(`Roster cleanup: Removed ${validRosterBefore - team.roster.length} deleted players from ${teamName}`);
         }
     }
 
@@ -278,7 +280,8 @@ export function rebuildDepthChartFromOrder(team) {
     // 🔧 CRITICAL FIX: Validate formation slot count matches expected structure
     const prevOffSlots = Object.keys(team.depthChart.offense || {}).length;
     if (prevOffSlots > 0 && prevOffSlots !== offSlots.length) {
-        console.warn(`⚠️ FORMATION DESYNC for ${team.name}: offense had ${prevOffSlots} slots, new formation has ${offSlots.length}. Resetting depth chart.`);
+        const teamName = team?.name || 'Unknown Team';
+        console.warn(`⚠️ FORMATION DESYNC for ${teamName}: offense had ${prevOffSlots} slots, new formation has ${offSlots.length}. Resetting depth chart.`);
     }
 
     offSlots.forEach(slot => {
@@ -311,7 +314,8 @@ export function rebuildDepthChartFromOrder(team) {
     // 🔧 CRITICAL FIX: Validate formation slot count matches expected structure
     const prevDefSlots = Object.keys(team.depthChart.defense || {}).length;
     if (prevDefSlots > 0 && prevDefSlots !== defSlots.length) {
-        console.warn(`⚠️ FORMATION DESYNC for ${team.name}: defense had ${prevDefSlots} slots, new formation has ${defSlots.length}. Resetting depth chart.`);
+        const teamName = team?.name || 'Unknown Team';
+        console.warn(`⚠️ FORMATION DESYNC for ${teamName}: defense had ${prevDefSlots} slots, new formation has ${defSlots.length}. Resetting depth chart.`);
     }
 
     defSlots.forEach(slot => {
@@ -360,7 +364,8 @@ function getRosterObjects(team) {
     });
     
     if (invalidIds.length > 0) {
-        console.warn(`⚠️ Removing ${invalidIds.length} non-existent player IDs from ${team.name}: ${invalidIds.join(', ')}`);
+        const teamName = team?.name || 'Unknown Team';
+        console.warn(`⚠️ Removing ${invalidIds.length} non-existent player IDs from ${teamName}: ${invalidIds.join(', ')}`);
         team.roster = validIds;  // Update roster to only valid players
     }
 
@@ -383,7 +388,7 @@ function setTeamCaptain(team, playerId) {
         team.captainId = playerId;
         return true;
     }
-    console.warn(`Player ${playerId} not found on team ${team.name}`);
+    console.warn(`Player ${playerId} not found on team ${team?.name || 'Unknown Team'}`);
     return false;
 }
 
@@ -883,17 +888,21 @@ function aiSetDepthChart(team) {
     
     if (healthyPlayers.length < rosterObjs.length) {
         const injuredCount = rosterObjs.length - healthyPlayers.length;
-        console.log(`⚠️ ${team.name}: ${injuredCount} player(s) injured/unavailable. Using depth chart with ${healthyPlayers.length} healthy players.`);
+        const teamName = team?.name || 'Unknown Team';
+        console.log(`⚠️ ${teamName}: ${injuredCount} player(s) injured/unavailable. Using depth chart with ${healthyPlayers.length} healthy players.`);
     }
 
     // 2. Sort Roster by Overall (Best players first)
     // We use a generic 'ATH' position to just get raw talent
-    const sortedRoster = [...sortRoster].sort((a, b) =>
-        calculateOverall(b, estimateBestPosition(b)) - calculateOverall(a, estimateBestPosition(a))
-    );
+    const sortedRoster = [...sortRoster]
+        .filter(p => p) // 🔧 Filter out any undefined players
+        .sort((a, b) =>
+            calculateOverall(b, estimateBestPosition(b)) - calculateOverall(a, estimateBestPosition(a))
+        );
 
     // 3. Distribute into Buckets
     sortedRoster.forEach(p => {
+        if (!p || !p.id) return; // 🔧 Skip any invalid player entries
         let pos = p.pos || p.favoriteOffensivePosition || 'WR';
         // Normalize
         if (['FB'].includes(pos)) pos = 'RB';
@@ -934,7 +943,10 @@ function simulateAIPick(team) {
     const bestPlayer = bestPick.player;
 
     if (bestPlayer) { addPlayerToTeam(bestPlayer, team); }
-    else { console.warn(`${team.name} failed to find a suitable player.`); }
+    else { 
+        const teamName = team?.name || 'Unknown Team';
+        console.warn(`${teamName} failed to find a suitable player.`); 
+    }
     return bestPlayer;
 }
 
