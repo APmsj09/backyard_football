@@ -694,20 +694,21 @@ async function initializeLeague(onProgress) {
         const prefOff = offenseFormations[coach.preferredOffense] ? coach.preferredOffense : 'Balanced';
         const prefDef = defenseFormations[coach.preferredDefense] ? coach.preferredDefense : '3-1-3';
 
-        const offenseFormationData = offenseFormations[prefOff];
-        const defenseFormationData = defenseFormations[prefDef];
+        // Safely resolve formation objects with sane defaults if the coach preference isn't present
+        const offenseFormationData = offenseFormations[prefOff] || offenseFormations['Balanced'];
+        const defenseFormationData = defenseFormations[prefDef] || defenseFormations['3-1-3'];
 
         if (availableColors.length === 0) availableColors = [...teamColors];
         const colorSet = availableColors.splice(getRandomInt(0, availableColors.length - 1), 1)[0];
 
         const team = {
             id: crypto.randomUUID(), name: teamName, roster: [], coach, division, wins: 0, losses: 0,
-            primaryColor: colorSet.primary,
-            secondaryColor: colorSet.secondary,
-            formations: { offense: offenseFormationData.name, defense: defenseFormationData.name },
+            primaryColor: colorSet?.primary || teamColors[0].primary,
+            secondaryColor: colorSet?.secondary || teamColors[0].secondary,
+            formations: { offense: offenseFormationData?.name || 'Balanced', defense: defenseFormationData?.name || '3-1-3' },
             depthChart: {
-                offense: Object.fromEntries(offenseFormationData.slots.map(slot => [slot, null])),
-                defense: Object.fromEntries(defenseFormationData.slots.map(slot => [slot, null]))
+                offense: Object.fromEntries((offenseFormationData?.slots || []).map(slot => [slot, null])),
+                defense: Object.fromEntries((defenseFormationData?.slots || []).map(slot => [slot, null]))
             },
             draftNeeds: 0
         };
