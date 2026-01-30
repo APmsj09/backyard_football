@@ -22,10 +22,8 @@ import {
     estimateBestPosition
 } from './game/player.js';
 
-import { computeStarterAssignments } from './ui_helpers.js';
-
-// At the top of ui.js
 import { getRandom, getRandomInt, formatHeight } from './utils.js';
+import { computeStarterAssignments } from './ui_helpers.js';
 
 // --- Visualization Constants (Must match game.js) ---
 const FIELD_LENGTH = 120;
@@ -786,7 +784,6 @@ function renderRosterSummary(roster) { // 💡 FIX: Now accepts the roster objec
         p.status?.duration === 0
     );
     // Use the shared helper to compute assignments
-    import { computeStarterAssignments } from './ui_helpers.js';
 
     const assignments = computeStarterAssignments(availablePlayers);
 
