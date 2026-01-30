@@ -3404,6 +3404,17 @@ function handleBallArrival(playState, carrier, playResult, gameLog) {
             bestCandidate.hasBall = true;
             bestCandidate.isBallCarrier = true;
 
+            // Snap ball to receiver immediately so visuals reflect the catch (prevents ball flying off)
+            ball.x = bestCandidate.x;
+            ball.y = bestCandidate.y;
+            ball.z = 0.5;
+            ball.vx = 0;
+            ball.vy = 0;
+            ball.vz = 0;
+            ball.prevX = ball.x;
+            ball.prevY = ball.y;
+            ball.targetPlayerId = bestCandidate.id;
+
             // 1. PUNT RETURN LOGIC
             if (playState.type === 'punt' && !bestCandidate.isOffense) {
                 if (gameLog) gameLog.push(`🏈 ${bestCandidate.name} catches the punt! Return started.`);
