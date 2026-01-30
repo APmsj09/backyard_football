@@ -22,6 +22,8 @@ import {
     estimateBestPosition
 } from './game/player.js';
 
+import { computeStarterAssignments } from './ui_helpers.js';
+
 // At the top of ui.js
 import { getRandom, getRandomInt, formatHeight } from './utils.js';
 
@@ -783,41 +785,20 @@ function renderRosterSummary(roster) { // 💡 FIX: Now accepts the roster objec
         p.status?.type !== 'temporary' &&
         p.status?.duration === 0
     );
-    // 2. Loop through each position we need to fill
+    // Use the shared helper to compute assignments
+    import { computeStarterAssignments } from './ui_helpers.js';
+
+    const assignments = computeStarterAssignments(availablePlayers);
+
     Object.keys(positionOverallWeights).forEach(pos => {
-
-        // 3. If no players are left in the pool, show N/A
-        if (availablePlayers.length === 0) {
+        const entry = assignments[pos];
+        if (!entry) {
             summaryHtml += `<div class="flex justify-between"><span class="font-semibold">${pos}:</span><span class="font-bold text-gray-400">N/A</span></div>`;
-            return;
-        }
-
-        // 4. Find the best player *in the available pool* for this position
-        let bestPlayer = null;
-        let bestOverall = -1;
-
-        for (const player of availablePlayers) {
-            const ovr = calculateOverall(player, pos);
-            if (ovr > bestOverall) {
-                bestOverall = ovr;
-                bestPlayer = player;
-            }
-        }
-
-        // 5. If we found a starter for this position...
-        if (bestPlayer) {
-            // ...add them to the HTML...
-            summaryHtml += `<div class="flex justify-between" title="Starter: ${bestPlayer.name} (${bestOverall} Ovr)">
-                              <span class="font-semibold">${pos}:</span>
-                              <span class="font-bold">${bestOverall}</span>
-                            </div>`;
-
-            // 6. ...and REMOVE them from the pool so they can't start at another position.
-            availablePlayers = availablePlayers.filter(p => p.id !== bestPlayer.id);
-
         } else {
-            // Fallback in case no valid player was found (shouldn't happen if pool > 0)
-            summaryHtml += `<div class="flex justify-between"><span class="font-semibold">${pos}:</span><span class="font-bold text-gray-400">N/A</span></div>`;
+            summaryHtml += `<div class="flex justify-between" title="Starter: ${entry.player.name} (${entry.ovr} Ovr)">
+                              <span class="font-semibold">${pos}:</span>
+                              <span class="font-bold">${entry.ovr}</span>
+                            </div>`;
         }
     });
 

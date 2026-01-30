@@ -3155,11 +3155,15 @@ function updateQBDecision(qbState, offenseStates, defenseStates, playState, offe
         playState.ballState.inAir = true;
         playState.ballState.throwInitiated = true;
         playState.ballState.throwerId = qbState.id;
-        playState.ballState.targetX = (qbState.x > 26.6) ? 55 : -2;
-        playState.ballState.targetY = qbState.y + 10;
+        // Keep the 'throw away' direction but clamp magnitude to avoid massive coordinates
+        const PAD = 10;
+        playState.ballState.targetX = Math.max(-PAD, Math.min(FIELD_WIDTH + PAD, (qbState.x > 26.6) ? FIELD_WIDTH + 2 : -2));
+        playState.ballState.targetY = Math.max(0, Math.min(FIELD_LENGTH, qbState.y + 10));
         playState.ballState.vx = (playState.ballState.targetX - qbState.x) / 1.5;
         playState.ballState.vy = (playState.ballState.targetY - qbState.y) / 1.5;
         playState.ballState.vz = 5;
+        playState.ballState.throwTick = playState.tick;
+        playState.ballState.releaseeTick = playState.tick;
         qbState.hasBall = false;
         return;
     }
@@ -3205,16 +3209,24 @@ function executeThrow(qbState, target, strength, accuracy, playState, gameLog, a
     aimX += Math.cos(angle) * distError;
     aimY += Math.sin(angle) * distError;
 
+    // Safety: Prevent aim points from going wildly out of reasonable bounds
+    const PAD = 10; // allow some off-field for throw-aways but limit craziness
+    aimX = Math.max(-PAD, Math.min(FIELD_WIDTH + PAD, aimX));
+    aimY = Math.max(-PAD, Math.min(FIELD_LENGTH + PAD, aimY));
+
     // Physics
     const dx = aimX - startX;
     const dy = aimY - startY;
     const dist = Math.sqrt(dx * dx + dy * dy);
-    const t = dist / ballSpeed;
+    const t = Math.max(0.1, dist / ballSpeed);
 
     playState.ballState.inAir = true;
     playState.ballState.throwInitiated = true;
     playState.ballState.throwerId = qbState.id;
     playState.ballState.targetPlayerId = target.id;
+    playState.ballState.throwTick = playState.tick;      // Track when thrown
+    playState.ballState.releaseeTick = playState.tick;   // For safety/help timing
+
     playState.ballState.x = startX;
     playState.ballState.y = startY;
     playState.ballState.z = 1.8;
@@ -3311,7 +3323,24 @@ function handleBallArrival(playState, carrier, playResult, gameLog) {
     // --- B. FIND PLAYERS IN RANGE ---
     const CATCH_RADIUS = 1.2; // Tight radius for actual hands catch
 
-    // Find all players close enough (XY distance)
+    // Helper: Minimum distance from point to segment
+    const pointToSegmentDist = (px, py, x1, y1, x2, y2) => {
+        const A = px - x1;
+        const B = py - y1;
+        const C = x2 - x1;
+        const D = y2 - y1;
+        const dot = A * C + B * D;
+        const lenSq = C * C + D * D;
+        let param = lenSq !== 0 ? dot / lenSq : -1;
+        if (param < 0) param = 0; else if (param > 1) param = 1;
+        const xx = x1 + param * C;
+        const yy = y1 + param * D;
+        const dx = px - xx;
+        const dy = py - yy;
+        return Math.sqrt(dx * dx + dy * dy);
+    };
+
+    // Find all players close enough (XY distance or along segment travelled this tick)
     const playersInRange = playState.activePlayers.filter(p => {
         // 🛑 RULE: Thrower cannot catch their own pass immediately (Wait 50 ticks)
         if (p.id === ball.throwerId && playState.tick < 50) return false;
@@ -3319,8 +3348,16 @@ function handleBallArrival(playState, carrier, playResult, gameLog) {
         // 🛑 RULE: Kicking team cannot catch a punt in the air (Interference/Downing rule)
         if (playState.type === 'punt' && p.isOffense) return false;
 
-        const dist = Math.sqrt((p.x - ball.x)**2 + (p.y - ball.y)**2);
-        return dist <= CATCH_RADIUS;
+        const distNow = Math.sqrt((p.x - ball.x)**2 + (p.y - ball.y)**2);
+        if (distNow <= CATCH_RADIUS) return true;
+
+        // If ball moved this tick, check if it passed near the player between prev and current positions
+        if (typeof ball.prevX === 'number' && typeof ball.prevY === 'number') {
+            const segDist = pointToSegmentDist(p.x, p.y, ball.prevX, ball.prevY, ball.x, ball.y);
+            if (segDist <= CATCH_RADIUS) return true;
+        }
+
+        return false;
     });
 
     // --- C. RESOLVE CATCH ATTEMPT ---
@@ -3756,6 +3793,11 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
 
             // --- E. BALL PHYSICS & CATCHING ---
             if (ballPos.inAir) {
+                // Store previous pos (for segment-based catch checks)
+                ballPos.prevX = ballPos.x;
+                ballPos.prevY = ballPos.y;
+                ballPos.prevZ = ballPos.z;
+
                 // Velocity & Gravity
                 ballPos.x += (ballPos.vx || 0) * timeDelta;
                 ballPos.y += (ballPos.vy || 0) * timeDelta;
@@ -4010,6 +4052,13 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
 
     // Apply Stats
     applyStatEvents(playState.statEvents);
+
+    // Ensure no player ended beyond the field bounds (prevents post-play roaming off-field visuals)
+    playState.activePlayers.forEach(p => {
+        p.x = Math.max(0.5, Math.min(FIELD_WIDTH - 0.5, p.x));
+        p.y = Math.max(0.0, Math.min(FIELD_LENGTH, p.y));
+    });
+
     playState.activePlayers.forEach(p => resetPlayerRuntimeState(p));
 
     return {
@@ -6042,7 +6091,8 @@ export {
     simulateWeek, 
     simulateMatchFast,    // Replaces simulateGame for CPU matches
     simulateLivePlayStep, // The new engine step function
-    
+    resolvePlay,           // Export resolvePlay for testing/play harness
+
     // Helpers
     advanceToOffseason, generateWeeklyFreeAgents, generateSchedule,
     addMessage, markMessageAsRead, getScoutedPlayerInfo, getRelationshipLevel, calculateOverall, calculateSlotSuitability,
