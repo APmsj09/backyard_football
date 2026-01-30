@@ -765,17 +765,21 @@ function createPlayerTeam(teamName) {
     const division = div0Count <= div1Count ? divisionNames[0] : divisionNames[1];
 
     // 💡 FIX: Updated to match data.js keys
-    const defaultOffense = 'Balanced';
-    const defaultDefense = '3-1-3';
+    let defaultOffense = 'Balanced';
+    let defaultDefense = '3-1-3';
     
-    // Safety check in case data.js isn't loaded yet
+    // Safety / fallback in case data.js formations are missing or keys changed
     if (!offenseFormations[defaultOffense]) {
-        console.error(`Critical: Formation ${defaultOffense} not found in data.js`);
-        return;
+        console.warn(`Warning: Formation ${defaultOffense} not found in data.js; falling back to first available offense formation.`);
+        defaultOffense = Object.keys(offenseFormations)[0] || defaultOffense;
+    }
+    if (!defenseFormations[defaultDefense]) {
+        console.warn(`Warning: Formation ${defaultDefense} not found in data.js; falling back to first available defense formation.`);
+        defaultDefense = Object.keys(defenseFormations)[0] || defaultDefense;
     }
 
-    const defaultOffenseSlots = offenseFormations[defaultOffense].slots;
-    const defaultDefenseSlots = defenseFormations[defaultDefense].slots;
+    const defaultOffenseSlots = offenseFormations[defaultOffense]?.slots || [];
+    const defaultDefenseSlots = defenseFormations[defaultDefense]?.slots || [];
 
     const colorSet = getUniqueColor();
 
@@ -4310,37 +4314,58 @@ function determineDefensiveFormation(defense, offenseFormationName, down, yardsT
     const personnel = offData ? offData.personnel : { WR: 2, RB: 1 };
     const wrCount = personnel.WR || 2;
     const heavyCount = (personnel.RB || 1) + (personnel.TE || 0);
-    const coachPref = defense.coach?.preferredDefense || '3-1-3';
+    let coachPref = defense.coach?.preferredDefense || null;
+    if (!coachPref || !defenseFormations[coachPref]) coachPref = null; // ensure validity
+
+    const defEntries = Object.entries(defenseFormations);
+
+    const pickMax = (scoreFn) => {
+        let best = null; let bestScore = -Infinity;
+        for (const [key, val] of defEntries) {
+            const score = scoreFn(val);
+            if (score > bestScore) { bestScore = score; best = key; }
+        }
+        return best;
+    };
 
     // --- SCENARIO A: CAPTAIN IS SHARP (Smart Counters) ---
     if (captainIsSharp) {
 
         // 1. Situational Overrides
-        if (yardsToGo <= 2) return '4-2-1'; // Goal Line -> Run Stop
+        if (yardsToGo <= 2) {
+            // Goal line / short yardage -> prefer heavy front (max DL + LB)
+            return pickMax(v => (v.personnel?.DL || 0) + (v.personnel?.LB || 0)) || coachPref || Object.keys(defenseFormations)[0];
+        }
+
         if ((down === 3 && yardsToGo > 8) || (down === 4 && yardsToGo > 5)) {
-            return wrCount >= 3 ? '2-3-2' : '4-1-2'; // Passing Down -> Coverage
+            // Passing down -> prefer more DBs
+            const candidate = pickMax(v => (v.personnel?.DB || 0));
+            return candidate || coachPref || Object.keys(defenseFormations)[0];
         }
 
         // 4. Personnel Matching
         if (wrCount >= 4) {
-            // EMPTY SET (4+ WRs) -> MUST use Dime (3-0-4)
-            // Anything else is a mismatch.
-            return '3-0-4';
+            // Heavy passing -> prefer formation with DB >= 4 if available, else max DB
+            const d4 = defEntries.find(([k, v]) => (v.personnel?.DB || 0) >= 4);
+            return (d4 && d4[0]) || pickMax(v => (v.personnel?.DB || 0)) || coachPref || Object.keys(defenseFormations)[0];
         }
 
         if (wrCount === 3) {
-            // SPREAD (3 WRs) -> Nickel (4-1-2) or Dime (3-0-4)
-            if (coachPref === '3-0-4' || coachPref === '4-1-2') return coachPref;
-            return '4-1-2'; // Default to Nickel
+            // Spread -> prefer formation with DB >=3 or a high DB count
+            const d3 = defEntries.find(([k, v]) => (v.personnel?.DB || 0) >= 3);
+            if (d3) return d3[0];
+            return pickMax(v => (v.personnel?.DB || 0)) || coachPref || Object.keys(defenseFormations)[0];
         }
 
         if (heavyCount >= 2) {
             // POWER (2 RBs) -> Heavy Front
-            if (coachPref === '4-2-1') return coachPref;
-            return '4-2-1';
+            const heavy = pickMax(v => (v.personnel?.DL || 0) + (v.personnel?.LB || 0));
+            return heavy || coachPref || Object.keys(defenseFormations)[0];
         }
-        // Standard -> Coach's Base
-        return coachPref;
+
+        // Standard -> Coach's Base (if valid) else pick a balanced default
+        if (coachPref) return coachPref;
+        return pickMax(v => -Math.abs((v.personnel?.WR || 0) - wrCount)) || Object.keys(defenseFormations)[0];
     }
 
     // --- SCENARIO B: CAPTAIN IS CONFUSED (Mistakes) ---
@@ -4350,12 +4375,12 @@ function determineDefensiveFormation(defense, offenseFormationName, down, yardsT
 
         // 50% chance they just stick to the "Base Defense" regardless of situation
         if (Math.random() < 0.5) {
-            return '3-1-3';
+            // Stick to the team's current base defense if valid, else fall back to a reasonable default
+            return (defense.formations?.defense && defenseFormations[defense.formations.defense]) ? defense.formations.defense : (coachPref || Object.keys(defenseFormations)[0]);
         }
 
-        // 50% chance they guess randomly (Bad!)
-        // This might result in a 2-3-2 Dime defense against a Goal Line run.
-        const allFormations = ['3-1-3', '4-2-1', '2-3-2', '4-1-2', '4-0-3'];
+        // 50% chance they guess randomly (Bad!) - pick a random available formation key
+        const allFormations = Object.keys(defenseFormations);
         return getRandom(allFormations);
     }
 }
@@ -4365,9 +4390,34 @@ function determineDefensiveFormation(defense, offenseFormationName, down, yardsT
  */
 function determineDefensivePlayCall(defense, offense, down, yardsToGo, ballOn, scoreDiff, gameLog, drivesRemaining) {
     const defenseFormationName = defense.formations.defense;
-    const availablePlays = Object.keys(defensivePlaybook).filter(key =>
-        defensivePlaybook[key]?.compatibleFormations?.includes(defenseFormationName)
-    );
+    // Helper: Match a formation against a set of minimum personnel criteria
+    const formationMatchesCriteria = (form, criteria) => {
+        if (!form || !criteria) return false;
+        const p = form.personnel || {};
+        const front = (p.DL || 0) + (p.LB || 0);
+        if (criteria.minDL && (p.DL || 0) < criteria.minDL) return false;
+        if (criteria.minLB && (p.LB || 0) < criteria.minLB) return false;
+        if (criteria.minDB && (p.DB || 0) < criteria.minDB) return false;
+        if (criteria.minWR && (p.WR || 0) < criteria.minWR) return false;
+        if (criteria.minFront && front < criteria.minFront) return false;
+        return true;
+    };
+
+    const isPlayCompatibleWithDefense = (play, formationName) => {
+        if (!play) return false;
+        // 1) Legacy explicit list
+        if (Array.isArray(play.compatibleFormations) && play.compatibleFormations.includes(formationName)) return true;
+        // 2) Criteria-based compatibility
+        if (play.compatibleCriteria) {
+            const form = defenseFormations[formationName];
+            if (formationMatchesCriteria(form, play.compatibleCriteria)) return true;
+        }
+        // 3) If neither field is present, treat as generic (available everywhere)
+        if (!play.hasOwnProperty('compatibleFormations') && !play.hasOwnProperty('compatibleCriteria')) return true;
+        return false;
+    };
+
+    const availablePlays = Object.keys(defensivePlaybook).filter(key => isPlayCompatibleWithDefense(defensivePlaybook[key], defenseFormationName));
 
     if (availablePlays.length === 0) return 'Cover_2_Zone_3-1-3';
 
@@ -5946,6 +5996,34 @@ function getPlayer(id) {
     if (typeof playerMap !== 'undefined') return playerMap.get(id);
     return game?.players?.find(p => p.id === id);
 }
+
+// --- Helper exports for testing & playbook checks ---
+export function formationMatchesCriteria(form, criteria) {
+    if (!form || !criteria) return false;
+    const p = form.personnel || {};
+    const front = (p.DL || 0) + (p.LB || 0);
+    if (criteria.minDL && (p.DL || 0) < criteria.minDL) return false;
+    if (criteria.minLB && (p.LB || 0) < criteria.minLB) return false;
+    if (criteria.minDB && (p.DB || 0) < criteria.minDB) return false;
+    if (criteria.minWR && (p.WR || 0) < criteria.minWR) return false;
+    if (criteria.minFront && front < criteria.minFront) return false;
+    return true;
+}
+
+export function isPlayCompatibleWithDefense(play, formationName) {
+    if (!play) return false;
+    // 1) Legacy explicit list
+    if (Array.isArray(play.compatibleFormations) && play.compatibleFormations.includes(formationName)) return true;
+    // 2) Criteria-based compatibility
+    if (play.compatibleCriteria) {
+        const form = defenseFormations[formationName];
+        if (formationMatchesCriteria(form, play.compatibleCriteria)) return true;
+    }
+    // 3) If neither field is present, treat as generic (available everywhere)
+    if (!play.hasOwnProperty('compatibleFormations') && !play.hasOwnProperty('compatibleCriteria')) return true;
+    return false;
+}
+
 // =============================================================
 // --- EXPORTS ---
 // =============================================================
@@ -5969,6 +6047,7 @@ export {
     advanceToOffseason, generateWeeklyFreeAgents, generateSchedule,
     addMessage, markMessageAsRead, getScoutedPlayerInfo, getRelationshipLevel, calculateOverall, calculateSlotSuitability,
     substitutePlayers, autoMakeSubstitutions, aiCheckAudible, setTeamCaptain, normalizeFormationKey,
+
     
     // 🔧 NEW: Validation
     validateFormationDepthChartSync

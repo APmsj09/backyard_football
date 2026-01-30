@@ -540,31 +540,32 @@ export const defenseFormations = {
 // --- DEFENSIVE PLAYBOOK ---
 export const defensivePlaybook = {
     // --- 3-1-3 ---
-    'Cover_1_Man_3-1-3': { name: 'Cover 1 Man', compatibleFormations: ['3-1-3'], tags: ['man', 'cover1'], assignments: { 'DL1': 'pass_rush', 'DL2': 'pass_rush', 'DL3': 'pass_rush', 'LB1': 'man_cover_RB1', 'DB1': 'man_cover_WR1', 'DB2': 'man_cover_WR2', 'DB3': 'zone_deep_middle' } },
-    'Cover_3_Zone_3-1-3': { name: 'Cover 3 Zone', compatibleFormations: ['3-1-3'], tags: ['zone', 'cover3', 'safeZone'], assignments: { 'DL1': 'pass_rush', 'DL2': 'pass_rush', 'DL3': 'pass_rush', 'LB1': 'zone_hook_curl_middle', 'DB1': 'zone_deep_third_left', 'DB2': 'zone_deep_third_right', 'DB3': 'zone_deep_middle' } },
-    'Zone_Blitz_3-1-3': { name: 'Zone Blitz', compatibleFormations: ['3-1-3'], tags: ['zone', 'blitz'], assignments: { 'DL1': 'pass_rush', 'DL2': 'pass_rush', 'DL3': 'pass_rush', 'LB1': 'blitz_gap', 'DB1': 'zone_flat_left', 'DB2': 'zone_flat_right', 'DB3': 'zone_deep_middle' } },
+    'Cover_1_Man_3-1-3': { name: 'Cover 1 Man', compatibleFormations: ['3-1-4'], compatibleCriteria: { minDL: 3, minLB: 1, minDB: 2 }, tags: ['man', 'cover1'], assignments: { 'DL1': 'pass_rush', 'DL2': 'pass_rush', 'DL3': 'pass_rush', 'LB1': 'man_cover_RB1', 'DB1': 'man_cover_WR1', 'DB2': 'man_cover_WR2', 'DB3': 'zone_deep_middle' } },
+    'Cover_3_Zone_3-1-3': { name: 'Cover 3 Zone', compatibleFormations: ['3-1-4'], compatibleCriteria: { minDL: 3, minDB: 3 }, tags: ['zone', 'cover3', 'safeZone'], assignments: { 'DL1': 'pass_rush', 'DL2': 'pass_rush', 'DL3': 'pass_rush', 'LB1': 'zone_hook_curl_middle', 'DB1': 'zone_deep_third_left', 'DB2': 'zone_deep_third_right', 'DB3': 'zone_deep_middle' } },
+    'Zone_Blitz_3-1-3': { name: 'Zone Blitz', compatibleFormations: ['3-1-4'], compatibleCriteria: { minDL: 3, minLB: 1 }, tags: ['zone', 'blitz'], assignments: { 'DL1': 'pass_rush', 'DL2': 'pass_rush', 'DL3': 'pass_rush', 'LB1': 'blitz_gap', 'DB1': 'zone_flat_left', 'DB2': 'zone_flat_right', 'DB3': 'zone_deep_middle' } },
 
     // --- 4-2-1 (Run Stop) ---
-    'GoalLine_RunStuff': { name: 'Goal Line Stuff', compatibleFormations: ['4-2-1'], tags: ['runStop', 'blitz'], assignments: { 'DL1': 'run_edge_left', 'DL2': 'run_gap_A_left', 'DL3': 'run_gap_A_right', 'DL4': 'run_edge_right', 'LB1': 'blitz_gap', 'LB2': 'blitz_gap', 'DB1': 'run_support' } },
-    'Cover_0_Blitz_4-2-1': { name: 'Cover 0 All Out', compatibleFormations: ['4-2-1'], tags: ['man', 'blitz', 'cover0'], assignments: { 'DL1': 'pass_rush', 'DL2': 'pass_rush', 'DL3': 'pass_rush', 'DL4': 'pass_rush', 'LB1': 'blitz_gap', 'LB2': 'blitz_edge', 'DB1': 'man_cover_WR1' } },
+    'GoalLine_RunStuff': { name: 'Goal Line Stuff', compatibleFormations: ['4-2-2'], compatibleCriteria: { minDL: 4, minLB: 1 }, tags: ['runStop', 'blitz'], assignments: { 'DL1': 'run_edge_left', 'DL2': 'run_gap_A_left', 'DL3': 'run_gap_A_right', 'DL4': 'run_edge_right', 'LB1': 'blitz_gap', 'LB2': 'blitz_gap', 'DB1': 'run_support' } },
+    'Cover_0_Blitz_4-2-1': { name: 'Cover 0 All Out', compatibleFormations: ['4-2-2'], compatibleCriteria: { minDL: 4, minLB: 2 }, tags: ['man', 'blitz', 'cover0'], assignments: { 'DL1': 'pass_rush', 'DL2': 'pass_rush', 'DL3': 'pass_rush', 'DL4': 'pass_rush', 'LB1': 'blitz_gap', 'LB2': 'blitz_edge', 'DB1': 'man_cover_WR1' } },
 
     // --- 2-3-2 (Nickel) ---
-    'Cover_2_Zone_2-3-2': { name: 'Tampa 2', compatibleFormations: ['2-3-2'], tags: ['zone', 'cover2'], assignments: { 'DL1': 'pass_rush', 'DL2': 'pass_rush', 'LB1': 'zone_flat_left', 'LB2': 'zone_deep_middle', 'LB3': 'zone_flat_right', 'DB1': 'zone_deep_half_left', 'DB2': 'zone_deep_half_right' } },
-    'Double_A_Gap_Blitz': { name: 'Double A Gap Blitz', compatibleFormations: ['2-3-2'], tags: ['blitz', 'man'], assignments: { 'DL1': 'pass_rush', 'DL2': 'pass_rush', 'LB1': 'man_cover_RB1', 'LB2': 'blitz_gap', 'LB3': 'blitz_gap', 'DB1': 'man_cover_WR1', 'DB2': 'man_cover_WR2' } },
+    'Cover_2_Zone_2-3-2': { name: 'Tampa 2', compatibleFormations: ['2-3-3'], compatibleCriteria: { minLB: 3, minDB: 2 }, tags: ['zone', 'cover2'], assignments: { 'DL1': 'pass_rush', 'DL2': 'pass_rush', 'LB1': 'zone_flat_left', 'LB2': 'zone_deep_middle', 'LB3': 'zone_flat_right', 'DB1': 'zone_deep_half_left', 'DB2': 'zone_deep_half_right' } },
+    'Double_A_Gap_Blitz': { name: 'Double A Gap Blitz', compatibleFormations: ['2-3-3'], compatibleCriteria: { minDL: 2, minLB: 3, minDB: 2 }, tags: ['blitz', 'man'], assignments: { 'DL1': 'pass_rush', 'DL2': 'pass_rush', 'LB1': 'man_cover_RB1', 'LB2': 'blitz_gap', 'LB3': 'blitz_gap', 'DB1': 'man_cover_WR1', 'DB2': 'man_cover_WR2' } },
 
     // --- 4-0-3 (Prevent) ---
-    'Cover_4_Quarters': { name: 'Cover 4 Quarters', compatibleFormations: ['4-0-3'], tags: ['zone', 'cover4', 'safeZone'], assignments: { 'DL1': 'pass_rush', 'DL2': 'pass_rush', 'DL3': 'pass_rush', 'DL4': 'pass_rush', 'DB1': 'zone_deep_third_left', 'DB2': 'zone_deep_third_right', 'DB3': 'zone_deep_middle' } },
-    'Victory_Prevent': { name: 'Victory Prevent', compatibleFormations: ['4-0-3'], tags: ['prevent', 'zone'], assignments: { 'DL1': 'spy_QB', 'DL2': 'pass_rush', 'DL3': 'pass_rush', 'DL4': 'spy_QB', 'DB1': 'zone_deep_half_left', 'DB2': 'zone_deep_half_right', 'DB3': 'zone_deep_middle' } },
+    'Cover_4_Quarters': { name: 'Cover 4 Quarters', compatibleFormations: ['4-1-3'], compatibleCriteria: { minDL: 4, minDB: 3 }, tags: ['zone', 'cover4', 'safeZone'], assignments: { 'DL1': 'pass_rush', 'DL2': 'pass_rush', 'DL3': 'pass_rush', 'DL4': 'pass_rush', 'DB1': 'zone_deep_third_left', 'DB2': 'zone_deep_third_right', 'DB3': 'zone_deep_middle' } },
+    'Victory_Prevent': { name: 'Victory Prevent', compatibleFormations: ['4-1-3'], compatibleCriteria: { minDL: 4, minDB: 3 }, tags: ['prevent', 'zone'], assignments: { 'DL1': 'spy_QB', 'DL2': 'pass_rush', 'DL3': 'pass_rush', 'DL4': 'spy_QB', 'DB1': 'zone_deep_half_left', 'DB2': 'zone_deep_half_right', 'DB3': 'zone_deep_middle' } },
 
     // --- Special ---
-    'Punt_Return_Return': { name: 'Punt Return', compatibleFormations: ['Punt_Return'], tags: ['specialTeams'], assignments: { 'DL1': 'pass_rush', 'DL2': 'pass_rush', 'LB1': 'run_block', 'LB2': 'run_block', 'DB1': 'punt_return', 'DB2': 'punt_return', 'DB3': 'punt_return' } },
+    'Punt_Return_Return': { name: 'Punt Return', compatibleFormations: ['Punt_Return'], compatibleCriteria: { minDL: 2, minLB: 2, minDB: 3 }, tags: ['specialTeams'], assignments: { 'DL1': 'pass_rush', 'DL2': 'pass_rush', 'LB1': 'run_block', 'LB2': 'run_block', 'DB1': 'punt_return', 'DB2': 'punt_return', 'DB3': 'punt_return' } },
     // --- 4-1-2 (Nickel Hybrid) Plays ---
 
     'Cover_2_Zone_4-1-2': {
         name: 'Cover 2 Invert (4-1-2)',
         concept: 'Zone',
         blitz: false,
-        compatibleFormations: ['4-1-2'],
+        compatibleFormations: ['4-1-3'],
+        compatibleCriteria: { minDL: 4, minLB: 1, minDB: 2 },
         tags: ['zone', 'cover2', 'safeZone'],
         assignments: {
             'DL1': 'pass_rush', 'DL2': 'pass_rush', 'DL3': 'pass_rush', 'DL4': 'pass_rush',
@@ -578,7 +579,8 @@ export const defensivePlaybook = {
         name: 'Cover 3 Buzz (4-1-2)',
         concept: 'Zone',
         blitz: false,
-        compatibleFormations: ['4-1-2'],
+        compatibleFormations: ['4-1-3'],
+        compatibleCriteria: { minDL: 4, minLB: 1, minDB: 2 },
         tags: ['zone', 'cover3'],
         assignments: {
             'DL1': 'pass_rush', 'DL2': 'pass_rush', 'DL3': 'pass_rush', 'DL4': 'pass_rush',
@@ -592,7 +594,8 @@ export const defensivePlaybook = {
         name: 'Cover 1 Man Free (4-1-2)',
         concept: 'Man',
         blitz: false,
-        compatibleFormations: ['4-1-2'],
+        compatibleFormations: ['4-1-3'],
+        compatibleCriteria: { minDL: 4, minLB: 1, minDB: 2 },
         tags: ['man', 'cover1'],
         assignments: {
             'DL1': 'pass_rush', 'DL2': 'pass_rush', 'DL3': 'pass_rush', 'DL4': 'pass_rush',
@@ -610,7 +613,8 @@ export const defensivePlaybook = {
         name: 'Double A-Gap Blitz (4-1-2)',
         concept: 'Man',
         blitz: true,
-        compatibleFormations: ['4-1-2'],
+        compatibleFormations: ['4-1-3'],
+        compatibleCriteria: { minDL: 4, minLB: 1, minDB: 2 },
         tags: ['blitz', 'man', 'aggressive'],
         assignments: {
             'DL1': 'pass_rush', 'DL4': 'pass_rush', // Ends contain
@@ -626,7 +630,8 @@ export const defensivePlaybook = {
         name: 'LB Spy (4-1-2)',
         concept: 'Zone',
         blitz: false,
-        compatibleFormations: ['4-1-2'],
+        compatibleFormations: ['4-1-3'],
+        compatibleCriteria: { minDL: 4, minLB: 1, minDB: 2 },
         tags: ['zone', 'safeZone', 'spy'],
         assignments: {
             'DL1': 'pass_rush', 'DL2': 'pass_rush', 'DL3': 'pass_rush', 'DL4': 'pass_rush',
@@ -641,7 +646,8 @@ export const defensivePlaybook = {
         name: 'Cover 2 Hard Flat',
         concept: 'Zone',
         blitz: false,
-        compatibleFormations: ['4-1-2'],
+        compatibleFormations: ['4-1-3'],
+        compatibleCriteria: { minDL: 4, minLB: 1, minDB: 2 },
         tags: ['zone', 'cover2', 'hardFlat', 'press'], // 'hardFlat' tells AI to jump short routes
         assignments: {
             'DL1': 'pass_rush', 'DL2': 'pass_rush', 'DL3': 'pass_rush', 'DL4': 'pass_rush',
@@ -654,7 +660,8 @@ export const defensivePlaybook = {
         name: '2 Man Under (Press)',
         concept: 'Man',
         blitz: false,
-        compatibleFormations: ['4-1-2'],
+        compatibleFormations: ['4-1-3'],
+        compatibleCriteria: { minDL: 4, minLB: 1, minDB: 2 },
         tags: ['man', 'cover2', 'press'],
         assignments: {
             'DL1': 'pass_rush', 'DL2': 'pass_rush', 'DL3': 'pass_rush', 'DL4': 'pass_rush',
@@ -668,7 +675,8 @@ export const defensivePlaybook = {
         name: 'Cover 4 Palms (3-0-4)',
         concept: 'Zone',
         blitz: false,
-        compatibleFormations: ['3-0-4'],
+        compatibleFormations: ['3-0-5'],
+        compatibleCriteria: { minDL: 3, minDB: 4 },
         tags: ['zone', 'cover4', 'safeZone'],
         assignments: {
             'DL1': 'pass_rush', 'DL2': 'pass_rush', 'DL3': 'pass_rush',
@@ -682,7 +690,8 @@ export const defensivePlaybook = {
         name: 'Man Lock (3-0-4)',
         concept: 'Man',
         blitz: false,
-        compatibleFormations: ['3-0-4'],
+        compatibleFormations: ['3-0-5'],
+        compatibleCriteria: { minDL: 3, minDB: 4 },
         tags: ['man', 'cover1'],
         assignments: {
             'DL1': 'pass_rush', 'DL2': 'pass_rush', 'DL3': 'pass_rush',
@@ -696,8 +705,7 @@ export const defensivePlaybook = {
         name: 'Slot Corner Blitz',
         concept: 'Man',
         blitz: true,
-        compatibleFormations: ['3-0-4'],
-        tags: ['blitz', 'man'],
+        compatibleFormations: ['3-0-5'],        compatibleCriteria: { minDL: 3, minDB: 4 },        tags: ['blitz', 'man'],
         assignments: {
             'DL1': 'pass_rush', 'DL2': 'pass_rush', 'DL3': 'pass_rush',
             'DB1': 'man_cover_WR1',
