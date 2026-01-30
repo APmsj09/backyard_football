@@ -3386,6 +3386,14 @@ function handleBallArrival(playState, carrier, playResult, gameLog) {
 
         const isDefense = !bestCandidate.isOffense;
 
+        // Logging helper to avoid duplicate consecutive messages
+        const pushLog = (m) => {
+            if (!gameLog) return;
+            const last = gameLog[gameLog.length - 1];
+            if (last === m) return;
+            gameLog.push(m);
+        };
+
         // Base Chance Calculation
         let catchScore = (catching * 0.7) + (agility * 0.3);
 
@@ -3417,7 +3425,7 @@ function handleBallArrival(playState, carrier, playResult, gameLog) {
 
             // 1. PUNT RETURN LOGIC
             if (playState.type === 'punt' && !bestCandidate.isOffense) {
-                if (gameLog) gameLog.push(`🏈 ${bestCandidate.name} catches the punt! Return started.`);
+                pushLog(`🏈 ${bestCandidate.name} catches the punt! Return started.`);
                 playState.possessionChanged = true;
                 playState.returnStartY = bestCandidate.y;
                 bestCandidate.action = 'run_path';
@@ -3428,7 +3436,7 @@ function handleBallArrival(playState, carrier, playResult, gameLog) {
 
             // 2. INTERCEPTION LOGIC
             if (isDefense) {
-                if (gameLog) gameLog.push(`❗ INTERCEPTION! ${bestCandidate.name} picks it off!`);
+                pushLog(`❗ INTERCEPTION! ${bestCandidate.name} picks it off!`);
                 
                 playState.interceptionOccurred = true;
                 playState.possessionChanged = true;
@@ -3444,7 +3452,7 @@ function handleBallArrival(playState, carrier, playResult, gameLog) {
             }
 
             // 3. OFFENSIVE CATCH LOGIC
-            if (gameLog) gameLog.push(`👍 CATCH! ${bestCandidate.name} grabs it!`);
+            pushLog(`👍 CATCH! ${bestCandidate.name} grabs it!`);
             bestCandidate.action = 'run_path';
             
             // Calculate pass yards (from LOS to catch point)
@@ -3460,18 +3468,30 @@ function handleBallArrival(playState, carrier, playResult, gameLog) {
             // --- DROP / SWAT ---
             // Ball bounces off hands
             ball.isLoose = true; // Briefly loose? Or dead?
-            // Usually drops hit ground immediately. 
-            // We give it a small bump velocity to simulate the bounce off pads
-            ball.vz = 2.0; 
-            ball.vx += (Math.random() - 0.5) * 2;
-            ball.vy += (Math.random() - 0.5) * 2;
 
             if (isDefense) {
-                if (gameLog) gameLog.push(`🚫 ${bestCandidate.name} swats the pass away!`);
-                // Swats on 4th down? Handled by ground logic below.
+                // Prevent repeated swat effects/logs from the same player within 1 tick
+                const last = ball.lastInteraction;
+                if (!(last && last.playerId === bestCandidate.id && last.type === 'swat' && (playState.tick - last.tick) <= 1)) {
+                    pushLog(`🚫 ${bestCandidate.name} swats the pass away!`);
+                    // Apply swat velocity bump only once
+                    ball.isLoose = true; // Briefly loose? Or dead?
+                    ball.vz = 2.0;
+                    ball.vx += (Math.random() - 0.5) * 2;
+                    ball.vy += (Math.random() - 0.5) * 2;
+                    ball.lastInteraction = { tick: playState.tick, playerId: bestCandidate.id, type: 'swat' };
+                }
             } else {
-                if (gameLog) gameLog.push(`❌ ${bestCandidate.name} drops the pass!`);
-                playState.statEvents.push({ type: 'drop', playerId: bestCandidate.id });
+                const last = ball.lastInteraction;
+                if (!(last && last.playerId === bestCandidate.id && last.type === 'drop' && (playState.tick - last.tick) <= 1)) {
+                    pushLog(`❌ ${bestCandidate.name} drops the pass!`);
+                    playState.statEvents.push({ type: 'drop', playerId: bestCandidate.id });
+                    ball.isLoose = true; // ensure loose
+                    ball.vz = 2.0;
+                    ball.vx += (Math.random() - 0.5) * 2;
+                    ball.vy += (Math.random() - 0.5) * 2;
+                    ball.lastInteraction = { tick: playState.tick, playerId: bestCandidate.id, type: 'drop' };
+                }
             }
             // Note: We do NOT set playIsLive=false here. We wait for it to hit ground below.
         }
@@ -3814,6 +3834,10 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
                 ballPos.y += (ballPos.vy || 0) * timeDelta;
                 ballPos.z += (ballPos.vz || 0) * timeDelta;
                 ballPos.vz = (ballPos.vz || 0) - 9.8 * timeDelta;
+
+                // Clamp ball to field bounds as a safety so visuals never show it out-of-bounds
+                ballPos.x = Math.max(0.5, Math.min(FIELD_WIDTH - 0.5, ballPos.x));
+                ballPos.y = Math.max(0.0, Math.min(FIELD_LENGTH, ballPos.y));
 
                 // Handle Catch/Ground arrival
                 if (typeof handleBallArrival === 'function') {
@@ -6103,6 +6127,7 @@ export {
     simulateMatchFast,    // Replaces simulateGame for CPU matches
     simulateLivePlayStep, // The new engine step function
     resolvePlay,           // Export resolvePlay for testing/play harness
+    handleBallArrival,     // Exported for unit tests that target catch/drop/swats
 
     // Helpers
     advanceToOffseason, generateWeeklyFreeAgents, generateSchedule,
