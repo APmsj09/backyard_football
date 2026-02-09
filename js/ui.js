@@ -3210,8 +3210,17 @@ function renderDepthOrderPane(gameState) {
     listsHtml += `</div>`;
 
     // --- 3. Render Full Sortable Roster (Bottom) ---
+    // Filter out players already assigned to depth positions
+    const assignedPlayerIds = new Set();
+    displayOrder.forEach(groupKey => {
+        const idList = depthOrder[groupKey] || [];
+        idList.forEach(id => assignedPlayerIds.add(id));
+    });
+    
+    const availableRoster = roster.filter(p => !assignedPlayerIds.has(p.id));
+    
     // (Existing sort logic preserved)
-    roster.sort((a, b) => {
+    availableRoster.sort((a, b) => {
         let valA, valB;
         const getVal = (p, key) => {
             if (key === 'overall') return calculateOverall(p, p.pos || 'ATH');
@@ -3257,6 +3266,23 @@ function renderDepthOrderPane(gameState) {
         { key: 'blockShedding', label: 'Bsh', width: 'w-12' }
     ];
 
+    // --- Build reverse lookup maps for efficient slot assignment lookup ---
+    const depthChart = team.depthChart || { offense: {}, defense: {} };
+    const playerToOffSlot = {};
+    const playerToDefSlot = {};
+    
+    if (depthChart.offense) {
+        Object.entries(depthChart.offense).forEach(([slot, playerId]) => {
+            if (playerId) playerToOffSlot[playerId] = slot;
+        });
+    }
+    
+    if (depthChart.defense) {
+        Object.entries(depthChart.defense).forEach(([slot, playerId]) => {
+            if (playerId) playerToDefSlot[playerId] = slot;
+        });
+    }
+
     let rosterHtml = `
         <div class="mt-8 border-t pt-4">
             <h4 class="font-bold text-lg text-gray-800 mb-3">Full Roster (Drag to Reorder)</h4>
@@ -3277,34 +3303,15 @@ function renderDepthOrderPane(gameState) {
                         </tr>
                     </thead>
                     <tbody class="divide-y divide-gray-200">
-                        ${roster.map(p => {
+                        ${availableRoster.map(p => {
         let pos = p.pos || estimateBestPosition(p);
         if (pos === 'FB') pos = 'RB';
         if (['TE', 'ATH', 'K', 'P'].includes(pos)) pos = 'WR';
         const ovr = calculateOverall(p, pos);
         
-        // Find the actual depth chart slot assignment (e.g., QB1, LB2, WR3)
-        const depthChart = team.depthChart || { offense: {}, defense: {} };
-        let offSlot = '';
-        let defSlot = '';
-        
-        // Check offense slots
-        if (depthChart.offense) {
-            Object.entries(depthChart.offense).forEach(([slot, playerId]) => {
-                if (playerId === p.id) {
-                    offSlot = slot;
-                }
-            });
-        }
-        
-        // Check defense slots
-        if (depthChart.defense) {
-            Object.entries(depthChart.defense).forEach(([slot, playerId]) => {
-                if (playerId === p.id) {
-                    defSlot = slot;
-                }
-            });
-        }
+        // Look up slot assignments using efficient reverse maps
+        const offSlot = playerToOffSlot[p.id] || '';
+        const defSlot = playerToDefSlot[p.id] || '';
         
         const vals = {
             height: formatHeight(p.attributes?.physical?.height),
@@ -3410,46 +3417,35 @@ function setupDepthTabs() {
 }
 
 function setupDepthOrderDragEvents() {
-    const draggables = document.querySelectorAll('.depth-order-item, .roster-row-item');
-    const containers = document.querySelectorAll('.depth-sortable-list');
-    const mainContainer = document.getElementById('depth-order-container');
+    const pane = document.getElementById('depth-order-container');
+    if (!pane) return;
 
-    // 1. Global "Remove" Listener (Event Delegation)
-    // This handles clicks for EXISTING items AND newly dropped items automatically.
-    if (mainContainer) {
-        // Remove old listener to prevent duplicates if function called multiple times
-        const newContainer = mainContainer.cloneNode(true);
-        mainContainer.parentNode.replaceChild(newContainer, mainContainer);
+    // Use proper event delegation - much simpler and more reliable
+    // Attach ONE listener to the container that handles all clicks
+    pane.addEventListener('click', (e) => {
+        if (e.target.classList.contains('remove-depth-item')) {
+            e.preventDefault();
+            e.stopPropagation();
 
-        // Re-select containers after clone
-        const reselectedContainers = newContainer.querySelectorAll('.depth-sortable-list');
+            const btn = e.target;
+            const pid = btn.dataset.playerId;
+            const group = btn.dataset.group;
+            const gs = getGameState();
 
-        // Attach listener
-        newContainer.addEventListener('click', (e) => {
-            if (e.target.classList.contains('remove-depth-item')) {
-                e.preventDefault();
-                e.stopPropagation();
-
-                const btn = e.target;
-                const pid = btn.dataset.playerId;
-                const group = btn.dataset.group;
-                const gs = getGameState();
-
-                if (gs && gs.playerTeam.depthOrder && gs.playerTeam.depthOrder[group]) {
-                    // Remove ID from array
-                    gs.playerTeam.depthOrder[group] = gs.playerTeam.depthOrder[group].filter(id => id !== pid);
-                    applyDepthOrderToChart(); // Save & Render
-                }
+            if (gs && gs.playerTeam.depthOrder && gs.playerTeam.depthOrder[group]) {
+                // Remove ID from array
+                gs.playerTeam.depthOrder[group] = gs.playerTeam.depthOrder[group].filter(id => id !== pid);
+                applyDepthOrderToChart(); // Save & Render
             }
-        });
+            return;
+        }
+    });
 
-        // Update local references for the drag logic below
-        // Note: Cloning the container broke the previous references, so we map the drag logic to the NEW DOM
-        setupDragLogic(newContainer.querySelectorAll('.depth-order-item, .roster-row-item'), reselectedContainers);
-    } else {
-        // Fallback if main container missing (rare)
-        setupDragLogic(draggables, containers);
-    }
+    // Set up drag/drop for depth ordering
+    const draggables = pane.querySelectorAll('.depth-order-item, .roster-row-item');
+    const containers = pane.querySelectorAll('.depth-sortable-list');
+
+    setupDragLogic(draggables, containers);
 }
 
 function setupDragLogic(draggables, containers) {
