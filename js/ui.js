@@ -2019,9 +2019,41 @@ function drawFieldVisualization(frameData) {
     const toScreenY = (fieldX) => (fieldX + PADDING_Y_YARDS) * ppY;  // Field width → vertical
 
     // --- 4. DRAW FIELD ---
-    // Grass
-    ctx.fillStyle = "#2d5a27"; // Rich Turf Green
+    // Grass base
+    ctx.fillStyle = "#1a4d2e"; // Darker grass green for better contrast
     ctx.fillRect(0, 0, w, h);
+
+    // Optional: Add subtle striping for visual interest
+    ctx.fillStyle = "rgba(26, 77, 46, 0.3)";
+    for (let stripe = 0; stripe < w; stripe += ppY * 5) {
+        ctx.fillRect(stripe, 0, ppY * 2.5, h);
+    }
+
+    // --- 4a. DRAW HASH MARKS & FIELD MARKINGS ---
+    // Hash marks (small perpendicular marks at 1-yard intervals)
+    ctx.lineWidth = Math.max(1, ppY * 0.03);
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.2)";
+    
+    const startYard = Math.floor(camBottomY) - 1;
+    const endYard = Math.ceil(camBottomY + VIEW_LENGTH_YARDS) + 1;
+    
+    // Top and bottom sideline hash marks (every yard)
+    for (let y = startYard; y <= endYard; y++) {
+        const sy = toScreenX(y);
+        if (sy >= -10 && sy <= w + 10) {
+            // Top hash mark
+            ctx.beginPath();
+            ctx.moveTo(sy, toScreenY(0) - ppY * 0.15);
+            ctx.lineTo(sy, toScreenY(0));
+            ctx.stroke();
+            
+            // Bottom hash mark
+            ctx.beginPath();
+            ctx.moveTo(sy, toScreenY(FIELD_WIDTH_YARDS) + ppY * 0.15);
+            ctx.lineTo(sy, toScreenY(FIELD_WIDTH_YARDS));
+            ctx.stroke();
+        }
+    }
 
     // Grid Lines & Numbers (Vertical 10-yard markers along field length)
     ctx.lineWidth = Math.max(1, ppY * 0.05);
@@ -2030,17 +2062,22 @@ function drawFieldVisualization(frameData) {
     ctx.textBaseline = "middle";
 
     // Optimize loop: only draw lines visible in camera
-    const startYard = Math.floor(camBottomY / 10) * 10;
-    const endYard = Math.floor((camBottomY + VIEW_LENGTH_YARDS) / 10) * 10 + 10;
+    const startYard10 = Math.floor(camBottomY / 10) * 10;
+    const endYard10 = Math.floor((camBottomY + VIEW_LENGTH_YARDS) / 10) * 10 + 10;
 
-    for (let y = startYard; y <= endYard; y += 10) {
+    for (let y = startYard10; y <= endYard10; y += 10) {
         const sy = toScreenX(y);
         
-        // Stripe Opacity
-        if (y % 20 === 0) {
-            ctx.strokeStyle = "rgba(255, 255, 255, 0.4)"; // Major line
+        // Special emphasis on goal lines (y=10 and y=110)
+        if (y === 10 || y === 110) {
+            ctx.lineWidth = Math.max(3, ppY * 0.2);
+            ctx.strokeStyle = "rgba(255, 255, 255, 0.9)"; // Bright, thick goal line
+        } else if (y % 20 === 0) {
+            ctx.lineWidth = Math.max(2, ppY * 0.08);
+            ctx.strokeStyle = "rgba(255, 255, 255, 0.5)"; // Major line
         } else {
-            ctx.strokeStyle = "rgba(255, 255, 255, 0.1)"; // Minor line
+            ctx.lineWidth = Math.max(1, ppY * 0.05);
+            ctx.strokeStyle = "rgba(255, 255, 255, 0.25)"; // Minor line
         }
 
         // Draw Vertical Line
@@ -2053,11 +2090,12 @@ function drawFieldVisualization(frameData) {
         if (y >= 10 && y < 110 && y % 10 === 0) {
             const num = y <= 50 ? y - 10 : 110 - y; // Adjust for 10-yard endzones
             if (num > 0) {
-                ctx.fillStyle = "rgba(255, 255, 255, 0.6)";
+                ctx.fillStyle = "rgba(255, 255, 255, 0.7)";
+                ctx.font = `bold ${ppY * 0.9}px monospace`;
                 // Top number
-                ctx.fillText(num, sy, toScreenY(0) + ppY * 1.2);
+                ctx.fillText(num, sy, toScreenY(0) + ppY * 1.3);
                 // Bottom number
-                ctx.fillText(num, sy, toScreenY(FIELD_WIDTH_YARDS) - ppY * 0.8);
+                ctx.fillText(num, sy, toScreenY(FIELD_WIDTH_YARDS) - ppY * 0.9);
             }
         }
     }
@@ -2069,18 +2107,33 @@ function drawFieldVisualization(frameData) {
         const topY = Math.min(sY, eY);
         const heightPx = Math.abs(sY - eY);
 
+        // Endzone background with reduced opacity for visibility
         ctx.fillStyle = color;
+        ctx.globalAlpha = 0.25;
         ctx.fillRect(topY, 0, heightPx, h);
+        ctx.globalAlpha = 1.0;
 
-        // Label
+        // Endzone border (bright line at boundary)
+        ctx.lineWidth = Math.max(2, ppY * 0.15);
+        ctx.strokeStyle = "rgba(255, 255, 255, 0.8)";
+        ctx.beginPath();
+        ctx.moveTo(topY, 0);
+        ctx.lineTo(topY, h);
+        ctx.moveTo(topY + heightPx, 0);
+        ctx.lineTo(topY + heightPx, h);
+        ctx.stroke();
+
+        // Label (diagonal pattern diagonal stripes would be too much, just text)
         ctx.save();
         ctx.translate(topY + heightPx / 2, h / 2);
-        ctx.fillStyle = "rgba(255,255,255,0.5)";
-        ctx.font = `900 ${ppY * 2}px sans-serif`;
+        ctx.fillStyle = "rgba(255,255,255,0.6)";
+        ctx.font = `bold ${ppY * 1.5}px sans-serif`;
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
-        ctx.shadowColor = "black"; 
-        ctx.shadowBlur = 4;
+        ctx.shadowColor = "rgba(0,0,0,0.8)"; 
+        ctx.shadowBlur = 6;
+        ctx.shadowOffsetX = 1;
+        ctx.shadowOffsetY = 1;
         ctx.fillText(label, 0, 0);
         ctx.restore();
     };
@@ -2126,64 +2179,99 @@ function drawFieldVisualization(frameData) {
             const py = toScreenY(p.x);  // p.x is field width (0-53.3)
             
             // PLAYER SIZE scaled for visibility
-            const radius = ppY * 1.2; 
+            const radius = ppY * 1.3; 
 
-            // Shadow (elliptical, under the player)
-            ctx.fillStyle = "rgba(0,0,0,0.4)";
+            // Deep shadow (larger, darker, under the player for depth) 
+            ctx.fillStyle = "rgba(0,0,0,0.5)";
             ctx.beginPath(); 
-            ctx.ellipse(px, py + radius*0.6, radius * 1.0, radius * 0.35, 0, 0, Math.PI*2); 
+            ctx.ellipse(px, py + radius*0.8, radius * 1.2, radius * 0.4, 0, 0, Math.PI*2); 
             ctx.fill();
 
-            // Jersey Body (Main Circle)
+            // Jersey Body (Main Circle) - use team colors
             ctx.fillStyle = p.primaryColor || (p.isOffense ? "#e74c3c" : "#3498db");
             ctx.beginPath(); 
             ctx.arc(px, py, radius, 0, Math.PI*2); 
             ctx.fill();
             
-            // Jersey outline/border for definition
-            ctx.lineWidth = ppY * 0.1;
-            ctx.strokeStyle = "rgba(0,0,0,0.6)";
+            // Jersey outline/border - thicker for better visibility
+            ctx.lineWidth = ppY * 0.15;
+            ctx.strokeStyle = "rgba(0,0,0,0.8)";
+            ctx.stroke();
+
+            // Add secondary outline for extra pop
+            ctx.lineWidth = ppY * 0.06;
+            ctx.strokeStyle = "rgba(255,255,255,0.3)";
             ctx.stroke();
             
-            // Shoulder pads (darker shading on sides)
-            ctx.fillStyle = "rgba(0,0,0,0.2)";
+            // Shoulder pads (darker shading on sides) - more pronounced
+            ctx.fillStyle = "rgba(0,0,0,0.25)";
             ctx.beginPath(); 
-            ctx.ellipse(px - radius*0.3, py, radius*0.5, radius*0.8, 0, 0, Math.PI*2);
+            ctx.ellipse(px - radius*0.35, py, radius*0.55, radius*0.85, 0, 0, Math.PI*2);
             ctx.fill();
             ctx.beginPath(); 
-            ctx.ellipse(px + radius*0.3, py, radius*0.5, radius*0.8, 0, 0, Math.PI*2);
+            ctx.ellipse(px + radius*0.35, py, radius*0.55, radius*0.85, 0, 0, Math.PI*2);
             ctx.fill();
 
-            // Helmet (Larger, secondary color)
+            // Helmet (larger, secondary color)
             ctx.fillStyle = p.secondaryColor || "white";
             ctx.beginPath(); 
-            ctx.arc(px, py - radius*0.3, radius * 0.5, 0, Math.PI*2); 
+            ctx.arc(px, py - radius*0.4, radius * 0.55, 0, Math.PI*2); 
             ctx.fill();
             
-            // Helmet stripe
-            ctx.strokeStyle = "rgba(0,0,0,0.3)";
-            ctx.lineWidth = ppY * 0.08;
+            // Helmet outline - thick and prominent
+            ctx.lineWidth = ppY * 0.12;
+            ctx.strokeStyle = "rgba(0,0,0,0.7)";
             ctx.beginPath(); 
-            ctx.arc(px, py - radius*0.3, radius * 0.5, 0, Math.PI*2); 
+            ctx.arc(px, py - radius*0.4, radius * 0.55, 0, Math.PI*2); 
             ctx.stroke();
 
-            // Jersey Number (if available)
+            // Helmet shine/highlight for 3D effect
+            ctx.fillStyle = "rgba(255,255,255,0.4)";
+            ctx.beginPath();
+            ctx.ellipse(px - radius*0.15, py - radius*0.45, radius*0.2, radius*0.15, 0, 0, Math.PI*2);
+            ctx.fill();
+            
+            // Helmet stripe (center line)
+            ctx.strokeStyle = "rgba(0,0,0,0.4)";
+            ctx.lineWidth = ppY * 0.08;
+            ctx.beginPath(); 
+            ctx.arc(px, py - radius*0.4, radius * 0.55, 0, Math.PI*2); 
+            ctx.stroke();
+
+            // Jersey Number (if available) - larger and more visible
             if (p.number) {
+                // Number background (slight rectangle behind number for legibility)
+                ctx.fillStyle = "rgba(0,0,0,0.3)";
+                ctx.fillRect(px - ppY*0.5, py + radius*0.1 - ppY*0.4, ppY*1.0, ppY*0.8);
+                
                 ctx.fillStyle = p.secondaryColor || "white";
-                ctx.font = `bold ${ppY * 0.6}px Arial`;
+                ctx.font = `bold ${ppY * 0.75}px Arial`;
                 ctx.textAlign = "center";
                 ctx.textBaseline = "middle";
-                ctx.fillText(p.number, px, py + radius * 0.2);
+                ctx.shadowColor = "rgba(0,0,0,0.6)";
+                ctx.shadowBlur = 3;
+                ctx.shadowOffsetX = 1;
+                ctx.shadowOffsetY = 1;
+                ctx.fillText(p.number, px, py + radius * 0.15);
+                ctx.shadowBlur = 0;
             }
 
             // Ball Carrier Highlight (larger, more prominent)
             if (p.hasBall || p.isBallCarrier) {
-                ctx.strokeStyle = "#FFD700"; // Gold
-                ctx.lineWidth = ppY * 0.15;
-                ctx.shadowColor = "#FFD700";
-                ctx.shadowBlur = 8;
+                // Outer glow
+                ctx.strokeStyle = "rgba(255, 215, 0, 0.6)";
+                ctx.lineWidth = ppY * 0.1;
                 ctx.beginPath(); 
-                ctx.arc(px, py, radius * 1.4, 0, Math.PI*2); 
+                ctx.arc(px, py, radius * 1.5, 0, Math.PI*2); 
+                ctx.stroke();
+
+                // Inner bright ring
+                ctx.strokeStyle = "#FFD700"; // Gold
+                ctx.lineWidth = ppY * 0.2;
+                ctx.shadowColor = "#FFD700";
+                ctx.shadowBlur = 12;
+                ctx.beginPath(); 
+                ctx.arc(px, py, radius * 1.25, 0, Math.PI*2); 
                 ctx.stroke();
                 ctx.shadowBlur = 0;
             }
@@ -2197,51 +2285,63 @@ function drawFieldVisualization(frameData) {
         const bz = frameData.ball.z || 0;
 
         // Ball gets bigger as it goes higher (Pseudo-3D)
-        const ballRadius = ppY * 0.45 * (1 + bz * 0.15); 
+        const ballRadius = ppY * 0.5 * (1 + bz * 0.15); 
         
-        // Shadow (stays on ground, fades with height)
-        const shadowOffset = bz * ppY * 0.6;
-        ctx.fillStyle = `rgba(0,0,0,${Math.max(0.1, 0.4 - bz*0.08)})`;
+        // Deep shadow (stays on ground, fades with height) - more pronounced
+        const shadowOffset = bz * ppY * 0.8;
+        ctx.fillStyle = `rgba(0,0,0,${Math.max(0.15, 0.5 - bz*0.1)})`;
         ctx.beginPath(); 
-        ctx.ellipse(bx, by + shadowOffset, ballRadius * 1.0, ballRadius * 0.4, 0, 0, Math.PI*2); 
+        ctx.ellipse(bx, by + shadowOffset, ballRadius * 1.2, ballRadius * 0.45, 0, 0, Math.PI*2); 
         ctx.fill();
 
-        // Ball Body (Main oval shape - brown)
-        ctx.fillStyle = "#A0522D"; // Saddle Brown
+        // Ball Body (Main oval shape - rich brown)
+        ctx.fillStyle = "#8B4513"; // Darker Saddle Brown for more contrast
         ctx.beginPath(); 
-        ctx.ellipse(bx, by, ballRadius * 0.7, ballRadius * 0.95, 0, 0, Math.PI*2); 
+        ctx.ellipse(bx, by, ballRadius * 0.75, ballRadius, 0, 0, Math.PI*2); 
         ctx.fill();
 
-        // Ball highlight (light reflection for 3D effect)
+        // Ball highlight (light reflection for 3D effect) - more vibrant
         const gradient = ctx.createLinearGradient(bx - ballRadius*0.5, by - ballRadius*0.8, bx + ballRadius*0.3, by + ballRadius*0.5);
-        gradient.addColorStop(0, "rgba(255, 200, 100, 0.4)");
-        gradient.addColorStop(1, "rgba(255, 200, 100, 0)");
+        gradient.addColorStop(0, "rgba(255, 220, 120, 0.5)");
+        gradient.addColorStop(0.7, "rgba(255, 220, 120, 0.15)");
+        gradient.addColorStop(1, "rgba(255, 220, 120, 0)");
         ctx.fillStyle = gradient;
-        ctx.fillRect(bx - ballRadius*0.7, by - ballRadius, ballRadius*1.4, ballRadius*1.9);
+        ctx.fillRect(bx - ballRadius*0.8, by - ballRadius*1.1, ballRadius*1.6, ballRadius*2.1);
 
-        // Laces (stitching down the middle)
-        ctx.strokeStyle = "rgba(220, 220, 220, 0.95)";
-        ctx.lineWidth = ppY * 0.08;
+        // Laces (stitching down the middle - more prominent)
+        ctx.strokeStyle = "rgba(240, 240, 240, 1)";
+        ctx.lineWidth = ppY * 0.1;
+        ctx.shadowColor = "rgba(0,0,0,0.5)";
+        ctx.shadowBlur = 2;
         ctx.beginPath(); 
-        ctx.moveTo(bx - ballRadius*0.1, by - ballRadius*0.5); 
-        ctx.lineTo(bx - ballRadius*0.1, by + ballRadius*0.5);
+        ctx.moveTo(bx - ballRadius*0.08, by - ballRadius*0.6); 
+        ctx.lineTo(bx - ballRadius*0.08, by + ballRadius*0.6);
         ctx.stroke();
+        ctx.shadowBlur = 0;
 
-        // Lace crosses
-        ctx.lineWidth = ppY * 0.05;
+        // Lace crosses (more detailed stitching)
+        ctx.strokeStyle = "rgba(220, 220, 220, 0.9)";
+        ctx.lineWidth = ppY * 0.06;
         for (let i = -3; i <= 3; i++) {
-            const y = by - ballRadius*0.4 + (i * ballRadius*0.16);
+            const y = by - ballRadius*0.45 + (i * ballRadius*0.18);
             ctx.beginPath();
-            ctx.moveTo(bx - ballRadius*0.15, y);
-            ctx.lineTo(bx + ballRadius*0.05, y);
+            ctx.moveTo(bx - ballRadius*0.18, y);
+            ctx.lineTo(bx + ballRadius*0.08, y);
             ctx.stroke();
         }
 
-        // Ball outline for definition
-        ctx.strokeStyle = "rgba(0, 0, 0, 0.3)";
-        ctx.lineWidth = ppY * 0.06;
+        // Ball outline for definition - thicker and darker
+        ctx.strokeStyle = "rgba(0, 0, 0, 0.5)";
+        ctx.lineWidth = ppY * 0.08;
         ctx.beginPath(); 
-        ctx.ellipse(bx, by, ballRadius * 0.7, ballRadius * 0.95, 0, 0, Math.PI*2); 
+        ctx.ellipse(bx, by, ballRadius * 0.75, ballRadius, 0, 0, Math.PI*2); 
+        ctx.stroke();
+
+        // Ball rim highlight (side reflection)
+        ctx.strokeStyle = "rgba(255, 200, 80, 0.3)";
+        ctx.lineWidth = ppY * 0.04;
+        ctx.beginPath();
+        ctx.ellipse(bx + ballRadius*0.3, by + ballRadius*0.2, ballRadius*0.4, ballRadius*0.3, 0, 0, Math.PI*2);
         ctx.stroke();
     }
 }
