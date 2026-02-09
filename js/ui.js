@@ -3638,9 +3638,9 @@ export function applyDepthOrderToChart() {
     if (depthOrderPane && !depthOrderPane.classList.contains('hidden')) {
         renderDepthOrderPane(gs);
     }
-
-    // 5. Refresh UI
-    document.dispatchEvent(new CustomEvent('refresh-ui'));
+    // Note: We DON'T dispatch refresh-ui here because we've already updated the DOM
+    // and saved the state. The refresh-ui event would cause switchTab() to re-render
+    // the entire depth-chart tab, which could undo our changes.
 }
 
 
