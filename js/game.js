@@ -3191,7 +3191,7 @@ function resolveBattle(powerA, powerB, battle) {
 /**
  * Resolves ongoing block battles based on stats.
  */
-function resolveOngoingBlocks(playState, gameLog) {
+function resolveOngoingBlocks(playState, gameLog, offenseStates = [], defenseStates = []) {
     const battlesToRemove = [];
     const ballCarrier = playState.activePlayers.find(p => p.isBallCarrier);
 
@@ -3260,7 +3260,7 @@ function resolveOngoingBlocks(playState, gameLog) {
         if ((defender.assignment?.includes('rush') || defender.assignment?.includes('blitz')) && 
             defender.isBlocked && blocker) {
             
-            const qbState = offenseStates.find(p => p.slot.startsWith('QB'));
+            const qbState = (offenseStates || []).find(p => p.slot && p.slot.startsWith && p.slot.startsWith('QB'));
             
             // Only use moves if trying to get to QB
             if (qbState) {
@@ -3345,15 +3345,6 @@ function resolveOngoingBlocks(playState, gameLog) {
         playState.blockBattles.splice(battlesToRemove[i], 1);
     }
 }
-
-/**
- * Handles QB decision-making.
- * TUNED: Slower "Internal Clock" to allow deep routes to develop.
- */
-/**
- * ADVANCED QB AI
- * Features: Geometric Lane Logic, IQ-Based Read Times, Physics-Based Lead Passing, Pressure Panic
- */
 /**
  * ADVANCED QB AI
  * Corrected: Helper functions defined BEFORE use to prevent crashes.
@@ -4501,7 +4492,7 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
             // --- H. INTERACTIONS ---
             if (playState.playIsLive) {
                 if (typeof checkBlockCollisions === 'function') checkBlockCollisions(playState);
-                if (typeof resolveOngoingBlocks === 'function') resolveOngoingBlocks(playState, gameLog);
+                if (typeof resolveOngoingBlocks === 'function') resolveOngoingBlocks(playState, gameLog, offenseStates, defenseStates);
 
                 if (ballCarrierState) {
                     if (typeof checkTackleCollisions === 'function' && checkTackleCollisions(playState, gameLog)) {
@@ -5467,6 +5458,18 @@ function simulateLivePlayStep(game) {
         } else {
             game.down++;
         }
+    }
+
+    // --- Drive / End-Of-Game Accounting ---
+    // Ensure live UI has a simple progress counter so the UI loop can finish.
+    try {
+        game.drivesThisHalf = (game.drivesThisHalf || 0) + 1;
+        // Safety threshold: match UI expectation (drivesThisHalf > 30 ends game)
+        if (game.drivesThisHalf > 30) {
+            game.isGameOver = true;
+        }
+    } catch (e) {
+        // If game is not writable here (unexpected), ignore and continue returning result
     }
 
     return result; 
