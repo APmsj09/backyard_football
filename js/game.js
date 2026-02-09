@@ -64,6 +64,7 @@ const CATCH_RADIUS = 0.8;
 const SEPARATION_THRESHOLD = 2.0;
 const PLAYER_SEPARATION_RADIUS = 0.6;
 const FUMBLE_CHANCE_BASE = 0.015;
+const MIN_DROPBACK_TICKS = 45; // QB must wait this long for receivers to run routes
 
 // --- Event/Balance Constants ---
 const weeklyEvents = [
@@ -2184,8 +2185,10 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
 
     // --- 1. LOOSE BALL LOGIC (Emergency) ---
     if (playState.ballState.isLoose) {
+        // All available players go for loose ball, but stunned/engaged players cannot move
         playState.activePlayers.forEach(pState => {
-            if (pState.stunnedTicks === 0 && !pState.isEngaged) {
+            // 💡 FIX: Only pursue if not stunned and not actively engaged in block
+            if (pState.stunnedTicks <= 0 && !pState.isEngaged) {
                 pState.targetX = playState.ballState.x;
                 pState.targetY = playState.ballState.y;
                 pState.action = 'pursuit';
@@ -3556,7 +3559,6 @@ function updateQBDecision(qbState, offenseStates, defenseStates, playState, offe
     }
 
     // Time Constraints
-    const MIN_DROPBACK_TICKS = 45; // Increased to ~2.2s to stop instant dumps
     const canThrowStandard = playState.tick > MIN_DROPBACK_TICKS;
     const maxDecisionTimeTicks = 160; 
 
@@ -3592,8 +3594,9 @@ function updateQBDecision(qbState, offenseStates, defenseStates, playState, offe
     
     // 1. PRIMARY READ
     if (!decisionMade && currentReadInfo && currentReadInfo.separation > OPEN_SEP && currentReadInfo.separation > 0.1) {
-        // Gating Logic:
-        const validTiming = canThrowStandard || isPressured;
+        // Gating Logic: ENFORCE minimum dropback time for ALL throws
+        // This ensures receivers get time to run routes before QB can release the ball
+        const validTiming = canThrowStandard; // No exceptions - must wait MIN_DROPBACK_TICKS
         const validDepth = !isBackfieldTarget(currentReadInfo) || isPressured || playState.tick > 60;
         
         if (validTiming && validDepth) {
@@ -3622,7 +3625,9 @@ function updateQBDecision(qbState, offenseStates, defenseStates, playState, offe
                 a.info.distFromQB - b.info.distFromQB
             )[0];
             
-            if (canThrowStandard && (playState.tick > 70 || isPressured)) {
+            // 💡 FIX: Require minimum time before checkdown too. Only allow checkdown under pressure or late in play.
+            const checkdownAvailable = canThrowStandard && playState.tick > 60;
+            if (checkdownAvailable) {
                 targetPlayerState = best.state;
                 actionTaken = "Throw Checkdown";
                 decisionMade = true;
@@ -3751,6 +3756,11 @@ function executeThrow(qbState, target, strength, accuracy, playState, gameLog, a
     }
 
     if (gameLog) gameLog.push(`🏈 ${qbState.name} passes to ${target.name} (${actionType})`);
+
+    // DEBUG: Log when throw happens
+    if (gameLog && gameLog.length < 3) {
+        gameLog.push(`[DEBUG: Throw at tick ${playState.tick}, MIN_DROPBACK=${MIN_DROPBACK_TICKS}]`);
+    }
 
     const startX = qbState.x;
     const startY = qbState.y;

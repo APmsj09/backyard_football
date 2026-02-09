@@ -283,3 +283,24 @@ tbody tr:nth-child(odd) {
 tbody tr:hover {
     background-color: #fef3c7 !important; /* Amber-100 on hover */
 }
+
+/* --- 11. DEPTH CHART BENCH TABLES --- */
+/* Enable horizontal scrolling for bench tables with many columns */
+#offense-bench-table,
+#defense-bench-table {
+    overflow-x: auto;
+    display: block;
+}
+
+#offense-bench-table table,
+#defense-bench-table table {
+    width: 100%;
+}
+
+#offense-bench-table th,
+#offense-bench-table td,
+#defense-bench-table th,
+#defense-bench-table td {
+    white-space: nowrap; /* Prevent text wrapping */
+    padding: 0.5rem 0.75rem;
+}
