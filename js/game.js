@@ -2955,6 +2955,27 @@ function updateQBDecision(qbState, offenseStates, defenseStates, playState, offe
     // Don't make a new decision if QB is already scrambling
     if (qbState.action === 'qb_scramble') return;
 
+    // --- 0B. LINE OF SCRIMMAGE CHECK (Football Rule) ---
+    // QB cannot throw FORWARD if they've crossed the line of scrimmage (only backwards/laterals allowed)
+    // If QB has crossed the line, force them to scramble or take a sack
+    const hasQBCrossedLine = qbState.y < playState.lineOfScrimmage;
+    if (hasQBCrossedLine) {
+        // QB is past the line - must scramble or eat sack
+        const pressureDefender = defenseStates.find(d => !d.isBlocked && !d.isEngaged && getDistance(qbState, d) < 4.5);
+        if (pressureDefender && getDistance(qbState, pressureDefender) < 2.0) {
+            // Imminent sack - QB takes it
+            if (gameLog) gameLog.push(`💥 ${qbState.name} sacked after crossing the line of scrimmage!`);
+            qbState.action = 'sacked';
+            return;
+        } else {
+            // Open lane - scramble
+            qbState.action = 'qb_scramble';
+            playState.qbIntent = 'scramble';
+            if (gameLog) gameLog.push(`🏃 ${qbState.name} scrambles after crossing the line!`);
+            return;
+        }
+    }
+
     // Get Attributes
     const qbPlayer = getPlayer(qbState.id); 
     const qbAttrs = qbPlayer?.attributes || { mental: { playbookIQ: 50 }, physical: { agility: 50, strength: 50 }, technical: { throwingAccuracy: 50 } };
@@ -3193,6 +3214,19 @@ function updateQBDecision(qbState, offenseStates, defenseStates, playState, offe
  * HELPER: Calculates physics vectors for a throw
  */
 function executeThrow(qbState, target, strength, accuracy, playState, gameLog, actionType) {
+    // --- FOOTBALL RULE: QB Cannot Throw Forward Past Line of Scrimmage ---
+    const hasQBCrossedLine = qbState.y < playState.lineOfScrimmage;
+    const isForwardPass = target.y > qbState.y || (Math.abs(target.y - qbState.y) < 0.5 && target.y > qbState.y - 2);
+    
+    if (hasQBCrossedLine && isForwardPass) {
+        // Illegal forward pass - QB crossed the line
+        if (gameLog) gameLog.push(`🚫 ILLEGAL FORWARD PASS: ${qbState.name} crossed the line at y=${qbState.y.toFixed(1)} < LOS=${playState.lineOfScrimmage}`);
+        playState.ballState.inAir = false;
+        playState.ballState.throwInitiated = false;
+        qbState.hasBall = true; // QB retains ball due to illegal pass
+        return;
+    }
+
     if (gameLog) gameLog.push(`🏈 ${qbState.name} passes to ${target.name} (${actionType})`);
 
     const startX = qbState.x;

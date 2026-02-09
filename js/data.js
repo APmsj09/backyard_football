@@ -468,9 +468,9 @@ export const defenseFormations = {
             DL3: [2.0, 1], 
             DL4: [5.5, 1], 
             LB1: [0, 6],
-            DB1: [-18, 10], 
-            DB2: [18, 10], 
-            DB3: [0, 18] 
+            DB1: [-18, 8], 
+            DB2: [18, 8], 
+            DB3: [0, 12] 
         }
     },    
     'Punt_Return': {
@@ -482,10 +482,10 @@ export const defenseFormations = {
             DL2: [3, 1], 
             LB1: [-10, 8], 
             LB2: [10, 8], 
-            DB1: [-15, 30], 
-            DB2: [15, 30], 
-            DB3: [-5, 40],
-            DB4: [5, 40]
+            DB1: [-15, 15], 
+            DB2: [15, 15], 
+            DB3: [-5, 20],
+            DB4: [5, 20]
         }
     },
     '3-1-4': {
@@ -499,8 +499,8 @@ export const defenseFormations = {
             LB1: [0, 5.0],
             DB1: [-15, 8.0],
             DB2: [15, 8.0], 
-            DB3: [-6, 12.0],
-            DB4: [6, 12.0]
+            DB3: [-6, 10.0],
+            DB4: [6, 10.0]
         },
         slotPriorities: {
             'DL1': { speed: 3, blockShedding: 2 },
@@ -521,11 +521,13 @@ export const defenseFormations = {
             'DL1': [-5, 1.0],
             'DL2': [0, 1.0],
             'DL3': [5, 1.0],
-            'DB1': [-18, 5.0],
-            'DB2': [18, 5.0],
-            'DB3': [-6, 9.0],
-            'DB4': [6, 9.0],
-            'DB5': [0, 14.0],
+            'DB1': [-18, 8.0],
+            'DB2': [18, 8.0],
+            'DB3': [-6, 10.0],
+            'DB4': [6, 10.0],
+            'DB5': [0, 12.0]
+        },
+        slotPriorities: {
             'DL1': { speed: 2, strength: 2 },
             'DL2': { strength: 3, weight: 2 },
             'DL3': { speed: 2, strength: 2 },
