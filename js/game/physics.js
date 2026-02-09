@@ -70,9 +70,12 @@ export function updatePlayerPosition(pState, timeDelta) {
     let speedMult = pState.speedMultiplier || 1.0;
     if (pState.isBallCarrier) speedMult *= 0.9; // Carrying ball slows you down
     if (pState.action === 'backpedal') speedMult *= 0.7;
+    
+    // 💡 NEW: Contact reduction when running through defenders
+    const contactReduction = pState.contactReduction || 1.0;
 
     const fatigueMod = pState.fatigueModifier || 1.0;
-    const maxSpeed = baseSpeed * fatigueMod * speedMult;
+    const maxSpeed = baseSpeed * fatigueMod * speedMult * contactReduction;
 
     // Dynamic Acceleration based on Agility
     // 99 Agility = 14.0 force (Cuts on a dime)
