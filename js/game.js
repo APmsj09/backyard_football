@@ -131,6 +131,22 @@ function ensureSet(val) {
     if (Array.isArray(val)) return new Set(val);
     return new Set();
 }
+
+// --- Logging helper: Avoid consecutive duplicate messages and per-play duplicates ---
+function pushGameLog(gameLog, message, playState = null) {
+    if (!gameLog) return;
+    const last = gameLog[gameLog.length - 1];
+    if (last === message) return; // Prevent immediate duplicate
+
+    if (playState) {
+        // Use a Set to remember messages logged during this play
+        playState._logged = playState._logged || new Set();
+        if (playState._logged.has(message)) return;
+        playState._logged.add(message);
+    }
+
+    gameLog.push(message);
+}
 /**
  * Normalizes formation keys to ensure they exist in the provided formations object.
  * @param {object} formations - The dictionary of formations (e.g. offenseFormations)
@@ -3685,6 +3701,9 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
         resolvedDepth: null
     };
 
+    // Reset per-play captain flavor flags so a single team message only appears once per play
+    if (offense) offense._captainFlavorLogged = false;
+    if (defense) defense._captainFlavorLogged = false;
     let firstDownY = 0;
     const goalLineY = 110.0;
     const effectiveYardsToGo = (yardsToGo <= 0 || ballOn >= 90) ? (goalLineY - playState.lineOfScrimmage) : yardsToGo;
@@ -3737,7 +3756,10 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
     if (defendersInBox > blockers && qbIQ >= 80) {
         const rb = offenseStates.find(p => p.slot.startsWith('RB') && p.action.includes('route'));
         if (rb) {
-            if (gameLog && isLive) gameLog.push(`🧠 ${qbState.name} identifies blitz! Keeps RB in to block.`);
+            if (!rb.keptForBlock) {
+                pushGameLog(gameLog, `🧠 ${qbState.name} identifies blitz! Keeps RB in to block.`, playState);
+                rb.keptForBlock = true;
+            }
             rb.action = 'pass_block';
             rb.assignment = 'pass_block';
             rb.targetX = rb.x + 0.5; // Visual shift
@@ -3754,7 +3776,7 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
                 const isShortRoute = wr.routePath && wr.routePath.every(pt => pt.y < wr.initialY + 10);
 
                 if (pressDefender && isShortRoute) {
-                    if (gameLog && isLive) gameLog.push(`🧠 ${qbState.name} checks ${wr.name} to a Go route vs Press!`);
+                    pushGameLog(gameLog, `🧠 ${qbState.name} checks ${wr.name} to a Go route vs Press!`, playState);
                     // Overwrite with Fly Route
                     wr.routePath = [{ x: wr.x, y: wr.y + 40 }];
                     wr.assignment = 'Fly';
@@ -5340,9 +5362,10 @@ function checkCaptainDiscipline(team, gameLog) {
 
     const isSmart = Math.random() > mentalErrorChanceClamped;
 
-    if (!isSmart && gameLog && Math.random() < 0.2) {
-        // Flavor text for bad calls (20% of the time they fail)
-        gameLog.push(`⚠️ ${captain.name} looks confused and rushes the play call...`);
+    if (!isSmart && gameLog && Math.random() < 0.2 && !team._captainFlavorLogged) {
+        // Flavor text for bad calls (20% of the time they fail). Only once per play.
+        pushGameLog(gameLog, `⚠️ ${captain.name} looks confused and rushes the play call...`);
+        team._captainFlavorLogged = true;
     }
 
     return isSmart;
@@ -6128,6 +6151,7 @@ export {
     simulateLivePlayStep, // The new engine step function
     resolvePlay,           // Export resolvePlay for testing/play harness
     handleBallArrival,     // Exported for unit tests that target catch/drop/swats
+    pushGameLog,           // Export logging helper (tests)
 
     // Helpers
     advanceToOffseason, generateWeeklyFreeAgents, generateSchedule,

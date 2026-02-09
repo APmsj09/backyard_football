@@ -1,0 +1,3418 @@
+{
+  "log": [
+    "⏱️ Play ends, incomplete."
+  ],
+  "final": {
+    "yards": 0,
+    "outcome": "incomplete",
+    "possessionChange": false,
+    "score": null,
+    "safety": false,
+    "touchback": false,
+    "turnoverType": null
+  },
+  "framesCount": 1001,
+  "frames": [
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55,
+      "isSnap": true
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    },
+    {
+      "players": [],
+      "ball": {
+        "x": 26.65,
+        "y": 45,
+        "z": 1,
+        "vx": 0,
+        "vy": 0,
+        "vz": 0,
+        "inAir": false,
+        "isLoose": false,
+        "targetPlayerId": null
+      },
+      "logIndex": 0,
+      "lineOfScrimmage": 45,
+      "firstDownY": 55
+    }
+  ]
+}
