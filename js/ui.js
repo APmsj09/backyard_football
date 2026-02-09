@@ -1111,8 +1111,8 @@ function renderPositionalOveralls() {
         positions[pos].push(p);
     }
 
-    // Strict 7v7 Order
-    const order = ['QB', 'RB', 'WR', 'OL', 'DL', 'LB', 'DB'];
+    // Strict 8v8 Order
+    const order = ['QB', 'RB', 'WR', 'TE', 'OL', 'DL', 'LB', 'DB'];
     const sortedKeys = Object.keys(positions).sort((a, b) => {
         return order.indexOf(a) - order.indexOf(b);
     });

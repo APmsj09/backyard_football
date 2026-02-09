@@ -15,7 +15,7 @@ let activeSaveKey = 'backyardFootballGameState';
 
 // --- Constants ---
 const ROSTER_LIMIT = 12;
-const MIN_HEALTHY_PLAYERS = 9;
+const MIN_HEALTHY_PLAYERS = 8;
 const WEEKS_IN_SEASON = 9;
 
 function yieldToMain() { return new Promise(resolve => setTimeout(resolve, 0)); }

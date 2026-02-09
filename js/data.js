@@ -284,33 +284,33 @@ export const offensivePlaybook = {
     // ===================================
     'Balanced_InsideZone': {
         type: 'run', tags: ['run', 'inside'],
-        assignments: { 'RB1': 'run_inside', 'WR1': 'run_block', 'WR2': 'run_block', 'OL1': 'run_block', 'OL2': 'run_block', 'OL3': 'run_block' }
+        assignments: { 'RB1': 'run_inside', 'TE1': 'run_block', 'WR1': 'run_block', 'WR2': 'run_block', 'OL1': 'run_block', 'OL2': 'run_block', 'OL3': 'run_block' }
     },
     'Balanced_StretchRight': {
         type: 'run', tags: ['run', 'outside'],
-        assignments: { 'RB1': 'run_outside', 'WR1': 'run_block', 'WR2': 'run_block', 'OL1': 'run_block', 'OL2': 'run_block', 'OL3': 'run_block' }
+        assignments: { 'RB1': 'run_outside', 'TE1': 'run_block', 'WR1': 'run_block', 'WR2': 'run_block', 'OL1': 'run_block', 'OL2': 'run_block', 'OL3': 'run_block' }
     },
     'Balanced_Slants': {
         type: 'pass', tags: ['pass', 'short', 'quick'],
-        readProgression: ['WR1', 'WR2', 'RB1'],
-        assignments: { 'WR1': 'Slant', 'WR2': 'Slant', 'RB1': 'Flat', 'OL1': 'pass_block', 'OL2': 'pass_block', 'OL3': 'pass_block' }
+        readProgression: ['WR1', 'WR2', 'TE1', 'RB1'],
+        assignments: { 'WR1': 'Slant', 'WR2': 'Slant', 'TE1': 'CheckRelease', 'RB1': 'Flat', 'OL1': 'pass_block', 'OL2': 'pass_block', 'OL3': 'pass_block' }
     },
     'Balanced_Smash': {
         type: 'pass', tags: ['pass', 'medium', 'corner'],
-        readProgression: ['WR2', 'WR1'],
-        assignments: { 'WR1': 'Hitch', 'WR2': 'Corner', 'RB1': 'pass_block', 'OL1': 'pass_block', 'OL2': 'pass_block', 'OL3': 'pass_block' }
+        readProgression: ['WR2', 'WR1', 'TE1'],
+        assignments: { 'WR1': 'Hitch', 'WR2': 'Corner', 'TE1': 'Hitch', 'RB1': 'pass_block', 'OL1': 'pass_block', 'OL2': 'pass_block', 'OL3': 'pass_block' }
     },
     // NEW: Sluggo (Slant-and-Go) to punish aggressive corners
     'Balanced_Sluggo_Shot': {
         type: 'pass', tags: ['pass', 'deep', 'doublemove'],
-        readProgression: ['WR1', 'WR2'],
-        assignments: { 'WR1': 'Sluggo', 'WR2': 'In', 'RB1': 'CheckRelease', 'OL1': 'pass_block', 'OL2': 'pass_block', 'OL3': 'pass_block' }
+        readProgression: ['WR1', 'WR2', 'TE1'],
+        assignments: { 'WR1': 'Sluggo', 'WR2': 'In', 'TE1': 'Seam', 'RB1': 'CheckRelease', 'OL1': 'pass_block', 'OL2': 'pass_block', 'OL3': 'pass_block' }
     },
     // NEW: Whip route for 3rd & Short
     'Balanced_Zig_Zag': {
         type: 'pass', tags: ['pass', 'short', 'redzone'],
-        readProgression: ['WR2', 'RB1'],
-        assignments: { 'WR1': 'Fly', 'WR2': 'Whip', 'RB1': 'Angle', 'OL1': 'pass_block', 'OL2': 'pass_block', 'OL3': 'pass_block' }
+        readProgression: ['WR2', 'TE1', 'RB1'],
+        assignments: { 'WR1': 'Fly', 'WR2': 'Whip', 'TE1': 'CheckRelease', 'RB1': 'Angle', 'OL1': 'pass_block', 'OL2': 'pass_block', 'OL3': 'pass_block' }
     },
 
     // ===================================
@@ -343,22 +343,22 @@ export const offensivePlaybook = {
     // ===================================
     'Power_Iso': {
         type: 'run', tags: ['run', 'inside', 'power'],
-        assignments: { 'RB1': 'run_inside', 'RB2': 'run_block', 'WR1': 'run_block', 'OL1': 'run_block', 'OL2': 'run_block', 'OL3': 'run_block' }
+        assignments: { 'RB1': 'run_inside', 'RB2': 'run_block', 'TE1': 'run_block', 'WR1': 'run_block', 'OL1': 'run_block', 'OL2': 'run_block', 'OL3': 'run_block' }
     },
     'Power_Counter': {
         type: 'run', tags: ['run', 'inside', 'counter'],
-        assignments: { 'RB1': 'run_counter', 'RB2': 'run_block', 'WR1': 'run_block', 'OL1': 'run_block', 'OL2': 'run_block', 'OL3': 'run_block' }
+        assignments: { 'RB1': 'run_counter', 'RB2': 'run_block', 'TE1': 'run_block', 'WR1': 'run_block', 'OL1': 'run_block', 'OL2': 'run_block', 'OL3': 'run_block' }
     },
     'Power_PA_Leak': {
         type: 'pass', tags: ['pass', 'pa', 'deep'],
-        readProgression: ['WR1', 'RB1'],
-        assignments: { 'RB2': 'Flat', 'WR1': 'Post', 'RB1': 'Wheel', 'OL1': 'run_block', 'OL2': 'run_block', 'OL3': 'pass_block' }
+        readProgression: ['WR1', 'TE1', 'RB1'],
+        assignments: { 'RB2': 'Flat', 'WR1': 'Post', 'TE1': 'Seam', 'RB1': 'Wheel', 'OL1': 'run_block', 'OL2': 'run_block', 'OL3': 'pass_block' }
     },
     // NEW: Texas Concept (Angle Route)
     'Power_Texas': {
         type: 'pass', tags: ['pass', 'medium', 'middle'],
-        readProgression: ['RB1', 'WR1'],
-        assignments: { 'RB1': 'Angle', 'RB2': 'Flat', 'WR1': 'Post', 'OL1': 'pass_block', 'OL2': 'pass_block', 'OL3': 'pass_block' }
+        readProgression: ['RB1', 'TE1', 'WR1'],
+        assignments: { 'RB1': 'Angle', 'RB2': 'Flat', 'TE1': 'Hitch', 'WR1': 'Post', 'OL1': 'pass_block', 'OL2': 'pass_block', 'OL3': 'pass_block' }
     },
 
     // ===================================
@@ -542,16 +542,16 @@ export const defenseFormations = {
 // --- DEFENSIVE PLAYBOOK ---
 export const defensivePlaybook = {
     // --- 3-1-3 ---
-    'Cover_1_Man_3-1-3': { name: 'Cover 1 Man', compatibleFormations: ['3-1-4'], compatibleCriteria: { minDL: 3, minLB: 1, minDB: 2 }, tags: ['man', 'cover1'], assignments: { 'DL1': 'pass_rush', 'DL2': 'pass_rush', 'DL3': 'pass_rush', 'LB1': 'man_cover_RB1', 'DB1': 'man_cover_WR1', 'DB2': 'man_cover_WR2', 'DB3': 'zone_deep_middle' } },
-    'Cover_3_Zone_3-1-3': { name: 'Cover 3 Zone', compatibleFormations: ['3-1-4'], compatibleCriteria: { minDL: 3, minDB: 3 }, tags: ['zone', 'cover3', 'safeZone'], assignments: { 'DL1': 'pass_rush', 'DL2': 'pass_rush', 'DL3': 'pass_rush', 'LB1': 'zone_hook_curl_middle', 'DB1': 'zone_deep_third_left', 'DB2': 'zone_deep_third_right', 'DB3': 'zone_deep_middle' } },
-    'Zone_Blitz_3-1-3': { name: 'Zone Blitz', compatibleFormations: ['3-1-4'], compatibleCriteria: { minDL: 3, minLB: 1 }, tags: ['zone', 'blitz'], assignments: { 'DL1': 'pass_rush', 'DL2': 'pass_rush', 'DL3': 'pass_rush', 'LB1': 'blitz_gap', 'DB1': 'zone_flat_left', 'DB2': 'zone_flat_right', 'DB3': 'zone_deep_middle' } },
+    'Cover_1_Man_3-1-3': { name: 'Cover 1 Man', compatibleFormations: ['3-1-4'], compatibleCriteria: { minDL: 3, minLB: 1, minDB: 2 }, tags: ['man', 'cover1'], assignments: { 'DL1': 'pass_rush', 'DL2': 'pass_rush', 'DL3': 'pass_rush', 'LB1': 'man_cover_RB1', 'DB1': 'man_cover_WR1', 'DB2': 'man_cover_WR2', 'DB3': 'zone_deep_middle', 'DB4': 'man_cover_WR3' } },
+    'Cover_3_Zone_3-1-3': { name: 'Cover 3 Zone', compatibleFormations: ['3-1-4'], compatibleCriteria: { minDL: 3, minDB: 3 }, tags: ['zone', 'cover3', 'safeZone'], assignments: { 'DL1': 'pass_rush', 'DL2': 'pass_rush', 'DL3': 'pass_rush', 'LB1': 'zone_hook_curl_middle', 'DB1': 'zone_deep_third_left', 'DB2': 'zone_deep_third_right', 'DB3': 'zone_deep_middle', 'DB4': 'zone_deep_middle' } },
+    'Zone_Blitz_3-1-3': { name: 'Zone Blitz', compatibleFormations: ['3-1-4'], compatibleCriteria: { minDL: 3, minLB: 1 }, tags: ['zone', 'blitz'], assignments: { 'DL1': 'pass_rush', 'DL2': 'pass_rush', 'DL3': 'pass_rush', 'LB1': 'blitz_gap', 'DB1': 'zone_flat_left', 'DB2': 'zone_flat_right', 'DB3': 'zone_deep_middle', 'DB4': 'zone_deep_middle' } },
 
     // --- 4-2-1 (Run Stop) ---
-    'GoalLine_RunStuff': { name: 'Goal Line Stuff', compatibleFormations: ['4-2-2'], compatibleCriteria: { minDL: 4, minLB: 1 }, tags: ['runStop', 'blitz'], assignments: { 'DL1': 'run_edge_left', 'DL2': 'run_gap_A_left', 'DL3': 'run_gap_A_right', 'DL4': 'run_edge_right', 'LB1': 'blitz_gap', 'LB2': 'blitz_gap', 'DB1': 'run_support' } },
-    'Cover_0_Blitz_4-2-1': { name: 'Cover 0 All Out', compatibleFormations: ['4-2-2'], compatibleCriteria: { minDL: 4, minLB: 2 }, tags: ['man', 'blitz', 'cover0'], assignments: { 'DL1': 'pass_rush', 'DL2': 'pass_rush', 'DL3': 'pass_rush', 'DL4': 'pass_rush', 'LB1': 'blitz_gap', 'LB2': 'blitz_edge', 'DB1': 'man_cover_WR1' } },
+    'GoalLine_RunStuff': { name: 'Goal Line Stuff', compatibleFormations: ['4-2-2'], compatibleCriteria: { minDL: 4, minLB: 1 }, tags: ['runStop', 'blitz'], assignments: { 'DL1': 'run_edge_left', 'DL2': 'run_gap_A_left', 'DL3': 'run_gap_A_right', 'DL4': 'run_edge_right', 'LB1': 'blitz_gap', 'LB2': 'blitz_gap', 'DB1': 'run_support', 'DB2': 'run_support' } },
+    'Cover_0_Blitz_4-2-1': { name: 'Cover 0 All Out', compatibleFormations: ['4-2-2'], compatibleCriteria: { minDL: 4, minLB: 2 }, tags: ['man', 'blitz', 'cover0'], assignments: { 'DL1': 'pass_rush', 'DL2': 'pass_rush', 'DL3': 'pass_rush', 'DL4': 'pass_rush', 'LB1': 'blitz_gap', 'LB2': 'blitz_edge', 'DB1': 'man_cover_WR1', 'DB2': 'man_cover_WR2' } },
 
     // --- 2-3-2 (Nickel) ---
-    'Cover_2_Zone_2-3-2': { name: 'Tampa 2', compatibleFormations: ['2-3-3'], compatibleCriteria: { minLB: 3, minDB: 2 }, tags: ['zone', 'cover2'], assignments: { 'DL1': 'pass_rush', 'DL2': 'pass_rush', 'LB1': 'zone_flat_left', 'LB2': 'zone_deep_middle', 'LB3': 'zone_flat_right', 'DB1': 'zone_deep_half_left', 'DB2': 'zone_deep_half_right' } },
+    'Cover_2_Zone_2-3-2': { name: 'Tampa 2', compatibleFormations: ['2-3-3'], compatibleCriteria: { minLB: 3, minDB: 2 }, tags: ['zone', 'cover2'], assignments: { 'DL1': 'pass_rush', 'DL2': 'pass_rush', 'LB1': 'zone_flat_left', 'LB2': 'zone_deep_middle', 'LB3': 'zone_flat_right', 'DB1': 'zone_deep_half_left', 'DB2': 'zone_deep_half_right', 'DB3': 'zone_deep_middle' } },
     'Double_A_Gap_Blitz': { name: 'Double A Gap Blitz', compatibleFormations: ['2-3-3'], compatibleCriteria: { minDL: 2, minLB: 3, minDB: 2 }, tags: ['blitz', 'man'], assignments: { 'DL1': 'pass_rush', 'DL2': 'pass_rush', 'LB1': 'man_cover_RB1', 'LB2': 'blitz_gap', 'LB3': 'blitz_gap', 'DB1': 'man_cover_WR1', 'DB2': 'man_cover_WR2' } },
 
     // --- 4-0-3 (Prevent) ---
@@ -559,7 +559,7 @@ export const defensivePlaybook = {
     'Victory_Prevent': { name: 'Victory Prevent', compatibleFormations: ['4-1-3'], compatibleCriteria: { minDL: 4, minDB: 3 }, tags: ['prevent', 'zone'], assignments: { 'DL1': 'spy_QB', 'DL2': 'pass_rush', 'DL3': 'pass_rush', 'DL4': 'spy_QB', 'DB1': 'zone_deep_half_left', 'DB2': 'zone_deep_half_right', 'DB3': 'zone_deep_middle' } },
 
     // --- Special ---
-    'Punt_Return_Return': { name: 'Punt Return', compatibleFormations: ['Punt_Return'], compatibleCriteria: { minDL: 2, minLB: 2, minDB: 3 }, tags: ['specialTeams'], assignments: { 'DL1': 'pass_rush', 'DL2': 'pass_rush', 'LB1': 'run_block', 'LB2': 'run_block', 'DB1': 'punt_return', 'DB2': 'punt_return', 'DB3': 'punt_return' } },
+    'Punt_Return_Return': { name: 'Punt Return', compatibleFormations: ['Punt_Return'], compatibleCriteria: { minDL: 2, minLB: 2, minDB: 3 }, tags: ['specialTeams'], assignments: { 'DL1': 'pass_rush', 'DL2': 'pass_rush', 'LB1': 'run_block', 'LB2': 'run_block', 'DB1': 'punt_return', 'DB2': 'punt_return', 'DB3': 'punt_return', 'DB4': 'punt_return' } },
     // --- 4-1-2 (Nickel Hybrid) Plays ---
 
     'Cover_2_Zone_4-1-2': {
@@ -573,7 +573,8 @@ export const defensivePlaybook = {
             'DL1': 'pass_rush', 'DL2': 'pass_rush', 'DL3': 'pass_rush', 'DL4': 'pass_rush',
             'LB1': 'zone_hook_curl_middle', // Patrols the middle hole
             'DB1': 'zone_deep_half_left',   // Deep Half
-            'DB2': 'zone_deep_half_right'   // Deep Half
+            'DB2': 'zone_deep_half_right',  // Deep Half
+            'DB3': 'zone_deep_middle'
         }
     },
 
@@ -588,7 +589,8 @@ export const defensivePlaybook = {
             'DL1': 'pass_rush', 'DL2': 'pass_rush', 'DL3': 'pass_rush', 'DL4': 'pass_rush',
             'LB1': 'zone_hook_curl_left',   // Drops to hook zone
             'DB1': 'zone_hook_curl_right',  // Safety "Buzzes" down to rob the curl
-            'DB2': 'zone_deep_middle'       // Single High Safety
+            'DB2': 'zone_deep_middle',      // Single High Safety
+            'DB3': 'zone_deep_middle'
         }
     },
 
@@ -602,11 +604,11 @@ export const defensivePlaybook = {
         assignments: {
             'DL1': 'pass_rush', 'DL2': 'pass_rush', 'DL3': 'pass_rush', 'DL4': 'pass_rush',
             'LB1': 'man_cover_RB1', // LB takes RB
-            'DB1': 'man_cover_WR2', // Strong Safety takes TE/Slot
+            'DB1': 'man_cover_SLOT', // Strong Safety takes TE/Slot (use SLOT to let AI select TE if present)
             // Note: In 4-1-2, DLs don't cover WRs. 
             // We assume Base Corners (not in this formation slot list) exist in logic, 
-            // OR if this is 7v7, we rely on the 4-man rush + 3 coverage.
-            // Since this is 7-man football:
+            // OR if this is 8v8, we rely on the 4-man rush + 3 coverage.
+            // Since this is 8-man football:
             'DB2': 'zone_deep_middle' // Free Safety roams deep
         }
     },
@@ -624,7 +626,8 @@ export const defensivePlaybook = {
             'DL3': 'run_gap_B_right', // Tackles slant out
             'LB1': 'blitz_gap',       // LB shoots A-Gap
             'DB1': 'blitz_gap',       // Safety shoots the other A-Gap
-            'DB2': 'man_cover_WR1'    // Hero coverage
+            'DB2': 'man_cover_WR1',   // Hero coverage
+            'DB3': 'man_cover_WR2'
         }
     },
 

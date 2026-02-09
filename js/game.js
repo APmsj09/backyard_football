@@ -47,7 +47,7 @@ let availableColors = [...teamColors];
 // --- Constants ---
 const offensivePositions = ['QB', 'RB', 'WR', 'OL'];
 const defensivePositions = ['DL', 'LB', 'DB'];
-const MIN_HEALTHY_PLAYERS = 7; // Minimum players needed to avoid forfeit
+const MIN_HEALTHY_PLAYERS = 8; // Minimum players needed to avoid forfeit (8v8)
 
 // --- Field Constants ---
 const FIELD_LENGTH = 120; // Yards (including 10yd endzones at 0-10 and 110-120)
@@ -3382,19 +3382,29 @@ function updateQBDecision(qbState, offenseStates, defenseStates, playState, offe
     const hasQBCrossedLine = qbState.y < playState.lineOfScrimmage;
     if (hasQBCrossedLine) {
         // QB is past the line - must scramble or eat sack
-        const pressureDefender = defenseStates.find(d => !d.isBlocked && !d.isEngaged && getDistance(qbState, d) < 4.5);
-        if (pressureDefender && getDistance(qbState, pressureDefender) < 2.0) {
-            // Imminent sack - QB takes it
-            if (gameLog) gameLog.push(`💥 ${qbState.name} sacked after crossing the line of scrimmage!`);
-            qbState.action = 'sacked';
-            return;
-        } else {
-            // Open lane - scramble
-            qbState.action = 'qb_scramble';
-            playState.qbIntent = 'scramble';
-            if (gameLog) gameLog.push(`🏃 ${qbState.name} scrambles after crossing the line!`);
-            return;
+        // Only process crossing once per transition (use a flag to avoid repeated messages)
+        if (!qbState.hasProcessedLineCrossing) {
+            const pressureDefender = defenseStates.find(d => !d.isBlocked && !d.isEngaged && getDistance(qbState, d) < 4.5);
+            if (pressureDefender && getDistance(qbState, pressureDefender) < 2.0) {
+                // Imminent sack - QB takes it
+                if (gameLog) gameLog.push(`💥 ${qbState.name} sacked after crossing the line of scrimmage!`);
+                qbState.action = 'sacked';
+                qbState.hasProcessedLineCrossing = true;
+                return;
+            } else {
+                // Open lane - scramble
+                qbState.action = 'qb_scramble';
+                playState.qbIntent = 'scramble';
+                if (gameLog) gameLog.push(`🏃 ${qbState.name} scrambles after crossing the line!`);
+                qbState.hasProcessedLineCrossing = true;
+                return;
+            }
         }
+        // Already processed crossing, just return
+        return;
+    } else {
+        // QB is back behind the line - reset the crossing flag
+        qbState.hasProcessedLineCrossing = false;
     }
 
     // Get Attributes
