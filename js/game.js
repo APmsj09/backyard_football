@@ -782,6 +782,25 @@ async function initializeLeague(onProgress) {
             assignTeamCaptain(team);
         }
     });
+
+    // --- QUICK ROSTER FILL (Testing/Startup convenience) ---
+    // Ensure AI teams have players so fast simulations and tests work
+    try {
+        const ROSTER_LIMIT = 12;
+        let undraftedPlayers = game.players.filter(p => p && !p.teamId);
+        if (undraftedPlayers.length > 0) {
+            // Fill each team in order until rosters reach the limit or players exhausted
+            game.teams.forEach(team => {
+                if (!team || !Array.isArray(team.roster)) return;
+                while ((team.roster.length || 0) < ROSTER_LIMIT && undraftedPlayers.length > 0) {
+                    const nextPlayer = undraftedPlayers.shift();
+                    try { addPlayerToTeam(nextPlayer, team); } catch (e) { /* best-effort */ }
+                }
+            });
+        }
+    } catch (e) {
+        console.warn('Quick roster fill failed:', e);
+    }
 }
 
 function refillAvailableColors() {
@@ -3253,7 +3272,7 @@ function resolveOngoingBlocks(playState, gameLog, offenseStates = [], defenseSta
 
         // 3. Stats Calculation (Standard Block Battle)
         const blockPower = ((blocker.blocking || 50) + (blocker.strength || 50)) * blocker.fatigueModifier;
-        const shedPower = ((defender.blockShedding || 50) + (defender.strength || 50)) * defender.fatigueModifier;
+        let shedPower = ((defender.blockShedding || 50) + (defender.strength || 50)) * defender.fatigueModifier;
 
         // 💡 NEW: PASS RUSHER TECHNIQUE MOVES
         // If defender is a pass rusher (has rush/blitz assignment) and is blocked, try technique moves
