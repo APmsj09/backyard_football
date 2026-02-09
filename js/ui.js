@@ -3425,33 +3425,39 @@ function setupDepthOrderDragEvents() {
 }
 
 function setupDragLogic(draggables, containers) {
-    draggables.forEach(draggable => {
-        draggable.addEventListener('dragstart', (e) => {
-            e.dataTransfer.effectAllowed = 'copyMove';
-            e.dataTransfer.setData('text/plain', draggable.dataset.playerId);
+    // Attach drag listeners to all draggable items
+    const attachDragListeners = (items) => {
+        items.forEach(draggable => {
+            draggable.addEventListener('dragstart', (e) => {
+                e.dataTransfer.effectAllowed = 'copyMove';
+                e.dataTransfer.setData('text/plain', draggable.dataset.playerId);
 
-            // 💡 FIX: Store source type in dataTransfer (Reliable)
-            if (draggable.classList.contains('roster-row-item')) {
-                e.dataTransfer.setData('source-type', 'roster');
-            } else {
-                e.dataTransfer.setData('source-type', 'list');
-            }
+                // 💡 FIX: Store source type in dataTransfer (Reliable)
+                if (draggable.classList.contains('roster-row-item')) {
+                    e.dataTransfer.setData('source-type', 'roster');
+                } else {
+                    e.dataTransfer.setData('source-type', 'list');
+                }
 
-            // Visuals
-            requestAnimationFrame(() => {
-                draggable.classList.add('dragging');
-                draggable.classList.add('opacity-50');
+                // Visuals
+                requestAnimationFrame(() => {
+                    draggable.classList.add('dragging');
+                    draggable.classList.add('opacity-50');
+                });
+            });
+
+            draggable.addEventListener('dragend', () => {
+                draggable.classList.remove('dragging');
+                draggable.classList.remove('opacity-50');
+
+                // Update rank numbers visually (instant feedback)
+                containers.forEach(c => updateRankNumbers(c));
             });
         });
+    };
 
-        draggable.addEventListener('dragend', () => {
-            draggable.classList.remove('dragging');
-            draggable.classList.remove('opacity-50');
-
-            // Update rank numbers visually (instant feedback)
-            containers.forEach(c => updateRankNumbers(c));
-        });
-    });
+    // Attach listeners to initial draggables
+    attachDragListeners(draggables);
 
     containers.forEach(container => {
         container.addEventListener('dragover', e => {
@@ -3525,10 +3531,13 @@ function setupDragLogic(draggables, containers) {
                 const strayRows = container.querySelectorAll('.roster-row-item');
                 strayRows.forEach(row => row.remove());
 
-                // 7. Save
+                // 7. Attach listeners to the newly created item immediately
+                attachDragListeners([newItem]);
+
+                // 8. Save
                 applyDepthOrderToChart();
             } else {
-                // Reordering within list
+                // Reordering within list - save the new order
                 applyDepthOrderToChart();
             }
         });
@@ -3556,7 +3565,7 @@ function getDragAfterElement(container, y) {
 function updateRankNumbers(container) {
     const items = container.querySelectorAll('.depth-order-item');
     items.forEach((item, index) => {
-        const numberSpan = item.querySelector('span.text-center');
+        const numberSpan = item.querySelector('span.rank-number');
         if (numberSpan) numberSpan.textContent = index + 1;
 
         // Update styling for top 2
