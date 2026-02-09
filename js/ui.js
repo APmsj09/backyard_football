@@ -3239,6 +3239,8 @@ function renderDepthOrderPane(gameState) {
     const columns = [
         { key: 'name', label: 'Name', width: 'w-32' },
         { key: 'pos', label: 'Pos', width: 'w-12' },
+        { key: 'offPos', label: 'Off', width: 'w-14' },
+        { key: 'defPos', label: 'Def', width: 'w-14' },
         { key: 'overall', label: 'Ovr', width: 'w-12' },
         { key: 'age', label: 'Age', width: 'w-12' },
         { key: 'height', label: 'Hgt', width: 'w-16' },
@@ -3280,6 +3282,30 @@ function renderDepthOrderPane(gameState) {
         if (pos === 'FB') pos = 'RB';
         if (['TE', 'ATH', 'K', 'P'].includes(pos)) pos = 'WR';
         const ovr = calculateOverall(p, pos);
+        
+        // Find the actual depth chart slot assignment (e.g., QB1, LB2, WR3)
+        const depthChart = team.depthChart || { offense: {}, defense: {} };
+        let offSlot = '';
+        let defSlot = '';
+        
+        // Check offense slots
+        if (depthChart.offense) {
+            Object.entries(depthChart.offense).forEach(([slot, playerId]) => {
+                if (playerId === p.id) {
+                    offSlot = slot;
+                }
+            });
+        }
+        
+        // Check defense slots
+        if (depthChart.defense) {
+            Object.entries(depthChart.defense).forEach(([slot, playerId]) => {
+                if (playerId === p.id) {
+                    defSlot = slot;
+                }
+            });
+        }
+        
         const vals = {
             height: formatHeight(p.attributes?.physical?.height),
             weight: p.attributes?.physical?.weight,
@@ -3299,9 +3325,11 @@ function renderDepthOrderPane(gameState) {
                                 data-player-id="${p.id}" data-player-name="${p.name}" data-player-ovr="${ovr}">
                                 <td class="py-1 px-2 font-medium truncate max-w-[120px]" title="${p.name}">${p.name}</td>
                                 <td class="py-1 px-2">${pos}</td>
+                                <td class="py-1 px-2 font-semibold text-blue-700 text-center font-mono">${offSlot || '-'}</td>
+                                <td class="py-1 px-2 font-semibold text-red-700 text-center font-mono">${defSlot || '-'}</td>
                                 <td class="py-1 px-2 font-bold ${ovr >= 80 ? 'text-green-600' : ''}">${ovr}</td>
                                 <td class="py-1 px-2 text-gray-600">${p.age}</td>
-                                ${columns.slice(4).map(c => `<td class="py-1 px-2 text-center text-gray-600 border-l border-gray-100">${vals[c.key] ?? '-'}</td>`).join('')}
+                                ${columns.slice(6).map(c => `<td class="py-1 px-2 text-center text-gray-600 border-l border-gray-100">${vals[c.key] ?? '-'}</td>`).join('')}
                             </tr>`;
     }).join('')}
                     </tbody>
