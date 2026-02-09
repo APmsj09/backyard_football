@@ -45,7 +45,7 @@ const teamColors = [
 let availableColors = [...teamColors];
 
 // --- Constants ---
-const offensivePositions = ['QB', 'RB', 'WR', 'OL'];
+const offensivePositions = ['QB', 'RB', 'WR', 'TE', 'OL'];
 const defensivePositions = ['DL', 'LB', 'DB'];
 const MIN_HEALTHY_PLAYERS = 8; // Minimum players needed to avoid forfeit (8v8)
 
@@ -216,7 +216,7 @@ export function rebuildDepthChartFromOrder(team) {
     // 1. Ensure Depth Order Object Exists with correct keys
     if (!team.depthOrder || Array.isArray(team.depthOrder)) {
         team.depthOrder = {
-            'QB': [], 'RB': [], 'WR': [], 'OL': [],
+            'QB': [], 'RB': [], 'WR': [], 'TE': [], 'OL': [],
             'DL': [], 'LB': [], 'DB': []
         };
     }
@@ -253,7 +253,8 @@ export function rebuildDepthChartFromOrder(team) {
 
                 // Normalize positions
                 if (['FB'].includes(pos)) pos = 'RB';
-                if (['TE', 'ATH', 'K', 'P'].includes(pos)) pos = 'WR';
+                // TE should remain TE (do not remap to WR)
+                if (['ATH', 'K', 'P'].includes(pos)) pos = 'WR';
                 if (['OT', 'OG', 'C'].includes(pos)) pos = 'OL';
                 if (['DE', 'DT', 'NT'].includes(pos)) pos = 'DL';
                 if (['CB', 'S', 'FS', 'SS'].includes(pos)) pos = 'DB';
@@ -305,14 +306,15 @@ export function rebuildDepthChartFromOrder(team) {
         // Normalize Slot Names
         if (['OT', 'OG', 'C'].includes(posKey)) posKey = 'OL';
         if (posKey === 'FB') posKey = 'RB';
-        if (posKey === 'TE') posKey = 'WR';
 
+        // TE is its own bucket now
         let pid = getNext(posKey);
 
         // Fallbacks if position bucket is empty
         if (!pid) {
             if (posKey === 'WR') pid = getNext('RB');
             else if (posKey === 'RB') pid = getNext('WR');
+            else if (posKey === 'TE') pid = getNext('WR') || getNext('RB');
         }
         team.depthChart.offense[slot] = pid || null;
     });
@@ -3379,7 +3381,7 @@ function updateQBDecision(qbState, offenseStates, defenseStates, playState, offe
     // --- 0B. LINE OF SCRIMMAGE CHECK (Football Rule) ---
     // QB cannot throw FORWARD if they've crossed the line of scrimmage (only backwards/laterals allowed)
     // If QB has crossed the line, force them to scramble or take a sack
-    const hasQBCrossedLine = qbState.y < playState.lineOfScrimmage;
+    const hasQBCrossedLine = qbState.y > (playState.lineOfScrimmage + 0.5);
     if (hasQBCrossedLine) {
         // QB is past the line - must scramble or eat sack
         // Only process crossing once per transition (use a flag to avoid repeated messages)
@@ -3736,7 +3738,7 @@ function updateQBDecision(qbState, offenseStates, defenseStates, playState, offe
  */
 function executeThrow(qbState, target, strength, accuracy, playState, gameLog, actionType) {
     // --- FOOTBALL RULE: QB Cannot Throw Forward Past Line of Scrimmage ---
-    const hasQBCrossedLine = qbState.y < playState.lineOfScrimmage;
+    const hasQBCrossedLine = qbState.y > (playState.lineOfScrimmage + 0.5);
     const isForwardPass = target.y > qbState.y || (Math.abs(target.y - qbState.y) < 0.5 && target.y > qbState.y - 2);
     
     if (hasQBCrossedLine && isForwardPass) {
@@ -3904,6 +3906,7 @@ function handleBallArrival(playState, carrier, playResult, gameLog) {
 
     // --- B. FIND PLAYERS IN RANGE ---
     const CATCH_RADIUS = 1.2; // Tight radius for actual hands catch
+    const CATCH_TOLERANCE = 0.6; // Extra tolerance for high-speed segment checks
 
     // Helper: Minimum distance from point to segment
     const pointToSegmentDist = (px, py, x1, y1, x2, y2) => {
@@ -3931,12 +3934,12 @@ function handleBallArrival(playState, carrier, playResult, gameLog) {
         if (playState.type === 'punt' && p.isOffense) return false;
 
         const distNow = Math.sqrt((p.x - ball.x)**2 + (p.y - ball.y)**2);
-        if (distNow <= CATCH_RADIUS) return true;
+        if (distNow <= (CATCH_RADIUS + CATCH_TOLERANCE)) return true;
 
         // If ball moved this tick, check if it passed near the player between prev and current positions
         if (typeof ball.prevX === 'number' && typeof ball.prevY === 'number') {
             const segDist = pointToSegmentDist(p.x, p.y, ball.prevX, ball.prevY, ball.x, ball.y);
-            if (segDist <= CATCH_RADIUS) return true;
+            if (segDist <= (CATCH_RADIUS + CATCH_TOLERANCE)) return true;
         }
 
         return false;
@@ -4052,6 +4055,18 @@ function handleBallArrival(playState, carrier, playResult, gameLog) {
 
             // 3. OFFENSIVE CATCH LOGIC
             pushLog(`👍 CATCH! ${bestCandidate.name} grabs it!`);
+            
+            // Secure the ball to the receiver
+            ball.inAir = false;
+            ball.isLoose = false;
+            ball.x = bestCandidate.x;
+            ball.y = bestCandidate.y;
+            ball.z = 0.5;
+            ball.vx = 0;
+            ball.vy = 0;
+            ball.vz = 0;
+            bestCandidate.hasBall = true;
+            bestCandidate.isBallCarrier = true;
             bestCandidate.action = 'run_path';
             
             // Calculate pass yards (from LOS to catch point)
@@ -4062,6 +4077,7 @@ function handleBallArrival(playState, carrier, playResult, gameLog) {
                 qbId: ball.throwerId, 
                 yards: yardsGain 
             });
+            return; // Stop processing, catch is complete
 
         } else {
             // --- DROP / SWAT ---
@@ -4460,6 +4476,10 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
                 ballPos.x = ballCarrierState.x;
                 ballPos.y = ballCarrierState.y;
                 ballPos.z = 0.5;
+
+                // Clamp ball to field bounds (defensive safety to avoid tiny floating drift)
+                ballPos.x = Math.max(0.5, Math.min(FIELD_WIDTH - 0.5, ballPos.x));
+                ballPos.y = Math.max(0.0, Math.min(FIELD_LENGTH, ballPos.y));
             }
 
             // --- F. COLLISIONS ---
