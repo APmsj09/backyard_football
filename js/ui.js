@@ -3633,7 +3633,13 @@ export function applyDepthOrderToChart() {
     // 3. Persist
     saveGameState();
 
-    // 4. Refresh UI
+    // 4. Re-render depth-order pane if visible
+    const depthOrderPane = document.getElementById('depth-order-container');
+    if (depthOrderPane && !depthOrderPane.classList.contains('hidden')) {
+        renderDepthOrderPane(gs);
+    }
+
+    // 5. Refresh UI
     document.dispatchEvent(new CustomEvent('refresh-ui'));
 }
 

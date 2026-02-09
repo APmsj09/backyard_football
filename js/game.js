@@ -641,7 +641,7 @@ function diagnosePlay(pState, truePlayType, offensivePlayKey, tick) {
             const recoveryChance = (iq * 0.7) / 200; // Higher IQ = better recovery
             const recoveryTick = tick + Math.round(15 - (iq / 6)); // High IQ recovers faster
             
-            if (playState?.tick < recoveryTick && Math.random() > recoveryChance) {
+            if (tick < recoveryTick && Math.random() > recoveryChance) {
                 return 'run'; // FOOLED! Attack the run
             }
         }
