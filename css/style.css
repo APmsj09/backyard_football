@@ -104,14 +104,14 @@ body {
     display: flex;
     flex-direction: column;
     align-items: center;
-    width: 120px; /* Slightly wider to prevent text wrap */
+    width: 72px; /* Compact slot to reduce overlap */
     z-index: 10;
-    transition: all 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275); /* Bouncy transition */
-    background: rgba(17, 24, 39, 0.9); /* Gray-900 */
-    padding: 6px;
-    border-radius: 6px;
-    border: 1px solid rgba(255, 255, 255, 0.15);
-    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+    transition: all 0.15s ease;
+    background: rgba(17, 24, 39, 0.65); /* Semi-transparent to reduce visual weight */
+    padding: 6px 4px;
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.25);
     cursor: grab;
 }
 
@@ -126,15 +126,15 @@ body {
 
 .slot-overall {
     position: absolute;
-    top: -10px;
-    right: -5px;
+    top: -8px;
+    right: -6px;
     color: white;
     font-size: 0.7rem;
     font-weight: 800;
     padding: 2px 6px;
     border-radius: 12px;
-    border: 1px solid rgba(255,255,255,0.5);
-    box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+    border: 1px solid rgba(255,255,255,0.45);
+    box-shadow: 0 1px 3px rgba(0,0,0,0.25);
 }
 
 /* Specific Slot Labels */
@@ -146,21 +146,69 @@ body {
     margin-bottom: 2px;
 }
 
+.slot-player-name {
+    min-height: 20px;
+}
+
+.slot-rating-bar {
+    width: 100%;
+}
+.slot-rating-fill {
+    height: 100%;
+    transition: width 0.25s ease;
+}
+
 /* Styled Select inside the visual slot */
 .player-slot-visual select {
-    background-color: rgba(0,0,0,0.3);
+    background-color: rgba(0,0,0,0.7);
     color: white;
-    border: 1px solid #4b5563;
+    border: 1px solid #374151;
     font-size: 0.75rem;
-    padding: 2px;
-    width: 100%;
-    border-radius: 4px;
+    padding: 4px 6px;
+    width: 160px;
+    border-radius: 6px;
     outline: none;
     cursor: pointer;
+    display: none; /* Hidden by default to reduce clutter */
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 30;
 }
 .player-slot-visual select:focus {
     border-color: #fbbf24;
+    display: block;
 }
+
+/* Reveal select when hovering the slot (desktop) */
+.player-slot-visual:hover select { display: block; }
+
+.slot-badge {
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 800;
+    font-size: 0.9rem;
+    color: white;
+    border: 2px solid rgba(255,255,255,0.12);
+    box-shadow: 0 2px 6px rgba(0,0,0,0.35);
+}
+
+.slot-player-name {
+    font-size: 0.70rem;
+    color: #f3f4f6;
+    max-width: 68px;
+    text-overflow: ellipsis;
+    overflow: hidden;
+    white-space: nowrap;
+    margin-top: 6px;
+}
+
+.player-slot-visual.drag-over { transform: translate(-50%, -50%) scale(1.18); z-index: 40; }
 
 /* --- 6. DEPTH ORDER LIST (New Feature) --- */
 /* The sortable list view logic */

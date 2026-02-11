@@ -1260,6 +1260,22 @@ function renderVisualFormationSlots(
 
     container.innerHTML = '';
 
+    // Helper: produce gradient/bg color and foreground color for an overall value
+    function colorForOverall(val) {
+        if (val === '-' || val === null || val === undefined) {
+            return { bg: 'linear-gradient(90deg, rgba(55,65,81,0.6), rgba(31,41,55,0.6))', fg: '#ffffff' };
+        }
+        const v = Math.max(0, Math.min(100, Number(val)));
+        // Map 0..100 -> hue 0 (red) .. 120 (green)
+        const hue = Math.round((v / 100) * 120);
+        const hue2 = Math.min(140, hue + 12);
+        const c1 = `hsl(${hue} 75% 45%)`;
+        const c2 = `hsl(${hue2} 70% 55%)`;
+        // For very high values, prefer darker foreground for contrast
+        const fg = v >= 75 ? '#052e16' : '#ffffff';
+        return { bg: `linear-gradient(90deg, ${c1}, ${c2})`, fg };
+    }
+
     const losMarker = document.createElement('div');
     losMarker.className = 'los-marker';
     losMarker.style.top = side === 'offense' ? '20%' : '80%';
@@ -1282,6 +1298,17 @@ function renderVisualFormationSlots(
         const playerId = currentChart[slotId];
         const player = roster.find(p => p.id === playerId);
 
+        // Find best candidate on bench for this slot (preview)
+        let bestCandidate = null;
+        let bestCandidateOvr = -Infinity;
+        benchedPlayers.forEach(p => {
+            const candOvr = calculateOverall(p, positionKey);
+            if (candOvr > bestCandidateOvr) {
+                bestCandidateOvr = candOvr;
+                bestCandidate = p;
+            }
+        });
+
         let badgeColor = 'bg-gray-500';
         if (slotId.startsWith('QB')) badgeColor = 'bg-amber-600';
         else if (slotId.startsWith('RB') || slotId.startsWith('WR')) badgeColor = 'bg-blue-600';
@@ -1301,9 +1328,17 @@ function renderVisualFormationSlots(
         // Pass positionKey to calculateOverall
         const overall = player ? calculateOverall(player, positionKey) : '-';
 
+        // Decide display name and rating for visual preview
+        const displayName = player ? (player.firstName ? player.firstName.charAt(0) + '. ' : '') + (player.lastName || player.name) : (bestCandidate ? (bestCandidate.firstName ? bestCandidate.firstName.charAt(0) + '. ' : '') + (bestCandidate.lastName || bestCandidate.name) : 'Empty');
+        const displayOvr = player ? overall : (bestCandidate ? Math.round(bestCandidateOvr) : '-');
+        const fillPercent = (displayOvr && displayOvr !== '-') ? Math.max(0, Math.min(100, Math.round((displayOvr / 100) * 100))) : 0;
+
+        const colorInfo = colorForOverall(displayOvr);
+        const fgStyle = `color: ${colorInfo.fg};`;
         slotEl.innerHTML = `
-            <div class="slot-overall ${badgeColor}">${overall}</div>
-            <div class="slot-label">${slotId}</div>
+            <div class="slot-badge" style="background: ${colorInfo.bg}; ${fgStyle}">${overall !== '-' ? overall : ''}</div>
+            <div class="slot-player-name" style="${fgStyle}">${player ? displayName : `<span class="text-gray-300">${displayName}</span>`}</div>
+            <div class="slot-label text-[10px] mt-1">${slotId}</div>
             <select class="slot-select pointer-events-auto" data-slot-id="${slotId}" data-side="${side}">
                 <option value="">Empty</option>
                 ${player ? `<option value="${player.id}" selected>${player.firstName ? player.firstName.charAt(0) : ''}. ${player.lastName || player.name}</option>` : ''}
@@ -1315,6 +1350,18 @@ function renderVisualFormationSlots(
                 `).join('')}
             </select>
         `;
+
+        // Tooltip: show a quick stat summary for the player or best candidate
+        const tooltipTarget = player || bestCandidate;
+        if (tooltipTarget) {
+            const keyAttrs = ['speed','strength','agility','playbookIQ','catchingHands','blocking','tackling'];
+            const attrPairs = keyAttrs.map(k => {
+                let v = tooltipTarget.attributes?.physical?.[k] ?? tooltipTarget.attributes?.mental?.[k] ?? tooltipTarget.attributes?.technical?.[k] ?? null;
+                if (v === null || v === undefined) return null;
+                return `${k}: ${v}`;
+            }).filter(Boolean);
+            slotEl.title = `${tooltipTarget.name} — ${displayOvr}\n${attrPairs.join(' | ')}`;
+        }
 
         const select = slotEl.querySelector('select');
         select.addEventListener('change', e => {
@@ -3310,14 +3357,19 @@ function renderDepthOrderPane(gameState) {
     listsHtml += `</div>`;
 
     // --- 3. Render Full Sortable Roster (Bottom) ---
-    // Filter out players already assigned to depth positions
+    // Show the full roster here (including players already assigned to depth lists)
+    // so the user can always drag any player. Assigned slots are still shown
+    // in the Off/Def columns below.
     const assignedPlayerIds = new Set();
     displayOrder.forEach(groupKey => {
         const idList = depthOrder[groupKey] || [];
         idList.forEach(id => assignedPlayerIds.add(id));
     });
-    
-    const availableRoster = roster.filter(p => !assignedPlayerIds.has(p.id));
+
+    // Previously we filtered out assigned players which left the roster empty
+    // whenever `team.depthOrder` contained all roster IDs. Keep the full roster
+    // visible so users can drag/reorder regardless of assignment state.
+    const availableRoster = roster.slice();
     
     // (Existing sort logic preserved)
     availableRoster.sort((a, b) => {
@@ -3428,9 +3480,11 @@ function renderDepthOrderPane(gameState) {
             blockShedding: p.attributes?.technical?.blockShedding
         };
         return `
-                            <tr class="roster-row-item cursor-move hover:bg-blue-50" draggable="true" 
+                            <tr class="roster-row-item cursor-move hover:bg-blue-50 ${offSlot || defSlot ? 'bg-amber-50' : ''}" draggable="true" 
                                 data-player-id="${p.id}" data-player-name="${p.name}" data-player-ovr="${ovr}">
-                                <td class="py-1 px-2 font-medium truncate max-w-[120px]" title="${p.name}">${p.name}</td>
+                                <td class="py-1 px-2 font-medium truncate max-w-[120px]" title="${p.name}">
+                                    ${p.name} ${offSlot || defSlot ? ('<span class="ml-2 text-[10px] bg-amber-100 text-amber-800 px-2 py-0.5 rounded font-semibold">' + (offSlot?offSlot:'') + (offSlot && defSlot?'/':'') + (defSlot?defSlot:'') + '</span>') : ''}
+                                </td>
                                 <td class="py-1 px-2">${pos}</td>
                                 <td class="py-1 px-2 font-semibold text-blue-700 text-center font-mono">${offSlot || '-'}</td>
                                 <td class="py-1 px-2 font-semibold text-red-700 text-center font-mono">${defSlot || '-'}</td>
@@ -3519,6 +3573,8 @@ function setupDepthTabs() {
 function setupDepthOrderDragEvents() {
     const pane = document.getElementById('depth-order-container');
     if (!pane) return;
+    // Prevent attaching multiple identical listeners on re-renders
+    if (pane.dataset.depthOrderEventsAttached === '1') return;
 
     // Use proper event delegation - much simpler and more reliable
     // Attach ONE listener to the container that handles all clicks
@@ -3544,14 +3600,18 @@ function setupDepthOrderDragEvents() {
     // Set up drag/drop for depth ordering
     const draggables = pane.querySelectorAll('.depth-order-item, .roster-row-item');
     const containers = pane.querySelectorAll('.depth-sortable-list');
-
     setupDragLogic(draggables, containers);
+
+    // Mark pane so we don't reattach listeners on every render
+    pane.dataset.depthOrderEventsAttached = '1';
 }
 
 function setupDragLogic(draggables, containers) {
     // Attach drag listeners to all draggable items
     const attachDragListeners = (items) => {
         items.forEach(draggable => {
+            // Avoid duplicating listeners on the same element
+            if (draggable.dataset.dragListenerAttached === '1') return;
             draggable.addEventListener('dragstart', (e) => {
                 e.dataTransfer.effectAllowed = 'copyMove';
                 e.dataTransfer.setData('text/plain', draggable.dataset.playerId);
@@ -3577,6 +3637,9 @@ function setupDragLogic(draggables, containers) {
                 // Update rank numbers visually (instant feedback)
                 containers.forEach(c => updateRankNumbers(c));
             });
+
+            // Mark that listeners were attached so we don't reattach later
+            draggable.dataset.dragListenerAttached = '1';
         });
     };
 
@@ -3584,6 +3647,11 @@ function setupDragLogic(draggables, containers) {
     attachDragListeners(draggables);
 
     containers.forEach(container => {
+        // Skip if we've already attached drag listeners to this container
+        if (container.dataset.dragContainerAttached === '1') {
+            return; // listeners already present
+        }
+
         container.addEventListener('dragover', e => {
             e.preventDefault(); // Allow dropping
 
@@ -3665,6 +3733,9 @@ function setupDragLogic(draggables, containers) {
                 applyDepthOrderToChart();
             }
         });
+
+        // Mark attached
+        container.dataset.dragContainerAttached = '1';
     });
 }
 
