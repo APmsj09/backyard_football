@@ -1298,6 +1298,14 @@ function renderVisualFormationSlots(
         const playerId = currentChart[slotId];
         const player = roster.find(p => p.id === playerId);
 
+        // 💡 Determine the canonical position key for this slot BEFORE using it
+        let positionKey = slotId.replace(/\d+/g, '');
+        if (['OT', 'OG', 'C'].includes(positionKey)) positionKey = 'OL';
+        if (['DE', 'DT', 'NT'].includes(positionKey)) positionKey = 'DL';
+        if (['CB', 'S', 'FS', 'SS'].includes(positionKey)) positionKey = 'DB';
+        if (['FB'].includes(positionKey)) positionKey = 'RB';
+        if (['TE'].includes(positionKey)) positionKey = 'WR';
+
         // Find best candidate on bench for this slot (preview)
         let bestCandidate = null;
         let bestCandidateOvr = -Infinity;
@@ -1316,16 +1324,7 @@ function renderVisualFormationSlots(
         else if (slotId.startsWith('DB')) badgeColor = 'bg-purple-600';
         else if (slotId.startsWith('OL')) badgeColor = 'bg-emerald-600';
 
-        // 💡 FIX: Extract position from slotId (e.g. "QB1" -> "QB")
-        let positionKey = slotId.replace(/\d+/g, '');
-        // Map formation slots to calculation keys if necessary (e.g. C -> OL)
-        if (['OT', 'OG', 'C'].includes(positionKey)) positionKey = 'OL';
-        if (['DE', 'DT', 'NT'].includes(positionKey)) positionKey = 'DL';
-        if (['CB', 'S', 'FS', 'SS'].includes(positionKey)) positionKey = 'DB';
-        if (['FB'].includes(positionKey)) positionKey = 'RB';
-        if (['TE'].includes(positionKey)) positionKey = 'WR';
-
-        // Pass positionKey to calculateOverall
+        // Pass positionKey to calculateOverall (positionKey already computed above)
         const overall = player ? calculateOverall(player, positionKey) : '-';
 
         // Decide display name and rating for visual preview
