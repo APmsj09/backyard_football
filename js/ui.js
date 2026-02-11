@@ -1334,10 +1334,17 @@ function renderVisualFormationSlots(
 
         const colorInfo = colorForOverall(displayOvr);
         const fgStyle = `color: ${colorInfo.fg};`;
+
+        // compact display: show position and short name inside the circular badge
+        const posLabel = positionKey;
+        const shortName = player ? ((player.firstName ? player.firstName.charAt(0) + '. ' : '') + (player.lastName || player.name)) : (bestCandidate ? ((bestCandidate.firstName ? bestCandidate.firstName.charAt(0) + '. ' : '') + (bestCandidate.lastName || bestCandidate.name)) : 'Empty');
+
         slotEl.innerHTML = `
-            <div class="slot-badge" style="background: ${colorInfo.bg}; ${fgStyle}">${overall !== '-' ? overall : ''}</div>
-            <div class="slot-player-name" style="${fgStyle}">${player ? displayName : `<span class="text-gray-300">${displayName}</span>`}</div>
-            <div class="slot-label text-[10px] mt-1">${slotId}</div>
+            <div class="slot-badge" style="background: ${colorInfo.bg}; ${fgStyle}">
+                <div class="badge-pos">${posLabel}</div>
+                <div class="badge-name">${shortName}</div>
+            </div>
+            <div class="slot-overall-bubble" style="background:${colorInfo.bg}; ${fgStyle}">${overall !== '-' ? overall : ''}</div>
             <select class="slot-select pointer-events-auto" data-slot-id="${slotId}" data-side="${side}">
                 <option value="">Empty</option>
                 ${player ? `<option value="${player.id}" selected>${player.firstName ? player.firstName.charAt(0) : ''}. ${player.lastName || player.name}</option>` : ''}
@@ -1349,6 +1356,56 @@ function renderVisualFormationSlots(
                 `).join('')}
             </select>
         `;
+
+        // Tooltip: create a richer hover card showing full name and core skills for the position
+        const tooltipTarget = player || bestCandidate;
+        const getAttrValue = (pl, key) => {
+            if (!pl || !pl.attributes) return '-';
+            return (pl.attributes.physical && pl.attributes.physical[key] !== undefined) ? pl.attributes.physical[key]
+                : (pl.attributes.mental && pl.attributes.mental[key] !== undefined) ? pl.attributes.mental[key]
+                : (pl.attributes.technical && pl.attributes.technical[key] !== undefined) ? pl.attributes.technical[key]
+                : '-';
+        };
+
+        // compute core attributes for this position (top 3 weights)
+        let coreAttrs = [];
+        try {
+            if (typeof positionOverallWeights !== 'undefined' && positionOverallWeights[positionKey]) {
+                coreAttrs = Object.entries(positionOverallWeights[positionKey])
+                    .sort((a, b) => b[1] - a[1])
+                    .slice(0, 3)
+                    .map(e => e[0]);
+            }
+        } catch (e) { coreAttrs = []; }
+
+        // attach hover handlers
+        slotEl.addEventListener('mouseenter', () => {
+            if (!tooltipTarget) return;
+            const tt = document.createElement('div');
+            tt.className = 'slot-tooltip';
+            const fullName = tooltipTarget.name || `${tooltipTarget.firstName || ''} ${tooltipTarget.lastName || ''}`.trim();
+            let skillsHtml = '';
+            coreAttrs.forEach(a => {
+                const v = getAttrValue(tooltipTarget, a);
+                skillsHtml += `<div class="skill-row"><span class="skill-key">${a}</span>: <span class="skill-val">${v}</span></div>`;
+            });
+            tt.innerHTML = `<div class="tooltip-name"><strong>${fullName}</strong></div><div class="tooltip-skills">${skillsHtml}</div>`;
+            container.appendChild(tt);
+
+            // position tooltip to the right unless it would overflow
+            const slotRect = slotEl.getBoundingClientRect();
+            const containerRect = container.getBoundingClientRect();
+            const left = slotRect.right - containerRect.left + 8;
+            let top = slotRect.top - containerRect.top;
+            // clamp top within container
+            if (top + tt.offsetHeight > container.clientHeight) top = Math.max(0, container.clientHeight - tt.offsetHeight - 8);
+            tt.style.left = `${left}px`;
+            tt.style.top = `${top}px`;
+            slotEl._tooltipEl = tt;
+        });
+        slotEl.addEventListener('mouseleave', () => {
+            if (slotEl._tooltipEl) { slotEl._tooltipEl.remove(); slotEl._tooltipEl = null; }
+        });
 
         // Tooltip: show a quick stat summary for the player or best candidate
         const tooltipTarget = player || bestCandidate;

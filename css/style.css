@@ -104,15 +104,15 @@ body {
     display: flex;
     flex-direction: column;
     align-items: center;
-    width: 72px; /* Compact slot to reduce overlap */
-    z-index: 10;
-    transition: all 0.15s ease;
-    background: rgba(17, 24, 39, 0.65); /* Semi-transparent to reduce visual weight */
-    padding: 6px 4px;
-    border-radius: 8px;
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.25);
-    cursor: grab;
+    width: 64px; /* Slightly smaller to avoid overlap */
+    z-index: 8;
+    transition: transform 0.12s ease;
+    background: transparent; /* remove heavy box background */
+    padding: 2px 2px;
+    border-radius: 6px;
+    border: none;
+    box-shadow: none;
+    cursor: default;
 }
 
 .player-slot-visual:active { cursor: grabbing; }
@@ -185,30 +185,76 @@ body {
 .player-slot-visual:hover select { display: block; }
 
 .slot-badge {
-    width: 44px;
-    height: 44px;
+.slot-badge {
+    width: 56px;
+    height: 56px;
     border-radius: 50%;
     display: flex;
+    flex-direction: column;
     align-items: center;
     justify-content: center;
-    font-weight: 800;
-    font-size: 0.9rem;
+    padding: 6px;
     color: white;
-    border: 2px solid rgba(255,255,255,0.12);
-    box-shadow: 0 2px 6px rgba(0,0,0,0.35);
+    border: 1px solid rgba(255,255,255,0.06);
+    backdrop-filter: blur(3px);
+}
+.badge-pos {
+    font-size: 0.65rem;
+    font-weight: 800;
+    opacity: 0.95;
+}
+.badge-name {
+    font-size: 0.75rem;
+    font-weight: 900;
+    margin-top: 2px;
 }
 
 .slot-player-name {
-    font-size: 0.70rem;
+    font-size: 0.68rem;
     color: #f3f4f6;
-    max-width: 68px;
+    max-width: 64px;
     text-overflow: ellipsis;
     overflow: hidden;
     white-space: nowrap;
     margin-top: 6px;
+    text-align: center;
 }
 
 .player-slot-visual.drag-over { transform: translate(-50%, -50%) scale(1.18); z-index: 40; }
+
+/* Overall bubble positioned top-right of the slot */
+.slot-overall-bubble {
+    position: absolute;
+    top: -8px;
+    right: -8px;
+    min-width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 900;
+    font-size: 0.72rem;
+    padding: 4px;
+    border: 2px solid rgba(255,255,255,0.08);
+    box-shadow: 0 2px 6px rgba(0,0,0,0.2);
+}
+
+/* Tooltip styles */
+.slot-tooltip {
+    position: absolute;
+    background: rgba(17,24,39,0.95);
+    color: #fff;
+    padding: 8px 10px;
+    border-radius: 6px;
+    box-shadow: 0 8px 24px rgba(2,6,23,0.6);
+    z-index: 60;
+    width: 220px;
+    font-size: 0.82rem;
+}
+.slot-tooltip .tooltip-name { margin-bottom: 6px; font-weight: 800; }
+.slot-tooltip .skill-row { font-size: 0.78rem; color: #d1d5db; margin-bottom: 4px; }
+.slot-tooltip .skill-key { text-transform: capitalize; color: #9ca3af; margin-right: 6px; }
 
 /* --- 6. DEPTH ORDER LIST (New Feature) --- */
 /* The sortable list view logic */
