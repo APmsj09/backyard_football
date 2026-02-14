@@ -1408,7 +1408,7 @@ function renderVisualFormationSlots(
         });
 
         // Tooltip: show a quick stat summary for the player or best candidate
-        const tooltipTarget = player || bestCandidate;
+        //const tooltipTarget = player || bestCandidate;
         if (tooltipTarget) {
             const keyAttrs = ['speed','strength','agility','playbookIQ','catchingHands','blocking','tackling'];
             const attrPairs = keyAttrs.map(k => {
