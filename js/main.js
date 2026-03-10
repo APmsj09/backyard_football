@@ -315,17 +315,14 @@ function handleDepthChartSelect(e) {
     const selectEl = e.target;
 
     const val = selectEl.value;
-    // FIX: Ensure we never pass empty strings, only valid IDs or null
     const playerId = (val === 'null' || val === '') ? null : val;
-
-    const newPositionSlot = selectEl.dataset.slotId || selectEl.dataset.slot;
+    const slot = selectEl.dataset.slotId || selectEl.dataset.slot;
     const side = selectEl.dataset.side;
 
-    if (newPositionSlot && side && gameState) {
-        if (playerId) {
-            handleDepthChartDrop(playerId, newPositionSlot, side);
-            document.dispatchEvent(new CustomEvent('refresh-ui'));
-        }
+    if (slot && side && gameState) {
+        // 💡 THE FIX: Call the UI helper we just updated
+        // This ensures the priority list is updated when you use the dropdown
+        handleDepthChartChange(side, slot, playerId);
     }
 }
 

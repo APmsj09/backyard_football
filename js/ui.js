@@ -1215,26 +1215,18 @@ function handleDepthChartChange(side, slot, newPlayerId) {
     const gs = getGameState();
     if (!gs || !gs.playerTeam) return;
 
-    const team = gs.playerTeam;
-    const currentChart = team.depthChart[side];
-
-    // 1. Logic: If selecting a player who is ALREADY starting in a different slot,
-    // remove them from that old slot (prevent cloning).
-    if (newPlayerId) {
-        Object.keys(currentChart).forEach(existingSlot => {
-            if (currentChart[existingSlot] === newPlayerId) {
-                currentChart[existingSlot] = null;
-            }
-        });
+    if (!newPlayerId) {
+        // If "Empty" is selected, just clear the slot
+        gs.playerTeam.depthChart[side][slot] = null;
+    } else {
+        // 💡 THE FIX: Use Game.updateDepthChart instead of direct assignment.
+        // This updates the Rankings AND the Field at the same time.
+        Game.updateDepthChart(newPlayerId, slot, side);
     }
 
-    // 2. Assign the new player (or null if "Empty" was selected)
-    currentChart[slot] = newPlayerId || null;
-
-    // 3. Save the new state
     saveGameState();
-
-    // 4. Refresh the tab to update visuals (remove duplicate options, update overalls)
+    
+    // Refresh the UI to show the new overalls and updated bench
     renderDepthChartTab(gs);
 }
 
