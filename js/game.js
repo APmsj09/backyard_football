@@ -2174,6 +2174,68 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
         return;
     }
 
+    // --- 1.5 TURNOVER RETURN LOGIC (Interception / Fumble Recovery / Punt Return) ---
+    // If a defensive player has the ball, the roles reverse!
+    if (ballCarrierState && !ballCarrierState.isOffense) {
+        playState.activePlayers.forEach(pState => {
+            if (pState.stunnedTicks > 0) { pState.stunnedTicks--; return; }
+            if (pState.isBlocked || pState.isEngaged) return;
+
+            if (pState.id === ballCarrierState.id) {
+                // 1. The Returner: Run towards y = 10 (Opposite endzone)
+                let targetX = pState.x;
+                
+                // Simple vision: dodge offensive players
+                const nearestOff = offenseStates.find(o => getDistance(pState, o) < 8);
+                if (nearestOff) {
+                    const dx = pState.x - nearestOff.x;
+                    targetX += (dx > 0 ? 3 : -3); // Dodge laterally
+                    targetX = Math.max(1, Math.min(52, targetX));
+                } else {
+                    // Drift to center field
+                    if (pState.x < 20) targetX += 0.5;
+                    else if (pState.x > 33) targetX -= 0.5;
+                }
+                
+                pState.targetX = targetX;
+                pState.targetY = 10; // Defensive endzone is at 10
+                pState.action = 'run_path';
+                pState.contactReduction = nearestOff ? 0.9 : 1.0;
+            } 
+            else if (!pState.isOffense) {
+                // 2. The Return Team (Originally Defense): Block!
+                const nearestOff = offenseStates
+                    .filter(o => !o.isEngaged && o.y < pState.y + 5 && o.y > pState.y - 15)
+                    .sort((a, b) => getDistance(pState, a) - getDistance(pState, b))[0];
+                    
+                if (nearestOff) {
+                    pState.targetX = nearestOff.x;
+                    pState.targetY = nearestOff.y;
+                    pState.action = 'run_block';
+                } else {
+                    // Escort the returner
+                    pState.targetX = ballCarrierState.x + (pState.x < ballCarrierState.x ? -3 : 3);
+                    pState.targetY = ballCarrierState.y - 3; // Stay in front
+                    pState.action = 'run_path';
+                }
+            } 
+            else if (pState.isOffense) {
+                // 3. The Tackling Team (Originally Offense): Pursue!
+                const dist = getDistance(pState, ballCarrierState);
+                const leadTime = dist / 15; 
+                const carrierVx = ballCarrierState.vx || 0;
+                const carrierVy = ballCarrierState.vy || 0;
+                
+                pState.targetX = ballCarrierState.x + (carrierVx * leadTime);
+                pState.targetY = ballCarrierState.y + (carrierVy * leadTime);
+                
+                // 💡 FIX: Force the movement engine to process them as runners!
+                pState.action = 'run_path'; 
+            }
+        });
+        return; // EXIT EARLY! Do not run normal offense/defense logic.
+    }
+
     // --- 2. BLOCKING LOGIC (O-Line) ---
     // Identify threats for blockers
     const allThreats = defenseStates.filter(d => !d.isBlocked && !d.isEngaged && !d.assignment?.startsWith('man_cover_'));
@@ -4429,6 +4491,7 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
                     // 2. DEFENSIVE TOUCHDOWN (Crosses 10 yard line going other way)
                     if (!ballCarrierState.isOffense && ballCarrierState.y <= 10.0) {
                         playState.touchdown = true;
+                        playState.defensiveTD = true; // 💡 FIX: Flag it as a defensive score!
                         playState.playIsLive = false;
                         playState.possessionChanged = true;
                         playState.finalBallY = 10.0;
@@ -4452,13 +4515,31 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
                         playState.yards = ballCarrierState.y - playState.lineOfScrimmage;
                         playState.finalBallY = ballCarrierState.y;
                         if (gameLog) gameLog.push(`💨 ${ballCarrierState.name} steps out of bounds.`);
-
+                        
                         // Check Sack
                         if (ballCarrierState.role === 'QB' && playState.yards < 0 && playState.type === 'pass') {
                             playState.sack = true;
                             if (gameLog) gameLog.push(`(Sack recorded)`);
                         }
                         break;
+                    }
+
+                    // 5. 💡 NEW: FORWARD PROGRESS STALLED (Whistle)
+                    // If the carrier is trapped in a pile of bodies and can't move, blow the whistle.
+                    // We check distance moved over the last 1 second (20 ticks).
+                    if (!playState.stallCheck) playState.stallCheck = { tick: playState.tick, y: ballCarrierState.y };
+                    
+                    if (playState.tick - playState.stallCheck.tick >= 20) {
+                        const distMoved = Math.abs(ballCarrierState.y - playState.stallCheck.y);
+                        if (distMoved < 0.5) { // Moved less than half a yard in 1 second
+                            playState.playIsLive = false;
+                            playState.yards = ballCarrierState.y - playState.lineOfScrimmage;
+                            playState.finalBallY = ballCarrierState.y;
+                            if (gameLog) gameLog.push(`⏱️ Forward progress stopped. Play blown dead.`);
+                            break;
+                        }
+                        // Reset check
+                        playState.stallCheck = { tick: playState.tick, y: ballCarrierState.y };
                     }
                 }
             }
@@ -4617,6 +4698,7 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
     else if (playState.touchdown) {
         playResult.outcome = 'complete';
         playResult.score = 'TD';
+        playResult.defensiveTD = playState.defensiveTD || false; // 💡 FIX: Attach flag to result
     }
     else if (playState.safety) {
         playResult.safety = true;
@@ -5390,12 +5472,24 @@ function simulateLivePlayStep(game) {
     const { playResult, finalBallY } = result;
 
     if (playResult.score === 'TD') {
-        if (offense.id === game.homeTeam.id) game.homeScore += 6; else game.awayScore += 6;
+        let scoringTeam = offense;
+        
+        // 💡 FIX: Reward the Defense on a Pick-Six / Fumble Return
+        if (playResult.defensiveTD) {
+            scoringTeam = defense;
+            game.possession = defense; // Defense now possesses ball for PAT
+        }
+
+        if (scoringTeam.id === game.homeTeam.id) game.homeScore += 6; 
+        else game.awayScore += 6;
+
         if (game.isConversionAttempt) {
-            if (offense.id === game.homeTeam.id) game.homeScore += 2; else game.awayScore += 2;
+            if (scoringTeam.id === game.homeTeam.id) game.homeScore += 2; 
+            else game.awayScore += 2;
+            
             game.isConversionAttempt = false;
             game.gameLog.push("✅ Conversion GOOD!");
-            game.possession = offense;
+            game.possession = offense; // Reset to original offense for kickoff equivalent
             game.ballOn = 35;
             game.down = 1; game.yardsToGo = 10;
         } else {
@@ -5403,9 +5497,14 @@ function simulateLivePlayStep(game) {
         }
     }
     else if (playResult.safety) {
-        if (defense.id === game.homeTeam.id) game.homeScore += 2; else game.awayScore += 2;
-        game.possession = offense;
-        game.ballOn = 20;
+        // 💡 FIX: Award points and ball to the team that forced the safety
+        if (defense.id === game.homeTeam.id) game.homeScore += 2; 
+        else game.awayScore += 2;
+        
+        game.possession = defense; 
+        game.ballOn = 35; // Standard post-safety start
+        game.down = 1;
+        game.yardsToGo = 10;
     }
     else if (playResult.possessionChange) {
         if (game.isConversionAttempt) {
@@ -5415,7 +5514,16 @@ function simulateLivePlayStep(game) {
             game.ballOn = 35;
         } else {
             game.possession = defense;
-            game.ballOn = 100 - finalBallY;
+            
+            // 💡 FIX: Correct field-flip math!
+            game.ballOn = 110 - finalBallY; 
+            
+            // 💡 FIX: Handle Touchbacks correctly (Ball intercepted/punted into endzone)
+            if (game.ballOn <= 0) {
+                game.ballOn = 20;
+                if (game.gameLog) game.gameLog.push("Touchback! Ball placed at the 20.");
+            }
+            
             game.ballOn = Math.max(1, Math.min(99, game.ballOn));
             game.down = 1;
             game.yardsToGo = 10;
