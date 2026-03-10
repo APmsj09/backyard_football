@@ -44,16 +44,16 @@ let depthOrderSortDir = 'desc';    // Default sort direction
 let activeDepthOrderTab = 'QB';
 
 // --- Live Game Sim State ---
-let liveGameSpeed = 80; 
-let liveGameCurrentIndex = 0; 
-let liveGameLog = []; 
-let currentLiveGameResult = null; 
+let liveGameSpeed = 80;
+let liveGameCurrentIndex = 0;
+let liveGameLog = [];
+let currentLiveGameResult = null;
 let userPreferredSpeed = 80;
 let huddleTimeout = null;
 
-let activeLiveGame = null;       
-let liveGameCallback = null;     
-let liveGameInterval = null;     
+let activeLiveGame = null;
+let liveGameCallback = null;
+let liveGameInterval = null;
 let isSkipping = false;
 
 let liveGameLogIndex = 0;
@@ -1080,12 +1080,12 @@ function renderFormationDropdown(side, formationMap, selectedKey) {
 
     select.onchange = (e) => {
         const team = getGameState().playerTeam;
-
-        // 🔒 HARD GUARANTEE
-        team.formations[side] = e.target.value; // ALWAYS a key
+        team.formations[side] = e.target.value;
 
         rebuildDepthChartFromOrder(team);
-        renderDepthChartTab();
+
+        // 💡 FIX: Force a global UI refresh to ensure all sub-tabs see the new alignment
+        document.dispatchEvent(new CustomEvent('refresh-ui'));
     };
 }
 
@@ -1363,8 +1363,8 @@ function renderVisualFormationSlots(
             if (!pl || !pl.attributes) return '-';
             return (pl.attributes.physical && pl.attributes.physical[key] !== undefined) ? pl.attributes.physical[key]
                 : (pl.attributes.mental && pl.attributes.mental[key] !== undefined) ? pl.attributes.mental[key]
-                : (pl.attributes.technical && pl.attributes.technical[key] !== undefined) ? pl.attributes.technical[key]
-                : '-';
+                    : (pl.attributes.technical && pl.attributes.technical[key] !== undefined) ? pl.attributes.technical[key]
+                        : '-';
         };
 
         // compute core attributes for this position (top 3 weights)
@@ -1410,7 +1410,7 @@ function renderVisualFormationSlots(
         // Tooltip: show a quick stat summary for the player or best candidate
         //const tooltipTarget = player || bestCandidate;
         if (tooltipTarget) {
-            const keyAttrs = ['speed','strength','agility','playbookIQ','catchingHands','blocking','tackling'];
+            const keyAttrs = ['speed', 'strength', 'agility', 'playbookIQ', 'catchingHands', 'blocking', 'tackling'];
             const attrPairs = keyAttrs.map(k => {
                 let v = tooltipTarget.attributes?.physical?.[k] ?? tooltipTarget.attributes?.mental?.[k] ?? tooltipTarget.attributes?.technical?.[k] ?? null;
                 if (v === null || v === undefined) return null;
@@ -2109,11 +2109,11 @@ function drawFieldVisualization(frameData) {
 
     // Track the ball
     const ballY = frameData.ball ? frameData.ball.y : 60;
-    
+
     // Center camera on ball horizontally, but clamp to field boundaries
     const MIN_CAM_Y = 0;
     const MAX_CAM_Y = FIELD_LENGTH_YARDS - VIEW_LENGTH_YARDS;
-    
+
     let camBottomY = ballY - (VIEW_LENGTH_YARDS / 2);
     camBottomY = Math.max(MIN_CAM_Y, Math.min(MAX_CAM_Y, camBottomY));
 
@@ -2136,10 +2136,10 @@ function drawFieldVisualization(frameData) {
     // Hash marks (small perpendicular marks at 1-yard intervals)
     ctx.lineWidth = Math.max(1, ppY * 0.03);
     ctx.strokeStyle = "rgba(255, 255, 255, 0.2)";
-    
+
     const startYard = Math.floor(camBottomY) - 1;
     const endYard = Math.ceil(camBottomY + VIEW_LENGTH_YARDS) + 1;
-    
+
     // Top and bottom sideline hash marks (every yard)
     for (let y = startYard; y <= endYard; y++) {
         const sy = toScreenX(y);
@@ -2149,7 +2149,7 @@ function drawFieldVisualization(frameData) {
             ctx.moveTo(sy, toScreenY(0) - ppY * 0.15);
             ctx.lineTo(sy, toScreenY(0));
             ctx.stroke();
-            
+
             // Bottom hash mark
             ctx.beginPath();
             ctx.moveTo(sy, toScreenY(FIELD_WIDTH_YARDS) + ppY * 0.15);
@@ -2170,7 +2170,7 @@ function drawFieldVisualization(frameData) {
 
     for (let y = startYard10; y <= endYard10; y += 10) {
         const sy = toScreenX(y);
-        
+
         // Special emphasis on goal lines (y=10 and y=110)
         if (y === 10 || y === 110) {
             ctx.lineWidth = Math.max(3, ppY * 0.2);
@@ -2233,7 +2233,7 @@ function drawFieldVisualization(frameData) {
         ctx.font = `bold ${ppY * 1.5}px sans-serif`;
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
-        ctx.shadowColor = "rgba(0,0,0,0.8)"; 
+        ctx.shadowColor = "rgba(0,0,0,0.8)";
         ctx.shadowBlur = 6;
         ctx.shadowOffsetX = 1;
         ctx.shadowOffsetY = 1;
@@ -2256,7 +2256,7 @@ function drawFieldVisualization(frameData) {
         ctx.lineTo(sy, h);
         ctx.lineWidth = ppY * 0.15;
         ctx.strokeStyle = color;
-        ctx.shadowColor = color; 
+        ctx.shadowColor = color;
         ctx.shadowBlur = 8;
         ctx.stroke();
         ctx.shadowBlur = 0;
@@ -2269,9 +2269,9 @@ function drawFieldVisualization(frameData) {
     ctx.lineWidth = ppY * 0.1;
     ctx.strokeStyle = "white";
     ctx.beginPath();
-    ctx.moveTo(0, toScreenY(0)); 
+    ctx.moveTo(0, toScreenY(0));
     ctx.lineTo(w, toScreenY(0));
-    ctx.moveTo(0, toScreenY(FIELD_WIDTH_YARDS)); 
+    ctx.moveTo(0, toScreenY(FIELD_WIDTH_YARDS));
     ctx.lineTo(w, toScreenY(FIELD_WIDTH_YARDS));
     ctx.stroke();
 
@@ -2280,22 +2280,22 @@ function drawFieldVisualization(frameData) {
         frameData.players.forEach(p => {
             const px = toScreenX(p.y);  // p.y is field length (0-120)
             const py = toScreenY(p.x);  // p.x is field width (0-53.3)
-            
+
             // PLAYER SIZE scaled for visibility
-            const radius = ppY * 1.3; 
+            const radius = ppY * 1.3;
 
             // Deep shadow (larger, darker, under the player for depth) 
             ctx.fillStyle = "rgba(0,0,0,0.5)";
-            ctx.beginPath(); 
-            ctx.ellipse(px, py + radius*0.8, radius * 1.2, radius * 0.4, 0, 0, Math.PI*2); 
+            ctx.beginPath();
+            ctx.ellipse(px, py + radius * 0.8, radius * 1.2, radius * 0.4, 0, 0, Math.PI * 2);
             ctx.fill();
 
             // Jersey Body (Main Circle) - use team colors
             ctx.fillStyle = p.primaryColor || (p.isOffense ? "#e74c3c" : "#3498db");
-            ctx.beginPath(); 
-            ctx.arc(px, py, radius, 0, Math.PI*2); 
+            ctx.beginPath();
+            ctx.arc(px, py, radius, 0, Math.PI * 2);
             ctx.fill();
-            
+
             // Jersey outline/border - thicker for better visibility
             ctx.lineWidth = ppY * 0.15;
             ctx.strokeStyle = "rgba(0,0,0,0.8)";
@@ -2305,48 +2305,48 @@ function drawFieldVisualization(frameData) {
             ctx.lineWidth = ppY * 0.06;
             ctx.strokeStyle = "rgba(255,255,255,0.3)";
             ctx.stroke();
-            
+
             // Shoulder pads (darker shading on sides) - more pronounced
             ctx.fillStyle = "rgba(0,0,0,0.25)";
-            ctx.beginPath(); 
-            ctx.ellipse(px - radius*0.35, py, radius*0.55, radius*0.85, 0, 0, Math.PI*2);
+            ctx.beginPath();
+            ctx.ellipse(px - radius * 0.35, py, radius * 0.55, radius * 0.85, 0, 0, Math.PI * 2);
             ctx.fill();
-            ctx.beginPath(); 
-            ctx.ellipse(px + radius*0.35, py, radius*0.55, radius*0.85, 0, 0, Math.PI*2);
+            ctx.beginPath();
+            ctx.ellipse(px + radius * 0.35, py, radius * 0.55, radius * 0.85, 0, 0, Math.PI * 2);
             ctx.fill();
 
             // Helmet (larger, secondary color)
             ctx.fillStyle = p.secondaryColor || "white";
-            ctx.beginPath(); 
-            ctx.arc(px, py - radius*0.4, radius * 0.55, 0, Math.PI*2); 
+            ctx.beginPath();
+            ctx.arc(px, py - radius * 0.4, radius * 0.55, 0, Math.PI * 2);
             ctx.fill();
-            
+
             // Helmet outline - thick and prominent
             ctx.lineWidth = ppY * 0.12;
             ctx.strokeStyle = "rgba(0,0,0,0.7)";
-            ctx.beginPath(); 
-            ctx.arc(px, py - radius*0.4, radius * 0.55, 0, Math.PI*2); 
+            ctx.beginPath();
+            ctx.arc(px, py - radius * 0.4, radius * 0.55, 0, Math.PI * 2);
             ctx.stroke();
 
             // Helmet shine/highlight for 3D effect
             ctx.fillStyle = "rgba(255,255,255,0.4)";
             ctx.beginPath();
-            ctx.ellipse(px - radius*0.15, py - radius*0.45, radius*0.2, radius*0.15, 0, 0, Math.PI*2);
+            ctx.ellipse(px - radius * 0.15, py - radius * 0.45, radius * 0.2, radius * 0.15, 0, 0, Math.PI * 2);
             ctx.fill();
-            
+
             // Helmet stripe (center line)
             ctx.strokeStyle = "rgba(0,0,0,0.4)";
             ctx.lineWidth = ppY * 0.08;
-            ctx.beginPath(); 
-            ctx.arc(px, py - radius*0.4, radius * 0.55, 0, Math.PI*2); 
+            ctx.beginPath();
+            ctx.arc(px, py - radius * 0.4, radius * 0.55, 0, Math.PI * 2);
             ctx.stroke();
 
             // Jersey Number (if available) - larger and more visible
             if (p.number) {
                 // Number background (slight rectangle behind number for legibility)
                 ctx.fillStyle = "rgba(0,0,0,0.3)";
-                ctx.fillRect(px - ppY*0.5, py + radius*0.1 - ppY*0.4, ppY*1.0, ppY*0.8);
-                
+                ctx.fillRect(px - ppY * 0.5, py + radius * 0.1 - ppY * 0.4, ppY * 1.0, ppY * 0.8);
+
                 ctx.fillStyle = p.secondaryColor || "white";
                 ctx.font = `bold ${ppY * 0.75}px Arial`;
                 ctx.textAlign = "center";
@@ -2364,8 +2364,8 @@ function drawFieldVisualization(frameData) {
                 // Outer glow
                 ctx.strokeStyle = "rgba(255, 215, 0, 0.6)";
                 ctx.lineWidth = ppY * 0.1;
-                ctx.beginPath(); 
-                ctx.arc(px, py, radius * 1.5, 0, Math.PI*2); 
+                ctx.beginPath();
+                ctx.arc(px, py, radius * 1.5, 0, Math.PI * 2);
                 ctx.stroke();
 
                 // Inner bright ring
@@ -2373,8 +2373,8 @@ function drawFieldVisualization(frameData) {
                 ctx.lineWidth = ppY * 0.2;
                 ctx.shadowColor = "#FFD700";
                 ctx.shadowBlur = 12;
-                ctx.beginPath(); 
-                ctx.arc(px, py, radius * 1.25, 0, Math.PI*2); 
+                ctx.beginPath();
+                ctx.arc(px, py, radius * 1.25, 0, Math.PI * 2);
                 ctx.stroke();
                 ctx.shadowBlur = 0;
             }
@@ -2388,37 +2388,37 @@ function drawFieldVisualization(frameData) {
         const bz = frameData.ball.z || 0;
 
         // Ball gets bigger as it goes higher (Pseudo-3D)
-        const ballRadius = ppY * 0.5 * (1 + bz * 0.15); 
-        
+        const ballRadius = ppY * 0.5 * (1 + bz * 0.15);
+
         // Deep shadow (stays on ground, fades with height) - more pronounced
         const shadowOffset = bz * ppY * 0.8;
-        ctx.fillStyle = `rgba(0,0,0,${Math.max(0.15, 0.5 - bz*0.1)})`;
-        ctx.beginPath(); 
-        ctx.ellipse(bx, by + shadowOffset, ballRadius * 1.2, ballRadius * 0.45, 0, 0, Math.PI*2); 
+        ctx.fillStyle = `rgba(0,0,0,${Math.max(0.15, 0.5 - bz * 0.1)})`;
+        ctx.beginPath();
+        ctx.ellipse(bx, by + shadowOffset, ballRadius * 1.2, ballRadius * 0.45, 0, 0, Math.PI * 2);
         ctx.fill();
 
         // Ball Body (Main oval shape - rich brown)
         ctx.fillStyle = "#8B4513"; // Darker Saddle Brown for more contrast
-        ctx.beginPath(); 
-        ctx.ellipse(bx, by, ballRadius * 0.75, ballRadius, 0, 0, Math.PI*2); 
+        ctx.beginPath();
+        ctx.ellipse(bx, by, ballRadius * 0.75, ballRadius, 0, 0, Math.PI * 2);
         ctx.fill();
 
         // Ball highlight (light reflection for 3D effect) - more vibrant
-        const gradient = ctx.createLinearGradient(bx - ballRadius*0.5, by - ballRadius*0.8, bx + ballRadius*0.3, by + ballRadius*0.5);
+        const gradient = ctx.createLinearGradient(bx - ballRadius * 0.5, by - ballRadius * 0.8, bx + ballRadius * 0.3, by + ballRadius * 0.5);
         gradient.addColorStop(0, "rgba(255, 220, 120, 0.5)");
         gradient.addColorStop(0.7, "rgba(255, 220, 120, 0.15)");
         gradient.addColorStop(1, "rgba(255, 220, 120, 0)");
         ctx.fillStyle = gradient;
-        ctx.fillRect(bx - ballRadius*0.8, by - ballRadius*1.1, ballRadius*1.6, ballRadius*2.1);
+        ctx.fillRect(bx - ballRadius * 0.8, by - ballRadius * 1.1, ballRadius * 1.6, ballRadius * 2.1);
 
         // Laces (stitching down the middle - more prominent)
         ctx.strokeStyle = "rgba(240, 240, 240, 1)";
         ctx.lineWidth = ppY * 0.1;
         ctx.shadowColor = "rgba(0,0,0,0.5)";
         ctx.shadowBlur = 2;
-        ctx.beginPath(); 
-        ctx.moveTo(bx - ballRadius*0.08, by - ballRadius*0.6); 
-        ctx.lineTo(bx - ballRadius*0.08, by + ballRadius*0.6);
+        ctx.beginPath();
+        ctx.moveTo(bx - ballRadius * 0.08, by - ballRadius * 0.6);
+        ctx.lineTo(bx - ballRadius * 0.08, by + ballRadius * 0.6);
         ctx.stroke();
         ctx.shadowBlur = 0;
 
@@ -2426,25 +2426,25 @@ function drawFieldVisualization(frameData) {
         ctx.strokeStyle = "rgba(220, 220, 220, 0.9)";
         ctx.lineWidth = ppY * 0.06;
         for (let i = -3; i <= 3; i++) {
-            const y = by - ballRadius*0.45 + (i * ballRadius*0.18);
+            const y = by - ballRadius * 0.45 + (i * ballRadius * 0.18);
             ctx.beginPath();
-            ctx.moveTo(bx - ballRadius*0.18, y);
-            ctx.lineTo(bx + ballRadius*0.08, y);
+            ctx.moveTo(bx - ballRadius * 0.18, y);
+            ctx.lineTo(bx + ballRadius * 0.08, y);
             ctx.stroke();
         }
 
         // Ball outline for definition - thicker and darker
         ctx.strokeStyle = "rgba(0, 0, 0, 0.5)";
         ctx.lineWidth = ppY * 0.08;
-        ctx.beginPath(); 
-        ctx.ellipse(bx, by, ballRadius * 0.75, ballRadius, 0, 0, Math.PI*2); 
+        ctx.beginPath();
+        ctx.ellipse(bx, by, ballRadius * 0.75, ballRadius, 0, 0, Math.PI * 2);
         ctx.stroke();
 
         // Ball rim highlight (side reflection)
         ctx.strokeStyle = "rgba(255, 200, 80, 0.3)";
         ctx.lineWidth = ppY * 0.04;
         ctx.beginPath();
-        ctx.ellipse(bx + ballRadius*0.3, by + ballRadius*0.2, ballRadius*0.4, ballRadius*0.3, 0, 0, Math.PI*2);
+        ctx.ellipse(bx + ballRadius * 0.3, by + ballRadius * 0.2, ballRadius * 0.4, ballRadius * 0.3, 0, 0, Math.PI * 2);
         ctx.stroke();
     }
 }
@@ -2581,12 +2581,21 @@ function updateStatsFromLogEntry(entry) {
     // Using a simple cache to avoid looping through rosters 60 times a second
     const findIdByName = (name) => {
         if (!name) return null;
-        const cleanName = name.trim();
-        // Search current simulation team rosters
-        const p = [...currentLiveGameResult.homeTeam.roster, ...currentLiveGameResult.awayTeam.roster]
+        const cleanName = name.trim().toLowerCase();
+
+        // Search both teams for a match
+        const players = [...currentLiveGameResult.homeTeam.roster, ...currentLiveGameResult.awayTeam.roster]
             .map(id => getPlayer(id))
-            .find(pl => pl && pl.name === cleanName);
-        return p ? p.id : null;
+            .filter(p => p);
+
+        const match = players.find(pl => {
+            const fullName = pl.name.toLowerCase();
+            // Check if the name in the log contains the player's name, or vice versa
+            // This handles "Reese 'Slinger' Walker" matching "Reese Walker"
+            return cleanName.includes(fullName) || fullName.includes(cleanName);
+        });
+
+        return match ? match.id : null;
     };
 
     const getStats = (pid) => {
@@ -2804,12 +2813,12 @@ function renderSimPlayers(frame) {
         // 2. IDENTIFY USER TEAM
         // We need to know which team is the user's so we only show subs for them
         // (Assuming 'Game' is imported or getGameState is global)
-        const gs = Game.getGameState(); 
+        const gs = Game.getGameState();
         const playerTeamId = gs?.playerTeam?.id;
-        
+
         if (!playerTeamId) return;
 
-        const team = findTeamInGame(playerTeamId); 
+        const team = findTeamInGame(playerTeamId);
         if (!team) {
             elements.simPlayersList.innerHTML = '<p class="text-gray-400 p-4">You are watching a CPU vs CPU game.</p>';
             return;
@@ -2835,17 +2844,17 @@ function renderSimPlayers(frame) {
             const chart = depth[side] || {};
             Object.values(chart).forEach(id => { if (id) starterIds.add(id); });
         });
-        
+
         const starters = roster.filter(p => p && starterIds.has(p.id));
         const bench = roster.filter(p => p && !starterIds.has(p.id));
 
         // 5. ROW BUILDER
         const buildRow = (p, isStarter) => {
             const stamina = p.attributes?.physical?.stamina || 50;
-            
+
             // Use live fatigue if available, else static
             const currentFatigue = fatigueMap.has(p.id) ? fatigueMap.get(p.id) : (p.fatigue || 0);
-            
+
             const fatigue = Math.max(0, Math.min(100, Math.round(currentFatigue)));
             const energyPct = Math.max(0, Math.round(100 - (fatigue / Math.max(1, stamina)) * 100));
 
@@ -2887,10 +2896,10 @@ function renderSimPlayers(frame) {
                         <div class="text-[10px] ${statusClass} w-20 text-right">${statusText}</div>
                     </div>
                     <div>
-                        ${isStarter 
-                            ? `<button data-player-id="${p.id}" class="sub-out-btn bg-red-900/80 hover:bg-red-700 text-red-100 text-xs py-1 px-3 rounded border border-red-700 transition">Out</button>` 
-                            : `<button data-player-id="${p.id}" class="sub-in-btn bg-green-900/80 hover:bg-green-700 text-green-100 text-xs py-1 px-3 rounded border border-green-700 transition">In</button>`
-                        }
+                        ${isStarter
+                    ? `<button data-player-id="${p.id}" class="sub-out-btn bg-red-900/80 hover:bg-red-700 text-red-100 text-xs py-1 px-3 rounded border border-red-700 transition">Out</button>`
+                    : `<button data-player-id="${p.id}" class="sub-in-btn bg-green-900/80 hover:bg-green-700 text-green-100 text-xs py-1 px-3 rounded border border-green-700 transition">In</button>`
+                }
                     </div>
                 </div>
             `;
@@ -2933,9 +2942,9 @@ function attachSubHandlers(team, roster, depth, frame) {
                 Object.keys(chart).forEach(slot => {
                     const occupantId = chart[slot];
                     const occupant = roster.find(p => p && p.id === occupantId);
-                    slotOptions.push({ 
-                        value: `${side}|${slot}`, 
-                        label: `${side.toUpperCase()} - ${slot} (${occupant ? occupant.name : 'Vacant'})` 
+                    slotOptions.push({
+                        value: `${side}|${slot}`,
+                        label: `${side.toUpperCase()} - ${slot} (${occupant ? occupant.name : 'Vacant'})`
                     });
                 });
             });
@@ -2955,13 +2964,17 @@ function attachSubHandlers(team, roster, depth, frame) {
                 const [side, slot] = chosen.split('|');
                 const outId = team.depthChart?.[side]?.[slot];
 
-                // Call Game Logic to perform swap
                 const result = Game.substitutePlayers(team.id, outId, inId);
 
-                if (!result.success) {
-                    alert(result.message); // Simple alert for fallback
-                } else {
-                    renderSimPlayers(frame); // Refresh UI
+                if (result.success) {
+                    // 💡 FIX: Manually update the live game reference so the engine sees the change!
+                    if (activeLiveGame && activeLiveGame.homeTeam.id === team.id) {
+                        activeLiveGame.homeTeam.depthChart[side][slot] = inId;
+                    } else if (activeLiveGame && activeLiveGame.awayTeam.id === team.id) {
+                        activeLiveGame.awayTeam.depthChart[side][slot] = inId;
+                    }
+
+                    renderSimPlayers(frame);
                 }
             }, 'Confirm Sub');
         };
@@ -3070,7 +3083,7 @@ function animateQBShout(frame) {
             // Re-draw field with a tiny random offset only for the QB
             // (Alternative: Simple scale pulse)
             drawFieldVisualization(frame);
-            requestAnimationFrame(shake);f
+            requestAnimationFrame(shake); f
         } else {
             drawFieldVisualization(frame); // Final clean draw
         }
@@ -3091,27 +3104,27 @@ export function startLiveGameLoop(initialGameState, onComplete) {
     }
 
     activeLiveGame = initialGameState;
-    currentLiveGameResult = { 
-        homeTeam: activeLiveGame.homeTeam, 
+    currentLiveGameResult = {
+        homeTeam: activeLiveGame.homeTeam,
         awayTeam: activeLiveGame.awayTeam,
         visualizationFrames: [] // Stub for visualizer
-    }; 
-    
+    };
+
     liveGameCallback = onComplete;
     isSkipping = false;
 
     // Reset UI
     const ticker = elements.simPlayLog;
     if (ticker) ticker.innerHTML = '';
-    
+
     // IMPORTANT: Sync log index to current log length
     // If the game object already has "Coin toss" in it, we want to print that.
-    liveGameCurrentIndex = 0; 
-    
+    liveGameCurrentIndex = 0;
+
     updateLiveScoreboard();
-    
+
     // Initial Render of logs
-    flushLiveLogs(); 
+    flushLiveLogs();
 
     // Start Step
     runLiveGameStep();
@@ -3127,7 +3140,7 @@ function runLiveGameStep() {
     if (!activeLiveGame) return;
 
     // 1. End Check
-    if (activeLiveGame.isGameOver || activeLiveGame.drivesThisHalf > 30) { 
+    if (activeLiveGame.isGameOver || activeLiveGame.drivesThisHalf > 30) {
         finishLiveGame();
         return;
     }
@@ -3144,9 +3157,9 @@ function runLiveGameStep() {
 
     // 3. UI Update
     updateLiveScoreboard();
-    
+
     // 💡 NEW LOGGING LOGIC: Flush any new lines added to game.gameLog
-    flushLiveLogs(); 
+    flushLiveLogs();
 
     // Update Sidebars (Fatigue/Stats) using the first frame of the new data
     if (stepResult.visualizationFrames && stepResult.visualizationFrames.length > 0) {
@@ -3159,7 +3172,7 @@ function runLiveGameStep() {
     if (stepResult.visualizationFrames && stepResult.visualizationFrames.length > 0) {
         playVisualization(stepResult.visualizationFrames, () => {
             if (isSkipping) {
-                runLiveGameStep(); 
+                runLiveGameStep();
             } else {
                 const delay = activeLiveGame.isConversionAttempt ? 1000 : 3500;
                 if (huddleTimeout) clearTimeout(huddleTimeout);
@@ -3176,17 +3189,17 @@ function runLiveGameStep() {
  */
 function flushLiveLogs() {
     if (!activeLiveGame || !activeLiveGame.gameLog) return;
-    
+
     const fullLog = activeLiveGame.gameLog;
-    
+
     // If we have new entries
     if (fullLog.length > liveGameCurrentIndex) {
         const newEntries = fullLog.slice(liveGameCurrentIndex);
-        
+
         newEntries.forEach(entry => {
             addLiveLogEntry(entry);
         });
-        
+
         // Update tracker
         liveGameCurrentIndex = fullLog.length;
     }
@@ -3218,7 +3231,7 @@ function updateLiveScoreboard() {
     if (!activeLiveGame) return;
     elements.simHomeScore.textContent = activeLiveGame.homeScore;
     elements.simAwayScore.textContent = activeLiveGame.awayScore;
-    
+
     // Context-aware text
     if (activeLiveGame.isConversionAttempt) {
         elements.simGameDown.textContent = "Conversion";
@@ -3240,7 +3253,7 @@ function addLiveLogEntry(text) {
 function finishLiveGame() {
     if (liveGameInterval) clearInterval(liveGameInterval);
     addLiveLogEntry(`FINAL: ${activeLiveGame.homeScore} - ${activeLiveGame.awayScore}`);
-    
+
     // Call Main.js back to save results
     if (liveGameCallback) {
         setTimeout(() => liveGameCallback(activeLiveGame), 2000);
@@ -3426,7 +3439,7 @@ function renderDepthOrderPane(gameState) {
     // whenever `team.depthOrder` contained all roster IDs. Keep the full roster
     // visible so users can drag/reorder regardless of assignment state.
     const availableRoster = roster.slice();
-    
+
     // (Existing sort logic preserved)
     availableRoster.sort((a, b) => {
         let valA, valB;
@@ -3478,13 +3491,13 @@ function renderDepthOrderPane(gameState) {
     const depthChart = team.depthChart || { offense: {}, defense: {} };
     const playerToOffSlot = {};
     const playerToDefSlot = {};
-    
+
     if (depthChart.offense) {
         Object.entries(depthChart.offense).forEach(([slot, playerId]) => {
             if (playerId) playerToOffSlot[playerId] = slot;
         });
     }
-    
+
     if (depthChart.defense) {
         Object.entries(depthChart.defense).forEach(([slot, playerId]) => {
             if (playerId) playerToDefSlot[playerId] = slot;
@@ -3516,11 +3529,11 @@ function renderDepthOrderPane(gameState) {
         if (pos === 'FB') pos = 'RB';
         if (['TE', 'ATH', 'K', 'P'].includes(pos)) pos = 'WR';
         const ovr = calculateOverall(p, pos);
-        
+
         // Look up slot assignments using efficient reverse maps
         const offSlot = playerToOffSlot[p.id] || '';
         const defSlot = playerToDefSlot[p.id] || '';
-        
+
         const vals = {
             height: formatHeight(p.attributes?.physical?.height),
             weight: p.attributes?.physical?.weight,
@@ -3539,7 +3552,7 @@ function renderDepthOrderPane(gameState) {
                             <tr class="roster-row-item cursor-move hover:bg-blue-50 ${offSlot || defSlot ? 'bg-amber-50' : ''}" draggable="true" 
                                 data-player-id="${p.id}" data-player-name="${p.name}" data-player-ovr="${ovr}">
                                 <td class="py-1 px-2 font-medium truncate max-w-[120px]" title="${p.name}">
-                                    ${p.name} ${offSlot || defSlot ? ('<span class="ml-2 text-[10px] bg-amber-100 text-amber-800 px-2 py-0.5 rounded font-semibold">' + (offSlot?offSlot:'') + (offSlot && defSlot?'/':'') + (defSlot?defSlot:'') + '</span>') : ''}
+                                    ${p.name} ${offSlot || defSlot ? ('<span class="ml-2 text-[10px] bg-amber-100 text-amber-800 px-2 py-0.5 rounded font-semibold">' + (offSlot ? offSlot : '') + (offSlot && defSlot ? '/' : '') + (defSlot ? defSlot : '') + '</span>') : ''}
                                 </td>
                                 <td class="py-1 px-2">${pos}</td>
                                 <td class="py-1 px-2 font-semibold text-blue-700 text-center font-mono">${offSlot || '-'}</td>
@@ -3635,19 +3648,33 @@ function setupDepthOrderDragEvents() {
     // Use proper event delegation - much simpler and more reliable
     // Attach ONE listener to the container that handles all clicks
     pane.addEventListener('click', (e) => {
-        if (e.target.classList.contains('remove-depth-item')) {
+        // 1. Find the button (or the span inside the button if they click exactly on the X)
+        const removeBtn = e.target.closest('.remove-depth-item');
+
+        if (removeBtn) {
             e.preventDefault();
             e.stopPropagation();
 
-            const btn = e.target;
-            const pid = btn.dataset.playerId;
-            const group = btn.dataset.group;
+            const pid = removeBtn.dataset.playerId;
+            const group = removeBtn.dataset.group;
             const gs = getGameState();
 
-            if (gs && gs.playerTeam.depthOrder && gs.playerTeam.depthOrder[group]) {
-                // Remove ID from array
+            // 2. Find the actual card element in the DOM
+            const card = removeBtn.closest('.depth-order-item');
+
+            if (card && gs && gs.playerTeam.depthOrder && gs.playerTeam.depthOrder[group]) {
+                // 3. REMOVE from DOM first (so the scraper doesn't find it)
+                card.remove();
+
+                // 4. Update the source of truth array
                 gs.playerTeam.depthOrder[group] = gs.playerTeam.depthOrder[group].filter(id => id !== pid);
-                applyDepthOrderToChart(); // Save & Render
+
+                // 5. Save the state and rebuild the depth chart (QB1, WR1, etc)
+                applyDepthOrderToChart();
+
+                // 6. 💡 IMPORTANT: Dispatch a global refresh so the visual field 
+                // (the green field with dots) also updates to show the new starter
+                document.dispatchEvent(new CustomEvent('refresh-ui'));
             }
             return;
         }
@@ -3835,39 +3862,31 @@ export function applyDepthOrderToChart() {
     const gs = getGameState();
     if (!gs || !gs.playerTeam) return;
 
-    // Initialize if missing
     if (!gs.playerTeam.depthOrder || Array.isArray(gs.playerTeam.depthOrder)) {
         gs.playerTeam.depthOrder = {};
     }
 
     const lists = document.querySelectorAll('.depth-sortable-list');
 
-    // 1. Scrape Lists
+    // 1. Scrape the current state of the UI lists
     lists.forEach(list => {
         const groupKey = list.dataset.group;
-        // Map elements to IDs
+        // Map remaining elements to IDs
         const ids = [...list.querySelectorAll('.depth-order-item')]
             .map(el => el.dataset.playerId)
-            .filter(id => id); // Filter out empty IDs
+            .filter(id => id);
 
         gs.playerTeam.depthOrder[groupKey] = ids;
     });
 
-    // 2. Rebuild Logic (Call directly)
-    // This fills the QB1, RB1 slots based on the list you just scraped
+    // 2. Re-assign starters (QB1, RB1, etc) based on the new priorities
     rebuildDepthChartFromOrder(gs.playerTeam);
 
-    // 3. Persist
+    // 3. Save to LocalStorage
     saveGameState();
 
-    // 4. Re-render depth-order pane if visible
-    const depthOrderPane = document.getElementById('depth-order-container');
-    if (depthOrderPane && !depthOrderPane.classList.contains('hidden')) {
-        renderDepthOrderPane(gs);
-    }
-    // Note: We DON'T dispatch refresh-ui here because we've already updated the DOM
-    // and saved the state. The refresh-ui event would cause switchTab() to re-render
-    // the entire depth-chart tab, which could undo our changes.
+    // 4. Re-render the specific pane we are looking at
+    renderDepthOrderPane(gs);
 }
 
 

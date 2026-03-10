@@ -90,7 +90,7 @@ function handlePlayerSelectInDraft(playerId) {
 }
 
 function handleDraftPlayer() {
-    if (!gameState) return;
+    if (!gameState || isDraftingLocked) return;
     if (selectedPlayerId) {
         const player = gameState.players.find(p => p.id === selectedPlayerId);
         const team = gameState.playerTeam;
@@ -103,9 +103,9 @@ function handleDraftPlayer() {
             selectedPlayerId = null;
             gameState.currentPick++;
             UI.renderSelectedPlayerCard(null, gameState);
+            // Re-render pool to remove the drafted player immediately
+            UI.renderDraftScreen(gameState, handlePlayerSelectInDraft, null, currentSortColumn, currentSortDirection);
             runAIDraftPicks();
-        } else {
-            UI.showModal("Draft Error", "Could not draft player.", null, '', null, 'Close');
         }
     }
 }
@@ -403,7 +403,7 @@ function startLiveGame(playerGameMatch) {
                 const result = Game.simulateMatchFast(match.home, match.away);
                 otherResults.push(result);
             }
-            
+
         } catch (error) {
             console.error(`Sim error for CPU game:`, error);
         }
