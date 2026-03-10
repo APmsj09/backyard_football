@@ -272,94 +272,75 @@ export function rebuildDepthChartFromOrder(team) {
     // 3. Reset Visual Depth Chart Slots
     team.depthChart = { offense: {}, defense: {}, special: {} };
 
-    // 4. Create a working copy to "deal cards" into slots
-    const workingOrder = {};
-    Object.keys(team.depthOrder).forEach(key => {
-        workingOrder[key] = [...team.depthOrder[key]]; // Copy list
-    });
+    // 4. Create tracking sets to allow Two-Way Players (Ironman Football)
+    // 💡 FIX: Instead of shifting/destroying arrays, we just track who is used PER SIDE.
+    const usedOffense = new Set();
+    const usedDefense = new Set();
 
-    const getNext = (posKey) => {
-        if (workingOrder[posKey] && workingOrder[posKey].length > 0) {
-            return workingOrder[posKey].shift();
+    const getBestAvailable = (preferredBuckets, usedSet) => {
+        for (const bucket of preferredBuckets) {
+            const pool = team.depthOrder[bucket] || [];
+            for (const pid of pool) {
+                if (!usedSet.has(pid)) {
+                    usedSet.add(pid);
+                    return pid;
+                }
+            }
         }
         return null;
     };
 
     // 5. Fill Offense Slots
-    const offFormKey = normalizeFormationKey(
-        offenseFormations,
-        team.formations.offense,
-        'Balanced'
-    );
-    team.formations.offense = offFormKey; // 🔒 Fix state
-
+    const offFormKey = normalizeFormationKey(offenseFormations, team.formations.offense, 'Balanced');
+    team.formations.offense = offFormKey;
     const offSlots = offenseFormations[offFormKey].slots;
-
-    // 🔧 CRITICAL FIX: Validate formation slot count matches expected structure
-    const prevOffSlots = Object.keys(team.depthChart.offense || {}).length;
-    if (prevOffSlots > 0 && prevOffSlots !== offSlots.length) {
-        const teamName = team?.name || 'Unknown Team';
-        console.warn(`⚠️ FORMATION DESYNC for ${teamName}: offense had ${prevOffSlots} slots, new formation has ${offSlots.length}. Resetting depth chart.`);
-    }
 
     offSlots.forEach(slot => {
         let posKey = slot.replace(/\d+/g, '');
-        // Normalize Slot Names
         if (['OT', 'OG', 'C'].includes(posKey)) posKey = 'OL';
         if (posKey === 'FB') posKey = 'RB';
 
-        // TE is its own bucket now
-        let pid = getNext(posKey);
+        // 💡 FIX: Intelligent positional cascades
+        let searchBuckets = [posKey];
+        if (posKey === 'WR') searchBuckets.push('TE', 'RB', 'DB', 'QB'); // DBs make great WRs
+        if (posKey === 'RB') searchBuckets.push('WR', 'DB', 'LB');
+        if (posKey === 'TE') searchBuckets.push('WR', 'OL', 'LB');
+        if (posKey === 'OL') searchBuckets.push('DL', 'TE', 'LB'); // DLs make great OLs
+        if (posKey === 'QB') searchBuckets.push('WR', 'RB', 'DB');
 
-        // Fallbacks if position bucket is empty
-        if (!pid) {
-            if (posKey === 'WR') pid = getNext('RB');
-            else if (posKey === 'RB') pid = getNext('WR');
-            else if (posKey === 'TE') pid = getNext('WR') || getNext('RB');
-        }
-        team.depthChart.offense[slot] = pid || null;
+        // Catch-all emergency fallback
+        searchBuckets.push('WR', 'RB', 'TE', 'DB', 'LB', 'DL', 'OL', 'QB');
+
+        team.depthChart.offense[slot] = getBestAvailable(searchBuckets, usedOffense);
     });
 
     // 6. Fill Defense Slots
-    const defFormKey = normalizeFormationKey(
-        defenseFormations,
-        team.formations.defense,
-        '3-1-3'
-    );
-    team.formations.defense = defFormKey; // 🔒 Fix state
-
+    const defFormKey = normalizeFormationKey(defenseFormations, team.formations.defense, '3-1-3');
+    team.formations.defense = defFormKey;
     const defSlots = defenseFormations[defFormKey].slots;
-
-    // 🔧 CRITICAL FIX: Validate formation slot count matches expected structure
-    const prevDefSlots = Object.keys(team.depthChart.defense || {}).length;
-    if (prevDefSlots > 0 && prevDefSlots !== defSlots.length) {
-        const teamName = team?.name || 'Unknown Team';
-        console.warn(`⚠️ FORMATION DESYNC for ${teamName}: defense had ${prevDefSlots} slots, new formation has ${defSlots.length}. Resetting depth chart.`);
-    }
 
     defSlots.forEach(slot => {
         let posKey = slot.replace(/\d+/g, '');
-        // Normalize Slot Names
         if (['CB', 'S'].includes(posKey)) posKey = 'DB';
         if (['DE', 'DT'].includes(posKey)) posKey = 'DL';
 
-        let pid = getNext(posKey);
+        // 💡 FIX: Intelligent positional cascades
+        let searchBuckets = [posKey];
+        if (posKey === 'DB') searchBuckets.push('WR', 'RB', 'QB'); // WRs make great DBs
+        if (posKey === 'LB') searchBuckets.push('DL', 'DB', 'TE', 'RB');
+        if (posKey === 'DL') searchBuckets.push('LB', 'OL', 'TE'); // OLs make great DLs
 
-        // Fallbacks
-        if (!pid) {
-            if (posKey === 'DB') pid = getNext('LB') || getNext('WR'); // DB can be LB or WR (Athlete)
-            else if (posKey === 'DL') pid = getNext('LB') || getNext('OL'); // DL can be LB or OL (Big man)
-            else if (posKey === 'LB') pid = getNext('DL') || getNext('DB'); // LB can be DL or DB
-        }
-        team.depthChart.defense[slot] = pid || null;
+        // Catch-all emergency fallback
+        searchBuckets.push('DB', 'LB', 'DL', 'WR', 'RB', 'TE', 'OL', 'QB');
+
+        team.depthChart.defense[slot] = getBestAvailable(searchBuckets, usedDefense);
     });
 
     // 7. Special Teams (Punter = Backup QB or Best Athlete)
     const qbBucket = team.depthOrder['QB'] || [];
-    const bestPunter = qbBucket.length > 1 ? qbBucket[1] : qbBucket[0]; // QB2 or QB1
+    const bestPunter = qbBucket.length > 1 ? qbBucket[1] : qbBucket[0];
     team.depthChart.special['P'] = bestPunter || null;
 }
-
 /** Helper: Gets full player objects from a team's roster of IDs. */
 function getRosterObjects(team) {
     if (!team || !Array.isArray(team.roster)) return [];
@@ -954,7 +935,7 @@ function aiSetDepthChart(team) {
 
     // 1. Initialize Depth Order Buckets (The Source of Truth)
     team.depthOrder = {
-        'QB': [], 'RB': [], 'WR': [], 'OL': [],
+        'QB': [], 'RB': [], 'WR': [], 'TE': [], 'OL': [],
         'DL': [], 'LB': [], 'DB': []
     };
 
@@ -987,16 +968,15 @@ function aiSetDepthChart(team) {
 
     // 3. Distribute into Buckets
     sortedRoster.forEach(p => {
-        if (!p || !p.id) return; // 🔧 Skip any invalid player entries
+        if (!p || !p.id) return;
         let pos = p.pos || p.favoriteOffensivePosition || 'WR';
-        // Normalize
+
         if (['FB'].includes(pos)) pos = 'RB';
-        if (['TE', 'ATH', 'K', 'P'].includes(pos)) pos = 'WR';
+        if (['ATH', 'K', 'P'].includes(pos)) pos = 'WR';
         if (['OT', 'OG', 'C'].includes(pos)) pos = 'OL';
         if (['DE', 'DT', 'NT'].includes(pos)) pos = 'DL';
         if (['CB', 'S', 'FS', 'SS'].includes(pos)) pos = 'DB';
 
-        // Safety Fallback
         if (!team.depthOrder[pos]) pos = 'WR';
 
         team.depthOrder[pos].push(p.id);
@@ -1108,16 +1088,15 @@ function addPlayerToTeam(player, team) {
     player.teamId = team.id;
     team.roster.push(player.id); // Add to ID list
 
-    // 💡 FIX: Add to Depth Order Bucket
+
     if (!team.depthOrder || Array.isArray(team.depthOrder)) {
-        // Fix bad state if it exists
-        team.depthOrder = { 'QB': [], 'RB': [], 'WR': [], 'OL': [], 'DL': [], 'LB': [], 'DB': [] };
+        team.depthOrder = { 'QB': [], 'RB': [], 'WR': [], 'TE': [], 'OL': [], 'DL': [], 'LB': [], 'DB': [] };
     }
 
     let pos = player.favoriteOffensivePosition || 'WR';
     // Normalize
     if (['FB'].includes(pos)) pos = 'RB';
-    if (['TE', 'ATH', 'K', 'P'].includes(pos)) pos = 'WR';
+    if (['ATH', 'K', 'P'].includes(pos)) pos = 'WR';
     if (['OT', 'OG', 'C'].includes(pos)) pos = 'OL';
     if (['DE', 'DT', 'NT'].includes(pos)) pos = 'DL';
     if (['CB', 'S', 'FS', 'SS'].includes(pos)) pos = 'DB';
@@ -1125,7 +1104,7 @@ function addPlayerToTeam(player, team) {
     if (team.depthOrder[pos]) {
         team.depthOrder[pos].push(player.id);
     } else {
-        team.depthOrder['WR'].push(player.id); // Fallback
+        team.depthOrder['WR'].push(player.id);
     }
 
     return true;
