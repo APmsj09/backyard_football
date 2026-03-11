@@ -3651,12 +3651,8 @@ function setupDepthOrderDragEvents() {
     // Prevent attaching multiple identical listeners on re-renders
     if (pane.dataset.depthOrderEventsAttached === '1') return;
 
-    // Use proper event delegation - much simpler and more reliable
-    // Attach ONE listener to the container that handles all clicks
     pane.addEventListener('click', (e) => {
-        // 1. Find the button (or the span inside the button if they click exactly on the X)
         const removeBtn = e.target.closest('.remove-depth-item');
-
         if (removeBtn) {
             e.preventDefault();
             e.stopPropagation();
@@ -3665,24 +3661,18 @@ function setupDepthOrderDragEvents() {
             const group = removeBtn.dataset.group;
             const gs = getGameState();
 
-            // 2. Find the actual card element in the DOM
             const card = removeBtn.closest('.depth-order-item');
-
             if (card && gs && gs.playerTeam.depthOrder && gs.playerTeam.depthOrder[group]) {
-                // 3. REMOVE from DOM first (so the scraper doesn't find it)
+                // Remove from DOM
                 card.remove();
-
-                // 4. Update the source of truth array
+                
+                // Remove from source-of-truth priority list
                 gs.playerTeam.depthOrder[group] = gs.playerTeam.depthOrder[group].filter(id => id !== pid);
-
-                // 5. Save the state and rebuild the depth chart (QB1, WR1, etc)
+                
+                // Apply and refresh
                 applyDepthOrderToChart();
-
-                // 6. 💡 IMPORTANT: Dispatch a global refresh so the visual field 
-                // (the green field with dots) also updates to show the new starter
                 document.dispatchEvent(new CustomEvent('refresh-ui'));
             }
-            return;
         }
     });
 
@@ -3768,12 +3758,15 @@ function setupDragLogic(draggables, containers) {
         container.addEventListener('drop', e => {
             e.preventDefault();
 
-            // 💡 FIX: Read from dataTransfer
-            const sourceType = e.dataTransfer.getData('source-type');
-            const playerId = e.dataTransfer.getData('text/plain');
+            // 💡 FIX: Access the dragged node directly instead of relying on dataTransfer types
+            const draggable = document.querySelector('.dragging');
+            if (!draggable) return;
+
+            const isFromRoster = draggable.classList.contains('roster-row-item');
+            const playerId = draggable.dataset.playerId;
             const groupKey = container.dataset.group;
 
-            if (sourceType === 'roster') {
+            if (isFromRoster) {
                 // 1. Remove existing instance in this list to prevent duplicates
                 const existing = container.querySelector(`[data-player-id="${playerId}"]`);
                 if (existing) existing.remove();

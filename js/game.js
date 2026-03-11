@@ -245,29 +245,24 @@ export function rebuildDepthChartFromOrder(team) {
     });
 
     // Add missing players (Drafted/Signed) to the END of their bucket
-    team.roster.forEach(pid => {
-        if (!assignedIds.has(pid)) {
-            const p = getPlayer(pid);
-            if (p) {
-                // Determine bucket
-                let pos = p.pos || p.favoriteOffensivePosition || 'WR';
+    if (!team.isPlayerControlled) {
+        team.roster.forEach(pid => {
+            if (!assignedIds.has(pid)) {
+                const p = getPlayer(pid);
+                if (p) {
+                    let pos = p.pos || p.favoriteOffensivePosition || 'WR';
+                    if (['FB'].includes(pos)) pos = 'RB';
+                    if (['ATH', 'K', 'P'].includes(pos)) pos = 'WR';
+                    if (['OT', 'OG', 'C'].includes(pos)) pos = 'OL';
+                    if (['DE', 'DT', 'NT'].includes(pos)) pos = 'DL';
+                    if (['CB', 'S', 'FS', 'SS'].includes(pos)) pos = 'DB';
 
-                // Normalize positions
-                if (['FB'].includes(pos)) pos = 'RB';
-                // TE should remain TE (do not remap to WR)
-                if (['ATH', 'K', 'P'].includes(pos)) pos = 'WR';
-                if (['OT', 'OG', 'C'].includes(pos)) pos = 'OL';
-                if (['DE', 'DT', 'NT'].includes(pos)) pos = 'DL';
-                if (['CB', 'S', 'FS', 'SS'].includes(pos)) pos = 'DB';
-
-                // Safety fallback
-                if (!team.depthOrder[pos]) pos = 'WR';
-
-                // Append to end of list (Bench)
-                team.depthOrder[pos].push(pid);
+                    if (!team.depthOrder[pos]) pos = 'WR';
+                    team.depthOrder[pos].push(pid);
+                }
             }
-        }
-    });
+        });
+    }
 
     // 3. Reset Visual Depth Chart Slots
     team.depthChart = { offense: {}, defense: {}, special: {} };
@@ -969,17 +964,26 @@ function aiSetDepthChart(team) {
     // 3. Distribute into Buckets
     sortedRoster.forEach(p => {
         if (!p || !p.id) return;
-        let pos = p.pos || p.favoriteOffensivePosition || 'WR';
+        
+        // Determine Offensive Bucket
+        let offPos = p.favoriteOffensivePosition || 'WR';
+        if (['FB'].includes(offPos)) offPos = 'RB';
+        if (['ATH', 'K', 'P'].includes(offPos)) offPos = 'WR';
+        if (['OT', 'OG', 'C'].includes(offPos)) offPos = 'OL';
+        if (!team.depthOrder[offPos]) offPos = 'WR';
 
-        if (['FB'].includes(pos)) pos = 'RB';
-        if (['ATH', 'K', 'P'].includes(pos)) pos = 'WR';
-        if (['OT', 'OG', 'C'].includes(pos)) pos = 'OL';
-        if (['DE', 'DT', 'NT'].includes(pos)) pos = 'DL';
-        if (['CB', 'S', 'FS', 'SS'].includes(pos)) pos = 'DB';
+        // Determine Defensive Bucket
+        let defPos = p.favoriteDefensivePosition || 'DB';
+        if (['CB', 'S', 'FS', 'SS'].includes(defPos)) defPos = 'DB';
+        if (['DE', 'DT', 'NT'].includes(defPos)) defPos = 'DL';
+        if (!team.depthOrder[defPos]) defPos = 'DB';
 
-        if (!team.depthOrder[pos]) pos = 'WR';
-
-        team.depthOrder[pos].push(p.id);
+        // Push player to BOTH buckets so the AI uses them on both sides of the ball
+        team.depthOrder[offPos].push(p.id);
+        
+        if (team.depthOrder[defPos] && !team.depthOrder[defPos].includes(p.id)) {
+            team.depthOrder[defPos].push(p.id);
+        }
     });
 
     // 4. Now that depthOrder is correct, let the rebuilder handle the slot assignments
@@ -1090,21 +1094,24 @@ function addPlayerToTeam(player, team) {
 
 
     if (!team.depthOrder || Array.isArray(team.depthOrder)) {
-        team.depthOrder = { 'QB': [], 'RB': [], 'WR': [], 'TE': [], 'OL': [], 'DL': [], 'LB': [], 'DB': [] };
+        team.depthOrder = { 'QB': [], 'RB': [], 'WR': [], 'TE': [], 'OL':[], 'DL': [], 'LB': [], 'DB':[] };
     }
 
-    let pos = player.favoriteOffensivePosition || 'WR';
-    // Normalize
-    if (['FB'].includes(pos)) pos = 'RB';
-    if (['ATH', 'K', 'P'].includes(pos)) pos = 'WR';
-    if (['OT', 'OG', 'C'].includes(pos)) pos = 'OL';
-    if (['DE', 'DT', 'NT'].includes(pos)) pos = 'DL';
-    if (['CB', 'S', 'FS', 'SS'].includes(pos)) pos = 'DB';
+    // 💡 TWO-WAY PLAYER FIX for newly added players
+    let offPos = player.favoriteOffensivePosition || 'WR';
+    if (['FB'].includes(offPos)) offPos = 'RB';
+    if (['ATH', 'K', 'P'].includes(offPos)) offPos = 'WR';
+    if (['OT', 'OG', 'C'].includes(offPos)) offPos = 'OL';
+    if (!team.depthOrder[offPos]) offPos = 'WR';
 
-    if (team.depthOrder[pos]) {
-        team.depthOrder[pos].push(player.id);
-    } else {
-        team.depthOrder['WR'].push(player.id);
+    let defPos = player.favoriteDefensivePosition || 'DB';
+    if (['CB', 'S', 'FS', 'SS'].includes(defPos)) defPos = 'DB';
+    if (['DE', 'DT', 'NT'].includes(defPos)) defPos = 'DL';
+    if (!team.depthOrder[defPos]) defPos = 'DB';
+
+    team.depthOrder[offPos].push(player.id);
+    if (team.depthOrder[defPos] && !team.depthOrder[defPos].includes(player.id)) {
+        team.depthOrder[defPos].push(player.id);
     }
 
     return true;
@@ -6841,6 +6848,31 @@ export function isPlayCompatibleWithDefense(play, formationName) {
     return false;
 }
 
+function getDepthChartEmptySlots(team) {
+    const emptySlots =[];
+    if (!team || !team.depthChart) return emptySlots;
+
+    if (team.formations && team.depthChart.offense) {
+        const offForm = offenseFormations[team.formations.offense];
+        if (offForm && offForm.slots) {
+            offForm.slots.forEach(slot => {
+                if (!team.depthChart.offense[slot]) emptySlots.push(`Offense: ${slot}`);
+            });
+        }
+    }
+
+    if (team.formations && team.depthChart.defense) {
+        const defForm = defenseFormations[team.formations.defense];
+        if (defForm && defForm.slots) {
+            defForm.slots.forEach(slot => {
+                if (!team.depthChart.defense[slot]) emptySlots.push(`Defense: ${slot}`);
+            });
+        }
+    }
+
+    return emptySlots;
+}
+
 // =============================================================
 // --- EXPORTS ---
 // =============================================================
@@ -6871,5 +6903,6 @@ export {
 
 
     // 🔧 NEW: Validation
-    validateFormationDepthChartSync
+    validateFormationDepthChartSync,
+    getDepthChartEmptySlots
 };

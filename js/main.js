@@ -347,37 +347,23 @@ async function handleAdvanceWeek() {
             return;
         }
     }
-    proceedWithAdvanceWeek();
-}
 
-function proceedWithAdvanceWeek() {
-    if (!gameState) return;
-
-    if (gameState.currentWeek >= WEEKS_IN_SEASON) {
-        handleSeasonEnd();
+    // 💡 FIX: Check for empty Depth Chart slots and warn the player
+    const emptySlots = Game.getDepthChartEmptySlots(gameState.playerTeam);
+    if (emptySlots.length > 0) {
+        UI.showModal("Incomplete Depth Chart", 
+            `<p class="mb-2">Your depth chart has missing starters!</p>
+             <div class="max-h-32 overflow-y-auto bg-red-50 p-3 rounded mb-4 text-sm text-red-700 border border-red-200">
+                <ul class="list-disc pl-5">${emptySlots.map(s => `<li>${s}</li>`).join('')}</ul>
+             </div>
+             <p>Do you want to proceed anyway? (The AI will auto-fill the gaps with backups if possible)</p>`,
+            () => proceedWithAdvanceWeek(), "Proceed Anyway",
+            null, "Fix Lineup"
+        );
         return;
     }
 
-    if (gameState.currentWeek === 0 && (!gameState.schedule || gameState.schedule.length === 0)) {
-        Game.generateSchedule();
-        gameState = Game.getGameState();
-    }
-
-    const gamesPerWeek = gameState.teams.length / 2;
-    const weekStartIndex = gameState.currentWeek * gamesPerWeek;
-    const weekEndIndex = weekStartIndex + gamesPerWeek;
-    const playerGameMatch = gameState.schedule.slice(weekStartIndex, weekEndIndex)
-        .find(g => g && g.home && g.away && (g.home.id === gameState.playerTeam.id || g.away.id === gameState.playerTeam.id));
-
-    if (playerGameMatch) {
-        UI.showModal("Game Day!",
-            `<p>Week ${gameState.currentWeek + 1} vs <strong>${playerGameMatch.home.id === gameState.playerTeam.id ? playerGameMatch.away.name : playerGameMatch.home.name}</strong>.</p>`,
-            () => startLiveGame(playerGameMatch), "Watch Game",
-            () => simulateRestOfWeek(), "Sim Week"
-        );
-    } else {
-        simulateRestOfWeek();
-    }
+    proceedWithAdvanceWeek();
 }
 
 function startLiveGame(playerGameMatch) {
