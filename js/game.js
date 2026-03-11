@@ -6217,7 +6217,7 @@ function advanceToOffseason() {
  * Update roster depth order based on newOrder[] (array of player IDs).
  * Persists to the player's team object and dispatches a UI refresh.
  */
-export function updateDepthChart(playerId, slotName, side) {
+function updateDepthChart(playerId, slotName, side) {
     const team = game?.playerTeam;
     if (!team || !team.depthOrder) return;
 
