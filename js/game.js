@@ -3828,7 +3828,7 @@ function updatePunterDecision(playState, offenseStates, gameLog) {
 
     // Target Logic: Aim for the "Coffin Corner" or deep field
     const isLeftHash = punter.x < 26.6;
-    const targetX = isLeftHash ? 48.0 : 5.0; 
+    const targetX = isLeftHash ? 48.0 : 5.0;
     const targetY = playState.lineOfScrimmage + 40 + (punterPower * 0.4); // 40-80 yard punt range
 
     // Add Variance (Accuracy)
@@ -3849,11 +3849,11 @@ function updatePunterDecision(playState, offenseStates, gameLog) {
 
     // 4. Update State
     playState.ballState.inAir = true;
-    playState.ballState.throwerId = punter.id; 
+    playState.ballState.throwerId = punter.id;
     playState.ballState.x = punter.x;
     playState.ballState.y = punter.y;
     playState.ballState.z = 1.5; // Kick from waist height
-    
+
     // 💡 FIX: Set these so the return team knows where to run!
     playState.ballState.targetX = finalTargetX;
     playState.ballState.targetY = finalTargetY;
@@ -4086,10 +4086,15 @@ function handleBallArrival(playState, carrier, playResult, gameLog) {
                 const last = ball.lastInteraction;
                 if (!(last && last.playerId === bestCandidate.id && last.type === 'swat' && (playState.tick - last.tick) <= 1)) {
                     pushLog(`🚫 ${bestCandidate.name} swats the pass away!`);
-                    // Apply swat velocity bump only once
                     ball.vz = 2.0;
                     ball.vx += (Math.random() - 0.5) * 2;
                     ball.vy += (Math.random() - 0.5) * 2;
+
+                    // 💡 BONUS FIX: Update the ball's target so AI defenders 
+                    // dynamically adjust and try to intercept the tipped ball!
+                    ball.targetX = ball.x + ball.vx;
+                    ball.targetY = ball.y + ball.vy;
+
                     ball.lastInteraction = { tick: playState.tick, playerId: bestCandidate.id, type: 'swat' };
                 }
             } else {
@@ -4099,7 +4104,7 @@ function handleBallArrival(playState, carrier, playResult, gameLog) {
                     playState.statEvents.push({ type: 'drop', playerId: bestCandidate.id });
 
                     // 💡 FIX: Spike the ball violently into the ground so it registers as an incomplete pass immediately
-                    ball.vz = -4.0; 
+                    ball.vz = -4.0;
                     ball.vx *= 0.1;
                     ball.vy *= 0.1;
                     ball.droppedById = bestCandidate.id; // Flag it to prevent magical re-catches
@@ -4448,31 +4453,28 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
 
             // --- E. BALL PHYSICS & CATCHING ---
             if (ballPos.inAir) {
-                // Store previous pos (for segment-based catch checks)
                 ballPos.prevX = ballPos.x;
                 ballPos.prevY = ballPos.y;
                 ballPos.prevZ = ballPos.z;
 
-                // Velocity & Gravity
                 ballPos.x += (ballPos.vx || 0) * timeDelta;
                 ballPos.y += (ballPos.vy || 0) * timeDelta;
                 ballPos.z += (ballPos.vz || 0) * timeDelta;
                 ballPos.vz = (ballPos.vz || 0) - 9.8 * timeDelta;
 
-                // Clamp ball to field bounds as a safety so visuals never show it out-of-bounds
-                ballPos.x = Math.max(0.5, Math.min(FIELD_WIDTH - 0.5, ballPos.x));
-                ballPos.y = Math.max(0.0, Math.min(FIELD_LENGTH, ballPos.y));
+                // 💡 FIX: Allow the ball to visually leave the field slightly for throw aways!
+                // Changed from 0.5 & 52.8 to -10 & 63.3
+                ballPos.x = Math.max(-10.0, Math.min(FIELD_WIDTH + 10.0, ballPos.x));
+                ballPos.y = Math.max(-10.0, Math.min(FIELD_LENGTH + 10.0, ballPos.y));
 
-                // Handle Catch/Ground arrival
                 if (typeof handleBallArrival === 'function') {
                     handleBallArrival(playState, ballCarrierState, playResult, gameLog);
                 }
 
-                // Safety Floor
                 if (ballPos.z < 0) {
                     ballPos.z = 0;
                     ballPos.vz = 0;
-                    if (ballPos.inAir) ballPos.inAir = false; // Dead ball
+                    if (ballPos.inAir) ballPos.inAir = false;
                 }
             } else if (ballCarrierState) {
                 // Ball stuck to player
@@ -4685,7 +4687,8 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
         } else if (!playState.sack && !playState.turnover) {
             playState.incomplete = true;
             playState.yards = 0;
-            playState.finalBallY = playState.ballState.y;
+            // 💡 FIX: Incomplete passes MUST return to the line of scrimmage
+            playState.finalBallY = playState.lineOfScrimmage;
             if (gameLog) gameLog.push("⏱️ Play ends, incomplete.");
         }
     }
@@ -4694,7 +4697,7 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
     if (down === 4 && !playState.touchdown && !playState.possessionChanged && !playState.safety && playState.type !== 'punt') {
         if (playState.yards < yardsToGo) {
             playState.possessionChanged = true;
-            playResult.turnoverType = 'downs'; // Explicitly set type
+            playResult.turnoverType = 'downs';
             if (gameLog) gameLog.push("🛑 Turnover on Downs!");
         }
     }
@@ -4709,6 +4712,8 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
     if (playState.incomplete) {
         playResult.outcome = 'incomplete';
         playResult.yards = 0;
+        // 💡 Double guarantee the ball placement for downs turnover math
+        playState.finalBallY = playState.lineOfScrimmage;
     }
     else if (playState.touchdown) {
         playResult.outcome = 'complete';

@@ -3099,19 +3099,20 @@ function runLiveGameStep() {
     // 3. UI Update
     updateLiveScoreboard();
 
-    // 💡 NEW LOGGING LOGIC: Flush any new lines added to game.gameLog
-    flushLiveLogs();
+    // 💡 FIX: Removed flushLiveLogs() from here! It now happens inside the animator.
 
     // Update Sidebars (Fatigue/Stats) using the first frame of the new data
     if (stepResult.visualizationFrames && stepResult.visualizationFrames.length > 0) {
         renderSimPlayers(stepResult.visualizationFrames[0]);
-        // Also update live stats box if available
-        renderLiveStatsLive(); // Uncomment if you have this function
+        if (typeof renderLiveStatsLive === 'function') renderLiveStatsLive();
     }
 
     // 4. Animate
     if (stepResult.visualizationFrames && stepResult.visualizationFrames.length > 0) {
         playVisualization(stepResult.visualizationFrames, () => {
+            // 💡 FIX: Flush any final logs (like "Play ends" or "Turnover") after the animation finishes
+            flushLiveLogs(); 
+
             if (isSkipping) {
                 runLiveGameStep();
             } else {
@@ -3128,35 +3129,35 @@ function runLiveGameStep() {
 /**
  * Helper to print any new lines from the game state log to the UI.
  */
-function flushLiveLogs() {
+function flushLiveLogs(targetIndex) {
     if (!activeLiveGame || !activeLiveGame.gameLog) return;
 
     const fullLog = activeLiveGame.gameLog;
+    // If no target index provided, flush to the very end
+    const limit = targetIndex !== undefined ? targetIndex : fullLog.length;
 
-    if (fullLog.length > liveGameCurrentIndex) {
-        const newEntries = fullLog.slice(liveGameCurrentIndex);
-        
-        // 💡 FIX: Performance optimization - use DocumentFragment to prevent layout thrashing
+    if (limit > liveGameCurrentIndex) {
+        const newEntries = fullLog.slice(liveGameCurrentIndex, limit);
         const fragment = document.createDocumentFragment();
 
         newEntries.forEach(entry => {
             const p = document.createElement('p');
-            p.className = "text-sm border-b border-gray-700 pb-1 mb-1";
+            // 💡 Added fade-in animation for a cleaner look
+            p.className = "text-sm border-b border-gray-700 pb-1 mb-1 animate-fadeIn";
             p.textContent = entry;
             fragment.appendChild(p);
             
-            updateStatsFromLogEntry(entry); 
+            if (typeof updateStatsFromLogEntry === 'function') updateStatsFromLogEntry(entry); 
         });
 
-        elements.simPlayLog.appendChild(fragment);
-        
-        // Layout thrashing fix: Only update scrollTop ONCE after all elements are added
-        elements.simPlayLog.scrollTop = elements.simPlayLog.scrollHeight;
+        if (elements.simPlayLog) {
+            elements.simPlayLog.appendChild(fragment);
+            elements.simPlayLog.scrollTop = elements.simPlayLog.scrollHeight;
+        }
 
-        liveGameCurrentIndex = fullLog.length;
+        liveGameCurrentIndex = limit;
     }
 }
-
 /**
  * ANIMATOR
  * Plays the array of frames on the canvas.
@@ -3165,17 +3166,22 @@ function playVisualization(frames, onComplete) {
     let index = 0;
     if (liveGameInterval) clearTimeout(liveGameInterval);
 
-    // Render first frame immediately
-    drawFieldVisualization(frames[0]);
-
-    // 💡 FIX: Use recursive setTimeout instead of setInterval so liveGameSpeed changes apply immediately mid-play
     const runNextFrame = () => {
+        const frame = frames[index];
+        if (frame) {
+            drawFieldVisualization(frame);
+            
+            // 💡 NEW: Sync logs to exactly what the physics engine saw at this specific frame!
+            if (frame.logIndex !== undefined) {
+                flushLiveLogs(frame.logIndex);
+            }
+        }
+        
         index++;
         if (index >= frames.length) {
             if (onComplete) onComplete();
             return;
         }
-        drawFieldVisualization(frames[index]);
         
         const currentDelay = isSkipping ? 5 : liveGameSpeed;
         liveGameInterval = setTimeout(runNextFrame, currentDelay);
