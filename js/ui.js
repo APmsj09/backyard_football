@@ -47,9 +47,7 @@ let activeDepthOrderTab = 'QB';
 // --- Live Game Sim State ---
 let liveGameSpeed = 80;
 let liveGameCurrentIndex = 0;
-let liveGameLog = [];
 let currentLiveGameResult = null;
-let userPreferredSpeed = 80;
 let huddleTimeout = null;
 
 let activeLiveGame = null;
@@ -57,18 +55,6 @@ let liveGameCallback = null;
 let liveGameInterval = null;
 let isSkipping = false;
 
-let liveGameLogIndex = 0;
-let liveGameCurrentHomeScore = 0;
-let liveGameCurrentAwayScore = 0;
-let liveGameBallOn = 20;
-let liveGameDown = 1;
-let liveGameToGo = 10;
-let liveGameDriveActive = false;
-let liveGamePossessionName = '';
-let liveGameDriveText = '';
-
-// --- Live stats counters (updated as logs are processed) ---
-let liveGameStats = { home: { yards: 0, td: 0, turnovers: 0, punts: 0, returns: 0 }, away: { yards: 0, td: 0, turnovers: 0, punts: 0, returns: 0 } };
 // Per-player live stat snapshots (id -> stats)
 let livePlayerStats = new Map();
 let playerNameIdMap = new Map();
@@ -398,6 +384,9 @@ let messageInterval = null;
 export function startLoadingMessages() {
     const messageEl = document.getElementById('loading-message');
     if (!messageEl) return;
+
+    // 💡 FIX: Prevent background interval leak if called repeatedly
+    if (messageInterval) clearInterval(messageInterval);
 
     messageEl.textContent = loadingMessages[0];
     messageIndex = 1;
@@ -1101,9 +1090,9 @@ function renderPositionalOveralls() {
 
     for (const p of roster) {
         let pos = p.pos || estimateBestPosition(p);
-        // Normalize for display
         if (['FB'].includes(pos)) pos = 'RB';
-        if (['TE', 'ATH', 'K', 'P'].includes(pos)) pos = 'WR';
+        if (['ATH', 'K', 'P'].includes(pos)) pos = 'WR'; 
+        // TE is no longer forced to WR here, keeping it standalone
         if (['OT', 'OG', 'C'].includes(pos)) pos = 'OL';
         if (['DE', 'DT', 'NT'].includes(pos)) pos = 'DL';
         if (['CB', 'S', 'FS', 'SS'].includes(pos)) pos = 'DB';
@@ -2548,10 +2537,13 @@ function initLiveGameStats(gameResult) {
 
 function initLivePlayerStats(gameResult) {
     livePlayerStats = new Map();
+    playerNameIdMap = new Map(); // 💡 FIX: Utilize unused cache map to optimize log parsing
+
     if (!gameResult) return;
     const homeRoster = getUIRosterObjects(gameResult.homeTeam || {});
     const awayRoster = getUIRosterObjects(gameResult.awayTeam || {});
     const all = [...homeRoster, ...awayRoster];
+    
     all.forEach(p => {
         if (!p || !p.id) return;
         livePlayerStats.set(p.id, {
@@ -2561,6 +2553,15 @@ function initLivePlayerStats(gameResult) {
             returnYards: 0,
             touchdowns: 0, interceptions: 0, fumbles: 0
         });
+        
+        // Cache lowercase names for ultra-fast O(1) lookup during log parsing
+        playerNameIdMap.set(p.name.toLowerCase(), p.id);
+        
+        // Also cache common short variations (e.g. "Reese 'Slinger' Walker" -> "Reese Walker")
+        const noNickname = p.name.replace(/'.*?'\s/g, '').toLowerCase();
+        if (noNickname !== p.name.toLowerCase()) {
+            playerNameIdMap.set(noNickname, p.id);
+        }
     });
 }
 
@@ -2573,23 +2574,21 @@ function updateStatsFromLogEntry(entry) {
 
     // --- 1. OPTIMIZED LOOKUP ---
     // Using a simple cache to avoid looping through rosters 60 times a second
+    // --- 1. OPTIMIZED LOOKUP ---
     const findIdByName = (name) => {
         if (!name) return null;
         const cleanName = name.trim().toLowerCase();
+        
+        // 💡 FIX: Fast O(1) cache lookup instead of O(N) array creation and filtering
+        if (playerNameIdMap.has(cleanName)) return playerNameIdMap.get(cleanName);
 
-        // Search both teams for a match
-        const players = [...currentLiveGameResult.homeTeam.roster, ...currentLiveGameResult.awayTeam.roster]
-            .map(id => getPlayer(id))
-            .filter(p => p);
-
-        const match = players.find(pl => {
-            const fullName = pl.name.toLowerCase();
-            // Check if the name in the log contains the player's name, or vice versa
-            // This handles "Reese 'Slinger' Walker" matching "Reese Walker"
-            return cleanName.includes(fullName) || fullName.includes(cleanName);
-        });
-
-        return match ? match.id : null;
+        // Fallback for partial matches (rare but safe)
+        for (let [cachedName, id] of playerNameIdMap.entries()) {
+            if (cleanName.includes(cachedName) || cachedName.includes(cleanName)) {
+                return id;
+            }
+        }
+        return null;
     };
 
     const getStats = (pid) => {
@@ -3007,59 +3006,6 @@ function attachSubHandlers(team, roster, depth, frame) {
 }
 
 
-
-
-let qbShoutTimeout1 = null;
-let qbShoutTimeout2 = null;
-let qbShoutTimeout3 = null;
-
-function startNextPlay() {
-    // 1. Clear ALL potential timers
-    if (liveGameInterval) { clearInterval(liveGameInterval); liveGameInterval = null; }
-    if (huddleTimeout) { clearTimeout(huddleTimeout); huddleTimeout = null; }
-    if (qbShoutTimeout1) { clearTimeout(qbShoutTimeout1); qbShoutTimeout1 = null; }
-    if (qbShoutTimeout2) { clearTimeout(qbShoutTimeout2); qbShoutTimeout2 = null; }
-    if (qbShoutTimeout3) { clearTimeout(qbShoutTimeout3); qbShoutTimeout3 = null; }
-
-    // Safety check: ensure game data still exists
-    if (!currentLiveGameResult || !currentLiveGameResult.visualizationFrames) return;
-
-    const allFrames = currentLiveGameResult.visualizationFrames;
-    const snapFrame = allFrames[liveGameCurrentIndex];
-
-    if (snapFrame) {
-        drawFieldVisualization(snapFrame);
-
-        if (typeof updateSimPlayerUI === 'function') {
-            if (snapFrame.players) snapFrame.players.forEach(p => updateSimPlayerUI(p));
-        }
-
-        if (elements.simBannerOffense) elements.simBannerOffense.textContent = "SET...";
-
-        // 1. "BLUE 42..." (Store ID to clear later)
-        qbShoutTimeout1 = setTimeout(() => {
-            if (elements.simBannerOffense) elements.simBannerOffense.textContent = "BLUE 42...";
-            animateQBShout(snapFrame);
-        }, 700);
-
-        // 2. "SET, HUT!!"
-        qbShoutTimeout2 = setTimeout(() => {
-            if (elements.simBannerOffense) elements.simBannerOffense.textContent = "SET, HUT!!";
-            animateQBShout(snapFrame);
-        }, 1400);
-
-        // 3. "HIKE!" -> RESTART SIMULATION
-        qbShoutTimeout3 = setTimeout(() => {
-            if (elements.simBannerOffense) elements.simBannerOffense.textContent = "";
-
-            // Resume the game loop!
-            if (!liveGameInterval) {
-                liveGameInterval = setInterval(runLiveGameTick, liveGameSpeed);
-            }
-        }, 2000);
-    }
-}
-
 /**
  * Visual Juice: Makes the QB dot "pulse" or jitter when shouting signals
  */
@@ -3101,7 +3047,7 @@ export function startLiveGameLoop(initialGameState, onComplete) {
     currentLiveGameResult = {
         homeTeam: activeLiveGame.homeTeam,
         awayTeam: activeLiveGame.awayTeam,
-        visualizationFrames: [] // Stub for visualizer
+        visualizationFrames:[] // Stub for visualizer
     };
 
     liveGameCallback = onComplete;
@@ -3111,11 +3057,12 @@ export function startLiveGameLoop(initialGameState, onComplete) {
     const ticker = elements.simPlayLog;
     if (ticker) ticker.innerHTML = '';
 
-    // IMPORTANT: Sync log index to current log length
-    // If the game object already has "Coin toss" in it, we want to print that.
     liveGameCurrentIndex = 0;
 
     updateLiveScoreboard();
+    
+    // 💡 Initialize the live stats map before flushing the first logs
+    initLivePlayerStats(currentLiveGameResult);
 
     // Initial Render of logs
     flushLiveLogs();
@@ -3186,15 +3133,26 @@ function flushLiveLogs() {
 
     const fullLog = activeLiveGame.gameLog;
 
-    // If we have new entries
     if (fullLog.length > liveGameCurrentIndex) {
         const newEntries = fullLog.slice(liveGameCurrentIndex);
+        
+        // 💡 FIX: Performance optimization - use DocumentFragment to prevent layout thrashing
+        const fragment = document.createDocumentFragment();
 
         newEntries.forEach(entry => {
-            addLiveLogEntry(entry);
+            const p = document.createElement('p');
+            p.className = "text-sm border-b border-gray-700 pb-1 mb-1";
+            p.textContent = entry;
+            fragment.appendChild(p);
+            
+            updateStatsFromLogEntry(entry); 
         });
 
-        // Update tracker
+        elements.simPlayLog.appendChild(fragment);
+        
+        // Layout thrashing fix: Only update scrollTop ONCE after all elements are added
+        elements.simPlayLog.scrollTop = elements.simPlayLog.scrollHeight;
+
         liveGameCurrentIndex = fullLog.length;
     }
 }
@@ -3205,20 +3163,26 @@ function flushLiveLogs() {
  */
 function playVisualization(frames, onComplete) {
     let index = 0;
-    if (liveGameInterval) clearInterval(liveGameInterval);
+    if (liveGameInterval) clearTimeout(liveGameInterval);
 
     // Render first frame immediately
     drawFieldVisualization(frames[0]);
 
-    liveGameInterval = setInterval(() => {
+    // 💡 FIX: Use recursive setTimeout instead of setInterval so liveGameSpeed changes apply immediately mid-play
+    const runNextFrame = () => {
         index++;
         if (index >= frames.length) {
-            clearInterval(liveGameInterval);
             if (onComplete) onComplete();
             return;
         }
         drawFieldVisualization(frames[index]);
-    }, isSkipping ? 5 : 50); // Fast forward if skipping
+        
+        const currentDelay = isSkipping ? 5 : liveGameSpeed;
+        liveGameInterval = setTimeout(runNextFrame, currentDelay);
+    };
+
+    const initialDelay = isSkipping ? 5 : liveGameSpeed;
+    liveGameInterval = setTimeout(runNextFrame, initialDelay);
 }
 
 function updateLiveScoreboard() {
@@ -3234,14 +3198,6 @@ function updateLiveScoreboard() {
         elements.simGameDown.textContent = `${activeLiveGame.down} & ${activeLiveGame.yardsToGo}`;
         elements.simGameDrive.textContent = `Drive ${activeLiveGame.drivesThisHalf}`;
     }
-}
-
-function addLiveLogEntry(text) {
-    const p = document.createElement('p');
-    p.className = "text-sm border-b border-gray-700 pb-1 mb-1";
-    p.textContent = text;
-    elements.simPlayLog.appendChild(p);
-    elements.simPlayLog.scrollTop = elements.simPlayLog.scrollHeight;
 }
 
 function finishLiveGame() {
@@ -3281,13 +3237,9 @@ export function setSimSpeed(speed) {
         activeButton.classList.add('active', 'bg-blue-500', 'hover:bg-blue-600');
     }
 
-    // Restart logic (same as before)
-    clearTimeout(huddleTimeout);
-    huddleTimeout = null;
-    if (currentLiveGameResult && liveGameCurrentIndex < currentLiveGameResult.visualizationFrames.length) {
-        if (liveGameInterval) clearInterval(liveGameInterval);
-        liveGameInterval = setInterval(runLiveGameTick, liveGameSpeed);
-    }
+    // 💡 FIX: Removed fatal 'runLiveGameTick' reference.
+    // The new speed will automatically apply on the next visualization frame cycle 
+    // because playVisualization now reads liveGameSpeed dynamically.
 }
 
 
@@ -3378,7 +3330,7 @@ function renderDepthOrderPane(gameState) {
     // Get full roster objects
     let roster = getUIRosterObjects(team);
     const depthOrder = team.depthOrder || {};
-    const displayOrder = ['QB', 'RB', 'WR', 'OL', 'DL', 'LB', 'DB'];
+    const displayOrder =['QB', 'RB', 'WR', 'TE', 'OL', 'DL', 'LB', 'DB']; // Added TE here
 
     // --- 1. Render Tabs (Top) ---
     // Uses inline onclick to trigger re-render with new active tab
@@ -3648,41 +3600,34 @@ function setupDepthTabs() {
 function setupDepthOrderDragEvents() {
     const pane = document.getElementById('depth-order-container');
     if (!pane) return;
-    // Prevent attaching multiple identical listeners on re-renders
-    if (pane.dataset.depthOrderEventsAttached === '1') return;
+    
+    // Attach the generic 'click' listener on the parent pane ONCE
+    if (pane.dataset.depthOrderEventsAttached !== '1') {
+        pane.addEventListener('click', (e) => {
+            const removeBtn = e.target.closest('.remove-depth-item');
+            if (removeBtn) {
+                e.preventDefault();
+                e.stopPropagation();
 
-    pane.addEventListener('click', (e) => {
-        const removeBtn = e.target.closest('.remove-depth-item');
-        if (removeBtn) {
-            e.preventDefault();
-            e.stopPropagation();
+                const pid = removeBtn.dataset.playerId;
+                const group = removeBtn.dataset.group;
+                const gs = getGameState();
 
-            const pid = removeBtn.dataset.playerId;
-            const group = removeBtn.dataset.group;
-            const gs = getGameState();
-
-            const card = removeBtn.closest('.depth-order-item');
-            if (card && gs && gs.playerTeam.depthOrder && gs.playerTeam.depthOrder[group]) {
-                // Remove from DOM
-                card.remove();
-                
-                // Remove from source-of-truth priority list
-                gs.playerTeam.depthOrder[group] = gs.playerTeam.depthOrder[group].filter(id => id !== pid);
-                
-                // Apply and refresh
-                applyDepthOrderToChart();
-                document.dispatchEvent(new CustomEvent('refresh-ui'));
+                const card = removeBtn.closest('.depth-order-item');
+                if (card && gs && gs.playerTeam.depthOrder && gs.playerTeam.depthOrder[group]) {
+                    card.remove();
+                    gs.playerTeam.depthOrder[group] = gs.playerTeam.depthOrder[group].filter(id => id !== pid);
+                    applyDepthOrderToChart(); // Now handles UI refresh internally
+                }
             }
-        }
-    });
+        });
+        pane.dataset.depthOrderEventsAttached = '1';
+    }
 
-    // Set up drag/drop for depth ordering
+    // Set up drag/drop for depth ordering (MUST run every render)
     const draggables = pane.querySelectorAll('.depth-order-item, .roster-row-item');
     const containers = pane.querySelectorAll('.depth-sortable-list');
     setupDragLogic(draggables, containers);
-
-    // Mark pane so we don't reattach listeners on every render
-    pane.dataset.depthOrderEventsAttached = '1';
 }
 
 function setupDragLogic(draggables, containers) {
@@ -3695,18 +3640,17 @@ function setupDragLogic(draggables, containers) {
                 e.dataTransfer.effectAllowed = 'copyMove';
                 e.dataTransfer.setData('text/plain', draggable.dataset.playerId);
 
-                // 💡 FIX: Store source type in dataTransfer (Reliable)
                 if (draggable.classList.contains('roster-row-item')) {
                     e.dataTransfer.setData('source-type', 'roster');
                 } else {
                     e.dataTransfer.setData('source-type', 'list');
                 }
 
-                // Visuals
-                requestAnimationFrame(() => {
+                // Visuals - Changed to setTimeout for cross-browser reliability during drag
+                setTimeout(() => {
                     draggable.classList.add('dragging');
                     draggable.classList.add('opacity-50');
-                });
+                }, 0);
             });
 
             draggable.addEventListener('dragend', () => {
@@ -3886,6 +3830,9 @@ export function applyDepthOrderToChart() {
 
     // 4. Re-render the specific pane we are looking at
     renderDepthOrderPane(gs);
+    
+    // 5. Force the visual field to update so changes reflect instantly!
+    document.dispatchEvent(new CustomEvent('refresh-ui'));
 }
 
 

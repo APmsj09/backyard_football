@@ -328,6 +328,22 @@ function handleDepthChartSelect(e) {
 
 // --- SIMULATION & WEEK ADVANCE ---
 
+function proceedWithAdvanceWeek() {
+    if (!gameState) return;
+    try { UI.hideModal(); } catch (e) {}
+
+    const playerTeamId = gameState.playerTeam.id;
+    const gamesPerWeek = gameState.teams.length / 2;
+    const weekGames = gameState.schedule.slice(gameState.currentWeek * gamesPerWeek, (gameState.currentWeek + 1) * gamesPerWeek);
+    const playerGameMatch = weekGames.find(g => g.home.id === playerTeamId || g.away.id === playerTeamId);
+
+    if (playerGameMatch) {
+        startLiveGame(playerGameMatch);
+    } else {
+        simulateRestOfWeek();
+    }
+}
+
 async function handleAdvanceWeek() {
     if (!gameState) return;
 
@@ -348,7 +364,7 @@ async function handleAdvanceWeek() {
         }
     }
 
-    // 💡 FIX: Check for empty Depth Chart slots and warn the player
+    // Check for empty Depth Chart slots and warn the player
     const emptySlots = Game.getDepthChartEmptySlots(gameState.playerTeam);
     if (emptySlots.length > 0) {
         UI.showModal("Incomplete Depth Chart", 
@@ -358,7 +374,7 @@ async function handleAdvanceWeek() {
              </div>
              <p>Do you want to proceed anyway? (The AI will auto-fill the gaps with backups if possible)</p>`,
             () => proceedWithAdvanceWeek(), "Proceed Anyway",
-            null, "Fix Lineup"
+            () => { try { UI.hideModal(); } catch(e){} }, "Fix Lineup"
         );
         return;
     }
