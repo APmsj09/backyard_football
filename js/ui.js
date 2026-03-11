@@ -10,7 +10,8 @@ import {
     changeFormation,
     getPlayer,
     rebuildDepthChartFromOrder,
-    normalizeFormationKey
+    normalizeFormationKey,
+    assignPlayerToSlot
 } from './game.js';
 import {
     offenseFormations,
@@ -1215,14 +1216,7 @@ function handleDepthChartChange(side, slot, newPlayerId) {
     const gs = getGameState();
     if (!gs || !gs.playerTeam) return;
 
-    if (!newPlayerId) {
-        // If "Empty" is selected, just clear the slot
-        gs.playerTeam.depthChart[side][slot] = null;
-    } else {
-        // 💡 THE FIX: Use Game.updateDepthChart instead of direct assignment.
-        // This updates the Rankings AND the Field at the same time.
-        Game.updateDepthChart(newPlayerId, slot, side);
-    }
+    assignPlayerToSlot(gs.playerTeam, newPlayerId, slot, side);
 
     saveGameState();
     
@@ -1286,8 +1280,16 @@ function renderVisualFormationSlots(
         slotEl.className = 'player-slot-visual';
         slotEl.style.left = `${leftPercent}%`;
         slotEl.style.top = `${topPercent}%`;
+        
+        // Enable proper drag and drop
+        slotEl.dataset.positionSlot = slotId;
+        slotEl.dataset.side = side;
 
         const playerId = currentChart[slotId];
+        if (playerId) {
+            slotEl.draggable = true;
+            slotEl.dataset.playerId = playerId;
+        }
         const player = roster.find(p => p.id === playerId);
 
         // 💡 Determine the canonical position key for this slot BEFORE using it
@@ -3561,6 +3563,18 @@ function renderDepthOrderPane(gameState) {
     `;
 
     pane.innerHTML = tabsHtml + listsHtml + rosterHtml;
+
+    // Hook up the Auto-Sort button natively
+    const autoBtn = pane.querySelector('#auto-reorder-btn');
+    if (autoBtn) {
+        autoBtn.onclick = () => {
+            if (window.confirm("This will completely reset your Depth Chart & Bench Order based purely on Overall Ratings. Proceed?")) {
+                Game.aiSetDepthChart(gameState.playerTeam);
+                saveGameState();
+                document.dispatchEvent(new CustomEvent('refresh-ui'));
+            }
+        };
+    }
 
     // NOTE: setupDepthTabs is REMOVED. The onclick handles the logic now.
     setupDepthOrderDragEvents();

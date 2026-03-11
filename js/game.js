@@ -6207,6 +6207,52 @@ function advanceToOffseason() {
 // --- DEPTH CHART & PLAYER MANAGEMENT ---
 // =============================================================
 
+/**
+ * Directly assigns a player to a specific slot on the depth chart,
+ * preserving all other overrides and cleanly handling swaps.
+ */
+function assignPlayerToSlot(team, playerId, slot, side) {
+    if (!team || !team.depthChart || !team.depthChart[side]) return false;
+    
+    if (!playerId || playerId === 'null' || playerId === '') {
+        team.depthChart[side][slot] = null;
+        return true;
+    }
+    
+    // Check if player is already in a slot on this side
+    let oldSlot = null;
+    for (const s in team.depthChart[side]) {
+        if (team.depthChart[side][s] === playerId) {
+            oldSlot = s;
+            break;
+        }
+    }
+    
+    const existingPlayerInNewSlot = team.depthChart[side][slot];
+    
+    if (oldSlot) {
+        // Swap them
+        team.depthChart[side][oldSlot] = existingPlayerInNewSlot;
+    }
+    
+    team.depthChart[side][slot] = playerId;
+    
+    // Ensure player is in the correct positional depthOrder list fallback so they don't disappear
+    let posKey = slot.replace(/\d+/g, '');
+    if (['OT', 'OG', 'C'].includes(posKey)) posKey = 'OL';
+    if (posKey === 'FB') posKey = 'RB';
+    if (posKey === 'TE') posKey = 'TE'; 
+    if (['CB', 'S', 'FS', 'SS'].includes(posKey)) posKey = 'DB';
+    if (['DE', 'DT', 'NT'].includes(posKey)) posKey = 'DL';
+    
+    if (!team.depthOrder) team.depthOrder = {};
+    const groupList = team.depthOrder[posKey] ||[];
+    if (!groupList.includes(playerId)) {
+        groupList.push(playerId);
+    }
+    
+    return true;
+}
 
 
 // -----------------------------
@@ -6807,6 +6853,7 @@ export {
     getRosterObjects,
     getRosterObjects as getUIRosterObjects, // ALIAS for UI compatibility
     getPlayer,
+    assignPlayerToSlot,
 
     // Simulation Logic
     simulateAIPick,

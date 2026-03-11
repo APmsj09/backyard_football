@@ -297,8 +297,8 @@ function handleFormationChange(e) {
 function handleDepthChartDrop(playerId, newPositionSlot, side) {
     if (!gameState) return;
 
-    // 1. Update Game Logic
-    Game.updateDepthChart(playerId, newPositionSlot, side);
+    // 1. Explicitly assign player to the exact slot
+    Game.assignPlayerToSlot(gameState.playerTeam, playerId, newPositionSlot, side);
 
     // 2. Refresh local state
     gameState = Game.getGameState();
@@ -762,7 +762,6 @@ function main() {
         // Dashboard Navigation
         document.getElementById('dashboard-tabs')?.addEventListener('click', handleTabSwitch);
         document.getElementById('dashboard-content')?.addEventListener('click', handleDashboardClicks);
-        document.getElementById('dashboard-content')?.addEventListener('change', handleDepthChartSelect);
 
         // Messages List
         document.getElementById('messages-list')?.addEventListener('click', (e) => {
