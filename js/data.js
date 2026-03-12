@@ -406,7 +406,16 @@ export const offensivePlaybook = {
     'Punt_Punt': {
         type: 'punt', tags: ['specialTeams'],
         readProgression: [],
-        assignments: { 'QB1': 'punt', 'WR1': 'Fly', 'WR2': 'Fly', 'OL1': 'pass_block', 'OL2': 'pass_block', 'OL3': 'pass_block', 'RB1': 'pass_block' }
+        assignments: { 
+            'QB1': 'punt', 
+            'WR1': 'Fly', 
+            'WR2': 'Fly', 
+            'OL1': 'pass_block', 
+            'OL2': 'pass_block', 
+            'OL3': 'pass_block', 
+            'RB1': 'pass_block',
+            'TE1': 'pass_block' // Added TE1 to assignments to match formation slots
+        }
     }
 };
 
@@ -478,14 +487,14 @@ export const defenseFormations = {
         slots: ['DL1', 'DL2', 'LB1', 'LB2', 'DB1', 'DB2', 'DB3', 'DB4'],
         personnel: { DL: 2, LB: 2, DB: 4 },
         coordinates: { 
-            DL1: [-3, 1], 
-            DL2: [3, 1], 
-            LB1: [-10, 8], 
-            LB2: [10, 8], 
-            DB1: [-15, 15], 
-            DB2: [15, 15], 
-            DB3: [-5, 20],
-            DB4: [5, 20]
+            DL1: [-2, 1],       // Rushers
+            DL2: [2, 1], 
+            LB1: [-8, 5],       // Wall setup
+            LB2: [8, 5], 
+            DB1: [-15, 12],     // Jammers (blocking outside gunners)
+            DB2: [15, 12], 
+            DB3: [0, 45],       // 💡 DEEP RETURNER (45 yards back)
+            DB4: [0, 35]        // 💡 SHORT RETURNER/FAIR CATCHER
         }
     },
     '3-1-4': {

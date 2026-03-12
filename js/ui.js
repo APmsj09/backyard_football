@@ -1056,6 +1056,9 @@ function renderFormationDropdown(side, formationMap, selectedKey) {
     select.innerHTML = '';
 
     Object.entries(formationMap).forEach(([key, formation]) => {
+        // 💡 FIX: Hide Special Teams formations from the manual selection dropdown
+        if (key === 'Punt' || key === 'Punt_Return') return;
+
         const option = document.createElement('option');
 
         option.value = key;                 // ✅ KEY

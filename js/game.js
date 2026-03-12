@@ -2289,15 +2289,15 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                 const qb = offenseStates.find(p => p.slot.startsWith('QB'));
                 if (qb) {
                     // Step in front of the rusher laterally
-                    blocker.targetX = target.x; 
+                    blocker.targetX = target.x;
                     // Give ground slowly, but don't get pushed directly into the QB
                     const pocketDepth = Math.max(LOS - 3.5, qb.y + 1.5);
-                    blocker.targetY = Math.max(pocketDepth, blocker.y - 0.2); 
+                    blocker.targetY = Math.max(pocketDepth, blocker.y - 0.2);
                 }
             } else {
                 // 💡 FIX: THE RUN WALL
                 blocker.targetX = target.x; // Attack them directly
-                blocker.targetY = target.y; 
+                blocker.targetY = target.y;
             }
 
             // Auto-Engage
@@ -2344,12 +2344,18 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
             // A. KICKING TEAM AI (The Gunners)
             if (isKickingTeam) {
                 // 1. Before Kick: Protect the Punter
-                if (!ballInAir && !returnerHasBall && ballPos.y < LOS + 5) {
-                    if (pState.slot === 'QB1') return; // Punter handles themselves
-                    // Blockers hold the line
-                    if (!pState.dynamicTargetId) {
+                if (!ballInAir && !returnerHasBall && playState.tick < 26) {
+                    if (pState.slot === 'QB1') return;
+
+                    // 💡 FIX: Force blockers to stay between rushers and the Punter
+                    const nearestRusher = defenseStates.find(d => getDistance(pState, d) < 5);
+                    if (nearestRusher) {
+                        pState.targetX = nearestRusher.x;
+                        pState.targetY = Math.min(LOS, nearestRusher.y - 1);
+                        pState.strength *= 1.5; // Special Teams "Adrenaline" boost to blocking
+                    } else {
                         pState.targetX = pState.initialX;
-                        pState.targetY = LOS;
+                        pState.targetY = LOS - 1;
                     }
                     return;
                 }
@@ -2384,19 +2390,19 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                         return;
                     }
                     else if (ballInAir) {
-                        // Phase 1: Go to Landing Spot
-                        // 💡 FIX: Don't block! Run to where the ball is going!
+                        // 💡 FIX: SPRINT to landing spot. Don't look at anything else.
                         const landX = ballPos.targetX || ballPos.x;
                         const landY = ballPos.targetY || ballPos.y;
 
+                        // Give them a slight "lead" on the ball landing
                         pState.targetX = landX;
                         pState.targetY = landY;
-                        pState.action = 'pursuit'; // Use pursuit speed/animation
+                        pState.action = 'pursuit'; // Pursuit is the fastest movement state
 
-                        // "Camping" logic: If close, stop and wait
-                        if (getDistance(pState, { x: landX, y: landY }) < 1.0) {
-                            pState.targetX = pState.x;
-                            pState.targetY = pState.y;
+                        // If they are within 2 yards of the target, stop and wait (Camp)
+                        if (getDistance(pState, { x: landX, y: landY }) < 2.0) {
+                            pState.vx = 0;
+                            pState.vy = 0;
                         }
                         return;
                     }
@@ -3070,7 +3076,7 @@ function checkTackleCollisions(playState, gameLog) {
             const jukeDir = jukeType === 'juke_left' ? -1 : 1;
             carrier.x += jukeDir * 0.8;
             defender.stunnedTicks = 25;
-            
+
             // 💡 FIX: If a passing QB shakes a sack, force them to abandon the pocket and scramble!
             if (carrier.role === 'QB' && !carrier.isBallCarrier) {
                 carrier.isBallCarrier = true;
@@ -3548,11 +3554,14 @@ function updateQBDecision(qbState, offenseStates, defenseStates, playState, offe
 
     // Scramble Check
     const openLane = !defenseStates.some(d => !d.isBlocked && !d.isEngaged && Math.abs(d.x - qbState.x) < 3.5 && d.y < qbState.y + 1);
-    
+
     // 💡 FIX: Force scramble if time is running out, regardless of agility
     const timeIsRunningOut = playState.tick > 90;
     const scrambleChance = timeIsRunningOut ? 0.8 : (qbAgility / 100);
-    const canScramble = openLane && (isPressured || playState.tick > 70) && (Math.random() < scrambleChance);
+    const isGoalLine = playState.lineOfScrimmage > 105;
+    const scrambleThreshold = isGoalLine ? 90 : 70;
+    
+    const canScramble = openLane && (isPressured || playState.tick > scrambleThreshold) && (Math.random() < scrambleChance);
 
     // 💡 NEW: Late-Game Desperation Logic
     const isLatePlay = playState.tick > 100;
@@ -3567,7 +3576,7 @@ function updateQBDecision(qbState, offenseStates, defenseStates, playState, offe
 
     // We only process organic reads if a forced decision wasn't already made at the top
     if (!decisionMade) {
-        
+
         // 1. PRIMARY READ 
         if (currentReadInfo && currentReadInfo.separation > OPEN_SEP) {
             const validTiming = canThrowStandard;
@@ -3596,8 +3605,8 @@ function updateQBDecision(qbState, offenseStates, defenseStates, playState, offe
             // Fallback to WRs if no RB/TE
             if (checkdownOptions.length === 0) {
                 checkdownOptions = offenseStates.filter(p => {
-                     if (p.slot === 'QB1' || p.action === 'sacked' || p.action === 'idle') return false;
-                     return true;
+                    if (p.slot === 'QB1' || p.action === 'sacked' || p.action === 'idle') return false;
+                    return true;
                 }).map(p => ({
                     state: p,
                     info: getTargetInfo(p.slot)
@@ -3617,27 +3626,27 @@ function updateQBDecision(qbState, offenseStates, defenseStates, playState, offe
 
         // 2.5 STATUE PREVENTION (Force Action if time expiring)
         if (!decisionMade && playState.tick > 110) {
-             const bestDesperationTarget = offenseStates
+            const bestDesperationTarget = offenseStates
                 .filter(p => p.slot !== 'QB1' && p.action.includes('route'))
                 .map(p => ({ state: p, info: getTargetInfo(p.slot) }))
                 .filter(x => x.info)
                 .sort((a, b) => b.info.separation - a.info.separation)[0];
 
-             if (bestDesperationTarget && bestDesperationTarget.info.separation > 0.1) {
-                 targetPlayerState = bestDesperationTarget.state;
-                 actionTaken = "Forced Throw";
-                 decisionMade = true;
-             } else if (openLane) {
-                 qbState.scrambleDirection = 'forward';
-                 qbState.action = 'qb_scramble';
-                 qbState.isBallCarrier = true; 
-                 playState.qbIntent = 'scramble';
-                 if (gameLog) gameLog.push(`🏃 ${qbState.name} abandons the pass and runs!`);
-                 return;
-             } else {
-                 decisionMade = true;
-                 reason = "Time Expired";
-             }
+            if (bestDesperationTarget && bestDesperationTarget.info.separation > 0.1) {
+                targetPlayerState = bestDesperationTarget.state;
+                actionTaken = "Forced Throw";
+                decisionMade = true;
+            } else if (openLane) {
+                qbState.scrambleDirection = 'forward';
+                qbState.action = 'qb_scramble';
+                qbState.isBallCarrier = true;
+                playState.qbIntent = 'scramble';
+                if (gameLog) gameLog.push(`🏃 ${qbState.name} abandons the pass and runs!`);
+                return;
+            } else {
+                decisionMade = true;
+                reason = "Time Expired";
+            }
         }
 
         // 3. SCRAMBLE
@@ -3657,7 +3666,12 @@ function updateQBDecision(qbState, offenseStates, defenseStates, playState, offe
             qbState.action = 'qb_scramble';
             qbState.isBallCarrier = true;
             playState.qbIntent = 'scramble';
-            if (gameLog) gameLog.push(`🏃 ${qbState.name} tucks it and runs ${qbState.scrambleDirection}!`);
+
+            // 💡 FIX: Only push to log ONCE per play
+            if (gameLog && !qbState.hasLoggedScramble) {
+                gameLog.push(`🏃 ${qbState.name} tucks it and runs ${qbState.scrambleDirection}!`);
+                qbState.hasLoggedScramble = true;
+            }
             return;
         }
     }
@@ -3702,7 +3716,7 @@ function updateQBDecision(qbState, offenseStates, defenseStates, playState, offe
         // 💡 FIX: Throw it on a much faster, sharper trajectory to clear the play quickly
         const dx = targetX - qbState.x;
         const dy = targetY - qbState.y;
-        const dist = Math.sqrt(dx*dx + dy*dy);
+        const dist = Math.sqrt(dx * dx + dy * dy);
         const ballSpeed = 25; // Bullet pass speed
         const t = Math.max(0.1, dist / ballSpeed);
 
@@ -3853,10 +3867,23 @@ function updatePunterDecision(playState, offenseStates, gameLog) {
     const punter = offenseStates.find(p => p.slot === 'QB1');
     if (!punter || !punter.hasBall) return;
 
-    // It takes time for the ball to reach the punter 12 yards back.
-    if (playState.tick < 30) {
+    // Ball starts at Center (0, LOS) and travels to Punter (0, LOS-12)
+    const snapDuration = 15; // 0.75 seconds to reach punter
+    if (playState.tick < snapDuration) {
+        const pct = playState.tick / snapDuration;
+        const snapStartY = playState.lineOfScrimmage - 0.5;
+        // Move ball from LOS to Punter's hands
+        playState.ballState.x = 0;
+        playState.ballState.y = snapStartY + (punter.y - snapStartY) * pct;
+        playState.ballState.z = 0.5 + (pct * 0.5); // Slight arc
+        return;
+    }
+
+    // Punter catches snap at tick 15, kicks at tick 25
+    if (playState.tick < 25) {
         playState.ballState.x = punter.x;
         playState.ballState.y = punter.y;
+        playState.ballState.z = 1.2;
         return;
     }
 
@@ -3865,19 +3892,30 @@ function updatePunterDecision(playState, offenseStates, gameLog) {
 
     // Target Logic: Aim for the "Coffin Corner" or deep field
     const isLeftHash = punter.x < 26.6;
-    const targetX = isLeftHash ? 48.0 : 5.0;
-    const targetY = playState.lineOfScrimmage + 40 + (punterPower * 0.4); // 40-80 yard punt range
+    const targetX = isLeftHash ? 42.0 : 11.0; // Aim away from center but stay in bounds
 
-    // Add Variance (Accuracy)
-    const errorX = (Math.random() - 0.5) * (100 - punterAcc) * 0.5;
-    const errorY = (Math.random() - 0.5) * (100 - punterAcc) * 0.5;
+    // Punts now target 45 yards base + up to 25 yards from strength
+    const puntDistance = 45 + (punterPower * 0.25);
+    const targetY = playState.lineOfScrimmage + puntDistance;
 
-    const finalTargetX = Math.max(0, Math.min(53.3, targetX + errorX));
-    const finalTargetY = Math.min(115, targetY + errorY); // Cap at back of endzone
+    // Reduced variance so punts don't wildly fly out of bounds 10 yards downfield
+    const errorX = (Math.random() - 0.5) * (100 - punterAcc) * 0.2;
+    const errorY = (Math.random() - 0.5) * (100 - punterAcc) * 0.3;
 
-    // 3. Execute Kick
-    const dist = Math.sqrt((finalTargetX - punter.x) ** 2 + (finalTargetY - punter.y) ** 2);
-    const hangTime = 3.5 + (punterPower / 50); // 3.5s - 5.5s hangtime
+    const finalTargetX = Math.max(2, Math.min(51, targetX + errorX));
+    const finalTargetY = Math.min(118, targetY + errorY);
+
+    // 3. Execute Kick Physics
+    const distY = finalTargetY - punter.y;
+    const distX = finalTargetX - punter.x;
+
+    // Realistic Hangtime: 4.0 to 5.5 seconds
+    const hangTime = 4.0 + (punterPower / 65);
+
+    playState.ballState.vx = distX / hangTime;
+    playState.ballState.vy = distY / hangTime;
+    // Standard projectile physics: v0 = (g * t) / 2
+    playState.ballState.vz = (9.8 * hangTime) / 2;
 
     // Physics Vectors
     playState.ballState.vx = (finalTargetX - punter.x) / hangTime;
@@ -3931,8 +3969,12 @@ function handleBallArrival(playState, carrier, playResult, gameLog) {
     };
 
     const playersInRange = playState.activePlayers.filter(p => {
-        if (p.id === ball.throwerId && playState.tick < 50) return false;
-        if (playState.type === 'punt' && p.isOffense) return false;
+        // 💡 FIX: Kicker/Punter cannot touch the ball for at least 1 second after kick
+        const ticksSinceKick = playState.tick - (ball.throwTick || 0);
+        if (p.id === ball.throwerId && ticksSinceKick < 20) return false;
+
+        // 💡 FIX: Kicking team cannot catch their own punt in the air (Downing only happens on ground)
+        if (playState.type === 'punt' && p.isOffense && ball.z > 0.5) return false;
         if (ball.droppedById === p.id) return false;
 
         const distNow = Math.sqrt((p.x - ball.x) ** 2 + (p.y - ball.y) ** 2);
@@ -4005,6 +4047,8 @@ function handleBallArrival(playState, carrier, playResult, gameLog) {
         } else {
             // --- DROP / SWAT ---
             if (isDefense) {
+                if (playState.type === 'punt') return;
+
                 const last = ball.lastInteraction;
                 if (!(last && last.playerId === bestCandidate.id && last.type === 'swat' && (playState.tick - last.tick) <= 1)) {
                     pushLog(`🚫 ${bestCandidate.name} swats the pass away!`);
@@ -4636,7 +4680,7 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
     }
 
     // Possession Change Handling
-    if (playState.possessionChanged || playState.turnover) {
+    if (playState.possessionChanged || playState.turnover || playState.type === 'punt') {
         playResult.outcome = 'turnover';
         playResult.possessionChange = true;
 
@@ -5329,16 +5373,25 @@ function simulateLivePlayStep(game) {
     else if (determinePuntDecision(game.down, game.yardsToGo, game.ballOn)) {
         offPlayKey = 'Punt_Punt';
         defPlayKey = 'Punt_Return_Return';
-        offense.formations.offense = 'Punt';
-        defense.formations.defense = 'Punt_Return';
+        // 💡 FIX: Do NOT overwrite the team formations here. 
+        // resolvePlay will use the offPlayKey/defPlayKey to set up the field.
     }
     else {
         const scoreDiff = (offense.id === game.homeTeam.id) ? (game.homeScore - game.awayScore) : (game.awayScore - game.homeScore);
         const drivesRemaining = 10;
 
+        // 💡 FIX: Force formation reset if coming off a Punt or Conversion
+        if (offense.formations.offense === 'Punt' || game.isConversionAttempt === false) {
+            // Reset to coach preference or default
+            offense.formations.offense = offense.coach?.preferredOffense || 'Balanced';
+        }
+
         offPlayKey = determinePlayCall(offense, defense, game.down, game.yardsToGo, game.ballOn, scoreDiff, game.gameLog, drivesRemaining);
+
+        // Final fallback safety
         if (!offPlayKey || !offensivePlaybook[offPlayKey]) offPlayKey = 'Balanced_InsideZone';
 
+        // Update the team's current formation to match the play they just called
         const selectedFormation = offensivePlaybook[offPlayKey].formation || offPlayKey.split('_')[0];
         offense.formations.offense = selectedFormation;
 
