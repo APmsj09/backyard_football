@@ -3083,8 +3083,11 @@ export function startLiveGameLoop(initialGameState, onComplete) {
 function runLiveGameStep() {
     if (!activeLiveGame) return;
 
+    // 💡 FIX: Clear any existing timeouts to prevent "Double Stepping"
+    if (huddleTimeout) clearTimeout(huddleTimeout);
+
     // 1. End Check
-    if (activeLiveGame.isGameOver || activeLiveGame.drivesThisHalf > 30) {
+    if (activeLiveGame.isGameOver) {
         finishLiveGame();
         return;
     }
@@ -3200,22 +3203,38 @@ function updateLiveScoreboard() {
     elements.simAwayScore.textContent = activeLiveGame.awayScore;
 
     // Context-aware text
-    if (activeLiveGame.isConversionAttempt) {
+    if (activeLiveGame.isGameOver) {
+        elements.simGameDown.textContent = "FINAL";
+        elements.simGameDrive.textContent = "0:00";
+    } else if (activeLiveGame.isConversionAttempt) {
         elements.simGameDown.textContent = "Conversion";
         elements.simGameDrive.textContent = "PAT";
     } else {
         elements.simGameDown.textContent = `${activeLiveGame.down} & ${activeLiveGame.yardsToGo}`;
-        elements.simGameDrive.textContent = `Drive ${activeLiveGame.drivesThisHalf}`;
+        // Show progress through the 60-play game
+        const playNum = activeLiveGame.playsTotal || 1;
+        elements.simGameDrive.textContent = `Play ${playNum}/60`;
     }
 }
 
 function finishLiveGame() {
-    if (liveGameInterval) clearInterval(liveGameInterval);
-    addLiveLogEntry(`FINAL: ${activeLiveGame.homeScore} - ${activeLiveGame.awayScore}`);
+    // Stop all animations and timeouts
+    if (liveGameInterval) clearTimeout(liveGameInterval);
+    if (huddleTimeout) clearTimeout(huddleTimeout);
+    
+    // Update Scoreboard to show "FINAL"
+    updateLiveScoreboard();
+    
+    console.log("Game Over. Finalizing results...");
 
-    // Call Main.js back to save results
+    // Call the final result callback (returns to dashboard)
     if (liveGameCallback) {
-        setTimeout(() => liveGameCallback(activeLiveGame), 2000);
+        // Give the player 3 seconds to see the final score before switching screens
+        setTimeout(() => {
+            const finalData = activeLiveGame;
+            activeLiveGame = null; // Clear state
+            liveGameCallback(finalData);
+        }, 3000);
     }
 }
 

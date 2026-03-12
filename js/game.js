@@ -1798,27 +1798,23 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
     setupSide(offense, 'offense', offenseFormationData, true);
     setupSide(defense, 'defense', defenseFormationData, false);
 
-    // --- 8. INITIALIZE BALL ---
+    // 8. INITIALIZE BALL (Always starts with QB)
     const qbState = playState.activePlayers.find(p => p.slot === 'QB1' && p.isOffense);
-    const rbState = playState.activePlayers.find(p => p.slot === 'RB1' && p.isOffense);
-
-    // Default Ball State
-    playState.ballState.x = qbState ? qbState.x : CENTER_X;
-    playState.ballState.y = qbState ? qbState.y : playState.lineOfScrimmage;
-    playState.ballState.z = 1.0;
-
-    // Give ball to correct person based on play type
-    if (play.type === 'run' && rbState && !assignments['QB1']?.includes('run_')) {
-        // Direct Handoff / Sim Handoff
-        rbState.hasBall = true;
-        rbState.isBallCarrier = true;
-        playState.ballState.x = rbState.x;
-        playState.ballState.y = rbState.y;
-        if (qbState) qbState.action = 'run_fake';
-    } else if (qbState) {
-        // QB Pass or QB Run
+    
+    if (qbState) {
         qbState.hasBall = true;
-        qbState.isBallCarrier = (play.type === 'run'); // Only carrier on designated QB runs
+        playState.ballState.x = qbState.x;
+        playState.ballState.y = qbState.y;
+        playState.ballState.z = 1.0;
+        
+        // If it's a run, flag that we need a handoff
+        if (play.type === 'run') {
+            playState.handoffRequired = true;
+            playState.handoffTargetSlot = 'RB1';
+            playState.handoffOccurred = false;
+        }
+    } else {
+        console.error('No QB found in offense formation! Ball cannot be initialized.');
     }
 }
 
@@ -4384,6 +4380,28 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
                 }
             }
             if (!playState.playIsLive) break;
+            // --- HANDOFF SEQUENCE ---
+            if (playState.handoffRequired && !playState.handoffOccurred) {
+                const qb = playState.activePlayers.find(p => p.slot === 'QB1');
+                const rb = playState.activePlayers.find(p => p.slot === 'RB1');
+                
+                // QB and RB move toward each other for handoff until tick 12
+                if (playState.tick < 12) {
+                    if (rb) {
+                        rb.targetY = playState.lineOfScrimmage - 1.5; // RB meets QB
+                        rb.action = 'run_path';
+                    }
+                } else {
+                    // Execute handoff
+                    if (qb && rb) {
+                        qb.hasBall = false;
+                        rb.hasBall = true;
+                        rb.isBallCarrier = true;
+                        playState.handoffOccurred = true;
+                        if (gameLog && playState.tick === 12) pushGameLog(gameLog, `🏈 Handoff to ${rb.name}`);
+                    }
+                }
+            }
 
             // --- C. AI TARGETING ---
             if (typeof updatePlayerTargets === 'function') {
@@ -5510,10 +5528,13 @@ function simulateLivePlayStep(game) {
         }
     }
 
-    try {
-        game.drivesThisHalf = (game.drivesThisHalf || 0) + 1;
-        if (game.drivesThisHalf > 30) game.isGameOver = true;
-    } catch (e) { }
+    game.playsTotal = (game.playsTotal || 0) + 1;
+    
+    // Check if game should end
+    if (game.playsTotal >= 60) {
+        game.isGameOver = true;
+        if (game.gameLog) game.gameLog.push("🏁 WHISTLE BLOWS! That's the end of the game!");
+    }
 
     return result;
 }
