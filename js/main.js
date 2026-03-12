@@ -434,22 +434,34 @@ function startLiveGame(playerGameMatch) {
     UI.showScreen('game-sim-screen');
 
     // UI.startLiveGameLoop will handle the "Step -> Animate -> Step" cycle
-    UI.startLiveGameLoop(liveGameParams, (finalResult) => {
+     UI.startLiveGameLoop(liveGameParams, (finalResult) => {
+        
+        // 💡 FIX: Finalize the Player's Game Records & Stats
+        Game.finalizeGameResults(
+            finalResult.homeTeam, 
+            finalResult.awayTeam, 
+            finalResult.homeScore, 
+            finalResult.awayScore
+        );
 
-        // This callback runs when the game is fully over (Quarters done)
+        // This callback runs when the game is fully over
         const combinedResults = [...otherResults, finalResult];
 
         // Add results to history
         if (!gameState.gameResults) gameState.gameResults = [];
+        
         const minimalResults = combinedResults.filter(Boolean).map(r => ({
             homeTeam: { id: r.homeTeam.id, name: r.homeTeam.name },
             awayTeam: { id: r.awayTeam.id, name: r.awayTeam.name },
             homeScore: r.homeScore,
             awayScore: r.awayScore
         }));
+        
         gameState.gameResults.push(...minimalResults);
 
         gameState.currentWeek++;
+        // 💡 IMPORTANT: Save game state before returning to dashboard
+        Game.saveGameState(); 
         finishWeekSimulation(combinedResults);
     });
 }

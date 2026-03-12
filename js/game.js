@@ -59,7 +59,7 @@ const CENTER_X = FIELD_WIDTH / 2; // Approx 26.65
 // --- Physics/Interaction Constants ---
 let TICK_DURATION_SECONDS = 0.05;
 const BLOCK_ENGAGE_RANGE = 2;
-const TACKLE_RANGE = 1.8;
+const TACKLE_RANGE = 2.2;
 const CATCH_RADIUS = 0.8;
 const SEPARATION_THRESHOLD = 2.0;
 const PLAYER_SEPARATION_RADIUS = 0.6;
@@ -4001,13 +4001,13 @@ function handleBallArrival(playState, carrier, playResult, gameLog) {
     const ball = playState.ballState;
     if (!ball.inAir && !ball.isLoose) return;
 
-    if (playState.type === 'punt') {
-        const ticksInAir = playState.tick - (ball.throwTick || 0);
-        if (ticksInAir < 15 && ball.z > 1.0) return;
+    const MAX_JUMP_HEIGHT = 2.8; // Approx 8.4 feet tall
+    
+    // 💡 FIX: Force the engine to ignore ALL balls that are too high, including punts.
+    // The returner will now wait underneath the ball until it falls below 2.8 yards.
+    if (ball.inAir && ball.z > MAX_JUMP_HEIGHT) {
+        return; 
     }
-
-    const MAX_JUMP_HEIGHT = 2.8;
-    if (playState.type !== 'punt' && ball.z > MAX_JUMP_HEIGHT) return;
 
     const CATCH_RADIUS = 1.2;
     const CATCH_TOLERANCE = 0.6;
@@ -4196,7 +4196,7 @@ const ensureStats = (player) => {
  */
 function resolvePlayerCollisions(playState) {
     const players = playState.activePlayers;
-    const RADIUS = 0.5; // Yards
+    const RADIUS = PLAYER_SEPARATION_RADIUS; // Yards
 
     for (let i = 0; i < players.length; i++) {
         const p1 = players[i];
@@ -4211,21 +4211,27 @@ function resolvePlayerCollisions(playState) {
             const dist = Math.sqrt(dx * dx + dy * dy);
 
             // 💡 FIX: Give Offensive Linemen slightly wider physical bodies to block gaps
-            const effectiveRadius = (p1.role === 'OL' || p2.role === 'OL') ? RADIUS * 1.3 : RADIUS;
+            const isP1Heavy = p1.role === 'OL' || p1.role === 'DL';
+            const isP2Heavy = p2.role === 'OL' || p2.role === 'DL';
 
-            if (dist < effectiveRadius * 2 && dist > 0.01) {
-                const overlap = (effectiveRadius * 2) - dist;
+            let r1 = isP1Heavy ? BASE_RADIUS * 1.25 : BASE_RADIUS;
+            let r2 = isP2Heavy ? BASE_RADIUS * 1.25 : BASE_RADIUS;
+            let combinedRadius = r1 + r2;
+
+            if (dist < combinedRadius && dist > 0.01) {
+                const overlap = combinedRadius - dist;
                 
-                // 💡 FIX: Lower the push elasticity from 0.5 to 0.15. 
-                // This stops players from vibrating violently and normalizing their speed.
-                const pushX = (dx / dist) * overlap * 0.15;
-                const pushY = (dy / dist) * overlap * 0.15;
+                // 💡 FIX: Context-Aware Repulsion
+                // If it's two Linemen bumping, they "grind" (lower push)
+                // If it's a Lineman hitting a QB/WR, the small player gets "bounced" (higher push)
+                let pushFactor = 0.15; 
+                if (isP1Heavy && !isP2Heavy) pushFactor = 0.25; 
 
-                // Push p1
+                const pushX = (dx / dist) * overlap * pushFactor;
+                const pushY = (dy / dist) * overlap * pushFactor;
+
                 p1.x += pushX;
                 p1.y += pushY;
-
-                // Push p2 opposite
                 p2.x -= pushX;
                 p2.y -= pushY;
             }
@@ -4994,104 +5000,74 @@ function determinePuntDecision(down, yardsToGo, ballOn) {
  */
 // game.js
 
-function determinePlayCall(offense, defense, down, yardsToGo, ballOn, scoreDiff, gameLog, drivesRemaining, previousPlayAnalysis) {
-    // 1. Critical Safety Check: Ensure Offense Exists
-    if (!offense || !offense.formations) {
-        // If data is missing, return a safe default immediately to prevent crashes
-        return 'Balanced_InsideZone';
-    }
+function determinePlayCall(offense, defense, down, yardsToGo, ballOn, scoreDiff, gameLog, drivesRemaining) {
+    if (!offense || !offense.formations) return 'Balanced_InsideZone';
 
-    const offenseFormationName = offense.formations.offense;
+    const formationName = offense.formations.offense;
+    const coach = offense.coach;
+    const recentPlays = offense.recentPlayHistory || [];
 
-    // 2. Define formationPlays FIRST (This fixes the Initialization Error)
-    // We filter the playbook to find all plays that match the current formation name
-    const formationPlays = Object.keys(offensivePlaybook).filter(key => key.startsWith(offenseFormationName));
-
-    // 3. Fallback Check: Did we find any plays?
+    // 1. Get ALL valid plays for this specific formation
+    const formationPlays = Object.keys(offensivePlaybook).filter(key => key.startsWith(formationName));
+    
     if (formationPlays.length === 0) {
-        // If the formation name doesn't match any plays (e.g. mismatch in data.js), return safe default
+        console.warn(`AI Alert: Formation ${formationName} has no plays! Reverting to Balanced.`);
         return 'Balanced_InsideZone';
     }
 
-    // --- STRATEGY LOGIC STARTS HERE ---
-    const { coach } = offense;
+    // 2. Calculate "Pass Intent" Score (0 to 100)
+    let passScore = 50; // Start at 50/50
 
-    // Determine if the captain is smart enough to make adjustments
-    // (This function relies on your existing helper)
-    const captainIsSharp = checkCaptainDiscipline(offense, gameLog);
+    // Situation Adjustments
+    if (down === 1) passScore = 45; 
+    if (down === 2 && yardsToGo > 7) passScore = 70;
+    if (down === 2 && yardsToGo < 3) passScore = 30;
+    if (down === 3 && yardsToGo > 5) passScore = 85;
+    if (down === 3 && yardsToGo <= 2) passScore = 20;
 
-    // Base Pass/Run Bias (0.0 = Run, 1.0 = Pass)
-    let passBias = 0.50;
-    let preferredTag = null;
+    // Coach Personality
+    if (coach?.type === 'Air Raid') passScore += 25;
+    if (coach?.type === 'Ground and Pound') passScore -= 25;
+    if (coach?.type === 'West Coast Offense') passScore += 10;
 
-    if (captainIsSharp) {
-        // A. Down & Distance Logic
-        if (down === 1) passBias = 0.45; // 1st Down: Slight run lean
-        if (down === 2) {
-            if (yardsToGo > 7) passBias = 0.65; // 2nd & Long: Pass
-            else if (yardsToGo < 4) passBias = 0.30; // 2nd & Short: Run
-        }
-        if (down === 3) {
-            if (yardsToGo > 6) passBias = 0.85; // 3rd & Long: Heavy Pass
-            else if (yardsToGo <= 2) passBias = 0.20; // 3rd & Short: Heavy Run
-            else passBias = 0.60; // 3rd & Medium
-        }
-        if (down === 4) {
-            passBias = yardsToGo > 3 ? 0.90 : 0.40;
-        }
-
-        // B. Field Position Logic
-        if (ballOn > 90) passBias -= 0.15; // Red zone: Run more
-        if (ballOn < 10) passBias -= 0.10; // Backed up: Conservative run
-
-        // C. Game Situation Logic
-        if (drivesRemaining <= 2 && scoreDiff < 0) passBias += 0.25; // Late game trailing
-
-        // D. Coach Personality
-        if (coach?.type === 'Air Raid') passBias += 0.20;
-        if (coach?.type === 'Ground and Pound') passBias -= 0.20;
-    } else {
-        // Captain is confused: Randomize bias slightly
-        passBias = 0.50 + ((Math.random() - 0.5) * 0.6);
+    // Game Context (Trailing late? Pass more. Winning late? Run more.)
+    if (drivesRemaining < 4) {
+        if (scoreDiff < 0) passScore += 20;
+        if (scoreDiff > 8) passScore -= 30;
     }
 
-    // --- 4. SELECT PLAY TYPE ---
-    passBias = Math.max(0.05, Math.min(0.95, passBias));
-    let desiredType = Math.random() < passBias ? 'pass' : 'run';
+    const desiredType = (Math.random() * 100 < passScore) ? 'pass' : 'run';
 
-    // Filter the formation plays by the desired type (Run/Pass)
-    let pool = formationPlays.filter(key => {
-        const p = offensivePlaybook[key];
-        // Don't repeat the exact same play if we have analysis data
-        return p.type === desiredType && key !== previousPlayAnalysis?.playKey;
-    });
+    // 3. HIERARCHICAL SELECTION (The "Never-Default" System)
+    
+    // Attempt A: Correct Type AND Not Recently Played
+    let selectionPool = formationPlays.filter(key => 
+        offensivePlaybook[key].type === desiredType && !recentPlays.includes(key)
+    );
 
-    // If pool is empty (e.g. no runs in this formation), relax the filter
-    if (pool.length === 0) {
-        pool = formationPlays.filter(key => offensivePlaybook[key].type === desiredType);
+    // Attempt B: Correct Type (Allow repeats if formation is small)
+    if (selectionPool.length === 0) {
+        selectionPool = formationPlays.filter(key => offensivePlaybook[key].type === desiredType);
     }
 
-    // If STILL empty, just use whatever plays exist for this formation
-    if (pool.length === 0) {
-        pool = formationPlays;
+    // Attempt C: Opposite Type but Not Recently Played
+    if (selectionPool.length === 0) {
+        selectionPool = formationPlays.filter(key => !recentPlays.includes(key));
     }
 
-    // --- 5. TAG REFINEMENT (Optional) ---
-    // If smart captain wants a specific type of play (e.g. "short" or "screen")
-    let refinedPool = [];
-    if (captainIsSharp && preferredTag) {
-        const taggedPool = pool.filter(k => offensivePlaybook[k].tags.includes(preferredTag));
-        if (taggedPool.length > 0) refinedPool = taggedPool;
+    // Attempt D: Any play in the formation (Absolute last resort before global default)
+    if (selectionPool.length === 0) {
+        selectionPool = formationPlays;
     }
 
-    // If tag refinement found nothing, revert to the type-based pool
-    if (refinedPool.length === 0) refinedPool = pool;
+    const selectedKey = getRandom(selectionPool) || 'Balanced_InsideZone';
 
-    // --- 6. FINAL SELECTION ---
-    const selectedKey = getRandom(refinedPool);
+    // 4. Update History
+    if (!offense.recentPlayHistory) offense.recentPlayHistory = [];
+    offense.recentPlayHistory.push(selectedKey);
+    if (offense.recentPlayHistory.length > 3) offense.recentPlayHistory.shift();
 
-    // Final safety fallback: Return selected key OR first available play OR default
-    return selectedKey || formationPlays[0] || 'Balanced_InsideZone';
+    return selectedKey;
 }
 
 /**
@@ -5578,6 +5554,14 @@ function simulateLivePlayStep(game) {
     }
     else if (playResult.possessionChange) {
         game.possession = defense;
+        
+        // 💡 FIX: Reset formation logic so they don't start 1st down in a 4th down formation
+        const coachPref = game.possession.coach?.preferredOffense || 'Balanced';
+        game.possession.formations.offense = coachPref;
+        
+        // Clear history for the new drive to allow all plays to be "fresh"
+        game.possession.recentPlayHistory = [];
+
         game.ballOn = 110 - finalBallY;
 
         // Touchback handling
@@ -5696,45 +5680,38 @@ function simulateMatchFast(homeTeam, awayTeam) {
         }
     }
 
-    // 5. POST-GAME RPG LOGIC
+    // 5. POST-GAME RPG LOGIC (Breakthroughs)
     const breakthroughs = [];
-    const allPlayers = [...getRosterObjects(homeTeam), ...getRosterObjects(awayTeam)];
+    const allPlayersInMatch = [...getRosterObjects(homeTeam), ...getRosterObjects(awayTeam)];
 
-    allPlayers.forEach(p => {
+    allPlayersInMatch.forEach(p => {
         if (!p || !p.gameStats) return;
 
-        // A. Check Breakthroughs
+        // breakthrough check (relying on current gameStats)
         const s = p.gameStats;
         const perfThreshold = s.touchdowns >= 1 || s.passYards > 100 || s.rushYards > 50 || s.tackles > 4 || s.sacks >= 1 || s.interceptions >= 1;
 
         if (p.age < 14 && perfThreshold && Math.random() < 0.15) {
             const attributesToImprove = ['speed', 'strength', 'agility', 'throwingAccuracy', 'catchingHands', 'tackling', 'blocking', 'playbookIQ', 'blockShedding', 'toughness', 'consistency'];
             const attr = getRandom(attributesToImprove);
-            if (p.attributes.physical[attr] !== undefined && p.attributes.physical[attr] < 99) {
-                p.attributes.physical[attr]++;
-                breakthroughs.push({ player: p, attr, teamName: p.teamId === homeTeam.id ? homeTeam.name : awayTeam.name });
-            } else if (p.attributes.technical[attr] !== undefined) {
-                p.attributes.technical[attr]++;
-                breakthroughs.push({ player: p, attr, teamName: p.teamId === homeTeam.id ? homeTeam.name : awayTeam.name });
+            
+            // Check all attribute categories for the selected stat
+            let updated = false;
+            for (const cat in p.attributes) {
+                if (p.attributes[cat] && p.attributes[cat][attr] !== undefined && p.attributes[cat][attr] < 99) {
+                    p.attributes[cat][attr]++;
+                    updated = true;
+                    break;
+                }
             }
-        }
-
-        // B. Aggregate Season/Career Stats
-        if (!p.seasonStats) p.seasonStats = {};
-        if (!p.careerStats) p.careerStats = { seasonsPlayed: p.careerStats?.seasonsPlayed || 0 };
-
-        for (const stat in p.gameStats) {
-            if (typeof p.gameStats[stat] === 'number') {
-                p.seasonStats[stat] = (p.seasonStats[stat] || 0) + p.gameStats[stat];
-                p.careerStats[stat] = (p.careerStats[stat] || 0) + p.gameStats[stat];
+            if (updated) {
+                breakthroughs.push({ player: p, attr, teamName: p.teamId === homeTeam.id ? homeTeam.name : awayTeam.name });
             }
         }
     });
 
-    // 6. Update W/L Records
-    if (game.homeScore > game.awayScore) { homeTeam.wins++; awayTeam.losses++; }
-    else if (game.awayScore > game.homeScore) { awayTeam.wins++; homeTeam.losses++; }
-    else { homeTeam.ties++; awayTeam.ties++; }
+    // 6. 💡 FIX: Update Standings and Season Stats using the helper
+    finalizeGameResults(homeTeam, awayTeam, game.homeScore, game.awayScore);
 
     return {
         homeTeam: game.homeTeam,
@@ -5744,7 +5721,7 @@ function simulateMatchFast(homeTeam, awayTeam) {
         gameLog: game.gameLog,
         breakthroughs: breakthroughs
     };
-}
+} // end of simulateMatchFast
 
 
 // =============================================================
@@ -6905,6 +6882,47 @@ function getDepthChartEmptySlots(team) {
     }
 
     return emptySlots;
+}
+
+/**
+ * Finalizes team records and player season stats after a game is completed.
+ * This is called by both the Fast Sim and the Live Sim callback.
+ */
+export function finalizeGameResults(homeTeam, awayTeam, homeScore, awayScore) {
+    // 1. Update Team Records
+    if (homeScore > awayScore) {
+        homeTeam.wins = (homeTeam.wins || 0) + 1;
+        awayTeam.losses = (awayTeam.losses || 0) + 1;
+    } else if (awayScore > homeScore) {
+        awayTeam.wins = (awayTeam.wins || 0) + 1;
+        homeTeam.losses = (homeTeam.losses || 0) + 1;
+    } else {
+        homeTeam.ties = (homeTeam.ties || 0) + 1;
+        awayTeam.ties = (awayTeam.ties || 0) + 1;
+    }
+
+    // 2. Aggregate Season Stats for all players in the game
+    const allPlayers = [...getRosterObjects(homeTeam), ...getRosterObjects(awayTeam)];
+
+    allPlayers.forEach(p => {
+        if (!p || !p.gameStats) return;
+
+        if (!p.seasonStats) p.seasonStats = {};
+        if (!p.careerStats) p.careerStats = { seasonsPlayed: p.careerStats?.seasonsPlayed || 0 };
+
+        // Move every tracked category from game to season/career
+        for (const stat in p.gameStats) {
+            if (typeof p.gameStats[stat] === 'number') {
+                p.seasonStats[stat] = (p.seasonStats[stat] || 0) + p.gameStats[stat];
+                p.careerStats[stat] = (p.careerStats[stat] || 0) + p.gameStats[stat];
+            }
+        }
+        
+        // 💡 Reset gameStats so they are fresh for the next week
+        p.gameStats = null; 
+    });
+
+    console.log(`Results finalized: ${awayTeam.name} ${awayScore} @ ${homeTeam.name} ${homeScore}`);
 }
 
 // =============================================================
