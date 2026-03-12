@@ -1812,9 +1812,19 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
         
         // If it's a run, flag that we need a handoff
         if (play.type === 'run') {
-            playState.handoffRequired = true;
-            playState.handoffTargetSlot = 'RB1';
-            playState.handoffOccurred = false;
+            const hasRB = playState.activePlayers.some(p => p.slot === 'RB1');
+            
+            if (hasRB) {
+                playState.handoffRequired = true;
+                playState.handoffTargetSlot = 'RB1';
+                playState.handoffOccurred = false;
+            } else {
+                // 💡 FIX: Failsafe for Spread/Empty Runs. 
+                // If there is no RB, the QB must run the ball himself!
+                qbState.isBallCarrier = true;
+                qbState.action = 'run_path';
+                qbState.assignment = 'run_inside';
+            }
         }
     } else {
         console.error('No QB found in offense formation! Ball cannot be initialized.');
@@ -4469,6 +4479,11 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
                         rb.isBallCarrier = true;
                         playState.handoffOccurred = true;
                         if (gameLog) pushGameLog(gameLog, `🏈 Handoff to ${rb.name}`);
+                    } else if (qb) {
+                        // 💡 FIX: Failsafe. If the RB is missing or stuck, QB keeps it.
+                        playState.handoffOccurred = true;
+                        qb.isBallCarrier = true;
+                        qb.action = 'qb_scramble';
                     }
                 }
             }
@@ -4534,7 +4549,8 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
 
             // --- G. SCORING & BOUNDARIES ---
             if (playState.playIsLive) {
-                ballCarrierState = playState.activePlayers.find(p => p.isBallCarrier);
+                // 💡 FIX: Ensure the engine respects players who have the ball but aren't actively "running" yet (like the QB in the pocket)
+                ballCarrierState = playState.activePlayers.find(p => p.hasBall || p.isBallCarrier);
 
                 if (ballCarrierState) {
                     // 1. OFFENSIVE TOUCHDOWN
@@ -4739,8 +4755,9 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
     }
 
     // End of Play Cleanup / Incomplete Logic
-    if (playState.playIsLive && !playState.touchdown && !playState.safety) {
-        ballCarrierState = playState.activePlayers.find(p => p.isBallCarrier);
+    f (playState.playIsLive && !playState.touchdown && !playState.safety) {
+        // 💡 FIX: Sync the end-of-play logic to match the live physics
+        ballCarrierState = playState.activePlayers.find(p => p.hasBall || p.isBallCarrier);
         if (ballCarrierState) {
             playState.yards = ballCarrierState.y - playState.lineOfScrimmage;
             playState.finalBallY = ballCarrierState.y;
