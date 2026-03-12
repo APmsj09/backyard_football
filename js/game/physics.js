@@ -18,23 +18,21 @@ export function updatePlayerPosition(pState, timeDelta) {
     // --- 0. Safety Checks ---
     if (!pState || typeof pState.x !== 'number' || typeof pState.y !== 'number') return;
     
-    // 🔧 HIGH FIX: Sanitize position from NaN/Infinity
     if (!isFinite(pState.x) || !isFinite(pState.y)) {
-        console.warn(`⚠️ Player ${pState.id} has invalid position (${pState.x}, ${pState.y}). Resetting to (26.65, 60).`);
-        pState.x = 26.65;  // Center field
-        pState.y = 60;     // Mid-field
+        pState.x = 26.65; 
+        pState.y = 60;
     }
     
-    // Initialize vectors if missing
     if (!pState.velocity) pState.velocity = { x: 0, y: 0 };
     if (!pState.vx) pState.vx = 0; 
     if (!pState.vy) pState.vy = 0; 
 
-    // --- 1. Handle Stuns/Blocks (Instant Stop) ---
+    // --- 1. Handle Stuns/Blocks (Enhanced Friction) ---
     if (pState.stunnedTicks > 0 || pState.isBlocked || pState.isEngaged) {
-        // Apply heavy friction instead of instant stop for impact feel
-        pState.vx *= 0.5;
-        pState.vy *= 0.5;
+        // High friction: 0.95 vs 0.5 makes them feel "stuck" but still movable by block pushes
+        const friction = 0.85; 
+        pState.vx *= friction;
+        pState.vy *= friction;
         pState.velocity = { x: pState.vx, y: pState.vy };
         return;
     }
@@ -43,9 +41,7 @@ export function updatePlayerPosition(pState, timeDelta) {
     let targetX = pState.targetX || pState.x;
     let targetY = pState.targetY || pState.y;
     
-    // 🔧 HIGH FIX: Sanitize target coordinates
     if (!isFinite(targetX) || !isFinite(targetY)) {
-        console.warn(`⚠️ Player ${pState.id} has invalid target (${targetX}, ${targetY}). Using current position.`);
         targetX = pState.x;
         targetY = pState.y;
     }
@@ -54,99 +50,81 @@ export function updatePlayerPosition(pState, timeDelta) {
     const dy = targetY - pState.y;
     const distToTarget = Math.sqrt(dx * dx + dy * dy);
 
-    // 🔧 HIGH FIX: Check for NaN distance
     if (!isFinite(distToTarget)) {
-        console.warn(`⚠️ Player ${pState.id} has invalid distance calculation. Stopping movement.`);
-        pState.vx = 0;
-        pState.vy = 0;
+        pState.vx = 0; pState.vy = 0;
         return;
     }
 
-    // --- 3. Determine Max Speed ---
-    // Stat 0-99 maps to approx 5.0 - 9.5 yards/sec
+    // --- 3. Determine Max Speed (Audit Fix: Combined Fatigue) ---
+    // 0-99 Stat maps to 5.0 - 9.5 yards/sec
     const baseSpeed = 5.0 + ((pState.speed || 50) / 100) * 4.5;
-    
-    // Apply modifiers
-    let speedMult = pState.speedMultiplier || 1.0;
-    if (pState.isBallCarrier) speedMult *= 0.9; // Carrying ball slows you down
-    if (pState.action === 'backpedal') speedMult *= 0.7;
-    
-    // 💡 NEW: Contact reduction when running through defenders
-    const contactReduction = pState.contactReduction || 1.0;
-
     const fatigueMod = pState.fatigueModifier || 1.0;
+    
+    let speedMult = pState.speedMultiplier || 1.0;
+    if (pState.isBallCarrier) speedMult *= 0.92; // Slightly tuned for balance
+    if (pState.action === 'backpedal') speedMult *= 0.65;
+    
+    const contactReduction = pState.contactReduction || 1.0;
     const maxSpeed = baseSpeed * fatigueMod * speedMult * contactReduction;
 
-    // Dynamic Acceleration based on Agility
-    // 99 Agility = 14.0 force (Cuts on a dime)
-    // 50 Agility = 9.0 force (Standard)
-    // 20 Agility = 6.0 force (Drifts like a truck)
+    // --- 4. Acceleration & Agility Logic (Audit Fix: The "Burst" Feel) ---
     const agilityStat = pState.agility || 50;
-    let acceleration = 4.0 + (agilityStat * 0.1); 
-
-    // Bonus: If carrying ball, slightly reduce acceleration (carrying weight)
-    if (pState.hasBall) acceleration *= 0.9;
-
     
-    // B. Arrival Deceleration (The "Braking" Logic)
-    // Start slowing down when within 3 yards of target
-    const SLOW_RADIUS = 3.0;
+    // Tired players have lower "burst" (acceleration)
+    // Range: ~4.0 (Tired Lineman) to ~16.0 (Fresh Elite WR)
+    let acceleration = (4.0 + (agilityStat * 0.12)) * fatigueMod; 
+
+    if (pState.hasBall) acceleration *= 0.85;
+
+    // --- 5. Braking Logic (Audit Fix: Snappier Stops) ---
+    const SLOW_RADIUS = 2.5;
     let arrivalFactor = 1.0;
     
     if (distToTarget < SLOW_RADIUS) {
         arrivalFactor = distToTarget / SLOW_RADIUS;
+        // Boost acceleration when slowing down to prevent "overshooting" the target
+        acceleration *= 1.5; 
     }
 
-    // C. Calculate Target Velocity
+    // Calculate Target Velocity
     let targetVx = 0;
     let targetVy = 0;
 
     if (distToTarget > 0.1) {
-        // Normalize direction
         const dirX = dx / distToTarget;
         const dirY = dy / distToTarget;
-        
-        // Scale by maxSpeed AND the arrival factor (braking)
         targetVx = dirX * maxSpeed * arrivalFactor;
         targetVy = dirY * maxSpeed * arrivalFactor;
     } else {
-        // Snap if incredibly close to prevent jitter
+        // Prevent micro-jitter when overlapping target
         if (distToTarget < 0.05) {
-            pState.x = targetX;
-            pState.y = targetY;
-            pState.vx = 0;
-            pState.vy = 0;
+            pState.x = targetX; pState.y = targetY;
+            pState.vx = 0; pState.vy = 0;
             return;
         }
     }
 
-    // --- 5. Apply Inertia (LERP) ---
-    // This blends the current velocity towards the target velocity.
-    // Low acceleration means the player will "drift" or "arc" before turning.
+    // --- 6. Apply Momentum Change (Inertia) ---
+    // The "Turn" logic: If the new target velocity is opposite to current movement, 
+    // we use Agility to determine how fast they can flip their momentum.
     pState.vx += (targetVx - pState.vx) * acceleration * timeDelta;
     pState.vy += (targetVy - pState.vy) * acceleration * timeDelta;
 
-    // 🔧 HIGH FIX: Sanitize velocity before applying
     if (!isFinite(pState.vx) || !isFinite(pState.vy)) {
-        console.warn(`⚠️ Player ${pState.id} has invalid velocity (${pState.vx}, ${pState.vy}). Resetting to 0.`);
-        pState.vx = 0;
-        pState.vy = 0;
+        pState.vx = 0; pState.vy = 0;
     }
 
-    // --- 6. Apply Movement ---
+    // --- 7. Apply Final Movement ---
     pState.x += pState.vx * timeDelta;
     pState.y += pState.vy * timeDelta;
 
-    // 🔧 HIGH FIX: Final sanity check on position
+    // Final sanity check
     if (!isFinite(pState.x) || !isFinite(pState.y)) {
-        console.warn(`⚠️ Player ${pState.id} moved to invalid position (${pState.x}, ${pState.y}). Reverting.`);
-        pState.x = targetX;
-        pState.y = targetY;
-        pState.vx = 0;
-        pState.vy = 0;
+        pState.x = targetX; pState.y = targetY;
+        pState.vx = 0; pState.vy = 0;
     }
 
-    // Update UI velocity helper
+    // Update Helpers
     pState.currentSpeedYPS = Math.sqrt(pState.vx * pState.vx + pState.vy * pState.vy);
     pState.velocity.x = pState.vx;
     pState.velocity.y = pState.vy;

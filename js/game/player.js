@@ -1,41 +1,34 @@
 // player.js - player generation and rating helpers
 
+// player.js - player generation and rating helpers
+
 import { getRandom, getRandomInt} from '../utils.js';
 import {
     firstNames, lastNames, nicknames,
     offenseFormations, defenseFormations
 } from '../data.js';
 
-// Local position lists for generation
-const offensivePositions = ['QB', 'RB', 'WR', 'OL'];
+// FIX #1: Added TE to the generator list
+const offensivePositions =['QB', 'RB', 'WR', 'TE', 'OL'];
 const defensivePositions = ['DL', 'LB', 'DB'];
 
-// Attribute Weights (exported)
+// FIX #1: Added TE weights to prevent 0 OVR returns
 export const positionOverallWeights = {
     QB: { throwingAccuracy: 0.4, playbookIQ: 0.3, consistency: 0.1, clutch: 0.1, speed: 0.05, agility: 0.05 },
     RB: { speed: 0.3, strength: 0.2, agility: 0.2, catchingHands: 0.1, blocking: 0.1, stamina: 0.1 },
     WR: { speed: 0.3, catchingHands: 0.3, agility: 0.2, height: 0.1, clutch: 0.1 },
+    TE: { catchingHands: 0.3, blocking: 0.3, strength: 0.2, speed: 0.1, playbookIQ: 0.1 }, 
     OL: { strength: 0.4, blocking: 0.4, weight: 0.1, playbookIQ: 0.1 },
     DL: { strength: 0.4, tackling: 0.25, blockShedding: 0.2, weight: 0.1, agility: 0.05 },
     LB: { tackling: 0.3, speed: 0.2, strength: 0.2, blockShedding: 0.1, playbookIQ: 0.2 },
     DB: { speed: 0.35, agility: 0.25, catchingHands: 0.15, tackling: 0.1, playbookIQ: 0.15 }
 };
 
-/**
- * Estimates the best position for a player by running their
- * scouted attributes through the game's actual calculateOverall logic.
- *
- * @param {object} scoutedPlayer - The player object, potentially with ranged attributes.
- * @returns {string} The abbreviation of the estimated best position (e.g., "WR", "LB").
- */
 export function estimateBestPosition(scoutedPlayer) {
-    // 1. Fast fail if data is missing
     if (!scoutedPlayer || !scoutedPlayer.attributes) {
         return 'UTIL';
     }
 
-    // --- Helper: Normalize Attribute Values ---
-    // Converts numbers, strings ("70-80"), or "?" to a usable number
     const resolveAttr = (val) => {
         if (typeof val === 'number') return val;
         if (typeof val === 'string') {
@@ -43,17 +36,14 @@ export function estimateBestPosition(scoutedPlayer) {
                 const [min, max] = val.split('-').map(Number);
                 return (min + max) / 2;
             }
-            // Handle "?" or other non-numeric strings by returning a safe average
-            return 50; 
+            // FIX #4: Handle exact string numbers correctly
+            const parsed = Number(val);
+            return isNaN(parsed) ? 50 : parsed; 
         }
-        return 0; // Fallback for null/undefined
+        return 0; 
     };
 
-    // --- 2. Create "Clean" Player Object ---
-    // We use spread (...) to keep ID/Name/etc, then overwrite attributes
-    // with the normalized numeric versions.
     const cleanAttributes = {};
-    
     for (const [category, attrs] of Object.entries(scoutedPlayer.attributes)) {
         cleanAttributes[category] = {};
         for (const [key, value] of Object.entries(attrs)) {
@@ -66,20 +56,12 @@ export function estimateBestPosition(scoutedPlayer) {
         attributes: cleanAttributes
     };
 
-    // --- 3. Evaluate Positions ---
     let bestPos = 'UTIL';
     let maxScore = -Infinity;
-
-    // Optional: Define valuable positions to break ties. 
-    // If a player is 80 WR and 80 CB, we usually prefer the offensive skill position.
-    // We iterate keys of weights, so this order is implicit, but strictly > means
-    // the first one found keeps the title in a tie.
     const positions = Object.keys(positionOverallWeights);
 
     for (const pos of positions) {
-        // Calculate score using the normalized data
         const score = calculateOverall(tempPlayer, pos);
-
         if (score > maxScore) {
             maxScore = score;
             bestPos = pos;
@@ -88,9 +70,7 @@ export function estimateBestPosition(scoutedPlayer) {
 
     return bestPos;
 }
-/**
- * Calculates a player's overall rating for a given position.
- */
+
 export function calculateOverall(player, position) {
     if (!player || !player.attributes) return 0;
     const attrs = player.attributes;
@@ -103,7 +83,8 @@ export function calculateOverall(player, position) {
             if (relevantWeights[attr]) {
                 let value = attrs[category][attr];
                 if (attr === 'weight') value = (value || 100) / 2.5;
-                if (attr === 'height') value = ((value || 60) - 60);
+                // FIX #2: Map height to a 0-100 scale so it matches standard math
+                if (attr === 'height') value = ((value || 60) - 50) * 4; 
                 if (typeof value === 'number') {
                     score += value * relevantWeights[attr];
                 }
@@ -113,9 +94,6 @@ export function calculateOverall(player, position) {
     return Math.min(99, Math.max(1, Math.round(score)));
 }
 
-/**
- * Calculates a player's suitability for a specific formation slot.
- */
 export function calculateSlotSuitability(player, slot, side, team) {
     if (!player || !player.attributes || !team || !team.formations || !team.formations[side]) return 0;
     const formationName = team.formations[side];
@@ -136,7 +114,8 @@ export function calculateSlotSuitability(player, slot, side, team) {
                 let value = player.attributes[category][attr];
                 if (typeof value !== 'number') continue;
                 if (attr === 'weight') value = value / 2.5;
-                if (attr === 'height') value = (value - 60);
+                // FIX #2: Apply same height scaling fix here
+                if (attr === 'height') value = (value - 50) * 4; 
                 score += value * priorities[attr];
                 totalWeight += priorities[attr];
                 break;
@@ -242,27 +221,22 @@ export function generatePlayer(minAge = 10, maxAge = 16) {
     // 6. BALANCE FIX: Apply Position Archetype Multipliers
     // This ensures a 99 Speed Lineman is still slower than a 99 Speed WR.
     const applyArchetypeModifiers = () => {
-        // Speed & Agility Modifiers
-        if (['OL', 'DL'].includes(bestPosition)) {
-            // Linemen are heavy
-            attributes.physical.speed *= 0.65; 
-            attributes.physical.agility *= 0.60;
-            attributes.physical.strength *= 1.2; // Bonus strength
-        } else if (['LB', 'QB'].includes(bestPosition)) {
-            // Hybrids
-            attributes.physical.speed *= 0.85;
-            attributes.physical.agility *= 0.80;
-        } else {
-            // Skill Positions (WR, DB, RB) - Pure speed
-            attributes.physical.speed *= 1.05; 
-            attributes.physical.agility *= 1.05;
-        }
+            if (['OL', 'DL'].includes(bestPosition)) {
+                attributes.physical.speed *= 0.65; 
+                attributes.physical.agility *= 0.60;
+                attributes.physical.strength *= 1.2; 
+            } else if (['LB', 'QB', 'TE'].includes(bestPosition)) { // <-- ADDED TE HERE
+                attributes.physical.speed *= 0.85;
+                attributes.physical.agility *= 0.80;
+            } else {
+                attributes.physical.speed *= 1.05; 
+                attributes.physical.agility *= 1.05;
+            }
 
-        // Skill Modifiers
-        if (['WR', 'DB', 'RB'].includes(bestPosition)) {
-            attributes.technical.blocking *= 0.5; // Skill guys can't block well
-        }
-    };
+            if (['WR', 'DB', 'RB'].includes(bestPosition)) { // TEs stay out so they retain blocking skill
+                attributes.technical.blocking *= 0.5; 
+            }
+        };
     
     applyArchetypeModifiers();
 
@@ -304,15 +278,18 @@ export function generatePlayer(minAge = 10, maxAge = 16) {
 
     // 9. Determine Potential (Same as before)
     let rawSum = 0; let count = 0;
-    Object.keys(attributes).forEach(cat => {
-        Object.keys(attributes[cat]).forEach(attr => {
-            if (['height', 'weight', 'clutch'].includes(attr)) return;
-            // Compare current stat vs the scaling factor to see "True Talent"
-            const scaler = (cat === 'physical') ? physicalScale : mentalScale;
-            rawSum += attributes[cat][attr] / scaler;
-            count++;
+        Object.keys(attributes).forEach(cat => {
+            Object.keys(attributes[cat]).forEach(attr => {
+                if (['height', 'weight', 'clutch'].includes(attr)) return;
+                
+                const scaler = (cat === 'physical') ? physicalScale : mentalScale;
+                let factor = scaler;
+                if (attr === 'speed' || attr === 'agility') factor += 0.1; // Re-apply the speed exception
+                
+                rawSum += attributes[cat][attr] / factor; // Divide by the TRUE factor, not just the scaler
+                count++;
+            });
         });
-    });
 
     const avgTalent = rawSum / count; 
     let potential = 'F';
