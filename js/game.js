@@ -2165,13 +2165,27 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
 
     // --- 1. LOOSE BALL LOGIC (Emergency) ---
     if (playState.ballState.isLoose) {
-        // All available players go for loose ball, but stunned/engaged players cannot move
+        // 💡 FIX: Only the closest 3 players from each team should pursue the ball. 
+        // Sending all 22 players causes a physics singularity and freezes the game.
+        const getClosest = (isOff) => playState.activePlayers
+            .filter(p => p.isOffense === isOff && p.stunnedTicks <= 0 && !p.isEngaged)
+            .sort((a, b) => getDistance(a, playState.ballState) - getDistance(b, playState.ballState))
+            .slice(0, 3);
+            
+        const pursuers = [...getClosest(true), ...getClosest(false)];
+
         playState.activePlayers.forEach(pState => {
-            // 💡 FIX: Only pursue if not stunned and not actively engaged in block
-            if (pState.stunnedTicks <= 0 && !pState.isEngaged) {
+            if (pState.stunnedTicks > 0 || pState.isEngaged) return;
+
+            if (pursuers.includes(pState)) {
                 pState.targetX = playState.ballState.x;
                 pState.targetY = playState.ballState.y;
                 pState.action = 'pursuit';
+            } else {
+                // Non-pursuers stop and watch to avoid crashing the physics engine
+                pState.targetX = pState.x;
+                pState.targetY = pState.y;
+                pState.action = 'idle';
             }
         });
         return;
@@ -2645,7 +2659,11 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
 
         if (shouldPursue && ballCarrierState) {
             const dist = getDistance(pState, ballCarrierState);
-            const leadTime = dist / 15;
+            
+            // 💡 FIX: Smarter players take better angles. Lower IQ players just chase the tail.
+            // This normalizes game speed by preventing low-stat defenders from moving "too efficiently".
+            const iq = pState.playbookIQ || 50;
+            const leadTime = dist / (12 + (iq / 5)); 
 
             const carrierVx = ballCarrierState.vx || 0;
             const carrierVy = ballCarrierState.vy || 0;
@@ -4153,10 +4171,16 @@ function resolvePlayerCollisions(playState) {
             const dy = p1.y - p2.y;
             const dist = Math.sqrt(dx * dx + dy * dy);
 
-            if (dist < RADIUS * 2 && dist > 0.01) {
-                const overlap = (RADIUS * 2) - dist;
-                const pushX = (dx / dist) * overlap * 0.5;
-                const pushY = (dy / dist) * overlap * 0.5;
+            // 💡 FIX: Give Offensive Linemen slightly wider physical bodies to block gaps
+            const effectiveRadius = (p1.role === 'OL' || p2.role === 'OL') ? RADIUS * 1.3 : RADIUS;
+
+            if (dist < effectiveRadius * 2 && dist > 0.01) {
+                const overlap = (effectiveRadius * 2) - dist;
+                
+                // 💡 FIX: Lower the push elasticity from 0.5 to 0.15. 
+                // This stops players from vibrating violently and normalizing their speed.
+                const pushX = (dx / dist) * overlap * 0.15;
+                const pushY = (dy / dist) * overlap * 0.15;
 
                 // Push p1
                 p1.x += pushX;
@@ -4531,6 +4555,15 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
                 // 💡 FIX: This MUST be outside the "if (ballCarrierState)" block 
                 // so it runs while the ball is rolling around with NO carrier.
                 if (playState.ballState.isLoose) {
+                    // 💡 FIX: The Pile-Up Whistle. If ball is loose for > 50 ticks (2.5s), blow it dead.
+                    if (!playState.looseBallTimer) playState.looseBallTimer = playState.tick;
+                    if (playState.tick - playState.looseBallTimer > 50) {
+                        playState.playIsLive = false;
+                        playState.finalBallY = Math.max(0, Math.min(110, playState.ballState.y));
+                        if (gameLog) gameLog.push(`⏱️ Whistle blown. Ball recovered in the pile.`);
+                        break;
+                    }
+
                     const ball = playState.ballState;
                     if (ball.x <= 0 || ball.x >= FIELD_WIDTH || ball.y <= 0 || ball.y >= FIELD_LENGTH) {
                         playState.playIsLive = false;
@@ -4557,7 +4590,9 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
 
                 if (playState.ballState?.isLoose) {
                     if (typeof checkFumbleRecovery === 'function') {
-                        const recovery = checkFumbleRecovery(playState, gameLog, 2.0);
+                        // 💡 FIX: Increased recovery range to 3.0 so a player in the pile 
+                        // can actually grab it before being pushed away.
+                        const recovery = checkFumbleRecovery(playState, gameLog, 3.0);
                         if (recovery) {
                             const recPlayer = recovery.playerState;
                             playState.ballState.isLoose = false;
