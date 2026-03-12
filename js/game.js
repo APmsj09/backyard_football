@@ -3560,7 +3560,7 @@ function updateQBDecision(qbState, offenseStates, defenseStates, playState, offe
     const scrambleChance = timeIsRunningOut ? 0.8 : (qbAgility / 100);
     const isGoalLine = playState.lineOfScrimmage > 105;
     const scrambleThreshold = isGoalLine ? 90 : 70;
-    
+
     const canScramble = openLane && (isPressured || playState.tick > scrambleThreshold) && (Math.random() < scrambleChance);
 
     // 💡 NEW: Late-Game Desperation Logic
@@ -4449,20 +4449,20 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
                 ballCarrierState = playState.activePlayers.find(p => p.isBallCarrier);
 
                 if (ballCarrierState) {
-                    // 1. OFFENSIVE TOUCHDOWN (Crosses 110 yard line)
+                    // 1. OFFENSIVE TOUCHDOWN
                     if (ballCarrierState.isOffense && ballCarrierState.y >= 110.0) {
                         playState.touchdown = true;
                         playState.playIsLive = false;
-                        ballCarrierState.y = 110.0; // Hard clamp to goal line
+                        ballCarrierState.y = 110.0;
                         playState.finalBallY = 110.0;
                         if (gameLog) gameLog.push(`🎉 TOUCHDOWN ${ballCarrierState.name}!`);
-                        break; // This only breaks the "if (ballCarrierState)" block!
+                        break;
                     }
 
-                    // 2. DEFENSIVE TOUCHDOWN (Crosses 10 yard line going other way)
+                    // 2. DEFENSIVE TOUCHDOWN
                     if (!ballCarrierState.isOffense && ballCarrierState.y <= 10.0) {
                         playState.touchdown = true;
-                        playState.defensiveTD = true; // 💡 FIX: Flag it as a defensive score!
+                        playState.defensiveTD = true;
                         playState.playIsLive = false;
                         playState.possessionChanged = true;
                         playState.finalBallY = 10.0;
@@ -4480,14 +4480,13 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
                         break;
                     }
 
-                    // 4. OUT OF BOUNDS
+                    // 4. OUT OF BOUNDS (CARRIER)
                     if (ballCarrierState.x <= 0.5 || ballCarrierState.x >= 52.8) {
                         playState.playIsLive = false;
                         playState.yards = ballCarrierState.y - playState.lineOfScrimmage;
                         playState.finalBallY = ballCarrierState.y;
                         if (gameLog) gameLog.push(`💨 ${ballCarrierState.name} steps out of bounds.`);
 
-                        // Check Sack
                         if (ballCarrierState.role === 'QB' && playState.yards < 0 && playState.type === 'pass') {
                             playState.sack = true;
                             if (gameLog) gameLog.push(`(Sack recorded)`);
@@ -4495,22 +4494,31 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
                         break;
                     }
 
-                    // 5. 💡 NEW: FORWARD PROGRESS STALLED (Whistle)
-                    // If the carrier is trapped in a pile of bodies and can't move, blow the whistle.
-                    // We check distance moved over the last 1 second (20 ticks).
+                    // 5. FORWARD PROGRESS STALLED
                     if (!playState.stallCheck) playState.stallCheck = { tick: playState.tick, y: ballCarrierState.y };
 
                     if (playState.tick - playState.stallCheck.tick >= 20) {
                         const distMoved = Math.abs(ballCarrierState.y - playState.stallCheck.y);
-                        if (distMoved < 0.5) { // Moved less than half a yard in 1 second
+                        if (distMoved < 0.5) {
                             playState.playIsLive = false;
                             playState.yards = ballCarrierState.y - playState.lineOfScrimmage;
                             playState.finalBallY = ballCarrierState.y;
                             if (gameLog) gameLog.push(`⏱️ Forward progress stopped. Play blown dead.`);
                             break;
                         }
-                        // Reset check
                         playState.stallCheck = { tick: playState.tick, y: ballCarrierState.y };
+                    }
+                } 
+
+                // 💡 FIX: This MUST be outside the "if (ballCarrierState)" block 
+                // so it runs while the ball is rolling around with NO carrier.
+                if (playState.ballState.isLoose) {
+                    const ball = playState.ballState;
+                    if (ball.x <= 0 || ball.x >= FIELD_WIDTH || ball.y <= 0 || ball.y >= FIELD_LENGTH) {
+                        playState.playIsLive = false;
+                        playState.finalBallY = Math.max(0, Math.min(110, ball.y));
+                        if (gameLog) gameLog.push(`🟠 Ball fumbled out of bounds at the ${Math.round(playState.finalBallY)} yard line.`);
+                        break;
                     }
                 }
             }
@@ -4638,7 +4646,9 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
             playState.yards = ballCarrierState.y - playState.lineOfScrimmage;
             playState.finalBallY = ballCarrierState.y;
             if (gameLog) gameLog.push(`⏱️ Play ends. Gain of ${playState.yards.toFixed(1)}.`);
-        } else if (!playState.sack && !playState.turnover) {
+        }
+        // 💡 FIX: Only mark incomplete if a fumble didn't occur
+        else if (!playState.sack && !playState.turnover && !playState.fumbleOccurred) {
             playState.incomplete = true;
             playState.yards = 0;
             // 💡 FIX: Incomplete passes MUST return to the line of scrimmage
@@ -4684,9 +4694,21 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
         playResult.outcome = 'turnover';
         playResult.possessionChange = true;
 
+        const endCarrier = playState.activePlayers.find(p => p.isBallCarrier);
+        const offenseTeamId = playState.activePlayers.find(p => p.isOffense)?.teamId;
+
         // 💡 FIX: Prioritize specific types
         if (playState.interceptionOccurred) playResult.turnoverType = 'interception';
-        else if (playState.fumbleOccurred) playResult.turnoverType = 'fumble';
+        if (playState.fumbleOccurred) {
+            // It's only a possession change if the defense recovered it
+            if (endCarrier && endCarrier.teamId !== offenseTeamId) {
+                playResult.turnoverType = 'fumble';
+            } else {
+                // Offense recovered their own fumble
+                playResult.possessionChange = false;
+                playResult.outcome = 'complete';
+            }
+        }
         else if (playState.type === 'punt') playResult.turnoverType = 'punt';
         else if (!playResult.turnoverType && down === 4) playResult.turnoverType = 'downs';
     }
