@@ -1630,10 +1630,13 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
                     } else if (play.type === 'run') {
                         assignment = 'run_fake'; action = 'run_fake'; // Holds QB in place
                     } else {
-                        assignment = 'qb_setup'; action = 'qb_setup'; targetY = startY - 2;
-                        // Init QB Reads
-                        const rawReads = play.readProgression || [];
-                        readProgression = rawReads.length > 0 ? [...rawReads] : ['WR1', 'WR2', 'TE1', 'RB1'];
+                        assignment = 'qb_setup'; 
+                        action = 'qb_setup';
+                        // 💡 NEW: Initialize dropback state
+                        pState.dropbackPhase = 'dropping';
+                        pState.hasCompletedDropback = false;
+                        // Determine depth based on play type (Passes drop deeper than Runs)
+                        pState.dropbackTargetY = play.type === 'pass' ? startY - 7.0 : startY - 3.0;
                     }
                 }
                 else if (slot.startsWith('OL')) {
@@ -2511,10 +2514,48 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
             switch (pState.action) {
                 // 💡 FIX: Missing pocket dropback logic added
                 case 'qb_setup':
-                    const dropbackDepth = playType === 'pass' ? LOS - 4.5 : LOS - 2.0;
-                    pState.targetX = pState.initialX;
-                    // Ease back into the pocket
-                    pState.targetY = Math.max(dropbackDepth, pState.y - 0.3);
+                    const qbIQ = pState.playbookIQ || 50;
+                    
+                    // PHASE 1: THE DROPBACK (Explosive movement to depth)
+                    if (!pState.hasCompletedDropback) {
+                        pState.targetX = pState.initialX;
+                        pState.targetY = pState.dropbackTargetY;
+                        
+                        // Give the QB a speed boost during the dropback to simulate backpedaling
+                        pState.contactReduction = 1.4; 
+
+                        // Once within 0.5 yards of target depth, plant feet and switch to phase 2
+                        if (Math.abs(pState.y - pState.dropbackTargetY) < 0.5) {
+                            pState.hasCompletedDropback = true;
+                            pState.dropbackPhase = 'set';
+                        }
+                        break; // Exit case while still dropping back
+                    }
+
+                    // PHASE 2: THE SET & DRIFT (Pocket awareness logic)
+                    // (This is the awareness logic we implemented in the previous step)
+                    pState.contactReduction = 1.0; // Reset speed to normal
+                    
+                    let idealX = pState.initialX;
+                    let idealY = pState.y;
+
+                    const rushers = defenseStates.filter(d => !d.isBlocked && getDistance(pState, d) < 6);
+                    
+                    if (rushers.length > 0 && qbIQ > 40) {
+                        let shiftX = 0;
+                        let shiftY = 0;
+                        rushers.forEach(r => {
+                            const dx = r.x - pState.x;
+                            if (Math.abs(dx) > 2 && r.y > pState.y + 1) shiftY += 0.5; 
+                            if (Math.abs(dx) < 4) shiftX += (dx > 0 ? -1.2 : 1.2);
+                        });
+                        const iqMod = qbIQ / 100;
+                        pState.targetX = Math.max(pState.initialX - 2, Math.min(pState.initialX + 2, idealX + (shiftX * iqMod)));
+                        pState.targetY = Math.max(pState.dropbackTargetY - 1, Math.min(LOS - 1, idealY + (shiftY * iqMod)));
+                    } else {
+                        pState.targetX = idealX;
+                        pState.targetY = pState.dropbackTargetY;
+                    }
                     break;
 
                 case 'run_route':
@@ -2522,34 +2563,32 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                         pState.action = 'route_complete';
                         break;
                     }
+                    
                     const pt = pState.routePath[pState.currentPathIndex];
-                    let targetX = pt.x;
-                    let targetY = pt.y;
+                    const distToNode = getDistance(pState, pt);
 
-                    const obstacle = defenseStates.find(d => !d.isEngaged && getDistance(pState, d) < 1.5 && d.y > pState.y);
-                    if (obstacle) {
-                        const sideStep = (pState.initialX > obstacle.initialX) ? 1.0 : -1.0;
-                        targetX = obstacle.x + sideStep;
+                    // 💡 FIX: ROUTE STEM BREAKS
+                    // As the receiver approaches the turn, they "plant" and "cut"
+                    if (distToNode < 1.5) {
+                        const agility = pState.agility || 50;
+                        // High agility = faster turns. We give a temporary speed burst 
+                        // to simulate the "explosion" out of a break.
+                        pState.contactReduction = 1.2 + (agility / 200); 
+                    } else {
+                        pState.contactReduction = 1.0;
                     }
 
-                    const manCoveredBy = defenseStates.find(d =>
-                        !d.isEngaged && d.assignment?.includes('man_cover_') &&
-                        getDistance(pState, d) < 2.0 && d.assignment.includes(pState.slot.replace(/\d/g, ''))
-                    );
+                    pState.targetX = pt.x;
+                    pState.targetY = pt.y;
 
-                    if (manCoveredBy && pState.currentPathIndex > 0) {
-                        const breakAngle = Math.atan2(targetY - pState.y, targetX - pState.x);
-                        const awayAngle = breakAngle + Math.PI * 0.5;
-                        const breakBurst = 0.8;
-                        // Keep receiver from violently stepping out of bounds on a break
-                        targetX = Math.max(1, Math.min(52.3, targetX + Math.cos(awayAngle) * breakBurst));
-                        targetY += Math.sin(awayAngle) * breakBurst;
+                    if (distToNode < 0.6) {
+                        pState.currentPathIndex++;
+                        // Stun the covering defender briefly on a sharp break
+                        const coverageDefender = defenseStates.find(d => d.engagedWith === pState.id || (d.assignment?.includes(pState.slot) && getDistance(pState, d) < 2));
+                        if (coverageDefender && Math.random() < (pState.agility / 150)) {
+                            coverageDefender.stunnedTicks = Math.max(coverageDefender.stunnedTicks, 5);
+                        }
                     }
-
-                    pState.targetX = targetX;
-                    pState.targetY = targetY;
-
-                    if (getDistance(pState, { x: targetX, y: targetY }) < 0.5) pState.currentPathIndex++;
                     break;
 
                 case 'route_complete':
@@ -2770,12 +2809,12 @@ function executeAssignment(pState, assignment, offenseStates, LOS, playState) {
             let perfectX = targetRec.x + cushionX;
             let perfectY = targetRec.y + cushionY;
 
-            if (defIQ > 75 && targetRec.action === 'run_route') {
-                if (targetRec.routePath && targetRec.currentPathIndex < targetRec.routePath.length - 1) {
-                    const nextPoint = targetRec.routePath[targetRec.currentPathIndex + 1];
-                    perfectX = (targetRec.x + nextPoint.x) * 0.6 + cushionX;
-                    perfectY = (targetRec.y + nextPoint.y) * 0.6 + cushionY;
-                }
+            const reactionLag = Math.max(0, (100 - defIQ) / 10);
+            if (targetRec.action === 'run_route' && targetRec.currentPathIndex > 0) {
+                // If the receiver just made a break, the defender is 
+                // essentially targeting where the receiver WAS 2-3 ticks ago.
+                perfectX = targetRec.x + cushionX;
+                perfectY = targetRec.y + cushionY;
             }
 
             const latMovement = ((targetRec.targetX || targetRec.x) - targetRec.x) * 0.8;
@@ -3547,7 +3586,7 @@ function updateQBDecision(qbState, offenseStates, defenseStates, playState, offe
     }
 
     // Time Constraints
-    const canThrowStandard = playState.tick > MIN_DROPBACK_TICKS;
+    const canThrowStandard = playState.tick > MIN_DROPBACK_TICKS && qbState.hasCompletedDropback;
     const maxDecisionTimeTicks = 120; // 💡 REDUCED: 6 seconds max in pocket
 
     let decisionMade = false;
@@ -4404,16 +4443,17 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
                 }
             }
             if (!playState.playIsLive) break;
-            // --- HANDOFF SEQUENCE ---
             if (playState.handoffRequired && !playState.handoffOccurred) {
                 const qb = playState.activePlayers.find(p => p.slot === 'QB1');
                 const rb = playState.activePlayers.find(p => p.slot === 'RB1');
                 
-                // QB and RB move toward each other for handoff until tick 12
-                if (playState.tick < 12) {
-                    if (rb) {
-                        rb.targetY = playState.lineOfScrimmage - 1.5; // RB meets QB
+                if (playState.tick < 15) { // 💡 Slightly longer window for the deeper drop
+                    if (rb && qb) {
+                        // RB targets the QB's current position for a clean handoff
+                        rb.targetX = qb.x;
+                        rb.targetY = qb.y;
                         rb.action = 'run_path';
+                        rb.contactReduction = 1.2; // Burst to the handoff
                     }
                 } else {
                     // Execute handoff
@@ -4422,7 +4462,7 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
                         rb.hasBall = true;
                         rb.isBallCarrier = true;
                         playState.handoffOccurred = true;
-                        if (gameLog && playState.tick === 12) pushGameLog(gameLog, `🏈 Handoff to ${rb.name}`);
+                        if (gameLog) pushGameLog(gameLog, `🏈 Handoff to ${rb.name}`);
                     }
                 }
             }
