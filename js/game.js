@@ -4755,7 +4755,7 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
     }
 
     // End of Play Cleanup / Incomplete Logic
-    f (playState.playIsLive && !playState.touchdown && !playState.safety) {
+    if (playState.playIsLive && !playState.touchdown && !playState.safety) {
         // 💡 FIX: Sync the end-of-play logic to match the live physics
         ballCarrierState = playState.activePlayers.find(p => p.hasBall || p.isBallCarrier);
         if (ballCarrierState) {
