@@ -2286,23 +2286,18 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
         if (target) {
             if (isPassPlay) {
                 // 💡 FIX: THE PASS POCKET (The "Cup")
-                // Linemen should try to stay between the QB and the Defender, 
-                // BUT they should push defenders WIDER to keep the middle clean.
                 const qb = offenseStates.find(p => p.slot.startsWith('QB'));
                 if (qb) {
-                    // Push the rusher AWAY from the QB's X-axis
-                    const isLeftSide = blocker.initialX < 26.65;
-                    const pushDirection = isLeftSide ? -1.5 : 1.5;
-
-                    blocker.targetX = blocker.initialX + (target.x - blocker.initialX) * 0.5;
-                    blocker.targetY = Math.max(LOS - 2.5, blocker.y - 0.2); // Slowly give ground
+                    // Step in front of the rusher laterally
+                    blocker.targetX = target.x; 
+                    // Give ground slowly, but don't get pushed directly into the QB
+                    const pocketDepth = Math.max(LOS - 3.5, qb.y + 1.5);
+                    blocker.targetY = Math.max(pocketDepth, blocker.y - 0.2); 
                 }
             } else {
                 // 💡 FIX: THE RUN WALL
-                // Linemen push forward but try to maintain their X-lane spacing 
-                // so they don't trip over each other.
-                blocker.targetX = blocker.initialX; // Stay in your lane!
-                blocker.targetY = target.y; // Drive into him
+                blocker.targetX = target.x; // Attack them directly
+                blocker.targetY = target.y; 
             }
 
             // Auto-Engage
@@ -2648,7 +2643,7 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
 
         if (shouldPursue && ballCarrierState) {
             const dist = getDistance(pState, ballCarrierState);
-            const leadTime = dist / 15; 
+            const leadTime = dist / 15;
 
             const carrierVx = ballCarrierState.vx || 0;
             const carrierVy = ballCarrierState.vy || 0;
@@ -2663,7 +2658,7 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
             const reactionDelay = Math.max(0, 15 - Math.floor(iq / 7));
 
             if (flightTime > reactionDelay) {
-                
+
                 // 💡 FIX 3: Defenders ignore the ball if it's being thrown away
                 if (playState.ballState.isThrowAway) {
                     pState.action = 'idle';
@@ -3075,6 +3070,14 @@ function checkTackleCollisions(playState, gameLog) {
             const jukeDir = jukeType === 'juke_left' ? -1 : 1;
             carrier.x += jukeDir * 0.8;
             defender.stunnedTicks = 25;
+            
+            // 💡 FIX: If a passing QB shakes a sack, force them to abandon the pocket and scramble!
+            if (carrier.role === 'QB' && !carrier.isBallCarrier) {
+                carrier.isBallCarrier = true;
+                carrier.action = 'qb_scramble';
+                carrier.scrambleDirection = 'forward';
+                if (playState) playState.qbIntent = 'scramble';
+            }
 
             if (gameLog) gameLog.push(`💪 ${carrier.name} breaks the tackle from ${defender.name}!`);
 
@@ -3328,8 +3331,8 @@ function updateQBDecision(qbState, offenseStates, defenseStates, playState, offe
     // --- 0. VALIDATION CHECKS ---
     if (!qbState || !qbState.hasBall || playState.ballState.inAir || playState.ballState.throwInitiated) return;
     if (qbState.isEngaged || qbState.stunnedTicks > 0) return;
-    // Don't make a new decision if QB is already scrambling
-    if (qbState.action === 'qb_scramble') return;
+    // Don't make a new decision if QB is already scrambling or bracing for a hit
+    if (qbState.action === 'qb_scramble' || qbState.action === 'sacked') return;
 
     // --- 0B. LINE OF SCRIMMAGE CHECK (Football Rule) ---
     // QB cannot throw FORWARD if they've crossed the line of scrimmage (only backwards/laterals allowed)
@@ -3462,8 +3465,8 @@ function updateQBDecision(qbState, offenseStates, defenseStates, playState, offe
     };
 
     // --- 3. ASSESS PRESSURE & POCKET GEOMETRY ---
-    // A defender 7 yards away isn't pressure yet.
-    const unblocked = defenseStates.filter(d => !d.isBlocked && !d.isEngaged && getDistance(qbState, d) < 4.5);
+    // A defender 7 yards away isn't pressure yet. Ignore stunned defenders.
+    const unblocked = defenseStates.filter(d => !d.isBlocked && !d.isEngaged && d.stunnedTicks === 0 && getDistance(qbState, d) < 4.5);
     const pressureDefender = unblocked.length > 0 ? unblocked[0] : null;
     const pressureCount = unblocked.length;
     const isPressured = !!pressureDefender;
@@ -3525,14 +3528,14 @@ function updateQBDecision(qbState, offenseStates, defenseStates, playState, offe
 
     // Time Constraints
     const canThrowStandard = playState.tick > MIN_DROPBACK_TICKS;
-    const maxDecisionTimeTicks = 160;
+    const maxDecisionTimeTicks = 120; // 💡 REDUCED: 6 seconds max in pocket
 
     let decisionMade = false;
     let reason = "";
 
     if (imminentSackDefender) { decisionMade = true; reason = "Imminent Sack"; }
     else if (playState.tick >= maxDecisionTimeTicks) { decisionMade = true; reason = "Time Expired"; }
-    else if (isPressured && playState.tick >= 110 && Math.random() < Math.max(0.01, 0.2 - qbIQ / 200)) {
+    else if (isPressured && playState.tick >= 90 && Math.random() < Math.max(0.01, 0.2 - qbIQ / 200)) {
         decisionMade = true;
         reason = "Pressure Panic";
     }
@@ -3545,87 +3548,123 @@ function updateQBDecision(qbState, offenseStates, defenseStates, playState, offe
 
     // Scramble Check
     const openLane = !defenseStates.some(d => !d.isBlocked && !d.isEngaged && Math.abs(d.x - qbState.x) < 3.5 && d.y < qbState.y + 1);
-    const canScramble = openLane && (isPressured || playState.tick > 80) && (Math.random() < (qbAgility / 100));
+    
+    // 💡 FIX: Force scramble if time is running out, regardless of agility
+    const timeIsRunningOut = playState.tick > 90;
+    const scrambleChance = timeIsRunningOut ? 0.8 : (qbAgility / 100);
+    const canScramble = openLane && (isPressured || playState.tick > 70) && (Math.random() < scrambleChance);
 
     // 💡 NEW: Late-Game Desperation Logic
-    // If play is breaking down in final ticks, attempt desperation throw vs just eating sack
-    const isLatePlay = playState.tick > 140;
+    const isLatePlay = playState.tick > 100;
     const isDesperationTime = isLatePlay && isPressured && pressureCount >= 2;
 
     // SELECT ACTION
     let targetPlayerState = null;
     let actionTaken = "None";
 
-    // --- DECISION FILTER (The Fix) ---
-    // Don't throw to guys behind the Line of Scrimmage (LOS) unless pressured or late in play
+    // --- DECISION FILTER ---
     const isBackfieldTarget = (info) => info && info.state.y < playState.lineOfScrimmage + 2.0;
 
-    // 1. PRIMARY READ (Evaluates whoever the QB is currently looking at in their progression)
-    if (!decisionMade && currentReadInfo && currentReadInfo.separation > OPEN_SEP) {
-        const validTiming = canThrowStandard;
-        const validDepth = !isBackfieldTarget(currentReadInfo) || isPressured || playState.tick > 60;
+    // We only process organic reads if a forced decision wasn't already made at the top
+    if (!decisionMade) {
+        
+        // 1. PRIMARY READ 
+        if (currentReadInfo && currentReadInfo.separation > OPEN_SEP) {
+            const validTiming = canThrowStandard;
+            const validDepth = !isBackfieldTarget(currentReadInfo) || isPressured || playState.tick > 60;
 
-        if (validTiming && validDepth) {
-            targetPlayerState = currentReadInfo.state;
-            actionTaken = "Throw Read";
-            decisionMade = true;
-        }
-    }
-
-    // 2. CHECKDOWN
-    // 💡 FIX: The QB must go through their WR progressions first!
-    // They will only skip to the checkdown if they are out of reads, pressured, or out of time.
-    const isProgressionFinished = qbState.currentReadTargetSlot === checkdownSlot;
-    const shouldCheckdown = isProgressionFinished || isPressured || playState.tick > 85;
-
-    if (!decisionMade && !targetPlayerState && shouldCheckdown) {
-        // Find closest open receiver near QB
-        const checkdownOptions = offenseStates.filter(p => {
-            if (p.slot === 'QB1' || p.action === 'sacked' || p.action === 'idle') return false;
-            // Only RBs/TEs for checkdowns
-            return p.slot.startsWith('RB') || p.slot.startsWith('TE');
-        }).map(p => ({
-            state: p,
-            info: getTargetInfo(p.slot)
-        })).filter(x => x.info && x.info.separation > 0.5);
-
-        if (checkdownOptions.length > 0) {
-            // Pick the closest/most open option
-            const best = checkdownOptions.sort((a, b) => a.info.distFromQB - b.info.distFromQB)[0];
-
-            const checkdownAvailable = canThrowStandard && playState.tick > 60;
-            if (checkdownAvailable) {
-                targetPlayerState = best.state;
-                actionTaken = "Throw Checkdown";
+            if (validTiming && validDepth) {
+                targetPlayerState = currentReadInfo.state;
+                actionTaken = "Throw Read";
                 decisionMade = true;
             }
         }
-    }
 
-    // 3. SCRAMBLE
-    // 💡 IMPROVED: Intelligent scramble direction
-    else if (!decisionMade && canScramble) {
-        qbState.scrambleDirection = 'forward';
+        // 2. CHECKDOWN
+        const isProgressionFinished = qbState.currentReadTargetSlot === checkdownSlot;
+        const shouldCheckdown = isProgressionFinished || isPressured || playState.tick > 75;
 
-        if (pocketComfort === 'collapsing') {
-            if (leftPressure > rightPressure) qbState.scrambleDirection = 'right';
-            else if (rightPressure > leftPressure) qbState.scrambleDirection = 'left';
+        if (!decisionMade && shouldCheckdown) {
+            let checkdownOptions = offenseStates.filter(p => {
+                if (p.slot === 'QB1' || p.action === 'sacked' || p.action === 'idle') return false;
+                return p.slot.startsWith('RB') || p.slot.startsWith('TE');
+            }).map(p => ({
+                state: p,
+                info: getTargetInfo(p.slot)
+            })).filter(x => x.info && x.info.separation > 0.4);
+
+            // Fallback to WRs if no RB/TE
+            if (checkdownOptions.length === 0) {
+                checkdownOptions = offenseStates.filter(p => {
+                     if (p.slot === 'QB1' || p.action === 'sacked' || p.action === 'idle') return false;
+                     return true;
+                }).map(p => ({
+                    state: p,
+                    info: getTargetInfo(p.slot)
+                })).filter(x => x.info && x.info.separation > 0.4 && x.info.distFromQB < 15);
+            }
+
+            if (checkdownOptions.length > 0) {
+                const best = checkdownOptions.sort((a, b) => a.info.distFromQB - b.info.distFromQB)[0];
+                const checkdownAvailable = canThrowStandard && playState.tick > 50;
+                if (checkdownAvailable) {
+                    targetPlayerState = best.state;
+                    actionTaken = "Throw Checkdown";
+                    decisionMade = true;
+                }
+            }
         }
 
-        const upfieldClear = !defenseStates.some(d =>
-            !d.isBlocked && !d.isEngaged && d.y < qbState.y - 2 && Math.abs(d.x - qbState.x) < 5
-        );
-        if (upfieldClear) qbState.scrambleDirection = 'forward';
+        // 2.5 STATUE PREVENTION (Force Action if time expiring)
+        if (!decisionMade && playState.tick > 110) {
+             const bestDesperationTarget = offenseStates
+                .filter(p => p.slot !== 'QB1' && p.action.includes('route'))
+                .map(p => ({ state: p, info: getTargetInfo(p.slot) }))
+                .filter(x => x.info)
+                .sort((a, b) => b.info.separation - a.info.separation)[0];
 
-        qbState.action = 'qb_scramble';
-        qbState.isBallCarrier = true; // 💡 FIX: This MUST be true so the physics engine recognizes the run!
-        playState.qbIntent = 'scramble';
-        if (gameLog) gameLog.push(`🏃 ${qbState.name} tucks it and runs ${qbState.scrambleDirection}!`);
-        return;
+             if (bestDesperationTarget && bestDesperationTarget.info.separation > 0.1) {
+                 targetPlayerState = bestDesperationTarget.state;
+                 actionTaken = "Forced Throw";
+                 decisionMade = true;
+             } else if (openLane) {
+                 qbState.scrambleDirection = 'forward';
+                 qbState.action = 'qb_scramble';
+                 qbState.isBallCarrier = true; 
+                 playState.qbIntent = 'scramble';
+                 if (gameLog) gameLog.push(`🏃 ${qbState.name} abandons the pass and runs!`);
+                 return;
+             } else {
+                 decisionMade = true;
+                 reason = "Time Expired";
+             }
+        }
+
+        // 3. SCRAMBLE
+        if (!decisionMade && canScramble) {
+            qbState.scrambleDirection = 'forward';
+
+            if (pocketComfort === 'collapsing') {
+                if (leftPressure > rightPressure) qbState.scrambleDirection = 'right';
+                else if (rightPressure > leftPressure) qbState.scrambleDirection = 'left';
+            }
+
+            const upfieldClear = !defenseStates.some(d =>
+                !d.isBlocked && !d.isEngaged && d.y < qbState.y - 2 && Math.abs(d.x - qbState.x) < 5
+            );
+            if (upfieldClear) qbState.scrambleDirection = 'forward';
+
+            qbState.action = 'qb_scramble';
+            qbState.isBallCarrier = true;
+            playState.qbIntent = 'scramble';
+            if (gameLog) gameLog.push(`🏃 ${qbState.name} tucks it and runs ${qbState.scrambleDirection}!`);
+            return;
+        }
     }
 
-    // 4. FORCED (Sack/Panic)
-    else if (decisionMade) {
+    // 4. FORCED (Sack/Panic/Time Expired)
+    // Only execute this if decisionMade is true AND no target was organically found
+    if (decisionMade && !targetPlayerState) {
         if (reason === "Imminent Sack") {
             const chanceToEatSack = qbIQ / 120;
             if (Math.random() < chanceToEatSack) return; // Eat sack
@@ -3654,17 +3693,22 @@ function updateQBDecision(qbState, offenseStates, defenseStates, playState, offe
         const distToRightSideline = FIELD_WIDTH - qbState.x;
         const throwToLeft = distToLeftSideline < distToRightSideline;
 
-        const targetX = throwToLeft ? -5 : FIELD_WIDTH + 5; // 💡 Throw further out of bounds
+        const targetX = throwToLeft ? -5 : FIELD_WIDTH + 5; // Throw out of bounds
         const targetY = qbState.y + 10;
 
         playState.ballState.targetX = targetX;
         playState.ballState.targetY = targetY;
 
-        // 💡 FIX: Increase the velocity and the height (vz)
-        // This ensures the ball is too high to be "vacuumed" by players as it passes them
-        playState.ballState.vx = (targetX - qbState.x) / 1.0;
-        playState.ballState.vy = (targetY - qbState.y) / 1.0;
-        playState.ballState.vz = 8; // 💡 High arc, clears heads
+        // 💡 FIX: Throw it on a much faster, sharper trajectory to clear the play quickly
+        const dx = targetX - qbState.x;
+        const dy = targetY - qbState.y;
+        const dist = Math.sqrt(dx*dx + dy*dy);
+        const ballSpeed = 25; // Bullet pass speed
+        const t = Math.max(0.1, dist / ballSpeed);
+
+        playState.ballState.vx = dx / t;
+        playState.ballState.vy = dy / t;
+        playState.ballState.vz = (-0.3 + (4.9 * t * t)) / t; // Physics to land in 't' seconds
 
         playState.ballState.throwTick = playState.tick;
         qbState.hasBall = false;
@@ -3864,7 +3908,7 @@ function updatePunterDecision(playState, offenseStates, gameLog) {
  */
 function handleBallArrival(playState, carrier, playResult, gameLog) {
     const ball = playState.ballState;
-    if (!ball.inAir && !ball.isLoose) return; 
+    if (!ball.inAir && !ball.isLoose) return;
 
     if (playState.type === 'punt') {
         const ticksInAir = playState.tick - (ball.throwTick || 0);
@@ -3872,10 +3916,10 @@ function handleBallArrival(playState, carrier, playResult, gameLog) {
     }
 
     const MAX_JUMP_HEIGHT = 2.8;
-    if (playState.type !== 'punt' && ball.z > MAX_JUMP_HEIGHT) return; 
+    if (playState.type !== 'punt' && ball.z > MAX_JUMP_HEIGHT) return;
 
-    const CATCH_RADIUS = 1.2; 
-    const CATCH_TOLERANCE = 0.6; 
+    const CATCH_RADIUS = 1.2;
+    const CATCH_TOLERANCE = 0.6;
 
     const pointToSegmentDist = (px, py, x1, y1, x2, y2) => {
         const A = px - x1; const B = py - y1; const C = x2 - x1; const D = y2 - y1;
@@ -3926,9 +3970,9 @@ function handleBallArrival(playState, carrier, playResult, gameLog) {
         };
 
         let catchScore = (catching * 0.7) + (agility * 0.3);
-        if (isDefense) catchScore -= 25; 
-        if (playersInRange.length > 1) catchScore -= 30; 
-        if (playState.type === 'punt') catchScore += 15; 
+        if (isDefense) catchScore -= 25;
+        if (playersInRange.length > 1) catchScore -= 30;
+        if (playState.type === 'punt') catchScore += 15;
 
         if (Math.random() * 100 < catchScore) {
             // --- SUCCESSFUL CATCH ---
@@ -3987,7 +4031,7 @@ function handleBallArrival(playState, carrier, playResult, gameLog) {
     // --- D. GROUND PHYSICS (Ball hit turf) ---
     if (ball.z <= 0) {
         ball.z = 0;
-        
+
         // 💡 FIX 2: Instantly kill the play when a throw-away hits the ground
         if (ball.isThrowAway) {
             ball.vz = 0; ball.vx = 0; ball.vy = 0;

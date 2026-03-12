@@ -202,17 +202,17 @@ export const offenseFormations = {
     },
     'Trips': {
         name: 'Trips Right',
-        slots: ['QB1', 'RB1', 'WR1', 'WR2', 'WR3', 'TE1', 'OL1', 'OL2'],
-        personnel: { QB: 1, RB: 1, WR: 3, TE: 1, OL: 2 },
+        slots:['QB1', 'RB1', 'WR1', 'WR2', 'WR3', 'OL1', 'OL2', 'OL3'],
+        personnel: { QB: 1, RB: 1, WR: 3, TE: 0, OL: 3 },
         coordinates: {
             QB1: [0, -5],
-            RB1: [-4, -5],
+            RB1:[-4, -5],
             WR1: [22, 0.5],
-            WR2: [16, 0.5],
+            WR2:[16, 0.5],
             WR3: [10, 0.5],
-            TE1: [6, -2],
-            OL1: [-2, -0.5],
-            OL2: [2, -0.5]
+            OL1: [-2.0, -0.5],
+            OL2: [0, -0.75],
+            OL3: [2.0, -0.5]
         },
         slotPriorities: {
             QB1: { throwingAccuracy: 3, playbookIQ: 2 },
@@ -220,34 +220,34 @@ export const offenseFormations = {
             WR1: { speed: 3, catchingHands: 2 },
             WR2: { agility: 3, catchingHands: 2 },
             WR3: { agility: 3, catchingHands: 2 },
-            TE1: { blocking: 2, catchingHands: 2 },
             OL1: { blocking: 3, strength: 3 },
-            OL2: { blocking: 3, strength: 3 }
+            OL2: { blocking: 3, strength: 3 },
+            OL3: { blocking: 3, strength: 3 }
         }
     },
     'Empty': {
-        name: 'Empty Five',
-        slots: ['QB1', 'WR1', 'WR2', 'WR3', 'WR4', 'WR5', 'OL1', 'OL2'],
-        personnel: { QB: 1, RB: 0, WR: 5, OL: 2 },
+        name: 'Empty Quads',
+        slots:['QB1', 'WR1', 'WR2', 'WR3', 'WR4', 'OL1', 'OL2', 'OL3'],
+        personnel: { QB: 1, RB: 0, WR: 4, OL: 3 },
         coordinates: {
             QB1: [0, -5],
-            WR1: [-22, 0.5],
+            WR1:[-22, 0.5],
             WR2: [-10, 0.5],
-            WR3: [0, 0.5],
-            WR4: [10, 0.5],
-            WR5: [22, 0.5],
-            OL1: [-2, -0.5],
-            OL2: [2, -0.5]
+            WR3: [10, 0.5],
+            WR4:[22, 0.5],
+            OL1: [-2.0, -0.5],
+            OL2:[0, -0.75],
+            OL3: [2.0, -0.5]
         },
         slotPriorities: {
             QB1: { throwingAccuracy: 3, playbookIQ: 3 },
             WR1: { speed: 3 },
             WR2: { agility: 3, catchingHands: 3 },
             WR3: { agility: 3, catchingHands: 3 },
-            WR4: { agility: 3, catchingHands: 3 },
-            WR5: { speed: 3 },
+            WR4: { speed: 3 },
             OL1: { blocking: 3, agility: 2 },
-            OL2: { blocking: 3, agility: 2 }
+            OL2: { blocking: 3, agility: 2 },
+            OL3: { blocking: 3, agility: 2 }
         }
     },
     'Punt': {
@@ -367,19 +367,19 @@ export const offensivePlaybook = {
     'Trips_Flood': {
         type: 'pass', tags: ['pass', 'medium', 'flood'],
         readProgression: ['WR2', 'WR3'],
-        assignments: { 'WR1': 'Fly', 'WR2': 'Out', 'WR3': 'Flat', 'RB1': 'pass_block', 'OL1': 'pass_block', 'OL2': 'pass_block' }
+        assignments: { 'WR1': 'Fly', 'WR2': 'Out', 'WR3': 'Flat', 'RB1': 'pass_block', 'OL1': 'pass_block', 'OL2': 'pass_block', 'OL3': 'pass_block' }
     },
     // NEW: Stick Concept (Quick Out + Vertical)
     'Trips_Stick': {
         type: 'pass', tags: ['pass', 'short', 'quick'],
         readProgression: ['WR3', 'WR2'],
-        assignments: { 'WR1': 'Fade', 'WR2': 'QuickOut', 'WR3': 'Hitch', 'RB1': 'CheckRelease', 'OL1': 'pass_block', 'OL2': 'pass_block' }
+        assignments: { 'WR1': 'Fade', 'WR2': 'QuickOut', 'WR3': 'Hitch', 'RB1': 'CheckRelease', 'OL1': 'pass_block', 'OL2': 'pass_block', 'OL3': 'pass_block' }
     },
     // NEW: Screen and Go
     'Trips_Bubble_Go': {
-        type: 'pass', tags: ['pass', 'deep', 'trick'],
+        type: 'pass', tags:['pass', 'deep', 'trick'],
         readProgression: ['WR3'],
-        assignments: { 'WR1': 'run_block', 'WR2': 'run_block', 'WR3': 'Sluggo', 'RB1': 'run_inside', 'OL1': 'pass_block', 'OL2': 'pass_block' }
+        assignments: { 'WR1': 'run_block', 'WR2': 'run_block', 'WR3': 'Sluggo', 'RB1': 'run_inside', 'OL1': 'pass_block', 'OL2': 'pass_block', 'OL3': 'pass_block' }
     },
 
     // ===================================
@@ -387,19 +387,19 @@ export const offensivePlaybook = {
     // ===================================
     'Empty_AllGo': {
         type: 'pass', tags: ['pass', 'deep', 'hailmary'],
-        readProgression: ['WR1', 'WR4'],
-        assignments: { 'WR1': 'Fly', 'WR2': 'Seam', 'WR3': 'Seam', 'WR4': 'Fly', 'OL1': 'pass_block', 'OL2': 'pass_block' }
+        readProgression:['WR1', 'WR4'],
+        assignments: { 'WR1': 'Fly', 'WR2': 'Seam', 'WR3': 'Seam', 'WR4': 'Fly', 'OL1': 'pass_block', 'OL2': 'pass_block', 'OL3': 'pass_block' }
     },
     'Empty_QuickGame': {
         type: 'pass', tags: ['pass', 'short'],
         readProgression: ['WR2', 'WR3'],
-        assignments: { 'WR1': 'Hitch', 'WR2': 'Slant', 'WR3': 'Whip', 'WR4': 'Hitch', 'OL1': 'pass_block', 'OL2': 'pass_block' }
+        assignments: { 'WR1': 'Hitch', 'WR2': 'Slant', 'WR3': 'Whip', 'WR4': 'Hitch', 'OL1': 'pass_block', 'OL2': 'pass_block', 'OL3': 'pass_block' }
     },
     // NEW: Double Post
     'Empty_DoublePost': {
         type: 'pass', tags: ['pass', 'deep', 'middle'],
-        readProgression: ['WR2', 'WR3'],
-        assignments: { 'WR1': 'Drag', 'WR2': 'Post', 'WR3': 'Post', 'WR4': 'Drag', 'OL1': 'pass_block', 'OL2': 'pass_block' }
+        readProgression:['WR2', 'WR3'],
+        assignments: { 'WR1': 'Drag', 'WR2': 'Post', 'WR3': 'Post', 'WR4': 'Drag', 'OL1': 'pass_block', 'OL2': 'pass_block', 'OL3': 'pass_block' }
     },
 
     // --- Special Teams ---
