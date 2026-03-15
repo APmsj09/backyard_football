@@ -520,9 +520,14 @@ function checkFumble(ballCarrierState, tacklerState, playState, gameLog) {
 
     if (Math.random() < fumbleChance) {
         if (gameLog) {
-            const hitPower = Math.round((strength + tackling) / 2 * tacklerState.fatigueModifier);
-            const security = Math.round(toughness * ballCarrierState.fatigueModifier);
-            gameLog.push(`[Tick ${playState.tick}] ❗ FUMBLE! ${tacklerState.name} jars it loose! (Hit: ${hitPower} vs Sec: ${security})`);
+            // 💡 FIX: Cast stats to Numbers to prevent "50" + "50" = "5050" string concatenation
+            const hitPower = Math.round(((Number(strength) + Number(tackling)) / 2) * tacklerState.fatigueModifier);
+            const security = Math.round(Number(toughness) * ballCarrierState.fatigueModifier);
+            const actionX = ballCarrierState.x.toFixed(1);
+            const actionY = ballCarrierState.y.toFixed(1);
+            const yardage = (ballCarrierState.y - playState.lineOfScrimmage).toFixed(1);
+            
+            gameLog.push(`[Tick ${playState.tick}] ❗ FUMBLE! ${tacklerState.name} jars it loose at (${actionX}, ${actionY}) | Gain: ${yardage}y | (Hit: ${hitPower} vs Sec: ${security})`);
         }
 
         // Logic: Drop ball at current spot
@@ -3177,7 +3182,11 @@ function checkTackleCollisions(playState, gameLog) {
                     const defFat = Math.round(defender.fatigueModifier * 100);
                     const runFat = Math.round(carrier.fatigueModifier * 100);
                     
-                    gameLog.push(`[Tick ${playState.tick}] ✋ ${carrier.name} tackled by ${defender.name} (Power: ${defEff}@${defFat}% vs ${runEff}@${runFat}%)`);
+                    const yardage = (carrier.y - playState.lineOfScrimmage).toFixed(1);
+                const contactX = carrier.x.toFixed(1);
+                const contactY = carrier.y.toFixed(1);
+                
+                gameLog.push(`[Tick ${playState.tick}] ✋ ${carrier.name} tackled at (${contactX}, ${contactY}) by ${defender.name} | Gain: ${yardage}y | (Power: ${defEff}@${defFat}% vs ${runEff}@${runFat}%)`);
                 }
             }
             return true;
@@ -3206,7 +3215,9 @@ function checkTackleCollisions(playState, gameLog) {
             if (gameLog) {
                 const runEff = Math.round(runnerSkill * carrier.fatigueModifier);
                 const defEff = Math.round(tacklerSkill * defender.fatigueModifier);
-                gameLog.push(`[Tick ${playState.tick}] 💪 ${carrier.name} sheds the tackle! (Agi: ${runEff} vs Tkl: ${defEff})`);
+                const contactX = carrier.x.toFixed(1);
+                const contactY = carrier.y.toFixed(1);
+                gameLog.push(`[Tick ${playState.tick}] 💪 ${carrier.name} sheds tackle at (${contactX}, ${contactY})! (Agi: ${runEff} vs Tkl: ${defEff})`);
             }
 
             // 💡 FIX: Exit the loop so the carrier doesn't evaluate 5 tackles in the exact same 0.05s tick!
@@ -3902,7 +3913,15 @@ function executeThrow(qbState, target, strength, accuracy, playState, gameLog, a
         return;
     }
 
-    if (gameLog) gameLog.push(`[Tick ${playState.tick}] 🏈 ${qbState.name} throws to ${target.name} (${actionType})`);
+    if (gameLog) {
+        const releaseX = qbState.x.toFixed(1);
+        const releaseY = qbState.y.toFixed(1);
+        const targetX = aimX.toFixed(1);
+        const targetY = aimY.toFixed(1);
+        const dist = throwDistance.toFixed(1);
+        
+        gameLog.push(`[Tick ${playState.tick}] 🏈 ${qbState.name} throws from (${releaseX}, ${releaseY}) to target (${targetX}, ${targetY}) | Air Dist: ${dist}y | (${actionType})`);
+    }
 
     // DEBUG: Log when throw happens
     if (gameLog && gameLog.length < 3) {
@@ -4149,6 +4168,11 @@ function handleBallArrival(playState, carrier, playResult, gameLog) {
         if (playersInRange.length > 1) catchScore -= 30;
         if (playState.type === 'punt') catchScore += 15;
 
+        // 💡 FIX: Move the stat calculations OUTSIDE the catch/drop blocks 
+        // so they are globally available to all outcomes (offense and defense).
+        const hndEff = Math.round(catching * bestCandidate.fatigueModifier);
+        const fatPct = Math.round(bestCandidate.fatigueModifier * 100);
+
         if (Math.random() * 100 < catchScore) {
             // --- SUCCESSFUL CATCH ---
             ball.inAir = false; ball.isLoose = false;
@@ -4164,15 +4188,20 @@ function handleBallArrival(playState, carrier, playResult, gameLog) {
                 return;
             }
 
+            const actionX = ball.x.toFixed(1);
+            const actionY = ball.y.toFixed(1);
+            const actionZ = ball.z.toFixed(1);
+            const yardage = (ball.y - playState.lineOfScrimmage).toFixed(1);
+
             if (isDefense) {
-                pushLog(`[Tick ${playState.tick}] ❗ INTERCEPTION! ${bestCandidate.name} picks it off!`);
+                pushLog(`[Tick ${playState.tick}] ❗ INTERCEPTION! ${bestCandidate.name} at (${actionX}, ${actionY}) | Gain: ${yardage}y`);
                 playState.interceptionOccurred = true; playState.possessionChanged = true;
                 playState.turnover = true; playState.returnStartY = bestCandidate.y;
                 playState.statEvents.push({ type: 'interception', interceptorId: bestCandidate.id, throwerId: ball.throwerId });
                 return;
             }
 
-            pushLog(`[Tick ${playState.tick}] 👍 CATCH! ${bestCandidate.name} grabs it!`);
+            pushLog(`[Tick ${playState.tick}] 👍 CATCH! ${bestCandidate.name} at (${actionX}, ${actionY}, z:${actionZ}) | Gain: ${yardage}y`);
             const yardsGain = bestCandidate.y - playState.lineOfScrimmage;
             playState.statEvents.push({ type: 'completion', receiverId: bestCandidate.id, qbId: ball.throwerId, yards: yardsGain });
             return;
@@ -4183,13 +4212,9 @@ function handleBallArrival(playState, carrier, playResult, gameLog) {
                 if (playState.type === 'punt') return;
 
                 const last = ball.lastInteraction;
-                // Cooldown to prevent a player from interacting twice in 5 ticks
                 if (!(last && last.playerId === bestCandidate.id && (playState.tick - last.tick) <= 5)) {
-
+                    
                     ball.tipCount = (ball.tipCount || 0) + 1;
-
-                    // 💡 FIX: 75% chance for a clean SWAT (down), 25% chance for a TIP (up).
-                    // If the ball has already been tipped twice, force a SWAT to kill the play (Volleyball Fix)
                     const isTip = (Math.random() < 0.25) && ball.tipCount < 3;
 
                     const hndEff = Math.round(catching * bestCandidate.fatigueModifier);
@@ -4623,7 +4648,8 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
             });
 
             // --- E. BALL PHYSICS & CATCHING ---
-            if (ballPos.inAir) {
+            // 💡 FIX: Keep calculating physics if it's a punt on the ground
+            if (ballPos.inAir || (ballPos.isLoose && playState.type === 'punt')) {
                 ballPos.prevX = ballPos.x;
                 ballPos.prevY = ballPos.y;
                 ballPos.prevZ = ballPos.z;
@@ -4633,8 +4659,6 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
                 ballPos.z += (ballPos.vz || 0) * timeDelta;
                 ballPos.vz = (ballPos.vz || 0) - 9.8 * timeDelta;
 
-                // 💡 FIX: Allow the ball to visually leave the field slightly for throw aways!
-                // Changed from 0.5 & 52.8 to -10 & 63.3
                 ballPos.x = Math.max(-10.0, Math.min(FIELD_WIDTH + 10.0, ballPos.x));
                 ballPos.y = Math.max(-10.0, Math.min(FIELD_LENGTH + 10.0, ballPos.y));
 
@@ -4644,8 +4668,14 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
 
                 if (ballPos.z < 0) {
                     ballPos.z = 0;
-                    ballPos.vz = 0;
-                    if (ballPos.inAir) ballPos.inAir = false;
+                    // 💡 FIX: Only kill inAir if the bounce physics didn't pop it back up
+                    if (ballPos.vz <= 0) {
+                        ballPos.vz = 0;
+                        if (ballPos.inAir) {
+                            ballPos.inAir = false;
+                            if (playState.type === 'punt') ballPos.isLoose = true; // Let it roll
+                        }
+                    }
                 }
             } else if (ballCarrierState) {
                 // Ball stuck to player
@@ -4907,7 +4937,12 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
         if (ballCarrierState) {
             playState.yards = ballCarrierState.y - playState.lineOfScrimmage;
             playState.finalBallY = ballCarrierState.y;
-            if (gameLog) gameLog.push(`[Tick ${playState.tick}] ⏱️ Play ends. Gain of ${playState.yards.toFixed(1)}.`);
+            
+            if (gameLog) {
+                const finalX = ballCarrierState.x.toFixed(1);
+                const finalY = ballCarrierState.y.toFixed(1);
+                gameLog.push(`[Tick ${playState.tick}] ⏱️ WHISTLE: Play ends at (${finalX}, ${finalY}) | Total Play Yardage: ${playState.yards.toFixed(1)}y`);
+            }
         }
         // 💡 FIX: Only mark incomplete if a fumble didn't occur
         else if (!playState.sack && !playState.turnover && !playState.fumbleOccurred) {
