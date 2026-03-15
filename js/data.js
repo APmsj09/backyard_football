@@ -130,14 +130,14 @@ export const offenseFormations = {
         slots: ['QB1', 'RB1', 'WR1', 'WR2', 'TE1', 'OL1', 'OL2', 'OL3'],
         personnel: { QB: 1, RB: 1, WR: 2, TE: 1, OL: 3 },
         coordinates: {
-            QB1: [0, -5],
+            QB1: [0, -6],
             RB1: [-3, -5.5],
             WR1: [-18, 0.5],
             WR2: [18, 0.5],
             TE1: [6, -2],
-            OL1: [-3, -0.5],
-            OL2: [0, -0.75],
-            OL3: [3, -0.5]
+            OL1: [-3, -1.5], // 💡 Corrected: OL Baseline
+            OL2: [0, -1.5],
+            OL3: [3, -1.5]
         },
         slotPriorities: {
             QB1: { throwingAccuracy: 3, playbookIQ: 2 },
@@ -155,14 +155,14 @@ export const offenseFormations = {
         slots: ['QB1', 'WR1', 'WR2', 'WR3', 'WR4', 'OL1', 'OL2', 'OL3'],
         personnel: { QB: 1, RB: 0, WR: 4, OL: 3 },
         coordinates: {
-            QB1: [0, -5],
+            QB1: [0, -6],
             WR1: [-22, 0.5],
             WR2: [22, 0.5],
             WR3: [-8, 0.5],
             WR4: [8, 0.5],
-            OL1: [-3, -0.5],
-            OL2: [0, -0.75],
-            OL3: [3, -0.5]
+            OL1: [-3, -1.5], // 💡 Corrected: OL Baseline
+            OL2: [0, -1.5],
+            OL3: [3, -1.5]
         },
         slotPriorities: {
             QB1: { throwingAccuracy: 3, playbookIQ: 2 },
@@ -180,14 +180,14 @@ export const offenseFormations = {
         slots: ['QB1', 'RB1', 'RB2', 'WR1', 'TE1', 'OL1', 'OL2', 'OL3'],
         personnel: { QB: 1, RB: 2, WR: 1, TE: 1, OL: 3 },
         coordinates: {
-            QB1: [0, -2],
+            QB1: [0, -4],
             RB1: [0, -7],
             RB2: [0, -4.5],
             WR1: [18, 0.5],
             TE1: [-6, -2],
-            OL1: [-3, -0.5],
-            OL2: [0, -0.75],
-            OL3: [3, -0.5]
+            OL1: [-3, -1.5], // 💡 Corrected: OL Baseline
+            OL2: [0, -1.5],
+            OL3: [3, -1.5]
         },
         slotPriorities: {
             QB1: { strength: 2, playbookIQ: 2 },
@@ -205,14 +205,14 @@ export const offenseFormations = {
         slots:['QB1', 'RB1', 'WR1', 'WR2', 'WR3', 'OL1', 'OL2', 'OL3'],
         personnel: { QB: 1, RB: 1, WR: 3, TE: 0, OL: 3 },
         coordinates: {
-            QB1: [0, -5],
+            QB1: [0, -6],
             RB1:[-4, -5],
             WR1: [22, 0.5],
             WR2:[16, 0.5],
             WR3: [10, 0.5],
-            OL1: [-2.0, -0.5],
-            OL2: [0, -0.75],
-            OL3: [2.0, -0.5]
+            OL1: [-3, -1.5], // 💡 Corrected: OL Baseline
+            OL2: [0, -1.5],
+            OL3: [3, -1.5]
         },
         slotPriorities: {
             QB1: { throwingAccuracy: 3, playbookIQ: 2 },
@@ -230,14 +230,14 @@ export const offenseFormations = {
         slots:['QB1', 'WR1', 'WR2', 'WR3', 'WR4', 'OL1', 'OL2', 'OL3'],
         personnel: { QB: 1, RB: 0, WR: 4, OL: 3 },
         coordinates: {
-            QB1: [0, -5],
+            QB1: [0, -6],
             WR1:[-22, 0.5],
             WR2: [-10, 0.5],
             WR3: [10, 0.5],
             WR4:[22, 0.5],
-            OL1: [-2.0, -0.5],
-            OL2:[0, -0.75],
-            OL3: [2.0, -0.5]
+            OL1: [-3, -1.5], // 💡 Corrected: OL Baseline
+            OL2: [0, -1.5],
+            OL3: [3, -1.5]
         },
         slotPriorities: {
             QB1: { throwingAccuracy: 3, playbookIQ: 3 },
@@ -256,9 +256,9 @@ export const offenseFormations = {
         slots: ['OL1', 'OL2', 'OL3', 'WR1', 'WR2', 'RB1', 'TE1', 'QB1'],
         coordinates: {
             QB1: [0, -12],
-            OL1: [0, -0.5],
-            OL2: [-3, -0.5],
-            OL3: [3, -0.5],
+            OL1: [-3, -1.5], // 💡 Corrected: OL Baseline
+            OL2: [0, -1.5],
+            OL3: [3, -1.5],
             RB1: [0, -8],
             TE1: [-6, -2],
             WR1: [-20, 0.5],
@@ -426,11 +426,11 @@ export const defenseFormations = {
         slots: ['DL1', 'DL2', 'DL3', 'LB1', 'LB2', 'DB1', 'DB2', 'DB3'],
         personnel: { DL: 3, LB: 2, DB: 3 },
         coordinates: { 
-            DL1: [-5, 1], 
-            DL2: [0, 1], 
-            DL3: [5, 1], 
-            LB1: [-6, 5],
-            LB2: [6, 5],
+            DL1: [-5, 1.5],  // 💡 Corrected: DL Baseline
+            DL2: [0, 1.5], 
+            DL3: [5, 1.5], 
+            LB1: [-6, 7],
+            LB2: [6, 7],
             DB1: [-18, 8], 
             DB2: [18, 8], 
             DB3: [0, 14] 
@@ -442,11 +442,11 @@ export const defenseFormations = {
         slots: ['DL1', 'DL2', 'LB1', 'LB2', 'LB3', 'DB1', 'DB2', 'DB3'],
         personnel: { DL: 2, LB: 3, DB: 3 },
         coordinates: { 
-            DL1: [-3, 1], 
-            DL2: [3, 1], 
-            LB1: [-8, 5], 
-            LB2: [0, 5], 
-            LB3: [8, 5], 
+            DL1: [-3, 1.5], 
+            DL2: [3, 1.5], 
+            LB1: [-8, 7], 
+            LB2: [0, 7], 
+            LB3: [8, 7], 
             DB1: [-20, 8], 
             DB2: [20, 8],
             DB3: [0, 12]
@@ -457,12 +457,12 @@ export const defenseFormations = {
         slots: ['DL1', 'DL2', 'DL3', 'DL4', 'LB1', 'LB2', 'DB1', 'DB2'],
         personnel: { DL: 4, LB: 2, DB: 2 },
         coordinates: { 
-            DL1: [-5.0, 1],
-            DL2: [-1.5, 1],
-            DL3: [1.5, 1],
-            DL4: [5.0, 1],
-            LB1: [-4, 5], 
-            LB2: [4, 5], 
+            DL1: [-5.0, 1.5],
+            DL2: [-1.5, 1.5],
+            DL3: [1.5, 1.5],
+            DL4: [5.0, 1.5],
+            LB1: [-4, 7], 
+            LB2: [4, 7], 
             DB1: [-15, 10],
             DB2: [15, 10]
         }
@@ -472,11 +472,11 @@ export const defenseFormations = {
         slots: ['DL1', 'DL2', 'DL3', 'DL4', 'LB1', 'DB1', 'DB2', 'DB3'],
         personnel: { DL: 4, LB: 1, DB: 3 },
         coordinates: { 
-            DL1: [-5.5, 1], 
-            DL2: [-2.0, 1], 
-            DL3: [2.0, 1], 
-            DL4: [5.5, 1], 
-            LB1: [0, 6],
+            DL1: [-5.5, 1.5], 
+            DL2: [-2.0, 1.5], 
+            DL3: [2.0, 1.5], 
+            DL4: [5.5, 1.5], 
+            LB1: [0, 7],
             DB1: [-18, 8], 
             DB2: [18, 8], 
             DB3: [0, 12] 
@@ -487,10 +487,10 @@ export const defenseFormations = {
         slots: ['DL1', 'DL2', 'LB1', 'LB2', 'DB1', 'DB2', 'DB3', 'DB4'],
         // ...
         coordinates: { 
-            DL1: [-2, 1],
-            DL2: [2, 1], 
-            LB1: [-8, 5],
-            LB2: [8, 5], 
+            DL1: [-2, 1.5],
+            DL2: [2, 1.5], 
+            LB1: [-8, 7],
+            LB2: [8, 7], 
             DB1: [-15, 12],
             DB2: [15, 12], 
             // 💡 FIX: Standard punts travel 45-55 yards. 
@@ -504,10 +504,10 @@ export const defenseFormations = {
         slots: ['DL1', 'DL2', 'DL3', 'LB1', 'DB1', 'DB2', 'DB3', 'DB4'],
         personnel: { DL: 3, LB: 1, DB: 4 },
         coordinates: {
-            DL1: [-5.5, 1.0], 
-            DL2: [0, 1.0], 
-            DL3: [5.5, 1.0],
-            LB1: [0, 5.0],
+            DL1: [-5.5, 1.5], 
+            DL2: [0, 1.5], 
+            DL3: [5.5, 1.5],
+            LB1: [0, 7],
             DB1: [-15, 8.0],
             DB2: [15, 8.0], 
             DB3: [-6, 10.0],
@@ -529,9 +529,9 @@ export const defenseFormations = {
         slots: ['DL1', 'DL2', 'DL3', 'DB1', 'DB2', 'DB3', 'DB4', 'DB5'],
         personnel: { DL: 3, LB: 0, DB: 5 },
         coordinates: {
-            'DL1': [-5, 1.0],
-            'DL2': [0, 1.0],
-            'DL3': [5, 1.0],
+            'DL1': [-5, 1.5],
+            'DL2': [0, 1.5],
+            'DL3': [5, 1.5],
             'DB1': [-18, 8.0],
             'DB2': [18, 8.0],
             'DB3': [-6, 10.0],
@@ -570,7 +570,7 @@ export const defensivePlaybook = {
     'Victory_Prevent': { name: 'Victory Prevent', compatibleFormations: ['4-1-3'], compatibleCriteria: { minDL: 4, minDB: 3 }, tags: ['prevent', 'zone'], assignments: { 'DL1': 'spy_QB', 'DL2': 'pass_rush', 'DL3': 'pass_rush', 'DL4': 'spy_QB', 'DB1': 'zone_deep_half_left', 'DB2': 'zone_deep_half_right', 'DB3': 'zone_deep_middle' } },
 
     // --- Special ---
-    'Punt_Return_Return': { name: 'Punt Return', compatibleFormations: ['Punt_Return'], compatibleCriteria: { minDL: 2, minLB: 2, minDB: 3 }, tags: ['specialTeams'], assignments: { 'DL1': 'pass_rush', 'DL2': 'pass_rush', 'LB1': 'run_block', 'LB2': 'run_block', 'DB1': 'punt_return', 'DB2': 'punt_return', 'DB3': 'punt_return', 'DB4': 'punt_return' } },
+    'PuntReturn_Classic': { name: 'Punt Return', compatibleFormations: ['Punt_Return'], compatibleCriteria: { minDL: 2, minLB: 2, minDB: 3 }, tags: ['specialTeams'], assignments: { 'DL1': 'pass_rush', 'DL2': 'pass_rush', 'LB1': 'run_block', 'LB2': 'run_block', 'DB1': 'punt_return', 'DB2': 'punt_return', 'DB3': 'punt_return', 'DB4': 'punt_return' } },
     // --- 4-1-2 (Nickel Hybrid) Plays ---
 
     'Cover_2_Zone_4-1-2': {

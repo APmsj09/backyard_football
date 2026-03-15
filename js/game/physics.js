@@ -64,8 +64,10 @@ export function updatePlayerPosition(pState, timeDelta) {
     if (pState.isBallCarrier) speedMult *= 0.92; // Slightly tuned for balance
     if (pState.action === 'backpedal') speedMult *= 0.65;
     
+    const squeezingPenalty = pState.isSqueezing ? 0.6 : 1.0;
+    
     const contactReduction = pState.contactReduction || 1.0;
-    const maxSpeed = baseSpeed * fatigueMod * speedMult * contactReduction;
+    const maxSpeed = baseSpeed * fatigueMod * speedMult * contactReduction * squeezingPenalty;
 
     // --- 4. Acceleration & Agility Logic (Audit Fix: The "Burst" Feel) ---
     const agilityStat = pState.agility || 50;

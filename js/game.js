@@ -1744,9 +1744,14 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
             startX = Math.max(0.5, Math.min(53.3 - 0.5, startX));
             startY = Math.max(10.5, Math.min(110.0 - 10.5, startY));
 
-            // Neutral Zone Enforcement
-            if (!isOffense && startY < playState.lineOfScrimmage + 1.0) startY = playState.lineOfScrimmage + 1.0;
-            if (isOffense && startY > playState.lineOfScrimmage - 0.5) startY = playState.lineOfScrimmage - 0.5;
+            // DL starts 1.5yds ahead of LOS, OL starts 1.5yds behind LOS.
+            // This prevents the "Icon Overlap" at the start of the play.
+            if (!isOffense && startY < playState.lineOfScrimmage + 1.5) {
+                startY = playState.lineOfScrimmage + 1.5;
+            }
+            if (isOffense && startY > playState.lineOfScrimmage - 1.5) {
+                startY = playState.lineOfScrimmage - 1.5;
+            }
 
             // RPG Attributes
             const fatigueRatio = player.fatigue / (player.attributes?.physical?.stamina || 50);
@@ -4316,12 +4321,12 @@ function resolvePlayerCollisions(playState) {
 
             if (dist < combinedRadius && dist > 0.01) {
                 const overlap = combinedRadius - dist;
+                
+                // 💡 FIX: If icons are overlapping, trigger the squeezing penalty for the physics engine
+                p1.isSqueezing = true;
+                p2.isSqueezing = true;
 
-                // 💡 FIX: Context-Aware Repulsion
-                // If it's two Linemen bumping, they "grind" (lower push)
-                // If it's a Lineman hitting a QB/WR, the small player gets "bounced" (higher push)
-                let pushFactor = 0.15;
-                if (isP1Heavy && !isP2Heavy) pushFactor = 0.25;
+                let pushFactor = (p1.role === 'OL' || p1.role === 'DL') ? 0.4 : 0.15; 
 
                 const pushX = (dx / dist) * overlap * pushFactor;
                 const pushY = (dy / dist) * overlap * pushFactor;
@@ -5588,15 +5593,15 @@ function simulateLivePlayStep(game) {
     }
     else if (determinePuntDecision(game.down, game.yardsToGo, game.ballOn)) {
         offPlayKey = 'Punt_Punt';
-        defPlayKey = 'Punt_Return_Return';
-        // 💡 FIX: Do NOT overwrite the team formations here. 
+        defPlayKey = 'PuntReturn_Classic';
+        // Do NOT overwrite the team formations here. 
         // resolvePlay will use the offPlayKey/defPlayKey to set up the field.
     }
     else {
         const scoreDiff = (offense.id === game.homeTeam.id) ? (game.homeScore - game.awayScore) : (game.awayScore - game.homeScore);
         const drivesRemaining = 10;
 
-        // 💡 FIX: Force formation reset if coming off a Punt or Conversion
+        // Force formation reset if coming off a Punt or Conversion
         if (offense.formations.offense === 'Punt' || game.isConversionAttempt === false) {
             // Reset to coach preference or default
             offense.formations.offense = offense.coach?.preferredOffense || 'Balanced';
