@@ -4717,9 +4717,11 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
                     if (ballCarrierState.isBallCarrier && ballCarrierState.action !== 'qb_setup') {
                         if (!playState.stallCheck) playState.stallCheck = { tick: playState.tick, y: ballCarrierState.y };
 
-                        if (playState.tick - playState.stallCheck.tick >= 20) {
+                        if (playState.tick - playState.stallCheck.tick >= 60) {
                             const distMoved = Math.abs(ballCarrierState.y - playState.stallCheck.y);
-                            if (distMoved < 0.5) {
+                            // 💡 FIX: Increase threshold to 1.2 yards. 
+                            // If they haven't made significant progress in 1 second, the play is dead.
+                            if (distMoved < 1) {
                                 playState.playIsLive = false;
                                 playState.yards = ballCarrierState.y - playState.lineOfScrimmage;
                                 playState.finalBallY = ballCarrierState.y;
@@ -4743,11 +4745,24 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
                 // 💡 FIX: Instant Out of Bounds Whistle for fumbles AND punts
                 if (isBallOutOfBounds && (ball.isLoose || (playState.type === 'punt' && !ballCarrierState))) {
                     playState.playIsLive = false;
-                    playState.finalBallY = Math.max(0, Math.min(110, ball.y));
+                    
+                    const wentOutSideline = ball.x <= 0 || ball.x >= FIELD_WIDTH;
+                    
+                    // 💡 FIX: A punt is ONLY a touchback if it crosses the BACK of the endzone (y > 120)
+                    // or if it lands IN the endzone and is downed. 
+                    // If it crosses the SIDELINE, it's spotted where it crossed, even if y > 110.
+                    if (wentOutSideline) {
+                        playState.finalBallY = ball.y;
+                    } else {
+                        // Crosses back of endzone
+                        playState.finalBallY = 110; // Touchback
+                        playState.touchback = true;
+                    }
                     
                     if (playState.type === 'punt') {
                         playState.possessionChanged = true;
-                        if (gameLog) gameLog.push(`[Tick ${playState.tick}] 🟠 Punt out of bounds at the ${Math.round(playState.finalBallY)} yard line.`);
+                        const logMsg = playState.touchback ? "Touchback!" : `Punt out of bounds at the ${Math.round(playState.finalBallY)} yard line.`;
+                        if (gameLog) gameLog.push(`[Tick ${playState.tick}] 🟠 ${logMsg}`);
                     } else {
                         if (gameLog) gameLog.push(`[Tick ${playState.tick}] 🟠 Ball fumbled out of bounds at the ${Math.round(playState.finalBallY)} yard line.`);
                     }
