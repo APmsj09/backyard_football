@@ -2936,7 +2936,8 @@ function executeAssignment(pState, assignment, offenseStates, LOS, playState) {
                 pState.targetY = Math.max(LOS - 2, qb.y - 1.5);
             } else {
                 pState.targetX = qb.x;
-                pState.targetY = Math.max(LOS - 3, qb.y);
+                // 💡 FIX: Allow interior rushers to chase QB all the way to their full dropback depth
+                pState.targetY = qb.y; 
             }
             // 💡 FIX: Removed the game-breaking permanent speed multiplication!
             // The movement physics engine is naturally faster when unblocked anyway.
@@ -3125,14 +3126,14 @@ function checkTackleCollisions(playState, gameLog) {
 
             if (isSafety) {
                 playState.safety = true;
-                if (gameLog) gameLog.push(`🚨 SAFETY! ${carrier.name} tackled in endzone by ${defender.name}!`);
+                if (gameLog) gameLog.push(`[Tick ${playState.tick}] 🚨 SAFETY! ${carrier.name} tackled in endzone by ${defender.name}!`);
             } else if (isSack) {
                 playState.sack = true;
                 playState.yards = Math.floor(playState.yards);
                 playState.statEvents.push({ type: 'sack', playerId: defender.id, qbId: carrier.id });
-                if (gameLog) gameLog.push(`💥 SACK! ${defender.name} drops ${carrier.name} for loss of ${Math.abs(playState.yards)}!`);
+                if (gameLog) gameLog.push(`[Tick ${playState.tick}] 💥 SACK! ${defender.name} drops ${carrier.name} for loss of ${Math.abs(playState.yards)}!`);
             } else {
-                if (gameLog) gameLog.push(`✋ ${carrier.name} tackled by ${defender.name}.`);
+                if (gameLog) gameLog.push(`[Tick ${playState.tick}] ✋ ${carrier.name} tackled by ${defender.name}.`);
             }
             return true;
 
@@ -3157,7 +3158,7 @@ function checkTackleCollisions(playState, gameLog) {
                 if (playState) playState.qbIntent = 'scramble';
             }
 
-            if (gameLog) gameLog.push(`💪 ${carrier.name} breaks the tackle from ${defender.name}!`);
+            if (gameLog) gameLog.push(`[Tick ${playState.tick}] 💪 ${carrier.name} breaks the tackle from ${defender.name}!`);
 
             // 💡 FIX: Exit the loop so the carrier doesn't evaluate 5 tackles in the exact same 0.05s tick!
             break;
@@ -3310,8 +3311,8 @@ function resolveOngoingBlocks(playState, gameLog, offenseStates = [], defenseSta
         // FIX: Replaced early 'returns' with proper nesting so we don't skip Step 4!
         if (isPassRush && defender.isBlocked && blocker) {
 
-            // Initialize cooldown if undefined
-            defender.moveCooldown = defender.moveCooldown || 0;
+            // 💡 FIX: Initialize cooldown to 15 ticks (0.75s) so blocks hold initially off the snap
+            if (typeof defender.moveCooldown === 'undefined') defender.moveCooldown = 15;
 
             if (defender.moveCooldown > 0) {
                 defender.moveCooldown--;
@@ -3329,7 +3330,8 @@ function resolveOngoingBlocks(playState, gameLog, offenseStates = [], defenseSta
                     const dirY = dy / dist;
 
                     // --- Swim Move ---
-                    if (escapeScore > 115 && Math.random() < 0.15) {
+                    // 💡 FIX: Probability adjusted from 15% to 1.5% per tick to prevent instant teleporting
+                    if (escapeScore > 115 && Math.random() < 0.015) {
                         const speed = 0.6;
                         defender.x += dirX * speed;
                         defender.y += dirY * speed;
@@ -3339,7 +3341,8 @@ function resolveOngoingBlocks(playState, gameLog, offenseStates = [], defenseSta
                         defender.moveCooldown = 20; // 0.8 sec
                     }
                     // --- Spin Move ---
-                    else if (escapeScore > 125 && Math.random() < 0.1) {
+                    // 💡 FIX: Probability adjusted from 10% to 1.0% per tick
+                    else if (escapeScore > 125 && Math.random() < 0.01) {
                         const bx = blocker.x - defender.x;
                         const by = blocker.y - defender.y;
 
@@ -3629,7 +3632,9 @@ function updateQBDecision(qbState, offenseStates, defenseStates, playState, offe
 
     // 💡 FIX: Force scramble if time is running out, regardless of agility
     const timeIsRunningOut = playState.tick > 90;
-    const scrambleChance = timeIsRunningOut ? 0.8 : (qbAgility / 100);
+    // 💡 FIX: Multiply by 0.05 because this is evaluated 20 times per second! 
+    // Otherwise a 0.8 chance per tick = guaranteed instant scramble.
+    const scrambleChance = timeIsRunningOut ? 0.2 : ((qbAgility / 100) * 0.05);
     const isGoalLine = playState.lineOfScrimmage > 105;
     const scrambleThreshold = isGoalLine ? 90 : 70;
 
@@ -3848,7 +3853,7 @@ function executeThrow(qbState, target, strength, accuracy, playState, gameLog, a
         return;
     }
 
-    if (gameLog) gameLog.push(`🏈 ${qbState.name} passes to ${target.name} (${actionType})`);
+    if (gameLog) gameLog.push(`[Tick ${playState.tick}] 🏈 ${qbState.name} throws to ${target.name} (${actionType})`);
 
     // DEBUG: Log when throw happens
     if (gameLog && gameLog.length < 3) {
@@ -4097,21 +4102,21 @@ function handleBallArrival(playState, carrier, playResult, gameLog) {
             bestCandidate.action = 'run_path';
 
             if (playState.type === 'punt' && !bestCandidate.isOffense) {
-                pushLog(`🏈 ${bestCandidate.name} catches the punt! Return started.`);
+                pushLog(`[Tick ${playState.tick}] 🏈 ${bestCandidate.name} catches the punt! Return started.`);
                 playState.possessionChanged = true; playState.returnStartY = bestCandidate.y;
                 playState.activePlayers.forEach(p => { if (p.id !== bestCandidate.id) p.action = 'pursuit'; });
                 return;
             }
 
             if (isDefense) {
-                pushLog(`❗ INTERCEPTION! ${bestCandidate.name} picks it off!`);
+                pushLog(`[Tick ${playState.tick}] ❗ INTERCEPTION! ${bestCandidate.name} picks it off!`);
                 playState.interceptionOccurred = true; playState.possessionChanged = true;
                 playState.turnover = true; playState.returnStartY = bestCandidate.y;
                 playState.statEvents.push({ type: 'interception', interceptorId: bestCandidate.id, throwerId: ball.throwerId });
                 return;
             }
 
-            pushLog(`👍 CATCH! ${bestCandidate.name} grabs it!`);
+            pushLog(`[Tick ${playState.tick}] 👍 CATCH! ${bestCandidate.name} grabs it!`);
             const yardsGain = bestCandidate.y - playState.lineOfScrimmage;
             playState.statEvents.push({ type: 'completion', receiverId: bestCandidate.id, qbId: ball.throwerId, yards: yardsGain });
             return;
@@ -4123,7 +4128,7 @@ function handleBallArrival(playState, carrier, playResult, gameLog) {
 
                 const last = ball.lastInteraction;
                 if (!(last && last.playerId === bestCandidate.id && last.type === 'swat' && (playState.tick - last.tick) <= 1)) {
-                    pushLog(`🚫 ${bestCandidate.name} swats the pass away!`);
+                    pushLog(`[Tick ${playState.tick}] 🚫 ${bestCandidate.name} swats the pass away!`);
                     ball.vz = 2.0;
                     ball.vx += (Math.random() - 0.5) * 2;
                     ball.vy += (Math.random() - 0.5) * 2;
@@ -4134,7 +4139,7 @@ function handleBallArrival(playState, carrier, playResult, gameLog) {
             } else {
                 const last = ball.lastInteraction;
                 if (!(last && last.playerId === bestCandidate.id && last.type === 'drop' && (playState.tick - last.tick) <= 1)) {
-                    pushLog(`❌ ${bestCandidate.name} drops the pass!`);
+                    pushLog(`[Tick ${playState.tick}] ❌ ${bestCandidate.name} drops the pass!`);
                     playState.statEvents.push({ type: 'drop', playerId: bestCandidate.id });
                     ball.vz = -4.0; ball.vx *= 0.1; ball.vy *= 0.1;
                     ball.droppedById = bestCandidate.id;
@@ -4324,6 +4329,10 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
 
     // Load the actual play object (Deep clone to prevent mutating the playbook)
     const play = deepClone(offensivePlaybook[finalOffensivePlayKey]);
+
+    if (gameLog) {
+        pushGameLog(gameLog, `📋 Play Call | OFF: ${finalOffensivePlayKey} | DEF: ${defensivePlayKey}`);
+    }
 
     // --- 4. INITIALIZE STATE ---
     let playState = {
@@ -4748,7 +4757,8 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
         }
 
     } catch (e) {
-        console.error("Simulation Loop Crash:", e);
+        console.error(`Simulation Loop Crash on tick ${playState.tick}:`, e);
+        if (gameLog) gameLog.push(`🚨 [Tick ${playState.tick}] CRASH: ${e.message}`);
     }
 
     // ===========================================================
@@ -4770,7 +4780,7 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
         if (ballCarrierState) {
             playState.yards = ballCarrierState.y - playState.lineOfScrimmage;
             playState.finalBallY = ballCarrierState.y;
-            if (gameLog) gameLog.push(`⏱️ Play ends. Gain of ${playState.yards.toFixed(1)}.`);
+            if (gameLog) gameLog.push(`[Tick ${playState.tick}] ⏱️ Play ends. Gain of ${playState.yards.toFixed(1)}.`);
         }
         // 💡 FIX: Only mark incomplete if a fumble didn't occur
         else if (!playState.sack && !playState.turnover && !playState.fumbleOccurred) {
@@ -4778,7 +4788,7 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
             playState.yards = 0;
             // 💡 FIX: Incomplete passes MUST return to the line of scrimmage
             playState.finalBallY = playState.lineOfScrimmage;
-            if (gameLog) gameLog.push("⏱️ Play ends, incomplete.");
+            if (gameLog) gameLog.push(`[Tick ${playState.tick}] ⏱️ Play ends, incomplete.`);
         }
     }
 
