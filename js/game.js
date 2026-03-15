@@ -501,10 +501,10 @@ function getScoutedPlayerInfo(player, relationshipLevelNum) {
 function checkFumble(ballCarrierState, tacklerState, playState, gameLog) {
     if (!ballCarrierState.hasBall) return false;
 
-    // Attribute Lookups (Safety check if attributes missing)
-    const toughness = ballCarrierState.toughness || 50;
-    const strength = tacklerState.strength || 50;
-    const tackling = tacklerState.tackling || 50;
+    // FORCE CASTING
+    const toughness = Number(ballCarrierState.toughness) || 50;
+    const strength = Number(tacklerState.strength) || 50;
+    const tackling = Number(tacklerState.tackling) || 50;
 
     // Modifiers: Fatigue makes fumbles more likely
     const carrierMod = (toughness / 100) * (ballCarrierState.fatigueModifier || 1);
@@ -519,10 +519,13 @@ function checkFumble(ballCarrierState, tacklerState, playState, gameLog) {
     }
 
     if (Math.random() < fumbleChance) {
+        // 2. TRACK THE DROP (Prevents infinite fumble loop)
+        playState.ballState.lastDroppedById = ballCarrierState.id;
+        playState.ballState.droppedTick = playState.tick;
+
         if (gameLog) {
-            // 💡 FIX: Cast stats to Numbers to prevent "50" + "50" = "5050" string concatenation
-            const hitPower = Math.round(((Number(strength) + Number(tackling)) / 2) * tacklerState.fatigueModifier);
-            const security = Math.round(Number(toughness) * ballCarrierState.fatigueModifier);
+            const hitPower = Math.round(((strength + tackling) / 2) * tacklerState.fatigueModifier);
+            const security = Math.round(toughness * ballCarrierState.fatigueModifier);
             const actionX = ballCarrierState.x.toFixed(1);
             const actionY = ballCarrierState.y.toFixed(1);
             const yardage = (ballCarrierState.y - playState.lineOfScrimmage).toFixed(1);
@@ -3147,7 +3150,7 @@ function checkTackleCollisions(playState, gameLog) {
             return false; // Play continues as loose ball
         }
 
-         // B. Calculate Tackle Probability (The "Truck Stick" Check)
+        // B. Calculate Tackle Probability (The "Truck Stick" Check)
         const tacklerSkill = ((Number(defender.tackling) || 50) + (Number(defender.strength) || 50)) / 2;
         const runnerSkill = ((Number(carrier.agility) || 50) + (Number(carrier.strength) || 50)) / 2;
 
@@ -4144,7 +4147,7 @@ function handleBallArrival(playState, carrier, playResult, gameLog) {
     if (ball.inAir && ball.z > MAX_JUMP_HEIGHT) {
         return;
     }
-    
+
     // If the ball has already been swatted down or dropped, stop other players from interacting with it mid-air
     if (ball.isSwatted) {
         return;
@@ -4163,6 +4166,12 @@ function handleBallArrival(playState, carrier, playResult, gameLog) {
     };
 
     const playersInRange = playState.activePlayers.filter(p => {
+        // 1. RECOVERY COOLDOWN (Prevents Magnet Recatch in a loop)
+        if (ball.isLoose && p.id === ball.lastDroppedById) {
+            const ticksSinceDrop = playState.tick - (ball.droppedTick || 0);
+            if (ticksSinceDrop < 25) return false; // Must wait ~1.25s to pick up own fumble
+        }
+
         // 💡 FIX: Kicker/Punter cannot touch the ball for at least 1 second after kick
         const ticksSinceKick = playState.tick - (ball.throwTick || 0);
         if (p.id === ball.throwerId && ticksSinceKick < 20) return false;
@@ -4356,15 +4365,18 @@ function handleBallArrival(playState, carrier, playResult, gameLog) {
                 playState.finalBallY = ball.y;
             }
         }
-        // PASSING RULE
+        // PASSING RULE (Statue Killer Fix)
         else if (playState.type === 'pass' && !ball.isLoose) {
             const wasCaught = playState.statEvents.some(e => e.type === 'completion' || e.type === 'interception');
             if (playState.playIsLive && !wasCaught) {
-                playState.playIsLive = false; playState.incomplete = true;
-                ball.vz = -ball.vz * 0.4; ball.vx *= 0.6;
+                playState.playIsLive = false;
+                playState.incomplete = true;
+                ball.vz = 0; ball.vx = 0; ball.vy = 0; // Stop ball
+                playState.finalBallY = playState.lineOfScrimmage;
+                if (gameLog) gameLog.push(`[Tick ${playState.tick}] ⏱️ Pass hits the turf. Incomplete.`);
             } else if (wasCaught && playState.playIsLive) {
                 playState.playIsLive = false;
-                if (gameLog && !playState.fumbleOccurred) gameLog.push("⏱️ Ball hits the ground.");
+                if (gameLog && !playState.fumbleOccurred) gameLog.push(`[Tick ${playState.tick}] ⏱️ Ball hits the ground.`);
             }
         }
         // FUMBLE RULE (Bounce)
@@ -5417,8 +5429,9 @@ function determineDefensiveFormation(defense, offenseFormationName, down, yardsT
         }
 
         // 50% chance they guess randomly (Bad!) - pick a random available formation key
-        const allFormations = Object.keys(defenseFormations);
-        return getRandom(allFormations);
+        // FIX: Exclude Punt Return from the random "Confused" pool so it isn't picked on normal downs
+        const validFormations = Object.keys(defenseFormations).filter(key => key !== 'Punt_Return');
+        return getRandom(validFormations);
     }
 }
 
