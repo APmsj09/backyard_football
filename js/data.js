@@ -318,7 +318,7 @@ export const offensivePlaybook = {
     // ===================================
     'Spread_BubbleScreen': {
         type: 'pass', tags: ['pass', 'screen', 'short'],
-        readProgression: ['WR3'],
+        readProgression: ['WR3', 'WR1', 'WR2'], // 💡 Added full progression
         assignments: { 'WR3': 'Bubble', 'WR1': 'run_block', 'WR2': 'Fly', 'OL1': 'run_block', 'OL2': 'run_block', 'OL3': 'run_block' }
     },
     'Spread_FourVerts': {
@@ -334,7 +334,7 @@ export const offensivePlaybook = {
     // NEW: Post-Corner Concept
     'Spread_DoubleMove': {
         type: 'pass', tags: ['pass', 'deep', 'doublemove'],
-        readProgression: ['WR1', 'WR3'],
+        readProgression:['WR1', 'WR3', 'WR2'], // 💡 Added WR2 as checkdown
         assignments: { 'WR1': 'PostCorner', 'WR2': 'Comeback', 'WR3': 'Seam', 'OL1': 'pass_block', 'OL2': 'pass_block', 'OL3': 'pass_block' }
     },
 
