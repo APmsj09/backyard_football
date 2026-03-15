@@ -4643,18 +4643,25 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
                     }
 
                     // 5. FORWARD PROGRESS STALLED
-                    if (!playState.stallCheck) playState.stallCheck = { tick: playState.tick, y: ballCarrierState.y };
+                    // 💡 FIX: Ignore QBs setting up in the pocket. Only apply stall checks to active runners.
+                    if (ballCarrierState.isBallCarrier && ballCarrierState.action !== 'qb_setup') {
+                        if (!playState.stallCheck) playState.stallCheck = { tick: playState.tick, y: ballCarrierState.y };
 
-                    if (playState.tick - playState.stallCheck.tick >= 20) {
-                        const distMoved = Math.abs(ballCarrierState.y - playState.stallCheck.y);
-                        if (distMoved < 0.5) {
-                            playState.playIsLive = false;
-                            playState.yards = ballCarrierState.y - playState.lineOfScrimmage;
-                            playState.finalBallY = ballCarrierState.y;
-                            if (gameLog) gameLog.push(`⏱️ Forward progress stopped. Play blown dead.`);
-                            break;
+                        if (playState.tick - playState.stallCheck.tick >= 20) {
+                            const distMoved = Math.abs(ballCarrierState.y - playState.stallCheck.y);
+                            if (distMoved < 0.5) {
+                                playState.playIsLive = false;
+                                playState.yards = ballCarrierState.y - playState.lineOfScrimmage;
+                                playState.finalBallY = ballCarrierState.y;
+                                // Added the tick stamp here for debugging consistency
+                                if (gameLog) gameLog.push(`[Tick ${playState.tick}] ⏱️ Forward progress stopped. Play blown dead.`);
+                                break;
+                            }
+                            playState.stallCheck = { tick: playState.tick, y: ballCarrierState.y };
                         }
-                        playState.stallCheck = { tick: playState.tick, y: ballCarrierState.y };
+                    } else {
+                        // Clear the check if the QB is just standing legally in the pocket
+                        playState.stallCheck = null;
                     }
                 } 
 
