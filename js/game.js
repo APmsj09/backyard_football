@@ -3008,16 +3008,42 @@ function checkTackleCollisions(playState, gameLog) {
     if (!carrier) return false;
 
     // 2. Find Active Defenders in Range
-    // Note: We filter out stunned/blocked defenders
     const defenders = playState.activePlayers.filter(p => {
+        if (p.teamId === carrier.teamId || p.stunnedTicks > 0) return false;
+        
         const dist = getDistance(p, carrier);
-        // A blocked defender can tackle if they are within 0.8 yards (collision)
-        const canTackleWhileBlocked = p.isBlocked && dist < 0.8;
+        if (dist > TACKLE_RANGE) return false;
 
-        return p.teamId !== carrier.teamId &&
-            (!p.isBlocked || canTackleWhileBlocked) &&
-            p.stunnedTicks === 0 &&
-            dist < TACKLE_RANGE;
+        // 💡 FIX: Prevent DL from reaching *through* the OL to sack the QB
+        if (p.isBlocked || p.isEngaged) {
+            const blockerId = p.blockedBy || p.engagedWith;
+            const blocker = playState.activePlayers.find(b => b.id === blockerId);
+            
+            if (blocker) {
+                const distToBlocker = getDistance(p, blocker);
+                
+                // If the carrier is further away than the blocker, check if they are shielded
+                if (dist > distToBlocker) {
+                    const dxC = carrier.x - p.x;
+                    const dyC = carrier.y - p.y;
+                    const dxB = blocker.x - p.x;
+                    const dyB = blocker.y - p.y;
+                    
+                    // Dot product determines alignment. > 0.4 means carrier is behind blocker's body
+                    const dot = (dxC * dxB + dyC * dyB) / (dist * distToBlocker);
+                    
+                    if (dot > 0.4) {
+                        return false; // Blocker is successfully shielding the carrier!
+                    }
+                }
+            }
+            
+            // If not shielded, they can make a "reach" tackle to the side, 
+            // but at a reduced range (1.3 yds) because they only have one arm free.
+            return dist < 1.3; 
+        }
+
+        return true; // Unblocked defenders use the full TACKLE_RANGE
     });
 
     for (const defender of defenders) {
