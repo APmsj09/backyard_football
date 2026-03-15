@@ -2058,136 +2058,136 @@ function analyzePlaySuccess(lastPlayState, offensiveTeam, defensiveTeam) {
 }
 
 /**
- * BALL CARRIER AI: Uses "Raycasting" logic to find open lanes.
- * 💡 IMPROVED: Multi-depth vision, blocker following, contact awareness
+ * BALL CARRIER AI: Dynamic Raycasting & Steering
+ * 💡 OVERHAUL: Adds Inertia, Lead-Block Drafting, Hip-Leverage, and Micro-Dodging
  */
 function getSmartCarrierTarget(runner, defenseStates, offenseStates, fieldWidth = 53.3) {
     const runnerIQ = runner.playbookIQ || 50;
     const runnerAgility = runner.agility || 50;
-    const runnerVision = runner.speed || 50; // Speed helps with spatial awareness
-
-    // 1. Define Vision Depth (How far ahead do they look?)
-    // Smart players look deeper (up to 12 yards), dumb players look at their feet (3 yards)
-    const primaryVisionDepth = 3.0 + (runnerIQ / 15);
-    const secondaryVisionDepth = primaryVisionDepth + 5.0; // Look ahead for developing blocks
-
-    // 2. Define Lanes (Relative to runner X)
-    // 💡 EXPANDED: More lanes for lateral awareness
-    // [FarLeft, Left-Mid, Left, Center, Right, Right-Mid, FarRight]
-    const laneOffsets = [-6, -4, -2.5, 0, 2.5, 4, 6];
+    
+    // 1. Define Vision Depth (How far downfield are we scanning?)
+    const primaryVisionDepth = 3.0 + (runnerIQ / 20); // 4.5 to 8 yards
+    
+    // 2. Finer Lane Granularity (More angles for smoother curves)
+    const laneOffsets =[-7, -5, -3, -1.5, 0, 1.5, 3, 5, 7];
 
     let bestScore = -Infinity;
     let bestTargetX = runner.x;
-    let bestTargetY = runner.y + primaryVisionDepth; // Default forward
-    let bestLaneIdx = -1;
+    let bestTargetY = runner.y + primaryVisionDepth; 
+
+    // Current momentum vector (to penalize unrealistic sharp cuts)
+    const currentVx = runner.vx || 0;
 
     // 3. Evaluate Each Lane
-    laneOffsets.forEach((offset, laneIdx) => {
-        // Calculate the hypothetical point we are running to
-        const testX = Math.max(1.0, Math.min(fieldWidth - 1.0, runner.x + offset)); // Clamp to bounds
-        const testY = runner.y + primaryVisionDepth; // Looking downfield
+    laneOffsets.forEach((offset) => {
+        const testX = runner.x + offset;
+        const testY = runner.y + primaryVisionDepth;
 
-        // Score this point (Higher is better)
-        let score = 0;
+        // Immediate Disqualification: Out of bounds
+        if (testX < 1 || testX > fieldWidth - 1) return;
 
-        // A. Forward Progress Bonus (We want to go downfield)
-        // Center lanes are slightly preferred to prevent running sideline-to-sideline unnecessarily
-        score += 100;
-        score -= Math.abs(offset) * 1.5; // Less penalty for wider lanes now
+        let score = 100; // Base score
 
-        // B. Defender Repulsion (The "Fear" Factor)
-        // 💡 IMPROVED: Multi-defender scoring (not just closest)
-        let defenderScore = 0;
+        // A. Forward Progress & Inertia
+        // Penalize sharp lateral cuts based on Agility. 
+        // Penalize cutting against momentum (e.g. running left, trying to cut hard right).
+        const lateralShift = Math.abs(offset);
+        const momentumConflict = Math.abs(offset - (currentVx * 0.5)); 
+        const agilityModifier = Math.max(0.4, (120 - runnerAgility) / 60); // 0.4 (Elite) to 1.1 (Slow)
+        
+        score -= (lateralShift * 3 * agilityModifier);
+        score -= (momentumConflict * 4 * agilityModifier);
+
+        // B. Defender Repulsion
         let defendersInLane = 0;
-
         defenseStates.forEach(def => {
-            // Only care about defenders in front of us or close by
-            if (def.y > runner.y - 2 && def.stunnedTicks === 0) {
-                // Distance to this specific lane point
-                const dist = Math.sqrt((testX - def.x) ** 2 + (testY - def.y) ** 2);
+            if (def.stunnedTicks > 0 || def.y < runner.y - 1.0) return;
 
-                // Inverse Square Law: Defenders get exponentially scarier the closer they are
-                if (dist < 10.0) {
-                    defenderScore -= (700 / (dist * dist + 1));
-                    if (dist < 3) defendersInLane++;
+            const distToTestPoint = Math.hypot(testX - def.x, testY - def.y);
+            
+            if (!def.isBlocked && !def.isEngaged) {
+                // Unblocked defenders are highly dangerous
+                if (distToTestPoint < 5.0) {
+                    score -= (600 / (distToTestPoint + 1)); // Exponential fear
+                    if (distToTestPoint < 2.5) defendersInLane++;
+                }
+                
+                // Anticipation: Is the defender waiting squarely in this lane ahead?
+                if (Math.abs(def.x - testX) < 1.5 && def.y > runner.y && def.y < testY + 2) {
+                    score -= 300; // Roadblock
+                }
+            } else {
+                // Blocked defender: Predictable obstacle
+                if (distToTestPoint < 1.5) {
+                    score -= 120; // Don't run directly into the back of a defender
                 }
             }
         });
 
-        score += defenderScore;
+        if (defendersInLane >= 2) score -= 400; // Overloaded lane penalty
 
-        // If too many defenders in this lane, heavily penalize (overloaded)
-        if (defendersInLane >= 3) score -= 200;
+        // C. Blocker Attraction (Follow the convoy!)
+        offenseStates.forEach(off => {
+            if (off.id === runner.id || off.y < runner.y - 1.0) return;
 
-        // C. Blocker Attraction (The "Trust" Factor)
-        // 💡 IMPROVED: Trust blocks to generate lanes
-        let blockerBonus = 0;
-        offenseStates.forEach(ol => {
-            if (ol.id !== runner.id && ol.y > runner.y) {
-                const dist = Math.sqrt((testX - ol.x) ** 2 + (testY - ol.y) ** 2);
-                // If a blocker is AT the point, that's bad (collision). 
-                // If a blocker is NEAR the point (creating a wall), that's good.
-                if (dist < 1.0) {
-                    blockerBonus -= 50; // Don't run into his back
-                } else if (dist < 3.0) {
-                    blockerBonus += 30; // Run behind him
-                } else if (dist < 6.0) {
-                    blockerBonus += 15; // General blocking presence
+            const distToTestPoint = Math.hypot(testX - off.x, testY - off.y);
+
+            if (off.isEngaged || off.isBlocked) {
+                // Engaged block: We want to run right off their hip, not into their back
+                if (distToTestPoint >= 1.5 && distToTestPoint <= 3.0) {
+                    score += 70; // Hip lane / Seam
+                } else if (distToTestPoint < 1.5) {
+                    score -= 100; // Colliding with back of blocker
+                }
+            } else {
+                // Free blocker (Lead blocker)
+                if (distToTestPoint >= 1.5 && distToTestPoint <= 4.0 && off.y > runner.y + 1) {
+                    score += 100; // DRAFTING: Follow the lead block!
                 }
             }
         });
-        score += blockerBonus;
 
-        // D. Out of Bounds Penalty
-        if (testX <= 2 || testX >= fieldWidth - 2) score -= 80;
-
-        // E. Cutback Lane Detection (Secondary Vision)
-        // 💡 NEW: Smarter runners look for cutback lanes
-        if (runnerIQ > 60) {
-            const cutbackX = runner.x + (offset * -1.2); // Opposite direction
-            const cutbackY = runner.y + secondaryVisionDepth;
-
-            let cutbackScore = 50; // Base bonus for cutback option
-            let cutbackDefCount = 0;
-
-            defenseStates.forEach(def => {
-                if (def.y > runner.y - 1 && def.stunnedTicks === 0) {
-                    const distToCutback = Math.sqrt((cutbackX - def.x) ** 2 + (cutbackY - def.y) ** 2);
-                    if (distToCutback < 8) cutbackDefCount++;
-                }
-            });
-
-            // If cutback is open (fewer defenders), boost this lane
-            if (cutbackDefCount < defendersInLane) {
-                score += 50;
-            }
+        // D. Sideline Avoidance (Exponential decay near bounds)
+        const distToSideline = Math.min(testX, fieldWidth - testX);
+        if (distToSideline < 4) {
+            score -= (100 / Math.max(0.1, distToSideline));
         }
 
-        // F. Update Best Lane
+        // E. Update Best Lane
         if (score > bestScore) {
             bestScore = score;
             bestTargetX = testX;
             bestTargetY = testY;
-            bestLaneIdx = laneIdx;
         }
     });
 
-    // 4. Agility-Based Cut Recognition
-    // 💡 IMPROVED: High agility runners can execute tighter cuts
-    const cutSharpness = (runnerAgility / 120); // 0.42 to 0.83
+    // 4. Micro-Steering (Immediate Threat Avoidance)
+    // If an unblocked defender is inside our personal bubble (2.5 yards), override macro-pathing to dodge!
+    const closestThreat = defenseStates
+        .filter(def => !def.isBlocked && !def.isEngaged && def.stunnedTicks === 0 && def.y >= runner.y - 0.5)
+        .sort((a, b) => Math.hypot(a.x - runner.x, a.y - runner.y) - Math.hypot(b.x - runner.x, b.y - runner.y))[0];
 
-    // 5. Contact Awareness
-    // 💡 NEW: Defender proximity slows decision-making and changes strategy
-    const proximityDefender = defenseStates.find(def =>
-        getDistance(def, runner) < 3.0 && def.stunnedTicks === 0
-    );
+    if (closestThreat && Math.hypot(closestThreat.x - runner.x, closestThreat.y - runner.y) < 2.5) {
+        
+        // Determine which side of the defender has more space
+        let dodgeDir = runner.x < closestThreat.x ? -1 : 1; // Default: dodge away
+        
+        // Override: Don't dodge out of bounds
+        if (runner.x < 5 && closestThreat.x > runner.x) dodgeDir = 1; // Force inside
+        if (runner.x > fieldWidth - 5 && closestThreat.x < runner.x) dodgeDir = -1; // Force inside
 
-    if (proximityDefender) {
-        // When defender is close, prefer quick cuts over deep lanes
-        bestTargetY = Math.min(bestTargetY, runner.y + 4);
+        // Smarter/more agile runners dodge wider and sharper
+        const dodgeWidth = 1.5 + (runnerAgility / 40); 
+        bestTargetX = runner.x + (dodgeDir * dodgeWidth);
+        
+        // Slow down forward momentum to execute the cut & let blocks develop
+        bestTargetY = Math.min(bestTargetY, runner.y + 1.5); 
     }
 
-    return { x: bestTargetX, y: bestTargetY, laneIdx: bestLaneIdx };
+    // Final safety clamp
+    bestTargetX = Math.max(1.5, Math.min(fieldWidth - 1.5, bestTargetX));
+
+    return { x: bestTargetX, y: bestTargetY };
 }
 
 /**
@@ -3141,12 +3141,16 @@ function checkTackleCollisions(playState, gameLog) {
             const carrierStrength = carrier.strength || 50;
             const defenderSpeed = defender.speed || 50;
 
-            // 💡 HURDLE ATTEMPT (Jump over tackle)
+            // 💡 FIX: Added action cooldown check so they can't spam hurdles 20x per second
+            const canPerformMove = !carrier.moveCooldown || carrier.moveCooldown <= 0;
+
+            // 💡 HURDLE ATTEMPT
             const hurdleChance = (carrierAgility / 120) - (defenderSpeed / 150);
-            if (hurdleChance > 0.1 && Math.random() < hurdleChance * 0.5) {
+            if (canPerformMove && hurdleChance > 0.1 && Math.random() < hurdleChance * 0.4) {
                 carrier.action = 'hurdle';
                 carrier.hurdleTicks = 8; 
-                defender.stunnedTicks = 10; 
+                carrier.moveCooldown = 30; // 💡 1.5 second cooldown before next move
+                defender.stunnedTicks = 15;  
                 if (carrier.vy) carrier.vy *= 1.15; 
                 
                 // 💡 FIX: Apply fatigue penalty so they can't hurdle the whole team
@@ -3193,7 +3197,7 @@ function checkTackleCollisions(playState, gameLog) {
 
                 // Carrier gets slight speed reduction (effort expended)
                 if (carrier.vy) carrier.vy *= 0.95;
-
+                carrier.moveCooldown = 30; // 💡 1.5 second cooldown before next move
                 if (gameLog) gameLog.push(`💪 ${carrier.name} stiff-armed ${defender.name}!`);
                 continue;
             }
@@ -3205,8 +3209,13 @@ function checkTackleCollisions(playState, gameLog) {
         }
 
         // B. Calculate Tackle Probability (The "Truck Stick" Check)
-        const tacklerSkill = ((Number(defender.tackling) || 50) + (Number(defender.strength) || 50)) / 2;
-        const runnerSkill = ((Number(carrier.agility) || 50) + (Number(carrier.strength) || 50)) / 2;
+        const t_tkl = Number(defender.tackling) || 50;
+        const t_str = Number(defender.strength) || 50;
+        const c_agi = Number(carrier.agility) || 50;
+        const c_str = Number(carrier.strength) || 50;
+
+        const tacklerSkill = (t_tkl + t_str) / 2;
+        const runnerSkill = (c_agi + c_str) / 2;
 
         const weightDiff = (Number(carrier.weight) || 200) - (Number(defender.weight) || 200);
         const momentumBonus = Math.max(-0.10, Math.min(0.10, weightDiff / 2000));
@@ -3241,7 +3250,9 @@ function checkTackleCollisions(playState, gameLog) {
             }
         } catch (e) { /* defensive: keep disciplinePenalty = 0 */ }
 
-        let successChance = 0.78 + ((tacklerSkill - runnerSkill) * 0.006) - momentumBonus - speedBonus - anglePenalty + closingBonus - disciplinePenalty + fatigueFactor;
+        const brokenTacklePenalty = (carrier.tacklesBrokenThisPlay || 0) * 0.15;
+        
+        let successChance = 0.82 + ((tacklerSkill - runnerSkill) * 0.005) - momentumBonus - speedBonus + brokenTacklePenalty;
         successChance = Math.max(0.20, Math.min(0.985, successChance));
 
         if (Math.random() < successChance) {
@@ -6422,7 +6433,7 @@ function checkCaptainDiscipline(team, gameLog) {
 
     const isSmart = Math.random() > mentalErrorChanceClamped;
 
-    if (!isSmart && gameLog && Math.random() < 0.2 && !team._captainFlavorLogged) {
+    if (!isSmart && gameLog && Math.random() < 0.05 && !team._captainFlavorLogged) {
         // Flavor text for bad calls (20% of the time they fail). Only once per play.
         pushGameLog(gameLog, `⚠️ ${captain.name} looks confused and rushes the play call...`);
         team._captainFlavorLogged = true;
