@@ -4147,10 +4147,23 @@ function handleBallArrival(playState, carrier, playResult, gameLog) {
     if (ball.inAir && ball.z > MAX_JUMP_HEIGHT) {
         return;
     }
-
+    
     // If the ball has already been swatted down or dropped, stop other players from interacting with it mid-air
     if (ball.isSwatted) {
-        return;
+        // 💡 FIX: We still need to kill the play if the swatted ball hits the ground!
+        // We cannot just "return" without checking the turf first.
+        if (ball.z <= 0) {
+            ball.z = 0;
+            ball.vz = 0; // Stop the ball from falling further
+            
+            if (playState.type === 'pass' && !ball.isLoose && playState.playIsLive) {
+                playState.playIsLive = false; // Kill the physics loop!
+                playState.incomplete = true;
+                playState.finalBallY = playState.lineOfScrimmage;
+                if (gameLog) gameLog.push(`[Tick ${playState.tick}] ⏱️ Pass hits the turf. Incomplete.`);
+            }
+        }
+        return; // Now we can safely return so players don't try to catch it
     }
 
     const CATCH_RADIUS = 1.2;
