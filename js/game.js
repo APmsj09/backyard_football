@@ -1621,6 +1621,9 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
             let targetY = startY;
             let routePath = null;
             let readProgression = [];
+            let dropbackPhase = null;
+            let hasCompletedDropback = true;
+            let dropbackTargetY = startY;
 
             // --- A. OFFENSE SETUP ---
             if (isOffense) {
@@ -1632,11 +1635,10 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
                     } else {
                         assignment = 'qb_setup'; 
                         action = 'qb_setup';
-                        // 💡 NEW: Initialize dropback state
-                        pState.dropbackPhase = 'dropping';
-                        pState.hasCompletedDropback = false;
-                        // Determine depth based on play type (Passes drop deeper than Runs)
-                        pState.dropbackTargetY = play.type === 'pass' ? startY - 7.0 : startY - 3.0;
+                        // 💡 NEW: Initialize dropback state safely
+                        dropbackPhase = 'dropping';
+                        hasCompletedDropback = false;
+                        dropbackTargetY = play.type === 'pass' ? startY - 7.0 : startY - 3.0;
                     }
                 }
                 else if (slot.startsWith('OL')) {
@@ -1783,6 +1785,10 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
                 readProgression: readProgression,
                 currentReadTargetSlot: readProgression[0] || null,
                 ticksOnCurrentRead: 0,
+
+                dropbackPhase: dropbackPhase,
+                hasCompletedDropback: hasCompletedDropback,
+                dropbackTargetY: dropbackTargetY,
 
                 // Physics State
                 vx: 0, vy: 0, vz: 0, // Ensure Z exists
@@ -2709,8 +2715,7 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
         if (shouldPursue && ballCarrierState) {
             const dist = getDistance(pState, ballCarrierState);
             
-            // 💡 FIX: Smarter players take better angles. Lower IQ players just chase the tail.
-            // This normalizes game speed by preventing low-stat defenders from moving "too efficiently".
+            // 💡 FIX: Smarter players take better angles...
             const iq = pState.playbookIQ || 50;
             const leadTime = dist / (12 + (iq / 5)); 
 
@@ -2749,6 +2754,10 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
             } else {
                 executeAssignment(pState, assignment, offenseStates, LOS, playState);
             }
+        }
+        else {
+            // 💡 FIX: Pre-throw logic! Execute normal assignment (Man, Zone, Blitz, etc.)
+            executeAssignment(pState, assignment, offenseStates, LOS, playState);
         }
 
         // Final Clamp
@@ -4224,8 +4233,8 @@ function resolvePlayerCollisions(playState) {
             const isP1Heavy = p1.role === 'OL' || p1.role === 'DL';
             const isP2Heavy = p2.role === 'OL' || p2.role === 'DL';
 
-            let r1 = isP1Heavy ? BASE_RADIUS * 1.25 : BASE_RADIUS;
-            let r2 = isP2Heavy ? BASE_RADIUS * 1.25 : BASE_RADIUS;
+            let r1 = isP1Heavy ? PLAYER_SEPARATION_RADIUS * 1.25 : PLAYER_SEPARATION_RADIUS;
+            let r2 = isP2Heavy ? PLAYER_SEPARATION_RADIUS * 1.25 : PLAYER_SEPARATION_RADIUS;
             let combinedRadius = r1 + r2;
 
             if (dist < combinedRadius && dist > 0.01) {

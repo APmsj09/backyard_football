@@ -3026,7 +3026,7 @@ function animateQBShout(frame) {
             // Re-draw field with a tiny random offset only for the QB
             // (Alternative: Simple scale pulse)
             drawFieldVisualization(frame);
-            requestAnimationFrame(shake); f
+            requestAnimationFrame(shake);
         } else {
             drawFieldVisualization(frame); // Final clean draw
         }
