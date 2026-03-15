@@ -1633,7 +1633,7 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
                     } else if (play.type === 'run') {
                         assignment = 'run_fake'; action = 'run_fake'; // Holds QB in place
                     } else {
-                        assignment = 'qb_setup'; 
+                        assignment = 'qb_setup';
                         action = 'qb_setup';
                         // 💡 NEW: Initialize dropback state safely
                         dropbackPhase = 'dropping';
@@ -1733,7 +1733,12 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
                     // We let the AI move them there, but start them generally correct
                     if (assignment.includes('deep')) startY = Math.max(startY, playState.lineOfScrimmage + 8);
                 }
+                // 💡 FIX: Push Punt Returners much deeper so they aren't out-kicked by the punter
+                if (assignment === 'punt_return') {
+                    startY = Math.min(108, startY); // Never stand deeper than the 2-yard line in the endzone
+                }
             }
+            
 
             // --- 6. CLAMP & SPAWN ---
             startX = Math.max(0.5, Math.min(53.3 - 0.5, startX));
@@ -1809,17 +1814,17 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
 
     // 8. INITIALIZE BALL (Always starts with QB)
     const qbState = playState.activePlayers.find(p => p.slot === 'QB1' && p.isOffense);
-    
+
     if (qbState) {
         qbState.hasBall = true;
         playState.ballState.x = qbState.x;
         playState.ballState.y = qbState.y;
         playState.ballState.z = 1.0;
-        
+
         // If it's a run, flag that we need a handoff
         if (play.type === 'run') {
             const hasRB = playState.activePlayers.some(p => p.slot === 'RB1');
-            
+
             if (hasRB) {
                 playState.handoffRequired = true;
                 playState.handoffTargetSlot = 'RB1';
@@ -2190,7 +2195,7 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
             .filter(p => p.isOffense === isOff && p.stunnedTicks <= 0 && !p.isEngaged)
             .sort((a, b) => getDistance(a, playState.ballState) - getDistance(b, playState.ballState))
             .slice(0, 3);
-            
+
         const pursuers = [...getClosest(true), ...getClosest(false)];
 
         playState.activePlayers.forEach(pState => {
@@ -2531,14 +2536,14 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                 // 💡 FIX: Missing pocket dropback logic added
                 case 'qb_setup':
                     const qbIQ = pState.playbookIQ || 50;
-                    
+
                     // PHASE 1: THE DROPBACK (Explosive movement to depth)
                     if (!pState.hasCompletedDropback) {
                         pState.targetX = pState.initialX;
                         pState.targetY = pState.dropbackTargetY;
-                        
+
                         // Give the QB a speed boost during the dropback to simulate backpedaling
-                        pState.contactReduction = 1.4; 
+                        pState.contactReduction = 1.4;
 
                         // Once within 0.5 yards of target depth, plant feet and switch to phase 2
                         if (Math.abs(pState.y - pState.dropbackTargetY) < 0.5) {
@@ -2551,18 +2556,18 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                     // PHASE 2: THE SET & DRIFT (Pocket awareness logic)
                     // (This is the awareness logic we implemented in the previous step)
                     pState.contactReduction = 1.0; // Reset speed to normal
-                    
+
                     let idealX = pState.initialX;
                     let idealY = pState.y;
 
                     const rushers = defenseStates.filter(d => !d.isBlocked && getDistance(pState, d) < 6);
-                    
+
                     if (rushers.length > 0 && qbIQ > 40) {
                         let shiftX = 0;
                         let shiftY = 0;
                         rushers.forEach(r => {
                             const dx = r.x - pState.x;
-                            if (Math.abs(dx) > 2 && r.y > pState.y + 1) shiftY += 0.5; 
+                            if (Math.abs(dx) > 2 && r.y > pState.y + 1) shiftY += 0.5;
                             if (Math.abs(dx) < 4) shiftX += (dx > 0 ? -1.2 : 1.2);
                         });
                         const iqMod = qbIQ / 100;
@@ -2579,7 +2584,7 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                         pState.action = 'route_complete';
                         break;
                     }
-                    
+
                     const pt = pState.routePath[pState.currentPathIndex];
                     const distToNode = getDistance(pState, pt);
 
@@ -2589,7 +2594,7 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                         const agility = pState.agility || 50;
                         // High agility = faster turns. We give a temporary speed burst 
                         // to simulate the "explosion" out of a break.
-                        pState.contactReduction = 1.2 + (agility / 200); 
+                        pState.contactReduction = 1.2 + (agility / 200);
                     } else {
                         pState.contactReduction = 1.0;
                     }
@@ -2714,10 +2719,10 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
 
         if (shouldPursue && ballCarrierState) {
             const dist = getDistance(pState, ballCarrierState);
-            
+
             // 💡 FIX: Smarter players take better angles...
             const iq = pState.playbookIQ || 50;
-            const leadTime = dist / (12 + (iq / 5)); 
+            const leadTime = dist / (12 + (iq / 5));
 
             const carrierVx = ballCarrierState.vx || 0;
             const carrierVy = ballCarrierState.vy || 0;
@@ -2937,7 +2942,7 @@ function executeAssignment(pState, assignment, offenseStates, LOS, playState) {
             } else {
                 pState.targetX = qb.x;
                 // 💡 FIX: Allow interior rushers to chase QB all the way to their full dropback depth
-                pState.targetY = qb.y; 
+                pState.targetY = qb.y;
             }
             // 💡 FIX: Removed the game-breaking permanent speed multiplication!
             // The movement physics engine is naturally faster when unblocked anyway.
@@ -3010,7 +3015,7 @@ function checkTackleCollisions(playState, gameLog) {
     // 2. Find Active Defenders in Range
     const defenders = playState.activePlayers.filter(p => {
         if (p.teamId === carrier.teamId || p.stunnedTicks > 0) return false;
-        
+
         const dist = getDistance(p, carrier);
         if (dist > TACKLE_RANGE) return false;
 
@@ -3018,29 +3023,29 @@ function checkTackleCollisions(playState, gameLog) {
         if (p.isBlocked || p.isEngaged) {
             const blockerId = p.blockedBy || p.engagedWith;
             const blocker = playState.activePlayers.find(b => b.id === blockerId);
-            
+
             if (blocker) {
                 const distToBlocker = getDistance(p, blocker);
-                
+
                 // If the carrier is further away than the blocker, check if they are shielded
                 if (dist > distToBlocker) {
                     const dxC = carrier.x - p.x;
                     const dyC = carrier.y - p.y;
                     const dxB = blocker.x - p.x;
                     const dyB = blocker.y - p.y;
-                    
+
                     // Dot product determines alignment. > 0.4 means carrier is behind blocker's body
                     const dot = (dxC * dxB + dyC * dyB) / (dist * distToBlocker);
-                    
+
                     if (dot > 0.4) {
                         return false; // Blocker is successfully shielding the carrier!
                     }
                 }
             }
-            
+
             // If not shielded, they can make a "reach" tackle to the side, 
             // but at a reduced range (1.3 yds) because they only have one arm free.
-            return dist < 1.3; 
+            return dist < 1.3;
         }
 
         return true; // Unblocked defenders use the full TACKLE_RANGE
@@ -3998,12 +4003,19 @@ function updatePunterDecision(playState, offenseStates, gameLog) {
     const targetX = isLeftHash ? 42.0 : 11.0; // Aim away from center but stay in bounds
 
     // Punts now target 45 yards base + up to 25 yards from strength
-    const puntDistance = 45 + (punterPower * 0.25);
+    let puntDistance = 45 + (punterPower * 0.25);
+    
+    // 💡 FIX: Coffin Corner logic. If the punt would go into the endzone, shorten it to pin them inside the 10.
+    if (playState.lineOfScrimmage + puntDistance > 105) {
+        puntDistance = 105 - playState.lineOfScrimmage; // Aim for the 5-yard line
+    }
+    
     const targetY = playState.lineOfScrimmage + puntDistance;
 
     // Reduced variance so punts don't wildly fly out of bounds 10 yards downfield
     const errorX = (Math.random() - 0.5) * (100 - punterAcc) * 0.2;
-    const errorY = (Math.random() - 0.5) * (100 - punterAcc) * 0.3;
+    // 💡 FIX: Reduce Y-variance when coffin-corner kicking so we don't accidentally get a touchback anyway
+    const errorY = (Math.random() - 0.5) * (100 - punterAcc) * (targetY === 105 ? 0.1 : 0.3);
 
     const finalTargetX = Math.max(2, Math.min(51, targetX + errorX));
     const finalTargetY = Math.min(118, targetY + errorY);
@@ -4041,7 +4053,7 @@ function updatePunterDecision(playState, offenseStates, gameLog) {
     punter.isBallCarrier = false;
     punter.action = 'idle'; // Punter watches the play
 
-    if (gameLog) gameLog.push(`👟 ${punter.name} punts the ball!`);
+    if (gameLog) gameLog.push(`[Tick ${playState.tick}] 👟 ${punter.name} punts the ball! (${Math.round(puntDistance)} yards)`);
 }
 /**
  * Handles ball arrival at target coordinates.
@@ -4052,11 +4064,11 @@ function handleBallArrival(playState, carrier, playResult, gameLog) {
     if (!ball.inAir && !ball.isLoose) return;
 
     const MAX_JUMP_HEIGHT = 2.8; // Approx 8.4 feet tall
-    
+
     // 💡 FIX: Force the engine to ignore ALL balls that are too high, including punts.
     // The returner will now wait underneath the ball until it falls below 2.8 yards.
     if (ball.inAir && ball.z > MAX_JUMP_HEIGHT) {
-        return; 
+        return;
     }
 
     const CATCH_RADIUS = 1.2;
@@ -4148,28 +4160,62 @@ function handleBallArrival(playState, carrier, playResult, gameLog) {
             return;
 
         } else {
-            // --- DROP / SWAT ---
+            // --- DROP / SWAT / TIP ---
             if (isDefense) {
                 if (playState.type === 'punt') return;
 
                 const last = ball.lastInteraction;
-                if (!(last && last.playerId === bestCandidate.id && last.type === 'swat' && (playState.tick - last.tick) <= 1)) {
-                    pushLog(`[Tick ${playState.tick}] 🚫 ${bestCandidate.name} swats the pass away!`);
-                    ball.vz = 2.0;
-                    ball.vx += (Math.random() - 0.5) * 2;
-                    ball.vy += (Math.random() - 0.5) * 2;
+                // Cooldown to prevent a player from interacting twice in 5 ticks
+                if (!(last && last.playerId === bestCandidate.id && (playState.tick - last.tick) <= 5)) {
+
+                    ball.tipCount = (ball.tipCount || 0) + 1;
+
+                    // 💡 FIX: 75% chance for a clean SWAT (down), 25% chance for a TIP (up).
+                    // If the ball has already been tipped twice, force a SWAT to kill the play (Volleyball Fix)
+                    const isTip = (Math.random() < 0.25) && ball.tipCount < 3;
+
+                    if (isTip) {
+                        pushLog(`[Tick ${playState.tick}] 🖐️ ${bestCandidate.name} tips the pass into the air!`);
+                        ball.vz = 3.0 + (Math.random() * 2); // Pops up
+                        ball.vx += (Math.random() - 0.5) * 6; // Wild lateral deflection
+                        ball.vy += (Math.random() - 0.5) * 6;
+                        ball.lastInteraction = { tick: playState.tick, playerId: bestCandidate.id, type: 'tip' };
+                    } else {
+                        pushLog(`[Tick ${playState.tick}] 🚫 ${bestCandidate.name} swats the pass away!`);
+                        ball.vz = -8.0; // Spikes into the turf
+                        ball.vx *= 0.3; // Kills forward momentum
+                        ball.vy *= 0.3;
+                        ball.lastInteraction = { tick: playState.tick, playerId: bestCandidate.id, type: 'swat' };
+                    }
+
                     ball.targetX = ball.x + ball.vx;
                     ball.targetY = ball.y + ball.vy;
-                    ball.lastInteraction = { tick: playState.tick, playerId: bestCandidate.id, type: 'swat' };
                 }
             } else {
+                // --- OFFENSE DROP / BOBBLE ---
                 const last = ball.lastInteraction;
-                if (!(last && last.playerId === bestCandidate.id && last.type === 'drop' && (playState.tick - last.tick) <= 1)) {
-                    pushLog(`[Tick ${playState.tick}] ❌ ${bestCandidate.name} drops the pass!`);
-                    playState.statEvents.push({ type: 'drop', playerId: bestCandidate.id });
-                    ball.vz = -4.0; ball.vx *= 0.1; ball.vy *= 0.1;
-                    ball.droppedById = bestCandidate.id;
-                    ball.lastInteraction = { tick: playState.tick, playerId: bestCandidate.id, type: 'drop' };
+                if (!(last && last.playerId === bestCandidate.id && (playState.tick - last.tick) <= 5)) {
+
+                    ball.tipCount = (ball.tipCount || 0) + 1;
+
+                    // 💡 FIX: 20% chance an offensive player bobbles the ball into the air instead of dropping it clean
+                    const isBobble = (Math.random() < 0.20) && ball.tipCount < 3;
+
+                    if (isBobble) {
+                        pushLog(`[Tick ${playState.tick}] 🖐️ ${bestCandidate.name} bobbles the pass!`);
+                        ball.vz = 2.5 + Math.random(); // Pops up slightly
+                        ball.vx += (Math.random() - 0.5) * 3;
+                        ball.vy += (Math.random() - 0.5) * 3;
+                        ball.lastInteraction = { tick: playState.tick, playerId: bestCandidate.id, type: 'bobble' };
+                    } else {
+                        pushLog(`[Tick ${playState.tick}] ❌ ${bestCandidate.name} drops the pass!`);
+                        playState.statEvents.push({ type: 'drop', playerId: bestCandidate.id });
+                        ball.vz = -5.0; // Straight down
+                        ball.vx *= 0.2;
+                        ball.vy *= 0.2;
+                        ball.droppedById = bestCandidate.id;
+                        ball.lastInteraction = { tick: playState.tick, playerId: bestCandidate.id, type: 'drop' };
+                    }
                 }
             }
         }
@@ -4194,7 +4240,7 @@ function handleBallArrival(playState, carrier, playResult, gameLog) {
         if (playState.type === 'punt') {
             ball.vz = -ball.vz * 0.5; ball.vx *= 0.8; ball.vy *= 0.8;
             if (Math.abs(ball.vx) < 0.5 && Math.abs(ball.vy) < 0.5) {
-                if (gameLog && playState.playIsLive) gameLog.push("⏱️ Punt downed.");
+                if (gameLog && playState.playIsLive) gameLog.push(`[Tick ${playState.tick}] ⏱️ Punt downed.`);
                 playState.playIsLive = false; playState.possessionChanged = true;
                 playState.finalBallY = ball.y;
             }
@@ -4270,12 +4316,12 @@ function resolvePlayerCollisions(playState) {
 
             if (dist < combinedRadius && dist > 0.01) {
                 const overlap = combinedRadius - dist;
-                
+
                 // 💡 FIX: Context-Aware Repulsion
                 // If it's two Linemen bumping, they "grind" (lower push)
                 // If it's a Lineman hitting a QB/WR, the small player gets "bounced" (higher push)
-                let pushFactor = 0.15; 
-                if (isP1Heavy && !isP2Heavy) pushFactor = 0.25; 
+                let pushFactor = 0.15;
+                if (isP1Heavy && !isP2Heavy) pushFactor = 0.25;
 
                 const pushX = (dx / dist) * overlap * pushFactor;
                 const pushY = (dy / dist) * overlap * pushFactor;
@@ -4506,7 +4552,7 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
             if (playState.handoffRequired && !playState.handoffOccurred) {
                 const qb = playState.activePlayers.find(p => p.slot === 'QB1');
                 const rb = playState.activePlayers.find(p => p.slot === 'RB1');
-                
+
                 if (playState.tick < 15) { // 💡 Slightly longer window for the deeper drop
                     if (rb && qb) {
                         // RB targets the QB's current position for a clean handoff
@@ -4519,10 +4565,11 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
                     // Execute handoff
                     if (qb && rb) {
                         qb.hasBall = false;
+                        qb.isBallCarrier = false; // 💡 FIX: Strip runner status from QB
                         rb.hasBall = true;
                         rb.isBallCarrier = true;
                         playState.handoffOccurred = true;
-                        if (gameLog) pushGameLog(gameLog, `🏈 Handoff to ${rb.name}`);
+                        if (gameLog) pushGameLog(gameLog, `[Tick ${playState.tick}] 🏈 Handoff to ${rb.name}`);
                     } else if (qb) {
                         // 💡 FIX: Failsafe. If the RB is missing or stuck, QB keeps it.
                         playState.handoffOccurred = true;
@@ -4663,25 +4710,34 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
                         // Clear the check if the QB is just standing legally in the pocket
                         playState.stallCheck = null;
                     }
-                } 
+                }
 
                 // 💡 FIX: This MUST be outside the "if (ballCarrierState)" block 
                 // so it runs while the ball is rolling around with NO carrier.
-                if (playState.ballState.isLoose) {
+                const ball = playState.ballState;
+                const isBallOutOfBounds = ball.x <= 0 || ball.x >= FIELD_WIDTH || ball.y <= 0 || ball.y >= FIELD_LENGTH;
+
+                // 💡 FIX: Instant Out of Bounds Whistle for fumbles AND punts
+                if (isBallOutOfBounds && (ball.isLoose || (playState.type === 'punt' && !ballCarrierState))) {
+                    playState.playIsLive = false;
+                    playState.finalBallY = Math.max(0, Math.min(110, ball.y));
+                    
+                    if (playState.type === 'punt') {
+                        playState.possessionChanged = true;
+                        if (gameLog) gameLog.push(`[Tick ${playState.tick}] 🟠 Punt out of bounds at the ${Math.round(playState.finalBallY)} yard line.`);
+                    } else {
+                        if (gameLog) gameLog.push(`[Tick ${playState.tick}] 🟠 Ball fumbled out of bounds at the ${Math.round(playState.finalBallY)} yard line.`);
+                    }
+                    break;
+                }
+
+                if (ball.isLoose) {
                     // 💡 FIX: The Pile-Up Whistle. If ball is loose for > 50 ticks (2.5s), blow it dead.
                     if (!playState.looseBallTimer) playState.looseBallTimer = playState.tick;
                     if (playState.tick - playState.looseBallTimer > 50) {
                         playState.playIsLive = false;
-                        playState.finalBallY = Math.max(0, Math.min(110, playState.ballState.y));
-                        if (gameLog) gameLog.push(`⏱️ Whistle blown. Ball recovered in the pile.`);
-                        break;
-                    }
-
-                    const ball = playState.ballState;
-                    if (ball.x <= 0 || ball.x >= FIELD_WIDTH || ball.y <= 0 || ball.y >= FIELD_LENGTH) {
-                        playState.playIsLive = false;
                         playState.finalBallY = Math.max(0, Math.min(110, ball.y));
-                        if (gameLog) gameLog.push(`🟠 Ball fumbled out of bounds at the ${Math.round(playState.finalBallY)} yard line.`);
+                        if (gameLog) gameLog.push(`[Tick ${playState.tick}] ⏱️ Whistle blown. Ball recovered in the pile.`);
                         break;
                     }
                 }
@@ -5078,7 +5134,7 @@ function determinePlayCall(offense, defense, down, yardsToGo, ballOn, scoreDiff,
 
     // 1. Get ALL valid plays for this specific formation
     const formationPlays = Object.keys(offensivePlaybook).filter(key => key.startsWith(formationName));
-    
+
     if (formationPlays.length === 0) {
         console.warn(`AI Alert: Formation ${formationName} has no plays! Reverting to Balanced.`);
         return 'Balanced_InsideZone';
@@ -5088,7 +5144,7 @@ function determinePlayCall(offense, defense, down, yardsToGo, ballOn, scoreDiff,
     let passScore = 50; // Start at 50/50
 
     // Situation Adjustments
-    if (down === 1) passScore = 45; 
+    if (down === 1) passScore = 45;
     if (down === 2 && yardsToGo > 7) passScore = 70;
     if (down === 2 && yardsToGo < 3) passScore = 30;
     if (down === 3 && yardsToGo > 5) passScore = 85;
@@ -5108,9 +5164,9 @@ function determinePlayCall(offense, defense, down, yardsToGo, ballOn, scoreDiff,
     const desiredType = (Math.random() * 100 < passScore) ? 'pass' : 'run';
 
     // 3. HIERARCHICAL SELECTION (The "Never-Default" System)
-    
+
     // Attempt A: Correct Type AND Not Recently Played
-    let selectionPool = formationPlays.filter(key => 
+    let selectionPool = formationPlays.filter(key =>
         offensivePlaybook[key].type === desiredType && !recentPlays.includes(key)
     );
 
@@ -5623,11 +5679,11 @@ function simulateLivePlayStep(game) {
     }
     else if (playResult.possessionChange) {
         game.possession = defense;
-        
+
         // 💡 FIX: Reset formation logic so they don't start 1st down in a 4th down formation
         const coachPref = game.possession.coach?.preferredOffense || 'Balanced';
         game.possession.formations.offense = coachPref;
-        
+
         // Clear history for the new drive to allow all plays to be "fresh"
         game.possession.recentPlayHistory = [];
 
@@ -5657,7 +5713,7 @@ function simulateLivePlayStep(game) {
     }
 
     game.playsTotal = (game.playsTotal || 0) + 1;
-    
+
     // Check if game should end
     if (game.playsTotal >= 60) {
         game.isGameOver = true;
@@ -5763,7 +5819,7 @@ function simulateMatchFast(homeTeam, awayTeam) {
         if (p.age < 14 && perfThreshold && Math.random() < 0.15) {
             const attributesToImprove = ['speed', 'strength', 'agility', 'throwingAccuracy', 'catchingHands', 'tackling', 'blocking', 'playbookIQ', 'blockShedding', 'toughness', 'consistency'];
             const attr = getRandom(attributesToImprove);
-            
+
             // Check all attribute categories for the selected stat
             let updated = false;
             for (const cat in p.attributes) {
@@ -6258,7 +6314,7 @@ function advanceToOffseason() {
             const defSlots = defenseFormations[team.formations.defense]?.slots || [];
             team.depthChart.defense = Object.fromEntries(defSlots.map(slot => [slot, null]));
         }
-        team.wins = 0; team.losses = 0;
+        team.wins = 0; team.losses = 0; team.ties = 0;
         aiSetDepthChart(team);
     });
 
@@ -6958,40 +7014,59 @@ function getDepthChartEmptySlots(team) {
  * This is called by both the Fast Sim and the Live Sim callback.
  */
 export function finalizeGameResults(homeTeam, awayTeam, homeScore, awayScore) {
+    
+    const masterHome = game.teams.find(t => t.id === homeTeam.id);
+    const masterAway = game.teams.find(t => t.id === awayTeam.id);
+    
+    if (!masterHome || !masterAway) return;
+
     // 1. Update Team Records
     if (homeScore > awayScore) {
-        homeTeam.wins = (homeTeam.wins || 0) + 1;
-        awayTeam.losses = (awayTeam.losses || 0) + 1;
+        masterHome.wins = (masterHome.wins || 0) + 1;
+        masterAway.losses = (masterAway.losses || 0) + 1;
     } else if (awayScore > homeScore) {
-        awayTeam.wins = (awayTeam.wins || 0) + 1;
-        homeTeam.losses = (homeTeam.losses || 0) + 1;
+        masterAway.wins = (masterAway.wins || 0) + 1;
+        masterHome.losses = (masterHome.losses || 0) + 1;
     } else {
-        homeTeam.ties = (homeTeam.ties || 0) + 1;
-        awayTeam.ties = (awayTeam.ties || 0) + 1;
+        masterHome.ties = (masterHome.ties || 0) + 1;
+        masterAway.ties = (masterAway.ties || 0) + 1;
     }
 
-    // 2. Aggregate Season Stats for all players in the game
-    const allPlayers = [...getRosterObjects(homeTeam), ...getRosterObjects(awayTeam)];
 
-    allPlayers.forEach(p => {
+    // 2. Aggregate Season Stats
+    // 💡 FIX: We fetch IDs and then get the object from the Global Map 
+    // to ensure we are editing the Source of Truth used by the Stats Tab.
+    const allPlayerIds = [...(homeTeam.roster || []), ...(awayTeam.roster || [])];
+
+    allPlayerIds.forEach(id => {
+        const p = getPlayer(id); // Use the helper to get the main reference
         if (!p || !p.gameStats) return;
 
         if (!p.seasonStats) p.seasonStats = {};
         if (!p.careerStats) p.careerStats = { seasonsPlayed: p.careerStats?.seasonsPlayed || 0 };
 
-        // Move every tracked category from game to season/career
-        for (const stat in p.gameStats) {
-            if (typeof p.gameStats[stat] === 'number') {
-                p.seasonStats[stat] = (p.seasonStats[stat] || 0) + p.gameStats[stat];
-                p.careerStats[stat] = (p.careerStats[stat] || 0) + p.gameStats[stat];
+        // 💡 FIX: Explicitly migrate every possible stat field
+        const statFields = [
+            'passYards', 'passAttempts', 'passCompletions', 'interceptionsThrown',
+            'rushYards', 'rushAttempts',
+            'recYards', 'receptions', 'targets', 'drops',
+            'tackles', 'sacks', 'interceptions', 'fumbles', 'fumblesLost', 'fumblesRecovered',
+            'touchdowns', 'returnYards'
+        ];
+
+        statFields.forEach(field => {
+            const value = p.gameStats[field] || 0;
+            if (value !== 0) {
+                p.seasonStats[field] = (p.seasonStats[field] || 0) + value;
+                p.careerStats[field] = (p.careerStats[field] || 0) + value;
             }
-        }
+        });
         
-        // 💡 Reset gameStats so they are fresh for the next week
+        // 💡 Clear per-game stats for next week
         p.gameStats = null; 
     });
 
-    console.log(`Results finalized: ${awayTeam.name} ${awayScore} @ ${homeTeam.name} ${homeScore}`);
+    console.log(`Stats migrated to season totals for ${awayTeam.name} @ ${homeTeam.name}`);
 }
 
 // =============================================================

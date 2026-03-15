@@ -485,16 +485,18 @@ export const defenseFormations = {
     'Punt_Return': {
         name: 'Punt Return',
         slots: ['DL1', 'DL2', 'LB1', 'LB2', 'DB1', 'DB2', 'DB3', 'DB4'],
-        personnel: { DL: 2, LB: 2, DB: 4 },
+        // ...
         coordinates: { 
-            DL1: [-2, 1],       // Rushers
+            DL1: [-2, 1],
             DL2: [2, 1], 
-            LB1: [-8, 5],       // Wall setup
+            LB1: [-8, 5],
             LB2: [8, 5], 
-            DB1: [-15, 12],     // Jammers (blocking outside gunners)
+            DB1: [-15, 12],
             DB2: [15, 12], 
-            DB3: [0, 45],       // 💡 DEEP RETURNER (45 yards back)
-            DB4: [0, 35]        // 💡 SHORT RETURNER/FAIR CATCHER
+            // 💡 FIX: Standard punts travel 45-55 yards. 
+            // These offsets are relative to the LOS (Line of Scrimmage).
+            DB3: [0, 52],  // Main Returner (52 yards back)     
+            DB4: [0, 40]   // Short/Safety Returner (40 yards back)
         }
     },
     '3-1-4': {

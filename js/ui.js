@@ -1710,39 +1710,43 @@ function renderScheduleTab(gameState) {
 
 /** Renders the 'Standings' tab content. */
 function renderStandingsTab(gameState) {
-    if (!elements.standingsContainer) return;
-
-    if (!gameState?.divisions || !gameState.teams) {
-        elements.standingsContainer.innerHTML = '<p class="text-red-500 p-4">Standings data unavailable.</p>';
-        return;
-    }
+    if (!elements.standingsContainer || !gameState) return;
 
     elements.standingsContainer.innerHTML = '';
 
+    // Helper: Calculate Win Percentage (Wins = 1.0, Ties = 0.5)
+    const getWinPct = (t) => {
+        const games = (t.wins || 0) + (t.losses || 0) + (t.ties || 0);
+        if (games === 0) return 0;
+        return ((t.wins || 0) + ((t.ties || 0) * 0.5)) / games;
+    };
+
     for (const [divName, divisionTeamIdsArray] of Object.entries(gameState.divisions)) {
-        if (!Array.isArray(divisionTeamIdsArray)) continue;
-
-        const divisionTeamIds = new Set(divisionTeamIdsArray);
-
-        // Filter teams belonging to this division
+        // 💡 FIX: Ensure we are pulling the very latest data from gameState.teams
         const divTeams = gameState.teams
-            .filter(t => t && divisionTeamIds.has(t.id))
+            .filter(t => divisionTeamIdsArray.includes(t.id))
             .sort((a, b) => {
-                // Sort by Win % -> Wins -> Name
-                const getWinPct = (t) => {
-                    const games = (t.wins || 0) + (t.losses || 0) + (t.ties || 0);
-                    return games === 0 ? 0 : ((t.wins || 0) + 0.5 * (t.ties || 0)) / games;
-                };
-                if (getWinPct(a) !== getWinPct(b)) return getWinPct(b) - getWinPct(a);
-                if ((b.wins || 0) !== (a.wins || 0)) return (b.wins || 0) - (a.wins || 0);
+                const pctA = getWinPct(a);
+                const pctB = getWinPct(b);
+
+                // 1. Sort by Win Percentage
+                if (pctB !== pctA) return pctB - pctA;
+                // 2. Tie-breaker: Total Wins
+                if (b.wins !== a.wins) return (b.wins || 0) - (a.wins || 0);
+                // 3. Tie-breaker: Fewer Losses
+                if (a.losses !== b.losses) return (a.losses || 0) - (b.losses || 0);
+                // 4. Alphabetical
                 return a.name.localeCompare(b.name);
             });
 
         const divEl = document.createElement('div');
-        divEl.className = 'mb-6 bg-gray-50 rounded-lg overflow-hidden border border-gray-200';
+        divEl.className = 'mb-6 bg-gray-50 rounded-lg overflow-hidden border border-gray-200 shadow-sm';
 
         let tableHtml = `
-            <div class="bg-gray-200 px-4 py-2 font-bold text-gray-700 border-b border-gray-300">${divName} Division</div>
+            <div class="bg-gray-800 px-4 py-2 font-bold text-white flex justify-between">
+                <span>${divName} Division</span>
+                <span class="text-gray-400 text-xs uppercase self-center">Season ${gameState.year}</span>
+            </div>
             <table class="min-w-full text-sm">
                 <thead class="bg-gray-100 text-gray-600 text-xs uppercase">
                     <tr>
@@ -1750,6 +1754,7 @@ function renderStandingsTab(gameState) {
                         <th class="py-2 px-3 text-center">W</th>
                         <th class="py-2 px-3 text-center">L</th>
                         <th class="py-2 px-3 text-center">T</th>
+                        <th class="py-2 px-3 text-center">PCT</th>
                     </tr>
                 </thead>
                 <tbody class="divide-y divide-gray-200">
@@ -1757,14 +1762,18 @@ function renderStandingsTab(gameState) {
 
         divTeams.forEach(t => {
             const isPlayer = t.id === gameState.playerTeam.id;
-            const rowClass = isPlayer ? 'bg-amber-100 font-bold' : 'bg-white';
+            const pct = getWinPct(t).toFixed(3).replace(/^0/, ''); // Format as .500 instead of 0.500
 
             tableHtml += `
-                <tr class="${rowClass}">
-                    <td class="py-2 px-3 text-left">${t.name}</td>
-                    <td class="text-center py-2 px-3 font-semibold">${t.wins || 0}</td>
+                <tr class="${isPlayer ? 'bg-amber-100 font-bold' : 'bg-white hover:bg-gray-50'}">
+                    <td class="py-2 px-3 text-left flex items-center">
+                        <div class="w-3 h-3 rounded-full mr-2" style="background-color: ${t.primaryColor}"></div>
+                        ${t.name} ${isPlayer ? '<span class="ml-1 text-[10px] text-amber-600">(YOU)</span>' : ''}
+                    </td>
+                    <td class="text-center py-2 px-3">${t.wins || 0}</td>
                     <td class="text-center py-2 px-3 text-gray-600">${t.losses || 0}</td>
                     <td class="text-center py-2 px-3 text-gray-400">${t.ties || 0}</td>
+                    <td class="text-center py-2 px-3 font-mono text-gray-500">${pct}</td>
                 </tr>`;
         });
 
@@ -1790,8 +1799,11 @@ function renderPlayerStatsTab(gameState) {
     let playersToShow = gameState.players.filter(p => p && (teamIdFilter ? p.teamId === teamIdFilter : true));
 
     playersToShow.sort((a, b) => {
-        const valA = a.seasonStats?.[sortStat] || 0;
-        const valB = b.seasonStats?.[sortStat] || 0;
+        // 💡 FIX: Ensure we have an object to look at, or default to 0
+        const statsA = a.seasonStats || {};
+        const statsB = b.seasonStats || {};
+        const valA = statsA[sortStat] || 0;
+        const valB = statsB[sortStat] || 0;
         return valB - valA; // Descending
     });
 
