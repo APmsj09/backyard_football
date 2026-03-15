@@ -2331,14 +2331,21 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
 
         if (target) {
             if (isPassPlay) {
-                // 💡 FIX: THE PASS POCKET (The "Cup")
+                // 💡 FIX: DYNAMIC LEVERAGE (The True Pocket)
                 const qb = offenseStates.find(p => p.slot.startsWith('QB'));
                 if (qb) {
-                    // Step in front of the rusher laterally
-                    blocker.targetX = target.x;
-                    // Give ground slowly, but don't get pushed directly into the QB
-                    const pocketDepth = Math.max(LOS - 3.5, qb.y + 1.5);
-                    blocker.targetY = Math.max(pocketDepth, blocker.y - 0.2);
+                    // Calculate the direct line between the Rusher and the QB
+                    const dx = qb.x - target.x;
+                    const dy = qb.y - target.y;
+                    const distToQB = Math.max(0.1, Math.sqrt(dx * dx + dy * dy));
+                    
+                    // The blocker's ideal target is 0.8 yards directly in front of the rusher, 
+                    // anchoring exactly on that path to the QB.
+                    blocker.targetX = target.x + (dx / distToQB) * 0.8;
+                    blocker.targetY = target.y + (dy / distToQB) * 0.8;
+                    
+                    // Anchor rule: Don't get pushed directly into the QB's lap
+                    if (blocker.targetY < qb.y + 1.5) blocker.targetY = qb.y + 1.5;
                 }
             } else {
                 // 💡 FIX: THE RUN WALL
@@ -2566,28 +2573,50 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                     }
 
                     // PHASE 2: THE SET & DRIFT (Pocket awareness logic)
-                    // (This is the awareness logic we implemented in the previous step)
                     pState.contactReduction = 1.0; // Reset speed to normal
-
+                    
                     let idealX = pState.initialX;
-                    let idealY = pState.y;
+                    let idealY = pState.dropbackTargetY; // Anchor to dropback depth
 
-                    const rushers = defenseStates.filter(d => !d.isBlocked && getDistance(pState, d) < 6);
-
+                    const rushers = defenseStates.filter(d => !d.isBlocked && !d.isEngaged && getDistance(pState, d) < 6);
+                    
                     if (rushers.length > 0 && qbIQ > 40) {
                         let shiftX = 0;
                         let shiftY = 0;
+                        let edgePressure = false;
+                        let interiorPressure = false;
+
                         rushers.forEach(r => {
                             const dx = r.x - pState.x;
-                            if (Math.abs(dx) > 2 && r.y > pState.y + 1) shiftY += 0.5;
-                            if (Math.abs(dx) < 4) shiftX += (dx > 0 ? -1.2 : 1.2);
+                            const dy = r.y - pState.y;
+                            
+                            // Categorize pressure type
+                            if (Math.abs(dx) > 3.0) edgePressure = true;
+                            if (Math.abs(dx) <= 3.0 && dy > 0) interiorPressure = true;
+
+                            if (Math.abs(dx) > 2 && r.y > pState.y + 1) shiftY -= 0.8; // Edge rusher approaching -> Drift back slightly
+                            if (Math.abs(dx) < 4) shiftX += (dx > 0 ? -1.2 : 1.2); // Slide laterally away from threat
                         });
+                        
+                        // 💡 FIX: "Step Up" Logic!
+                        // If the edges are collapsing but the interior (A/B gaps) is clean, a smart QB steps forward.
+                        if (edgePressure && !interiorPressure && qbIQ > 65) {
+                            shiftY += 2.5; // Step forward firmly
+                            if (gameLog && Math.random() < 0.05) {
+                                pushGameLog(gameLog, `[Tick ${playState.tick}] 👣 ${pState.name} steps up into the pocket!`, playState);
+                            }
+                        }
+
                         const iqMod = qbIQ / 100;
-                        pState.targetX = Math.max(pState.initialX - 2, Math.min(pState.initialX + 2, idealX + (shiftX * iqMod)));
-                        pState.targetY = Math.max(pState.dropbackTargetY - 1, Math.min(LOS - 1, idealY + (shiftY * iqMod)));
+                        pState.targetX = Math.max(pState.initialX - 3, Math.min(pState.initialX + 3, idealX + (shiftX * iqMod)));
+                        
+                        // 💡 FIX: Hard cap the drift depth. A QB should NEVER drift more than 10 yards behind the LOS.
+                        // This prevents those massive -14 yard sacks while maintaining pocket sliding.
+                        const maxDepth = LOS - 10.0; 
+                        pState.targetY = Math.max(maxDepth, Math.min(LOS - 1, idealY + (shiftY * iqMod)));
                     } else {
                         pState.targetX = idealX;
-                        pState.targetY = pState.dropbackTargetY;
+                        pState.targetY = idealY;
                     }
                     break;
 
@@ -3594,7 +3623,6 @@ function updateQBDecision(qbState, offenseStates, defenseStates, playState, offe
                 }
 
                 // 💡 FIX: Trailing Bonus (Defender is behind the receiver)
-                // Expanded to give QBs confidence to throw when the receiver has a step
                 if (recState.action === 'run_route' && d.y < recState.y - 0.5 && dist > 0.1) {
                     dist += 2.5;
                 }
@@ -3602,6 +3630,21 @@ function updateQBDecision(qbState, offenseStates, defenseStates, playState, offe
                 if (dist < minSeparation) minSeparation = dist;
             }
         });
+        
+        // 💡 FIX: Throw Anticipation!
+        // If a receiver is within 2 yards of the next "cut" in their route tree, an elite QB
+        // knows they are about to snap away from the defender. 
+        if (recState.action === 'run_route' && recState.routePath && recState.currentPathIndex < recState.routePath.length) {
+            const nextNode = recState.routePath[recState.currentPathIndex];
+            const distToNode = getDistance(recState, nextNode);
+            
+            // Only smart QBs (IQ > 70) can anticipate throws. They get up to a +1.5 separation bonus artificially.
+            if (distToNode < 2.0 && qbIQ > 70) {
+                const anticipationBonus = ((qbIQ - 60) / 40) * 1.5;
+                minSeparation += anticipationBonus;
+            }
+        }
+        
         return { state: recState, separation: minSeparation, distFromQB };
     };
 
@@ -4158,6 +4201,13 @@ function handleBallArrival(playState, carrier, playResult, gameLog) {
         if (isDefense) catchScore -= 25;
         if (playersInRange.length > 1) catchScore -= 30;
         if (playState.type === 'punt') catchScore += 15;
+
+        // 💡 FIX: Point-Blank Penalty. If the ball was just thrown (< 10 ticks / 0.5s ago), 
+        // it's incredibly hard for a DL to react and get their hands up in time.
+        const ticksInAir = playState.tick - (ball.throwTick || 0);
+        if (ticksInAir < 10 && isDefense && playState.type === 'pass') {
+            catchScore -= 60; // Massive penalty for reaction time
+        }
 
         // 💡 FIX: Move the stat calculations OUTSIDE the catch/drop blocks 
         // so they are globally available to all outcomes (offense and defense).
@@ -4738,15 +4788,16 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
                     if (ballCarrierState.isBallCarrier && ballCarrierState.action !== 'qb_setup') {
                         if (!playState.stallCheck) playState.stallCheck = { tick: playState.tick, y: ballCarrierState.y };
 
-                        if (playState.tick - playState.stallCheck.tick >= 60) {
-                            const distMoved = Math.abs(ballCarrierState.y - playState.stallCheck.y);
-                            // 💡 FIX: Increase threshold to 1.2 yards. 
-                            // If they haven't made significant progress in 1 second, the play is dead.
-                            if (distMoved < 1) {
+                        if (playState.tick - playState.stallCheck.tick >= 30) {
+                            const dx = ballCarrierState.x - playState.stallCheck.x;
+                            const dy = ballCarrierState.y - playState.stallCheck.y;
+                            const totalDistMoved = Math.sqrt(dx * dx + dy * dy);
+                            
+                            // If they haven't moved a total of 1.5 yards in ANY direction in 1.5s, blow the whistle.
+                            if (totalDistMoved < 1.5) {
                                 playState.playIsLive = false;
                                 playState.yards = ballCarrierState.y - playState.lineOfScrimmage;
                                 playState.finalBallY = ballCarrierState.y;
-                                // Added the tick stamp here for debugging consistency
                                 if (gameLog) gameLog.push(`[Tick ${playState.tick}] ⏱️ Forward progress stopped. Play blown dead.`);
                                 break;
                             }
