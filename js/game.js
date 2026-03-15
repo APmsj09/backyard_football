@@ -526,7 +526,7 @@ function checkFumble(ballCarrierState, tacklerState, playState, gameLog) {
             const actionX = ballCarrierState.x.toFixed(1);
             const actionY = ballCarrierState.y.toFixed(1);
             const yardage = (ballCarrierState.y - playState.lineOfScrimmage).toFixed(1);
-            
+
             gameLog.push(`[Tick ${playState.tick}] ❗ FUMBLE! ${tacklerState.name} jars it loose at (${actionX}, ${actionY}) | Gain: ${yardage}y | (Hit: ${hitPower} vs Sec: ${security})`);
         }
 
@@ -1745,7 +1745,7 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
                     startY = Math.min(108, startY); // Never stand deeper than the 2-yard line in the endzone
                 }
             }
-            
+
 
             // --- 6. CLAMP & SPAWN ---
             startX = Math.max(0.5, Math.min(53.3 - 0.5, startX));
@@ -2338,12 +2338,12 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                     const dx = qb.x - target.x;
                     const dy = qb.y - target.y;
                     const distToQB = Math.max(0.1, Math.sqrt(dx * dx + dy * dy));
-                    
+
                     // The blocker's ideal target is 0.8 yards directly in front of the rusher, 
                     // anchoring exactly on that path to the QB.
                     blocker.targetX = target.x + (dx / distToQB) * 0.8;
                     blocker.targetY = target.y + (dy / distToQB) * 0.8;
-                    
+
                     // Anchor rule: Don't get pushed directly into the QB's lap
                     if (blocker.targetY < qb.y + 1.5) blocker.targetY = qb.y + 1.5;
                 }
@@ -2574,12 +2574,12 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
 
                     // PHASE 2: THE SET & DRIFT (Pocket awareness logic)
                     pState.contactReduction = 1.0; // Reset speed to normal
-                    
+
                     let idealX = pState.initialX;
                     let idealY = pState.dropbackTargetY; // Anchor to dropback depth
 
                     const rushers = defenseStates.filter(d => !d.isBlocked && !d.isEngaged && getDistance(pState, d) < 6);
-                    
+
                     if (rushers.length > 0 && qbIQ > 40) {
                         let shiftX = 0;
                         let shiftY = 0;
@@ -2589,7 +2589,7 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                         rushers.forEach(r => {
                             const dx = r.x - pState.x;
                             const dy = r.y - pState.y;
-                            
+
                             // Categorize pressure type
                             if (Math.abs(dx) > 3.0) edgePressure = true;
                             if (Math.abs(dx) <= 3.0 && dy > 0) interiorPressure = true;
@@ -2597,7 +2597,7 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                             if (Math.abs(dx) > 2 && r.y > pState.y + 1) shiftY -= 0.8; // Edge rusher approaching -> Drift back slightly
                             if (Math.abs(dx) < 4) shiftX += (dx > 0 ? -1.2 : 1.2); // Slide laterally away from threat
                         });
-                        
+
                         // 💡 FIX: "Step Up" Logic!
                         // If the edges are collapsing but the interior (A/B gaps) is clean, a smart QB steps forward.
                         if (edgePressure && !interiorPressure && qbIQ > 65) {
@@ -2609,10 +2609,10 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
 
                         const iqMod = qbIQ / 100;
                         pState.targetX = Math.max(pState.initialX - 3, Math.min(pState.initialX + 3, idealX + (shiftX * iqMod)));
-                        
+
                         // 💡 FIX: Hard cap the drift depth. A QB should NEVER drift more than 10 yards behind the LOS.
                         // This prevents those massive -14 yard sacks while maintaining pocket sliding.
-                        const maxDepth = LOS - 10.0; 
+                        const maxDepth = LOS - 10.0;
                         pState.targetY = Math.max(maxDepth, Math.min(LOS - 1, idealY + (shiftY * iqMod)));
                     } else {
                         pState.targetX = idealX;
@@ -3147,11 +3147,11 @@ function checkTackleCollisions(playState, gameLog) {
             return false; // Play continues as loose ball
         }
 
-        // B. Calculate Tackle Probability (The "Truck Stick" Check)
-        const tacklerSkill = ((defender.tackling || 50) + (defender.strength || 50)) / 2;
-        const runnerSkill = ((carrier.agility || 50) + (carrier.strength || 50)) / 2;
+         // B. Calculate Tackle Probability (The "Truck Stick" Check)
+        const tacklerSkill = ((Number(defender.tackling) || 50) + (Number(defender.strength) || 50)) / 2;
+        const runnerSkill = ((Number(carrier.agility) || 50) + (Number(carrier.strength) || 50)) / 2;
 
-        const weightDiff = (carrier.weight || 200) - (defender.weight || 200);
+        const weightDiff = (Number(carrier.weight) || 200) - (Number(defender.weight) || 200);
         const momentumBonus = Math.max(-0.10, Math.min(0.10, weightDiff / 2000));
 
         // 💡 FIX: Actually apply the fatigue factor (25% easier to tackle per broken tackle)
@@ -3210,12 +3210,12 @@ function checkTackleCollisions(playState, gameLog) {
                     const runEff = Math.round(runnerSkill * carrier.fatigueModifier);
                     const defFat = Math.round(defender.fatigueModifier * 100);
                     const runFat = Math.round(carrier.fatigueModifier * 100);
-                    
+
                     const yardage = (carrier.y - playState.lineOfScrimmage).toFixed(1);
-                const contactX = carrier.x.toFixed(1);
-                const contactY = carrier.y.toFixed(1);
-                
-                gameLog.push(`[Tick ${playState.tick}] ✋ ${carrier.name} tackled at (${contactX}, ${contactY}) by ${defender.name} | Gain: ${yardage}y | (Power: ${defEff}@${defFat}% vs ${runEff}@${runFat}%)`);
+                    const contactX = carrier.x.toFixed(1);
+                    const contactY = carrier.y.toFixed(1);
+
+                    gameLog.push(`[Tick ${playState.tick}] ✋ ${carrier.name} tackled at (${contactX}, ${contactY}) by ${defender.name} | Gain: ${yardage}y | (Power: ${defEff}@${defFat}% vs ${runEff}@${runFat}%)`);
                 }
             }
             return true;
@@ -3631,21 +3631,21 @@ function updateQBDecision(qbState, offenseStates, defenseStates, playState, offe
                 if (dist < minSeparation) minSeparation = dist;
             }
         });
-        
+
         // 💡 FIX: Throw Anticipation!
         // If a receiver is within 2 yards of the next "cut" in their route tree, an elite QB
         // knows they are about to snap away from the defender. 
         if (recState.action === 'run_route' && recState.routePath && recState.currentPathIndex < recState.routePath.length) {
             const nextNode = recState.routePath[recState.currentPathIndex];
             const distToNode = getDistance(recState, nextNode);
-            
+
             // Only smart QBs (IQ > 70) can anticipate throws. They get up to a +1.5 separation bonus artificially.
             if (distToNode < 2.0 && qbIQ > 70) {
                 const anticipationBonus = ((qbIQ - 60) / 40) * 1.5;
                 minSeparation += anticipationBonus;
             }
         }
-        
+
         return { state: recState, separation: minSeparation, distFromQB };
     };
 
@@ -3953,7 +3953,7 @@ function executeThrow(qbState, target, strength, accuracy, playState, gameLog, a
         if (gameLog) gameLog.push(`🚫 ILLEGAL FORWARD PASS: ${qbState.name} crossed the line at y=${qbState.y.toFixed(1)} < LOS=${playState.lineOfScrimmage}`);
         playState.ballState.inAir = false;
         playState.ballState.throwInitiated = false;
-        qbState.hasBall = true; 
+        qbState.hasBall = true;
         return;
     }
 
@@ -3961,8 +3961,8 @@ function executeThrow(qbState, target, strength, accuracy, playState, gameLog, a
     const startY = qbState.y;
 
     const throwDistance = Math.sqrt((target.x - startX) ** 2 + (target.y - startY) ** 2);
-    const baseSpeed = 18 + (strength / 100) * 8; 
-    const ballSpeed = baseSpeed + (throwDistance > 20 ? strength * 0.1 : 0); 
+    const baseSpeed = 18 + (strength / 100) * 8;
+    const ballSpeed = baseSpeed + (throwDistance > 20 ? strength * 0.1 : 0);
 
     let aimX = target.x;
     let aimY = target.y;
@@ -3984,7 +3984,7 @@ function executeThrow(qbState, target, strength, accuracy, playState, gameLog, a
     }
 
     // Accuracy Error
-    const baseErrorMargin = (100 - accuracy) / 20; 
+    const baseErrorMargin = (100 - accuracy) / 20;
     const angle = Math.random() * Math.PI * 2;
     const distError = Math.random() * baseErrorMargin;
 
@@ -3995,7 +3995,7 @@ function executeThrow(qbState, target, strength, accuracy, playState, gameLog, a
     aimY += Math.sin(angle) * distError + bodyBiasY;
 
     // Safety Clamp
-    const PAD = 10; 
+    const PAD = 10;
     aimX = Math.max(-PAD, Math.min(FIELD_WIDTH + PAD, aimX));
     aimY = Math.max(-PAD, Math.min(FIELD_LENGTH + PAD, aimY));
 
@@ -4006,8 +4006,9 @@ function executeThrow(qbState, target, strength, accuracy, playState, gameLog, a
         const targetXStr = aimX.toFixed(1);
         const targetYStr = aimY.toFixed(1);
         const distStr = throwDistance.toFixed(1);
-        
-        gameLog.push(`[Tick ${playState.tick}] 🏈 ${qbState.name} throws from (${releaseX}, ${releaseY}) to target (${targetXStr}, ${targetYStr}) | Air Dist: ${distStr}y | (${actionType})`);
+
+        // Added ${target.role} before the target name
+        gameLog.push(`[Tick ${playState.tick}] 🏈 ${qbState.name} throws from (${releaseX}, ${releaseY}) to target ${target.role} ${target.name} (${targetXStr}, ${targetYStr}) | Air Dist: ${distStr}y | (${actionType})`);
     }
 
     // Physics
@@ -4077,12 +4078,12 @@ function updatePunterDecision(playState, offenseStates, gameLog) {
 
     // Punts now target 45 yards base + up to 25 yards from strength
     let puntDistance = 45 + (punterPower * 0.25);
-    
+
     // 💡 FIX: Coffin Corner logic. If the punt would go into the endzone, shorten it to pin them inside the 10.
     if (playState.lineOfScrimmage + puntDistance > 105) {
         puntDistance = 105 - playState.lineOfScrimmage; // Aim for the 5-yard line
     }
-    
+
     const targetY = playState.lineOfScrimmage + puntDistance;
 
     // Reduced variance so punts don't wildly fly out of bounds 10 yards downfield
@@ -4141,6 +4142,11 @@ function handleBallArrival(playState, carrier, playResult, gameLog) {
     // 💡 FIX: Force the engine to ignore ALL balls that are too high, including punts.
     // The returner will now wait underneath the ball until it falls below 2.8 yards.
     if (ball.inAir && ball.z > MAX_JUMP_HEIGHT) {
+        return;
+    }
+    
+    // If the ball has already been swatted down or dropped, stop other players from interacting with it mid-air
+    if (ball.isSwatted) {
         return;
     }
 
@@ -4243,14 +4249,14 @@ function handleBallArrival(playState, carrier, playResult, gameLog) {
             const yardage = (ball.y - playState.lineOfScrimmage).toFixed(1);
 
             if (isDefense) {
-                pushLog(`[Tick ${playState.tick}] ❗ INTERCEPTION! ${bestCandidate.name} at (${actionX}, ${actionY}) | Gain: ${yardage}y`);
+                pushLog(`[Tick ${playState.tick}] ❗ INTERCEPTION! ${bestCandidate.role} ${bestCandidate.name} at (${actionX}, ${actionY}) | Gain: ${yardage}y`);
                 playState.interceptionOccurred = true; playState.possessionChanged = true;
                 playState.turnover = true; playState.returnStartY = bestCandidate.y;
                 playState.statEvents.push({ type: 'interception', interceptorId: bestCandidate.id, throwerId: ball.throwerId });
                 return;
             }
 
-            pushLog(`[Tick ${playState.tick}] 👍 CATCH! ${bestCandidate.name} at (${actionX}, ${actionY}, z:${actionZ}) | Gain: ${yardage}y`);
+            pushLog(`[Tick ${playState.tick}] 👍 CATCH! ${bestCandidate.role} ${bestCandidate.name} at (${actionX}, ${actionY}, z:${actionZ}) | Gain: ${yardage}y`);
             const yardsGain = bestCandidate.y - playState.lineOfScrimmage;
             playState.statEvents.push({ type: 'completion', receiverId: bestCandidate.id, qbId: ball.throwerId, yards: yardsGain });
             return;
@@ -4262,7 +4268,7 @@ function handleBallArrival(playState, carrier, playResult, gameLog) {
 
                 const last = ball.lastInteraction;
                 if (!(last && last.playerId === bestCandidate.id && (playState.tick - last.tick) <= 5)) {
-                    
+
                     ball.tipCount = (ball.tipCount || 0) + 1;
                     const isTip = (Math.random() < 0.25) && ball.tipCount < 3;
 
@@ -4280,6 +4286,7 @@ function handleBallArrival(playState, carrier, playResult, gameLog) {
                         ball.vz = -8.0; // Spikes into the turf
                         ball.vx *= 0.3; // Kills forward momentum
                         ball.vy *= 0.3;
+                        ball.isSwatted = true;
                         ball.lastInteraction = { tick: playState.tick, playerId: bestCandidate.id, type: 'swat' };
                     }
 
@@ -4311,6 +4318,7 @@ function handleBallArrival(playState, carrier, playResult, gameLog) {
                         ball.vx *= 0.2;
                         ball.vy *= 0.2;
                         ball.droppedById = bestCandidate.id;
+                        ball.isSwatted = true;
                         ball.lastInteraction = { tick: playState.tick, playerId: bestCandidate.id, type: 'drop' };
                     }
                 }
@@ -4413,12 +4421,12 @@ function resolvePlayerCollisions(playState) {
 
             if (dist < combinedRadius && dist > 0.01) {
                 const overlap = combinedRadius - dist;
-                
+
                 // 💡 FIX: If icons are overlapping, trigger the squeezing penalty for the physics engine
                 p1.isSqueezing = true;
                 p2.isSqueezing = true;
 
-                let pushFactor = (p1.role === 'OL' || p1.role === 'DL') ? 0.4 : 0.15; 
+                let pushFactor = (p1.role === 'OL' || p1.role === 'DL') ? 0.4 : 0.15;
 
                 const pushX = (dx / dist) * overlap * pushFactor;
                 const pushY = (dy / dist) * overlap * pushFactor;
@@ -4500,7 +4508,11 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
     const play = deepClone(offensivePlaybook[finalOffensivePlayKey]);
 
     if (gameLog) {
-        pushGameLog(gameLog, `📋 Play Call | OFF: ${finalOffensivePlayKey} | DEF: ${defensivePlayKey}`);
+        // Convert down number to ordinal (1st, 2nd, etc.)
+        const downNames = ["", "1st", "2nd", "3rd", "4th"];
+        const downStr = downNames[down] || down;
+
+        pushGameLog(gameLog, `📋 ${downStr} Down | Play Call | OFF: ${finalOffensivePlayKey} | DEF: ${defensivePlayKey}`);
     }
 
     // --- 4. INITIALIZE STATE ---
@@ -4800,7 +4812,7 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
                             const dx = ballCarrierState.x - playState.stallCheck.x;
                             const dy = ballCarrierState.y - playState.stallCheck.y;
                             const totalDistMoved = Math.sqrt(dx * dx + dy * dy);
-                            
+
                             // If they haven't moved a total of 1.5 yards in ANY direction in 1.5s, blow the whistle.
                             if (totalDistMoved < 1.5) {
                                 playState.playIsLive = false;
@@ -4825,9 +4837,9 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
                 // 💡 FIX: Instant Out of Bounds Whistle for fumbles AND punts
                 if (isBallOutOfBounds && (ball.isLoose || (playState.type === 'punt' && !ballCarrierState))) {
                     playState.playIsLive = false;
-                    
+
                     const wentOutSideline = ball.x <= 0 || ball.x >= FIELD_WIDTH;
-                    
+
                     // 💡 FIX: A punt is ONLY a touchback if it crosses the BACK of the endzone (y > 120)
                     // or if it lands IN the endzone and is downed. 
                     // If it crosses the SIDELINE, it's spotted where it crossed, even if y > 110.
@@ -4838,7 +4850,7 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
                         playState.finalBallY = 110; // Touchback
                         playState.touchback = true;
                     }
-                    
+
                     if (playState.type === 'punt') {
                         playState.possessionChanged = true;
                         const logMsg = playState.touchback ? "Touchback!" : `Punt out of bounds at the ${Math.round(playState.finalBallY)} yard line.`;
@@ -4987,7 +4999,7 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
         if (ballCarrierState) {
             playState.yards = ballCarrierState.y - playState.lineOfScrimmage;
             playState.finalBallY = ballCarrierState.y;
-            
+
             if (gameLog) {
                 const finalX = ballCarrierState.x.toFixed(1);
                 const finalY = ballCarrierState.y.toFixed(1);
@@ -5706,11 +5718,11 @@ function simulateLivePlayStep(game) {
         game.down = 1;
         game.yardsToGo = 3;
         game.ballOn = 97;
-        
+
         // 💡 FIX: Force the formations to match the special situation
         offense.formations.offense = 'Balanced';
-        defense.formations.defense = '4-2-2'; 
-        
+        defense.formations.defense = '4-2-2';
+
         offPlayKey = 'Balanced_Slants';
         defPlayKey = 'GoalLine_RunStuff';
     }
@@ -5721,7 +5733,7 @@ function simulateLivePlayStep(game) {
         defense.formations.defense = 'Punt_Return';
 
         offPlayKey = 'Punt_Punt';
-        defPlayKey = 'PuntReturn_Classic'; 
+        defPlayKey = 'PuntReturn_Classic';
     }
     else {
         const scoreDiff = (offense.id === game.homeTeam.id) ? (game.homeScore - game.awayScore) : (game.awayScore - game.homeScore);
@@ -7145,10 +7157,10 @@ function getDepthChartEmptySlots(team) {
  * This is called by both the Fast Sim and the Live Sim callback.
  */
 export function finalizeGameResults(homeTeam, awayTeam, homeScore, awayScore) {
-    
+
     const masterHome = game.teams.find(t => t.id === homeTeam.id);
     const masterAway = game.teams.find(t => t.id === awayTeam.id);
-    
+
     if (!masterHome || !masterAway) return;
 
     // 1. Update Team Records
@@ -7192,9 +7204,9 @@ export function finalizeGameResults(homeTeam, awayTeam, homeScore, awayScore) {
                 p.careerStats[field] = (p.careerStats[field] || 0) + value;
             }
         });
-        
+
         // 💡 Clear per-game stats for next week
-        p.gameStats = null; 
+        p.gameStats = null;
     });
 
     console.log(`Stats migrated to season totals for ${awayTeam.name} @ ${homeTeam.name}`);
