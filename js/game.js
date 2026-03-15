@@ -3905,37 +3905,19 @@ function executeThrow(qbState, target, strength, accuracy, playState, gameLog, a
     const isForwardPass = target.y > qbState.y || (Math.abs(target.y - qbState.y) < 0.5 && target.y > qbState.y - 2);
 
     if (hasQBCrossedLine && isForwardPass) {
-        // Illegal forward pass - QB crossed the line
         if (gameLog) gameLog.push(`🚫 ILLEGAL FORWARD PASS: ${qbState.name} crossed the line at y=${qbState.y.toFixed(1)} < LOS=${playState.lineOfScrimmage}`);
         playState.ballState.inAir = false;
         playState.ballState.throwInitiated = false;
-        qbState.hasBall = true; // QB retains ball due to illegal pass
+        qbState.hasBall = true; 
         return;
-    }
-
-    if (gameLog) {
-        const releaseX = qbState.x.toFixed(1);
-        const releaseY = qbState.y.toFixed(1);
-        const targetX = aimX.toFixed(1);
-        const targetY = aimY.toFixed(1);
-        const dist = throwDistance.toFixed(1);
-        
-        gameLog.push(`[Tick ${playState.tick}] 🏈 ${qbState.name} throws from (${releaseX}, ${releaseY}) to target (${targetX}, ${targetY}) | Air Dist: ${dist}y | (${actionType})`);
-    }
-
-    // DEBUG: Log when throw happens
-    if (gameLog && gameLog.length < 3) {
-        gameLog.push(`[DEBUG: Throw at tick ${playState.tick}, MIN_DROPBACK=${MIN_DROPBACK_TICKS}]`);
     }
 
     const startX = qbState.x;
     const startY = qbState.y;
 
-    // 💡 IMPROVED: Ball speed varies by QB arm strength and throw distance
-    // Weak armed QBs need more time on longer throws
     const throwDistance = Math.sqrt((target.x - startX) ** 2 + (target.y - startY) ** 2);
-    const baseSpeed = 18 + (strength / 100) * 8; // 18-26 YPS range
-    const ballSpeed = baseSpeed + (throwDistance > 20 ? strength * 0.1 : 0); // Bonus for long throws
+    const baseSpeed = 18 + (strength / 100) * 8; 
+    const ballSpeed = baseSpeed + (throwDistance > 20 ? strength * 0.1 : 0); 
 
     let aimX = target.x;
     let aimY = target.y;
@@ -3956,23 +3938,32 @@ function executeThrow(qbState, target, strength, accuracy, playState, gameLog, a
         }
     }
 
-    // 💡 IMPROVED: Accuracy Error (more realistic ball placement)
-    // High accuracy QBs have smaller error margins
-    const baseErrorMargin = (100 - accuracy) / 20; // Larger margin for less accurate QBs
+    // Accuracy Error
+    const baseErrorMargin = (100 - accuracy) / 20; 
     const angle = Math.random() * Math.PI * 2;
     const distError = Math.random() * baseErrorMargin;
 
-    // Slightly bias error toward receivers (easier to catch near body)
     const bodyBiasX = (Math.random() - 0.5) * (baseErrorMargin * 0.3);
     const bodyBiasY = (Math.random() - 0.5) * (baseErrorMargin * 0.3);
 
     aimX += Math.cos(angle) * distError + bodyBiasX;
     aimY += Math.sin(angle) * distError + bodyBiasY;
 
-    // Safety: Prevent aim points from going wildly out of reasonable bounds
-    const PAD = 10; // allow some off-field for throw-aways but limit craziness
+    // Safety Clamp
+    const PAD = 10; 
     aimX = Math.max(-PAD, Math.min(FIELD_WIDTH + PAD, aimX));
     aimY = Math.max(-PAD, Math.min(FIELD_LENGTH + PAD, aimY));
+
+    // 💡 FIX: Move the Log here! Now aimX, aimY, and throwDistance actually exist.
+    if (gameLog) {
+        const releaseX = startX.toFixed(1);
+        const releaseY = startY.toFixed(1);
+        const targetXStr = aimX.toFixed(1);
+        const targetYStr = aimY.toFixed(1);
+        const distStr = throwDistance.toFixed(1);
+        
+        gameLog.push(`[Tick ${playState.tick}] 🏈 ${qbState.name} throws from (${releaseX}, ${releaseY}) to target (${targetXStr}, ${targetYStr}) | Air Dist: ${distStr}y | (${actionType})`);
+    }
 
     // Physics
     const dx = aimX - startX;
