@@ -3572,7 +3572,8 @@ function updateQBDecision(qbState, offenseStates, defenseStates, playState, offe
     if (!progression || progression.length === 0) {
         // No receivers running routes - force include ALL non-QB players as emergency fallback
         const emergencyProgression = offenseStates
-            .filter(p => p.slot !== 'QB1')
+            // 💡 FIX: Exclude OL from the emergency progression so the QB doesn't target them!
+            .filter(p => p.slot !== 'QB1' && !p.slot.startsWith('OL'))
             .map(p => p.slot);
 
         if (emergencyProgression.length === 0) {
@@ -3785,7 +3786,8 @@ function updateQBDecision(qbState, offenseStates, defenseStates, playState, offe
             // Fallback to WRs if no RB/TE
             if (checkdownOptions.length === 0) {
                 checkdownOptions = offenseStates.filter(p => {
-                    if (p.slot === 'QB1' || p.action === 'sacked' || p.action === 'idle') return false;
+                    // 💡 FIX: Exclude OL from being treated as "open checkdown targets"
+                    if (p.slot === 'QB1' || p.action === 'sacked' || p.action === 'idle' || p.slot.startsWith('OL')) return false;
                     return true;
                 }).map(p => ({
                     state: p,
@@ -3926,9 +3928,9 @@ function updateQBDecision(qbState, offenseStates, defenseStates, playState, offe
 
     // 4. DESPERATION THROW (Late game last resort)
     if (isDesperationTime && !decisionMade && !targetPlayerState) {
-        // 💡 FIX: Don't pick a random lineman, pick the furthest receiver downfield
+        // 💡 FIX: Ensure we explicitly exclude OL from Hail Mary targets
         const deepReceiver = offenseStates
-            .filter(o => o.slot !== 'QB1' && (o.action.includes('route') || o.action === 'route_complete'))
+            .filter(o => o.slot !== 'QB1' && !o.slot.startsWith('OL') && (o.action.includes('route') || o.action === 'route_complete'))
             .sort((a, b) => b.y - a.y)[0];
 
         if (deepReceiver && Math.random() > 0.5) {
@@ -4162,6 +4164,12 @@ function handleBallArrival(playState, carrier, playResult, gameLog) {
         // 💡 FIX: Kicking team cannot catch their own punt in the air (Downing only happens on ground)
         if (playState.type === 'punt' && p.isOffense && ball.z > 0.5) return false;
         if (ball.droppedById === p.id) return false;
+
+        // 💡 FIX: Offensive Linemen know they are ineligible. They will let a forward 
+        // pass fly past them UNLESS it has already been tipped or fumbled.
+        if (p.isOffense && p.slot.startsWith('OL') && playState.type === 'pass' && !ball.isLoose && !ball.tipCount) {
+            return false;
+        }
 
         const distNow = Math.sqrt((p.x - ball.x) ** 2 + (p.y - ball.y) ** 2);
         if (distNow <= (CATCH_RADIUS + CATCH_TOLERANCE)) return true;
