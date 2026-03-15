@@ -520,7 +520,9 @@ function checkFumble(ballCarrierState, tacklerState, playState, gameLog) {
 
     if (Math.random() < fumbleChance) {
         if (gameLog) {
-            gameLog.push(`❗ FUMBLE! Ball knocked loose by ${tacklerState.name}!`);
+            const hitPower = Math.round((strength + tackling) / 2 * tacklerState.fatigueModifier);
+            const security = Math.round(toughness * ballCarrierState.fatigueModifier);
+            gameLog.push(`[Tick ${playState.tick}] ❗ FUMBLE! ${tacklerState.name} jars it loose! (Hit: ${hitPower} vs Sec: ${security})`);
         }
 
         // Logic: Drop ball at current spot
@@ -3169,7 +3171,14 @@ function checkTackleCollisions(playState, gameLog) {
                 playState.statEvents.push({ type: 'sack', playerId: defender.id, qbId: carrier.id });
                 if (gameLog) gameLog.push(`[Tick ${playState.tick}] 💥 SACK! ${defender.name} drops ${carrier.name} for loss of ${Math.abs(playState.yards)}!`);
             } else {
-                if (gameLog) gameLog.push(`[Tick ${playState.tick}] ✋ ${carrier.name} tackled by ${defender.name}.`);
+                if (gameLog) {
+                    const defEff = Math.round(tacklerSkill * defender.fatigueModifier);
+                    const runEff = Math.round(runnerSkill * carrier.fatigueModifier);
+                    const defFat = Math.round(defender.fatigueModifier * 100);
+                    const runFat = Math.round(carrier.fatigueModifier * 100);
+                    
+                    gameLog.push(`[Tick ${playState.tick}] ✋ ${carrier.name} tackled by ${defender.name} (Power: ${defEff}@${defFat}% vs ${runEff}@${runFat}%)`);
+                }
             }
             return true;
 
@@ -3194,7 +3203,11 @@ function checkTackleCollisions(playState, gameLog) {
                 if (playState) playState.qbIntent = 'scramble';
             }
 
-            if (gameLog) gameLog.push(`[Tick ${playState.tick}] 💪 ${carrier.name} breaks the tackle from ${defender.name}!`);
+            if (gameLog) {
+                const runEff = Math.round(runnerSkill * carrier.fatigueModifier);
+                const defEff = Math.round(tacklerSkill * defender.fatigueModifier);
+                gameLog.push(`[Tick ${playState.tick}] 💪 ${carrier.name} sheds the tackle! (Agi: ${runEff} vs Tkl: ${defEff})`);
+            }
 
             // 💡 FIX: Exit the loop so the carrier doesn't evaluate 5 tackles in the exact same 0.05s tick!
             break;
@@ -4179,14 +4192,17 @@ function handleBallArrival(playState, carrier, playResult, gameLog) {
                     // If the ball has already been tipped twice, force a SWAT to kill the play (Volleyball Fix)
                     const isTip = (Math.random() < 0.25) && ball.tipCount < 3;
 
+                    const hndEff = Math.round(catching * bestCandidate.fatigueModifier);
+                    const fatPct = Math.round(bestCandidate.fatigueModifier * 100);
+
                     if (isTip) {
-                        pushLog(`[Tick ${playState.tick}] 🖐️ ${bestCandidate.name} tips the pass into the air!`);
+                        pushLog(`[Tick ${playState.tick}] 🖐️ ${bestCandidate.name} tips pass! (Hands: ${hndEff}, Energy: ${fatPct}%)`);
                         ball.vz = 3.0 + (Math.random() * 2); // Pops up
                         ball.vx += (Math.random() - 0.5) * 6; // Wild lateral deflection
                         ball.vy += (Math.random() - 0.5) * 6;
                         ball.lastInteraction = { tick: playState.tick, playerId: bestCandidate.id, type: 'tip' };
                     } else {
-                        pushLog(`[Tick ${playState.tick}] 🚫 ${bestCandidate.name} swats the pass away!`);
+                        pushLog(`[Tick ${playState.tick}] 🚫 ${bestCandidate.name} swats the pass away! (Hands: ${hndEff}, Energy: ${fatPct}%)`);
                         ball.vz = -8.0; // Spikes into the turf
                         ball.vx *= 0.3; // Kills forward momentum
                         ball.vy *= 0.3;
@@ -4206,14 +4222,16 @@ function handleBallArrival(playState, carrier, playResult, gameLog) {
                     // 💡 FIX: 20% chance an offensive player bobbles the ball into the air instead of dropping it clean
                     const isBobble = (Math.random() < 0.20) && ball.tipCount < 3;
 
+                    const hndEff = Math.round(catching * bestCandidate.fatigueModifier);
+
                     if (isBobble) {
-                        pushLog(`[Tick ${playState.tick}] 🖐️ ${bestCandidate.name} bobbles the pass!`);
+                        pushLog(`[Tick ${playState.tick}] 🖐️ ${bestCandidate.name} bobbles the ball! (Hands: ${hndEff}, Energy: ${fatPct}%)`);
                         ball.vz = 2.5 + Math.random(); // Pops up slightly
                         ball.vx += (Math.random() - 0.5) * 3;
                         ball.vy += (Math.random() - 0.5) * 3;
                         ball.lastInteraction = { tick: playState.tick, playerId: bestCandidate.id, type: 'bobble' };
                     } else {
-                        pushLog(`[Tick ${playState.tick}] ❌ ${bestCandidate.name} drops the pass!`);
+                        pushLog(`[Tick ${playState.tick}] ❌ ${bestCandidate.name} drops the pass! (Hands: ${hndEff}, Energy: ${fatPct}%)`);
                         playState.statEvents.push({ type: 'drop', playerId: bestCandidate.id });
                         ball.vz = -5.0; // Straight down
                         ball.vx *= 0.2;
@@ -5588,14 +5606,22 @@ function simulateLivePlayStep(game) {
         game.down = 1;
         game.yardsToGo = 3;
         game.ballOn = 97;
+        
+        // 💡 FIX: Force the formations to match the special situation
+        offense.formations.offense = 'Balanced';
+        defense.formations.defense = '4-2-2'; 
+        
         offPlayKey = 'Balanced_Slants';
         defPlayKey = 'GoalLine_RunStuff';
     }
     else if (determinePuntDecision(game.down, game.yardsToGo, game.ballOn)) {
+        // 💡 FIX: Explicitly set the formations so the physics engine 
+        // uses the correct coordinates from data.js
+        offense.formations.offense = 'Punt';
+        defense.formations.defense = 'Punt_Return';
+
         offPlayKey = 'Punt_Punt';
-        defPlayKey = 'PuntReturn_Classic';
-        // Do NOT overwrite the team formations here. 
-        // resolvePlay will use the offPlayKey/defPlayKey to set up the field.
+        defPlayKey = 'PuntReturn_Classic'; 
     }
     else {
         const scoreDiff = (offense.id === game.homeTeam.id) ? (game.homeScore - game.awayScore) : (game.awayScore - game.homeScore);

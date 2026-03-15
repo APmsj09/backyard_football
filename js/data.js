@@ -181,8 +181,8 @@ export const offenseFormations = {
         personnel: { QB: 1, RB: 2, WR: 1, TE: 1, OL: 3 },
         coordinates: {
             QB1: [0, -4],
-            RB1: [0, -7],
-            RB2: [0, -4.5],
+            RB1: [0, -8.5],
+            RB2: [2, -5.5],
             WR1: [18, 0.5],
             TE1: [-6, -2],
             OL1: [-3, -1.5], // 💡 Corrected: OL Baseline
