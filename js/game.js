@@ -3142,24 +3142,42 @@ function checkTackleCollisions(playState, gameLog) {
             const defenderSpeed = defender.speed || 50;
 
             // 💡 HURDLE ATTEMPT (Jump over tackle)
-            // Success chance based on agility vs defender closing speed
             const hurdleChance = (carrierAgility / 120) - (defenderSpeed / 150);
             if (hurdleChance > 0.1 && Math.random() < hurdleChance * 0.5) {
-                // Successful hurdle!
                 carrier.action = 'hurdle';
-                carrier.hurdleTicks = 8; // Animation duration
-                defender.stunnedTicks = 10; // Defender whiffs
-
-                // Carrier gets a burst of speed from the hurdle
-                if (carrier.vy) carrier.vy *= 1.15; // 15% speed boost
+                carrier.hurdleTicks = 8; 
+                defender.stunnedTicks = 10; 
+                if (carrier.vy) carrier.vy *= 1.15; 
+                
+                // 💡 FIX: Apply fatigue penalty so they can't hurdle the whole team
+                carrier.tacklesBrokenThisPlay = (carrier.tacklesBrokenThisPlay || 0) + 1; 
 
                 if (gameLog) gameLog.push(`🏃 ${carrier.name} hurdled over ${defender.name}!`);
-                continue; // Skip tackle check, move to next defender
+                continue; 
+            }
+
+            // 💡 STIFF-ARM ATTEMPT (Push defender away)
+            const stiffArmChance = ((carrierStrength + (carrier.weight / 100)) / 300) - (defender.strength / 150);
+            if (stiffArmChance > 0.0 && Math.random() < stiffArmChance * 0.45) {
+                carrier.action = 'stiff_arm';
+                carrier.stiffArmTicks = 6;
+                const dx = defender.x - carrier.x;
+                const dy = defender.y - carrier.y;
+                const dist = Math.max(0.1, Math.sqrt(dx * dx + dy * dy));
+                defender.x += (dx / dist) * 2.5; 
+                defender.y += (dy / dist) * 2.5;
+                defender.stunnedTicks = 20; 
+                if (carrier.vy) carrier.vy *= 0.95;
+
+                // 💡 FIX: Apply fatigue penalty here too
+                carrier.tacklesBrokenThisPlay = (carrier.tacklesBrokenThisPlay || 0) + 1; 
+
+                if (gameLog) gameLog.push(`💪 ${carrier.name} stiff-armed ${defender.name}!`);
+                continue;
             }
 
             // 💡 STIFF-ARM ATTEMPT (Push defender away)
             // Success based on strength + size vs defender strength
-            const stiffArmChance = ((carrierStrength + (carrier.weight / 100)) / 300) - (defender.strength / 150);
             if (stiffArmChance > 0.0 && Math.random() < stiffArmChance * 0.45) {
                 // Successful stiff-arm!
                 carrier.action = 'stiff_arm';
@@ -4238,10 +4256,22 @@ function handleBallArrival(playState, carrier, playResult, gameLog) {
         if (playState.type === 'punt' && p.isOffense && ball.z > 0.5) return false;
         if (ball.droppedById === p.id) return false;
 
-        // 💡 FIX: Offensive Linemen know they are ineligible. They will let a forward 
-        // pass fly past them UNLESS it has already been tipped or fumbled.
+        // 💡 FIX: Offensive Linemen know they are ineligible.
         if (p.isOffense && p.slot.startsWith('OL') && playState.type === 'pass' && !ball.isLoose && !ball.tipCount) {
             return false;
+        }
+
+        // 💡 FIX: Friendly Fire Prevention! Offensive players won't snatch bullet passes meant for teammates
+        if (p.isOffense && playState.type === 'pass' && !ball.isLoose && !ball.tipCount) {
+            if (p.id !== ball.targetPlayerId) {
+                // If they aren't the target, check how close they are to the actual target
+                const targetPlayer = playState.activePlayers.find(t => t.id === ball.targetPlayerId);
+                if (targetPlayer) {
+                    const distToTarget = Math.sqrt((p.x - targetPlayer.x) ** 2 + (p.y - targetPlayer.y) ** 2);
+                    // If the target is more than 4 yards away, let the ball fly over their head
+                    if (distToTarget > 4.0) return false; 
+                }
+            }
         }
 
         const distNow = Math.sqrt((p.x - ball.x) ** 2 + (p.y - ball.y) ** 2);
@@ -4279,9 +4309,9 @@ function handleBallArrival(playState, carrier, playResult, gameLog) {
         };
 
         // 💡 FIX: Re-balanced Catching Odds
-        let catchScore = (catching * 0.75) + (agility * 0.25) + 10; // Base boost for reliable receivers
-        if (isDefense) catchScore -= 40; // DBs should SWAT more, INTERCEPT less
-        if (playersInRange.length > 1) catchScore -= 15; // Reduced penalty for contested catches (WRs fight for it)
+        let catchScore = (catching * 0.60) + (agility * 0.20) + 35; // Increased base floor significantly
+        if (isDefense) catchScore -= 50; // DBs should heavily favor SWATS over INTERCEPTIONS
+        if (playersInRange.length > 1) catchScore -= 10; 
         if (playState.type === 'punt') catchScore += 20;
 
         // 💡 FIX: Point-Blank Penalty. If the ball was just thrown (< 10 ticks / 0.5s ago), 
@@ -5727,7 +5757,14 @@ function aiCheckAudible(offense, offensivePlayKey, defense, defensivePlayKey, ga
                 newPlayKey = audibleTo;
                 didAudible = true;
                 if (gameLog) {
-                    gameLog.push(`[Audible]: 🧠 ${qb.name} (Tough:${qbToughness}) sees soft zone and audibles to run!`);
+                    // 💡 FIX: Ensure the play we found is ACTUALLY a run before printing the log
+                    // (Empty formations don't have run plays, for example)
+                    const isActuallyRun = offensivePlaybook[audibleTo]?.type === 'run';
+                    if (isActuallyRun) {
+                        gameLog.push(`[Audible]: 🧠 ${qb.name} sees soft zone and audibles to run!`);
+                    } else {
+                        gameLog.push(`[Audible]: 🧠 ${qb.name} changes the play at the line!`);
+                    }
                 }
             } else {
                 // 🔧 HIGH FIX: No run plays available - stick with pass or find any play
@@ -6379,8 +6416,9 @@ function checkCaptainDiscipline(team, gameLog) {
     const iqErrorFactor = (100 - iq) / 100;       // Inverse: 99 IQ = 0.01, 50 IQ = 0.5, 20 IQ = 0.8
     const consistencyErrorFactor = (100 - consistency) / 100;  // Same scale
 
-    const mentalErrorChance = (iqErrorFactor * 0.7) + (consistencyErrorFactor * 0.3);
-    const mentalErrorChanceClamped = Math.max(0.001, Math.min(0.95, mentalErrorChance)); // Clamp to reasonable range
+    // 💡 FIX: Reduced base error chance so bad captains aren't confused EVERY single play
+    const mentalErrorChance = ((iqErrorFactor * 0.6) + (consistencyErrorFactor * 0.4)) * 0.5; // Cut in half
+    const mentalErrorChanceClamped = Math.max(0.001, Math.min(0.35, mentalErrorChance)); // Max 35% chance to be confused
 
     const isSmart = Math.random() > mentalErrorChanceClamped;
 
