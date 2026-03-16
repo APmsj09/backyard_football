@@ -1027,6 +1027,27 @@ function renderDepthChartTab(gameState) {
         return;
     }
 
+    // 💡 FIX: Inject an Auto-Set Lineup button directly into the tabs container
+    const subTabsContainer = document.getElementById('depth-chart-subtabs');
+    if (subTabsContainer && !document.getElementById('global-auto-depth-btn')) {
+        const autoBtn = document.createElement('button');
+        autoBtn.id = 'global-auto-depth-btn';
+        autoBtn.className = 'ml-auto bg-amber-500 hover:bg-amber-600 text-white font-bold py-1 px-4 rounded text-sm transition shadow flex items-center gap-2';
+        autoBtn.innerHTML = `
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 002-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path></svg>
+            Auto-Set Lineup
+        `;
+        autoBtn.onclick = () => {
+            if (confirm("Auto-set your lineup? The coaching staff will organize your depth chart based on player ratings, playbook IQ, and consistency.")) {
+                Game.aiSetDepthChart(getGameState().playerTeam);
+                Game.saveGameState();
+                document.dispatchEvent(new CustomEvent('refresh-ui'));
+            }
+        };
+        // Float to the right side of the flex container
+        subTabsContainer.appendChild(autoBtn);
+    }
+
     const permanentRoster = getUIRosterObjects(gs.playerTeam)
         .filter(p => p && p.status?.type !== 'temporary');
 

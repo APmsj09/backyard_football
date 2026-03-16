@@ -940,39 +940,21 @@ function aiSetDepthChart(team) {
 
     // 1. Initialize Depth Order Buckets (The Source of Truth)
     team.depthOrder = {
-        'QB': [], 'RB': [], 'WR': [], 'TE': [], 'OL': [],
-        'DL': [], 'LB': [], 'DB': []
+        'QB': [], 'RB': [], 'WR': [], 'TE':[], 'OL': [],
+        'DL': [], 'LB': [], 'DB':[]
     };
 
-    // 🔧 HIGH FIX: Filter out injured/busy players before sorting
-    const healthyPlayers = rosterObjs.filter(p => {
-        // Player is healthy if they have no status OR status duration is 0
-        if (!p.status || p.status.duration === 0) {
-            return true;  // Healthy
-        }
-        // Injured, busy, or suspended
-        return false;
-    });
-
-    // If all players are injured, fall back to full roster
+    // Filter out injured/busy players before sorting
+    const healthyPlayers = rosterObjs.filter(p => !p.status || p.status.duration === 0);
     const sortRoster = healthyPlayers.length > 0 ? healthyPlayers : rosterObjs;
 
-    if (healthyPlayers.length < rosterObjs.length) {
-        const injuredCount = rosterObjs.length - healthyPlayers.length;
-        const teamName = team?.name || 'Unknown Team';
-        console.log(`⚠️ ${teamName}: ${injuredCount} player(s) injured/unavailable. Using depth chart with ${healthyPlayers.length} healthy players.`);
-    }
+    // 2. Distribute into Buckets First
+    const bucketMap = {
+        'QB': [], 'RB': [], 'WR': [], 'TE': [], 'OL':[],
+        'DL': [], 'LB': [], 'DB':[]
+    };
 
-    // 2. Sort Roster by Overall (Best players first)
-    // We use a generic 'ATH' position to just get raw talent
-    const sortedRoster = [...sortRoster]
-        .filter(p => p) // 🔧 Filter out any undefined players
-        .sort((a, b) =>
-            calculateOverall(b, estimateBestPosition(b)) - calculateOverall(a, estimateBestPosition(a))
-        );
-
-    // 3. Distribute into Buckets
-    sortedRoster.forEach(p => {
+    sortRoster.forEach(p => {
         if (!p || !p.id) return;
 
         // Determine Offensive Bucket
@@ -980,21 +962,53 @@ function aiSetDepthChart(team) {
         if (['FB'].includes(offPos)) offPos = 'RB';
         if (['ATH', 'K', 'P'].includes(offPos)) offPos = 'WR';
         if (['OT', 'OG', 'C'].includes(offPos)) offPos = 'OL';
-        if (!team.depthOrder[offPos]) offPos = 'WR';
+        if (!bucketMap[offPos]) offPos = 'WR';
 
         // Determine Defensive Bucket
         let defPos = p.favoriteDefensivePosition || 'DB';
         if (['CB', 'S', 'FS', 'SS'].includes(defPos)) defPos = 'DB';
         if (['DE', 'DT', 'NT'].includes(defPos)) defPos = 'DL';
-        if (!team.depthOrder[defPos]) defPos = 'DB';
+        if (!bucketMap[defPos]) defPos = 'DB';
 
-        // Push player to BOTH buckets so the AI uses them on both sides of the ball
-        team.depthOrder[offPos].push(p.id);
-
-        if (team.depthOrder[defPos] && !team.depthOrder[defPos].includes(p.id)) {
-            team.depthOrder[defPos].push(p.id);
+        bucketMap[offPos].push(p);
+        
+        // Push player to defensive bucket if different so ironman logic works
+        if (offPos !== defPos && bucketMap[defPos]) {
+            bucketMap[defPos].push(p);
         }
     });
+
+    // 3. Sort Each Position Bucket Realistically
+    for (const pos of Object.keys(bucketMap)) {
+        const players = bucketMap[pos];
+        
+        // Remove duplicates just in case
+        const uniquePlayers = Array.from(new Set(players));
+
+        uniquePlayers.sort((a, b) => {
+            const ovrA = calculateOverall(a, pos);
+            const ovrB = calculateOverall(b, pos);
+
+            // 💡 REALISM FIX: Coaches value smart, reliable players. Give them a subjective bump.
+            const iqA = a.attributes?.mental?.playbookIQ || 50;
+            const iqB = b.attributes?.mental?.playbookIQ || 50;
+            const consA = a.attributes?.mental?.consistency || 50;
+            const consB = b.attributes?.mental?.consistency || 50;
+
+            // "Coach's Eye" Noise: Small seeded bias so evaluations aren't perfectly mathematical
+            const biasA = (a.id.charCodeAt(0) % 5) - 2;
+            const biasB = (b.id.charCodeAt(0) % 5) - 2;
+
+            // Smart/consistent players can play up to +3 to +5 OVR better in a coach's eyes
+            const perceivedValueA = ovrA + ((iqA - 50) * 0.06) + ((consA - 50) * 0.06) + biasA;
+            const perceivedValueB = ovrB + ((iqB - 50) * 0.06) + ((consB - 50) * 0.06) + biasB;
+
+            return perceivedValueB - perceivedValueA; // Sort Descending
+        });
+
+        // Map back to IDs
+        team.depthOrder[pos] = uniquePlayers.map(p => p.id);
+    }
 
     // 4. Now that depthOrder is correct, let the rebuilder handle the slot assignments
     rebuildDepthChartFromOrder(team);
