@@ -2627,7 +2627,7 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
 
                         // 💡 FIX: Hard cap the drift depth. A QB should NEVER drift more than 10 yards behind the LOS.
                         // This prevents those massive -14 yard sacks while maintaining pocket sliding.
-                        const maxDepth = LOS - 10.0;
+                        const maxDepth = LOS - 7.5;
                         pState.targetY = Math.max(maxDepth, Math.min(LOS - 1, idealY + (shiftY * iqMod)));
                     } else {
                         pState.targetX = idealX;
@@ -2908,10 +2908,10 @@ function executeAssignment(pState, assignment, offenseStates, LOS, playState) {
                 const longMovement = ((targetRec.targetY || targetRec.y) - targetRec.y);
                 
                 // IQ 100 = 1.0 (Perfect mirror), IQ 70 = 0.5 (Slight read), IQ < 40 = 0 (Just chases)
-                const readMultiplier = Math.max(0, (defIQ - 40) / 60); 
+                const readMultiplier = Math.max(0, (defIQ - 50) / 50); 
                 
-                perfectX += latMovement * readMultiplier * 0.85; // Mirror lateral cuts
-                perfectY += longMovement * readMultiplier * 0.4; // Anticipate depth
+                perfectX += latMovement * readMultiplier * 0.60; // Reduced to allow inside leverage separation
+                perfectY += longMovement * readMultiplier * 0.25; // Anticipate depth less aggressively
 
                 // 2. PHYSICAL: Agility Trailing
                 // Even if the DB reads it perfectly, a more agile WR can physically shake them
@@ -3459,9 +3459,8 @@ function resolveOngoingBlocks(playState, gameLog, offenseStates = [], defenseSta
         }
 
         // 3. Stats Calculation (Standard Block Battle)
-        const blockPower = ((blocker.blocking || 50) + (blocker.strength || 50)) * blocker.fatigueModifier;
+        const blockPower = (((blocker.blocking || 50) * 1.25) + (blocker.strength || 50)) * blocker.fatigueModifier;
         let shedPower = ((defender.blockShedding || 50) + (defender.strength || 50)) * defender.fatigueModifier;
-
         // 💡 PASS RUSHER TECHNIQUE MOVES
         const isPassRush = defender.assignment?.includes('rush') || defender.assignment?.includes('blitz');
 
@@ -3939,7 +3938,8 @@ function updateQBDecision(qbState, offenseStates, defenseStates, playState, offe
     // Only execute this if decisionMade is true AND no target was organically found
     if (decisionMade && !targetPlayerState) {
         if (reason === "Imminent Sack") {
-            const chanceToEatSack = qbIQ / 120;
+            // 💡 FIX: Dumb QBs eat sacks. Smart QBs throw it away. (Reversed the math)
+            const chanceToEatSack = (110 - qbIQ) / 100;
             if (Math.random() < chanceToEatSack) return; // Eat sack
 
             if (Math.random() > 0.7 && qbAttrs.mental?.clutch > 60) {
@@ -4044,32 +4044,47 @@ function executeThrow(qbState, target, strength, accuracy, playState, gameLog, a
     let aimX = target.x;
     let aimY = target.y;
 
-    // Lead Calculation
-    if (target.action.includes('route')) {
-        const dist = Math.sqrt((aimX - startX) ** 2 + (aimY - startY) ** 2);
+    // 💡 FIX: Enhanced Lead Calculation
+    if (target.action.includes('route') || target.action === 'run_path') {
+        const dist = Math.sqrt((target.x - startX) ** 2 + (target.y - startY) ** 2);
         const estTime = dist / ballSpeed;
-        const recSpeedYPS = (target.speed || 50) / 100 * 8.0;
+        
+        // Use actual current velocity for the most accurate direction
+        const vx = target.vx || 0;
+        const vy = target.vy || 0;
 
-        const rDx = (target.targetX || target.x) - target.x;
-        const rDy = (target.targetY || target.y) - target.y;
-        const rLen = Math.sqrt(rDx * rDx + rDy * rDy);
+        // QB IQ determines how well they "predict" the WR's speed
+        // 100 IQ = 100% lead accuracy, 50 IQ = 80% lead (throwing behind)
+        const qbIQ = qbState.playbookIQ || 50;
+        const leadFactor = 0.75 + (qbIQ / 400); 
 
-        if (rLen > 0.1) {
-            aimX += (rDx / rLen) * recSpeedYPS * estTime;
-            aimY += (rDy / rLen) * recSpeedYPS * estTime;
-        }
+        aimX += vx * estTime * leadFactor;
+        aimY += vy * estTime * leadFactor;
     }
 
-    // Accuracy Error
-    const baseErrorMargin = (100 - accuracy) / 20;
-    const angle = Math.random() * Math.PI * 2;
-    const distError = Math.random() * baseErrorMargin;
+    // 💡 FIX: Directional Accuracy Error
+    // Instead of a random circle, we bias errors to land "long" or "wide" 
+    // rather than "behind," which is where most real-life misses happen.
+    const baseErrorMargin = (100 - accuracy) / 18;
+    
+    // Calculate the vector from QB to target
+    const dirX = aimX - startX;
+    const dirY = aimY - startY;
+    const mag = Math.sqrt(dirX * dirX + dirY * dirY);
+    const unitX = dirX / mag;
+    const unitY = dirY / mag;
 
-    const bodyBiasX = (Math.random() - 0.5) * (baseErrorMargin * 0.3);
-    const bodyBiasY = (Math.random() - 0.5) * (baseErrorMargin * 0.3);
+    // Longitudinal Error (Overthrow/Underthrow)
+    // We bias this to be positive (overthrow) 60% of the time
+    const longBias = (Math.random() > 0.4) ? 1.2 : -0.8;
+    const longError = (Math.random() * baseErrorMargin) * longBias;
 
-    aimX += Math.cos(angle) * distError + bodyBiasX;
-    aimY += Math.sin(angle) * distError + bodyBiasY;
+    // Lateral Error (Left/Right)
+    const latError = (Math.random() - 0.5) * baseErrorMargin * 1.5;
+
+    // Apply errors: move along the pass line (long) and perpendicular to it (lat)
+    aimX += (unitX * longError) + (-unitY * latError);
+    aimY += (unitY * longError) + (unitX * latError);
 
     // Safety Clamp
     const PAD = 10;
@@ -4240,8 +4255,8 @@ function handleBallArrival(playState, carrier, playResult, gameLog) {
         return; // Now we can safely return so players don't try to catch it
     }
 
-    const CATCH_RADIUS = 1.2;
-    const CATCH_TOLERANCE = 0.6;
+    const CATCH_RADIUS = 0.6;
+    const CATCH_TOLERANCE = 0.25;
 
     const pointToSegmentDist = (px, py, x1, y1, x2, y2) => {
         const A = px - x1; const B = py - y1; const C = x2 - x1; const D = y2 - y1;
@@ -4256,14 +4271,14 @@ function handleBallArrival(playState, carrier, playResult, gameLog) {
         // 1. RECOVERY COOLDOWN (Prevents Magnet Recatch in a loop)
         if (ball.isLoose && p.id === ball.lastDroppedById) {
             const ticksSinceDrop = playState.tick - (ball.droppedTick || 0);
-            if (ticksSinceDrop < 25) return false; // Must wait ~1.25s to pick up own fumble
+            if (ticksSinceDrop < 25) return false; 
         }
 
         // 💡 FIX: Kicker/Punter cannot touch the ball for at least 1 second after kick
         const ticksSinceKick = playState.tick - (ball.throwTick || 0);
         if (p.id === ball.throwerId && ticksSinceKick < 20) return false;
 
-        // 💡 FIX: Kicking team cannot catch their own punt in the air (Downing only happens on ground)
+        // 💡 FIX: Kicking team cannot catch their own punt in the air
         if (playState.type === 'punt' && p.isOffense && ball.z > 0.5) return false;
         if (ball.droppedById === p.id) return false;
 
@@ -4272,14 +4287,12 @@ function handleBallArrival(playState, carrier, playResult, gameLog) {
             return false;
         }
 
-        // 💡 FIX: Friendly Fire Prevention! Offensive players won't snatch bullet passes meant for teammates
+        // 💡 FIX: Friendly Fire Prevention!
         if (p.isOffense && playState.type === 'pass' && !ball.isLoose && !ball.tipCount) {
             if (p.id !== ball.targetPlayerId) {
-                // If they aren't the target, check how close they are to the actual target
                 const targetPlayer = playState.activePlayers.find(t => t.id === ball.targetPlayerId);
                 if (targetPlayer) {
                     const distToTarget = Math.sqrt((p.x - targetPlayer.x) ** 2 + (p.y - targetPlayer.y) ** 2);
-                    // If the target is more than 4 yards away, let the ball fly over their head
                     if (distToTarget > 4.0) return false; 
                 }
             }
@@ -4297,7 +4310,12 @@ function handleBallArrival(playState, carrier, playResult, gameLog) {
 
     // 💡 FIX 1: Only run catch calculations if it's NOT a throw away
     if (!ball.isThrowAway && playersInRange.length > 0) {
-        playersInRange.sort((a, b) => getDistance(a, ball) - getDistance(b, ball));
+        // 💡 FIX: Give the intended receiver a 0.5 yard "priority" radius in jump balls
+        playersInRange.sort((a, b) => {
+            const distA = getDistance(a, ball) - (a.id === ball.targetPlayerId ? 0.5 : 0);
+            const distB = getDistance(b, ball) - (b.id === ball.targetPlayerId ? 0.5 : 0);
+            return distA - distB;
+        });
         const bestCandidate = playersInRange[0];
 
         let catching = 50; let agility = 50;
@@ -4377,6 +4395,12 @@ function handleBallArrival(playState, carrier, playResult, gameLog) {
 
                 const last = ball.lastInteraction;
                 if (!(last && last.playerId === bestCandidate.id && (playState.tick - last.tick) <= 5)) {
+
+                    // 💡 FIX: Defenders don't automatically swat if they miss an INT. They must roll for it!
+                    const swatChance = (catching * 0.5) + (agility * 0.5) + 15;
+                    if (Math.random() * 100 > swatChance) {
+                        return; // DB whiffed the swat! Let the ball continue to the receiver
+                    }
 
                     ball.tipCount = (ball.tipCount || 0) + 1;
                     const isTip = (Math.random() < 0.25) && ball.tipCount < 3;

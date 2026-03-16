@@ -338,8 +338,21 @@ function proceedWithAdvanceWeek() {
     const playerGameMatch = weekGames.find(g => g.home.id === playerTeamId || g.away.id === playerTeamId);
 
     if (playerGameMatch) {
-        startLiveGame(playerGameMatch);
+        const isHome = playerGameMatch.home.id === playerTeamId;
+        const opponentName = isHome ? playerGameMatch.away.name : playerGameMatch.home.name;
+        const location = isHome ? "at Home" : "Away";
+
+        // Prompt the user: Watch Live or Quick Sim?
+        UI.showModal(
+            `Game Day: Week ${gameState.currentWeek + 1}`,
+            `<p class="mb-4">Your team is playing <strong>${opponentName}</strong> (${location}).</p><p>How do you want to play this week?</p>`,
+            () => startLiveGame(playerGameMatch), // Primary Action
+            "Watch Game",
+            () => simulateRestOfWeek(), // Secondary Action
+            "Quick Sim"
+        );
     } else {
+        // Bye week or no game, just sim it instantly
         simulateRestOfWeek();
     }
 }
