@@ -2585,13 +2585,14 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
             switch (pState.action) {
                 // 💡 FIX: Missing pocket dropback logic added
                 case 'qb_setup':
+                case 'handoff_setup':
                     const qbIQ = pState.playbookIQ || 50;
 
                     // PHASE 1: THE DROPBACK (Explosive movement to depth)
                     if (!pState.hasCompletedDropback) {
                         pState.targetX = pState.initialX;
                         pState.targetY = pState.dropbackTargetY;
-
+                        
                         // Give the QB a speed boost during the dropback to simulate backpedaling
                         pState.contactReduction = 1.4;
 
@@ -2603,14 +2604,34 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                         break; // Exit case while still dropping back
                     }
 
-                    // PHASE 2: THE SET & DRIFT (Pocket awareness logic)
+                    // PHASE 2: POCKET AWARENESS & ESCAPE
                     pState.contactReduction = 1.0; // Reset speed to normal
-
                     let idealX = pState.initialX;
                     let idealY = pState.dropbackTargetY; // Anchor to dropback depth
 
                     const rushers = defenseStates.filter(d => !d.isBlocked && !d.isEngaged && getDistance(pState, d) < 6);
+                    
+                    // --- 💡 THE "PANIC" TRIGGER ---
+                    // If any unblocked defender is inside 3.5 yards, forget drifting—ROLL OUT.
+                    const immediateThreat = rushers.find(r => getDistance(pState, r) < 3.5);
 
+                    if (immediateThreat && (qbIQ > 45 || pState.agility > 50)) {
+                        if (!pState.rolloutDir) {
+                            // Pick the side with the most green grass (away from center)
+                            pState.rolloutDir = pState.x > CENTER_X ? -1 : 1;
+                        }
+                        
+                        // Change action to scramble so the QB actually runs at full speed laterally
+                        pState.action = 'qb_scramble'; 
+                        pState.targetX = pState.x + (pState.rolloutDir * 8);
+                        pState.targetY = pState.y + 1.0; // Slowly advance to LOS while rolling out
+                        pState.loggedRollout = true;
+                        
+                        if (gameLog) pushGameLog(gameLog, `[Tick ${playState.tick}] 🏃 ${pState.name} escapes the collapsing pocket!`, playState);
+                        break;
+                    }
+
+                    // --- PHASE 3: STANDARD POCKET DRIFT (If no immediate panic) ---
                     if (rushers.length > 0 && qbIQ > 40) {
                         let shiftX = 0;
                         let shiftY = 0;
@@ -2625,35 +2646,25 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                             if (Math.abs(dx) > 3.0) edgePressure = true;
                             if (Math.abs(dx) <= 3.0 && dy > 0) interiorPressure = true;
 
-                            if (Math.abs(dx) > 2 && r.y > pState.y + 1) shiftY -= 0.8; // Edge rusher approaching -> Drift back slightly
+                            if (Math.abs(dx) > 2) shiftY -= 0.8; // Edge rusher approaching -> Drift back slightly
                             if (Math.abs(dx) < 4) shiftX += (dx > 0 ? -1.2 : 1.2); // Slide laterally away from threat
                         });
 
-                        // 💡 FIX: "Step Up" Logic!
+                        // "Step Up" Logic!
                         // If the edges are collapsing but the interior (A/B gaps) is clean, a smart QB steps forward.
                         if (edgePressure && !interiorPressure && qbIQ > 65) {
                             shiftY += 2.5; // Step forward firmly
                             if (gameLog && Math.random() < 0.05) pushGameLog(gameLog, `[Tick ${playState.tick}] 👣 ${pState.name} steps up into the pocket!`, playState);
                         }
-                        // 💡 NEW: "Roll Out" Logic!
-                        // If the interior is collapsing but an edge is open, a mobile QB rolls out.
-                        else if (interiorPressure && !edgePressure && qbIQ > 60 && (pState.agility || 50) > 60) {
-                            const centerDist = pState.x - 26.65;
-                            const rollDir = centerDist > 0 ? 1.5 : -1.5; // Roll to the wide side
-                            shiftX += rollDir * 3.5;
-                            shiftY -= 0.5; // Drift back slightly to avoid reaching LOS too fast
-
-                            pState.loggedRollout = true; // Flags QB to get extra time in decision logic
-                        }
 
                         const iqMod = qbIQ / 100;
-                        pState.targetX = Math.max(pState.initialX - 3, Math.min(pState.initialX + 3, idealX + (shiftX * iqMod)));
+                        pState.targetX = Math.max(pState.initialX - 4, Math.min(pState.initialX + 4, idealX + (shiftX * iqMod)));
 
-                        // 💡 FIX: Hard cap the drift depth. A QB should NEVER drift more than 10 yards behind the LOS.
-                        // This prevents those massive -14 yard sacks while maintaining pocket sliding.
+                        // Hard cap the drift depth. A QB should NEVER drift more than 7.5 yards behind the LOS.
                         const maxDepth = LOS - 7.5;
                         pState.targetY = Math.max(maxDepth, Math.min(LOS - 1, idealY + (shiftY * iqMod)));
                     } else {
+                        // Pocket is perfectly clean
                         pState.targetX = idealX;
                         pState.targetY = idealY;
                     }

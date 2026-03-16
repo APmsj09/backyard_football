@@ -3095,16 +3095,29 @@ export function startLiveGameLoop(initialGameState, onComplete) {
 function runLiveGameStep() {
     if (!activeLiveGame) return;
 
-    // 💡 FIX: Clear any existing timeouts to prevent "Double Stepping"
     if (huddleTimeout) clearTimeout(huddleTimeout);
 
-    // 1. End Check
     if (activeLiveGame.isGameOver) {
         finishLiveGame();
         return;
     }
 
-    // 2. Run Physics Step
+    // 💡 SNAPSHOT: Capture current down/dist BEFORE we simulate the next play
+    const currentDown = activeLiveGame.down;
+    const currentYards = activeLiveGame.yardsToGo;
+    const currentPlays = activeLiveGame.playsTotal || 1;
+    const isConversion = activeLiveGame.isConversionAttempt;
+
+    // Update scoreboard with current (pre-play) info
+    if (isConversion) {
+        elements.simGameDown.textContent = "Conversion";
+        elements.simGameDrive.textContent = "PAT";
+    } else {
+        elements.simGameDown.textContent = `${currentDown} & ${currentYards}`;
+        elements.simGameDrive.textContent = `Play ${currentPlays}/60`;
+    }
+
+    // Run Physics Step (this updates the internal activeLiveGame state)
     let stepResult;
     try {
         stepResult = Game.simulateLivePlayStep(activeLiveGame);
@@ -3114,28 +3127,25 @@ function runLiveGameStep() {
         return;
     }
 
-    // 3. UI Update
-    updateLiveScoreboard();
-
-    // 💡 FIX: Removed flushLiveLogs() from here! It now happens inside the animator.
-
-    // Update Sidebars (Fatigue/Stats) using the first frame of the new data
+    // Update Sidebars (Fatigue/Stats) 
     if (stepResult.visualizationFrames && stepResult.visualizationFrames.length > 0) {
         renderSimPlayers(stepResult.visualizationFrames[0]);
         if (typeof renderLiveStatsLive === 'function') renderLiveStatsLive();
     }
 
-    // 4. Animate
+    // Animate the frames we just calculated
     if (stepResult.visualizationFrames && stepResult.visualizationFrames.length > 0) {
         playVisualization(stepResult.visualizationFrames, () => {
-            // 💡 FIX: Flush any final logs (like "Play ends" or "Turnover") after the animation finishes
             flushLiveLogs(); 
+            
+            // 💡 UPDATE SCORE: Now that the animation is over, show the NEW scores
+            elements.simHomeScore.textContent = activeLiveGame.homeScore;
+            elements.simAwayScore.textContent = activeLiveGame.awayScore;
 
             if (isSkipping) {
                 runLiveGameStep();
             } else {
                 const delay = activeLiveGame.isConversionAttempt ? 1000 : 3500;
-                if (huddleTimeout) clearTimeout(huddleTimeout);
                 huddleTimeout = setTimeout(runLiveGameStep, delay);
             }
         });
