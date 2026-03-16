@@ -2823,12 +2823,15 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
             if (isBallInAir) {
                 shouldPursue = false;
             } else if (!carrierIsQB) {
-                shouldPursue = true;
+                // 💡 FIX: Defenders MUST actually diagnose the run before they can abandon their gap and chase the RB!
+                if (isRunRead) shouldPursue = true;
             } else if (qbScrambling) {
                 shouldPursue = true;
             } else {
-                // 💡 FIX: DL/Blitzers ignore "Read" state and pursue QB immediately if in rush/blitz mode
+                // Carrier is still the QB (Sitting in pocket, or handing ball off)
                 if (assignment?.includes('blitz') || assignment?.includes('rush') || isDL) {
+                    // 💡 FIX: DLs rush the *pocket* until the handoff actually occurs. 
+                    // This forces them to engage the Offensive Line realistically.
                     shouldPursue = true;
                 }
             }
@@ -3924,8 +3927,9 @@ function updateQBDecision(qbState, offenseStates, defenseStates, playState, offe
     // Calculate how many reads the QB has processed so far (sees more of the field the longer he holds it)
     const numReadsVisible = Math.min(progression.length, 1 + Math.floor(qbState.ticksInPocket / scanSpeedBase));
 
-    // Time Constraints
-    const canThrowStandard = (playState.tick > 25 || isHotReadSituation) && qbState.hasCompletedDropback;
+    // 💡 FIX: Force the QB to let the play develop! Minimum 2.25 seconds (45 ticks) for standard reads.
+    const MIN_DROPBACK_TICKS = 45;
+    const canThrowStandard = (playState.tick >= MIN_DROPBACK_TICKS || isHotReadSituation) && qbState.hasCompletedDropback;
 
     let maxDecisionTimeTicks = 110 + (qbIQ / 3) + (qbAgility / 3);
     if (qbState.loggedRollout) maxDecisionTimeTicks += 35; // Rolling out extends the play
@@ -5015,22 +5019,23 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
                     const meshX = qb.initialX + (rb.initialX > qb.initialX ? 1.5 : -1.5);
                     const meshY = playState.lineOfScrimmage - 1.2;
 
-                    // 💡 FIX: Speed up handoff so it occurs before free blitzers can tackle the QB for a TFL
-                    if (playState.tick < 10) {
-                        // QB moves to mesh point and "turns" (simulated by target)
+                    // 💡 FIX: Realistic pacing. Handoffs take ~1.2 seconds (24 ticks) to develop.
+                    if (playState.tick < 24) { 
+                        // QB moves to mesh point and "turns"
                         qb.targetX = meshX;
                         qb.targetY = meshY;
                         qb.action = 'handoff_setup';
-
-                        // RB targets the QB's hands (the mesh point)
+                        
+                        // RB jogs to the mesh point
                         rb.targetX = meshX;
                         rb.targetY = meshY;
                         rb.action = 'run_path';
-                        rb.contactReduction = 1.1; // Burst to the exchange
+                        // Keep speed restrained so they don't overrun the QB
+                        rb.contactReduction = 0.85; 
                     } else {
-                        // Execute exchange if close enough, or force it at tick 10
+                        // Execute exchange
                         const dist = getDistance(qb, rb);
-                        if (dist < 1.5 || playState.tick >= 14) {
+                        if (dist < 1.5 || playState.tick >= 28) {
                             qb.hasBall = false;
                             qb.isBallCarrier = false;
                             rb.hasBall = true;
