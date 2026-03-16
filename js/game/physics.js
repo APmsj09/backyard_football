@@ -82,29 +82,28 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
     const effectiveMaxSpeed = maxPossibleSpeed * turnPenalty * (1.0 - (1.0 - gapFriction) * 0.7); // Reduce speed by 70% of friction
 
     // --- 6. Acceleration & Deceleration (Braking) ---
-    // Accelerate harder when moving straight, stall when cutting
-    let accelRate = (6.0 + (agilityStat * 0.10)) * fatigueMod * (1.0 - (1.0 - gapFriction) * 0.5); // Reduce acceleration by 50% of friction
+    let accelRate = (6.0 + (agilityStat * 0.10)) * fatigueMod * (1.0 - (1.0 - gapFriction) * 0.5); 
     
-    if (dotProduct > 0.85) accelRate *= 1.5; // Straight line "burst"
-    if (dotProduct < 0.25) accelRate *= 0.5; // "Stumble" penalty during hard cuts
+    if (dotProduct > 0.85) accelRate *= 1.5; 
+    if (dotProduct < 0.25) accelRate *= 0.5; 
 
     // Arrival Braking
     const SLOW_RADIUS = 3.0;
     let arrivalFactor = 1.0;
-    if (distToTarget < SLOW_RADIUS) {
+    
+    // 💡 FIX: Players bursting to the handoff mesh ('run_path') should NEVER hit the brakes!
+    if (distToTarget < SLOW_RADIUS && pState.action !== 'run_path') {
         arrivalFactor = distToTarget / SLOW_RADIUS;
-        accelRate *= 2.0; // Extra effort to plant feet at the destination
+        accelRate *= 2.0; 
     }
 
     // --- 7. Momentum Calculation ---
     const targetVx = (dx / distToTarget) * effectiveMaxSpeed * arrivalFactor;
     const targetVy = (dy / distToTarget) * effectiveMaxSpeed * arrivalFactor;
 
-    // Apply change in velocity (Inertia)
     pState.vx += (targetVx - pState.vx) * accelRate * timeDelta;
     pState.vy += (targetVy - pState.vy) * accelRate * timeDelta;
 
-    // Absolute Speed Cap
     const speedAfterAccel = Math.sqrt(pState.vx * pState.vx + pState.vy * pState.vy);
     if (speedAfterAccel > maxPossibleSpeed) {
         const ratio = maxPossibleSpeed / speedAfterAccel;
@@ -112,28 +111,31 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
     }
 
     // --- 8. Collision Deflection (Physical Nudges) ---
-    // 💡 NEW: Aggressive collision resolution to prevent players from phasing through each other.
-    const SEPARATION_RADIUS = 0.6; // Base player radius
+    const SEPARATION_RADIUS = 0.6; 
     allPlayers.forEach(other => {
-        if (other.id === pState.id || other.isEngaged || pState.isEngaged) return; // Engaged players are handled by block battles
+        if (other.id === pState.id || other.isEngaged || pState.isEngaged) return; 
+
+        // 💡 FIX: DO NOT repel players who are actively trying to exchange the ball!
+        if ((pState.action === 'handoff_setup' && other.action === 'run_path') ||
+            (pState.action === 'run_path' && other.action === 'handoff_setup')) {
+            return; 
+        }
 
         const dist = getDistance(pState, other);
-        const combinedRadius = SEPARATION_RADIUS + SEPARATION_RADIUS; // Simple sphere-ish collision
+        const combinedRadius = SEPARATION_RADIUS + SEPARATION_RADIUS; 
         
         if (dist < combinedRadius && dist > 0.01) {
             const overlap = combinedRadius - dist;
-            const pushMagnitude = overlap * 0.6; // Push with 60% of overlap distance
+            const pushMagnitude = overlap * 0.6; 
 
             const dx_norm = (pState.x - other.x) / dist;
             const dy_norm = (pState.y - other.y) / dist;
 
-            // Apply push to both players in opposite directions
             pState.x += dx_norm * pushMagnitude * 0.5;
             pState.y += dy_norm * pushMagnitude * 0.5;
             other.x -= dx_norm * pushMagnitude * 0.5;
             other.y -= dy_norm * pushMagnitude * 0.5;
 
-            // Also affect velocities to "bounce" them off each other
             pState.vx += dx_norm * pushMagnitude * 2.0;
             pState.vy += dy_norm * pushMagnitude * 2.0;
             other.vx -= dx_norm * pushMagnitude * 2.0;

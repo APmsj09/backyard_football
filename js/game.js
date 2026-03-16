@@ -2583,9 +2583,15 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
             }
 
             switch (pState.action) {
-                // 💡 FIX: Missing pocket dropback logic added
-                case 'qb_setup':
+                // 💡 FIX 1: Handoff and Run Path need to be left alone! 
+                // Their targets are already calculated perfectly in the main tick loop.
                 case 'handoff_setup':
+                case 'run_path':
+                case 'run_fake':
+                    break;
+
+                // 💡 FIX 2: Isolate QB pass dropback so it ONLY happens on passes
+                case 'qb_setup':
                     const qbIQ = pState.playbookIQ || 50;
 
                     // PHASE 1: THE DROPBACK (Explosive movement to depth)
@@ -2601,7 +2607,7 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                             pState.hasCompletedDropback = true;
                             pState.dropbackPhase = 'set';
                         }
-                        break; // Exit case while still dropping back
+                        break; 
                     }
 
                     // PHASE 2: POCKET AWARENESS & ESCAPE
@@ -2765,8 +2771,9 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                 case 'run_block':
                     if (!pState.dynamicTargetId) {
                         pState.targetX = pState.initialX;
-                        // 💡 FIX: Keep pocket depth tight to match QB dropback
-                        pState.targetY = (pState.action === 'pass_block') ? Math.max(LOS - 1.5, pState.y - 0.5) : pState.y + 1.0;
+                        // 💡 FIX: Form a deeper, truer pocket (step back to 2.5 yards behind LOS)
+                        // This allows the tackles to naturally intercept wide rushers.
+                        pState.targetY = (pState.action === 'pass_block') ? Math.max(LOS - 2.5, pState.y - 0.8) : pState.y + 1.0;
                     }
                     break;
 
@@ -3076,19 +3083,27 @@ function executeAssignment(pState, assignment, offenseStates, LOS, playState) {
             const dx = qb.x - pState.x;
             const dy = qb.y - pState.y;
 
-            const isEdgeRusher = Math.abs(pState.x - 26.65) > 10;
+            // 💡 FIX: Define Edge Rusher based on initial alignment relative to the QB.
+            // Anyone lining up more than 3.5 yards wide of the QB is an edge rusher.
+            const isEdgeRusher = Math.abs(pState.initialX - qb.initialX) >= 3.5;
 
             if (isEdgeRusher) {
-                const escapeAngle = dx < 0 ? -1 : 1;
-                pState.targetX = qb.x + (escapeAngle * 3.0);
-                pState.targetY = Math.max(LOS - 2, qb.y - 1.5);
+                const escapeAngle = pState.initialX < qb.initialX ? -1 : 1;
+                
+                // 💡 FIX: "Run the Hoop" - Force the edge rusher to stay wide until they reach QB depth.
+                // This creates a realistic U-shaped pass rush arc, buying the QB ~1 extra second.
+                if (pState.y > qb.y + 1.0) {
+                    pState.targetX = qb.x + (escapeAngle * 3.5); // Stay wide of the shoulder
+                    pState.targetY = qb.y - 1.0;                 // Aim deep behind the QB
+                } else {
+                    // Once they reach the QB's depth, collapse violently inward
+                    pState.targetX = qb.x;
+                    pState.targetY = qb.y;
+                }
             } else {
                 pState.targetX = qb.x;
-                // 💡 FIX: Allow interior rushers to chase QB all the way to their full dropback depth
                 pState.targetY = qb.y;
             }
-            // 💡 FIX: Removed the game-breaking permanent speed multiplication!
-            // The movement physics engine is naturally faster when unblocked anyway.
         } else {
             pState.targetX = pState.x;
             pState.targetY = LOS - 5;
@@ -3790,12 +3805,14 @@ function updateQBDecision(qbState, offenseStates, defenseStates, playState, offe
     };
 
     // --- 3. ASSESS PRESSURE & POCKET GEOMETRY ---
-    // A defender 7 yards away isn't pressure yet. Ignore stunned defenders.
     const unblocked = defenseStates.filter(d => !d.isBlocked && !d.isEngaged && d.stunnedTicks === 0 && getDistance(qbState, d) < 4.5);
     const pressureDefender = unblocked.length > 0 ? unblocked[0] : null;
     const pressureCount = unblocked.length;
     const isPressured = !!pressureDefender;
     const imminentSackDefender = isPressured && getDistance(qbState, pressureDefender) < 1.2;
+
+    // 💡 NEW: Hot Read Trigger! If an unblocked rusher is within 4.5 yards, panic-mode activates.
+    const isHotReadSituation = isPressured && getDistance(qbState, pressureDefender) < 4.5;
 
     // 💡 NEW: Pocket Collapse Detection
     // Check if defenders are collapsing from one side (left/right of QB)
@@ -3851,7 +3868,7 @@ function updateQBDecision(qbState, offenseStates, defenseStates, playState, offe
     const numReadsVisible = Math.min(progression.length, 1 + Math.floor(qbState.ticksInPocket / scanSpeedBase));
 
     // Time Constraints
-    const canThrowStandard = playState.tick > MIN_DROPBACK_TICKS && qbState.hasCompletedDropback;
+    const canThrowStandard = (playState.tick > 25 || isHotReadSituation) && qbState.hasCompletedDropback;
 
     let maxDecisionTimeTicks = 110 + (qbIQ / 3) + (qbAgility / 3);
     if (qbState.loggedRollout) maxDecisionTimeTicks += 35; // Rolling out extends the play
@@ -3938,13 +3955,15 @@ function updateQBDecision(qbState, offenseStates, defenseStates, playState, offe
         }
 
         // THRESHOLD TO THROW: If the pocket is clean, the QB is greedy and wants a great (35) throw. 
-        // If pressured, he will settle for a lesser (15) throw.
-        const THROW_THRESHOLD = isPressured ? 15 : 35;
+        // 💡 FIX: If throwing HOT, settle for ANY positive throw (value > 0) to avoid the sack!
+        let THROW_THRESHOLD = 35;
+        if (isPressured) THROW_THRESHOLD = 15;
+        if (isHotReadSituation) THROW_THRESHOLD = 0;
 
         // EXECUTE THROW DECISION
         if (bestTargetEval && bestTargetEval.score > THROW_THRESHOLD) {
             targetPlayerState = bestTargetEval.info.state;
-            actionTaken = "Throw Value Target";
+            actionTaken = isHotReadSituation ? "Hot Read Throw" : "Throw Value Target";
             decisionMade = true;
         }
 
@@ -4823,7 +4842,7 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
     const offenseStates = playState.activePlayers.filter(p => p.isOffense);
     const defenseStates = playState.activePlayers.filter(p => !p.isOffense);
 
-    // A. BLITZ PICKUP (IQ 80+)
+    // A. BLITZ PICKUP (IQ Scaling)
     // If defenders in box > blockers, keep RB in to block
     const defendersInBox = defenseStates.filter(d =>
         Math.abs(d.y - playState.lineOfScrimmage) < 5.0 &&
@@ -4832,16 +4851,21 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
 
     const blockers = offenseStates.filter(p => p.action === 'pass_block' || p.action === 'run_block').length;
 
-    if (defendersInBox > blockers && qbIQ >= 80) {
-        const rb = offenseStates.find(p => p.slot.startsWith('RB') && p.action.includes('route'));
-        if (rb) {
-            if (!rb.keptForBlock) {
-                pushGameLog(gameLog, `🧠 ${qbState.name} identifies blitz! Keeps RB in to block.`, playState);
-                rb.keptForBlock = true;
+    // 💡 FIX: Make blitz pickup scale naturally. An average QB (IQ 50) has a 70% chance to see it. 
+    // An elite QB (IQ 80+) has a 100% chance.
+    if (defendersInBox > blockers) {
+        const pickupChance = qbIQ + 20; 
+        if (Math.random() * 100 < pickupChance) {
+            const rb = offenseStates.find(p => p.slot.startsWith('RB') && p.action.includes('route'));
+            if (rb) {
+                if (!rb.keptForBlock) {
+                    if (gameLog) pushGameLog(gameLog, `🧠 ${qbState.name} identifies blitz! Keeps RB in to block.`, playState);
+                    rb.keptForBlock = true;
+                }
+                rb.action = 'pass_block';
+                rb.assignment = 'pass_block';
+                rb.targetX = rb.x + 0.5; // Visual shift
             }
-            rb.action = 'pass_block';
-            rb.assignment = 'pass_block';
-            rb.targetX = rb.x + 0.5; // Visual shift
         }
     }
 
