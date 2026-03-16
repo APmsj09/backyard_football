@@ -3768,9 +3768,17 @@ function updateQBDecision(qbState, offenseStates, defenseStates, playState, offe
     // --- 5. PROGRESSION LOGIC ---
 
     // Update Read Timer
+    // High IQ QBs process information faster and move their eyes quicker.
     const isPrimaryRead = qbState.currentReadTargetSlot === progression[0];
-    let requiredTimeOnRead = Math.round((isPrimaryRead ? 35 : 20) * (1.5 - (qbIQ / 100)));
-    if (isPressured) requiredTimeOnRead *= (qbIQ > 80 ? 0.7 : 1.2);
+    
+    // Base scan time: 15-30 ticks for smart QBs, 40-60 for low IQ
+    let scanSpeedBase = (110 - qbIQ) / 2; 
+    let requiredTimeOnRead = Math.round(isPrimaryRead ? scanSpeedBase : scanSpeedBase * 0.6);
+
+    // Pressure makes low-IQ QBs "lock on" (Panic), while high-IQ QBs scan even faster
+    if (isPressured) {
+        requiredTimeOnRead = (qbIQ > 75) ? requiredTimeOnRead * 0.5 : requiredTimeOnRead * 1.5;
+    }
 
     qbState.ticksOnCurrentRead++;
 
@@ -3801,136 +3809,95 @@ function updateQBDecision(qbState, offenseStates, defenseStates, playState, offe
         reason = "Pressure Panic";
     }
 
-    // Analyze Targets
-    const currentReadInfo = getTargetInfo(qbState.currentReadTargetSlot);
-    const checkdownSlot = progression[progression.length - 1];
-    const checkdownInfo = (checkdownSlot !== qbState.currentReadTargetSlot) ? getTargetInfo(checkdownSlot) : null;
+    // 💡 FIX: Targeted Value Scoring (Yardage over Checkdowns)
     const OPEN_SEP = isPressured ? 0.3 : Math.max(0.5, 1.2 - (qbIQ / 150));
+    
+    const getTargetValue = (slot) => {
+        const info = getTargetInfo(slot);
+        if (!info || info.separation < OPEN_SEP) return null;
 
-    // Scramble Check
-    const openLane = !defenseStates.some(d => !d.isBlocked && !d.isEngaged && Math.abs(d.x - qbState.x) < 3.5 && d.y < qbState.y + 1);
+        const depth = info.state.y - playState.lineOfScrimmage;
+        
+        // BASE SCORE: Separation (Primary) + Depth (Bonus)
+        let score = (info.separation * 12) + (depth * 1.5);
 
-    // 💡 FIX: Force scramble if time is running out, regardless of agility
-    const timeIsRunningOut = playState.tick > 90;
-    // 💡 FIX: Multiply by 0.05 because this is evaluated 20 times per second! 
-    // Otherwise a 0.8 chance per tick = guaranteed instant scramble.
-    const scrambleChance = timeIsRunningOut ? 0.2 : ((qbAgility / 100) * 0.05);
-    const isGoalLine = playState.lineOfScrimmage > 105;
-    const scrambleThreshold = isGoalLine ? 90 : 70;
+        // AGGRESSION: High IQ QBs value yardage more
+        if (depth > 12 && qbIQ > 70) score += (qbIQ - 60) * 0.5;
 
-    const canScramble = openLane && (isPressured || playState.tick > scrambleThreshold) && (Math.random() < scrambleChance);
+        // CHECKDOWN PENALTY: Heavily discourage checkdowns behind LOS early in the play
+        if (depth < 2 && playState.tick < 85) score -= 40;
 
-    // 💡 NEW: Late-Game Desperation Logic
-    const isLatePlay = playState.tick > 100;
-    const isDesperationTime = isLatePlay && isPressured && pressureCount >= 2;
+        return { score, info };
+    };
 
     // SELECT ACTION
     let targetPlayerState = null;
     let actionTaken = "None";
 
-    // --- DECISION FILTER ---
-    const isBackfieldTarget = (info) => info && info.state.y < playState.lineOfScrimmage + 2.0;
-
-    // We only process organic reads if a forced decision wasn't already made at the top
     if (!decisionMade) {
+        // 1. EVALUATE CURRENT READ
+        const currentEval = getTargetValue(qbState.currentReadTargetSlot);
+        let bestTargetEval = currentEval;
 
-        // 1. PRIMARY READ 
-        if (currentReadInfo && currentReadInfo.separation > OPEN_SEP) {
-            const validTiming = canThrowStandard;
-            const validDepth = !isBackfieldTarget(currentReadInfo) || isPressured || playState.tick > 60;
+        // 2. PEAK AHEAD (Smart QBs only)
+        // If current read is bad or IQ is high, look at the NEXT read in the same tick
+        if (qbIQ > 65 && (!currentEval || currentEval.score < 30)) {
+            const nextIdx = (progression.indexOf(qbState.currentReadTargetSlot) + 1) % progression.length;
+            const peekEval = getTargetValue(progression[nextIdx]);
 
-            if (validTiming && validDepth) {
-                targetPlayerState = currentReadInfo.state;
-                actionTaken = "Throw Read";
+            if (peekEval && peekEval.score > (bestTargetEval?.score || 0)) {
+                // If the next read is much better, switch focus immediately
+                bestTargetEval = peekEval;
+                qbState.currentReadTargetSlot = progression[nextIdx];
+                qbState.ticksOnCurrentRead = 0;
+            }
+        }
+
+        // 3. EXECUTE THROW DECISION
+        // QBs only pull the trigger if they have a target and aren't being "Patiently Greedy"
+        if (bestTargetEval && bestTargetEval.score > 15) {
+            const depth = bestTargetEval.info.state.y - playState.lineOfScrimmage;
+            const isDeep = depth > 12;
+
+            // Wait for deep plays to develop unless pressured or time is up
+            if (!isDeep || playState.tick > 65 || isPressured) {
+                targetPlayerState = bestTargetEval.info.state;
+                actionTaken = "Throw Value Target";
                 decisionMade = true;
             }
         }
 
-        // 2. CHECKDOWN
-        const isProgressionFinished = qbState.currentReadTargetSlot === checkdownSlot;
-        const shouldCheckdown = isProgressionFinished || isPressured || playState.tick > 75;
-
-        if (!decisionMade && shouldCheckdown) {
-            let checkdownOptions = offenseStates.filter(p => {
-                if (p.slot === 'QB1' || p.action === 'sacked' || p.action === 'idle') return false;
-                return p.slot.startsWith('RB') || p.slot.startsWith('TE');
-            }).map(p => ({
-                state: p,
-                info: getTargetInfo(p.slot)
-            })).filter(x => x.info && x.info.separation > 0.4);
-
-            // Fallback to WRs if no RB/TE
-            if (checkdownOptions.length === 0) {
-                checkdownOptions = offenseStates.filter(p => {
-                    // 💡 FIX: Exclude OL from being treated as "open checkdown targets"
-                    if (p.slot === 'QB1' || p.action === 'sacked' || p.action === 'idle' || p.slot.startsWith('OL')) return false;
-                    return true;
-                }).map(p => ({
-                    state: p,
-                    info: getTargetInfo(p.slot)
-                })).filter(x => x.info && x.info.separation > 0.4 && x.info.distFromQB < 15);
-            }
-
-            if (checkdownOptions.length > 0) {
-                const best = checkdownOptions.sort((a, b) => a.info.distFromQB - b.info.distFromQB)[0];
-                const checkdownAvailable = canThrowStandard && playState.tick > 50;
-                if (checkdownAvailable) {
-                    targetPlayerState = best.state;
-                    actionTaken = "Throw Checkdown";
-                    decisionMade = true;
-                }
-            }
-        }
-
-        // 2.5 STATUE PREVENTION (Force Action if time expiring)
-        if (!decisionMade && playState.tick > 110) {
-            const bestDesperationTarget = offenseStates
-                .filter(p => p.slot !== 'QB1' && p.action.includes('route'))
-                .map(p => ({ state: p, info: getTargetInfo(p.slot) }))
-                .filter(x => x.info)
-                .sort((a, b) => b.info.separation - a.info.separation)[0];
-
-            if (bestDesperationTarget && bestDesperationTarget.info.separation > 0.1) {
-                targetPlayerState = bestDesperationTarget.state;
-                actionTaken = "Forced Throw";
-                decisionMade = true;
-            } else if (openLane) {
-                qbState.scrambleDirection = 'forward';
+        // 4. SCRAMBLE CHECK (If no throw found)
+        const openLane = !defenseStates.some(d => !d.isBlocked && !d.isEngaged && Math.abs(d.x - qbState.x) < 3.5 && d.y < qbState.y + 1);
+        if (!decisionMade && openLane && (isPressured || playState.tick > 80)) {
+            const scrambleChance = (playState.tick > 100) ? 0.3 : ((qbAgility / 100) * 0.05);
+            if (Math.random() < scrambleChance) {
                 qbState.action = 'qb_scramble';
                 qbState.isBallCarrier = true;
                 playState.qbIntent = 'scramble';
-                if (gameLog) gameLog.push(`🏃 ${qbState.name} abandons the pass and runs!`);
+                if (gameLog && !qbState.hasLoggedScramble) {
+                    gameLog.push(`🏃 ${qbState.name} tucks it and runs!`);
+                    qbState.hasLoggedScramble = true;
+                }
                 return;
-            } else {
-                decisionMade = true;
-                reason = "Time Expired";
             }
         }
-
-        // 3. SCRAMBLE
-        if (!decisionMade && canScramble) {
-            qbState.scrambleDirection = 'forward';
-
-            if (pocketComfort === 'collapsing') {
-                if (leftPressure > rightPressure) qbState.scrambleDirection = 'right';
-                else if (rightPressure > leftPressure) qbState.scrambleDirection = 'left';
+        
+        // 5. EMERGENCY DESPERATION (End of Play)
+        if (!decisionMade && playState.tick > 115) {
+            const desperation = progression
+                .map(s => getTargetValue(s))
+                .filter(v => v !== null)
+                .sort((a,b) => b.score - a.score)[0];
+            
+            if (desperation) {
+                targetPlayerState = desperation.info.state;
+                actionTaken = "Desperation Throw";
+                decisionMade = true;
+            } else {
+                reason = "Time Expired";
+                decisionMade = true;
             }
-
-            const upfieldClear = !defenseStates.some(d =>
-                !d.isBlocked && !d.isEngaged && d.y < qbState.y - 2 && Math.abs(d.x - qbState.x) < 5
-            );
-            if (upfieldClear) qbState.scrambleDirection = 'forward';
-
-            qbState.action = 'qb_scramble';
-            qbState.isBallCarrier = true;
-            playState.qbIntent = 'scramble';
-
-            // 💡 FIX: Only push to log ONCE per play
-            if (gameLog && !qbState.hasLoggedScramble) {
-                gameLog.push(`🏃 ${qbState.name} tucks it and runs ${qbState.scrambleDirection}!`);
-                qbState.hasLoggedScramble = true;
-            }
-            return;
         }
     }
 
@@ -3938,13 +3905,20 @@ function updateQBDecision(qbState, offenseStates, defenseStates, playState, offe
     // Only execute this if decisionMade is true AND no target was organically found
     if (decisionMade && !targetPlayerState) {
         if (reason === "Imminent Sack") {
-            // 💡 FIX: Dumb QBs eat sacks. Smart QBs throw it away. (Reversed the math)
             const chanceToEatSack = (110 - qbIQ) / 100;
             if (Math.random() < chanceToEatSack) return; // Eat sack
 
-            if (Math.random() > 0.7 && qbAttrs.mental?.clutch > 60) {
-                targetPlayerState = offenseStates.find(o => o.slot !== 'QB1' && o.action.includes('route'));
-                actionTaken = targetPlayerState ? "Forced Throw" : "Throw Away";
+            // 💡 FIX: Before throwing away, do one final "Panic Scan" for any open WRs downfield
+            const panicTarget = offenseStates
+                .filter(o => o.slot !== 'QB1' && !o.slot.startsWith('OL'))
+                .map(o => getTargetValue(o.slot))
+                .filter(v => v.score > 30) // Only if they are actually open
+                .sort((a, b) => b.score - a.score)[0];
+
+            if (panicTarget) {
+                targetPlayerState = panicTarget.info.state;
+                actionTaken = "Panic Throw";
+                decisionMade = true;
             } else {
                 actionTaken = "Throw Away";
             }
