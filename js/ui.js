@@ -1255,7 +1255,8 @@ function renderVisualFormationSlots(
     }
 
     const losMarker = document.createElement('div');
-    losMarker.className = 'los-marker';
+    // 💡 FIX: Added Tailwind classes so the LOS renders cleanly as a glowing blue line
+    losMarker.className = 'absolute left-0 w-full h-1 bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.8)] z-0';
     losMarker.style.top = side === 'offense' ? '20%' : '80%';
     container.appendChild(losMarker);
 
@@ -1290,7 +1291,6 @@ function renderVisualFormationSlots(
         if (['DE', 'DT', 'NT'].includes(positionKey)) positionKey = 'DL';
         if (['CB', 'S', 'FS', 'SS'].includes(positionKey)) positionKey = 'DB';
         if (['FB'].includes(positionKey)) positionKey = 'RB';
-        if (['TE'].includes(positionKey)) positionKey = 'WR';
 
         // Find best candidate on bench for this slot (preview)
         let bestCandidate = null;
@@ -1318,29 +1318,38 @@ function renderVisualFormationSlots(
         const displayOvr = player ? overall : (bestCandidate ? Math.round(bestCandidateOvr) : '-');
         const fillPercent = (displayOvr && displayOvr !== '-') ? Math.max(0, Math.min(100, Math.round((displayOvr / 100) * 100))) : 0;
 
-        const colorInfo = colorForOverall(displayOvr);
+         const colorInfo = colorForOverall(displayOvr);
         const fgStyle = `color: ${colorInfo.fg};`;
 
         // compact display: show position and short name inside the circular badge
         const posLabel = positionKey;
         const shortName = player ? ((player.firstName ? player.firstName.charAt(0) + '. ' : '') + (player.lastName || player.name)) : (bestCandidate ? ((bestCandidate.firstName ? bestCandidate.firstName.charAt(0) + '. ' : '') + (bestCandidate.lastName || bestCandidate.name)) : 'Empty');
 
+        // 💡 FIX: Make the slot visual element explicitly positioned using Tailwind 
+        // This stops overlapping, centers the dot, and gives it a nice "pop" hover effect
+        slotEl.className = 'absolute transform -translate-x-1/2 -translate-y-1/2 flex flex-col items-center group z-10';
+
+        // 💡 FIX: The Dropdown menu is now hidden until you hover over the player dot, cleaning up the field view!
         slotEl.innerHTML = `
-            <div class="slot-badge" style="background: ${colorInfo.bg}; ${fgStyle}">
-                <div class="badge-pos">${posLabel}</div>
-                <div class="badge-name">${shortName}</div>
+            <div class="relative w-12 h-12 rounded-full border-2 border-white shadow-lg flex flex-col items-center justify-center cursor-grab transition-transform transform group-hover:scale-110" style="background: ${colorInfo.bg}; ${fgStyle}">
+                <span class="text-[9px] font-bold uppercase tracking-wide opacity-80 leading-none mt-1">${posLabel}</span>
+                <span class="text-base font-black leading-none">${overall !== '-' ? overall : '?'}</span>
             </div>
-            <div class="slot-overall-bubble" style="background:${colorInfo.bg}; ${fgStyle}">${overall !== '-' ? overall : ''}</div>
-            <select class="slot-select pointer-events-auto" data-slot-id="${slotId}" data-side="${side}">
-                <option value="">Empty</option>
-                ${player ? `<option value="${player.id}" selected>${player.firstName ? player.firstName.charAt(0) : ''}. ${player.lastName || player.name}</option>` : ''}
-                <option disabled>--- Bench ---</option>
-                ${benchedPlayers.map(p => `
-                    <option value="${p.id}">
-                        (${calculateOverall(p, positionKey)}) ${p.firstName ? p.firstName.charAt(0) : ''}. ${p.lastName || p.name}
-                    </option>
-                `).join('')}
-            </select>
+            <div class="mt-1 bg-gray-900 text-white text-[10px] font-bold px-2 py-0.5 rounded shadow text-center max-w-[80px] truncate border border-gray-700">
+                ${shortName}
+            </div>
+            <div class="absolute top-16 opacity-0 group-hover:opacity-100 transition-opacity z-50 pointer-events-auto shadow-xl">
+                <select class="slot-select text-xs font-medium text-gray-800 bg-white border border-gray-300 rounded p-1 w-28 cursor-pointer focus:ring-2 focus:ring-amber-500" data-slot-id="${slotId}" data-side="${side}">
+                    <option value="">Empty</option>
+                    ${player ? `<option value="${player.id}" selected>${player.firstName ? player.firstName.charAt(0) : ''}. ${player.lastName || player.name}</option>` : ''}
+                    <option disabled>--- Bench ---</option>
+                    ${benchedPlayers.map(p => `
+                        <option value="${p.id}">
+                            (${calculateOverall(p, positionKey)}) ${p.firstName ? p.firstName.charAt(0) : ''}. ${p.lastName || p.name}
+                        </option>
+                    `).join('')}
+                </select>
+            </div>
         `;
 
         // Tooltip: create a richer hover card showing full name and core skills for the position
@@ -3529,7 +3538,7 @@ function renderDepthOrderPane(gameState) {
                         ${availableRoster.map(p => {
         let pos = p.pos || estimateBestPosition(p);
         if (pos === 'FB') pos = 'RB';
-        if (['TE', 'ATH', 'K', 'P'].includes(pos)) pos = 'WR';
+        if (['ATH', 'K', 'P'].includes(pos)) pos = 'WR'; // 💡 FIX: Removed TE from this list so their ratings display correctly
         const ovr = calculateOverall(p, pos);
 
         // Look up slot assignments using efficient reverse maps

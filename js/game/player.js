@@ -160,13 +160,14 @@ export function generatePlayer(minAge = 10, maxAge = 16) {
     const getKeyAttributes = (pos) => {
         switch (pos) {
             case 'QB': return ['throwingAccuracy', 'playbookIQ', 'consistency'];
-            case 'RB': return ['speed', 'agility', 'strength', 'toughness'];
-            case 'WR': return ['speed', 'catchingHands', 'agility'];
-            case 'OL': return ['strength', 'blocking', 'toughness'];
+            case 'RB': return['speed', 'agility', 'strength', 'toughness'];
+            case 'WR': return['speed', 'catchingHands', 'agility'];
+            case 'TE': return['catchingHands', 'blocking', 'strength', 'toughness']; // 💡 FIX: Added TE
+            case 'OL': return['strength', 'blocking', 'toughness'];
             case 'DL': return ['strength', 'blockShedding', 'tackling'];
-            case 'LB': return ['tackling', 'playbookIQ', 'strength', 'speed'];
-            case 'DB': return ['speed', 'agility', 'catchingHands'];
-            default: return [];
+            case 'LB': return['tackling', 'playbookIQ', 'strength', 'speed'];
+            case 'DB': return['speed', 'agility', 'catchingHands'];
+            default: return[];
         }
     };
     const keyAttrs = new Set(getKeyAttributes(bestPosition));
@@ -218,37 +219,57 @@ export function generatePlayer(minAge = 10, maxAge = 16) {
         }
     };
 
+    // 5.5 FIX: Calculate Potential BEFORE applying Archetype nerfs and Age scaling!
+    // Otherwise, Linemen always get 'F' potential because their speed is naturally slashed.
+    let baseRawSum = 0; let baseCount = 0;
+    keyAttrs.forEach(attr => {
+        for (const cat in attributes) {
+            if (attributes[cat][attr] !== undefined) {
+                baseRawSum += attributes[cat][attr];
+                baseCount++;
+            }
+        }
+    });
+    
+    const avgTalent = baseCount > 0 ? (baseRawSum / baseCount) : 50; 
+    let potential = 'F';
+    const potentialRoll = avgTalent + getRandomInt(-5, 12); // Add a little variance
+
+    if (potentialRoll >= 90) potential = 'A';
+    else if (potentialRoll >= 80) potential = 'B';
+    else if (potentialRoll >= 70) potential = 'C';
+    else if (potentialRoll >= 60) potential = 'D';
+
     // 6. BALANCE FIX: Apply Position Archetype Multipliers
     // This ensures a 99 Speed Lineman is still slower than a 99 Speed WR.
     const applyArchetypeModifiers = () => {
-            if (['OL', 'DL'].includes(bestPosition)) {
-                attributes.physical.speed *= 0.65; 
-                attributes.physical.agility *= 0.60;
-                attributes.physical.strength *= 1.2; 
-            } else if (['LB', 'QB', 'TE'].includes(bestPosition)) { // <-- ADDED TE HERE
-                attributes.physical.speed *= 0.85;
-                attributes.physical.agility *= 0.80;
-            } else {
-                attributes.physical.speed *= 1.05; 
-                attributes.physical.agility *= 1.05;
-            }
+        if (['OL', 'DL'].includes(bestPosition)) {
+            attributes.physical.speed *= 0.65; 
+            attributes.physical.agility *= 0.60;
+            attributes.physical.strength *= 1.2; 
+        } else if (['LB', 'QB', 'TE'].includes(bestPosition)) { 
+            attributes.physical.speed *= 0.85;
+            attributes.physical.agility *= 0.80;
+        } else {
+            attributes.physical.speed *= 1.05; 
+            attributes.physical.agility *= 1.05;
+        }
 
-            if (['WR', 'DB', 'RB'].includes(bestPosition)) { // TEs stay out so they retain blocking skill
-                attributes.technical.blocking *= 0.5; 
-            }
-        };
-    
+        if (['WR', 'DB', 'RB'].includes(bestPosition)) {
+            attributes.technical.blocking *= 0.5; 
+        }
+    };
     applyArchetypeModifiers();
 
     // 7. Calculate Body Type
-    const ageProgress = (age - 10) / (16 - 10);
+    const ageProgress = (age - 10) / (16 - 10); // 0.0 to 1.0
     
     let height = 55 + (ageProgress * 15) + getRandomInt(-3, 5); 
     let weight = 70 + (ageProgress * 90) + getRandomInt(-15, 20); 
 
     if (['OL', 'DL'].includes(bestPosition)) {
         weight *= 1.4; // 40% heavier
-        attributes.physical.strength += 10;
+        attributes.physical.strength += 10; // 💡 FIX: Applied BEFORE the 99 clamp!
     } else if (['WR', 'DB'].includes(bestPosition)) {
         weight *= 0.9; // 10% lighter
     }
@@ -257,21 +278,18 @@ export function generatePlayer(minAge = 10, maxAge = 16) {
     attributes.physical.weight = Math.round(weight);
 
     // 8. Age Scaling (Tweaked for Balance)
-    // Physical stats scale differently than Mental
-    const physicalScale = 0.70 + (ageProgress * 0.30); // Kids are 70% of adult speed (was 60%)
-    const mentalScale = 0.50 + (ageProgress * 0.50);   // Kids are dumb (50% IQ) compared to adults
+    const physicalScale = 0.70 + (ageProgress * 0.30); // Kids are 70% of adult speed
+    const mentalScale = 0.50 + (ageProgress * 0.50);   // Kids are 50% of adult IQ
     
     Object.keys(attributes).forEach(cat => {
         Object.keys(attributes[cat]).forEach(attr => {
             if (['height', 'weight', 'clutch'].includes(attr)) return;
             
-            // Choose scaler
             let factor = (cat === 'physical') ? physicalScale : mentalScale;
-            
-            // Special Case: Speed peaks early.
             if (attr === 'speed' || attr === 'agility') factor += 0.1; 
 
             let val = attributes[cat][attr] * factor;
+            // 💡 FIX: Ensure no stat goes above 99 here
             attributes[cat][attr] = Math.max(20, Math.min(99, Math.round(val)));
         });
     });
@@ -290,10 +308,6 @@ export function generatePlayer(minAge = 10, maxAge = 16) {
                 count++;
             });
         });
-
-    const avgTalent = rawSum / count; 
-    let potential = 'F';
-    const potentialRoll = avgTalent + getRandomInt(-5, 20); // Skew higher for fun
 
     if (potentialRoll >= 90) potential = 'A';
     else if (potentialRoll >= 80) potential = 'B';
