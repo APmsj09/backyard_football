@@ -75,14 +75,15 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
         dotProduct = (nx * tx) + (ny * ty); // 1.0 = Straight, 0.0 = 90 deg cut, -1.0 = U-turn
     }
 
-    // High Agility reduces the penalty of turning. Squeezing increases it.
     const turnAbility = (agilityStat / 100) * (pState.isSqueezing ? 0.4 : 1.0);
     const turnPenalty = Math.max(0.3 + turnAbility, dotProduct);
-    const effectiveMaxSpeed = maxPossibleSpeed * turnPenalty;
+    
+    // 💡 FIX: Apply gap friction directly to speed and turning
+    const effectiveMaxSpeed = maxPossibleSpeed * turnPenalty * (1.0 - (1.0 - gapFriction) * 0.7); // Reduce speed by 70% of friction
 
     // --- 6. Acceleration & Deceleration (Braking) ---
     // Accelerate harder when moving straight, stall when cutting
-    let accelRate = (6.0 + (agilityStat * 0.10)) * fatigueMod * gapFriction;
+    let accelRate = (6.0 + (agilityStat * 0.10)) * fatigueMod * (1.0 - (1.0 - gapFriction) * 0.5); // Reduce acceleration by 50% of friction
     
     if (dotProduct > 0.85) accelRate *= 1.5; // Straight line "burst"
     if (dotProduct < 0.25) accelRate *= 0.5; // "Stumble" penalty during hard cuts
@@ -111,19 +112,34 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
     }
 
     // --- 8. Collision Deflection (Physical Nudges) ---
-    // If icon is too close to another player while squeezing, nudge laterally
-    if (pState.isSqueezing) {
-        allPlayers.forEach(other => {
-            if (other.id === pState.id) return;
-            const dist = getDistance(pState, other);
-            if (dist < 0.65) {
-                const pushX = (pState.x - other.x) / dist;
-                const pushY = (pState.y - other.y) / dist;
-                pState.vx += pushX * 1.5;
-                pState.vy += pushY * 1.5;
-            }
-        });
-    }
+    // 💡 NEW: Aggressive collision resolution to prevent players from phasing through each other.
+    const SEPARATION_RADIUS = 0.6; // Base player radius
+    allPlayers.forEach(other => {
+        if (other.id === pState.id || other.isEngaged || pState.isEngaged) return; // Engaged players are handled by block battles
+
+        const dist = getDistance(pState, other);
+        const combinedRadius = SEPARATION_RADIUS + SEPARATION_RADIUS; // Simple sphere-ish collision
+        
+        if (dist < combinedRadius && dist > 0.01) {
+            const overlap = combinedRadius - dist;
+            const pushMagnitude = overlap * 0.6; // Push with 60% of overlap distance
+
+            const dx_norm = (pState.x - other.x) / dist;
+            const dy_norm = (pState.y - other.y) / dist;
+
+            // Apply push to both players in opposite directions
+            pState.x += dx_norm * pushMagnitude * 0.5;
+            pState.y += dy_norm * pushMagnitude * 0.5;
+            other.x -= dx_norm * pushMagnitude * 0.5;
+            other.y -= dy_norm * pushMagnitude * 0.5;
+
+            // Also affect velocities to "bounce" them off each other
+            pState.vx += dx_norm * pushMagnitude * 2.0;
+            pState.vy += dy_norm * pushMagnitude * 2.0;
+            other.vx -= dx_norm * pushMagnitude * 2.0;
+            other.vy -= dy_norm * pushMagnitude * 2.0;
+        }
+    });
 
     // --- 9. Apply Final Movement ---
     pState.x += pState.vx * timeDelta;
@@ -169,7 +185,7 @@ function calculateGapFriction(pState, allPlayers) {
                     // Calculate how much we need to slow down based on gap tightness
                     // If gap is 0.7 or less, friction is heavy (0.4)
                     let friction = (gapWidth - IMPASSABLE_THRESHOLD) / (SQUEEZE_THRESHOLD - IMPASSABLE_THRESHOLD);
-                    friction = Math.max(0.4, Math.min(1.0, friction));
+                    friction = Math.max(0.35, Math.min(1.0, friction)); // 💡 FIX: Slightly heavier minimum friction
                     
                     if (friction < minFriction) minFriction = friction;
                 }
