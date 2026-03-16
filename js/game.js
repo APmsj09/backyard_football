@@ -3343,11 +3343,29 @@ function checkTackleCollisions(playState, gameLog) {
             playState.statEvents.push({ type: 'tackle', playerId: defender.id });
 
             const isSack = carrier.role === 'QB' && carrier.y < playState.lineOfScrimmage && playState.type === 'pass';
-            const isSafety = (carrier.isOffense && carrier.y <= 10.0) || (!carrier.isOffense && carrier.y >= 110.0);
+            
+            // 💡 FIX: Determine Touchback vs Safety on turnovers
+            const inOwnEndzone = (carrier.isOffense && carrier.y <= 10.0) || (!carrier.isOffense && carrier.y >= 110.0);
+            const caughtInEndzone = playState.returnStartY !== null && ((carrier.isOffense && playState.returnStartY <= 10.0) || (!carrier.isOffense && playState.returnStartY >= 110.0));
+            
+            let isSafety = false;
+            let isTouchback = false;
+
+            if (inOwnEndzone) {
+                if (caughtInEndzone) {
+                    isTouchback = true;
+                } else {
+                    isSafety = true;
+                }
+            }
 
             if (isSafety) {
                 playState.safety = true;
                 if (gameLog) gameLog.push(`[Tick ${playState.tick}] 🚨 SAFETY! ${carrier.name} tackled in endzone by ${defender.name}!`);
+            } else if (isTouchback) {
+                playState.touchback = true;
+                playState.finalBallY = carrier.isOffense ? 20 : 100; // Place at 20 yard line
+                if (gameLog) gameLog.push(`[Tick ${playState.tick}] 🛡️ TOUCHBACK. ${carrier.name} downed in the endzone.`);
             } else if (isSack) {
                 playState.sack = true;
                 playState.yards = Math.floor(playState.yards);
@@ -3360,7 +3378,11 @@ function checkTackleCollisions(playState, gameLog) {
                     const defFat = Math.round(defender.fatigueModifier * 100);
                     const runFat = Math.round(carrier.fatigueModifier * 100);
 
-                    const yardage = (carrier.y - playState.lineOfScrimmage).toFixed(1);
+                    // 💡 FIX: Return yards calculate from the catch point, offensive yards from the LOS
+                    const yardage = (!carrier.isOffense || playState.turnover) 
+                        ? Math.abs(carrier.y - (playState.returnStartY || carrier.y)).toFixed(1) 
+                        : (carrier.y - playState.lineOfScrimmage).toFixed(1);
+                    
                     const contactX = carrier.x.toFixed(1);
                     const contactY = carrier.y.toFixed(1);
 
@@ -3380,7 +3402,8 @@ function checkTackleCollisions(playState, gameLog) {
 
             const jukeDir = jukeType === 'juke_left' ? -1 : 1;
             carrier.x += jukeDir * 0.8;
-            defender.stunnedTicks = 12;
+            // 💡 FIX: Hard stun to tackler so they don't roll to tackle again 5 times in 1 second
+            defender.stunnedTicks = 35; 
 
             // 💡 FIX: If a passing QB shakes a sack, force them to abandon the pocket and scramble!
             if (carrier.role === 'QB' && !carrier.isBallCarrier) {
@@ -3896,8 +3919,9 @@ function updateQBDecision(qbState, offenseStates, defenseStates, playState, offe
 
         const depth = info.state.y - playState.lineOfScrimmage;
 
-        // BASE SCORE: Highly rewards open separation (guaranteed completions) and rewards depth.
-        let score = (info.separation * 20) + (depth * 1.5);
+        // BASE SCORE: 💡 FIX: Soft cap depth bonus at 15 yards. Forces QB to value separation underneath over double-covered deep shots.
+        let score = (info.separation * 25) + (Math.min(depth, 15) * 0.8);
+
 
         // PENALTY: Heavily punish throwing into coverage
         if (info.separation < OPEN_SEP) {
@@ -4474,7 +4498,8 @@ function handleBallArrival(playState, carrier, playResult, gameLog) {
 
         // 💡 FIX: Re-balanced Catching Odds
         let catchScore = (catching * 0.60) + (agility * 0.20) + 35; // Increased base floor significantly
-        if (isDefense) catchScore -= 50; // DBs should heavily favor SWATS over INTERCEPTIONS
+        // 💡 FIX: Massive penalty for DBs so they don't catch 80% of jump balls. Forces them to Swat instead.
+        if (isDefense) catchScore -= 80; 
         if (playersInRange.length > 1) catchScore -= 10;
         if (playState.type === 'punt') catchScore += 20;
 
@@ -4539,7 +4564,7 @@ function handleBallArrival(playState, carrier, playResult, gameLog) {
                 if (!(last && last.playerId === bestCandidate.id && (playState.tick - last.tick) <= 5)) {
 
                     // 💡 FIX: Defenders don't automatically swat if they miss an INT. They must roll for it!
-                    const swatChance = (catching * 0.5) + (agility * 0.5) + 15;
+                    const swatChance = (catching * 0.6) + (agility * 0.4) + 25; // Boosted swat chance to compensate for fewer INTs
                     if (Math.random() * 100 > swatChance) {
                         return; // DB whiffed the swat! Let the ball continue to the receiver
                     }
@@ -4955,7 +4980,8 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
                     const meshX = qb.initialX + (rb.initialX > qb.initialX ? 1.5 : -1.5);
                     const meshY = playState.lineOfScrimmage - 1.2;
 
-                    if (playState.tick < 20) { 
+                    // 💡 FIX: Speed up handoff so it occurs before free blitzers can tackle the QB for a TFL
+                    if (playState.tick < 10) { 
                         // QB moves to mesh point and "turns" (simulated by target)
                         qb.targetX = meshX;
                         qb.targetY = meshY;
@@ -4967,9 +4993,9 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
                         rb.action = 'run_path';
                         rb.contactReduction = 1.1; // Burst to the exchange
                     } else {
-                        // Execute exchange if close enough, or force it at tick 20
+                        // Execute exchange if close enough, or force it at tick 10
                         const dist = getDistance(qb, rb);
-                        if (dist < 1.5 || playState.tick >= 20) {
+                        if (dist < 1.5 || playState.tick >= 14) {
                             qb.hasBall = false;
                             qb.isBallCarrier = false;
                             rb.hasBall = true;
@@ -6091,11 +6117,7 @@ function simulateLivePlayStep(game) {
         defense.formations.defense = defFormation;
 
         defPlayKey = determineDefensivePlayCall(defense, offense, game.down, game.yardsToGo, game.ballOn, scoreDiff, game.gameLog, drivesRemaining);
-
-        const audible = aiCheckAudible(offense, offPlayKey, defense, defPlayKey, game.gameLog);
-        if (audible.playKey && offensivePlaybook[audible.playKey]) {
-            offPlayKey = audible.playKey;
-        }
+        
     }
 
     const context = {
