@@ -47,17 +47,17 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
         return;
     }
 
-    // --- 4. Attributes & Base Limits ---
+    // --- 4. Attributes & Base Limits (REAL WORLD MATH) ---
     const speedStat = pState.speed || 50;
     const agilityStat = pState.agility || 50;
     const fatigueMod = pState.fatigueModifier || 1.0;
     
-    // Top Speed Range: 5.0 to 9.5 yards/sec
-    const baseMaxSpeed = (5.0 + (speedStat / 100) * 4.5) * fatigueMod;
+    // Top Speed Range: 7.2 yds/sec (0 rating) to 10.8 yds/sec (99 rating = ~22mph peak)
+    const baseMaxSpeed = (7.2 + (speedStat / 100) * 3.6) * fatigueMod;
     
     let speedMult = pState.speedMultiplier || 1.0;
-    if (pState.isBallCarrier) speedMult *= 0.90;
-    if (pState.action === 'backpedal') speedMult *= 0.60;
+    if (pState.isBallCarrier) speedMult *= 0.90; // Padding/ball carrying slows you down ~10%
+    if (pState.action === 'backpedal') speedMult *= 0.55;
     
     // Final speed limit is capped by gap friction (squeezing through a hole slows you down)
     const maxPossibleSpeed = baseMaxSpeed * speedMult * gapFriction * (pState.contactReduction || 1.0);
@@ -81,32 +81,43 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
     // 💡 FIX: Apply gap friction directly to speed and turning
     const effectiveMaxSpeed = maxPossibleSpeed * turnPenalty * (1.0 - (1.0 - gapFriction) * 0.7); // Reduce speed by 70% of friction
 
-    // --- 6. Acceleration & Deceleration (Braking) ---
-    let accelRate = (6.0 + (agilityStat * 0.10)) * fatigueMod * (1.0 - (1.0 - gapFriction) * 0.5); 
+    // --- 6. Acceleration & Deceleration (REAL WORLD PHYSICS) ---
+    // REALITY CHECK: It takes ~2.5 seconds to reach top speed. 
+    // An accelRate of 1.2 to 2.8 means players gain roughly 6% to 14% of their top speed per tick.
+    let accelRate = (1.2 + (agilityStat / 100) * 1.6) * fatigueMod * (1.0 - (1.0 - gapFriction) * 0.5); 
     
-    if (dotProduct > 0.85) accelRate *= 1.5; 
-    if (dotProduct < 0.25) accelRate *= 0.5; 
+    if (dotProduct > 0.85) accelRate *= 1.3; // Straight line burst
+    if (dotProduct < 0.25) accelRate *= 0.6; // Heavy cuts ruin your acceleration curve
 
     // Arrival Braking
-    const SLOW_RADIUS = 3.0;
+    const SLOW_RADIUS = 2.5;
     let arrivalFactor = 1.0;
     
-    // 💡 FIX: Players bursting to the handoff mesh ('run_path') should NEVER hit the brakes!
-    if (distToTarget < SLOW_RADIUS && pState.action !== 'run_path') {
+    // 💡 FIX: Players bursting to the handoff ('run_path') and WRs tracking a deep pass ('tracking_ball') 
+    // should NEVER hit the brakes! They need to run through the catch point at full speed.
+    if (distToTarget < SLOW_RADIUS && pState.action !== 'run_path' && pState.action !== 'tracking_ball') {
         arrivalFactor = distToTarget / SLOW_RADIUS;
-        accelRate *= 2.0; 
+        // Braking is much faster than accelerating (planting your foot)
+        accelRate *= 2.5; 
     }
 
     // --- 7. Momentum Calculation ---
     const targetVx = (dx / distToTarget) * effectiveMaxSpeed * arrivalFactor;
     const targetVy = (dy / distToTarget) * effectiveMaxSpeed * arrivalFactor;
 
-    pState.vx += (targetVx - pState.vx) * accelRate * timeDelta;
-    pState.vy += (targetVy - pState.vy) * accelRate * timeDelta;
+    // Calculate how much we want to change velocity
+    const deltaVx = targetVx - pState.vx;
+    const deltaVy = targetVy - pState.vy;
+
+    // Apply acceleration gradually over time
+    pState.vx += deltaVx * accelRate * timeDelta;
+    pState.vy += deltaVy * accelRate * timeDelta;
 
     const speedAfterAccel = Math.sqrt(pState.vx * pState.vx + pState.vy * pState.vy);
     if (speedAfterAccel > maxPossibleSpeed) {
-        const ratio = maxPossibleSpeed / speedAfterAccel;
+        // Soft cap max speed instead of hard clamping so momentum feels heavier
+        const overage = speedAfterAccel - maxPossibleSpeed;
+        const ratio = (maxPossibleSpeed + (overage * 0.5)) / speedAfterAccel;
         pState.vx *= ratio; pState.vy *= ratio;
     }
 

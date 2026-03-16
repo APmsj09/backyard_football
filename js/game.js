@@ -2877,6 +2877,9 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                 } else {
                     pState.targetX = playState.ballState.targetX;
                     pState.targetY = playState.ballState.targetY;
+                    
+                    // 💡 FIX: Change action state so the physics engine knows not to hit the brakes
+                    if (pState.isOffense) pState.action = 'tracking_ball';
                 }
             } else {
                 executeAssignment(pState, assignment, offenseStates, LOS, playState);
@@ -4114,8 +4117,20 @@ function executeThrow(qbState, target, strength, accuracy, playState, gameLog, a
     const startY = qbState.y;
 
     const throwDistance = Math.sqrt((target.x - startX) ** 2 + (target.y - startY) ** 2);
-    const baseSpeed = 18 + (strength / 100) * 8;
-    const ballSpeed = baseSpeed + (throwDistance > 20 ? strength * 0.1 : 0);
+    
+    // REAL WORLD MATH: 
+    // High School Elite (99 str): 52mph = ~25.5 yds/sec
+    // High School Avg (50 str): 42mph = ~20 yds/sec
+    // High School Weak (0 str): 30mph = ~14.5 yds/sec
+    const maxArmVelocity = 14.5 + (strength / 100) * 11.0;
+    
+    // Trajectory adjustment: Deep throws require arc (loft), which slows horizontal velocity.
+    // Short throws (< 15 yds) are thrown on a frozen rope (fast).
+    let ballSpeed = maxArmVelocity;
+    if (throwDistance > 15) {
+        // Deep balls take longer to arrive because they travel upwards into the air
+        ballSpeed = maxArmVelocity * Math.max(0.65, 1.0 - (throwDistance / 100));
+    }
 
     let aimX = target.x;
     let aimY = target.y;
