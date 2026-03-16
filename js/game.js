@@ -3790,39 +3790,23 @@ function updateQBDecision(qbState, offenseStates, defenseStates, playState, offe
         } else return; // Keep running if no one is open
     }
 
-    // --- 5. PROGRESSION LOGIC ---
+    // --- 5. PROGRESSION LOGIC (Value System) ---
 
-    // Update Read Timer
-    // High IQ QBs process information faster and move their eyes quicker.
-    const isPrimaryRead = qbState.currentReadTargetSlot === progression[0];
+    // Scan Speed: High IQ (90) = 10 ticks per read. Low IQ (50) = 20 ticks per read.
+    let scanSpeedBase = Math.max(8, (110 - qbIQ) / 3); 
+    if (isPressured) scanSpeedBase *= (qbIQ > 75 ? 0.6 : 1.5); // Smart QBs scan faster under pressure, dumb QBs panic
 
-    // Base scan time: 15-30 ticks for smart QBs, 40-60 for low IQ
-    let scanSpeedBase = (110 - qbIQ) / 2;
-    let requiredTimeOnRead = Math.round(isPrimaryRead ? scanSpeedBase : scanSpeedBase * 0.6);
+    if (typeof qbState.ticksInPocket === 'undefined') qbState.ticksInPocket = 0;
+    qbState.ticksInPocket++;
 
-    // Pressure makes low-IQ QBs "lock on" (Panic), while high-IQ QBs scan even faster
-    if (isPressured) {
-        requiredTimeOnRead = (qbIQ > 75) ? requiredTimeOnRead * 0.5 : requiredTimeOnRead * 1.5;
-    }
-
-    qbState.ticksOnCurrentRead++;
-
-    if (!imminentSackDefender && qbState.ticksOnCurrentRead > requiredTimeOnRead) {
-        const currIdx = progression.indexOf(qbState.currentReadTargetSlot);
-        if (currIdx < progression.length - 1) {
-            qbState.currentReadTargetSlot = progression[currIdx + 1];
-            qbState.ticksOnCurrentRead = 0;
-        }
-    }
+    // Calculate how many reads the QB has processed so far (sees more of the field the longer he holds it)
+    const numReadsVisible = Math.min(progression.length, 1 + Math.floor(qbState.ticksInPocket / scanSpeedBase));
 
     // Time Constraints
     const canThrowStandard = playState.tick > MIN_DROPBACK_TICKS && qbState.hasCompletedDropback;
 
-    // 💡 NEW: Dynamic Play Timer! Mobile/Smart QBs buy more time.
     let maxDecisionTimeTicks = 110 + (qbIQ / 3) + (qbAgility / 3);
-    if (qbState.loggedRollout) {
-        maxDecisionTimeTicks += 35; // Rolling out extends the play by ~1.75 seconds
-    }
+    if (qbState.loggedRollout) maxDecisionTimeTicks += 35; // Rolling out extends the play
 
     let decisionMade = false;
     let reason = "";
@@ -3834,65 +3818,89 @@ function updateQBDecision(qbState, offenseStates, defenseStates, playState, offe
         reason = "Pressure Panic";
     }
 
-    // 💡 FIX: Targeted Value Scoring (Yardage over Checkdowns)
-    const OPEN_SEP = isPressured ? 0.3 : Math.max(0.5, 1.2 - (qbIQ / 150));
+    // 💡 NEW: Dynamic Separation Requirements
+    const OPEN_SEP = isPressured ? 0.3 : Math.max(0.6, 1.3 - (qbIQ / 150));
 
+    // 💡 NEW: Target Value Evaluator (Requires plays to develop!)
     const getTargetValue = (slot) => {
         const info = getTargetInfo(slot);
-        if (!info || info.separation < OPEN_SEP) return null;
+        if (!info) return null;
 
         const depth = info.state.y - playState.lineOfScrimmage;
 
-        // BASE SCORE: Separation (Primary) + Depth (Bonus)
-        let score = (info.separation * 12) + (depth * 1.5);
+        // BASE SCORE: Highly rewards open separation (guaranteed completions) and rewards depth.
+        let score = (info.separation * 20) + (depth * 1.5);
 
-        // AGGRESSION: High IQ QBs value yardage more
-        if (depth > 12 && qbIQ > 70) score += (qbIQ - 60) * 0.5;
+        // PENALTY: Heavily punish throwing into coverage
+        if (info.separation < OPEN_SEP) {
+            score -= 60; 
+        }
 
-        // CHECKDOWN PENALTY: Heavily discourage checkdowns behind LOS early in the play
-        if (depth < 2 && playState.tick < 85) score -= 40;
+        // AGGRESSION: High IQ QBs value chunk yardage
+        if (depth > 12 && qbIQ > 70) score += (qbIQ - 60) * 0.8;
+
+        // 💡 NEW: TIMING ROUTES & ANTICIPATION
+        const recState = info.state;
+        if (recState.action === 'run_route' && recState.routePath) {
+            const isLastCut = recState.currentPathIndex === recState.routePath.length - 1;
+            const nextNode = recState.routePath[recState.currentPathIndex];
+            const distToCut = getDistance(recState, nextNode);
+
+            if (!isLastCut) {
+                // If it's NOT the last cut, normally we hold the ball.
+                // BUT if the receiver is within 1.5 yards of their cut, a smart QB will throw it BEFORE they turn!
+                if (distToCut <= 1.5 && qbIQ >= 75) {
+                    score += 25; // Elite anticipation throw (Timing Route)
+                } else {
+                    score -= 30; // Hold the ball, the route is still developing!
+                }
+            } else {
+                // This is the final leg of the route.
+                // If they are actively making the turn right now, boost the score
+                if (distToCut < 1.0) {
+                    score += 15; 
+                }
+            }
+        }
+
+        // CHECKDOWN PENALTY: Refuse to throw dump-offs in the first few seconds if the pocket is clean!
+        if (depth < 4 && !isPressured) {
+            if (playState.tick < 80) score -= 50;
+            else if (playState.tick < 105) score -= 20;
+        }
 
         return { score, info };
     };
 
-    // SELECT ACTION
     let targetPlayerState = null;
     let actionTaken = "None";
 
-    if (!decisionMade) {
-        // 1. EVALUATE CURRENT READ
-        const currentEval = getTargetValue(qbState.currentReadTargetSlot);
-        let bestTargetEval = currentEval;
+    if (!decisionMade && canThrowStandard) {
+        let bestTargetEval = null;
+        let highestScore = -Infinity;
 
-        // 2. PEAK AHEAD (Smart QBs only)
-        // If current read is bad or IQ is high, look at the NEXT read in the same tick
-        if (qbIQ > 65 && (!currentEval || currentEval.score < 30)) {
-            const nextIdx = (progression.indexOf(qbState.currentReadTargetSlot) + 1) % progression.length;
-            const peekEval = getTargetValue(progression[nextIdx]);
-
-            if (peekEval && peekEval.score > (bestTargetEval?.score || 0)) {
-                // If the next read is much better, switch focus immediately
-                bestTargetEval = peekEval;
-                qbState.currentReadTargetSlot = progression[nextIdx];
-                qbState.ticksOnCurrentRead = 0;
+        // Evaluate ALL reads the QB has processed so far, looking for the highest value throw
+        for (let i = 0; i < numReadsVisible; i++) {
+            const slot = progression[i];
+            const evalResult = getTargetValue(slot);
+            if (evalResult && evalResult.score > highestScore) {
+                highestScore = evalResult.score;
+                bestTargetEval = evalResult;
             }
         }
 
-        // 3. EXECUTE THROW DECISION
-        // QBs only pull the trigger if they have a target and aren't being "Patiently Greedy"
-        if (bestTargetEval && bestTargetEval.score > 15) {
-            const depth = bestTargetEval.info.state.y - playState.lineOfScrimmage;
-            const isDeep = depth > 12;
+        // THRESHOLD TO THROW: If the pocket is clean, the QB is greedy and wants a great (35) throw. 
+        // If pressured, he will settle for a lesser (15) throw.
+        const THROW_THRESHOLD = isPressured ? 15 : 35;
 
-            // Wait for deep plays to develop unless pressured or time is up
-            if (!isDeep || playState.tick > 65 || isPressured) {
-                targetPlayerState = bestTargetEval.info.state;
-                actionTaken = "Throw Value Target";
-                decisionMade = true;
-            }
+        // EXECUTE THROW DECISION
+        if (bestTargetEval && bestTargetEval.score > THROW_THRESHOLD) {
+            targetPlayerState = bestTargetEval.info.state;
+            actionTaken = "Throw Value Target";
+            decisionMade = true;
         }
 
-        // 4. SCRAMBLE CHECK (If no throw found)
+        // SCRAMBLE CHECK (If no throw found but lane is open)
         const openLane = !defenseStates.some(d => !d.isBlocked && !d.isEngaged && Math.abs(d.x - qbState.x) < 3.5 && d.y < qbState.y + 1);
         if (!decisionMade && openLane && (isPressured || playState.tick > 80)) {
             const scrambleChance = (playState.tick > 100) ? 0.3 : ((qbAgility / 100) * 0.05);
@@ -3908,14 +3916,14 @@ function updateQBDecision(qbState, offenseStates, defenseStates, playState, offe
             }
         }
 
-        // 5. EMERGENCY DESPERATION (End of Play)
+        // EMERGENCY DESPERATION (End of Play, forces a throw to whoever is best)
         if (!decisionMade && playState.tick > 115) {
             const desperation = progression
                 .map(s => getTargetValue(s))
                 .filter(v => v !== null)
                 .sort((a, b) => b.score - a.score)[0];
 
-            if (desperation) {
+            if (desperation && desperation.score > -20) {
                 targetPlayerState = desperation.info.state;
                 actionTaken = "Desperation Throw";
                 decisionMade = true;
@@ -3937,7 +3945,7 @@ function updateQBDecision(qbState, offenseStates, defenseStates, playState, offe
             const panicTarget = offenseStates
                 .filter(o => o.slot !== 'QB1' && !o.slot.startsWith('OL'))
                 .map(o => getTargetValue(o.slot))
-                .filter(v => v.score > 30) // Only if they are actually open
+                .filter(v => v && v.score > 20) // Only if they are actually decently open
                 .sort((a, b) => b.score - a.score)[0];
 
             if (panicTarget) {
@@ -4043,22 +4051,55 @@ function executeThrow(qbState, target, strength, accuracy, playState, gameLog, a
     let aimX = target.x;
     let aimY = target.y;
 
-    // 💡 FIX: Enhanced Lead Calculation
-    if (target.action.includes('route') || target.action === 'run_path') {
+    // 💡 NEW: Route-Aware Lead Calculation
+    if (target.action === 'run_route' && target.routePath) {
+        const distToTarget = Math.sqrt((target.x - startX) ** 2 + (target.y - startY) ** 2);
+        const estTime = distToTarget / ballSpeed;
+        
+        const qbIQ = qbState.playbookIQ || 50;
+        const leadFactor = 0.75 + (qbIQ / 400); // Smart QBs lead more accurately
+        
+        // Estimate receiver's speed in yards per second (approx 6-9 yps based on Madden scale)
+        const receiverYPS = 5.0 + ((target.speed || 50) / 25); 
+        let distanceToTravel = receiverYPS * estTime * leadFactor;
+        
+        let currX = target.x;
+        let currY = target.y;
+        
+        // Trace the receiver's future steps along their specific route tree
+        for (let i = target.currentPathIndex; i < target.routePath.length; i++) {
+            const nextNode = target.routePath[i];
+            const distToNext = Math.hypot(nextNode.x - currX, nextNode.y - currY);
+            
+            if (distanceToTravel > distToNext) {
+                // The receiver will pass this cut before the ball arrives, keep tracing
+                distanceToTravel -= distToNext;
+                currX = nextNode.x;
+                currY = nextNode.y;
+            } else {
+                // The ball will arrive on this specific segment of the route
+                const ratio = distanceToTravel / distToNext;
+                aimX = currX + (nextNode.x - currX) * ratio;
+                aimY = currY + (nextNode.y - currY) * ratio;
+                distanceToTravel = 0;
+                break;
+            }
+        }
+        
+        // If they run out of route before the ball arrives, just aim at the final node
+        if (distanceToTravel > 0) {
+            aimX = currX;
+            aimY = currY;
+        }
+
+    } else if (target.action === 'run_path' || target.action === 'qb_scramble') {
+        // Fallback for unstructured running (scrambles, checkdowns)
         const dist = Math.sqrt((target.x - startX) ** 2 + (target.y - startY) ** 2);
         const estTime = dist / ballSpeed;
-
-        // Use actual current velocity for the most accurate direction
         const vx = target.vx || 0;
         const vy = target.vy || 0;
-
-        // QB IQ determines how well they "predict" the WR's speed
-        // 100 IQ = 100% lead accuracy, 50 IQ = 80% lead (throwing behind)
-        const qbIQ = qbState.playbookIQ || 50;
-        const leadFactor = 0.75 + (qbIQ / 400);
-
-        aimX += vx * estTime * leadFactor;
-        aimY += vy * estTime * leadFactor;
+        aimX += vx * estTime;
+        aimY += vy * estTime;
     }
 
     // 💡 FIX: Directional Accuracy Error
@@ -4228,18 +4269,9 @@ function handleBallArrival(playState, carrier, playResult, gameLog) {
     const ball = playState.ballState;
     if (!ball.inAir && !ball.isLoose) return;
 
-    const MAX_JUMP_HEIGHT = 2.8; // Approx 8.4 feet tall
-
-    // 💡 FIX: Force the engine to ignore ALL balls that are too high, including punts.
-    // The returner will now wait underneath the ball until it falls below 2.8 yards.
-    if (ball.inAir && ball.z > MAX_JUMP_HEIGHT) {
-        return;
-    }
-
     // If the ball has already been swatted down or dropped, stop other players from interacting with it mid-air
     if (ball.isSwatted) {
         // 💡 FIX: We still need to kill the play if the swatted ball hits the ground!
-        // We cannot just "return" without checking the turf first.
         if (ball.z <= 0) {
             ball.z = 0;
             ball.vz = 0; // Stop the ball from falling further
@@ -4253,9 +4285,6 @@ function handleBallArrival(playState, carrier, playResult, gameLog) {
         }
         return; // Now we can safely return so players don't try to catch it
     }
-
-    const CATCH_RADIUS = 0.6;
-    const CATCH_TOLERANCE = 0.25;
 
     const pointToSegmentDist = (px, py, x1, y1, x2, y2) => {
         const A = px - x1; const B = py - y1; const C = x2 - x1; const D = y2 - y1;
@@ -4296,13 +4325,33 @@ function handleBallArrival(playState, carrier, playResult, gameLog) {
                 }
             }
         }
+        
+        // 💡 NEW: Realistic Dynamic Catch Radius & Vertical Reach based on Physical Height
+        let playerHeight = 70; // 5'10" default fallback
+        if (p.attributes?.physical?.height) {
+            playerHeight = p.attributes.physical.height;
+        } else {
+            const pObj = getPlayer(p.id);
+            if (pObj?.attributes?.physical?.height) {
+                playerHeight = pObj.attributes.physical.height;
+            }
+        }
+        
+        // Vertical jump/reach max threshold (approx. 72 inch player reaches 3.2 yards up)
+        const maxCatchHeight = (playerHeight / 36) + 1.2;
+        if (ball.inAir && ball.z > maxCatchHeight) return false;
+
+        // Catch Radius: A 6'4" (76 inch) player gets a massive 1.04 radius vs a 5'8" (68 in) 0.72 radius
+        const heightBonus = Math.max(0, (playerHeight - 65) * 0.04);
+        const dynamicCatchRadius = 0.6 + heightBonus;
+        const CATCH_TOLERANCE = 0.25;
 
         const distNow = Math.sqrt((p.x - ball.x) ** 2 + (p.y - ball.y) ** 2);
-        if (distNow <= (CATCH_RADIUS + CATCH_TOLERANCE)) return true;
+        if (distNow <= (dynamicCatchRadius + CATCH_TOLERANCE)) return true;
 
         if (typeof ball.prevX === 'number' && typeof ball.prevY === 'number') {
             const segDist = pointToSegmentDist(p.x, p.y, ball.prevX, ball.prevY, ball.x, ball.y);
-            if (segDist <= (CATCH_RADIUS + CATCH_TOLERANCE)) return true;
+            if (segDist <= (dynamicCatchRadius + CATCH_TOLERANCE)) return true;
         }
         return false;
     });
@@ -4356,10 +4405,17 @@ function handleBallArrival(playState, carrier, playResult, gameLog) {
 
         if (Math.random() * 100 < catchScore) {
             // --- SUCCESSFUL CATCH ---
-            ball.inAir = false; ball.isLoose = false;
-            ball.x = bestCandidate.x; ball.y = bestCandidate.y; ball.z = 0.5;
+            ball.inAir = false; 
+            ball.isLoose = false;
+            
+            // 💡 FIX: Snap the ball perfectly to the receiver's chest to avoid visual hovering mid-air
+            ball.x = bestCandidate.x; 
+            ball.y = bestCandidate.y; 
+            ball.z = 1.0; 
             ball.vx = 0; ball.vy = 0; ball.vz = 0;
-            bestCandidate.hasBall = true; bestCandidate.isBallCarrier = true;
+            
+            bestCandidate.hasBall = true; 
+            bestCandidate.isBallCarrier = true;
             bestCandidate.action = 'run_path';
 
             if (playState.type === 'punt' && !bestCandidate.isOffense) {
