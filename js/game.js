@@ -2058,155 +2058,113 @@ function analyzePlaySuccess(lastPlayState, offensiveTeam, defensiveTeam) {
 }
 
 /**
- * BALL CARRIER AI: Dynamic Raycasting & Steering
- * 💡 OVERHAUL: Adds Inertia, Lead-Block Drafting, Hip-Leverage, and Micro-Dodging
+ * BALL CARRIER AI: The Ultimate Situational Intelligence
+ * Combines: Physics Constraints, Predictive Tracking, Salvage Protocol, and Blocker Leverage.
  */
 function getSmartCarrierTarget(runner, defenseStates, offenseStates, fieldWidth = 53.3) {
-    const runnerIQ = runner.playbookIQ || 50;
-    const runnerAgility = runner.agility || 50;
+    const iq = runner.playbookIQ || 50;
+    const agility = runner.agility || 50;
+    const strength = runner.strength || 50;
 
-    // 1. Define Vision Depth (How far downfield are we scanning?)
-    // Increased vision depth so runners can see the edge is open sooner
-    const primaryVisionDepth = 4.0 + (runnerIQ / 20); // 4.0 to 9.0 yards
+    // 1. PHYSICS CONSTRAINTS (Tunnel Vision)
+    const currentVx = runner.vx || 0;
+    const currentVy = runner.vy || 0;
+    const currentSpeed = Math.hypot(currentVx, currentVy);
 
-    // 2. Finer Lane Granularity (More angles for smoother curves) + WIDER lanes for bounce outs
-    const laneOffsets = [-10, -7, -4, -1.5, 0, 1.5, 4, 7, 10];
+    // Speed narrows your vision (Inertia)
+    let maxLateral = 8.0 + (agility / 50); 
+    if (currentSpeed > 4.5) maxLateral = 5.0; 
+    if (currentSpeed > 7.5) maxLateral = 2.0; 
 
+    // 2. SITUATIONAL ASSESSMENT (Salvage vs Aggression)
+    const nearbyDefenders = defenseStates.filter(d => 
+        !d.isBlocked && d.stunnedTicks === 0 && getDistance(runner, d) < 4.0 && d.y > runner.y - 1
+    );
+    const inTraffic = nearbyDefenders.length >= 2;
+
+    // If in the trenches, stop looking for the home run
+    if (inTraffic) maxLateral = Math.min(maxLateral, 2.5);
+
+    const laneOffsets = [0];
+    [1.5, 3.5, 5.5, 8.0, 10.0].forEach(off => {
+        if (off <= maxLateral) {
+            laneOffsets.push(off);
+            laneOffsets.push(-off);
+        }
+    });
+
+    const visionDepth = 4.0 + (iq / 25); 
     let bestScore = -Infinity;
     let bestTargetX = runner.x;
-    let bestTargetY = runner.y + primaryVisionDepth;
+    let bestTargetY = runner.y + visionDepth;
 
-    // Current momentum vector (to penalize unrealistic sharp cuts)
-    const currentVx = runner.vx || 0;
-
-    // 3. Evaluate Each Lane
+    // 3. LANE EVALUATION
     laneOffsets.forEach((offset) => {
         const testX = runner.x + offset;
-        const testY = runner.y + primaryVisionDepth;
+        const testY = runner.y + visionDepth;
 
-        // Immediate Disqualification: Out of bounds
         if (testX < 1 || testX > fieldWidth - 1) return;
 
-        let score = 100; // Base score
-
-        // A. Forward Progress & Inertia
+        let score = 100;
         const lateralShift = Math.abs(offset);
-        const momentumConflict = Math.abs(offset - (currentVx * 0.5));
-        const agilityModifier = Math.max(0.3, (120 - runnerAgility) / 70); // 0.3 (Elite) to 1.0 (Slow)
 
-        // Give a slight "bounce" forgiveness for high agility players looking outside
-        score -= (lateralShift * 1.5 * agilityModifier);
+        // A. MOMENTUM PENALTY
+        const agilityMitigation = Math.max(0.3, (120 - agility) / 80);
+        const momentumConflict = Math.abs(offset - (currentVx * 0.7));
+        score -= (momentumConflict * 4.5 * agilityMitigation);
 
-        // Cutback penalty is reduced for high agility to allow changing directions
-        const cutbackPenalty = momentumConflict > 4 ? (momentumConflict * 3 * agilityModifier) : (momentumConflict * 1.5 * agilityModifier);
-        score -= cutbackPenalty;
+        // B. SALVAGE LOGIC (Take the 3 yards)
+        if (inTraffic) {
+            score -= (lateralShift * 15.0); // Sideways is death in traffic
+        } else {
+            score -= (lateralShift * 2.0);  // Sideways is okay in open field
+        }
 
-        // B. Defender Repulsion & Open Space (Green Grass)
-        let defendersInLane = 0;
-        let closestUnblockedDefDist = 20; // Track how far the closest threat is
+        // C. PREDICTIVE DEFENDER & BLOCKER LEVERAGE
+        let laneThreat = 0;
+        let overPursuitDetected = false;
 
         defenseStates.forEach(def => {
-            // Ignore defenders behind the runner or stunned
             if (def.stunnedTicks > 0 || def.y < runner.y - 1.5) return;
 
-            const distToTestPoint = Math.hypot(testX - def.x, testY - def.y);
+            // Project 0.4s into future
+            const defPredX = def.x + ((def.vx || 0) * 0.4);
+            const defPredY = def.y + ((def.vy || 0) * 0.4);
+            const distToPred = Math.hypot(testX - defPredX, testY - defPredY);
 
             if (!def.isBlocked && !def.isEngaged) {
-                if (distToTestPoint < closestUnblockedDefDist) {
-                    closestUnblockedDefDist = distToTestPoint;
-                }
-
-                // Unblocked defenders are highly dangerous
-                if (distToTestPoint < 6.0) {
-                    // Exponential fear based on proximity to the intended path
-                    score -= (600 / (distToTestPoint + 1));
-
-                    // If the defender has an angle on this lane, penalize more
-                    const defVx = def.vx || 0;
-                    const defTargetingLane = (testX < def.x && defVx < -0.5) || (testX > def.x && defVx > 0.5);
-                    if (defTargetingLane && distToTestPoint < 4.0) {
-                        score -= 150; // Defender is flowing this way
+                if (distToPred < 5.0) {
+                    laneThreat += (600 / (distToPred + 0.5));
+                    
+                    // Detect over-pursuit for cutback
+                    if (Math.abs(def.vx || 0) > 3.0) {
+                        if (Math.sign(def.vx) !== Math.sign(offset)) overPursuitDetected = true;
                     }
-
-                    if (distToTestPoint < 2.5) defendersInLane++;
-                }
-
-                // Anticipation: Is the defender waiting squarely in this lane ahead?
-                if (Math.abs(def.x - testX) < 2.0 && def.y > runner.y && def.y < testY + 2) {
-                    score -= 300; // Roadblock
                 }
             } else {
-                // Blocked defender: Predictable obstacle
-                if (distToTestPoint < 1.5) {
-                    score -= 120; // Don't run directly into the back of a defender
-                }
-                // Good blockers create a "shield"
-                if (distToTestPoint < 3.0 && def.y > runner.y) {
-                    // The defender is engaged ahead, this might actually be a good lane to cut BEHIND
-                    score += 30;
+                // BLOCKER LEVERAGE (Hip Reading)
+                const blocker = offenseStates.find(o => o.id === def.blockedBy || o.id === def.engagedWith);
+                if (blocker && Math.hypot(testX - blocker.x, testY - blocker.y) < 3.0) {
+                    const defIsRight = def.x > blocker.x;
+                    const laneIsLeft = testX < blocker.x;
+                    score += (defIsRight === laneIsLeft) ? 70 : -60;
                 }
             }
         });
 
-        if (defendersInLane >= 1) score -= 300; // Severely penalize lanes with immediate unblocked threats
-        if (defendersInLane >= 2) score -= 500; // Overloaded lane
+        score -= laneThreat;
 
-        // 💡 NEW: Green Grass Bonus (Reward open space & bouncing out!)
-        if (closestUnblockedDefDist > 4.5) {
-            // Wide open space! The further the closest defender, the bigger the bonus.
-            score += (closestUnblockedDefDist * 20);
-
-            // If it's a wide lane (bounce out) AND it's open, give a massive bonus to encourage bouncing
-            if (lateralShift >= 4) {
-                const distToSideline = Math.min(testX, fieldWidth - testX);
-                const currentDistToSideline = Math.min(runner.x, fieldWidth - runner.x);
-                if (distToSideline < currentDistToSideline) {
-                    score += (lateralShift * 18); // Reward finding the edge
-                } else {
-                    score += (lateralShift * 10); // Reward cutting to open middle
-                }
-            }
-        }
-
-        // C. Blocker Attraction (Follow the convoy!)
+        // D. LEAD BLOCK DRAFTING (From your version)
         offenseStates.forEach(off => {
-            if (off.id === runner.id || off.y < runner.y - 1.0) return;
-
-            const distToTestPoint = Math.hypot(testX - off.x, testY - off.y);
-
-            if (off.isEngaged || off.isBlocked) {
-                // Engaged block: We want to run right off their hip, not into their back
-                if (distToTestPoint >= 1.5 && distToTestPoint <= 3.5) {
-                    score += 80; // Hip lane / Seam
-                } else if (distToTestPoint < 1.5) {
-                    score -= 120; // Colliding with back of blocker
-                }
-            } else {
-                // Free blocker (Lead blocker)
-                if (distToTestPoint >= 1.5 && distToTestPoint <= 5.0 && off.y > runner.y + 1) {
-                    // Check if blocker is moving to the same side
-                    const blockSide = off.x > runner.x ? 1 : (off.x < runner.x ? -1 : 0);
-                    const laneSide = offset > 0 ? 1 : (offset < 0 ? -1 : 0);
-                    if (blockSide === laneSide || laneSide === 0) {
-                        score += 120; // DRAFTING: Follow the lead block!
-                    }
-                }
-            }
+            if (off.id === runner.id || off.isEngaged || off.y < runner.y) return;
+            const distToBlocker = Math.hypot(testX - off.x, testY - off.y);
+            if (distToBlocker < 4.0) score += 40; // Follow the convoy
         });
 
-        // D. Sideline Avoidance (Exponential decay near bounds)
-        // But don't penalize too heavily if we are trying to turn the corner and go upfield
-        const distToSideline = Math.min(testX, fieldWidth - testX);
-        if (distToSideline < 3) {
-            // If the lane is completely wide open, ignore the sideline fear
-            if (closestUnblockedDefDist > 6.0) {
-                score -= (50 / Math.max(0.1, distToSideline));
-            } else {
-                score -= (150 / Math.max(0.1, distToSideline));
-            }
-        }
+        // E. GREEN GRASS & CUTBACKS
+        if (iq > 75 && overPursuitDetected) score += 90;
+        if (!inTraffic && lateralShift > 4 && laneThreat < 50) score += 60; // Aggression in open field
 
-        // E. Update Best Lane
         if (score > bestScore) {
             bestScore = score;
             bestTargetX = testX;
@@ -2214,47 +2172,29 @@ function getSmartCarrierTarget(runner, defenseStates, offenseStates, fieldWidth 
         }
     });
 
-    // 4. Micro-Steering (Immediate Threat Avoidance)
-    // If an unblocked defender is inside our personal bubble, override macro-pathing to dodge!
-    const closestThreat = defenseStates
-        .filter(def => !def.isBlocked && !def.isEngaged && def.stunnedTicks === 0 && def.y >= runner.y - 0.5)
-        .sort((a, b) => Math.hypot(a.x - runner.x, a.y - runner.y) - Math.hypot(b.x - runner.x, b.y - runner.y))[0];
+    // 4. THE SALVAGE PROTOCOL (Micro-steering)
+    const immediateThreat = nearbyDefenders.sort((a, b) => getDistance(runner, a) - getDistance(runner, b))[0];
 
-    if (closestThreat && Math.hypot(closestThreat.x - runner.x, closestThreat.y - runner.y) < 3.0) {
+    if (immediateThreat && getDistance(runner, immediateThreat) < 2.5) {
+        const strengthAdvantage = strength - (immediateThreat.strength || 50);
 
-        // Determine which side of the defender has more space
-        let dodgeDir = runner.x < closestThreat.x ? -1 : 1; // Default: dodge away
-
-        // Override: Don't dodge out of bounds
-        if (runner.x < 5 && closestThreat.x > runner.x) dodgeDir = 1; // Force inside
-        if (runner.x > fieldWidth - 5 && closestThreat.x < runner.x) dodgeDir = -1; // Force inside
-
-        // 💡 NEW: Check if dodging inside runs us into traffic. If so, bounce outside harder!
-        const insideTraffic = defenseStates.some(def =>
-            !def.isBlocked && !def.isEngaged &&
-            def.id !== closestThreat.id &&
-            Math.hypot((runner.x + dodgeDir * 2) - def.x, (runner.y + 1) - def.y) < 2.5
-        );
-
-        if (insideTraffic && (runner.x >= 6 && runner.x <= fieldWidth - 6)) {
-            // Flip the dodge direction if it was leading into traffic and we have room outside
-            dodgeDir = -dodgeDir;
+        if (strengthAdvantage > 15 && (inTraffic || bestScore < 40)) {
+            // SALVAGE: Lower the shoulder
+            bestTargetX = runner.x + (currentVx * 0.3);
+            bestTargetY = runner.y + 2.0;
+            runner.contactReduction = 0.85; // Trucking state
+        } else {
+            // JUKE: Agile dodge
+            let dodgeDir = runner.x < immediateThreat.x ? -1 : 1;
+            if (Math.abs(immediateThreat.vx || 0) > 2.0) dodgeDir = -Math.sign(immediateThreat.vx);
+            
+            const dodgeWidth = 1.3 + (agility / 40);
+            bestTargetX = (bestTargetX * 0.4) + ((runner.x + (dodgeDir * dodgeWidth)) * 0.6);
+            bestTargetY = Math.min(bestTargetY, runner.y + 1.5);
         }
-
-        // Smarter/more agile runners dodge wider and sharper
-        const dodgeWidth = 1.8 + (runnerAgility / 30);
-
-        // Blend macro target with micro dodge
-        bestTargetX = (bestTargetX * 0.4) + ((runner.x + (dodgeDir * dodgeWidth)) * 0.6);
-
-        // Slow down forward momentum to execute the cut & let blocks develop
-        bestTargetY = Math.min(bestTargetY, runner.y + 1.0 + (runnerAgility / 50));
     }
 
-    // Final safety clamp
-    bestTargetX = Math.max(1.5, Math.min(fieldWidth - 1.5, bestTargetX));
-
-    return { x: bestTargetX, y: bestTargetY };
+    return { x: Math.max(1, Math.min(fieldWidth - 1, bestTargetX)), y: bestTargetY };
 }
 
 /**
