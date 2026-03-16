@@ -2058,47 +2058,54 @@ function analyzePlaySuccess(lastPlayState, offensiveTeam, defensiveTeam) {
 }
 
 /**
- * BALL CARRIER AI: The Ultimate Situational Intelligence
- * Combines: Physics Constraints, Predictive Tracking, Salvage Protocol, and Blocker Leverage.
+ * BALL CARRIER AI: Situational Intelligence & Physics Integration
+ * Features: Predictive Tracking, Momentum-Constrained Vision, and Salvage Protocol.
  */
 function getSmartCarrierTarget(runner, defenseStates, offenseStates, fieldWidth = 53.3) {
     const iq = runner.playbookIQ || 50;
     const agility = runner.agility || 50;
     const strength = runner.strength || 50;
 
-    // 1. PHYSICS CONSTRAINTS (Tunnel Vision)
+    // Current physics state
     const currentVx = runner.vx || 0;
     const currentVy = runner.vy || 0;
     const currentSpeed = Math.hypot(currentVx, currentVy);
 
-    // Speed narrows your vision (Inertia)
+    // 1. DYNAMIC VISION CONE (Momentum restricts lateral options)
+    // Limits "Aggression" based on physics: you can't bounce outside if you're too fast.
     let maxLateral = 8.0 + (agility / 50); 
     if (currentSpeed > 4.5) maxLateral = 5.0; 
-    if (currentSpeed > 7.5) maxLateral = 2.0; 
+    if (currentSpeed > 7.0) maxLateral = 2.5; 
 
-    // 2. SITUATIONAL ASSESSMENT (Salvage vs Aggression)
+    // TRAFFIC ASSESSMENT (Are we in the trenches?)
     const nearbyDefenders = defenseStates.filter(d => 
         !d.isBlocked && d.stunnedTicks === 0 && getDistance(runner, d) < 4.0 && d.y > runner.y - 1
     );
     const inTraffic = nearbyDefenders.length >= 2;
 
-    // If in the trenches, stop looking for the home run
+    // EFFICIENCY/SALVAGE: If in traffic, drastically limit "Bounce" attempts.
     if (inTraffic) maxLateral = Math.min(maxLateral, 2.5);
 
-    const laneOffsets = [0];
-    [1.5, 3.5, 5.5, 8.0, 10.0].forEach(off => {
+    // --- FIX: Corrected Lane Initialization ---
+    const laneOffsets = [0]; // Always evaluate straight ahead
+    [1.5, 3.0, 5.0, 8.0, 10.0].forEach(off => {
         if (off <= maxLateral) {
             laneOffsets.push(off);
             laneOffsets.push(-off);
         }
     });
 
-    const visionDepth = 4.0 + (iq / 25); 
+    // Evaluate current momentum as a lane
+    if (Math.abs(currentVx) > 1.0 && Math.abs(currentVx) <= maxLateral) {
+        laneOffsets.push(currentVx);
+    }
+
+    const visionDepth = 3.5 + (iq / 25); 
     let bestScore = -Infinity;
     let bestTargetX = runner.x;
     let bestTargetY = runner.y + visionDepth;
 
-    // 3. LANE EVALUATION
+    // 2. EVALUATE LANES (Determining Aggression vs. Efficiency)
     laneOffsets.forEach((offset) => {
         const testX = runner.x + offset;
         const testY = runner.y + visionDepth;
@@ -2106,64 +2113,61 @@ function getSmartCarrierTarget(runner, defenseStates, offenseStates, fieldWidth 
         if (testX < 1 || testX > fieldWidth - 1) return;
 
         let score = 100;
+
+        // PHYSICS PENALTY
         const lateralShift = Math.abs(offset);
-
-        // A. MOMENTUM PENALTY
         const agilityMitigation = Math.max(0.3, (120 - agility) / 80);
-        const momentumConflict = Math.abs(offset - (currentVx * 0.7));
-        score -= (momentumConflict * 4.5 * agilityMitigation);
+        const momentumConflict = Math.abs(offset - (currentVx * 0.6));
+        score -= (momentumConflict * 4.0 * agilityMitigation);
 
-        // B. SALVAGE LOGIC (Take the 3 yards)
-        if (inTraffic) {
-            score -= (lateralShift * 15.0); // Sideways is death in traffic
-        } else {
-            score -= (lateralShift * 2.0);  // Sideways is okay in open field
-        }
+        // SALVAGE: Heavily penalize lateral movement when surrounded (don't dance!)
+        if (inTraffic) score -= (lateralShift * 12.0); 
 
-        // C. PREDICTIVE DEFENDER & BLOCKER LEVERAGE
+        // PREDICTIVE DEFENDER AVOIDANCE
         let laneThreat = 0;
         let overPursuitDetected = false;
 
         defenseStates.forEach(def => {
             if (def.stunnedTicks > 0 || def.y < runner.y - 1.5) return;
 
-            // Project 0.4s into future
+            // Project where defender will be in 0.4s
             const defPredX = def.x + ((def.vx || 0) * 0.4);
             const defPredY = def.y + ((def.vy || 0) * 0.4);
-            const distToPred = Math.hypot(testX - defPredX, testY - defPredY);
+            const distToPredicted = Math.hypot(testX - defPredX, testY - defPredY);
 
             if (!def.isBlocked && !def.isEngaged) {
-                if (distToPred < 5.0) {
-                    laneThreat += (600 / (distToPred + 0.5));
-                    
-                    // Detect over-pursuit for cutback
-                    if (Math.abs(def.vx || 0) > 3.0) {
-                        if (Math.sign(def.vx) !== Math.sign(offset)) overPursuitDetected = true;
+                if (distToPredicted < 5.0) {
+                    laneThreat += (500 / (distToPredicted + 0.5));
+
+                    // Cutback Logic (Punishing Aggression)
+                    const defLateralSpeed = def.vx || 0;
+                    if (Math.abs(defLateralSpeed) > 3.0) {
+                        const defGoingRight = defLateralSpeed > 0;
+                        const laneGoingLeft = offset < 0;
+                        if ((defGoingRight && laneGoingLeft) || (!defGoingRight && !laneGoingLeft)) {
+                            overPursuitDetected = true;
+                        }
                     }
                 }
             } else {
-                // BLOCKER LEVERAGE (Hip Reading)
+                // BLOCKER LEVERAGE (Reading the hips)
                 const blocker = offenseStates.find(o => o.id === def.blockedBy || o.id === def.engagedWith);
-                if (blocker && Math.hypot(testX - blocker.x, testY - blocker.y) < 3.0) {
-                    const defIsRight = def.x > blocker.x;
-                    const laneIsLeft = testX < blocker.x;
-                    score += (defIsRight === laneIsLeft) ? 70 : -60;
+                if (blocker) {
+                    const distToBlock = Math.hypot(testX - blocker.x, testY - blocker.y);
+                    if (distToBlock >= 1.0 && distToBlock <= 3.0 && blocker.y > runner.y) {
+                        const defIsRight = def.x > blocker.x;
+                        const laneIsLeft = testX < blocker.x;
+                        if (defIsRight === laneIsLeft) score += 60; // Clean side
+                        else score -= 50; // Contested side
+                    }
                 }
             }
         });
 
         score -= laneThreat;
 
-        // D. LEAD BLOCK DRAFTING (From your version)
-        offenseStates.forEach(off => {
-            if (off.id === runner.id || off.isEngaged || off.y < runner.y) return;
-            const distToBlocker = Math.hypot(testX - off.x, testY - off.y);
-            if (distToBlocker < 4.0) score += 40; // Follow the convoy
-        });
-
-        // E. GREEN GRASS & CUTBACKS
-        if (iq > 75 && overPursuitDetected) score += 90;
-        if (!inTraffic && lateralShift > 4 && laneThreat < 50) score += 60; // Aggression in open field
+        // OPPORTUNITY REWARD: Big runs (Cutbacks/Green Grass)
+        if (iq > 70 && overPursuitDetected) score += 80;
 
         if (score > bestScore) {
             bestScore = score;
@@ -2172,29 +2176,35 @@ function getSmartCarrierTarget(runner, defenseStates, offenseStates, fieldWidth 
         }
     });
 
-    // 4. THE SALVAGE PROTOCOL (Micro-steering)
+    // 3. THE SALVAGE PROTOCOL (Trucking vs Juking)
     const immediateThreat = nearbyDefenders.sort((a, b) => getDistance(runner, a) - getDistance(runner, b))[0];
 
     if (immediateThreat && getDistance(runner, immediateThreat) < 2.5) {
+        
         const strengthAdvantage = strength - (immediateThreat.strength || 50);
-
-        if (strengthAdvantage > 15 && (inTraffic || bestScore < 40)) {
-            // SALVAGE: Lower the shoulder
-            bestTargetX = runner.x + (currentVx * 0.3);
-            bestTargetY = runner.y + 2.0;
-            runner.contactReduction = 0.85; // Trucking state
+        
+        // SALVAGE: If no good escape exists and we are strong, just fall forward.
+        if (strengthAdvantage > 10 && inTraffic && bestScore < 50) {
+            bestTargetX = immediateThreat.x + (immediateThreat.x > runner.x ? -0.4 : 0.4);
+            bestTargetY = immediateThreat.y + 1.5; 
+            runner.contactReduction = 0.9; // Hunker down for impact
         } else {
-            // JUKE: Agile dodge
+            // JUKE: Standard agility-based dodge
             let dodgeDir = runner.x < immediateThreat.x ? -1 : 1;
-            if (Math.abs(immediateThreat.vx || 0) > 2.0) dodgeDir = -Math.sign(immediateThreat.vx);
-            
-            const dodgeWidth = 1.3 + (agility / 40);
-            bestTargetX = (bestTargetX * 0.4) + ((runner.x + (dodgeDir * dodgeWidth)) * 0.6);
+            if ((immediateThreat.vx || 0) < -2.0) dodgeDir = 1;
+            else if ((immediateThreat.vx || 0) > 2.0) dodgeDir = -1;
+
+            if (runner.x < 4) dodgeDir = 1;
+            if (runner.x > fieldWidth - 4) dodgeDir = -1;
+
+            const dodgeWidth = 1.2 + (agility / 40);
+            bestTargetX = (bestTargetX * 0.3) + ((runner.x + (dodgeDir * dodgeWidth)) * 0.7);
             bestTargetY = Math.min(bestTargetY, runner.y + 1.5);
         }
     }
 
-    return { x: Math.max(1, Math.min(fieldWidth - 1, bestTargetX)), y: bestTargetY };
+    bestTargetX = Math.max(1.0, Math.min(fieldWidth - 1.0, bestTargetX));
+    return { x: bestTargetX, y: bestTargetY };
 }
 
 /**
@@ -5964,18 +5974,19 @@ function simulateLivePlayStep(game) {
     else if (playResult.possessionChange) {
         game.possession = defense;
 
-        // 💡 FIX: Reset formation logic so they don't start 1st down in a 4th down formation
+        // Reset formation
         const coachPref = game.possession.coach?.preferredOffense || 'Balanced';
         game.possession.formations.offense = coachPref;
-
-        // Clear history for the new drive to allow all plays to be "fresh"
         game.possession.recentPlayHistory = [];
 
-        game.ballOn = 110 - finalBallY;
+        // CALCULATE NEW BALL POSITION
+        // finalBallY is the absolute coordinate (0-120). 
+        // We need to convert it to the perspective of the new offense.
+        game.ballOn = 110 - finalBallY; 
 
-        // Touchback handling
+        // Handle Touchbacks / Out of Bounds
         if (game.ballOn <= 0 || game.ballOn >= 100) {
-            game.ballOn = 20;
+            game.ballOn = 20; 
             if (game.gameLog) game.gameLog.push("Touchback! Ball placed at the 20.");
         }
 
@@ -5987,12 +5998,31 @@ function simulateLivePlayStep(game) {
         game.ballOn += playResult.yards;
         game.ballOn = Math.max(1, Math.min(99, game.ballOn));
         game.yardsToGo -= playResult.yards;
+
         if (game.yardsToGo <= 0) {
+            // First Down!
             game.down = 1;
             const distToGoal = 100 - game.ballOn;
             game.yardsToGo = (distToGoal < 10) ? distToGoal : 10;
+            if (game.gameLog) game.gameLog.push("✨ First Down!");
         } else {
-            game.down++;
+            // Not a first down. Was it 4th down?
+            if (game.down >= 4) {
+                // FORCE TURNOVER ON DOWNS
+                if (game.gameLog) game.gameLog.push("🛑 Turnover on Downs!");
+                
+                // Flip Possession
+                game.possession = defense;
+                game.ballOn = 110 - game.ballOn; // Flip field position
+                
+                // Reset for new drive
+                game.down = 1;
+                game.yardsToGo = 10;
+                game.possession.recentPlayHistory = [];
+            } else {
+                // Just move to the next down
+                game.down++;
+            }
         }
     }
 
