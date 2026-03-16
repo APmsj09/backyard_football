@@ -4238,7 +4238,10 @@ function executeThrow(qbState, target, strength, accuracy, playState, gameLog, a
 
     qbState.hasBall = false;
     qbState.isBallCarrier = false;
+    qbState.action = 'idle'; // FIX: Reset QB action so they don't keep running
 
+    // FIX: Log the Pass Attempt
+    playState.statEvents.push({ type: 'pass_attempt', qbId: qbState.id });
 
 }
 
@@ -5046,9 +5049,14 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
                         ballCarrierState.y = 110.0;
                         playState.finalBallY = 110.0;
                         if (gameLog) gameLog.push(`🎉 TOUCHDOWN ${ballCarrierState.name}!`);
+                        
+                        // FIX: Log Touchdown Stats
+                        playState.statEvents.push({ type: 'touchdown', playerId: ballCarrierState.id });
+                        if (playState.type === 'pass' && !playState.fumbleOccurred) {
+                            playState.statEvents.push({ type: 'pass_td', qbId: playState.ballState.throwerId });
+                        }
                         break;
                     }
-
                     // 2. DEFENSIVE TOUCHDOWN
                     if (!ballCarrierState.isOffense && ballCarrierState.y <= 10.0) {
                         playState.touchdown = true;
@@ -5266,10 +5274,23 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
     // ===========================================================
 
     // Calculate Return Yards 
+    // Calculate Return Yards 
     if (playState.returnStartY !== null && ballCarrierState) {
         const returnYards = Math.abs(ballCarrierState.y - playState.returnStartY);
         if (returnYards > 0) {
             playState.statEvents.push({ type: 'return', playerId: ballCarrierState.id, yards: returnYards });
+        }
+    }
+
+    // FIX: Calculate Rushing Stats
+    if (ballCarrierState && ballCarrierState.isOffense && !playState.returnStartY && !playState.fumbleOccurred) {
+        const isRun = playState.type === 'run' || (playState.type === 'pass' && ballCarrierState.role === 'QB');
+        // Don't count it as a rush if they caught a pass
+        const caughtPassThisPlay = playState.statEvents.some(e => e.type === 'completion' && e.receiverId === ballCarrierState.id);
+        
+        if (isRun && !caughtPassThisPlay) {
+            const rushYards = ballCarrierState.y - playState.lineOfScrimmage;
+            playState.statEvents.push({ type: 'rush', runnerId: ballCarrierState.id, yards: rushYards });
         }
     }
 
@@ -5461,6 +5482,14 @@ function applyStatEvents(statEvents) {
                 if (p) {
                     ensureStats(p);
                     p.gameStats.touchdowns++;
+                }
+                break;
+            }
+            case 'pass_td': {
+                const qb = getPlayer(evt.qbId);
+                if (qb) {
+                    ensureStats(qb);
+                    qb.gameStats.touchdowns++;
                 }
                 break;
             }

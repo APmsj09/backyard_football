@@ -3135,20 +3135,26 @@ function runLiveGameStep() {
 
     // Animate the frames we just calculated
     if (stepResult.visualizationFrames && stepResult.visualizationFrames.length > 0) {
-        playVisualization(stepResult.visualizationFrames, () => {
-            flushLiveLogs(); 
-            
-            // 💡 UPDATE SCORE: Now that the animation is over, show the NEW scores
-            elements.simHomeScore.textContent = activeLiveGame.homeScore;
-            elements.simAwayScore.textContent = activeLiveGame.awayScore;
+        
+        // 💡 FIX: Pause at the start of the play so the user can see the formation
+        setTimeout(() => {
+            playVisualization(stepResult.visualizationFrames, () => {
+                flushLiveLogs(); 
+                
+                // 💡 UPDATE SCORE: Now that the animation is over, show the NEW scores
+                elements.simHomeScore.textContent = activeLiveGame.homeScore;
+                elements.simAwayScore.textContent = activeLiveGame.awayScore;
 
-            if (isSkipping) {
-                runLiveGameStep();
-            } else {
-                const delay = activeLiveGame.isConversionAttempt ? 1000 : 3500;
-                huddleTimeout = setTimeout(runLiveGameStep, delay);
-            }
-        });
+                if (isSkipping) {
+                    runLiveGameStep();
+                } else {
+                    // 💡 FIX: Shorter huddle timeout for better game rhythm
+                    const delay = activeLiveGame.isConversionAttempt ? 1000 : 1500;
+                    huddleTimeout = setTimeout(runLiveGameStep, delay);
+                }
+            });
+        }, isSkipping ? 0 : 1200);
+
     } else {
         setTimeout(runLiveGameStep, 500);
     }

@@ -395,31 +395,47 @@ async function handleAdvanceWeek() {
     proceedWithAdvanceWeek();
 }
 
-function startLiveGame(playerGameMatch) {
+async function startLiveGame(playerGameMatch) {
     if (!gameState) return;
     currentLiveSimResult = null;
+
+    // 💡 FIX: Show Loading Modal
+    UI.showModal("Simulating League", "<div id='cpu-sim-results' class='text-sm space-y-1 h-48 overflow-y-auto'>Simulating games...</div>", null, '', null, 'Please Wait');
+    const modalContent = document.getElementById('cpu-sim-results');
 
     // 1. Simulate the OTHER games (Fast Sim)
     const gamesPerWeek = gameState.teams.length / 2;
     const allGames = gameState.schedule.slice(gameState.currentWeek * gamesPerWeek, (gameState.currentWeek + 1) * gamesPerWeek);
-    const otherResults = [];
+    const otherResults =[];
 
-    allGames.forEach(match => {
+    for (const match of allGames) {
         // Skip the player's game for now
-        if (match.home.id === playerGameMatch.home.id && match.away.id === playerGameMatch.away.id) return;
+        if (match.home.id === playerGameMatch.home.id && match.away.id === playerGameMatch.away.id) continue;
 
         try {
             // Fast sim the CPU games
-            // Check if function exists first to prevent crashes during the transition
             if (typeof Game.simulateMatchFast === 'function') {
+                // Small delay to allow UI to update between chunks
+                await new Promise(resolve => setTimeout(resolve, 50));
+                
                 const result = Game.simulateMatchFast(match.home, match.away);
                 otherResults.push(result);
+                
+                if (modalContent) {
+                    modalContent.innerHTML += `<p>${match.away.name} <span class="font-bold">${result.awayScore}</span> @ ${match.home.name} <span class="font-bold">${result.homeScore}</span></p>`;
+                    modalContent.scrollTop = modalContent.scrollHeight;
+                }
             }
-
         } catch (error) {
             console.error(`Sim error for CPU game:`, error);
         }
-    });
+    }
+
+    // Give the player a second to see the results before jumping into their game
+    if (otherResults.length > 0) {
+        await new Promise(resolve => setTimeout(resolve, 1500));
+    }
+    UI.hideModal();
 
     // 2. Initialize Player's Live Game Object
     // We do NOT call simulateGame here. We create the state container.
@@ -479,16 +495,33 @@ function startLiveGame(playerGameMatch) {
     });
 }
 
-function simulateRestOfWeek() {
+async function simulateRestOfWeek() {
     let results = null;
     try {
         if (!gameState || gameState.currentWeek >= WEEKS_IN_SEASON) {
             if (gameState) handleSeasonEnd();
             return;
         }
+        
+        // 💡 FIX: Show Loading Modal
+        UI.showModal("Simulating League", "<div id='cpu-sim-results' class='text-sm space-y-1 h-48 overflow-y-auto'>Simulating rest of week...</div>", null, '', null, 'Please Wait');
+        const modalContent = document.getElementById('cpu-sim-results');
+        await new Promise(resolve => setTimeout(resolve, 50)); // allow render to catch up
+
         if (typeof Game.simulateWeek === 'function') {
             results = Game.simulateWeek({ fastSim: true });
+            
+            // Print the final batch to the modal
+            if (modalContent && results) {
+                modalContent.innerHTML = '';
+                results.forEach(r => {
+                    modalContent.innerHTML += `<p>${r.awayTeam.name} <span class="font-bold">${r.awayScore}</span> @ ${r.homeTeam.name} <span class="font-bold">${r.homeScore}</span></p>`;
+                });
+                await new Promise(resolve => setTimeout(resolve, 1500));
+            }
         }
+        UI.hideModal();
+        
     } catch (error) {
         console.error("Sim week error:", error);
         if (gameState) gameState.currentWeek++;
