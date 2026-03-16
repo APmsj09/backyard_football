@@ -2598,7 +2598,7 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                     if (!pState.hasCompletedDropback) {
                         pState.targetX = pState.initialX;
                         pState.targetY = pState.dropbackTargetY;
-                        
+
                         // Give the QB a speed boost during the dropback to simulate backpedaling
                         pState.contactReduction = 1.4;
 
@@ -2607,7 +2607,7 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                             pState.hasCompletedDropback = true;
                             pState.dropbackPhase = 'set';
                         }
-                        break; 
+                        break;
                     }
 
                     // PHASE 2: POCKET AWARENESS & ESCAPE
@@ -2616,7 +2616,7 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                     let idealY = pState.dropbackTargetY; // Anchor to dropback depth
 
                     const rushers = defenseStates.filter(d => !d.isBlocked && !d.isEngaged && getDistance(pState, d) < 6);
-                    
+
                     // --- 💡 THE "PANIC" TRIGGER ---
                     // If any unblocked defender is inside 3.5 yards, forget drifting—ROLL OUT.
                     const immediateThreat = rushers.find(r => getDistance(pState, r) < 3.5);
@@ -2626,13 +2626,13 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                             // Pick the side with the most green grass (away from center)
                             pState.rolloutDir = pState.x > CENTER_X ? -1 : 1;
                         }
-                        
+
                         // Change action to scramble so the QB actually runs at full speed laterally
-                        pState.action = 'qb_scramble'; 
+                        pState.action = 'qb_scramble';
                         pState.targetX = pState.x + (pState.rolloutDir * 8);
                         pState.targetY = pState.y + 1.0; // Slowly advance to LOS while rolling out
                         pState.loggedRollout = true;
-                        
+
                         if (gameLog) pushGameLog(gameLog, `[Tick ${playState.tick}] 🏃 ${pState.name} escapes the collapsing pocket!`, playState);
                         break;
                     }
@@ -2856,32 +2856,49 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
         else if (isBallInAir) {
             const iq = pState.playbookIQ || 50;
             const flightTime = playState.tick - (playState.ballState.throwTick || 0);
-            const reactionDelay = Math.max(0, 15 - Math.floor(iq / 7));
+
+            // 💡 REACTION DELAY: How long until the player "locates" the ball in the air
+            const reactionDelay = Math.max(1, 15 - Math.floor(iq / 7));
 
             if (flightTime > reactionDelay) {
-
-                // 💡 FIX 3: Defenders ignore the ball if it's being thrown away
+                // --- 1. BALL THROWN AWAY ---
                 if (playState.ballState.isThrowAway) {
                     pState.action = 'idle';
                     pState.targetX = pState.x;
                     pState.targetY = pState.y;
                 }
-                else if (assignment?.startsWith('man_cover_')) {
+                // --- 2. OFFENSE TRACKING ---
+                else if (pState.isOffense) {
+                    pState.targetX = playState.ballState.targetX;
+                    pState.targetY = playState.ballState.targetY;
+                    pState.action = 'tracking_ball'; // 💡 physics.js uses this to skip arrival braking
+
+                    // 💡 BOOST: Receivers get a 15% speed/accel boost to simulate the "Go get it" 
+                    // mentality and adjusting to the ball.
+                    pState.contactReduction = 1.15;
+                }
+                // --- 3. DEFENSE TRACKING ---
+                else {
+                    const isMan = assignment?.startsWith('man_cover_');
                     const targetRecId = playState.ballState.targetPlayerId;
                     const myManId = pState.assignedPlayerId;
 
-                    if (targetRecId === myManId || getDistance(pState, playState.ballState) < 5.0) {
+                    // 💡 DISCIPLINE: Man defenders only leave their man to hunt the ball 
+                    // if their man is the target OR they are within 5 yards of the ball.
+                    if (!isMan || targetRecId === myManId || getDistance(pState, playState.ballState) < 5.0) {
                         pState.targetX = playState.ballState.targetX;
                         pState.targetY = playState.ballState.targetY;
+                        pState.action = 'pursuit';
+                    } else {
+                        // Stay with assigned man if the ball is on the other side of the field
+                        executeAssignment(pState, assignment, offenseStates, LOS, playState);
                     }
-                } else {
-                    pState.targetX = playState.ballState.targetX;
-                    pState.targetY = playState.ballState.targetY;
-                    
-                    // 💡 FIX: Change action state so the physics engine knows not to hit the brakes
-                    if (pState.isOffense) pState.action = 'tracking_ball';
                 }
             } else {
+                // --- 4. STILL LOCATING BALL ---
+                // 💡 SAFETY: Ensure they are moving at standard speed while still running the route
+                if (pState.isOffense) pState.contactReduction = 1.0;
+
                 executeAssignment(pState, assignment, offenseStates, LOS, playState);
             }
         }
@@ -3092,7 +3109,7 @@ function executeAssignment(pState, assignment, offenseStates, LOS, playState) {
 
             if (isEdgeRusher) {
                 const escapeAngle = pState.initialX < qb.initialX ? -1 : 1;
-                
+
                 // 💡 FIX: "Run the Hoop" - Force the edge rusher to stay wide until they reach QB depth.
                 // This creates a realistic U-shaped pass rush arc, buying the QB ~1 extra second.
                 if (pState.y > qb.y + 1.0) {
@@ -3343,11 +3360,11 @@ function checkTackleCollisions(playState, gameLog) {
             playState.statEvents.push({ type: 'tackle', playerId: defender.id });
 
             const isSack = carrier.role === 'QB' && carrier.y < playState.lineOfScrimmage && playState.type === 'pass';
-            
+
             // 💡 FIX: Determine Touchback vs Safety on turnovers
             const inOwnEndzone = (carrier.isOffense && carrier.y <= 10.0) || (!carrier.isOffense && carrier.y >= 110.0);
             const caughtInEndzone = playState.returnStartY !== null && ((carrier.isOffense && playState.returnStartY <= 10.0) || (!carrier.isOffense && playState.returnStartY >= 110.0));
-            
+
             let isSafety = false;
             let isTouchback = false;
 
@@ -3379,10 +3396,10 @@ function checkTackleCollisions(playState, gameLog) {
                     const runFat = Math.round(carrier.fatigueModifier * 100);
 
                     // 💡 FIX: Return yards calculate from the catch point, offensive yards from the LOS
-                    const yardage = (!carrier.isOffense || playState.turnover) 
-                        ? Math.abs(carrier.y - (playState.returnStartY || carrier.y)).toFixed(1) 
+                    const yardage = (!carrier.isOffense || playState.turnover)
+                        ? Math.abs(carrier.y - (playState.returnStartY || carrier.y)).toFixed(1)
                         : (carrier.y - playState.lineOfScrimmage).toFixed(1);
-                    
+
                     const contactX = carrier.x.toFixed(1);
                     const contactY = carrier.y.toFixed(1);
 
@@ -3403,7 +3420,7 @@ function checkTackleCollisions(playState, gameLog) {
             const jukeDir = jukeType === 'juke_left' ? -1 : 1;
             carrier.x += jukeDir * 0.8;
             // 💡 FIX: Hard stun to tackler so they don't roll to tackle again 5 times in 1 second
-            defender.stunnedTicks = 35; 
+            defender.stunnedTicks = 35;
 
             // 💡 FIX: If a passing QB shakes a sack, force them to abandon the pocket and scramble!
             if (carrier.role === 'QB' && !carrier.isBallCarrier) {
@@ -4101,7 +4118,7 @@ function updateQBDecision(qbState, offenseStates, defenseStates, playState, offe
         }
         if (pocketComfort === 'collapsing') {
             // Collapsing pocket is still bad, but slightly less punitive
-            adjustedAccuracy *= 0.95; 
+            adjustedAccuracy *= 0.95;
         }
         executeThrow(qbState, targetPlayerState, qbStrength, adjustedAccuracy, playState, gameLog, actionTaken);
     }
@@ -4141,13 +4158,13 @@ function executeThrow(qbState, target, strength, accuracy, playState, gameLog, a
     const startY = qbState.y;
 
     const throwDistance = Math.sqrt((target.x - startX) ** 2 + (target.y - startY) ** 2);
-    
+
     // REAL WORLD MATH: 
     // High School Elite (99 str): 52mph = ~25.5 yds/sec
     // High School Avg (50 str): 42mph = ~20 yds/sec
     // High School Weak (0 str): 30mph = ~14.5 yds/sec
     const maxArmVelocity = 14.5 + (strength / 100) * 11.0;
-    
+
     // Trajectory adjustment: Deep throws require arc (loft), which slows horizontal velocity.
     // Short throws (< 15 yds) are thrown on a frozen rope (fast).
     let ballSpeed = maxArmVelocity;
@@ -4457,6 +4474,10 @@ function handleBallArrival(playState, carrier, playResult, gameLog) {
         const dynamicCatchRadius = 0.6 + heightBonus;
         const CATCH_TOLERANCE = 0.25;
 
+        if (p.action === 'tracking_ball') {
+            dynamicCatchRadius *= 1.2;
+        }
+
         const distNow = Math.sqrt((p.x - ball.x) ** 2 + (p.y - ball.y) ** 2);
         if (distNow <= (dynamicCatchRadius + CATCH_TOLERANCE)) return true;
 
@@ -4499,7 +4520,7 @@ function handleBallArrival(playState, carrier, playResult, gameLog) {
         // 💡 FIX: Re-balanced Catching Odds
         let catchScore = (catching * 0.60) + (agility * 0.20) + 35; // Increased base floor significantly
         // 💡 FIX: Massive penalty for DBs so they don't catch 80% of jump balls. Forces them to Swat instead.
-        if (isDefense) catchScore -= 80; 
+        if (isDefense) catchScore -= 80;
         if (playersInRange.length > 1) catchScore -= 10;
         if (playState.type === 'punt') catchScore += 20;
 
@@ -4897,7 +4918,7 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
     // 💡 FIX: Make blitz pickup scale naturally. An average QB (IQ 50) has a 70% chance to see it. 
     // An elite QB (IQ 80+) has a 100% chance.
     if (defendersInBox > blockers) {
-        const pickupChance = qbIQ + 20; 
+        const pickupChance = qbIQ + 20;
         if (Math.random() * 100 < pickupChance) {
             const rb = offenseStates.find(p => p.slot.startsWith('RB') && p.action.includes('route'));
             if (rb) {
@@ -4981,12 +5002,12 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
                     const meshY = playState.lineOfScrimmage - 1.2;
 
                     // 💡 FIX: Speed up handoff so it occurs before free blitzers can tackle the QB for a TFL
-                    if (playState.tick < 10) { 
+                    if (playState.tick < 10) {
                         // QB moves to mesh point and "turns" (simulated by target)
                         qb.targetX = meshX;
                         qb.targetY = meshY;
                         qb.action = 'handoff_setup';
-                        
+
                         // RB targets the QB's hands (the mesh point)
                         rb.targetX = meshX;
                         rb.targetY = meshY;
@@ -5001,7 +5022,7 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
                             rb.hasBall = true;
                             rb.isBallCarrier = true;
                             playState.handoffOccurred = true;
-                            
+
                             // QB carries out a fake to the opposite side
                             qb.targetX = qb.initialX + (rb.initialX > qb.initialX ? -5 : 5);
                             qb.targetY = qb.y - 2;
@@ -5090,7 +5111,7 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
                         ballCarrierState.y = 110.0;
                         playState.finalBallY = 110.0;
                         if (gameLog) gameLog.push(`🎉 TOUCHDOWN ${ballCarrierState.name}!`);
-                        
+
                         // FIX: Log Touchdown Stats
                         playState.statEvents.push({ type: 'touchdown', playerId: ballCarrierState.id });
                         if (playState.type === 'pass' && !playState.fumbleOccurred) {
@@ -5328,7 +5349,7 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
         const isRun = playState.type === 'run' || (playState.type === 'pass' && ballCarrierState.role === 'QB');
         // Don't count it as a rush if they caught a pass
         const caughtPassThisPlay = playState.statEvents.some(e => e.type === 'completion' && e.receiverId === ballCarrierState.id);
-        
+
         if (isRun && !caughtPassThisPlay) {
             const rushYards = ballCarrierState.y - playState.lineOfScrimmage;
             playState.statEvents.push({ type: 'rush', runnerId: ballCarrierState.id, yards: rushYards });
@@ -6117,7 +6138,7 @@ function simulateLivePlayStep(game) {
         defense.formations.defense = defFormation;
 
         defPlayKey = determineDefensivePlayCall(defense, offense, game.down, game.yardsToGo, game.ballOn, scoreDiff, game.gameLog, drivesRemaining);
-        
+
     }
 
     const context = {
