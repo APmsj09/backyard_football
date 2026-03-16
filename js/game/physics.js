@@ -14,120 +14,167 @@ export function getDistance(p1State, p2State) {
 }
 
 // physics.js - safe coordinate/movement helper
-export function updatePlayerPosition(pState, timeDelta) {
-    // --- 0. Safety Checks ---
-    if (!pState || typeof pState.x !== 'number' || typeof pState.y !== 'number') return;
-    
-    if (!isFinite(pState.x) || !isFinite(pState.y)) {
-        pState.x = 26.65; 
-        pState.y = 60;
-    }
-    
-    if (!pState.velocity) pState.velocity = { x: 0, y: 0 };
-    if (!pState.vx) pState.vx = 0; 
-    if (!pState.vy) pState.vy = 0; 
+export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
+    // --- 0. Pre-Flight Checks ---
+    if (!pState || typeof pState.x !== 'number') return;
+    if (!pState.vx) pState.vx = 0;
+    if (!pState.vy) pState.vy = 0;
 
-    // --- 1. Handle Stuns/Blocks (Enhanced Friction) ---
+    // --- 1. Gap Awareness & Squeezing ---
+    // This reduces speed and agility when "skinnying" through a hole
+    const gapFriction = allPlayers.length > 0 ? calculateGapFriction(pState, allPlayers) : 1.0;
+    pState.isSqueezing = gapFriction < 0.9;
+
+    // --- 2. Handle Stuns / Blocks (Friction State) ---
     if (pState.stunnedTicks > 0 || pState.isBlocked || pState.isEngaged) {
-        // High friction: 0.95 vs 0.5 makes them feel "stuck" but still movable by block pushes
         const friction = 0.85; 
-        pState.vx *= friction;
-        pState.vy *= friction;
-        pState.velocity = { x: pState.vx, y: pState.vy };
+        pState.vx *= friction; pState.vy *= friction;
+        pState.x += pState.vx * timeDelta; pState.y += pState.vy * timeDelta;
+        pState.currentSpeedYPS = Math.sqrt(pState.vx * pState.vx + pState.vy * pState.vy);
         return;
     }
 
-    // --- 2. Calculate Desired Vector ---
-    let targetX = pState.targetX || pState.x;
-    let targetY = pState.targetY || pState.y;
-    
-    if (!isFinite(targetX) || !isFinite(targetY)) {
-        targetX = pState.x;
-        targetY = pState.y;
-    }
-    
+    // --- 3. Target Vector Math ---
+    const targetX = pState.targetX || pState.x;
+    const targetY = pState.targetY || pState.y;
     const dx = targetX - pState.x;
     const dy = targetY - pState.y;
     const distToTarget = Math.sqrt(dx * dx + dy * dy);
 
-    if (!isFinite(distToTarget)) {
-        pState.vx = 0; pState.vy = 0;
+    // If arrived, bleed off velocity rapidly
+    if (distToTarget < 0.05) {
+        pState.vx *= 0.5; pState.vy *= 0.5;
         return;
     }
 
-    // --- 3. Determine Max Speed (Audit Fix: Combined Fatigue) ---
-    // 0-99 Stat maps to 5.0 - 9.5 yards/sec
-    const baseSpeed = 5.0 + ((pState.speed || 50) / 100) * 4.5;
+    // --- 4. Attributes & Base Limits ---
+    const speedStat = pState.speed || 50;
+    const agilityStat = pState.agility || 50;
     const fatigueMod = pState.fatigueModifier || 1.0;
     
+    // Top Speed Range: 5.0 to 9.5 yards/sec
+    const baseMaxSpeed = (5.0 + (speedStat / 100) * 4.5) * fatigueMod;
+    
     let speedMult = pState.speedMultiplier || 1.0;
-    if (pState.isBallCarrier) speedMult *= 0.92; // Slightly tuned for balance
-    if (pState.action === 'backpedal') speedMult *= 0.65;
+    if (pState.isBallCarrier) speedMult *= 0.90;
+    if (pState.action === 'backpedal') speedMult *= 0.60;
     
-    const squeezingPenalty = pState.isSqueezing ? 0.6 : 1.0;
+    // Final speed limit is capped by gap friction (squeezing through a hole slows you down)
+    const maxPossibleSpeed = baseMaxSpeed * speedMult * gapFriction * (pState.contactReduction || 1.0);
+
+    // --- 5. Turning & Inertia (Dot Product Logic) ---
+    const currentSpeed = Math.sqrt(pState.vx * pState.vx + pState.vy * pState.vy);
+    let dotProduct = 1.0; 
+
+    if (currentSpeed > 0.1) {
+        // Alignment between current velocity and direction to target
+        const nx = pState.vx / currentSpeed;
+        const ny = pState.vy / currentSpeed;
+        const tx = dx / distToTarget;
+        const ty = dy / distToTarget;
+        dotProduct = (nx * tx) + (ny * ty); // 1.0 = Straight, 0.0 = 90 deg cut, -1.0 = U-turn
+    }
+
+    // High Agility reduces the penalty of turning. Squeezing increases it.
+    const turnAbility = (agilityStat / 100) * (pState.isSqueezing ? 0.4 : 1.0);
+    const turnPenalty = Math.max(0.3 + turnAbility, dotProduct);
+    const effectiveMaxSpeed = maxPossibleSpeed * turnPenalty;
+
+    // --- 6. Acceleration & Deceleration (Braking) ---
+    // Accelerate harder when moving straight, stall when cutting
+    let accelRate = (6.0 + (agilityStat * 0.10)) * fatigueMod * gapFriction;
     
-    const contactReduction = pState.contactReduction || 1.0;
-    const maxSpeed = baseSpeed * fatigueMod * speedMult * contactReduction * squeezingPenalty;
+    if (dotProduct > 0.85) accelRate *= 1.5; // Straight line "burst"
+    if (dotProduct < 0.25) accelRate *= 0.5; // "Stumble" penalty during hard cuts
 
-    // --- 4. Acceleration & Agility Logic (Audit Fix: The "Burst" Feel) ---
-    const agilityStat = pState.agility || 50;
-    
-    // Tired players have lower "burst" (acceleration)
-    // Range: ~4.0 (Tired Lineman) to ~16.0 (Fresh Elite WR)
-    let acceleration = (4.0 + (agilityStat * 0.12)) * fatigueMod; 
-
-    if (pState.hasBall) acceleration *= 0.85;
-
-    // --- 5. Braking Logic (Audit Fix: Snappier Stops) ---
-    const SLOW_RADIUS = 2.5;
+    // Arrival Braking
+    const SLOW_RADIUS = 3.0;
     let arrivalFactor = 1.0;
-    
     if (distToTarget < SLOW_RADIUS) {
         arrivalFactor = distToTarget / SLOW_RADIUS;
-        // Boost acceleration when slowing down to prevent "overshooting" the target
-        acceleration *= 1.5; 
+        accelRate *= 2.0; // Extra effort to plant feet at the destination
     }
 
-    // Calculate Target Velocity
-    let targetVx = 0;
-    let targetVy = 0;
+    // --- 7. Momentum Calculation ---
+    const targetVx = (dx / distToTarget) * effectiveMaxSpeed * arrivalFactor;
+    const targetVy = (dy / distToTarget) * effectiveMaxSpeed * arrivalFactor;
 
-    if (distToTarget > 0.1) {
-        const dirX = dx / distToTarget;
-        const dirY = dy / distToTarget;
-        targetVx = dirX * maxSpeed * arrivalFactor;
-        targetVy = dirY * maxSpeed * arrivalFactor;
-    } else {
-        // Prevent micro-jitter when overlapping target
-        if (distToTarget < 0.05) {
-            pState.x = targetX; pState.y = targetY;
-            pState.vx = 0; pState.vy = 0;
-            return;
-        }
+    // Apply change in velocity (Inertia)
+    pState.vx += (targetVx - pState.vx) * accelRate * timeDelta;
+    pState.vy += (targetVy - pState.vy) * accelRate * timeDelta;
+
+    // Absolute Speed Cap
+    const speedAfterAccel = Math.sqrt(pState.vx * pState.vx + pState.vy * pState.vy);
+    if (speedAfterAccel > maxPossibleSpeed) {
+        const ratio = maxPossibleSpeed / speedAfterAccel;
+        pState.vx *= ratio; pState.vy *= ratio;
     }
 
-    // --- 6. Apply Momentum Change (Inertia) ---
-    // The "Turn" logic: If the new target velocity is opposite to current movement, 
-    // we use Agility to determine how fast they can flip their momentum.
-    pState.vx += (targetVx - pState.vx) * acceleration * timeDelta;
-    pState.vy += (targetVy - pState.vy) * acceleration * timeDelta;
-
-    if (!isFinite(pState.vx) || !isFinite(pState.vy)) {
-        pState.vx = 0; pState.vy = 0;
+    // --- 8. Collision Deflection (Physical Nudges) ---
+    // If icon is too close to another player while squeezing, nudge laterally
+    if (pState.isSqueezing) {
+        allPlayers.forEach(other => {
+            if (other.id === pState.id) return;
+            const dist = getDistance(pState, other);
+            if (dist < 0.65) {
+                const pushX = (pState.x - other.x) / dist;
+                const pushY = (pState.y - other.y) / dist;
+                pState.vx += pushX * 1.5;
+                pState.vy += pushY * 1.5;
+            }
+        });
     }
 
-    // --- 7. Apply Final Movement ---
+    // --- 9. Apply Final Movement ---
     pState.x += pState.vx * timeDelta;
     pState.y += pState.vy * timeDelta;
 
-    // Final sanity check
-    if (!isFinite(pState.x) || !isFinite(pState.y)) {
-        pState.x = targetX; pState.y = targetY;
-        pState.vx = 0; pState.vy = 0;
-    }
-
-    // Update Helpers
+    // Update Meta Stats
     pState.currentSpeedYPS = Math.sqrt(pState.vx * pState.vx + pState.vy * pState.vy);
-    pState.velocity.x = pState.vx;
-    pState.velocity.y = pState.vy;
+    pState.velocity = { x: pState.vx, y: pState.vy };
+}
+
+/**
+ * Detects if a player is trying to move through a narrow gap between other players.
+ * Returns a "Friction Factor" (0.0 to 1.0) where 1.0 is wide open.
+ */
+function calculateGapFriction(pState, allPlayers) {
+    const SQUEEZE_THRESHOLD = 1.4; // Yards between two players to be considered "tight"
+    const IMPASSABLE_THRESHOLD = 0.7; // Too narrow to pass without significant struggle
+    let minFriction = 1.0;
+
+    // We only care about players within 2 yards of the mover
+    const nearby = allPlayers.filter(other => 
+        other.id !== pState.id && 
+        getDistance(pState, other) < 2.0
+    );
+
+    // Check pairs of nearby players to see if pState is between them
+    for (let i = 0; i < nearby.length; i++) {
+        for (let j = i + 1; j < nearby.length; j++) {
+            const p1 = nearby[i];
+            const p2 = nearby[j];
+
+            // Gap Width: distance between the two stationary/engaged players
+            const gapWidth = getDistance(p1, p2);
+
+            if (gapWidth < SQUEEZE_THRESHOLD) {
+                // Determine if mover is actually positioned "in" the gap
+                // (Using a simple midpoint proximity check)
+                const midX = (p1.x + p2.x) / 2;
+                const midY = (p1.y + p2.y) / 2;
+                const distToGapCenter = Math.hypot(pState.x - midX, pState.y - midY);
+
+                if (distToGapCenter < 0.8) {
+                    // Calculate how much we need to slow down based on gap tightness
+                    // If gap is 0.7 or less, friction is heavy (0.4)
+                    let friction = (gapWidth - IMPASSABLE_THRESHOLD) / (SQUEEZE_THRESHOLD - IMPASSABLE_THRESHOLD);
+                    friction = Math.max(0.4, Math.min(1.0, friction));
+                    
+                    if (friction < minFriction) minFriction = friction;
+                }
+            }
+        }
+    }
+    return minFriction;
 }

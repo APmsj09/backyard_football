@@ -2066,10 +2066,11 @@ function getSmartCarrierTarget(runner, defenseStates, offenseStates, fieldWidth 
     const runnerAgility = runner.agility || 50;
 
     // 1. Define Vision Depth (How far downfield are we scanning?)
-    const primaryVisionDepth = 3.0 + (runnerIQ / 20); // 4.5 to 8 yards
+    // Increased vision depth so runners can see the edge is open sooner
+    const primaryVisionDepth = 4.0 + (runnerIQ / 20); // 4.0 to 9.0 yards
 
-    // 2. Finer Lane Granularity (More angles for smoother curves)
-    const laneOffsets = [-7, -5, -3, -1.5, 0, 1.5, 3, 5, 7];
+    // 2. Finer Lane Granularity (More angles for smoother curves) + WIDER lanes for bounce outs
+    const laneOffsets = [-10, -7, -4, -1.5, 0, 1.5, 4, 7, 10];
 
     let bestScore = -Infinity;
     let bestTargetX = runner.x;
@@ -2089,31 +2090,49 @@ function getSmartCarrierTarget(runner, defenseStates, offenseStates, fieldWidth 
         let score = 100; // Base score
 
         // A. Forward Progress & Inertia
-        // Penalize sharp lateral cuts based on Agility. 
-        // Penalize cutting against momentum (e.g. running left, trying to cut hard right).
         const lateralShift = Math.abs(offset);
         const momentumConflict = Math.abs(offset - (currentVx * 0.5));
-        const agilityModifier = Math.max(0.4, (120 - runnerAgility) / 60); // 0.4 (Elite) to 1.1 (Slow)
+        const agilityModifier = Math.max(0.3, (120 - runnerAgility) / 70); // 0.3 (Elite) to 1.0 (Slow)
 
-        score -= (lateralShift * 3 * agilityModifier);
-        score -= (momentumConflict * 4 * agilityModifier);
+        // Give a slight "bounce" forgiveness for high agility players looking outside
+        score -= (lateralShift * 1.5 * agilityModifier);
 
-        // B. Defender Repulsion
+        // Cutback penalty is reduced for high agility to allow changing directions
+        const cutbackPenalty = momentumConflict > 4 ? (momentumConflict * 3 * agilityModifier) : (momentumConflict * 1.5 * agilityModifier);
+        score -= cutbackPenalty;
+
+        // B. Defender Repulsion & Open Space (Green Grass)
         let defendersInLane = 0;
+        let closestUnblockedDefDist = 20; // Track how far the closest threat is
+
         defenseStates.forEach(def => {
-            if (def.stunnedTicks > 0 || def.y < runner.y - 1.0) return;
+            // Ignore defenders behind the runner or stunned
+            if (def.stunnedTicks > 0 || def.y < runner.y - 1.5) return;
 
             const distToTestPoint = Math.hypot(testX - def.x, testY - def.y);
 
             if (!def.isBlocked && !def.isEngaged) {
+                if (distToTestPoint < closestUnblockedDefDist) {
+                    closestUnblockedDefDist = distToTestPoint;
+                }
+
                 // Unblocked defenders are highly dangerous
-                if (distToTestPoint < 5.0) {
-                    score -= (600 / (distToTestPoint + 1)); // Exponential fear
+                if (distToTestPoint < 6.0) {
+                    // Exponential fear based on proximity to the intended path
+                    score -= (600 / (distToTestPoint + 1));
+
+                    // If the defender has an angle on this lane, penalize more
+                    const defVx = def.vx || 0;
+                    const defTargetingLane = (testX < def.x && defVx < -0.5) || (testX > def.x && defVx > 0.5);
+                    if (defTargetingLane && distToTestPoint < 4.0) {
+                        score -= 150; // Defender is flowing this way
+                    }
+
                     if (distToTestPoint < 2.5) defendersInLane++;
                 }
 
                 // Anticipation: Is the defender waiting squarely in this lane ahead?
-                if (Math.abs(def.x - testX) < 1.5 && def.y > runner.y && def.y < testY + 2) {
+                if (Math.abs(def.x - testX) < 2.0 && def.y > runner.y && def.y < testY + 2) {
                     score -= 300; // Roadblock
                 }
             } else {
@@ -2121,10 +2140,33 @@ function getSmartCarrierTarget(runner, defenseStates, offenseStates, fieldWidth 
                 if (distToTestPoint < 1.5) {
                     score -= 120; // Don't run directly into the back of a defender
                 }
+                // Good blockers create a "shield"
+                if (distToTestPoint < 3.0 && def.y > runner.y) {
+                    // The defender is engaged ahead, this might actually be a good lane to cut BEHIND
+                    score += 30;
+                }
             }
         });
 
-        if (defendersInLane >= 2) score -= 400; // Overloaded lane penalty
+        if (defendersInLane >= 1) score -= 300; // Severely penalize lanes with immediate unblocked threats
+        if (defendersInLane >= 2) score -= 500; // Overloaded lane
+
+        // 💡 NEW: Green Grass Bonus (Reward open space & bouncing out!)
+        if (closestUnblockedDefDist > 4.5) {
+            // Wide open space! The further the closest defender, the bigger the bonus.
+            score += (closestUnblockedDefDist * 20);
+
+            // If it's a wide lane (bounce out) AND it's open, give a massive bonus to encourage bouncing
+            if (lateralShift >= 4) {
+                const distToSideline = Math.min(testX, fieldWidth - testX);
+                const currentDistToSideline = Math.min(runner.x, fieldWidth - runner.x);
+                if (distToSideline < currentDistToSideline) {
+                    score += (lateralShift * 18); // Reward finding the edge
+                } else {
+                    score += (lateralShift * 10); // Reward cutting to open middle
+                }
+            }
+        }
 
         // C. Blocker Attraction (Follow the convoy!)
         offenseStates.forEach(off => {
@@ -2134,23 +2176,34 @@ function getSmartCarrierTarget(runner, defenseStates, offenseStates, fieldWidth 
 
             if (off.isEngaged || off.isBlocked) {
                 // Engaged block: We want to run right off their hip, not into their back
-                if (distToTestPoint >= 1.5 && distToTestPoint <= 3.0) {
-                    score += 70; // Hip lane / Seam
+                if (distToTestPoint >= 1.5 && distToTestPoint <= 3.5) {
+                    score += 80; // Hip lane / Seam
                 } else if (distToTestPoint < 1.5) {
-                    score -= 100; // Colliding with back of blocker
+                    score -= 120; // Colliding with back of blocker
                 }
             } else {
                 // Free blocker (Lead blocker)
-                if (distToTestPoint >= 1.5 && distToTestPoint <= 4.0 && off.y > runner.y + 1) {
-                    score += 100; // DRAFTING: Follow the lead block!
+                if (distToTestPoint >= 1.5 && distToTestPoint <= 5.0 && off.y > runner.y + 1) {
+                    // Check if blocker is moving to the same side
+                    const blockSide = off.x > runner.x ? 1 : (off.x < runner.x ? -1 : 0);
+                    const laneSide = offset > 0 ? 1 : (offset < 0 ? -1 : 0);
+                    if (blockSide === laneSide || laneSide === 0) {
+                        score += 120; // DRAFTING: Follow the lead block!
+                    }
                 }
             }
         });
 
         // D. Sideline Avoidance (Exponential decay near bounds)
+        // But don't penalize too heavily if we are trying to turn the corner and go upfield
         const distToSideline = Math.min(testX, fieldWidth - testX);
-        if (distToSideline < 4) {
-            score -= (100 / Math.max(0.1, distToSideline));
+        if (distToSideline < 3) {
+            // If the lane is completely wide open, ignore the sideline fear
+            if (closestUnblockedDefDist > 6.0) {
+                score -= (50 / Math.max(0.1, distToSideline));
+            } else {
+                score -= (150 / Math.max(0.1, distToSideline));
+            }
         }
 
         // E. Update Best Lane
@@ -2162,12 +2215,12 @@ function getSmartCarrierTarget(runner, defenseStates, offenseStates, fieldWidth 
     });
 
     // 4. Micro-Steering (Immediate Threat Avoidance)
-    // If an unblocked defender is inside our personal bubble (2.5 yards), override macro-pathing to dodge!
+    // If an unblocked defender is inside our personal bubble, override macro-pathing to dodge!
     const closestThreat = defenseStates
         .filter(def => !def.isBlocked && !def.isEngaged && def.stunnedTicks === 0 && def.y >= runner.y - 0.5)
         .sort((a, b) => Math.hypot(a.x - runner.x, a.y - runner.y) - Math.hypot(b.x - runner.x, b.y - runner.y))[0];
 
-    if (closestThreat && Math.hypot(closestThreat.x - runner.x, closestThreat.y - runner.y) < 2.5) {
+    if (closestThreat && Math.hypot(closestThreat.x - runner.x, closestThreat.y - runner.y) < 3.0) {
 
         // Determine which side of the defender has more space
         let dodgeDir = runner.x < closestThreat.x ? -1 : 1; // Default: dodge away
@@ -2176,12 +2229,26 @@ function getSmartCarrierTarget(runner, defenseStates, offenseStates, fieldWidth 
         if (runner.x < 5 && closestThreat.x > runner.x) dodgeDir = 1; // Force inside
         if (runner.x > fieldWidth - 5 && closestThreat.x < runner.x) dodgeDir = -1; // Force inside
 
+        // 💡 NEW: Check if dodging inside runs us into traffic. If so, bounce outside harder!
+        const insideTraffic = defenseStates.some(def =>
+            !def.isBlocked && !def.isEngaged &&
+            def.id !== closestThreat.id &&
+            Math.hypot((runner.x + dodgeDir * 2) - def.x, (runner.y + 1) - def.y) < 2.5
+        );
+
+        if (insideTraffic && (runner.x >= 6 && runner.x <= fieldWidth - 6)) {
+            // Flip the dodge direction if it was leading into traffic and we have room outside
+            dodgeDir = -dodgeDir;
+        }
+
         // Smarter/more agile runners dodge wider and sharper
-        const dodgeWidth = 1.5 + (runnerAgility / 40);
-        bestTargetX = runner.x + (dodgeDir * dodgeWidth);
+        const dodgeWidth = 1.8 + (runnerAgility / 30);
+
+        // Blend macro target with micro dodge
+        bestTargetX = (bestTargetX * 0.4) + ((runner.x + (dodgeDir * dodgeWidth)) * 0.6);
 
         // Slow down forward momentum to execute the cut & let blocks develop
-        bestTargetY = Math.min(bestTargetY, runner.y + 1.5);
+        bestTargetY = Math.min(bestTargetY, runner.y + 1.0 + (runnerAgility / 50));
     }
 
     // Final safety clamp
@@ -2528,20 +2595,18 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                 }
                 else {
                     // Standard Runner Pathing (Smart Vision)
+                    // 💡 ENHANCED: Always use the smart carrier target to take advantage of Green Grass and drafting
+                    const smartTarget = getSmartCarrierTarget(pState, defenseStates, offenseStates);
+                    targetX = smartTarget.x;
+                    targetY = smartTarget.y;
+
                     const nearestDef = defenseStates.find(d => getDistance(pState, d) < 10);
-
                     if (nearestDef) {
-                        const smartTarget = getSmartCarrierTarget(pState, defenseStates, offenseStates);
-                        targetX = smartTarget.x;
-                        targetY = smartTarget.y;
-
                         const defendersNear = defenseStates.filter(d => getDistance(pState, d) < 2.0).length;
                         if (defendersNear > 1) pState.contactReduction = 0.85;
                         else if (defendersNear > 0) pState.contactReduction = 0.92;
                         else pState.contactReduction = 1.0;
                     } else {
-                        if (pState.x < 20) targetX = pState.x + 0.5;
-                        else if (pState.x > 33) targetX = pState.x - 0.5;
                         pState.contactReduction = 1.0;
                     }
                 }
@@ -3578,8 +3643,8 @@ function updateQBDecision(qbState, offenseStates, defenseStates, playState, offe
     const playsLeft = playState.playsRemaining || 60;
 
     // Desperation = Down by > 8 in the 4th, OR down by any amount with < 60s left in the game
-    const isDesperationTime = (currentQuarter >= 4) && 
-                              ((scoreDiff < 0 && playsLeft <= 9) || (scoreDiff <= -9 && playsLeft <= 15));
+    const isDesperationTime = (currentQuarter >= 4) &&
+        ((scoreDiff < 0 && playsLeft <= 9) || (scoreDiff <= -9 && playsLeft <= 15));
 
     // --- 0B. LINE OF SCRIMMAGE CHECK (Football Rule) ---
     // QB cannot throw FORWARD if they've crossed the line of scrimmage (only backwards/laterals allowed)
@@ -3592,7 +3657,7 @@ function updateQBDecision(qbState, offenseStates, defenseStates, playState, offe
             const pressureDefender = defenseStates.find(d => !d.isBlocked && !d.isEngaged && getDistance(qbState, d) < 4.5);
             if (pressureDefender && getDistance(qbState, pressureDefender) < 2.0) {
                 // Imminent sack - QB takes it
-                if (gameLog) gameLog.push(`💥 ${qbState.name} sacked after crossing the line of scrimmage!`);
+                if (gameLog) gameLog.push(`💥 ${qbState.name} tackled after crossing the line of scrimmage!`);
                 qbState.action = 'sacked';
                 qbState.hasProcessedLineCrossing = true;
                 return;
