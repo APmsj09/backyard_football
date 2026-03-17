@@ -20,6 +20,17 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
     if (!pState.vx) pState.vx = 0;
     if (!pState.vy) pState.vy = 0;
 
+    // 💡 NEW: Enforce Snap Reaction Time
+    if (pState.snapReactionTimer > 0) {
+        pState.snapReactionTimer--;
+        // Kill any AI-applied momentum. They are frozen in their stance.
+        pState.vx = 0;
+        pState.vy = 0;
+        pState.targetX = pState.x;
+        pState.targetY = pState.y;
+        return; // Exit early! No movement allowed yet.
+    }
+
     // --- 1. Gap Awareness & Squeezing ---
     // This reduces speed and agility when "skinnying" through a hole
     const gapFriction = allPlayers.length > 0 ? calculateGapFriction(pState, allPlayers) : 1.0;
@@ -27,7 +38,7 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
 
     // --- 2. Handle Stuns / Blocks (Friction State) ---
     if (pState.stunnedTicks > 0 || pState.isBlocked || pState.isEngaged) {
-        const friction = 0.85; 
+        const friction = 0.85;
         pState.vx *= friction; pState.vy *= friction;
         pState.x += pState.vx * timeDelta; pState.y += pState.vy * timeDelta;
         pState.currentSpeedYPS = Math.sqrt(pState.vx * pState.vx + pState.vy * pState.vy);
@@ -51,20 +62,20 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
     const speedStat = pState.speed || 50;
     const agilityStat = pState.agility || 50;
     const fatigueMod = pState.fatigueModifier || 1.0;
-    
+
     // Top Speed Range: 7.2 yds/sec (0 rating) to 10.8 yds/sec (99 rating = ~22mph peak)
     const baseMaxSpeed = (7.2 + (speedStat / 100) * 3.6) * fatigueMod;
-    
+
     let speedMult = pState.speedMultiplier || 1.0;
     if (pState.isBallCarrier) speedMult *= 0.90; // Padding/ball carrying slows you down ~10%
     if (pState.action === 'backpedal') speedMult *= 0.55;
-    
+
     // Final speed limit is capped by gap friction (squeezing through a hole slows you down)
     const maxPossibleSpeed = baseMaxSpeed * speedMult * gapFriction * (pState.contactReduction || 1.0);
 
     // --- 5. Turning & Inertia (Dot Product Logic) ---
     const currentSpeed = Math.sqrt(pState.vx * pState.vx + pState.vy * pState.vy);
-    let dotProduct = 1.0; 
+    let dotProduct = 1.0;
 
     if (currentSpeed > 0.1) {
         // Alignment between current velocity and direction to target
@@ -77,28 +88,28 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
 
     const turnAbility = (agilityStat / 100) * (pState.isSqueezing ? 0.4 : 1.0);
     const turnPenalty = Math.max(0.3 + turnAbility, dotProduct);
-    
+
     // 💡 FIX: Apply gap friction directly to speed and turning
     const effectiveMaxSpeed = maxPossibleSpeed * turnPenalty * (1.0 - (1.0 - gapFriction) * 0.7); // Reduce speed by 70% of friction
 
     // --- 6. Acceleration & Deceleration (REAL WORLD PHYSICS) ---
     // REALITY CHECK: It takes ~2.5 seconds to reach top speed. 
     // An accelRate of 1.2 to 2.8 means players gain roughly 6% to 14% of their top speed per tick.
-    let accelRate = (1.2 + (agilityStat / 100) * 1.6) * fatigueMod * (1.0 - (1.0 - gapFriction) * 0.5); 
-    
+    let accelRate = (1.2 + (agilityStat / 100) * 1.6) * fatigueMod * (1.0 - (1.0 - gapFriction) * 0.5);
+
     if (dotProduct > 0.85) accelRate *= 1.3; // Straight line burst
     if (dotProduct < 0.25) accelRate *= 0.6; // Heavy cuts ruin your acceleration curve
 
     // Arrival Braking
     const SLOW_RADIUS = 2.5;
     let arrivalFactor = 1.0;
-    
+
     // 💡 FIX: Players bursting to the handoff ('run_path') and WRs tracking a deep pass ('tracking_ball') 
     // should NEVER hit the brakes! They need to run through the catch point at full speed.
     if (distToTarget < SLOW_RADIUS && pState.action !== 'run_path' && pState.action !== 'tracking_ball') {
         arrivalFactor = distToTarget / SLOW_RADIUS;
         // Braking is much faster than accelerating (planting your foot)
-        accelRate *= 2.5; 
+        accelRate *= 2.5;
     }
 
     // --- 7. Momentum Calculation ---
@@ -122,35 +133,46 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
     }
 
     // --- 8. Collision Deflection (Physical Nudges) ---
-    const SEPARATION_RADIUS = 0.6; 
-    allPlayers.forEach(other => {
-        if (other.id === pState.id || other.isEngaged || pState.isEngaged) return; 
+    const BASE_RADIUS = 0.45;
 
-        // 💡 FIX: DO NOT repel players who are actively trying to exchange the ball!
+    // Calculate THIS player's dynamic radius based on weight
+    const myRadius = BASE_RADIUS + ((pState.weight || 200) / 1000);
+
+    allPlayers.forEach(other => {
+        if (other.id === pState.id || other.isEngaged || pState.isEngaged) return;
+
         if ((pState.action === 'handoff_setup' && other.action === 'run_path') ||
             (pState.action === 'run_path' && other.action === 'handoff_setup')) {
-            return; 
+            return;
         }
 
         const dist = getDistance(pState, other);
-        const combinedRadius = SEPARATION_RADIUS + SEPARATION_RADIUS; 
-        
+
+        // Calculate the OTHER player's dynamic radius
+        const theirRadius = BASE_RADIUS + ((other.weight || 200) / 1000);
+        const combinedRadius = myRadius + theirRadius;
+
         if (dist < combinedRadius && dist > 0.01) {
             const overlap = combinedRadius - dist;
-            const pushMagnitude = overlap * 0.6; 
+            const pushMagnitude = overlap * 0.6;
 
             const dx_norm = (pState.x - other.x) / dist;
             const dy_norm = (pState.y - other.y) / dist;
 
-            pState.x += dx_norm * pushMagnitude * 0.5;
-            pState.y += dy_norm * pushMagnitude * 0.5;
-            other.x -= dx_norm * pushMagnitude * 0.5;
-            other.y -= dy_norm * pushMagnitude * 0.5;
+            // Heavier players are harder to deflect
+            const totalWeight = (pState.weight || 200) + (other.weight || 200);
+            const myDeflection = (other.weight || 200) / totalWeight;
+            const theirDeflection = (pState.weight || 200) / totalWeight;
 
-            pState.vx += dx_norm * pushMagnitude * 2.0;
-            pState.vy += dy_norm * pushMagnitude * 2.0;
-            other.vx -= dx_norm * pushMagnitude * 2.0;
-            other.vy -= dy_norm * pushMagnitude * 2.0;
+            pState.x += dx_norm * pushMagnitude * myDeflection;
+            pState.y += dy_norm * pushMagnitude * myDeflection;
+            other.x -= dx_norm * pushMagnitude * theirDeflection;
+            other.y -= dy_norm * pushMagnitude * theirDeflection;
+
+            pState.vx += dx_norm * pushMagnitude * (myDeflection * 4.0);
+            pState.vy += dy_norm * pushMagnitude * (myDeflection * 4.0);
+            other.vx -= dx_norm * pushMagnitude * (theirDeflection * 4.0);
+            other.vy -= dy_norm * pushMagnitude * (theirDeflection * 4.0);
         }
     });
 
@@ -173,8 +195,8 @@ function calculateGapFriction(pState, allPlayers) {
     let minFriction = 1.0;
 
     // We only care about players within 2 yards of the mover
-    const nearby = allPlayers.filter(other => 
-        other.id !== pState.id && 
+    const nearby = allPlayers.filter(other =>
+        other.id !== pState.id &&
         getDistance(pState, other) < 2.0
     );
 
@@ -199,7 +221,7 @@ function calculateGapFriction(pState, allPlayers) {
                     // If gap is 0.7 or less, friction is heavy (0.4)
                     let friction = (gapWidth - IMPASSABLE_THRESHOLD) / (SQUEEZE_THRESHOLD - IMPASSABLE_THRESHOLD);
                     friction = Math.max(0.35, Math.min(1.0, friction)); // 💡 FIX: Slightly heavier minimum friction
-                    
+
                     if (friction < minFriction) minFriction = friction;
                 }
             }

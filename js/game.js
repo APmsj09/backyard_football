@@ -940,8 +940,8 @@ function aiSetDepthChart(team) {
 
     // 1. Initialize Depth Order Buckets (The Source of Truth)
     team.depthOrder = {
-        'QB': [], 'RB': [], 'WR': [], 'TE':[], 'OL': [],
-        'DL': [], 'LB': [], 'DB':[]
+        'QB': [], 'RB': [], 'WR': [], 'TE': [], 'OL': [],
+        'DL': [], 'LB': [], 'DB': []
     };
 
     // Filter out injured/busy players before sorting
@@ -950,8 +950,8 @@ function aiSetDepthChart(team) {
 
     // 2. Distribute into Buckets First
     const bucketMap = {
-        'QB': [], 'RB': [], 'WR': [], 'TE': [], 'OL':[],
-        'DL': [], 'LB': [], 'DB':[]
+        'QB': [], 'RB': [], 'WR': [], 'TE': [], 'OL': [],
+        'DL': [], 'LB': [], 'DB': []
     };
 
     sortRoster.forEach(p => {
@@ -971,7 +971,7 @@ function aiSetDepthChart(team) {
         if (!bucketMap[defPos]) defPos = 'DB';
 
         bucketMap[offPos].push(p);
-        
+
         // Push player to defensive bucket if different so ironman logic works
         if (offPos !== defPos && bucketMap[defPos]) {
             bucketMap[defPos].push(p);
@@ -981,7 +981,7 @@ function aiSetDepthChart(team) {
     // 3. Sort Each Position Bucket Realistically
     for (const pos of Object.keys(bucketMap)) {
         const players = bucketMap[pos];
-        
+
         // Remove duplicates just in case
         const uniquePlayers = Array.from(new Set(players));
 
@@ -1784,6 +1784,23 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
             // RPG Attributes
             const fatigueRatio = player.fatigue / (player.attributes?.physical?.stamina || 50);
             const fatigueMod = Math.max(0.3, 1.0 - fatigueRatio);
+            const playerIQ = player.attributes?.mental?.playbookIQ || 50;
+
+            // 💡 NEW: Snap Reaction Logic
+            let reactionTicks = 0;
+
+            // In your data.js, OL2 is the Center (X-coord is 0). 
+            // The Center and QB know the snap count. Everyone else has a delay.
+            if (slot !== 'QB1' && slot !== 'OL2') {
+                // Base delay: 99 IQ = ~1 tick (0.05s), 50 IQ = ~5 ticks (0.25s), 0 IQ = ~10 ticks (0.5s)
+                reactionTicks = Math.max(1, 10 - Math.floor(playerIQ / 10));
+
+                // Add minor random variance (0 to 2 ticks) to simulate jumping the snap vs being late
+                reactionTicks += Math.floor(Math.random() * 3);
+
+                // Defense reacts to the offense moving, so they get an inherent 2-tick penalty (0.1s)
+                if (!isOffense) reactionTicks += 2;
+            }
 
             const pState = {
                 id: player.id,
@@ -1791,6 +1808,7 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
                 number: player.number,
                 role: slot.replace(/\d+/g, ''),
                 teamId: team.id,
+                snapReactionTimer: reactionTicks,
 
                 // 💡 FIX 1: RESTORE COLORS
                 primaryColor: team.primaryColor,
@@ -3040,62 +3058,93 @@ function executeAssignment(pState, assignment, offenseStates, LOS, playState) {
         }
     }
 
-    // 3. ZONE COVERAGE (Smart Zones with Rotation and Threat Response)
+    // 3. ZONE COVERAGE (Smart Zones with Leverage and Tethering)
     else if (assignment?.startsWith('zone_')) {
+        const zone = zoneBoundaries[assignment];
         const zoneCenter = getZoneCenter(assignment, LOS);
         const isDeep = assignment.includes('deep') || pState.slot.startsWith('S');
-        let threatFound = false;
-        let bestThreat = null;
 
-        const zoneThreats = offenseStates.filter(o => {
-            const inZoneHorizontally = Math.abs(o.x - zoneCenter.x) < 10.0;
-            const inZoneDepth = isDeep ? (o.y > LOS + 8) : (o.y < LOS + 15);
-            return o.action.includes('route') && inZoneHorizontally && inZoneDepth;
+        // A. Define the True Zone Bounding Box (with a 3-yard anticipation buffer)
+        // This allows defenders to react as receivers are *about* to enter their zone.
+        const minX = (zone?.minX || 0) - 3.0;
+        const maxX = (zone?.maxX || FIELD_WIDTH) + 3.0;
+        const minY = LOS + (zone?.minY || 0) - 2.0;
+        const maxY = LOS + (zone?.maxY || 25.0) + 3.0;
+
+        // B. Filter valid threats who are in/entering this specific zone
+        let zoneThreats = offenseStates.filter(o => {
+            if (!o.action.includes('route')) return false;
+            return o.x >= minX && o.x <= maxX && o.y >= minY && o.y <= maxY;
         });
 
-        if (isDeep) {
-            const deepThreat = zoneThreats.find(o => o.y > LOS + 12 && o.action === 'run_route');
-            if (deepThreat) {
-                pState.targetX = deepThreat.x;
-                pState.targetY = Math.max(zoneCenter.y, deepThreat.y + 3.0);
-                threatFound = true;
+        let primaryThreat = null;
+
+        if (zoneThreats.length > 0) {
+            if (isDeep) {
+                // Deep zones ALWAYS prioritize the deepest vertical threat
+                primaryThreat = zoneThreats.reduce((deepest, current) => current.y > deepest.y ? current : deepest);
+            } else {
+                // Underneath zones prioritize the threat closest to them
+                primaryThreat = zoneThreats.reduce((closest, current) => 
+                    getDistance(pState, current) < getDistance(pState, closest) ? current : closest
+                );
             }
         }
 
-        if (!threatFound && assignment.includes('flat')) {
-            const shortThreat = zoneThreats.find(o => o.y < LOS + 8 && o.action.includes('route'));
-            if (shortThreat) {
-                pState.targetX = shortThreat.x;
-                pState.targetY = shortThreat.y + 1.0;
-                threatFound = true;
+        if (primaryThreat) {
+            // C. LEVERAGE POSITIONING
+            if (isDeep) {
+                // Deep Leverage: Stay ON TOP (deeper) and slightly inside
+                const insideLeverageX = primaryThreat.x < CENTER_X ? 1.0 : -1.0; 
+                pState.targetX = primaryThreat.x + insideLeverageX;
+                pState.targetY = Math.max(zoneCenter.y, primaryThreat.y + 3.5); // Never get beat deep
+            } else {
+                // Underneath Leverage: Stay UNDERNEATH (shallower) to disrupt passing lanes
+                pState.targetX = primaryThreat.x;
+                pState.targetY = primaryThreat.y - 1.5; 
             }
-        }
 
-        if (!threatFound && assignment.includes('hook') && pState.slot.startsWith('LB')) {
-            const hookThreat = zoneThreats.find(o => o.y > LOS + 5 && o.y < LOS + 15 && o.action.includes('route'));
-            if (hookThreat) {
-                pState.targetX = hookThreat.x;
-                pState.targetY = hookThreat.y;
-                threatFound = true;
+            // D. THE "ZONE TETHER" (Pass-off logic)
+            // 💡 CRITICAL: We clamp the defender's target so they cannot be dragged out of their zone.
+            // If the receiver runs out of this bounding box, the defender lets them go!
+            const TETHER_LIMIT_X = isDeep ? 8.0 : 6.0; 
+            
+            pState.targetX = Math.max(zoneCenter.x - TETHER_LIMIT_X, Math.min(zoneCenter.x + TETHER_LIMIT_X, pState.targetX));
+            
+            // Limit how deep underneath defenders will sink (usually ~15 yards max)
+            if (!isDeep) {
+                const maxSinkDepth = LOS + (zone?.maxY || 15.0);
+                pState.targetY = Math.min(maxSinkDepth, pState.targetY);
             }
-        }
-
-        if (!threatFound && zoneThreats.length > 0) {
-            bestThreat = zoneThreats.reduce((closest, current) => {
-                return getDistance(pState, current) < getDistance(pState, closest) ? current : closest;
-            });
-            pState.targetX = bestThreat.x;
-            pState.targetY = bestThreat.y;
-            threatFound = true;
-        }
-
-        if (!threatFound) {
-            // 💡 FIX: Prevent vibrating zones by locking drift target for ~1.5 seconds
-            if (!pState.zoneDriftTick || playState.tick > pState.zoneDriftTick + 30) {
+            
+            // Reset drift timer because we are actively covering someone
+            pState.zoneDriftTick = playState.tick;
+        } 
+        else {
+            // E. NO THREAT: READ QB & DRIFT
+            const qb = offenseStates.find(p => p.slot.startsWith('QB'));
+            
+            // Only recalculate drift every ~1 second to prevent jittering
+            if (!pState.zoneDriftTick || playState.tick > pState.zoneDriftTick + 20) {
                 pState.zoneDriftTick = playState.tick;
-                pState.dynamicTargetX = zoneCenter.x + (Math.random() - 0.5) * 2;
-                pState.dynamicTargetY = zoneCenter.y;
+                
+                let driftX = zoneCenter.x;
+                let driftY = zoneCenter.y;
+
+                if (qb) {
+                    // Smart defenders drift slightly toward the side the QB is looking/rolling
+                    const qbSide = qb.x < CENTER_X ? -1.5 : 1.5;
+                    driftX += qbSide;
+                }
+
+                // Add a tiny bit of natural "shuffling" within their zone
+                driftX += (Math.random() - 0.5) * 2.0;
+                driftY += (Math.random() - 0.5) * 1.5;
+                
+                pState.dynamicTargetX = driftX;
+                pState.dynamicTargetY = driftY;
             }
+            
             pState.targetX = pState.dynamicTargetX || zoneCenter.x;
             pState.targetY = pState.dynamicTargetY || zoneCenter.y;
         }
@@ -4001,23 +4050,31 @@ function updateQBDecision(qbState, offenseStates, defenseStates, playState, offe
 
     let targetPlayerState = null;
     let actionTaken = "None";
+    let readDebugLog = [];
 
     if (!decisionMade && canThrowStandard) {
         let bestTargetEval = null;
         let highestScore = -Infinity;
 
-        // Evaluate ALL reads the QB has processed so far, looking for the highest value throw
+        // Evaluate ALL reads the QB has processed so far
         for (let i = 0; i < numReadsVisible; i++) {
             const slot = progression[i];
             const evalResult = getTargetValue(slot);
-            if (evalResult && evalResult.score > highestScore) {
-                highestScore = evalResult.score;
-                bestTargetEval = evalResult;
+
+            if (evalResult) {
+                // Record the score (e.g., "WR1: 42")
+                readDebugLog.push(`${slot}:${evalResult.score.toFixed(0)}`);
+
+                if (evalResult.score > highestScore) {
+                    highestScore = evalResult.score;
+                    bestTargetEval = evalResult;
+                }
+            } else {
+                readDebugLog.push(`${slot}:X`); // X = Not a valid route right now
             }
         }
 
-        // THRESHOLD TO THROW: If the pocket is clean, the QB is greedy and wants a great (35) throw. 
-        // 💡 FIX: If throwing HOT, settle for ANY positive throw (value > 0) to avoid the sack!
+        // THRESHOLD TO THROW
         let THROW_THRESHOLD = 35;
         if (isPressured) THROW_THRESHOLD = 15;
         if (isHotReadSituation) THROW_THRESHOLD = 0;
@@ -4027,6 +4084,12 @@ function updateQBDecision(qbState, offenseStates, defenseStates, playState, offe
             targetPlayerState = bestTargetEval.info.state;
             actionTaken = isHotReadSituation ? "Hot Read Throw" : "Throw Value Target";
             decisionMade = true;
+
+            // 💡 NEW: Push the progression breakdown to the game log!
+            if (gameLog) {
+                const readProgress = `${numReadsVisible}/${progression.length}`;
+                gameLog.push(`[Tick ${playState.tick}] 🧠 QB Reads (${readProgress}): [${readDebugLog.join(', ')}] -> Selected: ${targetPlayerState.slot}`);
+            }
         }
 
         // SCRAMBLE CHECK (If no throw found but lane is open)
@@ -4066,6 +4129,11 @@ function updateQBDecision(qbState, offenseStates, defenseStates, playState, offe
     // 4. FORCED (Sack/Panic/Time Expired)
     // Only execute this if decisionMade is true AND no target was organically found
     if (decisionMade && !targetPlayerState) {
+        // 💡 NEW: Print the reads even if the QB decided no one was open!
+        if (gameLog && readDebugLog.length > 0 && actionTaken !== "Hot Read Throw") {
+            gameLog.push(`[Tick ${playState.tick}] 🧠 QB Reads: [${readDebugLog.join(', ')}] -> Result: NO OPEN TARGETS`);
+        }
+
         if (reason === "Imminent Sack") {
             const chanceToEatSack = (110 - qbIQ) / 100;
             if (Math.random() < chanceToEatSack) return; // Eat sack
@@ -4739,44 +4807,43 @@ const ensureStats = (player) => {
  */
 function resolvePlayerCollisions(playState) {
     const players = playState.activePlayers;
-    const RADIUS = PLAYER_SEPARATION_RADIUS; // Yards
+    const BASE_RADIUS = 0.45; // Base radius for a hypothetical 0 lb player
 
     for (let i = 0; i < players.length; i++) {
         const p1 = players[i];
         for (let j = i + 1; j < players.length; j++) {
             const p2 = players[j];
 
-            // Ignore if they are engaged in a block (block logic handles their position)
             if (p1.engagedWith === p2.id) continue;
 
             const dx = p1.x - p2.x;
             const dy = p1.y - p2.y;
             const dist = Math.sqrt(dx * dx + dy * dy);
 
-            // 💡 FIX: Give Offensive Linemen slightly wider physical bodies to block gaps
-            const isP1Heavy = p1.role === 'OL' || p1.role === 'DL';
-            const isP2Heavy = p2.role === 'OL' || p2.role === 'DL';
-
-            let r1 = isP1Heavy ? PLAYER_SEPARATION_RADIUS * 1.25 : PLAYER_SEPARATION_RADIUS;
-            let r2 = isP2Heavy ? PLAYER_SEPARATION_RADIUS * 1.25 : PLAYER_SEPARATION_RADIUS;
+            // 💡 NEW: Radius scales dynamically with weight!
+            // 150 lbs = ~0.60 radius | 250 lbs = ~0.70 radius | 350 lbs = ~0.80 radius
+            let r1 = BASE_RADIUS + ((p1.weight || 200) / 1000);
+            let r2 = BASE_RADIUS + ((p2.weight || 200) / 1000);
             let combinedRadius = r1 + r2;
 
             if (dist < combinedRadius && dist > 0.01) {
                 const overlap = combinedRadius - dist;
 
-                // 💡 FIX: If icons are overlapping, trigger the squeezing penalty for the physics engine
                 p1.isSqueezing = true;
                 p2.isSqueezing = true;
 
-                let pushFactor = (p1.role === 'OL' || p1.role === 'DL') ? 0.4 : 0.15;
+                // Heavier players push lighter players more easily
+                const totalWeight = (p1.weight || 200) + (p2.weight || 200);
+                const pushFactorP1 = ((p2.weight || 200) / totalWeight) * 0.4;
+                const pushFactorP2 = ((p1.weight || 200) / totalWeight) * 0.4;
 
-                const pushX = (dx / dist) * overlap * pushFactor;
-                const pushY = (dy / dist) * overlap * pushFactor;
+                const pushX = (dx / dist) * overlap;
+                const pushY = (dy / dist) * overlap;
 
-                p1.x += pushX;
-                p1.y += pushY;
-                p2.x -= pushX;
-                p2.y -= pushY;
+                p1.x += pushX * pushFactorP1;
+                p1.y += pushY * pushFactorP1;
+                p2.x -= pushX * pushFactorP2;
+                p2.y -= pushY * pushFactorP2;
             }
         }
     }

@@ -84,43 +84,41 @@ export const ZONES = {
 // Paths are relative to the player's starting [x, y].
 export const routeTree = {
     // --- Short / Quick Routes (0-5 yards) ---
-    'Flat': { path: [{ x: -3, y: 1 }, { x: -8, y: 1.5 }] }, // Move AWAY from ball
-    'Slant': { path: [{ x: 1, y: 1 }, { x: 5, y: 4 }] },    // Move TOWARD ball
-    'QuickOut': { path: [{ x: 0, y: 3 }, { x: -5, y: 3 }] },
-    'Hitch': { path: [{ x: 0, y: 6 }, { x: 0, y: 4 }] }, // Run 6, stop and come back 2
-    'Drag': { path: [{ x: 1, y: 2 }, { x: -8, y: 3 }, { x: -18, y: 3.5 }] }, // Shallow crossing route
-    'Whip': { path: [{ x: 0, y: 4 }, { x: -2, y: 4 }, { x: 4, y: 4 }] }, // In, stop, pivot back out (Zig)
-    'Bubble': { path: [{ x: 4, y: -1 }, { x: 8, y: 0 }] }, // Wide receiver screen, drift back & out
+    'Flat': { path:[{ x: 3, y: 1 }, { x: 8, y: 1.5 }] },   // Fixed: Move Outside
+    'Slant': { path:[{ x: -1, y: 1 }, { x: -5, y: 4 }] },  // Fixed: Move Inside
+    'QuickOut': { path:[{ x: 0, y: 3 }, { x: 5, y: 3 }] }, // Fixed: Move Outside
+    'Hitch': { path:[{ x: 0, y: 6 }, { x: 0, y: 4 }] }, 
+    'Drag': { path:[{ x: -1, y: 2 }, { x: -8, y: 3 }, { x: -18, y: 3.5 }] }, // Fixed: Shallow crossing inside
+    'Whip': { path:[{ x: 0, y: 4 }, { x: -2, y: 4 }, { x: 4, y: 4 }] }, 
+    'Bubble': { path: [{ x: 4, y: -1 }, { x: 8, y: 0 }] }, 
 
     // --- Medium Routes (8-15 yards) ---
-    'Out': { path: [{ x: 0, y: 10 }, { x: -8, y: 10 }] },
-    'In': { path: [{ x: 0, y: 10 }, { x: 8, y: 10 }] },     // Cut toward center
-    'Curl': { path: [{ x: 0, y: 12 }, { x: 2, y: 12 }, { x: 2, y: 10 }] },
-    'Comeback': { path: [{ x: 0, y: 15 }, { x: 2, y: 15.5 }, { x: 6, y: 12 }] }, // Deep out, come back to ball
-    'Corner': { path: [{ x: 0, y: 10 }, { x: 8, y: 25 }] }, // Flag route (10y stem, break to back pylon)
-    'Post': { path: [{ x: 0, y: 10 }, { x: -6, y: 25 }] }, // Attack goal post (10y stem, break to middle)
+    'Out': { path:[{ x: 0, y: 10 }, { x: 8, y: 10 }] },    // Fixed: Break Outside
+    'In': { path:[{ x: 0, y: 10 }, { x: -8, y: 10 }] },    // Fixed: Break Inside
+    'Curl': { path:[{ x: 0, y: 12 }, { x: 2, y: 12 }, { x: 2, y: 10 }] },
+    'Comeback': { path:[{ x: 0, y: 15 }, { x: 2, y: 15.5 }, { x: 6, y: 12 }] }, 
+    'Corner': { path:[{ x: 0, y: 10 }, { x: 8, y: 25 }] }, 
+    'Post': { path:[{ x: 0, y: 10 }, { x: -6, y: 25 }] }, 
 
     // --- Deep Routes (20+ yards) ---
-    'Fly': { path: [{ x: 0, y: 40 }] }, // Go / Streak / Vertical
-    'Seam': { path: [{ x: 0, y: 40 }] }, // Inner vertical, usually against zone
-    'Fade': { path: [{ x: 1, y: 10 }, { x: 3, y: 35 }] }, // Drift outside towards back shoulder
-    'PostCorner': { path: [{ x: 0, y: 10 }, { x: -2, y: 14 }, { x: 6, y: 25 }] }, // Double move: Fake Post, break Corner
-    'Sluggo': { path: [{ x: 1, y: 2 }, { x: -3, y: 5 }, { x: -3, y: 25 }] }, // Slant-and-Go: Fake Slant, burst vertical
+    'Fly': { path: [{ x: 0, y: 40 }] }, 
+    'Seam': { path: [{ x: 0, y: 40 }] }, 
+    'Fade': { path:[{ x: 1, y: 10 }, { x: 3, y: 35 }] }, 
+    'PostCorner': { path:[{ x: 0, y: 10 }, { x: -2, y: 14 }, { x: 6, y: 25 }] }, 
+    'Sluggo': { path:[{ x: -1, y: 2 }, { x: -3, y: 5 }, { x: -3, y: 25 }] }, // Fixed: Fake Slant Inside, then Go
 
     // --- Running Back Specific ---
-    'Wheel': { path: [{ x: 4, y: 1 }, { x: 6, y: 8 }, { x: 6, y: 25 }] }, // Flat then turn up sideline
-    'Angle': { path: [{ x: 3, y: 2 }, { x: -2, y: 6 }] }, // Texas route: fake flat, sharp cut to middle
-    'Screen': { path: [{ x: -2, y: -1 }, { x: -4, y: -0.5 }] }, // Slow release behind line
-    'CheckRelease': { path: [{ x: 0, y: 1 }, { x: 2, y: 1 }, { x: 3, y: 4 }] }, // Block for a beat, then leak to flat
+    'Wheel': { path:[{ x: 4, y: 1 }, { x: 6, y: 8 }, { x: 6, y: 25 }] }, 
+    'Angle': { path:[{ x: 3, y: 2 }, { x: -2, y: 6 }] }, 
+    'Screen': { path:[{ x: -2, y: -1 }, { x: -4, y: -0.5 }] }, 
+    'CheckRelease': { path:[{ x: 0, y: 1 }, { x: 2, y: 1 }, { x: 3, y: 4 }] }, 
 
-    // --- Blocking Assignments ---
-    'run_block': { path: [{ x: 0, y: 1.5 }] }, // Step forward to engage
-    'pass_block': { path: [{ x: 0, y: -1.0 }] }, // Step back to form pocket
-
-    // --- Run Paths (Game Engine Handles Physics) ---
-    'run_inside': { path: [{ x: 0, y: 5 }] },
-    'run_outside': { path: [{ x: 6, y: 4 }] },
-    'run_counter': { path: [{ x: -2, y: -0.5 }, { x: 4, y: 4 }] } // Step wrong way, then cut back
+    // --- Blocking & Run Paths ---
+    'run_block': { path:[{ x: 0, y: 1.5 }] }, 
+    'pass_block': { path:[{ x: 0, y: -1.0 }] }, 
+    'run_inside': { path:[{ x: 0, y: 5 }] },
+    'run_outside': { path:[{ x: 6, y: 4 }] },
+    'run_counter': { path:[{ x: -2, y: -0.5 }, { x: 4, y: 4 }] } 
 };
 
 // --- OFFENSIVE FORMATIONS ---
@@ -489,6 +487,16 @@ export const defenseFormations = {
             DB1: [-18, 8], 
             DB2: [18, 8], 
             DB3: [0, 14] 
+        },
+        slotPriorities: {
+            'DL1': { strength: 3, blockShedding: 3 },
+            'DL2': { strength: 3, weight: 3 },
+            'DL3': { strength: 3, blockShedding: 3 },
+            'LB1': { tackling: 3, speed: 2, playbookIQ: 2 },
+            'LB2': { tackling: 3, speed: 2, playbookIQ: 2 },
+            'DB1': { speed: 3, catchingHands: 2, playbookIQ: 3 },
+            'DB2': { speed: 3, catchingHands: 2, playbookIQ: 3 },
+            'DB3': { agility: 3, playbookIQ: 3, tackling: 2 } // Safety
         }
     },
     
@@ -505,6 +513,16 @@ export const defenseFormations = {
             DB1: [-20, 8], 
             DB2: [20, 8],
             DB3: [0, 12]
+        },
+        slotPriorities: {
+            'DL1': { strength: 3, blockShedding: 3, weight: 2 },
+            'DL2': { strength: 3, weight: 3, blockShedding: 3 },
+            'LB3': { tackling: 3, speed: 2, playbookIQ: 2 },
+            'LB1': { tackling: 3, speed: 2, playbookIQ: 2 },
+            'LB2': { tackling: 3, speed: 2, playbookIQ: 2 },
+            'DB1': { speed: 3, catchingHands: 2, playbookIQ: 3 },
+            'DB2': { speed: 3, catchingHands: 2, playbookIQ: 3 },
+            'DB3': { agility: 3, playbookIQ: 3, tackling: 2 } // Safety
         }
     },
     '4-2-2': {
@@ -520,6 +538,16 @@ export const defenseFormations = {
             LB2: [4, 7], 
             DB1: [-15, 10],
             DB2: [15, 10]
+        },
+        slotPriorities: {
+            'DL1': { strength: 3, blockShedding: 3, weight: 2},
+            'DL2': { strength: 3, blockShedding: 2, weight: 3 },
+            'DL3': { strength: 3, blockShedding: 2, weight: 3 },
+            'DL4': { strength: 3, blockShedding: 3, weight: 2 }, 
+            'LB1': { tackling: 3, speed: 2, playbookIQ: 2 },
+            'LB2': { tackling: 3, speed: 2, playbookIQ: 2 },
+            'DB1': { speed: 3, catchingHands: 2, playbookIQ: 3 },
+            'DB2': { speed: 3, catchingHands: 2, playbookIQ: 3 }
         }
     },
     '4-1-3': {
@@ -535,6 +563,16 @@ export const defenseFormations = {
             DB1: [-18, 8], 
             DB2: [18, 8], 
             DB3: [0, 12] 
+        },
+        slotPriorities: {
+            'DL1': { strength: 3, blockShedding: 3, weight: 2},
+            'DL2': { strength: 3, blockShedding: 2, weight: 3 },
+            'DL3': { strength: 3, blockShedding: 2, weight: 3 },
+            'DL4': { strength: 3, blockShedding: 3, weight: 2 }, 
+            'LB1': { tackling: 3, speed: 2, playbookIQ: 2 },
+            'DB1': { speed: 3, catchingHands: 2, playbookIQ: 2 },
+            'DB2': { speed: 3, catchingHands: 2, playbookIQ: 2 },
+            'DB3': { speed: 3, catchingHands: 2, playbookIQ: 3 } // Safety,
         }
     },    
     'Punt_Return': {
@@ -767,12 +805,12 @@ export const defensivePlaybook = {
 };
 
 // --- COACH PERSONALITIES ---
-export const coachPersonalities = [
-    { type: 'West Coast Offense', preferredOffense: 'Spread', preferredDefense: '2-3-2', attributePreferences: { physical: { speed: 1.4 }, mental: { playbookIQ: 1.6 }, technical: { throwingAccuracy: 1.8 } } },
-    { type: 'Ground and Pound', preferredOffense: 'Power', preferredDefense: '4-2-1', attributePreferences: { physical: { strength: 1.8 }, mental: { toughness: 1.5 }, technical: { blocking: 1.8 } } },
-    { type: 'Blitz-Happy Defense', preferredOffense: 'Balanced', preferredDefense: '4-2-1', attributePreferences: { physical: { speed: 1.6 }, mental: { clutch: 1.4 }, technical: { tackling: 1.8 } } },
-    { type: 'Balanced', preferredOffense: 'Balanced', preferredDefense: '3-1-3', attributePreferences: { physical: { speed: 1.2 }, mental: { playbookIQ: 1.2 }, technical: { tackling: 1.2 } } },
-    { type: 'The Moneyballer', preferredOffense: 'Spread', preferredDefense: '3-1-3', attributePreferences: { physical: { speed: 0.8 }, mental: { playbookIQ: 2.0 }, technical: { catchingHands: 1.5 } } },
-    { type: 'Air Raid', preferredOffense: 'Empty', preferredDefense: '2-3-2', attributePreferences: { physical: { speed: 1.8 }, mental: { playbookIQ: 0.8 }, technical: { throwingAccuracy: 1.5 } } },
-    { type: 'Trench Warfare', preferredOffense: 'Power', preferredDefense: '4-2-1', attributePreferences: { physical: { strength: 2.0 }, mental: { toughness: 1.5 }, technical: { blocking: 2.0 } } }
+export const coachPersonalities =[
+    { type: 'West Coast Offense', preferredOffense: 'Spread', preferredDefense: '3-2-3', attributePreferences: { physical: { speed: 1.4 }, mental: { playbookIQ: 1.6 }, technical: { throwingAccuracy: 1.8 } } },
+    { type: 'Ground and Pound', preferredOffense: 'Power', preferredDefense: '4-2-2', attributePreferences: { physical: { strength: 1.8 }, mental: { toughness: 1.5 }, technical: { blocking: 1.8 } } },
+    { type: 'Blitz-Happy Defense', preferredOffense: 'Balanced', preferredDefense: '4-2-2', attributePreferences: { physical: { speed: 1.6 }, mental: { clutch: 1.4 }, technical: { tackling: 1.8 } } },
+    { type: 'Balanced', preferredOffense: 'Balanced', preferredDefense: '3-2-3', attributePreferences: { physical: { speed: 1.2 }, mental: { playbookIQ: 1.2 }, technical: { tackling: 1.2 } } },
+    { type: 'The Moneyballer', preferredOffense: 'Spread', preferredDefense: '3-1-4', attributePreferences: { physical: { speed: 0.8 }, mental: { playbookIQ: 2.0 }, technical: { catchingHands: 1.5 } } },
+    { type: 'Air Raid', preferredOffense: 'Empty', preferredDefense: '4-1-3', attributePreferences: { physical: { speed: 1.8 }, mental: { playbookIQ: 0.8 }, technical: { throwingAccuracy: 1.5 } } },
+    { type: 'Trench Warfare', preferredOffense: 'Power', preferredDefense: '4-2-2', attributePreferences: { physical: { strength: 2.0 }, mental: { toughness: 1.5 }, technical: { blocking: 2.0 } } }
 ];
