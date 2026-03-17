@@ -4976,6 +4976,11 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
         const activeOffense = playState.activePlayers.filter(p => p.isOffense);
         const activeDefense = playState.activePlayers.filter(p => !p.isOffense);
 
+        const offenseTeam = activeOffense;
+        const defenseTeam = activeDefense;
+        const offenseStates = activeOffense;
+        const defenseStates = activeDefense;
+
         // Map specific players for quick access
         const qb1 = playState.activePlayers.find(p => p.slot === 'QB1');
         const rb1 = playState.activePlayers.find(p => p.slot === 'RB1');
