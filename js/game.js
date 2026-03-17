@@ -3198,7 +3198,9 @@ function checkTackleCollisions(playState, gameLog) {
 
         // --- OPTIMIZATION: Use cached distance from the start of the tick ---
         const dist = p._distToCarrier;
-        if (dist > TACKLE_RANGE) return false;
+        
+        // 💡 FIX: Safety check for undefined distance, and strict > TACKLE_RANGE check
+        if (dist === undefined || dist > TACKLE_RANGE) return false;
 
         // 💡 FIX: Prevent DL from reaching *through* the OL to sack the QB
         if (p.isBlocked || p.isEngaged) {
@@ -3221,8 +3223,9 @@ function checkTackleCollisions(playState, gameLog) {
                     if (dot > 0.4) return false;
                 }
             }
-            // Reach tackle range
-            return dist < 1.3;
+            // 💡 FIX: Significantly reduce the "reach tackle" range through blocks
+            // 0.8 yards is ~2.4 feet. They can only make the tackle if the runner brushes right past them.
+            return dist < 0.8;
         }
 
         return true;
@@ -5024,12 +5027,16 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
             ballCarrierState = playState.activePlayers.find(p => p.hasBall || p.isBallCarrier) || null;
 
             if (ballCarrierState) {
-                // This allows checkTackleCollisions to be nearly instant later on
-                for (let i = 0; i < defenseTeam.length; i++) {
-                    const d = defenseTeam[i];
-                    const dx = d.x - ballCarrierState.x;
-                    const dy = d.y - ballCarrierState.y;
-                    d._distToCarrier = Math.sqrt(dx * dx + dy * dy);
+                // 💡 FIX: Update distance to carrier for ALL players not on the carrier's team.
+                // This fixes the bug where the punting team (offense) teleport-tackled punt returners 
+                // because their _distToCarrier was left undefined!
+                for (let i = 0; i < playState.activePlayers.length; i++) {
+                    const p = playState.activePlayers[i];
+                    if (p.isOffense !== ballCarrierState.isOffense) {
+                        const dx = p.x - ballCarrierState.x;
+                        const dy = p.y - ballCarrierState.y;
+                        p._distToCarrier = Math.sqrt(dx * dx + dy * dy);
+                    }
                 }
             }
 
@@ -5051,10 +5058,15 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
 
             if (playState.handoffRequired && !playState.handoffOccurred) {
                 if (qb1 && rb1) {
-
+                    
+                    // Calculate how far back the QB started
                     const qbDepth = playState.lineOfScrimmage - qb1.initialY;
+                    
+                    // Hand off on the correct side
                     const meshX = qb1.initialX + (rb1.initialX > qb1.initialX ? 1.2 : -1.2);
-                    const meshY = qb1.initialY + 0.8; // Meet the QB where he is!
+                    
+                    // Mesh point pushes forward slightly for under center, stays back for shotgun
+                    const meshY = qb1.initialY + (qbDepth < 3.5 ? 1.5 : 0.8); 
 
                     // 💡 FIX: Shotgun handoffs take 1.2s (24 ticks). Under-center handoffs take 0.6s (12 ticks).
                     const handoffTickThreshold = qbDepth < 3.5 ? 12 : 24;
@@ -5074,7 +5086,7 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
                         const dy = qb1.y - rb1.y;
                         const dist = getDistance(qb1, rb1);
 
-                        if (dist < 1.5 || playState.tick >= (handoffTickThreshold + 4)) {
+                        if (dist < 1.5 || playState.tick >= (handoffTickThreshold + 6)) {
                             qb1.hasBall = false;
                             qb1.isBallCarrier = false;
                             rb1.hasBall = true;

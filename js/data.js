@@ -84,58 +84,58 @@ export const ZONES = {
 // Paths are relative to the player's starting [x, y].
 export const routeTree = {
     // --- Short / Quick Routes (0-5 yards) ---
-    'Flat': { path:[{ x: 3, y: 1 }, { x: 8, y: 1.5 }] },   // Fixed: Move Outside
-    'Slant': { path:[{ x: -1, y: 1 }, { x: -5, y: 4 }] },  // Fixed: Move Inside
-    'QuickOut': { path:[{ x: 0, y: 3 }, { x: 5, y: 3 }] }, // Fixed: Move Outside
-    'Hitch': { path:[{ x: 0, y: 6 }, { x: 0, y: 4 }] }, 
-    'Drag': { path:[{ x: -1, y: 2 }, { x: -8, y: 3 }, { x: -18, y: 3.5 }] }, // Fixed: Shallow crossing inside
-    'Whip': { path:[{ x: 0, y: 4 }, { x: -2, y: 4 }, { x: 4, y: 4 }] }, 
-    'Bubble': { path: [{ x: 4, y: -1 }, { x: 8, y: 0 }] }, 
+    'Flat': { path: [{ x: 3, y: 1 }, { x: 8, y: 1.5 }] },   // Fixed: Move Outside
+    'Slant': { path: [{ x: -1, y: 1 }, { x: -5, y: 4 }] },  // Fixed: Move Inside
+    'QuickOut': { path: [{ x: 0, y: 3 }, { x: 5, y: 3 }] }, // Fixed: Move Outside
+    'Hitch': { path: [{ x: 0, y: 6 }, { x: 0, y: 4 }] },
+    'Drag': { path: [{ x: -1, y: 2 }, { x: -8, y: 3 }, { x: -18, y: 3.5 }] }, // Fixed: Shallow crossing inside
+    'Whip': { path: [{ x: 0, y: 4 }, { x: -2, y: 4 }, { x: 4, y: 4 }] },
+    'Bubble': { path: [{ x: 4, y: -1 }, { x: 8, y: 0 }] },
 
     // --- Medium Routes (8-15 yards) ---
-    'Out': { path:[{ x: 0, y: 10 }, { x: 8, y: 10 }] },    // Fixed: Break Outside
-    'In': { path:[{ x: 0, y: 10 }, { x: -8, y: 10 }] },    // Fixed: Break Inside
-    'Curl': { path:[{ x: 0, y: 12 }, { x: 2, y: 12 }, { x: 2, y: 10 }] },
-    'Comeback': { path:[{ x: 0, y: 15 }, { x: 2, y: 15.5 }, { x: 6, y: 12 }] }, 
-    'Corner': { path:[{ x: 0, y: 10 }, { x: 8, y: 25 }] }, 
-    'Post': { path:[{ x: 0, y: 10 }, { x: -6, y: 25 }] }, 
+    'Out': { path: [{ x: 0, y: 10 }, { x: 8, y: 10 }] },    // Fixed: Break Outside
+    'In': { path: [{ x: 0, y: 10 }, { x: -8, y: 10 }] },    // Fixed: Break Inside
+    'Curl': { path: [{ x: 0, y: 12 }, { x: 2, y: 12 }, { x: 2, y: 10 }] },
+    'Comeback': { path: [{ x: 0, y: 15 }, { x: 2, y: 15.5 }, { x: 6, y: 12 }] },
+    'Corner': { path: [{ x: 0, y: 10 }, { x: 8, y: 25 }] },
+    'Post': { path: [{ x: 0, y: 10 }, { x: -6, y: 25 }] },
 
     // --- Deep Routes (20+ yards) ---
-    'Fly': { path: [{ x: 0, y: 40 }] }, 
-    'Seam': { path: [{ x: 0, y: 40 }] }, 
-    'Fade': { path:[{ x: 1, y: 10 }, { x: 3, y: 35 }] }, 
-    'PostCorner': { path:[{ x: 0, y: 10 }, { x: -2, y: 14 }, { x: 6, y: 25 }] }, 
-    'Sluggo': { path:[{ x: -1, y: 2 }, { x: -3, y: 5 }, { x: -3, y: 25 }] }, // Fixed: Fake Slant Inside, then Go
+    'Fly': { path: [{ x: 0, y: 40 }] },
+    'Seam': { path: [{ x: 0, y: 40 }] },
+    'Fade': { path: [{ x: 1, y: 10 }, { x: 3, y: 35 }] },
+    'PostCorner': { path: [{ x: 0, y: 10 }, { x: -2, y: 14 }, { x: 6, y: 25 }] },
+    'Sluggo': { path: [{ x: -1, y: 2 }, { x: -3, y: 5 }, { x: -3, y: 25 }] }, // Fixed: Fake Slant Inside, then Go
 
     // --- Running Back Specific ---
-    'Wheel': { path:[{ x: 4, y: 1 }, { x: 6, y: 8 }, { x: 6, y: 25 }] }, 
-    'Angle': { path:[{ x: 3, y: 2 }, { x: -2, y: 6 }] }, 
-    'Screen': { path:[{ x: -2, y: -1 }, { x: -4, y: -0.5 }] }, 
-    'CheckRelease': { path:[{ x: 0, y: 1 }, { x: 2, y: 1 }, { x: 3, y: 4 }] }, 
+    'Wheel': { path: [{ x: 4, y: 1 }, { x: 6, y: 8 }, { x: 6, y: 25 }] },
+    'Angle': { path: [{ x: 3, y: 2 }, { x: -2, y: 6 }] },
+    'Screen': { path: [{ x: -2, y: -1 }, { x: -4, y: -0.5 }] },
+    'CheckRelease': { path: [{ x: 0, y: 1 }, { x: 2, y: 1 }, { x: 3, y: 4 }] },
 
     // --- Blocking & Run Paths ---
-    'run_block': { path:[{ x: 0, y: 1.5 }] }, 
-    'pass_block': { path:[{ x: 0, y: -1.0 }] }, 
-    'run_inside': { path:[{ x: 0, y: 5 }] },
-    'run_outside': { path:[{ x: 6, y: 4 }] },
-    'run_counter': { path:[{ x: -2, y: -0.5 }, { x: 4, y: 4 }] } 
+    'run_block': { path: [{ x: 0, y: 1.5 }] },
+    'pass_block': { path: [{ x: 0, y: -1.0 }] },
+    'run_inside': { path: [{ x: 0, y: 5 }] },
+    'run_outside': { path: [{ x: 6, y: 4 }] },
+    'run_counter': { path: [{ x: -2, y: -0.5 }, { x: 4, y: 4 }] }
 };
 
 // --- OFFENSIVE FORMATIONS ---
 export const offenseFormations = {
     'Balanced': {
         name: 'Balanced',
-        slots:['QB1', 'RB1', 'WR1', 'WR2', 'TE1', 'OL1', 'OL2', 'OL3'],
+        slots: ['QB1', 'RB1', 'WR1', 'WR2', 'TE1', 'OL1', 'OL2', 'OL3'],
         personnel: { QB: 1, RB: 1, WR: 2, TE: 1, OL: 3 },
         coordinates: {
-            QB1: [0, -5.0],
-            RB1: [-1.5, -5.0],
+            QB1: [0, -6.0],     // 💡 FIX: Shotgun depth to allow plays to develop
+            RB1: [-1.5, -6.0],
             WR1: [-15, 0.5],
             WR2: [15, 0.5],
-            TE1:[2.8, -1.5], // Tight to the right tackle
-            OL1: [-1.4, -1.5], // Realistic 4-foot line splits
+            TE1: [2.8, -1.5],
+            OL1: [-1.4, -1.5],
             OL2: [0, -1.5],
-            OL3:[1.4, -1.5]
+            OL3: [1.4, -1.5]
         },
         slotPriorities: {
             QB1: { throwingAccuracy: 3, playbookIQ: 2 },
@@ -148,19 +148,19 @@ export const offenseFormations = {
             OL3: { strength: 3, blocking: 3 }
         }
     },
-     'Spread': {
+    'Spread': {
         name: 'Spread',
-        slots:['QB1', 'WR1', 'WR2', 'WR3', 'WR4', 'OL1', 'OL2', 'OL3'],
+        slots: ['QB1', 'WR1', 'WR2', 'WR3', 'WR4', 'OL1', 'OL2', 'OL3'],
         personnel: { QB: 1, RB: 0, WR: 4, OL: 3 },
         coordinates: {
-            QB1:[0, -5.0],
+            QB1: [0, -6.0],      // 💡 FIX: Standard shotgun depth
             WR1: [-16, 0.5],
             WR2: [16, 0.5],
             WR3: [-6, 0.5],
             WR4: [6, 0.5],
-            OL1:[-1.4, -1.5], 
+            OL1: [-1.4, -1.5],
             OL2: [0, -1.5],
-            OL3:[1.4, -1.5]
+            OL3: [1.4, -1.5]
         },
         slotPriorities: {
             QB1: { throwingAccuracy: 3, playbookIQ: 2 },
@@ -175,16 +175,16 @@ export const offenseFormations = {
     },
     'Power': {
         name: 'Power I',
-        slots:['QB1', 'RB1', 'RB2', 'WR1', 'TE1', 'OL1', 'OL2', 'OL3'],
+        slots: ['QB1', 'RB1', 'RB2', 'WR1', 'TE1', 'OL1', 'OL2', 'OL3'],
         personnel: { QB: 1, RB: 2, WR: 1, TE: 1, OL: 3 },
         coordinates: {
-            QB1:[0, -2.0],    // QB under center
-            RB1: [0, -6.5],    // Tailback deep
-            RB2: [0, -4.0],    // Fullback leading
-            WR1:[14, 0.5],
-            TE1: [-2.8, -1.5], // Tight to the left tackle
-            OL1: [-1.4, -1.5], 
-            OL2:[0, -1.5],
+            QB1: [0, -3.0],     // 💡 FIX: Give under-center QB more clearance from OL
+            RB1: [0, -7.5],    // Tailback deep
+            RB2: [0, -5.0],    // Fullback leading
+            WR1: [14, 0.5],
+            TE1: [-2.8, -1.5],
+            OL1: [-1.4, -1.5],
+            OL2: [0, -1.5],
             OL3: [1.4, -1.5]
         },
         slotPriorities: {
@@ -200,15 +200,15 @@ export const offenseFormations = {
     },
     'Trips': {
         name: 'Trips Right',
-        slots:['QB1', 'RB1', 'WR1', 'WR2', 'WR3', 'OL1', 'OL2', 'OL3'],
+        slots: ['QB1', 'RB1', 'WR1', 'WR2', 'WR3', 'OL1', 'OL2', 'OL3'],
         personnel: { QB: 1, RB: 1, WR: 3, TE: 0, OL: 3 },
         coordinates: {
-            QB1: [0, -5.0],
-            RB1: [-2.0, -5.0],
+            QB1: [0, -6.0],     // 💡 FIX: Standard shotgun depth
+            RB1: [-2.0, -6.0],
             WR1: [16, 0.5],
             WR2: [10, 0.5],
-            WR3:[5, 0.5],
-            OL1: [-1.4, -1.5], 
+            WR3: [5, 0.5],
+            OL1: [-1.4, -1.5],
             OL2: [0, -1.5],
             OL3: [1.4, -1.5]
         },
@@ -225,15 +225,15 @@ export const offenseFormations = {
     },
     'Empty': {
         name: 'Empty Quads',
-        slots:['QB1', 'WR1', 'WR2', 'WR3', 'WR4', 'OL1', 'OL2', 'OL3'],
+        slots: ['QB1', 'WR1', 'WR2', 'WR3', 'WR4', 'OL1', 'OL2', 'OL3'],
         personnel: { QB: 1, RB: 0, WR: 4, OL: 3 },
         coordinates: {
-            QB1: [0, -5.0],
-            WR1:[-16, 0.5],
+            QB1: [0, -6.0],     // 💡 FIX: Standard shotgun depth
+            WR1: [-16, 0.5],
             WR2: [-6, 0.5],
-            WR3:[6, 0.5],
+            WR3: [6, 0.5],
             WR4: [16, 0.5],
-            OL1: [-1.4, -1.5], 
+            OL1: [-1.4, -1.5],
             OL2: [0, -1.5],
             OL3: [1.4, -1.5]
         },
@@ -251,14 +251,14 @@ export const offenseFormations = {
     'Punt': {
         name: 'Punt',
         personnel: { OL: 3, WR: 2, QB: 1, RB: 1, TE: 1 },
-        slots:['OL1', 'OL2', 'OL3', 'WR1', 'WR2', 'RB1', 'TE1', 'QB1'],
+        slots: ['OL1', 'OL2', 'OL3', 'WR1', 'WR2', 'RB1', 'TE1', 'QB1'],
         coordinates: {
-            QB1:[0, -12.0],
+            QB1: [0, -12.0],
             RB1: [2.0, -3.0],  // Personal protector/Upback
             TE1: [-2.8, -1.5], // Wing blocker
-            WR1:[-16, 0.5],   // Gunners
+            WR1: [-16, 0.5],   // Gunners
             WR2: [16, 0.5],
-            OL1:[-1.4, -1.5], 
+            OL1: [-1.4, -1.5],
             OL2: [0, -1.5],
             OL3: [1.4, -1.5]
         },
@@ -282,50 +282,50 @@ export const offensivePlaybook = {
     // ===================================
     'Balanced_InsideZone': {
         type: 'run', tags: ['run', 'inside'],
-        assignments: { 
-            'QB1': 'qb_setup', 'RB1': 'run_inside', 'TE1': 'run_block', 
-            'WR1': 'run_block', 'WR2': 'run_block', 
-            'OL1': 'run_block', 'OL2': 'run_block', 'OL3': 'run_block' 
+        assignments: {
+            'QB1': 'qb_setup', 'RB1': 'run_inside', 'TE1': 'run_block',
+            'WR1': 'run_block', 'WR2': 'run_block',
+            'OL1': 'run_block', 'OL2': 'run_block', 'OL3': 'run_block'
         }
     },
     'Balanced_StretchRight': {
         type: 'run', tags: ['run', 'outside'],
-        assignments: { 
-            'QB1': 'qb_setup', 'RB1': 'run_outside', 'TE1': 'run_block', 
-            'WR1': 'run_block', 'WR2': 'run_block', 
-            'OL1': 'run_block', 'OL2': 'run_block', 'OL3': 'run_block' 
+        assignments: {
+            'QB1': 'qb_setup', 'RB1': 'run_outside', 'TE1': 'run_block',
+            'WR1': 'run_block', 'WR2': 'run_block',
+            'OL1': 'run_block', 'OL2': 'run_block', 'OL3': 'run_block'
         }
     },
     'Balanced_Slants': {
         type: 'pass', tags: ['pass', 'short', 'quick'],
         readProgression: ['WR1', 'WR2', 'TE1', 'RB1'],
-        assignments: { 
-            'QB1': 'qb_setup', 'WR1': 'Slant', 'WR2': 'Slant', 'TE1': 'CheckRelease', 
-            'RB1': 'Flat', 'OL1': 'pass_block', 'OL2': 'pass_block', 'OL3': 'pass_block' 
+        assignments: {
+            'QB1': 'qb_setup', 'WR1': 'Slant', 'WR2': 'Slant', 'TE1': 'CheckRelease',
+            'RB1': 'Flat', 'OL1': 'pass_block', 'OL2': 'pass_block', 'OL3': 'pass_block'
         }
     },
     'Balanced_Smash': {
         type: 'pass', tags: ['pass', 'medium', 'corner'],
         readProgression: ['WR2', 'WR1', 'TE1'],
-        assignments: { 
-            'QB1': 'qb_setup', 'WR1': 'Hitch', 'WR2': 'Corner', 'TE1': 'Hitch', 
-            'RB1': 'CheckRelease', 'OL1': 'pass_block', 'OL2': 'pass_block', 'OL3': 'pass_block' 
+        assignments: {
+            'QB1': 'qb_setup', 'WR1': 'Hitch', 'WR2': 'Corner', 'TE1': 'Hitch',
+            'RB1': 'CheckRelease', 'OL1': 'pass_block', 'OL2': 'pass_block', 'OL3': 'pass_block'
         }
     },
     'Balanced_Sluggo_Shot': {
         type: 'pass', tags: ['pass', 'deep', 'doublemove'],
         readProgression: ['WR1', 'WR2', 'TE1'],
-        assignments: { 
-            'QB1': 'qb_setup', 'WR1': 'Sluggo', 'WR2': 'In', 'TE1': 'Seam', 
-            'RB1': 'Flat', 'OL1': 'pass_block', 'OL2': 'pass_block', 'OL3': 'pass_block' 
+        assignments: {
+            'QB1': 'qb_setup', 'WR1': 'Sluggo', 'WR2': 'In', 'TE1': 'Seam',
+            'RB1': 'Flat', 'OL1': 'pass_block', 'OL2': 'pass_block', 'OL3': 'pass_block'
         }
     },
     'Balanced_Zig_Zag': {
         type: 'pass', tags: ['pass', 'short', 'redzone'],
         readProgression: ['WR2', 'TE1', 'RB1'],
-        assignments: { 
-            'QB1': 'qb_setup', 'WR1': 'Fly', 'WR2': 'Whip', 'TE1': 'CheckRelease', 
-            'RB1': 'Angle', 'OL1': 'pass_block', 'OL2': 'pass_block', 'OL3': 'pass_block' 
+        assignments: {
+            'QB1': 'qb_setup', 'WR1': 'Fly', 'WR2': 'Whip', 'TE1': 'CheckRelease',
+            'RB1': 'Angle', 'OL1': 'pass_block', 'OL2': 'pass_block', 'OL3': 'pass_block'
         }
     },
 
@@ -335,33 +335,33 @@ export const offensivePlaybook = {
     'Spread_BubbleScreen': {
         type: 'pass', tags: ['pass', 'screen', 'short'],
         readProgression: ['WR3', 'WR4', 'WR1'],
-        assignments: { 
-            'QB1': 'qb_setup', 'WR3': 'Bubble', 'WR4': 'Bubble', 'WR1': 'run_block', 
-            'WR2': 'Fly', 'OL1': 'run_block', 'OL2': 'run_block', 'OL3': 'run_block' 
+        assignments: {
+            'QB1': 'qb_setup', 'WR3': 'Bubble', 'WR4': 'Bubble', 'WR1': 'run_block',
+            'WR2': 'Fly', 'OL1': 'run_block', 'OL2': 'run_block', 'OL3': 'run_block'
         }
     },
     'Spread_FourVerts': {
         type: 'pass', tags: ['pass', 'deep'],
         readProgression: ['WR1', 'WR2', 'WR3', 'WR4'],
-        assignments: { 
-            'QB1': 'qb_setup', 'WR1': 'Fly', 'WR2': 'Fly', 'WR3': 'Seam', 'WR4': 'Seam', 
-            'OL1': 'pass_block', 'OL2': 'pass_block', 'OL3': 'pass_block' 
+        assignments: {
+            'QB1': 'qb_setup', 'WR1': 'Fly', 'WR2': 'Fly', 'WR3': 'Seam', 'WR4': 'Seam',
+            'OL1': 'pass_block', 'OL2': 'pass_block', 'OL3': 'pass_block'
         }
     },
     'Spread_Mesh': {
         type: 'pass', tags: ['pass', 'short'],
         readProgression: ['WR1', 'WR2', 'WR3', 'WR4'],
-        assignments: { 
-            'QB1': 'qb_setup', 'WR1': 'Drag', 'WR2': 'Drag', 'WR3': 'In', 'WR4': 'Out', 
-            'OL1': 'pass_block', 'OL2': 'pass_block', 'OL3': 'pass_block' 
+        assignments: {
+            'QB1': 'qb_setup', 'WR1': 'Drag', 'WR2': 'Drag', 'WR3': 'In', 'WR4': 'Out',
+            'OL1': 'pass_block', 'OL2': 'pass_block', 'OL3': 'pass_block'
         }
     },
     'Spread_DoubleMove': {
         type: 'pass', tags: ['pass', 'deep', 'doublemove'],
-        readProgression:['WR1', 'WR2', 'WR3'],
-        assignments: { 
-            'QB1': 'qb_setup', 'WR1': 'PostCorner', 'WR2': 'Sluggo', 'WR3': 'Seam', 'WR4': 'Hitch', 
-            'OL1': 'pass_block', 'OL2': 'pass_block', 'OL3': 'pass_block' 
+        readProgression: ['WR1', 'WR2', 'WR3'],
+        assignments: {
+            'QB1': 'qb_setup', 'WR1': 'PostCorner', 'WR2': 'Sluggo', 'WR3': 'Seam', 'WR4': 'Hitch',
+            'OL1': 'pass_block', 'OL2': 'pass_block', 'OL3': 'pass_block'
         }
     },
 
@@ -370,32 +370,32 @@ export const offensivePlaybook = {
     // ===================================
     'Power_Iso': {
         type: 'run', tags: ['run', 'inside', 'power'],
-        assignments: { 
-            'QB1': 'qb_setup', 'RB1': 'run_inside', 'RB2': 'run_block', 'TE1': 'run_block', 
-            'WR1': 'run_block', 'OL1': 'run_block', 'OL2': 'run_block', 'OL3': 'run_block' 
+        assignments: {
+            'QB1': 'qb_setup', 'RB1': 'run_inside', 'RB2': 'run_block', 'TE1': 'run_block',
+            'WR1': 'run_block', 'OL1': 'run_block', 'OL2': 'run_block', 'OL3': 'run_block'
         }
     },
     'Power_Counter': {
         type: 'run', tags: ['run', 'inside', 'counter'],
-        assignments: { 
-            'QB1': 'qb_setup', 'RB1': 'run_counter', 'RB2': 'run_block', 'TE1': 'run_block', 
-            'WR1': 'run_block', 'OL1': 'run_block', 'OL2': 'run_block', 'OL3': 'run_block' 
+        assignments: {
+            'QB1': 'qb_setup', 'RB1': 'run_counter', 'RB2': 'run_block', 'TE1': 'run_block',
+            'WR1': 'run_block', 'OL1': 'run_block', 'OL2': 'run_block', 'OL3': 'run_block'
         }
     },
     'Power_PA_Leak': {
         type: 'pass', tags: ['pass', 'pa', 'deep'],
         readProgression: ['WR1', 'TE1', 'RB1'],
-        assignments: { 
-            'QB1': 'qb_setup', 'RB2': 'CheckRelease', 'WR1': 'Post', 'TE1': 'Seam', 
-            'RB1': 'Wheel', 'OL1': 'run_block', 'OL2': 'run_block', 'OL3': 'pass_block' 
+        assignments: {
+            'QB1': 'qb_setup', 'RB2': 'CheckRelease', 'WR1': 'Post', 'TE1': 'Seam',
+            'RB1': 'Wheel', 'OL1': 'run_block', 'OL2': 'run_block', 'OL3': 'pass_block'
         }
     },
     'Power_Texas': {
         type: 'pass', tags: ['pass', 'medium', 'middle'],
         readProgression: ['RB1', 'TE1', 'WR1'],
-        assignments: { 
-            'QB1': 'qb_setup', 'RB1': 'Angle', 'RB2': 'Flat', 'TE1': 'Hitch', 
-            'WR1': 'Post', 'OL1': 'pass_block', 'OL2': 'pass_block', 'OL3': 'pass_block' 
+        assignments: {
+            'QB1': 'qb_setup', 'RB1': 'Angle', 'RB2': 'Flat', 'TE1': 'Hitch',
+            'WR1': 'Post', 'OL1': 'pass_block', 'OL2': 'pass_block', 'OL3': 'pass_block'
         }
     },
 
@@ -405,25 +405,25 @@ export const offensivePlaybook = {
     'Trips_Flood': {
         type: 'pass', tags: ['pass', 'medium', 'flood'],
         readProgression: ['WR2', 'WR3', 'RB1'],
-        assignments: { 
-            'QB1': 'qb_setup', 'WR1': 'Fly', 'WR2': 'Out', 'WR3': 'Flat', 
-            'RB1': 'Angle', 'OL1': 'pass_block', 'OL2': 'pass_block', 'OL3': 'pass_block' 
+        assignments: {
+            'QB1': 'qb_setup', 'WR1': 'Fly', 'WR2': 'Out', 'WR3': 'Flat',
+            'RB1': 'Angle', 'OL1': 'pass_block', 'OL2': 'pass_block', 'OL3': 'pass_block'
         }
     },
     'Trips_Stick': {
         type: 'pass', tags: ['pass', 'short', 'quick'],
         readProgression: ['WR3', 'WR2', 'RB1'],
-        assignments: { 
-            'QB1': 'qb_setup', 'WR1': 'Fade', 'WR2': 'QuickOut', 'WR3': 'Hitch', 
-            'RB1': 'Flat', 'OL1': 'pass_block', 'OL2': 'pass_block', 'OL3': 'pass_block' 
+        assignments: {
+            'QB1': 'qb_setup', 'WR1': 'Fade', 'WR2': 'QuickOut', 'WR3': 'Hitch',
+            'RB1': 'Flat', 'OL1': 'pass_block', 'OL2': 'pass_block', 'OL3': 'pass_block'
         }
     },
     'Trips_Bubble_Go': {
-        type: 'pass', tags:['pass', 'deep', 'trick'],
+        type: 'pass', tags: ['pass', 'deep', 'trick'],
         readProgression: ['WR3', 'WR1'],
-        assignments: { 
-            'QB1': 'qb_setup', 'WR1': 'Fly', 'WR2': 'run_block', 'WR3': 'Sluggo', 
-            'RB1': 'Flat', 'OL1': 'pass_block', 'OL2': 'pass_block', 'OL3': 'pass_block' 
+        assignments: {
+            'QB1': 'qb_setup', 'WR1': 'Fly', 'WR2': 'run_block', 'WR3': 'Sluggo',
+            'RB1': 'Flat', 'OL1': 'pass_block', 'OL2': 'pass_block', 'OL3': 'pass_block'
         }
     },
 
@@ -432,26 +432,26 @@ export const offensivePlaybook = {
     // ===================================
     'Empty_AllGo': {
         type: 'pass', tags: ['pass', 'deep', 'hailmary'],
-        readProgression:['WR1', 'WR4', 'WR2', 'WR3'],
-        assignments: { 
-            'QB1': 'qb_setup', 'WR1': 'Fly', 'WR2': 'Seam', 'WR3': 'Seam', 'WR4': 'Fly', 
-            'OL1': 'pass_block', 'OL2': 'pass_block', 'OL3': 'pass_block' 
+        readProgression: ['WR1', 'WR4', 'WR2', 'WR3'],
+        assignments: {
+            'QB1': 'qb_setup', 'WR1': 'Fly', 'WR2': 'Seam', 'WR3': 'Seam', 'WR4': 'Fly',
+            'OL1': 'pass_block', 'OL2': 'pass_block', 'OL3': 'pass_block'
         }
     },
     'Empty_QuickGame': {
         type: 'pass', tags: ['pass', 'short'],
         readProgression: ['WR2', 'WR3', 'WR1', 'WR4'],
-        assignments: { 
-            'QB1': 'qb_setup', 'WR1': 'Hitch', 'WR2': 'Slant', 'WR3': 'Whip', 'WR4': 'Hitch', 
-            'OL1': 'pass_block', 'OL2': 'pass_block', 'OL3': 'pass_block' 
+        assignments: {
+            'QB1': 'qb_setup', 'WR1': 'Hitch', 'WR2': 'Slant', 'WR3': 'Whip', 'WR4': 'Hitch',
+            'OL1': 'pass_block', 'OL2': 'pass_block', 'OL3': 'pass_block'
         }
     },
     'Empty_DoublePost': {
         type: 'pass', tags: ['pass', 'deep', 'middle'],
-        readProgression:['WR2', 'WR3', 'WR1', 'WR4'],
-        assignments: { 
-            'QB1': 'qb_setup', 'WR1': 'Drag', 'WR2': 'Post', 'WR3': 'Post', 'WR4': 'Drag', 
-            'OL1': 'pass_block', 'OL2': 'pass_block', 'OL3': 'pass_block' 
+        readProgression: ['WR2', 'WR3', 'WR1', 'WR4'],
+        assignments: {
+            'QB1': 'qb_setup', 'WR1': 'Drag', 'WR2': 'Post', 'WR3': 'Post', 'WR4': 'Drag',
+            'OL1': 'pass_block', 'OL2': 'pass_block', 'OL3': 'pass_block'
         }
     },
 
@@ -459,15 +459,15 @@ export const offensivePlaybook = {
     'Punt_Punt': {
         type: 'punt', tags: ['specialTeams'],
         readProgression: [],
-        assignments: { 
-            'QB1': 'punt', 
-            'WR1': 'Fly', 
-            'WR2': 'Fly', 
-            'OL1': 'pass_block', 
-            'OL2': 'pass_block', 
-            'OL3': 'pass_block', 
+        assignments: {
+            'QB1': 'punt',
+            'WR1': 'Fly',
+            'WR2': 'Fly',
+            'OL1': 'pass_block',
+            'OL2': 'pass_block',
+            'OL3': 'pass_block',
             'RB1': 'pass_block',
-            'TE1': 'pass_block' 
+            'TE1': 'pass_block'
         }
     }
 };
@@ -476,17 +476,17 @@ export const offensivePlaybook = {
 export const defenseFormations = {
     '3-2-3': {
         name: '3-2-3 (Base)',
-        slots:['DL1', 'DL2', 'DL3', 'LB1', 'LB2', 'DB1', 'DB2', 'DB3'],
+        slots: ['DL1', 'DL2', 'DL3', 'LB1', 'LB2', 'DB1', 'DB2', 'DB3'],
         personnel: { DL: 3, LB: 2, DB: 3 },
-        coordinates: { 
+        coordinates: {
             DL1: [-2.8, 1.0], // 5-Tech (Outside edge of Tackle)
-            DL2:[0, 1.0],    // 0-Tech (Nose Tackle)
-            DL3:[2.8, 1.0], 
+            DL2: [0, 1.0],    // 0-Tech (Nose Tackle)
+            DL3: [2.8, 1.0],
             LB1: [-3.5, 4.5], // Moved down to fill gaps
-            LB2:[3.5, 4.5],
-            DB1: [-14, 7.0], 
-            DB2:[14, 7.0], 
-            DB3: [0, 12.0] 
+            LB2: [3.5, 4.5],
+            DB1: [-14, 7.0],
+            DB2: [14, 7.0],
+            DB3: [0, 12.0]
         },
         slotPriorities: {
             'DL1': { strength: 3, blockShedding: 3 },
@@ -499,19 +499,19 @@ export const defenseFormations = {
             'DB3': { agility: 3, playbookIQ: 3, tackling: 2 } // Safety
         }
     },
-    
+
     '2-3-3': {
         name: '2-3-3 (Nickel)',
-        slots:['DL1', 'DL2', 'LB1', 'LB2', 'LB3', 'DB1', 'DB2', 'DB3'],
+        slots: ['DL1', 'DL2', 'LB1', 'LB2', 'LB3', 'DB1', 'DB2', 'DB3'],
         personnel: { DL: 2, LB: 3, DB: 3 },
-        coordinates: { 
-            DL1:[-1.5, 1.0], // 3-Tech (Over Guards)
-            DL2:[1.5, 1.0], 
-            LB1: [-4.0, 4.5], 
+        coordinates: {
+            DL1: [-1.5, 1.0], // 3-Tech (Over Guards)
+            DL2: [1.5, 1.0],
+            LB1: [-4.0, 4.5],
             LB2: [0, 4.5],    // Middle Linebacker
-            LB3: [4.0, 4.5], 
-            DB1: [-15, 7.0], 
-            DB2:[15, 7.0],
+            LB3: [4.0, 4.5],
+            DB1: [-15, 7.0],
+            DB2: [15, 7.0],
             DB3: [0, 12.0]
         },
         slotPriorities: {
@@ -527,23 +527,23 @@ export const defenseFormations = {
     },
     '4-2-2': {
         name: '4-2-2 (Run Stop)',
-        slots:['DL1', 'DL2', 'DL3', 'DL4', 'LB1', 'LB2', 'DB1', 'DB2'],
+        slots: ['DL1', 'DL2', 'DL3', 'DL4', 'LB1', 'LB2', 'DB1', 'DB2'],
         personnel: { DL: 4, LB: 2, DB: 2 },
-        coordinates: { 
+        coordinates: {
             DL1: [-3.0, 1.0], // End
             DL2: [-1.0, 1.0], // Tackle (A/B Gap)
             DL3: [1.0, 1.0],  // Tackle (A/B Gap)
             DL4: [3.0, 1.0],  // End
             LB1: [-2.5, 4.0], // Aggressive downhill depth
-            LB2:[2.5, 4.0], 
+            LB2: [2.5, 4.0],
             DB1: [-12, 8.0],
             DB2: [12, 8.0]
         },
         slotPriorities: {
-            'DL1': { strength: 3, blockShedding: 3, weight: 2},
+            'DL1': { strength: 3, blockShedding: 3, weight: 2 },
             'DL2': { strength: 3, blockShedding: 2, weight: 3 },
             'DL3': { strength: 3, blockShedding: 2, weight: 3 },
-            'DL4': { strength: 3, blockShedding: 3, weight: 2 }, 
+            'DL4': { strength: 3, blockShedding: 3, weight: 2 },
             'LB1': { tackling: 3, speed: 2, playbookIQ: 2 },
             'LB2': { tackling: 3, speed: 2, playbookIQ: 2 },
             'DB1': { speed: 3, catchingHands: 2, playbookIQ: 3 },
@@ -552,40 +552,40 @@ export const defenseFormations = {
     },
     '4-1-3': {
         name: '4-1-3 (Dime/Prevent)',
-        slots:['DL1', 'DL2', 'DL3', 'DL4', 'LB1', 'DB1', 'DB2', 'DB3'],
+        slots: ['DL1', 'DL2', 'DL3', 'DL4', 'LB1', 'DB1', 'DB2', 'DB3'],
         personnel: { DL: 4, LB: 1, DB: 3 },
-        coordinates: { 
-            DL1: [-3.5, 1.0], 
-            DL2: [-1.5, 1.0], 
-            DL3:[1.5, 1.0], 
-            DL4: [3.5, 1.0], 
+        coordinates: {
+            DL1: [-3.5, 1.0],
+            DL2: [-1.5, 1.0],
+            DL3: [1.5, 1.0],
+            DL4: [3.5, 1.0],
             LB1: [0, 4.5],
-            DB1: [-14, 7.0], 
-            DB2: [14, 7.0], 
-            DB3:[0, 12.0] 
+            DB1: [-14, 7.0],
+            DB2: [14, 7.0],
+            DB3: [0, 12.0]
         },
         slotPriorities: {
-            'DL1': { strength: 3, blockShedding: 3, weight: 2},
+            'DL1': { strength: 3, blockShedding: 3, weight: 2 },
             'DL2': { strength: 3, blockShedding: 2, weight: 3 },
             'DL3': { strength: 3, blockShedding: 2, weight: 3 },
-            'DL4': { strength: 3, blockShedding: 3, weight: 2 }, 
+            'DL4': { strength: 3, blockShedding: 3, weight: 2 },
             'LB1': { tackling: 3, speed: 2, playbookIQ: 2 },
             'DB1': { speed: 3, catchingHands: 2, playbookIQ: 2 },
             'DB2': { speed: 3, catchingHands: 2, playbookIQ: 2 },
             'DB3': { speed: 3, catchingHands: 2, playbookIQ: 3 } // Safety,
         }
-    },    
+    },
     'Punt_Return': {
         name: 'Punt Return',
-        slots:['DL1', 'DL2', 'LB1', 'LB2', 'DB1', 'DB2', 'DB3', 'DB4'],
+        slots: ['DL1', 'DL2', 'LB1', 'LB2', 'DB1', 'DB2', 'DB3', 'DB4'],
         // ...
-        coordinates: { 
-            DL1:[-1.5, 1.0],
-            DL2: [1.5, 1.0], 
+        coordinates: {
+            DL1: [-1.5, 1.0],
+            DL2: [1.5, 1.0],
             LB1: [-4.0, 4.0],
-            LB2:[4.0, 4.0], 
+            LB2: [4.0, 4.0],
             DB1: [-12, 10.0],
-            DB2:[12, 10.0], 
+            DB2: [12, 10.0],
             // 💡 FIX: Standard punts travel 45-55 yards. 
             // These offsets are relative to the LOS (Line of Scrimmage).
             DB3: [0, 48.0],  // Main Returner 
@@ -594,15 +594,15 @@ export const defenseFormations = {
     },
     '3-1-4': {
         name: '3-1-4 (Nickel Hybrid)',
-        slots:['DL1', 'DL2', 'DL3', 'LB1', 'DB1', 'DB2', 'DB3', 'DB4'],
+        slots: ['DL1', 'DL2', 'DL3', 'LB1', 'DB1', 'DB2', 'DB3', 'DB4'],
         personnel: { DL: 3, LB: 1, DB: 4 },
         coordinates: {
-            DL1:[-2.8, 1.0], 
-            DL2: [0, 1.0], 
-            DL3:[2.8, 1.0],
+            DL1: [-2.8, 1.0],
+            DL2: [0, 1.0],
+            DL3: [2.8, 1.0],
             LB1: [0, 4.5],
             DB1: [-14, 7.0],
-            DB2:[14, 7.0], 
+            DB2: [14, 7.0],
             DB3: [-5.0, 5.0], // Slot DB playing close
             DB4: [5.0, 5.0]
         },
@@ -619,14 +619,14 @@ export const defenseFormations = {
     },
     '3-0-5': {
         name: '3-0-5 (Dime)',
-        slots:['DL1', 'DL2', 'DL3', 'DB1', 'DB2', 'DB3', 'DB4', 'DB5'],
+        slots: ['DL1', 'DL2', 'DL3', 'DB1', 'DB2', 'DB3', 'DB4', 'DB5'],
         personnel: { DL: 3, LB: 0, DB: 5 },
         coordinates: {
             'DL1': [-2.8, 1.0],
             'DL2': [0, 1.0],
-            'DL3':[2.8, 1.0],
+            'DL3': [2.8, 1.0],
             'DB1': [-15, 7.0],
-            'DB2':[15, 7.0],
+            'DB2': [15, 7.0],
             'DB3': [-5.0, 5.0],
             'DB4': [5.0, 5.0],
             'DB5': [0, 12.0]
@@ -708,7 +708,7 @@ export const defensivePlaybook = {
     },
     'Cover_2_Hard_Flat': {
         name: 'Cover 2 Hard Flat', concept: 'Zone', blitz: false,
-        compatibleFormations:['4-2-2'],
+        compatibleFormations: ['4-2-2'],
         tags: ['zone', 'cover2', 'safeZone'],
         assignments: {
             'DL1': 'pass_rush', 'DL2': 'pass_rush', 'DL3': 'pass_rush', 'DL4': 'pass_rush',
@@ -784,7 +784,7 @@ export const defensivePlaybook = {
         tags: ['prevent', 'zone'],
         assignments: {
             'DL1': 'spy_QB', 'DL2': 'pass_rush', 'DL3': 'spy_QB',
-            'DB1': 'zone_deep_half_left', 'DB2': 'zone_deep_half_right', 
+            'DB1': 'zone_deep_half_left', 'DB2': 'zone_deep_half_right',
             'DB3': 'zone_deep_middle', 'DB4': 'zone_deep_third_left', 'DB5': 'zone_deep_third_right'
         }
     },
@@ -794,7 +794,7 @@ export const defensivePlaybook = {
         tags: ['man', 'cover1'],
         assignments: {
             'DL1': 'pass_rush', 'DL2': 'pass_rush', 'DL3': 'pass_rush',
-            'DB1': 'man_cover_WR1', 'DB2': 'man_cover_WR2', 'DB3': 'man_cover_WR3', 
+            'DB1': 'man_cover_WR1', 'DB2': 'man_cover_WR2', 'DB3': 'man_cover_WR3',
             'DB4': 'man_cover_WR4', 'DB5': 'zone_deep_middle'
         }
     },
@@ -815,7 +815,7 @@ export const defensivePlaybook = {
 };
 
 // --- COACH PERSONALITIES ---
-export const coachPersonalities =[
+export const coachPersonalities = [
     { type: 'West Coast Offense', preferredOffense: 'Spread', preferredDefense: '3-2-3', attributePreferences: { physical: { speed: 1.4 }, mental: { playbookIQ: 1.6 }, technical: { throwingAccuracy: 1.8 } } },
     { type: 'Ground and Pound', preferredOffense: 'Power', preferredDefense: '4-2-2', attributePreferences: { physical: { strength: 1.8 }, mental: { toughness: 1.5 }, technical: { blocking: 1.8 } } },
     { type: 'Blitz-Happy Defense', preferredOffense: 'Balanced', preferredDefense: '4-2-2', attributePreferences: { physical: { speed: 1.6 }, mental: { clutch: 1.4 }, technical: { tackling: 1.8 } } },
