@@ -4138,7 +4138,7 @@ function executeThrow(qbState, target, strength, accuracy, playState, gameLog, a
     const isForwardPass = target.y > qbState.y || (Math.abs(target.y - qbState.y) < 0.5 && target.y > qbState.y - 2);
 
     if (hasQBCrossedLine && isForwardPass) {
-        if (gameLog) gameLog.push(`🚫 ILLEGAL FORWARD PASS: ${qbState.name} crossed the line at y=${qbState.y.toFixed(1)} < LOS=${playState.lineOfScrimmage}`);
+        if (gameLog) gameLog.push(`🚫 ILLEGAL FORWARD PASS: ${qbState.name} crossed the line!`);
         playState.ballState.inAir = false;
         playState.ballState.throwInitiated = false;
         qbState.hasBall = true;
@@ -4147,154 +4147,145 @@ function executeThrow(qbState, target, strength, accuracy, playState, gameLog, a
 
     const startX = qbState.x;
     const startY = qbState.y;
+    const throwDistance = Math.hypot(target.x - startX, target.y - startY);
 
-    const throwDistance = Math.sqrt((target.x - startX) ** 2 + (target.y - startY) ** 2);
-
-    // REAL WORLD MATH: 
-    // High School Elite (99 str): 52mph = ~25.5 yds/sec
-    // High School Avg (50 str): 42mph = ~20 yds/sec
-    // High School Weak (0 str): 30mph = ~14.5 yds/sec
-    const maxArmVelocity = 14.5 + (strength / 100) * 11.0;
-
-    // Trajectory adjustment: Deep throws require arc (loft), which slows horizontal velocity.
-    // Short throws (< 15 yds) are thrown on a frozen rope (fast).
-    let ballSpeed = maxArmVelocity;
-    if (throwDistance > 15) {
-        // Deep balls take longer to arrive because they travel upwards into the air
-        ballSpeed = maxArmVelocity * Math.max(0.65, 1.0 - (throwDistance / 100));
+    // --- 1. DETERMINE PASS TYPE ---
+    let passType = 'touch'; // Default medium arc
+    const assignment = target.assignment || '';
+    
+    // Bullet: Short throws or quick breaking routes
+    if (throwDistance < 12 ||['Slant', 'Drag', 'Curl', 'Hitch', 'Quick'].some(r => assignment.includes(r))) {
+        passType = 'bullet';
+    } 
+    // Lob: Deep bombs or vertical routes
+    else if (throwDistance > 25 || ['Fly', 'Go', 'Streak', 'Post'].some(r => assignment.includes(r))) {
+        passType = 'lob';
     }
+
+    // --- 2. CALCULATE BALL SPEED ---
+    // 99 Str = ~30 yds/sec (61 mph). 50 Str = ~23 yds/sec.
+    const maxArmVelocity = 16 + (strength / 100) * 14.0; 
+    
+    let ballSpeed = maxArmVelocity;
+    if (passType === 'lob') ballSpeed *= 0.70; // High arc, travels slower horizontally
+    else if (passType === 'touch') ballSpeed *= 0.85; // Medium arc
+    // Bullet uses 100% of maxArmVelocity
 
     let aimX = target.x;
     let aimY = target.y;
 
-    // 💡 NEW: Route-Aware Lead Calculation
-    if (target.action === 'run_route' && target.routePath) {
-        const distToTarget = Math.sqrt((target.x - startX) ** 2 + (target.y - startY) ** 2);
-        const estTime = distToTarget / ballSpeed;
+    // --- 3. ROUTE-AWARE LEAD CALCULATION (Fixes the Underthrow) ---
+    if (target.action === 'run_route' && target.routePath && target.routePath.length > 0) {
+        const estTime = throwDistance / ballSpeed;
+        const qbIQ = qbState.iq || 50;
+        
+        // Smart QBs lead better. Lob passes get extra lead so the WR can run under it.
+        let leadFactor = 0.85 + (qbIQ / 400);
+        if (passType === 'lob') leadFactor += 0.25; 
 
-        const qbIQ = qbState.playbookIQ || 50;
-        const leadFactor = 0.75 + (qbIQ / 400); // Smart QBs lead more accurately
-
-        // Estimate receiver's speed in yards per second (approx 6-9 yps based on Madden scale)
-        const receiverYPS = 5.0 + ((target.speed || 50) / 25);
+        // Receiver speed in yards per second
+        const receiverYPS = 5.0 + ((target.spd || 50) / 25);
         let distanceToTravel = receiverYPS * estTime * leadFactor;
 
         let currX = target.x;
         let currY = target.y;
+        let lastValidDirX = 0;
+        let lastValidDirY = 1; // Default to straight downfield
 
-        // Trace the receiver's future steps along their specific route tree
+        // Trace the receiver's route path
         for (let i = target.currentPathIndex; i < target.routePath.length; i++) {
             const nextNode = target.routePath[i];
-            const distToNext = Math.hypot(nextNode.x - currX, nextNode.y - currY);
+            const dx = nextNode.x - currX;
+            const dy = nextNode.y - currY;
+            const distToNext = Math.hypot(dx, dy);
+
+            // Save the direction they are running
+            if (distToNext > 0.1) {
+                lastValidDirX = dx / distToNext;
+                lastValidDirY = dy / distToNext;
+            }
 
             if (distanceToTravel > distToNext) {
-                // The receiver will pass this cut before the ball arrives, keep tracing
                 distanceToTravel -= distToNext;
                 currX = nextNode.x;
                 currY = nextNode.y;
             } else {
-                // The ball will arrive on this specific segment of the route
                 const ratio = distanceToTravel / distToNext;
-                aimX = currX + (nextNode.x - currX) * ratio;
-                aimY = currY + (nextNode.y - currY) * ratio;
+                aimX = currX + dx * ratio;
+                aimY = currY + dy * ratio;
                 distanceToTravel = 0;
                 break;
             }
         }
 
-        // If they run out of route before the ball arrives, just aim at the final node
+        // 💡 THE UNDERTHROW FIX: Extrapolate if they run out of drawn route!
+        // If the receiver is running deep and the route array runs out, we project 
+        // the target point forward along their current trajectory into open space.
         if (distanceToTravel > 0) {
-            aimX = currX;
-            aimY = currY;
+            aimX = currX + (lastValidDirX * distanceToTravel);
+            aimY = currY + (lastValidDirY * distanceToTravel);
         }
-
-    } else if (target.action === 'run_path' || target.action === 'qb_scramble') {
-        // Fallback for unstructured running (scrambles, checkdowns)
-        const dist = Math.sqrt((target.x - startX) ** 2 + (target.y - startY) ** 2);
-        const estTime = dist / ballSpeed;
-        const vx = target.vx || 0;
-        const vy = target.vy || 0;
-        aimX += vx * estTime;
-        aimY += vy * estTime;
+        
+    } else {
+        // Scramble / Freestyle / Checkdown leading
+        const estTime = throwDistance / ballSpeed;
+        aimX += (target.vx || 0) * estTime;
+        aimY += (target.vy || 0) * estTime;
     }
 
-    // 💡 NEW: Skill-Mitigated Distance Accuracy
-    // Accurate QBs "flatten the curve" of distance-based errors.
-    // distancePower: 1.5 for bad QBs (exponential growth), 0.5 for elite (negligible growth)
+    // --- 4. ACCURACY ERRORS ---
     const distancePower = 1.5 - (accuracy / 100);
     const distanceFactor = Math.pow(throwDistance / 25, distancePower);
+    let errorMargin = ((100 - accuracy) / 12) * distanceFactor;
 
-    // Base error is reduced significantly by accuracy stat
-    let baseErrorMargin = ((100 - accuracy) / 12) * distanceFactor;
+    if (playState.isPressured) errorMargin *= (2.0 - (qbState.iq / 100));
 
-    // Pressure/Panic Modifier (Mitigated by IQ)
-    if (playState.isPressured || qbState.action === 'qb_scramble') {
-        const iqMitigation = (qbState.playbookIQ || 50) / 100;
-        const panicFactor = 2.0 - iqMitigation; // High IQ = 1.0x (no panic), Low IQ = 2.0x (double error)
-        baseErrorMargin *= panicFactor;
-    }
-
-    // Directional Vector Math (Longitudinal vs Lateral)
     const dirX = aimX - startX;
     const dirY = aimY - startY;
-    const mag = Math.max(0.1, Math.sqrt(dirX * dirX + dirY * dirY));
-    const unitX = dirX / mag;
-    const unitY = dirY / mag;
+    const mag = Math.max(0.1, Math.hypot(dirX, dirY));
+    const uX = dirX / mag;
+    const uY = dirY / mag;
 
-    // Longitudinal Error (Overthrow/Underthrow) - Realism: Most misses are deep
-    const longBias = (Math.random() > 0.3) ? 1.3 : -0.7;
-    const longError = (Math.random() * baseErrorMargin) * longBias;
+    // Bias towards overthrowing rather than underthrowing deep balls
+    const longBias = (Math.random() > 0.3) ? 1.4 : -0.6;
+    const longError = (Math.random() * errorMargin) * longBias;
+    const latError = (Math.random() - 0.5) * errorMargin * 1.2;
 
-    // Lateral Error (Left/Right)
-    const latError = (Math.random() - 0.5) * baseErrorMargin * 1.2;
+    aimX += (uX * longError) + (-uY * latError);
+    aimY += (uY * longError) + (uX * latError);
 
-    // Apply corrected coordinates
-    aimX += (unitX * longError) + (-unitY * latError);
-    aimY += (unitY * longError) + (unitX * latError);
+    // Clamp to field loosely
+    aimX = Math.max(-5, Math.min(FIELD_WIDTH + 5, aimX));
+    aimY = Math.max(-5, Math.min(FIELD_LENGTH + 10, aimY));
 
-    // 💡 FIX: Move the Log here! Now aimX, aimY, and throwDistance actually exist.
-    if (gameLog) {
-        const releaseX = startX.toFixed(1);
-        const releaseY = startY.toFixed(1);
-        const targetXStr = aimX.toFixed(1);
-        const targetYStr = aimY.toFixed(1);
-        const distStr = throwDistance.toFixed(1);
+    // --- 5. FINALIZE PHYSICS ---
+    const finalDist = Math.hypot(aimX - startX, aimY - startY);
+    const t = Math.max(0.1, finalDist / ballSpeed);
 
-        // Added ${target.role} before the target name
-        gameLog.push(`[Tick ${playState.tick}] 🏈 ${qbState.name} throws from (${releaseX}, ${releaseY}) to target ${target.role} ${target.name} (${targetXStr}, ${targetYStr}) | Air Dist: ${distStr}y | (${actionType})`);
-    }
+    // Calculate Z Velocity (Arc) based on Pass Type
+    let baseZ = 0;
+    if (passType === 'bullet') baseZ = -0.5; // Flat rope
+    else if (passType === 'touch') baseZ = -0.1; // Moderate arc
+    else baseZ = 0.5; // High lob
+    
+    const vz = (baseZ + (4.9 * t * t)) / t;
 
-    // Physics
-    const dx = aimX - startX;
-    const dy = aimY - startY;
-    const dist = Math.sqrt(dx * dx + dy * dy);
-    const t = Math.max(0.1, dist / ballSpeed);
+    playState.ballState = {
+        x: startX, y: startY, z: 1.8, inAir: true, throwTick: playState.tick, releaseeTick: playState.tick,
+        vx: (aimX - startX) / t, vy: (aimY - startY) / t, vz: vz,
+        targetX: aimX, targetY: aimY, targetPlayerId: target.id, throwerId: qbState.id, isThrowAway: false
+    };
 
-    playState.ballState.inAir = true;
-    playState.ballState.throwInitiated = true;
-    playState.ballState.throwerId = qbState.id;
-    playState.ballState.targetPlayerId = target.id;
-    playState.ballState.throwTick = playState.tick;   // Track when thrown
-
-    playState.ballState.releaseeTick = playState.tick;   // For safety/help timing
-
-    playState.ballState.x = startX;
-    playState.ballState.y = startY;
-    playState.ballState.z = 1.8;
-
-    playState.ballState.vx = dx / t;
-    playState.ballState.vy = dy / t;
-    playState.ballState.vz = (-0.3 + (4.9 * t * t)) / t; // Arc math
-    playState.ballState.targetX = aimX;
-    playState.ballState.targetY = aimY;
-
-    qbState.hasBall = false;
+    qbState.hasBall = false; 
     qbState.isBallCarrier = false;
-    qbState.action = 'idle'; // FIX: Reset QB action so they don't keep running
-
-    // FIX: Log the Pass Attempt
+    qbState.action = 'idle';
+    
     playState.statEvents.push({ type: 'pass_attempt', qbId: qbState.id });
 
+    if (gameLog) {
+        const passTypeStr = passType.charAt(0).toUpperCase() + passType.slice(1);
+        gameLog.push(`[Tick ${playState.tick}] 🏈 ${qbState.name} throws a ${passTypeStr} to ${target.name} | Air Dist: ${finalDist.toFixed(1)}y`);
+    }
 }
 
 /**
