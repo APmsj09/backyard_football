@@ -3189,10 +3189,11 @@ function checkTackleCollisions(playState, gameLog) {
     const carrier = playState.activePlayers.find(p => p.hasBall && !playState.ballState.isLoose);
     if (!carrier) return false;
 
-    // 2. Identify Defense (Use the pre-filtered team if available, or filter now)
-    const defenseTeam = playState.activePlayers.filter(p => !p.isOffense);
+    // 2. Identify Defense 
+    // 💡 FIX: Dynamically target whoever is NOT on the carrier's team (fixes punt return friendly-fire)
+    const tacklingTeam = playState.activePlayers.filter(p => p.isOffense !== carrier.isOffense);
 
-    const defenders = defenseTeam.filter(p => {
+    const defenders = tacklingTeam.filter(p => {
         if (p.stunnedTicks > 0) return false;
 
         // --- OPTIMIZATION: Use cached distance from the start of the tick ---
@@ -3232,8 +3233,9 @@ function checkTackleCollisions(playState, gameLog) {
 
         // 💡 NEW: Contact Avoidance Mechanics (Before Tackle Attempt)
         // Runners can attempt to dodge/hurdle/stiff-arm within 1.5 yards
-        if (distance < 1.5) {
-            const canPerformMove = !carrier.moveCooldown || carrier.moveCooldown <= 0;
+         if (distance < 1.5) {
+            // 💡 FIX: QBs cannot juke/hurdle while actively trying to hand the ball off
+            const canPerformMove = (!carrier.moveCooldown || carrier.moveCooldown <= 0) && carrier.action !== 'handoff_setup';
 
             if (canPerformMove) {
                 const roll = Math.random();
@@ -4265,14 +4267,16 @@ function executeThrow(qbState, target, strength, accuracy, playState, gameLog, a
 
     // Calculate Z Velocity (Arc) based on Pass Type
     let baseZ = 0;
-    if (passType === 'bullet') baseZ = -0.5; // Flat rope
-    else if (passType === 'touch') baseZ = -0.1; // Moderate arc
-    else baseZ = 0.5; // High lob
+    // 💡 FIX: Give passes a slight upward push so they clear the D-Line helmets
+    if (passType === 'bullet') baseZ = 0.5; // Flat rope, but pushes upward initially
+    else if (passType === 'touch') baseZ = 1.2; // Moderate arc
+    else baseZ = 3.0; // High lob
 
     const vz = (baseZ + (4.9 * t * t)) / t;
 
     playState.ballState = {
-        x: startX, y: startY, z: 1.8, inAir: true, throwTick: playState.tick, releaseeTick: playState.tick,
+        // 💡 FIX: QB release height raised to 2.2 yards (~6'6") to represent arm extension
+        x: startX, y: startY, z: 2.2, inAir: true, throwTick: playState.tick, releaseeTick: playState.tick,
         vx: (aimX - startX) / t, vy: (aimY - startY) / t, vz: vz,
         targetX: aimX, targetY: aimY, targetPlayerId: target.id, throwerId: qbState.id, isThrowAway: false
     };
@@ -4531,8 +4535,10 @@ function handleBallArrival(playState, carrier, playResult, gameLog) {
         // 💡 FIX: Point-Blank Penalty. If the ball was just thrown (< 10 ticks / 0.5s ago), 
         // it's incredibly hard for a DL to react and get their hands up in time.
         const ticksInAir = playState.tick - (ball.throwTick || 0);
-        if (ticksInAir < 10 && isDefense && playState.type === 'pass') {
-            catchScore -= 60; // Massive penalty for reaction time
+        if (ticksInAir < 15 && isDefense && playState.type === 'pass') {
+            // 💡 FIX: DLs almost never swat bullets right out of the QB's hand unless very lucky
+            if (bestCandidate.role === 'DL') catchScore -= 120; 
+            else catchScore -= 60;
         }
 
         if (Math.random() * 100 < catchScore) {
@@ -5805,7 +5811,9 @@ function determineDefensiveFormation(defense, offenseFormationName, down, yardsT
             return pickMax(v => (v.personnel?.DB || 0)) || coachPref || Object.keys(defenseFormations)[0];
         }
 
-        if (heavyCount >= 2) {
+        // 💡 FIX: Require 3 "Heavy" players (e.g., 2 TE + 1 RB) OR specifically 2 RBs to trigger a heavy front.
+        // 1 RB + 1 TE is standard balanced offense.
+        if (heavyCount >= 3 || personnel.RB >= 2) {
             // POWER (2 RBs) -> Heavy Front
             const heavy = pickMax(v => (v.personnel?.DL || 0) + (v.personnel?.LB || 0));
             return heavy || coachPref || Object.keys(defenseFormations)[0];

@@ -2310,7 +2310,7 @@ function drawFieldVisualization(frameData) {
             const py = toScreenY(p.x);  // p.x is field width (0-53.3)
 
             // PLAYER SIZE scaled for visibility
-            const radius = ppY * 1.3;
+            const radius = ppY * 0.9;
 
             // Deep shadow (larger, darker, under the player for depth) 
             ctx.fillStyle = "rgba(0,0,0,0.5)";
@@ -2416,7 +2416,7 @@ function drawFieldVisualization(frameData) {
         const bz = frameData.ball.z || 0;
 
         // Ball gets bigger as it goes higher (Pseudo-3D)
-        const ballRadius = ppY * 0.5 * (1 + bz * 0.15);
+        const ballRadius = ppY * 0.35 * (1 + bz * 0.15);
 
         // Deep shadow (stays on ground, fades with height) - more pronounced
         const shadowOffset = bz * ppY * 0.8;
