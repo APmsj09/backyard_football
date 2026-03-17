@@ -4452,7 +4452,7 @@ function handleBallArrival(playState, carrier, playResult, gameLog) {
 
         // 💡 NEW: Realistic Dynamic Catch Radius & Vertical Reach based on Physical Height
         // PERFORMANCE MAPPING: Look for the top-level 'hgt' or 'height' first before digging into objects
-        let playerHeight = p.hgt || p.height || 70; 
+        let playerHeight = p.hgt || p.height || 70;
         if (!p.hgt && !p.height) {
             if (p.attributes?.physical?.height) {
                 playerHeight = p.attributes.physical.height;
@@ -4530,7 +4530,7 @@ function handleBallArrival(playState, carrier, playResult, gameLog) {
 
         // 💡 FIX: Re-balanced Catching Odds
         let catchScore = (catching * 0.60) + (agility * 0.20) + 35; // Increased base floor significantly
-        
+
         // 💡 FIX: Massive penalty for DBs so they don't catch 80% of jump balls. Forces them to Swat instead.
         if (isDefense) catchScore -= 80;
         if (playersInRange.length > 1) catchScore -= 10;
@@ -4569,7 +4569,7 @@ function handleBallArrival(playState, carrier, playResult, gameLog) {
             // --- FULL PUNT LOGIC RESTORED ---
             if (playState.type === 'punt' && !bestCandidate.isOffense) {
                 pushLog(`[Tick ${playState.tick}] 🏈 ${bestCandidate.name} catches the punt! Return started.`);
-                playState.possessionChanged = true; 
+                playState.possessionChanged = true;
                 playState.returnStartY = bestCandidate.y;
                 playState.activePlayers.forEach(p => { if (p.id !== bestCandidate.id) p.action = 'pursuit'; });
                 return;
@@ -4582,9 +4582,9 @@ function handleBallArrival(playState, carrier, playResult, gameLog) {
 
             if (isDefense) {
                 pushLog(`[Tick ${playState.tick}] ❗ INTERCEPTION! ${bestCandidate.role} ${bestCandidate.name} at (${actionX}, ${actionY}) | Gain: ${yardage}y`);
-                playState.interceptionOccurred = true; 
+                playState.interceptionOccurred = true;
                 playState.possessionChanged = true;
-                playState.turnover = true; 
+                playState.turnover = true;
                 playState.returnStartY = bestCandidate.y;
                 playState.statEvents.push({ type: 'interception', interceptorId: bestCandidate.id, throwerId: ball.throwerId });
                 return;
@@ -5026,10 +5026,14 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
             if (!playState.playIsLive) break;
 
             // C. HANDOFF LOGIC (Optimized with pre-mapped qb1/rb1)
+
             if (playState.handoffRequired && !playState.handoffOccurred) {
                 if (qb1 && rb1) {
-                    const meshX = qb1.initialX + (rb1.initialX > qb1.initialX ? 1.5 : -1.5);
-                    const meshY = playState.lineOfScrimmage - 1.2;
+
+                    const qbDepth = playState.lineOfScrimmage - qb1.initialY;
+                    const meshX = qb1.initialX + (rb1.initialX > qb1.initialX ? 1.2 : -1.2);
+                    const meshY = qb1.initialY + 0.8; // Meet the QB where he is!
+
 
                     if (playState.tick < 24) {
                         qb1.targetX = meshX;
@@ -5044,7 +5048,7 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
                         // Use cached distance to save a function call
                         const dx = qb1.x - rb1.x;
                         const dy = qb1.y - rb1.y;
-                        const dist = Math.sqrt(dx * dx + dy * dy);
+                        const dist = getDistance(qb1, rb1);
 
                         if (dist < 1.5 || playState.tick >= 28) {
                             qb1.hasBall = false;
@@ -5053,8 +5057,10 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
                             rb1.isBallCarrier = true;
                             playState.handoffOccurred = true;
 
-                            qb1.targetX = qb1.initialX + (rb1.initialX > qb1.initialX ? -5 : 5);
-                            qb1.targetY = qb1.y - 2;
+                            // QB carries out a fake to the side AWAY from the RB
+                            const fakeDir = (rb1.initialX > qb1.initialX) ? -1 : 1;
+                            qb1.targetX = qb1.initialX + (fakeDir * 5);
+                            qb1.targetY = qb1.y - 1;
                             qb1.action = 'run_fake';
 
                             if (gameLog) pushGameLog(gameLog, `[Tick ${playState.tick}] 🏈 Handoff mesh complete to ${rb1.name}`);
