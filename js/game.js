@@ -2803,7 +2803,6 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                 const reactionDelay = Math.max(2, 12 - Math.floor(iq / 10));
 
                 if (flightTime > reactionDelay) {
-                    const ballPos = playState.ballState;
                     if (ballPos.isThrowAway) {
                         pState.action = 'idle';
                         pState.targetX = pState.x; pState.targetY = pState.y;
@@ -4545,28 +4544,22 @@ function handleBallArrival(playState, carrier, playResult, gameLog) {
                 const last = ball.lastInteraction;
                 if (!(last && last.playerId === bestCandidate.id && (playState.tick - last.tick) <= 5)) {
 
-                    // 💡 FIX: Defenders don't automatically swat if they miss an INT. They must roll for it!
-                    const swatChance = (catching * 0.6) + (agility * 0.4) + 25; // Boosted swat chance to compensate for fewer INTs
-                    if (Math.random() * 100 > swatChance) {
-                        return; // DB whiffed the swat! Let the ball continue to the receiver
-                    }
+                    const swatChance = (catching * 0.6) + (agility * 0.4) + 25;
+                    if (Math.random() * 100 > swatChance) return;
 
                     ball.tipCount = (ball.tipCount || 0) + 1;
                     const isTip = (Math.random() < 0.25) && ball.tipCount < 3;
 
-                    const hndEff = Math.round(catching * bestCandidate.fatigueModifier);
-                    const fatPct = Math.round(bestCandidate.fatigueModifier * 100);
-
                     if (isTip) {
                         pushLog(`[Tick ${playState.tick}] 🖐️ ${bestCandidate.name} tips pass! (Hands: ${hndEff}, Energy: ${fatPct}%)`);
-                        ball.vz = 3.0 + (Math.random() * 2); // Pops up
-                        ball.vx += (Math.random() - 0.5) * 6; // Wild lateral deflection
+                        ball.vz = 3.0 + (Math.random() * 2);
+                        ball.vx += (Math.random() - 0.5) * 6;
                         ball.vy += (Math.random() - 0.5) * 6;
                         ball.lastInteraction = { tick: playState.tick, playerId: bestCandidate.id, type: 'tip' };
                     } else {
                         pushLog(`[Tick ${playState.tick}] 🚫 ${bestCandidate.name} swats the pass away! (Hands: ${hndEff}, Energy: ${fatPct}%)`);
-                        ball.vz = -8.0; // Spikes into the turf
-                        ball.vx *= 0.3; // Kills forward momentum
+                        ball.vz = -8.0;
+                        ball.vx *= 0.3;
                         ball.vy *= 0.3;
                         ball.isSwatted = true;
                         ball.lastInteraction = { tick: playState.tick, playerId: bestCandidate.id, type: 'swat' };
