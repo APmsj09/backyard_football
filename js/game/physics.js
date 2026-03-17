@@ -141,6 +141,13 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
     allPlayers.forEach(other => {
         if (other.id === pState.id || other.isEngaged || pState.isEngaged) return;
 
+        // 💡 FIX: Ignore collisions between the QB and RB during the mesh point
+        const isHandoffP1 = pState.action === 'handoff_setup' || pState.action === 'handoff_receive';
+        const isHandoffP2 = other.action === 'handoff_setup' || other.action === 'handoff_receive';
+
+        if (isHandoffP1 && isHandoffP2) return;
+
+        // Also ignore collision the exact moment the RB gets the ball and transitions to run_path
         if ((pState.action === 'handoff_setup' && other.action === 'run_path') ||
             (pState.action === 'run_path' && other.action === 'handoff_setup')) {
             return;

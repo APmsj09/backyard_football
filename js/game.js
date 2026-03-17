@@ -2661,6 +2661,7 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
 
             switch (pState.action) {
                 case 'handoff_setup':
+                case 'handoff_receive': // 💡 FIX: Tells the AI to let the physics engine handle the approach
                 case 'run_path':
                 case 'run_fake':
                     break;
@@ -3301,7 +3302,7 @@ function checkTackleCollisions(playState, gameLog) {
         const rPower = (carrier.agi * 0.5) + (carrier.str * 0.5);
 
         // Calculate Success Chance
-        let successChance = 0.60; // Base
+        let successChance = 0.68; // Base
 
         // 1. Momentum Delta: Being faster/heavier than the opponent helps.
         successChance += (tMomentum / Math.max(1, rMomentum) - 1.0) * 0.3;
@@ -3310,14 +3311,15 @@ function checkTackleCollisions(playState, gameLog) {
         successChance += (defender.wgt / carrier.wgt - 1.0) * 0.5;
 
         // 3. Skill & Strength Delta
-        successChance += (tPower - rPower) * 0.006;
+        successChance += (tPower - rPower) * 0.008; // 💡 Increased skill multiplier slightly
 
         // 4. Angle Adjustment: Tackling from behind is a 30% penalty
         if (defender.y < carrier.y - 0.2) successChance *= 0.7;
 
         // 5. BEAST MODE LIMITER: Cumulative fatigue
         const brokenCount = carrier.tacklesBrokenThisPlay || 0;
-        successChance += (brokenCount * 0.25);
+        // 💡 FIX: Massively increase penalty for successive broken tackles to prevent pinball runs
+        successChance += (brokenCount * 0.40); 
 
         successChance = Math.max(0.10, Math.min(0.98, successChance));
 
@@ -4475,7 +4477,8 @@ function handleBallArrival(playState, carrier, playResult, gameLog) {
         const CATCH_TOLERANCE = 0.25;
 
         if (p.action === 'tracking_ball') {
-            dynamicCatchRadius *= 1.2; // Works perfectly now
+            // 💡 FIX: Receivers tracking deep balls get a much larger bucket to simulate "running under it"
+            dynamicCatchRadius *= 1.8; 
         }
 
         const distNow = Math.sqrt((p.x - ball.x) ** 2 + (p.y - ball.y) ** 2);
@@ -5054,52 +5057,59 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
 
             // C. HANDOFF LOGIC (Optimized with pre-mapped qb1/rb1)
 
-            // C. HANDOFF LOGIC (Optimized with pre-mapped qb1/rb1)
-
             if (playState.handoffRequired && !playState.handoffOccurred) {
                 if (qb1 && rb1) {
                     
-                    // Calculate how far back the QB started
                     const qbDepth = playState.lineOfScrimmage - qb1.initialY;
                     
-                    // Hand off on the correct side
-                    const meshX = qb1.initialX + (rb1.initialX > qb1.initialX ? 1.2 : -1.2);
+                    // 💡 FIX: Create distinct target points for QB and RB to prevent them crashing head-on
+                    const handoffSide = rb1.initialX > qb1.initialX ? 1 : -1;
+                    const qbMeshX = qb1.initialX + (handoffSide * 1.0);
+                    const rbMeshX = qb1.initialX + (handoffSide * 1.6); // RB runs slightly wider
                     
-                    // Mesh point pushes forward slightly for under center, stays back for shotgun
-                    const meshY = qb1.initialY + (qbDepth < 3.5 ? 1.5 : 0.8); 
+                    const meshY = qbDepth < 4.0 ? (playState.lineOfScrimmage - 4.5) : (qb1.initialY + 1.0); 
 
-                    // 💡 FIX: Shotgun handoffs take 1.2s (24 ticks). Under-center handoffs take 0.6s (12 ticks).
-                    const handoffTickThreshold = qbDepth < 3.5 ? 12 : 24;
+                    const handoffTickThreshold = qbDepth < 4.0 ? 18 : 24;
 
                     if (playState.tick < handoffTickThreshold) {
-                        qb1.targetX = meshX;
+                        qb1.targetX = qbMeshX;
                         qb1.targetY = meshY;
                         qb1.action = 'handoff_setup';
 
-                        rb1.targetX = meshX;
-                        rb1.targetY = meshY;
-                        rb1.action = 'run_path';
+                        rb1.targetX = rbMeshX;
+                        // 💡 FIX: RB targets slightly upfield from the mesh so they have forward momentum, 
+                        // but we use 'handoff_receive' so they brake and gather instead of overshooting at 22mph.
+                        rb1.targetY = meshY + 1.5; 
+                        rb1.action = 'handoff_receive'; 
                         rb1.contactReduction = 0.85;
                     } else {
-                        // Use cached distance to save a function call
-                        const dx = qb1.x - rb1.x;
-                        const dy = qb1.y - rb1.y;
                         const dist = getDistance(qb1, rb1);
 
-                        if (dist < 1.5 || playState.tick >= (handoffTickThreshold + 6)) {
+                        // 💡 FIX: Expanded distance threshold to 2.5 yards. Since they are reaching out their arms, 
+                        // they don't need to occupy the exact same pixel. Also force handoff if time expires.
+                        if (dist < 2.5 || playState.tick >= (handoffTickThreshold + 6)) {
                             qb1.hasBall = false;
                             qb1.isBallCarrier = false;
                             rb1.hasBall = true;
                             rb1.isBallCarrier = true;
                             playState.handoffOccurred = true;
 
-                            // QB carries out a fake to the side AWAY from the RB
                             const fakeDir = (rb1.initialX > qb1.initialX) ? -1 : 1;
                             qb1.targetX = qb1.initialX + (fakeDir * 5);
                             qb1.targetY = qb1.y - 1;
                             qb1.action = 'run_fake';
 
-                            if (gameLog) pushGameLog(gameLog, `[Tick ${playState.tick}] 🏈 Handoff mesh complete to ${rb1.name}`);
+                            // 💡 FIX: Immediately transition RB to runner so target AI takes over
+                            rb1.action = 'run_path';
+                            rb1.contactReduction = 1.0;
+
+                            if (gameLog) pushGameLog(gameLog, `[Tick ${playState.tick}] 🏈 Handoff mesh complete to ${rb1.name}`, playState);
+                        } else {
+                            // 💡 FIX: If the threshold passed but they aren't close enough yet, force the RB to 
+                            // converge directly on the QB to finish the handoff instead of orbiting.
+                            rb1.targetX = qb1.x;
+                            rb1.targetY = qb1.y;
+                            rb1.action = 'handoff_receive';
                         }
                     }
                 }
