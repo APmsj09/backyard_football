@@ -1795,7 +1795,7 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
                 // Add minor random variance (0 to 2 ticks)
                 reactionTicks += Math.floor(Math.random() * 3);
                 // Defense reacts to the offense moving, inherent 2-tick penalty (0.1s)
-                if (!isOffense) reactionTicks += 2; 
+                if (!isOffense) reactionTicks += 2;
             }
 
             const pState = {
@@ -2285,6 +2285,7 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
         playState.activePlayers.forEach(pState => {
             if (pState.stunnedTicks > 0) { pState.stunnedTicks--; return; }
             if (pState.isBlocked || pState.isEngaged) return;
+            
 
             if (pState.id === ballCarrierState.id) {
                 // 1. The Returner: Run towards y = 10 (Opposite endzone)
@@ -2483,7 +2484,7 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                 if (pState.assignment === 'punt_return' || pState.isBallCarrier) {
                     if (pState.isBallCarrier) return;
                     // Phase 2: RUN! (Handled by the "0. TURNOVER RETURN" block at the start of the function)
-                        // We return here to let that specific logic take over.
+                    // We return here to let that specific logic take over.
                     else if (ballInAir) {
                         const landX = ballPos.targetX || ballPos.x;
                         const landY = ballPos.targetY || ballPos.y;
@@ -2537,14 +2538,14 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
             const isRunner = pState.isBallCarrier || (pState.slot === 'QB1' && pState.action === 'qb_scramble');
 
             if (isRunner) {
-                pState.isBallCarrier = true; 
+                pState.isBallCarrier = true;
                 let targetX = pState.x;
                 let targetY = 110;
 
                 if (pState.role === 'QB' && pState.action === 'qb_scramble' && pState.y < LOS) {
                     const rollDir = pState.scrambleDirection === 'right' ? 1 : (pState.scrambleDirection === 'left' ? -1 : (pState.x > 26.6 ? 1 : -1));
-                    targetX = pState.x + (rollDir * 8); 
-                    targetY = pState.y + 1.5; 
+                    targetX = pState.x + (rollDir * 8);
+                    targetY = pState.y + 1.5;
                     targetX = Math.max(3, Math.min(50.3, targetX));
                 } else {
                     // Standard Runner Pathing
@@ -2565,7 +2566,7 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                 pState.targetX = targetX;
                 pState.targetY = targetY;
                 pState.action = 'run_path';
-                return; 
+                return;
             }
 
             // RECEIVER BALL TRACKING
@@ -2648,7 +2649,7 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                         // "Step Up" Logic!
                         // If the edges are collapsing but the interior (A/B gaps) is clean, a smart QB steps forward.
                         if (edgePressure && !interiorPressure && qbIQ > 65) {
-                            shiftY += 2.5; 
+                            shiftY += 2.5;
                             if (gameLog && Math.random() < 0.05) pushGameLog(gameLog, `[Tick ${playState.tick}] 👣 ${pState.name} steps up into the pocket!`, playState);
                         }
 
@@ -2675,7 +2676,7 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                     // As the receiver approaches the turn, they "plant" and "cut"
                     if (distToNode < 1.5) pState.contactReduction = 1.2 + ((pState.agility || 50) / 200);
                     // High agility = faster turns. We give a temporary speed burst 
-                        // to simulate the "explosion" out of a break.
+                    // to simulate the "explosion" out of a break.
                     else pState.contactReduction = 1.0;
 
                     pState.targetX = pt.x; pState.targetY = pt.y;
@@ -2745,7 +2746,7 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
         // B. DEFENSE AI
         // ------------------------------------------
         if (!pState.isOffense) {
-            
+
             // 1. DIAGNOSIS (IQ-Based Read)
             const isDL = pState.role === 'DL';
             const playDiagnosis = isDL ? playType : diagnosePlay(pState, playType, offensivePlayKey, playState.tick);
@@ -2761,20 +2762,20 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
             // 3. PURSUIT DECISION MATRIX (The Gatekeeper)
             let shouldPursue = false;
             if (ballCarrierState) {
-                if (isBallInAir) shouldPursue = false; 
-                else if (isFooledByPA) shouldPursue = true; 
-                else if (ballCarrierState.role !== 'QB' || qbScrambling) shouldPursue = true; 
-                else if (assignment?.includes('blitz') || assignment?.includes('rush') || isDL) shouldPursue = true; 
+                if (isBallInAir) shouldPursue = false;
+                else if (isFooledByPA) shouldPursue = true;
+                else if (ballCarrierState.role !== 'QB' || qbScrambling) shouldPursue = true;
+                else if (assignment?.includes('blitz') || assignment?.includes('rush') || isDL) shouldPursue = true;
             }
 
             // 4. DISCIPLINE CHECK
             if (assignment?.startsWith('man_cover_') && shouldPursue && !isFooledByPA && !isDL) {
                 const targetSlot = assignment.replace('man_cover_', '');
                 const carrierSlot = ballCarrierState?.slot;
-                if (carrierSlot !== targetSlot && !isRunRead && !qbScrambling) shouldPursue = false; 
+                if (carrierSlot !== targetSlot && !isRunRead && !qbScrambling) shouldPursue = false;
             }
             if (assignment?.startsWith('zone_') && pState.slot.startsWith('LB') && carrierIsQB && !qbScrambling && !isFooledByPA) {
-                shouldPursue = false; 
+                shouldPursue = false;
             }
 
             // --- 5. EXECUTE MOVEMENT ---
@@ -2790,7 +2791,7 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                     pState.targetX = chaseTarget.x + ((chaseTarget.vx || 0) * leadTime);
                     pState.targetY = chaseTarget.y + ((chaseTarget.vy || 0) * leadTime);
                     pState.action = 'pursuit';
-                    
+
                     if (isFooledByPA && !pState.loggedPA && gameLog && Math.random() < 0.05) {
                         pushGameLog(gameLog, `[Tick ${playState.tick}] 🎣 ${pState.name} bites on the play action!`, playState);
                         pState.loggedPA = true;
@@ -2809,11 +2810,11 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                     } else {
                         // 💡 INTERCEPTION / BREAK ON BALL
                         const targetRec = offenseStates.find(o => o.id === ballPos.targetPlayerId);
-                        
+
                         if (targetRec && iq > 60) {
                             pState.targetX = (ballPos.targetX * 0.7) + (targetRec.x * 0.3);
                             pState.targetY = (ballPos.targetY * 0.7) + (targetRec.y * 0.3);
-                            if (pState.slot === 'DB3' || pState.role === 'S') pState.targetY += 1.5; 
+                            if (pState.slot === 'DB3' || pState.role === 'S') pState.targetY += 1.5;
                         } else {
                             pState.targetX = ballPos.targetX;
                             pState.targetY = ballPos.targetY;
@@ -2970,7 +2971,7 @@ function executeAssignment(pState, assignment, offenseStates, LOS, playState) {
                 primaryThreat = zoneThreats.reduce((deepest, current) => current.y > deepest.y ? current : deepest);
             } else {
                 // Linebackers prioritize the closest guy
-                primaryThreat = zoneThreats.reduce((closest, current) => 
+                primaryThreat = zoneThreats.reduce((closest, current) =>
                     getDistance(pState, current) < getDistance(pState, closest) ? current : closest
                 );
             }
@@ -2980,26 +2981,26 @@ function executeAssignment(pState, assignment, offenseStates, LOS, playState) {
             // C. LEVERAGE POSITIONING
             if (isDeep) {
                 // Stay deeper (+3.5y) and slightly inside the receiver
-                const insideLeverageX = primaryThreat.x < CENTER_X ? 1.0 : -1.0; 
+                const insideLeverageX = primaryThreat.x < CENTER_X ? 1.0 : -1.0;
                 pState.targetX = primaryThreat.x + insideLeverageX;
                 pState.targetY = Math.max(zoneCenter.y, primaryThreat.y + 3.5);
             } else {
                 // Stay underneath (-1.5y) to jump the route
                 pState.targetX = primaryThreat.x;
-                pState.targetY = primaryThreat.y - 1.5; 
+                pState.targetY = primaryThreat.y - 1.5;
             }
 
             // D. THE ZONE TETHER
             // If the receiver runs out of the zone, the defender stops at the edge
-            const TETHER_LIMIT_X = isDeep ? 10.0 : 6.0; 
+            const TETHER_LIMIT_X = isDeep ? 10.0 : 6.0;
             pState.targetX = Math.max(zoneCenter.x - TETHER_LIMIT_X, Math.min(zoneCenter.x + TETHER_LIMIT_X, pState.targetX));
-            
+
             if (!isDeep) {
                 const maxSinkDepth = LOS + (zone?.maxY || 15.0);
                 pState.targetY = Math.min(maxSinkDepth, pState.targetY);
             }
             pState.zoneDriftTick = playState.tick;
-        } 
+        }
         else {
             // E. NO THREAT: SHUFFLE FEET & WATCH QB
             if (!pState.zoneDriftTick || playState.tick > pState.zoneDriftTick + 25) {
@@ -3007,7 +3008,7 @@ function executeAssignment(pState, assignment, offenseStates, LOS, playState) {
                 let driftX = zoneCenter.x;
                 const qb = offenseStates.find(p => p.slot.startsWith('QB'));
                 if (qb) driftX += (qb.x < CENTER_X ? -1.5 : 1.5); // Drift toward QB's eyes
-                
+
                 pState.dynamicTargetX = driftX + (Math.random() - 0.5) * 2;
                 pState.dynamicTargetY = zoneCenter.y + (Math.random() - 0.5) * 1.5;
             }
@@ -4439,6 +4440,10 @@ function handleBallArrival(playState, carrier, playResult, gameLog) {
         }
         return false;
     });
+    // 💡 FIX: Move the stat calculations OUTSIDE the catch/drop blocks 
+    // so they are globally available to all outcomes (offense and defense).
+    const hndEff = Math.round(catching * bestCandidate.fatigueModifier);
+    const fatPct = Math.round(bestCandidate.fatigueModifier * 100);
 
     // 💡 FIX 1: Only run catch calculations if it's NOT a throw away
     if (!ball.isThrowAway && playersInRange.length > 0) {
@@ -4483,10 +4488,6 @@ function handleBallArrival(playState, carrier, playResult, gameLog) {
             catchScore -= 60; // Massive penalty for reaction time
         }
 
-        // 💡 FIX: Move the stat calculations OUTSIDE the catch/drop blocks 
-        // so they are globally available to all outcomes (offense and defense).
-        const hndEff = Math.round(catching * bestCandidate.fatigueModifier);
-        const fatPct = Math.round(bestCandidate.fatigueModifier * 100);
 
         if (Math.random() * 100 < catchScore) {
             // --- SUCCESSFUL CATCH ---
@@ -4506,7 +4507,7 @@ function handleBallArrival(playState, carrier, playResult, gameLog) {
             // 💡 NEW: Force all defenders to "Locate" the new runner
             playState.activePlayers.forEach(p => {
                 if (!p.isOffense) {
-                    p.action = 'pursuit'; 
+                    p.action = 'pursuit';
                     p.snapReactionTimer = 0; // Ensure no lingering delays
                 }
             });
@@ -4578,7 +4579,6 @@ function handleBallArrival(playState, carrier, playResult, gameLog) {
                     // 💡 FIX: 20% chance an offensive player bobbles the ball into the air instead of dropping it clean
                     const isBobble = (Math.random() < 0.20) && ball.tipCount < 3;
 
-                    const hndEff = Math.round(catching * bestCandidate.fatigueModifier);
 
                     if (isBobble) {
                         pushLog(`[Tick ${playState.tick}] 🖐️ ${bestCandidate.name} bobbles the ball! (Hands: ${hndEff}, Energy: ${fatPct}%)`);
@@ -4955,18 +4955,18 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
                     const meshY = playState.lineOfScrimmage - 1.2;
 
                     // 💡 FIX: Realistic pacing. Handoffs take ~1.2 seconds (24 ticks) to develop.
-                    if (playState.tick < 24) { 
+                    if (playState.tick < 24) {
                         // QB moves to mesh point and "turns"
                         qb.targetX = meshX;
                         qb.targetY = meshY;
                         qb.action = 'handoff_setup';
-                        
+
                         // RB jogs to the mesh point
                         rb.targetX = meshX;
                         rb.targetY = meshY;
                         rb.action = 'run_path';
                         // Keep speed restrained so they don't overrun the QB
-                        rb.contactReduction = 0.85; 
+                        rb.contactReduction = 0.85;
                     } else {
                         // Execute exchange
                         const dist = getDistance(qb, rb);
