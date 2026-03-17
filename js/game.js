@@ -2449,6 +2449,7 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
 
             // Auto-Engage
             if (getDistance(blocker, target) < 1.8) {
+                const strDiff = (blocker.str || 50) - (target.str || 50);
                 blocker.isEngaged = true;
                 blocker.engagedWith = target.id;
                 target.isEngaged = true;
