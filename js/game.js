@@ -3211,69 +3211,48 @@ function checkTackleCollisions(playState, gameLog) {
         // 💡 NEW: Contact Avoidance Mechanics (Before Tackle Attempt)
         // Runners can attempt to dodge/hurdle/stiff-arm within 1.5 yards
         if (distance < 1.5) {
-            const carrierAgility = carrier.agility || 50;
-            const carrierStrength = carrier.strength || 50;
-            const defenderSpeed = defender.speed || 50;
-
-            // 💡 FIX: Added action cooldown check so they can't spam hurdles 20x per second
             const canPerformMove = !carrier.moveCooldown || carrier.moveCooldown <= 0;
 
-            // 💡 HURDLE ATTEMPT
-            const hurdleChance = (carrierAgility / 120) - (defenderSpeed / 150);
-            if (canPerformMove && hurdleChance > 0.1 && Math.random() < hurdleChance * 0.4) {
-                carrier.action = 'hurdle';
-                carrier.hurdleTicks = 8;
-                carrier.moveCooldown = 30; // 💡 1.5 second cooldown before next move
-                defender.stunnedTicks = 15;
-                if (carrier.vy) carrier.vy *= 1.15;
+            if (canPerformMove) {
+                const roll = Math.random();
 
-                // 💡 FIX: Apply fatigue penalty so they can't hurdle the whole team
-                carrier.tacklesBrokenThisPlay = (carrier.tacklesBrokenThisPlay || 0) + 1;
+                // 1. HURDLE (Agility + Luck)
+                const hurdleChance = (carrier.agi / 120) - (defender.spd / 150);
+                if (roll < hurdleChance * 0.3) {
+                    carrier.action = 'hurdle';
+                    carrier.moveCooldown = 30;
+                    defender.stunnedTicks = 20;
+                    carrier.tacklesBrokenThisPlay = (carrier.tacklesBrokenThisPlay || 0) + 1;
+                    if (gameLog) gameLog.push(`🏃 ${carrier.name} hurdled over ${defender.name}!`);
+                    continue;
+                }
 
-                if (gameLog) gameLog.push(`🏃 ${carrier.name} hurdled over ${defender.name}!`);
-                continue;
-            }
+                // 2. JUKE (Pure Agility)
+                const jukeChance = (carrier.agi / 100) - (defender.tkl / 150);
+                if (roll < jukeChance * 0.4) {
+                    const dir = Math.random() > 0.5 ? 1 : -1;
+                    carrier.action = dir === 1 ? 'juke_right' : 'juke_left';
+                    carrier.x += dir * 1.2;
+                    carrier.moveCooldown = 35;
+                    defender.stunnedTicks = 30;
+                    carrier.tacklesBrokenThisPlay = (carrier.tacklesBrokenThisPlay || 0) + 1;
+                    if (gameLog) gameLog.push(`⚡ ${carrier.name} juked ${defender.name}!`);
+                    continue;
+                }
 
-            // 💡 STIFF-ARM ATTEMPT (Push defender away)
-            const stiffArmChance = ((carrierStrength + (carrier.weight / 100)) / 300) - (defender.strength / 150);
-            if (stiffArmChance > 0.0 && Math.random() < stiffArmChance * 0.45) {
-                carrier.action = 'stiff_arm';
-                carrier.stiffArmTicks = 6;
-                const dx = defender.x - carrier.x;
-                const dy = defender.y - carrier.y;
-                const dist = Math.max(0.1, Math.sqrt(dx * dx + dy * dy));
-                defender.x += (dx / dist) * 2.5;
-                defender.y += (dy / dist) * 2.5;
-                defender.stunnedTicks = 20;
-                if (carrier.vy) carrier.vy *= 0.95;
-
-                // 💡 FIX: Apply fatigue penalty here too
-                carrier.tacklesBrokenThisPlay = (carrier.tacklesBrokenThisPlay || 0) + 1;
-
-                if (gameLog) gameLog.push(`💪 ${carrier.name} stiff-armed ${defender.name}!`);
-                continue;
-            }
-
-            // 💡 STIFF-ARM ATTEMPT (Push defender away)
-            // Success based on strength + size vs defender strength
-            if (stiffArmChance > 0.0 && Math.random() < stiffArmChance * 0.45) {
-                // Successful stiff-arm!
-                carrier.action = 'stiff_arm';
-                carrier.stiffArmTicks = 6;
-
-                // Push defender away
-                const dx = defender.x - carrier.x;
-                const dy = defender.y - carrier.y;
-                const dist = Math.max(0.1, Math.sqrt(dx * dx + dy * dy));
-                defender.x += (dx / dist) * 2.5; // Push defender back 2.5 yards
-                defender.y += (dy / dist) * 2.5;
-                defender.stunnedTicks = 20; // Defender stumbles
-
-                // Carrier gets slight speed reduction (effort expended)
-                if (carrier.vy) carrier.vy *= 0.95;
-                carrier.moveCooldown = 30; // 💡 1.5 second cooldown before next move
-                if (gameLog) gameLog.push(`💪 ${carrier.name} stiff-armed ${defender.name}!`);
-                continue;
+                // 3. STIFF-ARM (Strength)
+                const stiffArmChance = ((carrier.str + (carrier.wgt / 100)) / 300) - (defender.str / 150);
+                if (roll < stiffArmChance * 0.4) {
+                    carrier.action = 'stiff_arm';
+                    carrier.moveCooldown = 30;
+                    const dx = defender.x - carrier.x, dy = defender.y - carrier.y;
+                    const d = Math.max(0.1, Math.sqrt(dx*dx + dy*dy));
+                    defender.x += (dx/d) * 2.5; defender.y += (dy/d) * 2.5;
+                    defender.stunnedTicks = 25;
+                    carrier.tacklesBrokenThisPlay = (carrier.tacklesBrokenThisPlay || 0) + 1;
+                    if (gameLog) gameLog.push(`💪 ${carrier.name} stiff-armed ${defender.name}!`);
+                    continue;
+                }
             }
         }
 
@@ -3282,155 +3261,77 @@ function checkTackleCollisions(playState, gameLog) {
             return false; // Play continues as loose ball
         }
 
-        // B. Calculate Tackle Probability (The "Truck Stick" Check)
-        const t_tkl = Number(defender.tackling) || 50;
-        const t_str = Number(defender.strength) || 50;
-        const c_agi = Number(carrier.agility) || 50;
-        const c_str = Number(carrier.strength) || 50;
+        // --- B. PHYSICS-BASED TACKLE CALCULATION ---
+        const runnerVel = Math.hypot(carrier.vx, carrier.vy);
+        const tacklerVel = Math.hypot(defender.vx, defender.vy);
+        
+        // Momentum (Mass * Velocity)
+        const rMomentum = (carrier.wgt || 200) * runnerVel;
+        const tMomentum = (defender.wgt || 200) * tacklerVel;
 
-        const tacklerSkill = (t_tkl + t_str) / 2;
-        const runnerSkill = (c_agi + c_str) / 2;
+        // Skill vs Strength Power
+        const tPower = (defender.tkl * 0.6) + (defender.str * 0.4);
+        const rPower = (carrier.agi * 0.5) + (carrier.str * 0.5);
 
-        const weightDiff = (Number(carrier.weight) || 200) - (Number(defender.weight) || 200);
-        const momentumBonus = Math.max(-0.10, Math.min(0.10, weightDiff / 2000));
+        // Calculate Success Chance
+        let successChance = 0.60; // Base
+        
+        // 1. Momentum Delta: Being faster/heavier than the opponent helps.
+        successChance += (tMomentum / Math.max(1, rMomentum) - 1.0) * 0.3;
 
-        // 💡 FIX: Actually apply the fatigue factor (25% easier to tackle per broken tackle)
-        const fatigueFactor = (carrier.tacklesBrokenThisPlay || 0) * 0.25;
+        // 2. Mass (Weight) Delta: Pure "Big man vs Small man" logic.
+        successChance += (defender.wgt / carrier.wgt - 1.0) * 0.5;
 
-        const speedBonus = (carrier.currentSpeedYPS || 0) / 20;
-        const defenderClosing = (defender.currentSpeedYPS || defender.speed || 0);
-        const closingBonus = Math.max(-0.08, Math.min(0.15, (defenderClosing - (carrier.currentSpeedYPS || 0)) / 40));
-        const tackleAngle = Math.abs(carrier.x - defender.x);
-        const anglePenalty = Math.min(0.05, tackleAngle / 20);
+        // 3. Skill & Strength Delta
+        successChance += (tPower - rPower) * 0.006;
 
-        let disciplinePenalty = 0;
-        try {
-            const assign = defender.assignment || defender.currentAssignment || '';
-            if (assign && (assign.startsWith('run_gap') || assign.startsWith('run_edge') || assign === 'fill_run' || assign === 'run_support')) {
-                const zone = zoneBoundaries[assign];
-                if (zone && zone.xOffset !== undefined) {
-                    const ballX = (playState.ballState && playState.ballState.x) ? playState.ballState.x : CENTER_X;
-                    const assignedX = ballX + (zone.xOffset || 0);
-                    const assignedY = (playState.lineOfScrimmage || 0) + (zone.yOffset || 0);
-                    const distFromAssigned = Math.hypot(defender.x - assignedX, defender.y - assignedY);
-                    if (distFromAssigned > 3.0) {
-                        disciplinePenalty = Math.min(0.35, (distFromAssigned - 3.0) * 0.06); // 0.06 per yard beyond 3yds
-                    }
-                } else {
-                    // For 'fill_run' or null assignments, prefer being close to the carrier
-                    const distToCarrier = getDistance(defender, carrier);
-                    if (distToCarrier > 6.0) disciplinePenalty = Math.min(0.35, (distToCarrier - 6.0) * 0.05);
-                }
-            }
-        } catch (e) { /* defensive: keep disciplinePenalty = 0 */ }
+        // 4. Angle Adjustment: Tackling from behind is a 30% penalty
+        if (defender.y < carrier.y - 0.2) successChance *= 0.7;
 
-        const brokenTacklePenalty = (carrier.tacklesBrokenThisPlay || 0) * 0.15;
+        // 5. BEAST MODE LIMITER: Cumulative fatigue
+        const brokenCount = carrier.tacklesBrokenThisPlay || 0;
+        successChance += (brokenCount * 0.25); 
 
-        let successChance = 0.65;
-
-        // Stat Comparison
-        const skillGap = (tacklerSkill - runnerSkill) * 0.008;
-        successChance += skillGap;
-
-        // Speed/Momentum Factor
-        // A fast runner is HARDER to tackle (Jukes/Speed)
-        const speedPenalty = (carrier.currentSpeedYPS || 0) * 0.03;
-        successChance -= speedPenalty;
-
-        // Strength/Weight Factor
-        // Big backs are harder to bring down
-        const weightAdvantage = (carrier.weight - defender.weight) / 500;
-        successChance -= weightAdvantage;
-
-        successChance = Math.max(0.15, Math.min(0.96, successChance));
+        successChance = Math.max(0.10, Math.min(0.98, successChance));
 
         if (Math.random() < successChance) {
             // --- TACKLE SUCCESS ---
-            playState.yards = carrier.y - playState.lineOfScrimmage;
             playState.playIsLive = false;
+            playState.yards = carrier.y - playState.lineOfScrimmage;
             playState.statEvents.push({ type: 'tackle', playerId: defender.id });
 
-            const isSack = carrier.role === 'QB' && carrier.y < playState.lineOfScrimmage && playState.type === 'pass';
-
-            // 💡 FIX: Determine Touchback vs Safety on turnovers
+            // Safety/Touchback/Sack Logic
             const inOwnEndzone = (carrier.isOffense && carrier.y <= 10.0) || (!carrier.isOffense && carrier.y >= 110.0);
             const caughtInEndzone = playState.returnStartY !== null && ((carrier.isOffense && playState.returnStartY <= 10.0) || (!carrier.isOffense && playState.returnStartY >= 110.0));
 
-            let isSafety = false;
-            let isTouchback = false;
-
             if (inOwnEndzone) {
-                if (caughtInEndzone) {
-                    isTouchback = true;
-                } else {
-                    isSafety = true;
-                }
+                if (caughtInEndzone) { playState.touchback = true; playState.finalBallY = carrier.isOffense ? 20 : 100; } 
+                else { playState.safety = true; }
+            } else if (carrier.role === 'QB' && carrier.y < playState.lineOfScrimmage && playState.type === 'pass') {
+                playState.sack = true;
+                playState.statEvents.push({ type: 'sack', playerId: defender.id, qbId: carrier.id });
             }
 
-            if (isSafety) {
-                playState.safety = true;
-                if (gameLog) gameLog.push(`[Tick ${playState.tick}] 🚨 SAFETY! ${carrier.name} tackled in endzone by ${defender.name}!`);
-            } else if (isTouchback) {
-                playState.touchback = true;
-                playState.finalBallY = carrier.isOffense ? 20 : 100; // Place at 20 yard line
-                if (gameLog) gameLog.push(`[Tick ${playState.tick}] 🛡️ TOUCHBACK. ${carrier.name} downed in the endzone.`);
-            } else if (isSack) {
-                playState.sack = true;
-                playState.yards = Math.floor(playState.yards);
-                playState.statEvents.push({ type: 'sack', playerId: defender.id, qbId: carrier.id });
-                if (gameLog) gameLog.push(`[Tick ${playState.tick}] 💥 SACK! ${defender.name} drops ${carrier.name} for loss of ${Math.abs(playState.yards)}!`);
-            } else {
-                if (gameLog) {
-                    const defEff = Math.round(tacklerSkill * defender.fatigueModifier);
-                    const runEff = Math.round(runnerSkill * carrier.fatigueModifier);
-                    const defFat = Math.round(defender.fatigueModifier * 100);
-                    const runFat = Math.round(carrier.fatigueModifier * 100);
-
-                    // 💡 FIX: Return yards calculate from the catch point, offensive yards from the LOS
-                    const yardage = (!carrier.isOffense || playState.turnover)
-                        ? Math.abs(carrier.y - (playState.returnStartY || carrier.y)).toFixed(1)
-                        : (carrier.y - playState.lineOfScrimmage).toFixed(1);
-
-                    const contactX = carrier.x.toFixed(1);
-                    const contactY = carrier.y.toFixed(1);
-
-                    gameLog.push(`[Tick ${playState.tick}] ✋ ${carrier.name} tackled at (${contactX}, ${contactY}) by ${defender.name} | Gain: ${yardage}y | (Power: ${defEff}@${defFat}% vs ${runEff}@${runFat}%)`);
-                }
+            if (gameLog) {
+                const hitForce = Math.round(tMomentum / 10);
+                const type = playState.sack ? '💥 SACK' : '✋ TACKLE';
+                pushGameLog(gameLog, `[Tick ${playState.tick}] ${type} by ${defender.name} (Force: ${hitForce})`, playState);
             }
             return true;
 
         } else {
-            // --- BROKEN TACKLE ---
-            if (!carrier.tacklesBrokenThisPlay) carrier.tacklesBrokenThisPlay = 0;
-            carrier.tacklesBrokenThisPlay++;
+            // --- TACKLE BROKEN ---
+            carrier.tacklesBrokenThisPlay = brokenCount + 1;
+            defender.stunnedTicks = 40; 
+            
+            // Physics: Runner loses speed based on the weight of the guy they just hit
+            const speedDrain = (defender.wgt / carrier.wgt) * 0.3;
+            carrier.vx *= (1 - speedDrain);
+            carrier.vy *= (1 - speedDrain);
 
-            const jukeType = Math.random() > 0.5 ? 'juke_left' : 'juke_right';
-            carrier.action = jukeType;
-            carrier.jukeTicks = 12;
-
-            const jukeDir = jukeType === 'juke_left' ? -1 : 1;
-            carrier.x += jukeDir * 0.8;
-            // 💡 FIX: Hard stun to tackler so they don't roll to tackle again 5 times in 1 second
-            defender.stunnedTicks = 35;
-
-            // 💡 FIX: If a passing QB shakes a sack, force them to abandon the pocket and scramble!
-            if (carrier.role === 'QB' && !carrier.isBallCarrier) {
-                carrier.isBallCarrier = true;
-                carrier.action = 'qb_scramble';
-                carrier.scrambleDirection = 'forward';
-                if (playState) playState.qbIntent = 'scramble';
-            }
-
-            if (gameLog) {
-                const runEff = Math.round(runnerSkill * carrier.fatigueModifier);
-                const defEff = Math.round(tacklerSkill * defender.fatigueModifier);
-                const contactX = carrier.x.toFixed(1);
-                const contactY = carrier.y.toFixed(1);
-                gameLog.push(`[Tick ${playState.tick}] 💪 ${carrier.name} sheds tackle at (${contactX}, ${contactY})! (Agi: ${runEff} vs Tkl: ${defEff})`);
-            }
-
-            // 💡 FIX: Exit the loop so the carrier doesn't evaluate 5 tackles in the exact same 0.05s tick!
-            break;
+            if (gameLog) pushGameLog(gameLog, `[Tick ${playState.tick}] 💪 ${carrier.name} runs THROUGH ${defender.name}!`, playState);
+            
+            break; // Interaction resolved for this tick
         }
     }
     return false;
