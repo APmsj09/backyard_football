@@ -706,6 +706,16 @@ export const defensivePlaybook = {
             'DB1': 'man_cover_WR1', 'DB2': 'man_cover_WR2'
         }
     },
+    'Cover_2_Hard_Flat': {
+        name: 'Cover 2 Hard Flat', concept: 'Zone', blitz: false,
+        compatibleFormations:['4-2-2'],
+        tags: ['zone', 'cover2', 'safeZone'],
+        assignments: {
+            'DL1': 'pass_rush', 'DL2': 'pass_rush', 'DL3': 'pass_rush', 'DL4': 'pass_rush',
+            'LB1': 'zone_hook_curl_left', 'LB2': 'zone_hook_curl_right',
+            'DB1': 'zone_deep_half_left', 'DB2': 'zone_deep_half_right'
+        }
+    },
     'Heavy_Man_Under': {
         name: '4-Man Press', concept: 'Man', blitz: false,
         compatibleFormations: ['4-2-2'],

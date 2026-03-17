@@ -4181,9 +4181,11 @@ function executeThrow(qbState, target, strength, accuracy, playState, gameLog, a
         const estTime = throwDistance / ballSpeed;
         const qbIQ = qbState.iq || 50;
 
-        // Smart QBs lead better. Lob passes get extra lead so the WR can run under it.
-        let leadFactor = 0.85 + (qbIQ / 400);
-        if (passType === 'lob') leadFactor += 0.25;
+        // 💡 FIX: Dial back the lead factor so receivers aren't overthrown.
+        // 1.0 = Aiming at the exact spot they will be.
+        let leadFactor = 0.75 + (qbIQ / 250); 
+        if (passType === 'lob') leadFactor += 0.15; // Deep balls get slight lead
+        if (passType === 'bullet') leadFactor -= 0.15; // Bullets are thrown at the body
 
         // Receiver speed in yards per second
         const receiverYPS = 5.0 + ((target.spd || 50) / 25);
@@ -4612,7 +4614,15 @@ function handleBallArrival(playState, carrier, playResult, gameLog) {
                 const last = ball.lastInteraction;
                 if (!(last && last.playerId === bestCandidate.id && (playState.tick - last.tick) <= 5)) {
 
-                    const swatChance = (catching * 0.6) + (agility * 0.4) + 25;
+                    let swatChance = (catching * 0.6) + (agility * 0.4) + 25;
+                    
+                    // 💡 FIX: Apply the Point-Blank penalty to Swats/Tips too!
+                    const ticksInAir = playState.tick - (ball.throwTick || 0);
+                    if (ticksInAir < 15 && playState.type === 'pass') {
+                        if (bestCandidate.role === 'DL') swatChance -= 80; 
+                        else swatChance -= 40;
+                    }
+
                     if (Math.random() * 100 > swatChance) return;
 
                     ball.tipCount = (ball.tipCount || 0) + 1;
@@ -5037,6 +5047,8 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
 
             // C. HANDOFF LOGIC (Optimized with pre-mapped qb1/rb1)
 
+            // C. HANDOFF LOGIC (Optimized with pre-mapped qb1/rb1)
+
             if (playState.handoffRequired && !playState.handoffOccurred) {
                 if (qb1 && rb1) {
 
@@ -5044,8 +5056,10 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
                     const meshX = qb1.initialX + (rb1.initialX > qb1.initialX ? 1.2 : -1.2);
                     const meshY = qb1.initialY + 0.8; // Meet the QB where he is!
 
+                    // 💡 FIX: Shotgun handoffs take 1.2s (24 ticks). Under-center handoffs take 0.6s (12 ticks).
+                    const handoffTickThreshold = qbDepth < 3.5 ? 12 : 24;
 
-                    if (playState.tick < 24) {
+                    if (playState.tick < handoffTickThreshold) {
                         qb1.targetX = meshX;
                         qb1.targetY = meshY;
                         qb1.action = 'handoff_setup';
@@ -5060,7 +5074,7 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
                         const dy = qb1.y - rb1.y;
                         const dist = getDistance(qb1, rb1);
 
-                        if (dist < 1.5 || playState.tick >= 28) {
+                        if (dist < 1.5 || playState.tick >= (handoffTickThreshold + 4)) {
                             qb1.hasBall = false;
                             qb1.isBallCarrier = false;
                             rb1.hasBall = true;
