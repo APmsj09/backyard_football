@@ -2219,7 +2219,9 @@ function getSmartCarrierTarget(runner, defenseStates, offenseStates, fieldWidth 
                 }
             } else {
                 // BLOCKER LEVERAGE (Reading the hips)
-                const blocker = offenseStates.find(o => o.id === def.blockedBy || o.id === def.engagedWith);
+                const blocker = (typeof def.blockedBy === 'object' && def.blockedBy !== null) ? def.blockedBy : 
+                                (typeof def.engagedWith === 'object' && def.engagedWith !== null) ? def.engagedWith : 
+                                offenseStates.find(o => o.id === def.blockedBy || o.id === def.engagedWith);
                 if (blocker) {
                     const distToBlock = Math.hypot(testX - blocker.x, testY - blocker.y);
                     if (distToBlock >= 1.0 && distToBlock <= 3.0 && blocker.y > runner.y) {
@@ -2464,15 +2466,15 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
             if (getDistance(blocker, target) < 1.8) {
                 const strDiff = (blocker.str || 50) - (target.str || 50);
                 blocker.isEngaged = true;
-                blocker.engagedWith = target.id;
+                blocker.engagedWith = target;
                 target.isEngaged = true;
                 target.isBlocked = true;
-                target.blockedBy = blocker.id;
+                target.blockedBy = blocker;
 
                 // Add to Battle Queue
                 playState.blockBattles.push({
-                    blockerId: blocker.id,
-                    defenderId: target.id,
+                    blocker: blocker,
+                    defender: target,
                     status: 'ongoing',
                     battleScore: strDiff / 10, // Initial advantage
                     startTick: playState.tick
@@ -2564,8 +2566,16 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                         if (threat) {
                             pState.targetX = threat.x; pState.targetY = threat.y;
                             if (getDistance(pState, threat) < 2.0) {
-                                pState.isEngaged = true; pState.engagedWith = threat.id;
-                                threat.isEngaged = true; threat.isBlocked = true; threat.blockedBy = pState.id;
+                                pState.isEngaged = true; pState.engagedWith = threat;
+                                threat.isEngaged = true; threat.isBlocked = true; threat.blockedBy = pState;
+                                
+                                playState.blockBattles.push({
+                                    blocker: pState,
+                                    defender: threat,
+                                    status: 'ongoing',
+                                    battleScore: 0,
+                                    startTick: playState.tick
+                                });
                             }
                         } else {
                             // Escort
@@ -3124,12 +3134,7 @@ function executeAssignment(pState, assignment, offenseStates, LOS, playState) {
  */
 function checkBlockCollisions(playState) {
     const blockers = playState.activePlayers.filter(p => p.isOffense && !p.isEngaged && p.stunnedTicks === 0);
-    const defenders = playState.activePlayers.filter(p => 
-        p.teamId !== carrier.teamId && // Only opponents
-        p.id !== carrier.id &&         // Not self
-        p.stunnedTicks <= 0 && 
-        p._distToCarrier < TACKLE_RANGE
-    );
+    const defenders = playState.activePlayers.filter(p => !p.isOffense && p.stunnedTicks <= 0);
 
     blockers.forEach(blocker => {
             if (blocker.action !== 'pass_block' && blocker.action !== 'run_block') return;
