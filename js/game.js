@@ -1832,18 +1832,18 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
                 fatigueModifier: fatigueMod,
 
                 // --- PERFORMANCE ALIASES (For the physics loop) ---
-                spd: speed, 
-                agi: agility, 
-                str: strength, 
-                wgt: weight, 
+                spd: speed,
+                agi: agility,
+                str: strength,
+                wgt: weight,
                 hgt: height,
-                iq: iq, 
-                cons: consistency, 
+                iq: iq,
+                cons: consistency,
                 tgh: toughness,
-                ctch: catching, 
-                tkl: tackling, 
-                blk: blocking, 
-                shed: blockShedding, 
+                ctch: catching,
+                tkl: tackling,
+                blk: blocking,
+                shed: blockShedding,
                 acc: accuracy,
                 cov: coverage,
 
@@ -4973,12 +4973,13 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
         });
 
         // --- PERFORMANCE MAPPING (Do this once BEFORE the loop) ---
-        const offenseTeam = playState.activePlayers.filter(p => p.isOffense);
-        const defenseTeam = playState.activePlayers.filter(p => !p.isOffense);
+        const activeOffense = playState.activePlayers.filter(p => p.isOffense);
+        const activeDefense = playState.activePlayers.filter(p => !p.isOffense);
 
-        // Map specific players so we don't have to .find() them every tick
+        // Map specific players for quick access
         const qb1 = playState.activePlayers.find(p => p.slot === 'QB1');
         const rb1 = playState.activePlayers.find(p => p.slot === 'RB1');
+        const qbState = qb1; // Alias for updateQBDecision compatibility
 
         while (playState.playIsLive && playState.tick < playState.maxTicks) {
             if (!playState.playIsLive) break;
