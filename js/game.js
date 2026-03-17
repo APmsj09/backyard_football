@@ -3678,6 +3678,9 @@ function resolveOngoingBlocks(playState, gameLog, offenseStates = [], defenseSta
  */
 function updateQBDecision(qbState, offenseStates, defenseStates, playState, offensiveAssignments, gameLog) {
 
+    const offenseTeam = offenseStates;
+    const defenseTeam = defenseStates;
+
     // --- 0. VALIDATION CHECKS ---
     if (!qbState || !qbState.hasBall || playState.ballState.inAir || playState.ballState.throwInitiated) return;
     if (qbState.isEngaged || qbState.stunnedTicks > 0) return;
