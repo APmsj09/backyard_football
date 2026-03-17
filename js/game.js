@@ -2609,15 +2609,18 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                 let targetY = 110;
 
                 if (pState.role === 'QB' && pState.action === 'qb_scramble' && pState.y < LOS) {
-                    const rollDir = pState.scrambleDirection === 'right' ? 1 : (pState.scrambleDirection === 'left' ? -1 : (pState.x > 26.6 ? 1 : -1));
+                    const rollDir = pState.rolloutDir || (pState.x > CENTER_X ? 1 : -1);
                     targetX = pState.x + (rollDir * 8);
-                    targetY = pState.y + 1.5;
-                    targetX = Math.max(3, Math.min(50.3, targetX));
+                    targetY = pState.y + 1.0;
+                    targetX = Math.max(3, Math.min(FIELD_WIDTH - 3, targetX));
                 } else {
                     // Standard Runner Pathing
                     const smartTarget = getSmartCarrierTarget(pState, defenseStates, offenseStates);
                     targetX = smartTarget.x;
                     targetY = smartTarget.y;
+                    
+                    pState.action = 'run_path'; // Convert to standard run
+
                     const nearestDef = defenseStates.find(d => getDistance(pState, d) < 10);
                     if (nearestDef) {
                         const defendersNear = defenseStates.filter(d => getDistance(pState, d) < 2.0).length;
@@ -2631,7 +2634,6 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
 
                 pState.targetX = targetX;
                 pState.targetY = targetY;
-                pState.action = 'run_path';
                 return;
             }
 
@@ -2688,8 +2690,11 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                     const immediateThreat = rushers.find(r => getDistance(pState, r) < 3.5);
 
                     if (immediateThreat && (qbIQ > 45 || pState.agility > 50)) {
-                        if (!pState.rolloutDir) pState.rolloutDir = pState.x > CENTER_X ? -1 : 1;
-                        // Change action to scramble so the QB actually runs at full speed laterally
+                        if (!pState.rolloutDir) {
+                            const threatSide = immediateThreat.x > pState.x ? 1 : -1;
+                            pState.rolloutDir = -threatSide; // Roll away from pressure
+                        }
+                        // Change action to scramble so the QB actually runs laterally
                         pState.action = 'qb_scramble';
                         pState.targetX = pState.x + (pState.rolloutDir * 8);
                         pState.targetY = pState.y + 1.0;
@@ -3599,11 +3604,11 @@ function updateQBDecision(qbState, offenseStates, defenseStates, playState, offe
     const offenseTeam = offenseStates;
     const defenseTeam = defenseStates;
 
-    // --- 0. VALIDATION CHECKS ---
+     // --- 0. VALIDATION CHECKS ---
     if (!qbState || !qbState.hasBall || playState.ballState.inAir || playState.ballState.throwInitiated) return;
     if (qbState.isEngaged || qbState.stunnedTicks > 0) return;
-    // Don't make a new decision if QB is already scrambling or bracing for a hit
-    if (qbState.action === 'qb_scramble' || qbState.action === 'sacked') return;
+    // Don't make a new decision if QB is bracing for a hit
+    if (qbState.action === 'sacked') return;
 
     // --- 0C. SITUATIONAL CONTEXT ---
     // Define isDesperationTime here using playState data
@@ -3632,7 +3637,7 @@ function updateQBDecision(qbState, offenseStates, defenseStates, playState, offe
                 return;
             } else {
                 // Open lane - scramble
-                qbState.action = 'qb_scramble';
+                qbState.action = 'run_path'; // Convert to standard run past LOS
                 playState.qbIntent = 'scramble';
                 if (gameLog) gameLog.push(`🏃 ${qbState.name} scrambles after crossing the line!`);
                 qbState.hasProcessedLineCrossing = true;
@@ -3795,7 +3800,7 @@ function updateQBDecision(qbState, offenseStates, defenseStates, playState, offe
             const info = getTargetInfo(rec.slot);
             // 💡 FIX: Lowered separation requirement so QBs will actually pull the trigger on the run
             if (info && info.separation > 0.8) {
-                const onSameSide = Math.sign(rec.x - 26.6) === Math.sign(qbState.x - 26.6);
+                const onSameSide = Math.sign(rec.x - CENTER_X) === Math.sign(qbState.x - CENTER_X);
                 // Heavily weight separation and being on the same side of the field
                 const score = (info.separation * 3.0) + (onSameSide ? 8 : 0) - (info.distFromQB * 0.2);
                 if (score > bestScore) { bestScore = score; bestTarget = rec; }
@@ -3808,7 +3813,40 @@ function updateQBDecision(qbState, offenseStates, defenseStates, playState, offe
             if (gameLog) pushGameLog(gameLog, `[Tick ${playState.tick}] 🏃‍♂️🎯 ${qbState.name} throws on the run!`, playState);
             executeThrow(qbState, bestTarget, qbStrength, qbAcc * onTheRunMod, playState, gameLog, "Throw on Run");
             return;
-        } else return; // Keep running if no one is open
+        } else {
+             // 💡 NEW: If about to be sacked while rolling out, throw it away
+             const immediateThreat = defenseStates.find(d => !d.isBlocked && !d.isEngaged && getDistance(qbState, d) < 2.5);
+             if (immediateThreat && qbIQ > 60) {
+                 if (gameLog) pushGameLog(gameLog, `[Tick ${playState.tick}] 👋 ${qbState.name} throws it away under pressure.`, playState);
+                 playState.ballState.inAir = true;
+                 playState.ballState.throwInitiated = true;
+                 playState.ballState.throwerId = qbState.id;
+                 playState.ballState.isThrowAway = true;
+                 
+                 const throwToLeft = qbState.x < CENTER_X;
+                 const targetX = throwToLeft ? -5 : FIELD_WIDTH + 5;
+                 const targetY = qbState.y + 10;
+                 
+                 playState.ballState.targetX = targetX;
+                 playState.ballState.targetY = targetY;
+                 
+                 const dx = targetX - qbState.x;
+                 const dy = targetY - qbState.y;
+                 const dist = Math.sqrt(dx * dx + dy * dy);
+                 const ballSpeed = 25; 
+                 const t = Math.max(0.1, dist / ballSpeed);
+                 
+                 playState.ballState.vx = dx / t;
+                 playState.ballState.vy = dy / t;
+                 playState.ballState.vz = (-0.3 + (4.9 * t * t)) / t;
+                 
+                 playState.ballState.throwTick = playState.tick;
+                 qbState.hasBall = false;
+                 return;
+             }
+
+             return; // Keep running if no one is open
+        }
     }
 
     // --- 5. PROGRESSION LOGIC (Value System) ---
@@ -3964,11 +4002,11 @@ function updateQBDecision(qbState, offenseStates, defenseStates, playState, offe
         if (!decisionMade && openLane && (isPressured || playState.tick > 80)) {
             const scrambleChance = (playState.tick > 100) ? 0.3 : ((qbAgility / 100) * 0.05);
             if (Math.random() < scrambleChance) {
-                qbState.action = 'qb_scramble';
+                qbState.action = 'run_path'; // Tucks and runs upfield
                 qbState.isBallCarrier = true;
                 playState.qbIntent = 'scramble';
                 if (gameLog && !qbState.hasLoggedScramble) {
-                    gameLog.push(`🏃 ${qbState.name} tucks it and runs!`);
+                    gameLog.push(`🏃 ${qbState.name} tucks it and runs upfield!`);
                     qbState.hasLoggedScramble = true;
                 }
                 return;
