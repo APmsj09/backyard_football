@@ -3924,33 +3924,70 @@ function updateQBDecision(qbState, offenseStates, defenseStates, playState, offe
 
     // 💡 NEW: Target Value Evaluator (Requires plays to develop!)
     const getTargetValue = (slot) => {
-        const info = getTargetInfo(slot);
-        if (!info) return null;
+        const rec = offenseTeam.find(r => r.slot === slot);
+        if (!rec || !rec.action.includes('route')) return null;
 
-        const depth = info.state.y - playState.lineOfScrimmage;
+        // 1. ESTIMATE FLIGHT TIME
+        const distFromQB = getDistance(qbState, rec);
+        // Average ball speed is ~22 yps. Flight time = distance / speed
+        const estimatedFlightTime = distFromQB / 22; 
+
+        // 2. PROJECT POSITIONS AT ARRIVAL
+        // Where will the receiver be?
+        const projRecX = rec.x + (rec.vx || 0) * estimatedFlightTime;
+        const projRecY = rec.y + (rec.vy || 0) * estimatedFlightTime;
+
+        let minProjectedSeparation = 20;
+        let defendersClosingIn = 0;
+
+        defenseTeam.forEach(d => {
+            if (d.stunnedTicks > 0) return;
+
+            // Project where the defender will be when the ball arrives
+            // We assume they keep running their current direction (pursuit/zone)
+            const projDefX = d.x + (d.vx || 0) * estimatedFlightTime;
+            const projDefY = d.y + (d.vy || 0) * estimatedFlightTime;
+
+            const projDist = Math.hypot(projRecX - projDefX, projRecY - projDefY);
+            
+            if (projDist < minProjectedSeparation) {
+                minProjectedSeparation = projDist;
+            }
+
+            // Count how many defenders are projected to be within 5 yards of the catch
+            if (projDist < 5.0) {
+                defendersClosingIn++;
+            }
+        });
+
+        // 3. SCORING LOGIC (Using Projections)
+        const depth = rec.y - playState.lineOfScrimmage;
         const iqFactor = qbIQ / 100;
+        
+        // Base score uses PROJECTED separation
+        let score = (Math.min(minProjectedSeparation, 6) * 10); 
 
-        // 1. BASE SCORE (0-100 Scale)
-        // We value separation, but cap its impact so it doesn't balloon.
-        let score = (Math.min(info.separation, 5) * 12); // Max 60 points from separation
+        // DEPTH BONUSES
+        if (depth > 5 && depth < 15) score += 20;
+        if (depth >= 15) score += 30 * iqFactor;
 
-        // 2. DEPTH WEIGHTING
-        // QBs prefer moving the chains. 8-12 yards is the "Sweet Spot".
-        if (depth > 5 && depth < 15) score += 15;
-        if (depth >= 15) score += 25 * iqFactor; // Aggressive QBs love the deep ball
-        if (depth < 0) score -= 30; // Checkdowns behind the LOS are a last resort
-
-        // 3. THE "TIGHT WINDOW" PENALTY
-        // If separation is less than 1.2 yards, it's a "Contested" throw.
-        if (info.separation < 1.2) {
-            score -= (40 * (1 - iqFactor)); // Low IQ QBs don't realize how covered a guy is
+        // --- THE "TRIPLE COVERAGE" KILLER ---
+        // Heavily penalize throwing into "Crowds"
+        if (defendersClosingIn >= 2) {
+            // Low IQ QBs might still try it, High IQ QBs will see the crowd and look away
+            score -= (30 + (20 * iqFactor)); 
         }
 
-        // 4. THROW DISTANCE PENALTY (Realism)
-        // Harder to throw accurately across the field.
-        if (info.distFromQB > 30) score -= 10;
+        // --- SAFETY HELP RECOGNITION ---
+        // If it's a deep pass and the projected separation is tight, it's a dangerous throw
+        if (depth > 20 && minProjectedSeparation < 2.0) {
+            score -= 50; 
+        }
 
-        return { score, info };
+        // Penalty for checkdowns if not pressured
+        if (depth < 0 && !playState.isPressured) score -= 40;
+
+        return { score, rec, separation: minProjectedSeparation };
     };
 
     let targetPlayerState = null;
