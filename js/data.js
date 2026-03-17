@@ -517,9 +517,9 @@ export const defenseFormations = {
         slotPriorities: {
             'DL1': { strength: 3, blockShedding: 3, weight: 2 },
             'DL2': { strength: 3, weight: 3, blockShedding: 3 },
-            'LB3': { tackling: 3, speed: 2, playbookIQ: 2 },
             'LB1': { tackling: 3, speed: 2, playbookIQ: 2 },
             'LB2': { tackling: 3, speed: 2, playbookIQ: 2 },
+            'LB3': { tackling: 3, speed: 2, playbookIQ: 2 },
             'DB1': { speed: 3, catchingHands: 2, playbookIQ: 3 },
             'DB2': { speed: 3, catchingHands: 2, playbookIQ: 3 },
             'DB3': { agility: 3, playbookIQ: 3, tackling: 2 } // Safety
