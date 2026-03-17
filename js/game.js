@@ -4470,11 +4470,11 @@ function handleBallArrival(playState, carrier, playResult, gameLog) {
 
         // Catch Radius: A 6'4" (76 inch) player gets a massive 1.04 radius vs a 5'8" (68 in) 0.72 radius
         const heightBonus = Math.max(0, (playerHeight - 65) * 0.04);
-        const dynamicCatchRadius = 0.6 + heightBonus;
+        let dynamicCatchRadius = 0.6 + heightBonus; // ✅ FIX: Change const to let
         const CATCH_TOLERANCE = 0.25;
 
         if (p.action === 'tracking_ball') {
-            dynamicCatchRadius *= 1.2;
+            dynamicCatchRadius *= 1.2; // Works perfectly now
         }
 
         const distNow = Math.sqrt((p.x - ball.x) ** 2 + (p.y - ball.y) ** 2);
