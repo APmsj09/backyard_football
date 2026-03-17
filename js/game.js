@@ -1797,6 +1797,20 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
                 // Defense reacts to the offense moving, inherent 2-tick penalty (0.1s)
                 if (!isOffense) reactionTicks += 2;
             }
+            const speed = player.attributes?.physical?.speed || 50;
+            const agility = player.attributes?.physical?.agility || 50;
+            const strength = player.attributes?.physical?.strength || 50;
+            const weight = player.attributes?.physical?.weight || 150;
+            const height = player.attributes?.physical?.height || 68;
+            const iq = player.attributes?.mental?.playbookIQ || 50;
+            const consistency = player.attributes?.mental?.consistency || 50;
+            const toughness = player.attributes?.mental?.toughness || 50;
+            const catching = player.attributes?.technical?.catchingHands || 50;
+            const tackling = player.attributes?.defense?.tackling || 50;
+            const blocking = player.attributes?.technical?.blocking || 50;
+            const blockShedding = player.attributes?.technical?.blockShedding || 50;
+            const accuracy = player.attributes?.technical?.throwingAccuracy || 50;
+            const coverage = player.attributes?.defense?.passCoverage || 50;
 
             const pState = {
                 id: player.id,
@@ -1815,17 +1829,39 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
                 x: startX, y: startY, initialX: startX, initialY: startY,
                 targetX: targetX, targetY: targetY,
 
-                // 💡 FIX 2: ENSURE ATTRIBUTES EXIST (Prevent NaN errors)
-                // Use optional chaining (?.) and strict defaults
-                speed: player.attributes?.physical?.speed || 50,
-                agility: player.attributes?.physical?.agility || 50,
-                strength: player.attributes?.physical?.strength || 50,
-                weight: player.attributes?.physical?.weight || 150, // Default to 150lb if missing
-                height: player.attributes?.physical?.height || 68,  // Default to 5'8"
-
-                playbookIQ: player.attributes?.mental?.playbookIQ || 50,
-                // 🔧 HIGH FIX: Initialize fatigue modifier based on stamina stat
                 fatigueModifier: fatigueMod,
+
+                // --- PERFORMANCE ALIASES (For the physics loop) ---
+                spd: speed, 
+                agi: agility, 
+                str: strength, 
+                wgt: weight, 
+                hgt: height,
+                iq: iq, 
+                cons: consistency, 
+                tgh: toughness,
+                ctch: catching, 
+                tkl: tackling, 
+                blk: blocking, 
+                shed: blockShedding, 
+                acc: accuracy,
+                cov: coverage,
+
+                // --- LEGACY COMPATIBILITY (For your existing functions) ---
+                speed: speed,
+                agility: agility,
+                strength: strength,
+                weight: weight,
+                height: height,
+                playbookIQ: iq,
+                consistency: consistency,
+                toughness: toughness,
+                catchingHands: catching,
+                tackling: tackling,
+                blocking: blocking,
+                blockShedding: blockShedding,
+                throwingAccuracy: accuracy,
+                coverage: coverage,
 
                 // Logic State
                 action: action,
@@ -2285,7 +2321,7 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
         playState.activePlayers.forEach(pState => {
             if (pState.stunnedTicks > 0) { pState.stunnedTicks--; return; }
             if (pState.isBlocked || pState.isEngaged) return;
-            
+
 
             if (pState.id === ballCarrierState.id) {
                 // 1. The Returner: Run towards y = 10 (Opposite endzone)
@@ -2418,8 +2454,14 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                 target.isEngaged = true;
                 target.isBlocked = true;
                 target.blockedBy = blocker.id;
+
+                // Add to Battle Queue
                 playState.blockBattles.push({
-                    blockerId: blocker.id, defenderId: target.id, status: 'ongoing', battleScore: 0, startTick: playState.tick
+                    blockerId: blocker.id,
+                    defenderId: target.id,
+                    status: 'ongoing',
+                    battleScore: strDiff / 10, // Initial advantage
+                    startTick: playState.tick
                 });
             }
         } else {
@@ -3097,69 +3139,69 @@ function checkBlockCollisions(playState) {
 
         // 4. Engage
         if (target) {
-            // Calculate Strength Win/Loss immediately to set initial momentum
+            // Use the flattened .str stat we mapped earlier for faster access
             const strDiff = (blocker.strength || 50) - (target.strength || 50);
 
-            // Link them
+            // Link objects directly instead of using IDs
             blocker.isEngaged = true;
-            blocker.engagedWith = target.id;
+            blocker.engagedWith = target;
+
             target.isEngaged = true;
             target.isBlocked = true;
-            target.blockedBy = blocker.id;
+            target.blockedBy = blocker;
 
-            // Add to Battle Queue
+            // Store the actual objects in the battle queue
             playState.blockBattles.push({
-                blockerId: blocker.id,
-                defenderId: target.id,
+                blocker: blocker,   // Pointer to the object
+                defender: target,  // Pointer to the object
                 status: 'ongoing',
-                battleScore: strDiff / 10, // Initial advantage
+                battleScore: strDiff / 10,
                 startTick: playState.tick
             });
         }
     });
 }
 function checkTackleCollisions(playState, gameLog) {
-    // 1. Find Ball Carrier
+    // 1. Find Ball Carrier (We use the pre-found state)
     const carrier = playState.activePlayers.find(p => p.hasBall && !playState.ballState.isLoose);
     if (!carrier) return false;
 
-    // 2. Find Active Defenders in Range
-    const defenders = playState.activePlayers.filter(p => {
-        if (p.teamId === carrier.teamId || p.stunnedTicks > 0) return false;
+    // 2. Identify Defense (Use the pre-filtered team if available, or filter now)
+    const defenseTeam = playState.activePlayers.filter(p => !p.isOffense);
 
-        const dist = getDistance(p, carrier);
+    const defenders = defenseTeam.filter(p => {
+        if (p.stunnedTicks > 0) return false;
+
+        // --- OPTIMIZATION: Use cached distance from the start of the tick ---
+        const dist = p._distToCarrier;
         if (dist > TACKLE_RANGE) return false;
 
         // 💡 FIX: Prevent DL from reaching *through* the OL to sack the QB
         if (p.isBlocked || p.isEngaged) {
-            const blockerId = p.blockedBy || p.engagedWith;
-            const blocker = playState.activePlayers.find(b => b.id === blockerId);
+            // OPTIMIZATION: Use the direct object reference instead of .find(id)
+            const blocker = p.blockedBy || p.engagedWith;
 
-            if (blocker) {
+            if (blocker && typeof blocker === 'object') {
+                // Calculate distance to blocker (this happens rarely, so getDistance is fine here)
                 const distToBlocker = getDistance(p, blocker);
 
-                // If the carrier is further away than the blocker, check if they are shielded
                 if (dist > distToBlocker) {
                     const dxC = carrier.x - p.x;
                     const dyC = carrier.y - p.y;
                     const dxB = blocker.x - p.x;
                     const dyB = blocker.y - p.y;
 
-                    // Dot product determines alignment. > 0.4 means carrier is behind blocker's body
+                    // Dot product to see if carrier is "behind" the blocker
                     const dot = (dxC * dxB + dyC * dyB) / (dist * distToBlocker);
 
-                    if (dot > 0.4) {
-                        return false; // Blocker is successfully shielding the carrier!
-                    }
+                    if (dot > 0.4) return false;
                 }
             }
-
-            // If not shielded, they can make a "reach" tackle to the side, 
-            // but at a reduced range (1.3 yds) because they only have one arm free.
+            // Reach tackle range
             return dist < 1.3;
         }
 
-        return true; // Unblocked defenders use the full TACKLE_RANGE
+        return true;
     });
 
     for (const defender of defenders) {
@@ -3283,8 +3325,23 @@ function checkTackleCollisions(playState, gameLog) {
 
         const brokenTacklePenalty = (carrier.tacklesBrokenThisPlay || 0) * 0.15;
 
-        let successChance = 0.82 + ((tacklerSkill - runnerSkill) * 0.005) - momentumBonus - speedBonus + brokenTacklePenalty;
-        successChance = Math.max(0.20, Math.min(0.985, successChance));
+        let successChance = 0.65;
+
+        // Stat Comparison
+        const skillGap = (tacklerSkill - runnerSkill) * 0.008;
+        successChance += skillGap;
+
+        // Speed/Momentum Factor
+        // A fast runner is HARDER to tackle (Jukes/Speed)
+        const speedPenalty = (carrier.currentSpeedYPS || 0) * 0.03;
+        successChance -= speedPenalty;
+
+        // Strength/Weight Factor
+        // Big backs are harder to bring down
+        const weightAdvantage = (carrier.weight - defender.weight) / 500;
+        successChance -= weightAdvantage;
+
+        successChance = Math.max(0.15, Math.min(0.96, successChance));
 
         if (Math.random() < successChance) {
             // --- TACKLE SUCCESS ---
@@ -3479,13 +3536,14 @@ function resolveOngoingBlocks(playState, gameLog, offenseStates = [], defenseSta
             return;
         }
 
-        const blocker = playState.activePlayers.find(p => p.id === battle.blockerId);
-        const defender = playState.activePlayers.find(p => p.id === battle.defenderId);
+        const blocker = battle.blocker;
+        const defender = battle.defender;
+
 
         // 1. Validation Checks
         if (!blocker || !defender ||
-            blocker.engagedWith !== defender.id ||
-            defender.blockedBy !== blocker.id ||
+            blocker.engagedWith !== defender ||
+            defender.blockedBy !== blocker ||
             blocker.stunnedTicks > 0 || defender.stunnedTicks > 0) {
 
             // Force disengage
@@ -3869,48 +3927,27 @@ function updateQBDecision(qbState, offenseStates, defenseStates, playState, offe
         if (!info) return null;
 
         const depth = info.state.y - playState.lineOfScrimmage;
+        const iqFactor = qbIQ / 100;
 
-        // BASE SCORE: 💡 FIX: Soft cap depth bonus at 15 yards. Forces QB to value separation underneath over double-covered deep shots.
-        let score = (info.separation * 25) + (Math.min(depth, 15) * 0.8);
+        // 1. BASE SCORE (0-100 Scale)
+        // We value separation, but cap its impact so it doesn't balloon.
+        let score = (Math.min(info.separation, 5) * 12); // Max 60 points from separation
 
+        // 2. DEPTH WEIGHTING
+        // QBs prefer moving the chains. 8-12 yards is the "Sweet Spot".
+        if (depth > 5 && depth < 15) score += 15;
+        if (depth >= 15) score += 25 * iqFactor; // Aggressive QBs love the deep ball
+        if (depth < 0) score -= 30; // Checkdowns behind the LOS are a last resort
 
-        // PENALTY: Heavily punish throwing into coverage
-        if (info.separation < OPEN_SEP) {
-            score -= 60;
+        // 3. THE "TIGHT WINDOW" PENALTY
+        // If separation is less than 1.2 yards, it's a "Contested" throw.
+        if (info.separation < 1.2) {
+            score -= (40 * (1 - iqFactor)); // Low IQ QBs don't realize how covered a guy is
         }
 
-        // AGGRESSION: High IQ QBs value chunk yardage
-        if (depth > 12 && qbIQ > 70) score += (qbIQ - 60) * 0.8;
-
-        // 💡 NEW: TIMING ROUTES & ANTICIPATION
-        const recState = info.state;
-        if (recState.action === 'run_route' && recState.routePath) {
-            const isLastCut = recState.currentPathIndex === recState.routePath.length - 1;
-            const nextNode = recState.routePath[recState.currentPathIndex];
-            const distToCut = getDistance(recState, nextNode);
-
-            if (!isLastCut) {
-                // If it's NOT the last cut, normally we hold the ball.
-                // BUT if the receiver is within 1.5 yards of their cut, a smart QB will throw it BEFORE they turn!
-                if (distToCut <= 1.5 && qbIQ >= 75) {
-                    score += 25; // Elite anticipation throw (Timing Route)
-                } else {
-                    score -= 30; // Hold the ball, the route is still developing!
-                }
-            } else {
-                // This is the final leg of the route.
-                // If they are actively making the turn right now, boost the score
-                if (distToCut < 1.0) {
-                    score += 15;
-                }
-            }
-        }
-
-        // CHECKDOWN PENALTY: Refuse to throw dump-offs in the first few seconds if the pocket is clean!
-        if (depth < 4 && !isPressured) {
-            if (playState.tick < 80) score -= 50;
-            else if (playState.tick < 105) score -= 20;
-        }
+        // 4. THROW DISTANCE PENALTY (Realism)
+        // Harder to throw accurately across the field.
+        if (info.distFromQB > 30) score -= 10;
 
         return { score, info };
     };
@@ -4180,34 +4217,39 @@ function executeThrow(qbState, target, strength, accuracy, playState, gameLog, a
         aimY += vy * estTime;
     }
 
-    // 💡 FIX: Directional Accuracy Error
-    // Instead of a random circle, we bias errors to land "long" or "wide" 
-    // rather than "behind," which is where most real-life misses happen.
-    const baseErrorMargin = (100 - accuracy) / 18;
+    // 💡 NEW: Skill-Mitigated Distance Accuracy
+    // Accurate QBs "flatten the curve" of distance-based errors.
+    // distancePower: 1.5 for bad QBs (exponential growth), 0.5 for elite (negligible growth)
+    const distancePower = 1.5 - (accuracy / 100);
+    const distanceFactor = Math.pow(throwDistance / 25, distancePower);
 
-    // Calculate the vector from QB to target
+    // Base error is reduced significantly by accuracy stat
+    let baseErrorMargin = ((100 - accuracy) / 12) * distanceFactor;
+
+    // Pressure/Panic Modifier (Mitigated by IQ)
+    if (playState.isPressured || qbState.action === 'qb_scramble') {
+        const iqMitigation = (qbState.playbookIQ || 50) / 100;
+        const panicFactor = 2.0 - iqMitigation; // High IQ = 1.0x (no panic), Low IQ = 2.0x (double error)
+        baseErrorMargin *= panicFactor;
+    }
+
+    // Directional Vector Math (Longitudinal vs Lateral)
     const dirX = aimX - startX;
     const dirY = aimY - startY;
-    const mag = Math.sqrt(dirX * dirX + dirY * dirY);
+    const mag = Math.max(0.1, Math.sqrt(dirX * dirX + dirY * dirY));
     const unitX = dirX / mag;
     const unitY = dirY / mag;
 
-    // Longitudinal Error (Overthrow/Underthrow)
-    // We bias this to be positive (overthrow) 60% of the time
-    const longBias = (Math.random() > 0.4) ? 1.2 : -0.8;
+    // Longitudinal Error (Overthrow/Underthrow) - Realism: Most misses are deep
+    const longBias = (Math.random() > 0.3) ? 1.3 : -0.7;
     const longError = (Math.random() * baseErrorMargin) * longBias;
 
     // Lateral Error (Left/Right)
-    const latError = (Math.random() - 0.5) * baseErrorMargin * 1.5;
+    const latError = (Math.random() - 0.5) * baseErrorMargin * 1.2;
 
-    // Apply errors: move along the pass line (long) and perpendicular to it (lat)
+    // Apply corrected coordinates
     aimX += (unitX * longError) + (-unitY * latError);
     aimY += (unitY * longError) + (unitX * latError);
-
-    // Safety Clamp
-    const PAD = 10;
-    aimX = Math.max(-PAD, Math.min(FIELD_WIDTH + PAD, aimX));
-    aimY = Math.max(-PAD, Math.min(FIELD_LENGTH + PAD, aimY));
 
     // 💡 FIX: Move the Log here! Now aimX, aimY, and throwDistance actually exist.
     if (gameLog) {
@@ -4455,7 +4497,12 @@ function handleBallArrival(playState, carrier, playResult, gameLog) {
         });
         const bestCandidate = playersInRange[0];
 
-        let catching = 50; let agility = 50;
+        // No more let catching = 50;
+        // We pull directly from the pState we set up at the start of the play
+        const catching = bestCandidate.catching || 50;
+        const agility = bestCandidate.agility || 50;
+
+
         if (bestCandidate.attributes) {
             catching = bestCandidate.attributes.technical?.catchingHands || 50;
             agility = bestCandidate.attributes.physical?.agility || 50;
@@ -4466,6 +4513,10 @@ function handleBallArrival(playState, carrier, playResult, gameLog) {
                 agility = pObj.attributes?.physical?.agility || 50;
             }
         }
+
+        // 2. NOW calculate the display stats for the game log
+        const hndEff = Math.round(catching * (bestCandidate.fatigueModifier || 1));
+        const fatPct = Math.round((bestCandidate.fatigueModifier || 1) * 100);
 
         const isDefense = !bestCandidate.isOffense;
         const pushLog = (m) => {
@@ -4921,68 +4972,79 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
             if (pObj) playerCache.set(pState.id, pObj);
         });
 
+        // --- PERFORMANCE MAPPING (Do this once BEFORE the loop) ---
+        const offenseTeam = playState.activePlayers.filter(p => p.isOffense);
+        const defenseTeam = playState.activePlayers.filter(p => !p.isOffense);
+
+        // Map specific players so we don't have to .find() them every tick
+        const qb1 = playState.activePlayers.find(p => p.slot === 'QB1');
+        const rb1 = playState.activePlayers.find(p => p.slot === 'RB1');
+
         while (playState.playIsLive && playState.tick < playState.maxTicks) {
-            if (!playState.playIsLive) break; // Force exit if a previous logic block ended the play
+            if (!playState.playIsLive) break;
             playState.tick++;
 
-            // --- A. REFERENCES ---
             const ballPos = playState.ballState;
-            // Refresh references in case array order changed (unlikely but safe)
-            const activeOffense = playState.activePlayers.filter(p => p?.isOffense);
-            const activeDefense = playState.activePlayers.filter(p => !p?.isOffense);
 
-            // Find Carrier
-            ballCarrierState = playState.activePlayers.find(p => p?.hasBall || p?.isBallCarrier) || null;
+            // A. FIND CARRIER & CACHE DISTANCES
+            // We look for carrier once. If found, we update distances for the whole defense.
+            ballCarrierState = playState.activePlayers.find(p => p.hasBall || p.isBallCarrier) || null;
 
-            // --- B. DECISION MAKING ---
-            if (playState.playIsLive && !ballPos.inAir && !ballPos.isLoose && !playState.turnover && !playState.sack) {
-                if (loopType === 'pass' && typeof updateQBDecision === 'function') {
-                    // This calls the ADVANCED logic we added earlier
-                    updateQBDecision(qbState, activeOffense, activeDefense, playState, playState.assignments, gameLog);
-                } else if (loopType === 'punt' && typeof updatePunterDecision === 'function') {
-                    updatePunterDecision(playState, activeOffense, gameLog);
+            if (ballCarrierState) {
+                // This allows checkTackleCollisions to be nearly instant later on
+                for (let i = 0; i < defenseTeam.length; i++) {
+                    const d = defenseTeam[i];
+                    const dx = d.x - ballCarrierState.x;
+                    const dy = d.y - ballCarrierState.y;
+                    d._distToCarrier = Math.sqrt(dx * dx + dy * dy);
                 }
             }
-            if (!playState.playIsLive) break;
-            if (playState.handoffRequired && !playState.handoffOccurred) {
-                const qb = playState.activePlayers.find(p => p.slot === 'QB1');
-                const rb = playState.activePlayers.find(p => p.slot === 'RB1');
 
-                if (qb && rb) {
-                    // Calculate the Mesh Point (where they meet)
-                    // Usually 1.5 yards behind LOS and 1-2 yards toward the RB's side
-                    const meshX = qb.initialX + (rb.initialX > qb.initialX ? 1.5 : -1.5);
+            // B. DECISION MAKING
+            if (playState.playIsLive && !ballPos.inAir && !ballPos.isLoose && !playState.turnover && !playState.sack) {
+                if (loopType === 'pass' && typeof updateQBDecision === 'function') {
+                    // Use our pre-filtered offenseTeam and defenseTeam
+                    updateQBDecision(qbState, offenseTeam, defenseTeam, playState, playState.assignments, gameLog);
+                } else if (loopType === 'punt' && typeof updatePunterDecision === 'function') {
+                    updatePunterDecision(playState, offenseTeam, gameLog);
+                }
+            }
+
+            if (!playState.playIsLive) break;
+
+            // C. HANDOFF LOGIC (Optimized with pre-mapped qb1/rb1)
+            if (playState.handoffRequired && !playState.handoffOccurred) {
+                if (qb1 && rb1) {
+                    const meshX = qb1.initialX + (rb1.initialX > qb1.initialX ? 1.5 : -1.5);
                     const meshY = playState.lineOfScrimmage - 1.2;
 
-                    // 💡 FIX: Realistic pacing. Handoffs take ~1.2 seconds (24 ticks) to develop.
                     if (playState.tick < 24) {
-                        // QB moves to mesh point and "turns"
-                        qb.targetX = meshX;
-                        qb.targetY = meshY;
-                        qb.action = 'handoff_setup';
+                        qb1.targetX = meshX;
+                        qb1.targetY = meshY;
+                        qb1.action = 'handoff_setup';
 
-                        // RB jogs to the mesh point
-                        rb.targetX = meshX;
-                        rb.targetY = meshY;
-                        rb.action = 'run_path';
-                        // Keep speed restrained so they don't overrun the QB
-                        rb.contactReduction = 0.85;
+                        rb1.targetX = meshX;
+                        rb1.targetY = meshY;
+                        rb1.action = 'run_path';
+                        rb1.contactReduction = 0.85;
                     } else {
-                        // Execute exchange
-                        const dist = getDistance(qb, rb);
+                        // Use cached distance to save a function call
+                        const dx = qb1.x - rb1.x;
+                        const dy = qb1.y - rb1.y;
+                        const dist = Math.sqrt(dx * dx + dy * dy);
+
                         if (dist < 1.5 || playState.tick >= 28) {
-                            qb.hasBall = false;
-                            qb.isBallCarrier = false;
-                            rb.hasBall = true;
-                            rb.isBallCarrier = true;
+                            qb1.hasBall = false;
+                            qb1.isBallCarrier = false;
+                            rb1.hasBall = true;
+                            rb1.isBallCarrier = true;
                             playState.handoffOccurred = true;
 
-                            // QB carries out a fake to the opposite side
-                            qb.targetX = qb.initialX + (rb.initialX > qb.initialX ? -5 : 5);
-                            qb.targetY = qb.y - 2;
-                            qb.action = 'run_fake';
+                            qb1.targetX = qb1.initialX + (rb1.initialX > qb1.initialX ? -5 : 5);
+                            qb1.targetY = qb1.y - 2;
+                            qb1.action = 'run_fake';
 
-                            if (gameLog) pushGameLog(gameLog, `[Tick ${playState.tick}] 🏈 Handoff mesh complete to ${rb.name}`);
+                            if (gameLog) pushGameLog(gameLog, `[Tick ${playState.tick}] 🏈 Handoff mesh complete to ${rb1.name}`);
                         }
                     }
                 }
