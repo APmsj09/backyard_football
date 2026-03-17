@@ -3990,7 +3990,11 @@ function updateQBDecision(qbState, offenseStates, defenseStates, playState, offe
         // Penalty for checkdowns if not pressured
         if (depth < 0 && !playState.isPressured) score -= 40;
 
-        return { score, rec, separation: minProjectedSeparation };
+        return { 
+            score: score, 
+            info: { state: rec }, // The engine needs best.info.state
+            separation: minProjectedSeparation 
+        };
     };
 
     let targetPlayerState = null;
