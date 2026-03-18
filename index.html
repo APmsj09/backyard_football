@@ -481,20 +481,30 @@
               <div id="sim-field-players" class="flex-grow flex flex-col p-0"></div>
             </div>
             <div id="pane-strategy" class="absolute inset-0 overflow-y-auto hidden p-4 flex flex-col gap-4">
-              <div class="bg-gray-800 p-3 rounded border border-gray-700">
-                <label class="block text-[10px] uppercase font-bold text-gray-400 mb-2">Offensive Formation</label>
+              <div class="bg-gray-800 p-3 rounded border border-gray-700 shadow-sm">
+                <label class="block text-[10px] uppercase font-bold text-gray-400 mb-1">Offensive Gameplan</label>
+                <p class="text-[11px] text-gray-500 mb-2 leading-tight">Change formations to adapt. Spread the field for
+                  passing, or pack the box for running.</p>
                 <select id="sim-offense-formation"
-                  class="w-full bg-gray-900 text-white text-xs border border-gray-600 rounded p-1.5 focus:border-amber-500 outline-none"></select>
+                  class="w-full bg-gray-900 text-white text-xs border border-gray-600 rounded p-1.5 focus:border-amber-500 outline-none mb-1"></select>
+                <div id="sim-offense-personnel"
+                  class="text-[10px] text-amber-400 font-mono font-bold mt-1 bg-gray-900 px-2 py-1 rounded inline-block">
+                </div>
               </div>
-              <div class="bg-gray-800 p-3 rounded border border-gray-700">
-                <label class="block text-[10px] uppercase font-bold text-gray-400 mb-2">Defensive Formation</label>
+              <div class="bg-gray-800 p-3 rounded border border-gray-700 shadow-sm">
+                <label class="block text-[10px] uppercase font-bold text-gray-400 mb-1">Defensive Gameplan</label>
+                <p class="text-[11px] text-gray-500 mb-2 leading-tight">Match the offense. Use more DBs to counter the
+                  pass, or heavy fronts (DL/LB) to stop the run.</p>
                 <select id="sim-defense-formation"
-                  class="w-full bg-gray-900 text-white text-xs border border-gray-600 rounded p-1.5 focus:border-amber-500 outline-none"></select>
+                  class="w-full bg-gray-900 text-white text-xs border border-gray-600 rounded p-1.5 focus:border-amber-500 outline-none mb-1"></select>
+                <div id="sim-defense-personnel"
+                  class="text-[10px] text-blue-400 font-mono font-bold mt-1 bg-gray-900 px-2 py-1 rounded inline-block">
+                </div>
               </div>
-              <div class="bg-gray-800 p-3 rounded border border-gray-700">
+              <div class="bg-gray-800 p-3 rounded border border-gray-700 shadow-sm">
                 <label class="block text-[10px] uppercase font-bold text-gray-400 mb-2">Auto-Sub Threshold</label>
-                <p class="text-xs text-gray-500 mb-3 leading-tight">The AI handles fatigue automatically. Lowering the
-                  threshold forces players to sub out earlier.</p>
+                <p class="text-[11px] text-gray-500 mb-3 leading-tight">The AI handles fatigue automatically. Lowering
+                  the threshold forces players to sub out earlier.</p>
                 <div class="flex items-center gap-3">
                   <input type="range" id="sim-auto-sub-slider" min="30" max="90" value="65"
                     class="flex-grow accent-amber-500">

@@ -213,10 +213,14 @@ export function setupElements() {
         simGameDown: getEl('sim-game-down'),
         simPossession: getEl('sim-possession'),
 
+        // 💡 FIX: Safely bind the new dynamic layout IDs
+        simFieldPlayers: getEl('sim-field-players', true),
+        simPlayersList: getEl('sim-field-players', true), // Alias for backward compatibility
+        simLiveStats: getEl('sim-live-stats', true),
+        simStatsAway: getEl('sim-stats-away', true),
+        simStatsHome: getEl('sim-stats-home', true),
 
-        simFieldPlayers: getEl('sim-field-players'),
         fieldCanvas: getEl('field-canvas'),
-
         simPlayLog: getEl('sim-play-log'),
         simSpeedBtns: document.querySelectorAll('.sim-speed-btn'),
         simSkipBtn: getEl('sim-skip-btn'),
@@ -3091,13 +3095,26 @@ function initSimStrategyTab() {
     const offSelect = document.getElementById('sim-offense-formation');
     const defSelect = document.getElementById('sim-defense-formation');
 
+    const updatePersonnelText = (side, formKey) => {
+        const map = side === 'offense' ? offenseFormations : defenseFormations;
+        const form = map[formKey];
+        if (!form) return;
+        const personnelText = Object.entries(form.personnel || {}).map(([pos, count]) => `${count} ${pos}`).join(', ');
+        const textEl = document.getElementById(`sim-${side}-personnel`);
+        if (textEl) textEl.textContent = `Personnel: ${personnelText}`;
+    };
+
     if(offSelect) {
         offSelect.innerHTML = Object.entries(offenseFormations)
             .filter(([k]) => k !== 'Punt' && k !== 'Punt_Return')
             .map(([k,v]) => `<option value="${k}" ${gs.playerTeam.formations.offense === k ? 'selected' : ''}>${v.name}</option>`)
             .join('');
+        
+        updatePersonnelText('offense', gs.playerTeam.formations.offense);
+        
         offSelect.onchange = (e) => {
             Game.changeFormationSmart('offense', e.target.value);
+            updatePersonnelText('offense', e.target.value);
             Game.saveGameState();
         };
     }
@@ -3107,8 +3124,12 @@ function initSimStrategyTab() {
             .filter(([k]) => k !== 'Punt' && k !== 'Punt_Return')
             .map(([k,v]) => `<option value="${k}" ${gs.playerTeam.formations.defense === k ? 'selected' : ''}>${v.name}</option>`)
             .join('');
+            
+        updatePersonnelText('defense', gs.playerTeam.formations.defense);
+
         defSelect.onchange = (e) => {
             Game.changeFormationSmart('defense', e.target.value);
+            updatePersonnelText('defense', e.target.value);
             Game.saveGameState();
         };
     }

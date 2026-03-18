@@ -940,77 +940,47 @@ function aiSetDepthChart(team) {
 
     // 1. Initialize Depth Order Buckets (The Source of Truth)
     team.depthOrder = {
-        'QB': [], 'RB': [], 'WR': [], 'TE': [], 'OL': [],
-        'DL': [], 'LB': [], 'DB': []
+        'QB': [], 'RB': [], 'WR': [], 'TE': [], 'OL':[],
+        'DL': [], 'LB': [], 'DB':[]
     };
 
     // Filter out injured/busy players before sorting
     const healthyPlayers = rosterObjs.filter(p => !p.status || p.status.duration === 0);
     const sortRoster = healthyPlayers.length > 0 ? healthyPlayers : rosterObjs;
 
-    // 2. Distribute into Buckets First
-    const bucketMap = {
-        'QB': [], 'RB': [], 'WR': [], 'TE': [], 'OL': [],
-        'DL': [], 'LB': [], 'DB': []
-    };
+    // 2. 💡 THE UPGRADE: Deep, Intelligent Backup Sorting
+    // Instead of putting players into just ONE bucket, we evaluate the ENTIRE healthy roster
+    // for EVERY position, creating a deep pool of backups so the AI never runs out of subs.
+    const positions = Object.keys(team.depthOrder);
 
-    sortRoster.forEach(p => {
-        if (!p || !p.id) return;
+    positions.forEach(pos => {
+        // Clone roster array for independent sorting
+        const candidates = [...sortRoster];
 
-        // Determine Offensive Bucket
-        let offPos = p.favoriteOffensivePosition || 'WR';
-        if (['FB'].includes(offPos)) offPos = 'RB';
-        if (['ATH', 'K', 'P'].includes(offPos)) offPos = 'WR';
-        if (['OT', 'OG', 'C'].includes(offPos)) offPos = 'OL';
-        if (!bucketMap[offPos]) offPos = 'WR';
-
-        // Determine Defensive Bucket
-        let defPos = p.favoriteDefensivePosition || 'DB';
-        if (['CB', 'S', 'FS', 'SS'].includes(defPos)) defPos = 'DB';
-        if (['DE', 'DT', 'NT'].includes(defPos)) defPos = 'DL';
-        if (!bucketMap[defPos]) defPos = 'DB';
-
-        bucketMap[offPos].push(p);
-
-        // Push player to defensive bucket if different so ironman logic works
-        if (offPos !== defPos && bucketMap[defPos]) {
-            bucketMap[defPos].push(p);
-        }
-    });
-
-    // 3. Sort Each Position Bucket Realistically
-    for (const pos of Object.keys(bucketMap)) {
-        const players = bucketMap[pos];
-
-        // Remove duplicates just in case
-        const uniquePlayers = Array.from(new Set(players));
-
-        uniquePlayers.sort((a, b) => {
+        candidates.sort((a, b) => {
             const ovrA = calculateOverall(a, pos);
             const ovrB = calculateOverall(b, pos);
 
-            // 💡 REALISM FIX: Coaches value smart, reliable players. Give them a subjective bump.
-            const iqA = a.attributes?.mental?.playbookIQ || 50;
-            const iqB = b.attributes?.mental?.playbookIQ || 50;
-            const consA = a.attributes?.mental?.consistency || 50;
-            const consB = b.attributes?.mental?.consistency || 50;
+            // Give a +15 OVR artificial boost if it's the player's true natural position.
+            // This ensures natural WRs start over DBs at WR, unless the DB is overwhelmingly better.
+            const isNaturalA = (a.favoriteOffensivePosition === pos || a.favoriteDefensivePosition === pos || a.pos === pos) ? 15 : 0;
+            const isNaturalB = (b.favoriteOffensivePosition === pos || b.favoriteDefensivePosition === pos || b.pos === pos) ? 15 : 0;
 
-            // "Coach's Eye" Noise: Small seeded bias so evaluations aren't perfectly mathematical
-            const biasA = (a.id.charCodeAt(0) % 5) - 2;
-            const biasB = (b.id.charCodeAt(0) % 5) - 2;
+            // Coaches like smart/consistent players (noise)
+            const biasA = ((a.attributes?.mental?.playbookIQ || 50) - 50) * 0.1;
+            const biasB = ((b.attributes?.mental?.playbookIQ || 50) - 50) * 0.1;
 
-            // Smart/consistent players can play up to +3 to +5 OVR better in a coach's eyes
-            const perceivedValueA = ovrA + ((iqA - 50) * 0.06) + ((consA - 50) * 0.06) + biasA;
-            const perceivedValueB = ovrB + ((iqB - 50) * 0.06) + ((consB - 50) * 0.06) + biasB;
+            const perceivedValueA = ovrA + isNaturalA + biasA;
+            const perceivedValueB = ovrB + isNaturalB + biasB;
 
             return perceivedValueB - perceivedValueA; // Sort Descending
         });
 
-        // Map back to IDs
-        team.depthOrder[pos] = uniquePlayers.map(p => p.id);
-    }
+        // Save the sorted IDs to the bucket
+        team.depthOrder[pos] = candidates.map(p => p.id);
+    });
 
-    // 4. Now that depthOrder is correct, let the rebuilder handle the slot assignments
+    // 4. Now that depthOrder has deep reserves, re-assign the visual depth chart slots
     rebuildDepthChartFromOrder(team);
 }
 
@@ -4867,13 +4837,18 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
 
     // Load the actual play object (Deep clone to prevent mutating the playbook)
     const play = deepClone(offensivePlaybook[finalOffensivePlayKey]);
+    const defPlay = defensivePlaybook[defensivePlayKey] || { concept: 'Zone' };
 
     if (gameLog) {
         // Convert down number to ordinal (1st, 2nd, etc.)
-        const downNames = ["", "1st", "2nd", "3rd", "4th"];
+        const downNames =["", "1st", "2nd", "3rd", "4th"];
         const downStr = downNames[down] || down;
+        
+        // 💡 NEW: Enhanced play call debugging context
+        const offType = play.type ? play.type.toUpperCase() : 'UNKNOWN';
+        const defType = defPlay.concept ? defPlay.concept.toUpperCase() : 'UNKNOWN';
 
-        pushGameLog(gameLog, `📋 ${downStr} Down | Play Call | OFF: ${finalOffensivePlayKey} | DEF: ${defensivePlayKey}`);
+        pushGameLog(gameLog, `📋 ${downStr} & ${yardsToGo} | OFF: ${finalOffensivePlayKey} (${offType}) | DEF: ${defensivePlayKey} (${defType})`);
     }
 
     // --- 4. INITIALIZE STATE ---
@@ -7258,7 +7233,13 @@ function substitutePlayers(teamId, outPlayerId, inPlayerId, gameLog = null) {
 
     const inPlayerName = inPlayer?.name || 'Unknown Player';
     const outPlayerName = outPlayer?.name || 'Unknown Player';
-    const logMsg = `🔄 SUB: ${inPlayerName} enters for ${outPlayerName}.`;
+    
+    // 💡 NEW: Calculate display energy for logging
+    const inEnergy = Math.round(100 - (inPlayer.fatigue || 0));
+    const outEnergy = Math.round(100 - (outPlayer.fatigue || 0));
+    
+    const logMsg = `🔄 SUB (${outSlot.slot}): ${inPlayerName} (${inEnergy}% E) enters for ${outPlayerName} (${outEnergy}% E).`;
+    
     console.log(logMsg);
     if (gameLog && Array.isArray(gameLog)) gameLog.push(logMsg);
     return { success: true, message: 'Substitution completed.' };
