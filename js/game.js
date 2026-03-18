@@ -6252,8 +6252,9 @@ function simulateLivePlayStep(game) {
 
     // --- 3. AUTO SUBSTITUTIONS ---
     // The coaching AI handles resting tired players dynamically
-    autoMakeSubstitutions(offense, { thresholdFatigue: 65, chance: 1.0 }, game.gameLog);
-    autoMakeSubstitutions(defense, { thresholdFatigue: 65, chance: 1.0 }, game.gameLog);
+    const autoSubThreshold = game.autoSubThreshold !== undefined ? game.autoSubThreshold : 65;
+    autoMakeSubstitutions(offense, { thresholdFatigue: autoSubThreshold, chance: 1.0 }, game.gameLog);
+    autoMakeSubstitutions(defense, { thresholdFatigue: autoSubThreshold, chance: 1.0 }, game.gameLog);
 
     // --- 4. EXECUTE THE PLAY ---
     const result = resolvePlay(offense, defense, offPlayKey, defPlayKey, context, {}, true);

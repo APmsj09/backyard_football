@@ -257,7 +257,33 @@ export function setupElements() {
 
     setupFormationListeners();
     setupDepthChartTabs();
+    setupSimTabs(); // 💡 FIX: Hook up the new Live Sim Sidebars
     console.log("UI Elements setup complete.");
+}
+
+function setupSimTabs() {
+    const setupTabGroup = (btn1, btn2, pane1, pane2, colorClass) => {
+        if(!btn1 || !btn2 || !pane1 || !pane2) return;
+        const activate = (activeBtn, inactiveBtn, activePane, inactivePane) => {
+            activeBtn.className = `flex-1 py-2.5 text-xs font-bold text-white bg-gray-900 border-t-2 border-${colorClass} transition-colors`;
+            inactiveBtn.className = `flex-1 py-2.5 text-xs font-bold text-gray-400 hover:text-white border-t-2 border-transparent bg-gray-800 transition-colors`;
+            activePane.classList.remove('hidden');
+            inactivePane.classList.add('hidden');
+        };
+        btn1.addEventListener('click', () => activate(btn1, btn2, pane1, pane2));
+        btn2.addEventListener('click', () => activate(btn2, btn1, pane2, pane1));
+    };
+
+    setupTabGroup(
+        document.getElementById('tab-btn-subs'), document.getElementById('tab-btn-strategy'),
+        document.getElementById('pane-subs'), document.getElementById('pane-strategy'),
+        'amber-500'
+    );
+    setupTabGroup(
+        document.getElementById('tab-btn-log'), document.getElementById('tab-btn-stats'),
+        document.getElementById('pane-log'), document.getElementById('pane-stats'),
+        'blue-500'
+    );
 }
 
 /**
@@ -2688,8 +2714,7 @@ function updateStatsFromLogEntry(entry) {
         }
     }
 
-    // D. Yards Gained (Matches: 💨 ✋ Tom Freeman tackled by... gain of 15.8)
-    // Also matches: ✋ Harper 'Gizmo' tackled by... loss of 2.7
+    // D. Yards Gained 
     const gainMatch = entry.match(/(?:✋|🎉|💨) (.*?) (?:tackled|scores|returns|breaks)/);
     const yardsMatch = entry.match(/gain of (-?\d+\.?\d*)|loss of (\d+\.?\d*)/);
 
@@ -2749,14 +2774,12 @@ function renderLiveStatsLive() {
     const home = currentLiveGameResult.homeTeam || {};
     const away = currentLiveGameResult.awayTeam || {};
 
-    // 💡 NEW: Calculate team totals dynamically from livePlayerStats
     const getTeamTotals = (team) => {
         let yards = 0;
         let turnovers = 0;
         team.roster.forEach(pid => {
             const s = livePlayerStats.get(pid);
             if (s) {
-                // Team yards = Passing + Rushing (to avoid double counting receiving)
                 yards += (s.passYards + s.rushYards);
                 turnovers += (s.interceptionsThrown + s.fumblesLost);
             }
@@ -2768,73 +2791,56 @@ function renderLiveStatsLive() {
     const aTotals = getTeamTotals(away);
 
     // --- Helper to build individual stats lines ---
-    const getTopPerformersHtml = (team) => {
+    const getTopPerformersHtml = (team, totals) => {
         if (!team || !team.roster) return '';
 
-        // Map roster IDs to their live stats objects
         const playersWithStats = team.roster.map(pid => {
             const stats = livePlayerStats.get(pid);
             if (!stats) return null;
             const pData = getPlayer(pid);
-
-            // Calculate an "Impact Score" to decide who to show in the limited sidebar space
             const impact = stats.passYards + stats.rushYards + stats.recYards + (stats.touchdowns * 20);
-
             return impact > 0 ? { name: pData.name, id: pid, impact, ...stats } : null;
         }).filter(p => p !== null);
 
-        // Sort by impact (highest first) and take the top 3
-        const top3 = playersWithStats.sort((a, b) => b.impact - a.impact).slice(0, 3);
+        const top5 = playersWithStats.sort((a, b) => b.impact - a.impact).slice(0, 5);
 
-        if (top3.length === 0) return '<div class="text-[10px] text-gray-500 italic">No stats yet...</div>';
+        let html = `
+            <div class="flex justify-between items-end border-b border-gray-600 pb-2 mb-3">
+                <h5 class="text-sm font-black text-white uppercase truncate">${team.name}</h5>
+                <span class="text-xs text-amber-400 font-mono">${totals.yards} YDS | ${totals.turnovers} TO</span>
+            </div>
+            <div class="space-y-3">
+        `;
 
-        return top3.map(p => {
-            let statLine = "";
-            // Determine the primary stat to show for this player
-            if (p.passAttempts > 0) {
-                statLine = `${p.passCompletions}/${p.passAttempts}, ${p.passYards} pass`;
-            } else if (p.rushYards >= p.recYards) {
-                statLine = `${p.rushYards} rush, ${p.rushAttempts} car`;
-            } else {
-                statLine = `${p.recYards} rec, ${p.receptions} ctch`;
-            }
+        if (top5.length === 0) {
+            html += '<div class="text-xs text-gray-500 italic">No stats yet...</div>';
+        } else {
+            html += top5.map(p => {
+                let statLine = "";
+                if (p.passAttempts > 0) statLine = `${p.passCompletions}/${p.passAttempts}, ${p.passYards} yds`;
+                else if (p.rushYards >= p.recYards) statLine = `${p.rushYards} rush yds, ${p.rushAttempts} car`;
+                else statLine = `${p.recYards} rec yds, ${p.receptions} rec`;
 
-            return `
-                <div class="mb-2 animate-fadeIn">
-                    <div class="flex justify-between items-baseline">
-                        <span class="text-[11px] font-bold text-gray-200 truncate w-24">${p.name}</span>
-                        <span class="text-[10px] font-bold text-amber-400">${p.touchdowns > 0 ? p.touchdowns + ' TD' : ''}</span>
+                return `
+                    <div class="animate-fadeIn">
+                        <div class="flex justify-between items-baseline mb-0.5">
+                            <span class="text-xs font-bold text-gray-200 truncate">${p.name}</span>
+                            <span class="text-[10px] font-bold text-amber-400">${p.touchdowns > 0 ? p.touchdowns + ' TD' : ''}</span>
+                        </div>
+                        <div class="text-[10px] text-gray-400 font-mono">${statLine}</div>
                     </div>
-                    <div class="text-[10px] text-gray-400 font-mono">${statLine}</div>
-                </div>
-            `;
-        }).join('');
+                `;
+            }).join('');
+        }
+        
+        html += `</div>`;
+        return html;
     };
 
-    // --- Build Final Layout ---
-    elements.simLiveStats.innerHTML = `
-        <div class="flex gap-4 h-full">
-            <div class="flex-1">
-                <div class="flex justify-between items-end border-b border-red-900/30 pb-1 mb-2">
-                    <h5 class="text-xs font-black text-red-400 uppercase truncate max-w-[80px]">${away.name}</h5>
-                    <span class="text-[10px] text-gray-500 font-mono">${aTotals.yards} YDS</span>
-                </div>
-                <div class="space-y-1">
-                    ${getTopPerformersHtml(away)}
-                </div>
-            </div>
-
-            <div class="flex-1">
-                <div class="flex justify-between items-end border-b border-blue-900/30 pb-1 mb-2">
-                    <h5 class="text-xs font-black text-blue-400 uppercase truncate max-w-[80px]">${home.name}</h5>
-                    <span class="text-[10px] text-gray-500 font-mono">${hTotals.yards} YDS</span>
-                </div>
-                <div class="space-y-1">
-                    ${getTopPerformersHtml(home)}
-                </div>
-            </div>
-        </div>
-    `;
+    const awayEl = document.getElementById('sim-stats-away');
+    const homeEl = document.getElementById('sim-stats-home');
+    if(awayEl) awayEl.innerHTML = getTopPerformersHtml(away, aTotals);
+    if(homeEl) homeEl.innerHTML = getTopPerformersHtml(home, hTotals);
 }
 
 function renderSimPlayers(frame) {
@@ -2919,25 +2925,25 @@ function renderSimPlayers(frame) {
             if (energyPct < 50) barColor = 'bg-yellow-500';
             if (energyPct < 25) barColor = 'bg-red-500';
 
+            // 💡 FIX: Restructured HTML to fit elegantly inside the narrow sidebar
             return `
-                <div class="flex items-center justify-between p-2 border-b border-gray-700 bg-gray-800/50">
-                    <div class="flex items-center gap-3">
-                        <div class="w-32">
-                            <div class="text-sm font-bold text-white">${p.name}</div>
-                            <div class="text-xs text-gray-400">#${p.number || '00'} • ${currentSlot}</div>
+                <div class="flex items-center justify-between p-2 border-b border-gray-700 bg-gray-800/50 hover:bg-gray-800 transition">
+                    <div class="flex-grow flex flex-col gap-1 overflow-hidden pr-2">
+                        <div class="flex justify-between items-baseline">
+                            <div class="text-[11px] font-bold text-white truncate pr-2">${p.name}</div>
+                            <div class="text-[9px] ${statusClass} whitespace-nowrap">${statusText}</div>
                         </div>
-                        <div class="w-32">
-                            <div class="relative h-2 bg-gray-600 rounded overflow-hidden">
-                                <div style="width:${energyPct}%" class="absolute left-0 top-0 h-full ${barColor}"></div>
+                        <div class="flex items-center gap-2">
+                            <div class="text-[10px] text-gray-400 font-mono w-14 shrink-0 truncate">#${p.number || '00'} ${currentSlot}</div>
+                            <div class="flex-grow h-1.5 bg-gray-600 rounded overflow-hidden">
+                                <div style="width:${energyPct}%" class="h-full ${barColor}"></div>
                             </div>
-                            <div class="text-[10px] text-gray-400 mt-1">Energy: ${energyPct}%</div>
                         </div>
-                        <div class="text-[10px] ${statusClass} w-20 text-right">${statusText}</div>
                     </div>
-                    <div>
+                    <div class="shrink-0 pl-1 border-l border-gray-700">
                         ${isStarter
-                    ? `<button data-player-id="${p.id}" class="sub-out-btn bg-red-900/80 hover:bg-red-700 text-red-100 text-xs py-1 px-3 rounded border border-red-700 transition">Out</button>`
-                    : `<button data-player-id="${p.id}" class="sub-in-btn bg-green-900/80 hover:bg-green-700 text-green-100 text-xs py-1 px-3 rounded border border-green-700 transition">In</button>`
+                    ? `<button data-player-id="${p.id}" class="sub-out-btn bg-red-900/80 hover:bg-red-700 text-red-100 text-[10px] font-bold py-1.5 px-3 rounded border border-red-700 transition">OUT</button>`
+                    : `<button data-player-id="${p.id}" class="sub-in-btn bg-green-900/80 hover:bg-green-700 text-green-100 text-[10px] font-bold py-1.5 px-3 rounded border border-green-700 transition">IN</button>`
                 }
                     </div>
                 </div>
@@ -2947,11 +2953,11 @@ function renderSimPlayers(frame) {
         // 6. BUILD HTML
         let html = '';
         if (starters.length > 0) {
-            html += '<div class="mb-4"><div class="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2 px-2">On Field</div>';
+            html += '<div class="mb-3"><div class="bg-gray-900 text-[10px] font-bold text-gray-500 uppercase tracking-widest px-3 py-1 border-y border-gray-800">On Field</div>';
             starters.forEach(s => { html += buildRow(s, true); });
             html += '</div>';
         }
-        html += '<div><div class="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2 px-2">Bench</div>';
+        html += '<div><div class="bg-gray-900 text-[10px] font-bold text-gray-500 uppercase tracking-widest px-3 py-1 border-y border-gray-800">Bench</div>';
         bench.forEach(b => { html += buildRow(b, false); });
         html += '</div>';
 
@@ -3077,6 +3083,49 @@ function animateQBShout(frame) {
     shake();
 }
 
+/** Prepares the in-game strategy tab controls */
+function initSimStrategyTab() {
+    const gs = Game.getGameState();
+    if(!gs || !gs.playerTeam) return;
+
+    const offSelect = document.getElementById('sim-offense-formation');
+    const defSelect = document.getElementById('sim-defense-formation');
+
+    if(offSelect) {
+        offSelect.innerHTML = Object.entries(offenseFormations)
+            .filter(([k]) => k !== 'Punt' && k !== 'Punt_Return')
+            .map(([k,v]) => `<option value="${k}" ${gs.playerTeam.formations.offense === k ? 'selected' : ''}>${v.name}</option>`)
+            .join('');
+        offSelect.onchange = (e) => {
+            Game.changeFormationSmart('offense', e.target.value);
+            Game.saveGameState();
+        };
+    }
+    
+    if(defSelect) {
+        defSelect.innerHTML = Object.entries(defenseFormations)
+            .filter(([k]) => k !== 'Punt' && k !== 'Punt_Return')
+            .map(([k,v]) => `<option value="${k}" ${gs.playerTeam.formations.defense === k ? 'selected' : ''}>${v.name}</option>`)
+            .join('');
+        defSelect.onchange = (e) => {
+            Game.changeFormationSmart('defense', e.target.value);
+            Game.saveGameState();
+        };
+    }
+
+    const slider = document.getElementById('sim-auto-sub-slider');
+    const valDisplay = document.getElementById('sim-auto-sub-val');
+    if(slider && valDisplay && activeLiveGame) {
+        slider.value = activeLiveGame.autoSubThreshold || 65;
+        valDisplay.textContent = slider.value + '%';
+        slider.oninput = (e) => {
+            valDisplay.textContent = e.target.value + '%';
+            if(activeLiveGame) activeLiveGame.autoSubThreshold = parseInt(e.target.value, 10);
+        };
+    }
+}
+
+
 /**
  * STARTS THE LOOP
  * This replaces your old 'startLiveGameSim'
@@ -3114,6 +3163,7 @@ export function startLiveGameLoop(initialGameState, onComplete) {
     liveGameCurrentIndex = 0;
 
     updateLiveScoreboard();
+    initSimStrategyTab(); // 💡 Initialize real-time strategy controls
     
     // 💡 Initialize the live stats map before flushing the first logs
     initLivePlayerStats(currentLiveGameResult);
@@ -3223,12 +3273,21 @@ function flushLiveLogs(targetIndex) {
         newEntries.forEach(entry => {
             const p = document.createElement('p');
             // 💡 Added fade-in animation for a cleaner look
-            p.className = "text-sm border-b border-gray-700 pb-1 mb-1 animate-fadeIn";
+            p.className = "text-sm border-b border-gray-700/50 pb-1.5 mb-1.5 animate-fadeIn";
             p.textContent = entry;
             fragment.appendChild(p);
             
             if (typeof updateStatsFromLogEntry === 'function') updateStatsFromLogEntry(entry); 
         });
+
+        // Flashing Broadcast Overlay Check
+        if (newEntries.length > 0) {
+            const lastEntry = newEntries[newEntries.length - 1];
+            // Don't flash setup lines
+            if (!lastEntry.includes('Coin Toss') && !lastEntry.includes('Play Call')) {
+                showPlayOverlay(lastEntry);
+            }
+        }
 
         if (elements.simPlayLog) {
             elements.simPlayLog.appendChild(fragment);
@@ -3238,6 +3297,21 @@ function flushLiveLogs(targetIndex) {
         liveGameCurrentIndex = limit;
     }
 }
+
+function showPlayOverlay(text) {
+    const overlay = document.getElementById('sim-play-overlay');
+    if (overlay) {
+        // Strip the [Tick XX] part for a clean broadcast text overlay
+        let cleanText = text.replace(/\[Tick \d+\] /g, '');
+        overlay.textContent = cleanText;
+        overlay.style.opacity = '1';
+        
+        // Clear previous timeout so it doesn't blink out early if plays chain
+        if (overlay.timeoutId) clearTimeout(overlay.timeoutId);
+        overlay.timeoutId = setTimeout(() => { overlay.style.opacity = '0'; }, 3000);
+    }
+}
+
 /**
  * ANIMATOR
  * Plays the array of frames on the canvas.
