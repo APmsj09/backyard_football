@@ -2648,21 +2648,12 @@ function initLivePlayerStats(gameResult) {
 function updateStatsFromLogEntry(entry) {
     if (!entry || !currentLiveGameResult) return;
 
-    // --- 1. OPTIMIZED LOOKUP ---
-    // Using a simple cache to avoid looping through rosters 60 times a second
-    // --- 1. OPTIMIZED LOOKUP ---
     const findIdByName = (name) => {
         if (!name) return null;
         const cleanName = name.trim().toLowerCase();
-        
-        // 💡 FIX: Fast O(1) cache lookup instead of O(N) array creation and filtering
         if (playerNameIdMap.has(cleanName)) return playerNameIdMap.get(cleanName);
-
-        // Fallback for partial matches (rare but safe)
         for (let [cachedName, id] of playerNameIdMap.entries()) {
-            if (cleanName.includes(cachedName) || cachedName.includes(cleanName)) {
-                return id;
-            }
+            if (cleanName.includes(cachedName)) return id;
         }
         return null;
     };
@@ -2672,102 +2663,68 @@ function updateStatsFromLogEntry(entry) {
         if (!livePlayerStats.has(pid)) {
             livePlayerStats.set(pid, {
                 passAttempts: 0, passCompletions: 0, passYards: 0, interceptionsThrown: 0,
-                receptions: 0, recYards: 0, drops: 0,
-                rushAttempts: 0, rushYards: 0, returnYards: 0,
-                touchdowns: 0, interceptions: 0, fumbles: 0, fumblesLost: 0, fumblesRecovered: 0,
-                tackles: 0, sacks: 0
+                receptions: 0, recYards: 0, drops: 0, rushAttempts: 0, rushYards: 0, 
+                touchdowns: 0, interceptions: 0, fumblesLost: 0, tackles: 0, sacks: 0
             });
         }
         return livePlayerStats.get(pid);
     };
 
-    // --- 2. PARSE LOGIC ---
+    // 1. Passing Attempts
+    if (entry.includes('throws a')) {
+        const match = entry.match(/🏈 (.*?) throws/);
+        const id = findIdByName(match ? match[1] : null);
+        if (id) getStats(id).passAttempts++;
+    }
 
-    // A. Context Reset (New Play or Down)
-    if (entry.includes('---') || entry.includes('Offense:')) {
-        livePlayContext = { type: 'run', passerId: null, receiverId: null, catchMade: false };
-        if (entry.includes('Offense:')) {
-            // Simple keyword detection for pass plays
-            const lower = entry.toLowerCase();
-            if (lower.includes('pass') || lower.includes('verts') || lower.includes('slants') || lower.includes('curl') || lower.includes('mesh')) {
-                livePlayContext.type = 'pass';
-            }
+    // 2. Completions/Receptions
+    if (entry.includes('CATCH!')) {
+        const match = entry.match(/CATCH! (.*?) (?:at|grabs)/);
+        const id = findIdByName(match ? match[1] : null);
+        if (id) {
+            getStats(id).receptions++;
+            // We'll credit the passer when the yardage is announced
+            livePlayContext.lastReceiverId = id;
+            livePlayContext.isPassComplete = true;
         }
     }
 
-    // B. Pass Attempt (Matches: 🏈 Reese 'Slinger' throws to...)
-    const throwMatch = entry.match(/🏈 (.*?) throws to/);
-    if (throwMatch) {
-        livePlayContext.type = 'pass';
-        const qbId = findIdByName(throwMatch[1]);
-        if (qbId) {
-            livePlayContext.passerId = qbId;
-            getStats(qbId).passAttempts++;
-        }
-    }
+    // 3. Yardage & Carriers (Rushing/Passing Yards)
+    if (entry.includes('Gain:') || entry.includes('yardage:')) {
+        const idMatch = entry.match(/(?:🎉|✋|💨|🏈) (.*?) (?:at|jars|scores|tackled|steps)/);
+        const yardMatch = entry.match(/(?:Gain:|Yardage:)\s*(-?\d+\.?\d*)y/i);
+        
+        const id = findIdByName(idMatch ? idMatch[1] : null);
+        const yards = yardMatch ? Math.round(parseFloat(yardMatch[1])) : 0;
 
-    // C. Completion (Matches: 👍 CATCH! Tom Freeman grabs it!)
-    const catchMatch = entry.match(/CATCH! (.*?) grabs/);
-    if (catchMatch) {
-        livePlayContext.catchMade = true;
-        const recId = findIdByName(catchMatch[1]);
-        if (recId) {
-            livePlayContext.receiverId = recId;
-            getStats(recId).receptions++;
-            if (livePlayContext.passerId) getStats(livePlayContext.passerId).passCompletions++;
-        }
-    }
-
-    // D. Yards Gained 
-    const gainMatch = entry.match(/(?:✋|🎉|💨) (.*?) (?:tackled|scores|returns|breaks)/);
-    const yardsMatch = entry.match(/gain of (-?\d+\.?\d*)|loss of (\d+\.?\d*)/);
-
-    if (gainMatch && yardsMatch) {
-        const carrierId = findIdByName(gainMatch[1]);
-        const yards = Math.round(parseFloat(yardsMatch[1] || `-${yardsMatch[2]}`));
-
-        if (carrierId) {
-            const s = getStats(carrierId);
-            if (livePlayContext.type === 'pass' && livePlayContext.catchMade) {
+        if (id) {
+            const s = getStats(id);
+            if (livePlayContext.isPassComplete && id === livePlayContext.lastReceiverId) {
                 s.recYards += yards;
-                if (livePlayContext.passerId) getStats(livePlayContext.passerId).passYards += yards;
-            } else if (!entry.includes('SACK') && !entry.includes('INTERCEPTION')) {
-                // It's a run (scramble or designed)
-                s.rushYards += yards;
-                // Only count 1 attempt per play context
-                if (!livePlayContext.rushCounted) {
-                    s.rushAttempts++;
-                    livePlayContext.rushCounted = true;
+                // Credit the current QB
+                const qb = activeLiveGame.possession.depthChart.offense.QB1;
+                if (qb) {
+                    const qbStats = getStats(qb);
+                    qbStats.passCompletions++;
+                    qbStats.passYards += yards;
                 }
+            } else if (!entry.includes('INTERCEPTION') && !entry.includes('SACK')) {
+                s.rushYards += yards;
+                s.rushAttempts++;
             }
+            if (entry.includes('TOUCHDOWN')) s.touchdowns++;
         }
+        livePlayContext.isPassComplete = false; // Reset context
     }
 
-    // E. Sacks (Matches: 💥 SACK! [Def] drops [QB]!)
-    if (entry.includes('SACK!')) {
-        const sackMatch = entry.match(/SACK! (.*?) drops (.*?)!/);
-        if (sackMatch) {
-            const defId = findIdByName(sackMatch[1]);
-            if (defId) getStats(defId).sacks++;
-        }
-    }
-
-    // F. Interceptions (Matches: ❗ INTERCEPTION! Justice 'Joker' picks it off!)
-    if (entry.includes('INTERCEPTION')) {
-        const intMatch = entry.match(/INTERCEPTION! (.*?) picks/);
-        if (intMatch) {
-            const defId = findIdByName(intMatch[1]);
-            if (defId) getStats(defId).interceptions++;
-            if (livePlayContext.passerId) getStats(livePlayContext.passerId).interceptionsThrown++;
-        }
-    }
-
-    // G. Drops (Matches: ❌ Sam 'Wizard' drops the pass!)
-    if (entry.includes('drops the pass')) {
-        const dropMatch = entry.match(/❌ (.*?) drops/);
-        if (dropMatch) {
-            const dropperId = findIdByName(dropMatch[1]);
-            if (dropperId) getStats(dropperId).drops++;
+    // 4. Defensive Stats
+    if (entry.includes('TACKLE by') || entry.includes('SACK by')) {
+        const match = entry.match(/(?:TACKLE|SACK) by (.*?)(?: \(|$)/);
+        const id = findIdByName(match ? match[1] : null);
+        if (id) {
+            const s = getStats(id);
+            if (entry.includes('SACK')) s.sacks++;
+            else s.tackles++;
         }
     }
 }
@@ -2848,7 +2805,6 @@ function renderLiveStatsLive() {
 }
 
 function renderSimPlayers(frame) {
-    // 1. HELPERS
     const findTeamInGame = (playerTeamId) => {
         if (!activeLiveGame) return null;
         if (activeLiveGame.homeTeam?.id === playerTeamId) return activeLiveGame.homeTeam;
@@ -2859,120 +2815,86 @@ function renderSimPlayers(frame) {
     try {
         if (!elements.simPlayersList || !activeLiveGame) return;
 
-        // 2. IDENTIFY USER TEAM
-        // We need to know which team is the user's so we only show subs for them
-        // (Assuming 'Game' is imported or getGameState is global)
         const gs = Game.getGameState();
         const playerTeamId = gs?.playerTeam?.id;
-
         if (!playerTeamId) return;
 
         const team = findTeamInGame(playerTeamId);
-        if (!team) {
-            elements.simPlayersList.innerHTML = '<p class="text-gray-400 p-4">You are watching a CPU vs CPU game.</p>';
-            return;
-        }
+        if (!team) return;
 
-        // 3. MAP FATIGUE FROM FRAME DATA
-        // The frame contains the live physics state (current x,y, fatigue)
+        // 💡 FIX: Identify who is ACTUALLY on the field using the physics frame
+        const activeOnFieldIds = new Set();
         const fatigueMap = new Map();
+        
         if (frame && frame.players) {
             frame.players.forEach(pState => {
+                activeOnFieldIds.add(pState.id);
                 if (pState.teamId === team.id) {
                     fatigueMap.set(pState.id, pState.fatigue);
                 }
             });
         }
 
-        const roster = Game.getUIRosterObjects(team); // Ensure Game.js exports this or it's available
-        const depth = team.depthChart || {};
+        const roster = Game.getUIRosterObjects(team);
+        
+        // Split roster based on the Set we just created from the frame
+        const starters = roster.filter(p => p && activeOnFieldIds.has(p.id));
+        const bench = roster.filter(p => p && !activeOnFieldIds.has(p.id));
 
-        // 4. SORT STARTERS VS BENCH
-        const starterIds = new Set();
-        Object.keys(depth).forEach(side => {
-            const chart = depth[side] || {};
-            Object.values(chart).forEach(id => { if (id) starterIds.add(id); });
-        });
-
-        const starters = roster.filter(p => p && starterIds.has(p.id));
-        const bench = roster.filter(p => p && !starterIds.has(p.id));
-
-        // 5. ROW BUILDER
         const buildRow = (p, isStarter) => {
             const stamina = p.attributes?.physical?.stamina || 50;
-
-            // Use live fatigue if available, else static
             const currentFatigue = fatigueMap.has(p.id) ? fatigueMap.get(p.id) : (p.fatigue || 0);
+            const energyPct = Math.max(0, Math.round(100 - (currentFatigue / Math.max(1, stamina)) * 100));
 
-            const fatigue = Math.max(0, Math.min(100, Math.round(currentFatigue)));
-            const energyPct = Math.max(0, Math.round(100 - (fatigue / Math.max(1, stamina)) * 100));
-
-            // Find specific slot name (e.g., "QB1")
+            // Find current slot assignment
             let currentSlot = 'Bench';
-            if (isStarter) {
-                for (const side in depth) {
-                    for (const slot in depth[side]) {
-                        if (depth[side][slot] === p.id) {
-                            currentSlot = slot;
-                            break;
-                        }
+            for (const side in team.depthChart) {
+                for (const slot in team.depthChart[side]) {
+                    if (team.depthChart[side][slot] === p.id) {
+                        currentSlot = slot;
+                        break;
                     }
-                    if (currentSlot !== 'Bench') break;
                 }
             }
 
-            const statusText = (p.status?.duration > 0) ? `${p.status.description} (${p.status.duration}w)` : 'Healthy';
-            const statusClass = (p.status?.duration > 0) ? 'text-red-400' : 'text-gray-300';
+            const statusText = (p.status?.duration > 0) ? `${p.status.description}` : 'Healthy';
+            const statusClass = (p.status?.duration > 0) ? 'text-red-400' : 'text-gray-400';
+            let barColor = energyPct < 30 ? 'bg-red-500' : (energyPct < 60 ? 'bg-yellow-500' : 'bg-green-500');
 
-            // Color code energy bar
-            let barColor = 'bg-green-500';
-            if (energyPct < 50) barColor = 'bg-yellow-500';
-            if (energyPct < 25) barColor = 'bg-red-500';
-
-            // 💡 FIX: Restructured HTML to fit elegantly inside the narrow sidebar
             return `
-                <div class="flex items-center justify-between p-2 border-b border-gray-700 bg-gray-800/50 hover:bg-gray-800 transition">
+                <div class="flex items-center justify-between p-2 border-b border-gray-800 bg-gray-900/40 hover:bg-gray-800 transition">
                     <div class="flex-grow flex flex-col gap-1 overflow-hidden pr-2">
                         <div class="flex justify-between items-baseline">
-                            <div class="text-[11px] font-bold text-white truncate pr-2">${p.name}</div>
-                            <div class="text-[9px] ${statusClass} whitespace-nowrap">${statusText}</div>
+                            <div class="text-[11px] font-bold ${isStarter ? 'text-white' : 'text-gray-400'} truncate">${p.name}</div>
+                            <div class="text-[8px] font-mono ${statusClass}">${energyPct}% E</div>
                         </div>
                         <div class="flex items-center gap-2">
-                            <div class="text-[10px] text-gray-400 font-mono w-14 shrink-0 truncate">#${p.number || '00'} ${currentSlot}</div>
-                            <div class="flex-grow h-1.5 bg-gray-600 rounded overflow-hidden">
-                                <div style="width:${energyPct}%" class="h-full ${barColor}"></div>
+                            <div class="text-[9px] text-gray-500 font-bold w-12 shrink-0">${isStarter ? currentSlot : 'BENCH'}</div>
+                            <div class="flex-grow h-1 bg-gray-800 rounded-full overflow-hidden">
+                                <div style="width:${energyPct}%" class="h-full ${barColor} transition-all duration-500"></div>
                             </div>
                         </div>
                     </div>
-                    <div class="shrink-0 pl-1 border-l border-gray-700">
+                    <div class="shrink-0 pl-1">
                         ${isStarter
-                    ? `<button data-player-id="${p.id}" class="sub-out-btn bg-red-900/80 hover:bg-red-700 text-red-100 text-[10px] font-bold py-1.5 px-3 rounded border border-red-700 transition">OUT</button>`
-                    : `<button data-player-id="${p.id}" class="sub-in-btn bg-green-900/80 hover:bg-green-700 text-green-100 text-[10px] font-bold py-1.5 px-3 rounded border border-green-700 transition">IN</button>`
-                }
+                            ? `<button data-player-id="${p.id}" class="sub-out-btn opacity-40 hover:opacity-100 bg-red-900/20 hover:bg-red-600 text-red-400 hover:text-white text-[9px] font-bold p-1 rounded border border-red-900 transition">OUT</button>`
+                            : `<button data-player-id="${p.id}" class="sub-in-btn bg-green-900/40 hover:bg-green-600 text-green-400 hover:text-white text-[9px] font-bold p-1 rounded border border-green-900 transition">SUB</button>`
+                        }
                     </div>
                 </div>
             `;
         };
 
-        // 6. BUILD HTML
         let html = '';
-        if (starters.length > 0) {
-            html += '<div class="mb-3"><div class="bg-gray-900 text-[10px] font-bold text-gray-500 uppercase tracking-widest px-3 py-1 border-y border-gray-800">On Field</div>';
-            starters.forEach(s => { html += buildRow(s, true); });
-            html += '</div>';
-        }
-        html += '<div><div class="bg-gray-900 text-[10px] font-bold text-gray-500 uppercase tracking-widest px-3 py-1 border-y border-gray-800">Bench</div>';
-        bench.forEach(b => { html += buildRow(b, false); });
-        html += '</div>';
+        html += `<div class="bg-black/20 py-1 px-3 text-[9px] font-black text-amber-500/80 uppercase tracking-widest border-b border-gray-800">Active Personnel (${starters.length})</div>`;
+        starters.forEach(s => html += buildRow(s, true));
+        
+        html += `<div class="bg-black/20 py-1 px-3 text-[9px] font-black text-gray-500 uppercase tracking-widest border-y border-gray-800 mt-2">Available Bench (${bench.length})</div>`;
+        bench.forEach(b => html += buildRow(b, false));
 
         elements.simPlayersList.innerHTML = html;
-
-        // 7. ATTACH HANDLERS (Delegation or Direct)
-        attachSubHandlers(team, roster, depth, frame);
-
-    } catch (err) {
-        console.error('renderSimPlayers failed:', err);
-    }
+        attachSubHandlers(team, roster, team.depthChart, frame);
+    } catch (err) { console.error('renderSimPlayers failed:', err); }
 }
 
 /**

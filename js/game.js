@@ -981,8 +981,10 @@ function aiSetDepthChart(team) {
     });
 
     // 4. Now that depthOrder has deep reserves, re-assign the visual depth chart slots
+    team.depthChart = { offense: {}, defense: {}, special: {} };
     rebuildDepthChartFromOrder(team);
 }
+
 
 
 /** Simulates an AI team's draft pick. */
@@ -2828,10 +2830,39 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                 if (chaseTarget) {
                     const dist = getDistance(pState, chaseTarget);
                     const iq = pState.playbookIQ || 50;
-                    const leadTime = dist / (12 + (iq / 5));
 
-                    pState.targetX = chaseTarget.x + ((chaseTarget.vx || 0) * leadTime);
-                    pState.targetY = chaseTarget.y + ((chaseTarget.vy || 0) * leadTime);
+                    // 💡 NEW: Improved Pursuit AI
+                    if (dist < 2.5) {
+                        // A. Close Quarters: Breakdown and tackle
+                        // Stop trying to lead the runner and aim directly at their hips
+                        pState.targetX = chaseTarget.x;
+                        pState.targetY = chaseTarget.y;
+                        pState.contactReduction = 0.85; // Slow down slightly to "break down" and not overrun
+                    } else {
+                        // B. Open Field Pursuit
+                        // Calculate lead based on distance. Shorter lead if close, longer lead if far.
+                        const maxLeadTime = 1.2;
+                        const leadTime = Math.min(maxLeadTime, dist / (16 + (iq / 4)));
+
+                        let predX = chaseTarget.x + ((chaseTarget.vx || 0) * leadTime);
+                        let predY = chaseTarget.y + ((chaseTarget.vy || 0) * leadTime);
+
+                        // 💡 INSIDE-OUT LEVERAGE:
+                        // Smart defenders (IQ > 65) will use the sideline as an extra defender
+                        // rather than letting the runner get outside of them.
+                        if (iq > 65 && dist > 5.0) {
+                            if (predX > CENTER_X && pState.x < predX) {
+                                predX -= 1.5; // Force them outside right
+                            } else if (predX <= CENTER_X && pState.x > predX) {
+                                predX += 1.5; // Force them outside left
+                            }
+                        }
+
+                        pState.targetX = predX;
+                        pState.targetY = predY;
+                        pState.contactReduction = 1.0; // Full sprint
+                    }
+
                     pState.action = 'pursuit';
 
                     if (isFooledByPA && !pState.loggedPA && gameLog && Math.random() < 0.05) {
@@ -3863,69 +3894,87 @@ function updateQBDecision(qbState, offenseStates, defenseStates, playState, offe
         const rec = offenseTeam.find(r => r.slot === slot);
         if (!rec || !rec.action.includes('route')) return null;
 
-        // 1. ESTIMATE FLIGHT TIME
+        // 1. ESTIMATE FLIGHT TIME (Better Physics Sync)
         const distFromQB = getDistance(qbState, rec);
-        // Average ball speed is ~22 yps. Flight time = distance / speed
-        const estimatedFlightTime = distFromQB / 22;
+        let estimatedBallSpeed = 22; // Default
+        
+        // Match the speeds in executeThrow
+        if (distFromQB > 25) estimatedBallSpeed = 16 + (qbStrength / 100) * 14.0; // Lob
+        else if (distFromQB < 12) estimatedBallSpeed = maxArmVelocity = 16 + (qbStrength / 100) * 14.0; // Bullet
+        
+        const estimatedFlightTime = distFromQB / estimatedBallSpeed;
 
         // 2. PROJECT POSITIONS AT ARRIVAL
-        // Where will the receiver be?
         const projRecX = rec.x + (rec.vx || 0) * estimatedFlightTime;
         const projRecY = rec.y + (rec.vy || 0) * estimatedFlightTime;
 
         let minProjectedSeparation = 20;
         let defendersClosingIn = 0;
+        let undercutThreat = 0;
 
         defenseTeam.forEach(d => {
-            if (d.stunnedTicks > 0) return;
+            if (d.stunnedTicks > 0 || d.isEngaged || d.isBlocked) return;
 
             // Project where the defender will be when the ball arrives
-            // We assume they keep running their current direction (pursuit/zone)
             const projDefX = d.x + (d.vx || 0) * estimatedFlightTime;
             const projDefY = d.y + (d.vy || 0) * estimatedFlightTime;
-
             const projDist = Math.hypot(projRecX - projDefX, projRecY - projDefY);
 
             if (projDist < minProjectedSeparation) {
                 minProjectedSeparation = projDist;
             }
 
-            // Count how many defenders are projected to be within 5 yards of the catch
-            if (projDist < 5.0) {
-                defendersClosingIn++;
+            if (projDist < 4.0) defendersClosingIn++;
+
+            // 💡 NEW: Undercut Detection (Is the DB between the QB and the WR?)
+            const distDefToQB = Math.hypot(projDefX - qbState.x, projDefY - qbState.y);
+            if (distDefToQB < distFromQB - 1.5) {
+                const dx = projRecX - qbState.x;
+                const dy = projRecY - qbState.y;
+                const defDx = projDefX - qbState.x;
+                const defDy = projDefY - qbState.y;
+                
+                // Dot product to check if they are directly in the throwing lane
+                const dot = (dx * defDx + dy * defDy) / (distFromQB * distDefToQB);
+                if (dot > 0.95) {
+                    undercutThreat += (4.0 - (distDefToQB / distFromQB) * 4.0); // Harsh penalty
+                }
             }
         });
 
-        // 3. SCORING LOGIC (Using Projections)
+        // 3. SCORING LOGIC
         const depth = rec.y - playState.lineOfScrimmage;
         const iqFactor = qbIQ / 100;
 
-        // Base score uses PROJECTED separation
+        // Base score: 0 to 60 based on separation
         let score = (Math.min(minProjectedSeparation, 6) * 10);
 
-        // DEPTH BONUSES
-        if (depth > 5 && depth < 15) score += 20;
-        if (depth >= 15) score += 30 * iqFactor;
-
-        // --- THE "TRIPLE COVERAGE" KILLER ---
-        // Heavily penalize throwing into "Crowds"
-        if (defendersClosingIn >= 2) {
-            // Low IQ QBs might still try it, High IQ QBs will see the crowd and look away
-            score -= (30 + (20 * iqFactor));
+        // 💡 DEPTH BONUSES: Must be contingent on separation!
+        if (depth > 5 && depth < 15) {
+            if (minProjectedSeparation > 1.5) score += 15; // Open intermediate
+            else score -= 15; // Covered intermediate
+        }
+        if (depth >= 15) {
+            if (minProjectedSeparation > 2.5) score += 25 * iqFactor; // Open deep ball
+            else score -= 40; // Covered deep ball (Harsh Punish!)
         }
 
-        // --- SAFETY HELP RECOGNITION ---
-        // If it's a deep pass and the projected separation is tight, it's a dangerous throw
-        if (depth > 20 && minProjectedSeparation < 2.0) {
-            score -= 50;
-        }
+        // --- PENALTIES ---
+        
+        // Undercutting DBs (Baiting the QB)
+        if (undercutThreat > 0) score -= (undercutThreat * 35 * iqFactor);
 
-        // Penalty for checkdowns if not pressured
-        if (depth < 0 && !playState.isPressured) score -= 40;
+        // Crowds / Double Coverage
+        if (defendersClosingIn >= 2) score -= (30 + (30 * iqFactor));
+        if (defendersClosingIn >= 3) score -= 100; // Never throw into triple coverage
+
+        // Checkdown logic
+        if (depth < 0 && !isPressured) score -= 30; // Don't checkdown from a clean pocket
+        if (depth < 2 && isPressured && minProjectedSeparation > 2.0) score += 40; // Dump off under pressure
 
         return {
             score: score,
-            info: { state: rec }, // The engine needs best.info.state
+            info: { state: rec },
             separation: minProjectedSeparation
         };
     };
@@ -4156,11 +4205,17 @@ function executeThrow(qbState, target, strength, accuracy, playState, gameLog, a
         const estTime = throwDistance / ballSpeed;
         const qbIQ = qbState.iq || 50;
 
-        // 💡 FIX: Dial back the lead factor so receivers aren't overthrown.
-        // 1.0 = Aiming at the exact spot they will be.
-        let leadFactor = 0.75 + (qbIQ / 250);
-        if (passType === 'lob') leadFactor += 0.15; // Deep balls get slight lead
-        if (passType === 'bullet') leadFactor -= 0.15; // Bullets are thrown at the body
+        // 💡 FIX: Increase base lead factor heavily for deep passes!
+        // 1.0 = Aiming exactly where math says they will be.
+        let leadFactor = 0.95 + (qbIQ / 300); 
+        
+        if (passType === 'lob') {
+            // Lob passes must be thrown far ahead so the WR runs UNDER it, maintaining stride.
+            leadFactor += 0.35; 
+        } else if (passType === 'bullet') {
+            // Bullets are thrown firmly at the numbers/chest.
+            leadFactor -= 0.15; 
+        }
 
         // Receiver speed in yards per second
         const receiverYPS = 5.0 + ((target.spd || 50) / 25);
@@ -4169,7 +4224,7 @@ function executeThrow(qbState, target, strength, accuracy, playState, gameLog, a
         let currX = target.x;
         let currY = target.y;
         let lastValidDirX = 0;
-        let lastValidDirY = 1; // Default to straight downfield
+        let lastValidDirY = 1; // Default upfield
 
         // Trace the receiver's route path
         for (let i = target.currentPathIndex; i < target.routePath.length; i++) {
@@ -4178,7 +4233,7 @@ function executeThrow(qbState, target, strength, accuracy, playState, gameLog, a
             const dy = nextNode.y - currY;
             const distToNext = Math.hypot(dx, dy);
 
-            // Save the direction they are running
+            // Save direction
             if (distToNext > 0.1) {
                 lastValidDirX = dx / distToNext;
                 lastValidDirY = dy / distToNext;
@@ -4197,9 +4252,8 @@ function executeThrow(qbState, target, strength, accuracy, playState, gameLog, a
             }
         }
 
-        // 💡 THE UNDERTHROW FIX: Extrapolate if they run out of drawn route!
-        // If the receiver is running deep and the route array runs out, we project 
-        // the target point forward along their current trajectory into open space.
+        // 💡 EXTENSION FIX: If the receiver is running a Fly/Post and runs off the end of their drawn route,
+        // we MUST keep projecting them downfield, otherwise the ball is aimed at their current spot (massive underthrow).
         if (distanceToTravel > 0) {
             aimX = currX + (lastValidDirX * distanceToTravel);
             aimY = currY + (lastValidDirY * distanceToTravel);
