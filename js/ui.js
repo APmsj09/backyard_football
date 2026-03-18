@@ -54,6 +54,7 @@ let activeLiveGame = null;
 let liveGameCallback = null;
 let liveGameInterval = null;
 let isSkipping = false;
+let isPaused = false;
 
 // Per-player live stat snapshots (id -> stats)
 let livePlayerStats = new Map();
@@ -3097,6 +3098,14 @@ export function startLiveGameLoop(initialGameState, onComplete) {
 
     liveGameCallback = onComplete;
     isSkipping = false;
+    isPaused = false;
+
+    // Reset pause button UI state
+    const pauseBtn = document.getElementById('sim-speed-pause');
+    if (pauseBtn) {
+        pauseBtn.classList.remove('active', 'bg-red-600', 'text-white');
+        pauseBtn.classList.add('text-gray-400', 'hover:text-white');
+    }
 
     // Reset UI
     const ticker = elements.simPlayLog;
@@ -3178,9 +3187,16 @@ function runLiveGameStep() {
                 if (isSkipping) {
                     runLiveGameStep();
                 } else {
-                    // 💡 FIX: Shorter huddle timeout for better game rhythm
+                    // 💡 FIX: Use a wrapper to obey the pause state between plays
                     const delay = activeLiveGame.isConversionAttempt ? 1000 : 1500;
-                    huddleTimeout = setTimeout(runLiveGameStep, delay);
+                    const waitAndStep = () => {
+                        if (isPaused) {
+                            huddleTimeout = setTimeout(waitAndStep, 100);
+                        } else {
+                            runLiveGameStep();
+                        }
+                    };
+                    huddleTimeout = setTimeout(waitAndStep, delay);
                 }
             });
         }, isSkipping ? 0 : 1200);
@@ -3231,6 +3247,11 @@ function playVisualization(frames, onComplete) {
     if (liveGameInterval) clearTimeout(liveGameInterval);
 
     const runNextFrame = () => {
+        if (isPaused) {
+            liveGameInterval = setTimeout(runNextFrame, 100);
+            return;
+        }
+
         const frame = frames[index];
         if (frame) {
             drawFieldVisualization(frame);
@@ -3288,44 +3309,61 @@ function finishLiveGame() {
     // Call the final result callback (returns to dashboard)
     if (liveGameCallback) {
         // Give the player 3 seconds to see the final score before switching screens
-        setTimeout(() => {
+        // Wait gracefully if the user happens to have the game paused at the very end
+        const waitAndFinish = () => {
+            if (isPaused) {
+                setTimeout(waitAndFinish, 100);
+                return;
+            }
             const finalData = activeLiveGame;
             activeLiveGame = null; // Clear state
             liveGameCallback(finalData);
-        }, 3000);
+        };
+        setTimeout(waitAndFinish, 3000);
     }
 }
 
 export function skipLiveGameSim() {
     isSkipping = true;
+    isPaused = false;
+}
+
+export function togglePause() {
+    isPaused = !isPaused;
+    const pauseBtn = document.getElementById('sim-speed-pause');
+    if (pauseBtn) {
+        if (isPaused) {
+            pauseBtn.classList.add('active', 'bg-red-600', 'text-white');
+            pauseBtn.classList.remove('text-gray-400', 'hover:text-white');
+        } else {
+            pauseBtn.classList.remove('active', 'bg-red-600', 'text-white');
+            pauseBtn.classList.add('text-gray-400', 'hover:text-white');
+        }
+    }
+    return isPaused;
 }
 
 /** Changes the speed of the live game simulation interval. */
-
-
 export function setSimSpeed(speed) {
     liveGameSpeed = speed;
+    isPaused = false;
 
     // Update button styles
     elements.simSpeedBtns?.forEach(btn => {
-        btn.classList.remove('active', 'bg-blue-500', 'hover:bg-blue-600');
-        btn.classList.add('bg-gray-500', 'hover:bg-gray-600');
+        btn.classList.remove('active', 'bg-blue-500', 'hover:bg-blue-600', 'bg-red-600', 'text-white');
+        btn.classList.add('bg-gray-500', 'hover:bg-gray-600', 'text-gray-400');
     });
 
     let activeButtonId;
-    if (speed === 80) activeButtonId = 'sim-speed-play';  // 💡 Update logic to match new default
+    if (speed === 80) activeButtonId = 'sim-speed-play';
     else if (speed === 50) activeButtonId = 'sim-speed-fast';
-    else if (speed === 30) activeButtonId = 'sim-speed-faster';
+    else if (speed === 10) activeButtonId = 'sim-speed-faster'; // Fixed from 30 to 10 for max
 
     const activeButton = document.getElementById(activeButtonId);
     if (activeButton) {
-        activeButton.classList.remove('bg-gray-500', 'hover:bg-gray-600');
-        activeButton.classList.add('active', 'bg-blue-500', 'hover:bg-blue-600');
+        activeButton.classList.remove('bg-gray-500', 'hover:bg-gray-600', 'text-gray-400');
+        activeButton.classList.add('active', 'bg-blue-500', 'hover:bg-blue-600', 'text-white');
     }
-
-    // 💡 FIX: Removed fatal 'runLiveGameTick' reference.
-    // The new speed will automatically apply on the next visualization frame cycle 
-    // because playVisualization now reads liveGameSpeed dynamically.
 }
 
 

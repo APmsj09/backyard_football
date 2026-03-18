@@ -812,6 +812,7 @@ function main() {
         document.getElementById('go-to-next-draft-btn')?.addEventListener('click', handleGoToNextDraft);
 
         // Live Sim Controls
+        document.getElementById('sim-speed-pause')?.addEventListener('click', () => UI.togglePause());
         document.getElementById('sim-skip-btn')?.addEventListener('click', () => {
             UI.skipLiveGameSim();
         });

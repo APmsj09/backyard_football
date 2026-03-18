@@ -2219,9 +2219,9 @@ function getSmartCarrierTarget(runner, defenseStates, offenseStates, fieldWidth 
                 }
             } else {
                 // BLOCKER LEVERAGE (Reading the hips)
-                const blocker = (typeof def.blockedBy === 'object' && def.blockedBy !== null) ? def.blockedBy : 
-                                (typeof def.engagedWith === 'object' && def.engagedWith !== null) ? def.engagedWith : 
-                                offenseStates.find(o => o.id === def.blockedBy || o.id === def.engagedWith);
+                const blocker = (typeof def.blockedBy === 'object' && def.blockedBy !== null) ? def.blockedBy :
+                    (typeof def.engagedWith === 'object' && def.engagedWith !== null) ? def.engagedWith :
+                        offenseStates.find(o => o.id === def.blockedBy || o.id === def.engagedWith);
                 if (blocker) {
                     const distToBlock = Math.hypot(testX - blocker.x, testY - blocker.y);
                     if (distToBlock >= 1.0 && distToBlock <= 3.0 && blocker.y > runner.y) {
@@ -2384,16 +2384,16 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
     // Identify threats for blockers
     const allThreats = defenseStates.filter(d => {
         if (d.isBlocked || d.isEngaged || d.stunnedTicks > 0) return false;
-        
+
         // 1. Explicit rushers/blitzers are always threats
         if (d.assignment?.includes('rush') || d.assignment?.includes('blitz')) return true;
-        
+
         // 2. Defensive Linemen are always threats
         if (d.role === 'DL') return true;
-        
+
         // 3. Any defender who encroaches into the pocket/box is a threat
         if (d.y < LOS + 3.0 && Math.abs(d.x - CENTER_X) < 10) return true;
-        
+
         return false; // Ignore DBs and LBs dropping into coverage
     });
     const linemen = offenseStates.filter(p => !p.isEngaged && p.slot.startsWith('OL'));
@@ -2568,7 +2568,7 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                             if (getDistance(pState, threat) < 2.0) {
                                 pState.isEngaged = true; pState.engagedWith = threat;
                                 threat.isEngaged = true; threat.isBlocked = true; threat.blockedBy = pState;
-                                
+
                                 playState.blockBattles.push({
                                     blocker: pState,
                                     defender: threat,
@@ -2618,7 +2618,7 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                     const smartTarget = getSmartCarrierTarget(pState, defenseStates, offenseStates);
                     targetX = smartTarget.x;
                     targetY = smartTarget.y;
-                    
+
                     pState.action = 'run_path'; // Convert to standard run
 
                     const nearestDef = defenseStates.find(d => getDistance(pState, d) < 10);
@@ -3114,12 +3114,12 @@ function executeAssignment(pState, assignment, offenseStates, LOS, playState) {
                 const escapeAngle = pState.initialX < qb.initialX ? -1 : 1;
 
                 if (pState.y > qb.y + 1.0) {
-                    pState.targetX = qb.x + (escapeAngle * 3.5); 
-                    pState.targetY = qb.y - 1.0;                 
+                    pState.targetX = qb.x + (escapeAngle * 3.5);
+                    pState.targetY = qb.y - 1.0;
                 } else {
                     // 💡 FIX: Aim THROUGH the QB so the rusher accelerates into the hit
                     pState.targetX = qb.x + (dx * 0.5);
-                    pState.targetY = qb.y - 2.0; 
+                    pState.targetY = qb.y - 2.0;
                 }
             } else {
                 // 💡 FIX: Interior rushers aim THROUGH the QB
@@ -3143,47 +3143,47 @@ function checkBlockCollisions(playState) {
     const defenders = playState.activePlayers.filter(p => !p.isOffense && p.stunnedTicks <= 0);
 
     blockers.forEach(blocker => {
-            if (blocker.action !== 'pass_block' && blocker.action !== 'run_block') return;
+        if (blocker.action !== 'pass_block' && blocker.action !== 'run_block') return;
 
-            let target = null;
+        let target = null;
 
-            // 💡 NEW: The "Look Out!" Proximity Override
-            // If an unblocked rusher is dangerously close (flying through the gap), grab them!
-            // This overrides the lineman's pre-assigned AI target.
-            const imminentThreat = defenders
-                .filter(d => getDistance(blocker, d) < 2.4 && d.y > blocker.y - 1.5)
-                .sort((a, b) => getDistance(blocker, a) - getDistance(blocker, b))[0];
+        // 💡 NEW: The "Look Out!" Proximity Override
+        // If an unblocked rusher is dangerously close (flying through the gap), grab them!
+        // This overrides the lineman's pre-assigned AI target.
+        const imminentThreat = defenders
+            .filter(d => getDistance(blocker, d) < 2.4 && d.y > blocker.y - 1.5)
+            .sort((a, b) => getDistance(blocker, a) - getDistance(blocker, b))[0];
 
-            if (imminentThreat) {
-                target = imminentThreat;
-            } 
-            // Priority 2: Assigned AI Target
-            else if (blocker.dynamicTargetId) {
-                target = defenders.find(d => d.id === blocker.dynamicTargetId);
-                if (!target || target.isEngaged || getDistance(blocker, target) > 3.0) {
-                    target = null; // Lost him
-                }
+        if (imminentThreat) {
+            target = imminentThreat;
+        }
+        // Priority 2: Assigned AI Target
+        else if (blocker.dynamicTargetId) {
+            target = defenders.find(d => d.id === blocker.dynamicTargetId);
+            if (!target || target.isEngaged || getDistance(blocker, target) > 3.0) {
+                target = null; // Lost him
             }
+        }
 
-            // Engage
-            if (target) {
-                const strDiff = (blocker.str || 50) - (target.str || 50);
+        // Engage
+        if (target) {
+            const strDiff = (blocker.str || 50) - (target.str || 50);
 
-                blocker.isEngaged = true;
-                blocker.engagedWith = target;
-                target.isEngaged = true;
-                target.isBlocked = true;
-                target.blockedBy = blocker;
+            blocker.isEngaged = true;
+            blocker.engagedWith = target;
+            target.isEngaged = true;
+            target.isBlocked = true;
+            target.blockedBy = blocker;
 
-                playState.blockBattles.push({
-                    blocker: blocker,
-                    defender: target,
-                    status: 'ongoing',
-                    battleScore: strDiff / 10,
-                    startTick: playState.tick
-                });
-            }
-        });
+            playState.blockBattles.push({
+                blocker: blocker,
+                defender: target,
+                status: 'ongoing',
+                battleScore: strDiff / 10,
+                startTick: playState.tick
+            });
+        }
+    });
 }
 function checkTackleCollisions(playState, gameLog) {
     // 1. Find Ball Carrier (We use the pre-found state)
@@ -3199,7 +3199,7 @@ function checkTackleCollisions(playState, gameLog) {
 
         // --- OPTIMIZATION: Use cached distance from the start of the tick ---
         const dist = p._distToCarrier;
-        
+
         // 💡 FIX: Safety check for undefined distance, and strict > TACKLE_RANGE check
         if (dist === undefined || dist > TACKLE_RANGE) return false;
 
@@ -3237,7 +3237,7 @@ function checkTackleCollisions(playState, gameLog) {
 
         // 💡 NEW: Contact Avoidance Mechanics (Before Tackle Attempt)
         // Runners can attempt to dodge/hurdle/stiff-arm within 1.5 yards
-         if (distance < 1.5) {
+        if (distance < 1.5) {
             // 💡 FIX: QBs cannot juke/hurdle while actively trying to hand the ball off
             const canPerformMove = (!carrier.moveCooldown || carrier.moveCooldown <= 0) && carrier.action !== 'handoff_setup';
 
@@ -3319,7 +3319,7 @@ function checkTackleCollisions(playState, gameLog) {
         // 5. BEAST MODE LIMITER: Cumulative fatigue
         const brokenCount = carrier.tacklesBrokenThisPlay || 0;
         // 💡 FIX: Massively increase penalty for successive broken tackles to prevent pinball runs
-        successChance += (brokenCount * 0.40); 
+        successChance += (brokenCount * 0.40);
 
         successChance = Math.max(0.10, Math.min(0.98, successChance));
 
@@ -3611,7 +3611,7 @@ function updateQBDecision(qbState, offenseStates, defenseStates, playState, offe
     const offenseTeam = offenseStates;
     const defenseTeam = defenseStates;
 
-     // --- 0. VALIDATION CHECKS ---
+    // --- 0. VALIDATION CHECKS ---
     if (!qbState || !qbState.hasBall || playState.ballState.inAir || playState.ballState.throwInitiated) return;
     if (qbState.isEngaged || qbState.stunnedTicks > 0) return;
     // Don't make a new decision if QB is bracing for a hit
@@ -3821,38 +3821,38 @@ function updateQBDecision(qbState, offenseStates, defenseStates, playState, offe
             executeThrow(qbState, bestTarget, qbStrength, qbAcc * onTheRunMod, playState, gameLog, "Throw on Run");
             return;
         } else {
-             // 💡 NEW: If about to be sacked while rolling out, throw it away
-             const immediateThreat = defenseStates.find(d => !d.isBlocked && !d.isEngaged && getDistance(qbState, d) < 2.5);
-             if (immediateThreat && qbIQ > 60) {
-                 if (gameLog) pushGameLog(gameLog, `[Tick ${playState.tick}] 👋 ${qbState.name} throws it away under pressure.`, playState);
-                 playState.ballState.inAir = true;
-                 playState.ballState.throwInitiated = true;
-                 playState.ballState.throwerId = qbState.id;
-                 playState.ballState.isThrowAway = true;
-                 
-                 const throwToLeft = qbState.x < CENTER_X;
-                 const targetX = throwToLeft ? -5 : FIELD_WIDTH + 5;
-                 const targetY = qbState.y + 10;
-                 
-                 playState.ballState.targetX = targetX;
-                 playState.ballState.targetY = targetY;
-                 
-                 const dx = targetX - qbState.x;
-                 const dy = targetY - qbState.y;
-                 const dist = Math.sqrt(dx * dx + dy * dy);
-                 const ballSpeed = 25; 
-                 const t = Math.max(0.1, dist / ballSpeed);
-                 
-                 playState.ballState.vx = dx / t;
-                 playState.ballState.vy = dy / t;
-                 playState.ballState.vz = (-0.3 + (4.9 * t * t)) / t;
-                 
-                 playState.ballState.throwTick = playState.tick;
-                 qbState.hasBall = false;
-                 return;
-             }
+            // 💡 NEW: If about to be sacked while rolling out, throw it away
+            const immediateThreat = defenseStates.find(d => !d.isBlocked && !d.isEngaged && getDistance(qbState, d) < 2.5);
+            if (immediateThreat && qbIQ > 60) {
+                if (gameLog) pushGameLog(gameLog, `[Tick ${playState.tick}] 👋 ${qbState.name} throws it away under pressure.`, playState);
+                playState.ballState.inAir = true;
+                playState.ballState.throwInitiated = true;
+                playState.ballState.throwerId = qbState.id;
+                playState.ballState.isThrowAway = true;
 
-             return; // Keep running if no one is open
+                const throwToLeft = qbState.x < CENTER_X;
+                const targetX = throwToLeft ? -5 : FIELD_WIDTH + 5;
+                const targetY = qbState.y + 10;
+
+                playState.ballState.targetX = targetX;
+                playState.ballState.targetY = targetY;
+
+                const dx = targetX - qbState.x;
+                const dy = targetY - qbState.y;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+                const ballSpeed = 25;
+                const t = Math.max(0.1, dist / ballSpeed);
+
+                playState.ballState.vx = dx / t;
+                playState.ballState.vy = dy / t;
+                playState.ballState.vz = (-0.3 + (4.9 * t * t)) / t;
+
+                playState.ballState.throwTick = playState.tick;
+                qbState.hasBall = false;
+                return;
+            }
+
+            return; // Keep running if no one is open
         }
     }
 
@@ -4188,7 +4188,7 @@ function executeThrow(qbState, target, strength, accuracy, playState, gameLog, a
 
         // 💡 FIX: Dial back the lead factor so receivers aren't overthrown.
         // 1.0 = Aiming at the exact spot they will be.
-        let leadFactor = 0.75 + (qbIQ / 250); 
+        let leadFactor = 0.75 + (qbIQ / 250);
         if (passType === 'lob') leadFactor += 0.15; // Deep balls get slight lead
         if (passType === 'bullet') leadFactor -= 0.15; // Bullets are thrown at the body
 
@@ -4478,7 +4478,7 @@ function handleBallArrival(playState, carrier, playResult, gameLog) {
 
         if (p.action === 'tracking_ball') {
             // 💡 FIX: Receivers tracking deep balls get a much larger bucket to simulate "running under it"
-            dynamicCatchRadius *= 1.8; 
+            dynamicCatchRadius *= 1.8;
         }
 
         const distNow = Math.sqrt((p.x - ball.x) ** 2 + (p.y - ball.y) ** 2);
@@ -4545,7 +4545,7 @@ function handleBallArrival(playState, carrier, playResult, gameLog) {
         const ticksInAir = playState.tick - (ball.throwTick || 0);
         if (ticksInAir < 15 && isDefense && playState.type === 'pass') {
             // 💡 FIX: DLs almost never swat bullets right out of the QB's hand unless very lucky
-            if (bestCandidate.role === 'DL') catchScore -= 120; 
+            if (bestCandidate.role === 'DL') catchScore -= 120;
             else catchScore -= 60;
         }
 
@@ -4621,11 +4621,11 @@ function handleBallArrival(playState, carrier, playResult, gameLog) {
                 if (!(last && last.playerId === bestCandidate.id && (playState.tick - last.tick) <= 5)) {
 
                     let swatChance = (catching * 0.6) + (agility * 0.4) + 25;
-                    
+
                     // 💡 FIX: Apply the Point-Blank penalty to Swats/Tips too!
                     const ticksInAir = playState.tick - (ball.throwTick || 0);
                     if (ticksInAir < 15 && playState.type === 'pass') {
-                        if (bestCandidate.role === 'DL') swatChance -= 80; 
+                        if (bestCandidate.role === 'DL') swatChance -= 80;
                         else swatChance -= 40;
                     }
 
@@ -5059,15 +5059,15 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
 
             if (playState.handoffRequired && !playState.handoffOccurred) {
                 if (qb1 && rb1) {
-                    
+
                     const qbDepth = playState.lineOfScrimmage - qb1.initialY;
-                    
+
                     // 💡 FIX: Create distinct target points for QB and RB to prevent them crashing head-on
                     const handoffSide = rb1.initialX > qb1.initialX ? 1 : -1;
                     const qbMeshX = qb1.initialX + (handoffSide * 1.0);
                     const rbMeshX = qb1.initialX + (handoffSide * 1.6); // RB runs slightly wider
-                    
-                    const meshY = qbDepth < 4.0 ? (playState.lineOfScrimmage - 4.5) : (qb1.initialY + 1.0); 
+
+                    const meshY = qbDepth < 4.0 ? (playState.lineOfScrimmage - 4.5) : (qb1.initialY + 1.0);
 
                     const handoffTickThreshold = qbDepth < 4.0 ? 18 : 24;
 
@@ -5079,8 +5079,8 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
                         rb1.targetX = rbMeshX;
                         // 💡 FIX: RB targets slightly upfield from the mesh so they have forward momentum, 
                         // but we use 'handoff_receive' so they brake and gather instead of overshooting at 22mph.
-                        rb1.targetY = meshY + 1.5; 
-                        rb1.action = 'handoff_receive'; 
+                        rb1.targetY = meshY + 1.5;
+                        rb1.action = 'handoff_receive';
                         rb1.contactReduction = 0.85;
                     } else {
                         const dist = getDistance(qb1, rb1);
@@ -5305,8 +5305,8 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
                 }
             }
 
-            // --- H. INTERACTIONS ---
             if (playState.playIsLive) {
+
                 if (typeof checkBlockCollisions === 'function') checkBlockCollisions(playState);
                 if (typeof resolveOngoingBlocks === 'function') resolveOngoingBlocks(playState, gameLog, offenseStates, defenseStates);
 
@@ -5341,15 +5341,17 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
 
             // --- I. UPDATE FATIGUE (Optimized) ---
             playState.activePlayers.forEach(p => {
-                let drain = (p.action.includes('run') || p.action.includes('rush') || p.action === 'pursuit') ? 0.03 : 0.01;
+                let drain = (p.action.includes('run') || p.action.includes('rush') || p.action === 'pursuit' || p.action.includes('route') || p.action.includes('scramble')) ? 0.05 : 0.02;
                 const player = playerCache.get(p.id);
                 if (player) {
                     player.fatigue = Math.min(100, (player.fatigue || 0) + drain);
                     const stamina = player.attributes?.physical?.stamina || 50;
                     const fatigueRatio = player.fatigue / Math.max(1, stamina);
-                    p.fatigueModifier = Math.max(0.75, 1.0 - (fatigueRatio * 0.25));
+                    // 💡 FIX: Make fatigue impact performance more noticeably
+                    p.fatigueModifier = Math.max(0.70, 1.0 - (fatigueRatio * 0.30));
                 }
             });
+
 
             // --- J. VISUALIZER RECORDING ---
             if (isLive && gameLog) {
@@ -5406,11 +5408,22 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
                 });
             }
         }
+        // --- K. BENCH RECOVERY ---
+        // Players on the bench recover energy between plays
+        const activeIds = new Set(playState.activePlayers.map(p => p.id));
+        const allRoster = [...getRosterObjects(offense), ...getRosterObjects(defense)];
+        allRoster.forEach(p => {
+            if (p && !activeIds.has(p.id)) {
+                const stamina = p.attributes?.physical?.stamina || 50;
+                const recovery = 5 + (stamina / 10); // Recovers 10 to 15 fatigue per play
+                p.fatigue = Math.max(0, (p.fatigue || 0) - recovery);
+            }
+        });
 
     } catch (e) {
         console.error(`Simulation Loop Crash on tick ${playState.tick}:`, e);
-        if (gameLog) gameLog.push(`🚨 [Tick ${playState.tick}] CRASH: ${e.message}`);
-    }
+        if (gameLog) gameLog.push(`🚨[Tick ${playState.tick}] CRASH: ${e.message}`);
+    } 
 
     // ===========================================================
     // --- 8. POST-PLAY CALCULATION (Final Results) ---
@@ -6236,6 +6249,11 @@ function simulateLivePlayStep(game) {
         playsRemaining: 60 - (game.playsTotal || 0),
         quarter: game.quarter || 1
     };
+
+    // --- 3. AUTO SUBSTITUTIONS ---
+    // The coaching AI handles resting tired players dynamically
+    autoMakeSubstitutions(offense, { thresholdFatigue: 65, chance: 1.0 }, game.gameLog);
+    autoMakeSubstitutions(defense, { thresholdFatigue: 65, chance: 1.0 }, game.gameLog);
 
     // --- 4. EXECUTE THE PLAY ---
     const result = resolvePlay(offense, defense, offPlayKey, defPlayKey, context, {}, true);
@@ -7239,7 +7257,7 @@ function substitutePlayers(teamId, outPlayerId, inPlayerId, gameLog = null) {
 
     const inPlayerName = inPlayer?.name || 'Unknown Player';
     const outPlayerName = outPlayer?.name || 'Unknown Player';
-    const logMsg = `🔄 SUBSTITUTION: ${inPlayerName} enters for ${outPlayerName}.`;
+    const logMsg = `🔄 SUB: ${inPlayerName} enters for ${outPlayerName}.`;
     console.log(logMsg);
     if (gameLog && Array.isArray(gameLog)) gameLog.push(logMsg);
     return { success: true, message: 'Substitution completed.' };
@@ -7252,8 +7270,8 @@ function substitutePlayers(teamId, outPlayerId, inPlayerId, gameLog = null) {
 function autoMakeSubstitutions(team, options = {}, gameLog = null) {
     if (!team || !team.depthChart || !team.roster) return 0;
 
-    const thresholdFatigue = options.thresholdFatigue || 50;
-    const reEntryFatigue = 20; // Player must recover to this fatigue level to re-enter
+    const thresholdFatigue = options.thresholdFatigue || 65;
+    const reEntryFatigue = 25; // Player must recover to this fatigue level to re-enter
     const maxSubs = options.maxSubs || 3;
     const chance = typeof options.chance === 'number' ? options.chance : 0.8;
 
@@ -7336,8 +7354,8 @@ function autoMakeSubstitutions(team, options = {}, gameLog = null) {
 
                     const bestRestedScore = calculateSlotSuitability(bestRested, slot, side, team);
 
-                    // If bench player is significantly more suitable, swap them in
-                    if (bestRestedScore > currentSuitability + 8) {
+                    // If bench player is more suitable (e.g., original starter recovered), swap them in!
+                    if (bestRestedScore > currentSuitability) {
                         const res = substitutePlayers(team.id, currentPlayerId, bestRested.id, gameLog);
                         if (res && res.success) {
                             subsDone++;
