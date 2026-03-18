@@ -1626,19 +1626,41 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
                 if (slot.startsWith('QB')) {
                     if (play.type === 'punt') {
                         assignment = 'punt'; action = 'punt_kick'; targetY = startY - 5;
-                    } else if (play.type === 'run') {
-                        // 💡 FIX: QB takes a shallow drop for run plays to facilitate handoff
-                        assignment = 'qb_setup'; // Use qb_setup action
-                        action = 'qb_setup';
-                        dropbackPhase = 'dropping';
-                        hasCompletedDropback = false;
-                        dropbackTargetY = startY - 3.0; // Shallow 3-yard drop
-                    } else { // It's a pass play
+                    } else {
                         assignment = 'qb_setup';
                         action = 'qb_setup';
                         dropbackPhase = 'dropping';
                         hasCompletedDropback = false;
-                        dropbackTargetY = play.type === 'pass' ? startY - 7.0 : startY - 3.0;
+
+                        // 💡 NEW: Advanced Dropback Logic based on Formation and Concept
+                        const initialDepth = playState.lineOfScrimmage - startY;
+                        const isShotgun = initialDepth >= 4.0; // Gun/Pistol is 4+ yards back
+
+                        if (play.type === 'run') {
+                            // Run Plays: Positioning for Handoff (Fallback for physics mesh)
+                            if (isShotgun) {
+                                dropbackTargetY = startY - 0.5; // Slight step back to clear mesh point
+                            } else {
+                                dropbackTargetY = playState.lineOfScrimmage - 3.5; // Reverse out
+                            }
+                        } else {
+                            // Pass Plays: Route-depth based drops
+                            const isQuick = play.tags && (play.tags.includes('short') || play.tags.includes('quick') || play.tags.includes('screen'));
+                            const isDeep = play.tags && (play.tags.includes('deep') || play.tags.includes('hailmary'));
+
+                            let targetDepth = 0;
+                            if (isShotgun) {
+                                if (isQuick) targetDepth = initialDepth; // Catch and fire, stay in gun
+                                else if (isDeep) targetDepth = 9.5;      // 5-step in gun
+                                else targetDepth = 7.5;                  // 3-step in gun
+                            } else {
+                                if (isQuick) targetDepth = 3.5;          // 3-step drop under center
+                                else if (isDeep) targetDepth = 9.0;      // 7-step drop under center
+                                else targetDepth = 6.0;                  // 5-step drop under center
+                            }
+
+                            dropbackTargetY = playState.lineOfScrimmage - targetDepth;
+                        }
                     }
                 }
                 else if (slot.startsWith('OL')) {
@@ -1744,13 +1766,16 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
             startX = Math.max(0.5, Math.min(53.3 - 0.5, startX));
             startY = Math.max(10.5, Math.min(110.0 - 10.5, startY));
 
-            // DL starts 1.5yds ahead of LOS, OL starts 1.5yds behind LOS.
-            // This prevents the "Icon Overlap" at the start of the play.
-            if (!isOffense && startY < playState.lineOfScrimmage + 1.5) {
-                startY = playState.lineOfScrimmage + 1.5;
-            }
-            if (isOffense && startY > playState.lineOfScrimmage - 1.5) {
-                startY = playState.lineOfScrimmage - 1.5;
+            // 💡 FIX: Bring the trenches closer together. 
+            // OL starts right on the line (-0.2), DL starts just across it (+0.8).
+            if (isOffense && slot.startsWith('OL')) {
+                startY = playState.lineOfScrimmage - 0.2;
+            } else if (!isOffense && slot.startsWith('DL')) {
+                startY = playState.lineOfScrimmage + 0.8;
+            } else {
+                // Default clamping for non-linemen to prevent overlap
+                if (!isOffense && startY < playState.lineOfScrimmage + 1.5) startY = playState.lineOfScrimmage + 1.5;
+                if (isOffense && startY > playState.lineOfScrimmage - 1.5) startY = playState.lineOfScrimmage - 1.5;
             }
 
             // RPG Attributes
@@ -2678,35 +2703,49 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
 
                     // --- PHASE 3: STANDARD POCKET DRIFT
                     if (rushers.length > 0 && qbIQ > 40) {
-                        let shiftX = 0; let shiftY = 0;
-                        let edgePressure = false; let interiorPressure = false;
+                        let desiredX = idealX;
+                        let desiredY = idealY;
+                        
+                        let leftPressure = 0;
+                        let rightPressure = 0;
+                        let upTheMiddle = 0;
 
                         rushers.forEach(r => {
-                            const dx = r.x - pState.x; const dy = r.y - pState.y;
-                            // Categorize pressure type
-                            if (Math.abs(dx) > 3.0) edgePressure = true;
-                            if (Math.abs(dx) <= 3.0 && dy > 0) interiorPressure = true;
-                            if (Math.abs(dx) > 2) shiftY -= 0.8;
-                            if (Math.abs(dx) < 4) shiftX += (dx > 0 ? -1.2 : 1.2);
+                            const dx = r.x - pState.x; 
+                            const dy = r.y - pState.y;
+                            const dist = Math.max(0.1, Math.hypot(dx, dy));
+
+                            // Weight pressure by proximity (closer = much higher threat)
+                            const threatLevel = 10 / dist;
+
+                            if (dx < -1.5) leftPressure += threatLevel;
+                            if (dx > 1.5) rightPressure += threatLevel;
+                            if (Math.abs(dx) <= 1.5 && dy > 0) upTheMiddle += threatLevel;
                         });
 
-                        // "Step Up" Logic!
-                        // If the edges are collapsing but the interior (A/B gaps) is clean, a smart QB steps forward.
-                        if (edgePressure && !interiorPressure && qbIQ > 65) {
-                            shiftY += 2.5;
+                        // 💡 FIX: Pronounced Lateral Drift
+                        // Slide significantly away from the dominant pressure side
+                        if (leftPressure > rightPressure + 1.0) desiredX += 5.0; // Slide right
+                        else if (rightPressure > leftPressure + 1.0) desiredX -= 5.0; // Slide left
+
+                        // "Step Up" Logic
+                        if ((leftPressure > 2.0 || rightPressure > 2.0) && upTheMiddle < 1.5 && qbIQ > 65) {
+                            desiredY += 3.5; // Step up boldly!
                             if (gameLog && Math.random() < 0.05) pushGameLog(gameLog, `[Tick ${playState.tick}] 👣 ${pState.name} steps up into the pocket!`, playState);
+                        } else if (upTheMiddle > 2.0) {
+                            desiredY -= 2.0; // Fade back
                         }
 
-                        const iqMod = qbIQ / 100;
-                        pState.targetX = Math.max(pState.initialX - 4, Math.min(pState.initialX + 4, idealX + (shiftX * iqMod)));
-
-                        // Hard cap the drift depth. A QB should NEVER drift more than 7.5 yards behind the LOS.
-                        pState.targetY = Math.max(LOS - 7.5, Math.min(LOS - 1, idealY + (shiftY * iqMod)));
+                        // Apply IQ to how quickly and aggressively they slide
+                        const iqMod = 0.5 + (qbIQ / 200); // 0.75 for average, 1.0 for elite
+                        
+                        // Set the actual movement targets
+                        pState.targetX = Math.max(pState.initialX - 6, Math.min(pState.initialX + 6, pState.initialX + ((desiredX - pState.initialX) * iqMod)));
+                        pState.targetY = Math.max(LOS - 12.0, Math.min(LOS - 1, idealY + ((desiredY - idealY) * iqMod)));
                     } else {
                         pState.targetX = idealX;
                         pState.targetY = idealY;
                     }
-                    break;
 
                 case 'run_route':
                     if (!pState.routePath || pState.currentPathIndex >= pState.routePath.length) {
@@ -2774,7 +2813,8 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                 case 'run_block':
                     if (!pState.dynamicTargetId) {
                         pState.targetX = pState.initialX;
-                        pState.targetY = (pState.action === 'pass_block') ? Math.max(LOS - 2.5, pState.y - 0.8) : pState.y + 1.0;
+                        // 💡 FIX: OL should only drop back slightly on pass blocks (1 yard max) to form a tight pocket.
+                        pState.targetY = (pState.action === 'pass_block') ? Math.max(LOS - 1.5, pState.y - 0.5) : pState.y + 1.0;
                     }
                     break;
 
@@ -2837,7 +2877,7 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                         // Stop trying to lead the runner and aim directly at their hips
                         pState.targetX = chaseTarget.x;
                         pState.targetY = chaseTarget.y;
-                        pState.contactReduction = 0.85; // Slow down slightly to "break down" and not overrun
+                        pState.contactReduction = 1.0; // 💡 FIX: Sprint through the tackle! Do not slow down.
                     } else {
                         // B. Open Field Pursuit
                         // Calculate lead based on distance. Shorter lead if close, longer lead if far.
