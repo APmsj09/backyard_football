@@ -2636,16 +2636,27 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
 
             // RECEIVER BALL TRACKING
             if (isBallInAir && !playState.ballState.isThrowAway) {
+                const isIntendedTarget = (playState.ballState.targetPlayerId === pState.id);
                 const iq = pState.playbookIQ || 50;
                 const flightTime = playState.tick - (playState.ballState.throwTick || 0);
-                const reactionDelay = Math.max(1, 15 - Math.floor(iq / 7));
+                
+                // 💡 FIX: Intended targets react to the ball's actual trajectory almost instantly. 
+                // Unintended receivers (like crossing routes) take longer to realize the ball isn't for them.
+                const reactionDelay = isIntendedTarget ? 2 : Math.max(5, 20 - Math.floor(iq / 5));
 
                 if (flightTime > reactionDelay) {
-                    pState.targetX = playState.ballState.targetX;
-                    pState.targetY = playState.ballState.targetY;
-                    pState.action = 'tracking_ball';
-                    pState.contactReduction = 1.15; // Speed boost to get to ball
-                    return; // Skip normal route logic
+                    const distToLanding = Math.hypot(pState.x - playState.ballState.targetX, pState.y - playState.ballState.targetY);
+                    
+                    // Only abandon the route if you are the target OR if it's landing right near you
+                    if (isIntendedTarget || distToLanding < 8.0) {
+                        pState.targetX = playState.ballState.targetX;
+                        pState.targetY = playState.ballState.targetY;
+                        pState.action = 'tracking_ball';
+                        
+                        // 💡 FIX: Give highly agile receivers a better ability to adjust to bad throws
+                        pState.contactReduction = 1.1 + ((pState.agility || 50) / 250); 
+                        return; // Skip normal route logic
+                    }
                 }
             }
 
@@ -3940,7 +3951,7 @@ function updateQBDecision(qbState, offenseStates, defenseStates, playState, offe
         
         // Match the speeds in executeThrow
         if (distFromQB > 25) estimatedBallSpeed = 16 + (qbStrength / 100) * 14.0; // Lob
-        else if (distFromQB < 12) estimatedBallSpeed = maxArmVelocity = 16 + (qbStrength / 100) * 14.0; // Bullet
+        else if (distFromQB < 12) estimatedBallSpeed = 16 + (qbStrength / 100) * 14.0; // Bullet
         
         const estimatedFlightTime = distFromQB / estimatedBallSpeed;
 
@@ -5133,54 +5144,49 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
 
             if (playState.handoffRequired && !playState.handoffOccurred) {
                 if (qb1 && rb1) {
-
                     const qbDepth = playState.lineOfScrimmage - qb1.initialY;
-
-                    // 💡 FIX: Create distinct target points for QB and RB to prevent them crashing head-on
                     const handoffSide = rb1.initialX > qb1.initialX ? 1 : -1;
                     const qbMeshX = qb1.initialX + (handoffSide * 1.0);
-                    const rbMeshX = qb1.initialX + (handoffSide * 1.6); // RB runs slightly wider
-
-                    const meshY = qbDepth < 4.0 ? (playState.lineOfScrimmage - 4.5) : (qb1.initialY + 1.0);
+                    const rbMeshX = qb1.initialX + (handoffSide * 1.6); 
+                    const meshY = qbDepth < 4.0 ? (playState.lineOfScrimmage - 4.5) : (qb1.initialY + 1.0); 
 
                     const handoffTickThreshold = qbDepth < 4.0 ? 18 : 24;
+                    const dist = getDistance(qb1, rb1);
 
-                    if (playState.tick < handoffTickThreshold) {
+                    // 💡 FIX: Allow early handoffs! If they are touching (dist < 1.2) and the snap is complete (tick > 10), hand it off immediately.
+                    const canHandoffEarly = (dist < 1.2 && playState.tick > 10);
+                    const isTimeUp = (playState.tick >= handoffTickThreshold && dist < 2.5) || (playState.tick >= handoffTickThreshold + 6);
+
+                    if (canHandoffEarly || isTimeUp) {
+                        qb1.hasBall = false;
+                        qb1.isBallCarrier = false;
+                        rb1.hasBall = true;
+                        rb1.isBallCarrier = true;
+                        playState.handoffOccurred = true;
+
+                        const fakeDir = (rb1.initialX > qb1.initialX) ? -1 : 1;
+                        qb1.targetX = qb1.initialX + (fakeDir * 5);
+                        qb1.targetY = qb1.y - 1;
+                        qb1.action = 'run_fake';
+
+                        rb1.action = 'run_path';
+                        rb1.contactReduction = 1.0;
+
+                        if (gameLog) pushGameLog(gameLog, `[Tick ${playState.tick}] 🏈 Handoff mesh complete to ${rb1.name}`, playState);
+                    } else {
+                        // Keep moving to mesh point
                         qb1.targetX = qbMeshX;
                         qb1.targetY = meshY;
                         qb1.action = 'handoff_setup';
 
-                        rb1.targetX = rbMeshX;
-                        // 💡 FIX: RB targets slightly upfield from the mesh so they have forward momentum, 
-                        // but we use 'handoff_receive' so they brake and gather instead of overshooting at 22mph.
-                        rb1.targetY = meshY + 1.5;
-                        rb1.action = 'handoff_receive';
-                        rb1.contactReduction = 0.85;
-                    } else {
-                        const dist = getDistance(qb1, rb1);
-
-                        // 💡 FIX: Expanded distance threshold to 2.5 yards. Since they are reaching out their arms, 
-                        // they don't need to occupy the exact same pixel. Also force handoff if time expires.
-                        if (dist < 2.5 || playState.tick >= (handoffTickThreshold + 6)) {
-                            qb1.hasBall = false;
-                            qb1.isBallCarrier = false;
-                            rb1.hasBall = true;
-                            rb1.isBallCarrier = true;
-                            playState.handoffOccurred = true;
-
-                            const fakeDir = (rb1.initialX > qb1.initialX) ? -1 : 1;
-                            qb1.targetX = qb1.initialX + (fakeDir * 5);
-                            qb1.targetY = qb1.y - 1;
-                            qb1.action = 'run_fake';
-
-                            // 💡 FIX: Immediately transition RB to runner so target AI takes over
-                            rb1.action = 'run_path';
-                            rb1.contactReduction = 1.0;
-
-                            if (gameLog) pushGameLog(gameLog, `[Tick ${playState.tick}] 🏈 Handoff mesh complete to ${rb1.name}`, playState);
+                        if (playState.tick < handoffTickThreshold - 4) {
+                            // Standard mesh approach
+                            rb1.targetX = rbMeshX;
+                            rb1.targetY = meshY + 1.5; 
+                            rb1.action = 'handoff_receive'; 
+                            rb1.contactReduction = 0.85;
                         } else {
-                            // 💡 FIX: If the threshold passed but they aren't close enough yet, force the RB to 
-                            // converge directly on the QB to finish the handoff instead of orbiting.
+                            // 💡 FIX: If time is running out, force the RB to converge directly on the QB
                             rb1.targetX = qb1.x;
                             rb1.targetY = qb1.y;
                             rb1.action = 'handoff_receive';
