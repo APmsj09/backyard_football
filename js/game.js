@@ -4559,8 +4559,11 @@ function handleBallArrival(playState, carrier, playResult, gameLog) {
     if (!ball.isThrowAway && playersInRange.length > 0) {
         // 💡 FIX: Give the intended receiver a 0.5 yard "priority" radius in jump balls
         playersInRange.sort((a, b) => {
-            const distA = getDistance(a, ball) - (a.id === ball.targetPlayerId ? 0.5 : 0);
-            const distB = getDistance(b, ball) - (b.id === ball.targetPlayerId ? 0.5 : 0);
+            const priorityA = a.id === ball.targetPlayerId ? 3.0 : 0;
+            const priorityB = b.id === ball.targetPlayerId ? 3.0 : 0;
+            
+            const distA = getDistance(a, ball) - priorityA;
+            const distB = getDistance(b, ball) - priorityB;
             return distA - distB;
         });
         const bestCandidate = playersInRange[0];
@@ -4622,7 +4625,8 @@ function handleBallArrival(playState, carrier, playResult, gameLog) {
             if (isOutOfBounds) {
                 ball.isSwatted = true;
                 ball.vz = -2; // Ball drops
-                pushLog(`[Tick ${playState.tick}] 🚩 OUT OF BOUNDS! ${bestCandidate.name} caught it, but was past the line.`);
+                // 💡 FIX: Reworded for clarity
+                pushLog(`[Tick ${playState.tick}] 🚩 OUT OF BOUNDS! ${bestCandidate.name} caught it out of bounds.`);
                 return; // Exit catch logic
             }
             // --- SUCCESSFUL CATCH ---
@@ -4684,12 +4688,13 @@ function handleBallArrival(playState, carrier, playResult, gameLog) {
                 const last = ball.lastInteraction;
                 if (!(last && last.playerId === bestCandidate.id && (playState.tick - last.tick) <= 5)) {
 
-                    let swatChance = (catching * 0.6) + (agility * 0.4) + 25;
-
+                    // 💡 FIX: Adjusted Swat Chance. IQ plays a larger role, base floor lowered.
+                    let swatChance = (catching * 0.4) + (agility * 0.4) + ((bestCandidate.playbookIQ || 50) * 0.2) + 10;
+                    
                     // 💡 FIX: Apply the Point-Blank penalty to Swats/Tips too!
                     const ticksInAir = playState.tick - (ball.throwTick || 0);
                     if (ticksInAir < 15 && playState.type === 'pass') {
-                        if (bestCandidate.role === 'DL') swatChance -= 80;
+                        if (bestCandidate.role === 'DL') swatChance -= 80; 
                         else swatChance -= 40;
                     }
 
@@ -7240,7 +7245,7 @@ export function getBackupForPosition(team, position, excludeId = null) {
 function validateDepthChart(team) {
     const errors = [];
     if (!team || !team.depthChart || !team.roster) {
-        return { valid: false, errors: ['Team or depth chart invalid'] };
+        return { valid: errors.length === 0, errors };
     }
 
     const allRosterIds = new Set(team.roster.filter(id => id));
@@ -7276,67 +7281,39 @@ function substitutePlayers(teamId, outPlayerId, inPlayerId, gameLog = null) {
     const fullRoster = getRosterObjects(team);
     const outPlayer = fullRoster.find(p => p && p.id === outPlayerId);
     const inPlayer = fullRoster.find(p => p && p.id === inPlayerId);
-    if (!outPlayer) return { success: false, message: 'Outgoing player not found on roster.' };
-    if (!inPlayer) return { success: false, message: 'Incoming player not found on roster.' };
+    if (!outPlayer || !inPlayer) return { success: false, message: 'Player not found.' };
 
-    // depthChart is organized by side (offense/defense). Find slots across both sides.
-    const sides = Object.keys(team.depthChart || {});
-    let outSlot = null; // The ONLY slot outPlayer occupies
-    let inSlot = null;  // The ONLY slot inPlayer occupies (if any)
+    const sides = ['offense', 'defense'];
+    let swappedCount = 0;
+    let lastSlot = '';
 
     sides.forEach(side => {
         const chart = team.depthChart[side] || {};
         Object.keys(chart).forEach(slot => {
             if (chart[slot] === outPlayerId) {
-                outSlot = { side, slot };
-            }
-            if (chart[slot] === inPlayerId) {
-                inSlot = { side, slot };
+                // Check if incoming player is ALREADY starting on this side
+                const isAlreadyOnSide = Object.values(chart).includes(inPlayerId);
+                
+                if (!isAlreadyOnSide) {
+                    chart[slot] = inPlayerId;
+                    swappedCount++;
+                    lastSlot = `${side === 'offense' ? 'OFF' : 'DEF'} ${slot}`;
+                }
             }
         });
     });
 
-    if (!outSlot) {
-        return { success: false, message: 'Outgoing player is not currently a starter.' };
-    }
-
-    // CASE 1: Both players are starters → swap them
-    if (inSlot) {
-        team.depthChart[outSlot.side][outSlot.slot] = inPlayerId;
-        team.depthChart[inSlot.side][inSlot.slot] = outPlayerId;
-        const inPlayerName = inPlayer?.name || 'Unknown Player';
-        const outPlayerName = outPlayer?.name || 'Unknown Player';
-        const logMsg = `🔄 SUBSTITUTION: ${inPlayerName} and ${outPlayerName} swap positions.`;
+    if (swappedCount > 0) {
+        const inEnergy = Math.round(100 - (inPlayer.fatigue || 0));
+        const outEnergy = Math.round(100 - (outPlayer.fatigue || 0));
+        const logMsg = `🔄 SUB (${lastSlot}): ${inPlayer.name} (${inEnergy}% E) enters for ${outPlayer.name} (${outEnergy}% E).`;
+        
         console.log(logMsg);
         if (gameLog && Array.isArray(gameLog)) gameLog.push(logMsg);
-        return { success: true, message: 'Players swapped positions.' };
+        return { success: true, message: 'Substitution completed.' };
     }
-
-    // CASE 2: inPlayer is a bench player → move them to outSlot, remove outPlayer from any other slots
-    team.depthChart[outSlot.side][outSlot.slot] = inPlayerId;
-
-    // Remove outPlayer from ALL depth chart slots (he should go to bench)
-    sides.forEach(side => {
-        const chart = team.depthChart[side] || {};
-        Object.keys(chart).forEach(slot => {
-            if (chart[slot] === outPlayerId) {
-                chart[slot] = null;
-            }
-        });
-    });
-
-    const inPlayerName = inPlayer?.name || 'Unknown Player';
-    const outPlayerName = outPlayer?.name || 'Unknown Player';
     
-    // 💡 NEW: Calculate display energy for logging
-    const inEnergy = Math.round(100 - (inPlayer.fatigue || 0));
-    const outEnergy = Math.round(100 - (outPlayer.fatigue || 0));
-    
-    const logMsg = `🔄 SUB (${outSlot.slot}): ${inPlayerName} (${inEnergy}% E) enters for ${outPlayerName} (${outEnergy}% E).`;
-    
-    console.log(logMsg);
-    if (gameLog && Array.isArray(gameLog)) gameLog.push(logMsg);
-    return { success: true, message: 'Substitution completed.' };
+    return { success: false, message: 'No valid swap found or player already active.' };
 }
 
 /**
@@ -7347,7 +7324,7 @@ function autoMakeSubstitutions(team, options = {}, gameLog = null) {
     if (!team || !team.depthChart || !team.roster) return 0;
 
     const thresholdFatigue = options.thresholdFatigue || 65;
-    const reEntryFatigue = 25; // Player must recover to this fatigue level to re-enter
+    const reEntryFatigue = 20; // Player must recover to this fatigue level to re-enter
     const maxSubs = options.maxSubs || 3;
     const chance = typeof options.chance === 'number' ? options.chance : 0.8;
 
@@ -7357,68 +7334,58 @@ function autoMakeSubstitutions(team, options = {}, gameLog = null) {
     if (!fullRoster || fullRoster.length === 0) return 0;
 
     let subsDone = 0;
-    const sides = Object.keys(team.depthChart || {});
+    const sides =['offense', 'defense'];
 
     for (const side of sides) {
         if (subsDone >= maxSubs) break;
 
         const chart = team.depthChart[side] || {};
-        const formationSlots = Object.keys(chart).filter(slot => chart[slot]); // Only active starters
+        const formationSlots = Object.keys(chart).filter(slot => chart[slot]);
 
         for (const slot of formationSlots) {
             if (subsDone >= maxSubs) break;
 
             const currentPlayerId = chart[slot];
-            if (!currentPlayerId) continue;
-
             const currentPlayer = fullRoster.find(p => p && p.id === currentPlayerId);
             if (!currentPlayer) continue;
 
             const currentFatigue = currentPlayer.fatigue || 0;
 
-            // Get all players currently on the depth chart (starters)
-            const allStarters = new Set();
-            Object.values(team.depthChart).forEach(sideChart => {
-                Object.values(sideChart).forEach(playerId => {
-                    if (playerId) allStarters.add(playerId);
-                });
-            });
-
-            // Get all bench players (on roster but not in depth chart)
+            // Get active players ON THIS SIDE specifically to allow Two-Way players
+            const activeOnThisSide = new Set(Object.values(chart));
+            
             const benchPlayers = fullRoster.filter(p =>
                 p &&
-                !allStarters.has(p.id) &&
-                (!p.status || p.status.duration === 0) // Healthy
+                !activeOnThisSide.has(p.id) &&
+                (!p.status || p.status.duration === 0)
             );
 
             // --- SCENARIO A: Current player is TIRED -> Sub Out ---
             if (currentFatigue >= thresholdFatigue && benchPlayers.length > 0) {
-                // Find freshest, most suitable bench player for this slot
                 const bestSub = benchPlayers.reduce((best, curr) => {
                     const currFatigue = curr.fatigue || 0;
                     const bestFatigue = best.fatigue || 0;
                     const currSuitability = calculateSlotSuitability(curr, slot, side, team);
                     const bestSuitability = calculateSlotSuitability(best, slot, side, team);
 
-                    // Prioritize: 1) Lower fatigue, 2) Better suitability
                     if (currFatigue < bestFatigue - 10) return curr;
                     if (bestFatigue < currFatigue - 10) return best;
                     return currSuitability > bestSuitability ? curr : best;
                 }, benchPlayers[0]);
 
                 if (bestSub) {
-                    const res = substitutePlayers(team.id, currentPlayerId, bestSub.id, gameLog);
-                    if (res && res.success) {
-                        subsDone++;
-                    }
+                    // We assign directly here to bypass full roster search for targeted slots
+                    chart[slot] = bestSub.id;
+                    subsDone++;
+                    
+                    const inE = Math.round(100 - (bestSub.fatigue || 0));
+                    const outE = Math.round(100 - currentFatigue);
+                    if (gameLog) pushGameLog(gameLog, `🔄 SUB (${side === 'offense' ? 'OFF' : 'DEF'} ${slot}): ${bestSub.name} (${inE}% E) in for ${currentPlayer.name} (${outE}% E).`);
                 }
             }
-
             // --- SCENARIO B: Check if a well-rested bench player should start ---
             else if (benchPlayers.length > 0) {
                 const currentSuitability = calculateSlotSuitability(currentPlayer, slot, side, team);
-
-                // Find the best-rested, most-suitable bench player
                 const restedStarters = benchPlayers.filter(p => (p.fatigue || 0) < reEntryFatigue);
 
                 if (restedStarters.length > 0) {
@@ -7430,12 +7397,13 @@ function autoMakeSubstitutions(team, options = {}, gameLog = null) {
 
                     const bestRestedScore = calculateSlotSuitability(bestRested, slot, side, team);
 
-                    // If bench player is more suitable (e.g., original starter recovered), swap them in!
-                    if (bestRestedScore > currentSuitability) {
-                        const res = substitutePlayers(team.id, currentPlayerId, bestRested.id, gameLog);
-                        if (res && res.success) {
-                            subsDone++;
-                        }
+                    if (bestRestedScore > currentSuitability + 8) {
+                        chart[slot] = bestRested.id;
+                        subsDone++;
+                        
+                        const inE = Math.round(100 - (bestRested.fatigue || 0));
+                        const outE = Math.round(100 - currentFatigue);
+                        if (gameLog) pushGameLog(gameLog, `🔄 SUB (${side === 'offense' ? 'OFF' : 'DEF'} ${slot}): ${bestRested.name} (${inE}% E) returns for ${currentPlayer.name} (${outE}% E).`);
                     }
                 }
             }
@@ -7443,6 +7411,7 @@ function autoMakeSubstitutions(team, options = {}, gameLog = null) {
     }
     return subsDone;
 }
+
 /** Changes the player team's formation for offense or defense. */
 /**
  * Validates that formation slots match depth chart structure.
