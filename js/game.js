@@ -2460,7 +2460,7 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
             }
 
             // Auto-Engage
-            if (getDistance(blocker, target) < 1.8) {
+            if (getDistance(blocker, target) < 1.2) { // 💡 FIX: Reduced from 1.8 to prevent Bluetooth blocking
                 const strDiff = (blocker.str || 50) - (target.str || 50);
                 blocker.isEngaged = true;
                 blocker.engagedWith = target;
@@ -2859,6 +2859,7 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
             if (ballCarrierState) {
                 if (isBallInAir) shouldPursue = false;
                 else if (isFooledByPA) shouldPursue = true;
+                else if (isRunRead) shouldPursue = true; // 💡 CRITICAL FIX: LBs attack the run immediately upon diagnosis!
                 else if (ballCarrierState.role !== 'QB' || qbScrambling) shouldPursue = true;
                 else if (assignment?.includes('blitz') || assignment?.includes('rush') || isDL) shouldPursue = true;
             }
@@ -3154,7 +3155,7 @@ function executeAssignment(pState, assignment, offenseStates, LOS, playState) {
     }
 
     // 5. BLITZ / RUSH
-    else if (assignment?.includes('rush') || assignment?.includes('blitz')) {
+    else if (assignment?.includes('rush') || assignment?.includes('blitz') || assignment?.includes('run_gap')) { // 💡 FIX: Added run_gap so DLs don't freeze on passes
         const qb = offenseStates.find(p => p.slot.startsWith('QB'));
         if (qb) {
             const dx = qb.x - pState.x;
