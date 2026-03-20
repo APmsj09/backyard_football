@@ -4029,11 +4029,12 @@ function updateQBDecision(qbState, offenseStates, defenseStates, playState, offe
     const OPEN_SEP = isPressured ? 0.3 : Math.max(0.6, 1.3 - (qbIQ / 150));
 
     // 💡 NEW: Target Value Evaluator (Requires plays to develop!)
-    const getTargetValue = (slot) => {
+    const getTargetValue = (slotOrRole) => {
         const rec = offenseTeam.find(r =>
             r.slot === slotOrRole ||
             r.assignedPlayerSlot === slotOrRole
         );
+
         if (!rec || !rec.action.includes('route')) return null;
 
         // 1. ESTIMATE FLIGHT TIME (Better Physics Sync)
