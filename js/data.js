@@ -84,69 +84,69 @@ export const ZONES = {
 // Paths are relative to the player's starting [x, y].
 export const routeTree = {
     // --- Short / Quick Routes (0-5 yards) ---
-    'Flat': { path:[{ x: 3, y: 1 }, { x: 8, y: 1.5 }] },
+    'Flat': { path: [{ x: 3, y: 1 }, { x: 8, y: 1.5 }] },
     'Slant': { path: [{ x: -1, y: 1 }, { x: -5, y: 4 }] },
-    'QuickOut': { path:[{ x: 0, y: 3 }, { x: 5, y: 3 }] },
-    'Hitch': { path:[{ x: 0, y: 6 }, { x: 0, y: 4 }] },
-    'Drag': { path:[{ x: -1, y: 2 }, { x: -8, y: 3 }, { x: -18, y: 3.5 }] },
-    'Whip': { path:[{ x: 0, y: 4 }, { x: -2, y: 4 }, { x: 4, y: 4 }] },
-    'Bubble': { path:[{ x: 4, y: -1 }, { x: 8, y: 0 }] },
+    'QuickOut': { path: [{ x: 0, y: 3 }, { x: 5, y: 3 }] },
+    'Hitch': { path: [{ x: 0, y: 6 }, { x: 0, y: 4 }] },
+    'Drag': { path: [{ x: -1, y: 2 }, { x: -8, y: 3 }, { x: -18, y: 3.5 }] },
+    'Whip': { path: [{ x: 0, y: 4 }, { x: -2, y: 4 }, { x: 4, y: 4 }] },
+    'Bubble': { path: [{ x: 4, y: -1 }, { x: 8, y: 0 }] },
     'Jet_Motion': { path: [{ x: 12, y: -1 }] }, // Fast motion across formation
 
     // --- Medium Routes (8-15 yards) ---
-    'Out': { path:[{ x: 0, y: 10 }, { x: 8, y: 10 }] },
-    'In': { path:[{ x: 0, y: 10 }, { x: -8, y: 10 }] },
-    'Dig': { path:[{ x: 0, y: 12 }, { x: -10, y: 12 }] }, // Deeper square in
-    'Curl': { path:[{ x: 0, y: 12 }, { x: 2, y: 12 }, { x: 2, y: 10 }] },
-    'Comeback': { path:[{ x: 0, y: 15 }, { x: 2, y: 15.5 }, { x: 6, y: 12 }] },
-    'Corner': { path:[{ x: 0, y: 10 }, { x: 8, y: 25 }] },
+    'Out': { path: [{ x: 0, y: 10 }, { x: 8, y: 10 }] },
+    'In': { path: [{ x: 0, y: 10 }, { x: -8, y: 10 }] },
+    'Dig': { path: [{ x: 0, y: 12 }, { x: -10, y: 12 }] }, // Deeper square in
+    'Curl': { path: [{ x: 0, y: 12 }, { x: 2, y: 12 }, { x: 2, y: 10 }] },
+    'Comeback': { path: [{ x: 0, y: 15 }, { x: 2, y: 15.5 }, { x: 6, y: 12 }] },
+    'Corner': { path: [{ x: 0, y: 10 }, { x: 8, y: 25 }] },
     'Post': { path: [{ x: 0, y: 10 }, { x: -6, y: 25 }] },
 
     // --- Deep Routes (20+ yards) ---
-    'Fly': { path:[{ x: 0, y: 40 }] },
-    'Seam': { path:[{ x: 0, y: 40 }] },
-    'Fade': { path:[{ x: 1, y: 10 }, { x: 3, y: 35 }] },
-    'PostCorner': { path:[{ x: 0, y: 10 }, { x: -2, y: 14 }, { x: 6, y: 25 }] },
-    'Sluggo': { path:[{ x: -1, y: 2 }, { x: -3, y: 5 }, { x: -3, y: 25 }] },
+    'Fly': { path: [{ x: 0, y: 40 }] },
+    'Seam': { path: [{ x: 0, y: 40 }] },
+    'Fade': { path: [{ x: 1, y: 10 }, { x: 3, y: 35 }] },
+    'PostCorner': { path: [{ x: 0, y: 10 }, { x: -2, y: 14 }, { x: 6, y: 25 }] },
+    'Sluggo': { path: [{ x: -1, y: 2 }, { x: -3, y: 5 }, { x: -3, y: 25 }] },
 
-     // --- Receiver Screen Specific ---
+    // --- Receiver Screen Specific ---
     'WR_Screen_Catch': { path: [{ x: -2, y: -1 }, { x: 2, y: 0 }] }, // Step back/lateral to catch
     'WR_Screen_Lead': { path: [{ x: 0, y: 1 }, { x: 3, y: 2 }] },   // Drive defender back then seal
     'Tunnel_Screen_Catch': { path: [{ x: 5, y: -1 }, { x: 2, y: 1 }] }, // Run inside toward the OL for a wall
-    
+
     // --- Advanced Double Moves ---
     'Out_And_Up': { path: [{ x: 0, y: 5 }, { x: 6, y: 5 }, { x: 6, y: 30 }] },
     'Hitch_And_Go': { path: [{ x: 0, y: 5 }, { x: 0, y: 3 }, { x: 0, y: 30 }] },
-    
+
     // --- Passing Concept Routes ---
     'Scissors_Corner': { path: [{ x: 0, y: 8 }, { x: 10, y: 20 }] },
     'Scissors_Post': { path: [{ x: 0, y: 12 }, { x: -8, y: 30 }] },
 
     // --- Running Back Pass Routes ---
-    'Wheel': { path:[{ x: 4, y: 1 }, { x: 6, y: 8 }, { x: 6, y: 25 }] },
-    'Angle': { path:[{ x: 3, y: 2 }, { x: -2, y: 6 }] },
-    'Screen': { path:[{ x: -2, y: -1 }, { x: -4, y: -0.5 }] },
-    'Slip_Screen': { path:[{ x: 0, y: 2 }, { x: 4, y: 0 }] }, // Fake block, slip out
-    'CheckRelease': { path:[{ x: 0, y: 1 }, { x: 2, y: 1 }, { x: 3, y: 4 }] },
+    'Wheel': { path: [{ x: 4, y: 1 }, { x: 6, y: 8 }, { x: 6, y: 25 }] },
+    'Angle': { path: [{ x: 3, y: 2 }, { x: -2, y: 6 }] },
+    'Screen': { path: [{ x: -2, y: -1 }, { x: -4, y: -0.5 }] },
+    'Slip_Screen': { path: [{ x: 0, y: 2 }, { x: 4, y: 0 }] }, // Fake block, slip out
+    'CheckRelease': { path: [{ x: 0, y: 1 }, { x: 2, y: 1 }, { x: 3, y: 4 }] },
 
     // --- RB Run Designs (Initial Paths) ---
-    'run_dive': { path:[{ x: 0, y: 2 }, { x: 0, y: 5 }] },
-    'run_iso_l': { path:[{ x: -1.5, y: 1 }, { x: -1.5, y: 5 }] },
-    'run_iso_r': { path:[{ x: 1.5, y: 1 }, { x: 1.5, y: 5 }] },
-    'run_stretch_r': { path:[{ x: 6, y: 0.5 }, { x: 10, y: 4 }] },
-    'run_stretch_l': { path:[{ x: -6, y: 0.5 }, { x: -10, y: 4 }] },
-    'run_counter_r': { path:[{ x: -2, y: -0.5 }, { x: 1, y: 1 }, { x: 5, y: 5 }] },
-    'run_counter_l': { path:[{ x: 2, y: -0.5 }, { x: -1, y: 1 }, { x: -5, y: 5 }] },
-    'run_toss_r': { path:[{ x: 10, y: -1 }, { x: 14, y: 4 }] },
-    
+    'run_dive': { path: [{ x: 0, y: 2 }, { x: 0, y: 5 }] },
+    'run_iso_l': { path: [{ x: -1.5, y: 1 }, { x: -1.5, y: 5 }] },
+    'run_iso_r': { path: [{ x: 1.5, y: 1 }, { x: 1.5, y: 5 }] },
+    'run_stretch_r': { path: [{ x: 6, y: 0.5 }, { x: 10, y: 4 }] },
+    'run_stretch_l': { path: [{ x: -6, y: 0.5 }, { x: -10, y: 4 }] },
+    'run_counter_r': { path: [{ x: -2, y: -0.5 }, { x: 1, y: 1 }, { x: 5, y: 5 }] },
+    'run_counter_l': { path: [{ x: 2, y: -0.5 }, { x: -1, y: 1 }, { x: -5, y: 5 }] },
+    'run_toss_r': { path: [{ x: 10, y: -1 }, { x: 14, y: 4 }] },
+
     // --- ADVANCED BLOCKING ROUTES ---
     'run_block': { path: [{ x: 0, y: 0 }] }, // Stationary target seeking
     'pass_block': { path: [{ x: 0, y: -1.0 }] },
-    'pull_right': { path:[{ x: -0.5, y: -1.0 }, { x: 4, y: -0.5 }, { x: 5, y: 3 }] }, // Step back, run right, turn up
-    'pull_left': { path:[{ x: 0.5, y: -1.0 }, { x: -4, y: -0.5 }, { x: -5, y: 3 }] },
-    'lead_right': { path:[{ x: 3, y: 1 }, { x: 4, y: 4 }] }, // FB leading off tackle
-    'lead_left': { path:[{ x: -3, y: 1 }, { x: -4, y: 4 }] },
-    'screen_block': { path:[{ x: 0, y: -1 }, { x: -5, y: -0.5 }, { x: -8, y: 5 }] } // Let DL past, set up wall
+    'pull_right': { path: [{ x: -0.5, y: -1.0 }, { x: 4, y: -0.5 }, { x: 5, y: 3 }] }, // Step back, run right, turn up
+    'pull_left': { path: [{ x: 0.5, y: -1.0 }, { x: -4, y: -0.5 }, { x: -5, y: 3 }] },
+    'lead_right': { path: [{ x: 3, y: 1 }, { x: 4, y: 4 }] }, // FB leading off tackle
+    'lead_left': { path: [{ x: -3, y: 1 }, { x: -4, y: 4 }] },
+    'screen_block': { path: [{ x: 0, y: -1 }, { x: -5, y: -0.5 }, { x: -8, y: 5 }] } // Let DL past, set up wall
 };
 
 // --- OFFENSIVE FORMATIONS ---
@@ -293,12 +293,12 @@ export const offenseFormations = {
     'Pistol': {
         name: 'Pistol Balanced',
         slots: ['QB1', 'RB1', 'WR1', 'WR2', 'TE1', 'OL1', 'OL2', 'OL3'],
-        personnel: { QB: 1, RB: 1, WR: 2, TE: 1, OL: 3 },
         mapping: { QB: 'QB1', RB: 'RB1', X: 'WR1', Z: 'WR2', Y: 'TE1', OL: ['OL1', 'OL2', 'OL3'] },
         coordinates: {
-            QB1: [0, -4.0],      // Short Shotgun
-            RB1: [0, -7.0],      // RB directly behind
-            WR1: [-15, 0.5], Z: [15, 0.5],
+            QB1: [0, -4.0],
+            RB1: [0, -7.0],
+            WR1: [-15, 0.5],
+            WR2: [15, 0.5], // Changed from Z to WR2
             TE1: [2.8, -1.5],
             OL1: [-1.4, -1.5], OL2: [0, -1.5], OL3: [1.4, -1.5]
         }
@@ -308,14 +308,13 @@ export const offenseFormations = {
     'Jumbo': {
         name: 'Jumbo',
         slots: ['QB1', 'RB1', 'RB2', 'TE1', 'TE2', 'OL1', 'OL2', 'OL3'],
-        personnel: { QB: 1, RB: 2, TE: 2, OL: 3 },
         mapping: { QB: 'QB1', RB: 'RB1', RB2: 'RB2', X: 'TE1', Y: 'TE2', OL: ['OL1', 'OL2', 'OL3'] },
         coordinates: {
-            QB1: [0, -1.0],      // Under Center
-            RB1: [0, -4.5],      // Tailback
-            RB2: [0, -2.5],      // Fullback
-            TE1: [-2.8, -1.5],   // Wing Left
-            TE2: [2.8, -1.5],    // Wing Right
+            QB1: [0, -1.0],
+            RB1: [0, -4.5],
+            RB2: [0, -2.5],
+            TE1: [-2.8, -1.5], // Changed from X to TE1
+            TE2: [2.8, -1.5],  // Changed from Y to TE2
             OL1: [-1.4, -1.5], OL2: [0, -1.5], OL3: [1.4, -1.5]
         }
     },
@@ -371,14 +370,14 @@ export const offensivePlaybook = {
     'Uni_InsideZone': {
         type: 'run', tags: ['run', 'inside'],
         assignments: {
-            'QB': 'qb_setup', 'RB': 'run_dive', 'OL': 'run_block', 
+            'QB': 'qb_setup', 'RB': 'run_dive', 'OL': 'run_block',
             'X': 'run_block', 'Z': 'run_block', 'Y': 'run_block', 'H': 'run_block'
         }
     },
     'Uni_StretchRight': {
         type: 'run', tags: ['run', 'outside'],
         assignments: {
-            'QB': 'qb_setup', 'RB': 'run_stretch_r', 'OL': 'run_block', 
+            'QB': 'qb_setup', 'RB': 'run_stretch_r', 'OL': 'run_block',
             'X': 'run_block', 'Z': 'run_block', 'Y': 'run_block', 'H': 'run_block'
         }
     },
@@ -386,7 +385,7 @@ export const offensivePlaybook = {
     'Uni_Counter_Trap': {
         type: 'run', tags: ['run', 'counter', 'misdirection'],
         assignments: {
-            'QB': 'qb_setup', 'RB': 'run_counter_r', 
+            'QB': 'qb_setup', 'RB': 'run_counter_r',
             'OL1': 'pull_right', 'OL2': 'run_block', 'OL3': 'run_block', // Left Tackle pulls!
             'Y': 'run_block', 'X': 'run_block', 'Z': 'run_block', 'H': 'run_block'
         }
@@ -413,15 +412,15 @@ export const offensivePlaybook = {
         type: 'pass', tags: ['pass', 'quick', 'short'],
         readProgression: ['X', 'Z', 'H', 'RB'],
         assignments: {
-            'QB': 'qb_setup', 'X': 'Slant', 'Z': 'Slant', 'H': 'Slant', 
+            'QB': 'qb_setup', 'X': 'Slant', 'Z': 'Slant', 'H': 'Slant',
             'Y': 'Hitch', 'RB': 'Flat', 'OL': 'pass_block'
         }
     },
     'Uni_Stick': {
-        type: 'pass', tags:['pass', 'short'],
+        type: 'pass', tags: ['pass', 'short'],
         readProgression: ['Y', 'H', 'RB'],
         assignments: {
-            'QB': 'qb_setup', 'Y': 'QuickOut', 'H': 'Hitch', 'X': 'Fade', 
+            'QB': 'qb_setup', 'Y': 'QuickOut', 'H': 'Hitch', 'X': 'Fade',
             'Z': 'Fade', 'RB': 'Flat', 'OL': 'pass_block'
         }
     },
@@ -430,8 +429,8 @@ export const offensivePlaybook = {
         type: 'pass', tags: ['pass', 'screen'],
         readProgression: ['RB', 'X'],
         assignments: {
-            'QB': 'qb_setup', 'RB': 'Slip_Screen', 'X': 'Fly', 'Z': 'Fly', 
-            'Y': 'Fly', 'H': 'Fly', 
+            'QB': 'qb_setup', 'RB': 'Slip_Screen', 'X': 'Fly', 'Z': 'Fly',
+            'Y': 'Fly', 'H': 'Fly',
             'OL1': 'screen_block', 'OL2': 'screen_block', 'OL3': 'pass_block'
         }
     },
@@ -444,12 +443,12 @@ export const offensivePlaybook = {
         compatibleFormations: ['Trips', 'TripsLeft', 'Spread'],
         readProgression: ['H', 'X'],
         assignments: {
-            'QB': 'qb_setup', 
+            'QB': 'qb_setup',
             'H': 'WR_Screen_Catch',  // The target (Slot)
             'X': 'WR_Screen_Lead',   // Outside blocker
             'Y': 'WR_Screen_Lead',   // Inside blocker
             'Z': 'Fly',              // Decoy back side
-            'RB': 'pass_block', 
+            'RB': 'pass_block',
             'OL': 'screen_block'
         }
     },
@@ -469,22 +468,22 @@ export const offensivePlaybook = {
     // --- PASSING CONCEPTS (MEDIUM / DEEP)
     // ===================================
     'Uni_FourVerts': {
-        type: 'pass', tags:['pass', 'deep', 'vertical'],
-        readProgression:['X', 'Z', 'H', 'Y'],
+        type: 'pass', tags: ['pass', 'deep', 'vertical'],
+        readProgression: ['X', 'Z', 'H', 'Y'],
         assignments: {
-            'QB': 'qb_setup', 'X': 'Fly', 'Z': 'Fly', 'H': 'Seam', 
+            'QB': 'qb_setup', 'X': 'Fly', 'Z': 'Fly', 'H': 'Seam',
             'Y': 'Seam', 'RB': 'CheckRelease', 'OL': 'pass_block'
         }
     },
     'Uni_Drive': {
         type: 'pass', tags: ['pass', 'medium', 'cross'],
-        readProgression:['H', 'Y', 'Z'],
+        readProgression: ['H', 'Y', 'Z'],
         assignments: {
-            'QB': 'qb_setup', 'H': 'Drag', 'Y': 'Dig', 'X': 'Fly', 
+            'QB': 'qb_setup', 'H': 'Drag', 'Y': 'Dig', 'X': 'Fly',
             'Z': 'Comeback', 'RB': 'Flat', 'OL': 'pass_block'
         }
     },
-    
+
     'Uni_Scissors': {
         type: 'pass', tags: ['pass', 'deep', 'cross'],
         readProgression: ['Z', 'X', 'Y'],
@@ -492,7 +491,7 @@ export const offensivePlaybook = {
             'QB': 'qb_setup',
             'Z': 'Scissors_Post',   // Deep post from outside
             'X': 'Scissors_Corner', // Corner route from inside
-            'Y': 'In', 
+            'Y': 'In',
             'H': 'Drag',
             'RB': 'CheckRelease', 'OL': 'pass_block'
         }
@@ -502,7 +501,7 @@ export const offensivePlaybook = {
         readProgression: ['H', 'Y', 'RB'],
         assignments: {
             'QB': 'qb_setup',
-            'X': 'Fly', 
+            'X': 'Fly',
             'Z': 'In',      // Level 3 (12yd)
             'Y': 'Dig',     // Level 2 (10yd)
             'H': 'Out',     // Level 1 (5yd)
@@ -527,7 +526,7 @@ export const offensivePlaybook = {
         readProgression: ['X', 'Z'],
         assignments: {
             'QB': 'qb_setup',
-            'X': 'Sluggo', 
+            'X': 'Sluggo',
             'Z': 'Out_And_Up',
             'Y': 'Seam',
             'H': 'Hitch_And_Go',
@@ -541,14 +540,14 @@ export const offensivePlaybook = {
     // 💡 NEW: Play Action creates massive separation if it fools the Linebackers
     'PA_Crossers': {
         type: 'pass', tags: ['pass', 'pa', 'deep'],
-        readProgression:['Y', 'Z', 'X'],
+        readProgression: ['Y', 'Z', 'X'],
         assignments: {
             'QB': 'qb_setup', 'RB': 'run_dive', // Fake dive
             'X': 'Post', 'Y': 'Drag', 'Z': 'Dig', 'H': 'Corner', 'OL': 'pass_block'
         }
     },
     'PA_Bootleg_Right': {
-        type: 'pass', tags:['pass', 'pa', 'rollout'],
+        type: 'pass', tags: ['pass', 'pa', 'rollout'],
         readProgression: ['Z', 'Y', 'H'],
         assignments: {
             'QB': 'qb_scramble', 'RB': 'run_stretch_l', // Fake left, QB rolls right
@@ -582,9 +581,9 @@ export const offensivePlaybook = {
     // --- RPO CONCEPTS
     // ===================================
     'RPO_Slant_Dive': {
-        type: 'pass', tags: ['rpo', 'quick'], 
+        type: 'pass', tags: ['rpo', 'quick'],
         assignments: {
-            'QB': 'qb_rpo_read', 'RB': 'run_dive', 'X': 'Slant', 
+            'QB': 'qb_rpo_read', 'RB': 'run_dive', 'X': 'Slant',
             'Z': 'Fly', 'H': 'Slant', 'Y': 'run_block', 'OL': 'run_block'
         }
     },
@@ -593,9 +592,9 @@ export const offensivePlaybook = {
     // --- TRICK PLAYS
     // ===================================
     'Trick_Flea_Flicker': {
-        type: 'pass', tags:['trick', 'deep'], 
+        type: 'pass', tags: ['trick', 'deep'],
         assignments: {
-            'QB': 'qb_flea_flicker', 'RB': 'run_dive', 'X': 'Fly', 
+            'QB': 'qb_flea_flicker', 'RB': 'run_dive', 'X': 'Fly',
             'Z': 'PostCorner', 'Y': 'Seam', 'H': 'Fly', 'OL': 'pass_block'
         }
     },
@@ -603,7 +602,7 @@ export const offensivePlaybook = {
     // --- Special Teams ---
     'Punt_Punt': {
         type: 'punt', tags: ['specialTeams'],
-        readProgression:[],
+        readProgression: [],
         assignments: {
             'QB1': 'punt', 'WR1': 'Fly', 'WR2': 'Fly',
             'OL1': 'pass_block', 'OL2': 'pass_block', 'OL3': 'pass_block',
@@ -786,7 +785,7 @@ export const defenseFormations = {
 // --- DEFENSIVE PLAYBOOK (8-Man Optimized) ---
 export const defensivePlaybook = {
     // ===================================
-    // --- 3-2-3 Base Plays (3 DL, 2 LB, 3 DB)
+    // --- 3-2-3 Base Plays
     // ===================================
     'Cover_2_Zone_Base': {
         name: 'Base Cover 2', concept: 'Zone', blitz: false,
@@ -814,8 +813,11 @@ export const defensivePlaybook = {
         tags: ['man', 'cover1', 'underneath-help'],
         assignments: {
             'DL1': 'pass_rush', 'DL2': 'pass_rush', 'DL3': 'pass_rush',
-            'LB1': 'man_cover_RB1', 'LB2': 'zone_short_middle', // LB2 roams to jump crossing routes
-            'DB1': 'man_cover_WR1', 'DB2': 'man_cover_WR2', 'DB3': 'zone_deep_middle'
+            'LB1': 'man_cover_RB', // Changed RB1 -> RB
+            'LB2': 'zone_short_middle',
+            'DB1': 'man_cover_X',  // Changed WR1 -> X
+            'DB2': 'man_cover_Z',  // Changed WR2 -> Z
+            'DB3': 'zone_deep_middle'
         }
     },
     'Man_Blitz_Base': {
@@ -824,13 +826,15 @@ export const defensivePlaybook = {
         tags: ['man', 'blitz'],
         assignments: {
             'DL1': 'pass_rush', 'DL2': 'pass_rush', 'DL3': 'pass_rush',
-            'LB1': 'blitz_gap', 'LB2': 'man_cover_RB1',
-            'DB1': 'man_cover_WR1', 'DB2': 'man_cover_WR2', 'DB3': 'zone_deep_middle'
+            'LB1': 'blitz_gap', 'LB2': 'man_cover_RB', // Changed RB1 -> RB
+            'DB1': 'man_cover_X',  // Changed WR1 -> X
+            'DB2': 'man_cover_Z',  // Changed WR2 -> Z
+            'DB3': 'zone_deep_middle'
         }
     },
 
     // ===================================
-    // --- 2-3-3 Nickel Plays (2 DL, 3 LB, 3 DB)
+    // --- 2-3-3 Nickel Plays
     // ===================================
     'Nickel_Tampa_2': {
         name: 'Nickel Tampa 2', concept: 'Zone', blitz: false,
@@ -848,8 +852,10 @@ export const defensivePlaybook = {
         tags: ['man', 'blitz'],
         assignments: {
             'DL1': 'pass_rush', 'DL2': 'pass_rush',
-            'LB1': 'blitz_edge', 'LB2': 'blitz_gap', 'LB3': 'man_cover_RB1',
-            'DB1': 'man_cover_WR1', 'DB2': 'man_cover_WR2', 'DB3': 'zone_deep_middle'
+            'LB1': 'blitz_edge', 'LB2': 'blitz_gap', 'LB3': 'man_cover_RB', // Changed RB1 -> RB
+            'DB1': 'man_cover_X',  // Changed WR1 -> X
+            'DB2': 'man_cover_Z',  // Changed WR2 -> Z
+            'DB3': 'zone_deep_middle'
         }
     },
     'Nickel_Bracket_WR1': {
@@ -858,14 +864,16 @@ export const defensivePlaybook = {
         tags: ['man', 'double-team'],
         assignments: {
             'DL1': 'pass_rush', 'DL2': 'pass_rush',
-            'LB1': 'man_cover_RB1', 'LB2': 'zone_short_middle', 'LB3': 'man_cover_TE1',
-            'DB1': 'man_cover_WR1', 'DB3': 'zone_deep_third_left', // DB3 shades specifically toward WR1
-            'DB2': 'man_cover_WR2'
+            'LB1': 'man_cover_RB', // Changed RB1 -> RB
+            'LB2': 'zone_short_middle', 'LB3': 'man_cover_Y', // Changed TE1 -> Y
+            'DB1': 'man_cover_X',  // Changed WR1 -> X
+            'DB3': 'zone_deep_third_left',
+            'DB2': 'man_cover_Z'   // Changed WR2 -> Z
         }
     },
 
     // ===================================
-    // --- 4-2-2 Run Stop Plays (4 DL, 2 LB, 2 DB)
+    // --- 4-2-2 Run Stop Plays
     // ===================================
     'GoalLine_RunStuff': {
         name: 'Goal Line Stuff', concept: 'Run', blitz: true,
@@ -874,9 +882,11 @@ export const defensivePlaybook = {
         assignments: {
             'DL1': 'run_edge_left', 'DL2': 'run_gap_A_left', 'DL3': 'run_gap_A_right', 'DL4': 'run_edge_right',
             'LB1': 'blitz_gap', 'LB2': 'blitz_gap',
-            'DB1': 'man_cover_WR1', 'DB2': 'man_cover_WR2'
+            'DB1': 'man_cover_X', // Changed WR1 -> X
+            'DB2': 'man_cover_Z'  // Changed WR2 -> Z
         }
     },
+
     'Cover_2_Hard_Flat': {
         name: 'Cover 2 Hard Flat', concept: 'Zone', blitz: false,
         compatibleFormations: ['4-2-2'],
@@ -893,13 +903,15 @@ export const defensivePlaybook = {
         tags: ['man', 'press'],
         assignments: {
             'DL1': 'pass_rush', 'DL2': 'pass_rush', 'DL3': 'pass_rush', 'DL4': 'pass_rush',
-            'LB1': 'man_cover_RB1', 'LB2': 'man_cover_TE1',
-            'DB1': 'man_cover_WR1', 'DB2': 'man_cover_WR2'
+            'LB1': 'man_cover_RB', // Changed RB1 -> RB
+            'LB2': 'man_cover_Y',  // Changed TE1 -> Y
+            'DB1': 'man_cover_X',  // Changed WR1 -> X
+            'DB2': 'man_cover_Z'   // Changed WR2 -> Z
         }
     },
 
     // ===================================
-    // --- 4-1-3 Dime / Prevent Plays (4 DL, 1 LB, 3 DB)
+    // --- 4-1-3 Dime / Prevent Plays
     // ===================================
     'Cover_4_Quarters': {
         name: 'Cover 4 Quarters', concept: 'Zone', blitz: false,
@@ -918,7 +930,9 @@ export const defensivePlaybook = {
         assignments: {
             'DL1': 'pass_rush', 'DL2': 'pass_rush', 'DL3': 'pass_rush', 'DL4': 'pass_rush',
             'LB1': 'blitz_gap',
-            'DB1': 'man_cover_WR1', 'DB2': 'man_cover_WR2', 'DB3': 'man_cover_WR3'
+            'DB1': 'man_cover_X', // Changed WR1 -> X
+            'DB2': 'man_cover_Z', // Changed WR2 -> Z
+            'DB3': 'man_cover_H'  // Changed WR3 -> H
         }
     },
     'Zero_Max_Blitz': {
@@ -928,12 +942,14 @@ export const defensivePlaybook = {
         assignments: {
             'DL1': 'pass_rush', 'DL2': 'pass_rush', 'DL3': 'pass_rush', 'DL4': 'pass_rush',
             'LB1': 'blitz_gap',
-            'DB1': 'man_cover_WR1', 'DB2': 'man_cover_WR2', 'DB3': 'blitz_edge' // One DB joins the rush!
+            'DB1': 'man_cover_X', // Changed WR1 -> X
+            'DB2': 'man_cover_Z', // Changed WR2 -> Z
+            'DB3': 'blitz_edge'
         }
     },
 
     // ===================================
-    // --- 3-1-4 Hybrid / Fire Zone Plays (3 DL, 1 LB, 4 DB)
+    // --- 3-1-4 Hybrid Plays
     // ===================================
     'Cover_3_Buzz': {
         name: 'Cover 3 Buzz', concept: 'Zone', blitz: false,
@@ -971,13 +987,16 @@ export const defensivePlaybook = {
         tags: ['man', 'cover1'],
         assignments: {
             'DL1': 'pass_rush', 'DL2': 'pass_rush', 'DL3': 'pass_rush',
-            'LB1': 'man_cover_RB1',
-            'DB1': 'man_cover_WR1', 'DB2': 'man_cover_WR2', 'DB3': 'man_cover_WR3', 'DB4': 'zone_deep_middle'
+            'LB1': 'man_cover_RB', // Changed RB1 -> RB
+            'DB1': 'man_cover_X',  // Changed WR1 -> X
+            'DB2': 'man_cover_Z',  // Changed WR2 -> Z
+            'DB3': 'man_cover_H',  // Changed WR3 -> H
+            'DB4': 'zone_deep_middle'
         }
     },
 
     // ===================================
-    // --- 3-0-5 Prevent Plays (3 DL, 0 LB, 5 DB)
+    // --- 3-0-5 Prevent Plays
     // ===================================
     'Victory_Prevent': {
         name: 'Victory Prevent', concept: 'Zone', blitz: false,
@@ -995,8 +1014,11 @@ export const defensivePlaybook = {
         tags: ['man', 'cover1'],
         assignments: {
             'DL1': 'pass_rush', 'DL2': 'pass_rush', 'DL3': 'pass_rush',
-            'DB1': 'man_cover_WR1', 'DB2': 'man_cover_WR2', 'DB3': 'man_cover_WR3',
-            'DB4': 'man_cover_WR4', 'DB5': 'zone_deep_middle'
+            'DB1': 'man_cover_X', // Changed WR1 -> X
+            'DB2': 'man_cover_Z', // Changed WR2 -> Z
+            'DB3': 'man_cover_H', // Changed WR3 -> H
+            'DB4': 'man_cover_Y', // Changed WR4 -> Y
+            'DB5': 'zone_deep_middle'
         }
     },
 

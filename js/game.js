@@ -1568,24 +1568,22 @@ function resolveDepthForPlay(offense, defense) {
     const resolveSide = (team, side) => {
         const formationName = team.formations[side];
         const formationData = side === 'offense' ? offenseFormations[formationName] : defenseFormations[formationName];
+        if (!formationData) return;
 
-        if (!formationData || !formationData.slots) return;
+        const rosterIds = team.roster || [];
+        const usedThisPlay = new Set();
 
         formationData.slots.forEach(slot => {
-            let playerId = team.depthChart[side]?.[slot];
-            const rosterIds = team.roster || [];
+            let pId = team.depthChart[side]?.[slot];
 
-            // 💡 FIX: If slot is empty, find the first healthy person not already playing
-            if (!playerId) {
-                playerId = rosterIds.find(id => !Object.values(resolved[side]).includes(id));
+            // If slot is empty, or player is already used (Ironman logic safety), find anyone else
+            if (!pId || usedThisPlay.has(pId)) {
+                pId = rosterIds.find(id => !usedThisPlay.has(id));
             }
-            resolved[side][slot] = playerId;
-        });
 
-        // 💡 CRITICAL SAFETY: Ensure QB1 is NEVER null for offense
-        if (side === 'offense' && !resolved.offense['QB1']) {
-            resolved.offense['QB1'] = team.roster[0];
-        }
+            resolved[side][slot] = pId;
+            if (pId) usedThisPlay.add(pId);
+        });
     };
 
     if (offense) resolveSide(offense, 'offense');
@@ -1597,22 +1595,25 @@ function resolveDepthForPlay(offense, defense) {
  * Resolves if a play assignment is a conceptual Role (X, Y, Z, RB) 
  * or a specific Slot (WR1, TE1, etc.)
  */
-function getAssignment(slot, playAssignments, formationMapping, isOffense) {
-    if (!isOffense) return playAssignments[slot];
+function getAssignment(slot, playbookAssignments, formationMapping, isOffense) {
+    if (!playbookAssignments) return null;
 
-    // 1. Check specific slot (WR1)
-    if (playAssignments[slot]) return playAssignments[slot];
+    // 1. Direct Match: Does the playbook explicitly mention "WR1"?
+    if (playbookAssignments[slot]) return playbookAssignments[slot];
 
-    if (formationMapping) {
+    // 2. Role Match: If we are checking "WR1", is it mapped to "X" in the formation?
+    if (isOffense && formationMapping) {
         for (const [role, mappedSlot] of Object.entries(formationMapping)) {
-            if (mappedSlot === slot || (Array.isArray(mappedSlot) && mappedSlot.includes(slot))) {
-                // 💡 FIX: Check both 'QB' and 'qb' or whatever case was used in data.js
-                return playAssignments[role] ||
-                    playAssignments[role.toUpperCase()] ||
-                    playAssignments[role.toLowerCase()] || null;
+            // Check if this slot is the mapped role (handles strings and arrays for OL)
+            const isMatch = Array.isArray(mappedSlot) ? mappedSlot.includes(slot) : mappedSlot === slot;
+
+            if (isMatch) {
+                // If "X" is in the playbook, return that assignment
+                if (playbookAssignments[role]) return playbookAssignments[role];
             }
         }
     }
+
     return null;
 }
 
@@ -1621,12 +1622,12 @@ function getAssignment(slot, playAssignments, formationMapping, isOffense) {
  * Sets up the initial state for all players involved in a play.
  */
 function setupInitialPlayerStates(playState, offense, defense, play, assignments, ballOnYardLine, defensivePlayKey, ballHash = 'M', offensivePlayKey = '') {
-    playState.activePlayers =[];
+    playState.activePlayers = [];
     const isPlayAction = offensivePlayKey.includes('PA_');
 
     // --- 1. NORMALIZE PLAY INTENT ---
     playState.type = play.type;
-    playState.readProgression = play.readProgression ||[];
+    playState.readProgression = play.readProgression || [];
     playState.playKey = play.key || null;
 
     // --- 2. DEFENSIVE PLAY LOOKUP (Robust Fallback) ---
@@ -1645,11 +1646,11 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
 
     // --- 4. PRE-CALCULATE OFFENSIVE POSITIONS ---
     const offenseFormationData = offenseFormations[offense.formations.offense];
-    const initialOffenseStates =[];
+    const initialOffenseStates = [];
 
     if (offenseFormationData?.slots) {
         offenseFormationData.slots.forEach(slot => {
-            const relCoords = offenseFormationData.coordinates[slot] ||[0, 0];
+            const relCoords = offenseFormationData.coordinates[slot] || [0, 0];
             let startX = ballX + relCoords[0];
             let startY = playState.lineOfScrimmage + relCoords[1];
 
@@ -1679,7 +1680,7 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
             // 💡 CRITICAL FIX: ALL VARIABLES DECLARED HERE AT THE TOP OF THE LOOP!
             let assignedPlayerSlot = null;
             let routePath = null;
-            let readProgression =[];
+            let readProgression = [];
             let dropbackPhase = null;
             let hasCompletedDropback = true;
 
@@ -1703,6 +1704,13 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
 
             // --- A. OFFENSE SETUP ---
             if (isOffense) {
+
+                for (const [role, mappedSlot] of Object.entries(formationMapping)) {
+                    if (mappedSlot === slot || (Array.isArray(mappedSlot) && mappedSlot.includes(slot))) {
+                        assignedPlayerSlot = role; // Tag the WR1 as "X", RB1 as "RB", etc.
+                        break;
+                    }
+                }
                 if (slot.startsWith('QB')) {
                     if (play.type === 'punt') {
                         assignment = 'punt'; action = 'punt_kick'; targetY = startY - 5;
@@ -1711,7 +1719,7 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
                         dropbackPhase = 'dropping'; hasCompletedDropback = false;
 
                         const initialDepth = playState.lineOfScrimmage - startY;
-                        const isShotgun = initialDepth >= 4.0; 
+                        const isShotgun = initialDepth >= 4.0;
 
                         if (play.type === 'run') {
                             if (isShotgun) dropbackTargetY = startY - 0.5;
@@ -1722,13 +1730,13 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
 
                             let targetDepth = 0;
                             if (isShotgun) {
-                                if (isQuick) targetDepth = initialDepth; 
-                                else if (isDeep) targetDepth = 9.5;      
-                                else targetDepth = 7.5;                  
+                                if (isQuick) targetDepth = initialDepth;
+                                else if (isDeep) targetDepth = 9.5;
+                                else targetDepth = 7.5;
                             } else {
-                                if (isQuick) targetDepth = 3.5;          
-                                else if (isDeep) targetDepth = 9.0;      
-                                else targetDepth = 6.0;                  
+                                if (isQuick) targetDepth = 3.5;
+                                else if (isDeep) targetDepth = 9.0;
+                                else targetDepth = 6.0;
                             }
                             dropbackTargetY = playState.lineOfScrimmage - targetDepth;
                         }
@@ -1749,7 +1757,7 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
                         if (routePath && routePath.length > 0) {
                             targetX = routePath[0].x; targetY = routePath[0].y;
                         } else {
-                            targetY = startY + 5; 
+                            targetY = startY + 5;
                         }
                     }
                     else if (routeTree[assignment]) {
@@ -1765,7 +1773,7 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
             else {
                 if (!assignment) {
                     if (slot.startsWith('DL')) assignment = 'run_gap_A';
-                    else if (slot.startsWith('LB')) assignment = 'def_read'; 
+                    else if (slot.startsWith('LB')) assignment = 'def_read';
                     else if (slot.startsWith('DB')) assignment = 'zone_deep_middle';
                 }
 
@@ -1806,7 +1814,7 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
                             const finalSlot = Array.isArray(mappedSlot) ? mappedSlot[0] : mappedSlot;
 
                             assignment = `man_cover_${finalSlot}`;
-                            assignedPlayerSlot = finalSlot; 
+                            assignedPlayerSlot = finalSlot;
                         } else {
                             assignedPlayerSlot = cleanTargetSlot; // Fallback
                         }
@@ -1831,9 +1839,9 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
                 else if (assignment.startsWith('zone_')) {
                     if (assignment.includes('deep')) startY = Math.max(startY, playState.lineOfScrimmage + 8);
                 }
-                
+
                 if (assignment === 'punt_return') {
-                    startY = Math.min(108, startY); 
+                    startY = Math.min(108, startY);
                 }
             }
 
@@ -1957,7 +1965,7 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
                 playState.handoffRequired = true;
                 playState.handoffTargetSlot = runner.slot;
             } else {
-                snapTaker.isBallCarrier = true; 
+                snapTaker.isBallCarrier = true;
             }
         }
     } else {
@@ -3833,9 +3841,16 @@ function updateQBDecision(qbState, offenseStates, defenseStates, playState, offe
 
 
     // --- 2. HELPER: GEOMETRIC TARGET ANALYSIS ---
-    const getTargetInfo = (slot) => {
-        if (!slot) return null;
-        const recState = offenseStates.find(r => r.slot === slot);
+    const getTargetInfo = (slotOrRole) => {
+        if (!slotOrRole) return null;
+
+        // 💡 FIXED: Search by Slot (WR1) OR Role (X) OR Assigned Role
+        const recState = offenseStates.find(r =>
+            r.slot === slotOrRole ||
+            r.role === slotOrRole ||
+            r.assignedPlayerSlot === slotOrRole
+        );
+
         if (!recState || (!recState.action.includes('route') && recState.action !== 'idle')) return null;
 
         const distFromQB = getDistance(qbState, recState);
