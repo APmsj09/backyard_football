@@ -2379,140 +2379,109 @@ function drawFieldVisualization(frameData) {
     // --- 7. DRAW PLAYERS ---
     if (frameData.players) {
         frameData.players.forEach(p => {
-            const px = toScreenX(p.y);  // p.y is field length (0-120)
-            const py = toScreenY(p.x);  // p.x is field width (0-53.3)
+            const px = toScreenX(p.y);
+            const py = toScreenY(p.x);
+            const radius = ppY * 0.8;
 
-            // PLAYER SIZE scaled for visibility
-            const radius = ppY * 0.9;
-
-            // 💡 NEW: STUNNED OVERLAY LOGIC
+            ctx.save();
+            
+            // 1. JITTER EFFECT
+            // If stunned, the player "wobbles" slightly in place
+            let offsetX = 0;
+            let offsetY = 0;
             if (p.isStunned) {
-                // 1. Gray out the player slightly (Loss of color)
-                ctx.fillStyle = "rgba(0, 0, 0, 0.4)";
-                ctx.beginPath();
-                ctx.arc(px, py, radius, 0, Math.PI * 2);
-                ctx.fill();
+                offsetX = (Math.random() - 0.5) * 2;
+                offsetY = (Math.random() - 0.5) * 2;
+            }
 
-                // 2. Draw "Dizzy Stars" or Birds effect
-                const time = Date.now() * 0.01; // Use time for animation
-                ctx.fillStyle = "#fbbf24"; // Amber/Gold stars
+            ctx.translate(px + offsetX, py + offsetY);
+            ctx.rotate(p.angle);
 
+            // 2. DYNAMIC COLORS
+            // If stunned, we drain the color to a grayish-blue/dark gray
+            const jerseyColor = p.isStunned ? "#4b5563" : (p.primaryColor || "#333");
+            const helmetColor = p.isStunned ? "#9ca3af" : (p.secondaryColor || "#fff");
+
+            // 3. Shoulder Pads (The Rectangle)
+            ctx.fillStyle = jerseyColor;
+            const padW = radius * 1.3; 
+            const padH = radius * 2.2; 
+            ctx.beginPath();
+            ctx.roundRect(-padW/2, -padH/2, padW, padH, 5);
+            ctx.fill();
+            ctx.strokeStyle = "rgba(0,0,0,0.6)";
+            ctx.lineWidth = 1.5;
+            ctx.stroke();
+
+            // 4. Helmet (The Circle)
+            ctx.fillStyle = helmetColor;
+            ctx.beginPath();
+            ctx.arc(0, 0, radius * 0.7, 0, Math.PI * 2);
+            ctx.fill();
+            
+            // Facemask (Facing the direction of angle)
+            ctx.strokeStyle = "#111";
+            ctx.lineWidth = ppY * 0.2;
+            ctx.beginPath();
+            ctx.arc(0, 0, radius * 0.7, -Math.PI/3, Math.PI/3);
+            ctx.stroke();
+
+            // 5. STUNNED OVERLAY (Stars and Text)
+            if (p.isStunned) {
+                ctx.restore(); // Exit the player's rotation/translation to draw upright stars
+                ctx.save();
+                ctx.translate(px, py);
+                
+                const time = Date.now() * 0.008; // Animation speed
+                const starRadius = radius * 1.2;
+                
+                // Draw 3 orbiting stars
                 for (let i = 0; i < 3; i++) {
                     const angle = time + (i * (Math.PI * 2) / 3);
-                    const starX = px + Math.cos(angle) * (radius * 1.2);
-                    const starY = py + Math.sin(angle) * (radius * 0.5) - (radius * 0.8);
-
+                    const sx = Math.cos(angle) * starRadius;
+                    const sy = Math.sin(angle) * (starRadius * 0.4) - (radius * 1.5); // Oval orbit above head
+                    
+                    // The Star
+                    ctx.fillStyle = "#facc15"; // Bright yellow
                     ctx.beginPath();
-                    ctx.arc(starX, starY, radius * 0.2, 0, Math.PI * 2);
+                    ctx.arc(sx, sy, 2.5, 0, Math.PI * 2);
                     ctx.fill();
-
-                    // Star glow
-                    ctx.shadowBlur = 5;
-                    ctx.shadowColor = "white";
-                    ctx.stroke();
-                    ctx.shadowBlur = 0;
+                    
+                    // Star Glow
+                    ctx.shadowBlur = 10;
+                    ctx.shadowColor = "#fef08a";
                 }
-
-                // 3. Add a "!!" or "X_X" indicator
+                
+                // "X_X" indicator
+                ctx.shadowBlur = 0;
                 ctx.fillStyle = "white";
                 ctx.font = `bold ${ppY * 0.6}px Arial`;
-                ctx.fillText("X_X", px, py - radius * 1.5);
-            }
-
-            // Deep shadow (larger, darker, under the player for depth) 
-            ctx.fillStyle = "rgba(0,0,0,0.5)";
-            ctx.beginPath();
-            ctx.ellipse(px, py + radius * 0.8, radius * 1.2, radius * 0.4, 0, 0, Math.PI * 2);
-            ctx.fill();
-
-            // Jersey Body (Main Circle) - use team colors
-            ctx.fillStyle = p.primaryColor || (p.isOffense ? "#e74c3c" : "#3498db");
-            ctx.beginPath();
-            ctx.arc(px, py, radius, 0, Math.PI * 2);
-            ctx.fill();
-
-            // Jersey outline/border - thicker for better visibility
-            ctx.lineWidth = ppY * 0.15;
-            ctx.strokeStyle = "rgba(0,0,0,0.8)";
-            ctx.stroke();
-
-            // Add secondary outline for extra pop
-            ctx.lineWidth = ppY * 0.06;
-            ctx.strokeStyle = "rgba(255,255,255,0.3)";
-            ctx.stroke();
-
-            // Shoulder pads (darker shading on sides) - more pronounced
-            ctx.fillStyle = "rgba(0,0,0,0.25)";
-            ctx.beginPath();
-            ctx.ellipse(px - radius * 0.35, py, radius * 0.55, radius * 0.85, 0, 0, Math.PI * 2);
-            ctx.fill();
-            ctx.beginPath();
-            ctx.ellipse(px + radius * 0.35, py, radius * 0.55, radius * 0.85, 0, 0, Math.PI * 2);
-            ctx.fill();
-
-            // Helmet (larger, secondary color)
-            ctx.fillStyle = p.secondaryColor || "white";
-            ctx.beginPath();
-            ctx.arc(px, py - radius * 0.4, radius * 0.55, 0, Math.PI * 2);
-            ctx.fill();
-
-            // Helmet outline - thick and prominent
-            ctx.lineWidth = ppY * 0.12;
-            ctx.strokeStyle = "rgba(0,0,0,0.7)";
-            ctx.beginPath();
-            ctx.arc(px, py - radius * 0.4, radius * 0.55, 0, Math.PI * 2);
-            ctx.stroke();
-
-            // Helmet shine/highlight for 3D effect
-            ctx.fillStyle = "rgba(255,255,255,0.4)";
-            ctx.beginPath();
-            ctx.ellipse(px - radius * 0.15, py - radius * 0.45, radius * 0.2, radius * 0.15, 0, 0, Math.PI * 2);
-            ctx.fill();
-
-            // Helmet stripe (center line)
-            ctx.strokeStyle = "rgba(0,0,0,0.4)";
-            ctx.lineWidth = ppY * 0.08;
-            ctx.beginPath();
-            ctx.arc(px, py - radius * 0.4, radius * 0.55, 0, Math.PI * 2);
-            ctx.stroke();
-
-            // Jersey Number (if available) - larger and more visible
-            if (p.number) {
-                // Number background (slight rectangle behind number for legibility)
-                ctx.fillStyle = "rgba(0,0,0,0.3)";
-                ctx.fillRect(px - ppY * 0.5, py + radius * 0.1 - ppY * 0.4, ppY * 1.0, ppY * 0.8);
-
-                ctx.fillStyle = p.secondaryColor || "white";
-                ctx.font = `bold ${ppY * 0.75}px Arial`;
+                ctx.textAlign = "center";
+                ctx.fillText("X_X", 0, -radius * 2.2);
+            } else {
+                // Regular number drawing (only if NOT stunned)
+                ctx.save();
+                ctx.rotate(-Math.PI / 2);
+                ctx.fillStyle = p.secondaryColor;
+                ctx.font = `bold ${ppY * 0.7}px Arial`;
                 ctx.textAlign = "center";
                 ctx.textBaseline = "middle";
-                ctx.shadowColor = "rgba(0,0,0,0.6)";
-                ctx.shadowBlur = 3;
-                ctx.shadowOffsetX = 1;
-                ctx.shadowOffsetY = 1;
-                ctx.fillText(p.number, px, py + radius * 0.15);
-                ctx.shadowBlur = 0;
+                ctx.fillText(p.number || "", 0, 0);
+                ctx.restore();
             }
 
-            // Ball Carrier Highlight (larger, more prominent)
-            if (p.hasBall || p.isBallCarrier) {
-                // Outer glow
-                ctx.strokeStyle = "rgba(255, 215, 0, 0.6)";
-                ctx.lineWidth = ppY * 0.1;
+            // 6. Ball Carrier Glow
+            if (p.hasBall) {
+                // If the logic above restored/saved, ensure we are at px,py
+                ctx.strokeStyle = "#fbbf24";
+                ctx.lineWidth = 3;
+                ctx.setLineDash([4, 2]);
                 ctx.beginPath();
-                ctx.arc(px, py, radius * 1.5, 0, Math.PI * 2);
+                ctx.arc(0, 0, radius * 1.8, 0, Math.PI * 2);
                 ctx.stroke();
-
-                // Inner bright ring
-                ctx.strokeStyle = "#FFD700"; // Gold
-                ctx.lineWidth = ppY * 0.2;
-                ctx.shadowColor = "#FFD700";
-                ctx.shadowBlur = 12;
-                ctx.beginPath();
-                ctx.arc(px, py, radius * 1.25, 0, Math.PI * 2);
-                ctx.stroke();
-                ctx.shadowBlur = 0;
             }
+
+            ctx.restore();
         });
     }
 

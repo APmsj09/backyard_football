@@ -205,7 +205,14 @@ function captureFrame(playState, gameLog) {
             action: p.action,
             isOffense: p.isOffense,
             hasBall: p.hasBall,
-            isStunned: p.stunnedTicks > 0
+            isStunned: p.stunnedTicks > 0,
+            primaryColor: p.primaryColor,
+            secondaryColor: p.secondaryColor,
+            number: p.number,
+            // 💡 NEW: Calculate angle based on velocity (defaults to facing upfield)
+            angle: (Math.abs(p.vx) < 0.1 && Math.abs(p.vy) < 0.1)
+                ? (p.isOffense ? Math.PI / 2 : -Math.PI / 2)
+                : Math.atan2(p.vy, p.vx)
         })),
         logIndex: gameLog ? gameLog.length : 0,
         lineOfScrimmage: playState.lineOfScrimmage
@@ -3647,7 +3654,7 @@ function resolveOngoingBlocks(playState, gameLog, offenseStates = [], defenseSta
         }
 
         // 3. Stats Calculation (Standard Block Battle)
-        const blockPower = (((blocker.blocking || 50) * 1.25) + (blocker.strength || 50)) * blocker.fatigueModifier;
+        let blockPower = (((blocker.blocking || 50) * 1.25) + (blocker.strength || 50)) * blocker.fatigueModifier;
         let shedPower = ((defender.blockShedding || 50) + (defender.strength || 50)) * defender.fatigueModifier;
 
         const ticksInBlock = playState.tick - battle.startTick;
