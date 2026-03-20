@@ -127,89 +127,53 @@ export function calculateSlotSuitability(player, slot, side, team) {
 }
 
 const archetypes = [
-    // --- QUARTERBACKS ---
-    { 
-        name: 'Dual-Threat QB', off: 'QB', def: 'DB', 
-        weightMod: 1.0, heightMod: 0, 
-        keyAttrs: ['speed', 'throwingAccuracy', 'playbookIQ', 'agility'],
-        speedMod: 1.1, strMod: 0.9 
-    },
-    { 
-        name: 'Pocket General', off: 'QB', def: 'LB', 
-        weightMod: 1.1, heightMod: 3, 
-        keyAttrs: ['throwingAccuracy', 'playbookIQ', 'consistency', 'toughness'],
-        speedMod: 0.8, strMod: 1.1 
-    },
+    // --- 1. THE SIGNAL CALLERS (QB Primary) ---
+    { name: 'Field General', off: 'QB', def: 'LB', weightMod: 1.1, heightMod: 2, keyAttrs: ['playbookIQ', 'throwingAccuracy', 'consistency', 'tackling'], speedMod: 0.85, strMod: 1.0 },
+    { name: 'Scrambler', off: 'QB', def: 'DB', weightMod: 0.95, heightMod: -1, keyAttrs: ['speed', 'agility', 'throwingAccuracy', 'stamina'], speedMod: 1.2, strMod: 0.85 },
+    { name: 'Gunslinger', off: 'QB', def: 'DB', weightMod: 1.05, heightMod: 3, keyAttrs: ['throwingAccuracy', 'strength', 'clutch', 'playbookIQ'], speedMod: 0.9, strMod: 1.25 },
+    { name: 'Heavy Crusher QB', off: 'QB', def: 'DL', weightMod: 1.4, heightMod: 4, keyAttrs: ['strength', 'throwingAccuracy', 'toughness', 'blockShedding'], speedMod: 0.65, strMod: 1.3 },
 
-    // --- RUNNING BACKS ---
-    { 
-        name: 'Power Back', off: 'RB', def: 'LB', 
-        weightMod: 1.2, heightMod: -1, 
-        keyAttrs: ['strength', 'toughness', 'tackling', 'speed'],
-        speedMod: 0.9, strMod: 1.2 
-    },
-    { 
-        name: 'Scatback', off: 'RB', def: 'DB', 
-        weightMod: 0.85, heightMod: -2, 
-        keyAttrs: ['speed', 'agility', 'catchingHands', 'coverage'],
-        speedMod: 1.15, strMod: 0.8 
-    },
+    // --- 2. THE BALL CARRIERS (RB Primary) ---
+    { name: 'Power Back', off: 'RB', def: 'LB', weightMod: 1.25, heightMod: -1, keyAttrs: ['strength', 'toughness', 'tackling', 'stamina'], speedMod: 0.9, strMod: 1.2 },
+    { name: 'Speed Back', off: 'RB', def: 'DB', weightMod: 0.85, heightMod: -2, keyAttrs: ['speed', 'agility', 'clutch', 'catchingHands'], speedMod: 1.25, strMod: 0.75 },
+    { name: 'Workhorse', off: 'RB', def: 'LB', weightMod: 1.1, heightMod: 0, keyAttrs: ['stamina', 'consistency', 'tackling', 'toughness'], speedMod: 1.0, strMod: 1.0 },
+    { name: 'Receiving Back', off: 'RB', def: 'DB', weightMod: 0.9, heightMod: -1, keyAttrs: ['catchingHands', 'agility', 'speed', 'coverage'], speedMod: 1.1, strMod: 0.8 },
 
-    // --- RECEIVERS ---
-    { 
-        name: 'Deep Threat', off: 'WR', def: 'DB', 
-        weightMod: 0.9, heightMod: 1, 
-        keyAttrs: ['speed', 'agility', 'catchingHands', 'coverage'],
-        speedMod: 1.2, strMod: 0.8 
-    },
-    { 
-        name: 'Physical Slot', off: 'WR', def: 'LB', 
-        weightMod: 1.1, heightMod: 0, 
-        keyAttrs: ['catchingHands', 'toughness', 'tackling', 'consistency'],
-        speedMod: 0.95, strMod: 1.1 
-    },
+    // --- 3. THE PASS CATCHERS (WR Primary) ---
+    { name: 'Deep Threat', off: 'WR', def: 'DB', weightMod: 0.85, heightMod: 1, keyAttrs: ['speed', 'agility', 'clutch', 'coverage'], speedMod: 1.3, strMod: 0.7 },
+    { name: 'Route Technician', off: 'WR', def: 'DB', weightMod: 1.0, heightMod: 0, keyAttrs: ['agility', 'playbookIQ', 'catchingHands', 'consistency'], speedMod: 1.0, strMod: 1.0 },
+    { name: 'Red Zone Specialist', off: 'WR', def: 'LB', weightMod: 1.15, heightMod: 7, keyAttrs: ['height', 'catchingHands', 'strength', 'clutch'], speedMod: 0.8, strMod: 1.15 },
+    { name: 'Slot Brawler', off: 'WR', def: 'LB', weightMod: 1.1, heightMod: 0, keyAttrs: ['toughness', 'catchingHands', 'tackling', 'strength'], speedMod: 0.95, strMod: 1.1 },
 
-    // --- TIGHT ENDS ---
-    { 
-        name: 'Vertical TE', off: 'TE', def: 'LB', 
-        weightMod: 1.25, heightMod: 4, 
-        keyAttrs: ['speed', 'catchingHands', 'playbookIQ', 'tackling'],
-        speedMod: 0.9, strMod: 1.1 
-    },
-    { 
-        name: 'Blocking Specialist', off: 'TE', def: 'DL', 
-        weightMod: 1.4, heightMod: 2, 
-        keyAttrs: ['strength', 'blocking', 'blockShedding', 'toughness'],
-        speedMod: 0.7, strMod: 1.25 
-    },
+    // --- 4. THE TIGHT ENDS (TE Primary) ---
+    { name: 'Vertical TE', off: 'TE', def: 'LB', weightMod: 1.3, heightMod: 5, keyAttrs: ['speed', 'catchingHands', 'height', 'playbookIQ'], speedMod: 0.9, strMod: 1.1 },
+    { name: 'Jumbo Athlete', off: 'TE', def: 'DL', weightMod: 1.5, heightMod: 4, keyAttrs: ['strength', 'blocking', 'catchingHands', 'blockShedding'], speedMod: 0.75, strMod: 1.3 },
+    { name: 'Lead Blocker TE', off: 'TE', def: 'LB', weightMod: 1.4, heightMod: 1, keyAttrs: ['blocking', 'strength', 'tackling', 'toughness'], speedMod: 0.8, strMod: 1.25 },
+    { name: 'Hybrid Wing', off: 'TE', def: 'DB', weightMod: 1.15, heightMod: 3, keyAttrs: ['agility', 'catchingHands', 'coverage', 'speed'], speedMod: 1.0, strMod: 0.95 },
 
-    // --- LINEMEN ---
-    { 
-        name: 'Space Eater', off: 'OL', def: 'DL', 
-        weightMod: 1.7, heightMod: 1, 
-        keyAttrs: ['strength', 'blocking', 'weight', 'toughness'],
-        speedMod: 0.5, strMod: 1.4 
-    },
-    { 
-        name: 'Edge Protector', off: 'OL', def: 'DL', 
-        weightMod: 1.45, heightMod: 5, 
-        keyAttrs: ['strength', 'agility', 'blockShedding', 'playbookIQ'],
-        speedMod: 0.75, strMod: 1.15 
-    },
+    // --- 5. THE OFFENSIVE WALL (OL Primary) ---
+    { name: 'Road Grader', off: 'OL', def: 'DL', weightMod: 1.9, heightMod: 2, keyAttrs: ['strength', 'blocking', 'weight', 'toughness'], speedMod: 0.45, strMod: 1.5 },
+    { name: 'Mobile Guard', off: 'OL', def: 'LB', weightMod: 1.4, heightMod: 1, keyAttrs: ['agility', 'blocking', 'playbookIQ', 'tackling'], speedMod: 0.8, strMod: 1.1 },
+    { name: 'Wall Protector', off: 'OL', def: 'DL', weightMod: 1.6, heightMod: 6, keyAttrs: ['blocking', 'height', 'strength', 'consistency'], speedMod: 0.6, strMod: 1.2 },
+    { name: 'Technician OL', off: 'OL', def: 'DL', weightMod: 1.5, heightMod: 3, keyAttrs: ['playbookIQ', 'blocking', 'consistency', 'blockShedding'], speedMod: 0.7, strMod: 1.1 },
 
-    // --- DEFENSIVE SPECIALISTS (Secondary Offensive Roles) ---
-    { 
-        name: 'Ballhawk', off: 'WR', def: 'DB', 
-        weightMod: 0.9, heightMod: 2, 
-        keyAttrs: ['coverage', 'catchingHands', 'speed', 'agility'],
-        speedMod: 1.1, strMod: 0.85 
-    },
-    { 
-        name: 'Run Stopper', off: 'RB', def: 'LB', 
-        weightMod: 1.2, heightMod: 0, 
-        keyAttrs: ['tackling', 'strength', 'toughness', 'playbookIQ'],
-        speedMod: 0.85, strMod: 1.2 
-    }
+    // --- 6. THE PASS RUSHERS (DL Primary) ---
+    { name: 'Speed Rusher', off: 'OL', def: 'DL', weightMod: 1.25, heightMod: 4, keyAttrs: ['speed', 'blockShedding', 'agility', 'clutch'], speedMod: 1.05, strMod: 1.05 },
+    { name: 'Run Stuffer', off: 'TE', def: 'DL', weightMod: 1.7, heightMod: 1, keyAttrs: ['strength', 'tackling', 'weight', 'toughness'], speedMod: 0.55, strMod: 1.4 },
+    { name: 'Bull Rusher', off: 'OL', def: 'DL', weightMod: 1.6, heightMod: 2, keyAttrs: ['strength', 'blockShedding', 'toughness', 'blocking'], speedMod: 0.7, strMod: 1.35 },
+    { name: 'Versatile End', off: 'TE', def: 'DL', weightMod: 1.4, heightMod: 4, keyAttrs: ['blockShedding', 'tackling', 'playbookIQ', 'strength'], speedMod: 0.85, strMod: 1.2 },
+
+    // --- 7. THE DEFENSIVE CORE (LB Primary) ---
+    { name: 'Middle Hawk', off: 'RB', def: 'LB', weightMod: 1.15, heightMod: 1, keyAttrs: ['playbookIQ', 'tackling', 'coverage', 'speed'], speedMod: 1.0, strMod: 1.0 },
+    { name: 'Hard Hitter', off: 'RB', def: 'LB', weightMod: 1.3, heightMod: 0, keyAttrs: ['tackling', 'strength', 'toughness', 'clutch'], speedMod: 0.9, strMod: 1.25 },
+    { name: 'Blitz Specialist', off: 'WR', def: 'LB', weightMod: 1.1, heightMod: 2, keyAttrs: ['speed', 'blockShedding', 'tackling', 'agility'], speedMod: 1.15, strMod: 1.05 },
+    { name: 'Coverage LB', off: 'TE', def: 'LB', weightMod: 1.05, heightMod: 3, keyAttrs: ['coverage', 'agility', 'playbookIQ', 'catchingHands'], speedMod: 1.05, strMod: 0.95 },
+
+    // --- 8. THE SECONDARY (DB Primary) ---
+    { name: 'Island Corner', off: 'WR', def: 'DB', weightMod: 0.85, heightMod: 0, keyAttrs: ['coverage', 'speed', 'agility', 'consistency'], speedMod: 1.3, strMod: 0.8 },
+    { name: 'Ballhawk Safety', off: 'WR', def: 'DB', weightMod: 0.95, heightMod: 2, keyAttrs: ['catchingHands', 'playbookIQ', 'coverage', 'clutch'], speedMod: 1.1, strMod: 0.9 },
+    { name: 'Nickel Stopper', off: 'RB', def: 'DB', weightMod: 1.05, heightMod: -1, keyAttrs: ['tackling', 'agility', 'speed', 'toughness'], speedMod: 1.1, strMod: 1.1 },
+    { name: 'Zone Specialist', off: 'WR', def: 'DB', weightMod: 1.0, heightMod: 3, keyAttrs: ['playbookIQ', 'coverage', 'height', 'catchingHands'], speedMod: 0.95, strMod: 1.0 }
 ];
 
 export function generatePlayer(minAge = 10, maxAge = 16) {
