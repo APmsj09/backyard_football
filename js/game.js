@@ -186,6 +186,31 @@ function normalizeFormationKey(formations, formationKey, defaultKey) {
     return keys.length > 0 ? keys[0] : null;
 }
 
+/** 
+ * PERFORMANCE FIX: Instead of deep-cloning giant player objects, 
+ * we only save the coordinates and actions needed for the visualizer.
+ */
+function captureFrame(playState, gameLog) {
+    return {
+        tick: playState.tick,
+        ball: {
+            x: playState.ballState.x,
+            y: playState.ballState.y,
+            z: playState.ballState.z
+        },
+        players: playState.activePlayers.map(p => ({
+            slot: p.slot,
+            x: p.x,
+            y: p.y,
+            action: p.action,
+            isOffense: p.isOffense,
+            hasBall: p.hasBall
+        })),
+        logIndex: gameLog ? gameLog.length : 0,
+        lineOfScrimmage: playState.lineOfScrimmage
+    };
+}
+
 /**
  * REBUILDS the Depth Chart slots (QB1, WR1, etc.) strictly based on the
  * team's 'depthOrder' lists.
@@ -1547,43 +1572,24 @@ function resolveDepthForPlay(offense, defense) {
         if (!formationData || !formationData.slots) return;
 
         formationData.slots.forEach(slot => {
-            // 1. Check Depth Chart
             let playerId = team.depthChart[side]?.[slot];
+            const rosterIds = team.roster || [];
 
-            // 2. Fallback: If slot is empty, find best available from Roster
+            // 💡 FIX: If slot is empty, find the first healthy person not already playing
             if (!playerId) {
-                // Try to find a player who fits this position who isn't already assigned
-                const basePos = slot.replace(/\d/g, ''); // WR1 -> WR
-                // Get all roster objects
-                const rosterObjs = getRosterObjects(team);
-
-                // Find someone compatible
-                const candidate = rosterObjs.find(p =>
-                    p &&
-                    (!p.status || p.status.duration === 0) &&
-                    (p.favoriteOffensivePosition === basePos || p.favoriteDefensivePosition === basePos || p.pos === basePos) &&
-                    !Object.values(resolved[side]).includes(p.id) // Not already used
-                );
-
-                if (candidate) playerId = candidate.id;
-
-                // 3. Emergency Fallback: Any healthy player not used
-                if (!playerId) {
-                    const emergency = rosterObjs.find(p =>
-                        p &&
-                        (!p.status || p.status.duration === 0) &&
-                        !Object.values(resolved[side]).includes(p.id)
-                    );
-                    if (emergency) playerId = emergency.id;
-                }
+                playerId = rosterIds.find(id => !Object.values(resolved[side]).includes(id));
             }
             resolved[side][slot] = playerId;
         });
+
+        // 💡 CRITICAL SAFETY: Ensure QB1 is NEVER null for offense
+        if (side === 'offense' && !resolved.offense['QB1']) {
+            resolved.offense['QB1'] = team.roster[0];
+        }
     };
 
     if (offense) resolveSide(offense, 'offense');
     if (defense) resolveSide(defense, 'defense');
-
     return resolved;
 }
 
@@ -3073,11 +3079,11 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                         pState.action = 'pursuit';
                     }
                 } else {
-                    executeAssignment(pState, assignment, offenseStates, LOS, playState);
+                    executeAssignment(pState, assignment, offenseStates, LOS, playState, ballCarrierState);
                 }
             }
             else {
-                executeAssignment(pState, assignment, offenseStates, LOS, playState);
+                executeAssignment(pState, assignment, offenseStates, LOS, playState, ballCarrierState);
             }
 
             // Final Clamp to keep defenders on the field
@@ -3091,7 +3097,8 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
  * HELPER: Executes specific defensive assignments (Man, Zone, Spy, Rush).
  * Separated for clarity and reuse.
  */
-function executeAssignment(pState, assignment, offenseStates, LOS, playState) {
+function executeAssignment(pState, assignment, offenseStates, LOS, playState, ballCarrierState) {
+
 
     // 1. SAFETY HELP (High Level Logic)
     if (pState.slot.startsWith('S') && !assignment.includes('blitz')) {
@@ -5168,14 +5175,7 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
 
         // Initial Frame (Pre-Snap Huddle View)
         if (isLive && gameLog) {
-            playState.visualizationFrames.push({
-                players: deepClone(playState.activePlayers),
-                ball: deepClone(playState.ballState),
-                logIndex: gameLog.length,
-                lineOfScrimmage: playState.lineOfScrimmage,
-                firstDownY: firstDownY,
-                isSnap: true
-            });
+            playState.visualizationFrames.push(captureFrame(playState, gameLog));
         }
     } catch (setupError) {
         console.error("CRITICAL ERROR during setup:", setupError);
@@ -5615,13 +5615,7 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
 
             // --- J. VISUALIZER RECORDING ---
             if (isLive && gameLog) {
-                playState.visualizationFrames.push({
-                    players: deepClone(playState.activePlayers),
-                    ball: deepClone(playState.ballState || {}),
-                    logIndex: gameLog.length,
-                    lineOfScrimmage: playState.lineOfScrimmage,
-                    firstDownY: firstDownY
-                });
+                playState.visualizationFrames.push(captureFrame(playState, gameLog));
             }
 
         } // END TICK LOOP
@@ -5659,13 +5653,7 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
                 }
 
                 // Record Frame
-                playState.visualizationFrames.push({
-                    players: deepClone(playState.activePlayers),
-                    ball: deepClone(playState.ballState),
-                    logIndex: gameLog.length,
-                    lineOfScrimmage: playState.lineOfScrimmage,
-                    firstDownY: firstDownY
-                });
+                playState.visualizationFrames.push(captureFrame(playState, gameLog));
             }
         }
         // Players on the bench recover energy between plays
@@ -7788,21 +7776,32 @@ const DEFAULT_SAVE_KEY = 'backyardFootballGameState';
  */
 function saveGameState(saveKey = DEFAULT_SAVE_KEY) {
     try {
-        // --- FIX: We must convert the Map to an Object for JSON.stringify ---
-        const gameStateToSave = { ...game };
-        if (game.relationships instanceof Map) {
-            gameStateToSave.relationships = Object.fromEntries(game.relationships);
-        }
-        // --- END FIX ---
+        // Create a shallow copy to modify for saving
+        const dataToSave = { ...game };
 
-        localStorage.setItem(saveKey, JSON.stringify(gameStateToSave));
-        if (saveKey === DEFAULT_SAVE_KEY) {
-            console.log("Game state saved.");
-        } else {
-            console.log(`Game state saved to key: ${saveKey}`);
+        // 1. Ditch the heavy frames and logs for all non-player games
+        dataToSave.teams = dataToSave.teams.map(team => {
+            const cleanTeam = { ...team };
+            delete cleanTeam.recentPlayHistory; // Only needed during active sim
+            return cleanTeam;
+        });
+
+        // 2. Limit the message history
+        if (dataToSave.messages.length > 50) {
+            dataToSave.messages = dataToSave.messages.slice(0, 50);
         }
+
+        // 3. Clear result logs
+        dataToSave.gameResults = dataToSave.gameResults.map(res => ({
+            ...res,
+            gameLog: [] // We don't need the play-by-play after the game is over
+        }));
+
+        localStorage.setItem(saveKey, JSON.stringify(dataToSave));
     } catch (e) {
-        console.error('Error saving game state:', e);
+        console.error('Save failed:', e);
+        // Emergency: Clear old results if save fails
+        game.gameResults = game.gameResults.slice(-10);
     }
 }
 
