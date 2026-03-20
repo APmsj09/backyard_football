@@ -204,7 +204,8 @@ function captureFrame(playState, gameLog) {
             y: p.y,
             action: p.action,
             isOffense: p.isOffense,
-            hasBall: p.hasBall
+            hasBall: p.hasBall,
+            isStunned: p.stunnedTicks > 0
         })),
         logIndex: gameLog ? gameLog.length : 0,
         lineOfScrimmage: playState.lineOfScrimmage
@@ -4036,7 +4037,6 @@ function updateQBDecision(qbState, offenseStates, defenseStates, playState, offe
         );
 
         if (!rec || !rec.action.includes('route')) return null;
-
         // 1. ESTIMATE FLIGHT TIME (Better Physics Sync)
         const distFromQB = getDistance(qbState, rec);
         let estimatedBallSpeed = 22; // Default
@@ -6195,10 +6195,14 @@ function determineDefensivePlayCall(defense, offense, down, yardsToGo, ballOn, s
 function findAudiblePlay(offense, desiredType, desiredTag = null) {
     const offenseFormationName = offense.formations.offense;
 
-    let possiblePlays = Object.keys(offensivePlaybook).filter(key =>
-        key.startsWith(offenseFormationName) &&
-        offensivePlaybook[key]?.type === desiredType
-    );
+    let possiblePlays = Object.keys(offensivePlaybook).filter(key => {
+        const play = offensivePlaybook[key];
+        // ✅ Match if play is Universal (Uni_) OR explicitly matches formation name
+        const nameMatch = key.startsWith(offenseFormationName) || key.startsWith('Uni_') || key.startsWith('PA_');
+        const typeMatch = play.type === desiredType;
+
+        return nameMatch && typeMatch;
+    });
 
     // --- 🔧 HIGH FIX: Enhanced fallback logic for edge cases ---
     if (possiblePlays.length === 0) {
@@ -6382,7 +6386,7 @@ function simulateLivePlayStep(game) {
         offense.formations.offense = 'Balanced';
         defense.formations.defense = '4-2-2';
 
-        offPlayKey = 'Balanced_Slants';
+        offPlayKey = 'Uni_Slants';
         defPlayKey = 'GoalLine_RunStuff';
     }
     else if (determinePuntDecision(game.down, game.yardsToGo, game.ballOn)) {
@@ -6407,7 +6411,7 @@ function simulateLivePlayStep(game) {
         offPlayKey = determinePlayCall(offense, defense, game.down, game.yardsToGo, game.ballOn, scoreDiff, game.gameLog, drivesRemaining);
 
         // Final fallback safety
-        if (!offPlayKey || !offensivePlaybook[offPlayKey]) offPlayKey = 'Balanced_InsideZone';
+        if (!offPlayKey || !offensivePlaybook[offPlayKey]) offPlayKey = 'Uni_InsideZone';
 
         // Update the team's current formation to match the play they just called
         let prefix = offPlayKey.split('_')[0];

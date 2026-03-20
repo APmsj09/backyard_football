@@ -2385,6 +2385,40 @@ function drawFieldVisualization(frameData) {
             // PLAYER SIZE scaled for visibility
             const radius = ppY * 0.9;
 
+            // 💡 NEW: STUNNED OVERLAY LOGIC
+            if (p.isStunned) {
+                // 1. Gray out the player slightly (Loss of color)
+                ctx.fillStyle = "rgba(0, 0, 0, 0.4)";
+                ctx.beginPath();
+                ctx.arc(px, py, radius, 0, Math.PI * 2);
+                ctx.fill();
+
+                // 2. Draw "Dizzy Stars" or Birds effect
+                const time = Date.now() * 0.01; // Use time for animation
+                ctx.fillStyle = "#fbbf24"; // Amber/Gold stars
+
+                for (let i = 0; i < 3; i++) {
+                    const angle = time + (i * (Math.PI * 2) / 3);
+                    const starX = px + Math.cos(angle) * (radius * 1.2);
+                    const starY = py + Math.sin(angle) * (radius * 0.5) - (radius * 0.8);
+
+                    ctx.beginPath();
+                    ctx.arc(starX, starY, radius * 0.2, 0, Math.PI * 2);
+                    ctx.fill();
+
+                    // Star glow
+                    ctx.shadowBlur = 5;
+                    ctx.shadowColor = "white";
+                    ctx.stroke();
+                    ctx.shadowBlur = 0;
+                }
+
+                // 3. Add a "!!" or "X_X" indicator
+                ctx.fillStyle = "white";
+                ctx.font = `bold ${ppY * 0.6}px Arial`;
+                ctx.fillText("X_X", px, py - radius * 1.5);
+            }
+
             // Deep shadow (larger, darker, under the player for depth) 
             ctx.fillStyle = "rgba(0,0,0,0.5)";
             ctx.beginPath();
