@@ -2012,32 +2012,40 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
     setupSide(defense, 'defense', defenseFormationData, false);
 
     // 8. INITIALIZE BALL (Always starts with QB)
-    const qbState = playState.activePlayers.find(p => p.slot === 'QB1' && p.isOffense);
+    const snapTaker = playState.activePlayers.find(p =>
+        p.isOffense && (p.assignment === 'qb_setup' || p.assignment === 'qb_rpo_read' || p.assignment === 'qb_flea_flicker' || p.assignment === 'punt')
+    );
 
-    if (qbState) {
-        qbState.hasBall = true;
-        playState.ballState.x = qbState.x;
-        playState.ballState.y = qbState.y;
+    if (snapTaker) {
+        snapTaker.hasBall = true;
+        playState.ballState.x = snapTaker.x;
+        playState.ballState.y = snapTaker.y;
         playState.ballState.z = 1.0;
 
         // If it's a run, flag that we need a handoff
         if (play.type === 'run') {
-            const hasRB = playState.activePlayers.some(p => p.slot === 'RB1');
+            // Find the mapped RB role
+            const mappedRB = playState.activePlayers.find(p => p.isOffense && p.assignment && p.assignment.includes('run_'));
 
-            if (hasRB) {
+            if (mappedRB && mappedRB.id !== snapTaker.id) {
                 playState.handoffRequired = true;
-                playState.handoffTargetSlot = 'RB1';
+                playState.handoffTargetSlot = mappedRB.slot;
                 playState.handoffOccurred = false;
             } else {
-                // 💡 FIX: Failsafe for Spread/Empty Runs. 
-                // If there is no RB, the QB must run the ball himself!
-                qbState.isBallCarrier = true;
-                qbState.action = 'run_path';
-                qbState.assignment = 'run_inside';
+                // QB-only run (Scramble/Draw)
+                snapTaker.isBallCarrier = true;
             }
         }
     } else {
-        console.error('No QB found in offense formation! Ball cannot be initialized.');
+        // 💡 ULTIMATE FAILSAFE: If no one has a QB assignment, force it to the QB1 slot
+        const fallback = playState.activePlayers.find(p => p.slot === 'QB1' && p.isOffense);
+        if (fallback) {
+            fallback.hasBall = true;
+            fallback.assignment = 'qb_setup'; // Force assignment so they don't stand still
+            console.warn("Recovered: Assigned ball to fallback QB1 slot.");
+        } else {
+            console.error('CRITICAL: No Snap Taker found in formation mapping!');
+        }
     }
 }
 
