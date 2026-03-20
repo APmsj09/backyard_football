@@ -2844,8 +2844,11 @@ function renderSimPlayers(frame) {
         const buildRow = (p, isStarter) => {
             const stamina = p.attributes?.physical?.stamina || 50;
             const currentFatigue = fatigueMap.has(p.id) ? fatigueMap.get(p.id) : (p.fatigue || 0);
-            const energyPct = Math.max(0, Math.round(100 - (currentFatigue / Math.max(1, stamina)) * 100));
-
+            
+            // 💡 FIX: Energy is simply 100 - Fatigue. 
+            // (Stamina determines how quickly fatigue is gained/lost in the backend)
+            const energyPct = Math.max(0, 100 - Math.round(currentFatigue));
+            
             // Find current slot assignment
             let currentSlot = 'Bench';
             for (const side in team.depthChart) {

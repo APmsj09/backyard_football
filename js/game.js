@@ -987,32 +987,87 @@ function aiSetDepthChart(team) {
 
 
 
-/** Simulates an AI team's draft pick. */
+/** Calculates how much a team needs a specific position (0.1 to 2.0) */
+function getPositionalNeed(team, pos) {
+    const roster = getRosterObjects(team);
+    const count = roster.filter(p => {
+        let pPos = p.pos || estimateBestPosition(p);
+        if (['OT', 'OG', 'C'].includes(pPos)) pPos = 'OL';
+        if (['DE', 'DT', 'NT'].includes(pPos)) pPos = 'DL';
+        if (['CB', 'S', 'FS', 'SS'].includes(pPos)) pPos = 'DB';
+        return pPos === pos;
+    }).length;
+
+    // Ideal counts for an 8-man roster
+    const targets = { 'QB': 1, 'RB': 1, 'WR': 2, 'TE': 1, 'OL': 2, 'DL': 2, 'LB': 1, 'DB': 2 };
+    const target = targets[pos] || 1;
+
+    if (count === 0) return 2.0; // Desperate
+    if (count < target) return 1.5; // High Need
+    if (count === target) return 0.8; // Depth needed
+    return 0.2; // Overloaded
+}
+
+/** Revised simulateAIPick with Roster Awareness */
 function simulateAIPick(team) {
-    if (!team || !team.roster || !game || !game.players || !team.coach) {
-        console.error(`simulateAIPick: Invalid team data or game state.`); return null;
-    }
+    if (!team || !team.roster || !game || !game.players || !team.coach) return null;
     const ROSTER_LIMIT = 12;
     if (team.roster.length >= ROSTER_LIMIT) return null;
 
     const undraftedPlayers = game.players.filter(p => p && !p.teamId);
     if (undraftedPlayers.length === 0) return null;
 
-    let bestPick = { player: null, score: -Infinity };
-    if (undraftedPlayers.length > 0) {
-        bestPick = undraftedPlayers.reduce((best, current) => {
-            const currentScore = getPlayerScore(current, team.coach);
-            return currentScore > best.score ? { player: current, score: currentScore } : best;
-        }, { player: undraftedPlayers[0], score: getPlayerScore(undraftedPlayers[0], team.coach) });
-    }
-    const bestPlayer = bestPick.player;
+    // 1. Analyze Current Roster Needs
+    const rosterObjs = getRosterObjects(team);
+    let qbCount = 0, trenchCount = 0, skillCount = 0;
 
-    if (bestPlayer) { addPlayerToTeam(bestPlayer, team); }
-    else {
+    rosterObjs.forEach(p => {
+        const pos = estimateBestPosition(p);
+        if (pos === 'QB') qbCount++;
+        else if (['OL', 'DL', 'C', 'DT', 'DE', 'OT', 'OG'].includes(pos)) trenchCount++;
+        else skillCount++;
+    });
+
+    let bestPick = { player: null, score: -Infinity };
+
+    // 2. Evaluate Players
+    undraftedPlayers.forEach(player => {
+        const pos = estimateBestPosition(player);
+        let baseScore = getPlayerScore(player, team.coach);
+
+        // 3. Apply Needs Multiplier
+        let needMultiplier = 1.0;
+
+        if (pos === 'QB') {
+            if (qbCount === 0) needMultiplier = 3.0;      // Desperate for a QB
+            else if (qbCount === 1) needMultiplier = 0.5; // Backup
+            else needMultiplier = 0.1;                    // Do not draft 3 QBs
+        } 
+        else if (['OL', 'DL', 'C', 'DT', 'DE', 'OT', 'OG'].includes(pos)) {
+            if (trenchCount < 3) needMultiplier = 2.0;    // Need starting linemen
+            else if (trenchCount < 5) needMultiplier = 1.2; // Need depth
+            else needMultiplier = 0.6;
+        } 
+        else {
+            // Skill Players (WR, RB, DB, LB)
+            if (skillCount < 4) needMultiplier = 1.5;
+            else needMultiplier = 0.9;
+        }
+
+        const finalScore = baseScore * needMultiplier;
+
+        if (finalScore > bestPick.score) {
+            bestPick = { player, score: finalScore };
+        }
+    });
+
+    if (bestPick.player) {
+        addPlayerToTeam(bestPick.player, team);
         const teamName = team?.name || 'Unknown Team';
-        console.warn(`${teamName} failed to find a suitable player.`);
+        console.log(`[Draft] ${teamName} drafted ${bestPick.player.name} (Pos: ${estimateBestPosition(bestPick.player)}, Score: ${bestPick.score.toFixed(1)})`);
     }
-    return bestPlayer;
+
+    return bestPick.player;
 }
 
 /**
@@ -1168,6 +1223,7 @@ function resetGameStats(teamA, teamB) {
     playersInGame.forEach(player => {
         if (!player) return;
         player.fatigue = 0;
+        player.isResting = false;
         player.gameStats = {
             receptions: 0, recYards: 0, passYards: 0, rushYards: 0, touchdowns: 0,
             tackles: 0, sacks: 0, interceptions: 0, fumbles: 0, fumblesLost: 0, fumblesRecovered: 0,
@@ -4999,6 +5055,42 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
 
         setupInitialPlayerStates(playState, offense, defense, play, playState.assignments, ballOn, defensivePlayKey, ballHash, finalOffensivePlayKey);
 
+// =========================================================
+        // 💡 ANTI-SPAM ENGINE (The "Scouting" Mechanic)
+        // =========================================================
+        // Keep a running history of the last 6 plays
+        if (!offense.playCallHistory) offense.playCallHistory =[];
+        offense.playCallHistory.push(finalOffensivePlayKey);
+        
+        if (offense.playCallHistory.length > 6) {
+            offense.playCallHistory.shift();
+        }
+
+        // Count how many times this specific play was called recently
+        const spamCount = offense.playCallHistory.filter(k => k === finalOffensivePlayKey).length;
+
+        // If called 3 or more times in the last 6 plays, the defense "keys in" on it
+        if (spamCount >= 3 && !defense.isPlayerControlled) {
+            playState.activePlayers.forEach(pState => {
+                if (!pState.isOffense) {
+                    // Defenders recognize the routes/blocking scheme, boosting Playbook IQ
+                    pState.iq = Math.min(99, pState.iq + (spamCount * 8));
+                    
+                    // DBs play tighter coverage, DLs shed blocks faster because they know the play
+                    if (pState.role === 'DB') pState.cov = Math.min(99, (pState.cov || 50) + (spamCount * 5));
+                    if (pState.role === 'DL' || pState.role === 'LB') pState.shed = Math.min(99, (pState.shed || 50) + (spamCount * 5));
+                    
+                    // Reduce their snap reaction delay to simulate "jumping the snap"
+                    pState.snapReactionTimer = Math.max(0, pState.snapReactionTimer - spamCount);
+                }
+            });
+
+            if (context.gameLog && !defense._spamLogged) {
+                pushGameLog(context.gameLog, `[Scouting] 🧠 The defense recognizes the play and jumps the snap!`, playState);
+                defense._spamLogged = true;
+            }
+        }
+
         // Initial Frame (Pre-Snap Huddle View)
         if (isLive && gameLog) {
             playState.visualizationFrames.push({
@@ -5422,14 +5514,19 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
 
             // --- I. UPDATE FATIGUE (Optimized) ---
             playState.activePlayers.forEach(p => {
-                let drain = (p.action.includes('run') || p.action.includes('rush') || p.action === 'pursuit' || p.action.includes('route') || p.action.includes('scramble')) ? 0.05 : 0.02;
                 const player = playerCache.get(p.id);
                 if (player) {
-                    player.fatigue = Math.min(100, (player.fatigue || 0) + drain);
                     const stamina = player.attributes?.physical?.stamina || 50;
-                    const fatigueRatio = player.fatigue / Math.max(1, stamina);
-                    // 💡 FIX: Make fatigue impact performance more noticeably
-                    p.fatigueModifier = Math.max(0.70, 1.0 - (fatigueRatio * 0.30));
+                    const effortMultiplier = (p.action.includes('run') || p.action.includes('rush') || p.action === 'pursuit' || p.action.includes('route') || p.action.includes('scramble')) ? 1.0 : 0.4;
+                    
+                    // High stamina = less drain (0.51x for 99 stamina, 1.3x for 20 stamina)
+                    const staminaFactor = (150 - stamina) / 100; 
+                    const drain = 0.03 * effortMultiplier * staminaFactor;
+                    
+                    player.fatigue = Math.min(100, (player.fatigue || 0) + drain);
+                    
+                    // Calculate immediate gameplay penalty (max 30% reduction)
+                    p.fatigueModifier = Math.max(0.70, 1.0 - (player.fatigue / 100) * 0.30);
                 }
             });
 
@@ -5489,15 +5586,18 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
                 });
             }
         }
-        // --- K. BENCH RECOVERY ---
         // Players on the bench recover energy between plays
         const activeIds = new Set(playState.activePlayers.map(p => p.id));
         const allRoster = [...getRosterObjects(offense), ...getRosterObjects(defense)];
         allRoster.forEach(p => {
             if (p && !activeIds.has(p.id)) {
                 const stamina = p.attributes?.physical?.stamina || 50;
-                const recovery = 5 + (stamina / 10); // Recovers 10 to 15 fatigue per play
+                // Recovers 2.0 to 4.0 fatigue per play based on stamina
+                const recovery = 1.5 + (stamina / 40); 
                 p.fatigue = Math.max(0, (p.fatigue || 0) - recovery);
+                
+                // Clear resting state if they have sufficiently recovered!
+                if (p.fatigue < 40) p.isResting = false; 
             }
         });
 
@@ -5812,67 +5912,66 @@ function determinePlayCall(offense, defense, down, yardsToGo, ballOn, scoreDiff,
 
     const formationName = offense.formations.offense;
     const coach = offense.coach;
-    const recentPlays = offense.recentPlayHistory || [];
-
-    // 1. Get ALL valid plays for this specific formation
+    const recentPlays = offense.recentPlayHistory ||[];
     const formationPlays = Object.keys(offensivePlaybook).filter(key => key.startsWith(formationName));
 
-    if (formationPlays.length === 0) {
-        console.warn(`AI Alert: Formation ${formationName} has no plays! Reverting to Balanced.`);
-        return 'Balanced_InsideZone';
-    }
+    if (formationPlays.length === 0) return 'Balanced_InsideZone';
 
-    // 2. Calculate "Pass Intent" Score (0 to 100)
-    let passScore = 50; // Start at 50/50
+    // 1. Analyze Team Personnel (Who are our stars?)
+    const roster = getRosterObjects(offense);
+    const qb = roster.find(p => p.id === offense.depthChart.offense.QB1);
+    const rb = roster.find(p => p.id === offense.depthChart.offense.RB1);
+    const qbOvr = qb ? calculateOverall(qb, 'QB') : 50;
+    const rbOvr = rb ? calculateOverall(rb, 'RB') : 50;
+
+    // 2. Base Pass Intent (0 to 100)
+    let passScore = 50;
+
+    // Personnel Adjustments
+    if (qbOvr > rbOvr + 10) passScore += 20; // Great QB, average RB -> Pass more
+    if (rbOvr > qbOvr + 10) passScore -= 20; // Great RB, average QB -> Run more
 
     // Situation Adjustments
-    if (down === 1) passScore = 45;
-    if (down === 2 && yardsToGo > 7) passScore = 70;
-    if (down === 2 && yardsToGo < 3) passScore = 30;
-    if (down === 3 && yardsToGo > 5) passScore = 85;
-    if (down === 3 && yardsToGo <= 2) passScore = 20;
+    if (down === 1) passScore -= 5;
+    if (down === 2 && yardsToGo > 7) passScore += 15;
+    if (down === 3 && yardsToGo > 5) passScore += 35;
+    if (down === 3 && yardsToGo <= 2) passScore -= 25; // Short yardage run
 
     // Coach Personality
     if (coach?.type === 'Air Raid') passScore += 25;
     if (coach?.type === 'Ground and Pound') passScore -= 25;
-    if (coach?.type === 'West Coast Offense') passScore += 10;
 
-    // Game Context (Trailing late? Pass more. Winning late? Run more.)
-    if (drivesRemaining < 4) {
-        if (scoreDiff < 0) passScore += 20;
-        if (scoreDiff > 8) passScore -= 30;
+    // 3. Clock Management / Game Context
+    if (drivesRemaining < 4) { // Late in the game
+        if (scoreDiff < 0) {
+            passScore += 40; // Trailing -> Panic, throw the ball!
+            if (scoreDiff < -8) passScore += 20; // Down 2 scores -> Always throw
+        } else if (scoreDiff > 0) {
+            passScore -= 40; // Winning -> Chew the clock, run the ball!
+        }
     }
 
+    // Cap probability
+    passScore = Math.max(5, Math.min(95, passScore));
     const desiredType = (Math.random() * 100 < passScore) ? 'pass' : 'run';
 
-    // 3. HIERARCHICAL SELECTION (The "Never-Default" System)
-
-    // Attempt A: Correct Type AND Not Recently Played
-    let selectionPool = formationPlays.filter(key =>
+    // 4. Select a play (Avoiding recent repeats)
+    let selectionPool = formationPlays.filter(key => 
         offensivePlaybook[key].type === desiredType && !recentPlays.includes(key)
     );
 
-    // Attempt B: Correct Type (Allow repeats if formation is small)
     if (selectionPool.length === 0) {
         selectionPool = formationPlays.filter(key => offensivePlaybook[key].type === desiredType);
     }
-
-    // Attempt C: Opposite Type but Not Recently Played
     if (selectionPool.length === 0) {
-        selectionPool = formationPlays.filter(key => !recentPlays.includes(key));
+        selectionPool = formationPlays; // Absolute fallback
     }
 
-    // Attempt D: Any play in the formation (Absolute last resort before global default)
-    if (selectionPool.length === 0) {
-        selectionPool = formationPlays;
-    }
+    const selectedKey = getRandom(selectionPool);
 
-    const selectedKey = getRandom(selectionPool) || 'Balanced_InsideZone';
-
-    // 4. Update History
-    if (!offense.recentPlayHistory) offense.recentPlayHistory = [];
+    if (!offense.recentPlayHistory) offense.recentPlayHistory =[];
     offense.recentPlayHistory.push(selectedKey);
-    if (offense.recentPlayHistory.length > 3) offense.recentPlayHistory.shift();
+    if (offense.recentPlayHistory.length > 5) offense.recentPlayHistory.shift();
 
     return selectedKey;
 }
@@ -5977,109 +6076,71 @@ function determineDefensiveFormation(defense, offenseFormationName, down, yardsT
  */
 function determineDefensivePlayCall(defense, offense, down, yardsToGo, ballOn, scoreDiff, gameLog, drivesRemaining) {
     const defenseFormationName = defense.formations.defense;
-    // Helper: Match a formation against a set of minimum personnel criteria
-    const formationMatchesCriteria = (form, criteria) => {
-        if (!form || !criteria) return false;
-        const p = form.personnel || {};
-        const front = (p.DL || 0) + (p.LB || 0);
-        if (criteria.minDL && (p.DL || 0) < criteria.minDL) return false;
-        if (criteria.minLB && (p.LB || 0) < criteria.minLB) return false;
-        if (criteria.minDB && (p.DB || 0) < criteria.minDB) return false;
-        if (criteria.minWR && (p.WR || 0) < criteria.minWR) return false;
-        if (criteria.minFront && front < criteria.minFront) return false;
-        return true;
-    };
+    const availablePlays = Object.keys(defensivePlaybook).filter(key => 
+        isPlayCompatibleWithDefense(defensivePlaybook[key], defenseFormationName)
+    );
 
-    const isPlayCompatibleWithDefense = (play, formationName) => {
-        if (!play) return false;
-        // 1) Legacy explicit list
-        if (Array.isArray(play.compatibleFormations) && play.compatibleFormations.includes(formationName)) return true;
-        // 2) Criteria-based compatibility
-        if (play.compatibleCriteria) {
-            const form = defenseFormations[formationName];
-            if (formationMatchesCriteria(form, play.compatibleCriteria)) return true;
-        }
-        // 3) If neither field is present, treat as generic (available everywhere)
-        if (!play.hasOwnProperty('compatibleFormations') && !play.hasOwnProperty('compatibleCriteria')) return true;
-        return false;
-    };
+    if (availablePlays.length === 0) return 'Cover_2_Zone_Base';
 
-    const availablePlays = Object.keys(defensivePlaybook).filter(key => isPlayCompatibleWithDefense(defensivePlaybook[key], defenseFormationName));
-
-    if (availablePlays.length === 0) return 'Cover_2_Zone_3-1-3';
-
-    // --- 1. CAPTAIN & IQ CHECK ---
     const captainIsSharp = checkCaptainDiscipline(defense, gameLog);
 
-    // --- 2. ANALYZE OPPONENT TENDENCIES (NEW) ---
-    // Calculate Average Depth of Target (aDOT) from recent plays
-    // (This assumes you track 'playHistory' or similar, otherwise we infer from 'yardsToGo')
-    // For now, we simulate this "Scouting Report" logic:
-    const offRoster = getRosterObjects(offense);
-    const qb = offRoster.find(p => p.slot === 'QB1') || offRoster.find(p => p.favoriteOffensivePosition === 'QB');
-    const qbIQ = qb?.attributes?.mental?.playbookIQ || 50;
+    // 1. Tendency Tracking ("Scouting")
+    // Look at the offense's last 5 plays to gauge run/pass ratio
+    const offHistory = offense.recentPlayHistory ||[];
+    let recentPassCount = 0;
+    offHistory.forEach(playKey => {
+        if (offensivePlaybook[playKey] && offensivePlaybook[playKey].type === 'pass') recentPassCount++;
+    });
+    const passHeavyTendency = (offHistory.length >= 3 && recentPassCount / offHistory.length > 0.6);
 
-    // Default Strategy
+    // 2. Establish Base Strategy
     let blitzChance = 0.20;
-    let manCoverageChance = 0.40; // Base 40% Man
-    let pressBias = 0.0; // Bonus chance to pick "Press" or "Hard" plays
+    let manCoverageChance = 0.40;
+    let deepZoneBias = 0.0;
 
     if (captainIsSharp) {
-        // A. Down & Distance Logic
-        if (yardsToGo < 5) {
-            // Short yardage: They will throw quick or run.
-            manCoverageChance = 0.70; // Tight Man
-            pressBias = 0.30;         // Press coverage
-            blitzChance = 0.30;
-        } else if (down === 3 && yardsToGo > 10) {
-            // Long yardage: NOW we play deep zones.
+        // Situation: Passing Down
+        if ((down === 3 && yardsToGo > 6) || (drivesRemaining < 4 && scoreDiff < 0)) {
+            deepZoneBias = 0.40; // Play deep, don't get beat
             manCoverageChance = 0.20;
-            pressBias = -0.50; // Play off
+            blitzChance = 0.35; // Bring pressure on 3rd down
+        } 
+        // Situation: Short Yardage / Goal Line
+        else if (yardsToGo <= 2 || ballOn > 90) {
+            deepZoneBias = -0.50; // Play short/press
+            manCoverageChance = 0.70; // Tight man coverage
+            blitzChance = 0.40;
         }
-
-        // B. Game Flow Adjustment (The "Dink & Dunk" Killer)
-        // If the offense hasn't thrown deep successfully, tighten up!
-        // We look at the opponent's 'longPass' stat or just infer.
-        // Logic: If they are in a compressed formation (Balanced/Power), play tight.
-        if (offense.formations.offense === 'Balanced' || offense.formations.offense === 'Power') {
-            manCoverageChance += 0.15;
-            pressBias += 0.20;
+        
+        // Apply "Scouting" Adjustment
+        if (passHeavyTendency) {
+            deepZoneBias += 0.20; // Back up, they like to pass
+            manCoverageChance -= 0.10; // Zone is safer against pass spam
         }
     } else {
-        // Confused Captain: Random guessing
+        // Confused Captain picks randomly
         blitzChance = Math.random();
         manCoverageChance = Math.random();
     }
 
-    // --- 3. FILTER & SELECT ---
-    let pool = [];
-
-    // Helper to check if a play is "Press" or "Hard" (Short yardage focus)
-    const isShortDefense = (play) => play.tags.includes('press') || play.tags.includes('hardFlat') || play.tags.includes('cover2');
-    const isDeepDefense = (play) => play.tags.includes('cover4') || play.tags.includes('prevent');
-
-    // Decision Tree
+    // 3. Filter Playbook based on Strategy
+    let pool =[];
     if (Math.random() < blitzChance) {
         pool = availablePlays.filter(k => defensivePlaybook[k].tags.includes('blitz'));
     } else {
-        // Coverage Selection
         const useMan = Math.random() < manCoverageChance;
         pool = availablePlays.filter(k => defensivePlaybook[k].concept === (useMan ? 'Man' : 'Zone'));
 
-        // Refine Pool based on Press Bias
-        if (pressBias > 0 && Math.random() < pressBias) {
-            // Force "Short" defenses (Cover 2, Man Press)
-            const shortPool = pool.filter(k => isShortDefense(defensivePlaybook[k]));
-            if (shortPool.length > 0) pool = shortPool;
-        } else if (pressBias < 0) {
-            // Force "Deep" defenses (Cover 3/4)
-            const deepPool = pool.filter(k => isDeepDefense(defensivePlaybook[k]));
+        if (deepZoneBias > 0 && Math.random() < deepZoneBias) {
+            const deepPool = pool.filter(k => defensivePlaybook[k].tags.includes('cover3') || defensivePlaybook[k].tags.includes('cover4'));
             if (deepPool.length > 0) pool = deepPool;
+        } else if (deepZoneBias < 0) {
+            const shortPool = pool.filter(k => defensivePlaybook[k].tags.includes('press') || defensivePlaybook[k].tags.includes('runStop'));
+            if (shortPool.length > 0) pool = shortPool;
         }
     }
 
-    if (pool.length === 0) pool = availablePlays;
-    return getRandom(pool);
+    return getRandom(pool.length > 0 ? pool : availablePlays);
 }
 // In game.js
 
@@ -6440,6 +6501,17 @@ function simulateLivePlayStep(game) {
 
     game.playsTotal = (game.playsTotal || 0) + 1;
 
+    // --- HALFTIME LOGIC ---
+    if (game.playsTotal === 30 && !game.halftimeProcessed) {
+        game.halftimeProcessed = true;
+        if (game.gameLog) game.gameLog.push("⏸️ HALFTIME. Players recover energy in the locker room.");[...getRosterObjects(offense), ...getRosterObjects(defense)].forEach(p => {
+            if (p) {
+                p.fatigue = Math.max(0, (p.fatigue || 0) - 40);
+                if (p.fatigue < 40) p.isResting = false;
+            }
+        });
+    }
+
     // Check if game should end
     if (game.playsTotal >= 60) {
         game.isGameOver = true;
@@ -6508,7 +6580,10 @@ function simulateMatchFast(homeTeam, awayTeam) {
 
     // Recovery
     [...getRosterObjects(homeTeam), ...getRosterObjects(awayTeam)].forEach(p => {
-        if (p) p.fatigue = Math.max(0, (p.fatigue || 0) - 30);
+        if (p) {
+            p.fatigue = Math.max(0, (p.fatigue || 0) - 40);
+            if (p.fatigue < 40) p.isResting = false;
+        }
     });
 
     // Second Half Kickoff
@@ -7311,8 +7386,9 @@ function substitutePlayers(teamId, outPlayerId, inPlayerId, gameLog = null) {
     });
 
     if (swappedCount > 0) {
-        const inEnergy = Math.round(100 - (inPlayer.fatigue || 0));
-        const outEnergy = Math.round(100 - (outPlayer.fatigue || 0));
+        inPlayer.isResting = false; // Manually putting them in overrides resting
+        const inEnergy = Math.max(0, Math.round(100 - (inPlayer.fatigue || 0)));
+        const outEnergy = Math.max(0, Math.round(100 - (outPlayer.fatigue || 0)));
         const logMsg = `🔄 SUB (${lastSlot}): ${inPlayer.name} (${inEnergy}% E) enters for ${outPlayer.name} (${outEnergy}% E).`;
         
         console.log(logMsg);
@@ -7328,90 +7404,102 @@ function substitutePlayers(teamId, outPlayerId, inPlayerId, gameLog = null) {
  * Will attempt up to `maxSubs` swaps.
  */
 function autoMakeSubstitutions(team, options = {}, gameLog = null) {
-    if (!team || !team.depthChart || !team.roster) return 0;
+    if (!team || !team.depthChart || !team.roster || !team.depthOrder) return 0;
 
-    const thresholdFatigue = options.thresholdFatigue || 65;
-    const reEntryFatigue = 20; // Player must recover to this fatigue level to re-enter
-    const maxSubs = options.maxSubs || 3;
-    const chance = typeof options.chance === 'number' ? options.chance : 0.8;
-
-    if (Math.random() > chance) return 0;
-
+    const fatigueLimit = options.thresholdFatigue || 75;
+    const recoverLimit = 40; // Player must drop below this fatigue to return to the field
     const fullRoster = getRosterObjects(team);
-    if (!fullRoster || fullRoster.length === 0) return 0;
-
     let subsDone = 0;
-    const sides =['offense', 'defense'];
 
-    for (const side of sides) {
-        if (subsDone >= maxSubs) break;
+    // Track active players per side to prevent double-booking within the same play
+    const activeOffense = new Set(Object.values(team.depthChart.offense).filter(Boolean));
+    const activeDefense = new Set(Object.values(team.depthChart.defense).filter(Boolean));
 
-        const chart = team.depthChart[side] || {};
-        const formationSlots = Object.keys(chart).filter(slot => chart[slot]);
+    for (const side of['offense', 'defense']) {
+        const chart = team.depthChart[side];
+        const activeOnThisSide = side === 'offense' ? activeOffense : activeDefense;
 
-        for (const slot of formationSlots) {
-            if (subsDone >= maxSubs) break;
-
-            const currentPlayerId = chart[slot];
-            const currentPlayer = fullRoster.find(p => p && p.id === currentPlayerId);
-            if (!currentPlayer) continue;
-
-            const currentFatigue = currentPlayer.fatigue || 0;
-
-            // Get active players ON THIS SIDE specifically to allow Two-Way players
-            const activeOnThisSide = new Set(Object.values(chart));
+        for (const slot in chart) {
+            const currentId = chart[slot];
+            const currentPlayer = fullRoster.find(p => p.id === currentId);
             
-            const benchPlayers = fullRoster.filter(p =>
-                p &&
-                !activeOnThisSide.has(p.id) &&
-                (!p.status || p.status.duration === 0)
-            );
+            // 1. Manage resting state for current player
+            if (currentPlayer) {
+                if ((currentPlayer.fatigue || 0) >= fatigueLimit) currentPlayer.isResting = true;
+                if ((currentPlayer.fatigue || 0) <= recoverLimit) currentPlayer.isResting = false;
+            }
 
-            // --- SCENARIO A: Current player is TIRED -> Sub Out ---
-            if (currentFatigue >= thresholdFatigue && benchPlayers.length > 0) {
-                const bestSub = benchPlayers.reduce((best, curr) => {
-                    const currFatigue = curr.fatigue || 0;
-                    const bestFatigue = best.fatigue || 0;
-                    const currSuitability = calculateSlotSuitability(curr, slot, side, team);
-                    const bestSuitability = calculateSlotSuitability(best, slot, side, team);
+            // 2. Identify the ideal position cascades
+            let basePos = slot.replace(/\d/g, '');
+            if (['OT', 'OG', 'C'].includes(basePos)) basePos = 'OL';
+            if (['CB', 'S'].includes(basePos)) basePos = 'DB';
+            if (['DE', 'DT'].includes(basePos)) basePos = 'DL';
+            if (basePos === 'FB') basePos = 'RB';
 
-                    if (currFatigue < bestFatigue - 10) return curr;
-                    if (bestFatigue < currFatigue - 10) return best;
-                    return currSuitability > bestSuitability ? curr : best;
-                }, benchPlayers[0]);
+            let searchBuckets = [basePos];
+            if (basePos === 'WR') searchBuckets.push('TE', 'RB', 'DB', 'QB');
+            if (basePos === 'RB') searchBuckets.push('WR', 'DB', 'LB');
+            if (basePos === 'TE') searchBuckets.push('WR', 'OL', 'LB');
+            if (basePos === 'OL') searchBuckets.push('DL', 'TE', 'LB');
+            if (basePos === 'DB') searchBuckets.push('WR', 'RB', 'QB');
+            if (basePos === 'LB') searchBuckets.push('DL', 'DB', 'TE', 'RB');
+            if (basePos === 'DL') searchBuckets.push('LB', 'OL', 'TE');
+            if (basePos === 'QB') searchBuckets.push('WR', 'RB', 'DB');
+            searchBuckets.push('WR', 'RB', 'TE', 'DB', 'LB', 'DL', 'OL', 'QB');
 
-                if (bestSub) {
-                    // We assign directly here to bypass full roster search for targeted slots
-                    chart[slot] = bestSub.id;
-                    subsDone++;
-                    
-                    const inE = Math.round(100 - (bestSub.fatigue || 0));
-                    const outE = Math.round(100 - currentFatigue);
-                    if (gameLog) pushGameLog(gameLog, `🔄 SUB (${side === 'offense' ? 'OFF' : 'DEF'} ${slot}): ${bestSub.name} (${inE}% E) in for ${currentPlayer.name} (${outE}% E).`);
+            let bestCandidateId = null;
+
+            // 3. Scan depthOrder to find the highest-ranking rested player
+            for (const bucket of searchBuckets) {
+                const groupList = team.depthOrder[bucket] ||[];
+                for (const candidateId of groupList) {
+                    const candidate = fullRoster.find(p => p.id === candidateId);
+                    if (!candidate || candidate.status?.duration > 0) continue;
+
+                    // Cannot assign if they are already playing another slot on THIS side
+                    if (activeOnThisSide.has(candidateId) && candidateId !== currentId) continue;
+
+                    // Manage candidate resting state
+                    if ((candidate.fatigue || 0) >= fatigueLimit) candidate.isResting = true;
+                    if ((candidate.fatigue || 0) <= recoverLimit) candidate.isResting = false;
+
+                    // First player found who isn't resting gets the job!
+                    if (!candidate.isResting) {
+                        bestCandidateId = candidateId;
+                        break; 
+                    }
+                }
+                if (bestCandidateId) break;
+            }
+
+            // 4. Emergency Fallback: If literally everyone is resting, play the best guy anyway
+            if (!bestCandidateId) {
+                for (const bucket of searchBuckets) {
+                    const groupList = team.depthOrder[bucket] ||[];
+                    for (const candidateId of groupList) {
+                        const candidate = fullRoster.find(p => p.id === candidateId);
+                        if (!candidate || candidate.status?.duration > 0) continue;
+                        if (activeOnThisSide.has(candidateId) && candidateId !== currentId) continue;
+                        bestCandidateId = candidateId;
+                        break;
+                    }
+                    if (bestCandidateId) break;
                 }
             }
-            // --- SCENARIO B: Check if a well-rested bench player should start ---
-            else if (benchPlayers.length > 0) {
-                const currentSuitability = calculateSlotSuitability(currentPlayer, slot, side, team);
-                const restedStarters = benchPlayers.filter(p => (p.fatigue || 0) < reEntryFatigue);
 
-                if (restedStarters.length > 0) {
-                    const bestRested = restedStarters.reduce((best, curr) => {
-                        const currSuitability = calculateSlotSuitability(curr, slot, side, team);
-                        const bestSuitability = calculateSlotSuitability(best, slot, side, team);
-                        return currSuitability > bestSuitability ? curr : best;
-                    }, restedStarters[0]);
-
-                    const bestRestedScore = calculateSlotSuitability(bestRested, slot, side, team);
-
-                    if (bestRestedScore > currentSuitability + 8) {
-                        chart[slot] = bestRested.id;
-                        subsDone++;
-                        
-                        const inE = Math.round(100 - (bestRested.fatigue || 0));
-                        const outE = Math.round(100 - currentFatigue);
-                        if (gameLog) pushGameLog(gameLog, `🔄 SUB (${side === 'offense' ? 'OFF' : 'DEF'} ${slot}): ${bestRested.name} (${inE}% E) returns for ${currentPlayer.name} (${outE}% E).`);
-                    }
+            // 5. Execute Sub
+            if (bestCandidateId && bestCandidateId !== currentId) {
+                const newPlayer = fullRoster.find(p => p.id === bestCandidateId);
+                chart[slot] = bestCandidateId;
+                
+                activeOnThisSide.delete(currentId);
+                activeOnThisSide.add(bestCandidateId);
+                subsDone++;
+                
+                if (gameLog && currentPlayer) {
+                    const inE = Math.max(0, Math.round(100 - (newPlayer.fatigue || 0)));
+                    const outE = Math.max(0, Math.round(100 - (currentPlayer.fatigue || 0)));
+                    pushGameLog(gameLog, `🔄 SUB (${side === 'offense' ? 'OFF' : 'DEF'} ${slot}): ${newPlayer.name} (${inE}% E) in for ${currentPlayer.name} (${outE}% E).`);
                 }
             }
         }
