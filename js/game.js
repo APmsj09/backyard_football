@@ -810,7 +810,7 @@ function getUniqueColor() {
 /**
  * Creates the player-controlled team and adds it to the game state.
  */
-export function createPlayerTeam(teamName, options = {}) {
+function createPlayerTeam(teamName, options = {}) {
     if (!game || !game.teams || !game.divisions || !divisionNames) {
         console.error("Cannot create player team: Game not initialized properly.");
         return;
