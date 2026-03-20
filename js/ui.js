@@ -1138,55 +1138,93 @@ function renderFormationDropdown(side, formationMap, selectedKey) {
 function renderPositionalOveralls() {
     const pane = document.getElementById("positional-overalls-container");
     const gameState = getGameState();
-    if (!pane || !gameState) return;
+    if (!pane || !gameState || !gameState.playerTeam) return;
 
-    const positions = {};
-    const roster = getUIRosterObjects(gameState.playerTeam);
+    const team = gameState.playerTeam;
+    const roster = getUIRosterObjects(team);
+    const depthOrder = team.depthOrder || {};
 
-    for (const p of roster) {
-        let pos = p.pos || estimateBestPosition(p);
-        if (['FB'].includes(pos)) pos = 'RB';
-        if (['ATH', 'K', 'P'].includes(pos)) pos = 'WR'; 
-        // TE is no longer forced to WR here, keeping it standalone
-        if (['OT', 'OG', 'C'].includes(pos)) pos = 'OL';
-        if (['DE', 'DT', 'NT'].includes(pos)) pos = 'DL';
-        if (['CB', 'S', 'FS', 'SS'].includes(pos)) pos = 'DB';
-
-        if (!positions[pos]) positions[pos] = [];
-        positions[pos].push(p);
+    // Build reverse maps for starters to display badges
+    const offStarters = {}; 
+    const defStarters = {};
+    
+    if (team.depthChart) {
+        if (team.depthChart.offense) {
+            Object.entries(team.depthChart.offense).forEach(([slot, pId]) => {
+                if (pId) {
+                    if (!offStarters[pId]) offStarters[pId] =[];
+                    offStarters[pId].push(slot);
+                }
+            });
+        }
+        if (team.depthChart.defense) {
+            Object.entries(team.depthChart.defense).forEach(([slot, pId]) => {
+                if (pId) {
+                    if (!defStarters[pId]) defStarters[pId] = [];
+                    defStarters[pId].push(slot);
+                }
+            });
+        }
     }
 
-    // Strict 8v8 Order
-    const order = ['QB', 'RB', 'WR', 'TE', 'OL', 'DL', 'LB', 'DB'];
-    const sortedKeys = Object.keys(positions).sort((a, b) => {
-        return order.indexOf(a) - order.indexOf(b);
+    // 8 Core Positional Buckets
+    const displayOrder =['QB', 'RB', 'WR', 'TE', 'OL', 'DL', 'LB', 'DB'];
+    
+    let html = `<div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">`;
+
+    displayOrder.forEach(pos => {
+        const pIds = depthOrder[pos] ||[];
+        // Map IDs to actual player objects, filtering out invalid ones
+        const playersInBucket = pIds.map(id => roster.find(p => p && p.id === id)).filter(Boolean);
+
+        html += `
+        <div class="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden flex flex-col">
+            <div class="bg-gray-800 px-3 py-2 flex justify-between items-center text-white">
+                <h4 class="font-bold text-sm">${pos} DEPTH</h4>
+                <span class="text-[10px] font-bold bg-gray-700 px-2 py-0.5 rounded-full">${playersInBucket.length} Players</span>
+            </div>
+            <div class="flex-1 overflow-y-auto max-h-64 p-2 space-y-1">`;
+        
+        if (playersInBucket.length === 0) {
+            html += `<div class="text-xs text-gray-400 italic text-center p-4">No players assigned</div>`;
+        } else {
+            playersInBucket.forEach((p, index) => {
+                const ovr = calculateOverall(p, pos);
+                const ovrColor = ovr >= 80 ? 'text-green-600' : (ovr >= 70 ? 'text-blue-600' : 'text-gray-600');
+                
+                // Build badges for starting roles
+                let badges = '';
+                if (offStarters[p.id]) {
+                    offStarters[p.id].forEach(slot => {
+                        badges += `<span class="inline-block bg-blue-100 text-blue-800 text-[9px] px-1 rounded ml-1 font-bold border border-blue-200">${slot}</span>`;
+                    });
+                }
+                if (defStarters[p.id]) {
+                    defStarters[p.id].forEach(slot => {
+                        badges += `<span class="inline-block bg-red-100 text-red-800 text-[9px] px-1 rounded ml-1 font-bold border border-red-200">${slot}</span>`;
+                    });
+                }
+                
+                // Top ranked player in the bucket gets a slight highlight
+                const rankStyle = index === 0 ? 'font-bold bg-amber-50 border border-amber-200' : 'hover:bg-gray-50 border border-transparent';
+                const nameStyle = index === 0 ? 'text-gray-900' : 'text-gray-700';
+
+                html += `
+                    <div class="flex items-center justify-between p-1.5 rounded text-sm transition-colors ${rankStyle}">
+                        <div class="flex items-center truncate pr-2">
+                            <span class="text-xs text-gray-400 w-4 inline-block text-right mr-1.5">${index + 1}.</span>
+                            <span class="truncate ${nameStyle}">${p.name}</span>
+                            ${badges}
+                        </div>
+                        <span class="font-bold ${ovrColor} ml-2 shrink-0">${ovr}</span>
+                    </div>`;
+            });
+        }
+        
+        html += `</div></div>`;
     });
 
-    const html = `<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">` +
-        sortedKeys.map(pos => `
-        <div class="mb-4 p-4 bg-gray-50 rounded border shadow-sm">
-            <h4 class="font-bold text-gray-700 mb-2 border-b pb-1 flex justify-between">
-                <span>${pos}</span>
-                <span class="text-xs font-normal text-gray-500 self-center">${positions[pos].length} Players</span>
-            </h4>
-            <div class="space-y-1 max-h-60 overflow-y-auto">
-                ${positions[pos]
-                .sort((a, b) => calculateOverall(b, pos) - calculateOverall(a, pos))
-                .map(x => {
-                    const ovr = calculateOverall(x, pos);
-                    // Highlight high overalls
-                    const colorClass = ovr >= 80 ? 'text-green-600 font-bold' : (ovr >= 70 ? 'text-blue-600' : 'text-gray-600');
-                    return `
-                        <div class="flex justify-between text-sm hover:bg-gray-100 p-1 rounded">
-                            <span>${x.name}</span>
-                            <span class="${colorClass}">${ovr}</span>
-                        </div>`;
-                })
-                .join("")}
-            </div>
-        </div>
-    `).join("") + `</div>`;
-
+    html += `</div>`;
     pane.innerHTML = html;
 }
 
@@ -2848,7 +2886,7 @@ function renderSimPlayers(frame) {
             // 💡 FIX: Energy is simply 100 - Fatigue. 
             // (Stamina determines how quickly fatigue is gained/lost in the backend)
             const energyPct = Math.max(0, 100 - Math.round(currentFatigue));
-            
+
             // Find current slot assignment
             let currentSlot = 'Bench';
             for (const side in team.depthChart) {
@@ -3582,15 +3620,22 @@ function renderDepthOrderPane(gameState) {
     const playerToOffSlot = {};
     const playerToDefSlot = {};
 
+    // 💡 FIX: Store slots as an array so players playing multiple positions don't get overwritten
     if (depthChart.offense) {
         Object.entries(depthChart.offense).forEach(([slot, playerId]) => {
-            if (playerId) playerToOffSlot[playerId] = slot;
+            if (playerId) {
+                if (!playerToOffSlot[playerId]) playerToOffSlot[playerId] =[];
+                playerToOffSlot[playerId].push(slot);
+            }
         });
     }
 
     if (depthChart.defense) {
         Object.entries(depthChart.defense).forEach(([slot, playerId]) => {
-            if (playerId) playerToDefSlot[playerId] = slot;
+            if (playerId) {
+                if (!playerToDefSlot[playerId]) playerToDefSlot[playerId] =[];
+                playerToDefSlot[playerId].push(slot);
+            }
         });
     }
 
@@ -3602,56 +3647,56 @@ function renderDepthOrderPane(gameState) {
                     <thead class="bg-gray-800 text-white sticky top-0 z-10">
                         <tr>
                             ${columns.map(col => {
-        const currentSortCol = typeof depthOrderSortCol !== 'undefined' ? depthOrderSortCol : 'overall';
-        const currentSortDir = typeof depthOrderSortDir !== 'undefined' ? depthOrderSortDir : 'desc';
-        const active = currentSortCol === col.key;
-        const arrow = active ? (currentSortDir === 'asc' ? '▲' : '▼') : '';
-        return `<th class="py-2 px-2 text-left whitespace-nowrap cursor-pointer hover:bg-gray-700 select-none" 
+                                const currentSortCol = typeof depthOrderSortCol !== 'undefined' ? depthOrderSortCol : 'overall';
+                                const currentSortDir = typeof depthOrderSortDir !== 'undefined' ? depthOrderSortDir : 'desc';
+                                const active = currentSortCol === col.key;
+                                const arrow = active ? (currentSortDir === 'asc' ? '▲' : '▼') : '';
+                                return `<th class="py-2 px-2 text-left whitespace-nowrap cursor-pointer hover:bg-gray-700 select-none" 
                                             onclick="window.app_handleDepthSort('${col.key}')">
                                             ${col.label} <span class="text-[10px] ml-1">${arrow}</span>
                                         </th>`;
-    }).join('')}
+                            }).join('')}
                         </tr>
                     </thead>
                     <tbody class="divide-y divide-gray-200">
                         ${availableRoster.map(p => {
-        let pos = p.pos || estimateBestPosition(p);
-        if (pos === 'FB') pos = 'RB';
-        if (['ATH', 'K', 'P'].includes(pos)) pos = 'WR'; // 💡 FIX: Removed TE from this list so their ratings display correctly
-        const ovr = calculateOverall(p, pos);
+                            let pos = p.pos || estimateBestPosition(p);
+                            if (pos === 'FB') pos = 'RB';
+                            if (['ATH', 'K', 'P'].includes(pos)) pos = 'WR';
+                            const ovr = calculateOverall(p, pos);
 
-        // Look up slot assignments using efficient reverse maps
-        const offSlot = playerToOffSlot[p.id] || '';
-        const defSlot = playerToDefSlot[p.id] || '';
+                            // 💡 FIX: Join the arrays so players playing multiple slots show "WR1, WR3"
+                            const offSlot = playerToOffSlot[p.id] ? playerToOffSlot[p.id].join(', ') : '';
+                            const defSlot = playerToDefSlot[p.id] ? playerToDefSlot[p.id].join(', ') : '';
 
-        const vals = {
-            height: formatHeight(p.attributes?.physical?.height),
-            weight: p.attributes?.physical?.weight,
-            speed: p.attributes?.physical?.speed,
-            strength: p.attributes?.physical?.strength,
-            agility: p.attributes?.physical?.agility,
-            stamina: p.attributes?.physical?.stamina,
-            playbookIQ: p.attributes?.mental?.playbookIQ,
-            catchingHands: p.attributes?.technical?.catchingHands,
-            throwingAccuracy: p.attributes?.technical?.throwingAccuracy,
-            blocking: p.attributes?.technical?.blocking,
-            tackling: p.attributes?.technical?.tackling,
-            blockShedding: p.attributes?.technical?.blockShedding
-        };
-        return `
+                            const vals = {
+                                height: formatHeight(p.attributes?.physical?.height),
+                                weight: p.attributes?.physical?.weight,
+                                speed: p.attributes?.physical?.speed,
+                                strength: p.attributes?.physical?.strength,
+                                agility: p.attributes?.physical?.agility,
+                                stamina: p.attributes?.physical?.stamina,
+                                playbookIQ: p.attributes?.mental?.playbookIQ,
+                                catchingHands: p.attributes?.technical?.catchingHands,
+                                throwingAccuracy: p.attributes?.technical?.throwingAccuracy,
+                                blocking: p.attributes?.technical?.blocking,
+                                tackling: p.attributes?.technical?.tackling,
+                                blockShedding: p.attributes?.technical?.blockShedding
+                            };
+                            return `
                             <tr class="roster-row-item cursor-move hover:bg-blue-50 ${offSlot || defSlot ? 'bg-amber-50' : ''}" draggable="true" 
                                 data-player-id="${p.id}" data-player-name="${p.name}" data-player-ovr="${ovr}">
                                 <td class="py-1 px-2 font-medium truncate max-w-[120px]" title="${p.name}">
-                                    ${p.name} ${offSlot || defSlot ? ('<span class="ml-2 text-[10px] bg-amber-100 text-amber-800 px-2 py-0.5 rounded font-semibold">' + (offSlot ? offSlot : '') + (offSlot && defSlot ? '/' : '') + (defSlot ? defSlot : '') + '</span>') : ''}
+                                    ${p.name} ${offSlot || defSlot ? ('<span class="ml-2 text-[9px] bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded font-semibold leading-none">' + (offSlot ? offSlot : '') + (offSlot && defSlot ? ' / ' : '') + (defSlot ? defSlot : '') + '</span>') : ''}
                                 </td>
                                 <td class="py-1 px-2">${pos}</td>
-                                <td class="py-1 px-2 font-semibold text-blue-700 text-center font-mono">${offSlot || '-'}</td>
-                                <td class="py-1 px-2 font-semibold text-red-700 text-center font-mono">${defSlot || '-'}</td>
+                                <td class="py-1 px-2 font-semibold text-blue-700 text-center font-mono text-[10px]">${offSlot || '-'}</td>
+                                <td class="py-1 px-2 font-semibold text-red-700 text-center font-mono text-[10px]">${defSlot || '-'}</td>
                                 <td class="py-1 px-2 font-bold ${ovr >= 80 ? 'text-green-600' : ''}">${ovr}</td>
                                 <td class="py-1 px-2 text-gray-600">${p.age}</td>
                                 ${columns.slice(6).map(c => `<td class="py-1 px-2 text-center text-gray-600 border-l border-gray-100">${vals[c.key] ?? '-'}</td>`).join('')}
                             </tr>`;
-    }).join('')}
+                        }).join('')}
                     </tbody>
                 </table>
             </div>
