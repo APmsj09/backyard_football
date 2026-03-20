@@ -1,8 +1,8 @@
 // js/main.js
 import * as Game from './game.js';
 import * as UI from './ui.js';
-import { positionOverallWeights } from './game/player.js';
-import { relationshipLevels } from './data.js';
+import { positionOverallWeights, estimateBestPosition } from './game/player.js';
+import { relationshipLevels, coachPersonalities, offenseFormations, defenseFormations } from './data.js';
 import { formatHeight } from './utils.js';
 
 // --- Global State ---
@@ -24,62 +24,212 @@ function yieldToMain() { return new Promise(resolve => setTimeout(resolve, 0)); 
 // --- CORE HANDLERS ---
 // =============================================================
 
+// =============================================================
+// --- CORE HANDLERS (FRANCHISE SETUP) ---
+// =============================================================
+
 async function startNewGame() {
-    try {
-        UI.showScreen("loading-screen");
-        UI.startLoadingMessages();
-        // Give the UI a moment to render the screen before heavy lifting
-        await new Promise(resolve => setTimeout(resolve, 50));
+    // 1. Generate Form HTML dynamically from data.js
+    const styleOptions = coachPersonalities.map(c => `<option value="${c.type}">${c.type}</option>`).join('');
+    const offOptions = Object.keys(offenseFormations)
+        .filter(k => k !== 'Punt' && k !== 'Punt_Return')
+        .map(k => `<option value="${k}">${offenseFormations[k].name}</option>`).join('');
+    const defOptions = Object.keys(defenseFormations)
+        .filter(k => k !== 'Punt_Return' && k !== 'Punt')
+        .map(k => `<option value="${k}">${defenseFormations[k].name}</option>`).join('');
 
-        // Adapter to convert 0.0-1.0 (Game) to 0-100 (UI)
-        await Game.initializeLeague((progress) => {
-            UI.updateLoadingProgress(Math.round(progress * 100));
-        });
+    // 2. Inject Form into the existing Team Creation Screen
+    const container = document.querySelector('#team-creation-screen > div');
+    container.innerHTML = `
+        <h2 class="text-4xl font-bold mb-2 text-center text-gray-800">Create Your Franchise</h2>
+        <p class="text-sm text-gray-500 mb-6 text-center">Establish your identity. Running your preferred formations gives players a +5 IQ and Consistency boost on the field.</p>
+        
+        <div class="space-y-4 text-sm text-gray-700 text-left">
+            <div class="grid grid-cols-2 gap-4">
+                <div>
+                    <label class="block font-bold mb-1">Coach Name:</label>
+                    <input id="setup-coach-name" type="text" placeholder="e.g. Coach Taylor" class="w-full border border-gray-300 rounded p-2 focus:ring-amber-500 focus:border-amber-500">
+                </div>
+                <div>
+                    <label class="block font-bold mb-1">Coaching Style:</label>
+                    <select id="setup-coach-style" class="w-full border border-gray-300 rounded p-2 focus:ring-amber-500 focus:border-amber-500">
+                        ${styleOptions}
+                    </select>
+                </div>
+            </div>
 
-        UI.stopLoadingMessages();
+            <div class="grid grid-cols-2 gap-4 border-t border-gray-100 pt-4 mt-2">
+                <div>
+                    <label class="block font-bold mb-1">Preferred Offense:</label>
+                    <select id="setup-pref-off" class="w-full border border-gray-300 rounded p-2 focus:ring-amber-500 focus:border-amber-500">
+                        ${offOptions}
+                    </select>
+                </div>
+                <div>
+                    <label class="block font-bold mb-1">Preferred Defense:</label>
+                    <select id="setup-pref-def" class="w-full border border-gray-300 rounded p-2 focus:ring-amber-500 focus:border-amber-500">
+                        ${defOptions}
+                    </select>
+                </div>
+            </div>
 
-        gameState = Game.getGameState();
-        if (!gameState) throw new Error("Failed to get game state.");
+            <div class="border-t border-gray-100 pt-4 mt-2">
+                <label class="block font-bold mb-1">Team Name:</label>
+                <div class="flex gap-2">
+                    <input id="setup-team-name" type="text" placeholder="e.g. The Bulldogs" class="w-full border border-gray-300 rounded p-2 focus:ring-amber-500 focus:border-amber-500">
+                </div>
+            </div>
 
-        UI.renderTeamNameSuggestions(
-            ['Jets', 'Sharks', 'Tigers', 'Bulldogs', 'Panthers', 'Giants'],
-            handleTeamNameSelection
-        );
-        UI.showScreen('team-creation-screen');
-    } catch (error) {
-        console.error("Error starting game:", error);
-        UI.stopLoadingMessages();
-        UI.showModal("Error", `Could not start game: ${error.message}`, null, '', null, 'Close');
-    }
+            <div class="grid grid-cols-2 gap-4">
+                <div>
+                    <label class="block font-bold mb-1">Primary Color:</label>
+                    <input type="color" id="setup-primary-color" value="#2563EB" class="w-full h-10 rounded cursor-pointer border border-gray-300 p-0.5">
+                </div>
+                <div>
+                    <label class="block font-bold mb-1">Secondary Color:</label>
+                    <input type="color" id="setup-secondary-color" value="#FFFFFF" class="w-full h-10 rounded cursor-pointer border border-gray-300 p-0.5">
+                </div>
+            </div>
+        </div>
+
+        <button id="confirm-team-btn" class="mt-8 btn bg-amber-600 hover:bg-amber-700 text-white font-bold py-4 px-8 rounded-xl w-full text-xl shadow-lg hover:shadow-xl transition transform hover:-translate-y-0.5">
+            Start Franchise →
+        </button>
+    `;
+
+    document.getElementById('confirm-team-btn').addEventListener('click', handleConfirmTeam);
+    UI.showScreen('team-creation-screen');
 }
-
 function handleTeamNameSelection(name) {
     const customNameInput = document.getElementById('custom-team-name');
     if (customNameInput) customNameInput.value = name;
 }
 
-function handleConfirmTeam() {
-    const customNameInput = document.getElementById('custom-team-name');
-    const customName = customNameInput ? customNameInput.value.trim() : '';
+async function handleConfirmTeam() {
+    const teamName = document.getElementById('setup-team-name').value.trim();
+    const coachName = document.getElementById('setup-coach-name').value.trim();
+    const coachStyle = document.getElementById('setup-coach-style').value;
+    const prefOff = document.getElementById('setup-pref-off').value;
+    const prefDef = document.getElementById('setup-pref-def').value;
+    const primaryColor = document.getElementById('setup-primary-color').value;
+    const secondaryColor = document.getElementById('setup-secondary-color').value;
 
-    if (customName) {
-        try {
-            Game.createPlayerTeam(customName);
-            Game.setupDraft();
-            gameState = Game.getGameState();
+    if (!teamName || !coachName) {
+        UI.showModal("Missing Info", "<p>Please provide both a Team Name and a Coach Name.</p>");
+        return;
+    }
 
-            UI.renderSelectedPlayerCard(null, gameState);
-            UI.renderDraftScreen(gameState, handlePlayerSelectInDraft, selectedPlayerId, currentSortColumn, currentSortDirection);
-            UI.showScreen('draft-screen');
-            runAIDraftPicks();
-        } catch (error) {
-            console.error("Error confirming team:", error);
-            UI.showModal("Error", `Could not create team: ${error.message}`, null, '', null, 'Close');
+    try {
+        UI.showScreen("loading-screen");
+        UI.startLoadingMessages();
+        await new Promise(resolve => setTimeout(resolve, 50));
+
+        // 1. Generate League (AI Teams and Player Pool)
+        await Game.initializeLeague((progress) => {
+            UI.updateLoadingProgress(Math.round(progress * 100));
+        });
+
+        // 2. Create Player Team with new details
+        Game.createPlayerTeam(teamName, {
+            coachName, coachStyle, prefOff, prefDef, primaryColor, secondaryColor
+        });
+        
+        gameState = Game.getGameState();
+        gameState.draftCompleted = false; // Flag to catch advance week
+
+        // 3. Generate Draft Preview Messages
+        generateDraftPreviewMessage();
+
+        UI.stopLoadingMessages();
+        
+        // 4. Change Advance Week button text to "Go to Draft"
+        const advBtn = document.getElementById('advance-week-btn');
+        if (advBtn) {
+            advBtn.innerHTML = `<span>Start Draft</span><svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 ml-2" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10.293 3.293a1 1 0 011.414 0l6 6a1 1 0 010 1.414l-6 6a1 1 0 01-1.414-1.414L14.586 11H3a1 1 0 110-2h11.586l-4.293-4.293a1 1 0 010-1.414z" clip-rule="evenodd" /></svg>`;
+            advBtn.classList.remove('bg-amber-500', 'hover:bg-amber-600');
+            advBtn.classList.add('bg-green-600', 'hover:bg-green-700', 'animate-pulse');
         }
-    } else {
-        UI.showModal("Team Name Required", "<p>Please enter a team name.</p>");
+
+        // 5. Go directly to Dashboard (Messages Tab)
+        UI.renderDashboard(gameState);
+        UI.switchTab('messages', gameState); 
+        UI.showScreen('dashboard-screen');
+        
+    } catch (error) {
+        console.error("Error starting game:", error);
+        UI.stopLoadingMessages();
+        UI.showModal("Error", `Could not start game: ${error.message}`);
     }
 }
+
+function generateDraftPreviewMessage() {
+    const players = gameState.players.filter(p => !p.teamId);
+    
+    // 1. Group all players by their estimated position
+    const grouped = { QB:[], RB: [], WR: [], TE: [], OL: [], DL: [], LB: [], DB:[] };
+    
+    players.forEach(p => {
+        let pos = estimateBestPosition(p);
+        // Canonical mapping
+        if (['OT', 'OG', 'C'].includes(pos)) pos = 'OL';
+        if (['DE', 'DT', 'NT'].includes(pos)) pos = 'DL';
+        if (['CB', 'S', 'FS', 'SS'].includes(pos)) pos = 'DB';
+        if (pos === 'FB') pos = 'RB';
+        if (['ATH', 'K', 'P'].includes(pos)) pos = 'WR'; // Fallback
+        
+        if (grouped[pos]) grouped[pos].push(p);
+    });
+
+    // 2. Sort each group from Highest OVR to Lowest OVR
+    Object.keys(grouped).forEach(pos => {
+        grouped[pos].sort((a,b) => Game.calculateOverall(b, pos) - Game.calculateOverall(a, pos));
+    });
+
+    const qbs = grouped['QB'];
+    const rbs = grouped['RB'];
+    const wrs = grouped['WR'];
+    const tes = grouped['TE'];
+    const trenches = [...grouped['OL'], ...grouped['DL']];
+    const lbs = grouped['LB'];
+    const dbs = grouped['DB'];
+    
+    // 3. Analyze overall class strength
+    const topPotentials = players.filter(p => ['A', 'B'].includes(p.potential)).length;
+    let strength = "Average";
+    if (topPotentials > 30) strength = "Historically Strong";
+    else if (topPotentials > 20) strength = "Above Average";
+    else if (topPotentials < 10) strength = "Weak";
+
+    // 4. Extract Top Overalls for flavor text
+    const topQBOvr = qbs[0] ? Game.calculateOverall(qbs[0], 'QB') : 'N/A';
+    const topRBOvr = rbs[0] ? Game.calculateOverall(rbs[0], 'RB') : 'N/A';
+
+    // 5. Generate Dynamic Text
+    const msgBody = `Welcome to the league, Coach ${gameState.playerTeam.coach.name}!\n\n` +
+        `Your first task is to build your roster through the inaugural draft. Here is your Scouting Report for the upcoming class:\n\n` +
+        `Overall Class Strength: **${strength}**\n` +
+        `Top Tier Prospects (A/B Potential): **${topPotentials}**\n\n` +
+        `Positional Breakdown:\n` +
+        `- Quarterbacks: The top signal caller is rated at ${topQBOvr} OVR.\n` +
+        `- Running Backs: ${rbs.length > 0 ? `Led by a ${topRBOvr} OVR prospect, there are ${rbs.length} pure runners available.` : 'A completely barren class for traditional tailbacks.'}\n` +
+        `- Receivers & TEs: ${wrs.length + tes.length > 20 ? 'A very deep class for pass catchers. You can afford to wait on these positions.' : 'Thin class, grab a playmaker early.'}\n` +
+        `- The Trenches (OL/DL): ${trenches.length} big bodies available. ${trenches.length > 30 ? 'Plenty of beef to go around.' : 'You might have to reach early to protect your QB.'}\n` +
+        `- Linebackers: ${lbs.length > 8 ? 'A strong tackling group available in the middle rounds.' : 'Not many true linebackers in this pool.'}\n` +
+        `- Secondary (DBs): ${dbs.length > 15 ? 'A deep class of ballhawks and shutdown corners.' : 'Pass defense will be tough to play; grab elite DBs while you can.'}\n\n` +
+        `When you are ready, click "Start Draft" at the top right of your screen to hit the war room!`;
+
+    // Clear generic messages
+    gameState.messages =[];
+    
+    // Welcome Message
+    Game.addMessage("League Office", `Welcome to Backyard GM!`, false, gameState);
+    gameState.messages[0].body = `Coach, we've set up your office. Remember, running your preferred schemes (${gameState.playerTeam.formations.offense} & ${gameState.playerTeam.formations.defense}) will give your players a confidence boost on the field (+5 Playbook IQ and Consistency). Good luck!`;
+
+    // Draft Preview Message
+    Game.addMessage("Scouting Dept", `Inaugural Draft Preview`, false, gameState);
+    gameState.messages[0].body = msgBody; // Latest message is at index 0
+}
+
 
 function handlePlayerSelectInDraft(playerId) {
     if (!gameState) return;
@@ -177,6 +327,16 @@ async function handleDraftEnd() {
         try {
             Game.generateSchedule();
             gameState = Game.getGameState();
+            gameState.draftCompleted = true; // Mark draft as done
+            
+            // Reset the Advance button UI back to normal
+            const advBtn = document.getElementById('advance-week-btn');
+            if (advBtn) {
+                advBtn.innerHTML = `<span>Play Week</span><svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10.293 3.293a1 1 0 011.414 0l6 6a1 1 0 010 1.414l-6 6a1 1 0 01-1.414-1.414L14.586 11H3a1 1 0 110-2h11.586l-4.293-4.293a1 1 0 010-1.414z" clip-rule="evenodd" /></svg>`;
+                advBtn.classList.add('bg-amber-500', 'hover:bg-amber-600');
+                advBtn.classList.remove('bg-green-600', 'hover:bg-green-700', 'animate-pulse');
+            }
+
             UI.renderDashboard(gameState);
             UI.switchTab('my-team', gameState);
             UI.showScreen('dashboard-screen');
@@ -186,7 +346,7 @@ async function handleDraftEnd() {
         }
     };
 
-    UI.showModal("Draft Complete!", "<p>Finalizing rosters... Please wait.</p>", finalizeDraft, "Start Season");
+    UI.showModal("Draft Complete!", "<p>Finalizing rosters and building schedule... Please wait.</p>", finalizeDraft, "Start Season");
 
     const modalConfirmBtn = document.querySelector('#modal-actions button.bg-amber-500');
     if (modalConfirmBtn) {
@@ -196,7 +356,6 @@ async function handleDraftEnd() {
 
     await yieldToMain();
 
-    console.log("Setting depth charts...");
     for (const team of gameState.teams) {
         if (!team) continue;
         try { Game.aiSetDepthChart(team); } catch (error) { console.error(error); }
@@ -360,6 +519,18 @@ function proceedWithAdvanceWeek() {
 async function handleAdvanceWeek() {
     if (!gameState) return;
 
+    // --- CHECK IF INAUGURAL DRAFT IS NEEDED FIRST ---
+    if (gameState.currentWeek === 0 && !gameState.draftCompleted) {
+        Game.setupDraft();
+        gameState = Game.getGameState();
+        selectedPlayerId = null;
+        UI.renderSelectedPlayerCard(null, gameState);
+        UI.renderDraftScreen(gameState, handlePlayerSelectInDraft, selectedPlayerId, currentSortColumn, currentSortDirection);
+        UI.showScreen('draft-screen');
+        runAIDraftPicks();
+        return;
+    }
+
     const rosterObjects = Game.getRosterObjects(gameState.playerTeam);
     const healthyCount = rosterObjects.filter(p => p && p.status?.duration === 0).length;
 
@@ -377,7 +548,6 @@ async function handleAdvanceWeek() {
         }
     }
 
-    // Check for empty Depth Chart slots and warn the player
     const emptySlots = Game.getDepthChartEmptySlots(gameState.playerTeam);
     if (emptySlots.length > 0) {
         UI.showModal("Incomplete Depth Chart", 

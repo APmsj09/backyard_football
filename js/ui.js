@@ -267,7 +267,7 @@ export function setupElements() {
 
 function setupSimTabs() {
     const setupTabGroup = (btn1, btn2, pane1, pane2, colorClass) => {
-        if(!btn1 || !btn2 || !pane1 || !pane2) return;
+        if (!btn1 || !btn2 || !pane1 || !pane2) return;
         const activate = (activeBtn, inactiveBtn, activePane, inactivePane) => {
             activeBtn.className = `flex-1 py-2.5 text-xs font-bold text-white bg-gray-900 border-t-2 border-${colorClass} transition-colors`;
             inactiveBtn.className = `flex-1 py-2.5 text-xs font-bold text-gray-400 hover:text-white border-t-2 border-transparent bg-gray-800 transition-colors`;
@@ -827,7 +827,11 @@ function renderRosterSummary(roster) { // 💡 FIX: Now accepts the roster objec
 export function renderDashboard(gameState) {
     if (!gameState || !gameState.playerTeam || !gameState.teams) {
         console.error("renderDashboard: Invalid gameState provided.");
-        if (elements.dashboardTeamName) elements.dashboardTeamName.textContent = "Error Loading";
+        if (elements.dashboardTeamName) {
+            // Show Team Name and Coach Name
+            const coachName = playerTeam.coach?.name || 'Head Coach';
+            elements.dashboardTeamName.innerHTML = `${playerTeam.name} <span class="text-sm text-gray-400 block mt-1 font-sans font-normal">HC: ${coachName} (${playerTeam.coach?.type || 'Balanced'})</span>`;
+        }
         if (elements.dashboardRecord) elements.dashboardRecord.textContent = "";
         return;
     }
@@ -1145,14 +1149,14 @@ function renderPositionalOveralls() {
     const depthOrder = team.depthOrder || {};
 
     // Build reverse maps for starters to display badges
-    const offStarters = {}; 
+    const offStarters = {};
     const defStarters = {};
-    
+
     if (team.depthChart) {
         if (team.depthChart.offense) {
             Object.entries(team.depthChart.offense).forEach(([slot, pId]) => {
                 if (pId) {
-                    if (!offStarters[pId]) offStarters[pId] =[];
+                    if (!offStarters[pId]) offStarters[pId] = [];
                     offStarters[pId].push(slot);
                 }
             });
@@ -1168,12 +1172,12 @@ function renderPositionalOveralls() {
     }
 
     // 8 Core Positional Buckets
-    const displayOrder =['QB', 'RB', 'WR', 'TE', 'OL', 'DL', 'LB', 'DB'];
-    
+    const displayOrder = ['QB', 'RB', 'WR', 'TE', 'OL', 'DL', 'LB', 'DB'];
+
     let html = `<div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">`;
 
     displayOrder.forEach(pos => {
-        const pIds = depthOrder[pos] ||[];
+        const pIds = depthOrder[pos] || [];
         // Map IDs to actual player objects, filtering out invalid ones
         const playersInBucket = pIds.map(id => roster.find(p => p && p.id === id)).filter(Boolean);
 
@@ -1184,14 +1188,14 @@ function renderPositionalOveralls() {
                 <span class="text-[10px] font-bold bg-gray-700 px-2 py-0.5 rounded-full">${playersInBucket.length} Players</span>
             </div>
             <div class="flex-1 overflow-y-auto max-h-64 p-2 space-y-1">`;
-        
+
         if (playersInBucket.length === 0) {
             html += `<div class="text-xs text-gray-400 italic text-center p-4">No players assigned</div>`;
         } else {
             playersInBucket.forEach((p, index) => {
                 const ovr = calculateOverall(p, pos);
                 const ovrColor = ovr >= 80 ? 'text-green-600' : (ovr >= 70 ? 'text-blue-600' : 'text-gray-600');
-                
+
                 // Build badges for starting roles
                 let badges = '';
                 if (offStarters[p.id]) {
@@ -1204,7 +1208,7 @@ function renderPositionalOveralls() {
                         badges += `<span class="inline-block bg-red-100 text-red-800 text-[9px] px-1 rounded ml-1 font-bold border border-red-200">${slot}</span>`;
                     });
                 }
-                
+
                 // Top ranked player in the bucket gets a slight highlight
                 const rankStyle = index === 0 ? 'font-bold bg-amber-50 border border-amber-200' : 'hover:bg-gray-50 border border-transparent';
                 const nameStyle = index === 0 ? 'text-gray-900' : 'text-gray-700';
@@ -1220,7 +1224,7 @@ function renderPositionalOveralls() {
                     </div>`;
             });
         }
-        
+
         html += `</div></div>`;
     });
 
@@ -1301,7 +1305,7 @@ function handleDepthChartChange(side, slot, newPlayerId) {
     assignPlayerToSlot(gs.playerTeam, newPlayerId, slot, side);
 
     saveGameState();
-    
+
     // Refresh the UI to show the new overalls and updated bench
     renderDepthChartTab(gs);
 }
@@ -1363,7 +1367,7 @@ function renderVisualFormationSlots(
         slotEl.className = 'player-slot-visual';
         slotEl.style.left = `${leftPercent}%`;
         slotEl.style.top = `${topPercent}%`;
-        
+
         // Enable proper drag and drop
         slotEl.dataset.positionSlot = slotId;
         slotEl.dataset.side = side;
@@ -1408,7 +1412,7 @@ function renderVisualFormationSlots(
         const displayOvr = player ? overall : (bestCandidate ? Math.round(bestCandidateOvr) : '-');
         const fillPercent = (displayOvr && displayOvr !== '-') ? Math.max(0, Math.min(100, Math.round((displayOvr / 100) * 100))) : 0;
 
-         const colorInfo = colorForOverall(displayOvr);
+        const colorInfo = colorForOverall(displayOvr);
         const fgStyle = `color: ${colorInfo.fg};`;
 
         // compact display: show position and short name inside the circular badge
@@ -2657,7 +2661,7 @@ function initLivePlayerStats(gameResult) {
     const homeRoster = getUIRosterObjects(gameResult.homeTeam || {});
     const awayRoster = getUIRosterObjects(gameResult.awayTeam || {});
     const all = [...homeRoster, ...awayRoster];
-    
+
     all.forEach(p => {
         if (!p || !p.id) return;
         livePlayerStats.set(p.id, {
@@ -2667,10 +2671,10 @@ function initLivePlayerStats(gameResult) {
             returnYards: 0,
             touchdowns: 0, interceptions: 0, fumbles: 0
         });
-        
+
         // Cache lowercase names for ultra-fast O(1) lookup during log parsing
         playerNameIdMap.set(p.name.toLowerCase(), p.id);
-        
+
         // Also cache common short variations (e.g. "Reese 'Slinger' Walker" -> "Reese Walker")
         const noNickname = p.name.replace(/'.*?'\s/g, '').toLowerCase();
         if (noNickname !== p.name.toLowerCase()) {
@@ -2701,7 +2705,7 @@ function updateStatsFromLogEntry(entry) {
         if (!livePlayerStats.has(pid)) {
             livePlayerStats.set(pid, {
                 passAttempts: 0, passCompletions: 0, passYards: 0, interceptionsThrown: 0,
-                receptions: 0, recYards: 0, drops: 0, rushAttempts: 0, rushYards: 0, 
+                receptions: 0, recYards: 0, drops: 0, rushAttempts: 0, rushYards: 0,
                 touchdowns: 0, interceptions: 0, fumblesLost: 0, tackles: 0, sacks: 0
             });
         }
@@ -2731,7 +2735,7 @@ function updateStatsFromLogEntry(entry) {
     if (entry.includes('Gain:') || entry.includes('yardage:')) {
         const idMatch = entry.match(/(?:🎉|✋|💨|🏈) (.*?) (?:at|jars|scores|tackled|steps)/);
         const yardMatch = entry.match(/(?:Gain:|Yardage:)\s*(-?\d+\.?\d*)y/i);
-        
+
         const id = findIdByName(idMatch ? idMatch[1] : null);
         const yards = yardMatch ? Math.round(parseFloat(yardMatch[1])) : 0;
 
@@ -2831,15 +2835,15 @@ function renderLiveStatsLive() {
                 `;
             }).join('');
         }
-        
+
         html += `</div>`;
         return html;
     };
 
     const awayEl = document.getElementById('sim-stats-away');
     const homeEl = document.getElementById('sim-stats-home');
-    if(awayEl) awayEl.innerHTML = getTopPerformersHtml(away, aTotals);
-    if(homeEl) homeEl.innerHTML = getTopPerformersHtml(home, hTotals);
+    if (awayEl) awayEl.innerHTML = getTopPerformersHtml(away, aTotals);
+    if (homeEl) homeEl.innerHTML = getTopPerformersHtml(home, hTotals);
 }
 
 function renderSimPlayers(frame) {
@@ -2863,7 +2867,7 @@ function renderSimPlayers(frame) {
         // 💡 FIX: Identify who is ACTUALLY on the field using the physics frame
         const activeOnFieldIds = new Set();
         const fatigueMap = new Map();
-        
+
         if (frame && frame.players) {
             frame.players.forEach(pState => {
                 activeOnFieldIds.add(pState.id);
@@ -2874,7 +2878,7 @@ function renderSimPlayers(frame) {
         }
 
         const roster = Game.getUIRosterObjects(team);
-        
+
         // Split roster based on the Set we just created from the frame
         const starters = roster.filter(p => p && activeOnFieldIds.has(p.id));
         const bench = roster.filter(p => p && !activeOnFieldIds.has(p.id));
@@ -2882,7 +2886,7 @@ function renderSimPlayers(frame) {
         const buildRow = (p, isStarter) => {
             const stamina = p.attributes?.physical?.stamina || 50;
             const currentFatigue = fatigueMap.has(p.id) ? fatigueMap.get(p.id) : (p.fatigue || 0);
-            
+
             // 💡 FIX: Energy is simply 100 - Fatigue. 
             // (Stamina determines how quickly fatigue is gained/lost in the backend)
             const energyPct = Math.max(0, 100 - Math.round(currentFatigue));
@@ -2918,9 +2922,9 @@ function renderSimPlayers(frame) {
                     </div>
                     <div class="shrink-0 pl-1">
                         ${isStarter
-                            ? `<button data-player-id="${p.id}" class="sub-out-btn opacity-40 hover:opacity-100 bg-red-900/20 hover:bg-red-600 text-red-400 hover:text-white text-[9px] font-bold p-1 rounded border border-red-900 transition">OUT</button>`
-                            : `<button data-player-id="${p.id}" class="sub-in-btn bg-green-900/40 hover:bg-green-600 text-green-400 hover:text-white text-[9px] font-bold p-1 rounded border border-green-900 transition">SUB</button>`
-                        }
+                    ? `<button data-player-id="${p.id}" class="sub-out-btn opacity-40 hover:opacity-100 bg-red-900/20 hover:bg-red-600 text-red-400 hover:text-white text-[9px] font-bold p-1 rounded border border-red-900 transition">OUT</button>`
+                    : `<button data-player-id="${p.id}" class="sub-in-btn bg-green-900/40 hover:bg-green-600 text-green-400 hover:text-white text-[9px] font-bold p-1 rounded border border-green-900 transition">SUB</button>`
+                }
                     </div>
                 </div>
             `;
@@ -2929,7 +2933,7 @@ function renderSimPlayers(frame) {
         let html = '';
         html += `<div class="bg-black/20 py-1 px-3 text-[9px] font-black text-amber-500/80 uppercase tracking-widest border-b border-gray-800">Active Personnel (${starters.length})</div>`;
         starters.forEach(s => html += buildRow(s, true));
-        
+
         html += `<div class="bg-black/20 py-1 px-3 text-[9px] font-black text-gray-500 uppercase tracking-widest border-y border-gray-800 mt-2">Available Bench (${bench.length})</div>`;
         bench.forEach(b => html += buildRow(b, false));
 
@@ -3053,7 +3057,7 @@ function animateQBShout(frame) {
 /** Prepares the in-game strategy tab controls */
 function initSimStrategyTab() {
     const gs = Game.getGameState();
-    if(!gs || !gs.playerTeam) return;
+    if (!gs || !gs.playerTeam) return;
 
     const offSelect = document.getElementById('sim-offense-formation');
     const defSelect = document.getElementById('sim-defense-formation');
@@ -3067,27 +3071,27 @@ function initSimStrategyTab() {
         if (textEl) textEl.textContent = `Personnel: ${personnelText}`;
     };
 
-    if(offSelect) {
+    if (offSelect) {
         offSelect.innerHTML = Object.entries(offenseFormations)
             .filter(([k]) => k !== 'Punt' && k !== 'Punt_Return')
-            .map(([k,v]) => `<option value="${k}" ${gs.playerTeam.formations.offense === k ? 'selected' : ''}>${v.name}</option>`)
+            .map(([k, v]) => `<option value="${k}" ${gs.playerTeam.formations.offense === k ? 'selected' : ''}>${v.name}</option>`)
             .join('');
-        
+
         updatePersonnelText('offense', gs.playerTeam.formations.offense);
-        
+
         offSelect.onchange = (e) => {
             Game.changeFormationSmart('offense', e.target.value);
             updatePersonnelText('offense', e.target.value);
             Game.saveGameState();
         };
     }
-    
-    if(defSelect) {
+
+    if (defSelect) {
         defSelect.innerHTML = Object.entries(defenseFormations)
             .filter(([k]) => k !== 'Punt' && k !== 'Punt_Return')
-            .map(([k,v]) => `<option value="${k}" ${gs.playerTeam.formations.defense === k ? 'selected' : ''}>${v.name}</option>`)
+            .map(([k, v]) => `<option value="${k}" ${gs.playerTeam.formations.defense === k ? 'selected' : ''}>${v.name}</option>`)
             .join('');
-            
+
         updatePersonnelText('defense', gs.playerTeam.formations.defense);
 
         defSelect.onchange = (e) => {
@@ -3099,12 +3103,12 @@ function initSimStrategyTab() {
 
     const slider = document.getElementById('sim-auto-sub-slider');
     const valDisplay = document.getElementById('sim-auto-sub-val');
-    if(slider && valDisplay && activeLiveGame) {
+    if (slider && valDisplay && activeLiveGame) {
         slider.value = activeLiveGame.autoSubThreshold || 65;
         valDisplay.textContent = slider.value + '%';
         slider.oninput = (e) => {
             valDisplay.textContent = e.target.value + '%';
-            if(activeLiveGame) activeLiveGame.autoSubThreshold = parseInt(e.target.value, 10);
+            if (activeLiveGame) activeLiveGame.autoSubThreshold = parseInt(e.target.value, 10);
         };
     }
 }
@@ -3126,7 +3130,7 @@ export function startLiveGameLoop(initialGameState, onComplete) {
     currentLiveGameResult = {
         homeTeam: activeLiveGame.homeTeam,
         awayTeam: activeLiveGame.awayTeam,
-        visualizationFrames:[] // Stub for visualizer
+        visualizationFrames: [] // Stub for visualizer
     };
 
     liveGameCallback = onComplete;
@@ -3148,7 +3152,7 @@ export function startLiveGameLoop(initialGameState, onComplete) {
 
     updateLiveScoreboard();
     initSimStrategyTab(); // 💡 Initialize real-time strategy controls
-    
+
     // 💡 Initialize the live stats map before flushing the first logs
     initLivePlayerStats(currentLiveGameResult);
 
@@ -3208,12 +3212,12 @@ function runLiveGameStep() {
 
     // Animate the frames we just calculated
     if (stepResult.visualizationFrames && stepResult.visualizationFrames.length > 0) {
-        
+
         // 💡 FIX: Pause at the start of the play so the user can see the formation
         setTimeout(() => {
             playVisualization(stepResult.visualizationFrames, () => {
-                flushLiveLogs(); 
-                
+                flushLiveLogs();
+
                 // 💡 UPDATE SCORE: Now that the animation is over, show the NEW scores
                 elements.simHomeScore.textContent = activeLiveGame.homeScore;
                 elements.simAwayScore.textContent = activeLiveGame.awayScore;
@@ -3260,8 +3264,8 @@ function flushLiveLogs(targetIndex) {
             p.className = "text-sm border-b border-gray-700/50 pb-1.5 mb-1.5 animate-fadeIn";
             p.textContent = entry;
             fragment.appendChild(p);
-            
-            if (typeof updateStatsFromLogEntry === 'function') updateStatsFromLogEntry(entry); 
+
+            if (typeof updateStatsFromLogEntry === 'function') updateStatsFromLogEntry(entry);
         });
 
         // Flashing Broadcast Overlay Check
@@ -3289,7 +3293,7 @@ function showPlayOverlay(text) {
         let cleanText = text.replace(/\[Tick \d+\] /g, '');
         overlay.textContent = cleanText;
         overlay.style.opacity = '1';
-        
+
         // Clear previous timeout so it doesn't blink out early if plays chain
         if (overlay.timeoutId) clearTimeout(overlay.timeoutId);
         overlay.timeoutId = setTimeout(() => { overlay.style.opacity = '0'; }, 3000);
@@ -3313,19 +3317,19 @@ function playVisualization(frames, onComplete) {
         const frame = frames[index];
         if (frame) {
             drawFieldVisualization(frame);
-            
+
             // 💡 NEW: Sync logs to exactly what the physics engine saw at this specific frame!
             if (frame.logIndex !== undefined) {
                 flushLiveLogs(frame.logIndex);
             }
         }
-        
+
         index++;
         if (index >= frames.length) {
             if (onComplete) onComplete();
             return;
         }
-        
+
         const currentDelay = isSkipping ? 5 : liveGameSpeed;
         liveGameInterval = setTimeout(runNextFrame, currentDelay);
     };
@@ -3358,10 +3362,10 @@ function finishLiveGame() {
     // Stop all animations and timeouts
     if (liveGameInterval) clearTimeout(liveGameInterval);
     if (huddleTimeout) clearTimeout(huddleTimeout);
-    
+
     // Update Scoreboard to show "FINAL"
     updateLiveScoreboard();
-    
+
     console.log("Game Over. Finalizing results...");
 
     // Call the final result callback (returns to dashboard)
@@ -3512,7 +3516,7 @@ function renderDepthOrderPane(gameState) {
     // Get full roster objects
     let roster = getUIRosterObjects(team);
     const depthOrder = team.depthOrder || {};
-    const displayOrder =['QB', 'RB', 'WR', 'TE', 'OL', 'DL', 'LB', 'DB']; // Added TE here
+    const displayOrder = ['QB', 'RB', 'WR', 'TE', 'OL', 'DL', 'LB', 'DB']; // Added TE here
 
     // --- 1. Render Tabs (Top) ---
     // Uses inline onclick to trigger re-render with new active tab
@@ -3624,7 +3628,7 @@ function renderDepthOrderPane(gameState) {
     if (depthChart.offense) {
         Object.entries(depthChart.offense).forEach(([slot, playerId]) => {
             if (playerId) {
-                if (!playerToOffSlot[playerId]) playerToOffSlot[playerId] =[];
+                if (!playerToOffSlot[playerId]) playerToOffSlot[playerId] = [];
                 playerToOffSlot[playerId].push(slot);
             }
         });
@@ -3633,7 +3637,7 @@ function renderDepthOrderPane(gameState) {
     if (depthChart.defense) {
         Object.entries(depthChart.defense).forEach(([slot, playerId]) => {
             if (playerId) {
-                if (!playerToDefSlot[playerId]) playerToDefSlot[playerId] =[];
+                if (!playerToDefSlot[playerId]) playerToDefSlot[playerId] = [];
                 playerToDefSlot[playerId].push(slot);
             }
         });
@@ -3647,43 +3651,43 @@ function renderDepthOrderPane(gameState) {
                     <thead class="bg-gray-800 text-white sticky top-0 z-10">
                         <tr>
                             ${columns.map(col => {
-                                const currentSortCol = typeof depthOrderSortCol !== 'undefined' ? depthOrderSortCol : 'overall';
-                                const currentSortDir = typeof depthOrderSortDir !== 'undefined' ? depthOrderSortDir : 'desc';
-                                const active = currentSortCol === col.key;
-                                const arrow = active ? (currentSortDir === 'asc' ? '▲' : '▼') : '';
-                                return `<th class="py-2 px-2 text-left whitespace-nowrap cursor-pointer hover:bg-gray-700 select-none" 
+        const currentSortCol = typeof depthOrderSortCol !== 'undefined' ? depthOrderSortCol : 'overall';
+        const currentSortDir = typeof depthOrderSortDir !== 'undefined' ? depthOrderSortDir : 'desc';
+        const active = currentSortCol === col.key;
+        const arrow = active ? (currentSortDir === 'asc' ? '▲' : '▼') : '';
+        return `<th class="py-2 px-2 text-left whitespace-nowrap cursor-pointer hover:bg-gray-700 select-none" 
                                             onclick="window.app_handleDepthSort('${col.key}')">
                                             ${col.label} <span class="text-[10px] ml-1">${arrow}</span>
                                         </th>`;
-                            }).join('')}
+    }).join('')}
                         </tr>
                     </thead>
                     <tbody class="divide-y divide-gray-200">
                         ${availableRoster.map(p => {
-                            let pos = p.pos || estimateBestPosition(p);
-                            if (pos === 'FB') pos = 'RB';
-                            if (['ATH', 'K', 'P'].includes(pos)) pos = 'WR';
-                            const ovr = calculateOverall(p, pos);
+        let pos = p.pos || estimateBestPosition(p);
+        if (pos === 'FB') pos = 'RB';
+        if (['ATH', 'K', 'P'].includes(pos)) pos = 'WR';
+        const ovr = calculateOverall(p, pos);
 
-                            // 💡 FIX: Join the arrays so players playing multiple slots show "WR1, WR3"
-                            const offSlot = playerToOffSlot[p.id] ? playerToOffSlot[p.id].join(', ') : '';
-                            const defSlot = playerToDefSlot[p.id] ? playerToDefSlot[p.id].join(', ') : '';
+        // 💡 FIX: Join the arrays so players playing multiple slots show "WR1, WR3"
+        const offSlot = playerToOffSlot[p.id] ? playerToOffSlot[p.id].join(', ') : '';
+        const defSlot = playerToDefSlot[p.id] ? playerToDefSlot[p.id].join(', ') : '';
 
-                            const vals = {
-                                height: formatHeight(p.attributes?.physical?.height),
-                                weight: p.attributes?.physical?.weight,
-                                speed: p.attributes?.physical?.speed,
-                                strength: p.attributes?.physical?.strength,
-                                agility: p.attributes?.physical?.agility,
-                                stamina: p.attributes?.physical?.stamina,
-                                playbookIQ: p.attributes?.mental?.playbookIQ,
-                                catchingHands: p.attributes?.technical?.catchingHands,
-                                throwingAccuracy: p.attributes?.technical?.throwingAccuracy,
-                                blocking: p.attributes?.technical?.blocking,
-                                tackling: p.attributes?.technical?.tackling,
-                                blockShedding: p.attributes?.technical?.blockShedding
-                            };
-                            return `
+        const vals = {
+            height: formatHeight(p.attributes?.physical?.height),
+            weight: p.attributes?.physical?.weight,
+            speed: p.attributes?.physical?.speed,
+            strength: p.attributes?.physical?.strength,
+            agility: p.attributes?.physical?.agility,
+            stamina: p.attributes?.physical?.stamina,
+            playbookIQ: p.attributes?.mental?.playbookIQ,
+            catchingHands: p.attributes?.technical?.catchingHands,
+            throwingAccuracy: p.attributes?.technical?.throwingAccuracy,
+            blocking: p.attributes?.technical?.blocking,
+            tackling: p.attributes?.technical?.tackling,
+            blockShedding: p.attributes?.technical?.blockShedding
+        };
+        return `
                             <tr class="roster-row-item cursor-move hover:bg-blue-50 ${offSlot || defSlot ? 'bg-amber-50' : ''}" draggable="true" 
                                 data-player-id="${p.id}" data-player-name="${p.name}" data-player-ovr="${ovr}">
                                 <td class="py-1 px-2 font-medium truncate max-w-[120px]" title="${p.name}">
@@ -3696,7 +3700,7 @@ function renderDepthOrderPane(gameState) {
                                 <td class="py-1 px-2 text-gray-600">${p.age}</td>
                                 ${columns.slice(6).map(c => `<td class="py-1 px-2 text-center text-gray-600 border-l border-gray-100">${vals[c.key] ?? '-'}</td>`).join('')}
                             </tr>`;
-                        }).join('')}
+    }).join('')}
                     </tbody>
                 </table>
             </div>
@@ -3789,7 +3793,7 @@ function setupDepthTabs() {
 function setupDepthOrderDragEvents() {
     const pane = document.getElementById('depth-order-container');
     if (!pane) return;
-    
+
     // Attach the generic 'click' listener on the parent pane ONCE
     if (pane.dataset.depthOrderEventsAttached !== '1') {
         pane.addEventListener('click', (e) => {
@@ -4019,7 +4023,7 @@ export function applyDepthOrderToChart() {
 
     // 4. Re-render the specific pane we are looking at
     renderDepthOrderPane(gs);
-    
+
     // 5. Force the visual field to update so changes reflect instantly!
     document.dispatchEvent(new CustomEvent('refresh-ui'));
 }

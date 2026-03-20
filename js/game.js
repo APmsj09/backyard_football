@@ -810,11 +810,13 @@ function getUniqueColor() {
 /**
  * Creates the player-controlled team and adds it to the game state.
  */
-function createPlayerTeam(teamName) {
+export function createPlayerTeam(teamName, options = {}) {
     if (!game || !game.teams || !game.divisions || !divisionNames) {
         console.error("Cannot create player team: Game not initialized properly.");
         return;
     }
+
+    const { coachName, coachStyle, prefOff, prefDef, primaryColor, secondaryColor } = options;
 
     const finalTeamName = teamName.toLowerCase().startsWith("the ")
         ? teamName
@@ -824,35 +826,33 @@ function createPlayerTeam(teamName) {
     const div1Count = game.divisions[divisionNames[1]]?.length || 0;
     const division = div0Count <= div1Count ? divisionNames[0] : divisionNames[1];
 
-    // 💡 FIX: Updated to match data.js keys
-    let defaultOffense = 'Balanced';
-    let defaultDefense = '3-1-3';
+    // Find base coach and clone it to customize
+    let baseCoach = coachPersonalities.find(c => c.type === coachStyle) || coachPersonalities[0];
+    const customCoach = deepClone(baseCoach);
+    customCoach.name = coachName || 'Coach';
+    if (prefOff) customCoach.preferredOffense = prefOff;
+    if (prefDef) customCoach.preferredDefense = prefDef;
 
-    // Safety / fallback in case data.js formations are missing or keys changed
-    if (!offenseFormations[defaultOffense]) {
-        console.warn(`Warning: Formation ${defaultOffense} not found in data.js; falling back to first available offense formation.`);
-        defaultOffense = Object.keys(offenseFormations)[0] || defaultOffense;
-    }
-    if (!defenseFormations[defaultDefense]) {
-        console.warn(`Warning: Formation ${defaultDefense} not found in data.js; falling back to first available defense formation.`);
-        defaultDefense = Object.keys(defenseFormations)[0] || defaultDefense;
-    }
+    // Safety / fallback in case data.js formations are missing
+    let defaultOffense = prefOff || 'Balanced';
+    let defaultDefense = prefDef || '3-1-3';
+    
+    if (!offenseFormations[defaultOffense]) defaultOffense = Object.keys(offenseFormations)[0];
+    if (!defenseFormations[defaultDefense]) defaultDefense = Object.keys(defenseFormations)[0];
 
     const defaultOffenseSlots = offenseFormations[defaultOffense]?.slots || [];
-    const defaultDefenseSlots = defenseFormations[defaultDefense]?.slots || [];
-
-    const colorSet = getUniqueColor();
+    const defaultDefenseSlots = defenseFormations[defaultDefense]?.slots ||[];
 
     const playerTeam = {
         id: crypto.randomUUID(),
         name: finalTeamName,
-        roster: [],
-        coach: getRandom(coachPersonalities),
+        roster:[],
+        coach: customCoach,
         division,
         wins: 0,
         losses: 0,
-        primaryColor: colorSet.primary,
-        secondaryColor: colorSet.secondary,
+        primaryColor: primaryColor || '#2563EB',
+        secondaryColor: secondaryColor || '#FFFFFF',
         formations: { offense: defaultOffense, defense: defaultDefense },
         depthChart: {
             offense: Object.fromEntries(defaultOffenseSlots.map(slot => [slot, null])),
@@ -866,8 +866,6 @@ function createPlayerTeam(teamName) {
     if (!Array.isArray(game.divisions[division])) game.divisions[division] = [];
     game.divisions[division].push(playerTeam.id);
     game.playerTeam = playerTeam;
-
-    addMessage("Team Created!", `Welcome to the league, ${finalTeamName}! It's time to build your team in the draft.`);
 }
 
 
@@ -1837,26 +1835,32 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
             // RPG Attributes
             const fatigueRatio = player.fatigue / (player.attributes?.physical?.stamina || 50);
             const fatigueMod = Math.max(0.3, 1.0 - fatigueRatio);
-            const playerIQ = player.attributes?.mental?.playbookIQ || 50;
+            
+            // 💡 NEW: The "Scheme Fit" Boost
+            const isPreferredOffense = offense.formations.offense === offense.coach?.preferredOffense;
+            const isPreferredDefense = defense.formations.defense === defense.coach?.preferredDefense;
+            let schemeBoost = 0;
+            
+            if (isOffense && isPreferredOffense) schemeBoost = 5;
+            else if (!isOffense && isPreferredDefense) schemeBoost = 5;
 
-            // 💡 NEW: Snap Reaction Logic
+            // Apply the boost directly to the mental attributes for this play
+            const playerIQ = Math.min(99, (player.attributes?.mental?.playbookIQ || 50) + schemeBoost);
+            const consistency = Math.min(99, (player.attributes?.mental?.consistency || 50) + schemeBoost);
+
+            // 💡 NEW: Snap Reaction Logic (Now uses the boosted playerIQ)
             let reactionTicks = 0;
-            // The Center (OL2) and QB know the snap count. Everyone else has a delay.
             if (slot !== 'QB1' && slot !== 'OL2') {
-                // Base delay: 99 IQ = ~1 tick (0.05s), 50 IQ = ~5 ticks (0.25s), 0 IQ = ~10 ticks (0.5s)
                 reactionTicks = Math.max(1, 10 - Math.floor(playerIQ / 10));
-                // Add minor random variance (0 to 2 ticks)
                 reactionTicks += Math.floor(Math.random() * 3);
-                // Defense reacts to the offense moving, inherent 2-tick penalty (0.1s)
                 if (!isOffense) reactionTicks += 2;
             }
+            
             const speed = player.attributes?.physical?.speed || 50;
             const agility = player.attributes?.physical?.agility || 50;
             const strength = player.attributes?.physical?.strength || 50;
             const weight = player.attributes?.physical?.weight || 150;
             const height = player.attributes?.physical?.height || 68;
-            const iq = player.attributes?.mental?.playbookIQ || 50;
-            const consistency = player.attributes?.mental?.consistency || 50;
             const toughness = player.attributes?.mental?.toughness || 50;
             const catching = player.attributes?.technical?.catchingHands || 50;
             const tackling = player.attributes?.defense?.tackling || 50;
@@ -1873,7 +1877,6 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
                 teamId: team.id,
                 snapReactionTimer: reactionTicks,
 
-                // 💡 FIX 1: RESTORE COLORS
                 primaryColor: team.primaryColor,
                 secondaryColor: team.secondaryColor,
 
@@ -1890,8 +1893,8 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
                 str: strength,
                 wgt: weight,
                 hgt: height,
-                iq: iq,
-                cons: consistency,
+                iq: playerIQ,         // <--- SCHEME BOOST APPLIED
+                cons: consistency,    // <--- SCHEME BOOST APPLIED
                 tgh: toughness,
                 ctch: catching,
                 tkl: tackling,
@@ -1900,14 +1903,14 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
                 acc: accuracy,
                 cov: coverage,
 
-                // --- LEGACY COMPATIBILITY (For your existing functions) ---
+                // --- LEGACY COMPATIBILITY ---
                 speed: speed,
                 agility: agility,
                 strength: strength,
                 weight: weight,
                 height: height,
-                playbookIQ: iq,
-                consistency: consistency,
+                playbookIQ: playerIQ, // <--- SCHEME BOOST APPLIED
+                consistency: consistency, // <--- SCHEME BOOST APPLIED
                 toughness: toughness,
                 catchingHands: catching,
                 tackling: tackling,
@@ -1932,7 +1935,7 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
                 dropbackTargetY: dropbackTargetY,
 
                 // Physics State
-                vx: 0, vy: 0, vz: 0, // Ensure Z exists
+                vx: 0, vy: 0, vz: 0,
                 isEngaged: false, engagedWith: null,
                 isBlocked: false, blockedBy: null,
                 hasBall: false, isBallCarrier: false,
