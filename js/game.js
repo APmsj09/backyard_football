@@ -3560,17 +3560,18 @@ function resolveBattle(powerA, powerB, battle) {
     // 1. Calculate base difference
     const BASE_DIFF = powerA - powerB;
 
-    // 2. Add controlled randomness
-    const roll = getRandomInt(-15, 15);
+    // 2. Add controlled randomness (reduced variance)
+    const roll = getRandomInt(-10, 10);
 
-    // 3. Calculate the "push" for this tick
-    const finalDiff = (BASE_DIFF + roll) / 100;
+    // 3. 💡 NEW: Higher divider (350 instead of 100) makes the "push" much slower
+    const finalDiff = (BASE_DIFF + roll) / 350;
 
     // 4. Apply the "push" to the battle score
     battle.battleScore += finalDiff;
 
-    // 5. Define the "reasonable numbers" (Win Threshold)
-    const WIN_SCORE = 6;
+    // 5. 💡 NEW: Higher Win Threshold (15 instead of 6)
+    // This requires more sustained effort to win a block.
+    const WIN_SCORE = 15;
 
     // 6. Check for a winner
     if (battle.battleScore > WIN_SCORE) {
@@ -3581,7 +3582,6 @@ function resolveBattle(powerA, powerB, battle) {
         battle.status = 'ongoing';
     }
 
-    // 7. 💡 NEW: Return the push amount
     return finalDiff;
 }
 
@@ -3638,6 +3638,21 @@ function resolveOngoingBlocks(playState, gameLog, offenseStates = [], defenseSta
         // 3. Stats Calculation (Standard Block Battle)
         const blockPower = (((blocker.blocking || 50) * 1.25) + (blocker.strength || 50)) * blocker.fatigueModifier;
         let shedPower = ((defender.blockShedding || 50) + (defender.strength || 50)) * defender.fatigueModifier;
+
+        const ticksInBlock = playState.tick - battle.startTick;
+        if (ticksInBlock < 30) {
+            blockPower *= 1.25;
+        }
+
+        // 💡 NEW: PASS RUSH FATIGUE
+        // As the block lasts longer, the Blocker gets tired of holding on.
+        // After 3 seconds (60 ticks), the Blocker starts losing 1% power per tick.
+        if (ticksInBlock > 60) {
+            const fatiguePenalty = 1.0 - ((ticksInBlock - 60) * 0.01);
+            blockPower *= Math.max(0.5, fatiguePenalty);
+        }
+
+
         // 💡 PASS RUSHER TECHNIQUE MOVES
         const isPassRush = defender.assignment?.includes('rush') || defender.assignment?.includes('blitz');
 
@@ -3664,7 +3679,7 @@ function resolveOngoingBlocks(playState, gameLog, offenseStates = [], defenseSta
 
                     // --- Swim Move ---
                     // 💡 FIX: Probability adjusted from 15% to 1.5% per tick to prevent instant teleporting
-                    if (escapeScore > 115 && Math.random() < 0.015) {
+                    if (escapeScore > 120 && Math.random() < 0.005) { 
                         const speed = 0.6;
                         defender.x += dirX * speed;
                         defender.y += dirY * speed;
@@ -3675,7 +3690,7 @@ function resolveOngoingBlocks(playState, gameLog, offenseStates = [], defenseSta
                     }
                     // --- Spin Move ---
                     // 💡 FIX: Probability adjusted from 10% to 1.0% per tick
-                    else if (escapeScore > 125 && Math.random() < 0.01) {
+                    else if (escapeScore > 130 && Math.random() < 0.003) {
                         const bx = blocker.x - defender.x;
                         const by = blocker.y - defender.y;
 
