@@ -2732,6 +2732,17 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                 }
             }
 
+            // 💡 3. PLACE THE NEW QB LOGIC HERE!
+            // This catches the QB as soon as he hands off and tells him to move
+            if (pState.role === 'QB' && playState.handoffOccurred) {
+                const driftSide = pState.initialX > CENTER_X ? 1 : -1;
+                pState.targetX = pState.initialX + (driftSide * 2);
+                pState.targetY = playState.lineOfScrimmage - 5.0;
+                pState.action = 'idle';
+                pState.ghostTicks = 20; // Needs to be handled in resolvePlayerCollisions
+                return; // Stop here so he doesn't try to do 'qb_setup' logic
+            }
+
             // STANDARD OFFENSIVE ACTIONS
             if (!pState.action) {
                 pState.action = 'idle';
@@ -3679,7 +3690,7 @@ function resolveOngoingBlocks(playState, gameLog, offenseStates = [], defenseSta
 
                     // --- Swim Move ---
                     // 💡 FIX: Probability adjusted from 15% to 1.5% per tick to prevent instant teleporting
-                    if (escapeScore > 120 && Math.random() < 0.005) { 
+                    if (escapeScore > 120 && Math.random() < 0.005) {
                         const speed = 0.6;
                         defender.x += dirX * speed;
                         defender.y += dirY * speed;
@@ -4204,13 +4215,21 @@ function updateQBDecision(qbState, offenseStates, defenseStates, playState, offe
                 .filter(v => v !== null)
                 .sort((a, b) => b.score - a.score)[0];
 
+            // 1. If someone is even SLIGHTLY open, chuck it deep
             if (desperation && desperation.score > -20) {
                 targetPlayerState = desperation.info.state;
                 actionTaken = "Desperation Throw";
                 decisionMade = true;
-            } else {
-                reason = "Time Expired";
-                decisionMade = true;
+            }
+            // 2. Otherwise, tuck the ball and run (Scramble)
+            else {
+                qbState.action = 'qb_scramble';
+                qbState.isBallCarrier = true;
+                if (gameLog && !qbState.hasLoggedPanic) {
+                    gameLog.push(`🏃 ${qbState.name} can't find anyone and takes off!`);
+                    qbState.hasLoggedPanic = true;
+                }
+                return; // 💡 CRITICAL: Return here so we don't execute any "Throw" logic below
             }
         }
     }
@@ -4458,8 +4477,8 @@ function executeThrow(qbState, target, strength, accuracy, playState, gameLog, a
     let baseZ = 0;
     // 💡 FIX: Give passes a slight upward push so they clear the D-Line helmets
     if (passType === 'bullet') baseZ = 0.5; // Flat rope, but pushes upward initially
-    else if (passType === 'touch') baseZ = 1.2; // Moderate arc
-    else baseZ = 3.0; // High lob
+    else if (passType === 'touch') baseZ = 2.5; // Moderate arc
+    baseZ = 3.5 + (throwDistance / 15);  // High lob
 
     const vz = (baseZ + (4.9 * t * t)) / t;
 
@@ -4953,7 +4972,17 @@ function resolvePlayerCollisions(playState) {
             const p2 = players[j];
 
             if (p1.id === p2.id) continue; // 💡 FIX: Stop colliding with self
+
+            if (p1.ghostTicks > 0 || p2.ghostTicks > 0) continue;
+
             if (p1.engagedWith === p2) continue; // High-performance object check
+
+            // 💡 NEW: QB/RB Collision Bypass during Handoff
+            // Prevents the "circling" bug by allowing them to overlap during the mesh
+            const isHandoffPair = (p1.role === 'QB' && p2.role === 'RB') || (p1.role === 'RB' && p2.role === 'QB');
+            if (isHandoffPair && playState.handoffRequired && !playState.handoffOccurred) {
+                continue;
+            }
 
             const dx = p1.x - p2.x;
             const dy = p1.y - p2.y;
@@ -5244,6 +5273,13 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
             if (!playState.playIsLive) break;
             playState.tick++;
 
+            playState.activePlayers.forEach(p => {
+                if (p.stunnedTicks > 0) p.stunnedTicks--;
+                if (p.ghostTicks > 0) p.ghostTicks--;
+                if (p.jamTicks > 0) p.jamTicks--;
+                if (p.moveCooldown > 0) p.moveCooldown--;
+            });
+
             const ballPos = playState.ballState;
 
             // A. FIND CARRIER & CACHE DISTANCES
@@ -5295,13 +5331,15 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
                     const dist = getDistance(qb1, rb1);
                     const handoffTickThreshold = qbDepth < 4.0 ? 18 : 24;
 
-                    if ((dist < 1.2 && playState.tick > 10) || (playState.tick >= handoffTickThreshold)) {
+                    if ((dist < 1.8 && playState.tick > 5) || (playState.tick >= handoffTickThreshold)) {
                         // EXECUTE HANDOFF
                         qb1.hasBall = false;
                         rb1.hasBall = true;
                         rb1.isBallCarrier = true;
                         playState.handoffOccurred = true;
 
+
+                        rb1.contactReduction = 1.2;
                         rb1.action = 'run_path';
                         if (finalOffensivePlayKey.includes('Flea_Flicker')) {
                             rb1.fleaFlickerPhase = 'running_draw';
@@ -5445,7 +5483,7 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
                     }
 
                     // 4. OUT OF BOUNDS (CARRIER)
-                    if (ballCarrierState.x <= 0.5 || ballCarrierState.x >= 52.8) {
+                    if (ballCarrierState.x <= 0.8 || ballCarrierState.x >= 52.5) {
                         playState.playIsLive = false;
                         playState.yards = ballCarrierState.y - playState.lineOfScrimmage;
                         playState.finalBallY = ballCarrierState.y;
