@@ -1598,16 +1598,18 @@ function resolveDepthForPlay(offense, defense) {
  * or a specific Slot (WR1, TE1, etc.)
  */
 function getAssignment(slot, playAssignments, formationMapping, isOffense) {
-    if (!isOffense) return playAssignments[slot]; // Defense usually uses slot-based logic
+    if (!isOffense) return playAssignments[slot];
 
-    // 1. Direct match (e.g., play defines "WR1": "Slant")
+    // 1. Check specific slot (WR1)
     if (playAssignments[slot]) return playAssignments[slot];
 
-    // 2. Role match (e.g., formation mapping says 'WR1' is 'X', check play for 'X')
     if (formationMapping) {
         for (const [role, mappedSlot] of Object.entries(formationMapping)) {
             if (mappedSlot === slot || (Array.isArray(mappedSlot) && mappedSlot.includes(slot))) {
-                return playAssignments[role] || null;
+                // 💡 FIX: Check both 'QB' and 'qb' or whatever case was used in data.js
+                return playAssignments[role] ||
+                    playAssignments[role.toUpperCase()] ||
+                    playAssignments[role.toLowerCase()] || null;
             }
         }
     }
@@ -2013,7 +2015,7 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
 
     // 8. INITIALIZE BALL (Always starts with QB)
     const snapTaker = playState.activePlayers.find(p =>
-        p.isOffense && (p.assignment === 'qb_setup' || p.assignment === 'qb_rpo_read' || p.assignment === 'qb_flea_flicker' || p.assignment === 'punt')
+        p.isOffense && (p.assignment?.includes('qb_') || p.assignment === 'punt')
     );
 
     if (snapTaker) {
@@ -2022,29 +2024,23 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
         playState.ballState.y = snapTaker.y;
         playState.ballState.z = 1.0;
 
-        // If it's a run, flag that we need a handoff
         if (play.type === 'run') {
-            // Find the mapped RB role
-            const mappedRB = playState.activePlayers.find(p => p.isOffense && p.assignment && p.assignment.includes('run_'));
-
-            if (mappedRB && mappedRB.id !== snapTaker.id) {
+            // Find the person assigned the 'run_' track
+            const runner = playState.activePlayers.find(p => p.isOffense && p.assignment?.startsWith('run_') && p.id !== snapTaker.id);
+            if (runner) {
                 playState.handoffRequired = true;
-                playState.handoffTargetSlot = mappedRB.slot;
-                playState.handoffOccurred = false;
+                playState.handoffTargetSlot = runner.slot;
             } else {
-                // QB-only run (Scramble/Draw)
-                snapTaker.isBallCarrier = true;
+                snapTaker.isBallCarrier = true; // QB Draw/Scramble
             }
         }
     } else {
-        // 💡 ULTIMATE FAILSAFE: If no one has a QB assignment, force it to the QB1 slot
-        const fallback = playState.activePlayers.find(p => p.slot === 'QB1' && p.isOffense);
-        if (fallback) {
-            fallback.hasBall = true;
-            fallback.assignment = 'qb_setup'; // Force assignment so they don't stand still
-            console.warn("Recovered: Assigned ball to fallback QB1 slot.");
-        } else {
-            console.error('CRITICAL: No Snap Taker found in formation mapping!');
+        // 🚨 EMERGENCY FAILSAFE: If mapping failed, force ball to first offensive player
+        const failsafe = playState.activePlayers.find(p => p.isOffense);
+        if (failsafe) {
+            failsafe.hasBall = true;
+            failsafe.assignment = 'qb_setup';
+            console.warn("Failsafe triggered: Snap taker not found, assigned to " + failsafe.slot);
         }
     }
 }
