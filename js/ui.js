@@ -2381,104 +2381,110 @@ function drawFieldVisualization(frameData) {
         frameData.players.forEach(p => {
             const px = toScreenX(p.y);
             const py = toScreenY(p.x);
-            const radius = ppY * 0.8;
+
+            // 💡 DYNAMIC SCALING MATH
+            // Base yard-to-pixel scale (ppY)
+            const baseSize = ppY * 0.7;
+
+            // Weight (approx 150-350) scales the BREADTH (shoulder to shoulder)
+            // A 350lb lineman will look significantly wider than a 150lb kicker.
+            const weightScale = 0.7 + (p.wgt / 300);
+
+            // Height (approx 60-80) scales the LENGTH (top of head to back)
+            // Taller players have a slightly longer top-down profile.
+            const heightScale = 0.8 + (p.hgt / 100);
 
             ctx.save();
-            
-            // 1. JITTER EFFECT
-            // If stunned, the player "wobbles" slightly in place
-            let offsetX = 0;
-            let offsetY = 0;
-            if (p.isStunned) {
-                offsetX = (Math.random() - 0.5) * 2;
-                offsetY = (Math.random() - 0.5) * 2;
-            }
 
-            ctx.translate(px + offsetX, py + offsetY);
+            // Jitter for stunned
+            let jitterX = p.isStunned ? (Math.random() - 0.5) * 2 : 0;
+            let jitterY = p.isStunned ? (Math.random() - 0.5) * 2 : 0;
+            ctx.translate(px + jitterX, py + jitterY);
+
+            ctx.save();
             ctx.rotate(p.angle);
 
-            // 2. DYNAMIC COLORS
-            // If stunned, we drain the color to a grayish-blue/dark gray
             const jerseyColor = p.isStunned ? "#4b5563" : (p.primaryColor || "#333");
             const helmetColor = p.isStunned ? "#9ca3af" : (p.secondaryColor || "#fff");
 
-            // 3. Shoulder Pads (The Rectangle)
+            // 💡 SHOULDER PADS (The Rectangle)
+            // padThickness = Front-to-back (Height affected)
+            // padWidth = Shoulder-to-shoulder (Weight affected)
             ctx.fillStyle = jerseyColor;
-            const padW = radius * 1.3; 
-            const padH = radius * 2.2; 
+            const padThickness = baseSize * heightScale;
+            const padWidth = baseSize * 2.2 * weightScale;
+
             ctx.beginPath();
-            ctx.roundRect(-padW/2, -padH/2, padW, padH, 5);
+            ctx.roundRect(-padThickness / 2, -padWidth / 2, padThickness, padWidth, 4);
             ctx.fill();
             ctx.strokeStyle = "rgba(0,0,0,0.6)";
-            ctx.lineWidth = 1.5;
+            ctx.lineWidth = 1.2;
             ctx.stroke();
 
-            // 4. Helmet (The Circle)
+            // 💡 HELMET (Scales slightly with height)
             ctx.fillStyle = helmetColor;
+            const helmetRadius = baseSize * 0.7 * (0.9 + p.hgt / 150);
             ctx.beginPath();
-            ctx.arc(0, 0, radius * 0.7, 0, Math.PI * 2);
+            // Helmet is positioned at the front edge of the pads
+            ctx.arc(padThickness * 0.2, 0, helmetRadius, 0, Math.PI * 2);
             ctx.fill();
-            
-            // Facemask (Facing the direction of angle)
+
+            // Facemask
             ctx.strokeStyle = "#111";
-            ctx.lineWidth = ppY * 0.2;
+            ctx.lineWidth = ppY * 0.18;
             ctx.beginPath();
-            ctx.arc(0, 0, radius * 0.7, -Math.PI/3, Math.PI/3);
+            ctx.arc(padThickness * 0.2, 0, helmetRadius, -Math.PI / 3, Math.PI / 3);
             ctx.stroke();
 
-            // 5. STUNNED OVERLAY (Stars and Text)
-            if (p.isStunned) {
-                ctx.restore(); // Exit the player's rotation/translation to draw upright stars
+            // JERSEY NUMBER (Centered on body)
+            if (!p.isStunned && p.number) {
                 ctx.save();
-                ctx.translate(px, py);
-                
-                const time = Date.now() * 0.008; // Animation speed
-                const starRadius = radius * 1.2;
-                
-                // Draw 3 orbiting stars
+                ctx.rotate(-p.angle);
+                ctx.fillStyle = p.secondaryColor;
+                // Font size also scales with weight so it fits the jersey
+                ctx.font = `bold ${ppY * 0.65 * weightScale}px Arial`;
+                ctx.textAlign = "center";
+                ctx.textBaseline = "middle";
+                ctx.shadowColor = "rgba(0,0,0,0.5)";
+                ctx.shadowBlur = 2;
+                ctx.fillText(p.number, 0, 0);
+                ctx.restore();
+            }
+            ctx.restore(); // End body rotation
+
+            // 💡 UPRIGHT OVERLAYS (Stunned stars & Glow)
+            if (p.isStunned) {
+                const time = Date.now() * 0.008;
+                // Stars orbit wider on bigger players
+                const starRadius = baseSize * 1.5 * weightScale;
+                ctx.save();
                 for (let i = 0; i < 3; i++) {
                     const angle = time + (i * (Math.PI * 2) / 3);
                     const sx = Math.cos(angle) * starRadius;
-                    const sy = Math.sin(angle) * (starRadius * 0.4) - (radius * 1.5); // Oval orbit above head
-                    
-                    // The Star
-                    ctx.fillStyle = "#facc15"; // Bright yellow
+                    const sy = Math.sin(angle) * (starRadius * 0.4) - (baseSize * 1.8);
+                    ctx.fillStyle = "#facc15";
                     ctx.beginPath();
                     ctx.arc(sx, sy, 2.5, 0, Math.PI * 2);
                     ctx.fill();
-                    
-                    // Star Glow
-                    ctx.shadowBlur = 10;
-                    ctx.shadowColor = "#fef08a";
                 }
-                
-                // "X_X" indicator
-                ctx.shadowBlur = 0;
+                ctx.restore();
                 ctx.fillStyle = "white";
                 ctx.font = `bold ${ppY * 0.6}px Arial`;
                 ctx.textAlign = "center";
-                ctx.fillText("X_X", 0, -radius * 2.2);
-            } else {
-                // Regular number drawing (only if NOT stunned)
-                ctx.save();
-                ctx.rotate(-Math.PI / 2);
-                ctx.fillStyle = p.secondaryColor;
-                ctx.font = `bold ${ppY * 0.7}px Arial`;
-                ctx.textAlign = "center";
-                ctx.textBaseline = "middle";
-                ctx.fillText(p.number || "", 0, 0);
-                ctx.restore();
+                ctx.fillText("X_X", 0, -baseSize * 2.5);
             }
 
-            // 6. Ball Carrier Glow
             if (p.hasBall) {
-                // If the logic above restored/saved, ensure we are at px,py
                 ctx.strokeStyle = "#fbbf24";
                 ctx.lineWidth = 3;
                 ctx.setLineDash([4, 2]);
+                ctx.shadowBlur = 15;
+                ctx.shadowColor = "#fbbf24";
                 ctx.beginPath();
-                ctx.arc(0, 0, radius * 1.8, 0, Math.PI * 2);
+                // Glow circle is larger for bigger players
+                ctx.arc(0, 0, baseSize * 2.0 * weightScale, 0, Math.PI * 2);
                 ctx.stroke();
+                ctx.setLineDash([]);
             }
 
             ctx.restore();

@@ -209,10 +209,12 @@ function captureFrame(playState, gameLog) {
             primaryColor: p.primaryColor,
             secondaryColor: p.secondaryColor,
             number: p.number,
+            wgt: p.wgt || 200, // Weight (approx 150 - 350)
+            hgt: p.hgt || 70,  // Height (approx 60 - 80)
             // 💡 NEW: Calculate angle based on velocity (defaults to facing upfield)
             angle: (Math.abs(p.vx) < 0.1 && Math.abs(p.vy) < 0.1)
-                ? (p.isOffense ? Math.PI / 2 : -Math.PI / 2)
-                : Math.atan2(p.vy, p.vx)
+                ? (p.isOffense ? 0 : Math.PI) // Offense faces Right (0), Defense faces Left (PI)
+                : Math.atan2(p.vx, p.vy)
         })),
         logIndex: gameLog ? gameLog.length : 0,
         lineOfScrimmage: playState.lineOfScrimmage
@@ -6446,7 +6448,7 @@ function simulateLivePlayStep(game) {
         offense.formations.offense = 'Balanced';
         defense.formations.defense = '4-2-2';
 
-        offPlayKey = 'Uni_Slants';
+        offPlayKey = 'Uni_QuickSlants';
         defPlayKey = 'GoalLine_RunStuff';
     }
     else if (determinePuntDecision(game.down, game.yardsToGo, game.ballOn)) {
