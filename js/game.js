@@ -1645,7 +1645,10 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
     else if (ballHash === 'R') ballX = HASH_RIGHT_X;
 
     // --- 4. PRE-CALCULATE OFFENSIVE POSITIONS ---
-    const offenseFormationData = offenseFormations[offense.formations.offense];
+    let offFormKey = offense.formations.offense;
+    if (!offenseFormations[offFormKey]) offFormKey = 'Balanced';
+
+    const offenseFormationData = offenseFormations[offFormKey];
     const initialOffenseStates = [];
 
     if (offenseFormationData?.slots) {
@@ -3049,7 +3052,10 @@ function executeAssignment(pState, assignment, offenseStates, LOS, playState, ba
     // 2. MAN COVERAGE (Elastic Band + IQ Prediction + Jamming)
     if (assignment?.startsWith('man_cover_')) {
         const targetSlot = assignment.replace('man_cover_', '');
-        let targetRec = pState.assignedPlayerId ? offenseStates.find(o => o.id === pState.assignedPlayerId) : null;
+        let targetRec = offenseStates.find(o =>
+            o.slot === targetSlot ||
+            o.assignedPlayerSlot === targetSlot
+        );
         if (!targetRec) targetRec = offenseStates.find(o => o.slot === targetSlot);
 
         if (targetRec) {
@@ -4024,7 +4030,10 @@ function updateQBDecision(qbState, offenseStates, defenseStates, playState, offe
 
     // 💡 NEW: Target Value Evaluator (Requires plays to develop!)
     const getTargetValue = (slot) => {
-        const rec = offenseTeam.find(r => r.slot === slot);
+        const rec = offenseTeam.find(r =>
+            r.slot === slotOrRole ||
+            r.assignedPlayerSlot === slotOrRole
+        );
         if (!rec || !rec.action.includes('route')) return null;
 
         // 1. ESTIMATE FLIGHT TIME (Better Physics Sync)
@@ -6400,7 +6409,14 @@ function simulateLivePlayStep(game) {
         if (!offPlayKey || !offensivePlaybook[offPlayKey]) offPlayKey = 'Balanced_InsideZone';
 
         // Update the team's current formation to match the play they just called
-        const selectedFormation = offensivePlaybook[offPlayKey].formation || offPlayKey.split('_')[0];
+        let prefix = offPlayKey.split('_')[0];
+        let selectedFormation = offensivePlaybook[offPlayKey].formation || prefix;
+
+        // 💡 FIXED: If it's a Universal ("Uni") play, keep their preferred formation!
+        if (selectedFormation === 'Uni' || !offenseFormations[selectedFormation]) {
+            selectedFormation = offense.coach?.preferredOffense || 'Balanced';
+        }
+
         offense.formations.offense = selectedFormation;
 
         const defFormation = determineDefensiveFormation(defense, offense.formations.offense, game.down, game.yardsToGo, game.gameLog);
