@@ -1703,6 +1703,7 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
             let targetX = startX;
             let targetY = startY;
             let routePath = null;
+            let readProgression = [];
             let dropbackPhase = null;
             let hasCompletedDropback = true;
             let dropbackTargetY = startY;
