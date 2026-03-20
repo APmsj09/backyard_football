@@ -1827,23 +1827,15 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
                     }
 
                     // Mark target as covered
+                    let assignedSlot = null;
                     if (assignment.startsWith('man_cover_')) {
-                        let targetSlot = assignment.replace('man_cover_', ''); // e.g., 'RB1' or 'RB'
-
-                        // 💡 TRANSLATION LOGIC
-                        // If the target is a ROLE (like 'RB') rather than a SLOT (like 'RB1')
-                        // or if the SLOT doesn't exist in this formation...
+                        let targetSlot = assignment.replace('man_cover_', '');
                         const offMapping = offenseFormationData.mapping || {};
 
-                        // Check if the assignment target is a key in the offense's mapping
                         if (offMapping[targetSlot]) {
                             const mappedSlot = offMapping[targetSlot];
-                            // If it maps to an array (like OL), pick one, otherwise take the string
-                            const finalSlot = Array.isArray(mappedSlot) ? mappedSlot[0] : mappedSlot;
-
-                            // Update the assignment to the actual physical slot on the field
-                            assignment = `man_cover_${finalSlot}`;
-                            pState.assignedPlayerSlot = finalSlot; // Store for easy lookups
+                            assignedSlot = Array.isArray(mappedSlot) ? mappedSlot[0] : mappedSlot;
+                            assignment = `man_cover_${assignedSlot}`;
                         }
                     }
                 }
@@ -1939,6 +1931,9 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
                 teamId: team.id,
                 snapReactionTimer: reactionTicks,
 
+                assignment: assignment,
+                assignedPlayerSlot: assignedSlot, // Assigned safely here
+
                 primaryColor: team.primaryColor,
                 secondaryColor: team.secondaryColor,
 
@@ -2025,13 +2020,20 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
         playState.ballState.z = 1.0;
 
         if (play.type === 'run') {
-            // Find the person assigned the 'run_' track
-            const runner = playState.activePlayers.find(p => p.isOffense && p.assignment?.startsWith('run_') && p.id !== snapTaker.id);
+            // Flexible search: find anyone assigned a run path/track
+            const runner = playState.activePlayers.find(p =>
+                p.isOffense &&
+                p.assignment?.startsWith('run_') &&
+                p.id !== snapTaker.id
+            );
+
             if (runner) {
                 playState.handoffRequired = true;
                 playState.handoffTargetSlot = runner.slot;
             } else {
-                snapTaker.isBallCarrier = true; // QB Draw/Scramble
+                // Fallback: If no runner found, QB keeps it (scramble)
+                snapTaker.isBallCarrier = true;
+                playState.handoffRequired = false;
             }
         }
     } else {
