@@ -1702,10 +1702,11 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
             let targetX = startX;
             let targetY = startY;
             let routePath = null;
-            let readProgression = [];
+            let readProgression =[];
             let dropbackPhase = null;
             let hasCompletedDropback = true;
             let dropbackTargetY = startY;
+            let assignedPlayerSlot = null;
 
             // --- A. OFFENSE SETUP ---
             if (isOffense) {
@@ -1827,15 +1828,19 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
                     }
 
                     // Mark target as covered
-                    let assignedSlot = null;
+                    let assignedPlayerSlot = null;
                     if (assignment.startsWith('man_cover_')) {
                         let targetSlot = assignment.replace('man_cover_', '');
                         const offMapping = offenseFormationData.mapping || {};
 
                         if (offMapping[targetSlot]) {
                             const mappedSlot = offMapping[targetSlot];
-                            assignedSlot = Array.isArray(mappedSlot) ? mappedSlot[0] : mappedSlot;
-                            assignment = `man_cover_${assignedSlot}`;
+                            // If it maps to an array (like OL), pick one, otherwise take the string
+                            const finalSlot = Array.isArray(mappedSlot) ? mappedSlot[0] : mappedSlot;
+
+                            // Update the assignment to the actual physical slot on the field
+                            assignment = `man_cover_${finalSlot}`;
+                            assignedPlayerSlot = finalSlot; // 💡 FIXED: Save to local variable, NOT pState
                         }
                     }
                 }
@@ -1931,9 +1936,6 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
                 teamId: team.id,
                 snapReactionTimer: reactionTicks,
 
-                assignment: assignment,
-                assignedPlayerSlot: assignedSlot, // Assigned safely here
-
                 primaryColor: team.primaryColor,
                 secondaryColor: team.secondaryColor,
 
@@ -1979,6 +1981,8 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
                 // Logic State
                 action: action,
                 assignment: assignment,
+                assignedPlayerSlot: assignedPlayerSlot,
+                
                 routePath: routePath,
                 currentPathIndex: 0,
 
