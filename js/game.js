@@ -1621,12 +1621,12 @@ function getAssignment(slot, playAssignments, formationMapping, isOffense) {
  * Sets up the initial state for all players involved in a play.
  */
 function setupInitialPlayerStates(playState, offense, defense, play, assignments, ballOnYardLine, defensivePlayKey, ballHash = 'M', offensivePlayKey = '') {
-    playState.activePlayers = [];
+    playState.activePlayers =[];
     const isPlayAction = offensivePlayKey.includes('PA_');
 
     // --- 1. NORMALIZE PLAY INTENT ---
     playState.type = play.type;
-    playState.readProgression = play.readProgression || [];
+    playState.readProgression = play.readProgression ||[];
     playState.playKey = play.key || null;
 
     // --- 2. DEFENSIVE PLAY LOOKUP (Robust Fallback) ---
@@ -1644,22 +1644,17 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
     else if (ballHash === 'R') ballX = HASH_RIGHT_X;
 
     // --- 4. PRE-CALCULATE OFFENSIVE POSITIONS ---
-    // We need to know where the Offense IS so the Defense can line up properly.
     const offenseFormationData = offenseFormations[offense.formations.offense];
-    const initialOffenseStates = [];
+    const initialOffenseStates =[];
 
     if (offenseFormationData?.slots) {
         offenseFormationData.slots.forEach(slot => {
-            const relCoords = offenseFormationData.coordinates[slot] || [0, 0];
+            const relCoords = offenseFormationData.coordinates[slot] ||[0, 0];
             let startX = ballX + relCoords[0];
             let startY = playState.lineOfScrimmage + relCoords[1];
 
-            // 🔧 FIXED: Use coordinate validation function
             const validated = validateFormationCoordinate(startX, startY, slot);
-            startX = validated.x;
-            startY = validated.y;
-
-            initialOffenseStates.push({ slot, x: startX, y: startY });
+            initialOffenseStates.push({ slot, x: validated.x, y: validated.y });
         });
     }
 
@@ -1676,16 +1671,18 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
         const coveredOffensiveSlots = new Set();
 
         sortedSlots.forEach(slot => {
-            // 1. Get Player ID
             if (!playState.resolvedDepth) playState.resolvedDepth = resolveDepthForPlay(offense, defense);
             const playerId = playState.resolvedDepth[side]?.[slot];
-            const roster = getRosterObjects(team);
-            const player = roster.find(p => p.id === playerId);
-            
-            if (!player) return; // Skip if no player found for this slot
+            const player = getRosterObjects(team).find(p => p.id === playerId);
+            if (!player) return;
 
-            // 2. Initialize variables for this player
-            let assignedPlayerSlot = null; // 💡 DECLARED AT TOP OF LOOP
+            // 💡 CRITICAL FIX: ALL VARIABLES DECLARED HERE AT THE TOP OF THE LOOP!
+            let assignedPlayerSlot = null;
+            let routePath = null;
+            let readProgression =[];
+            let dropbackPhase = null;
+            let hasCompletedDropback = true;
+
             const relCoords = formationData.coordinates[slot] || [0, 0];
             let startX = ballX + relCoords[0];
             let startY = playState.lineOfScrimmage + relCoords[1];
@@ -1694,19 +1691,15 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
             startX = validated.x;
             startY = validated.y;
 
+            let targetX = startX;
+            let targetY = startY;
+            let dropbackTargetY = startY;
             let action = 'idle';
+
             const formationMapping = formationData.mapping || {};
             let assignment = isOffense
                 ? getAssignment(slot, assignments, formationMapping, true)
                 : defAssignments[slot];
-            
-            let targetX = startX;
-            let targetY = startY;
-            let routePath = null;
-            let readProgression = [];
-            let dropbackPhase = null;
-            let hasCompletedDropback = true;
-            let dropbackTargetY = startY;
 
             // --- A. OFFENSE SETUP ---
             if (isOffense) {
@@ -1714,38 +1707,29 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
                     if (play.type === 'punt') {
                         assignment = 'punt'; action = 'punt_kick'; targetY = startY - 5;
                     } else {
-                        assignment = 'qb_setup';
-                        action = 'qb_setup';
-                        dropbackPhase = 'dropping';
-                        hasCompletedDropback = false;
+                        assignment = 'qb_setup'; action = 'qb_setup';
+                        dropbackPhase = 'dropping'; hasCompletedDropback = false;
 
-                        // 💡 NEW: Advanced Dropback Logic based on Formation and Concept
                         const initialDepth = playState.lineOfScrimmage - startY;
-                        const isShotgun = initialDepth >= 4.0; // Gun/Pistol is 4+ yards back
+                        const isShotgun = initialDepth >= 4.0; 
 
                         if (play.type === 'run') {
-                            // Run Plays: Positioning for Handoff (Fallback for physics mesh)
-                            if (isShotgun) {
-                                dropbackTargetY = startY - 0.5; // Slight step back to clear mesh point
-                            } else {
-                                dropbackTargetY = playState.lineOfScrimmage - 3.5; // Reverse out
-                            }
+                            if (isShotgun) dropbackTargetY = startY - 0.5;
+                            else dropbackTargetY = playState.lineOfScrimmage - 3.5;
                         } else {
-                            // Pass Plays: Route-depth based drops
                             const isQuick = play.tags && (play.tags.includes('short') || play.tags.includes('quick') || play.tags.includes('screen'));
                             const isDeep = play.tags && (play.tags.includes('deep') || play.tags.includes('hailmary'));
 
                             let targetDepth = 0;
                             if (isShotgun) {
-                                if (isQuick) targetDepth = initialDepth; // Catch and fire, stay in gun
-                                else if (isDeep) targetDepth = 9.5;      // 5-step in gun
-                                else targetDepth = 7.5;                  // 3-step in gun
+                                if (isQuick) targetDepth = initialDepth; 
+                                else if (isDeep) targetDepth = 9.5;      
+                                else targetDepth = 7.5;                  
                             } else {
-                                if (isQuick) targetDepth = 3.5;          // 3-step drop under center
-                                else if (isDeep) targetDepth = 9.0;      // 7-step drop under center
-                                else targetDepth = 6.0;                  // 5-step drop under center
+                                if (isQuick) targetDepth = 3.5;          
+                                else if (isDeep) targetDepth = 9.0;      
+                                else targetDepth = 6.0;                  
                             }
-
                             dropbackTargetY = playState.lineOfScrimmage - targetDepth;
                         }
                     }
@@ -1756,49 +1740,35 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
                     targetY = startY + (action === 'pass_block' ? -0.5 : 0.5);
                 }
                 else if (assignment) {
-                    // Skill Position Assignments
                     if (assignment.includes('block')) {
-                        action = assignment;
-                        targetY = startY + 0.5;
+                        action = assignment; targetY = startY + 0.5;
                     }
                     else if (assignment.includes('run_')) {
-                        // New logic: Running backs now treat 'run_inside', 'run_outside', etc. as paths
                         action = 'run_path';
-
-                        // Calculate the absolute path based on the play assignment
                         routePath = calculateRoutePath(assignment, startX, startY);
-
-                        // If a path exists, set the initial target to the first point of that run design
                         if (routePath && routePath.length > 0) {
-                            targetX = routePath[0].x;
-                            targetY = routePath[0].y;
+                            targetX = routePath[0].x; targetY = routePath[0].y;
                         } else {
-                            targetY = startY + 5; // Fallback
+                            targetY = startY + 5; 
                         }
                     }
                     else if (routeTree[assignment]) {
                         action = 'run_route';
                         routePath = calculateRoutePath(assignment, startX, startY);
                         if (routePath && routePath.length) {
-                            targetX = routePath[0].x;
-                            targetY = routePath[0].y;
+                            targetX = routePath[0].x; targetY = routePath[0].y;
                         }
                     }
                 }
             }
-
-            // --- B. DEFENSE SETUP (The Threat Board Logic) ---
+            // --- B. DEFENSE SETUP ---
             else {
-                // If assignment missing, default based on position
                 if (!assignment) {
                     if (slot.startsWith('DL')) assignment = 'run_gap_A';
-                    else if (slot.startsWith('LB')) assignment = 'def_read'; // Will turn into zone/man
+                    else if (slot.startsWith('LB')) assignment = 'def_read'; 
                     else if (slot.startsWith('DB')) assignment = 'zone_deep_middle';
                 }
 
-                // 1. INTELLIGENT MAN MATCHING
-                // If assigned 'man_cover_X', verify X exists. If not, find new target.
-                // If assigned 'def_read', find an uncovered target.
                 if (assignment.startsWith('man_cover_') || assignment === 'def_read') {
 
                     let targetSlot = assignment.replace('man_cover_', '');
@@ -1827,32 +1797,28 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
                         }
                     }
 
-                    // Mark target as covered
                     if (assignment.startsWith('man_cover_')) {
-                        let targetSlot = assignment.replace('man_cover_', '');
+                        let cleanTargetSlot = assignment.replace('man_cover_', '');
                         const offMapping = offenseFormationData.mapping || {};
 
-                        if (offMapping[targetSlot]) {
-                            const mappedSlot = offMapping[targetSlot];
-                            // If it maps to an array (like OL), pick one, otherwise take the string
+                        if (offMapping[cleanTargetSlot]) {
+                            const mappedSlot = offMapping[cleanTargetSlot];
                             const finalSlot = Array.isArray(mappedSlot) ? mappedSlot[0] : mappedSlot;
 
-                            // Update the assignment to the actual physical slot on the field
                             assignment = `man_cover_${finalSlot}`;
-                            assignedPlayerSlot = finalSlot; // 💡 FIXED: Save to local variable, NOT pState
+                            assignedPlayerSlot = finalSlot; 
+                        } else {
+                            assignedPlayerSlot = cleanTargetSlot; // Fallback
                         }
                     }
                 }
 
                 action = assignment;
 
-                // 2. Set Initial Stance based on Assignment
                 if (assignment.startsWith('man_cover_')) {
                     const tSlot = assignment.split('_')[2];
                     const tState = initialOffenseStates.find(o => o.slot === tSlot);
                     if (tState) {
-                        // Align 2 yards off the receiver
-                        // Inside leverage for slot, Outside for wide
                         const isSlot = tSlot.includes('TE') || tSlot === 'WR3';
                         const xOffset = (tState.x < CENTER_X) ? (isSlot ? 1.0 : -0.5) : (isSlot ? -1.0 : 0.5);
 
@@ -1863,38 +1829,30 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
                     }
                 }
                 else if (assignment.startsWith('zone_')) {
-                    // Zones are static points on field
-                    // We let the AI move them there, but start them generally correct
                     if (assignment.includes('deep')) startY = Math.max(startY, playState.lineOfScrimmage + 8);
                 }
-                // 💡 FIX: Push Punt Returners much deeper so they aren't out-kicked by the punter
+                
                 if (assignment === 'punt_return') {
-                    startY = Math.min(108, startY); // Never stand deeper than the 2-yard line in the endzone
+                    startY = Math.min(108, startY); 
                 }
             }
-
 
             // --- 6. CLAMP & SPAWN ---
             startX = Math.max(0.5, Math.min(53.3 - 0.5, startX));
             startY = Math.max(10.5, Math.min(110.0 - 10.5, startY));
 
-            // 💡 FIX: Bring the trenches closer together. 
-            // OL starts right on the line (-0.2), DL starts just across it (+0.8).
             if (isOffense && slot.startsWith('OL')) {
                 startY = playState.lineOfScrimmage - 0.2;
             } else if (!isOffense && slot.startsWith('DL')) {
                 startY = playState.lineOfScrimmage + 0.8;
             } else {
-                // Default clamping for non-linemen to prevent overlap
                 if (!isOffense && startY < playState.lineOfScrimmage + 1.5) startY = playState.lineOfScrimmage + 1.5;
                 if (isOffense && startY > playState.lineOfScrimmage - 1.5) startY = playState.lineOfScrimmage - 1.5;
             }
 
-            // RPG Attributes
             const fatigueRatio = player.fatigue / (player.attributes?.physical?.stamina || 50);
             const fatigueMod = Math.max(0.3, 1.0 - fatigueRatio);
 
-            // 💡 NEW: The "Scheme Fit" Boost
             const isPreferredOffense = offense.formations.offense === offense.coach?.preferredOffense;
             const isPreferredDefense = defense.formations.defense === defense.coach?.preferredDefense;
             let schemeBoost = 0;
@@ -1902,11 +1860,9 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
             if (isOffense && isPreferredOffense) schemeBoost = 5;
             else if (!isOffense && isPreferredDefense) schemeBoost = 5;
 
-            // Apply the boost directly to the mental attributes for this play
             const playerIQ = Math.min(99, (player.attributes?.mental?.playbookIQ || 50) + schemeBoost);
             const consistency = Math.min(99, (player.attributes?.mental?.consistency || 50) + schemeBoost);
 
-            // 💡 NEW: Snap Reaction Logic (Now uses the boosted playerIQ)
             let reactionTicks = 0;
             if (slot !== 'QB1' && slot !== 'OL2') {
                 reactionTicks = Math.max(1, 10 - Math.floor(playerIQ / 10));
@@ -1934,7 +1890,6 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
                 role: slot.replace(/\d+/g, ''),
                 teamId: team.id,
                 snapReactionTimer: reactionTicks,
-
                 primaryColor: team.primaryColor,
                 secondaryColor: team.secondaryColor,
 
@@ -1945,47 +1900,24 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
 
                 fatigueModifier: fatigueMod,
 
-                // --- PERFORMANCE ALIASES (For the physics loop) ---
-                spd: speed,
-                agi: agility,
-                str: strength,
-                wgt: weight,
-                hgt: height,
-                iq: playerIQ,         // <--- SCHEME BOOST APPLIED
-                cons: consistency,    // <--- SCHEME BOOST APPLIED
-                tgh: toughness,
-                ctch: catching,
-                tkl: tackling,
-                blk: blocking,
-                shed: blockShedding,
-                acc: accuracy,
-                cov: coverage,
+                spd: speed, agi: agility, str: strength,
+                wgt: weight, hgt: height, iq: playerIQ,
+                cons: consistency, tgh: toughness, ctch: catching,
+                tkl: tackling, blk: blocking, shed: blockShedding,
+                acc: accuracy, cov: coverage,
 
-                // --- LEGACY COMPATIBILITY ---
-                speed: speed,
-                agility: agility,
-                strength: strength,
-                weight: weight,
-                height: height,
-                playbookIQ: playerIQ, // <--- SCHEME BOOST APPLIED
-                consistency: consistency, // <--- SCHEME BOOST APPLIED
-                toughness: toughness,
-                catchingHands: catching,
-                tackling: tackling,
-                blocking: blocking,
-                blockShedding: blockShedding,
-                throwingAccuracy: accuracy,
-                coverage: coverage,
+                speed: speed, agility: agility, strength: strength,
+                weight: weight, height: height, playbookIQ: playerIQ,
+                consistency: consistency, toughness: toughness, catchingHands: catching,
+                tackling: tackling, blocking: blocking, blockShedding: blockShedding,
+                throwingAccuracy: accuracy, coverage: coverage,
 
-                // Logic State
                 action: action,
                 assignment: assignment,
                 assignedPlayerSlot: assignedPlayerSlot,
-                
                 routePath: routePath,
                 currentPathIndex: 0,
 
-                // QB Specific
                 readProgression: readProgression,
                 currentReadTargetSlot: readProgression[0] || null,
                 ticksOnCurrentRead: 0,
@@ -1994,7 +1926,6 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
                 hasCompletedDropback: hasCompletedDropback,
                 dropbackTargetY: dropbackTargetY,
 
-                // Physics State
                 vx: 0, vy: 0, vz: 0,
                 isEngaged: false, engagedWith: null,
                 isBlocked: false, blockedBy: null,
@@ -2012,9 +1943,7 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
     setupSide(defense, 'defense', defenseFormationData, false);
 
     // 8. INITIALIZE BALL (Always starts with QB)
-    const snapTaker = playState.activePlayers.find(p =>
-        p.isOffense && (p.assignment?.includes('qb_') || p.assignment === 'punt')
-    );
+    const snapTaker = playState.activePlayers.find(p => p.isOffense && (p.assignment?.includes('qb_') || p.assignment === 'punt'));
 
     if (snapTaker) {
         snapTaker.hasBall = true;
@@ -2023,29 +1952,19 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
         playState.ballState.z = 1.0;
 
         if (play.type === 'run') {
-            // Flexible search: find anyone assigned a run path/track
-            const runner = playState.activePlayers.find(p =>
-                p.isOffense &&
-                p.assignment?.startsWith('run_') &&
-                p.id !== snapTaker.id
-            );
-
+            const runner = playState.activePlayers.find(p => p.isOffense && p.assignment?.startsWith('run_') && p.id !== snapTaker.id);
             if (runner) {
                 playState.handoffRequired = true;
                 playState.handoffTargetSlot = runner.slot;
             } else {
-                // Fallback: If no runner found, QB keeps it (scramble)
-                snapTaker.isBallCarrier = true;
-                playState.handoffRequired = false;
+                snapTaker.isBallCarrier = true; 
             }
         }
     } else {
-        // 🚨 EMERGENCY FAILSAFE: If mapping failed, force ball to first offensive player
         const failsafe = playState.activePlayers.find(p => p.isOffense);
         if (failsafe) {
             failsafe.hasBall = true;
             failsafe.assignment = 'qb_setup';
-            console.warn("Failsafe triggered: Snap taker not found, assigned to " + failsafe.slot);
         }
     }
 }
