@@ -1667,29 +1667,29 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
     const setupSide = (team, side, formationData, isOffense) => {
         if (!team || !formationData) return;
 
-        // Sort slots (Line first, then QBs, then skill)
         const sortedSlots = [...formationData.slots].sort((a, b) => {
             if (a.startsWith('C') || a.startsWith('OL')) return -1;
             if (a.startsWith('QB')) return -1;
             return 0;
         });
 
-        // Track who is covered to prevent unintentional double teams
         const coveredOffensiveSlots = new Set();
 
         sortedSlots.forEach(slot => {
-            // Get Player ID from Depth Chart
+            // 1. Get Player ID
             if (!playState.resolvedDepth) playState.resolvedDepth = resolveDepthForPlay(offense, defense);
             const playerId = playState.resolvedDepth[side]?.[slot];
-            const player = getRosterObjects(team).find(p => p.id === playerId);
-            if (!player) return;
+            const roster = getRosterObjects(team);
+            const player = roster.find(p => p.id === playerId);
+            
+            if (!player) return; // Skip if no player found for this slot
 
-            // Initial Coordinates
+            // 2. Initialize variables for this player
+            let assignedPlayerSlot = null; // 💡 DECLARED AT TOP OF LOOP
             const relCoords = formationData.coordinates[slot] || [0, 0];
             let startX = ballX + relCoords[0];
             let startY = playState.lineOfScrimmage + relCoords[1];
 
-            // 🔧 FIXED: Validate coordinates are within field bounds
             const validated = validateFormationCoordinate(startX, startY, slot);
             startX = validated.x;
             startY = validated.y;
@@ -1699,14 +1699,13 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
             let assignment = isOffense
                 ? getAssignment(slot, assignments, formationMapping, true)
                 : defAssignments[slot];
+            
             let targetX = startX;
             let targetY = startY;
             let routePath = null;
-            let readProgression =[];
             let dropbackPhase = null;
             let hasCompletedDropback = true;
             let dropbackTargetY = startY;
-            let assignedPlayerSlot = null;
 
             // --- A. OFFENSE SETUP ---
             if (isOffense) {
@@ -1828,7 +1827,6 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
                     }
 
                     // Mark target as covered
-                    let assignedPlayerSlot = null;
                     if (assignment.startsWith('man_cover_')) {
                         let targetSlot = assignment.replace('man_cover_', '');
                         const offMapping = offenseFormationData.mapping || {};
