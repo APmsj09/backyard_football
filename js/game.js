@@ -6359,84 +6359,114 @@ function determinePlayCall(offense, defense, down, yardsToGo, ballOn, scoreDiff,
 
     const formationName = offense.formations.offense;
     const coach = offense.coach;
-    const recentPlays = offense.recentPlayHistory || [];
+    const recentPlays = offense.recentPlayHistory ||[];
 
-    // 1. 💡 FIX: Filter plays based on the new COMPATIBILITY system
-    // A play is valid if it explicitly lists the formation OR uses the legacy "Formation_Name" prefix
+    // 1. Filter Compatible Plays
     const formationPlays = Object.keys(offensivePlaybook).filter(key => {
         const play = offensivePlaybook[key];
         const isCompatible = play.compatibleFormations && play.compatibleFormations.includes(formationName);
         const isLegacyMatch = key.startsWith(formationName);
-        const isUniversal = key.startsWith('Uni_'); // Allow all universal plays
-
+        const isUniversal = key.startsWith('Uni_') || key.startsWith('PA_') || key.startsWith('Trick_') || key.startsWith('RPO_');
         return isCompatible || isLegacyMatch || isUniversal;
     });
 
     if (formationPlays.length === 0) return 'Uni_InsideZone';
 
-    // 2. ANALYZE PERSONNEL
-    const roster = getRosterObjects(offense);
-    const qb = roster.find(p => p.id === offense.depthChart.offense.QB1);
-    const rb = roster.find(p => p.id === offense.depthChart.offense.RB1);
-    const qbOvr = qb ? calculateOverall(qb, 'QB') : 50;
-    const rbOvr = rb ? calculateOverall(rb, 'RB') : 50;
+    // 2. Situational Awareness (The "Coordinator's Brain")
+    const isGoalLine = ballOn >= 90;
+    const isBackedUp = ballOn <= 10;
+    const isShort = yardsToGo <= 2;
+    const isLong = yardsToGo >= 8;
+    const isDesperation = drivesRemaining <= 2 && scoreDiff <= -8; // Late game, losing
+    const isChewClock = drivesRemaining <= 2 && scoreDiff >= 8;    // Late game, winning
 
-    // 3. STRATEGIC INTENT (0-100)
-    let passScore = 50;
-    let rpoScore = 10;   // Chance to choose an RPO if available
-    let trickScore = 2;  // Chance to choose a Trick play if available
-
-    // Personnel Weighting
-    if (qbOvr > rbOvr + 10) passScore += 20;
-    if (rbOvr > qbOvr + 10) passScore -= 20;
-
-    // Situational Weighting
-    if (down === 1) {
-        passScore -= 10;
-        rpoScore += 20; // 1st down is great for RPOs
-    }
-    if (down === 3 && yardsToGo > 6) passScore += 40;
-    if (down === 2 && yardsToGo < 4) trickScore += 15; // "Shot" down for trick plays
-
-    // Coach Personality
-    if (coach?.type === 'Air Raid') { passScore += 25; rpoScore += 10; }
-    if (coach?.type === 'Ground and Pound') { passScore -= 25; rpoScore -= 5; }
-
-    // 4. SELECT CATEGORY
-    const roll = Math.random() * 100;
-    let desiredType = 'run';
-
-    if (roll < trickScore) {
-        desiredType = 'trick';
-    } else if (roll < (trickScore + rpoScore)) {
-        desiredType = 'rpo'; // Note: RPOs are usually 'pass' type with 'rpo' tag
-    } else {
-        desiredType = (Math.random() * 100 < passScore) ? 'pass' : 'run';
-    }
-
-    // 5. FILTER POOL BY INTENT
-    let selectionPool = formationPlays.filter(key => {
+    // 3. Score Every Play
+    let scoredPlays = formationPlays.map(key => {
         const play = offensivePlaybook[key];
-        if (desiredType === 'trick') return play.tags?.includes('trick');
-        if (desiredType === 'rpo') return play.tags?.includes('rpo');
-        return play.type === desiredType;
+        const tags = play.tags ||[];
+        let score = 50; // Base baseline score
+
+        // --- DOWN & DISTANCE ---
+        if (isShort) {
+            if (play.type === 'run' && tags.includes('inside')) score += 40;
+            if (play.type === 'run' && tags.includes('power')) score += 50;
+            if (tags.includes('quick') || tags.includes('short')) score += 20;
+            if (tags.includes('deep')) score -= 40; // Too risky
+        } else if (isLong) {
+            if (play.type === 'run') score -= 30; // Don't run on 3rd & 10
+            if (tags.includes('deep') || tags.includes('medium')) score += 40;
+            if (tags.includes('screen') || tags.includes('draw')) score += 25; // Safe yardage underneath
+        } else {
+            // Normal downs (1st & 10, 2nd & 5)
+            if (down === 1) {
+                if (play.type === 'run') score += 15; // Establish the run
+                if (tags.includes('pa')) score += 30; // 1st down Play Action is highly effective
+            } else if (down === 2 && yardsToGo <= 4) {
+                if (tags.includes('deep') || tags.includes('trick')) score += 35; // 2nd & Short is "Shot Play" territory
+            }
+        }
+
+        // --- FIELD POSITION ---
+        if (isGoalLine) {
+            if (play.type === 'run' && tags.includes('power')) score += 50;
+            if (tags.includes('deep') || tags.includes('vertical')) score -= 100; // Literally out of room
+            if (tags.includes('quick')) score += 25; // Slants work well in redzone
+        } else if (isBackedUp) {
+            if (tags.includes('deep')) score -= 40; // Don't take a safety holding the ball
+            if (play.type === 'run' && tags.includes('inside')) score += 30; // Safe push forward
+        }
+
+        // --- GAME SCRIPT (Clock Management) ---
+        if (isDesperation) {
+            if (play.type === 'run') score -= 90; // Cannot afford to run the clock
+            if (tags.includes('deep') || tags.includes('vertical') || tags.includes('outside')) score += 60;
+        } else if (isChewClock) {
+            if (play.type === 'run' && tags.includes('inside')) score += 80; // Keep the clock moving safely
+            if (play.type === 'pass') score -= 80; // Do not risk an incompletion
+        }
+
+        // --- COACH PERSONALITY ---
+        if (coach?.type === 'Air Raid' || coach?.type === 'West Coast Offense') {
+            if (play.type === 'pass') score += 25;
+            if (tags.includes('quick') || tags.includes('screen')) score += 15;
+        } else if (coach?.type === 'Ground and Pound' || coach?.type === 'Trench Warfare') {
+            if (play.type === 'run') score += 30;
+            if (tags.includes('power') || tags.includes('inside')) score += 20;
+        }
+
+        // --- TENDENCY & SPAM PREVENTION ---
+        // If we just ran this play recently, heavily penalize it so we don't spam it
+        const recentCount = recentPlays.filter(k => k === key).length;
+        if (recentCount > 0) {
+            score *= Math.pow(0.4, recentCount); // Drops score by 60% per recent use
+        }
+
+        return { key, score: Math.max(1, score) };
     });
 
-    // Fallback if the specific category (like trick) isn't in this formation
-    if (selectionPool.length === 0) {
-        selectionPool = formationPlays.filter(key => offensivePlaybook[key].type === (passScore > 50 ? 'pass' : 'run'));
+    // 4. Select Play (Weighted Random among the Top 5)
+    // Sort highest to lowest
+    scoredPlays.sort((a, b) => b.score - a.score);
+    
+    // Take the top 5 highest-scoring options so the AI isn't 100% predictable
+    const topOptions = scoredPlays.slice(0, 5);
+    const totalScore = topOptions.reduce((sum, p) => sum + p.score, 0);
+    
+    let roll = Math.random() * totalScore;
+    let selectedKey = topOptions[0].key;
+
+    for (const option of topOptions) {
+        if (roll < option.score) {
+            selectedKey = option.key;
+            break;
+        }
+        roll -= option.score;
     }
 
-    // 6. PICK PLAY (Avoid immediate repeats)
-    let finalSelection = selectionPool.filter(key => !recentPlays.includes(key));
-    if (finalSelection.length === 0) finalSelection = selectionPool;
-
-    const selectedKey = getRandom(finalSelection.length > 0 ? finalSelection : ['Uni_InsideZone']);
-
-    // Track history
-    if (!offense.recentPlayHistory) offense.recentPlayHistory = [];
+    // 5. Log History
+    if (!offense.recentPlayHistory) offense.recentPlayHistory =[];
     offense.recentPlayHistory.push(selectedKey);
-    if (offense.recentPlayHistory.length > 5) offense.recentPlayHistory.shift();
+    if (offense.recentPlayHistory.length > 6) offense.recentPlayHistory.shift();
 
     return selectedKey;
 }
@@ -6544,65 +6574,78 @@ function determineDefensivePlayCall(defense, offense, down, yardsToGo, ballOn, s
 
     if (availablePlays.length === 0) return 'Cover_2_Zone_Base';
 
-    const captainIsSharp = checkCaptainDiscipline(defense, gameLog);
-
-    // 1. Tendency Tracking ("Scouting")
-    // Look at the offense's last 5 plays to gauge run/pass ratio
-    const offHistory = offense.recentPlayHistory || [];
+    // 1. Scouting: What does the offense like to do?
+    const offHistory = offense.recentPlayHistory ||[];
     let recentPassCount = 0;
     offHistory.forEach(playKey => {
         if (offensivePlaybook[playKey] && offensivePlaybook[playKey].type === 'pass') recentPassCount++;
     });
-    const passHeavyTendency = (offHistory.length >= 3 && recentPassCount / offHistory.length > 0.6);
+    // If they passed on 3 of their last 4 plays, expect pass.
+    const passHeavyTendency = (offHistory.length >= 3 && recentPassCount / offHistory.length >= 0.6);
 
-    // 2. Establish Base Strategy
-    let blitzChance = 0.20;
-    let manCoverageChance = 0.40;
-    let deepZoneBias = 0.0;
+    // 2. Situational Context
+    const isGoalLine = ballOn >= 90;
+    const isBackedUp = ballOn <= 5; // Pin them for a safety
+    const isShort = yardsToGo <= 2;
+    const isLong = yardsToGo >= 8;
+    const isDesperation = drivesRemaining <= 2 && scoreDiff < 0; // Offense is throwing deep
 
-    if (captainIsSharp) {
-        // Situation: Passing Down
-        if ((down === 3 && yardsToGo > 6) || (drivesRemaining < 4 && scoreDiff < 0)) {
-            deepZoneBias = 0.40; // Play deep, don't get beat
-            manCoverageChance = 0.20;
-            blitzChance = 0.35; // Bring pressure on 3rd down
-        }
-        // Situation: Short Yardage / Goal Line
-        else if (yardsToGo <= 2 || ballOn > 90) {
-            deepZoneBias = -0.50; // Play short/press
-            manCoverageChance = 0.70; // Tight man coverage
-            blitzChance = 0.40;
+    // Check Captain Discipline (If false, the defense ignores the logic and guesses randomly)
+    const captainIsSharp = checkCaptainDiscipline(defense, gameLog);
+
+    // 3. Score Every Defensive Play
+    let scoredPlays = availablePlays.map(key => {
+        const play = defensivePlaybook[key];
+        const tags = play.tags ||[];
+        let score = 50;
+
+        if (captainIsSharp) {
+            // --- DOWN & DISTANCE ---
+            if (isGoalLine || isShort || isBackedUp) {
+                if (tags.includes('runStop')) score += 60;
+                if (tags.includes('blitz')) score += 30;
+                if (tags.includes('man') || tags.includes('press')) score += 20;
+                if (tags.includes('cover4') || tags.includes('prevent') || tags.includes('safeZone')) score -= 80;
+            } 
+            else if (isLong || isDesperation) {
+                if (tags.includes('prevent') || tags.includes('cover4') || tags.includes('safeZone')) score += 60;
+                if (tags.includes('cover3')) score += 25;
+                if (tags.includes('runStop') || tags.includes('press')) score -= 80; // Do not get beat deep!
+                if (isDesperation && tags.includes('blitz')) score -= 40; // Play it safe
+            } 
+            else if (down === 3) {
+                // 3rd & Medium (3-7 yards) - High pressure situation
+                if (tags.includes('man') || tags.includes('blitz')) score += 25;
+            }
+
+            // --- OFFENSIVE TENDENCY ---
+            if (passHeavyTendency) {
+                if (tags.includes('zone') || tags.includes('cover3') || tags.includes('cover4')) score += 25;
+                if (tags.includes('runStop')) score -= 30;
+            } else {
+                if (tags.includes('runStop') || tags.includes('blitz')) score += 20;
+            }
+
+        } else {
+            // Captain is confused: flatten the scores to introduce random bad calls
+            score = 50 + (Math.random() * 20);
         }
 
-        // Apply "Scouting" Adjustment
-        if (passHeavyTendency) {
-            deepZoneBias += 0.20; // Back up, they like to pass
-            manCoverageChance -= 0.10; // Zone is safer against pass spam
-        }
-    } else {
-        // Confused Captain picks randomly
-        blitzChance = Math.random();
-        manCoverageChance = Math.random();
+        return { key, score: Math.max(1, score) };
+    });
+
+    // 4. Select Play (Weighted Random among Top 3)
+    scoredPlays.sort((a, b) => b.score - a.score);
+    const topOptions = scoredPlays.slice(0, 3); // Tighter pool for defense to ensure discipline
+    const totalScore = topOptions.reduce((sum, p) => sum + p.score, 0);
+    
+    let roll = Math.random() * totalScore;
+    for (const option of topOptions) {
+        if (roll < option.score) return option.key;
+        roll -= option.score;
     }
-
-    // 3. Filter Playbook based on Strategy
-    let pool = [];
-    if (Math.random() < blitzChance) {
-        pool = availablePlays.filter(k => defensivePlaybook[k].tags.includes('blitz'));
-    } else {
-        const useMan = Math.random() < manCoverageChance;
-        pool = availablePlays.filter(k => defensivePlaybook[k].concept === (useMan ? 'Man' : 'Zone'));
-
-        if (deepZoneBias > 0 && Math.random() < deepZoneBias) {
-            const deepPool = pool.filter(k => defensivePlaybook[k].tags.includes('cover3') || defensivePlaybook[k].tags.includes('cover4'));
-            if (deepPool.length > 0) pool = deepPool;
-        } else if (deepZoneBias < 0) {
-            const shortPool = pool.filter(k => defensivePlaybook[k].tags.includes('press') || defensivePlaybook[k].tags.includes('runStop'));
-            if (shortPool.length > 0) pool = shortPool;
-        }
-    }
-
-    return getRandom(pool.length > 0 ? pool : availablePlays);
+    
+    return topOptions[0].key;
 }
 // In game.js
 
