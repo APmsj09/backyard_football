@@ -4529,22 +4529,22 @@ function executeThrow(qbState, target, strength, accuracy, playState, gameLog, a
     const finalDist = Math.hypot(aimX - startX, aimY - startY);
     const t = Math.max(0.1, finalDist / ballSpeed);
 
-    if (DEBUG_MODE) {
+    // --- DEBUG LOG ---
+    if (typeof DEBUG_MODE !== 'undefined' && DEBUG_MODE) {
         console.log(`[THROW-AIM] ${qbState.name} -> ${target.name}. Aim: (${aimX.toFixed(1)}, ${aimY.toFixed(1)}) | Rec Pos: (${target.x.toFixed(1)}, ${target.y.toFixed(1)}) | Lead Distance: ${(Math.hypot(aimX - target.x, aimY - target.y)).toFixed(1)}y`);
     }
 
-    // Calculate Z Velocity (Arc) based on Pass Type
-    let baseZ = 0;
-    // 💡 FIX: Give passes a slight upward push so they clear the D-Line helmets
-    if (passType === 'bullet') baseZ = 0.5; // Flat rope, but pushes upward initially
-    else if (passType === 'touch') baseZ = 2.5; // Moderate arc
-    baseZ = 3.5 + (throwDistance / 15);  // High lob
-
-    const vz = (baseZ + (4.9 * t * t)) / t;
+    // NEW PHYSICS MATH: 
+    // We want the ball to hit the receiver right in the chest (z = 1.0)
+    const targetZ = 1.0; 
+    const startZ = 2.2; // QB release height
+    const deltaZ = targetZ - startZ;
+    
+    // This calculates the exact vertical velocity needed to arrive at targetZ at time t
+    const vz = (deltaZ + (4.9 * t * t)) / t;
 
     playState.ballState = {
-        // 💡 FIX: QB release height raised to 2.2 yards (~6'6") to represent arm extension
-        x: startX, y: startY, z: 2.2, inAir: true, throwTick: playState.tick, releaseeTick: playState.tick,
+        x: startX, y: startY, z: startZ, inAir: true, throwTick: playState.tick, releaseeTick: playState.tick,
         vx: (aimX - startX) / t, vy: (aimY - startY) / t, vz: vz,
         targetX: aimX, targetY: aimY, targetPlayerId: target.id, throwerId: qbState.id, isThrowAway: false
     };
@@ -4813,8 +4813,10 @@ function handleBallArrival(playState, carrier, playResult, gameLog) {
             else catchScore -= 60;
         }
 
-        if (DEBUG_MODE) {
-            console.log(`[CATCH-CHANCE] ${bestCandidate.name}: ${catchScore.toFixed(1)}% | Ball Height: ${ball.z.toFixed(2)} | Dist to Ball: ${distNow.toFixed(2)}`);
+        if (typeof DEBUG_MODE !== 'undefined' && DEBUG_MODE) {
+            // Recalculate distance safely for the log
+            const distToBall = Math.sqrt((bestCandidate.x - ball.x)**2 + (bestCandidate.y - ball.y)**2);
+            console.log(`[CATCH-CHANCE] ${bestCandidate.name}: ${catchScore.toFixed(1)}% | Ball Height: ${ball.z.toFixed(2)} | Dist to Ball: ${distToBall.toFixed(2)}`);
         }
 
 
