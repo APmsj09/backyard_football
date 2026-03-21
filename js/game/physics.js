@@ -12,9 +12,9 @@ export function getDistance(p1, p2) {
  * Main Physics and Movement Engine
  * Handles momentum, mass-based inertia, gap friction, and Newtonian collisions.
  */
-export function updatePlayerPosition(pState, timeDelta, allPlayers =[]) {
+export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
     if (!pState || typeof pState.x !== 'number') return;
-    
+
     pState.vx = pState.vx || 0;
     pState.vy = pState.vy || 0;
 
@@ -25,12 +25,12 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers =[]) {
         pState.vy = 0;
         pState.targetX = pState.x;
         pState.targetY = pState.y;
-        return; 
+        return;
     }
 
     // --- 2. PASSIVE STATES (Stunned/Blocked) ---
     if (pState.stunnedTicks > 0 || pState.isBlocked || pState.isEngaged) {
-        const friction = 0.85; 
+        const friction = 0.85;
         pState.vx *= friction;
         pState.vy *= friction;
         pState.x += pState.vx * timeDelta;
@@ -48,7 +48,7 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers =[]) {
     const fatigueMod = pState.fatigueModifier || 1.0;
 
     // Ratios for physics math (225 lbs is considered the "baseline" 1.0 ratio)
-    const weightRatio = weight / 225; 
+    const weightRatio = weight / 225;
     const strengthFactor = strength / 100;
     const agiFactor = agility / 100;
 
@@ -72,12 +72,12 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers =[]) {
 
     // Base Speed: 7.0 yds/sec to 11.0 yds/sec
     const baseMaxSpeed = (7.0 + (speedStat / 100) * 4.0) * fatigueMod;
-    
+
     // Weight Penalty: 160lbs = +4% speed | 200lbs = 0% | 350lbs = -15% speed
-    const weightSpeedPenalty = Math.max(0.80, 1.0 - ((weight - 200) / 1000)); 
-    
+    const weightSpeedPenalty = Math.max(0.80, 1.0 - ((weight - 200) / 1000));
+
     let actionMult = pState.speedMultiplier || 1.0;
-    if (pState.isBallCarrier) actionMult *= 0.92; 
+    if (pState.isBallCarrier) actionMult *= 0.92;
     if (pState.action === 'backpedal') actionMult *= 0.55;
     if (pState.action === 'trucking') actionMult *= 0.75;
 
@@ -90,7 +90,7 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers =[]) {
     if (currentSpeed > 0.5 && distToTarget > 0.1) {
         // Dot Product: 1.0 = Straight, 0.0 = 90 degree cut, -1.0 = U-turn
         const dot = ((pState.vx / currentSpeed) * (dx / distToTarget)) + ((pState.vy / currentSpeed) * (dy / distToTarget));
-        
+
         // WEIGHT IMPACT ON CUTS:
         // Heavier players drift significantly more on sharp cuts. Agility fights this drift.
         const cutStability = 0.4 + (agiFactor * 0.5) - ((weightRatio - 1.0) * 0.3);
@@ -99,11 +99,14 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers =[]) {
     const effectiveMaxSpeed = maxPossibleSpeed * turningPenalty;
 
     // --- 7. ACCELERATION (Strength vs. Weight) ---
-    // Explosiveness = Force (Strength) / Mass (Weight)
     const explosiveness = (0.5 + strengthFactor) / weightRatio;
-    
-    // Agility helps players start their feet moving quickly
     let accelRate = (1.5 + (agiFactor * 2.0) + (explosiveness * 2.0)) * fatigueMod;
+
+    // Apply Stumble Penalty
+    // If the player recently broke a tackle or got bumped, their acceleration is crippled.
+    if (pState.moveCooldown > 0) {
+        accelRate *= 0.15; // 85% acceleration penalty while stumbling
+    }
 
     // --- 8. DECELERATION (Braking / Planting) ---
     const isStopping = distToTarget < 2.5 && !['run_path', 'tracking_ball', 'pursuit'].includes(pState.action);
@@ -111,11 +114,11 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers =[]) {
 
     if (isStopping) {
         arrivalFactor = distToTarget / 2.5; // Throttle down smoothly
-        
+
         // WEIGHT IMPACT ON BRAKING (Inertia):
         // Heavy players require much more time/distance to slow down.
         // Agility helps plant the feet.
-        const brakePower = (2.0 + (agiFactor * 4.0)) / Math.sqrt(weightRatio); 
+        const brakePower = (2.0 + (agiFactor * 4.0)) / Math.sqrt(weightRatio);
         accelRate *= brakePower;
     }
 
@@ -130,7 +133,7 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers =[]) {
     const speedAfter = Math.sqrt(pState.vx ** 2 + pState.vy ** 2);
     if (speedAfter > maxPossibleSpeed && speedAfter > 0.1) {
         // Agile players regain control of their over-speed momentum faster
-        const drag = 0.8 + (agiFactor * 0.15); 
+        const drag = 0.8 + (agiFactor * 0.15);
         const ratio = (maxPossibleSpeed + (speedAfter - maxPossibleSpeed) * (1.0 - drag)) / speedAfter;
         pState.vx *= ratio;
         pState.vy *= ratio;
@@ -142,7 +145,7 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers =[]) {
     // --- 11. FINALIZE MOVEMENT ---
     pState.x += pState.vx * timeDelta;
     pState.y += pState.vy * timeDelta;
-    
+
     clampToField(pState);
 
     // Update metadata for AI logic and Visualizer angle rendering
@@ -194,7 +197,7 @@ function resolveNewtonianCollisions(pState, allPlayers) {
 
         // Ignore collisions during the handoff mesh (QB/RB overlap)
         const isHandoffPair = (pState.role === 'QB' && other.role === 'RB') || (pState.role === 'RB' && other.role === 'QB');
-        if (isHandoffPair &&['handoff_setup', 'handoff_receive', 'run_path'].includes(pState.action)) continue;
+        if (isHandoffPair && ['handoff_setup', 'handoff_receive', 'run_path'].includes(pState.action)) continue;
 
         const dist = getDistance(pState, other);
         const theirWeight = other.weight || other.wgt || 200;
@@ -207,10 +210,10 @@ function resolveNewtonianCollisions(pState, allPlayers) {
             const dy_norm = (pState.y - other.y) / dist;
 
             const totalW = myWeight + theirWeight;
-            
+
             // Deflection Math: Lighter players absorb more of the push
-            const myMoveRatio = theirWeight / totalW; 
-            
+            const myMoveRatio = theirWeight / totalW;
+
             // 1. Positional Push (Prevents rendering inside each other)
             pState.x += dx_norm * overlap * myMoveRatio * 0.5;
             pState.y += dy_norm * overlap * myMoveRatio * 0.5;

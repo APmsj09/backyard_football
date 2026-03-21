@@ -1850,10 +1850,19 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
                     const tState = initialOffenseStates.find(o => o.slot === tSlot);
                     if (tState) {
                         const isSlot = tSlot.includes('TE') || tSlot === 'WR3';
-                        const xOffset = (tState.x < CENTER_X) ? (isSlot ? 1.0 : -0.5) : (isSlot ? -1.0 : 0.5);
+                        let xOffset = (tState.x < CENTER_X) ? (isSlot ? 1.0 : -0.5) : (isSlot ? -1.0 : 0.5);
+                        let yOffset = 2.0;
+
+                        // 💡 FIX: Check if another defender is ALREADY covering this guy!
+                        // If so, shift this second defender to the opposite shoulder and back them up.
+                        const alreadyCovered = playState.activePlayers.some(p => p.assignedPlayerSlot === tSlot || p.assignment === assignment);
+                        if (alreadyCovered) {
+                            xOffset *= -2.5; // Flip to the other shoulder, slightly wider
+                            yOffset += 1.5;  // Play deeper bracket coverage
+                        }
 
                         startX = tState.x + xOffset;
-                        startY = tState.y + 2.0;
+                        startY = tState.y + yOffset;
                         targetX = tState.x;
                         targetY = tState.y;
                     }
@@ -3589,10 +3598,15 @@ function checkTackleCollisions(playState, gameLog) {
             carrier.tacklesBrokenThisPlay = brokenCount + 1;
             defender.stunnedTicks = 40;
 
-            // Physics: Runner loses speed based on the weight of the guy they just hit
+            // 💡 FIX: Runner Stumble Mechanic
+            // The runner loses 40% of their speed AND is placed on a moveCooldown.
+            // During a moveCooldown, the physics engine won't allow them to accelerate!
             const speedDrain = Math.max(0.40, (defender.wgt / carrier.wgt) * 0.40);
             carrier.vx *= (1 - speedDrain);
             carrier.vy *= (1 - speedDrain);
+
+            // Stumble for 15 ticks (0.75 seconds). They cannot juke or accelerate during this time.
+            carrier.moveCooldown = 15;
 
             if (gameLog) pushGameLog(gameLog, `[Tick ${playState.tick}] 💪 ${carrier.name} runs THROUGH ${defender.name}!`, playState);
 
@@ -4281,26 +4295,25 @@ function updateQBDecision(qbState, offenseStates, defenseStates, playState, offe
         }
 
         // THRESHOLD TO THROW
+        // THRESHOLD TO THROW
         let THROW_THRESHOLD = 35;
         if (isPressured) THROW_THRESHOLD = 15;
         if (isHotReadSituation) THROW_THRESHOLD = 0;
 
+        // 💡 FIX: Safely calculate accuracy early just for the debug log
+        let debugAdjAcc = Number(qbAcc) || 50;
+        let debugPen = 0;
+        if (isPressured) {
+            const pCount = Number(pressureCount) || 0;
+            const iqNum = Number(qbState.playbookIQ || 50);
+            debugPen = 15 + (pCount * 5) - (15 * ((iqNum / 100) * 0.5));
+            debugAdjAcc = Math.max(30, debugAdjAcc - debugPen);
+        }
+
         if (typeof DEBUG_MODE !== 'undefined' && DEBUG_MODE) {
-            const safeLogs = readDebugLog.map(s => {
-                if (!s) return "ERR";
-                return s; // Already strings like "WR1:42"
-            });
-
-            const qbName = qbState?.name ?? "Unknown QB";
-            const thresh = typeof THROW_THRESHOLD !== 'undefined' ? THROW_THRESHOLD : "N/A";
-
-            console.log(`[QB-BRAIN] ${qbName} scanning: [${safeLogs.join(' | ')}] Threshold: ${thresh}`);
-            const pen = adjustedAccuracy - qbAcc;
-            console.log(
-                `[QB-STATS] ${qbName} Accuracy: ${(qbAcc ?? 0).toFixed(0)} | ` +
-                `Pressure Penalty: ${pen.toFixed(0)} | ` +
-                `Final: ${(adjustedAccuracy ?? 0).toFixed(0)}`
-            );
+            const safeLogs = readDebugLog.map(s => s || "ERR");
+            console.log(`[QB-BRAIN] ${qbState.name} scanning: [${safeLogs.join(' | ')}] Threshold: ${THROW_THRESHOLD}`);
+            console.log(`[QB-STATS] ${qbState.name} Accuracy: ${(qbAcc ?? 0).toFixed(0)} | Pressure Penalty: ${debugPen.toFixed(0)} | Final: ${debugAdjAcc.toFixed(0)}`);
         }
 
         // EXECUTE THROW DECISION
