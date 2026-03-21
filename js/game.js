@@ -3450,7 +3450,7 @@ function checkTackleCollisions(playState, gameLog) {
             }
             // 💡 FIX: Significantly reduce the "reach tackle" range through blocks
             // 0.8 yards is ~2.4 feet. They can only make the tackle if the runner brushes right past them.
-            return dist < 0.8;
+            return dist < 0.5;
         }
 
         return true;
@@ -3530,7 +3530,13 @@ function checkTackleCollisions(playState, gameLog) {
 
         // 2. Momentum delta: Being faster/heavier helps, but don't let it dominate 100%
         const momRatio = tMomentum / Math.max(1, rMomentum);
-        successChance += (momRatio - 1.0) * 0.2; // Reduced from 0.3
+        successChance += (momRatio - 1.0) * 0.2;
+
+        // 💡 GROUP TACKLE BONUS: If multiple defenders are in range, success goes way up
+        const defendersInRange = tacklingTeam.filter(d => getDistance(carrier, d) < TACKLE_RANGE && d.stunnedTicks === 0);
+        if (defendersInRange.length > 1) {
+            successChance += 0.35;
+        }
 
         // 3. Skill & Strength Delta
         successChance += (tPower - rPower) * 0.005;
@@ -3584,7 +3590,7 @@ function checkTackleCollisions(playState, gameLog) {
             defender.stunnedTicks = 40;
 
             // Physics: Runner loses speed based on the weight of the guy they just hit
-            const speedDrain = (defender.wgt / carrier.wgt) * 0.3;
+            const speedDrain = Math.max(0.40, (defender.wgt / carrier.wgt) * 0.40);
             carrier.vx *= (1 - speedDrain);
             carrier.vy *= (1 - speedDrain);
 
@@ -4823,7 +4829,7 @@ function handleBallArrival(playState, carrier, playResult, gameLog) {
 
         // Catch Radius: A 6'4" (76 inch) player gets a massive 1.04 radius vs a 5'8" (68 in) 0.72 radius
         const heightBonus = Math.max(0, (playerHeight - 65) * 0.04);
-        let dynamicCatchRadius = 0.6 + heightBonus; // ✅ FIX: Change const to let
+        let dynamicCatchRadius = 0.45 + heightBonus;
         const CATCH_TOLERANCE = 0.25;
 
         if (p.action === 'tracking_ball') {
@@ -4892,9 +4898,14 @@ function handleBallArrival(playState, carrier, playResult, gameLog) {
             // DBs have harder time catching than WRs (need to focus on coverage)
             catchScore *= 0.40;
         }
-        if (playersInRange.length > 1) {
-            // Traffic reduces catch chance slightly
-            catchScore *= 0.85;
+        const defendersNear = playersInRange.filter(p => !p.isOffense).length;
+
+        if (bestCandidate.isOffense) {
+            if (defendersNear === 1) catchScore *= 0.85; // Single coverage traffic
+            else if (defendersNear === 2) catchScore *= 0.50; // Double coverage (50% penalty)
+            else if (defendersNear >= 3) catchScore *= 0.15; // Triple coverage (85% penalty)
+        } else {
+            if (playersInRange.length > 1) catchScore *= 0.85; // Standard penalty for defense
         }
 
         if (playState.type === 'punt') {
@@ -5320,6 +5331,27 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
         firstDownY = Math.min(playState.lineOfScrimmage + effectiveYardsToGo, goalLineY);
 
         setupInitialPlayerStates(playState, offense, defense, play, playState.assignments, ballOn, defensivePlayKey, ballHash, finalOffensivePlayKey);
+
+        // =========================================================
+        // 🔍 SNAP REPORT: Debugging Lineups & Assignments
+        // =========================================================
+        if (DEBUG_MODE) {
+            console.group(`🏈 SNAP REPORT: ${finalOffensivePlayKey} vs ${defensivePlayKey}`);
+            console.log(`Situation: Down ${down}, ${yardsToGo}y to go, Ball on ${ballOn}`);
+
+            const lineupData = playState.activePlayers.map(p => ({
+                Team: p.isOffense ? 'OFF' : 'DEF',
+                Slot: p.slot,
+                Name: p.name,
+                X: p.x.toFixed(1),
+                Y: p.y.toFixed(1),
+                Assignment: p.assignment,
+                Action: p.action
+            }));
+            console.table(lineupData);
+            console.groupEnd();
+        }
+
 
         // =========================================================
         // 💡 ANTI-SPAM ENGINE (The "Scouting" Mechanic)
@@ -5830,7 +5862,7 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
         // --- 7.5 POST-PLAY "COOL DOWN" (Visuals Only) ---
         // ===========================================================
         // 💡 NEW: Let the ball bounce/roll after the whistle so it doesn't vanish in mid-air.
-        if (isLive && gameLog && (playState.incomplete || playState.ballState.isLoose || playState.type === 'punt')) {
+        if (isLive && gameLog) {
             let cooldownTicks = 0;
             const POST_PLAY_TICKS = 30; // 1.5 seconds
 
@@ -5853,9 +5885,9 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
                 // Bounce
                 if (ballPos.z <= 0) {
                     ballPos.z = 0;
-                    ballPos.vz *= -0.6;
-                    ballPos.vx *= 0.8;
-                    ballPos.vy *= 0.8;
+                    ballPos.vz *= -0.4; // Softer bounce
+                    ballPos.vx *= 0.7;  // More ground friction
+                    ballPos.vy *= 0.7;
                 }
 
                 // Record Frame
