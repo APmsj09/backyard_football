@@ -3499,11 +3499,11 @@ function checkTackleCollisions(playState, gameLog) {
         }
 
         // --- B. PHYSICS-BASED TACKLE CALCULATION ---
-        const runnerVel = Math.hypot(carrier.vx, carrier.vy);
-        const tacklerVel = Math.hypot(defender.vx, defender.vy);
+        const runnerVel = Math.max(1.0, Math.hypot(carrier.vx, carrier.vy));
+        const tacklerVel = Math.max(1.0, Math.hypot(defender.vx, defender.vy));
 
         // Momentum (Mass * Velocity)
-        const rMomentum = Math.max(10, (carrier.wgt || 200) * runnerVel); // Minimum floor of 10
+        const rMomentum = (carrier.wgt || 200) * runnerVel;
         const tMomentum = (defender.wgt || 200) * tacklerVel;
 
         // Skill vs Strength Power
@@ -4409,21 +4409,31 @@ function updateQBDecision(qbState, offenseStates, defenseStates, playState, offe
     }
 
     if (targetPlayerState && actionTaken.includes("Throw")) {
-        // 💡 NEW: Accuracy degradation under pressure
+        // 💡 STRICT MATH FIX: Ensure everything is a valid integer before doing math
+        const safeQBIQ = parseInt(qbState.playbookIQ || qbState.iq || 50, 10);
         let adjustedAccuracy = qbAcc;
-        if (isPressured) {
-            // FIX: Ensure pressureCount is a number and not undefined/0 in a way that breaks math
-            const pCount = pressureCount || 0;
-            const basePenalty = 15;
-            const IQ_MITIGATION = (qbIQ / 100) * 0.5;
-            const pressurePenalty = basePenalty + (pCount * 5) - (basePenalty * IQ_MITIGATION);
 
-            adjustedAccuracy = Math.max(30, qbAcc - (pressurePenalty || 0)); // Use || 0 to prevent NaN
+        if (isPressured) {
+            const safePressureCount = parseInt(pressureCount || 0, 10);
+            const basePenalty = 15;
+            const IQ_MITIGATION = (safeQBIQ / 100) * 0.5; // Will no longer be NaN
+            
+            const pressurePenalty = basePenalty + (safePressureCount * 5) - (basePenalty * IQ_MITIGATION);
+            
+            // Subtract penalty safely
+            adjustedAccuracy = Math.max(30, qbAcc - pressurePenalty);
         }
+        
         if (pocketComfort === 'collapsing') {
-            // Collapsing pocket is still bad, but slightly less punitive
             adjustedAccuracy *= 0.95;
         }
+
+        // --- SAFE DEBUG LOG ---
+        if (typeof DEBUG_MODE !== 'undefined' && DEBUG_MODE) {
+            const pen = qbAcc - adjustedAccuracy;
+            console.log(`[QB-STATS] ${qbState.name} Accuracy: ${qbAcc.toFixed(0)} | Pressure Penalty: ${pen.toFixed(0)} | Final: ${adjustedAccuracy.toFixed(0)}`);
+        }
+
         executeThrow(qbState, targetPlayerState, qbStrength, adjustedAccuracy, playState, gameLog, actionTaken);
     }
 
@@ -4867,22 +4877,32 @@ function handleBallArrival(playState, carrier, playResult, gameLog) {
             gameLog.push(m);
         };
 
-        // 💡 FIX: Re-balanced Catching Odds
-        let catchScore = (catching * 0.60) + (agility * 0.20) + 35; // Increased base floor significantly
+        let catchScore = (catching * 0.60) + (agility * 0.20) + 25; 
 
-        // 💡 FIX: Massive penalty for DBs so they don't catch 80% of jump balls. Forces them to Swat instead.
-        if (isDefense) catchScore -= 80;
-        if (playersInRange.length > 1) catchScore -= 10;
-        if (playState.type === 'punt') catchScore += 20;
+        // Apply situational multipliers instead of flat subtractions
+        if (isDefense) {
+            // DBs have harder time catching than WRs (need to focus on coverage)
+            catchScore *= 0.40; 
+        }
+        if (playersInRange.length > 1) {
+            // Traffic reduces catch chance slightly
+            catchScore *= 0.85; 
+        }
+
+        if (playState.type === 'punt') {
+            // Punts are easier to catch (more hangtime)
+            catchScore += 15; 
+        }
 
         // 💡 FIX: Point-Blank Penalty. If the ball was just thrown (< 10 ticks / 0.5s ago), 
         // it's incredibly hard for a DL to react and get their hands up in time.
         const ticksInAir = playState.tick - (ball.throwTick || 0);
         if (ticksInAir < 15 && isDefense && playState.type === 'pass') {
-            // 💡 FIX: DLs almost never swat bullets right out of the QB's hand unless very lucky
-            if (bestCandidate.role === 'DL') catchScore -= 120;
-            else catchScore -= 60;
+            if (bestCandidate.role === 'DL') catchScore *= 0.10; // 90% penalty for DLs
+            else catchScore *= 0.60; // 40% penalty for LBs/DBs
         }
+
+        catchScore = Math.max(1.0, Math.min(99.0, catchScore));
 
         if (DEBUG_MODE && playersInRange.length > 1) {
             const list = playersInRange.map(p =>
