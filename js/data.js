@@ -85,10 +85,10 @@ export const ZONES = {
 export const routeTree = {
     // --- Short / Quick Routes (0-5 yards) ---
     'Flat': { path: [{ x: 3, y: 1 }, { x: 8, y: 1.5 }] },
-    'Slant': { path: [{ x: -1, y: 1 }, { x: -5, y: 4 }] },
-    'QuickOut': { path: [{ x: 0, y: 3 }, { x: 5, y: 3 }] },
-    'Hitch': { path: [{ x: 0, y: 6 }, { x: 0, y: 4 }] },
-    'Drag': { path: [{ x: -1, y: 2 }, { x: -8, y: 3 }, { x: -18, y: 3.5 }] },
+    'Slant': { path: [{ x: 0, y: 1.5 }, { x: -6, y: 6 }] }, // Stem up, hard cut in
+    'QuickOut': { path: [{ x: 0, y: 3 }, { x: 5, y: 3.5 }] },
+    'Hitch': { path: [{ x: 0, y: 6 }, { x: 1, y: 5 }] }, // Run 6, turn back to 5
+    'Drag': { path: [{ x: 0, y: 1.5 }, { x: -10, y: 2.5 }, { x: -20, y: 3.5 }] },
     'Whip': { path: [{ x: 0, y: 4 }, { x: -2, y: 4 }, { x: 4, y: 4 }] },
     'Bubble': { path: [{ x: 4, y: -1 }, { x: 8, y: 0 }] },
     'Jet_Motion': { path: [{ x: 12, y: -1 }] }, // Fast motion across formation
@@ -99,14 +99,14 @@ export const routeTree = {
     'Dig': { path: [{ x: 0, y: 12 }, { x: -10, y: 12 }] }, // Deeper square in
     'Curl': { path: [{ x: 0, y: 12 }, { x: 2, y: 12 }, { x: 2, y: 10 }] },
     'Comeback': { path: [{ x: 0, y: 15 }, { x: 2, y: 15.5 }, { x: 6, y: 12 }] },
-    'Corner': { path: [{ x: 0, y: 10 }, { x: 8, y: 25 }] },
-    'Post': { path: [{ x: 0, y: 10 }, { x: -6, y: 25 }] },
+    'Corner': { path: [{ x: 0, y: 10 }, { x: -1, y: 12 }, { x: 10, y: 22 }] }, // Stem, fake in, break out
+    'Post': { path: [{ x: 0, y: 10 }, { x: 1, y: 12 }, { x: -10, y: 22 }] },   // Stem, fake out, break in
 
     // --- Deep Routes (20+ yards) ---
-    'Fly': { path: [{ x: 0, y: 40 }] },
+    'Fly': { path: [{ x: 0, y: 10 }, { x: 0.5, y: 20 }, { x: 0, y: 40 }] },   // Slight weave to shake press
     'Seam': { path: [{ x: 0, y: 40 }] },
     'Fade': { path: [{ x: 1, y: 10 }, { x: 3, y: 35 }] },
-    'PostCorner': { path: [{ x: 0, y: 10 }, { x: -2, y: 14 }, { x: 6, y: 25 }] },
+    'PostCorner': { path: [{ x: 0, y: 12 }, { x: -4, y: 16 }, { x: 8, y: 25 }] }, // Double move
     'Sluggo': { path: [{ x: -1, y: 2 }, { x: -3, y: 5 }, { x: -3, y: 25 }] },
 
     // --- Receiver Screen Specific ---
@@ -117,6 +117,7 @@ export const routeTree = {
     // --- Advanced Double Moves ---
     'Out_And_Up': { path: [{ x: 0, y: 5 }, { x: 6, y: 5 }, { x: 6, y: 30 }] },
     'Hitch_And_Go': { path: [{ x: 0, y: 5 }, { x: 0, y: 3 }, { x: 0, y: 30 }] },
+    
 
     // --- Passing Concept Routes ---
     'Scissors_Corner': { path: [{ x: 0, y: 8 }, { x: 10, y: 20 }] },
@@ -128,6 +129,7 @@ export const routeTree = {
     'Screen': { path: [{ x: -2, y: -1 }, { x: -4, y: -0.5 }] },
     'Slip_Screen': { path: [{ x: 0, y: 2 }, { x: 4, y: 0 }] }, // Fake block, slip out
     'CheckRelease': { path: [{ x: 0, y: 1 }, { x: 2, y: 1 }, { x: 3, y: 4 }] },
+    'Texas': { path: [{ x: 3, y: 1 }, { x: 5, y: 4 }, { x: -3, y: 9 }] }, // RB angle route
 
     // --- RB Run Designs (Initial Paths) ---
     'run_dive': { path: [{ x: 0, y: 2 }, { x: 0, y: 5 }] },
@@ -146,7 +148,10 @@ export const routeTree = {
     'pull_left': { path: [{ x: 0.5, y: -1.0 }, { x: -4, y: -0.5 }, { x: -5, y: 3 }] },
     'lead_right': { path: [{ x: 3, y: 1 }, { x: 4, y: 4 }] }, // FB leading off tackle
     'lead_left': { path: [{ x: -3, y: 1 }, { x: -4, y: 4 }] },
-    'screen_block': { path: [{ x: 0, y: -1 }, { x: -5, y: -0.5 }, { x: -8, y: 5 }] } // Let DL past, set up wall
+    'screen_block': { path: [{ x: 0, y: -1 }, { x: -5, y: -0.5 }, { x: -8, y: 5 }] }, // Let DL past, set up wall
+    'Screen_Wait': { path: [{ x: 0, y: -1 }, { x: 4, y: -1 }, { x: 5, y: 1 }] }, // Step back, drift wide, wait
+    'Wall_Alley_Left': { path: [{ x: -2, y: -1 }, { x: -8, y: 1 }, { x: -10, y: 5 }] }, // Leak, then set alley
+    'Wall_Alley_Right': { path: [{ x: 2, y: -1 }, { x: 8, y: 1 }, { x: 10, y: 5 }] },
 };
 
 // --- OFFENSIVE FORMATIONS ---
@@ -461,6 +466,27 @@ export const offensivePlaybook = {
             'H': 'WR_Screen_Lead',
             'OL1': 'screen_block', 'OL2': 'screen_block', 'OL3': 'run_block',
             'Z': 'Fly', 'RB': 'Flat'
+        }
+    },
+    'Uni_HB_Screen_Left': {
+        type: 'pass', tags: ['pass', 'screen', 'slow-mesh'],
+        readProgression: ['RB'],
+        assignments: {
+            'QB': 'qb_screen_retreat', 
+            'RB': 'Screen_Wait',
+            'OL1': 'Wall_Alley_Left', 'OL2': 'Wall_Alley_Left', 'OL3': 'pass_block',
+            'X': 'Fly', 'Z': 'Post', 'Y': 'Fly' // Clear out deep defenders
+        }
+    },
+    'Uni_WR_Screen_Right': {
+        type: 'pass', tags: ['pass', 'screen', 'quick'],
+        readProgression: ['Z'],
+        assignments: {
+            'QB': 'qb_setup',
+            'Z': 'Screen_Wait',
+            'RB': 'pass_block',
+            'OL1': 'pass_block', 'OL2': 'Wall_Alley_Right', 'OL3': 'Wall_Alley_Right',
+            'X': 'Fly', 'Y': 'Seam'
         }
     },
 

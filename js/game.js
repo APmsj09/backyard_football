@@ -620,7 +620,7 @@ function checkFumble(ballCarrierState, tacklerState, playState, gameLog) {
  */
 function diagnosePlay(pState, tick, offenseStates, truePlayType, offensivePlayKey) {
     const iq = pState.playbookIQ || 50;
-    
+
     let runScore = 0;
     let passScore = 0;
 
@@ -674,7 +674,7 @@ function diagnosePlay(pState, tick, offenseStates, truePlayType, offensivePlayKe
 
     // Noise represents slight hesitation or misinterpretation (Reduced randomness)
     // Inversely proportional to IQ. 99 IQ = basically 0 noise. 50 IQ = +/- 15 score noise.
-    const noiseMax = 30 * (1.0 - iqFactor); 
+    const noiseMax = 30 * (1.0 - iqFactor);
     const noiseRun = (Math.random() * noiseMax) - (noiseMax / 2);
     const noisePass = (Math.random() * noiseMax) - (noiseMax / 2);
 
@@ -690,9 +690,9 @@ function diagnosePlay(pState, tick, offenseStates, truePlayType, offensivePlayKe
     let confidence = 0;
 
     const scoreDiff = Math.abs(finalRunScore - finalPassScore);
-    
+
     // Confidence is based on how strongly one score outweighs the other (Scale of 0.0 to 1.0)
-    confidence = Math.max(0, Math.min(1.0, scoreDiff / 60)); 
+    confidence = Math.max(0, Math.min(1.0, scoreDiff / 60));
 
     // Threshold to commit: Must have a clear winner, or enough time has passed.
     // High IQ players require less confidence to make the right read early.
@@ -700,7 +700,7 @@ function diagnosePlay(pState, tick, offenseStates, truePlayType, offensivePlayKe
 
     if (confidence > commitThreshold || tick > 40) {
         guess = finalRunScore > finalPassScore ? 'run' : 'pass';
-        
+
         // Late Read Adjustment: If it's very late and ball is passed, force pass read
         if (tick > 50 && truePlayType === 'pass') {
             guess = 'pass';
@@ -1765,24 +1765,42 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
 
                         const initialDepth = playState.lineOfScrimmage - startY;
                         const isShotgun = initialDepth >= 4.0;
+                        const isScreen = play.tags && play.tags.includes('screen');
 
                         if (play.type === 'run') {
-                            if (isShotgun) dropbackTargetY = startY - 0.5;
-                            else dropbackTargetY = playState.lineOfScrimmage - 3.5;
+                            // RUN PLAY: Minimal movement to handoff point
+                            if (isShotgun) {
+                                dropbackTargetY = startY - 0.5;
+                            } else {
+                                dropbackTargetY = playState.lineOfScrimmage - 3.5;
+                            }
                         } else {
-                            const isQuick = play.tags && (play.tags.includes('short') || play.tags.includes('quick') || play.tags.includes('screen'));
+                            // PASS PLAY: Calculate specific dropback depth
+                            const isScreen = play.tags && play.tags.includes('screen');
+                            const isQuick = play.tags && (play.tags.includes('short') || play.tags.includes('quick'));
                             const isDeep = play.tags && (play.tags.includes('deep') || play.tags.includes('hailmary'));
 
                             let targetDepth = 0;
-                            if (isShotgun) {
-                                if (isQuick) targetDepth = initialDepth;
-                                else if (isDeep) targetDepth = 9.5;
-                                else targetDepth = 7.5;
-                            } else {
-                                if (isQuick) targetDepth = 3.5;
-                                else if (isDeep) targetDepth = 9.0;
-                                else targetDepth = 6.0;
+
+                            // 💡 Priority 1: Screen Plays (The "Bait" Drop)
+                            // We want the QB to drop deep regardless of Shotgun or Under Center to pull the DL in.
+                            if (isScreen) {
+                                targetDepth = 12.0;
+                                pState.contactReduction = 1.4; // Boost speed to retreat into the screen "pocket" quickly
                             }
+                            // 💡 Priority 2: Shotgun Drops
+                            else if (isShotgun) {
+                                if (isQuick) targetDepth = initialDepth; // Catch and throw (0-step)
+                                else if (isDeep) targetDepth = 10.0;     // Deep drop
+                                else targetDepth = 7.5;                  // Standard drop
+                            }
+                            // 💡 Priority 3: Under Center Drops (3-step, 5-step, 7-step)
+                            else {
+                                if (isQuick) targetDepth = 3.5;
+                                else if (isDeep) targetDepth = 9.5;
+                                else targetDepth = 6.5;
+                            }
+
                             dropbackTargetY = playState.lineOfScrimmage - targetDepth;
                         }
                     }
@@ -1824,14 +1842,14 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
 
                 // 💡 FIX 1: Map Conceptual Roles (X, Z, Y) to Actual Slots (WR1, WR2, TE1) FIRST
                 if (assignment.startsWith('man_cover_') || assignment === 'def_read') {
-                    
+
                     let targetSlot = assignment.replace('man_cover_', '');
                     const offMapping = offenseFormationData.mapping || {};
 
                     if (offMapping[targetSlot]) {
                         const mappedSlot = offMapping[targetSlot];
                         targetSlot = Array.isArray(mappedSlot) ? mappedSlot[0] : mappedSlot;
-                        
+
                         if (assignment !== 'def_read') {
                             assignment = `man_cover_${targetSlot}`;
                         }
@@ -1843,9 +1861,9 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
                     if (!targetExists || assignment === 'def_read') {
                         // Priority list for this position type
                         let priorities = [];
-                        if (slot.startsWith('DB')) priorities =['WR1', 'WR2', 'WR3', 'TE1', 'RB1'];
+                        if (slot.startsWith('DB')) priorities = ['WR1', 'WR2', 'WR3', 'TE1', 'RB1'];
                         else if (slot.startsWith('LB')) priorities = ['RB1', 'TE1', 'RB2', 'WR3'];
-                        else priorities =['RB1'];
+                        else priorities = ['RB1'];
 
                         // 💡 FIX 2: Check coveredOffensiveSlots to ensure we don't assign 3 guys to WR1
                         const bestTarget = priorities.find(t =>
@@ -1874,7 +1892,7 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
                 if (assignment.startsWith('man_cover_')) {
                     const tSlot = assignment.split('_')[2];
                     const tState = initialOffenseStates.find(o => o.slot === tSlot);
-                    
+
                     if (tState) {
                         const isSlot = tSlot.includes('TE') || tSlot === 'WR3';
                         let xOffset = (tState.x < CENTER_X) ? (isSlot ? 1.0 : -0.5) : (isSlot ? -1.0 : 0.5);
@@ -1885,8 +1903,8 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
 
                         if (existingCoverers === 1) {
                             // Double Coverage: Play inside shoulder, deeper bracket
-                            xOffset *= -2.5; 
-                            yOffset += 2.0;  
+                            xOffset *= -2.5;
+                            yOffset += 2.0;
                         } else if (existingCoverers >= 2) {
                             // Triple Coverage: Play dead center, much deeper (Safety help)
                             xOffset = 0;
@@ -2529,6 +2547,28 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
     const assignBlockerTarget = (blocker, threats) => {
         if (blocker.isEngaged) return;
 
+        const isScreenPlay = playState.playKey?.includes('Screen');
+
+        if (isScreenPlay && blocker.assignment?.includes('Wall')) {
+            if (playState.tick < 25) {
+                // Leak: Backpedal to invite the rush
+                blocker.targetX = blocker.initialX;
+                blocker.targetY = blocker.y - 1.5;
+                blocker.contactReduction = 0.5;
+                return;
+            } else {
+                // Sprint: Go to the screen receiver
+                const targetRec = playState.activePlayers.find(p => p.assignment === 'Screen_Wait');
+                if (targetRec) {
+                    blocker.targetX = targetRec.x + (blocker.initialX > CENTER_X ? -3 : 3);
+                    blocker.targetY = targetRec.y + 3.0;
+                    blocker.action = 'run_path';
+                    blocker.contactReduction = 1.4;
+                    return;
+                }
+            }
+        }
+
         const VISION_RANGE = 10.0;
         const validThreats = threats.filter(t =>
             getDistance(blocker, t) < VISION_RANGE &&
@@ -2944,63 +2984,85 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                     const pt = pState.routePath[pState.currentPathIndex];
                     const distToNode = getDistance(pState, pt);
 
-                    // As the receiver approaches the turn, they "plant" and "cut"
-                    if (distToNode < 1.5) pState.contactReduction = 1.2 + ((pState.agility || 50) / 200);
-                    // High agility = faster turns. We give a temporary speed burst 
-                    // to simulate the "explosion" out of a break.
-                    else pState.contactReduction = 1.0;
+                    // 1. PHYSICAL PLANT (Slow down slightly before a cut, then burst)
+                    if (distToNode < 1.0) {
+                        pState.contactReduction = 0.8; // "Planting" the foot
+                    } else {
+                        pState.contactReduction = 1.0;
+                    }
 
-                    pState.targetX = pt.x; pState.targetY = pt.y;
+                    pState.targetX = pt.x;
+                    pState.targetY = pt.y;
 
+                    // 2. THE CUT EVENT (Reached the node)
                     if (distToNode < 0.6) {
                         pState.currentPathIndex++;
-                        const coverageDefender = defenseStates.find(d => (d.assignment?.includes(pState.slot) || d.assignedPlayerId === pState.id) && getDistance(pState, d) < 4.0);
 
-                        if (DEBUG_MODE && coverageDefender) {
-                            const sep = getDistance(pState, coverageDefender);
-                            console.log(`[ROUTE-CUT] ${pState.name} turned. Separation from ${coverageDefender.name}: ${sep.toFixed(2)}y`);
-                        }
+                        // Find the primary defender covering this receiver
+                        const coverageDefender = defenseStates.find(d =>
+                            (d.assignment?.includes(pState.slot) || d.assignedPlayerSlot === pState.slot) &&
+                            getDistance(pState, d) < 5.0
+                        );
 
                         if (coverageDefender) {
-                            const wrSkill = (pState.agility || 50) + (pState.playbookIQ || 50);
-                            const dbSkill = (coverageDefender.agility || 50) + (coverageDefender.playbookIQ || 50);
-                            // If WR wins the cut, they create separation and "stun" the DB's momentum
-                            if (Math.random() * wrSkill > Math.random() * dbSkill * 0.85) {
-                                coverageDefender.stunnedTicks = Math.max(coverageDefender.stunnedTicks, 15 + Math.floor((wrSkill - dbSkill) / 5));
-                                const dx = coverageDefender.x - pState.x; const dy = coverageDefender.y - pState.y;
-                                const dist = Math.max(0.1, Math.hypot(dx, dy));
-                                coverageDefender.x += (dx / dist) * 0.8; coverageDefender.y += (dy / dist) * 0.8;
-                                if (gameLog && Math.random() < 0.08) pushGameLog(gameLog, `[Tick ${playState.tick}] 💨 ${pState.name} shakes ${coverageDefender.name} for separation!`, playState);
-                            } else {
-                                // If DB wins, they stick to the receiver, potentially stunting their speed
-                                pState.contactReduction = 0.8;
-                                if (gameLog && Math.random() < 0.03) pushGameLog(gameLog, `[Tick ${playState.tick}] 🔒 ${coverageDefender.name} blankets ${pState.name}!`, playState);
+                            const wrAgility = pState.agility || 50;
+                            const dbAgility = coverageDefender.agility || 50;
+                            const dbIQ = coverageDefender.playbookIQ || 50;
+
+                            // WIN/LOSS CALCULATION
+                            // WR wins if they are more agile, or if the DB is "fooled" (Low IQ)
+                            const shakeChance = (wrAgility / (dbAgility + 10)) * (1.2 - (dbIQ / 150));
+
+                            if (Math.random() < shakeChance * 0.4) {
+                                // SUCCESSFUL SHAKE: Defender is "Stunned" (hesitates)
+                                coverageDefender.stunnedTicks = Math.max(10, 25 - (dbIQ / 4));
+
+                                // Visual juice: Force the defender to move slightly in the WRONG direction
+                                const dx = pState.vx * 0.5;
+                                coverageDefender.x += dx;
+
+                                if (gameLog && Math.random() < 0.2) {
+                                    pushGameLog(gameLog, `[Tick ${playState.tick}] 💨 ${pState.name} shakes ${coverageDefender.name} on the cut!`, playState);
+                                }
                             }
                         }
+
+                        // ACCELERATION BURST: Burst out of the cut
+                        pState.vx *= 1.2;
+                        pState.vy *= 1.2;
                     }
                     break;
 
                 case 'route_complete':
-                    if (!pState.freestyleTick || playState.tick > pState.freestyleTick + 30) {
-                        pState.freestyleTick = playState.tick;
-                        let bestX = pState.x; let bestY = pState.y; let bestScore = 0;
-                        for (let angle = 0; angle < Math.PI * 2; angle += Math.PI / 6) {
-                            for (let dist = 1; dist <= 5; dist += 1) {
-                                const testX = pState.x + Math.cos(angle) * dist;
-                                const testY = pState.y + Math.sin(angle) * dist;
-                                if (testX < 2 || testX > 51.3 || testY < 0 || testY > 120) continue;
-                                let score = 100 - (dist * 2);
-                                defenseStates.forEach(d => {
-                                    const distToDef = getDistance({ x: testX, y: testY }, d);
-                                    if (distToDef < 5) score -= (25 / (distToDef + 0.5));
-                                });
-                                if (score > bestScore) { bestScore = score; bestX = testX; bestY = testY; }
+                    // Every 20 ticks, find the nearest "Green Grass" (away from defenders)
+                    if (playState.tick % 20 === 0) {
+                        let bestX = pState.x;
+                        let bestY = pState.y + 2; // Drift upfield by default
+                        let maxDistToDef = 0;
+
+                        // Check 4 diagonal points around the player
+                        const searchPoints = [
+                            { x: pState.x + 4, y: pState.y + 2 }, { x: pState.x - 4, y: pState.y + 2 },
+                            { x: pState.x + 3, y: pState.y - 2 }, { x: pState.x - 3, y: pState.y - 2 }
+                        ];
+
+                        searchPoints.forEach(p => {
+                            if (p.x < 2 || p.x > FIELD_WIDTH - 2) return;
+
+                            // Find distance to closest defender for this point
+                            const closestDef = defenseStates.reduce((min, d) =>
+                                Math.min(min, getDistance(p, d)), 100);
+
+                            if (closestDef > maxDistToDef) {
+                                maxDistToDef = closestDef;
+                                bestX = p.x;
+                                bestY = p.y;
                             }
-                        }
-                        pState.dynamicTargetX = bestX; pState.dynamicTargetY = bestY;
+                        });
+
+                        pState.targetX = bestX;
+                        pState.targetY = bestY;
                     }
-                    pState.targetX = pState.dynamicTargetX || pState.x;
-                    pState.targetY = pState.dynamicTargetY || pState.y;
                     break;
 
                 case 'pass_block':
@@ -3044,12 +3106,12 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
             if (typeof DEBUG_MODE !== 'undefined' && DEBUG_MODE) {
                 // Log when a player gets fooled by Play Action
                 if (isFooledByPA && !pState.loggedPA) {
-                    console.log(`[DEF-FOOLED] 🎣 ${pState.name} bit on the Play Action! Confidence: ${(diagConfidence*100).toFixed(0)}%`);
+                    console.log(`[DEF-FOOLED] 🎣 ${pState.name} bit on the Play Action! Confidence: ${(diagConfidence * 100).toFixed(0)}%`);
                     pState.loggedPA = true;
                 }
                 // Log LB diagnosis periodically to track read progression
                 if (pState.role === 'LB' && playState.tick % 15 === 0) {
-                    console.log(`[DEF-DIAGNOSIS] ${pState.name} (${pState.slot}): Sees "${playDiagnosis}" (Conf: ${(diagConfidence*100).toFixed(0)}%). Action: ${pState.action}`);
+                    console.log(`[DEF-DIAGNOSIS] ${pState.name} (${pState.slot}): Sees "${playDiagnosis}" (Conf: ${(diagConfidence * 100).toFixed(0)}%). Action: ${pState.action}`);
                 }
             }
 
@@ -3061,7 +3123,7 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
 
             if (playDiagnosis === 'read') {
                 pState.action = 'idle';
-                pState.targetX = pState.x; 
+                pState.targetX = pState.x;
                 pState.targetY = pState.y;
                 return; // Don't allow pursuit yet!
             }
@@ -3124,7 +3186,7 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
 
                         pState.targetX = predX;
                         pState.targetY = predY;
-                        pState.contactReduction = 0.6 + (diagConfidence * 0.4); 
+                        pState.contactReduction = 0.6 + (diagConfidence * 0.4);
                     }
 
                     pState.action = 'pursuit';
@@ -3796,6 +3858,10 @@ function resolveOngoingBlocks(playState, gameLog, offenseStates = [], defenseSta
         let blockPower = (((blocker.blocking || 50) * 1.25) + (blocker.strength || 50)) * blocker.fatigueModifier;
         let shedPower = ((defender.blockShedding || 50) + (defender.strength || 50)) * defender.fatigueModifier;
 
+        if (playState.playKey?.includes('Screen') && playState.tick < 20) {
+            blockPower *= 0.1; // Defenders will "Shed" or "Pancake" instantly to chase the QB
+        }
+
         const ticksInBlock = playState.tick - battle.startTick;
         if (ticksInBlock < 30) {
             blockPower *= 1.25;
@@ -4223,6 +4289,18 @@ function updateQBDecision(qbState, offenseStates, defenseStates, playState, offe
             r.assignedPlayerSlot === slotOrRole
         );
 
+        // 💡 SCREEN TIMING VALVE
+        if (rec.assignment === 'Screen_Wait') {
+            // QB refuses to throw the screen until the blockers have had time to leak (tick 40+)
+            if (playState.tick < 45) return { score: -100 };
+
+            // If the screen is developing, give it a massive score boost to ensure he picks it
+            score += 80;
+
+            // If there's a defender right in the receiver's face before the wall forms, ABORT
+            if (minProjectedSeparation < 1.0) score -= 150;
+        }
+
         if (!rec || !rec.action.includes('route')) return null;
         // 1. ESTIMATE FLIGHT TIME (Better Physics Sync)
         const distFromQB = getDistance(qbState, rec);
@@ -4278,6 +4356,12 @@ function updateQBDecision(qbState, offenseStates, defenseStates, playState, offe
 
         // Base score: 0 to 60 based on separation
         let score = (Math.min(minProjectedSeparation, 6) * 10);
+
+        if (rec.assignment === 'Screen_Wait') {
+            if (playState.tick < 45) return null; // QB ignores the screen until blockers leak
+            score += 80; // High priority once ready
+            if (minProjectedSeparation < 1.0) score -= 150; // Don't throw if defender is on top of him
+        }
 
         // 💡 DEPTH BONUSES: Must be contingent on separation!
         if (depth > 5 && depth < 15) {
@@ -5614,14 +5698,14 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
 
                         // 💡 FIX: Prevent QB/RB collision explosion!
                         // Allow them to phase through each other for 1.25 seconds (25 ticks)
-                        qb1.ghostTicks = 25; 
+                        qb1.ghostTicks = 25;
                         rb1.ghostTicks = 25;
 
                         rb1.contactReduction = 1.2;
                         rb1.action = 'run_path';
                         if (finalOffensivePlayKey.includes('Flea_Flicker')) {
                             rb1.fleaFlickerPhase = 'running_draw';
-                            rb1.fleaFlickerTimer = playState.tick + 22; 
+                            rb1.fleaFlickerTimer = playState.tick + 22;
                         }
                     } else {
                         // Movement to mesh point (Your existing code here...)
