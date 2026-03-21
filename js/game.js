@@ -24,6 +24,13 @@ import {
 
 const DEBUG_MODE = true;
 
+function debugLog(category, message, frequency = 1) {
+    if (!DEBUG_MODE) return;
+    // frequency = 1 means every time. frequency = 10 means once every 10 calls.
+    if (frequency > 1 && Math.random() > (1 / frequency)) return;
+    console.log(`%c${category}`, "color: #fbbf24; font-weight: bold", message);
+}
+
 // --- Global Game State ---
 let game = null;
 let playerMap = new Map();
@@ -2340,6 +2347,9 @@ function getSmartCarrierTarget(runner, defenseStates, offenseStates, fieldWidth 
             bestTargetY = Math.min(bestTargetY, runner.y + 1.5);
         }
     }
+    if (DEBUG_MODE && runner.slot === 'RB1' && playState.tick % 15 === 0) {
+    console.log(`[RUNNER-VISION] ${runner.name} | Best Lane Score: ${bestScore.toFixed(0)} | Offset: ${bestTargetX - runner.x > 0 ? 'Right' : 'Left'}`);
+}
 
     bestTargetX = Math.max(1.0, Math.min(fieldWidth - 1.0, bestTargetX));
     return { x: bestTargetX, y: bestTargetY };
@@ -2959,6 +2969,15 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
             const isRunRead = playDiagnosis === 'run';
             const isFooledByPA = (playDiagnosis === 'run' && playType === 'pass' && !isDL);
 
+            if (DEBUG_MODE && pState.role === 'LB' && playState.tick % 20 === 0) { // Log every 20 ticks to avoid spam
+                console.log(`[DEF-BRAIN] ${pState.name} (${pState.slot}) state: ${pState.action} | Diagnosis: ${playDiagnosis}`);
+            }
+
+            // And specifically for Play Action
+            if (DEBUG_MODE && isFooledByPA && !pState.loggedPA) {
+                console.log(`[DEF-FOOLED] 🎣 ${pState.name} bit on the Play Action! Reaction delay: ${pState.snapReactionTimer} ticks.`);
+            }
+
             // 2. CONTEXT ANALYSIS
             const carrierIsPasser = ballCarrierState && !playState.handoffOccurred && !playState.fumbleOccurred;
             const isBallPastLOS = ballCarrierState && ballCarrierState.y > LOS + 0.5;
@@ -3496,6 +3515,13 @@ function checkTackleCollisions(playState, gameLog) {
 
         successChance = Math.max(0.10, Math.min(0.98, successChance));
 
+        if (DEBUG_MODE) {
+            console.log(`[TACKLE-CALC] ${defender.name} vs ${carrier.name}: ` +
+                `Chance: ${(successChance * 100).toFixed(1)}% | ` +
+                `Broken previously: ${carrier.tacklesBrokenThisPlay || 0} | ` +
+                `Momentum Ratio: ${(tMomentum / Math.max(1, rMomentum)).toFixed(2)}`);
+        }
+
         if (Math.random() < successChance) {
             // --- TACKLE SUCCESS ---
             playState.playIsLive = false;
@@ -3774,6 +3800,8 @@ function resolveOngoingBlocks(playState, gameLog, offenseStates = [], defenseSta
             }
         }
 
+
+
         // 5. Resolution
         if (battle.status === 'win_B') { // Defender Sheds
             blocker.engagedWith = null; blocker.isEngaged = false;
@@ -3789,6 +3817,13 @@ function resolveOngoingBlocks(playState, gameLog, offenseStates = [], defenseSta
             blocker.engagedWith = null; blocker.isEngaged = false;
             defender.isBlocked = false; defender.blockedBy = null; defender.isEngaged = false;
             battlesToRemove.push(index);
+        }
+
+        if (DEBUG_MODE && (battle.status === 'win_A' || battle.status === 'win_B')) {
+            const winner = battle.status === 'win_A' ? battle.blocker.name : battle.defender.name;
+            const type = battle.status === 'win_A' ? "PANCAKE" : "SHED";
+            const duration = playState.tick - battle.startTick;
+            console.log(`[BLOCK-END] ${type} by ${winner} after ${duration} ticks. Score: ${battle.battleScore.toFixed(1)}`);
         }
     });
 
@@ -4218,6 +4253,11 @@ function updateQBDecision(qbState, offenseStates, defenseStates, playState, offe
             console.log(`[QB-BRAIN] ${qbState.name} scanning: [${brainSummary}] Threshold: ${THROW_THRESHOLD}`);
         }
 
+        if (DEBUG_MODE) {
+            const pen = adjustedAccuracy - qbAcc;
+            console.log(`[QB-STATS] ${qbState.name} Accuracy: ${qbAcc.toFixed(0)} | Pressure Penalty: ${pen.toFixed(0)} | Final: ${adjustedAccuracy.toFixed(0)}`);
+        }
+
         // EXECUTE THROW DECISION
         if (bestTargetEval && bestTargetEval.score > THROW_THRESHOLD) {
             targetPlayerState = bestTargetEval.info.state;
@@ -4536,10 +4576,10 @@ function executeThrow(qbState, target, strength, accuracy, playState, gameLog, a
 
     // NEW PHYSICS MATH: 
     // We want the ball to hit the receiver right in the chest (z = 1.0)
-    const targetZ = 1.0; 
+    const targetZ = 1.0;
     const startZ = 2.2; // QB release height
     const deltaZ = targetZ - startZ;
-    
+
     // This calculates the exact vertical velocity needed to arrive at targetZ at time t
     const vz = (deltaZ + (4.9 * t * t)) / t;
 
@@ -4813,9 +4853,16 @@ function handleBallArrival(playState, carrier, playResult, gameLog) {
             else catchScore -= 60;
         }
 
+        if (DEBUG_MODE && playersInRange.length > 1) {
+            const list = playersInRange.map(p =>
+                `${p.name}(${p.id === ball.targetPlayerId ? 'Target' : 'Neighbor'}, Dist:${getDistance(p, ball).toFixed(1)})`
+            ).join(' vs ');
+            console.log(`[CATCH-BATTLE] ${list}`);
+        }
+
         if (typeof DEBUG_MODE !== 'undefined' && DEBUG_MODE) {
             // Recalculate distance safely for the log
-            const distToBall = Math.sqrt((bestCandidate.x - ball.x)**2 + (bestCandidate.y - ball.y)**2);
+            const distToBall = Math.sqrt((bestCandidate.x - ball.x) ** 2 + (bestCandidate.y - ball.y) ** 2);
             console.log(`[CATCH-CHANCE] ${bestCandidate.name}: ${catchScore.toFixed(1)}% | Ball Height: ${ball.z.toFixed(2)} | Dist to Ball: ${distToBall.toFixed(2)}`);
         }
 
@@ -4997,9 +5044,9 @@ function handleBallArrival(playState, carrier, playResult, gameLog) {
                 playState.finalBallY = playState.lineOfScrimmage;
 
                 const targetRec = playState.activePlayers.find(p => p.id === ball.targetPlayerId);
-                if (DEBUG_MODE && targetRec && !ball.isThrowAway) {
-                    const distToBall = getDistance(ball, targetRec);
-                    console.log(`[PASS-INCOMPLETE] Ball landed: (${ball.x.toFixed(1)}, ${ball.y.toFixed(1)}). Target ${targetRec.name} was at: (${targetRec.x.toFixed(1)}, ${targetRec.y.toFixed(1)}). Missed by: ${distToBall.toFixed(1)}y`);
+                if (DEBUG_MODE && !wasCaught) {
+                    const flightTime = ((playState.tick - ball.throwTick) * 0.05).toFixed(2);
+                    console.log(`[PASS-FINAL] Incomplete. Flight Time: ${flightTime}s | Final Ball Pos: (${ball.x.toFixed(1)}, ${ball.y.toFixed(1)})`);
                 }
 
                 if (gameLog) gameLog.push(`[Tick ${playState.tick}] ⏱️ Pass hits the turf. Incomplete.`);
@@ -5119,7 +5166,9 @@ function resetPlayerRuntimeState(playerState) {
  * Simulates a single play tick-by-tick.
  * The "Main Loop" of the physics engine.
  */
+
 function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, context, options, isLive = false) {
+    if (DEBUG_MODE) console.groupCollapsed(`Play Tick ${playState.tick}: ${offensivePlayKey}`);
 
     // 1. Extract values from context
     const { gameLog = [], weather, ballOn, ballHash = 'M', down, yardsToGo, offenseScore = 0, defenseScore = 0, playsRemaining = 60, quarter = 1 } = context;
@@ -5586,6 +5635,8 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
                                 playState.yards = ballCarrierState.y - playState.lineOfScrimmage;
                                 playState.finalBallY = ballCarrierState.y;
                                 if (gameLog) gameLog.push(`[Tick ${playState.tick}] ⏱️ Forward progress stopped. Play blown dead.`);
+
+                                if (DEBUG_MODE) console.log(`[WHISTLE] Progress Stalled. ${ballCarrierState.name} only moved ${totalDistMoved.toFixed(2)}y in 30 ticks.`);
                                 break;
                             }
                             playState.stallCheck = { tick: playState.tick, y: ballCarrierState.y };
@@ -5881,6 +5932,8 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
     });
 
     playState.activePlayers.forEach(p => resetPlayerRuntimeState(p));
+
+    if (DEBUG_MODE) console.groupEnd();
 
     return {
         playResult,
