@@ -70,6 +70,14 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
     if (pState.isBallCarrier) speedMult *= 0.90; // Padding/ball carrying slows you down ~10%
     if (pState.action === 'backpedal') speedMult *= 0.55;
 
+    // Power vs Speed tradeoff
+    if (pState.action === 'trucking') {
+        speedMult *= 0.7; // Lower top speed while lowering the shoulder
+        pState.weightMultiplier = 1.5; // Artificial "heaviness" for collisions
+    } else {
+        pState.weightMultiplier = 1.0; // Reset if not trucking
+    }
+
     // Final speed limit is capped by gap friction (squeezing through a hole slows you down)
     const maxPossibleSpeed = baseMaxSpeed * speedMult * gapFriction * (pState.contactReduction || 1.0);
 
@@ -170,6 +178,7 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
             const totalWeight = (pState.weight || 200) + (other.weight || 200);
             const myDeflection = (other.weight || 200) / totalWeight;
             const theirDeflection = (pState.weight || 200) / totalWeight;
+
 
             pState.x += dx_norm * pushMagnitude * myDeflection;
             pState.y += dy_norm * pushMagnitude * myDeflection;

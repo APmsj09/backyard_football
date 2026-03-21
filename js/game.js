@@ -2320,6 +2320,7 @@ function getSmartCarrierTarget(runner, defenseStates, offenseStates, fieldWidth 
 
         // SALVAGE: If no good escape exists and we are strong, just fall forward.
         if (strengthAdvantage > 10 && inTraffic && bestScore < 50) {
+            runner.action = 'trucking';
             bestTargetX = immediateThreat.x + (immediateThreat.x > runner.x ? -0.4 : 0.4);
             bestTargetY = immediateThreat.y + 1.5;
             runner.contactReduction = 0.9; // Hunker down for impact
@@ -2672,6 +2673,16 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                 pState.isBallCarrier = true;
                 let targetX = pState.x;
                 let targetY = pState.y;
+
+                // We need to identify the immediate threat to see if we should STOP trucking
+                const nearbyDefenders = defenseStates.filter(d => !d.isBlocked && d.stunnedTicks === 0);
+                const immediateThreat = nearbyDefenders.sort((a, b) => getDistance(pState, a) - getDistance(pState, b))[0];
+
+                if (pState.action === 'trucking') {
+                    if (!immediateThreat || getDistance(pState, immediateThreat) > 3.0) {
+                        pState.action = 'run_path'; // Resume normal speed/agility
+                    }
+                }
 
                 // 1. DESIGNED RUN PATH (The "Pre-AI" Phase)
                 // If the RB has a designed route (run_outside, run_counter, etc.) follow it first.
@@ -5402,7 +5413,7 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
 
             // --- D. PLAYER MOVEMENT ---
             playState.activePlayers.forEach(p => {
-                try { updatePlayerPosition(p, timeDelta); } catch (e) { /* ignore */ }
+                try { updatePlayerPosition(p, timeDelta, playState.activePlayers); } catch (e) { console.error("Movement error:", e); }
             });
 
             // --- E. BALL PHYSICS & CATCHING ---
