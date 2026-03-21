@@ -1,247 +1,236 @@
-// physics.js - coordinate and movement helpers
-
-/** Calculates distance between two player states. */
-export function getDistance(p1State, p2State) {
-    if (
-        !p1State || !p2State ||
-        typeof p1State.x !== 'number' || typeof p1State.y !== 'number' ||
-        typeof p2State.x !== 'number' || typeof p2State.y !== 'number'
-    ) return Infinity;
-
-    const dx = p1State.x - p2State.x;
-    const dy = p1State.y - p2State.y;
+/**
+ * Calculates Euclidean distance between two points.
+ */
+export function getDistance(p1, p2) {
+    if (!p1 || !p2) return Infinity;
+    const dx = (p1.x ?? 0) - (p2.x ?? 0);
+    const dy = (p1.y ?? 0) - (p2.y ?? 0);
     return Math.sqrt(dx * dx + dy * dy);
 }
 
-// physics.js - safe coordinate/movement helper
-export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
-    // --- 0. Pre-Flight Checks ---
+/**
+ * Main Physics and Movement Engine
+ * Handles momentum, mass-based inertia, gap friction, and Newtonian collisions.
+ */
+export function updatePlayerPosition(pState, timeDelta, allPlayers =[]) {
     if (!pState || typeof pState.x !== 'number') return;
-    if (!pState.vx) pState.vx = 0;
-    if (!pState.vy) pState.vy = 0;
+    
+    pState.vx = pState.vx || 0;
+    pState.vy = pState.vy || 0;
 
-    // 💡 NEW: Enforce Snap Reaction Time
+    // --- 1. SNAP REACTION TIMER ---
     if (pState.snapReactionTimer > 0) {
         pState.snapReactionTimer--;
-        // Kill any AI-applied momentum. They are frozen in their stance.
         pState.vx = 0;
         pState.vy = 0;
         pState.targetX = pState.x;
         pState.targetY = pState.y;
-        return; // Exit early! No movement allowed yet.
+        return; 
     }
 
-    // --- 1. Gap Awareness & Squeezing ---
-    // This reduces speed and agility when "skinnying" through a hole
-    const gapFriction = allPlayers.length > 0 ? calculateGapFriction(pState, allPlayers) : 1.0;
-    pState.isSqueezing = gapFriction < 0.9;
-
-    // --- 2. Handle Stuns / Blocks (Friction State) ---
+    // --- 2. PASSIVE STATES (Stunned/Blocked) ---
     if (pState.stunnedTicks > 0 || pState.isBlocked || pState.isEngaged) {
-        const friction = 0.85;
-        pState.vx *= friction; pState.vy *= friction;
-        pState.x += pState.vx * timeDelta; pState.y += pState.vy * timeDelta;
-        pState.currentSpeedYPS = Math.sqrt(pState.vx * pState.vx + pState.vy * pState.vy);
+        const friction = 0.85; 
+        pState.vx *= friction;
+        pState.vy *= friction;
+        pState.x += pState.vx * timeDelta;
+        pState.y += pState.vy * timeDelta;
+        pState.currentSpeedYPS = Math.sqrt(pState.vx ** 2 + pState.vy ** 2);
         return;
     }
 
-    // --- 3. Target Vector Math ---
-    const targetX = pState.targetX || pState.x;
-    const targetY = pState.targetY || pState.y;
+    // --- 3. ATTRIBUTE RETRIEVAL & NORMALIZATION ---
+    // Safe fallbacks for mapping structures
+    const weight = pState.weight || pState.wgt || 200;
+    const strength = pState.strength || pState.str || 50;
+    const agility = pState.agility || pState.agi || 50;
+    const speedStat = pState.speed || pState.spd || 50;
+    const fatigueMod = pState.fatigueModifier || 1.0;
+
+    // Ratios for physics math (225 lbs is considered the "baseline" 1.0 ratio)
+    const weightRatio = weight / 225; 
+    const strengthFactor = strength / 100;
+    const agiFactor = agility / 100;
+
+    // --- 4. TARGETING MATH ---
+    const targetX = pState.targetX ?? pState.x;
+    const targetY = pState.targetY ?? pState.y;
     const dx = targetX - pState.x;
     const dy = targetY - pState.y;
     const distToTarget = Math.sqrt(dx * dx + dy * dy);
 
-    // If arrived, bleed off velocity rapidly
+    // Hard arrival stop
     if (distToTarget < 0.05) {
-        pState.vx *= 0.5; pState.vy *= 0.5;
+        pState.vx *= 0.5;
+        pState.vy *= 0.5;
         return;
     }
 
-    // --- 4. Attributes & Base Limits (REAL WORLD MATH) ---
-    const speedStat = pState.speed || 50;
-    const agilityStat = pState.agility || 50;
-    const fatigueMod = pState.fatigueModifier || 1.0;
+    // --- 5. TOP SPEED CALCULATION ---
+    const gapFriction = calculateGapFriction(pState, allPlayers);
+    pState.isSqueezing = gapFriction < 0.9;
 
-    // Top Speed Range: 7.2 yds/sec (0 rating) to 10.8 yds/sec (99 rating = ~22mph peak)
-    const baseMaxSpeed = (7.2 + (speedStat / 100) * 3.6) * fatigueMod;
+    // Base Speed: 7.0 yds/sec to 11.0 yds/sec
+    const baseMaxSpeed = (7.0 + (speedStat / 100) * 4.0) * fatigueMod;
+    
+    // Weight Penalty: 160lbs = +4% speed | 200lbs = 0% | 350lbs = -15% speed
+    const weightSpeedPenalty = Math.max(0.80, 1.0 - ((weight - 200) / 1000)); 
+    
+    let actionMult = pState.speedMultiplier || 1.0;
+    if (pState.isBallCarrier) actionMult *= 0.92; 
+    if (pState.action === 'backpedal') actionMult *= 0.55;
+    if (pState.action === 'trucking') actionMult *= 0.75;
 
-    let speedMult = pState.speedMultiplier || 1.0;
-    if (pState.isBallCarrier) speedMult *= 0.90; // Padding/ball carrying slows you down ~10%
-    if (pState.action === 'backpedal') speedMult *= 0.55;
+    const maxPossibleSpeed = baseMaxSpeed * weightSpeedPenalty * actionMult * gapFriction * (pState.contactReduction || 1.0);
 
-    // Power vs Speed tradeoff
-    if (pState.action === 'trucking') {
-        speedMult *= 0.7; // Lower top speed while lowering the shoulder
-        pState.weightMultiplier = 1.5; // Artificial "heaviness" for collisions
-    } else {
-        pState.weightMultiplier = 1.0; // Reset if not trucking
+    // --- 6. CARRYING MOMENTUM & CUTTING ---
+    const currentSpeed = Math.sqrt(pState.vx ** 2 + pState.vy ** 2);
+    let turningPenalty = 1.0;
+
+    if (currentSpeed > 0.5 && distToTarget > 0.1) {
+        // Dot Product: 1.0 = Straight, 0.0 = 90 degree cut, -1.0 = U-turn
+        const dot = ((pState.vx / currentSpeed) * (dx / distToTarget)) + ((pState.vy / currentSpeed) * (dy / distToTarget));
+        
+        // WEIGHT IMPACT ON CUTS:
+        // Heavier players drift significantly more on sharp cuts. Agility fights this drift.
+        const cutStability = 0.4 + (agiFactor * 0.5) - ((weightRatio - 1.0) * 0.3);
+        turningPenalty = Math.max(cutStability, dot);
     }
+    const effectiveMaxSpeed = maxPossibleSpeed * turningPenalty;
 
-    // Final speed limit is capped by gap friction (squeezing through a hole slows you down)
-    const maxPossibleSpeed = baseMaxSpeed * speedMult * gapFriction * (pState.contactReduction || 1.0);
+    // --- 7. ACCELERATION (Strength vs. Weight) ---
+    // Explosiveness = Force (Strength) / Mass (Weight)
+    const explosiveness = (0.5 + strengthFactor) / weightRatio;
+    
+    // Agility helps players start their feet moving quickly
+    let accelRate = (1.5 + (agiFactor * 2.0) + (explosiveness * 2.0)) * fatigueMod;
 
-    // --- 5. Turning & Inertia (Dot Product Logic) ---
-    const currentSpeed = Math.sqrt(pState.vx * pState.vx + pState.vy * pState.vy);
-    let dotProduct = 1.0;
-
-    if (currentSpeed > 0.1) {
-        // Alignment between current velocity and direction to target
-        const nx = pState.vx / currentSpeed;
-        const ny = pState.vy / currentSpeed;
-        const tx = dx / distToTarget;
-        const ty = dy / distToTarget;
-        dotProduct = (nx * tx) + (ny * ty); // 1.0 = Straight, 0.0 = 90 deg cut, -1.0 = U-turn
-    }
-
-    const turnAbility = (agilityStat / 100) * (pState.isSqueezing ? 0.4 : 1.0);
-    const turnPenalty = Math.max(0.3 + turnAbility, dotProduct);
-
-    // 💡 FIX: Apply gap friction directly to speed and turning
-    const effectiveMaxSpeed = maxPossibleSpeed * turnPenalty * (1.0 - (1.0 - gapFriction) * 0.7); // Reduce speed by 70% of friction
-
-    // --- 6. Acceleration & Deceleration (REAL WORLD PHYSICS) ---
-    // REALITY CHECK: It takes ~2.5 seconds to reach top speed. 
-    // An accelRate of 1.2 to 2.8 means players gain roughly 6% to 14% of their top speed per tick.
-    let accelRate = (1.2 + (agilityStat / 100) * 1.6) * fatigueMod * (1.0 - (1.0 - gapFriction) * 0.5);
-
-    if (dotProduct > 0.85) accelRate *= 1.3; // Straight line burst
-    if (dotProduct < 0.25) accelRate *= 0.6; // Heavy cuts ruin your acceleration curve
-
-    // Arrival Braking
-    const SLOW_RADIUS = 2.5;
+    // --- 8. DECELERATION (Braking / Planting) ---
+    const isStopping = distToTarget < 2.5 && !['run_path', 'tracking_ball', 'pursuit'].includes(pState.action);
     let arrivalFactor = 1.0;
 
-    // 💡 FIX: Players bursting to the handoff ('run_path') and WRs tracking a deep pass ('tracking_ball') 
-    // should NEVER hit the brakes! They need to run through the catch point at full speed.
-    if (distToTarget < SLOW_RADIUS && pState.action !== 'run_path' && pState.action !== 'tracking_ball') {
-        arrivalFactor = distToTarget / SLOW_RADIUS;
-        // Braking is much faster than accelerating (planting your foot)
-        accelRate *= 2.5;
+    if (isStopping) {
+        arrivalFactor = distToTarget / 2.5; // Throttle down smoothly
+        
+        // WEIGHT IMPACT ON BRAKING (Inertia):
+        // Heavy players require much more time/distance to slow down.
+        // Agility helps plant the feet.
+        const brakePower = (2.0 + (agiFactor * 4.0)) / Math.sqrt(weightRatio); 
+        accelRate *= brakePower;
     }
 
-    // --- 7. Momentum Calculation ---
+    // --- 9. APPLY NEWTONIAN ACCELERATION ---
     const targetVx = (dx / distToTarget) * effectiveMaxSpeed * arrivalFactor;
     const targetVy = (dy / distToTarget) * effectiveMaxSpeed * arrivalFactor;
 
-    // Calculate how much we want to change velocity
-    const deltaVx = targetVx - pState.vx;
-    const deltaVy = targetVy - pState.vy;
+    pState.vx += (targetVx - pState.vx) * accelRate * timeDelta;
+    pState.vy += (targetVy - pState.vy) * accelRate * timeDelta;
 
-    // Apply acceleration gradually over time
-    pState.vx += deltaVx * accelRate * timeDelta;
-    pState.vy += deltaVy * accelRate * timeDelta;
-
-    const speedAfterAccel = Math.sqrt(pState.vx * pState.vx + pState.vy * pState.vy);
-    if (speedAfterAccel > maxPossibleSpeed) {
-        // Soft cap max speed instead of hard clamping so momentum feels heavier
-        const overage = speedAfterAccel - maxPossibleSpeed;
-        const ratio = (maxPossibleSpeed + (overage * 0.5)) / speedAfterAccel;
-        pState.vx *= ratio; pState.vy *= ratio;
+    // Soft Speed Clamp (Retain slight over-speed from being bumped, but bleed it off)
+    const speedAfter = Math.sqrt(pState.vx ** 2 + pState.vy ** 2);
+    if (speedAfter > maxPossibleSpeed && speedAfter > 0.1) {
+        // Agile players regain control of their over-speed momentum faster
+        const drag = 0.8 + (agiFactor * 0.15); 
+        const ratio = (maxPossibleSpeed + (speedAfter - maxPossibleSpeed) * (1.0 - drag)) / speedAfter;
+        pState.vx *= ratio;
+        pState.vy *= ratio;
     }
 
-    // --- 8. Collision Deflection (Physical Nudges) ---
-    const BASE_RADIUS = 0.45;
+    // --- 10. COLLISION DEFLECTION ---
+    resolveNewtonianCollisions(pState, allPlayers);
 
-    // Calculate THIS player's dynamic radius based on weight
-    const myRadius = BASE_RADIUS + ((pState.weight || 200) / 1000);
-
-    allPlayers.forEach(other => {
-        if (other.id === pState.id || other.isEngaged || pState.isEngaged) return;
-
-        // 💡 FIX: Ignore collisions between the QB and RB during the mesh point
-        const isHandoffP1 = pState.action === 'handoff_setup' || pState.action === 'handoff_receive';
-        const isHandoffP2 = other.action === 'handoff_setup' || other.action === 'handoff_receive';
-
-        if (isHandoffP1 && isHandoffP2) return;
-
-        // Also ignore collision the exact moment the RB gets the ball and transitions to run_path
-        if ((pState.action === 'handoff_setup' && other.action === 'run_path') ||
-            (pState.action === 'run_path' && other.action === 'handoff_setup')) {
-            return;
-        }
-
-        const dist = getDistance(pState, other);
-
-        // Calculate the OTHER player's dynamic radius
-        const theirRadius = BASE_RADIUS + ((other.weight || 200) / 1000);
-        const combinedRadius = myRadius + theirRadius;
-
-        if (dist < combinedRadius && dist > 0.01) {
-            const overlap = combinedRadius - dist;
-            const pushMagnitude = overlap * 0.6;
-
-            const dx_norm = (pState.x - other.x) / dist;
-            const dy_norm = (pState.y - other.y) / dist;
-
-            // Heavier players are harder to deflect
-            const totalWeight = (pState.weight || 200) + (other.weight || 200);
-            const myDeflection = (other.weight || 200) / totalWeight;
-            const theirDeflection = (pState.weight || 200) / totalWeight;
-
-
-            pState.x += dx_norm * pushMagnitude * myDeflection;
-            pState.y += dy_norm * pushMagnitude * myDeflection;
-            other.x -= dx_norm * pushMagnitude * theirDeflection;
-            other.y -= dy_norm * pushMagnitude * theirDeflection;
-
-            pState.vx += dx_norm * pushMagnitude * (myDeflection * 4.0);
-            pState.vy += dy_norm * pushMagnitude * (myDeflection * 4.0);
-            other.vx -= dx_norm * pushMagnitude * (theirDeflection * 4.0);
-            other.vy -= dy_norm * pushMagnitude * (theirDeflection * 4.0);
-        }
-    });
-
-    // --- 9. Apply Final Movement ---
+    // --- 11. FINALIZE MOVEMENT ---
     pState.x += pState.vx * timeDelta;
     pState.y += pState.vy * timeDelta;
+    
+    clampToField(pState);
 
-    // Update Meta Stats
-    pState.currentSpeedYPS = Math.sqrt(pState.vx * pState.vx + pState.vy * pState.vy);
+    // Update metadata for AI logic and Visualizer angle rendering
+    pState.currentSpeedYPS = Math.sqrt(pState.vx ** 2 + pState.vy ** 2);
     pState.velocity = { x: pState.vx, y: pState.vy };
+    if (pState.currentSpeedYPS > 0.2) pState.angle = Math.atan2(pState.vx, pState.vy);
 }
 
 /**
- * Detects if a player is trying to move through a narrow gap between other players.
- * Returns a "Friction Factor" (0.0 to 1.0) where 1.0 is wide open.
+ * Calculates friction based on nearby player density.
  */
 function calculateGapFriction(pState, allPlayers) {
-    const SQUEEZE_THRESHOLD = 1.4; // Yards between two players to be considered "tight"
-    const IMPASSABLE_THRESHOLD = 0.7; // Too narrow to pass without significant struggle
     let minFriction = 1.0;
+    const nearby = allPlayers.filter(o => o.id !== pState.id && getDistance(pState, o) < 2.0);
 
-    // We only care about players within 2 yards of the mover
-    const nearby = allPlayers.filter(other =>
-        other.id !== pState.id &&
-        getDistance(pState, other) < 2.0
-    );
-
-    // Check pairs of nearby players to see if pState is between them
     for (let i = 0; i < nearby.length; i++) {
         for (let j = i + 1; j < nearby.length; j++) {
             const p1 = nearby[i];
             const p2 = nearby[j];
-
-            // Gap Width: distance between the two stationary/engaged players
             const gapWidth = getDistance(p1, p2);
 
-            if (gapWidth < SQUEEZE_THRESHOLD) {
-                // Determine if mover is actually positioned "in" the gap
-                // (Using a simple midpoint proximity check)
+            if (gapWidth < 1.4) {
                 const midX = (p1.x + p2.x) / 2;
                 const midY = (p1.y + p2.y) / 2;
-                const distToGapCenter = Math.hypot(pState.x - midX, pState.y - midY);
+                const distToGap = Math.hypot(pState.x - midX, pState.y - midY);
 
-                if (distToGapCenter < 0.8) {
-                    // Calculate how much we need to slow down based on gap tightness
-                    // If gap is 0.7 or less, friction is heavy (0.4)
-                    let friction = (gapWidth - IMPASSABLE_THRESHOLD) / (SQUEEZE_THRESHOLD - IMPASSABLE_THRESHOLD);
-                    friction = Math.max(0.35, Math.min(1.0, friction)); // 💡 FIX: Slightly heavier minimum friction
-
+                if (distToGap < 0.8) {
+                    let friction = (gapWidth - 0.7) / (1.4 - 0.7);
+                    friction = Math.max(0.35, Math.min(1.0, friction));
                     if (friction < minFriction) minFriction = friction;
                 }
             }
         }
     }
     return minFriction;
+}
+
+/**
+ * Resolves soft collisions to prevent players from overlapping.
+ * Uses Weight (Mass) to determine who gets pushed out of the way.
+ */
+function resolveNewtonianCollisions(pState, allPlayers) {
+    const BASE_RADIUS = 0.45;
+    const myWeight = pState.weight || pState.wgt || 200;
+    const myRadius = BASE_RADIUS + (myWeight / 1000);
+
+    for (const other of allPlayers) {
+        if (other.id === pState.id || other.isEngaged || pState.isEngaged) continue;
+
+        // Ignore collisions during the handoff mesh (QB/RB overlap)
+        const isHandoffPair = (pState.role === 'QB' && other.role === 'RB') || (pState.role === 'RB' && other.role === 'QB');
+        if (isHandoffPair &&['handoff_setup', 'handoff_receive', 'run_path'].includes(pState.action)) continue;
+
+        const dist = getDistance(pState, other);
+        const theirWeight = other.weight || other.wgt || 200;
+        const theirRadius = BASE_RADIUS + (theirWeight / 1000);
+        const combinedRadius = myRadius + theirRadius;
+
+        if (dist < combinedRadius && dist > 0.01) {
+            const overlap = combinedRadius - dist;
+            const dx_norm = (pState.x - other.x) / dist;
+            const dy_norm = (pState.y - other.y) / dist;
+
+            const totalW = myWeight + theirWeight;
+            
+            // Deflection Math: Lighter players absorb more of the push
+            const myMoveRatio = theirWeight / totalW; 
+            
+            // 1. Positional Push (Prevents rendering inside each other)
+            pState.x += dx_norm * overlap * myMoveRatio * 0.5;
+            pState.y += dy_norm * overlap * myMoveRatio * 0.5;
+
+            // 2. Velocity Deflection (Momentum bump)
+            const bounce = 0.4;
+            pState.vx += dx_norm * bounce * myMoveRatio;
+            pState.vy += dy_norm * bounce * myMoveRatio;
+        }
+    }
+}
+
+/**
+ * Validates coordinates and prevents players from leaving the field boundary.
+ */
+export function clampToField(pState) {
+    const FIELD_WIDTH = 53.3;
+    const FIELD_LENGTH = 120; // 0-10 & 110-120 are endzones
+    const BOUNDARY_PADDING = 0.5;
+
+    pState.x = Math.max(BOUNDARY_PADDING, Math.min(FIELD_WIDTH - BOUNDARY_PADDING, pState.x));
+    pState.y = Math.max(0, Math.min(FIELD_LENGTH, pState.y));
 }

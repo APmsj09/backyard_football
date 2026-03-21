@@ -22,6 +22,8 @@ import {
     relationshipLevels
 } from './data.js';
 
+const DEBUG_MODE = true;
+
 // --- Global Game State ---
 let game = null;
 let playerMap = new Map();
@@ -2881,6 +2883,12 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                     if (distToNode < 0.6) {
                         pState.currentPathIndex++;
                         const coverageDefender = defenseStates.find(d => (d.assignment?.includes(pState.slot) || d.assignedPlayerId === pState.id) && getDistance(pState, d) < 4.0);
+
+                        if (DEBUG_MODE && coverageDefender) {
+                            const sep = getDistance(pState, coverageDefender);
+                            console.log(`[ROUTE-CUT] ${pState.name} turned. Separation from ${coverageDefender.name}: ${sep.toFixed(2)}y`);
+                        }
+
                         if (coverageDefender) {
                             const wrSkill = (pState.agility || 50) + (pState.playbookIQ || 50);
                             const dbSkill = (coverageDefender.agility || 50) + (coverageDefender.playbookIQ || 50);
@@ -3503,6 +3511,12 @@ function checkTackleCollisions(playState, gameLog) {
                 else { playState.safety = true; }
             } else if (carrier.role === 'QB' && carrier.y < playState.lineOfScrimmage && playState.type === 'pass') {
                 playState.sack = true;
+
+                // --- ADD DEBUG CODE HERE ---
+                if (DEBUG_MODE) {
+                    console.log(`[SACK-DATA] ${carrier.name} sacked at ${playState.tick} ticks (${(playState.tick * 0.05).toFixed(2)}s). Rusher: ${defender.name}`);
+                }
+
                 playState.statEvents.push({ type: 'sack', playerId: defender.id, qbId: carrier.id });
             }
 
@@ -4199,6 +4213,11 @@ function updateQBDecision(qbState, offenseStates, defenseStates, playState, offe
         if (isPressured) THROW_THRESHOLD = 15;
         if (isHotReadSituation) THROW_THRESHOLD = 0;
 
+        if (DEBUG_MODE) {
+            const brainSummary = readDebugLog.join(' | ');
+            console.log(`[QB-BRAIN] ${qbState.name} scanning: [${brainSummary}] Threshold: ${THROW_THRESHOLD}`);
+        }
+
         // EXECUTE THROW DECISION
         if (bestTargetEval && bestTargetEval.score > THROW_THRESHOLD) {
             targetPlayerState = bestTargetEval.info.state;
@@ -4510,6 +4529,10 @@ function executeThrow(qbState, target, strength, accuracy, playState, gameLog, a
     const finalDist = Math.hypot(aimX - startX, aimY - startY);
     const t = Math.max(0.1, finalDist / ballSpeed);
 
+    if (DEBUG_MODE) {
+        console.log(`[THROW-AIM] ${qbState.name} -> ${target.name}. Aim: (${aimX.toFixed(1)}, ${aimY.toFixed(1)}) | Rec Pos: (${target.x.toFixed(1)}, ${target.y.toFixed(1)}) | Lead Distance: ${(Math.hypot(aimX - target.x, aimY - target.y)).toFixed(1)}y`);
+    }
+
     // Calculate Z Velocity (Arc) based on Pass Type
     let baseZ = 0;
     // 💡 FIX: Give passes a slight upward push so they clear the D-Line helmets
@@ -4790,6 +4813,11 @@ function handleBallArrival(playState, carrier, playResult, gameLog) {
             else catchScore -= 60;
         }
 
+        if (DEBUG_MODE) {
+            console.log(`[CATCH-CHANCE] ${bestCandidate.name}: ${catchScore.toFixed(1)}% | Ball Height: ${ball.z.toFixed(2)} | Dist to Ball: ${distNow.toFixed(2)}`);
+        }
+
+
         if (Math.random() * 100 < catchScore) {
 
             // --- 💡 NEW: BOUNDARY CHECK ---
@@ -4965,6 +4993,13 @@ function handleBallArrival(playState, carrier, playResult, gameLog) {
                 playState.incomplete = true;
                 ball.vz = 0; ball.vx = 0; ball.vy = 0; // Stop ball
                 playState.finalBallY = playState.lineOfScrimmage;
+
+                const targetRec = playState.activePlayers.find(p => p.id === ball.targetPlayerId);
+                if (DEBUG_MODE && targetRec && !ball.isThrowAway) {
+                    const distToBall = getDistance(ball, targetRec);
+                    console.log(`[PASS-INCOMPLETE] Ball landed: (${ball.x.toFixed(1)}, ${ball.y.toFixed(1)}). Target ${targetRec.name} was at: (${targetRec.x.toFixed(1)}, ${targetRec.y.toFixed(1)}). Missed by: ${distToBall.toFixed(1)}y`);
+                }
+
                 if (gameLog) gameLog.push(`[Tick ${playState.tick}] ⏱️ Pass hits the turf. Incomplete.`);
             } else if (wasCaught && playState.playIsLive) {
                 playState.playIsLive = false;
@@ -5567,6 +5602,16 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
                 // 💡 FIX: Instant Out of Bounds Whistle for fumbles AND punts
                 if (isBallOutOfBounds && (ball.isLoose || (playState.type === 'punt' && !ballCarrierState))) {
                     playState.playIsLive = false;
+
+                    // --- DEBUG LOGGING START ---
+                    const targetRec = playState.activePlayers.find(p => p.id === ball.targetPlayerId);
+                    if (targetRec && playState.type === 'pass') {
+                        const debugMsg = `[DEBUG-BOUNDS] Ball went OOB at (${ball.x.toFixed(1)}, ${ball.y.toFixed(1)}). ` +
+                            `Target ${targetRec.name} was at (${targetRec.x.toFixed(1)}, ${targetRec.y.toFixed(1)}).`;
+                        console.log(debugMsg);
+                        if (gameLog) gameLog.push(debugMsg);
+                    }
+                    // --- DEBUG LOGGING END ---
 
                     const wentOutSideline = ball.x <= 0 || ball.x >= FIELD_WIDTH;
 
