@@ -2347,11 +2347,17 @@ function getSmartCarrierTarget(runner, defenseStates, offenseStates, fieldWidth 
             bestTargetY = Math.min(bestTargetY, runner.y + 1.5);
         }
     }
-    if (DEBUG_MODE && runner.slot === 'RB1' && playState.tick % 15 === 0) {
-    console.log(`[RUNNER-VISION] ${runner.name} | Best Lane Score: ${bestScore.toFixed(0)} | Offset: ${bestTargetX - runner.x > 0 ? 'Right' : 'Left'}`);
-}
 
     bestTargetX = Math.max(1.0, Math.min(fieldWidth - 1.0, bestTargetX));
+
+    // --- DEBUG: RUNNER VISION ---
+    // Log occasionally so we don't spam the console every single tick
+    if (typeof DEBUG_MODE !== 'undefined' && DEBUG_MODE && runner.slot === 'RB1' && (!runner.lastVisionLog || runner.lastVisionLog < runner.y - 2.0)) {
+        const direction = bestTargetX > runner.x ? 'Right' : (bestTargetX < runner.x ? 'Left' : 'Straight');
+        console.log(`[RUNNER-VISION] ${runner.name} evaluating lanes | Best Lane Score: ${bestScore.toFixed(0)} | Cutting: ${direction}`);
+        runner.lastVisionLog = runner.y; // Only log again after moving 2 yards
+    }
+
     return { x: bestTargetX, y: bestTargetY };
 }
 
@@ -2969,13 +2975,17 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
             const isRunRead = playDiagnosis === 'run';
             const isFooledByPA = (playDiagnosis === 'run' && playType === 'pass' && !isDL);
 
-            if (DEBUG_MODE && pState.role === 'LB' && playState.tick % 20 === 0) { // Log every 20 ticks to avoid spam
-                console.log(`[DEF-BRAIN] ${pState.name} (${pState.slot}) state: ${pState.action} | Diagnosis: ${playDiagnosis}`);
-            }
-
-            // And specifically for Play Action
-            if (DEBUG_MODE && isFooledByPA && !pState.loggedPA) {
-                console.log(`[DEF-FOOLED] 🎣 ${pState.name} bit on the Play Action! Reaction delay: ${pState.snapReactionTimer} ticks.`);
+            // --- DEBUG: DEFENSIVE BRAIN ---
+            if (typeof DEBUG_MODE !== 'undefined' && DEBUG_MODE) {
+                // Log when a player gets fooled by Play Action
+                if (isFooledByPA && !pState.loggedPA) {
+                    console.log(`[DEF-FOOLED] 🎣 ${pState.name} bit on the Play Action! Recovery in ${pState.snapReactionTimer} ticks.`);
+                    pState.loggedPA = true;
+                }
+                // Log LB diagnosis periodically (every 15 ticks / 0.75s) to track read progression
+                if (pState.role === 'LB' && playState.tick % 15 === 0) {
+                    console.log(`[DEF-DIAGNOSIS] ${pState.name} (${pState.slot}): Sees "${playDiagnosis}". Current Action: ${pState.action}`);
+                }
             }
 
             // 2. CONTEXT ANALYSIS
@@ -3515,11 +3525,9 @@ function checkTackleCollisions(playState, gameLog) {
 
         successChance = Math.max(0.10, Math.min(0.98, successChance));
 
-        if (DEBUG_MODE) {
-            console.log(`[TACKLE-CALC] ${defender.name} vs ${carrier.name}: ` +
-                `Chance: ${(successChance * 100).toFixed(1)}% | ` +
-                `Broken previously: ${carrier.tacklesBrokenThisPlay || 0} | ` +
-                `Momentum Ratio: ${(tMomentum / Math.max(1, rMomentum)).toFixed(2)}`);
+        // --- DEBUG: TACKLE MATH ---
+        if (typeof DEBUG_MODE !== 'undefined' && DEBUG_MODE) {
+            console.log(`[TACKLE-CALC] ${defender.name} tackling ${carrier.name} | Chance: ${(successChance * 100).toFixed(1)}% | Momentum Diff: ${(tMomentum / Math.max(1, rMomentum)).toFixed(2)}x | Broken Prev: ${brokenCount}`);
         }
 
         if (Math.random() < successChance) {
@@ -5168,7 +5176,6 @@ function resetPlayerRuntimeState(playerState) {
  */
 
 function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, context, options, isLive = false) {
-    if (DEBUG_MODE) console.groupCollapsed(`Play Tick ${playState.tick}: ${offensivePlayKey}`);
 
     // 1. Extract values from context
     const { gameLog = [], weather, ballOn, ballHash = 'M', down, yardsToGo, offenseScore = 0, defenseScore = 0, playsRemaining = 60, quarter = 1 } = context;
@@ -5244,6 +5251,12 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
         resolvedDepth: null
     };
 
+
+    // --- FIX: ADD GROUP LOG HERE AFTER PLAYSTATE IS CREATED ---
+    if (typeof DEBUG_MODE !== 'undefined' && DEBUG_MODE) {
+        console.groupCollapsed(`🏈 Play: ${finalOffensivePlayKey} vs ${defensivePlayKey}`);
+    }
+
     // Reset per-play captain flavor flags so a single team message only appears once per play
     if (offense) offense._captainFlavorLogged = false;
     if (defense) defense._captainFlavorLogged = false;
@@ -5301,6 +5314,7 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
         console.error("CRITICAL ERROR during setup:", setupError);
         playResult.outcome = 'turnover';
         playResult.possessionChange = true;
+        if (typeof DEBUG_MODE !== 'undefined' && DEBUG_MODE) console.groupEnd();
         return { playResult, finalBallY: ballOn, log: gameLog, visualizationFrames: [] };
     }
 
@@ -5933,7 +5947,6 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
 
     playState.activePlayers.forEach(p => resetPlayerRuntimeState(p));
 
-    if (DEBUG_MODE) console.groupEnd();
 
     return {
         playResult,
