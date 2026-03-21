@@ -2994,6 +2994,13 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
             const qbScrambling = carrierIsPasser && (isBallPastLOS || ballCarrierState.action === 'qb_scramble');
             const assignment = pState.assignment;
 
+            if (playDiagnosis === 'read') {
+                pState.action = 'idle'; 
+                pState.targetX = pState.x; // Stay put or move slightly
+                pState.targetY = pState.y;
+                return; // Don't allow pursuit yet!
+            }
+
             // 3. PURSUIT DECISION MATRIX (The Gatekeeper)
             let shouldPursue = false;
             if (ballCarrierState) {
@@ -3496,7 +3503,7 @@ function checkTackleCollisions(playState, gameLog) {
         const tacklerVel = Math.hypot(defender.vx, defender.vy);
 
         // Momentum (Mass * Velocity)
-        const rMomentum = (carrier.wgt || 200) * runnerVel;
+        const rMomentum = Math.max(10, (carrier.wgt || 200) * runnerVel); // Minimum floor of 10
         const tMomentum = (defender.wgt || 200) * tacklerVel;
 
         // Skill vs Strength Power
@@ -3811,7 +3818,13 @@ function resolveOngoingBlocks(playState, gameLog, offenseStates = [], defenseSta
 
 
         // 5. Resolution
-        if (battle.status === 'win_B') { // Defender Sheds
+        if (battle.status === 'win_B') {
+            const ticksInBlock = playState.tick - battle.startTick;
+            // Defenders must hold a block for at least 15 ticks (0.75s) unless they are elite
+            if (ticksInBlock < 15 && (defender.blockShedding || 0) < 90) {
+                battle.status = 'ongoing';
+                return;
+            } // Defender Sheds
             blocker.engagedWith = null; blocker.isEngaged = false;
             blocker.stunnedTicks = 15; // Blocker loses balance
 
@@ -4399,11 +4412,13 @@ function updateQBDecision(qbState, offenseStates, defenseStates, playState, offe
         // 💡 NEW: Accuracy degradation under pressure
         let adjustedAccuracy = qbAcc;
         if (isPressured) {
-            // 💡 FIX: Less severe pressure penalty for higher IQ QBs
+            // FIX: Ensure pressureCount is a number and not undefined/0 in a way that breaks math
+            const pCount = pressureCount || 0;
             const basePenalty = 15;
-            const IQ_MITIGATION = (qbIQ / 100) * 0.5; // High IQ QBs are less affected
-            const pressurePenalty = basePenalty + (pressureCount * 5) - (basePenalty * IQ_MITIGATION);
-            adjustedAccuracy = Math.max(30, qbAcc - pressurePenalty);
+            const IQ_MITIGATION = (qbIQ / 100) * 0.5;
+            const pressurePenalty = basePenalty + (pCount * 5) - (basePenalty * IQ_MITIGATION);
+
+            adjustedAccuracy = Math.max(30, qbAcc - (pressurePenalty || 0)); // Use || 0 to prevent NaN
         }
         if (pocketComfort === 'collapsing') {
             // Collapsing pocket is still bad, but slightly less punitive
