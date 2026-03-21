@@ -4397,70 +4397,87 @@ function executeThrow(qbState, target, strength, accuracy, playState, gameLog, a
     let aimX = target.x;
     let aimY = target.y;
 
-    // --- 3. ROUTE-AWARE LEAD CALCULATION (Fixes the Underthrow) ---
-    if (target.action === 'run_route' && target.routePath && target.routePath.length > 0) {
-        const estTime = throwDistance / ballSpeed;
-        const qbIQ = qbState.iq || 50;
+    // --- 3. DYNAMIC PHYSICS-BASED LEAD CALCULATION ---
+    if (target.action === 'run_route' || target.action === 'route_complete' || target.isBallCarrier) {
 
-        // 💡 FIX: Increase base lead factor heavily for deep passes!
-        // 1.0 = Aiming exactly where math says they will be.
-        let leadFactor = 0.95 + (qbIQ / 300);
+        // 1. Calculate Base Flight Time
+        const flightTime = throwDistance / ballSpeed;
 
-        if (passType === 'lob') {
-            // Lob passes must be thrown far ahead so the WR runs UNDER it, maintaining stride.
-            leadFactor += 0.35;
-        } else if (passType === 'bullet') {
-            // Bullets are thrown firmly at the numbers/chest.
-            leadFactor -= 0.15;
-        }
+        // 2. Calculate Receiver's Actual Speed (Yards per second)
+        // Map 0-99 speed to roughly 5.0 - 10.0 yards per second
+        const recYPS = 5.0 + ((target.spd || 50) / 20);
 
-        // Receiver speed in yards per second
-        const receiverYPS = 5.0 + ((target.spd || 50) / 25);
-        let distanceToTravel = receiverYPS * estTime * leadFactor;
+        // 3. THE "QB BRAIN" (Estimation Error)
+        // High IQ QBs estimate the receiver's speed and flight time perfectly.
+        // Low IQ QBs make "estimation errors" (leading too much or too little).
+        const qbIQ = qbState.playbookIQ || 50;
+        const qbCons = qbState.consistency || 50;
 
+        // Max error is ~15% for a 0-IQ QB, near 0% for a 99-IQ QB.
+        const maxError = (100 - qbIQ) / 650;
+        const errorRoll = (Math.random() - 0.5) * 2; // -1.0 to 1.0
+
+        // Apply inconsistency (Lower consistency = more random variation in throws)
+        const consistencyRoll = (Math.random() * (100 - qbCons)) / 100;
+
+        let qbEstimation = 1.0 + (errorRoll * maxError) + (errorRoll * consistencyRoll * 0.1);
+
+        // 4. ARC ADJUSTMENT
+        // Bullets need to be aimed "at" the receiver (smaller lead).
+        // Lobs need to be aimed "to space" for the receiver to run under (larger lead).
+        if (passType === 'bullet') qbEstimation *= 0.92;
+        if (passType === 'lob') qbEstimation *= 1.08;
+
+        // 5. Calculate Final Travel Distance
+        let distanceToTravel = recYPS * flightTime * qbEstimation;
+
+        // 6. Trace the Path (Predictive Aiming)
         let currX = target.x;
         let currY = target.y;
         let lastValidDirX = 0;
-        let lastValidDirY = 1; // Default upfield
+        let lastValidDirY = 1;
 
-        // Trace the receiver's route path
-        for (let i = target.currentPathIndex; i < target.routePath.length; i++) {
-            const nextNode = target.routePath[i];
-            const dx = nextNode.x - currX;
-            const dy = nextNode.y - currY;
-            const distToNext = Math.hypot(dx, dy);
+        if (target.routePath && target.currentPathIndex < target.routePath.length) {
+            // QB traces the receiver's intended route nodes
+            for (let i = target.currentPathIndex; i < target.routePath.length; i++) {
+                const nextNode = target.routePath[i];
+                const dx = nextNode.x - currX;
+                const dy = nextNode.y - currY;
+                const distToNext = Math.hypot(dx, dy);
 
-            // Save direction
-            if (distToNext > 0.1) {
-                lastValidDirX = dx / distToNext;
-                lastValidDirY = dy / distToNext;
-            }
+                if (distToNext > 0.1) {
+                    lastValidDirX = dx / distToNext;
+                    lastValidDirY = dy / distToNext;
+                }
 
-            if (distanceToTravel > distToNext) {
-                distanceToTravel -= distToNext;
-                currX = nextNode.x;
-                currY = nextNode.y;
-            } else {
-                const ratio = distanceToTravel / distToNext;
-                aimX = currX + dx * ratio;
-                aimY = currY + dy * ratio;
-                distanceToTravel = 0;
-                break;
+                if (distanceToTravel > distToNext) {
+                    distanceToTravel -= distToNext;
+                    currX = nextNode.x;
+                    currY = nextNode.y;
+                } else {
+                    const ratio = distanceToTravel / distToNext;
+                    aimX = currX + dx * ratio;
+                    aimY = currY + dy * ratio;
+                    distanceToTravel = 0;
+                    break;
+                }
             }
         }
 
-        // 💡 EXTENSION FIX: If the receiver is running a Fly/Post and runs off the end of their drawn route,
-        // we MUST keep projecting them downfield, otherwise the ball is aimed at their current spot (massive underthrow).
+        // If receiver runs out of route or is scrambling, project current momentum
         if (distanceToTravel > 0) {
-            aimX = currX + (lastValidDirX * distanceToTravel);
-            aimY = currY + (lastValidDirY * distanceToTravel);
+            // Use current velocity for direction if scrambling, otherwise use path direction
+            const dirX = (target.vx && Math.abs(target.vx) > 0.5) ? target.vx / recYPS : lastValidDirX;
+            const dirY = (target.vy && Math.abs(target.vy) > 0.5) ? target.vy / recYPS : lastValidDirY;
+
+            aimX = currX + (dirX * distanceToTravel);
+            aimY = currY + (dirY * distanceToTravel);
         }
 
     } else {
-        // Scramble / Freestyle / Checkdown leading
-        const estTime = throwDistance / ballSpeed;
-        aimX += (target.vx || 0) * estTime;
-        aimY += (target.vy || 0) * estTime;
+        // Checkdown/Statue target - no lead required
+        aimX = target.x;
+        aimY = target.y;
     }
 
     // --- 4. ACCURACY ERRORS ---
@@ -6169,17 +6186,14 @@ function determineDefensiveFormation(defense, offenseFormationName, down, yardsT
 
     // --- SCENARIO B: CAPTAIN IS CONFUSED (Mistakes) ---
     else {
-        // Flavor text is handled inside checkCaptainDiscipline, 
-        // but the consequence happens here.
-
-        // 50% chance they just stick to the "Base Defense" regardless of situation
         if (Math.random() < 0.5) {
-            // Stick to the team's current base defense if valid, else fall back to a reasonable default
+            // 💡 FIX: Do not allow the defense to accidentally stay in a Punt Return formation on normal downs!
+            if (defense.formations?.defense === 'Punt_Return') {
+                return coachPref || Object.keys(defenseFormations)[0];
+            }
             return (defense.formations?.defense && defenseFormations[defense.formations.defense]) ? defense.formations.defense : (coachPref || Object.keys(defenseFormations)[0]);
         }
 
-        // 50% chance they guess randomly (Bad!) - pick a random available formation key
-        // FIX: Exclude Punt Return from the random "Confused" pool so it isn't picked on normal downs
         const validFormations = Object.keys(defenseFormations).filter(key => key !== 'Punt_Return');
         return getRandom(validFormations);
     }
