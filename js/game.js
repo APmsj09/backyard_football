@@ -2995,7 +2995,7 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
             const assignment = pState.assignment;
 
             if (playDiagnosis === 'read') {
-                pState.action = 'idle'; 
+                pState.action = 'idle';
                 pState.targetX = pState.x; // Stay put or move slightly
                 pState.targetY = pState.y;
                 return; // Don't allow pursuit yet!
@@ -3510,27 +3510,22 @@ function checkTackleCollisions(playState, gameLog) {
         const tPower = (defender.tkl * 0.6) + (defender.str * 0.4);
         const rPower = (carrier.agi * 0.5) + (carrier.str * 0.5);
 
-        // Calculate Success Chance
-        let successChance = 0.68; // Base
+        // 1. Base success chance 65%
+        let successChance = 0.65;
 
-        // 1. Momentum Delta: Being faster/heavier than the opponent helps.
-        successChance += (tMomentum / Math.max(1, rMomentum) - 1.0) * 0.3;
-
-        // 2. Mass (Weight) Delta: Pure "Big man vs Small man" logic.
-        successChance += (defender.wgt / carrier.wgt - 1.0) * 0.5;
+        // 2. Momentum delta: Being faster/heavier helps, but don't let it dominate 100%
+        const momRatio = tMomentum / Math.max(1, rMomentum);
+        successChance += (momRatio - 1.0) * 0.2; // Reduced from 0.3
 
         // 3. Skill & Strength Delta
-        successChance += (tPower - rPower) * 0.008; // 💡 Increased skill multiplier slightly
+        successChance += (tPower - rPower) * 0.005;
 
-        // 4. Angle Adjustment: Tackling from behind is a 30% penalty
-        if (defender.y < carrier.y - 0.2) successChance *= 0.7;
-
-        // 5. BEAST MODE LIMITER: Cumulative fatigue
+        // 4. BEAST MODE LIMITER: Cumulative fatigue
         const brokenCount = carrier.tacklesBrokenThisPlay || 0;
-        // 💡 FIX: Massively increase penalty for successive broken tackles to prevent pinball runs
-        successChance += (brokenCount * 0.40);
+        successChance += (brokenCount * 0.25); // Reduced from 0.40 to allow for "elusive" runs
 
-        successChance = Math.max(0.10, Math.min(0.98, successChance));
+        // Hard Caps: Always at least 5% chance to miss, always at least 10% chance to tackle
+        successChance = Math.max(0.10, Math.min(0.95, successChance));
 
         // --- DEBUG: TACKLE MATH ---
         if (typeof DEBUG_MODE !== 'undefined' && DEBUG_MODE) {
@@ -4411,21 +4406,19 @@ function updateQBDecision(qbState, offenseStates, defenseStates, playState, offe
     if (targetPlayerState && actionTaken.includes("Throw")) {
         // 💡 STRICT MATH FIX: Ensure everything is a valid integer before doing math
         const safeQBIQ = parseInt(qbState.playbookIQ || qbState.iq || 50, 10);
-        let adjustedAccuracy = qbAcc;
+        let adjustedAccuracy = Number(qbAcc) || 50;
+        let pPenalty = 0;
 
         if (isPressured) {
-            const safePressureCount = parseInt(pressureCount || 0, 10);
+            // Force everything to numbers
+            const pCount = Number(pressureCount) || 0;
+            const qbIQNum = Number(qbState.playbookIQ || qbState.iq || 50);
+
             const basePenalty = 15;
-            const IQ_MITIGATION = (safeQBIQ / 100) * 0.5; // Will no longer be NaN
-            
-            const pressurePenalty = basePenalty + (safePressureCount * 5) - (basePenalty * IQ_MITIGATION);
-            
-            // Subtract penalty safely
-            adjustedAccuracy = Math.max(30, qbAcc - pressurePenalty);
-        }
-        
-        if (pocketComfort === 'collapsing') {
-            adjustedAccuracy *= 0.95;
+            const IQ_MITIGATION = (qbIQNum / 100) * 0.5;
+            pPenalty = basePenalty + (pCount * 5) - (basePenalty * IQ_MITIGATION);
+
+            adjustedAccuracy = Math.max(30, adjustedAccuracy - pPenalty);
         }
 
         // --- SAFE DEBUG LOG ---
@@ -4877,21 +4870,21 @@ function handleBallArrival(playState, carrier, playResult, gameLog) {
             gameLog.push(m);
         };
 
-        let catchScore = (catching * 0.60) + (agility * 0.20) + 25; 
+        let catchScore = (catching * 0.60) + (agility * 0.20) + 25;
 
         // Apply situational multipliers instead of flat subtractions
         if (isDefense) {
             // DBs have harder time catching than WRs (need to focus on coverage)
-            catchScore *= 0.40; 
+            catchScore *= 0.40;
         }
         if (playersInRange.length > 1) {
             // Traffic reduces catch chance slightly
-            catchScore *= 0.85; 
+            catchScore *= 0.85;
         }
 
         if (playState.type === 'punt') {
             // Punts are easier to catch (more hangtime)
-            catchScore += 15; 
+            catchScore += 15;
         }
 
         // 💡 FIX: Point-Blank Penalty. If the ball was just thrown (< 10 ticks / 0.5s ago), 
