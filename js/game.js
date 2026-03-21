@@ -5253,9 +5253,9 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
 
 
     // --- FIX: ADD GROUP LOG HERE AFTER PLAYSTATE IS CREATED ---
-    if (typeof DEBUG_MODE !== 'undefined' && DEBUG_MODE) {
-        console.groupCollapsed(`🏈 Play: ${finalOffensivePlayKey} vs ${defensivePlayKey}`);
-    }
+    //if (typeof DEBUG_MODE !== 'undefined' && DEBUG_MODE) {
+        //console.groupCollapsed(`🏈 Play: ${finalOffensivePlayKey} vs ${defensivePlayKey}`);
+    //}
 
     // Reset per-play captain flavor flags so a single team message only appears once per play
     if (offense) offense._captainFlavorLogged = false;
@@ -5314,7 +5314,7 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
         console.error("CRITICAL ERROR during setup:", setupError);
         playResult.outcome = 'turnover';
         playResult.possessionChange = true;
-        if (typeof DEBUG_MODE !== 'undefined' && DEBUG_MODE) console.groupEnd();
+        //if (typeof DEBUG_MODE !== 'undefined' && DEBUG_MODE) console.groupEnd();
         return { playResult, finalBallY: ballOn, log: gameLog, visualizationFrames: [] };
     }
 
