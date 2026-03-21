@@ -618,74 +618,97 @@ function checkFumble(ballCarrierState, tacklerState, playState, gameLog) {
  * @param {number} tick - The current play tick.
  * @returns {string} - The *diagnosed* play type ('run', 'pass', or 'read').
  */
-function diagnosePlay(pState, truePlayType, offensivePlayKey, tick) {
+function diagnosePlay(pState, tick, offenseStates, truePlayType, offensivePlayKey) {
     const iq = pState.playbookIQ || 50;
-    const tackling = pState.tackling || 50; // Defensive linemen are better at reading run
-    const coverage = pState.coverage || 50; // DBs natural at reading pass
+    
+    let runScore = 0;
+    let passScore = 0;
 
-    // 1. Calculate Read Time (How long until they "know"?)
-    // 💡 IMPROVED: Position-specific recognition
-    // DL/LB read runs faster. DBs read passes faster.
-    let baseTicks = 45 - Math.floor(iq * 0.4); // 5-45 ticks base
+    // 1. GATHER KEYS (Observable Evidence)
+    const qb = offenseStates.find(p => p.slot.startsWith('QB'));
+    const rbs = offenseStates.filter(p => p.slot.startsWith('RB'));
+    const ol = offenseStates.filter(p => p.slot.startsWith('OL'));
 
-    if (pState.role === 'DL' || pState.role === 'LB') {
-        baseTicks *= (50 / (tackling + 1)); // DL/LBs faster at run reads
-    } else if (pState.role === 'DB') {
-        baseTicks *= (50 / (coverage + 1)); // DBs faster at coverage reads
+    // Key: QB Depth / Action
+    if (qb) {
+        if (qb.action === 'qb_setup' && qb.hasCompletedDropback) passScore += 45;
+        else if (qb.action === 'qb_setup' && !qb.hasCompletedDropback) passScore += 15;
+        else if (qb.action === 'handoff_setup') runScore += 40;
+        else if (qb.isBallCarrier && qb.y > qb.initialY + 1.0) runScore += 30; // Scramble
     }
 
-    const ticksToDiagnose = Math.max(3, Math.min(40, baseTicks));
+    // Key: Offensive Line Action (Trench warfare)
+    let passBlocks = 0;
+    let runBlocks = 0;
+    let pullers = 0;
+    ol.forEach(lineman => {
+        if (lineman.action === 'pass_block') passBlocks++;
+        else if (lineman.action === 'run_block') runBlocks++;
+        if (lineman.assignment && lineman.assignment.includes('pull')) pullers++;
+    });
 
-    // 2. Key Reads (Observable clues)
-    // 💡 NEW: Geometric & personnel-based reads
-    let keyReadBonus = 0;
+    // OL dictates the trench keys
+    if (passBlocks > runBlocks) passScore += (passBlocks * 12);
+    if (runBlocks > passBlocks) runScore += (runBlocks * 10);
+    if (pullers > 0) runScore += (pullers * 30); // Guard pulling is a massive run key
 
-    // Formation clues (need to be passed from play state context)
-    // For now, we use position as proxy - can be expanded later
-    if (pState.role === 'DL') {
-        // DL reads blocking schemes: If guards are pulling left, run is going that way
-        // If OL is pass-setting (backpedaling), it's a pass
-        // This would require tracking actual offensive intent
+    // Key: Running Backs
+    rbs.forEach(rb => {
+        if (rb.isBallCarrier) runScore += 60;
+        else if (rb.action === 'run_path' && rb.y > (qb?.y || 0)) runScore += 20; // Pressing LOS
+        else if (rb.action === 'pass_block') passScore += 15;
+    });
+
+    // 2. PLAY ACTION (The Deception)
+    // Play action mimics run keys early, spoofing the defense
+    const isPlayAction = offensivePlayKey.includes('PA_');
+    if (isPlayAction && tick < 25) {
+        runScore += 50; // Fake handoff injects artificial run keys
     }
 
-    if (tick < ticksToDiagnose - keyReadBonus) {
-        return 'read'; // Still diagnosing
-    }
+    // 3. APPLY IQ & TIME (Causality)
+    // High IQ processes keys faster and weights them accurately.
+    // Low IQ needs more time to build confidence.
+    const timeFactor = Math.min(1.0, tick / 35); // Full read usually by 1.75s
+    const iqFactor = iq / 100; // 0.2 to 0.99
 
-    // 3. Play Action Logic (The "Bite" Factor)
-    // 💡 IMPROVED: IQ-based fooling with position consideration
-    const isPlayAction = (truePlayType === 'pass' && offensivePlayKey.includes('PA_'));
+    // Noise represents slight hesitation or misinterpretation (Reduced randomness)
+    // Inversely proportional to IQ. 99 IQ = basically 0 noise. 50 IQ = +/- 15 score noise.
+    const noiseMax = 30 * (1.0 - iqFactor); 
+    const noiseRun = (Math.random() * noiseMax) - (noiseMax / 2);
+    const noisePass = (Math.random() * noiseMax) - (noiseMax / 2);
 
-    if (isPlayAction) {
-        // DL/LBs more susceptible to play action (watching backfield action)
-        // DBs less susceptible (reading receivers)
-        let foolChance = (100 - iq) / 100;
+    let finalRunScore = (runScore * timeFactor * (0.5 + (iqFactor / 2))) + noiseRun;
+    let finalPassScore = (passScore * timeFactor * (0.5 + (iqFactor / 2))) + noisePass;
 
-        if (pState.role === 'DL' || pState.role === 'LB') {
-            foolChance *= 1.3; // 30% more likely to bite
-        } else if (pState.role === 'DB') {
-            foolChance *= 0.6; // 40% less likely to bite
+    // Position Bias (LBs look for run first, DBs look for pass)
+    if (pState.role === 'LB') finalRunScore += 15;
+    if (pState.role === 'DB') finalPassScore += 15;
+
+    // 4. DETERMINE GUESS & CONFIDENCE
+    let guess = 'read';
+    let confidence = 0;
+
+    const scoreDiff = Math.abs(finalRunScore - finalPassScore);
+    
+    // Confidence is based on how strongly one score outweighs the other (Scale of 0.0 to 1.0)
+    confidence = Math.max(0, Math.min(1.0, scoreDiff / 60)); 
+
+    // Threshold to commit: Must have a clear winner, or enough time has passed.
+    // High IQ players require less confidence to make the right read early.
+    const commitThreshold = 0.60 - (iqFactor * 0.3);
+
+    if (confidence > commitThreshold || tick > 40) {
+        guess = finalRunScore > finalPassScore ? 'run' : 'pass';
+        
+        // Late Read Adjustment: If it's very late and ball is passed, force pass read
+        if (tick > 50 && truePlayType === 'pass') {
+            guess = 'pass';
+            confidence = 1.0;
         }
-
-        if (Math.random() < foolChance) {
-            // Two-part decision: Initial bite, then recovery
-            const recoveryChance = (iq * 0.7) / 200; // Higher IQ = better recovery
-            const recoveryTick = tick + Math.round(15 - (iq / 6)); // High IQ recovers faster
-
-            if (tick < recoveryTick && Math.random() > recoveryChance) {
-                return 'run'; // FOOLED! Attack the run
-            }
-        }
     }
 
-    // 4. Late Read Adjustment
-    // 💡 NEW: If you get fooled early, you can still correct later
-    if (tick > ticksToDiagnose + 20 && truePlayType === 'pass') {
-        // After 20+ ticks, even fooled defenders should read pass
-        return 'pass';
-    }
-
-    return truePlayType; // Correct read
+    return { guess, confidence };
 }
 
 
@@ -3004,7 +3027,16 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
 
             // 1. DIAGNOSIS (IQ-Based Read)
             const isDL = pState.role === 'DL';
-            const playDiagnosis = isDL ? playType : diagnosePlay(pState, playType, offensivePlayKey, playState.tick);
+            let playDiagnosis = playType;
+            let diagConfidence = 1.0; // DLs always know their assignment (100% confidence)
+
+            if (!isDL) {
+                // 💡 Pass the offenseStates so the AI can read the keys!
+                const diag = diagnosePlay(pState, playState.tick, offenseStates, playType, offensivePlayKey);
+                playDiagnosis = diag.guess;
+                diagConfidence = diag.confidence;
+            }
+
             const isRunRead = playDiagnosis === 'run';
             const isFooledByPA = (playDiagnosis === 'run' && playType === 'pass' && !isDL);
 
@@ -3012,12 +3044,12 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
             if (typeof DEBUG_MODE !== 'undefined' && DEBUG_MODE) {
                 // Log when a player gets fooled by Play Action
                 if (isFooledByPA && !pState.loggedPA) {
-                    console.log(`[DEF-FOOLED] 🎣 ${pState.name} bit on the Play Action! Recovery in ${pState.snapReactionTimer} ticks.`);
+                    console.log(`[DEF-FOOLED] 🎣 ${pState.name} bit on the Play Action! Confidence: ${(diagConfidence*100).toFixed(0)}%`);
                     pState.loggedPA = true;
                 }
-                // Log LB diagnosis periodically (every 15 ticks / 0.75s) to track read progression
+                // Log LB diagnosis periodically to track read progression
                 if (pState.role === 'LB' && playState.tick % 15 === 0) {
-                    console.log(`[DEF-DIAGNOSIS] ${pState.name} (${pState.slot}): Sees "${playDiagnosis}". Current Action: ${pState.action}`);
+                    console.log(`[DEF-DIAGNOSIS] ${pState.name} (${pState.slot}): Sees "${playDiagnosis}" (Conf: ${(diagConfidence*100).toFixed(0)}%). Action: ${pState.action}`);
                 }
             }
 
@@ -3029,7 +3061,7 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
 
             if (playDiagnosis === 'read') {
                 pState.action = 'idle';
-                pState.targetX = pState.x; // Stay put or move slightly
+                pState.targetX = pState.x; 
                 pState.targetY = pState.y;
                 return; // Don't allow pursuit yet!
             }
@@ -3092,7 +3124,7 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
 
                         pState.targetX = predX;
                         pState.targetY = predY;
-                        pState.contactReduction = 1.0; // Full sprint
+                        pState.contactReduction = 0.6 + (diagConfidence * 0.4); 
                     }
 
                     pState.action = 'pursuit';
@@ -5580,12 +5612,16 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
                         rb1.isBallCarrier = true;
                         playState.handoffOccurred = true;
 
+                        // 💡 FIX: Prevent QB/RB collision explosion!
+                        // Allow them to phase through each other for 1.25 seconds (25 ticks)
+                        qb1.ghostTicks = 25; 
+                        rb1.ghostTicks = 25;
 
                         rb1.contactReduction = 1.2;
                         rb1.action = 'run_path';
                         if (finalOffensivePlayKey.includes('Flea_Flicker')) {
                             rb1.fleaFlickerPhase = 'running_draw';
-                            rb1.fleaFlickerTimer = playState.tick + 22; // RB holds ball for ~1.1s
+                            rb1.fleaFlickerTimer = playState.tick + 22; 
                         }
                     } else {
                         // Movement to mesh point (Your existing code here...)

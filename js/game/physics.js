@@ -59,10 +59,21 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
     const dy = targetY - pState.y;
     const distToTarget = Math.sqrt(dx * dx + dy * dy);
 
-    // Hard arrival stop
-    if (distToTarget < 0.05) {
-        pState.vx *= 0.5;
-        pState.vy *= 0.5;
+    // 💡 FIX: Deadzone for stationary actions to stop micro-oscillations (Jitter)
+    const isContinuousAction =['run_path', 'pursuit', 'tracking_ball'].includes(pState.action);
+    
+    if (distToTarget < 0.15 && !isContinuousAction) {
+        // Bleed off speed heavily when arriving
+        pState.vx *= 0.2;
+        pState.vy *= 0.2;
+        
+        // Snap directly to the target if moving very slowly to eliminate the last pixel of vibration
+        if (Math.abs(pState.vx) < 0.2 && Math.abs(pState.vy) < 0.2) {
+            pState.x = targetX;
+            pState.y = targetY;
+            pState.vx = 0;
+            pState.vy = 0;
+        }
         return;
     }
 
@@ -195,9 +206,8 @@ function resolveNewtonianCollisions(pState, allPlayers) {
     for (const other of allPlayers) {
         if (other.id === pState.id || other.isEngaged || pState.isEngaged) continue;
 
-        // Ignore collisions during the handoff mesh (QB/RB overlap)
-        const isHandoffPair = (pState.role === 'QB' && other.role === 'RB') || (pState.role === 'RB' && other.role === 'QB');
-        if (isHandoffPair && ['handoff_setup', 'handoff_receive', 'run_path'].includes(pState.action)) continue;
+        // 💡 FIX: Respect ghostTicks to prevent QB/RB explosion after handoffs
+        if (pState.ghostTicks > 0 || other.ghostTicks > 0) continue;
 
         const dist = getDistance(pState, other);
         const theirWeight = other.weight || other.wgt || 200;
@@ -210,18 +220,22 @@ function resolveNewtonianCollisions(pState, allPlayers) {
             const dy_norm = (pState.y - other.y) / dist;
 
             const totalW = myWeight + theirWeight;
-
-            // Deflection Math: Lighter players absorb more of the push
-            const myMoveRatio = theirWeight / totalW;
-
+            const myMoveRatio = theirWeight / totalW; 
+            
             // 1. Positional Push (Prevents rendering inside each other)
-            pState.x += dx_norm * overlap * myMoveRatio * 0.5;
-            pState.y += dy_norm * overlap * myMoveRatio * 0.5;
+            // 💡 FIX: Soften the positional push (0.5 -> 0.3) so it doesn't violently snap players
+            pState.x += dx_norm * overlap * myMoveRatio * 0.3;
+            pState.y += dy_norm * overlap * myMoveRatio * 0.3;
 
             // 2. Velocity Deflection (Momentum bump)
-            const bounce = 0.4;
-            pState.vx += dx_norm * bounce * myMoveRatio;
-            pState.vy += dy_norm * bounce * myMoveRatio;
+            // 💡 FIX: Only apply a bounce if there is actual kinetic energy.
+            // Prevents stationary players (like WRs and DBs) from vibrating constantly.
+            const relativeSpeed = Math.hypot(pState.vx - (other.vx || 0), pState.vy - (other.vy || 0));
+            if (relativeSpeed > 1.0) {
+                const bounce = Math.min(0.4, relativeSpeed * 0.05);
+                pState.vx += dx_norm * bounce * myMoveRatio;
+                pState.vy += dy_norm * bounce * myMoveRatio;
+            }
         }
     }
 }
