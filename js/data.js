@@ -560,6 +560,55 @@ export const offensivePlaybook = {
         }
     },
 
+    // --- SYMMETRICAL RUNS ---
+    'Uni_PowerLead_Left': {
+        type: 'run', tags:['run', 'inside', 'power'],
+        assignments: {
+            'QB': 'qb_setup', 'RB': 'run_iso_l', 'RB2': 'lead_left', 
+            'OL': 'run_block', 'Y': 'run_block', 'X': 'run_block', 'Z': 'run_block'
+        }
+    },
+    'Uni_Toss_Right': {
+        type: 'run', tags:['run', 'outside', 'toss'],
+        assignments: {
+            'QB': 'qb_setup', 'RB': 'run_toss_r', 
+            'OL1': 'pull_right_wide', 'OL2': 'run_block', 'OL3': 'run_block', // Left Guard pulls all the way right
+            'Y': 'run_block', 'X': 'run_block', 'Z': 'run_block', 'H': 'run_block'
+        }
+    },
+    'Uni_Toss_Left': {
+        type: 'run', tags: ['run', 'outside', 'toss'],
+        assignments: {
+            'QB': 'qb_setup', 'RB': 'run_toss_l', 
+            'OL1': 'run_block', 'OL2': 'run_block', 'OL3': 'pull_left_wide', // Right Guard pulls all the way left
+            'Y': 'run_block', 'X': 'run_block', 'Z': 'run_block', 'H': 'run_block'
+        }
+    },
+
+    // --- SYMMETRICAL / CONCEPT PASSES ---
+    'Uni_Mesh': {
+        type: 'pass', tags: ['pass', 'short', 'cross'],
+        readProgression: ['X', 'Z', 'RB'],
+        assignments: {
+            'QB': 'qb_setup', 
+            'X': 'Mesh_Right', 'Z': 'Mesh_Left', // The rubbing crossers
+            'H': 'Corner', 'Y': 'Corner',        // Clear out the safeties
+            'RB': 'Texas', 'OL': 'pass_block'
+        }
+    },
+    'Uni_Flood_Right': {
+        type: 'pass', tags:['pass', 'medium', 'flood'],
+        readProgression: ['Z', 'H', 'Y'],
+        assignments: {
+            'QB': 'qb_setup', 
+            'Z': 'Flood_Deep', // Pushes safety back
+            'H': 'Flood_Out',  // Medium out (Primary read)
+            'Y': 'Flat',       // Short out
+            'X': 'Dig',        // Backside dig to keep MLB honest
+            'RB': 'pass_block', 'OL': 'pass_block'
+        }
+    },
+
     // ===================================
     // --- PLAY ACTION CONCEPTS
     // ===================================
@@ -1045,6 +1094,32 @@ export const defensivePlaybook = {
             'DB3': 'man_cover_H', // Changed WR3 -> H
             'DB4': 'man_cover_Y', // Changed WR4 -> Y
             'DB5': 'zone_deep_middle'
+        }
+    },
+
+    // --- DIRECTIONAL BLITZES ---
+    'Overload_Blitz_Right': {
+        name: 'Overload Blitz Right', concept: 'Man', blitz: true,
+        compatibleFormations: ['3-2-3', '2-3-3', '3-1-4'],
+        tags: ['man', 'blitz', 'overload'],
+        assignments: {
+            'DL1': 'pass_rush', 'DL2': 'pass_rush', 'DL3': 'pass_rush',
+            'LB2': 'blitz_edge', // Right-side LB blitzes
+            'LB1': 'zone_short_middle', // Left-side LB drops to cover the hot read
+            'DB2': 'blitz_edge', // Right-side DB/Nickel also blitzes
+            'DB1': 'man_cover_X', 'DB3': 'man_cover_Z'
+        }
+    },
+    'Overload_Blitz_Left': {
+        name: 'Overload Blitz Left', concept: 'Man', blitz: true,
+        compatibleFormations:['3-2-3', '2-3-3', '3-1-4'],
+        tags: ['man', 'blitz', 'overload'],
+        assignments: {
+            'DL1': 'pass_rush', 'DL2': 'pass_rush', 'DL3': 'pass_rush',
+            'LB1': 'blitz_edge', // Left-side LB blitzes
+            'LB2': 'zone_short_middle', 
+            'DB1': 'blitz_edge', // Left-side DB blitzes
+            'DB2': 'man_cover_Z', 'DB3': 'man_cover_X'
         }
     },
 

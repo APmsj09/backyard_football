@@ -620,95 +620,105 @@ function checkFumble(ballCarrierState, tacklerState, playState, gameLog) {
  */
 function diagnosePlay(pState, tick, offenseStates, truePlayType, offensivePlayKey) {
     const iq = pState.playbookIQ || 50;
-
-    let runScore = 0;
-    let passScore = 0;
+    
+    let runScore = 0; let passScore = 0;
+    let leftScore = 10; let rightScore = 10; let centerScore = 15; // Directional biases
 
     // 1. GATHER KEYS (Observable Evidence)
     const qb = offenseStates.find(p => p.slot.startsWith('QB'));
     const rbs = offenseStates.filter(p => p.slot.startsWith('RB'));
     const ol = offenseStates.filter(p => p.slot.startsWith('OL'));
 
-    // Key: QB Depth / Action
+    // Key: QB Depth / Action / Rollout
     if (qb) {
         if (qb.action === 'qb_setup' && qb.hasCompletedDropback) passScore += 45;
         else if (qb.action === 'qb_setup' && !qb.hasCompletedDropback) passScore += 15;
         else if (qb.action === 'handoff_setup') runScore += 40;
-        else if (qb.isBallCarrier && qb.y > qb.initialY + 1.0) runScore += 30; // Scramble
+        
+        // Read Rollouts/Scrambles
+        if (qb.vx > 1.5) rightScore += 30;
+        else if (qb.vx < -1.5) leftScore += 30;
     }
 
-    // Key: Offensive Line Action (Trench warfare)
-    let passBlocks = 0;
-    let runBlocks = 0;
-    let pullers = 0;
+    // Key: Offensive Line Action & Pulling Guards
+    let passBlocks = 0; let runBlocks = 0;
     ol.forEach(lineman => {
         if (lineman.action === 'pass_block') passBlocks++;
         else if (lineman.action === 'run_block') runBlocks++;
-        if (lineman.assignment && lineman.assignment.includes('pull')) pullers++;
+        
+        // Massive directional keys
+        if (lineman.assignment && lineman.assignment.includes('pull_right')) { 
+            runScore += 40; rightScore += 70; 
+        }
+        if (lineman.assignment && lineman.assignment.includes('pull_left')) { 
+            runScore += 40; leftScore += 70; 
+        }
     });
 
-    // OL dictates the trench keys
     if (passBlocks > runBlocks) passScore += (passBlocks * 12);
     if (runBlocks > passBlocks) runScore += (runBlocks * 10);
-    if (pullers > 0) runScore += (pullers * 30); // Guard pulling is a massive run key
 
-    // Key: Running Backs
+    // Key: Running Back Flow
     rbs.forEach(rb => {
         if (rb.isBallCarrier) runScore += 60;
-        else if (rb.action === 'run_path' && rb.y > (qb?.y || 0)) runScore += 20; // Pressing LOS
+        else if (rb.action === 'run_path' && rb.y > (qb?.y || 0)) runScore += 20; 
         else if (rb.action === 'pass_block') passScore += 15;
+
+        // RB initial lateral burst (Toss/Sweep detection)
+        if (rb.vx > 2.0) rightScore += 40;
+        else if (rb.vx < -2.0) leftScore += 40;
+        else if (rb.vy > 1.5) centerScore += 30; // Hitting the A gap
     });
 
     // 2. PLAY ACTION (The Deception)
-    // Play action mimics run keys early, spoofing the defense
     const isPlayAction = offensivePlayKey.includes('PA_');
     if (isPlayAction && tick < 25) {
-        runScore += 50; // Fake handoff injects artificial run keys
+        runScore += 50; 
+        // Play action bootlegs spoof directional keys!
+        if (offensivePlayKey.includes('Bootleg_Right')) leftScore += 40; // Fakes left, rolls right
+        if (offensivePlayKey.includes('Bootleg_Left')) rightScore += 40;
     }
 
-    // 3. APPLY IQ & TIME (Causality)
-    // High IQ processes keys faster and weights them accurately.
-    // Low IQ needs more time to build confidence.
-    const timeFactor = Math.min(1.0, tick / 35); // Full read usually by 1.75s
-    const iqFactor = iq / 100; // 0.2 to 0.99
+    // 3. APPLY IQ & TIME (Causality & Noise)
+    const timeFactor = Math.min(1.0, tick / 35); 
+    const iqFactor = iq / 100; 
 
-    // Noise represents slight hesitation or misinterpretation (Reduced randomness)
-    // Inversely proportional to IQ. 99 IQ = basically 0 noise. 50 IQ = +/- 15 score noise.
-    const noiseMax = 30 * (1.0 - iqFactor);
-    const noiseRun = (Math.random() * noiseMax) - (noiseMax / 2);
-    const noisePass = (Math.random() * noiseMax) - (noiseMax / 2);
+    const noiseMax = 30 * (1.0 - iqFactor); 
+    const applyNoise = (score) => score * timeFactor * (0.5 + (iqFactor / 2)) + ((Math.random() * noiseMax) - (noiseMax / 2));
 
-    let finalRunScore = (runScore * timeFactor * (0.5 + (iqFactor / 2))) + noiseRun;
-    let finalPassScore = (passScore * timeFactor * (0.5 + (iqFactor / 2))) + noisePass;
+    const finalRunScore = applyNoise(runScore) + (pState.role === 'LB' ? 15 : 0);
+    const finalPassScore = applyNoise(passScore) + (pState.role === 'DB' ? 15 : 0);
+    const finalLeft = applyNoise(leftScore);
+    const finalRight = applyNoise(rightScore);
+    const finalCenter = applyNoise(centerScore);
 
-    // Position Bias (LBs look for run first, DBs look for pass)
-    if (pState.role === 'LB') finalRunScore += 15;
-    if (pState.role === 'DB') finalPassScore += 15;
-
-    // 4. DETERMINE GUESS & CONFIDENCE
+    // 4. DETERMINE TYPE CONFIDENCE
     let guess = 'read';
-    let confidence = 0;
-
-    const scoreDiff = Math.abs(finalRunScore - finalPassScore);
-
-    // Confidence is based on how strongly one score outweighs the other (Scale of 0.0 to 1.0)
-    confidence = Math.max(0, Math.min(1.0, scoreDiff / 60));
-
-    // Threshold to commit: Must have a clear winner, or enough time has passed.
-    // High IQ players require less confidence to make the right read early.
+    let confidence = Math.max(0, Math.min(1.0, Math.abs(finalRunScore - finalPassScore) / 60)); 
     const commitThreshold = 0.60 - (iqFactor * 0.3);
 
     if (confidence > commitThreshold || tick > 40) {
         guess = finalRunScore > finalPassScore ? 'run' : 'pass';
-
-        // Late Read Adjustment: If it's very late and ball is passed, force pass read
-        if (tick > 50 && truePlayType === 'pass') {
-            guess = 'pass';
-            confidence = 1.0;
-        }
+        if (tick > 50 && truePlayType === 'pass') { guess = 'pass'; confidence = 1.0; }
     }
 
-    return { guess, confidence };
+    // 5. DETERMINE DIRECTION CONFIDENCE
+    let direction = 'center';
+    let dirConfidence = 0;
+    const totalDirScore = Math.max(1, finalLeft + finalRight + finalCenter);
+    
+    if (finalRight > finalLeft && finalRight > finalCenter) {
+        direction = 'right';
+        dirConfidence = finalRight / totalDirScore;
+    } else if (finalLeft > finalRight && finalLeft > finalCenter) {
+        direction = 'left';
+        dirConfidence = finalLeft / totalDirScore;
+    } else {
+        direction = 'center';
+        dirConfidence = finalCenter / totalDirScore;
+    }
+
+    return { guess, confidence, direction, dirConfidence };
 }
 
 
@@ -3090,13 +3100,16 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
             // 1. DIAGNOSIS (IQ-Based Read)
             const isDL = pState.role === 'DL';
             let playDiagnosis = playType;
-            let diagConfidence = 1.0; // DLs always know their assignment (100% confidence)
+            let diagConfidence = 1.0; 
+            let diagDirection = 'center';
+            let dirConfidence = 1.0;
 
             if (!isDL) {
-                // 💡 Pass the offenseStates so the AI can read the keys!
                 const diag = diagnosePlay(pState, playState.tick, offenseStates, playType, offensivePlayKey);
                 playDiagnosis = diag.guess;
                 diagConfidence = diag.confidence;
+                diagDirection = diag.direction;
+                dirConfidence = diag.dirConfidence;
             }
 
             const isRunRead = playDiagnosis === 'run';
@@ -3166,27 +3179,35 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                         pState.contactReduction = 1.0; // 💡 FIX: Sprint through the tackle! Do not slow down.
                     } else {
                         // B. Open Field Pursuit
-                        // Calculate lead based on distance. Shorter lead if close, longer lead if far.
                         const maxLeadTime = 1.2;
                         const leadTime = Math.min(maxLeadTime, dist / (16 + (iq / 4)));
 
                         let predX = chaseTarget.x + ((chaseTarget.vx || 0) * leadTime);
                         let predY = chaseTarget.y + ((chaseTarget.vy || 0) * leadTime);
 
-                        // 💡 INSIDE-OUT LEVERAGE:
-                        // Smart defenders (IQ > 65) will use the sideline as an extra defender
-                        // rather than letting the runner get outside of them.
-                        if (iq > 65 && dist > 5.0) {
-                            if (predX > CENTER_X && pState.x < predX) {
-                                predX -= 1.5; // Force them outside right
-                            } else if (predX <= CENTER_X && pState.x > predX) {
-                                predX += 1.5; // Force them outside left
+                        // 💡 FIX: Directional Pursuit Cheating
+                        // If the defender is confident the play is going wide, they cheat their angle outside!
+                        if (dirConfidence > 0.45 && !isFooledByPA) {
+                            const cheatAmount = 4.0 * dirConfidence * (iq / 100); // Smart LBs cheat harder
+                            
+                            if (diagDirection === 'right' && predX < FIELD_WIDTH - 5) {
+                                predX += cheatAmount; // Run right to cut off the edge
+                            } else if (diagDirection === 'left' && predX > 5) {
+                                predX -= cheatAmount; // Run left to cut off the edge
                             }
+                        }
+
+                        // Inside-Out Leverage (Sideline safety)
+                        if (iq > 65 && dist > 5.0) {
+                            if (predX > CENTER_X && pState.x < predX) predX -= 1.5; 
+                            else if (predX <= CENTER_X && pState.x > predX) predX += 1.5; 
                         }
 
                         pState.targetX = predX;
                         pState.targetY = predY;
-                        pState.contactReduction = 0.6 + (diagConfidence * 0.4);
+                        
+                        // Hesitation penalty applied via contactReduction
+                        pState.contactReduction = 0.6 + (diagConfidence * 0.4); 
                     }
 
                     pState.action = 'pursuit';
