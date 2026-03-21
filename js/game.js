@@ -2709,9 +2709,24 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                     targetX = pt.x;
                     targetY = pt.y;
 
+                    const distToNode = getDistance(pState, pt);
+
                     // Progress through the design based on proximity
-                    if (getDistance(pState, pt) < 1.2) {
+                    // 💡 FIX: Increased radius to 1.8 so fast players don't "orbit" missed waypoints
+                    if (distToNode < 1.8) {
                         pState.currentPathIndex++;
+
+                        // 💡 FIX: The "Hard Plant"
+                        // If there is another cut coming (like a Counter run), bleed off their 
+                        // momentum instantly so they can redirect their weight without drifting.
+                        if (pState.currentPathIndex < pState.routePath.length) {
+                            pState.vx *= 0.4;
+                            pState.vy *= 0.4;
+
+                            if (typeof DEBUG_MODE !== 'undefined' && DEBUG_MODE) {
+                                console.log(`[RUN-CUT] 👟 ${pState.name} plants foot for designed cut!`);
+                            }
+                        }
                     }
 
                     // Give a slight "burst" modifier for designed runs
