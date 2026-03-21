@@ -1799,21 +1799,32 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
                     else if (slot.startsWith('DB')) assignment = 'zone_deep_middle';
                 }
 
+                // 💡 FIX 1: Map Conceptual Roles (X, Z, Y) to Actual Slots (WR1, WR2, TE1) FIRST
                 if (assignment.startsWith('man_cover_') || assignment === 'def_read') {
-
+                    
                     let targetSlot = assignment.replace('man_cover_', '');
+                    const offMapping = offenseFormationData.mapping || {};
 
-                    // If target doesn't exist or vague assignment, find OPEN threat
+                    if (offMapping[targetSlot]) {
+                        const mappedSlot = offMapping[targetSlot];
+                        targetSlot = Array.isArray(mappedSlot) ? mappedSlot[0] : mappedSlot;
+                        
+                        if (assignment !== 'def_read') {
+                            assignment = `man_cover_${targetSlot}`;
+                        }
+                    }
+
+                    // Now check if the actual mapped slot exists on the field
                     const targetExists = initialOffenseStates.some(o => o.slot === targetSlot);
 
                     if (!targetExists || assignment === 'def_read') {
                         // Priority list for this position type
                         let priorities = [];
-                        if (slot.startsWith('DB')) priorities = ['WR1', 'WR2', 'WR3', 'TE1', 'RB1'];
+                        if (slot.startsWith('DB')) priorities =['WR1', 'WR2', 'WR3', 'TE1', 'RB1'];
                         else if (slot.startsWith('LB')) priorities = ['RB1', 'TE1', 'RB2', 'WR3'];
-                        else priorities = ['RB1'];
+                        else priorities =['RB1'];
 
-                        // Find first priority that isn't covered yet
+                        // 💡 FIX 2: Check coveredOffensiveSlots to ensure we don't assign 3 guys to WR1
                         const bestTarget = priorities.find(t =>
                             initialOffenseStates.some(o => o.slot === t) && !coveredOffensiveSlots.has(t)
                         );
@@ -1827,38 +1838,36 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
                         }
                     }
 
+                    // 💡 FIX 3: Mark this guy as covered so the next fallback goes to the next receiver
                     if (assignment.startsWith('man_cover_')) {
-                        let cleanTargetSlot = assignment.replace('man_cover_', '');
-                        const offMapping = offenseFormationData.mapping || {};
-
-                        if (offMapping[cleanTargetSlot]) {
-                            const mappedSlot = offMapping[cleanTargetSlot];
-                            const finalSlot = Array.isArray(mappedSlot) ? mappedSlot[0] : mappedSlot;
-
-                            assignment = `man_cover_${finalSlot}`;
-                            assignedPlayerSlot = finalSlot;
-                        } else {
-                            assignedPlayerSlot = cleanTargetSlot; // Fallback
-                        }
+                        assignedPlayerSlot = targetSlot;
+                        coveredOffensiveSlots.add(targetSlot);
                     }
                 }
 
                 action = assignment;
 
+                // 💡 FIX 4: Better Stacking/Offset Logic for Double & Triple Coverage
                 if (assignment.startsWith('man_cover_')) {
                     const tSlot = assignment.split('_')[2];
                     const tState = initialOffenseStates.find(o => o.slot === tSlot);
+                    
                     if (tState) {
                         const isSlot = tSlot.includes('TE') || tSlot === 'WR3';
                         let xOffset = (tState.x < CENTER_X) ? (isSlot ? 1.0 : -0.5) : (isSlot ? -1.0 : 0.5);
                         let yOffset = 2.0;
 
-                        // 💡 FIX: Check if another defender is ALREADY covering this guy!
-                        // If so, shift this second defender to the opposite shoulder and back them up.
-                        const alreadyCovered = playState.activePlayers.some(p => p.assignedPlayerSlot === tSlot || p.assignment === assignment);
-                        if (alreadyCovered) {
-                            xOffset *= -2.5; // Flip to the other shoulder, slightly wider
-                            yOffset += 1.5;  // Play deeper bracket coverage
+                        // Count how many defenders have ALREADY been assigned to cover this exact player
+                        const existingCoverers = playState.activePlayers.filter(p => p.assignment === assignment).length;
+
+                        if (existingCoverers === 1) {
+                            // Double Coverage: Play inside shoulder, deeper bracket
+                            xOffset *= -2.5; 
+                            yOffset += 2.0;  
+                        } else if (existingCoverers >= 2) {
+                            // Triple Coverage: Play dead center, much deeper (Safety help)
+                            xOffset = 0;
+                            yOffset += 5.0;
                         }
 
                         startX = tState.x + xOffset;
