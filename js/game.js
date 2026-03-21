@@ -4256,14 +4256,22 @@ function updateQBDecision(qbState, offenseStates, defenseStates, playState, offe
         if (isPressured) THROW_THRESHOLD = 15;
         if (isHotReadSituation) THROW_THRESHOLD = 0;
 
-        if (DEBUG_MODE) {
-            const brainSummary = readDebugLog.join(' | ');
-            console.log(`[QB-BRAIN] ${qbState.name} scanning: [${brainSummary}] Threshold: ${THROW_THRESHOLD}`);
-        }
+        if (typeof DEBUG_MODE !== 'undefined' && DEBUG_MODE) {
+            const safeLogs = readDebugLog.map(s => {
+                if (!s) return "ERR";
+                return s; // Already strings like "WR1:42"
+            });
 
-        if (DEBUG_MODE) {
+            const qbName = qbState?.name ?? "Unknown QB";
+            const thresh = typeof THROW_THRESHOLD !== 'undefined' ? THROW_THRESHOLD : "N/A";
+
+            console.log(`[QB-BRAIN] ${qbName} scanning: [${safeLogs.join(' | ')}] Threshold: ${thresh}`);
             const pen = adjustedAccuracy - qbAcc;
-            console.log(`[QB-STATS] ${qbState.name} Accuracy: ${qbAcc.toFixed(0)} | Pressure Penalty: ${pen.toFixed(0)} | Final: ${adjustedAccuracy.toFixed(0)}`);
+            console.log(
+                `[QB-STATS] ${qbName} Accuracy: ${(qbAcc ?? 0).toFixed(0)} | ` +
+                `Pressure Penalty: ${pen.toFixed(0)} | ` +
+                `Final: ${(adjustedAccuracy ?? 0).toFixed(0)}`
+            );
         }
 
         // EXECUTE THROW DECISION
@@ -5254,7 +5262,7 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
 
     // --- FIX: ADD GROUP LOG HERE AFTER PLAYSTATE IS CREATED ---
     //if (typeof DEBUG_MODE !== 'undefined' && DEBUG_MODE) {
-        //console.groupCollapsed(`🏈 Play: ${finalOffensivePlayKey} vs ${defensivePlayKey}`);
+    //console.groupCollapsed(`🏈 Play: ${finalOffensivePlayKey} vs ${defensivePlayKey}`);
     //}
 
     // Reset per-play captain flavor flags so a single team message only appears once per play
