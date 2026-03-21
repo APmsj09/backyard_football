@@ -60,13 +60,13 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
     const distToTarget = Math.sqrt(dx * dx + dy * dy);
 
     // 💡 FIX: Deadzone for stationary actions to stop micro-oscillations (Jitter)
-    const isContinuousAction =['run_path', 'pursuit', 'tracking_ball'].includes(pState.action);
-    
+    const isContinuousAction = ['run_path', 'pursuit', 'tracking_ball', 'run_route', 'qb_scramble'].includes(pState.action);
+
     if (distToTarget < 0.15 && !isContinuousAction) {
         // Bleed off speed heavily when arriving
         pState.vx *= 0.2;
         pState.vy *= 0.2;
-        
+
         // Snap directly to the target if moving very slowly to eliminate the last pixel of vibration
         if (Math.abs(pState.vx) < 0.2 && Math.abs(pState.vy) < 0.2) {
             pState.x = targetX;
@@ -220,8 +220,8 @@ function resolveNewtonianCollisions(pState, allPlayers) {
             const dy_norm = (pState.y - other.y) / dist;
 
             const totalW = myWeight + theirWeight;
-            const myMoveRatio = theirWeight / totalW; 
-            
+            const myMoveRatio = theirWeight / totalW;
+
             // 1. Positional Push (Prevents rendering inside each other)
             // 💡 FIX: Soften the positional push (0.5 -> 0.3) so it doesn't violently snap players
             pState.x += dx_norm * overlap * myMoveRatio * 0.3;
