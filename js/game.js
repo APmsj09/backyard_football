@@ -2021,6 +2021,9 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
                 if (isOffense && startY > playState.lineOfScrimmage - 1.5) startY = playState.lineOfScrimmage - 1.5;
             }
 
+            // 💡 FIX: Safely initialize fatigue to prevent NaN physics corruption
+            if (player.fatigue === undefined || isNaN(player.fatigue)) player.fatigue = 0;
+
             const fatigueRatio = player.fatigue / (player.attributes?.physical?.stamina || 50);
             const fatigueMod = Math.max(0.3, 1.0 - fatigueRatio);
 
@@ -2048,11 +2051,14 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
             const height = player.attributes?.physical?.height || 68;
             const toughness = player.attributes?.mental?.toughness || 50;
             const catching = player.attributes?.technical?.catchingHands || 50;
-            const tackling = player.attributes?.defense?.tackling || 50;
+            
+            // 💡 FIX: Defensive attributes fallback to technical to guarantee valid numbers
+            const tackling = player.attributes?.technical?.tackling || player.attributes?.defense?.tackling || 50;
+            const coverage = player.attributes?.defense?.passCoverage || player.attributes?.technical?.passCoverage || 50;
+            
             const blocking = player.attributes?.technical?.blocking || 50;
             const blockShedding = player.attributes?.technical?.blockShedding || 50;
             const accuracy = player.attributes?.technical?.throwingAccuracy || 50;
-            const coverage = player.attributes?.defense?.passCoverage || 50;
 
             const pState = {
                 id: player.id,
@@ -2744,7 +2750,7 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
     playState.activePlayers.forEach(pState => {
         // Global Status Checks
         if (pState.stunnedTicks > 0) {
-            pState.stunnedTicks--;
+            // 💡 FIX: Removed double-decrement (handled safely inside resolvePlay instead)
             return;
         }
         if (pState.isBlocked || pState.isEngaged) return;
@@ -3719,16 +3725,16 @@ function checkTackleCollisions(playState, gameLog) {
         }
 
         // --- B. PHYSICS-BASED TACKLE CALCULATION ---
-        const runnerVel = Math.max(1.0, Math.hypot(carrier.vx, carrier.vy));
-        const tacklerVel = Math.max(1.0, Math.hypot(defender.vx, defender.vy));
+        const runnerVel = Math.max(1.0, Math.hypot(carrier.vx || 0, carrier.vy || 0));
+        const tacklerVel = Math.max(1.0, Math.hypot(defender.vx || 0, defender.vy || 0));
 
         // Momentum (Mass * Velocity)
         const rMomentum = (carrier.wgt || 200) * runnerVel;
         const tMomentum = (defender.wgt || 200) * tacklerVel;
 
         // Skill vs Strength Power
-        const tPower = (defender.tkl * 0.6) + (defender.str * 0.4);
-        const rPower = (carrier.agi * 0.5) + (carrier.str * 0.5);
+        const tPower = ((defender.tkl || 50) * 0.6) + ((defender.str || 50) * 0.4);
+        const rPower = ((carrier.agi || 50) * 0.5) + ((carrier.str || 50) * 0.5);
 
         // 1. Base success chance 65%
         let successChance = 0.65;
@@ -3737,8 +3743,8 @@ function checkTackleCollisions(playState, gameLog) {
         const momRatio = tMomentum / Math.max(1, rMomentum);
         successChance += (momRatio - 1.0) * 0.2;
 
-        // 💡 GROUP TACKLE BONUS: If multiple defenders are in range, success goes way up
-        const defendersInRange = tacklingTeam.filter(d => getDistance(carrier, d) < TACKLE_RANGE && d.stunnedTicks === 0);
+        // 💡 GROUP TACKLE BONUS: Safely verify distances to avoid NaN issues
+        const defendersInRange = tacklingTeam.filter(d => d.stunnedTicks === 0 && !isNaN(d._distToCarrier) && d._distToCarrier < TACKLE_RANGE);
         if (defendersInRange.length > 1) {
             successChance += 0.35;
         }
@@ -3748,15 +3754,13 @@ function checkTackleCollisions(playState, gameLog) {
 
         // 4. BEAST MODE LIMITER: Cumulative fatigue
         const brokenCount = carrier.tacklesBrokenThisPlay || 0;
-        successChance += (brokenCount * 0.25); // Reduced from 0.40 to allow for "elusive" runs
+        successChance += (brokenCount * 0.25); 
 
         // Hard Caps: Always at least 5% chance to miss, always at least 10% chance to tackle
         successChance = Math.max(0.10, Math.min(0.95, successChance));
-
-        // --- DEBUG: TACKLE MATH ---
-        if (typeof DEBUG_MODE !== 'undefined' && DEBUG_MODE) {
-            console.log(`[TACKLE-CALC] ${defender.name} tackling ${carrier.name} | Chance: ${(successChance * 100).toFixed(1)}% | Momentum Diff: ${(tMomentum / Math.max(1, rMomentum)).toFixed(2)}x | Broken Prev: ${brokenCount}`);
-        }
+        
+        // 💡 ULTIMATE FAILSAFE: If NaN corruption leaked through somehow, fallback to 65% 
+        if (isNaN(successChance)) successChance = 0.65;
 
         if (Math.random() < successChance) {
             // --- TACKLE SUCCESS ---
@@ -8495,5 +8499,6 @@ export {
 
     // 🔧 NEW: Validation
     validateFormationDepthChartSync,
-    getDepthChartEmptySlots
+    getDepthChartEmptySlots,
+    resetGameStats
 };

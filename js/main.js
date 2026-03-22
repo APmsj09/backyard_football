@@ -607,6 +607,14 @@ async function startLiveGame(playerGameMatch) {
     }
     UI.hideModal();
 
+    // 💡 FIX: Reset Stats and Fatigue BEFORE starting the live game
+    if (typeof Game.resetGameStats === 'function') {
+        Game.resetGameStats(playerGameMatch.home, playerGameMatch.away);
+    }
+
+    // 2. Initialize Player's Live Game Object
+    // We do NOT call simulateGame here. We create the state container.
+
     // 2. Initialize Player's Live Game Object
     // We do NOT call simulateGame here. We create the state container.
     const liveGameParams = {
