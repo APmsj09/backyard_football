@@ -849,12 +849,18 @@ export function renderDashboard(gameState) {
     if (elements.advanceWeekBtn) elements.advanceWeekBtn.textContent = (typeof currentWeek === 'number' && currentWeek < WEEKS_IN_SEASON) ? 'Advance Week' : 'Go to Offseason';
 
     if (elements.statsFilterTeam && Array.isArray(teams)) {
-        let teamOptions = '<option value="">All Teams</option>';
+        let teamOptions = '<option value="">League Leaders (All)</option>';
         teams
             .filter(t => t && t.id && t.name)
             .sort((a, b) => a.name.localeCompare(b.name))
-            .forEach(t => teamOptions += `<option value="${t.id}">${t.name}</option>`);
+            .forEach(t => {
+                // 💡 FIX: Default to the user's team on first load for better QoL
+                const isUserTeam = t.id === playerTeam.id;
+                const shouldSelect = isUserTeam && !elements.statsFilterTeam.dataset.initialized;
+                teamOptions += `<option value="${t.id}" ${shouldSelect ? 'selected' : ''}>${t.name}</option>`;
+            });
         elements.statsFilterTeam.innerHTML = teamOptions;
+        elements.statsFilterTeam.dataset.initialized = "true"; // Prevent overriding user selection later
     } else if (elements.statsFilterTeam) {
         elements.statsFilterTeam.innerHTML = '<option value="">Error loading teams</option>';
     }
@@ -1946,7 +1952,7 @@ function renderPlayerStatsTab(gameState) {
             const teamName = gameState.teams.find(t => t.id === p.teamId)?.name || 'FA';
 
             tableHtml += `
-                <tr class="${isMyTeam ? 'bg-amber-50' : 'hover:bg-gray-50'}">
+                <tr class="${isMyTeam ? 'bg-amber-50' : 'hover:bg-gray-50'} cursor-pointer" data-player-id="${p.id}" onclick="app.openPlayerCard('${p.id}')">
                     <td class="py-2 px-3 font-semibold sticky left-0 ${isMyTeam ? 'bg-amber-50' : 'bg-white'} z-10">${p.name}</td>
                     <td class="py-2 px-3 text-gray-500 text-xs">${teamName}</td>
                     ${statsConfig.map(s => `

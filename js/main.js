@@ -799,38 +799,103 @@ function handleGoToNextDraft() {
 
 function handleDashboardClicks(e) {
     const target = e.target;
-    const playerRow = target.closest('#my-team-roster tbody tr[data-player-id]');
+    // Prevent triggering if a button (like set captain) was clicked
+    if (target.tagName === 'BUTTON' || target.closest('button')) return;
 
+    // Trigger on ANY player row inside the dashboard
+    const playerRow = target.closest('tr[data-player-id]');
     if (playerRow && playerRow.dataset.playerId) {
-        const clickedPlayerId = playerRow.dataset.playerId;
-        if (!gameState) return;
-
-        let clickedPlayer;
-        if (typeof Game.getPlayer === 'function') {
-            clickedPlayer = Game.getPlayer(clickedPlayerId);
-        } else {
-            clickedPlayer = gameState.players.find(p => p.id === clickedPlayerId);
-        }
-
-        if (clickedPlayer) {
-            const positions = Object.keys(positionOverallWeights);
-            let overallsHtml = '<div class="mt-4 grid grid-cols-4 gap-2 text-center">';
-            positions.forEach(pos => {
-                overallsHtml += `<div class="bg-gray-200 p-2 rounded"><p class="font-semibold text-xs">${pos}</p><p class="font-bold text-xl">${Game.calculateOverall(clickedPlayer, pos)}</p></div>`;
-            });
-            overallsHtml += '</div>';
-
-            const playerInfoHtml = `
-                <p class="text-sm text-gray-600">
-                    Age: ${clickedPlayer.age} | H: ${formatHeight(clickedPlayer.attributes?.physical?.height)} | W: ${clickedPlayer.attributes?.physical?.weight} lbs
-                </p>
-                <p class="text-sm text-gray-600">Potential: <span class="font-semibold">${clickedPlayer.potential}</span></p>
-                ${overallsHtml}
-                <button class="mt-4 w-full bg-red-500 text-white py-2 rounded hover:bg-red-600" onclick="app.cutPlayer('${clickedPlayer.id}')">Cut Player</button>
-            `;
-            UI.showModal(`${clickedPlayer.name}`, playerInfoHtml, null, '', null, 'Close');
-        }
+        openPlayerCard(playerRow.dataset.playerId);
     }
+}
+
+// 💡 NEW: Rich, Tabbed Player Card
+function openPlayerCard(playerId) {
+    if (!gameState) return;
+    
+    let player = (typeof Game.getPlayer === 'function') ? Game.getPlayer(playerId) : gameState.players.find(p => p.id === playerId);
+    if (!player) return;
+
+    const team = gameState.teams.find(t => t.id === player.teamId);
+    const teamName = team ? team.name : 'Free Agent';
+    const isMyTeam = player.teamId === gameState.playerTeam.id;
+
+    // Tab 1: Attributes & Overalls
+    const positions = Object.keys(positionOverallWeights);
+    let overallsHtml = '<div class="grid grid-cols-4 gap-2 text-center mt-2">';
+    positions.forEach(pos => {
+        overallsHtml += `<div class="bg-gray-100 border border-gray-200 p-2 rounded"><p class="font-semibold text-[10px] text-gray-500 uppercase">${pos}</p><p class="font-bold text-lg text-gray-800">${Game.calculateOverall(player, pos)}</p></div>`;
+    });
+    overallsHtml += '</div>';
+
+    // Tab 2: Season & Career Stats
+    const s = player.seasonStats || {};
+    const c = player.careerStats || {};
+    const statsHtml = `
+        <div class="grid grid-cols-2 gap-4 text-sm mt-2">
+            <div class="bg-blue-50 p-3 rounded border border-blue-100">
+                <h5 class="font-bold text-blue-800 border-b border-blue-200 mb-2 pb-1">Current Season</h5>
+                <p>Pass: ${s.passYards||0} yds, ${s.passCompletions||0}/${s.passAttempts||0}, ${s.interceptionsThrown||0} INT</p>
+                <p>Rush: ${s.rushYards||0} yds, ${s.rushAttempts||0} att</p>
+                <p>Rec: ${s.recYards||0} yds, ${s.receptions||0} rec, ${s.drops||0} drp</p>
+                <p>Defense: ${s.tackles||0} tkl, ${s.sacks||0} sck, ${s.interceptions||0} int</p>
+                <p class="mt-1 font-bold text-amber-600">Total TDs: ${s.touchdowns||0}</p>
+            </div>
+            <div class="bg-gray-50 p-3 rounded border border-gray-200">
+                <h5 class="font-bold text-gray-800 border-b border-gray-300 mb-2 pb-1">Career</h5>
+                <p>Seasons: ${c.seasonsPlayed||0}</p>
+                <p>Pass Yds: ${c.passYards||0}</p>
+                <p>Rush Yds: ${c.rushYards||0}</p>
+                <p>Rec Yds: ${c.recYards||0}</p>
+                <p>Tackles: ${c.tackles||0}</p>
+                <p class="mt-1 font-bold text-amber-600">Total TDs: ${c.touchdowns||0}</p>
+            </div>
+        </div>
+    `;
+
+    // Build the Modal HTML
+    const playerInfoHtml = `
+        <div class="mb-4 pb-2 border-b border-gray-200">
+            <p class="text-sm text-gray-500 font-bold uppercase tracking-wider">${teamName} • Age ${player.age} • ${player.potential} Potential</p>
+            <p class="text-sm text-gray-700">H: ${formatHeight(player.attributes?.physical?.height)} | W: ${player.attributes?.physical?.weight} lbs</p>
+        </div>
+        
+        <!-- CSS Tabs -->
+        <div class="flex border-b border-gray-300 mb-4">
+            <button class="player-tab-btn active px-4 py-2 font-bold text-amber-600 border-b-2 border-amber-600" data-target="tab-skills">Skills</button>
+            <button class="player-tab-btn px-4 py-2 font-bold text-gray-500 hover:text-gray-700 border-b-2 border-transparent" data-target="tab-stats">Stats</button>
+        </div>
+
+        <div id="tab-skills" class="player-tab-content block animate-fadeIn">
+            ${overallsHtml}
+        </div>
+        
+        <div id="tab-stats" class="player-tab-content hidden animate-fadeIn">
+            ${statsHtml}
+        </div>
+
+        ${isMyTeam ? `<button class="mt-6 w-full bg-red-500 text-white py-2 rounded hover:bg-red-600 font-bold transition shadow" onclick="app.cutPlayer('${player.id}')">Cut Player from Team</button>` : ''}
+    `;
+
+    UI.showModal(`${player.name} <span class="text-gray-400 text-lg">#${player.number||'--'}</span>`, playerInfoHtml, null, '', null, 'Close');
+
+    // Attach Tab Event Listeners inside Modal
+    setTimeout(() => {
+        const modalBody = document.getElementById('modal-body');
+        if(!modalBody) return;
+        const tabs = modalBody.querySelectorAll('.player-tab-btn');
+        const contents = modalBody.querySelectorAll('.player-tab-content');
+
+        tabs.forEach(tab => {
+            tab.addEventListener('click', () => {
+                tabs.forEach(t => t.className = "player-tab-btn px-4 py-2 font-bold text-gray-500 hover:text-gray-700 border-b-2 border-transparent");
+                tab.className = "player-tab-btn active px-4 py-2 font-bold text-amber-600 border-b-2 border-amber-600";
+                
+                contents.forEach(c => c.classList.add('hidden'));
+                modalBody.querySelector(`#${tab.dataset.target}`).classList.remove('hidden');
+            });
+        });
+    }, 10);
 }
 
 function handleStatsChange() {
@@ -937,6 +1002,7 @@ function handleSetCaptain(playerId) {
 window.app = {
     startNewGame,
     handleLoadGame,
+    openPlayerCard,
     handleLoadTestRoster,
     handleSaveTestRoster,
     handleConfirmTeam,

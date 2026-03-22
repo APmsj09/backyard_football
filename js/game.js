@@ -6065,14 +6065,16 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
         }
     }
 
-    // FIX: Calculate Rushing Stats
-    if (ballCarrierState && ballCarrierState.isOffense && !playState.returnStartY && !playState.fumbleOccurred) {
+    // FIX: Calculate Rushing Stats (Includes fumbles and trick plays)
+    if (ballCarrierState && ballCarrierState.isOffense && !playState.returnStartY) {
         const isRun = playState.type === 'run' || (playState.type === 'pass' && ballCarrierState.role === 'QB');
-        // Don't count it as a rush if they caught a pass
+        // Don't count it as a rush if they caught a pass THIS play
         const caughtPassThisPlay = playState.statEvents.some(e => e.type === 'completion' && e.receiverId === ballCarrierState.id);
 
         if (isRun && !caughtPassThisPlay) {
-            const rushYards = ballCarrierState.y - playState.lineOfScrimmage;
+            // 💡 FIX: Grant yards up to the spot of the fumble if a fumble occurred
+            const yardageLine = playState.fumbleOccurred ? playState.finalBallY : ballCarrierState.y;
+            const rushYards = yardageLine - playState.lineOfScrimmage;
             playState.statEvents.push({ type: 'rush', runnerId: ballCarrierState.id, yards: rushYards });
         }
     }
