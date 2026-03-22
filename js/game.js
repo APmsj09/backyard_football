@@ -334,7 +334,17 @@ export function rebuildDepthChartFromOrder(team) {
     team.formations.offense = offFormKey;
     const offSlots = offenseFormations[offFormKey].slots;
 
-    offSlots.forEach(slot => {
+    // 💡 NEW: Prioritization System
+    // Engine evaluates high-priority roles first. If a player is listed #1 in multiple, the highest priority role claims them.
+    const slotPriority = {
+        'QB1': 100, 'OL2': 90, 'OL1': 85, 'OL3': 80, 'RB1': 75, 'WR1': 70, 'TE1': 65, 'WR2': 60, 'WR3': 55, 'RB2': 50, 'WR4': 45, 'TE2': 40, 'WR5': 35,
+        'LB2': 100, 'LB1': 95, 'LB3': 90, 'DB1': 85, 'DB3': 80, 'DB2': 75, 'DB4': 70, 'DL1': 65, 'DL3': 60, 'DL2': 55, 'DL4': 50, 'DB5': 45
+    };
+    const getPriority = (slot) => slotPriority[slot] || 0;
+
+    const sortedOffSlots = [...offSlots].sort((a, b) => getPriority(b) - getPriority(a));
+
+    sortedOffSlots.forEach(slot => {
         let posKey = slot.replace(/\d+/g, '');
         if (['OT', 'OG', 'C'].includes(posKey)) posKey = 'OL';
         if (posKey === 'FB') posKey = 'RB';
@@ -358,7 +368,9 @@ export function rebuildDepthChartFromOrder(team) {
     team.formations.defense = defFormKey;
     const defSlots = defenseFormations[defFormKey].slots;
 
-    defSlots.forEach(slot => {
+    const sortedDefSlots = [...defSlots].sort((a, b) => getPriority(b) - getPriority(a));
+
+    sortedDefSlots.forEach(slot => {
         let posKey = slot.replace(/\d+/g, '');
         if (['CB', 'S'].includes(posKey)) posKey = 'DB';
         if (['DE', 'DT'].includes(posKey)) posKey = 'DL';
@@ -1015,38 +1027,99 @@ function aiSetDepthChart(team) {
 
     // 1. Initialize Depth Order Buckets (The Source of Truth)
     team.depthOrder = {
-        'QB': [], 'RB': [], 'WR': [], 'TE': [], 'OL': [],
-        'DL': [], 'LB': [], 'DB': []
+        'QB':[], 'RB': [], 'WR': [], 'TE': [], 'OL': [],
+        'DL':[], 'LB': [], 'DB':[]
     };
 
     // Filter out injured/busy players before sorting
     const healthyPlayers = rosterObjs.filter(p => !p.status || p.status.duration === 0);
     const sortRoster = healthyPlayers.length > 0 ? healthyPlayers : rosterObjs;
 
-    // 2. 💡 THE UPGRADE: Deep, Intelligent Backup Sorting
-    // Instead of putting players into just ONE bucket, we evaluate the ENTIRE healthy roster
-    // for EVERY position, creating a deep pool of backups so the AI never runs out of subs.
-    const positions = Object.keys(team.depthOrder);
+    // =========================================================
+    // 💡 NEW AI UPGRADE: PASS 1 - SMART SLOT TARGETING
+    // The AI looks at its specific formation and evaluates players
+    // using the hidden `slotPriorities` (e.g. Centers need IQ).
+    // =========================================================
+    
+    const offFormKey = normalizeFormationKey(offenseFormations, team.formations.offense, 'Balanced');
+    const defFormKey = normalizeFormationKey(defenseFormations, team.formations.defense, '3-1-3');
+    
+    const offSlots = offenseFormations[offFormKey]?.slots || [];
+    const defSlots = defenseFormations[defFormKey]?.slots ||[];
+    
+    const slotPriority = {
+        'QB1': 100, 'OL2': 90, 'OL1': 85, 'OL3': 80, 'RB1': 75, 'WR1': 70, 'TE1': 65, 'WR2': 60, 'WR3': 55, 'RB2': 50, 'WR4': 45, 'TE2': 40, 'WR5': 35,
+        'LB2': 100, 'LB1': 95, 'LB3': 90, 'DB1': 85, 'DB3': 80, 'DB2': 75, 'DB4': 70, 'DL1': 65, 'DL3': 60, 'DL2': 55, 'DL4': 50, 'DB5': 45
+    };
+    const getPriority = (slot) => slotPriority[slot] || 0;
+
+    const sortedOffSlots = [...offSlots].sort((a, b) => getPriority(b) - getPriority(a));
+    const sortedDefSlots =[...defSlots].sort((a, b) => getPriority(b) - getPriority(a));
+
+    const assignedStarters = new Set();
+
+    const assignSmartStarter = (slot, side) => {
+        let bestPlayer = null;
+        let bestScore = -Infinity;
+        
+        let posKey = slot.replace(/\d+/g, '');
+        if (['OT', 'OG', 'C'].includes(posKey)) posKey = 'OL';
+        if (posKey === 'FB') posKey = 'RB';
+        if (['CB', 'S'].includes(posKey)) posKey = 'DB';
+        if (['DE', 'DT'].includes(posKey)) posKey = 'DL';
+
+        sortRoster.forEach(p => {
+            if (assignedStarters.has(p.id)) return;
+            
+            // Only consider players who naturally play this generic position
+            const isNatural = (p.favoriteOffensivePosition === posKey || p.favoriteDefensivePosition === posKey || p.pos === posKey);
+            if (!isNatural) return;
+
+            // calculateSlotSuitability looks at data.js slotPriorities
+            const score = calculateSlotSuitability(p, slot, side, team);
+            if (score > bestScore) {
+                bestScore = score;
+                bestPlayer = p;
+            }
+        });
+
+        if (bestPlayer) {
+            team.depthOrder[slot] = [bestPlayer.id];
+            assignedStarters.add(bestPlayer.id);
+        }
+    };
+
+    // Have the AI draft the perfect starting 8 based on positional importance
+    sortedOffSlots.forEach(slot => assignSmartStarter(slot, 'offense'));
+    sortedDefSlots.forEach(slot => assignSmartStarter(slot, 'defense'));
+
+    // =========================================================
+    // 💡 PASS 2: GENERAL BUCKET SORTING (The Bench)
+    // Fill the standard positional pools so the UI has depth.
+    // =========================================================
+    const positions = ['QB', 'RB', 'WR', 'TE', 'OL', 'DL', 'LB', 'DB'];
 
     positions.forEach(pos => {
         // Clone roster array for independent sorting
-        const candidates = [...sortRoster];
+        const candidates =[...sortRoster];
 
         candidates.sort((a, b) => {
             const ovrA = calculateOverall(a, pos);
             const ovrB = calculateOverall(b, pos);
 
-            // Give a +15 OVR artificial boost if it's the player's true natural position.
-            // This ensures natural WRs start over DBs at WR, unless the DB is overwhelmingly better.
             const isNaturalA = (a.favoriteOffensivePosition === pos || a.favoriteDefensivePosition === pos || a.pos === pos) ? 15 : 0;
             const isNaturalB = (b.favoriteOffensivePosition === pos || b.favoriteDefensivePosition === pos || b.pos === pos) ? 15 : 0;
 
-            // Coaches like smart/consistent players (noise)
             const biasA = ((a.attributes?.mental?.playbookIQ || 50) - 50) * 0.1;
             const biasB = ((b.attributes?.mental?.playbookIQ || 50) - 50) * 0.1;
 
-            const perceivedValueA = ovrA + isNaturalA + biasA;
-            const perceivedValueB = ovrB + isNaturalB + biasB;
+            // Deprioritize players who are already starting in a specific slot 
+            // so pure backups float to the top of the general pool
+            const startingPenaltyA = assignedStarters.has(a.id) ? 100 : 0;
+            const startingPenaltyB = assignedStarters.has(b.id) ? 100 : 0;
+
+            const perceivedValueA = ovrA + isNaturalA + biasA - startingPenaltyA;
+            const perceivedValueB = ovrB + isNaturalB + biasB - startingPenaltyB;
 
             return perceivedValueB - perceivedValueA; // Sort Descending
         });
