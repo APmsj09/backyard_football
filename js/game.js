@@ -339,9 +339,9 @@ export function rebuildDepthChartFromOrder(team) {
         if (['OT', 'OG', 'C'].includes(posKey)) posKey = 'OL';
         if (posKey === 'FB') posKey = 'RB';
 
-        // 💡 FIX: Intelligent positional cascades
-        let searchBuckets = [posKey];
-        if (posKey === 'WR') searchBuckets.push('TE', 'RB', 'DB', 'QB'); // DBs make great WRs
+        // 💡 FIX: Search the specific slot (e.g. OL1) FIRST, then fallback to general (OL)
+        let searchBuckets = [slot, posKey]; 
+        if (posKey === 'WR') searchBuckets.push('TE', 'RB', 'DB', 'QB');
         if (posKey === 'RB') searchBuckets.push('WR', 'DB', 'LB');
         if (posKey === 'TE') searchBuckets.push('WR', 'OL', 'LB');
         if (posKey === 'OL') searchBuckets.push('DL', 'TE', 'LB'); // DLs make great OLs
@@ -363,9 +363,9 @@ export function rebuildDepthChartFromOrder(team) {
         if (['CB', 'S'].includes(posKey)) posKey = 'DB';
         if (['DE', 'DT'].includes(posKey)) posKey = 'DL';
 
-        // 💡 FIX: Intelligent positional cascades
-        let searchBuckets = [posKey];
-        if (posKey === 'DB') searchBuckets.push('WR', 'RB', 'QB'); // WRs make great DBs
+        // 💡 FIX: Search specific slot first
+        let searchBuckets = [slot, posKey]; 
+        if (posKey === 'DB') searchBuckets.push('WR', 'RB', 'QB');
         if (posKey === 'LB') searchBuckets.push('DL', 'DB', 'TE', 'RB');
         if (posKey === 'DL') searchBuckets.push('LB', 'OL', 'TE'); // OLs make great DLs
 
@@ -620,7 +620,7 @@ function checkFumble(ballCarrierState, tacklerState, playState, gameLog) {
  */
 function diagnosePlay(pState, tick, offenseStates, truePlayType, offensivePlayKey) {
     const iq = pState.playbookIQ || 50;
-    
+
     let runScore = 0; let passScore = 0;
     let leftScore = 10; let rightScore = 10; let centerScore = 15; // Directional biases
 
@@ -634,7 +634,7 @@ function diagnosePlay(pState, tick, offenseStates, truePlayType, offensivePlayKe
         if (qb.action === 'qb_setup' && qb.hasCompletedDropback) passScore += 45;
         else if (qb.action === 'qb_setup' && !qb.hasCompletedDropback) passScore += 15;
         else if (qb.action === 'handoff_setup') runScore += 40;
-        
+
         // Read Rollouts/Scrambles
         if (qb.vx > 1.5) rightScore += 30;
         else if (qb.vx < -1.5) leftScore += 30;
@@ -645,13 +645,13 @@ function diagnosePlay(pState, tick, offenseStates, truePlayType, offensivePlayKe
     ol.forEach(lineman => {
         if (lineman.action === 'pass_block') passBlocks++;
         else if (lineman.action === 'run_block') runBlocks++;
-        
+
         // Massive directional keys
-        if (lineman.assignment && lineman.assignment.includes('pull_right')) { 
-            runScore += 40; rightScore += 70; 
+        if (lineman.assignment && lineman.assignment.includes('pull_right')) {
+            runScore += 40; rightScore += 70;
         }
-        if (lineman.assignment && lineman.assignment.includes('pull_left')) { 
-            runScore += 40; leftScore += 70; 
+        if (lineman.assignment && lineman.assignment.includes('pull_left')) {
+            runScore += 40; leftScore += 70;
         }
     });
 
@@ -661,7 +661,7 @@ function diagnosePlay(pState, tick, offenseStates, truePlayType, offensivePlayKe
     // Key: Running Back Flow
     rbs.forEach(rb => {
         if (rb.isBallCarrier) runScore += 60;
-        else if (rb.action === 'run_path' && rb.y > (qb?.y || 0)) runScore += 20; 
+        else if (rb.action === 'run_path' && rb.y > (qb?.y || 0)) runScore += 20;
         else if (rb.action === 'pass_block') passScore += 15;
 
         // RB initial lateral burst (Toss/Sweep detection)
@@ -673,17 +673,17 @@ function diagnosePlay(pState, tick, offenseStates, truePlayType, offensivePlayKe
     // 2. PLAY ACTION (The Deception)
     const isPlayAction = offensivePlayKey.includes('PA_');
     if (isPlayAction && tick < 25) {
-        runScore += 50; 
+        runScore += 50;
         // Play action bootlegs spoof directional keys!
         if (offensivePlayKey.includes('Bootleg_Right')) leftScore += 40; // Fakes left, rolls right
         if (offensivePlayKey.includes('Bootleg_Left')) rightScore += 40;
     }
 
     // 3. APPLY IQ & TIME (Causality & Noise)
-    const timeFactor = Math.min(1.0, tick / 35); 
-    const iqFactor = iq / 100; 
+    const timeFactor = Math.min(1.0, tick / 35);
+    const iqFactor = iq / 100;
 
-    const noiseMax = 30 * (1.0 - iqFactor); 
+    const noiseMax = 30 * (1.0 - iqFactor);
     const applyNoise = (score) => score * timeFactor * (0.5 + (iqFactor / 2)) + ((Math.random() * noiseMax) - (noiseMax / 2));
 
     const finalRunScore = applyNoise(runScore) + (pState.role === 'LB' ? 15 : 0);
@@ -694,7 +694,7 @@ function diagnosePlay(pState, tick, offenseStates, truePlayType, offensivePlayKe
 
     // 4. DETERMINE TYPE CONFIDENCE
     let guess = 'read';
-    let confidence = Math.max(0, Math.min(1.0, Math.abs(finalRunScore - finalPassScore) / 60)); 
+    let confidence = Math.max(0, Math.min(1.0, Math.abs(finalRunScore - finalPassScore) / 60));
     const commitThreshold = 0.60 - (iqFactor * 0.3);
 
     if (confidence > commitThreshold || tick > 40) {
@@ -706,7 +706,7 @@ function diagnosePlay(pState, tick, offenseStates, truePlayType, offensivePlayKe
     let direction = 'center';
     let dirConfidence = 0;
     const totalDirScore = Math.max(1, finalLeft + finalRight + finalCenter);
-    
+
     if (finalRight > finalLeft && finalRight > finalCenter) {
         direction = 'right';
         dirConfidence = finalRight / totalDirScore;
@@ -3099,7 +3099,7 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
             // 1. DIAGNOSIS (IQ-Based Read)
             const isDL = pState.role === 'DL';
             let playDiagnosis = playType;
-            let diagConfidence = 1.0; 
+            let diagConfidence = 1.0;
             let diagDirection = 'center';
             let dirConfidence = 1.0;
 
@@ -3188,7 +3188,7 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                         // If the defender is confident the play is going wide, they cheat their angle outside!
                         if (dirConfidence > 0.45 && !isFooledByPA) {
                             const cheatAmount = 4.0 * dirConfidence * (iq / 100); // Smart LBs cheat harder
-                            
+
                             if (diagDirection === 'right' && predX < FIELD_WIDTH - 5) {
                                 predX += cheatAmount; // Run right to cut off the edge
                             } else if (diagDirection === 'left' && predX > 5) {
@@ -3198,15 +3198,15 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
 
                         // Inside-Out Leverage (Sideline safety)
                         if (iq > 65 && dist > 5.0) {
-                            if (predX > CENTER_X && pState.x < predX) predX -= 1.5; 
-                            else if (predX <= CENTER_X && pState.x > predX) predX += 1.5; 
+                            if (predX > CENTER_X && pState.x < predX) predX -= 1.5;
+                            else if (predX <= CENTER_X && pState.x > predX) predX += 1.5;
                         }
 
                         pState.targetX = predX;
                         pState.targetY = predY;
-                        
+
                         // Hesitation penalty applied via contactReduction
-                        pState.contactReduction = 0.6 + (diagConfidence * 0.4); 
+                        pState.contactReduction = 0.6 + (diagConfidence * 0.4);
                     }
 
                     pState.action = 'pursuit';
@@ -3689,6 +3689,7 @@ function checkTackleCollisions(playState, gameLog) {
             // --- TACKLE SUCCESS ---
             playState.playIsLive = false;
             playState.yards = carrier.y - playState.lineOfScrimmage;
+            playState.finalBallY = carrier.y; // 💡 FIX: Explicitly set final spot for stat logic
             playState.statEvents.push({ type: 'tackle', playerId: defender.id });
 
             // Safety/Touchback/Sack Logic
@@ -4923,7 +4924,7 @@ function handleBallArrival(playState, carrier, playResult, gameLog) {
                 if (gameLog && !ball.isThrowAway) pushGameLog(gameLog, `[Tick ${playState.tick}] ⏱️ Pass hits the turf. Incomplete.`, playState);
             }
         }
-        return; 
+        return;
     }
 
     // Helper for fast-moving ball trajectories
@@ -5001,7 +5002,7 @@ function handleBallArrival(playState, carrier, playResult, gameLog) {
     });
 
     if (!ball.isThrowAway && playersInRange.length > 0) {
-        
+
         // 💡 FIX: TRUE CONTESTED CATCH LOGIC (Positional Battle)
         // Everyone in the radius rolls for positioning to see who gets their hands on it first.
         let bestCandidate = null;
@@ -5009,13 +5010,13 @@ function handleBallArrival(playState, carrier, playResult, gameLog) {
 
         playersInRange.forEach(p => {
             let posScore = ((p.ctch || p.catchingHands || 50) * 0.4) + ((p.agi || p.agility || 50) * 0.2);
-            
+
             if (p.id === ball.targetPlayerId) {
                 posScore += 50; // Intended target has huge positional advantage
             } else if (!p.isOffense) {
                 posScore += ((p.cov || p.coverage || 50) * 0.3) + ((p.iq || p.playbookIQ || 50) * 0.3); // DB read and react
             }
-            
+
             posScore += ((p.hgt || 70) > 74 ? 15 : 0); // Jump ball advantage for tall players
 
             const roll = posScore + (Math.random() * 100);
@@ -5039,7 +5040,7 @@ function handleBallArrival(playState, carrier, playResult, gameLog) {
                     catching = pObj.attributes?.technical?.catchingHands || 50;
                     agility = pObj.attributes?.physical?.agility || 50;
                 } else {
-                    catching = 50; agility = 50; 
+                    catching = 50; agility = 50;
                 }
             }
         }
@@ -5054,7 +5055,7 @@ function handleBallArrival(playState, carrier, playResult, gameLog) {
         if (isDefense) {
             catchScore *= 0.40; // DBs drop INTs frequently
         }
-        
+
         const defendersNear = playersInRange.filter(p => !p.isOffense).length;
         if (bestCandidate.isOffense) {
             if (defendersNear === 1) catchScore *= 0.85; // Single coverage
@@ -5096,7 +5097,7 @@ function handleBallArrival(playState, carrier, playResult, gameLog) {
                 ball.isSwatted = true;
                 ball.vz = -2; // Ball drops
                 if (gameLog) pushGameLog(gameLog, `[Tick ${playState.tick}] 🚩 OUT OF BOUNDS! ${bestCandidate.name} caught it out of bounds.`, playState);
-                return; 
+                return;
             }
 
             // --- SUCCESSFUL CATCH ---
@@ -5154,16 +5155,16 @@ function handleBallArrival(playState, carrier, playResult, gameLog) {
             }
 
             // --- COMPLETION ---
-            if (gameLog) pushGameLog(gameLog, `[Tick ${playState.tick}] 👍 CATCH! ${bestCandidate.role} ${bestCandidate.name} at (${actionX}, ${actionY}, z:${actionZ}) | Gain: ${yardage}y`, playState);
-            const yardsGain = bestCandidate.y - playState.lineOfScrimmage;
-            playState.statEvents.push({ type: 'completion', receiverId: bestCandidate.id, qbId: ball.throwerId, yards: yardsGain });
+            if (gameLog) pushGameLog(gameLog, `[Tick ${playState.tick}] 👍 CATCH! ${bestCandidate.role} ${bestCandidate.name} at (${actionX}, ${actionY}, z:${actionZ})`, playState);
+            // 💡 FIX: Do not calculate yards here. We'll do it at the end of the play to capture YAC.
+            playState.statEvents.push({ type: 'completion', receiverId: bestCandidate.id, qbId: ball.throwerId, yards: 0 });
             return;
 
         } else {
             // --- DROP / SWAT / TIP ---
             const last = ball.lastInteraction;
             if (!(last && last.playerId === bestCandidate.id && (playState.tick - last.tick) <= 5)) {
-                
+
                 ball.tipCount = (ball.tipCount || 0) + 1;
 
                 if (isDefense) {
@@ -5189,14 +5190,14 @@ function handleBallArrival(playState, carrier, playResult, gameLog) {
 
                     if (isBobble) {
                         if (gameLog) pushGameLog(gameLog, `[Tick ${playState.tick}] 🖐️ ${bestCandidate.name} bobbles the ball! (Hands: ${hndEff}, Energy: ${fatPct}%)`, playState);
-                        ball.vz = 2.5 + Math.random(); 
+                        ball.vz = 2.5 + Math.random();
                         ball.vx += (Math.random() - 0.5) * 3;
                         ball.vy += (Math.random() - 0.5) * 3;
                         ball.lastInteraction = { tick: playState.tick, playerId: bestCandidate.id, type: 'bobble' };
                     } else {
                         if (gameLog) pushGameLog(gameLog, `[Tick ${playState.tick}] ❌ ${bestCandidate.name} drops the pass! (Hands: ${hndEff}, Energy: ${fatPct}%)`, playState);
                         playState.statEvents.push({ type: 'drop', playerId: bestCandidate.id });
-                        ball.vz = -5.0; 
+                        ball.vz = -5.0;
                         ball.vx *= 0.2;
                         ball.vy *= 0.2;
                         ball.droppedById = bestCandidate.id;
@@ -5245,7 +5246,7 @@ function handleBallArrival(playState, carrier, playResult, gameLog) {
             if (playState.playIsLive && !wasCaught) {
                 playState.playIsLive = false;
                 playState.incomplete = true;
-                ball.vz = 0; ball.vx = 0; ball.vy = 0; 
+                ball.vz = 0; ball.vx = 0; ball.vy = 0;
                 playState.finalBallY = playState.lineOfScrimmage;
 
                 const targetRec = playState.activePlayers.find(p => p.id === ball.targetPlayerId);
@@ -5810,6 +5811,7 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
                         playState.playIsLive = false;
                         ballCarrierState.y = 110.0;
                         playState.finalBallY = 110.0;
+                        playState.yards = 110.0 - playState.lineOfScrimmage; // 💡 FIX: Assign correct yardage on TDs
                         if (gameLog) gameLog.push(`🎉 TOUCHDOWN ${ballCarrierState.name}!`);
 
                         // FIX: Log Touchdown Stats
@@ -6071,7 +6073,8 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
         // Don't count it as a rush if they caught a pass THIS play
         const caughtPassThisPlay = playState.statEvents.some(e => e.type === 'completion' && e.receiverId === ballCarrierState.id);
 
-        if (isRun && !caughtPassThisPlay) {
+        // 💡 FIX: Exclude sacks from negative rushing yards
+        if (isRun && !caughtPassThisPlay && !playState.sack) {
             // 💡 FIX: Grant yards up to the spot of the fumble if a fumble occurred
             const yardageLine = playState.fumbleOccurred ? playState.finalBallY : ballCarrierState.y;
             const rushYards = yardageLine - playState.lineOfScrimmage;
@@ -6114,6 +6117,16 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
 
     // Normalize Final Ball Position (Clamp to Field)
     playState.finalBallY = Math.max(0, Math.min(110, playState.finalBallY));
+
+    // 💡 FIX: Apply YAC (Yards After Catch) to passing yards!
+    const completionEvent = playState.statEvents.find(e => e.type === 'completion');
+    if (completionEvent) {
+        // The total yards of the play is the passing yards (Air + YAC)
+        completionEvent.yards = playState.yards;
+    }
+
+    // --- Build Result Object ---
+    playResult.yards = Math.round(playState.yards);
 
     // --- Build Result Object ---
     playResult.yards = Math.round(playState.yards);
@@ -6361,7 +6374,7 @@ function determinePlayCall(offense, defense, down, yardsToGo, ballOn, scoreDiff,
 
     const formationName = offense.formations.offense;
     const coach = offense.coach;
-    const recentPlays = offense.recentPlayHistory ||[];
+    const recentPlays = offense.recentPlayHistory || [];
 
     // 1. Filter Compatible Plays
     const formationPlays = Object.keys(offensivePlaybook).filter(key => {
@@ -6385,7 +6398,7 @@ function determinePlayCall(offense, defense, down, yardsToGo, ballOn, scoreDiff,
     // 3. Score Every Play
     let scoredPlays = formationPlays.map(key => {
         const play = offensivePlaybook[key];
-        const tags = play.tags ||[];
+        const tags = play.tags || [];
         let score = 50; // Base baseline score
 
         // --- DOWN & DISTANCE ---
@@ -6449,11 +6462,11 @@ function determinePlayCall(offense, defense, down, yardsToGo, ballOn, scoreDiff,
     // 4. Select Play (Weighted Random among the Top 5)
     // Sort highest to lowest
     scoredPlays.sort((a, b) => b.score - a.score);
-    
+
     // Take the top 5 highest-scoring options so the AI isn't 100% predictable
     const topOptions = scoredPlays.slice(0, 5);
     const totalScore = topOptions.reduce((sum, p) => sum + p.score, 0);
-    
+
     let roll = Math.random() * totalScore;
     let selectedKey = topOptions[0].key;
 
@@ -6466,7 +6479,7 @@ function determinePlayCall(offense, defense, down, yardsToGo, ballOn, scoreDiff,
     }
 
     // 5. Log History
-    if (!offense.recentPlayHistory) offense.recentPlayHistory =[];
+    if (!offense.recentPlayHistory) offense.recentPlayHistory = [];
     offense.recentPlayHistory.push(selectedKey);
     if (offense.recentPlayHistory.length > 6) offense.recentPlayHistory.shift();
 
@@ -6577,7 +6590,7 @@ function determineDefensivePlayCall(defense, offense, down, yardsToGo, ballOn, s
     if (availablePlays.length === 0) return 'Cover_2_Zone_Base';
 
     // 1. Scouting: What does the offense like to do?
-    const offHistory = offense.recentPlayHistory ||[];
+    const offHistory = offense.recentPlayHistory || [];
     let recentPassCount = 0;
     offHistory.forEach(playKey => {
         if (offensivePlaybook[playKey] && offensivePlaybook[playKey].type === 'pass') recentPassCount++;
@@ -6598,7 +6611,7 @@ function determineDefensivePlayCall(defense, offense, down, yardsToGo, ballOn, s
     // 3. Score Every Defensive Play
     let scoredPlays = availablePlays.map(key => {
         const play = defensivePlaybook[key];
-        const tags = play.tags ||[];
+        const tags = play.tags || [];
         let score = 50;
 
         if (captainIsSharp) {
@@ -6608,13 +6621,13 @@ function determineDefensivePlayCall(defense, offense, down, yardsToGo, ballOn, s
                 if (tags.includes('blitz')) score += 30;
                 if (tags.includes('man') || tags.includes('press')) score += 20;
                 if (tags.includes('cover4') || tags.includes('prevent') || tags.includes('safeZone')) score -= 80;
-            } 
+            }
             else if (isLong || isDesperation) {
                 if (tags.includes('prevent') || tags.includes('cover4') || tags.includes('safeZone')) score += 60;
                 if (tags.includes('cover3')) score += 25;
                 if (tags.includes('runStop') || tags.includes('press')) score -= 80; // Do not get beat deep!
                 if (isDesperation && tags.includes('blitz')) score -= 40; // Play it safe
-            } 
+            }
             else if (down === 3) {
                 // 3rd & Medium (3-7 yards) - High pressure situation
                 if (tags.includes('man') || tags.includes('blitz')) score += 25;
@@ -6640,13 +6653,13 @@ function determineDefensivePlayCall(defense, offense, down, yardsToGo, ballOn, s
     scoredPlays.sort((a, b) => b.score - a.score);
     const topOptions = scoredPlays.slice(0, 3); // Tighter pool for defense to ensure discipline
     const totalScore = topOptions.reduce((sum, p) => sum + p.score, 0);
-    
+
     let roll = Math.random() * totalScore;
     for (const option of topOptions) {
         if (roll < option.score) return option.key;
         roll -= option.score;
     }
-    
+
     return topOptions[0].key;
 }
 // In game.js
@@ -7022,12 +7035,22 @@ function simulateLivePlayStep(game) {
     // --- HALFTIME LOGIC ---
     if (game.playsTotal === 30 && !game.halftimeProcessed) {
         game.halftimeProcessed = true;
-        if (game.gameLog) game.gameLog.push("⏸️ HALFTIME. Players recover energy in the locker room.");[...getRosterObjects(offense), ...getRosterObjects(defense)].forEach(p => {
+        if (game.gameLog) game.gameLog.push("⏸️ HALFTIME. Players recover energy in the locker room.");
+
+        // 💡 FIX: Correctly spaced syntax for iteration to prevent JS parse errors
+        [...getRosterObjects(offense), ...getRosterObjects(defense)].forEach(p => {
             if (p) {
                 p.fatigue = Math.max(0, (p.fatigue || 0) - 40);
                 if (p.fatigue < 40) p.isResting = false;
             }
         });
+
+        // 💡 FIX: Apply Second Half Kickoff Logic
+        game.possession = defense; // The team that kicked off to start the game now receives
+        game.ballOn = 35;
+        game.down = 1;
+        game.yardsToGo = 10;
+        game.quarter = 3;
     }
 
     // Check if game should end
@@ -7070,8 +7093,8 @@ function simulateMatchFast(homeTeam, awayTeam) {
         possession: Math.random() < 0.5 ? homeTeam : awayTeam,
         ballOn: 35, down: 1, yardsToGo: 10,
         gameLog: [],
-        drivesThisHalf: 0,
         quarter: 1,
+        playsTotal: 0,
         isConversionAttempt: false,
         isGameOver: false,
         weather: getRandom(['Sunny', 'Windy', 'Rain']),
@@ -7080,48 +7103,24 @@ function simulateMatchFast(homeTeam, awayTeam) {
     };
 
     // 4. THE FAST LOOP
-    const TOTAL_DRIVES_PER_HALF = getRandomInt(5, 6);
-    let currentHalf = 1;
-
-    // --- FIRST HALF ---
-    while (game.drivesThisHalf < TOTAL_DRIVES_PER_HALF * 2) {
+    // 💡 FIX: Loop strictly based on the 60 play limit, exactly matching the live sim.
+    while (!game.isGameOver && game.playsTotal < 60) {
         simulateLivePlayStep(game);
-        // Simple counter increment - in a real game this is time based, 
-        // but for fast sim we just ensure plays happen.
-        game.drivesThisHalf += 0.2;
-    }
-
-    // --- HALFTIME ---
-    currentHalf = 2;
-    game.drivesThisHalf = 0;
-    game.quarter = 3;
-
-    // Recovery
-    [...getRosterObjects(homeTeam), ...getRosterObjects(awayTeam)].forEach(p => {
-        if (p) {
-            p.fatigue = Math.max(0, (p.fatigue || 0) - 40);
-            if (p.fatigue < 40) p.isResting = false;
-        }
-    });
-
-    // Second Half Kickoff
-    game.possession = (game.possession.id === homeTeam.id) ? awayTeam : homeTeam;
-    game.ballOn = 35; game.down = 1; game.yardsToGo = 10;
-
-    // --- SECOND HALF ---
-    while (game.drivesThisHalf < TOTAL_DRIVES_PER_HALF * 2) {
-        simulateLivePlayStep(game);
-        game.drivesThisHalf += 0.2;
     }
 
     // --- OVERTIME (Simple) ---
     if (game.homeScore === game.awayScore) {
-        let otPossessions = 0;
-        game.ballOn = 75;
-        while (game.homeScore === game.awayScore && otPossessions < 6) {
+        game.isGameOver = false; // 💡 FIX: Reset game over flag so OT runs
+        let otPlays = 0;
+        game.ballOn = 75; // 25 yard line
+        game.down = 1;
+        game.yardsToGo = 10;
+
+        while (game.homeScore === game.awayScore && otPlays < 15) {
             simulateLivePlayStep(game);
-            otPossessions += 0.1;
+            otPlays++;
         }
+        game.isGameOver = true;
     }
 
     // 5. POST-GAME RPG LOGIC (Breakthroughs)
@@ -7139,7 +7138,6 @@ function simulateMatchFast(homeTeam, awayTeam) {
             const attributesToImprove = ['speed', 'strength', 'agility', 'throwingAccuracy', 'catchingHands', 'tackling', 'blocking', 'playbookIQ', 'blockShedding', 'toughness', 'consistency'];
             const attr = getRandom(attributesToImprove);
 
-            // Check all attribute categories for the selected stat
             let updated = false;
             for (const cat in p.attributes) {
                 if (p.attributes[cat] && p.attributes[cat][attr] !== undefined && p.attributes[cat][attr] < 99) {
@@ -7154,7 +7152,7 @@ function simulateMatchFast(homeTeam, awayTeam) {
         }
     });
 
-    // 6. 💡 FIX: Update Standings and Season Stats using the helper
+    // 6. Update Standings and Season Stats using the helper
     finalizeGameResults(homeTeam, awayTeam, game.homeScore, game.awayScore);
 
     return {
@@ -7165,7 +7163,7 @@ function simulateMatchFast(homeTeam, awayTeam) {
         gameLog: game.gameLog,
         breakthroughs: breakthroughs
     };
-} // end of simulateMatchFast
+}
 
 
 // =============================================================
@@ -7709,10 +7707,20 @@ function assignPlayerToSlot(team, playerId, slot, side) {
     if (['DE', 'DT', 'NT'].includes(posKey)) posKey = 'DL';
 
     if (!team.depthOrder) team.depthOrder = {};
-    const groupList = team.depthOrder[posKey] || [];
+    
+    // Add to the Specific Slot List (e.g. OL1)
+    const slotList = team.depthOrder[slot] ||[];
+    if (!slotList.includes(playerId)) {
+        slotList.push(playerId);
+    }
+    team.depthOrder[slot] = slotList;
+
+    // Add to the General Positional List (e.g. OL)
+    const groupList = team.depthOrder[posKey] ||[];
     if (!groupList.includes(playerId)) {
         groupList.push(playerId);
     }
+    team.depthOrder[posKey] = groupList;
 
     return true;
 }

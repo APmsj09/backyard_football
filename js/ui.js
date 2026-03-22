@@ -3445,32 +3445,37 @@ export function setSimSpeed(speed) {
 
 
 /** Helper to generate the HTML for a depth chart card (used by render AND drop) */
-function createDepthCardHTML(player, index, groupKey) {
+function createDepthCardHTML(player, index, groupKey, baseGroupKey = null) {
 
     if (!player || !player.attributes) {
-        return {
-            className: 'hidden', // Hide it visually so it doesn't break layout
-            innerHTML: ''
-        };
+        return { className: 'hidden', innerHTML: '' };
     }
 
-    const ovr = calculateOverall(player, groupKey);
+    // Calculate using base position (e.g., OL instead of OL1)
+    const calcPos = baseGroupKey || groupKey.replace(/\d/g, '');
+    const ovr = calculateOverall(player, calcPos);
     let isStarterZone = false;
 
     // Visual Starter Thresholds
-    if (groupKey === 'QB' && index === 0) isStarterZone = true;
-    else if (groupKey === 'RB' && index === 0) isStarterZone = true;
-    else if (groupKey === 'WR' && index <= 2) isStarterZone = true;
-    else if (groupKey === 'OL' && index === 0) isStarterZone = true;
-    else if (['DL', 'LB', 'DB'].includes(groupKey) && index === 0) isStarterZone = true;
+    if (/\d/.test(groupKey)) {
+        // It is a specific slot (e.g. OL1) - The top spot is the starter
+        if (index === 0) isStarterZone = true;
+    } else {
+        // It is a general pool - Estimate typical starter counts
+        if (groupKey === 'QB' && index === 0) isStarterZone = true;
+        else if (groupKey === 'RB' && index === 0) isStarterZone = true;
+        else if (groupKey === 'WR' && index <= 2) isStarterZone = true;
+        else if (groupKey === 'OL' && index <= 2) isStarterZone = true; // 3 OL in 8v8
+        else if (['DL', 'LB', 'DB'].includes(groupKey) && index <= 1) isStarterZone = true;
+    }
 
     const rankStyle = isStarterZone ? 'border-l-4 border-green-500' : 'border-l-4 border-gray-300';
-    const badge = isStarterZone ? '<span class="ml-2 text-[10px] bg-green-100 text-green-800 px-1 rounded font-bold">START</span>' : '';
+    const badge = isStarterZone ? '<span class="ml-2 text-[10px] bg-green-100 text-green-800 px-1 rounded font-bold shadow-sm border border-green-200">START</span>' : '';
 
     // Key Attributes Logic
-    let keyAttrs = [];
-    if (typeof positionOverallWeights !== 'undefined' && positionOverallWeights[groupKey]) {
-        keyAttrs = Object.entries(positionOverallWeights[groupKey])
+    let keyAttrs =[];
+    if (typeof positionOverallWeights !== 'undefined' && positionOverallWeights[calcPos]) {
+        keyAttrs = Object.entries(positionOverallWeights[calcPos])
             .sort((a, b) => b[1] - a[1])
             .slice(0, 3)
             .map(entry => entry[0]);
@@ -3549,26 +3554,69 @@ function renderDepthOrderPane(gameState) {
     });
     tabsHtml += `</div>`;
 
+    // Mapping structure for visual slots
+    const slotMappings = {
+        'QB': [{ id: 'QB1', name: 'Quarterback' }],
+        'RB':[{ id: 'RB1', name: 'Halfback 1' }, { id: 'RB2', name: 'Fullback / RB2' }],
+        'WR':[{ id: 'WR1', name: 'WR1 (X)' }, { id: 'WR2', name: 'WR2 (Z)' }, { id: 'WR3', name: 'WR3 (Slot)' }, { id: 'WR4', name: 'WR4' }, { id: 'WR5', name: 'WR5 (Empty)' }],
+        'TE':[{ id: 'TE1', name: 'Tight End 1' }, { id: 'TE2', name: 'Tight End 2' }],
+        'OL':[{ id: 'OL1', name: 'Left OL' }, { id: 'OL2', name: 'Center' }, { id: 'OL3', name: 'Right OL' }],
+        'DL':[{ id: 'DL1', name: 'Left Edge/DT' }, { id: 'DL2', name: 'Interior DL' }, { id: 'DL3', name: 'Right Edge/DT' }, { id: 'DL4', name: 'Edge/DL4' }],
+        'LB':[{ id: 'LB1', name: 'Left/Outside LB' }, { id: 'LB2', name: 'Middle LB' }, { id: 'LB3', name: 'Right/Outside LB' }],
+        'DB':[{ id: 'DB1', name: 'Cornerback 1' }, { id: 'DB2', name: 'Cornerback 2' }, { id: 'DB3', name: 'FS / Nickel' }, { id: 'DB4', name: 'SS / Dime' }, { id: 'DB5', name: 'Quarter DB' }]
+    };
+
     // --- 2. Render Buckets (Middle) ---
     let listsHtml = `<div id="depth-lists-container" class="mb-8">`;
     displayOrder.forEach((groupKey) => {
-        // Pure state-based visibility
         const isHidden = groupKey !== activeDepthOrderTab ? 'hidden' : '';
-        const idList = depthOrder[groupKey] || [];
-        const players = idList.map(id => roster.find(p => p.id === id)).filter(p => p);
+        listsHtml += `<div id="group-${groupKey}" class="depth-group-container ${isHidden}">
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">`;
 
-        listsHtml += `
-            <div id="group-${groupKey}" class="depth-group-container ${isHidden}">
-                <div class="depth-sortable-list flex-grow p-2 space-y-2 min-h-[200px]" data-group="${groupKey}">
+        const renderedIds = new Set();
+        
+        // Ensure specific slots are captured before the general pool to avoid visual duplicates
+        slotMappings[groupKey]?.forEach(slotInfo => {
+            const idList = depthOrder[slotInfo.id] ||[];
+            idList.forEach(id => renderedIds.add(id));
+        });
+
+        // The specific slots render first, followed by the General Pool as a catch-all
+        const slots = [...(slotMappings[groupKey] ||[]), { id: groupKey, name: `${groupKey} (General Pool)` }];
+
+        slots.forEach(slotInfo => {
+            const sId = slotInfo.id;
+            const sName = slotInfo.name;
+            const idList = depthOrder[sId] ||[];
+            
+            let players =[];
+            if (sId === groupKey) {
+                // General pool: Only render players NOT actively assigned to specific slots
+                players = idList.map(id => roster.find(p => p.id === id)).filter(p => p && !renderedIds.has(p.id));
+            } else {
+                // Specific slot: Render everyone assigned
+                players = idList.map(id => roster.find(p => p.id === id)).filter(p => p);
+            }
+            
+            listsHtml += `
+            <div class="bg-gray-50 border border-gray-300 rounded-lg flex flex-col shadow-sm">
+                <div class="bg-gray-200 px-3 py-2 border-b border-gray-300 rounded-t-lg flex justify-between items-center">
+                    <h5 class="font-bold text-gray-800 text-xs uppercase tracking-wider">${sName}</h5>
+                    <span class="text-[10px] font-bold text-gray-500 bg-white px-1.5 py-0.5 rounded shadow-sm">${players.length}</span>
+                </div>
+                <div class="depth-sortable-list flex-grow p-2 space-y-2 min-h-[140px] overflow-y-auto max-h-[300px]" data-group="${sId}">
                     ${players.map((p, i) => {
-            const cardData = createDepthCardHTML(p, i, groupKey);
-            return `<div class="${cardData.className}" draggable="true" data-player-id="${p.id}">
-                                    ${cardData.innerHTML}
-                                </div>`;
-        }).join('')}
-                    ${players.length === 0 ? '<div class="text-gray-400 text-sm italic p-4 text-center border-2 border-dashed rounded">Drag players here from the roster below</div>' : ''}
+                        const cardData = createDepthCardHTML(p, i, sId, groupKey);
+                        return `<div class="${cardData.className}" draggable="true" data-player-id="${p.id}">
+                            ${cardData.innerHTML}
+                        </div>`;
+                    }).join('')}
+                    ${players.length === 0 ? `<div class="text-gray-400 text-xs italic p-3 text-center border-2 border-dashed border-gray-300 rounded h-full flex items-center justify-center opacity-70">Drag here</div>` : ''}
                 </div>
             </div>`;
+        });
+        
+        listsHtml += `</div></div>`;
     });
     listsHtml += `</div>`;
 
