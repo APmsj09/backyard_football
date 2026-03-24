@@ -385,7 +385,7 @@ async function handleDraftEnd() {
  */
 function generateWeeklyMatchupPreview() {
     const gs = Game.getGameState();
-    if (!gs || !gs.schedule || gs.currentWeek >= WEEKS_IN_SEASON) return;
+    if (!gs || !gs.schedule || gs.currentWeek >= 9) return; // Hardcode to 9 weeks safety
 
     const gamesPerWeek = gs.teams.length / 2;
     const weekGames = gs.schedule.slice(gs.currentWeek * gamesPerWeek, (gs.currentWeek + 1) * gamesPerWeek);
@@ -396,14 +396,17 @@ function generateWeeklyMatchupPreview() {
     const isHome = myGame.home.id === gs.playerTeam.id;
     const opponent = isHome ? myGame.away : myGame.home;
 
-    // Get Opponent's Starters to hype them up
-    const oppRoster = Game.getUIRosterObjects(opponent);
+    const oppRoster = Game.getRosterObjects(opponent);
     const oppQB = oppRoster.find(p => p && p.id === opponent.depthChart?.offense?.QB1);
     
-    // Find their best player
+    // Safely find their best player without relying on out-of-scope imports
     const bestPlayer = oppRoster
-        .filter(p => p)
-        .sort((a, b) => Game.calculateOverall(b, estimateBestPosition(b)) - Game.calculateOverall(a, estimateBestPosition(a)))[0];
+        .filter(p => p && p.id !== oppQB?.id)
+        .sort((a, b) => {
+            const posA = a.pos || a.favoriteOffensivePosition || 'WR';
+            const posB = b.pos || b.favoriteOffensivePosition || 'WR';
+            return Game.calculateOverall(b, posB) - Game.calculateOverall(a, posA);
+        })[0];
 
     const locationText = isHome ? `We are defending home turf` : `We are on the road`;
     const coachType = opponent.coach?.type || 'Balanced';
@@ -411,7 +414,7 @@ function generateWeeklyMatchupPreview() {
     const defForm = opponent.formations?.defense || '3-1-3';
 
     let body = `Coach,\n\nHere is the advance scouting report for our upcoming Week ${gs.currentWeek + 1} matchup against ${opponent.name}.\n\n` +
-               `**Game Info:** ${locationText}. They currently hold a record of ${opponent.wins}-${opponent.losses}.\n\n` +
+               `**Game Info:** ${locationText}. They currently hold a record of ${opponent.wins || 0}-${opponent.losses || 0}.\n\n` +
                `**Opponent Tendencies:**\n` +
                `Head Coach ${opponent.coach?.name || 'Smith'} runs a **${coachType}** system. ` +
                `Expect to see them line up primarily in a **${offForm}** formation on offense, and run a **${defForm}** defense to counter us.\n\n`;
@@ -420,16 +423,17 @@ function generateWeeklyMatchupPreview() {
         body += `**Key Matchup:** Their offense runs through QB ${oppQB.name} (${Game.calculateOverall(oppQB, 'QB')} OVR). We need to disrupt his timing in the pocket.\n\n`;
     }
 
-    if (bestPlayer && bestPlayer.id !== oppQB?.id) {
-        body += `**Player to Watch:** Keep an eye on ${bestPlayer.name}, their star ${estimateBestPosition(bestPlayer)} (${Game.calculateOverall(bestPlayer, estimateBestPosition(bestPlayer))} OVR). He is a true game-changer.\n\n`;
+    if (bestPlayer) {
+        const bPos = bestPlayer.pos || bestPlayer.favoriteOffensivePosition || 'ATH';
+        body += `**Player to Watch:** Keep an eye on ${bestPlayer.name}, their star ${bPos} (${Game.calculateOverall(bestPlayer, bPos)} OVR). He is a true game-changer.\n\n`;
     }
 
     body += `Set your depth chart and gameplan accordingly. Let's get this win.`;
 
     Game.addMessage(`Scouting Report: Week ${gs.currentWeek + 1} vs ${opponent.name}`, body, false, gs);
     
-    // Update notification dot
-    updateMessagesNotification(gs.messages);
+    // 💡 FIX: Removed the buggy 'updateMessagesNotification' call.
+    // The Dashboard automatically handles updating the unread dot when it transitions screens!
 }
 
 // --- LOADING & SAVING ---

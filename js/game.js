@@ -762,7 +762,7 @@ async function initializeLeague(onProgress) {
     const initialClassModifiers = generateDraftClassModifiers();
     
     for (let i = 0; i < totalPlayers; i++) {
-        // Pass the modifiers to generatePlayer (default ages 10 to 16)
+        // Pass the modifiers to generatePlayer
         game.players.push(generatePlayer(10, 16, initialClassModifiers));
         if (i % 10 === 0 && onProgress) {
             onProgress((i / totalPlayers) * 0.7);
@@ -7742,11 +7742,10 @@ function advanceToOffseason() {
     const thisYearsClassModifiers = generateDraftClassModifiers();
     
     for (let i = 0; i < rookieCount; i++) {
-        // Pass the modifiers to the rookies (ages 10 to 12)
         game.players.push(generatePlayer(10, 12, thisYearsClassModifiers));
     }
 
-    game.gameResults = [];
+    game.gameResults =[];
     game.breakthroughs = [];
 
     // Re-elect captains for the new season

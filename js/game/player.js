@@ -21,12 +21,11 @@ export const positionOverallWeights = {
 export function estimateBestPosition(scoutedPlayer) {
     if (!scoutedPlayer || !scoutedPlayer.attributes) return 'UTIL';
 
-    // Same resolution logic as before
     const resolveAttr = (val) => {
         if (typeof val === 'number') return val;
         if (typeof val === 'string') {
             if (val.includes('-')) {
-                const [min, max] = val.split('-').map(Number);
+                const[min, max] = val.split('-').map(Number);
                 return (min + max) / 2;
             }
             const parsed = Number(val);
@@ -50,14 +49,14 @@ export function estimateBestPosition(scoutedPlayer) {
     
     // 💡 ULTIMATE FIX: If the player was generated via an archetype, they are STRICTLY categorized 
     // as whichever of those two positions they grade out higher in. 
-    // This absolutely guarantees that the Draft Pool distributions perfectly match the Archetype distributions.
+    // This perfectly aligns the draft pool with the generated archetypes.
     if (offPos && defPos) {
         const offScore = calculateOverall(tempPlayer, offPos);
         const defScore = calculateOverall(tempPlayer, defPos);
         return offScore >= defScore ? offPos : defPos;
     }
 
-    // Fallback for extremely old saves without favorite positions
+    // Fallback for extremely old saves
     let bestPos = 'UTIL';
     let maxScore = -Infinity;
     
