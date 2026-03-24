@@ -1031,40 +1031,32 @@ function aiSetDepthChart(team) {
     if (!team || !team.formations || !Array.isArray(rosterObjs)) return;
     if (rosterObjs.length === 0) return;
 
-    // 1. Initialize Depth Order Buckets (The Source of Truth)
+    // 1. Initialize Depth Order Buckets
     team.depthOrder = {
-        'QB':[], 'RB': [], 'WR': [], 'TE': [], 'OL': [],
-        'DL':[], 'LB': [], 'DB':[]
+        'QB': [], 'RB': [], 'WR': [], 'TE': [], 'OL': [],
+        'DL': [], 'LB': [], 'DB': []
     };
 
-    // Filter out injured/busy players before sorting
     const healthyPlayers = rosterObjs.filter(p => !p.status || p.status.duration === 0);
     const sortRoster = healthyPlayers.length > 0 ? healthyPlayers : rosterObjs;
 
-    // =========================================================
-    // 💡 NEW AI UPGRADE: PASS 1 - SMART SLOT TARGETING
-    // The AI looks at its specific formation and evaluates players
-    // using the hidden `slotPriorities` (e.g. Centers need IQ).
-    // =========================================================
-    
     const offFormKey = normalizeFormationKey(offenseFormations, team.formations.offense, 'Balanced');
     const defFormKey = normalizeFormationKey(defenseFormations, team.formations.defense, '3-1-3');
     
     const offSlots = offenseFormations[offFormKey]?.slots || [];
-    const defSlots = defenseFormations[defFormKey]?.slots ||[];
-    
+    const defSlots = defenseFormations[defFormKey]?.slots || [];
+
+    // Prioritization map to determine who gets assigned first
     const slotPriority = {
-        'QB1': 100, 'OL2': 90, 'OL1': 85, 'OL3': 80, 'RB1': 75, 'WR1': 70, 'TE1': 65, 'WR2': 60, 'WR3': 55, 'RB2': 50, 'WR4': 45, 'TE2': 40, 'WR5': 35,
-        'LB2': 100, 'LB1': 95, 'LB3': 90, 'DB1': 85, 'DB3': 80, 'DB2': 75, 'DB4': 70, 'DL1': 65, 'DL3': 60, 'DL2': 55, 'DL4': 50, 'DB5': 45
+        'QB1': 100, 'OL2': 90, 'OL1': 85, 'OL3': 80, 'RB1': 75, 'WR1': 70, 'TE1': 65,
+        'LB2': 100, 'LB1': 95, 'DB1': 85, 'DB3': 80, 'DB2': 75, 'DL1': 65
     };
     const getPriority = (slot) => slotPriority[slot] || 0;
 
-    const sortedOffSlots = [...offSlots].sort((a, b) => getPriority(b) - getPriority(a));
-    const sortedDefSlots =[...defSlots].sort((a, b) => getPriority(b) - getPriority(a));
+    const assignedOffense = new Set();
+    const assignedDefense = new Set();
 
-    const assignedStarters = new Set();
-
-    const assignSmartStarter = (slot, side) => {
+    const assignSmartStarter = (slot, side, assignedSet) => {
         let bestPlayer = null;
         let bestScore = -Infinity;
         
@@ -1075,13 +1067,11 @@ function aiSetDepthChart(team) {
         if (['DE', 'DT'].includes(posKey)) posKey = 'DL';
 
         sortRoster.forEach(p => {
-            if (assignedStarters.has(p.id)) return;
+            if (assignedSet.has(p.id)) return;
             
-            // Only consider players who naturally play this generic position
             const isNatural = (p.favoriteOffensivePosition === posKey || p.favoriteDefensivePosition === posKey || p.pos === posKey);
             if (!isNatural) return;
 
-            // calculateSlotSuitability looks at data.js slotPriorities
             const score = calculateSlotSuitability(p, slot, side, team);
             if (score > bestScore) {
                 bestScore = score;
@@ -1090,52 +1080,37 @@ function aiSetDepthChart(team) {
         });
 
         if (bestPlayer) {
+            // 💡 FIX: This creates the specific bucket (e.g. WR1) that your rebuild logic looks for
             team.depthOrder[slot] = [bestPlayer.id];
-            assignedStarters.add(bestPlayer.id);
+            assignedSet.add(bestPlayer.id);
         }
     };
 
-    // Have the AI draft the perfect starting 8 based on positional importance
-    sortedOffSlots.forEach(slot => assignSmartStarter(slot, 'offense'));
-    sortedDefSlots.forEach(slot => assignSmartStarter(slot, 'defense'));
+    // PASS 1: Fill specific buckets for the current formation
+    const sortedOff = [...offSlots].sort((a, b) => getPriority(b) - getPriority(a));
+    const sortedDef = [...defSlots].sort((a, b) => getPriority(b) - getPriority(a));
 
-    // =========================================================
-    // 💡 PASS 2: GENERAL BUCKET SORTING (The Bench)
-    // Fill the standard positional pools so the UI has depth.
-    // =========================================================
+    sortedOff.forEach(slot => assignSmartStarter(slot, 'offense', assignedOffense));
+    sortedDef.forEach(slot => assignSmartStarter(slot, 'defense', assignedDefense));
+
+    // PASS 2: Fill general positional buckets with remaining players (The Master Rankings)
     const positions = ['QB', 'RB', 'WR', 'TE', 'OL', 'DL', 'LB', 'DB'];
-
     positions.forEach(pos => {
-        // Clone roster array for independent sorting
-        const candidates =[...sortRoster];
-
-        candidates.sort((a, b) => {
+        const candidates = [...rosterObjs].sort((a, b) => {
             const ovrA = calculateOverall(a, pos);
             const ovrB = calculateOverall(b, pos);
+            
+            // Bias for natural position
+            const isNaturalA = (a.favoriteOffensivePosition === pos || a.pos === pos) ? 10 : 0;
+            const isNaturalB = (b.favoriteOffensivePosition === pos || b.pos === pos) ? 10 : 0;
 
-            const isNaturalA = (a.favoriteOffensivePosition === pos || a.favoriteDefensivePosition === pos || a.pos === pos) ? 15 : 0;
-            const isNaturalB = (b.favoriteOffensivePosition === pos || b.favoriteDefensivePosition === pos || b.pos === pos) ? 15 : 0;
-
-            const biasA = ((a.attributes?.mental?.playbookIQ || 50) - 50) * 0.1;
-            const biasB = ((b.attributes?.mental?.playbookIQ || 50) - 50) * 0.1;
-
-            // Deprioritize players who are already starting in a specific slot 
-            // so pure backups float to the top of the general pool
-            const startingPenaltyA = assignedStarters.has(a.id) ? 100 : 0;
-            const startingPenaltyB = assignedStarters.has(b.id) ? 100 : 0;
-
-            const perceivedValueA = ovrA + isNaturalA + biasA - startingPenaltyA;
-            const perceivedValueB = ovrB + isNaturalB + biasB - startingPenaltyB;
-
-            return perceivedValueB - perceivedValueA; // Sort Descending
+            return (ovrB + isNaturalB) - (ovrA + isNaturalA);
         });
 
-        // Save the sorted IDs to the bucket
         team.depthOrder[pos] = candidates.map(p => p.id);
     });
 
-    // 4. Now that depthOrder has deep reserves, re-assign the visual depth chart slots
-    team.depthChart = { offense: {}, defense: {}, special: {} };
+    // Final execution
     rebuildDepthChartFromOrder(team);
 }
 

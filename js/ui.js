@@ -2074,11 +2074,19 @@ export function setupDragAndDrop(onDrop) {
         if (dropSlot && dropSlot.dataset.positionSlot && dragPlayerId) {
             const dropSide = dropSlot.dataset.side;
 
-            // Final Validation before processing
             if (!dragSide || dragSide === dropSide) {
-                onDrop(dragPlayerId, dropSlot.dataset.positionSlot, dropSide);
-            } else {
-                console.warn(`Cannot move player from ${dragSide} to ${dropSide}`);
+                // 💡 NEW LOGIC FOR MANUAL OVERRIDE
+                const gs = getGameState();
+                const slotId = dropSlot.dataset.positionSlot; // e.g. "WR1"
+                
+                // Set this player as the #1 priority for this specific slot
+                if (!gs.playerTeam.depthOrder) gs.playerTeam.depthOrder = {};
+                gs.playerTeam.depthOrder[slotId] = [dragPlayerId];
+                
+                // Rebuild and Save
+                Game.rebuildDepthChartFromOrder(gs.playerTeam);
+                Game.saveGameState();
+                document.dispatchEvent(new CustomEvent('refresh-ui'));
             }
         }
 
