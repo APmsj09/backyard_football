@@ -255,8 +255,9 @@ function handleDraftPlayer() {
         }
 
         if (player && Game.addPlayerToTeam(player, team)) {
-            // 💡 NEW: Record human pick in history
-            if (!gameState.pickHistory) gameState.pickHistory = [];
+            // 💡 FIX: Safe initialization to prevent crashes on older saves
+            if (!gameState.pickHistory) gameState.pickHistory =[];
+            
             gameState.pickHistory.push({
                 pick: gameState.currentPick + 1,
                 teamName: team.name,
@@ -270,6 +271,8 @@ function handleDraftPlayer() {
             selectedPlayerId = null;
             gameState.currentPick++;
             UI.renderSelectedPlayerCard(null, gameState);
+            UI.renderDraftScreen(gameState, handlePlayerSelectInDraft, null, currentSortColumn, currentSortDirection);
+            runAIDraftPicks();
         }
     }
 }

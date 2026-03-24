@@ -1081,8 +1081,11 @@ function aiSetDepthChart(team) {
 
         if (bestPick.player) {
             addPlayerToTeam(bestPick.player, team);
+            const teamName = team?.name || 'Unknown Team';
+            console.log(`[Draft] ${teamName} drafted ${bestPick.player.name}`);
 
-            // 💡 NEW: Record the pick in history
+            // 💡 FIX: Safe initialization
+            if (!game.pickHistory) game.pickHistory = [];
             game.pickHistory.push({
                 pick: game.currentPick + 1,
                 teamName: team.name,
@@ -1306,17 +1309,18 @@ function addPlayerToTeam(player, team) {
     return true;
 }
 
-export function generateDraftSummary() {
-    if (!game || !game.pickHistory) return;
+function generateDraftSummary() {
+    if (!game || !game.pickHistory || game.pickHistory.length === 0) return;
 
     const history = game.pickHistory;
     const topPick = history[0];
     
-    // Find the "Steal of the Draft" (High OVR pick in late rounds)
-    const steal = [...history]
-        .sort((a, b) => (b.ovr - (b.pick * 0.5)) - (a.ovr - (a.pick * 0.5)))[0];
+    // Safety check to ensure we have enough picks to calculate a steal
+    let steal = topPick;
+    if (history.length > 5) {
+        steal = [...history].sort((a, b) => (b.ovr - (b.pick * 0.5)) - (a.ovr - (a.pick * 0.5)))[0];
+    }
 
-    // Find the Team with the highest average OVR drafted
     const teamGrades = {};
     history.forEach(p => {
         if (!teamGrades[p.teamName]) teamGrades[p.teamName] = { total: 0, count: 0 };
@@ -1329,10 +1333,17 @@ export function generateDraftSummary() {
         .sort((a, b) => b.avg - a.avg)[0];
 
     let body = `The draft has officially concluded! Here is the league-wide wrap-up:\n\n` +
-               `**No. 1 Overall Pick:** ${topPick.teamName} selected **${topPick.playerName}** (${topPick.pos}). Scouts expect him to be a day-one starter.\n\n` +
-               `**Steal of the Draft:** Everyone is talking about **${steal.playerName}**, who fell to pick #${steal.pick}. ${steal.teamName} got incredible value for a player of his caliber.\n\n` +
-               `**Best Draft Class:** **${bestDraft.name}** is receiving high marks from analysts, drafting a class with an average OVR of ${Math.round(bestDraft.avg)}.\n\n` +
-               `The preseason is now underway. Check your roster and set your depth charts!`;
+               `**No. 1 Overall Pick:** ${topPick.teamName} selected **${topPick.playerName}** (${topPick.pos}). Scouts expect him to be a day-one starter.\n\n`;
+               
+    if (steal && steal.pick > 5) {
+        body += `**Steal of the Draft:** Everyone is talking about **${steal.playerName}**, who fell to pick #${steal.pick}. ${steal.teamName} got incredible value for a player of his caliber.\n\n`;
+    }
+
+    if (bestDraft) {
+        body += `**Best Draft Class:** **${bestDraft.name}** is receiving high marks from analysts, drafting a class with an average OVR of ${Math.round(bestDraft.avg)}.\n\n`;
+    }
+    
+    body += `The preseason is now underway. Check your roster and set your depth charts!`;
 
     addMessage("Draft Recap: Winners and Losers", body, false, game);
 }
@@ -8503,7 +8514,7 @@ export function finalizeGameResults(homeTeam, awayTeam, homeScore, awayScore) {
 
 export {
     initializeLeague, createPlayerTeam, setupDraft, getGameState, saveGameState, loadGameState, getBreakthroughs,
-    addPlayerToTeam, playerCut, playerSignFreeAgent, callFriend, aiManageRoster, aiSetDepthChart, updateDepthChart, changeFormation,generateDraftSummary,
+    addPlayerToTeam, playerCut, playerSignFreeAgent, callFriend, aiManageRoster, aiSetDepthChart, updateDepthChart, changeFormation, generateDraftSummary,
 
     // Roster Helpers
     getRosterObjects,
