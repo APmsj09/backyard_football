@@ -2060,7 +2060,9 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
             
             // 💡 FIX: Defensive attributes fallback to technical to guarantee valid numbers
             const tackling = player.attributes?.technical?.tackling || player.attributes?.defense?.tackling || 50;
-            const coverage = player.attributes?.defense?.passCoverage || player.attributes?.technical?.passCoverage || 50;
+            
+            // 💡 RE-SYNCED: Now looks for 'coverage' first, while keeping 'passCoverage' as a fallback for older save files
+            const coverage = player.attributes?.technical?.coverage || player.attributes?.technical?.passCoverage || player.attributes?.defense?.passCoverage || 50;
             
             const blocking = player.attributes?.technical?.blocking || 50;
             const blockShedding = player.attributes?.technical?.blockShedding || 50;
