@@ -252,11 +252,9 @@
     </section>
 
     <section id="dashboard-screen" class="screen hidden h-full flex flex-col overflow-hidden">
-      <div
-        class="flex-shrink-0 flex flex-col md:flex-row justify-between items-center p-4 bg-gray-900 text-white rounded-xl shadow-md mb-4 border-b-4 border-amber-500">
+      <div class="flex-shrink-0 flex flex-col md:flex-row justify-between items-center p-4 bg-gray-900 text-white rounded-xl shadow-md mb-4 border-b-4 border-amber-500">
         <div class="mb-4 md:mb-0 text-center md:text-left">
-          <h2 id="dashboard-team-name" class="text-3xl font-display tracking-wider text-white drop-shadow-md">Your Team
-          </h2>
+          <h2 id="dashboard-team-name" class="text-3xl font-display tracking-wider text-white drop-shadow-md">Your Team</h2>
           <div class="flex items-center gap-3 mt-1 justify-center md:justify-start text-sm text-gray-300 font-mono">
             <span id="dashboard-record" class="bg-gray-800 px-2 py-0.5 rounded">0-0-0</span>
             <span class="text-gray-600">|</span>
@@ -266,37 +264,34 @@
           </div>
         </div>
         <div class="flex gap-3">
-          <button id="save-test-roster-btn"
-            class="btn bg-gray-700 hover:bg-gray-600 text-white font-semibold py-2 px-4 rounded-lg text-sm transition">Save</button>
-          <button id="advance-week-btn"
-            class="btn bg-amber-500 hover:bg-amber-600 text-white font-bold py-2 px-6 rounded-lg text-lg transition shadow-lg flex items-center gap-2 transform hover:-translate-y-0.5 active:translate-y-0">
+          <button id="save-test-roster-btn" class="btn bg-gray-700 hover:bg-gray-600 text-white font-semibold py-2 px-4 rounded-lg text-sm transition">Save</button>
+          <button id="advance-week-btn" class="btn bg-amber-500 hover:bg-amber-600 text-white font-bold py-2 px-6 rounded-lg text-lg transition shadow-lg flex items-center gap-2 transform hover:-translate-y-0.5 active:translate-y-0">
             <span>Play Week</span>
             <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-              <path fill-rule="evenodd"
-                d="M10.293 3.293a1 1 0 011.414 0l6 6a1 1 0 010 1.414l-6 6a1 1 0 01-1.414-1.414L14.586 11H3a1 1 0 110-2h11.586l-4.293-4.293a1 1 0 010-1.414z"
-                clip-rule="evenodd" />
+              <path fill-rule="evenodd" d="M10.293 3.293a1 1 0 011.414 0l6 6a1 1 0 010 1.414l-6 6a1 1 0 01-1.414-1.414L14.586 11H3a1 1 0 110-2h11.586l-4.293-4.293a1 1 0 010-1.414z" clip-rule="evenodd" />
             </svg>
           </button>
         </div>
       </div>
 
-      <div class="flex-grow flex flex-col md:flex-row gap-4 min-h-0">
-        <nav id="dashboard-tabs" class="md:w-64 flex-shrink-0 flex flex-col gap-1 overflow-y-auto">
-          <button class="tab-button active" data-tab="my-team"><span class="text-lg">📋</span> Roster</button>
-          <button class="tab-button" data-tab="depth-chart"><span class="text-lg">♟️</span> Strategy</button>
-          <button class="tab-button" data-tab="schedule"><span class="text-lg">📅</span> Schedule</button>
-          <button class="tab-button" data-tab="standings"><span class="text-lg">🏆</span> Standings</button>
-          <button class="tab-button" data-tab="player-stats"><span class="text-lg">📊</span> League Leaders</button>
-          <button class="tab-button" data-tab="hall-of-fame"><span class="text-lg">🏛️</span> Hall of Fame</button>
-          <button class="tab-button relative" data-tab="messages">
-            <span class="text-lg">📩</span> Messages
-            <span id="messages-notification-dot"
-              class="absolute top-3 right-3 w-2.5 h-2.5 bg-red-500 rounded-full border-2 border-gray-100 hidden shadow-sm animate-pulse"></span>
+      <!-- NEW: Horizontal Layout for Tabs -->
+      <div class="flex-grow flex flex-col gap-3 min-h-0">
+        <nav id="dashboard-tabs" class="w-full flex-shrink-0 flex flex-row gap-2 overflow-x-auto bg-gray-100 p-2 rounded-xl border border-gray-200 hide-scrollbar">
+          <button class="tab-button active whitespace-nowrap" data-tab="my-team"><span class="text-base mr-1">📋</span> Roster</button>
+          <button class="tab-button whitespace-nowrap" data-tab="depth-chart"><span class="text-base mr-1">♟️</span> Strategy</button>
+          <button class="tab-button whitespace-nowrap" data-tab="schedule"><span class="text-base mr-1">📅</span> Schedule</button>
+          <button class="tab-button whitespace-nowrap" data-tab="standings"><span class="text-base mr-1">🏆</span> Standings</button>
+          <button class="tab-button whitespace-nowrap" data-tab="player-stats"><span class="text-base mr-1">📊</span> League Leaders</button>
+          <button class="tab-button whitespace-nowrap" data-tab="hall-of-fame"><span class="text-base mr-1">🏛️</span> Hall of Fame</button>
+          <button class="tab-button relative whitespace-nowrap" data-tab="messages">
+            <span class="text-base mr-1">📩</span> Messages
+            <span id="messages-notification-dot" class="absolute top-1 right-1 w-2.5 h-2.5 bg-red-500 rounded-full border-2 border-gray-100 hidden shadow-sm animate-pulse"></span>
           </button>
         </nav>
 
-        <main id="dashboard-content"
-          class="flex-grow bg-white rounded-xl shadow-sm p-0 overflow-hidden flex flex-col border border-gray-200 relative">
+        <main id="dashboard-content" class="flex-grow bg-white rounded-xl shadow-sm p-0 overflow-hidden flex flex-col border border-gray-200 relative">
+          <!-- The Rest of your Tab Panes Remain Exactly the Same... -->
+          
           <div id="tab-content-my-team" class="tab-pane flex flex-col h-full">
             <div class="p-4 border-b border-gray-100 bg-gray-50">
               <h3 class="text-xl font-bold text-gray-800">Team Roster</h3>
@@ -305,77 +300,58 @@
           </div>
 
           <div id="tab-content-depth-chart" class="tab-pane hidden flex flex-col h-full">
-            <div class="p-4 border-b border-gray-100 bg-gray-50 flex flex-wrap gap-2 items-center justify-between">
+            <div class="p-3 border-b border-gray-100 bg-gray-50 flex flex-wrap gap-2 items-center justify-between shrink-0">
               <h3 class="text-xl font-bold text-gray-800 mr-4">Strategy</h3>
               <div id="depth-chart-subtabs" class="flex bg-white rounded-lg p-1 border shadow-sm">
-                <button class="depth-chart-tab active px-4 py-1.5 rounded-md text-sm font-semibold transition-colors"
-                  data-sub-tab="offense">Offense</button>
-                <button class="depth-chart-tab px-4 py-1.5 rounded-md text-sm font-semibold transition-colors"
-                  data-sub-tab="defense">Defense</button>
-                <button class="depth-chart-tab px-4 py-1.5 rounded-md text-sm font-semibold transition-colors"
-                  data-sub-tab="overalls">Ratings</button>
-                <button
-                  class="depth-chart-tab px-4 py-1.5 rounded-md text-sm font-semibold transition-colors text-amber-700 bg-amber-50 border border-amber-200"
-                  data-sub-tab="depth-order">Depth Order</button>
+                <button class="depth-chart-tab active px-4 py-1.5 rounded-md text-sm font-semibold transition-colors" data-sub-tab="offense">Offense</button>
+                <button class="depth-chart-tab px-4 py-1.5 rounded-md text-sm font-semibold transition-colors" data-sub-tab="defense">Defense</button>
+                <button class="depth-chart-tab px-4 py-1.5 rounded-md text-sm font-semibold transition-colors" data-sub-tab="overalls">Ratings</button>
+                <button class="depth-chart-tab px-4 py-1.5 rounded-md text-sm font-semibold transition-colors text-amber-700 bg-amber-50 border border-amber-200" data-sub-tab="depth-order">Depth Order</button>
               </div>
             </div>
 
-            <div class="flex-grow overflow-y-auto p-4 bg-gray-50">
-              <div id="depth-chart-offense-pane" class="depth-chart-sub-pane space-y-4">
-                <div class="bg-white p-3 rounded-lg border shadow-sm flex items-center justify-between">
+            <!-- Changed overflow to allow inner flex control -->
+            <div class="flex-grow overflow-y-auto p-4 bg-gray-50 flex flex-col min-h-0">
+              <div id="depth-chart-offense-pane" class="depth-chart-sub-pane flex-grow flex flex-col space-y-4 min-h-0">
+                <div class="bg-white p-3 rounded-lg border shadow-sm flex items-center justify-between shrink-0">
                   <label class="font-bold text-gray-700 text-sm">Formation:</label>
-                  <select id="offense-formation-select"
-                    class="p-2 border rounded bg-gray-50 text-sm font-medium w-64"></select>
+                  <select id="offense-formation-select" class="p-2 border rounded bg-gray-50 text-sm font-medium w-64"></select>
                 </div>
-                <div class="visual-field-container">
-                  <div
-                    class="absolute top-2 left-1/2 -translate-x-1/2 bg-black/40 text-white px-3 py-1 rounded text-xs font-bold tracking-widest z-20">
-                    OFFENSE</div>
+                <div class="visual-field-container shrink-0">
+                  <div class="absolute top-2 left-1/2 -translate-x-1/2 bg-black/40 text-white px-3 py-1 rounded text-xs font-bold tracking-widest z-20">OFFENSE</div>
                   <div id="offense-visual-field" class="w-full h-full relative"></div>
                 </div>
-                <div class="bg-white p-4 rounded-lg border shadow-sm">
-                  <h4 class="font-bold text-gray-700 mb-2">Offensive Bench</h4>
-                  <div id="offense-bench-table"></div>
+                <div class="bg-white p-4 rounded-lg border shadow-sm flex-grow overflow-hidden flex flex-col">
+                  <h4 class="font-bold text-gray-700 mb-2 shrink-0">Offensive Bench</h4>
+                  <div id="offense-bench-table" class="flex-grow overflow-auto"></div>
                 </div>
               </div>
 
-              <div id="depth-chart-defense-pane" class="depth-chart-sub-pane hidden space-y-4">
-                <div class="bg-white p-3 rounded-lg border shadow-sm flex items-center justify-between">
+              <div id="depth-chart-defense-pane" class="depth-chart-sub-pane hidden flex-grow flex flex-col space-y-4 min-h-0">
+                <div class="bg-white p-3 rounded-lg border shadow-sm flex items-center justify-between shrink-0">
                   <label class="font-bold text-gray-700 text-sm">Formation:</label>
-                  <select id="defense-formation-select"
-                    class="p-2 border rounded bg-gray-50 text-sm font-medium w-64"></select>
+                  <select id="defense-formation-select" class="p-2 border rounded bg-gray-50 text-sm font-medium w-64"></select>
                 </div>
-                <div class="visual-field-container">
-                  <div
-                    class="absolute top-2 left-1/2 -translate-x-1/2 bg-black/40 text-white px-3 py-1 rounded text-xs font-bold tracking-widest z-20">
-                    DEFENSE</div>
+                <div class="visual-field-container shrink-0">
+                  <div class="absolute top-2 left-1/2 -translate-x-1/2 bg-black/40 text-white px-3 py-1 rounded text-xs font-bold tracking-widest z-20">DEFENSE</div>
                   <div id="defense-visual-field" class="w-full h-full relative"></div>
                 </div>
-                <div class="bg-white p-4 rounded-lg border shadow-sm">
-                  <h4 class="font-bold text-gray-700 mb-2">Defensive Bench</h4>
-                  <div id="defense-bench-table"></div>
+                <div class="bg-white p-4 rounded-lg border shadow-sm flex-grow overflow-hidden flex flex-col">
+                  <h4 class="font-bold text-gray-700 mb-2 shrink-0">Defensive Bench</h4>
+                  <div id="defense-bench-table" class="flex-grow overflow-auto"></div>
                 </div>
               </div>
 
-              <div id="positional-overalls-container" class="depth-chart-sub-pane hidden"></div>
+              <div id="positional-overalls-container" class="depth-chart-sub-pane hidden flex-grow"></div>
 
-              <div id="depth-order-container" class="depth-chart-sub-pane hidden">
-                <div
-                  class="mb-6 bg-blue-50 border border-blue-200 rounded-lg p-4 flex flex-col sm:flex-row justify-between items-center gap-4">
-                  <div>
-                    <h4 class="font-bold text-lg text-blue-900">Set Positional Hierarchy</h4>
-                    <p class="text-sm text-blue-700">Drag players up or down to set the starter (top) and backup order.
-                    </p>
-                  </div>
-                  <button id="auto-reorder-btn"
-                    class="btn bg-white border border-gray-300 text-gray-700 hover:bg-gray-100 font-bold py-2 px-4 rounded shadow-sm text-sm">Auto-Sort
-                    by Overall</button>
-                </div>
-                <div id="depth-order-list"></div>
+              <!-- Important: Make depth order container full height and flex-col -->
+              <div id="depth-order-container" class="depth-chart-sub-pane hidden h-full flex-col overflow-hidden">
+                <!-- Content generated via JS -->
               </div>
             </div>
           </div>
 
+          <!-- ... The rest of the dashboard tabs remain the same ... -->
           <div id="tab-content-schedule" class="tab-pane hidden flex-col h-full">
             <div class="p-4 border-b bg-gray-50">
               <h3 class="text-xl font-bold">Schedule</h3>
@@ -420,7 +396,6 @@
             </div>
             <div id="messages-list" class="p-4 overflow-y-auto space-y-2"></div>
           </div>
-
         </main>
       </div>
     </section>

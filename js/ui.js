@@ -1316,46 +1316,97 @@ function handleDepthChartChange(side, slot, newPlayerId) {
     renderDepthChartTab(gs);
 }
 
+/**
+ * 💡 NEW: Opens a modal to assign a player to a specific depth chart slot.
+ * Eliminates the clunky hover-dropdowns on the field visualizer.
+ */
+window.app_openSlotModal = function(side, slotId) {
+    const gs = Game.getGameState();
+    if (!gs || !gs.playerTeam) return;
+
+    const roster = Game.getUIRosterObjects(gs.playerTeam);
+    const currentChart = gs.playerTeam.depthChart[side];
+    const currentPlayerId = currentChart[slotId];
+    
+    let positionKey = slotId.replace(/\d+/g, '');
+    if (['OT', 'OG', 'C'].includes(positionKey)) positionKey = 'OL';
+    if (['DE', 'DT', 'NT'].includes(positionKey)) positionKey = 'DL';
+    if (['CB', 'S', 'FS', 'SS'].includes(positionKey)) positionKey = 'DB';
+    if (['FB'].includes(positionKey)) positionKey = 'RB';
+
+    // Find available players (not already starting on this side, except the current player)
+    const startingOnSide = new Set(Object.values(currentChart).filter(Boolean));
+    const candidates = roster.filter(p => p && (!startingOnSide.has(p.id) || p.id === currentPlayerId));
+
+    // Sort candidates: Current Pos Matches First, then by OVR Descending
+    candidates.sort((a, b) => {
+        const ovrA = Game.calculateOverall(a, positionKey);
+        const ovrB = Game.calculateOverall(b, positionKey);
+        const aMatch = (a.pos === positionKey || a.favoriteOffensivePosition === positionKey) ? 1 : 0;
+        const bMatch = (b.pos === positionKey || b.favoriteOffensivePosition === positionKey) ? 1 : 0;
+        if (aMatch !== bMatch) return bMatch - aMatch;
+        return ovrB - ovrA;
+    });
+
+    window.app_assignSlot = function(assignSide, assignSlot, pid) {
+        handleDepthChartChange(assignSide, assignSlot, pid);
+        hideModal();
+    };
+
+    let modalHtml = `<div class="space-y-2 max-h-[60vh] overflow-y-auto pr-2 pb-2">`;
+    modalHtml += `<button class="w-full text-left p-3 border border-red-200 rounded-lg hover:bg-red-50 flex justify-between items-center transition shadow-sm mb-4" onclick="app_assignSlot('${side}', '${slotId}', '')">
+        <span class="font-bold text-red-600">Leave Empty</span>
+    </button>`;
+
+    candidates.forEach(p => {
+        const ovr = Game.calculateOverall(p, positionKey);
+        const isCurrent = p.id === currentPlayerId;
+        const bgClass = isCurrent ? 'bg-amber-100 border-amber-400 shadow-md ring-2 ring-amber-300' : 'bg-white hover:bg-gray-50 border-gray-200';
+        
+        modalHtml += `<button class="w-full text-left p-3 border rounded-lg ${bgClass} flex justify-between items-center transition shadow-sm" onclick="app_assignSlot('${side}', '${slotId}', '${p.id}')">
+            <div class="flex items-center gap-3">
+                <div class="w-10 h-10 rounded-full bg-gray-200 border border-gray-300 flex items-center justify-center font-bold text-gray-700 text-xs">${p.pos || '-'}</div>
+                <div>
+                    <span class="font-bold text-gray-800 block text-lg leading-tight">${p.name}</span>
+                    <span class="text-xs text-gray-500 font-medium">Age: ${p.age} • ${formatHeight(p.attributes?.physical?.height)} • ${p.attributes?.physical?.weight} lbs</span>
+                </div>
+            </div>
+            <div class="text-right">
+                <span class="font-black text-2xl ${ovr >= 80 ? 'text-green-600' : 'text-gray-700'}">${ovr}</span>
+                <span class="text-[10px] text-gray-400 block -mt-1 font-bold uppercase tracking-wider">OVR</span>
+            </div>
+        </button>`;
+    });
+    modalHtml += `</div>`;
+
+    showModal(`Assign Player: ${slotId}`, modalHtml);
+};
+
 
 /**
  * Renders the visual, on-field player slots and their assignment dropdowns.
  * UPDATED: Shows full roster, contextual overalls, and swap indicators.
  */
-function renderVisualFormationSlots(
-    container,
-    currentChart,
-    formationData,
-    benchedPlayers,
-    roster,
-    side,
-    formationKey
-) {
+function renderVisualFormationSlots(container, currentChart, formationData, benchedPlayers, roster, side, formationKey) {
     if (!formationKey || typeof formationKey !== 'string') return;
-    if (!formationData || !Array.isArray(formationData.slots)) {
-        console.error('Invalid formationData:', formationData);
-        return;
-    }
+    if (!formationData || !Array.isArray(formationData.slots)) return;
 
     container.innerHTML = '';
 
-    // Helper: produce gradient/bg color and foreground color for an overall value
     function colorForOverall(val) {
         if (val === '-' || val === null || val === undefined) {
             return { bg: 'linear-gradient(90deg, rgba(55,65,81,0.6), rgba(31,41,55,0.6))', fg: '#ffffff' };
         }
         const v = Math.max(0, Math.min(100, Number(val)));
-        // Map 0..100 -> hue 0 (red) .. 120 (green)
         const hue = Math.round((v / 100) * 120);
         const hue2 = Math.min(140, hue + 12);
         const c1 = `hsl(${hue} 75% 45%)`;
         const c2 = `hsl(${hue2} 70% 55%)`;
-        // For very high values, prefer darker foreground for contrast
         const fg = v >= 75 ? '#052e16' : '#ffffff';
         return { bg: `linear-gradient(90deg, ${c1}, ${c2})`, fg };
     }
 
     const losMarker = document.createElement('div');
-    // 💡 FIX: Added Tailwind classes so the LOS renders cleanly as a glowing blue line
     losMarker.className = 'absolute left-0 w-full h-1 bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.8)] z-0';
     losMarker.style.top = side === 'offense' ? '20%' : '80%';
     container.appendChild(losMarker);
@@ -1364,13 +1415,12 @@ function renderVisualFormationSlots(
         const coords = formationData.coordinates?.[slotId];
         if (!coords) return;
 
-        const [yardsX, yardsY] = coords;
+        const[yardsX, yardsY] = coords;
         const leftPercent = 50 + (yardsX * 1.8);
         const Y_SCALE = 3.5;
         let topPercent = side === 'offense' ? 20 - (yardsY * Y_SCALE) : 80 - (yardsY * Y_SCALE);
 
         const slotEl = document.createElement('div');
-        slotEl.className = 'player-slot-visual';
         slotEl.style.left = `${leftPercent}%`;
         slotEl.style.top = `${topPercent}%`;
 
@@ -1385,127 +1435,42 @@ function renderVisualFormationSlots(
         }
         const player = roster.find(p => p.id === playerId);
 
-        // 💡 Determine the canonical position key for this slot BEFORE using it
         let positionKey = slotId.replace(/\d+/g, '');
         if (['OT', 'OG', 'C'].includes(positionKey)) positionKey = 'OL';
         if (['DE', 'DT', 'NT'].includes(positionKey)) positionKey = 'DL';
         if (['CB', 'S', 'FS', 'SS'].includes(positionKey)) positionKey = 'DB';
         if (['FB'].includes(positionKey)) positionKey = 'RB';
 
-        // Find best candidate on bench for this slot (preview)
-        let bestCandidate = null;
-        let bestCandidateOvr = -Infinity;
-        benchedPlayers.forEach(p => {
-            const candOvr = calculateOverall(p, positionKey);
-            if (candOvr > bestCandidateOvr) {
-                bestCandidateOvr = candOvr;
-                bestCandidate = p;
-            }
-        });
-
-        let badgeColor = 'bg-gray-500';
-        if (slotId.startsWith('QB')) badgeColor = 'bg-amber-600';
-        else if (slotId.startsWith('RB') || slotId.startsWith('WR')) badgeColor = 'bg-blue-600';
-        else if (slotId.startsWith('DL') || slotId.startsWith('LB')) badgeColor = 'bg-red-500';
-        else if (slotId.startsWith('DB')) badgeColor = 'bg-purple-600';
-        else if (slotId.startsWith('OL')) badgeColor = 'bg-emerald-600';
-
-        // Pass positionKey to calculateOverall (positionKey already computed above)
-        const overall = player ? calculateOverall(player, positionKey) : '-';
-
-        // Decide display name and rating for visual preview
-        const displayName = player ? (player.firstName ? player.firstName.charAt(0) + '. ' : '') + (player.lastName || player.name) : (bestCandidate ? (bestCandidate.firstName ? bestCandidate.firstName.charAt(0) + '. ' : '') + (bestCandidate.lastName || bestCandidate.name) : 'Empty');
-        const displayOvr = player ? overall : (bestCandidate ? Math.round(bestCandidateOvr) : '-');
-        const fillPercent = (displayOvr && displayOvr !== '-') ? Math.max(0, Math.min(100, Math.round((displayOvr / 100) * 100))) : 0;
-
+        const overall = player ? Game.calculateOverall(player, positionKey) : '-';
+        const displayOvr = player ? overall : '-';
         const colorInfo = colorForOverall(displayOvr);
         const fgStyle = `color: ${colorInfo.fg};`;
-
-        // compact display: show position and short name inside the circular badge
         const posLabel = positionKey;
-        const shortName = player ? ((player.firstName ? player.firstName.charAt(0) + '. ' : '') + (player.lastName || player.name)) : (bestCandidate ? ((bestCandidate.firstName ? bestCandidate.firstName.charAt(0) + '. ' : '') + (bestCandidate.lastName || bestCandidate.name)) : 'Empty');
+        const shortName = player ? ((player.firstName ? player.firstName.charAt(0) + '. ' : '') + (player.lastName || player.name)) : 'Empty';
 
-        // 💡 FIX: Make the slot visual element explicitly positioned using Tailwind 
-        // This stops overlapping, centers the dot, and gives it a nice "pop" hover effect
-        slotEl.className = 'absolute transform -translate-x-1/2 -translate-y-1/2 flex flex-col items-center group z-10';
+        // 💡 FIX: Removed the embedded dropdown and shrunk dimensions to w-10/h-10
+        slotEl.className = 'absolute transform -translate-x-1/2 -translate-y-1/2 flex flex-col items-center group z-10 cursor-pointer';
 
-        // 💡 FIX: The Dropdown menu is now hidden until you hover over the player dot, cleaning up the field view!
         slotEl.innerHTML = `
-            <div class="relative w-12 h-12 rounded-full border-2 border-white shadow-lg flex flex-col items-center justify-center cursor-grab transition-transform transform group-hover:scale-110" style="background: ${colorInfo.bg}; ${fgStyle}">
-                <span class="text-[9px] font-bold uppercase tracking-wide opacity-80 leading-none mt-1">${posLabel}</span>
-                <span class="text-base font-black leading-none">${overall !== '-' ? overall : '?'}</span>
+            <div class="relative w-10 h-10 rounded-full border-2 border-white shadow-lg flex flex-col items-center justify-center transition-transform transform group-hover:scale-110" style="background: ${colorInfo.bg}; ${fgStyle}">
+                <span class="text-[8px] font-bold uppercase tracking-wide opacity-80 leading-none mt-0.5">${posLabel}</span>
+                <span class="text-sm font-black leading-none">${overall !== '-' ? overall : '?'}</span>
             </div>
-            <div class="mt-1 bg-gray-900 text-white text-[10px] font-bold px-2 py-0.5 rounded shadow text-center max-w-[80px] truncate border border-gray-700">
+            <div class="mt-1 bg-gray-900 text-white text-[9px] font-bold px-1.5 py-0.5 rounded shadow text-center max-w-[70px] truncate border border-gray-700">
                 ${shortName}
-            </div>
-            <div class="absolute top-16 opacity-0 group-hover:opacity-100 transition-opacity z-50 pointer-events-auto shadow-xl">
-                <select class="slot-select text-xs font-medium text-gray-800 bg-white border border-gray-300 rounded p-1 w-28 cursor-pointer focus:ring-2 focus:ring-amber-500" data-slot-id="${slotId}" data-side="${side}">
-                    <option value="">Empty</option>
-                    ${player ? `<option value="${player.id}" selected>${player.firstName ? player.firstName.charAt(0) : ''}. ${player.lastName || player.name}</option>` : ''}
-                    <option disabled>--- Bench ---</option>
-                    ${benchedPlayers.map(p => `
-                        <option value="${p.id}">
-                            (${calculateOverall(p, positionKey)}) ${p.firstName ? p.firstName.charAt(0) : ''}. ${p.lastName || p.name}
-                        </option>
-                    `).join('')}
-                </select>
             </div>
         `;
 
-        // Tooltip: create a richer hover card showing full name and core skills for the position
-        const tooltipTarget = player || bestCandidate;
-        const getAttrValue = (pl, key) => {
-            if (!pl || !pl.attributes) return '-';
-            return (pl.attributes.physical && pl.attributes.physical[key] !== undefined) ? pl.attributes.physical[key]
-                : (pl.attributes.mental && pl.attributes.mental[key] !== undefined) ? pl.attributes.mental[key]
-                    : (pl.attributes.technical && pl.attributes.technical[key] !== undefined) ? pl.attributes.technical[key]
-                        : '-';
-        };
-
-        // compute core attributes for this position (top 3 weights)
-        let coreAttrs = [];
-        try {
-            if (typeof positionOverallWeights !== 'undefined' && positionOverallWeights[positionKey]) {
-                coreAttrs = Object.entries(positionOverallWeights[positionKey])
-                    .sort((a, b) => b[1] - a[1])
-                    .slice(0, 3)
-                    .map(e => e[0]);
-            }
-        } catch (e) { coreAttrs = []; }
-
-        // attach hover handlers
-        slotEl.addEventListener('mouseenter', () => {
-            if (!tooltipTarget) return;
-            const tt = document.createElement('div');
-            tt.className = 'slot-tooltip';
-            const fullName = tooltipTarget.name || `${tooltipTarget.firstName || ''} ${tooltipTarget.lastName || ''}`.trim();
-            let skillsHtml = '';
-            coreAttrs.forEach(a => {
-                const v = getAttrValue(tooltipTarget, a);
-                skillsHtml += `<div class="skill-row"><span class="skill-key">${a}</span>: <span class="skill-val">${v}</span></div>`;
-            });
-            tt.innerHTML = `<div class="tooltip-name"><strong>${fullName}</strong></div><div class="tooltip-skills">${skillsHtml}</div>`;
-            container.appendChild(tt);
-
-            // position tooltip to the right unless it would overflow
-            const slotRect = slotEl.getBoundingClientRect();
-            const containerRect = container.getBoundingClientRect();
-            const left = slotRect.right - containerRect.left + 8;
-            let top = slotRect.top - containerRect.top;
-            // clamp top within container
-            if (top + tt.offsetHeight > container.clientHeight) top = Math.max(0, container.clientHeight - tt.offsetHeight - 8);
-            tt.style.left = `${left}px`;
-            tt.style.top = `${top}px`;
-            slotEl._tooltipEl = tt;
-        });
-        slotEl.addEventListener('mouseleave', () => {
-            if (slotEl._tooltipEl) { slotEl._tooltipEl.remove(); slotEl._tooltipEl = null; }
+        // Bind the Click Event to open the new Modal Assignment system
+        slotEl.addEventListener('click', (e) => {
+            if (e.defaultPrevented) return; // Prevent if drag-and-drop fired
+            window.app_openSlotModal(side, slotId);
         });
 
-        // Tooltip: show a quick stat summary for the player or best candidate
-        //const tooltipTarget = player || bestCandidate;
+        // Tooltip code remains the same...
+        const tooltipTarget = player;
         if (tooltipTarget) {
-            const keyAttrs = ['speed', 'strength', 'agility', 'playbookIQ', 'catchingHands', 'blocking', 'tackling'];
+            const keyAttrs =['speed', 'strength', 'agility', 'playbookIQ', 'catchingHands', 'blocking', 'tackling'];
             const attrPairs = keyAttrs.map(k => {
                 let v = tooltipTarget.attributes?.physical?.[k] ?? tooltipTarget.attributes?.mental?.[k] ?? tooltipTarget.attributes?.technical?.[k] ?? null;
                 if (v === null || v === undefined) return null;
@@ -1513,11 +1478,6 @@ function renderVisualFormationSlots(
             }).filter(Boolean);
             slotEl.title = `${tooltipTarget.name} — ${displayOvr}\n${attrPairs.join(' | ')}`;
         }
-
-        const select = slotEl.querySelector('select');
-        select.addEventListener('change', e => {
-            handleDepthChartChange(side, slotId, e.target.value);
-        });
 
         container.appendChild(slotEl);
     });
@@ -3529,32 +3489,27 @@ function renderDepthOrderPane(gameState) {
     const pane = document.getElementById("depth-order-container");
     if (!pane || !gameState) return;
 
-    // Ensure data is synced
-    rebuildDepthChartFromOrder(gameState.playerTeam);
-
+    Game.rebuildDepthChartFromOrder(gameState.playerTeam);
     const team = gameState.playerTeam;
-    // Get full roster objects
     let roster = getUIRosterObjects(team);
     const depthOrder = team.depthOrder || {};
-    const displayOrder = ['QB', 'RB', 'WR', 'TE', 'OL', 'DL', 'LB', 'DB']; // Added TE here
+    const displayOrder = ['QB', 'RB', 'WR', 'TE', 'OL', 'DL', 'LB', 'DB'];
 
-    // --- 1. Render Tabs (Top) ---
-    // Uses inline onclick to trigger re-render with new active tab
-    let tabsHtml = `<div class="flex flex-wrap gap-2 mb-4 border-b border-gray-200 pb-2">`;
+    // 1. Build the Tabs (Left Column)
+    let tabsHtml = `<div class="flex flex-wrap gap-1 mb-3 pb-2 border-b border-gray-200 shrink-0">`;
     displayOrder.forEach((pos) => {
         const isActive = pos === activeDepthOrderTab;
         const colorClass = isActive
-            ? 'bg-amber-500 text-white shadow-md transform scale-105'
+            ? 'bg-amber-500 text-white shadow-md transform scale-105 z-10'
             : 'bg-gray-200 text-gray-700 hover:bg-gray-300';
 
-        tabsHtml += `<button class="px-4 py-2 rounded font-bold text-sm transition-all ${colorClass}" 
+        tabsHtml += `<button class="px-3 py-1.5 rounded font-bold text-xs transition-all ${colorClass}" 
                              onclick="window.app_switchDepthTab('${pos}')">
                              ${pos}
                      </button>`;
     });
     tabsHtml += `</div>`;
 
-    // Mapping structure for visual slots
     const slotMappings = {
         'QB': [{ id: 'QB1', name: 'Quarterback' }],
         'RB':[{ id: 'RB1', name: 'Halfback 1' }, { id: 'RB2', name: 'Fullback / RB2' }],
@@ -3566,22 +3521,18 @@ function renderDepthOrderPane(gameState) {
         'DB':[{ id: 'DB1', name: 'Cornerback 1' }, { id: 'DB2', name: 'Cornerback 2' }, { id: 'DB3', name: 'FS / Nickel' }, { id: 'DB4', name: 'SS / Dime' }, { id: 'DB5', name: 'Quarter DB' }]
     };
 
-    // --- 2. Render Buckets (Middle) ---
-    let listsHtml = `<div id="depth-lists-container" class="mb-8">`;
+    // 2. Build the Slots (Left Column below tabs)
+    let listsHtml = ``;
     displayOrder.forEach((groupKey) => {
         const isHidden = groupKey !== activeDepthOrderTab ? 'hidden' : '';
-        listsHtml += `<div id="group-${groupKey}" class="depth-group-container ${isHidden}">
-            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">`;
+        listsHtml += `<div id="group-${groupKey}" class="depth-group-container ${isHidden} grid grid-cols-1 md:grid-cols-2 gap-3 pb-8">`;
 
         const renderedIds = new Set();
-        
-        // Ensure specific slots are captured before the general pool to avoid visual duplicates
         slotMappings[groupKey]?.forEach(slotInfo => {
             const idList = depthOrder[slotInfo.id] ||[];
             idList.forEach(id => renderedIds.add(id));
         });
 
-        // The specific slots render first, followed by the General Pool as a catch-all
         const slots = [...(slotMappings[groupKey] ||[]), { id: groupKey, name: `${groupKey} (General Pool)` }];
 
         slots.forEach(slotInfo => {
@@ -3591,188 +3542,142 @@ function renderDepthOrderPane(gameState) {
             
             let players =[];
             if (sId === groupKey) {
-                // General pool: Only render players NOT actively assigned to specific slots
                 players = idList.map(id => roster.find(p => p.id === id)).filter(p => p && !renderedIds.has(p.id));
             } else {
-                // Specific slot: Render everyone assigned
                 players = idList.map(id => roster.find(p => p.id === id)).filter(p => p);
             }
             
             listsHtml += `
             <div class="bg-gray-50 border border-gray-300 rounded-lg flex flex-col shadow-sm">
-                <div class="bg-gray-200 px-3 py-2 border-b border-gray-300 rounded-t-lg flex justify-between items-center">
+                <div class="bg-gray-200 px-2 py-1.5 border-b border-gray-300 rounded-t-lg flex justify-between items-center shrink-0">
                     <h5 class="font-bold text-gray-800 text-xs uppercase tracking-wider">${sName}</h5>
-                    <span class="text-[10px] font-bold text-gray-500 bg-white px-1.5 py-0.5 rounded shadow-sm">${players.length}</span>
+                    <span class="text-[9px] font-bold text-gray-500 bg-white px-1.5 py-0.5 rounded shadow-sm">${players.length}</span>
                 </div>
-                <div class="depth-sortable-list flex-grow p-2 space-y-2 min-h-[140px] overflow-y-auto max-h-[300px]" data-group="${sId}">
+                <!-- Min height ensures a droppable area -->
+                <div class="depth-sortable-list flex-grow p-1.5 space-y-1.5 min-h-[100px] overflow-y-auto max-h-[300px]" data-group="${sId}">
                     ${players.map((p, i) => {
                         const cardData = createDepthCardHTML(p, i, sId, groupKey);
                         return `<div class="${cardData.className}" draggable="true" data-player-id="${p.id}">
                             ${cardData.innerHTML}
                         </div>`;
                     }).join('')}
-                    ${players.length === 0 ? `<div class="text-gray-400 text-xs italic p-3 text-center border-2 border-dashed border-gray-300 rounded h-full flex items-center justify-center opacity-70">Drag here</div>` : ''}
+                    ${players.length === 0 ? `<div class="text-gray-400 text-xs italic p-2 text-center border-2 border-dashed border-gray-300 rounded h-full flex items-center justify-center opacity-70">Drag here</div>` : ''}
                 </div>
             </div>`;
         });
-        
-        listsHtml += `</div></div>`;
-    });
-    listsHtml += `</div>`;
-
-    // --- 3. Render Full Sortable Roster (Bottom) ---
-    // Show the full roster here (including players already assigned to depth lists)
-    // so the user can always drag any player. Assigned slots are still shown
-    // in the Off/Def columns below.
-    const assignedPlayerIds = new Set();
-    displayOrder.forEach(groupKey => {
-        const idList = depthOrder[groupKey] || [];
-        idList.forEach(id => assignedPlayerIds.add(id));
+        listsHtml += `</div>`;
     });
 
-    // Previously we filtered out assigned players which left the roster empty
-    // whenever `team.depthOrder` contained all roster IDs. Keep the full roster
-    // visible so users can drag/reorder regardless of assignment state.
+    // 3. Build Full Sortable Roster Table (Right Column)
     const availableRoster = roster.slice();
-
-    // (Existing sort logic preserved)
     availableRoster.sort((a, b) => {
-        let valA, valB;
-        const getVal = (p, key) => {
-            if (key === 'overall') return calculateOverall(p, p.pos || 'ATH');
-            if (key === 'name') return p.name;
-            if (key === 'pos') return p.pos || p.favoriteOffensivePosition;
-            if (key === 'age') return p.age;
-            const cats = ['physical', 'mental', 'technical'];
-            for (const c of cats) {
-                if (p.attributes?.[c]?.[key] !== undefined) return p.attributes[c][key];
-            }
-            return 0;
-        };
-
         const sortCol = typeof depthOrderSortCol !== 'undefined' ? depthOrderSortCol : 'overall';
         const sortDir = typeof depthOrderSortDir !== 'undefined' ? depthOrderSortDir : 'desc';
 
-        valA = getVal(a, sortCol);
-        valB = getVal(b, sortCol);
+        const getVal = (p, key) => {
+            if (key === 'overall') return Game.calculateOverall(p, p.pos || 'ATH');
+            if (key === 'name') return p.name;
+            if (key === 'pos') return p.pos || p.favoriteOffensivePosition;
+            const cats = ['physical', 'mental', 'technical'];
+            for (const c of cats) if (p.attributes?.[c]?.[key] !== undefined) return p.attributes[c][key];
+            return 0;
+        };
 
+        const valA = getVal(a, sortCol); const valB = getVal(b, sortCol);
         if (valA < valB) return sortDir === 'asc' ? -1 : 1;
         if (valA > valB) return sortDir === 'asc' ? 1 : -1;
         return 0;
     });
 
-    const columns = [
-        { key: 'name', label: 'Name', width: 'w-32' },
-        { key: 'pos', label: 'Pos', width: 'w-12' },
-        { key: 'offPos', label: 'Off', width: 'w-14' },
-        { key: 'defPos', label: 'Def', width: 'w-14' },
-        { key: 'overall', label: 'Ovr', width: 'w-12' },
-        { key: 'age', label: 'Age', width: 'w-12' },
-        { key: 'height', label: 'Hgt', width: 'w-16' },
-        { key: 'weight', label: 'Wgt', width: 'w-16' },
-        { key: 'speed', label: 'Spd', width: 'w-12' },
-        { key: 'strength', label: 'Str', width: 'w-12' },
-        { key: 'agility', label: 'Agi', width: 'w-12' },
-        { key: 'stamina', label: 'Sta', width: 'w-12' },
-        { key: 'playbookIQ', label: 'IQ', width: 'w-12' },
-        { key: 'catchingHands', label: 'Hnd', width: 'w-12' },
-        { key: 'throwingAccuracy', label: 'Thr', width: 'w-12' },
-        { key: 'blocking', label: 'Blk', width: 'w-12' },
-        { key: 'tackling', label: 'Tkl', width: 'w-12' },
-        { key: 'blockShedding', label: 'Bsh', width: 'w-12' }
+    // Minimized Columns to fit side-by-side
+    const columns =[
+        { key: 'name', label: 'Name' },
+        { key: 'pos', label: 'Pos' },
+        { key: 'overall', label: 'Ovr' },
+        { key: 'speed', label: 'Spd' },
+        { key: 'catchingHands', label: 'Hnd' },
+        { key: 'tackling', label: 'Tkl' },
+        { key: 'blocking', label: 'Blk' }
     ];
 
-    // --- Build reverse lookup maps for efficient slot assignment lookup ---
     const depthChart = team.depthChart || { offense: {}, defense: {} };
-    const playerToOffSlot = {};
-    const playerToDefSlot = {};
+    const playerToOffSlot = {}; const playerToDefSlot = {};
+    if (depthChart.offense) Object.entries(depthChart.offense).forEach(([s, id]) => { if(id) { if(!playerToOffSlot[id]) playerToOffSlot[id]=[]; playerToOffSlot[id].push(s); } });
+    if (depthChart.defense) Object.entries(depthChart.defense).forEach(([s, id]) => { if(id) { if(!playerToDefSlot[id]) playerToDefSlot[id]=[]; playerToDefSlot[id].push(s); } });
 
-    // 💡 FIX: Store slots as an array so players playing multiple positions don't get overwritten
-    if (depthChart.offense) {
-        Object.entries(depthChart.offense).forEach(([slot, playerId]) => {
-            if (playerId) {
-                if (!playerToOffSlot[playerId]) playerToOffSlot[playerId] = [];
-                playerToOffSlot[playerId].push(slot);
-            }
-        });
-    }
+    // 4. Assemble the final Side-by-Side Flex HTML
+    pane.innerHTML = `
+        <div class="mb-3 bg-blue-50 border border-blue-200 rounded-lg p-2.5 flex flex-col sm:flex-row justify-between items-center gap-2 shrink-0">
+            <div>
+                <h4 class="font-bold text-sm text-blue-900 leading-tight">Positional Hierarchy</h4>
+                <p class="text-[11px] text-blue-700">Drag players into slots. Number 1 is your starter.</p>
+            </div>
+            <button id="auto-reorder-btn" class="btn bg-white border border-gray-300 text-gray-700 hover:bg-gray-100 font-bold py-1 px-3 rounded shadow-sm text-xs">Auto-Sort</button>
+        </div>
 
-    if (depthChart.defense) {
-        Object.entries(depthChart.defense).forEach(([slot, playerId]) => {
-            if (playerId) {
-                if (!playerToDefSlot[playerId]) playerToDefSlot[playerId] = [];
-                playerToDefSlot[playerId].push(slot);
-            }
-        });
-    }
+        <div class="flex flex-col lg:flex-row gap-4 h-full min-h-0 overflow-hidden pb-4">
+            <!-- LEFT COLUMN: Positional Trees -->
+            <div class="w-full lg:w-7/12 xl:w-2/3 flex flex-col min-h-0 h-full">
+                ${tabsHtml}
+                <div id="depth-lists-container" class="flex-grow overflow-y-auto pr-1 hide-scrollbar">
+                    ${listsHtml}
+                </div>
+            </div>
+            
+            <!-- RIGHT COLUMN: Roster Drag Source -->
+            <div class="w-full lg:w-5/12 xl:w-1/3 flex flex-col border-l border-gray-200 pl-0 lg:pl-3 min-h-0 h-full">
+                <h4 class="font-bold text-gray-800 text-sm mb-1 shrink-0">Full Roster <span class="text-[10px] font-normal text-gray-500">(Drag to assign)</span></h4>
+                <div class="flex-grow overflow-auto border border-gray-300 rounded shadow-inner bg-white hide-scrollbar">
+                    <table class="min-w-full text-xs">
+                        <thead class="bg-gray-800 text-white sticky top-0 z-10 shadow-sm">
+                            <tr>
+                                ${columns.map(col => {
+                                    const currentSortCol = typeof depthOrderSortCol !== 'undefined' ? depthOrderSortCol : 'overall';
+                                    const currentSortDir = typeof depthOrderSortDir !== 'undefined' ? depthOrderSortDir : 'desc';
+                                    const active = currentSortCol === col.key;
+                                    const arrow = active ? (currentSortDir === 'asc' ? '▲' : '▼') : '';
+                                    return `<th class="py-1.5 px-2 text-left whitespace-nowrap cursor-pointer hover:bg-gray-700 select-none" 
+                                        onclick="window.app_handleDepthSort('${col.key}')">
+                                        ${col.label} <span class="text-[9px] ml-0.5">${arrow}</span>
+                                    </th>`;
+                                }).join('')}
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-gray-100">
+                            ${availableRoster.map(p => {
+                                let pos = p.pos || estimateBestPosition(p);
+                                if (pos === 'FB') pos = 'RB';
+                                if (['ATH', 'K', 'P'].includes(pos)) pos = 'WR';
+                                const ovr = Game.calculateOverall(p, pos);
+                                const offSlot = playerToOffSlot[p.id] ? playerToOffSlot[p.id].join(',') : '';
+                                const defSlot = playerToDefSlot[p.id] ? playerToDefSlot[p.id].join(',') : '';
+                                const isInPlay = offSlot || defSlot;
 
-    let rosterHtml = `
-        <div class="mt-8 border-t pt-4">
-            <h4 class="font-bold text-lg text-gray-800 mb-3">Full Roster (Drag to Reorder)</h4>
-            <div class="overflow-x-auto max-h-80 overflow-y-auto border rounded shadow-inner">
-                <table class="min-w-full text-xs bg-white">
-                    <thead class="bg-gray-800 text-white sticky top-0 z-10">
-                        <tr>
-                            ${columns.map(col => {
-        const currentSortCol = typeof depthOrderSortCol !== 'undefined' ? depthOrderSortCol : 'overall';
-        const currentSortDir = typeof depthOrderSortDir !== 'undefined' ? depthOrderSortDir : 'desc';
-        const active = currentSortCol === col.key;
-        const arrow = active ? (currentSortDir === 'asc' ? '▲' : '▼') : '';
-        return `<th class="py-2 px-2 text-left whitespace-nowrap cursor-pointer hover:bg-gray-700 select-none" 
-                                            onclick="window.app_handleDepthSort('${col.key}')">
-                                            ${col.label} <span class="text-[10px] ml-1">${arrow}</span>
-                                        </th>`;
-    }).join('')}
-                        </tr>
-                    </thead>
-                    <tbody class="divide-y divide-gray-200">
-                        ${availableRoster.map(p => {
-        let pos = p.pos || estimateBestPosition(p);
-        if (pos === 'FB') pos = 'RB';
-        if (['ATH', 'K', 'P'].includes(pos)) pos = 'WR';
-        const ovr = calculateOverall(p, pos);
+                                const vals = {
+                                    speed: p.attributes?.physical?.speed,
+                                    catchingHands: p.attributes?.technical?.catchingHands,
+                                    tackling: p.attributes?.technical?.tackling,
+                                    blocking: p.attributes?.technical?.blocking
+                                };
 
-        // 💡 FIX: Join the arrays so players playing multiple slots show "WR1, WR3"
-        const offSlot = playerToOffSlot[p.id] ? playerToOffSlot[p.id].join(', ') : '';
-        const defSlot = playerToDefSlot[p.id] ? playerToDefSlot[p.id].join(', ') : '';
-
-        const vals = {
-            height: formatHeight(p.attributes?.physical?.height),
-            weight: p.attributes?.physical?.weight,
-            speed: p.attributes?.physical?.speed,
-            strength: p.attributes?.physical?.strength,
-            agility: p.attributes?.physical?.agility,
-            stamina: p.attributes?.physical?.stamina,
-            playbookIQ: p.attributes?.mental?.playbookIQ,
-            catchingHands: p.attributes?.technical?.catchingHands,
-            throwingAccuracy: p.attributes?.technical?.throwingAccuracy,
-            blocking: p.attributes?.technical?.blocking,
-            tackling: p.attributes?.technical?.tackling,
-            blockShedding: p.attributes?.technical?.blockShedding
-        };
-        return `
-                            <tr class="roster-row-item cursor-move hover:bg-blue-50 ${offSlot || defSlot ? 'bg-amber-50' : ''}" draggable="true" 
-                                data-player-id="${p.id}" data-player-name="${p.name}" data-player-ovr="${ovr}">
-                                <td class="py-1 px-2 font-medium truncate max-w-[120px]" title="${p.name}">
-                                    ${p.name} ${offSlot || defSlot ? ('<span class="ml-2 text-[9px] bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded font-semibold leading-none">' + (offSlot ? offSlot : '') + (offSlot && defSlot ? ' / ' : '') + (defSlot ? defSlot : '') + '</span>') : ''}
-                                </td>
-                                <td class="py-1 px-2">${pos}</td>
-                                <td class="py-1 px-2 font-semibold text-blue-700 text-center font-mono text-[10px]">${offSlot || '-'}</td>
-                                <td class="py-1 px-2 font-semibold text-red-700 text-center font-mono text-[10px]">${defSlot || '-'}</td>
-                                <td class="py-1 px-2 font-bold ${ovr >= 80 ? 'text-green-600' : ''}">${ovr}</td>
-                                <td class="py-1 px-2 text-gray-600">${p.age}</td>
-                                ${columns.slice(6).map(c => `<td class="py-1 px-2 text-center text-gray-600 border-l border-gray-100">${vals[c.key] ?? '-'}</td>`).join('')}
-                            </tr>`;
-    }).join('')}
-                    </tbody>
-                </table>
+                                return `
+                                <tr class="roster-row-item cursor-move hover:bg-amber-100 ${isInPlay ? 'bg-blue-50/50' : 'bg-white'}" draggable="true" data-player-id="${p.id}">
+                                    <td class="py-1.5 px-2 font-semibold truncate max-w-[100px]" title="${p.name}">
+                                        ${p.name}
+                                    </td>
+                                    <td class="py-1.5 px-1 text-[10px] font-bold text-gray-500">${pos}</td>
+                                    <td class="py-1.5 px-1 font-bold ${ovr >= 80 ? 'text-green-600' : 'text-gray-800'}">${ovr}</td>
+                                    ${columns.slice(3).map(c => `<td class="py-1.5 px-1 text-center text-gray-500">${vals[c.key] ?? '-'}</td>`).join('')}
+                                </tr>`;
+                            }).join('')}
+                        </tbody>
+                    </table>
+                </div>
             </div>
         </div>
     `;
 
-    pane.innerHTML = tabsHtml + listsHtml + rosterHtml;
-
-    // Hook up the Auto-Sort button natively
+    // Reattach Events
     const autoBtn = pane.querySelector('#auto-reorder-btn');
     if (autoBtn) {
         autoBtn.onclick = () => {
@@ -3783,8 +3688,6 @@ function renderDepthOrderPane(gameState) {
             }
         };
     }
-
-    // NOTE: setupDepthTabs is REMOVED. The onclick handles the logic now.
     setupDepthOrderDragEvents();
 }
 
