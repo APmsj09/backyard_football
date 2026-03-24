@@ -171,12 +171,11 @@ function generateDraftPreviewMessage() {
     
     players.forEach(p => {
         let pos = estimateBestPosition(p);
-        // Canonical mapping
         if (['OT', 'OG', 'C'].includes(pos)) pos = 'OL';
         if (['DE', 'DT', 'NT'].includes(pos)) pos = 'DL';
         if (['CB', 'S', 'FS', 'SS'].includes(pos)) pos = 'DB';
         if (pos === 'FB') pos = 'RB';
-        if (['ATH', 'K', 'P'].includes(pos)) pos = 'WR'; // Fallback
+        if (['ATH', 'K', 'P'].includes(pos)) pos = 'WR'; 
         
         if (grouped[pos]) grouped[pos].push(p);
     });
@@ -197,27 +196,32 @@ function generateDraftPreviewMessage() {
     // 3. Analyze overall class strength
     const topPotentials = players.filter(p => ['A', 'B'].includes(p.potential)).length;
     let strength = "Average";
-    if (topPotentials > 30) strength = "Historically Strong";
-    else if (topPotentials > 20) strength = "Above Average";
-    else if (topPotentials < 10) strength = "Weak";
+    if (topPotentials > 30) strength = "Generational";
+    else if (topPotentials > 20) strength = "Deep and Talented";
+    else if (topPotentials < 10) strength = "Top-Heavy";
 
-    // 4. Extract Top Overalls for flavor text
-    const topQBOvr = qbs[0] ? Game.calculateOverall(qbs[0], 'QB') : 'N/A';
-    const topRBOvr = rbs[0] ? Game.calculateOverall(rbs[0], 'RB') : 'N/A';
+    // Extract Top Players for Flavor
+    const topQB = qbs[0];
+    const topRB = rbs[0];
+    const topWR = wrs[0];
+    const topDefender = [...lbs, ...dbs, ...grouped['DL']].sort((a,b) => Game.calculateOverall(b, estimateBestPosition(b)) - Game.calculateOverall(a, estimateBestPosition(a)))[0];
 
     // 5. Generate Dynamic Text
     const msgBody = `Welcome to the league, Coach ${gameState.playerTeam.coach.name}!\n\n` +
-        `Your first task is to build your roster through the inaugural draft. Here is your Scouting Report for the upcoming class:\n\n` +
-        `Overall Class Strength: **${strength}**\n` +
-        `Top Tier Prospects (A/B Potential): **${topPotentials}**\n\n` +
-        `Positional Breakdown:\n` +
-        `- Quarterbacks: The top signal caller is rated at ${topQBOvr} OVR.\n` +
-        `- Running Backs: ${rbs.length > 0 ? `Led by a ${topRBOvr} OVR prospect, there are ${rbs.length} pure runners available.` : 'A completely barren class for traditional tailbacks.'}\n` +
-        `- Receivers & TEs: ${wrs.length + tes.length > 20 ? 'A very deep class for pass catchers. You can afford to wait on these positions.' : 'Thin class, grab a playmaker early.'}\n` +
-        `- The Trenches (OL/DL): ${trenches.length} big bodies available. ${trenches.length > 30 ? 'Plenty of beef to go around.' : 'You might have to reach early to protect your QB.'}\n` +
-        `- Linebackers: ${lbs.length > 8 ? 'A strong tackling group available in the middle rounds.' : 'Not many true linebackers in this pool.'}\n` +
-        `- Secondary (DBs): ${dbs.length > 15 ? 'A deep class of ballhawks and shutdown corners.' : 'Pass defense will be tough to play; grab elite DBs while you can.'}\n\n` +
-        `When you are ready, click "Start Draft" at the top right of your screen to hit the war room!`;
+        `The scouting department has finalized their evaluations for the inaugural draft. Overall, our scouts are calling this class **${strength}**, with ${topPotentials} players grading out with A or B potential.\n\n` +
+        `Here is the breakdown by position:\n\n` +
+        `**Quarterbacks:**\n` +
+        `${topQB ? `The prize of the class is **${topQB.name}**. Scouts are enamored with his arm talent (${Game.calculateOverall(topQB, 'QB')} OVR). Beyond him, there are ${qbs.length - 1} other passers in the pool.` : 'A completely barren class for signal callers. You might have to run the Wildcat!'}\n\n` +
+        `**Running Backs:**\n` +
+        `${rbs.length > 0 ? `Led by the explosive **${topRB.name}**, this group features ${rbs.length} pure runners capable of carrying the load.` : 'A very thin class for tailbacks.'}\n\n` +
+        `**Receivers & Tight Ends:**\n` +
+        `${wrs.length + tes.length > 20 ? `A incredibly deep class for pass catchers. **${topWR?.name || 'Several elite athletes'}** leads a group where you can absolutely afford to wait and still find value in the middle rounds.` : 'Thin class. If you want a perimeter weapon, grab one early.'}\n\n` +
+        `**The Trenches (OL/DL):**\n` +
+        `Games are won in the trenches, and there are ${trenches.length} big bodies available. ${trenches.length > 30 ? 'Plenty of beef to go around to protect your QB.' : 'Premium linemen are scarce; you might have to reach early.'}\n\n` +
+        `**Linebackers & Secondary:**\n` +
+        `${topDefender ? `Defensively, everyone is talking about **${topDefender.name}**, an absolute game-wrecker. ` : ''}` +
+        `There are ${dbs.length} defensive backs and ${lbs.length} linebackers in the pool. ${dbs.length > 15 ? 'Pass defense shouldn\'t be an issue with this many ballhawks available.' : 'Lockdown corners are rare this year.'}\n\n` +
+        `Get your draft board ready. When you are set, click "Start Draft" at the top right of your screen to hit the war room!`;
 
     // Clear generic messages
     gameState.messages =[];
@@ -227,8 +231,8 @@ function generateDraftPreviewMessage() {
     gameState.messages[0].body = `Coach, we've set up your office. Remember, running your preferred schemes (${gameState.playerTeam.formations.offense} & ${gameState.playerTeam.formations.defense}) will give your players a confidence boost on the field (+5 Playbook IQ and Consistency). Good luck!`;
 
     // Draft Preview Message
-    Game.addMessage("Scouting Dept", `Inaugural Draft Preview`, false, gameState);
-    gameState.messages[0].body = msgBody; // Latest message is at index 0
+    Game.addMessage("Scouting Dept", `Inaugural Draft Preview: A ${strength} Class`, false, gameState);
+    gameState.messages[0].body = msgBody; 
 }
 
 
@@ -330,6 +334,9 @@ async function handleDraftEnd() {
             gameState = Game.getGameState();
             gameState.draftCompleted = true; // Mark draft as done
             
+            // 💡 NEW: Generate Week 1 Matchup Preview
+            generateWeeklyMatchupPreview();
+            
             // Reset the Advance button UI back to normal
             const advBtn = document.getElementById('advance-week-btn');
             if (advBtn) {
@@ -370,6 +377,59 @@ async function handleDraftEnd() {
     }
 
     try { await yieldToMain(); finalizeDraft(); } catch (e) { }
+}
+
+/**
+ * Generates a scouting report message for the upcoming opponent
+ * and adds it to the player's inbox.
+ */
+function generateWeeklyMatchupPreview() {
+    const gs = Game.getGameState();
+    if (!gs || !gs.schedule || gs.currentWeek >= WEEKS_IN_SEASON) return;
+
+    const gamesPerWeek = gs.teams.length / 2;
+    const weekGames = gs.schedule.slice(gs.currentWeek * gamesPerWeek, (gs.currentWeek + 1) * gamesPerWeek);
+    const myGame = weekGames.find(g => g.home.id === gs.playerTeam.id || g.away.id === gs.playerTeam.id);
+
+    if (!myGame) return; // Bye week
+
+    const isHome = myGame.home.id === gs.playerTeam.id;
+    const opponent = isHome ? myGame.away : myGame.home;
+
+    // Get Opponent's Starters to hype them up
+    const oppRoster = Game.getUIRosterObjects(opponent);
+    const oppQB = oppRoster.find(p => p && p.id === opponent.depthChart?.offense?.QB1);
+    
+    // Find their best player
+    const bestPlayer = oppRoster
+        .filter(p => p)
+        .sort((a, b) => Game.calculateOverall(b, estimateBestPosition(b)) - Game.calculateOverall(a, estimateBestPosition(a)))[0];
+
+    const locationText = isHome ? `We are defending home turf` : `We are on the road`;
+    const coachType = opponent.coach?.type || 'Balanced';
+    const offForm = opponent.formations?.offense || 'Balanced';
+    const defForm = opponent.formations?.defense || '3-1-3';
+
+    let body = `Coach,\n\nHere is the advance scouting report for our upcoming Week ${gs.currentWeek + 1} matchup against ${opponent.name}.\n\n` +
+               `**Game Info:** ${locationText}. They currently hold a record of ${opponent.wins}-${opponent.losses}.\n\n` +
+               `**Opponent Tendencies:**\n` +
+               `Head Coach ${opponent.coach?.name || 'Smith'} runs a **${coachType}** system. ` +
+               `Expect to see them line up primarily in a **${offForm}** formation on offense, and run a **${defForm}** defense to counter us.\n\n`;
+
+    if (oppQB) {
+        body += `**Key Matchup:** Their offense runs through QB ${oppQB.name} (${Game.calculateOverall(oppQB, 'QB')} OVR). We need to disrupt his timing in the pocket.\n\n`;
+    }
+
+    if (bestPlayer && bestPlayer.id !== oppQB?.id) {
+        body += `**Player to Watch:** Keep an eye on ${bestPlayer.name}, their star ${estimateBestPosition(bestPlayer)} (${Game.calculateOverall(bestPlayer, estimateBestPosition(bestPlayer))} OVR). He is a true game-changer.\n\n`;
+    }
+
+    body += `Set your depth chart and gameplan accordingly. Let's get this win.`;
+
+    Game.addMessage(`Scouting Report: Week ${gs.currentWeek + 1} vs ${opponent.name}`, body, false, gs);
+    
+    // Update notification dot
+    updateMessagesNotification(gs.messages);
 }
 
 // --- LOADING & SAVING ---
@@ -773,6 +833,9 @@ function finishWeekSimulation(results) {
     UI.showScreen('dashboard-screen');
 
     if (gameState.currentWeek >= WEEKS_IN_SEASON) { handleSeasonEnd(); return; }
+
+    // 💡 NEW: Generate preview for the upcoming week
+    generateWeeklyMatchupPreview();
 
     const roster = Game.getRosterObjects(gameState.playerTeam);
     const healthyCount = roster.filter(p => p && p.status?.duration === 0).length;

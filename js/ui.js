@@ -3493,7 +3493,7 @@ function renderDepthOrderPane(gameState) {
     const team = gameState.playerTeam;
     let roster = getUIRosterObjects(team);
     const depthOrder = team.depthOrder || {};
-    const displayOrder = ['QB', 'RB', 'WR', 'TE', 'OL', 'DL', 'LB', 'DB'];
+    const displayOrder =['QB', 'RB', 'WR', 'TE', 'OL', 'DL', 'LB', 'DB'];
 
     // 1. Build the Tabs (Left Column)
     let tabsHtml = `<div class="flex flex-wrap gap-1 mb-3 pb-2 border-b border-gray-200 shrink-0">`;
@@ -3525,27 +3525,20 @@ function renderDepthOrderPane(gameState) {
     let listsHtml = ``;
     displayOrder.forEach((groupKey) => {
         const isHidden = groupKey !== activeDepthOrderTab ? 'hidden' : '';
-        listsHtml += `<div id="group-${groupKey}" class="depth-group-container ${isHidden} grid grid-cols-1 md:grid-cols-2 gap-3 pb-8">`;
+        // 💡 FIX: Tighter grid (xl:grid-cols-3) so boxes aren't unnecessarily wide
+        listsHtml += `<div id="group-${groupKey}" class="depth-group-container ${isHidden} grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3 pb-8">`;
 
         const renderedIds = new Set();
-        slotMappings[groupKey]?.forEach(slotInfo => {
-            const idList = depthOrder[slotInfo.id] ||[];
-            idList.forEach(id => renderedIds.add(id));
-        });
-
-        const slots = [...(slotMappings[groupKey] ||[]), { id: groupKey, name: `${groupKey} (General Pool)` }];
+        
+        // 💡 FIX: Removing the "General Pool" fallback. We only map explicit positional slots.
+        const slots = slotMappings[groupKey] ||[];
 
         slots.forEach(slotInfo => {
             const sId = slotInfo.id;
             const sName = slotInfo.name;
             const idList = depthOrder[sId] ||[];
             
-            let players =[];
-            if (sId === groupKey) {
-                players = idList.map(id => roster.find(p => p.id === id)).filter(p => p && !renderedIds.has(p.id));
-            } else {
-                players = idList.map(id => roster.find(p => p.id === id)).filter(p => p);
-            }
+            let players = idList.map(id => roster.find(p => p.id === id)).filter(p => p);
             
             listsHtml += `
             <div class="bg-gray-50 border border-gray-300 rounded-lg flex flex-col shadow-sm">
@@ -3578,6 +3571,8 @@ function renderDepthOrderPane(gameState) {
             if (key === 'overall') return Game.calculateOverall(p, p.pos || 'ATH');
             if (key === 'name') return p.name;
             if (key === 'pos') return p.pos || p.favoriteOffensivePosition;
+            if (key === 'height') return p.attributes?.physical?.height || 0;
+            if (key === 'weight') return p.attributes?.physical?.weight || 0;
             const cats = ['physical', 'mental', 'technical'];
             for (const c of cats) if (p.attributes?.[c]?.[key] !== undefined) return p.attributes[c][key];
             return 0;
@@ -3589,16 +3584,38 @@ function renderDepthOrderPane(gameState) {
         return 0;
     });
 
-    // Minimized Columns to fit side-by-side
-    const columns =[
+    // 💡 FIX: Dynamic Columns based on active tab
+    const baseColumns =[
         { key: 'name', label: 'Name' },
         { key: 'pos', label: 'Pos' },
         { key: 'overall', label: 'Ovr' },
-        { key: 'speed', label: 'Spd' },
-        { key: 'catchingHands', label: 'Hnd' },
-        { key: 'tackling', label: 'Tkl' },
-        { key: 'blocking', label: 'Blk' }
+        { key: 'height', label: 'Hgt' },
+        { key: 'weight', label: 'Wgt' },
+        { key: 'playbookIQ', label: 'IQ' }
     ];
+
+    const dynamicCols = [];
+    const weights = positionOverallWeights[activeDepthOrderTab];
+    if (weights) {
+        const topAttrs = Object.entries(weights)
+            .sort((a, b) => b[1] - a[1])
+            .slice(0, 4) // Get top 4 skills
+            .map(e => e[0])
+            .filter(k => k !== 'playbookIQ'); // Don't duplicate IQ
+
+        const attrMap = {
+            speed: 'Spd', strength: 'Str', agility: 'Agi', stamina: 'Sta',
+            toughness: 'Tgh', consistency: 'Con',
+            throwingAccuracy: 'Thr', catchingHands: 'Hnd',
+            blocking: 'Blk', tackling: 'Tkl', blockShedding: 'BSh'
+        };
+
+        topAttrs.forEach(attr => {
+            dynamicCols.push({ key: attr, label: attrMap[attr] || attr.substring(0,3).toUpperCase() });
+        });
+    }
+
+    const columns = [...baseColumns, ...dynamicCols];
 
     const depthChart = team.depthChart || { offense: {}, defense: {} };
     const playerToOffSlot = {}; const playerToDefSlot = {};
@@ -3617,7 +3634,7 @@ function renderDepthOrderPane(gameState) {
 
         <div class="flex flex-col lg:flex-row gap-4 h-full min-h-0 overflow-hidden pb-4">
             <!-- LEFT COLUMN: Positional Trees -->
-            <div class="w-full lg:w-7/12 xl:w-2/3 flex flex-col min-h-0 h-full">
+            <div class="w-full lg:w-7/12 xl:w-3/5 flex flex-col min-h-0 h-full">
                 ${tabsHtml}
                 <div id="depth-lists-container" class="flex-grow overflow-y-auto pr-1 hide-scrollbar">
                     ${listsHtml}
@@ -3625,7 +3642,7 @@ function renderDepthOrderPane(gameState) {
             </div>
             
             <!-- RIGHT COLUMN: Roster Drag Source -->
-            <div class="w-full lg:w-5/12 xl:w-1/3 flex flex-col border-l border-gray-200 pl-0 lg:pl-3 min-h-0 h-full">
+            <div class="w-full lg:w-5/12 xl:w-2/5 flex flex-col border-l border-gray-200 pl-0 lg:pl-3 min-h-0 h-full">
                 <h4 class="font-bold text-gray-800 text-sm mb-1 shrink-0">Full Roster <span class="text-[10px] font-normal text-gray-500">(Drag to assign)</span></h4>
                 <div class="flex-grow overflow-auto border border-gray-300 rounded shadow-inner bg-white hide-scrollbar">
                     <table class="min-w-full text-xs">
@@ -3653,11 +3670,13 @@ function renderDepthOrderPane(gameState) {
                                 const defSlot = playerToDefSlot[p.id] ? playerToDefSlot[p.id].join(',') : '';
                                 const isInPlay = offSlot || defSlot;
 
-                                const vals = {
-                                    speed: p.attributes?.physical?.speed,
-                                    catchingHands: p.attributes?.technical?.catchingHands,
-                                    tackling: p.attributes?.technical?.tackling,
-                                    blocking: p.attributes?.technical?.blocking
+                                const getAttr = (key) => {
+                                    if (key === 'height') return formatHeight(p.attributes?.physical?.height);
+                                    if (key === 'weight') return p.attributes?.physical?.weight;
+                                    if (p.attributes?.physical?.[key] !== undefined) return p.attributes.physical[key];
+                                    if (p.attributes?.mental?.[key] !== undefined) return p.attributes.mental[key];
+                                    if (p.attributes?.technical?.[key] !== undefined) return p.attributes.technical[key];
+                                    return '-';
                                 };
 
                                 return `
@@ -3667,7 +3686,7 @@ function renderDepthOrderPane(gameState) {
                                     </td>
                                     <td class="py-1.5 px-1 text-[10px] font-bold text-gray-500">${pos}</td>
                                     <td class="py-1.5 px-1 font-bold ${ovr >= 80 ? 'text-green-600' : 'text-gray-800'}">${ovr}</td>
-                                    ${columns.slice(3).map(c => `<td class="py-1.5 px-1 text-center text-gray-500">${vals[c.key] ?? '-'}</td>`).join('')}
+                                    ${columns.slice(3).map(c => `<td class="py-1.5 px-1 text-center text-gray-500">${getAttr(c.key)}</td>`).join('')}
                                 </tr>`;
                             }).join('')}
                         </tbody>
