@@ -351,7 +351,7 @@ export function rebuildDepthChartFromOrder(team) {
         if (posKey === 'FB') posKey = 'RB';
 
         // 💡 FIX: Search the specific slot (e.g. OL1) FIRST, then fallback to general (OL)
-        let searchBuckets = [slot, posKey]; 
+        let searchBuckets = [slot, posKey];
         if (posKey === 'WR') searchBuckets.push('TE', 'RB', 'DB', 'QB');
         if (posKey === 'RB') searchBuckets.push('WR', 'DB', 'LB');
         if (posKey === 'TE') searchBuckets.push('WR', 'OL', 'LB');
@@ -377,7 +377,7 @@ export function rebuildDepthChartFromOrder(team) {
         if (['DE', 'DT'].includes(posKey)) posKey = 'DL';
 
         // 💡 FIX: Search specific slot first
-        let searchBuckets = [slot, posKey]; 
+        let searchBuckets = [slot, posKey];
         if (posKey === 'DB') searchBuckets.push('WR', 'RB', 'QB');
         if (posKey === 'LB') searchBuckets.push('DL', 'DB', 'TE', 'RB');
         if (posKey === 'DL') searchBuckets.push('LB', 'OL', 'TE'); // OLs make great DLs
@@ -755,12 +755,12 @@ async function initializeLeague(onProgress) {
     game.divisions[divisionNames[0]] = []; game.divisions[divisionNames[1]] = [];
 
     // --- Generate initial player pool ---
-    const totalPlayers = 300;
+    const totalPlayers = 350;
     console.log(`Generating ${totalPlayers} players...`);
-    
+
     // 💡 NEW: Generate a baseline class strength for the inaugural draft
     const initialClassModifiers = generateDraftClassModifiers();
-    
+
     for (let i = 0; i < totalPlayers; i++) {
         // Pass the modifiers to generatePlayer
         game.players.push(generatePlayer(10, 16, initialClassModifiers));
@@ -1042,7 +1042,7 @@ function aiSetDepthChart(team) {
 
     const offFormKey = normalizeFormationKey(offenseFormations, team.formations.offense, 'Balanced');
     const defFormKey = normalizeFormationKey(defenseFormations, team.formations.defense, '3-1-3');
-    
+
     const offSlots = offenseFormations[offFormKey]?.slots || [];
     const defSlots = defenseFormations[defFormKey]?.slots || [];
 
@@ -1059,7 +1059,7 @@ function aiSetDepthChart(team) {
     const assignSmartStarter = (slot, side, assignedSet) => {
         let bestPlayer = null;
         let bestScore = -Infinity;
-        
+
         let posKey = slot.replace(/\d+/g, '');
         if (['OT', 'OG', 'C'].includes(posKey)) posKey = 'OL';
         if (posKey === 'FB') posKey = 'RB';
@@ -1068,7 +1068,7 @@ function aiSetDepthChart(team) {
 
         sortRoster.forEach(p => {
             if (assignedSet.has(p.id)) return;
-            
+
             const isNatural = (p.favoriteOffensivePosition === posKey || p.favoriteDefensivePosition === posKey || p.pos === posKey);
             if (!isNatural) return;
 
@@ -1079,10 +1079,19 @@ function aiSetDepthChart(team) {
             }
         });
 
-        if (bestPlayer) {
-            // 💡 FIX: This creates the specific bucket (e.g. WR1) that your rebuild logic looks for
-            team.depthOrder[slot] = [bestPlayer.id];
-            assignedSet.add(bestPlayer.id);
+        if (bestPick.player) {
+            addPlayerToTeam(bestPick.player, team);
+
+            // 💡 NEW: Record the pick in history
+            game.pickHistory.push({
+                pick: game.currentPick + 1,
+                teamName: team.name,
+                teamId: team.id,
+                playerName: bestPick.player.name,
+                pos: estimateBestPosition(bestPick.player),
+                ovr: calculateOverall(bestPick.player, estimateBestPosition(bestPick.player)),
+                potential: bestPick.player.potential
+            });
         }
     };
 
@@ -1099,7 +1108,7 @@ function aiSetDepthChart(team) {
         const candidates = [...rosterObjs].sort((a, b) => {
             const ovrA = calculateOverall(a, pos);
             const ovrB = calculateOverall(b, pos);
-            
+
             // Bias for natural position
             const isNaturalA = (a.favoriteOffensivePosition === pos || a.pos === pos) ? 10 : 0;
             const isNaturalB = (b.favoriteOffensivePosition === pos || b.pos === pos) ? 10 : 0;
@@ -1295,6 +1304,37 @@ function addPlayerToTeam(player, team) {
     }
 
     return true;
+}
+
+export function generateDraftSummary() {
+    if (!game || !game.pickHistory) return;
+
+    const history = game.pickHistory;
+    const topPick = history[0];
+    
+    // Find the "Steal of the Draft" (High OVR pick in late rounds)
+    const steal = [...history]
+        .sort((a, b) => (b.ovr - (b.pick * 0.5)) - (a.ovr - (a.pick * 0.5)))[0];
+
+    // Find the Team with the highest average OVR drafted
+    const teamGrades = {};
+    history.forEach(p => {
+        if (!teamGrades[p.teamName]) teamGrades[p.teamName] = { total: 0, count: 0 };
+        teamGrades[p.teamName].total += p.ovr;
+        teamGrades[p.teamName].count++;
+    });
+
+    const bestDraft = Object.entries(teamGrades)
+        .map(([name, data]) => ({ name, avg: data.total / data.count }))
+        .sort((a, b) => b.avg - a.avg)[0];
+
+    let body = `The draft has officially concluded! Here is the league-wide wrap-up:\n\n` +
+               `**No. 1 Overall Pick:** ${topPick.teamName} selected **${topPick.playerName}** (${topPick.pos}). Scouts expect him to be a day-one starter.\n\n` +
+               `**Steal of the Draft:** Everyone is talking about **${steal.playerName}**, who fell to pick #${steal.pick}. ${steal.teamName} got incredible value for a player of his caliber.\n\n` +
+               `**Best Draft Class:** **${bestDraft.name}** is receiving high marks from analysts, drafting a class with an average OVR of ${Math.round(bestDraft.avg)}.\n\n` +
+               `The preseason is now underway. Check your roster and set your depth charts!`;
+
+    addMessage("Draft Recap: Winners and Losers", body, false, game);
 }
 
 // =============================================================
@@ -2032,13 +2072,13 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
             const height = player.attributes?.physical?.height || 68;
             const toughness = player.attributes?.mental?.toughness || 50;
             const catching = player.attributes?.technical?.catchingHands || 50;
-            
+
             // 💡 FIX: Defensive attributes fallback to technical to guarantee valid numbers
             const tackling = player.attributes?.technical?.tackling || player.attributes?.defense?.tackling || 50;
-            
+
             // 💡 RE-SYNCED: Now looks for 'coverage' first, while keeping 'passCoverage' as a fallback for older save files
             const coverage = player.attributes?.technical?.coverage || player.attributes?.technical?.passCoverage || player.attributes?.defense?.passCoverage || 50;
-            
+
             const blocking = player.attributes?.technical?.blocking || 50;
             const blockShedding = player.attributes?.technical?.blockShedding || 50;
             const accuracy = player.attributes?.technical?.throwingAccuracy || 50;
@@ -3737,11 +3777,11 @@ function checkTackleCollisions(playState, gameLog) {
 
         // 4. BEAST MODE LIMITER: Cumulative fatigue
         const brokenCount = carrier.tacklesBrokenThisPlay || 0;
-        successChance += (brokenCount * 0.25); 
+        successChance += (brokenCount * 0.25);
 
         // Hard Caps: Always at least 5% chance to miss, always at least 10% chance to tackle
         successChance = Math.max(0.10, Math.min(0.95, successChance));
-        
+
         // 💡 ULTIMATE FAILSAFE: If NaN corruption leaked through somehow, fallback to 65% 
         if (isNaN(successChance)) successChance = 0.65;
 
@@ -7712,15 +7752,15 @@ function advanceToOffseason() {
 
     const rookieCount = Math.max(totalVacancies, game.teams.length);
     console.log(`Generating ${rookieCount} new rookie players (age 10-12).`);
-    
+
     // 💡 NEW: Generate a unique class strength for this specific draft year
     const thisYearsClassModifiers = generateDraftClassModifiers();
-    
+
     for (let i = 0; i < rookieCount; i++) {
         game.players.push(generatePlayer(10, 12, thisYearsClassModifiers));
     }
 
-    game.gameResults =[];
+    game.gameResults = [];
     game.breakthroughs = [];
 
     // Re-elect captains for the new season
@@ -7773,16 +7813,16 @@ function assignPlayerToSlot(team, playerId, slot, side) {
     if (['DE', 'DT', 'NT'].includes(posKey)) posKey = 'DL';
 
     if (!team.depthOrder) team.depthOrder = {};
-    
+
     // Add to the Specific Slot List (e.g. OL1)
-    const slotList = team.depthOrder[slot] ||[];
+    const slotList = team.depthOrder[slot] || [];
     if (!slotList.includes(playerId)) {
         slotList.push(playerId);
     }
     team.depthOrder[slot] = slotList;
 
     // Add to the General Positional List (e.g. OL)
-    const groupList = team.depthOrder[posKey] ||[];
+    const groupList = team.depthOrder[posKey] || [];
     if (!groupList.includes(playerId)) {
         groupList.push(playerId);
     }
@@ -8463,7 +8503,7 @@ export function finalizeGameResults(homeTeam, awayTeam, homeScore, awayScore) {
 
 export {
     initializeLeague, createPlayerTeam, setupDraft, getGameState, saveGameState, loadGameState, getBreakthroughs,
-    addPlayerToTeam, playerCut, playerSignFreeAgent, callFriend, aiManageRoster, aiSetDepthChart, updateDepthChart, changeFormation,
+    addPlayerToTeam, playerCut, playerSignFreeAgent, callFriend, aiManageRoster, aiSetDepthChart, updateDepthChart, changeFormation,generateDraftSummary,
 
     // Roster Helpers
     getRosterObjects,

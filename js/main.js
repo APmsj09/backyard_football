@@ -134,7 +134,7 @@ async function handleConfirmTeam() {
         Game.createPlayerTeam(teamName, {
             coachName, coachStyle, prefOff, prefDef, primaryColor, secondaryColor
         });
-        
+
         gameState = Game.getGameState();
         gameState.draftCompleted = false; // Flag to catch advance week
 
@@ -142,7 +142,7 @@ async function handleConfirmTeam() {
         generateDraftPreviewMessage();
 
         UI.stopLoadingMessages();
-        
+
         // 4. Change Advance Week button text to "Go to Draft"
         const advBtn = document.getElementById('advance-week-btn');
         if (advBtn) {
@@ -153,9 +153,9 @@ async function handleConfirmTeam() {
 
         // 5. Go directly to Dashboard (Messages Tab)
         UI.renderDashboard(gameState);
-        UI.switchTab('messages', gameState); 
+        UI.switchTab('messages', gameState);
         UI.showScreen('dashboard-screen');
-        
+
     } catch (error) {
         console.error("Error starting game:", error);
         UI.stopLoadingMessages();
@@ -165,24 +165,24 @@ async function handleConfirmTeam() {
 
 function generateDraftPreviewMessage() {
     const players = gameState.players.filter(p => !p.teamId);
-    
+
     // 1. Group all players by their estimated position
-    const grouped = { QB:[], RB: [], WR: [], TE: [], OL: [], DL: [], LB: [], DB:[] };
-    
+    const grouped = { QB: [], RB: [], WR: [], TE: [], OL: [], DL: [], LB: [], DB: [] };
+
     players.forEach(p => {
         let pos = estimateBestPosition(p);
         if (['OT', 'OG', 'C'].includes(pos)) pos = 'OL';
         if (['DE', 'DT', 'NT'].includes(pos)) pos = 'DL';
         if (['CB', 'S', 'FS', 'SS'].includes(pos)) pos = 'DB';
         if (pos === 'FB') pos = 'RB';
-        if (['ATH', 'K', 'P'].includes(pos)) pos = 'WR'; 
-        
+        if (['ATH', 'K', 'P'].includes(pos)) pos = 'WR';
+
         if (grouped[pos]) grouped[pos].push(p);
     });
 
     // 2. Sort each group from Highest OVR to Lowest OVR
     Object.keys(grouped).forEach(pos => {
-        grouped[pos].sort((a,b) => Game.calculateOverall(b, pos) - Game.calculateOverall(a, pos));
+        grouped[pos].sort((a, b) => Game.calculateOverall(b, pos) - Game.calculateOverall(a, pos));
     });
 
     const qbs = grouped['QB'];
@@ -192,7 +192,7 @@ function generateDraftPreviewMessage() {
     const trenches = [...grouped['OL'], ...grouped['DL']];
     const lbs = grouped['LB'];
     const dbs = grouped['DB'];
-    
+
     // 3. Analyze overall class strength
     const topPotentials = players.filter(p => ['A', 'B'].includes(p.potential)).length;
     let strength = "Average";
@@ -204,7 +204,7 @@ function generateDraftPreviewMessage() {
     const topQB = qbs[0];
     const topRB = rbs[0];
     const topWR = wrs[0];
-    const topDefender = [...lbs, ...dbs, ...grouped['DL']].sort((a,b) => Game.calculateOverall(b, estimateBestPosition(b)) - Game.calculateOverall(a, estimateBestPosition(a)))[0];
+    const topDefender = [...lbs, ...dbs, ...grouped['DL']].sort((a, b) => Game.calculateOverall(b, estimateBestPosition(b)) - Game.calculateOverall(a, estimateBestPosition(a)))[0];
 
     // 5. Generate Dynamic Text
     const msgBody = `Welcome to the league, Coach ${gameState.playerTeam.coach.name}!\n\n` +
@@ -224,15 +224,15 @@ function generateDraftPreviewMessage() {
         `Get your draft board ready. When you are set, click "Start Draft" at the top right of your screen to hit the war room!`;
 
     // Clear generic messages
-    gameState.messages =[];
-    
+    gameState.messages = [];
+
     // Welcome Message
     Game.addMessage("League Office", `Welcome to Backyard GM!`, false, gameState);
     gameState.messages[0].body = `Coach, we've set up your office. Remember, running your preferred schemes (${gameState.playerTeam.formations.offense} & ${gameState.playerTeam.formations.defense}) will give your players a confidence boost on the field (+5 Playbook IQ and Consistency). Good luck!`;
 
     // Draft Preview Message
     Game.addMessage("Scouting Dept", `Inaugural Draft Preview: A ${strength} Class`, false, gameState);
-    gameState.messages[0].body = msgBody; 
+    gameState.messages[0].body = msgBody;
 }
 
 
@@ -255,15 +255,25 @@ function handleDraftPlayer() {
         }
 
         if (player && Game.addPlayerToTeam(player, team)) {
+            // 💡 NEW: Record human pick in history
+            if (!gameState.pickHistory) gameState.pickHistory = [];
+            gameState.pickHistory.push({
+                pick: gameState.currentPick + 1,
+                teamName: team.name,
+                teamId: team.id,
+                playerName: player.name,
+                pos: estimateBestPosition(player),
+                ovr: Game.calculateOverall(player, estimateBestPosition(player)),
+                potential: player.potential
+            });
+
             selectedPlayerId = null;
             gameState.currentPick++;
             UI.renderSelectedPlayerCard(null, gameState);
-            // Re-render pool to remove the drafted player immediately
-            UI.renderDraftScreen(gameState, handlePlayerSelectInDraft, null, currentSortColumn, currentSortDirection);
-            runAIDraftPicks();
         }
     }
 }
+
 
 let isDraftingLocked = false;
 
@@ -325,6 +335,9 @@ async function runAIDraftPicks() {
 async function handleDraftEnd() {
     if (!gameState) return;
 
+    // 💡 NEW: Call the summary generator before switching screens
+    Game.generateDraftSummary();
+
     let _draftFinalized = false;
     const finalizeDraft = async () => {
         if (_draftFinalized) return;
@@ -333,10 +346,10 @@ async function handleDraftEnd() {
             Game.generateSchedule();
             gameState = Game.getGameState();
             gameState.draftCompleted = true; // Mark draft as done
-            
+
             // 💡 NEW: Generate Week 1 Matchup Preview
             generateWeeklyMatchupPreview();
-            
+
             // Reset the Advance button UI back to normal
             const advBtn = document.getElementById('advance-week-btn');
             if (advBtn) {
@@ -398,7 +411,7 @@ function generateWeeklyMatchupPreview() {
 
     const oppRoster = Game.getRosterObjects(opponent);
     const oppQB = oppRoster.find(p => p && p.id === opponent.depthChart?.offense?.QB1);
-    
+
     // Safely find their best player without relying on out-of-scope imports
     const bestPlayer = oppRoster
         .filter(p => p && p.id !== oppQB?.id)
@@ -414,10 +427,10 @@ function generateWeeklyMatchupPreview() {
     const defForm = opponent.formations?.defense || '3-1-3';
 
     let body = `Coach,\n\nHere is the advance scouting report for our upcoming Week ${gs.currentWeek + 1} matchup against ${opponent.name}.\n\n` +
-               `**Game Info:** ${locationText}. They currently hold a record of ${opponent.wins || 0}-${opponent.losses || 0}.\n\n` +
-               `**Opponent Tendencies:**\n` +
-               `Head Coach ${opponent.coach?.name || 'Smith'} runs a **${coachType}** system. ` +
-               `Expect to see them line up primarily in a **${offForm}** formation on offense, and run a **${defForm}** defense to counter us.\n\n`;
+        `**Game Info:** ${locationText}. They currently hold a record of ${opponent.wins || 0}-${opponent.losses || 0}.\n\n` +
+        `**Opponent Tendencies:**\n` +
+        `Head Coach ${opponent.coach?.name || 'Smith'} runs a **${coachType}** system. ` +
+        `Expect to see them line up primarily in a **${offForm}** formation on offense, and run a **${defForm}** defense to counter us.\n\n`;
 
     if (oppQB) {
         body += `**Key Matchup:** Their offense runs through QB ${oppQB.name} (${Game.calculateOverall(oppQB, 'QB')} OVR). We need to disrupt his timing in the pocket.\n\n`;
@@ -431,7 +444,7 @@ function generateWeeklyMatchupPreview() {
     body += `Set your depth chart and gameplan accordingly. Let's get this win.`;
 
     Game.addMessage(`Scouting Report: Week ${gs.currentWeek + 1} vs ${opponent.name}`, body, false, gs);
-    
+
     // 💡 FIX: Removed the buggy 'updateMessagesNotification' call.
     // The Dashboard automatically handles updating the unread dot when it transitions screens!
 }
@@ -554,7 +567,7 @@ function handleDepthChartSelect(e) {
 
 function proceedWithAdvanceWeek() {
     if (!gameState) return;
-    try { UI.hideModal(); } catch (e) {}
+    try { UI.hideModal(); } catch (e) { }
 
     const playerTeamId = gameState.playerTeam.id;
     const gamesPerWeek = gameState.teams.length / 2;
@@ -615,14 +628,14 @@ async function handleAdvanceWeek() {
 
     const emptySlots = Game.getDepthChartEmptySlots(gameState.playerTeam);
     if (emptySlots.length > 0) {
-        UI.showModal("Incomplete Depth Chart", 
+        UI.showModal("Incomplete Depth Chart",
             `<p class="mb-2">Your depth chart has missing starters!</p>
              <div class="max-h-32 overflow-y-auto bg-red-50 p-3 rounded mb-4 text-sm text-red-700 border border-red-200">
                 <ul class="list-disc pl-5">${emptySlots.map(s => `<li>${s}</li>`).join('')}</ul>
              </div>
              <p>Do you want to proceed anyway? (The AI will auto-fill the gaps with backups if possible)</p>`,
             () => proceedWithAdvanceWeek(), "Proceed Anyway",
-            () => { try { UI.hideModal(); } catch(e){} }, "Fix Lineup"
+            () => { try { UI.hideModal(); } catch (e) { } }, "Fix Lineup"
         );
         return;
     }
@@ -641,7 +654,7 @@ async function startLiveGame(playerGameMatch) {
     // 1. Simulate the OTHER games (Fast Sim)
     const gamesPerWeek = gameState.teams.length / 2;
     const allGames = gameState.schedule.slice(gameState.currentWeek * gamesPerWeek, (gameState.currentWeek + 1) * gamesPerWeek);
-    const otherResults =[];
+    const otherResults = [];
 
     for (const match of allGames) {
         // Skip the player's game for now
@@ -652,10 +665,10 @@ async function startLiveGame(playerGameMatch) {
             if (typeof Game.simulateMatchFast === 'function') {
                 // Small delay to allow UI to update between chunks
                 await new Promise(resolve => setTimeout(resolve, 50));
-                
+
                 const result = Game.simulateMatchFast(match.home, match.away);
                 otherResults.push(result);
-                
+
                 if (modalContent) {
                     modalContent.innerHTML += `<p>${match.away.name} <span class="font-bold">${result.awayScore}</span> @ ${match.home.name} <span class="font-bold">${result.homeScore}</span></p>`;
                     modalContent.scrollTop = modalContent.scrollHeight;
@@ -706,13 +719,13 @@ async function startLiveGame(playerGameMatch) {
     UI.showScreen('game-sim-screen');
 
     // UI.startLiveGameLoop will handle the "Step -> Animate -> Step" cycle
-     UI.startLiveGameLoop(liveGameParams, (finalResult) => {
-        
+    UI.startLiveGameLoop(liveGameParams, (finalResult) => {
+
         // 1. Finalize the Player's Game Records & Stats
         Game.finalizeGameResults(
-            finalResult.homeTeam, 
-            finalResult.awayTeam, 
-            finalResult.homeScore, 
+            finalResult.homeTeam,
+            finalResult.awayTeam,
+            finalResult.homeScore,
             finalResult.awayScore
         );
 
@@ -720,7 +733,7 @@ async function startLiveGame(playerGameMatch) {
 
         // 2. Add results to history
         if (!gameState.gameResults) gameState.gameResults = [];
-        
+
         // Store minimal results for the Schedule tab
         gameState.gameResults.push(...combinedResults.filter(Boolean).map(r => ({
             homeTeam: { id: r.homeTeam.id, name: r.homeTeam.name },
@@ -732,7 +745,7 @@ async function startLiveGame(playerGameMatch) {
         gameState.currentWeek++;
 
         // 💡 FIX: Force a save to LocalStorage here so seasonStats persist!
-        Game.saveGameState(); 
+        Game.saveGameState();
 
         finishWeekSimulation(combinedResults);
     });
@@ -745,7 +758,7 @@ async function simulateRestOfWeek() {
             if (gameState) handleSeasonEnd();
             return;
         }
-        
+
         // 💡 FIX: Show Loading Modal
         UI.showModal("Simulating League", "<div id='cpu-sim-results' class='text-sm space-y-1 h-48 overflow-y-auto'>Simulating rest of week...</div>", null, '', null, 'Please Wait');
         const modalContent = document.getElementById('cpu-sim-results');
@@ -753,7 +766,7 @@ async function simulateRestOfWeek() {
 
         if (typeof Game.simulateWeek === 'function') {
             results = Game.simulateWeek({ fastSim: true });
-            
+
             // Print the final batch to the modal
             if (modalContent && results) {
                 modalContent.innerHTML = '';
@@ -764,7 +777,7 @@ async function simulateRestOfWeek() {
             }
         }
         UI.hideModal();
-        
+
     } catch (error) {
         console.error("Sim week error:", error);
         if (gameState) gameState.currentWeek++;
@@ -888,7 +901,7 @@ function handleDashboardClicks(e) {
 // 💡 NEW: Rich, Tabbed Player Card
 function openPlayerCard(playerId) {
     if (!gameState) return;
-    
+
     let player = (typeof Game.getPlayer === 'function') ? Game.getPlayer(playerId) : gameState.players.find(p => p.id === playerId);
     if (!player) return;
 
@@ -911,20 +924,20 @@ function openPlayerCard(playerId) {
         <div class="grid grid-cols-2 gap-4 text-sm mt-2">
             <div class="bg-blue-50 p-3 rounded border border-blue-100">
                 <h5 class="font-bold text-blue-800 border-b border-blue-200 mb-2 pb-1">Current Season</h5>
-                <p>Pass: ${s.passYards||0} yds, ${s.passCompletions||0}/${s.passAttempts||0}, ${s.interceptionsThrown||0} INT</p>
-                <p>Rush: ${s.rushYards||0} yds, ${s.rushAttempts||0} att</p>
-                <p>Rec: ${s.recYards||0} yds, ${s.receptions||0} rec, ${s.drops||0} drp</p>
-                <p>Defense: ${s.tackles||0} tkl, ${s.sacks||0} sck, ${s.interceptions||0} int</p>
-                <p class="mt-1 font-bold text-amber-600">Total TDs: ${s.touchdowns||0}</p>
+                <p>Pass: ${s.passYards || 0} yds, ${s.passCompletions || 0}/${s.passAttempts || 0}, ${s.interceptionsThrown || 0} INT</p>
+                <p>Rush: ${s.rushYards || 0} yds, ${s.rushAttempts || 0} att</p>
+                <p>Rec: ${s.recYards || 0} yds, ${s.receptions || 0} rec, ${s.drops || 0} drp</p>
+                <p>Defense: ${s.tackles || 0} tkl, ${s.sacks || 0} sck, ${s.interceptions || 0} int</p>
+                <p class="mt-1 font-bold text-amber-600">Total TDs: ${s.touchdowns || 0}</p>
             </div>
             <div class="bg-gray-50 p-3 rounded border border-gray-200">
                 <h5 class="font-bold text-gray-800 border-b border-gray-300 mb-2 pb-1">Career</h5>
-                <p>Seasons: ${c.seasonsPlayed||0}</p>
-                <p>Pass Yds: ${c.passYards||0}</p>
-                <p>Rush Yds: ${c.rushYards||0}</p>
-                <p>Rec Yds: ${c.recYards||0}</p>
-                <p>Tackles: ${c.tackles||0}</p>
-                <p class="mt-1 font-bold text-amber-600">Total TDs: ${c.touchdowns||0}</p>
+                <p>Seasons: ${c.seasonsPlayed || 0}</p>
+                <p>Pass Yds: ${c.passYards || 0}</p>
+                <p>Rush Yds: ${c.rushYards || 0}</p>
+                <p>Rec Yds: ${c.recYards || 0}</p>
+                <p>Tackles: ${c.tackles || 0}</p>
+                <p class="mt-1 font-bold text-amber-600">Total TDs: ${c.touchdowns || 0}</p>
             </div>
         </div>
     `;
@@ -953,12 +966,12 @@ function openPlayerCard(playerId) {
         ${isMyTeam ? `<button class="mt-6 w-full bg-red-500 text-white py-2 rounded hover:bg-red-600 font-bold transition shadow" onclick="app.cutPlayer('${player.id}')">Cut Player from Team</button>` : ''}
     `;
 
-    UI.showModal(`${player.name} <span class="text-gray-400 text-lg">#${player.number||'--'}</span>`, playerInfoHtml, null, '', null, 'Close');
+    UI.showModal(`${player.name} <span class="text-gray-400 text-lg">#${player.number || '--'}</span>`, playerInfoHtml, null, '', null, 'Close');
 
     // Attach Tab Event Listeners inside Modal
     setTimeout(() => {
         const modalBody = document.getElementById('modal-body');
-        if(!modalBody) return;
+        if (!modalBody) return;
         const tabs = modalBody.querySelectorAll('.player-tab-btn');
         const contents = modalBody.querySelectorAll('.player-tab-content');
 
@@ -966,7 +979,7 @@ function openPlayerCard(playerId) {
             tab.addEventListener('click', () => {
                 tabs.forEach(t => t.className = "player-tab-btn px-4 py-2 font-bold text-gray-500 hover:text-gray-700 border-b-2 border-transparent");
                 tab.className = "player-tab-btn active px-4 py-2 font-bold text-amber-600 border-b-2 border-amber-600";
-                
+
                 contents.forEach(c => c.classList.add('hidden'));
                 modalBody.querySelector(`#${tab.dataset.target}`).classList.remove('hidden');
             });
@@ -1120,6 +1133,26 @@ function main() {
         document.getElementById('load-test-roster-btn')?.addEventListener('click', handleLoadTestRoster);
         document.getElementById('save-test-roster-btn')?.addEventListener('click', handleSaveTestRoster);
         document.getElementById('draft-player-btn')?.addEventListener('click', handleDraftPlayer);
+        document.querySelectorAll('.draft-tab-btn').forEach(btn => {
+            btn.onclick = () => {
+                const tab = btn.dataset.draftTab;
+                // Update button visuals
+                document.querySelectorAll('.draft-tab-btn').forEach(b => {
+                    b.classList.remove('active', 'bg-amber-600', 'text-white');
+                    b.classList.add('text-gray-400');
+                });
+                btn.classList.add('active', 'bg-amber-600', 'text-white');
+                btn.classList.remove('text-gray-400');
+
+                // Switch content visibility
+                document.querySelectorAll('.draft-tab-content').forEach(c => c.classList.add('hidden'));
+                document.getElementById(`draft-tab-${tab}`).classList.remove('hidden');
+
+                // Trigger specific renders
+                if (tab === 'history') UI.renderPickHistory(gameState);
+                if (tab === 'teams') UI.renderDraftTeamView(gameState);
+            };
+        });
         document.getElementById('advance-week-btn')?.addEventListener('click', handleAdvanceWeek);
         document.getElementById('go-to-next-draft-btn')?.addEventListener('click', handleGoToNextDraft);
 

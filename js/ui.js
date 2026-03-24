@@ -20,7 +20,8 @@ import {
 } from './data.js';
 import {
     positionOverallWeights,
-    estimateBestPosition
+    estimateBestPosition,
+    calculateOverall
 } from './game/player.js';
 
 import { getRandom, getRandomInt, formatHeight } from './utils.js';
@@ -3716,6 +3717,54 @@ function renderDepthOrderPane(gameState) {
         };
     }
     setupDepthOrderDragEvents();
+}
+
+export function renderPickHistory(gameState) {
+    const list = document.getElementById('draft-history-list');
+    if (!list || !gameState.pickHistory) return;
+
+    list.innerHTML = gameState.pickHistory.slice().reverse().map(p => `
+        <div class="flex items-center justify-between p-3 bg-gray-50 rounded border-l-4 ${p.potential === 'A' ? 'border-amber-500' : 'border-gray-300'} shadow-sm">
+            <div class="flex items-center gap-4">
+                <span class="font-mono font-bold text-gray-400">#${p.pick}</span>
+                <div>
+                    <p class="font-bold text-gray-800">${p.playerName}</p>
+                    <p class="text-xs text-gray-500">${p.teamName}</p>
+                </div>
+            </div>
+            <div class="text-right">
+                <span class="bg-gray-200 px-2 py-1 rounded text-xs font-bold">${p.pos}</span>
+                <span class="ml-2 font-black ${p.ovr > 70 ? 'text-green-600' : 'text-gray-700'}">${p.ovr} OVR</span>
+            </div>
+        </div>
+    `).join('');
+}
+
+export function renderDraftTeamView(gameState) {
+    const selector = document.getElementById('draft-team-selector');
+    const rosterDiv = document.getElementById('draft-team-roster');
+    if (!selector || !rosterDiv) return;
+
+    // Fill selector if empty
+    if (selector.options.length === 0) {
+        gameState.teams.forEach(t => {
+            const opt = document.createElement('option');
+            opt.value = t.id; opt.textContent = t.name;
+            selector.appendChild(opt);
+        });
+        selector.onchange = () => renderDraftTeamView(gameState);
+    }
+
+    const team = gameState.teams.find(t => t.id === selector.value);
+    const roster = getUIRosterObjects(team);
+
+    rosterDiv.innerHTML = `<h4 class="text-sm font-bold uppercase text-gray-500 mb-2">Current Roster (${roster.length}/12)</h4>` +
+        roster.map(p => `
+        <div class="flex justify-between py-1 border-b text-sm">
+            <span class="font-medium">${p.name}</span>
+            <span class="text-gray-400">${estimateBestPosition(p)} (${calculateOverall(p, estimateBestPosition(p))})</span>
+        </div>
+    `).join('');
 }
 
 /**

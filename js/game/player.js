@@ -274,7 +274,7 @@ export function generatePlayer(minAge = 10, maxAge = 16, classModifiers = null) 
             tackling: generateAttributeValue('tackling'),
             blocking: generateAttributeValue('blocking'),
             blockShedding: generateAttributeValue('blockShedding'),
-            passCoverage: generateAttributeValue('coverage') // Note: maps to 'passCoverage' in object
+            coverage: generateAttributeValue('coverage') // Note: maps to 'passCoverage' in object
         }
     };
 
