@@ -255,11 +255,11 @@ function handleDraftPlayer() {
         }
 
         if (player && Game.addPlayerToTeam(player, team)) {
-            // 💡 FIX: Safe initialization to prevent crashes on older saves
-            if (!gameState.pickHistory) gameState.pickHistory =[];
+            const gs = Game.getGameState(); // 💡 FIX: Get fresh reference
+            if (!gs.pickHistory) gs.pickHistory = [];
             
-            gameState.pickHistory.push({
-                pick: gameState.currentPick + 1,
+            gs.pickHistory.push({
+                pick: gs.currentPick + 1,
                 teamName: team.name,
                 teamId: team.id,
                 playerName: player.name,
@@ -269,9 +269,9 @@ function handleDraftPlayer() {
             });
 
             selectedPlayerId = null;
-            gameState.currentPick++;
-            UI.renderSelectedPlayerCard(null, gameState);
-            UI.renderDraftScreen(gameState, handlePlayerSelectInDraft, null, currentSortColumn, currentSortDirection);
+            gs.currentPick++; // Use fresh reference
+            UI.renderSelectedPlayerCard(null, gs);
+            UI.renderDraftScreen(gs, handlePlayerSelectInDraft, null, currentSortColumn, currentSortDirection);
             runAIDraftPicks();
         }
     }
@@ -448,8 +448,8 @@ function generateWeeklyMatchupPreview() {
 
     Game.addMessage(`Scouting Report: Week ${gs.currentWeek + 1} vs ${opponent.name}`, body, false, gs);
 
-    // 💡 FIX: Removed the buggy 'updateMessagesNotification' call.
-    // The Dashboard automatically handles updating the unread dot when it transitions screens!
+    // 💡 FIXED: Use the UI prefix so the function is found
+    UI.updateMessagesNotification(gs.messages);
 }
 
 // --- LOADING & SAVING ---

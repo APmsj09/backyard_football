@@ -1,7 +1,6 @@
 import * as Game from './game.js';
 import {
     saveGameState,
-    calculateOverall,
     getRelationshipLevel,
     getScoutedPlayerInfo,
     getGameState,

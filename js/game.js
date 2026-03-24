@@ -747,7 +747,8 @@ async function initializeLeague(onProgress) {
     game = {
         year: 1, teams: [], players: [], freeAgents: [], playerTeam: null, schedule: [],
         currentWeek: 0, divisions: {}, draftOrder: [], currentPick: 0, hallOfFame: [],
-        gameResults: [], messages: [], relationships: new Map()
+        gameResults: [], messages: [], relationships: new Map(),
+        pickHistory: [] // 💡 FIX: Initialize this here so Draft doesn't crash on pick #1
     };
     addMessage("Welcome!", "Generating the league and players...");
 
