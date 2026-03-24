@@ -45,6 +45,19 @@ export function estimateBestPosition(scoutedPlayer) {
 
     const tempPlayer = { ...scoutedPlayer, attributes: cleanAttributes };
 
+    const offPos = tempPlayer.favoriteOffensivePosition;
+    const defPos = tempPlayer.favoriteDefensivePosition;
+    
+    // 💡 ULTIMATE FIX: If the player was generated via an archetype, they are STRICTLY categorized 
+    // as whichever of those two positions they grade out higher in. 
+    // This absolutely guarantees that the Draft Pool distributions perfectly match the Archetype distributions.
+    if (offPos && defPos) {
+        const offScore = calculateOverall(tempPlayer, offPos);
+        const defScore = calculateOverall(tempPlayer, defPos);
+        return offScore >= defScore ? offPos : defPos;
+    }
+
+    // Fallback for extremely old saves without favorite positions
     let bestPos = 'UTIL';
     let maxScore = -Infinity;
     
@@ -68,21 +81,22 @@ export function calculateOverall(player, position) {
     let score = 0;
     for (const category in attrs) {
         for (const attr in attrs[category]) {
-            if (relevantWeights[attr]) {
+            // 💡 FIX: Map legacy 'passCoverage' to 'coverage' for older saves
+            const weightKey = attr === 'passCoverage' ? 'coverage' : attr;
+
+            if (relevantWeights[weightKey]) {
                 let value = attrs[category][attr];
                 
                 // Normalization mappings
-                if (attr === 'weight') {
-                    // 100 lbs = 40 rating, 250 lbs = 100 rating
+                if (weightKey === 'weight') {
                     value = Math.max(0, Math.min(100, (value - 100) * 0.66 + 40));
                 }
-                if (attr === 'height') {
-                    // 50 inches = 0 rating, 75 inches (6'3") = 100 rating
+                if (weightKey === 'height') {
                     value = Math.max(0, Math.min(100, (value - 50) * 4)); 
                 }
 
                 if (typeof value === 'number') {
-                    score += value * relevantWeights[attr];
+                    score += value * relevantWeights[weightKey];
                 }
             }
         }
@@ -106,8 +120,11 @@ export function calculateSlotSuitability(player, slot, side, team) {
 
     for (const attr in priorities) {
         for (const category in player.attributes) {
-            if (player.attributes[category]?.[attr] !== undefined) {
-                let value = player.attributes[category][attr];
+            // 💡 FIX: Safely check for legacy 'passCoverage'
+            const actualAttr = (attr === 'coverage' && player.attributes[category]?.passCoverage !== undefined) ? 'passCoverage' : attr;
+
+            if (player.attributes[category]?.[actualAttr] !== undefined) {
+                let value = player.attributes[category][actualAttr];
                 if (typeof value !== 'number') continue;
                 
                 if (attr === 'weight') value = Math.max(0, Math.min(100, (value - 100) * 0.66 + 40));
@@ -119,11 +136,6 @@ export function calculateSlotSuitability(player, slot, side, team) {
             }
         }
     }
-
-    const baseOverall = calculateOverall(player, basePosition);
-    const finalScore = (totalWeight > 0 ? (score / totalWeight) : baseOverall) * 0.7 + (baseOverall * 0.3);
-
-    return Math.min(99, Math.max(1, Math.round(finalScore)));
 }
 
 const archetypes = [
