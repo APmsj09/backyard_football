@@ -143,7 +143,7 @@ async function handleConfirmTeam() {
 
         UI.stopLoadingMessages();
 
-        // 4. Change Advance Week button text to "Go to Draft"
+        // 4. Change Advance Week button text to "Start Draft"
         const advBtn = document.getElementById('advance-week-btn');
         if (advBtn) {
             advBtn.innerHTML = `<span>Start Draft</span><svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 ml-2" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10.293 3.293a1 1 0 011.414 0l6 6a1 1 0 010 1.414l-6 6a1 1 0 01-1.414-1.414L14.586 11H3a1 1 0 110-2h11.586l-4.293-4.293a1 1 0 010-1.414z" clip-rule="evenodd" /></svg>`;
@@ -153,12 +153,8 @@ async function handleConfirmTeam() {
 
         // 5. Go directly to Dashboard (Messages Tab)
         UI.renderDashboard(gameState);
-        UI.switchTab('messages', gameState); 
+        UI.switchTab('messages', gameState);
         UI.showScreen('dashboard-screen');
-        
-        // 💡 ADD THIS: Run the first set of picks immediately
-        // This ensures if you are pick #5, picks 1-4 happen before you open the draft.
-        runAIDraftPicks();
 
     } catch (error) {
         console.error("Error starting game:", error);
@@ -612,7 +608,7 @@ async function handleAdvanceWeek() {
         UI.renderSelectedPlayerCard(null, gameState);
         UI.renderDraftScreen(gameState, handlePlayerSelectInDraft, selectedPlayerId, currentSortColumn, currentSortDirection);
         UI.showScreen('draft-screen');
-        runAIDraftPicks();
+        runAIDraftPicks(); // Start the AI picking loop
         return;
     }
 

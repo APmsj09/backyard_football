@@ -966,9 +966,10 @@ function getPlayerScore(player, coach) {
 
 /** Sets up draft order based on standings. */
 function setupDraft() {
-    if (!game || !game.teams) { console.error("setupDraft: Game/teams not initialized."); return; }
+    if (!game || !game.teams) return;
     game.draftOrder = [];
     game.currentPick = 0;
+    game.pickHistory = [];
 
     let sortedTeams;
 
