@@ -866,24 +866,6 @@ async function initializeLeague(onProgress) {
         }
     });
 
-    // --- QUICK ROSTER FILL (Testing/Startup convenience) ---
-    // Ensure AI teams have players so fast simulations and tests work
-    try {
-        const ROSTER_LIMIT = 12;
-        let undraftedPlayers = game.players.filter(p => p && !p.teamId);
-        if (undraftedPlayers.length > 0) {
-            // Fill each team in order until rosters reach the limit or players exhausted
-            game.teams.forEach(team => {
-                if (!team || !Array.isArray(team.roster)) return;
-                while ((team.roster.length || 0) < ROSTER_LIMIT && undraftedPlayers.length > 0) {
-                    const nextPlayer = undraftedPlayers.shift();
-                    try { addPlayerToTeam(nextPlayer, team); } catch (e) { /* best-effort */ }
-                }
-            });
-        }
-    } catch (e) {
-        console.warn('Quick roster fill failed:', e);
-    }
 }
 
 function refillAvailableColors() {
@@ -1083,6 +1065,7 @@ function aiSetDepthChart(team) {
         if (bestPick.player) {
             addPlayerToTeam(bestPick.player, team);
             const teamName = team?.name || 'Unknown Team';
+            const posName = estimateBestPosition(bestPick.player);
             console.log(`[Draft] ${teamName} drafted ${bestPick.player.name}`);
 
             // 💡 FIX: Safe initialization
@@ -1092,8 +1075,8 @@ function aiSetDepthChart(team) {
                 teamName: team.name,
                 teamId: team.id,
                 playerName: bestPick.player.name,
-                pos: estimateBestPosition(bestPick.player),
-                ovr: calculateOverall(bestPick.player, estimateBestPosition(bestPick.player)),
+                pos: posName, // <--- Ensure this matches the variable name
+                ovr: calculateOverall(bestPick.player, posName),
                 potential: bestPick.player.potential
             });
         }
@@ -1315,7 +1298,7 @@ function generateDraftSummary() {
 
     const history = game.pickHistory;
     const topPick = history[0];
-    
+
     // Safety check to ensure we have enough picks to calculate a steal
     let steal = topPick;
     if (history.length > 5) {
@@ -1334,8 +1317,8 @@ function generateDraftSummary() {
         .sort((a, b) => b.avg - a.avg)[0];
 
     let body = `The draft has officially concluded! Here is the league-wide wrap-up:\n\n` +
-               `**No. 1 Overall Pick:** ${topPick.teamName} selected **${topPick.playerName}** (${topPick.pos}). Scouts expect him to be a day-one starter.\n\n`;
-               
+        `**No. 1 Overall Pick:** ${topPick.teamName} selected **${topPick.playerName}** (${topPick.pos}). Scouts expect him to be a day-one starter.\n\n`;
+
     if (steal && steal.pick > 5) {
         body += `**Steal of the Draft:** Everyone is talking about **${steal.playerName}**, who fell to pick #${steal.pick}. ${steal.teamName} got incredible value for a player of his caliber.\n\n`;
     }
@@ -1343,7 +1326,7 @@ function generateDraftSummary() {
     if (bestDraft) {
         body += `**Best Draft Class:** **${bestDraft.name}** is receiving high marks from analysts, drafting a class with an average OVR of ${Math.round(bestDraft.avg)}.\n\n`;
     }
-    
+
     body += `The preseason is now underway. Check your roster and set your depth charts!`;
 
     addMessage("Draft Recap: Winners and Losers", body, false, game);

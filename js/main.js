@@ -153,8 +153,12 @@ async function handleConfirmTeam() {
 
         // 5. Go directly to Dashboard (Messages Tab)
         UI.renderDashboard(gameState);
-        UI.switchTab('messages', gameState);
+        UI.switchTab('messages', gameState); 
         UI.showScreen('dashboard-screen');
+        
+        // 💡 ADD THIS: Run the first set of picks immediately
+        // This ensures if you are pick #5, picks 1-4 happen before you open the draft.
+        runAIDraftPicks();
 
     } catch (error) {
         console.error("Error starting game:", error);
@@ -914,7 +918,7 @@ function openPlayerCard(playerId) {
 
     // Tab 1: Attributes & Overalls
     const positions = Object.keys(positionOverallWeights);
-    let overallsHtml = '<div class="grid grid-cols-4 gap-2 text-center mt-2">';
+    let overallsHtml = '<div class="mt-2 grid grid-cols-2 gap-2 text-center">'; 
     positions.forEach(pos => {
         overallsHtml += `<div class="bg-gray-100 border border-gray-200 p-2 rounded"><p class="font-semibold text-[10px] text-gray-500 uppercase">${pos}</p><p class="font-bold text-lg text-gray-800">${Game.calculateOverall(player, pos)}</p></div>`;
     });
