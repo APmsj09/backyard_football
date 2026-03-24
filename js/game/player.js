@@ -173,10 +173,40 @@ const archetypes = [
     { name: 'Island Corner', off: 'WR', def: 'DB', weightMod: 0.85, heightMod: 0, keyAttrs: ['coverage', 'speed', 'agility', 'consistency'], speedMod: 1.3, strMod: 0.8 },
     { name: 'Ballhawk Safety', off: 'WR', def: 'DB', weightMod: 0.95, heightMod: 2, keyAttrs: ['catchingHands', 'playbookIQ', 'coverage', 'clutch'], speedMod: 1.1, strMod: 0.9 },
     { name: 'Nickel Stopper', off: 'RB', def: 'DB', weightMod: 1.05, heightMod: -1, keyAttrs: ['tackling', 'agility', 'speed', 'toughness'], speedMod: 1.1, strMod: 1.1 },
-    { name: 'Zone Specialist', off: 'WR', def: 'DB', weightMod: 1.0, heightMod: 3, keyAttrs: ['playbookIQ', 'coverage', 'height', 'catchingHands'], speedMod: 0.95, strMod: 1.0 }
+    { name: 'Zone Specialist', off: 'WR', def: 'DB', weightMod: 1.0, heightMod: 3, keyAttrs:['playbookIQ', 'coverage', 'height', 'catchingHands'], speedMod: 0.95, strMod: 1.0 }
 ];
 
-export function generatePlayer(minAge = 10, maxAge = 16) {
+/**
+ * Standard Box-Muller transform to generate normally distributed numbers (Bell Curve).
+ */
+export function gaussianRandom(mean = 0, stdev = 1) {
+    const u = 1 - Math.random(); 
+    const v = Math.random();
+    const z = Math.sqrt(-2.0 * Math.log(u)) * Math.cos(2.0 * Math.PI * v);
+    return z * stdev + mean;
+}
+
+/**
+ * Generates a set of modifiers for an entire draft class.
+ * Can be passed into generatePlayer to create naturally strong/weak classes.
+ */
+export function generateDraftClassModifiers() {
+    return {
+        overallShift: Math.round(gaussianRandom(0, 3)), // Usually -3 to +3, rarely +/- 8
+        positionShifts: {
+            QB: Math.round(gaussianRandom(0, 4)),
+            RB: Math.round(gaussianRandom(0, 4)),
+            WR: Math.round(gaussianRandom(0, 4)),
+            TE: Math.round(gaussianRandom(0, 4)),
+            OL: Math.round(gaussianRandom(0, 4)),
+            DL: Math.round(gaussianRandom(0, 4)),
+            LB: Math.round(gaussianRandom(0, 4)),
+            DB: Math.round(gaussianRandom(0, 4))
+        }
+    };
+}
+
+export function generatePlayer(minAge = 10, maxAge = 16, classModifiers = null) {
     const firstName = getRandom(firstNames);
     const lastName = Math.random() < 0.4 ? getRandom(nicknames) : getRandom(lastNames);
     const age = getRandomInt(minAge, maxAge);
@@ -186,46 +216,33 @@ export function generatePlayer(minAge = 10, maxAge = 16) {
     const favoriteOffensivePosition = archetype.off;
     const favoriteDefensivePosition = archetype.def;
     
-    // Determine which side they are "naturally" better at for potential calculation
+    // Determine which side they are "naturally" better at for draft class shifting
     const bestPosition = Math.random() > 0.5 ? favoriteOffensivePosition : favoriteDefensivePosition;
 
-    const tiers = {
-        'Elite': { min: 90, max: 99 },
-        'Great': { min: 80, max: 89 },
-        'Good': { min: 70, max: 79 },
-        'Average': { min: 55, max: 69 },
-        'Poor': { min: 40, max: 54 },
-        'Terrible': { min: 20, max: 39 }
-    };
+    // 2. Draft Class Shifts (Allows for Generational or Terrible classes)
+    const classShift = classModifiers ? (classModifiers.overallShift || 0) : 0;
+    const posShift = classModifiers && classModifiers.positionShifts ? (classModifiers.positionShifts[bestPosition] || 0) : 0;
+    const totalShift = classShift + posShift;
 
     const keyAttrs = new Set(archetype.keyAttrs);
 
-    // 2. Base Attribute Roll
+    // 3. Base Attribute Roll (Gaussian Bell Curve)
     let generatedKeySum = 0;
     const generateAttributeValue = (name) => {
         const isKey = keyAttrs.has(name);
-        const roll = Math.random();
-        let tier;
+        
+        // Key attributes form a bell curve around 72. Non-keys around 48.
+        const mean = (isKey ? 72 : 48) + totalShift;
+        const stdDev = isKey ? 7 : 12; // Keys are reliably good, non-keys have wild variance
+        
+        let val = Math.round(gaussianRandom(mean, stdDev));
+        val = Math.max(15, Math.min(99, val)); // Hard clamp
 
-        if (isKey) {
-            if (roll < 0.20) tier = 'Elite';      // 20% Elite if key
-            else if (roll < 0.50) tier = 'Great';
-            else if (roll < 0.85) tier = 'Good';
-            else tier = 'Average';
-        } else {
-            if (roll < 0.02) tier = 'Elite';      // 2% Freak
-            else if (roll < 0.12) tier = 'Great';
-            else if (roll < 0.35) tier = 'Good';
-            else if (roll < 0.75) tier = 'Average';
-            else tier = 'Poor';
-        }
-
-        const val = getRandomInt(tiers[tier].min, tiers[tier].max);
         if (isKey) generatedKeySum += val;
         return val;
     };
 
-    // 3. Generate the Attributes
+    // 4. Generate the Attributes
     let attributes = {
         physical: {
             speed: generateAttributeValue('speed'),
@@ -236,7 +253,7 @@ export function generatePlayer(minAge = 10, maxAge = 16) {
         },
         mental: {
             playbookIQ: generateAttributeValue('playbookIQ'),
-            clutch: getRandomInt(20, 99),
+            clutch: Math.max(15, Math.min(99, Math.round(gaussianRandom(50, 15)))), // Pure random bell curve
             consistency: generateAttributeValue('consistency'),
             toughness: generateAttributeValue('toughness')
         },
@@ -246,12 +263,11 @@ export function generatePlayer(minAge = 10, maxAge = 16) {
             tackling: generateAttributeValue('tackling'),
             blocking: generateAttributeValue('blocking'),
             blockShedding: generateAttributeValue('blockShedding'),
-            passCoverage: generateAttributeValue('coverage')
+            passCoverage: generateAttributeValue('coverage') // Note: maps to 'passCoverage' in object
         }
     };
 
-    // 4. Apply Archetype Modifiers
-    // These apply to the 0-99 rolls before age scaling
+    // 5. Apply Archetype Modifiers
     attributes.physical.speed = Math.min(99, attributes.physical.speed * archetype.speedMod);
     attributes.physical.strength = Math.min(99, attributes.physical.strength * archetype.strMod);
     
@@ -262,31 +278,44 @@ export function generatePlayer(minAge = 10, maxAge = 16) {
         attributes.technical.blockShedding *= 0.4;
     }
 
-    // 5. Potential (Logic: How good are they relative to their archetype's keys?)
-    const avgKeyTalent = generatedKeySum / archetype.keyAttrs.length;
-    const potentialRoll = avgKeyTalent + getRandomInt(-5, 10);
-    let potential = 'F';
-    if (potentialRoll >= 88) potential = 'A';
-    else if (potentialRoll >= 78) potential = 'B';
-    else if (potentialRoll >= 68) potential = 'C';
-    else if (potentialRoll >= 55) potential = 'D';
+    // 6. Potential (Bell curve influenced by actual talent + class strength)
+    const avgKeyTalent = generatedKeySum / Math.max(1, archetype.keyAttrs.length);
+    // Mix 60% of their generated talent with 40% randomness to allow "hidden gems" and "busts"
+    const potentialMean = (avgKeyTalent * 0.6) + (65 * 0.4) + totalShift;
+    const potentialRoll = gaussianRandom(potentialMean, 10);
+    
+    let potential = 'C';
+    if (potentialRoll >= 84) potential = 'A';
+    else if (potentialRoll >= 74) potential = 'B';
+    else if (potentialRoll >= 58) potential = 'C';
+    else if (potentialRoll >= 45) potential = 'D';
+    else potential = 'F';
 
-    // 6. Body Type
-    const ageProgress = (age - 10) / (16 - 10);
-    let height = 55 + (ageProgress * 15) + archetype.heightMod + getRandomInt(-2, 3);
-    let weight = (80 + (ageProgress * 90)) * archetype.weightMod + getRandomInt(-10, 15);
-    attributes.physical.height = Math.round(height);
-    attributes.physical.weight = Math.round(weight);
+    // 7. Body Type (Gaussian variance around the archetype ideals)
+    const ageProgress = (age - 10) / Math.max(1, (maxAge - 10)); // 0.0 to 1.0
+    
+    const baseHeightMean = 55 + (ageProgress * 15) + archetype.heightMod;
+    let height = Math.round(gaussianRandom(baseHeightMean, 2.5));
+    
+    const baseWeightMean = (80 + (ageProgress * 90)) * archetype.weightMod;
+    let weight = Math.round(gaussianRandom(baseWeightMean, 15));
+    
+    attributes.physical.height = height;
+    attributes.physical.weight = weight;
 
-    // 7. Age Scaling
-    const physScale = 0.65 + (ageProgress * 0.35);
-    const mentScale = 0.50 + (ageProgress * 0.50);
+    // 8. Age Scaling & Clamping
+    // 16yo gets ~100% of their generated stats. 10yo gets ~70%
+    const physScale = 0.70 + (ageProgress * 0.30);
+    const mentScale = 0.60 + (ageProgress * 0.40);
 
     Object.keys(attributes).forEach(cat => {
         Object.keys(attributes[cat]).forEach(attr => {
             if (['height', 'weight', 'clutch'].includes(attr)) return;
             let factor = (cat === 'physical') ? physScale : mentScale;
+            
+            // Speed and Agility mature faster than strength
             if (attr === 'speed' || attr === 'agility') factor = Math.min(1.0, factor + 0.15);
+            
             attributes[cat][attr] = Math.max(15, Math.min(99, Math.round(attributes[cat][attr] * factor)));
         });
     });
@@ -294,7 +323,7 @@ export function generatePlayer(minAge = 10, maxAge = 16) {
     return {
         id: crypto.randomUUID(),
         name: `${firstName} ${lastName}`,
-        archetypeName: archetype.name, // 💡 Added for UI visibility
+        archetypeName: archetype.name,
         age,
         favoriteOffensivePosition,
         favoriteDefensivePosition,
@@ -304,8 +333,8 @@ export function generatePlayer(minAge = 10, maxAge = 16) {
         teamId: null,
         status: { type: 'healthy', description: '', duration: 0 },
         fatigue: 0,
-        gameStats: { /* initial empty stats */ },
-        seasonStats: { /* initial empty stats */ },
-        careerStats: { seasonsPlayed: 0 /* etc */ }
+        gameStats: {},
+        seasonStats: {},
+        careerStats: { seasonsPlayed: 0 }
     };
 }

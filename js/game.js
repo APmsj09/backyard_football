@@ -6,6 +6,7 @@ import {
     calculateOverall,
     calculateSlotSuitability,
     generatePlayer,
+    generateDraftClassModifiers, // <-- ADDED THIS
     positionOverallWeights,
     estimateBestPosition
 } from './game/player.js';
@@ -756,8 +757,13 @@ async function initializeLeague(onProgress) {
     // --- Generate initial player pool ---
     const totalPlayers = 300;
     console.log(`Generating ${totalPlayers} players...`);
+    
+    // 💡 NEW: Generate a baseline class strength for the inaugural draft
+    const initialClassModifiers = generateDraftClassModifiers();
+    
     for (let i = 0; i < totalPlayers; i++) {
-        game.players.push(generatePlayer());
+        // Pass the modifiers to generatePlayer (default ages 10 to 16)
+        game.players.push(generatePlayer(10, 16, initialClassModifiers));
         if (i % 10 === 0 && onProgress) {
             onProgress((i / totalPlayers) * 0.7);
             await yieldToMain();
@@ -7729,7 +7735,14 @@ function advanceToOffseason() {
 
     const rookieCount = Math.max(totalVacancies, game.teams.length);
     console.log(`Generating ${rookieCount} new rookie players (age 10-12).`);
-    for (let i = 0; i < rookieCount; i++) game.players.push(generatePlayer(10, 12));
+    
+    // 💡 NEW: Generate a unique class strength for this specific draft year
+    const thisYearsClassModifiers = generateDraftClassModifiers();
+    
+    for (let i = 0; i < rookieCount; i++) {
+        // Pass the modifiers to the rookies (ages 10 to 12)
+        game.players.push(generatePlayer(10, 12, thisYearsClassModifiers));
+    }
 
     game.gameResults = [];
     game.breakthroughs = [];
