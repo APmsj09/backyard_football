@@ -3720,20 +3720,35 @@ function renderDepthOrderPane(gameState) {
 
 export function renderPickHistory(gameState) {
     const list = document.getElementById('draft-history-list');
-    if (!list || !gameState.pickHistory) return;
+    if (!list) {
+        console.error("Could not find draft-history-list element");
+        return;
+    }
 
-    list.innerHTML = gameState.pickHistory.slice().reverse().map(p => `
-        <div class="flex items-center justify-between p-3 bg-gray-50 rounded border-l-4 ${p.potential === 'A' ? 'border-amber-500' : 'border-gray-300'} shadow-sm">
+    // 💡 FIX: Access pickHistory from game state
+    const history = gameState.pickHistory || [];
+    
+    if (history.length === 0) {
+        list.innerHTML = `
+            <div class="text-center py-20">
+                <p class="text-gray-400 font-bold italic">The draft has just begun.</p>
+                <p class="text-gray-500 text-xs uppercase tracking-widest mt-2">Picks will appear here as they are made</p>
+            </div>`;
+        return;
+    }
+
+    list.innerHTML = history.slice().reverse().map(p => `
+        <div class="flex items-center justify-between p-3 bg-white rounded-lg border border-gray-200 border-l-4 ${p.potential === 'A' ? 'border-l-amber-500 bg-amber-50' : 'border-l-gray-400'} shadow-sm mb-2">
             <div class="flex items-center gap-4">
-                <span class="font-mono font-bold text-gray-400">#${p.pick}</span>
+                <span class="font-mono font-black text-gray-300 text-xl w-10">#${p.pick}</span>
                 <div>
-                    <p class="font-bold text-gray-800">${p.playerName}</p>
-                    <p class="text-xs text-gray-500">${p.teamName}</p>
+                    <p class="font-bold text-gray-800 leading-tight">${p.playerName}</p>
+                    <p class="text-[10px] font-bold text-gray-400 uppercase tracking-tighter">${p.teamName}</p>
                 </div>
             </div>
             <div class="text-right">
-                <span class="bg-gray-200 px-2 py-1 rounded text-xs font-bold">${p.pos}</span>
-                <span class="ml-2 font-black ${p.ovr > 70 ? 'text-green-600' : 'text-gray-700'}">${p.ovr} OVR</span>
+                <span class="bg-gray-100 px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-wider text-gray-600 border border-gray-200">${p.pos}</span>
+                <span class="ml-2 font-black ${p.ovr >= 80 ? 'text-green-600' : 'text-gray-700'}">${p.ovr} OVR</span>
             </div>
         </div>
     `).join('');

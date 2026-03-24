@@ -257,7 +257,7 @@ function handleDraftPlayer() {
         if (player && Game.addPlayerToTeam(player, team)) {
             const gs = Game.getGameState(); // 💡 FIX: Get fresh reference
             if (!gs.pickHistory) gs.pickHistory = [];
-            
+
             gs.pickHistory.push({
                 pick: gs.currentPick + 1,
                 teamName: team.name,
@@ -914,7 +914,7 @@ function openPlayerCard(playerId) {
 
     // Tab 1: Attributes & Overalls
     const positions = Object.keys(positionOverallWeights);
-    let overallsHtml = '<div class="mt-2 grid grid-cols-2 gap-2 text-center">'; 
+    let overallsHtml = '<div class="mt-2 grid grid-cols-2 gap-2 text-center">';
     positions.forEach(pos => {
         overallsHtml += `<div class="bg-gray-100 border border-gray-200 p-2 rounded"><p class="font-semibold text-[10px] text-gray-500 uppercase">${pos}</p><p class="font-bold text-lg text-gray-800">${Game.calculateOverall(player, pos)}</p></div>`;
     });
@@ -1149,11 +1149,17 @@ function main() {
 
                 // Switch content visibility
                 document.querySelectorAll('.draft-tab-content').forEach(c => c.classList.add('hidden'));
-                document.getElementById(`draft-tab-${tab}`).classList.remove('hidden');
+                const targetTab = document.getElementById(`draft-tab-${tab}`);
+                if (targetTab) targetTab.classList.remove('hidden');
 
-                // Trigger specific renders
-                if (tab === 'history') UI.renderPickHistory(gameState);
-                if (tab === 'teams') UI.renderDraftTeamView(gameState);
+                // 💡 FIX: Ensure render functions are called when tabs are clicked
+                if (tab === 'history') {
+                    console.log("Rendering Pick History..."); // Debug check
+                    UI.renderPickHistory(gameState);
+                }
+                if (tab === 'teams') {
+                    UI.renderDraftTeamView(gameState);
+                }
             };
         });
         document.getElementById('advance-week-btn')?.addEventListener('click', handleAdvanceWeek);
