@@ -3304,7 +3304,7 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                         pState.targetY = predY;
 
                         // Hesitation penalty applied via contactReduction
-                        pState.contactReduction = 0.6 + (diagConfidence * 0.4);
+                        pState.contactReduction = 0.6 + (diagConfidence * 0.4)
                     }
 
                     pState.action = 'pursuit';
@@ -3640,8 +3640,11 @@ function checkBlockCollisions(playState) {
     });
 }
 function checkTackleCollisions(playState, gameLog) {
-    // 1. Find Ball Carrier (We use the pre-found state)
-    const carrier = playState.activePlayers.find(p => p.hasBall && !playState.ballState.isLoose);
+    // 1. Find Ball Carrier
+    const carrier = playState.activePlayers.find(p => p.hasBall === true && p.isBallCarrier === true && !playState.ballState.isLoose);
+
+    // 💡 FIX: If no one has the ball (like during the mesh of a Play Action), 
+    // or the "carrier" is just a fake runner, exit immediately.
     if (!carrier) return false;
 
     // 2. Identify Defense 
@@ -4403,22 +4406,14 @@ function updateQBDecision(qbState, offenseStates, defenseStates, playState, offe
     const getTargetValue = (slotOrRole) => {
         const rec = offenseTeam.find(r =>
             r.slot === slotOrRole ||
+            r.role === slotOrRole ||
             r.assignedPlayerSlot === slotOrRole
         );
 
-        // 💡 SCREEN TIMING VALVE
-        if (rec.assignment === 'Screen_Wait') {
-            // QB refuses to throw the screen until the blockers have had time to leak (tick 40+)
-            if (playState.tick < 45) return { score: -100 };
-
-            // If the screen is developing, give it a massive score boost to ensure he picks it
-            score += 80;
-
-            // If there's a defender right in the receiver's face before the wall forms, ABORT
-            if (minProjectedSeparation < 1.0) score -= 150;
-        }
-
         if (!rec || !rec.action.includes('route')) return null;
+
+        let score = (Math.min(minProjectedSeparation, 6) * 10); 
+
         // 1. ESTIMATE FLIGHT TIME (Better Physics Sync)
         const distFromQB = getDistance(qbState, rec);
         let estimatedBallSpeed = 22; // Default
@@ -4467,18 +4462,22 @@ function updateQBDecision(qbState, offenseStates, defenseStates, playState, offe
             }
         });
 
-        // 3. SCORING LOGIC
+        // 3. SCORING LOGIC        
+
+        // 💡 INSERTED HERE: SCREEN TIMING VALVE
+        if (rec.assignment === 'Screen_Wait') {
+            // QB refuses to throw the screen until the blockers have had time to leak (tick 45+)
+            if (playState.tick < 45) return { score: -100 };
+
+            // If the screen is developing, give it a massive score boost to ensure he picks it
+            score += 80;
+
+            // If there's a defender right in the receiver's face before the wall forms, ABORT
+            if (minProjectedSeparation < 1.0) score -= 150;
+        }
+
         const depth = rec.y - playState.lineOfScrimmage;
         const iqFactor = qbIQ / 100;
-
-        // Base score: 0 to 60 based on separation
-        let score = (Math.min(minProjectedSeparation, 6) * 10);
-
-        if (rec.assignment === 'Screen_Wait') {
-            if (playState.tick < 45) return null; // QB ignores the screen until blockers leak
-            score += 80; // High priority once ready
-            if (minProjectedSeparation < 1.0) score -= 150; // Don't throw if defender is on top of him
-        }
 
         // 💡 DEPTH BONUSES: Must be contingent on separation!
         if (depth > 5 && depth < 15) {
