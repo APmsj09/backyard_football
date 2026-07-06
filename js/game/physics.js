@@ -97,6 +97,11 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
     if (pState.action === 'backpedal') actionMult *= 0.55;
     if (pState.action === 'trucking') actionMult *= 0.75;
 
+    if (pState.jammedTicks > 0) {
+        pState.jammedTicks--;
+        actionMult *= 0.60; // 40% speed reduction when physically jammed
+    }
+
     const maxPossibleSpeed = baseMaxSpeed * weightSpeedPenalty * actionMult * gapFriction * (pState.contactReduction || 1.0);
 
     // --- 6. CARRYING MOMENTUM & CUTTING ---

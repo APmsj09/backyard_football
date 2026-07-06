@@ -3367,7 +3367,7 @@ function executeAssignment(pState, assignment, offenseStates, LOS, playState, ba
 
     // 1. SAFETY HELP (High Level Logic)
     if (pState.slot.startsWith('S') && !assignment.includes('blitz')) {
-        const safetyHelp = calculateSafetyHelp(pState, playState.activePlayers.filter(p => !p.isOffense), offenseStates, null, playState, false);
+        const safetyHelp = calculateSafetyHelp(pState, playState.activePlayers.filter(p => !p.isOffense), offenseStates, null, playState, isBallInAir);
         if (safetyHelp && safetyHelp.type === 'help') {
             pState.targetX = safetyHelp.helpX;
             pState.targetY = safetyHelp.helpY;
@@ -3411,22 +3411,19 @@ function executeAssignment(pState, assignment, offenseStates, LOS, playState, ba
 
             if (pState.jamTicks > 0) {
                 pState.jamTicks--;
-                // 💡 NEW: Force the defender to physically "push" the receiver during the jam.
-                // This makes the jam effective, physically altering the receiver's path.
                 const dx = targetRec.x - pState.x;
                 const dy = targetRec.y - pState.y;
                 const dist = Math.max(0.1, Math.hypot(dx, dy));
 
-                // Push the receiver slightly away and delay their advance
                 targetRec.x += (dx / dist) * 0.08;
                 targetRec.y += (dy / dist) * 0.08;
 
-                pState.targetX = targetRec.x - (dx / dist) * 0.5; // Stay tight on the hip
+                pState.targetX = targetRec.x - (dx / dist) * 0.5;
                 pState.targetY = targetRec.y + (dy / dist) * 0.5;
 
-                // Reduce receiver speed during the jam
-                targetRec.contactReduction = 0.6;
-                return; // Lock movement to the jam
+                // 💡 FIX: Apply persistent jammed ticks directly to the receiver
+                targetRec.jammedTicks = 15; 
+                return;
             } else {
                 // Reset receiver speed after jam
                 targetRec.contactReduction = 1.0;
@@ -3558,33 +3555,37 @@ function executeAssignment(pState, assignment, offenseStates, LOS, playState, ba
     }
 
     // 5. BLITZ / RUSH
-    else if (assignment?.includes('rush') || assignment?.includes('blitz') || assignment?.includes('run_gap')) { // 💡 FIX: Added run_gap so DLs don't freeze on passes
-        const qb = offenseStates.find(p => p.slot.startsWith('QB'));
-        if (qb) {
-            const dx = qb.x - pState.x;
-            const dy = qb.y - pState.y;
+    else if (assignment?.includes('rush') || assignment?.includes('blitz') || assignment?.includes('run_gap')) {
+        // 💡 FIX: If the handoff has occurred, redirect the pass rush/gaps to pursue the actual ball carrier
+        if (playState.handoffOccurred && ballCarrierState) {
+            pState.targetX = ballCarrierState.x;
+            pState.targetY = ballCarrierState.y;
+        } else {
+            const qb = offenseStates.find(p => p.slot.startsWith('QB'));
+            if (qb) {
+                const dx = qb.x - pState.x;
+                const dy = qb.y - pState.y;
 
-            const isEdgeRusher = Math.abs(pState.initialX - qb.initialX) >= 3.5;
+                const isEdgeRusher = Math.abs(pState.initialX - qb.initialX) >= 3.5;
 
-            if (isEdgeRusher) {
-                const escapeAngle = pState.initialX < qb.initialX ? -1 : 1;
+                if (isEdgeRusher) {
+                    const escapeAngle = pState.initialX < qb.initialX ? -1 : 1;
 
-                if (pState.y > qb.y + 1.0) {
-                    pState.targetX = qb.x + (escapeAngle * 3.5);
-                    pState.targetY = qb.y - 1.0;
+                    if (pState.y > qb.y + 1.0) {
+                        pState.targetX = qb.x + (escapeAngle * 3.5);
+                        pState.targetY = qb.y - 1.0;
+                    } else {
+                        pState.targetX = qb.x + (dx * 0.5);
+                        pState.targetY = qb.y - 2.0;
+                    }
                 } else {
-                    // 💡 FIX: Aim THROUGH the QB so the rusher accelerates into the hit
                     pState.targetX = qb.x + (dx * 0.5);
                     pState.targetY = qb.y - 2.0;
                 }
             } else {
-                // 💡 FIX: Interior rushers aim THROUGH the QB
-                pState.targetX = qb.x + (dx * 0.5);
-                pState.targetY = qb.y - 2.0;
+                pState.targetX = pState.x;
+                pState.targetY = LOS - 5;
             }
-        } else {
-            pState.targetX = pState.x;
-            pState.targetY = LOS - 5;
         }
     }
 
