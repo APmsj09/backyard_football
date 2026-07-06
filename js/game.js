@@ -4391,8 +4391,6 @@ function updateQBDecision(qbState, offenseStates, defenseStates, playState, offe
 
         if (!rec || !rec.action.includes('route')) return null;
 
-        let score = (Math.min(minProjectedSeparation, 6) * 10);
-
         // 1. ESTIMATE FLIGHT TIME (Better Physics Sync)
         const distFromQB = getDistance(qbState, rec);
         let estimatedBallSpeed = 22; // Default
@@ -4441,7 +4439,9 @@ function updateQBDecision(qbState, offenseStates, defenseStates, playState, offe
             }
         });
 
-        // 3. SCORING LOGIC        
+        // 3. SCORING LOGIC    
+        
+        let score = (Math.min(minProjectedSeparation, 6) * 10);
 
         // 💡 INSERTED HERE: SCREEN TIMING VALVE
         if (rec.assignment === 'Screen_Wait') {
