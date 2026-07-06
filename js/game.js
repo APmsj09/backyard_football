@@ -1884,9 +1884,23 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
                     }
                 }
                 else if (slot.startsWith('OL')) {
-                    assignment = (play.type === 'pass' && !isPlayAction) ? 'pass_block' : 'run_block';
+                    // Respect playbook assignments (pulling, screen walls) if they exist
+                    if (!assignment) {
+                        assignment = (play.type === 'pass' && !isPlayAction) ? 'pass_block' : 'run_block';
+                    }
                     action = assignment;
-                    targetY = startY + (action === 'pass_block' ? -0.5 : 0.5);
+                    
+                    // If they are just standard blocking, set their anchor point
+                    if (action === 'pass_block' || action === 'run_block') {
+                        targetY = startY + (action === 'pass_block' ? -0.5 : 0.5);
+                    } else if (routeTree[assignment]) {
+                        // If they are pulling, convert their action so they execute the path
+                        action = 'run_path';
+                        routePath = calculateRoutePath(assignment, startX, startY);
+                        if (routePath && routePath.length) {
+                            targetX = routePath[0].x; targetY = routePath[0].y;
+                        }
+                    }
                 }
                 else if (assignment) {
                     if (assignment.includes('block')) {
@@ -2655,7 +2669,9 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
             }
         }
 
-        const VISION_RANGE = 10.0;
+        const isPulling = blocker.routePath && blocker.currentPathIndex < blocker.routePath.length;
+        const VISION_RANGE = isPulling ? 2.0 : 10.0;
+        
         const validThreats = threats.filter(t =>
             getDistance(blocker, t) < VISION_RANGE &&
             t.y > blocker.y - 1.5
@@ -2910,15 +2926,25 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                 // 3. SMART CARRIER AI (The "Open Field" Phase)
                 // Once the designed path is finished, the "Smart AI" takes over to find holes.
                 else {
+                    // Cache the action before the AI evaluates
+                    const oldAction = pState.action;
+                    
                     const smartTarget = getSmartCarrierTarget(pState, defenseStates, offenseStates);
                     targetX = smartTarget.x;
                     targetY = smartTarget.y;
 
-                    pState.action = 'run_path';
+                    // 💡 FIX: Only apply 'run_path' if the AI didn't explicitly trigger a special move (truck/juke)
+                    if (pState.action === oldAction || pState.action === 'run_path') {
+                        pState.action = 'run_path';
+                    }
 
                     // Dynamic speed based on density (Slowing down in traffic)
                     const defendersNear = defenseStates.filter(d => getDistance(pState, d) < 2.5).length;
-                    pState.contactReduction = defendersNear > 1 ? 0.85 : 1.0;
+                    
+                    // Don't overwrite contactReduction if they are bracing for a truck!
+                    if (pState.action !== 'trucking') {
+                        pState.contactReduction = defendersNear > 1 ? 0.85 : 1.0;
+                    }
                 }
 
                 pState.targetX = targetX;
@@ -3315,7 +3341,7 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                             pState.targetX = ballPos.targetX;
                             pState.targetY = ballPos.targetY;
                         }
-                        pState.action = 'pursuit';
+                        pState.action = 'tracking_ball'; 
                     }
                 } else {
                     executeAssignment(pState, assignment, offenseStates, LOS, playState, ballCarrierState);
@@ -3584,7 +3610,7 @@ function checkBlockCollisions(playState) {
         // If an unblocked rusher is dangerously close (flying through the gap), grab them!
         // This overrides the lineman's pre-assigned AI target.
         const imminentThreat = defenders
-            .filter(d => getDistance(blocker, d) < 2.4 && d.y > blocker.y - 1.5)
+            .filter(d => getDistance(blocker, d) < 1.3 && d.y > blocker.y - 1.5)
             .sort((a, b) => getDistance(blocker, a) - getDistance(blocker, b))[0];
 
         if (imminentThreat) {
@@ -3620,7 +3646,7 @@ function checkBlockCollisions(playState) {
 }
 function checkTackleCollisions(playState, gameLog) {
     // 1. Find Ball Carrier
-    const carrier = playState.activePlayers.find(p => p.hasBall === true && p.isBallCarrier === true && !playState.ballState.isLoose);
+    const carrier = playState.activePlayers.find(p => p.hasBall === true && !playState.ballState.isLoose);
 
     // 💡 FIX: If no one has the ball (like during the mesh of a Play Action), 
     // or the "carrier" is just a fake runner, exit immediately.
@@ -4000,18 +4026,18 @@ function resolveOngoingBlocks(playState, gameLog, offenseStates = [], defenseSta
                     const dirY = dy / dist;
 
                     // --- Swim Move ---
-                    // 💡 FIX: Probability adjusted from 15% to 1.5% per tick to prevent instant teleporting
                     if (escapeScore > 120 && Math.random() < 0.005) {
                         const speed = 0.6;
                         defender.x += dirX * speed;
                         defender.y += dirY * speed;
 
                         blocker.stunnedTicks = 10; // 0.2 sec
-                        shedPower *= 0.92;
+                        
+                        // 💡 FIX: Directly affect the persistent battle score (negative favors defender)
+                        battle.battleScore -= 4.0; 
                         defender.moveCooldown = 20; // 0.8 sec
                     }
                     // --- Spin Move ---
-                    // 💡 FIX: Probability adjusted from 10% to 1.0% per tick
                     else if (escapeScore > 130 && Math.random() < 0.003) {
                         const bx = blocker.x - defender.x;
                         const by = blocker.y - defender.y;
@@ -4023,7 +4049,9 @@ function resolveOngoingBlocks(playState, gameLog, offenseStates = [], defenseSta
                         defender.y += spinY;
 
                         blocker.stunnedTicks = 5; // 0.25 sec
-                        shedPower *= 0.9;
+                        
+                        // 💡 FIX: Directly affect the persistent battle score
+                        battle.battleScore -= 4.0;
                         defender.moveCooldown = 20; // 1 sec
                     }
                 }
@@ -4752,7 +4780,13 @@ function executeThrow(qbState, target, strength, accuracy, playState, gameLog, a
 
         // 2. Calculate Receiver's Actual Speed (Yards per second)
         // Map 0-99 speed to roughly 5.0 - 10.0 yards per second
-        const recYPS = 5.0 + ((target.spd || 50) / 20);
+        const targetWgt = target.weight || target.wgt || 200;
+        const targetSpd = target.speed || target.spd || 50;
+        const targetAgi = target.agility || target.agi || 50;
+        
+        const weightSpeedPenalty = Math.max(0.80, 1.0 - ((targetWgt - 200) / 1000));
+        const trackingSprintBoost = 1.1 + (targetAgi / 250); // Matches the boost given in updatePlayerTargets
+        const recYPS = (7.0 + (targetSpd / 100) * 4.0) * (target.fatigueModifier || 1.0) * weightSpeedPenalty * trackingSprintBoost;
 
         // 3. THE "QB BRAIN" (Estimation Error)
         // High IQ QBs estimate the receiver's speed and flight time perfectly.

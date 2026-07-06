@@ -62,12 +62,17 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
     // 💡 FIX: Deadzone for stationary actions to stop micro-oscillations (Jitter)
     const isContinuousAction = ['run_path', 'pursuit', 'tracking_ball', 'run_route', 'qb_scramble'].includes(pState.action);
 
-    if (distToTarget < 0.15 && !isContinuousAction) {
+    // Replace the existing deadzone block with this:
+    if (pState.action === 'tracking_ball' && distToTarget < 1.0) {
+        // Bleed off speed so they settle under the ball instead of running past it
+        pState.vx *= 0.5;
+        pState.vy *= 0.5;
+    } else if (distToTarget < 0.15 && !isContinuousAction) {
         // Bleed off speed heavily when arriving
         pState.vx *= 0.2;
         pState.vy *= 0.2;
 
-        // Snap directly to the target if moving very slowly to eliminate the last pixel of vibration
+        // Snap directly to the target if moving very slowly
         if (Math.abs(pState.vx) < 0.2 && Math.abs(pState.vy) < 0.2) {
             pState.x = targetX;
             pState.y = targetY;
