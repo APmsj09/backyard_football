@@ -36,6 +36,13 @@ function debugLog(category, message, frequency = 1) {
 let game = null;
 let playerMap = new Map();
 
+// --- Depth Chart Slot Prioritization ---
+const slotPriority = {
+    'QB1': 100, 'OL2': 90, 'OL1': 85, 'OL3': 80, 'RB1': 75, 'WR1': 70, 'TE1': 65, 'WR2': 60, 'WR3': 55, 'RB2': 50, 'WR4': 45, 'TE2': 40, 'WR5': 35,
+    'LB2': 100, 'LB1': 95, 'DB1': 85, 'DB3': 80, 'DB2': 75, 'DL1': 65, 'DL3': 60, 'DL2': 55, 'DL4': 50, 'DB5': 45
+};
+const getPriority = (slot) => slotPriority[slot] || 0;
+
 // --- Team Color Definitions ---
 const teamColors = [
     { primary: '#DC2626', secondary: '#FFFFFF' }, // Red
@@ -335,13 +342,7 @@ export function rebuildDepthChartFromOrder(team) {
     team.formations.offense = offFormKey;
     const offSlots = offenseFormations[offFormKey].slots;
 
-    // 💡 NEW: Prioritization System
-    // Engine evaluates high-priority roles first. If a player is listed #1 in multiple, the highest priority role claims them.
-    const slotPriority = {
-        'QB1': 100, 'OL2': 90, 'OL1': 85, 'OL3': 80, 'RB1': 75, 'WR1': 70, 'TE1': 65, 'WR2': 60, 'WR3': 55, 'RB2': 50, 'WR4': 45, 'TE2': 40, 'WR5': 35,
-        'LB2': 100, 'LB1': 95, 'LB3': 90, 'DB1': 85, 'DB3': 80, 'DB2': 75, 'DB4': 70, 'DL1': 65, 'DL3': 60, 'DL2': 55, 'DL4': 50, 'DB5': 45
-    };
-    const getPriority = (slot) => slotPriority[slot] || 0;
+    // (Orphaned slotPriorities: { ... } block has been removed)
 
     const sortedOffSlots = [...offSlots].sort((a, b) => getPriority(b) - getPriority(a));
 
@@ -350,15 +351,13 @@ export function rebuildDepthChartFromOrder(team) {
         if (['OT', 'OG', 'C'].includes(posKey)) posKey = 'OL';
         if (posKey === 'FB') posKey = 'RB';
 
-        // 💡 FIX: Search the specific slot (e.g. OL1) FIRST, then fallback to general (OL)
         let searchBuckets = [slot, posKey];
         if (posKey === 'WR') searchBuckets.push('TE', 'RB', 'DB', 'QB');
         if (posKey === 'RB') searchBuckets.push('WR', 'DB', 'LB');
         if (posKey === 'TE') searchBuckets.push('WR', 'OL', 'LB');
-        if (posKey === 'OL') searchBuckets.push('DL', 'TE', 'LB'); // DLs make great OLs
+        if (posKey === 'OL') searchBuckets.push('DL', 'TE', 'LB');
         if (posKey === 'QB') searchBuckets.push('WR', 'RB', 'DB');
 
-        // Catch-all emergency fallback
         searchBuckets.push('WR', 'RB', 'TE', 'DB', 'LB', 'DL', 'OL', 'QB');
 
         team.depthChart.offense[slot] = getBestAvailable(searchBuckets, usedOffense);
@@ -1030,13 +1029,6 @@ function aiSetDepthChart(team) {
     const offSlots = offenseFormations[offFormKey]?.slots || [];
     const defSlots = defenseFormations[defFormKey]?.slots || [];
 
-    // Prioritization map to determine who gets assigned first
-    const slotPriority = {
-        'QB1': 100, 'OL2': 90, 'OL1': 85, 'OL3': 80, 'RB1': 75, 'WR1': 70, 'TE1': 65,
-        'LB2': 100, 'LB1': 95, 'DB1': 85, 'DB3': 80, 'DB2': 75, 'DL1': 65
-    };
-    const getPriority = (slot) => slotPriority[slot] || 0;
-
     const assignedOffense = new Set();
     const assignedDefense = new Set();
 
@@ -1053,51 +1045,39 @@ function aiSetDepthChart(team) {
         sortRoster.forEach(p => {
             if (assignedSet.has(p.id)) return;
 
-            const isNatural = (p.favoriteOffensivePosition === posKey || p.favoriteDefensivePosition === posKey || p.pos === posKey);
-            if (!isNatural) return;
+            let score = calculateSlotSuitability(p, slot, side, team);
 
-            const score = calculateSlotSuitability(p, slot, side, team);
+            const isNatural = (p.favoriteOffensivePosition === posKey || p.favoriteDefensivePosition === posKey || p.pos === posKey);
+            if (!isNatural) {
+                score -= 30;
+            }
+
             if (score > bestScore) {
                 bestScore = score;
                 bestPlayer = p;
             }
         });
 
-        if (bestPick.player) {
-            addPlayerToTeam(bestPick.player, team);
-            const teamName = team?.name || 'Unknown Team';
-            const posName = estimateBestPosition(bestPick.player);
-            console.log(`[Draft] ${teamName} drafted ${bestPick.player.name}`);
-
-            // 💡 FIX: Safe initialization
-            if (!game.pickHistory) game.pickHistory = [];
-            game.pickHistory.push({
-                pick: game.currentPick + 1,
-                teamName: team.name,
-                teamId: team.id,
-                playerName: bestPick.player.name,
-                pos: posName, // <--- Ensure this matches the variable name
-                ovr: calculateOverall(bestPick.player, posName),
-                potential: bestPick.player.potential
-            });
+        if (bestPlayer) {
+            assignedSet.add(bestPlayer.id);
+            team.depthOrder[slot] = [bestPlayer.id];
         }
     };
 
-    // PASS 1: Fill specific buckets for the current formation
+    // PASS 1: Fill specific buckets for the current formation (uses module scope getPriority)
     const sortedOff = [...offSlots].sort((a, b) => getPriority(b) - getPriority(a));
     const sortedDef = [...defSlots].sort((a, b) => getPriority(b) - getPriority(a));
 
     sortedOff.forEach(slot => assignSmartStarter(slot, 'offense', assignedOffense));
     sortedDef.forEach(slot => assignSmartStarter(slot, 'defense', assignedDefense));
 
-    // PASS 2: Fill general positional buckets with remaining players (The Master Rankings)
+    // PASS 2: Fill general positional buckets with remaining players
     const positions = ['QB', 'RB', 'WR', 'TE', 'OL', 'DL', 'LB', 'DB'];
     positions.forEach(pos => {
         const candidates = [...rosterObjs].sort((a, b) => {
             const ovrA = calculateOverall(a, pos);
             const ovrB = calculateOverall(b, pos);
 
-            // Bias for natural position
             const isNaturalA = (a.favoriteOffensivePosition === pos || a.pos === pos) ? 10 : 0;
             const isNaturalB = (b.favoriteOffensivePosition === pos || b.pos === pos) ? 10 : 0;
 
@@ -1107,7 +1087,6 @@ function aiSetDepthChart(team) {
         team.depthOrder[pos] = candidates.map(p => p.id);
     });
 
-    // Final execution
     rebuildDepthChartFromOrder(team);
 }
 
@@ -4412,7 +4391,7 @@ function updateQBDecision(qbState, offenseStates, defenseStates, playState, offe
 
         if (!rec || !rec.action.includes('route')) return null;
 
-        let score = (Math.min(minProjectedSeparation, 6) * 10); 
+        let score = (Math.min(minProjectedSeparation, 6) * 10);
 
         // 1. ESTIMATE FLIGHT TIME (Better Physics Sync)
         const distFromQB = getDistance(qbState, rec);

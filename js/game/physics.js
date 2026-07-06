@@ -134,8 +134,9 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
     }
 
     // --- 9. APPLY NEWTONIAN ACCELERATION ---
-    const targetVx = (dx / distToTarget) * effectiveMaxSpeed * arrivalFactor;
-    const targetVy = (dy / distToTarget) * effectiveMaxSpeed * arrivalFactor;
+    const safeDist = Math.max(0.001, distToTarget);
+    const targetVx = (dx / safeDist) * effectiveMaxSpeed * arrivalFactor;
+    const targetVy = (dy / safeDist) * effectiveMaxSpeed * arrivalFactor;
 
     pState.vx += (targetVx - pState.vx) * accelRate * timeDelta;
     pState.vy += (targetVy - pState.vy) * accelRate * timeDelta;
