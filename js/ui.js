@@ -2638,7 +2638,7 @@ function initLiveGameStats(gameResult) {
 
 function initLivePlayerStats(gameResult) {
     livePlayerStats = new Map();
-    playerNameIdMap = new Map(); // 💡 FIX: Utilize unused cache map to optimize log parsing
+    playerNameIdMap = new Map();
 
     if (!gameResult) return;
     const homeRoster = getUIRosterObjects(gameResult.homeTeam || {});
@@ -2652,7 +2652,8 @@ function initLivePlayerStats(gameResult) {
             receptions: 0, recYards: 0, drops: 0,
             rushAttempts: 0, rushYards: 0,
             returnYards: 0,
-            touchdowns: 0, interceptions: 0, fumbles: 0
+            touchdowns: 0, interceptions: 0, fumbles: 0,
+            fumblesLost: 0, tackles: 0, sacks: 0 // 💡 FIX: Prevents NaN in box score
         });
 
         // Cache lowercase names for ultra-fast O(1) lookup during log parsing

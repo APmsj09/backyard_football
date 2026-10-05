@@ -216,6 +216,9 @@ function captureFrame(playState, gameLog) {
             z: playState.ballState.z
         },
         players: playState.activePlayers.map(p => ({
+            id: p.id,             // 💡 FIX: Required for Active Personnel sidebar
+            teamId: p.teamId,     // 💡 FIX: Required to filter player team
+            fatigue: p.fatigue,   // 💡 FIX: Required for live energy bar
             slot: p.slot,
             x: p.x,
             y: p.y,
@@ -226,11 +229,10 @@ function captureFrame(playState, gameLog) {
             primaryColor: p.primaryColor,
             secondaryColor: p.secondaryColor,
             number: p.number,
-            wgt: p.wgt || 200, // Weight (approx 150 - 350)
-            hgt: p.hgt || 70,  // Height (approx 60 - 80)
-            // 💡 NEW: Calculate angle based on velocity (defaults to facing upfield)
+            wgt: p.wgt || 200,
+            hgt: p.hgt || 70,
             angle: (Math.abs(p.vx) < 0.1 && Math.abs(p.vy) < 0.1)
-                ? (p.isOffense ? 0 : Math.PI) // Offense faces Right (0), Defense faces Left (PI)
+                ? (p.isOffense ? 0 : Math.PI)
                 : Math.atan2(p.vx, p.vy)
         })),
         logIndex: gameLog ? gameLog.length : 0,
@@ -3867,7 +3869,9 @@ function checkTackleCollisions(playState, gameLog) {
             if (gameLog) {
                 const hitForce = Math.round(tMomentum / 10);
                 const type = playState.sack ? '💥 SACK' : '✋ TACKLE';
-                pushGameLog(gameLog, `[Tick ${playState.tick}] ${type} by ${defender.name} (Force: ${hitForce})`, playState);
+                const gainYards = (carrier.y - playState.lineOfScrimmage).toFixed(1);
+                // 💡 FIX: Provide "Gain:" so the live stats sidebar updates yardage
+                pushGameLog(gameLog, `[Tick ${playState.tick}] ${type} by ${defender.name} on ${carrier.name} | Gain: ${gainYards}y (Force: ${hitForce})`, playState);
             }
             return true;
 
@@ -7151,6 +7155,11 @@ function simulateLivePlayStep(game, mode = 'live') {
             offense.formations.offense = selectedFormation;
         }
 
+        // 💡 FIX: Release teams from Punt_Return back to their base defense on normal downs
+        if (defense.formations.defense === 'Punt_Return') {
+            defense.formations.defense = defense.coach?.preferredDefense || '3-2-3';
+        }
+
         // DEFENSE: CPU adapts. Human stays in their selected formation.
         if (!defense.isPlayerControlled) {
             defense.formations.defense = determineDefensiveFormation(defense, offense.formations.offense, game.down, game.yardsToGo, game.gameLog);
@@ -8284,6 +8293,14 @@ function autoMakeSubstitutions(team, options = {}, gameLog = null) {
                 if ((currentPlayer.fatigue || 0) >= fatigueLimit) currentPlayer.isResting = true;
                 if ((currentPlayer.fatigue || 0) <= recoverLimit) currentPlayer.isResting = false;
             }
+
+            // 💡 FIX: If the starter is healthy and rested, DO NOT SUB THEM OUT!
+            const needsSub = !currentPlayer || 
+                             currentPlayer.isResting || 
+                             (currentPlayer.fatigue || 0) >= fatigueLimit || 
+                             currentPlayer.status?.duration > 0;
+
+            if (!needsSub) continue;
 
             // 2. Identify realistic football position families (No WRs at DT!)
             let basePos = slot.replace(/\d/g, '');
