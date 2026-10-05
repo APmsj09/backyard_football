@@ -119,22 +119,25 @@ export function calculateSlotSuitability(player, slot, side, team) {
 
     for (const attr in priorities) {
         for (const category in player.attributes) {
-            // 💡 FIX: Safely check for legacy 'passCoverage'
             const actualAttr = (attr === 'coverage' && player.attributes[category]?.passCoverage !== undefined) ? 'passCoverage' : attr;
 
             if (player.attributes[category]?.[actualAttr] !== undefined) {
                 let value = player.attributes[category][actualAttr];
                 if (typeof value !== 'number') continue;
-                
+
                 if (attr === 'weight') value = Math.max(0, Math.min(100, (value - 100) * 0.66 + 40));
-                if (attr === 'height') value = Math.max(0, Math.min(100, (value - 50) * 4)); 
-                
+                if (attr === 'height') value = Math.max(0, Math.min(100, (value - 50) * 4));
+
                 score += value * priorities[attr];
                 totalWeight += priorities[attr];
                 break;
             }
         }
     }
+
+    return totalWeight > 0
+        ? score / totalWeight
+        : calculateOverall(player, basePosition);
 }
 
 const archetypes = [
@@ -338,7 +341,7 @@ export function generatePlayer(minAge = 10, maxAge = 16, classModifiers = null) 
         age,
         favoriteOffensivePosition,
         favoriteDefensivePosition,
-        number: getRandomInt(1, 99),
+        number: null,
         potential,
         attributes,
         teamId: null,

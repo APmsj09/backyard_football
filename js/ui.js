@@ -3326,6 +3326,12 @@ function updateLiveScoreboard() {
     if (elements.simHomeScore) elements.simHomeScore.textContent = activeLiveGame.homeScore;
     if (elements.simAwayScore) elements.simAwayScore.textContent = activeLiveGame.awayScore;
 
+    const formatClock = (seconds) => {
+        const m = Math.floor(seconds / 60);
+        const s = Math.floor(seconds % 60).toString().padStart(2, '0');
+        return `${m}:${s}`;
+    };
+
     // Context-aware text
     if (activeLiveGame.isGameOver) {
         if (elements.simGameDown) elements.simGameDown.textContent = "FINAL";
@@ -3335,9 +3341,8 @@ function updateLiveScoreboard() {
         if (elements.simGameDrive) elements.simGameDrive.textContent = "PAT";
     } else {
         if (elements.simGameDown) elements.simGameDown.textContent = `${activeLiveGame.down} & ${activeLiveGame.yardsToGo}`;
-        // Show progress through the 60-play game
-        const playNum = activeLiveGame.playsTotal || 1;
-        if (elements.simGameDrive) elements.simGameDrive.textContent = `Play ${playNum}/60`;
+        const qStr = activeLiveGame.quarter > 4 ? 'OT' : `Q${activeLiveGame.quarter}`;
+        if (elements.simGameDrive) elements.simGameDrive.textContent = `${qStr} | ${formatClock(activeLiveGame.clock)}`;
     }
 }
 

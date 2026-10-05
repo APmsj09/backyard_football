@@ -1010,6 +1010,13 @@ function setupDraft() {
  * Produces both a valid depthChart and a complete depthOrder (starter → bench list).
  */
 function aiSetDepthChart(team) {
+    if (!team) return;
+
+    if (team.isPlayerControlled) {
+        rebuildDepthChartFromOrder(team);
+        return;
+    }
+
     const rosterObjs = getRosterObjects(team);
     if (!team || !team.formations || !Array.isArray(rosterObjs)) return;
     if (rosterObjs.length === 0) return;
@@ -1119,7 +1126,13 @@ function simulateAIPick(team) {
     const ROSTER_LIMIT = 12;
     if (team.roster.length >= ROSTER_LIMIT) return null;
 
-    const undraftedPlayers = game.players.filter(p => p && !p.teamId);
+    const undraftedPlayers = game.players.filter(p =>
+        p &&
+        !p.teamId &&
+        (!p.status || p.status.duration === 0) &&
+        p.status?.type !== 'retired' &&
+        p.status?.type !== 'departed'
+    );
     if (undraftedPlayers.length === 0) return null;
 
     // 1. Analyze Current Roster Needs
@@ -1180,7 +1193,11 @@ function simulateAIPick(team) {
  * and updates the player's teamId.
  */
 function addPlayerToTeam(player, team) {
+    const ROSTER_LIMIT = 12;
+
     if (!player || !team || !team.roster || typeof player.id === 'undefined') return false;
+    if (team.roster.length >= ROSTER_LIMIT) return false;
+    if (team.roster.includes(player.id)) return false;
 
     // --- Position-Based Number Assignment ---
     if (player.number == null) {
@@ -1356,6 +1373,12 @@ function generateSchedule() {
 
 /** Resets player fatigue and game stats (typically before a game). */
 function resetGameStats(teamA, teamB) {
+    // Reset per-game tactical history.
+    [teamA, teamB].filter(Boolean).forEach(team => {
+        team.recentPlayHistory = [];
+        team.playCallHistory = [];
+    });
+
     // Combine the rosters of just these two teams
     const playersInGame = [...getRosterObjects(teamA), ...getRosterObjects(teamB)];
 
@@ -1699,11 +1722,30 @@ function resolveDepthForPlay(offense, defense) {
 
             // If slot is empty, or player is already used (Ironman logic safety), find anyone else
             if (!pId || usedThisPlay.has(pId)) {
-                pId = rosterIds.find(id => !usedThisPlay.has(id));
+                const candidates = rosterIds
+                    .map(id => getPlayer(id))
+                    .filter(p =>
+                        p &&
+                        !usedThisPlay.has(p.id) &&
+                        (
+                            !p.status ||
+                            p.status.duration === 0 ||
+                            p.status.type === 'temporary'
+                        )
+                    )
+                    .sort((a, b) =>
+                        calculateSlotSuitability(b, slot, side, team) -
+                        calculateSlotSuitability(a, slot, side, team)
+                    );
+
+                pId = candidates[0]?.id || null;
             }
 
             resolved[side][slot] = pId;
-            if (pId) usedThisPlay.add(pId);
+
+            if (pId) {
+                usedThisPlay.add(pId);
+            }
         });
     };
 
@@ -1890,7 +1932,7 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
                         assignment = (play.type === 'pass' && !isPlayAction) ? 'pass_block' : 'run_block';
                     }
                     action = assignment;
-                    
+
                     // If they are just standard blocking, set their anchor point
                     if (action === 'pass_block' || action === 'run_block') {
                         targetY = startY + (action === 'pass_block' ? -0.5 : 0.5);
@@ -2035,8 +2077,10 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
             // 💡 FIX: Safely initialize fatigue to prevent NaN physics corruption
             if (player.fatigue === undefined || isNaN(player.fatigue)) player.fatigue = 0;
 
-            const fatigueRatio = player.fatigue / (player.attributes?.physical?.stamina || 50);
-            const fatigueMod = Math.max(0.3, 1.0 - fatigueRatio);
+            const fatigueMod = Math.max(
+                0.70,
+                1.0 - ((player.fatigue || 0) / 100) * 0.30
+            );
 
             const isPreferredOffense = offense.formations.offense === offense.coach?.preferredOffense;
             const isPreferredDefense = defense.formations.defense === defense.coach?.preferredDefense;
@@ -2674,7 +2718,7 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
 
         const isPulling = blocker.routePath && blocker.currentPathIndex < blocker.routePath.length;
         const VISION_RANGE = isPulling ? 2.0 : 10.0;
-        
+
         const validThreats = threats.filter(t =>
             getDistance(blocker, t) < VISION_RANGE &&
             t.y > blocker.y - 1.5
@@ -2704,6 +2748,8 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
         }
 
         if (target) {
+            if (target.isEngaged) return; // Prevent simultaneous target loops from overwriting engagements
+
             if (isPassPlay) {
                 // 💡 FIX: DYNAMIC LEVERAGE (The True Pocket)
                 const qb = offenseStates.find(p => p.slot.startsWith('QB'));
@@ -2931,7 +2977,7 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                 else {
                     // Cache the action before the AI evaluates
                     const oldAction = pState.action;
-                    
+
                     const smartTarget = getSmartCarrierTarget(pState, defenseStates, offenseStates);
                     targetX = smartTarget.x;
                     targetY = smartTarget.y;
@@ -2943,7 +2989,7 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
 
                     // Dynamic speed based on density (Slowing down in traffic)
                     const defendersNear = defenseStates.filter(d => getDistance(pState, d) < 2.5).length;
-                    
+
                     // Don't overwrite contactReduction if they are bracing for a truck!
                     if (pState.action !== 'trucking') {
                         pState.contactReduction = defendersNear > 1 ? 0.85 : 1.0;
@@ -3269,7 +3315,7 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
             // --- 5. EXECUTE MOVEMENT ---
             if (shouldPursue && ballCarrierState) {
                 // WHO ARE WE CHASING?
-                const chaseTarget = isFooledByPA ? offenseStates.find(o => o.slot.startsWith('RB')) : ballCarrierState;
+                const chaseTarget = (isFooledByPA ? offenseStates.find(o => o.slot.startsWith('RB')) : null) || ballCarrierState;
 
                 if (chaseTarget) {
                     const dist = getDistance(pState, chaseTarget);
@@ -3344,7 +3390,7 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                             pState.targetX = ballPos.targetX;
                             pState.targetY = ballPos.targetY;
                         }
-                        pState.action = 'tracking_ball'; 
+                        pState.action = 'tracking_ball';
                     }
                 } else {
                     executeAssignment(pState, assignment, offenseStates, LOS, playState, ballCarrierState);
@@ -3366,7 +3412,7 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
  * Separated for clarity and reuse.
  */
 function executeAssignment(pState, assignment, offenseStates, LOS, playState, ballCarrierState) {
-
+    const isBallInAir = playState.ballState.inAir;
 
     // 1. SAFETY HELP (High Level Logic)
     if (pState.role === 'DB' && assignment.includes('zone_deep') && !assignment.includes('blitz')) {
@@ -3425,7 +3471,7 @@ function executeAssignment(pState, assignment, offenseStates, LOS, playState, ba
                 pState.targetY = targetRec.y + (dy / dist) * 0.5;
 
                 // 💡 FIX: Apply persistent jammed ticks directly to the receiver
-                targetRec.jammedTicks = 15; 
+                targetRec.jammedTicks = 15;
                 return;
             } else {
                 // Reset receiver speed after jam
@@ -3600,7 +3646,7 @@ function executeAssignment(pState, assignment, offenseStates, LOS, playState, ba
  */
 function checkBlockCollisions(playState) {
     const blockers = playState.activePlayers.filter(p => p.isOffense && !p.isEngaged && p.stunnedTicks === 0);
-    const defenders = playState.activePlayers.filter(p => !p.isOffense && p.stunnedTicks <= 0);
+    const defenders = playState.activePlayers.filter(p => !p.isOffense && p.stunnedTicks <= 0 && !p.isEngaged);
 
     blockers.forEach(blocker => {
         const isBlockingDuty = blocker.action.includes('block') ||
@@ -4036,9 +4082,9 @@ function resolveOngoingBlocks(playState, gameLog, offenseStates = [], defenseSta
                         defender.y += dirY * speed;
 
                         blocker.stunnedTicks = 10; // 0.2 sec
-                        
+
                         // 💡 FIX: Directly affect the persistent battle score (negative favors defender)
-                        battle.battleScore -= 4.0; 
+                        battle.battleScore -= 4.0;
                         defender.moveCooldown = 20; // 0.8 sec
                     }
                     // --- Spin Move ---
@@ -4053,7 +4099,7 @@ function resolveOngoingBlocks(playState, gameLog, offenseStates = [], defenseSta
                         defender.y += spinY;
 
                         blocker.stunnedTicks = 5; // 0.25 sec
-                        
+
                         // 💡 FIX: Directly affect the persistent battle score
                         battle.battleScore -= 4.0;
                         defender.moveCooldown = 20; // 1 sec
@@ -4139,11 +4185,11 @@ function updateQBDecision(qbState, offenseStates, defenseStates, playState, offe
     // Define isDesperationTime here using playState data
     const scoreDiff = (playState.offenseScore || 0) - (playState.defenseScore || 0);
     const currentQuarter = playState.quarter || 1;
-    const playsLeft = playState.playsRemaining || 60;
+    const timeRemaining = playState.timeRemaining || 720;
 
-    // Desperation = Down by > 8 in the 4th, OR down by any amount with < 60s left in the game
+    // Desperation = Down by > 8 in the 4th, OR down by any amount with < 120s left in the game
     const isDesperationTime = (currentQuarter >= 4) &&
-        ((scoreDiff < 0 && playsLeft <= 9) || (scoreDiff <= -9 && playsLeft <= 15));
+        ((scoreDiff < 0 && timeRemaining <= 120) || (scoreDiff <= -9 && timeRemaining <= 300));
 
     // --- 0B. LINE OF SCRIMMAGE CHECK (Football Rule) ---
     // QB cannot throw FORWARD if they've crossed the line of scrimmage (only backwards/laterals allowed)
@@ -4319,9 +4365,6 @@ function updateQBDecision(qbState, offenseStates, defenseStates, playState, offe
     });
     const pocketComfort = Math.max(leftPressure, rightPressure) > pressureCount * 0.6 ? 'collapsing' : 'intact';
 
-    // Sack Prevention (Stop Teleporting)
-    if (isPressured && getDistance(qbState, pressureDefender) < 1.2) return;
-
     // --- 4. SCRAMBLE DRILL (Throwing on the run) ---
     if (qbState.action === 'qb_scramble') {
         const allReceivers = offenseStates.filter(p => p.slot !== 'QB1' && (p.action.includes('route') || p.action === 'route_complete'));
@@ -4472,7 +4515,7 @@ function updateQBDecision(qbState, offenseStates, defenseStates, playState, offe
         });
 
         // 3. SCORING LOGIC    
-        
+
         let score = (Math.min(minProjectedSeparation, 6) * 10);
 
         // 💡 INSERTED HERE: SCREEN TIMING VALVE
@@ -4787,7 +4830,7 @@ function executeThrow(qbState, target, strength, accuracy, playState, gameLog, a
         const targetWgt = target.weight || target.wgt || 200;
         const targetSpd = target.speed || target.spd || 50;
         const targetAgi = target.agility || target.agi || 50;
-        
+
         const weightSpeedPenalty = Math.max(0.80, 1.0 - ((targetWgt - 200) / 1000));
         const trackingSprintBoost = 1.1 + (targetAgi / 250); // Matches the boost given in updatePlayerTargets
         const recYPS = (7.0 + (targetSpd / 100) * 4.0) * (target.fatigueModifier || 1.0) * weightSpeedPenalty * trackingSprintBoost;
@@ -5499,7 +5542,7 @@ function resetPlayerRuntimeState(playerState) {
 function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, context, options, isLive = false) {
 
     // 1. Extract values from context
-    const { gameLog = [], weather, ballOn, ballHash = 'M', down, yardsToGo, offenseScore = 0, defenseScore = 0, playsRemaining = 60, quarter = 1 } = context;
+    const { gameLog = [], weather, ballOn, ballHash = 'M', down, yardsToGo, offenseScore = 0, defenseScore = 0, timeRemaining = 720, quarter = 1 } = context;
     const fastSim = (options.fastSim === true) && !isLive;
 
     // --- Define playResult ---
@@ -5566,7 +5609,7 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
         defenseScore: defenseScore,
         quarter: quarter,
         lineOfScrimmage: ballOn + 10,
-        playsRemaining: playsRemaining,
+        timeRemaining: timeRemaining,
         activePlayers: [],
         blockBattles: [],
         resolvedDepth: null
@@ -5983,7 +6026,7 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
                     // 5. FORWARD PROGRESS STALLED
                     // 💡 FIX: Ignore QBs setting up in the pocket. Only apply stall checks to active runners.
                     if (ballCarrierState.isBallCarrier && ballCarrierState.action !== 'qb_setup') {
-                        if (!playState.stallCheck) playState.stallCheck = { tick: playState.tick, y: ballCarrierState.y };
+                        if (!playState.stallCheck) playState.stallCheck = { tick: playState.tick, x: ballCarrierState.x, y: ballCarrierState.y };
 
                         if (playState.tick - playState.stallCheck.tick >= 30) {
                             const dx = ballCarrierState.x - playState.stallCheck.x;
@@ -6097,7 +6140,7 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
                             playState.possessionChanged = recovery.possessionChange;
                             playState.returnStartY = recPlayer.y;
                             if (gameLog) gameLog.push(`🏈 ${recPlayer.name} recovers!`);
-                            
+
                             playState.statEvents.push({ type: 'fumble_recovery', playerId: recPlayer.id });
                             if (recovery.possessionChange && playState.ballState.lastDroppedById) {
                                 playState.statEvents.push({ type: 'fumble_lost', playerId: playState.ballState.lastDroppedById });
@@ -6318,6 +6361,16 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
 
     playState.activePlayers.forEach(p => resetPlayerRuntimeState(p));
 
+    // --- GAME CLOCK BURN CALCULATION ---
+    let clockBurn = Math.floor(Math.random() * 8) + 24; // 24-32 seconds for a normal play running down the play clock
+    if (playState.incomplete) {
+        clockBurn = Math.floor(Math.random() * 3) + 5; // 5-7 seconds, clock stops
+    } else if (playResult.possessionChange || playState.touchdown || playState.safety) {
+        clockBurn = 12; // Change of possession/score
+    } else if (ballCarrierState && (ballCarrierState.x <= 1.5 || ballCarrierState.x >= 51.8)) {
+        clockBurn = Math.floor(Math.random() * 4) + 6; // 6-9 seconds, out of bounds stops clock
+    }
+    playResult.clockBurn = clockBurn;
 
     return {
         playResult,
@@ -6990,7 +7043,8 @@ function aiCheckAudible(offense, offensivePlayKey, defense, defensivePlayKey, ga
  * SIMULATES EXACTLY ONE PLAY STEP (For Live Game View)
  * This replaces 'simulateGame' when watching the game.
  */
-function simulateLivePlayStep(game) {
+function simulateLivePlayStep(game, mode = 'live') {
+    const isLive = mode === 'live';
     // --- 1. SAFETY CHECKS ---
     if (!game || !game.possession || !game.homeTeam || !game.awayTeam) {
         console.error("simulateLivePlayStep: Critical Error - Invalid game state.", game);
@@ -7029,8 +7083,17 @@ function simulateLivePlayStep(game) {
         defPlayKey = 'PuntReturn_Classic';
     }
     else {
-        const scoreDiff = (offense.id === game.homeTeam.id) ? (game.homeScore - game.awayScore) : (game.awayScore - game.homeScore);
-        const drivesRemaining = 10;
+        const scoreDiff =
+            (offense.id === game.homeTeam.id)
+                ? (game.homeScore - game.awayScore)
+                : (game.awayScore - game.homeScore);
+
+        // 💡 CLOCK OVERHAUL: Initialize if missing
+        if (game.clock === undefined) game.clock = 720;
+        if (game.quarter === undefined) game.quarter = 1;
+
+        const timeRemaining = game.quarter < 5 ? game.clock + ((4 - game.quarter) * 720) : game.clock;
+        const drivesRemaining = Math.max(1, Math.ceil(timeRemaining / 120));
 
         // Force formation reset if coming off a Punt or Conversion
         if (offense.formations.offense === 'Punt' || game.isConversionAttempt === false) {
@@ -7070,8 +7133,8 @@ function simulateLivePlayStep(game) {
         yardsToGo: game.yardsToGo,
         offenseScore: (offense.id === game.homeTeam.id) ? (game.homeScore || 0) : (game.awayScore || 0),
         defenseScore: (offense.id === game.homeTeam.id) ? (game.awayScore || 0) : (game.homeScore || 0),
-        playsRemaining: 60 - (game.playsTotal || 0),
-        quarter: game.quarter || 1
+        timeRemaining: game.clock, // Passed to resolvePlay
+        quarter: game.quarter
     };
 
     // --- 3. AUTO SUBSTITUTIONS ---
@@ -7081,7 +7144,15 @@ function simulateLivePlayStep(game) {
     autoMakeSubstitutions(defense, { thresholdFatigue: autoSubThreshold, chance: 1.0 }, game.gameLog);
 
     // --- 4. EXECUTE THE PLAY ---
-    const result = resolvePlay(offense, defense, offPlayKey, defPlayKey, context, {}, true);
+    const result = resolvePlay(
+        offense,
+        defense,
+        offPlayKey,
+        defPlayKey,
+        context,
+        { fastSim: !isLive },
+        isLive
+    );
 
     // --- 5. UPDATE GAME STATE (FIXED LOGIC) ---
     const { playResult, finalBallY } = result;
@@ -7183,31 +7254,50 @@ function simulateLivePlayStep(game) {
 
     game.playsTotal = (game.playsTotal || 0) + 1;
 
-    // --- HALFTIME LOGIC ---
-    if (game.playsTotal === 30 && !game.halftimeProcessed) {
-        game.halftimeProcessed = true;
-        if (game.gameLog) game.gameLog.push("⏸️ HALFTIME. Players recover energy in the locker room.");
-
-        // 💡 FIX: Correctly spaced syntax for iteration to prevent JS parse errors
-        [...getRosterObjects(offense), ...getRosterObjects(defense)].forEach(p => {
-            if (p) {
-                p.fatigue = Math.max(0, (p.fatigue || 0) - 40);
-                if (p.fatigue < 40) p.isResting = false;
-            }
-        });
-
-        // 💡 FIX: Apply Second Half Kickoff Logic
-        game.possession = defense; // The team that kicked off to start the game now receives
-        game.ballOn = 35;
-        game.down = 1;
-        game.yardsToGo = 10;
-        game.quarter = 3;
+    if (!game.isConversionAttempt) {
+        game.clock -= playResult.clockBurn || 15;
     }
 
-    // Check if game should end
-    if (game.playsTotal >= 60) {
-        game.isGameOver = true;
-        if (game.gameLog) game.gameLog.push("🏁 WHISTLE BLOWS! That's the end of the game!");
+    // --- QUARTER & CLOCK LOGIC ---
+    if (game.clock <= 0) {
+        game.quarter++;
+        game.clock = 720; // Reset for next quarter
+        
+        if (game.quarter === 3 && !game.halftimeProcessed) {
+            game.halftimeProcessed = true;
+            if (game.gameLog) game.gameLog.push("⏸️ HALFTIME. Teams head to the locker room.");
+
+            [...getRosterObjects(offense), ...getRosterObjects(defense)].forEach(p => {
+                if (p) {
+                    p.fatigue = Math.max(0, (p.fatigue || 0) - 40);
+                    if (p.fatigue < 40) p.isResting = false;
+                }
+            });
+
+            // Second Half Kickoff
+            game.possession = defense; 
+            game.ballOn = 35;
+            game.down = 1;
+            game.yardsToGo = 10;
+        } else if (game.quarter === 5) {
+            // End of Regulation
+            if (game.homeScore !== game.awayScore) {
+                game.isGameOver = true;
+                if (game.gameLog) game.gameLog.push("🏁 WHISTLE BLOWS! That's the end of the game!");
+            } else {
+                if (game.gameLog) game.gameLog.push("⚖️ WE ARE GOING TO OVERTIME!");
+                game.clock = 300; // 5 minute OT
+                game.ballOn = 75; // 25 yard line for OT rules
+                game.down = 1;
+                game.yardsToGo = 10;
+            }
+        } else if (game.quarter > 5) {
+            // End of OT
+            game.isGameOver = true;
+            if (game.gameLog) game.gameLog.push("🏁 WHISTLE BLOWS! Game ends in a tie!");
+        } else {
+            if (game.gameLog) game.gameLog.push(`⏱️ End of Quarter ${game.quarter - 1}.`);
+        }
     }
 
     return result;
@@ -7245,6 +7335,7 @@ function simulateMatchFast(homeTeam, awayTeam) {
         ballOn: 35, down: 1, yardsToGo: 10,
         gameLog: [],
         quarter: 1,
+        clock: 720, // 12-minute quarters (720s)
         playsTotal: 0,
         isConversionAttempt: false,
         isGameOver: false,
@@ -7254,24 +7345,8 @@ function simulateMatchFast(homeTeam, awayTeam) {
     };
 
     // 4. THE FAST LOOP
-    // 💡 FIX: Loop strictly based on the 60 play limit, exactly matching the live sim.
-    while (!game.isGameOver && game.playsTotal < 60) {
-        simulateLivePlayStep(game);
-    }
-
-    // --- OVERTIME (Simple) ---
-    if (game.homeScore === game.awayScore) {
-        game.isGameOver = false; // 💡 FIX: Reset game over flag so OT runs
-        let otPlays = 0;
-        game.ballOn = 75; // 25 yard line
-        game.down = 1;
-        game.yardsToGo = 10;
-
-        while (game.homeScore === game.awayScore && otPlays < 15) {
-            simulateLivePlayStep(game);
-            otPlays++;
-        }
-        game.isGameOver = true;
+    while (!game.isGameOver) {
+        simulateLivePlayStep(game, 'fast');
     }
 
     // 5. POST-GAME RPG LOGIC (Breakthroughs)
@@ -7344,10 +7419,25 @@ function updatePlayerStatuses() {
 /** Removes temporary players (friends) at the end of the week. */
 function endOfWeekCleanup() {
     if (!game || !game.teams) return;
+
     game.teams.forEach(team => {
-        if (team && team.roster) {
-            team.roster = team.roster.filter(p => p && p.status?.type !== 'temporary');
-        }
+        if (!team || !Array.isArray(team.roster)) return;
+
+        team.roster = team.roster.filter(id => {
+            const player = getPlayer(id);
+
+            if (!player) return false;
+
+            if (player.status?.type === 'temporary') {
+                player.teamId = null;
+                player.number = null;
+                return false;
+            }
+
+            return true;
+        });
+
+        rebuildDepthChartFromOrder(team);
     });
 }
 
@@ -7545,12 +7635,22 @@ function callFriend(playerId) {
 function aiManageRoster(team) {
     if (!team || !team.roster || !game || !game.freeAgents || !team.coach) return;
 
-    // --- 💡 FIX: Get roster objects ---
     const roster = getRosterObjects(team);
-    let healthyCount = roster.filter(p => p && p.status?.duration === 0).length;
-    // --- 💡 END FIX ---
 
-    while (healthyCount < MIN_HEALTHY_PLAYERS && game.freeAgents.length > 0) {
+    let playableCount = roster.filter(p =>
+        p &&
+        (!p.status ||
+            p.status.duration === 0 ||
+            p.status.type === 'temporary')
+    ).length;
+
+    const ROSTER_LIMIT = 12;
+
+    while (
+        playableCount < MIN_HEALTHY_PLAYERS &&
+        team.roster.length < ROSTER_LIMIT &&
+        game.freeAgents.length > 0
+    ) {
         const bestFA = game.freeAgents
             .filter(p => p)
             .reduce((best, current) => {
@@ -7563,19 +7663,34 @@ function aiManageRoster(team) {
         game.freeAgents = game.freeAgents.filter(p => p && p.id !== bestFA.id);
 
         if (Math.random() < aiSuccessChance) {
-            bestFA.status = { type: 'temporary', description: 'Helping Out', duration: 1 };
+            const originalStatus = bestFA.status;
+
+            bestFA.status = {
+                type: 'temporary',
+                description: 'Helping Out',
+                duration: 1
+            };
+
             if (addPlayerToTeam(bestFA, team)) {
-                // --- 💡 FIX: Re-get roster objects to check count ---
+                game.freeAgents = game.freeAgents.filter(p => p && p.id !== bestFA.id);
+
                 const newRoster = getRosterObjects(team);
-                healthyCount = newRoster.filter(p => p && p.status?.duration === 0).length;
-                const bestFAName = bestFA?.name || 'Unknown Player';
-                console.log(`${team.name} signed temporary player ${bestFAName}`);
+
+                playableCount = newRoster.filter(p =>
+                    p &&
+                    (!p.status ||
+                        p.status.duration === 0 ||
+                        p.status.type === 'temporary')
+                ).length;
+            } else {
+                bestFA.status = originalStatus;
             }
         } else {
             const bestFAName = bestFA?.name || 'Unknown Player';
             console.log(`${team.name} failed to sign temporary player ${bestFAName}.`);
         }
     }
+
     aiSetDepthChart(team);
 }
 
@@ -7773,6 +7888,15 @@ function advanceToOffseason() {
                 team.roster.push(player.id);
             } else {
                 player.teamId = null;
+
+                player.status = {
+                    type: player.age >= 17 ? 'retired' : 'departed',
+                    description: player.age >= 17
+                        ? 'Retired from the league'
+                        : 'Left the league',
+                    duration: 0
+                };
+
                 totalVacancies++;
             }
         });
@@ -7808,7 +7932,10 @@ function advanceToOffseason() {
     const thisYearsClassModifiers = generateDraftClassModifiers();
 
     for (let i = 0; i < rookieCount; i++) {
-        game.players.push(generatePlayer(10, 12, thisYearsClassModifiers));
+        const rookie = generatePlayer(10, 12, thisYearsClassModifiers);
+
+        game.players.push(rookie);
+        playerMap.set(rookie.id, rookie);
     }
 
     game.gameResults = [];
@@ -7830,54 +7957,46 @@ function advanceToOffseason() {
  * preserving all other overrides and cleanly handling swaps.
  */
 function assignPlayerToSlot(team, playerId, slot, side) {
-    if (!team || !team.depthChart || !team.depthChart[side]) return false;
+    if (!team) return false;
 
-    if (!playerId || playerId === 'null' || playerId === '') {
-        team.depthChart[side][slot] = null;
-        return true;
-    }
-
-    // Check if player is already in a slot on this side
-    let oldSlot = null;
-    for (const s in team.depthChart[side]) {
-        if (team.depthChart[side][s] === playerId) {
-            oldSlot = s;
-            break;
-        }
-    }
-
-    const existingPlayerInNewSlot = team.depthChart[side][slot];
-
-    if (oldSlot) {
-        // Swap them
-        team.depthChart[side][oldSlot] = existingPlayerInNewSlot;
-    }
-
-    team.depthChart[side][slot] = playerId;
-
-    // Ensure player is in the correct positional depthOrder list fallback so they don't disappear
     let posKey = slot.replace(/\d+/g, '');
     if (['OT', 'OG', 'C'].includes(posKey)) posKey = 'OL';
     if (posKey === 'FB') posKey = 'RB';
-    if (posKey === 'TE') posKey = 'TE';
     if (['CB', 'S', 'FS', 'SS'].includes(posKey)) posKey = 'DB';
     if (['DE', 'DT', 'NT'].includes(posKey)) posKey = 'DL';
 
     if (!team.depthOrder) team.depthOrder = {};
+    if (!team.depthOrder[posKey]) team.depthOrder[posKey] = [];
 
-    // Add to the Specific Slot List (e.g. OL1)
-    const slotList = team.depthOrder[slot] || [];
-    if (!slotList.includes(playerId)) {
-        slotList.push(playerId);
-    }
-    team.depthOrder[slot] = slotList;
+    const groupList = team.depthOrder[posKey];
+    
+    // Determine target index based on the slot number (e.g., WR1 -> 0, WR2 -> 1)
+    const slotNumberMatch = slot.match(/\d+/);
+    const targetIndex = slotNumberMatch ? Math.max(0, parseInt(slotNumberMatch[0], 10) - 1) : 0;
 
-    // Add to the General Positional List (e.g. OL)
-    const groupList = team.depthOrder[posKey] || [];
-    if (!groupList.includes(playerId)) {
-        groupList.push(playerId);
+    if (!playerId || playerId === 'null' || playerId === '') {
+        // If clearing a slot, we don't necessarily want to delete the player from the team,
+        // we just push them down the priority list.
+        return true; 
     }
-    team.depthOrder[posKey] = groupList;
+
+    // 1. Remove player from their current position in the list
+    const existingIndex = groupList.indexOf(playerId);
+    if (existingIndex > -1) {
+        groupList.splice(existingIndex, 1);
+    }
+
+    // 2. Insert player at the target index (pad with nulls if necessary, though rebuild handles gaps)
+    while (groupList.length < targetIndex) {
+        groupList.push(null);
+    }
+    groupList.splice(targetIndex, 0, playerId);
+
+    // Clean up nulls
+    team.depthOrder[posKey] = groupList.filter(id => id !== null);
+
+    // 3. Immediately trigger a rebuild so the Depth Chart output matches the new Truth
+    rebuildDepthChartFromOrder(team);
 
     return true;
 }
@@ -8321,9 +8440,14 @@ function playerSignFreeAgent(playerId) {
     const player = game.players.find(p => p && p.id === playerId && !p.teamId);
 
     if (player) {
-        player.status = { type: 'healthy', description: '', duration: 0 };
+        if (player.status?.duration > 0) {
+            return {
+                success: false,
+                message: `${player.name} is currently unavailable.`
+            };
+        }
 
-        if (addPlayerToTeam(player, team)) { // This function now handles number assignment
+        if (addPlayerToTeam(player, team)) {
             aiSetDepthChart(team);
             addMessage("Roster Move", `${player.name} has been signed to the team!`);
 
@@ -8372,7 +8496,14 @@ const DEFAULT_SAVE_KEY = 'backyardFootballGameState';
 function saveGameState(saveKey = DEFAULT_SAVE_KEY) {
     try {
         // Create a shallow copy to modify for saving
-        const dataToSave = { ...game };
+        const dataToSave = {
+            ...game,
+            relationships: Object.fromEntries(
+                game.relationships instanceof Map
+                    ? game.relationships
+                    : new Map()
+            )
+        };
 
         // 1. Ditch the heavy frames and logs for all non-player games
         dataToSave.teams = dataToSave.teams.map(team => {
@@ -8416,12 +8547,59 @@ function loadGameState(saveKey = DEFAULT_SAVE_KEY) {
                 game.relationships = new Map(Object.entries(game.relationships));
             }
 
-            // 💡 FIX: Repopulate the Global Player Map
+            // Repopulate the Global Player Map
             playerMap.clear();
+
             if (Array.isArray(game.players)) {
                 game.players.forEach(p => {
-                    if (p && p.id) playerMap.set(p.id, p);
+                    if (p && p.id) {
+                        playerMap.set(p.id, p);
+                    }
                 });
+            }
+
+            // Rebind everything that should point to the master team/player objects.
+            const teamById = new Map(
+                (game.teams || [])
+                    .filter(t => t && t.id)
+                    .map(t => [t.id, t])
+            );
+
+            game.playerTeam = game.playerTeam?.id
+                ? (teamById.get(game.playerTeam.id) || null)
+                : null;
+
+            // Free agents should reference the master player objects.
+            game.freeAgents = (game.freeAgents || [])
+                .map(p => p?.id ? playerMap.get(p.id) : null)
+                .filter(Boolean);
+
+            // Schedule matchups should reference the master team objects.
+            if (Array.isArray(game.schedule)) {
+                game.schedule = game.schedule
+                    .map(match => {
+                        const homeId = match?.home?.id ?? match?.homeId;
+                        const awayId = match?.away?.id ?? match?.awayId;
+
+                        const home = teamById.get(homeId);
+                        const away = teamById.get(awayId);
+
+                        if (!home || !away) return null;
+
+                        return {
+                            ...match,
+                            home,
+                            away
+                        };
+                    })
+                    .filter(Boolean);
+            }
+
+            // Hall of Fame entries should reference master player objects too.
+            if (Array.isArray(game.hallOfFame)) {
+                game.hallOfFame = game.hallOfFame
+                    .map(p => p?.id ? playerMap.get(p.id) : null)
+                    .filter(Boolean);
             }
 
             return game;
@@ -8530,7 +8708,7 @@ export function finalizeGameResults(homeTeam, awayTeam, homeScore, awayScore) {
             'rushYards', 'rushAttempts',
             'recYards', 'receptions', 'targets', 'drops',
             'tackles', 'sacks', 'interceptions', 'fumbles', 'fumblesLost', 'fumblesRecovered',
-            'touchdowns', 'returnYards'
+            'touchdowns', 'returnYards', 'safeties'
         ];
 
         statFields.forEach(field => {
