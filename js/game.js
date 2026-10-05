@@ -64,7 +64,8 @@ let availableColors = [...teamColors];
 // --- Constants ---
 const offensivePositions = ['QB', 'RB', 'WR', 'TE', 'OL'];
 const defensivePositions = ['DL', 'LB', 'DB'];
-const MIN_HEALTHY_PLAYERS = 8; // Minimum players needed to avoid forfeit (8v8)
+const MIN_HEALTHY_PLAYERS = 8; 
+export const ROSTER_LIMIT = 18; // 💡 18-Man Roster: 8 Starters, 6 Backups, 4 Developmental
 
 // --- Field Constants ---
 const FIELD_LENGTH = 120; // Yards (including 10yd endzones at 0-10 and 110-120)
@@ -762,14 +763,13 @@ async function initializeLeague(onProgress) {
     game.divisions[divisionNames[0]] = []; game.divisions[divisionNames[1]] = [];
 
     // --- Generate initial player pool ---
-    const totalPlayers = 350;
+    // 💡 10 teams x 18 players = 180 drafted + 200 free agents = 380 total neighborhood kids
+    const totalPlayers = 380;
     console.log(`Generating ${totalPlayers} players...`);
 
-    // 💡 NEW: Generate a baseline class strength for the inaugural draft
     const initialClassModifiers = generateDraftClassModifiers();
 
     for (let i = 0; i < totalPlayers; i++) {
-        // Pass the modifiers to generatePlayer
         game.players.push(generatePlayer(10, 16, initialClassModifiers));
         if (i % 10 === 0 && onProgress) {
             onProgress((i / totalPlayers) * 0.7);
@@ -784,28 +784,26 @@ async function initializeLeague(onProgress) {
         if (p && p.id) playerMap.set(p.id, p);
     });
 
-    // --- 💡 NEW: Generate sparse, non-stranger relationships ---
     console.log("Assigning initial non-stranger relationships...");
-    const relationshipChance = 0.05; // 5% chance of any two players having a non-stranger relationship
+    // 💡 INCREASED NETWORK: With fewer teams but more FAs, kids need tighter networks
+    const relationshipChance = 0.08; 
     let relationshipsAdded = 0;
 
     for (let i = 0; i < game.players.length; i++) {
         for (let j = i + 1; j < game.players.length; j++) {
             const roll = Math.random();
 
-            // Only create an entry if it's NOT a stranger
             if (roll < relationshipChance) {
                 const p1 = game.players[i];
                 const p2 = game.players[j];
                 if (!p1 || !p2) continue;
 
-                let level = relationshipLevels.ACQUAINTANCE.level; // Default to acquaintance
+                let level = relationshipLevels.ACQUAINTANCE.level; 
                 const specialRoll = Math.random();
 
-                if (specialRoll < 0.05) level = relationshipLevels.BEST_FRIEND.level; // 0.25% overall
-                else if (specialRoll < 0.20) level = relationshipLevels.GOOD_FRIEND.level; // 1% overall
-                else if (specialRoll < 0.50) level = relationshipLevels.FRIEND.level; // 2.5% overall
-                // else: 2.5% chance of acquaintance
+                if (specialRoll < 0.08) level = relationshipLevels.BEST_FRIEND.level; 
+                else if (specialRoll < 0.25) level = relationshipLevels.GOOD_FRIEND.level; 
+                else if (specialRoll < 0.55) level = relationshipLevels.FRIEND.level; 
 
                 const key = [p1.id, p2.id].sort().join('_');
                 game.relationships.set(key, level);
@@ -813,25 +811,25 @@ async function initializeLeague(onProgress) {
             }
         }
         if (i % 20 === 0 && onProgress) {
-            onProgress(0.7 + (i / totalPlayers) * 0.2); // Update progress based on player loop
+            onProgress(0.7 + (i / totalPlayers) * 0.2); 
             await yieldToMain();
         }
     }
     console.log(`Assigned ${relationshipsAdded} initial non-stranger relationships.`);
-    // --- 💡 END FIX ---
 
     onProgress(0.9); await yieldToMain();
 
-
-    // --- Generate AI teams ---
-    console.log("Generating AI teams...");
-    availableColors = [...teamColors]; // Reset available colors
+    console.log("Generating the 3-Tier Backyard Universe...");
+    game.youthTeams = [];
+    availableColors = [...teamColors]; 
     const availableTeamNames = [...teamNames];
-    const numAiTeams = 19;
-    for (let i = 0; i < numAiTeams; i++) {
+    
+    // 💡 TIER 1 & 2: Generate 19 AI Teams (Player team makes 20)
+    for (let i = 0; i < 19; i++) {
         const nameIndex = getRandomInt(0, availableTeamNames.length - 1);
         const teamName = `The ${availableTeamNames.splice(nameIndex, 1)[0]}`;
         const division = divisionNames[i % divisionNames.length];
+        const tier = i < 9 ? 1 : 2; // 9 AI in Tier 1 (with player), 10 in Tier 2
         const coach = getRandom(coachPersonalities);
 
         const prefOff = offenseFormations[coach.preferredOffense] ? coach.preferredOffense : 'Balanced';
@@ -853,15 +851,43 @@ async function initializeLeague(onProgress) {
                 offense: Object.fromEntries((offenseFormationData?.slots || []).map(slot => [slot, null])),
                 defense: Object.fromEntries((defenseFormationData?.slots || []).map(slot => [slot, null]))
             },
-            draftNeeds: 0
+            draftNeeds: 0,
+            tier: tier, // 💡 PRO/REL TRACKING
+            socialProfile: {
+                streetCred: tier === 1 ? 60 : 35, // Tier 1 teams are cooler
+                favorTokens: 3
+            }
         };
         game.teams.push(team);
         game.divisions[division].push(team.id);
 
-        if (onProgress) onProgress(0.9 + ((i + 1) / numAiTeams) * 0.1);
         if (i % 4 === 0) await yieldToMain();
     }
-    console.log("AI team generation complete.");
+
+    // 💡 TIER 3: The Pee-Wee League (Ages 8-10)
+    const youthMascots = ["Lil' Tykes", "Mini Monsters", "Sandlot Pups", "Junior Jets", "Tots", "Wildcats"];
+    for (let i = 0; i < 6; i++) {
+        const yTeam = {
+            id: crypto.randomUUID(), name: `The ${youthMascots[i]}`, roster: [],
+            coach: getRandom(coachPersonalities), wins: 0, losses: 0, ties: 0,
+            formations: { offense: 'Balanced', defense: '3-2-3' },
+            depthChart: { offense: {}, defense: {} },
+            isYouth: true
+        };
+        
+        // Fill youth teams with 8-10 year olds
+        for(let j = 0; j < 14; j++) {
+            const kid = generatePlayer(8, 10, initialClassModifiers);
+            kid.teamId = yTeam.id;
+            yTeam.roster.push(kid.id);
+            game.players.push(kid);
+            playerMap.set(kid.id, kid);
+        }
+        aiSetDepthChart(yTeam);
+        game.youthTeams.push(yTeam);
+    }
+    
+    console.log("AI team & Youth League generation complete.");
     onProgress(1.0);
     addMessage("Ready!", "League generated. Time to create your team.");
 
@@ -943,7 +969,13 @@ function createPlayerTeam(teamName, options = {}) {
             defense: Object.fromEntries(defaultDefenseSlots.map(slot => [slot, null])),
         },
         draftNeeds: 0,
+        tier: 1, // Player starts in the Premier parks
         isPlayerControlled: true,
+        // 💡 BACKYARD ECONOMY
+        socialProfile: {
+            streetCred: 50,
+            favorTokens: 3
+        }
     };
 
     game.teams.push(playerTeam);
@@ -977,6 +1009,12 @@ function setupDraft() {
     game.currentPick = 0;
     game.pickHistory = [];
 
+    // 💡 NEIGHBORHOOD TRYOUTS:
+    // Only kids with entersDraft === true appear in the official draft pool.
+    // Reluctant kids or street legends will not be draftable—you must recruit them via friends later!
+    const tryoutCount = game.players.filter(p => !p.teamId && p.personality?.entersDraft).length;
+    console.log(`📋 League Tryouts: ${tryoutCount} kids showed up to the official park draft.`);
+
     let sortedTeams;
 
     if (game.year === 1) {
@@ -994,8 +1032,9 @@ function setupDraft() {
             .sort((a, b) => (a.wins || 0) - (b.wins || 0) || (b.losses || 0) - (a.losses || 0));
     }
 
-    const ROSTER_LIMIT = 12;
+    const ROSTER_LIMIT = 18;
     console.log("Setting draft needs based on current rosters...");
+    // 💡 FIX: Only Senior Teams (Tiers 1 & 2) participate in the draft
     game.teams.forEach(team => {
         if (team) team.draftNeeds = Math.max(0, ROSTER_LIMIT - (team.roster?.length || 0));
     });
@@ -1117,14 +1156,14 @@ function getPositionalNeed(team, pos) {
         return pPos === pos;
     }).length;
 
-    // Ideal counts for an 8-man roster
-    const targets = { 'QB': 1, 'RB': 1, 'WR': 2, 'TE': 1, 'OL': 2, 'DL': 2, 'LB': 1, 'DB': 2 };
-    const target = targets[pos] || 1;
+    // 💡 AI TARGETS: Ideal positional breakdown for an 18-man roster
+    const targets = { 'QB': 2, 'RB': 2, 'WR': 3, 'TE': 1, 'OL': 3, 'DL': 3, 'LB': 2, 'DB': 2 };
+    const target = targets[pos] || 2;
 
-    if (count === 0) return 2.0; // Desperate
-    if (count < target) return 1.5; // High Need
-    if (count === target) return 0.8; // Depth needed
-    return 0.2; // Overloaded
+    if (count === 0) return 2.0; 
+    if (count < target) return 1.5; 
+    if (count === target) return 0.8; 
+    return 0.2; 
 }
 
 /** Revised simulateAIPick with Roster Awareness */
@@ -1164,19 +1203,21 @@ function simulateAIPick(team) {
         let needMultiplier = 1.0;
 
         if (pos === 'QB') {
-            if (qbCount === 0) needMultiplier = 3.0;      // Desperate for a QB
-            else if (qbCount === 1) needMultiplier = 0.5; // Backup
-            else needMultiplier = 0.1;                    // Do not draft 3 QBs
+            if (qbCount === 0) needMultiplier = 3.0;      
+            else if (qbCount === 1) needMultiplier = 1.2; 
+            else needMultiplier = 0.1;                    
         }
         else if (['OL', 'DL', 'C', 'DT', 'DE', 'OT', 'OG'].includes(pos)) {
-            if (trenchCount < 3) needMultiplier = 2.0;    // Need starting linemen
-            else if (trenchCount < 5) needMultiplier = 1.2; // Need depth
-            else needMultiplier = 0.6;
+            if (trenchCount < 4) needMultiplier = 2.2;    
+            else if (trenchCount < 7) needMultiplier = 1.4; 
+            else needMultiplier = 0.5;
         }
         else {
             // Skill Players (WR, RB, DB, LB)
-            if (skillCount < 4) needMultiplier = 1.5;
-            else needMultiplier = 0.9;
+            // 20 man roster means ~11 skill players (4 WR, 2 RB, 2 TE, 2 LB, 2 DB minus 1 for overlap)
+            if (skillCount < 6) needMultiplier = 1.6;
+            else if (skillCount < 10) needMultiplier = 1.1;
+            else needMultiplier = 0.7;
         }
 
         const finalScore = baseScore * needMultiplier;
@@ -1200,7 +1241,7 @@ function simulateAIPick(team) {
  * and updates the player's teamId.
  */
 function addPlayerToTeam(player, team) {
-    const ROSTER_LIMIT = 12;
+    //const ROSTER_LIMIT = 12;
 
     if (!player || !team || !team.roster || typeof player.id === 'undefined') return false;
     if (team.roster.length >= ROSTER_LIMIT) return false;
@@ -1344,38 +1385,50 @@ function generateDraftSummary() {
  * Generates the league schedule using a round-robin algorithm within divisions.
  */
 function generateSchedule() {
-    if (!game || !game.teams || !game.divisions || !divisionNames || divisionNames.length !== 2) {
+    if (!game || !game.teams) {
         console.error("generateSchedule: Game state invalid."); game.schedule = []; return;
     }
     game.schedule = [];
     game.currentWeek = 0;
     const numWeeks = 9;
     const allWeeklyGames = Array(numWeeks).fill(null).map(() => []);
-    console.log("Generating schedule...");
+    
+    console.log("Generating 3-Tier Multi-League Schedule...");
 
-    for (const divisionName of divisionNames) {
-        let teamsInDivision = game.teams.filter(t => t && t.division === divisionName);
-        if (teamsInDivision.length !== 10) {
-            console.error(`Scheduling Error: Division ${divisionName} requires 10 teams but has ${teamsInDivision.length}. Skipping.`);
-            continue;
-        }
-        const numTeams = teamsInDivision.length;
+    // Helper: Runs a round-robin for a specific pool of teams
+    const schedulePool = (poolTeams) => {
+        if (poolTeams.length < 2) return;
+        const t0 = poolTeams[0];
+        const others = poolTeams.slice(1);
 
         for (let round = 0; round < numWeeks; round++) {
-            for (let match = 0; match < numTeams / 2; match++) {
-                const home = teamsInDivision[match];
-                const away = teamsInDivision[numTeams - 1 - match];
-                if (home && away) {
-                    const matchup = round % 2 === 1 ? { home, away } : { home: away, away: home };
-                    allWeeklyGames[round].push(matchup);
-                } else { console.warn(`Scheduling warning: Invalid team object in round ${round}, match ${match}, div ${divisionName}`); }
+            if (others.length > 0) {
+                allWeeklyGames[round].push({ home: t0, away: others[0] });
+                for (let i = 1; i < others.length / 2; i++) {
+                    const home = others[i];
+                    const away = others[others.length - i];
+                    if (home && away) {
+                        allWeeklyGames[round].push(round % 2 === 0 ? { home, away } : { home: away, away: home });
+                    }
+                }
+                others.push(others.shift());
             }
-            const lastTeam = teamsInDivision.pop();
-            if (lastTeam) teamsInDivision.splice(1, 0, lastTeam);
         }
+    };
+
+    // 1. Schedule Tier 1 (Majors)
+    schedulePool(game.teams.filter(t => t.tier === 1));
+    
+    // 2. Schedule Tier 2 (Minors)
+    schedulePool(game.teams.filter(t => t.tier === 2));
+
+    // 3. Schedule Tier 3 (Pee-Wee Youth)
+    if (game.youthTeams && game.youthTeams.length > 0) {
+        schedulePool(game.youthTeams);
     }
+
     game.schedule = allWeeklyGames.flat();
-    console.log(`Schedule generated: ${game.schedule.length} total games over ${numWeeks} weeks.`);
+    console.log(`Schedule generated: ${game.schedule.length} total games across all leagues.`);
 }
 
 /** Resets player fatigue and game stats (typically before a game). */
@@ -5150,6 +5203,8 @@ function executeThrow(qbState, target, strength, accuracy, playState, gameLog, a
     qbState.action = 'idle';
 
     playState.statEvents.push({ type: 'pass_attempt', qbId: qbState.id });
+    // 💡 FIX: Log the target so we can track touches for happiness!
+    playState.statEvents.push({ type: 'target', receiverId: target.id });
 
     if (gameLog) {
         const passTypeStr = passType.charAt(0).toUpperCase() + passType.slice(1);
@@ -6549,6 +6604,15 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
 
     playState.activePlayers.forEach(p => resetPlayerRuntimeState(p));
 
+    // 💡 RECORD SNAPS PLAYED (Drives player development & bench/starter growth)
+    playState.activePlayers.forEach(pState => {
+        const p = getPlayer(pState.id);
+        if (p) {
+            if (!p.careerStats) p.careerStats = { seasonsPlayed: 0 };
+            p.careerStats.snapsThisSeason = (p.careerStats.snapsThisSeason || 0) + 1;
+        }
+    });
+
     // --- GAME CLOCK BURN CALCULATION ---
     let clockBurn = Math.floor(Math.random() * 8) + 24; // 24-32 seconds for a normal play running down the play clock
     if (playState.incomplete) {
@@ -6606,6 +6670,14 @@ function applyStatEvents(statEvents) {
                 if (p) {
                     ensureStats(p);
                     p.gameStats.drops = (p.gameStats.drops || 0) + 1;
+                }
+                break;
+            }
+            case 'target': {
+                const p = getPlayer(evt.receiverId);
+                if (p) {
+                    ensureStats(p);
+                    p.gameStats.targets = (p.gameStats.targets || 0) + 1;
                 }
                 break;
             }
@@ -7683,24 +7755,85 @@ function endOfWeekCleanup() {
     });
 }
 
-/** Generates random weekly non-game events (injuries, unavailability). */
+/** 
+ * 💡 DYNAMIC NEIGHBORHOOD EVENTS
+ * Events that factor in Dependability, Relationships, and Local Drama
+ */
 function generateWeeklyEvents() {
-    if (!game || !game.players) return;
-    for (const player of game.players) {
-        if (!player || !player.status || player.status.type !== 'healthy') continue;
-        for (const event of weeklyEvents) {
-            if (Math.random() < event.chance) {
-                player.status.type = event.type;
-                player.status.description = event.description;
-                player.status.duration = getRandomInt(event.minDuration, event.maxDuration);
-                player.status.isNew = true;
-                if (player.teamId === game.playerTeam?.id) {
-                    addMessage('Player Status Update', `${player.name} will be unavailable for ${player.status.duration} week(s): ${player.status.description}`);
+    if (!game || !game.teams) return;
+
+    game.teams.forEach(team => {
+        const roster = getRosterObjects(team);
+        if (roster.length === 0) return;
+
+        roster.forEach(player => {
+            if (player.status?.duration > 0) return;
+
+            const dependability = player.personality?.dependability || 60;
+            const flakeChance = (100 - dependability) / 1800; // Low dependability = more school/chore trouble
+
+            // 1. Chores / Grounded (Dependability-based)
+            if (Math.random() < flakeChance) {
+                const reasons = [
+                    'Grounded for bad report card',
+                    'Family road trip to visit grandma',
+                    'Has to babysit younger sibling',
+                    'Got detention after school'
+                ];
+                const reason = getRandom(reasons);
+                player.status = { type: 'busy', description: reason, duration: getRandomInt(1, 2), isNew: true };
+                
+                if (team.id === game.playerTeam?.id) {
+                    addMessage('Unavailable this week', `⚠️ ${player.name} cannot play: ${reason}.`);
                 }
-                break;
+                return;
             }
-        }
-    }
+
+            // 2. Bike Trouble (Buddy Event: affects both friends!)
+            if (Math.random() < 0.004) {
+                // Find their best friend on the team
+                const buddy = roster.find(other => 
+                    other.id !== player.id && 
+                    getRelationshipLevel(player.id, other.id) >= relationshipLevels.GOOD_FRIEND.level
+                );
+
+                if (buddy && buddy.status?.duration === 0) {
+                    player.status = { type: 'busy', description: 'Flat bike tire / missed ride', duration: 1, isNew: true };
+                    buddy.status = { type: 'busy', description: 'Flat bike tire / missed ride', duration: 1, isNew: true };
+
+                    if (team.id === game.playerTeam?.id) {
+                        addMessage('Bike Disaster!', `🚲 ${player.name} and ${buddy.name} ride together to games, but their bike chain snapped on the way! Both miss this week.`);
+                    }
+                    return;
+                }
+            }
+
+            // 3. Mentorship / Study Session (Positive Event)
+            if (dependability < 40 && Math.random() < 0.01) {
+                const smartTeammate = roster.find(other => (other.attributes?.mental?.playbookIQ || 50) > 75);
+                if (smartTeammate) {
+                    player.personality.dependability = Math.min(99, dependability + 5);
+                    improveRelationship(player.id, smartTeammate.id);
+
+                    if (team.id === game.playerTeam?.id) {
+                        addMessage('Study Session', `📚 ${smartTeammate.name} helped ${player.name} pass his algebra test. His dependability improved (+5)!`);
+                    }
+                    return;
+                }
+            }
+
+            // 4. Standard Minor Sprains
+            if (Math.random() < 0.005) {
+                const injuries = ['Sprained wrist climbing tree', 'Skateboard scrape', 'Jammed pinky in gym class'];
+                const injury = getRandom(injuries);
+                player.status = { type: 'injured', description: injury, duration: 1, isNew: true };
+
+                if (team.id === game.playerTeam?.id) {
+                    addMessage('Minor Injury', `🩹 ${player.name} is resting: ${injury}.`);
+                }
+            }
+        });
+    });
 }
 
 /** Processes random relationship changes between players. */
@@ -7807,19 +7940,56 @@ function simulateWeek(options = {}) {
 // --- FREE AGENCY & ROSTER MANAGEMENT ---
 // =============================================================
 
-/** Generates a list of available free agents for the week. */
+/**
+ * 💡 NETWORKED SCOUTING:
+ * Returns only unassigned players who have a social connection (>= ACQUAINTANCE)
+ * with at least one player currently on the team's roster.
+ */
+export function getTeamNetworkRecruits(team) {
+    if (!team || !team.roster || !game || !game.players) return [];
+
+    const rosterIds = new Set(team.roster);
+    const unassignedPlayers = game.players.filter(p => 
+        p && 
+        !p.teamId && 
+        p.status?.type !== 'retired' && 
+        p.status?.type !== 'departed'
+    );
+
+    const connectedRecruits = [];
+
+    unassignedPlayers.forEach(freeAgent => {
+        let highestRelationship = relationshipLevels.STRANGER.level;
+        let connectedTeammate = null;
+
+        for (const rosterPlayerId of rosterIds) {
+            const rel = getRelationshipLevel(rosterPlayerId, freeAgent.id);
+            if (rel > highestRelationship) {
+                highestRelationship = rel;
+                connectedTeammate = getPlayer(rosterPlayerId);
+            }
+        }
+
+        // Only visible if at least an Acquaintance
+        if (highestRelationship >= relationshipLevels.ACQUAINTANCE.level) {
+            const scouted = getScoutedPlayerInfo(freeAgent, highestRelationship);
+            scouted.connectedBuddyName = connectedTeammate?.name || 'A teammate';
+            scouted.networkStrength = highestRelationship;
+            connectedRecruits.push(scouted);
+        }
+    });
+
+    // Sort by strongest friendship first
+    return connectedRecruits.sort((a, b) => b.networkStrength - a.networkStrength);
+}
+
+/**
+ * Weekly network discovery: Players introduce their friends to the team
+ */
 function generateWeeklyFreeAgents() {
-    if (!game || !game.players) { console.error("generateWeeklyFreeAgents: Game not initialized."); return; }
-    const undraftedPlayers = game.players.filter(p => p && !p.teamId);
-    game.freeAgents = [];
-    const numFreeAgents = 5;
-    for (let i = 0; i < numFreeAgents; i++) {
-        if (undraftedPlayers.length > 0) {
-            const faIndex = getRandomInt(0, undraftedPlayers.length - 1);
-            const fa = undraftedPlayers.splice(faIndex, 1)[0];
-            if (fa) game.freeAgents.push(fa);
-        } else { break; }
-    }
+    if (!game || !game.playerTeam) return;
+    // Human visible free agents are exclusively friends of their roster
+    game.freeAgents = getTeamNetworkRecruits(game.playerTeam).slice(0, 6);
 }
 
 /**
@@ -7831,11 +8001,18 @@ function callFriend(playerId) {
         return { success: false, message: "Game state error prevented calling friend." };
     }
     const team = game.playerTeam;
-    // --- 💡 FIX: Get roster objects ---
+    
+    // 💡 BACKYARD ECONOMY: Costs 1 Favor
+    if (!team.socialProfile) team.socialProfile = { favorTokens: 3, streetCred: 50 };
+    if (team.socialProfile.favorTokens <= 0) {
+        return { success: false, message: "You are out of Favor Tokens for this season! No one owes you a ride." };
+    }
+
     const roster = getRosterObjects(team);
-    if (!roster.some(p => p && p.status?.duration > 0)) {
-        // --- 💡 END FIX ---
-        return { success: false, message: "You can only call a friend if a player on your team is currently injured or busy." };
+    const healthyCount = roster.filter(p => p && p.status?.duration === 0).length;
+    
+    if (healthyCount >= 16) {
+        return { success: false, message: "Your roster is full enough. Save your favors for when you're desperate." };
     }
     const player = game.freeAgents.find(p => p && p.id === playerId);
     if (!player) return { success: false, message: "That player is no longer available this week." };
@@ -7852,16 +8029,17 @@ function callFriend(playerId) {
 
     if (Math.random() < successChance) {
         player.status = { type: 'temporary', description: 'Helping Out', duration: 1 };
-        if (addPlayerToTeam(player, team)) { // This now adds an ID
-            // --- 💡 FIX: Get the full roster objects to do relationship improvements ---
+        if (addPlayerToTeam(player, team)) { 
+            
+            team.socialProfile.favorTokens -= 1; // 💡 DEDUCT FAVOR
+
             const fullRoster = getRosterObjects(team);
             fullRoster.forEach(rosterPlayer => {
-                // --- 💡 END FIX ---
                 if (rosterPlayer && rosterPlayer.id !== player.id) {
                     improveRelationship(rosterPlayer.id, player.id);
                 }
             });
-            const message = `${player.name} (${relationshipName}) agreed to help out for the next game!`;
+            const message = `${player.name} (${relationshipName}) agreed to help out! (Favors Remaining: ${team.socialProfile.favorTokens})`;
             addMessage("Roster Update: Friend Called", message);
             return { success: true, message };
         } else {
@@ -7877,64 +8055,67 @@ function callFriend(playerId) {
 // game.js
 
 function aiManageRoster(team) {
-    if (!team || !team.roster || !game || !game.freeAgents || !team.coach) return;
+    if (!team || !team.roster || !game || !team.coach) return;
 
     const roster = getRosterObjects(team);
-
     let playableCount = roster.filter(p =>
-        p &&
-        (!p.status ||
-            p.status.duration === 0 ||
-            p.status.type === 'temporary')
+        p && (!p.status || p.status.duration === 0 || p.status.type === 'temporary')
     ).length;
 
-    const ROSTER_LIMIT = 12;
+    const aiAvailableNetwork = getTeamNetworkRecruits(team);
 
+    // 1. EMERGENCY RECRUITING: If below 8 players, sign anyone connected.
     while (
         playableCount < MIN_HEALTHY_PLAYERS &&
         team.roster.length < ROSTER_LIMIT &&
-        game.freeAgents.length > 0
+        aiAvailableNetwork.length > 0
     ) {
-        const bestFA = game.freeAgents
-            .filter(p => p)
-            .reduce((best, current) => {
-                if (!best) return current;
-                return getPlayerScore(current, team.coach) > getPlayerScore(best, team.coach) ? current : best;
-            }, null);
+        const bestFA = aiAvailableNetwork.reduce((best, current) => {
+            if (!best) return current;
+            const currentScore = getPlayerScore(current, team.coach) + (current.networkStrength * 15);
+            const bestScore = getPlayerScore(best, team.coach) + (best.networkStrength * 15);
+            return currentScore > bestScore ? current : best;
+        }, null);
+
         if (!bestFA) break;
 
-        const aiSuccessChance = 0.5;
-        game.freeAgents = game.freeAgents.filter(p => p && p.id !== bestFA.id);
+        const idx = aiAvailableNetwork.findIndex(p => p.id === bestFA.id);
+        if (idx > -1) aiAvailableNetwork.splice(idx, 1);
 
-        if (Math.random() < aiSuccessChance) {
-            const originalStatus = bestFA.status;
+        const originalStatus = bestFA.status;
+        bestFA.status = { type: 'temporary', description: 'Helping Out', duration: 1 };
 
-            bestFA.status = {
-                type: 'temporary',
-                description: 'Helping Out',
-                duration: 1
-            };
-
-            if (addPlayerToTeam(bestFA, team)) {
-                game.freeAgents = game.freeAgents.filter(p => p && p.id !== bestFA.id);
-
-                const newRoster = getRosterObjects(team);
-
-                playableCount = newRoster.filter(p =>
-                    p &&
-                    (!p.status ||
-                        p.status.duration === 0 ||
-                        p.status.type === 'temporary')
-                ).length;
-            } else {
-                bestFA.status = originalStatus;
-            }
+        if (addPlayerToTeam(bestFA, team)) {
+            playableCount++;
         } else {
-            const bestFAName = bestFA?.name || 'Unknown Player';
-            console.log(`${team.name} failed to sign temporary player ${bestFAName}.`);
+            bestFA.status = originalStatus;
         }
     }
 
+    // 💡 2. LUXURY SNIPING: If AI has open roster spots and Favor Tokens, recruit a star street legend!
+    if (team.roster.length < ROSTER_LIMIT && team.socialProfile?.favorTokens > 0) {
+        const topFriend = aiAvailableNetwork.reduce((best, p) => {
+            // Must be at least a GOOD_FRIEND to spend a luxury favor mid-season
+            if (p.networkStrength < relationshipLevels.GOOD_FRIEND.level) return best;
+            
+            // Value is Coach Scheme + Friendship + Street Cred
+            const score = getPlayerScore(p, team.coach) + (p.networkStrength * 20) + (p.personality?.streetCred || 50);
+            
+            // Threshold: Only snipe if the player is very good (score > 150)
+            return score > (best ? best._score : 150) ? { ...p, _score: score } : best;
+        }, null);
+
+        // 30% chance they actually pull the trigger this week
+        if (topFriend && Math.random() < 0.3) {
+            topFriend.status = { type: 'healthy', description: '', duration: 0 };
+            if (addPlayerToTeam(topFriend, team)) {
+                team.socialProfile.favorTokens -= 1;
+                console.log(`[AI Network] ${team.name} used a favor token to recruit street legend ${topFriend.name}!`);
+            }
+        }
+    }
+
+    // After resolving AI network moves, rebuild their depth chart
     aiSetDepthChart(team);
 }
 
@@ -8011,45 +8192,106 @@ function checkCaptainDiscipline(team, gameLog) {
 // --- PLAYER DEVELOPMENT & OFFSEASON ---
 // =============================================================
 
-/** Applies attribute improvements based on age and potential. */
-function developPlayer(player) {
+/** 
+ * 💡 DEEP PROGRESSION ENGINE
+ * Combines: Potential + Work Ethic + Experience (Snaps) + Mentorship
+ */
+function developPlayer(player, team = null) {
     if (!player || !player.attributes) return { player, improvements: [] };
     const developmentReport = { player, improvements: [] };
-    const potentialMultipliers = { 'A': 1.6, 'B': 1.3, 'C': 1.0, 'D': 0.7, 'F': 0.4 };
-    const potentialMultiplier = potentialMultipliers[player.potential] || 1.0;
 
+    const potentialMultipliers = { 'A': 1.5, 'B': 1.25, 'C': 1.0, 'D': 0.75, 'F': 0.5 };
+    const potMod = potentialMultipliers[player.potential] || 1.0;
+    const ethic = player.personality?.workEthic || 50;
+    const ethicMod = 0.5 + (ethic / 100); // 0.65x (lazy) to 1.49x (gym rat)
+
+     // 1. Calculate Experience Factor (Snaps played during the year)
+    const snaps = player.careerStats?.snapsThisSeason || 0;
+    // 💡 FIX: In a 9-game season, a starter plays ~350-400 snaps. Scale divisor to 500.
+    const experienceMod = Math.min(1.5, 0.6 + (snaps / 500)); // Bench warmer = 0.6x, Ironman Starter = 1.4x
+
+    // 2. Mentorship Bonus from team captain or veteran
+    let mentorBoost = 0;
+    if (team && player.age <= 13) {
+        const roster = getRosterObjects(team);
+        const hasOlderMentor = roster.some(teammate => 
+            teammate.age >= 15 && 
+            getRelationshipLevel(player.id, teammate.id) >= relationshipLevels.GOOD_FRIEND.level
+        );
+        if (hasOlderMentor) mentorBoost = 1;
+    }
+
+    // 3. Base Points Driven by Age Tier
     let basePoints = 0;
-    if (player.age <= 12) basePoints = getRandomInt(3, 5);
-    else if (player.age <= 14) basePoints = getRandomInt(2, 4);
-    else if (player.age <= 16) basePoints = getRandomInt(1, 2);
-    else basePoints = getRandomInt(0, 1);
+    let focusGroup = [];
 
-    let potentialPoints = Math.max(0, Math.round(basePoints * potentialMultiplier));
-    const attributesToImprove = ['speed', 'strength', 'agility', 'throwingAccuracy', 'catchingHands', 'tackling', 'blocking', 'playbookIQ', 'blockShedding', 'toughness', 'consistency'];
+    if (player.age <= 12) {
+        // Growth Spurt Phase (Physical focus)
+        basePoints = getRandomInt(3, 5);
+        focusGroup = ['speed', 'agility', 'stamina', 'catchingHands'];
+    } else if (player.age <= 14) {
+        // Athletic & Skill Transition Phase
+        basePoints = getRandomInt(2, 4);
+        focusGroup = ['throwingAccuracy', 'catchingHands', 'blocking', 'tackling', 'speed', 'strength'];
+    } else if (player.age <= 16) {
+        // High School Peak & Mental Mastery Phase
+        basePoints = getRandomInt(1, 3);
+        focusGroup = ['playbookIQ', 'consistency', 'toughness', 'blockShedding', 'throwingAccuracy'];
+    } else {
+        // Plateau / Ceiling
+        basePoints = getRandomInt(0, 1);
+        focusGroup = ['playbookIQ', 'consistency'];
+    }
 
-    for (let i = 0; i < potentialPoints; i++) {
-        const attrToBoost = getRandom(attributesToImprove);
-        for (const category in player.attributes) {
-            if (player.attributes[category]?.[attrToBoost] !== undefined && player.attributes[category][attrToBoost] < 99) {
-                const increase = 1;
-                if (increase > 0) {
-                    player.attributes[category][attrToBoost] = Math.min(99, player.attributes[category][attrToBoost] + increase);
-                    const existing = developmentReport.improvements.find(imp => imp.attr === attrToBoost);
-                    if (existing) existing.increase += increase;
-                    else developmentReport.improvements.push({ attr: attrToBoost, increase });
-                    break;
-                }
+    // Compound all 4 growth factors
+    let totalUpgradePoints = Math.round((basePoints * potMod * ethicMod * experienceMod)) + mentorBoost;
+
+    // Slacker regression check: lazy kids (workEthic < 25) past age 15 can actually LOSE stamina/speed!
+    if (ethic < 25 && player.age >= 15 && Math.random() < 0.35) {
+        const regressedAttr = getRandom(['speed', 'stamina', 'agility']);
+        for (const cat in player.attributes) {
+            if (player.attributes[cat]?.[regressedAttr] && player.attributes[cat][regressedAttr] > 30) {
+                player.attributes[cat][regressedAttr] -= 1;
+                developmentReport.improvements.push({ attr: `${regressedAttr} (Slacked off)`, increase: -1 });
+                break;
             }
         }
     }
 
-    const heightGain = player.age <= 12 ? getRandomInt(1, 3) : player.age <= 14 ? getRandomInt(0, 2) : getRandomInt(0, 1);
-    const weightGain = player.age <= 12 ? getRandomInt(6, 16) : player.age <= 14 ? getRandomInt(4, 12) : getRandomInt(2, 8);
+    // Apply Upgrades
+    for (let i = 0; i < totalUpgradePoints; i++) {
+        // 70% chance to improve a position-focused skill, 30% wild card
+        const pool = (Math.random() < 0.70 && focusGroup.length > 0) 
+            ? focusGroup 
+            : ['speed', 'strength', 'agility', 'throwingAccuracy', 'catchingHands', 'tackling', 'blocking', 'playbookIQ', 'blockShedding', 'toughness', 'consistency'];
+        
+        const attrToBoost = getRandom(pool);
+
+        for (const category in player.attributes) {
+            if (player.attributes[category]?.[attrToBoost] !== undefined && player.attributes[category][attrToBoost] < 99) {
+                player.attributes[category][attrToBoost] = Math.min(99, player.attributes[category][attrToBoost] + 1);
+                const existing = developmentReport.improvements.find(imp => imp.attr === attrToBoost);
+                if (existing) existing.increase += 1;
+                else developmentReport.improvements.push({ attr: attrToBoost, increase: 1 });
+                break;
+            }
+        }
+    }
+
+    // Natural Body Growth (Independent of skill points)
+    const heightGain = player.age <= 12 ? getRandomInt(1, 3) : (player.age <= 14 ? getRandomInt(0, 2) : 0);
+    const weightGain = player.age <= 12 ? getRandomInt(8, 18) : (player.age <= 14 ? getRandomInt(6, 14) : getRandomInt(2, 6));
+
     if (heightGain > 0) developmentReport.improvements.push({ attr: 'height', increase: heightGain });
     if (weightGain > 0) developmentReport.improvements.push({ attr: 'weight', increase: weightGain });
+
     if (!player.attributes.physical) player.attributes.physical = {};
     player.attributes.physical.height = (player.attributes.physical.height || 50) + heightGain;
     player.attributes.physical.weight = (player.attributes.physical.weight || 100) + weightGain;
+
+    // Reset snap counter for the next season
+    if (!player.careerStats) player.careerStats = {};
+    player.careerStats.snapsThisSeason = 0;
 
     return developmentReport;
 }
@@ -8100,27 +8342,60 @@ function advanceToOffseason() {
             if (team.id === game.playerTeam?.id) developmentResults.push(devReport);
 
             let playerIsLeaving = false;
+            
+            // 💡 1. GRADUATION (Aging Out)
             if (player.age >= 17) {
                 retiredPlayers.push(player); playerIsLeaving = true;
                 if (team.id === game.playerTeam?.id) addMessage("Player Retires", `${player.name} is moving on from the league.`);
-                if ((player.careerStats.touchdowns || 0) > 25 /* ... other HOF criteria ... */) {
+                if ((player.careerStats.touchdowns || 0) > 25) {
                     if (!game.hallOfFame) game.hallOfFame = [];
                     game.hallOfFame.push(player); hofInductees.push(player);
                     if (team.id === game.playerTeam?.id) addMessage("Hall of Fame!", `${player.name} inducted!`);
                 }
             } else {
-                for (const event of offseasonDepartureEvents) {
-                    if (Math.random() < event.chance) {
-                        leavingPlayers.push({ player, reason: event.reason, teamName: team.name });
-                        playerIsLeaving = true;
-                        if (team.id === game.playerTeam?.id) addMessage("Player Leaving", `${player.name}: ${event.reason}.`);
-                        break;
-                    }
+                // 💡 2. HAPPINESS & TRANSFER LOGIC
+                if (!player.expectations) player.expectations = { desiredRole: 'DEVELOPMENTAL', minTouchesPerGame: 0, happiness: 100 };
+                
+                // Base check: did they play? (9 games in season)
+                const gamesPlayed = 9;
+                const snapsPerGame = (player.careerStats.snapsThisSeason || 0) / gamesPlayed;
+                const touchesPerGame = ((player.seasonStats.rushAttempts || 0) + (player.seasonStats.targets || 0) + (player.seasonStats.passAttempts || 0)) / gamesPlayed;
+
+                // 💡 FIX: Snaps per game expectation scaled realistically. (Average game has ~50 snaps total)
+                if (player.expectations.desiredRole === 'STARTER' && snapsPerGame < 35) {
+                    player.expectations.happiness -= 30; // Mad about being benched
+                } else if (player.expectations.desiredRole === 'ROTATION' && snapsPerGame < 15) {
+                    player.expectations.happiness -= 20; // Expected to rotate in, but didn't
                 }
-                if (!playerIsLeaving && team.id === game.playerTeam?.id && Math.random() < transferEventChance) {
-                    leavingPlayers.push({ player, reason: 'Asked to leave', teamName: team.name });
+
+                if (touchesPerGame < player.expectations.minTouchesPerGame) {
+                    player.expectations.happiness -= 25; // "You never throw me the ball!"
+                }
+
+                // Team Success Check
+                if (team.socialProfile && team.socialProfile.streetCred < 35) {
+                    player.expectations.happiness -= 15; // Team is a joke on the playground
+                } else if (team.socialProfile && team.socialProfile.streetCred > 65) {
+                    player.expectations.happiness += 10; // Winning cures everything
+                }
+
+                // The Ultimatum
+                if (player.expectations.happiness < 40) {
+                    leavingPlayers.push({ player, reason: 'Unhappy with role, transferred to rival', teamName: team.name });
                     playerIsLeaving = true;
-                    addMessage("Transfer Request", `${player.name} asked to leave and has departed.`);
+                    if (team.id === game.playerTeam?.id) {
+                        addMessage("Transfer Request", `😠 ${player.name} was unhappy with his touches/playing time and left the team.`);
+                    }
+                } else {
+                    // Standard Life Events (Moving away, etc.)
+                    for (const event of offseasonDepartureEvents) {
+                        if (Math.random() < event.chance) {
+                            leavingPlayers.push({ player, reason: event.reason, teamName: team.name });
+                            playerIsLeaving = true;
+                            if (team.id === game.playerTeam?.id) addMessage("Player Leaving", `${player.name}: ${event.reason}.`);
+                            break;
+                        }
+                    }
                 }
             }
 
@@ -8152,6 +8427,14 @@ function advanceToOffseason() {
             team.depthChart.defense = Object.fromEntries(defSlots.map(slot => [slot, null]));
         }
         team.wins = 0; team.losses = 0; team.ties = 0;
+        
+        // 💡 REFRESH ECONOMY
+        if (team.socialProfile) {
+            team.socialProfile.favorTokens = 3 + (team.socialProfile.streetCred >= 75 ? 1 : 0); // Cool teams get an extra favor
+            // Normalize street cred towards 50
+            team.socialProfile.streetCred = Math.round((team.socialProfile.streetCred + 50) / 2);
+        }
+
         aiSetDepthChart(team);
     });
 
@@ -8167,25 +8450,72 @@ function advanceToOffseason() {
         }
     }
 
-    addMessage("Offseason Summary", `Offseason complete. ${totalVacancies} roster spots opened. Preparing for the draft.`);
+    // 💡 PEE-WEE GRADUATION
+    let youthGraduates = 0;
+    if (game.youthTeams) {
+        game.youthTeams.forEach(yt => {
+            yt.roster = yt.roster.filter(id => {
+                const kid = getPlayer(id);
+                kid.age++;
+                kid.careerStats.seasonsPlayed = (kid.careerStats.seasonsPlayed || 0) + 1;
+                developPlayer(kid, yt);
+                
+                // At age 11, they leave the youth league
+                if (kid.age >= 11) {
+                    kid.teamId = null;
+                    kid.seasonStats = {}; // Reset for big leagues
+                    kid.careerStats.snapsThisSeason = 0;
+                    // 70% enter draft, 30% hit the streets as unassigned friends
+                    kid.personality.entersDraft = Math.random() < 0.70; 
+                    youthGraduates++;
+                    return false;
+                }
+                return true;
+            });
+            yt.wins = 0; yt.losses = 0; yt.ties = 0;
+        });
+    }
 
-    const rookieCount = Math.max(totalVacancies, game.teams.length);
-    console.log(`Generating ${rookieCount} new rookie players (age 10-12).`);
+    // 💡 PROMOTION & RELEGATION
+    const tier1 = game.teams.filter(t => t.tier === 1).sort((a, b) => b.wins - a.wins || a.losses - b.losses);
+    const tier2 = game.teams.filter(t => t.tier === 2).sort((a, b) => b.wins - a.wins || a.losses - b.losses);
+    
+    let proRelMsg = "League Tiers hold steady this year.";
+    if (tier1.length > 2 && tier2.length > 2) {
+        const relegated = tier1.slice(-2); // Bottom 2 of Tier 1
+        const promoted = tier2.slice(0, 2); // Top 2 of Tier 2
 
-    // 💡 NEW: Generate a unique class strength for this specific draft year
+        relegated.forEach(t => { t.tier = 2; t.socialProfile.streetCred -= 20; });
+        promoted.forEach(t => { t.tier = 1; t.socialProfile.streetCred += 20; });
+
+        proRelMsg = `**PROMOTED:** ${promoted[0].name}, ${promoted[1].name}\n**RELEGATED:** ${relegated[0].name}, ${relegated[1].name}`;
+        
+        if (relegated.some(t => t.id === game.playerTeam.id)) {
+            addMessage("Relegated!", "We finished at the bottom of the league and have been relegated to the Sandlot Circuit (Tier 2). We must fight our way back up!", false, game);
+        } else if (promoted.some(t => t.id === game.playerTeam.id)) {
+            addMessage("Promoted!", "We won the Sandlot Circuit! Next year we play with the big dogs in Tier 1.", false, game);
+        }
+    }
+
+    addMessage("Offseason Summary", `Offseason complete. ${totalVacancies} roster spots opened.\n\n${proRelMsg}\n\nPreparing for the draft.`, false, game);
+
+    // 💡 BACKFILL PEE-WEE LEAGUE
     const thisYearsClassModifiers = generateDraftClassModifiers();
-
-    for (let i = 0; i < rookieCount; i++) {
-        const rookie = generatePlayer(10, 12, thisYearsClassModifiers);
-
-        game.players.push(rookie);
-        playerMap.set(rookie.id, rookie);
+    if (game.youthTeams) {
+        game.youthTeams.forEach(yt => {
+            while (yt.roster.length < 14) {
+                const freshKid = generatePlayer(8, 8, thisYearsClassModifiers);
+                freshKid.teamId = yt.id;
+                yt.roster.push(freshKid.id);
+                game.players.push(freshKid);
+                playerMap.set(freshKid.id, freshKid);
+            }
+            aiSetDepthChart(yt);
+        });
     }
 
     game.gameResults = [];
     game.breakthroughs = [];
-
-    // Re-elect captains for the new season
     game.teams.forEach(t => assignTeamCaptain(t));
 
     return { retiredPlayers, hofInductees, developmentResults, leavingPlayers };

@@ -1145,13 +1145,11 @@ export const defensivePlaybook = {
     }
 };
 
-// --- COACH PERSONALITIES ---
+// --- COACH PERSONALITIES (Neighborhood Archetypes) ---
 export const coachPersonalities = [
-    { type: 'West Coast Offense', preferredOffense: 'Spread', preferredDefense: '3-2-3', attributePreferences: { physical: { speed: 1.4 }, mental: { playbookIQ: 1.6 }, technical: { throwingAccuracy: 1.8 } } },
-    { type: 'Ground and Pound', preferredOffense: 'Power', preferredDefense: '4-2-2', attributePreferences: { physical: { strength: 1.8 }, mental: { toughness: 1.5 }, technical: { blocking: 1.8 } } },
-    { type: 'Blitz-Happy Defense', preferredOffense: 'Balanced', preferredDefense: '4-2-2', attributePreferences: { physical: { speed: 1.6 }, mental: { clutch: 1.4 }, technical: { tackling: 1.8 } } },
-    { type: 'Balanced', preferredOffense: 'Balanced', preferredDefense: '3-2-3', attributePreferences: { physical: { speed: 1.2 }, mental: { playbookIQ: 1.2 }, technical: { tackling: 1.2 } } },
-    { type: 'The Moneyballer', preferredOffense: 'Spread', preferredDefense: '3-1-4', attributePreferences: { physical: { speed: 0.8 }, mental: { playbookIQ: 2.0 }, technical: { catchingHands: 1.5 } } },
-    { type: 'Air Raid', preferredOffense: 'Empty', preferredDefense: '4-1-3', attributePreferences: { physical: { speed: 1.8 }, mental: { playbookIQ: 0.8 }, technical: { throwingAccuracy: 1.5 } } },
-    { type: 'Trench Warfare', preferredOffense: 'Power', preferredDefense: '4-2-2', attributePreferences: { physical: { strength: 2.0 }, mental: { toughness: 1.5 }, technical: { blocking: 2.0 } } }
+    { type: 'The Has-Been Dad', preferredOffense: 'Power', preferredDefense: '4-2-2', attributePreferences: { physical: { strength: 1.8 }, mental: { toughness: 1.8 }, technical: { blocking: 1.8 } } },
+    { type: 'The Techie Brother', preferredOffense: 'Spread', preferredDefense: '3-1-4', attributePreferences: { physical: { speed: 1.6 }, mental: { playbookIQ: 2.0 }, technical: { catchingHands: 1.5 } } },
+    { type: 'The Rec Center Director', preferredOffense: 'Balanced', preferredDefense: '3-2-3', attributePreferences: { physical: { stamina: 1.5 }, mental: { consistency: 1.8 }, technical: { tackling: 1.2 } } },
+    { type: 'The Playground Alpha', preferredOffense: 'Empty', preferredDefense: '3-0-5', attributePreferences: { physical: { speed: 1.8 }, mental: { clutch: 2.0 }, technical: { throwingAccuracy: 1.5 } } },
+    { type: 'The Strict Parent', preferredOffense: 'Balanced', preferredDefense: '4-1-3', attributePreferences: { mental: { playbookIQ: 2.0, consistency: 1.5 }, technical: { blocking: 1.5, tackling: 1.5 } } }
 ];

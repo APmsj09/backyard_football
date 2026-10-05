@@ -466,7 +466,7 @@ export function renderDraftScreen(gameState, onPlayerSelect, currentSelectedId, 
         return;
     }
     const { year, draftOrder, currentPick, playerTeam, players, teams } = gameState;
-    const ROSTER_LIMIT = 12;
+    const ROSTER_LIMIT = 18;
 
     if (currentPick >= draftOrder.length) {
         if (elements.draftHeader) elements.draftHeader.innerHTML = `<h2 class="text-3xl font-bold">Season ${year} Draft Complete</h2>`;
@@ -523,7 +523,10 @@ export function renderDraftPool(gameState, onPlayerSelect, sortColumn, sortDirec
     // --- 💡 FIX: Get roster objects for relationship calc ---
     const playerRoster = getUIRosterObjects(gameState.playerTeam);
 
-    const undraftedPlayers = gameState.players.filter(p => p && !p.teamId);
+    // 💡 Only show players who signed up for the draft tryout
+    const undraftedPlayers = gameState.players.filter(p => 
+        p && !p.teamId && (p.personality?.entersDraft !== false)
+    );
     const searchTerm = elements.draftSearch?.value.toLowerCase() || '';
     const posFilter = elements.draftFilterPos?.value || '';
 
@@ -765,7 +768,7 @@ export function renderPlayerRoster(playerTeam) {
 
     // --- 💡 FIX: Get roster objects ---
     const roster = getUIRosterObjects(playerTeam);
-    const ROSTER_LIMIT = 12;
+    const ROSTER_LIMIT = 18;
 
     elements.rosterCount.textContent = `${roster.length}/${ROSTER_LIMIT}`;
     elements.draftRosterList.innerHTML = '';
@@ -839,13 +842,22 @@ export function renderDashboard(gameState) {
     const WEEKS_IN_SEASON = 9; // Consider getting from game.js or config
     const currentW = (typeof currentWeek === 'number' && currentWeek < WEEKS_IN_SEASON) ? `Week ${currentWeek + 1}` : 'Offseason';
 
-    if (elements.dashboardTeamName) elements.dashboardTeamName.textContent = playerTeam.name || 'Your Team';
-    // 💡 FIXED: Include ties in the displayed record
-    const recordText = `Record: ${playerTeam.wins || 0} - ${playerTeam.losses || 0}` +
-        ((playerTeam.ties && playerTeam.ties > 0) ? ` - ${playerTeam.ties}` : '');
+    if (elements.dashboardTeamName) {
+        const coachName = playerTeam.coach?.name || 'Head Coach';
+        elements.dashboardTeamName.innerHTML = `${playerTeam.name} <span class="text-sm text-gray-400 block mt-1 font-sans font-normal">HC: ${coachName} (${playerTeam.coach?.type || 'Balanced'})</span>`;
+    }
+    
+    const recordText = `${playerTeam.wins || 0} - ${playerTeam.losses || 0}` + ((playerTeam.ties && playerTeam.ties > 0) ? ` - ${playerTeam.ties}` : '');
     if (elements.dashboardRecord) elements.dashboardRecord.textContent = recordText;
     if (elements.dashboardYear) elements.dashboardYear.textContent = year || '?';
     if (elements.dashboardWeek) elements.dashboardWeek.textContent = currentW;
+    
+    // 💡 SHOW CURRENCIES
+    const credEl = document.getElementById('dashboard-cred');
+    const favorsEl = document.getElementById('dashboard-favors');
+    if (credEl) credEl.textContent = playerTeam.socialProfile?.streetCred || 50;
+    if (favorsEl) favorsEl.textContent = playerTeam.socialProfile?.favorTokens || 0;
+
     if (elements.advanceWeekBtn) elements.advanceWeekBtn.textContent = (typeof currentWeek === 'number' && currentWeek < WEEKS_IN_SEASON) ? 'Advance Week' : 'Go to Offseason';
 
     if (elements.statsFilterTeam && Array.isArray(teams)) {
@@ -1749,7 +1761,11 @@ function renderScheduleTab(gameState) {
                     const homeWin = result.homeScore > result.awayScore;
                     const awayWin = result.awayScore > result.homeScore;
 
+                    const isPeeWee = g.home.isYouth;
+                    const badge = isPeeWee ? '<span class="px-1.5 py-0.5 bg-purple-100 text-purple-800 rounded text-[9px] font-bold mr-2">PEE-WEE</span>' : '';
+
                     content = `
+                        ${badge}
                         <span class="${awayWin ? 'font-bold' : ''}">${g.away.name} ${result.awayScore}</span> 
                         <span class="text-gray-400 mx-1">@</span> 
                         <span class="${homeWin ? 'font-bold' : ''}">${g.home.name} ${result.homeScore}</span>
@@ -1763,10 +1779,13 @@ function renderScheduleTab(gameState) {
                     }
                 } else {
                     // Game not played yet
-                    content = `<span>${g.away.name}</span> <span class="text-gray-400 mx-1">@</span> <span>${g.home.name}</span>`;
+                    const isPeeWee = g.home.isYouth;
+                    const badge = isPeeWee ? '<span class="px-1.5 py-0.5 bg-purple-100 text-purple-800 rounded text-[9px] font-bold mr-2">PEE-WEE</span>' : '';
+                    
+                    content = `${badge}<span>${g.away.name}</span> <span class="text-gray-400 mx-1">@</span> <span>${g.home.name}</span>`;
                 }
 
-                weekHtml += `<div class="bg-white p-2 rounded shadow-sm flex justify-center items-center ${resultClass}">${content}</div>`;
+                weekHtml += `<div class="bg-white p-2 rounded shadow-sm flex items-center ${resultClass}">${content}</div>`;
             });
         } else {
             weekHtml += `<p class="text-gray-500 md:col-span-2 italic">Bye Week / No Games</p>`;
@@ -1783,37 +1802,42 @@ function renderStandingsTab(gameState) {
 
     elements.standingsContainer.innerHTML = '';
 
-    // Helper: Calculate Win Percentage (Wins = 1.0, Ties = 0.5)
     const getWinPct = (t) => {
         const games = (t.wins || 0) + (t.losses || 0) + (t.ties || 0);
         if (games === 0) return 0;
         return ((t.wins || 0) + ((t.ties || 0) * 0.5)) / games;
     };
 
-    for (const [divName, divisionTeamIdsArray] of Object.entries(gameState.divisions)) {
-        // 💡 FIX: Ensure we are pulling the very latest data from gameState.teams
-        const divTeams = gameState.teams
-            .filter(t => divisionTeamIdsArray.includes(t.id))
-            .sort((a, b) => {
-                const pctA = getWinPct(a);
-                const pctB = getWinPct(b);
+    // 💡 FIX: Group by Tiers instead of Divisions
+    const tiers = [
+        { id: 1, name: 'Premier Parks (Tier 1)', teams: gameState.teams.filter(t => t.tier === 1) },
+        { id: 2, name: 'Sandlot Circuit (Tier 2)', teams: gameState.teams.filter(t => t.tier === 2) },
+        { id: 3, name: 'Pee-Wee League (Youth)', teams: gameState.youthTeams || [] }
+    ];
 
-                // 1. Sort by Win Percentage
-                if (pctB !== pctA) return pctB - pctA;
-                // 2. Tie-breaker: Total Wins
-                if (b.wins !== a.wins) return (b.wins || 0) - (a.wins || 0);
-                // 3. Tie-breaker: Fewer Losses
-                if (a.losses !== b.losses) return (a.losses || 0) - (b.losses || 0);
-                // 4. Alphabetical
-                return a.name.localeCompare(b.name);
-            });
+    tiers.forEach(tier => {
+        if (tier.teams.length === 0) return;
+
+        const sortedTeams = tier.teams.sort((a, b) => {
+            const pctA = getWinPct(a);
+            const pctB = getWinPct(b);
+
+            // 1. Sort by Win Percentage
+            if (pctB !== pctA) return pctB - pctA;
+            // 2. Tie-breaker: Total Wins
+            if (b.wins !== a.wins) return (b.wins || 0) - (a.wins || 0);
+            // 3. Tie-breaker: Fewer Losses
+            if (a.losses !== b.losses) return (a.losses || 0) - (b.losses || 0);
+            // 4. Alphabetical
+            return a.name.localeCompare(b.name);
+        });
 
         const divEl = document.createElement('div');
         divEl.className = 'mb-6 bg-gray-50 rounded-lg overflow-hidden border border-gray-200 shadow-sm';
 
         let tableHtml = `
             <div class="bg-gray-800 px-4 py-2 font-bold text-white flex justify-between">
-                <span>${divName} Division</span>
+                <span>${tier.name}</span>
                 <span class="text-gray-400 text-xs uppercase self-center">Season ${gameState.year}</span>
             </div>
             <table class="min-w-full text-sm">
@@ -1829,15 +1853,30 @@ function renderStandingsTab(gameState) {
                 <tbody class="divide-y divide-gray-200">
         `;
 
-        divTeams.forEach(t => {
-            const isPlayer = t.id === gameState.playerTeam.id;
+        sortedTeams.forEach((t, index) => {
+            const isPlayer = t.id === gameState.playerTeam?.id;
             const pct = getWinPct(t).toFixed(3).replace(/^0/, ''); // Format as .500 instead of 0.500
+            
+            // 💡 PROMOTION & RELEGATION HIGHLIGHTING
+            let rowStyle = isPlayer ? 'bg-amber-100 font-bold' : 'bg-white hover:bg-gray-50';
+            let statusIcon = '';
+            
+            if (tier.id === 1 && index >= sortedTeams.length - 2) {
+                rowStyle += ' border-l-4 border-red-500'; // Relegation zone (Bottom 2 of Tier 1)
+                statusIcon = '<span title="Relegation Zone" class="text-red-500 text-xs ml-1">▼</span>';
+            } else if (tier.id === 2 && index < 2) {
+                rowStyle += ' border-l-4 border-green-500'; // Promotion zone (Top 2 of Tier 2)
+                statusIcon = '<span title="Promotion Zone" class="text-green-500 text-xs ml-1">▲</span>';
+            }
 
             tableHtml += `
-                <tr class="${isPlayer ? 'bg-amber-100 font-bold' : 'bg-white hover:bg-gray-50'}">
+                <tr class="${rowStyle}">
                     <td class="py-2 px-3 text-left flex items-center">
-                        <div class="w-3 h-3 rounded-full mr-2" style="background-color: ${t.primaryColor}"></div>
-                        ${t.name} ${isPlayer ? '<span class="ml-1 text-[10px] text-amber-600">(YOU)</span>' : ''}
+                        <div class="w-3 h-3 rounded-full mr-2 shrink-0" style="background-color: ${t.primaryColor || '#999'}"></div>
+                        <span class="w-4 text-xs text-gray-400 font-bold mr-1">${index + 1}.</span>
+                        <span class="truncate">${t.name}</span> 
+                        ${isPlayer ? '<span class="ml-1 text-[10px] text-amber-600 shrink-0">(YOU)</span>' : ''} 
+                        ${statusIcon}
                     </td>
                     <td class="text-center py-2 px-3">${t.wins || 0}</td>
                     <td class="text-center py-2 px-3 text-gray-600">${t.losses || 0}</td>
@@ -1849,7 +1888,7 @@ function renderStandingsTab(gameState) {
         tableHtml += `</tbody></table>`;
         divEl.innerHTML = tableHtml;
         elements.standingsContainer.appendChild(divEl);
-    }
+    }); // 💡 FIXED: Properly closes the tiers.forEach loop!
 }
 
 /** Renders the 'Player Stats' tab content. */
@@ -3805,7 +3844,7 @@ export function renderDraftTeamView(gameState) {
     const team = gameState.teams.find(t => t.id === selector.value);
     const roster = getUIRosterObjects(team);
 
-    rosterDiv.innerHTML = `<h4 class="text-sm font-bold uppercase text-gray-500 mb-2">Current Roster (${roster.length}/12)</h4>` +
+    rosterDiv.innerHTML = `<h4 class="text-sm font-bold uppercase text-gray-500 mb-2">Current Roster (${roster.length}/18)</h4>` +
         roster.map(p => `
         <div class="flex justify-between py-1 border-b text-sm">
             <span class="font-medium">${p.name}</span>

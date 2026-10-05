@@ -14,7 +14,7 @@ let currentSortDirection = 'desc';
 let activeSaveKey = 'backyardFootballGameState';
 
 // --- Constants ---
-const ROSTER_LIMIT = 12;
+const ROSTER_LIMIT = 18; // 💡 18-Man Roster
 const MIN_HEALTHY_PLAYERS = 8;
 const WEEKS_IN_SEASON = 9;
 
@@ -971,6 +971,7 @@ function openPlayerCard(playerId) {
         <div class="flex border-b border-gray-300 mb-4">
             <button class="player-tab-btn active px-4 py-2 font-bold text-amber-600 border-b-2 border-amber-600" data-target="tab-skills">Skills</button>
             <button class="player-tab-btn px-4 py-2 font-bold text-gray-500 hover:text-gray-700 border-b-2 border-transparent" data-target="tab-stats">Stats</button>
+            <button class="player-tab-btn px-4 py-2 font-bold text-gray-500 hover:text-gray-700 border-b-2 border-transparent" data-target="tab-social">Personality</button>
         </div>
 
         <div id="tab-skills" class="player-tab-content block animate-fadeIn">
@@ -979,6 +980,23 @@ function openPlayerCard(playerId) {
         
         <div id="tab-stats" class="player-tab-content hidden animate-fadeIn">
             ${statsHtml}
+        </div>
+
+        <div id="tab-social" class="player-tab-content hidden animate-fadeIn">
+            <div class="space-y-3 mt-2 text-sm">
+                <div class="bg-gray-50 border border-gray-200 p-3 rounded">
+                    <h5 class="font-bold text-gray-800 border-b border-gray-200 pb-1 mb-2">Traits</h5>
+                    <p><span class="font-semibold text-gray-600 w-24 inline-block">Work Ethic:</span> <span class="font-bold ${player.personality?.workEthic > 75 ? 'text-green-600' : (player.personality?.workEthic < 40 ? 'text-red-500' : 'text-gray-800')}">${player.personality?.workEthic || 50}</span></p>
+                    <p><span class="font-semibold text-gray-600 w-24 inline-block">Dependability:</span> <span class="font-bold ${player.personality?.dependability > 75 ? 'text-green-600' : (player.personality?.dependability < 40 ? 'text-red-500' : 'text-gray-800')}">${player.personality?.dependability || 50}</span></p>
+                    <p><span class="font-semibold text-gray-600 w-24 inline-block">Street Cred:</span> <span class="font-bold">${player.personality?.streetCred || 50}</span></p>
+                </div>
+                <div class="bg-blue-50 border border-blue-200 p-3 rounded">
+                    <h5 class="font-bold text-blue-800 border-b border-blue-200 pb-1 mb-2">Team Status</h5>
+                    <p><span class="font-semibold text-blue-700 w-24 inline-block">Desired Role:</span> <span class="font-bold text-gray-800">${player.expectations?.desiredRole || 'Unknown'}</span></p>
+                    <p><span class="font-semibold text-blue-700 w-24 inline-block">Req. Touches:</span> <span class="font-bold text-gray-800">${player.expectations?.minTouchesPerGame || 0} / game</span></p>
+                    <p><span class="font-semibold text-blue-700 w-24 inline-block">Happiness:</span> <span class="font-bold ${player.expectations?.happiness < 50 ? 'text-red-600' : 'text-green-600'}">${player.expectations?.happiness || 100}%</span></p>
+                </div>
+            </div>
         </div>
 
         ${isMyTeam ? `<button class="mt-6 w-full bg-red-500 text-white py-2 rounded hover:bg-red-600 font-bold transition shadow" onclick="app.cutPlayer('${player.id}')">Cut Player from Team</button>` : ''}

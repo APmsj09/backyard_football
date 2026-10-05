@@ -237,7 +237,7 @@
           <div class="bg-white rounded-xl shadow-md flex-grow flex flex-col overflow-hidden border border-gray-200">
             <div class="flex justify-between items-center p-3 border-b bg-gray-50 shrink-0">
               <h4 class="font-bold text-gray-700">Your Roster</h4>
-              <span id="roster-count" class="bg-gray-200 text-gray-600 px-2 py-0.5 rounded text-xs font-bold">0/12</span>
+              <span id="roster-count" class="bg-gray-200 text-gray-600 px-2 py-0.5 rounded text-xs font-bold">0/18</span>
             </div>
             <ul id="draft-roster-list" class="divide-y divide-gray-100 text-sm overflow-y-auto flex-grow p-0"></ul>
             <div id="roster-summary" class="p-3 border-t bg-gray-50 text-xs shrink-0"></div>
@@ -251,14 +251,16 @@
     <div
       class="flex-shrink-0 flex flex-col md:flex-row justify-between items-center p-4 bg-gray-900 text-white rounded-xl shadow-md mb-4 border-b-4 border-amber-500">
       <div class="mb-4 md:mb-0 text-center md:text-left">
-        <h2 id="dashboard-team-name" class="text-3xl font-display tracking-wider text-white drop-shadow-md">Your Team
-        </h2>
+        <h2 id="dashboard-team-name" class="text-3xl font-display tracking-wider text-white drop-shadow-md">Your Team</h2>
         <div class="flex items-center gap-3 mt-1 justify-center md:justify-start text-sm text-gray-300 font-mono">
-          <span id="dashboard-record" class="bg-gray-800 px-2 py-0.5 rounded">0-0-0</span>
+          <span id="dashboard-record" class="bg-gray-800 px-2 py-0.5 rounded border border-gray-700">0-0-0</span>
           <span class="text-gray-600">|</span>
           <span>Year <span id="dashboard-year" class="text-white font-bold">1</span></span>
           <span class="text-gray-600">|</span>
           <span id="dashboard-week" class="text-amber-400 font-bold">Week 1</span>
+          <span class="text-gray-600">|</span>
+          <span class="flex items-center gap-1" title="Street Cred (Out of 100)">😎 <span id="dashboard-cred" class="text-white font-bold">50</span></span>
+          <span class="flex items-center gap-1" title="Favor Tokens (Recruiting)">🤝 <span id="dashboard-favors" class="text-white font-bold">3</span></span>
         </div>
       </div>
       <div class="flex gap-3">
