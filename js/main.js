@@ -120,6 +120,8 @@ async function handleConfirmTeam() {
         return;
     }
 
+    activeSaveKey = 'backyardFootballGameState'; // 💡 FIX: Prevent overwriting test rosters
+
     try {
         UI.showScreen("loading-screen");
         UI.startLoadingMessages();
@@ -167,7 +169,7 @@ function generateDraftPreviewMessage() {
     const players = gameState.players.filter(p => !p.teamId);
 
     // 1. Group all players by their estimated position
-    const grouped = { QB: [], RB: [], WR: [], TE: [], OL: [], DL: [], LB: [], DB: [] };
+    const grouped = { QB: [], RB: [], WR: [], TE: [], OL: [], DL: [], LB: [], DB: [], K: [], P: [] };
 
     players.forEach(p => {
         let pos = estimateBestPosition(p);
@@ -175,7 +177,7 @@ function generateDraftPreviewMessage() {
         if (['DE', 'DT', 'NT'].includes(pos)) pos = 'DL';
         if (['CB', 'S', 'FS', 'SS'].includes(pos)) pos = 'DB';
         if (pos === 'FB') pos = 'RB';
-        if (['ATH', 'K', 'P'].includes(pos)) pos = 'WR';
+        if (pos === 'ATH') pos = 'WR';
 
         if (grouped[pos]) grouped[pos].push(p);
     });
@@ -401,7 +403,7 @@ async function handleDraftEnd() {
  */
 function generateWeeklyMatchupPreview() {
     const gs = Game.getGameState();
-    if (!gs || !gs.schedule || gs.currentWeek >= 9) return; // Hardcode to 9 weeks safety
+    if (!gs || !gs.schedule || gs.currentWeek >= WEEKS_IN_SEASON) return;
 
     const gamesPerWeek = gs.teams.length / 2;
     const weekGames = gs.schedule.slice(gs.currentWeek * gamesPerWeek, (gs.currentWeek + 1) * gamesPerWeek);
@@ -560,9 +562,8 @@ function handleDepthChartSelect(e) {
     const side = selectEl.dataset.side;
 
     if (slot && side && gameState) {
-        // 💡 THE FIX: Call the UI helper we just updated
-        // This ensures the priority list is updated when you use the dropdown
-        handleDepthChartChange(side, slot, playerId);
+        // 💡 FIX: Call the actual drag-and-drop function to handle the override securely
+        handleDepthChartDrop(playerId, slot, side);
     }
 }
 
@@ -701,6 +702,7 @@ async function startLiveGame(playerGameMatch) {
     const liveGameParams = {
         homeTeam: playerGameMatch.home,
         awayTeam: playerGameMatch.away,
+        autoSubThreshold: gameState.playerTeam?.autoSubThreshold ?? 65, // 💡 FIX: Inherit user preference
         homeScore: 0,
         awayScore: 0,
         possession: Math.random() < 0.5 ? playerGameMatch.home : playerGameMatch.away, // Coin toss
@@ -745,11 +747,8 @@ async function startLiveGame(playerGameMatch) {
             awayScore: r.awayScore
         })));
 
-        gameState.currentWeek++;
-
-        // 💡 FIX: Force a save to LocalStorage here so seasonStats persist!
-        Game.saveGameState();
-
+        // 💡 FIX: Removed redundant currentWeek++ and saveGameState() here.
+        // It is now securely handled inside finishWeekSimulation.
         finishWeekSimulation(combinedResults);
     });
 }
@@ -783,8 +782,14 @@ async function simulateRestOfWeek() {
 
     } catch (error) {
         console.error("Sim week error:", error);
-        if (gameState) gameState.currentWeek++;
-        results = [];
+        UI.hideModal();
+        UI.showModal(
+            "Simulation Error",
+            `<p>The week could not be simulated. No week was advanced.</p>
+             <p class="text-sm text-gray-500 mt-2">${error.message}</p>`,
+            null, '', null, 'Close'
+        );
+        results = null; // 💡 FIX: Ensure results is null so we don't proceed
     }
 
     if (results !== null) {
@@ -806,6 +811,13 @@ function finishWeekSimulation(results) {
         if (gameState) { UI.renderDashboard(gameState); UI.showScreen('dashboard-screen'); }
         return;
     }
+
+    // 💡 ARCHITECTURE FIX: Unify Weekly Lifecycle
+    Game.processEndOfWeek();
+    gameState.currentWeek++;
+
+    // 💡 SAVE FIX: Guarantee game is saved to the active slot after every week
+    Game.saveGameState(activeSaveKey);
 
     const buildResultsModalHtml = (results) => {
         if (!gameState?.playerTeam || !Array.isArray(results)) return "<p>Error.</p>";
@@ -868,6 +880,9 @@ function handleSeasonEnd() {
     try {
         const report = Game.advanceToOffseason();
         gameState = Game.getGameState();
+        
+        Game.saveGameState(activeSaveKey); // 💡 FIX: Persist the generated rookies immediately
+
         UI.renderOffseasonScreen(report, gameState.year);
         UI.showScreen('offseason-screen');
     } catch (error) {
@@ -1132,7 +1147,7 @@ function main() {
         // --- Setup Global Event Listeners ---
         document.getElementById('start-game-btn')?.addEventListener('click', startNewGame);
         document.getElementById('confirm-team-btn')?.addEventListener('click', handleConfirmTeam);
-        document.getElementById('load-game-btn')?.addEventListener('click', handleLoadGame);
+        document.getElementById('load-game-btn')?.addEventListener('click', () => handleLoadGame()); // 💡 FIX: Don't pass MouseEvent as saveKey
         document.getElementById('load-test-roster-btn')?.addEventListener('click', handleLoadTestRoster);
         document.getElementById('save-test-roster-btn')?.addEventListener('click', handleSaveTestRoster);
         document.getElementById('draft-player-btn')?.addEventListener('click', handleDraftPlayer);

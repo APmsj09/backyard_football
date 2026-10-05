@@ -122,6 +122,10 @@ export const routeTree = {
     // --- Passing Concept Routes ---
     'Scissors_Corner': { path: [{ x: 0, y: 8 }, { x: 10, y: 20 }] },
     'Scissors_Post': { path: [{ x: 0, y: 12 }, { x: -8, y: 30 }] },
+    'Mesh_Right': { path: [{ x: 3, y: 3 }, { x: 15, y: 4 }], mirror: false },
+    'Mesh_Left': { path: [{ x: -3, y: 3 }, { x: -15, y: 4 }], mirror: false },
+    'Flood_Deep': { path: [{ x: 0, y: 10 }, { x: 10, y: 25 }] },
+    'Flood_Out': { path: [{ x: 0, y: 12 }, { x: 10, y: 12 }] },
 
     // --- Running Back Pass Routes ---
     'Wheel': { path: [{ x: 4, y: 1 }, { x: 6, y: 8 }, { x: 6, y: 25 }] },
@@ -133,19 +137,22 @@ export const routeTree = {
 
     // --- RB Run Designs (Initial Paths) ---
     'run_dive': { path: [{ x: 0, y: 2 }, { x: 0, y: 5 }] },
-    'run_iso_l': { path: [{ x: -1.5, y: 1 }, { x: -1.5, y: 5 }] },
-    'run_iso_r': { path: [{ x: 1.5, y: 1 }, { x: 1.5, y: 5 }] },
-    'run_stretch_r': { path: [{ x: 6, y: 0.5 }, { x: 10, y: 4 }] },
-    'run_stretch_l': { path: [{ x: -6, y: 0.5 }, { x: -10, y: 4 }] },
-    'run_counter_r': { path: [{ x: -2, y: -0.5 }, { x: 1, y: 1 }, { x: 5, y: 5 }] },
-    'run_counter_l': { path: [{ x: 2, y: -0.5 }, { x: -1, y: 1 }, { x: -5, y: 5 }] },
-    'run_toss_r': { path: [{ x: 10, y: -1 }, { x: 14, y: 4 }] },
+    'run_iso_l': { path: [{ x: -1.5, y: 1 }, { x: -1.5, y: 5 }], mirror: false },
+    'run_iso_r': { path: [{ x: 1.5, y: 1 }, { x: 1.5, y: 5 }], mirror: false },
+    'run_stretch_r': { path: [{ x: 6, y: 0.5 }, { x: 10, y: 4 }], mirror: false },
+    'run_stretch_l': { path: [{ x: -6, y: 0.5 }, { x: -10, y: 4 }], mirror: false },
+    'run_counter_r': { path: [{ x: -2, y: -0.5 }, { x: 1, y: 1 }, { x: 5, y: 5 }], mirror: false },
+    'run_counter_l': { path: [{ x: 2, y: -0.5 }, { x: -1, y: 1 }, { x: -5, y: 5 }], mirror: false },
+    'run_toss_r': { path: [{ x: 10, y: -1 }, { x: 14, y: 4 }], mirror: false },
+    'run_toss_l': { path: [{ x: -10, y: -1 }, { x: -14, y: 4 }], mirror: false },
 
     // --- ADVANCED BLOCKING ROUTES ---
     'run_block': { path: [{ x: 0, y: 0 }] }, // Stationary target seeking
     'pass_block': { path: [{ x: 0, y: -1.0 }] },
-    'pull_right': { path: [{ x: -0.5, y: -1.0 }, { x: 4, y: -0.5 }, { x: 5, y: 3 }] }, // Step back, run right, turn up
-    'pull_left': { path: [{ x: 0.5, y: -1.0 }, { x: -4, y: -0.5 }, { x: -5, y: 3 }] },
+    'pull_right': { path: [{ x: -0.5, y: -1.0 }, { x: 4, y: -0.5 }, { x: 5, y: 3 }], mirror: false },
+    'pull_left': { path: [{ x: 0.5, y: -1.0 }, { x: -4, y: -0.5 }, { x: -5, y: 3 }], mirror: false },
+    'pull_right_wide': { path: [{ x: -0.5, y: -1.0 }, { x: 6, y: -0.5 }, { x: 7, y: 4 }], mirror: false },
+    'pull_left_wide': { path: [{ x: 0.5, y: -1.0 }, { x: -6, y: -0.5 }, { x: -7, y: 4 }], mirror: false },
     'lead_right': { path: [{ x: 3, y: 1 }, { x: 4, y: 4 }] }, // FB leading off tackle
     'lead_left': { path: [{ x: -3, y: 1 }, { x: -4, y: 4 }] },
     'screen_block': { path: [{ x: 0, y: -1 }, { x: -5, y: -0.5 }, { x: -8, y: 5 }] }, // Let DL past, set up wall
@@ -276,20 +283,18 @@ export const offenseFormations = {
         }
     },
 
-    // --- EMPTY SPREAD (No RB, 5 Wide Receivers/Slots) ---
+    // --- EMPTY SPREAD (No RB, 4 Wide Receivers/Slots) ---
     'Empty': {
         name: 'Empty Spread',
-        slots: ['QB1', 'WR1', 'WR2', 'WR3', 'WR4', 'WR5', 'OL1', 'OL2', 'OL3'],
-        personnel: { QB: 1, WR: 5, OL: 3 },
-        // Note: RB role is mapped to WR5 in this formation
-        mapping: { QB: 'QB1', X: 'WR1', Z: 'WR2', H: 'WR3', Y: 'WR4', RB: 'WR5', OL: ['OL1', 'OL2', 'OL3'] },
+        slots: ['QB1', 'WR1', 'WR2', 'WR3', 'WR4', 'OL1', 'OL2', 'OL3'],
+        personnel: { QB: 1, WR: 4, OL: 3 },
+        mapping: { QB: 'QB1', X: 'WR1', Z: 'WR2', H: 'WR3', Y: 'WR4', OL: ['OL1', 'OL2', 'OL3'] },
         coordinates: {
             QB1: [0, -7.0],      // Deep Shotgun
             WR1: [-18, 0.5],     // X (Far Left)
             WR2: [18, 0.5],      // Z (Far Right)
             WR3: [-8, 0.5],      // H (Slot Left)
             WR4: [8, 0.5],       // Y (Slot Right)
-            WR5: [3, -2.0],      // RB role (Stand-up Slot)
             OL1: [-1.4, -1.5], OL2: [0, -1.5], OL3: [1.4, -1.5]
         }
     },
@@ -297,6 +302,7 @@ export const offenseFormations = {
     // --- PISTOL (RB is directly behind QB) ---
     'Pistol': {
         name: 'Pistol Balanced',
+        personnel: { QB: 1, RB: 1, WR: 2, TE: 1, OL: 3 },
         slots: ['QB1', 'RB1', 'WR1', 'WR2', 'TE1', 'OL1', 'OL2', 'OL3'],
         mapping: { QB: 'QB1', RB: 'RB1', X: 'WR1', Z: 'WR2', Y: 'TE1', OL: ['OL1', 'OL2', 'OL3'] },
         coordinates: {
@@ -312,6 +318,7 @@ export const offenseFormations = {
     // --- JUMBO (Heavy Goal Line) ---
     'Jumbo': {
         name: 'Jumbo',
+        personnel: { QB: 1, RB: 2, TE: 2, OL: 3 },
         slots: ['QB1', 'RB1', 'RB2', 'TE1', 'TE2', 'OL1', 'OL2', 'OL3'],
         mapping: { QB: 'QB1', RB: 'RB1', RB2: 'RB2', X: 'TE1', Y: 'TE2', OL: ['OL1', 'OL2', 'OL3'] },
         coordinates: {
@@ -939,11 +946,11 @@ export const defensivePlaybook = {
         tags: ['man', 'double-team'],
         assignments: {
             'DL1': 'pass_rush', 'DL2': 'pass_rush',
-            'LB1': 'man_cover_RB', // Changed RB1 -> RB
-            'LB2': 'zone_short_middle', 'LB3': 'man_cover_Y', // Changed TE1 -> Y
-            'DB1': 'man_cover_X',  // Changed WR1 -> X
-            'DB3': 'zone_deep_third_left',
-            'DB2': 'man_cover_Z'   // Changed WR2 -> Z
+            'LB1': 'man_cover_RB', 
+            'LB2': 'zone_short_middle', 'LB3': 'man_cover_Y', 
+            'DB1': 'man_cover_X',  
+            'DB3': 'man_cover_X', // The actual double team / bracket over the top
+            'DB2': 'man_cover_Z'   
         }
     },
 
@@ -988,10 +995,10 @@ export const defensivePlaybook = {
     // ===================================
     // --- 4-1-3 Dime / Prevent Plays
     // ===================================
-    'Cover_4_Quarters': {
-        name: 'Cover 4 Quarters', concept: 'Zone', blitz: false,
+    'Cover_3_Drop': {
+        name: 'Cover 3 Drop', concept: 'Zone', blitz: false,
         compatibleFormations: ['4-1-3'],
-        tags: ['zone', 'cover4', 'safeZone'],
+        tags: ['zone', 'cover3', 'safeZone'],
         assignments: {
             'DL1': 'pass_rush', 'DL2': 'pass_rush', 'DL3': 'pass_rush', 'DL4': 'pass_rush',
             'LB1': 'zone_short_middle',

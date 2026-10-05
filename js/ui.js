@@ -3087,11 +3087,21 @@ function initSimStrategyTab() {
     const slider = document.getElementById('sim-auto-sub-slider');
     const valDisplay = document.getElementById('sim-auto-sub-val');
     if (slider && valDisplay && activeLiveGame) {
-        slider.value = activeLiveGame.autoSubThreshold || 65;
+        const team = gs.playerTeam;
+        slider.value = team.autoSubThreshold || 65;
         valDisplay.textContent = slider.value + '%';
+        
+        // Sync initial value to the live game object
+        activeLiveGame.autoSubThreshold = parseInt(slider.value, 10);
+        
         slider.oninput = (e) => {
-            valDisplay.textContent = e.target.value + '%';
-            if (activeLiveGame) activeLiveGame.autoSubThreshold = parseInt(e.target.value, 10);
+            const val = parseInt(e.target.value, 10);
+            valDisplay.textContent = val + '%';
+            
+            // Apply immediately to the live game and save it to the franchise object
+            activeLiveGame.autoSubThreshold = val;
+            team.autoSubThreshold = val; 
+            Game.saveGameState();
         };
     }
 }

@@ -1694,7 +1694,8 @@ function isPlayerInZone(playerState, zoneAssignment, lineOfScrimmage) {
 function calculateRoutePath(routeName, startX, startY) {
     const route = routeTree[routeName];
     if (!route || !route.path) return null;
-    const xMirror = (startX < CENTER_X) ? -1 : 1;
+    // 💡 FIX: Respect explicit directionality (e.g. pull_right, run_toss_l)
+    const xMirror = (route.mirror !== false && startX < CENTER_X) ? -1 : 1;
     const absolutePath = route.path.map(point => ({
         x: startX + ((point.x || 0) * xMirror),
         y: startY + (point.y || 0)
@@ -1882,7 +1883,10 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
                     if (play.type === 'punt') {
                         assignment = 'punt'; action = 'punt_kick'; targetY = startY - 5;
                     } else {
-                        assignment = 'qb_setup'; action = 'qb_setup';
+                        // 💡 FIX: Respect playbook assignments (RPO, Flea Flicker, Scramble, Screen)
+                        assignment = assignment || 'qb_setup';
+                        action = assignment; // Map action directly to the assignment
+
                         dropbackPhase = 'dropping'; hasCompletedDropback = false;
 
                         const initialDepth = playState.lineOfScrimmage - startY;
@@ -6586,7 +6590,13 @@ function determinePlayCall(offense, defense, down, yardsToGo, ballOn, scoreDiff,
         const isCompatible = play.compatibleFormations && play.compatibleFormations.includes(formationName);
         const isLegacyMatch = key.startsWith(formationName);
         const isUniversal = key.startsWith('Uni_') || key.startsWith('PA_') || key.startsWith('Trick_') || key.startsWith('RPO_');
-        return isCompatible || isLegacyMatch || isUniversal;
+
+        // 💡 FIX: If the play EXPLICITLY defines compatible formations, enforce it to stop "Universal" over-reach
+        if (play.compatibleFormations) {
+            return isCompatible;
+        }
+
+        return isLegacyMatch || isUniversal;
     });
 
     if (formationPlays.length === 0) return 'Uni_InsideZone';
@@ -7095,30 +7105,38 @@ function simulateLivePlayStep(game, mode = 'live') {
         const timeRemaining = game.quarter < 5 ? game.clock + ((4 - game.quarter) * 720) : game.clock;
         const drivesRemaining = Math.max(1, Math.ceil(timeRemaining / 120));
 
-        // Force formation reset if coming off a Punt or Conversion
-        if (offense.formations.offense === 'Punt' || game.isConversionAttempt === false) {
-            // Reset to coach preference or default
+        // 💡 ARCHITECTURE FIX: Human Formation vs CPU Formation Authority
+        // If the human changed their formation, we DO NOT overwrite it. 
+        // We only reset if we are coming off a forced Special Teams state (like a Punt).
+        if (offense.formations.offense === 'Punt') {
+            offense.formations.offense = offense.coach?.preferredOffense || 'Balanced';
+        }
+
+        if (!offense.isPlayerControlled) {
+            // CPU dynamically picks its offensive formation based on coach preference
             offense.formations.offense = offense.coach?.preferredOffense || 'Balanced';
         }
 
         offPlayKey = determinePlayCall(offense, defense, game.down, game.yardsToGo, game.ballOn, scoreDiff, game.gameLog, drivesRemaining);
 
-        // Final fallback safety
         if (!offPlayKey || !offensivePlaybook[offPlayKey]) offPlayKey = 'Uni_InsideZone';
 
-        // Update the team's current formation to match the play they just called
         let prefix = offPlayKey.split('_')[0];
         let selectedFormation = offensivePlaybook[offPlayKey].formation || prefix;
 
-        // 💡 FIXED: If it's a Universal ("Uni") play, keep their preferred formation!
-        if (selectedFormation === 'Uni' || !offenseFormations[selectedFormation]) {
-            selectedFormation = offense.coach?.preferredOffense || 'Balanced';
+        // If CPU, they adapt to the play call. 
+        // If Human, they stay in the formation they selected, UNLESS it's a formation-specific play that overrides it.
+        if (!offense.isPlayerControlled) {
+            if (selectedFormation === 'Uni' || !offenseFormations[selectedFormation]) {
+                selectedFormation = offense.coach?.preferredOffense || 'Balanced';
+            }
+            offense.formations.offense = selectedFormation;
         }
 
-        offense.formations.offense = selectedFormation;
-
-        const defFormation = determineDefensiveFormation(defense, offense.formations.offense, game.down, game.yardsToGo, game.gameLog);
-        defense.formations.defense = defFormation;
+        // DEFENSE: CPU adapts. Human stays in their selected formation.
+        if (!defense.isPlayerControlled) {
+            defense.formations.defense = determineDefensiveFormation(defense, offense.formations.offense, game.down, game.yardsToGo, game.gameLog);
+        }
 
         defPlayKey = determineDefensivePlayCall(defense, offense, game.down, game.yardsToGo, game.ballOn, scoreDiff, game.gameLog, drivesRemaining);
 
@@ -7138,10 +7156,13 @@ function simulateLivePlayStep(game, mode = 'live') {
     };
 
     // --- 3. AUTO SUBSTITUTIONS ---
-    // The coaching AI handles resting tired players dynamically
-    const autoSubThreshold = game.autoSubThreshold !== undefined ? game.autoSubThreshold : 65;
-    autoMakeSubstitutions(offense, { thresholdFatigue: autoSubThreshold, chance: 1.0 }, game.gameLog);
-    autoMakeSubstitutions(defense, { thresholdFatigue: autoSubThreshold, chance: 1.0 }, game.gameLog);
+    // The coaching AI handles resting tired players dynamically. 
+    // Respect the player's manual threshold if set.
+    const offThreshold = offense.isPlayerControlled ? (offense.autoSubThreshold || game.autoSubThreshold || 65) : 65;
+    const defThreshold = defense.isPlayerControlled ? (defense.autoSubThreshold || game.autoSubThreshold || 65) : 65;
+    
+    autoMakeSubstitutions(offense, { thresholdFatigue: offThreshold, chance: 1.0 }, game.gameLog);
+    autoMakeSubstitutions(defense, { thresholdFatigue: defThreshold, chance: 1.0 }, game.gameLog);
 
     // --- 4. EXECUTE THE PLAY ---
     const result = resolvePlay(
@@ -7172,6 +7193,11 @@ function simulateLivePlayStep(game, mode = 'live') {
         // Reset state for Kickoff (Flip possession)
         game.isConversionAttempt = false;
         game.possession = defense;
+        
+        if (!game.possession.isPlayerControlled) {
+            game.possession.formations.offense = game.possession.coach?.preferredOffense || 'Balanced';
+        }
+        
         game.ballOn = 20; // Simulated touchback placement
         game.down = 1;
         game.yardsToGo = 10;
@@ -7200,9 +7226,10 @@ function simulateLivePlayStep(game, mode = 'live') {
     else if (playResult.possessionChange) {
         game.possession = defense;
 
-        // Reset formation
-        const coachPref = game.possession.coach?.preferredOffense || 'Balanced';
-        game.possession.formations.offense = coachPref;
+        // Reset formation (only for CPU; humans keep their manual selection)
+        if (!game.possession.isPlayerControlled) {
+            game.possession.formations.offense = game.possession.coach?.preferredOffense || 'Balanced';
+        }
         game.possession.recentPlayHistory = [];
 
         // CALCULATE NEW BALL POSITION
@@ -7241,6 +7268,10 @@ function simulateLivePlayStep(game, mode = 'live') {
                 game.possession = defense;
                 game.ballOn = 110 - game.ballOn; // Flip field position
 
+                if (!game.possession.isPlayerControlled) {
+                    game.possession.formations.offense = game.possession.coach?.preferredOffense || 'Balanced';
+                }
+
                 // Reset for new drive
                 game.down = 1;
                 game.yardsToGo = 10;
@@ -7262,7 +7293,7 @@ function simulateLivePlayStep(game, mode = 'live') {
     if (game.clock <= 0) {
         game.quarter++;
         game.clock = 720; // Reset for next quarter
-        
+
         if (game.quarter === 3 && !game.halftimeProcessed) {
             game.halftimeProcessed = true;
             if (game.gameLog) game.gameLog.push("⏸️ HALFTIME. Teams head to the locker room.");
@@ -7276,6 +7307,9 @@ function simulateLivePlayStep(game, mode = 'live') {
 
             // Second Half Kickoff
             game.possession = defense; 
+            if (!game.possession.isPlayerControlled) {
+                game.possession.formations.offense = game.possession.coach?.preferredOffense || 'Balanced';
+            }
             game.ballOn = 35;
             game.down = 1;
             game.yardsToGo = 10;
@@ -7486,10 +7520,20 @@ function processRelationshipEvents() {
 }
 
 /**
- * Simulates all games for the current week and advances state.
+ * Processes the end of the week events: injuries, relationships, and temporary player cleanup.
+ */
+function processEndOfWeek() {
+    if (!game) return;
+    updatePlayerStatuses();
+    generateWeeklyEvents();
+    processRelationshipEvents();
+    endOfWeekCleanup(); // 💡 FIX: Temporary players removed AFTER the week's games are played
+}
+
+/**
+ * Simulates all games for the current week.
  */
 function simulateWeek(options = {}) {
-    // 1. MODIFIED: Removed !game.schedule from this check
     if (!game || !game.teams) {
         console.error("simulateWeek: Invalid game state.");
         return [];
@@ -7500,11 +7544,7 @@ function simulateWeek(options = {}) {
         return null;
     }
 
-    endOfWeekCleanup();
-    updatePlayerStatuses();
-    generateWeeklyEvents();
     game.breakthroughs = [];
-
 
     // Check if the schedule exists OR if it's empty when it shouldn't be
     if (!game.schedule || game.schedule.length === 0) {
@@ -7552,11 +7592,7 @@ function simulateWeek(options = {}) {
         }
     }).filter(Boolean);
 
-    processRelationshipEvents();
-
-    game.currentWeek++;
-    console.log(`Week ${game.currentWeek - 1} simulation complete. Advanced to week ${game.currentWeek}.`);
-    return results;
+    return results; // 💡 FIX: Return results. Week advancement is now centralized in main.js
 }
 
 // =============================================================
@@ -7969,7 +8005,7 @@ function assignPlayerToSlot(team, playerId, slot, side) {
     if (!team.depthOrder[posKey]) team.depthOrder[posKey] = [];
 
     const groupList = team.depthOrder[posKey];
-    
+
     // Determine target index based on the slot number (e.g., WR1 -> 0, WR2 -> 1)
     const slotNumberMatch = slot.match(/\d+/);
     const targetIndex = slotNumberMatch ? Math.max(0, parseInt(slotNumberMatch[0], 10) - 1) : 0;
@@ -7977,7 +8013,7 @@ function assignPlayerToSlot(team, playerId, slot, side) {
     if (!playerId || playerId === 'null' || playerId === '') {
         // If clearing a slot, we don't necessarily want to delete the player from the team,
         // we just push them down the priority list.
-        return true; 
+        return true;
     }
 
     // 1. Remove player from their current position in the list
