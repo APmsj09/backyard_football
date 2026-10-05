@@ -2716,7 +2716,7 @@ function updateStatsFromLogEntry(entry) {
 
     // 3. Yardage & Carriers (Rushing/Passing Yards)
     if (entry.includes('Gain:') || entry.includes('yardage:')) {
-        const idMatch = entry.match(/(?:🎉|✋|💨|🏈) (.*?) (?:at|jars|scores|tackled|steps)/);
+        const idMatch = entry.match(/(?:🎉|✋|💨|🏈|⏱️ WHISTLE:) (.*?) (?:at|jars|scores|tackled|steps|stopped)/);
         const yardMatch = entry.match(/(?:Gain:|Yardage:)\s*(-?\d+\.?\d*)y/i);
 
         const id = findIdByName(idMatch ? idMatch[1] : null);
@@ -3202,8 +3202,8 @@ function runLiveGameStep() {
                 flushLiveLogs();
 
                 // 💡 UPDATE SCORE: Now that the animation is over, show the NEW scores
-                elements.simHomeScore.textContent = activeLiveGame.homeScore;
-                elements.simAwayScore.textContent = activeLiveGame.awayScore;
+                if (elements.simHomeScore) elements.simHomeScore.textContent = activeLiveGame.homeScore;
+                if (elements.simAwayScore) elements.simAwayScore.textContent = activeLiveGame.awayScore;
 
                 if (isSkipping) {
                     runLiveGameStep();
@@ -3323,21 +3323,21 @@ function playVisualization(frames, onComplete) {
 
 function updateLiveScoreboard() {
     if (!activeLiveGame) return;
-    elements.simHomeScore.textContent = activeLiveGame.homeScore;
-    elements.simAwayScore.textContent = activeLiveGame.awayScore;
+    if (elements.simHomeScore) elements.simHomeScore.textContent = activeLiveGame.homeScore;
+    if (elements.simAwayScore) elements.simAwayScore.textContent = activeLiveGame.awayScore;
 
     // Context-aware text
     if (activeLiveGame.isGameOver) {
-        elements.simGameDown.textContent = "FINAL";
-        elements.simGameDrive.textContent = "0:00";
+        if (elements.simGameDown) elements.simGameDown.textContent = "FINAL";
+        if (elements.simGameDrive) elements.simGameDrive.textContent = "0:00";
     } else if (activeLiveGame.isConversionAttempt) {
-        elements.simGameDown.textContent = "Conversion";
-        elements.simGameDrive.textContent = "PAT";
+        if (elements.simGameDown) elements.simGameDown.textContent = "Conversion";
+        if (elements.simGameDrive) elements.simGameDrive.textContent = "PAT";
     } else {
-        elements.simGameDown.textContent = `${activeLiveGame.down} & ${activeLiveGame.yardsToGo}`;
+        if (elements.simGameDown) elements.simGameDown.textContent = `${activeLiveGame.down} & ${activeLiveGame.yardsToGo}`;
         // Show progress through the 60-play game
         const playNum = activeLiveGame.playsTotal || 1;
-        elements.simGameDrive.textContent = `Play ${playNum}/60`;
+        if (elements.simGameDrive) elements.simGameDrive.textContent = `Play ${playNum}/60`;
     }
 }
 

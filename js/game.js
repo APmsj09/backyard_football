@@ -1752,6 +1752,7 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
     playState.playKey = play.key || null;
 
     // --- 2. DEFENSIVE PLAY LOOKUP (Robust Fallback) ---
+    playState.defensivePlayKey = defensivePlayKey;
     let defPlay = defensivePlaybook[defensivePlayKey];
     if (!defPlay) {
         console.warn(`Defensive play key '${defensivePlayKey}' invalid. Defaulting to Cover 2.`);
@@ -2166,22 +2167,23 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
  * Returns positioning guidance for coverage coordination
  */
 function calculateSafetyHelp(safetyState, defenseStates, offenseStates, ballCarrierState, playState, isBallInAir) {
-    if (!safetyState || !safetyState.slot.startsWith('S')) return null;
+    if (!safetyState || safetyState.role !== 'DB') return null;
 
     const LOS = playState.lineOfScrimmage;
     const defensiveCall = playState.defensiveCall || {};
+    const defPlayKey = playState.defensivePlayKey || '';
 
     // 💡 ENHANCED: Coverage-type aware safety rotation
     // In Cover 2: Safeties split halves - limited help
     // In Cover 3: Middle safety can help weak side
     // In Cover 1: Free safety roams and helps everywhere
 
-    const isCover2 = defensiveCall.isCover2 || false;
-    const isCover3 = defensiveCall.isCover3 || false;
-    const isCover1 = defensiveCall.isCover1 || false;
+    const isCover2 = defPlayKey.includes('Cover_2') || defensiveCall.isCover2 || false;
+    const isCover3 = defPlayKey.includes('Cover_3') || defensiveCall.isCover3 || false;
+    const isCover1 = defPlayKey.includes('Cover_1') || defPlayKey.includes('Man_Free') || defensiveCall.isCover1 || false;
 
     // Find cornersbacks and man coverage players this safety should help
-    const corners = defenseStates.filter(d => d.slot.startsWith('DB') && !d.slot.startsWith('S'));
+    const corners = defenseStates.filter(d => d.role === 'DB' && d.id !== safetyState.id);
     const inManCoverage = corners.filter(d => d.assignment && d.assignment.startsWith('man_cover_'));
 
     // Decision 1: Identify high-pressure corners (being beaten badly)
@@ -2219,7 +2221,8 @@ function calculateSafetyHelp(safetyState, defenseStates, offenseStates, ballCarr
         shouldHelp = shouldHelp && (helperHalf === cornerHalf) && (maxPressure > 6.0); // Higher threshold
     } else if (isCover3) {
         // In Cover 3, middle safety can help, outside corner depends on receiver
-        if (safetyState.x < CENTER_X || safetyState.x > FIELD_WIDTH - CENTER_X) {
+        // Safeties inside the hashes are "middle" safeties. Outside are "outside" safeties.
+        if (safetyState.x < HASH_LEFT_X || safetyState.x > HASH_RIGHT_X) {
             // Outside safety - only help own half
             shouldHelp = maxPressure > 5.0;
         } else {
@@ -2286,7 +2289,7 @@ function evaluateCoverageAlignment(defenseStates, playState) {
     const deep = defenseStates.filter(d => d.y >= LOS + 16); // Deep
 
     // Single vs. two-high safety look
-    const safeties = defenseStates.filter(d => d.slot.startsWith('S'));
+    const safeties = defenseStates.filter(d => d.role === 'DB' && d.assignment && d.assignment.includes('zone_deep'));
     const safetyDepths = safeties.map(s => s.y - LOS);
     const avgSafetyDepth = safetyDepths.length > 0 ?
         safetyDepths.reduce((a, b) => a + b) / safetyDepths.length : 15;
@@ -3366,7 +3369,7 @@ function executeAssignment(pState, assignment, offenseStates, LOS, playState, ba
 
 
     // 1. SAFETY HELP (High Level Logic)
-    if (pState.slot.startsWith('S') && !assignment.includes('blitz')) {
+    if (pState.role === 'DB' && assignment.includes('zone_deep') && !assignment.includes('blitz')) {
         const safetyHelp = calculateSafetyHelp(pState, playState.activePlayers.filter(p => !p.isOffense), offenseStates, null, playState, isBallInAir);
         if (safetyHelp && safetyHelp.type === 'help') {
             pState.targetX = safetyHelp.helpX;
@@ -3803,7 +3806,7 @@ function checkTackleCollisions(playState, gameLog) {
 
             if (inOwnEndzone) {
                 if (caughtInEndzone) { playState.touchback = true; playState.finalBallY = carrier.isOffense ? 20 : 100; }
-                else { playState.safety = true; }
+                else { playState.safety = true; playState.finalBallY = carrier.isOffense ? 0 : 120; }
             } else if (carrier.role === 'QB' && carrier.y < playState.lineOfScrimmage && playState.type === 'pass') {
                 playState.sack = true;
 
@@ -5304,14 +5307,26 @@ function handleBallArrival(playState, carrier, playResult, gameLog) {
                         ball.vy += (Math.random() - 0.5) * 3;
                         ball.lastInteraction = { tick: playState.tick, playerId: bestCandidate.id, type: 'bobble' };
                     } else {
-                        if (gameLog) pushGameLog(gameLog, `[Tick ${playState.tick}] ❌ ${bestCandidate.name} drops the pass! (Hands: ${hndEff}, Energy: ${fatPct}%)`, playState);
-                        playState.statEvents.push({ type: 'drop', playerId: bestCandidate.id });
-                        ball.vz = -5.0;
-                        ball.vx *= 0.2;
-                        ball.vy *= 0.2;
-                        ball.droppedById = bestCandidate.id;
-                        ball.isSwatted = true;
-                        ball.lastInteraction = { tick: playState.tick, playerId: bestCandidate.id, type: 'drop' };
+                        if (playState.type === 'punt') {
+                            if (gameLog) pushGameLog(gameLog, `[Tick ${playState.tick}] ❌ ${bestCandidate.name} muffs the punt!`, playState);
+                            playState.statEvents.push({ type: 'fumble', playerId: bestCandidate.id });
+                            playState.fumbleOccurred = true;
+                            ball.vz = -2.0;
+                            ball.vx += (Math.random() - 0.5) * 4;
+                            ball.vy += (Math.random() - 0.5) * 4;
+                            ball.droppedById = bestCandidate.id;
+                            ball.isLoose = true; // Muffed punt is a live ball
+                            ball.lastInteraction = { tick: playState.tick, playerId: bestCandidate.id, type: 'muff' };
+                        } else {
+                            if (gameLog) pushGameLog(gameLog, `[Tick ${playState.tick}] ❌ ${bestCandidate.name} drops the pass! (Hands: ${hndEff}, Energy: ${fatPct}%)`, playState);
+                            playState.statEvents.push({ type: 'drop', playerId: bestCandidate.id });
+                            ball.vz = -5.0;
+                            ball.vx *= 0.2;
+                            ball.vy *= 0.2;
+                            ball.droppedById = bestCandidate.id;
+                            ball.isSwatted = true;
+                            ball.lastInteraction = { tick: playState.tick, playerId: bestCandidate.id, type: 'drop' };
+                        }
                     }
                 }
                 ball.targetX = ball.x + ball.vx;
@@ -5943,10 +5958,10 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
                     }
 
                     // 3. SAFETY
-                    if (ballCarrierState.isOffense && ballCarrierState.y <= 0) {
+                    if ((ballCarrierState.isOffense && ballCarrierState.y <= 0) || (!ballCarrierState.isOffense && ballCarrierState.y >= 120.0)) {
                         playState.safety = true;
                         playState.playIsLive = false;
-                        playState.finalBallY = 0;
+                        playState.finalBallY = ballCarrierState.isOffense ? 0 : 120;
                         if (gameLog) gameLog.push(`🚨 SAFETY! ${ballCarrierState.name} ran out of the endzone!`);
                         break;
                     }
@@ -6014,15 +6029,21 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
 
                     const wentOutSideline = ball.x <= 0 || ball.x >= FIELD_WIDTH;
 
-                    // 💡 FIX: A punt is ONLY a touchback if it crosses the BACK of the endzone (y > 120)
-                    // or if it lands IN the endzone and is downed. 
-                    // If it crosses the SIDELINE, it's spotted where it crossed, even if y > 110.
                     if (wentOutSideline) {
                         playState.finalBallY = ball.y;
                     } else {
                         // Crosses back of endzone
-                        playState.finalBallY = 110; // Touchback
-                        playState.touchback = true;
+                        if (ball.y >= 110) {
+                            playState.finalBallY = 110; // Touchback
+                            playState.touchback = true;
+                            if (ball.isLoose && !playState.possessionChanged && playState.type !== 'punt') {
+                                playState.possessionChanged = true;
+                                playState.turnover = true;
+                            }
+                        } else if (ball.y <= 10) {
+                            playState.safety = true;
+                            playState.finalBallY = 0;
+                        }
                     }
 
                     if (playState.type === 'punt') {
@@ -6076,6 +6097,11 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
                             playState.possessionChanged = recovery.possessionChange;
                             playState.returnStartY = recPlayer.y;
                             if (gameLog) gameLog.push(`🏈 ${recPlayer.name} recovers!`);
+                            
+                            playState.statEvents.push({ type: 'fumble_recovery', playerId: recPlayer.id });
+                            if (recovery.possessionChange && playState.ballState.lastDroppedById) {
+                                playState.statEvents.push({ type: 'fumble_lost', playerId: playState.ballState.lastDroppedById });
+                            }
                         }
                     }
                 }
@@ -6202,7 +6228,7 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
             if (gameLog) {
                 const finalX = ballCarrierState.x.toFixed(1);
                 const finalY = ballCarrierState.y.toFixed(1);
-                gameLog.push(`[Tick ${playState.tick}] ⏱️ WHISTLE: Play ends at (${finalX}, ${finalY}) | Total Play Yardage: ${playState.yards.toFixed(1)}y`);
+                gameLog.push(`[Tick ${playState.tick}] ⏱️ WHISTLE: ${ballCarrierState.name} stopped at (${finalX}, ${finalY}) | Total Play Yardage: ${playState.yards.toFixed(1)}y`);
             }
         }
         // 💡 FIX: Only mark incomplete if a fumble didn't occur
@@ -6417,6 +6443,22 @@ function applyStatEvents(statEvents) {
                 if (p) {
                     ensureStats(p);
                     p.gameStats.fumbles++;
+                }
+                break;
+            }
+            case 'fumble_recovery': {
+                const p = getPlayer(evt.playerId);
+                if (p) {
+                    ensureStats(p);
+                    p.gameStats.fumblesRecovered++;
+                }
+                break;
+            }
+            case 'fumble_lost': {
+                const p = getPlayer(evt.playerId);
+                if (p) {
+                    ensureStats(p);
+                    p.gameStats.fumblesLost++;
                 }
                 break;
             }
