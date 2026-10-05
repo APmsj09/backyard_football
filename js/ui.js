@@ -3178,13 +3178,21 @@ function runLiveGameStep() {
     const currentPlays = activeLiveGame.playsTotal || 1;
     const isConversion = activeLiveGame.isConversionAttempt;
 
-    // Update scoreboard with current (pre-play) info
+    // 💡 FIX: Update scoreboard with clock & down info
+    const qStr = activeLiveGame.quarter > 4 ? 'OT' : `Q${activeLiveGame.quarter || 1}`;
+    const timeStr = formatGameClock(activeLiveGame.clock !== undefined ? activeLiveGame.clock : 720);
+
+    if (elements.simPossession && activeLiveGame.possession) {
+        elements.simPossession.textContent = `🏈 ${activeLiveGame.possession.name}`;
+        elements.simPossession.style.color = activeLiveGame.possession.primaryColor || '#60a5fa';
+    }
+
     if (isConversion) {
-        elements.simGameDown.textContent = "Conversion";
-        elements.simGameDrive.textContent = "PAT";
+        if (elements.simGameDown) elements.simGameDown.textContent = "Conversion";
+        if (elements.simGameDrive) elements.simGameDrive.textContent = "PAT";
     } else {
-        elements.simGameDown.textContent = `${currentDown} & ${currentYards}`;
-        elements.simGameDrive.textContent = `Play ${currentPlays}/60`;
+        if (elements.simGameDown) elements.simGameDown.textContent = `${currentDown} & ${currentYards}`;
+        if (elements.simGameDrive) elements.simGameDrive.textContent = `${qStr} | ${timeStr}`;
     }
 
     // Run Physics Step (this updates the internal activeLiveGame state)
@@ -3331,18 +3339,25 @@ function playVisualization(frames, onComplete) {
     liveGameInterval = setTimeout(runNextFrame, initialDelay);
 }
 
+function formatGameClock(seconds) {
+    const s = Math.max(0, Math.floor(seconds || 0));
+    const mins = Math.floor(s / 60);
+    const secs = (s % 60).toString().padStart(2, '0');
+    return `${mins}:${secs}`;
+}
+
 function updateLiveScoreboard() {
     if (!activeLiveGame) return;
     if (elements.simHomeScore) elements.simHomeScore.textContent = activeLiveGame.homeScore;
     if (elements.simAwayScore) elements.simAwayScore.textContent = activeLiveGame.awayScore;
 
-    const formatClock = (seconds) => {
-        const m = Math.floor(seconds / 60);
-        const s = Math.floor(seconds % 60).toString().padStart(2, '0');
-        return `${m}:${s}`;
-    };
+    // 💡 FIX: Dynamic Possession Indicator
+    if (elements.simPossession && activeLiveGame.possession) {
+        elements.simPossession.textContent = `🏈 ${activeLiveGame.possession.name}`;
+        elements.simPossession.style.color = activeLiveGame.possession.primaryColor || '#60a5fa';
+    }
 
-    // Context-aware text
+    // 💡 FIX: Real Clock & Quarter Display
     if (activeLiveGame.isGameOver) {
         if (elements.simGameDown) elements.simGameDown.textContent = "FINAL";
         if (elements.simGameDrive) elements.simGameDrive.textContent = "0:00";
@@ -3350,9 +3365,11 @@ function updateLiveScoreboard() {
         if (elements.simGameDown) elements.simGameDown.textContent = "Conversion";
         if (elements.simGameDrive) elements.simGameDrive.textContent = "PAT";
     } else {
+        const qStr = activeLiveGame.quarter > 4 ? 'OT' : `Q${activeLiveGame.quarter || 1}`;
+        const timeStr = formatGameClock(activeLiveGame.clock !== undefined ? activeLiveGame.clock : 720);
+
         if (elements.simGameDown) elements.simGameDown.textContent = `${activeLiveGame.down} & ${activeLiveGame.yardsToGo}`;
-        const qStr = activeLiveGame.quarter > 4 ? 'OT' : `Q${activeLiveGame.quarter}`;
-        if (elements.simGameDrive) elements.simGameDrive.textContent = `${qStr} | ${formatClock(activeLiveGame.clock)}`;
+        if (elements.simGameDrive) elements.simGameDrive.textContent = `${qStr} | ${timeStr}`;
     }
 }
 
