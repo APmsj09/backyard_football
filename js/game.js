@@ -391,6 +391,11 @@ export function rebuildDepthChartFromOrder(team) {
     const qbBucket = team.depthOrder['QB'] || [];
     const bestPunter = qbBucket.length > 1 ? qbBucket[1] : qbBucket[0];
     team.depthChart.special['P'] = bestPunter || null;
+
+    // 💡 FIX: In Punt formation, QB1 is the Punter, NOT the starting QB!
+    if (offFormKey === 'Punt') {
+        team.depthChart.offense['QB1'] = team.depthChart.special['P'] || bestPunter || null;
+    }
 }
 /** Helper: Gets full player objects from a team's roster of IDs. */
 function getRosterObjects(team) {
@@ -1718,10 +1723,13 @@ function resolveDepthForPlay(offense, defense) {
         const rosterIds = team.roster || [];
         const usedThisPlay = new Set();
 
-        formationData.slots.forEach(slot => {
+        // 💡 FIX: Process slots in strict priority order (QB1/LB2/OL2 first, depth last)
+        const sortedSlots = [...formationData.slots].sort((a, b) => getPriority(b) - getPriority(a));
+
+        sortedSlots.forEach(slot => {
             let pId = team.depthChart[side]?.[slot];
 
-            // If slot is empty, or player is already used (Ironman logic safety), find anyone else
+            // If slot is empty or player is already used on this side, find best suitable fallback
             if (!pId || usedThisPlay.has(pId)) {
                 const candidates = rosterIds
                     .map(id => getPlayer(id))
@@ -1879,13 +1887,21 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
                         break;
                     }
                 }
-                if (slot.startsWith('QB')) {
+                 if (slot.startsWith('QB')) {
                     if (play.type === 'punt') {
                         assignment = 'punt'; action = 'punt_kick'; targetY = startY - 5;
                     } else {
-                        // 💡 FIX: Respect playbook assignments (RPO, Flea Flicker, Scramble, Screen)
-                        assignment = assignment || 'qb_setup';
-                        action = assignment; // Map action directly to the assignment
+                        assignment = assignment || 'qb_setup'; 
+                        action = assignment;
+
+                        // 💡 FIX: Map concept roles (X, Z, H, Y, RB) to actual slot names (WR1, TE1, etc.)
+                        if (play.readProgression && play.readProgression.length > 0) {
+                            const mapping = formationData.mapping || {};
+                            readProgression = play.readProgression.map(role => {
+                                const mapped = mapping[role];
+                                return Array.isArray(mapped) ? mapped[0] : (mapped || role);
+                            }).filter(Boolean);
+                        }
 
                         dropbackPhase = 'dropping'; hasCompletedDropback = false;
 
@@ -3751,50 +3767,30 @@ function checkTackleCollisions(playState, gameLog) {
     for (const defender of defenders) {
         const distance = getDistance(carrier, defender);
 
-        // 💡 NEW: Contact Avoidance Mechanics (Before Tackle Attempt)
-        // Runners can attempt to dodge/hurdle/stiff-arm within 1.5 yards
-        if (distance < 1.5) {
-            // 💡 FIX: QBs cannot juke/hurdle while actively trying to hand the ball off
+        // 💡 TUNING: Consolidated Evasion Check (15-22% base chance, avoids chained highlight reels)
+        if (distance < 1.4) {
             const canPerformMove = (!carrier.moveCooldown || carrier.moveCooldown <= 0) && carrier.action !== 'handoff_setup';
 
             if (canPerformMove) {
-                const roll = Math.random();
+                const agiDiff = (carrier.agi || 50) - (defender.tkl || 50);
+                const strDiff = (carrier.str || 50) - (defender.str || 50);
+                const evadeChance = Math.max(0.05, Math.min(0.35, 0.16 + (Math.max(agiDiff, strDiff) / 250)));
 
-                // 1. HURDLE (Agility + Luck)
-                const hurdleChance = (carrier.agi / 120) - (defender.spd / 150);
-                if (roll < hurdleChance * 0.3) {
-                    carrier.action = 'hurdle';
-                    carrier.moveCooldown = 30;
-                    defender.stunnedTicks = 20;
-                    carrier.tacklesBrokenThisPlay = (carrier.tacklesBrokenThisPlay || 0) + 1;
-                    if (gameLog) gameLog.push(`🏃 ${carrier.name} hurdled over ${defender.name}!`);
-                    continue;
-                }
-
-                // 2. JUKE (Pure Agility)
-                const jukeChance = (carrier.agi / 100) - (defender.tkl / 150);
-                if (roll < jukeChance * 0.4) {
-                    const dir = Math.random() > 0.5 ? 1 : -1;
-                    carrier.action = dir === 1 ? 'juke_right' : 'juke_left';
-                    carrier.x += dir * 1.2;
+                if (Math.random() < evadeChance) {
                     carrier.moveCooldown = 35;
-                    defender.stunnedTicks = 30;
                     carrier.tacklesBrokenThisPlay = (carrier.tacklesBrokenThisPlay || 0) + 1;
-                    if (gameLog) gameLog.push(`⚡ ${carrier.name} juked ${defender.name}!`);
-                    continue;
-                }
 
-                // 3. STIFF-ARM (Strength)
-                const stiffArmChance = ((carrier.str + (carrier.wgt / 100)) / 300) - (defender.str / 150);
-                if (roll < stiffArmChance * 0.4) {
-                    carrier.action = 'stiff_arm';
-                    carrier.moveCooldown = 30;
-                    const dx = defender.x - carrier.x, dy = defender.y - carrier.y;
-                    const d = Math.max(0.1, Math.sqrt(dx * dx + dy * dy));
-                    defender.x += (dx / d) * 2.5; defender.y += (dy / d) * 2.5;
-                    defender.stunnedTicks = 25;
-                    carrier.tacklesBrokenThisPlay = (carrier.tacklesBrokenThisPlay || 0) + 1;
-                    if (gameLog) gameLog.push(`💪 ${carrier.name} stiff-armed ${defender.name}!`);
+                    if (strDiff > agiDiff && strDiff > 10) {
+                        carrier.action = 'stiff_arm';
+                        defender.stunnedTicks = 20;
+                        if (gameLog) pushGameLog(gameLog, `💪 ${carrier.name} stiff-arms ${defender.name}!`, playState);
+                    } else {
+                        const dir = Math.random() > 0.5 ? 1 : -1;
+                        carrier.action = dir === 1 ? 'juke_right' : 'juke_left';
+                        carrier.x += dir * 0.9;
+                        defender.stunnedTicks = 18;
+                        if (gameLog) pushGameLog(gameLog, `⚡ ${carrier.name} shakes free with a quick cut!`, playState);
+                    }
                     continue;
                 }
             }
@@ -4537,14 +4533,16 @@ function updateQBDecision(qbState, offenseStates, defenseStates, playState, offe
         const depth = rec.y - playState.lineOfScrimmage;
         const iqFactor = qbIQ / 100;
 
-        // 💡 DEPTH BONUSES: Must be contingent on separation!
-        if (depth > 5 && depth < 15) {
-            if (minProjectedSeparation > 1.5) score += 15; // Open intermediate
-            else score -= 15; // Covered intermediate
+        // 💡 STATISTICAL BALANCE: Intermediate routes are the bread-and-butter
+        if (depth >= 3 && depth <= 14) {
+            if (minProjectedSeparation > 1.2) score += 35; // Strongly favor high-percentage rhythm throws
+            else score -= 10;
         }
-        if (depth >= 15) {
-            if (minProjectedSeparation > 2.5) score += 25 * iqFactor; // Open deep ball
-            else score -= 40; // Covered deep ball (Harsh Punish!)
+        if (depth > 14) {
+            // Deep balls require clean separation (3.5+ yds) to pull the trigger
+            if (minProjectedSeparation > 3.5) score += 20 * iqFactor;
+            else if (minProjectedSeparation > 2.0 && playState.isDesperation) score += 30; // Late game heave
+            else score -= 55; // Strongly discourage contested deep chucks
         }
 
         // --- PENALTIES ---
@@ -5009,20 +5007,19 @@ function updatePunterDecision(playState, offenseStates, gameLog) {
     const isLeftHash = punter.x < 26.6;
     const targetX = isLeftHash ? 42.0 : 11.0; // Aim away from center but stay in bounds
 
-    // Punts now target 45 yards base + up to 25 yards from strength
-    let puntDistance = 45 + (punterPower * 0.25);
+    // 💡 REALISM: Base punt distance 36-52 yards based on strength with natural kick scatter
+    const baseDistance = 34 + ((punterPower / 100) * 16);
+    const varianceY = (Math.random() - 0.5) * 14; // +/- 7 yards variance
+    let puntDistance = Math.max(25, baseDistance + varianceY);
 
-    // 💡 FIX: Coffin Corner logic. If the punt would go into the endzone, shorten it to pin them inside the 10.
-    if (playState.lineOfScrimmage + puntDistance > 105) {
-        puntDistance = 105 - playState.lineOfScrimmage; // Aim for the 5-yard line
+    // Coffin corner targeting inside the opponent's 40
+    if (playState.lineOfScrimmage + puntDistance > 106) {
+        puntDistance = Math.max(20, 104 - playState.lineOfScrimmage);
     }
 
     const targetY = playState.lineOfScrimmage + puntDistance;
-
-    // Reduced variance so punts don't wildly fly out of bounds 10 yards downfield
-    const errorX = (Math.random() - 0.5) * (100 - punterAcc) * 0.2;
-    // 💡 FIX: Reduce Y-variance when coffin-corner kicking so we don't accidentally get a touchback anyway
-    const errorY = (Math.random() - 0.5) * (100 - punterAcc) * (targetY === 105 ? 0.1 : 0.3);
+    const errorX = (Math.random() - 0.5) * ((100 - punterAcc) / 100) * 10;
+    const errorY = (Math.random() - 0.5) * 4;
 
     const finalTargetX = Math.max(2, Math.min(51, targetX + errorX));
     const finalTargetY = Math.min(118, targetY + errorY);
@@ -5210,9 +5207,11 @@ function handleBallArrival(playState, carrier, playResult, gameLog) {
 
         let catchScore = (catching * 0.60) + (agility * 0.20) + 25;
 
-        // 💡 FIX: Situational & Traffic Penalties
+        // 💡 REALISM FIX: Defenders swat/break up passes far more often than picking them off
         if (isDefense) {
-            catchScore *= 0.40; // DBs drop INTs frequently
+            // INT chance scales with catching hands; average DBs drop or swat 80%+ of contested balls
+            const handsFactor = Math.min(1.0, catching / 85);
+            catchScore *= (0.18 * handsFactor); 
         }
 
         const defendersNear = playersInRange.filter(p => !p.isOffense).length;
@@ -6590,27 +6589,46 @@ function determinePlayCall(offense, defense, down, yardsToGo, ballOn, scoreDiff,
         const isCompatible = play.compatibleFormations && play.compatibleFormations.includes(formationName);
         const isLegacyMatch = key.startsWith(formationName);
         const isUniversal = key.startsWith('Uni_') || key.startsWith('PA_') || key.startsWith('Trick_') || key.startsWith('RPO_');
-
-        // 💡 FIX: If the play EXPLICITLY defines compatible formations, enforce it to stop "Universal" over-reach
-        if (play.compatibleFormations) {
-            return isCompatible;
-        }
-
+        
+        if (play.compatibleFormations) return isCompatible;
         return isLegacyMatch || isUniversal;
     });
 
     if (formationPlays.length === 0) return 'Uni_InsideZone';
 
-    // 2. Situational Awareness (The "Coordinator's Brain")
+    // 2. Situational Awareness
     const isGoalLine = ballOn >= 90;
     const isBackedUp = ballOn <= 10;
     const isShort = yardsToGo <= 2;
     const isLong = yardsToGo >= 8;
-    const isDesperation = drivesRemaining <= 2 && scoreDiff <= -8; // Late game, losing
-    const isChewClock = drivesRemaining <= 2 && scoreDiff >= 8;    // Late game, winning
+    const isDesperation = drivesRemaining <= 2 && scoreDiff <= -8;
+    const isChewClock = drivesRemaining <= 2 && scoreDiff >= 8;
 
-    // 3. Score Every Play
-    let scoredPlays = formationPlays.map(key => {
+    // 💡 ARCHITECTURE FIX: Choose Run vs. Pass intent first
+    // Base 50/50 balance on 1st down, modified by identity and situation
+    let runProbability = 0.50;
+
+    if (coach?.type === 'Ground and Pound' || coach?.type === 'Trench Warfare') runProbability += 0.20;
+    else if (coach?.type === 'Air Raid') runProbability -= 0.25;
+    else if (coach?.type === 'West Coast Offense') runProbability -= 0.10;
+
+    if (isShort) runProbability += 0.30;
+    if (isLong) runProbability -= 0.35;
+    if (isGoalLine) runProbability += 0.15;
+    if (isChewClock) runProbability += 0.35;
+    if (isDesperation) runProbability = 0.05;
+
+    runProbability = Math.max(0.05, Math.min(0.90, runProbability));
+
+    const availableRuns = formationPlays.filter(k => offensivePlaybook[k].type === 'run');
+    const availablePasses = formationPlays.filter(k => offensivePlaybook[k].type === 'pass');
+
+    // Select category (fallback if one has no plays in formation)
+    const selectRun = (Math.random() < runProbability && availableRuns.length > 0) || availablePasses.length === 0;
+    const candidateKeys = selectRun ? availableRuns : availablePasses;
+
+    // 3. Score Plays Within the Selected Category
+    let scoredPlays = candidateKeys.map(key => {
         const play = offensivePlaybook[key];
         const tags = play.tags || [];
         let score = 50; // Base baseline score
@@ -8267,62 +8285,56 @@ function autoMakeSubstitutions(team, options = {}, gameLog = null) {
                 if ((currentPlayer.fatigue || 0) <= recoverLimit) currentPlayer.isResting = false;
             }
 
-            // 2. Identify the ideal position cascades
+            // 2. Identify realistic football position families (No WRs at DT!)
             let basePos = slot.replace(/\d/g, '');
             if (['OT', 'OG', 'C'].includes(basePos)) basePos = 'OL';
-            if (['CB', 'S'].includes(basePos)) basePos = 'DB';
-            if (['DE', 'DT'].includes(basePos)) basePos = 'DL';
+            if (['CB', 'S', 'FS', 'SS'].includes(basePos)) basePos = 'DB';
+            if (['DE', 'DT', 'NT'].includes(basePos)) basePos = 'DL';
             if (basePos === 'FB') basePos = 'RB';
 
             let searchBuckets = [basePos];
-            if (basePos === 'WR') searchBuckets.push('TE', 'RB', 'DB', 'QB');
-            if (basePos === 'RB') searchBuckets.push('WR', 'DB', 'LB');
-            if (basePos === 'TE') searchBuckets.push('WR', 'OL', 'LB');
-            if (basePos === 'OL') searchBuckets.push('DL', 'TE', 'LB');
-            if (basePos === 'DB') searchBuckets.push('WR', 'RB', 'QB');
-            if (basePos === 'LB') searchBuckets.push('DL', 'DB', 'TE', 'RB');
-            if (basePos === 'DL') searchBuckets.push('LB', 'OL', 'TE');
-            if (basePos === 'QB') searchBuckets.push('WR', 'RB', 'DB');
-            searchBuckets.push('WR', 'RB', 'TE', 'DB', 'LB', 'DL', 'OL', 'QB');
+            // Trenches only swap with Trenches & Tight Ends
+            if (basePos === 'OL') searchBuckets.push('DL', 'TE');
+            else if (basePos === 'DL') searchBuckets.push('OL', 'LB', 'TE');
+            // Second Level / Power
+            else if (basePos === 'LB') searchBuckets.push('DL', 'TE', 'RB', 'DB');
+            else if (basePos === 'TE') searchBuckets.push('OL', 'LB', 'WR');
+            // Skill / Perimeter
+            else if (basePos === 'RB') searchBuckets.push('WR', 'DB', 'LB');
+            else if (basePos === 'WR') searchBuckets.push('DB', 'RB', 'TE');
+            else if (basePos === 'DB') searchBuckets.push('WR', 'RB', 'LB');
+            // QBs only sub for QBs unless desperate
+            else if (basePos === 'QB') searchBuckets.push('WR', 'RB');
 
             let bestCandidateId = null;
+            let bestSuitability = -Infinity;
 
-            // 3. Scan depthOrder to find the highest-ranking rested player
+            // 3. Find the best suitable player who is rested and eligible
             for (const bucket of searchBuckets) {
                 const groupList = team.depthOrder[bucket] || [];
                 for (const candidateId of groupList) {
                     const candidate = fullRoster.find(p => p.id === candidateId);
                     if (!candidate || candidate.status?.duration > 0) continue;
-
-                    // Cannot assign if they are already playing another slot on THIS side
                     if (activeOnThisSide.has(candidateId) && candidateId !== currentId) continue;
 
-                    // Manage candidate resting state
                     if ((candidate.fatigue || 0) >= fatigueLimit) candidate.isResting = true;
                     if ((candidate.fatigue || 0) <= recoverLimit) candidate.isResting = false;
 
-                    // First player found who isn't resting gets the job!
                     if (!candidate.isResting) {
-                        bestCandidateId = candidateId;
-                        break;
+                        const score = calculateSlotSuitability(candidate, slot, side, team);
+                        // Minimum suitability floor: reject absurd out-of-position assignments
+                        if (score > 35 && score > bestSuitability) {
+                            bestSuitability = score;
+                            bestCandidateId = candidateId;
+                        }
                     }
                 }
                 if (bestCandidateId) break;
             }
 
-            // 4. Emergency Fallback: If literally everyone is resting, play the best guy anyway
-            if (!bestCandidateId) {
-                for (const bucket of searchBuckets) {
-                    const groupList = team.depthOrder[bucket] || [];
-                    for (const candidateId of groupList) {
-                        const candidate = fullRoster.find(p => p.id === candidateId);
-                        if (!candidate || candidate.status?.duration > 0) continue;
-                        if (activeOnThisSide.has(candidateId) && candidateId !== currentId) continue;
-                        bestCandidateId = candidateId;
-                        break;
-                    }
-                    if (bestCandidateId) break;
-                }
+            // 4. Emergency Fallback: If no ideal sub is rested, keep current or use natural backup
+            if (!bestCandidateId && currentPlayer && !currentPlayer.isResting) {
+                bestCandidateId = currentId;
             }
 
             // 5. Execute Sub

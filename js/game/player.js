@@ -4,14 +4,14 @@ import { getRandom, getRandomInt } from '../utils.js';
 import { firstNames, lastNames, nicknames, offenseFormations, defenseFormations } from '../data.js';
 
 const offensivePositions = ['QB', 'RB', 'WR', 'TE', 'OL'];
-const defensivePositions =['DL', 'LB', 'DB'];
+const defensivePositions = ['DL', 'LB', 'DB'];
 
 // Adjusted weights: Removed speed from OL/DL so their archetype nerfs don't tank their OVR
 export const positionOverallWeights = {
     QB: { throwingAccuracy: 0.45, playbookIQ: 0.30, consistency: 0.10, clutch: 0.05, agility: 0.05, strength: 0.05 },
     RB: { speed: 0.35, agility: 0.25, strength: 0.15, catchingHands: 0.10, toughness: 0.10, stamina: 0.05 },
     WR: { speed: 0.40, catchingHands: 0.30, agility: 0.15, height: 0.10, playbookIQ: 0.05 },
-    TE: { catchingHands: 0.30, blocking: 0.25, strength: 0.20, height: 0.15, toughness: 0.10 }, 
+    TE: { catchingHands: 0.30, blocking: 0.25, strength: 0.20, height: 0.15, toughness: 0.10 },
     OL: { strength: 0.45, blocking: 0.40, weight: 0.10, toughness: 0.05 },
     DL: { strength: 0.40, blockShedding: 0.30, tackling: 0.20, weight: 0.10 },
     LB: { tackling: 0.35, playbookIQ: 0.20, strength: 0.20, speed: 0.15, blockShedding: 0.10 },
@@ -25,13 +25,13 @@ export function estimateBestPosition(scoutedPlayer) {
         if (typeof val === 'number') return val;
         if (typeof val === 'string') {
             if (val.includes('-')) {
-                const[min, max] = val.split('-').map(Number);
+                const [min, max] = val.split('-').map(Number);
                 return (min + max) / 2;
             }
             const parsed = Number(val);
-            return isNaN(parsed) ? 50 : parsed; 
+            return isNaN(parsed) ? 50 : parsed;
         }
-        return 0; 
+        return 0;
     };
 
     const cleanAttributes = {};
@@ -46,7 +46,7 @@ export function estimateBestPosition(scoutedPlayer) {
 
     const offPos = tempPlayer.favoriteOffensivePosition;
     const defPos = tempPlayer.favoriteDefensivePosition;
-    
+
     // 💡 ULTIMATE FIX: If the player was generated via an archetype, they are STRICTLY categorized 
     // as whichever of those two positions they grade out higher in. 
     // This perfectly aligns the draft pool with the generated archetypes.
@@ -59,7 +59,7 @@ export function estimateBestPosition(scoutedPlayer) {
     // Fallback for extremely old saves
     let bestPos = 'UTIL';
     let maxScore = -Infinity;
-    
+
     Object.keys(positionOverallWeights).forEach(pos => {
         const score = calculateOverall(tempPlayer, pos);
         if (score > maxScore) {
@@ -85,13 +85,13 @@ export function calculateOverall(player, position) {
 
             if (relevantWeights[weightKey]) {
                 let value = attrs[category][attr];
-                
+
                 // Normalization mappings
                 if (weightKey === 'weight') {
                     value = Math.max(0, Math.min(100, (value - 100) * 0.66 + 40));
                 }
                 if (weightKey === 'height') {
-                    value = Math.max(0, Math.min(100, (value - 50) * 4)); 
+                    value = Math.max(0, Math.min(100, (value - 50) * 4));
                 }
 
                 if (typeof value === 'number') {
@@ -136,7 +136,7 @@ export function calculateSlotSuitability(player, slot, side, team) {
     }
 
     return totalWeight > 0
-        ? score / totalWeight
+        ? Math.min(99, Math.max(1, Math.round(score / totalWeight)))
         : calculateOverall(player, basePosition);
 }
 
@@ -187,14 +187,14 @@ const archetypes = [
     { name: 'Island Corner', off: 'WR', def: 'DB', weightMod: 0.85, heightMod: 0, keyAttrs: ['coverage', 'speed', 'agility', 'consistency'], speedMod: 1.3, strMod: 0.8 },
     { name: 'Ballhawk Safety', off: 'WR', def: 'DB', weightMod: 0.95, heightMod: 2, keyAttrs: ['catchingHands', 'playbookIQ', 'coverage', 'clutch'], speedMod: 1.1, strMod: 0.9 },
     { name: 'Nickel Stopper', off: 'RB', def: 'DB', weightMod: 1.05, heightMod: -1, keyAttrs: ['tackling', 'agility', 'speed', 'toughness'], speedMod: 1.1, strMod: 1.1 },
-    { name: 'Zone Specialist', off: 'WR', def: 'DB', weightMod: 1.0, heightMod: 3, keyAttrs:['playbookIQ', 'coverage', 'height', 'catchingHands'], speedMod: 0.95, strMod: 1.0 }
+    { name: 'Zone Specialist', off: 'WR', def: 'DB', weightMod: 1.0, heightMod: 3, keyAttrs: ['playbookIQ', 'coverage', 'height', 'catchingHands'], speedMod: 0.95, strMod: 1.0 }
 ];
 
 /**
  * Standard Box-Muller transform to generate normally distributed numbers (Bell Curve).
  */
 export function gaussianRandom(mean = 0, stdev = 1) {
-    const u = 1 - Math.random(); 
+    const u = 1 - Math.random();
     const v = Math.random();
     const z = Math.sqrt(-2.0 * Math.log(u)) * Math.cos(2.0 * Math.PI * v);
     return z * stdev + mean;
@@ -229,7 +229,7 @@ export function generatePlayer(minAge = 10, maxAge = 16, classModifiers = null) 
     const archetype = getRandom(archetypes);
     const favoriteOffensivePosition = archetype.off;
     const favoriteDefensivePosition = archetype.def;
-    
+
     // Determine which side they are "naturally" better at for draft class shifting
     const bestPosition = Math.random() > 0.5 ? favoriteOffensivePosition : favoriteDefensivePosition;
 
@@ -244,11 +244,11 @@ export function generatePlayer(minAge = 10, maxAge = 16, classModifiers = null) 
     let generatedKeySum = 0;
     const generateAttributeValue = (name) => {
         const isKey = keyAttrs.has(name);
-        
+
         // Key attributes form a bell curve around 72. Non-keys around 48.
         const mean = (isKey ? 72 : 48) + totalShift;
         const stdDev = isKey ? 7 : 12; // Keys are reliably good, non-keys have wild variance
-        
+
         let val = Math.round(gaussianRandom(mean, stdDev));
         val = Math.max(15, Math.min(99, val)); // Hard clamp
 
@@ -267,7 +267,7 @@ export function generatePlayer(minAge = 10, maxAge = 16, classModifiers = null) 
         },
         mental: {
             playbookIQ: generateAttributeValue('playbookIQ'),
-            clutch: Math.max(15, Math.min(99, Math.round(gaussianRandom(50, 15)))), // Pure random bell curve
+            clutch: generateAttributeValue('clutch'),
             consistency: generateAttributeValue('consistency'),
             toughness: generateAttributeValue('toughness')
         },
@@ -284,7 +284,7 @@ export function generatePlayer(minAge = 10, maxAge = 16, classModifiers = null) 
     // 5. Apply Archetype Modifiers
     attributes.physical.speed = Math.min(99, attributes.physical.speed * archetype.speedMod);
     attributes.physical.strength = Math.min(99, attributes.physical.strength * archetype.strMod);
-    
+
     // Penalize things the archetype shouldn't be doing
     if (archetype.off !== 'QB') attributes.technical.throwingAccuracy *= 0.5;
     if (['WR', 'DB', 'QB'].includes(archetype.off)) {
@@ -292,21 +292,8 @@ export function generatePlayer(minAge = 10, maxAge = 16, classModifiers = null) 
         attributes.technical.blockShedding *= 0.4;
     }
 
-    // 6. Potential (Bell curve influenced by actual talent + class strength)
-    const avgKeyTalent = generatedKeySum / Math.max(1, archetype.keyAttrs.length);
-    // Mix 60% of their generated talent with 40% randomness to allow "hidden gems" and "busts"
-    const potentialMean = (avgKeyTalent * 0.6) + (65 * 0.4) + totalShift;
-    const potentialRoll = gaussianRandom(potentialMean, 10);
-    
-    let potential = 'C';
-    if (potentialRoll >= 84) potential = 'A';
-    else if (potentialRoll >= 74) potential = 'B';
-    else if (potentialRoll >= 58) potential = 'C';
-    else if (potentialRoll >= 45) potential = 'D';
-    else potential = 'F';
-
     // 7. Body Type (Gaussian variance around the archetype ideals)
-    const ageProgress = (age - 10) / Math.max(1, (maxAge - 10)); // 0.0 to 1.0
+    const ageProgress = (age - minAge) / Math.max(1, (maxAge - minAge)); // 0.0 to 1.0
     
     const baseHeightMean = 55 + (ageProgress * 15) + archetype.heightMod;
     let height = Math.round(gaussianRandom(baseHeightMean, 2.5));
@@ -317,6 +304,39 @@ export function generatePlayer(minAge = 10, maxAge = 16, classModifiers = null) 
     attributes.physical.height = height;
     attributes.physical.weight = weight;
 
+    // 6. Potential (Calculated AFTER archetype modifiers & body attributes are set)
+    const getNormalizedAttribute = (name) => {
+        if (name === 'height') {
+            return Math.max(0, Math.min(100, (attributes.physical.height - 50) * 4));
+        }
+        if (name === 'weight') {
+            return Math.max(0, Math.min(100, (attributes.physical.weight - 100) * 0.66 + 40));
+        }
+        for (const category of Object.values(attributes)) {
+            if (category && typeof category[name] === 'number') {
+                return category[name];
+            }
+        }
+        return 50;
+    };
+
+    const avgKeyTalent = archetype.keyAttrs.reduce(
+        (sum, attr) => sum + getNormalizedAttribute(attr), 
+        0
+    ) / Math.max(1, archetype.keyAttrs.length);
+
+    // Underlying ceiling before age maturation
+    const potentialMean = (avgKeyTalent * 0.60) + (65 * 0.40) + totalShift;
+    const potentialRoll = gaussianRandom(potentialMean, 10);
+    
+    // Balanced distribution (A and B are genuine blue-chip prospects)
+    let potential = 'C';
+    if (potentialRoll >= 90) potential = 'A';
+    else if (potentialRoll >= 80) potential = 'B';
+    else if (potentialRoll >= 60) potential = 'C';
+    else if (potentialRoll >= 45) potential = 'D';
+    else potential = 'F';
+
     // 8. Age Scaling & Clamping
     // 16yo gets ~100% of their generated stats. 10yo gets ~70%
     const physScale = 0.70 + (ageProgress * 0.30);
@@ -326,10 +346,10 @@ export function generatePlayer(minAge = 10, maxAge = 16, classModifiers = null) 
         Object.keys(attributes[cat]).forEach(attr => {
             if (['height', 'weight', 'clutch'].includes(attr)) return;
             let factor = (cat === 'physical') ? physScale : mentScale;
-            
+
             // Speed and Agility mature faster than strength
             if (attr === 'speed' || attr === 'agility') factor = Math.min(1.0, factor + 0.15);
-            
+
             attributes[cat][attr] = Math.max(15, Math.min(99, Math.round(attributes[cat][attr] * factor)));
         });
     });
