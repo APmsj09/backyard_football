@@ -3880,19 +3880,21 @@ function checkTackleCollisions(playState, gameLog) {
             carrier.tacklesBrokenThisPlay = brokenCount + 1;
             defender.stunnedTicks = 40;
 
-            // 💡 FIX: Runner Stumble Mechanic
-            // The runner loses 40% of their speed AND is placed on a moveCooldown.
-            // During a moveCooldown, the physics engine won't allow them to accelerate!
             const speedDrain = Math.max(0.40, (defender.wgt / carrier.wgt) * 0.40);
             carrier.vx *= (1 - speedDrain);
             carrier.vy *= (1 - speedDrain);
 
-            // Stumble for 15 ticks (0.75 seconds). They cannot juke or accelerate during this time.
             carrier.moveCooldown = 15;
+
+            // 💡 FIX: If a QB breaks a tackle in the pocket, trigger an immediate scramble!
+            if (carrier.role === 'QB' && carrier.action === 'qb_setup' && carrier.y < playState.lineOfScrimmage) {
+                carrier.action = 'qb_scramble';
+                carrier.rolloutDir = carrier.x > CENTER_X ? -1 : 1;
+            }
 
             if (gameLog) pushGameLog(gameLog, `[Tick ${playState.tick}] 💪 ${carrier.name} runs THROUGH ${defender.name}!`, playState);
 
-            break; // Interaction resolved for this tick
+            break; 
         }
     }
     return false;
@@ -4766,13 +4768,14 @@ function updateQBDecision(qbState, offenseStates, defenseStates, playState, offe
     }
 
     // 4. DESPERATION THROW (Late game last resort)
-    if (isDesperationTime && !decisionMade && !targetPlayerState) {
-        // 💡 FIX: Ensure we explicitly exclude OL from Hail Mary targets
+    // 💡 FIX: Don't heave on Tick 1! Wait until receivers are actually downfield (Tick 35+)
+    if (isDesperationTime && !decisionMade && !targetPlayerState && playState.tick >= 35) {
         const deepReceiver = offenseStates
             .filter(o => o.slot !== 'QB1' && !o.slot.startsWith('OL') && (o.action.includes('route') || o.action === 'route_complete'))
             .sort((a, b) => b.y - a.y)[0];
 
-        if (deepReceiver && Math.random() > 0.5) {
+        // Only throw if receiver has actually crossed downfield past the line of scrimmage
+        if (deepReceiver && deepReceiver.y > playState.lineOfScrimmage + 10 && Math.random() > 0.4) {
             if (gameLog) gameLog.push(`🚨 ${qbState.name} heaves it downfield in desperation!`);
             executeThrow(qbState, deepReceiver, qbStrength, qbAcc * 0.4, playState, gameLog, "Desperation Throw");
             return;
@@ -8295,9 +8298,13 @@ function autoMakeSubstitutions(team, options = {}, gameLog = null) {
             }
 
             // 💡 FIX: If the starter is healthy and rested, DO NOT SUB THEM OUT!
+            // Two-way players with high fatigue are forced to sit on defense to break the death spiral
+            const isTwoWayFatigued = side === 'defense' && (currentPlayer?.fatigue || 0) > 55;
+
             const needsSub = !currentPlayer || 
                              currentPlayer.isResting || 
                              (currentPlayer.fatigue || 0) >= fatigueLimit || 
+                             isTwoWayFatigued ||
                              currentPlayer.status?.duration > 0;
 
             if (!needsSub) continue;
