@@ -17,145 +17,145 @@ const MIN_HEALTHY_PLAYERS = 8;
 const WEEKS_IN_SEASON = 9;
 
 async function startNewGame() {
-    const styleOptions = coachPersonalities.map(c => `<option value="${c.type}">${c.type}</option>`).join('');
-    const offOptions = Object.keys(offenseFormations)
-        .filter(k => k !== 'Punt' && k !== 'Punt_Return')
-        .map(k => `<option value="${k}">${offenseFormations[k].name}</option>`).join('');
-    const defOptions = Object.keys(defenseFormations)
-        .filter(k => k !== 'Punt_Return' && k !== 'Punt')
-        .map(k => `<option value="${k}">${defenseFormations[k].name}</option>`).join('');
-
-    const container = document.querySelector('#team-creation-screen > div');
-    if (container) {
-        container.innerHTML = `
-            <h2 class="text-3xl font-black mb-2 text-center text-slate-900 uppercase tracking-wider">Franchise Setup</h2>
-            <p class="text-sm text-slate-500 mb-6 text-center border-b border-slate-200 pb-4">Establish your identity. Running your preferred formations gives players a +5 IQ and Consistency boost.</p>
-            
-            <div class="space-y-4 text-sm text-slate-700 text-left">
-                <div class="grid grid-cols-2 gap-4">
-                    <div>
-                        <label class="block font-bold text-xs uppercase tracking-wider mb-1 text-slate-500">Coach Name</label>
-                        <input id="setup-coach-name" type="text" placeholder="e.g. Coach Taylor" class="w-full border border-slate-300 rounded-sm p-2 outline-none focus:border-slate-800">
-                    </div>
-                    <div>
-                        <label class="block font-bold text-xs uppercase tracking-wider mb-1 text-slate-500">Coaching Style</label>
-                        <select id="setup-coach-style" class="w-full border border-slate-300 rounded-sm p-2 outline-none focus:border-slate-800 bg-white">
-                            ${styleOptions}
-                        </select>
-                    </div>
-                </div>
-
-                <div class="grid grid-cols-2 gap-4 pt-2">
-                    <div>
-                        <label class="block font-bold text-xs uppercase tracking-wider mb-1 text-slate-500">Preferred Offense</label>
-                        <select id="setup-pref-off" class="w-full border border-slate-300 rounded-sm p-2 outline-none focus:border-slate-800 bg-white">
-                            ${offOptions}
-                        </select>
-                    </div>
-                    <div>
-                        <label class="block font-bold text-xs uppercase tracking-wider mb-1 text-slate-500">Preferred Defense</label>
-                        <select id="setup-pref-def" class="w-full border border-slate-300 rounded-sm p-2 outline-none focus:border-slate-800 bg-white">
-                            ${defOptions}
-                        </select>
-                    </div>
-                </div>
-
-                <div class="pt-2">
-                    <label class="block font-bold text-xs uppercase tracking-wider mb-1 text-slate-500">Team Name</label>
-                    <input id="setup-team-name" type="text" placeholder="e.g. The Bulldogs" class="w-full border border-slate-300 rounded-sm p-2 outline-none focus:border-slate-800">
-                </div>
-
-                <div class="grid grid-cols-2 gap-4">
-                    <div>
-                        <label class="block font-bold text-xs uppercase tracking-wider mb-1 text-slate-500">Primary Color</label>
-                        <input type="color" id="setup-primary-color" value="#2563EB" class="w-full h-10 rounded-sm cursor-pointer border border-slate-300 p-0.5">
-                    </div>
-                    <div>
-                        <label class="block font-bold text-xs uppercase tracking-wider mb-1 text-slate-500">Secondary Color</label>
-                        <input type="color" id="setup-secondary-color" value="#FFFFFF" class="w-full h-10 rounded-sm cursor-pointer border border-slate-300 p-0.5">
-                    </div>
-                </div>
-            </div>
-
-            <button id="confirm-team-btn" class="mt-8 bg-slate-900 hover:bg-slate-800 text-white font-bold py-4 px-8 rounded-sm w-full text-lg uppercase tracking-widest transition shadow-sm border border-slate-900">
-                Establish Franchise →
-            </button>
-        `;
-
-        document.getElementById('confirm-team-btn')?.addEventListener('click', handleConfirmTeam);
-    }
-    UI.showScreen('team-creation-screen');
-}
-
-async function handleConfirmTeam() {
-    const teamName = document.getElementById('setup-team-name')?.value.trim();
-    const coachName = document.getElementById('setup-coach-name')?.value.trim();
-    const coachStyle = document.getElementById('setup-coach-style')?.value;
-    const prefOff = document.getElementById('setup-pref-off')?.value;
-    const prefDef = document.getElementById('setup-pref-def')?.value;
-    const primaryColor = document.getElementById('setup-primary-color')?.value;
-    const secondaryColor = document.getElementById('setup-secondary-color')?.value;
-
-    if (!teamName || !coachName) {
-        UI.showModal("Missing Info", "<p>Please provide both a Team Name and a Coach Name.</p>");
-        return;
-    }
-
     activeSaveKey = 'backyardFootballGameState';
-
     try {
         UI.showScreen("loading-screen");
         UI.startLoadingMessages();
         await new Promise(resolve => setTimeout(resolve, 50));
 
+        // Generate the 20 main teams + 6 youth teams
         await Game.initializeLeague((progress) => {
-            UI.updateLoadingProgress(Math.round(progress * 40));
-        });
-
-        Game.createPlayerTeam(teamName, {
-            coachName, coachStyle, prefOff, prefDef, primaryColor, secondaryColor
+            UI.updateLoadingProgress(Math.round(progress * 30));
         });
 
         gameState = Game.getGameState();
-        
-        // 3-Year Historical Simulation Fast-Forward
-        gameState.playerTeam.isPlayerControlled = false;
         const loadingMsgEl = document.getElementById('loading-message');
-        
+
+        // Simulate 3 Seasons of pure history before player chooses a team
         for (let y = 1; y <= 3; y++) {
-            if (loadingMsgEl) loadingMsgEl.textContent = `Simulating Year ${y} History...`;
-            UI.updateLoadingProgress(40 + (y * 15));
+            if (loadingMsgEl) loadingMsgEl.textContent = `Simulating Season ${y} Matches & Draft...`;
+            UI.updateLoadingProgress(30 + (y * 22));
             await new Promise(resolve => setTimeout(resolve, 50));
-            
+
             Game.simulateHistoricalSeason(y, gameState);
-            Game.advanceToOffseason(); 
+            Game.advanceToOffseason();
             Game.simulateHistoricalDraft(y);
         }
-        
-        gameState.playerTeam.isPlayerControlled = true;
-        
-        // Initialize Year 4 Draft for the human player
-        Game.setupDraft();
-        gameState.draftCompleted = false;
 
-        generateDraftPreviewMessage();
         UI.stopLoadingMessages();
+        UI.updateLoadingProgress(100);
 
-        const advBtn = document.getElementById('advance-week-btn');
-        if (advBtn) {
-            advBtn.innerHTML = `<span>Start Draft</span>`;
-            advBtn.classList.remove('bg-amber-500');
-            advBtn.classList.add('bg-green-600');
-        }
-
-        UI.renderDashboard(gameState);
-        UI.switchTab('messages', gameState);
-        UI.showScreen('dashboard-screen');
+        renderTeamChooser(gameState);
     } catch (error) {
         console.error("Error starting game:", error);
         UI.stopLoadingMessages();
         UI.showModal("Error", `Could not start game: ${error.message}`);
     }
+}
+
+function renderTeamChooser(gameState) {
+    const grid = document.getElementById('team-select-grid');
+    if (!grid) return;
+
+    let selectedFilter = 'all';
+
+    const renderCards = () => {
+        grid.innerHTML = '';
+        const mainTeams = gameState.teams.filter(t => t.leagueType === 'main');
+        const filtered = mainTeams.filter(t => {
+            if (selectedFilter === '1') return t.tier === 1;
+            if (selectedFilter === '2') return t.tier === 2;
+            return true;
+        });
+
+        filtered.sort((a, b) => a.tier - b.tier);
+
+        filtered.forEach(team => {
+            const roster = Game.getRosterObjects(team);
+            const topPlayers = [...roster]
+                .sort((a, b) => Game.calculateOverall(b, estimateBestPosition(b)) - Game.calculateOverall(a, estimateBestPosition(a)))
+                .slice(0, 3);
+
+            // Count historical titles
+            const titles = (gameState.history?.seasons || []).filter(s => s.champion === team.name).length;
+            const t2Titles = (gameState.history?.seasons || []).filter(s => s.tier2Champion === team.name).length;
+
+            const card = document.createElement('div');
+            card.className = "bg-white border border-slate-300 rounded-sm p-4 flex flex-col justify-between shadow-sm hover:border-slate-800 transition";
+            card.innerHTML = `
+                <div>
+                    <div class="flex justify-between items-start mb-2">
+                        <div class="flex items-center gap-2">
+                            <span class="w-4 h-4 rounded-full border border-slate-400" style="background-color: ${team.primaryColor}"></span>
+                            <h3 class="font-black text-base uppercase tracking-wider text-slate-900">${team.name}</h3>
+                        </div>
+                        <span class="text-[10px] font-bold px-1.5 py-0.5 rounded-sm uppercase tracking-wider ${team.tier === 1 ? 'bg-amber-100 text-amber-800' : 'bg-blue-100 text-blue-800'}">
+                            Tier ${team.tier}
+                        </span>
+                    </div>
+
+                    <p class="text-xs text-slate-500 mb-2">Coach: <b>${team.coach?.name || 'Coach'}</b> (${team.coach?.type || 'Standard'})</p>
+                    
+                    <div class="text-[11px] bg-slate-50 p-2 rounded-sm border border-slate-100 mb-3 space-y-1 text-slate-700">
+                        <p>Roster: <b>${roster.length} Players</b> | Street Cred: <b>${team.socialProfile?.streetCred || 50}</b></p>
+                        ${titles > 0 ? `<p class="text-amber-600 font-bold">🏆 ${titles}x Premier Champion</p>` : ''}
+                        ${t2Titles > 0 ? `<p class="text-blue-600 font-bold">🥇 ${t2Titles}x Sandlot Champion</p>` : ''}
+                    </div>
+
+                    <p class="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">Key Stars</p>
+                    <div class="space-y-1 mb-4">
+                        ${topPlayers.map(p => `
+                            <div class="flex justify-between text-xs">
+                                <span class="font-semibold text-slate-800 truncate">${p.name} (${estimateBestPosition(p)})</span>
+                                <span class="font-black text-slate-900">${Game.calculateOverall(p, estimateBestPosition(p))} OVR</span>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+
+                <button class="select-franchise-btn w-full bg-slate-900 hover:bg-slate-800 text-white font-bold py-2 rounded-sm text-xs uppercase tracking-widest transition" data-team-id="${team.id}">
+                    Take Over Franchise →
+                </button>
+            `;
+            grid.appendChild(card);
+        });
+
+        grid.querySelectorAll('.select-franchise-btn').forEach(btn => {
+            btn.onclick = () => confirmFranchiseTakeover(btn.dataset.teamId);
+        });
+    };
+
+    document.getElementById('filter-tier-all').onclick = () => { selectedFilter = 'all'; renderCards(); };
+    document.getElementById('filter-tier-1').onclick = () => { selectedFilter = '1'; renderCards(); };
+    document.getElementById('filter-tier-2').onclick = () => { selectedFilter = '2'; renderCards(); };
+
+    renderCards();
+    UI.showScreen('team-select-screen');
+}
+
+function confirmFranchiseTakeover(teamId) {
+    const team = gameState.teams.find(t => t.id === teamId);
+    if (!team) return;
+
+    team.isPlayerControlled = true;
+    gameState.playerTeam = team;
+
+    // Initialize Year 4 Draft for the human player
+    Game.setupDraft();
+    gameState.draftCompleted = false;
+
+    generateDraftPreviewMessage();
+
+    const advBtn = document.getElementById('advance-week-btn');
+    if (advBtn) {
+        advBtn.innerHTML = `<span>Start Draft</span>`;
+        advBtn.classList.remove('bg-amber-500');
+        advBtn.classList.add('bg-green-600');
+    }
+
+    UI.renderDashboard(gameState);
+    UI.switchTab('messages', gameState);
+    UI.showScreen('dashboard-screen');
 }
 
 function generateDraftPreviewMessage() {
@@ -164,7 +164,7 @@ function generateDraftPreviewMessage() {
         const lastSeason = gameState.history.seasons[gameState.history.seasons.length - 1];
         historyBlurb = `\n\n---\n**Recent Highlights (Year ${lastSeason.year})**\n🏆 Champion: ${lastSeason.champion}\n🥈 Runner-Up: ${lastSeason.runnerUp}\n📈 Promoted: ${lastSeason.promoted.join(', ')}\n📉 Relegated: ${lastSeason.relegated.join(', ')}`;
     }
-    
+
     Game.addMessage("League Office", `Welcome to Backyard GM, Coach! After 3 years of building the franchise, you are now officially in control. Check your veteran roster, scout the incoming rookie class, and click "Start Draft" when you're ready to make your first pick.\n\n**Be sure to check the "History" tab on your dashboard to see the full record of past champions and draft picks before you arrived!**${historyBlurb}`, false, gameState);
 }
 
@@ -482,19 +482,37 @@ function openPlayerCard(playerId) {
     let progHtml = '<p class="text-xs text-slate-500 italic mt-2">No history available.</p>';
     if (player.progression && player.progression.length > 0) {
         progHtml = `
-        <table class="w-full text-left text-xs mt-2">
-            <thead class="bg-slate-100 text-slate-600 uppercase tracking-wider">
-                <tr><th class="p-2 border-b">Year</th><th class="p-2 border-b">Age</th><th class="p-2 border-b">Team</th><th class="p-2 border-b text-right">OVR</th></tr>
-            </thead>
-            <tbody class="divide-y divide-slate-100">
-                ${player.progression.map(p => `<tr>
-                    <td class="p-2">${p.year}</td>
-                    <td class="p-2">${p.age}</td>
-                    <td class="p-2 truncate max-w-[120px] font-medium">${p.teamName}</td>
-                    <td class="p-2 text-right font-black text-slate-800">${p.ovr}</td>
-                </tr>`).join('')}
-            </tbody>
-        </table>`;
+            <table class="w-full text-left text-[11px] mt-2">
+                <thead class="bg-slate-100 text-slate-600 uppercase tracking-wider">
+                    <tr>
+                        <th class="p-1.5 border-b">Year</th>
+                        <th class="p-1.5 border-b">Age</th>
+                        <th class="p-1.5 border-b">Team</th>
+                        <th class="p-1.5 border-b text-center">OVR</th>
+                        <th class="p-1.5 border-b text-right">Stats</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-100">
+                    ${player.progression.map(p => {
+            const st = p.stats || {};
+            let line = [];
+            if (st.passYards > 0) line.push(`${st.passYards} Pass`);
+            if (st.rushYards > 0) line.push(`${st.rushYards} Rush`);
+            if (st.recYards > 0) line.push(`${st.recYards} Rec`);
+            if (st.touchdowns > 0) line.push(`${st.touchdowns} TD`);
+            if (st.tackles > 0) line.push(`${st.tackles} Tkl`);
+            const statText = line.length > 0 ? line.slice(0, 2).join(', ') : '-';
+
+            return `<tr>
+                            <td class="p-1.5 font-mono">Y${p.year}</td>
+                            <td class="p-1.5">${p.age}</td>
+                            <td class="p-1.5 truncate max-w-[100px] font-medium">${p.teamName}</td>
+                            <td class="p-1.5 text-center font-black text-slate-900">${p.ovr}</td>
+                            <td class="p-1.5 text-right font-mono text-[10px] text-slate-600">${statText}</td>
+                        </tr>`;
+        }).join('')}
+                </tbody>
+            </table>`;
     }
 
     let modalHtml = `

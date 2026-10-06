@@ -57,6 +57,7 @@ export function setupElements() {
             'start-screen': getEl('start-screen'),
             'loading-screen': getEl('loading-screen'),
             'team-creation-screen': getEl('team-creation-screen'),
+            'team-select-screen': getEl('team-select-screen'),
             'draft-screen': getEl('draft-screen'),
             'dashboard-screen': getEl('dashboard-screen'),
             'offseason-screen': getEl('offseason-screen'),
@@ -815,46 +816,63 @@ export function renderHistoryTab(gameState) {
     if (!container) return;
 
     if (!gameState?.history?.seasons || gameState.history.seasons.length === 0) {
-        container.innerHTML = `<p class="text-gray-400 text-center py-12">No history available yet.</p>`;
+        container.innerHTML = `<p class="text-slate-400 text-center py-12">No history available yet.</p>`;
         return;
     }
 
-    let html = '<div class="space-y-6">';
-    // Reverse to show the most recent season at the top
-    const seasons = [...gameState.history.seasons].reverse();
+    // Filter out duplicates if any exist by year
+    const seenYears = new Set();
+    const uniqueSeasons = [];
+    for (const s of [...gameState.history.seasons].reverse()) {
+        if (!seenYears.has(s.year)) {
+            seenYears.add(s.year);
+            uniqueSeasons.push(s);
+        }
+    }
 
-    seasons.forEach(season => {
-        const topPicks = (season.draftResults || []).slice(0, 3).map(p => `<strong>1.${p.pick}</strong> ${p.playerName} (${p.teamName})`).join('<br>');
+    let html = '<div class="space-y-4 pb-6">';
+    uniqueSeasons.forEach(season => {
+        const topPicks = (season.draftResults || []).slice(0, 3).map(p => `<strong>1.${p.pick}</strong> ${p.playerName} <span class="text-slate-500">(${p.teamName})</span>`).join('<br>');
+        const l = season.leaders || {};
 
         html += `
-        <div class="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden">
-            <div class="bg-gray-800 text-white px-4 py-2 flex justify-between items-center">
-                <h4 class="font-bold text-lg">Season ${season.year}</h4>
-                <span class="text-sm text-amber-400 font-bold uppercase tracking-wider">🏆 ${season.champion}</span>
+        <div class="bg-white rounded-sm border border-slate-300 shadow-sm overflow-hidden">
+            <div class="bg-slate-900 text-white px-4 py-2 flex justify-between items-center">
+                <h4 class="font-black text-base uppercase tracking-wider">Season ${season.year}</h4>
+                <span class="text-xs text-amber-400 font-bold uppercase tracking-wider">🏆 Champion: ${season.champion}</span>
             </div>
-            <div class="p-4 grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
-                <div class="space-y-2">
-                    <p><span class="font-bold text-gray-500 uppercase text-xs tracking-wider">Champion:</span> <span class="text-amber-600 font-bold text-base block">${season.champion}</span></p>
-                    <p><span class="font-bold text-gray-500 uppercase text-xs tracking-wider">Runner-Up:</span> <span class="text-gray-800 font-semibold block">${season.runnerUp}</span></p>
-                    <div class="pt-2 mt-2 border-t border-gray-100">
-                        <p><span class="font-bold text-gray-500 uppercase text-xs tracking-wider">Sandlot Champ (Tier 2):</span> <span class="text-blue-600 font-semibold block">${season.tier2Champion || 'Unknown'}</span></p>
-                        <p><span class="font-bold text-gray-500 uppercase text-xs tracking-wider">Pee-Wee Champ:</span> <span class="text-green-600 font-semibold block">${season.youthChampion || 'Unknown'}</span></p>
-                    </div>
+            <div class="p-4 grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
+                <!-- Column 1: Trophies & Movement -->
+                <div class="space-y-2 border-r border-slate-100 pr-2">
+                    <p><span class="font-bold text-slate-400 uppercase text-[10px] tracking-wider block">Premier Champion:</span> <span class="text-amber-600 font-black text-sm">${season.champion}</span></p>
+                    <p><span class="font-bold text-slate-400 uppercase text-[10px] tracking-wider block">Runner-Up:</span> <span class="text-slate-800 font-semibold">${season.runnerUp}</span></p>
+                    <p><span class="font-bold text-slate-400 uppercase text-[10px] tracking-wider block">Sandlot Champ (Tier 2):</span> <span class="text-blue-600 font-semibold">${season.tier2Champion || 'Unknown'}</span></p>
+                    <p><span class="font-bold text-slate-400 uppercase text-[10px] tracking-wider block">Pee-Wee Champ:</span> <span class="text-green-600 font-semibold">${season.youthChampion || 'Unknown'}</span></p>
                     
-                    <div class="pt-2 mt-2 border-t border-gray-100 flex gap-4">
+                    <div class="pt-2 border-t border-slate-100 flex gap-4">
                         <div>
-                            <span class="font-bold text-green-600 uppercase text-xs tracking-wider">Promoted (Tier 1)</span>
-                            <p class="text-gray-700">${season.promoted.join('<br>') || 'None'}</p>
+                            <span class="font-bold text-emerald-700 uppercase text-[10px] tracking-wider block">Promoted</span>
+                            <p class="text-slate-700">${season.promoted?.join('<br>') || 'None'}</p>
                         </div>
                         <div>
-                            <span class="font-bold text-red-600 uppercase text-xs tracking-wider">Relegated (Tier 2)</span>
-                            <p class="text-gray-700">${season.relegated.join('<br>') || 'None'}</p>
+                            <span class="font-bold text-rose-700 uppercase text-[10px] tracking-wider block">Relegated</span>
+                            <p class="text-slate-700">${season.relegated?.join('<br>') || 'None'}</p>
                         </div>
                     </div>
                 </div>
-                <div class="bg-gray-50 p-3 rounded-lg border border-gray-100 h-full">
-                    <p class="font-bold text-gray-500 uppercase text-xs tracking-wider mb-2">Top Draft Picks</p>
-                    <p class="text-sm text-gray-700 leading-relaxed">${topPicks || 'No draft data available.'}</p>
+
+                <!-- Column 2: Statistical Leaders -->
+                <div class="space-y-2 border-r border-slate-100 pr-2">
+                    <span class="font-bold text-slate-400 uppercase text-[10px] tracking-wider block mb-1">League Leaders</span>
+                    <p><span class="text-slate-500 font-semibold">Passing:</span> <br><b class="text-slate-900">${l.passer || 'None'}</b></p>
+                    <p><span class="text-slate-500 font-semibold">Rushing:</span> <br><b class="text-slate-900">${l.rusher || 'None'}</b></p>
+                    <p><span class="text-slate-500 font-semibold">Tackles:</span> <br><b class="text-slate-900">${l.tackler || 'None'}</b></p>
+                </div>
+
+                <!-- Column 3: Top Draft Picks -->
+                <div class="bg-slate-50 p-3 rounded-sm border border-slate-200">
+                    <p class="font-bold text-slate-400 uppercase text-[10px] tracking-wider mb-2">Rookie Draft Highlights</p>
+                    <p class="text-slate-700 leading-relaxed">${topPicks || 'No draft data recorded.'}</p>
                 </div>
             </div>
         </div>`;

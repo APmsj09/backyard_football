@@ -109,10 +109,10 @@ export async function initializeLeague(onProgress) {
     availableColors = [...teamColors];
     const availableTeamNames = [...teamNames];
 
-    for (let i = 0; i < 19; i++) {
+    for (let i = 0; i < 20; i++) {
         const nameIndex = getRandomInt(0, availableTeamNames.length - 1);
         const teamName = `The ${availableTeamNames.splice(nameIndex, 1)[0]}`;
-        const tier = i < 9 ? 1 : 2;
+        const tier = i < 10 ? 1 : 2;
         const coach = getRandom(coachPersonalities);
 
         const prefOff = offenseFormations[coach.preferredOffense] ? coach.preferredOffense : 'Balanced';
@@ -526,6 +526,12 @@ export function simulateHistoricalSeason(yearNum, gameInstance) {
     const relegated = tier1Teams.slice(-2);
     const promoted = tier2Teams.slice(0, 2);
 
+    // Capture historical season league leaders before stats reset
+    const allPlayers = gameInstance.players || [];
+    const topPasser = [...allPlayers].sort((a, b) => (b.seasonStats?.passYards || 0) - (a.seasonStats?.passYards || 0))[0];
+    const topRusher = [...allPlayers].sort((a, b) => (b.seasonStats?.rushYards || 0) - (a.seasonStats?.rushYards || 0))[0];
+    const topTackler = [...allPlayers].sort((a, b) => (b.seasonStats?.tackles || 0) - (a.seasonStats?.tackles || 0))[0];
+
     gameInstance.history = gameInstance.history || { seasons: [] };
     gameInstance.history.seasons.push({
         year: yearNum,
@@ -533,6 +539,11 @@ export function simulateHistoricalSeason(yearNum, gameInstance) {
         runnerUp: runnerUp ? runnerUp.name : "Unknown",
         tier2Champion: tier2Teams[0] ? tier2Teams[0].name : "Unknown",
         youthChampion: youthTeams[0] ? youthTeams[0].name : "Unknown",
+        leaders: {
+            passer: topPasser && (topPasser.seasonStats?.passYards || 0) > 0 ? `${topPasser.name} (${topPasser.seasonStats.passYards} yds)` : 'None',
+            rusher: topRusher && (topRusher.seasonStats?.rushYards || 0) > 0 ? `${topRusher.name} (${topRusher.seasonStats.rushYards} yds)` : 'None',
+            tackler: topTackler && (topTackler.seasonStats?.tackles || 0) > 0 ? `${topTackler.name} (${topTackler.seasonStats.tackles} tkls)` : 'None'
+        },
         standings: [...tier1Teams, ...tier2Teams].map(t => ({ name: t.name, wins: t.wins, losses: t.losses, tier: t.tier })),
         promoted: promoted.map(t => t.name),
         relegated: relegated.map(t => t.name),
@@ -971,17 +982,30 @@ export function advanceToOffseason() {
     }
 
     if (!game.history) game.history = { seasons: [] };
-    game.history.seasons.push({
-        year: game.year,
-        champion: tier1[0]?.name || "Unknown",
-        runnerUp: tier1[1]?.name || "Unknown",
-        tier2Champion: tier2[0]?.name || "Unknown",
-        youthChampion: youthT[0]?.name || "Unknown",
-        promoted: promoted.map(t => t.name),
-        relegated: relegated.map(t => t.name),
-        standings: [...tier1, ...tier2].map(t => ({ name: t.name, wins: t.wins, losses: t.losses, tier: t.tier })),
-        draftResults: []
-    });
+    // Only push if this year hasn't already been pushed by historical simulation
+    if (!game.history.seasons.some(s => s.year === game.year)) {
+        const allPlayers = game.players || [];
+        const topPasser = [...allPlayers].sort((a, b) => (b.seasonStats?.passYards || 0) - (a.seasonStats?.passYards || 0))[0];
+        const topRusher = [...allPlayers].sort((a, b) => (b.seasonStats?.rushYards || 0) - (a.seasonStats?.rushYards || 0))[0];
+        const topTackler = [...allPlayers].sort((a, b) => (b.seasonStats?.tackles || 0) - (a.seasonStats?.tackles || 0))[0];
+
+        game.history.seasons.push({
+            year: game.year,
+            champion: tier1[0]?.name || "Unknown",
+            runnerUp: tier1[1]?.name || "Unknown",
+            tier2Champion: tier2[0]?.name || "Unknown",
+            youthChampion: youthT[0]?.name || "Unknown",
+            leaders: {
+                passer: topPasser && (topPasser.seasonStats?.passYards || 0) > 0 ? `${topPasser.name} (${topPasser.seasonStats.passYards} yds)` : 'None',
+                rusher: topRusher && (topRusher.seasonStats?.rushYards || 0) > 0 ? `${topRusher.name} (${topRusher.seasonStats.rushYards} yds)` : 'None',
+                tackler: topTackler && (topTackler.seasonStats?.tackles || 0) > 0 ? `${topTackler.name} (${topTackler.seasonStats.tackles} tkls)` : 'None'
+            },
+            promoted: promoted.map(t => t.name),
+            relegated: relegated.map(t => t.name),
+            standings: [...tier1, ...tier2].map(t => ({ name: t.name, wins: t.wins, losses: t.losses, tier: t.tier })),
+            draftResults: []
+        });
+    }
 
     game.year++;
     const retiredPlayers = []; const hofInductees = []; const developmentResults = []; const leavingPlayers = [];
@@ -1016,13 +1040,20 @@ export function advanceToOffseason() {
         currentRoster.forEach(player => {
             if (!player.careerStats || !player.attributes) return;
 
-            // Record End-of-Year Progression Snapshot
+            // Record End-of-Year Progression Snapshot with Stat Highlights
             if (!player.progression) player.progression = [];
             player.progression.push({
                 year: game.year,
                 age: player.age,
                 teamName: team.name,
-                ovr: calculateOverall(player, estimateBestPosition(player))
+                ovr: calculateOverall(player, estimateBestPosition(player)),
+                stats: {
+                    passYards: player.seasonStats?.passYards || 0,
+                    rushYards: player.seasonStats?.rushYards || 0,
+                    recYards: player.seasonStats?.recYards || 0,
+                    touchdowns: player.seasonStats?.touchdowns || 0,
+                    tackles: player.seasonStats?.tackles || 0
+                }
             });
 
             player.age++;
