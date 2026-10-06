@@ -47,16 +47,13 @@ export function estimateBestPosition(scoutedPlayer) {
     const offPos = tempPlayer.favoriteOffensivePosition;
     const defPos = tempPlayer.favoriteDefensivePosition;
 
-    // 💡 ULTIMATE FIX: If the player was generated via an archetype, they are STRICTLY categorized 
-    // as whichever of those two positions they grade out higher in. 
-    // This perfectly aligns the draft pool with the generated archetypes.
     if (offPos && defPos) {
         const offScore = calculateOverall(tempPlayer, offPos);
         const defScore = calculateOverall(tempPlayer, defPos);
         return offScore >= defScore ? offPos : defPos;
     }
 
-    // Fallback for extremely old saves
+    // Fallback for older saves
     let bestPos = 'UTIL';
     let maxScore = -Infinity;
 
@@ -80,7 +77,6 @@ export function calculateOverall(player, position) {
     let score = 0;
     for (const category in attrs) {
         for (const attr in attrs[category]) {
-            // 💡 FIX: Map legacy 'passCoverage' to 'coverage' for older saves
             const weightKey = attr === 'passCoverage' ? 'coverage' : attr;
 
             if (relevantWeights[weightKey]) {
@@ -206,7 +202,7 @@ export function gaussianRandom(mean = 0, stdev = 1) {
  */
 export function generateDraftClassModifiers() {
     return {
-        overallShift: Math.round(gaussianRandom(0, 3)), // Usually -3 to +3, rarely +/- 8
+        overallShift: Math.round(gaussianRandom(0, 3)),
         positionShifts: {
             QB: Math.round(gaussianRandom(0, 4)),
             RB: Math.round(gaussianRandom(0, 4)),
@@ -248,14 +244,13 @@ export function generatePlayer(minAge = 10, maxAge = 16, classModifiers = null) 
     
     const bestPosition = Math.random() > 0.5 ? favoriteOffensivePosition : favoriteDefensivePosition;
 
-    // 2. Draft Class Shifts (Isolated to correct attributes)
+    // 2. Draft Class Shifts
     const classShift = classModifiers ? (classModifiers.overallShift || 0) : 0;
     const posShift = classModifiers && classModifiers.positionShifts ? (classModifiers.positionShifts[bestPosition] || 0) : 0;
 
     const keyAttrs = new Set(archetype.keyAttrs);
 
     // 3. Base Attribute Roll (Talent Tiers)
-    // Introduces genuine skill gaps. Not everyone gets to be rated 75 OVR.
     const talentRoll = Math.random();
     let baseKeyMean, baseNonKeyMean;
 
@@ -268,12 +263,11 @@ export function generatePlayer(minAge = 10, maxAge = 16, classModifiers = null) 
     const generateAttributeValue = (name) => {
         const isKey = keyAttrs.has(name);
         
-        // 💡 FIX: Positional shift only applies to key attributes!
         const mean = (isKey ? baseKeyMean : baseNonKeyMean) + classShift + (isKey ? posShift : 0);
         const stdDev = isKey ? 6 : 10; 
         
         let val = Math.round(gaussianRandom(mean, stdDev));
-        val = Math.max(15, Math.min(99, val)); // Hard clamp
+        val = Math.max(15, Math.min(99, val));
 
         if (isKey) generatedKeySum += val;
         return val;
@@ -300,7 +294,7 @@ export function generatePlayer(minAge = 10, maxAge = 16, classModifiers = null) 
             tackling: generateAttributeValue('tackling'),
             blocking: generateAttributeValue('blocking'),
             blockShedding: generateAttributeValue('blockShedding'),
-            coverage: generateAttributeValue('coverage') // Note: maps to 'passCoverage' in object
+            coverage: generateAttributeValue('coverage')
         }
     };
 
@@ -315,21 +309,20 @@ export function generatePlayer(minAge = 10, maxAge = 16, classModifiers = null) 
         attributes.technical.blockShedding *= 0.4;
     }
 
-    // 6. Absolute Age Scaling (Prevents 16yos generated with maxAge=16 from being infants)
-    // Scale is strictly based on football age: 8yo (PeeWee) to 18yo (Graduated High School)
+    // 6. Absolute Age Scaling
     const absoluteAgeProgress = Math.max(0, Math.min(1.0, (age - 8) / 10.0));
     
-    // 7. Body Type (Gaussian variance around the archetype ideals)
-    const baseHeightMean = 52 + (absoluteAgeProgress * 20) + archetype.heightMod; // 8yo=52"(4'4"), 18yo=72"(6'0")
+    // 7. Body Type
+    const baseHeightMean = 52 + (absoluteAgeProgress * 20) + archetype.heightMod;
     let height = Math.round(gaussianRandom(baseHeightMean, 2.5));
     
-    const baseWeightMean = (70 + (absoluteAgeProgress * 120)) * archetype.weightMod; // 8yo=70lbs, 18yo=190lbs
+    const baseWeightMean = (70 + (absoluteAgeProgress * 120)) * archetype.weightMod;
     let weight = Math.round(gaussianRandom(baseWeightMean, 15));
     
     attributes.physical.height = height;
     attributes.physical.weight = weight;
 
-    // 8. Potential (Calculated AFTER archetype modifiers & body attributes are set)
+    // 8. Potential
     const getNormalizedAttribute = (name) => {
         if (name === 'height') return Math.max(0, Math.min(100, (attributes.physical.height - 50) * 4));
         if (name === 'weight') return Math.max(0, Math.min(100, (attributes.physical.weight - 100) * 0.66 + 40));
@@ -347,11 +340,9 @@ export function generatePlayer(minAge = 10, maxAge = 16, classModifiers = null) 
         0
     ) / Math.max(1, archetype.keyAttrs.length);
 
-    // 💡 FIX: Underlying ceiling using the new classShift logic
     const potentialMean = (avgKeyTalent * 0.70) + (65 * 0.30) + classShift;
     const potentialRoll = gaussianRandom(potentialMean, 8);
     
-    // Balanced distribution (A and B are genuine blue-chip prospects)
     let potential = 'C';
     if (potentialRoll >= 90) potential = 'A';
     else if (potentialRoll >= 80) potential = 'B';
@@ -360,7 +351,6 @@ export function generatePlayer(minAge = 10, maxAge = 16, classModifiers = null) 
     else potential = 'F';
 
     // 9. Age Scaling & Clamping
-    // 💡 REALISM: Steep maturation curves. An 8-year-old has terrible football IQ and low raw power.
     const physScale = 0.45 + (absoluteAgeProgress * 0.55);
     const mentScale = 0.25 + (absoluteAgeProgress * 0.75);
 
@@ -369,21 +359,14 @@ export function generatePlayer(minAge = 10, maxAge = 16, classModifiers = null) 
             if (['height', 'weight', 'clutch'].includes(attr)) return;
             let factor = (cat === 'physical') ? physScale : mentScale;
 
-            // Speed and Agility mature faster than strength
             if (attr === 'speed' || attr === 'agility') factor = Math.min(1.0, factor + 0.15);
 
             attributes[cat][attr] = Math.max(15, Math.min(99, Math.round(attributes[cat][attr] * factor)));
         });
     });
 
-    // 💡 NEIGHBORHOOD DNA: Personality & Community traits
-    // Work Ethic (1-99): How much they practice on their own
-    // Dependability (1-99): Low = forgets gear, gets grounded, chores
     const workEthicRoll = gaussianRandom(50, 18);
     const dependabilityRoll = gaussianRandom(60, 15);
-    
-    // Only ~60% of neighborhood kids formally register for the open draft.
-    // The rest (40%) are street legends or reluctant kids who only play if a friend asks them!
     const entersDraft = Math.random() < 0.60;
 
     return {
@@ -403,7 +386,6 @@ export function generatePlayer(minAge = 10, maxAge = 16, classModifiers = null) 
         seasonStats: {},
         careerStats: { seasonsPlayed: 0, snapsThisSeason: 0 },
 
-        // 💡 NEW LIVING WORLD PROFILE:
         personality: {
             workEthic: Math.max(15, Math.min(99, Math.round(workEthicRoll))),
             dependability: Math.max(20, Math.min(99, Math.round(dependabilityRoll))),
@@ -411,12 +393,10 @@ export function generatePlayer(minAge = 10, maxAge = 16, classModifiers = null) 
             entersDraft: entersDraft
         },
         
-        // 💡 ROLE CONTRACTS & HAPPINESS
         expectations: {
-            // Little kids are happy to be waterboys. Older kids demand to play.
             desiredRole: age <= 12 ? 'DEVELOPMENTAL' : (age <= 14 ? 'ROTATION' : 'STARTER'),
             minTouchesPerGame: (age >= 15 && ['QB', 'RB', 'WR'].includes(favoriteOffensivePosition)) ? 4 : 0,
-            happiness: 100 // 0-100 scale. Drops if benched or ignored.
+            happiness: 100
         }
     };
 }

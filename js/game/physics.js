@@ -59,10 +59,9 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
     const dy = targetY - pState.y;
     const distToTarget = Math.sqrt(dx * dx + dy * dy);
 
-    // 💡 FIX: Deadzone for stationary actions to stop micro-oscillations (Jitter)
+    // Deadzone for stationary actions to stop micro-oscillations (Jitter)
     const isContinuousAction = ['run_path', 'pursuit', 'tracking_ball', 'run_route', 'qb_scramble'].includes(pState.action);
 
-    // Replace the existing deadzone block with this:
     if (pState.action === 'tracking_ball' && distToTarget < 1.0) {
         // Bleed off speed so they settle under the ball instead of running past it
         pState.vx *= 0.5;
@@ -217,7 +216,7 @@ function resolveNewtonianCollisions(pState, allPlayers) {
     for (const other of allPlayers) {
         if (other.id === pState.id || other.isEngaged || pState.isEngaged) continue;
 
-        // 💡 FIX: Respect ghostTicks to prevent QB/RB explosion after handoffs
+        // Respect ghostTicks to prevent QB/RB explosion after handoffs
         if (pState.ghostTicks > 0 || other.ghostTicks > 0) continue;
 
         const dist = getDistance(pState, other);
@@ -234,13 +233,10 @@ function resolveNewtonianCollisions(pState, allPlayers) {
             const myMoveRatio = theirWeight / totalW;
 
             // 1. Positional Push (Prevents rendering inside each other)
-            // 💡 FIX: Soften the positional push (0.5 -> 0.3) so it doesn't violently snap players
             pState.x += dx_norm * overlap * myMoveRatio * 0.3;
             pState.y += dy_norm * overlap * myMoveRatio * 0.3;
 
             // 2. Velocity Deflection (Momentum bump)
-            // 💡 FIX: Only apply a bounce if there is actual kinetic energy.
-            // Prevents stationary players (like WRs and DBs) from vibrating constantly.
             const relativeSpeed = Math.hypot(pState.vx - (other.vx || 0), pState.vy - (other.vy || 0));
             if (relativeSpeed > 1.0) {
                 const bounce = Math.min(0.4, relativeSpeed * 0.05);

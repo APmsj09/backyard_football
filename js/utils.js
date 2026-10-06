@@ -24,8 +24,6 @@ export function getRandomInt(min, max) {
     return Math.floor(Math.random() * (max - min + 1)) + min;
 }
 
-
-
 /**
  * Converts total inches to a feet'inches" string format.
  * @param {number} totalInches - The height in inches.

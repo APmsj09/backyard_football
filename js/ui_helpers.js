@@ -1,5 +1,4 @@
-import { calculateOverall } from './game.js';
-import { positionOverallWeights } from './game/player.js';
+import { calculateOverall, positionOverallWeights } from './game/player.js';
 
 /**
  * Computes starter assignments for a given roster.

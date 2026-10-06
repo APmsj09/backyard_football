@@ -1,130 +1,59 @@
 import * as Game from './game.js';
 import {
-    saveGameState,
-    getRelationshipLevel,
-    getScoutedPlayerInfo,
-    getGameState,
-    substitutePlayers,
-    getRosterObjects,
-    changeFormation,
-    getPlayer,
-    rebuildDepthChartFromOrder,
-    normalizeFormationKey,
-    assignPlayerToSlot
+    saveGameState, getRelationshipLevel, getScoutedPlayerInfo, getGameState,
+    getRosterObjects, getPlayer, rebuildDepthChartFromOrder, assignPlayerToSlot
 } from './game.js';
-import {
-    offenseFormations,
-    defenseFormations,
-    relationshipLevels // <-- Added
-} from './data.js';
-import {
-    positionOverallWeights,
-    estimateBestPosition,
-    calculateOverall
-} from './game/player.js';
-
-import { getRandom, getRandomInt, formatHeight } from './utils.js';
+import { offenseFormations, defenseFormations, relationshipLevels } from './data.js';
+import { positionOverallWeights, estimateBestPosition, calculateOverall } from './game/player.js';
+import { formatHeight } from './utils.js';
 import { computeStarterAssignments } from './ui_helpers.js';
+import { drawFieldVisualization, formatGameClock, showPlayOverlay } from './ui/field_visualizer.js';
+import { renderDepthOrderPane } from './ui/depth_order.js';
 
-// --- Visualization Constants (Must match game.js) ---
-const FIELD_LENGTH = 120;
-const FIELD_WIDTH = 53.3;
-const CENTER_X = FIELD_WIDTH / 2;
-const HASH_LEFT_X = 18.0;
-const HASH_RIGHT_X = 35.3;
-
-// --- Global UI State & Elements ---
 let elements = {};
-let selectedPlayerId = null; // Used for highlighting in draft pool
-let dragPlayerId = null; // ID of player being dragged in depth chart
-let dragSide = null; // 'offense' or 'defense' being dragged from/to
-let debounceTimeout = null; // For debouncing input
-let liveGameIsConversion = false;
-let depthOrderSortCol = 'overall'; // Default sort column
-let depthOrderSortDir = 'desc';    // Default sort direction
+let selectedPlayerId = null;
+let dragPlayerId = null;
+let dragSide = null;
+let debounceTimeout = null;
+let depthOrderSortCol = 'overall';
+let depthOrderSortDir = 'desc';
 let activeDepthOrderTab = 'QB';
 
-// --- Live Game Sim State ---
 let liveGameSpeed = 80;
 let liveGameCurrentIndex = 0;
 let currentLiveGameResult = null;
 let huddleTimeout = null;
-
 let activeLiveGame = null;
 let liveGameCallback = null;
 let liveGameInterval = null;
 let isSkipping = false;
 let isPaused = false;
 
-// Per-player live stat snapshots (id -> stats)
 let livePlayerStats = new Map();
 let playerNameIdMap = new Map();
+let livePlayContext = { type: 'run', lastReceiverId: null, isPassComplete: false };
 
-let livePlayContext = {
-    type: 'run',
-    passerId: null,
-    receiverId: null,
-    catchMade: false
-};
-
-
-/**
- * Debounce function to limit rapid function calls (e.g., on input).
- * @param {Function} func - The function to debounce.
- * @param {number} delay - The debounce delay in milliseconds.
- */
 function debounce(func, delay) {
     return function (...args) {
-        clearTimeout(debounceTimeout); // Clear existing timeout
-        debounceTimeout = setTimeout(() => {
-            func.apply(this, args); // Call the original function after delay
-        }, delay);
+        clearTimeout(debounceTimeout);
+        debounceTimeout = setTimeout(() => func.apply(this, args), delay);
     };
 }
 
-/** Helper: Gets full player objects from a team's roster of IDs. */
 function getUIRosterObjects(team) {
     if (!team || !Array.isArray(team.roster)) return [];
-
-    // 1. Get Game State for fallback lookup
     const gs = getGameState();
-
-    // 2. Map IDs to Players with a fail-safe fallback
     return team.roster.map(id => {
-        // A. Try the standard getter (fastest)
         let p = getPlayer(id);
-
-        // B. Fallback: If Map isn't ready yet, search the raw array
-        if (!p && gs && gs.players) {
-            p = gs.players.find(pl => pl.id === id);
-        }
-
-        // C. Legacy Support: If roster contained objects instead of IDs
-        if (!p && typeof id === 'object' && id.id) {
-            p = id;
-        }
-
+        if (!p && gs?.players) p = gs.players.find(pl => pl.id === id);
+        if (!p && typeof id === 'object' && id.id) p = id;
         return p;
-    }).filter(p => p); // Remove any nulls/undefineds
+    }).filter(Boolean);
 }
 
-/**
- * Grabs references to all necessary DOM elements and stores them in the 'elements' object.
- */
 export function setupElements() {
-    console.log("Running setupElements...");
-
-    // Helper to grab ID and warn if missing
-    const getEl = (id, optional = false) => {
-        const el = document.getElementById(id);
-        if (!el && !optional) {
-            console.warn(`⚠️ MISSING UI ELEMENT: ID "${id}" was not found in the HTML.`);
-        }
-        return el;
-    };
-
+    const getEl = (id) => document.getElementById(id);
     elements = {
-        // --- Screens ---
         screens: {
             'start-screen': getEl('start-screen'),
             'loading-screen': getEl('loading-screen'),
@@ -132,18 +61,8 @@ export function setupElements() {
             'draft-screen': getEl('draft-screen'),
             'dashboard-screen': getEl('dashboard-screen'),
             'offseason-screen': getEl('offseason-screen'),
-            'game-sim-screen': getEl('game-sim-screen'),
-            // Aliases
-            startScreen: getEl('start-screen'),
-            loadingScreen: getEl('loading-screen'),
-            teamCreationScreen: getEl('team-creation-screen'),
-            draftScreen: getEl('draft-screen'),
-            dashboardScreen: getEl('dashboard-screen'),
-            offseasonScreen: getEl('offseason-screen'),
-            gameSimScreen: getEl('game-sim-screen'),
+            'game-sim-screen': getEl('game-sim-screen')
         },
-
-        // --- Common ---
         modal: getEl('modal'),
         modalTitle: getEl('modal-title'),
         modalBody: getEl('modal-body'),
@@ -152,8 +71,6 @@ export function setupElements() {
         teamNameSuggestions: getEl('team-name-suggestions'),
         customTeamName: getEl('custom-team-name'),
         confirmTeamBtn: getEl('confirm-team-btn'),
-
-        // --- Draft ---
         draftHeader: getEl('draft-header'),
         draftYear: getEl('draft-year'),
         draftPickNumber: getEl('draft-pick-number'),
@@ -167,8 +84,6 @@ export function setupElements() {
         draftSearch: getEl('draft-search'),
         draftFilterPos: getEl('draft-filter-pos'),
         draftSort: getEl('draft-sort'),
-
-        // --- Dashboard Main ---
         dashboardTeamName: getEl('dashboard-team-name'),
         dashboardRecord: getEl('dashboard-record'),
         dashboardYear: getEl('dashboard-year'),
@@ -176,8 +91,6 @@ export function setupElements() {
         dashboardTabs: getEl('dashboard-tabs'),
         dashboardContent: getEl('dashboard-content'),
         advanceWeekBtn: getEl('advance-week-btn'),
-
-        // --- Dashboard Tabs  ---
         myTeamRoster: getEl('my-team-roster'),
         scheduleList: getEl('schedule-list'),
         standingsContainer: getEl('standings-container'),
@@ -187,8 +100,6 @@ export function setupElements() {
         hallOfFameList: getEl('hall-of-fame-list'),
         messagesList: getEl('messages-list'),
         messagesNotificationDot: getEl('messages-notification-dot'),
-
-        // --- Depth Chart ---
         depthChartSubTabs: getEl('depth-chart-subtabs'),
         offenseFormationSelect: getEl('offense-formation-select'),
         defenseFormationSelect: getEl('defense-formation-select'),
@@ -202,8 +113,6 @@ export function setupElements() {
         depthOrderContainer: getEl('depth-order-container'),
         depthOrderGrid: getEl('depth-order-list'),
         autoReorderBtn: getEl('auto-reorder-btn'),
-
-        // --- Game Sim ---
         simScoreboard: getEl('sim-scoreboard'),
         simAwayTeam: getEl('sim-away-team'),
         simAwayScore: getEl('sim-away-score'),
@@ -212,57 +121,31 @@ export function setupElements() {
         simGameDrive: getEl('sim-game-drive'),
         simGameDown: getEl('sim-game-down'),
         simPossession: getEl('sim-possession'),
-
-        // 💡 FIX: Safely bind the new dynamic layout IDs
-        simFieldPlayers: getEl('sim-field-players', true),
-        simPlayersList: getEl('sim-field-players', true), // Alias for backward compatibility
-        simLiveStats: getEl('sim-live-stats', true),
-        simStatsAway: getEl('sim-stats-away', true),
-        simStatsHome: getEl('sim-stats-home', true),
-
+        simFieldPlayers: getEl('sim-field-players'),
+        simPlayersList: getEl('sim-field-players'),
+        simLiveStats: getEl('sim-live-stats'),
+        simStatsAway: getEl('sim-stats-away'),
+        simStatsHome: getEl('sim-stats-home'),
         fieldCanvas: getEl('field-canvas'),
         simPlayLog: getEl('sim-play-log'),
         simSpeedBtns: document.querySelectorAll('.sim-speed-btn'),
         simSkipBtn: getEl('sim-skip-btn'),
-
         simBannerOffense: getEl('sim-banner-offense'),
         simBannerDefense: getEl('sim-banner-defense'),
-
-        // --- Offseason ---
         offseasonYear: getEl('offseason-year'),
         playerDevelopmentContainer: getEl('player-development-container'),
         retirementsList: getEl('retirements-list'),
         hofInducteesList: getEl('hof-inductees-list'),
         leavingPlayersList: getEl('leaving-players-list'),
-        goToNextDraftBtn: getEl('go-to-next-draft-btn'),
+        goToNextDraftBtn: getEl('go-to-next-draft-btn')
     };
 
-    if (elements.fieldCanvas) {
-        elements.fieldCanvasCtx = elements.fieldCanvas.getContext('2d');
-    }
-
-    if (elements.draftSort) {
-        elements.draftSort.innerHTML = `
-            <option value="default">Potential (Default)</option>
-            <option value="age-asc">Age (Youngest)</option>
-            <option value="age-desc">Age (Oldest)</option>
-            <option value="speed-desc">Speed (Fastest)</option>
-            <option value="strength-desc">Strength (Strongest)</option>
-            <option value="agility-desc">Agility (Most Agile)</option>
-            <option value="potential-desc">Potential (Highest)</option>
-        `;
-    }
-
-    if (elements.modalDefaultClose) {
-        elements.modalDefaultClose.addEventListener('click', () => {
-            try { hideModal(); } catch (e) { }
-        });
-    }
+    if (elements.fieldCanvas) elements.fieldCanvasCtx = elements.fieldCanvas.getContext('2d');
+    if (elements.modalDefaultClose) elements.modalDefaultClose.addEventListener('click', hideModal);
 
     setupFormationListeners();
     setupDepthChartTabs();
-    setupSimTabs(); // 💡 FIX: Hook up the new Live Sim Sidebars
-    console.log("UI Elements setup complete.");
+    setupSimTabs();
 }
 
 function setupSimTabs() {
@@ -290,182 +173,95 @@ function setupSimTabs() {
     );
 }
 
-/**
- * Shows a specific screen div and hides all others.
- */
 export function showScreen(screenId) {
-    if (!elements || !elements.screens) {
-        console.error("Screen elements object not initialized.");
-        return;
-    }
-    console.log(`showScreen called for: ${screenId}.`);
-
-    // Try to match the screen by converting kebab-case to camelCase
-    const camelScreenId = screenId.replace(/-([a-z])/g, g => g[1].toUpperCase());
-    if (!elements.screens[screenId] && !elements.screens[camelScreenId]) {
-        console.warn(`Screen element "${screenId}" not found in initial setup. Attempting direct lookup.`);
-        const element = document.getElementById(screenId);
-        if (element) {
-            elements.screens[screenId] = element;
-            // Also store with camelCase key for future lookups
-            elements.screens[camelScreenId] = element;
-        }
-        else { console.error(`CRITICAL: Screen element ID "${screenId}" still not found.`); return; }
-    }
-
-    // Use whichever key exists
-    const screenElement = elements.screens[screenId] || elements.screens[camelScreenId];
-
+    if (!elements?.screens) return;
     Object.values(elements.screens).forEach(screen => {
-        if (screen && screen.classList) {
-            screen.classList.add('hidden');
-        }
+        if (screen?.classList) screen.classList.add('hidden');
     });
-
-    if (screenElement && screenElement.classList) {
-        screenElement.classList.remove('hidden');
-    } else {
-        console.error(`Attempted to show screen "${screenId}" but element reference invalid.`);
-        return;
-    }
-
-    // Store screen reference for both kebab and camel case
-    elements.screens[screenId] = screenElement;
-    elements.screens[camelScreenId] = screenElement;
+    const target = elements.screens[screenId] || document.getElementById(screenId);
+    if (target?.classList) target.classList.remove('hidden');
 }
 
-/**
- * Displays the universal modal.
- */
 export function showModal(title, bodyHtml, onConfirm = null, confirmText = 'Confirm', onCancel = null, cancelText = 'Close') {
-    if (!elements.modal || !elements.modalTitle || !elements.modalBody) {
-        console.error("Modal elements not found."); return;
-    }
-
-    elements.modalTitle.textContent = title;
+    if (!elements.modal) return;
+    elements.modalTitle.innerHTML = title;
     elements.modalBody.innerHTML = bodyHtml;
 
     const modalContent = elements.modal.querySelector('#modal-content');
-    let actionsDiv = modalContent?.querySelector('#modal-actions');
-    if (actionsDiv) actionsDiv.remove();
+    modalContent?.querySelector('#modal-actions')?.remove();
 
-    actionsDiv = document.createElement('div');
+    const actionsDiv = document.createElement('div');
     actionsDiv.id = 'modal-actions';
     actionsDiv.className = 'mt-6 text-right space-x-2';
 
-    // --- FIX: Added the missing createButton helper function ---
-    const createButton = (text, classes, onClick) => {
-        const button = document.createElement('button');
-        button.textContent = text;
-        button.className = `btn ${classes}`;
-        button.onclick = onClick;
-        return button;
-    };
-    // --- END FIX ---
+    const cancelBtn = document.createElement('button');
+    cancelBtn.textContent = cancelText;
+    cancelBtn.className = 'btn bg-gray-500 hover:bg-gray-600 text-white font-bold py-2 px-6 rounded-lg text-sm';
+    cancelBtn.onclick = () => { if (onCancel) onCancel(); hideModal(); };
+    actionsDiv.appendChild(cancelBtn);
 
-    // Cancel/Close button
-    const closeAction = () => { if (onCancel) onCancel(); hideModal(); };
-    actionsDiv.appendChild(createButton(cancelText, 'bg-gray-500 hover:bg-gray-600 text-white font-bold py-2 px-6 rounded-lg', closeAction));
-
-    // Confirm button
-    if (onConfirm && typeof onConfirm === 'function') {
-        const confirmAction = () => { onConfirm(); hideModal(); };
-        actionsDiv.appendChild(createButton(confirmText, 'bg-amber-500 hover:bg-amber-600 text-white font-bold py-2 px-6 rounded-lg', confirmAction));
+    if (onConfirm) {
+        const confirmBtn = document.createElement('button');
+        confirmBtn.textContent = confirmText;
+        confirmBtn.className = 'btn bg-amber-500 hover:bg-amber-600 text-white font-bold py-2 px-6 rounded-lg text-sm';
+        confirmBtn.onclick = () => { onConfirm(); hideModal(); };
+        actionsDiv.appendChild(confirmBtn);
     }
 
     modalContent?.appendChild(actionsDiv);
     elements.modal.classList.remove('hidden');
 }
 
-/** Hides the universal modal. */
 export function hideModal() {
     elements.modal?.classList.add('hidden');
 }
 
 export function updateLoadingProgress(progress) {
-    const progressElement = document.getElementById('loading-progress');
-    const progressText = document.getElementById('loading-progress-text');
-
-    if (progressElement) {
-        progressElement.style.width = progress + "%";
-        progressElement.setAttribute("aria-valuenow", progress);
-    }
-
-    if (progressText) {
-        progressText.textContent = `${progress}%`;
-    }
+    const el = document.getElementById('loading-progress');
+    const txt = document.getElementById('loading-progress-text');
+    if (el) el.style.width = `${progress}%`;
+    if (txt) txt.textContent = `${progress}%`;
 }
 
-// Rotating loading messages
+let messageInterval = null;
 const loadingMessages = [
-    "Scouting rookies...",
-    "Building team rosters...",
-    "Analyzing player stats...",
-    "Setting up salary caps...",
-    "Scheduling season games...",
-    "Drafting prospects...",
-    "Signing free agents...",
-    "Preparing preseason matchups...",
-    "Almost ready for kickoff!"
+    "Scouting rookies...", "Building team rosters...", "Analyzing player stats...",
+    "Setting up salary caps...", "Scheduling season games...", "Drafting prospects...",
+    "Signing free agents...", "Preparing preseason matchups...", "Almost ready for kickoff!"
 ];
 
-let messageIndex = 0;
-let messageInterval = null;
-
 export function startLoadingMessages() {
-    const messageEl = document.getElementById('loading-message');
-    if (!messageEl) return;
-
-    // 💡 FIX: Prevent background interval leak if called repeatedly
+    const el = document.getElementById('loading-message');
+    if (!el) return;
     if (messageInterval) clearInterval(messageInterval);
-
-    messageEl.textContent = loadingMessages[0];
-    messageIndex = 1;
-
+    let idx = 1;
+    el.textContent = loadingMessages[0];
     messageInterval = setInterval(() => {
-        messageEl.style.opacity = 0;
-
-        setTimeout(() => {
-            messageEl.textContent = loadingMessages[messageIndex];
-            messageEl.style.opacity = 1;
-            messageIndex = (messageIndex + 1) % loadingMessages.length;
-        }, 600);
+        el.textContent = loadingMessages[idx];
+        idx = (idx + 1) % loadingMessages.length;
     }, 2500);
 }
 
 export function stopLoadingMessages() {
-    if (messageInterval) {
-        clearInterval(messageInterval);
-        messageInterval = null;
-    }
+    if (messageInterval) clearInterval(messageInterval);
 }
 
-
-/** Renders suggested team names. */
 export function renderTeamNameSuggestions(names, onSelect) {
     if (!elements.teamNameSuggestions) return;
     elements.teamNameSuggestions.innerHTML = '';
     names.forEach(name => {
-        const button = document.createElement('button');
-        button.className = 'bg-gray-200 hover:bg-amber-500 hover:text-white text-gray-700 font-semibold py-2 px-4 rounded-lg transition';
-        button.textContent = name;
-        button.type = 'button';
-        button.onclick = () => onSelect(name);
-        elements.teamNameSuggestions.appendChild(button);
+        const btn = document.createElement('button');
+        btn.className = 'bg-gray-200 hover:bg-amber-500 hover:text-white text-gray-700 font-semibold py-2 px-4 rounded-lg transition text-sm';
+        btn.textContent = name;
+        btn.type = 'button';
+        btn.onclick = () => onSelect(name);
+        elements.teamNameSuggestions.appendChild(btn);
     });
 }
 
-
-/**
- * Renders the main draft screen UI.
- */
 export function renderDraftScreen(gameState, onPlayerSelect, currentSelectedId, sortColumn, sortDirection) {
-    if (!gameState || !gameState.teams || !gameState.players || !gameState.draftOrder || !gameState.playerTeam) {
-        console.error("renderDraftScreen called without valid gameState.");
-        if (elements.draftHeader) elements.draftHeader.innerHTML = `<h2 class="text-3xl font-bold text-red-500">Draft Error: Invalid Game State</h2>`;
-        return;
-    }
-    const { year, draftOrder, currentPick, playerTeam, players, teams } = gameState;
+    if (!gameState?.playerTeam) return;
+    const { year, draftOrder, currentPick, playerTeam } = gameState;
     const ROSTER_LIMIT = 18;
 
     if (currentPick >= draftOrder.length) {
@@ -473,23 +269,18 @@ export function renderDraftScreen(gameState, onPlayerSelect, currentSelectedId, 
         if (elements.draftPlayerBtn) { elements.draftPlayerBtn.disabled = true; elements.draftPlayerBtn.textContent = 'Draft Complete'; }
         renderSelectedPlayerCard(null, gameState);
         updateSelectedPlayerRow(null);
-        if (elements.draftPoolTbody) elements.draftPoolTbody.innerHTML = `<tr><td colspan="15" class="p-4 text-center text-gray-500">Draft Complete.</td></tr>`;
+        if (elements.draftPoolTbody) elements.draftPoolTbody.innerHTML = `<tr><td colspan="18" class="p-4 text-center text-gray-500">Draft Complete.</td></tr>`;
         return;
     }
 
     const pickingTeam = draftOrder[currentPick];
-    if (!pickingTeam) {
-        console.error(`Draft Error: No valid team found at current pick index (${currentPick}).`);
-        if (elements.draftHeader) elements.draftHeader.innerHTML = `<h2 class="text-3xl font-bold text-red-500">Draft Error Occurred</h2>`;
-        return;
-    }
+    if (!pickingTeam) return;
 
-    // --- 💡 FIX: Use .roster.length (array of IDs is fine for a count) ---
-    const currentTeamRosterSize = pickingTeam.roster?.length || 0;
-    const playerCanPick = pickingTeam.id === playerTeam.id && currentTeamRosterSize < ROSTER_LIMIT;
+    const currentRosterSize = pickingTeam.roster?.length || 0;
+    const playerCanPick = pickingTeam.id === playerTeam.id && currentRosterSize < ROSTER_LIMIT;
 
     if (elements.draftYear) elements.draftYear.textContent = year;
-    if (elements.draftPickNumber) elements.draftPickNumber.textContent = `${currentPick + 1} (${currentTeamRosterSize}/${ROSTER_LIMIT} players)`;
+    if (elements.draftPickNumber) elements.draftPickNumber.textContent = `#${currentPick + 1} (${currentRosterSize}/${ROSTER_LIMIT})`;
     if (elements.draftPickingTeam) elements.draftPickingTeam.textContent = pickingTeam.name || 'Unknown Team';
 
     renderDraftPool(gameState, onPlayerSelect, sortColumn, sortDirection);
@@ -497,11 +288,8 @@ export function renderDraftScreen(gameState, onPlayerSelect, currentSelectedId, 
     updateDraftSortIndicators(sortColumn, sortDirection);
 
     if (currentSelectedId) {
-        // Find the player object from the master list (sorted or unsorted)
         const playerObj = gameState.players.find(p => p.id === currentSelectedId);
-        if (playerObj) {
-            renderSelectedPlayerCard(playerObj, gameState);
-        }
+        if (playerObj) renderSelectedPlayerCard(playerObj, gameState);
     }
 
     if (elements.draftPlayerBtn) {
@@ -510,1641 +298,532 @@ export function renderDraftScreen(gameState, onPlayerSelect, currentSelectedId, 
     }
 }
 
-/**
- * Renders the draft pool table with scouted info.
- */
-export function renderDraftPool(gameState, onPlayerSelect, sortColumn, sortDirection, positionOverallWeights) {
-    if (!elements.draftPoolTbody || !gameState || !gameState.players || !gameState.playerTeam?.roster) {
-        console.error("Cannot render draft pool: Missing elements or invalid game state/roster.");
-        if (elements.draftPoolTbody) elements.draftPoolTbody.innerHTML = `<tr><td colspan="18" class="p-4 text-center text-red-500">Error loading players.</td></tr>`;
-        return;
-    }
-
-    // --- 💡 FIX: Get roster objects for relationship calc ---
+export function renderDraftPool(gameState, onPlayerSelect, sortColumn = 'potential', sortDirection = 'desc') {
+    if (!elements.draftPoolTbody || !gameState?.players) return;
     const playerRoster = getUIRosterObjects(gameState.playerTeam);
-
-    // 💡 Only show players who signed up for the draft tryout
-    const undraftedPlayers = gameState.players.filter(p => 
-        p && !p.teamId && (p.personality?.entersDraft !== false)
-    );
+    const undraftedPlayers = gameState.players.filter(p => p && !p.teamId && (p.personality?.entersDraft !== false));
     const searchTerm = elements.draftSearch?.value.toLowerCase() || '';
     const posFilter = elements.draftFilterPos?.value || '';
 
-
-    let filteredPlayers = undraftedPlayers.filter(p =>
+    let filtered = undraftedPlayers.filter(p =>
         p.name.toLowerCase().includes(searchTerm) &&
         (!posFilter || p.favoriteOffensivePosition === posFilter || p.favoriteDefensivePosition === posFilter)
     );
 
-    // --- IMPROVED SORT LOGIC WITH TIE-BREAKER ---
     const potentialOrder = { 'A': 5, 'B': 4, 'C': 3, 'D': 2, 'F': 1 };
-
-    // Helper: Sorts by primary key, then breaks ties with Overall Rating
-    const sortPlayer = (a, b, key, category = null) => {
-        // 1. Primary Sort (e.g., Speed)
-        const valA = category ? (a?.attributes?.[category]?.[key] || 0) : (a?.[key] || 0);
-        const valB = category ? (b?.attributes?.[category]?.[key] || 0) : (b?.[key] || 0);
-
-        if (valA !== valB) {
-            return sortDirection === 'asc' ? valA - valB : valB - valA;
+    filtered.sort((a, b) => {
+        if (sortColumn === 'potential') {
+            const valA = potentialOrder[a?.potential] || 0;
+            const valB = potentialOrder[b?.potential] || 0;
+            if (valA !== valB) return sortDirection === 'asc' ? valA - valB : valB - valA;
+            return calculateOverall(b, estimateBestPosition(b)) - calculateOverall(a, estimateBestPosition(a));
         }
+        if (sortColumn === 'name') return sortDirection === 'asc' ? a.name.localeCompare(b.name) : b.name.localeCompare(a.name);
+        if (sortColumn === 'age') return sortDirection === 'asc' ? a.age - b.age : b.age - a.age;
 
-        // 2. Tie-Breaker: Overall Rating (Always Descending)
-        // We want the best player at the top, even if we are sorting by age/height
-        const ovrA = calculateOverall(a, estimateBestPosition(a));
-        const ovrB = calculateOverall(b, estimateBestPosition(b));
-
-        return ovrB - ovrA;
-    };
-
-    switch (sortColumn) {
-        case 'name':
-            filteredPlayers.sort((a, b) => sortDirection === 'asc' ? a.name.localeCompare(b.name) : b.name.localeCompare(a.name));
-            break;
-        case 'age':
-            filteredPlayers.sort((a, b) => sortPlayer(a, b, 'age'));
-            break;
-        case 'position':
-            filteredPlayers.sort((a, b) => {
-                const posA = a.favoriteOffensivePosition || a.favoriteDefensivePosition;
-                const posB = b.favoriteOffensivePosition || b.favoriteDefensivePosition;
-                // Use overall as tiebreaker here too
-                if (posA !== posB) return sortDirection === 'asc' ? posA.localeCompare(posB) : posB.localeCompare(posA);
-                return calculateOverall(b, estimateBestPosition(b)) - calculateOverall(a, estimateBestPosition(a));
-            });
-            break;
-        case 'height':
-            filteredPlayers.sort((a, b) => sortPlayer(a, b, 'height', 'physical'));
-            break;
-        case 'weight':
-            filteredPlayers.sort((a, b) => sortPlayer(a, b, 'weight', 'physical'));
-            break;
-        case 'speed':
-            filteredPlayers.sort((a, b) => sortPlayer(a, b, 'speed', 'physical'));
-            break;
-        case 'strength':
-            filteredPlayers.sort((a, b) => sortPlayer(a, b, 'strength', 'physical'));
-            break;
-        case 'agility':
-            filteredPlayers.sort((a, b) => sortPlayer(a, b, 'agility', 'physical'));
-            break;
-        case 'throwingAccuracy':
-            filteredPlayers.sort((a, b) => sortPlayer(a, b, 'throwingAccuracy', 'technical'));
-            break;
-        case 'catchingHands':
-            filteredPlayers.sort((a, b) => sortPlayer(a, b, 'catchingHands', 'technical'));
-            break;
-        case 'blocking':
-            filteredPlayers.sort((a, b) => sortPlayer(a, b, 'blocking', 'technical'));
-            break;
-        case 'tackling':
-            filteredPlayers.sort((a, b) => sortPlayer(a, b, 'tackling', 'technical'));
-            break;
-        case 'blockShedding':
-            filteredPlayers.sort((a, b) => sortPlayer(a, b, 'blockShedding', 'technical'));
-            break;
-        case 'potential':
-        default:
-            // Improved Default Sort: Potential Letter -> Overall Rating
-            filteredPlayers.sort((a, b) => {
-                const valA = potentialOrder[a?.potential] || 0;
-                const valB = potentialOrder[b?.potential] || 0;
-
-                if (valA !== valB) {
-                    return sortDirection === 'asc' ? valA - valB : valB - valA;
-                }
-                // If potential is same (e.g. both 'A'), sort by Overall
-                const ovrA = calculateOverall(a, estimateBestPosition(a));
-                const ovrB = calculateOverall(b, estimateBestPosition(b));
-                return ovrB - ovrA;
-            });
-            break;
-    }
+        const getAttr = (p) => {
+            const cats = ['physical', 'mental', 'technical'];
+            for (const c of cats) if (p.attributes?.[c]?.[sortColumn] !== undefined) return p.attributes[c][sortColumn];
+            return 0;
+        };
+        const valA = getAttr(a);
+        const valB = getAttr(b);
+        return sortDirection === 'asc' ? valA - valB : valB - valA;
+    });
 
     elements.draftPoolTbody.innerHTML = '';
-
-    if (filteredPlayers.length === 0) {
+    if (filtered.length === 0) {
         elements.draftPoolTbody.innerHTML = `<tr><td colspan="18" class="p-4 text-center text-gray-500">No players match filters.</td></tr>`;
         return;
     }
 
-    filteredPlayers.forEach(player => {
-        // --- 💡 FIX: Use the playerRoster objects we fetched earlier ---
+    filtered.forEach(player => {
         const maxLevel = playerRoster.reduce(
             (max, rp) => Math.max(max, getRelationshipLevel(rp.id, player.id)),
             relationshipLevels.STRANGER.level
         );
-        const scoutedPlayer = getScoutedPlayerInfo(player, maxLevel);
-        if (!scoutedPlayer) return;
-
-        const relationshipInfo = Object.values(relationshipLevels).find(rl => rl.level === maxLevel) || relationshipLevels.STRANGER;
+        const scouted = getScoutedPlayerInfo(player, maxLevel);
+        if (!scouted) return;
+        const relInfo = Object.values(relationshipLevels).find(rl => rl.level === maxLevel) || relationshipLevels.STRANGER;
 
         const row = document.createElement('tr');
-        row.className = `cursor-pointer hover:bg-amber-100 draft-player-row ${scoutedPlayer.id === selectedPlayerId ? 'bg-amber-200' : ''}`;
-        row.dataset.playerId = scoutedPlayer.id;
-
-        // Make sure this line starts and ends with BACKTICKS (`)
+        row.className = `cursor-pointer hover:bg-amber-100 draft-player-row ${scouted.id === selectedPlayerId ? 'bg-amber-200' : ''}`;
+        row.dataset.playerId = scouted.id;
         row.innerHTML = `
-            <td class="py-2 px-3 font-semibold">${scoutedPlayer.name ?? 'N/A'}</td>
-            <td class="text-center py-2 px-3">${scoutedPlayer.age ?? '?'}</td>
-            <td class="text-center py-2 px-3 font-medium">${scoutedPlayer.potential ?? '?'}</td>
-            <td class="text-center py-2 px-3 ${relationshipInfo.color}" title="${relationshipInfo.name}">${relationshipInfo.name.substring(0, 4)}</td>
-            <td class="text-center py-2 px-3 font-bold">${scoutedPlayer.estimatedPosition ?? '?'}</td>
-            <td class="text-center py-2 px-3">${formatHeight(scoutedPlayer.attributes?.physical?.height) ?? '?'}</td>
-            <td class="text-center py-2 px-3">${scoutedPlayer.attributes?.physical?.weight ?? '?'}</td>
-            <td class="text-center py-2 px-3">${scoutedPlayer.attributes?.physical?.speed ?? '?'}</td>
-            <td class="text-center py-2 px-3">${scoutedPlayer.attributes?.physical?.strength ?? '?'}</td>
-            <td class="text-center py-2 px-3">${scoutedPlayer.attributes?.physical?.agility ?? '?'}</td>
-            <td class="text-center py-2 px-3">${scoutedPlayer.attributes?.physical?.stamina ?? '?'}</td>
-            <td class="text-center py-2 px-3">${scoutedPlayer.attributes?.mental?.playbookIQ ?? '?'}</td>
-            <td class="text-center py-2 px-3">${scoutedPlayer.attributes?.mental?.toughness ?? '?'}</td>
-            <td class="text-center py-2 px-3">${scoutedPlayer.attributes?.technical?.throwingAccuracy ?? '?'}</td>
-            <td class="text-center py-2 px-3">${scoutedPlayer.attributes?.technical?.catchingHands ?? '?'}</td>
-            <td class="text-center py-2 px-3">${scoutedPlayer.attributes?.technical?.blocking ?? '?'}</td>
-            <td class="text-center py-2 px-3">${scoutedPlayer.attributes?.technical?.tackling ?? '?'}</td>
-            <td class="text-center py-2 px-3">${scoutedPlayer.attributes?.technical?.blockShedding ?? '?'}</td>
-        `; // <<< Make sure this closing backtick is present
-
-        row.onclick = () => onPlayerSelect(scoutedPlayer.id);
+            <td class="py-2 px-3 font-semibold">${scouted.name ?? 'N/A'}</td>
+            <td class="text-center py-2 px-3">${scouted.age ?? '?'}</td>
+            <td class="text-center py-2 px-3 font-medium">${scouted.potential ?? '?'}</td>
+            <td class="text-center py-2 px-3 ${relInfo.color}" title="${relInfo.name}">${relInfo.name.substring(0, 4)}</td>
+            <td class="text-center py-2 px-3 font-bold">${estimateBestPosition(scouted)}</td>
+            <td class="text-center py-2 px-3">${formatHeight(scouted.attributes?.physical?.height)}</td>
+            <td class="text-center py-2 px-3">${scouted.attributes?.physical?.weight ?? '?'}</td>
+            <td class="text-center py-2 px-3 text-blue-600 font-bold">${scouted.attributes?.physical?.speed ?? '?'}</td>
+            <td class="text-center py-2 px-3">${scouted.attributes?.physical?.strength ?? '?'}</td>
+            <td class="text-center py-2 px-3">${scouted.attributes?.physical?.agility ?? '?'}</td>
+            <td class="text-center py-2 px-3">${scouted.attributes?.physical?.stamina ?? '?'}</td>
+            <td class="text-center py-2 px-3">${scouted.attributes?.mental?.playbookIQ ?? '?'}</td>
+            <td class="text-center py-2 px-3">${scouted.attributes?.mental?.toughness ?? '?'}</td>
+            <td class="text-center py-2 px-3">${scouted.attributes?.technical?.throwingAccuracy ?? '?'}</td>
+            <td class="text-center py-2 px-3">${scouted.attributes?.technical?.catchingHands ?? '?'}</td>
+            <td class="text-center py-2 px-3">${scouted.attributes?.technical?.blocking ?? '?'}</td>
+            <td class="text-center py-2 px-3">${scouted.attributes?.technical?.tackling ?? '?'}</td>
+            <td class="text-center py-2 px-3">${scouted.attributes?.technical?.blockShedding ?? '?'}</td>
+        `;
+        row.onclick = () => onPlayerSelect(scouted.id);
         elements.draftPoolTbody.appendChild(row);
     });
 }
 
 export function updateDraftSortIndicators(sortColumn, sortDirection) {
-    // Remove all indicators
-    document.querySelectorAll('#draft-screen thead th .sort-indicator').forEach(span => {
-        span.textContent = '';
-    });
-
-    // Add new indicator
+    document.querySelectorAll('#draft-screen thead th .sort-indicator').forEach(s => s.textContent = '');
     const headerCell = document.querySelector(`#draft-screen thead th[data-sort="${sortColumn}"] .sort-indicator`);
-    if (headerCell) {
-        headerCell.textContent = (sortDirection === 'desc') ? ' ▼' : ' ▲';
-    }
+    if (headerCell) headerCell.textContent = sortDirection === 'desc' ? ' ▼' : ' ▲';
 }
 
-/** Debounced version of renderDraftPool */
 export const debouncedRenderDraftPool = debounce(renderDraftPool, 300);
 
-/** Highlights the selected player row in the draft pool. */
 export function updateSelectedPlayerRow(newSelectedId) {
     selectedPlayerId = newSelectedId;
-    document.querySelectorAll('.draft-player-row').forEach(row => {
-        row.classList.toggle('bg-amber-200', row.dataset.playerId === newSelectedId);
-    });
+    document.querySelectorAll('.draft-player-row').forEach(r => r.classList.toggle('bg-amber-200', r.dataset.playerId === newSelectedId));
 }
 
-/** Renders the selected player card with scouted info. */
 export function renderSelectedPlayerCard(player, gameState) {
     if (!elements.selectedPlayerCard) return;
-
-    if (!player || !gameState || !gameState.playerTeam || !gameState.playerTeam.roster) {
-        elements.selectedPlayerCard.innerHTML = `<p class="text-gray-500">Select a player to see their details</p>`;
+    if (!player || !gameState?.playerTeam) {
+        elements.selectedPlayerCard.innerHTML = `<p class="text-gray-400 text-sm italic text-center py-8">Select a player to view details.</p>`;
         if (elements.draftPlayerBtn) elements.draftPlayerBtn.disabled = true;
         return;
     }
 
-    // --- 💡 FIX: Get roster objects for relationship calc ---
     const playerRoster = getUIRosterObjects(gameState.playerTeam);
-    const maxLevel = playerRoster.reduce(
-        (max, rp) => Math.max(max, getRelationshipLevel(rp.id, player.id)),
-        relationshipLevels.STRANGER.level
-    );
-    const scoutedPlayer = getScoutedPlayerInfo(player, maxLevel);
-
-    if (!scoutedPlayer) {
-        elements.selectedPlayerCard.innerHTML = `<p class="text-red-500">Error scouting player details.</p>`;
-        if (elements.draftPlayerBtn) elements.draftPlayerBtn.disabled = true;
-        return;
-    }
+    const maxLevel = playerRoster.reduce((max, rp) => Math.max(max, getRelationshipLevel(rp.id, player.id)), relationshipLevels.STRANGER.level);
+    const scouted = getScoutedPlayerInfo(player, maxLevel);
 
     const positions = Object.keys(positionOverallWeights);
-    let overallsHtml = '<div class="mt-2 grid grid-cols-4 gap-2 text-center">';
+    let overallsHtml = '<div class="mt-2 grid grid-cols-4 gap-1 text-center">';
     positions.forEach(pos => {
-        let displayOverall = '?';
-        let isScoutedRange = false;
-        if (scoutedPlayer.attributes) {
-            isScoutedRange = Object.keys(positionOverallWeights[pos]).some(attrKey => {
-                for (const cat in scoutedPlayer.attributes) {
-                    if (typeof scoutedPlayer.attributes[cat]?.[attrKey] === 'string') return true;
-                } return false;
-            });
-        }
-        if (!isScoutedRange) displayOverall = calculateOverall(player, pos);
-
-        overallsHtml += `<div class="bg-gray-200 p-2 rounded"><p class="font-semibold text-xs">${pos} OVR</p><p class="font-bold text-xl">${displayOverall}</p></div>`;
+        overallsHtml += `<div class="bg-gray-100 p-1.5 rounded"><p class="text-[10px] font-bold text-gray-500">${pos}</p><p class="font-black text-sm text-gray-800">${calculateOverall(player, pos)}</p></div>`;
     });
     overallsHtml += '</div>';
 
     elements.selectedPlayerCard.innerHTML = `
-        <h4 class="font-bold text-lg">${scoutedPlayer.name ?? 'Unknown Player'}</h4>
-        <p class="text-sm text-gray-600">
-            Age: ${scoutedPlayer.age ?? '?'} | H: ${formatHeight(scoutedPlayer.attributes?.physical?.height) ?? '?'} | W: ${scoutedPlayer.attributes?.physical?.weight ?? '?'} lbs
-        </p>
-        <p class="text-sm text-gray-600">
-            Est. Position: <span class="font-bold">${scoutedPlayer.estimatedPosition ?? '?'}</span> | // <<< Add estimatedPosition
-            Potential: <span class="font-semibold">${scoutedPlayer.potential ?? '?'}</span> |
-            Relationship: <span class="font-semibold ${scoutedPlayer.relationshipColor || ''}">${scoutedPlayer.relationshipName ?? '?'}</span>
-         </p>
-        ${overallsHtml}`;
-
-    const { draftOrder, currentPick, playerTeam } = gameState;
-    const ROSTER_LIMIT = 12;
-    if (draftOrder && currentPick >= 0 && currentPick < draftOrder.length && playerTeam && draftOrder[currentPick]) {
-        const pickingTeam = draftOrder[currentPick];
-        const playerCanPick = pickingTeam.id === playerTeam.id && (playerTeam.roster?.length || 0) < ROSTER_LIMIT;
-        elements.draftPlayerBtn.disabled = !playerCanPick || !player;
-    } else {
-        if (elements.draftPlayerBtn) elements.draftPlayerBtn.disabled = true;
-    }
+        <h4 class="font-bold text-base text-gray-900">${scouted.name}</h4>
+        <p class="text-xs text-gray-500">Age: ${scouted.age} | H: ${formatHeight(scouted.attributes?.physical?.height)} | W: ${scouted.attributes?.physical?.weight} lbs</p>
+        <p class="text-xs text-gray-600 mt-1">Est. Pos: <span class="font-bold text-gray-900">${estimateBestPosition(scouted)}</span> | Pot: <span class="font-bold text-amber-600">${scouted.potential}</span></p>
+        ${overallsHtml}
+    `;
 }
 
-/** Renders the player's current roster list in the draft panel. */
 export function renderPlayerRoster(playerTeam) {
-    if (!elements.rosterCount || !elements.draftRosterList || !playerTeam) {
-        console.error("Cannot render player roster: Missing elements or playerTeam data.");
-        return;
-    }
-
-    // --- 💡 FIX: Get roster objects ---
+    if (!elements.rosterCount || !elements.draftRosterList || !playerTeam) return;
     const roster = getUIRosterObjects(playerTeam);
-    const ROSTER_LIMIT = 18;
-
-    elements.rosterCount.textContent = `${roster.length}/${ROSTER_LIMIT}`;
-    elements.draftRosterList.innerHTML = '';
-
-    if (roster.length === 0) {
-        elements.draftRosterList.innerHTML = '<li class="p-2 text-center text-gray-500">No players drafted yet.</li>';
-    } else {
-        roster.forEach(player => {
-            if (!player) return;
-            const li = document.createElement('li');
-            const estimatedPos = estimateBestPosition(player, positionOverallWeights);
-            li.className = 'p-2';
-            li.textContent = `${player.name} (${estimatedPos ?? '?'})`;
-            elements.draftRosterList.appendChild(li);
-        });
-    }
-
-    // --- 💡 FIX: Pass the full roster objects ---
-    renderRosterSummary(roster);
+    elements.rosterCount.textContent = `${roster.length}/18`;
+    elements.draftRosterList.innerHTML = roster.map(p => `
+        <li class="py-1.5 px-3 flex justify-between items-center text-xs">
+            <span class="font-semibold text-gray-800">${p.name}</span>
+            <span class="text-gray-400 font-bold">${estimateBestPosition(p)} (${calculateOverall(p, estimateBestPosition(p))})</span>
+        </li>
+    `).join('') || '<li class="p-2 text-center text-gray-400 text-xs italic">No players drafted yet.</li>';
 }
 
-/** Renders the average overall ratings for the player's current roster. */
-function renderRosterSummary(roster) { // 💡 FIX: Now accepts the roster objects directly
-    if (!elements.rosterSummary) return;
-
-    if (roster.length === 0) {
-        elements.rosterSummary.innerHTML = '<p class="text-xs text-gray-500">Your roster is empty.</p>';
-        return;
-    }
-
-    let summaryHtml = '<h5 class="font-bold text-sm mb-1">Team Starters</h5><div class="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">';
-
-    let availablePlayers = roster.filter(p =>
-        p &&
-        p.attributes &&
-        p.status?.type !== 'temporary' &&
-        p.status?.duration === 0
-    );
-    // Use the shared helper to compute assignments
-
-    const assignments = computeStarterAssignments(availablePlayers);
-
-    Object.keys(positionOverallWeights).forEach(pos => {
-        const entry = assignments[pos];
-        if (!entry) {
-            summaryHtml += `<div class="flex justify-between"><span class="font-semibold">${pos}:</span><span class="font-bold text-gray-400">N/A</span></div>`;
-        } else {
-            summaryHtml += `<div class="flex justify-between" title="Starter: ${entry.player.name} (${entry.ovr} Ovr)">
-                              <span class="font-semibold">${pos}:</span>
-                              <span class="font-bold">${entry.ovr}</span>
-                            </div>`;
-        }
-    });
-
-    summaryHtml += '</div>';
-    elements.rosterSummary.innerHTML = summaryHtml;
-}
-/** Renders the main dashboard header and populates team filter. */
 export function renderDashboard(gameState) {
-    if (!gameState || !gameState.playerTeam || !gameState.teams) {
-        console.error("renderDashboard: Invalid gameState provided.");
-        if (elements.dashboardTeamName) {
-            // Show Team Name and Coach Name
-            const coachName = playerTeam.coach?.name || 'Head Coach';
-            elements.dashboardTeamName.innerHTML = `${playerTeam.name} <span class="text-sm text-gray-400 block mt-1 font-sans font-normal">HC: ${coachName} (${playerTeam.coach?.type || 'Balanced'})</span>`;
-        }
-        if (elements.dashboardRecord) elements.dashboardRecord.textContent = "";
-        return;
-    }
-    const { playerTeam, year, currentWeek, messages, teams } = gameState;
-    const WEEKS_IN_SEASON = 9; // Consider getting from game.js or config
-    const currentW = (typeof currentWeek === 'number' && currentWeek < WEEKS_IN_SEASON) ? `Week ${currentWeek + 1}` : 'Offseason';
+    if (!gameState?.playerTeam) return;
+    const { playerTeam, year, currentWeek, messages } = gameState;
+    const currentW = currentWeek < 9 ? `Week ${currentWeek + 1}` : 'Offseason';
 
-    if (elements.dashboardTeamName) {
-        const coachName = playerTeam.coach?.name || 'Head Coach';
-        elements.dashboardTeamName.innerHTML = `${playerTeam.name} <span class="text-sm text-gray-400 block mt-1 font-sans font-normal">HC: ${coachName} (${playerTeam.coach?.type || 'Balanced'})</span>`;
-    }
-    
-    const recordText = `${playerTeam.wins || 0} - ${playerTeam.losses || 0}` + ((playerTeam.ties && playerTeam.ties > 0) ? ` - ${playerTeam.ties}` : '');
-    if (elements.dashboardRecord) elements.dashboardRecord.textContent = recordText;
-    if (elements.dashboardYear) elements.dashboardYear.textContent = year || '?';
+    if (elements.dashboardTeamName) elements.dashboardTeamName.innerHTML = `${playerTeam.name}`;
+    if (elements.dashboardRecord) elements.dashboardRecord.textContent = `${playerTeam.wins || 0} - ${playerTeam.losses || 0}${playerTeam.ties ? ` - ${playerTeam.ties}` : ''}`;
+    if (elements.dashboardYear) elements.dashboardYear.textContent = year || '1';
     if (elements.dashboardWeek) elements.dashboardWeek.textContent = currentW;
-    
-    // 💡 SHOW CURRENCIES
+
     const credEl = document.getElementById('dashboard-cred');
     const favorsEl = document.getElementById('dashboard-favors');
     if (credEl) credEl.textContent = playerTeam.socialProfile?.streetCred || 50;
     if (favorsEl) favorsEl.textContent = playerTeam.socialProfile?.favorTokens || 0;
 
-    if (elements.advanceWeekBtn) elements.advanceWeekBtn.textContent = (typeof currentWeek === 'number' && currentWeek < WEEKS_IN_SEASON) ? 'Advance Week' : 'Go to Offseason';
+    if (elements.advanceWeekBtn) elements.advanceWeekBtn.textContent = currentWeek < 9 ? 'Play Week' : 'Go to Offseason';
 
-    if (elements.statsFilterTeam && Array.isArray(teams)) {
-        let teamOptions = '<option value="">League Leaders (All)</option>';
-        teams
-            .filter(t => t && t.id && t.name)
-            .sort((a, b) => a.name.localeCompare(b.name))
-            .forEach(t => {
-                // 💡 FIX: Default to the user's team on first load for better QoL
-                const isUserTeam = t.id === playerTeam.id;
-                const shouldSelect = isUserTeam && !elements.statsFilterTeam.dataset.initialized;
-                teamOptions += `<option value="${t.id}" ${shouldSelect ? 'selected' : ''}>${t.name}</option>`;
-            });
-        elements.statsFilterTeam.innerHTML = teamOptions;
-        elements.statsFilterTeam.dataset.initialized = "true"; // Prevent overriding user selection later
-    } else if (elements.statsFilterTeam) {
-        elements.statsFilterTeam.innerHTML = '<option value="">Error loading teams</option>';
-    }
-
-    if (messages && Array.isArray(messages)) updateMessagesNotification(messages);
-
-    const activeTabButton = elements.dashboardTabs?.querySelector('.tab-button.active');
-    const activeTabId = activeTabButton ? activeTabButton.dataset.tab : 'my-team';
-    switchTab(activeTabId, gameState);
+    if (messages) updateMessagesNotification(messages);
+    const activeTab = elements.dashboardTabs?.querySelector('.tab-button.active')?.dataset.tab || 'my-team';
+    switchTab(activeTab, gameState);
 }
 
-/** Handles switching between dashboard tabs and rendering content. */
 export function switchTab(tabId, gameState) {
-    console.log(`🖱️ Switching to tab: "${tabId}"`);
+    if (!elements.dashboardContent || !elements.dashboardTabs) return;
 
-    if (!elements.dashboardContent || !elements.dashboardTabs) {
-        console.error("CRITICAL: Dashboard containers not found in setupElements.");
-        return;
-    }
-
-    // 1. Visual Toggle: Hide all panes, Show selected pane
     elements.dashboardContent.querySelectorAll('.tab-pane').forEach(p => p.classList.add('hidden'));
-
-    // Deactivate all buttons
     elements.dashboardTabs.querySelectorAll('.tab-button').forEach(b => {
         b.classList.remove('active');
         b.setAttribute('aria-selected', 'false');
     });
 
-    // Activate the specific DOM elements
-    const contentPane = document.getElementById(`tab-content-${tabId}`);
-    const tabButton = elements.dashboardTabs.querySelector(`[data-tab="${tabId}"]`);
+    const pane = document.getElementById(`tab-content-${tabId}`);
+    const btn = elements.dashboardTabs.querySelector(`[data-tab="${tabId}"]`);
+    if (pane) pane.classList.remove('hidden');
+    if (btn) { btn.classList.add('active'); btn.setAttribute('aria-selected', 'true'); }
 
-    if (contentPane) contentPane.classList.remove('hidden');
-    else console.error(`❌ HTML Error: ID "tab-content-${tabId}" not found in index.html`);
+    if (!gameState) return;
 
-    if (tabButton) {
-        tabButton.classList.add('active');
-        tabButton.setAttribute('aria-selected', 'true');
-    }
-
-    // 2. Data Check
-    if (!gameState) {
-        console.warn("⚠️ No GameState provided to switchTab.");
-        if (contentPane) contentPane.innerHTML = '<p class="p-4 text-red-500">Game data is missing.</p>';
-        return;
-    }
-
-    // 3. Routing: Call the correct render function
-    try {
-        switch (tabId) {
-            case 'my-team':
-                renderMyTeamTab(gameState);
-                break;
-            case 'depth-chart':
-                // Depth chart handles its own sub-logic
-                if (typeof renderDepthChartTab === 'function') renderDepthChartTab(gameState);
-                break;
-            case 'schedule':
-                console.log("📅 Rendering Schedule...");
-                renderScheduleTab(gameState);
-                break;
-            case 'standings':
-                console.log("🏆 Rendering Standings...");
-                renderStandingsTab(gameState);
-                break;
-            case 'player-stats':
-                console.log("📊 Rendering Stats...");
-                renderPlayerStatsTab(gameState);
-                break;
-            case 'hall-of-fame':
-                console.log("🏛️ Rendering Hall of Fame...");
-                renderHallOfFameTab(gameState);
-                break;
-            case 'messages':
-                console.log("📩 Rendering Messages...");
-                renderMessagesTab(gameState);
-                break;
-            default:
-                console.warn(`❓ Unknown tab ID: ${tabId}`);
-        }
-    } catch (error) {
-        console.error(`💥 CRASH in switchTab for "${tabId}":`, error);
-        if (contentPane) contentPane.innerHTML = `<p class="p-4 text-red-500">Error rendering this tab: ${error.message}</p>`;
+    switch (tabId) {
+        case 'my-team': renderMyTeamTab(gameState); break;
+        case 'depth-chart': renderDepthChartTab(gameState); break;
+        case 'schedule': renderScheduleTab(gameState); break;
+        case 'standings': renderStandingsTab(gameState); break;
+        case 'player-stats': renderPlayerStatsTab(gameState); break;
+        case 'hall-of-fame': renderHallOfFameTab(gameState); break;
+        case 'messages': renderMessagesTab(gameState); break;
     }
 }
 
-/** Renders the 'My Team' tab content (roster table). */
 function renderMyTeamTab(gameState) {
-    if (!elements.myTeamRoster || !gameState?.playerTeam?.roster || !Array.isArray(gameState.playerTeam.roster)) {
-        console.error("Cannot render My Team tab: Missing elements or invalid roster data.");
-        if (elements.myTeamRoster) elements.myTeamRoster.innerHTML = '<p class="text-red-500">Error loading roster data.</p>';
-        return;
-    }
+    if (!elements.myTeamRoster || !gameState?.playerTeam) return;
     const roster = getUIRosterObjects(gameState.playerTeam);
 
-    const physicalAttrs = ['height', 'weight', 'speed', 'strength', 'agility', 'stamina'];
-    const mentalAttrs = ['playbookIQ', 'clutch', 'consistency', 'toughness'];
-    const technicalAttrs = ['throwingAccuracy', 'catchingHands', 'blocking', 'tackling', 'blockShedding'];
-
-    let tableHtml = `<div class="overflow-x-auto"><table class="min-w-full bg-white text-sm"><thead class="bg-gray-800 text-white sticky top-0 z-10"><tr>
-        <th scope="col" class="py-2 px-3 text-left sticky left-0 bg-gray-800 z-20">Name</th>
-        <th scope="col" class="py-2 px-3 text-center" title="Captain">C</th> <th scope="col" class="py-2 px-3">#</th>
-        <th scope="col" class="py-2 px-3">Type</th>
-        <th scope="col" class="py-2 px-3">Age</th>
-        <th scope="col" class="py-2 px-3">Pot</th>
-        <th scope="col" class="py-2 px-3">Status</th>
-        ${physicalAttrs.map(h => `<th scope="col" class="py-2 px-3 uppercase">${h.slice(0, 3)}</th>`).join('')}
-        ${mentalAttrs.map(h => `<th scope="col" class="py-2 px-3 uppercase">${h.slice(0, 3)}</th>`).join('')}
-        ${technicalAttrs.map(h => `<th scope="col" class="py-2 px-3 uppercase">${h.slice(0, 3)}</th>`).join('')}
+    let html = `<div class="overflow-x-auto"><table class="min-w-full bg-white text-sm"><thead class="bg-gray-800 text-white sticky top-0 z-10"><tr>
+        <th class="py-2 px-3 text-left sticky left-0 bg-gray-800 z-20">Name</th>
+        <th class="py-2 px-3 text-center">C</th><th class="py-2 px-3 text-center">#</th>
+        <th class="py-2 px-3 text-center">Age</th><th class="py-2 px-3 text-center">Pot</th>
+        <th class="py-2 px-3 text-center">Status</th>
+        <th class="py-2 px-3 text-center">HGT</th><th class="py-2 px-3 text-center">WGT</th>
+        <th class="py-2 px-3 text-center">SPD</th><th class="py-2 px-3 text-center">STR</th>
+        <th class="py-2 px-3 text-center">AGI</th><th class="py-2 px-3 text-center">IQ</th>
+        <th class="py-2 px-3 text-center">THR</th><th class="py-2 px-3 text-center">HND</th>
+        <th class="py-2 px-3 text-center">BLK</th><th class="py-2 px-3 text-center">TKL</th>
     </tr></thead><tbody class="divide-y">`;
 
     if (roster.length === 0) {
-        tableHtml += `<tr><td colspan="22" class="p-4 text-center text-gray-500">Your roster is empty.</td></tr>`;
+        html += `<tr><td colspan="16" class="p-4 text-center text-gray-400">Roster empty.</td></tr>`;
     } else {
         roster.forEach(p => {
-            if (!p || !p.attributes || !p.status) return;
-            const statusClass = p.status.duration > 0 ? 'text-red-500 font-semibold' : 'text-green-600';
-            const statusText = p.status.description || 'Healthy';
-            const typeTag = p.status.type === 'temporary' ? '<span class="status-tag temporary" title="Temporary Friend">[T]</span>' : '<span class="status-tag permanent" title="Permanent Roster">[P]</span>';
-
-            // --- CAPTAIN LOGIC ---
-            const isCaptain = gameState.playerTeam.captainId === p.id;
-            const captainBtn = isCaptain
-                ? '<span class="text-amber-500 font-bold text-lg" title="Current Captain">★</span>'
-                : `<button onclick="app.setCaptain('${p.id}')" class="text-gray-300 hover:text-amber-400 font-bold text-lg transition" title="Make Captain">☆</button>`;
-
-            tableHtml += `<tr data-player-id="${p.id}" class="cursor-pointer hover:bg-amber-100">
-                 <th scope="row" class="py-2 px-3 font-semibold sticky left-0 bg-white z-10">${p.name}</th>
-                 <td class="text-center py-2 px-3">${captainBtn}</td> <td class="text-center py-2 px-3 font-medium">${p.number || '?'}</td>
-                 <td class="text-center py-2 px-3">${typeTag}</td>
-                 <td class="text-center py-2 px-3">${p.age}</td>
-                 <td class="text-center py-2 px-3 font-medium">${p.potential || '?'}</td>
-                 <td class="text-center py-2 px-3 ${statusClass}" title="${statusText}">${statusText} ${p.status.duration > 0 ? `(${p.status.duration}w)` : ''}</td>`;
-
-            const renderAttr = (val, attrName) => {
-                const breakthroughClass = p.breakthroughAttr === attrName ? ' breakthrough font-bold text-green-600' : '';
-                const displayValue = attrName === 'height' ? formatHeight(val) : (val ?? '?');
-                return `<td class="text-center py-2 px-3${breakthroughClass}" title="${attrName}">${displayValue}</td>`;
-            };
-
-            physicalAttrs.forEach(attr => tableHtml += renderAttr(p.attributes.physical?.[attr], attr));
-            mentalAttrs.forEach(attr => tableHtml += renderAttr(p.attributes.mental?.[attr], attr));
-            technicalAttrs.forEach(attr => tableHtml += renderAttr(p.attributes.technical?.[attr], attr));
-
-            tableHtml += `</tr>`;
+            const isCap = gameState.playerTeam.captainId === p.id;
+            const capIcon = isCap ? '★' : '☆';
+            html += `<tr data-player-id="${p.id}" class="cursor-pointer hover:bg-amber-50">
+                <td class="py-2 px-3 font-semibold sticky left-0 bg-white z-10">${p.name}</td>
+                <td class="text-center py-2 px-3 text-amber-500 font-bold">${capIcon}</td>
+                <td class="text-center py-2 px-3 font-medium">${p.number || '--'}</td>
+                <td class="text-center py-2 px-3">${p.age}</td>
+                <td class="text-center py-2 px-3 font-bold text-amber-600">${p.potential || '?'}</td>
+                <td class="text-center py-2 px-3 text-xs ${p.status?.duration > 0 ? 'text-red-500' : 'text-green-600'}">${p.status?.description || 'Healthy'}</td>
+                <td class="text-center py-2 px-3">${formatHeight(p.attributes?.physical?.height)}</td>
+                <td class="text-center py-2 px-3">${p.attributes?.physical?.weight || 0}</td>
+                <td class="text-center py-2 px-3 font-bold text-blue-600">${p.attributes?.physical?.speed || 0}</td>
+                <td class="text-center py-2 px-3">${p.attributes?.physical?.strength || 0}</td>
+                <td class="text-center py-2 px-3">${p.attributes?.physical?.agility || 0}</td>
+                <td class="text-center py-2 px-3">${p.attributes?.mental?.playbookIQ || 0}</td>
+                <td class="text-center py-2 px-3">${p.attributes?.technical?.throwingAccuracy || 0}</td>
+                <td class="text-center py-2 px-3">${p.attributes?.technical?.catchingHands || 0}</td>
+                <td class="text-center py-2 px-3">${p.attributes?.technical?.blocking || 0}</td>
+                <td class="text-center py-2 px-3">${p.attributes?.technical?.tackling || 0}</td>
+            </tr>`;
         });
     }
-    elements.myTeamRoster.innerHTML = tableHtml + `</tbody></table></div>`;
+    elements.myTeamRoster.innerHTML = html + `</tbody></table></div>`;
 }
 
-/**
- * NEW HELPER FUNCTION
- * Gets the correct group container ID for a given position slot.
- * @param {string} positionSlot - The slot name (e.g., "QB1", "WR1", "DL1").
- * @param {string} side - 'offense' or 'defense'.
- * @returns {string|null} The DOM ID of the container, or null if not found.
- */
-function getSlotContainerId(positionSlot, side) {
-    // Get the base position (e.g., "WR1" -> "WR")
-    const basePosition = positionSlot.replace(/\d/g, '');
-
-    if (side === 'offense') {
-        switch (basePosition) {
-            case 'QB':
-                return 'offense-qb-slots';
-            case 'WR':
-            case 'TE': // Receivers and TEs go in the same group
-                return 'offense-receiver-slots';
-            case 'RB':
-            case 'FB': // Running backs and Fullbacks go in the same group
-                return 'offense-back-slots';
-            case 'OL':
-                return 'offense-line-slots';
-            default:
-                console.warn(`Unknown offensive slot container for: ${positionSlot}`);
-                return null;
-        }
-    } else if (side === 'defense') {
-        switch (basePosition) {
-            case 'DL':
-                return 'defense-line-slots';
-            case 'LB':
-                return 'defense-lb-slots';
-            case 'DB': // All defensive backs (CB, S) go in this group
-                return 'defense-db-slots';
-            default:
-                console.warn(`Unknown defensive slot container for: ${positionSlot}`);
-                return null;
-        }
-    }
-    return null;
-}
-
-
-/** Renders the 'Depth Chart' tab and its sub-components. */
 function renderDepthChartTab(gameState) {
-    // FORCE fresh state retrieval. 
-    // This prevents stale props from overwriting recent drag-and-drop changes.
     const gs = getGameState();
+    if (!gs?.playerTeam) return;
 
-    if (!gs || !gs.playerTeam || !gs.playerTeam.roster || !gs.playerTeam.formations || !gs.playerTeam.depthChart) {
-        console.error("Cannot render depth chart: Invalid game state.");
-        if (elements.positionalOverallsContainer) elements.positionalOverallsContainer.innerHTML = '<p class="text-red-500">Error loading depth chart data.</p>';
-        return;
-    }
-
-    // 💡 FIX: Inject an Auto-Set Lineup button directly into the tabs container
-    const subTabsContainer = document.getElementById('depth-chart-subtabs');
-    if (subTabsContainer && !document.getElementById('global-auto-depth-btn')) {
-        const autoBtn = document.createElement('button');
-        autoBtn.id = 'global-auto-depth-btn';
-        autoBtn.className = 'ml-auto bg-amber-500 hover:bg-amber-600 text-white font-bold py-1 px-4 rounded text-sm transition shadow flex items-center gap-2';
-        autoBtn.innerHTML = `
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 002-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path></svg>
-            Auto-Set Lineup
-        `;
-        autoBtn.onclick = () => {
-            if (confirm("Auto-set your lineup? The coaching staff will organize your depth chart based on player ratings, playbook IQ, and consistency.")) {
-                Game.aiSetDepthChart(getGameState().playerTeam);
-                Game.saveGameState();
-                document.dispatchEvent(new CustomEvent('refresh-ui'));
-            }
-        };
-        // Float to the right side of the flex container
-        subTabsContainer.appendChild(autoBtn);
-    }
-
-    const permanentRoster = getUIRosterObjects(gs.playerTeam)
-        .filter(p => p && p.status?.type !== 'temporary');
-
-    renderPositionalOveralls(permanentRoster);
-
-    // Pass specific current formation names from the fresh state
-    renderFormationDropdown(
-        'offense',
-        offenseFormations,
-        gs.playerTeam.formations.offense
-    );
-    renderFormationDropdown(
-        'defense',
-        defenseFormations,
-        gs.playerTeam.formations.defense
-    );
-
+    renderFormationDropdown('offense', offenseFormations, gs.playerTeam.formations.offense);
+    renderFormationDropdown('defense', defenseFormations, gs.playerTeam.formations.defense);
     renderDepthChartSide('offense', gs);
     renderDepthChartSide('defense', gs);
+    renderPositionalOveralls();
 }
 
-/** Populates the formation selection dropdown. */
 function renderFormationDropdown(side, formationMap, selectedKey) {
     const select = document.getElementById(`${side}-formation-select`);
     if (!select) return;
-
-    select.innerHTML = '';
-
-    Object.entries(formationMap).forEach(([key, formation]) => {
-        // 💡 FIX: Hide Special Teams formations from the manual selection dropdown
-        if (key === 'Punt' || key === 'Punt_Return') return;
-
-        const option = document.createElement('option');
-
-        option.value = key;                 // ✅ KEY
-        option.textContent = formation.name; // 👀 NAME
-
-        if (key === selectedKey) {
-            option.selected = true;
-        }
-
-        select.appendChild(option);
-    });
+    select.innerHTML = Object.entries(formationMap)
+        .filter(([k]) => k !== 'Punt' && k !== 'Punt_Return')
+        .map(([k, v]) => `<option value="${k}" ${k === selectedKey ? 'selected' : ''}>${v.name}</option>`)
+        .join('');
 
     select.onchange = (e) => {
         const team = getGameState().playerTeam;
         team.formations[side] = e.target.value;
-
         rebuildDepthChartFromOrder(team);
-
-        // 💡 FIX: Force a global UI refresh to ensure all sub-tabs see the new alignment
         document.dispatchEvent(new CustomEvent('refresh-ui'));
     };
 }
 
-/** Renders the table showing overall ratings for each player at each position. */
 function renderPositionalOveralls() {
     const pane = document.getElementById("positional-overalls-container");
-    const gameState = getGameState();
-    if (!pane || !gameState || !gameState.playerTeam) return;
+    const gs = getGameState();
+    if (!pane || !gs?.playerTeam) return;
 
-    const team = gameState.playerTeam;
+    const team = gs.playerTeam;
     const roster = getUIRosterObjects(team);
     const depthOrder = team.depthOrder || {};
-
-    // Build reverse maps for starters to display badges
-    const offStarters = {};
-    const defStarters = {};
-
-    if (team.depthChart) {
-        if (team.depthChart.offense) {
-            Object.entries(team.depthChart.offense).forEach(([slot, pId]) => {
-                if (pId) {
-                    if (!offStarters[pId]) offStarters[pId] = [];
-                    offStarters[pId].push(slot);
-                }
-            });
-        }
-        if (team.depthChart.defense) {
-            Object.entries(team.depthChart.defense).forEach(([slot, pId]) => {
-                if (pId) {
-                    if (!defStarters[pId]) defStarters[pId] = [];
-                    defStarters[pId].push(slot);
-                }
-            });
-        }
-    }
-
-    // 8 Core Positional Buckets
     const displayOrder = ['QB', 'RB', 'WR', 'TE', 'OL', 'DL', 'LB', 'DB'];
 
     let html = `<div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">`;
-
     displayOrder.forEach(pos => {
         const pIds = depthOrder[pos] || [];
-        // Map IDs to actual player objects, filtering out invalid ones
-        const playersInBucket = pIds.map(id => roster.find(p => p && p.id === id)).filter(Boolean);
+        const players = pIds.map(id => roster.find(p => p && p.id === id)).filter(Boolean);
 
         html += `
         <div class="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden flex flex-col">
             <div class="bg-gray-800 px-3 py-2 flex justify-between items-center text-white">
                 <h4 class="font-bold text-sm">${pos} DEPTH</h4>
-                <span class="text-[10px] font-bold bg-gray-700 px-2 py-0.5 rounded-full">${playersInBucket.length} Players</span>
+                <span class="text-[10px] font-bold bg-gray-700 px-2 py-0.5 rounded-full">${players.length}</span>
             </div>
-            <div class="flex-1 overflow-y-auto max-h-64 p-2 space-y-1">`;
-
-        if (playersInBucket.length === 0) {
-            html += `<div class="text-xs text-gray-400 italic text-center p-4">No players assigned</div>`;
-        } else {
-            playersInBucket.forEach((p, index) => {
-                const ovr = calculateOverall(p, pos);
-                const ovrColor = ovr >= 80 ? 'text-green-600' : (ovr >= 70 ? 'text-blue-600' : 'text-gray-600');
-
-                // Build badges for starting roles
-                let badges = '';
-                if (offStarters[p.id]) {
-                    offStarters[p.id].forEach(slot => {
-                        badges += `<span class="inline-block bg-blue-100 text-blue-800 text-[9px] px-1 rounded ml-1 font-bold border border-blue-200">${slot}</span>`;
-                    });
-                }
-                if (defStarters[p.id]) {
-                    defStarters[p.id].forEach(slot => {
-                        badges += `<span class="inline-block bg-red-100 text-red-800 text-[9px] px-1 rounded ml-1 font-bold border border-red-200">${slot}</span>`;
-                    });
-                }
-
-                // Top ranked player in the bucket gets a slight highlight
-                const rankStyle = index === 0 ? 'font-bold bg-amber-50 border border-amber-200' : 'hover:bg-gray-50 border border-transparent';
-                const nameStyle = index === 0 ? 'text-gray-900' : 'text-gray-700';
-
-                html += `
-                    <div class="flex items-center justify-between p-1.5 rounded text-sm transition-colors ${rankStyle}">
-                        <div class="flex items-center truncate pr-2">
-                            <span class="text-xs text-gray-400 w-4 inline-block text-right mr-1.5">${index + 1}.</span>
-                            <span class="truncate ${nameStyle}">${p.name}</span>
-                            ${badges}
-                        </div>
-                        <span class="font-bold ${ovrColor} ml-2 shrink-0">${ovr}</span>
-                    </div>`;
-            });
-        }
-
-        html += `</div></div>`;
+            <div class="flex-1 overflow-y-auto max-h-64 p-2 space-y-1">
+                ${players.map((p, i) => `
+                    <div class="flex items-center justify-between p-1.5 rounded text-sm hover:bg-gray-50">
+                        <span class="truncate">${i + 1}. ${p.name}</span>
+                        <span class="font-bold text-gray-700">${calculateOverall(p, pos)}</span>
+                    </div>
+                `).join('')}
+            </div>
+        </div>`;
     });
-
-    html += `</div>`;
-    pane.innerHTML = html;
+    pane.innerHTML = html + `</div>`;
 }
 
-
-/** Renders the depth chart slots and available players for one side. */
 function renderDepthChartSide(side, gameState) {
-    const visualFieldContainer = document.getElementById(`${side}-visual-field`);
-    const benchTableContainer = document.getElementById(`${side}-bench-table`);
-
-    // 1. Safety Check: Elements
-    if (!visualFieldContainer || !benchTableContainer) {
-        return;
-    }
-
-    // 2. Safety Check: Data
-    if (!gameState?.playerTeam?.roster || !gameState?.playerTeam?.depthChart) {
-        visualFieldContainer.innerHTML = '<div class="flex h-full items-center justify-center text-white/50 italic">Data loading...</div>';
-        return;
-    }
+    const visualField = document.getElementById(`${side}-visual-field`);
+    const benchTable = document.getElementById(`${side}-bench-table`);
+    if (!visualField || !benchTable) return;
 
     const { depthChart, formations } = gameState.playerTeam;
-
-    // 3. Get Roster Objects
     const roster = getUIRosterObjects(gameState.playerTeam);
-
     const currentChart = depthChart[side] || {};
-    const rawFormationKey = formations[side];
+    const formKey = formations[side] || (side === 'offense' ? 'Balanced' : '3-2-3 Base');
+    const formationData = (side === 'offense' ? offenseFormations : defenseFormations)[formKey];
 
-    const formationsMap = side === 'offense'
-        ? offenseFormations
-        : defenseFormations;
+    visualField.innerHTML = '';
+    const losMarker = document.createElement('div');
+    losMarker.className = 'absolute left-0 w-full h-1 bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.8)] z-0';
+    losMarker.style.top = side === 'offense' ? '20%' : '80%';
+    visualField.appendChild(losMarker);
 
-    // Normalize to a VALID KEY
-    let formationKey = rawFormationKey;
+    if (formationData?.slots) {
+        formationData.slots.forEach(slotId => {
+            const coords = formationData.coordinates?.[slotId];
+            if (!coords) return;
+            const [yardsX, yardsY] = coords;
+            const leftPercent = 50 + (yardsX * 1.8);
+            const topPercent = side === 'offense' ? 20 - (yardsY * 3.5) : 80 - (yardsY * 3.5);
 
-    if (!formationKey || !formationsMap[formationKey]) {
-        console.warn(
-            `Invalid formation "${rawFormationKey}" for ${side}. Falling back to default.`
-        );
-        formationKey = side === 'offense'
-            ? Object.keys(offenseFormations)[0]
-            : Object.keys(defenseFormations)[0];
+            const slotEl = document.createElement('div');
+            slotEl.style.left = `${leftPercent}%`;
+            slotEl.style.top = `${topPercent}%`;
+            slotEl.dataset.positionSlot = slotId;
+            slotEl.dataset.side = side;
+
+            const playerId = currentChart[slotId];
+            const player = roster.find(p => p.id === playerId);
+            let posKey = slotId.replace(/\d+/g, '');
+            if (['OT', 'OG', 'C'].includes(posKey)) posKey = 'OL';
+            if (['DE', 'DT', 'NT'].includes(posKey)) posKey = 'DL';
+            if (['CB', 'S'].includes(posKey)) posKey = 'DB';
+
+            const ovr = player ? calculateOverall(player, posKey) : '?';
+            const shortName = player ? player.name.split(' ')[0] : 'Empty';
+
+            slotEl.className = 'absolute transform -translate-x-1/2 -translate-y-1/2 flex flex-col items-center group z-10 cursor-pointer';
+            slotEl.innerHTML = `
+                <div class="relative w-10 h-10 rounded-full border-2 border-white shadow-lg flex flex-col items-center justify-center bg-gray-800 text-white">
+                    <span class="text-[8px] font-bold uppercase leading-none">${posKey}</span>
+                    <span class="text-sm font-black leading-none">${ovr}</span>
+                </div>
+                <div class="mt-1 bg-gray-900 text-white text-[9px] font-bold px-1.5 py-0.5 rounded shadow text-center max-w-[70px] truncate border border-gray-700">
+                    ${shortName}
+                </div>
+            `;
+            slotEl.onclick = () => window.app_openSlotModal(side, slotId);
+            visualField.appendChild(slotEl);
+        });
     }
 
-    const formationData = formationsMap[formationKey];
+    const starters = new Set(Object.values(currentChart).filter(Boolean));
+    const benched = roster.filter(p => !starters.has(p.id));
 
-    // 5. Calculate Starters vs Bench
-    const playersStartingOnThisSide = new Set(Object.values(currentChart).filter(Boolean));
-    const benchedPlayers = roster.filter(p => p && !playersStartingOnThisSide.has(p.id));
-
-    // 6. Render Components
-    renderVisualFormationSlots(
-        visualFieldContainer,
-        currentChart,
-        formationData,
-        benchedPlayers,
-        roster,
-        side,
-        formationKey // <--- 💡 FIX: ADD THIS ARGUMENT HERE
-    );
-    renderDepthChartBench(benchTableContainer, benchedPlayers, side);
+    benchTable.innerHTML = `<table class="min-w-full bg-white text-xs"><thead class="bg-gray-100"><tr>
+        <th class="py-1 px-2 text-left">Name</th><th class="py-1 px-2 text-center">Pos</th><th class="py-1 px-2 text-center">OVR</th>
+    </tr></thead><tbody class="divide-y">
+        ${benched.map(p => `
+            <tr>
+                <td class="py-1 px-2 font-semibold">${p.name}</td>
+                <td class="py-1 px-2 text-center text-gray-500">${estimateBestPosition(p)}</td>
+                <td class="py-1 px-2 text-center font-bold">${calculateOverall(p, estimateBestPosition(p))}</td>
+            </tr>
+        `).join('')}
+    </tbody></table>`;
 }
 
-/**
- * Handles logic when a user selects a player from the depth chart dropdown.
- * @param {string} side - 'offense' or 'defense'
- * @param {string} slot - The specific slot ID (e.g., 'QB1')
- * @param {string} newPlayerId - The ID of the selected player (or empty string)
- */
-function handleDepthChartChange(side, slot, newPlayerId) {
+window.app_openSlotModal = function (side, slotId) {
     const gs = getGameState();
-    if (!gs || !gs.playerTeam) return;
+    if (!gs?.playerTeam) return;
+    const roster = getUIRosterObjects(gs.playerTeam);
+    const currentChart = gs.playerTeam.depthChart[side] || {};
+    const currentId = currentChart[slotId];
+    let posKey = slotId.replace(/\d+/g, '');
+    if (['OT', 'OG', 'C'].includes(posKey)) posKey = 'OL';
 
-    assignPlayerToSlot(gs.playerTeam, newPlayerId, slot, side);
+    const candidates = roster.filter(p => p && (!Object.values(currentChart).includes(p.id) || p.id === currentId));
+    candidates.sort((a, b) => calculateOverall(b, posKey) - calculateOverall(a, posKey));
 
-    saveGameState();
-
-    // Refresh the UI to show the new overalls and updated bench
-    renderDepthChartTab(gs);
-}
-
-/**
- * 💡 NEW: Opens a modal to assign a player to a specific depth chart slot.
- * Eliminates the clunky hover-dropdowns on the field visualizer.
- */
-window.app_openSlotModal = function(side, slotId) {
-    const gs = Game.getGameState();
-    if (!gs || !gs.playerTeam) return;
-
-    const roster = Game.getUIRosterObjects(gs.playerTeam);
-    const currentChart = gs.playerTeam.depthChart[side];
-    const currentPlayerId = currentChart[slotId];
-    
-    let positionKey = slotId.replace(/\d+/g, '');
-    if (['OT', 'OG', 'C'].includes(positionKey)) positionKey = 'OL';
-    if (['DE', 'DT', 'NT'].includes(positionKey)) positionKey = 'DL';
-    if (['CB', 'S', 'FS', 'SS'].includes(positionKey)) positionKey = 'DB';
-    if (['FB'].includes(positionKey)) positionKey = 'RB';
-
-    // Find available players (not already starting on this side, except the current player)
-    const startingOnSide = new Set(Object.values(currentChart).filter(Boolean));
-    const candidates = roster.filter(p => p && (!startingOnSide.has(p.id) || p.id === currentPlayerId));
-
-    // Sort candidates: Current Pos Matches First, then by OVR Descending
-    candidates.sort((a, b) => {
-        const ovrA = Game.calculateOverall(a, positionKey);
-        const ovrB = Game.calculateOverall(b, positionKey);
-        const aMatch = (a.pos === positionKey || a.favoriteOffensivePosition === positionKey) ? 1 : 0;
-        const bMatch = (b.pos === positionKey || b.favoriteOffensivePosition === positionKey) ? 1 : 0;
-        if (aMatch !== bMatch) return bMatch - aMatch;
-        return ovrB - ovrA;
-    });
-
-    window.app_assignSlot = function(assignSide, assignSlot, pid) {
-        handleDepthChartChange(assignSide, assignSlot, pid);
+    window.app_assignSlot = function (s, slot, pid) {
+        assignPlayerToSlot(gs.playerTeam, pid, slot, s);
+        saveGameState();
+        renderDepthChartTab(gs);
         hideModal();
     };
 
-    let modalHtml = `<div class="space-y-2 max-h-[60vh] overflow-y-auto pr-2 pb-2">`;
-    modalHtml += `<button class="w-full text-left p-3 border border-red-200 rounded-lg hover:bg-red-50 flex justify-between items-center transition shadow-sm mb-4" onclick="app_assignSlot('${side}', '${slotId}', '')">
-        <span class="font-bold text-red-600">Leave Empty</span>
-    </button>`;
-
-    candidates.forEach(p => {
-        const ovr = Game.calculateOverall(p, positionKey);
-        const isCurrent = p.id === currentPlayerId;
-        const bgClass = isCurrent ? 'bg-amber-100 border-amber-400 shadow-md ring-2 ring-amber-300' : 'bg-white hover:bg-gray-50 border-gray-200';
-        
-        modalHtml += `<button class="w-full text-left p-3 border rounded-lg ${bgClass} flex justify-between items-center transition shadow-sm" onclick="app_assignSlot('${side}', '${slotId}', '${p.id}')">
-            <div class="flex items-center gap-3">
-                <div class="w-10 h-10 rounded-full bg-gray-200 border border-gray-300 flex items-center justify-center font-bold text-gray-700 text-xs">${p.pos || '-'}</div>
+    let modalHtml = `<div class="space-y-2 max-h-[60vh] overflow-y-auto pr-2 pb-2">
+        <button class="w-full text-left p-3 border border-red-200 rounded-lg hover:bg-red-50 text-red-600 font-bold" onclick="app_assignSlot('${side}', '${slotId}', '')">
+            Clear Slot
+        </button>
+        ${candidates.map(p => `
+            <button class="w-full text-left p-3 border rounded-lg hover:bg-gray-50 flex justify-between items-center ${p.id === currentId ? 'bg-amber-50 border-amber-300' : 'border-gray-200'}" onclick="app_assignSlot('${side}', '${slotId}', '${p.id}')">
                 <div>
-                    <span class="font-bold text-gray-800 block text-lg leading-tight">${p.name}</span>
-                    <span class="text-xs text-gray-500 font-medium">Age: ${p.age} • ${formatHeight(p.attributes?.physical?.height)} • ${p.attributes?.physical?.weight} lbs</span>
+                    <span class="font-bold text-gray-800">${p.name}</span>
+                    <span class="text-xs text-gray-500 block">Age: ${p.age} • ${formatHeight(p.attributes?.physical?.height)}</span>
                 </div>
-            </div>
-            <div class="text-right">
-                <span class="font-black text-2xl ${ovr >= 80 ? 'text-green-600' : 'text-gray-700'}">${ovr}</span>
-                <span class="text-[10px] text-gray-400 block -mt-1 font-bold uppercase tracking-wider">OVR</span>
-            </div>
-        </button>`;
-    });
-    modalHtml += `</div>`;
+                <span class="font-black text-xl text-gray-800">${calculateOverall(p, posKey)} OVR</span>
+            </button>
+        `).join('')}
+    </div>`;
 
     showModal(`Assign Player: ${slotId}`, modalHtml);
 };
 
-
-/**
- * Renders the visual, on-field player slots and their assignment dropdowns.
- * UPDATED: Shows full roster, contextual overalls, and swap indicators.
- */
-function renderVisualFormationSlots(container, currentChart, formationData, benchedPlayers, roster, side, formationKey) {
-    if (!formationKey || typeof formationKey !== 'string') return;
-    if (!formationData || !Array.isArray(formationData.slots)) return;
-
-    container.innerHTML = '';
-
-    function colorForOverall(val) {
-        if (val === '-' || val === null || val === undefined) {
-            return { bg: 'linear-gradient(90deg, rgba(55,65,81,0.6), rgba(31,41,55,0.6))', fg: '#ffffff' };
-        }
-        const v = Math.max(0, Math.min(100, Number(val)));
-        const hue = Math.round((v / 100) * 120);
-        const hue2 = Math.min(140, hue + 12);
-        const c1 = `hsl(${hue} 75% 45%)`;
-        const c2 = `hsl(${hue2} 70% 55%)`;
-        const fg = v >= 75 ? '#052e16' : '#ffffff';
-        return { bg: `linear-gradient(90deg, ${c1}, ${c2})`, fg };
-    }
-
-    const losMarker = document.createElement('div');
-    losMarker.className = 'absolute left-0 w-full h-1 bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.8)] z-0';
-    losMarker.style.top = side === 'offense' ? '20%' : '80%';
-    container.appendChild(losMarker);
-
-    formationData.slots.forEach(slotId => {
-        const coords = formationData.coordinates?.[slotId];
-        if (!coords) return;
-
-        const[yardsX, yardsY] = coords;
-        const leftPercent = 50 + (yardsX * 1.8);
-        const Y_SCALE = 3.5;
-        let topPercent = side === 'offense' ? 20 - (yardsY * Y_SCALE) : 80 - (yardsY * Y_SCALE);
-
-        const slotEl = document.createElement('div');
-        slotEl.style.left = `${leftPercent}%`;
-        slotEl.style.top = `${topPercent}%`;
-
-        // Enable proper drag and drop
-        slotEl.dataset.positionSlot = slotId;
-        slotEl.dataset.side = side;
-
-        const playerId = currentChart[slotId];
-        if (playerId) {
-            slotEl.draggable = true;
-            slotEl.dataset.playerId = playerId;
-        }
-        const player = roster.find(p => p.id === playerId);
-
-        let positionKey = slotId.replace(/\d+/g, '');
-        if (['OT', 'OG', 'C'].includes(positionKey)) positionKey = 'OL';
-        if (['DE', 'DT', 'NT'].includes(positionKey)) positionKey = 'DL';
-        if (['CB', 'S', 'FS', 'SS'].includes(positionKey)) positionKey = 'DB';
-        if (['FB'].includes(positionKey)) positionKey = 'RB';
-
-        const overall = player ? Game.calculateOverall(player, positionKey) : '-';
-        const displayOvr = player ? overall : '-';
-        const colorInfo = colorForOverall(displayOvr);
-        const fgStyle = `color: ${colorInfo.fg};`;
-        const posLabel = positionKey;
-        const shortName = player ? ((player.firstName ? player.firstName.charAt(0) + '. ' : '') + (player.lastName || player.name)) : 'Empty';
-
-        // 💡 FIX: Removed the embedded dropdown and shrunk dimensions to w-10/h-10
-        slotEl.className = 'absolute transform -translate-x-1/2 -translate-y-1/2 flex flex-col items-center group z-10 cursor-pointer';
-
-        slotEl.innerHTML = `
-            <div class="relative w-10 h-10 rounded-full border-2 border-white shadow-lg flex flex-col items-center justify-center transition-transform transform group-hover:scale-110" style="background: ${colorInfo.bg}; ${fgStyle}">
-                <span class="text-[8px] font-bold uppercase tracking-wide opacity-80 leading-none mt-0.5">${posLabel}</span>
-                <span class="text-sm font-black leading-none">${overall !== '-' ? overall : '?'}</span>
-            </div>
-            <div class="mt-1 bg-gray-900 text-white text-[9px] font-bold px-1.5 py-0.5 rounded shadow text-center max-w-[70px] truncate border border-gray-700">
-                ${shortName}
-            </div>
-        `;
-
-        // Bind the Click Event to open the new Modal Assignment system
-        slotEl.addEventListener('click', (e) => {
-            if (e.defaultPrevented) return; // Prevent if drag-and-drop fired
-            window.app_openSlotModal(side, slotId);
-        });
-
-        // Tooltip code remains the same...
-        const tooltipTarget = player;
-        if (tooltipTarget) {
-            const keyAttrs =['speed', 'strength', 'agility', 'playbookIQ', 'catchingHands', 'blocking', 'tackling'];
-            const attrPairs = keyAttrs.map(k => {
-                let v = tooltipTarget.attributes?.physical?.[k] ?? tooltipTarget.attributes?.mental?.[k] ?? tooltipTarget.attributes?.technical?.[k] ?? null;
-                if (v === null || v === undefined) return null;
-                return `${k}: ${v}`;
-            }).filter(Boolean);
-            slotEl.title = `${tooltipTarget.name} — ${displayOvr}\n${attrPairs.join(' | ')}`;
-        }
-
-        container.appendChild(slotEl);
-    });
-}
-
-/**
- * Renders the bench players into a sortable, draggable table.
- */
-function renderDepthChartBench(container, benchedPlayers, side) {
-    const physicalAttrs = ['height', 'weight', 'speed', 'strength', 'agility', 'stamina'];
-    const mentalAttrs = ['playbookIQ', 'clutch', 'consistency', 'toughness'];
-    const technicalAttrs = ['throwingAccuracy', 'catchingHands', 'blocking', 'tackling', 'blockShedding'];
-
-    let tableHtml = `<table class="min-w-full bg-white text-sm"><thead class="bg-gray-100 sticky top-0 z-10"><tr>
-        <th scope="col" class="py-2 px-3 text-left sticky left-0 bg-gray-100 z-20">Name</th>
-        <th scope="col" class="py-2 px-3">Age</th>
-        <th scope="col" class="py-2 px-3">Pot</th>
-        <th scope="col" class="py-2 px-3">Status</th>
-        ${physicalAttrs.map(h => `<th scope="col" class="py-2 px-3 uppercase">${h.slice(0, 3)}</th>`).join('')}
-        ${mentalAttrs.map(h => `<th scope="col" class="py-2 px-3 uppercase">${h.slice(0, 3)}</th>`).join('')}
-        ${technicalAttrs.map(h => `<th scope="col" class="py-2 px-3 uppercase">${h.slice(0, 3)}</th>`).join('')}
-    </tr></thead><tbody class="divide-y">`;
-
-    if (benchedPlayers.length === 0) {
-        tableHtml += `<tr><td colspan="20" class="p-4 text-center text-gray-500">All players are starting.</td></tr>`;
-    } else {
-        benchedPlayers.forEach(p => {
-            if (!p || !p.attributes || !p.status) return;
-
-            const statusClass = p.status.duration > 0 ? 'text-red-500 font-semibold' : 'text-green-600';
-            const statusText = p.status.description || 'Healthy';
-
-            tableHtml += `
-                <tr class="bench-player-row" draggable="true" data-player-id="${p.id}" data-side="${side}">
-                    <th scope="row" class="py-2 px-3 font-semibold sticky left-0 bg-white z-10">${p.name}</th>
-                    <td class="text-center py-2 px-3">${p.age}</td>
-                    <td class="text-center py-2 px-3 font-medium">${p.potential || '?'}</td>
-                    <td class="text-center py-2 px-3 ${statusClass}" title="${statusText}">
-                        ${statusText} ${p.status.duration > 0 ? `(${p.status.duration}w)` : ''}
-                    </td>
-            `;
-
-            const renderAttr = (val, attrName) => {
-                const displayValue = attrName === 'height' ? formatHeight(val) : (val ?? '?');
-                return `<td class="text-center py-2 px-3" title="${attrName}">${displayValue}</td>`;
-            };
-
-            physicalAttrs.forEach(attr => tableHtml += renderAttr(p.attributes.physical?.[attr], attr));
-            mentalAttrs.forEach(attr => tableHtml += renderAttr(p.attributes.mental?.[attr], attr));
-            technicalAttrs.forEach(attr => tableHtml += renderAttr(p.attributes.technical?.[attr], attr));
-
-            tableHtml += `</tr>`;
-        });
-    }
-    container.innerHTML = tableHtml + `</tbody></table>`;
-}
-
-/** Helper to find a player's attribute value from any category. */
-function getStat(player, attrKey) {
-    if (!player || !player.attributes) return '-';
-    if (attrKey === 'height') return formatHeight(player.attributes.physical?.height);
-    if (attrKey === 'weight') return player.attributes.physical?.weight || '-';
-
-    if (player.attributes.physical?.[attrKey] !== undefined) return player.attributes.physical[attrKey];
-    if (player.attributes.mental?.[attrKey] !== undefined) return player.attributes.mental[attrKey];
-    if (player.attributes.technical?.[attrKey] !== undefined) return player.attributes.technical[attrKey];
-
-    return '-';
-}
-
-/** Renders a single depth chart slot. (NEW, CLEANER VERSION) */
-function renderSlot(positionSlot, roster, chart, container, side) {
-    const playerId = chart[positionSlot];
-    const player = Array.isArray(roster) ? roster.find(p => p?.id === playerId) : null;
-    const basePosition = positionSlot.replace(/\d/g, '');
-    const overall = player ? calculateOverall(player, basePosition) : '---';
-    const typeTag = player?.status?.type === 'temporary' ? '<span class="status-tag temporary">[T]</span>' : '';
-
-    // --- 1. Get Key Attributes ---
-
-    // These attributes will ALWAYS be shown
-    const baseAttributes = [
-        'height',
-        'weight',
-        'speed',
-        'strength',
-        'agility',
-        'stamina',
-        'playbookIQ'
-    ];
-
-    // These are the "skill" attributes
-    const technicalKeys = ['throwingAccuracy', 'catchingHands', 'blocking', 'tackling', 'blockShedding'];
-
-    // Get the important *technical* skills for this position
-    const positionalAttributes = (positionOverallWeights && positionOverallWeights[basePosition])
-        ? Object.keys(positionOverallWeights[basePosition])
-            .filter(key => technicalKeys.includes(key)) // Only get skill keys
-            .sort() // Sort them alphabetically
-        : []; // Fallback
-
-    // Combine the lists, removing any duplicates
-    // (e.g., if 'playbookIQ' was in both, it won't be duplicated)
-    const allAttributes = [...new Set([...baseAttributes, ...positionalAttributes])];
-
-    // --- 2. Build Dynamic Stats HTML ---
-    let statsHtml = '';
-
-    for (const attr of allAttributes) {
-        const value = getStat(player, attr);
-        // Create an abbreviation for the title
-        let abbr = attr.slice(0, 3).toUpperCase();
-        if (attr === 'height') abbr = 'HGT';
-        if (attr === 'weight') abbr = 'WGT';
-        if (attr === 'playbookIQ') abbr = 'IQ';
-        if (attr === 'throwingAccuracy') abbr = 'THR';
-        if (attr === 'catchingHands') abbr = 'HND';
-        if (attr === 'blockShedding') abbr = 'BSH';
-
-        statsHtml += `<div class="text-center"><span class="font-semibold text-gray-500 text-xs" title="${attr}">${abbr}</span><p class="font-medium">${value}</p></div>`;
-    }
-
-    // --- 3. Build the final element ---
-    const slotEl = document.createElement('div');
-    slotEl.className = 'depth-chart-slot bg-gray-100 p-2 rounded flex items-center justify-between gap-4';
-    slotEl.dataset.positionSlot = positionSlot;
-    slotEl.dataset.side = side;
-
-    if (player && player.status?.type !== 'temporary') {
-        slotEl.draggable = true;
-        slotEl.dataset.playerId = player.id;
-        slotEl.setAttribute('title', `Drag ${player.name}`);
-    } else if (!player) {
-        slotEl.setAttribute('title', `Drop player for ${positionSlot}`);
-    } else {
-        slotEl.setAttribute('title', `${player.name} (Temporary)`);
-    }
-
-    // This new layout is 3 distinct parts, not one massive grid
-    slotEl.innerHTML = `
-        <div class="flex-shrink-0 w-1/3">
-            <span class="font-bold block">${positionSlot}</span>
-            <span class="text-sm font-medium truncate">${typeTag} ${player?.name ?? 'Empty'}</span>
-        </div>
-
-        <div class="flex-shrink-0 font-bold text-xl text-amber-600 px-4">
-            ${overall}
-        </div>
-
-        <div class="flex-grow grid grid-flow-col auto-cols-fr gap-3 text-sm">
-            ${statsHtml}
-        </div>
-    `;
-
-    container.appendChild(slotEl);
-}
-
-/** Renders the list of available players as draggable items. */
-function renderAvailablePlayerList(players, container, side) {
-    if (!container) return;
-    container.innerHTML = '';
-    if (!Array.isArray(players) || players.length === 0) {
-        container.innerHTML = '<p class="text-xs text-gray-500 p-2">No players available.</p>';
-        return;
-    }
-    players.forEach(player => {
-        if (!player) return;
-        const typeTag = player.status?.type === 'temporary' ? '<span class="status-tag temporary">[T]</span> ' : '';
-        const playerEl = document.createElement('div');
-        playerEl.className = 'draggable-player';
-        playerEl.dataset.playerId = player.id;
-        playerEl.dataset.side = side;
-        playerEl.innerHTML = `${typeTag}${player.name ?? 'Unknown Player'}`;
-
-        // --- Unified Drag Logic ---
-        // Always allow drag if player exists.
-        playerEl.draggable = true;
-        playerEl.setAttribute('title', `Drag ${player.name ?? 'Player'} to ${side} slot`);
-
-        // Optional: Visual distinction without disabling functionality
-        if (player.status?.type === 'temporary') {
-            playerEl.classList.add('text-amber-700', 'font-semibold');
-        }
-        container.appendChild(playerEl);
-    });
-}
-
-/** Renders the 'Messages' tab content. */
-export function renderMessagesTab(gameState) {
-    if (!elements.messagesList) return;
-
-    if (!gameState?.messages || !Array.isArray(gameState.messages) || gameState.messages.length === 0) {
-        elements.messagesList.innerHTML = `<div class="p-8 text-center text-gray-400 flex flex-col items-center">
-            <svg class="w-12 h-12 mb-2 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4"></path></svg>
-            <p>No messages yet.</p>
-        </div>`;
-        return;
-    }
-
-    elements.messagesList.innerHTML = gameState.messages.map(msg => {
-        const readClass = msg.isRead ? 'bg-white text-gray-600' : 'bg-blue-50 border-l-4 border-blue-500 font-semibold text-gray-800';
-        return `
-            <div class="message-item ${readClass} p-3 rounded shadow-sm cursor-pointer hover:bg-gray-50 transition mb-2" 
-                 data-message-id="${msg.id}">
-                <div class="flex justify-between items-center">
-                    <span class="truncate">${msg.subject || '(No Subject)'}</span>
-                    <span class="text-xs text-gray-400">${msg.week ? 'Wk ' + msg.week : ''}</span>
-                </div>
-            </div>
-        `;
-    }).join('');
-
-    updateMessagesNotification(gameState.messages);
-}
-
-/** Updates the visibility of the unread messages notification dot. */
-export function updateMessagesNotification(messages, markAllAsRead = false) {
-    if (!elements.messagesNotificationDot || !Array.isArray(messages)) return;
-    if (markAllAsRead) {
-        messages.forEach(msg => { if (msg) msg.isRead = true; });
-    }
-    const hasUnread = messages.some(m => m && !m.isRead);
-    elements.messagesNotificationDot.classList.toggle('hidden', !hasUnread);
-}
-
-/** Renders the 'Schedule' tab content. */
-function renderScheduleTab(gameState) {
-    if (!elements.scheduleList) return;
-
-    if (!gameState?.schedule || !Array.isArray(gameState.schedule)) {
-        elements.scheduleList.innerHTML = '<p class="text-gray-500 p-4">No schedule data available.</p>';
-        return;
-    }
-
-    let html = '';
+export function renderScheduleTab(gameState) {
+    if (!elements.scheduleList || !gameState?.schedule) return;
     const numTeams = gameState.teams?.length || 0;
     const gamesPerWeek = numTeams > 0 ? Math.floor(numTeams / 2) : 0;
-    const numWeeks = 9; // Or gameState.totalWeeks if available
 
-    for (let i = 0; i < numWeeks; i++) {
-        const weekStartIndex = i * gamesPerWeek;
-        const weekEndIndex = weekStartIndex + gamesPerWeek;
-        const weekGames = gameState.schedule.slice(weekStartIndex, weekEndIndex);
-
-        const isCurrentWeek = i === gameState.currentWeek;
-        const isPastWeek = i < gameState.currentWeek;
-
-        let weekHtml = `<div class="p-4 rounded mb-4 ${isCurrentWeek ? 'bg-amber-100 border-2 border-amber-500' : 'bg-gray-100'}">
-            <h4 class="font-bold text-lg mb-2">Week ${i + 1}</h4>
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm">`;
-
-        if (weekGames.length > 0) {
-            weekGames.forEach(g => {
-                if (!g || !g.home || !g.away) return;
-
-                // Try to find the result for this specific game
-                let result = null;
-                if (isPastWeek && gameState.gameResults) {
-                    result = gameState.gameResults.find(r =>
-                        r && r.homeTeam.id === g.home.id && r.awayTeam.id === g.away.id
-                    );
-                }
-
-                let content;
-                let resultClass = '';
-
-                if (result) {
-                    // Game is finished, show score
-                    const homeWin = result.homeScore > result.awayScore;
-                    const awayWin = result.awayScore > result.homeScore;
-
-                    const isPeeWee = g.home.isYouth;
-                    const badge = isPeeWee ? '<span class="px-1.5 py-0.5 bg-purple-100 text-purple-800 rounded text-[9px] font-bold mr-2">PEE-WEE</span>' : '';
-
-                    content = `
-                        ${badge}
-                        <span class="${awayWin ? 'font-bold' : ''}">${g.away.name} ${result.awayScore}</span> 
-                        <span class="text-gray-400 mx-1">@</span> 
-                        <span class="${homeWin ? 'font-bold' : ''}">${g.home.name} ${result.homeScore}</span>
-                    `;
-
-                    // Highlight win/loss for player
-                    if (result.homeTeam.id === gameState.playerTeam.id) {
-                        resultClass = homeWin ? 'border-l-4 border-green-500 bg-green-50' : (result.homeScore < result.awayScore ? 'border-l-4 border-red-500 bg-red-50' : '');
-                    } else if (result.awayTeam.id === gameState.playerTeam.id) {
-                        resultClass = awayWin ? 'border-l-4 border-green-500 bg-green-50' : (result.awayScore < result.homeScore ? 'border-l-4 border-red-500 bg-red-50' : '');
-                    }
-                } else {
-                    // Game not played yet
-                    const isPeeWee = g.home.isYouth;
-                    const badge = isPeeWee ? '<span class="px-1.5 py-0.5 bg-purple-100 text-purple-800 rounded text-[9px] font-bold mr-2">PEE-WEE</span>' : '';
-                    
-                    content = `${badge}<span>${g.away.name}</span> <span class="text-gray-400 mx-1">@</span> <span>${g.home.name}</span>`;
-                }
-
-                weekHtml += `<div class="bg-white p-2 rounded shadow-sm flex items-center ${resultClass}">${content}</div>`;
-            });
-        } else {
-            weekHtml += `<p class="text-gray-500 md:col-span-2 italic">Bye Week / No Games</p>`;
-        }
-        weekHtml += `</div></div>`;
-        html += weekHtml;
+    let html = '';
+    for (let i = 0; i < 9; i++) {
+        const weekGames = gameState.schedule.slice(i * gamesPerWeek, (i + 1) * gamesPerWeek);
+        const isCurrent = i === gameState.currentWeek;
+        html += `<div class="p-4 rounded-lg mb-3 ${isCurrent ? 'bg-amber-50 border-2 border-amber-500' : 'bg-gray-50 border border-gray-200'}">
+            <h4 class="font-bold text-sm mb-2 text-gray-700">Week ${i + 1}</h4>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">
+                ${weekGames.map(g => `<div class="bg-white p-2 rounded border border-gray-200 shadow-sm flex justify-between">
+                    <span>${g.away.name}</span><span class="text-gray-400">@</span><span>${g.home.name}</span>
+                </div>`).join('')}
+            </div>
+        </div>`;
     }
     elements.scheduleList.innerHTML = html;
 }
 
-/** Renders the 'Standings' tab content. */
-function renderStandingsTab(gameState) {
+export function renderStandingsTab(gameState) {
     if (!elements.standingsContainer || !gameState) return;
-
     elements.standingsContainer.innerHTML = '';
 
-    const getWinPct = (t) => {
-        const games = (t.wins || 0) + (t.losses || 0) + (t.ties || 0);
-        if (games === 0) return 0;
-        return ((t.wins || 0) + ((t.ties || 0) * 0.5)) / games;
-    };
-
-    // 💡 FIX: Group by Tiers instead of Divisions
     const tiers = [
-        { id: 1, name: 'Premier Parks (Tier 1)', teams: gameState.teams.filter(t => t.tier === 1) },
-        { id: 2, name: 'Sandlot Circuit (Tier 2)', teams: gameState.teams.filter(t => t.tier === 2) },
-        { id: 3, name: 'Pee-Wee League (Youth)', teams: gameState.youthTeams || [] }
+        { name: 'Premier Parks (Tier 1)', teams: gameState.teams.filter(t => t.tier === 1) },
+        { name: 'Sandlot Circuit (Tier 2)', teams: gameState.teams.filter(t => t.tier === 2) }
     ];
 
     tiers.forEach(tier => {
         if (tier.teams.length === 0) return;
-
-        const sortedTeams = tier.teams.sort((a, b) => {
-            const pctA = getWinPct(a);
-            const pctB = getWinPct(b);
-
-            // 1. Sort by Win Percentage
-            if (pctB !== pctA) return pctB - pctA;
-            // 2. Tie-breaker: Total Wins
-            if (b.wins !== a.wins) return (b.wins || 0) - (a.wins || 0);
-            // 3. Tie-breaker: Fewer Losses
-            if (a.losses !== b.losses) return (a.losses || 0) - (b.losses || 0);
-            // 4. Alphabetical
-            return a.name.localeCompare(b.name);
-        });
-
-        const divEl = document.createElement('div');
-        divEl.className = 'mb-6 bg-gray-50 rounded-lg overflow-hidden border border-gray-200 shadow-sm';
-
-        let tableHtml = `
-            <div class="bg-gray-800 px-4 py-2 font-bold text-white flex justify-between">
-                <span>${tier.name}</span>
-                <span class="text-gray-400 text-xs uppercase self-center">Season ${gameState.year}</span>
-            </div>
-            <table class="min-w-full text-sm">
-                <thead class="bg-gray-100 text-gray-600 text-xs uppercase">
-                    <tr>
-                        <th class="py-2 px-3 text-left">Team</th>
-                        <th class="py-2 px-3 text-center">W</th>
-                        <th class="py-2 px-3 text-center">L</th>
-                        <th class="py-2 px-3 text-center">T</th>
-                        <th class="py-2 px-3 text-center">PCT</th>
-                    </tr>
-                </thead>
-                <tbody class="divide-y divide-gray-200">
-        `;
-
-        sortedTeams.forEach((t, index) => {
-            const isPlayer = t.id === gameState.playerTeam?.id;
-            const pct = getWinPct(t).toFixed(3).replace(/^0/, ''); // Format as .500 instead of 0.500
-            
-            // 💡 PROMOTION & RELEGATION HIGHLIGHTING
-            let rowStyle = isPlayer ? 'bg-amber-100 font-bold' : 'bg-white hover:bg-gray-50';
-            let statusIcon = '';
-            
-            if (tier.id === 1 && index >= sortedTeams.length - 2) {
-                rowStyle += ' border-l-4 border-red-500'; // Relegation zone (Bottom 2 of Tier 1)
-                statusIcon = '<span title="Relegation Zone" class="text-red-500 text-xs ml-1">▼</span>';
-            } else if (tier.id === 2 && index < 2) {
-                rowStyle += ' border-l-4 border-green-500'; // Promotion zone (Top 2 of Tier 2)
-                statusIcon = '<span title="Promotion Zone" class="text-green-500 text-xs ml-1">▲</span>';
-            }
-
-            tableHtml += `
-                <tr class="${rowStyle}">
-                    <td class="py-2 px-3 text-left flex items-center">
-                        <div class="w-3 h-3 rounded-full mr-2 shrink-0" style="background-color: ${t.primaryColor || '#999'}"></div>
-                        <span class="w-4 text-xs text-gray-400 font-bold mr-1">${index + 1}.</span>
-                        <span class="truncate">${t.name}</span> 
-                        ${isPlayer ? '<span class="ml-1 text-[10px] text-amber-600 shrink-0">(YOU)</span>' : ''} 
-                        ${statusIcon}
-                    </td>
-                    <td class="text-center py-2 px-3">${t.wins || 0}</td>
-                    <td class="text-center py-2 px-3 text-gray-600">${t.losses || 0}</td>
-                    <td class="text-center py-2 px-3 text-gray-400">${t.ties || 0}</td>
-                    <td class="text-center py-2 px-3 font-mono text-gray-500">${pct}</td>
-                </tr>`;
-        });
-
-        tableHtml += `</tbody></table>`;
-        divEl.innerHTML = tableHtml;
-        elements.standingsContainer.appendChild(divEl);
-    }); // 💡 FIXED: Properly closes the tiers.forEach loop!
+        const sorted = tier.teams.sort((a, b) => (b.wins || 0) - (a.wins || 0));
+        elements.standingsContainer.innerHTML += `
+            <div class="bg-white rounded-lg border border-gray-200 overflow-hidden shadow-sm mb-4">
+                <div class="bg-gray-800 text-white px-3 py-2 font-bold text-sm">${tier.name}</div>
+                <table class="min-w-full text-xs">
+                    <thead class="bg-gray-50 text-gray-500">
+                        <tr><th class="py-1 px-3 text-left">Team</th><th class="py-1 px-3 text-center">W</th><th class="py-1 px-3 text-center">L</th></tr>
+                    </thead>
+                    <tbody class="divide-y">
+                        ${sorted.map(t => `<tr>
+                            <td class="py-1.5 px-3 font-semibold ${t.id === gameState.playerTeam.id ? 'text-amber-600' : 'text-gray-800'}">${t.name}</td>
+                            <td class="py-1.5 px-3 text-center font-bold">${t.wins || 0}</td>
+                            <td class="py-1.5 px-3 text-center text-gray-500">${t.losses || 0}</td>
+                        </tr>`).join('')}
+                    </tbody>
+                </table>
+            </div>`;
+    });
 }
 
-/** Renders the 'Player Stats' tab content. */
-function renderPlayerStatsTab(gameState) {
-    if (!elements.playerStatsContainer) return;
-
-    if (!gameState?.players || !Array.isArray(gameState.players)) {
-        elements.playerStatsContainer.innerHTML = '<p class="text-red-500 p-4">Player stats unavailable.</p>';
-        return;
-    }
-
+export function renderPlayerStatsTab(gameState) {
+    if (!elements.playerStatsContainer || !gameState?.players) return;
     const teamIdFilter = elements.statsFilterTeam?.value || '';
     const sortStat = elements.statsSort?.value || 'touchdowns';
 
-    // Filter and Sort
-    let playersToShow = gameState.players.filter(p => p && (teamIdFilter ? p.teamId === teamIdFilter : true));
+    let players = gameState.players.filter(p => !teamIdFilter || p.teamId === teamIdFilter);
+    players.sort((a, b) => ((b.seasonStats?.[sortStat]) || 0) - ((a.seasonStats?.[sortStat]) || 0));
+    players = players.slice(0, 50);
 
-    playersToShow.sort((a, b) => {
-        // 💡 FIX: Ensure we have an object to look at, or default to 0
-        const statsA = a.seasonStats || {};
-        const statsB = b.seasonStats || {};
-        const valA = statsA[sortStat] || 0;
-        const valB = statsB[sortStat] || 0;
-        return valB - valA; // Descending
-    });
-
-    // Limit to top 50 to improve performance
-    playersToShow = playersToShow.slice(0, 50);
-
-    const statsConfig = [
-        { key: 'passYards', label: 'PASS YDS' },
-        { key: 'passCompletions', label: 'COMP' },
-        { key: 'rushYards', label: 'RUSH YDS' },
-        { key: 'recYards', label: 'REC YDS' },
-        { key: 'receptions', label: 'REC' },
-        { key: 'touchdowns', label: 'TD' },
-        { key: 'tackles', label: 'TKL' },
-        { key: 'sacks', label: 'SACK' },
-        { key: 'interceptions', label: 'INT' }
-    ];
-
-    let tableHtml = `
-        <div class="overflow-x-auto">
-        <table class="min-w-full bg-white text-sm">
-            <thead class="bg-gray-800 text-white sticky top-0 z-10">
-                <tr>
-                    <th class="py-2 px-3 text-left sticky left-0 bg-gray-800 z-20">Name</th>
-                    <th class="py-2 px-3 text-left">Team</th>
-                    ${statsConfig.map(s => `<th class="py-2 px-3 text-center whitespace-nowrap">${s.label}</th>`).join('')}
-                </tr>
-            </thead>
-            <tbody class="divide-y divide-gray-200">
-    `;
-
-    if (playersToShow.length === 0) {
-        tableHtml += `<tr><td colspan="${statsConfig.length + 2}" class="p-4 text-center text-gray-500">No stats found.</td></tr>`;
-    } else {
-        playersToShow.forEach(p => {
-            const isMyTeam = p.teamId === gameState.playerTeam.id;
-            const teamName = gameState.teams.find(t => t.id === p.teamId)?.name || 'FA';
-
-            tableHtml += `
-                <tr class="${isMyTeam ? 'bg-amber-50' : 'hover:bg-gray-50'} cursor-pointer" data-player-id="${p.id}" onclick="app.openPlayerCard('${p.id}')">
-                    <td class="py-2 px-3 font-semibold sticky left-0 ${isMyTeam ? 'bg-amber-50' : 'bg-white'} z-10">${p.name}</td>
-                    <td class="py-2 px-3 text-gray-500 text-xs">${teamName}</td>
-                    ${statsConfig.map(s => `
-                        <td class="text-center py-2 px-3 ${s.key === sortStat ? 'font-bold text-black' : 'text-gray-600'}">
-                            ${p.seasonStats?.[s.key] || 0}
-                        </td>
-                    `).join('')}
-                </tr>`;
-        });
-    }
-
-    elements.playerStatsContainer.innerHTML = tableHtml + `</tbody></table></div>`;
+    elements.playerStatsContainer.innerHTML = `
+        <table class="min-w-full bg-white text-xs"><thead class="bg-gray-800 text-white"><tr>
+            <th class="py-2 px-3 text-left">Name</th>
+            <th class="py-2 px-3 text-center">PASS YDS</th>
+            <th class="py-2 px-3 text-center">RUSH YDS</th>
+            <th class="py-2 px-3 text-center">REC YDS</th>
+            <th class="py-2 px-3 text-center">TDS</th>
+            <th class="py-2 px-3 text-center">TKLS</th>
+        </tr></thead><tbody class="divide-y">
+            ${players.map(p => `<tr class="hover:bg-gray-50 cursor-pointer" onclick="app.openPlayerCard('${p.id}')">
+                <td class="py-1.5 px-3 font-semibold text-gray-800">${p.name}</td>
+                <td class="py-1.5 px-3 text-center">${p.seasonStats?.passYards || 0}</td>
+                <td class="py-1.5 px-3 text-center">${p.seasonStats?.rushYards || 0}</td>
+                <td class="py-1.5 px-3 text-center">${p.seasonStats?.recYards || 0}</td>
+                <td class="py-1.5 px-3 text-center font-bold text-amber-600">${p.seasonStats?.touchdowns || 0}</td>
+                <td class="py-1.5 px-3 text-center">${p.seasonStats?.tackles || 0}</td>
+            </tr>`).join('')}
+        </tbody></table>`;
 }
 
-/** Renders the 'Hall of Fame' tab content. */
-function renderHallOfFameTab(gameState) {
+export function renderHallOfFameTab(gameState) {
     if (!elements.hallOfFameList) return;
-
-    if (!gameState?.hallOfFame || gameState.hallOfFame.length === 0) {
-        elements.hallOfFameList.innerHTML = `
-            <div class="p-8 text-center text-gray-400 border-2 border-dashed border-gray-300 rounded-lg">
-                <p>The Hall of Fame is currently empty.</p>
-                <p class="text-xs mt-2">Players are inducted upon retirement if they meet specific criteria.</p>
-            </div>`;
+    if (!gameState?.hallOfFame?.length) {
+        elements.hallOfFameList.innerHTML = `<p class="text-gray-400 text-sm text-center py-12">Hall of Fame is empty.</p>`;
         return;
     }
-
-    elements.hallOfFameList.innerHTML = '<div class="grid grid-cols-1 md:grid-cols-2 gap-4">' +
-        gameState.hallOfFame.map(p => {
-            return `
-            <div class="bg-gradient-to-br from-amber-50 to-white p-4 rounded-lg shadow border border-amber-200">
-                <div class="flex justify-between items-start mb-2">
-                    <h4 class="font-bold text-lg text-amber-800">${p.name}</h4>
-                    <span class="text-xs bg-amber-200 text-amber-800 px-2 py-1 rounded-full">Inducted Year ${p.retiredYear || '?'}</span>
-                </div>
-                <div class="grid grid-cols-2 gap-x-4 gap-y-1 text-sm text-gray-700">
-                    <span>TDs: <strong>${p.careerStats?.touchdowns || 0}</strong></span>
-                    <span>Pass Yds: <strong>${p.careerStats?.passYards || 0}</strong></span>
-                    <span>Rush Yds: <strong>${p.careerStats?.rushYards || 0}</strong></span>
-                    <span>Rec Yds: <strong>${p.careerStats?.recYards || 0}</strong></span>
-                    <span>Tackles: <strong>${p.careerStats?.tackles || 0}</strong></span>
-                    <span>Sacks: <strong>${p.careerStats?.sacks || 0}</strong></span>
-                </div>
-            </div>`;
-        }).join('') +
-        '</div>';
+    elements.hallOfFameList.innerHTML = gameState.hallOfFame.map(p => `
+        <div class="bg-white p-3 rounded-lg border border-amber-200 shadow-sm mb-2">
+            <h4 class="font-bold text-amber-800">${p.name}</h4>
+            <p class="text-xs text-gray-600">Total TDs: ${p.careerStats?.touchdowns || 0}</p>
+        </div>
+    `).join('');
 }
 
-/** Renders the Offseason summary screen. */
-export function renderOffseasonScreen(offseasonReport, year) {
-    if (!offseasonReport) { console.error("Offseason report missing."); return; }
-    const { retiredPlayers = [], hofInductees = [], developmentResults = [], leavingPlayers = [] } = offseasonReport;
-
-    if (elements.offseasonYear) elements.offseasonYear.textContent = year ?? '?';
-
-    // Player Development
-    let devHtml = '';
-    if (developmentResults.length > 0) {
-        developmentResults.forEach(res => {
-            const playerName = res?.player?.name ?? '?'; const playerAge = res?.player?.age ?? '?';
-            devHtml += `<div class="p-2 bg-gray-100 rounded text-sm mb-1"><p class="font-bold">${playerName} (${playerAge})</p><div class="flex flex-wrap gap-x-2">`;
-            if (res?.improvements?.length > 0) { res.improvements.forEach(imp => { devHtml += `<span class="text-green-600">${imp?.attr ?? '?'} +${imp?.increase ?? '?'}</span>`; }); }
-            else { devHtml += `<span>No improvements</span>`; }
-            devHtml += '</div></div>';
-        });
-    } else { devHtml = '<p>No player development updates for your team.</p>'; }
-    if (elements.playerDevelopmentContainer) elements.playerDevelopmentContainer.innerHTML = devHtml;
-
-    // Helper for lists
-    const renderList = (element, items, formatFn) => { if (element) { element.innerHTML = items.length > 0 ? items.map(formatFn).join('') : '<li>None</li>'; } };
-
-    renderList(elements.retirementsList, retiredPlayers, p => `<li>${p?.name ?? '?'} (Graduated)</li>`);
-    renderList(elements.leavingPlayersList, leavingPlayers, l => `<li>${l?.player?.name ?? '?'} (${l?.reason || '?'})</li>`);
-    renderList(elements.hofInducteesList, hofInductees, p => `<li>${p?.name ?? '?'}</li>`);
+export function renderMessagesTab(gameState) {
+    if (!elements.messagesList) return;
+    if (!gameState?.messages?.length) {
+        elements.messagesList.innerHTML = `<p class="text-gray-400 text-sm text-center py-12">No messages.</p>`;
+        return;
+    }
+    elements.messagesList.innerHTML = gameState.messages.map(msg => `
+        <div class="message-item ${msg.isRead ? 'bg-white' : 'bg-blue-50 border-l-4 border-blue-500 font-semibold'} p-3 rounded shadow-sm cursor-pointer hover:bg-gray-50 transition mb-2" data-message-id="${msg.id}">
+            <span class="text-sm text-gray-800">${msg.subject}</span>
+        </div>
+    `).join('');
 }
 
-/** Sets up drag and drop event listeners for depth chart. */
-export function setupDragAndDrop(onDrop) {
-    const container = document.getElementById('dashboard-content');
-    if (!container) { console.error("Drag/drop container missing."); return; }
-
-    let draggedEl = null;
-
-    // Helper to find the draggable source
-    const getDraggable = (target) => {
-        return target.closest('.bench-player-row') ||
-            target.closest('.player-slot-visual[draggable="true"]') ||
-            target.closest('.roster-row-item');
-    };
-
-    container.addEventListener('dragstart', e => {
-        // 💡 FIX: Ignore drag events if they originated inside the Depth Order Manager.
-        // This lets 'setupDepthOrderDragEvents' handle those exclusively without conflict.
-        if (e.target.closest('#depth-order-container')) return;
-
-        const target = getDraggable(e.target);
-
-        if (target) {
-            draggedEl = target;
-            dragPlayerId = target.dataset.playerId;
-
-            // If dragging from Bench/Field, we know the side (offense/defense). 
-            // If from Roster list, side is undefined (neutral), allowing drop anywhere.
-            dragSide = target.dataset.side || null;
-
-            if (dragPlayerId) {
-                e.dataTransfer.effectAllowed = 'copyMove'; // Allow copy behavior
-                e.dataTransfer.setData('text/plain', dragPlayerId);
-
-                // Visual feedback
-                setTimeout(() => target.classList.add('dragging'), 0);
-            } else {
-                e.preventDefault();
-            }
-        }
-    });
-
-    container.addEventListener('dragend', e => {
-        if (draggedEl) draggedEl.classList.remove('dragging');
-        draggedEl = null;
-        dragPlayerId = null;
-        dragSide = null;
-        document.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over'));
-    });
-
-    container.addEventListener('dragover', e => {
-        // We only care if we are hovering over a Visual Slot on the field
-        const targetSlot = e.target.closest('.player-slot-visual');
-
-        if (targetSlot) {
-            e.preventDefault(); // Allow dropping
-            e.dataTransfer.dropEffect = 'move';
-
-            // Visual feedback
-            document.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over'));
-
-            // STRICT CHECK:
-            // 1. If source has a side (e.g. Offense Bench), target must match (Offense Field).
-            // 2. If source is neutral (Full Roster), allow it anywhere.
-            const slotSide = targetSlot.dataset.side;
-            if (!dragSide || dragSide === slotSide) {
-                targetSlot.classList.add('drag-over');
-            }
-        }
-    });
-
-    container.addEventListener('dragleave', e => {
-        const targetSlot = e.target.closest('.player-slot-visual');
-        if (targetSlot) targetSlot.classList.remove('drag-over');
-    });
-
-    container.addEventListener('drop', e => {
-        // Prevent default browser behavior (opening file)
-        e.preventDefault();
-        document.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over'));
-
-        const dropSlot = e.target.closest('.player-slot-visual');
-
-        if (dropSlot && dropSlot.dataset.positionSlot && dragPlayerId) {
-            const dropSide = dropSlot.dataset.side;
-
-            if (!dragSide || dragSide === dropSide) {
-                // 💡 NEW LOGIC FOR MANUAL OVERRIDE
-                const gs = getGameState();
-                const slotId = dropSlot.dataset.positionSlot; // e.g. "WR1"
-                
-                // Set this player as the #1 priority for this specific slot
-                if (!gs.playerTeam.depthOrder) gs.playerTeam.depthOrder = {};
-                gs.playerTeam.depthOrder[slotId] = [dragPlayerId];
-                
-                // Rebuild and Save
-                Game.rebuildDepthChartFromOrder(gs.playerTeam);
-                Game.saveGameState();
-                document.dispatchEvent(new CustomEvent('refresh-ui'));
-            }
-        }
-
-        // Cleanup
-        draggedEl = null;
-        dragPlayerId = null;
-        dragSide = null;
-    });
+export function updateMessagesNotification(messages) {
+    if (!elements.messagesNotificationDot) return;
+    const hasUnread = messages?.some(m => !m.isRead);
+    elements.messagesNotificationDot.classList.toggle('hidden', !hasUnread);
 }
 
-/** Sets up event listener for depth chart sub-tabs (Offense/Defense/Overalls). */
+export function renderOffseasonScreen(report, year) {
+    if (elements.offseasonYear) elements.offseasonYear.textContent = year;
+    const container = elements.playerDevelopmentContainer;
+    if (container && report?.developmentResults) {
+        container.innerHTML = report.developmentResults.map(r => `
+            <div class="p-2 bg-white rounded border border-gray-200 text-xs mb-1">
+                <span class="font-bold text-gray-800">${r.player.name} (${r.player.age}yo)</span>
+                <span class="text-green-600 font-semibold ml-2">${r.improvements.map(i => `${i.attr} +${i.increase}`).join(', ') || 'No gains'}</span>
+            </div>
+        `).join('');
+    }
+}
+
+export function setupDragAndDrop(onDrop) {}
+
 export function setupDepthChartTabs() {
     const subTabs = document.querySelectorAll(".depth-chart-tab");
-
     subTabs.forEach(tab => {
         tab.addEventListener("click", () => {
             const subTab = tab.dataset.subTab;
-
-            // Update active class
             subTabs.forEach(t => {
                 if (t.dataset.subTab === subTab) {
                     t.classList.add("active", "text-amber-600", "border-amber-500");
@@ -2153,1677 +832,61 @@ export function setupDepthChartTabs() {
                 }
             });
 
-            // Show / hide sub-panes
             const offensePane = document.getElementById("depth-chart-offense-pane");
             const defensePane = document.getElementById("depth-chart-defense-pane");
             const overallsPane = document.getElementById("positional-overalls-container");
             const depthOrderPane = document.getElementById("depth-order-container");
 
-            offensePane.classList.toggle("hidden", subTab !== "offense");
-            defensePane.classList.toggle("hidden", subTab !== "defense");
-            overallsPane.classList.toggle("hidden", subTab !== "overalls");
-            depthOrderPane.classList.toggle("hidden", subTab !== "depth-order");
+            if (offensePane) offensePane.classList.toggle("hidden", subTab !== "offense");
+            if (defensePane) defensePane.classList.toggle("hidden", subTab !== "defense");
+            if (overallsPane) overallsPane.classList.toggle("hidden", subTab !== "overalls");
+            if (depthOrderPane) depthOrderPane.classList.toggle("hidden", subTab !== "depth-order");
 
-            // Render tab content as needed
             if (subTab === "overalls") renderPositionalOveralls();
             if (subTab === "depth-order") renderDepthOrderPane(getGameState());
         });
     });
 }
 
-/**
- * 💡 FIX: Attach listeners to formation dropdowns.
- * Call this inside setupElements() or renderDepthChartTab().
- */
 export function setupFormationListeners() {
     const offSelect = document.getElementById('offense-formation-select');
     const defSelect = document.getElementById('defense-formation-select');
 
     if (offSelect) {
-        offSelect.onchange = (e) => changeFormationSmart('offense', e.target.value);
-    }
-    if (defSelect) {
-        defSelect.onchange = (e) => changeFormationSmart('defense', e.target.value);
-    }
-}
-// ===================================
-// --- Live Game Sim UI Logic ---
-// ===================================
-
-/**
- * Draws the state of a play (players, ball) onto the field canvas.
- * Uses a zoomed camera that follows the play action.
- * @param {object} frameData - A single frame from resolvePlay.visualizationFrames.
- */
-
-function drawFieldVisualization(frameData) {
-    const canvas = elements.fieldCanvas;
-    const ctx = elements.fieldCanvasCtx;
-    if (!canvas || !ctx) return;
-
-    // --- 1. CANVAS DIMENSIONS ---
-    const w = canvas.width;
-    const h = canvas.height;
-    if (w === 0 || h === 0) return;
-
-    // --- 2. FIELD DIMENSIONS (LANDSCAPE ORIENTED - ZOOMED IN) ---
-    // Game logic uses: X = 0-53.3 (sideline to sideline), Y = 0-120 (endzone to endzone)
-    // We want landscape: Y runs left-right (field length), X runs top-bottom (field width)
-    const FIELD_WIDTH_YARDS = 53.3;    // Game X-axis (sideline to sideline)
-    const FIELD_LENGTH_YARDS = 120;    // Game Y-axis (endzone to endzone)
-    const PADDING_Y_YARDS = 1.0;       // Buffer on top/bottom (to see both sidelines)
-    const VIEW_HEIGHT_YARDS = FIELD_WIDTH_YARDS + (PADDING_Y_YARDS * 2);
-
-    // Calculate "Pixels Per Yard" based on canvas HEIGHT (this is field width)
-    const ppY = h / VIEW_HEIGHT_YARDS;
-
-    // --- 3. CAMERA LOGIC (HORIZONTAL TRACKING - ZOOMED IN) ---
-    // Show ~25-30 yard window horizontally (this is field length)
-    const VIEW_LENGTH_YARDS = w / ppY;
-
-    // Track the ball
-    const ballY = frameData.ball ? frameData.ball.y : 60;
-
-    // Center camera on ball horizontally, but clamp to field boundaries
-    const MIN_CAM_Y = 0;
-    const MAX_CAM_Y = FIELD_LENGTH_YARDS - VIEW_LENGTH_YARDS;
-
-    let camBottomY = ballY - (VIEW_LENGTH_YARDS / 2);
-    camBottomY = Math.max(MIN_CAM_Y, Math.min(MAX_CAM_Y, camBottomY));
-
-    // Coordinate mapping: swap X/Y since field is rotated
-    const toScreenX = (fieldY) => (fieldY - camBottomY) * ppY;  // Field length → horizontal
-    const toScreenY = (fieldX) => (fieldX + PADDING_Y_YARDS) * ppY;  // Field width → vertical
-
-    // --- 4. DRAW FIELD ---
-    // Grass base
-    ctx.fillStyle = "#1a4d2e"; // Darker grass green for better contrast
-    ctx.fillRect(0, 0, w, h);
-
-    // Optional: Add subtle striping for visual interest
-    ctx.fillStyle = "rgba(26, 77, 46, 0.3)";
-    for (let stripe = 0; stripe < w; stripe += ppY * 5) {
-        ctx.fillRect(stripe, 0, ppY * 2.5, h);
-    }
-
-    // --- 4a. DRAW HASH MARKS & FIELD MARKINGS ---
-    // Hash marks (small perpendicular marks at 1-yard intervals)
-    ctx.lineWidth = Math.max(1, ppY * 0.03);
-    ctx.strokeStyle = "rgba(255, 255, 255, 0.2)";
-
-    const startYard = Math.floor(camBottomY) - 1;
-    const endYard = Math.ceil(camBottomY + VIEW_LENGTH_YARDS) + 1;
-
-    // Top and bottom sideline hash marks (every yard)
-    for (let y = startYard; y <= endYard; y++) {
-        const sy = toScreenX(y);
-        if (sy >= -10 && sy <= w + 10) {
-            // Top hash mark
-            ctx.beginPath();
-            ctx.moveTo(sy, toScreenY(0) - ppY * 0.15);
-            ctx.lineTo(sy, toScreenY(0));
-            ctx.stroke();
-
-            // Bottom hash mark
-            ctx.beginPath();
-            ctx.moveTo(sy, toScreenY(FIELD_WIDTH_YARDS) + ppY * 0.15);
-            ctx.lineTo(sy, toScreenY(FIELD_WIDTH_YARDS));
-            ctx.stroke();
-        }
-    }
-
-    // Grid Lines & Numbers (Vertical 10-yard markers along field length)
-    ctx.lineWidth = Math.max(1, ppY * 0.05);
-    ctx.font = `bold ${ppY * 0.8}px monospace`;
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-
-    // Optimize loop: only draw lines visible in camera
-    const startYard10 = Math.floor(camBottomY / 10) * 10;
-    const endYard10 = Math.floor((camBottomY + VIEW_LENGTH_YARDS) / 10) * 10 + 10;
-
-    for (let y = startYard10; y <= endYard10; y += 10) {
-        const sy = toScreenX(y);
-
-        // Special emphasis on goal lines (y=10 and y=110)
-        if (y === 10 || y === 110) {
-            ctx.lineWidth = Math.max(3, ppY * 0.2);
-            ctx.strokeStyle = "rgba(255, 255, 255, 0.9)"; // Bright, thick goal line
-        } else if (y % 20 === 0) {
-            ctx.lineWidth = Math.max(2, ppY * 0.08);
-            ctx.strokeStyle = "rgba(255, 255, 255, 0.5)"; // Major line
-        } else {
-            ctx.lineWidth = Math.max(1, ppY * 0.05);
-            ctx.strokeStyle = "rgba(255, 255, 255, 0.25)"; // Minor line
-        }
-
-        // Draw Vertical Line
-        ctx.beginPath();
-        ctx.moveTo(sy, 0);
-        ctx.lineTo(sy, h);
-        ctx.stroke();
-
-        // Draw Numbers (10, 20, 30... 40-50-40...)
-        if (y >= 10 && y < 110 && y % 10 === 0) {
-            const num = y <= 50 ? y - 10 : 110 - y; // Adjust for 10-yard endzones
-            if (num > 0) {
-                ctx.fillStyle = "rgba(255, 255, 255, 0.7)";
-                ctx.font = `bold ${ppY * 0.9}px monospace`;
-                // Top number
-                ctx.fillText(num, sy, toScreenY(0) + ppY * 1.3);
-                // Bottom number
-                ctx.fillText(num, sy, toScreenY(FIELD_WIDTH_YARDS) - ppY * 0.9);
-            }
-        }
-    }
-
-    // --- 5. ENDZONES ---
-    const drawEndzone = (yStart, yEnd, color, label) => {
-        const sY = toScreenX(yStart);
-        const eY = toScreenX(yEnd);
-        const topY = Math.min(sY, eY);
-        const heightPx = Math.abs(sY - eY);
-
-        // Endzone background with reduced opacity for visibility
-        ctx.fillStyle = color;
-        ctx.globalAlpha = 0.25;
-        ctx.fillRect(topY, 0, heightPx, h);
-        ctx.globalAlpha = 1.0;
-
-        // Endzone border (bright line at boundary)
-        ctx.lineWidth = Math.max(2, ppY * 0.15);
-        ctx.strokeStyle = "rgba(255, 255, 255, 0.8)";
-        ctx.beginPath();
-        ctx.moveTo(topY, 0);
-        ctx.lineTo(topY, h);
-        ctx.moveTo(topY + heightPx, 0);
-        ctx.lineTo(topY + heightPx, h);
-        ctx.stroke();
-
-        // Label (diagonal pattern diagonal stripes would be too much, just text)
-        ctx.save();
-        ctx.translate(topY + heightPx / 2, h / 2);
-        ctx.fillStyle = "rgba(255,255,255,0.6)";
-        ctx.font = `bold ${ppY * 1.5}px sans-serif`;
-        ctx.textAlign = "center";
-        ctx.textBaseline = "middle";
-        ctx.shadowColor = "rgba(0,0,0,0.8)";
-        ctx.shadowBlur = 6;
-        ctx.shadowOffsetX = 1;
-        ctx.shadowOffsetY = 1;
-        ctx.fillText(label, 0, 0);
-        ctx.restore();
-    };
-
-    const homeColor = currentLiveGameResult?.homeTeam?.primaryColor || "#0000aa";
-    const awayColor = currentLiveGameResult?.awayTeam?.primaryColor || "#aa0000";
-
-    // Field is 0-120. Endzones are 0-10 and 110-120.
-    drawEndzone(0, 10, awayColor, currentLiveGameResult?.awayTeam?.name || "AWAY");
-    drawEndzone(110, 120, homeColor, currentLiveGameResult?.homeTeam?.name || "HOME");
-
-    // --- 6. SPECIAL LINES (LOS / First Down) ---
-    const drawSpecialLine = (y, color) => {
-        const sy = toScreenX(y);
-        ctx.beginPath();
-        ctx.moveTo(sy, 0);
-        ctx.lineTo(sy, h);
-        ctx.lineWidth = ppY * 0.15;
-        ctx.strokeStyle = color;
-        ctx.shadowColor = color;
-        ctx.shadowBlur = 8;
-        ctx.stroke();
-        ctx.shadowBlur = 0;
-    };
-
-    drawSpecialLine(frameData.lineOfScrimmage, "#3b82f6"); // Blue LOS
-    drawSpecialLine(frameData.firstDownY, "#eab308");      // Yellow First Down
-
-    // Sidelines (Visual Border - Top & Bottom)
-    ctx.lineWidth = ppY * 0.1;
-    ctx.strokeStyle = "white";
-    ctx.beginPath();
-    ctx.moveTo(0, toScreenY(0));
-    ctx.lineTo(w, toScreenY(0));
-    ctx.moveTo(0, toScreenY(FIELD_WIDTH_YARDS));
-    ctx.lineTo(w, toScreenY(FIELD_WIDTH_YARDS));
-    ctx.stroke();
-
-    // --- 7. DRAW PLAYERS ---
-    if (frameData.players) {
-        frameData.players.forEach(p => {
-            const px = toScreenX(p.y);
-            const py = toScreenY(p.x);
-
-            // 💡 DYNAMIC SCALING MATH
-            // Base yard-to-pixel scale (ppY)
-            const baseSize = ppY * 0.7;
-
-            // Weight (approx 150-350) scales the BREADTH (shoulder to shoulder)
-            // A 350lb lineman will look significantly wider than a 150lb kicker.
-            const weightScale = 0.7 + (p.wgt / 300);
-
-            // Height (approx 60-80) scales the LENGTH (top of head to back)
-            // Taller players have a slightly longer top-down profile.
-            const heightScale = 0.8 + (p.hgt / 100);
-
-            ctx.save();
-
-            // Jitter for stunned
-            let jitterX = p.isStunned ? (Math.random() - 0.5) * 2 : 0;
-            let jitterY = p.isStunned ? (Math.random() - 0.5) * 2 : 0;
-            ctx.translate(px + jitterX, py + jitterY);
-
-            ctx.save();
-            ctx.rotate(p.angle);
-
-            const jerseyColor = p.isStunned ? "#4b5563" : (p.primaryColor || "#333");
-            const helmetColor = p.isStunned ? "#9ca3af" : (p.secondaryColor || "#fff");
-
-            // 💡 SHOULDER PADS (The Rectangle)
-            // padThickness = Front-to-back (Height affected)
-            // padWidth = Shoulder-to-shoulder (Weight affected)
-            ctx.fillStyle = jerseyColor;
-            const padThickness = baseSize * heightScale;
-            const padWidth = baseSize * 2.2 * weightScale;
-
-            ctx.beginPath();
-            ctx.roundRect(-padThickness / 2, -padWidth / 2, padThickness, padWidth, 4);
-            ctx.fill();
-            ctx.strokeStyle = "rgba(0,0,0,0.6)";
-            ctx.lineWidth = 1.2;
-            ctx.stroke();
-
-            // 💡 HELMET (Scales slightly with height)
-            ctx.fillStyle = helmetColor;
-            const helmetRadius = baseSize * 0.7 * (0.9 + p.hgt / 150);
-            ctx.beginPath();
-            // Helmet is positioned at the front edge of the pads
-            ctx.arc(padThickness * 0.2, 0, helmetRadius, 0, Math.PI * 2);
-            ctx.fill();
-
-            // Facemask
-            ctx.strokeStyle = "#111";
-            ctx.lineWidth = ppY * 0.18;
-            ctx.beginPath();
-            ctx.arc(padThickness * 0.2, 0, helmetRadius, -Math.PI / 3, Math.PI / 3);
-            ctx.stroke();
-
-            // JERSEY NUMBER (Centered on body)
-            if (!p.isStunned && p.number) {
-                ctx.save();
-                ctx.rotate(-p.angle);
-                ctx.fillStyle = p.secondaryColor;
-                // Font size also scales with weight so it fits the jersey
-                ctx.font = `bold ${ppY * 0.65 * weightScale}px Arial`;
-                ctx.textAlign = "center";
-                ctx.textBaseline = "middle";
-                ctx.shadowColor = "rgba(0,0,0,0.5)";
-                ctx.shadowBlur = 2;
-                ctx.fillText(p.number, 0, 0);
-                ctx.restore();
-            }
-            ctx.restore(); // End body rotation
-
-            // 💡 UPRIGHT OVERLAYS (Stunned stars & Glow)
-            if (p.isStunned) {
-                const time = Date.now() * 0.008;
-                // Stars orbit wider on bigger players
-                const starRadius = baseSize * 1.5 * weightScale;
-                ctx.save();
-                for (let i = 0; i < 3; i++) {
-                    const angle = time + (i * (Math.PI * 2) / 3);
-                    const sx = Math.cos(angle) * starRadius;
-                    const sy = Math.sin(angle) * (starRadius * 0.4) - (baseSize * 1.8);
-                    ctx.fillStyle = "#facc15";
-                    ctx.beginPath();
-                    ctx.arc(sx, sy, 2.5, 0, Math.PI * 2);
-                    ctx.fill();
-                }
-                ctx.restore();
-                ctx.fillStyle = "white";
-                ctx.font = `bold ${ppY * 0.6}px Arial`;
-                ctx.textAlign = "center";
-                ctx.fillText("X_X", 0, -baseSize * 2.5);
-            }
-
-            if (p.hasBall) {
-                ctx.strokeStyle = "#fbbf24";
-                ctx.lineWidth = 3;
-                ctx.setLineDash([4, 2]);
-                ctx.shadowBlur = 15;
-                ctx.shadowColor = "#fbbf24";
-                ctx.beginPath();
-                // Glow circle is larger for bigger players
-                ctx.arc(0, 0, baseSize * 2.0 * weightScale, 0, Math.PI * 2);
-                ctx.stroke();
-                ctx.setLineDash([]);
-            }
-
-            ctx.restore();
-        });
-    }
-
-    // --- 8. DRAW BALL ---
-    if (frameData.ball) {
-        const bx = toScreenX(frameData.ball.y);  // ball.y is field length
-        const by = toScreenY(frameData.ball.x);  // ball.x is field width
-        const bz = frameData.ball.z || 0;
-
-        // Ball gets bigger as it goes higher (Pseudo-3D)
-        const ballRadius = ppY * 0.35 * (1 + bz * 0.15);
-
-        // Deep shadow (stays on ground, fades with height) - more pronounced
-        const shadowOffset = bz * ppY * 0.8;
-        ctx.fillStyle = `rgba(0,0,0,${Math.max(0.15, 0.5 - bz * 0.1)})`;
-        ctx.beginPath();
-        ctx.ellipse(bx, by + shadowOffset, ballRadius * 1.2, ballRadius * 0.45, 0, 0, Math.PI * 2);
-        ctx.fill();
-
-        // Ball Body (Main oval shape - rich brown)
-        ctx.fillStyle = "#8B4513"; // Darker Saddle Brown for more contrast
-        ctx.beginPath();
-        ctx.ellipse(bx, by, ballRadius * 0.75, ballRadius, 0, 0, Math.PI * 2);
-        ctx.fill();
-
-        // Ball highlight (light reflection for 3D effect) - more vibrant
-        const gradient = ctx.createLinearGradient(bx - ballRadius * 0.5, by - ballRadius * 0.8, bx + ballRadius * 0.3, by + ballRadius * 0.5);
-        gradient.addColorStop(0, "rgba(255, 220, 120, 0.5)");
-        gradient.addColorStop(0.7, "rgba(255, 220, 120, 0.15)");
-        gradient.addColorStop(1, "rgba(255, 220, 120, 0)");
-        ctx.fillStyle = gradient;
-        ctx.fillRect(bx - ballRadius * 0.8, by - ballRadius * 1.1, ballRadius * 1.6, ballRadius * 2.1);
-
-        // Laces (stitching down the middle - more prominent)
-        ctx.strokeStyle = "rgba(240, 240, 240, 1)";
-        ctx.lineWidth = ppY * 0.1;
-        ctx.shadowColor = "rgba(0,0,0,0.5)";
-        ctx.shadowBlur = 2;
-        ctx.beginPath();
-        ctx.moveTo(bx - ballRadius * 0.08, by - ballRadius * 0.6);
-        ctx.lineTo(bx - ballRadius * 0.08, by + ballRadius * 0.6);
-        ctx.stroke();
-        ctx.shadowBlur = 0;
-
-        // Lace crosses (more detailed stitching)
-        ctx.strokeStyle = "rgba(220, 220, 220, 0.9)";
-        ctx.lineWidth = ppY * 0.06;
-        for (let i = -3; i <= 3; i++) {
-            const y = by - ballRadius * 0.45 + (i * ballRadius * 0.18);
-            ctx.beginPath();
-            ctx.moveTo(bx - ballRadius * 0.18, y);
-            ctx.lineTo(bx + ballRadius * 0.08, y);
-            ctx.stroke();
-        }
-
-        // Ball outline for definition - thicker and darker
-        ctx.strokeStyle = "rgba(0, 0, 0, 0.5)";
-        ctx.lineWidth = ppY * 0.08;
-        ctx.beginPath();
-        ctx.ellipse(bx, by, ballRadius * 0.75, ballRadius, 0, 0, Math.PI * 2);
-        ctx.stroke();
-
-        // Ball rim highlight (side reflection)
-        ctx.strokeStyle = "rgba(255, 200, 80, 0.3)";
-        ctx.lineWidth = ppY * 0.04;
-        ctx.beginPath();
-        ctx.ellipse(bx + ballRadius * 0.3, by + ballRadius * 0.2, ballRadius * 0.4, ballRadius * 0.3, 0, 0, Math.PI * 2);
-        ctx.stroke();
-    }
-}
-
-/** Renders the live stats box with key player performances for the game. */
-function renderLiveStatsBox(gameResult) {
-    if (!elements.simLiveStats || !elements.simStatsAway || !elements.simStatsHome || !gameResult) {
-        return;
-    }
-    const { homeTeam, awayTeam } = gameResult;
-
-    // Helper function to find top players and format their stats
-    const generateTeamStatsHtml = (team) => {
-        if (!team || !team.roster || team.roster.length === 0) return '<h5>No Player Data</h5>';
-
-        // 💡 FIX: Convert Roster IDs to Player Objects so we can read stats
-        const fullRoster = getUIRosterObjects(team);
-
-        // Filters and sorts roster to find a specific stat leader
-        const findTopStat = (statName) => fullRoster
-            .filter(p => p && p.gameStats && p.gameStats[statName] > 0)
-            .sort((a, b) => (b.gameStats[statName] || 0) - (a.gameStats[statName] || 0))[0];
-
-        // --- OFFENSIVE LEADERS ---
-        const qb = fullRoster.find(p => p && p.gameStats && p.gameStats.passAttempts > 0);
-        const leadingRusher = findTopStat('rushYards');
-        const leadingReceiver = findTopStat('recYards');
-        const offensivePlayersLogged = new Set();
-
-        let html = `<h5 class="text-lg font-semibold text-amber-400 mb-1 border-b border-gray-600 pb-1">${team.name}</h5>`;
-
-        // 1. QB Stats
-        if (qb) {
-            html += `<p class="text-sm">${qb.name}: <strong>${qb.gameStats.passCompletions}/${qb.gameStats.passAttempts}, ${qb.gameStats.passYards} yds, ${qb.gameStats.touchdowns} TD, ${qb.gameStats.interceptionsThrown} INT</strong></p>`;
-            offensivePlayersLogged.add(qb.id);
-        }
-
-        // 2. Running Leader
-        if (leadingRusher && !offensivePlayersLogged.has(leadingRusher.id)) {
-            html += `<p class="text-sm">${leadingRusher.name}: <strong>${leadingRusher.gameStats.rushYards} Rush Yds, ${leadingRusher.gameStats.touchdowns} TD</strong></p>`;
-            offensivePlayersLogged.add(leadingRusher.id);
-        }
-
-        // 3. Receiving Leader
-        if (leadingReceiver && !offensivePlayersLogged.has(leadingReceiver.id)) {
-            let recHtml = `<p class="text-sm">${leadingReceiver.name}: <strong>${leadingReceiver.gameStats.receptions} Rec, ${leadingReceiver.gameStats.recYards} Yds, ${leadingReceiver.gameStats.touchdowns} TD`;
-            if (leadingReceiver.gameStats.drops > 0) recHtml += `, ${leadingReceiver.gameStats.drops} Drop`;
-            recHtml += `</strong></p>`;
-            html += recHtml;
-            offensivePlayersLogged.add(leadingReceiver.id);
-        }
-
-        // 4. Fumble Leaders (offensive turnovers)
-        const fumbleLeader = fullRoster.filter(p => p && p.gameStats && p.gameStats.fumblesLost > 0)
-            .sort((a, b) => (b.gameStats.fumblesLost || 0) - (a.gameStats.fumblesLost || 0))[0];
-        if (fumbleLeader && !offensivePlayersLogged.has(fumbleLeader.id)) {
-            html += `<p class="text-sm text-red-300">${fumbleLeader.name}: <strong>${fumbleLeader.gameStats.fumblesLost} Fum Lost</strong></p>`;
-            offensivePlayersLogged.add(fumbleLeader.id);
-        }
-
-        // --- DEFENSIVE LEADERS ---
-        const defensiveLeaders = [];
-
-        fullRoster.forEach(p => {
-            if (p?.gameStats && (p.gameStats.tackles > 0 || p.gameStats.sacks > 0 || p.gameStats.interceptions > 0 || p.gameStats.fumblesRecovered > 0)) {
-                if (offensivePlayersLogged.has(p.id)) return;
-                defensiveLeaders.push(p);
-            }
-        });
-
-        // Sort by "Impact" (Int > Sack > FumRec > Tackle)
-        defensiveLeaders.sort((a, b) => {
-            const scoreA = (a.gameStats.interceptions * 10) + (a.gameStats.fumblesRecovered * 8) + (a.gameStats.sacks * 5) + a.gameStats.tackles;
-            const scoreB = (b.gameStats.interceptions * 10) + (b.gameStats.fumblesRecovered * 8) + (b.gameStats.sacks * 5) + b.gameStats.tackles;
-            return scoreB - scoreA;
-        });
-
-        // 5. Print Top 3 Defenders
-        defensiveLeaders.slice(0, 3).forEach(d => {
-            let defHtml = `<p class="text-sm">${d.name}: <strong>${d.gameStats.tackles} Tkl`;
-            if (d.gameStats.sacks > 0) defHtml += `, ${d.gameStats.sacks} Sack`;
-            if (d.gameStats.interceptions > 0) defHtml += `, ${d.gameStats.interceptions} INT`;
-            if (d.gameStats.fumblesRecovered > 0) defHtml += `, ${d.gameStats.fumblesRecovered} FR`;
-            defHtml += `</strong></p>`;
-            html += defHtml;
-        });
-
-        if (offensivePlayersLogged.size === 0 && defensiveLeaders.length === 0) {
-            html += '<p class="text-gray-400 text-xs">No significant stats.</p>';
-        }
-
-        return html;
-    };
-
-    // 💡 FIXED: Correctly assign away team stats to away stats box and home team to home stats box
-    elements.simStatsAway.innerHTML = generateTeamStatsHtml(awayTeam);
-    elements.simStatsHome.innerHTML = generateTeamStatsHtml(homeTeam);
-}
-
-// ------------------
-// Live stats helpers
-// ------------------
-function initLiveGameStats(gameResult) {
-    liveGameStats = { home: { yards: 0, td: 0, turnovers: 0, punts: 0, returns: 0 }, away: { yards: 0, td: 0, turnovers: 0, punts: 0, returns: 0 } };
-    // Optionally seed from gameResult if you want starting values
-}
-
-function initLivePlayerStats(gameResult) {
-    livePlayerStats = new Map();
-    playerNameIdMap = new Map();
-
-    if (!gameResult) return;
-    const homeRoster = getUIRosterObjects(gameResult.homeTeam || {});
-    const awayRoster = getUIRosterObjects(gameResult.awayTeam || {});
-    const all = [...homeRoster, ...awayRoster];
-
-    all.forEach(p => {
-        if (!p || !p.id) return;
-        livePlayerStats.set(p.id, {
-            passAttempts: 0, passCompletions: 0, passYards: 0, interceptionsThrown: 0,
-            receptions: 0, recYards: 0, drops: 0,
-            rushAttempts: 0, rushYards: 0,
-            returnYards: 0,
-            touchdowns: 0, interceptions: 0, fumbles: 0,
-            fumblesLost: 0, tackles: 0, sacks: 0 // 💡 FIX: Prevents NaN in box score
-        });
-
-        // Cache lowercase names for ultra-fast O(1) lookup during log parsing
-        playerNameIdMap.set(p.name.toLowerCase(), p.id);
-
-        // Also cache common short variations (e.g. "Reese 'Slinger' Walker" -> "Reese Walker")
-        const noNickname = p.name.replace(/'.*?'\s/g, '').toLowerCase();
-        if (noNickname !== p.name.toLowerCase()) {
-            playerNameIdMap.set(noNickname, p.id);
-        }
-    });
-}
-
-/**
- * REFINED: Synchronizes sidebar stats with the text log entries.
- * Specifically tuned for the Backyard Football GM log format.
- */
-function updateStatsFromLogEntry(entry) {
-    if (!entry || !currentLiveGameResult) return;
-
-    const findIdByName = (name) => {
-        if (!name) return null;
-        const cleanName = name.trim().toLowerCase();
-        if (playerNameIdMap.has(cleanName)) return playerNameIdMap.get(cleanName);
-        for (let [cachedName, id] of playerNameIdMap.entries()) {
-            if (cleanName.includes(cachedName)) return id;
-        }
-        return null;
-    };
-
-    const getStats = (pid) => {
-        if (!pid) return null;
-        if (!livePlayerStats.has(pid)) {
-            livePlayerStats.set(pid, {
-                passAttempts: 0, passCompletions: 0, passYards: 0, interceptionsThrown: 0,
-                receptions: 0, recYards: 0, drops: 0, rushAttempts: 0, rushYards: 0,
-                touchdowns: 0, interceptions: 0, fumblesLost: 0, tackles: 0, sacks: 0
-            });
-        }
-        return livePlayerStats.get(pid);
-    };
-
-    // 1. Passing Attempts
-    if (entry.includes('throws a')) {
-        const match = entry.match(/🏈 (.*?) throws/);
-        const id = findIdByName(match ? match[1] : null);
-        if (id) getStats(id).passAttempts++;
-    }
-
-    // 2. Completions/Receptions
-    if (entry.includes('CATCH!')) {
-        const match = entry.match(/CATCH! (.*?) (?:at|grabs)/);
-        const id = findIdByName(match ? match[1] : null);
-        if (id) {
-            getStats(id).receptions++;
-            // We'll credit the passer when the yardage is announced
-            livePlayContext.lastReceiverId = id;
-            livePlayContext.isPassComplete = true;
-        }
-    }
-
-    // 3. Yardage & Carriers (Rushing/Passing Yards)
-    if (entry.includes('Gain:') || entry.includes('yardage:')) {
-        const idMatch = entry.match(/(?:🎉|✋|💨|🏈|⏱️ WHISTLE:) (.*?) (?:at|jars|scores|tackled|steps|stopped)/);
-        const yardMatch = entry.match(/(?:Gain:|Yardage:)\s*(-?\d+\.?\d*)y/i);
-
-        const id = findIdByName(idMatch ? idMatch[1] : null);
-        const yards = yardMatch ? Math.round(parseFloat(yardMatch[1])) : 0;
-
-        if (id) {
-            const s = getStats(id);
-            if (livePlayContext.isPassComplete && id === livePlayContext.lastReceiverId) {
-                s.recYards += yards;
-                // Credit the current QB
-                const qb = activeLiveGame.possession.depthChart.offense.QB1;
-                if (qb) {
-                    const qbStats = getStats(qb);
-                    qbStats.passCompletions++;
-                    qbStats.passYards += yards;
-                }
-            } else if (!entry.includes('INTERCEPTION') && !entry.includes('SACK')) {
-                s.rushYards += yards;
-                s.rushAttempts++;
-            }
-            if (entry.includes('TOUCHDOWN')) s.touchdowns++;
-        }
-        livePlayContext.isPassComplete = false; // Reset context
-    }
-
-    // 4. Defensive Stats
-    if (entry.includes('TACKLE by') || entry.includes('SACK by')) {
-        const match = entry.match(/(?:TACKLE|SACK) by (.*?)(?: \(|$)/);
-        const id = findIdByName(match ? match[1] : null);
-        if (id) {
-            const s = getStats(id);
-            if (entry.includes('SACK')) s.sacks++;
-            else s.tackles++;
-        }
-    }
-}
-
-function renderLiveStatsLive() {
-    if (!elements.simLiveStats || !currentLiveGameResult) return;
-
-    const home = currentLiveGameResult.homeTeam || {};
-    const away = currentLiveGameResult.awayTeam || {};
-
-    const getTeamTotals = (team) => {
-        let yards = 0;
-        let turnovers = 0;
-        team.roster.forEach(pid => {
-            const s = livePlayerStats.get(pid);
-            if (s) {
-                yards += (s.passYards + s.rushYards);
-                turnovers += (s.interceptionsThrown + s.fumblesLost);
-            }
-        });
-        return { yards: Math.round(yards), turnovers };
-    };
-
-    const hTotals = getTeamTotals(home);
-    const aTotals = getTeamTotals(away);
-
-    // --- Helper to build individual stats lines ---
-    const getTopPerformersHtml = (team, totals) => {
-        if (!team || !team.roster) return '';
-
-        const playersWithStats = team.roster.map(pid => {
-            const stats = livePlayerStats.get(pid);
-            if (!stats) return null;
-            const pData = getPlayer(pid);
-            const impact = stats.passYards + stats.rushYards + stats.recYards + (stats.touchdowns * 20);
-            return impact > 0 ? { name: pData.name, id: pid, impact, ...stats } : null;
-        }).filter(p => p !== null);
-
-        const top5 = playersWithStats.sort((a, b) => b.impact - a.impact).slice(0, 5);
-
-        let html = `
-            <div class="flex justify-between items-end border-b border-gray-600 pb-2 mb-3">
-                <h5 class="text-sm font-black text-white uppercase truncate">${team.name}</h5>
-                <span class="text-xs text-amber-400 font-mono">${totals.yards} YDS | ${totals.turnovers} TO</span>
-            </div>
-            <div class="space-y-3">
-        `;
-
-        if (top5.length === 0) {
-            html += '<div class="text-xs text-gray-500 italic">No stats yet...</div>';
-        } else {
-            html += top5.map(p => {
-                let statLine = "";
-                if (p.passAttempts > 0) statLine = `${p.passCompletions}/${p.passAttempts}, ${p.passYards} yds`;
-                else if (p.rushYards >= p.recYards) statLine = `${p.rushYards} rush yds, ${p.rushAttempts} car`;
-                else statLine = `${p.recYards} rec yds, ${p.receptions} rec`;
-
-                return `
-                    <div class="animate-fadeIn">
-                        <div class="flex justify-between items-baseline mb-0.5">
-                            <span class="text-xs font-bold text-gray-200 truncate">${p.name}</span>
-                            <span class="text-[10px] font-bold text-amber-400">${p.touchdowns > 0 ? p.touchdowns + ' TD' : ''}</span>
-                        </div>
-                        <div class="text-[10px] text-gray-400 font-mono">${statLine}</div>
-                    </div>
-                `;
-            }).join('');
-        }
-
-        html += `</div>`;
-        return html;
-    };
-
-    const awayEl = document.getElementById('sim-stats-away');
-    const homeEl = document.getElementById('sim-stats-home');
-    if (awayEl) awayEl.innerHTML = getTopPerformersHtml(away, aTotals);
-    if (homeEl) homeEl.innerHTML = getTopPerformersHtml(home, hTotals);
-}
-
-function renderSimPlayers(frame) {
-    const findTeamInGame = (playerTeamId) => {
-        if (!activeLiveGame) return null;
-        if (activeLiveGame.homeTeam?.id === playerTeamId) return activeLiveGame.homeTeam;
-        if (activeLiveGame.awayTeam?.id === playerTeamId) return activeLiveGame.awayTeam;
-        return null;
-    };
-
-    try {
-        if (!elements.simPlayersList || !activeLiveGame) return;
-
-        const gs = Game.getGameState();
-        const playerTeamId = gs?.playerTeam?.id;
-        if (!playerTeamId) return;
-
-        const team = findTeamInGame(playerTeamId);
-        if (!team) return;
-
-        // 💡 FIX: Identify who is ACTUALLY on the field using the physics frame
-        const activeOnFieldIds = new Set();
-        const fatigueMap = new Map();
-
-        if (frame && frame.players) {
-            frame.players.forEach(pState => {
-                activeOnFieldIds.add(pState.id);
-                if (pState.teamId === team.id) {
-                    fatigueMap.set(pState.id, pState.fatigue);
-                }
-            });
-        }
-
-        const roster = Game.getUIRosterObjects(team);
-
-        // Split roster based on the Set we just created from the frame
-        const starters = roster.filter(p => p && activeOnFieldIds.has(p.id));
-        const bench = roster.filter(p => p && !activeOnFieldIds.has(p.id));
-
-        const buildRow = (p, isStarter) => {
-            const stamina = p.attributes?.physical?.stamina || 50;
-            const currentFatigue = fatigueMap.has(p.id) ? fatigueMap.get(p.id) : (p.fatigue || 0);
-
-            // 💡 FIX: Energy is simply 100 - Fatigue. 
-            // (Stamina determines how quickly fatigue is gained/lost in the backend)
-            const energyPct = Math.max(0, 100 - Math.round(currentFatigue));
-
-            // Find current slot assignment
-            let currentSlot = 'Bench';
-            for (const side in team.depthChart) {
-                for (const slot in team.depthChart[side]) {
-                    if (team.depthChart[side][slot] === p.id) {
-                        currentSlot = slot;
-                        break;
-                    }
-                }
-            }
-
-            const statusText = (p.status?.duration > 0) ? `${p.status.description}` : 'Healthy';
-            const statusClass = (p.status?.duration > 0) ? 'text-red-400' : 'text-gray-400';
-            let barColor = energyPct < 30 ? 'bg-red-500' : (energyPct < 60 ? 'bg-yellow-500' : 'bg-green-500');
-
-            return `
-                <div class="flex items-center justify-between p-2 border-b border-gray-800 bg-gray-900/40 hover:bg-gray-800 transition">
-                    <div class="flex-grow flex flex-col gap-1 overflow-hidden pr-2">
-                        <div class="flex justify-between items-baseline">
-                            <div class="text-[11px] font-bold ${isStarter ? 'text-white' : 'text-gray-400'} truncate">${p.name}</div>
-                            <div class="text-[8px] font-mono ${statusClass}">${energyPct}% E</div>
-                        </div>
-                        <div class="flex items-center gap-2">
-                            <div class="text-[9px] text-gray-500 font-bold w-12 shrink-0">${isStarter ? currentSlot : 'BENCH'}</div>
-                            <div class="flex-grow h-1 bg-gray-800 rounded-full overflow-hidden">
-                                <div style="width:${energyPct}%" class="h-full ${barColor} transition-all duration-500"></div>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="shrink-0 pl-1">
-                        ${isStarter
-                    ? `<button data-player-id="${p.id}" class="sub-out-btn opacity-40 hover:opacity-100 bg-red-900/20 hover:bg-red-600 text-red-400 hover:text-white text-[9px] font-bold p-1 rounded border border-red-900 transition">OUT</button>`
-                    : `<button data-player-id="${p.id}" class="sub-in-btn bg-green-900/40 hover:bg-green-600 text-green-400 hover:text-white text-[9px] font-bold p-1 rounded border border-green-900 transition">SUB</button>`
-                }
-                    </div>
-                </div>
-            `;
-        };
-
-        let html = '';
-        html += `<div class="bg-black/20 py-1 px-3 text-[9px] font-black text-amber-500/80 uppercase tracking-widest border-b border-gray-800">Active Personnel (${starters.length})</div>`;
-        starters.forEach(s => html += buildRow(s, true));
-
-        html += `<div class="bg-black/20 py-1 px-3 text-[9px] font-black text-gray-500 uppercase tracking-widest border-y border-gray-800 mt-2">Available Bench (${bench.length})</div>`;
-        bench.forEach(b => html += buildRow(b, false));
-
-        elements.simPlayersList.innerHTML = html;
-        attachSubHandlers(team, roster, team.depthChart, frame);
-    } catch (err) { console.error('renderSimPlayers failed:', err); }
-}
-
-/**
- * Helper to attach click listeners for substitution buttons.
- */
-function attachSubHandlers(team, roster, depth, frame) {
-    // SUB IN
-    elements.simPlayersList.querySelectorAll('.sub-in-btn').forEach(btn => {
-        btn.onclick = () => {
-            const inId = btn.dataset.playerId;
-            const slotOptions = [];
-
-            // Find all possible slots to sub into
-            Object.keys(depth).forEach(side => {
-                const chart = depth[side] || {};
-                Object.keys(chart).forEach(slot => {
-                    const occupantId = chart[slot];
-                    const occupant = roster.find(p => p && p.id === occupantId);
-                    slotOptions.push({
-                        value: `${side}|${slot}`,
-                        label: `${side.toUpperCase()} - ${slot} (${occupant ? occupant.name : 'Vacant'})`
-                    });
-                });
-            });
-
-            const selectHtml = `
-                <div class="p-2">
-                    <p class="mb-2 text-sm text-gray-300">Choose a position to take over:</p>
-                    <select id="_sub_slot_select" class="w-full p-2 bg-gray-700 text-white border border-gray-600 rounded">
-                        ${slotOptions.map(s => `<option value="${s.value}">${s.label}</option>`).join('')}
-                    </select>
-                </div>
-            `;
-
-            showModal('Substitution', selectHtml, () => {
-                const chosen = document.getElementById('_sub_slot_select')?.value;
-                if (!chosen) return;
-                const [side, slot] = chosen.split('|');
-                const outId = team.depthChart?.[side]?.[slot];
-
-                const result = Game.substitutePlayers(team.id, outId, inId);
-
-                if (result.success) {
-                    // 💡 FIX: Manually update the live game reference so the engine sees the change!
-                    if (activeLiveGame && activeLiveGame.homeTeam.id === team.id) {
-                        activeLiveGame.homeTeam.depthChart[side][slot] = inId;
-                    } else if (activeLiveGame && activeLiveGame.awayTeam.id === team.id) {
-                        activeLiveGame.awayTeam.depthChart[side][slot] = inId;
-                    }
-
-                    renderSimPlayers(frame);
-                }
-            }, 'Confirm Sub');
-        };
-    });
-
-    // SUB OUT
-    elements.simPlayersList.querySelectorAll('.sub-out-btn').forEach(btn => {
-        btn.onclick = () => {
-            const outId = btn.dataset.playerId;
-            const benchPlayers = roster.filter(p => p && !Object.values(depth.offense || {}).includes(p.id) && !Object.values(depth.defense || {}).includes(p.id));
-
-            if (benchPlayers.length === 0) {
-                alert("No bench players available.");
-                return;
-            }
-
-            const options = benchPlayers.map(b => `<option value="${b.id}">${b.name}</option>`).join('');
-            const selectHtml = `
-                 <div class="p-2">
-                    <p class="mb-2 text-sm text-gray-300">Who should replace them?</p>
-                    <select id="_sub_in_select" class="w-full p-2 bg-gray-700 text-white border border-gray-600 rounded">
-                        ${options}
-                    </select>
-                </div>
-            `;
-
-            showModal('Substitution', selectHtml, () => {
-                const inId = document.getElementById('_sub_in_select')?.value;
-                if (!inId) return;
-
-                const result = Game.substitutePlayers(team.id, outId, inId);
-                if (result.success) renderSimPlayers(frame);
-            }, 'Confirm Sub');
-        };
-    });
-}
-
-
-/**
- * Visual Juice: Makes the QB dot "pulse" or jitter when shouting signals
- */
-function animateQBShout(frame) {
-    const qb = frame.players?.find(p => p.role === 'QB' && p.isOffense);
-    if (!qb) return;
-
-    // We do a very fast "mini-loop" to shake the QB dot for 200ms
-    let startTime = Date.now();
-    const duration = 200;
-
-    const shake = () => {
-        let elapsed = Date.now() - startTime;
-        if (elapsed < duration) {
-            // Re-draw field with a tiny random offset only for the QB
-            // (Alternative: Simple scale pulse)
-            drawFieldVisualization(frame);
-            requestAnimationFrame(shake);
-        } else {
-            drawFieldVisualization(frame); // Final clean draw
-        }
-    };
-    shake();
-}
-
-/** Prepares the in-game strategy tab controls */
-function initSimStrategyTab() {
-    const gs = Game.getGameState();
-    if (!gs || !gs.playerTeam) return;
-
-    const offSelect = document.getElementById('sim-offense-formation');
-    const defSelect = document.getElementById('sim-defense-formation');
-
-    const updatePersonnelText = (side, formKey) => {
-        const map = side === 'offense' ? offenseFormations : defenseFormations;
-        const form = map[formKey];
-        if (!form) return;
-        const personnelText = Object.entries(form.personnel || {}).map(([pos, count]) => `${count} ${pos}`).join(', ');
-        const textEl = document.getElementById(`sim-${side}-personnel`);
-        if (textEl) textEl.textContent = `Personnel: ${personnelText}`;
-    };
-
-    if (offSelect) {
-        offSelect.innerHTML = Object.entries(offenseFormations)
-            .filter(([k]) => k !== 'Punt' && k !== 'Punt_Return')
-            .map(([k, v]) => `<option value="${k}" ${gs.playerTeam.formations.offense === k ? 'selected' : ''}>${v.name}</option>`)
-            .join('');
-
-        updatePersonnelText('offense', gs.playerTeam.formations.offense);
-
         offSelect.onchange = (e) => {
-            Game.changeFormationSmart('offense', e.target.value);
-            updatePersonnelText('offense', e.target.value);
-            Game.saveGameState();
-        };
-    }
-
-    if (defSelect) {
-        defSelect.innerHTML = Object.entries(defenseFormations)
-            .filter(([k]) => k !== 'Punt' && k !== 'Punt_Return')
-            .map(([k, v]) => `<option value="${k}" ${gs.playerTeam.formations.defense === k ? 'selected' : ''}>${v.name}</option>`)
-            .join('');
-
-        updatePersonnelText('defense', gs.playerTeam.formations.defense);
-
-        defSelect.onchange = (e) => {
-            Game.changeFormationSmart('defense', e.target.value);
-            updatePersonnelText('defense', e.target.value);
-            Game.saveGameState();
-        };
-    }
-
-    const slider = document.getElementById('sim-auto-sub-slider');
-    const valDisplay = document.getElementById('sim-auto-sub-val');
-    if (slider && valDisplay && activeLiveGame) {
-        const team = gs.playerTeam;
-        slider.value = team.autoSubThreshold || 65;
-        valDisplay.textContent = slider.value + '%';
-        
-        // Sync initial value to the live game object
-        activeLiveGame.autoSubThreshold = parseInt(slider.value, 10);
-        
-        slider.oninput = (e) => {
-            const val = parseInt(e.target.value, 10);
-            valDisplay.textContent = val + '%';
-            
-            // Apply immediately to the live game and save it to the franchise object
-            activeLiveGame.autoSubThreshold = val;
-            team.autoSubThreshold = val; 
-            Game.saveGameState();
-        };
-    }
-}
-
-
-/**
- * STARTS THE LOOP
- * This replaces your old 'startLiveGameSim'
- */
-export function startLiveGameLoop(initialGameState, onComplete) {
-    console.log("Starting Live Game Loop...");
-
-    if (!initialGameState) {
-        console.error("startLiveGameLoop: Initial game state is missing/null.");
-        return;
-    }
-
-    activeLiveGame = initialGameState;
-    currentLiveGameResult = {
-        homeTeam: activeLiveGame.homeTeam,
-        awayTeam: activeLiveGame.awayTeam,
-        visualizationFrames: [] // Stub for visualizer
-    };
-
-    liveGameCallback = onComplete;
-    isSkipping = false;
-    isPaused = false;
-
-    // Reset pause button UI state
-    const pauseBtn = document.getElementById('sim-speed-pause');
-    if (pauseBtn) {
-        pauseBtn.classList.remove('active', 'bg-red-600', 'text-white');
-        pauseBtn.classList.add('text-gray-400', 'hover:text-white');
-    }
-
-    // Reset UI
-    const ticker = elements.simPlayLog;
-    if (ticker) ticker.innerHTML = '';
-
-    liveGameCurrentIndex = 0;
-
-    updateLiveScoreboard();
-    initSimStrategyTab(); // 💡 Initialize real-time strategy controls
-
-    // 💡 Initialize the live stats map before flushing the first logs
-    initLivePlayerStats(currentLiveGameResult);
-
-    // Initial Render of logs
-    flushLiveLogs();
-
-    // Start Step
-    runLiveGameStep();
-}
-
-/**
- * THE STEP FUNCTION
- * Calculates one play -> Plays Animation -> Waits -> Repeats
- */
-// js/ui.js
-
-function runLiveGameStep() {
-    if (!activeLiveGame) return;
-
-    if (huddleTimeout) clearTimeout(huddleTimeout);
-
-    if (activeLiveGame.isGameOver) {
-        finishLiveGame();
-        return;
-    }
-
-    // 💡 SNAPSHOT: Capture current down/dist BEFORE we simulate the next play
-    const currentDown = activeLiveGame.down;
-    const currentYards = activeLiveGame.yardsToGo;
-    const currentPlays = activeLiveGame.playsTotal || 1;
-    const isConversion = activeLiveGame.isConversionAttempt;
-
-    // 💡 FIX: Update scoreboard with clock & down info
-    const qStr = activeLiveGame.quarter > 4 ? 'OT' : `Q${activeLiveGame.quarter || 1}`;
-    const timeStr = formatGameClock(activeLiveGame.clock !== undefined ? activeLiveGame.clock : 720);
-
-    if (elements.simPossession && activeLiveGame.possession) {
-        elements.simPossession.textContent = `🏈 ${activeLiveGame.possession.name}`;
-        elements.simPossession.style.color = activeLiveGame.possession.primaryColor || '#60a5fa';
-    }
-
-    if (isConversion) {
-        if (elements.simGameDown) elements.simGameDown.textContent = "Conversion";
-        if (elements.simGameDrive) elements.simGameDrive.textContent = "PAT";
-    } else {
-        if (elements.simGameDown) elements.simGameDown.textContent = `${currentDown} & ${currentYards}`;
-        if (elements.simGameDrive) elements.simGameDrive.textContent = `${qStr} | ${timeStr}`;
-    }
-
-    // Run Physics Step (this updates the internal activeLiveGame state)
-    let stepResult;
-    try {
-        stepResult = Game.simulateLivePlayStep(activeLiveGame);
-    } catch (e) {
-        console.error("Game Sim Crash:", e);
-        finishLiveGame();
-        return;
-    }
-
-    // Update Sidebars (Fatigue/Stats) 
-    if (stepResult.visualizationFrames && stepResult.visualizationFrames.length > 0) {
-        renderSimPlayers(stepResult.visualizationFrames[0]);
-        if (typeof renderLiveStatsLive === 'function') renderLiveStatsLive();
-    }
-
-    // Animate the frames we just calculated
-    if (stepResult.visualizationFrames && stepResult.visualizationFrames.length > 0) {
-
-        // 💡 FIX: Pause at the start of the play so the user can see the formation
-        setTimeout(() => {
-            playVisualization(stepResult.visualizationFrames, () => {
-                flushLiveLogs();
-
-                // 💡 UPDATE SCORE: Now that the animation is over, show the NEW scores
-                if (elements.simHomeScore) elements.simHomeScore.textContent = activeLiveGame.homeScore;
-                if (elements.simAwayScore) elements.simAwayScore.textContent = activeLiveGame.awayScore;
-
-                if (isSkipping) {
-                    runLiveGameStep();
-                } else {
-                    // 💡 FIX: Use a wrapper to obey the pause state between plays
-                    const delay = activeLiveGame.isConversionAttempt ? 1000 : 1500;
-                    const waitAndStep = () => {
-                        if (isPaused) {
-                            huddleTimeout = setTimeout(waitAndStep, 100);
-                        } else {
-                            runLiveGameStep();
-                        }
-                    };
-                    huddleTimeout = setTimeout(waitAndStep, delay);
-                }
-            });
-        }, isSkipping ? 0 : 1200);
-
-    } else {
-        setTimeout(runLiveGameStep, 500);
-    }
-}
-
-/**
- * Helper to print any new lines from the game state log to the UI.
- */
-function flushLiveLogs(targetIndex) {
-    if (!activeLiveGame || !activeLiveGame.gameLog) return;
-
-    const fullLog = activeLiveGame.gameLog;
-    // If no target index provided, flush to the very end
-    const limit = targetIndex !== undefined ? targetIndex : fullLog.length;
-
-    if (limit > liveGameCurrentIndex) {
-        const newEntries = fullLog.slice(liveGameCurrentIndex, limit);
-        const fragment = document.createDocumentFragment();
-
-        newEntries.forEach(entry => {
-            const p = document.createElement('p');
-            // 💡 Added fade-in animation for a cleaner look
-            p.className = "text-sm border-b border-gray-700/50 pb-1.5 mb-1.5 animate-fadeIn";
-            p.textContent = entry;
-            fragment.appendChild(p);
-
-            if (typeof updateStatsFromLogEntry === 'function') updateStatsFromLogEntry(entry);
-        });
-
-        // Flashing Broadcast Overlay Check
-        if (newEntries.length > 0) {
-            const lastEntry = newEntries[newEntries.length - 1];
-            // Don't flash setup lines
-            if (!lastEntry.includes('Coin Toss') && !lastEntry.includes('Play Call')) {
-                showPlayOverlay(lastEntry);
-            }
-        }
-
-        if (elements.simPlayLog) {
-            elements.simPlayLog.appendChild(fragment);
-            elements.simPlayLog.scrollTop = elements.simPlayLog.scrollHeight;
-        }
-
-        liveGameCurrentIndex = limit;
-    }
-}
-
-function showPlayOverlay(text) {
-    const overlay = document.getElementById('sim-play-overlay');
-    if (overlay) {
-        // Strip the [Tick XX] part for a clean broadcast text overlay
-        let cleanText = text.replace(/\[Tick \d+\] /g, '');
-        overlay.textContent = cleanText;
-        overlay.style.opacity = '1';
-
-        // Clear previous timeout so it doesn't blink out early if plays chain
-        if (overlay.timeoutId) clearTimeout(overlay.timeoutId);
-        overlay.timeoutId = setTimeout(() => { overlay.style.opacity = '0'; }, 3000);
-    }
-}
-
-/**
- * ANIMATOR
- * Plays the array of frames on the canvas.
- */
-function playVisualization(frames, onComplete) {
-    let index = 0;
-    if (liveGameInterval) clearTimeout(liveGameInterval);
-
-    const runNextFrame = () => {
-        if (isPaused) {
-            liveGameInterval = setTimeout(runNextFrame, 100);
-            return;
-        }
-
-        const frame = frames[index];
-        if (frame) {
-            drawFieldVisualization(frame);
-
-            // 💡 NEW: Sync logs to exactly what the physics engine saw at this specific frame!
-            if (frame.logIndex !== undefined) {
-                flushLiveLogs(frame.logIndex);
-            }
-        }
-
-        index++;
-        if (index >= frames.length) {
-            if (onComplete) onComplete();
-            return;
-        }
-
-        const currentDelay = isSkipping ? 5 : liveGameSpeed;
-        liveGameInterval = setTimeout(runNextFrame, currentDelay);
-    };
-
-    const initialDelay = isSkipping ? 5 : liveGameSpeed;
-    liveGameInterval = setTimeout(runNextFrame, initialDelay);
-}
-
-function formatGameClock(seconds) {
-    const s = Math.max(0, Math.floor(seconds || 0));
-    const mins = Math.floor(s / 60);
-    const secs = (s % 60).toString().padStart(2, '0');
-    return `${mins}:${secs}`;
-}
-
-function updateLiveScoreboard() {
-    if (!activeLiveGame) return;
-    if (elements.simHomeScore) elements.simHomeScore.textContent = activeLiveGame.homeScore;
-    if (elements.simAwayScore) elements.simAwayScore.textContent = activeLiveGame.awayScore;
-
-    // 💡 FIX: Dynamic Possession Indicator
-    if (elements.simPossession && activeLiveGame.possession) {
-        elements.simPossession.textContent = `🏈 ${activeLiveGame.possession.name}`;
-        elements.simPossession.style.color = activeLiveGame.possession.primaryColor || '#60a5fa';
-    }
-
-    // 💡 FIX: Real Clock & Quarter Display
-    if (activeLiveGame.isGameOver) {
-        if (elements.simGameDown) elements.simGameDown.textContent = "FINAL";
-        if (elements.simGameDrive) elements.simGameDrive.textContent = "0:00";
-    } else if (activeLiveGame.isConversionAttempt) {
-        if (elements.simGameDown) elements.simGameDown.textContent = "Conversion";
-        if (elements.simGameDrive) elements.simGameDrive.textContent = "PAT";
-    } else {
-        const qStr = activeLiveGame.quarter > 4 ? 'OT' : `Q${activeLiveGame.quarter || 1}`;
-        const timeStr = formatGameClock(activeLiveGame.clock !== undefined ? activeLiveGame.clock : 720);
-
-        if (elements.simGameDown) elements.simGameDown.textContent = `${activeLiveGame.down} & ${activeLiveGame.yardsToGo}`;
-        if (elements.simGameDrive) elements.simGameDrive.textContent = `${qStr} | ${timeStr}`;
-    }
-}
-
-function finishLiveGame() {
-    // Stop all animations and timeouts
-    if (liveGameInterval) clearTimeout(liveGameInterval);
-    if (huddleTimeout) clearTimeout(huddleTimeout);
-
-    // Update Scoreboard to show "FINAL"
-    updateLiveScoreboard();
-
-    console.log("Game Over. Finalizing results...");
-
-    // Call the final result callback (returns to dashboard)
-    if (liveGameCallback) {
-        // Give the player 3 seconds to see the final score before switching screens
-        // Wait gracefully if the user happens to have the game paused at the very end
-        const waitAndFinish = () => {
-            if (isPaused) {
-                setTimeout(waitAndFinish, 100);
-                return;
-            }
-            const finalData = activeLiveGame;
-            activeLiveGame = null; // Clear state
-            liveGameCallback(finalData);
-        };
-        setTimeout(waitAndFinish, 3000);
-    }
-}
-
-export function skipLiveGameSim() {
-    isSkipping = true;
-    isPaused = false;
-}
-
-export function togglePause() {
-    isPaused = !isPaused;
-    const pauseBtn = document.getElementById('sim-speed-pause');
-    if (pauseBtn) {
-        if (isPaused) {
-            pauseBtn.classList.add('active', 'bg-red-600', 'text-white');
-            pauseBtn.classList.remove('text-gray-400', 'hover:text-white');
-        } else {
-            pauseBtn.classList.remove('active', 'bg-red-600', 'text-white');
-            pauseBtn.classList.add('text-gray-400', 'hover:text-white');
-        }
-    }
-    return isPaused;
-}
-
-/** Changes the speed of the live game simulation interval. */
-export function setSimSpeed(speed) {
-    liveGameSpeed = speed;
-    isPaused = false;
-
-    // Update button styles
-    elements.simSpeedBtns?.forEach(btn => {
-        btn.classList.remove('active', 'bg-blue-500', 'hover:bg-blue-600', 'bg-red-600', 'text-white');
-        btn.classList.add('bg-gray-500', 'hover:bg-gray-600', 'text-gray-400');
-    });
-
-    let activeButtonId;
-    if (speed === 80) activeButtonId = 'sim-speed-play';
-    else if (speed === 50) activeButtonId = 'sim-speed-fast';
-    else if (speed === 10) activeButtonId = 'sim-speed-faster'; // Fixed from 30 to 10 for max
-
-    const activeButton = document.getElementById(activeButtonId);
-    if (activeButton) {
-        activeButton.classList.remove('bg-gray-500', 'hover:bg-gray-600', 'text-gray-400');
-        activeButton.classList.add('active', 'bg-blue-500', 'hover:bg-blue-600', 'text-white');
-    }
-}
-
-
-/** Helper to generate the HTML for a depth chart card (used by render AND drop) */
-function createDepthCardHTML(player, index, groupKey, baseGroupKey = null) {
-
-    if (!player || !player.attributes) {
-        return { className: 'hidden', innerHTML: '' };
-    }
-
-    // Calculate using base position (e.g., OL instead of OL1)
-    const calcPos = baseGroupKey || groupKey.replace(/\d/g, '');
-    const ovr = calculateOverall(player, calcPos);
-    let isStarterZone = false;
-
-    // Visual Starter Thresholds
-    if (/\d/.test(groupKey)) {
-        // It is a specific slot (e.g. OL1) - The top spot is the starter
-        if (index === 0) isStarterZone = true;
-    } else {
-        // It is a general pool - Estimate typical starter counts
-        if (groupKey === 'QB' && index === 0) isStarterZone = true;
-        else if (groupKey === 'RB' && index === 0) isStarterZone = true;
-        else if (groupKey === 'WR' && index <= 2) isStarterZone = true;
-        else if (groupKey === 'OL' && index <= 2) isStarterZone = true; // 3 OL in 8v8
-        else if (['DL', 'LB', 'DB'].includes(groupKey) && index <= 1) isStarterZone = true;
-    }
-
-    const rankStyle = isStarterZone ? 'border-l-4 border-green-500' : 'border-l-4 border-gray-300';
-    const badge = isStarterZone ? '<span class="ml-2 text-[10px] bg-green-100 text-green-800 px-1 rounded font-bold shadow-sm border border-green-200">START</span>' : '';
-
-    // Key Attributes Logic
-    let keyAttrs =[];
-    if (typeof positionOverallWeights !== 'undefined' && positionOverallWeights[calcPos]) {
-        keyAttrs = Object.entries(positionOverallWeights[calcPos])
-            .sort((a, b) => b[1] - a[1])
-            .slice(0, 3)
-            .map(entry => entry[0]);
-    }
-
-    const attrMap = {
-        throwingAccuracy: 'THR', playbookIQ: 'IQ', strength: 'STR',
-        speed: 'SPD', agility: 'AGI', catchingHands: 'HND',
-        blocking: 'BLK', tackling: 'TKL', blockShedding: 'BSH',
-        stamina: 'STA', toughness: 'TGH'
-    };
-
-    const attrString = keyAttrs.map(k => {
-        const val = getStat(player, k);
-        return `<span class="mr-2"><span class="text-gray-400 font-semibold">${attrMap[k] || k.substring(0, 3).toUpperCase()}:</span> <span class="text-gray-700 font-medium">${val}</span></span>`;
-    }).join('');
-
-    return {
-        className: `depth-order-item bg-white hover:bg-amber-50 p-2 rounded border border-gray-200 shadow-sm cursor-move flex items-center justify-between relative group ${rankStyle}`,
-        innerHTML: `
-            <div class="flex items-center gap-3 flex-grow overflow-hidden">
-                <span class="text-lg font-bold text-gray-400 w-6 text-center rank-number">${index + 1}</span>
-                <div class="flex flex-col truncate">
-                    <div class="flex items-center">
-                        <span class="font-bold text-gray-800 text-sm truncate">${player.name}</span>
-                        ${badge}
-                    </div>
-                    <div class="text-[10px] flex mt-0.5">
-                        ${attrString}
-                    </div>
-                </div>
-            </div>
-            
-            <div class="flex flex-col items-end pl-2">
-                <button class="remove-depth-item text-gray-300 hover:text-red-500 font-bold text-lg leading-none mb-1 opacity-0 group-hover:opacity-100 transition-opacity" 
-                        title="Remove from depth chart"
-                        data-player-id="${player.id}" 
-                        data-group="${groupKey}">
-                    &times;
-                </button>
-                
-                <div class="text-right">
-                    <span class="text-lg font-bold ${ovr >= 80 ? 'text-green-600' : 'text-gray-600'}">${ovr}</span>
-                    <div class="text-[9px] text-gray-400 uppercase font-bold">OVR</div>
-                </div>
-            </div>`
-    };
-}
-
-function renderDepthOrderPane(gameState) {
-    const pane = document.getElementById("depth-order-container");
-    if (!pane || !gameState) return;
-
-    Game.rebuildDepthChartFromOrder(gameState.playerTeam);
-    const team = gameState.playerTeam;
-    let roster = getUIRosterObjects(team);
-    const depthOrder = team.depthOrder || {};
-    const displayOrder =['QB', 'RB', 'WR', 'TE', 'OL', 'DL', 'LB', 'DB'];
-
-    // 1. Build the Tabs (Left Column)
-    let tabsHtml = `<div class="flex flex-wrap gap-1 mb-3 pb-2 border-b border-gray-200 shrink-0">`;
-    displayOrder.forEach((pos) => {
-        const isActive = pos === activeDepthOrderTab;
-        const colorClass = isActive
-            ? 'bg-amber-500 text-white shadow-md transform scale-105 z-10'
-            : 'bg-gray-200 text-gray-700 hover:bg-gray-300';
-
-        tabsHtml += `<button class="px-3 py-1.5 rounded font-bold text-xs transition-all ${colorClass}" 
-                             onclick="window.app_switchDepthTab('${pos}')">
-                             ${pos}
-                     </button>`;
-    });
-    tabsHtml += `</div>`;
-
-    const slotMappings = {
-        'QB': [{ id: 'QB1', name: 'Quarterback' }],
-        'RB':[{ id: 'RB1', name: 'Halfback 1' }, { id: 'RB2', name: 'Fullback / RB2' }],
-        'WR':[{ id: 'WR1', name: 'WR1 (X)' }, { id: 'WR2', name: 'WR2 (Z)' }, { id: 'WR3', name: 'WR3 (Slot)' }, { id: 'WR4', name: 'WR4' }, { id: 'WR5', name: 'WR5 (Empty)' }],
-        'TE':[{ id: 'TE1', name: 'Tight End 1' }, { id: 'TE2', name: 'Tight End 2' }],
-        'OL':[{ id: 'OL1', name: 'Left OL' }, { id: 'OL2', name: 'Center' }, { id: 'OL3', name: 'Right OL' }],
-        'DL':[{ id: 'DL1', name: 'Left Edge/DT' }, { id: 'DL2', name: 'Interior DL' }, { id: 'DL3', name: 'Right Edge/DT' }, { id: 'DL4', name: 'Edge/DL4' }],
-        'LB':[{ id: 'LB1', name: 'Left/Outside LB' }, { id: 'LB2', name: 'Middle LB' }, { id: 'LB3', name: 'Right/Outside LB' }],
-        'DB':[{ id: 'DB1', name: 'Cornerback 1' }, { id: 'DB2', name: 'Cornerback 2' }, { id: 'DB3', name: 'FS / Nickel' }, { id: 'DB4', name: 'SS / Dime' }, { id: 'DB5', name: 'Quarter DB' }]
-    };
-
-    // 2. Build the Slots (Left Column below tabs)
-    let listsHtml = ``;
-    displayOrder.forEach((groupKey) => {
-        const isHidden = groupKey !== activeDepthOrderTab ? 'hidden' : '';
-        // 💡 FIX: Tighter grid (xl:grid-cols-3) so boxes aren't unnecessarily wide
-        listsHtml += `<div id="group-${groupKey}" class="depth-group-container ${isHidden} grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3 pb-8">`;
-
-        const renderedIds = new Set();
-        
-        // 💡 FIX: Removing the "General Pool" fallback. We only map explicit positional slots.
-        const slots = slotMappings[groupKey] ||[];
-
-        slots.forEach(slotInfo => {
-            const sId = slotInfo.id;
-            const sName = slotInfo.name;
-            const idList = depthOrder[sId] ||[];
-            
-            let players = idList.map(id => roster.find(p => p.id === id)).filter(p => p);
-            
-            listsHtml += `
-            <div class="bg-gray-50 border border-gray-300 rounded-lg flex flex-col shadow-sm">
-                <div class="bg-gray-200 px-2 py-1.5 border-b border-gray-300 rounded-t-lg flex justify-between items-center shrink-0">
-                    <h5 class="font-bold text-gray-800 text-xs uppercase tracking-wider">${sName}</h5>
-                    <span class="text-[9px] font-bold text-gray-500 bg-white px-1.5 py-0.5 rounded shadow-sm">${players.length}</span>
-                </div>
-                <!-- Min height ensures a droppable area -->
-                <div class="depth-sortable-list flex-grow p-1.5 space-y-1.5 min-h-[100px] overflow-y-auto max-h-[300px]" data-group="${sId}">
-                    ${players.map((p, i) => {
-                        const cardData = createDepthCardHTML(p, i, sId, groupKey);
-                        return `<div class="${cardData.className}" draggable="true" data-player-id="${p.id}">
-                            ${cardData.innerHTML}
-                        </div>`;
-                    }).join('')}
-                    ${players.length === 0 ? `<div class="text-gray-400 text-xs italic p-2 text-center border-2 border-dashed border-gray-300 rounded h-full flex items-center justify-center opacity-70">Drag here</div>` : ''}
-                </div>
-            </div>`;
-        });
-        listsHtml += `</div>`;
-    });
-
-    // 3. Build Full Sortable Roster Table (Right Column)
-    const availableRoster = roster.slice();
-    availableRoster.sort((a, b) => {
-        const sortCol = typeof depthOrderSortCol !== 'undefined' ? depthOrderSortCol : 'overall';
-        const sortDir = typeof depthOrderSortDir !== 'undefined' ? depthOrderSortDir : 'desc';
-
-        const getVal = (p, key) => {
-            if (key === 'overall') return Game.calculateOverall(p, p.pos || 'ATH');
-            if (key === 'name') return p.name;
-            if (key === 'pos') return p.pos || p.favoriteOffensivePosition;
-            if (key === 'height') return p.attributes?.physical?.height || 0;
-            if (key === 'weight') return p.attributes?.physical?.weight || 0;
-            const cats = ['physical', 'mental', 'technical'];
-            for (const c of cats) if (p.attributes?.[c]?.[key] !== undefined) return p.attributes[c][key];
-            return 0;
-        };
-
-        const valA = getVal(a, sortCol); const valB = getVal(b, sortCol);
-        if (valA < valB) return sortDir === 'asc' ? -1 : 1;
-        if (valA > valB) return sortDir === 'asc' ? 1 : -1;
-        return 0;
-    });
-
-    // 💡 FIX: Dynamic Columns based on active tab
-    const baseColumns =[
-        { key: 'name', label: 'Name' },
-        { key: 'pos', label: 'Pos' },
-        { key: 'overall', label: 'Ovr' },
-        { key: 'height', label: 'Hgt' },
-        { key: 'weight', label: 'Wgt' },
-        { key: 'playbookIQ', label: 'IQ' }
-    ];
-
-    const dynamicCols = [];
-    const weights = positionOverallWeights[activeDepthOrderTab];
-    if (weights) {
-        const topAttrs = Object.entries(weights)
-            .sort((a, b) => b[1] - a[1])
-            .slice(0, 4) // Get top 4 skills
-            .map(e => e[0])
-            .filter(k => k !== 'playbookIQ'); // Don't duplicate IQ
-
-        const attrMap = {
-            speed: 'Spd', strength: 'Str', agility: 'Agi', stamina: 'Sta',
-            toughness: 'Tgh', consistency: 'Con',
-            throwingAccuracy: 'Thr', catchingHands: 'Hnd',
-            blocking: 'Blk', tackling: 'Tkl', blockShedding: 'BSh'
-        };
-
-        topAttrs.forEach(attr => {
-            dynamicCols.push({ key: attr, label: attrMap[attr] || attr.substring(0,3).toUpperCase() });
-        });
-    }
-
-    const columns = [...baseColumns, ...dynamicCols];
-
-    const depthChart = team.depthChart || { offense: {}, defense: {} };
-    const playerToOffSlot = {}; const playerToDefSlot = {};
-    if (depthChart.offense) Object.entries(depthChart.offense).forEach(([s, id]) => { if(id) { if(!playerToOffSlot[id]) playerToOffSlot[id]=[]; playerToOffSlot[id].push(s); } });
-    if (depthChart.defense) Object.entries(depthChart.defense).forEach(([s, id]) => { if(id) { if(!playerToDefSlot[id]) playerToDefSlot[id]=[]; playerToDefSlot[id].push(s); } });
-
-    // 4. Assemble the final Side-by-Side Flex HTML
-    pane.innerHTML = `
-        <div class="mb-3 bg-blue-50 border border-blue-200 rounded-lg p-2.5 flex flex-col sm:flex-row justify-between items-center gap-2 shrink-0">
-            <div>
-                <h4 class="font-bold text-sm text-blue-900 leading-tight">Positional Hierarchy</h4>
-                <p class="text-[11px] text-blue-700">Drag players into slots. Number 1 is your starter.</p>
-            </div>
-            <button id="auto-reorder-btn" class="btn bg-white border border-gray-300 text-gray-700 hover:bg-gray-100 font-bold py-1 px-3 rounded shadow-sm text-xs">Auto-Sort</button>
-        </div>
-
-        <div class="flex flex-col lg:flex-row gap-4 h-full min-h-0 overflow-hidden pb-4">
-            <!-- LEFT COLUMN: Positional Trees -->
-            <div class="w-full lg:w-7/12 xl:w-3/5 flex flex-col min-h-0 h-full">
-                ${tabsHtml}
-                <div id="depth-lists-container" class="flex-grow overflow-y-auto pr-1 hide-scrollbar">
-                    ${listsHtml}
-                </div>
-            </div>
-            
-            <!-- RIGHT COLUMN: Roster Drag Source -->
-            <div class="w-full lg:w-5/12 xl:w-2/5 flex flex-col border-l border-gray-200 pl-0 lg:pl-3 min-h-0 h-full">
-                <h4 class="font-bold text-gray-800 text-sm mb-1 shrink-0">Full Roster <span class="text-[10px] font-normal text-gray-500">(Drag to assign)</span></h4>
-                <div class="flex-grow overflow-auto border border-gray-300 rounded shadow-inner bg-white hide-scrollbar">
-                    <table class="min-w-full text-xs">
-                        <thead class="bg-gray-800 text-white sticky top-0 z-10 shadow-sm">
-                            <tr>
-                                ${columns.map(col => {
-                                    const currentSortCol = typeof depthOrderSortCol !== 'undefined' ? depthOrderSortCol : 'overall';
-                                    const currentSortDir = typeof depthOrderSortDir !== 'undefined' ? depthOrderSortDir : 'desc';
-                                    const active = currentSortCol === col.key;
-                                    const arrow = active ? (currentSortDir === 'asc' ? '▲' : '▼') : '';
-                                    return `<th class="py-1.5 px-2 text-left whitespace-nowrap cursor-pointer hover:bg-gray-700 select-none" 
-                                        onclick="window.app_handleDepthSort('${col.key}')">
-                                        ${col.label} <span class="text-[9px] ml-0.5">${arrow}</span>
-                                    </th>`;
-                                }).join('')}
-                            </tr>
-                        </thead>
-                        <tbody class="divide-y divide-gray-100">
-                            ${availableRoster.map(p => {
-                                let pos = p.pos || estimateBestPosition(p);
-                                if (pos === 'FB') pos = 'RB';
-                                if (['ATH', 'K', 'P'].includes(pos)) pos = 'WR';
-                                const ovr = Game.calculateOverall(p, pos);
-                                const offSlot = playerToOffSlot[p.id] ? playerToOffSlot[p.id].join(',') : '';
-                                const defSlot = playerToDefSlot[p.id] ? playerToDefSlot[p.id].join(',') : '';
-                                const isInPlay = offSlot || defSlot;
-
-                                const getAttr = (key) => {
-                                    if (key === 'height') return formatHeight(p.attributes?.physical?.height);
-                                    if (key === 'weight') return p.attributes?.physical?.weight;
-                                    if (p.attributes?.physical?.[key] !== undefined) return p.attributes.physical[key];
-                                    if (p.attributes?.mental?.[key] !== undefined) return p.attributes.mental[key];
-                                    if (p.attributes?.technical?.[key] !== undefined) return p.attributes.technical[key];
-                                    return '-';
-                                };
-
-                                return `
-                                <tr class="roster-row-item cursor-move hover:bg-amber-100 ${isInPlay ? 'bg-blue-50/50' : 'bg-white'}" draggable="true" data-player-id="${p.id}">
-                                    <td class="py-1.5 px-2 font-semibold truncate max-w-[100px]" title="${p.name}">
-                                        ${p.name}
-                                    </td>
-                                    <td class="py-1.5 px-1 text-[10px] font-bold text-gray-500">${pos}</td>
-                                    <td class="py-1.5 px-1 font-bold ${ovr >= 80 ? 'text-green-600' : 'text-gray-800'}">${ovr}</td>
-                                    ${columns.slice(3).map(c => `<td class="py-1.5 px-1 text-center text-gray-500">${getAttr(c.key)}</td>`).join('')}
-                                </tr>`;
-                            }).join('')}
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-        </div>
-    `;
-
-    // Reattach Events
-    const autoBtn = pane.querySelector('#auto-reorder-btn');
-    if (autoBtn) {
-        autoBtn.onclick = () => {
-            if (window.confirm("This will completely reset your Depth Chart & Bench Order based purely on Overall Ratings. Proceed?")) {
-                Game.aiSetDepthChart(gameState.playerTeam);
+            const team = getGameState()?.playerTeam;
+            if (team) {
+                team.formations.offense = e.target.value;
+                rebuildDepthChartFromOrder(team);
                 saveGameState();
                 document.dispatchEvent(new CustomEvent('refresh-ui'));
             }
         };
     }
-    setupDepthOrderDragEvents();
+
+    if (defSelect) {
+        defSelect.onchange = (e) => {
+            const team = getGameState()?.playerTeam;
+            if (team) {
+                team.formations.defense = e.target.value;
+                rebuildDepthChartFromOrder(team);
+                saveGameState();
+                document.dispatchEvent(new CustomEvent('refresh-ui'));
+            }
+        };
+    }
 }
 
 export function renderPickHistory(gameState) {
     const list = document.getElementById('draft-history-list');
-    if (!list) {
-        console.error("Could not find draft-history-list element");
-        return;
-    }
-
-    // 💡 FIX: Access pickHistory from game state
+    if (!list) return;
     const history = gameState.pickHistory || [];
-    
-    if (history.length === 0) {
-        list.innerHTML = `
-            <div class="text-center py-20">
-                <p class="text-gray-400 font-bold italic">The draft has just begun.</p>
-                <p class="text-gray-500 text-xs uppercase tracking-widest mt-2">Picks will appear here as they are made</p>
-            </div>`;
-        return;
-    }
-
     list.innerHTML = history.slice().reverse().map(p => `
-        <div class="flex items-center justify-between p-3 bg-white rounded-lg border border-gray-200 border-l-4 ${p.potential === 'A' ? 'border-l-amber-500 bg-amber-50' : 'border-l-gray-400'} shadow-sm mb-2">
-            <div class="flex items-center gap-4">
-                <span class="font-mono font-black text-gray-300 text-xl w-10">#${p.pick}</span>
-                <div>
-                    <p class="font-bold text-gray-800 leading-tight">${p.playerName}</p>
-                    <p class="text-[10px] font-bold text-gray-400 uppercase tracking-tighter">${p.teamName}</p>
-                </div>
-            </div>
-            <div class="text-right">
-                <span class="bg-gray-100 px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-wider text-gray-600 border border-gray-200">${p.pos}</span>
-                <span class="ml-2 font-black ${p.ovr >= 80 ? 'text-green-600' : 'text-gray-700'}">${p.ovr} OVR</span>
-            </div>
+        <div class="flex items-center justify-between p-2 bg-white rounded border border-gray-200 text-xs mb-1">
+            <span class="font-bold">#${p.pick} ${p.playerName} (${p.pos})</span>
+            <span class="text-gray-500">${p.teamName}</span>
         </div>
-    `).join('');
+    `).join('') || '<p class="text-gray-400 text-center py-8 text-xs">No picks yet.</p>';
 }
 
 export function renderDraftTeamView(gameState) {
@@ -3831,7 +894,6 @@ export function renderDraftTeamView(gameState) {
     const rosterDiv = document.getElementById('draft-team-roster');
     if (!selector || !rosterDiv) return;
 
-    // Fill selector if empty
     if (selector.options.length === 0) {
         gameState.teams.forEach(t => {
             const opt = document.createElement('option');
@@ -3840,356 +902,106 @@ export function renderDraftTeamView(gameState) {
         });
         selector.onchange = () => renderDraftTeamView(gameState);
     }
-
     const team = gameState.teams.find(t => t.id === selector.value);
     const roster = getUIRosterObjects(team);
-
-    rosterDiv.innerHTML = `<h4 class="text-sm font-bold uppercase text-gray-500 mb-2">Current Roster (${roster.length}/18)</h4>` +
-        roster.map(p => `
-        <div class="flex justify-between py-1 border-b text-sm">
-            <span class="font-medium">${p.name}</span>
-            <span class="text-gray-400">${estimateBestPosition(p)} (${calculateOverall(p, estimateBestPosition(p))})</span>
+    rosterDiv.innerHTML = roster.map(p => `
+        <div class="flex justify-between py-1 border-b text-xs">
+            <span>${p.name}</span><span class="text-gray-500">${estimateBestPosition(p)} (${calculateOverall(p, estimateBestPosition(p))})</span>
         </div>
     `).join('');
 }
 
-/**
- * Global handler for depth order table sorting.
- * Needs to be attached to window to work with inline onclick strings.
- */
-window.app_handleDepthSort = function (colKey) {
-    if (depthOrderSortCol === colKey) {
-        // Toggle direction
-        depthOrderSortDir = depthOrderSortDir === 'asc' ? 'desc' : 'asc';
+export function startLiveGameLoop(initialGameState, onComplete) {
+    activeLiveGame = initialGameState;
+    currentLiveGameResult = { homeTeam: activeLiveGame.homeTeam, awayTeam: activeLiveGame.awayTeam };
+    liveGameCallback = onComplete;
+    isSkipping = false;
+    isPaused = false;
+    liveGameCurrentIndex = 0;
+
+    if (elements.simPlayLog) elements.simPlayLog.innerHTML = '';
+    updateLiveScoreboard();
+    runLiveGameStep();
+}
+
+function updateLiveScoreboard() {
+    if (!activeLiveGame) return;
+    if (elements.simHomeScore) elements.simHomeScore.textContent = activeLiveGame.homeScore;
+    if (elements.simAwayScore) elements.simAwayScore.textContent = activeLiveGame.awayScore;
+    if (elements.simPossession && activeLiveGame.possession) {
+        elements.simPossession.textContent = `🏈 ${activeLiveGame.possession.name}`;
+    }
+    if (elements.simGameDown) elements.simGameDown.textContent = `${activeLiveGame.down} & ${activeLiveGame.yardsToGo}`;
+    if (elements.simGameDrive) elements.simGameDrive.textContent = `Q${activeLiveGame.quarter || 1} | ${formatGameClock(activeLiveGame.clock)}`;
+}
+
+function runLiveGameStep() {
+    if (!activeLiveGame) return;
+    if (activeLiveGame.isGameOver) {
+        finishLiveGame();
+        return;
+    }
+
+    updateLiveScoreboard();
+    let stepResult = Game.simulateLivePlayStep(activeLiveGame);
+
+    if (stepResult.visualizationFrames?.length > 0) {
+        playVisualization(stepResult.visualizationFrames, () => {
+            flushLiveLogs();
+            updateLiveScoreboard();
+            if (isSkipping) runLiveGameStep();
+            else setTimeout(runLiveGameStep, isPaused ? 100 : 1200);
+        });
     } else {
-        // New column, default to desc for stats/ratings, asc for text
-        depthOrderSortCol = colKey;
-        depthOrderSortDir = ['name', 'pos', 'height'].includes(colKey) ? 'asc' : 'desc';
+        setTimeout(runLiveGameStep, 400);
     }
-
-    // Re-render
-    const gs = getGameState();
-    if (gs) renderDepthOrderPane(gs);
-};
-
-/** Global handler for switching Depth Order tabs */
-window.app_switchDepthTab = function (pos) {
-    activeDepthOrderTab = pos;
-    const gs = getGameState();
-    if (gs) renderDepthOrderPane(gs);
-};
-
-/** Helper to check if a player is in any starting slot */
-function isPlayerStarting(playerId, team) {
-    if (!team.depthChart) return false;
-    const allStarters = [
-        ...Object.values(team.depthChart.offense || {}),
-        ...Object.values(team.depthChart.defense || {})
-    ];
-    return allStarters.includes(playerId);
 }
 
-/** Handles the hiding/showing of position tabs in Depth Order. */
-function setupDepthTabs() {
-    const tabs = document.querySelectorAll('.depth-pos-tab');
-    const groups = document.querySelectorAll('.depth-group-container');
-
-    tabs.forEach(tab => {
-        tab.addEventListener('click', () => {
-            const target = tab.dataset.target;
-
-            // Fix: Update global state so sort/re-render remembers where we were
-            activeDepthOrderTab = target;
-
-            // Update Tab Styles
-            tabs.forEach(t => {
-                const isTarget = t.dataset.target === target;
-                t.classList.toggle('bg-amber-500', isTarget);
-                t.classList.toggle('text-white', isTarget);
-                t.classList.toggle('bg-gray-200', !isTarget);
-                t.classList.toggle('text-gray-700', !isTarget);
-            });
-
-            // Show/Hide Content
-            groups.forEach(g => {
-                g.classList.toggle('hidden', g.id !== `group-${target}`);
-            });
+function flushLiveLogs() {
+    if (!activeLiveGame?.gameLog) return;
+    const fullLog = activeLiveGame.gameLog;
+    if (fullLog.length > liveGameCurrentIndex) {
+        const newEntries = fullLog.slice(liveGameCurrentIndex);
+        newEntries.forEach(entry => {
+            const p = document.createElement('p');
+            p.className = "text-xs border-b border-gray-800 pb-1 mb-1 text-gray-300";
+            p.textContent = entry;
+            elements.simPlayLog?.appendChild(p);
         });
-    });
-}
-
-function setupDepthOrderDragEvents() {
-    const pane = document.getElementById('depth-order-container');
-    if (!pane) return;
-
-    // Attach the generic 'click' listener on the parent pane ONCE
-    if (pane.dataset.depthOrderEventsAttached !== '1') {
-        pane.addEventListener('click', (e) => {
-            const removeBtn = e.target.closest('.remove-depth-item');
-            if (removeBtn) {
-                e.preventDefault();
-                e.stopPropagation();
-
-                const pid = removeBtn.dataset.playerId;
-                const group = removeBtn.dataset.group;
-                const gs = getGameState();
-
-                const card = removeBtn.closest('.depth-order-item');
-                if (card && gs && gs.playerTeam.depthOrder && gs.playerTeam.depthOrder[group]) {
-                    card.remove();
-                    gs.playerTeam.depthOrder[group] = gs.playerTeam.depthOrder[group].filter(id => id !== pid);
-                    applyDepthOrderToChart(); // Now handles UI refresh internally
-                }
-            }
-        });
-        pane.dataset.depthOrderEventsAttached = '1';
+        if (elements.simPlayLog) elements.simPlayLog.scrollTop = elements.simPlayLog.scrollHeight;
+        liveGameCurrentIndex = fullLog.length;
     }
-
-    // Set up drag/drop for depth ordering (MUST run every render)
-    const draggables = pane.querySelectorAll('.depth-order-item, .roster-row-item');
-    const containers = pane.querySelectorAll('.depth-sortable-list');
-    setupDragLogic(draggables, containers);
 }
 
-function setupDragLogic(draggables, containers) {
-    // Attach drag listeners to all draggable items
-    const attachDragListeners = (items) => {
-        items.forEach(draggable => {
-            // Avoid duplicating listeners on the same element
-            if (draggable.dataset.dragListenerAttached === '1') return;
-            draggable.addEventListener('dragstart', (e) => {
-                e.dataTransfer.effectAllowed = 'copyMove';
-                e.dataTransfer.setData('text/plain', draggable.dataset.playerId);
-
-                if (draggable.classList.contains('roster-row-item')) {
-                    e.dataTransfer.setData('source-type', 'roster');
-                } else {
-                    e.dataTransfer.setData('source-type', 'list');
-                }
-
-                // Visuals - Changed to setTimeout for cross-browser reliability during drag
-                setTimeout(() => {
-                    draggable.classList.add('dragging');
-                    draggable.classList.add('opacity-50');
-                }, 0);
-            });
-
-            draggable.addEventListener('dragend', () => {
-                draggable.classList.remove('dragging');
-                draggable.classList.remove('opacity-50');
-
-                // Update rank numbers visually (instant feedback)
-                containers.forEach(c => updateRankNumbers(c));
-            });
-
-            // Mark that listeners were attached so we don't reattach later
-            draggable.dataset.dragListenerAttached = '1';
-        });
+function playVisualization(frames, onComplete) {
+    let index = 0;
+    const runNext = () => {
+        if (isPaused) {
+            setTimeout(runNext, 100);
+            return;
+        }
+        const frame = frames[index];
+        if (frame && elements.fieldCanvas && elements.fieldCanvasCtx) {
+            drawFieldVisualization(elements.fieldCanvas, elements.fieldCanvasCtx, frame);
+        }
+        index++;
+        if (index >= frames.length) {
+            if (onComplete) onComplete();
+            return;
+        }
+        setTimeout(runNext, isSkipping ? 5 : liveGameSpeed);
     };
-
-    // Attach listeners to initial draggables
-    attachDragListeners(draggables);
-
-    containers.forEach(container => {
-        // Skip if we've already attached drag listeners to this container
-        if (container.dataset.dragContainerAttached === '1') {
-            return; // listeners already present
-        }
-
-        container.addEventListener('dragover', e => {
-            e.preventDefault(); // Allow dropping
-
-            // Visual cursor feedback
-            // We can't read 'source-type' here in Chrome/Firefox for security during dragover,
-            // so we rely on the class presence for the cursor style only.
-            const dragging = document.querySelector('.dragging');
-            if (dragging && dragging.classList.contains('roster-row-item')) {
-                e.dataTransfer.dropEffect = 'copy';
-            } else {
-                e.dataTransfer.dropEffect = 'move';
-            }
-
-            const afterElement = getDragAfterElement(container, e.clientY);
-            const draggable = document.querySelector('.dragging');
-            if (draggable) {
-                if (afterElement == null) {
-                    container.appendChild(draggable);
-                } else {
-                    container.insertBefore(draggable, afterElement);
-                }
-            }
-        });
-
-        container.addEventListener('drop', e => {
-            e.preventDefault();
-
-            // 💡 FIX: Access the dragged node directly instead of relying on dataTransfer types
-            const draggable = document.querySelector('.dragging');
-            if (!draggable) return;
-
-            const isFromRoster = draggable.classList.contains('roster-row-item');
-            const playerId = draggable.dataset.playerId;
-            const groupKey = container.dataset.group;
-
-            if (isFromRoster) {
-                // 1. Remove existing instance in this list to prevent duplicates
-                const existing = container.querySelector(`[data-player-id="${playerId}"]`);
-                if (existing) existing.remove();
-
-                // 2. Fetch Data
-                const player = getPlayer(playerId);
-                if (!player) return;
-
-                // 3. Determine Drop Location
-                // (The 'dragover' event already moved the ghost into place, 
-                // but since we are replacing the ghost with a real card, we need to find that spot)
-                const afterElement = getDragAfterElement(container, e.clientY);
-                const allItems = [...container.querySelectorAll('.depth-order-item')];
-                let dropIndex = afterElement ? allItems.indexOf(afterElement) : allItems.length;
-
-                // If appending to end
-                if (dropIndex === -1) dropIndex = allItems.length;
-
-                // 4. Create the Card
-                const cardData = createDepthCardHTML(player, dropIndex, groupKey);
-                const newItem = document.createElement('div');
-                newItem.className = cardData.className;
-                newItem.innerHTML = cardData.innerHTML;
-                newItem.draggable = true;
-                newItem.dataset.playerId = playerId;
-
-                // 5. Insert
-                if (afterElement == null) {
-                    container.appendChild(newItem);
-                } else {
-                    container.insertBefore(newItem, afterElement);
-                }
-
-                // 6. Cleanup the "ghost" roster row that might have been moved by dragover
-                // (When dragging from roster, the browser sometimes visually moves the row <tr> into the div)
-                const strayRows = container.querySelectorAll('.roster-row-item');
-                strayRows.forEach(row => row.remove());
-
-                // 7. Attach listeners to the newly created item immediately
-                attachDragListeners([newItem]);
-
-                // 8. Save
-                applyDepthOrderToChart();
-            } else {
-                // Reordering within list - save the new order
-                applyDepthOrderToChart();
-            }
-        });
-
-        // Mark attached
-        container.dataset.dragContainerAttached = '1';
-    });
+    runNext();
 }
 
-
-
-/** Helper for List Reordering Logic */
-function getDragAfterElement(container, y) {
-    const draggableElements = [...container.querySelectorAll('.depth-order-item:not(.dragging)')];
-
-    return draggableElements.reduce((closest, child) => {
-        const box = child.getBoundingClientRect();
-        const offset = y - box.top - box.height / 2;
-        if (offset < 0 && offset > closest.offset) {
-            return { offset: offset, element: child };
-        } else {
-            return closest;
-        }
-    }, { offset: Number.NEGATIVE_INFINITY }).element;
-}
-
-/** Helper to update the "1, 2, 3" visual numbers after a drop */
-function updateRankNumbers(container) {
-    const items = container.querySelectorAll('.depth-order-item');
-    items.forEach((item, index) => {
-        const numberSpan = item.querySelector('span.rank-number');
-        if (numberSpan) numberSpan.textContent = index + 1;
-
-        // Update styling for top 2
-        item.classList.remove('border-green-500', 'border-blue-500', 'border-transparent');
-        if (index === 0) item.classList.add('border-green-500');
-        else if (index === 1) item.classList.add('border-blue-500');
-        else item.classList.add('border-transparent');
-    });
-}
-/**
- * Applies the visual Depth Order to the actual Depth Chart state.
- * Implements the "Rank 1 > Rank 2" priority rule.
- */
-export function applyDepthOrderToChart() {
-    console.log("Saving Definitive Depth Order...");
-    const gs = getGameState();
-    if (!gs || !gs.playerTeam) return;
-
-    if (!gs.playerTeam.depthOrder || Array.isArray(gs.playerTeam.depthOrder)) {
-        gs.playerTeam.depthOrder = {};
+function finishLiveGame() {
+    if (liveGameCallback && activeLiveGame) {
+        const res = activeLiveGame;
+        activeLiveGame = null;
+        liveGameCallback(res);
     }
-
-    const lists = document.querySelectorAll('.depth-sortable-list');
-
-    // 1. Scrape the current state of the UI lists
-    lists.forEach(list => {
-        const groupKey = list.dataset.group;
-        // Map remaining elements to IDs
-        const ids = [...list.querySelectorAll('.depth-order-item')]
-            .map(el => el.dataset.playerId)
-            .filter(id => id);
-
-        gs.playerTeam.depthOrder[groupKey] = ids;
-    });
-
-    // 2. Re-assign starters (QB1, RB1, etc) based on the new priorities
-    rebuildDepthChartFromOrder(gs.playerTeam);
-
-    // 3. Save to LocalStorage
-    saveGameState();
-
-    // 4. Re-render the specific pane we are looking at
-    renderDepthOrderPane(gs);
-
-    // 5. Force the visual field to update so changes reflect instantly!
-    document.dispatchEvent(new CustomEvent('refresh-ui'));
 }
 
-
-/**
- * Handles formation changes with "Snapshot & Restore" logic.
- * This prevents the "Revert to Default" bug.
- */
-export function changeFormationSmart(side, newFormationName) {
-    const gs = getGameState();
-
-    // 1. Snapshot the CURRENT (Old) assignments
-    const oldChart = { ...gs.playerTeam.depthChart[side] };
-
-    // 2. Execute the Formation Change (Resets backend to defaults)
-    // This runs synchronously, so data is updated immediately on this line.
-    changeFormation(side, newFormationName);
-
-    // 3. Restore Players IMMEDIATELY
-    const formationData = side === 'offense'
-        ? offenseFormations[newFormationName]
-        : defenseFormations[newFormationName];
-
-    if (formationData && formationData.slots) {
-        const validSlots = new Set(formationData.slots);
-        const currentChart = gs.playerTeam.depthChart[side];
-
-        Object.entries(oldChart).forEach(([slot, playerId]) => {
-            // If the player exists AND the new formation has this slot
-            if (playerId && validSlots.has(slot)) {
-                // Update state directly (Fastest method)
-                currentChart[slot] = playerId;
-            }
-        });
-    }
-
-    // 4. Save and Refresh UI once
-    saveGameState();
-    document.dispatchEvent(new CustomEvent('refresh-ui'));
-}
+export function skipLiveGameSim() { isSkipping = true; isPaused = false; }
+export function togglePause() { isPaused = !isPaused; return isPaused; }
+export function setSimSpeed(speed) { liveGameSpeed = speed; isPaused = false; }
