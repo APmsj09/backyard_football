@@ -115,10 +115,10 @@ export async function initializeLeague(onProgress) {
         const coach = getRandom(coachPersonalities);
 
         const prefOff = offenseFormations[coach.preferredOffense] ? coach.preferredOffense : 'Balanced';
-        const prefDef = defenseFormations[coach.preferredDefense] ? coach.preferredDefense : '3-2-3 Base';
+        const prefDef = defenseFormations[coach.preferredDefense] ? coach.preferredDefense : '3-2-3';
 
         const offenseFormationData = offenseFormations[prefOff] || offenseFormations['Balanced'];
-        const defenseFormationData = defenseFormations[prefDef] || defenseFormations['3-2-3 Base'];
+        const defenseFormationData = defenseFormations[prefDef] || defenseFormations['3-2-3'];
 
         if (availableColors.length === 0) availableColors = [...teamColors];
         const colorSet = availableColors.splice(getRandomInt(0, availableColors.length - 1), 1)[0];
@@ -127,7 +127,7 @@ export async function initializeLeague(onProgress) {
             id: crypto.randomUUID(), name: teamName, roster: [], coach, division, wins: 0, losses: 0,
             primaryColor: colorSet?.primary || teamColors[0].primary,
             secondaryColor: colorSet?.secondary || teamColors[0].secondary,
-            formations: { offense: offenseFormationData?.name || 'Balanced', defense: defenseFormationData?.name || '3-2-3 Base' },
+            formations: { offense: offenseFormationData?.name || 'Balanced', defense: defenseFormationData?.name || '3-2-3' },
             depthChart: {
                 offense: Object.fromEntries((offenseFormationData?.slots || []).map(slot => [slot, null])),
                 defense: Object.fromEntries((defenseFormationData?.slots || []).map(slot => [slot, null]))
@@ -191,7 +191,7 @@ export function createPlayerTeam(teamName, options = {}) {
     if (prefDef) customCoach.preferredDefense = prefDef;
 
     let defaultOffense = prefOff || 'Balanced';
-    let defaultDefense = prefDef || '3-2-3 Base';
+    let defaultDefense = prefDef || '3-2-3';
     if (!offenseFormations[defaultOffense]) defaultOffense = Object.keys(offenseFormations)[0];
     if (!defenseFormations[defaultDefense]) defaultDefense = Object.keys(defenseFormations)[0];
 

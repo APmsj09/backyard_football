@@ -334,7 +334,7 @@ export function setupInitialPlayerStates(playState, offense, defense, play, assi
         });
     };
 
-    const defenseFormationData = defenseFormations[defense.formations.defense] || defenseFormations['3-2-3 Base'];
+    const defenseFormationData = defenseFormations[defense.formations.defense] || defenseFormations['3-2-3'];
     setupSide(offense, 'offense', offenseFormationData, true);
     setupSide(defense, 'defense', defenseFormationData, false);
 

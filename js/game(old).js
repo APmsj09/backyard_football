@@ -1,4 +1,4 @@
-// game.js - COMPLETE FILE
+// game.js - COMPLETE FILE old file
 
 // --- Imports ---
 import { getRandom, getRandomInt } from './utils.js';

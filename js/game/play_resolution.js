@@ -1,10 +1,15 @@
 import {
-    game, getPlayer, getRosterObjects, finalizeGameResults, resetGameStats
+    game, getPlayer, getRosterObjects, finalizeGameResults, resetGameStats,
+    applyStatEvents // <-- Added
 } from './state.js';
 import {
     pushGameLog, checkBlockCollisions, resolveOngoingBlocks,
-    checkTackleCollisions, checkFumbleRecovery, resolvePlayerCollisions
+    checkTackleCollisions, checkFumbleRecovery, resolvePlayerCollisions,
+    handleBallArrival // <-- Added
 } from './collisions.js';
+import {
+    generateSchedule // <-- Added
+} from './season.js';
 import {
     updateQBDecision, updatePunterDecision
 } from './ai.js';
@@ -463,7 +468,7 @@ export function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey
                 ballPos.x = Math.max(-10.0, Math.min(FIELD_WIDTH + 10.0, ballPos.x));
                 ballPos.y = Math.max(-10.0, Math.min(FIELD_LENGTH + 10.0, ballPos.y));
 
-                import('./collisions.js').then(m => m.handleBallArrival(playState, ballCarrierState, playResult, gameLog));
+                handleBallArrival(playState, ballCarrierState, playResult, gameLog);
 
                 if (ballPos.z < 0) {
                     ballPos.z = 0;
@@ -672,7 +677,7 @@ export function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey
         else if (!playResult.turnoverType && down === 4) playResult.turnoverType = 'downs';
     }
 
-    import('./state.js').then(m => m.applyStatEvents(playState.statEvents));
+    applyStatEvents(playState.statEvents);
 
     playState.activePlayers.forEach(p => {
         const player = getPlayer(p.id);
@@ -921,7 +926,7 @@ export function simulateWeek(options = {}) {
     game.breakthroughs = [];
     if (!game.schedule || game.schedule.length === 0) {
         if (game.currentWeek === 0) {
-            import('./season.js').then(m => m.generateSchedule());
+            generateSchedule();
         } else {
             return [];
         }

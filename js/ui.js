@@ -6,7 +6,6 @@ import {
 import { offenseFormations, defenseFormations, relationshipLevels } from './data.js';
 import { positionOverallWeights, estimateBestPosition, calculateOverall } from './game/player.js';
 import { formatHeight } from './utils.js';
-import { computeStarterAssignments } from './ui_helpers.js';
 import { drawFieldVisualization, formatGameClock, showPlayOverlay } from './ui/field_visualizer.js';
 import { renderDepthOrderPane } from './ui/depth_order.js';
 

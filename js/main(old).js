@@ -1,4 +1,4 @@
-// js/main.js
+// js/main.js old file
 import * as Game from './game.js';
 import * as UI from './ui.js';
 import { positionOverallWeights, estimateBestPosition } from './game/player.js';

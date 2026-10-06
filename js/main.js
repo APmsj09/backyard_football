@@ -1,7 +1,7 @@
 // js/main.js
 import * as Game from './game.js';
 import * as UI from './ui.js';
-import { positionOverallWeights, estimateBestPosition } from './game/player.js';
+import { positionOverallWeights, estimateBestPosition, calculateOverall } from './game/player.js';
 import { coachPersonalities, offenseFormations, defenseFormations } from './data.js';
 import { formatHeight } from './utils.js';
 
