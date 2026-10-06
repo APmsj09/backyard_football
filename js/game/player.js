@@ -476,6 +476,7 @@ export function generatePlayer(minAge = 10, maxAge = 16, classModifiers = null) 
         gameStats: {},
         seasonStats: {},
         careerStats: { seasonsPlayed: 0, snapsThisSeason: 0 },
+        progression: [],
 
         personality: {
             workEthic: Math.max(15, Math.min(99, Math.round(workEthicRoll))),

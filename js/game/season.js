@@ -1009,6 +1009,15 @@ export function advanceToOffseason() {
         currentRoster.forEach(player => {
             if (!player.careerStats || !player.attributes) return;
 
+            // Record End-of-Year Progression Snapshot
+            if (!player.progression) player.progression = [];
+            player.progression.push({
+                year: game.year,
+                age: player.age,
+                teamName: team.name,
+                ovr: calculateOverall(player, estimateBestPosition(player))
+            });
+
             player.age++;
             player.careerStats.seasonsPlayed = (player.careerStats.seasonsPlayed || 0) + 1;
             const snapsThisSeason = player.careerStats.snapsThisSeason || 0;

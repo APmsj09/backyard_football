@@ -28,57 +28,57 @@ async function startNewGame() {
     const container = document.querySelector('#team-creation-screen > div');
     if (container) {
         container.innerHTML = `
-            <h2 class="text-4xl font-bold mb-2 text-center text-gray-800">Create Your Franchise</h2>
-            <p class="text-sm text-gray-500 mb-6 text-center">Establish your identity. Running your preferred formations gives players a +5 IQ and Consistency boost.</p>
+            <h2 class="text-3xl font-black mb-2 text-center text-slate-900 uppercase tracking-wider">Franchise Setup</h2>
+            <p class="text-sm text-slate-500 mb-6 text-center border-b border-slate-200 pb-4">Establish your identity. Running your preferred formations gives players a +5 IQ and Consistency boost.</p>
             
-            <div class="space-y-4 text-sm text-gray-700 text-left">
+            <div class="space-y-4 text-sm text-slate-700 text-left">
                 <div class="grid grid-cols-2 gap-4">
                     <div>
-                        <label class="block font-bold mb-1">Coach Name:</label>
-                        <input id="setup-coach-name" type="text" placeholder="e.g. Coach Taylor" class="w-full border border-gray-300 rounded p-2 focus:ring-amber-500">
+                        <label class="block font-bold text-xs uppercase tracking-wider mb-1 text-slate-500">Coach Name</label>
+                        <input id="setup-coach-name" type="text" placeholder="e.g. Coach Taylor" class="w-full border border-slate-300 rounded-sm p-2 outline-none focus:border-slate-800">
                     </div>
                     <div>
-                        <label class="block font-bold mb-1">Coaching Style:</label>
-                        <select id="setup-coach-style" class="w-full border border-gray-300 rounded p-2 focus:ring-amber-500">
+                        <label class="block font-bold text-xs uppercase tracking-wider mb-1 text-slate-500">Coaching Style</label>
+                        <select id="setup-coach-style" class="w-full border border-slate-300 rounded-sm p-2 outline-none focus:border-slate-800 bg-white">
                             ${styleOptions}
                         </select>
                     </div>
                 </div>
 
-                <div class="grid grid-cols-2 gap-4 border-t border-gray-100 pt-4 mt-2">
+                <div class="grid grid-cols-2 gap-4 pt-2">
                     <div>
-                        <label class="block font-bold mb-1">Preferred Offense:</label>
-                        <select id="setup-pref-off" class="w-full border border-gray-300 rounded p-2 focus:ring-amber-500">
+                        <label class="block font-bold text-xs uppercase tracking-wider mb-1 text-slate-500">Preferred Offense</label>
+                        <select id="setup-pref-off" class="w-full border border-slate-300 rounded-sm p-2 outline-none focus:border-slate-800 bg-white">
                             ${offOptions}
                         </select>
                     </div>
                     <div>
-                        <label class="block font-bold mb-1">Preferred Defense:</label>
-                        <select id="setup-pref-def" class="w-full border border-gray-300 rounded p-2 focus:ring-amber-500">
+                        <label class="block font-bold text-xs uppercase tracking-wider mb-1 text-slate-500">Preferred Defense</label>
+                        <select id="setup-pref-def" class="w-full border border-slate-300 rounded-sm p-2 outline-none focus:border-slate-800 bg-white">
                             ${defOptions}
                         </select>
                     </div>
                 </div>
 
-                <div class="border-t border-gray-100 pt-4 mt-2">
-                    <label class="block font-bold mb-1">Team Name:</label>
-                    <input id="setup-team-name" type="text" placeholder="e.g. The Bulldogs" class="w-full border border-gray-300 rounded p-2 focus:ring-amber-500">
+                <div class="pt-2">
+                    <label class="block font-bold text-xs uppercase tracking-wider mb-1 text-slate-500">Team Name</label>
+                    <input id="setup-team-name" type="text" placeholder="e.g. The Bulldogs" class="w-full border border-slate-300 rounded-sm p-2 outline-none focus:border-slate-800">
                 </div>
 
                 <div class="grid grid-cols-2 gap-4">
                     <div>
-                        <label class="block font-bold mb-1">Primary Color:</label>
-                        <input type="color" id="setup-primary-color" value="#2563EB" class="w-full h-10 rounded cursor-pointer border border-gray-300 p-0.5">
+                        <label class="block font-bold text-xs uppercase tracking-wider mb-1 text-slate-500">Primary Color</label>
+                        <input type="color" id="setup-primary-color" value="#2563EB" class="w-full h-10 rounded-sm cursor-pointer border border-slate-300 p-0.5">
                     </div>
                     <div>
-                        <label class="block font-bold mb-1">Secondary Color:</label>
-                        <input type="color" id="setup-secondary-color" value="#FFFFFF" class="w-full h-10 rounded cursor-pointer border border-gray-300 p-0.5">
+                        <label class="block font-bold text-xs uppercase tracking-wider mb-1 text-slate-500">Secondary Color</label>
+                        <input type="color" id="setup-secondary-color" value="#FFFFFF" class="w-full h-10 rounded-sm cursor-pointer border border-slate-300 p-0.5">
                     </div>
                 </div>
             </div>
 
-            <button id="confirm-team-btn" class="mt-8 btn bg-amber-600 hover:bg-amber-700 text-white font-bold py-4 px-8 rounded-xl w-full text-xl shadow-lg transition">
-                Start Franchise →
+            <button id="confirm-team-btn" class="mt-8 bg-slate-900 hover:bg-slate-800 text-white font-bold py-4 px-8 rounded-sm w-full text-lg uppercase tracking-widest transition shadow-sm border border-slate-900">
+                Establish Franchise →
             </button>
         `;
 
@@ -465,50 +465,91 @@ function openPlayerCard(playerId) {
     const tierLabel = team ? (team.leagueType === 'youth' ? 'Pee-Wee' : `Tier ${team.tier}`) : 'FA';
     const isMyTeam = player.teamId === gameState.playerTeam?.id;
 
+    const bestPos = estimateBestPosition(player);
+    const ovr = calculateOverall(player, bestPos);
+
     const positions = Object.keys(positionOverallWeights);
-    let overallsHtml = '<div class="mt-2 grid grid-cols-4 gap-1 text-center">';
+    let overallsHtml = '<div class="grid grid-cols-4 gap-2 text-center mt-4">';
     positions.forEach(pos => {
-        overallsHtml += `<div class="bg-gray-100 p-1.5 rounded"><p class="text-[10px] font-bold text-gray-500">${pos}</p><p class="font-black text-sm text-gray-800">${calculateOverall(player, pos)}</p></div>`;
+        const isBest = pos === bestPos;
+        overallsHtml += `<div class="${isBest ? 'bg-slate-800 text-white' : 'bg-slate-100 text-slate-800'} p-2 rounded-sm border border-slate-300"><p class="text-[10px] font-bold uppercase tracking-widest opacity-80">${pos}</p><p class="font-black text-lg">${calculateOverall(player, pos)}</p></div>`;
     });
     overallsHtml += '</div>';
 
     const s = player.seasonStats || {};
     const c = player.careerStats || {};
 
+    let progHtml = '<p class="text-xs text-slate-500 italic mt-2">No history available.</p>';
+    if (player.progression && player.progression.length > 0) {
+        progHtml = `
+        <table class="w-full text-left text-xs mt-2">
+            <thead class="bg-slate-100 text-slate-600 uppercase tracking-wider">
+                <tr><th class="p-2 border-b">Year</th><th class="p-2 border-b">Age</th><th class="p-2 border-b">Team</th><th class="p-2 border-b text-right">OVR</th></tr>
+            </thead>
+            <tbody class="divide-y divide-slate-100">
+                ${player.progression.map(p => `<tr>
+                    <td class="p-2">${p.year}</td>
+                    <td class="p-2">${p.age}</td>
+                    <td class="p-2 truncate max-w-[120px] font-medium">${p.teamName}</td>
+                    <td class="p-2 text-right font-black text-slate-800">${p.ovr}</td>
+                </tr>`).join('')}
+            </tbody>
+        </table>`;
+    }
+
     let modalHtml = `
-        <div class="mb-3 pb-2 border-b border-gray-200">
-            <p class="text-xs font-bold uppercase text-gray-500">${teamName} <span class="text-amber-500">(${tierLabel})</span> • Age ${player.age} • Pot ${player.potential}</p>
-            <p class="text-xs text-gray-700">H: ${formatHeight(player.attributes?.physical?.height)} | W: ${player.attributes?.physical?.weight} lbs</p>
-        </div>
-
-        <div class="mb-3">
-            <h5 class="text-xs font-bold text-gray-700 uppercase mb-1">Ratings by Position</h5>
-            ${overallsHtml}
-        </div>
-
-        <div class="grid grid-cols-2 gap-2 text-xs mb-3">
-            <div class="bg-blue-50 p-2 rounded border border-blue-100">
-                <h6 class="font-bold text-blue-900 border-b border-blue-200 pb-0.5 mb-1">Season Stats</h6>
-                <p>Pass: ${s.passYards || 0} yds, ${s.passCompletions || 0}/${s.passAttempts || 0}</p>
-                <p>Rush: ${s.rushYards || 0} yds, ${s.rushAttempts || 0} att</p>
-                <p>Rec: ${s.recYards || 0} yds, ${s.receptions || 0} rec</p>
-                <p>Tackles: ${s.tackles || 0} | Sacks: ${s.sacks || 0}</p>
-                <p class="font-bold text-amber-700 mt-1">TDs: ${s.touchdowns || 0}</p>
+        <div class="flex flex-col md:flex-row gap-6">
+            <!-- Left Column -->
+            <div class="md:w-1/2 flex flex-col">
+                <div class="bg-slate-50 p-4 border border-slate-200 rounded-sm mb-4">
+                    <div class="flex justify-between items-start mb-2">
+                        <div>
+                            <h3 class="text-xl font-black text-slate-900 uppercase tracking-wide">${player.name}</h3>
+                            <p class="text-sm font-bold text-emerald-700">${teamName} <span class="text-slate-500 font-normal">(${tierLabel})</span></p>
+                        </div>
+                        <div class="text-right bg-slate-800 text-white px-3 py-1 rounded-sm">
+                            <span class="text-[10px] uppercase tracking-widest block opacity-70">${bestPos} OVR</span>
+                            <span class="text-2xl font-black">${ovr}</span>
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-2 gap-x-4 gap-y-2 text-xs text-slate-700 mt-4">
+                        <p><span class="text-slate-500 uppercase font-bold text-[10px] tracking-wider block">Archetype</span> ${player.archetypeName || 'Unknown'}</p>
+                        <p><span class="text-slate-500 uppercase font-bold text-[10px] tracking-wider block">Potential</span> <span class="font-bold text-slate-900">${player.potential}</span></p>
+                        <p><span class="text-slate-500 uppercase font-bold text-[10px] tracking-wider block">Age</span> ${player.age} yrs</p>
+                        <p><span class="text-slate-500 uppercase font-bold text-[10px] tracking-wider block">Vitals</span> ${formatHeight(player.attributes?.physical?.height)} / ${player.attributes?.physical?.weight} lbs</p>
+                        <p><span class="text-slate-500 uppercase font-bold text-[10px] tracking-wider block">Work Ethic</span> ${player.personality?.workEthic || 50}</p>
+                        <p><span class="text-slate-500 uppercase font-bold text-[10px] tracking-wider block">Dependability</span> ${player.personality?.dependability || 50}</p>
+                    </div>
+                </div>
+                
+                <h4 class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Positional Ratings</h4>
+                ${overallsHtml}
             </div>
-            <div class="bg-gray-50 p-2 rounded border border-gray-200">
-                <h6 class="font-bold text-gray-800 border-b border-gray-200 pb-0.5 mb-1">Career & Traits</h6>
-                <p>Seasons: ${c.seasonsPlayed || 0}</p>
-                <p>Work Ethic: <strong>${player.personality?.workEthic || 50}</strong></p>
-                <p>Dependability: <strong>${player.personality?.dependability || 50}</strong></p>
-                <p>Street Cred: <strong>${player.personality?.streetCred || 50}</strong></p>
-                <p class="font-bold text-amber-700 mt-1">Career TDs: ${c.touchdowns || 0}</p>
+
+            <!-- Right Column -->
+            <div class="md:w-1/2 flex flex-col">
+                <div class="bg-white border border-slate-200 rounded-sm p-4 mb-4 shadow-sm">
+                    <h4 class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3 border-b pb-1">Current Season Stats</h4>
+                    <div class="grid grid-cols-2 gap-3 text-xs text-slate-800">
+                        <p><span class="text-slate-500">Passing:</span> <br><b>${s.passYards || 0}</b> yds, <b>${s.passCompletions || 0}</b>/<b>${s.passAttempts || 0}</b></p>
+                        <p><span class="text-slate-500">Rushing:</span> <br><b>${s.rushYards || 0}</b> yds, <b>${s.rushAttempts || 0}</b> att</p>
+                        <p><span class="text-slate-500">Receiving:</span> <br><b>${s.recYards || 0}</b> yds, <b>${s.receptions || 0}</b> rec</p>
+                        <p><span class="text-slate-500">Defense:</span> <br><b>${s.tackles || 0}</b> tkl, <b>${s.sacks || 0}</b> sck</p>
+                        <p class="col-span-2 pt-2 border-t border-slate-100"><span class="text-slate-500">Touchdowns:</span> <span class="font-black text-slate-900">${s.touchdowns || 0}</span></p>
+                    </div>
+                </div>
+
+                <div class="bg-white border border-slate-200 rounded-sm p-4 flex-grow overflow-y-auto shadow-sm">
+                    <h4 class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Progression History</h4>
+                    ${progHtml}
+                </div>
             </div>
         </div>
 
-        ${isMyTeam ? `<button class="mt-2 w-full bg-red-500 hover:bg-red-600 text-white py-2 rounded font-bold text-xs transition shadow" onclick="app.cutPlayer('${player.id}')">Cut Player from Team</button>` : ''}
+        ${isMyTeam ? `<div class="mt-4 pt-4 border-t border-slate-200 flex justify-end"><button class="bg-red-700 hover:bg-red-800 text-white px-4 py-2 rounded-sm font-bold text-xs transition shadow-sm uppercase tracking-wider" onclick="app.cutPlayer('${player.id}')">Release Player</button></div>` : ''}
     `;
 
-    UI.showModal(`${player.name}`, modalHtml);
+    UI.showModal('Scouting Report', modalHtml);
 }
 
 function handleSetCaptain(playerId) {
