@@ -125,6 +125,31 @@ export function simulateAIPick(team) {
     return bestProspect;
 }
 
+export function simulateHistoricalDraft(yearNum) {
+    if (!game || !game.draftOrder) return;
+    setupDraft();
+    const draftResults = [];
+    
+    while (game.currentPick < game.draftOrder.length) {
+        const team = game.draftOrder[game.currentPick];
+        const pickedPlayer = simulateAIPick(team);
+        if (pickedPlayer) {
+            draftResults.push({
+                pick: game.currentPick + 1,
+                teamName: team.name,
+                playerName: pickedPlayer.name,
+                pos: estimateBestPosition(pickedPlayer)
+            });
+        }
+        game.currentPick++;
+    }
+    completeDraft();
+
+    if (game.history && game.history.seasons) {
+        const season = game.history.seasons.find(s => s.year === yearNum);
+        if (season) season.draftResults = draftResults;
+    }
+}
 /**
  * Concludes the draft: undrafted rookies become active street Free Agents.
  */

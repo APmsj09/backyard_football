@@ -274,7 +274,7 @@ export function determineDefensiveFormation(defense, offenseFormationName, down,
             return heavy || coachPref || Object.keys(defenseFormations)[0];
         }
         if (coachPref) return coachPref;
-        return pickMax(v => -Math.abs((v.personnel?.WR || 0) - wrCount)) || Object.keys(defenseFormations)[0];
+        return pickMax(v => -Math.abs((v.personnel?.DB || 0) - wrCount)) || Object.keys(defenseFormations)[0];
     } else {
         if (Math.random() < 0.5) {
             if (defense.formations?.defense === 'Punt_Return') return coachPref || Object.keys(defenseFormations)[0];
@@ -452,7 +452,7 @@ export function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey
             );
 
             playState.activePlayers.forEach(p => {
-                try { updatePlayerPosition(p, timeDelta, playState.activePlayers); } catch (e) {}
+                try { updatePlayerPosition(p, timeDelta, playState.activePlayers); } catch (e) { }
             });
 
             if (ballPos.inAir || (ballPos.isLoose && playState.type === 'punt')) {
@@ -564,8 +564,10 @@ export function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey
                 resolveOngoingBlocks(playState, gameLog, activeOffense, activeDefense);
 
                 if (ballCarrierState && checkTackleCollisions(playState, gameLog)) {
-                    playState.finalBallY = ballCarrierState.y;
-                    playState.yards = ballCarrierState.y - playState.lineOfScrimmage;
+                    if (!playState.touchback && !playState.safety) {
+                        playState.finalBallY = ballCarrierState.y;
+                        playState.yards = ballCarrierState.y - playState.lineOfScrimmage;
+                    }
                     playState.playIsLive = false;
                     break;
                 }

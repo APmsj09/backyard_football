@@ -340,6 +340,8 @@
                             class="text-base mr-1">📊</span> League Leaders</button>
                     <button class="tab-button whitespace-nowrap" data-tab="hall-of-fame"><span
                             class="text-base mr-1">🏛️</span> Hall of Fame</button>
+                    <button class="tab-button whitespace-nowrap" data-tab="history"><span
+                            class="text-base mr-1">📜</span> History</button>
                     <button class="tab-button relative whitespace-nowrap" data-tab="messages">
                         <span class="text-base mr-1">📩</span> Messages
                         <span id="messages-notification-dot"
@@ -442,6 +444,12 @@
                     <div id="tab-content-player-stats" class="tab-pane hidden flex-col h-full">
                         <div class="p-4 border-b bg-gray-50 flex gap-4 items-center">
                             <h3 class="text-xl font-bold mr-auto">Leaders</h3>
+                            <select id="stats-filter-league" class="p-2 border rounded text-sm bg-white">
+                                <option value="">All Leagues</option>
+                                <option value="tier1">Premier Parks (Tier 1)</option>
+                                <option value="tier2">Sandlot Circuit (Tier 2)</option>
+                                <option value="youth">Pee-Wee (Youth)</option>
+                            </select>
                             <select id="stats-filter-team" class="p-2 border rounded text-sm"></select>
                             <select id="stats-sort" class="p-2 border rounded text-sm">
                                 <option value="touchdowns">Sort by: TDs</option>
@@ -461,6 +469,13 @@
                             <h3 class="text-xl font-bold text-amber-700">Hall of Fame</h3>
                         </div>
                         <div id="hall-of-fame-list" class="p-4 overflow-y-auto"></div>
+                    </div>
+
+                    <div id="tab-content-history" class="tab-pane hidden flex-col h-full">
+                        <div class="p-4 border-b bg-gray-50">
+                            <h3 class="text-xl font-bold text-gray-800">League History</h3>
+                        </div>
+                        <div id="history-container" class="p-4 overflow-y-auto flex-grow bg-gray-100"></div>
                     </div>
 
                     <div id="tab-content-messages" class="tab-pane hidden flex-col h-full">

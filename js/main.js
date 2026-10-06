@@ -109,7 +109,7 @@ async function handleConfirmTeam() {
         await new Promise(resolve => setTimeout(resolve, 50));
 
         await Game.initializeLeague((progress) => {
-            UI.updateLoadingProgress(Math.round(progress * 100));
+            UI.updateLoadingProgress(Math.round(progress * 40));
         });
 
         Game.createPlayerTeam(teamName, {
@@ -117,6 +117,25 @@ async function handleConfirmTeam() {
         });
 
         gameState = Game.getGameState();
+        
+        // 3-Year Historical Simulation Fast-Forward
+        gameState.playerTeam.isPlayerControlled = false;
+        const loadingMsgEl = document.getElementById('loading-message');
+        
+        for (let y = 1; y <= 3; y++) {
+            if (loadingMsgEl) loadingMsgEl.textContent = `Simulating Year ${y} History...`;
+            UI.updateLoadingProgress(40 + (y * 15));
+            await new Promise(resolve => setTimeout(resolve, 50));
+            
+            Game.simulateHistoricalSeason(y, gameState);
+            Game.advanceToOffseason(); 
+            Game.simulateHistoricalDraft(y);
+        }
+        
+        gameState.playerTeam.isPlayerControlled = true;
+        
+        // Initialize Year 4 Draft for the human player
+        Game.setupDraft();
         gameState.draftCompleted = false;
 
         generateDraftPreviewMessage();
@@ -140,7 +159,13 @@ async function handleConfirmTeam() {
 }
 
 function generateDraftPreviewMessage() {
-    Game.addMessage("League Office", `Welcome to Backyard GM, Coach! Your squad has entered the league. Check your roster, scout the draft class, and click "Start Draft" when you're ready to pick your players.`, false, gameState);
+    let historyBlurb = '';
+    if (gameState && gameState.history && gameState.history.seasons.length > 0) {
+        const lastSeason = gameState.history.seasons[gameState.history.seasons.length - 1];
+        historyBlurb = `\n\n---\n**Recent Highlights (Year ${lastSeason.year})**\n🏆 Champion: ${lastSeason.champion}\n🥈 Runner-Up: ${lastSeason.runnerUp}\n📈 Promoted: ${lastSeason.promoted.join(', ')}\n📉 Relegated: ${lastSeason.relegated.join(', ')}`;
+    }
+    
+    Game.addMessage("League Office", `Welcome to Backyard GM, Coach! After 3 years of building the franchise, you are now officially in control. Check your veteran roster, scout the incoming rookie class, and click "Start Draft" when you're ready to make your first pick.\n\n**Be sure to check the "History" tab on your dashboard to see the full record of past champions and draft picks before you arrived!**${historyBlurb}`, false, gameState);
 }
 
 function handlePlayerSelectInDraft(playerId) {
@@ -437,7 +462,8 @@ function openPlayerCard(playerId) {
 
     const team = gameState.teams.find(t => t.id === player.teamId);
     const teamName = team ? team.name : 'Free Agent';
-    const isMyTeam = player.teamId === gameState.playerTeam.id;
+    const tierLabel = team ? (team.leagueType === 'youth' ? 'Pee-Wee' : `Tier ${team.tier}`) : 'FA';
+    const isMyTeam = player.teamId === gameState.playerTeam?.id;
 
     const positions = Object.keys(positionOverallWeights);
     let overallsHtml = '<div class="mt-2 grid grid-cols-4 gap-1 text-center">';
@@ -451,7 +477,7 @@ function openPlayerCard(playerId) {
 
     let modalHtml = `
         <div class="mb-3 pb-2 border-b border-gray-200">
-            <p class="text-xs font-bold uppercase text-gray-500">${teamName} • Age ${player.age} • Pot ${player.potential}</p>
+            <p class="text-xs font-bold uppercase text-gray-500">${teamName} <span class="text-amber-500">(${tierLabel})</span> • Age ${player.age} • Pot ${player.potential}</p>
             <p class="text-xs text-gray-700">H: ${formatHeight(player.attributes?.physical?.height)} | W: ${player.attributes?.physical?.weight} lbs</p>
         </div>
 
@@ -597,6 +623,9 @@ function main() {
 
     // Stats Filters & Sorters
     document.getElementById('stats-filter-team')?.addEventListener('change', () => {
+        if (gameState) UI.switchTab('player-stats', gameState);
+    });
+    document.getElementById('stats-filter-league')?.addEventListener('change', () => {
         if (gameState) UI.switchTab('player-stats', gameState);
     });
     document.getElementById('stats-sort')?.addEventListener('change', () => {

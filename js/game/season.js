@@ -10,6 +10,9 @@ import {
     coachPersonalities, offenseFormations, defenseFormations, teamNames, divisionNames, relationshipLevels
 } from '../data.js';
 import {
+    resetGameStats, finalizeGameResults
+} from './state.js';
+import {
     rebuildDepthChartFromOrder, aiSetDepthChart, assignTeamCaptain
 } from './depth_chart.js';
 
@@ -52,7 +55,7 @@ export async function initializeLeague(onProgress) {
         year: 1, teams: [], players: [], freeAgents: [], draftClass: [], playerTeam: null, schedule: [],
         currentWeek: 0, draftOrder: [], currentPick: 0, hallOfFame: [],
         gameResults: [], messages: [], relationships: new Map(),
-        pickHistory: []
+        pickHistory: [], history: { seasons: [] }
     };
     setGame(newGame);
 
@@ -420,6 +423,114 @@ export function generateDraftSummary() {
 
     body += `The preseason is now underway. Check your roster and set your depth charts!`;
     addMessage("Draft Recap: Winners and Losers", body, false, game);
+}
+
+export function generateHistoricalStats(team, score) {
+    const roster = getRosterObjects(team);
+    roster.forEach(p => {
+        if (p && !p.gameStats) {
+            p.gameStats = { passAttempts: 0, passCompletions: 0, passYards: 0, interceptionsThrown: 0, rushAttempts: 0, rushYards: 0, receptions: 0, recYards: 0, targets: 0, drops: 0, tackles: 0, sacks: 0, interceptions: 0, fumbles: 0, fumblesLost: 0, fumblesRecovered: 0, returnYards: 0, touchdowns: 0, safeties: 0 };
+        }
+    });
+
+    const qb = roster.find(p => team.depthChart?.offense && p.id === team.depthChart.offense['QB1']) || roster.find(p => p.pos === 'QB') || roster[0];
+    const rb = roster.find(p => team.depthChart?.offense && p.id === team.depthChart.offense['RB1']) || roster.find(p => p.pos === 'RB') || roster[1];
+    const wr1 = roster.find(p => team.depthChart?.offense && p.id === team.depthChart.offense['WR1']) || roster.find(p => p.pos === 'WR') || roster[2];
+    const wr2 = roster.find(p => team.depthChart?.offense && p.id === team.depthChart.offense['WR2']) || roster.find(p => p.pos === 'WR' && p.id !== wr1?.id) || roster[3];
+    const def1 = roster.find(p => team.depthChart?.defense && p.id === team.depthChart.defense['LB1']) || roster.find(p => p.pos === 'LB') || roster[4];
+    const def2 = roster.find(p => team.depthChart?.defense && p.id === team.depthChart.defense['DB1']) || roster.find(p => p.pos === 'DB') || roster[5];
+
+    const tds = Math.floor(score / 7);
+    const passTds = Math.floor(tds * 0.6);
+    const rushTds = tds - passTds;
+
+    if (qb && qb.gameStats) {
+        qb.gameStats.passAttempts = getRandomInt(15, 25);
+        qb.gameStats.passCompletions = Math.floor(qb.gameStats.passAttempts * (0.5 + Math.random() * 0.2));
+        qb.gameStats.passYards = qb.gameStats.passCompletions * getRandomInt(8, 12);
+        qb.gameStats.touchdowns += passTds;
+        qb.gameStats.interceptionsThrown = getRandomInt(0, 2);
+    }
+    if (rb && rb.gameStats) {
+        rb.gameStats.rushAttempts = getRandomInt(10, 20);
+        rb.gameStats.rushYards = rb.gameStats.rushAttempts * getRandomInt(3, 6);
+        rb.gameStats.touchdowns += rushTds;
+    }
+    if (wr1 && wr1.gameStats) {
+        wr1.gameStats.receptions = Math.floor((qb?.gameStats.passCompletions || 10) * 0.4);
+        wr1.gameStats.recYards = wr1.gameStats.receptions * getRandomInt(10, 15);
+        wr1.gameStats.touchdowns += Math.floor(passTds * 0.6);
+    }
+    if (wr2 && wr2.gameStats) {
+        wr2.gameStats.receptions = Math.floor((qb?.gameStats.passCompletions || 10) * 0.3);
+        wr2.gameStats.recYards = wr2.gameStats.receptions * getRandomInt(9, 13);
+        wr2.gameStats.touchdowns += (passTds - Math.floor(passTds * 0.6));
+    }
+    if (def1 && def1.gameStats) def1.gameStats.tackles = getRandomInt(4, 8);
+    if (def2 && def2.gameStats) def2.gameStats.interceptions = (qb?.gameStats.interceptionsThrown || 0) > 0 ? 1 : 0;
+}
+
+export function simulateHistoricalMatch(homeTeam, awayTeam) {
+    const homeOvr = getTeamOverall(homeTeam);
+    const awayOvr = getTeamOverall(awayTeam);
+
+    const homeAdvantage = 3;
+    let homeScore = Math.max(0, Math.floor(homeOvr / 5 + homeAdvantage + getRandomInt(-14, 14)));
+    let awayScore = Math.max(0, Math.floor(awayOvr / 5 + getRandomInt(-14, 14)));
+
+    if (homeScore === awayScore) homeScore += Math.random() > 0.5 ? 3 : -3;
+    homeScore = Math.max(0, homeScore);
+    awayScore = Math.max(0, awayScore);
+
+    resetGameStats(homeTeam, awayTeam);
+    generateHistoricalStats(homeTeam, homeScore);
+    generateHistoricalStats(awayTeam, awayScore);
+
+    finalizeGameResults(homeTeam, awayTeam, homeScore, awayScore);
+}
+
+export function simulateHistoricalSeason(yearNum, gameInstance) {
+    gameInstance.currentWeek = 0;
+    generateSchedule();
+
+    const numWeeks = 9;
+    const gamesPerWeek = gameInstance.teams.length / 2;
+
+    for (let w = 0; w < numWeeks; w++) {
+        const startIndex = w * gamesPerWeek;
+        const endIndex = startIndex + gamesPerWeek;
+        const weeklyGames = gameInstance.schedule.slice(startIndex, endIndex);
+
+        weeklyGames.forEach(match => {
+            if (match && match.home && match.away) {
+                simulateHistoricalMatch(match.home, match.away);
+            }
+        });
+        gameInstance.currentWeek++;
+    }
+
+    const mainTeams = gameInstance.teams.filter(t => t.leagueType === 'main');
+    const tier1Teams = mainTeams.filter(t => t.tier === 1).sort((a, b) => (b.wins || 0) - (a.wins || 0) || (a.losses || 0) - (b.losses || 0));
+    const tier2Teams = mainTeams.filter(t => t.tier === 2).sort((a, b) => (b.wins || 0) - (a.wins || 0) || (a.losses || 0) - (b.losses || 0));
+    const youthTeams = gameInstance.teams.filter(t => t.leagueType === 'youth').sort((a, b) => (b.wins || 0) - (a.wins || 0) || (a.losses || 0) - (b.losses || 0));
+
+    const champion = tier1Teams[0];
+    const runnerUp = tier1Teams[1];
+    const relegated = tier1Teams.slice(-2);
+    const promoted = tier2Teams.slice(0, 2);
+
+    gameInstance.history = gameInstance.history || { seasons: [] };
+    gameInstance.history.seasons.push({
+        year: yearNum,
+        champion: champion ? champion.name : "Unknown",
+        runnerUp: runnerUp ? runnerUp.name : "Unknown",
+        tier2Champion: tier2Teams[0] ? tier2Teams[0].name : "Unknown",
+        youthChampion: youthTeams[0] ? youthTeams[0].name : "Unknown",
+        standings: [...tier1Teams, ...tier2Teams].map(t => ({ name: t.name, wins: t.wins, losses: t.losses, tier: t.tier })),
+        promoted: promoted.map(t => t.name),
+        relegated: relegated.map(t => t.name),
+        draftResults: []
+    });
 }
 
 export function generateSchedule() {
@@ -830,6 +941,41 @@ export function developPlayer(player, team = null) {
 
 export function advanceToOffseason() {
     if (!game || !game.teams || !game.players) return { retiredPlayers: [], hofInductees: [], developmentResults: [], leavingPlayers: [] };
+    
+    // CAPTURE STANDINGS & HISTORY BEFORE RESETTING STATS
+    const tier1 = game.teams.filter(t => t.tier === 1).sort((a, b) => (b.wins || 0) - (a.wins || 0) || (a.losses || 0) - (b.losses || 0));
+    const tier2 = game.teams.filter(t => t.tier === 2).sort((a, b) => (b.wins || 0) - (a.wins || 0) || (a.losses || 0) - (b.losses || 0));
+    const youthT = game.teams.filter(t => t.leagueType === 'youth').sort((a, b) => (b.wins || 0) - (a.wins || 0) || (a.losses || 0) - (b.losses || 0));
+
+    const relegated = tier1.slice(-2);
+    const promoted = tier2.slice(0, 2);
+
+    let proRelMsg = "League Tiers hold steady this year.";
+    if (tier1.length > 2 && tier2.length > 2) {
+        relegated.forEach(t => { t.tier = 2; t.socialProfile.streetCred -= 20; });
+        promoted.forEach(t => { t.tier = 1; t.socialProfile.streetCred += 20; });
+        proRelMsg = `**PROMOTED:** ${promoted[0].name}, ${promoted[1].name}\n**RELEGATED:** ${relegated[0].name}, ${relegated[1].name}`;
+
+        if (relegated.some(t => t.id === game.playerTeam?.id)) {
+            addMessage("Relegated!", "We finished at the bottom of the league and have been relegated to the Sandlot Circuit (Tier 2). We must fight our way back up!", false, game);
+        } else if (promoted.some(t => t.id === game.playerTeam?.id)) {
+            addMessage("Promoted!", "We won the Sandlot Circuit! Next year we play with the big dogs in Tier 1.", false, game);
+        }
+    }
+
+    if (!game.history) game.history = { seasons: [] };
+    game.history.seasons.push({
+        year: game.year,
+        champion: tier1[0]?.name || "Unknown",
+        runnerUp: tier1[1]?.name || "Unknown",
+        tier2Champion: tier2[0]?.name || "Unknown",
+        youthChampion: youthT[0]?.name || "Unknown",
+        promoted: promoted.map(t => t.name),
+        relegated: relegated.map(t => t.name),
+        standings: [...tier1, ...tier2].map(t => ({ name: t.name, wins: t.wins, losses: t.losses, tier: t.tier })),
+        draftResults: []
+    });
+
     game.year++;
     const retiredPlayers = []; const hofInductees = []; const developmentResults = []; const leavingPlayers = [];
     let totalVacancies = 0;
@@ -997,26 +1143,6 @@ export function advanceToOffseason() {
         yt.wins = 0; yt.losses = 0; yt.ties = 0;
     });
 
-
-    const tier1 = game.teams.filter(t => t.tier === 1).sort((a, b) => b.wins - a.wins || a.losses - b.losses);
-    const tier2 = game.teams.filter(t => t.tier === 2).sort((a, b) => b.wins - a.wins || a.losses - b.losses);
-
-    let proRelMsg = "League Tiers hold steady this year.";
-    if (tier1.length > 2 && tier2.length > 2) {
-        const relegated = tier1.slice(-2);
-        const promoted = tier2.slice(0, 2);
-
-        relegated.forEach(t => { t.tier = 2; t.socialProfile.streetCred -= 20; });
-        promoted.forEach(t => { t.tier = 1; t.socialProfile.streetCred += 20; });
-
-        proRelMsg = `**PROMOTED:** ${promoted[0].name}, ${promoted[1].name}\n**RELEGATED:** ${relegated[0].name}, ${relegated[1].name}`;
-
-        if (relegated.some(t => t.id === game.playerTeam.id)) {
-            addMessage("Relegated!", "We finished at the bottom of the league and have been relegated to the Sandlot Circuit (Tier 2). We must fight our way back up!", false, game);
-        } else if (promoted.some(t => t.id === game.playerTeam.id)) {
-            addMessage("Promoted!", "We won the Sandlot Circuit! Next year we play with the big dogs in Tier 1.", false, game);
-        }
-    }
 
     addMessage("Offseason Summary", `Offseason complete. ${totalVacancies} roster spots opened.\n\n${proRelMsg}\n\nPreparing for the draft.`, false, game);
 

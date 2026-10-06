@@ -94,7 +94,7 @@ export function checkBlockCollisions(playState) {
             .filter(d => getDistance(blocker, d) < 1.3 && d.y > blocker.y - 1.5)
             .sort((a, b) => getDistance(blocker, a) - getDistance(blocker, b))[0];
 
-        if (imminentThreat) {
+        if (imminentThreat && !imminentThreat.isEngaged && !imminentThreat.isBlocked) {
             target = imminentThreat;
         } else if (blocker.dynamicTargetId) {
             target = defenders.find(d => d.id === blocker.dynamicTargetId);

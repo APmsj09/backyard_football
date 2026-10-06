@@ -999,7 +999,7 @@ export function updatePunterDecision(playState, offenseStates, gameLog) {
     if (playState.tick < snapDuration) {
         const pct = playState.tick / snapDuration;
         const snapStartY = playState.lineOfScrimmage - 0.5;
-        playState.ballState.x = 0;
+        playState.ballState.x = punter.x;
         playState.ballState.y = snapStartY + (punter.y - snapStartY) * pct;
         playState.ballState.z = 0.5 + (pct * 0.5);
         return;

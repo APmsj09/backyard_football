@@ -470,6 +470,7 @@ export function switchTab(tabId, gameState) {
         case 'standings': renderStandingsTab(gameState); break;
         case 'player-stats': renderPlayerStatsTab(gameState); break;
         case 'hall-of-fame': renderHallOfFameTab(gameState); break;
+        case 'history': renderHistoryTab(gameState); break;
         case 'messages': renderMessagesTab(gameState); break;
     }
 }
@@ -698,13 +699,26 @@ export function renderScheduleTab(gameState) {
     for (let i = 0; i < 9; i++) {
         const weekGames = gameState.schedule.slice(i * gamesPerWeek, (i + 1) * gamesPerWeek);
         const isCurrent = i === gameState.currentWeek;
-        html += `<div class="p-4 rounded-lg mb-3 ${isCurrent ? 'bg-amber-50 border-2 border-amber-500' : 'bg-gray-50 border border-gray-200'}">
-            <h4 class="font-bold text-sm mb-2 text-gray-700">Week ${i + 1}</h4>
+
+        const t1 = weekGames.filter(g => g.home.tier === 1);
+        const t2 = weekGames.filter(g => g.home.tier === 2);
+        const yth = weekGames.filter(g => g.home.leagueType === 'youth');
+
+        const renderGames = (games, title, color) => {
+            if (!games.length) return '';
+            return `<div class="mb-3"><h5 class="text-[10px] font-bold uppercase text-${color}-600 mb-1 border-b border-${color}-100 pb-0.5">${title}</h5>
             <div class="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">
-                ${weekGames.map(g => `<div class="bg-white p-2 rounded border border-gray-200 shadow-sm flex justify-between">
-                    <span>${g.away.name}</span><span class="text-gray-400">@</span><span>${g.home.name}</span>
+                ${games.map(g => `<div class="bg-white p-2 rounded border border-gray-200 shadow-sm flex justify-between items-center">
+                    <span class="font-semibold text-gray-800">${g.away.name}</span><span class="text-gray-400 font-mono text-[10px]">@</span><span class="font-semibold text-gray-800">${g.home.name}</span>
                 </div>`).join('')}
-            </div>
+            </div></div>`;
+        }
+
+        html += `<div class="p-4 rounded-lg mb-4 ${isCurrent ? 'bg-amber-50 border-2 border-amber-500 shadow-sm' : 'bg-gray-50 border border-gray-200'}">
+            <h4 class="font-bold text-lg mb-3 text-gray-800">Week ${i + 1}</h4>
+            ${renderGames(t1, 'Premier Parks (Tier 1)', 'amber')}
+            ${renderGames(t2, 'Sandlot Circuit (Tier 2)', 'blue')}
+            ${renderGames(yth, 'Pee-Wee League (Youth)', 'green')}
         </div>`;
     }
     elements.scheduleList.innerHTML = html;
@@ -745,9 +759,20 @@ export function renderStandingsTab(gameState) {
 export function renderPlayerStatsTab(gameState) {
     if (!elements.playerStatsContainer || !gameState?.players) return;
     const teamIdFilter = elements.statsFilterTeam?.value || '';
+    const leagueFilter = document.getElementById('stats-filter-league')?.value || '';
     const sortStat = elements.statsSort?.value || 'touchdowns';
 
-    let players = gameState.players.filter(p => !teamIdFilter || p.teamId === teamIdFilter);
+    let players = gameState.players.filter(p => {
+        if (teamIdFilter && p.teamId !== teamIdFilter) return false;
+        if (leagueFilter) {
+            const team = gameState.teams.find(t => t.id === p.teamId);
+            if (!team) return false;
+            if (leagueFilter === 'tier1' && team.tier !== 1) return false;
+            if (leagueFilter === 'tier2' && team.tier !== 2) return false;
+            if (leagueFilter === 'youth' && team.leagueType !== 'youth') return false;
+        }
+        return p.teamId; // Only show players currently on a team
+    });
     players.sort((a, b) => ((b.seasonStats?.[sortStat]) || 0) - ((a.seasonStats?.[sortStat]) || 0));
     players = players.slice(0, 50);
 
@@ -783,6 +808,59 @@ export function renderHallOfFameTab(gameState) {
             <p class="text-xs text-gray-600">Total TDs: ${p.careerStats?.touchdowns || 0}</p>
         </div>
     `).join('');
+}
+
+export function renderHistoryTab(gameState) {
+    const container = document.getElementById('history-container');
+    if (!container) return;
+
+    if (!gameState?.history?.seasons || gameState.history.seasons.length === 0) {
+        container.innerHTML = `<p class="text-gray-400 text-center py-12">No history available yet.</p>`;
+        return;
+    }
+
+    let html = '<div class="space-y-6">';
+    // Reverse to show the most recent season at the top
+    const seasons = [...gameState.history.seasons].reverse();
+
+    seasons.forEach(season => {
+        const topPicks = (season.draftResults || []).slice(0, 3).map(p => `<strong>1.${p.pick}</strong> ${p.playerName} (${p.teamName})`).join('<br>');
+
+        html += `
+        <div class="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden">
+            <div class="bg-gray-800 text-white px-4 py-2 flex justify-between items-center">
+                <h4 class="font-bold text-lg">Season ${season.year}</h4>
+                <span class="text-sm text-amber-400 font-bold uppercase tracking-wider">🏆 ${season.champion}</span>
+            </div>
+            <div class="p-4 grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+                <div class="space-y-2">
+                    <p><span class="font-bold text-gray-500 uppercase text-xs tracking-wider">Champion:</span> <span class="text-amber-600 font-bold text-base block">${season.champion}</span></p>
+                    <p><span class="font-bold text-gray-500 uppercase text-xs tracking-wider">Runner-Up:</span> <span class="text-gray-800 font-semibold block">${season.runnerUp}</span></p>
+                    <div class="pt-2 mt-2 border-t border-gray-100">
+                        <p><span class="font-bold text-gray-500 uppercase text-xs tracking-wider">Sandlot Champ (Tier 2):</span> <span class="text-blue-600 font-semibold block">${season.tier2Champion || 'Unknown'}</span></p>
+                        <p><span class="font-bold text-gray-500 uppercase text-xs tracking-wider">Pee-Wee Champ:</span> <span class="text-green-600 font-semibold block">${season.youthChampion || 'Unknown'}</span></p>
+                    </div>
+                    
+                    <div class="pt-2 mt-2 border-t border-gray-100 flex gap-4">
+                        <div>
+                            <span class="font-bold text-green-600 uppercase text-xs tracking-wider">Promoted (Tier 1)</span>
+                            <p class="text-gray-700">${season.promoted.join('<br>') || 'None'}</p>
+                        </div>
+                        <div>
+                            <span class="font-bold text-red-600 uppercase text-xs tracking-wider">Relegated (Tier 2)</span>
+                            <p class="text-gray-700">${season.relegated.join('<br>') || 'None'}</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="bg-gray-50 p-3 rounded-lg border border-gray-100 h-full">
+                    <p class="font-bold text-gray-500 uppercase text-xs tracking-wider mb-2">Top Draft Picks</p>
+                    <p class="text-sm text-gray-700 leading-relaxed">${topPicks || 'No draft data available.'}</p>
+                </div>
+            </div>
+        </div>`;
+    });
+    html += '</div>';
+    container.innerHTML = html;
 }
 
 export function renderMessagesTab(gameState) {
