@@ -425,6 +425,20 @@ export function generateDraftSummary() {
     addMessage("Draft Recap: Winners and Losers", body, false, game);
 }
 
+export function getTeamOverall(team) {
+    const roster = getRosterObjects(team);
+    if (!roster || !roster.length) return 50;
+    const sum = roster.reduce((s, p) => s + calculateOverall(p, estimateBestPosition(p)), 0);
+    return sum / roster.length;
+}
+
+export function getTeamOverall(team) {
+    const roster = getRosterObjects(team);
+    if (!roster || !roster.length) return 50;
+    const sum = roster.reduce((s, p) => s + calculateOverall(p, estimateBestPosition(p)), 0);
+    return sum / roster.length;
+}
+
 export function generateHistoricalStats(team, score) {
     const roster = getRosterObjects(team);
     roster.forEach(p => {
