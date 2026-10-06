@@ -7,6 +7,7 @@ export * from './game/collisions.js';
 export * from './game/ai.js';
 export * from './game/depth_chart.js';
 export * from './game/season.js';
+export * from './game/draft.js';
 export * from './game/engine_helpers.js';
 export * from './game/play_execution.js';
 export * from './game/play_resolution.js';

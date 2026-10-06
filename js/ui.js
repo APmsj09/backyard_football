@@ -716,7 +716,8 @@ export function renderStandingsTab(gameState) {
 
     const tiers = [
         { name: 'Premier Parks (Tier 1)', teams: gameState.teams.filter(t => t.tier === 1) },
-        { name: 'Sandlot Circuit (Tier 2)', teams: gameState.teams.filter(t => t.tier === 2) }
+        { name: 'Sandlot Circuit (Tier 2)', teams: gameState.teams.filter(t => t.tier === 2) },
+        { name: 'Pee-Wee League (Youth)', teams: gameState.teams.filter(t => t.leagueType === 'youth') }
     ];
 
     tiers.forEach(tier => {

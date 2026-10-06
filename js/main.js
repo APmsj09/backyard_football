@@ -228,6 +228,7 @@ async function runAIDraftPicks() {
 
 async function handleDraftEnd() {
     if (!gameState) return;
+    Game.completeDraft();
     Game.generateDraftSummary();
     Game.generateSchedule();
     gameState = Game.getGameState();

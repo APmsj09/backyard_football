@@ -12,6 +12,15 @@ export function getPlayer(id) {
 export function getGameState() { return game; }
 export function getBreakthroughs() { return game?.breakthroughs || []; }
 
+// --- Competition & Eligibility Helpers ---
+export const getMainTeams = () => (game?.teams || []).filter(t => t.leagueType === 'main');
+export const getPremierTeams = () => (game?.teams || []).filter(t => t.tier === 1);
+export const getSandlotTeams = () => (game?.teams || []).filter(t => t.tier === 2);
+export const getYouthTeams = () => (game?.teams || []).filter(t => t.leagueType === 'youth');
+
+export const isYouthEligible = (player) => player.age >= 8 && player.age <= 10;
+export const isDraftEligible = (player) => player.age === 11;
+
 export function markMessageAsRead(messageId) {
     const message = game?.messages?.find(m => m && m.id === messageId);
     if (message) { message.isRead = true; }

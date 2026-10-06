@@ -1,4 +1,4 @@
-// player.js - player generation and rating helpers
+// js/game/player.js - Player Generation & Rating System
 
 import { getRandom, getRandomInt } from '../utils.js';
 import { firstNames, lastNames, nicknames, offenseFormations, defenseFormations } from '../data.js';
@@ -6,7 +6,6 @@ import { firstNames, lastNames, nicknames, offenseFormations, defenseFormations 
 const offensivePositions = ['QB', 'RB', 'WR', 'TE', 'OL'];
 const defensivePositions = ['DL', 'LB', 'DB'];
 
-// Adjusted weights: Removed speed from OL/DL so their archetype nerfs don't tank their OVR
 export const positionOverallWeights = {
     QB: { throwingAccuracy: 0.45, playbookIQ: 0.30, consistency: 0.10, clutch: 0.05, agility: 0.05, strength: 0.05 },
     RB: { speed: 0.35, agility: 0.25, strength: 0.15, catchingHands: 0.10, toughness: 0.10, stamina: 0.05 },
@@ -20,6 +19,10 @@ export const positionOverallWeights = {
 
 export function estimateBestPosition(scoutedPlayer) {
     if (!scoutedPlayer || !scoutedPlayer.attributes) return 'UTIL';
+
+    // Respect explicit identity if already assigned
+    if (scoutedPlayer.bestPosition) return scoutedPlayer.bestPosition;
+    if (scoutedPlayer.pos) return scoutedPlayer.pos;
 
     const resolveAttr = (val) => {
         if (typeof val === 'number') return val;
@@ -43,7 +46,6 @@ export function estimateBestPosition(scoutedPlayer) {
     }
 
     const tempPlayer = { ...scoutedPlayer, attributes: cleanAttributes };
-
     const offPos = tempPlayer.favoriteOffensivePosition;
     const defPos = tempPlayer.favoriteDefensivePosition;
 
@@ -53,7 +55,6 @@ export function estimateBestPosition(scoutedPlayer) {
         return offScore >= defScore ? offPos : defPos;
     }
 
-    // Fallback for older saves
     let bestPos = 'UTIL';
     let maxScore = -Infinity;
 
@@ -82,7 +83,6 @@ export function calculateOverall(player, position) {
             if (relevantWeights[weightKey]) {
                 let value = attrs[category][attr];
 
-                // Normalization mappings
                 if (weightKey === 'weight') {
                     value = Math.max(0, Math.min(100, (value - 100) * 0.66 + 40));
                 }
@@ -137,58 +137,98 @@ export function calculateSlotSuitability(player, slot, side, team) {
 }
 
 const archetypes = [
-    // --- 1. THE SIGNAL CALLERS (QB Primary) ---
+    // --- SIGNAL CALLERS ---
     { name: 'Field General', off: 'QB', def: 'LB', weightMod: 1.1, heightMod: 2, keyAttrs: ['playbookIQ', 'throwingAccuracy', 'consistency', 'tackling'], speedMod: 0.85, strMod: 1.0 },
     { name: 'Scrambler', off: 'QB', def: 'DB', weightMod: 0.95, heightMod: -1, keyAttrs: ['speed', 'agility', 'throwingAccuracy', 'stamina'], speedMod: 1.2, strMod: 0.85 },
     { name: 'Gunslinger', off: 'QB', def: 'DB', weightMod: 1.05, heightMod: 3, keyAttrs: ['throwingAccuracy', 'strength', 'clutch', 'playbookIQ'], speedMod: 0.9, strMod: 1.25 },
     { name: 'Heavy Crusher QB', off: 'QB', def: 'DL', weightMod: 1.4, heightMod: 4, keyAttrs: ['strength', 'throwingAccuracy', 'toughness', 'blockShedding'], speedMod: 0.65, strMod: 1.3 },
 
-    // --- 2. THE BALL CARRIERS (RB Primary) ---
+    // --- BALL CARRIERS ---
     { name: 'Power Back', off: 'RB', def: 'LB', weightMod: 1.25, heightMod: -1, keyAttrs: ['strength', 'toughness', 'tackling', 'stamina'], speedMod: 0.9, strMod: 1.2 },
     { name: 'Speed Back', off: 'RB', def: 'DB', weightMod: 0.85, heightMod: -2, keyAttrs: ['speed', 'agility', 'clutch', 'catchingHands'], speedMod: 1.25, strMod: 0.75 },
     { name: 'Workhorse', off: 'RB', def: 'LB', weightMod: 1.1, heightMod: 0, keyAttrs: ['stamina', 'consistency', 'tackling', 'toughness'], speedMod: 1.0, strMod: 1.0 },
     { name: 'Receiving Back', off: 'RB', def: 'DB', weightMod: 0.9, heightMod: -1, keyAttrs: ['catchingHands', 'agility', 'speed', 'coverage'], speedMod: 1.1, strMod: 0.8 },
 
-    // --- 3. THE PASS CATCHERS (WR Primary) ---
+    // --- PASS CATCHERS ---
     { name: 'Deep Threat', off: 'WR', def: 'DB', weightMod: 0.85, heightMod: 1, keyAttrs: ['speed', 'agility', 'clutch', 'coverage'], speedMod: 1.3, strMod: 0.7 },
     { name: 'Route Technician', off: 'WR', def: 'DB', weightMod: 1.0, heightMod: 0, keyAttrs: ['agility', 'playbookIQ', 'catchingHands', 'consistency'], speedMod: 1.0, strMod: 1.0 },
     { name: 'Red Zone Specialist', off: 'WR', def: 'LB', weightMod: 1.15, heightMod: 7, keyAttrs: ['height', 'catchingHands', 'strength', 'clutch'], speedMod: 0.8, strMod: 1.15 },
     { name: 'Slot Brawler', off: 'WR', def: 'LB', weightMod: 1.1, heightMod: 0, keyAttrs: ['toughness', 'catchingHands', 'tackling', 'strength'], speedMod: 0.95, strMod: 1.1 },
 
-    // --- 4. THE TIGHT ENDS (TE Primary) ---
+    // --- TIGHT ENDS ---
     { name: 'Vertical TE', off: 'TE', def: 'LB', weightMod: 1.3, heightMod: 5, keyAttrs: ['speed', 'catchingHands', 'height', 'playbookIQ'], speedMod: 0.9, strMod: 1.1 },
     { name: 'Jumbo Athlete', off: 'TE', def: 'DL', weightMod: 1.5, heightMod: 4, keyAttrs: ['strength', 'blocking', 'catchingHands', 'blockShedding'], speedMod: 0.75, strMod: 1.3 },
     { name: 'Lead Blocker TE', off: 'TE', def: 'LB', weightMod: 1.4, heightMod: 1, keyAttrs: ['blocking', 'strength', 'tackling', 'toughness'], speedMod: 0.8, strMod: 1.25 },
     { name: 'Hybrid Wing', off: 'TE', def: 'DB', weightMod: 1.15, heightMod: 3, keyAttrs: ['agility', 'catchingHands', 'coverage', 'speed'], speedMod: 1.0, strMod: 0.95 },
 
-    // --- 5. THE OFFENSIVE WALL (OL Primary) ---
+    // --- OFFENSIVE LINE ---
     { name: 'Road Grader', off: 'OL', def: 'DL', weightMod: 1.9, heightMod: 2, keyAttrs: ['strength', 'blocking', 'weight', 'toughness'], speedMod: 0.45, strMod: 1.5 },
     { name: 'Mobile Guard', off: 'OL', def: 'LB', weightMod: 1.4, heightMod: 1, keyAttrs: ['agility', 'blocking', 'playbookIQ', 'tackling'], speedMod: 0.8, strMod: 1.1 },
     { name: 'Wall Protector', off: 'OL', def: 'DL', weightMod: 1.6, heightMod: 6, keyAttrs: ['blocking', 'height', 'strength', 'consistency'], speedMod: 0.6, strMod: 1.2 },
     { name: 'Technician OL', off: 'OL', def: 'DL', weightMod: 1.5, heightMod: 3, keyAttrs: ['playbookIQ', 'blocking', 'consistency', 'blockShedding'], speedMod: 0.7, strMod: 1.1 },
 
-    // --- 6. THE PASS RUSHERS (DL Primary) ---
+    // --- DEFENSIVE LINE ---
     { name: 'Speed Rusher', off: 'OL', def: 'DL', weightMod: 1.25, heightMod: 4, keyAttrs: ['speed', 'blockShedding', 'agility', 'clutch'], speedMod: 1.05, strMod: 1.05 },
     { name: 'Run Stuffer', off: 'TE', def: 'DL', weightMod: 1.7, heightMod: 1, keyAttrs: ['strength', 'tackling', 'weight', 'toughness'], speedMod: 0.55, strMod: 1.4 },
     { name: 'Bull Rusher', off: 'OL', def: 'DL', weightMod: 1.6, heightMod: 2, keyAttrs: ['strength', 'blockShedding', 'toughness', 'blocking'], speedMod: 0.7, strMod: 1.35 },
     { name: 'Versatile End', off: 'TE', def: 'DL', weightMod: 1.4, heightMod: 4, keyAttrs: ['blockShedding', 'tackling', 'playbookIQ', 'strength'], speedMod: 0.85, strMod: 1.2 },
 
-    // --- 7. THE DEFENSIVE CORE (LB Primary) ---
+    // --- LINEBACKERS ---
     { name: 'Middle Hawk', off: 'RB', def: 'LB', weightMod: 1.15, heightMod: 1, keyAttrs: ['playbookIQ', 'tackling', 'coverage', 'speed'], speedMod: 1.0, strMod: 1.0 },
     { name: 'Hard Hitter', off: 'RB', def: 'LB', weightMod: 1.3, heightMod: 0, keyAttrs: ['tackling', 'strength', 'toughness', 'clutch'], speedMod: 0.9, strMod: 1.25 },
     { name: 'Blitz Specialist', off: 'WR', def: 'LB', weightMod: 1.1, heightMod: 2, keyAttrs: ['speed', 'blockShedding', 'tackling', 'agility'], speedMod: 1.15, strMod: 1.05 },
     { name: 'Coverage LB', off: 'TE', def: 'LB', weightMod: 1.05, heightMod: 3, keyAttrs: ['coverage', 'agility', 'playbookIQ', 'catchingHands'], speedMod: 1.05, strMod: 0.95 },
 
-    // --- 8. THE SECONDARY (DB Primary) ---
+    // --- SECONDARY ---
     { name: 'Island Corner', off: 'WR', def: 'DB', weightMod: 0.85, heightMod: 0, keyAttrs: ['coverage', 'speed', 'agility', 'consistency'], speedMod: 1.3, strMod: 0.8 },
     { name: 'Ballhawk Safety', off: 'WR', def: 'DB', weightMod: 0.95, heightMod: 2, keyAttrs: ['catchingHands', 'playbookIQ', 'coverage', 'clutch'], speedMod: 1.1, strMod: 0.9 },
     { name: 'Nickel Stopper', off: 'RB', def: 'DB', weightMod: 1.05, heightMod: -1, keyAttrs: ['tackling', 'agility', 'speed', 'toughness'], speedMod: 1.1, strMod: 1.1 },
     { name: 'Zone Specialist', off: 'WR', def: 'DB', weightMod: 1.0, heightMod: 3, keyAttrs: ['playbookIQ', 'coverage', 'height', 'catchingHands'], speedMod: 0.95, strMod: 1.0 }
 ];
 
-/**
- * Standard Box-Muller transform to generate normally distributed numbers (Bell Curve).
- */
+// Targeted signature boosts for specific archetypes
+const archetypeBoosts = {
+    'Field General': { playbookIQ: 7, throwingAccuracy: 5 },
+    'Scrambler': { speed: 8, agility: 6 },
+    'Gunslinger': { throwingAccuracy: 7, strength: 5 },
+    'Heavy Crusher QB': { strength: 8, toughness: 6 },
+
+    'Power Back': { strength: 7, toughness: 5 },
+    'Speed Back': { speed: 8, agility: 6 },
+    'Workhorse': { stamina: 8, consistency: 6 },
+    'Receiving Back': { catchingHands: 7, agility: 5 },
+
+    'Deep Threat': { speed: 8, agility: 5 },
+    'Route Technician': { agility: 7, playbookIQ: 5 },
+    'Red Zone Specialist': { catchingHands: 7, strength: 5 },
+    'Slot Brawler': { toughness: 6, catchingHands: 5 },
+
+    'Vertical TE': { speed: 6, catchingHands: 6 },
+    'Jumbo Athlete': { strength: 7, blocking: 6 },
+    'Lead Blocker TE': { blocking: 8, strength: 6 },
+    'Hybrid Wing': { agility: 6, catchingHands: 6 },
+
+    'Road Grader': { strength: 8, blocking: 7 },
+    'Mobile Guard': { agility: 7, blocking: 5 },
+    'Wall Protector': { blocking: 8, consistency: 5 },
+    'Technician OL': { playbookIQ: 7, blocking: 6 },
+
+    'Speed Rusher': { speed: 7, blockShedding: 6 },
+    'Run Stuffer': { strength: 8, tackling: 6 },
+    'Bull Rusher': { strength: 8, blockShedding: 6 },
+    'Versatile End': { blockShedding: 6, tackling: 6 },
+
+    'Middle Hawk': { playbookIQ: 7, tackling: 6 },
+    'Hard Hitter': { tackling: 7, toughness: 6 },
+    'Blitz Specialist': { speed: 6, blockShedding: 6 },
+    'Coverage LB': { coverage: 7, playbookIQ: 5 },
+
+    'Island Corner': { coverage: 8, speed: 6 },
+    'Ballhawk Safety': { catchingHands: 6, playbookIQ: 6 },
+    'Nickel Stopper': { tackling: 6, agility: 6 },
+    'Zone Specialist': { playbookIQ: 7, coverage: 6 }
+};
+
 export function gaussianRandom(mean = 0, stdev = 1) {
     const u = 1 - Math.random();
     const v = Math.random();
@@ -196,10 +236,6 @@ export function gaussianRandom(mean = 0, stdev = 1) {
     return z * stdev + mean;
 }
 
-/**
- * Generates a set of modifiers for an entire draft class.
- * Can be passed into generatePlayer to create naturally strong/weak classes.
- */
 export function generateDraftClassModifiers() {
     return {
         overallShift: Math.round(gaussianRandom(0, 3)),
@@ -221,11 +257,10 @@ export function generatePlayer(minAge = 10, maxAge = 16, classModifiers = null) 
     const lastName = Math.random() < 0.4 ? getRandom(nicknames) : getRandom(lastNames);
     const age = getRandomInt(minAge, maxAge);
 
-    // 1. Select Archetype (Weighted for realistic league distribution)
+    // 1. SELECT ARCHETYPE
     const getWeightedArchetype = () => {
         const roll = Math.random();
         let targetPos = 'WR';
-        // Targets: OL 18%, DL 18%, WR 20%, DB 20%, LB 12%, RB 8%, QB 4%
         if (roll < 0.18) targetPos = 'OL';
         else if (roll < 0.36) targetPos = 'DL';
         else if (roll < 0.56) targetPos = 'WR';
@@ -241,93 +276,100 @@ export function generatePlayer(minAge = 10, maxAge = 16, classModifiers = null) 
     const archetype = getWeightedArchetype();
     const favoriteOffensivePosition = archetype.off;
     const favoriteDefensivePosition = archetype.def;
-    
-    const bestPosition = Math.random() > 0.5 ? favoriteOffensivePosition : favoriteDefensivePosition;
 
-    // 2. Draft Class Shifts
-    const classShift = classModifiers ? (classModifiers.overallShift || 0) : 0;
-    const posShift = classModifiers && classModifiers.positionShifts ? (classModifiers.positionShifts[bestPosition] || 0) : 0;
+    // 2. PRIMARY IDENTITY
+    const primarySide = Math.random() < 0.70 ? 'offense' : 'defense';
+    const bestPosition = primarySide === 'offense' ? favoriteOffensivePosition : favoriteDefensivePosition;
+
+    // 3. CONTROLLED DRAFT CLASS MODIFIERS
+    const rawClassShift = classModifiers ? (classModifiers.overallShift || 0) : 0;
+    const rawPosShift = classModifiers && classModifiers.positionShifts ? (classModifiers.positionShifts[bestPosition] || 0) : 0;
+
+    const classEffect = Math.max(-8, Math.min(8, rawClassShift));
+    const positionEffect = Math.max(-6, Math.min(6, rawPosShift));
 
     const keyAttrs = new Set(archetype.keyAttrs);
 
-    // 3. Base Attribute Roll (Talent Tiers)
+    // 4. BASE TALENT ROLL (Player's Adult Talent Ceiling)
     const talentRoll = Math.random();
     let baseKeyMean, baseNonKeyMean;
 
-    if (talentRoll < 0.05) { baseKeyMean = 84; baseNonKeyMean = 48; }       // Elite (5%)
-    else if (talentRoll < 0.25) { baseKeyMean = 74; baseNonKeyMean = 40; }  // Good (20%)
-    else if (talentRoll < 0.70) { baseKeyMean = 62; baseNonKeyMean = 32; }  // Average (45%)
-    else { baseKeyMean = 48; baseNonKeyMean = 22; }                         // Scrub (30%)
+    if (talentRoll < 0.05) { baseKeyMean = 84; baseNonKeyMean = 50; }       // Elite (5%)
+    else if (talentRoll < 0.25) { baseKeyMean = 75; baseNonKeyMean = 42; }  // Good (20%)
+    else if (talentRoll < 0.70) { baseKeyMean = 63; baseNonKeyMean = 34; }  // Average (45%)
+    else { baseKeyMean = 50; baseNonKeyMean = 24; }                         // Scrub (30%)
 
-    let generatedKeySum = 0;
-    const generateAttributeValue = (name) => {
+    const generateTalentValue = (name) => {
         const isKey = keyAttrs.has(name);
-        
-        const mean = (isKey ? baseKeyMean : baseNonKeyMean) + classShift + (isKey ? posShift : 0);
-        const stdDev = isKey ? 6 : 10; 
-        
-        let val = Math.round(gaussianRandom(mean, stdDev));
-        val = Math.max(15, Math.min(99, val));
+        const mean = (isKey ? baseKeyMean : baseNonKeyMean) + classEffect + (isKey ? positionEffect : 0);
+        const stdDev = isKey ? 6 : 9;
 
-        if (isKey) generatedKeySum += val;
-        return val;
+        let val = Math.round(gaussianRandom(mean, stdDev));
+        return Math.max(25, Math.min(99, val));
     };
 
-    // 4. Generate the Attributes
-    let attributes = {
+    // 5. HIDDEN TALENT PROFILE (Ceiling Attributes)
+    let talentAttributes = {
         physical: {
-            speed: generateAttributeValue('speed'),
-            strength: generateAttributeValue('strength'),
-            agility: generateAttributeValue('agility'),
-            stamina: generateAttributeValue('stamina'),
-            height: 0, weight: 0
+            speed: generateTalentValue('speed'),
+            strength: generateTalentValue('strength'),
+            agility: generateTalentValue('agility'),
+            stamina: generateTalentValue('stamina'),
+            height: 0,
+            weight: 0
         },
         mental: {
-            playbookIQ: generateAttributeValue('playbookIQ'),
-            clutch: generateAttributeValue('clutch'),
-            consistency: generateAttributeValue('consistency'),
-            toughness: generateAttributeValue('toughness')
+            playbookIQ: generateTalentValue('playbookIQ'),
+            clutch: generateTalentValue('clutch'),
+            consistency: generateTalentValue('consistency'),
+            toughness: generateTalentValue('toughness')
         },
         technical: {
-            throwingAccuracy: generateAttributeValue('throwingAccuracy'),
-            catchingHands: generateAttributeValue('catchingHands'),
-            tackling: generateAttributeValue('tackling'),
-            blocking: generateAttributeValue('blocking'),
-            blockShedding: generateAttributeValue('blockShedding'),
-            coverage: generateAttributeValue('coverage')
+            throwingAccuracy: generateTalentValue('throwingAccuracy'),
+            catchingHands: generateTalentValue('catchingHands'),
+            tackling: generateTalentValue('tackling'),
+            blocking: generateTalentValue('blocking'),
+            blockShedding: generateTalentValue('blockShedding'),
+            coverage: generateTalentValue('coverage')
         }
     };
 
-    // 5. Apply Archetype Modifiers
-    attributes.physical.speed = Math.min(99, attributes.physical.speed * archetype.speedMod);
-    attributes.physical.strength = Math.min(99, attributes.physical.strength * archetype.strMod);
+    // Apply Archetype Multipliers & Boosts to Talent Profile
+    talentAttributes.physical.speed = Math.min(99, Math.round(talentAttributes.physical.speed * archetype.speedMod));
+    talentAttributes.physical.strength = Math.min(99, Math.round(talentAttributes.physical.strength * archetype.strMod));
 
-    // Penalize things the archetype shouldn't be doing
-    if (archetype.off !== 'QB') attributes.technical.throwingAccuracy *= 0.5;
+    if (archetype.off !== 'QB') talentAttributes.technical.throwingAccuracy = Math.round(talentAttributes.technical.throwingAccuracy * 0.5);
     if (['WR', 'DB', 'QB'].includes(archetype.off)) {
-        attributes.technical.blocking *= 0.4;
-        attributes.technical.blockShedding *= 0.4;
+        talentAttributes.technical.blocking = Math.round(talentAttributes.technical.blocking * 0.45);
+        talentAttributes.technical.blockShedding = Math.round(talentAttributes.technical.blockShedding * 0.45);
     }
 
-    // 6. Absolute Age Scaling
-    const absoluteAgeProgress = Math.max(0, Math.min(1.0, (age - 8) / 10.0));
-    
-    // 7. Body Type
+    const boosts = archetypeBoosts[archetype.name] || {};
+    for (const [attr, boost] of Object.entries(boosts)) {
+        for (const cat of Object.values(talentAttributes)) {
+            if (typeof cat[attr] === 'number') {
+                cat[attr] = Math.min(99, cat[attr] + boost);
+            }
+        }
+    }
+
+    // 6. PHYSICAL MEASUREMENTS (Height & Weight based on Age & Archetype)
+    const absoluteAgeProgress = Math.max(0, Math.min(1.0, (age - 8) / 8.0));
     const baseHeightMean = 52 + (absoluteAgeProgress * 20) + archetype.heightMod;
     let height = Math.round(gaussianRandom(baseHeightMean, 2.5));
-    
-    const baseWeightMean = (70 + (absoluteAgeProgress * 120)) * archetype.weightMod;
-    let weight = Math.round(gaussianRandom(baseWeightMean, 15));
-    
-    attributes.physical.height = height;
-    attributes.physical.weight = weight;
 
-    // 8. Potential
-    const getNormalizedAttribute = (name) => {
-        if (name === 'height') return Math.max(0, Math.min(100, (attributes.physical.height - 50) * 4));
-        if (name === 'weight') return Math.max(0, Math.min(100, (attributes.physical.weight - 100) * 0.66 + 40));
-        
-        for (const category of Object.values(attributes)) {
+    const baseWeightMean = (70 + (absoluteAgeProgress * 120)) * archetype.weightMod;
+    let weight = Math.round(gaussianRandom(baseWeightMean, 14));
+
+    talentAttributes.physical.height = height;
+    talentAttributes.physical.weight = weight;
+
+    // 7. POTENTIAL CALCULATION (Independent from current ability)
+    const getNormalizedTalent = (name) => {
+        if (name === 'height') return Math.max(0, Math.min(100, (height - 50) * 4));
+        if (name === 'weight') return Math.max(0, Math.min(100, (weight - 100) * 0.66 + 40));
+
+        for (const category of Object.values(talentAttributes)) {
             if (category && typeof category[name] === 'number') {
                 return category[name];
             }
@@ -336,49 +378,98 @@ export function generatePlayer(minAge = 10, maxAge = 16, classModifiers = null) 
     };
 
     const avgKeyTalent = archetype.keyAttrs.reduce(
-        (sum, attr) => sum + getNormalizedAttribute(attr), 
+        (sum, attr) => sum + getNormalizedTalent(attr),
         0
     ) / Math.max(1, archetype.keyAttrs.length);
 
-    const potentialMean = (avgKeyTalent * 0.70) + (65 * 0.30) + classShift;
-    const potentialRoll = gaussianRandom(potentialMean, 8);
-    
+    const potentialScore = (avgKeyTalent * 0.75) + (gaussianRandom(65, 7) * 0.25) + (classEffect * 0.5);
+
     let potential = 'C';
-    if (potentialRoll >= 90) potential = 'A';
-    else if (potentialRoll >= 80) potential = 'B';
-    else if (potentialRoll >= 60) potential = 'C';
-    else if (potentialRoll >= 45) potential = 'D';
+    if (potentialScore >= 88) potential = 'A';
+    else if (potentialScore >= 76) potential = 'B';
+    else if (potentialScore >= 58) potential = 'C';
+    else if (potentialScore >= 43) potential = 'D';
     else potential = 'F';
 
-    // 9. Age Scaling & Clamping
-    const physScale = 0.45 + (absoluteAgeProgress * 0.55);
-    const mentScale = 0.25 + (absoluteAgeProgress * 0.75);
+    // 8. AGE SCALING & DEVELOPMENT VARIANCE (Deriving Current Ability)
+    // Scale baseline: Age 10 is 60%/50%/45%, scaling up to 100% by Age 16
+    const ageProgress = (age - 10) / 6;
+    const basePhysicalScale = Math.max(0.45, Math.min(1.0, 0.60 + (ageProgress * 0.40)));
+    const baseMentalScale = Math.max(0.35, Math.min(1.0, 0.50 + (ageProgress * 0.50)));
+    const baseTechnicalScale = Math.max(0.30, Math.min(1.0, 0.45 + (ageProgress * 0.55)));
 
-    Object.keys(attributes).forEach(cat => {
-        Object.keys(attributes[cat]).forEach(attr => {
-            if (['height', 'weight', 'clutch'].includes(attr)) return;
-            let factor = (cat === 'physical') ? physScale : mentScale;
+    // Player growth curve variance (some kids hit earlier growth spurts)
+    const playerGrowthTempo = 1 + gaussianRandom(0, 0.05);
 
-            if (attr === 'speed' || attr === 'agility') factor = Math.min(1.0, factor + 0.15);
+    let attributes = {
+        physical: { height, weight },
+        mental: {},
+        technical: {}
+    };
 
-            attributes[cat][attr] = Math.max(15, Math.min(99, Math.round(attributes[cat][attr] * factor)));
+    Object.keys(talentAttributes).forEach(cat => {
+        let baseScale = basePhysicalScale;
+        if (cat === 'mental') baseScale = baseMentalScale;
+        else if (cat === 'technical') baseScale = baseTechnicalScale;
+
+        Object.keys(talentAttributes[cat]).forEach(attr => {
+            if (attr === 'height' || attr === 'weight') return;
+
+            // Attribute-specific developmental variance
+            const attrVariance = 1 + gaussianRandom(0, 0.05);
+            const devFactor = Math.min(1.0, baseScale * playerGrowthTempo * attrVariance);
+
+            const rawVal = Math.round(talentAttributes[cat][attr] * devFactor);
+            attributes[cat][attr] = Math.max(15, Math.min(99, rawVal));
         });
     });
 
+    // 9. SCOUTING PROFILE (Dossier with Top Strengths & Weaknesses)
+    const skillList = [];
+    for (const [catName, catAttrs] of Object.entries(attributes)) {
+        for (const [attrName, val] of Object.entries(catAttrs)) {
+            if (attrName === 'height' || attrName === 'weight') continue;
+            skillList.push({ name: attrName, value: val });
+        }
+    }
+    skillList.sort((a, b) => b.value - a.value);
+
+    const strengths = skillList.slice(0, 3).map(s => s.name);
+    const weaknesses = skillList.slice(-2).reverse().map(s => s.name);
+
+    // 10. CLAMPED PERSONALITY & ASSEMBLE OBJECT
     const workEthicRoll = gaussianRandom(50, 18);
     const dependabilityRoll = gaussianRandom(60, 15);
-    const entersDraft = Math.random() < 0.60;
+    const streetCredRoll = gaussianRandom(50, 20);
 
     return {
         id: crypto.randomUUID(),
         name: `${firstName} ${lastName}`,
         archetypeName: archetype.name,
         age,
+        primarySide,
+        bestPosition,
+        pos: bestPosition,
         favoriteOffensivePosition,
         favoriteDefensivePosition,
         number: null,
         potential,
+
+        // Active current ability ratings used in-game
         attributes,
+
+        // Underlying full-potential ceiling ratings
+        talentAttributes,
+
+        // Concise scouting dossier
+        scouting: {
+            potential,
+            primarySide,
+            bestPosition,
+            strengths,
+            weaknesses
+        },
+
         teamId: null,
         status: { type: 'healthy', description: '', duration: 0 },
         fatigue: 0,
@@ -389,10 +480,10 @@ export function generatePlayer(minAge = 10, maxAge = 16, classModifiers = null) 
         personality: {
             workEthic: Math.max(15, Math.min(99, Math.round(workEthicRoll))),
             dependability: Math.max(20, Math.min(99, Math.round(dependabilityRoll))),
-            streetCred: Math.round(gaussianRandom(50, 20)), 
-            entersDraft: entersDraft
+            streetCred: Math.max(0, Math.min(100, Math.round(streetCredRoll))),
+            entersDraft: Math.random() < 0.60
         },
-        
+
         expectations: {
             desiredRole: age <= 12 ? 'DEVELOPMENTAL' : (age <= 14 ? 'ROTATION' : 'STARTER'),
             minTouchesPerGame: (age >= 15 && ['QB', 'RB', 'WR'].includes(favoriteOffensivePosition)) ? 4 : 0,

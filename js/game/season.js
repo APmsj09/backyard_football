@@ -49,15 +49,14 @@ export function getPlayerScore(player, coach) {
 
 export async function initializeLeague(onProgress) {
     const newGame = {
-        year: 1, teams: [], players: [], freeAgents: [], playerTeam: null, schedule: [],
-        currentWeek: 0, divisions: {}, draftOrder: [], currentPick: 0, hallOfFame: [],
+        year: 1, teams: [], players: [], freeAgents: [], draftClass: [], playerTeam: null, schedule: [],
+        currentWeek: 0, draftOrder: [], currentPick: 0, hallOfFame: [],
         gameResults: [], messages: [], relationships: new Map(),
-        pickHistory: [], youthTeams: []
+        pickHistory: []
     };
     setGame(newGame);
 
     addMessage("Welcome!", "Generating the league and players...");
-    game.divisions[divisionNames[0]] = []; game.divisions[divisionNames[1]] = [];
 
     const totalPlayers = 380;
     const initialClassModifiers = generateDraftClassModifiers();
@@ -110,7 +109,6 @@ export async function initializeLeague(onProgress) {
     for (let i = 0; i < 19; i++) {
         const nameIndex = getRandomInt(0, availableTeamNames.length - 1);
         const teamName = `The ${availableTeamNames.splice(nameIndex, 1)[0]}`;
-        const division = divisionNames[i % divisionNames.length];
         const tier = i < 9 ? 1 : 2;
         const coach = getRandom(coachPersonalities);
 
@@ -124,7 +122,11 @@ export async function initializeLeague(onProgress) {
         const colorSet = availableColors.splice(getRandomInt(0, availableColors.length - 1), 1)[0];
 
         const team = {
-            id: crypto.randomUUID(), name: teamName, roster: [], coach, division, wins: 0, losses: 0,
+            id: crypto.randomUUID(), name: teamName, roster: [], coach, wins: 0, losses: 0,
+            leagueType: 'main',
+            tier: tier,
+            ageMin: 11,
+            ageMax: 16,
             primaryColor: colorSet?.primary || teamColors[0].primary,
             secondaryColor: colorSet?.secondary || teamColors[0].secondary,
             formations: { offense: offenseFormationData?.name || 'Balanced', defense: defenseFormationData?.name || '3-2-3' },
@@ -133,14 +135,12 @@ export async function initializeLeague(onProgress) {
                 defense: Object.fromEntries((defenseFormationData?.slots || []).map(slot => [slot, null]))
             },
             draftNeeds: 0,
-            tier: tier,
             socialProfile: {
                 streetCred: tier === 1 ? 60 : 35,
                 favorTokens: 3
             }
         };
         game.teams.push(team);
-        game.divisions[division].push(team.id);
 
         if (i % 4 === 0) await yieldToMain();
     }
@@ -150,6 +150,10 @@ export async function initializeLeague(onProgress) {
         const yTeam = {
             id: crypto.randomUUID(), name: `The ${youthMascots[i]}`, roster: [],
             coach: getRandom(coachPersonalities), wins: 0, losses: 0, ties: 0,
+            leagueType: 'youth',
+            tier: null,
+            ageMin: 8,
+            ageMax: 10,
             formations: { offense: 'Balanced', defense: '3-2-3' },
             depthChart: { offense: {}, defense: {} },
             isYouth: true
@@ -158,12 +162,13 @@ export async function initializeLeague(onProgress) {
         for (let j = 0; j < 14; j++) {
             const kid = generatePlayer(8, 10, initialClassModifiers);
             kid.teamId = yTeam.id;
+            kid.lifecycle = 'youth';
             yTeam.roster.push(kid.id);
             game.players.push(kid);
             playerMap.set(kid.id, kid);
         }
         aiSetDepthChart(yTeam);
-        game.youthTeams.push(yTeam);
+        game.teams.push(yTeam); // ✅ Now unified in game.teams
     }
 
     if (onProgress) onProgress(1.0);
@@ -175,14 +180,10 @@ export async function initializeLeague(onProgress) {
 }
 
 export function createPlayerTeam(teamName, options = {}) {
-    if (!game || !game.teams || !game.divisions || !divisionNames) return;
+    if (!game || !game.teams) return;
 
     const { coachName, coachStyle, prefOff, prefDef, primaryColor, secondaryColor } = options;
     const finalTeamName = teamName.toLowerCase().startsWith("the ") ? teamName : `The ${teamName}`;
-
-    const div0Count = game.divisions[divisionNames[0]]?.length || 0;
-    const div1Count = game.divisions[divisionNames[1]]?.length || 0;
-    const division = div0Count <= div1Count ? divisionNames[0] : divisionNames[1];
 
     let baseCoach = coachPersonalities.find(c => c.type === coachStyle) || coachPersonalities[0];
     const customCoach = JSON.parse(JSON.stringify(baseCoach));
@@ -203,7 +204,10 @@ export function createPlayerTeam(teamName, options = {}) {
         name: finalTeamName,
         roster: [],
         coach: customCoach,
-        division,
+        leagueType: 'main',
+        tier: 1,
+        ageMin: 11,
+        ageMax: 16,
         wins: 0,
         losses: 0,
         primaryColor: primaryColor || '#2563EB',
@@ -214,7 +218,6 @@ export function createPlayerTeam(teamName, options = {}) {
             defense: Object.fromEntries(defaultDefenseSlots.map(slot => [slot, null])),
         },
         draftNeeds: 0,
-        tier: 1,
         isPlayerControlled: true,
         socialProfile: {
             streetCred: 50,
@@ -223,13 +226,11 @@ export function createPlayerTeam(teamName, options = {}) {
     };
 
     game.teams.push(playerTeam);
-    if (!Array.isArray(game.divisions[division])) game.divisions[division] = [];
-    game.divisions[division].push(playerTeam.id);
     game.playerTeam = playerTeam;
     return playerTeam;
 }
 
-export function setupDraft() {
+/*export function setupDraft() {
     if (!game || !game.teams) return;
     game.draftOrder = [];
     game.currentPick = 0;
@@ -253,7 +254,7 @@ export function setupDraft() {
         game.draftOrder.push(...(i % 2 === 0 ? sortedTeams : [...sortedTeams].reverse()));
     }
 }
-
+*/
 export function addPlayerToTeam(player, team) {
     if (!player || !team || !team.roster || typeof player.id === 'undefined') return false;
     if (team.roster.length >= ROSTER_LIMIT) return false;
@@ -332,7 +333,7 @@ export function addPlayerToTeam(player, team) {
     return true;
 }
 
-export function simulateAIPick(team) {
+/*export function simulateAIPick(team) {
     if (!team || !team.roster || !game || !game.players || !team.coach) return null;
     if (team.roster.length >= ROSTER_LIMIT) return null;
 
@@ -383,7 +384,7 @@ export function simulateAIPick(team) {
         addPlayerToTeam(bestPick.player, team);
     }
     return bestPick.player;
-}
+}*/
 
 export function generateDraftSummary() {
     if (!game || !game.pickHistory || game.pickHistory.length === 0) return;
@@ -450,9 +451,7 @@ export function generateSchedule() {
 
     schedulePool(game.teams.filter(t => t.tier === 1));
     schedulePool(game.teams.filter(t => t.tier === 2));
-    if (game.youthTeams && game.youthTeams.length > 0) {
-        schedulePool(game.youthTeams);
-    }
+    schedulePool(game.teams.filter(t => t.leagueType === 'youth'));
 
     game.schedule = allWeeklyGames.flat();
 }
@@ -969,26 +968,35 @@ export function advanceToOffseason() {
         }
     }
 
-    if (game.youthTeams) {
-        game.youthTeams.forEach(yt => {
-            yt.roster = yt.roster.filter(id => {
-                const kid = getPlayer(id);
-                kid.age++;
-                kid.careerStats.seasonsPlayed = (kid.careerStats.seasonsPlayed || 0) + 1;
-                developPlayer(kid, yt);
+    // 💡 PEE-WEE GRADUATION → ROOKIE DRAFT POOL
+    if (!game.draftClass) game.draftClass = [];
+    const youthTeams = game.teams.filter(t => t.leagueType === 'youth');
 
-                if (kid.age >= 11) {
-                    kid.teamId = null;
-                    kid.seasonStats = {};
-                    kid.careerStats.snapsThisSeason = 0;
-                    kid.personality.entersDraft = Math.random() < 0.70;
-                    return false;
-                }
-                return true;
-            });
-            yt.wins = 0; yt.losses = 0; yt.ties = 0;
+    youthTeams.forEach(yt => {
+        yt.roster = yt.roster.filter(id => {
+            const kid = getPlayer(id);
+            if (!kid) return false;
+
+            // Develop before aging
+            developPlayer(kid, yt);
+
+            kid.age++;
+            kid.careerStats.seasonsPlayed = (kid.careerStats.seasonsPlayed || 0) + 1;
+
+            // Age 11 graduates into the formal Rookie Draft Class!
+            if (kid.age >= 11) {
+                kid.teamId = null;
+                kid.seasonStats = {};
+                kid.careerStats.snapsThisSeason = 0;
+                kid.lifecycle = 'draft_eligible';
+                game.draftClass.push(kid); // ✅ Added directly to draft class
+                return false;
+            }
+            return true;
         });
-    }
+        yt.wins = 0; yt.losses = 0; yt.ties = 0;
+    });
+
 
     const tier1 = game.teams.filter(t => t.tier === 1).sort((a, b) => b.wins - a.wins || a.losses - b.losses);
     const tier2 = game.teams.filter(t => t.tier === 2).sort((a, b) => b.wins - a.wins || a.losses - b.losses);
@@ -1012,19 +1020,19 @@ export function advanceToOffseason() {
 
     addMessage("Offseason Summary", `Offseason complete. ${totalVacancies} roster spots opened.\n\n${proRelMsg}\n\nPreparing for the draft.`, false, game);
 
+    // 💡 BACKFILL PEE-WEE LEAGUE WITH NEW 8-YEAR-OLDS
     const thisYearsClassModifiers = generateDraftClassModifiers();
-    if (game.youthTeams) {
-        game.youthTeams.forEach(yt => {
-            while (yt.roster.length < 14) {
-                const freshKid = generatePlayer(8, 8, thisYearsClassModifiers);
-                freshKid.teamId = yt.id;
-                yt.roster.push(freshKid.id);
-                game.players.push(freshKid);
-                playerMap.set(freshKid.id, freshKid);
-            }
-            aiSetDepthChart(yt);
-        });
-    }
+    youthTeams.forEach(yt => {
+        while (yt.roster.length < 14) {
+            const freshKid = generatePlayer(8, 8, thisYearsClassModifiers);
+            freshKid.teamId = yt.id;
+            freshKid.lifecycle = 'youth';
+            yt.roster.push(freshKid.id);
+            game.players.push(freshKid); // ✅ Fixed variable reference
+            playerMap.set(freshKid.id, freshKid);
+        }
+        aiSetDepthChart(yt);
+    });
 
     game.gameResults = [];
     game.breakthroughs = [];
