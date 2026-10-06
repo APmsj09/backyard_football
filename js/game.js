@@ -64,7 +64,7 @@ let availableColors = [...teamColors];
 // --- Constants ---
 const offensivePositions = ['QB', 'RB', 'WR', 'TE', 'OL'];
 const defensivePositions = ['DL', 'LB', 'DB'];
-const MIN_HEALTHY_PLAYERS = 8; 
+const MIN_HEALTHY_PLAYERS = 8;
 export const ROSTER_LIMIT = 18; // 💡 18-Man Roster: 8 Starters, 6 Backups, 4 Developmental
 
 // --- Field Constants ---
@@ -367,7 +367,7 @@ export function rebuildDepthChartFromOrder(team) {
     });
 
     // 6. Fill Defense Slots
-    const defFormKey = normalizeFormationKey(defenseFormations, team.formations.defense, '3-1-3');
+    const defFormKey = normalizeFormationKey(team.formations?.defense || '3-2-3 Base', defenseFormations);
     team.formations.defense = defFormKey;
     const defSlots = defenseFormations[defFormKey].slots;
 
@@ -786,7 +786,7 @@ async function initializeLeague(onProgress) {
 
     console.log("Assigning initial non-stranger relationships...");
     // 💡 INCREASED NETWORK: With fewer teams but more FAs, kids need tighter networks
-    const relationshipChance = 0.08; 
+    const relationshipChance = 0.08;
     let relationshipsAdded = 0;
 
     for (let i = 0; i < game.players.length; i++) {
@@ -798,12 +798,12 @@ async function initializeLeague(onProgress) {
                 const p2 = game.players[j];
                 if (!p1 || !p2) continue;
 
-                let level = relationshipLevels.ACQUAINTANCE.level; 
+                let level = relationshipLevels.ACQUAINTANCE.level;
                 const specialRoll = Math.random();
 
-                if (specialRoll < 0.08) level = relationshipLevels.BEST_FRIEND.level; 
-                else if (specialRoll < 0.25) level = relationshipLevels.GOOD_FRIEND.level; 
-                else if (specialRoll < 0.55) level = relationshipLevels.FRIEND.level; 
+                if (specialRoll < 0.08) level = relationshipLevels.BEST_FRIEND.level;
+                else if (specialRoll < 0.25) level = relationshipLevels.GOOD_FRIEND.level;
+                else if (specialRoll < 0.55) level = relationshipLevels.FRIEND.level;
 
                 const key = [p1.id, p2.id].sort().join('_');
                 game.relationships.set(key, level);
@@ -811,7 +811,7 @@ async function initializeLeague(onProgress) {
             }
         }
         if (i % 20 === 0 && onProgress) {
-            onProgress(0.7 + (i / totalPlayers) * 0.2); 
+            onProgress(0.7 + (i / totalPlayers) * 0.2);
             await yieldToMain();
         }
     }
@@ -821,9 +821,9 @@ async function initializeLeague(onProgress) {
 
     console.log("Generating the 3-Tier Backyard Universe...");
     game.youthTeams = [];
-    availableColors = [...teamColors]; 
+    availableColors = [...teamColors];
     const availableTeamNames = [...teamNames];
-    
+
     // 💡 TIER 1 & 2: Generate 19 AI Teams (Player team makes 20)
     for (let i = 0; i < 19; i++) {
         const nameIndex = getRandomInt(0, availableTeamNames.length - 1);
@@ -833,11 +833,11 @@ async function initializeLeague(onProgress) {
         const coach = getRandom(coachPersonalities);
 
         const prefOff = offenseFormations[coach.preferredOffense] ? coach.preferredOffense : 'Balanced';
-        const prefDef = defenseFormations[coach.preferredDefense] ? coach.preferredDefense : '3-1-3';
+        const prefDef = defenseFormations[coach.preferredDefense] ? coach.preferredDefense : '3-2-3 Base';
 
         // Safely resolve formation objects with sane defaults if the coach preference isn't present
         const offenseFormationData = offenseFormations[prefOff] || offenseFormations['Balanced'];
-        const defenseFormationData = defenseFormations[prefDef] || defenseFormations['3-1-3'];
+        const defenseFormationData = defenseFormations[prefDef] || defenseFormations['3-2-3 Base'];
 
         if (availableColors.length === 0) availableColors = [...teamColors];
         const colorSet = availableColors.splice(getRandomInt(0, availableColors.length - 1), 1)[0];
@@ -846,7 +846,7 @@ async function initializeLeague(onProgress) {
             id: crypto.randomUUID(), name: teamName, roster: [], coach, division, wins: 0, losses: 0,
             primaryColor: colorSet?.primary || teamColors[0].primary,
             secondaryColor: colorSet?.secondary || teamColors[0].secondary,
-            formations: { offense: offenseFormationData?.name || 'Balanced', defense: defenseFormationData?.name || '3-1-3' },
+            formations: { offense: offenseFormationData?.name || 'Balanced', defense: defenseFormationData?.name || '3-2-3 Base' },
             depthChart: {
                 offense: Object.fromEntries((offenseFormationData?.slots || []).map(slot => [slot, null])),
                 defense: Object.fromEntries((defenseFormationData?.slots || []).map(slot => [slot, null]))
@@ -874,9 +874,9 @@ async function initializeLeague(onProgress) {
             depthChart: { offense: {}, defense: {} },
             isYouth: true
         };
-        
+
         // Fill youth teams with 8-10 year olds
-        for(let j = 0; j < 14; j++) {
+        for (let j = 0; j < 14; j++) {
             const kid = generatePlayer(8, 10, initialClassModifiers);
             kid.teamId = yTeam.id;
             yTeam.roster.push(kid.id);
@@ -886,7 +886,7 @@ async function initializeLeague(onProgress) {
         aiSetDepthChart(yTeam);
         game.youthTeams.push(yTeam);
     }
-    
+
     console.log("AI team & Youth League generation complete.");
     onProgress(1.0);
     addMessage("Ready!", "League generated. Time to create your team.");
@@ -945,7 +945,7 @@ function createPlayerTeam(teamName, options = {}) {
 
     // Safety / fallback in case data.js formations are missing
     let defaultOffense = prefOff || 'Balanced';
-    let defaultDefense = prefDef || '3-1-3';
+    let defaultDefense = prefDef || '3-2-3 Base';
 
     if (!offenseFormations[defaultOffense]) defaultOffense = Object.keys(offenseFormations)[0];
     if (!defenseFormations[defaultDefense]) defaultDefense = Object.keys(defenseFormations)[0];
@@ -1077,7 +1077,7 @@ function aiSetDepthChart(team) {
     const sortRoster = healthyPlayers.length > 0 ? healthyPlayers : rosterObjs;
 
     const offFormKey = normalizeFormationKey(offenseFormations, team.formations.offense, 'Balanced');
-    const defFormKey = normalizeFormationKey(defenseFormations, team.formations.defense, '3-1-3');
+    const defFormKey = normalizeFormationKey(defenseFormations, team.formations.defense, '3-2-3 Base');
 
     const offSlots = offenseFormations[offFormKey]?.slots || [];
     const defSlots = defenseFormations[defFormKey]?.slots || [];
@@ -1160,16 +1160,16 @@ function getPositionalNeed(team, pos) {
     const targets = { 'QB': 2, 'RB': 2, 'WR': 3, 'TE': 1, 'OL': 3, 'DL': 3, 'LB': 2, 'DB': 2 };
     const target = targets[pos] || 2;
 
-    if (count === 0) return 2.0; 
-    if (count < target) return 1.5; 
-    if (count === target) return 0.8; 
-    return 0.2; 
+    if (count === 0) return 2.0;
+    if (count < target) return 1.5;
+    if (count === target) return 0.8;
+    return 0.2;
 }
 
 /** Revised simulateAIPick with Roster Awareness */
 function simulateAIPick(team) {
     if (!team || !team.roster || !game || !game.players || !team.coach) return null;
-    const ROSTER_LIMIT = 12;
+    //const ROSTER_LIMIT = 12;
     if (team.roster.length >= ROSTER_LIMIT) return null;
 
     const undraftedPlayers = game.players.filter(p =>
@@ -1203,13 +1203,13 @@ function simulateAIPick(team) {
         let needMultiplier = 1.0;
 
         if (pos === 'QB') {
-            if (qbCount === 0) needMultiplier = 3.0;      
-            else if (qbCount === 1) needMultiplier = 1.2; 
-            else needMultiplier = 0.1;                    
+            if (qbCount === 0) needMultiplier = 3.0;
+            else if (qbCount === 1) needMultiplier = 1.2;
+            else needMultiplier = 0.1;
         }
         else if (['OL', 'DL', 'C', 'DT', 'DE', 'OT', 'OG'].includes(pos)) {
-            if (trenchCount < 4) needMultiplier = 2.2;    
-            else if (trenchCount < 7) needMultiplier = 1.4; 
+            if (trenchCount < 4) needMultiplier = 2.2;
+            else if (trenchCount < 7) needMultiplier = 1.4;
             else needMultiplier = 0.5;
         }
         else {
@@ -1392,7 +1392,7 @@ function generateSchedule() {
     game.currentWeek = 0;
     const numWeeks = 9;
     const allWeeklyGames = Array(numWeeks).fill(null).map(() => []);
-    
+
     console.log("Generating 3-Tier Multi-League Schedule...");
 
     // Helper: Runs a round-robin for a specific pool of teams
@@ -1418,7 +1418,7 @@ function generateSchedule() {
 
     // 1. Schedule Tier 1 (Majors)
     schedulePool(game.teams.filter(t => t.tier === 1));
-    
+
     // 2. Schedule Tier 2 (Minors)
     schedulePool(game.teams.filter(t => t.tier === 2));
 
@@ -1862,7 +1862,7 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
     let defPlay = defensivePlaybook[defensivePlayKey];
     if (!defPlay) {
         console.warn(`Defensive play key '${defensivePlayKey}' invalid. Defaulting to Cover 2.`);
-        defPlay = defensivePlaybook['Cover_2_Zone_3-1-3'] || { name: 'Emergency Default', assignments: {} };
+        defPlay = defensivePlaybook['Cover_2_Zone_Base'] || { name: 'Emergency Default', assignments: {} };
     }
     const defAssignments = defPlay.assignments || {};
 
@@ -2247,7 +2247,7 @@ function setupInitialPlayerStates(playState, offense, defense, play, assignments
     };
 
     // --- 7. RUN SETUP ---
-    const defenseFormationData = defenseFormations[defense.formations.defense] || defenseFormations['3-1-3'];
+    const defenseFormationData = defenseFormations[defense.formations.defense] || defenseFormations['3-2-3 Base'];
     setupSide(offense, 'offense', offenseFormationData, true);
     setupSide(defense, 'defense', defenseFormationData, false);
 
@@ -3262,6 +3262,10 @@ function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrie
                         pState.targetX = idealX;
                         pState.targetY = idealY;
                     }
+
+                    // Prevent QB pocket logic from falling through
+                    // into receiver route logic.
+                    break;
 
                 case 'run_route':
                     if (!pState.routePath || pState.currentPathIndex >= pState.routePath.length) {
@@ -5019,9 +5023,13 @@ function updateQBDecision(qbState, offenseStates, defenseStates, playState, offe
  */
 function executeThrow(qbState, target, strength, accuracy, playState, gameLog, actionType) {
     // --- FOOTBALL RULE: QB Cannot Throw Forward Past Line of Scrimmage ---
-    const hasQBCrossedLine = qbState.y > (playState.lineOfScrimmage + 0.5);
-    const isForwardPass = target.y > qbState.y || (Math.abs(target.y - qbState.y) < 0.5 && target.y > qbState.y - 2);
+    const hasQBCrossedLine =
+        qbState.y > (playState.lineOfScrimmage + 0.5);
 
+    // Positive Y is downfield.
+    // A target meaningfully behind the QB is therefore a backward/lateral pass.
+    const isForwardPass =
+        target.y > qbState.y + 0.25;
     if (hasQBCrossedLine && isForwardPass) {
         if (gameLog) gameLog.push(`🚫 ILLEGAL FORWARD PASS: ${qbState.name} crossed the line!`);
         playState.ballState.inAir = false;
@@ -6010,7 +6018,7 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
     let ballCarrierState = null;
 
     try {
-        const timeDelta = fastSim ? TICK_DURATION_SECONDS * 10 : TICK_DURATION_SECONDS;
+        const timeDelta = TICK_DURATION_SECONDS;
         const loopType = playState.type || 'pass';
 
         const playerCache = new Map();
@@ -6375,18 +6383,39 @@ function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, conte
                         const recovery = checkFumbleRecovery(playState, gameLog, 3.0);
                         if (recovery) {
                             const recPlayer = recovery.playerState;
+
                             playState.ballState.isLoose = false;
                             playState.ballState.inAir = false;
+
                             recPlayer.hasBall = true;
                             recPlayer.isBallCarrier = true;
                             recPlayer.action = 'run_path';
+
+                            // Refresh the cached carrier immediately.
+                            // Otherwise post-play return/stat logic can still reference
+                            // the player who had the ball before the fumble.
+                            ballCarrierState = recPlayer;
+
                             playState.possessionChanged = recovery.possessionChange;
                             playState.returnStartY = recPlayer.y;
-                            if (gameLog) gameLog.push(`🏈 ${recPlayer.name} recovers!`);
 
-                            playState.statEvents.push({ type: 'fumble_recovery', playerId: recPlayer.id });
-                            if (recovery.possessionChange && playState.ballState.lastDroppedById) {
-                                playState.statEvents.push({ type: 'fumble_lost', playerId: playState.ballState.lastDroppedById });
+                            if (gameLog) {
+                                gameLog.push(`🏈 ${recPlayer.name} recovers!`);
+                            }
+
+                            playState.statEvents.push({
+                                type: 'fumble_recovery',
+                                playerId: recPlayer.id
+                            });
+
+                            if (
+                                recovery.possessionChange &&
+                                playState.ballState.lastDroppedById
+                            ) {
+                                playState.statEvents.push({
+                                    type: 'fumble_lost',
+                                    playerId: playState.ballState.lastDroppedById
+                                });
                             }
                         }
                     }
@@ -7339,8 +7368,8 @@ function simulateLivePlayStep(game, mode = 'live') {
     const offense = game.possession;
     const defense = (offense.id === game.homeTeam.id) ? game.awayTeam : game.homeTeam;
 
-    if (!offense.formations) offense.formations = { offense: 'Balanced', defense: '3-1-3' };
-    if (!defense.formations) defense.formations = { offense: 'Balanced', defense: '3-1-3' };
+    if (!offense.formations) offense.formations = { offense: 'Balanced', defense: '3-2-3 Base' };
+    if (!defense.formations) defense.formations = { offense: 'Balanced', defense: '3-2-3 Base' };
 
     // --- 2. DETERMINE PLAY CALLS ---
     let offPlayKey = '';
@@ -7782,7 +7811,7 @@ function generateWeeklyEvents() {
                 ];
                 const reason = getRandom(reasons);
                 player.status = { type: 'busy', description: reason, duration: getRandomInt(1, 2), isNew: true };
-                
+
                 if (team.id === game.playerTeam?.id) {
                     addMessage('Unavailable this week', `⚠️ ${player.name} cannot play: ${reason}.`);
                 }
@@ -7792,8 +7821,8 @@ function generateWeeklyEvents() {
             // 2. Bike Trouble (Buddy Event: affects both friends!)
             if (Math.random() < 0.004) {
                 // Find their best friend on the team
-                const buddy = roster.find(other => 
-                    other.id !== player.id && 
+                const buddy = roster.find(other =>
+                    other.id !== player.id &&
                     getRelationshipLevel(player.id, other.id) >= relationshipLevels.GOOD_FRIEND.level
                 );
 
@@ -7949,10 +7978,10 @@ export function getTeamNetworkRecruits(team) {
     if (!team || !team.roster || !game || !game.players) return [];
 
     const rosterIds = new Set(team.roster);
-    const unassignedPlayers = game.players.filter(p => 
-        p && 
-        !p.teamId && 
-        p.status?.type !== 'retired' && 
+    const unassignedPlayers = game.players.filter(p =>
+        p &&
+        !p.teamId &&
+        p.status?.type !== 'retired' &&
         p.status?.type !== 'departed'
     );
 
@@ -8001,7 +8030,7 @@ function callFriend(playerId) {
         return { success: false, message: "Game state error prevented calling friend." };
     }
     const team = game.playerTeam;
-    
+
     // 💡 BACKYARD ECONOMY: Costs 1 Favor
     if (!team.socialProfile) team.socialProfile = { favorTokens: 3, streetCred: 50 };
     if (team.socialProfile.favorTokens <= 0) {
@@ -8010,7 +8039,7 @@ function callFriend(playerId) {
 
     const roster = getRosterObjects(team);
     const healthyCount = roster.filter(p => p && p.status?.duration === 0).length;
-    
+
     if (healthyCount >= 16) {
         return { success: false, message: "Your roster is full enough. Save your favors for when you're desperate." };
     }
@@ -8029,8 +8058,8 @@ function callFriend(playerId) {
 
     if (Math.random() < successChance) {
         player.status = { type: 'temporary', description: 'Helping Out', duration: 1 };
-        if (addPlayerToTeam(player, team)) { 
-            
+        if (addPlayerToTeam(player, team)) {
+
             team.socialProfile.favorTokens -= 1; // 💡 DEDUCT FAVOR
 
             const fullRoster = getRosterObjects(team);
@@ -8082,13 +8111,24 @@ function aiManageRoster(team) {
         const idx = aiAvailableNetwork.findIndex(p => p.id === bestFA.id);
         if (idx > -1) aiAvailableNetwork.splice(idx, 1);
 
-        const originalStatus = bestFA.status;
-        bestFA.status = { type: 'temporary', description: 'Helping Out', duration: 1 };
+        const masterFA = getPlayer(bestFA.id);
 
-        if (addPlayerToTeam(bestFA, team)) {
+        if (!masterFA) {
+            continue;
+        }
+
+        const originalStatus = masterFA.status;
+
+        masterFA.status = {
+            type: 'temporary',
+            description: 'Helping Out',
+            duration: 1
+        };
+
+        if (addPlayerToTeam(masterFA, team)) {
             playableCount++;
         } else {
-            bestFA.status = originalStatus;
+            masterFA.status = originalStatus;
         }
     }
 
@@ -8097,20 +8137,36 @@ function aiManageRoster(team) {
         const topFriend = aiAvailableNetwork.reduce((best, p) => {
             // Must be at least a GOOD_FRIEND to spend a luxury favor mid-season
             if (p.networkStrength < relationshipLevels.GOOD_FRIEND.level) return best;
-            
+
             // Value is Coach Scheme + Friendship + Street Cred
             const score = getPlayerScore(p, team.coach) + (p.networkStrength * 20) + (p.personality?.streetCred || 50);
-            
+
             // Threshold: Only snipe if the player is very good (score > 150)
             return score > (best ? best._score : 150) ? { ...p, _score: score } : best;
         }, null);
 
         // 30% chance they actually pull the trigger this week
         if (topFriend && Math.random() < 0.3) {
-            topFriend.status = { type: 'healthy', description: '', duration: 0 };
-            if (addPlayerToTeam(topFriend, team)) {
-                team.socialProfile.favorTokens -= 1;
-                console.log(`[AI Network] ${team.name} used a favor token to recruit street legend ${topFriend.name}!`);
+            const masterFriend = getPlayer(topFriend.id);
+
+            if (!masterFriend) {
+                console.warn(
+                    `[AI Network] Could not resolve master player for ${topFriend.id}`
+                );
+            } else {
+                masterFriend.status = {
+                    type: 'healthy',
+                    description: '',
+                    duration: 0
+                };
+
+                if (addPlayerToTeam(masterFriend, team)) {
+                    team.socialProfile.favorTokens -= 1;
+
+                    console.log(
+                        `[AI Network] ${team.name} used a favor token to recruit street legend ${masterFriend.name}!`
+                    );
+                }
             }
         }
     }
@@ -8205,7 +8261,7 @@ function developPlayer(player, team = null) {
     const ethic = player.personality?.workEthic || 50;
     const ethicMod = 0.5 + (ethic / 100); // 0.65x (lazy) to 1.49x (gym rat)
 
-     // 1. Calculate Experience Factor (Snaps played during the year)
+    // 1. Calculate Experience Factor (Snaps played during the year)
     const snaps = player.careerStats?.snapsThisSeason || 0;
     // 💡 FIX: In a 9-game season, a starter plays ~350-400 snaps. Scale divisor to 500.
     const experienceMod = Math.min(1.5, 0.6 + (snaps / 500)); // Bench warmer = 0.6x, Ironman Starter = 1.4x
@@ -8214,8 +8270,8 @@ function developPlayer(player, team = null) {
     let mentorBoost = 0;
     if (team && player.age <= 13) {
         const roster = getRosterObjects(team);
-        const hasOlderMentor = roster.some(teammate => 
-            teammate.age >= 15 && 
+        const hasOlderMentor = roster.some(teammate =>
+            teammate.age >= 15 &&
             getRelationshipLevel(player.id, teammate.id) >= relationshipLevels.GOOD_FRIEND.level
         );
         if (hasOlderMentor) mentorBoost = 1;
@@ -8261,10 +8317,10 @@ function developPlayer(player, team = null) {
     // Apply Upgrades
     for (let i = 0; i < totalUpgradePoints; i++) {
         // 70% chance to improve a position-focused skill, 30% wild card
-        const pool = (Math.random() < 0.70 && focusGroup.length > 0) 
-            ? focusGroup 
+        const pool = (Math.random() < 0.70 && focusGroup.length > 0)
+            ? focusGroup
             : ['speed', 'strength', 'agility', 'throwingAccuracy', 'catchingHands', 'tackling', 'blocking', 'playbookIQ', 'blockShedding', 'toughness', 'consistency'];
-        
+
         const attrToBoost = getRandom(pool);
 
         for (const category in player.attributes) {
@@ -8303,7 +8359,7 @@ function advanceToOffseason() {
     console.log(`Advancing to Offseason for Year ${game.year}`);
     const retiredPlayers = []; const hofInductees = []; const developmentResults = []; const leavingPlayers = [];
     let totalVacancies = 0;
-    const ROSTER_LIMIT = 12;
+    //const ROSTER_LIMIT = 12;
 
     console.log("Processing teammate relationship improvements...");
     const teammateImproveChance = 0.15;
@@ -8338,11 +8394,14 @@ function advanceToOffseason() {
             player.age++;
             player.careerStats.seasonsPlayed = (player.careerStats.seasonsPlayed || 0) + 1;
 
-            const devReport = developPlayer(player);
+            // Capture the completed season's snap count BEFORE development resets it.
+            const snapsThisSeason = player.careerStats.snapsThisSeason || 0;
+
+            const devReport = developPlayer(player, team);
             if (team.id === game.playerTeam?.id) developmentResults.push(devReport);
 
             let playerIsLeaving = false;
-            
+
             // 💡 1. GRADUATION (Aging Out)
             if (player.age >= 17) {
                 retiredPlayers.push(player); playerIsLeaving = true;
@@ -8355,11 +8414,14 @@ function advanceToOffseason() {
             } else {
                 // 💡 2. HAPPINESS & TRANSFER LOGIC
                 if (!player.expectations) player.expectations = { desiredRole: 'DEVELOPMENTAL', minTouchesPerGame: 0, happiness: 100 };
-                
+
                 // Base check: did they play? (9 games in season)
                 const gamesPlayed = 9;
-                const snapsPerGame = (player.careerStats.snapsThisSeason || 0) / gamesPlayed;
-                const touchesPerGame = ((player.seasonStats.rushAttempts || 0) + (player.seasonStats.targets || 0) + (player.seasonStats.passAttempts || 0)) / gamesPlayed;
+                const snapsPerGame = snapsThisSeason / gamesPlayed;
+                const touchesPerGame =
+                    ((player.seasonStats.rushAttempts || 0) +
+                        (player.seasonStats.targets || 0) +
+                        (player.seasonStats.passAttempts || 0)) / gamesPlayed;
 
                 // 💡 FIX: Snaps per game expectation scaled realistically. (Average game has ~50 snaps total)
                 if (player.expectations.desiredRole === 'STARTER' && snapsPerGame < 35) {
@@ -8427,7 +8489,7 @@ function advanceToOffseason() {
             team.depthChart.defense = Object.fromEntries(defSlots.map(slot => [slot, null]));
         }
         team.wins = 0; team.losses = 0; team.ties = 0;
-        
+
         // 💡 REFRESH ECONOMY
         if (team.socialProfile) {
             team.socialProfile.favorTokens = 3 + (team.socialProfile.streetCred >= 75 ? 1 : 0); // Cool teams get an extra favor
@@ -8459,14 +8521,14 @@ function advanceToOffseason() {
                 kid.age++;
                 kid.careerStats.seasonsPlayed = (kid.careerStats.seasonsPlayed || 0) + 1;
                 developPlayer(kid, yt);
-                
+
                 // At age 11, they leave the youth league
                 if (kid.age >= 11) {
                     kid.teamId = null;
                     kid.seasonStats = {}; // Reset for big leagues
                     kid.careerStats.snapsThisSeason = 0;
                     // 70% enter draft, 30% hit the streets as unassigned friends
-                    kid.personality.entersDraft = Math.random() < 0.70; 
+                    kid.personality.entersDraft = Math.random() < 0.70;
                     youthGraduates++;
                     return false;
                 }
@@ -8479,7 +8541,7 @@ function advanceToOffseason() {
     // 💡 PROMOTION & RELEGATION
     const tier1 = game.teams.filter(t => t.tier === 1).sort((a, b) => b.wins - a.wins || a.losses - b.losses);
     const tier2 = game.teams.filter(t => t.tier === 2).sort((a, b) => b.wins - a.wins || a.losses - b.losses);
-    
+
     let proRelMsg = "League Tiers hold steady this year.";
     if (tier1.length > 2 && tier2.length > 2) {
         const relegated = tier1.slice(-2); // Bottom 2 of Tier 1
@@ -8489,7 +8551,7 @@ function advanceToOffseason() {
         promoted.forEach(t => { t.tier = 1; t.socialProfile.streetCred += 20; });
 
         proRelMsg = `**PROMOTED:** ${promoted[0].name}, ${promoted[1].name}\n**RELEGATED:** ${relegated[0].name}, ${relegated[1].name}`;
-        
+
         if (relegated.some(t => t.id === game.playerTeam.id)) {
             addMessage("Relegated!", "We finished at the bottom of the league and have been relegated to the Sandlot Circuit (Tier 2). We must fight our way back up!", false, game);
         } else if (promoted.some(t => t.id === game.playerTeam.id)) {
@@ -8549,8 +8611,23 @@ function assignPlayerToSlot(team, playerId, slot, side) {
     const targetIndex = slotNumberMatch ? Math.max(0, parseInt(slotNumberMatch[0], 10) - 1) : 0;
 
     if (!playerId || playerId === 'null' || playerId === '') {
-        // If clearing a slot, we don't necessarily want to delete the player from the team,
-        // we just push them down the priority list.
+        // Clearing a slot means demoting the player currently occupying it
+        // to the bottom of that position group's depth order.
+        const currentPlayerId = team.depthChart?.[side]?.[slot];
+
+        if (currentPlayerId) {
+            const currentIndex = groupList.indexOf(currentPlayerId);
+
+            if (currentIndex > -1) {
+                groupList.splice(currentIndex, 1);
+            }
+
+            groupList.push(currentPlayerId);
+            team.depthOrder[posKey] = groupList;
+
+            rebuildDepthChartFromOrder(team);
+        }
+
         return true;
     }
 
@@ -8627,36 +8704,82 @@ export function getStarterForPosition(team, position) {
 
     const rosterObjects = getRosterObjects(team);
 
-    // Use explicit depthOrder if present
-    const order = Array.isArray(team.depthOrder) ? team.depthOrder : (team.roster || []);
+    let basePos = position.replace(/\d/g, '');
 
+    if (['OT', 'OG', 'C'].includes(basePos)) basePos = 'OL';
+    if (basePos === 'FB') basePos = 'RB';
+    if (['CB', 'S', 'FS', 'SS'].includes(basePos)) basePos = 'DB';
+    if (['DE', 'DT', 'NT'].includes(basePos)) basePos = 'DL';
+
+    const side = ['DL', 'LB', 'DB'].includes(basePos)
+        ? 'defense'
+        : 'offense';
+
+    // depthOrder is an object:
+    // { QB: [], RB: [], WR: [], TE: [], OL: [], DL: [], LB: [], DB: [] }
+    const order = Array.isArray(team.depthOrder?.[basePos])
+        ? team.depthOrder[basePos]
+        : [];
+
+    // Respect explicit depth order first
     for (const id of order) {
-        const p = rosterObjects.find(r => r && r.id === id);
-        if (!p) continue;
-        // match by primary positions or estimated best fit
-        // assume p.favoriteOffensivePosition / favoriteDefensivePosition or pos field exists
-        const basePos = position.replace(/\d/g, '');
-        if (p.favoriteOffensivePosition === basePos || p.favoriteDefensivePosition === basePos || p.pos === basePos) {
-            // Only return healthy players by default
-            if (!p.status || p.status.duration === 0) return p;
+        const player = rosterObjects.find(p => p && p.id === id);
+        if (!player) continue;
+
+        const matchesPosition =
+            player.favoriteOffensivePosition === basePos ||
+            player.favoriteDefensivePosition === basePos ||
+            player.pos === basePos;
+
+        const healthy =
+            !player.status || player.status.duration === 0;
+
+        if (matchesPosition && healthy) {
+            return player;
         }
     }
 
-    // Fallback: find best available by suitability
-    const candidates = rosterObjects.filter(p => p && (!p.status || p.status.duration === 0));
+    // Fallback: best available player for the slot
+    const candidates = rosterObjects.filter(p => {
+        if (!p) return false;
+
+        const healthy =
+            !p.status || p.status.duration === 0;
+
+        if (!healthy) return false;
+
+        return (
+            p.favoriteOffensivePosition === basePos ||
+            p.favoriteDefensivePosition === basePos ||
+            p.pos === basePos
+        );
+    });
+
     if (candidates.length === 0) return null;
 
-    const best = candidates.reduce((bestSoFar, cur) => {
+    return candidates.reduce((bestSoFar, current) => {
         try {
-            const bestScore = calculateSlotSuitability(bestSoFar, position, position.startsWith('DL') ? 'defense' : 'offense', team);
-            const curScore = calculateSlotSuitability(cur, position, position.startsWith('DL') ? 'defense' : 'offense', team);
-            return curScore > bestScore ? cur : bestSoFar;
+            const bestScore = calculateSlotSuitability(
+                bestSoFar,
+                position,
+                side,
+                team
+            );
+
+            const currentScore = calculateSlotSuitability(
+                current,
+                position,
+                side,
+                team
+            );
+
+            return currentScore > bestScore
+                ? current
+                : bestSoFar;
         } catch (e) {
             return bestSoFar;
         }
     }, candidates[0]);
-
-    return best || null;
 }
 
 /**
@@ -8665,34 +8788,67 @@ export function getStarterForPosition(team, position) {
  */
 export function getBackupForPosition(team, position, excludeId = null) {
     if (!team || !Array.isArray(team.roster)) return null;
+
     const rosterObjects = getRosterObjects(team);
-    const order = Array.isArray(team.depthOrder) ? team.depthOrder : (team.roster || []);
 
-    let foundStarter = excludeId ? false : true;
+    let basePos = position.replace(/\d/g, '');
 
-    for (const id of order) {
-        const p = rosterObjects.find(r => r && r.id === id);
-        if (!p) continue;
-        const basePos = position.replace(/\d/g, '');
-        if (!(p.favoriteOffensivePosition === basePos || p.favoriteDefensivePosition === basePos || p.pos === basePos)) continue;
-        if (!p.status || p.status.duration === 0) {
-            if (!excludeId) return p;
-            if (!foundStarter) {
-                if (p.id === excludeId) {
-                    foundStarter = true;
+    if (['OT', 'OG', 'C'].includes(basePos)) basePos = 'OL';
+    if (basePos === 'FB') basePos = 'RB';
+    if (['CB', 'S', 'FS', 'SS'].includes(basePos)) basePos = 'DB';
+    if (['DE', 'DT', 'NT'].includes(basePos)) basePos = 'DL';
+
+    const order = Array.isArray(team.depthOrder?.[basePos])
+        ? team.depthOrder[basePos]
+        : [];
+
+    const matchesPosition = (p) =>
+        p.favoriteOffensivePosition === basePos ||
+        p.favoriteDefensivePosition === basePos ||
+        p.pos === basePos;
+
+    // If the starter is known, return the next player after them.
+    if (excludeId) {
+        const starterIndex = order.indexOf(excludeId);
+
+        if (starterIndex >= 0) {
+            for (let i = starterIndex + 1; i < order.length; i++) {
+                const player = rosterObjects.find(p => p && p.id === order[i]);
+
+                if (
+                    player &&
+                    player.id !== excludeId &&
+                    matchesPosition(player) &&
+                    (!player.status || player.status.duration === 0)
+                ) {
+                    return player;
                 }
-                continue;
-            } else {
-                if (p.id !== excludeId) return p;
+            }
+        }
+    } else {
+        // No excluded starter: return first healthy player in depth order
+        for (const id of order) {
+            const player = rosterObjects.find(p => p && p.id === id);
+
+            if (
+                player &&
+                matchesPosition(player) &&
+                (!player.status || player.status.duration === 0)
+            ) {
+                return player;
             }
         }
     }
 
-    // Fallback: simple search through roster objects
-    const candidates = rosterObjects.filter(p => p && p.id !== excludeId && (!p.status || p.status.duration === 0) &&
-        (p.favoriteOffensivePosition === position.replace(/\d/g, '') || p.favoriteDefensivePosition === position.replace(/\d/g, '') || p.pos === position.replace(/\d/g, ''))
+    // Final fallback
+    const candidates = rosterObjects.filter(p =>
+        p &&
+        p.id !== excludeId &&
+        (!p.status || p.status.duration === 0) &&
+        matchesPosition(p)
     );
-    return candidates.length > 0 ? candidates[0] : null;
+
+    return candidates[0] || null;
 }
 
 
@@ -8702,28 +8858,44 @@ export function getBackupForPosition(team, position, excludeId = null) {
  */
 function validateDepthChart(team) {
     const errors = [];
+
     if (!team || !team.depthChart || !team.roster) {
-        return { valid: errors.length === 0, errors };
+        return { valid: false, errors: ['Team missing roster or depth chart'] };
     }
 
-    const allRosterIds = new Set(team.roster.filter(id => id));
-    const assignedPlayerIds = new Set();
+    const allRosterIds = new Set(
+        team.roster.filter(id => id)
+    );
 
-    Object.values(team.depthChart).forEach(sideChart => {
-        Object.values(sideChart).forEach(playerId => {
-            if (playerId) {
-                if (!allRosterIds.has(playerId)) {
-                    errors.push(`Player ${playerId} in depth chart but not on roster`);
-                }
-                if (assignedPlayerIds.has(playerId)) {
-                    errors.push(`Player ${playerId} assigned to multiple slots`);
-                }
-                assignedPlayerIds.add(playerId);
+    // A player may legally appear once on offense
+    // AND once on defense because two-way players are allowed.
+    for (const [side, sideChart] of Object.entries(team.depthChart)) {
+        const assignedOnThisSide = new Set();
+
+        for (const [slot, playerId] of Object.entries(sideChart || {})) {
+            if (!playerId) continue;
+
+            if (!allRosterIds.has(playerId)) {
+                errors.push(
+                    `Player ${playerId} in ${side} slot ${slot} but not on roster`
+                );
             }
-        });
-    });
 
-    return { valid: errors.length === 0, errors };
+            // Duplicate within the SAME side is invalid.
+            if (assignedOnThisSide.has(playerId)) {
+                errors.push(
+                    `Player ${playerId} assigned to multiple ${side} slots`
+                );
+            }
+
+            assignedOnThisSide.add(playerId);
+        }
+    }
+
+    return {
+        valid: errors.length === 0,
+        errors
+    };
 }
 
 /**
@@ -9008,7 +9180,7 @@ function playerSignFreeAgent(playerId) {
         return { success: false, message: "Game state error." };
     }
     const team = game.playerTeam;
-    const ROSTER_LIMIT = 12;
+    //const ROSTER_LIMIT = 12;
 
     // --- 💡 FIX: Get roster objects ---
     const roster = getRosterObjects(team);
