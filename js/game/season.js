@@ -1058,6 +1058,13 @@ export function developPlayer(player, team = null) {
 export function advanceToOffseason() {
     if (!game || !game.teams || !game.players) return { retiredPlayers: [], hofInductees: [], developmentResults: [], leavingPlayers: [] };
     
+    // Initialize tracking arrays at the top so any offseason phase can safely push to them
+    const retiredPlayers = []; 
+    const hofInductees = []; 
+    const developmentResults = []; 
+    const leavingPlayers = [];
+    let totalVacancies = 0;
+
     // CAPTURE STANDINGS & HISTORY BEFORE RESETTING STATS
     const tier1 = game.teams.filter(t => t.tier === 1).sort((a, b) => (b.wins || 0) - (a.wins || 0) || (a.losses || 0) - (b.losses || 0));
     const tier2 = game.teams.filter(t => t.tier === 2).sort((a, b) => (b.wins || 0) - (a.wins || 0) || (a.losses || 0) - (b.losses || 0));
@@ -1126,8 +1133,6 @@ export function advanceToOffseason() {
     }
 
     game.year++;
-    const retiredPlayers = []; const hofInductees = []; const developmentResults = []; const leavingPlayers = [];
-    let totalVacancies = 0;
 
     const teammateImproveChance = 0.15;
     game.teams.forEach(team => {
