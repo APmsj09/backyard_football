@@ -408,7 +408,10 @@ function handleTabSwitch(e) {
     if (button) {
         const tabId = button.dataset.tab;
         gameState = Game.getGameState();
-        if (gameState) UI.switchTab(tabId, gameState);
+        if (gameState) {
+            UI.switchTab(tabId, gameState);
+            if (tabId === 'social') renderSocialNetworkTab(gameState); // Render our new tab!
+        }
     }
 }
 
@@ -708,18 +711,6 @@ function handleGoToNextDraft() {
     UI.renderDraftScreen(gameState, handlePlayerSelectInDraft, selectedPlayerId, currentSortColumn, currentSortDirection);
     UI.showScreen('draft-screen');
     runAIDraftPicks();
-}
-
-function handleTabSwitch(e) {
-    const button = e.target.closest('.tab-button');
-    if (button) {
-        const tabId = button.dataset.tab;
-        gameState = Game.getGameState();
-        if (gameState) {
-            UI.switchTab(tabId, gameState);
-            if (tabId === 'social') renderSocialNetworkTab(gameState); // Render our new tab!
-        }
-    }
 }
 
 function renderSocialNetworkTab(gameState) {
