@@ -458,15 +458,24 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
     // A high-IQ QB will actively look at the opposite side of the field for the first 1.5 seconds
     if (qbIQ > 75 && playState.tick < 30 && progression.length > 1) {
         const trueTarget = offenseStates.find(o => o.slot === progression[0]);
-        if (trueTarget) {
+        if (trueTarget && trueTarget.initialX !== undefined) {
             // Find a decoy receiver on the opposite side of the center hash
-            const decoy = offenseStates.find(o => o.slot !== 'QB1' && o.slot !== trueTarget.slot && Math.sign(o.initialX - 26.6) !== Math.sign(trueTarget.initialX - 26.6));
+            const decoy = offenseStates.find(o => 
+                o.slot !== 'QB1' && 
+                o.slot !== trueTarget.slot && 
+                o.initialX !== undefined && 
+                Math.sign(o.initialX - 26.6) !== Math.sign(trueTarget.initialX - 26.6)
+            );
             if (decoy) {
                 qbState.currentReadTargetSlot = decoy.slot; // Spoof the defense!
                 if (gameLog && playState.tick === 25 && Math.random() < 0.1) {
                     pushGameLog(gameLog, `[Tick ${playState.tick}] 👀 ${qbState.name} uses his eyes to look the safety off his primary read!`, playState);
                 }
+            } else {
+                qbState.currentReadTargetSlot = progression[0];
             }
+        } else {
+            qbState.currentReadTargetSlot = progression[0];
         }
     } else {
         // Normal progression tracking

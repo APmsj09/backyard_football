@@ -784,14 +784,14 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                         idealY = Math.min(LOS - 1.2, pState.y + 2.0); // Step up into the clean pocket
                     }
 
-                    if (rushers.length > 0 && qbIQ > 40) {
+                    if (unblockedRushers.length > 0 && qbIQ > 40) {
                         let desiredX = idealX;
                         let desiredY = idealY;
                         let leftPressure = 0;
                         let rightPressure = 0;
                         let upTheMiddle = 0;
 
-                        rushers.forEach(r => {
+                        unblockedRushers.forEach(r => {
                             const dx = r.x - pState.x;
                             const dy = r.y - pState.y;
                             const dist = Math.max(0.1, Math.hypot(dx, dy));
