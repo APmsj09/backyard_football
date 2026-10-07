@@ -111,7 +111,7 @@ export async function initializeLeague(onProgress) {
     const initialClassModifiers = generateDraftClassModifiers();
 
     for (let i = 0; i < totalPlayers; i++) {
-        game.players.push(generatePlayer(11, 16, initialClassModifiers)); // Age 11-16 for main league
+        game.players.push(generatePlayer(11, 18, initialClassModifiers)); // Age 11-18 for main league
         if (i % 10 === 0 && onProgress) {
             onProgress((i / totalPlayers) * 0.7);
             await yieldToMain();
@@ -155,7 +155,7 @@ export async function initializeLeague(onProgress) {
             leagueType: 'main',
             tier: tier,
             ageMin: 11,
-            ageMax: 16,
+            ageMax: 18,
             primaryColor: colorSet?.primary || teamColors[0].primary,
             secondaryColor: colorSet?.secondary || teamColors[0].secondary,
             formations: { offense: offenseFormationData?.name || 'Balanced', defense: defenseFormationData?.name || '3-2-3' },
@@ -202,7 +202,7 @@ export async function initializeLeague(onProgress) {
 
     // Populate Initial Main Team Rosters
     const mainTeams = game.teams.filter(t => t.leagueType === 'main');
-    const unassigned = game.players.filter(p => !p.teamId && p.age >= 11 && p.age <= 16);
+    const unassigned = game.players.filter(p => !p.teamId && p.age >= 11 && p.age <= 18);
 
     mainTeams.forEach(team => {
         const targetRosterSize = 14; // Give every team 14 initial players
@@ -252,7 +252,7 @@ export function createPlayerTeam(teamName, options = {}) {
         leagueType: 'main',
         tier: 1,
         ageMin: 11,
-        ageMax: 16,
+        ageMax: 18,
         wins: 0,
         losses: 0,
         primaryColor: primaryColor || '#2563EB',
@@ -1217,13 +1217,32 @@ export function advanceToOffseason() {
         player.careerStats.seasonsPlayed = (player.careerStats.seasonsPlayed || 0) + 1;
         const snapsThisSeason = player.careerStats.snapsThisSeason || 0;
 
+        // --- THE AGING PROCESS: ARROGANCE & LAZINESS ---
+        // As kids become older teenagers, their ego inflates, loyalty drops, and stamina decays
+        if (player.age >= 15) {
+            if (player.personality) {
+                player.personality.ego = Math.min(100, (player.personality.ego || 50) + getRandomInt(2, 6));
+                player.personality.loyalty = Math.max(0, (player.personality.loyalty || 50) - getRandomInt(1, 4));
+            }
+            if (player.attributes?.physical?.stamina) {
+                player.attributes.physical.stamina = Math.max(15, player.attributes.physical.stamina - getRandomInt(2, 5));
+            }
+            // Update their expectations dynamically
+            if (player.expectations) {
+                player.expectations.desiredRole = 'STARTER';
+                if (['QB', 'RB', 'WR', 'TE'].includes(player.favoriteOffensivePosition)) {
+                    player.expectations.minTouchesPerGame = Math.floor((player.age - 14) * 1.5);
+                }
+            }
+        }
+
         const devReport = developPlayer(player, team);
         if (team && team.id === game.playerTeam?.id) developmentResults.push(devReport);
 
         let playerIsLeaving = false;
 
-        // Everyone retires at age 17, even Free Agents
-        if (player.age >= 17) {
+        // Everyone retires at age 19 (After their 18yo Senior season), even Free Agents
+        if (player.age >= 19) {
             retiredPlayers.push(player);
             playerIsLeaving = true;
             if (team && team.id === game.playerTeam?.id) addMessage("Player Retires", `${player.name} is moving on from the league.`);
@@ -1295,8 +1314,8 @@ export function advanceToOffseason() {
             }
             player.teamId = null;
             player.status = {
-                type: player.age >= 17 ? 'retired' : 'departed',
-                description: player.age >= 17 ? 'Retired from the league' : 'Left the league',
+                type: player.age >= 19 ? 'retired' : 'departed',
+                description: player.age >= 19 ? 'Graduated High School' : 'Left the league',
                 duration: 0
             };
             totalVacancies++;
@@ -1339,12 +1358,13 @@ export function advanceToOffseason() {
     // 💡 FREE AGENT ATTRITION (Cull unassigned kids so the pool never bloats)
     game.players.forEach(p => {
         if (!p.teamId && p.status?.type !== 'retired' && p.status?.type !== 'departed') {
-            let quitChance = 0.15;
-            if (p.age >= 14) quitChance = 0.30;
+            let quitChance = 0.10;
+            if (p.age >= 14 && p.age <= 16) quitChance = 0.25;
+            if (p.age >= 17) quitChance = 0.40;
             if (Math.random() < quitChance) {
                 p.status = {
                     type: 'departed',
-                    description: p.age >= 14 ? 'Got an after-school job / focused on track' : 'Quit football to skateboard and play video games',
+                    description: p.age >= 16 ? 'Got a job and bought a car / focused on varsity sports' : 'Quit football to skateboard and play video games',
                     duration: 0
                 };
             }
@@ -1415,10 +1435,10 @@ export function advanceToOffseason() {
         newAge11Rookies.push(rookie);
     }
 
-    // 💡 GENERATE OLDER MOVE-INS (Ages 12-15) DIRECTLY INTO STREET FREE AGENCY
+    // 💡 GENERATE OLDER MOVE-INS (Ages 12-17) DIRECTLY INTO STREET FREE AGENCY
     const newOlderWalkons = [];
     for (let i = 0; i < 5; i++) {
-        const olderKid = generatePlayer(12, 15, thisYearsClassModifiers);
+        const olderKid = generatePlayer(12, 17, thisYearsClassModifiers);
         olderKid.lifecycle = 'active';
         if (!olderKid.personality) olderKid.personality = {};
         olderKid.personality.entersDraft = false;

@@ -84,7 +84,9 @@ export function calculateOverall(player, position) {
                 let value = attrs[category][attr];
 
                 if (weightKey === 'weight') {
-                    value = Math.max(0, Math.min(100, (value - 100) * 0.66 + 40));
+                    // OLD: value = Math.max(0, Math.min(100, (value - 100) * 0.66 + 40));
+                    // NEW: Weight gives a smaller raw OVR boost, keeping OL balanced with WR/QB
+                    value = Math.max(0, Math.min(100, (value - 120) * 0.5 + 30));
                 }
                 if (weightKey === 'height') {
                     value = Math.max(0, Math.min(100, (value - 50) * 4));
@@ -188,15 +190,16 @@ const archetypes = [
 
 // Targeted signature boosts for specific archetypes
 const archetypeBoosts = {
-    'Field General': { playbookIQ: 7, throwingAccuracy: 5 },
-    'Scrambler': { speed: 8, agility: 6 },
-    'Gunslinger': { throwingAccuracy: 7, strength: 5 },
-    'Heavy Crusher QB': { strength: 8, toughness: 6 },
+    // 🔥 BOOSTED QB & RB STATS SO THEY CAN ACTUALLY THROW/RUN EFFECTIVELY
+    'Field General': { playbookIQ: 15, throwingAccuracy: 18 },
+    'Scrambler': { speed: 12, agility: 12, throwingAccuracy: 10 },
+    'Gunslinger': { throwingAccuracy: 15, strength: 12 },
+    'Heavy Crusher QB': { strength: 12, toughness: 10, throwingAccuracy: 8 },
 
-    'Power Back': { strength: 7, toughness: 5 },
-    'Speed Back': { speed: 8, agility: 6 },
-    'Workhorse': { stamina: 8, consistency: 6 },
-    'Receiving Back': { catchingHands: 7, agility: 5 },
+    'Power Back': { strength: 12, toughness: 10, speed: 6 },
+    'Speed Back': { speed: 15, agility: 12 },
+    'Workhorse': { stamina: 15, consistency: 12, speed: 5 },
+    'Receiving Back': { catchingHands: 12, agility: 10, speed: 8 },
 
     'Deep Threat': { speed: 8, agility: 5 },
     'Route Technician': { agility: 7, playbookIQ: 5 },
@@ -252,7 +255,7 @@ export function generateDraftClassModifiers() {
     };
 }
 
-export function generatePlayer(minAge = 10, maxAge = 16, classModifiers = null) {
+export function generatePlayer(minAge = 10, maxAge = 18, classModifiers = null) {
     const firstName = getRandom(firstNames);
     const lastName = Math.random() < 0.4 ? getRandom(nicknames) : getRandom(lastNames);
     const age = getRandomInt(minAge, maxAge);
@@ -314,7 +317,8 @@ export function generatePlayer(minAge = 10, maxAge = 16, classModifiers = null) 
             speed: generateTalentValue('speed'),
             strength: generateTalentValue('strength'),
             agility: generateTalentValue('agility'),
-            stamina: generateTalentValue('stamina'),
+            // Youth Stamina Buff: Young kids can run forever.
+            stamina: Math.max(30, Math.min(99, generateTalentValue('stamina') + (16 - age) * 5)),
             height: 0,
             weight: 0
         },
@@ -392,11 +396,13 @@ export function generatePlayer(minAge = 10, maxAge = 16, classModifiers = null) 
     else potential = 'F';
 
     // 8. AGE SCALING & DEVELOPMENT VARIANCE (Deriving Current Ability)
-    // Scale baseline: Age 10 is 60%/50%/45%, scaling up to 100% by Age 16
-    const ageProgress = (age - 10) / 6;
-    const basePhysicalScale = Math.max(0.45, Math.min(1.0, 0.60 + (ageProgress * 0.40)));
-    const baseMentalScale = Math.max(0.35, Math.min(1.0, 0.50 + (ageProgress * 0.50)));
-    const baseTechnicalScale = Math.max(0.30, Math.min(1.0, 0.45 + (ageProgress * 0.55)));
+    // Scale baseline: Age 10 is scaling up to 100% by Age 18
+    const ageProgress = (age - 10) / 8;
+    
+    // Kids hit their stride faster, and older teenagers become absolute superstars
+    const basePhysicalScale = Math.max(0.55, Math.min(1.0, 0.70 + (ageProgress * 0.30)));
+    const baseMentalScale = Math.max(0.45, Math.min(1.0, 0.60 + (ageProgress * 0.40)));
+    const baseTechnicalScale = Math.max(0.40, Math.min(1.0, 0.55 + (ageProgress * 0.45)));
 
     // Player growth curve variance (some kids hit earlier growth spurts)
     const playerGrowthTempo = 1 + gaussianRandom(0, 0.05);
@@ -479,7 +485,23 @@ export function generatePlayer(minAge = 10, maxAge = 16, classModifiers = null) 
             "Known around the park for practicing diving catches into lawn leaf piles."
         ];
 
-        return `${getRandom(athleticClues)} ${getRandom(mentalClues)} ${getRandom(quirks)}`;
+        // Age-specific lore to ground the reality of the neighborhood
+        let ageLore = "";
+        if (age <= 12) {
+            ageLore = getRandom([
+                "Runs on pure sugar and adrenaline; literally never gets tired.",
+                "Doesn't care if he starts or sits, just happy his mom let him come to the park.",
+                "Small frame, but fearless against the older kids."
+            ]);
+        } else if (age >= 17) {
+            ageLore = getRandom([
+                "A playground legend who is starting to get gassed after two hard sprints.",
+                "Has his own car now; if he isn't getting the ball, he might just drive home.",
+                "A physical mismatch against the middle schoolers, but his knees are already aching."
+            ]);
+        }
+
+        return `${getRandom(athleticClues)} ${getRandom(mentalClues)} ${getRandom(quirks)} ${ageLore}`;
     };
 
     const bio = generateBio();
@@ -543,8 +565,9 @@ export function generatePlayer(minAge = 10, maxAge = 16, classModifiers = null) 
         },
 
         expectations: {
-            desiredRole: age <= 12 ? 'DEVELOPMENTAL' : (age <= 14 ? 'ROTATION' : 'STARTER'),
-            minTouchesPerGame: (age >= 15 && ['QB', 'RB', 'WR'].includes(favoriteOffensivePosition)) ? 4 : 0,
+            desiredRole: age <= 13 ? 'DEVELOPMENTAL' : (age <= 15 ? 'ROTATION' : 'STARTER'),
+            // 17 and 18 year old skill players DEMAND the ball, or they quit.
+            minTouchesPerGame: (age >= 16 && ['QB', 'RB', 'WR', 'TE'].includes(favoriteOffensivePosition)) ? Math.floor((age - 14) * 1.5) : 0,
             happiness: 100
         }
     };
