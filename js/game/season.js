@@ -38,6 +38,47 @@ let availableColors = [...teamColors];
 
 function yieldToMain() { return new Promise(resolve => setTimeout(resolve, 0)); }
 
+export function buildSocialNetworks(targetPlayers, allPlayers) {
+    targetPlayers.forEach(p => {
+        if (!p.social) p.social = { bestFriendId: null, goodFriendIds: [], rivalIds: [] };
+        
+        let maxGoodFriends = 3; let maxRivals = 2;
+        if (p.personality.likeability > 70) { maxGoodFriends = getRandomInt(4, 7); maxRivals = getRandomInt(0, 1); }
+        else if (p.personality.likeability < 35) { maxGoodFriends = getRandomInt(1, 2); maxRivals = getRandomInt(2, 3); }
+
+        const sameClique = allPlayers.filter(o => o.id !== p.id && o.personality?.clique === p.personality?.clique);
+        const others = allPlayers.filter(o => o.id !== p.id);
+
+        if (!p.social.bestFriendId && Math.random() < 0.8 && sameClique.length > 0) {
+            const bf = getRandom(sameClique);
+            if (!bf.social.bestFriendId) {
+                p.social.bestFriendId = bf.id;
+                bf.social.bestFriendId = p.id;
+            }
+        }
+
+        let attempts = 0;
+        while (p.social.goodFriendIds.length < maxGoodFriends && attempts < 10) {
+            const gf = getRandom(Math.random() < 0.6 ? sameClique : others);
+            if (gf && gf.id !== p.id && gf.id !== p.social.bestFriendId && !p.social.goodFriendIds.includes(gf.id)) {
+                p.social.goodFriendIds.push(gf.id);
+                if (!gf.social.goodFriendIds.includes(p.id)) gf.social.goodFriendIds.push(p.id);
+            }
+            attempts++;
+        }
+
+        attempts = 0;
+        while (p.social.rivalIds.length < maxRivals && attempts < 10) {
+            const rv = getRandom(others);
+            if (rv && rv.id !== p.id && rv.personality?.clique !== p.personality?.clique && !p.social.goodFriendIds.includes(rv.id) && rv.id !== p.social.bestFriendId) {
+                if (!p.social.rivalIds.includes(rv.id)) p.social.rivalIds.push(rv.id);
+                if (!rv.social.rivalIds.includes(p.id)) rv.social.rivalIds.push(p.id);
+            }
+            attempts++;
+        }
+    });
+}
+
 export function getPlayerScore(player, coach) {
     if (!player || !player.attributes || !coach || !coach.attributePreferences) return 0;
     let score = 0;
@@ -84,29 +125,9 @@ export async function initializeLeague(onProgress) {
         if (p && p.id) playerMap.set(p.id, p);
     });
 
-    const relationshipChance = 0.08;
-    for (let i = 0; i < game.players.length; i++) {
-        for (let j = i + 1; j < game.players.length; j++) {
-            if (Math.random() < relationshipChance) {
-                const p1 = game.players[i];
-                const p2 = game.players[j];
-                if (!p1 || !p2) continue;
-
-                let level = relationshipLevels.ACQUAINTANCE.level;
-                const specialRoll = Math.random();
-                if (specialRoll < 0.08) level = relationshipLevels.BEST_FRIEND.level;
-                else if (specialRoll < 0.25) level = relationshipLevels.GOOD_FRIEND.level;
-                else if (specialRoll < 0.55) level = relationshipLevels.FRIEND.level;
-
-                const key = [p1.id, p2.id].sort().join('_');
-                game.relationships.set(key, level);
-            }
-        }
-        if (i % 20 === 0 && onProgress) {
-            onProgress(0.7 + (i / totalPlayers) * 0.2);
-            await yieldToMain();
-        }
-    }
+    buildSocialNetworks(game.players, game.players);
+    if (onProgress) onProgress(0.9);
+    await yieldToMain();
 
     if (onProgress) onProgress(0.9);
     await yieldToMain();
@@ -1172,11 +1193,18 @@ export function advanceToOffseason() {
                 player.expectations.happiness += 10;
             }
 
-            if (player.expectations.happiness < 40) {
-                leavingPlayers.push({ player, reason: 'Unhappy with role, transferred to rival', teamName: team.name });
-                playerIsLeaving = true;
-                if (team.id === game.playerTeam?.id) {
-                    addMessage("Transfer Request", `😠 ${player.name} was unhappy with his touches/playing time and left the team.`);
+            const egoDrop = (player.personality?.ego || 50) > 70 ? 25 : 0;
+            if (player.expectations.happiness - egoDrop < 40) {
+                if ((player.personality?.loyalty || 50) < 40) {
+                    leavingPlayers.push({ player, reason: `Ego clash / Demanded transfer to a better situation`, teamName: team.name });
+                    playerIsLeaving = true;
+                    if (team.id === game.playerTeam?.id) {
+                        addMessage("Transfer Request", `😠 ${player.name} feels he is a superstar being held back. He has left the team!`);
+                    }
+                } else {
+                    if (team.id === game.playerTeam?.id && Math.random() < 0.3) {
+                        addMessage("Locker Room Drama", `⚠️ ${player.name} is extremely frustrated with his role but his loyalty is keeping him here... for now.`);
+                    }
                 }
             } else {
                 for (const event of departureEvents) {
@@ -1195,6 +1223,10 @@ export function advanceToOffseason() {
             if (!player.status) player.status = {};
             player.status = { type: 'healthy', description: '', duration: 0 };
         } else {
+            if (team) {
+                if (!player.playerHistory) player.playerHistory = { teamsPlayedFor: [] };
+                player.playerHistory.teamsPlayedFor.push({ teamId: team.id, teamName: team.name, year: game.year });
+            }
             player.teamId = null;
             player.status = {
                 type: player.age >= 17 ? 'retired' : 'departed',
@@ -1285,6 +1317,19 @@ export function advanceToOffseason() {
         }
         aiSetDepthChart(yt);
     });
+
+    // Generate new FA Kids moving into town
+    const newFAKids = [];
+    for (let i = 0; i < 6; i++) {
+        const fa = generatePlayer(12, 15, thisYearsClassModifiers);
+        game.players.push(fa);
+        playerMap.set(fa.id, fa);
+        newFAKids.push(fa);
+    }
+    
+    // Connect new kids into the social network
+    const allLivingPlayers = game.players.filter(p => p.status?.type !== 'retired' && p.status?.type !== 'departed');
+    buildSocialNetworks([...game.draftClass, ...newFAKids], allLivingPlayers);
 
     // 🚀 PERFORMANCE & MEMORY LEAK FIX
     // 1. Purge players who are retired/departed and NOT in the Hall of Fame

@@ -660,14 +660,30 @@ function openPlayerCard(playerId) {
                     </div>
                 </div>
 
+                <div class="bg-white border border-slate-200 rounded-sm p-4 shadow-sm mb-4">
+                    <h4 class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2 border-b pb-1">Social Connections</h4>
+                    <div class="text-xs text-slate-800 space-y-1">
+                        <p><span class="font-bold text-slate-500">Clique:</span> <span class="font-bold text-indigo-600">${player.personality?.clique || 'None'}</span></p>
+                        <p><span class="font-bold text-slate-500">Best Friend:</span> ${player.social?.bestFriendId ? (Game.getPlayer(player.social.bestFriendId)?.name || 'Unknown') : 'None'}</p>
+                        <p><span class="font-bold text-slate-500">Good Friends:</span> ${player.social?.goodFriendIds?.length > 0 ? player.social.goodFriendIds.map(id => Game.getPlayer(id)?.name?.split(' ')[0] || 'Unknown').join(', ') : 'None'}</p>
+                        <p><span class="font-bold text-slate-500">Rivals:</span> <span class="text-rose-600 font-semibold">${player.social?.rivalIds?.length > 0 ? player.social.rivalIds.map(id => Game.getPlayer(id)?.name?.split(' ')[0] || 'Unknown').join(', ') : 'None'}</span></p>
+                    </div>
+                </div>
+
                 <div class="bg-white border border-slate-200 rounded-sm p-4 flex-grow overflow-y-auto shadow-sm">
                     <h4 class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Progression History</h4>
                     ${progHtml}
+                    ${player.playerHistory?.teamsPlayedFor?.length > 0 ? `
+                        <div class="mt-4 border-t pt-2 text-[10px] text-slate-500">
+                            <span class="font-bold uppercase tracking-wider block mb-1">Past Teams</span>
+                            ${player.playerHistory.teamsPlayedFor.map(t => `${t.teamName} (Yr ${t.year})`).join(' • ')}
+                        </div>
+                    ` : ''}
                 </div>
             </div>
         </div>
 
-        ${isMyTeam ? `<div class="mt-4 pt-4 border-t border-slate-200 flex justify-end"><button class="bg-red-700 hover:bg-red-800 text-white px-4 py-2 rounded-sm font-bold text-xs transition shadow-sm uppercase tracking-wider" onclick="app.cutPlayer('${player.id}')">Release Player</button></div>` : ''}
+        ${isMyTeam ? `<div class="mt-4 pt-4 border-t border-slate-200 flex justify-end"><button class="bg-rose-700 hover:bg-rose-800 text-white px-4 py-2 rounded-sm font-bold text-xs transition shadow-sm uppercase tracking-wider" onclick="app.cutPlayer('${player.id}')">Release Player</button></div>` : ''}
     `;
 
     UI.showModal('Scouting Report', modalHtml);
@@ -692,6 +708,80 @@ function handleGoToNextDraft() {
     UI.renderDraftScreen(gameState, handlePlayerSelectInDraft, selectedPlayerId, currentSortColumn, currentSortDirection);
     UI.showScreen('draft-screen');
     runAIDraftPicks();
+}
+
+function handleTabSwitch(e) {
+    const button = e.target.closest('.tab-button');
+    if (button) {
+        const tabId = button.dataset.tab;
+        gameState = Game.getGameState();
+        if (gameState) {
+            UI.switchTab(tabId, gameState);
+            if (tabId === 'social') renderSocialNetworkTab(gameState); // Render our new tab!
+        }
+    }
+}
+
+function renderSocialNetworkTab(gameState) {
+    const container = document.getElementById('social-network-container');
+    if (!container || !gameState.playerTeam) return;
+
+    const roster = Game.getUIRosterObjects(gameState.playerTeam);
+    const cliquesMap = {};
+    let totalChem = 0;
+    
+    roster.forEach(p => {
+        const clique = p.personality?.clique || 'Unknown';
+        if (!cliquesMap[clique]) cliquesMap[clique] = [];
+        cliquesMap[clique].push(p);
+        
+        let localChem = (p.personality?.likeability || 50) + (p.expectations?.happiness || 100);
+        
+        // Boost for having best friend on team
+        if (p.social?.bestFriendId && roster.some(r => r.id === p.social.bestFriendId)) localChem += 20;
+        // Penalty for rival on team
+        if (p.social?.rivalIds?.some(id => roster.some(r => r.id === id))) localChem -= 30;
+
+        totalChem += localChem;
+    });
+
+    const avgChem = roster.length > 0 ? Math.min(100, Math.round(totalChem / (roster.length * 2))) : 50;
+    const chemColor = avgChem >= 80 ? 'text-emerald-600' : (avgChem >= 50 ? 'text-amber-600' : 'text-rose-600');
+
+    let html = `
+        <div class="bg-white p-4 rounded-sm border border-slate-300 shadow-sm mb-6 flex justify-between items-center">
+            <div>
+                <h4 class="font-black text-lg uppercase tracking-wider text-slate-800">Overall Chemistry</h4>
+                <p class="text-xs text-slate-500">Dictated by happiness, friends, and cliques.</p>
+            </div>
+            <div class="text-4xl font-black ${chemColor}">${avgChem}%</div>
+        </div>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+    `;
+
+    Object.entries(cliquesMap).sort((a,b) => b[1].length - a[1].length).forEach(([clique, members]) => {
+        html += `
+            <div class="bg-white p-3 rounded-sm border border-slate-200 shadow-sm">
+                <h5 class="font-bold text-slate-700 uppercase tracking-wider text-xs border-b pb-1 mb-2">${clique} (${members.length})</h5>
+                <div class="space-y-2">
+                    ${members.map(p => {
+                        const egoColor = p.personality?.ego > 75 ? 'text-rose-600' : 'text-slate-500';
+                        const bestFriend = roster.find(r => r.id === p.social?.bestFriendId);
+                        const bfBadge = bestFriend ? `<span class="bg-amber-100 text-amber-800 px-1 py-0.5 text-[9px] rounded font-bold ml-1">🤝 BFF: ${bestFriend.name.split(' ')[0]}</span>` : '';
+                        
+                        return `
+                        <div class="flex justify-between items-center text-xs bg-slate-50 p-1.5 rounded cursor-pointer hover:bg-slate-100" onclick="app.openPlayerCard('${p.id}')">
+                            <span class="font-semibold text-slate-800">${p.name} ${bfBadge}</span>
+                            <span class="font-mono text-[9px] ${egoColor}">EGO: ${p.personality?.ego || 50}</span>
+                        </div>`;
+                    }).join('')}
+                </div>
+            </div>
+        `;
+    });
+    
+    html += `</div>`;
+    container.innerHTML = html;
 }
 
 window.app = {
@@ -722,6 +812,29 @@ function main() {
     UI.setupElements();
     Game.loadGameState();
     gameState = Game.getGameState();
+
+    // Dynamically inject the Social Network Tab
+    const dashTabs = document.getElementById('dashboard-tabs');
+    if (dashTabs && !document.querySelector('[data-tab="social"]')) {
+        const socialBtn = document.createElement('button');
+        socialBtn.className = 'tab-button whitespace-nowrap';
+        socialBtn.dataset.tab = 'social';
+        socialBtn.innerHTML = '<span class="text-base mr-1">💬</span> Social';
+        dashTabs.appendChild(socialBtn);
+
+        const dashContent = document.getElementById('dashboard-content');
+        const socialPane = document.createElement('div');
+        socialPane.id = 'tab-content-social';
+        socialPane.className = 'tab-pane hidden flex-col h-full overflow-hidden';
+        socialPane.innerHTML = `
+            <div class="p-4 border-b bg-slate-50 shrink-0">
+                <h3 class="text-xl font-bold text-slate-800 uppercase tracking-wider">Locker Room Network</h3>
+                <p class="text-xs text-slate-500">Manage chemistry, cliques, and morale.</p>
+            </div>
+            <div id="social-network-container" class="p-4 overflow-y-auto flex-grow bg-slate-100"></div>
+        `;
+        dashContent.appendChild(socialPane);
+    }
 
     document.getElementById('start-game-btn')?.addEventListener('click', startNewGame);
     document.getElementById('load-game-btn')?.addEventListener('click', () => handleLoadGame());

@@ -1,7 +1,7 @@
 // js/game/player.js - Player Generation & Rating System
 
 import { getRandom, getRandomInt } from '../utils.js';
-import { firstNames, lastNames, nicknames, offenseFormations, defenseFormations } from '../data.js';
+import { firstNames, lastNames, nicknames, offenseFormations, defenseFormations, cliques } from '../data.js';
 
 const offensivePositions = ['QB', 'RB', 'WR', 'TE', 'OL'];
 const defensivePositions = ['DL', 'LB', 'DB'];
@@ -441,6 +441,9 @@ export function generatePlayer(minAge = 10, maxAge = 16, classModifiers = null) 
     const workEthicRoll = gaussianRandom(50, 18);
     const dependabilityRoll = gaussianRandom(60, 15);
     const streetCredRoll = gaussianRandom(50, 20);
+    const likeabilityRoll = gaussianRandom(55, 20);
+    const egoRoll = gaussianRandom(50, 25);
+    const loyaltyRoll = gaussianRandom(60, 20);
 
     return {
         id: crypto.randomUUID(),
@@ -482,7 +485,21 @@ export function generatePlayer(minAge = 10, maxAge = 16, classModifiers = null) 
             workEthic: Math.max(15, Math.min(99, Math.round(workEthicRoll))),
             dependability: Math.max(20, Math.min(99, Math.round(dependabilityRoll))),
             streetCred: Math.max(0, Math.min(100, Math.round(streetCredRoll))),
+            likeability: Math.max(10, Math.min(99, Math.round(likeabilityRoll))),
+            ego: Math.max(0, Math.min(100, Math.round(egoRoll))),
+            loyalty: Math.max(0, Math.min(100, Math.round(loyaltyRoll))),
+            clique: getRandom(cliques),
             entersDraft: Math.random() < 0.60
+        },
+
+        social: {
+            bestFriendId: null,
+            goodFriendIds: [],
+            rivalIds: []
+        },
+
+        playerHistory: {
+            teamsPlayedFor: []
         },
 
         expectations: {

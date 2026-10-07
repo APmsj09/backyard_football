@@ -36,25 +36,69 @@ export function addMessage(subject, body, isRead = false, gameObj = null) {
 }
 
 export function getRelationshipLevel(p1Id, p2Id) {
-    if (!p1Id || !p2Id || p1Id === p2Id || !game || !game.relationships) return relationshipLevels.STRANGER.level;
-    const key = [p1Id, p2Id].sort().join('_');
-    return game.relationships.get(key) ?? relationshipLevels.STRANGER.level;
+    if (!p1Id || !p2Id || p1Id === p2Id) return relationshipLevels.STRANGER.level;
+    const p1 = getPlayer(p1Id);
+    if (!p1 || !p1.social) return relationshipLevels.STRANGER.level;
+    
+    if (p1.social.bestFriendId === p2Id) return relationshipLevels.BEST_FRIEND.level;
+    if (p1.social.goodFriendIds.includes(p2Id)) return relationshipLevels.GOOD_FRIEND.level;
+    if (p1.social.rivalIds.includes(p2Id)) return relationshipLevels.RIVAL.level;
+    
+    return relationshipLevels.STRANGER.level;
 }
 
 export function improveRelationship(p1Id, p2Id) {
-    if (!p1Id || !p2Id || p1Id === p2Id || !game || !game.relationships) return;
-    const key = [p1Id, p2Id].sort().join('_');
-    const currentLevel = game.relationships.get(key) ?? relationshipLevels.STRANGER.level;
-    const newLevel = Math.min(relationshipLevels.BEST_FRIEND.level, currentLevel + 1);
-    if (newLevel > currentLevel) game.relationships.set(key, newLevel);
+    const p1 = getPlayer(p1Id); const p2 = getPlayer(p2Id);
+    if (!p1 || !p2 || p1Id === p2Id) return;
+    if (!p1.social) p1.social = { bestFriendId: null, goodFriendIds: [], rivalIds: [] };
+    if (!p2.social) p2.social = { bestFriendId: null, goodFriendIds: [], rivalIds: [] };
+
+    // If they are rivals, they squash the beef (become strangers)
+    if (p1.social.rivalIds.includes(p2Id)) {
+        p1.social.rivalIds = p1.social.rivalIds.filter(id => id !== p2Id);
+        p2.social.rivalIds = p2.social.rivalIds.filter(id => id !== p1Id);
+        return;
+    }
+
+    // If already best friends, do nothing
+    if (p1.social.bestFriendId === p2Id) return;
+
+    // Move to Best Friend if already Good Friends
+    if (p1.social.goodFriendIds.includes(p2Id)) {
+        if (!p1.social.bestFriendId && !p2.social.bestFriendId) {
+            p1.social.bestFriendId = p2Id; p2.social.bestFriendId = p1Id;
+            p1.social.goodFriendIds = p1.social.goodFriendIds.filter(id => id !== p2Id);
+            p2.social.goodFriendIds = p2.social.goodFriendIds.filter(id => id !== p1Id);
+        }
+        return;
+    }
+
+    // Otherwise, become Good Friends
+    if (!p1.social.goodFriendIds.includes(p2Id)) p1.social.goodFriendIds.push(p2Id);
+    if (!p2.social.goodFriendIds.includes(p1Id)) p2.social.goodFriendIds.push(p1Id);
 }
 
 export function decreaseRelationship(p1Id, p2Id) {
-    if (!p1Id || !p2Id || p1Id === p2Id || !game || !game.relationships) return;
-    const key = [p1Id, p2Id].sort().join('_');
-    const currentLevel = game.relationships.get(key) ?? relationshipLevels.STRANGER.level;
-    const newLevel = Math.max(relationshipLevels.STRANGER.level, currentLevel - 1);
-    if (newLevel < currentLevel) game.relationships.set(key, newLevel);
+    const p1 = getPlayer(p1Id); const p2 = getPlayer(p2Id);
+    if (!p1 || !p2 || p1Id === p2Id) return;
+    
+    // Break Best Friendship
+    if (p1.social.bestFriendId === p2Id) {
+        p1.social.bestFriendId = null; p2.social.bestFriendId = null;
+        p1.social.goodFriendIds.push(p2Id); p2.social.goodFriendIds.push(p1Id);
+        return;
+    }
+
+    // Break Good Friendship
+    if (p1.social.goodFriendIds.includes(p2Id)) {
+        p1.social.goodFriendIds = p1.social.goodFriendIds.filter(id => id !== p2Id);
+        p2.social.goodFriendIds = p2.social.goodFriendIds.filter(id => id !== p1Id);
+        return;
+    }
+
+    // Become Rivals
+    if (!p1.social.rivalIds.includes(p2Id)) p1.social.rivalIds.push(p2Id);
+    if (!p2.social.rivalIds.includes(p1Id)) p2.social.rivalIds.push(p1Id);
 }
 
 export function getScoutedPlayerInfo(player, relationshipLevelNum) {
@@ -327,12 +371,8 @@ const DEFAULT_SAVE_KEY = 'backyardFootballGameState';
 
 export function saveGameState(saveKey = DEFAULT_SAVE_KEY) {
     try {
-        const dataToSave = {
-            ...game,
-            relationships: Object.fromEntries(
-                game.relationships instanceof Map ? game.relationships : new Map()
-            )
-        };
+        const dataToSave = { ...game };
+        delete dataToSave.relationships; // Removed massive bloat!
 
         // 🚀 COMPRESSION & EFFICIENCY FIXES
         // Strip out bloated, transient, and unnecessary data before serialization
@@ -395,10 +435,6 @@ export function loadGameState(saveKey = DEFAULT_SAVE_KEY) {
         if (saved) {
             const loaded = JSON.parse(saved);
             game = loaded;
-
-            if (game.relationships && !(game.relationships instanceof Map)) {
-                game.relationships = new Map(Object.entries(game.relationships));
-            }
 
             playerMap.clear();
             if (Array.isArray(game.players)) {

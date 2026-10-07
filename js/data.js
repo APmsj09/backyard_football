@@ -2,14 +2,17 @@
 
 import { getRandom, getRandomInt } from './utils.js';
 
-// --- Relationship Levels ---
+// --- Social & Relationship Levels ---
 export const relationshipLevels = {
+    RIVAL: { level: -1, name: 'Rival', callChance: 0.0, scoutAccuracy: 0.3, color: 'text-red-600 font-bold' },
     STRANGER: { level: 0, name: 'Stranger', callChance: 0.10, scoutAccuracy: 0.2, color: 'text-gray-500' },
     ACQUAINTANCE: { level: 1, name: 'Acquaintance', callChance: 0.30, scoutAccuracy: 0.4, color: 'text-blue-500' },
     FRIEND: { level: 2, name: 'Friend', callChance: 0.60, scoutAccuracy: 0.7, color: 'text-green-600' },
     GOOD_FRIEND: { level: 3, name: 'Good Friend', callChance: 0.80, scoutAccuracy: 0.9, color: 'text-purple-600' },
     BEST_FRIEND: { level: 4, name: 'Best Friend', callChance: 0.95, scoutAccuracy: 1.0, color: 'text-amber-500 font-bold' }
 };
+
+export const cliques = ["Jocks", "Skaters", "Gamers", "Band Kids", "Troublemakers", "Preps", "Theater Kids"];
 
 // --- Name Data ---
 export const firstNames = [
