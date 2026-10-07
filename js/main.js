@@ -31,10 +31,10 @@ async function startNewGame() {
         gameState = Game.getGameState();
         const loadingMsgEl = document.getElementById('loading-message');
 
-        // Simulate 3 Seasons of pure history before player chooses a team
-        for (let y = 1; y <= 3; y++) {
+        // Simulate 4 Seasons of pure history before player chooses a team (Complete 4-Year Youth Cycle)
+        for (let y = 1; y <= 4; y++) {
             if (loadingMsgEl) loadingMsgEl.textContent = `Simulating Season ${y} Matches & Draft...`;
-            UI.updateLoadingProgress(30 + (y * 22));
+            UI.updateLoadingProgress(30 + (y * 17));
             await new Promise(resolve => setTimeout(resolve, 50));
 
             Game.simulateHistoricalSeason(y, gameState);
@@ -205,7 +205,7 @@ function confirmFranchiseTakeover(teamId, coachDetails) {
         Game.rebuildDepthChartFromOrder(team);
     }
 
-    // Initialize Year 4 Draft for the human player
+    // Initialize Year 5 Draft for the human player
     Game.setupDraft();
     gameState.draftCompleted = false;
 
@@ -230,7 +230,7 @@ function generateDraftPreviewMessage() {
         historyBlurb = `\n\n---\n**Recent Highlights (Year ${lastSeason.year})**\n🏆 Champion: ${lastSeason.champion}\n🥈 Runner-Up: ${lastSeason.runnerUp}\n📈 Promoted: ${lastSeason.promoted.join(', ')}\n📉 Relegated: ${lastSeason.relegated.join(', ')}`;
     }
 
-    Game.addMessage("League Office", `Welcome to Backyard GM, Coach! After 3 years of building the franchise, you are now officially in control. Check your veteran roster, scout the incoming rookie class, and click "Start Draft" when you're ready to make your first pick.\n\n**Be sure to check the "History" tab on your dashboard to see the full record of past champions and draft picks before you arrived!**${historyBlurb}`, false, gameState);
+    Game.addMessage("League Office", `Welcome to Backyard GM, Coach! After 4 years of building the franchise, you are now officially in control. Check your veteran roster, scout the incoming rookie class, and click "Start Draft" when you're ready to make your first pick.\n\n**Be sure to check the "History" tab on your dashboard to see the full record of past champions and draft picks before you arrived!**${historyBlurb}`, false, gameState);
 }
 
 function handlePlayerSelectInDraft(playerId) {

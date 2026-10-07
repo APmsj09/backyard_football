@@ -255,7 +255,7 @@ export function generateDraftClassModifiers() {
     };
 }
 
-export function generatePlayer(minAge = 10, maxAge = 18, classModifiers = null) {
+export function generatePlayer(minAge = 12, maxAge = 18, classModifiers = null) {
     const firstName = getRandom(firstNames);
     const lastName = Math.random() < 0.4 ? getRandom(nicknames) : getRandom(lastNames);
     const age = getRandomInt(minAge, maxAge);
@@ -357,12 +357,12 @@ export function generatePlayer(minAge = 10, maxAge = 18, classModifiers = null) 
         }
     }
 
-    // 6. PHYSICAL MEASUREMENTS (Height & Weight based on Age & Archetype)
-    const absoluteAgeProgress = Math.max(0, Math.min(1.0, (age - 8) / 8.0));
-    const baseHeightMean = 52 + (absoluteAgeProgress * 20) + archetype.heightMod;
+    // 6. PHYSICAL MEASUREMENTS (Height & Weight based on Age & Archetype across ages 8-18)
+    const absoluteAgeProgress = Math.max(0, Math.min(1.0, (age - 8) / 10.0));
+    const baseHeightMean = 52 + (absoluteAgeProgress * 22) + archetype.heightMod;
     let height = Math.round(gaussianRandom(baseHeightMean, 2.5));
 
-    const baseWeightMean = (70 + (absoluteAgeProgress * 120)) * archetype.weightMod;
+    const baseWeightMean = (70 + (absoluteAgeProgress * 130)) * archetype.weightMod;
     let weight = Math.round(gaussianRandom(baseWeightMean, 14));
 
     talentAttributes.physical.height = height;
@@ -396,13 +396,12 @@ export function generatePlayer(minAge = 10, maxAge = 18, classModifiers = null) 
     else potential = 'F';
 
     // 8. AGE SCALING & DEVELOPMENT VARIANCE (Deriving Current Ability)
-    // Scale baseline: Age 10 is scaling up to 100% by Age 18
-    const ageProgress = (age - 10) / 8;
+    // Scale baseline: Age 12 rookie floor up to 100% at Age 18
+    const ageProgress = Math.max(0, Math.min(1.0, (age - 12) / 6.0));
     
-    // Kids hit their stride faster, and older teenagers become absolute superstars
-    const basePhysicalScale = Math.max(0.55, Math.min(1.0, 0.70 + (ageProgress * 0.30)));
-    const baseMentalScale = Math.max(0.45, Math.min(1.0, 0.60 + (ageProgress * 0.40)));
-    const baseTechnicalScale = Math.max(0.40, Math.min(1.0, 0.55 + (ageProgress * 0.45)));
+    const basePhysicalScale = Math.max(0.58, Math.min(1.0, 0.72 + (ageProgress * 0.28)));
+    const baseMentalScale = Math.max(0.48, Math.min(1.0, 0.62 + (ageProgress * 0.38)));
+    const baseTechnicalScale = Math.max(0.45, Math.min(1.0, 0.58 + (ageProgress * 0.42)));
 
     // Player growth curve variance (some kids hit earlier growth spurts)
     const playerGrowthTempo = 1 + gaussianRandom(0, 0.05);

@@ -102,7 +102,7 @@ export function setupDraft() {
         if (needed > 0) {
             const classMods = generateDraftClassModifiers();
             for (let i = 0; i < needed; i++) {
-                const rookie = generatePlayer(11, 13, classMods);
+                const rookie = generatePlayer(12, 12, classMods); // STRICTLY AGE 12
                 rookie.lifecycle = 'draft_eligible';
                 if (!rookie.personality) rookie.personality = {};
                 rookie.personality.entersDraft = true;

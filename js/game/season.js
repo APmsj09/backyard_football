@@ -111,7 +111,7 @@ export async function initializeLeague(onProgress) {
     const initialClassModifiers = generateDraftClassModifiers();
 
     for (let i = 0; i < totalPlayers; i++) {
-        game.players.push(generatePlayer(11, 18, initialClassModifiers)); // Age 11-18 for main league
+        game.players.push(generatePlayer(12, 18, initialClassModifiers)); // Age 12-18 for main league
         if (i % 10 === 0 && onProgress) {
             onProgress((i / totalPlayers) * 0.7);
             await yieldToMain();
@@ -154,7 +154,7 @@ export async function initializeLeague(onProgress) {
             id: crypto.randomUUID(), name: teamName, roster: [], coach, wins: 0, losses: 0,
             leagueType: 'main',
             tier: tier,
-            ageMin: 11,
+            ageMin: 12,
             ageMax: 18,
             primaryColor: colorSet?.primary || teamColors[0].primary,
             secondaryColor: colorSet?.secondary || teamColors[0].secondary,
@@ -182,14 +182,14 @@ export async function initializeLeague(onProgress) {
             leagueType: 'youth',
             tier: null,
             ageMin: 8,
-            ageMax: 10,
+            ageMax: 11,
             formations: { offense: 'Balanced', defense: '3-2-3' },
             depthChart: { offense: {}, defense: {} },
             isYouth: true
         };
 
         for (let j = 0; j < 14; j++) {
-            const kid = generatePlayer(8, 10, initialClassModifiers);
+            const kid = generatePlayer(8, 11, initialClassModifiers);
             kid.teamId = yTeam.id;
             kid.lifecycle = 'youth';
             yTeam.roster.push(kid.id);
@@ -202,7 +202,7 @@ export async function initializeLeague(onProgress) {
 
     // Populate Initial Main Team Rosters
     const mainTeams = game.teams.filter(t => t.leagueType === 'main');
-    const unassigned = game.players.filter(p => !p.teamId && p.age >= 11 && p.age <= 18);
+    const unassigned = game.players.filter(p => !p.teamId && p.age >= 12 && p.age <= 18);
 
     mainTeams.forEach(team => {
         const targetRosterSize = 14; // Give every team 14 initial players
@@ -251,7 +251,7 @@ export function createPlayerTeam(teamName, options = {}) {
         coach: customCoach,
         leagueType: 'main',
         tier: 1,
-        ageMin: 11,
+        ageMin: 12,
         ageMax: 18,
         wins: 0,
         losses: 0,
@@ -1384,12 +1384,13 @@ export function advanceToOffseason() {
             kid.age++;
             kid.careerStats.seasonsPlayed = (kid.careerStats.seasonsPlayed || 0) + 1;
 
-            if (kid.age >= 11) {
+            // Pee-Wee graduates at age 12 into the Rookie Draft
+            if (kid.age >= 12) {
                 kid.teamId = null;
                 kid.seasonStats = {};
                 kid.careerStats.snapsThisSeason = 0;
 
-                // LOGIC: Does the kid declare for the draft or wait as a street walk-on?
+                // LOGIC: Does the 12-year-old declare for the draft or wait as a street walk-on?
                 const ego = kid.personality?.ego || 50;
                 const loyalty = kid.personality?.loyalty || 60;
                 const bestFriend = kid.social?.bestFriendId ? getPlayer(kid.social.bestFriendId) : null;
@@ -1419,26 +1420,26 @@ export function advanceToOffseason() {
         yt.wins = 0; yt.losses = 0; yt.ties = 0;
     });
 
-    // 💡 TOP OFF DRAFT CLASS WITH STRICTLY AGE 11 ROOKIES (Guarantee 65 prospects for 60 picks)
+    // 💡 TOP OFF DRAFT CLASS WITH STRICTLY AGE 12 ROOKIES (Guarantee 65 prospects for 60 picks)
     const thisYearsClassModifiers = generateDraftClassModifiers();
     const neededDraftRookies = Math.max(0, 65 - game.draftClass.length);
-    const newAge11Rookies = [];
+    const newAge12Rookies = [];
 
     for (let i = 0; i < neededDraftRookies; i++) {
-        const rookie = generatePlayer(11, 11, thisYearsClassModifiers); // STRICTLY AGE 11
+        const rookie = generatePlayer(12, 12, thisYearsClassModifiers); // STRICTLY AGE 12
         rookie.lifecycle = 'draft_eligible';
         if (!rookie.personality) rookie.personality = {};
         rookie.personality.entersDraft = true;
         game.players.push(rookie);
         playerMap.set(rookie.id, rookie);
         game.draftClass.push(rookie);
-        newAge11Rookies.push(rookie);
+        newAge12Rookies.push(rookie);
     }
 
-    // 💡 GENERATE OLDER MOVE-INS (Ages 12-17) DIRECTLY INTO STREET FREE AGENCY
+    // 💡 GENERATE OLDER MOVE-INS (Ages 13-17) DIRECTLY INTO STREET FREE AGENCY
     const newOlderWalkons = [];
     for (let i = 0; i < 5; i++) {
-        const olderKid = generatePlayer(12, 17, thisYearsClassModifiers);
+        const olderKid = generatePlayer(13, 17, thisYearsClassModifiers);
         olderKid.lifecycle = 'active';
         if (!olderKid.personality) olderKid.personality = {};
         olderKid.personality.entersDraft = false;
@@ -1449,7 +1450,7 @@ export function advanceToOffseason() {
 
     // Connect new recruits into the social network
     const livingActivePlayers = game.players.filter(p => p.status?.type !== 'retired' && p.status?.type !== 'departed');
-    buildSocialNetworks([...newAge11Rookies, ...newOlderWalkons], livingActivePlayers);
+    buildSocialNetworks([...newAge12Rookies, ...newOlderWalkons], livingActivePlayers);
 
     addMessage("Offseason Summary", `Offseason complete. ${totalVacancies} roster spots opened.\n\n${proRelMsg}\n\nPreparing for the draft.`, false, game);
 
