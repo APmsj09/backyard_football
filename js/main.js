@@ -594,7 +594,7 @@ window.app = {
     handleLoadTestRoster,
     handleSaveTestRoster,
     openPlayerCard,
-    handleConfirmTeam,
+    // handleConfirmTeam,
     handleDraftPlayer,
     onDraftSelect: handlePlayerSelectInDraft,
     setCaptain: handleSetCaptain,
