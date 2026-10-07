@@ -1,6 +1,6 @@
 // js/game/draft.js - Draft Manager
 
-import { game, getPlayer, getRosterObjects, addMessage } from './state.js';
+import { game, getPlayer, getRosterObjects, addMessage, playerMap } from './state.js';
 import { calculateOverall, estimateBestPosition } from './player.js';
 import { addPlayerToTeam, ROSTER_LIMIT } from './season.js';
 
@@ -104,6 +104,8 @@ export function setupDraft() {
             for (let i = 0; i < needed; i++) {
                 const rookie = generatePlayer(11, 13, classMods);
                 rookie.lifecycle = 'draft_eligible';
+                if (!rookie.personality) rookie.personality = {};
+                rookie.personality.entersDraft = true;
                 game.players.push(rookie);
                 playerMap.set(rookie.id, rookie);
                 game.draftClass.push(rookie);
@@ -144,7 +146,7 @@ export function simulateAIPick(team) {
 }
 
 export function simulateHistoricalDraft(yearNum) {
-    if (!game || !game.draftOrder) return;
+    if (!game) return;
     setupDraft();
     const draftResults = [];
     

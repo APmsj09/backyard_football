@@ -6,7 +6,7 @@ import {
     routeTree, offenseFormations, defenseFormations, defensivePlaybook
 } from '../data.js';
 import {
-    getZoneCenter, calculateRoutePath, resolveDepthForPlay, getAssignment
+    getZoneCenter, calculateRoutePath, resolveDepthForPlay, getAssignment, zoneBoundaries
 } from './engine_helpers.js';
 import {
     calculateSafetyHelp, diagnosePlay, getSmartCarrierTarget

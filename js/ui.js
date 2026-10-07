@@ -1450,6 +1450,14 @@ function playVisualization(frames, onComplete) {
             setTimeout(runNext, 100);
             return;
         }
+        if (isSkipping) {
+            const lastFrame = frames[frames.length - 1];
+            if (lastFrame && elements.fieldCanvas && elements.fieldCanvasCtx) {
+                drawFieldVisualization(elements.fieldCanvas, elements.fieldCanvasCtx, lastFrame);
+            }
+            if (onComplete) onComplete();
+            return;
+        }
         const frame = frames[index];
         if (frame && elements.fieldCanvas && elements.fieldCanvasCtx) {
             drawFieldVisualization(elements.fieldCanvas, elements.fieldCanvasCtx, frame);
@@ -1459,7 +1467,7 @@ function playVisualization(frames, onComplete) {
             if (onComplete) onComplete();
             return;
         }
-        setTimeout(runNext, isSkipping ? 5 : liveGameSpeed);
+        setTimeout(runNext, liveGameSpeed);
     };
     runNext();
 }

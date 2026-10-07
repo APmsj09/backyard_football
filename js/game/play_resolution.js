@@ -26,7 +26,7 @@ import {
     offenseFormations, defenseFormations, offensivePlaybook, defensivePlaybook
 } from '../data.js';
 import { getRandom, getRandomInt } from '../utils.js';
-import { updatePlayerPosition } from './physics.js';
+import { updatePlayerPosition, getDistance } from './physics.js';
 
 const TICK_DURATION_SECONDS = 0.05;
 const FIELD_WIDTH = 53.3;

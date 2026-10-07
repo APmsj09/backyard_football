@@ -239,6 +239,14 @@ function handlePlayerSelectInDraft(playerId) {
     const player = gameState.players.find(p => p.id === playerId);
     UI.updateSelectedPlayerRow(playerId);
     UI.renderSelectedPlayerCard(player, gameState);
+
+    const draftBtn = document.getElementById('draft-player-btn');
+    if (draftBtn && gameState.playerTeam) {
+        const currentPickingTeam = gameState.draftOrder?.[gameState.currentPick];
+        const isMyTurn = currentPickingTeam?.id === gameState.playerTeam.id;
+        const hasRoom = (gameState.playerTeam.roster?.length || 0) < ROSTER_LIMIT;
+        draftBtn.disabled = !(isMyTurn && hasRoom && player);
+    }
 }
 
 function handleDraftPlayer() {
@@ -252,7 +260,11 @@ function handleDraftPlayer() {
         }
 
         if (player && Game.addPlayerToTeam(player, team)) {
+            player.lifecycle = 'active';
             const gs = Game.getGameState();
+            if (gs.draftClass) {
+                gs.draftClass = gs.draftClass.filter(p => p.id !== player.id);
+            }
             if (!gs.pickHistory) gs.pickHistory = [];
 
             gs.pickHistory.push({
@@ -305,7 +317,19 @@ async function runAIDraftPicks() {
             if (!currentPickingTeam || !currentPickingTeam.roster || currentPickingTeam.roster.length >= ROSTER_LIMIT) {
                 gameState.currentPick++;
             } else {
-                Game.simulateAIPick(currentPickingTeam);
+                const picked = Game.simulateAIPick(currentPickingTeam);
+                if (picked) {
+                    if (!gameState.pickHistory) gameState.pickHistory = [];
+                    gameState.pickHistory.push({
+                        pick: gameState.currentPick + 1,
+                        teamName: currentPickingTeam.name,
+                        teamId: currentPickingTeam.id,
+                        playerName: picked.name,
+                        pos: estimateBestPosition(picked),
+                        ovr: Game.calculateOverall(picked, estimateBestPosition(picked)),
+                        potential: picked.potential
+                    });
+                }
                 gameState.currentPick++;
             }
         }
@@ -321,6 +345,7 @@ async function handleDraftEnd() {
     Game.completeDraft();
     Game.generateDraftSummary();
     Game.generateSchedule();
+    Game.generateWeeklyFreeAgents();
     gameState = Game.getGameState();
     gameState.draftCompleted = true;
 
@@ -507,12 +532,6 @@ async function startLiveGame(playerGameMatch) {
     });
 }
 
-function simulateRestOfWeek() {
-    if (!gameState || gameState.currentWeek >= WEEKS_IN_SEASON) return;
-    const results = Game.simulateWeek({ fastSim: true });
-    finishWeekSimulation(results || []);
-}
-
 function buildResultsModalHtml(results) {
     if (!gameState?.playerTeam || !Array.isArray(results)) return "<p>Week completed.</p>";
     const playerGame = results.find(r => r && (r.homeTeam?.id === gameState.playerTeam.id || r.awayTeam?.id === gameState.playerTeam.id));
@@ -537,30 +556,6 @@ function buildResultsModalHtml(results) {
     });
     html += '</div>';
     return html;
-}
-
-function finishWeekSimulation(results) {
-    Game.processEndOfWeek();
-    gameState.currentWeek++;
-    Game.saveGameState(activeSaveKey);
-
-    if (results && results.length > 0) {
-        UI.showModal(`Week ${gameState.currentWeek} Summary`, buildResultsModalHtml(results));
-    }
-
-    if (gameState.currentWeek >= WEEKS_IN_SEASON) {
-        const report = Game.advanceToOffseason();
-        gameState = Game.getGameState();
-        Game.saveGameState(activeSaveKey);
-        UI.renderOffseasonScreen(report, gameState.year);
-        UI.showScreen('offseason-screen');
-        return;
-    }
-
-    Game.generateWeeklyFreeAgents();
-    gameState = Game.getGameState();
-    UI.renderDashboard(gameState);
-    UI.showScreen('dashboard-screen');
 }
 
 function openPlayerCard(playerId) {

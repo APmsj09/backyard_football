@@ -998,6 +998,12 @@ export function advanceToOffseason() {
     const relegated = tier1.slice(-2);
     const promoted = tier2.slice(0, 2);
 
+    // Capture reverse standings for next draft before wins/losses reset
+    const mainTeams = game.teams.filter(t => t.leagueType === 'main');
+    game.nextDraftOrder = [...mainTeams].sort((a, b) => 
+        (a.wins || 0) - (b.wins || 0) || (b.losses || 0) - (a.losses || 0)
+    ).map(t => t.id);
+
     let proRelMsg = "League Tiers hold steady this year.";
     if (tier1.length > 2 && tier2.length > 2) {
         relegated.forEach(t => { t.tier = 2; t.socialProfile.streetCred -= 20; });
@@ -1253,6 +1259,8 @@ export function advanceToOffseason() {
                 kid.seasonStats = {};
                 kid.careerStats.snapsThisSeason = 0;
                 kid.lifecycle = 'draft_eligible';
+                if (!kid.personality) kid.personality = {};
+                kid.personality.entersDraft = true;
                 game.draftClass.push(kid); // ✅ Added directly to draft class
                 return false;
             }
@@ -1301,6 +1309,7 @@ export function advanceToOffseason() {
 
     game.gameResults = [];
     game.breakthroughs = [];
+    game.currentWeek = 0;
     game.teams.forEach(t => assignTeamCaptain(t));
 
     return { retiredPlayers, hofInductees, developmentResults, leavingPlayers };
