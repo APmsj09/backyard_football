@@ -148,17 +148,23 @@ export function determinePlayCall(offense, defense, down, yardsToGo, ballOn, sco
     const isDesperation = drivesRemaining <= 2 && scoreDiff <= -8;
     const isChewClock = drivesRemaining <= 2 && scoreDiff >= 8;
 
-    let runProbability = 0.50;
+    // Base run probability increased so backyard teams rely more on the ground game
+    let runProbability = 0.55; 
+    
     if (coach?.type === 'Ground and Pound' || coach?.type === 'Trench Warfare') runProbability += 0.20;
-    else if (coach?.type === 'Air Raid') runProbability -= 0.25;
+    else if (coach?.type === 'Air Raid') runProbability -= 0.20;
 
+    // Normal downs/distances
     if (isShort) runProbability += 0.30;
-    if (isLong) runProbability -= 0.35;
-    if (isGoalLine) runProbability += 0.15;
-    if (isChewClock) runProbability += 0.35;
+    if (isLong) runProbability -= 0.25; // Less punishing reduction for long downs so teams still run draws
+    if (isGoalLine) runProbability += 0.25; // Run it in when close!
+    if (isChewClock) runProbability += 0.40;
     if (isDesperation) runProbability = 0.05;
+    
+    // First Down Tendency: Teams should try to establish the run on 1st down
+    if (down === 1 && !isDesperation && !isChewClock) runProbability += 0.15;
 
-    runProbability = Math.max(0.05, Math.min(0.90, runProbability));
+    runProbability = Math.max(0.10, Math.min(0.90, runProbability));
 
     const availableRuns = formationPlays.filter(k => offensivePlaybook[k].type === 'run');
     const availablePasses = formationPlays.filter(k => offensivePlaybook[k].type === 'pass');
@@ -328,7 +334,7 @@ export function determineDefensivePlayCall(defense, offense, down, yardsToGo, ba
 }
 
 export function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, context, options, isLive = false) {
-    const { gameLog = [], ballOn, ballHash = 'M', down, yardsToGo, offenseScore = 0, defenseScore = 0, timeRemaining = 720, quarter = 1 } = context;
+    const { gameLog = [], ballOn, ballHash = 'M', down, yardsToGo, offenseScore = 0, defenseScore = 0, timeRemaining = 420, quarter = 1 } = context;
 
     const playResult = {
         yards: 0, outcome: 'live', possessionChange: false,
@@ -618,11 +624,24 @@ export function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey
     }
 
     if (ballCarrierState && ballCarrierState.isOffense && !playState.returnStartY) {
-        const isRun = playState.type === 'run' || (playState.type === 'pass' && ballCarrierState.role === 'QB');
         const caughtPassThisPlay = playState.statEvents.some(e => e.type === 'completion' && e.receiverId === ballCarrierState.id);
-        if (isRun && !caughtPassThisPlay && !playState.sack) {
-            const yardageLine = playState.fumbleOccurred ? playState.finalBallY : ballCarrierState.y;
-            const rushYards = yardageLine - playState.lineOfScrimmage;
+        const yardageLine = playState.fumbleOccurred ? playState.finalBallY : ballCarrierState.y;
+        const rushYards = yardageLine - playState.lineOfScrimmage;
+
+        // Correctly classify Sacks vs QB Scrambles
+        if (playState.type === 'pass' && ballCarrierState.role === 'QB' && !caughtPassThisPlay) {
+            if (rushYards < 0) {
+                playState.sack = true; // He didn't make it back to the line, it's a sack!
+                // Assign sack to the nearest unblocked defender
+                const tacklerEvent = playState.statEvents.find(e => e.type === 'tackle');
+                if (tacklerEvent) {
+                    playState.statEvents.push({ type: 'sack', playerId: tacklerEvent.playerId, qbId: ballCarrierState.id });
+                }
+            } else {
+                // Positive yards on a scramble is a rush
+                playState.statEvents.push({ type: 'rush', runnerId: ballCarrierState.id, yards: rushYards });
+            }
+        } else if (playState.type === 'run' && !caughtPassThisPlay && !playState.sack) {
             playState.statEvents.push({ type: 'rush', runnerId: ballCarrierState.id, yards: rushYards });
         }
     }
@@ -686,12 +705,23 @@ export function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey
         if (player) {
             if (!player.careerStats) player.careerStats = { seasonsPlayed: 0 };
             player.careerStats.snapsThisSeason = (player.careerStats.snapsThisSeason || 0) + 1;
+            
+            // PASSIVE HUDDLE RECOVERY: Players catch their breath between plays based on their stamina rating
+            const staminaRating = player.attributes?.physical?.stamina || 50;
+            const recoveryAmt = 1.5 + (staminaRating / 25); // Recovers roughly 3.5% to 5.5% fatigue per play
+            player.fatigue = Math.max(0, (player.fatigue || 0) - recoveryAmt);
         }
     });
 
-    let clockBurn = Math.floor(Math.random() * 8) + 24;
-    if (playState.incomplete) clockBurn = Math.floor(Math.random() * 3) + 5;
-    else if (playResult.possessionChange || playState.touchdown || playState.safety) clockBurn = 12;
+    // BACKYARD CLOCK BURN: Plays take time to set up, kids have to retrieve incomplete passes from the bushes
+    let clockBurn = Math.floor(Math.random() * 10) + 30; // 30 to 39 seconds for a normal play + huddle
+    if (playState.incomplete) clockBurn = Math.floor(Math.random() * 8) + 18; // Even an incompletion burns 18-25 secs fetching the ball
+    else if (playResult.possessionChange || playState.touchdown || playState.safety) clockBurn = 40; // Turnovers take a while to reset
+    
+    // Late 4th quarter hurry-up offense (if losing)
+    const isLateTrailing = quarter >= 4 && timeRemaining < 120 && scoreDiff < 0;
+    if (isLateTrailing) clockBurn = Math.floor(clockBurn * 0.6); 
+
     playResult.clockBurn = clockBurn;
 
     return {
@@ -729,10 +759,10 @@ export function simulateLivePlayStep(gameInstance, mode = 'live') {
             ? (gameInstance.homeScore - gameInstance.awayScore)
             : (gameInstance.awayScore - gameInstance.homeScore);
 
-        if (gameInstance.clock === undefined) gameInstance.clock = 720;
+        if (gameInstance.clock === undefined) gameInstance.clock = 420;
         if (gameInstance.quarter === undefined) gameInstance.quarter = 1;
 
-        const timeRemaining = gameInstance.quarter < 5 ? gameInstance.clock + ((4 - gameInstance.quarter) * 720) : gameInstance.clock;
+        const timeRemaining = gameInstance.quarter < 5 ? gameInstance.clock + ((4 - gameInstance.quarter) * 420) : gameInstance.clock;
         const drivesRemaining = Math.max(1, Math.ceil(timeRemaining / 120));
 
         if (offense.formations.offense === 'Punt') {
@@ -855,7 +885,7 @@ export function simulateLivePlayStep(gameInstance, mode = 'live') {
 
     if (gameInstance.clock <= 0) {
         gameInstance.quarter++;
-        gameInstance.clock = 720;
+        gameInstance.clock = 420;
         if (gameInstance.quarter === 3 && !gameInstance.halftimeProcessed) {
             gameInstance.halftimeProcessed = true;
             [...getRosterObjects(offense), ...getRosterObjects(defense)].forEach(p => {
@@ -898,7 +928,7 @@ export function simulateMatchFast(homeTeam, awayTeam) {
         ballOn: 35, down: 1, yardsToGo: 10,
         gameLog: [],
         quarter: 1,
-        clock: 720,
+        clock: 420,
         playsTotal: 0,
         isConversionAttempt: false,
         isGameOver: false,

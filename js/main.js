@@ -524,7 +524,7 @@ async function startLiveGame(playerGameMatch) {
         possession: Math.random() < 0.5 ? playerGameMatch.home : playerGameMatch.away,
         ballOn: 35, down: 1, yardsToGo: 10,
         gameLog: [`Coin Toss! ${playerGameMatch.home.name} vs ${playerGameMatch.away.name}`],
-        isConversionAttempt: false, isGameOver: false, weather: 'Sunny', quarter: 1, clock: 720
+        isConversionAttempt: false, isGameOver: false, weather: 'Sunny', quarter: 1, clock: 420
     };
 
     UI.showScreen('game-sim-screen');
@@ -805,6 +805,8 @@ window.app = {
     }
 };
 
+window.app_toggleWatchlist = (id) => UI.toggleWatchlistPlayer(id);
+
 function main() {
     UI.setupElements();
     Game.loadGameState();
@@ -881,6 +883,31 @@ function main() {
         if (gameState) UI.renderDraftPool(gameState, handlePlayerSelectInDraft, currentSortColumn, currentSortDirection);
     });
     document.querySelector('#draft-screen thead tr')?.addEventListener('click', (e) => {
+        const headerCell = e.target.closest('th[data-sort]');
+        if (!headerCell || !gameState) return;
+
+        const newSortColumn = headerCell.dataset.sort;
+        if (currentSortColumn === newSortColumn) {
+            currentSortDirection = (currentSortDirection === 'desc') ? 'asc' : 'desc';
+        } else {
+            currentSortColumn = newSortColumn;
+            currentSortDirection = 'desc';
+        }
+
+        UI.renderDraftPool(gameState, handlePlayerSelectInDraft, currentSortColumn, currentSortDirection);
+        UI.updateDraftSortIndicators(currentSortColumn, currentSortDirection);
+    });
+
+    // Draft Sub-View Tabs (Overview, Physicals, Skills, Watchlist)
+    document.querySelectorAll('.draft-view-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            UI.setDraftView(btn.dataset.view);
+            if (gameState) UI.renderDraftPool(gameState, handlePlayerSelectInDraft, currentSortColumn, currentSortDirection);
+        });
+    });
+
+    // Delegate header clicks to the dynamic thead
+    document.getElementById('draft-pool-thead')?.addEventListener('click', (e) => {
         const headerCell = e.target.closest('th[data-sort]');
         if (!headerCell || !gameState) return;
 

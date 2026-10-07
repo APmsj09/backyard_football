@@ -658,19 +658,29 @@ export function handleBallArrival(playState, carrier, playResult, gameLog) {
         const fatPct = Math.round((bestCandidate.fatigueModifier || 1) * 100);
         const isDefense = !bestCandidate.isOffense;
 
-        let catchScore = (catching * 0.60) + (agility * 0.20) + 25;
-
-        if (isDefense) {
-            const handsFactor = Math.min(1.0, catching / 85);
-            catchScore *= (0.18 * handsFactor);
-        }
+        // Base catch: Give a higher floor so wide-open players don't drop everything
+        let catchScore = (catching * 0.50) + (agility * 0.20) + 40; 
 
         const defendersNear = playersInRange.filter(p => !p.isOffense).length;
-        if (bestCandidate.isOffense) {
-            if (defendersNear === 1) catchScore *= 0.85;
-            if (defendersNear >= 2) catchScore *= 0.25;
-        } else if (playersInRange.length > 1) {
-            catchScore *= 0.85;
+        const attackersNear = playersInRange.filter(p => p.isOffense).length;
+
+        if (isDefense) {
+            // DBs intercept floaty deep passes more often now, instead of just swatting
+            const ticksInAir = playState.tick - (ball.throwTick || 0);
+            const floatBonus = ticksInAir > 40 ? 15 : 0; // Floaties are easy to pick
+            const handsFactor = Math.min(1.0, catching / 70);
+            catchScore = (catchScore * (0.25 * handsFactor)) + floatBonus;
+            
+            if (attackersNear > 0) catchScore *= 0.50; // Hard to pick if WR is fighting for it
+        } else {
+            // Offensive Catch logic
+            if (defendersNear === 1) {
+                catchScore -= 20; // Contested catch penalty
+            } else if (defendersNear >= 2) {
+                catchScore -= 45; // Double coverage penalty
+            } else {
+                catchScore += 15; // "Wide Open" bonus!
+            }
         }
 
         if (playState.type === 'punt') catchScore += 15;

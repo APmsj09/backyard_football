@@ -265,11 +265,11 @@ export function renderDraftScreen(gameState, onPlayerSelect, currentSelectedId, 
     const ROSTER_LIMIT = 18;
 
     if (currentPick >= draftOrder.length) {
-        if (elements.draftHeader) elements.draftHeader.innerHTML = `<h2 class="text-3xl font-bold">Season ${year} Draft Complete</h2>`;
+        if (elements.draftHeader) elements.draftHeader.innerHTML = `<h2 class="text-2xl font-bold">Season ${year} Draft Complete</h2>`;
         if (elements.draftPlayerBtn) { elements.draftPlayerBtn.disabled = true; elements.draftPlayerBtn.textContent = 'Draft Complete'; }
         renderSelectedPlayerCard(null, gameState);
         updateSelectedPlayerRow(null);
-        if (elements.draftPoolTbody) elements.draftPoolTbody.innerHTML = `<tr><td colspan="18" class="p-4 text-center text-gray-500">Draft Complete.</td></tr>`;
+        if (elements.draftPoolTbody) elements.draftPoolTbody.innerHTML = `<tr><td colspan="9" class="p-6 text-center text-slate-400">Draft Complete.</td></tr>`;
         return;
     }
 
@@ -280,12 +280,40 @@ export function renderDraftScreen(gameState, onPlayerSelect, currentSelectedId, 
     const playerCanPick = pickingTeam.id === playerTeam.id && currentRosterSize < ROSTER_LIMIT;
 
     if (elements.draftYear) elements.draftYear.textContent = year;
-    if (elements.draftPickNumber) elements.draftPickNumber.textContent = `#${currentPick + 1} (${currentRosterSize}/${ROSTER_LIMIT})`;
+    if (elements.draftPickNumber) elements.draftPickNumber.textContent = `#${currentPick + 1}`;
     if (elements.draftPickingTeam) elements.draftPickingTeam.textContent = pickingTeam.name || 'Unknown Team';
+
+    // 1. Render User Upcoming Picks Roadmap
+    const userPicksEl = document.getElementById('draft-user-picks');
+    if (userPicksEl && draftOrder) {
+        const myPicks = [];
+        draftOrder.forEach((t, idx) => {
+            if (t.id === playerTeam.id && idx >= currentPick) {
+                const roundNum = Math.floor(idx / (gameState.teams.filter(tm => tm.leagueType === 'main').length || 20)) + 1;
+                myPicks.push(`R${roundNum} (#${idx + 1})`);
+            }
+        });
+        userPicksEl.textContent = myPicks.length > 0 ? `Your Upcoming: ${myPicks.slice(0, 3).join(', ')}` : 'No picks remaining';
+    }
+
+    // 2. Render Recent Picks Ticker
+    const tickerContainer = document.getElementById('draft-ticker-items');
+    if (tickerContainer && gameState.pickHistory) {
+        const recent = gameState.pickHistory.slice(-4).reverse();
+        if (recent.length > 0) {
+            tickerContainer.innerHTML = recent.map(p => `
+                <span class="inline-flex items-center gap-1.5 bg-slate-900 px-2 py-0.5 rounded border border-slate-700">
+                    <b class="text-amber-400">#${p.pick}</b> 
+                    <span class="text-slate-300 font-bold">${p.playerName}</span> 
+                    <span class="text-[9px] bg-slate-800 text-slate-400 px-1 rounded">${p.pos}</span> 
+                    <span class="text-slate-500 font-sans text-[10px]">(${p.teamName.replace('The ', '')})</span>
+                </span>
+            `).join('');
+        }
+    }
 
     renderDraftPool(gameState, onPlayerSelect, sortColumn, sortDirection);
     renderPlayerRoster(gameState.playerTeam);
-    updateDraftSortIndicators(sortColumn, sortDirection);
 
     if (currentSelectedId) {
         const playerObj = gameState.players.find(p => p.id === currentSelectedId);
@@ -294,22 +322,100 @@ export function renderDraftScreen(gameState, onPlayerSelect, currentSelectedId, 
 
     if (elements.draftPlayerBtn) {
         elements.draftPlayerBtn.disabled = !playerCanPick || currentSelectedId === null;
-        elements.draftPlayerBtn.textContent = playerCanPick ? 'Draft Player' : `Waiting for ${pickingTeam.name || 'AI'}...`;
+        elements.draftPlayerBtn.textContent = playerCanPick ? `Draft Player to ${playerTeam.name}` : `Waiting on ${pickingTeam.name}...`;
     }
 }
 
 export function renderDraftPool(gameState, onPlayerSelect, sortColumn = 'potential', sortDirection = 'desc') {
     if (!elements.draftPoolTbody || !gameState?.players) return;
+    const thead = document.getElementById('draft-pool-thead');
     const playerRoster = getUIRosterObjects(gameState.playerTeam);
-    const undraftedPlayers = gameState.players.filter(p => p && !p.teamId && (p.personality?.entersDraft !== false));
+
+    // 1. Strict Draft Pool Filtering (Culls 18-20 year olds from rookie drafts)
+    const poolSource = (gameState.draftClass && gameState.draftClass.length > 0)
+        ? gameState.draftClass
+        : gameState.players;
+
+    let undraftedPlayers = poolSource.filter(p =>
+        p && !p.teamId &&
+        p.age <= 13 && // Rookie Draft is strictly for kids graduating into the league
+        p.status?.type !== 'retired' &&
+        p.status?.type !== 'departed' &&
+        (p.personality?.entersDraft !== false)
+    );
+
+    if (activeDraftView === 'watchlist') {
+        undraftedPlayers = undraftedPlayers.filter(p => draftWatchlist.has(p.id));
+    }
+
     const searchTerm = elements.draftSearch?.value.toLowerCase() || '';
     const posFilter = elements.draftFilterPos?.value || '';
 
-    let filtered = undraftedPlayers.filter(p =>
-        p.name.toLowerCase().includes(searchTerm) &&
-        (!posFilter || p.favoriteOffensivePosition === posFilter || p.favoriteDefensivePosition === posFilter)
-    );
+    let filtered = undraftedPlayers.filter(p => {
+        const matchesName = p.name.toLowerCase().includes(searchTerm);
+        const bestP = p.pos || estimateBestPosition(p);
+        const matchesPos = !posFilter || bestP === posFilter || p.favoriteOffensivePosition === posFilter || p.favoriteDefensivePosition === posFilter;
+        return matchesName && matchesPos;
+    });
 
+    // 2. Render Dynamic Table Header based on View Tab
+    if (thead) {
+        if (activeDraftView === 'overview') {
+            thead.innerHTML = `
+                <tr>
+                    <th class="py-2 px-2 text-center w-8">★</th>
+                    <th class="py-2 px-2 text-center w-12 cursor-pointer hover:bg-slate-200" data-sort="position">Pos</th>
+                    <th class="py-2 px-3 text-left cursor-pointer hover:bg-slate-200" data-sort="name">Prospect</th>
+                    <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-200" data-sort="age">Age</th>
+                    <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-200" data-sort="potential">Pot</th>
+                    <th class="py-2 px-2 text-center">Rel</th>
+                    <th class="py-2 px-2 text-center">Hgt / Wgt</th>
+                    <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-200 text-blue-600" data-sort="speed">Speed</th>
+                    <th class="py-2 px-2 text-center">Est OVR</th>
+                </tr>`;
+        } else if (activeDraftView === 'physicals') {
+            thead.innerHTML = `
+                <tr>
+                    <th class="py-2 px-2 text-center w-8">★</th>
+                    <th class="py-2 px-2 text-center w-12 cursor-pointer hover:bg-slate-200" data-sort="position">Pos</th>
+                    <th class="py-2 px-3 text-left cursor-pointer hover:bg-slate-200" data-sort="name">Prospect</th>
+                    <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-200" data-sort="height">Hgt</th>
+                    <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-200" data-sort="weight">Wgt</th>
+                    <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-200 text-blue-600" data-sort="speed">Speed</th>
+                    <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-200" data-sort="strength">Strength</th>
+                    <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-200" data-sort="agility">Agility</th>
+                    <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-200" data-sort="stamina">Stamina</th>
+                </tr>`;
+        } else if (activeDraftView === 'skills') {
+            thead.innerHTML = `
+                <tr>
+                    <th class="py-2 px-2 text-center w-8">★</th>
+                    <th class="py-2 px-2 text-center w-12 cursor-pointer hover:bg-slate-200" data-sort="position">Pos</th>
+                    <th class="py-2 px-3 text-left cursor-pointer hover:bg-slate-200" data-sort="name">Prospect</th>
+                    <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-200" data-sort="throwingAccuracy">Throw</th>
+                    <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-200" data-sort="catchingHands">Hands</th>
+                    <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-200" data-sort="blocking">Block</th>
+                    <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-200" data-sort="tackling">Tackle</th>
+                    <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-200" data-sort="blockShedding">B.Shed</th>
+                    <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-200" data-sort="playbookIQ">IQ</th>
+                </tr>`;
+        } else {
+            // Watchlist View (mirrors overview)
+            thead.innerHTML = `
+                <tr>
+                    <th class="py-2 px-2 text-center w-8">★</th>
+                    <th class="py-2 px-2 text-center w-12 cursor-pointer hover:bg-slate-200" data-sort="position">Pos</th>
+                    <th class="py-2 px-3 text-left cursor-pointer hover:bg-slate-200" data-sort="name">Prospect</th>
+                    <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-200" data-sort="age">Age</th>
+                    <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-200" data-sort="potential">Pot</th>
+                    <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-200 text-blue-600" data-sort="speed">Speed</th>
+                    <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-200" data-sort="catchingHands">Hands</th>
+                    <th class="py-2 px-2 text-center">Est OVR</th>
+                </tr>`;
+        }
+    }
+
+    // 3. Sorting
     const potentialOrder = { 'A': 5, 'B': 4, 'C': 3, 'D': 2, 'F': 1 };
     filtered.sort((a, b) => {
         if (sortColumn === 'potential') {
@@ -318,12 +424,17 @@ export function renderDraftPool(gameState, onPlayerSelect, sortColumn = 'potenti
             if (valA !== valB) return sortDirection === 'asc' ? valA - valB : valB - valA;
             return calculateOverall(b, estimateBestPosition(b)) - calculateOverall(a, estimateBestPosition(a));
         }
+        if (sortColumn === 'position') {
+            const posA = a.pos || estimateBestPosition(a);
+            const posB = b.pos || estimateBestPosition(b);
+            return sortDirection === 'asc' ? posA.localeCompare(posB) : posB.localeCompare(posA);
+        }
         if (sortColumn === 'name') return sortDirection === 'asc' ? a.name.localeCompare(b.name) : b.name.localeCompare(a.name);
         if (sortColumn === 'age') return sortDirection === 'asc' ? a.age - b.age : b.age - a.age;
 
         const getAttr = (p) => {
             const cats = ['physical', 'mental', 'technical'];
-            for (const c of cats) if (p.attributes?.[c]?.[sortColumn] !== undefined) return p.attributes[c][sortColumn];
+            for (const c of cats) if (p.attributes?.[c]?.[sortColumn] !== undefined) return Number(p.attributes[c][sortColumn]) || 0;
             return 0;
         };
         const valA = getAttr(a);
@@ -333,42 +444,78 @@ export function renderDraftPool(gameState, onPlayerSelect, sortColumn = 'potenti
 
     elements.draftPoolTbody.innerHTML = '';
     if (filtered.length === 0) {
-        elements.draftPoolTbody.innerHTML = `<tr><td colspan="18" class="p-4 text-center text-gray-500">No players match filters.</td></tr>`;
+        const msg = activeDraftView === 'watchlist' ? 'No prospects pinned to your watchlist yet. Click the ★ next to any player to shortlist them.' : 'No prospects match filters.';
+        elements.draftPoolTbody.innerHTML = `<tr><td colspan="9" class="p-6 text-center text-slate-400 font-sans italic">${msg}</td></tr>`;
         return;
     }
 
+    // 4. Render Table Rows
     filtered.forEach(player => {
-        const maxLevel = playerRoster.reduce(
-            (max, rp) => Math.max(max, getRelationshipLevel(rp.id, player.id)),
-            relationshipLevels.STRANGER.level
-        );
+        const maxLevel = playerRoster.reduce((max, rp) => Math.max(max, getRelationshipLevel(rp.id, player.id)), relationshipLevels.STRANGER.level);
         const scouted = getScoutedPlayerInfo(player, maxLevel);
         if (!scouted) return;
+
         const relInfo = Object.values(relationshipLevels).find(rl => rl.level === maxLevel) || relationshipLevels.STRANGER;
+        const pos = scouted.pos || estimateBestPosition(scouted);
+        const ovr = calculateOverall(scouted, pos);
+        const isStarred = draftWatchlist.has(player.id);
 
         const row = document.createElement('tr');
-        row.className = `cursor-pointer hover:bg-amber-100 draft-player-row ${scouted.id === selectedPlayerId ? 'bg-amber-200' : ''}`;
+        row.className = `cursor-pointer hover:bg-amber-50 draft-player-row transition ${scouted.id === selectedPlayerId ? 'bg-amber-100 font-bold' : ''}`;
         row.dataset.playerId = scouted.id;
-        row.innerHTML = `
-            <td class="py-2 px-3 font-semibold">${scouted.name ?? 'N/A'}</td>
-            <td class="text-center py-2 px-3">${scouted.age ?? '?'}</td>
-            <td class="text-center py-2 px-3 font-medium">${scouted.potential ?? '?'}</td>
-            <td class="text-center py-2 px-3 ${relInfo.color}" title="${relInfo.name}">${relInfo.name.substring(0, 4)}</td>
-            <td class="text-center py-2 px-3 font-bold">${estimateBestPosition(scouted)}</td>
-            <td class="text-center py-2 px-3">${formatHeight(scouted.attributes?.physical?.height)}</td>
-            <td class="text-center py-2 px-3">${scouted.attributes?.physical?.weight ?? '?'}</td>
-            <td class="text-center py-2 px-3 text-blue-600 font-bold">${scouted.attributes?.physical?.speed ?? '?'}</td>
-            <td class="text-center py-2 px-3">${scouted.attributes?.physical?.strength ?? '?'}</td>
-            <td class="text-center py-2 px-3">${scouted.attributes?.physical?.agility ?? '?'}</td>
-            <td class="text-center py-2 px-3">${scouted.attributes?.physical?.stamina ?? '?'}</td>
-            <td class="text-center py-2 px-3">${scouted.attributes?.mental?.playbookIQ ?? '?'}</td>
-            <td class="text-center py-2 px-3">${scouted.attributes?.mental?.toughness ?? '?'}</td>
-            <td class="text-center py-2 px-3">${scouted.attributes?.technical?.throwingAccuracy ?? '?'}</td>
-            <td class="text-center py-2 px-3">${scouted.attributes?.technical?.catchingHands ?? '?'}</td>
-            <td class="text-center py-2 px-3">${scouted.attributes?.technical?.blocking ?? '?'}</td>
-            <td class="text-center py-2 px-3">${scouted.attributes?.technical?.tackling ?? '?'}</td>
-            <td class="text-center py-2 px-3">${scouted.attributes?.technical?.blockShedding ?? '?'}</td>
-        `;
+
+        const starBtn = `<button class="star-btn text-base leading-none ${isStarred ? 'text-amber-500 font-bold' : 'text-slate-300 hover:text-amber-400'}" onclick="event.stopPropagation(); window.app_toggleWatchlist('${player.id}')">${isStarred ? '★' : '☆'}</button>`;
+        const posBadge = `<span class="bg-slate-100 text-slate-800 font-bold text-[10px] px-1.5 py-0.5 rounded border border-slate-300">${pos}</span>`;
+
+        if (activeDraftView === 'overview') {
+            row.innerHTML = `
+                <td class="py-2 px-2 text-center">${starBtn}</td>
+                <td class="py-2 px-2 text-center">${posBadge}</td>
+                <td class="py-2 px-3 font-semibold text-slate-900 font-sans truncate max-w-[140px]">${scouted.name}</td>
+                <td class="text-center py-2 px-2 text-slate-600">${scouted.age}</td>
+                <td class="text-center py-2 px-2 font-bold ${scouted.potential === 'A' ? 'text-amber-600' : (scouted.potential === 'B' ? 'text-blue-600' : 'text-slate-500')}">${scouted.potential}</td>
+                <td class="text-center py-2 px-2 ${relInfo.color} text-[10px] uppercase font-sans font-bold" title="${relInfo.name}">${relInfo.name.substring(0, 4)}</td>
+                <td class="text-center py-2 px-2 text-slate-500 text-[10px]">${formatHeight(scouted.attributes?.physical?.height)} / ${scouted.attributes?.physical?.weight}#</td>
+                <td class="text-center py-2 px-2 text-blue-600 font-bold">${scouted.attributes?.physical?.speed ?? '?'}</td>
+                <td class="text-center py-2 px-2 font-black text-slate-900">${ovr}</td>
+            `;
+        } else if (activeDraftView === 'physicals') {
+            row.innerHTML = `
+                <td class="py-2 px-2 text-center">${starBtn}</td>
+                <td class="py-2 px-2 text-center">${posBadge}</td>
+                <td class="py-2 px-3 font-semibold text-slate-900 font-sans truncate max-w-[140px]">${scouted.name}</td>
+                <td class="text-center py-2 px-2">${formatHeight(scouted.attributes?.physical?.height)}</td>
+                <td class="text-center py-2 px-2">${scouted.attributes?.physical?.weight}#</td>
+                <td class="text-center py-2 px-2 text-blue-600 font-bold">${scouted.attributes?.physical?.speed ?? '?'}</td>
+                <td class="text-center py-2 px-2">${scouted.attributes?.physical?.strength ?? '?'}</td>
+                <td class="text-center py-2 px-2">${scouted.attributes?.physical?.agility ?? '?'}</td>
+                <td class="text-center py-2 px-2">${scouted.attributes?.physical?.stamina ?? '?'}</td>
+            `;
+        } else if (activeDraftView === 'skills') {
+            row.innerHTML = `
+                <td class="py-2 px-2 text-center">${starBtn}</td>
+                <td class="py-2 px-2 text-center">${posBadge}</td>
+                <td class="py-2 px-3 font-semibold text-slate-900 font-sans truncate max-w-[140px]">${scouted.name}</td>
+                <td class="text-center py-2 px-2">${scouted.attributes?.technical?.throwingAccuracy ?? '?'}</td>
+                <td class="text-center py-2 px-2">${scouted.attributes?.technical?.catchingHands ?? '?'}</td>
+                <td class="text-center py-2 px-2">${scouted.attributes?.technical?.blocking ?? '?'}</td>
+                <td class="text-center py-2 px-2">${scouted.attributes?.technical?.tackling ?? '?'}</td>
+                <td class="text-center py-2 px-2">${scouted.attributes?.technical?.blockShedding ?? '?'}</td>
+                <td class="text-center py-2 px-2">${scouted.attributes?.mental?.playbookIQ ?? '?'}</td>
+            `;
+        } else {
+            row.innerHTML = `
+                <td class="py-2 px-2 text-center">${starBtn}</td>
+                <td class="py-2 px-2 text-center">${posBadge}</td>
+                <td class="py-2 px-3 font-semibold text-slate-900 font-sans truncate max-w-[140px]">${scouted.name}</td>
+                <td class="text-center py-2 px-2">${scouted.age}</td>
+                <td class="text-center py-2 px-2 font-bold text-amber-600">${scouted.potential}</td>
+                <td class="text-center py-2 px-2 text-blue-600 font-bold">${scouted.attributes?.physical?.speed ?? '?'}</td>
+                <td class="text-center py-2 px-2">${scouted.attributes?.technical?.catchingHands ?? '?'}</td>
+                <td class="text-center py-2 px-2 font-black text-slate-900">${ovr}</td>
+            `;
+        }
+
         row.onclick = () => onPlayerSelect(scouted.id);
         elements.draftPoolTbody.appendChild(row);
     });
@@ -384,13 +531,13 @@ export const debouncedRenderDraftPool = debounce(renderDraftPool, 300);
 
 export function updateSelectedPlayerRow(newSelectedId) {
     selectedPlayerId = newSelectedId;
-    document.querySelectorAll('.draft-player-row').forEach(r => r.classList.toggle('bg-amber-200', r.dataset.playerId === newSelectedId));
+    document.querySelectorAll('.draft-player-row').forEach(r => r.classList.toggle('bg-amber-100', r.dataset.playerId === newSelectedId));
 }
 
 export function renderSelectedPlayerCard(player, gameState) {
     if (!elements.selectedPlayerCard) return;
     if (!player || !gameState?.playerTeam) {
-        elements.selectedPlayerCard.innerHTML = `<p class="text-gray-400 text-sm italic text-center py-8">Select a player to view details.</p>`;
+        elements.selectedPlayerCard.innerHTML = `<p class="text-slate-400 text-xs italic text-center py-12">Select a prospect from the board to examine their scouting report.</p>`;
         if (elements.draftPlayerBtn) elements.draftPlayerBtn.disabled = true;
         return;
     }
@@ -399,18 +546,75 @@ export function renderSelectedPlayerCard(player, gameState) {
     const maxLevel = playerRoster.reduce((max, rp) => Math.max(max, getRelationshipLevel(rp.id, player.id)), relationshipLevels.STRANGER.level);
     const scouted = getScoutedPlayerInfo(player, maxLevel);
 
-    const positions = Object.keys(positionOverallWeights);
-    let overallsHtml = '<div class="mt-2 grid grid-cols-4 gap-1 text-center">';
-    positions.forEach(pos => {
-        overallsHtml += `<div class="bg-gray-100 p-1.5 rounded"><p class="text-[10px] font-bold text-gray-500">${pos}</p><p class="font-black text-sm text-gray-800">${calculateOverall(player, pos)}</p></div>`;
+    const pos = scouted.pos || estimateBestPosition(scouted);
+    const ovr = calculateOverall(scouted, pos);
+
+    // Teammate Social Radar
+    const bestFriend = playerRoster.find(r => r.id === player.social?.bestFriendId);
+    const friendsOnTeam = playerRoster.filter(r => player.social?.goodFriendIds?.includes(r.id));
+    const rivalOnTeam = playerRoster.find(r => player.social?.rivalIds?.includes(r.id));
+
+    let socialBadgeHtml = '';
+    if (bestFriend) {
+        socialBadgeHtml += `<span class="bg-amber-100 text-amber-800 border border-amber-300 px-1.5 py-0.5 rounded text-[10px] font-bold">🤝 BFF: ${bestFriend.name.split(' ')[0]}</span>`;
+    }
+    if (friendsOnTeam.length > 0) {
+        socialBadgeHtml += `<span class="bg-emerald-100 text-emerald-800 border border-emerald-300 px-1.5 py-0.5 rounded text-[10px] font-bold">Friends: ${friendsOnTeam.length}</span>`;
+    }
+    if (rivalOnTeam) {
+        socialBadgeHtml += `<span class="bg-rose-100 text-rose-800 border border-rose-300 px-1.5 py-0.5 rounded text-[10px] font-bold">⚠️ Rival: ${rivalOnTeam.name.split(' ')[0]}</span>`;
+    }
+
+    const workEthic = player.personality?.workEthic || 50;
+    const ego = player.personality?.ego || 50;
+    const clique = player.personality?.clique || 'Regular';
+
+    const positions = ['QB', 'RB', 'WR', 'TE', 'OL', 'DL', 'LB', 'DB'];
+    let overallsHtml = '<div class="grid grid-cols-4 gap-1 text-center mt-2">';
+    positions.forEach(pKey => {
+        const pOvr = calculateOverall(player, pKey);
+        const isBest = pKey === pos;
+        overallsHtml += `
+            <div class="${isBest ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-700'} p-1 rounded border border-slate-200">
+                <p class="text-[9px] font-bold uppercase ${isBest ? 'text-amber-400' : 'text-slate-400'}">${pKey}</p>
+                <p class="font-black text-xs">${pOvr}</p>
+            </div>`;
     });
     overallsHtml += '</div>';
 
     elements.selectedPlayerCard.innerHTML = `
-        <h4 class="font-bold text-base text-gray-900">${scouted.name}</h4>
-        <p class="text-xs text-gray-500">Age: ${scouted.age} | H: ${formatHeight(scouted.attributes?.physical?.height)} | W: ${scouted.attributes?.physical?.weight} lbs</p>
-        <p class="text-xs text-gray-600 mt-1">Est. Pos: <span class="font-bold text-gray-900">${estimateBestPosition(scouted)}</span> | Pot: <span class="font-bold text-amber-600">${scouted.potential}</span></p>
-        ${overallsHtml}
+        <div>
+            <!-- Top Identity Header -->
+            <div class="flex justify-between items-start mb-2">
+                <div>
+                    <h3 class="font-black text-base text-slate-900 leading-tight">${scouted.name}</h3>
+                    <p class="text-xs text-slate-500 mt-0.5">${scouted.age}yo • ${formatHeight(scouted.attributes?.physical?.height)} • ${scouted.attributes?.physical?.weight} lbs</p>
+                </div>
+                <div class="text-right bg-slate-900 text-white px-2.5 py-1 rounded">
+                    <span class="text-[9px] uppercase tracking-wider block text-slate-400">${pos} OVR</span>
+                    <span class="text-xl font-black">${ovr}</span>
+                </div>
+            </div>
+
+            <!-- Personality & Clique Bar -->
+            <div class="flex flex-wrap items-center gap-1.5 mb-2 text-[10px]">
+                <span class="bg-indigo-100 text-indigo-900 font-bold px-1.5 py-0.5 rounded border border-indigo-200">Clique: ${clique}</span>
+                <span class="bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded font-mono">Ethic: <b>${workEthic}</b></span>
+                <span class="${ego > 70 ? 'bg-rose-100 text-rose-800 font-bold' : 'bg-slate-100 text-slate-700'} px-1.5 py-0.5 rounded font-mono">Ego: <b>${ego}</b></span>
+                ${socialBadgeHtml}
+            </div>
+
+            <!-- Scouting Bio & Lore Box -->
+            ${player.bio ? `
+            <div class="p-2 bg-amber-50/70 border border-amber-200 rounded text-[11px] text-slate-700 leading-relaxed italic mb-2">
+                <span class="font-bold uppercase tracking-wider text-[9px] text-amber-800 not-italic block mb-0.5">Scouting Lore & Reputation</span>
+                "${player.bio}"
+            </div>` : ''}
+
+            <!-- Positional Overalls Matrix -->
+            <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Positional Suitability</span>
+            ${overallsHtml}
+        </div>
     `;
 }
 
@@ -433,7 +637,7 @@ export function renderPlayerRoster(playerTeam) {
     const summaryEl = document.getElementById('roster-summary');
     if (summaryEl) {
         const counts = { QB: 0, RB: 0, WR: 0, TE: 0, OL: 0, DL: 0, LB: 0, DB: 0 };
-        const ideal  = { QB: 1, RB: 2, WR: 3, TE: 1, OL: 3, DL: 3, LB: 2, DB: 3 };
+        const ideal = { QB: 1, RB: 2, WR: 3, TE: 1, OL: 3, DL: 3, LB: 2, DB: 3 };
 
         roster.forEach(p => {
             const pos = p.pos || estimateBestPosition(p);
@@ -445,16 +649,16 @@ export function renderPlayerRoster(playerTeam) {
                 <span class="text-[10px] font-bold uppercase tracking-wider text-slate-500 block mb-1">Roster Needs Radar</span>
                 <div class="grid grid-cols-4 gap-1 text-[10px] font-mono text-center">
                     ${Object.entries(counts).map(([pos, count]) => {
-                        const target = ideal[pos];
-                        const isNeed = count < target;
-                        const isFull = count >= target;
-                        const bg = isNeed ? (count === 0 ? 'bg-rose-100 text-rose-800 border-rose-300 font-bold' : 'bg-amber-50 text-amber-800 border-amber-200') : 'bg-slate-100 text-slate-500 border-slate-200';
-                        return `
+            const target = ideal[pos];
+            const isNeed = count < target;
+            const isFull = count >= target;
+            const bg = isNeed ? (count === 0 ? 'bg-rose-100 text-rose-800 border-rose-300 font-bold' : 'bg-amber-50 text-amber-800 border-amber-200') : 'bg-slate-100 text-slate-500 border-slate-200';
+            return `
                         <div class="border p-1 rounded ${bg}" title="${count} of ${target} ideal">
                             <span class="block text-[9px] font-sans font-bold">${pos}</span>
                             <span>${count}/${target}</span>
                         </div>`;
-                    }).join('')}
+        }).join('')}
                 </div>
             </div>
         `;
@@ -519,7 +723,7 @@ export function switchTab(tabId, gameState) {
 let rosterSortCol = 'ovr';
 let rosterSortDir = 'desc';
 
-window.app_setRosterSort = function(col) {
+window.app_setRosterSort = function (col) {
     if (rosterSortCol === col) {
         rosterSortDir = (rosterSortDir === 'desc') ? 'asc' : 'desc';
     } else {
@@ -626,7 +830,7 @@ function renderMyTeamTab(gameState) {
     elements.myTeamRoster.innerHTML = html + `</tbody></table></div>`;
 }
 
-window.app_autoResetLineup = function() {
+window.app_autoResetLineup = function () {
     const gs = getGameState();
     if (!gs?.playerTeam) return;
     if (confirm("Reset lineup to optimal depth rankings? All manual slot locks will clear.")) {
@@ -694,7 +898,7 @@ function renderPositionalOveralls() {
     const keyAttrConfig = {
         QB: [
             { label: 'THR', get: p => p.attributes?.technical?.throwingAccuracy ?? 50 },
-            { label: 'IQ',  get: p => p.attributes?.mental?.playbookIQ ?? 50 },
+            { label: 'IQ', get: p => p.attributes?.mental?.playbookIQ ?? 50 },
             { label: 'SPD', get: p => p.attributes?.physical?.speed ?? 50 }
         ],
         RB: [
@@ -724,7 +928,7 @@ function renderPositionalOveralls() {
         ],
         LB: [
             { label: 'TKL', get: p => p.attributes?.technical?.tackling ?? 50 },
-            { label: 'IQ',  get: p => p.attributes?.mental?.playbookIQ ?? 50 },
+            { label: 'IQ', get: p => p.attributes?.mental?.playbookIQ ?? 50 },
             { label: 'SPD', get: p => p.attributes?.physical?.speed ?? 50 }
         ],
         DB: [
@@ -787,28 +991,28 @@ function renderPositionalOveralls() {
             
             <div class="flex-1 overflow-y-auto max-h-80 p-1.5 space-y-1 divide-y divide-slate-100">
                 ${players.map((p, i) => {
-                    const ovr = calculateOverall(p, pos);
-                    const natPos = p.pos || estimateBestPosition(p);
-                    const isOffPosition = natPos !== pos;
-                    const starterSlot = activeStarterMap.get(p.id);
-                    const isStarterHere = starterSlot && starterSlot.startsWith(pos);
-                    const isStarterElsewhere = starterSlot && !starterSlot.startsWith(pos);
+            const ovr = calculateOverall(p, pos);
+            const natPos = p.pos || estimateBestPosition(p);
+            const isOffPosition = natPos !== pos;
+            const starterSlot = activeStarterMap.get(p.id);
+            const isStarterHere = starterSlot && starterSlot.startsWith(pos);
+            const isStarterElsewhere = starterSlot && !starterSlot.startsWith(pos);
 
-                    const statusAlert = p.status?.duration > 0 
-                        ? `<span class="text-[9px] text-rose-600 font-bold ml-1" title="${p.status.description || 'Unavailable'}">🩹 ${p.status.duration}w</span>` 
-                        : '';
+            const statusAlert = p.status?.duration > 0
+                ? `<span class="text-[9px] text-rose-600 font-bold ml-1" title="${p.status.description || 'Unavailable'}">🩹 ${p.status.duration}w</span>`
+                : '';
 
-                    const energy = Math.round(100 - (p.fatigue || 0));
-                    const energyBadge = energy < 65 
-                        ? `<span class="text-[8px] bg-amber-100 text-amber-800 px-1 rounded font-bold" title="Low Stamina">${energy}%</span>` 
-                        : '';
+            const energy = Math.round(100 - (p.fatigue || 0));
+            const energyBadge = energy < 65
+                ? `<span class="text-[8px] bg-amber-100 text-amber-800 px-1 rounded font-bold" title="Low Stamina">${energy}%</span>`
+                : '';
 
-                    // Key stats preview row
-                    const statPills = attrsConfig.map(a => 
-                        `<span class="mr-1.5"><b class="text-slate-400 font-normal">${a.label}:</b> <span class="text-slate-700 font-semibold">${a.get(p)}</span></span>`
-                    ).join('');
+            // Key stats preview row
+            const statPills = attrsConfig.map(a =>
+                `<span class="mr-1.5"><b class="text-slate-400 font-normal">${a.label}:</b> <span class="text-slate-700 font-semibold">${a.get(p)}</span></span>`
+            ).join('');
 
-                    return `
+            return `
                     <div class="p-1.5 rounded hover:bg-slate-50 transition cursor-pointer group flex items-center justify-between"
                          onclick="app.openPlayerCard('${p.id}')"
                          title="Click to view scouting dossier for ${p.name}">
@@ -837,7 +1041,7 @@ function renderPositionalOveralls() {
                             <span class="text-[9px] text-slate-400 block font-bold uppercase -mt-1 tracking-tighter">OVR</span>
                         </div>
                     </div>`;
-                }).join('')}
+        }).join('')}
                 
                 ${players.length === 0 ? `<div class="p-4 text-center text-xs text-slate-400 italic">No players available for this position.</div>` : ''}
             </div>
@@ -1063,16 +1267,16 @@ window.app_openSlotModal = function (side, slotId) {
     </div>
     <div class="space-y-2 max-h-[60vh] overflow-y-auto pr-1 pb-2">
         ${candidates.map(p => {
-            const slotOvr = calculateOverall(p, posKey);
-            const energy = Math.max(0, Math.round(100 - (p.fatigue || 0)));
-            const isUnavailable = p.status?.duration > 0;
-            const otherSlot = Object.entries(otherChart).find(([_, id]) => id === p.id)?.[0] || null;
-            const isCurrent = p.id === currentId;
+        const slotOvr = calculateOverall(p, posKey);
+        const energy = Math.max(0, Math.round(100 - (p.fatigue || 0)));
+        const isUnavailable = p.status?.duration > 0;
+        const otherSlot = Object.entries(otherChart).find(([_, id]) => id === p.id)?.[0] || null;
+        const isCurrent = p.id === currentId;
 
-            let borderClass = isCurrent ? 'bg-amber-50 border-amber-400' : 'bg-white border-slate-200 hover:border-slate-400';
-            let energyColor = energy >= 75 ? 'text-emerald-600' : (energy >= 50 ? 'text-amber-600' : 'text-rose-600 font-bold');
+        let borderClass = isCurrent ? 'bg-amber-50 border-amber-400' : 'bg-white border-slate-200 hover:border-slate-400';
+        let energyColor = energy >= 75 ? 'text-emerald-600' : (energy >= 50 ? 'text-amber-600' : 'text-rose-600 font-bold');
 
-            return `
+        return `
             <button class="w-full text-left p-3 border rounded-sm shadow-sm flex justify-between items-center transition-all ${borderClass}" onclick="app_assignSlot('${side}', '${slotId}', '${p.id}')">
                 <div class="flex flex-col truncate pr-2">
                     <div class="flex items-center gap-2">
@@ -1085,9 +1289,9 @@ window.app_openSlotModal = function (side, slotId) {
                         <span>•</span>
                         <span class="${energyColor}">⚡ ${energy}% Energy</span>
                         <span>•</span>
-                        ${otherSlot 
-                            ? `<span class="bg-amber-100 text-amber-800 border border-amber-300 px-1 rounded font-sans font-black text-[10px]" title="Already starting on ${otherSide}">⚡ Starts at ${otherSlot} (${otherSide.substring(0,3)})</span>`
-                            : `<span class="text-slate-400 font-sans">🪑 Free on ${otherSide}</span>`}
+                        ${otherSlot
+                ? `<span class="bg-amber-100 text-amber-800 border border-amber-300 px-1 rounded font-sans font-black text-[10px]" title="Already starting on ${otherSide}">⚡ Starts at ${otherSlot} (${otherSide.substring(0, 3)})</span>`
+                : `<span class="text-slate-400 font-sans">🪑 Free on ${otherSide}</span>`}
                     </div>
                 </div>
                 <div class="text-right shrink-0">
@@ -1095,7 +1299,7 @@ window.app_openSlotModal = function (side, slotId) {
                     <span class="text-[9px] text-slate-400 uppercase font-bold block -mt-1">${posKey} OVR</span>
                 </div>
             </button>`;
-        }).join('')}
+    }).join('')}
     </div>`;
 
     showModal(`Assign Slot: ${side.toUpperCase()} ${slotId}`, modalHtml);
@@ -1140,20 +1344,20 @@ export function renderStandingsTab(gameState) {
     elements.standingsContainer.innerHTML = '';
 
     const tiers = [
-        { 
-            name: 'Premier Parks (Tier 1)', 
+        {
+            name: 'Premier Parks (Tier 1)',
             teams: gameState.teams.filter(t => t.tier === 1),
             hasRel: true,
             hasProm: false
         },
-        { 
-            name: 'Sandlot Circuit (Tier 2)', 
+        {
+            name: 'Sandlot Circuit (Tier 2)',
             teams: gameState.teams.filter(t => t.tier === 2),
             hasRel: false,
             hasProm: true
         },
-        { 
-            name: 'Pee-Wee League (Youth)', 
+        {
+            name: 'Pee-Wee League (Youth)',
             teams: gameState.teams.filter(t => t.leagueType === 'youth'),
             hasRel: false,
             hasProm: false
@@ -1185,24 +1389,24 @@ export function renderStandingsTab(gameState) {
                     </thead>
                     <tbody class="divide-y divide-slate-100">
                         ${sorted.map((t, i) => {
-                            const isMe = t.id === gameState.playerTeam?.id;
-                            const total = (t.wins || 0) + (t.losses || 0);
-                            const pct = total > 0 ? ((t.wins || 0) / total).toFixed(3).replace(/^0+/, '') : '.000';
-                            
-                            // ZenGM style cut-off highlights
-                            let borderIndicator = '';
-                            let badge = '';
-                            if (tier.hasProm && i < 2) {
-                                borderIndicator = 'border-l-4 border-emerald-500 bg-emerald-50/40';
-                                badge = '<span class="text-[8px] bg-emerald-100 text-emerald-800 px-1 py-0.2 rounded font-bold ml-1 font-sans">PROM</span>';
-                            } else if (tier.hasRel && i >= sorted.length - 2) {
-                                borderIndicator = 'border-l-4 border-rose-500 bg-rose-50/40';
-                                badge = '<span class="text-[8px] bg-rose-100 text-rose-800 px-1 py-0.2 rounded font-bold ml-1 font-sans">REL</span>';
-                            } else if (i === 0) {
-                                badge = '<span class="text-[8px] bg-amber-100 text-amber-800 px-1 py-0.2 rounded font-bold ml-1 font-sans">#1</span>';
-                            }
+            const isMe = t.id === gameState.playerTeam?.id;
+            const total = (t.wins || 0) + (t.losses || 0);
+            const pct = total > 0 ? ((t.wins || 0) / total).toFixed(3).replace(/^0+/, '') : '.000';
 
-                            return `
+            // ZenGM style cut-off highlights
+            let borderIndicator = '';
+            let badge = '';
+            if (tier.hasProm && i < 2) {
+                borderIndicator = 'border-l-4 border-emerald-500 bg-emerald-50/40';
+                badge = '<span class="text-[8px] bg-emerald-100 text-emerald-800 px-1 py-0.2 rounded font-bold ml-1 font-sans">PROM</span>';
+            } else if (tier.hasRel && i >= sorted.length - 2) {
+                borderIndicator = 'border-l-4 border-rose-500 bg-rose-50/40';
+                badge = '<span class="text-[8px] bg-rose-100 text-rose-800 px-1 py-0.2 rounded font-bold ml-1 font-sans">REL</span>';
+            } else if (i === 0) {
+                badge = '<span class="text-[8px] bg-amber-100 text-amber-800 px-1 py-0.2 rounded font-bold ml-1 font-sans">#1</span>';
+            }
+
+            return `
                             <tr class="${borderIndicator} ${isMe ? 'bg-amber-50 font-bold' : ''}">
                                 <td class="py-1.5 px-3 font-sans truncate flex items-center ${isMe ? 'text-amber-800 font-black' : 'text-slate-800'}">
                                     <span class="w-4 font-mono text-[10px] text-slate-400">${i + 1}.</span>
@@ -1213,7 +1417,7 @@ export function renderStandingsTab(gameState) {
                                 <td class="py-1.5 px-2 text-center text-slate-500">${t.losses || 0}</td>
                                 <td class="py-1.5 px-2 text-center font-bold text-slate-700">${pct}</td>
                             </tr>`;
-                        }).join('')}
+        }).join('')}
                     </tbody>
                 </table>
             </div>`;
@@ -1288,7 +1492,7 @@ export function renderHistoryTab(gameState) {
     if (gameState.records) {
         const formatRec = (rec, isCareer) => rec && rec.val > 0 ? `<span class="font-black text-slate-900">${rec.val}</span> <span class="text-slate-600">by ${rec.holder} ${isCareer ? '' : `(Yr ${rec.year})`}</span>` : '<span class="text-slate-400">None</span>';
         const r = gameState.records;
-        
+
         recordsHtml = `
         <div class="bg-white rounded-sm border border-amber-300 shadow-sm overflow-hidden mb-6">
             <div class="bg-gradient-to-r from-amber-600 to-amber-500 text-white px-4 py-2">
@@ -1411,7 +1615,7 @@ export function updateMessagesNotification(messages) {
 
 export function renderOffseasonScreen(report, year) {
     if (elements.offseasonYear) elements.offseasonYear.textContent = year;
-    
+
     // 1. Player Development List
     const devContainer = elements.playerDevelopmentContainer;
     if (devContainer) {
@@ -1451,7 +1655,7 @@ export function renderOffseasonScreen(report, year) {
     }
 }
 
-export function setupDragAndDrop(onDrop) {}
+export function setupDragAndDrop(onDrop) { }
 
 export function setupDepthChartTabs() {
     const subTabs = document.querySelectorAll(".depth-chart-tab");

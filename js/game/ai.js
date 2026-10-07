@@ -573,15 +573,15 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
             else score -= 10;
         }
 
-        // 2. Deep routes: Heavily penalize weak-armed QBs launching deep moonballs
+        // 2. Deep routes: Neighborhood kids shouldn't be hurling 40-yard bombs
         if (depth > 14) {
-            if (qbStrength < 45) {
-                // Low arm strength cannot reach deep receivers in time before DBs recover
-                score -= (45 - qbStrength) * 1.5; 
-            } else if (minProjectedSeparation > 3.0 && armFactor > 0.55) {
-                score += 30 * iqFactor * armFactor;
+            if (qbStrength < 60) {
+                // EXTREME penalty for weak arms trying to throw deep
+                score -= (60 - qbStrength) * 3.0; 
+            } else if (minProjectedSeparation > 4.0 && armFactor > 0.65) {
+                score += 15 * iqFactor * armFactor; // Only take the shot if WIDE open
             } else {
-                score -= 40;
+                score -= 60; // Otherwise, look for a checkdown
             }
         }
 
