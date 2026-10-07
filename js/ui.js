@@ -418,12 +418,47 @@ export function renderPlayerRoster(playerTeam) {
     if (!elements.rosterCount || !elements.draftRosterList || !playerTeam) return;
     const roster = getUIRosterObjects(playerTeam);
     elements.rosterCount.textContent = `${roster.length}/18`;
-    elements.draftRosterList.innerHTML = roster.map(p => `
-        <li class="py-1.5 px-3 flex justify-between items-center text-xs">
-            <span class="font-semibold text-gray-800">${p.name}</span>
-            <span class="text-gray-400 font-bold">${estimateBestPosition(p)} (${calculateOverall(p, estimateBestPosition(p))})</span>
-        </li>
-    `).join('') || '<li class="p-2 text-center text-gray-400 text-xs italic">No players drafted yet.</li>';
+
+    elements.draftRosterList.innerHTML = roster.map(p => {
+        const pos = p.pos || estimateBestPosition(p);
+        const ovr = calculateOverall(p, pos);
+        return `
+        <li class="py-1 px-3 flex justify-between items-center text-xs hover:bg-slate-50 transition">
+            <span class="font-semibold text-slate-800 truncate pr-2">${p.name}</span>
+            <span class="font-mono text-[10px] font-bold text-slate-600 bg-slate-100 px-1 rounded">${pos} ${ovr}</span>
+        </li>`;
+    }).join('') || '<li class="p-4 text-center text-slate-400 text-xs italic">No players drafted yet.</li>';
+
+    // ZenGM Style Positional Needs Radar
+    const summaryEl = document.getElementById('roster-summary');
+    if (summaryEl) {
+        const counts = { QB: 0, RB: 0, WR: 0, TE: 0, OL: 0, DL: 0, LB: 0, DB: 0 };
+        const ideal  = { QB: 1, RB: 2, WR: 3, TE: 1, OL: 3, DL: 3, LB: 2, DB: 3 };
+
+        roster.forEach(p => {
+            const pos = p.pos || estimateBestPosition(p);
+            if (counts[pos] !== undefined) counts[pos]++;
+        });
+
+        summaryEl.innerHTML = `
+            <div class="border-t border-slate-200 pt-2">
+                <span class="text-[10px] font-bold uppercase tracking-wider text-slate-500 block mb-1">Roster Needs Radar</span>
+                <div class="grid grid-cols-4 gap-1 text-[10px] font-mono text-center">
+                    ${Object.entries(counts).map(([pos, count]) => {
+                        const target = ideal[pos];
+                        const isNeed = count < target;
+                        const isFull = count >= target;
+                        const bg = isNeed ? (count === 0 ? 'bg-rose-100 text-rose-800 border-rose-300 font-bold' : 'bg-amber-50 text-amber-800 border-amber-200') : 'bg-slate-100 text-slate-500 border-slate-200';
+                        return `
+                        <div class="border p-1 rounded ${bg}" title="${count} of ${target} ideal">
+                            <span class="block text-[9px] font-sans font-bold">${pos}</span>
+                            <span>${count}/${target}</span>
+                        </div>`;
+                    }).join('')}
+                </div>
+            </div>
+        `;
+    }
 }
 
 export function renderDashboard(gameState) {
@@ -476,45 +511,110 @@ export function switchTab(tabId, gameState) {
     }
 }
 
+let rosterSortCol = 'ovr';
+let rosterSortDir = 'desc';
+
+window.app_setRosterSort = function(col) {
+    if (rosterSortCol === col) {
+        rosterSortDir = (rosterSortDir === 'desc') ? 'asc' : 'desc';
+    } else {
+        rosterSortCol = col;
+        rosterSortDir = 'desc';
+    }
+    renderMyTeamTab(getGameState());
+};
+
 function renderMyTeamTab(gameState) {
     if (!elements.myTeamRoster || !gameState?.playerTeam) return;
     const roster = getUIRosterObjects(gameState.playerTeam);
 
-    let html = `<div class="overflow-x-auto"><table class="min-w-full bg-white text-sm"><thead class="bg-gray-800 text-white sticky top-0 z-10"><tr>
-        <th class="py-2 px-3 text-left sticky left-0 bg-gray-800 z-20">Name</th>
-        <th class="py-2 px-3 text-center">C</th><th class="py-2 px-3 text-center">#</th>
-        <th class="py-2 px-3 text-center">Age</th><th class="py-2 px-3 text-center">Pot</th>
-        <th class="py-2 px-3 text-center">Status</th>
-        <th class="py-2 px-3 text-center">HGT</th><th class="py-2 px-3 text-center">WGT</th>
-        <th class="py-2 px-3 text-center">SPD</th><th class="py-2 px-3 text-center">STR</th>
-        <th class="py-2 px-3 text-center">AGI</th><th class="py-2 px-3 text-center">IQ</th>
-        <th class="py-2 px-3 text-center">THR</th><th class="py-2 px-3 text-center">HND</th>
-        <th class="py-2 px-3 text-center">BLK</th><th class="py-2 px-3 text-center">TKL</th>
-    </tr></thead><tbody class="divide-y">`;
+    const sortedRoster = [...roster].sort((a, b) => {
+        const bestPosA = a.pos || estimateBestPosition(a);
+        const bestPosB = b.pos || estimateBestPosition(b);
+        const ovrA = calculateOverall(a, bestPosA);
+        const ovrB = calculateOverall(b, bestPosB);
 
-    if (roster.length === 0) {
-        html += `<tr><td colspan="16" class="p-4 text-center text-gray-400">Roster empty.</td></tr>`;
+        let valA, valB;
+        if (rosterSortCol === 'name') { valA = a.name; valB = b.name; }
+        else if (rosterSortCol === 'ovr') { valA = ovrA; valB = ovrB; }
+        else if (rosterSortCol === 'age') { valA = a.age; valB = b.age; }
+        else if (rosterSortCol === 'pot') { valA = a.potential || 'C'; valB = b.potential || 'C'; }
+        else if (rosterSortCol === 'energy') { valA = 100 - (a.fatigue || 0); valB = 100 - (b.fatigue || 0); }
+        else {
+            valA = (a.attributes?.physical?.[rosterSortCol] ?? a.attributes?.technical?.[rosterSortCol] ?? a.attributes?.mental?.[rosterSortCol]) || 0;
+            valB = (b.attributes?.physical?.[rosterSortCol] ?? b.attributes?.technical?.[rosterSortCol] ?? b.attributes?.mental?.[rosterSortCol]) || 0;
+        }
+
+        if (typeof valA === 'string') {
+            return rosterSortDir === 'asc' ? valA.localeCompare(valB) : valB.localeCompare(valA);
+        }
+        return rosterSortDir === 'asc' ? valA - valB : valB - valA;
+    });
+
+    const getIndicator = (col) => rosterSortCol === col ? (rosterSortDir === 'desc' ? ' ▼' : ' ▲') : '';
+
+    let html = `
+    <div class="overflow-x-auto">
+        <table class="min-w-full bg-white text-xs">
+            <thead class="bg-slate-900 text-white sticky top-0 z-10 select-none uppercase tracking-wider text-[11px]">
+                <tr>
+                    <th class="py-2.5 px-3 text-left sticky left-0 bg-slate-900 z-20 cursor-pointer hover:bg-slate-800" onclick="app_setRosterSort('name')">Player${getIndicator('name')}</th>
+                    <th class="py-2.5 px-2 text-center cursor-pointer hover:bg-slate-800" onclick="app_setRosterSort('ovr')">Pos / OVR${getIndicator('ovr')}</th>
+                    <th class="py-2.5 px-2 text-center" title="Team Captain">Cap</th>
+                    <th class="py-2.5 px-2 text-center cursor-pointer hover:bg-slate-800" onclick="app_setRosterSort('age')">Age${getIndicator('age')}</th>
+                    <th class="py-2.5 px-2 text-center cursor-pointer hover:bg-slate-800" onclick="app_setRosterSort('pot')">Pot${getIndicator('pot')}</th>
+                    <th class="py-2.5 px-2 text-center cursor-pointer hover:bg-slate-800" onclick="app_setRosterSort('energy')">Energy${getIndicator('energy')}</th>
+                    <th class="py-2.5 px-2 text-center cursor-pointer hover:bg-slate-800 text-blue-400" onclick="app_setRosterSort('speed')">SPD${getIndicator('speed')}</th>
+                    <th class="py-2.5 px-2 text-center cursor-pointer hover:bg-slate-800" onclick="app_setRosterSort('strength')">STR${getIndicator('strength')}</th>
+                    <th class="py-2.5 px-2 text-center cursor-pointer hover:bg-slate-800" onclick="app_setRosterSort('agility')">AGI${getIndicator('agility')}</th>
+                    <th class="py-2.5 px-2 text-center cursor-pointer hover:bg-slate-800" onclick="app_setRosterSort('playbookIQ')">IQ${getIndicator('playbookIQ')}</th>
+                    <th class="py-2.5 px-2 text-center cursor-pointer hover:bg-slate-800" onclick="app_setRosterSort('throwingAccuracy')">THR${getIndicator('throwingAccuracy')}</th>
+                    <th class="py-2.5 px-2 text-center cursor-pointer hover:bg-slate-800" onclick="app_setRosterSort('catchingHands')">HND${getIndicator('catchingHands')}</th>
+                    <th class="py-2.5 px-2 text-center cursor-pointer hover:bg-slate-800" onclick="app_setRosterSort('blocking')">BLK${getIndicator('blocking')}</th>
+                    <th class="py-2.5 px-2 text-center cursor-pointer hover:bg-slate-800" onclick="app_setRosterSort('tackling')">TKL${getIndicator('tackling')}</th>
+                </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-100 font-mono">`;
+
+    if (sortedRoster.length === 0) {
+        html += `<tr><td colspan="14" class="p-6 text-center text-slate-400 font-sans italic">Roster empty.</td></tr>`;
     } else {
-        roster.forEach(p => {
+        sortedRoster.forEach(p => {
             const isCap = gameState.playerTeam.captainId === p.id;
-            const capIcon = isCap ? '★' : '☆';
-            html += `<tr data-player-id="${p.id}" class="cursor-pointer hover:bg-amber-50">
-                <td class="py-2 px-3 font-semibold sticky left-0 bg-white z-10">${p.name}</td>
-                <td class="text-center py-2 px-3 text-amber-500 font-bold">${capIcon}</td>
-                <td class="text-center py-2 px-3 font-medium">${p.number || '--'}</td>
-                <td class="text-center py-2 px-3">${p.age}</td>
-                <td class="text-center py-2 px-3 font-bold text-amber-600">${p.potential || '?'}</td>
-                <td class="text-center py-2 px-3 text-xs ${p.status?.duration > 0 ? 'text-red-500' : 'text-green-600'}">${p.status?.description || 'Healthy'}</td>
-                <td class="text-center py-2 px-3">${formatHeight(p.attributes?.physical?.height)}</td>
-                <td class="text-center py-2 px-3">${p.attributes?.physical?.weight || 0}</td>
-                <td class="text-center py-2 px-3 font-bold text-blue-600">${p.attributes?.physical?.speed || 0}</td>
-                <td class="text-center py-2 px-3">${p.attributes?.physical?.strength || 0}</td>
-                <td class="text-center py-2 px-3">${p.attributes?.physical?.agility || 0}</td>
-                <td class="text-center py-2 px-3">${p.attributes?.mental?.playbookIQ || 0}</td>
-                <td class="text-center py-2 px-3">${p.attributes?.technical?.throwingAccuracy || 0}</td>
-                <td class="text-center py-2 px-3">${p.attributes?.technical?.catchingHands || 0}</td>
-                <td class="text-center py-2 px-3">${p.attributes?.technical?.blocking || 0}</td>
-                <td class="text-center py-2 px-3">${p.attributes?.technical?.tackling || 0}</td>
+            const pos = p.pos || estimateBestPosition(p);
+            const ovr = calculateOverall(p, pos);
+            const energy = Math.max(0, Math.round(100 - (p.fatigue || 0)));
+            const energyColor = energy > 75 ? 'bg-emerald-500' : (energy > 50 ? 'bg-amber-500' : 'bg-rose-500');
+
+            html += `
+            <tr data-player-id="${p.id}" class="hover:bg-slate-50 transition cursor-pointer group">
+                <td class="py-2 px-3 font-semibold text-slate-900 sticky left-0 bg-white group-hover:bg-slate-50 z-10 flex items-center gap-2 truncate font-sans">
+                    <span class="text-slate-400 font-mono text-[10px] w-4">#${p.number || '--'}</span>
+                    <span class="truncate group-hover:text-amber-600 transition">${p.name}</span>
+                    ${p.status?.duration > 0 ? `<span class="text-[9px] bg-rose-100 text-rose-700 px-1 py-0.5 rounded font-bold" title="${p.status.description}">🩹 ${p.status.duration}w</span>` : ''}
+                </td>
+                <td class="text-center py-2 px-2">
+                    <span class="font-bold text-[10px] bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded mr-1">${pos}</span>
+                    <span class="font-black text-xs ${ovr >= 40 ? 'text-emerald-700' : (ovr >= 30 ? 'text-slate-900' : 'text-slate-500')}">${ovr}</span>
+                </td>
+                <td class="text-center py-2 px-2" onclick="event.stopPropagation(); app.setCaptain('${p.id}');" title="Toggle Captain">
+                    <button class="text-base font-bold ${isCap ? 'text-amber-500' : 'text-slate-300 hover:text-amber-400'} transition leading-none">${isCap ? '★' : '☆'}</button>
+                </td>
+                <td class="text-center py-2 px-2 text-slate-600">${p.age}</td>
+                <td class="text-center py-2 px-2 font-bold ${p.potential === 'A' ? 'text-amber-600' : (p.potential === 'B' ? 'text-blue-600' : 'text-slate-500')}">${p.potential || '?'}</td>
+                <td class="text-center py-2 px-2" title="${energy}% Stamina">
+                    <div class="w-12 bg-slate-200 rounded-full h-1.5 mx-auto overflow-hidden">
+                        <div class="${energyColor} h-full" style="width: ${energy}%"></div>
+                    </div>
+                </td>
+                <td class="text-center py-2 px-2 font-bold text-blue-600">${p.attributes?.physical?.speed || 0}</td>
+                <td class="text-center py-2 px-2 text-slate-700">${p.attributes?.physical?.strength || 0}</td>
+                <td class="text-center py-2 px-2 text-slate-700">${p.attributes?.physical?.agility || 0}</td>
+                <td class="text-center py-2 px-2 text-slate-700">${p.attributes?.mental?.playbookIQ || 0}</td>
+                <td class="text-center py-2 px-2 text-slate-700">${p.attributes?.technical?.throwingAccuracy || 0}</td>
+                <td class="text-center py-2 px-2 text-slate-700">${p.attributes?.technical?.catchingHands || 0}</td>
+                <td class="text-center py-2 px-2 text-slate-700">${p.attributes?.technical?.blocking || 0}</td>
+                <td class="text-center py-2 px-2 text-slate-700">${p.attributes?.technical?.tackling || 0}</td>
             </tr>`;
         });
     }
@@ -558,28 +658,169 @@ function renderPositionalOveralls() {
     const depthOrder = team.depthOrder || {};
     const displayOrder = ['QB', 'RB', 'WR', 'TE', 'OL', 'DL', 'LB', 'DB'];
 
-    let html = `<div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">`;
+    // Map which starter slots players currently occupy
+    const activeStarterMap = new Map();
+    const offChart = team.depthChart?.offense || {};
+    const defChart = team.depthChart?.defense || {};
+    Object.entries(offChart).forEach(([slot, pId]) => { if (pId) activeStarterMap.set(pId, slot); });
+    Object.entries(defChart).forEach(([slot, pId]) => { if (pId) activeStarterMap.set(pId, slot); });
+
+    // Key attribute definitions per position for compact stat bars
+    const keyAttrConfig = {
+        QB: [
+            { label: 'THR', get: p => p.attributes?.technical?.throwingAccuracy ?? 50 },
+            { label: 'IQ',  get: p => p.attributes?.mental?.playbookIQ ?? 50 },
+            { label: 'SPD', get: p => p.attributes?.physical?.speed ?? 50 }
+        ],
+        RB: [
+            { label: 'SPD', get: p => p.attributes?.physical?.speed ?? 50 },
+            { label: 'AGI', get: p => p.attributes?.physical?.agility ?? 50 },
+            { label: 'STR', get: p => p.attributes?.physical?.strength ?? 50 }
+        ],
+        WR: [
+            { label: 'SPD', get: p => p.attributes?.physical?.speed ?? 50 },
+            { label: 'HND', get: p => p.attributes?.technical?.catchingHands ?? 50 },
+            { label: 'AGI', get: p => p.attributes?.physical?.agility ?? 50 }
+        ],
+        TE: [
+            { label: 'HND', get: p => p.attributes?.technical?.catchingHands ?? 50 },
+            { label: 'BLK', get: p => p.attributes?.technical?.blocking ?? 50 },
+            { label: 'STR', get: p => p.attributes?.physical?.strength ?? 50 }
+        ],
+        OL: [
+            { label: 'STR', get: p => p.attributes?.physical?.strength ?? 50 },
+            { label: 'BLK', get: p => p.attributes?.technical?.blocking ?? 50 },
+            { label: 'WGT', get: p => `${p.attributes?.physical?.weight ?? 200}#` }
+        ],
+        DL: [
+            { label: 'STR', get: p => p.attributes?.physical?.strength ?? 50 },
+            { label: 'BSH', get: p => p.attributes?.technical?.blockShedding ?? 50 },
+            { label: 'TKL', get: p => p.attributes?.technical?.tackling ?? 50 }
+        ],
+        LB: [
+            { label: 'TKL', get: p => p.attributes?.technical?.tackling ?? 50 },
+            { label: 'IQ',  get: p => p.attributes?.mental?.playbookIQ ?? 50 },
+            { label: 'SPD', get: p => p.attributes?.physical?.speed ?? 50 }
+        ],
+        DB: [
+            { label: 'SPD', get: p => p.attributes?.physical?.speed ?? 50 },
+            { label: 'COV', get: p => (p.attributes?.technical?.coverage || p.attributes?.technical?.passCoverage) ?? 50 },
+            { label: 'TKL', get: p => p.attributes?.technical?.tackling ?? 50 }
+        ]
+    };
+
+    // Calculate group starter strength to give high-level strategic intelligence
+    const groupInsights = displayOrder.map(pos => {
+        const pIds = depthOrder[pos] || [];
+        const topPlayer = pIds.length ? roster.find(p => p.id === pIds[0]) : null;
+        const ovr = topPlayer ? calculateOverall(topPlayer, pos) : 0;
+        return { pos, topOvr: ovr, topName: topPlayer ? topPlayer.name : 'None' };
+    }).sort((a, b) => b.topOvr - a.topOvr);
+
+    const strongestGroup = groupInsights[0];
+    const weakestGroup = groupInsights[groupInsights.length - 1];
+
+    let html = `
+    <!-- Top Strategic Context Header -->
+    <div class="mb-4 bg-slate-900 text-white rounded-sm p-3 border border-slate-700 shadow-sm flex flex-col md:flex-row justify-between items-start md:items-center gap-3 shrink-0">
+        <div class="flex items-center gap-4 text-xs">
+            <div>
+                <span class="text-slate-400 uppercase text-[10px] font-bold tracking-wider block">Strongest Unit</span>
+                <span class="font-black text-emerald-400 text-sm">${strongestGroup.pos} Room</span> 
+                <span class="text-slate-300">(${strongestGroup.topName} • ${strongestGroup.topOvr} OVR)</span>
+            </div>
+            <div class="border-l border-slate-700 pl-4">
+                <span class="text-slate-400 uppercase text-[10px] font-bold tracking-wider block">Priority Need</span>
+                <span class="font-black text-amber-400 text-sm">${weakestGroup.pos} Room</span>
+                <span class="text-slate-300">(${weakestGroup.topName} • ${weakestGroup.topOvr} OVR)</span>
+            </div>
+        </div>
+        <div class="text-[11px] text-slate-300 bg-slate-800/80 px-3 py-1.5 rounded border border-slate-700">
+            <span class="text-slate-400 font-bold uppercase text-[9px] block">Active Schemes</span>
+            Offense: <b class="text-white">${team.formations?.offense || 'Balanced'}</b> | Defense: <b class="text-white">${team.formations?.defense || '3-2-3'}</b>
+        </div>
+    </div>
+
+    <!-- Positional Overall Grid -->
+    <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 pb-6">`;
+
     displayOrder.forEach(pos => {
         const pIds = depthOrder[pos] || [];
         const players = pIds.map(id => roster.find(p => p && p.id === id)).filter(Boolean);
+        const topOvr = players.length > 0 ? calculateOverall(players[0], pos) : 0;
+        const attrsConfig = keyAttrConfig[pos] || [];
 
         html += `
-        <div class="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden flex flex-col">
-            <div class="bg-gray-800 px-3 py-2 flex justify-between items-center text-white">
-                <h4 class="font-bold text-sm">${pos} DEPTH</h4>
-                <span class="text-[10px] font-bold bg-gray-700 px-2 py-0.5 rounded-full">${players.length}</span>
+        <div class="bg-white rounded-sm border border-slate-300 shadow-sm overflow-hidden flex flex-col">
+            <div class="bg-slate-800 px-3 py-2 flex justify-between items-center text-white border-b border-slate-700">
+                <div class="flex items-center gap-2">
+                    <span class="font-black text-sm tracking-wider uppercase">${pos} DEPTH</span>
+                    <span class="text-[10px] font-semibold text-slate-300 bg-slate-700 px-1.5 py-0.5 rounded">Starter: ${topOvr}</span>
+                </div>
+                <span class="text-[10px] font-bold bg-slate-700 px-2 py-0.5 rounded text-slate-200">${players.length} Players</span>
             </div>
-            <div class="flex-1 overflow-y-auto max-h-64 p-2 space-y-1">
-                ${players.map((p, i) => `
-                    <div class="flex items-center justify-between p-1.5 rounded text-sm hover:bg-gray-50">
-                        <span class="truncate">${i + 1}. ${p.name}</span>
-                        <span class="font-bold text-gray-700">${calculateOverall(p, pos)}</span>
-                    </div>
-                `).join('')}
+            
+            <div class="flex-1 overflow-y-auto max-h-80 p-1.5 space-y-1 divide-y divide-slate-100">
+                ${players.map((p, i) => {
+                    const ovr = calculateOverall(p, pos);
+                    const natPos = p.pos || estimateBestPosition(p);
+                    const isOffPosition = natPos !== pos;
+                    const starterSlot = activeStarterMap.get(p.id);
+                    const isStarterHere = starterSlot && starterSlot.startsWith(pos);
+                    const isStarterElsewhere = starterSlot && !starterSlot.startsWith(pos);
+
+                    const statusAlert = p.status?.duration > 0 
+                        ? `<span class="text-[9px] text-rose-600 font-bold ml-1" title="${p.status.description || 'Unavailable'}">🩹 ${p.status.duration}w</span>` 
+                        : '';
+
+                    const energy = Math.round(100 - (p.fatigue || 0));
+                    const energyBadge = energy < 65 
+                        ? `<span class="text-[8px] bg-amber-100 text-amber-800 px-1 rounded font-bold" title="Low Stamina">${energy}%</span>` 
+                        : '';
+
+                    // Key stats preview row
+                    const statPills = attrsConfig.map(a => 
+                        `<span class="mr-1.5"><b class="text-slate-400 font-normal">${a.label}:</b> <span class="text-slate-700 font-semibold">${a.get(p)}</span></span>`
+                    ).join('');
+
+                    return `
+                    <div class="p-1.5 rounded hover:bg-slate-50 transition cursor-pointer group flex items-center justify-between"
+                         onclick="app.openPlayerCard('${p.id}')"
+                         title="Click to view scouting dossier for ${p.name}">
+                        
+                        <div class="flex flex-col truncate pr-2 flex-1">
+                            <div class="flex items-center gap-1.5 truncate">
+                                <span class="font-mono text-xs font-bold text-slate-400 w-4">${i + 1}.</span>
+                                <span class="font-bold text-xs text-slate-900 group-hover:text-amber-600 truncate">${p.name}</span>
+                                ${statusAlert}
+                                ${energyBadge}
+                                ${isStarterHere ? `<span class="text-[8px] bg-emerald-100 text-emerald-800 font-black px-1 rounded uppercase tracking-tight border border-emerald-300">START • ${starterSlot}</span>` : ''}
+                                ${isStarterElsewhere ? `<span class="text-[8px] bg-slate-100 text-slate-600 font-bold px-1 rounded uppercase tracking-tight" title="Starting at ${starterSlot}">• ${starterSlot}</span>` : ''}
+                            </div>
+                            
+                            <!-- Micro-meta row: Age, Potential, Natural Pos, Key Stats -->
+                            <div class="text-[10px] text-slate-500 flex items-center gap-2 mt-0.5 font-mono">
+                                <span class="text-slate-400">${p.age}yo</span>
+                                <span class="font-bold text-slate-600">Pot:${p.potential || '?'}</span>
+                                ${isOffPosition ? `<span class="text-amber-700 bg-amber-50 px-1 rounded text-[9px] font-sans font-bold" title="Natural Position">NAT: ${natPos}</span>` : ''}
+                                <span class="hidden sm:inline border-l border-slate-200 pl-1.5 text-[9px] text-slate-600 truncate">${statPills}</span>
+                            </div>
+                        </div>
+
+                        <div class="text-right shrink-0">
+                            <span class="font-black text-sm ${ovr >= 40 ? 'text-emerald-700' : (ovr >= 30 ? 'text-slate-900' : 'text-slate-400')}">${ovr}</span>
+                            <span class="text-[9px] text-slate-400 block font-bold uppercase -mt-1 tracking-tighter">OVR</span>
+                        </div>
+                    </div>`;
+                }).join('')}
+                
+                ${players.length === 0 ? `<div class="p-4 text-center text-xs text-slate-400 italic">No players available for this position.</div>` : ''}
             </div>
         </div>`;
     });
-    pane.innerHTML = html + `</div>`;
+
+    html += `</div>`;
+    pane.innerHTML = html;
 }
 
 function renderDepthChartSide(side, gameState) {
@@ -730,27 +971,80 @@ export function renderStandingsTab(gameState) {
     elements.standingsContainer.innerHTML = '';
 
     const tiers = [
-        { name: 'Premier Parks (Tier 1)', teams: gameState.teams.filter(t => t.tier === 1) },
-        { name: 'Sandlot Circuit (Tier 2)', teams: gameState.teams.filter(t => t.tier === 2) },
-        { name: 'Pee-Wee League (Youth)', teams: gameState.teams.filter(t => t.leagueType === 'youth') }
+        { 
+            name: 'Premier Parks (Tier 1)', 
+            teams: gameState.teams.filter(t => t.tier === 1),
+            hasRel: true,
+            hasProm: false
+        },
+        { 
+            name: 'Sandlot Circuit (Tier 2)', 
+            teams: gameState.teams.filter(t => t.tier === 2),
+            hasRel: false,
+            hasProm: true
+        },
+        { 
+            name: 'Pee-Wee League (Youth)', 
+            teams: gameState.teams.filter(t => t.leagueType === 'youth'),
+            hasRel: false,
+            hasProm: false
+        }
     ];
 
     tiers.forEach(tier => {
         if (tier.teams.length === 0) return;
-        const sorted = tier.teams.sort((a, b) => (b.wins || 0) - (a.wins || 0));
+        const sorted = [...tier.teams].sort((a, b) => {
+            const winsDiff = (b.wins || 0) - (a.wins || 0);
+            if (winsDiff !== 0) return winsDiff;
+            return (a.losses || 0) - (b.losses || 0);
+        });
+
         elements.standingsContainer.innerHTML += `
-            <div class="bg-white rounded-lg border border-gray-200 overflow-hidden shadow-sm mb-4">
-                <div class="bg-gray-800 text-white px-3 py-2 font-bold text-sm">${tier.name}</div>
-                <table class="min-w-full text-xs">
-                    <thead class="bg-gray-50 text-gray-500">
-                        <tr><th class="py-1 px-3 text-left">Team</th><th class="py-1 px-3 text-center">W</th><th class="py-1 px-3 text-center">L</th></tr>
+            <div class="bg-white rounded-sm border border-slate-300 overflow-hidden shadow-sm mb-4">
+                <div class="bg-slate-900 text-white px-3 py-2 font-black text-xs uppercase tracking-wider flex justify-between items-center">
+                    <span>${tier.name}</span>
+                    <span class="text-[10px] font-normal text-slate-400">9 Games Total</span>
+                </div>
+                <table class="min-w-full text-xs font-mono">
+                    <thead class="bg-slate-100 text-slate-600 uppercase text-[10px]">
+                        <tr>
+                            <th class="py-1.5 px-3 text-left font-bold">Team</th>
+                            <th class="py-1.5 px-2 text-center font-bold">W</th>
+                            <th class="py-1.5 px-2 text-center font-bold">L</th>
+                            <th class="py-1.5 px-2 text-center font-bold">PCT</th>
+                        </tr>
                     </thead>
-                    <tbody class="divide-y">
-                        ${sorted.map(t => `<tr>
-                            <td class="py-1.5 px-3 font-semibold ${t.id === gameState.playerTeam.id ? 'text-amber-600' : 'text-gray-800'}">${t.name}</td>
-                            <td class="py-1.5 px-3 text-center font-bold">${t.wins || 0}</td>
-                            <td class="py-1.5 px-3 text-center text-gray-500">${t.losses || 0}</td>
-                        </tr>`).join('')}
+                    <tbody class="divide-y divide-slate-100">
+                        ${sorted.map((t, i) => {
+                            const isMe = t.id === gameState.playerTeam?.id;
+                            const total = (t.wins || 0) + (t.losses || 0);
+                            const pct = total > 0 ? ((t.wins || 0) / total).toFixed(3).replace(/^0+/, '') : '.000';
+                            
+                            // ZenGM style cut-off highlights
+                            let borderIndicator = '';
+                            let badge = '';
+                            if (tier.hasProm && i < 2) {
+                                borderIndicator = 'border-l-4 border-emerald-500 bg-emerald-50/40';
+                                badge = '<span class="text-[8px] bg-emerald-100 text-emerald-800 px-1 py-0.2 rounded font-bold ml-1 font-sans">PROM</span>';
+                            } else if (tier.hasRel && i >= sorted.length - 2) {
+                                borderIndicator = 'border-l-4 border-rose-500 bg-rose-50/40';
+                                badge = '<span class="text-[8px] bg-rose-100 text-rose-800 px-1 py-0.2 rounded font-bold ml-1 font-sans">REL</span>';
+                            } else if (i === 0) {
+                                badge = '<span class="text-[8px] bg-amber-100 text-amber-800 px-1 py-0.2 rounded font-bold ml-1 font-sans">#1</span>';
+                            }
+
+                            return `
+                            <tr class="${borderIndicator} ${isMe ? 'bg-amber-50 font-bold' : ''}">
+                                <td class="py-1.5 px-3 font-sans truncate flex items-center ${isMe ? 'text-amber-800 font-black' : 'text-slate-800'}">
+                                    <span class="w-4 font-mono text-[10px] text-slate-400">${i + 1}.</span>
+                                    <span class="truncate">${t.name}</span>
+                                    ${badge}
+                                </td>
+                                <td class="py-1.5 px-2 text-center font-black ${t.wins > 0 ? 'text-slate-900' : 'text-slate-400'}">${t.wins || 0}</td>
+                                <td class="py-1.5 px-2 text-center text-slate-500">${t.losses || 0}</td>
+                                <td class="py-1.5 px-2 text-center font-bold text-slate-700">${pct}</td>
+                            </tr>`;
+                        }).join('')}
                     </tbody>
                 </table>
             </div>`;
