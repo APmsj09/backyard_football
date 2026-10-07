@@ -471,17 +471,22 @@ export function renderDashboard(gameState) {
     if (elements.dashboardYear) elements.dashboardYear.textContent = year || '1';
     if (elements.dashboardWeek) elements.dashboardWeek.textContent = currentW;
 
-    const credEl = document.getElementById('dashboard-cred');
-    const favorsEl = document.getElementById('dashboard-favors');
-    if (credEl) credEl.textContent = playerTeam.socialProfile?.streetCred || 50;
-    if (favorsEl) favorsEl.textContent = playerTeam.socialProfile?.favorTokens || 0;
-
-    if (elements.advanceWeekBtn) elements.advanceWeekBtn.textContent = currentWeek < 9 ? 'Play Week' : 'Go to Offseason';
+    // Update the button appearance based on current phase
+    if (elements.advanceWeekBtn) {
+        if (currentWeek === 0 && !gameState.draftCompleted) {
+            elements.advanceWeekBtn.innerHTML = `<span>Start Draft</span>`;
+        } else if (currentWeek >= 9) {
+            elements.advanceWeekBtn.innerHTML = `<span>Advance to Offseason →</span>`;
+        } else {
+            elements.advanceWeekBtn.innerHTML = `<span>Play Week ${currentWeek + 1}</span>`;
+        }
+    }
 
     if (messages) updateMessagesNotification(messages);
     const activeTab = elements.dashboardTabs?.querySelector('.tab-button.active')?.dataset.tab || 'my-team';
     switchTab(activeTab, gameState);
 }
+
 
 export function switchTab(tabId, gameState) {
     if (!elements.dashboardContent || !elements.dashboardTabs) return;
@@ -1242,14 +1247,43 @@ export function updateMessagesNotification(messages) {
 
 export function renderOffseasonScreen(report, year) {
     if (elements.offseasonYear) elements.offseasonYear.textContent = year;
-    const container = elements.playerDevelopmentContainer;
-    if (container && report?.developmentResults) {
-        container.innerHTML = report.developmentResults.map(r => `
-            <div class="p-2 bg-white rounded border border-gray-200 text-xs mb-1">
-                <span class="font-bold text-gray-800">${r.player.name} (${r.player.age}yo)</span>
-                <span class="text-green-600 font-semibold ml-2">${r.improvements.map(i => `${i.attr} +${i.increase}`).join(', ') || 'No gains'}</span>
-            </div>
-        `).join('');
+    
+    // 1. Player Development List
+    const devContainer = elements.playerDevelopmentContainer;
+    if (devContainer) {
+        if (report?.developmentResults && report.developmentResults.length > 0) {
+            devContainer.innerHTML = report.developmentResults.map(r => `
+                <div class="p-2.5 bg-white rounded border border-green-200 text-xs mb-1 shadow-sm">
+                    <span class="font-bold text-gray-900">${r.player.name} (${r.player.age}yo)</span>
+                    <div class="text-green-700 font-semibold mt-1">
+                        ${r.improvements.map(i => `<span class="bg-green-50 px-1.5 py-0.5 rounded border border-green-200 mr-1">${i.attr} +${i.increase}</span>`).join('') || '<span class="text-gray-400">No gains</span>'}
+                    </div>
+                </div>
+            `).join('');
+        } else {
+            devContainer.innerHTML = '<p class="text-gray-400 italic text-xs p-2">No player improvements this year.</p>';
+        }
+    }
+
+    // 2. Retirements List
+    if (elements.retirementsList) {
+        elements.retirementsList.innerHTML = (report?.retiredPlayers || []).map(p =>
+            `<li class="flex items-center gap-2"><span>👴</span><span><b>${p.name}</b> (Age ${p.age}) hung up his cleats.</span></li>`
+        ).join('') || '<li class="text-gray-400 italic text-xs">No retirements this season.</li>';
+    }
+
+    // 3. Departures List
+    if (elements.leavingPlayersList) {
+        elements.leavingPlayersList.innerHTML = (report?.leavingPlayers || []).map(p =>
+            `<li class="flex items-center gap-2"><span>🏃</span><span><b>${p.player?.name || p.name}</b>: ${p.reason}</span></li>`
+        ).join('') || '<li class="text-gray-400 italic text-xs">No player departures.</li>';
+    }
+
+    // 4. Hall of Fame List
+    if (elements.hofInducteesList) {
+        elements.hofInducteesList.innerHTML = (report?.hofInductees || []).map(p =>
+            `<li class="flex items-center gap-2"><span>🏆</span><span><b>${p.name}</b> (${p.careerStats?.touchdowns || 0} Career TDs)</span></li>`
+        ).join('') || '<li class="text-amber-800/60 italic text-xs">No new Hall of Fame inductees.</li>';
     }
 }
 

@@ -398,6 +398,7 @@ function handleFormationChange(e) {
 async function handleAdvanceWeek() {
     if (!gameState) return;
 
+    // 1. Initial Draft (Year 1/Year 4 pre-season)
     if (gameState.currentWeek === 0 && !gameState.draftCompleted) {
         Game.setupDraft();
         gameState = Game.getGameState();
@@ -409,6 +410,17 @@ async function handleAdvanceWeek() {
         return;
     }
 
+    // 2. THIS WAS MISSING: Advance to Offseason when Week 9 ends!
+    if (gameState.currentWeek >= WEEKS_IN_SEASON) {
+        const report = Game.advanceToOffseason();
+        gameState = Game.getGameState();
+        Game.saveGameState(activeSaveKey);
+        UI.renderOffseasonScreen(report, gameState.year);
+        UI.showScreen('offseason-screen');
+        return;
+    }
+
+    // 3. Regular Season game handling
     const playerTeamId = gameState.playerTeam.id;
     const gamesPerWeek = gameState.teams.length / 2;
     const weekGames = gameState.schedule.slice(gameState.currentWeek * gamesPerWeek, (gameState.currentWeek + 1) * gamesPerWeek);
@@ -428,6 +440,37 @@ async function handleAdvanceWeek() {
         simulateRestOfWeek();
     }
 }
+
+function simulateRestOfWeek() {
+    if (!gameState) return;
+    if (gameState.currentWeek >= WEEKS_IN_SEASON) {
+        handleAdvanceWeek();
+        return;
+    }
+    const results = Game.simulateWeek({ fastSim: true });
+    finishWeekSimulation(results || []);
+}
+
+function finishWeekSimulation(results) {
+    Game.processEndOfWeek();
+    gameState.currentWeek++;
+    Game.saveGameState(activeSaveKey);
+
+    if (results && results.length > 0) {
+        UI.showModal(`Week ${gameState.currentWeek} Summary`, buildResultsModalHtml(results));
+    }
+
+    // Keep the player on the dashboard to review final standings
+    if (gameState.currentWeek < WEEKS_IN_SEASON) {
+        Game.generateWeeklyFreeAgents();
+    }
+
+    gameState = Game.getGameState();
+    UI.renderDashboard(gameState);
+    UI.showScreen('dashboard-screen');
+}
+
+
 
 async function startLiveGame(playerGameMatch) {
     if (!gameState) return;
@@ -643,9 +686,12 @@ function handleSetCaptain(playerId) {
     }
 }
 
+// Make sure going to the next draft resets draftCompleted:
 function handleGoToNextDraft() {
-    Game.setupDraft();
     gameState = Game.getGameState();
+    if (!gameState) return;
+    gameState.draftCompleted = false;
+    Game.setupDraft();
     selectedPlayerId = null;
     UI.renderSelectedPlayerCard(null, gameState);
     UI.renderDraftScreen(gameState, handlePlayerSelectInDraft, selectedPlayerId, currentSortColumn, currentSortDirection);
