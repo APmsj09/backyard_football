@@ -836,6 +836,9 @@ function renderDepthChartSide(side, gameState) {
     const { depthChart, formations } = gameState.playerTeam;
     const roster = getUIRosterObjects(gameState.playerTeam);
     const currentChart = depthChart[side] || {};
+    const otherSide = side === 'offense' ? 'defense' : 'offense';
+    const otherChart = depthChart[otherSide] || {};
+
     const formKey = formations[side] || (side === 'offense' ? 'Balanced' : '3-2-3 Base');
     const formationData = (side === 'offense' ? offenseFormations : defenseFormations)[formKey];
 
@@ -866,38 +869,145 @@ function renderDepthChartSide(side, gameState) {
             if (['DE', 'DT', 'NT'].includes(posKey)) posKey = 'DL';
             if (['CB', 'S'].includes(posKey)) posKey = 'DB';
 
-            const ovr = player ? calculateOverall(player, posKey) : '?';
-            const shortName = player ? player.name.split(' ')[0] : 'Empty';
+            const ovr = player ? calculateOverall(player, posKey) : '--';
+            const shortName = player ? player.name.split(' ')[0] : 'EMPTY';
+            const energy = player ? Math.max(0, Math.round(100 - (player.fatigue || 0))) : 100;
+            const isUnavailable = player && player.status?.duration > 0;
 
-            slotEl.className = 'absolute transform -translate-x-1/2 -translate-y-1/2 flex flex-col items-center group z-10 cursor-pointer';
+            // Two-Way Check: Does this player also start on the other side?
+            const otherSlot = player ? Object.entries(otherChart).find(([_, id]) => id === player.id)?.[0] : null;
+
+            // Stamina ring border color
+            let ringColor = 'border-slate-400';
+            if (player) {
+                if (energy >= 75) ringColor = 'border-emerald-400';
+                else if (energy >= 50) ringColor = 'border-amber-400';
+                else ringColor = 'border-rose-500 animate-pulse';
+            }
+
+            slotEl.className = 'absolute transform -translate-x-1/2 -translate-y-1/2 flex flex-col items-center group z-10 cursor-pointer select-none';
             slotEl.innerHTML = `
-                <div class="relative w-10 h-10 rounded-full border-2 border-white shadow-lg flex flex-col items-center justify-center bg-gray-800 text-white">
-                    <span class="text-[8px] font-bold uppercase leading-none">${posKey}</span>
+                <!-- Slot Label Badge -->
+                <span class="text-[8px] font-black tracking-wider uppercase px-1 rounded shadow-sm mb-0.5 ${side === 'offense' ? 'bg-blue-900 text-blue-200 border border-blue-700' : 'bg-red-900 text-red-200 border border-red-700'}">
+                    ${slotId}
+                </span>
+
+                <!-- Avatar Circle with Stamina Halo -->
+                <div class="relative w-11 h-11 rounded-full border-2 ${ringColor} shadow-xl flex flex-col items-center justify-center ${player ? 'bg-slate-900 text-white' : 'bg-slate-800/80 border-dashed border-slate-500 text-slate-400'}">
+                    <span class="text-[8px] font-mono text-slate-400 leading-none">${posKey}</span>
                     <span class="text-sm font-black leading-none">${ovr}</span>
+                    ${isUnavailable ? '<span class="absolute -top-1 -right-1 text-[10px]">🩹</span>' : ''}
                 </div>
-                <div class="mt-1 bg-gray-900 text-white text-[9px] font-bold px-1.5 py-0.5 rounded shadow text-center max-w-[70px] truncate border border-gray-700">
+
+                <!-- Player Name Pill -->
+                <div class="mt-0.5 bg-slate-950 text-white text-[9px] font-bold px-1.5 py-0.5 rounded shadow text-center max-w-[75px] truncate border border-slate-700 group-hover:border-amber-400 transition-colors">
                     ${shortName}
                 </div>
+
+                <!-- Two-Way Ironman Badge -->
+                ${otherSlot ? `
+                    <span class="mt-0.5 text-[8px] font-black uppercase tracking-tight px-1 py-0.2 rounded shadow border ${side === 'offense' ? 'bg-rose-950 text-rose-300 border-rose-800' : 'bg-blue-950 text-blue-300 border-blue-800'}" title="Also starting at ${otherSlot} on ${otherSide}">
+                        ⚡ ${otherSlot}
+                    </span>
+                ` : ''}
             `;
             slotEl.onclick = () => window.app_openSlotModal(side, slotId);
             visualField.appendChild(slotEl);
         });
     }
 
-    const starters = new Set(Object.values(currentChart).filter(Boolean));
-    const benched = roster.filter(p => !starters.has(p.id));
+    // Build the Comprehensive Two-Way Deployment & Availability Command Table
+    const offSlotsCount = Object.values(depthChart.offense || {}).filter(Boolean).length;
+    const defSlotsCount = Object.values(depthChart.defense || {}).filter(Boolean).length;
+    const ironmanCount = roster.filter(p => Object.values(depthChart.offense || {}).includes(p.id) && Object.values(depthChart.defense || {}).includes(p.id)).length;
+    const injuredCount = roster.filter(p => p.status?.duration > 0).length;
 
-    benchTable.innerHTML = `<table class="min-w-full bg-white text-xs"><thead class="bg-gray-100"><tr>
-        <th class="py-1 px-2 text-left">Name</th><th class="py-1 px-2 text-center">Pos</th><th class="py-1 px-2 text-center">OVR</th>
-    </tr></thead><tbody class="divide-y">
-        ${benched.map(p => `
-            <tr>
-                <td class="py-1 px-2 font-semibold">${p.name}</td>
-                <td class="py-1 px-2 text-center text-gray-500">${estimateBestPosition(p)}</td>
-                <td class="py-1 px-2 text-center font-bold">${calculateOverall(p, estimateBestPosition(p))}</td>
-            </tr>
-        `).join('')}
-    </tbody></table>`;
+    let tableHtml = `
+    <!-- Top Telemetry Bar -->
+    <div class="mb-3 flex flex-wrap items-center justify-between gap-2 bg-slate-900 text-white p-2.5 rounded-sm border border-slate-800 text-xs shrink-0">
+        <div class="flex items-center gap-3">
+            <span class="font-bold text-[11px] uppercase tracking-wider text-slate-400">Roster Telemetry:</span>
+            <span class="bg-blue-950 text-blue-300 border border-blue-800 px-2 py-0.5 rounded font-mono font-bold text-[10px]">🏈 Off: ${offSlotsCount}/8</span>
+            <span class="bg-red-950 text-red-300 border border-red-800 px-2 py-0.5 rounded font-mono font-bold text-[10px]">🛡️ Def: ${defSlotsCount}/8</span>
+            <span class="bg-amber-950 text-amber-300 border border-amber-800 px-2 py-0.5 rounded font-mono font-bold text-[10px]" title="Players starting both Offense and Defense">⚡ Ironmen: ${ironmanCount}</span>
+            ${injuredCount > 0 ? `<span class="bg-rose-950 text-rose-300 border border-rose-800 px-2 py-0.5 rounded font-mono font-bold text-[10px]">🩹 Unavailable: ${injuredCount}</span>` : ''}
+        </div>
+        <div class="text-[10px] text-slate-400">
+            Click any field position or player row to adjust assignments.
+        </div>
+    </div>
+
+    <!-- Master Roster Deployment Table -->
+    <div class="overflow-x-auto border border-slate-200 rounded-sm">
+        <table class="min-w-full bg-white text-xs">
+            <thead class="bg-slate-900 text-white uppercase tracking-wider text-[10px]">
+                <tr>
+                    <th class="py-2 px-3 text-left">Player</th>
+                    <th class="py-2 px-2 text-center">Status</th>
+                    <th class="py-2 px-2 text-center">Energy</th>
+                    <th class="py-2 px-2 text-center text-blue-300">Offense Role</th>
+                    <th class="py-2 px-2 text-center text-red-300">Defense Role</th>
+                    <th class="py-2 px-2 text-center">Deployment</th>
+                    <th class="py-2 px-2 text-center">Best OVR</th>
+                </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-100 font-mono text-[11px]">`;
+
+    roster.forEach(p => {
+        const offSlot = Object.entries(depthChart.offense || {}).find(([_, id]) => id === p.id)?.[0] || null;
+        const defSlot = Object.entries(depthChart.defense || {}).find(([_, id]) => id === p.id)?.[0] || null;
+        const isIronman = offSlot && defSlot;
+        const energy = Math.max(0, Math.round(100 - (p.fatigue || 0)));
+        const isUnavailable = p.status?.duration > 0;
+        const bestPos = p.pos || estimateBestPosition(p);
+        const bestOvr = calculateOverall(p, bestPos);
+
+        let roleBadge = '<span class="bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded text-[9px] font-sans font-bold">🪑 Reserve</span>';
+        if (isIronman) {
+            roleBadge = '<span class="bg-amber-100 text-amber-900 border border-amber-300 px-1.5 py-0.5 rounded text-[9px] font-sans font-black tracking-tight" title="Starts both ways - higher fatigue burn">⚡ Ironman</span>';
+        } else if (offSlot) {
+            roleBadge = '<span class="bg-blue-100 text-blue-900 border border-blue-200 px-1.5 py-0.5 rounded text-[9px] font-sans font-bold">🏈 Off Only</span>';
+        } else if (defSlot) {
+            roleBadge = '<span class="bg-red-100 text-red-900 border border-red-200 px-1.5 py-0.5 rounded text-[9px] font-sans font-bold">🛡️ Def Only</span>';
+        }
+
+        const energyColor = energy >= 75 ? 'bg-emerald-500' : (energy >= 50 ? 'bg-amber-500' : 'bg-rose-500');
+
+        tableHtml += `
+            <tr class="hover:bg-slate-50 transition cursor-pointer ${isIronman ? 'bg-amber-50/40' : ''}" onclick="app.openPlayerCard('${p.id}')">
+                <td class="py-2 px-3 font-sans font-semibold text-slate-900 truncate">
+                    <span class="font-mono text-slate-400 text-[10px] mr-1">#${p.number || '--'}</span>
+                    <span>${p.name}</span>
+                    <span class="text-slate-400 text-[10px] ml-1 font-mono">(${p.age}yo)</span>
+                </td>
+                <td class="text-center py-2 px-2 font-sans">
+                    ${isUnavailable ? `<span class="bg-rose-100 text-rose-800 px-1.5 py-0.5 rounded text-[9px] font-bold" title="${p.status.description}">🩹 Out ${p.status.duration}w</span>` : '<span class="text-emerald-700 text-[10px] font-bold">Active</span>'}
+                </td>
+                <td class="text-center py-2 px-2">
+                    <div class="flex items-center justify-center gap-1.5">
+                        <div class="w-12 bg-slate-200 rounded-full h-1.5 overflow-hidden">
+                            <div class="${energyColor} h-full" style="width: ${energy}%"></div>
+                        </div>
+                        <span class="text-[10px] text-slate-600 font-bold">${energy}%</span>
+                    </div>
+                </td>
+                <td class="text-center py-2 px-2">
+                    ${offSlot ? `<span class="bg-blue-50 text-blue-800 border border-blue-300 font-black px-1.5 py-0.5 rounded text-[10px]">${offSlot}</span>` : '<span class="text-slate-300">--</span>'}
+                </td>
+                <td class="text-center py-2 px-2">
+                    ${defSlot ? `<span class="bg-red-50 text-red-800 border border-red-300 font-black px-1.5 py-0.5 rounded text-[10px]">${defSlot}</span>` : '<span class="text-slate-300">--</span>'}
+                </td>
+                <td class="text-center py-2 px-2">
+                    ${roleBadge}
+                </td>
+                <td class="text-center py-2 px-2 font-black text-slate-800">
+                    <span class="text-slate-400 text-[10px] mr-1">${bestPos}</span>${bestOvr}
+                </td>
+            </tr>`;
+    });
+
+    tableHtml += `</tbody></table></div>`;
+    benchTable.innerHTML = tableHtml;
 }
 
 window.app_openSlotModal = function (side, slotId) {
@@ -905,9 +1015,14 @@ window.app_openSlotModal = function (side, slotId) {
     if (!gs?.playerTeam) return;
     const roster = getUIRosterObjects(gs.playerTeam);
     const currentChart = gs.playerTeam.depthChart[side] || {};
+    const otherSide = side === 'offense' ? 'defense' : 'offense';
+    const otherChart = gs.playerTeam.depthChart[otherSide] || {};
     const currentId = currentChart[slotId];
+
     let posKey = slotId.replace(/\d+/g, '');
     if (['OT', 'OG', 'C'].includes(posKey)) posKey = 'OL';
+    if (['DE', 'DT', 'NT'].includes(posKey)) posKey = 'DL';
+    if (['CB', 'S'].includes(posKey)) posKey = 'DB';
 
     const candidates = roster.filter(p => p && (!Object.values(currentChart).includes(p.id) || p.id === currentId));
     candidates.sort((a, b) => calculateOverall(b, posKey) - calculateOverall(a, posKey));
@@ -919,22 +1034,51 @@ window.app_openSlotModal = function (side, slotId) {
         hideModal();
     };
 
-    let modalHtml = `<div class="space-y-2 max-h-[60vh] overflow-y-auto pr-2 pb-2">
-        <button class="w-full text-left p-3 border border-red-200 rounded-lg hover:bg-red-50 text-red-600 font-bold" onclick="app_assignSlot('${side}', '${slotId}', '')">
+    let modalHtml = `
+    <div class="mb-3 p-2 bg-slate-100 rounded text-xs text-slate-600 flex justify-between items-center">
+        <span>Target: <b class="text-slate-900">${side.toUpperCase()} ${slotId}</b> (${posKey})</span>
+        <button class="px-2.5 py-1 bg-rose-100 text-rose-800 border border-rose-300 rounded font-bold hover:bg-rose-200 transition-colors" onclick="app_assignSlot('${side}', '${slotId}', '')">
             Clear Slot
         </button>
-        ${candidates.map(p => `
-            <button class="w-full text-left p-3 border rounded-lg hover:bg-gray-50 flex justify-between items-center ${p.id === currentId ? 'bg-amber-50 border-amber-300' : 'border-gray-200'}" onclick="app_assignSlot('${side}', '${slotId}', '${p.id}')">
-                <div>
-                    <span class="font-bold text-gray-800">${p.name}</span>
-                    <span class="text-xs text-gray-500 block">Age: ${p.age} • ${formatHeight(p.attributes?.physical?.height)}</span>
+    </div>
+    <div class="space-y-2 max-h-[60vh] overflow-y-auto pr-1 pb-2">
+        ${candidates.map(p => {
+            const slotOvr = calculateOverall(p, posKey);
+            const energy = Math.max(0, Math.round(100 - (p.fatigue || 0)));
+            const isUnavailable = p.status?.duration > 0;
+            const otherSlot = Object.entries(otherChart).find(([_, id]) => id === p.id)?.[0] || null;
+            const isCurrent = p.id === currentId;
+
+            let borderClass = isCurrent ? 'bg-amber-50 border-amber-400' : 'bg-white border-slate-200 hover:border-slate-400';
+            let energyColor = energy >= 75 ? 'text-emerald-600' : (energy >= 50 ? 'text-amber-600' : 'text-rose-600 font-bold');
+
+            return `
+            <button class="w-full text-left p-3 border rounded-sm shadow-sm flex justify-between items-center transition-all ${borderClass}" onclick="app_assignSlot('${side}', '${slotId}', '${p.id}')">
+                <div class="flex flex-col truncate pr-2">
+                    <div class="flex items-center gap-2">
+                        <span class="font-bold text-slate-900 text-sm truncate">${p.name}</span>
+                        ${isCurrent ? '<span class="text-[9px] bg-amber-200 text-amber-900 px-1 rounded font-bold uppercase">Current Starter</span>' : ''}
+                        ${isUnavailable ? `<span class="text-[9px] bg-rose-100 text-rose-800 px-1 rounded font-bold">🩹 Out ${p.status.duration}w</span>` : ''}
+                    </div>
+                    <div class="flex flex-wrap items-center gap-2 text-[11px] text-slate-500 mt-1 font-mono">
+                        <span>Age: ${p.age}</span>
+                        <span>•</span>
+                        <span class="${energyColor}">⚡ ${energy}% Energy</span>
+                        <span>•</span>
+                        ${otherSlot 
+                            ? `<span class="bg-amber-100 text-amber-800 border border-amber-300 px-1 rounded font-sans font-black text-[10px]" title="Already starting on ${otherSide}">⚡ Starts at ${otherSlot} (${otherSide.substring(0,3)})</span>`
+                            : `<span class="text-slate-400 font-sans">🪑 Free on ${otherSide}</span>`}
+                    </div>
                 </div>
-                <span class="font-black text-xl text-gray-800">${calculateOverall(p, posKey)} OVR</span>
-            </button>
-        `).join('')}
+                <div class="text-right shrink-0">
+                    <span class="text-xl font-black ${slotOvr >= 40 ? 'text-emerald-700' : (slotOvr >= 30 ? 'text-slate-900' : 'text-slate-500')}">${slotOvr}</span>
+                    <span class="text-[9px] text-slate-400 uppercase font-bold block -mt-1">${posKey} OVR</span>
+                </div>
+            </button>`;
+        }).join('')}
     </div>`;
 
-    showModal(`Assign Player: ${slotId}`, modalHtml);
+    showModal(`Assign Slot: ${side.toUpperCase()} ${slotId}`, modalHtml);
 };
 
 export function renderScheduleTab(gameState) {
