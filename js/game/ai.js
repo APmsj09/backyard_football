@@ -308,23 +308,34 @@ export function getSmartCarrierTarget(runner, defenseStates, offenseStates, fiel
         let laneThreat = 0;
         let overPursuitDetected = false;
 
-        defenseStates.forEach(def => {
-            if (def.stunnedTicks > 0 || def.y < runner.y - 1.5) return;
+        // Cutback detection: Check for lead blockers sealing defenders
+        offenseStates.forEach(blocker => {
+            if (blocker.id !== runner.id && (blocker.action?.includes('block') || blocker.action === 'run_path')) {
+                const distToBlocker = Math.hypot(testX - blocker.x, testY - blocker.y);
+                // Follow behind blocker's hip
+                if (distToBlocker < 2.5 && blocker.y > runner.y) {
+                    score += 45;
+                }
+            }
+        });
 
-            const defPredX = def.x + ((def.vx || 0) * 0.4);
-            const defPredY = def.y + ((def.vy || 0) * 0.4);
+        defenseStates.forEach(def => {
+            if (def.stunnedTicks > 0 || def.y < runner.y - 1.0) return;
+
+            const defPredX = def.x + ((def.vx || 0) * 0.3);
+            const defPredY = def.y + ((def.vy || 0) * 0.3);
             const distToPredicted = Math.hypot(testX - defPredX, testY - defPredY);
 
             if (!def.isBlocked && !def.isEngaged) {
-                if (distToPredicted < 5.0) {
-                    laneThreat += (500 / (distToPredicted + 0.5));
+                if (distToPredicted < 4.5) {
+                    laneThreat += (350 / (distToPredicted + 0.4));
 
                     const defLateralSpeed = def.vx || 0;
-                    if (Math.abs(defLateralSpeed) > 3.0) {
+                    if (Math.abs(defLateralSpeed) > 2.5) {
                         const defGoingRight = defLateralSpeed > 0;
                         const laneGoingLeft = offset < 0;
                         if ((defGoingRight && laneGoingLeft) || (!defGoingRight && !laneGoingLeft)) {
-                            overPursuitDetected = true;
+                            overPursuitDetected = true; // Cutback lane discovered!
                         }
                     }
                 }
@@ -443,6 +454,26 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
     if (typeof qbState.ticksOnCurrentRead === 'undefined') qbState.ticksOnCurrentRead = 0;
     if (typeof qbState.currentReadTargetSlot === 'undefined') qbState.currentReadTargetSlot = progression[0];
 
+    // --- ELITE QB EYE MANIPULATION (Looking off Safeties) ---
+    // A high-IQ QB will actively look at the opposite side of the field for the first 1.5 seconds
+    if (qbIQ > 75 && playState.tick < 30 && progression.length > 1) {
+        const trueTarget = offenseStates.find(o => o.slot === progression[0]);
+        if (trueTarget) {
+            // Find a decoy receiver on the opposite side of the center hash
+            const decoy = offenseStates.find(o => o.slot !== 'QB1' && o.slot !== trueTarget.slot && Math.sign(o.initialX - 26.6) !== Math.sign(trueTarget.initialX - 26.6));
+            if (decoy) {
+                qbState.currentReadTargetSlot = decoy.slot; // Spoof the defense!
+                if (gameLog && playState.tick === 25 && Math.random() < 0.1) {
+                    pushGameLog(gameLog, `[Tick ${playState.tick}] 👀 ${qbState.name} uses his eyes to look the safety off his primary read!`, playState);
+                }
+            }
+        }
+    } else {
+        // Normal progression tracking
+        const readIndex = Math.min(progression.length - 1, Math.floor(qbState.ticksInPocket / (Math.max(8, (110 - qbIQ) / 3))));
+        qbState.currentReadTargetSlot = progression[readIndex];
+    }
+
     if (!progression || progression.length === 0) {
         const emergencyProgression = offenseStates
             .filter(p => p.slot !== 'QB1' && !p.slot.startsWith('OL'))
@@ -524,22 +555,37 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
 
         const depth = rec.y - playState.lineOfScrimmage;
         const iqFactor = qbIQ / 100;
+        const armFactor = qbStrength / 100;
 
-        if (depth >= 3 && depth <= 14) {
-            if (minProjectedSeparation > 1.2) score += 35;
+        // --- REALISTIC QB ARM-STRENGTH TARGET SELECTION ---
+        // 1. Intermediate & Short routes (High completion probability)
+        if (depth >= 2 && depth <= 14) {
+            if (minProjectedSeparation > 1.2) score += 45;
             else score -= 10;
         }
+
+        // 2. Deep routes: Heavily penalize weak-armed QBs launching deep moonballs
         if (depth > 14) {
-            if (minProjectedSeparation > 3.5) score += 20 * iqFactor;
-            else if (minProjectedSeparation > 2.0 && playState.isDesperation) score += 30;
-            else score -= 55;
+            if (qbStrength < 45) {
+                // Low arm strength cannot reach deep receivers in time before DBs recover
+                score -= (45 - qbStrength) * 1.5; 
+            } else if (minProjectedSeparation > 3.0 && armFactor > 0.55) {
+                score += 30 * iqFactor * armFactor;
+            } else {
+                score -= 40;
+            }
+        }
+
+        // 3. Pressure Checkdowns (Hot Reads to TE / Flat / RB)
+        if (isPressured) {
+            if (depth >= 0 && depth <= 8 && minProjectedSeparation > 1.0) {
+                score += 55; // Dump it off quickly to avoid the sack!
+            }
         }
 
         if (undercutThreat > 0) score -= (undercutThreat * 35 * iqFactor);
-        if (defendersClosingIn >= 2) score -= (30 + (30 * iqFactor));
+        if (defendersClosingIn >= 2) score -= (35 + (25 * iqFactor));
         if (defendersClosingIn >= 3) score -= 100;
-        if (depth < 0 && !isPressured) score -= 30;
-        if (depth < 2 && isPressured && minProjectedSeparation > 2.0) score += 40;
 
         const isLateTrailing = (playState.quarter >= 4 || playState.quarter === 'OT') &&
             (playState.timeRemaining <= 150) &&
@@ -655,15 +701,17 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
         return;
     }
 
-    let scanSpeedBase = Math.max(8, (110 - qbIQ) / 3);
-    if (isPressured) scanSpeedBase *= (qbIQ > 75 ? 0.6 : 1.5);
+    let scanSpeedBase = Math.max(6, (110 - qbIQ) / 3.5);
+    if (isPressured) scanSpeedBase *= 0.65; // Scan faster when pocket collapses
 
     if (typeof qbState.ticksInPocket === 'undefined') qbState.ticksInPocket = 0;
     qbState.ticksInPocket++;
 
     const numReadsVisible = Math.min(progression.length, 1 + Math.floor(qbState.ticksInPocket / scanSpeedBase));
-    const MIN_DROPBACK_TICKS = 45;
-    const canThrowStandard = (playState.tick >= MIN_DROPBACK_TICKS || isHotReadSituation) && qbState.hasCompletedDropback;
+    
+    // Lowered minimum dropback ticks to 28 so QBs can deliver quick slants/screens before getting sacked
+    const MIN_DROPBACK_TICKS = 28;
+    const canThrowStandard = (playState.tick >= MIN_DROPBACK_TICKS || isHotReadSituation) && (qbState.hasCompletedDropback || isPressured);
 
     let maxDecisionTimeTicks = 110 + (qbIQ / 3) + (qbAgility / 3);
     if (qbState.loggedRollout) maxDecisionTimeTicks += 35;

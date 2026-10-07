@@ -104,7 +104,24 @@ export function checkBlockCollisions(playState) {
         }
 
         if (target) {
-            const strDiff = (blocker.str || 50) - (target.str || 50);
+            const blockerStr = blocker.str || blocker.strength || 50;
+            const targetStr = target.str || target.strength || 50;
+            const targetSpd = target.spd || target.speed || 50;
+            const blockerAgi = blocker.agi || blocker.agility || 50;
+            const isPassRush = target.assignment?.includes('rush') || target.assignment?.includes('blitz');
+
+            // 1. Speed Edge Dip: Fast rusher blows by the tackle on the outside arc
+            const isEdgeAlignment = Math.abs(target.initialX - blocker.initialX) > 1.4;
+            if (isPassRush && isEdgeAlignment && targetSpd > blockerAgi + 14 && Math.random() < 0.28) {
+                blocker.stunnedTicks = 12;
+                target.action = 'pursuit';
+                if (gameLog && Math.random() < 0.25) {
+                    pushGameLog(gameLog, `[Tick ${playState.tick}] ⚡ ${target.name} burns ${blocker.name} around the edge with pure speed!`, playState);
+                }
+                return;
+            }
+
+            const strDiff = blockerStr - targetStr;
 
             blocker.isEngaged = true;
             blocker.engagedWith = target;
@@ -416,8 +433,22 @@ export function resolveOngoingBlocks(playState, gameLog, offenseStates = [], def
             pushAmount = resolveBattle(blockPower, shedPower, battle);
 
             if (battle.status === 'ongoing') {
-                const dx = defender.x - blocker.x;
-                const dy = defender.y - blocker.y;
+                const defStr = defender.strength || defender.str || 50;
+                const blkStr = blocker.strength || blocker.str || 50;
+
+                let dx = defender.x - blocker.x;
+                let dy = defender.y - blocker.y;
+
+                // 2. Bulldozer Bull Rush: Massive DL pushes blocker straight back toward the QB
+                if (isPassRush && defStr > blkStr + 14) {
+                    const qb = offenseStates?.find(p => p.slot?.startsWith('QB'));
+                    if (qb) {
+                        dx = qb.x - defender.x;
+                        dy = qb.y - defender.y;
+                    }
+                    pushAmount = Math.max(0.2, pushAmount + 0.15);
+                }
+
                 const dist = Math.max(0.1, Math.sqrt(dx * dx + dy * dy));
                 const pushX = (dx / dist) * pushAmount * 0.5;
                 const pushY = (dy / dist) * pushAmount * 0.5;

@@ -654,27 +654,23 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                     }
                 }
 
-                if (pState.routePath && pState.currentPathIndex < pState.routePath.length) {
+                // --- DYNAMIC RB VISION & CUTBACK SYSTEM ---
+                if (pState.role === 'RB' && playState.handoffOccurred) {
+                    // Running back takes over with dynamic Vision AI immediately at handoff
+                    const smartTarget = getSmartCarrierTarget(pState, defenseStates, offenseStates, FIELD_WIDTH, playState);
+                    targetX = smartTarget.x;
+                    targetY = smartTarget.y;
+                    pState.action = 'run_path';
+                    pState.contactReduction = 1.15; // Give RB physical momentum at the line
+                } else if (pState.routePath && pState.currentPathIndex < pState.routePath.length) {
                     const pt = pState.routePath[pState.currentPathIndex];
                     targetX = pt.x;
                     targetY = pt.y;
 
                     const distToNode = getDistance(pState, pt);
-                    const isZoneRun = playState.playKey?.includes('Zone') || playState.playKey?.includes('Stretch');
-                    const rbIQ = pState.playbookIQ || 50;
-
-                    if (isZoneRun && pState.y < LOS && playState.tick < 22 && rbIQ > 60) {
-                        pState.contactReduction = 0.72;
-                    } else {
-                        pState.contactReduction = 1.05;
-                    }
-
-                    if (distToNode < 1.8) {
+                    if (distToNode < 1.5) {
                         pState.currentPathIndex++;
-                        if (pState.currentPathIndex < pState.routePath.length) {
-                            pState.vx *= 0.4;
-                            pState.vy *= 0.4;
-                        }
+                        // NO BRAKING GLITCH: Maintain explosive momentum into the hole!
                     }
                     pState.action = 'run_path';
                 } else if (pState.role === 'QB' && pState.action === 'qb_scramble' && pState.y < LOS) {
@@ -759,20 +755,33 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                     pState.contactReduction = 1.0;
                     let idealX = pState.initialX;
                     let idealY = pState.dropbackTargetY;
-                    const rushers = defenseStates.filter(d => !d.isBlocked && !d.isEngaged && getDistance(pState, d) < 6);
-                    const immediateThreat = rushers.find(r => getDistance(pState, r) < 3.5);
 
-                    if (immediateThreat && (qbIQ > 45 || pState.agility > 50)) {
+                    // Sense BOTH unblocked rushers AND collapsing engaged linemen
+                    const unblockedRushers = defenseStates.filter(d => !d.isBlocked && !d.isEngaged && d.stunnedTicks === 0 && getDistance(pState, d) < 5.5);
+                    const collapsingDefenders = defenseStates.filter(d => d.isEngaged && getDistance(pState, d) < 3.0);
+                    const immediateThreat = unblockedRushers.find(r => getDistance(pState, r) < 3.2);
+
+                    if (immediateThreat && (qbIQ > 40 || pState.agility > 45)) {
                         if (!pState.rolloutDir) {
                             const threatSide = immediateThreat.x > pState.x ? 1 : -1;
                             pState.rolloutDir = -threatSide;
                         }
                         pState.action = 'qb_scramble';
-                        pState.targetX = pState.x + (pState.rolloutDir * 8);
-                        pState.targetY = pState.y + 1.0;
+                        pState.targetX = pState.x + (pState.rolloutDir * 7);
+                        pState.targetY = pState.y + 1.5;
                         pState.loggedRollout = true;
-                        if (gameLog) pushGameLog(gameLog, `[Tick ${playState.tick}] 🏃 ${pState.name} escapes the collapsing pocket!`, playState);
+                        if (gameLog) pushGameLog(gameLog, `[Tick ${playState.tick}] 🏃 ${pState.name} senses immediate pressure and scrambles!`, playState);
                         break;
+                    }
+
+                    // --- STEPPING UP IN THE POCKET ---
+                    // If edge rushers loop wide around the tackles and the A-gap is clean, climb the pocket!
+                    const edgePressureLeft = defenseStates.some(d => d.x < pState.x - 2.5 && getDistance(pState, d) < 4.5);
+                    const edgePressureRight = defenseStates.some(d => d.x > pState.x + 2.5 && getDistance(pState, d) < 4.5);
+                    const interiorClean = !defenseStates.some(d => Math.abs(d.x - pState.x) <= 2.0 && d.y > pState.y && d.y < LOS);
+
+                    if ((edgePressureLeft || edgePressureRight || collapsingDefenders.length > 0) && interiorClean && qbIQ > 45) {
+                        idealY = Math.min(LOS - 1.2, pState.y + 2.0); // Step up into the clean pocket
                     }
 
                     if (rushers.length > 0 && qbIQ > 40) {
@@ -853,18 +862,53 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                             const wrAgility = pState.agility || 50;
                             const dbAgility = coverageDefender.agility || 50;
                             const dbIQ = coverageDefender.playbookIQ || 50;
-                            const shakeChance = (wrAgility / (dbAgility + 10)) * (1.2 - (dbIQ / 150));
+                            const wrStrength = pState.strength || 50;
+                            const dbStrength = coverageDefender.strength || 50;
 
-                            if (Math.random() < shakeChance * 0.4) {
-                                coverageDefender.stunnedTicks = Math.max(10, 25 - (dbIQ / 4));
-                                coverageDefender.x += pState.vx * 0.5;
-                                if (gameLog && Math.random() < 0.2) {
-                                    pushGameLog(gameLog, `[Tick ${playState.tick}] 💨 ${pState.name} shakes ${coverageDefender.name} on the cut!`, playState);
+                            const isDoubleMove = ['Sluggo', 'Out_And_Up', 'Hitch_And_Go', 'PostCorner'].some(r => pState.assignment?.includes(r));
+                            let separated = false;
+
+                            // 1. Playground Double-Move Trap (Freezes low-IQ DBs)
+                            if (isDoubleMove && dbIQ < 60 && Math.random() < 0.65) {
+                                coverageDefender.stunnedTicks = Math.max(14, 30 - Math.floor(dbIQ / 3));
+                                coverageDefender.vx = 0;
+                                coverageDefender.vy = 0;
+                                separated = true;
+                                if (gameLog && Math.random() < 0.35) {
+                                    pushGameLog(gameLog, `[Tick ${playState.tick}] 🎣 ${coverageDefender.name} completely bites on ${pState.name}'s double move!`, playState);
+                                }
+                            }
+
+                            // 2. Uncalled Playground Shove (Stronger WR pushes off smaller DB)
+                            if (!separated && wrStrength > dbStrength + 8 && Math.random() < 0.35) {
+                                const pushDx = (coverageDefender.x - pState.x) || 1;
+                                const pushDy = (coverageDefender.y - pState.y) || 1;
+                                const pushDist = Math.max(0.1, Math.hypot(pushDx, pushDy));
+                                coverageDefender.x += (pushDx / pushDist) * 1.6;
+                                coverageDefender.y += (pushDy / pushDist) * 1.6;
+                                coverageDefender.stunnedTicks = 12;
+                                separated = true;
+                                if (gameLog && Math.random() < 0.3) {
+                                    pushGameLog(gameLog, `[Tick ${playState.tick}] 💪 ${pState.name} gives ${coverageDefender.name} an uncalled playground shove at the break!`, playState);
+                                }
+                            }
+
+                            // 3. Momentum Overshoot on the Cut (Lower agility DB drifts in wrong direction)
+                            if (!separated) {
+                                const shakeChance = (wrAgility / (dbAgility + 10)) * (1.2 - (dbIQ / 150));
+                                if (Math.random() < shakeChance * 0.45) {
+                                    coverageDefender.stunnedTicks = Math.max(8, 22 - Math.floor(dbIQ / 5));
+                                    // Overshoot along original pursuit vector
+                                    coverageDefender.x += (coverageDefender.vx || 0) * 0.7;
+                                    coverageDefender.y += (coverageDefender.vy || 0) * 0.7;
+                                    if (gameLog && Math.random() < 0.25) {
+                                        pushGameLog(gameLog, `[Tick ${playState.tick}] 💨 ${pState.name} shakes ${coverageDefender.name} on the cut!`, playState);
+                                    }
                                 }
                             }
                         }
-                        pState.vx *= 1.2;
-                        pState.vy *= 1.2;
+                        pState.vx *= 1.25;
+                        pState.vy *= 1.25;
                     }
                     break;
                 }
@@ -976,6 +1020,19 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                 if (chaseTarget) {
                     const dist = getDistance(pState, chaseTarget);
                     const iq = pState.playbookIQ || 50;
+
+                    // Playground PA Bite: Low-IQ defenders charge downhill to the line of scrimmage
+                    if (isFooledByPA && iq < 60) {
+                        pState.targetX = chaseTarget.x;
+                        pState.targetY = Math.min(chaseTarget.y, LOS + 0.5);
+                        pState.action = 'pursuit';
+                        pState.contactReduction = 1.2;
+                        if (!pState.loggedPA && gameLog && Math.random() < 0.2) {
+                            pushGameLog(gameLog, `[Tick ${playState.tick}] 🎣 ${pState.name} bites hard downhill on the play action!`, playState);
+                            pState.loggedPA = true;
+                        }
+                        return;
+                    }
 
                     if (dist < 2.5) {
                         pState.targetX = chaseTarget.x;
@@ -1145,6 +1202,21 @@ export function executeAssignment(pState, assignment, offenseStates, LOS, playSt
         const zone = zoneBoundaries[assignment];
         const zoneCenter = getZoneCenter(assignment, LOS);
         const isDeep = assignment.includes('deep') || pState.slot.startsWith('S');
+        const iq = pState.playbookIQ || 50;
+
+        // 1. "Hero Ball" Safety Creep: Impatient low-IQ deep safeties creep downhill toward LOS
+        if (isDeep && iq < 58) {
+            zoneCenter.y = Math.max(LOS + 7.0, zoneCenter.y - 3.5);
+        }
+
+        // 2. QB Stare-Down Tracking: If QB has low IQ, zone defenders cheat toward his target
+        const qb = offenseStates.find(o => o.slot?.startsWith('QB'));
+        if (qb && (qb.playbookIQ || 50) < 65 && qb.currentReadTargetSlot) {
+            const primaryRec = offenseStates.find(o => o.slot === qb.currentReadTargetSlot);
+            if (primaryRec && Math.abs(primaryRec.x - zoneCenter.x) < 14) {
+                zoneCenter.x += (primaryRec.x > zoneCenter.x ? 2.0 : -2.0);
+            }
+        }
 
         const minX = (zone?.minX || 0) - 3.0;
         const maxX = (zone?.maxX || FIELD_WIDTH) + 3.0;
@@ -1170,11 +1242,32 @@ export function executeAssignment(pState, assignment, offenseStates, LOS, playSt
         if (primaryThreat) {
             if (isDeep) {
                 const insideLeverageX = primaryThreat.x < CENTER_X ? 1.0 : -1.0;
-                pState.targetX = primaryThreat.x + insideLeverageX;
-                pState.targetY = Math.max(zoneCenter.y, primaryThreat.y + 3.5);
+                
+                // --- ELITE DB BAITING (Trap Coverage) ---
+                if (iq > 75 && !isBallInAir && playState.tick > 25) {
+                    // Elite safety intentionally "sags" 3 yards shallow and 2 yards inside to make the WR look open
+                    pState.targetX = primaryThreat.x + (insideLeverageX * 2.5);
+                    pState.targetY = Math.max(zoneCenter.y, primaryThreat.y + 1.0);
+                } else if (isBallInAir && playState.ballState.targetPlayerId === primaryThreat.id) {
+                    // Ball is thrown! Elite safety gets an explosive break on the ball
+                    pState.targetX = playState.ballState.targetX;
+                    pState.targetY = playState.ballState.targetY;
+                    pState.contactReduction = 1.3; // Break on the ball hard!
+                } else {
+                    // Standard deep coverage (stay on top)
+                    pState.targetX = primaryThreat.x + insideLeverageX;
+                    pState.targetY = Math.max(zoneCenter.y, primaryThreat.y + 3.5);
+                }
             } else {
-                pState.targetX = primaryThreat.x;
-                pState.targetY = primaryThreat.y - 1.5;
+                // Short Zone
+                if (iq > 75 && !isBallInAir) {
+                    // Bait shallow crossers by drifting slightly away
+                    pState.targetX = primaryThreat.x + (primaryThreat.vx > 0 ? -2.0 : 2.0);
+                    pState.targetY = primaryThreat.y - 2.5;
+                } else {
+                    pState.targetX = primaryThreat.x;
+                    pState.targetY = primaryThreat.y - 1.5;
+                }
             }
 
             const TETHER_LIMIT_X = isDeep ? 10.0 : 6.0;
