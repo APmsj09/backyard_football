@@ -1571,6 +1571,58 @@ function runLiveGameStep() {
     }
 }
 
+export function renderLiveFieldLineup(frameData, gameState) {
+    const container = document.getElementById('sim-field-players');
+    if (!container || !frameData?.players || !gameState?.playerTeam) return;
+
+    const myTeamId = gameState.playerTeam.id;
+    const myPlayers = frameData.players.filter(p => p.teamId === myTeamId);
+
+    if (myPlayers.length === 0) return;
+
+    let html = `
+        <div class="p-2.5 bg-slate-900 border-b border-slate-800 text-[10px] uppercase font-bold text-slate-400 flex justify-between items-center">
+            <span>On-Field Unit (${myPlayers.length}/8)</span>
+            <span class="${myPlayers[0]?.isOffense ? 'text-blue-400' : 'text-rose-400'}">
+                ${myPlayers[0]?.isOffense ? '🏈 OFFENSE' : '🛡️ DEFENSE'}
+            </span>
+        </div>
+        <div class="divide-y divide-slate-800/60 overflow-y-auto">
+    `;
+
+    myPlayers.forEach(p => {
+        const fullPlayer = getPlayer(p.id);
+        const energy = Math.max(0, Math.round(100 - (fullPlayer?.fatigue || 0)));
+        const energyColor = energy >= 75 ? 'bg-emerald-500' : (energy >= 50 ? 'bg-amber-500' : 'bg-rose-500');
+
+        let actionText = p.action || 'idle';
+        actionText = actionText.replace(/_/g, ' ');
+
+        html += `
+            <div class="p-2 hover:bg-slate-800/40 transition-colors flex items-center justify-between text-xs">
+                <div class="flex items-center gap-2 truncate pr-2">
+                    <span class="font-mono text-[10px] font-bold px-1.5 py-0.5 rounded ${p.isOffense ? 'bg-blue-950 text-blue-300 border border-blue-800' : 'bg-rose-950 text-rose-300 border border-rose-800'}">
+                        ${p.slot || 'P'}
+                    </span>
+                    <div class="flex flex-col truncate">
+                        <span class="font-bold text-slate-200 truncate">${fullPlayer?.name || 'Player'}</span>
+                        <span class="text-[9px] text-slate-400 capitalize truncate">${actionText}</span>
+                    </div>
+                </div>
+                <div class="flex items-center gap-1.5 shrink-0">
+                    <div class="w-10 bg-slate-800 rounded-full h-1.5 overflow-hidden">
+                        <div class="${energyColor} h-full" style="width: ${energy}%"></div>
+                    </div>
+                    <span class="text-[9px] font-mono text-slate-400 w-6 text-right">${energy}%</span>
+                </div>
+            </div>
+        `;
+    });
+
+    html += `</div>`;
+    container.innerHTML = html;
+}
+
 function flushLiveLogs() {
     if (!activeLiveGame?.gameLog) return;
     const fullLog = activeLiveGame.gameLog;
@@ -1605,6 +1657,7 @@ function playVisualization(frames, onComplete) {
         const frame = frames[index];
         if (frame && elements.fieldCanvas && elements.fieldCanvasCtx) {
             drawFieldVisualization(elements.fieldCanvas, elements.fieldCanvasCtx, frame);
+            if (activeLiveGame) renderLiveFieldLineup(frame, getGameState());
         }
         index++;
         if (index >= frames.length) {

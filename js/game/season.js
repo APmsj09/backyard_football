@@ -820,25 +820,69 @@ export function callFriend(playerId) {
     }
 
     const roster = getRosterObjects(team);
-    const healthyCount = roster.filter(p => p && p.status?.duration === 0).length;
+    const healthyCount = roster.filter(p => p && (!p.status || p.status.duration === 0)).length;
 
     if (healthyCount >= 16) {
-        return { success: false, message: "Your roster is full enough. Save your favors for when you're desperate." };
+        return { success: false, message: "Your roster is full enough (16+ active). Save your favors for when you're desperate." };
     }
     const player = game.freeAgents.find(p => p && p.id === playerId);
-    if (!player) return { success: false, message: "That player is no longer available this week." };
+    if (!player) return { success: false, message: "That player is no longer hanging around the park this week." };
 
-    const maxLevel = roster.reduce(
-        (max, rosterPlayer) => Math.max(max, getRelationshipLevel(rosterPlayer?.id, playerId)),
-        relationshipLevels.STRANGER.level
-    );
-    const relationshipInfo = Object.values(relationshipLevels).find(rl => rl.level === maxLevel) || relationshipLevels.STRANGER;
-    const successChance = relationshipInfo.callChance;
-    const relationshipName = relationshipInfo.name;
+    // --- LOGIC-BASED ACCEPTANCE CALCULATION ---
+    let interestScore = Math.round((team.socialProfile.streetCred || 50) * 0.3);
+    if (team.tier === 1) interestScore += 8; // Prestige of playing under the lights
 
+    let decisionReasons = [];
+
+    // 1. Friend & Clique Anchors
+    const hasBestFriend = player.social?.bestFriendId && roster.some(r => r.id === player.social.bestFriendId);
+    if (hasBestFriend) {
+        interestScore += 35;
+        const bfName = roster.find(r => r.id === player.social.bestFriendId)?.name || 'his best friend';
+        decisionReasons.push(`wanted to play with ${bfName}`);
+    }
+
+    const friendsOnTeam = roster.filter(r => player.social?.goodFriendIds?.includes(r.id)).length;
+    if (friendsOnTeam > 0) {
+        const boost = Math.min(24, friendsOnTeam * 12);
+        interestScore += boost;
+        decisionReasons.push(`has ${friendsOnTeam} friend(s) on the squad`);
+    }
+
+    const captain = roster.find(r => r.id === team.captainId);
+    if (captain && captain.personality?.clique === player.personality?.clique) {
+        interestScore += 10;
+        decisionReasons.push(`vibes with team captain ${captain.name.split(' ')[0]} (${player.personality.clique})`);
+    }
+
+    // 2. Sworn Rival Penalty
+    const rivalOnTeam = roster.find(r => player.social?.rivalIds?.includes(r.id));
+    if (rivalOnTeam) {
+        interestScore -= 50;
+        decisionReasons.push(`refuses to wear the same jersey as his rival ${rivalOnTeam.name}`);
+    }
+
+    // 3. Ego vs. Role Evaluation
+    const bestPos = player.pos || estimateBestPosition(player);
+    const myOvr = calculateOverall(player, bestPos);
+    const isStarterWorthy = myOvr >= 45 || healthyCount < 9;
+
+    if (isStarterWorthy) {
+        interestScore += 15;
+    } else {
+        const ego = player.personality?.ego || 50;
+        if (ego > 70) {
+            const egoPenalty = Math.round((ego - 50) * 0.9);
+            interestScore -= egoPenalty;
+            decisionReasons.push(`refuses to ride the bench with his high ego`);
+        }
+    }
+
+    // Remove from the weekly free agent screen
     game.freeAgents = game.freeAgents.filter(p => p && p.id !== playerId);
 
-    if (Math.random() < successChance) {
+    if (interestScore >= 50) {
+        // Player accepts offer!
         player.status = { type: 'temporary', description: 'Helping Out', duration: 1 };
         if (addPlayerToTeam(player, team)) {
             team.socialProfile.favorTokens -= 1;
@@ -848,15 +892,18 @@ export function callFriend(playerId) {
                     improveRelationship(rosterPlayer.id, player.id);
                 }
             });
-            const message = `${player.name} (${relationshipName}) agreed to help out! (Favors Remaining: ${team.socialProfile.favorTokens})`;
-            addMessage("Roster Update: Friend Called", message);
+            const reasonBlurb = decisionReasons.length > 0 ? ` (${decisionReasons.join(', ')})` : '';
+            const message = `🤝 ${player.name} agreed to help out!${reasonBlurb} [Favors Left: ${team.socialProfile.favorTokens}]`;
+            addMessage("Roster Update: Friend Joined", message);
             return { success: true, message };
         } else {
-            return { success: false, message: `Failed to add ${player.name} to roster after successful call.` };
+            return { success: false, message: `Failed to add ${player.name} to roster.` };
         }
     } else {
-        const message = `${player.name} (${relationshipName}) couldn't make it this week.`;
-        addMessage("Roster Update: Friend Called", message);
+        // Player declines offer!
+        const declineReason = decisionReasons.slice(-1)[0] || 'was not interested in joining right now';
+        const message = `✋ ${player.name} declined the invite: ${declineReason}. (Favor Token preserved).`;
+        addMessage("Roster Update: Invite Declined", message);
         return { success: false, message };
     }
 }
@@ -1036,6 +1083,20 @@ export function advanceToOffseason() {
         } else if (promoted.some(t => t.id === game.playerTeam?.id)) {
             addMessage("Promoted!", "We won the Sandlot Circuit! Next year we play with the big dogs in Tier 1.", false, game);
         }
+
+        // Relegation Walkouts: Divas with low loyalty refuse to play in Tier 2
+        relegated.forEach(relTeam => {
+            const teamRoster = getRosterObjects(relTeam);
+            teamRoster.forEach(p => {
+                if ((p.personality?.streetCred || 50) > 65 && (p.personality?.loyalty || 50) < 45) {
+                    leavingPlayers.push({ player: p, reason: 'Refused to play in Sandlot Circuit (Tier 2)', teamName: relTeam.name });
+                    p.teamId = null;
+                    if (relTeam.id === game.playerTeam?.id) {
+                        addMessage("Relegation Walkout", `🏃 ${p.name} refused to play in Tier 2 and walked away to Free Agency!`);
+                    }
+                }
+            });
+        });
     }
 
     if (!game.history) game.history = { seasons: [] };
@@ -1270,7 +1331,22 @@ export function advanceToOffseason() {
         }
     }
 
-    // 💡 PEE-WEE GRADUATION → ROOKIE DRAFT POOL
+    // 💡 FREE AGENT ATTRITION (Cull unassigned kids so the pool never bloats)
+    game.players.forEach(p => {
+        if (!p.teamId && p.status?.type !== 'retired' && p.status?.type !== 'departed') {
+            let quitChance = 0.15;
+            if (p.age >= 14) quitChance = 0.30;
+            if (Math.random() < quitChance) {
+                p.status = {
+                    type: 'departed',
+                    description: p.age >= 14 ? 'Got an after-school job / focused on track' : 'Quit football to skateboard and play video games',
+                    duration: 0
+                };
+            }
+        }
+    });
+
+    // 💡 PEE-WEE GRADUATION → LOGICAL DRAFT DECLARATION
     if (!game.draftClass) game.draftClass = [];
     const youthTeams = game.teams.filter(t => t.leagueType === 'youth');
 
@@ -1279,21 +1355,38 @@ export function advanceToOffseason() {
             const kid = getPlayer(id);
             if (!kid) return false;
 
-            // Develop before aging
             developPlayer(kid, yt);
-
             kid.age++;
             kid.careerStats.seasonsPlayed = (kid.careerStats.seasonsPlayed || 0) + 1;
 
-            // Age 11 graduates into the formal Rookie Draft Class!
             if (kid.age >= 11) {
                 kid.teamId = null;
                 kid.seasonStats = {};
                 kid.careerStats.snapsThisSeason = 0;
-                kid.lifecycle = 'draft_eligible';
-                if (!kid.personality) kid.personality = {};
-                kid.personality.entersDraft = true;
-                game.draftClass.push(kid); // ✅ Added directly to draft class
+
+                // LOGIC: Does the kid declare for the draft or wait as a street walk-on?
+                const ego = kid.personality?.ego || 50;
+                const loyalty = kid.personality?.loyalty || 60;
+                const bestFriend = kid.social?.bestFriendId ? getPlayer(kid.social.bestFriendId) : null;
+                const friendOnMainTeam = bestFriend && bestFriend.teamId;
+
+                let entersDraft = true;
+                if (friendOnMainTeam && Math.random() < 0.50) {
+                    entersDraft = false; // Bypasses draft to be recruited by buddy's team!
+                } else if (ego >= 80 && loyalty < 40 && Math.random() < 0.40) {
+                    entersDraft = false; // Diva skips draft to pick landing spot later
+                }
+
+                if (entersDraft) {
+                    kid.lifecycle = 'draft_eligible';
+                    if (!kid.personality) kid.personality = {};
+                    kid.personality.entersDraft = true;
+                    game.draftClass.push(kid);
+                } else {
+                    kid.lifecycle = 'active';
+                    if (!kid.personality) kid.personality = {};
+                    kid.personality.entersDraft = false;
+                }
                 return false;
             }
             return true;
@@ -1301,35 +1394,52 @@ export function advanceToOffseason() {
         yt.wins = 0; yt.losses = 0; yt.ties = 0;
     });
 
+    // 💡 TOP OFF DRAFT CLASS WITH STRICTLY AGE 11 ROOKIES (Guarantee 65 prospects for 60 picks)
+    const thisYearsClassModifiers = generateDraftClassModifiers();
+    const neededDraftRookies = Math.max(0, 65 - game.draftClass.length);
+    const newAge11Rookies = [];
+
+    for (let i = 0; i < neededDraftRookies; i++) {
+        const rookie = generatePlayer(11, 11, thisYearsClassModifiers); // STRICTLY AGE 11
+        rookie.lifecycle = 'draft_eligible';
+        if (!rookie.personality) rookie.personality = {};
+        rookie.personality.entersDraft = true;
+        game.players.push(rookie);
+        playerMap.set(rookie.id, rookie);
+        game.draftClass.push(rookie);
+        newAge11Rookies.push(rookie);
+    }
+
+    // 💡 GENERATE OLDER MOVE-INS (Ages 12-15) DIRECTLY INTO STREET FREE AGENCY
+    const newOlderWalkons = [];
+    for (let i = 0; i < 5; i++) {
+        const olderKid = generatePlayer(12, 15, thisYearsClassModifiers);
+        olderKid.lifecycle = 'active';
+        if (!olderKid.personality) olderKid.personality = {};
+        olderKid.personality.entersDraft = false;
+        game.players.push(olderKid);
+        playerMap.set(olderKid.id, olderKid);
+        newOlderWalkons.push(olderKid);
+    }
+
+    // Connect new recruits into the social network
+    const livingActivePlayers = game.players.filter(p => p.status?.type !== 'retired' && p.status?.type !== 'departed');
+    buildSocialNetworks([...newAge11Rookies, ...newOlderWalkons], livingActivePlayers);
 
     addMessage("Offseason Summary", `Offseason complete. ${totalVacancies} roster spots opened.\n\n${proRelMsg}\n\nPreparing for the draft.`, false, game);
 
     // 💡 BACKFILL PEE-WEE LEAGUE WITH NEW 8-YEAR-OLDS
-    const thisYearsClassModifiers = generateDraftClassModifiers();
     youthTeams.forEach(yt => {
         while (yt.roster.length < 14) {
             const freshKid = generatePlayer(8, 8, thisYearsClassModifiers);
             freshKid.teamId = yt.id;
             freshKid.lifecycle = 'youth';
             yt.roster.push(freshKid.id);
-            game.players.push(freshKid); // ✅ Fixed variable reference
+            game.players.push(freshKid);
             playerMap.set(freshKid.id, freshKid);
         }
         aiSetDepthChart(yt);
     });
-
-    // Generate new FA Kids moving into town
-    const newFAKids = [];
-    for (let i = 0; i < 6; i++) {
-        const fa = generatePlayer(12, 15, thisYearsClassModifiers);
-        game.players.push(fa);
-        playerMap.set(fa.id, fa);
-        newFAKids.push(fa);
-    }
-    
-    // Connect new kids into the social network
-    const allLivingPlayers = game.players.filter(p => p.status?.type !== 'retired' && p.status?.type !== 'departed');
-    buildSocialNetworks([...game.draftClass, ...newFAKids], allLivingPlayers);
 
     // 🚀 PERFORMANCE & MEMORY LEAK FIX
     // 1. Purge players who are retired/departed and NOT in the Hall of Fame

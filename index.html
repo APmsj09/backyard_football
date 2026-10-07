@@ -80,7 +80,7 @@
 
 <body class="bg-gray-100 text-gray-900 antialiased h-screen overflow-hidden flex flex-col">
 
-    <div class="container mx-auto p-4 flex-grow flex flex-col overflow-hidden">
+    <div class="container mx-auto p-4 flex-grow flex flex-col overflow-hidden min-h-0">
 
         <section id="start-screen" class="screen text-center flex flex-col items-center justify-center h-full">
             <h1 class="font-display text-7xl text-slate-800 mb-4 tracking-wider">Backyard GM</h1>
@@ -285,7 +285,7 @@
             </div>
         </section>
 
-        <section id="dashboard-screen" class="screen hidden h-full flex flex-col overflow-hidden">
+        <section id="dashboard-screen" class="screen hidden h-full flex flex-col overflow-hidden min-h-0">
             <div
                 class="flex-shrink-0 flex flex-col md:flex-row justify-between items-center p-4 bg-slate-900 text-white rounded-sm shadow-sm mb-4 border-b border-slate-700">
                 <div class="mb-4 md:mb-0 text-center md:text-left">
@@ -346,15 +346,15 @@
                 </nav>
 
                 <main id="dashboard-content"
-                    class="flex-grow bg-white rounded-sm shadow-sm p-0 overflow-hidden flex flex-col border border-slate-300 relative">
-                    <div id="tab-content-my-team" class="tab-pane flex flex-col h-full">
-                        <div class="p-4 border-b border-gray-100 bg-gray-50">
+                    class="flex-grow bg-white rounded-sm shadow-sm p-0 overflow-hidden flex flex-col border border-slate-300 relative min-h-0">
+                    <div id="tab-content-my-team" class="tab-pane flex flex-col h-full min-h-0">
+                        <div class="p-4 border-b border-gray-100 bg-gray-50 shrink-0">
                             <h3 class="text-xl font-bold text-gray-800">Team Roster</h3>
                         </div>
-                        <div id="my-team-roster" class="flex-grow overflow-auto p-0"></div>
+                        <div id="my-team-roster" class="flex-grow overflow-auto p-0 min-h-0"></div>
                     </div>
 
-                    <div id="tab-content-depth-chart" class="tab-pane hidden flex flex-col h-full">
+                    <div id="tab-content-depth-chart" class="tab-pane hidden flex flex-col h-full min-h-0">
                         <div
                             class="p-3 border-b border-gray-100 bg-gray-50 flex flex-wrap gap-2 items-center justify-between shrink-0">
                             <h3 class="text-xl font-bold text-gray-800 mr-4">Strategy</h3>
@@ -423,22 +423,22 @@
                         </div>
                     </div>
 
-                    <div id="tab-content-schedule" class="tab-pane hidden flex-col h-full">
-                        <div class="p-4 border-b bg-gray-50">
+                    <div id="tab-content-schedule" class="tab-pane hidden flex flex-col h-full min-h-0">
+                        <div class="p-4 border-b bg-gray-50 shrink-0">
                             <h3 class="text-xl font-bold">Schedule</h3>
                         </div>
-                        <div id="schedule-list" class="p-4 overflow-y-auto"></div>
+                        <div id="schedule-list" class="p-4 overflow-y-auto flex-grow min-h-0"></div>
                     </div>
 
-                    <div id="tab-content-standings" class="tab-pane hidden flex-col h-full">
-                        <div class="p-4 border-b bg-gray-50">
+                    <div id="tab-content-standings" class="tab-pane hidden flex flex-col h-full min-h-0">
+                        <div class="p-4 border-b bg-gray-50 shrink-0">
                             <h3 class="text-xl font-bold">Standings</h3>
                         </div>
-                        <div id="standings-container" class="p-4 overflow-y-auto grid md:grid-cols-2 gap-6"></div>
+                        <div id="standings-container" class="p-4 overflow-y-auto flex-grow min-h-0 grid md:grid-cols-2 gap-6"></div>
                     </div>
 
-                    <div id="tab-content-player-stats" class="tab-pane hidden flex-col h-full">
-                        <div class="p-4 border-b bg-gray-50 flex gap-4 items-center">
+                    <div id="tab-content-player-stats" class="tab-pane hidden flex flex-col h-full min-h-0">
+                        <div class="p-4 border-b bg-gray-50 flex gap-4 items-center shrink-0">
                             <h3 class="text-xl font-bold mr-auto">Leaders</h3>
                             <select id="stats-filter-league" class="p-2 border rounded text-sm bg-white">
                                 <option value="">All Leagues</option>
@@ -457,14 +457,14 @@
                                 <option value="interceptions">Sort by: INTs</option>
                             </select>
                         </div>
-                        <div id="player-stats-container" class="flex-grow overflow-y-auto p-0"></div>
+                        <div id="player-stats-container" class="flex-grow overflow-y-auto p-0 min-h-0"></div>
                     </div>
 
-                    <div id="tab-content-hall-of-fame" class="tab-pane hidden flex-col h-full">
-                        <div class="p-4 border-b bg-gray-50">
+                    <div id="tab-content-hall-of-fame" class="tab-pane hidden flex flex-col h-full min-h-0">
+                        <div class="p-4 border-b bg-gray-50 shrink-0">
                             <h3 class="text-xl font-bold text-amber-700">Hall of Fame</h3>
                         </div>
-                        <div id="hall-of-fame-list" class="p-4 overflow-y-auto"></div>
+                        <div id="hall-of-fame-list" class="p-4 overflow-y-auto flex-grow min-h-0"></div>
                     </div>
 
                     <div id="tab-content-history" class="tab-pane hidden flex flex-col h-full min-h-0">
@@ -474,11 +474,11 @@
                         <div id="history-container" class="p-4 overflow-y-auto flex-grow min-h-0 bg-slate-100"></div>
                     </div>
 
-                    <div id="tab-content-messages" class="tab-pane hidden flex-col h-full">
-                        <div class="p-4 border-b bg-gray-50">
+                    <div id="tab-content-messages" class="tab-pane hidden flex flex-col h-full min-h-0">
+                        <div class="p-4 border-b bg-gray-50 shrink-0">
                             <h3 class="text-xl font-bold">Inbox</h3>
                         </div>
-                        <div id="messages-list" class="p-4 overflow-y-auto space-y-2"></div>
+                        <div id="messages-list" class="p-4 overflow-y-auto space-y-2 flex-grow min-h-0"></div>
                     </div>
                 </main>
             </div>
@@ -666,12 +666,12 @@
     <div id="modal"
         class="fixed inset-0 bg-black/60 z-[100] hidden flex items-center justify-center backdrop-blur-sm p-4">
         <div id="modal-content"
-            class="bg-white rounded-sm shadow-xl w-full max-w-3xl overflow-hidden transform transition-all scale-100 flex flex-col max-h-[90vh] border border-slate-300">
-            <div class="p-3 border-b flex justify-between items-center bg-slate-50">
+            class="bg-white rounded-sm shadow-xl w-full max-w-3xl overflow-hidden transform transition-all scale-100 flex flex-col max-h-[90vh] border border-slate-300 min-h-0">
+            <div class="p-3 border-b flex justify-between items-center bg-slate-50 shrink-0">
                 <h3 id="modal-title" class="text-sm font-bold uppercase tracking-wider text-slate-600">Title</h3>
                 <button id="modal-default-close" class="text-slate-400 hover:text-slate-700 text-2xl leading-none">&times;</button>
             </div>
-            <div id="modal-body" class="p-6 overflow-y-auto text-slate-800 bg-slate-100"></div>
+            <div id="modal-body" class="p-6 overflow-y-auto text-slate-800 bg-slate-100 flex-grow min-h-0"></div>
         </div>
     </div>
 

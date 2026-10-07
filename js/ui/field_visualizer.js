@@ -223,6 +223,7 @@ export function drawFieldVisualization(canvas, ctx, frameData, homeColor = '#000
                 ctx.fillStyle = "white";
                 ctx.font = `bold ${ppY * 0.6}px Arial`;
                 ctx.textAlign = "center";
+                ctx.textBaseline = "middle";
                 ctx.fillText("X_X", 0, -baseSize * 2.5);
             }
 
@@ -235,6 +236,55 @@ export function drawFieldVisualization(canvas, ctx, frameData, homeColor = '#000
                 ctx.stroke();
                 ctx.setLineDash([]);
             }
+
+            // --- CRISP ON-FIELD POSITION & NAME BADGES (NO CLUTTER) ---
+            if (!p.isStunned) {
+                // 1. Position Micro-Pill (Above Helmet)
+                const posLabel = p.slot ? p.slot.replace(/\d+/g, '') : (p.isOffense ? 'OFF' : 'DEF');
+                const badgeBg = p.isOffense ? 'rgba(30, 58, 138, 0.85)' : 'rgba(136, 19, 55, 0.85)';
+                const badgeBorder = p.isOffense ? 'rgba(96, 165, 250, 0.6)' : 'rgba(251, 113, 133, 0.6)';
+                const badgeY = -baseSize * 1.8;
+
+                ctx.save();
+                ctx.font = `bold ${Math.max(9, ppY * 0.45)}px monospace`;
+                const posWidth = ctx.measureText(p.slot || posLabel).width + 8;
+                
+                ctx.fillStyle = badgeBg;
+                ctx.strokeStyle = badgeBorder;
+                ctx.lineWidth = 1;
+                ctx.beginPath();
+                ctx.roundRect(-posWidth / 2, badgeY - 6, posWidth, 12, 3);
+                ctx.fill();
+                ctx.stroke();
+
+                ctx.fillStyle = "#ffffff";
+                ctx.textAlign = "center";
+                ctx.textBaseline = "middle";
+                ctx.fillText(p.slot || posLabel, 0, badgeY);
+                ctx.restore();
+
+                // 2. Compact Surname Pill (Below Player)
+                if (p.name) {
+                    const lastName = p.name.split(' ').slice(-1)[0];
+                    const nameY = baseSize * 1.8;
+
+                    ctx.save();
+                    ctx.font = `bold ${Math.max(8, ppY * 0.4)}px sans-serif`;
+                    const nameWidth = ctx.measureText(lastName).width + 8;
+
+                    ctx.fillStyle = "rgba(15, 23, 42, 0.8)";
+                    ctx.beginPath();
+                    ctx.roundRect(-nameWidth / 2, nameY - 5, nameWidth, 11, 2);
+                    ctx.fill();
+
+                    ctx.fillStyle = "rgba(255, 255, 255, 0.9)";
+                    ctx.textAlign = "center";
+                    ctx.textBaseline = "middle";
+                    ctx.fillText(lastName, 0, nameY);
+                    ctx.restore();
+                }
+            }
+
             ctx.restore();
         });
     }
