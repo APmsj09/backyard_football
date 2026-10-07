@@ -79,7 +79,7 @@ export function checkFumble(ballCarrierState, tacklerState, playState, gameLog) 
     return false;
 }
 
-export function checkBlockCollisions(playState) {
+export function checkBlockCollisions(playState, gameLog = null) {
     const blockers = playState.activePlayers.filter(p => p.isOffense && !p.isEngaged && p.stunnedTicks === 0);
     const defenders = playState.activePlayers.filter(p => !p.isOffense && p.stunnedTicks <= 0 && !p.isEngaged);
 

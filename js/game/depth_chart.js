@@ -106,6 +106,9 @@ export function rebuildDepthChartFromOrder(team) {
     }
 
     if (!team.depthChart) team.depthChart = { offense: {}, defense: {}, special: {} };
+    if (!team.depthChart.offense) team.depthChart.offense = {};
+    if (!team.depthChart.defense) team.depthChart.defense = {};
+    if (!team.depthChart.special) team.depthChart.special = {};
     if (!team.slotOverrides) team.slotOverrides = { offense: {}, defense: {} };
     if (!team.slotOverrides.offense) team.slotOverrides.offense = {};
     if (!team.slotOverrides.defense) team.slotOverrides.defense = {};
@@ -203,6 +206,7 @@ export function rebuildDepthChartFromOrder(team) {
 
     const qbBucket = team.depthOrder['QB'] || [];
     const bestPunter = qbBucket.length > 1 ? qbBucket[1] : qbBucket[0];
+    if (!team.depthChart.special) team.depthChart.special = {};
     team.depthChart.special['P'] = bestPunter || null;
 
     if (offFormKey === 'Punt') {
@@ -225,6 +229,9 @@ export function aiSetDepthChart(team) {
 export function assignPlayerToSlot(team, playerId, slot, side) {
     if (!team) return false;
     if (!team.depthChart) team.depthChart = { offense: {}, defense: {}, special: {} };
+    if (!team.depthChart.offense) team.depthChart.offense = {};
+    if (!team.depthChart.defense) team.depthChart.defense = {};
+    if (!team.depthChart.special) team.depthChart.special = {};
     if (!team.slotOverrides) team.slotOverrides = { offense: {}, defense: {} };
     if (!team.slotOverrides[side]) team.slotOverrides[side] = {};
 
@@ -403,8 +410,8 @@ export function autoMakeSubstitutions(team, options = {}, gameLog = null) {
     const fullRoster = getRosterObjects(team);
     let subsDone = 0;
 
-    const activeOffense = new Set(Object.values(team.depthChart.offense).filter(Boolean));
-    const activeDefense = new Set(Object.values(team.depthChart.defense).filter(Boolean));
+    const activeOffense = new Set(Object.values(team.depthChart.offense || {}).filter(Boolean));
+    const activeDefense = new Set(Object.values(team.depthChart.defense || {}).filter(Boolean));
 
     for (const side of ['offense', 'defense']) {
         const chart = team.depthChart[side];

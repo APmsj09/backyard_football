@@ -560,7 +560,7 @@ export function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey
             }
 
             if (playState.playIsLive) {
-                checkBlockCollisions(playState);
+                checkBlockCollisions(playState, gameLog);
                 resolveOngoingBlocks(playState, gameLog, activeOffense, activeDefense);
 
                 if (ballCarrierState && checkTackleCollisions(playState, gameLog)) {

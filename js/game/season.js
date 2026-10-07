@@ -161,7 +161,8 @@ export async function initializeLeague(onProgress) {
             formations: { offense: offenseFormationData?.name || 'Balanced', defense: defenseFormationData?.name || '3-2-3' },
             depthChart: {
                 offense: Object.fromEntries((offenseFormationData?.slots || []).map(slot => [slot, null])),
-                defense: Object.fromEntries((defenseFormationData?.slots || []).map(slot => [slot, null]))
+                defense: Object.fromEntries((defenseFormationData?.slots || []).map(slot => [slot, null])),
+                special: { P: null }
             },
             draftNeeds: 0,
             socialProfile: {
@@ -184,7 +185,7 @@ export async function initializeLeague(onProgress) {
             ageMin: 8,
             ageMax: 11,
             formations: { offense: 'Balanced', defense: '3-2-3' },
-            depthChart: { offense: {}, defense: {} },
+            depthChart: { offense: {}, defense: {}, special: { P: null } },
             isYouth: true
         };
 
@@ -261,6 +262,7 @@ export function createPlayerTeam(teamName, options = {}) {
         depthChart: {
             offense: Object.fromEntries(defaultOffenseSlots.map(slot => [slot, null])),
             defense: Object.fromEntries(defaultDefenseSlots.map(slot => [slot, null])),
+            special: { P: null }
         },
         draftNeeds: 0,
         isPlayerControlled: true,
@@ -1333,6 +1335,7 @@ export function advanceToOffseason() {
             team.depthChart.offense = Object.fromEntries(offSlots.map(slot => [slot, null]));
             const defSlots = defenseFormations[team.formations.defense]?.slots || [];
             team.depthChart.defense = Object.fromEntries(defSlots.map(slot => [slot, null]));
+            team.depthChart.special = { P: null };
         }
         team.wins = 0; team.losses = 0; team.ties = 0;
 
