@@ -420,7 +420,8 @@ export function generatePlayer(minAge = 10, maxAge = 16, classModifiers = null) 
             const devFactor = Math.min(1.0, baseScale * playerGrowthTempo * attrVariance);
 
             const rawVal = Math.round(talentAttributes[cat][attr] * devFactor);
-            attributes[cat][attr] = Math.max(15, Math.min(99, rawVal));
+            // Raised floor from 15 to 28 so kids have basic functional ability
+            attributes[cat][attr] = Math.max(28, Math.min(99, rawVal));
         });
     });
 
@@ -445,8 +446,47 @@ export function generatePlayer(minAge = 10, maxAge = 16, classModifiers = null) 
     const egoRoll = gaussianRandom(50, 25);
     const loyaltyRoll = gaussianRandom(60, 20);
 
+    // --- GENERATE LORE BACKGROUND BLURB ---
+    const generateBio = () => {
+        const speedVal = attributes.physical?.speed || 50;
+        const strVal = attributes.physical?.strength || 50;
+        const iqVal = attributes.mental?.playbookIQ || 50;
+        const egoVal = egoRoll;
+        const ethVal = workEthicRoll;
+
+        const athleticClues = [
+            speedVal > 65 ? "Won the neighborhood 50-yard dash in untied sneakers." :
+            speedVal < 35 ? "Not the fastest runner on the blacktop, but holds his ground." :
+            "A balanced athlete who plays every sport at recess.",
+            strVal > 60 ? "Built like a cinder block from helping his uncle haul landscape pavers." :
+            strVal < 30 ? "Relies on quickness rather than brute power in scuffles." :
+            "Has decent functional strength for his age."
+        ];
+
+        const mentalClues = [
+            iqVal > 65 ? "Draws up trick plays on cafeteria napkins during lunch." :
+            iqVal < 35 ? "Pure natural athlete who still forgets which hash mark to line up on." :
+            "Understands the basics of backyard route trees.",
+            egoVal > 75 ? "Once took his ball home from the park because nobody passed to him." :
+            ethVal > 75 ? "First one waiting at the park gates on Saturday mornings." :
+            "Always brings extra freeze pops for the team after games."
+        ];
+
+        const quirks = [
+            "Refuses to wear gloves even in the freezing November wind.",
+            "Wears his older brother's oversized championship wristband for good luck.",
+            "Always carries a deflated football and a pump in his backpack.",
+            "Known around the park for practicing diving catches into lawn leaf piles."
+        ];
+
+        return `${getRandom(athleticClues)} ${getRandom(mentalClues)} ${getRandom(quirks)}`;
+    };
+
+    const bio = generateBio();
+
     return {
         id: crypto.randomUUID(),
+        bio,
         name: `${firstName} ${lastName}`,
         archetypeName: archetype.name,
         age,

@@ -644,6 +644,12 @@ function openPlayerCard(playerId) {
                         <p><span class="text-slate-500 uppercase font-bold text-[10px] tracking-wider block">Work Ethic</span> ${player.personality?.workEthic || 50}</p>
                         <p><span class="text-slate-500 uppercase font-bold text-[10px] tracking-wider block">Dependability</span> ${player.personality?.dependability || 50}</p>
                     </div>
+
+                    ${player.bio ? `
+                    <div class="mt-3 p-2.5 bg-amber-50/70 border border-amber-200/80 rounded text-xs text-slate-800 leading-relaxed italic">
+                        <span class="font-bold uppercase tracking-wider text-[9px] text-amber-800 not-italic block mb-0.5">Scouting Lore & Reputation</span>
+                        "${player.bio}"
+                    </div>` : ''}
                 </div>
                 
                 <h4 class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Positional Ratings</h4>
@@ -816,13 +822,13 @@ function main() {
         const dashContent = document.getElementById('dashboard-content');
         const socialPane = document.createElement('div');
         socialPane.id = 'tab-content-social';
-        socialPane.className = 'tab-pane hidden flex-col h-full overflow-hidden';
+        socialPane.className = 'tab-pane hidden flex flex-col h-full min-h-0 overflow-y-auto bg-slate-100';
         socialPane.innerHTML = `
-            <div class="p-4 border-b bg-slate-50 shrink-0">
+            <div class="p-4 border-b bg-white shrink-0 sticky top-0 z-10 shadow-sm">
                 <h3 class="text-xl font-bold text-slate-800 uppercase tracking-wider">Locker Room Network</h3>
                 <p class="text-xs text-slate-500">Manage chemistry, cliques, and morale.</p>
             </div>
-            <div id="social-network-container" class="p-4 overflow-y-auto flex-grow bg-slate-100"></div>
+            <div id="social-network-container" class="p-4 flex-grow min-h-0 pb-12"></div>
         `;
         dashContent.appendChild(socialPane);
     }

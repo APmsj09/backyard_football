@@ -364,8 +364,9 @@ export function resolveOngoingBlocks(playState, gameLog, offenseStates = [], def
         }
 
         const ticksInBlock = playState.tick - battle.startTick;
-        if (ticksInBlock < 30) {
-            blockPower *= 1.25;
+        if (ticksInBlock < 35) {
+            // Give pass blockers solid early-snap anchor so QBs can complete 3-step drops
+            blockPower *= 1.60;
         }
 
         if (ticksInBlock > 60) {

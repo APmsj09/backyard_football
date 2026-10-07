@@ -1557,6 +1557,7 @@ function runLiveGameStep() {
     }
 
     updateLiveScoreboard();
+    renderLiveBoxScore(activeLiveGame);
     let stepResult = Game.simulateLivePlayStep(activeLiveGame);
 
     if (stepResult.visualizationFrames?.length > 0) {
@@ -1667,6 +1668,65 @@ function playVisualization(frames, onComplete) {
         setTimeout(runNext, liveGameSpeed);
     };
     runNext();
+}
+
+export function renderLiveBoxScore(activeGame) {
+    const awayContainer = document.getElementById('sim-stats-away');
+    const homeContainer = document.getElementById('sim-stats-home');
+    if (!awayContainer || !homeContainer || !activeGame) return;
+
+    const renderTeamStats = (team, container) => {
+        const players = getUIRosterObjects(team);
+        const passers = players.filter(p => (p.gameStats?.passAttempts || 0) > 0);
+        const rushers = players.filter(p => (p.gameStats?.rushAttempts || 0) > 0);
+        const receivers = players.filter(p => (p.gameStats?.receptions || 0) > 0 || (p.gameStats?.targets || 0) > 0);
+        const tacklers = players.filter(p => (p.gameStats?.tackles || 0) > 0 || (p.gameStats?.sacks || 0) > 0);
+
+        let html = `
+            <div class="font-black text-xs uppercase tracking-wider mb-2 text-slate-200 border-b border-slate-700 pb-1">
+                ${team.name} Stats
+            </div>
+            <div class="space-y-3 text-[11px] font-mono">
+        `;
+
+        if (passers.length > 0) {
+            html += `<div><span class="text-slate-400 font-sans font-bold text-[10px] uppercase block">Passing</span>`;
+            passers.forEach(p => {
+                html += `<div class="flex justify-between"><span>${p.name.split(' ')[0]}</span><span>${p.gameStats.passCompletions}/${p.gameStats.passAttempts}, ${p.gameStats.passYards}y, ${p.gameStats.touchdowns || 0}TD</span></div>`;
+            });
+            html += `</div>`;
+        }
+
+        if (rushers.length > 0) {
+            html += `<div><span class="text-slate-400 font-sans font-bold text-[10px] uppercase block">Rushing</span>`;
+            rushers.forEach(p => {
+                html += `<div class="flex justify-between"><span>${p.name.split(' ')[0]}</span><span>${p.gameStats.rushAttempts} car, ${p.gameStats.rushYards}y</span></div>`;
+            });
+            html += `</div>`;
+        }
+
+        if (receivers.length > 0) {
+            html += `<div><span class="text-slate-400 font-sans font-bold text-[10px] uppercase block">Receiving</span>`;
+            receivers.forEach(p => {
+                html += `<div class="flex justify-between"><span>${p.name.split(' ')[0]}</span><span>${p.gameStats.receptions} rec, ${p.gameStats.recYards}y</span></div>`;
+            });
+            html += `</div>`;
+        }
+
+        if (tacklers.length > 0) {
+            html += `<div><span class="text-slate-400 font-sans font-bold text-[10px] uppercase block">Defense</span>`;
+            tacklers.forEach(p => {
+                html += `<div class="flex justify-between"><span>${p.name.split(' ')[0]}</span><span>${p.gameStats.tackles || 0} tkl, ${p.gameStats.sacks || 0} sck</span></div>`;
+            });
+            html += `</div>`;
+        }
+
+        html += `</div>`;
+        container.innerHTML = html;
+    };
+
+    renderTeamStats(activeGame.awayTeam, awayContainer);
+    renderTeamStats(activeGame.homeTeam, homeContainer);
 }
 
 function finishLiveGame() {
