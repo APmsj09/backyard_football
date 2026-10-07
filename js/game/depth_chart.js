@@ -31,63 +31,127 @@ export function normalizeFormationKey(formations, formationKey, defaultKey) {
     return keys.length > 0 ? keys[0] : null;
 }
 
+export function isPlayerViableForPosition(p, pos) {
+    if (!p) return false;
+    const normalize = (raw) => {
+        if (!raw) return null;
+        if (['FB'].includes(raw)) return 'RB';
+        if (['ATH', 'K', 'P'].includes(raw)) return 'WR';
+        if (['OT', 'OG', 'C'].includes(raw)) return 'OL';
+        if (['DE', 'DT', 'NT'].includes(raw)) return 'DL';
+        if (['CB', 'S', 'FS', 'SS'].includes(raw)) return 'DB';
+        return raw;
+    };
+    const off = normalize(p.favoriteOffensivePosition || p.pos || 'WR');
+    const def = normalize(p.favoriteDefensivePosition || 'DB');
+
+    if (off === pos || def === pos) return true;
+    if (pos === 'QB') return off === 'QB'; // Strictly actual QBs
+    if (pos === 'OL' && (off === 'TE' || def === 'DL')) return true;
+    if (pos === 'DL' && (off === 'OL' || def === 'LB')) return true;
+    if (pos === 'TE' && off === 'WR') return true;
+    if (pos === 'RB' && (off === 'WR' || def === 'LB')) return true;
+    if (pos === 'WR' && (off === 'RB' || def === 'DB')) return true;
+    if (pos === 'DB' && (off === 'WR' || def === 'LB')) return true;
+    if (pos === 'LB' && (def === 'DL' || def === 'DB')) return true;
+    return false;
+}
+
+export function populateNaturalDepthOrder(team) {
+    const rosterObjs = getRosterObjects(team);
+    team.depthOrder = {
+        'QB': [], 'RB': [], 'WR': [], 'TE': [], 'OL': [],
+        'DL': [], 'LB': [], 'DB': []
+    };
+
+    const positions = ['QB', 'RB', 'WR', 'TE', 'OL', 'DL', 'LB', 'DB'];
+    positions.forEach(pos => {
+        const viable = rosterObjs.filter(p => isPlayerViableForPosition(p, pos));
+        viable.sort((a, b) => calculateOverall(b, pos) - calculateOverall(a, pos));
+        team.depthOrder[pos] = viable.map(p => p.id);
+    });
+}
+
+export function pruneUnnaturalDepthOrder(team) {
+    if (!team || !team.depthOrder || typeof team.depthOrder !== 'object') return;
+    const assignedIds = new Set();
+    if (team.depthChart) {
+        Object.values(team.depthChart.offense || {}).forEach(id => { if (id) assignedIds.add(id); });
+        Object.values(team.depthChart.defense || {}).forEach(id => { if (id) assignedIds.add(id); });
+    }
+    if (team.slotOverrides) {
+        Object.values(team.slotOverrides.offense || {}).forEach(id => { if (id) assignedIds.add(id); });
+        Object.values(team.slotOverrides.defense || {}).forEach(id => { if (id) assignedIds.add(id); });
+    }
+
+    Object.keys(team.depthOrder).forEach(pos => {
+        if (!Array.isArray(team.depthOrder[pos])) return;
+        team.depthOrder[pos] = team.depthOrder[pos].filter(pid => {
+            if (assignedIds.has(pid)) return true;
+            const p = getPlayer(pid);
+            return isPlayerViableForPosition(p, pos);
+        });
+    });
+}
+
 export function rebuildDepthChartFromOrder(team) {
     if (!team || !team.formations) return;
 
     if (Array.isArray(team.roster)) {
-        team.roster = team.roster.filter(id => {
-            const p = getPlayer(id);
-            return !!p;
-        });
+        team.roster = team.roster.filter(id => !!getPlayer(id));
     }
 
-    if (!team.depthOrder || Array.isArray(team.depthOrder)) {
-        team.depthOrder = {
-            'QB': [], 'RB': [], 'WR': [], 'TE': [], 'OL': [],
-            'DL': [], 'LB': [], 'DB': []
-        };
+    if (!team.depthOrder || Array.isArray(team.depthOrder) || Object.keys(team.depthOrder).length === 0) {
+        populateNaturalDepthOrder(team);
     }
+
+    if (!team.depthChart) team.depthChart = { offense: {}, defense: {}, special: {} };
+    if (!team.slotOverrides) team.slotOverrides = { offense: {}, defense: {} };
+    if (!team.slotOverrides.offense) team.slotOverrides.offense = {};
+    if (!team.slotOverrides.defense) team.slotOverrides.defense = {};
+
+    pruneUnnaturalDepthOrder(team);
 
     const rosterIds = new Set(team.roster);
-    const assignedIds = new Set();
+    const offFormKey = normalizeFormationKey(offenseFormations, team.formations.offense, 'Balanced');
+    team.formations.offense = offFormKey;
+    const offSlots = offenseFormations[offFormKey]?.slots || [];
 
-    Object.keys(team.depthOrder).forEach(posKey => {
-        if (!Array.isArray(team.depthOrder[posKey])) {
-            team.depthOrder[posKey] = [];
-            return;
-        }
+    const defFormKey = normalizeFormationKey(defenseFormations, team.formations?.defense || '3-2-3 Base', '3-2-3 Base');
+    team.formations.defense = defFormKey;
+    const defSlots = defenseFormations[defFormKey]?.slots || [];
 
-        team.depthOrder[posKey] = team.depthOrder[posKey].filter(id => {
-            if (rosterIds.has(id)) {
-                assignedIds.add(id);
-                return true;
-            }
-            return false;
-        });
-    });
-
-    if (!team.isPlayerControlled) {
-        team.roster.forEach(pid => {
-            if (!assignedIds.has(pid)) {
-                const p = getPlayer(pid);
-                if (p) {
-                    let pos = p.pos || p.favoriteOffensivePosition || 'WR';
-                    if (['FB'].includes(pos)) pos = 'RB';
-                    if (['ATH', 'K', 'P'].includes(pos)) pos = 'WR';
-                    if (['OT', 'OG', 'C'].includes(pos)) pos = 'OL';
-                    if (['DE', 'DT', 'NT'].includes(pos)) pos = 'DL';
-                    if (['CB', 'S', 'FS', 'SS'].includes(pos)) pos = 'DB';
-
-                    if (!team.depthOrder[pos]) pos = 'WR';
-                    team.depthOrder[pos].push(pid);
-                }
-            }
-        });
-    }
-
-    team.depthChart = { offense: {}, defense: {}, special: {} };
     const usedOffense = new Set();
     const usedDefense = new Set();
+
+    // 1. RESPECT MANUAL SLOT OVERRIDES (AND CLEARED SLOTS)
+    offSlots.forEach(slot => {
+        if (team.slotOverrides.offense[slot] !== undefined) {
+            const pId = team.slotOverrides.offense[slot];
+            if (pId === null) {
+                team.depthChart.offense[slot] = null; // Explicitly cleared by user
+            } else if (rosterIds.has(pId)) {
+                team.depthChart.offense[slot] = pId;
+                usedOffense.add(pId);
+            } else {
+                delete team.slotOverrides.offense[slot];
+            }
+        }
+    });
+
+    defSlots.forEach(slot => {
+        if (team.slotOverrides.defense[slot] !== undefined) {
+            const pId = team.slotOverrides.defense[slot];
+            if (pId === null) {
+                team.depthChart.defense[slot] = null; // Explicitly cleared by user
+            } else if (rosterIds.has(pId)) {
+                team.depthChart.defense[slot] = pId;
+                usedDefense.add(pId);
+            } else {
+                delete team.slotOverrides.defense[slot];
+            }
+        }
+    });
 
     const getBestAvailable = (preferredBuckets, usedSet) => {
         for (const bucket of preferredBuckets) {
@@ -102,42 +166,37 @@ export function rebuildDepthChartFromOrder(team) {
         return null;
     };
 
-    const offFormKey = normalizeFormationKey(offenseFormations, team.formations.offense, 'Balanced');
-    team.formations.offense = offFormKey;
-    const offSlots = offenseFormations[offFormKey].slots;
+    // 2. AUTO-FILL REMAINING UNLOCKED SLOTS
     const sortedOffSlots = [...offSlots].sort((a, b) => getPriority(b) - getPriority(a));
-
     sortedOffSlots.forEach(slot => {
+        if (team.slotOverrides.offense[slot] !== undefined) return; // Keep locked or cleared
+
         let posKey = slot.replace(/\d+/g, '');
         if (['OT', 'OG', 'C'].includes(posKey)) posKey = 'OL';
         if (posKey === 'FB') posKey = 'RB';
 
         let searchBuckets = [slot, posKey];
-        if (posKey === 'WR') searchBuckets.push('TE', 'RB', 'DB', 'QB');
-        if (posKey === 'RB') searchBuckets.push('WR', 'DB', 'LB');
-        if (posKey === 'TE') searchBuckets.push('WR', 'OL', 'LB');
-        if (posKey === 'OL') searchBuckets.push('DL', 'TE', 'LB');
-        if (posKey === 'QB') searchBuckets.push('WR', 'RB', 'DB');
-        searchBuckets.push('WR', 'RB', 'TE', 'DB', 'LB', 'DL', 'OL', 'QB');
+        if (posKey === 'WR') searchBuckets.push('TE', 'RB');
+        if (posKey === 'RB') searchBuckets.push('WR');
+        if (posKey === 'TE') searchBuckets.push('WR', 'OL');
+        if (posKey === 'OL') searchBuckets.push('DL', 'TE');
+        if (posKey === 'QB') searchBuckets.push('WR', 'RB');
 
         team.depthChart.offense[slot] = getBestAvailable(searchBuckets, usedOffense);
     });
 
-    const defFormKey = normalizeFormationKey(defenseFormations, team.formations?.defense || '3-2-3 Base', '3-2-3 Base');
-    team.formations.defense = defFormKey;
-    const defSlots = defenseFormations[defFormKey].slots;
     const sortedDefSlots = [...defSlots].sort((a, b) => getPriority(b) - getPriority(a));
-
     sortedDefSlots.forEach(slot => {
+        if (team.slotOverrides.defense[slot] !== undefined) return; // Keep locked or cleared
+
         let posKey = slot.replace(/\d+/g, '');
         if (['CB', 'S'].includes(posKey)) posKey = 'DB';
         if (['DE', 'DT'].includes(posKey)) posKey = 'DL';
 
         let searchBuckets = [slot, posKey];
-        if (posKey === 'DB') searchBuckets.push('WR', 'RB', 'QB');
-        if (posKey === 'LB') searchBuckets.push('DL', 'DB', 'TE', 'RB');
-        if (posKey === 'DL') searchBuckets.push('LB', 'OL', 'TE');
-        searchBuckets.push('DB', 'LB', 'DL', 'WR', 'RB', 'TE', 'OL', 'QB');
+        if (posKey === 'DB') searchBuckets.push('WR');
+        if (posKey === 'LB') searchBuckets.push('DL', 'DB');
+        if (posKey === 'DL') searchBuckets.push('LB', 'OL');
 
         team.depthChart.defense[slot] = getBestAvailable(searchBuckets, usedDefense);
     });
@@ -151,89 +210,35 @@ export function rebuildDepthChartFromOrder(team) {
     }
 }
 
+export function autoResetLineup(team) {
+    if (!team) return;
+    team.slotOverrides = { offense: {}, defense: {} };
+    populateNaturalDepthOrder(team);
+    rebuildDepthChartFromOrder(team);
+}
+
 export function aiSetDepthChart(team) {
     if (!team) return;
-
-    if (team.isPlayerControlled) {
-        rebuildDepthChartFromOrder(team);
-        return;
-    }
-
-    const rosterObjs = getRosterObjects(team);
-    if (!team || !team.formations || !Array.isArray(rosterObjs) || rosterObjs.length === 0) return;
-
-    team.depthOrder = {
-        'QB': [], 'RB': [], 'WR': [], 'TE': [], 'OL': [],
-        'DL': [], 'LB': [], 'DB': []
-    };
-
-    const healthyPlayers = rosterObjs.filter(p => !p.status || p.status.duration === 0);
-    const sortRoster = healthyPlayers.length > 0 ? healthyPlayers : rosterObjs;
-
-    const offFormKey = normalizeFormationKey(offenseFormations, team.formations.offense, 'Balanced');
-    const defFormKey = normalizeFormationKey(defenseFormations, team.formations.defense, '3-2-3 Base');
-
-    const offSlots = offenseFormations[offFormKey]?.slots || [];
-    const defSlots = defenseFormations[defFormKey]?.slots || [];
-
-    const assignedOffense = new Set();
-    const assignedDefense = new Set();
-
-    const assignSmartStarter = (slot, side, assignedSet) => {
-        let bestPlayer = null;
-        let bestScore = -Infinity;
-
-        let posKey = slot.replace(/\d+/g, '');
-        if (['OT', 'OG', 'C'].includes(posKey)) posKey = 'OL';
-        if (posKey === 'FB') posKey = 'RB';
-        if (['CB', 'S'].includes(posKey)) posKey = 'DB';
-        if (['DE', 'DT'].includes(posKey)) posKey = 'DL';
-
-        sortRoster.forEach(p => {
-            if (assignedSet.has(p.id)) return;
-
-            let score = calculateSlotSuitability(p, slot, side, team);
-            const isNatural = (p.favoriteOffensivePosition === posKey || p.favoriteDefensivePosition === posKey || p.pos === posKey);
-            if (!isNatural) {
-                score -= 30;
-            }
-
-            if (score > bestScore) {
-                bestScore = score;
-                bestPlayer = p;
-            }
-        });
-
-        if (bestPlayer) {
-            assignedSet.add(bestPlayer.id);
-            team.depthOrder[slot] = [bestPlayer.id];
-        }
-    };
-
-    const sortedOff = [...offSlots].sort((a, b) => getPriority(b) - getPriority(a));
-    const sortedDef = [...defSlots].sort((a, b) => getPriority(b) - getPriority(a));
-
-    sortedOff.forEach(slot => assignSmartStarter(slot, 'offense', assignedOffense));
-    sortedDef.forEach(slot => assignSmartStarter(slot, 'defense', assignedDefense));
-
-    const positions = ['QB', 'RB', 'WR', 'TE', 'OL', 'DL', 'LB', 'DB'];
-    positions.forEach(pos => {
-        const candidates = [...rosterObjs].sort((a, b) => {
-            const ovrA = calculateOverall(a, pos);
-            const ovrB = calculateOverall(b, pos);
-            const isNaturalA = (a.favoriteOffensivePosition === pos || a.pos === pos) ? 10 : 0;
-            const isNaturalB = (b.favoriteOffensivePosition === pos || b.pos === pos) ? 10 : 0;
-            return (ovrB + isNaturalB) - (ovrA + isNaturalA);
-        });
-
-        team.depthOrder[pos] = candidates.map(p => p.id);
-    });
-
-    rebuildDepthChartFromOrder(team);
+    autoResetLineup(team);
 }
 
 export function assignPlayerToSlot(team, playerId, slot, side) {
     if (!team) return false;
+    if (!team.depthChart) team.depthChart = { offense: {}, defense: {}, special: {} };
+    if (!team.slotOverrides) team.slotOverrides = { offense: {}, defense: {} };
+    if (!team.slotOverrides[side]) team.slotOverrides[side] = {};
+
+    // 1. CLEAR SLOT: Lock as explicitly empty
+    if (!playerId || playerId === 'null' || playerId === '') {
+        team.slotOverrides[side][slot] = null;
+        team.depthChart[side][slot] = null;
+        rebuildDepthChartFromOrder(team);
+        return true;
+    }
+
+    // 2. ASSIGN SLOT: Lock assignment and promote player in group
+    team.slotOverrides[side][slot] = playerId;
+    team.depthChart[side][slot] = playerId;
 
     let posKey = slot.replace(/\d+/g, '');
     if (['OT', 'OG', 'C'].includes(posKey)) posKey = 'OL';
@@ -245,28 +250,11 @@ export function assignPlayerToSlot(team, playerId, slot, side) {
     if (!team.depthOrder[posKey]) team.depthOrder[posKey] = [];
 
     const groupList = team.depthOrder[posKey];
-    const slotNumberMatch = slot.match(/\d+/);
-    const targetIndex = slotNumberMatch ? Math.max(0, parseInt(slotNumberMatch[0], 10) - 1) : 0;
-
-    if (!playerId || playerId === 'null' || playerId === '') {
-        const currentPlayerId = team.depthChart?.[side]?.[slot];
-        if (currentPlayerId) {
-            const currentIndex = groupList.indexOf(currentPlayerId);
-            if (currentIndex > -1) groupList.splice(currentIndex, 1);
-            groupList.push(currentPlayerId);
-            team.depthOrder[posKey] = groupList;
-            rebuildDepthChartFromOrder(team);
-        }
-        return true;
-    }
-
     const existingIndex = groupList.indexOf(playerId);
     if (existingIndex > -1) groupList.splice(existingIndex, 1);
+    groupList.unshift(playerId);
+    team.depthOrder[posKey] = groupList;
 
-    while (groupList.length < targetIndex) groupList.push(null);
-    groupList.splice(targetIndex, 0, playerId);
-
-    team.depthOrder[posKey] = groupList.filter(id => id !== null);
     rebuildDepthChartFromOrder(team);
     return true;
 }

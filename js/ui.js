@@ -626,6 +626,16 @@ function renderMyTeamTab(gameState) {
     elements.myTeamRoster.innerHTML = html + `</tbody></table></div>`;
 }
 
+window.app_autoResetLineup = function() {
+    const gs = getGameState();
+    if (!gs?.playerTeam) return;
+    if (confirm("Reset lineup to optimal depth rankings? All manual slot locks will clear.")) {
+        Game.autoResetLineup(gs.playerTeam);
+        saveGameState();
+        renderDepthChartTab(gs);
+    }
+};
+
 function renderDepthChartTab(gameState) {
     const gs = getGameState();
     if (!gs?.playerTeam) return;
@@ -651,6 +661,16 @@ function renderFormationDropdown(side, formationMap, selectedKey) {
         rebuildDepthChartFromOrder(team);
         document.dispatchEvent(new CustomEvent('refresh-ui'));
     };
+
+    // Add an inline Auto-Set button right next to the formation dropdown if not already present
+    const parentContainer = select.parentElement;
+    if (parentContainer && !parentContainer.querySelector('.auto-lineup-btn')) {
+        const autoBtn = document.createElement('button');
+        autoBtn.className = 'auto-lineup-btn ml-3 px-3 py-1.5 bg-slate-900 text-white rounded text-xs font-bold hover:bg-slate-800 transition shadow-sm uppercase tracking-wider';
+        autoBtn.innerHTML = '⚡ Auto-Set Best';
+        autoBtn.onclick = () => window.app_autoResetLineup();
+        parentContainer.appendChild(autoBtn);
+    }
 }
 
 function renderPositionalOveralls() {
