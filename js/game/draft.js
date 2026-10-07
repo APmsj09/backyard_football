@@ -57,24 +57,20 @@ export function calculateDraftValue(player, team) {
  * Year 1: Inaugural draft (fill rosters).
  * Year 2+: 3-round fixed Rookie Draft (60 picks).
  */
+import { generatePlayer, generateDraftClassModifiers } from './player.js';
+
 export function setupDraft() {
     if (!game || !game.teams) return;
     game.draftOrder = [];
     game.currentPick = 0;
     game.pickHistory = [];
 
-    // ONLY the 20 main-league teams participate (Tier 1 & Tier 2)
     const mainTeams = game.teams.filter(t => t.leagueType === 'main');
 
-    let sortedTeams;
     if (game.year === 1) {
-        // Lottery shuffle for inaugural draft
-        sortedTeams = [...mainTeams].sort(() => 0.5 - Math.random());
-        
-        // Year 1: Populate draft class with inaugural tryouts (age >= 11)
+        const sortedTeams = [...mainTeams].sort(() => 0.5 - Math.random());
         game.draftClass = game.players.filter(p => !p.teamId && p.age >= 11 && p.personality?.entersDraft !== false);
 
-        // Snake draft to fill founding rosters
         mainTeams.forEach(t => t.draftNeeds = Math.max(0, ROSTER_LIMIT - (t.roster?.length || 0)));
         const maxNeeds = Math.max(0, ...mainTeams.map(t => t.draftNeeds || 0));
 
@@ -82,14 +78,36 @@ export function setupDraft() {
             game.draftOrder.push(...(i % 2 === 0 ? sortedTeams : [...sortedTeams].reverse()));
         }
     } else {
-        // Year 2+: Order based on reverse standings (worst record picks #1)
-        sortedTeams = [...mainTeams].sort((a, b) => 
-            (a.wins || 0) - (b.wins || 0) || (b.losses || 0) - (a.losses || 0)
-        );
+        // 1. Order by reverse standings from the season that just finished
+        let sortedTeams;
+        if (game.nextDraftOrder && Array.isArray(game.nextDraftOrder)) {
+            sortedTeams = game.nextDraftOrder.map(id => mainTeams.find(t => t.id === id)).filter(Boolean);
+        }
+        if (!sortedTeams || sortedTeams.length === 0) {
+            sortedTeams = [...mainTeams].sort((a, b) => 
+                (a.wins || 0) - (b.wins || 0) || (b.losses || 0) - (a.losses || 0)
+            );
+        }
 
         // 3 Fixed Rounds = 60 total picks
         for (let r = 0; r < DRAFT_ROUNDS_ROOKIE; r++) {
             game.draftOrder.push(...(r % 2 === 0 ? sortedTeams : [...sortedTeams].reverse()));
+        }
+
+        // 2. Ensure at least 65 draft-eligible prospects exist so picks don't run out
+        if (!game.draftClass) game.draftClass = [];
+        game.draftClass = game.draftClass.filter(p => !p.teamId);
+
+        const needed = Math.max(0, 65 - game.draftClass.length);
+        if (needed > 0) {
+            const classMods = generateDraftClassModifiers();
+            for (let i = 0; i < needed; i++) {
+                const rookie = generatePlayer(11, 13, classMods);
+                rookie.lifecycle = 'draft_eligible';
+                game.players.push(rookie);
+                playerMap.set(rookie.id, rookie);
+                game.draftClass.push(rookie);
+            }
         }
     }
 }
@@ -100,8 +118,10 @@ export function setupDraft() {
 export function simulateAIPick(team) {
     if (!team || !game || team.roster.length >= ROSTER_LIMIT) return null;
 
-    // Pull strictly from the draft class
-    const availableProspects = (game.draftClass || []).filter(p => !p.teamId);
+    let availableProspects = (game.draftClass || []).filter(p => !p.teamId);
+    if (availableProspects.length === 0) {
+        availableProspects = (game.players || []).filter(p => !p.teamId && p.age < 17 && p.personality?.entersDraft !== false);
+    }
     if (availableProspects.length === 0) return null;
 
     let bestProspect = null;
@@ -118,9 +138,7 @@ export function simulateAIPick(team) {
     if (bestProspect) {
         addPlayerToTeam(bestProspect, team);
         bestProspect.lifecycle = 'active';
-        
-        // Remove from draft class
-        game.draftClass = game.draftClass.filter(p => p.id !== bestProspect.id);
+        game.draftClass = (game.draftClass || []).filter(p => p.id !== bestProspect.id);
     }
     return bestProspect;
 }
