@@ -55,17 +55,22 @@ export async function initializeLeague(onProgress) {
         year: 1, teams: [], players: [], freeAgents: [], draftClass: [], playerTeam: null, schedule: [],
         currentWeek: 0, draftOrder: [], currentPick: 0, hallOfFame: [],
         gameResults: [], messages: [], relationships: new Map(),
-        pickHistory: [], history: { seasons: [] }
+        pickHistory: [], history: { seasons: [] },
+        records: {
+            game: {},
+            season: {},
+            career: {}
+        }
     };
     setGame(newGame);
 
     addMessage("Welcome!", "Generating the league and players...");
 
-    const totalPlayers = 380;
+    const totalPlayers = 480; // Increased to ensure deep initial rosters
     const initialClassModifiers = generateDraftClassModifiers();
 
     for (let i = 0; i < totalPlayers; i++) {
-        game.players.push(generatePlayer(10, 16, initialClassModifiers));
+        game.players.push(generatePlayer(11, 16, initialClassModifiers)); // Age 11-16 for main league
         if (i % 10 === 0 && onProgress) {
             onProgress((i / totalPlayers) * 0.7);
             await yieldToMain();
@@ -173,6 +178,22 @@ export async function initializeLeague(onProgress) {
         aiSetDepthChart(yTeam);
         game.teams.push(yTeam); // ✅ Now unified in game.teams
     }
+
+    // Populate Initial Main Team Rosters
+    const mainTeams = game.teams.filter(t => t.leagueType === 'main');
+    const unassigned = game.players.filter(p => !p.teamId && p.age >= 11 && p.age <= 16);
+
+    mainTeams.forEach(team => {
+        const targetRosterSize = 14; // Give every team 14 initial players
+        for (let i = 0; i < targetRosterSize; i++) {
+            if (unassigned.length > 0) {
+                const idx = getRandomInt(0, unassigned.length - 1);
+                const p = unassigned.splice(idx, 1)[0];
+                addPlayerToTeam(p, team);
+            }
+        }
+        aiSetDepthChart(team);
+    });
 
     if (onProgress) onProgress(1.0);
     addMessage("Ready!", "League generated. Time to create your team.");
@@ -428,8 +449,17 @@ export function generateDraftSummary() {
 export function getTeamOverall(team) {
     const roster = getRosterObjects(team);
     if (!roster || !roster.length) return 50;
-    const sum = roster.reduce((s, p) => s + calculateOverall(p, estimateBestPosition(p)), 0);
-    return sum / roster.length;
+    
+    // ZenGM Style: A team's OVR is dictated by its top 8 starters, not dragged down by bench scrubs
+    const sortedOvr = roster
+        .map(p => calculateOverall(p, estimateBestPosition(p)))
+        .sort((a, b) => b - a);
+        
+    const top8 = sortedOvr.slice(0, 8);
+    if (top8.length === 0) return 50;
+    
+    const sum = top8.reduce((s, val) => s + val, 0);
+    return Math.round(sum / top8.length);
 }
 
 export function generateHistoricalStats(team, score) {
@@ -1032,107 +1062,148 @@ export function advanceToOffseason() {
         { reason: 'Decided to quit', chance: 0.01 }
     ];
 
-    game.teams.forEach(team => {
-        if (!team || !team.roster) return;
-        const currentRoster = getRosterObjects(team);
-        team.roster = [];
+    // Process ALL players in the universe (ZenGM style) to fix Free Agent aging/leaks
+    game.players.forEach(player => {
+        if (!player.careerStats || !player.attributes) return;
 
-        currentRoster.forEach(player => {
-            if (!player.careerStats || !player.attributes) return;
+        const team = player.teamId ? game.teams.find(t => t.id === player.teamId) : null;
+        const teamName = team ? team.name : 'Free Agent';
 
-            // Record End-of-Year Progression Snapshot with Stat Highlights
-            if (!player.progression) player.progression = [];
-            player.progression.push({
-                year: game.year,
-                age: player.age,
-                teamName: team.name,
-                ovr: calculateOverall(player, estimateBestPosition(player)),
-                stats: {
-                    passYards: player.seasonStats?.passYards || 0,
-                    rushYards: player.seasonStats?.rushYards || 0,
-                    recYards: player.seasonStats?.recYards || 0,
-                    touchdowns: player.seasonStats?.touchdowns || 0,
-                    tackles: player.seasonStats?.tackles || 0
-                }
-            });
-
-            player.age++;
-            player.careerStats.seasonsPlayed = (player.careerStats.seasonsPlayed || 0) + 1;
-            const snapsThisSeason = player.careerStats.snapsThisSeason || 0;
-
-            const devReport = developPlayer(player, team);
-            if (team.id === game.playerTeam?.id) developmentResults.push(devReport);
-
-            let playerIsLeaving = false;
-
-            if (player.age >= 17) {
-                retiredPlayers.push(player);
-                playerIsLeaving = true;
-                if (team.id === game.playerTeam?.id) addMessage("Player Retires", `${player.name} is moving on from the league.`);
-                if ((player.careerStats.touchdowns || 0) > 25) {
-                    if (!game.hallOfFame) game.hallOfFame = [];
-                    game.hallOfFame.push(player); hofInductees.push(player);
-                    if (team.id === game.playerTeam?.id) addMessage("Hall of Fame!", `${player.name} inducted!`);
-                }
-            } else {
-                if (!player.expectations) player.expectations = { desiredRole: 'DEVELOPMENTAL', minTouchesPerGame: 0, happiness: 100 };
-
-                const gamesPlayed = 9;
-                const snapsPerGame = snapsThisSeason / gamesPlayed;
-                const touchesPerGame =
-                    ((player.seasonStats?.rushAttempts || 0) +
-                        (player.seasonStats?.targets || 0) +
-                        (player.seasonStats?.passAttempts || 0)) / gamesPlayed;
-
-                if (player.expectations.desiredRole === 'STARTER' && snapsPerGame < 35) {
-                    player.expectations.happiness -= 30;
-                } else if (player.expectations.desiredRole === 'ROTATION' && snapsPerGame < 15) {
-                    player.expectations.happiness -= 20;
-                }
-
-                if (touchesPerGame < player.expectations.minTouchesPerGame) {
-                    player.expectations.happiness -= 25;
-                }
-
-                if (team.socialProfile && team.socialProfile.streetCred < 35) {
-                    player.expectations.happiness -= 15;
-                } else if (team.socialProfile && team.socialProfile.streetCred > 65) {
-                    player.expectations.happiness += 10;
-                }
-
-                if (player.expectations.happiness < 40) {
-                    leavingPlayers.push({ player, reason: 'Unhappy with role, transferred to rival', teamName: team.name });
-                    playerIsLeaving = true;
-                    if (team.id === game.playerTeam?.id) {
-                        addMessage("Transfer Request", `😠 ${player.name} was unhappy with his touches/playing time and left the team.`);
-                    }
-                } else {
-                    for (const event of departureEvents) {
-                        if (Math.random() < event.chance) {
-                            leavingPlayers.push({ player, reason: event.reason, teamName: team.name });
-                            playerIsLeaving = true;
-                            if (team.id === game.playerTeam?.id) addMessage("Player Leaving", `${player.name}: ${event.reason}.`);
-                            break;
-                        }
-                    }
-                }
+        // Check Season and Career Records
+        if (!game.records) game.records = { game: {}, season: {}, career: {} };
+        
+        const checkSeasonRec = (statKey, val) => {
+            if (!game.records.season[statKey]) game.records.season[statKey] = { val: 0, holder: 'None', year: 0 };
+            if (val > game.records.season[statKey].val) {
+                game.records.season[statKey] = { val, holder: player.name, year: game.year };
             }
+        };
+        
+        const checkCareerRec = (statKey, val) => {
+            if (!game.records.career[statKey]) game.records.career[statKey] = { val: 0, holder: 'None' };
+            if (val > game.records.career[statKey].val) {
+                game.records.career[statKey] = { val, holder: player.name };
+            }
+        };
 
-            if (!playerIsLeaving) {
-                player.seasonStats = { receptions: 0, recYards: 0, passYards: 0, rushYards: 0, touchdowns: 0, tackles: 0, sacks: 0, interceptions: 0, passAttempts: 0, passCompletions: 0, interceptionsThrown: 0 };
-                if (!player.status) player.status = {};
-                player.status = { type: 'healthy', description: '', duration: 0 };
-                team.roster.push(player.id);
-            } else {
-                player.teamId = null;
-                player.status = {
-                    type: player.age >= 17 ? 'retired' : 'departed',
-                    description: player.age >= 17 ? 'Retired from the league' : 'Left the league',
-                    duration: 0
-                };
-                totalVacancies++;
+        const sStats = player.seasonStats || {};
+        checkSeasonRec('passYards', sStats.passYards || 0);
+        checkSeasonRec('rushYards', sStats.rushYards || 0);
+        checkSeasonRec('recYards', sStats.recYards || 0);
+        checkSeasonRec('touchdowns', sStats.touchdowns || 0);
+        checkSeasonRec('tackles', sStats.tackles || 0);
+        checkSeasonRec('sacks', sStats.sacks || 0);
+        checkSeasonRec('interceptions', sStats.interceptions || 0);
+
+        const cStats = player.careerStats || {};
+        checkCareerRec('passYards', cStats.passYards || 0);
+        checkCareerRec('rushYards', cStats.rushYards || 0);
+        checkCareerRec('recYards', cStats.recYards || 0);
+        checkCareerRec('touchdowns', cStats.touchdowns || 0);
+        checkCareerRec('tackles', cStats.tackles || 0);
+        checkCareerRec('sacks', cStats.sacks || 0);
+        checkCareerRec('interceptions', cStats.interceptions || 0);
+
+        // Record End-of-Year Progression Snapshot
+        if (!player.progression) player.progression = [];
+        player.progression.push({
+            year: game.year,
+            age: player.age,
+            teamName: teamName,
+            ovr: calculateOverall(player, estimateBestPosition(player)),
+            stats: {
+                passYards: player.seasonStats?.passYards || 0,
+                rushYards: player.seasonStats?.rushYards || 0,
+                recYards: player.seasonStats?.recYards || 0,
+                touchdowns: player.seasonStats?.touchdowns || 0,
+                tackles: player.seasonStats?.tackles || 0
             }
         });
+
+        player.age++;
+        player.careerStats.seasonsPlayed = (player.careerStats.seasonsPlayed || 0) + 1;
+        const snapsThisSeason = player.careerStats.snapsThisSeason || 0;
+
+        const devReport = developPlayer(player, team);
+        if (team && team.id === game.playerTeam?.id) developmentResults.push(devReport);
+
+        let playerIsLeaving = false;
+
+        // Everyone retires at age 17, even Free Agents
+        if (player.age >= 17) {
+            retiredPlayers.push(player);
+            playerIsLeaving = true;
+            if (team && team.id === game.playerTeam?.id) addMessage("Player Retires", `${player.name} is moving on from the league.`);
+            if ((player.careerStats.touchdowns || 0) > 25) {
+                if (!game.hallOfFame) game.hallOfFame = [];
+                game.hallOfFame.push(player); hofInductees.push(player);
+                if (team && team.id === game.playerTeam?.id) addMessage("Hall of Fame!", `${player.name} inducted!`);
+            }
+        } else if (team) {
+            // Roster specific morale checks
+            if (!player.expectations) player.expectations = { desiredRole: 'DEVELOPMENTAL', minTouchesPerGame: 0, happiness: 100 };
+
+            const gamesPlayed = 9;
+            const snapsPerGame = snapsThisSeason / gamesPlayed;
+            const touchesPerGame =
+                ((player.seasonStats?.rushAttempts || 0) +
+                    (player.seasonStats?.targets || 0) +
+                    (player.seasonStats?.passAttempts || 0)) / gamesPlayed;
+
+            if (player.expectations.desiredRole === 'STARTER' && snapsPerGame < 35) {
+                player.expectations.happiness -= 30;
+            } else if (player.expectations.desiredRole === 'ROTATION' && snapsPerGame < 15) {
+                player.expectations.happiness -= 20;
+            }
+
+            if (touchesPerGame < player.expectations.minTouchesPerGame) {
+                player.expectations.happiness -= 25;
+            }
+
+            if (team.socialProfile && team.socialProfile.streetCred < 35) {
+                player.expectations.happiness -= 15;
+            } else if (team.socialProfile && team.socialProfile.streetCred > 65) {
+                player.expectations.happiness += 10;
+            }
+
+            if (player.expectations.happiness < 40) {
+                leavingPlayers.push({ player, reason: 'Unhappy with role, transferred to rival', teamName: team.name });
+                playerIsLeaving = true;
+                if (team.id === game.playerTeam?.id) {
+                    addMessage("Transfer Request", `😠 ${player.name} was unhappy with his touches/playing time and left the team.`);
+                }
+            } else {
+                for (const event of departureEvents) {
+                    if (Math.random() < event.chance) {
+                        leavingPlayers.push({ player, reason: event.reason, teamName: team.name });
+                        playerIsLeaving = true;
+                        if (team.id === game.playerTeam?.id) addMessage("Player Leaving", `${player.name}: ${event.reason}.`);
+                        break;
+                    }
+                }
+            }
+        }
+
+        if (!playerIsLeaving) {
+            player.seasonStats = { receptions: 0, recYards: 0, passYards: 0, rushYards: 0, touchdowns: 0, tackles: 0, sacks: 0, interceptions: 0, passAttempts: 0, passCompletions: 0, interceptionsThrown: 0 };
+            if (!player.status) player.status = {};
+            player.status = { type: 'healthy', description: '', duration: 0 };
+        } else {
+            player.teamId = null;
+            player.status = {
+                type: player.age >= 17 ? 'retired' : 'departed',
+                description: player.age >= 17 ? 'Retired from the league' : 'Left the league',
+                duration: 0
+            };
+            totalVacancies++;
+        }
+    });
+
+    // Re-compile valid rosters based on the updated universal player pool
+    game.teams.forEach(team => {
+        team.roster = game.players
+            .filter(p => p.teamId === team.id && (!p.status || p.status.duration === 0 || p.status.type === 'healthy'))
+            .map(p => p.id);
 
         if (team.depthChart && team.formations) {
             const offSlots = offenseFormations[team.formations.offense]?.slots || [];
@@ -1206,6 +1277,27 @@ export function advanceToOffseason() {
         }
         aiSetDepthChart(yt);
     });
+
+    // 🚀 PERFORMANCE & MEMORY LEAK FIX
+    // 1. Purge players who are retired/departed and NOT in the Hall of Fame
+    const hofIds = new Set((game.hallOfFame || []).map(p => p.id));
+    game.players = game.players.filter(p => {
+        if (p.status?.type === 'retired' || p.status?.type === 'departed') {
+            return hofIds.has(p.id);
+        }
+        return true;
+    });
+
+    // 2. Cap progression history size to prevent infinite array growth
+    game.players.forEach(p => {
+        if (p.progression && p.progression.length > 5) {
+            p.progression = p.progression.slice(-5);
+        }
+    });
+
+    // 3. Re-sync playerMap to drop dead references
+    playerMap.clear();
+    game.players.forEach(p => playerMap.set(p.id, p));
 
     game.gameResults = [];
     game.breakthroughs = [];

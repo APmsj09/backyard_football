@@ -302,6 +302,23 @@ export function finalizeGameResults(homeTeam, awayTeam, homeScore, awayScore) {
             }
         });
 
+        // Check Single Game Records
+        if (!game.records) game.records = { game: {}, season: {}, career: {} };
+        const checkGameRec = (statKey, val) => {
+            if (!game.records.game[statKey]) game.records.game[statKey] = { val: 0, holder: 'None', year: 0 };
+            if (val > game.records.game[statKey].val) {
+                game.records.game[statKey] = { val, holder: p.name, year: game.year };
+            }
+        };
+
+        checkGameRec('passYards', p.gameStats.passYards || 0);
+        checkGameRec('rushYards', p.gameStats.rushYards || 0);
+        checkGameRec('recYards', p.gameStats.recYards || 0);
+        checkGameRec('touchdowns', p.gameStats.touchdowns || 0);
+        checkGameRec('tackles', p.gameStats.tackles || 0);
+        checkGameRec('sacks', p.gameStats.sacks || 0);
+        checkGameRec('interceptions', p.gameStats.interceptions || 0);
+
         p.gameStats = null;
     });
 }
@@ -317,27 +334,58 @@ export function saveGameState(saveKey = DEFAULT_SAVE_KEY) {
             )
         };
 
+        // 🚀 COMPRESSION & EFFICIENCY FIXES
+        // Strip out bloated, transient, and unnecessary data before serialization
+        dataToSave.players = (dataToSave.players || []).map(p => {
+            const cleanP = { ...p };
+            delete cleanP.gameStats;     // Transient in-game stats
+            delete cleanP.fatigue;       // Transient energy
+            delete cleanP.isResting;
+            delete cleanP._distToCarrier;
+            delete cleanP.velocity;
+            
+            // If completely healthy, don't store the verbose status object
+            if (cleanP.status && cleanP.status.type === 'healthy' && cleanP.status.duration === 0) {
+                delete cleanP.status;
+            }
+            return cleanP;
+        });
+
         dataToSave.teams = (dataToSave.teams || []).map(team => {
             const cleanTeam = { ...team };
             delete cleanTeam.recentPlayHistory;
+            delete cleanTeam._captainFlavorLogged;
             return cleanTeam;
         });
 
-        if (dataToSave.messages?.length > 50) {
-            dataToSave.messages = dataToSave.messages.slice(0, 50);
+        // Aggressive limiting on bloated arrays
+        if (dataToSave.messages?.length > 25) {
+            dataToSave.messages = dataToSave.messages.slice(0, 25);
         }
 
         if (dataToSave.gameResults) {
-            dataToSave.gameResults = dataToSave.gameResults.map(res => ({
+            dataToSave.gameResults = dataToSave.gameResults.slice(-10).map(res => ({
                 ...res,
-                gameLog: []
+                gameLog: [] // NEVER save full logs
             }));
+        }
+
+        if (dataToSave.pickHistory?.length > 100) {
+            dataToSave.pickHistory = dataToSave.pickHistory.slice(-100);
         }
 
         localStorage.setItem(saveKey, JSON.stringify(dataToSave));
     } catch (e) {
-        console.error('Save failed:', e);
-        if (game?.gameResults) game.gameResults = game.gameResults.slice(-10);
+        console.error('Save failed. LocalStorage limit likely reached:', e);
+        // Fallback: Ultra aggressive wipe
+        if (game?.gameResults) game.gameResults = [];
+        if (game?.messages) game.messages = [];
+        if (game?.pickHistory) game.pickHistory = [];
+        try {
+            localStorage.setItem(saveKey, JSON.stringify(game));
+        } catch(fallbackErr) {
+            console.error('Critical save failure.', fallbackErr);
+        }
     }
 }
 
@@ -355,7 +403,11 @@ export function loadGameState(saveKey = DEFAULT_SAVE_KEY) {
             playerMap.clear();
             if (Array.isArray(game.players)) {
                 game.players.forEach(p => {
-                    if (p && p.id) playerMap.set(p.id, p);
+                    if (p && p.id) {
+                        // Restore omitted healthy status stripped during compression save
+                        if (!p.status) p.status = { type: 'healthy', description: '', duration: 0 };
+                        playerMap.set(p.id, p);
+                    }
                 });
             }
 

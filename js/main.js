@@ -121,7 +121,7 @@ function renderTeamChooser(gameState) {
         });
 
         grid.querySelectorAll('.select-franchise-btn').forEach(btn => {
-            btn.onclick = () => confirmFranchiseTakeover(btn.dataset.teamId);
+            btn.onclick = () => promptCoachCreation(btn.dataset.teamId);
         });
     };
 
@@ -133,12 +133,77 @@ function renderTeamChooser(gameState) {
     UI.showScreen('team-select-screen');
 }
 
-function confirmFranchiseTakeover(teamId) {
+function promptCoachCreation(teamId) {
+    const team = gameState.teams.find(t => t.id === teamId);
+    if (!team) return;
+
+    let archetypeOptions = coachPersonalities.map(c => `<option value="${c.type}">${c.type}</option>`).join('');
+    let offOptions = Object.keys(offenseFormations).filter(k => k !== 'Punt').map(k => `<option value="${k}">${offenseFormations[k].name}</option>`).join('');
+    let defOptions = Object.keys(defenseFormations).filter(k => k !== 'Punt_Return').map(k => `<option value="${k}">${defenseFormations[k].name}</option>`).join('');
+
+    const modalHtml = `
+        <div class="space-y-4 text-left">
+            <p class="text-sm text-slate-600">You are taking over <strong>${team.name}</strong>. Time to introduce yourself to the players.</p>
+            
+            <div>
+                <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Coach Name</label>
+                <input type="text" id="new-coach-name" class="w-full p-2 border border-slate-300 rounded outline-none focus:border-amber-500" placeholder="e.g. Coach Gordon" value="Coach">
+            </div>
+
+            <div>
+                <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Coaching Style</label>
+                <select id="new-coach-style" class="w-full p-2 border border-slate-300 rounded outline-none focus:border-amber-500">
+                    ${archetypeOptions}
+                </select>
+                <p class="text-[10px] text-slate-500 mt-1">Affects which players want to join your team and how they develop.</p>
+            </div>
+
+            <div class="grid grid-cols-2 gap-4">
+                <div>
+                    <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Preferred Offense</label>
+                    <select id="new-coach-offense" class="w-full p-2 border border-slate-300 rounded outline-none focus:border-amber-500">
+                        ${offOptions}
+                    </select>
+                </div>
+
+                <div>
+                    <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Preferred Defense</label>
+                    <select id="new-coach-defense" class="w-full p-2 border border-slate-300 rounded outline-none focus:border-amber-500">
+                        ${defOptions}
+                    </select>
+                </div>
+            </div>
+        </div>
+    `;
+
+    UI.showModal("Create Your Coach", modalHtml, () => {
+        const name = document.getElementById('new-coach-name').value || 'Coach';
+        const style = document.getElementById('new-coach-style').value;
+        const off = document.getElementById('new-coach-offense').value;
+        const def = document.getElementById('new-coach-defense').value;
+
+        confirmFranchiseTakeover(teamId, { name, style, off, def });
+    }, "Sign Contract");
+}
+
+function confirmFranchiseTakeover(teamId, coachDetails) {
     const team = gameState.teams.find(t => t.id === teamId);
     if (!team) return;
 
     team.isPlayerControlled = true;
     gameState.playerTeam = team;
+
+    if (coachDetails) {
+        let baseCoach = coachPersonalities.find(c => c.type === coachDetails.style) || coachPersonalities[0];
+        const customCoach = JSON.parse(JSON.stringify(baseCoach));
+        customCoach.name = coachDetails.name;
+        customCoach.preferredOffense = coachDetails.off;
+        customCoach.preferredDefense = coachDetails.def;
+        team.coach = customCoach;
+        team.formations.offense = coachDetails.off;
+        team.formations.defense = coachDetails.def;
+        Game.rebuildDepthChartFromOrder(team);
+    }
 
     // Initialize Year 4 Draft for the human player
     Game.setupDraft();

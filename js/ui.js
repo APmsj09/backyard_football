@@ -820,6 +820,52 @@ export function renderHistoryTab(gameState) {
         return;
     }
 
+    // Render Record Book
+    let recordsHtml = '';
+    if (gameState.records) {
+        const formatRec = (rec, isCareer) => rec && rec.val > 0 ? `<span class="font-black text-slate-900">${rec.val}</span> <span class="text-slate-600">by ${rec.holder} ${isCareer ? '' : `(Yr ${rec.year})`}</span>` : '<span class="text-slate-400">None</span>';
+        const r = gameState.records;
+        
+        recordsHtml = `
+        <div class="bg-white rounded-sm border border-amber-300 shadow-sm overflow-hidden mb-6">
+            <div class="bg-gradient-to-r from-amber-600 to-amber-500 text-white px-4 py-2">
+                <h4 class="font-black text-base uppercase tracking-wider">🏆 All-Time Record Book</h4>
+            </div>
+            <div class="p-4 grid grid-cols-1 md:grid-cols-3 gap-6 text-xs">
+                <div>
+                    <h5 class="font-bold text-slate-400 uppercase text-[10px] tracking-widest border-b border-slate-100 pb-1 mb-2">Single Game</h5>
+                    <ul class="space-y-1">
+                        <li><span class="font-semibold text-slate-700 w-16 inline-block">Pass Yds:</span> ${formatRec(r.game.passYards, false)}</li>
+                        <li><span class="font-semibold text-slate-700 w-16 inline-block">Rush Yds:</span> ${formatRec(r.game.rushYards, false)}</li>
+                        <li><span class="font-semibold text-slate-700 w-16 inline-block">Rec Yds:</span> ${formatRec(r.game.recYards, false)}</li>
+                        <li><span class="font-semibold text-slate-700 w-16 inline-block">TDs:</span> ${formatRec(r.game.touchdowns, false)}</li>
+                        <li><span class="font-semibold text-slate-700 w-16 inline-block">Tackles:</span> ${formatRec(r.game.tackles, false)}</li>
+                    </ul>
+                </div>
+                <div>
+                    <h5 class="font-bold text-slate-400 uppercase text-[10px] tracking-widest border-b border-slate-100 pb-1 mb-2">Single Season</h5>
+                    <ul class="space-y-1">
+                        <li><span class="font-semibold text-slate-700 w-16 inline-block">Pass Yds:</span> ${formatRec(r.season.passYards, false)}</li>
+                        <li><span class="font-semibold text-slate-700 w-16 inline-block">Rush Yds:</span> ${formatRec(r.season.rushYards, false)}</li>
+                        <li><span class="font-semibold text-slate-700 w-16 inline-block">Rec Yds:</span> ${formatRec(r.season.recYards, false)}</li>
+                        <li><span class="font-semibold text-slate-700 w-16 inline-block">TDs:</span> ${formatRec(r.season.touchdowns, false)}</li>
+                        <li><span class="font-semibold text-slate-700 w-16 inline-block">Tackles:</span> ${formatRec(r.season.tackles, false)}</li>
+                    </ul>
+                </div>
+                <div>
+                    <h5 class="font-bold text-slate-400 uppercase text-[10px] tracking-widest border-b border-slate-100 pb-1 mb-2">Career</h5>
+                    <ul class="space-y-1">
+                        <li><span class="font-semibold text-slate-700 w-16 inline-block">Pass Yds:</span> ${formatRec(r.career.passYards, true)}</li>
+                        <li><span class="font-semibold text-slate-700 w-16 inline-block">Rush Yds:</span> ${formatRec(r.career.rushYards, true)}</li>
+                        <li><span class="font-semibold text-slate-700 w-16 inline-block">Rec Yds:</span> ${formatRec(r.career.recYards, true)}</li>
+                        <li><span class="font-semibold text-slate-700 w-16 inline-block">TDs:</span> ${formatRec(r.career.touchdowns, true)}</li>
+                        <li><span class="font-semibold text-slate-700 w-16 inline-block">Tackles:</span> ${formatRec(r.career.tackles, true)}</li>
+                    </ul>
+                </div>
+            </div>
+        </div>`;
+    }
+
     // Filter out duplicates if any exist by year
     const seenYears = new Set();
     const uniqueSeasons = [];
@@ -830,7 +876,7 @@ export function renderHistoryTab(gameState) {
         }
     }
 
-    let html = '<div class="space-y-4 pb-6">';
+    let html = '<div class="space-y-4 pb-6">' + recordsHtml;
     uniqueSeasons.forEach(season => {
         const topPicks = (season.draftResults || []).slice(0, 3).map(p => `<strong>1.${p.pick}</strong> ${p.playerName} <span class="text-slate-500">(${p.teamName})</span>`).join('<br>');
         const l = season.leaders || {};
