@@ -7,22 +7,23 @@ const offensivePositions = ['QB', 'RB', 'WR', 'TE', 'OL'];
 const defensivePositions = ['DL', 'LB', 'DB'];
 
 export const positionOverallWeights = {
-    QB: { throwingAccuracy: 0.45, playbookIQ: 0.30, consistency: 0.10, clutch: 0.05, agility: 0.05, strength: 0.05 },
-    RB: { speed: 0.35, agility: 0.25, strength: 0.15, catchingHands: 0.10, toughness: 0.10, stamina: 0.05 },
-    WR: { speed: 0.40, catchingHands: 0.30, agility: 0.15, height: 0.10, playbookIQ: 0.05 },
-    TE: { catchingHands: 0.30, blocking: 0.25, strength: 0.20, height: 0.15, toughness: 0.10 },
-    OL: { strength: 0.45, blocking: 0.40, weight: 0.10, toughness: 0.05 },
-    DL: { strength: 0.40, blockShedding: 0.30, tackling: 0.20, weight: 0.10 },
-    LB: { tackling: 0.35, playbookIQ: 0.20, strength: 0.20, speed: 0.15, blockShedding: 0.10 },
-    DB: { speed: 0.35, coverage: 0.30, agility: 0.20, catchingHands: 0.10, playbookIQ: 0.05 }
+    // Give QBs more weight to pure throwing accuracy and mobility
+    QB: { throwingAccuracy: 0.50, playbookIQ: 0.25, speed: 0.10, consistency: 0.10, strength: 0.05 },
+
+    // Skill positions
+    RB: { speed: 0.35, agility: 0.25, strength: 0.15, catchingHands: 0.15, toughness: 0.10 },
+    WR: { speed: 0.40, catchingHands: 0.35, agility: 0.20, playbookIQ: 0.05 },
+    TE: { catchingHands: 0.30, blocking: 0.30, strength: 0.25, speed: 0.15 },
+
+    // Spread OL across technique and pass/run blocking instincts so pure weight/strength doesn't break it
+    OL: { strength: 0.35, blocking: 0.35, playbookIQ: 0.15, weight: 0.10, toughness: 0.05 },
+    DL: { strength: 0.35, blockShedding: 0.35, tackling: 0.20, speed: 0.10 },
+    LB: { tackling: 0.30, playbookIQ: 0.25, speed: 0.25, blockShedding: 0.20 },
+    DB: { speed: 0.35, coverage: 0.35, agility: 0.20, catchingHands: 0.10 }
 };
 
 export function estimateBestPosition(scoutedPlayer) {
     if (!scoutedPlayer || !scoutedPlayer.attributes) return 'UTIL';
-
-    // Respect explicit identity if already assigned
-    if (scoutedPlayer.bestPosition) return scoutedPlayer.bestPosition;
-    if (scoutedPlayer.pos) return scoutedPlayer.pos;
 
     const resolveAttr = (val) => {
         if (typeof val === 'number') return val;
@@ -34,34 +35,52 @@ export function estimateBestPosition(scoutedPlayer) {
             const parsed = Number(val);
             return isNaN(parsed) ? 50 : parsed;
         }
-        return 0;
+        return 50;
     };
 
-    const cleanAttributes = {};
-    for (const [category, attrs] of Object.entries(scoutedPlayer.attributes)) {
-        cleanAttributes[category] = {};
-        for (const [key, value] of Object.entries(attrs)) {
-            cleanAttributes[category][key] = resolveAttr(value);
-        }
-    }
-
-    const tempPlayer = { ...scoutedPlayer, attributes: cleanAttributes };
-    const offPos = tempPlayer.favoriteOffensivePosition;
-    const defPos = tempPlayer.favoriteDefensivePosition;
-
-    if (offPos && defPos) {
-        const offScore = calculateOverall(tempPlayer, offPos);
-        const defScore = calculateOverall(tempPlayer, defPos);
-        return offScore >= defScore ? offPos : defPos;
-    }
+    const attrs = scoutedPlayer.attributes;
+    const speed = resolveAttr(attrs.physical?.speed);
+    const weight = resolveAttr(attrs.physical?.weight);
+    const throwing = resolveAttr(attrs.technical?.throwingAccuracy);
 
     let bestPos = 'UTIL';
-    let maxScore = -Infinity;
+    let highestScore = -Infinity;
 
-    Object.keys(positionOverallWeights).forEach(pos => {
-        const score = calculateOverall(tempPlayer, pos);
-        if (score > maxScore) {
-            maxScore = score;
+    const allPositions = ['QB', 'RB', 'WR', 'TE', 'OL', 'DL', 'LB', 'DB'];
+
+    allPositions.forEach(pos => {
+        let score = calculateOverall(scoutedPlayer, pos);
+
+        // --- GATEKEEPER SANITY RULES ---
+        // 1. Cannot be a QB unless you have legitimate throwing skill
+        if (pos === 'QB') {
+            if (throwing < 45) score -= 40;
+            if (throwing < 35) score = 0; // Absolute disqualification
+        }
+
+        // 2. Heavy players (>220 lbs) penalized at WR/DB, boosted at OL/DL
+        if (weight > 220) {
+            if (pos === 'WR' || pos === 'DB') score -= 25;
+            if (pos === 'OL' || pos === 'DL') score += 5;
+        }
+
+        // 3. Light players (<155 lbs) cannot realistically play OL
+        if (weight < 155 && pos === 'OL') {
+            score -= 30;
+        }
+
+        // 4. Slow players (<45 speed) cannot be deep WRs or DBs
+        if (speed < 45 && (pos === 'WR' || pos === 'DB')) {
+            score -= 20;
+        }
+
+        // 5. Mild tie-breaker if it matches their favorite archetype position
+        if (pos === scoutedPlayer.favoriteOffensivePosition || pos === scoutedPlayer.favoriteDefensivePosition) {
+            score += 3;
+        }
+
+        if (score > highestScore) {
+            highestScore = score;
             bestPos = pos;
         }
     });
@@ -84,9 +103,9 @@ export function calculateOverall(player, position) {
                 let value = attrs[category][attr];
 
                 if (weightKey === 'weight') {
-                    // OLD: value = Math.max(0, Math.min(100, (value - 100) * 0.66 + 40));
-                    // NEW: Weight gives a smaller raw OVR boost, keeping OL balanced with WR/QB
-                    value = Math.max(0, Math.min(100, (value - 120) * 0.5 + 30));
+                    // Old: Math.max(0, Math.min(100, (value - 120) * 0.5 + 30));
+                    // New: Normalize weight on a gentler curve
+                    value = Math.max(20, Math.min(85, (value - 120) * 0.35 + 35));
                 }
                 if (weightKey === 'height') {
                     value = Math.max(0, Math.min(100, (value - 50) * 4));
@@ -281,7 +300,8 @@ export function generatePlayer(minAge = 12, maxAge = 18, classModifiers = null) 
     const favoriteDefensivePosition = archetype.def;
 
     // 2. PRIMARY IDENTITY
-    const primarySide = Math.random() < 0.70 ? 'offense' : 'defense';
+    // If the archetype is a QB, ensure their primary side is always offense
+    const primarySide = archetype.off === 'QB' ? 'offense' : (Math.random() < 0.70 ? 'offense' : 'defense');
     const bestPosition = primarySide === 'offense' ? favoriteOffensivePosition : favoriteDefensivePosition;
 
     // 3. CONTROLLED DRAFT CLASS MODIFIERS
@@ -342,7 +362,20 @@ export function generatePlayer(minAge = 12, maxAge = 18, classModifiers = null) 
     talentAttributes.physical.speed = Math.min(99, Math.round(talentAttributes.physical.speed * archetype.speedMod));
     talentAttributes.physical.strength = Math.min(99, Math.round(talentAttributes.physical.strength * archetype.strMod));
 
-    if (archetype.off !== 'QB') talentAttributes.technical.throwingAccuracy = Math.round(talentAttributes.technical.throwingAccuracy * 0.5);
+    // Strict clamp: Non-QBs should strictly have throwing accuracy between 15 and 35
+    if (archetype.off !== 'QB') {
+        talentAttributes.technical.throwingAccuracy = Math.min(
+            35,
+            Math.round(talentAttributes.technical.throwingAccuracy * 0.35)
+        );
+    }
+
+    // Linemen should never roll decent passing or route-running hands
+    if (archetype.off === 'OL') {
+        talentAttributes.technical.throwingAccuracy = Math.min(25, talentAttributes.technical.throwingAccuracy);
+        talentAttributes.technical.catchingHands = Math.min(35, talentAttributes.technical.catchingHands);
+    }
+
     if (['WR', 'DB', 'QB'].includes(archetype.off)) {
         talentAttributes.technical.blocking = Math.round(talentAttributes.technical.blocking * 0.45);
         talentAttributes.technical.blockShedding = Math.round(talentAttributes.technical.blockShedding * 0.45);
@@ -398,7 +431,7 @@ export function generatePlayer(minAge = 12, maxAge = 18, classModifiers = null) 
     // 8. AGE SCALING & DEVELOPMENT VARIANCE (Deriving Current Ability)
     // Scale baseline: Age 12 rookie floor up to 100% at Age 18
     const ageProgress = Math.max(0, Math.min(1.0, (age - 12) / 6.0));
-    
+
     const basePhysicalScale = Math.max(0.58, Math.min(1.0, 0.72 + (ageProgress * 0.28)));
     const baseMentalScale = Math.max(0.48, Math.min(1.0, 0.62 + (ageProgress * 0.38)));
     const baseTechnicalScale = Math.max(0.45, Math.min(1.0, 0.58 + (ageProgress * 0.42)));
@@ -461,20 +494,20 @@ export function generatePlayer(minAge = 12, maxAge = 18, classModifiers = null) 
 
         const athleticClues = [
             speedVal > 65 ? "Won the neighborhood 50-yard dash in untied sneakers." :
-            speedVal < 35 ? "Not the fastest runner on the blacktop, but holds his ground." :
-            "A balanced athlete who plays every sport at recess.",
+                speedVal < 35 ? "Not the fastest runner on the blacktop, but holds his ground." :
+                    "A balanced athlete who plays every sport at recess.",
             strVal > 60 ? "Built like a cinder block from helping his uncle haul landscape pavers." :
-            strVal < 30 ? "Relies on quickness rather than brute power in scuffles." :
-            "Has decent functional strength for his age."
+                strVal < 30 ? "Relies on quickness rather than brute power in scuffles." :
+                    "Has decent functional strength for his age."
         ];
 
         const mentalClues = [
             iqVal > 65 ? "Draws up trick plays on cafeteria napkins during lunch." :
-            iqVal < 35 ? "Pure natural athlete who still forgets which hash mark to line up on." :
-            "Understands the basics of backyard route trees.",
+                iqVal < 35 ? "Pure natural athlete who still forgets which hash mark to line up on." :
+                    "Understands the basics of backyard route trees.",
             egoVal > 75 ? "Once took his ball home from the park because nobody passed to him." :
-            ethVal > 75 ? "First one waiting at the park gates on Saturday mornings." :
-            "Always brings extra freeze pops for the team after games."
+                ethVal > 75 ? "First one waiting at the park gates on Saturday mornings." :
+                    "Always brings extra freeze pops for the team after games."
         ];
 
         const quirks = [

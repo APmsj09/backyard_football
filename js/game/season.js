@@ -993,21 +993,28 @@ export function developPlayer(player, team = null) {
         if (hasOlderMentor) mentorBoost = 1;
     }
 
-    let basePoints = 0;
-    let focusGroup = [];
+    // 1. Award higher baseline points so stars develop into the 70s-80s
+    let basePoints = player.age <= 14 ? getRandomInt(4, 7) : getRandomInt(2, 5);
 
-    if (player.age <= 12) {
-        basePoints = getRandomInt(3, 5);
-        focusGroup = ['speed', 'agility', 'stamina', 'catchingHands'];
-    } else if (player.age <= 14) {
-        basePoints = getRandomInt(2, 4);
-        focusGroup = ['throwingAccuracy', 'catchingHands', 'blocking', 'tackling', 'speed', 'strength'];
-    } else if (player.age <= 16) {
-        basePoints = getRandomInt(1, 3);
-        focusGroup = ['playbookIQ', 'consistency', 'toughness', 'blockShedding', 'throwingAccuracy'];
-    } else {
-        basePoints = getRandomInt(0, 1);
-        focusGroup = ['playbookIQ', 'consistency'];
+    // 2. Determine position-specific focus (prevents linemen from practicing throwing!)
+    const pos = player.pos || estimateBestPosition(player);
+    let focusGroup = [];
+    if (pos === 'QB') {
+        focusGroup = ['throwingAccuracy', 'playbookIQ', 'speed', 'consistency'];
+    } else if (pos === 'RB') {
+        focusGroup = ['speed', 'agility', 'strength', 'catchingHands', 'toughness'];
+    } else if (pos === 'WR') {
+        focusGroup = ['speed', 'catchingHands', 'agility', 'playbookIQ'];
+    } else if (pos === 'TE') {
+        focusGroup = ['catchingHands', 'blocking', 'strength', 'toughness'];
+    } else if (pos === 'OL') {
+        focusGroup = ['strength', 'blocking', 'toughness', 'playbookIQ']; // NO THROWING
+    } else if (pos === 'DL') {
+        focusGroup = ['strength', 'blockShedding', 'tackling', 'toughness'];
+    } else if (pos === 'LB') {
+        focusGroup = ['tackling', 'playbookIQ', 'speed', 'blockShedding'];
+    } else if (pos === 'DB') {
+        focusGroup = ['speed', 'coverage', 'agility', 'catchingHands', 'playbookIQ'];
     }
 
     let totalUpgradePoints = Math.round((basePoints * potMod * ethicMod * experienceMod)) + mentorBoost;
@@ -1023,10 +1030,12 @@ export function developPlayer(player, team = null) {
         }
     }
 
+    // General athletic fallback (does NOT include specialized skills like throwingAccuracy)
+    const athleticAttrs = ['speed', 'strength', 'agility', 'stamina', 'toughness', 'consistency'];
+
     for (let i = 0; i < totalUpgradePoints; i++) {
-        const pool = (Math.random() < 0.70 && focusGroup.length > 0)
-            ? focusGroup
-            : ['speed', 'strength', 'agility', 'throwingAccuracy', 'catchingHands', 'tackling', 'blocking', 'playbookIQ', 'blockShedding', 'toughness', 'consistency'];
+        // 80% position-specific skills, 20% general athleticism
+        const pool = (Math.random() < 0.80 && focusGroup.length > 0) ? focusGroup : athleticAttrs;
 
         const attrToBoost = getRandom(pool);
 
