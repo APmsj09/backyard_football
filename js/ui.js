@@ -1452,9 +1452,37 @@ export function renderStandingsTab(gameState) {
     const leagueTeamIds = new Set(activeTier.teams.map(t => t.id));
     const leaguePlayers = (gameState.players || []).filter(p => leagueTeamIds.has(p.teamId));
 
-    const topPasser = [...leaguePlayers].sort((a, b) => (b.seasonStats?.passYards || 0) - (a.seasonStats?.passYards || 0))[0];
-    const topRusher = [...leaguePlayers].sort((a, b) => (b.seasonStats?.rushYards || 0) - (a.seasonStats?.rushYards || 0))[0];
-    const topDefender = [...leaguePlayers].sort((a, b) => ((b.seasonStats?.tackles || 0) + (b.seasonStats?.sacks || 0) * 2) - ((a.seasonStats?.tackles || 0) + (a.seasonStats?.sacks || 0) * 2))[0];
+    const hasPlayedGames = leaguePlayers.some(p => 
+        (p.seasonStats?.passYards || 0) > 0 || 
+        (p.seasonStats?.rushYards || 0) > 0 || 
+        (p.seasonStats?.tackles || 0) > 0
+    );
+
+    let topPasser, topRusher, topDefender;
+    let passerMetricLabel, rusherMetricLabel, defenderMetricLabel;
+
+    if (hasPlayedGames) {
+        topPasser = [...leaguePlayers].sort((a, b) => (b.seasonStats?.passYards || 0) - (a.seasonStats?.passYards || 0))[0];
+        topRusher = [...leaguePlayers].sort((a, b) => (b.seasonStats?.rushYards || 0) - (a.seasonStats?.rushYards || 0))[0];
+        topDefender = [...leaguePlayers].sort((a, b) => ((b.seasonStats?.tackles || 0) + (b.seasonStats?.sacks || 0) * 2) - ((a.seasonStats?.tackles || 0) + (a.seasonStats?.sacks || 0) * 2))[0];
+        
+        passerMetricLabel = `${topPasser?.seasonStats?.passYards || 0} YDS`;
+        rusherMetricLabel = `${topRusher?.seasonStats?.rushYards || 0} YDS`;
+        defenderMetricLabel = `${topDefender?.seasonStats?.tackles || 0} TKLS`;
+    } else {
+        // Preseason: Highlight the highest OVR QB, RB, and Defender
+        const qbs = leaguePlayers.filter(p => estimateBestPosition(p) === 'QB').sort((a, b) => calculateOverall(b, 'QB') - calculateOverall(a, 'QB'));
+        const rbs = leaguePlayers.filter(p => estimateBestPosition(p) === 'RB').sort((a, b) => calculateOverall(b, 'RB') - calculateOverall(a, 'RB'));
+        const defs = leaguePlayers.filter(p => ['DL', 'LB', 'DB'].includes(estimateBestPosition(p))).sort((a, b) => calculateOverall(b, estimateBestPosition(b)) - calculateOverall(a, estimateBestPosition(a)));
+
+        topPasser = qbs[0] || leaguePlayers[0];
+        topRusher = rbs[0] || leaguePlayers[1];
+        topDefender = defs[0] || leaguePlayers[2];
+
+        passerMetricLabel = `${calculateOverall(topPasser, 'QB')} OVR`;
+        rusherMetricLabel = `${calculateOverall(topRusher, 'RB')} OVR`;
+        defenderMetricLabel = `${calculateOverall(topDefender, estimateBestPosition(topDefender))} OVR`;
+    }
 
     // 2. Generate Dynamic Neighborhood Headline
     const leaderTeam = sortedTeams[0];
@@ -1577,30 +1605,30 @@ export function renderStandingsTab(gameState) {
                     <div class="space-y-2.5 text-xs">
                         <!-- Top Passer -->
                         <div class="p-2 bg-slate-50 rounded border border-slate-200 cursor-pointer hover:border-amber-400 transition" onclick="app.openPlayerCard('${topPasser?.id}')">
-                            <span class="text-[9px] font-black uppercase text-blue-600 block mb-0.5">Air General (Passing)</span>
+                            <span class="text-[9px] font-black uppercase text-blue-600 block mb-0.5">${hasPlayedGames ? 'Air General (Passing)' : '⭐ Preseason QB to Watch'}</span>
                             <div class="flex justify-between items-center">
-                                <span class="font-bold text-slate-900 truncate">${topPasser?.name || 'No leader'}</span>
-                                <span class="font-mono font-bold text-slate-700">${topPasser?.seasonStats?.passYards || 0} YDS</span>
+                                <span class="font-bold text-slate-900 truncate">${topPasser?.name || 'No player'}</span>
+                                <span class="font-mono font-bold text-slate-700">${passerMetricLabel}</span>
                             </div>
                             <span class="text-[10px] text-slate-500">${topPasser ? gameState.teams.find(t => t.id === topPasser.teamId)?.name : '-'}</span>
                         </div>
 
                         <!-- Top Rusher -->
                         <div class="p-2 bg-slate-50 rounded border border-slate-200 cursor-pointer hover:border-amber-400 transition" onclick="app.openPlayerCard('${topRusher?.id}')">
-                            <span class="text-[9px] font-black uppercase text-amber-600 block mb-0.5">Ground Enforcer (Rushing)</span>
+                            <span class="text-[9px] font-black uppercase text-amber-600 block mb-0.5">${hasPlayedGames ? 'Ground Enforcer (Rushing)' : '⭐ Preseason RB to Watch'}</span>
                             <div class="flex justify-between items-center">
-                                <span class="font-bold text-slate-900 truncate">${topRusher?.name || 'No leader'}</span>
-                                <span class="font-mono font-bold text-slate-700">${topRusher?.seasonStats?.rushYards || 0} YDS</span>
+                                <span class="font-bold text-slate-900 truncate">${topRusher?.name || 'No player'}</span>
+                                <span class="font-mono font-bold text-slate-700">${rusherMetricLabel}</span>
                             </div>
                             <span class="text-[10px] text-slate-500">${topRusher ? gameState.teams.find(t => t.id === topRusher.teamId)?.name : '-'}</span>
                         </div>
 
                         <!-- Top Defender -->
                         <div class="p-2 bg-slate-50 rounded border border-slate-200 cursor-pointer hover:border-amber-400 transition" onclick="app.openPlayerCard('${topDefender?.id}')">
-                            <span class="text-[9px] font-black uppercase text-rose-600 block mb-0.5">Defensive Anchor (Tackles)</span>
+                            <span class="text-[9px] font-black uppercase text-rose-600 block mb-0.5">${hasPlayedGames ? 'Defensive Anchor (Tackles)' : '⭐ Preseason Defender to Watch'}</span>
                             <div class="flex justify-between items-center">
-                                <span class="font-bold text-slate-900 truncate">${topDefender?.name || 'No leader'}</span>
-                                <span class="font-mono font-bold text-slate-700">${topDefender?.seasonStats?.tackles || 0} TKLS</span>
+                                <span class="font-bold text-slate-900 truncate">${topDefender?.name || 'No player'}</span>
+                                <span class="font-mono font-bold text-slate-700">${defenderMetricLabel}</span>
                             </div>
                             <span class="text-[10px] text-slate-500">${topDefender ? gameState.teams.find(t => t.id === topDefender.teamId)?.name : '-'}</span>
                         </div>

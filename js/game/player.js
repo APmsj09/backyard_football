@@ -535,14 +535,24 @@ export function generatePlayer(minAge = 12, maxAge = 18, classModifiers = null) 
     else potential = 'F';
 
     // 8. AGE SCALING & DEVELOPMENT VARIANCE (Deriving Current Ability)
-    // Scale baseline: Age 12 rookie floor up to 100% at Age 18
-    const ageProgress = Math.max(0, Math.min(1.0, (age - 12) / 6.0));
+    // Differentiate Pee-Wee (8-11) from High School (12-18)
+    let basePhysicalScale, baseMentalScale, baseTechnicalScale;
 
-    const basePhysicalScale = Math.max(0.58, Math.min(1.0, 0.72 + (ageProgress * 0.28)));
-    const baseMentalScale = Math.max(0.48, Math.min(1.0, 0.62 + (ageProgress * 0.38)));
-    const baseTechnicalScale = Math.max(0.45, Math.min(1.0, 0.58 + (ageProgress * 0.42)));
+    if (age < 12) {
+        // Ages 8-11: Youth scale from 35% up to 60% of adult ceiling
+        const youthProgress = Math.max(0, (age - 8) / 4.0);
+        basePhysicalScale = 0.35 + (youthProgress * 0.25);
+        baseMentalScale = 0.30 + (youthProgress * 0.25);
+        baseTechnicalScale = 0.25 + (youthProgress * 0.25);
+    } else {
+        // Ages 12-18: High school scale from 65% up to 100% of adult ceiling
+        const teenProgress = Math.min(1.0, (age - 12) / 6.0);
+        basePhysicalScale = 0.65 + (teenProgress * 0.35);
+        baseMentalScale = 0.58 + (teenProgress * 0.42);
+        baseTechnicalScale = 0.52 + (teenProgress * 0.48);
+    }
 
-    // Player growth curve variance (some kids hit earlier growth spurts)
+    // Player growth curve variance (early vs late bloomers)
     const playerGrowthTempo = 1 + gaussianRandom(0, 0.05);
 
     let attributes = {
@@ -550,6 +560,8 @@ export function generatePlayer(minAge = 12, maxAge = 18, classModifiers = null) 
         mental: {},
         technical: {}
     };
+
+    const ratingFloor = age < 12 ? 16 : 28;
 
     Object.keys(talentAttributes).forEach(cat => {
         let baseScale = basePhysicalScale;
@@ -559,13 +571,11 @@ export function generatePlayer(minAge = 12, maxAge = 18, classModifiers = null) 
         Object.keys(talentAttributes[cat]).forEach(attr => {
             if (attr === 'height' || attr === 'weight') return;
 
-            // Attribute-specific developmental variance
             const attrVariance = 1 + gaussianRandom(0, 0.05);
             const devFactor = Math.min(1.0, baseScale * playerGrowthTempo * attrVariance);
 
             const rawVal = Math.round(talentAttributes[cat][attr] * devFactor);
-            // Raised floor from 15 to 28 so kids have basic functional ability
-            attributes[cat][attr] = Math.max(28, Math.min(99, rawVal));
+            attributes[cat][attr] = Math.max(ratingFloor, Math.min(99, rawVal));
         });
     });
 

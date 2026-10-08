@@ -201,12 +201,33 @@ export async function initializeLeague(onProgress) {
         game.teams.push(yTeam); // ✅ Now unified in game.teams
     }
 
-    // Populate Initial Main Team Rosters
-    const mainTeams = game.teams.filter(t => t.leagueType === 'main');
-    const unassigned = game.players.filter(p => !p.teamId && p.age >= 12 && p.age <= 18);
+    // Populate Initial Main Team Rosters with Natural Tier Variance
+    const tier1Teams = game.teams.filter(t => t.tier === 1);
+    const tier2Teams = game.teams.filter(t => t.tier === 2);
+    
+    // Sort pool by best overall rating so elite teams get elite talent
+    const unassigned = game.players
+        .filter(p => !p.teamId && p.age >= 12 && p.age <= 18)
+        .sort((a, b) => calculateOverall(b, estimateBestPosition(b)) - calculateOverall(a, estimateBestPosition(a)));
 
-    mainTeams.forEach(team => {
-        const targetRosterSize = 14; // Give every team 14 initial players
+    // 1. Tier 1 (Premier Parks): Draft higher-tier veterans first (creates 58-68 OVR powerhouses)
+    tier1Teams.forEach(team => {
+        const targetRosterSize = 14;
+        for (let i = 0; i < targetRosterSize; i++) {
+            if (unassigned.length > 0) {
+                // Tier 1 draws from the top 40% of the available talent pool
+                const poolWindow = Math.min(unassigned.length - 1, Math.max(0, Math.floor(unassigned.length * 0.4)));
+                const idx = getRandomInt(0, poolWindow);
+                const p = unassigned.splice(idx, 1)[0];
+                addPlayerToTeam(p, team);
+            }
+        }
+        aiSetDepthChart(team);
+    });
+
+    // 2. Tier 2 (Sandlot Circuit): Receives developing talent & raw prospects (creates 44-54 OVR teams)
+    tier2Teams.forEach(team => {
+        const targetRosterSize = 14;
         for (let i = 0; i < targetRosterSize; i++) {
             if (unassigned.length > 0) {
                 const idx = getRandomInt(0, unassigned.length - 1);
