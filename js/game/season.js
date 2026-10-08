@@ -13,13 +13,13 @@ import {
     resetGameStats, finalizeGameResults
 } from './state.js';
 import {
-    rebuildDepthChartFromOrder, aiSetDepthChart, assignTeamCaptain
+    rebuildDepthChartFromOrder, aiSetDepthChart, assignTeamCaptain, isPlayerViableForPosition
 } from './depth_chart.js';
 import {
     initializeTeamStaff, generateStaffPool, checkRetiredPlayerToCoach, aiManageTeamStaff
 } from './staff.js';
 import {
-    evaluatePlayerRetention, evaluatePlayerNegotiation
+    evaluatePlayerRetention, evaluatePlayerNegotiation, resolvePlayerBiddingWar
 } from './negotiations.js';
 
 export const ROSTER_LIMIT = 18;
@@ -848,7 +848,7 @@ export function processEndOfWeek() {
             if (!player || player.teamId) return;
 
             const allPlayerBids = game.weeklyBids.filter(b => b.playerId === bid.playerId);
-            const resolution = Game.resolvePlayerBiddingWar(player, allPlayerBids);
+            const resolution = resolvePlayerBiddingWar(player, allPlayerBids);
 
             if (resolution?.winner) {
                 const win = resolution.winner;
@@ -1038,7 +1038,7 @@ export function processOffseasonFADay(gameState, userBids = []) {
 
         // Find biggest positional hole
         const needs = positions.map(pos => {
-            const count = roster.filter(p => Game.isPlayerViableForPosition(p, pos)).length;
+            const count = roster.filter(p => isPlayerViableForPosition(p, pos)).length;
             return { pos, deficit: idealCounts[pos] - count };
         }).sort((a, b) => b.deficit - a.deficit);
 
@@ -1051,7 +1051,7 @@ export function processOffseasonFADay(gameState, userBids = []) {
             p.status?.type !== 'retired' &&
             p.status?.type !== 'departed' &&
             p.age >= 12 && p.age <= 18 &&
-            Game.isPlayerViableForPosition(p, primaryNeed) &&
+            isPlayerViableForPosition(p, primaryNeed) &&
             !playerBidsMap.get(p.id)?.some(b => b.teamId === aiTeam.id)
         );
 
@@ -1074,7 +1074,7 @@ export function processOffseasonFADay(gameState, userBids = []) {
         const player = getPlayer(playerId);
         if (!player || player.teamId) return;
 
-        const resolution = Game.resolvePlayerBiddingWar(player, bids);
+        const resolution = resolvePlayerBiddingWar(player, bids);
         if (resolution?.winner) {
             const win = resolution.winner;
             const team = win.team;
