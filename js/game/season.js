@@ -1324,47 +1324,80 @@ export function advanceToOffseason() {
         checkCareerRec('sacks', cStats.sacks || 0);
         checkCareerRec('interceptions', cStats.interceptions || 0);
 
-        // Record End-of-Year Progression Snapshot
+        player.age++;
+        player.careerStats.seasonsPlayed = (player.careerStats.seasonsPlayed || 0) + 1;
+        const snapsThisSeason = player.careerStats.snapsThisSeason || 0;
+
+        // --- THE AGING PROCESS: PERSONALITY-DRIVEN MATURATION ---
+        if (player.age >= 15) {
+            const ethic = player.personality?.workEthic || 50;
+            const currentEgo = player.personality?.ego || 50;
+            const cred = player.personality?.streetCred || 50;
+
+            if (player.personality) {
+                // 1. Ego Inflation: Only affects kids with high street cred / low humility
+                const egoVulnerable = (currentEgo > 55 || cred > 60) && ethic < 75;
+                if (egoVulnerable && Math.random() < 0.65) {
+                    player.personality.ego = Math.min(100, currentEgo + getRandomInt(2, 5));
+                } else if (ethic >= 80 && Math.random() < 0.35) {
+                    // Dedicated team leaders stay humble
+                    player.personality.ego = Math.max(10, currentEgo - 1);
+                }
+
+                // 2. Loyalty Decay: Only kids with low work ethic or existing wanderlust lose loyalty
+                const loyaltyDecayChance = (100 - (player.personality.loyalty || 50)) / 120;
+                if (ethic < 45 && Math.random() < loyaltyDecayChance) {
+                    player.personality.loyalty = Math.max(0, (player.personality.loyalty || 50) - getRandomInt(1, 4));
+                }
+            }
+
+            // 3. Stamina Decay / Laziness: Only slackers lose conditioning!
+            if (player.attributes?.physical?.stamina) {
+                if (ethic < 40 && Math.random() < 0.60) {
+                    // Lazy teenagers lose stamina
+                    player.attributes.physical.stamina = Math.max(20, player.attributes.physical.stamina - getRandomInt(2, 4));
+                } else if (ethic >= 75 && player.attributes.physical.stamina < 90 && Math.random() < 0.30) {
+                    // Hardworking gym rats gain conditioning through summer training
+                    player.attributes.physical.stamina = Math.min(99, player.attributes.physical.stamina + 1);
+                }
+            }
+
+            // 4. Role & Touch Expectations: Only stars and divas demand focal touches
+            if (player.expectations) {
+                if (currentEgo > 60 || cred > 65) {
+                    player.expectations.desiredRole = 'STARTER';
+                    if (['QB', 'RB', 'WR', 'TE'].includes(player.favoriteOffensivePosition)) {
+                        player.expectations.minTouchesPerGame = Math.floor((player.age - 14) * 1.5);
+                    }
+                } else if (ethic >= 70) {
+                    // Unselfish kids are content being rotational contributors
+                    player.expectations.desiredRole = 'ROTATION';
+                }
+            }
+        }
+
+        // Run full player development (biological maturation + drill points)
+        const devReport = developPlayer(player, team);
+        if (team && team.id === game.playerTeam?.id) developmentResults.push(devReport);
+
+        // Record End-of-Year Progression Snapshot WITH DETAILED ATTRIBUTE GAINS
         if (!player.progression) player.progression = [];
         player.progression.push({
             year: game.year,
             age: player.age,
             teamName: teamName,
             ovr: calculateOverall(player, estimateBestPosition(player)),
+            improvements: devReport.improvements || [],
             stats: {
                 passYards: player.seasonStats?.passYards || 0,
                 rushYards: player.seasonStats?.rushYards || 0,
                 recYards: player.seasonStats?.recYards || 0,
                 touchdowns: player.seasonStats?.touchdowns || 0,
-                tackles: player.seasonStats?.tackles || 0
+                tackles: player.seasonStats?.tackles || 0,
+                sacks: player.seasonStats?.sacks || 0,
+                interceptions: player.seasonStats?.interceptions || 0
             }
         });
-
-        player.age++;
-        player.careerStats.seasonsPlayed = (player.careerStats.seasonsPlayed || 0) + 1;
-        const snapsThisSeason = player.careerStats.snapsThisSeason || 0;
-
-        // --- THE AGING PROCESS: ARROGANCE & LAZINESS ---
-        // As kids become older teenagers, their ego inflates, loyalty drops, and stamina decays
-        if (player.age >= 15) {
-            if (player.personality) {
-                player.personality.ego = Math.min(100, (player.personality.ego || 50) + getRandomInt(2, 6));
-                player.personality.loyalty = Math.max(0, (player.personality.loyalty || 50) - getRandomInt(1, 4));
-            }
-            if (player.attributes?.physical?.stamina) {
-                player.attributes.physical.stamina = Math.max(15, player.attributes.physical.stamina - getRandomInt(2, 5));
-            }
-            // Update their expectations dynamically
-            if (player.expectations) {
-                player.expectations.desiredRole = 'STARTER';
-                if (['QB', 'RB', 'WR', 'TE'].includes(player.favoriteOffensivePosition)) {
-                    player.expectations.minTouchesPerGame = Math.floor((player.age - 14) * 1.5);
-                }
-            }
-        }
-
-        const devReport = developPlayer(player, team);
-        if (team && team.id === game.playerTeam?.id) developmentResults.push(devReport);
 
         let playerIsLeaving = false;
 
@@ -1372,14 +1405,22 @@ export function advanceToOffseason() {
         if (player.age >= 19) {
             retiredPlayers.push(player);
             playerIsLeaving = true;
-            if (team && team.id === game.playerTeam?.id) addMessage("Player Retires", `${player.name} graduated and hung up his cleats.`);
-
-            // Former Legend to Coach Pipeline
+            if (team && team.id === game.playerTeam?.id && game.year >= 5) {
+                addMessage("Player Retires", `${player.name} graduated and hung up his cleats.`);
+            }
+            
+            // Former Legend to Coach Pipeline (SPAM SUPPRESSED DURING HISTORICAL PRE-SIM)
             const newCoach = checkRetiredPlayerToCoach(player);
             if (newCoach) {
                 if (!game.availableStaff) game.availableStaff = [];
                 game.availableStaff.unshift(newCoach);
-                addMessage("Sideline Legend", `🎓 <b>${player.name}</b> graduated from playing and has joined the neighborhood coaching market!`);
+                
+                // Only alert user for their own players or true league legends after Year 4
+                const isMyPlayer = team && team.id === game.playerTeam?.id;
+                const isLegend = (player.careerStats?.touchdowns || 0) >= 20;
+                if (game.year >= 5 && (isMyPlayer || isLegend)) {
+                    addMessage("Sideline Legend", `🎓 <b>${player.name}</b> (${teamName}) graduated and joined the coaching market!`);
+                }
             }
 
             if ((player.careerStats.touchdowns || 0) > 25) {

@@ -318,12 +318,21 @@ export function determineDefensivePlayCall(defense, offense, down, yardsToGo, ba
         const tags = play.tags || [];
         let score = 50;
 
+        // FIELD POSITION SANITY CHECKS:
+        // Do not call Goal Line defense at midfield, and do not call Prevent in the red zone
+        if (!isGoalLine && tags.includes('runStop') && play.key.includes('GoalLine')) {
+            score -= 80; // Heavy penalty outside the red zone
+        }
+        if (ballOn >= 80 && tags.includes('prevent')) {
+            score -= 100; // Never call Prevent inside the 20-yard line
+        }
+
         if (captainIsSharp) {
             if (isGoalLine || isShort) {
                 if (tags.includes('runStop')) score += 60;
                 if (tags.includes('blitz')) score += 30;
             } else if (isLong) {
-                if (tags.includes('prevent') || tags.includes('cover4') || tags.includes('safeZone')) score += 60;
+                if (tags.includes('prevent') && ballOn < 80) score += 60;
                 if (tags.includes('cover3')) score += 25;
             }
         }
@@ -873,13 +882,13 @@ export function simulateLivePlayStep(gameInstance, mode = 'live') {
         gameInstance.down = 1;
         gameInstance.yardsToGo = 10;
     } else {
-        gameInstance.ballOn += playResult.yards;
+        gameInstance.ballOn = Number((gameInstance.ballOn + playResult.yards).toFixed(1));
         gameInstance.ballOn = Math.max(1, Math.min(99, gameInstance.ballOn));
-        gameInstance.yardsToGo -= playResult.yards;
+        gameInstance.yardsToGo = Number((gameInstance.yardsToGo - playResult.yards).toFixed(1));
 
         if (gameInstance.yardsToGo <= 0) {
             gameInstance.down = 1;
-            const distToGoal = 100 - gameInstance.ballOn;
+            const distToGoal = Number((100 - gameInstance.ballOn).toFixed(1));
             gameInstance.yardsToGo = (distToGoal < 10) ? distToGoal : 10;
         } else {
             if (gameInstance.down >= 4) {

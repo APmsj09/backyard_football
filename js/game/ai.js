@@ -96,11 +96,15 @@ export function diagnosePlay(pState, tick, offenseStates, truePlayType, offensiv
         dirConfidence = finalCenter / totalDirScore;
     }
 
-    logPlayDebug('DEF_READ', `${pState.name} (${pState.role}) diagnosed play as [${guess.toUpperCase()}]`, {
-        confidence: Number(confidence.toFixed(2)),
-        direction,
-        dirConfidence: Number(dirConfidence.toFixed(2))
-    });
+    // Only log telemetry when the defender's diagnosis changes to prevent flooding
+    if (pState._lastLoggedGuess !== guess && guess !== 'read') {
+        logPlayDebug('DEF_READ', `${pState.name} (${pState.role}) committed to [${guess.toUpperCase()}]`, {
+            confidence: Number(confidence.toFixed(2)),
+            direction,
+            dirConfidence: Number(dirConfidence.toFixed(2))
+        });
+        pState._lastLoggedGuess = guess;
+    }
 
     return { guess, confidence, direction, dirConfidence };
 }

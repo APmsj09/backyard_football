@@ -259,6 +259,10 @@ export function checkTackleCollisions(playState, gameLog) {
             } else if (carrier.role === 'QB' && carrier.y < playState.lineOfScrimmage && playState.type === 'pass') {
                 playState.sack = true;
                 playState.statEvents.push({ type: 'sack', playerId: defender.id, qbId: carrier.id });
+                logPlayDebug('QB_SACK', `${defender.name} sacked ${carrier.name} for loss`, {
+                    lossYards: Number((playState.lineOfScrimmage - carrier.y).toFixed(1)),
+                    tacklerStrength: defender.str || 50
+                });
             }
 
             if (gameLog) {
@@ -679,20 +683,28 @@ export function handleBallArrival(playState, carrier, playResult, gameLog) {
         const attackersNear = playersInRange.filter(p => p.isOffense).length;
 
         if (isDefense) {
-            // DBs intercept floaty deep passes more often now, instead of just swatting
+            const isPunt = playState.type === 'punt';
             const ticksInAir = playState.tick - (ball.throwTick || 0);
-            const floatBonus = ticksInAir > 40 ? 15 : 0; // Floaties are easy to pick
+            const floatBonus = ticksInAir > 40 ? 15 : 0;
             const handsFactor = Math.min(1.0, catching / 70);
-            catchScore = (catchScore * (0.25 * handsFactor)) + floatBonus;
-            
-            if (attackersNear > 0) catchScore *= 0.50; // Hard to pick if WR is fighting for it
 
-            logPlayDebug('DEF_BALL_ATTEMPT', `${bestCandidate.name} attempted INT/Swat`, {
-                intProbability: `${Math.round(catchScore)}%`,
-                hands: hndEff,
-                floatBonusActive: floatBonus > 0,
-                attackersContesting: attackersNear
-            });
+            if (isPunt) {
+                catchScore = (catchScore * 0.85) + 20; // Punt returns are standard catches
+                logPlayDebug('PUNT_CATCH_ATTEMPT', `${bestCandidate.name} fielding punt`, {
+                    catchProbability: `${Math.round(catchScore)}%`,
+                    hands: hndEff
+                });
+            } else {
+                catchScore = (catchScore * (0.25 * handsFactor)) + floatBonus;
+                if (attackersNear > 0) catchScore *= 0.50;
+
+                logPlayDebug('DEF_BALL_ATTEMPT', `${bestCandidate.name} attempted INT/Swat`, {
+                    intProbability: `${Math.round(catchScore)}%`,
+                    hands: hndEff,
+                    floatBonusActive: floatBonus > 0,
+                    attackersContesting: attackersNear
+                });
+            }
         } else {
             // Offensive Catch logic
             if (defendersNear === 1) {

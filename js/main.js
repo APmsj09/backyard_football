@@ -202,6 +202,18 @@ function confirmFranchiseTakeover(teamId, coachDetails) {
         team.coach = customCoach;
         team.formations.offense = coachDetails.off;
         team.formations.defense = coachDetails.def;
+
+        // SYNC USER TO GENERAL MANAGER (YOU)
+        if (!team.staff) Game.initializeTeamStaff(team);
+        if (team.staff.gm) {
+            team.staff.gm.name = coachDetails.name;
+            team.staff.gm.biases.personality = { name: coachDetails.style, desc: `Prefers ${coachDetails.style} management style.` };
+            team.staff.gm.biases.tactical = { name: coachDetails.off, desc: `Favors ${coachDetails.off} concepts.` };
+        }
+        if (team.staff.coach) {
+            team.staff.coach.name = coachDetails.name;
+        }
+
         Game.rebuildDepthChartFromOrder(team);
     }
 
@@ -561,177 +573,248 @@ function buildResultsModalHtml(results) {
     return html;
 }
 
-function openPlayerCard(playerId) {
-    if (!gameState) return;
-    const player = Game.getPlayer(playerId) || gameState.players.find(p => p.id === playerId);
+export function openPlayerCard(playerId) {
+    const gs = getGameState();
+    if (!gs) return;
+    const player = Game.getPlayer(playerId) || gs.players?.find(p => p.id === playerId);
     if (!player) return;
 
-    const team = gameState.teams.find(t => t.id === player.teamId);
+    const team = gs.teams.find(t => t.id === player.teamId);
     const teamName = team ? team.name : 'Free Agent';
-    const tierLabel = team ? (team.leagueType === 'youth' ? 'Pee-Wee' : `Tier ${team.tier}`) : 'FA';
-    const isMyTeam = player.teamId === gameState.playerTeam?.id;
+    const isMyTeam = player.teamId === gs.playerTeam?.id;
 
     const bestPos = estimateBestPosition(player);
     const ovr = calculateOverall(player, bestPos);
 
-    const positions = Object.keys(positionOverallWeights);
-    let overallsHtml = '<div class="grid grid-cols-4 gap-2 text-center mt-4">';
+    let activeCardTab = 'overview';
+    window.app_switchPlayerCardTab = (tab) => {
+        activeCardTab = tab;
+        document.querySelectorAll('.pcard-tab-btn').forEach(btn => {
+            const isActive = btn.dataset.ptab === tab;
+            btn.className = `pcard-tab-btn px-3 py-1.5 rounded font-bold text-xs uppercase tracking-wider transition ${isActive ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-500 hover:text-slate-800 bg-slate-100'}`;
+        });
+        document.querySelectorAll('.pcard-pane').forEach(p => p.classList.add('hidden'));
+        document.getElementById(`pcard-pane-${tab}`)?.classList.remove('hidden');
+    };
+
+    // Tab 1: Positional Matrix
+    const positions = ['QB', 'RB', 'WR', 'TE', 'OL', 'DL', 'LB', 'DB'];
+    let overallsHtml = '<div class="grid grid-cols-4 gap-1.5 text-center">';
     positions.forEach(pos => {
         const isBest = pos === bestPos;
-        overallsHtml += `<div class="${isBest ? 'bg-slate-800 text-white' : 'bg-slate-100 text-slate-800'} p-2 rounded-sm border border-slate-300"><p class="text-[10px] font-bold uppercase tracking-widest opacity-80">${pos}</p><p class="font-black text-lg">${calculateOverall(player, pos)}</p></div>`;
+        overallsHtml += `
+            <div class="${isBest ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-800'} p-1.5 rounded border border-slate-200">
+                <span class="text-[9px] font-bold block ${isBest ? 'text-amber-400' : 'text-slate-400'}">${pos}</span>
+                <span class="font-black text-sm">${calculateOverall(player, pos)}</span>
+            </div>`;
     });
     overallsHtml += '</div>';
 
-    const s = player.seasonStats || {};
-    const c = player.careerStats || {};
+    // Tab 2: Detailed Attributes View
+    const renderAttrBar = (label, val) => `
+        <div class="flex items-center justify-between text-xs py-1 border-b border-slate-100">
+            <span class="text-slate-600 font-medium">${label}</span>
+            <div class="flex items-center gap-2">
+                <div class="w-24 bg-slate-200 rounded-full h-1.5 overflow-hidden">
+                    <div class="h-full ${val >= 70 ? 'bg-emerald-500' : (val >= 50 ? 'bg-blue-500' : 'bg-amber-500')}" style="width: ${val}%"></div>
+                </div>
+                <span class="font-mono font-bold w-6 text-right">${val}</span>
+            </div>
+        </div>`;
 
-    let progHtml = '<p class="text-xs text-slate-500 italic mt-2">No history available.</p>';
+    const phys = player.attributes?.physical || {};
+    const ment = player.attributes?.mental || {};
+    const tech = player.attributes?.technical || {};
+
+    // Tab 3: Detailed Growth History
+    let growthHtml = '<p class="text-xs text-slate-400 italic py-4">No progression recorded yet.</p>';
     if (player.progression && player.progression.length > 0) {
-        progHtml = `
-            <table class="w-full text-left text-[11px] mt-2">
-                <thead class="bg-slate-100 text-slate-600 uppercase tracking-wider">
+        growthHtml = `
+            <div class="space-y-2">
+                ${player.progression.slice().reverse().map(pr => {
+                    const gains = pr.improvements && pr.improvements.length > 0
+                        ? pr.improvements.map(g => `<span class="bg-emerald-50 text-emerald-800 border border-emerald-200 px-1.5 py-0.5 rounded text-[10px] font-bold mr-1"><b>${g.attr}</b> +${g.increase}</span>`).join('')
+                        : '<span class="text-slate-400 text-[10px]">Natural physical development</span>';
+
+                    return `
+                    <div class="bg-slate-50 border border-slate-200 p-2.5 rounded text-xs">
+                        <div class="flex justify-between items-center mb-1 pb-1 border-b border-slate-200/60 font-mono">
+                            <span class="font-bold text-slate-800">Season ${pr.year} (Age ${pr.age})</span>
+                            <span class="text-slate-500">${pr.teamName} • <b class="text-slate-900">${pr.ovr} OVR</b></span>
+                        </div>
+                        <div class="pt-1">${gains}</div>
+                    </div>`;
+                }).join('')}
+            </div>`;
+    }
+
+    // Tab 4: Career Stats Log
+    let statsTableHtml = '<p class="text-xs text-slate-400 italic py-4">No stats recorded yet.</p>';
+    if (player.progression && player.progression.length > 0) {
+        statsTableHtml = `
+            <table class="min-w-full text-xs font-mono">
+                <thead class="bg-slate-100 text-slate-600 uppercase text-[10px]">
                     <tr>
-                        <th class="p-1.5 border-b">Year</th>
-                        <th class="p-1.5 border-b">Age</th>
-                        <th class="p-1.5 border-b">Team</th>
-                        <th class="p-1.5 border-b text-center">OVR</th>
-                        <th class="p-1.5 border-b text-right">Stats</th>
+                        <th class="p-1.5 text-left">Yr</th>
+                        <th class="p-1.5 text-left">Team</th>
+                        <th class="p-1.5 text-center">Pass Yds</th>
+                        <th class="p-1.5 text-center">Rush Yds</th>
+                        <th class="p-1.5 text-center">Rec Yds</th>
+                        <th class="p-1.5 text-center">TDs</th>
+                        <th class="p-1.5 text-center">Tkls</th>
                     </tr>
                 </thead>
-                <tbody class="divide-y divide-slate-100">
-                    ${player.progression.map(p => {
-            const st = p.stats || {};
-            let line = [];
-            if (st.passYards > 0) line.push(`${st.passYards} Pass`);
-            if (st.rushYards > 0) line.push(`${st.rushYards} Rush`);
-            if (st.recYards > 0) line.push(`${st.recYards} Rec`);
-            if (st.touchdowns > 0) line.push(`${st.touchdowns} TD`);
-            if (st.tackles > 0) line.push(`${st.tackles} Tkl`);
-            const statText = line.length > 0 ? line.slice(0, 2).join(', ') : '-';
-
-            return `<tr>
-                            <td class="p-1.5 font-mono">Y${p.year}</td>
-                            <td class="p-1.5">${p.age}</td>
-                            <td class="p-1.5 truncate max-w-[100px] font-medium">${p.teamName}</td>
-                            <td class="p-1.5 text-center font-black text-slate-900">${p.ovr}</td>
-                            <td class="p-1.5 text-right font-mono text-[10px] text-slate-600">${statText}</td>
+                <tbody class="divide-y divide-slate-100 text-[11px]">
+                    ${player.progression.map(pr => {
+                        const st = pr.stats || {};
+                        return `
+                        <tr>
+                            <td class="p-1.5 font-bold">Y${pr.year}</td>
+                            <td class="p-1.5 font-sans truncate max-w-[90px]">${pr.teamName}</td>
+                            <td class="p-1.5 text-center">${st.passYards || 0}</td>
+                            <td class="p-1.5 text-center">${st.rushYards || 0}</td>
+                            <td class="p-1.5 text-center">${st.recYards || 0}</td>
+                            <td class="p-1.5 text-center font-bold text-amber-600">${st.touchdowns || 0}</td>
+                            <td class="p-1.5 text-center">${st.tackles || 0}</td>
                         </tr>`;
-        }).join('')}
+                    }).join('')}
                 </tbody>
             </table>`;
     }
 
-    let modalHtml = `
-        <div class="flex flex-col md:flex-row gap-6">
-            <!-- Left Column -->
-            <div class="md:w-1/2 flex flex-col">
-                <div class="bg-slate-50 p-4 border border-slate-200 rounded-sm mb-4">
-                    <div class="flex justify-between items-start mb-2">
+    const modalHtml = `
+        <div class="flex flex-col gap-3">
+            <!-- Top Identity Banner -->
+            <div class="bg-slate-900 text-white p-3.5 rounded flex justify-between items-start shadow-sm">
+                <div>
+                    <div class="flex items-center gap-2">
+                        <h3 class="text-xl font-black uppercase tracking-wider">${player.name}</h3>
+                        <span class="text-xs bg-slate-800 text-amber-400 font-mono px-2 py-0.5 rounded border border-slate-700">#${player.number || '--'}</span>
+                    </div>
+                    <p class="text-xs text-slate-400 mt-0.5 font-sans">
+                        ${teamName} • ${player.age}yo • ${formatHeight(phys.height)} • ${phys.weight} lbs
+                    </p>
+                </div>
+                <div class="text-right bg-slate-800 px-3 py-1.5 rounded border border-slate-700">
+                    <span class="text-[9px] uppercase tracking-widest text-slate-400 block">${bestPos} OVR</span>
+                    <span class="text-2xl font-black text-amber-400">${ovr}</span>
+                </div>
+            </div>
+
+            <!-- Tab Buttons -->
+            <div class="flex bg-slate-100 p-1 rounded border border-slate-200 gap-1 text-xs">
+                <button class="pcard-tab-btn active px-3 py-1.5 rounded font-bold text-xs uppercase tracking-wider transition bg-slate-900 text-white shadow-sm" data-ptab="overview" onclick="app_switchPlayerCardTab('overview')">📋 Summary</button>
+                <button class="pcard-tab-btn px-3 py-1.5 rounded font-bold text-xs uppercase tracking-wider transition text-slate-500 hover:text-slate-800 bg-slate-100" data-ptab="attributes" onclick="app_switchPlayerCardTab('attributes')">📊 All Attributes</button>
+                <button class="pcard-tab-btn px-3 py-1.5 rounded font-bold text-xs uppercase tracking-wider transition text-slate-500 hover:text-slate-800 bg-slate-100" data-ptab="growth" onclick="app_switchPlayerCardTab('growth')">📈 Development History</button>
+                <button class="pcard-tab-btn px-3 py-1.5 rounded font-bold text-xs uppercase tracking-wider transition text-slate-500 hover:text-slate-800 bg-slate-100" data-ptab="stats" onclick="app_switchPlayerCardTab('stats')">📜 Career Stats</button>
+            </div>
+
+            <!-- PANE 1: SUMMARY -->
+            <div id="pcard-pane-overview" class="pcard-pane space-y-3">
+                <div class="grid grid-cols-2 gap-2 text-xs bg-slate-50 p-3 rounded border border-slate-200">
+                    <p><span class="text-slate-400 font-bold uppercase text-[9px] block">Archetype</span> <b>${player.archetypeName || 'Athlete'}</b></p>
+                    <p><span class="text-slate-400 font-bold uppercase text-[9px] block">Potential Ceiling</span> <b class="text-amber-700">${player.potential || 'C'}</b></p>
+                    <p><span class="text-slate-400 font-bold uppercase text-[9px] block">Work Ethic</span> <b>${player.personality?.workEthic || 50}</b></p>
+                    <p><span class="text-slate-400 font-bold uppercase text-[9px] block">Dependability</span> <b>${player.personality?.dependability || 50}</b></p>
+                </div>
+
+                ${player.bio ? `
+                <div class="p-2.5 bg-amber-50/70 border border-amber-200 rounded text-xs text-slate-800 italic leading-relaxed">
+                    <span class="font-bold uppercase tracking-wider text-[9px] text-amber-800 not-italic block mb-0.5">Scouting Lore & Blacktop Rep</span>
+                    "${player.bio}"
+                </div>` : ''}
+
+                <div class="bg-white p-3 rounded border border-slate-200">
+                    <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1.5">Positional Suitability Matrix</span>
+                    ${overallsHtml}
+                </div>
+
+                <div class="bg-slate-50 p-2.5 rounded border border-slate-200 text-xs text-slate-700">
+                    <span class="text-[9px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Neighborhood Network</span>
+                    Clique: <b class="text-indigo-600">${player.personality?.clique || 'Regular'}</b> | 
+                    Best Friend: <b>${player.social?.bestFriendId ? (Game.getPlayer(player.social.bestFriendId)?.name || 'None') : 'None'}</b>
+                </div>
+            </div>
+
+            <!-- PANE 2: ALL ATTRIBUTES -->
+            <div id="pcard-pane-attributes" class="pcard-pane hidden grid grid-cols-1 md:grid-cols-3 gap-3">
+                <div class="bg-white p-3 rounded border border-slate-200">
+                    <h5 class="font-bold text-xs uppercase text-slate-400 tracking-wider mb-2 border-b pb-1">Physicals</h5>
+                    ${renderAttrBar('Speed', phys.speed || 50)}
+                    ${renderAttrBar('Strength', phys.strength || 50)}
+                    ${renderAttrBar('Agility', phys.agility || 50)}
+                    ${renderAttrBar('Stamina', phys.stamina || 50)}
+                </div>
+                <div class="bg-white p-3 rounded border border-slate-200">
+                    <h5 class="font-bold text-xs uppercase text-slate-400 tracking-wider mb-2 border-b pb-1">Mental & IQ</h5>
+                    ${renderAttrBar('Playbook IQ', ment.playbookIQ || 50)}
+                    ${renderAttrBar('Toughness', ment.toughness || 50)}
+                    ${renderAttrBar('Consistency', ment.consistency || 50)}
+                    ${renderAttrBar('Clutch', ment.clutch || 50)}
+                </div>
+                <div class="bg-white p-3 rounded border border-slate-200">
+                    <h5 class="font-bold text-xs uppercase text-slate-400 tracking-wider mb-2 border-b pb-1">Technicals</h5>
+                    ${renderAttrBar('Throwing Acc', tech.throwingAccuracy || 30)}
+                    ${renderAttrBar('Catching Hands', tech.catchingHands || 50)}
+                    ${renderAttrBar('Blocking', tech.blocking || 50)}
+                    ${renderAttrBar('Tackling', tech.tackling || 50)}
+                    ${renderAttrBar('Pass Coverage', tech.coverage || tech.passCoverage || 50)}
+                    ${renderAttrBar('Block Shed', tech.blockShedding || 50)}
+                </div>
+            </div>
+
+            <!-- PANE 3: GROWTH HISTORY -->
+            <div id="pcard-pane-growth" class="pcard-pane hidden max-h-72 overflow-y-auto">
+                ${growthHtml}
+            </div>
+
+            <!-- PANE 4: STATS HISTORY -->
+            <div id="pcard-pane-stats" class="pcard-pane hidden max-h-72 overflow-y-auto">
+                ${statsTableHtml}
+            </div>
+
+            <!-- Bottom Actions -->
+            ${isMyTeam ? `
+                <div class="pt-2 border-t border-slate-200 flex justify-end">
+                    <button class="bg-rose-700 hover:bg-rose-800 text-white px-4 py-1.5 rounded font-bold text-xs uppercase tracking-wider shadow-sm" onclick="app.cutPlayer('${player.id}')">Release Player</button>
+                </div>
+            ` : (!player.teamId ? `
+                <div class="pt-3 border-t border-slate-200 bg-slate-50 p-3 rounded">
+                    <h5 class="text-xs font-bold text-slate-800 uppercase tracking-wider mb-2">Offer Contract & Role Pitch</h5>
+                    <div class="grid grid-cols-3 gap-2 text-xs mb-3">
                         <div>
-                            <h3 class="text-xl font-black text-slate-900 uppercase tracking-wide">${player.name}</h3>
-                            <p class="text-sm font-bold text-emerald-700">${teamName} <span class="text-slate-500 font-normal">(${tierLabel})</span></p>
+                            <label class="block text-[10px] text-slate-500 font-bold uppercase">Role Promised</label>
+                            <select id="pitch-role" class="w-full p-1 border rounded bg-white font-bold text-slate-800">
+                                <option value="STARTER">Starter</option>
+                                <option value="ROTATION" selected>Rotation</option>
+                                <option value="BENCH">Reserve</option>
+                            </select>
                         </div>
-                        <div class="text-right bg-slate-800 text-white px-3 py-1 rounded-sm">
-                            <span class="text-[10px] uppercase tracking-widest block opacity-70">${bestPos} OVR</span>
-                            <span class="text-2xl font-black">${ovr}</span>
+                        <div>
+                            <label class="block text-[10px] text-slate-500 font-bold uppercase">Touches Promised</label>
+                            <select id="pitch-touches" class="w-full p-1 border rounded bg-white font-bold text-slate-800">
+                                <option value="NORMAL">Standard</option>
+                                <option value="FEATURED">Focal Option</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-[10px] text-slate-500 font-bold uppercase">Favor Tokens</label>
+                            <select id="pitch-tokens" class="w-full p-1 border rounded bg-white font-bold text-slate-800">
+                                <option value="0">0 Tokens</option>
+                                <option value="1">1 Token</option>
+                                <option value="2">2 Tokens</option>
+                            </select>
                         </div>
                     </div>
-                    <div class="grid grid-cols-2 gap-x-4 gap-y-2 text-xs text-slate-700 mt-4">
-                        <p><span class="text-slate-500 uppercase font-bold text-[10px] tracking-wider block">Archetype</span> ${player.archetypeName || 'Unknown'}</p>
-                        <p><span class="text-slate-500 uppercase font-bold text-[10px] tracking-wider block">Potential</span> <span class="font-bold text-slate-900">${player.potential}</span></p>
-                        <p><span class="text-slate-500 uppercase font-bold text-[10px] tracking-wider block">Age</span> ${player.age} yrs</p>
-                        <p><span class="text-slate-500 uppercase font-bold text-[10px] tracking-wider block">Vitals</span> ${formatHeight(player.attributes?.physical?.height)} / ${player.attributes?.physical?.weight} lbs</p>
-                        <p><span class="text-slate-500 uppercase font-bold text-[10px] tracking-wider block">Work Ethic</span> ${player.personality?.workEthic || 50}</p>
-                        <p><span class="text-slate-500 uppercase font-bold text-[10px] tracking-wider block">Dependability</span> ${player.personality?.dependability || 50}</p>
-                    </div>
-
-                    ${player.bio ? `
-                    <div class="mt-3 p-2.5 bg-amber-50/70 border border-amber-200/80 rounded text-xs text-slate-800 leading-relaxed italic">
-                        <span class="font-bold uppercase tracking-wider text-[9px] text-amber-800 not-italic block mb-0.5">Scouting Lore & Reputation</span>
-                        "${player.bio}"
-                    </div>` : ''}
+                    <button class="w-full bg-emerald-700 hover:bg-emerald-800 text-white font-bold py-2 rounded text-xs uppercase tracking-wider" onclick="app.negotiatePlayer('${player.id}')">
+                        Submit Contract Pitch
+                    </button>
                 </div>
-                
-                <h4 class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Positional Ratings</h4>
-                ${overallsHtml}
-            </div>
-
-            <!-- Right Column -->
-            <div class="md:w-1/2 flex flex-col">
-                <div class="bg-white border border-slate-200 rounded-sm p-4 mb-4 shadow-sm">
-                    <h4 class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3 border-b pb-1">Current Season Stats</h4>
-                    <div class="grid grid-cols-2 gap-3 text-xs text-slate-800">
-                        <p><span class="text-slate-500">Passing:</span> <br><b>${s.passYards || 0}</b> yds, <b>${s.passCompletions || 0}</b>/<b>${s.passAttempts || 0}</b></p>
-                        <p><span class="text-slate-500">Rushing:</span> <br><b>${s.rushYards || 0}</b> yds, <b>${s.rushAttempts || 0}</b> att</p>
-                        <p><span class="text-slate-500">Receiving:</span> <br><b>${s.recYards || 0}</b> yds, <b>${s.receptions || 0}</b> rec</p>
-                        <p><span class="text-slate-500">Defense:</span> <br><b>${s.tackles || 0}</b> tkl, <b>${s.sacks || 0}</b> sck</p>
-                        <p class="col-span-2 pt-2 border-t border-slate-100"><span class="text-slate-500">Touchdowns:</span> <span class="font-black text-slate-900">${s.touchdowns || 0}</span></p>
-                    </div>
-                </div>
-
-                <div class="bg-white border border-slate-200 rounded-sm p-4 shadow-sm mb-4">
-                    <h4 class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2 border-b pb-1">Social Connections</h4>
-                    <div class="text-xs text-slate-800 space-y-1">
-                        <p><span class="font-bold text-slate-500">Clique:</span> <span class="font-bold text-indigo-600">${player.personality?.clique || 'None'}</span></p>
-                        <p><span class="font-bold text-slate-500">Best Friend:</span> ${player.social?.bestFriendId ? (Game.getPlayer(player.social.bestFriendId)?.name || 'Unknown') : 'None'}</p>
-                        <p><span class="font-bold text-slate-500">Good Friends:</span> ${player.social?.goodFriendIds?.length > 0 ? player.social.goodFriendIds.map(id => Game.getPlayer(id)?.name?.split(' ')[0] || 'Unknown').join(', ') : 'None'}</p>
-                        <p><span class="font-bold text-slate-500">Rivals:</span> <span class="text-rose-600 font-semibold">${player.social?.rivalIds?.length > 0 ? player.social.rivalIds.map(id => Game.getPlayer(id)?.name?.split(' ')[0] || 'Unknown').join(', ') : 'None'}</span></p>
-                    </div>
-                </div>
-
-                <div class="bg-white border border-slate-200 rounded-sm p-4 flex-grow overflow-y-auto shadow-sm">
-                    <h4 class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Progression History</h4>
-                    ${progHtml}
-                    ${player.playerHistory?.teamsPlayedFor?.length > 0 ? `
-                        <div class="mt-4 border-t pt-2 text-[10px] text-slate-500">
-                            <span class="font-bold uppercase tracking-wider block mb-1">Past Teams</span>
-                            ${player.playerHistory.teamsPlayedFor.map(t => `${t.teamName} (Yr ${t.year})`).join(' • ')}
-                        </div>
-                    ` : ''}
-                </div>
-            </div>
+            ` : '')}
         </div>
-
-        ${isMyTeam ? `
-            <div class="mt-4 pt-4 border-t border-slate-200 flex justify-end">
-                <button class="bg-rose-700 hover:bg-rose-800 text-white px-4 py-2 rounded-sm font-bold text-xs transition shadow-sm uppercase tracking-wider" onclick="app.cutPlayer('${player.id}')">Release Player</button>
-            </div>
-        ` : (!player.teamId ? `
-            <div class="mt-4 pt-4 border-t border-slate-200 bg-slate-50 p-3 rounded">
-                <h5 class="text-xs font-bold text-slate-800 uppercase tracking-wider mb-2">Offer Contract & Role Pitch</h5>
-                <div class="grid grid-cols-3 gap-2 text-xs mb-3">
-                    <div>
-                        <label class="block text-[10px] text-slate-500 font-bold uppercase">Role Promised</label>
-                        <select id="pitch-role" class="w-full p-1 border rounded bg-white font-bold text-slate-800">
-                            <option value="STARTER">Starter</option>
-                            <option value="ROTATION" selected>Rotation</option>
-                            <option value="BENCH">Reserve</option>
-                        </select>
-                    </div>
-                    <div>
-                        <label class="block text-[10px] text-slate-500 font-bold uppercase">Touches Promised</label>
-                        <select id="pitch-touches" class="w-full p-1 border rounded bg-white font-bold text-slate-800">
-                            <option value="NORMAL">Standard</option>
-                            <option value="FEATURED">Focal Option</option>
-                        </select>
-                    </div>
-                    <div>
-                        <label class="block text-[10px] text-slate-500 font-bold uppercase">Favor Tokens</label>
-                        <select id="pitch-tokens" class="w-full p-1 border rounded bg-white font-bold text-slate-800">
-                            <option value="0">0 Tokens</option>
-                            <option value="1">1 Token</option>
-                            <option value="2">2 Tokens</option>
-                        </select>
-                    </div>
-                </div>
-                <button class="w-full bg-emerald-700 hover:bg-emerald-800 text-white font-bold py-2 rounded text-xs uppercase tracking-wider" onclick="app.negotiatePlayer('${player.id}')">
-                    Submit Contract Pitch
-                </button>
-            </div>
-        ` : '')}
     `;
 
-    UI.showModal('Scouting Report', modalHtml);
+    UI.showModal('Player Dossier', modalHtml);
 }
 
 function handleSetCaptain(playerId) {
