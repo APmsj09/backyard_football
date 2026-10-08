@@ -118,10 +118,17 @@ export function setupInitialPlayerStates(playState, offense, defense, play, assi
 
                         if (play.readProgression && play.readProgression.length > 0) {
                             const mapping = formationData.mapping || {};
-                            readProgression = play.readProgression.map(role => {
-                                const mapped = mapping[role];
-                                return Array.isArray(mapped) ? mapped[0] : (mapped || role);
-                            }).filter(Boolean);
+                            readProgression = play.readProgression
+                                .map(role => {
+                                    const mapped = mapping[role];
+
+                                    if (Array.isArray(mapped)) {
+                                        return mapped[0] || null;
+                                    }
+
+                                    return mapped || null;
+                                })
+                                .filter(Boolean);
                         }
 
                         dropbackPhase = 'dropping'; hasCompletedDropback = false;
