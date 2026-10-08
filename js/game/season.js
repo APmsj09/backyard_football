@@ -18,6 +18,9 @@ import {
 import {
     initializeTeamStaff, generateStaffPool, checkRetiredPlayerToCoach, aiManageTeamStaff
 } from './staff.js';
+import {
+    evaluatePlayerRetention, evaluatePlayerNegotiation
+} from './negotiations.js';
 
 export const ROSTER_LIMIT = 18;
 export const MIN_HEALTHY_PLAYERS = 8;
