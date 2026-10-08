@@ -422,6 +422,9 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
     const scoreDiff = (playState.offenseScore || 0) - (playState.defenseScore || 0);
     const currentQuarter = playState.quarter || 1;
     const timeRemaining = playState.timeRemaining || 720;
+    const down = Number(playState.down) || 1;
+    const yardsToGo = Number(playState.yardsToGo) || 10;
+
     const isDesperationTime = (currentQuarter >= 4) &&
         ((scoreDiff < 0 && timeRemaining <= 120) || (scoreDiff <= -9 && timeRemaining <= 300));
 

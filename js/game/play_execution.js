@@ -12,6 +12,7 @@ import {
     calculateSafetyHelp, diagnosePlay, getSmartCarrierTarget
 } from './ai.js';
 import { pushGameLog } from './collisions.js';
+import { logPlayDebug } from './telemetry.js';
 
 const FIELD_WIDTH = 53.3;
 const FIELD_LENGTH = 120;

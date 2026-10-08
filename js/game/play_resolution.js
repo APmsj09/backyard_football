@@ -578,6 +578,8 @@ export function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey
         statEvents: [],
         ballState: { x: 0, y: 0, z: 1.0, vx: 0, vy: 0, vz: 0, inAir: false, isLoose: false, targetPlayerId: null },
         offenseScore, defenseScore, quarter,
+        down,
+        yardsToGo,
         lineOfScrimmage: ballOn + 10,
         timeRemaining,
         activePlayers: [],
