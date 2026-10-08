@@ -574,7 +574,7 @@ function buildResultsModalHtml(results) {
 }
 
 export function openPlayerCard(playerId) {
-    const gs = getGameState();
+    const gs = Game.getGameState();
     if (!gs) return;
     const player = Game.getPlayer(playerId) || gs.players?.find(p => p.id === playerId);
     if (!player) return;

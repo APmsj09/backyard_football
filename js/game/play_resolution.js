@@ -152,8 +152,8 @@ export function determinePlayCall(offense, defense, down, yardsToGo, ballOn, sco
     const isChewClock = drivesRemaining <= 2 && scoreDiff >= 8;
 
     // Base run probability influenced by Head Coach tactical bias
-    let runProbability = 0.55; 
-    
+    let runProbability = 0.55;
+
     const tacticalBias = offense.staff?.coach?.biases?.tactical;
     if (tacticalBias?.runModifier) {
         runProbability += tacticalBias.runModifier;
@@ -173,38 +173,202 @@ export function determinePlayCall(offense, defense, down, yardsToGo, ballOn, sco
     // First Down Tendency: Teams should try to establish the run on 1st down
     if (down === 1 && !isDesperation && !isChewClock) runProbability += 0.15;
 
-    runProbability = Math.max(0.10, Math.min(0.90, runProbability));
+    // ==========================================================
+    // OFFENSIVE DECISION MODEL
+    // ==========================================================
+    // Run/pass tendency is a PRIOR, not a hard decision.
+    // The AI will score every compatible play and let situation,
+    // QB processing, play design, personnel fit, and recent usage
+    // determine the final choice.
 
-    const availableRuns = formationPlays.filter(k => offensivePlaybook[k].type === 'run');
-    const availablePasses = formationPlays.filter(k => offensivePlaybook[k].type === 'pass');
+    const offChart = offense.depthChart?.offense || {};
 
-    const selectRun = (Math.random() < runProbability && availableRuns.length > 0) || availablePasses.length === 0;
-    const candidateKeys = selectRun ? availableRuns : availablePasses;
+    const getSlotOvr = (slot) => {
+        const pid = offChart[slot];
+        const p = pid ? getPlayer(pid) : null;
+        return p ? calculateOverall(p, p.pos || estimateBestPosition(p)) : 0;
+    };
+
+    const offenseRoster = getRosterObjects(offense);
+    const qb = offenseRoster.find(
+        p => p && p.id === offense.depthChart?.offense?.QB1
+    );
+
+    const qbIQ = qb?.attributes?.mental?.playbookIQ ?? 50;
+    const qbDecision = qb?.attributes?.mental?.decisionMaking ?? 50;
+
+    // High-IQ QBs are better at recognizing which plays fit the situation.
+    // Low-IQ QBs stay closer to the team's normal tendencies.
+    const qbProcessing = (qbIQ + qbDecision) / 200;
+    const situationalWeight = 0.75 + (qbProcessing * 0.50);
+
+    runProbability = Math.max(0.15, Math.min(0.85, runProbability));
+
+    // IMPORTANT:
+    // Do not split into run/pass candidates first.
+    // A strong pass should be able to beat a mediocre run, and vice versa.
+    const candidateKeys = formationPlays;
+
+    // Ensure target history array exists
+    if (!offense.recentTargets) offense.recentTargets = [];
 
     let scoredPlays = candidateKeys.map(key => {
         const play = offensivePlaybook[key];
         const tags = play.tags || [];
         let score = 50;
 
+        // ======================================================
+        // 1. RUN/PASS TENDENCY = SOFT PRIOR
+        // ======================================================
+        // Example:
+        // 70% run tendency => run gets a modest bonus,
+        // but an excellent pass can still win the comparison.
+        const typePrior = play.type === 'run'
+            ? runProbability
+            : (1 - runProbability);
+
+        score += (typePrior - 0.5) * 30;
+
+        // ======================================================
+        // 2. SITUATIONAL FOOTBALL
+        // ======================================================
+        // QB intelligence affects how strongly the AI responds
+        // to situation, rather than directly forcing a player.
         if (isShort) {
-            if (play.type === 'run' && tags.includes('inside')) score += 40;
-            if (play.type === 'run' && tags.includes('power')) score += 50;
-        } else if (isLong) {
-            if (play.type === 'run') score -= 30;
-            if (tags.includes('deep') || tags.includes('medium')) score += 40;
-        } else {
-            if (down === 1) {
-                if (play.type === 'run') score += 15;
-                if (tags.includes('pa')) score += 30;
+            if (play.type === 'run' && tags.includes('inside')) {
+                score += 30 * situationalWeight;
+            }
+
+            if (play.type === 'run' && tags.includes('power')) {
+                score += 35 * situationalWeight;
+            }
+
+            if (play.type === 'pass' && tags.includes('short')) {
+                score += 10 * situationalWeight;
             }
         }
 
-        const recentCount = recentPlays.filter(k => k === key).length;
-        if (recentCount > 0) {
-            score *= Math.pow(0.4, recentCount);
+        if (isLong) {
+            if (play.type === 'run') {
+                score -= 20 * situationalWeight;
+            }
+
+            if (tags.includes('deep')) {
+                score += 30 * situationalWeight;
+            } else if (tags.includes('medium')) {
+                score += 18 * situationalWeight;
+            }
+
+            if (play.type === 'pass' && tags.includes('short')) {
+                score -= 8 * situationalWeight;
+            }
         }
 
-        return { key, score: Math.max(1, score) };
+        if (down === 1 && !isDesperation && !isChewClock) {
+            if (play.type === 'run') {
+                score += 8 * situationalWeight;
+            }
+
+            if (tags.includes('pa')) {
+                score += 12 * situationalWeight;
+            }
+        }
+
+        if (isGoalLine) {
+            if (play.type === 'run') {
+                score += 20 * situationalWeight;
+            }
+
+            if (tags.includes('short') || tags.includes('inside')) {
+                score += 8 * situationalWeight;
+            }
+        }
+
+        if (isBackedUp) {
+            if (tags.includes('inside')) {
+                score += 10 * situationalWeight;
+            }
+
+            if (tags.includes('short')) {
+                score += 8 * situationalWeight;
+            }
+
+            if (tags.includes('deep')) {
+                score -= 8 * situationalWeight;
+            }
+        }
+
+        // ======================================================
+        // 3. PLAYER / READ FIT
+        // ======================================================
+        // Player talent matters, but only because the specific
+        // play asks that player to execute it.
+        //
+        // This is intentionally a SMALL adjustment.
+        // A 90 OVR WR should not automatically cause more targets.
+        // It simply makes a play using that WR somewhat more attractive.
+        const readSlots = play.type === 'run'
+            ? ['RB1']
+            : (play.readProgression || []).slice(0, 3);
+
+        const readOvrs = readSlots
+            .map(slot => getSlotOvr(slot))
+            .filter(ovr => ovr > 0);
+
+        if (readOvrs.length > 0) {
+            const firstReadOvr = readOvrs[0];
+            const supportingReads = readOvrs.slice(1);
+
+            const supportingAvg = supportingReads.length > 0
+                ? supportingReads.reduce((sum, ovr) => sum + ovr, 0) / supportingReads.length
+                : firstReadOvr;
+
+            // First read matters more, but secondary reads still count.
+            const readQuality = (firstReadOvr * 0.65) + (supportingAvg * 0.35);
+
+            // Keep player talent from dominating play selection.
+            const readFit = Math.max(
+                -8,
+                Math.min(8, (readQuality - 50) * 0.18)
+            );
+
+            // Better QBs can make more use of quality reads.
+            score += readFit * (0.65 + qbProcessing * 0.70);
+        }
+
+        // ======================================================
+        // 4. PLAY REPETITION
+        // ======================================================
+        // Encourage variety, but don't make the AI allergic to a
+        // successful play that remains the best option.
+        const recentPlayCount = recentPlays.filter(k => k === key).length;
+
+        if (recentPlayCount > 0) {
+            score -= Math.min(18, recentPlayCount * 7);
+        }
+
+        // ======================================================
+        // 5. RECENT TARGET USAGE
+        // ======================================================
+        // This is a mild workload/variety consideration.
+        // It should NEVER crater a good matchup.
+        const primaryTarget = play.type === 'run'
+            ? 'RB1'
+            : play.readProgression?.[0];
+
+        if (primaryTarget) {
+            const recentTargetCount =
+                offense.recentTargets.filter(t => t === primaryTarget).length;
+
+            if (recentTargetCount > 0) {
+                score -= Math.min(10, recentTargetCount * 3);
+            }
+        }
+
+        return {
+            key,
+            score: Math.max(1, score)
+        };
     });
 
     scoredPlays.sort((a, b) => b.score - a.score);
@@ -224,6 +388,14 @@ export function determinePlayCall(offense, defense, down, yardsToGo, ballOn, sco
     if (!offense.recentPlayHistory) offense.recentPlayHistory = [];
     offense.recentPlayHistory.push(selectedKey);
     if (offense.recentPlayHistory.length > 6) offense.recentPlayHistory.shift();
+
+    if (!offense.recentTargets) offense.recentTargets = [];
+    const selectedPlayDef = offensivePlaybook[selectedKey];
+    const targetSlot = selectedPlayDef?.type === 'run' ? 'RB1' : selectedPlayDef?.readProgression?.[0];
+    if (targetSlot) {
+        offense.recentTargets.push(targetSlot);
+        if (offense.recentTargets.length > 4) offense.recentTargets.shift(); // Only track last 4 plays
+    }
 
     return selectedKey;
 }
@@ -313,10 +485,32 @@ export function determineDefensivePlayCall(defense, offense, down, yardsToGo, ba
     const isLong = yardsToGo >= 8;
     const captainIsSharp = checkCaptainDiscipline(defense, gameLog);
 
+    // ==========================================================
+    // DEFENSIVE GAME-PLANNING (SCOUTING THE OPPONENT)
+    // ==========================================================
+    const offChart = offense.depthChart?.offense || {};
+    const getOffWeaponOvr = (slot) => {
+        const pid = offChart[slot];
+        const p = pid ? getPlayer(pid) : null;
+        return p ? calculateOverall(p, p.pos || estimateBestPosition(p)) : 0;
+    };
+
+    const oppQB = getOffWeaponOvr('QB1');
+    const oppRB = getOffWeaponOvr('RB1');
+    const oppWR1 = getOffWeaponOvr('WR1');
+
+    // Determine the opponent's identity
+    const isRunHeavyThreat = oppRB > 65 && (oppRB - oppQB > 10);
+    const isPassHeavyThreat = oppQB > 65 && oppWR1 > 65 && (oppWR1 - oppRB > 10);
+
     let scoredPlays = availablePlays.map(key => {
         const play = defensivePlaybook[key];
         const tags = play.tags || [];
         let score = 50;
+
+        // Opponent-specific adjustments
+        if (isRunHeavyThreat && tags.includes('runStop')) score += 35; // Stack the box against star RBs
+        if (isPassHeavyThreat && (tags.includes('cover2') || tags.includes('double-team') || tags.includes('cover4'))) score += 35; // Play shell against elite passing attacks
 
         // FIELD POSITION SANITY CHECKS:
         // Do not call Goal Line defense at midfield, and do not call Prevent in the red zone

@@ -854,7 +854,7 @@ export function renderStaffTab(gameState) {
             </div>
         `;
 
-        UI.showModal(`Recruit ${roleName}`, pitchModalHtml, () => {
+        showModal(`Recruit ${roleName}`, pitchModalHtml, () => {
             const tokensOffered = parseInt(document.getElementById('staff-pitch-tokens')?.value || '0', 10);
 
             if (tokensOffered > tokensAvailable) {

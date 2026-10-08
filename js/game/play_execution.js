@@ -34,7 +34,7 @@ export function setupInitialPlayerStates(playState, offense, defense, play, assi
 
     playState.type = play.type;
     playState.readProgression = play.readProgression || [];
-    playState.playKey = play.key || null;
+    playState.playKey = offensivePlayKey || null;
 
     playState.defensivePlayKey = defensivePlayKey;
     let defPlay = defensivePlaybook[defensivePlayKey] || defensivePlaybook['Cover_2_Zone_Base'] || { name: 'Emergency Default', assignments: {} };
@@ -868,7 +868,7 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                             const isDoubleMove = ['Sluggo', 'Out_And_Up', 'Hitch_And_Go', 'PostCorner'].some(r => pState.assignment?.includes(r));
                             let separated = false;
 
-                           // 1. Playground Double-Move Trap (Freezes low-IQ DBs)
+                            // 1. Playground Double-Move Trap (Freezes low-IQ DBs)
                             if (isDoubleMove && dbIQ < 60 && Math.random() < 0.65) {
                                 coverageDefender.stunnedTicks = Math.max(14, 30 - Math.floor(dbIQ / 3));
                                 coverageDefender.vx = 0;
@@ -1249,7 +1249,7 @@ export function executeAssignment(pState, assignment, offenseStates, LOS, playSt
         if (primaryThreat) {
             if (isDeep) {
                 const insideLeverageX = primaryThreat.x < CENTER_X ? 1.0 : -1.0;
-                
+
                 // --- ELITE DB BAITING (Trap Coverage) ---
                 if (iq > 75 && !isBallInAir && playState.tick > 25) {
                     // Elite safety intentionally "sags" 3 yards shallow and 2 yards inside to make the WR look open

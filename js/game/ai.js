@@ -448,24 +448,56 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
     }
 
     const qbPlayer = getPlayer(qbState.id);
-    const qbAttrs = qbPlayer?.attributes || { mental: { playbookIQ: 50 }, physical: { agility: 50, strength: 50 }, technical: { throwingAccuracy: 50 } };
+    const qbAttrs = qbPlayer?.attributes || {
+        mental: { playbookIQ: 50, decisionMaking: 50 },
+        physical: { agility: 50, strength: 50 },
+        technical: { throwingAccuracy: 50 }
+    };
 
     const qbIQ = Math.max(20, Math.min(99, qbAttrs.mental?.playbookIQ ?? 50));
+    const qbDecision = Math.max(20, Math.min(99, qbAttrs.mental?.decisionMaking ?? 50));
     const qbAgility = qbAttrs.physical?.agility || 50;
     const qbStrength = qbAttrs.physical?.strength || 50;
     const qbAcc = qbAttrs.technical?.throwingAccuracy || 50;
 
+    // Post-snap processing ability.
+    // IQ = understanding the offense/play.
+    // Decision Making = choosing correctly under pressure.
+    const qbProcessing = (qbIQ * 0.40) + (qbDecision * 0.60);
+
     if (!qbState.readProgression || qbState.readProgression.length === 0) {
         qbState.readProgression = offenseStates
-            .filter(p => p.slot !== 'QB1' && (p.action.includes('route') || p.action === 'idle'))
+            .filter(p =>
+                p.slot !== 'QB1' &&
+                !p.slot.startsWith('OL') &&
+                (p.action.includes('route') || p.action === 'idle')
+            )
             .sort((a, b) => {
-                const getPriority = (slot) => {
-                    if (slot.startsWith('WR')) return 1;
-                    if (slot.startsWith('TE')) return 2;
-                    if (slot.startsWith('RB')) return 3;
-                    return 4;
+                // When the play doesn't provide an explicit progression,
+                // start with the players who are currently giving the QB
+                // the best immediate opportunity.
+                //
+                // This is deliberately based on football context,
+                // not overall rating or positional prestige.
+
+                const getImmediateValue = (p) => {
+                    let value = 0;
+
+                    if (p.action.includes('route')) value += 10;
+
+                    const routeDepth =
+                        p.y - (playState.lineOfScrimmage || 0);
+
+                    // Favor viable early reads without automatically
+                    // forcing short or deep targets.
+                    if (routeDepth >= 3 && routeDepth <= 14) value += 4;
+
+                    if (p.assignment?.includes('Screen')) value += 2;
+
+                    return value;
                 };
-                return getPriority(a.slot) - getPriority(b.slot);
+
+                return getImmediateValue(b) - getImmediateValue(a);
             })
             .map(p => p.slot);
     }
@@ -481,10 +513,10 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
         const trueTarget = offenseStates.find(o => o.slot === progression[0]);
         if (trueTarget && trueTarget.initialX !== undefined) {
             // Find a decoy receiver on the opposite side of the center hash
-            const decoy = offenseStates.find(o => 
-                o.slot !== 'QB1' && 
-                o.slot !== trueTarget.slot && 
-                o.initialX !== undefined && 
+            const decoy = offenseStates.find(o =>
+                o.slot !== 'QB1' &&
+                o.slot !== trueTarget.slot &&
+                o.initialX !== undefined &&
                 Math.sign(o.initialX - 26.6) !== Math.sign(trueTarget.initialX - 26.6)
             );
             if (decoy) {
@@ -575,66 +607,160 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
             }
         });
 
-        let score = (Math.min(minProjectedSeparation, 6) * 10);
+        const depth = rec.y - playState.lineOfScrimmage;
+
+        let score = Math.min(minProjectedSeparation, 6) * 10;
 
         if (rec.assignment === 'Screen_Wait') {
             if (playState.tick < 45) return { score: -100 };
             score += 80;
-            if (minProjectedSeparation < 1.0) score -= 150;
+
+            if (minProjectedSeparation < 1.0) {
+                score -= 150;
+            }
         }
 
-        const depth = rec.y - playState.lineOfScrimmage;
-        const iqFactor = qbIQ / 100;
-        const armFactor = qbStrength / 100;
+        const yardsToGo = playState.yardsToGo ?? 10;
+        const down = playState.down ?? 1;
+        const targetDepth = depth;
+        const distanceBeyondLOS = targetDepth;
+        const targetAtOrBeyondFirstDown = distanceBeyondLOS >= yardsToGo;
 
-        // --- REALISTIC QB ARM-STRENGTH TARGET SELECTION ---
-        // 1. Intermediate & Short routes (High completion probability)
+        // ======================================================
+        // SITUATIONAL VALUE
+        // ======================================================
+
+        // Throwing beyond the sticks is valuable, but not mandatory.
+        if (targetAtOrBeyondFirstDown) {
+            score += 18;
+        } else {
+            // Short targets are perfectly reasonable on early downs,
+            // but become less attractive when a first down is required.
+            const yardsShort = yardsToGo - Math.max(0, distanceBeyondLOS);
+
+            if (down >= 3 && yardsShort > 3) {
+                score -= Math.min(24, yardsShort * 3);
+            } else if (down <= 2) {
+                score -= Math.min(8, yardsShort * 1.5);
+            }
+        }
+
+        // Short throws are naturally more attractive when pressure is coming.
+        if (isPressured && targetDepth >= 0 && targetDepth <= 8) {
+            score += 30;
+        }
+
+        // Under heavy pressure, don't wait for a perfect deep window.
+        if (isPressured && targetDepth > 14) {
+            score -= 18;
+        }
+
+        // ======================================================
+        // COVERAGE / SEPARATION QUALITY
+        // ======================================================
+
+        // Separation matters, but returns diminish quickly.
+        // Being 8 yards open isn't four times better than being 2 yards open.
+        if (minProjectedSeparation >= 2.0) {
+            score += Math.min(18, (minProjectedSeparation - 2.0) * 6);
+        }
+
+        // Tight-window throws should be possible for good QBs,
+        // but become increasingly unattractive for poor decision makers.
+        if (minProjectedSeparation < 1.5) {
+            const tightWindowPenalty = (1.5 - minProjectedSeparation) *
+                (2.0 + ((100 - qbDecision) / 18));
+
+            score -= tightWindowPenalty * 4;
+        }
+
+        // Multiple defenders closing on the target is a major warning.
+        if (defendersClosingIn >= 2) {
+            score -= 25 + ((100 - qbDecision) * 0.18);
+        }
+
+        if (defendersClosingIn >= 3) {
+            score -= 35 + ((100 - qbDecision) * 0.25);
+        }
+
+        // ======================================================
+        // THROW DIFFICULTY / ARM STRENGTH
+        // ======================================================
+
         if (depth >= 2 && depth <= 14) {
-            if (minProjectedSeparation > 1.2) score += 45;
-            else score -= 10;
+            // Intermediate throws are the normal bread-and-butter option.
+            if (minProjectedSeparation > 1.2) {
+                score += 20;
+            }
         }
 
-        // 2. Deep routes: Neighborhood kids shouldn't be hurling 40-yard bombs
         if (depth > 14) {
+            // Deep balls require both physical ability and a meaningful window.
             if (qbStrength < 60) {
-                // EXTREME penalty for weak arms trying to throw deep
-                score -= (60 - qbStrength) * 3.0; 
-            } else if (minProjectedSeparation > 4.0 && armFactor > 0.65) {
-                score += 15 * iqFactor * armFactor; // Only take the shot if WIDE open
+                score -= (60 - qbStrength) * 2.0;
+            }
+
+            if (minProjectedSeparation >= 3.0) {
+                score += 12 + (qbIQ * 0.05);
             } else {
-                score -= 60; // Otherwise, look for a checkdown
+                // Good QBs can still attempt difficult throws,
+                // but poor QBs should usually move on.
+                score -= Math.max(10, (60 - qbDecision) * 0.6);
             }
         }
 
-        // 3. Pressure Checkdowns (Hot Reads to TE / Flat / RB)
-        if (isPressured) {
-            if (depth >= 0 && depth <= 8 && minProjectedSeparation > 1.0) {
-                score += 55; // Dump it off quickly to avoid the sack!
-            }
+        // ======================================================
+        // UNDERCUT / DEFENDER leverage
+        // ======================================================
+
+        if (undercutThreat > 0) {
+            const leveragePenalty = 22 + ((100 - qbDecision) * 0.20);
+            score -= undercutThreat * leveragePenalty;
         }
 
-        if (undercutThreat > 0) score -= (undercutThreat * 35 * iqFactor);
-        if (defendersClosingIn >= 2) score -= (35 + (25 * iqFactor));
-        if (defendersClosingIn >= 3) score -= 100;
+        // ======================================================
+        // GAME SITUATION
+        // ======================================================
 
-        const isLateTrailing = (playState.quarter >= 4 || playState.quarter === 'OT') &&
+        const isLateTrailing =
+            (playState.quarter >= 4 || playState.quarter === 'OT') &&
             (playState.timeRemaining <= 150) &&
             ((playState.offenseScore || 0) < (playState.defenseScore || 0));
 
-        if (isLateTrailing && qbIQ > 65) {
+        if (isLateTrailing && qbDecision > 65) {
             const distToBoundary = Math.min(rec.x, FIELD_WIDTH - rec.x);
+
             if (distToBoundary < 4.0) {
-                score += 25;
-            } else if (depth < 10) {
-                score -= 30;
+                score += 20;
+            }
+
+            if (targetDepth >= yardsToGo) {
+                score += 15;
             }
         }
 
-        return {
-            score: score,
-            info: { state: rec },
-            separation: minProjectedSeparation
-        };
+        // Leading late: avoid needless low-percentage hero throws.
+        const isLateLeading =
+            (playState.quarter >= 4 || playState.quarter === 'OT') &&
+            (playState.timeRemaining <= 150) &&
+            ((playState.offenseScore || 0) > (playState.defenseScore || 0));
+
+        if (isLateLeading && qbDecision > 60) {
+            if (depth > 15 && minProjectedSeparation < 3.0) {
+                score -= 20;
+            }
+        }
+
+        // ======================================================
+        // QB DECISION-MAKING SHOULD AFFECT RISK TOLERANCE,
+        // NOT WHICH PLAYER HE "LIKES"
+        // ======================================================
+
+        const riskTolerance = 0.65 + (qbDecision / 100) * 0.35;
+
+        // Good decision makers get more value from genuinely good windows.
+        // They do NOT get a bonus simply because a receiver is highly rated.
+        score *= riskTolerance;
     };
 
     if (qbState.action === 'qb_scramble') {
@@ -731,14 +857,21 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
         return;
     }
 
-    let scanSpeedBase = Math.max(6, (110 - qbIQ) / 3.5);
-    if (isPressured) scanSpeedBase *= 0.65; // Scan faster when pocket collapses
+    let scanSpeedBase = Math.max(6, (110 - qbProcessing) / 3.5);
+
+    // Pressure creates urgency.
+    // Good decision makers process that urgency better.
+    // Poor decision makers do not magically scan faster.
+    if (isPressured) {
+        const pressureProcessingMod = 1.05 - (qbDecision / 220);
+        scanSpeedBase *= Math.max(0.60, pressureProcessingMod);
+    }
 
     if (typeof qbState.ticksInPocket === 'undefined') qbState.ticksInPocket = 0;
     qbState.ticksInPocket++;
 
     const numReadsVisible = Math.min(progression.length, 1 + Math.floor(qbState.ticksInPocket / scanSpeedBase));
-    
+
     // Lowered minimum dropback ticks to 28 so QBs can deliver quick slants/screens before getting sacked
     const MIN_DROPBACK_TICKS = 28;
     const canThrowStandard = (playState.tick >= MIN_DROPBACK_TICKS || isHotReadSituation) && (qbState.hasCompletedDropback || isPressured);
@@ -779,9 +912,38 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
             }
         }
 
-        let THROW_THRESHOLD = 35;
-        if (isPressured) THROW_THRESHOLD = 15;
-        if (isHotReadSituation) THROW_THRESHOLD = 0;
+        let THROW_THRESHOLD = 32;
+
+        // Early downs: stay patient.
+        if (down <= 2) {
+            THROW_THRESHOLD += 5;
+        }
+
+        // Third/fourth down: accept more risk when the sticks demand it.
+        if (down >= 3 && yardsToGo >= 6) {
+            THROW_THRESHOLD -= 10;
+        }
+
+        // Trailing late: accept lower-probability opportunities.
+        if (isDesperationTime) {
+            THROW_THRESHOLD -= 8;
+        }
+
+        // Pressure forces quicker decisions.
+        if (isPressured) {
+            THROW_THRESHOLD -= 12;
+        }
+
+        // Hot read: get the ball out, but don't completely remove
+        // the concept of a bad throw.
+        if (isHotReadSituation) {
+            THROW_THRESHOLD -= 8;
+        }
+
+        // Smarter QBs can recognize good opportunities slightly earlier.
+        THROW_THRESHOLD -= ((qbDecision - 50) * 0.12);
+
+        THROW_THRESHOLD = Math.max(2, Math.min(45, THROW_THRESHOLD));
 
         if (bestTargetEval && bestTargetEval.score > THROW_THRESHOLD) {
             targetPlayerState = bestTargetEval.info.state;

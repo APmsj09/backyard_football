@@ -478,7 +478,7 @@ export const offensivePlaybook = {
         type: 'pass', tags: ['pass', 'screen', 'slow-mesh'],
         readProgression: ['RB'],
         assignments: {
-            'QB': 'qb_screen_retreat', 
+            'QB': 'qb_screen_retreat',
             'RB': 'Screen_Wait',
             'OL1': 'Wall_Alley_Left', 'OL2': 'Wall_Alley_Left', 'OL3': 'pass_block',
             'X': 'Fly', 'Z': 'Post', 'Y': 'Fly'
@@ -570,14 +570,14 @@ export const offensivePlaybook = {
     'Uni_PowerLead_Left': {
         type: 'run', tags: ['run', 'inside', 'power'],
         assignments: {
-            'QB': 'qb_setup', 'RB': 'run_iso_l', 'RB2': 'lead_left', 
+            'QB': 'qb_setup', 'RB': 'run_iso_l', 'RB2': 'lead_left',
             'OL': 'run_block', 'Y': 'run_block', 'X': 'run_block', 'Z': 'run_block'
         }
     },
     'Uni_Toss_Right': {
         type: 'run', tags: ['run', 'outside', 'toss'],
         assignments: {
-            'QB': 'qb_setup', 'RB': 'run_toss_r', 
+            'QB': 'qb_setup', 'RB': 'run_toss_r',
             'OL1': 'pull_right_wide', 'OL2': 'run_block', 'OL3': 'run_block',
             'Y': 'run_block', 'X': 'run_block', 'Z': 'run_block', 'H': 'run_block'
         }
@@ -585,7 +585,7 @@ export const offensivePlaybook = {
     'Uni_Toss_Left': {
         type: 'run', tags: ['run', 'outside', 'toss'],
         assignments: {
-            'QB': 'qb_setup', 'RB': 'run_toss_l', 
+            'QB': 'qb_setup', 'RB': 'run_toss_l',
             'OL1': 'run_block', 'OL2': 'run_block', 'OL3': 'pull_left_wide',
             'Y': 'run_block', 'X': 'run_block', 'Z': 'run_block', 'H': 'run_block'
         }
@@ -596,7 +596,7 @@ export const offensivePlaybook = {
         type: 'pass', tags: ['pass', 'short', 'cross'],
         readProgression: ['X', 'Z', 'RB'],
         assignments: {
-            'QB': 'qb_setup', 
+            'QB': 'qb_setup',
             'X': 'Mesh_Right', 'Z': 'Mesh_Left',
             'H': 'Corner', 'Y': 'Corner',
             'RB': 'Texas', 'OL': 'pass_block'
@@ -606,7 +606,7 @@ export const offensivePlaybook = {
         type: 'pass', tags: ['pass', 'medium', 'flood'],
         readProgression: ['Z', 'H', 'Y'],
         assignments: {
-            'QB': 'qb_setup', 
+            'QB': 'qb_setup',
             'Z': 'Flood_Deep',
             'H': 'Flood_Out',
             'Y': 'Flat',
@@ -662,6 +662,7 @@ export const offensivePlaybook = {
     // ===================================
     'RPO_Slant_Dive': {
         type: 'pass', tags: ['rpo', 'quick'],
+        readProgression: ['H', 'X', 'RB'],
         assignments: {
             'QB': 'qb_rpo_read', 'RB': 'run_dive', 'X': 'Slant',
             'Z': 'Fly', 'H': 'Slant', 'Y': 'run_block', 'OL': 'run_block'
@@ -673,6 +674,7 @@ export const offensivePlaybook = {
     // ===================================
     'Trick_Flea_Flicker': {
         type: 'pass', tags: ['trick', 'deep'],
+        readProgression: ['Z', 'X', 'Y', 'H'],
         assignments: {
             'QB': 'qb_flea_flicker', 'RB': 'run_dive', 'X': 'Fly',
             'Z': 'PostCorner', 'Y': 'Seam', 'H': 'Fly', 'OL': 'pass_block'
@@ -941,11 +943,11 @@ export const defensivePlaybook = {
         tags: ['man', 'double-team'],
         assignments: {
             'DL1': 'pass_rush', 'DL2': 'pass_rush',
-            'LB1': 'man_cover_RB', 
-            'LB2': 'zone_short_middle', 'LB3': 'man_cover_Y', 
-            'DB1': 'man_cover_X',  
+            'LB1': 'man_cover_RB',
+            'LB2': 'zone_short_middle', 'LB3': 'man_cover_Y',
+            'DB1': 'man_cover_X',
             'DB3': 'man_cover_X',
-            'DB2': 'man_cover_Z'   
+            'DB2': 'man_cover_Z'
         }
     },
 
@@ -1119,7 +1121,7 @@ export const defensivePlaybook = {
         assignments: {
             'DL1': 'pass_rush', 'DL2': 'pass_rush', 'DL3': 'pass_rush',
             'LB1': 'blitz_edge',
-            'LB2': 'zone_short_middle', 
+            'LB2': 'zone_short_middle',
             'DB1': 'blitz_edge',
             'DB2': 'man_cover_Z', 'DB3': 'man_cover_X'
         }
