@@ -8,7 +8,14 @@ const defensivePositions = ['DL', 'LB', 'DB'];
 
 export const positionOverallWeights = {
     // Give QBs more weight to pure throwing accuracy and mobility
-    QB: { throwingAccuracy: 0.50, playbookIQ: 0.25, speed: 0.10, consistency: 0.10, strength: 0.05 },
+    QB: {
+        throwingAccuracy: 0.42,
+        playbookIQ: 0.20,
+        decisionMaking: 0.13,
+        speed: 0.10,
+        consistency: 0.10,
+        strength: 0.05
+    },
 
     // Skill positions
     RB: { speed: 0.35, agility: 0.25, strength: 0.15, catchingHands: 0.15, toughness: 0.10 },
@@ -159,11 +166,11 @@ export function calculateSlotSuitability(player, slot, side, team) {
 
 const archetypes = [
     // --- SIGNAL CALLERS ---
-    { name: 'Field General', off: 'QB', def: 'LB', weightMod: 1.1, heightMod: 2, keyAttrs: ['playbookIQ', 'throwingAccuracy', 'consistency', 'tackling'], speedMod: 0.85, strMod: 1.0 },
+    { name: 'Field General', off: 'QB', def: 'LB', weightMod: 1.1, heightMod: 2, keyAttrs: ['playbookIQ', 'decisionMaking', 'throwingAccuracy', 'consistency', 'tackling'], speedMod: 0.85, strMod: 1.0 },
     { name: 'Scrambler', off: 'QB', def: 'DB', weightMod: 0.95, heightMod: -1, keyAttrs: ['speed', 'agility', 'throwingAccuracy', 'stamina'], speedMod: 1.2, strMod: 0.85 },
     { name: 'Gunslinger', off: 'QB', def: 'DB', weightMod: 1.05, heightMod: 3, keyAttrs: ['throwingAccuracy', 'strength', 'clutch', 'playbookIQ'], speedMod: 0.9, strMod: 1.25 },
     { name: 'Heavy Crusher QB', off: 'QB', def: 'DL', weightMod: 1.4, heightMod: 4, keyAttrs: ['strength', 'throwingAccuracy', 'toughness', 'blockShedding'], speedMod: 0.65, strMod: 1.3 },
-    { name: 'Game Manager', off: 'QB', def: 'DB', weightMod: 1.0, heightMod: 0, keyAttrs: ['playbookIQ', 'consistency', 'throwingAccuracy', 'coverage'], speedMod: 0.9, strMod: 0.9 },
+    { name: 'Game Manager', off: 'QB', def: 'DB', weightMod: 1.0, heightMod: 0, keyAttrs: ['playbookIQ', 'decisionMaking', 'consistency', 'throwingAccuracy', 'coverage'], speedMod: 0.9, strMod: 0.9 },
     { name: 'Dual-Threat', off: 'QB', def: 'DB', weightMod: 1.0, heightMod: 1, keyAttrs: ['speed', 'throwingAccuracy', 'agility', 'stamina'], speedMod: 1.15, strMod: 1.0 },
     { name: 'Backyard Magician', off: 'QB', def: 'DB', weightMod: 0.9, heightMod: -1, keyAttrs: ['agility', 'clutch', 'throwingAccuracy', 'speed'], speedMod: 1.1, strMod: 0.95 },
     { name: 'Cannon Arm', off: 'QB', def: 'DL', weightMod: 1.1, heightMod: 2, keyAttrs: ['strength', 'throwingAccuracy', 'tackling'], speedMod: 0.8, strMod: 1.3 },
@@ -452,7 +459,8 @@ export function generatePlayer(minAge = 12, maxAge = 18, classModifiers = null) 
             playbookIQ: generateTalentValue('playbookIQ'),
             clutch: generateTalentValue('clutch'),
             consistency: generateTalentValue('consistency'),
-            toughness: generateTalentValue('toughness')
+            toughness: generateTalentValue('toughness'),
+            decisionMaking: 50
         },
         technical: {
             throwingAccuracy: generateTalentValue('throwingAccuracy'),
@@ -467,6 +475,20 @@ export function generatePlayer(minAge = 12, maxAge = 18, classModifiers = null) 
     // Apply Archetype Multipliers & Boosts to Talent Profile
     talentAttributes.physical.speed = Math.min(99, Math.round(talentAttributes.physical.speed * archetype.speedMod));
     talentAttributes.physical.strength = Math.min(99, Math.round(talentAttributes.physical.strength * archetype.strMod));
+    // Decision-making is related to football IQ, consistency, and clutch,
+    // but has enough variance to be its own meaningful trait.
+    talentAttributes.mental.decisionMaking = Math.max(
+        25,
+        Math.min(
+            99,
+            Math.round(
+                (talentAttributes.mental.playbookIQ * 0.50) +
+                (talentAttributes.mental.consistency * 0.30) +
+                (talentAttributes.mental.clutch * 0.20) +
+                gaussianRandom(0, 4)
+            )
+        )
+    );
 
     // Strict clamp: Non-QBs should strictly have throwing accuracy between 15 and 35
     if (archetype.off !== 'QB') {
@@ -486,6 +508,8 @@ export function generatePlayer(minAge = 12, maxAge = 18, classModifiers = null) 
         talentAttributes.technical.blocking = Math.round(talentAttributes.technical.blocking * 0.45);
         talentAttributes.technical.blockShedding = Math.round(talentAttributes.technical.blockShedding * 0.45);
     }
+
+
 
     const boosts = archetypeBoosts[archetype.name] || {};
     for (const [attr, boost] of Object.entries(boosts)) {
