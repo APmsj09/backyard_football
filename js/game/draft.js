@@ -22,10 +22,10 @@ export function calculateDraftValue(player, team) {
     // Add scouting noise/error based on scout rating (Elite scout = accurate; Bad scout = +/- 8 OVR error)
     const noise = Math.round((Math.random() - 0.5) * (1.0 - scoutAccuracy) * 16);
     const pos = estimateBestPosition(player);
-    const perceivedOvr = Math.max(20, Math.min(99, calculateOverall(player, pos) + noise));
+    const ovr = Math.max(20, Math.min(99, calculateOverall(player, pos) + noise));
 
     // 1. Perceived Ability
-    let abilityScore = perceivedOvr * 0.35;
+    let abilityScore = ovr * 0.35;
 
     // SCOUT BIAS EFFECT: Scout's personal bias distorts player value
     const scoutBias = scout?.biases?.scouting?.name;
