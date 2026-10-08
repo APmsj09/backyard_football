@@ -784,8 +784,179 @@ export function switchTab(tabId, gameState) {
         case 'player-stats': renderPlayerStatsTab(gameState); break;
         case 'hall-of-fame': renderHallOfFameTab(gameState); break;
         case 'history': renderHistoryTab(gameState); break;
+        case 'staff': renderStaffTab(gameState); break;
         case 'messages': renderMessagesTab(gameState); break;
     }
+}
+
+export function renderStaffTab(gameState) {
+    const container = document.getElementById('staff-container');
+    if (!container || !gameState?.playerTeam) return;
+
+    const team = gameState.playerTeam;
+    if (!team.staff) Game.initializeTeamStaff(team);
+    if (!gameState.availableStaff) gameState.availableStaff = Game.generateStaffPool(6);
+
+    const roles = [
+        { key: 'gm', title: 'General Manager (You)', icon: '👑', desc: 'Oversees the program, hires staff, and builds team culture.' },
+        { key: 'coach', title: 'Head Coach (Sideline Boss)', icon: ' whistle', desc: 'Calls plays, sets offensive/defensive schemes, and manages timeouts.' },
+        { key: 'scout', title: 'Park Informant (Scout)', icon: '🚲', desc: 'Drives draft board fog-of-war and detects character red flags.' },
+        { key: 'trainer', title: 'Sideline Anchor (Trainer)', icon: '🧊', desc: 'Controls fatigue dissipation, conditioning, and injury rehabilitation.' }
+    ];
+
+    window.app_fireStaff = (roleKey) => {
+        if (confirm(`Relieve your ${roleKey.toUpperCase()} of duties?`)) {
+            const old = team.staff[roleKey];
+            if (old) {
+                old.teamId = null;
+                gameState.availableStaff.push(old);
+            }
+            team.staff[roleKey] = null;
+            renderStaffTab(gameState);
+        }
+    };
+
+    window.app_hireStaff = (staffId, roleKey) => {
+        const staff = gameState.availableStaff.find(s => s.id === staffId);
+        if (!staff) return;
+
+        const tokensAvailable = team.socialProfile?.favorTokens || 0;
+        const requiredTokens = staff.ratings.offSchemeMastery > 75 ? 1 : 0;
+
+        if (tokensAvailable < requiredTokens) {
+            alert(`You need ${requiredTokens} Favor Token(s) to recruit this staff member.`);
+            return;
+        }
+
+        const negotiation = Game.evaluateStaffNegotiation(staff, team, roleKey, requiredTokens);
+        if (!negotiation.accepted) {
+            alert(`✋ ${staff.name} declined to join: ${negotiation.reasons.join(' • ')}`);
+            return;
+        }
+
+        if (requiredTokens > 0) {
+            team.socialProfile.favorTokens -= requiredTokens;
+        }
+
+        const idx = gameState.availableStaff.findIndex(s => s.id === staffId);
+        gameState.availableStaff.splice(idx, 1);
+        staff.role = roleKey;
+        staff.teamId = team.id;
+        team.staff[roleKey] = staff;
+        renderStaffTab(gameState);
+    };
+
+    let html = `
+        <div class="mb-4 bg-slate-900 text-white rounded p-4 border border-slate-700 flex flex-col md:flex-row justify-between items-start md:items-center gap-3 shadow-sm">
+            <div>
+                <h3 class="text-lg font-black uppercase tracking-wider text-amber-400">Front Office & Sideline Staff</h3>
+                <p class="text-xs text-slate-300">Staff traits and biases directly warp play-calling, scouting accuracy, and player development.</p>
+            </div>
+            <div class="text-[11px] font-mono text-slate-400 bg-slate-800 px-3 py-1.5 rounded border border-slate-700">
+                Staff Budget: <b class="text-white">${team.socialProfile?.favorTokens || 3} Favor Tokens</b>
+            </div>
+        </div>
+
+        <!-- 1. Current Staff Hierarchy Cards -->
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
+    `;
+
+    roles.forEach(r => {
+        const member = team.staff[r.key];
+        if (!member) {
+            html += `
+                <div class="bg-white rounded border border-dashed border-slate-300 p-4 flex flex-col justify-between items-center text-center shadow-sm min-h-[220px]">
+                    <div>
+                        <span class="text-2xl block mb-1">🪑</span>
+                        <h4 class="font-bold text-xs uppercase text-slate-700">${r.title}</h4>
+                        <p class="text-[10px] text-slate-400 mt-1">${r.desc}</p>
+                    </div>
+                    <span class="text-xs font-black text-rose-500 bg-rose-50 border border-rose-200 px-2 py-1 rounded">VACANT</span>
+                </div>`;
+            return;
+        }
+
+        const rt = member.ratings;
+        const b = member.biases;
+        const isUserGM = r.key === 'gm';
+
+        html += `
+            <div class="bg-white rounded border border-slate-300 p-3.5 shadow-sm flex flex-col justify-between min-h-[220px]">
+                <div>
+                    <div class="flex justify-between items-start mb-1.5 border-b border-slate-100 pb-1.5">
+                        <div>
+                            <span class="text-[9px] font-black uppercase text-amber-700 block tracking-wider">${r.title}</span>
+                            <h4 class="font-bold text-sm text-slate-900 truncate">${member.name}</h4>
+                            ${member.formerPlayerBio ? `<span class="text-[9px] bg-amber-100 text-amber-900 font-bold px-1 rounded block mt-0.5" title="${member.formerPlayerBio}">🎓 Park Legend</span>` : ''}
+                        </div>
+                        <span class="text-[10px] font-mono text-slate-400">${member.age}yo</span>
+                    </div>
+
+                    <!-- Traits & Biases -->
+                    <div class="space-y-1 mb-2 text-[10px]">
+                        ${b.tactical ? `<div class="bg-slate-50 border border-slate-200 p-1 rounded"><b class="text-blue-700">Scheme:</b> ${b.tactical.name}</div>` : ''}
+                        ${b.scouting ? `<div class="bg-slate-50 border border-slate-200 p-1 rounded"><b class="text-indigo-700">Eye:</b> ${b.scouting.name}</div>` : ''}
+                        ${b.personality ? `<div class="bg-slate-50 border border-slate-200 p-1 rounded"><b class="text-emerald-700">Style:</b> ${b.personality.name}</div>` : ''}
+                    </div>
+
+                    <!-- Key Ratings Matrix -->
+                    <div class="grid grid-cols-2 gap-1 text-[10px] font-mono bg-slate-50 p-2 rounded border border-slate-200">
+                        <div>Tactics: <b class="text-slate-800">${Math.round((rt.offSchemeMastery + rt.defSchemeMastery) / 2)}</b></div>
+                        <div>Adjust: <b class="text-slate-800">${rt.inGameAdjustments}</b></div>
+                        <div>Scout: <b class="text-slate-800">${Math.round((rt.evalPhysicals + rt.evalTechnique) / 2)}</b></div>
+                        <div>Teach: <b class="text-slate-800">${rt.teaching}</b></div>
+                    </div>
+                </div>
+
+                ${!isUserGM ? `
+                <div class="mt-3 pt-2 border-t border-slate-100 flex justify-end">
+                    <button class="text-rose-600 hover:text-rose-800 text-[10px] font-bold uppercase tracking-wider" onclick="app_fireStaff('${r.key}')">Fire Staff</button>
+                </div>` : '<div class="mt-2 text-center text-[9px] text-slate-400 font-bold uppercase">Franchise Controller</div>'}
+            </div>
+        `;
+    });
+
+    html += `</div>`;
+
+    // 2. The Sideline Candidate Market (Available Hires)
+    html += `
+        <div class="bg-white rounded border border-slate-300 p-4 shadow-sm">
+            <h4 class="font-black text-xs uppercase tracking-wider text-slate-800 border-b border-slate-200 pb-2 mb-3">
+                Neighborhood Sideline Market (Available Candidates)
+            </h4>
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                ${gameState.availableStaff.map(s => {
+                    return `
+                    <div class="bg-slate-50 rounded border border-slate-200 p-3 flex flex-col justify-between text-xs hover:border-slate-400 transition">
+                        <div>
+                            <div class="flex justify-between items-start mb-1">
+                                <div>
+                                    <h5 class="font-bold text-slate-900">${s.name}</h5>
+                                    <span class="text-[9px] text-slate-500">${s.age}yo • ${s.biases.personality.name}</span>
+                                </div>
+                                ${s.formerPlayerBio ? `<span class="text-[9px] bg-amber-100 text-amber-900 font-bold px-1 rounded" title="${s.formerPlayerBio}">🎓 Legend</span>` : ''}
+                            </div>
+                            <p class="text-[10px] text-slate-600 italic mb-2">"${s.biases.tactical?.desc || s.biases.scouting?.desc || s.biases.personality.desc}"</p>
+                            
+                            <div class="grid grid-cols-3 gap-1 text-[10px] font-mono text-center mb-3">
+                                <div class="bg-white p-1 rounded border"><span>Tactics</span><br><b>${s.ratings.offSchemeMastery}</b></div>
+                                <div class="bg-white p-1 rounded border"><span>Scout</span><br><b>${s.ratings.evalPhysicals}</b></div>
+                                <div class="bg-white p-1 rounded border"><span>Teach</span><br><b>${s.ratings.teaching}</b></div>
+                            </div>
+                        </div>
+
+                        <div class="flex gap-1.5 border-t border-slate-200 pt-2">
+                            <button class="flex-1 bg-slate-900 hover:bg-slate-800 text-white font-bold py-1 rounded text-[10px]" onclick="app_hireStaff('${s.id}', 'coach')">Hire Coach</button>
+                            <button class="flex-1 bg-slate-200 hover:bg-slate-300 text-slate-800 font-bold py-1 rounded text-[10px]" onclick="app_hireStaff('${s.id}', 'scout')">Hire Scout</button>
+                            <button class="flex-1 bg-slate-200 hover:bg-slate-300 text-slate-800 font-bold py-1 rounded text-[10px]" onclick="app_hireStaff('${s.id}', 'trainer')">Hire Trainer</button>
+                        </div>
+                    </div>`;
+                }).join('')}
+            </div>
+        </div>
+    `;
+
+    container.innerHTML = html;
 }
 
 let rosterSortCol = 'ovr';

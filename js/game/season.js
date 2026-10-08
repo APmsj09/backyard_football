@@ -15,6 +15,9 @@ import {
 import {
     rebuildDepthChartFromOrder, aiSetDepthChart, assignTeamCaptain
 } from './depth_chart.js';
+import {
+    initializeTeamStaff, generateStaffPool, checkRetiredPlayerToCoach, aiManageTeamStaff
+} from './staff.js';
 
 export const ROSTER_LIMIT = 18;
 export const MIN_HEALTHY_PLAYERS = 8;
@@ -41,7 +44,7 @@ function yieldToMain() { return new Promise(resolve => setTimeout(resolve, 0)); 
 export function buildSocialNetworks(targetPlayers, allPlayers) {
     targetPlayers.forEach(p => {
         if (!p.social) p.social = { bestFriendId: null, goodFriendIds: [], rivalIds: [] };
-        
+
         let maxGoodFriends = 3; let maxRivals = 2;
         if (p.personality.likeability > 70) { maxGoodFriends = getRandomInt(4, 7); maxRivals = getRandomInt(0, 1); }
         else if (p.personality.likeability < 35) { maxGoodFriends = getRandomInt(1, 2); maxRivals = getRandomInt(2, 3); }
@@ -170,6 +173,7 @@ export async function initializeLeague(onProgress) {
                 favorTokens: 3
             }
         };
+        initializeTeamStaff(team);
         game.teams.push(team);
 
         if (i % 4 === 0) await yieldToMain();
@@ -204,7 +208,7 @@ export async function initializeLeague(onProgress) {
     // Populate Initial Main Team Rosters with Natural Tier Variance
     const tier1Teams = game.teams.filter(t => t.tier === 1);
     const tier2Teams = game.teams.filter(t => t.tier === 2);
-    
+
     // Sort pool by best overall rating so elite teams get elite talent
     const unassigned = game.players
         .filter(p => !p.teamId && p.age >= 12 && p.age <= 18)
@@ -493,15 +497,15 @@ export function generateDraftSummary() {
 export function getTeamOverall(team) {
     const roster = getRosterObjects(team);
     if (!roster || !roster.length) return 50;
-    
+
     // ZenGM Style: A team's OVR is dictated by its top 8 starters, not dragged down by bench scrubs
     const sortedOvr = roster
         .map(p => calculateOverall(p, estimateBestPosition(p)))
         .sort((a, b) => b - a);
-        
+
     const top8 = sortedOvr.slice(0, 8);
     if (top8.length === 0) return 50;
-    
+
     const sum = top8.reduce((s, val) => s + val, 0);
     return Math.round(sum / top8.length);
 }
@@ -796,10 +800,10 @@ export function processWeeklyPlayerGrowth() {
             if (!player || !player.attributes) return;
 
             // In-season growth applies to players getting real snaps (especially young kids 12-15)
-            const snapsThisWeek = (player.gameStats?.passAttempts || 0) + 
-                                  (player.gameStats?.rushAttempts || 0) + 
-                                  (player.gameStats?.targets || 0) + 
-                                  (player.gameStats?.tackles || 0);
+            const snapsThisWeek = (player.gameStats?.passAttempts || 0) +
+                (player.gameStats?.rushAttempts || 0) +
+                (player.gameStats?.targets || 0) +
+                (player.gameStats?.tackles || 0);
 
             const isYoung = player.age <= 15;
             const growthChance = isYoung ? 0.12 : 0.05;
@@ -1037,50 +1041,70 @@ export function developPlayer(player, team = null) {
     if (!player || !player.attributes) return { player, improvements: [] };
     const developmentReport = { player, improvements: [] };
 
-    const potentialMultipliers = { 'A': 1.5, 'B': 1.25, 'C': 1.0, 'D': 0.75, 'F': 0.5 };
+    const potentialMultipliers = { 'A': 1.35, 'B': 1.15, 'C': 1.0, 'D': 0.85, 'F': 0.65 };
     const potMod = potentialMultipliers[player.potential] || 1.0;
     const ethic = player.personality?.workEthic || 50;
-    const ethicMod = 0.5 + (ethic / 100);
+    const ethicMod = 0.6 + (ethic / 120);
 
     const snaps = player.careerStats?.snapsThisSeason || 0;
-    const experienceMod = Math.min(1.5, 0.6 + (snaps / 500));
+    const experienceMod = Math.min(1.4, 0.7 + (snaps / 400));
 
+    // Coach teaching influence from the staff system
+    const coachTeaching = team?.staff?.coach?.ratings?.teaching || 50;
+    const teachingMod = 0.85 + ((coachTeaching / 100) * 0.3); // 0.85x to 1.15x multiplier
+
+    // =========================================================================
+    // 1. BIOLOGICAL ATTRIBUTE MATURATION (Aging from child to young adult)
+    // =========================================================================
+    // Closes the gap toward their adult ceiling (talentAttributes) each year
+    if (player.talentAttributes && player.age >= 12 && player.age <= 18) {
+        const growthStep = 0.055 * potMod * ethicMod * teachingMod;
+
+        Object.keys(player.attributes).forEach(cat => {
+            if (!player.talentAttributes[cat]) return;
+            Object.keys(player.attributes[cat]).forEach(attr => {
+                if (attr === 'height' || attr === 'weight') return;
+
+                const currentVal = player.attributes[cat][attr] || 30;
+                const ceilingVal = player.talentAttributes[cat][attr] || 60;
+
+                if (ceilingVal > currentVal) {
+                    const naturalGain = Math.max(1, Math.round((ceilingVal - currentVal) * growthStep));
+                    player.attributes[cat][attr] = Math.min(ceilingVal, currentVal + naturalGain);
+                }
+            });
+        });
+    }
+
+    // =========================================================================
+    // 2. POSITION-SPECIFIC DRILL IMPROVEMENTS
+    // =========================================================================
     let mentorBoost = 0;
-    if (team && player.age <= 13) {
+    if (team && player.age <= 14) {
         const roster = getRosterObjects(team);
         const hasOlderMentor = roster.some(teammate =>
-            teammate.age >= 15 &&
+            teammate.age >= 16 &&
             getRelationshipLevel(player.id, teammate.id) >= relationshipLevels.GOOD_FRIEND.level
         );
         if (hasOlderMentor) mentorBoost = 1;
     }
 
-    // 1. Award higher baseline points so stars develop into the 70s-80s
-    let basePoints = player.age <= 14 ? getRandomInt(4, 7) : getRandomInt(2, 5);
+    let basePoints = player.age <= 14 ? getRandomInt(3, 5) : getRandomInt(2, 4);
 
-    // 2. Determine position-specific focus (prevents linemen from practicing throwing!)
     const pos = player.pos || estimateBestPosition(player);
     let focusGroup = [];
-    if (pos === 'QB') {
-        focusGroup = ['throwingAccuracy', 'playbookIQ', 'speed', 'consistency'];
-    } else if (pos === 'RB') {
-        focusGroup = ['speed', 'agility', 'strength', 'catchingHands', 'toughness'];
-    } else if (pos === 'WR') {
-        focusGroup = ['speed', 'catchingHands', 'agility', 'playbookIQ'];
-    } else if (pos === 'TE') {
-        focusGroup = ['catchingHands', 'blocking', 'strength', 'toughness'];
-    } else if (pos === 'OL') {
-        focusGroup = ['strength', 'blocking', 'toughness', 'playbookIQ']; // NO THROWING
-    } else if (pos === 'DL') {
-        focusGroup = ['strength', 'blockShedding', 'tackling', 'toughness'];
-    } else if (pos === 'LB') {
-        focusGroup = ['tackling', 'playbookIQ', 'speed', 'blockShedding'];
-    } else if (pos === 'DB') {
-        focusGroup = ['speed', 'coverage', 'agility', 'catchingHands', 'playbookIQ'];
-    }
+    if (pos === 'QB') focusGroup = ['throwingAccuracy', 'playbookIQ', 'speed', 'consistency'];
+    else if (pos === 'RB') focusGroup = ['speed', 'agility', 'strength', 'catchingHands', 'toughness'];
+    else if (pos === 'WR') focusGroup = ['speed', 'catchingHands', 'agility', 'playbookIQ'];
+    else if (pos === 'TE') focusGroup = ['catchingHands', 'blocking', 'strength', 'toughness'];
+    else if (pos === 'OL') focusGroup = ['strength', 'blocking', 'toughness', 'playbookIQ'];
+    else if (pos === 'DL') focusGroup = ['strength', 'blockShedding', 'tackling', 'toughness'];
+    else if (pos === 'LB') focusGroup = ['tackling', 'playbookIQ', 'speed', 'blockShedding'];
+    else if (pos === 'DB') focusGroup = ['speed', 'coverage', 'agility', 'catchingHands', 'playbookIQ'];
 
-    let totalUpgradePoints = Math.round((basePoints * potMod * ethicMod * experienceMod)) + mentorBoost;
+    let totalUpgradePoints = Math.round(basePoints * experienceMod) + mentorBoost;
 
+    // Slack-off penalty for older kids with terrible work ethic
     if (ethic < 25 && player.age >= 15 && Math.random() < 0.35) {
         const regressedAttr = getRandom(['speed', 'stamina', 'agility']);
         for (const cat in player.attributes) {
@@ -1092,13 +1116,8 @@ export function developPlayer(player, team = null) {
         }
     }
 
-    // General athletic fallback (does NOT include specialized skills like throwingAccuracy)
-    const athleticAttrs = ['speed', 'strength', 'agility', 'stamina', 'toughness', 'consistency'];
-
     for (let i = 0; i < totalUpgradePoints; i++) {
-        // 80% position-specific skills, 20% general athleticism
-        const pool = (Math.random() < 0.80 && focusGroup.length > 0) ? focusGroup : athleticAttrs;
-
+        const pool = focusGroup.length > 0 ? focusGroup : ['speed', 'strength', 'agility'];
         const attrToBoost = getRandom(pool);
 
         for (const category in player.attributes) {
@@ -1112,7 +1131,9 @@ export function developPlayer(player, team = null) {
         }
     }
 
-    // 3. FRAME MATURATION & GROWTH SPURTS
+    // =========================================================================
+    // 3. FRAME MATURATION & GROWTH SPURTS (Height & Weight)
+    // =========================================================================
     if (!player.attributes.physical) player.attributes.physical = {};
     const currHgt = player.attributes.physical.height || 66;
     const currWgt = player.attributes.physical.weight || 140;
@@ -1128,8 +1149,8 @@ export function developPlayer(player, team = null) {
     if (hitGrowthSpurt) {
         heightGain = getRandomInt(3, 5);
         weightGain = getRandomInt(18, 32);
-        
-        // Growth spurt benefits Strength, but causes temporary coordination/agility growing pains
+
+        // Growth spurt benefits Strength, but causes temporary growing pains on agility
         if (player.attributes.physical.strength) player.attributes.physical.strength = Math.min(99, player.attributes.physical.strength + 3);
         if (player.attributes.physical.agility && player.attributes.physical.agility > 30) player.attributes.physical.agility -= 1;
 
@@ -1160,11 +1181,11 @@ export function developPlayer(player, team = null) {
 
 export function advanceToOffseason() {
     if (!game || !game.teams || !game.players) return { retiredPlayers: [], hofInductees: [], developmentResults: [], leavingPlayers: [] };
-    
+
     // Initialize tracking arrays at the top so any offseason phase can safely push to them
-    const retiredPlayers = []; 
-    const hofInductees = []; 
-    const developmentResults = []; 
+    const retiredPlayers = [];
+    const hofInductees = [];
+    const developmentResults = [];
     const leavingPlayers = [];
     let totalVacancies = 0;
 
@@ -1178,7 +1199,7 @@ export function advanceToOffseason() {
 
     // Capture reverse standings for next draft before wins/losses reset
     const mainTeams = game.teams.filter(t => t.leagueType === 'main');
-    game.nextDraftOrder = [...mainTeams].sort((a, b) => 
+    game.nextDraftOrder = [...mainTeams].sort((a, b) =>
         (a.wins || 0) - (b.wins || 0) || (b.losses || 0) - (a.losses || 0)
     ).map(t => t.id);
 
@@ -1267,14 +1288,14 @@ export function advanceToOffseason() {
 
         // Check Season and Career Records
         if (!game.records) game.records = { game: {}, season: {}, career: {} };
-        
+
         const checkSeasonRec = (statKey, val) => {
             if (!game.records.season[statKey]) game.records.season[statKey] = { val: 0, holder: 'None', year: 0 };
             if (val > game.records.season[statKey].val) {
                 game.records.season[statKey] = { val, holder: player.name, year: game.year };
             }
         };
-        
+
         const checkCareerRec = (statKey, val) => {
             if (!game.records.career[statKey]) game.records.career[statKey] = { val: 0, holder: 'None' };
             if (val > game.records.career[statKey].val) {
@@ -1348,53 +1369,34 @@ export function advanceToOffseason() {
         if (player.age >= 19) {
             retiredPlayers.push(player);
             playerIsLeaving = true;
-            if (team && team.id === game.playerTeam?.id) addMessage("Player Retires", `${player.name} is moving on from the league.`);
+            if (team && team.id === game.playerTeam?.id) addMessage("Player Retires", `${player.name} graduated and hung up his cleats.`);
+
+            // Former Legend to Coach Pipeline
+            const newCoach = checkRetiredPlayerToCoach(player);
+            if (newCoach) {
+                if (!game.availableStaff) game.availableStaff = [];
+                game.availableStaff.unshift(newCoach);
+                addMessage("Sideline Legend", `🎓 <b>${player.name}</b> graduated from playing and has joined the neighborhood coaching market!`);
+            }
+
             if ((player.careerStats.touchdowns || 0) > 25) {
                 if (!game.hallOfFame) game.hallOfFame = [];
                 game.hallOfFame.push(player); hofInductees.push(player);
                 if (team && team.id === game.playerTeam?.id) addMessage("Hall of Fame!", `${player.name} inducted!`);
             }
-        } else if (team) {
-            // Roster specific morale checks
-            if (!player.expectations) player.expectations = { desiredRole: 'DEVELOPMENTAL', minTouchesPerGame: 0, happiness: 100 };
+        }
+        else if (team) {
+            // Realistic Contract Retention & Broken Promise Evaluation
+            const retentionCheck = evaluatePlayerRetention(player, team, snapsThisSeason);
 
-            const gamesPlayed = 9;
-            const snapsPerGame = snapsThisSeason / gamesPlayed;
-            const touchesPerGame =
-                ((player.seasonStats?.rushAttempts || 0) +
-                    (player.seasonStats?.targets || 0) +
-                    (player.seasonStats?.passAttempts || 0)) / gamesPlayed;
-
-            if (player.expectations.desiredRole === 'STARTER' && snapsPerGame < 35) {
-                player.expectations.happiness -= 30;
-            } else if (player.expectations.desiredRole === 'ROTATION' && snapsPerGame < 15) {
-                player.expectations.happiness -= 20;
-            }
-
-            if (touchesPerGame < player.expectations.minTouchesPerGame) {
-                player.expectations.happiness -= 25;
-            }
-
-            if (team.socialProfile && team.socialProfile.streetCred < 35) {
-                player.expectations.happiness -= 15;
-            } else if (team.socialProfile && team.socialProfile.streetCred > 65) {
-                player.expectations.happiness += 10;
-            }
-
-            const egoDrop = (player.personality?.ego || 50) > 70 ? 25 : 0;
-            if (player.expectations.happiness - egoDrop < 40) {
-                if ((player.personality?.loyalty || 50) < 40) {
-                    leavingPlayers.push({ player, reason: `Ego clash / Demanded transfer to a better situation`, teamName: team.name });
-                    playerIsLeaving = true;
-                    if (team.id === game.playerTeam?.id) {
-                        addMessage("Transfer Request", `😠 ${player.name} feels he is a superstar being held back. He has left the team!`);
-                    }
-                } else {
-                    if (team.id === game.playerTeam?.id && Math.random() < 0.3) {
-                        addMessage("Locker Room Drama", `⚠️ ${player.name} is extremely frustrated with his role but his loyalty is keeping him here... for now.`);
-                    }
+            if (!retentionCheck.willStay) {
+                leavingPlayers.push({ player, reason: retentionCheck.reason, teamName: team.name });
+                playerIsLeaving = true;
+                if (team.id === game.playerTeam?.id) {
+                    addMessage("Contract Departure", `🚶 <b>${player.name}</b> walked away to Free Agency: ${retentionCheck.reason}`);
                 }
             } else {
+                // Occasional life events (moved away, skateboard accident)
                 for (const event of departureEvents) {
                     if (Math.random() < event.chance) {
                         leavingPlayers.push({ player, reason: event.reason, teamName: team.name });
@@ -1595,7 +1597,13 @@ export function advanceToOffseason() {
     game.gameResults = [];
     game.breakthroughs = [];
     game.currentWeek = 0;
-    game.teams.forEach(t => assignTeamCaptain(t));
+    // AUTONOMOUS AI CAROUSEL: AI GMs manage staff, fire bad coaches, hire legends
+    game.teams.forEach(t => {
+        assignTeamCaptain(t);
+        if (!t.isPlayerControlled) {
+            aiManageTeamStaff(t, game);
+        }
+    });
 
     return { retiredPlayers, hofInductees, developmentResults, leavingPlayers };
 }
@@ -1633,7 +1641,7 @@ export function playerCut(playerId) {
     return { success: false, message: "Player not found on roster." };
 }
 
-export function playerSignFreeAgent(playerId) {
+export function playerSignFreeAgent(playerId, offer = {}) {
     if (!game || !game.playerTeam || !game.playerTeam.roster || !game.players) {
         return { success: false, message: "Game state error." };
     }
@@ -1644,18 +1652,33 @@ export function playerSignFreeAgent(playerId) {
     }
 
     const player = game.players.find(p => p && p.id === playerId && !p.teamId);
-    if (player) {
-        if (player.status?.duration > 0) {
-            return { success: false, message: `${player.name} is currently unavailable.` };
-        }
-        if (addPlayerToTeam(player, team)) {
-            aiSetDepthChart(team);
-            addMessage("Roster Move", `${player.name} has been signed to the team!`);
-            const fullRoster = getRosterObjects(team);
-            fullRoster.forEach(rp => { if (rp && rp.id !== player.id) improveRelationship(rp.id, player.id); });
-            return { success: true };
-        }
-        return { success: false, message: "Failed to add player to roster." };
+    if (!player) return { success: false, message: "Player not found." };
+    if (player.status?.duration > 0) return { success: false, message: `${player.name} is unavailable.` };
+
+    const negotiation = evaluatePlayerNegotiation(player, team, offer);
+
+    if (!negotiation.accepted) {
+        return {
+            success: false,
+            message: `✋ ${player.name} rejected your pitch: ${negotiation.reasons.join(' • ')}`
+        };
     }
-    return { success: false, message: "Player not found or not available." };
+
+    // Deduct tokens if offered
+    if (offer.tokensOffered > 0) {
+        team.socialProfile.favorTokens = Math.max(0, (team.socialProfile.favorTokens || 3) - offer.tokensOffered);
+    }
+
+    player.activePromise = {
+        role: offer.role || 'ROTATION',
+        promiseTouches: offer.promiseTouches || 'NORMAL'
+    };
+
+    if (addPlayerToTeam(player, team)) {
+        aiSetDepthChart(team);
+        addMessage("Free Agent Signed", `🤝 <b>${player.name}</b> accepted your contract pitch! (${negotiation.reasons.join(', ')})`);
+        return { success: true, message: `Signed ${player.name}!` };
+    }
+
+    return { success: false, message: "Failed to add player." };
 }

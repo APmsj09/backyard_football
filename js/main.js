@@ -692,7 +692,43 @@ function openPlayerCard(playerId) {
             </div>
         </div>
 
-        ${isMyTeam ? `<div class="mt-4 pt-4 border-t border-slate-200 flex justify-end"><button class="bg-rose-700 hover:bg-rose-800 text-white px-4 py-2 rounded-sm font-bold text-xs transition shadow-sm uppercase tracking-wider" onclick="app.cutPlayer('${player.id}')">Release Player</button></div>` : ''}
+        ${isMyTeam ? `
+            <div class="mt-4 pt-4 border-t border-slate-200 flex justify-end">
+                <button class="bg-rose-700 hover:bg-rose-800 text-white px-4 py-2 rounded-sm font-bold text-xs transition shadow-sm uppercase tracking-wider" onclick="app.cutPlayer('${player.id}')">Release Player</button>
+            </div>
+        ` : (!player.teamId ? `
+            <div class="mt-4 pt-4 border-t border-slate-200 bg-slate-50 p-3 rounded">
+                <h5 class="text-xs font-bold text-slate-800 uppercase tracking-wider mb-2">Offer Contract & Role Pitch</h5>
+                <div class="grid grid-cols-3 gap-2 text-xs mb-3">
+                    <div>
+                        <label class="block text-[10px] text-slate-500 font-bold uppercase">Role Promised</label>
+                        <select id="pitch-role" class="w-full p-1 border rounded bg-white font-bold text-slate-800">
+                            <option value="STARTER">Starter</option>
+                            <option value="ROTATION" selected>Rotation</option>
+                            <option value="BENCH">Reserve</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-[10px] text-slate-500 font-bold uppercase">Touches Promised</label>
+                        <select id="pitch-touches" class="w-full p-1 border rounded bg-white font-bold text-slate-800">
+                            <option value="NORMAL">Standard</option>
+                            <option value="FEATURED">Focal Option</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-[10px] text-slate-500 font-bold uppercase">Favor Tokens</label>
+                        <select id="pitch-tokens" class="w-full p-1 border rounded bg-white font-bold text-slate-800">
+                            <option value="0">0 Tokens</option>
+                            <option value="1">1 Token</option>
+                            <option value="2">2 Tokens</option>
+                        </select>
+                    </div>
+                </div>
+                <button class="w-full bg-emerald-700 hover:bg-emerald-800 text-white font-bold py-2 rounded text-xs uppercase tracking-wider" onclick="app.negotiatePlayer('${player.id}')">
+                    Submit Contract Pitch
+                </button>
+            </div>
+        ` : '')}
     `;
 
     UI.showModal('Scouting Report', modalHtml);
@@ -785,6 +821,16 @@ window.app = {
     startNewGame,
     handleLoadGame,
     handleLoadTestRoster,
+    negotiatePlayer: (id) => {
+        const role = document.getElementById('pitch-role')?.value || 'ROTATION';
+        const promiseTouches = document.getElementById('pitch-touches')?.value || 'NORMAL';
+        const tokensOffered = parseInt(document.getElementById('pitch-tokens')?.value || '0', 10);
+
+        const res = Game.playerSignFreeAgent(id, { role, promiseTouches, tokensOffered });
+        UI.hideModal();
+        alert(res.message);
+        document.dispatchEvent(new CustomEvent('refresh-ui'));
+    },
     handleSaveTestRoster,
     openPlayerCard,
     // handleConfirmTeam,

@@ -11,14 +11,31 @@ export const DRAFT_ROUNDS_ROOKIE = 3;
  * ceiling (potential), positional need, and coach preference.
  */
 export function calculateDraftValue(player, team) {
-    if (!player || !team || !team.coach) return 0;
+    if (!player || !team) return 0;
 
+    const scout = team.staff?.scout;
+    const coach = team.staff?.coach || team.coach;
+
+    // AI FOG OF WAR: The AI evaluates players through its Scout's imperfect eyes!
+    const scoutAccuracy = scout ? ((scout.ratings?.evalTechnique + scout.ratings?.evalPhysicals) / 200) : 0.5;
+    
+    // Add scouting noise/error based on scout rating (Elite scout = accurate; Bad scout = +/- 8 OVR error)
+    const noise = Math.round((Math.random() - 0.5) * (1.0 - scoutAccuracy) * 16);
     const pos = estimateBestPosition(player);
-    const ovr = calculateOverall(player, pos);
-    const coach = team.coach;
+    const perceivedOvr = Math.max(20, Math.min(99, calculateOverall(player, pos) + noise));
 
-    // 1. Current Ability (35%)
-    const abilityScore = ovr * 0.35;
+    // 1. Perceived Ability
+    let abilityScore = perceivedOvr * 0.35;
+
+    // SCOUT BIAS EFFECT: Scout's personal bias distorts player value
+    const scoutBias = scout?.biases?.scouting?.name;
+    if (scoutBias === 'Speed Chaser') {
+        const spd = player.attributes?.physical?.speed || 50;
+        if (spd > 70) abilityScore += (spd - 70) * 0.4; // AI overvalues speed
+    } else if (scoutBias === 'Character First') {
+        const ego = player.personality?.ego || 50;
+        if (ego > 70) abilityScore -= (ego - 70) * 0.5; // AI avoids divas
+    }
 
     // 2. Potential / Ceiling (30%)
     const potentialMap = { 'A': 95, 'B': 82, 'C': 68, 'D': 52, 'F': 35 };

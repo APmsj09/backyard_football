@@ -151,11 +151,17 @@ export function determinePlayCall(offense, defense, down, yardsToGo, ballOn, sco
     const isDesperation = drivesRemaining <= 2 && scoreDiff <= -8;
     const isChewClock = drivesRemaining <= 2 && scoreDiff >= 8;
 
-    // Base run probability increased so backyard teams rely more on the ground game
-    let runProbability = 0.55;
-
-    if (coach?.type === 'Ground and Pound' || coach?.type === 'Trench Warfare') runProbability += 0.20;
-    else if (coach?.type === 'Air Raid') runProbability -= 0.20;
+    // Base run probability influenced by Head Coach tactical bias
+    let runProbability = 0.55; 
+    
+    const tacticalBias = offense.staff?.coach?.biases?.tactical;
+    if (tacticalBias?.runModifier) {
+        runProbability += tacticalBias.runModifier;
+    } else if (coach?.type === 'Ground and Pound' || coach?.type === 'Trench Warfare') {
+        runProbability += 0.20;
+    } else if (coach?.type === 'Air Raid') {
+        runProbability -= 0.20;
+    }
 
     // Normal downs/distances
     if (isShort) runProbability += 0.30;
@@ -338,6 +344,7 @@ export function determineDefensivePlayCall(defense, offense, down, yardsToGo, ba
 
 export function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, context, options, isLive = false) {
     const { gameLog = [], ballOn, ballHash = 'M', down, yardsToGo, offenseScore = 0, defenseScore = 0, timeRemaining = 420, quarter = 1 } = context;
+    const scoreDiff = offenseScore - defenseScore;
 
     const playResult = {
         yards: 0, outcome: 'live', possessionChange: false,
@@ -605,10 +612,14 @@ export function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey
             playState.activePlayers.forEach(p => {
                 const player = getPlayer(p.id);
                 if (player) {
+                    const team = game?.teams?.find(t => t.id === player.teamId);
+                    const trainerConditioning = team?.staff?.trainer?.ratings?.conditioning || 50;
+                    const conditioningMod = Math.max(0.75, 1.25 - (trainerConditioning / 100)); // Good trainer cuts fatigue accumulation
+
                     const stamina = player.attributes?.physical?.stamina || 50;
                     const effortMultiplier = (p.action.includes('run') || p.action.includes('rush') || p.action === 'pursuit' || p.action.includes('route')) ? 1.0 : 0.4;
                     const staminaFactor = (150 - stamina) / 100;
-                    const drain = 0.03 * effortMultiplier * staminaFactor;
+                    const drain = 0.03 * effortMultiplier * staminaFactor * conditioningMod;
                     player.fatigue = Math.min(100, (player.fatigue || 0) + drain);
                     p.fatigueModifier = Math.max(0.70, 1.0 - (player.fatigue / 100) * 0.30);
                 }

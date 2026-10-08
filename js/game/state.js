@@ -105,7 +105,15 @@ export function getScoutedPlayerInfo(player, relationshipLevelNum) {
     if (!player) return null;
 
     const levelInfo = Object.values(relationshipLevels).find(rl => rl.level === relationshipLevelNum) || relationshipLevels.STRANGER;
-    const accuracy = levelInfo.scoutAccuracy;
+    let accuracy = levelInfo.scoutAccuracy;
+
+    // Park Scout Rating adjusts scouting clarity (+/- 15%)
+    const userScout = game?.playerTeam?.staff?.scout;
+    if (userScout) {
+        const evalScore = (userScout.ratings?.evalTechnique + userScout.ratings?.evalPhysicals) / 200;
+        accuracy = Math.min(1.0, Math.max(0.2, accuracy + (evalScore - 0.5) * 0.3));
+    }
+
     const scoutedPlayer = JSON.parse(JSON.stringify(player));
     scoutedPlayer.relationshipName = levelInfo.name;
     scoutedPlayer.relationshipColor = levelInfo.color;
