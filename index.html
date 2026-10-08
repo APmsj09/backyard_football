@@ -238,30 +238,53 @@
                 </div>
 
                 <!-- Right Column (4 cols): Detailed Dossier & War Room -->
-                <div class="lg:col-span-4 flex flex-col gap-3 min-h-0">
-                    <!-- Scouting Dossier Card -->
-                    <div class="bg-slate-50 rounded-sm shadow-sm p-3.5 border border-slate-300 flex-shrink-0 flex flex-col">
+                <div class="lg:col-span-4 flex flex-col gap-2.5 min-h-0">
+                    <!-- Scouting Dossier Card (Compact with internal tabs) -->
+                    <div class="bg-slate-50 rounded-sm shadow-sm p-3 border border-slate-300 shrink-0 flex flex-col">
                         <div class="flex justify-between items-center mb-1.5 border-b border-slate-200 pb-1">
-                            <h4 class="text-xs font-bold uppercase tracking-widest text-slate-600">Scouting Dossier</h4>
+                            <div class="flex items-center gap-1.5">
+                                <h4 class="text-xs font-bold uppercase tracking-widest text-slate-700">Prospect Scout</h4>
+                                <div id="dossier-subtabs" class="flex gap-1 text-[10px] font-bold">
+                                    <button class="dossier-tab-btn active px-1.5 py-0.5 rounded bg-slate-900 text-white" data-dtab="overview" onclick="window.app_switchDossierTab('overview')">Card</button>
+                                    <button class="dossier-tab-btn px-1.5 py-0.5 rounded bg-slate-200 text-slate-700 hover:bg-slate-300" data-dtab="matrix" onclick="window.app_switchDossierTab('matrix')">Suitability</button>
+                                    <button class="dossier-tab-btn px-1.5 py-0.5 rounded bg-slate-200 text-slate-700 hover:bg-slate-300" data-dtab="bio" onclick="window.app_switchDossierTab('bio')">Lore</button>
+                                </div>
+                            </div>
                             <span id="dossier-est-pos" class="text-[10px] font-bold text-slate-500"></span>
                         </div>
-                        <div id="selected-player-card" class="min-h-[220px]">
-                            <p class="text-slate-400 text-xs italic text-center py-12">Select a prospect from the board to examine their scouting report.</p>
+                        <div id="selected-player-card">
+                            <p class="text-slate-400 text-xs italic text-center py-4">Select a prospect from the board to examine report.</p>
                         </div>
-                        <button id="draft-player-btn" class="btn bg-emerald-700 hover:bg-emerald-800 text-white w-full font-bold py-2.5 px-4 rounded mt-2 shadow-sm disabled:bg-slate-200 disabled:border-slate-300 disabled:text-slate-400 disabled:shadow-none disabled:cursor-not-allowed transition-all uppercase tracking-wider border border-emerald-900 text-xs" disabled>
+                        <button id="draft-player-btn" class="btn bg-emerald-700 hover:bg-emerald-800 text-white w-full font-bold py-2 px-3 rounded mt-2 shadow-sm disabled:bg-slate-200 disabled:border-slate-300 disabled:text-slate-400 disabled:shadow-none disabled:cursor-not-allowed transition-all uppercase tracking-wider border border-emerald-900 text-xs" disabled>
                             Draft Player
                         </button>
                     </div>
 
-                    <!-- Your Roster & Sticky Needs Radar -->
+                    <!-- Team War Room (Tabbed View: Full Roster vs. 2-Way Depth & Quality) -->
                     <div class="bg-white rounded-sm shadow-sm flex-grow flex flex-col overflow-hidden border border-slate-300 min-h-0">
-                        <div class="flex justify-between items-center p-2.5 border-b bg-slate-50 shrink-0">
-                            <h4 class="font-bold text-xs text-slate-700 uppercase tracking-wider">Your Roster</h4>
-                            <span id="roster-count" class="bg-slate-200 text-slate-700 px-2 py-0.5 rounded text-xs font-mono font-bold">0/18</span>
+                        <div class="flex justify-between items-center p-2 border-b bg-slate-100 shrink-0">
+                            <div class="flex items-center gap-1">
+                                <button id="draft-tab-roster-btn" class="px-2.5 py-1 text-xs font-bold rounded bg-slate-900 text-white transition-all shadow-sm" onclick="window.app_switchDraftTeamTab('roster')">
+                                    📋 Roster (<span id="roster-count">0/18</span>)
+                                </button>
+                                <button id="draft-tab-needs-btn" class="px-2.5 py-1 text-xs font-bold rounded bg-slate-200 text-slate-700 hover:bg-slate-300 transition-all" onclick="window.app_switchDraftTeamTab('needs')">
+                                    ⚡ 2-Way Depth & Quality
+                                </button>
+                            </div>
+                            <button id="draft-popout-btn" class="text-slate-600 hover:text-slate-900 bg-white border border-slate-300 px-2 py-0.5 rounded text-[11px] font-bold flex items-center gap-1 shadow-sm transition" title="Open full-screen roster and depth analysis" onclick="window.app_openDraftTeamModal()">
+                                <span>⛶</span> <span class="hidden sm:inline">Expand</span>
+                            </button>
                         </div>
-                        <ul id="draft-roster-list" class="divide-y divide-slate-100 text-xs overflow-y-auto flex-grow p-0"></ul>
-                        <!-- Sticky Needs Radar -->
-                        <div id="roster-summary" class="p-2.5 border-t border-slate-200 bg-slate-50 text-xs shrink-0"></div>
+
+                        <!-- Pane 1: Full Height Scrollable Roster (Unsquished!) -->
+                        <div id="draft-roster-pane" class="flex-grow overflow-y-auto min-h-0">
+                            <ul id="draft-roster-list" class="divide-y divide-slate-100 text-xs p-0"></ul>
+                        </div>
+
+                        <!-- Pane 2: Two-Way Positional Rooms & Quality Breakdown -->
+                        <div id="draft-needs-pane" class="hidden flex-grow overflow-y-auto p-2 bg-slate-50 min-h-0">
+                            <div id="roster-summary" class="space-y-2"></div>
+                        </div>
                     </div>
                 </div>
             </div>

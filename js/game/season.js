@@ -1458,8 +1458,8 @@ export function advanceToOffseason() {
             }
         }
 
+        player.seasonStats = { receptions: 0, recYards: 0, passYards: 0, rushYards: 0, touchdowns: 0, tackles: 0, sacks: 0, interceptions: 0, passAttempts: 0, passCompletions: 0, interceptionsThrown: 0 };
         if (!playerIsLeaving) {
-            player.seasonStats = { receptions: 0, recYards: 0, passYards: 0, rushYards: 0, touchdowns: 0, tackles: 0, sacks: 0, interceptions: 0, passAttempts: 0, passCompletions: 0, interceptionsThrown: 0 };
             if (!player.status) player.status = {};
             player.status = { type: 'healthy', description: '', duration: 0 };
         } else {
@@ -1540,10 +1540,12 @@ export function advanceToOffseason() {
             kid.age++;
             kid.careerStats.seasonsPlayed = (kid.careerStats.seasonsPlayed || 0) + 1;
 
+            // Reset season stats for all returning youth players
+            kid.seasonStats = { receptions: 0, recYards: 0, passYards: 0, rushYards: 0, touchdowns: 0, tackles: 0, sacks: 0, interceptions: 0, passAttempts: 0, passCompletions: 0, interceptionsThrown: 0 };
+
             // Pee-Wee graduates at age 12 into the Rookie Draft
             if (kid.age >= 12) {
                 kid.teamId = null;
-                kid.seasonStats = {};
                 kid.careerStats.snapsThisSeason = 0;
 
                 // LOGIC: Does the 12-year-old declare for the draft or wait as a street walk-on?

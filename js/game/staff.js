@@ -75,6 +75,7 @@ export function initializeTeamStaff(team) {
         trainer: generateStaffMember('trainer', 28, 55)
     };
     Object.values(team.staff).forEach(s => { if (s) s.teamId = team.id; });
+    team.coach = team.staff.coach;
 }
 
 export function generateStaffPool(count = 8) {

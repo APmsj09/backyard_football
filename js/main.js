@@ -143,19 +143,19 @@ function promptCoachCreation(teamId) {
 
     const modalHtml = `
         <div class="space-y-4 text-left">
-            <p class="text-sm text-slate-600">You are taking over <strong>${team.name}</strong>. Time to introduce yourself to the players.</p>
+            <p class="text-sm text-slate-600">You are taking over <strong>${team.name}</strong> as General Manager. Set your front-office identity.</p>
             
             <div>
-                <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Coach Name</label>
-                <input type="text" id="new-coach-name" class="w-full p-2 border border-slate-300 rounded outline-none focus:border-amber-500" placeholder="e.g. Coach Gordon" value="Coach">
+                <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">General Manager Name (You)</label>
+                <input type="text" id="new-coach-name" class="w-full p-2 border border-slate-300 rounded outline-none focus:border-amber-500" placeholder="e.g. GM Gordon" value="GM">
             </div>
 
             <div>
-                <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Coaching Style</label>
+                <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Management Philosophy</label>
                 <select id="new-coach-style" class="w-full p-2 border border-slate-300 rounded outline-none focus:border-amber-500">
                     ${archetypeOptions}
                 </select>
-                <p class="text-[10px] text-slate-500 mt-1">Affects which players want to join your team and how they develop.</p>
+                <p class="text-[10px] text-slate-500 mt-1">Sets your front-office philosophy and organizational reputation.</p>
             </div>
 
             <div class="grid grid-cols-2 gap-4">
@@ -176,8 +176,8 @@ function promptCoachCreation(teamId) {
         </div>
     `;
 
-    UI.showModal("Create Your Coach", modalHtml, () => {
-        const name = document.getElementById('new-coach-name').value || 'Coach';
+    UI.showModal("General Manager Profile", modalHtml, () => {
+        const name = document.getElementById('new-coach-name').value || 'GM';
         const style = document.getElementById('new-coach-style').value;
         const off = document.getElementById('new-coach-offense').value;
         const def = document.getElementById('new-coach-defense').value;
@@ -194,12 +194,6 @@ function confirmFranchiseTakeover(teamId, coachDetails) {
     gameState.playerTeam = team;
 
     if (coachDetails) {
-        let baseCoach = coachPersonalities.find(c => c.type === coachDetails.style) || coachPersonalities[0];
-        const customCoach = JSON.parse(JSON.stringify(baseCoach));
-        customCoach.name = coachDetails.name;
-        customCoach.preferredOffense = coachDetails.off;
-        customCoach.preferredDefense = coachDetails.def;
-        team.coach = customCoach;
         team.formations.offense = coachDetails.off;
         team.formations.defense = coachDetails.def;
 
@@ -210,14 +204,19 @@ function confirmFranchiseTakeover(teamId, coachDetails) {
             team.staff.gm.biases.personality = { name: coachDetails.style, desc: `Prefers ${coachDetails.style} management style.` };
             team.staff.gm.biases.tactical = { name: coachDetails.off, desc: `Favors ${coachDetails.off} concepts.` };
         }
+
+        // Keep the team's existing head coach intact; do NOT overwrite with user's name
         if (team.staff.coach) {
-            team.staff.coach.name = coachDetails.name;
+            team.coach = team.staff.coach;
         }
 
         Game.rebuildDepthChartFromOrder(team);
     }
 
-    // Initialize Year 5 Draft for the human player
+    // Initialize Year 5 Draft for the human player and wipe any historical stats for the new season
+    gameState.players.forEach(p => {
+        p.seasonStats = { receptions: 0, recYards: 0, passYards: 0, rushYards: 0, touchdowns: 0, tackles: 0, sacks: 0, interceptions: 0, passAttempts: 0, passCompletions: 0, interceptionsThrown: 0 };
+    });
     Game.setupDraft();
     gameState.draftCompleted = false;
 

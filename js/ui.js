@@ -3,7 +3,7 @@ import {
     saveGameState, getRelationshipLevel, getScoutedPlayerInfo, getGameState,
     getRosterObjects, getPlayer, rebuildDepthChartFromOrder, assignPlayerToSlot
 } from './game.js';
-import { offenseFormations, defenseFormations, relationshipLevels } from './data.js';
+import { offenseFormations, defenseFormations, relationshipLevels, firstNames, lastNames } from './data.js';
 import { positionOverallWeights, estimateBestPosition, calculateOverall, getProspectSignatureSkills } from './game/player.js';
 import { formatHeight } from './utils.js';
 import { drawFieldVisualization, formatGameClock, showPlayOverlay } from './ui/field_visualizer.js';
@@ -613,10 +613,21 @@ export function updateSelectedPlayerRow(newSelectedId) {
     document.querySelectorAll('.draft-player-row').forEach(r => r.classList.toggle('bg-amber-100', r.dataset.playerId === newSelectedId));
 }
 
+let activeDossierTab = 'overview';
+window.app_switchDossierTab = function(tab) {
+    activeDossierTab = tab;
+    document.querySelectorAll('.dossier-tab-btn').forEach(btn => {
+        const isActive = btn.dataset.dtab === tab;
+        btn.className = `dossier-tab-btn px-1.5 py-0.5 rounded text-[10px] font-bold transition ${isActive ? 'bg-slate-900 text-white' : 'bg-slate-200 text-slate-700 hover:bg-slate-300'}`;
+    });
+    document.querySelectorAll('.dossier-pane').forEach(p => p.classList.add('hidden'));
+    document.getElementById(`dossier-pane-${tab}`)?.classList.remove('hidden');
+};
+
 export function renderSelectedPlayerCard(player, gameState) {
     if (!elements.selectedPlayerCard) return;
     if (!player || !gameState?.playerTeam) {
-        elements.selectedPlayerCard.innerHTML = `<p class="text-slate-400 text-xs italic text-center py-12">Select a prospect from the board to examine their scouting report.</p>`;
+        elements.selectedPlayerCard.innerHTML = `<p class="text-slate-400 text-xs italic text-center py-4">Select a prospect from the board to examine report.</p>`;
         if (elements.draftPlayerBtn) elements.draftPlayerBtn.disabled = true;
         return;
     }
@@ -628,28 +639,21 @@ export function renderSelectedPlayerCard(player, gameState) {
     const pos = scouted.pos || estimateBestPosition(scouted);
     const ovr = calculateOverall(scouted, pos);
 
-    // Teammate Social Radar
     const bestFriend = playerRoster.find(r => r.id === player.social?.bestFriendId);
     const friendsOnTeam = playerRoster.filter(r => player.social?.goodFriendIds?.includes(r.id));
     const rivalOnTeam = playerRoster.find(r => player.social?.rivalIds?.includes(r.id));
 
     let socialBadgeHtml = '';
-    if (bestFriend) {
-        socialBadgeHtml += `<span class="bg-amber-100 text-amber-800 border border-amber-300 px-1.5 py-0.5 rounded text-[10px] font-bold">🤝 BFF: ${bestFriend.name.split(' ')[0]}</span>`;
-    }
-    if (friendsOnTeam.length > 0) {
-        socialBadgeHtml += `<span class="bg-emerald-100 text-emerald-800 border border-emerald-300 px-1.5 py-0.5 rounded text-[10px] font-bold">Friends: ${friendsOnTeam.length}</span>`;
-    }
-    if (rivalOnTeam) {
-        socialBadgeHtml += `<span class="bg-rose-100 text-rose-800 border border-rose-300 px-1.5 py-0.5 rounded text-[10px] font-bold">⚠️ Rival: ${rivalOnTeam.name.split(' ')[0]}</span>`;
-    }
+    if (bestFriend) socialBadgeHtml += `<span class="bg-amber-100 text-amber-800 border border-amber-300 px-1 py-0.5 rounded text-[9px] font-bold">🤝 BFF: ${bestFriend.name.split(' ')[0]}</span>`;
+    if (friendsOnTeam.length > 0) socialBadgeHtml += `<span class="bg-emerald-100 text-emerald-800 border border-emerald-300 px-1 py-0.5 rounded text-[9px] font-bold">Friends: ${friendsOnTeam.length}</span>`;
+    if (rivalOnTeam) socialBadgeHtml += `<span class="bg-rose-100 text-rose-800 border border-rose-300 px-1 py-0.5 rounded text-[9px] font-bold">⚠️ Rival</span>`;
 
     const workEthic = player.personality?.workEthic || 50;
     const ego = player.personality?.ego || 50;
     const clique = player.personality?.clique || 'Regular';
 
     const positions = ['QB', 'RB', 'WR', 'TE', 'OL', 'DL', 'LB', 'DB'];
-    let overallsHtml = '<div class="grid grid-cols-4 gap-1 text-center mt-2">';
+    let overallsHtml = '<div class="grid grid-cols-4 gap-1 text-center">';
     positions.forEach(pKey => {
         const pOvr = calculateOverall(scouted, pKey);
         const isBest = pKey === pos;
@@ -662,38 +666,39 @@ export function renderSelectedPlayerCard(player, gameState) {
     overallsHtml += '</div>';
 
     elements.selectedPlayerCard.innerHTML = `
-        <div>
-            <!-- Top Identity Header -->
-            <div class="flex justify-between items-start mb-2">
-                <div>
-                    <h3 class="font-black text-base text-slate-900 leading-tight">${scouted.name}</h3>
-                    <p class="text-xs text-slate-500 mt-0.5">${scouted.age}yo • ${formatHeight(scouted.attributes?.physical?.height)} • ${scouted.attributes?.physical?.weight} lbs</p>
+        <div class="flex flex-col">
+            <!-- Compact Header -->
+            <div class="flex justify-between items-center mb-1.5 pb-1 border-b border-slate-200">
+                <div class="truncate pr-1">
+                    <h3 class="font-black text-sm text-slate-900 truncate leading-tight">${scouted.name}</h3>
+                    <p class="text-[10px] text-slate-500 font-mono">${scouted.age}yo • ${formatHeight(scouted.attributes?.physical?.height)} • ${scouted.attributes?.physical?.weight}#</p>
                 </div>
-                <div class="text-right bg-slate-900 text-white px-2.5 py-1 rounded">
-                    <span class="text-[9px] uppercase tracking-wider block text-slate-400">${pos} OVR</span>
-                    <span class="text-xl font-black">${ovr}</span>
+                <div class="text-right bg-slate-900 text-white px-2 py-0.5 rounded shrink-0">
+                    <span class="text-[8px] uppercase tracking-wider block text-slate-400">${pos}</span>
+                    <span class="text-base font-black leading-none">${ovr}</span>
                 </div>
             </div>
 
-            <!-- Personality & Clique Bar -->
-            <div class="flex flex-wrap items-center gap-1.5 mb-2 text-[10px]">
-                <span class="bg-amber-100 text-amber-900 font-black px-1.5 py-0.5 rounded border border-amber-300">Style: ${player.archetypeName || 'Athlete'}</span>
-                <span class="bg-indigo-100 text-indigo-900 font-bold px-1.5 py-0.5 rounded border border-indigo-200">Clique: ${clique}</span>
-                <span class="bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded font-mono">Ethic: <b>${workEthic}</b></span>
-                <span class="${ego > 70 ? 'bg-rose-100 text-rose-800 font-bold' : 'bg-slate-100 text-slate-700'} px-1.5 py-0.5 rounded font-mono">Ego: <b>${ego}</b></span>
-                ${socialBadgeHtml}
+            <!-- Tab 1: Overview Pane (Clean & Compact) -->
+            <div id="dossier-pane-overview" class="dossier-pane ${activeDossierTab === 'overview' ? '' : 'hidden'} text-[10px] space-y-1.5">
+                <div class="flex flex-wrap items-center gap-1">
+                    <span class="bg-amber-100 text-amber-900 font-bold px-1.5 py-0.5 rounded border border-amber-200">Style: ${player.archetypeName || 'Athlete'}</span>
+                    <span class="bg-indigo-100 text-indigo-900 font-bold px-1.5 py-0.5 rounded border border-indigo-200">${clique}</span>
+                    <span class="bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded font-mono">Ethic: <b>${workEthic}</b></span>
+                    <span class="${ego > 70 ? 'bg-rose-100 text-rose-800 font-bold' : 'bg-slate-100 text-slate-700'} px-1.5 py-0.5 rounded font-mono">Ego: <b>${ego}</b></span>
+                    ${socialBadgeHtml}
+                </div>
             </div>
 
-            <!-- Scouting Bio & Lore Box -->
-            ${player.bio ? `
-            <div class="p-2 bg-amber-50/70 border border-amber-200 rounded text-[11px] text-slate-700 leading-relaxed italic mb-2">
-                <span class="font-bold uppercase tracking-wider text-[9px] text-amber-800 not-italic block mb-0.5">Scouting Lore & Reputation</span>
-                "${player.bio}"
-            </div>` : ''}
+            <!-- Tab 2: Positional Suitability Matrix -->
+            <div id="dossier-pane-matrix" class="dossier-pane ${activeDossierTab === 'matrix' ? '' : 'hidden'}">
+                ${overallsHtml}
+            </div>
 
-            <!-- Positional Overalls Matrix -->
-            <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Positional Suitability</span>
-            ${overallsHtml}
+            <!-- Tab 3: Bio & Lore -->
+            <div id="dossier-pane-bio" class="dossier-pane ${activeDossierTab === 'bio' ? '' : 'hidden'} text-[11px] text-slate-700 italic bg-amber-50/70 p-2 rounded border border-amber-200 max-h-24 overflow-y-auto">
+                "${player.bio || 'A dependable playground competitor.'}"
+            </div>
         </div>
     `;
 }
@@ -702,52 +707,199 @@ export function resetDraftWatchlist() {
     draftWatchlist.clear();
 }
 
+let activeDraftTeamTab = 'roster';
+
+window.app_switchDraftTeamTab = function(tab) {
+    activeDraftTeamTab = tab;
+    const rosterBtn = document.getElementById('draft-tab-roster-btn');
+    const needsBtn = document.getElementById('draft-tab-needs-btn');
+    const rosterPane = document.getElementById('draft-roster-pane');
+    const needsPane = document.getElementById('draft-needs-pane');
+
+    if (tab === 'roster') {
+        rosterBtn?.classList.add('bg-slate-900', 'text-white', 'shadow-sm');
+        rosterBtn?.classList.remove('bg-slate-200', 'text-slate-700');
+        needsBtn?.classList.add('bg-slate-200', 'text-slate-700');
+        needsBtn?.classList.remove('bg-slate-900', 'text-white', 'shadow-sm');
+        rosterPane?.classList.remove('hidden');
+        needsPane?.classList.add('hidden');
+    } else {
+        needsBtn?.classList.add('bg-slate-900', 'text-white', 'shadow-sm');
+        needsBtn?.classList.remove('bg-slate-200', 'text-slate-700');
+        rosterBtn?.classList.add('bg-slate-200', 'text-slate-700');
+        rosterBtn?.classList.remove('bg-slate-900', 'text-white', 'shadow-sm');
+        needsPane?.classList.remove('hidden');
+        rosterPane?.classList.add('hidden');
+    }
+};
+
+function calculateTwoWayDepthAnalysis(roster) {
+    const positions = ['QB', 'RB', 'WR', 'TE', 'OL', 'DL', 'LB', 'DB'];
+    const idealCounts = { QB: 1, RB: 2, WR: 3, TE: 1, OL: 3, DL: 3, LB: 2, DB: 3 };
+
+    return positions.map(pos => {
+        const ideal = idealCounts[pos];
+        const viables = roster.filter(p => Game.isPlayerViableForPosition(p, pos));
+
+        const evaluated = viables.map(p => ({
+            player: p,
+            ovr: calculateOverall(p, pos),
+            isPrimary: (p.pos || estimateBestPosition(p)) === pos
+        })).sort((a, b) => b.ovr - a.ovr);
+
+        const primaryCount = evaluated.filter(e => e.isPrimary).length;
+        const twoWayCount = evaluated.length - primaryCount;
+
+        const topOvr = evaluated.length > 0 ? evaluated[0].ovr : 0;
+        const starterGroup = evaluated.slice(0, ideal);
+        const starterAvg = starterGroup.length > 0
+            ? Math.round(starterGroup.reduce((sum, item) => sum + item.ovr, 0) / starterGroup.length)
+            : 0;
+
+        let status = 'Empty';
+        let badgeColor = 'bg-rose-100 text-rose-800 border-rose-300';
+        if (evaluated.length >= ideal && starterAvg >= 65) {
+            status = 'Solid';
+            badgeColor = 'bg-emerald-100 text-emerald-800 border-emerald-300';
+        } else if (evaluated.length >= ideal && starterAvg >= 52) {
+            status = 'Average';
+            badgeColor = 'bg-blue-100 text-blue-800 border-blue-300';
+        } else if (evaluated.length > 0) {
+            status = 'Needs Upgrade';
+            badgeColor = 'bg-amber-100 text-amber-800 border-amber-300';
+        }
+
+        return {
+            pos, ideal, viableCount: evaluated.length,
+            primaryCount, twoWayCount, topOvr, starterAvg,
+            status, badgeColor, players: evaluated
+        };
+    });
+}
+
 export function renderPlayerRoster(playerTeam) {
     if (!elements.rosterCount || !elements.draftRosterList || !playerTeam) return;
     const roster = getUIRosterObjects(playerTeam);
     elements.rosterCount.textContent = `${roster.length}/18`;
 
+    // 1. Render Unsquished Full-Height Roster List
     elements.draftRosterList.innerHTML = roster.map(p => {
         const pos = p.pos || estimateBestPosition(p);
         const ovr = calculateOverall(p, pos);
-        return `
-        <li class="py-1 px-3 flex justify-between items-center text-xs hover:bg-slate-50 transition">
-            <span class="font-semibold text-slate-800 truncate pr-2">${p.name}</span>
-            <span class="font-mono text-[10px] font-bold text-slate-600 bg-slate-100 px-1 rounded">${pos} ${ovr}</span>
-        </li>`;
-    }).join('') || '<li class="p-4 text-center text-slate-400 text-xs italic">No players drafted yet.</li>';
 
-    // ZenGM Style Positional Needs Radar
+        // Detect secondary two-way capabilities
+        const secPositions = ['QB', 'RB', 'WR', 'TE', 'OL', 'DL', 'LB', 'DB'].filter(op =>
+            op !== pos && Game.isPlayerViableForPosition(p, op)
+        );
+        const twoWayBadge = secPositions.length > 0
+            ? `<span class="text-[9px] bg-slate-100 text-slate-500 font-bold px-1 rounded ml-1" title="Viable at: ${secPositions.join(', ')}">2W: ${secPositions[0]}</span>`
+            : '';
+
+        return `
+        <li class="py-1.5 px-3 flex justify-between items-center text-xs hover:bg-slate-50 transition cursor-pointer" onclick="app.openPlayerCard('${p.id}')">
+            <div class="flex items-center gap-1.5 truncate pr-2">
+                <span class="text-slate-400 font-mono text-[10px] w-4">#${p.number || '--'}</span>
+                <span class="font-semibold text-slate-900 truncate">${p.name}</span>
+                <span class="text-[10px] text-slate-400 font-mono">(${p.age}yo)</span>
+                ${twoWayBadge}
+            </div>
+            <div class="text-right shrink-0">
+                <span class="font-bold text-[10px] bg-slate-100 text-slate-700 px-1 rounded mr-1">${pos}</span>
+                <span class="font-mono text-xs font-black text-slate-900">${ovr}</span>
+            </div>
+        </li>`;
+    }).join('') || '<li class="p-6 text-center text-slate-400 text-xs italic">No players drafted yet.</li>';
+
+    // 2. Render Two-Way Positional Rooms & Quality Radar
     const summaryEl = document.getElementById('roster-summary');
     if (summaryEl) {
-        const counts = { QB: 0, RB: 0, WR: 0, TE: 0, OL: 0, DL: 0, LB: 0, DB: 0 };
-        const ideal = { QB: 1, RB: 2, WR: 3, TE: 1, OL: 3, DL: 3, LB: 2, DB: 3 };
-
-        roster.forEach(p => {
-            const pos = p.pos || estimateBestPosition(p);
-            if (counts[pos] !== undefined) counts[pos]++;
-        });
+        const analysis = calculateTwoWayDepthAnalysis(roster);
 
         summaryEl.innerHTML = `
-            <div class="border-t border-slate-200 pt-2">
-                <span class="text-[10px] font-bold uppercase tracking-wider text-slate-500 block mb-1">Roster Needs Radar</span>
-                <div class="grid grid-cols-4 gap-1 text-[10px] font-mono text-center">
-                    ${Object.entries(counts).map(([pos, count]) => {
-            const target = ideal[pos];
-            const isNeed = count < target;
-            const isFull = count >= target;
-            const bg = isNeed ? (count === 0 ? 'bg-rose-100 text-rose-800 border-rose-300 font-bold' : 'bg-amber-50 text-amber-800 border-amber-200') : 'bg-slate-100 text-slate-500 border-slate-200';
-            return `
-                        <div class="border p-1 rounded ${bg}" title="${count} of ${target} ideal">
-                            <span class="block text-[9px] font-sans font-bold">${pos}</span>
-                            <span>${count}/${target}</span>
+            <div class="space-y-1.5">
+                <div class="flex justify-between items-center mb-1">
+                    <span class="text-[10px] font-black uppercase tracking-wider text-slate-600">Unit Strength & 2-Way Depth</span>
+                    <span class="text-[10px] text-slate-400 font-mono">Ideal vs. Viable (Avg Starter OVR)</span>
+                </div>
+                <div class="grid grid-cols-2 gap-1.5 font-mono text-xs">
+                    ${analysis.map(item => {
+                        return `
+                        <div class="bg-white border p-1.5 rounded flex flex-col justify-between shadow-2xl hover:border-slate-400 transition" title="${item.viableCount} viable (${item.primaryCount} natural, ${item.twoWayCount} two-way). Top OVR: ${item.topOvr}">
+                            <div class="flex justify-between items-center">
+                                <span class="font-black text-slate-900 font-sans">${item.pos}</span>
+                                <span class="text-[9px] font-black uppercase px-1 rounded border ${item.badgeColor}">${item.status}</span>
+                            </div>
+                            <div class="flex justify-between items-baseline mt-1 text-[11px]">
+                                <span class="text-slate-500 font-bold">${item.viableCount}/${item.ideal} <span class="text-[9px] font-normal text-slate-400">(${item.twoWayCount > 0 ? `+${item.twoWayCount} 2W` : 'nat'})</span></span>
+                                <span class="font-black text-slate-800">${item.starterAvg ? `${item.starterAvg} avg` : '--'}</span>
+                            </div>
                         </div>`;
-        }).join('')}
+                    }).join('')}
                 </div>
             </div>
         `;
     }
 }
+
+// 3. Pop-Out Modal: Full Franchise Depth & Two-Way Analysis Window
+window.app_openDraftTeamModal = function() {
+    const gs = getGameState();
+    if (!gs?.playerTeam) return;
+
+    const roster = getUIRosterObjects(gs.playerTeam);
+    const analysis = calculateTwoWayDepthAnalysis(roster);
+
+    const modalHtml = `
+        <div class="space-y-4">
+            <!-- Strategic Header -->
+            <div class="bg-slate-900 text-white p-3 rounded flex justify-between items-center text-xs">
+                <div>
+                    <h4 class="font-black text-sm uppercase tracking-wider text-amber-400">${gs.playerTeam.name} Depth Analysis</h4>
+                    <p class="text-slate-400 text-[11px] mt-0.5">Roster Count: <b>${roster.length}/18</b> | Scheme: <b>${gs.playerTeam.formations?.offense || 'Balanced'}</b> / <b>${gs.playerTeam.formations?.defense || '3-2-3'}</b></p>
+                </div>
+                <div class="text-right">
+                    <span class="text-[10px] text-slate-400 block uppercase">Street Cred</span>
+                    <span class="font-black text-lg text-white">${gs.playerTeam.socialProfile?.streetCred || 50}</span>
+                </div>
+            </div>
+
+            <!-- Two-Way Position Room Breakdown -->
+            <div>
+                <h5 class="text-xs font-black uppercase tracking-wider text-slate-700 mb-2">Positional Rooms & Quality (Starters vs. 2-Way Depth)</h5>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">
+                    ${analysis.map(item => `
+                        <div class="bg-white border border-slate-200 rounded p-2.5 shadow-sm">
+                            <div class="flex justify-between items-center mb-1 pb-1 border-b border-slate-100">
+                                <div class="flex items-center gap-2">
+                                    <span class="font-black text-sm text-slate-900">${item.pos} Room</span>
+                                    <span class="text-[9px] font-black uppercase px-1.5 py-0.2 rounded border ${item.badgeColor}">${item.status}</span>
+                                </div>
+                                <span class="font-mono text-xs font-bold text-slate-600">Starter Avg: <b class="text-slate-900">${item.starterAvg}</b></span>
+                            </div>
+                            <div class="text-[10px] text-slate-500 mb-1.5 flex justify-between">
+                                <span>Ideal: <b>${item.ideal}</b> | Viable Total: <b>${item.viableCount}</b></span>
+                                <span>(${item.primaryCount} Natural • ${item.twoWayCount} Two-Way)</span>
+                            </div>
+                            <div class="space-y-1 font-mono text-[11px]">
+                                ${item.players.map(p => `
+                                    <div class="flex justify-between items-center p-1 bg-slate-50 rounded hover:bg-slate-100 cursor-pointer" onclick="app.openPlayerCard('${p.player.id}')">
+                                        <div class="flex items-center gap-1.5 truncate pr-2 font-sans">
+                                            <span class="font-semibold text-slate-800 truncate">${p.player.name}</span>
+                                            ${!p.isPrimary ? `<span class="bg-indigo-100 text-indigo-900 text-[8px] font-bold px-1 rounded uppercase">2-Way (${p.player.pos || 'ATH'})</span>` : ''}
+                                        </div>
+                                        <span class="font-bold text-slate-900">${p.ovr} OVR</span>
+                                    </div>
+                                `).join('') || '<p class="text-slate-400 italic text-[10px] py-1">No players viable at this position.</p>'}
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+            </div>
+        </div>
+    `;
+
+    showModal("Franchise War Room & 2-Way Depth", modalHtml, null, null, null, "Close War Room");
+};
 
 export function renderDashboard(gameState) {
     if (!gameState?.playerTeam) return;
@@ -812,6 +964,13 @@ export function renderStaffTab(gameState) {
     const team = gameState.playerTeam;
     if (!team.staff) Game.initializeTeamStaff(team);
     if (!gameState.availableStaff) gameState.availableStaff = Game.generateStaffPool(6);
+
+    // Auto-repair: Prevent Head Coach from sharing the GM's exact name
+    if (team.staff.coach && team.staff.gm && team.staff.coach.name === team.staff.gm.name) {
+        const former = team.staff.coach.formerPlayerId ? Game.getPlayer(team.staff.coach.formerPlayerId) : null;
+        team.staff.coach.name = former ? former.name : `${Game.getRandom(firstNames)} ${Game.getRandom(lastNames)}`;
+        team.coach = team.staff.coach;
+    }
 
     const roles = [
         { key: 'gm', title: 'General Manager (You)', icon: '👑', desc: 'Oversees the program, hires staff, and builds team culture.' },
@@ -1948,6 +2107,23 @@ export function renderStandingsTab(gameState) {
 
 export function renderPlayerStatsTab(gameState) {
     if (!elements.playerStatsContainer || !gameState?.players) return;
+
+    // Before Week 1 games are played, clean any stale stats and show kickoff state
+    if (gameState.currentWeek === 0) {
+        gameState.players.forEach(p => {
+            if (p.seasonStats && (p.seasonStats.touchdowns > 0 || p.seasonStats.passYards > 0 || p.seasonStats.rushYards > 0)) {
+                p.seasonStats = { receptions: 0, recYards: 0, passYards: 0, rushYards: 0, touchdowns: 0, tackles: 0, sacks: 0, interceptions: 0, passAttempts: 0, passCompletions: 0, interceptionsThrown: 0 };
+            }
+        });
+        elements.playerStatsContainer.innerHTML = `
+            <div class="p-8 text-center text-slate-400 font-sans">
+                <span class="text-3xl block mb-2">🏈</span>
+                <p class="font-bold text-sm text-slate-700 uppercase tracking-wider">Season ${gameState.year || 1} Has Not Started</p>
+                <p class="text-xs text-slate-500 mt-1">League leaders will update after Week 1 kickoff.</p>
+            </div>`;
+        return;
+    }
+
     const teamIdFilter = elements.statsFilterTeam?.value || '';
     const leagueFilter = document.getElementById('stats-filter-league')?.value || '';
     const sortStat = elements.statsSort?.value || 'touchdowns';
