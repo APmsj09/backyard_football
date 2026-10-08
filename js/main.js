@@ -1012,7 +1012,8 @@ window.app = {
             finishOffseasonFAMinigame();
         } else {
             UI.incrementOffseasonFADay();
-            UI.startOffseasonFAMinigame(gameState); // Clears bids for next day
+            UI.clearOffseasonFABids();
+            UI.renderOffseasonFAScreen(gameState);
         }
     },
     renderFAPool: () => {

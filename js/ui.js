@@ -1161,6 +1161,7 @@ export function addOffseasonFABid(bid) { offseasonFABids.push(bid); }
 export function removeOffseasonFABid(idx) { offseasonFABids.splice(idx, 1); }
 export function getOffseasonFADay() { return offseasonFADay; }
 export function incrementOffseasonFADay() { offseasonFADay++; }
+export function clearOffseasonFABids() { offseasonFABids = []; }
 
 export function renderStaffTab(gameState) {
     const container = document.getElementById('staff-container');
