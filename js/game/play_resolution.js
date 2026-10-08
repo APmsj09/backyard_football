@@ -515,7 +515,7 @@ export function determineDefensivePlayCall(defense, offense, down, yardsToGo, ba
 
         // FIELD POSITION SANITY CHECKS:
         // Do not call Goal Line defense at midfield, and do not call Prevent in the red zone
-        if (!isGoalLine && tags.includes('runStop') && play.key.includes('GoalLine')) {
+        if (!isGoalLine && tags.includes('runStop') && key.includes('GoalLine')) {
             score -= 80; // Heavy penalty outside the red zone
         }
         if (ballOn >= 80 && tags.includes('prevent')) {
