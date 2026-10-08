@@ -85,34 +85,99 @@ export function evaluatePlayerNegotiation(player, team, offer = {}) {
  * Evaluates whether an available staff member agrees to sign.
  */
 export function evaluateStaffNegotiation(staff, team, roleKey, tokensOffered = 0) {
-    let interest = Math.round((team.socialProfile?.streetCred || 50) * 0.3);
+    const cred = team.socialProfile?.streetCred || 50;
+    // Base interest scaled realistically (50 Cred = 32 base points)
+    let interest = Math.round(cred * 0.65);
     const reasons = [];
 
     if (team.tier === 1) {
         interest += 15;
-        reasons.push("Prestige of Tier 1 Premier league (+15)");
+        reasons.push("Premier Parks floodlights prestige (+15)");
+    } else {
+        reasons.push("Sandlot Circuit grassroots challenge");
     }
 
     // Former player loyalty bonus
     if (staff.formerPlayerBio && staff.formerPlayerBio.includes(team.name)) {
-        interest += 35;
-        reasons.push(`🎓 Alma mater loyalty to ${team.name} (+35)`);
+        interest += 30;
+        reasons.push(`🎓 Alma mater loyalty to ${team.name} (+30)`);
     }
 
-    // Staff tactical match with team formation
-    const offScheme = staff.ratings?.offSchemeMastery || 50;
-    if (roleKey === 'coach' && offScheme > 70) {
-        interest -= 10; // High-rated coaches want good teams
+    // High-reputation coaches demand compensation or tokens
+    const ratingAvg = Math.round(
+        ((staff.ratings?.offSchemeMastery || 50) + 
+         (staff.ratings?.evalPhysicals || 50) + 
+         (staff.ratings?.teaching || 50)) / 3
+    );
+
+    if (ratingAvg > 68) {
+        const prestigeDemand = Math.round((ratingAvg - 68) * 0.9);
+        interest -= prestigeDemand;
+        reasons.push(`High reputation expectations (-${prestigeDemand})`);
     }
 
+    // =========================================================================
+    // STAFF BIAS & PERSONALITY FIT WITH ROSTER
+    // =========================================================================
+    const roster = getRosterObjects(team);
+    const personality = staff.biases?.personality?.name;
+    const tactical = staff.biases?.tactical?.name;
+    const teamOffense = team.formations?.offense || 'Balanced';
+
+    // 1. Tactical Bias vs. Team Scheme Fit
+    if (roleKey === 'coach' && tactical) {
+        if (tactical === 'Air Raid Purist') {
+            if (['Spread', 'Empty', 'Trips'].includes(teamOffense)) {
+                interest += 15;
+                reasons.push("Loves your Spread passing formation (+15)");
+            } else if (['Power', 'Jumbo'].includes(teamOffense)) {
+                interest -= 25;
+                reasons.push("Refuses to coach heavy under-center Power offense (-25)");
+            }
+        } else if (tactical === 'Smashmouth Zealot') {
+            if (['Power', 'Jumbo', 'Pistol'].includes(teamOffense)) {
+                interest += 15;
+                reasons.push("Loves your physical run-first offensive formation (+15)");
+            } else if (['Spread', 'Empty'].includes(teamOffense)) {
+                interest -= 25;
+                reasons.push("Dislikes finesse spread formations (-25)");
+            }
+        }
+    }
+
+    // 2. Personality Trait vs. Locker Room Chemistry
+    if (personality === 'Old-School Disciplinarian') {
+        const divasOnTeam = roster.filter(p => (p.personality?.ego || 50) > 75).length;
+        if (divasOnTeam >= 2) {
+            interest -= 20;
+            reasons.push(`Refuses to babysit ${divasOnTeam} high-ego divas on roster (-20)`);
+        } else {
+            interest += 10;
+            reasons.push("Respects your humble, hard-working locker room (+10)");
+        }
+    } else if (personality === "Peaked in '94") {
+        if (cred < 55) {
+            interest -= 15;
+            reasons.push("Demands a team with higher neighborhood street respect (-15)");
+        }
+    } else if (personality === "Players' Coach") {
+        interest += 10;
+        reasons.push("Excited to work with your young roster (+10)");
+    }
+
+    // Favor tokens offered as sweeteners/bribes
     if (tokensOffered > 0) {
-        interest += tokensOffered * 20;
-        reasons.push(`Offered ${tokensOffered} Favor Tokens`);
+        const tokenBoost = tokensOffered * 22;
+        interest += tokenBoost;
+        reasons.push(`Offered ${tokensOffered} Favor Token(s) (+${tokenBoost})`);
     }
+
+    const threshold = 40;
+    const accepted = interest >= threshold;
 
     return {
-        accepted: interest >= 45,
-        interestScore: interest,
+        accepted,
+        interestScore: Math.max(0, Math.min(100, interest)),
         reasons
     };
 }

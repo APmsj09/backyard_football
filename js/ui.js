@@ -821,29 +821,78 @@ export function renderStaffTab(gameState) {
         if (!staff) return;
 
         const tokensAvailable = team.socialProfile?.favorTokens || 0;
-        const requiredTokens = staff.ratings.offSchemeMastery > 75 ? 1 : 0;
+        const roleLabels = { coach: 'Head Coach', scout: 'Park Scout', trainer: 'Sideline Trainer' };
+        const roleName = roleLabels[roleKey] || roleKey.toUpperCase();
 
-        if (tokensAvailable < requiredTokens) {
-            alert(`You need ${requiredTokens} Favor Token(s) to recruit this staff member.`);
-            return;
-        }
+        const pitchModalHtml = `
+            <div class="space-y-4 text-left">
+                <div class="bg-slate-50 p-3 rounded border border-slate-200">
+                    <div class="flex justify-between items-start">
+                        <div>
+                            <h4 class="font-black text-sm text-slate-900">${staff.name}</h4>
+                            <p class="text-[11px] text-slate-500">${staff.age}yo • ${staff.biases.personality.name}</p>
+                        </div>
+                        <span class="text-xs bg-amber-100 text-amber-900 font-bold px-2 py-0.5 rounded border border-amber-300">
+                            Target: ${roleName}
+                        </span>
+                    </div>
+                    ${staff.formerPlayerBio ? `<p class="text-[10px] text-amber-800 font-bold mt-1">🎓 ${staff.formerPlayerBio}</p>` : ''}
+                    <p class="text-[11px] text-slate-600 italic mt-1">"${staff.biases.tactical?.desc || staff.biases.personality.desc}"</p>
+                </div>
 
-        const negotiation = Game.evaluateStaffNegotiation(staff, team, roleKey, requiredTokens);
-        if (!negotiation.accepted) {
-            alert(`✋ ${staff.name} declined to join: ${negotiation.reasons.join(' • ')}`);
-            return;
-        }
+                <div>
+                    <label class="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                        Offer Favor Tokens (Available: ${tokensAvailable})
+                    </label>
+                    <select id="staff-pitch-tokens" class="w-full p-2 border border-slate-300 rounded font-bold text-slate-800 outline-none">
+                        <option value="0">0 Tokens (Standard neighborhood handshake)</option>
+                        ${tokensAvailable >= 1 ? '<option value="1" selected>1 Favor Token (Lend your bike / ride favors)</option>' : ''}
+                        ${tokensAvailable >= 2 ? '<option value="2">2 Favor Tokens (Major favors owed)</option>' : ''}
+                    </select>
+                    <p class="text-[10px] text-slate-500 mt-1">High-rated candidates or coaches with big reputations require Favor Tokens to convince them to sign.</p>
+                </div>
+            </div>
+        `;
 
-        if (requiredTokens > 0) {
-            team.socialProfile.favorTokens -= requiredTokens;
-        }
+        UI.showModal(`Recruit ${roleName}`, pitchModalHtml, () => {
+            const tokensOffered = parseInt(document.getElementById('staff-pitch-tokens')?.value || '0', 10);
 
-        const idx = gameState.availableStaff.findIndex(s => s.id === staffId);
-        gameState.availableStaff.splice(idx, 1);
-        staff.role = roleKey;
-        staff.teamId = team.id;
-        team.staff[roleKey] = staff;
-        renderStaffTab(gameState);
+            if (tokensOffered > tokensAvailable) {
+                alert("You do not have enough Favor Tokens.");
+                return;
+            }
+
+            const negotiation = Game.evaluateStaffNegotiation(staff, team, roleKey, tokensOffered);
+
+            if (!negotiation.accepted) {
+                alert(`✋ ${staff.name} declined the offer: \n\n• ${negotiation.reasons.join('\n• ')}\n\nTry offering a Favor Token or raising your Street Cred.`);
+                return;
+            }
+
+            // Deduct offered tokens
+            if (tokensOffered > 0) {
+                team.socialProfile.favorTokens -= tokensOffered;
+            }
+
+            // Remove previous role holder and put on market
+            const oldStaff = team.staff[roleKey];
+            if (oldStaff) {
+                oldStaff.teamId = null;
+                gameState.availableStaff.push(oldStaff);
+            }
+
+            // Move candidate to team staff
+            const idx = gameState.availableStaff.findIndex(s => s.id === staffId);
+            if (idx > -1) gameState.availableStaff.splice(idx, 1);
+
+            staff.role = roleKey;
+            staff.teamId = team.id;
+            team.staff[roleKey] = staff;
+            if (roleKey === 'coach') team.coach = staff;
+
+            renderStaffTab(gameState);
+            alert(`🤝 ${staff.name} agreed to join as ${roleName}!\n\nReasons: ${negotiation.reasons.join(', ')}`);
+        }, "Submit Contract Offer");
     };
 
     let html = `
