@@ -39,6 +39,14 @@ let currentDraftOnSelect = null;
 let currentDraftSortCol = 'potential';
 let currentDraftSortDir = 'desc';
 
+// Standings league sub-tab state
+let activeStandingsLeague = 'tier1'; // 'tier1', 'tier2', 'youth'
+window.app_switchStandingsLeague = function (leagueKey) {
+    activeStandingsLeague = leagueKey;
+    const gs = getGameState();
+    if (gs) renderStandingsTab(gs);
+};
+
 function debounce(func, delay) {
     return function (...args) {
         clearTimeout(debounceTimeout);
@@ -1401,87 +1409,217 @@ export function renderScheduleTab(gameState) {
 
 export function renderStandingsTab(gameState) {
     if (!elements.standingsContainer || !gameState) return;
-    elements.standingsContainer.innerHTML = '';
 
-    const tiers = [
-        {
-            name: 'Premier Parks (Tier 1)',
+    // League Tier Configurations
+    const tierConfig = {
+        tier1: {
+            name: "Premier Parks (Tier 1)",
+            subtitle: "The Elite Division",
+            desc: "Playing under the floodlights. Champion takes the Neighborhood Trophy; bottom 2 teams are relegated to the Sandlot.",
             teams: gameState.teams.filter(t => t.tier === 1),
+            badgeColor: "amber",
             hasRel: true,
             hasProm: false
         },
-        {
-            name: 'Sandlot Circuit (Tier 2)',
+        tier2: {
+            name: "Sandlot Circuit (Tier 2)",
+            subtitle: "The Grassroots Battleground",
+            desc: "Battles on dusty schoolyard fields. The top 2 finishers earn promotion to the Premier Parks under the big lights!",
             teams: gameState.teams.filter(t => t.tier === 2),
+            badgeColor: "blue",
             hasRel: false,
             hasProm: true
         },
-        {
-            name: 'Pee-Wee League (Youth)',
+        youth: {
+            name: "Pee-Wee League (Youth)",
+            subtitle: "Future Prospects (Ages 8-11)",
+            desc: "Playing for juice boxes and neighborhood bragging rights. Scouts watch graduating 12-year-olds for next year's Rookie Draft!",
             teams: gameState.teams.filter(t => t.leagueType === 'youth'),
+            badgeColor: "emerald",
             hasRel: false,
             hasProm: false
         }
-    ];
+    };
 
-    tiers.forEach(tier => {
-        if (tier.teams.length === 0) return;
-        const sorted = [...tier.teams].sort((a, b) => {
-            const winsDiff = (b.wins || 0) - (a.wins || 0);
-            if (winsDiff !== 0) return winsDiff;
-            return (a.losses || 0) - (b.losses || 0);
-        });
+    const activeTier = tierConfig[activeStandingsLeague] || tierConfig.tier1;
+    const sortedTeams = [...activeTier.teams].sort((a, b) => {
+        const winsDiff = (b.wins || 0) - (a.wins || 0);
+        if (winsDiff !== 0) return winsDiff;
+        return (a.losses || 0) - (b.losses || 0);
+    });
 
-        elements.standingsContainer.innerHTML += `
-            <div class="bg-white rounded-sm border border-slate-300 overflow-hidden shadow-sm mb-4">
-                <div class="bg-slate-900 text-white px-3 py-2 font-black text-xs uppercase tracking-wider flex justify-between items-center">
-                    <span>${tier.name}</span>
-                    <span class="text-[10px] font-normal text-slate-400">9 Games Total</span>
+    // 1. Find Standout Players in this specific league
+    const leagueTeamIds = new Set(activeTier.teams.map(t => t.id));
+    const leaguePlayers = (gameState.players || []).filter(p => leagueTeamIds.has(p.teamId));
+
+    const topPasser = [...leaguePlayers].sort((a, b) => (b.seasonStats?.passYards || 0) - (a.seasonStats?.passYards || 0))[0];
+    const topRusher = [...leaguePlayers].sort((a, b) => (b.seasonStats?.rushYards || 0) - (a.seasonStats?.rushYards || 0))[0];
+    const topDefender = [...leaguePlayers].sort((a, b) => ((b.seasonStats?.tackles || 0) + (b.seasonStats?.sacks || 0) * 2) - ((a.seasonStats?.tackles || 0) + (a.seasonStats?.sacks || 0) * 2))[0];
+
+    // 2. Generate Dynamic Neighborhood Headline
+    const leaderTeam = sortedTeams[0];
+    let parkChatter = "Preseason buzz is building across the blacktop.";
+    if (leaderTeam && (leaderTeam.wins || 0) > 0) {
+        parkChatter = `🔥 <b>${leaderTeam.name}</b> are setting the pace in the ${activeTier.subtitle}, coached by <b>${leaderTeam.coach?.name || 'Coach'}</b>!`;
+    } else if (leaderTeam) {
+        parkChatter = `Every team in <b>${activeTier.name}</b> starts with a clean slate. Who will claim the playground throne?`;
+    }
+
+    // 3. Render HTML
+    elements.standingsContainer.className = "p-4 overflow-y-auto flex-grow min-h-0 space-y-4";
+    elements.standingsContainer.innerHTML = `
+        <!-- Sub-Navigation Bar -->
+        <div class="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 pb-3">
+            <div class="flex bg-slate-200 rounded p-1 border border-slate-300 text-xs font-bold">
+                <button class="px-3 py-1.5 rounded transition ${activeStandingsLeague === 'tier1' ? 'bg-amber-600 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900'}" onclick="window.app_switchStandingsLeague('tier1')">
+                    🏆 Premier (Tier 1)
+                </button>
+                <button class="px-3 py-1.5 rounded transition ${activeStandingsLeague === 'tier2' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900'}" onclick="window.app_switchStandingsLeague('tier2')">
+                    🧢 Sandlot (Tier 2)
+                </button>
+                <button class="px-3 py-1.5 rounded transition ${activeStandingsLeague === 'youth' ? 'bg-emerald-600 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900'}" onclick="window.app_switchStandingsLeague('youth')">
+                    🧃 Pee-Wee (Youth)
+                </button>
+            </div>
+            <div class="text-[11px] text-slate-500 font-mono">
+                Week ${gameState.currentWeek < 9 ? gameState.currentWeek + 1 : 'Final'} of 9
+            </div>
+        </div>
+
+        <!-- League Narrative Banner -->
+        <div class="bg-slate-900 text-white rounded-sm p-4 border border-slate-800 shadow-sm flex flex-col md:flex-row justify-between items-start md:items-center gap-3">
+            <div>
+                <div class="flex items-center gap-2 mb-1">
+                    <span class="text-xs font-black uppercase tracking-wider text-${activeTier.badgeColor}-400">${activeTier.subtitle}</span>
+                    <span class="text-slate-600">•</span>
+                    <span class="text-xs text-slate-300 font-bold">${activeTier.name}</span>
+                </div>
+                <p class="text-xs text-slate-300 leading-relaxed">${activeTier.desc}</p>
+                <p class="text-[11px] text-amber-300 font-sans mt-2 bg-slate-800/80 px-2.5 py-1 rounded inline-block border border-slate-700">
+                    ${parkChatter}
+                </p>
+            </div>
+        </div>
+
+        <!-- 2-Column Content Grid: Standings (Left) + Kings of the Park (Right) -->
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
+            
+            <!-- Left: Rich Standings Table (8 cols) -->
+            <div class="lg:col-span-8 bg-white rounded-sm border border-slate-300 overflow-hidden shadow-sm">
+                <div class="bg-slate-800 text-white px-3 py-2 flex justify-between items-center text-xs font-black uppercase tracking-wider border-b border-slate-700">
+                    <span>${activeTier.name} Standings</span>
+                    <span class="text-[10px] text-slate-300 font-mono">${sortedTeams.length} Franchises</span>
                 </div>
                 <table class="min-w-full text-xs font-mono">
-                    <thead class="bg-slate-100 text-slate-600 uppercase text-[10px]">
+                    <thead class="bg-slate-100 text-slate-700 uppercase text-[10px] select-none">
                         <tr>
-                            <th class="py-1.5 px-3 text-left font-bold">Team</th>
-                            <th class="py-1.5 px-2 text-center font-bold">W</th>
-                            <th class="py-1.5 px-2 text-center font-bold">L</th>
-                            <th class="py-1.5 px-2 text-center font-bold">PCT</th>
+                            <th class="py-2 px-3 text-left">Team</th>
+                            <th class="py-2 px-2 text-center">W</th>
+                            <th class="py-2 px-2 text-center">L</th>
+                            <th class="py-2 px-2 text-center">PCT</th>
+                            <th class="py-2 px-2 text-center text-slate-800 font-sans">Power (OVR)</th>
+                            <th class="py-2 px-2 text-center text-slate-800 font-sans">Cred</th>
+                            <th class="py-2 px-3 text-right font-sans">Status</th>
                         </tr>
                     </thead>
                     <tbody class="divide-y divide-slate-100">
-                        ${sorted.map((t, i) => {
-            const isMe = t.id === gameState.playerTeam?.id;
-            const total = (t.wins || 0) + (t.losses || 0);
-            const pct = total > 0 ? ((t.wins || 0) / total).toFixed(3).replace(/^0+/, '') : '.000';
+                        ${sortedTeams.map((t, i) => {
+                            const isMe = t.id === gameState.playerTeam?.id;
+                            const total = (t.wins || 0) + (t.losses || 0);
+                            const pct = total > 0 ? ((t.wins || 0) / total).toFixed(3).replace(/^0+/, '') : '.000';
+                            const teamOvr = Game.getTeamOverall(t);
 
-            // ZenGM style cut-off highlights
-            let borderIndicator = '';
-            let badge = '';
-            if (tier.hasProm && i < 2) {
-                borderIndicator = 'border-l-4 border-emerald-500 bg-emerald-50/40';
-                badge = '<span class="text-[8px] bg-emerald-100 text-emerald-800 px-1 py-0.2 rounded font-bold ml-1 font-sans">PROM</span>';
-            } else if (tier.hasRel && i >= sorted.length - 2) {
-                borderIndicator = 'border-l-4 border-rose-500 bg-rose-50/40';
-                badge = '<span class="text-[8px] bg-rose-100 text-rose-800 px-1 py-0.2 rounded font-bold ml-1 font-sans">REL</span>';
-            } else if (i === 0) {
-                badge = '<span class="text-[8px] bg-amber-100 text-amber-800 px-1 py-0.2 rounded font-bold ml-1 font-sans">#1</span>';
-            }
+                            let borderIndicator = '';
+                            let statusBadge = '<span class="text-slate-400 font-sans text-[10px]">-</span>';
 
-            return `
-                            <tr class="${borderIndicator} ${isMe ? 'bg-amber-50 font-bold' : ''}">
-                                <td class="py-1.5 px-3 font-sans truncate flex items-center ${isMe ? 'text-amber-800 font-black' : 'text-slate-800'}">
+                            if (activeTier.hasProm && i < 2) {
+                                borderIndicator = 'border-l-4 border-emerald-500 bg-emerald-50/40';
+                                statusBadge = '<span class="text-[9px] bg-emerald-100 text-emerald-800 border border-emerald-300 px-1.5 py-0.5 rounded font-black font-sans">▲ PROMOTION</span>';
+                            } else if (activeTier.hasRel && i >= sortedTeams.length - 2) {
+                                borderIndicator = 'border-l-4 border-rose-500 bg-rose-50/40';
+                                statusBadge = '<span class="text-[9px] bg-rose-100 text-rose-800 border border-rose-300 px-1.5 py-0.5 rounded font-black font-sans">▼ RELEGATION</span>';
+                            } else if (i === 0) {
+                                statusBadge = '<span class="text-[9px] bg-amber-100 text-amber-800 border border-amber-300 px-1.5 py-0.5 rounded font-black font-sans">👑 #1 SEED</span>';
+                            }
+
+                            return `
+                            <tr class="${borderIndicator} ${isMe ? 'bg-amber-50 font-bold' : 'hover:bg-slate-50 transition'}">
+                                <td class="py-2 px-3 font-sans truncate flex items-center gap-2">
                                     <span class="w-4 font-mono text-[10px] text-slate-400">${i + 1}.</span>
-                                    <span class="truncate">${t.name}</span>
-                                    ${badge}
+                                    <span class="w-2.5 h-2.5 rounded-full shrink-0 border border-slate-300" style="background-color: ${t.primaryColor || '#333'}"></span>
+                                    <span class="truncate ${isMe ? 'text-amber-900 font-black' : 'text-slate-900 font-semibold'}">${t.name}</span>
+                                    ${isMe ? '<span class="bg-amber-200 text-amber-900 px-1 rounded text-[8px] font-black uppercase">YOU</span>' : ''}
                                 </td>
-                                <td class="py-1.5 px-2 text-center font-black ${t.wins > 0 ? 'text-slate-900' : 'text-slate-400'}">${t.wins || 0}</td>
-                                <td class="py-1.5 px-2 text-center text-slate-500">${t.losses || 0}</td>
-                                <td class="py-1.5 px-2 text-center font-bold text-slate-700">${pct}</td>
+                                <td class="py-2 px-2 text-center font-black ${t.wins > 0 ? 'text-slate-900' : 'text-slate-400'}">${t.wins || 0}</td>
+                                <td class="py-2 px-2 text-center text-slate-500">${t.losses || 0}</td>
+                                <td class="py-2 px-2 text-center font-bold text-slate-700">${pct}</td>
+                                <td class="py-2 px-2 text-center font-bold text-slate-800">${teamOvr}</td>
+                                <td class="py-2 px-2 text-center text-slate-600">${t.socialProfile?.streetCred || 50}</td>
+                                <td class="py-2 px-3 text-right">${statusBadge}</td>
                             </tr>`;
-        }).join('')}
+                        }).join('')}
                     </tbody>
                 </table>
-            </div>`;
-    });
+            </div>
+
+            <!-- Right: Kings of the Park & Unit Spotlight (4 cols) -->
+            <div class="lg:col-span-4 space-y-4">
+                
+                <!-- Kings of the Park (Top Performers in this Tier) -->
+                <div class="bg-white rounded-sm border border-slate-300 p-3.5 shadow-sm">
+                    <div class="flex justify-between items-center mb-2.5 border-b border-slate-200 pb-1.5">
+                        <h4 class="font-bold text-xs uppercase tracking-wider text-slate-800 flex items-center gap-1.5">
+                            <span>👑</span> Kings of the Park
+                        </h4>
+                        <span class="text-[9px] font-bold text-slate-400 uppercase tracking-widest">${activeTier.name.split(' ')[0]}</span>
+                    </div>
+
+                    <div class="space-y-2.5 text-xs">
+                        <!-- Top Passer -->
+                        <div class="p-2 bg-slate-50 rounded border border-slate-200 cursor-pointer hover:border-amber-400 transition" onclick="app.openPlayerCard('${topPasser?.id}')">
+                            <span class="text-[9px] font-black uppercase text-blue-600 block mb-0.5">Air General (Passing)</span>
+                            <div class="flex justify-between items-center">
+                                <span class="font-bold text-slate-900 truncate">${topPasser?.name || 'No leader'}</span>
+                                <span class="font-mono font-bold text-slate-700">${topPasser?.seasonStats?.passYards || 0} YDS</span>
+                            </div>
+                            <span class="text-[10px] text-slate-500">${topPasser ? gameState.teams.find(t => t.id === topPasser.teamId)?.name : '-'}</span>
+                        </div>
+
+                        <!-- Top Rusher -->
+                        <div class="p-2 bg-slate-50 rounded border border-slate-200 cursor-pointer hover:border-amber-400 transition" onclick="app.openPlayerCard('${topRusher?.id}')">
+                            <span class="text-[9px] font-black uppercase text-amber-600 block mb-0.5">Ground Enforcer (Rushing)</span>
+                            <div class="flex justify-between items-center">
+                                <span class="font-bold text-slate-900 truncate">${topRusher?.name || 'No leader'}</span>
+                                <span class="font-mono font-bold text-slate-700">${topRusher?.seasonStats?.rushYards || 0} YDS</span>
+                            </div>
+                            <span class="text-[10px] text-slate-500">${topRusher ? gameState.teams.find(t => t.id === topRusher.teamId)?.name : '-'}</span>
+                        </div>
+
+                        <!-- Top Defender -->
+                        <div class="p-2 bg-slate-50 rounded border border-slate-200 cursor-pointer hover:border-amber-400 transition" onclick="app.openPlayerCard('${topDefender?.id}')">
+                            <span class="text-[9px] font-black uppercase text-rose-600 block mb-0.5">Defensive Anchor (Tackles)</span>
+                            <div class="flex justify-between items-center">
+                                <span class="font-bold text-slate-900 truncate">${topDefender?.name || 'No leader'}</span>
+                                <span class="font-mono font-bold text-slate-700">${topDefender?.seasonStats?.tackles || 0} TKLS</span>
+                            </div>
+                            <span class="text-[10px] text-slate-500">${topDefender ? gameState.teams.find(t => t.id === topDefender.teamId)?.name : '-'}</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Division Lore Box -->
+                <div class="bg-amber-50/70 border border-amber-200/80 rounded-sm p-3 text-xs text-slate-700">
+                    <span class="font-bold uppercase tracking-wider text-[10px] text-amber-800 block mb-1">Playground Rulebook</span>
+                    ${activeTier.hasRel 
+                        ? `<p class="leading-relaxed">Teams finishing in the bottom 2 will drop down to Tier 2 next year, losing valuable playground Street Cred and fan turnout.</p>` 
+                        : (activeTier.hasProm 
+                            ? `<p class="leading-relaxed">The top 2 teams will earn direct promotion into Tier 1, earning +20 Street Cred and competing under the floodlights next season.</p>` 
+                            : `<p class="leading-relaxed">Graduating 12-year-olds from this league enter the Rookie Draft pool. Older kids move on to Tier 1 and Tier 2 squads.</p>`)}
+                </div>
+
+            </div>
+        </div>
+    `;
 }
 
 export function renderPlayerStatsTab(gameState) {
