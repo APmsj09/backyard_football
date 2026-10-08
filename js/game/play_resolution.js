@@ -30,7 +30,7 @@ import {
 } from '../data.js';
 import { getRandom, getRandomInt } from '../utils.js';
 import { updatePlayerPosition, getDistance } from './physics.js';
-import { calculateOverall, estimateBestPosition } from '../player.js';
+import { calculateOverall, estimateBestPosition } from './player.js';
 
 const TICK_DURATION_SECONDS = 0.05;
 const FIELD_WIDTH = 53.3;
