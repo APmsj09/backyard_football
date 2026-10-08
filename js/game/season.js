@@ -1289,6 +1289,12 @@ export function advanceToOffseason() {
         const team = player.teamId ? game.teams.find(t => t.id === player.teamId) : null;
         const teamName = team ? team.name : 'Free Agent';
 
+        // Youth players are handled separately below.
+        // Do not age/develop them again in the universal player lifecycle pass.
+        if (team?.leagueType === 'youth' || player.lifecycle === 'youth') {
+            return;
+        }
+
         // Check Season and Career Records
         if (!game.records) game.records = { game: {}, season: {}, career: {} };
 
@@ -1408,13 +1414,13 @@ export function advanceToOffseason() {
             if (team && team.id === game.playerTeam?.id && game.year >= 5) {
                 addMessage("Player Retires", `${player.name} graduated and hung up his cleats.`);
             }
-            
+
             // Former Legend to Coach Pipeline (SPAM SUPPRESSED DURING HISTORICAL PRE-SIM)
             const newCoach = checkRetiredPlayerToCoach(player);
             if (newCoach) {
                 if (!game.availableStaff) game.availableStaff = [];
                 game.availableStaff.unshift(newCoach);
-                
+
                 // Only alert user for their own players or true league legends after Year 4
                 const isMyPlayer = team && team.id === game.playerTeam?.id;
                 const isLegend = (player.careerStats?.touchdowns || 0) >= 20;

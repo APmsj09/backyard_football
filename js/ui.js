@@ -492,7 +492,7 @@ export function renderDraftPool(gameState, onPlayerSelect, sortColumn = 'potenti
 
         if (activeDraftView === 'overview') {
             const sigSkills = getProspectSignatureSkills(scouted, pos);
-            const sigSkillsHtml = sigSkills.map(s => 
+            const sigSkillsHtml = sigSkills.map(s =>
                 `<span class="inline-block bg-slate-100 text-slate-800 text-[10px] px-1.5 py-0.5 rounded font-mono mr-1 border border-slate-200">
                     <span class="text-slate-500 font-normal">${s.label}:</span> <b>${s.val}</b>
                 </span>`
@@ -555,9 +555,21 @@ export function renderDraftPool(gameState, onPlayerSelect, sortColumn = 'potenti
 }
 
 export function updateDraftSortIndicators(sortColumn, sortDirection) {
-    document.querySelectorAll('#draft-screen thead th .sort-indicator').forEach(s => s.textContent = '');
-    const headerCell = document.querySelector(`#draft-screen thead th[data-sort="${sortColumn}"] .sort-indicator`);
-    if (headerCell) headerCell.textContent = sortDirection === 'desc' ? ' ▼' : ' ▲';
+    document.querySelectorAll('#draft-screen thead th[data-sort]').forEach(th => {
+        const existing = th.querySelector('.sort-indicator');
+        if (existing) existing.remove();
+    });
+
+    const headerCell = document.querySelector(
+        `#draft-screen thead th[data-sort="${sortColumn}"]`
+    );
+
+    if (!headerCell) return;
+
+    const indicator = document.createElement('span');
+    indicator.className = 'sort-indicator ml-1 text-amber-500';
+    indicator.textContent = sortDirection === 'desc' ? '▼' : '▲';
+    headerCell.appendChild(indicator);
 }
 
 export function setDraftView(view) {
@@ -639,7 +651,7 @@ export function renderSelectedPlayerCard(player, gameState) {
     const positions = ['QB', 'RB', 'WR', 'TE', 'OL', 'DL', 'LB', 'DB'];
     let overallsHtml = '<div class="grid grid-cols-4 gap-1 text-center mt-2">';
     positions.forEach(pKey => {
-        const pOvr = calculateOverall(player, pKey);
+        const pOvr = calculateOverall(scouted, pKey);
         const isBest = pKey === pos;
         overallsHtml += `
             <div class="${isBest ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-700'} p-1 rounded border border-slate-200">
@@ -684,6 +696,10 @@ export function renderSelectedPlayerCard(player, gameState) {
             ${overallsHtml}
         </div>
     `;
+}
+
+export function resetDraftWatchlist() {
+    draftWatchlist.clear();
 }
 
 export function renderPlayerRoster(playerTeam) {
@@ -975,7 +991,7 @@ export function renderStaffTab(gameState) {
             </h4>
             <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
                 ${gameState.availableStaff.map(s => {
-                    return `
+        return `
                     <div class="bg-slate-50 rounded border border-slate-200 p-3 flex flex-col justify-between text-xs hover:border-slate-400 transition">
                         <div>
                             <div class="flex justify-between items-start mb-1">
@@ -1000,7 +1016,7 @@ export function renderStaffTab(gameState) {
                             <button class="flex-1 bg-slate-200 hover:bg-slate-300 text-slate-800 font-bold py-1 rounded text-[10px]" onclick="app_hireStaff('${s.id}', 'trainer')">Hire Trainer</button>
                         </div>
                     </div>`;
-                }).join('')}
+    }).join('')}
             </div>
         </div>
     `;
@@ -1147,12 +1163,12 @@ function renderFormationDropdown(side, formationMap, selectedKey) {
         .map(([k, v]) => `<option value="${k}" ${k === selectedKey ? 'selected' : ''}>${v.name}</option>`)
         .join('');
 
-    select.onchange = (e) => {
+    /*select.onchange = (e) => {
         const team = getGameState().playerTeam;
         team.formations[side] = e.target.value;
         rebuildDepthChartFromOrder(team);
         document.dispatchEvent(new CustomEvent('refresh-ui'));
-    };
+    };*/
 
     // Add an inline Auto-Set button right next to the formation dropdown if not already present
     const parentContainer = select.parentElement;
@@ -1163,6 +1179,60 @@ function renderFormationDropdown(side, formationMap, selectedKey) {
         autoBtn.onclick = () => window.app_autoResetLineup();
         parentContainer.appendChild(autoBtn);
     }
+
+    const formation = formationMap[selectedKey];
+    const personnel = formation?.personnel || {};
+
+    const personnelText = Object.entries(personnel)
+        .filter(([_, count]) => count > 0)
+        .map(([pos, count]) => `${count} ${pos}`)
+        .join(' • ');
+
+    let identityText = '';
+
+    if (side === 'offense') {
+        const labels = {
+            Spread: 'Wide spacing • passing-friendly',
+            Trips: 'Floods one side • stresses coverage',
+            TripsLeft: 'Floods one side • stresses coverage',
+            Empty: 'Maximum width • no RB protection',
+            Power: 'Heavy set • downhill run threat',
+            Jumbo: 'Heavy package • short-yardage power',
+            Pistol: 'Balanced run/pass look',
+            Wildcat: 'RB-led offense • QB as decoy',
+            Balanced: 'Balanced personnel • flexible attack'
+        };
+
+        identityText = labels[selectedKey] || 'Flexible offensive package';
+    } else {
+        const labels = {
+            '3-2-3': 'Balanced front • coverage flexibility',
+            '2-3-3': 'Extra linebacker • stronger underneath',
+            '4-2-2': 'Heavy front • designed to stop the run',
+            '4-1-3': 'Extra DB • passing situations',
+            '3-1-4': 'Hybrid defense • speed and flexibility',
+            '3-0-5': 'Maximum coverage • vulnerable to the run'
+        };
+
+        identityText = labels[selectedKey] || 'Flexible defensive package';
+    }
+
+    const existingInfo = parentContainer.querySelector('.formation-info');
+    if (existingInfo) existingInfo.remove();
+
+    const info = document.createElement('div');
+    info.className = 'formation-info mt-2 text-[10px] text-slate-500 leading-relaxed';
+
+    info.innerHTML = `
+    <div class="font-mono font-bold text-slate-700">
+        ${personnelText || 'Personnel not specified'}
+    </div>
+    <div class="mt-0.5">
+        ${identityText}
+    </div>
+`;
+
+    parentContainer.appendChild(info);
 }
 
 function renderPositionalOveralls() {
@@ -1247,9 +1317,15 @@ function renderPositionalOveralls() {
                 <span class="text-slate-300">(${strongestGroup.topName} • ${strongestGroup.topOvr} OVR)</span>
             </div>
             <div class="border-l border-slate-700 pl-4">
-                <span class="text-slate-400 uppercase text-[10px] font-bold tracking-wider block">Priority Need</span>
-                <span class="font-black text-amber-400 text-sm">${weakestGroup.pos} Room</span>
-                <span class="text-slate-300">(${weakestGroup.topName} • ${weakestGroup.topOvr} OVR)</span>
+                <span class="text-slate-400 uppercase text-[10px] font-bold tracking-wider block">
+                    Lowest-Rated Room
+                </span>
+                <span class="font-black text-amber-400 text-sm">
+                    ${weakestGroup.pos} Room
+                </span>
+                <span class="text-slate-300">
+                    (${weakestGroup.topName} • ${weakestGroup.topOvr} OVR)
+                </span>
             </div>
         </div>
         <div class="text-[11px] text-slate-300 bg-slate-800/80 px-3 py-1.5 rounded border border-slate-700">
@@ -1672,9 +1748,9 @@ export function renderStandingsTab(gameState) {
     const leagueTeamIds = new Set(activeTier.teams.map(t => t.id));
     const leaguePlayers = (gameState.players || []).filter(p => leagueTeamIds.has(p.teamId));
 
-    const hasPlayedGames = leaguePlayers.some(p => 
-        (p.seasonStats?.passYards || 0) > 0 || 
-        (p.seasonStats?.rushYards || 0) > 0 || 
+    const hasPlayedGames = leaguePlayers.some(p =>
+        (p.seasonStats?.passYards || 0) > 0 ||
+        (p.seasonStats?.rushYards || 0) > 0 ||
         (p.seasonStats?.tackles || 0) > 0
     );
 
@@ -1685,7 +1761,7 @@ export function renderStandingsTab(gameState) {
         topPasser = [...leaguePlayers].sort((a, b) => (b.seasonStats?.passYards || 0) - (a.seasonStats?.passYards || 0))[0];
         topRusher = [...leaguePlayers].sort((a, b) => (b.seasonStats?.rushYards || 0) - (a.seasonStats?.rushYards || 0))[0];
         topDefender = [...leaguePlayers].sort((a, b) => ((b.seasonStats?.tackles || 0) + (b.seasonStats?.sacks || 0) * 2) - ((a.seasonStats?.tackles || 0) + (a.seasonStats?.sacks || 0) * 2))[0];
-        
+
         passerMetricLabel = `${topPasser?.seasonStats?.passYards || 0} YDS`;
         rusherMetricLabel = `${topRusher?.seasonStats?.rushYards || 0} YDS`;
         defenderMetricLabel = `${topDefender?.seasonStats?.tackles || 0} TKLS`;
@@ -1772,25 +1848,25 @@ export function renderStandingsTab(gameState) {
                     </thead>
                     <tbody class="divide-y divide-slate-100">
                         ${sortedTeams.map((t, i) => {
-                            const isMe = t.id === gameState.playerTeam?.id;
-                            const total = (t.wins || 0) + (t.losses || 0);
-                            const pct = total > 0 ? ((t.wins || 0) / total).toFixed(3).replace(/^0+/, '') : '.000';
-                            const teamOvr = Game.getTeamOverall(t);
+        const isMe = t.id === gameState.playerTeam?.id;
+        const total = (t.wins || 0) + (t.losses || 0);
+        const pct = total > 0 ? ((t.wins || 0) / total).toFixed(3).replace(/^0+/, '') : '.000';
+        const teamOvr = Game.getTeamOverall(t);
 
-                            let borderIndicator = '';
-                            let statusBadge = '<span class="text-slate-400 font-sans text-[10px]">-</span>';
+        let borderIndicator = '';
+        let statusBadge = '<span class="text-slate-400 font-sans text-[10px]">-</span>';
 
-                            if (activeTier.hasProm && i < 2) {
-                                borderIndicator = 'border-l-4 border-emerald-500 bg-emerald-50/40';
-                                statusBadge = '<span class="text-[9px] bg-emerald-100 text-emerald-800 border border-emerald-300 px-1.5 py-0.5 rounded font-black font-sans">▲ PROMOTION</span>';
-                            } else if (activeTier.hasRel && i >= sortedTeams.length - 2) {
-                                borderIndicator = 'border-l-4 border-rose-500 bg-rose-50/40';
-                                statusBadge = '<span class="text-[9px] bg-rose-100 text-rose-800 border border-rose-300 px-1.5 py-0.5 rounded font-black font-sans">▼ RELEGATION</span>';
-                            } else if (i === 0) {
-                                statusBadge = '<span class="text-[9px] bg-amber-100 text-amber-800 border border-amber-300 px-1.5 py-0.5 rounded font-black font-sans">👑 #1 SEED</span>';
-                            }
+        if (activeTier.hasProm && i < 2) {
+            borderIndicator = 'border-l-4 border-emerald-500 bg-emerald-50/40';
+            statusBadge = '<span class="text-[9px] bg-emerald-100 text-emerald-800 border border-emerald-300 px-1.5 py-0.5 rounded font-black font-sans">▲ PROMOTION</span>';
+        } else if (activeTier.hasRel && i >= sortedTeams.length - 2) {
+            borderIndicator = 'border-l-4 border-rose-500 bg-rose-50/40';
+            statusBadge = '<span class="text-[9px] bg-rose-100 text-rose-800 border border-rose-300 px-1.5 py-0.5 rounded font-black font-sans">▼ RELEGATION</span>';
+        } else if (i === 0) {
+            statusBadge = '<span class="text-[9px] bg-amber-100 text-amber-800 border border-amber-300 px-1.5 py-0.5 rounded font-black font-sans">👑 #1 SEED</span>';
+        }
 
-                            return `
+        return `
                             <tr class="${borderIndicator} ${isMe ? 'bg-amber-50 font-bold' : 'hover:bg-slate-50 transition'}">
                                 <td class="py-2 px-3 font-sans truncate flex items-center gap-2">
                                     <span class="w-4 font-mono text-[10px] text-slate-400">${i + 1}.</span>
@@ -1805,7 +1881,7 @@ export function renderStandingsTab(gameState) {
                                 <td class="py-2 px-2 text-center text-slate-600">${t.socialProfile?.streetCred || 50}</td>
                                 <td class="py-2 px-3 text-right">${statusBadge}</td>
                             </tr>`;
-                        }).join('')}
+    }).join('')}
                     </tbody>
                 </table>
             </div>
@@ -1858,11 +1934,11 @@ export function renderStandingsTab(gameState) {
                 <!-- Division Lore Box -->
                 <div class="bg-amber-50/70 border border-amber-200/80 rounded-sm p-3 text-xs text-slate-700">
                     <span class="font-bold uppercase tracking-wider text-[10px] text-amber-800 block mb-1">Playground Rulebook</span>
-                    ${activeTier.hasRel 
-                        ? `<p class="leading-relaxed">Teams finishing in the bottom 2 will drop down to Tier 2 next year, losing valuable playground Street Cred and fan turnout.</p>` 
-                        : (activeTier.hasProm 
-                            ? `<p class="leading-relaxed">The top 2 teams will earn direct promotion into Tier 1, earning +20 Street Cred and competing under the floodlights next season.</p>` 
-                            : `<p class="leading-relaxed">Graduating 12-year-olds from this league enter the Rookie Draft pool. Older kids move on to Tier 1 and Tier 2 squads.</p>`)}
+                    ${activeTier.hasRel
+            ? `<p class="leading-relaxed">Teams finishing in the bottom 2 will drop down to Tier 2 next year, losing valuable playground Street Cred and fan turnout.</p>`
+            : (activeTier.hasProm
+                ? `<p class="leading-relaxed">The top 2 teams will earn direct promotion into Tier 1, earning +20 Street Cred and competing under the floodlights next season.</p>`
+                : `<p class="leading-relaxed">Graduating 12-year-olds from this league enter the Rookie Draft pool. Older kids move on to Tier 1 and Tier 2 squads.</p>`)}
                 </div>
 
             </div>
@@ -2304,7 +2380,7 @@ function flushLiveLogs() {
             p.className = "text-xs border-b border-gray-800 pb-1 mb-1 text-gray-300";
             p.textContent = entry;
             elements.simPlayLog?.appendChild(p);
-            
+
             // Update the new "Last Play" ticker at the top of the field
             const ticker = document.getElementById('sim-last-play-ticker');
             if (ticker) {

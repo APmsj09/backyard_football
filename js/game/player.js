@@ -23,7 +23,7 @@ export const positionOverallWeights = {
     TE: { catchingHands: 0.30, blocking: 0.30, strength: 0.25, speed: 0.15 },
 
     // Spread OL across technique and pass/run blocking instincts so pure weight/strength doesn't break it
-    OL: { strength: 0.35, blocking: 0.35, playbookIQ: 0.15, weight: 0.10, toughness: 0.05 },
+    OL: { strength: 0.35, blocking: 0.40, playbookIQ: 0.15, weight: 0.05, toughness: 0.05 },
     DL: { strength: 0.35, blockShedding: 0.35, tackling: 0.20, speed: 0.10 },
     LB: { tackling: 0.30, playbookIQ: 0.25, speed: 0.25, blockShedding: 0.20 },
     DB: { speed: 0.35, coverage: 0.35, agility: 0.20, catchingHands: 0.10 }
@@ -55,35 +55,87 @@ export function estimateBestPosition(scoutedPlayer) {
 
     const allPositions = ['QB', 'RB', 'WR', 'TE', 'OL', 'DL', 'LB', 'DB'];
 
-    allPositions.forEach(pos => {
+    // Start with the player's actual offensive/defensive identity.
+    // Then allow only natural backyard-football conversions.
+    const candidatePositions = new Set([
+        scoutedPlayer.favoriteOffensivePosition,
+        scoutedPlayer.favoriteDefensivePosition
+    ].filter(pos => allPositions.includes(pos)));
+
+    // Natural cross-training / two-way conversions.
+    // These are possibilities, not automatic position changes.
+    if (
+        scoutedPlayer.favoriteOffensivePosition === 'TE' ||
+        scoutedPlayer.favoriteDefensivePosition === 'DL'
+    ) {
+        candidatePositions.add('OL');
+    }
+
+    if (
+        scoutedPlayer.favoriteOffensivePosition === 'OL' ||
+        scoutedPlayer.favoriteDefensivePosition === 'LB'
+    ) {
+        candidatePositions.add('DL');
+    }
+
+    if (scoutedPlayer.favoriteOffensivePosition === 'WR') {
+        candidatePositions.add('TE');
+    }
+
+    if (scoutedPlayer.favoriteOffensivePosition === 'RB') {
+        candidatePositions.add('WR');
+    }
+
+    if (scoutedPlayer.favoriteDefensivePosition === 'DB') {
+        candidatePositions.add('WR');
+    }
+
+    if (scoutedPlayer.favoriteDefensivePosition === 'LB') {
+        candidatePositions.add('DB');
+    }
+
+    // Safety fallback for legacy/malformed players.
+    if (candidatePositions.size === 0) {
+        allPositions.forEach(pos => candidatePositions.add(pos));
+    }
+
+    candidatePositions.forEach(pos => {
         let score = calculateOverall(scoutedPlayer, pos);
 
-        // --- GATEKEEPER SANITY RULES ---
-        // 1. Cannot be a QB unless you have legitimate throwing skill
-        if (pos === 'QB') {
-            if (throwing < 45) score -= 40;
-            if (throwing < 35) score = 0; // Absolute disqualification
+        const isIdentityPosition =
+            pos === scoutedPlayer.favoriteOffensivePosition ||
+            pos === scoutedPlayer.favoriteDefensivePosition;
+
+        // Identity should normally win unless the conversion is meaningfully better.
+        if (isIdentityPosition) {
+            score += 3;
+        } else {
+            score -= 5;
         }
 
-        // 2. Heavy players (>220 lbs) penalized at WR/DB, boosted at OL/DL
+        // --- GATEKEEPER SANITY RULES ---
+
+        // 1. Cannot be a QB without legitimate throwing skill.
+        if (pos === 'QB') {
+            if (throwing < 45) score -= 40;
+            if (throwing < 35) score = 0;
+        }
+
+        // 2. Heavy players (>220 lbs) are poor WR/DB fits,
+        //    but can still become useful trench players.
         if (weight > 220) {
             if (pos === 'WR' || pos === 'DB') score -= 25;
             if (pos === 'OL' || pos === 'DL') score += 5;
         }
 
-        // 3. Light players (<155 lbs) cannot realistically play OL
+        // 3. Very light players cannot realistically become OL.
         if (weight < 155 && pos === 'OL') {
             score -= 30;
         }
 
-        // 4. Slow players (<45 speed) cannot be deep WRs or DBs
+        // 4. Slow players are poor WR/DB candidates.
         if (speed < 45 && (pos === 'WR' || pos === 'DB')) {
             score -= 20;
-        }
-
-        // 5. Mild tie-breaker if it matches their favorite archetype position
-        if (pos === scoutedPlayer.favoriteOffensivePosition || pos === scoutedPlayer.favoriteDefensivePosition) {
-            score += 3;
         }
 
         if (score > highestScore) {

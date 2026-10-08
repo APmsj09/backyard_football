@@ -2,6 +2,7 @@
 
 import { game, getPlayer, getRosterObjects, addMessage, playerMap } from './state.js';
 import { calculateOverall, estimateBestPosition } from './player.js';
+import { offenseFormations, defenseFormations } from '../data.js';
 import { addPlayerToTeam, ROSTER_LIMIT } from './season.js';
 
 export const DRAFT_ROUNDS_ROOKIE = 3;
@@ -18,7 +19,7 @@ export function calculateDraftValue(player, team) {
 
     // AI FOG OF WAR: The AI evaluates players through its Scout's imperfect eyes!
     const scoutAccuracy = scout ? ((scout.ratings?.evalTechnique + scout.ratings?.evalPhysicals) / 200) : 0.5;
-    
+
     // Add scouting noise/error based on scout rating (Elite scout = accurate; Bad scout = +/- 8 OVR error)
     const noise = Math.round((Math.random() - 0.5) * (1.0 - scoutAccuracy) * 16);
     const pos = estimateBestPosition(player);
@@ -42,16 +43,50 @@ export function calculateDraftValue(player, team) {
     const potScore = (potentialMap[player.potential] || 65) * 0.30;
 
     // 3. Positional Need (25%)
+    // Use the team's actual formations as a soft roster-building target.
+    // This creates coherent AI teams without forcing the AI to draft by position.
     const roster = getRosterObjects(team);
-    const countAtPos = roster.filter(p => estimateBestPosition(p) === pos).length;
+
+    const positionCounts = {};
+    roster.forEach(p => {
+        const rosterPos = estimateBestPosition(p);
+        positionCounts[rosterPos] = (positionCounts[rosterPos] || 0) + 1;
+    });
+
+    const offensePersonnel =
+        offenseFormations[team.formations?.offense]?.personnel || {};
+
+    const defensePersonnel =
+        defenseFormations[team.formations?.defense]?.personnel || {};
+
+    const formationTarget =
+        (offensePersonnel[pos] || 0) +
+        (defensePersonnel[pos] || 0);
+
+    const countAtPos = positionCounts[pos] || 0;
+
     let needMultiplier = 1.0;
-    if (pos === 'QB') {
-        needMultiplier = countAtPos === 0 ? 1.8 : (countAtPos === 1 ? 1.1 : 0.4);
-    } else if (['OL', 'DL'].includes(pos)) {
-        needMultiplier = countAtPos < 3 ? 1.5 : (countAtPos < 5 ? 1.1 : 0.6);
+
+    if (formationTarget <= 0) {
+        // Formation doesn't naturally use this position.
+        // Still draftable if the player is excellent, just less urgent.
+        needMultiplier = 0.75;
     } else {
-        needMultiplier = countAtPos < 4 ? 1.4 : (countAtPos < 7 ? 1.0 : 0.7);
+        const positionGap = formationTarget - countAtPos;
+
+        if (positionGap > 0) {
+            // Bigger hole = stronger preference, but keep it soft.
+            needMultiplier = 1.0 + Math.min(0.55, positionGap * 0.18);
+        } else {
+            // Once the formation position is adequately stocked,
+            // the AI gradually looks elsewhere.
+            needMultiplier = Math.max(
+                0.70,
+                1.0 - Math.min(0.30, Math.abs(positionGap) * 0.10)
+            );
+        }
     }
+
     const needScore = (ovr * 0.25) * needMultiplier;
 
     // 4. Coach Scheme & Attribute Bias (10%)
@@ -101,7 +136,7 @@ export function setupDraft() {
             sortedTeams = game.nextDraftOrder.map(id => mainTeams.find(t => t.id === id)).filter(Boolean);
         }
         if (!sortedTeams || sortedTeams.length === 0) {
-            sortedTeams = [...mainTeams].sort((a, b) => 
+            sortedTeams = [...mainTeams].sort((a, b) =>
                 (a.wins || 0) - (b.wins || 0) || (b.losses || 0) - (a.losses || 0)
             );
         }
@@ -166,7 +201,7 @@ export function simulateHistoricalDraft(yearNum) {
     if (!game) return;
     setupDraft();
     const draftResults = [];
-    
+
     while (game.currentPick < game.draftOrder.length) {
         const team = game.draftOrder[game.currentPick];
         const pickedPlayer = simulateAIPick(team);

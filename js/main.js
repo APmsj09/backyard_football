@@ -440,6 +440,7 @@ async function handleAdvanceWeek() {
 
     // 1. Initial Draft (Year 1/Year 4 pre-season)
     if (gameState.currentWeek === 0 && !gameState.draftCompleted) {
+        UI.resetDraftWatchlist();
         Game.setupDraft();
         gameState = Game.getGameState();
         selectedPlayerId = null;
@@ -632,11 +633,11 @@ export function openPlayerCard(playerId) {
         growthHtml = `
             <div class="space-y-2">
                 ${player.progression.slice().reverse().map(pr => {
-                    const gains = pr.improvements && pr.improvements.length > 0
-                        ? pr.improvements.map(g => `<span class="bg-emerald-50 text-emerald-800 border border-emerald-200 px-1.5 py-0.5 rounded text-[10px] font-bold mr-1"><b>${g.attr}</b> +${g.increase}</span>`).join('')
-                        : '<span class="text-slate-400 text-[10px]">Natural physical development</span>';
+            const gains = pr.improvements && pr.improvements.length > 0
+                ? pr.improvements.map(g => `<span class="bg-emerald-50 text-emerald-800 border border-emerald-200 px-1.5 py-0.5 rounded text-[10px] font-bold mr-1"><b>${g.attr}</b> +${g.increase}</span>`).join('')
+                : '<span class="text-slate-400 text-[10px]">Natural physical development</span>';
 
-                    return `
+            return `
                     <div class="bg-slate-50 border border-slate-200 p-2.5 rounded text-xs">
                         <div class="flex justify-between items-center mb-1 pb-1 border-b border-slate-200/60 font-mono">
                             <span class="font-bold text-slate-800">Season ${pr.year} (Age ${pr.age})</span>
@@ -644,7 +645,7 @@ export function openPlayerCard(playerId) {
                         </div>
                         <div class="pt-1">${gains}</div>
                     </div>`;
-                }).join('')}
+        }).join('')}
             </div>`;
     }
 
@@ -666,8 +667,8 @@ export function openPlayerCard(playerId) {
                 </thead>
                 <tbody class="divide-y divide-slate-100 text-[11px]">
                     ${player.progression.map(pr => {
-                        const st = pr.stats || {};
-                        return `
+            const st = pr.stats || {};
+            return `
                         <tr>
                             <td class="p-1.5 font-bold">Y${pr.year}</td>
                             <td class="p-1.5 font-sans truncate max-w-[90px]">${pr.teamName}</td>
@@ -677,7 +678,7 @@ export function openPlayerCard(playerId) {
                             <td class="p-1.5 text-center font-bold text-amber-600">${st.touchdowns || 0}</td>
                             <td class="p-1.5 text-center">${st.tackles || 0}</td>
                         </tr>`;
-                    }).join('')}
+        }).join('')}
                 </tbody>
             </table>`;
     }
@@ -829,6 +830,9 @@ function handleSetCaptain(playerId) {
 function handleGoToNextDraft() {
     gameState = Game.getGameState();
     if (!gameState) return;
+
+    UI.resetDraftWatchlist();
+
     gameState.draftCompleted = false;
     Game.setupDraft();
     selectedPlayerId = null;
@@ -845,14 +849,14 @@ function renderSocialNetworkTab(gameState) {
     const roster = Game.getUIRosterObjects(gameState.playerTeam);
     const cliquesMap = {};
     let totalChem = 0;
-    
+
     roster.forEach(p => {
         const clique = p.personality?.clique || 'Unknown';
         if (!cliquesMap[clique]) cliquesMap[clique] = [];
         cliquesMap[clique].push(p);
-        
+
         let localChem = (p.personality?.likeability || 50) + (p.expectations?.happiness || 100);
-        
+
         // Boost for having best friend on team
         if (p.social?.bestFriendId && roster.some(r => r.id === p.social.bestFriendId)) localChem += 20;
         // Penalty for rival on team
@@ -875,27 +879,27 @@ function renderSocialNetworkTab(gameState) {
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
     `;
 
-    Object.entries(cliquesMap).sort((a,b) => b[1].length - a[1].length).forEach(([clique, members]) => {
+    Object.entries(cliquesMap).sort((a, b) => b[1].length - a[1].length).forEach(([clique, members]) => {
         html += `
             <div class="bg-white p-3 rounded-sm border border-slate-200 shadow-sm">
                 <h5 class="font-bold text-slate-700 uppercase tracking-wider text-xs border-b pb-1 mb-2">${clique} (${members.length})</h5>
                 <div class="space-y-2">
                     ${members.map(p => {
-                        const egoColor = p.personality?.ego > 75 ? 'text-rose-600' : 'text-slate-500';
-                        const bestFriend = roster.find(r => r.id === p.social?.bestFriendId);
-                        const bfBadge = bestFriend ? `<span class="bg-amber-100 text-amber-800 px-1 py-0.5 text-[9px] rounded font-bold ml-1">🤝 BFF: ${bestFriend.name.split(' ')[0]}</span>` : '';
-                        
-                        return `
+            const egoColor = p.personality?.ego > 75 ? 'text-rose-600' : 'text-slate-500';
+            const bestFriend = roster.find(r => r.id === p.social?.bestFriendId);
+            const bfBadge = bestFriend ? `<span class="bg-amber-100 text-amber-800 px-1 py-0.5 text-[9px] rounded font-bold ml-1">🤝 BFF: ${bestFriend.name.split(' ')[0]}</span>` : '';
+
+            return `
                         <div class="flex justify-between items-center text-xs bg-slate-50 p-1.5 rounded cursor-pointer hover:bg-slate-100" onclick="app.openPlayerCard('${p.id}')">
                             <span class="font-semibold text-slate-800">${p.name} ${bfBadge}</span>
                             <span class="font-mono text-[9px] ${egoColor}">EGO: ${p.personality?.ego || 50}</span>
                         </div>`;
-                    }).join('')}
+        }).join('')}
                 </div>
             </div>
         `;
     });
-    
+
     html += `</div>`;
     container.innerHTML = html;
 }
@@ -1003,9 +1007,9 @@ function main() {
     document.getElementById('sim-speed-faster')?.addEventListener('click', () => UI.setSimSpeed(10));
 
     // Formation Selectors in Depth Chart
-    document.getElementById('offense-formation-select')?.addEventListener('change', handleFormationChange);
+    /*document.getElementById('offense-formation-select')?.addEventListener('change', handleFormationChange);
     document.getElementById('defense-formation-select')?.addEventListener('change', handleFormationChange);
-
+    */
     // Draft Screen Tabs
     document.querySelectorAll('.draft-tab-btn').forEach(btn => {
         btn.onclick = () => {
@@ -1033,7 +1037,7 @@ function main() {
     document.getElementById('draft-filter-pos')?.addEventListener('change', () => {
         if (gameState) UI.renderDraftPool(gameState, handlePlayerSelectInDraft, currentSortColumn, currentSortDirection);
     });
-    document.querySelector('#draft-screen thead tr')?.addEventListener('click', (e) => {
+    /*document.querySelector('#draft-screen thead tr')?.addEventListener('click', (e) => {
         const headerCell = e.target.closest('th[data-sort]');
         if (!headerCell || !gameState) return;
 
@@ -1047,13 +1051,39 @@ function main() {
 
         UI.renderDraftPool(gameState, handlePlayerSelectInDraft, currentSortColumn, currentSortDirection);
         UI.updateDraftSortIndicators(currentSortColumn, currentSortDirection);
-    });
+    });*/
 
     // Draft Sub-View Tabs (Overview, Physicals, Skills, Watchlist)
     document.querySelectorAll('.draft-view-btn').forEach(btn => {
         btn.addEventListener('click', () => {
-            UI.setDraftView(btn.dataset.view);
-            if (gameState) UI.renderDraftPool(gameState, handlePlayerSelectInDraft, currentSortColumn, currentSortDirection);
+            const view = btn.dataset.view;
+
+            const defaultSorts = {
+                overview: 'potential',
+                physicals: 'speed',
+                skills: 'playbookIQ',
+                watchlist: 'potential'
+            };
+
+            UI.setDraftView(view);
+
+            // Don't silently keep sorting by a column that isn't visible.
+            currentSortColumn = defaultSorts[view] || 'potential';
+            currentSortDirection = 'desc';
+
+            if (gameState) {
+                UI.renderDraftPool(
+                    gameState,
+                    handlePlayerSelectInDraft,
+                    currentSortColumn,
+                    currentSortDirection
+                );
+
+                UI.updateDraftSortIndicators(
+                    currentSortColumn,
+                    currentSortDirection
+                );
+            }
         });
     });
 
