@@ -163,48 +163,74 @@ const archetypes = [
     { name: 'Scrambler', off: 'QB', def: 'DB', weightMod: 0.95, heightMod: -1, keyAttrs: ['speed', 'agility', 'throwingAccuracy', 'stamina'], speedMod: 1.2, strMod: 0.85 },
     { name: 'Gunslinger', off: 'QB', def: 'DB', weightMod: 1.05, heightMod: 3, keyAttrs: ['throwingAccuracy', 'strength', 'clutch', 'playbookIQ'], speedMod: 0.9, strMod: 1.25 },
     { name: 'Heavy Crusher QB', off: 'QB', def: 'DL', weightMod: 1.4, heightMod: 4, keyAttrs: ['strength', 'throwingAccuracy', 'toughness', 'blockShedding'], speedMod: 0.65, strMod: 1.3 },
+    { name: 'Game Manager', off: 'QB', def: 'DB', weightMod: 1.0, heightMod: 0, keyAttrs: ['playbookIQ', 'consistency', 'throwingAccuracy', 'coverage'], speedMod: 0.9, strMod: 0.9 },
+    { name: 'Dual-Threat', off: 'QB', def: 'DB', weightMod: 1.0, heightMod: 1, keyAttrs: ['speed', 'throwingAccuracy', 'agility', 'stamina'], speedMod: 1.15, strMod: 1.0 },
+    { name: 'Backyard Magician', off: 'QB', def: 'DB', weightMod: 0.9, heightMod: -1, keyAttrs: ['agility', 'clutch', 'throwingAccuracy', 'speed'], speedMod: 1.1, strMod: 0.95 },
+    { name: 'Cannon Arm', off: 'QB', def: 'DL', weightMod: 1.1, heightMod: 2, keyAttrs: ['strength', 'throwingAccuracy', 'tackling'], speedMod: 0.8, strMod: 1.3 },
 
     // --- BALL CARRIERS ---
     { name: 'Power Back', off: 'RB', def: 'LB', weightMod: 1.25, heightMod: -1, keyAttrs: ['strength', 'toughness', 'tackling', 'stamina'], speedMod: 0.9, strMod: 1.2 },
     { name: 'Speed Back', off: 'RB', def: 'DB', weightMod: 0.85, heightMod: -2, keyAttrs: ['speed', 'agility', 'clutch', 'catchingHands'], speedMod: 1.25, strMod: 0.75 },
     { name: 'Workhorse', off: 'RB', def: 'LB', weightMod: 1.1, heightMod: 0, keyAttrs: ['stamina', 'consistency', 'tackling', 'toughness'], speedMod: 1.0, strMod: 1.0 },
     { name: 'Receiving Back', off: 'RB', def: 'DB', weightMod: 0.9, heightMod: -1, keyAttrs: ['catchingHands', 'agility', 'speed', 'coverage'], speedMod: 1.1, strMod: 0.8 },
+    { name: 'Bruiser', off: 'RB', def: 'DL', weightMod: 1.4, heightMod: 0, keyAttrs: ['strength', 'toughness', 'stamina', 'blocking'], speedMod: 0.75, strMod: 1.3 },
+    { name: 'Third-Down Back', off: 'RB', def: 'DB', weightMod: 0.95, heightMod: 0, keyAttrs: ['blocking', 'catchingHands', 'playbookIQ', 'agility'], speedMod: 1.0, strMod: 0.9 },
+    { name: 'Change-of-Pace', off: 'RB', def: 'DB', weightMod: 0.8, heightMod: -3, keyAttrs: ['speed', 'agility', 'clutch'], speedMod: 1.3, strMod: 0.6 },
+    { name: 'Slashing Back', off: 'RB', def: 'LB', weightMod: 1.0, heightMod: 0, keyAttrs: ['agility', 'speed', 'playbookIQ', 'consistency'], speedMod: 1.1, strMod: 1.0 },
 
     // --- PASS CATCHERS ---
     { name: 'Deep Threat', off: 'WR', def: 'DB', weightMod: 0.85, heightMod: 1, keyAttrs: ['speed', 'agility', 'clutch', 'coverage'], speedMod: 1.3, strMod: 0.7 },
     { name: 'Route Technician', off: 'WR', def: 'DB', weightMod: 1.0, heightMod: 0, keyAttrs: ['agility', 'playbookIQ', 'catchingHands', 'consistency'], speedMod: 1.0, strMod: 1.0 },
     { name: 'Red Zone Specialist', off: 'WR', def: 'LB', weightMod: 1.15, heightMod: 7, keyAttrs: ['height', 'catchingHands', 'strength', 'clutch'], speedMod: 0.8, strMod: 1.15 },
     { name: 'Slot Brawler', off: 'WR', def: 'LB', weightMod: 1.1, heightMod: 0, keyAttrs: ['toughness', 'catchingHands', 'tackling', 'strength'], speedMod: 0.95, strMod: 1.1 },
+    { name: 'Possession Receiver', off: 'WR', def: 'LB', weightMod: 1.1, heightMod: 2, keyAttrs: ['catchingHands', 'toughness', 'clutch', 'strength'], speedMod: 0.85, strMod: 1.1 },
+    { name: 'Gadget Player', off: 'WR', def: 'DB', weightMod: 0.8, heightMod: -2, keyAttrs: ['agility', 'speed', 'catchingHands', 'playbookIQ'], speedMod: 1.25, strMod: 0.7 },
+    { name: 'Jump Ball Specialist', off: 'WR', def: 'DB', weightMod: 1.05, heightMod: 6, keyAttrs: ['height', 'catchingHands', 'clutch', 'strength'], speedMod: 0.95, strMod: 1.0 },
 
     // --- TIGHT ENDS ---
     { name: 'Vertical TE', off: 'TE', def: 'LB', weightMod: 1.3, heightMod: 5, keyAttrs: ['speed', 'catchingHands', 'height', 'playbookIQ'], speedMod: 0.9, strMod: 1.1 },
     { name: 'Jumbo Athlete', off: 'TE', def: 'DL', weightMod: 1.5, heightMod: 4, keyAttrs: ['strength', 'blocking', 'catchingHands', 'blockShedding'], speedMod: 0.75, strMod: 1.3 },
     { name: 'Lead Blocker TE', off: 'TE', def: 'LB', weightMod: 1.4, heightMod: 1, keyAttrs: ['blocking', 'strength', 'tackling', 'toughness'], speedMod: 0.8, strMod: 1.25 },
     { name: 'Hybrid Wing', off: 'TE', def: 'DB', weightMod: 1.15, heightMod: 3, keyAttrs: ['agility', 'catchingHands', 'coverage', 'speed'], speedMod: 1.0, strMod: 0.95 },
+    { name: 'Move TE', off: 'TE', def: 'DB', weightMod: 1.1, heightMod: 2, keyAttrs: ['speed', 'agility', 'catchingHands', 'playbookIQ'], speedMod: 1.1, strMod: 0.9 },
+    { name: 'Extra Lineman', off: 'TE', def: 'DL', weightMod: 1.5, heightMod: 2, keyAttrs: ['blocking', 'strength', 'toughness', 'tackling'], speedMod: 0.6, strMod: 1.3 },
+    { name: 'H-Back', off: 'TE', def: 'LB', weightMod: 1.2, heightMod: -1, keyAttrs: ['blocking', 'strength', 'speed', 'agility'], speedMod: 0.95, strMod: 1.1 },
 
     // --- OFFENSIVE LINE ---
     { name: 'Road Grader', off: 'OL', def: 'DL', weightMod: 1.9, heightMod: 2, keyAttrs: ['strength', 'blocking', 'weight', 'toughness'], speedMod: 0.45, strMod: 1.5 },
     { name: 'Mobile Guard', off: 'OL', def: 'LB', weightMod: 1.4, heightMod: 1, keyAttrs: ['agility', 'blocking', 'playbookIQ', 'tackling'], speedMod: 0.8, strMod: 1.1 },
     { name: 'Wall Protector', off: 'OL', def: 'DL', weightMod: 1.6, heightMod: 6, keyAttrs: ['blocking', 'height', 'strength', 'consistency'], speedMod: 0.6, strMod: 1.2 },
     { name: 'Technician OL', off: 'OL', def: 'DL', weightMod: 1.5, heightMod: 3, keyAttrs: ['playbookIQ', 'blocking', 'consistency', 'blockShedding'], speedMod: 0.7, strMod: 1.1 },
+    { name: 'Mauler', off: 'OL', def: 'DL', weightMod: 2.0, heightMod: 1, keyAttrs: ['strength', 'blocking', 'toughness', 'weight'], speedMod: 0.4, strMod: 1.5 },
+    { name: 'Athletic Tackle', off: 'OL', def: 'DL', weightMod: 1.3, heightMod: 4, keyAttrs: ['agility', 'blocking', 'speed', 'stamina'], speedMod: 0.9, strMod: 1.1 },
+    { name: 'Center/General', off: 'OL', def: 'LB', weightMod: 1.4, heightMod: 0, keyAttrs: ['playbookIQ', 'blocking', 'consistency', 'toughness'], speedMod: 0.7, strMod: 1.1 },
 
     // --- DEFENSIVE LINE ---
     { name: 'Speed Rusher', off: 'OL', def: 'DL', weightMod: 1.25, heightMod: 4, keyAttrs: ['speed', 'blockShedding', 'agility', 'clutch'], speedMod: 1.05, strMod: 1.05 },
     { name: 'Run Stuffer', off: 'TE', def: 'DL', weightMod: 1.7, heightMod: 1, keyAttrs: ['strength', 'tackling', 'weight', 'toughness'], speedMod: 0.55, strMod: 1.4 },
     { name: 'Bull Rusher', off: 'OL', def: 'DL', weightMod: 1.6, heightMod: 2, keyAttrs: ['strength', 'blockShedding', 'toughness', 'blocking'], speedMod: 0.7, strMod: 1.35 },
     { name: 'Versatile End', off: 'TE', def: 'DL', weightMod: 1.4, heightMod: 4, keyAttrs: ['blockShedding', 'tackling', 'playbookIQ', 'strength'], speedMod: 0.85, strMod: 1.2 },
+    { name: 'Nose Tackle', off: 'OL', def: 'DL', weightMod: 2.2, heightMod: 0, keyAttrs: ['weight', 'strength', 'tackling', 'toughness'], speedMod: 0.3, strMod: 1.6 },
+    { name: 'Edge Setter', off: 'TE', def: 'DL', weightMod: 1.3, heightMod: 2, keyAttrs: ['strength', 'tackling', 'playbookIQ', 'blocking'], speedMod: 0.8, strMod: 1.2 },
+    { name: 'Pass Rush Specialist', off: 'WR', def: 'DL', weightMod: 1.0, heightMod: 1, keyAttrs: ['speed', 'blockShedding', 'agility', 'stamina'], speedMod: 1.2, strMod: 0.9 },
 
     // --- LINEBACKERS ---
     { name: 'Middle Hawk', off: 'RB', def: 'LB', weightMod: 1.15, heightMod: 1, keyAttrs: ['playbookIQ', 'tackling', 'coverage', 'speed'], speedMod: 1.0, strMod: 1.0 },
     { name: 'Hard Hitter', off: 'RB', def: 'LB', weightMod: 1.3, heightMod: 0, keyAttrs: ['tackling', 'strength', 'toughness', 'clutch'], speedMod: 0.9, strMod: 1.25 },
     { name: 'Blitz Specialist', off: 'WR', def: 'LB', weightMod: 1.1, heightMod: 2, keyAttrs: ['speed', 'blockShedding', 'tackling', 'agility'], speedMod: 1.15, strMod: 1.05 },
     { name: 'Coverage LB', off: 'TE', def: 'LB', weightMod: 1.05, heightMod: 3, keyAttrs: ['coverage', 'agility', 'playbookIQ', 'catchingHands'], speedMod: 1.05, strMod: 0.95 },
+    { name: 'Sideline-to-Sideline', off: 'RB', def: 'LB', weightMod: 0.95, heightMod: 0, keyAttrs: ['speed', 'agility', 'tackling', 'stamina'], speedMod: 1.2, strMod: 0.9 },
+    { name: 'Thumper', off: 'OL', def: 'LB', weightMod: 1.4, heightMod: -1, keyAttrs: ['tackling', 'strength', 'toughness', 'blocking'], speedMod: 0.7, strMod: 1.3 },
+    { name: 'Hybrid Safety', off: 'WR', def: 'LB', weightMod: 0.9, heightMod: 1, keyAttrs: ['coverage', 'speed', 'tackling', 'agility'], speedMod: 1.15, strMod: 0.85 },
 
     // --- SECONDARY ---
     { name: 'Island Corner', off: 'WR', def: 'DB', weightMod: 0.85, heightMod: 0, keyAttrs: ['coverage', 'speed', 'agility', 'consistency'], speedMod: 1.3, strMod: 0.8 },
     { name: 'Ballhawk Safety', off: 'WR', def: 'DB', weightMod: 0.95, heightMod: 2, keyAttrs: ['catchingHands', 'playbookIQ', 'coverage', 'clutch'], speedMod: 1.1, strMod: 0.9 },
     { name: 'Nickel Stopper', off: 'RB', def: 'DB', weightMod: 1.05, heightMod: -1, keyAttrs: ['tackling', 'agility', 'speed', 'toughness'], speedMod: 1.1, strMod: 1.1 },
-    { name: 'Zone Specialist', off: 'WR', def: 'DB', weightMod: 1.0, heightMod: 3, keyAttrs: ['playbookIQ', 'coverage', 'height', 'catchingHands'], speedMod: 0.95, strMod: 1.0 }
+    { name: 'Zone Specialist', off: 'WR', def: 'DB', weightMod: 1.0, heightMod: 3, keyAttrs: ['playbookIQ', 'coverage', 'height', 'catchingHands'], speedMod: 0.95, strMod: 1.0 },
+    { name: 'Press Corner', off: 'WR', def: 'DB', weightMod: 1.1, heightMod: 2, keyAttrs: ['strength', 'coverage', 'toughness', 'speed'], speedMod: 1.0, strMod: 1.2 },
+    { name: 'Box Safety', off: 'RB', def: 'DB', weightMod: 1.15, heightMod: 0, keyAttrs: ['tackling', 'strength', 'playbookIQ', 'toughness'], speedMod: 0.9, strMod: 1.1 },
+    { name: 'Free Safety', off: 'WR', def: 'DB', weightMod: 0.9, heightMod: 1, keyAttrs: ['speed', 'coverage', 'playbookIQ', 'agility'], speedMod: 1.15, strMod: 0.85 }
 ];
 
 // Targeted signature boosts for specific archetypes
@@ -214,41 +240,67 @@ const archetypeBoosts = {
     'Scrambler': { speed: 12, agility: 12, throwingAccuracy: 10 },
     'Gunslinger': { throwingAccuracy: 15, strength: 12 },
     'Heavy Crusher QB': { strength: 12, toughness: 10, throwingAccuracy: 8 },
+    'Game Manager': { playbookIQ: 12, consistency: 15, throwingAccuracy: 8 },
+    'Dual-Threat': { speed: 8, agility: 8, throwingAccuracy: 10 },
+    'Backyard Magician': { agility: 15, clutch: 12, throwingAccuracy: 10 },
+    'Cannon Arm': { strength: 18, throwingAccuracy: 8 },
 
     'Power Back': { strength: 12, toughness: 10, speed: 6 },
     'Speed Back': { speed: 15, agility: 12 },
     'Workhorse': { stamina: 15, consistency: 12, speed: 5 },
     'Receiving Back': { catchingHands: 12, agility: 10, speed: 8 },
+    'Bruiser': { strength: 12, toughness: 12, stamina: 5 },
+    'Third-Down Back': { blocking: 10, catchingHands: 10, playbookIQ: 5 },
+    'Change-of-Pace': { speed: 10, agility: 12 },
+    'Slashing Back': { agility: 10, speed: 8, playbookIQ: 5 },
 
     'Deep Threat': { speed: 8, agility: 5 },
     'Route Technician': { agility: 7, playbookIQ: 5 },
     'Red Zone Specialist': { catchingHands: 7, strength: 5 },
     'Slot Brawler': { toughness: 6, catchingHands: 5 },
+    'Possession Receiver': { catchingHands: 12, clutch: 10, toughness: 5 },
+    'Gadget Player': { agility: 12, speed: 8 },
+    'Jump Ball Specialist': { catchingHands: 12, clutch: 8 },
 
     'Vertical TE': { speed: 6, catchingHands: 6 },
     'Jumbo Athlete': { strength: 7, blocking: 6 },
     'Lead Blocker TE': { blocking: 8, strength: 6 },
     'Hybrid Wing': { agility: 6, catchingHands: 6 },
+    'Move TE': { speed: 8, catchingHands: 8 },
+    'Extra Lineman': { blocking: 15, strength: 10 },
+    'H-Back': { blocking: 10, speed: 6, strength: 5 },
 
     'Road Grader': { strength: 8, blocking: 7 },
     'Mobile Guard': { agility: 7, blocking: 5 },
     'Wall Protector': { blocking: 8, consistency: 5 },
     'Technician OL': { playbookIQ: 7, blocking: 6 },
+    'Mauler': { strength: 15, blocking: 10 },
+    'Athletic Tackle': { agility: 12, blocking: 8 },
+    'Center/General': { playbookIQ: 15, blocking: 8 },
 
     'Speed Rusher': { speed: 7, blockShedding: 6 },
     'Run Stuffer': { strength: 8, tackling: 6 },
     'Bull Rusher': { strength: 8, blockShedding: 6 },
     'Versatile End': { blockShedding: 6, tackling: 6 },
+    'Nose Tackle': { strength: 15, tackling: 10 },
+    'Edge Setter': { tackling: 12, strength: 8 },
+    'Pass Rush Specialist': { blockShedding: 12, speed: 10 },
 
     'Middle Hawk': { playbookIQ: 7, tackling: 6 },
     'Hard Hitter': { tackling: 7, toughness: 6 },
     'Blitz Specialist': { speed: 6, blockShedding: 6 },
     'Coverage LB': { coverage: 7, playbookIQ: 5 },
+    'Sideline-to-Sideline': { speed: 12, tackling: 8 },
+    'Thumper': { tackling: 15, strength: 10 },
+    'Hybrid Safety': { coverage: 10, speed: 8 },
 
     'Island Corner': { coverage: 8, speed: 6 },
     'Ballhawk Safety': { catchingHands: 6, playbookIQ: 6 },
     'Nickel Stopper': { tackling: 6, agility: 6 },
-    'Zone Specialist': { playbookIQ: 7, coverage: 6 }
+    'Zone Specialist': { playbookIQ: 7, coverage: 6 },
+    'Press Corner': { strength: 10, coverage: 10 },
+    'Box Safety': { tackling: 12, strength: 8 },
+    'Free Safety': { coverage: 12, playbookIQ: 8 }
 };
 
 export function gaussianRandom(mean = 0, stdev = 1) {
@@ -272,6 +324,60 @@ export function generateDraftClassModifiers() {
             DB: Math.round(gaussianRandom(0, 4))
         }
     };
+}
+
+export function getProspectSignatureSkills(player, pos) {
+    const tech = player.attributes?.technical || {};
+    const phys = player.attributes?.physical || {};
+    const ment = player.attributes?.mental || {};
+
+    switch (pos) {
+        case 'QB':
+            return [
+                { label: 'THR', val: tech.throwingAccuracy ?? '?' },
+                { label: 'IQ', val: ment.playbookIQ ?? '?' }
+            ];
+        case 'RB':
+            return [
+                { label: 'SPD', val: phys.speed ?? '?' },
+                { label: 'AGI', val: phys.agility ?? '?' }
+            ];
+        case 'WR':
+            return [
+                { label: 'HND', val: tech.catchingHands ?? '?' },
+                { label: 'SPD', val: phys.speed ?? '?' }
+            ];
+        case 'TE':
+            return [
+                { label: 'HND', val: tech.catchingHands ?? '?' },
+                { label: 'BLK', val: tech.blocking ?? '?' }
+            ];
+        case 'OL':
+            return [
+                { label: 'BLK', val: tech.blocking ?? '?' },
+                { label: 'STR', val: phys.strength ?? '?' }
+            ];
+        case 'DL':
+            return [
+                { label: 'BSH', val: tech.blockShedding ?? '?' },
+                { label: 'STR', val: phys.strength ?? '?' }
+            ];
+        case 'LB':
+            return [
+                { label: 'TKL', val: tech.tackling ?? '?' },
+                { label: 'IQ', val: ment.playbookIQ ?? '?' }
+            ];
+        case 'DB':
+            return [
+                { label: 'COV', val: (tech.coverage ?? tech.passCoverage) ?? '?' },
+                { label: 'SPD', val: phys.speed ?? '?' }
+            ];
+        default:
+            return [
+                { label: 'SPD', val: phys.speed ?? '?' },
+                { label: 'STR', val: phys.strength ?? '?' }
+            ];
+    }
 }
 
 export function generatePlayer(minAge = 12, maxAge = 18, classModifiers = null) {

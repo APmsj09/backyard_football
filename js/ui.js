@@ -4,7 +4,7 @@ import {
     getRosterObjects, getPlayer, rebuildDepthChartFromOrder, assignPlayerToSlot
 } from './game.js';
 import { offenseFormations, defenseFormations, relationshipLevels } from './data.js';
-import { positionOverallWeights, estimateBestPosition, calculateOverall } from './game/player.js';
+import { positionOverallWeights, estimateBestPosition, calculateOverall, getProspectSignatureSkills } from './game/player.js';
 import { formatHeight } from './utils.js';
 import { drawFieldVisualization, formatGameClock, showPlayOverlay } from './ui/field_visualizer.js';
 import { renderDepthOrderPane } from './ui/depth_order.js';
@@ -380,12 +380,12 @@ export function renderDraftPool(gameState, onPlayerSelect, sortColumn = 'potenti
                 <tr>
                     <th class="py-2 px-2 text-center w-8">★</th>
                     <th class="py-2 px-2 text-center w-12 cursor-pointer hover:bg-slate-200" data-sort="position">Pos</th>
-                    <th class="py-2 px-3 text-left cursor-pointer hover:bg-slate-200" data-sort="name">Prospect</th>
+                    <th class="py-2 px-3 text-left cursor-pointer hover:bg-slate-200" data-sort="name">Prospect / Style</th>
                     <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-200" data-sort="age">Age</th>
                     <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-200" data-sort="potential">Pot</th>
                     <th class="py-2 px-2 text-center">Rel</th>
-                    <th class="py-2 px-2 text-center">Hgt / Wgt</th>
-                    <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-200 text-blue-600" data-sort="speed">Speed</th>
+                    <th class="py-2 px-2 text-center">Frame</th>
+                    <th class="py-2 px-3 text-center">Key Skills</th>
                     <th class="py-2 px-2 text-center">Est OVR</th>
                 </tr>`;
         } else if (activeDraftView === 'physicals') {
@@ -483,16 +483,26 @@ export function renderDraftPool(gameState, onPlayerSelect, sortColumn = 'potenti
         const posBadge = `<span class="bg-slate-100 text-slate-800 font-bold text-[10px] px-1.5 py-0.5 rounded border border-slate-300">${pos}</span>`;
 
         if (activeDraftView === 'overview') {
+            const sigSkills = getProspectSignatureSkills(scouted, pos);
+            const sigSkillsHtml = sigSkills.map(s => 
+                `<span class="inline-block bg-slate-100 text-slate-800 text-[10px] px-1.5 py-0.5 rounded font-mono mr-1 border border-slate-200">
+                    <span class="text-slate-500 font-normal">${s.label}:</span> <b>${s.val}</b>
+                </span>`
+            ).join('');
+
             row.innerHTML = `
                 <td class="py-2 px-2 text-center">${starBtn}</td>
                 <td class="py-2 px-2 text-center">${posBadge}</td>
-                <td class="py-2 px-3 font-semibold text-slate-900 font-sans truncate max-w-[140px]">${scouted.name}</td>
-                <td class="text-center py-2 px-2 text-slate-600">${scouted.age}</td>
+                <td class="py-2 px-3 font-sans truncate max-w-[150px]">
+                    <span class="block font-semibold text-slate-900 truncate leading-tight">${scouted.name}</span>
+                    <span class="block text-[10px] text-slate-500 truncate leading-tight">${scouted.archetypeName || 'Athlete'}</span>
+                </td>
+                <td class="text-center py-2 px-2 text-slate-600 font-mono">${scouted.age}</td>
                 <td class="text-center py-2 px-2 font-bold ${scouted.potential === 'A' ? 'text-amber-600' : (scouted.potential === 'B' ? 'text-blue-600' : 'text-slate-500')}">${scouted.potential}</td>
                 <td class="text-center py-2 px-2 ${relInfo.color} text-[10px] uppercase font-sans font-bold" title="${relInfo.name}">${relInfo.name.substring(0, 4)}</td>
                 <td class="text-center py-2 px-2 text-slate-500 text-[10px]">${formatHeight(scouted.attributes?.physical?.height)} / ${scouted.attributes?.physical?.weight}#</td>
-                <td class="text-center py-2 px-2 text-blue-600 font-bold">${scouted.attributes?.physical?.speed ?? '?'}</td>
-                <td class="text-center py-2 px-2 font-black text-slate-900">${ovr}</td>
+                <td class="text-center py-2 px-3 whitespace-nowrap">${sigSkillsHtml}</td>
+                <td class="text-center py-2 px-2 font-black text-slate-900 font-mono">${ovr}</td>
             `;
         } else if (activeDraftView === 'physicals') {
             row.innerHTML = `
@@ -647,6 +657,7 @@ export function renderSelectedPlayerCard(player, gameState) {
 
             <!-- Personality & Clique Bar -->
             <div class="flex flex-wrap items-center gap-1.5 mb-2 text-[10px]">
+                <span class="bg-amber-100 text-amber-900 font-black px-1.5 py-0.5 rounded border border-amber-300">Style: ${player.archetypeName || 'Athlete'}</span>
                 <span class="bg-indigo-100 text-indigo-900 font-bold px-1.5 py-0.5 rounded border border-indigo-200">Clique: ${clique}</span>
                 <span class="bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded font-mono">Ethic: <b>${workEthic}</b></span>
                 <span class="${ego > 70 ? 'bg-rose-100 text-rose-800 font-bold' : 'bg-slate-100 text-slate-700'} px-1.5 py-0.5 rounded font-mono">Ego: <b>${ego}</b></span>
