@@ -127,11 +127,12 @@ export function aiManageTeamStaff(team, gameState) {
 
         // Hire best fitting available replacement
         if (gameState?.availableStaff && gameState.availableStaff.length > 0) {
-            // Find coach with highest scheme mastery
-            gameState.availableStaff.sort((a, b) => 
-                (b.ratings?.offSchemeMastery + b.ratings?.defSchemeMastery) - 
-                (a.ratings?.offSchemeMastery + a.ratings?.defSchemeMastery)
-            );
+            // Find coach with highest scheme mastery (safely default to 0 for scouts/trainers)
+            gameState.availableStaff.sort((a, b) => {
+                const aScore = (a.ratings?.offSchemeMastery || 0) + (a.ratings?.defSchemeMastery || 0);
+                const bScore = (b.ratings?.offSchemeMastery || 0) + (b.ratings?.defSchemeMastery || 0);
+                return bScore - aScore;
+            });
             const candidateIdx = gameState.availableStaff.findIndex(s => s.role === 'coach' || s.formerPlayerBio);
             if (candidateIdx > -1) {
                 const newHire = gameState.availableStaff.splice(candidateIdx, 1)[0];

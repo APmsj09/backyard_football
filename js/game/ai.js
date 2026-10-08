@@ -615,7 +615,7 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
         let score = Math.min(minProjectedSeparation, 6) * 10;
 
         if (rec.assignment === 'Screen_Wait') {
-            if (playState.tick < 45) return { score: -100 };
+            if (playState.tick < 45) return { score: -100, info: { state: rec, separation: minProjectedSeparation } };
             score += 80;
 
             if (minProjectedSeparation < 1.0) {
@@ -764,6 +764,12 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
         // Good decision makers get more value from genuinely good windows.
         // They do NOT get a bonus simply because a receiver is highly rated.
         score *= riskTolerance;
+
+        return {
+            score: score,
+            separation: minProjectedSeparation,
+            info: { state: rec, separation: minProjectedSeparation }
+        };
     };
 
     if (qbState.action === 'qb_scramble') {
