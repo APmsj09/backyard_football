@@ -360,14 +360,22 @@ async function handleDraftEnd() {
     gameState = Game.getGameState();
     gameState.draftCompleted = true;
 
+    // Launch the Post-Draft Free Agency Mini-Game!
+    UI.startOffseasonFAMinigame(gameState);
+}
+
+function finishOffseasonFAMinigame() {
     for (const team of gameState.teams) {
         if (!team) continue;
+        if (!team.isPlayerControlled) {
+            Game.autoFillTeamWalkOns(team, 14);
+        }
         try { Game.aiSetDepthChart(team); } catch (error) { console.error(error); }
     }
 
     const advBtn = document.getElementById('advance-week-btn');
     if (advBtn) {
-        advBtn.innerHTML = `<span>Play Week</span>`;
+        advBtn.innerHTML = `<span>Play Week 1</span>`;
         advBtn.classList.add('bg-amber-500');
         advBtn.classList.remove('bg-green-600');
     }
@@ -907,15 +915,112 @@ window.app = {
     startNewGame,
     handleLoadGame,
     handleLoadTestRoster,
-    negotiatePlayer: (id) => {
-        const role = document.getElementById('pitch-role')?.value || 'ROTATION';
-        const promiseTouches = document.getElementById('pitch-touches')?.value || 'NORMAL';
-        const tokensOffered = parseInt(document.getElementById('pitch-tokens')?.value || '0', 10);
+    openBidModal: (playerId) => {
+        const p = Game.getPlayer(playerId);
+        if (!p) return;
+        const availableTokens = gameState?.playerTeam?.socialProfile?.favorTokens || 0;
 
-        const res = Game.playerSignFreeAgent(id, { role, promiseTouches, tokensOffered });
+        const modalHtml = `
+            <div class="space-y-3 text-left">
+                <div class="p-2.5 bg-slate-50 border rounded flex justify-between items-center text-xs">
+                    <div>
+                        <span class="font-bold text-slate-900 text-sm block">${p.name}</span>
+                        <span class="text-slate-500 font-mono">${p.age}yo • ${p.archetypeName || 'Athlete'}</span>
+                    </div>
+                    <span class="text-sm font-black text-slate-900 bg-white px-2 py-0.5 rounded border">${Game.calculateOverall(p, p.pos || Game.estimateBestPosition(p))} OVR</span>
+                </div>
+                <div class="grid grid-cols-3 gap-2 text-xs">
+                    <div>
+                        <label class="block text-[10px] text-slate-500 font-bold uppercase mb-1">Role Promised</label>
+                        <select id="bid-role" class="w-full p-1 border rounded bg-white font-bold text-slate-800">
+                            <option value="STARTER">Starter</option>
+                            <option value="ROTATION" selected>Rotation</option>
+                            <option value="BENCH">Reserve</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-[10px] text-slate-500 font-bold uppercase mb-1">Touches</label>
+                        <select id="bid-touches" class="w-full p-1 border rounded bg-white font-bold text-slate-800">
+                            <option value="NORMAL" selected>Normal</option>
+                            <option value="FEATURED">Focal</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-[10px] text-slate-500 font-bold uppercase mb-1">Tokens (Have: ${availableTokens})</label>
+                        <select id="bid-tokens" class="w-full p-1 border rounded bg-white font-bold text-slate-800">
+                            <option value="0">0 Tokens</option>
+                            ${availableTokens >= 1 ? '<option value="1">1 Token</option>' : ''}
+                            ${availableTokens >= 2 ? '<option value="2">2 Tokens</option>' : ''}
+                        </select>
+                    </div>
+                </div>
+            </div>
+        `;
+
+        UI.showModal(`Submit Offer: ${p.name}`, modalHtml, () => {
+            const role = document.getElementById('bid-role')?.value || 'ROTATION';
+            const promiseTouches = document.getElementById('bid-touches')?.value || 'NORMAL';
+            const tokensOffered = parseInt(document.getElementById('bid-tokens')?.value || '0', 10);
+
+            // In Offseason Mini-Game: Queue bid for end-of-day resolution
+            if (document.getElementById('offseason-fa-screen')?.classList.contains('hidden') === false) {
+                UI.addOffseasonFABid({ playerId: p.id, offer: { role, promiseTouches, tokensOffered } });
+                UI.renderOffseasonFAScreen(gameState);
+            } else {
+                // In-Season Bidding: Check for instant commit or queue for end-of-week
+                const evalResult = Game.evaluatePlayerNegotiation(p, gameState.playerTeam, { role, promiseTouches, tokensOffered });
+                const isInstant = Game.checkInstantCommit(p, gameState.playerTeam, evalResult, { role, promiseTouches, tokensOffered });
+
+                if (isInstant) {
+                    Game.playerSignFreeAgent(p.id, { role, promiseTouches, tokensOffered });
+                    alert(`⚡ INSTANT COMMITMENT!\n\n${p.name} was blown away by your offer and immediately signed with ${gameState.playerTeam.name}!`);
+                } else if (evalResult.accepted) {
+                    gameState.weeklyBids = gameState.weeklyBids || [];
+                    gameState.weeklyBids.push({ playerId: p.id, team: gameState.playerTeam, teamId: gameState.playerTeam.id, offer: { role, promiseTouches, tokensOffered } });
+                    alert(`📋 Offer Submitted!\n\n${p.name} is considering your proposal alongside other interest. Bids will resolve at the end of the week.`);
+                } else {
+                    alert(`✋ Pitch Rejected: ${evalResult.reasons.join('\n• ')}`);
+                }
+                UI.switchTab('free-agents', gameState);
+            }
+        }, "Submit Offer");
+    },
+    cancelOffseasonBid: (idx) => {
+        UI.removeOffseasonFABid(idx);
+        UI.renderOffseasonFAScreen(gameState);
+    },
+    advanceOffseasonFADay: () => {
+        const currentDay = UI.getOffseasonFADay();
+        const userBids = UI.getOffseasonFABids();
+        const signings = Game.processOffseasonFADay(gameState, userBids);
+
+        // Update ticker and report
+        const wireList = document.getElementById('fa-daily-wire-list');
+        if (wireList) {
+            const dayHtml = signings.map(s => `
+                <div class="bg-slate-50 border p-1.5 rounded text-[11px]">
+                    <span class="font-bold text-slate-900">${s.player.name}</span> signed with <b class="text-blue-700">${s.team.name}</b>
+                    ${s.runnerUp ? `<span class="text-slate-400 block text-[9px]">(Chose over ${s.runnerUp.name})</span>` : ''}
+                </div>
+            `).join('') || '<p class="text-slate-400 italic text-[11px]">No signings reached consensus today.</p>';
+
+            wireList.innerHTML = `<div class="font-bold text-[10px] text-amber-700 border-b pb-0.5 mb-1 uppercase">Day ${currentDay} Signings</div>` + dayHtml;
+        }
+
+        if (currentDay >= 3) {
+            alert("🏆 Free Agency has officially concluded! Time to take the field for Season Kickoff.");
+            finishOffseasonFAMinigame();
+        } else {
+            UI.incrementOffseasonFADay();
+            UI.startOffseasonFAMinigame(gameState); // Clears bids for next day
+        }
+    },
+    renderFAPool: () => {
+        UI.renderOffseasonFAPool(gameState);
+    },
+    negotiatePlayer: (id) => {
+        app.openBidModal(id);
         UI.hideModal();
-        alert(res.message);
-        document.dispatchEvent(new CustomEvent('refresh-ui'));
     },
     handleSaveTestRoster,
     openPlayerCard,
@@ -927,6 +1032,18 @@ window.app = {
     handleGoToNextDraft,
     skipSim: () => UI.skipLiveGameSim(),
     setSpeed: (s) => UI.setSimSpeed(s),
+    switchTab: (tabId) => {
+        gameState = Game.getGameState();
+        if (gameState) UI.switchTab(tabId, gameState);
+    },
+    autoFillRoster: () => {
+        gameState = Game.getGameState();
+        if (!gameState?.playerTeam) return;
+        const count = Game.autoFillTeamWalkOns(gameState.playerTeam, 14);
+        Game.saveGameState(activeSaveKey);
+        UI.renderDashboard(gameState);
+        alert(`Signed ${count} walk-on prospect(s) from the park! Roster now at ${gameState.playerTeam.roster.length} players.`);
+    },
     cutPlayer: (id) => {
         if (confirm("Cut this player?")) {
             Game.playerCut(id);
@@ -1104,6 +1221,9 @@ function main() {
     });
 
     // Stats Filters & Sorters
+    document.getElementById('fa-filter-pos')?.addEventListener('change', () => {
+        if (gameState) UI.switchTab('free-agents', gameState);
+    });
     document.getElementById('stats-filter-team')?.addEventListener('change', () => {
         if (gameState) UI.switchTab('player-stats', gameState);
     });

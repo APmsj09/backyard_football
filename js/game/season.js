@@ -836,6 +836,39 @@ export function processWeeklyPlayerGrowth() {
 
 export function processEndOfWeek() {
     if (!game) return;
+
+    // Resolve In-Season Weekly Bids
+    if (game.weeklyBids && game.weeklyBids.length > 0) {
+        const processedPlayers = new Set();
+        game.weeklyBids.forEach(bid => {
+            if (processedPlayers.has(bid.playerId)) return;
+            processedPlayers.add(bid.playerId);
+
+            const player = getPlayer(bid.playerId);
+            if (!player || player.teamId) return;
+
+            const allPlayerBids = game.weeklyBids.filter(b => b.playerId === bid.playerId);
+            const resolution = Game.resolvePlayerBiddingWar(player, allPlayerBids);
+
+            if (resolution?.winner) {
+                const win = resolution.winner;
+                const team = win.team;
+                if (win.offer.tokensOffered > 0 && team.socialProfile) {
+                    team.socialProfile.favorTokens = Math.max(0, team.socialProfile.favorTokens - win.offer.tokensOffered);
+                }
+                player.activePromise = { role: win.offer.role, promiseTouches: win.offer.promiseTouches };
+                if (addPlayerToTeam(player, team)) {
+                    player.status = { type: 'healthy', description: '', duration: 0 };
+                    aiSetDepthChart(team);
+                    if (team.id === game.playerTeam?.id) {
+                        addMessage("Contract Finalized", `🤝 <b>${player.name}</b> chose your offer over competing bids and joined the team!`);
+                    }
+                }
+            }
+        });
+        game.weeklyBids = [];
+    }
+
     updatePlayerStatuses();
     generateWeeklyEvents();
     processRelationshipEvents();
@@ -977,6 +1010,130 @@ export function callFriend(playerId) {
         addMessage("Roster Update: Invite Declined", message);
         return { success: false, message };
     }
+}
+
+export function processOffseasonFADay(gameState, userBids = []) {
+    if (!gameState || !gameState.players) return [];
+
+    const activeTeams = gameState.teams.filter(t => t.leagueType === 'main');
+    const daySignings = [];
+    const playerBidsMap = new Map();
+
+    // 1. Register User Bids
+    userBids.forEach(ub => {
+        const pList = playerBidsMap.get(ub.playerId) || [];
+        pList.push({ team: gameState.playerTeam, teamId: gameState.playerTeam.id, offer: ub.offer });
+        playerBidsMap.set(ub.playerId, pList);
+    });
+
+    // 2. Generate Intelligent AI Bids
+    const positions = ['QB', 'RB', 'WR', 'TE', 'OL', 'DL', 'LB', 'DB'];
+    const idealCounts = { QB: 1, RB: 2, WR: 3, TE: 1, OL: 3, DL: 3, LB: 2, DB: 3 };
+
+    activeTeams.forEach(aiTeam => {
+        if (aiTeam.isPlayerControlled || aiTeam.roster.length >= 16) return;
+
+        const roster = getRosterObjects(aiTeam);
+        const tokensAvailable = aiTeam.socialProfile?.favorTokens || 0;
+
+        // Find biggest positional hole
+        const needs = positions.map(pos => {
+            const count = roster.filter(p => Game.isPlayerViableForPosition(p, pos)).length;
+            return { pos, deficit: idealCounts[pos] - count };
+        }).sort((a, b) => b.deficit - a.deficit);
+
+        const primaryNeed = needs[0]?.pos;
+        if (!primaryNeed) return;
+
+        // Find top unassigned prospect matching need
+        const candidate = gameState.players.find(p =>
+            !p.teamId &&
+            p.status?.type !== 'retired' &&
+            p.status?.type !== 'departed' &&
+            p.age >= 12 && p.age <= 18 &&
+            Game.isPlayerViableForPosition(p, primaryNeed) &&
+            !playerBidsMap.get(p.id)?.some(b => b.teamId === aiTeam.id)
+        );
+
+        if (candidate) {
+            const tokensToSpend = tokensAvailable > 0 && Math.random() < 0.45 ? 1 : 0;
+            const offer = {
+                role: candidate.expectations?.desiredRole || 'ROTATION',
+                promiseTouches: candidate.personality?.ego > 65 ? 'FEATURED' : 'NORMAL',
+                tokensOffered: tokensToSpend
+            };
+
+            const pList = playerBidsMap.get(candidate.id) || [];
+            pList.push({ team: aiTeam, teamId: aiTeam.id, offer });
+            playerBidsMap.set(candidate.id, pList);
+        }
+    });
+
+    // 3. Resolve Bids for Each Contested Player
+    playerBidsMap.forEach((bids, playerId) => {
+        const player = getPlayer(playerId);
+        if (!player || player.teamId) return;
+
+        const resolution = Game.resolvePlayerBiddingWar(player, bids);
+        if (resolution?.winner) {
+            const win = resolution.winner;
+            const team = win.team;
+
+            if (win.offer.tokensOffered > 0 && team.socialProfile) {
+                team.socialProfile.favorTokens = Math.max(0, team.socialProfile.favorTokens - win.offer.tokensOffered);
+            }
+
+            player.activePromise = {
+                role: win.offer.role || 'ROTATION',
+                promiseTouches: win.offer.promiseTouches || 'NORMAL'
+            };
+
+            if (addPlayerToTeam(player, team)) {
+                player.status = { type: 'healthy', description: '', duration: 0 };
+                aiSetDepthChart(team);
+                daySignings.push({
+                    player,
+                    team,
+                    runnerUp: resolution.competingBids[1]?.team || null,
+                    tokens: win.offer.tokensOffered
+                });
+            }
+        }
+    });
+
+    return daySignings;
+}
+
+export function autoFillTeamWalkOns(team, targetSize = 14) {
+    if (!team || !game || !game.players) return 0;
+    let added = 0;
+    while (team.roster.length < targetSize && team.roster.length < ROSTER_LIMIT) {
+        const unassigned = game.players.filter(p =>
+            p && !p.teamId &&
+            p.status?.type !== 'retired' &&
+            p.status?.type !== 'departed' &&
+            p.age >= 12 && p.age <= 18
+        );
+        if (unassigned.length === 0) break;
+
+        // Score players based on team need and overall ability
+        unassigned.sort((a, b) => {
+            const ovrA = calculateOverall(a, estimateBestPosition(a));
+            const ovrB = calculateOverall(b, estimateBestPosition(b));
+            return ovrB - ovrA;
+        });
+
+        const recruit = unassigned[0];
+        if (addPlayerToTeam(recruit, team)) {
+            recruit.status = { type: 'healthy', description: '', duration: 0 };
+            recruit.activePromise = { role: 'ROTATION', promiseTouches: 'NORMAL' };
+            added++;
+        } else {
+            break;
+        }
+    }
+    if (added > 0) aiSetDepthChart(team);
+    return added;
 }
 
 export function aiManageRoster(team) {

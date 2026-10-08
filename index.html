@@ -290,6 +290,73 @@
             </div>
         </section>
 
+        <section id="offseason-fa-screen" class="screen hidden h-full flex flex-col overflow-hidden bg-slate-100">
+            <!-- Header -->
+            <div class="flex-shrink-0 p-3.5 bg-slate-900 text-white flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 border-b border-slate-700 shadow-sm">
+                <div>
+                    <div class="flex items-center gap-2">
+                        <span class="text-xl">🤝</span>
+                        <h2 class="text-xl font-black uppercase tracking-wider text-amber-400">Post-Draft Free Agency War Room</h2>
+                        <span id="fa-round-indicator" class="text-xs bg-slate-800 text-slate-200 font-bold px-2 py-0.5 rounded border border-slate-700 font-mono">Day 1 of 3</span>
+                    </div>
+                    <p class="text-[11px] text-slate-400 mt-0.5">Place role & token bids on neighborhood talent. Bids across all 20 teams resolve at the end of each day.</p>
+                </div>
+                <div class="flex items-center gap-3">
+                    <div class="text-right text-xs bg-slate-800 px-3 py-1.5 rounded border border-slate-700">
+                        <span class="text-slate-400 text-[10px] uppercase font-bold block">Budget & Roster</span>
+                        <span class="font-bold text-white"><span id="fa-user-tokens">3</span> Tokens • <span id="fa-user-roster-count">0/18</span></span>
+                    </div>
+                    <button id="fa-advance-day-btn" class="bg-emerald-700 hover:bg-emerald-800 text-white font-bold px-4 py-2 rounded text-xs uppercase tracking-wider shadow-sm transition" onclick="app.advanceOffseasonFADay()">
+                        Submit Bids & Advance Day →
+                    </button>
+                </div>
+            </div>
+
+            <!-- Main Content Grid -->
+            <div class="flex-grow grid grid-cols-1 lg:grid-cols-12 gap-3 p-3 overflow-hidden min-h-0">
+                <!-- Available Prospects Pool (8 cols) -->
+                <div class="lg:col-span-8 bg-white border border-slate-300 rounded-sm shadow-sm flex flex-col overflow-hidden min-h-0">
+                    <div class="p-2 border-b border-slate-200 bg-slate-50 flex justify-between items-center shrink-0">
+                        <span class="font-bold text-xs uppercase tracking-wider text-slate-700">Available Neighborhood Prospects</span>
+                        <select id="fa-minigame-filter-pos" class="p-1 border border-slate-300 rounded text-xs bg-white font-bold text-slate-700 outline-none" onchange="app.renderFAPool()">
+                            <option value="">All Positions</option>
+                            <option value="QB">QB</option>
+                            <option value="RB">RB</option>
+                            <option value="WR">WR</option>
+                            <option value="TE">TE</option>
+                            <option value="OL">OL</option>
+                            <option value="DL">DL</option>
+                            <option value="LB">LB</option>
+                            <option value="DB">DB</option>
+                        </select>
+                    </div>
+                    <div id="fa-minigame-pool-tbody" class="flex-grow overflow-y-auto min-h-0"></div>
+                </div>
+
+                <!-- Active Bids & Day Recap (4 cols) -->
+                <div class="lg:col-span-4 flex flex-col gap-3 min-h-0">
+                    <!-- Your Active Day Bids -->
+                    <div class="bg-white border border-slate-300 rounded-sm shadow-sm p-3 flex flex-col shrink-0 max-h-56">
+                        <div class="flex justify-between items-center border-b border-slate-200 pb-1 mb-2">
+                            <h4 class="font-bold text-xs uppercase tracking-wider text-slate-800">Your Pending Bids Today</h4>
+                            <span id="fa-bids-count" class="text-[10px] font-mono text-slate-500 font-bold">0 Pending</span>
+                        </div>
+                        <div id="fa-pending-bids-list" class="space-y-1.5 overflow-y-auto flex-grow text-xs">
+                            <p class="text-slate-400 italic text-center py-4 text-[11px]">No bids placed yet today. Click "Bid" on any prospect to make an offer.</p>
+                        </div>
+                    </div>
+
+                    <!-- Daily News & Signings Ticker -->
+                    <div class="bg-white border border-slate-300 rounded-sm shadow-sm p-3 flex flex-col flex-grow overflow-hidden min-h-0">
+                        <h4 class="font-bold text-xs uppercase tracking-wider text-slate-800 border-b border-slate-200 pb-1 mb-2">Neighborhood Wire & Signings</h4>
+                        <div id="fa-daily-wire-list" class="space-y-1.5 overflow-y-auto flex-grow text-xs">
+                            <p class="text-slate-400 italic text-center py-6 text-[11px]">Free Agency commences on Day 1. Offers will be reviewed by players at the end of each day.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
         <section id="dashboard-screen" class="screen hidden h-full flex flex-col overflow-hidden min-h-0">
             <div
                 class="flex-shrink-0 flex flex-col md:flex-row justify-between items-center p-4 bg-slate-900 text-white rounded-sm shadow-sm mb-4 border-b border-slate-700">
@@ -343,6 +410,8 @@
                             class="text-base mr-1">🏛️</span> Hall of Fame</button>
                     <button class="tab-button whitespace-nowrap" data-tab="history"><span
                             class="text-base mr-1">📜</span> History</button>
+                    <button class="tab-button whitespace-nowrap" data-tab="free-agents"><span
+                            class="text-base mr-1">🏃</span> Free Agents</button>
                     <button class="tab-button whitespace-nowrap" data-tab="staff"><span
                             class="text-base mr-1">👔</span> Staff</button>
                     <button class="tab-button relative whitespace-nowrap" data-tab="messages">
@@ -470,6 +539,32 @@
                             <h3 class="text-xl font-bold text-slate-800 uppercase tracking-wider">League History</h3>
                         </div>
                         <div id="history-container" class="p-4 overflow-y-auto flex-grow min-h-0 bg-slate-100"></div>
+                    </div>
+
+                    <div id="tab-content-free-agents" class="tab-pane hidden flex flex-col h-full min-h-0">
+                        <div class="p-3 border-b border-slate-200 bg-slate-50 flex flex-wrap gap-2 items-center justify-between shrink-0">
+                            <div>
+                                <h3 class="text-lg font-black uppercase tracking-wider text-slate-800">Park Free Agents & Walk-Ons</h3>
+                                <p class="text-[11px] text-slate-500">Unsigned neighborhood talent ready to sign contracts and fill out roster depth.</p>
+                            </div>
+                            <div class="flex items-center gap-2">
+                                <select id="fa-filter-pos" class="p-1.5 border border-slate-300 rounded text-xs bg-white font-bold text-slate-700 outline-none">
+                                    <option value="">All Positions</option>
+                                    <option value="QB">QB</option>
+                                    <option value="RB">RB</option>
+                                    <option value="WR">WR</option>
+                                    <option value="TE">TE</option>
+                                    <option value="OL">OL</option>
+                                    <option value="DL">DL</option>
+                                    <option value="LB">LB</option>
+                                    <option value="DB">DB</option>
+                                </select>
+                                <button class="bg-emerald-700 hover:bg-emerald-800 text-white font-bold px-3 py-1.5 rounded text-xs uppercase tracking-wider shadow-sm transition" onclick="app.autoFillRoster()">
+                                    ⚡ Auto-Fill Walk-Ons (14)
+                                </button>
+                            </div>
+                        </div>
+                        <div id="free-agents-container" class="flex-grow overflow-y-auto p-0 min-h-0 bg-white"></div>
                     </div>
 
                     <div id="tab-content-staff" class="tab-pane hidden flex flex-col h-full min-h-0">

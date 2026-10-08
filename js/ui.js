@@ -952,10 +952,215 @@ export function switchTab(tabId, gameState) {
         case 'player-stats': renderPlayerStatsTab(gameState); break;
         case 'hall-of-fame': renderHallOfFameTab(gameState); break;
         case 'history': renderHistoryTab(gameState); break;
+        case 'free-agents': renderFreeAgentsTab(gameState); break;
         case 'staff': renderStaffTab(gameState); break;
         case 'messages': renderMessagesTab(gameState); break;
     }
 }
+
+export function renderFreeAgentsTab(gameState) {
+    const container = document.getElementById('free-agents-container');
+    if (!container || !gameState) return;
+
+    const posFilter = document.getElementById('fa-filter-pos')?.value || '';
+    let pool = (gameState.players || []).filter(p =>
+        p && !p.teamId &&
+        p.status?.type !== 'retired' &&
+        p.status?.type !== 'departed' &&
+        p.age >= 12 && p.age <= 18
+    );
+
+    if (posFilter) {
+        pool = pool.filter(p => {
+            const pos = p.pos || estimateBestPosition(p);
+            return pos === posFilter || p.favoriteOffensivePosition === posFilter || p.favoriteDefensivePosition === posFilter;
+        });
+    }
+
+    pool.sort((a, b) => {
+        const ovrA = calculateOverall(a, a.pos || estimateBestPosition(a));
+        const ovrB = calculateOverall(b, b.pos || estimateBestPosition(b));
+        return ovrB - ovrA;
+    });
+
+    if (pool.length === 0) {
+        container.innerHTML = `<p class="p-8 text-center text-slate-400 italic text-xs">No free agents currently available matching filters.</p>`;
+        return;
+    }
+
+    container.innerHTML = `
+        <table class="min-w-full text-xs font-mono">
+            <thead class="bg-slate-900 text-white uppercase text-[10px] select-none sticky top-0 z-10">
+                <tr>
+                    <th class="py-2.5 px-3 text-left font-sans">Prospect Name</th>
+                    <th class="py-2 px-2 text-center">Pos</th>
+                    <th class="py-2 px-2 text-center">OVR</th>
+                    <th class="py-2 px-2 text-center">Age</th>
+                    <th class="py-2 px-2 text-center">Pot</th>
+                    <th class="py-2 px-2 text-center text-blue-400">SPD</th>
+                    <th class="py-2 px-2 text-center">STR</th>
+                    <th class="py-2 px-2 text-center">AGI</th>
+                    <th class="py-2 px-2 text-center">HND</th>
+                    <th class="py-2 px-2 text-center">TKL</th>
+                    <th class="py-2 px-3 text-right font-sans">Action</th>
+                </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-100">
+                ${pool.map(p => {
+                    const pos = p.pos || estimateBestPosition(p);
+                    const ovr = calculateOverall(p, pos);
+                    return `
+                    <tr class="hover:bg-slate-50 transition cursor-pointer" onclick="app.openPlayerCard('${p.id}')">
+                        <td class="py-2 px-3 font-sans font-semibold text-slate-900 truncate">
+                            <span>${p.name}</span>
+                            <span class="text-slate-400 text-[10px] ml-1 font-mono">(${p.archetypeName || 'Athlete'})</span>
+                        </td>
+                        <td class="text-center py-2 px-2"><span class="bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded font-bold text-[10px]">${pos}</span></td>
+                        <td class="text-center py-2 px-2 font-black text-slate-900">${ovr}</td>
+                        <td class="text-center py-2 px-2 text-slate-600">${p.age}</td>
+                        <td class="text-center py-2 px-2 font-bold ${p.potential === 'A' ? 'text-amber-600' : 'text-slate-500'}">${p.potential || '?'}</td>
+                        <td class="text-center py-2 px-2 text-blue-600 font-bold">${p.attributes?.physical?.speed || 0}</td>
+                        <td class="text-center py-2 px-2">${p.attributes?.physical?.strength || 0}</td>
+                        <td class="text-center py-2 px-2">${p.attributes?.physical?.agility || 0}</td>
+                        <td class="text-center py-2 px-2">${p.attributes?.technical?.catchingHands || 0}</td>
+                        <td class="text-center py-2 px-2">${p.attributes?.technical?.tackling || 0}</td>
+                        <td class="text-right py-2 px-3 font-sans" onclick="event.stopPropagation()">
+                            <button class="bg-slate-900 hover:bg-slate-800 text-white font-bold px-2.5 py-1 rounded text-[10px] uppercase tracking-wider" onclick="app.openPlayerCard('${p.id}')">
+                                Pitch Contract
+                            </button>
+                        </td>
+                    </tr>`;
+                }).join('')}
+            </tbody>
+        </table>
+    `;
+}
+
+let offseasonFABids = [];
+let offseasonFADay = 1;
+
+export function startOffseasonFAMinigame(gameState) {
+    offseasonFABids = [];
+    offseasonFADay = 1;
+    showScreen('offseason-fa-screen');
+    renderOffseasonFAScreen(gameState);
+}
+
+export function renderOffseasonFAScreen(gameState) {
+    if (!gameState?.playerTeam) return;
+
+    const roundIndicator = document.getElementById('fa-round-indicator');
+    const userTokensEl = document.getElementById('fa-user-tokens');
+    const userRosterEl = document.getElementById('fa-user-roster-count');
+    const advanceBtn = document.getElementById('fa-advance-day-btn');
+
+    if (roundIndicator) roundIndicator.textContent = `Day ${offseasonFADay} of 3`;
+    if (userTokensEl) userTokensEl.textContent = gameState.playerTeam.socialProfile?.favorTokens || 0;
+    if (userRosterEl) userRosterEl.textContent = `${gameState.playerTeam.roster.length}/18`;
+    if (advanceBtn) {
+        advanceBtn.textContent = offseasonFADay >= 3 ? "Finalize Free Agency & Head to Kickoff →" : `Submit Bids & Advance to Day ${offseasonFADay + 1} →`;
+    }
+
+    renderOffseasonFAPool(gameState);
+    renderPendingBidsList(gameState);
+}
+
+export function renderOffseasonFAPool(gameState) {
+    const container = document.getElementById('fa-minigame-pool-tbody');
+    if (!container || !gameState) return;
+
+    const filterPos = document.getElementById('fa-minigame-filter-pos')?.value || '';
+    let pool = (gameState.players || []).filter(p =>
+        p && !p.teamId &&
+        p.status?.type !== 'retired' &&
+        p.status?.type !== 'departed' &&
+        p.age >= 12 && p.age <= 18
+    );
+
+    if (filterPos) {
+        pool = pool.filter(p => Game.isPlayerViableForPosition(p, filterPos));
+    }
+
+    pool.sort((a, b) => {
+        const ovrA = calculateOverall(a, a.pos || estimateBestPosition(a));
+        const ovrB = calculateOverall(b, b.pos || estimateBestPosition(b));
+        return ovrB - ovrA;
+    });
+
+    container.innerHTML = `
+        <table class="min-w-full text-xs font-mono">
+            <thead class="bg-slate-900 text-white uppercase text-[10px] select-none sticky top-0 z-10">
+                <tr>
+                    <th class="py-2.5 px-3 text-left font-sans">Prospect Name</th>
+                    <th class="py-2 px-2 text-center">Pos</th>
+                    <th class="py-2 px-2 text-center">OVR</th>
+                    <th class="py-2 px-2 text-center">Age</th>
+                    <th class="py-2 px-2 text-center">Pot</th>
+                    <th class="py-2 px-2 text-center text-blue-400">SPD</th>
+                    <th class="py-2 px-2 text-center">STR</th>
+                    <th class="py-2 px-3 text-right font-sans">Action</th>
+                </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-100">
+                ${pool.map(p => {
+                    const pos = p.pos || estimateBestPosition(p);
+                    const ovr = calculateOverall(p, pos);
+                    const hasBid = offseasonFABids.some(b => b.playerId === p.id);
+                    return `
+                    <tr class="hover:bg-slate-50 transition cursor-pointer" onclick="app.openPlayerCard('${p.id}')">
+                        <td class="py-2 px-3 font-sans font-semibold text-slate-900 truncate">
+                            <span>${p.name}</span>
+                            <span class="text-slate-400 text-[10px] ml-1 font-mono">(${p.archetypeName || 'Athlete'})</span>
+                        </td>
+                        <td class="text-center py-2 px-2"><span class="bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded font-bold text-[10px]">${pos}</span></td>
+                        <td class="text-center py-2 px-2 font-black text-slate-900">${ovr}</td>
+                        <td class="text-center py-2 px-2 text-slate-600">${p.age}</td>
+                        <td class="text-center py-2 px-2 font-bold ${p.potential === 'A' ? 'text-amber-600' : 'text-slate-500'}">${p.potential || '?'}</td>
+                        <td class="text-center py-2 px-2 text-blue-600 font-bold">${p.attributes?.physical?.speed || 0}</td>
+                        <td class="text-center py-2 px-2 text-slate-700">${p.attributes?.physical?.strength || 0}</td>
+                        <td class="text-right py-2 px-3 font-sans" onclick="event.stopPropagation()">
+                            ${hasBid ? `<span class="bg-amber-100 text-amber-800 border border-amber-300 font-bold px-2 py-0.5 rounded text-[10px]">Bid Active</span>` : `
+                            <button class="bg-slate-900 hover:bg-slate-800 text-white font-bold px-3 py-1 rounded text-[10px] uppercase tracking-wider" onclick="app.openBidModal('${p.id}')">
+                                Bid
+                            </button>`}
+                        </td>
+                    </tr>`;
+                }).join('')}
+            </tbody>
+        </table>
+    `;
+}
+
+export function renderPendingBidsList(gameState) {
+    const list = document.getElementById('fa-pending-bids-list');
+    const countEl = document.getElementById('fa-bids-count');
+    if (!list) return;
+
+    if (countEl) countEl.textContent = `${offseasonFABids.length} Active`;
+
+    if (offseasonFABids.length === 0) {
+        list.innerHTML = `<p class="text-slate-400 italic text-center py-4 text-[11px]">No bids placed yet today. Click "Bid" on any prospect to make an offer.</p>`;
+        return;
+    }
+
+    list.innerHTML = offseasonFABids.map((b, idx) => {
+        const p = Game.getPlayer(b.playerId);
+        return `
+        <div class="bg-slate-50 border border-slate-200 p-2 rounded flex justify-between items-center text-xs">
+            <div>
+                <span class="font-bold text-slate-900">${p?.name || 'Prospect'}</span>
+                <span class="text-[10px] text-slate-500 block">${b.offer.role} • ${b.offer.tokensOffered} Tokens</span>
+            </div>
+            <button class="text-rose-600 hover:text-rose-800 font-bold text-xs p-1" onclick="app.cancelOffseasonBid(${idx})" title="Cancel bid">✕</button>
+        </div>`;
+    }).join('');
+}
+
+export function getOffseasonFABids() { return offseasonFABids; }
+export function addOffseasonFABid(bid) { offseasonFABids.push(bid); }
+export function removeOffseasonFABid(idx) { offseasonFABids.splice(idx, 1); }
+export function getOffseasonFADay() { return offseasonFADay; }
+export function incrementOffseasonFADay() { offseasonFADay++; }
 
 export function renderStaffTab(gameState) {
     const container = document.getElementById('staff-container');
@@ -1225,7 +1430,26 @@ function renderMyTeamTab(gameState) {
 
     const getIndicator = (col) => rosterSortCol === col ? (rosterSortDir === 'desc' ? ' ▼' : ' ▲') : '';
 
-    let html = `
+    let rosterNotice = '';
+    if (roster.length < 14) {
+        rosterNotice = `
+        <div class="bg-amber-50 border-b border-amber-200 p-2.5 px-4 flex flex-wrap items-center justify-between gap-2 text-xs text-amber-900 shrink-0">
+            <div class="flex items-center gap-2">
+                <span class="text-base">⚠️</span>
+                <span><b>Roster Depth Low (${roster.length}/18):</b> You need at least 14 players for two-way stamina and backup rotations.</span>
+            </div>
+            <div class="flex items-center gap-2">
+                <button class="bg-slate-900 text-white font-bold px-2.5 py-1 rounded text-[11px] uppercase tracking-wider hover:bg-slate-800 transition" onclick="app.switchTab('free-agents')">
+                    Browse Free Agents →
+                </button>
+                <button class="bg-emerald-700 text-white font-bold px-2.5 py-1 rounded text-[11px] uppercase tracking-wider hover:bg-emerald-800 transition shadow-sm" onclick="app.autoFillRoster()">
+                    ⚡ Auto-Invite Walk-Ons
+                </button>
+            </div>
+        </div>`;
+    }
+
+    let html = rosterNotice + `
     <div class="overflow-x-auto">
         <table class="min-w-full bg-white text-xs">
             <thead class="bg-slate-900 text-white sticky top-0 z-10 select-none uppercase tracking-wider text-[11px]">

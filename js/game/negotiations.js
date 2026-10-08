@@ -7,6 +7,43 @@ import { calculateOverall, estimateBestPosition } from './player.js';
 /**
  * Evaluates a player free agency pitch/offer.
  */
+export function checkInstantCommit(player, team, evalResult, offer) {
+    if (!evalResult.accepted) return false;
+
+    // 1. Blowaway Offer: 2+ Tokens, Starter role, and Focal Touches
+    const isBlowaway = (offer.tokensOffered >= 2) && (offer.role === 'STARTER') && (offer.promiseTouches === 'FEATURED');
+
+    // 2. Perfect Alignment: Interest score >= 82 (natural home, best friend, matching clique, high street cred)
+    const isPerfectAlignment = evalResult.interestScore >= 82;
+
+    return isBlowaway || isPerfectAlignment;
+}
+
+export function resolvePlayerBiddingWar(player, bids = []) {
+    if (!bids || bids.length === 0) return null;
+
+    // Calculate each competing team's appeal to this specific player
+    const scoredBids = bids.map(bid => {
+        const evaluation = evaluatePlayerNegotiation(player, bid.team, bid.offer);
+        return {
+            ...bid,
+            evaluation,
+            score: evaluation.interestScore + (Math.random() * 4 - 2) // Slight variance for personality mood
+        };
+    });
+
+    // Sort by final interest score
+    scoredBids.sort((a, b) => b.score - a.score);
+    const winningBid = scoredBids[0];
+
+    // Player will reject all offers if none meet their minimum acceptance floor (45)
+    if (winningBid.evaluation.interestScore < 45) {
+        return { winner: null, competingBids: scoredBids, rejectedReason: "No offers met player's expectations." };
+    }
+
+    return { winner: winningBid, competingBids: scoredBids };
+}
+
 export function evaluatePlayerNegotiation(player, team, offer = {}) {
     // offer = { role: 'STARTER' | 'ROTATION' | 'BENCH', tokensOffered: 0-2, promiseTouches: 'FEATURED' | 'NORMAL' }
     const roleOffered = offer.role || 'ROTATION';
