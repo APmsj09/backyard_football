@@ -14,6 +14,9 @@ import {
     updateQBDecision, updatePunterDecision
 } from './ai.js';
 import {
+    initPlayTelemetry, finalizePlayTelemetry
+} from './telemetry.js';
+import {
     captureFrame
 } from './engine_helpers.js';
 import {
@@ -149,8 +152,8 @@ export function determinePlayCall(offense, defense, down, yardsToGo, ballOn, sco
     const isChewClock = drivesRemaining <= 2 && scoreDiff >= 8;
 
     // Base run probability increased so backyard teams rely more on the ground game
-    let runProbability = 0.55; 
-    
+    let runProbability = 0.55;
+
     if (coach?.type === 'Ground and Pound' || coach?.type === 'Trench Warfare') runProbability += 0.20;
     else if (coach?.type === 'Air Raid') runProbability -= 0.20;
 
@@ -160,7 +163,7 @@ export function determinePlayCall(offense, defense, down, yardsToGo, ballOn, sco
     if (isGoalLine) runProbability += 0.25; // Run it in when close!
     if (isChewClock) runProbability += 0.40;
     if (isDesperation) runProbability = 0.05;
-    
+
     // First Down Tendency: Teams should try to establish the run on 1st down
     if (down === 1 && !isDesperation && !isChewClock) runProbability += 0.15;
 
@@ -371,6 +374,8 @@ export function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey
         resolvedDepth: null
     };
 
+    initPlayTelemetry(context, playState, finalOffensivePlayKey, defensivePlayKey);
+
     try {
         setupInitialPlayerStates(playState, offense, defense, play, playState.assignments, ballOn, defensivePlayKey, ballHash, finalOffensivePlayKey);
         if (isLive && gameLog) {
@@ -395,6 +400,7 @@ export function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey
 
         while (playState.playIsLive && playState.tick < playState.maxTicks) {
             playState.tick++;
+            window.__CURRENT_TICK__ = playState.tick;
 
             playState.activePlayers.forEach(p => {
                 if (p.stunnedTicks > 0) p.stunnedTicks--;
@@ -705,7 +711,7 @@ export function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey
         if (player) {
             if (!player.careerStats) player.careerStats = { seasonsPlayed: 0 };
             player.careerStats.snapsThisSeason = (player.careerStats.snapsThisSeason || 0) + 1;
-            
+
             // PASSIVE HUDDLE RECOVERY: Players catch their breath between plays based on their stamina rating
             const staminaRating = player.attributes?.physical?.stamina || 50;
             const recoveryAmt = 1.5 + (staminaRating / 25); // Recovers roughly 3.5% to 5.5% fatigue per play
@@ -717,12 +723,14 @@ export function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey
     let clockBurn = Math.floor(Math.random() * 10) + 30; // 30 to 39 seconds for a normal play + huddle
     if (playState.incomplete) clockBurn = Math.floor(Math.random() * 8) + 18; // Even an incompletion burns 18-25 secs fetching the ball
     else if (playResult.possessionChange || playState.touchdown || playState.safety) clockBurn = 40; // Turnovers take a while to reset
-    
+
     // Late 4th quarter hurry-up offense (if losing)
     const isLateTrailing = quarter >= 4 && timeRemaining < 120 && scoreDiff < 0;
-    if (isLateTrailing) clockBurn = Math.floor(clockBurn * 0.6); 
+    if (isLateTrailing) clockBurn = Math.floor(clockBurn * 0.6);
 
     playResult.clockBurn = clockBurn;
+
+    finalizePlayTelemetry(playResult, playState.finalBallY);
 
     return {
         playResult,

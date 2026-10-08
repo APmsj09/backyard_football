@@ -1,6 +1,7 @@
 import { getDistance } from './physics.js';
 import { getRandomInt, formatHeight } from '../utils.js';
 import { getPlayer } from './state.js';
+import { logPlayDebug } from './telemetry.js';
 
 const FIELD_WIDTH = 53.3;
 const FIELD_LENGTH = 120;
@@ -115,6 +116,13 @@ export function checkBlockCollisions(playState, gameLog = null) {
             if (isPassRush && isEdgeAlignment && targetSpd > blockerAgi + 14 && Math.random() < 0.28) {
                 blocker.stunnedTicks = 12;
                 target.action = 'pursuit';
+
+                logPlayDebug('TRENCH_EDGE_BURN', `${target.name} beat ${blocker.name} with pure edge speed`, {
+                    rusherSpeed: targetSpd,
+                    blockerAgility: blockerAgi,
+                    speedDelta: targetSpd - blockerAgi
+                });
+
                 if (gameLog && Math.random() < 0.25) {
                     pushGameLog(gameLog, `[Tick ${playState.tick}] ⚡ ${target.name} burns ${blocker.name} around the edge with pure speed!`, playState);
                 }
@@ -229,6 +237,12 @@ export function checkTackleCollisions(playState, gameLog) {
 
         successChance = Math.max(0.10, Math.min(0.95, successChance));
         if (isNaN(successChance)) successChance = 0.65;
+
+        logPlayDebug('TACKLE_CALC', `${defender.name} vs ${carrier.name}`, {
+            distance: Number(distance.toFixed(2)),
+            successChance: `${Math.round(successChance * 100)}%`,
+            carrierBrokenTackles: carrier.tacklesBrokenThisPlay || 0
+        });
 
         if (Math.random() < successChance) {
             playState.playIsLive = false;
@@ -672,6 +686,13 @@ export function handleBallArrival(playState, carrier, playResult, gameLog) {
             catchScore = (catchScore * (0.25 * handsFactor)) + floatBonus;
             
             if (attackersNear > 0) catchScore *= 0.50; // Hard to pick if WR is fighting for it
+
+            logPlayDebug('DEF_BALL_ATTEMPT', `${bestCandidate.name} attempted INT/Swat`, {
+                intProbability: `${Math.round(catchScore)}%`,
+                hands: hndEff,
+                floatBonusActive: floatBonus > 0,
+                attackersContesting: attackersNear
+            });
         } else {
             // Offensive Catch logic
             if (defendersNear === 1) {
@@ -681,6 +702,13 @@ export function handleBallArrival(playState, carrier, playResult, gameLog) {
             } else {
                 catchScore += 15; // "Wide Open" bonus!
             }
+
+            logPlayDebug('REC_CATCH_ATTEMPT', `${bestCandidate.name} attempted catch`, {
+                finalCatchOdds: `${Math.round(catchScore)}%`,
+                baseHands: hndEff,
+                defendersClosingIn: defendersNear,
+                isWideOpen: defendersNear === 0
+            });
         }
 
         if (playState.type === 'punt') catchScore += 15;

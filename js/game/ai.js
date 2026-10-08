@@ -1,6 +1,7 @@
 import { getDistance } from './physics.js';
 import { getPlayer } from './state.js';
 import { pushGameLog } from './collisions.js';
+import { logPlayDebug } from './telemetry.js';
 
 const FIELD_WIDTH = 53.3;
 const FIELD_LENGTH = 120;
@@ -94,6 +95,12 @@ export function diagnosePlay(pState, tick, offenseStates, truePlayType, offensiv
         direction = 'center';
         dirConfidence = finalCenter / totalDirScore;
     }
+
+    logPlayDebug('DEF_READ', `${pState.name} (${pState.role}) diagnosed play as [${guess.toUpperCase()}]`, {
+        confidence: Number(confidence.toFixed(2)),
+        direction,
+        dirConfidence: Number(dirConfidence.toFixed(2))
+    });
 
     return { guess, confidence, direction, dirConfidence };
 }
@@ -390,6 +397,16 @@ export function getSmartCarrierTarget(runner, defenseStates, offenseStates, fiel
     }
 
     bestTargetX = Math.max(1.0, Math.min(fieldWidth - 1.0, bestTargetX));
+
+    if (inTraffic || Math.abs(bestTargetX - runner.x) > 1.5) {
+        logPlayDebug('CARRIER_VISION', `${runner.name} evaluated lanes`, {
+            offset: Number((bestTargetX - runner.x).toFixed(1)),
+            bestScore: Math.round(bestScore),
+            inTraffic,
+            action: runner.action
+        });
+    }
+
     return { x: bestTargetX, y: bestTargetY };
 }
 
@@ -767,6 +784,13 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
             actionTaken = isHotReadSituation ? "Hot Read Throw" : "Throw Value Target";
             decisionMade = true;
 
+            logPlayDebug('QB_READ', `${qbState.name} selected target ${targetPlayerState.slot}`, {
+                action: actionTaken,
+                readProgress: `${numReadsVisible}/${progression.length}`,
+                evaluatedScores: readDebugLog,
+                isPressured
+            });
+
             if (gameLog) {
                 const readProgress = `${numReadsVisible}/${progression.length}`;
                 gameLog.push(`[Tick ${playState.tick}] 🧠 QB Reads (${readProgress}): [${readDebugLog.join(', ')}] -> Selected: ${targetPlayerState.slot}`);
@@ -1041,6 +1065,13 @@ export function executeThrow(qbState, target, strength, accuracy, playState, gam
 
     playState.statEvents.push({ type: 'pass_attempt', qbId: qbState.id });
     playState.statEvents.push({ type: 'target', receiverId: target.id });
+
+    logPlayDebug('QB_THROW', `${qbState.name} threw to ${target.name} (${target.slot})`, {
+        passType,
+        airDistance: Number(finalDist.toFixed(1)),
+        accuracyApplied: Math.round(accuracy),
+        flightTimeSec: Number(t.toFixed(2))
+    });
 
     if (gameLog) {
         const passTypeStr = passType.charAt(0).toUpperCase() + passType.slice(1);

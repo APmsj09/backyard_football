@@ -868,12 +868,19 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                             const isDoubleMove = ['Sluggo', 'Out_And_Up', 'Hitch_And_Go', 'PostCorner'].some(r => pState.assignment?.includes(r));
                             let separated = false;
 
-                            // 1. Playground Double-Move Trap (Freezes low-IQ DBs)
+                           // 1. Playground Double-Move Trap (Freezes low-IQ DBs)
                             if (isDoubleMove && dbIQ < 60 && Math.random() < 0.65) {
                                 coverageDefender.stunnedTicks = Math.max(14, 30 - Math.floor(dbIQ / 3));
                                 coverageDefender.vx = 0;
                                 coverageDefender.vy = 0;
                                 separated = true;
+
+                                logPlayDebug('ROUTE_DOUBLE_MOVE', `${pState.name} froze ${coverageDefender.name} on double move`, {
+                                    dbIQ,
+                                    routeType: pState.assignment,
+                                    stunDurationTicks: coverageDefender.stunnedTicks
+                                });
+
                                 if (gameLog && Math.random() < 0.35) {
                                     pushGameLog(gameLog, `[Tick ${playState.tick}] 🎣 ${coverageDefender.name} completely bites on ${pState.name}'s double move!`, playState);
                                 }

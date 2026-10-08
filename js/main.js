@@ -847,6 +847,28 @@ function main() {
     // Live Sim Speed Controls
     document.getElementById('sim-speed-pause')?.addEventListener('click', () => UI.togglePause());
     document.getElementById('sim-skip-btn')?.addEventListener('click', () => UI.skipLiveGameSim());
+    document.getElementById('sim-debug-dump-btn')?.addEventListener('click', () => {
+        const report = Game.generatePlayDebugReport();
+        const modalHtml = `
+            <div class="flex flex-col gap-3">
+                <div class="flex justify-between items-center text-xs text-slate-500">
+                    <span>Recent play decisions, progression reads, and physics rolls.</span>
+                    <button id="copy-telemetry-btn" class="bg-slate-900 hover:bg-slate-800 text-amber-400 border border-slate-700 font-mono px-3 py-1.5 rounded transition shadow-sm font-bold text-xs">
+                        📋 Copy to Clipboard
+                    </button>
+                </div>
+                <pre class="bg-slate-950 text-emerald-400 p-4 rounded text-[11px] font-mono overflow-auto max-h-[60vh] select-all whitespace-pre-wrap leading-relaxed border border-slate-800 shadow-inner">${report}</pre>
+            </div>
+        `;
+        UI.showModal("Play Telemetry & AI Debug", modalHtml);
+
+        document.getElementById('copy-telemetry-btn')?.addEventListener('click', (e) => {
+            navigator.clipboard.writeText(report).then(() => {
+                e.target.textContent = '✅ Copied!';
+                setTimeout(() => { e.target.textContent = '📋 Copy to Clipboard'; }, 2000);
+            });
+        });
+    });
     document.getElementById('sim-speed-play')?.addEventListener('click', () => UI.setSimSpeed(80));
     document.getElementById('sim-speed-fast')?.addEventListener('click', () => UI.setSimSpeed(40));
     document.getElementById('sim-speed-faster')?.addEventListener('click', () => UI.setSimSpeed(10));

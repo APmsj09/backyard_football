@@ -32,6 +32,13 @@ let livePlayerStats = new Map();
 let playerNameIdMap = new Map();
 let livePlayContext = { type: 'run', lastReceiverId: null, isPassComplete: false };
 
+// Draft view and watchlist state
+export let activeDraftView = 'overview';
+export let draftWatchlist = new Set();
+let currentDraftOnSelect = null;
+let currentDraftSortCol = 'potential';
+let currentDraftSortDir = 'desc';
+
 function debounce(func, delay) {
     return function (...args) {
         clearTimeout(debounceTimeout);
@@ -149,28 +156,27 @@ export function setupElements() {
 }
 
 function setupSimTabs() {
-    const setupTabGroup = (btn1, btn2, pane1, pane2, colorClass) => {
-        if (!btn1 || !btn2 || !pane1 || !pane2) return;
-        const activate = (activeBtn, inactiveBtn, activePane, inactivePane) => {
-            activeBtn.className = `flex-1 py-2.5 text-xs font-bold text-white bg-gray-900 border-t-2 border-${colorClass} transition-colors`;
-            inactiveBtn.className = `flex-1 py-2.5 text-xs font-bold text-gray-400 hover:text-white border-t-2 border-transparent bg-gray-800 transition-colors`;
-            activePane.classList.remove('hidden');
-            inactivePane.classList.add('hidden');
-        };
-        btn1.addEventListener('click', () => activate(btn1, btn2, pane1, pane2));
-        btn2.addEventListener('click', () => activate(btn2, btn1, pane2, pane1));
-    };
+    const tabs = [
+        { id: 'log', btn: document.getElementById('tab-btn-log'), pane: document.getElementById('pane-log'), color: 'blue-500' },
+        { id: 'subs', btn: document.getElementById('tab-btn-subs'), pane: document.getElementById('pane-subs'), color: 'amber-500' },
+        { id: 'stats', btn: document.getElementById('tab-btn-stats'), pane: document.getElementById('pane-stats'), color: 'emerald-500' },
+        { id: 'strategy', btn: document.getElementById('tab-btn-strategy'), pane: document.getElementById('pane-strategy'), color: 'purple-500' }
+    ];
 
-    setupTabGroup(
-        document.getElementById('tab-btn-subs'), document.getElementById('tab-btn-strategy'),
-        document.getElementById('pane-subs'), document.getElementById('pane-strategy'),
-        'amber-500'
-    );
-    setupTabGroup(
-        document.getElementById('tab-btn-log'), document.getElementById('tab-btn-stats'),
-        document.getElementById('pane-log'), document.getElementById('pane-stats'),
-        'blue-500'
-    );
+    tabs.forEach(activeTab => {
+        if (!activeTab.btn || !activeTab.pane) return;
+        activeTab.btn.addEventListener('click', () => {
+            tabs.forEach(t => {
+                if (t.id === activeTab.id) {
+                    t.btn.className = `flex-1 py-3 font-black text-white bg-gray-900 border-t-2 border-${t.color} transition-colors tracking-wider text-[10px] sm:text-xs`;
+                    t.pane.classList.remove('hidden');
+                } else {
+                    t.btn.className = `flex-1 py-3 font-bold text-gray-400 hover:text-white border-t-2 border-transparent bg-gray-800 transition-colors tracking-wider text-[10px] sm:text-xs`;
+                    t.pane.classList.add('hidden');
+                }
+            });
+        });
+    });
 }
 
 export function showScreen(screenId) {
@@ -264,7 +270,7 @@ export function renderDraftScreen(gameState, onPlayerSelect, currentSelectedId, 
     const { year, draftOrder, currentPick, playerTeam } = gameState;
     const ROSTER_LIMIT = 18;
 
-    if (currentPick >= draftOrder.length) {
+    if (!draftOrder || currentPick >= draftOrder.length) {
         if (elements.draftHeader) elements.draftHeader.innerHTML = `<h2 class="text-2xl font-bold">Season ${year} Draft Complete</h2>`;
         if (elements.draftPlayerBtn) { elements.draftPlayerBtn.disabled = true; elements.draftPlayerBtn.textContent = 'Draft Complete'; }
         renderSelectedPlayerCard(null, gameState);
@@ -328,8 +334,17 @@ export function renderDraftScreen(gameState, onPlayerSelect, currentSelectedId, 
 
 export function renderDraftPool(gameState, onPlayerSelect, sortColumn = 'potential', sortDirection = 'desc') {
     if (!elements.draftPoolTbody || !gameState?.players) return;
+
+    // Cache active parameters for sub-view switches and watchlist star toggles
+    if (onPlayerSelect) currentDraftOnSelect = onPlayerSelect;
+    currentDraftSortCol = sortColumn;
+    currentDraftSortDir = sortDirection;
+
     const thead = document.getElementById('draft-pool-thead');
     const playerRoster = getUIRosterObjects(gameState.playerTeam);
+
+    const watchlistCountEl = document.getElementById('draft-watchlist-count');
+    if (watchlistCountEl) watchlistCountEl.textContent = draftWatchlist.size;
 
     // 1. Strict Draft Pool Filtering (Culls 18-20 year olds from rookie drafts)
     const poolSource = (gameState.draftClass && gameState.draftClass.length > 0)
@@ -338,10 +353,10 @@ export function renderDraftPool(gameState, onPlayerSelect, sortColumn = 'potenti
 
     let undraftedPlayers = poolSource.filter(p =>
         p && !p.teamId &&
-        p.age <= 13 && // Rookie Draft is strictly for kids graduating into the league
         p.status?.type !== 'retired' &&
         p.status?.type !== 'departed' &&
-        (p.personality?.entersDraft !== false)
+        (p.personality?.entersDraft !== false) &&
+        (gameState.draftClass && gameState.draftClass.length > 0 ? true : (p.age <= 13 || p.lifecycle === 'draft_eligible'))
     );
 
     if (activeDraftView === 'watchlist') {
@@ -525,6 +540,40 @@ export function updateDraftSortIndicators(sortColumn, sortDirection) {
     document.querySelectorAll('#draft-screen thead th .sort-indicator').forEach(s => s.textContent = '');
     const headerCell = document.querySelector(`#draft-screen thead th[data-sort="${sortColumn}"] .sort-indicator`);
     if (headerCell) headerCell.textContent = sortDirection === 'desc' ? ' ▼' : ' ▲';
+}
+
+export function setDraftView(view) {
+    activeDraftView = view;
+    document.querySelectorAll('.draft-view-btn').forEach(btn => {
+        const isActive = btn.dataset.view === view;
+        btn.classList.toggle('active', isActive);
+        if (isActive) {
+            btn.classList.add('bg-white', 'text-slate-900', 'shadow-sm');
+            btn.classList.remove('text-slate-600');
+        } else {
+            btn.classList.remove('bg-white', 'text-slate-900', 'shadow-sm');
+            if (btn.dataset.view !== 'watchlist') {
+                btn.classList.add('text-slate-600');
+            }
+        }
+    });
+}
+
+export function toggleWatchlistPlayer(playerId) {
+    if (!playerId) return;
+    if (draftWatchlist.has(playerId)) {
+        draftWatchlist.delete(playerId);
+    } else {
+        draftWatchlist.add(playerId);
+    }
+
+    const countEl = document.getElementById('draft-watchlist-count');
+    if (countEl) countEl.textContent = draftWatchlist.size;
+
+    const gs = getGameState();
+    if (gs) {
+        renderDraftPool(gs, currentDraftOnSelect || window.app?.onDraftSelect, currentDraftSortCol, currentDraftSortDir);
+    }
 }
 
 export const debouncedRenderDraftPool = debounce(renderDraftPool, 300);
@@ -1858,6 +1907,13 @@ function flushLiveLogs() {
             p.className = "text-xs border-b border-gray-800 pb-1 mb-1 text-gray-300";
             p.textContent = entry;
             elements.simPlayLog?.appendChild(p);
+            
+            // Update the new "Last Play" ticker at the top of the field
+            const ticker = document.getElementById('sim-last-play-ticker');
+            if (ticker) {
+                // Strip the [Tick X] bracket out of the string for a cleaner read
+                ticker.textContent = entry.replace(/\[Tick \d+\] /, '');
+            }
         });
         if (elements.simPlayLog) elements.simPlayLog.scrollTop = elements.simPlayLog.scrollHeight;
         liveGameCurrentIndex = fullLog.length;

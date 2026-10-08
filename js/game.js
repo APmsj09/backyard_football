@@ -12,6 +12,7 @@ export * from './game/draft.js';
 export * from './game/engine_helpers.js';
 export * from './game/play_execution.js';
 export * from './game/play_resolution.js';
+export * from './game/telemetry.js';
 
 import { getRosterObjects } from './game/state.js';
 import { changeFormation } from './game/depth_chart.js';

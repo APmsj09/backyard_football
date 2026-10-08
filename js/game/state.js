@@ -196,7 +196,11 @@ export function checkInGameInjury(player, gameLog) {
     }
 }
 
+import { clearPlayTelemetry } from './telemetry.js';
+
 export function resetGameStats(teamA, teamB) {
+    clearPlayTelemetry();
+
     [teamA, teamB].filter(Boolean).forEach(team => {
         team.recentPlayHistory = [];
         team.playCallHistory = [];
