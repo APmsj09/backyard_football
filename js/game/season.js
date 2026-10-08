@@ -787,11 +787,52 @@ export function processRelationshipEvents() {
     }
 }
 
+export function processWeeklyPlayerGrowth() {
+    if (!game || !game.teams) return;
+
+    game.teams.forEach(team => {
+        const roster = getRosterObjects(team);
+        roster.forEach(player => {
+            if (!player || !player.attributes) return;
+
+            // In-season growth applies to players getting real snaps (especially young kids 12-15)
+            const snapsThisWeek = (player.gameStats?.passAttempts || 0) + 
+                                  (player.gameStats?.rushAttempts || 0) + 
+                                  (player.gameStats?.targets || 0) + 
+                                  (player.gameStats?.tackles || 0);
+
+            const isYoung = player.age <= 15;
+            const growthChance = isYoung ? 0.12 : 0.05;
+
+            if (snapsThisWeek > 0 && Math.random() < growthChance) {
+                const ethic = player.personality?.workEthic || 50;
+                const canLearn = Math.random() < (ethic / 100);
+
+                if (canLearn) {
+                    const learnable = ['playbookIQ', 'consistency', 'catchingHands', 'tackling', 'throwingAccuracy'];
+                    const chosen = getRandom(learnable);
+
+                    for (const cat in player.attributes) {
+                        if (player.attributes[cat]?.[chosen] !== undefined && player.attributes[cat][chosen] < 95) {
+                            player.attributes[cat][chosen] += 1;
+                            if (team.id === game?.playerTeam?.id && Math.random() < 0.25) {
+                                addMessage("Weekly Rep Growth", `💡 <b>${player.name}</b> showed great progress in practice and game reps this week (+1 ${chosen})!`);
+                            }
+                            break;
+                        }
+                    }
+                }
+            }
+        });
+    });
+}
+
 export function processEndOfWeek() {
     if (!game) return;
     updatePlayerStatuses();
     generateWeeklyEvents();
     processRelationshipEvents();
+    processWeeklyPlayerGrowth();
     endOfWeekCleanup();
 }
 
@@ -1071,15 +1112,45 @@ export function developPlayer(player, team = null) {
         }
     }
 
-    const heightGain = player.age <= 12 ? getRandomInt(1, 3) : (player.age <= 14 ? getRandomInt(0, 2) : 0);
-    const weightGain = player.age <= 12 ? getRandomInt(8, 18) : (player.age <= 14 ? getRandomInt(6, 14) : getRandomInt(2, 6));
-
-    if (heightGain > 0) developmentReport.improvements.push({ attr: 'height', increase: heightGain });
-    if (weightGain > 0) developmentReport.improvements.push({ attr: 'weight', increase: weightGain });
-
+    // 3. FRAME MATURATION & GROWTH SPURTS
     if (!player.attributes.physical) player.attributes.physical = {};
-    player.attributes.physical.height = (player.attributes.physical.height || 50) + heightGain;
-    player.attributes.physical.weight = (player.attributes.physical.weight || 100) + weightGain;
+    const currHgt = player.attributes.physical.height || 66;
+    const currWgt = player.attributes.physical.weight || 140;
+    const ceilingHgt = player.talentAttributes?.physical?.height || currHgt + 4;
+    const ceilingWgt = player.talentAttributes?.physical?.weight || currWgt + 30;
+
+    let heightGain = 0;
+    let weightGain = 0;
+
+    // 6% chance for a massive Growth Spurt between ages 13 and 16
+    const hitGrowthSpurt = player.age >= 13 && player.age <= 16 && Math.random() < 0.06;
+
+    if (hitGrowthSpurt) {
+        heightGain = getRandomInt(3, 5);
+        weightGain = getRandomInt(18, 32);
+        
+        // Growth spurt benefits Strength, but causes temporary coordination/agility growing pains
+        if (player.attributes.physical.strength) player.attributes.physical.strength = Math.min(99, player.attributes.physical.strength + 3);
+        if (player.attributes.physical.agility && player.attributes.physical.agility > 30) player.attributes.physical.agility -= 1;
+
+        developmentReport.improvements.push({ attr: '🚀 GROWTH SPURT!', increase: heightGain });
+        if (team && team.id === game?.playerTeam?.id) {
+            addMessage("Growth Spurt!", `📈 <b>${player.name}</b> hit a massive growth spurt over the summer! Gained +${heightGain}" and +${weightGain} lbs!`);
+        }
+    } else if (player.age <= 17) {
+        // Natural annual frame closure toward adult ceiling
+        if (ceilingHgt > currHgt) heightGain = Math.min(ceilingHgt - currHgt, getRandomInt(1, 2));
+        if (ceilingWgt > currWgt) weightGain = Math.min(ceilingWgt - currWgt, getRandomInt(6, 14));
+    }
+
+    if (heightGain > 0) {
+        player.attributes.physical.height = currHgt + heightGain;
+        if (!hitGrowthSpurt) developmentReport.improvements.push({ attr: 'height', increase: heightGain });
+    }
+    if (weightGain > 0) {
+        player.attributes.physical.weight = currWgt + weightGain;
+        if (!hitGrowthSpurt) developmentReport.improvements.push({ attr: 'weight', increase: weightGain });
+    }
 
     if (!player.careerStats) player.careerStats = {};
     player.careerStats.snapsThisSeason = 0;

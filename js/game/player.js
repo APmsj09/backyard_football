@@ -534,11 +534,22 @@ export function generatePlayer(minAge = 12, maxAge = 18, classModifiers = null) 
     else if (potentialScore >= 43) potential = 'D';
     else potential = 'F';
 
+    // Rare "Neighborhood Wonderkid / Phenom" roll (1.5% chance)
+    const isWonderkid = Math.random() < 0.015;
+    if (isWonderkid) {
+        potential = 'A';
+    }
+
     // 8. AGE SCALING & DEVELOPMENT VARIANCE (Deriving Current Ability)
     // Differentiate Pee-Wee (8-11) from High School (12-18)
     let basePhysicalScale, baseMentalScale, baseTechnicalScale;
 
-    if (age < 12) {
+    if (isWonderkid) {
+        // Wonderkids bypass youth penalties and spawn ready to play
+        basePhysicalScale = 0.88;
+        baseMentalScale = 0.80;
+        baseTechnicalScale = 0.82;
+    } else if (age < 12) {
         // Ages 8-11: Youth scale from 35% up to 60% of adult ceiling
         const youthProgress = Math.max(0, (age - 8) / 4.0);
         basePhysicalScale = 0.35 + (youthProgress * 0.25);
@@ -649,7 +660,8 @@ export function generatePlayer(minAge = 12, maxAge = 18, classModifiers = null) 
             ]);
         }
 
-        return `${getRandom(athleticClues)} ${getRandom(mentalClues)} ${getRandom(quirks)} ${ageLore}`;
+        //const wonderkidNote = isWonderkid ? "⭐ THE NEIGHBORHOOD PHENOM. A once-in-a-generation playground prodigy who already runs circles around high school varsity athletes." : "";
+        return `${getRandom(athleticClues)} ${getRandom(mentalClues)} ${getRandom(quirks)} ${ageLore}`.trim();
     };
 
     const bio = generateBio();
