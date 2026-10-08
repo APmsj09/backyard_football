@@ -486,17 +486,37 @@
         <section id="game-sim-screen" class="screen hidden h-full flex flex-col bg-gray-950 text-white overflow-hidden">
             <div id="sim-scoreboard"
                 class="bg-gray-900 border-b border-gray-800 p-2 shadow-xl shrink-0 z-30 flex justify-between items-center h-20">
+                <!-- Away Team (Left) -->
+                <div class="flex items-center justify-start gap-4 w-1/3 pl-4">
+                    <div class="text-right flex flex-col items-end">
+                        <h2 id="sim-away-team" class="text-xl font-bold text-gray-200 leading-tight truncate max-w-[140px]">AWAY</h2>
+                        <div id="sim-banner-defense"
+                            class="mt-1 bg-red-900/80 text-red-200 text-[10px] px-2 py-0.5 rounded border border-red-700 font-bold uppercase tracking-tight truncate max-w-[140px]">
+                            DEFENSE
+                        </div>
+                    </div>
+                    <div id="sim-away-score" class="text-4xl font-display text-white drop-shadow-md">0</div>
+                </div>
+
+                <!-- Game Status (Center) -->
+                <div class="flex flex-col items-center justify-center w-1/3 text-center">
+                    <div id="sim-game-drive" class="text-amber-400 font-mono font-bold text-sm tracking-widest">Q1 | 7:00</div>
+                    <div id="sim-game-down" class="text-white font-black text-base tracking-wider mt-0.5">1 & 10</div>
+                    <div id="sim-possession" class="text-[11px] text-slate-400 font-semibold truncate max-w-[180px] mt-0.5">🏈 Possession</div>
+                </div>
+
+                <!-- Home Team (Right) -->
                 <div class="flex items-center justify-end gap-4 w-1/3 pr-4">
-                <div id="sim-home-score" class="text-4xl font-display text-white drop-shadow-md">0</div>
-                <div class="text-left flex flex-col items-start">
-                    <h2 id="sim-home-team" class="text-xl font-bold text-gray-200 leading-tight">HOME</h2>
-                    <div id="sim-banner-offense"
-                        class="mt-1 bg-blue-900/80 text-blue-200 text-[10px] px-2 py-0.5 rounded border border-blue-700 font-bold uppercase tracking-tight truncate max-w-[140px]">
-                        Waiting...
+                    <div id="sim-home-score" class="text-4xl font-display text-white drop-shadow-md">0</div>
+                    <div class="text-left flex flex-col items-start">
+                        <h2 id="sim-home-team" class="text-xl font-bold text-gray-200 leading-tight truncate max-w-[140px]">HOME</h2>
+                        <div id="sim-banner-offense"
+                            class="mt-1 bg-blue-900/80 text-blue-200 text-[10px] px-2 py-0.5 rounded border border-blue-700 font-bold uppercase tracking-tight truncate max-w-[140px]">
+                            OFFENSE
+                        </div>
                     </div>
                 </div>
             </div>
-        </div>
 
         <!-- NEW: Recent Play Ticker -->
         <div class="bg-gray-950 border-b border-gray-800 py-1.5 px-4 text-xs font-mono text-amber-400 flex items-center justify-center shrink-0 z-30 shadow-md">

@@ -533,7 +533,7 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                 blocker.contactReduction = 1.2;
             }
 
-            if (getDistance(blocker, target) < 1.2) {
+            if (getDistance(blocker, target) < 1.8) {
                 const strDiff = (blocker.str || 50) - (target.str || 50);
                 blocker.isEngaged = true;
                 blocker.engagedWith = target;
@@ -1336,9 +1336,8 @@ export function executeAssignment(pState, assignment, offenseStates, LOS, playSt
                         pState.targetY = qb.y - 2.0;
                     }
                 } else {
-                    const dx = qb.x - pState.x;
-                    pState.targetX = qb.x + (dx * 0.5);
-                    pState.targetY = qb.y - 2.0;
+                    pState.targetX = qb.x;
+                    pState.targetY = qb.y + 0.5;
                 }
             } else {
                 pState.targetX = pState.x;

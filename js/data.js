@@ -176,9 +176,9 @@ export const offenseFormations = {
             WR1: [-15, 0.5],
             WR2: [15, 0.5],
             TE1: [2.8, -1.5],
-            OL1: [-1.4, -1.5],
+            OL1: [-1.8, -1.5],
             OL2: [0, -1.5],
-            OL3: [1.4, -1.5]
+            OL3: [1.8, -1.5]
         },
         slotPriorities: {
             QB1: { throwingAccuracy: 3, playbookIQ: 2 },
@@ -550,7 +550,7 @@ export const offensivePlaybook = {
             'X': 'Dig',
             'Z': 'Fly',
             'Y': 'Drag',
-            'RB': 'CheckRelease', 'OL': 'pass_block'
+            'RB': 'pass_block', 'OL': 'pass_block'
         }
     },
     'Uni_Double_Moves': {
@@ -700,9 +700,9 @@ export const defenseFormations = {
         slots: ['DL1', 'DL2', 'DL3', 'LB1', 'LB2', 'DB1', 'DB2', 'DB3'],
         personnel: { DL: 3, LB: 2, DB: 3 },
         coordinates: {
-            DL1: [-2.8, 1.0], // 5-Tech (Outside edge of Tackle)
+            DL1: [-2.1, 1.0], // 4i/5-Tech (Aligned over Tackle)
             DL2: [0, 1.0],    // 0-Tech (Nose Tackle)
-            DL3: [2.8, 1.0],
+            DL3: [2.1, 1.0],
             LB1: [-3.5, 4.5], // Moved down to fill gaps
             LB2: [3.5, 4.5],
             DB1: [-14, 7.0],
@@ -815,9 +815,9 @@ export const defenseFormations = {
         slots: ['DL1', 'DL2', 'DL3', 'LB1', 'DB1', 'DB2', 'DB3', 'DB4'],
         personnel: { DL: 3, LB: 1, DB: 4 },
         coordinates: {
-            DL1: [-2.8, 1.0],
+            DL1: [-2.1, 1.0],
             DL2: [0, 1.0],
-            DL3: [2.8, 1.0],
+            DL3: [2.1, 1.0],
             LB1: [0, 4.5],
             DB1: [-14, 7.0],
             DB2: [14, 7.0],
@@ -840,9 +840,9 @@ export const defenseFormations = {
         slots: ['DL1', 'DL2', 'DL3', 'DB1', 'DB2', 'DB3', 'DB4', 'DB5'],
         personnel: { DL: 3, LB: 0, DB: 5 },
         coordinates: {
-            'DL1': [-2.8, 1.0],
+            'DL1': [-2.1, 1.0],
             'DL2': [0, 1.0],
-            'DL3': [2.8, 1.0],
+            'DL3': [2.1, 1.0],
             'DB1': [-15, 7.0],
             'DB2': [15, 7.0],
             'DB3': [-5.0, 5.0],

@@ -2462,6 +2462,8 @@ export function startLiveGameLoop(initialGameState, onComplete) {
 
 function updateLiveScoreboard() {
     if (!activeLiveGame) return;
+    if (elements.simHomeTeam && activeLiveGame.homeTeam) elements.simHomeTeam.textContent = activeLiveGame.homeTeam.name;
+    if (elements.simAwayTeam && activeLiveGame.awayTeam) elements.simAwayTeam.textContent = activeLiveGame.awayTeam.name;
     if (elements.simHomeScore) elements.simHomeScore.textContent = activeLiveGame.homeScore;
     if (elements.simAwayScore) elements.simAwayScore.textContent = activeLiveGame.awayScore;
     if (elements.simPossession && activeLiveGame.possession) {
@@ -2469,6 +2471,16 @@ function updateLiveScoreboard() {
     }
     if (elements.simGameDown) elements.simGameDown.textContent = `${activeLiveGame.down} & ${activeLiveGame.yardsToGo}`;
     if (elements.simGameDrive) elements.simGameDrive.textContent = `Q${activeLiveGame.quarter || 1} | ${formatGameClock(activeLiveGame.clock)}`;
+
+    // Dynamically show which team is on Offense / Defense
+    if (elements.simBannerOffense && elements.simBannerDefense && activeLiveGame.possession) {
+        const isHomeOffense = activeLiveGame.possession.id === activeLiveGame.homeTeam?.id;
+        elements.simBannerOffense.textContent = isHomeOffense ? "OFFENSE" : "DEFENSE";
+        elements.simBannerOffense.className = `mt-1 ${isHomeOffense ? 'bg-blue-900/80 text-blue-200 border-blue-700' : 'bg-red-900/80 text-red-200 border-red-700'} text-[10px] px-2 py-0.5 rounded border font-bold uppercase tracking-tight truncate max-w-[140px]`;
+
+        elements.simBannerDefense.textContent = isHomeOffense ? "DEFENSE" : "OFFENSE";
+        elements.simBannerDefense.className = `mt-1 ${isHomeOffense ? 'bg-red-900/80 text-red-200 border-red-700' : 'bg-blue-900/80 text-blue-200 border-blue-700'} text-[10px] px-2 py-0.5 rounded border font-bold uppercase tracking-tight truncate max-w-[140px]`;
+    }
 }
 
 function runLiveGameStep() {

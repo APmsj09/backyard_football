@@ -92,7 +92,7 @@ export function checkBlockCollisions(playState, gameLog = null) {
 
         let target = null;
         const imminentThreat = defenders
-            .filter(d => getDistance(blocker, d) < 1.3 && d.y > blocker.y - 1.5)
+            .filter(d => getDistance(blocker, d) < 1.8 && d.y > blocker.y - 1.5)
             .sort((a, b) => getDistance(blocker, a) - getDistance(blocker, b))[0];
 
         if (imminentThreat && !imminentThreat.isEngaged && !imminentThreat.isBlocked) {

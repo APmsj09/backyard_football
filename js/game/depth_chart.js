@@ -42,18 +42,37 @@ export function isPlayerViableForPosition(p, pos) {
         if (['CB', 'S', 'FS', 'SS'].includes(raw)) return 'DB';
         return raw;
     };
-    const off = normalize(p.favoriteOffensivePosition || p.pos || 'WR');
-    const def = normalize(p.favoriteDefensivePosition || 'DB');
 
+    const off = normalize(p.favoriteOffensivePosition || (['QB', 'RB', 'WR', 'TE', 'OL'].includes(p.pos) ? p.pos : null));
+    const def = normalize(p.favoriteDefensivePosition || (['DL', 'LB', 'DB'].includes(p.pos) ? p.pos : null));
+
+    // Direct matches for assigned primary offense or defense
     if (off === pos || def === pos) return true;
-    if (pos === 'QB') return off === 'QB'; // Strictly actual QBs
-    if (pos === 'OL' && (off === 'TE' || def === 'DL')) return true;
-    if (pos === 'DL' && (off === 'OL' || def === 'LB')) return true;
-    if (pos === 'TE' && off === 'WR') return true;
-    if (pos === 'RB' && (off === 'WR' || def === 'LB')) return true;
-    if (pos === 'WR' && (off === 'RB' || def === 'DB')) return true;
-    if (pos === 'DB' && (off === 'WR' || def === 'LB')) return true;
-    if (pos === 'LB' && (def === 'DL' || def === 'DB')) return true;
+
+    // Strict Offensive Viability (derived from offensive identity only)
+    if (pos === 'QB') return off === 'QB';
+    if (pos === 'RB') return off === 'RB';
+    if (pos === 'WR') {
+        return off === 'WR' || (off === 'RB' && (p.attributes?.technical?.catchingHands || 0) >= 45);
+    }
+    if (pos === 'TE') {
+        return off === 'TE' || (off === 'WR' && (p.attributes?.physical?.strength || 0) >= 48) || (off === 'OL' && (p.attributes?.physical?.speed || 0) >= 35);
+    }
+    if (pos === 'OL') {
+        return off === 'OL' || (off === 'TE' && (p.attributes?.physical?.strength || 0) >= 50) || def === 'DL';
+    }
+
+    // Strict Defensive Viability (derived from defensive identity only)
+    if (pos === 'DL') {
+        return def === 'DL' || off === 'OL' || (def === 'LB' && (p.attributes?.physical?.strength || 0) >= 55);
+    }
+    if (pos === 'LB') {
+        return def === 'LB' || (def === 'DL' && (p.attributes?.physical?.speed || 0) >= 40) || (def === 'DB' && (p.attributes?.technical?.tackling || 0) >= 45);
+    }
+    if (pos === 'DB') {
+        return def === 'DB' || (def === 'LB' && (p.attributes?.physical?.speed || 0) >= 52);
+    }
+
     return false;
 }
 
@@ -74,20 +93,10 @@ export function populateNaturalDepthOrder(team) {
 
 export function pruneUnnaturalDepthOrder(team) {
     if (!team || !team.depthOrder || typeof team.depthOrder !== 'object') return;
-    const assignedIds = new Set();
-    if (team.depthChart) {
-        Object.values(team.depthChart.offense || {}).forEach(id => { if (id) assignedIds.add(id); });
-        Object.values(team.depthChart.defense || {}).forEach(id => { if (id) assignedIds.add(id); });
-    }
-    if (team.slotOverrides) {
-        Object.values(team.slotOverrides.offense || {}).forEach(id => { if (id) assignedIds.add(id); });
-        Object.values(team.slotOverrides.defense || {}).forEach(id => { if (id) assignedIds.add(id); });
-    }
 
     Object.keys(team.depthOrder).forEach(pos => {
         if (!Array.isArray(team.depthOrder[pos])) return;
         team.depthOrder[pos] = team.depthOrder[pos].filter(pid => {
-            if (assignedIds.has(pid)) return true;
             const p = getPlayer(pid);
             return isPlayerViableForPosition(p, pos);
         });
