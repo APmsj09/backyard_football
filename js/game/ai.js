@@ -142,12 +142,12 @@ export function diagnosePlay(pState, tick, offenseStates, truePlayType, offensiv
     }
 
     // 5. STABLE DIRECTION WITH DEADZONE
-    let direction = 'center';
-    let dirConfidence = centerScore / totalDirScore;
-
     const totalDirScore = Math.max(1, leftScore + rightScore + centerScore);
     const rightMargin = rightScore - Math.max(leftScore, centerScore);
     const leftMargin = leftScore - Math.max(rightScore, centerScore);
+
+    let direction = 'center';
+    let dirConfidence = centerScore / totalDirScore;
 
     if (rightMargin > 15) {
         direction = 'right';
