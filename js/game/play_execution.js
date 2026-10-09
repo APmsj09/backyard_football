@@ -776,7 +776,7 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                         pState.targetX = pState.initialX;
                         pState.targetY = pState.dropbackTargetY;
                         pState.contactReduction = 1.4;
-                        
+
                         // When he reaches the end of his dropback, anchor him to his exact stopping spot
                         if (Math.abs(pState.y - pState.dropbackTargetY) < 0.4) {
                             pState.hasCompletedDropback = true;
@@ -819,7 +819,10 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                     const interiorClean = !defenseStates.some(d => Math.abs(d.x - pState.x) <= 2.0 && d.y > pState.y && d.y < LOS);
 
                     if ((edgePressureLeft || edgePressureRight || collapsingDefenders.length > 0) && interiorClean && qbIQ > 45) {
-                        idealY = Math.min(LOS - 1.2, pState.y + 2.0); // Step up into the clean pocket
+                        const pocketAnchorY =
+                            pState._pocketAnchorY ?? pState.dropbackTargetY ?? pState.y;
+
+                        idealY = Math.min(LOS - 1.2, pocketAnchorY + 2.0);
 
                         if (pState._lastPocketAction !== 'climb') {
                             logPlayDebug('QB_POCKET_MOVE', `${pState.name} steps up into the clean pocket`, { targetY: Number(idealY.toFixed(1)) });
@@ -844,12 +847,16 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                             if (Math.abs(dx) <= 1.5 && dy > 0) upTheMiddle += threatLevel;
                         });
 
-                        // SMOOTH PRESSURE GRADIENT INSTEAD OF HARD 5-YARD CLIFFS
                         const pressureDiff = rightPressure - leftPressure;
 
-                        // Slide away from the higher pressure side proportionally
-                        if (Math.abs(pressureDiff) > 0.5) {
-                            desiredX -= pressureDiff * 1.5;
+                        // Ignore small changes in pressure balance.
+                        // Stronger pressure can still move the QB away from danger.
+                        if (Math.abs(pressureDiff) > 1.5) {
+                            const lateralAdjustment =
+                                Math.sign(pressureDiff) *
+                                Math.min(3.0, Math.abs(pressureDiff));
+
+                            desiredX -= lateralAdjustment;
                         }
 
                         if ((leftPressure > 2.0 || rightPressure > 2.0) && upTheMiddle < 1.5 && qbIQ > 65) {
@@ -881,10 +888,33 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                             });
                         }
                     } else {
-                        pState.targetX = idealX;
-                        pState.targetY = idealY;
-                        pState._pocketX = idealX;
-                        pState._pocketY = idealY;
+                        // Gradually return to the pocket anchor rather than snapping back.
+                        const returnAlpha = 0.15;
+
+                        if (pState._pocketX === undefined) {
+                            pState._pocketX = idealX;
+                        }
+
+                        if (pState._pocketY === undefined) {
+                            pState._pocketY = idealY;
+                        }
+
+                        pState._pocketX +=
+                            (idealX - pState._pocketX) * returnAlpha;
+
+                        pState._pocketY +=
+                            (idealY - pState._pocketY) * returnAlpha;
+
+                        if (Math.abs(pState._pocketX - idealX) < 0.15) {
+                            pState._pocketX = idealX;
+                        }
+
+                        if (Math.abs(pState._pocketY - idealY) < 0.15) {
+                            pState._pocketY = idealY;
+                        }
+
+                        pState.targetX = pState._pocketX;
+                        pState.targetY = pState._pocketY;
                     }
                     break;
                 }
@@ -1105,7 +1135,7 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                         }
                         pState.targetX = pState._holdX;
                         pState.targetY = pState._holdY;
-                    } 
+                    }
                     // 2. DEFENSE: Must keep executing assignment so they don't freeze
                     else {
                         executeAssignment(pState, pState.assignment, offenseStates, LOS, playState, ballCarrierState);
