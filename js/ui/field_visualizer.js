@@ -226,14 +226,14 @@ export function drawFieldVisualization(canvas, ctx, frameData, homeColor = '#000
         frameData.players.forEach(p => {
             const px = toScreenX(p.y);
             const py = toScreenY(p.x);
-            // Boosted scale: ~2x larger player models for clear arcade readability
-            const baseSize = ppY * 1.35;
-            const weightScale = 0.75 + ((p.wgt || 200) / 350);
-            const heightScale = 0.85 + ((p.hgt || 70) / 120);
+            // Balanced scale: ~1.35x over original (readable without overcrowding the field)
+            const baseSize = ppY * 0.95;
+            const weightScale = 0.75 + ((p.wgt || 200) / 400);
+            const heightScale = 0.82 + ((p.hgt || 70) / 140);
 
             ctx.save();
-            let jitterX = p.isStunned ? (Math.random() - 0.5) * 3 : 0;
-            let jitterY = p.isStunned ? (Math.random() - 0.5) * 3 : 0;
+            let jitterX = p.isStunned ? (Math.random() - 0.5) * 2.5 : 0;
+            let jitterY = p.isStunned ? (Math.random() - 0.5) * 2.5 : 0;
             ctx.translate(px + jitterX, py + jitterY);
 
             ctx.save();
@@ -242,37 +242,37 @@ export function drawFieldVisualization(canvas, ctx, frameData, homeColor = '#000
             const jerseyColor = p.isStunned ? "#4b5563" : (p.primaryColor || "#333");
             const helmetColor = p.isStunned ? "#9ca3af" : (p.secondaryColor || "#fff");
 
-            // Chunkier shoulder pads
+            // Proportionate shoulder pads
             ctx.fillStyle = jerseyColor;
-            const padThickness = baseSize * 0.9 * heightScale;
+            const padThickness = baseSize * 0.85 * heightScale;
             const padWidth = baseSize * 2.1 * weightScale;
 
             ctx.beginPath();
-            ctx.roundRect(-padThickness / 2, -padWidth / 2, padThickness, padWidth, 6);
+            ctx.roundRect(-padThickness / 2, -padWidth / 2, padThickness, padWidth, 4.5);
             ctx.fill();
-            ctx.strokeStyle = "rgba(0,0,0,0.7)";
-            ctx.lineWidth = 1.5;
+            ctx.strokeStyle = "rgba(0,0,0,0.65)";
+            ctx.lineWidth = 1.2;
             ctx.stroke();
 
-            // Sizable helmet with face mask bar
+            // Proportional helmet
             ctx.fillStyle = helmetColor;
-            const helmetRadius = baseSize * 0.65 * (0.9 + (p.hgt || 70) / 150);
+            const helmetRadius = baseSize * 0.6 * (0.9 + (p.hgt || 70) / 160);
             ctx.beginPath();
-            ctx.arc(padThickness * 0.2, 0, helmetRadius, 0, Math.PI * 2);
+            ctx.arc(padThickness * 0.18, 0, helmetRadius, 0, Math.PI * 2);
             ctx.fill();
 
             ctx.strokeStyle = "#111";
-            ctx.lineWidth = Math.max(2, ppY * 0.22);
+            ctx.lineWidth = Math.max(1.8, ppY * 0.18);
             ctx.beginPath();
-            ctx.arc(padThickness * 0.2, 0, helmetRadius, -Math.PI / 3, Math.PI / 3);
+            ctx.arc(padThickness * 0.18, 0, helmetRadius, -Math.PI / 3, Math.PI / 3);
             ctx.stroke();
 
-            // Bold, highly legible jersey number
+            // Legible, proportionate jersey number
             if (!p.isStunned && p.number) {
                 ctx.save();
                 ctx.rotate(-p.angle);
                 ctx.fillStyle = p.secondaryColor || "#fff";
-                ctx.font = `black ${Math.max(10, baseSize * 0.65 * weightScale)}px sans-serif`;
+                ctx.font = `bold ${Math.max(9, Math.round(baseSize * 0.65 * weightScale))}px sans-serif`;
                 ctx.textAlign = "center";
                 ctx.textBaseline = "middle";
                 ctx.fillText(p.number, 0, 0);
@@ -369,8 +369,8 @@ export function drawFieldVisualization(canvas, ctx, frameData, homeColor = '#000
         const bx = toScreenX(frameData.ball.y);
         const by = toScreenY(frameData.ball.x);
         const bz = frameData.ball.z || 0;
-        // Scaled up ball radius for clear visibility in flight and on the ground
-        const ballRadius = ppY * 0.55 * (1 + bz * 0.2);
+        // Balanced ball radius (visible without looking like a beach ball)
+        const ballRadius = ppY * 0.37 * (1 + bz * 0.17);
 
         ctx.fillStyle = `rgba(0,0,0,${Math.max(0.15, 0.5 - bz * 0.1)})`;
         ctx.beginPath();
