@@ -1,3 +1,5 @@
+import { logPlayDebug } from './telemetry.js';
+
 /**
  * Calculates Euclidean distance between two points.
  */

@@ -718,9 +718,18 @@ export function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey
             );
 
             playState.activePlayers.forEach(p => {
-                try { updatePlayerPosition(p, timeDelta, playState.activePlayers); } catch (e) { }
+                try {
+                    updatePlayerPosition(p, timeDelta, playState.activePlayers);
+                } catch (e) {
+                    if (!p._physicsErrorLogged) {
+                        p._physicsErrorLogged = true;
+                        console.error(
+                            `[Physics Error] Tick ${playState.tick}: ${p.name} (${p.slot})`,
+                            e
+                        );
+                    }
+                }
             });
-
             if (ballPos.inAir || (ballPos.isLoose && playState.type === 'punt')) {
                 ballPos.prevX = ballPos.x;
                 ballPos.prevY = ballPos.y;
@@ -1022,9 +1031,9 @@ export function simulateLivePlayStep(gameInstance, mode = 'live') {
         gameInstance.down = 1; gameInstance.yardsToGo = 3; gameInstance.ballOn = 97;
         offPlayKey = 'Uni_QuickSlants'; defPlayKey = 'GoalLine_RunStuff';
     } else if (determinePuntDecision(gameInstance.down, gameInstance.yardsToGo, gameInstance.ballOn, offense, (offense.id === gameInstance.homeTeam.id ? (gameInstance.homeScore - gameInstance.awayScore) : (gameInstance.awayScore - gameInstance.homeScore)), gameInstance.clock)) {
-        offense.formations.offense = 'Punt'; 
+        offense.formations.offense = 'Punt';
         defense.formations.defense = 'Punt_Return';
-        offPlayKey = 'Punt_Punt'; 
+        offPlayKey = 'Punt_Punt';
         defPlayKey = 'PuntReturn_Classic';
     } else {
         const scoreDiff = (offense.id === gameInstance.homeTeam.id)
