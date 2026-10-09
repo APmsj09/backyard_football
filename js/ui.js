@@ -1983,78 +1983,123 @@ function renderDepthChartSide(side, gameState) {
     const formationData = (side === 'offense' ? offenseFormations : defenseFormations)[formKey];
 
     visualField.innerHTML = '';
-    const losMarker = document.createElement('div');
-    losMarker.className = 'absolute left-0 w-full h-1 bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.8)] z-0';
-    losMarker.style.top = side === 'offense' ? '20%' : '80%';
-    visualField.appendChild(losMarker);
+        const losMarker = document.createElement('div');
+        losMarker.className = 'absolute left-0 w-full h-1 bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.8)] z-0';
+        losMarker.style.top = side === 'offense' ? '22%' : '78%';
+        visualField.appendChild(losMarker);
 
-    if (formationData?.slots) {
-        formationData.slots.forEach(slotId => {
-            const coords = formationData.coordinates?.[slotId];
-            if (!coords) return;
-            const [yardsX, yardsY] = coords;
-            const leftPercent = 50 + (yardsX * 1.8);
-            const topPercent = side === 'offense' ? 20 - (yardsY * 3.5) : 80 - (yardsY * 3.5);
+        // Smart projection: Expands cramped interior trenches while keeping boundary WRs in bounds
+        const getVisualCoordinates = (rawX, rawY, currentSide) => {
+            // 1. Horizontal De-Clustering
+            let visualX = rawX;
+            if (Math.abs(rawX) <= 4.0) {
+                // Expand trench spacing by 2.1x so OL, TE, and DL never touch
+                visualX = rawX * 2.1;
+            } else {
+                const sign = Math.sign(rawX);
+                const excess = Math.abs(rawX) - 4.0;
+                visualX = sign * (4.0 * 2.1 + excess * 1.3);
+            }
+            visualX = Math.max(-21.5, Math.min(21.5, visualX));
+            const leftPercent = 50 + (visualX * 1.9);
 
-            const slotEl = document.createElement('div');
-            slotEl.style.left = `${leftPercent}%`;
-            slotEl.style.top = `${topPercent}%`;
-            slotEl.dataset.positionSlot = slotId;
-            slotEl.dataset.side = side;
-
-            const playerId = currentChart[slotId];
-            const player = roster.find(p => p.id === playerId);
-            let posKey = slotId.replace(/\d+/g, '');
-            if (['OT', 'OG', 'C'].includes(posKey)) posKey = 'OL';
-            if (['DE', 'DT', 'NT'].includes(posKey)) posKey = 'DL';
-            if (['CB', 'S'].includes(posKey)) posKey = 'DB';
-
-            const ovr = player ? calculateOverall(player, posKey) : '--';
-            const shortName = player ? player.name.split(' ')[0] : 'EMPTY';
-            const energy = player ? Math.max(0, Math.round(100 - (player.fatigue || 0))) : 100;
-            const isUnavailable = player && player.status?.duration > 0;
-
-            // Two-Way Check: Does this player also start on the other side?
-            const otherSlot = player ? Object.entries(otherChart).find(([_, id]) => id === player.id)?.[0] : null;
-
-            // Stamina ring border color
-            let ringColor = 'border-slate-400';
-            if (player) {
-                if (energy >= 75) ringColor = 'border-emerald-400';
-                else if (energy >= 50) ringColor = 'border-amber-400';
-                else ringColor = 'border-rose-500 animate-pulse';
+            // 2. Vertical Staggering & Tier Alignment
+            let visualY = rawY;
+            if (currentSide === 'offense') {
+                if (rawY < -0.5 && rawY > -2.0) {
+                    visualY = -2.2; // Push under-center QB down so he doesn't collide with the Center
+                } else if (rawY <= -2.0 && rawY > -4.5) {
+                    visualY = rawY * 1.25; // Fullback depth
+                } else if (rawY <= -4.5) {
+                    visualY = -5.0 + (rawY + 4.5) * 1.1; // Shotgun / Deep tailback
+                }
+            } else {
+                if (rawY >= 0.5 && rawY <= 2.0) {
+                    visualY = 1.3; // DL on the line
+                } else if (rawY > 2.0 && rawY <= 5.5) {
+                    visualY = 4.4; // Linebackers at clean 2nd level
+                } else if (rawY > 5.5 && rawY <= 9.0) {
+                    visualY = 8.0; // Cornerbacks / Nickel
+                } else if (rawY > 9.0) {
+                    visualY = 12.8; // Deep Safeties
+                }
             }
 
-            slotEl.className = 'absolute transform -translate-x-1/2 -translate-y-1/2 flex flex-col items-center group z-10 cursor-pointer select-none';
-            slotEl.innerHTML = `
-                <!-- Slot Label Badge -->
-                <span class="text-[8px] font-black tracking-wider uppercase px-1 rounded shadow-sm mb-0.5 ${side === 'offense' ? 'bg-blue-900 text-blue-200 border border-blue-700' : 'bg-red-900 text-red-200 border border-red-700'}">
-                    ${slotId}
-                </span>
+            const topPercent = currentSide === 'offense'
+                ? Math.max(10, Math.min(88, 22 - (visualY * 4.2)))
+                : Math.max(10, Math.min(88, 78 - (visualY * 4.2)));
 
-                <!-- Avatar Circle with Stamina Halo -->
-                <div class="relative w-11 h-11 rounded-full border-2 ${ringColor} shadow-xl flex flex-col items-center justify-center ${player ? 'bg-slate-900 text-white' : 'bg-slate-800/80 border-dashed border-slate-500 text-slate-400'}">
-                    <span class="text-[8px] font-mono text-slate-400 leading-none">${posKey}</span>
-                    <span class="text-sm font-black leading-none">${ovr}</span>
-                    ${isUnavailable ? '<span class="absolute -top-1 -right-1 text-[10px]">🩹</span>' : ''}
-                </div>
+            return { leftPercent, topPercent };
+        };
 
-                <!-- Player Name Pill -->
-                <div class="mt-0.5 bg-slate-950 text-white text-[9px] font-bold px-1.5 py-0.5 rounded shadow text-center max-w-[75px] truncate border border-slate-700 group-hover:border-amber-400 transition-colors">
-                    ${shortName}
-                </div>
+        if (formationData?.slots) {
+            formationData.slots.forEach(slotId => {
+                const coords = formationData.coordinates?.[slotId];
+                if (!coords) return;
+                const [yardsX, yardsY] = coords;
+                const { leftPercent, topPercent } = getVisualCoordinates(yardsX, yardsY, side);
 
-                <!-- Two-Way Ironman Badge -->
-                ${otherSlot ? `
-                    <span class="mt-0.5 text-[8px] font-black uppercase tracking-tight px-1 py-0.2 rounded shadow border ${side === 'offense' ? 'bg-rose-950 text-rose-300 border-rose-800' : 'bg-blue-950 text-blue-300 border-blue-800'}" title="Also starting at ${otherSlot} on ${otherSide}">
-                        ⚡ ${otherSlot}
-                    </span>
-                ` : ''}
-            `;
-            slotEl.onclick = () => window.app_openSlotModal(side, slotId);
-            visualField.appendChild(slotEl);
-        });
-    }
+                const slotEl = document.createElement('div');
+                slotEl.style.left = `${leftPercent}%`;
+                slotEl.style.top = `${topPercent}%`;
+                slotEl.dataset.positionSlot = slotId;
+                slotEl.dataset.side = side;
+
+                const playerId = currentChart[slotId];
+                const player = roster.find(p => p.id === playerId);
+                let posKey = slotId.replace(/\d+/g, '');
+                if (['OT', 'OG', 'C'].includes(posKey)) posKey = 'OL';
+                if (['DE', 'DT', 'NT'].includes(posKey)) posKey = 'DL';
+                if (['CB', 'S'].includes(posKey)) posKey = 'DB';
+
+                const ovr = player ? calculateOverall(player, posKey) : '--';
+                const shortName = player ? player.name.split(' ')[0] : 'EMPTY';
+                const energy = player ? Math.max(0, Math.round(100 - (player.fatigue || 0))) : 100;
+                const isUnavailable = player && player.status?.duration > 0;
+
+                // Two-Way check
+                const otherSlot = player ? Object.entries(otherChart).find(([_, id]) => id === player.id)?.[0] : null;
+
+                let ringColor = 'border-slate-500';
+                if (player) {
+                    if (energy >= 75) ringColor = 'border-emerald-400';
+                    else if (energy >= 50) ringColor = 'border-amber-400';
+                    else ringColor = 'border-rose-500 animate-pulse';
+                }
+
+                // Compact layout: avatar shrunk from w-11 to w-9, two-way badge pinned to avatar corner
+                slotEl.className = 'absolute transform -translate-x-1/2 -translate-y-1/2 flex flex-col items-center group z-10 cursor-pointer select-none';
+                slotEl.innerHTML = `
+                    <div class="relative flex flex-col items-center">
+                        <!-- Floating Slot Pill -->
+                        <span class="absolute -top-2.5 z-20 text-[7.5px] font-black tracking-wider uppercase px-1 rounded shadow-sm ${side === 'offense' ? 'bg-blue-900 text-blue-200 border border-blue-700' : 'bg-red-900 text-red-200 border border-red-700'}">
+                            ${slotId}
+                        </span>
+
+                        <!-- Compact Avatar Circle -->
+                        <div class="relative w-9 h-9 rounded-full border-2 ${ringColor} shadow-lg flex flex-col items-center justify-center ${player ? 'bg-slate-900 text-white' : 'bg-slate-800/90 border-dashed border-slate-500 text-slate-400'}">
+                            <span class="text-[7px] font-mono text-slate-400 leading-none">${posKey}</span>
+                            <span class="text-xs font-black leading-none">${ovr}</span>
+                            ${isUnavailable ? '<span class="absolute -top-1 -right-1 text-[9px]">🩹</span>' : ''}
+                            
+                            <!-- Ironman Tag as Corner Badge (Saves vertical space) -->
+                            ${otherSlot ? `
+                                <span class="absolute -bottom-1 -right-1.5 z-20 text-[7px] font-black uppercase px-1 rounded shadow border ${side === 'offense' ? 'bg-rose-950 text-rose-300 border-rose-800' : 'bg-blue-950 text-blue-300 border-blue-800'}" title="Also starts at ${otherSlot}">
+                                    ⚡${otherSlot.substring(0, 2)}
+                                </span>
+                            ` : ''}
+                        </div>
+                    </div>
+
+                    <!-- Sleek Name Pill -->
+                    <div class="mt-0.5 bg-slate-950 text-white text-[8.5px] font-bold px-1.5 py-0.5 rounded shadow text-center max-w-[64px] truncate border border-slate-700 group-hover:border-amber-400 transition-colors">
+                        ${shortName}
+                    </div>
+                `;
+                slotEl.onclick = () => window.app_openSlotModal(side, slotId);
+                visualField.appendChild(slotEl);
+            });
+        }
 
     // Build the Comprehensive Two-Way Deployment & Availability Command Table
     const offSlotsCount = Object.values(depthChart.offense || {}).filter(Boolean).length;
