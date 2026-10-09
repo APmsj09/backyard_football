@@ -270,13 +270,17 @@ export function setupInitialPlayerStates(playState, offense, defense, play, assi
             startX = Math.max(0.5, Math.min(53.3 - 0.5, startX));
             startY = Math.max(10.5, Math.min(110.0 - 10.5, startY));
 
-            if (isOffense && slot.startsWith('OL')) {
-                startY = playState.lineOfScrimmage - 0.2;
-            } else if (!isOffense && slot.startsWith('DL')) {
-                startY = playState.lineOfScrimmage + 0.8;
+            // Legal alignment enforcement: Offense must stay behind LOS; Defense must stay ahead
+            if (isOffense) {
+                // Ensure no offensive player crosses into the neutral zone
+                if (startY > playState.lineOfScrimmage - 0.2) {
+                    startY = playState.lineOfScrimmage - 0.2;
+                }
             } else {
-                if (!isOffense && startY < playState.lineOfScrimmage + 1.5) startY = playState.lineOfScrimmage + 1.5;
-                if (isOffense && startY > playState.lineOfScrimmage - 1.5) startY = playState.lineOfScrimmage - 1.5;
+                // Ensure no defender is offside
+                if (startY < playState.lineOfScrimmage + 0.8) {
+                    startY = playState.lineOfScrimmage + 0.8;
+                }
             }
 
             if (player.fatigue === undefined || isNaN(player.fatigue)) player.fatigue = 0;

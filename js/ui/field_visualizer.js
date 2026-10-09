@@ -142,19 +142,66 @@ export function drawFieldVisualization(canvas, ctx, frameData, homeColor = '#000
     drawEndzone(0, 10, awayColor, awayName);
     drawEndzone(110, 120, homeColor, homeName);
 
-    const drawSpecialLine = (lineY, color) => {
+    const drawSpecialLine = (lineY, color, label = null) => {
         if (typeof lineY !== 'number') return;
         const sy = toScreenX(lineY);
+        if (sy < -20 || sy > w + 20) return;
+
+        // Subtle broadcast glow
+        ctx.save();
+        ctx.shadowColor = color;
+        ctx.shadowBlur = ppY * 0.3;
         ctx.beginPath();
         ctx.moveTo(sy, 0);
         ctx.lineTo(sy, h);
-        ctx.lineWidth = ppY * 0.15;
+        ctx.lineWidth = ppY * 0.16;
         ctx.strokeStyle = color;
         ctx.stroke();
+        ctx.restore();
+
+        // Sideline label badge (LOS / 1ST)
+        if (label) {
+            ctx.save();
+            ctx.fillStyle = color;
+            ctx.font = `black ${Math.max(9, ppY * 0.45)}px sans-serif`;
+            ctx.textAlign = "center";
+            ctx.textBaseline = "middle";
+            ctx.fillRect(sy - ppY * 0.6, toScreenY(0) - ppY * 0.6, ppY * 1.2, ppY * 0.5);
+            ctx.fillStyle = "#000000";
+            ctx.fillText(label, sy, toScreenY(0) - ppY * 0.35);
+            ctx.restore();
+        }
     };
 
-    drawSpecialLine(frameData.lineOfScrimmage, "#3b82f6");
-    if (frameData.firstDownY) drawSpecialLine(frameData.firstDownY, "#eab308");
+    drawSpecialLine(frameData.lineOfScrimmage, "#38bdf8", "LOS");
+    if (frameData.firstDownY) drawSpecialLine(frameData.firstDownY, "#fbbf24", "1ST");
+
+    // PASSING TARGET RETICLE (Shows where the QB aimed while the ball is in flight)
+    if (frameData.ball?.inAir && typeof frameData.ball.targetX === 'number' && typeof frameData.ball.targetY === 'number') {
+        const retX = toScreenX(frameData.ball.targetY);
+        const retY = toScreenY(frameData.ball.targetX);
+        const retRadius = ppY * 0.8;
+
+        ctx.save();
+        ctx.strokeStyle = "rgba(251, 191, 36, 0.75)";
+        ctx.fillStyle = "rgba(251, 191, 36, 0.15)";
+        ctx.lineWidth = 2;
+        ctx.setLineDash([4, 3]);
+        ctx.beginPath();
+        ctx.arc(retX, retY, retRadius, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+
+        // Crosshair ticks
+        ctx.setLineDash([]);
+        ctx.beginPath();
+        ctx.moveTo(retX - retRadius * 1.3, retY);
+        ctx.lineTo(retX + retRadius * 1.3, retY);
+        ctx.moveTo(retX, retY - retRadius * 1.3);
+        ctx.lineTo(retX, retY + retRadius * 1.3);
+        ctx.stroke();
+        ctx.restore();
+    }
 
     ctx.lineWidth = ppY * 0.1;
     ctx.strokeStyle = "white";
@@ -227,14 +274,29 @@ export function drawFieldVisualization(canvas, ctx, frameData, homeColor = '#000
                 ctx.fillText("X_X", 0, -baseSize * 2.5);
             }
 
+            // High-visibility Ball Carrier Halo & Football icon
             if (p.hasBall) {
+                ctx.save();
+                // Glowing outer pulse ring
+                ctx.shadowColor = "#f59e0b";
+                ctx.shadowBlur = 10;
                 ctx.strokeStyle = "#fbbf24";
-                ctx.lineWidth = 3;
-                ctx.setLineDash([4, 2]);
+                ctx.lineWidth = 2.5;
                 ctx.beginPath();
-                ctx.arc(0, 0, baseSize * 2.0 * weightScale, 0, Math.PI * 2);
+                ctx.arc(0, 0, baseSize * 1.8 * weightScale, 0, Math.PI * 2);
                 ctx.stroke();
-                ctx.setLineDash([]);
+                ctx.restore();
+
+                // Football icon badge above helmet
+                ctx.save();
+                ctx.fillStyle = "#854d0e";
+                ctx.strokeStyle = "#fef08a";
+                ctx.lineWidth = 1;
+                ctx.beginPath();
+                ctx.ellipse(0, -baseSize * 2.6, 6, 3.5, 0, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.stroke();
+                ctx.restore();
             }
 
             // --- CRISP ON-FIELD POSITION & NAME BADGES (NO CLUTTER) ---

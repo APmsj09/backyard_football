@@ -128,12 +128,21 @@ export function getAssignment(slot, playbookAssignments, formationMapping, isOff
 }
 
 export function captureFrame(playState, gameLog) {
+    const los = playState.lineOfScrimmage;
+    const ytg = playState.yardsToGo ?? 10;
+    // Don't draw first down marker past the opponent's goal line (Goal-to-Go)
+    const targetY = los + ytg;
+    const firstDownY = targetY < 110 ? targetY : null;
+
     return {
         tick: playState.tick,
         ball: {
             x: playState.ballState.x,
             y: playState.ballState.y,
-            z: playState.ballState.z
+            z: playState.ballState.z,
+            inAir: playState.ballState.inAir || false,
+            targetX: playState.ballState.targetX,
+            targetY: playState.ballState.targetY
         },
         players: playState.activePlayers.map(p => ({
             id: p.id,
@@ -156,6 +165,7 @@ export function captureFrame(playState, gameLog) {
                 : Math.atan2(p.vx, p.vy)
         })),
         logIndex: gameLog ? gameLog.length : 0,
-        lineOfScrimmage: playState.lineOfScrimmage
+        lineOfScrimmage: los,
+        firstDownY: firstDownY
     };
 }

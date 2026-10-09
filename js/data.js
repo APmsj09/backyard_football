@@ -163,7 +163,7 @@ export const routeTree = {
     'Wall_Alley_Right': { path: [{ x: 2, y: -1 }, { x: 8, y: 1 }, { x: 10, y: 5 }] },
 };
 
-// --- OFFENSIVE FORMATIONS ---
+// --- OFFENSIVE FORMATIONS (Corrected 8-Man Alignments) ---
 export const offenseFormations = {
     'Balanced': {
         name: 'Balanced',
@@ -171,14 +171,14 @@ export const offenseFormations = {
         personnel: { QB: 1, RB: 1, WR: 2, TE: 1, OL: 3 },
         mapping: { QB: 'QB1', RB: 'RB1', X: 'WR1', Z: 'WR2', Y: 'TE1', OL: ['OL1', 'OL2', 'OL3'] },
         coordinates: {
-            QB1: [0, -6.0],     // Shotgun depth to allow plays to develop
-            RB1: [-1.5, -6.0],
-            WR1: [-15, 0.5],
-            WR2: [15, 0.5],
-            TE1: [2.8, -1.5],
-            OL1: [-1.8, -1.5],
-            OL2: [0, -1.5],
-            OL3: [1.8, -1.5]
+            QB1: [0, -6.0],      // Shotgun
+            RB1: [-1.8, -6.0],   // Offset Left
+            WR1: [-15.0, -0.2],  // X: Wide Left on the line
+            WR2: [15.0, -1.2],   // Z: Wide Right off the line (flanker)
+            TE1: [2.8, -0.2],    // Y: Inline TE on the line next to RT
+            OL1: [-1.6, -0.2],   // LT
+            OL2: [0, -0.2],      // Center
+            OL3: [1.6, -0.2]     // RT
         },
         slotPriorities: {
             QB1: { throwingAccuracy: 3, playbookIQ: 2 },
@@ -197,14 +197,14 @@ export const offenseFormations = {
         personnel: { QB: 1, RB: 0, WR: 4, OL: 3 },
         mapping: { QB: 'QB1', X: 'WR1', Z: 'WR2', H: 'WR3', Y: 'WR4', OL: ['OL1', 'OL2', 'OL3'] },
         coordinates: {
-            QB1: [0, -6.0],      // Standard shotgun depth
-            WR1: [-16, 0.5],
-            WR2: [16, 0.5],
-            WR3: [-6, 0.5],
-            WR4: [6, 0.5],
-            OL1: [-1.4, -1.5],
-            OL2: [0, -1.5],
-            OL3: [1.4, -1.5]
+            QB1: [0, -6.0],
+            WR1: [-16.0, -0.2], // X: Outside on line
+            WR2: [16.0, -0.2],  // Z: Outside on line
+            WR3: [-6.5, -1.2],  // H: Slot Left off line
+            WR4: [6.5, -1.2],   // Y: Slot Right off line
+            OL1: [-1.5, -0.2],
+            OL2: [0, -0.2],
+            OL3: [1.5, -0.2]
         },
         slotPriorities: {
             QB1: { throwingAccuracy: 3, playbookIQ: 2 },
@@ -223,14 +223,14 @@ export const offenseFormations = {
         personnel: { QB: 1, RB: 2, WR: 1, TE: 1, OL: 3 },
         mapping: { QB: 'QB1', RB: 'RB1', RB2: 'RB2', X: 'WR1', Y: 'TE1', OL: ['OL1', 'OL2', 'OL3'] },
         coordinates: {
-            QB1: [0, -3.0],     // Give under-center QB more clearance from OL
-            RB1: [0, -7.5],    // Tailback deep
-            RB2: [0, -5.0],    // Fullback leading
-            WR1: [14, 0.5],
-            TE1: [-2.8, -1.5],
-            OL1: [-1.4, -1.5],
-            OL2: [0, -1.5],
-            OL3: [1.4, -1.5]
+            QB1: [0, -1.0],     // True Under Center
+            RB2: [0, -3.2],     // FB in the hole
+            RB1: [0, -5.5],     // Deep Tailback
+            WR1: [14.0, -0.2],  // X: Solo WR on the line
+            TE1: [-2.6, -0.2],  // Y: Inline TE Left on the line
+            OL1: [-1.4, -0.2],
+            OL2: [0, -0.2],
+            OL3: [1.4, -0.2]
         },
         slotPriorities: {
             QB1: { strength: 2, playbookIQ: 2 },
@@ -249,14 +249,14 @@ export const offenseFormations = {
         personnel: { QB: 1, RB: 1, WR: 3, OL: 3 },
         mapping: { QB: 'QB1', RB: 'RB1', X: 'WR1', H: 'WR2', Y: 'WR3', OL: ['OL1', 'OL2', 'OL3'] },
         coordinates: {
-            QB1: [0, -6.0],     // Standard shotgun depth
-            RB1: [-2.0, -6.0],
-            WR1: [16, 0.5],
-            WR2: [10, 0.5],
-            WR3: [5, 0.5],
-            OL1: [-1.4, -1.5],
-            OL2: [0, -1.5],
-            OL3: [1.4, -1.5]
+            QB1: [0, -6.0],
+            RB1: [-2.0, -6.0],  // Offset weak-side
+            WR1: [16.0, -0.2],  // X: Point on line
+            WR2: [10.5, -1.2],  // H: Slot off line
+            WR3: [5.5, -0.2],   // Y: Inner Slot on line
+            OL1: [-1.5, -0.2],
+            OL2: [0, -0.2],
+            OL3: [1.5, -0.2]
         },
         slotPriorities: {
             QB1: { throwingAccuracy: 3, playbookIQ: 2 },
@@ -269,98 +269,99 @@ export const offenseFormations = {
             OL3: { blocking: 3, strength: 3 }
         }
     },
-    // --- TRIPS LEFT (3 Receivers to the Left) ---
     'TripsLeft': {
         name: 'Trips Left',
         slots: ['QB1', 'RB1', 'WR1', 'WR2', 'WR3', 'OL1', 'OL2', 'OL3'],
         personnel: { QB: 1, RB: 1, WR: 3, OL: 3 },
         mapping: { QB: 'QB1', RB: 'RB1', X: 'WR1', H: 'WR2', Y: 'WR3', OL: ['OL1', 'OL2', 'OL3'] },
         coordinates: {
-            QB1: [0, -6.0],     // Shotgun
-            RB1: [2.0, -6.0],   // Offset Right
-            WR1: [-16, 0.5],    // X (Far Left)
-            WR2: [-10, 0.5],    // H (Slot Left)
-            WR3: [-5, 0.5],     // Y (Inner Slot Left)
-            OL1: [-1.4, -1.5], OL2: [0, -1.5], OL3: [1.4, -1.5]
+            QB1: [0, -6.0],
+            RB1: [2.0, -6.0],   // Offset weak-side right
+            WR1: [-16.0, -0.2], // X: Point on line
+            WR2: [-10.5, -1.2], // H: Slot off line
+            WR3: [-5.5, -0.2],  // Y: Inner Slot on line
+            OL1: [-1.5, -0.2],
+            OL2: [0, -0.2],
+            OL3: [1.5, -0.2]
         }
     },
-
-    // --- EMPTY SPREAD (No RB, 4 Wide Receivers/Slots) ---
     'Empty': {
         name: 'Empty Spread',
         slots: ['QB1', 'WR1', 'WR2', 'WR3', 'WR4', 'OL1', 'OL2', 'OL3'],
         personnel: { QB: 1, WR: 4, OL: 3 },
         mapping: { QB: 'QB1', X: 'WR1', Z: 'WR2', H: 'WR3', Y: 'WR4', OL: ['OL1', 'OL2', 'OL3'] },
         coordinates: {
-            QB1: [0, -7.0],      // Deep Shotgun
-            WR1: [-18, 0.5],     // X (Far Left)
-            WR2: [18, 0.5],      // Z (Far Right)
-            WR3: [-8, 0.5],      // H (Slot Left)
-            WR4: [8, 0.5],       // Y (Slot Right)
-            OL1: [-1.4, -1.5], OL2: [0, -1.5], OL3: [1.4, -1.5]
+            QB1: [0, -6.5],     // Deep Shotgun
+            WR1: [-17.0, -0.2], // Wide Left on line
+            WR2: [17.0, -0.2],  // Wide Right on line
+            WR3: [-7.5, -1.2],  // Slot Left off line
+            WR4: [7.5, -1.2],   // Slot Right off line
+            OL1: [-1.5, -0.2],
+            OL2: [0, -0.2],
+            OL3: [1.5, -0.2]
         }
     },
-
-    // --- PISTOL (RB is directly behind QB) ---
     'Pistol': {
         name: 'Pistol Balanced',
         personnel: { QB: 1, RB: 1, WR: 2, TE: 1, OL: 3 },
         slots: ['QB1', 'RB1', 'WR1', 'WR2', 'TE1', 'OL1', 'OL2', 'OL3'],
         mapping: { QB: 'QB1', RB: 'RB1', X: 'WR1', Z: 'WR2', Y: 'TE1', OL: ['OL1', 'OL2', 'OL3'] },
         coordinates: {
-            QB1: [0, -4.0],
-            RB1: [0, -7.0],
-            WR1: [-15, 0.5],
-            WR2: [15, 0.5],
-            TE1: [2.8, -1.5],
-            OL1: [-1.4, -1.5], OL2: [0, -1.5], OL3: [1.4, -1.5]
+            QB1: [0, -4.0],     // Pistol depth
+            RB1: [0, -7.0],     // Deep behind QB
+            WR1: [-15.0, -0.2], // On the line
+            WR2: [15.0, -1.2],  // Off the line
+            TE1: [2.8, -0.2],   // Inline on the line
+            OL1: [-1.5, -0.2],
+            OL2: [0, -0.2],
+            OL3: [1.5, -0.2]
         }
     },
-
-    // --- JUMBO (Heavy Goal Line) ---
     'Jumbo': {
         name: 'Jumbo',
         personnel: { QB: 1, RB: 2, TE: 2, OL: 3 },
         slots: ['QB1', 'RB1', 'RB2', 'TE1', 'TE2', 'OL1', 'OL2', 'OL3'],
         mapping: { QB: 'QB1', RB: 'RB1', RB2: 'RB2', X: 'TE1', Y: 'TE2', OL: ['OL1', 'OL2', 'OL3'] },
         coordinates: {
-            QB1: [0, -1.0],
-            RB1: [0, -4.5],
-            RB2: [0, -2.5],
-            TE1: [-2.8, -1.5],
-            TE2: [2.8, -1.5],
-            OL1: [-1.4, -1.5], OL2: [0, -1.5], OL3: [1.4, -1.5]
+            QB1: [0, -1.0],     // Under Center
+            RB2: [0, -2.8],     // FB
+            RB1: [0, -5.0],     // TB
+            TE1: [-2.6, -0.2],  // Left TE on line
+            TE2: [2.6, -0.2],   // Right TE on line
+            OL1: [-1.4, -0.2],
+            OL2: [0, -0.2],
+            OL3: [1.4, -0.2]
         }
     },
-
-    // --- WILDCAT (RB takes the snap, QB is a receiver) ---
     'Wildcat': {
         name: 'Wildcat',
         slots: ['RB1', 'QB1', 'WR1', 'WR2', 'TE1', 'OL1', 'OL2', 'OL3'],
         personnel: { RB: 1, QB: 1, WR: 2, TE: 1, OL: 3 },
         mapping: { QB: 'RB1', RB: 'QB1', X: 'WR1', Z: 'WR2', Y: 'TE1', OL: ['OL1', 'OL2', 'OL3'] },
         coordinates: {
-            RB1: [0, -5.0],      // RB takes snap
-            QB1: [-10, 0.5],     // Real QB split wide as a decoy
-            WR1: [-18, 0.5], WR2: [15, 0.5],
-            TE1: [2.8, -1.5],
-            OL1: [-1.4, -1.5], OL2: [0, -1.5], OL3: [1.4, -1.5]
+            RB1: [0, -5.0],      // Direct Snap
+            QB1: [-11.0, -1.2],  // Real QB split out as decoy
+            WR1: [-17.0, -0.2],  // WR Left
+            WR2: [15.0, -0.2],   // WR Right
+            TE1: [2.8, -0.2],    // TE Right
+            OL1: [-1.5, -0.2],
+            OL2: [0, -0.2],
+            OL3: [1.5, -0.2]
         }
     },
-
     'Punt': {
         name: 'Punt',
         personnel: { OL: 3, WR: 2, QB: 1, RB: 1, TE: 1 },
         slots: ['OL1', 'OL2', 'OL3', 'WR1', 'WR2', 'RB1', 'TE1', 'QB1'],
         coordinates: {
-            QB1: [0, -12.0],
-            RB1: [2.0, -3.0],  // Personal protector/Upback
-            TE1: [-2.8, -1.5], // Wing blocker
-            WR1: [-16, 0.5],   // Gunners
-            WR2: [16, 0.5],
-            OL1: [-1.4, -1.5],
-            OL2: [0, -1.5],
-            OL3: [1.4, -1.5]
+            QB1: [0, -12.0],     // Punter
+            RB1: [2.0, -3.5],    // Personal protector
+            TE1: [-2.8, -0.2],   // Wing on line
+            WR1: [-16.0, -0.2],  // Gunner L
+            WR2: [16.0, -0.2],   // Gunner R
+            OL1: [-1.4, -0.2],
+            OL2: [0, -0.2],
+            OL3: [1.4, -0.2]
         },
         slotPriorities: {
             QB1: { strength: 3, throwingAccuracy: 2 },
@@ -700,14 +701,14 @@ export const defenseFormations = {
         slots: ['DL1', 'DL2', 'DL3', 'LB1', 'LB2', 'DB1', 'DB2', 'DB3'],
         personnel: { DL: 3, LB: 2, DB: 3 },
         coordinates: {
-            DL1: [-2.1, 1.0], // 4i/5-Tech (Aligned over Tackle)
-            DL2: [0, 1.0],    // 0-Tech (Nose Tackle)
-            DL3: [2.1, 1.0],
-            LB1: [-3.5, 4.5], // Moved down to fill gaps
-            LB2: [3.5, 4.5],
-            DB1: [-14, 7.0],
-            DB2: [14, 7.0],
-            DB3: [0, 12.0]
+            DL1: [-2.1, 1.0],  // DE Left
+            DL2: [0, 1.0],     // NT
+            DL3: [2.1, 1.0],   // DE Right
+            LB1: [-3.0, 4.0],  // Will LB
+            LB2: [3.0, 4.0],   // Sam LB
+            DB1: [-14.0, 5.5], // Corner Left (Flat/Cushion)
+            DB2: [-7.0, 12.0], // Free Safety (Deep Half Left)
+            DB3: [7.0, 12.0]   // Strong Safety (Deep Half Right)
         },
         slotPriorities: {
             'DL1': { strength: 3, blockShedding: 3 },
@@ -716,8 +717,8 @@ export const defenseFormations = {
             'LB1': { tackling: 3, speed: 2, playbookIQ: 2 },
             'LB2': { tackling: 3, speed: 2, playbookIQ: 2 },
             'DB1': { speed: 3, catchingHands: 2, playbookIQ: 3 },
-            'DB2': { speed: 3, catchingHands: 2, playbookIQ: 3 },
-            'DB3': { agility: 3, playbookIQ: 3, tackling: 2 } // Safety
+            'DB2': { agility: 3, playbookIQ: 3, tackling: 2 },
+            'DB3': { agility: 3, playbookIQ: 3, tackling: 2 }
         }
     },
 
@@ -726,14 +727,14 @@ export const defenseFormations = {
         slots: ['DL1', 'DL2', 'LB1', 'LB2', 'LB3', 'DB1', 'DB2', 'DB3'],
         personnel: { DL: 2, LB: 3, DB: 3 },
         coordinates: {
-            DL1: [-1.5, 1.0], // 3-Tech (Over Guards)
-            DL2: [1.5, 1.0],
-            LB1: [-4.0, 4.5],
-            LB2: [0, 4.5],    // Middle Linebacker
-            LB3: [4.0, 4.5],
-            DB1: [-15, 7.0],
-            DB2: [15, 7.0],
-            DB3: [0, 12.0]
+            DL1: [-1.6, 1.0],  // 3-Tech Left
+            DL2: [1.6, 1.0],   // 3-Tech Right
+            LB1: [-4.2, 4.0],  // OLB Left
+            LB2: [0, 4.0],     // MLB
+            LB3: [4.2, 4.0],   // OLB Right
+            DB1: [-14.0, 5.5], // CB Left
+            DB2: [-7.5, 12.0], // Safety Left
+            DB3: [7.5, 12.0]   // Safety Right
         },
         slotPriorities: {
             'DL1': { strength: 3, blockShedding: 3, weight: 2 },
@@ -742,23 +743,24 @@ export const defenseFormations = {
             'LB2': { tackling: 3, speed: 2, playbookIQ: 2 },
             'LB3': { tackling: 3, speed: 2, playbookIQ: 2 },
             'DB1': { speed: 3, catchingHands: 2, playbookIQ: 3 },
-            'DB2': { speed: 3, catchingHands: 2, playbookIQ: 3 },
-            'DB3': { agility: 3, playbookIQ: 3, tackling: 2 } // Safety
+            'DB2': { agility: 3, playbookIQ: 3, tackling: 2 },
+            'DB3': { agility: 3, playbookIQ: 3, tackling: 2 }
         }
     },
+
     '4-2-2': {
         name: '4-2-2 (Run Stop)',
         slots: ['DL1', 'DL2', 'DL3', 'DL4', 'LB1', 'LB2', 'DB1', 'DB2'],
         personnel: { DL: 4, LB: 2, DB: 2 },
         coordinates: {
-            DL1: [-3.0, 1.0], // End
-            DL2: [-1.0, 1.0], // Tackle (A/B Gap)
-            DL3: [1.0, 1.0],  // Tackle (A/B Gap)
-            DL4: [3.0, 1.0],  // End
-            LB1: [-2.5, 4.0], // Aggressive downhill depth
-            LB2: [2.5, 4.0],
-            DB1: [-12, 8.0],
-            DB2: [12, 8.0]
+            DL1: [-3.2, 1.0],  // End Left
+            DL2: [-1.1, 1.0],  // Tackle Left
+            DL3: [1.1, 1.0],   // Tackle Right
+            DL4: [3.2, 1.0],   // End Right
+            LB1: [-2.2, 3.5],  // Downhill LB Left
+            LB2: [2.2, 3.5],   // Downhill LB Right
+            DB1: [-12.0, 7.0], // Deep DB Left
+            DB2: [12.0, 7.0]   // Deep DB Right
         },
         slotPriorities: {
             'DL1': { strength: 3, blockShedding: 3, weight: 2 },
@@ -771,19 +773,20 @@ export const defenseFormations = {
             'DB2': { speed: 3, catchingHands: 2, playbookIQ: 3 }
         }
     },
+
     '4-1-3': {
         name: '4-1-3 (Dime/Prevent)',
         slots: ['DL1', 'DL2', 'DL3', 'DL4', 'LB1', 'DB1', 'DB2', 'DB3'],
         personnel: { DL: 4, LB: 1, DB: 3 },
         coordinates: {
-            DL1: [-3.5, 1.0],
-            DL2: [-1.5, 1.0],
-            DL3: [1.5, 1.0],
-            DL4: [3.5, 1.0],
-            LB1: [0, 4.5],
-            DB1: [-14, 7.0],
-            DB2: [14, 7.0],
-            DB3: [0, 12.0]
+            DL1: [-3.4, 1.0],
+            DL2: [-1.2, 1.0],
+            DL3: [1.2, 1.0],
+            DL4: [3.4, 1.0],
+            LB1: [0, 4.0],     // Lone Mike LB
+            DB1: [-14.0, 6.0], // CB Left
+            DB2: [14.0, 6.0],  // CB Right
+            DB3: [0, 13.0]     // Deep Post Safety
         },
         slotPriorities: {
             'DL1': { strength: 3, blockShedding: 3, weight: 2 },
@@ -793,23 +796,10 @@ export const defenseFormations = {
             'LB1': { tackling: 3, speed: 2, playbookIQ: 2 },
             'DB1': { speed: 3, catchingHands: 2, playbookIQ: 2 },
             'DB2': { speed: 3, catchingHands: 2, playbookIQ: 2 },
-            'DB3': { speed: 3, catchingHands: 2, playbookIQ: 3 } // Safety
+            'DB3': { speed: 3, catchingHands: 2, playbookIQ: 3 }
         }
     },
-    'Punt_Return': {
-        name: 'Punt Return',
-        slots: ['DL1', 'DL2', 'LB1', 'LB2', 'DB1', 'DB2', 'DB3', 'DB4'],
-        coordinates: {
-            DL1: [-1.5, 1.0],
-            DL2: [1.5, 1.0],
-            LB1: [-4.0, 4.0],
-            LB2: [4.0, 4.0],
-            DB1: [-12, 10.0],
-            DB2: [12, 10.0],
-            DB3: [0, 48.0],  // Main Returner 
-            DB4: [0, 38.0]   // Short/Safety Returner
-        }
-    },
+
     '3-1-4': {
         name: '3-1-4 (Nickel Hybrid)',
         slots: ['DL1', 'DL2', 'DL3', 'LB1', 'DB1', 'DB2', 'DB3', 'DB4'],
@@ -818,11 +808,11 @@ export const defenseFormations = {
             DL1: [-2.1, 1.0],
             DL2: [0, 1.0],
             DL3: [2.1, 1.0],
-            LB1: [0, 4.5],
-            DB1: [-14, 7.0],
-            DB2: [14, 7.0],
-            DB3: [-5.0, 5.0], // Slot DB playing close
-            DB4: [5.0, 5.0]
+            LB1: [0, 3.8],
+            DB1: [-14.0, 5.5], // CB Left
+            DB2: [14.0, 5.5],  // CB Right
+            DB3: [-5.0, 4.5],  // Slot Nickel DB
+            DB4: [0, 13.0]     // True Deep Free Safety
         },
         slotPriorities: {
             'DL1': { speed: 3, blockShedding: 2 },
@@ -835,19 +825,20 @@ export const defenseFormations = {
             'DB4': { speed: 3, catchingHands: 2, playbookIQ: 2 }
         }
     },
+
     '3-0-5': {
         name: '3-0-5 (Dime)',
         slots: ['DL1', 'DL2', 'DL3', 'DB1', 'DB2', 'DB3', 'DB4', 'DB5'],
         personnel: { DL: 3, LB: 0, DB: 5 },
         coordinates: {
-            'DL1': [-2.1, 1.0],
-            'DL2': [0, 1.0],
-            'DL3': [2.1, 1.0],
-            'DB1': [-15, 7.0],
-            'DB2': [15, 7.0],
-            'DB3': [-5.0, 5.0],
-            'DB4': [5.0, 5.0],
-            'DB5': [0, 12.0]
+            DL1: [-2.1, 1.0],
+            DL2: [0, 1.0],
+            DL3: [2.1, 1.0],
+            DB1: [-15.0, 5.5], // CB Left
+            DB2: [15.0, 5.5],  // CB Right
+            DB3: [-5.5, 4.0],  // Slot Left
+            DB4: [5.5, 4.0],   // Slot Right
+            DB5: [0, 13.5]     // Deep Centerfield Safety
         },
         slotPriorities: {
             'DL1': { speed: 2, strength: 2 },
@@ -856,7 +847,23 @@ export const defenseFormations = {
             'DB1': { speed: 3, catchingHands: 2 },
             'DB2': { speed: 3, catchingHands: 2 },
             'DB3': { agility: 3, speed: 2, tackling: 1 },
-            'DB4': { agility: 3, speed: 2, tackling: 1 }
+            'DB4': { agility: 3, speed: 2, tackling: 1 },
+            'DB5': { speed: 3, catchingHands: 2, playbookIQ: 3 }
+        }
+    },
+
+    'Punt_Return': {
+        name: 'Punt Return',
+        slots: ['DL1', 'DL2', 'LB1', 'LB2', 'DB1', 'DB2', 'DB3', 'DB4'],
+        coordinates: {
+            DL1: [-1.5, 1.0],
+            DL2: [1.5, 1.0],
+            LB1: [-4.0, 3.5],
+            LB2: [4.0, 3.5],
+            DB1: [-12.0, 8.0],
+            DB2: [12.0, 8.0],
+            DB3: [0, 48.0],  // Main Returner
+            DB4: [0, 36.0]   // Up-Returner
         }
     }
 };
