@@ -1095,14 +1095,21 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                 }
 
                 default:
-                    // Latch target ONCE when entering idle/complete, allowing physics to brake to a dead stop
-                    if (!pState._holdX || pState.action !== pState._lastActionForHold) {
-                        pState._holdX = pState.x;
-                        pState._holdY = pState.y;
-                        pState._lastActionForHold = pState.action;
+                    // 1. OFFENSE: Latch target ONCE when entering idle/complete
+                    // This allows physics to brake to a dead stop without jittering
+                    if (pState.isOffense) {
+                        if (!pState._holdX || pState.action !== pState._lastActionForHold) {
+                            pState._holdX = pState.x;
+                            pState._holdY = pState.y;
+                            pState._lastActionForHold = pState.action;
+                        }
+                        pState.targetX = pState._holdX;
+                        pState.targetY = pState._holdY;
+                    } 
+                    // 2. DEFENSE: Must keep executing assignment so they don't freeze
+                    else {
+                        executeAssignment(pState, pState.assignment, offenseStates, LOS, playState, ballCarrierState);
                     }
-                    pState.targetX = pState._holdX;
-                    pState.targetY = pState._holdY;
                     break;
             }
             return;
