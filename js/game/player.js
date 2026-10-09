@@ -482,10 +482,10 @@ export function generatePlayer(minAge = 12, maxAge = 18, classModifiers = null) 
     const talentRoll = Math.random();
     let baseKeyMean, baseNonKeyMean;
 
-    if (talentRoll < 0.05) { baseKeyMean = 84; baseNonKeyMean = 50; }       // Elite (5%)
-    else if (talentRoll < 0.25) { baseKeyMean = 75; baseNonKeyMean = 42; }  // Good (20%)
-    else if (talentRoll < 0.70) { baseKeyMean = 63; baseNonKeyMean = 34; }  // Average (45%)
-    else { baseKeyMean = 50; baseNonKeyMean = 24; }                         // Scrub (30%)
+    if (talentRoll < 0.06) { baseKeyMean = 90; baseNonKeyMean = 66; }       // Elite Wonderkid (6%)
+    else if (talentRoll < 0.28) { baseKeyMean = 82; baseNonKeyMean = 58; }  // Standout Varsity Talent (22%)
+    else if (talentRoll < 0.76) { baseKeyMean = 74; baseNonKeyMean = 50; }  // Solid Playground Competitor (48%)
+    else { baseKeyMean = 65; baseNonKeyMean = 42; }                         // Developmental Prospect (24%)
 
     const generateTalentValue = (name) => {
         const isKey = keyAttrs.has(name);
@@ -617,30 +617,27 @@ export function generatePlayer(minAge = 12, maxAge = 18, classModifiers = null) 
     }
 
     // 8. AGE SCALING & DEVELOPMENT VARIANCE (Deriving Current Ability)
-    // Differentiate Pee-Wee (8-11) from High School (12-18)
     let basePhysicalScale, baseMentalScale, baseTechnicalScale;
 
     if (isWonderkid) {
-        // Wonderkids bypass youth penalties and spawn ready to play
-        basePhysicalScale = 0.88;
-        baseMentalScale = 0.80;
-        baseTechnicalScale = 0.82;
+        basePhysicalScale = 0.92;
+        baseMentalScale = 0.86;
+        baseTechnicalScale = 0.88;
     } else if (age < 12) {
-        // Ages 8-11: Youth scale from 35% up to 60% of adult ceiling
-        const youthProgress = Math.max(0, (age - 8) / 4.0);
-        basePhysicalScale = 0.35 + (youthProgress * 0.25);
-        baseMentalScale = 0.30 + (youthProgress * 0.25);
-        baseTechnicalScale = 0.25 + (youthProgress * 0.25);
+        // Ages 8-11: Pee-Wee scale from 52% up to 70% of ceiling
+        const youthProgress = Math.max(0, (age - 8) / 3.0);
+        basePhysicalScale = 0.52 + (youthProgress * 0.18);
+        baseMentalScale = 0.48 + (youthProgress * 0.18);
+        baseTechnicalScale = 0.45 + (youthProgress * 0.20);
     } else {
-        // Ages 12-18: High school scale from 65% up to 100% of adult ceiling
+        // Ages 12-18: Realistic sandlot baseline (74% at age 12 up to 100% at age 18)
         const teenProgress = Math.min(1.0, (age - 12) / 6.0);
-        basePhysicalScale = 0.65 + (teenProgress * 0.35);
-        baseMentalScale = 0.58 + (teenProgress * 0.42);
-        baseTechnicalScale = 0.52 + (teenProgress * 0.48);
+        basePhysicalScale = 0.74 + (teenProgress * 0.26);
+        baseMentalScale = 0.70 + (teenProgress * 0.30);
+        baseTechnicalScale = 0.68 + (teenProgress * 0.32);
     }
 
-    // Player growth curve variance (early vs late bloomers)
-    const playerGrowthTempo = 1 + gaussianRandom(0, 0.05);
+    const playerGrowthTempo = 1 + gaussianRandom(0, 0.04);
 
     let attributes = {
         physical: { height, weight },
@@ -648,7 +645,8 @@ export function generatePlayer(minAge = 12, maxAge = 18, classModifiers = null) 
         technical: {}
     };
 
-    const ratingFloor = age < 12 ? 16 : 28;
+    // Functional rating floor: 12yo rookies won't roll single-digit or teen ratings
+    const ratingFloor = age < 12 ? 26 : 38;
 
     Object.keys(talentAttributes).forEach(cat => {
         let baseScale = basePhysicalScale;

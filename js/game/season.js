@@ -1372,32 +1372,38 @@ export function developPlayer(player, team = null) {
     if (!player || !player.attributes) return { player, improvements: [] };
     const developmentReport = { player, improvements: [] };
 
-    const potentialMultipliers = { 'A': 1.35, 'B': 1.15, 'C': 1.0, 'D': 0.85, 'F': 0.65 };
+    const potentialMultipliers = { 'A': 1.60, 'B': 1.30, 'C': 1.05, 'D': 0.85, 'F': 0.65 };
     const potMod = potentialMultipliers[player.potential] || 1.0;
     const ethic = player.personality?.workEthic || 50;
-    const ethicMod = 0.6 + (ethic / 120);
+    const ego = player.personality?.ego || 50;
+    const ethicMod = 0.65 + (ethic / 110);
 
+    // Live snaps create massive development leverage
     const snaps = player.careerStats?.snapsThisSeason || 0;
-    const experienceMod = Math.min(1.4, 0.7 + (snaps / 400));
+    let experienceMod = 1.0;
+    if (snaps >= 250) experienceMod = 1.45;     // Full-time starter leap
+    else if (snaps >= 100) experienceMod = 1.20; // Active rotational contributor
+    else if (snaps < 25) experienceMod = 0.65;   // Bench rot penalty
 
-    // Coach teaching influence from the staff system
     const coachTeaching = team?.staff?.coach?.ratings?.teaching || 50;
-    const teachingMod = 0.85 + ((coachTeaching / 100) * 0.3); // 0.85x to 1.15x multiplier
+    const coachDiscipline = team?.staff?.coach?.ratings?.practiceDiscipline || 50;
+    const teachingMod = 0.85 + ((coachTeaching / 100) * 0.25) + ((coachDiscipline / 100) * 0.15);
 
     // =========================================================================
-    // 1. BIOLOGICAL ATTRIBUTE MATURATION (Aging from child to young adult)
+    // 1. IMPACTFUL BIOLOGICAL MATURATION (Closing the Gap to Adult Ceiling)
     // =========================================================================
-    // Closes the gap toward their adult ceiling (talentAttributes) each year
     if (player.talentAttributes && player.age >= 12 && player.age <= 18) {
-        const growthStep = 0.055 * potMod * ethicMod * teachingMod;
+        // Boosted growth step: youth naturally close 15-28% of the ceiling gap per year
+        const youthAgeMultiplier = player.age <= 15 ? 1.35 : 1.0;
+        const growthStep = 0.16 * potMod * ethicMod * teachingMod * experienceMod * youthAgeMultiplier;
 
         Object.keys(player.attributes).forEach(cat => {
             if (!player.talentAttributes[cat]) return;
             Object.keys(player.attributes[cat]).forEach(attr => {
                 if (attr === 'height' || attr === 'weight') return;
 
-                const currentVal = player.attributes[cat][attr] || 30;
-                const ceilingVal = player.talentAttributes[cat][attr] || 60;
+                const currentVal = player.attributes[cat][attr] || 40;
+                const ceilingVal = player.talentAttributes[cat][attr] || 70;
 
                 if (ceilingVal > currentVal) {
                     const naturalGain = Math.max(1, Math.round((ceilingVal - currentVal) * growthStep));
@@ -1408,7 +1414,30 @@ export function developPlayer(player, team = null) {
     }
 
     // =========================================================================
-    // 2. POSITION-SPECIFIC DRILL IMPROVEMENTS
+    // 2. SUMMER BREAKTHROUGH LEAP (Phenom Leap)
+    // =========================================================================
+    const canBreakthrough = (player.potential === 'A' || player.potential === 'B') && ethic >= 65 && snaps >= 80;
+    const hitBreakthrough = canBreakthrough && Math.random() < 0.22;
+
+    if (hitBreakthrough) {
+        const sigStat = player.pos === 'QB' ? 'throwingAccuracy' :
+                        player.pos === 'RB' ? 'speed' :
+                        player.pos === 'WR' ? 'catchingHands' :
+                        player.pos === 'OL' ? 'blocking' :
+                        player.pos === 'DL' ? 'blockShedding' :
+                        player.pos === 'LB' ? 'tackling' : 'coverage';
+
+        for (const cat of ['technical', 'physical', 'mental']) {
+            if (player.attributes[cat]?.[sigStat] !== undefined) {
+                player.attributes[cat][sigStat] = Math.min(99, player.attributes[cat][sigStat] + 4);
+                developmentReport.improvements.push({ attr: `⭐ SUMMER BREAKTHROUGH (${sigStat})`, increase: 4 });
+                break;
+            }
+        }
+    }
+
+    // =========================================================================
+    // 3. TARGETED SKILL DRILL GAINS
     // =========================================================================
     let mentorBoost = 0;
     if (team && player.age <= 14) {
@@ -1417,10 +1446,11 @@ export function developPlayer(player, team = null) {
             teammate.age >= 16 &&
             getRelationshipLevel(player.id, teammate.id) >= relationshipLevels.GOOD_FRIEND.level
         );
-        if (hasOlderMentor) mentorBoost = 1;
+        if (hasOlderMentor) mentorBoost = 2;
     }
 
-    let basePoints = player.age <= 14 ? getRandomInt(3, 5) : getRandomInt(2, 4);
+    // Upgraded base points: Kids now gain 5-9 points (age 12-14) or 4-7 points (age 15-18)
+    let basePoints = player.age <= 14 ? getRandomInt(5, 8) : getRandomInt(4, 7);
 
     const pos = player.pos || estimateBestPosition(player);
     let focusGroup = [];
@@ -1435,16 +1465,17 @@ export function developPlayer(player, team = null) {
 
     let totalUpgradePoints = Math.round(basePoints * experienceMod) + mentorBoost;
 
-    // Slack-off penalty for older kids with terrible work ethic
-    if (ethic < 25 && player.age >= 15 && Math.random() < 0.35) {
+    // Slacker Stagnation / Regression: Low work-ethic teens (16-18) with high ego can regress
+    if (ethic < 35 && ego > 70 && player.age >= 16 && Math.random() < 0.40) {
         const regressedAttr = getRandom(['speed', 'stamina', 'agility']);
         for (const cat in player.attributes) {
-            if (player.attributes[cat]?.[regressedAttr] && player.attributes[cat][regressedAttr] > 30) {
-                player.attributes[cat][regressedAttr] -= 1;
-                developmentReport.improvements.push({ attr: `${regressedAttr} (Slacked off)`, increase: -1 });
+            if (player.attributes[cat]?.[regressedAttr] && player.attributes[cat][regressedAttr] > 40) {
+                player.attributes[cat][regressedAttr] -= 2;
+                developmentReport.improvements.push({ attr: `${regressedAttr} (Slacked Off)`, increase: -2 });
                 break;
             }
         }
+        totalUpgradePoints = Math.max(0, totalUpgradePoints - 3);
     }
 
     for (let i = 0; i < totalUpgradePoints; i++) {

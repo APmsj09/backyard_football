@@ -74,6 +74,7 @@ export function setupElements() {
             'team-creation-screen': getEl('team-creation-screen'),
             'team-select-screen': getEl('team-select-screen'),
             'draft-screen': getEl('draft-screen'),
+            'offseason-fa-screen': getEl('offseason-fa-screen'),
             'dashboard-screen': getEl('dashboard-screen'),
             'offseason-screen': getEl('offseason-screen'),
             'game-sim-screen': getEl('game-sim-screen')
@@ -188,11 +189,14 @@ function setupSimTabs() {
 }
 
 export function showScreen(screenId) {
-    if (!elements?.screens) return;
-    Object.values(elements.screens).forEach(screen => {
-        if (screen?.classList) screen.classList.add('hidden');
-    });
-    const target = elements.screens[screenId] || document.getElementById(screenId);
+    // Bulletproof safeguard: hide every screen section in the DOM
+    document.querySelectorAll('.screen').forEach(s => s.classList.add('hidden'));
+    if (elements?.screens) {
+        Object.values(elements.screens).forEach(screen => {
+            if (screen?.classList) screen.classList.add('hidden');
+        });
+    }
+    const target = elements?.screens?.[screenId] || document.getElementById(screenId);
     if (target?.classList) target.classList.remove('hidden');
 }
 
