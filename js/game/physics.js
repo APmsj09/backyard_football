@@ -221,6 +221,10 @@ function resolveNewtonianCollisions(pState, allPlayers) {
         // Respect ghostTicks to prevent QB/RB explosion after handoffs
         if (pState.ghostTicks > 0 || other.ghostTicks > 0) continue;
 
+        // Skip QB/RB collisions to prevent handoff mesh jittering
+        const isHandoffPair = (pState.role === 'QB' && other.role === 'RB') || (pState.role === 'RB' && other.role === 'QB');
+        if (isHandoffPair) continue;
+
         const dist = getDistance(pState, other);
         const theirWeight = other.weight || other.wgt || 200;
         const theirRadius = BASE_RADIUS + (theirWeight / 1000);

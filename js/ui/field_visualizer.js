@@ -226,10 +226,11 @@ export function drawFieldVisualization(canvas, ctx, frameData, homeColor = '#000
         frameData.players.forEach(p => {
             const px = toScreenX(p.y);
             const py = toScreenY(p.x);
-            // Balanced scale: ~1.35x over original (readable without overcrowding the field)
-            const baseSize = ppY * 0.95;
-            const weightScale = 0.75 + ((p.wgt || 200) / 400);
-            const heightScale = 0.82 + ((p.hgt || 70) / 140);
+            
+            // Realistic scale: Size visual sprites down to match their true physical collision radii (~1.3 yards)
+            const baseSize = ppY * 0.55;
+            const weightScale = 0.80 + ((p.wgt || 200) / 500);
+            const heightScale = 0.85 + ((p.hgt || 70) / 150);
 
             ctx.save();
             let jitterX = p.isStunned ? (Math.random() - 0.5) * 2.5 : 0;
@@ -242,13 +243,13 @@ export function drawFieldVisualization(canvas, ctx, frameData, homeColor = '#000
             const jerseyColor = p.isStunned ? "#4b5563" : (p.primaryColor || "#333");
             const helmetColor = p.isStunned ? "#9ca3af" : (p.secondaryColor || "#fff");
 
-            // Proportionate shoulder pads
+            // Proportionate shoulder pads (padWidth matches physical collision diameter perfectly)
             ctx.fillStyle = jerseyColor;
-            const padThickness = baseSize * 0.85 * heightScale;
-            const padWidth = baseSize * 2.1 * weightScale;
+            const padThickness = baseSize * 0.9 * heightScale;
+            const padWidth = baseSize * 1.9 * weightScale;
 
             ctx.beginPath();
-            ctx.roundRect(-padThickness / 2, -padWidth / 2, padThickness, padWidth, 4.5);
+            ctx.roundRect(-padThickness / 2, -padWidth / 2, padThickness, padWidth, 4.0);
             ctx.fill();
             ctx.strokeStyle = "rgba(0,0,0,0.65)";
             ctx.lineWidth = 1.2;
@@ -256,15 +257,15 @@ export function drawFieldVisualization(canvas, ctx, frameData, homeColor = '#000
 
             // Proportional helmet
             ctx.fillStyle = helmetColor;
-            const helmetRadius = baseSize * 0.6 * (0.9 + (p.hgt || 70) / 160);
+            const helmetRadius = baseSize * 0.45 * (0.9 + (p.hgt || 70) / 160);
             ctx.beginPath();
-            ctx.arc(padThickness * 0.18, 0, helmetRadius, 0, Math.PI * 2);
+            ctx.arc(padThickness * 0.15, 0, helmetRadius, 0, Math.PI * 2);
             ctx.fill();
 
             ctx.strokeStyle = "#111";
-            ctx.lineWidth = Math.max(1.8, ppY * 0.18);
+            ctx.lineWidth = Math.max(1.5, ppY * 0.12);
             ctx.beginPath();
-            ctx.arc(padThickness * 0.18, 0, helmetRadius, -Math.PI / 3, Math.PI / 3);
+            ctx.arc(padThickness * 0.15, 0, helmetRadius, -Math.PI / 3, Math.PI / 3);
             ctx.stroke();
 
             // Legible, proportionate jersey number
@@ -272,7 +273,7 @@ export function drawFieldVisualization(canvas, ctx, frameData, homeColor = '#000
                 ctx.save();
                 ctx.rotate(-p.angle);
                 ctx.fillStyle = p.secondaryColor || "#fff";
-                ctx.font = `bold ${Math.max(9, Math.round(baseSize * 0.65 * weightScale))}px sans-serif`;
+                ctx.font = `bold ${Math.max(8, Math.round(baseSize * 0.85 * weightScale))}px sans-serif`;
                 ctx.textAlign = "center";
                 ctx.textBaseline = "middle";
                 ctx.fillText(p.number, 0, 0);
@@ -282,10 +283,10 @@ export function drawFieldVisualization(canvas, ctx, frameData, homeColor = '#000
 
             if (p.isStunned) {
                 ctx.fillStyle = "white";
-                ctx.font = `bold ${ppY * 0.6}px Arial`;
+                ctx.font = `bold ${ppY * 0.5}px Arial`;
                 ctx.textAlign = "center";
                 ctx.textBaseline = "middle";
-                ctx.fillText("X_X", 0, -baseSize * 2.5);
+                ctx.fillText("X_X", 0, -baseSize * 2.0);
             }
 
             // High-visibility Ball Carrier Halo & Football icon
@@ -293,11 +294,11 @@ export function drawFieldVisualization(canvas, ctx, frameData, homeColor = '#000
                 ctx.save();
                 // Glowing outer pulse ring
                 ctx.shadowColor = "#f59e0b";
-                ctx.shadowBlur = 10;
+                ctx.shadowBlur = 8;
                 ctx.strokeStyle = "#fbbf24";
-                ctx.lineWidth = 2.5;
+                ctx.lineWidth = 2.0;
                 ctx.beginPath();
-                ctx.arc(0, 0, baseSize * 1.8 * weightScale, 0, Math.PI * 2);
+                ctx.arc(0, 0, baseSize * 1.6 * weightScale, 0, Math.PI * 2);
                 ctx.stroke();
                 ctx.restore();
 
@@ -307,7 +308,7 @@ export function drawFieldVisualization(canvas, ctx, frameData, homeColor = '#000
                 ctx.strokeStyle = "#fef08a";
                 ctx.lineWidth = 1;
                 ctx.beginPath();
-                ctx.ellipse(0, -baseSize * 2.6, 6, 3.5, 0, 0, Math.PI * 2);
+                ctx.ellipse(0, -baseSize * 2.0, 5, 3, 0, 0, Math.PI * 2);
                 ctx.fill();
                 ctx.stroke();
                 ctx.restore();
@@ -319,17 +320,17 @@ export function drawFieldVisualization(canvas, ctx, frameData, homeColor = '#000
                 const posLabel = p.slot ? p.slot.replace(/\d+/g, '') : (p.isOffense ? 'OFF' : 'DEF');
                 const badgeBg = p.isOffense ? 'rgba(30, 58, 138, 0.85)' : 'rgba(136, 19, 55, 0.85)';
                 const badgeBorder = p.isOffense ? 'rgba(96, 165, 250, 0.6)' : 'rgba(251, 113, 133, 0.6)';
-                const badgeY = -baseSize * 1.8;
+                const badgeY = -baseSize * 1.5;
 
                 ctx.save();
-                ctx.font = `bold ${Math.max(9, ppY * 0.45)}px monospace`;
-                const posWidth = ctx.measureText(p.slot || posLabel).width + 8;
+                ctx.font = `bold ${Math.max(8, ppY * 0.35)}px monospace`;
+                const posWidth = ctx.measureText(p.slot || posLabel).width + 6;
                 
                 ctx.fillStyle = badgeBg;
                 ctx.strokeStyle = badgeBorder;
                 ctx.lineWidth = 1;
                 ctx.beginPath();
-                ctx.roundRect(-posWidth / 2, badgeY - 6, posWidth, 12, 3);
+                ctx.roundRect(-posWidth / 2, badgeY - 5, posWidth, 10, 2);
                 ctx.fill();
                 ctx.stroke();
 
@@ -342,15 +343,15 @@ export function drawFieldVisualization(canvas, ctx, frameData, homeColor = '#000
                 // 2. Compact Surname Pill (Below Player)
                 if (p.name) {
                     const lastName = p.name.split(' ').slice(-1)[0];
-                    const nameY = baseSize * 1.8;
+                    const nameY = baseSize * 1.5;
 
                     ctx.save();
-                    ctx.font = `bold ${Math.max(8, ppY * 0.4)}px sans-serif`;
-                    const nameWidth = ctx.measureText(lastName).width + 8;
+                    ctx.font = `bold ${Math.max(7, ppY * 0.35)}px sans-serif`;
+                    const nameWidth = ctx.measureText(lastName).width + 6;
 
                     ctx.fillStyle = "rgba(15, 23, 42, 0.8)";
                     ctx.beginPath();
-                    ctx.roundRect(-nameWidth / 2, nameY - 5, nameWidth, 11, 2);
+                    ctx.roundRect(-nameWidth / 2, nameY - 4, nameWidth, 9, 2);
                     ctx.fill();
 
                     ctx.fillStyle = "rgba(255, 255, 255, 0.9)";

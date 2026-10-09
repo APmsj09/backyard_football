@@ -144,26 +144,39 @@ export function captureFrame(playState, gameLog) {
             targetX: playState.ballState.targetX,
             targetY: playState.ballState.targetY
         },
-        players: playState.activePlayers.map(p => ({
-            id: p.id,
-            teamId: p.teamId,
-            fatigue: p.fatigue,
-            slot: p.slot,
-            x: p.x,
-            y: p.y,
-            action: p.action,
-            isOffense: p.isOffense,
-            hasBall: p.hasBall,
-            isStunned: p.stunnedTicks > 0,
-            primaryColor: p.primaryColor,
-            secondaryColor: p.secondaryColor,
-            number: p.number,
-            wgt: p.wgt || 200,
-            hgt: p.hgt || 70,
-            angle: (Math.abs(p.vx) < 0.1 && Math.abs(p.vy) < 0.1)
+        players: playState.activePlayers.map(p => {
+            const rawAngle = (Math.abs(p.vx) < 0.1 && Math.abs(p.vy) < 0.1)
                 ? (p.isOffense ? 0 : Math.PI)
-                : Math.atan2(p.vx, p.vy)
-        })),
+                : Math.atan2(p.vx, p.vy);
+
+            // Interpolate angle to prevent visual rapid flips
+            if (p._visualAngle === undefined) p._visualAngle = rawAngle;
+
+            let diff = rawAngle - p._visualAngle;
+            while (diff > Math.PI) diff -= Math.PI * 2;
+            while (diff < -Math.PI) diff += Math.PI * 2;
+            
+            p._visualAngle += diff * 0.35; // Smooths the turn frame-over-frame
+
+            return {
+                id: p.id,
+                teamId: p.teamId,
+                fatigue: p.fatigue,
+                slot: p.slot,
+                x: p.x,
+                y: p.y,
+                action: p.action,
+                isOffense: p.isOffense,
+                hasBall: p.hasBall,
+                isStunned: p.stunnedTicks > 0,
+                primaryColor: p.primaryColor,
+                secondaryColor: p.secondaryColor,
+                number: p.number,
+                wgt: p.wgt || 200,
+                hgt: p.hgt || 70,
+                angle: p._visualAngle
+            };
+        }),
         logIndex: gameLog ? gameLog.length : 0,
         lineOfScrimmage: los,
         firstDownY: firstDownY
