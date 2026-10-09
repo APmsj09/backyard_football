@@ -482,6 +482,11 @@ export function getSmartCarrierTarget(runner, defenseStates, offenseStates, fiel
             bestTargetX = immediateThreat.x + (immediateThreat.x > runner.x ? -0.4 : 0.4);
             bestTargetY = immediateThreat.y + 1.5;
             runner.contactReduction = 0.9;
+            
+            if (runner._lastLoggedAction !== 'trucking') {
+                logPlayDebug('CARRIER_DECISION', `${runner.name} lowers shoulder to TRUCK`, { threat: immediateThreat.name });
+                runner._lastLoggedAction = 'trucking';
+            }
         } else {
             // Dodge persistence cooldown to prevent 20Hz vibration
             let dodgeDir = runner._dodgeDir || (runner.x < immediateThreat.x ? -1 : 1);
@@ -495,6 +500,9 @@ export function getSmartCarrierTarget(runner, defenseStates, offenseStates, fiel
 
                 runner._dodgeDir = dodgeDir;
                 runner._dodgeCooldown = 8;
+                
+                logPlayDebug('CARRIER_DECISION', `${runner.name} EVADES ${dodgeDir === 1 ? 'right' : 'left'}`, { threat: immediateThreat.name });
+                runner._lastLoggedAction = 'dodge';
             } else {
                 runner._dodgeCooldown--;
             }
@@ -935,6 +943,7 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
                 const reason = wouldGainFirstDown ? "sees a lane for the first down" : "takes off into open green grass";
                 pushGameLog(gameLog, `[Tick ${playState.tick}] 🏃 ${qbState.name} (IQ:${qbIQ}) ${reason} and tucks it!`, playState);
             }
+            logPlayDebug('QB_SCRAMBLE', `${qbState.name} commits to run`, { openRunningYards: Number(openRunningYards.toFixed(1)), wouldGainFirstDown });
             return;
         }
 
@@ -948,6 +957,7 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
         const immediateThreat = defenseStates.find(d => !d.isBlocked && !d.isEngaged && getDistance(qbState, d) < 2.5);
         if (immediateThreat && qbIQ > 60) {
             if (gameLog) pushGameLog(gameLog, `[Tick ${playState.tick}] 👋 ${qbState.name} throws it away under pressure.`, playState);
+            logPlayDebug('QB_THROW_AWAY', `${qbState.name} threw ball away to avoid sack`, { threatDist: Number(getDistance(qbState, immediateThreat).toFixed(2)) });
             playState.ballState.inAir = true;
             playState.ballState.throwInitiated = true;
             playState.ballState.throwerId = qbState.id;

@@ -145,9 +145,13 @@ export function captureFrame(playState, gameLog) {
             targetY: playState.ballState.targetY
         },
         players: playState.activePlayers.map(p => {
-            const rawAngle = (Math.abs(p.vx) < 0.1 && Math.abs(p.vy) < 0.1)
-                ? (p.isOffense ? 0 : Math.PI)
-                : Math.atan2(p.vx, p.vy);
+            let rawAngle;
+            // If basically stopped, HOLD the previous angle instead of snapping to 0 or PI
+            if (Math.abs(p.vx) < 0.2 && Math.abs(p.vy) < 0.2) {
+                rawAngle = p._visualAngle !== undefined ? p._visualAngle : (p.isOffense ? 0 : Math.PI);
+            } else {
+                rawAngle = Math.atan2(p.vx, p.vy);
+            }
 
             // Interpolate angle to prevent visual rapid flips
             if (p._visualAngle === undefined) p._visualAngle = rawAngle;

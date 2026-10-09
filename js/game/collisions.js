@@ -465,6 +465,11 @@ export function resolveOngoingBlocks(playState, gameLog, offenseStates = [], def
                         dy = qb.y - defender.y;
                     }
                     pushAmount = Math.max(0.2, pushAmount + 0.15);
+                    
+                    if (!battle.loggedBullRush) {
+                        logPlayDebug('TRENCH_BULL_RUSH', `${defender.name} is walking ${blocker.name} back to the QB!`, { defStr, blkStr });
+                        battle.loggedBullRush = true;
+                    }
                 }
 
                 const dist = Math.max(0.1, Math.sqrt(dx * dx + dy * dy));
@@ -481,6 +486,7 @@ export function resolveOngoingBlocks(playState, gameLog, offenseStates = [], def
                 battle.status = 'ongoing';
                 return;
             }
+            if (isPassRush) logPlayDebug('BLOCK_SHED', `${defender.name} defeated ${blocker.name}'s block`, { durationTicks: dur });
             blocker.engagedWith = null; blocker.isEngaged = false;
             blocker.stunnedTicks = 15;
             defender.stunnedTicks = 0;
@@ -488,6 +494,8 @@ export function resolveOngoingBlocks(playState, gameLog, offenseStates = [], def
             defender.action = 'pursuit';
             battlesToRemove.push(index);
         } else if (battle.status === 'win_A') {
+            const dur = playState.tick - battle.startTick;
+            logPlayDebug('PANCAKE_BLOCK', `${blocker.name} flattened ${defender.name}`, { durationTicks: dur });
             defender.stunnedTicks = 40;
             blocker.engagedWith = null; blocker.isEngaged = false;
             defender.isBlocked = false; defender.blockedBy = null; defender.isEngaged = false;

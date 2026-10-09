@@ -829,21 +829,47 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                             if (Math.abs(dx) <= 1.5 && dy > 0) upTheMiddle += threatLevel;
                         });
 
-                        if (leftPressure > rightPressure + 1.0) desiredX += 5.0;
-                        else if (rightPressure > leftPressure + 1.0) desiredX -= 5.0;
+                        // SMOOTH PRESSURE GRADIENT INSTEAD OF HARD 5-YARD CLIFFS
+                        const pressureDiff = rightPressure - leftPressure;
+                        
+                        // Slide away from the higher pressure side proportionally
+                        if (Math.abs(pressureDiff) > 0.5) {
+                            desiredX -= pressureDiff * 1.5; 
+                        }
 
                         if ((leftPressure > 2.0 || rightPressure > 2.0) && upTheMiddle < 1.5 && qbIQ > 65) {
                             desiredY += 3.5;
                         } else if (upTheMiddle > 2.0) {
-                            desiredY -= 2.0;
+                            desiredY -= 2.5;
                         }
 
                         const iqMod = 0.5 + (qbIQ / 200);
-                        pState.targetX = Math.max(pState.initialX - 6, Math.min(pState.initialX + 6, pState.initialX + ((desiredX - pState.initialX) * iqMod)));
-                        pState.targetY = Math.max(LOS - 12.0, Math.min(LOS - 1, idealY + ((desiredY - idealY) * iqMod)));
+                        const targetXRaw = Math.max(pState.initialX - 6, Math.min(pState.initialX + 6, pState.initialX + ((desiredX - pState.initialX) * iqMod)));
+                        const targetYRaw = Math.max(LOS - 12.0, Math.min(LOS - 1, idealY + ((desiredY - idealY) * iqMod)));
+
+                        // LOW-PASS FILTER to glide the pocket target rather than snap it
+                        if (pState._pocketX === undefined) pState._pocketX = pState.targetX;
+                        if (pState._pocketY === undefined) pState._pocketY = pState.targetY;
+
+                        pState._pocketX = (pState._pocketX * 0.85) + (targetXRaw * 0.15);
+                        pState._pocketY = (pState._pocketY * 0.85) + (targetYRaw * 0.15);
+
+                        pState.targetX = pState._pocketX;
+                        pState.targetY = pState._pocketY;
+
+                        // Add Telemetry for Pocket Movement (Throttled to prevent flooding)
+                        if (playState.tick % 15 === 0 && Math.abs(pressureDiff) > 1.5) {
+                            logPlayDebug('QB_POCKET', `${pState.name} sliding in pocket`, {
+                                leftPressure: Number(leftPressure.toFixed(1)),
+                                rightPressure: Number(rightPressure.toFixed(1)),
+                                shiftX: Number((pState.targetX - pState.initialX).toFixed(1))
+                            });
+                        }
                     } else {
                         pState.targetX = idealX;
                         pState.targetY = idealY;
+                        pState._pocketX = idealX;
+                        pState._pocketY = idealY;
                     }
                     break;
                 }
