@@ -510,19 +510,48 @@ export function determineDefensiveFormation(defense, offenseFormationName, down,
 export function determineDefensivePlayCall(defense, offense, down, yardsToGo, ballOn, scoreDiff, gameLog, drivesRemaining) {
     const defenseFormationName = defense.formations.defense;
     // Lore: Defensive gameplan is restricted to installed schemes + Universal Safety Nets
-    const BACKYARD_BASICS_DEF = ['Cover_2_Zone_Base', 'Cover_1_Robber', 'GoalLine_RunStuff'];
-    const installedDef = defense.gameplan?.installedDefense || [];
-    const activeDefKeys = Array.from(new Set([...BACKYARD_BASICS_DEF, ...installedDef]));
+    const BACKYARD_BASICS_DEF = [
+        'Cover_2_Zone_Base',
+        'Cover_1_Robber',
+        'GoalLine_RunStuff'
+    ];
 
-    let availablePlays = activeDefKeys.filter(key =>
-        isPlayCompatibleWithDefense(defensivePlaybook[key], defenseFormationName)
+    const installedDef = defense.gameplan?.installedDefense || [];
+    const activeDefKeys = Array.from(
+        new Set([...BACKYARD_BASICS_DEF, ...installedDef])
     );
 
-    if (availablePlays.length === 0) availablePlays = BACKYARD_BASICS_DEF;
-
-    if (availablePlays.length === 0) return 'Cover_2_Zone_Base';
-
     const isGoalLine = ballOn >= 90;
+
+    // Goal-line plays must never be selected outside the goal-line area.
+    const isEligibleOutsideGoalLine = key =>
+        isGoalLine || !key.includes('GoalLine');
+
+    let availablePlays = activeDefKeys.filter(key =>
+        isEligibleOutsideGoalLine(key) &&
+        isPlayCompatibleWithDefense(
+            defensivePlaybook[key],
+            defenseFormationName
+        )
+    );
+
+    // Safe fallback: never fall back to a goal-line play at midfield.
+    if (availablePlays.length === 0) {
+        availablePlays = BACKYARD_BASICS_DEF.filter(key =>
+            isEligibleOutsideGoalLine(key) &&
+            defensivePlaybook[key]
+        );
+    }
+
+    if (availablePlays.length === 0) {
+        if (defensivePlaybook['Cover_2_Zone_Base']) {
+            return 'Cover_2_Zone_Base';
+        }
+
+        return Object.keys(defensivePlaybook).find(key =>
+            isEligibleOutsideGoalLine(key)
+        ) || Object.keys(defensivePlaybook)[0];
+    }
     const isShort = yardsToGo <= 2;
     const isLong = yardsToGo >= 8;
     const captainIsSharp = checkCaptainDiscipline(defense, gameLog);

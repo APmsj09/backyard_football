@@ -1100,9 +1100,17 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                         // Smoothly glide towards the open space target
                         if (pState._scrambleTargetX !== undefined) {
                             // Smart players adjust sharper; slow players have sluggish inertia
-                            const smoothSpeed = 0.85 + (decision / 300);
-                            pState.targetX = (pState.targetX * smoothSpeed) + (pState._scrambleTargetX * (1 - smoothSpeed));
-                            pState.targetY = (pState.targetY * smoothSpeed) + (pState._scrambleTargetY * (1 - smoothSpeed));
+                            // Higher decision-making improves reaction speed, without overshooting.
+                            const targetBlend = Math.max(
+                                0.08,
+                                Math.min(0.25, (decision / 100) * 0.20)
+                            );
+
+                            pState.targetX +=
+                                (pState._scrambleTargetX - pState.targetX) * targetBlend;
+
+                            pState.targetY +=
+                                (pState._scrambleTargetY - pState.targetY) * targetBlend;
                         }
                         pState.contactReduction = 1.1;
                         break;
