@@ -678,11 +678,11 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                 }
 
                 // Only RBs on designed RUN plays follow routePath through the hole
-                const isRunHolePhase = playType === 'run' && 
-                                       pState.role === 'RB' && 
-                                       pState.routePath && 
-                                       pState.currentPathIndex < pState.routePath.length && 
-                                       pState.y < LOS + 1.5;
+                const isRunHolePhase = playType === 'run' &&
+                    pState.role === 'RB' &&
+                    pState.routePath &&
+                    pState.currentPathIndex < pState.routePath.length &&
+                    pState.y < LOS + 1.5;
 
                 if (isRunHolePhase) {
                     const pt = pState.routePath[pState.currentPathIndex];
@@ -801,18 +801,25 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                         pState.targetX = pState.x + (pState.rolloutDir * 7);
                         pState.targetY = pState.y + 1.5;
                         pState.loggedRollout = true;
+
+                        logPlayDebug('QB_POCKET_MOVE', `${pState.name} rolls out to escape edge pressure`, { rolloutDir: pState.rolloutDir, threat: immediateThreat.name });
+
                         if (gameLog) pushGameLog(gameLog, `[Tick ${playState.tick}] 🏃 ${pState.name} senses immediate pressure and scrambles!`, playState);
                         break;
                     }
 
                     // --- STEPPING UP IN THE POCKET ---
-                    // If edge rushers loop wide around the tackles and the A-gap is clean, climb the pocket!
                     const edgePressureLeft = defenseStates.some(d => d.x < pState.x - 2.5 && getDistance(pState, d) < 4.5);
                     const edgePressureRight = defenseStates.some(d => d.x > pState.x + 2.5 && getDistance(pState, d) < 4.5);
                     const interiorClean = !defenseStates.some(d => Math.abs(d.x - pState.x) <= 2.0 && d.y > pState.y && d.y < LOS);
 
                     if ((edgePressureLeft || edgePressureRight || collapsingDefenders.length > 0) && interiorClean && qbIQ > 45) {
                         idealY = Math.min(LOS - 1.2, pState.y + 2.0); // Step up into the clean pocket
+
+                        if (pState._lastPocketAction !== 'climb') {
+                            logPlayDebug('QB_POCKET_MOVE', `${pState.name} steps up into the clean pocket`, { targetY: Number(idealY.toFixed(1)) });
+                            pState._lastPocketAction = 'climb';
+                        }
                     }
 
                     if (unblockedRushers.length > 0 && qbIQ > 40) {
@@ -834,10 +841,10 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
 
                         // SMOOTH PRESSURE GRADIENT INSTEAD OF HARD 5-YARD CLIFFS
                         const pressureDiff = rightPressure - leftPressure;
-                        
+
                         // Slide away from the higher pressure side proportionally
                         if (Math.abs(pressureDiff) > 0.5) {
-                            desiredX -= pressureDiff * 1.5; 
+                            desiredX -= pressureDiff * 1.5;
                         }
 
                         if ((leftPressure > 2.0 || rightPressure > 2.0) && upTheMiddle < 1.5 && qbIQ > 65) {
@@ -1018,10 +1025,10 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                             const visionWidth = 4.0 + (iq * 0.05);
 
                             const candidates = [
-                                { x: pState.x + (rolloutDir * visionWidth), y: pState.y + 2.0 }, 
-                                { x: pState.x - (rolloutDir * 2.0), y: pState.y + 3.0 }, 
-                                { x: qbState.x + (rolloutDir * 4.0), y: Math.max(LOS + 3, qbState.y + 2.0) }, 
-                                { x: pState.x, y: pState.y + 5.0 } 
+                                { x: pState.x + (rolloutDir * visionWidth), y: pState.y + 2.0 },
+                                { x: pState.x - (rolloutDir * 2.0), y: pState.y + 3.0 },
+                                { x: qbState.x + (rolloutDir * 4.0), y: Math.max(LOS + 3, qbState.y + 2.0) },
+                                { x: pState.x, y: pState.y + 5.0 }
                             ];
 
                             let bestX = pState.x;
@@ -1030,7 +1037,7 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
 
                             candidates.forEach(pt => {
                                 if (pt.x < 2 || pt.x > FIELD_WIDTH - 2 || pt.y < LOS || pt.y > 115) return;
-                                
+
                                 let minDefDist = Infinity;
                                 defenseStates.forEach(def => {
                                     const d = Math.hypot(pt.x - def.x, pt.y - def.y);
@@ -1058,7 +1065,7 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                         // Smoothly glide towards the open space target
                         if (pState._scrambleTargetX !== undefined) {
                             // Smart players adjust sharper; slow players have sluggish inertia
-                            const smoothSpeed = 0.85 + (decision / 300); 
+                            const smoothSpeed = 0.85 + (decision / 300);
                             pState.targetX = (pState.targetX * smoothSpeed) + (pState._scrambleTargetX * (1 - smoothSpeed));
                             pState.targetY = (pState.targetY * smoothSpeed) + (pState._scrambleTargetY * (1 - smoothSpeed));
                         }

@@ -362,6 +362,8 @@ export function getSmartCarrierTarget(runner, defenseStates, offenseStates, fiel
 
     const prevOffset = runner._chosenLaneOffset !== undefined ? runner._chosenLaneOffset : 0;
 
+    let evaluatedLanesTracker = []; // Track choices for telemetry
+
     laneOffsets.forEach((offset) => {
         const testX = runner.x + offset;
         const testY = runner.y + visionDepth;
@@ -376,17 +378,17 @@ export function getSmartCarrierTarget(runner, defenseStates, offenseStates, fiel
 
         if (inTraffic) score -= (lateralShift * 12.0);
 
-        // Hysteresis: Keep momentum in currently selected lane
+        // STRENGTHENED HYSTERESIS: Strongly reward staying in the current lane to prevent stutter-stepping
         const offsetDiffFromPrev = Math.abs(offset - prevOffset);
         if (offsetDiffFromPrev < 0.5) {
-            score += 25; // Stickiness bonus
+            score += 25; // Substantial stickiness bonus
         } else {
-            score -= (offsetDiffFromPrev * 3.5);
+            score -= (offsetDiffFromPrev * 3.5); // Steeper penalty for erratic lane changes
         }
 
         // Heavy penalty against rapid full-reversal flips (e.g. +5 to -5)
         if (prevOffset !== 0 && offset !== 0 && Math.sign(offset) !== Math.sign(prevOffset)) {
-            score -= 35;
+            score -= 35; 
         }
 
         const isLateTrailing = (playState.quarter >= 4 || playState.quarter === 'OT') &&
@@ -406,7 +408,6 @@ export function getSmartCarrierTarget(runner, defenseStates, offenseStates, fiel
         let laneThreat = 0;
         let overPursuitDetected = false;
 
-        // Cutback detection: Check for lead blockers sealing defenders
         offenseStates.forEach(blocker => {
             if (blocker.id !== runner.id && (blocker.action?.includes('block') || blocker.action === 'run_path')) {
                 const distToBlocker = Math.hypot(testX - blocker.x, testY - blocker.y);
@@ -424,7 +425,6 @@ export function getSmartCarrierTarget(runner, defenseStates, offenseStates, fiel
             const distToPredicted = Math.hypot(testX - defPredX, testY - defPredY);
 
             if (!def.isBlocked && !def.isEngaged) {
-                // Smooth threat attenuation: continuous drop-off without hard cliff at 4.5
                 if (distToPredicted < 5.5) {
                     const threatFalloff = Math.max(0, 1.0 - (distToPredicted / 5.5));
                     laneThreat += (280 / (distToPredicted + 0.6)) * threatFalloff;
@@ -456,6 +456,8 @@ export function getSmartCarrierTarget(runner, defenseStates, offenseStates, fiel
         score -= laneThreat;
         if (iq > 70 && overPursuitDetected) score += 40;
 
+        evaluatedLanesTracker.push({ offset, score: Math.round(score), threat: Math.round(laneThreat) });
+
         if (score > bestScore) {
             bestScore = score;
             bestTargetX = testX;
@@ -463,6 +465,16 @@ export function getSmartCarrierTarget(runner, defenseStates, offenseStates, fiel
             bestOffset = offset;
         }
     });
+
+    // Telemetry: Log when the running back switches running lanes, showing the top scores evaluated
+    if (bestOffset !== prevOffset) {
+        evaluatedLanesTracker.sort((a, b) => b.score - a.score);
+        logPlayDebug('RB_LANE_EVAL', `${runner.name} switched running lanes`, {
+            fromOffset: prevOffset,
+            toOffset: bestOffset,
+            topChoices: evaluatedLanesTracker.slice(0, 3)
+        });
+    }
 
     runner._chosenLaneOffset = bestOffset;
 
@@ -629,11 +641,9 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
     if (typeof qbState.currentReadTargetSlot === 'undefined') qbState.currentReadTargetSlot = progression[0];
 
     // --- ELITE QB EYE MANIPULATION (Looking off Safeties) ---
-    // A high-IQ QB will actively look at the opposite side of the field for the first 1.5 seconds
     if (qbIQ > 75 && playState.tick < 30 && progression.length > 1) {
         const trueTarget = offenseStates.find(o => o.slot === progression[0]);
         if (trueTarget && trueTarget.initialX !== undefined) {
-            // Find a decoy receiver on the opposite side of the center hash
             const decoy = offenseStates.find(o =>
                 o.slot !== 'QB1' &&
                 o.slot !== trueTarget.slot &&
@@ -641,7 +651,14 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
                 Math.sign(o.initialX - 26.6) !== Math.sign(trueTarget.initialX - 26.6)
             );
             if (decoy) {
-                qbState.currentReadTargetSlot = decoy.slot; // Spoof the defense!
+                qbState.currentReadTargetSlot = decoy.slot; 
+                if (qbState._lastLoggedDecoy !== decoy.slot) {
+                    logPlayDebug('QB_EYE_MANIPULATION', `${qbState.name} uses eyes to look safety off primary read (${progression[0]}) using decoy ${decoy.slot}`, {
+                        trueRead: progression[0],
+                        decoySlot: decoy.slot
+                    });
+                    qbState._lastLoggedDecoy = decoy.slot;
+                }
                 if (gameLog && playState.tick === 25 && Math.random() < 0.1) {
                     pushGameLog(gameLog, `[Tick ${playState.tick}] 👀 ${qbState.name} uses his eyes to look the safety off his primary read!`, playState);
                 }
@@ -652,8 +669,18 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
             qbState.currentReadTargetSlot = progression[0];
         }
     } else {
-        // Normal progression tracking
+        // Normal progression tracking with telemetry on read transitions
         const readIndex = Math.min(progression.length - 1, Math.floor(qbState.ticksInPocket / (Math.max(8, (110 - qbIQ) / 3))));
+        
+        if (qbState._lastReadIndex !== readIndex) {
+            logPlayDebug('QB_READ_PROGRESSION', `${qbState.name} advances to read #${readIndex + 1} (${progression[readIndex]})`, {
+                tick: playState.tick,
+                targetSlot: progression[readIndex],
+                readIndex: readIndex + 1
+            });
+            qbState._lastReadIndex = readIndex;
+        }
+
         qbState.currentReadTargetSlot = progression[readIndex];
     }
 
