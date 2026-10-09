@@ -723,6 +723,7 @@ export function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey
                 } catch (e) {
                     if (!p._physicsErrorLogged) {
                         p._physicsErrorLogged = true;
+
                         console.error(
                             `[Physics Error] Tick ${playState.tick}: ${p.name} (${p.slot})`,
                             e
@@ -960,6 +961,9 @@ export function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey
     } else if (playState.safety) {
         playResult.safety = true;
         playResult.score = 'SAFETY';
+    } else if (!playState.playIsLive) {
+        // Ordinary tackle or another normal dead-ball event.
+        playResult.outcome = 'complete';
     }
 
     if (playState.possessionChanged || playState.turnover || playState.type === 'punt') {

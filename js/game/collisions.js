@@ -465,7 +465,7 @@ export function resolveOngoingBlocks(playState, gameLog, offenseStates = [], def
                         dy = qb.y - defender.y;
                     }
                     pushAmount = Math.max(0.2, pushAmount + 0.15);
-                    
+
                     if (!battle.loggedBullRush) {
                         logPlayDebug('TRENCH_BULL_RUSH', `${defender.name} is walking ${blocker.name} back to the QB!`, { defStr, blkStr });
                         battle.loggedBullRush = true;
@@ -473,10 +473,23 @@ export function resolveOngoingBlocks(playState, gameLog, offenseStates = [], def
                 }
 
                 const dist = Math.max(0.1, Math.sqrt(dx * dx + dy * dy));
-                const pushX = (dx / dist) * pushAmount * 0.5;
-                const pushY = (dy / dist) * pushAmount * 0.5;
-                blocker.x += pushX; blocker.y += pushY;
-                defender.x += pushX; defender.y += pushY;
+
+                // Battle score is a gameplay calculation, not a physical distance.
+                // Cap the displacement to prevent large per-tick jumps.
+                const pushDirection = Math.sign(pushAmount);
+                const pushMagnitude =
+                    Math.min(0.08, Math.abs(pushAmount) * 0.15) * pushDirection;
+
+                const pushX = (dx / dist) * pushMagnitude;
+                const pushY = (dy / dist) * pushMagnitude;
+
+                // The player losing the battle should visibly give ground.
+                blocker.x += pushX;
+                blocker.y += pushY;
+
+                // The opponent moves too, but much less.
+                defender.x += pushX * 0.25;
+                defender.y += pushY * 0.25;
             }
         }
 
@@ -685,7 +698,7 @@ export function handleBallArrival(playState, carrier, playResult, gameLog) {
         const isDefense = !bestCandidate.isOffense;
 
         // Base catch: Give a higher floor so wide-open players don't drop everything
-        let catchScore = (catching * 0.50) + (agility * 0.20) + 40; 
+        let catchScore = (catching * 0.50) + (agility * 0.20) + 40;
 
         const defendersNear = playersInRange.filter(p => !p.isOffense).length;
         const attackersNear = playersInRange.filter(p => p.isOffense).length;
