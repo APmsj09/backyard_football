@@ -3,7 +3,7 @@ import {
     saveGameState, getRelationshipLevel, getScoutedPlayerInfo, getGameState,
     getRosterObjects, getPlayer, rebuildDepthChartFromOrder, assignPlayerToSlot
 } from './game.js';
-import { offenseFormations, defenseFormations, relationshipLevels, firstNames, lastNames, offensivePlaybook, defensivePlaybook } from './data.js';
+import { offenseFormations, defenseFormations, relationshipLevels, firstNames, lastNames, offensivePlaybook, defensivePlaybook, routeTree } from './data.js';
 import { positionOverallWeights, estimateBestPosition, calculateOverall, getProspectSignatureSkills } from './game/player.js';
 import { formatHeight } from './utils.js';
 import { drawFieldVisualization, formatGameClock, showPlayOverlay } from './ui/field_visualizer.js';
@@ -2854,10 +2854,10 @@ export function renderPlaybookManager(gameState) {
                         let barColor = mastery >= 75 ? 'bg-emerald-500' : (mastery >= 50 ? 'bg-amber-500' : 'bg-rose-500');
 
                         return `
-                        <div class="p-2.5 rounded border border-blue-300 bg-blue-50/50 flex flex-col justify-between shadow-sm">
+                        <div class="p-2.5 rounded border border-blue-300 bg-blue-50/50 hover:bg-blue-100/60 transition cursor-pointer flex flex-col justify-between shadow-sm group" onclick="app_previewPlay('${key}', 'offense')">
                             <div>
                                 <div class="flex justify-between items-start">
-                                    <span class="font-bold text-slate-900 truncate">${key.replace('Uni_', '').replace('PA_', 'PA ')}</span>
+                                    <span class="font-bold text-slate-900 group-hover:text-blue-700 transition truncate">${key.replace('Uni_', '').replace('PA_', 'PA ')} 🔍</span>
                                     <span class="text-[9px] font-black uppercase px-1 rounded ${isBasic ? 'bg-slate-200 text-slate-700' : 'bg-blue-700 text-white'}">
                                         ${isBasic ? 'Safety Net' : 'Installed'}
                                     </span>
@@ -2888,12 +2888,12 @@ export function renderPlaybookManager(gameState) {
                             if (isInstalled) return '';
                             const mastery = team.gameplan.mastery[key] || 35;
                             return `
-                            <div class="p-2 rounded border border-slate-200 bg-slate-50 hover:bg-white flex justify-between items-center transition">
+                            <div class="p-2 rounded border border-slate-200 bg-slate-50 hover:bg-white flex justify-between items-center transition cursor-pointer group" onclick="app_previewPlay('${key}', 'offense')">
                                 <div class="truncate pr-1">
-                                    <span class="font-semibold text-slate-800 truncate block text-[11px]">${key.replace('Uni_', '').replace('PA_', 'PA ')}</span>
+                                    <span class="font-semibold text-slate-800 group-hover:text-blue-700 transition truncate block text-[11px]">${key.replace('Uni_', '').replace('PA_', 'PA ')} 🔍</span>
                                     <span class="text-[9px] text-slate-400 font-mono">${mastery}% Mst</span>
                                 </div>
-                                <button class="shrink-0 px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-slate-900 text-white hover:bg-slate-800 transition shadow-sm" onclick="app_toggleInstallPlay('${key}', 'offense')">
+                                <button class="shrink-0 px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-slate-900 text-white hover:bg-slate-800 transition shadow-sm" onclick="event.stopPropagation(); app_toggleInstallPlay('${key}', 'offense')">
                                     Install
                                 </button>
                             </div>`;
@@ -2918,10 +2918,10 @@ export function renderPlaybookManager(gameState) {
                         let barColor = mastery >= 75 ? 'bg-emerald-500' : (mastery >= 50 ? 'bg-amber-500' : 'bg-rose-500');
 
                         return `
-                        <div class="p-2.5 rounded border border-red-300 bg-red-50/50 flex flex-col justify-between shadow-sm">
+                        <div class="p-2.5 rounded border border-red-300 bg-red-50/50 hover:bg-red-100/60 transition cursor-pointer flex flex-col justify-between shadow-sm group" onclick="app_previewPlay('${key}', 'defense')">
                             <div>
                                 <div class="flex justify-between items-start">
-                                    <span class="font-bold text-slate-900 truncate">${play.name || key}</span>
+                                    <span class="font-bold text-slate-900 group-hover:text-rose-700 transition truncate">${play.name || key} 🔍</span>
                                     <span class="text-[9px] font-black uppercase px-1 rounded ${isBasic ? 'bg-slate-200 text-slate-700' : 'bg-red-700 text-white'}">
                                         ${isBasic ? 'Safety Net' : 'Installed'}
                                     </span>
@@ -2952,12 +2952,12 @@ export function renderPlaybookManager(gameState) {
                             if (isInstalled) return '';
                             const mastery = team.gameplan.mastery[key] || 35;
                             return `
-                            <div class="p-2 rounded border border-slate-200 bg-slate-50 hover:bg-white flex justify-between items-center transition">
+                            <div class="p-2 rounded border border-slate-200 bg-slate-50 hover:bg-white flex justify-between items-center transition cursor-pointer group" onclick="app_previewPlay('${key}', 'defense')">
                                 <div class="truncate pr-1">
-                                    <span class="font-semibold text-slate-800 truncate block text-[11px]">${play.name || key}</span>
+                                    <span class="font-semibold text-slate-800 group-hover:text-rose-700 transition truncate block text-[11px]">${play.name || key} 🔍</span>
                                     <span class="text-[9px] text-slate-400 font-mono">${mastery}% Mst</span>
                                 </div>
-                                <button class="shrink-0 px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-slate-900 text-white hover:bg-slate-800 transition shadow-sm" onclick="app_toggleInstallPlay('${key}', 'defense')">
+                                <button class="shrink-0 px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-slate-900 text-white hover:bg-slate-800 transition shadow-sm" onclick="event.stopPropagation(); app_toggleInstallPlay('${key}', 'defense')">
                                     Install
                                 </button>
                             </div>`;
@@ -3390,6 +3390,294 @@ function finishLiveGame() {
         liveGameCallback(res);
     }
 }
+
+/**
+ * Renders an on-the-fly chalkboard / napkin diagram for offensive and defensive plays.
+ */
+function drawPlayDiagram(canvas, playKey, side, team) {
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    const w = canvas.width;
+    const h = canvas.height;
+
+    // 1. Chalkboard Background
+    ctx.fillStyle = '#0f172a';
+    ctx.fillRect(0, 0, w, h);
+
+    // Subtle grid/yard lines
+    const losY = 180;
+    const centerX = w / 2;
+    const scaleX = w / 42; // ~8px per yard
+    const scaleY = 5.2;
+
+    const toX = (x) => centerX + (x * scaleX);
+    const toY = (y) => losY - (y * scaleY);
+
+    // Faint 5-yard markers
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
+    ctx.lineWidth = 1;
+    for (let yd = -10; yd <= 35; yd += 5) {
+        const y = toY(yd);
+        ctx.beginPath();
+        ctx.moveTo(10, y);
+        ctx.lineTo(w - 10, y);
+        ctx.stroke();
+    }
+
+    // Line of Scrimmage
+    ctx.strokeStyle = '#38bdf8';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(10, losY);
+    ctx.lineTo(w - 10, losY);
+    ctx.stroke();
+
+    ctx.fillStyle = '#38bdf8';
+    ctx.font = 'bold 9px monospace';
+    ctx.fillText('LOS', 12, losY - 4);
+
+    const drawArrow = (fromX, fromY, toXPos, toYPos, color, isDashed = false) => {
+        ctx.save();
+        ctx.strokeStyle = color;
+        ctx.fillStyle = color;
+        ctx.lineWidth = 2;
+        if (isDashed) ctx.setLineDash([3, 3]);
+        ctx.beginPath();
+        ctx.moveTo(fromX, fromY);
+        ctx.lineTo(toXPos, toYPos);
+        ctx.stroke();
+
+        const angle = Math.atan2(toYPos - fromY, toXPos - fromX);
+        const headLen = 6;
+        ctx.setLineDash([]);
+        ctx.beginPath();
+        ctx.moveTo(toXPos, toYPos);
+        ctx.lineTo(toXPos - headLen * Math.cos(angle - Math.PI / 6), toYPos - headLen * Math.sin(angle - Math.PI / 6));
+        ctx.lineTo(toXPos - headLen * Math.cos(angle + Math.PI / 6), toYPos - headLen * Math.sin(angle + Math.PI / 6));
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
+    };
+
+    if (side === 'offense') {
+        const play = offensivePlaybook[playKey] || {};
+        const formKey = team?.formations?.offense || 'Balanced';
+        const form = offenseFormations[formKey] || offenseFormations['Balanced'];
+        const coords = form.coordinates || {};
+        const mapping = form.mapping || {};
+        const assignments = play.assignments || {};
+
+        // Resolve each player's starting coordinate and draw
+        const roleSlots = {
+            'QB': mapping.QB || 'QB1',
+            'RB': mapping.RB || 'RB1',
+            'X': mapping.X || 'WR1',
+            'Z': mapping.Z || 'WR2',
+            'Y': mapping.Y || 'TE1',
+            'H': mapping.H || 'WR3'
+        };
+
+        // Draw Offensive Linemen
+        ['OL1', 'OL2', 'OL3'].forEach(olSlot => {
+            const pt = coords[olSlot] || [0, -1.5];
+            const px = toX(pt[0]);
+            const py = toY(pt[1]);
+
+            ctx.fillStyle = '#64748b';
+            ctx.fillRect(px - 4, py - 4, 8, 8);
+
+            const assign = assignments.OL || assignments[olSlot] || 'pass_block';
+            if (assign.includes('pull_right')) {
+                drawArrow(px, py, px + 28, toY(2), '#fbbf24');
+            } else if (assign.includes('pull_left')) {
+                drawArrow(px, py, px - 28, toY(2), '#fbbf24');
+            } else {
+                // T-Bar block line
+                ctx.strokeStyle = '#94a3b8';
+                ctx.lineWidth = 1.5;
+                ctx.beginPath();
+                ctx.moveTo(px, py);
+                ctx.lineTo(px, toY(0.5));
+                ctx.stroke();
+                ctx.beginPath();
+                ctx.moveTo(px - 5, toY(0.5));
+                ctx.lineTo(px + 5, toY(0.5));
+                ctx.stroke();
+            }
+        });
+
+        // Draw Skill Players and Routes
+        Object.entries(roleSlots).forEach(([role, slot]) => {
+            const startPt = coords[slot];
+            if (!startPt) return;
+
+            const sx = startPt[0];
+            const sy = startPt[1];
+            const px = toX(sx);
+            const py = toY(sy);
+
+            // Player Dot
+            ctx.fillStyle = '#38bdf8';
+            ctx.beginPath();
+            ctx.arc(px, py, 6, 0, Math.PI * 2);
+            ctx.fill();
+
+            ctx.fillStyle = '#0f172a';
+            ctx.font = 'bold 8px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(role, px, py);
+
+            const assign = assignments[role] || (role === 'RB' ? assignments.RB : null);
+            if (!assign) return;
+
+            // Route Path tracing
+            const route = routeTree[assign];
+            if (route && route.path) {
+                const mirror = (route.mirror !== false && sx < 0) ? -1 : 1;
+                let curX = sx;
+                let curY = sy;
+
+                route.path.forEach((node, i) => {
+                    const nextX = curX + (node.x * mirror);
+                    const nextY = curY + node.y;
+                    const isLast = i === route.path.length - 1;
+
+                    if (isLast) {
+                        drawArrow(toX(curX), toY(curY), toX(nextX), toY(nextY), '#fde047');
+                    } else {
+                        ctx.strokeStyle = '#fde047';
+                        ctx.lineWidth = 2;
+                        ctx.beginPath();
+                        ctx.moveTo(toX(curX), toY(curY));
+                        ctx.lineTo(toX(nextX), toY(nextY));
+                        ctx.stroke();
+                    }
+                    curX = nextX;
+                    curY = nextY;
+                });
+            } else if (assign.startsWith('run_')) {
+                // Ball carrier run design
+                const destX = assign.includes('right') ? sx + 10 : (assign.includes('left') ? sx - 10 : sx);
+                const destY = 6;
+                drawArrow(px, py, toX(destX), toY(destY), '#fb923c', true);
+            }
+        });
+
+    } else {
+        // DEFENSIVE SCHEME DIAGRAM
+        const play = defensivePlaybook[playKey] || {};
+        const formKey = team?.formations?.defense || '3-2-3';
+        const form = defenseFormations[formKey] || defenseFormations['3-2-3'];
+        const coords = form.coordinates || {};
+        const assignments = play.assignments || {};
+
+        form.slots.forEach(slot => {
+            const pt = coords[slot];
+            if (!pt) return;
+
+            const px = toX(pt[0]);
+            const py = toY(pt[1]);
+
+            // Defense Player Dot
+            ctx.fillStyle = '#f43f5e';
+            ctx.beginPath();
+            ctx.arc(px, py, 6, 0, Math.PI * 2);
+            ctx.fill();
+
+            ctx.fillStyle = '#ffffff';
+            ctx.font = 'bold 7px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(slot.substring(0, 2), px, py);
+
+            const assign = assignments[slot] || '';
+            if (assign.includes('rush') || assign.includes('blitz')) {
+                drawArrow(px, py, px, toY(-2), '#f43f5e');
+            } else if (assign.includes('zone_')) {
+                // Zone Coverage Bubble
+                ctx.save();
+                ctx.fillStyle = 'rgba(56, 189, 248, 0.15)';
+                ctx.strokeStyle = 'rgba(56, 189, 248, 0.5)';
+                ctx.lineWidth = 1;
+                ctx.setLineDash([2, 2]);
+                ctx.beginPath();
+                ctx.ellipse(px, py - 10, 24, 16, 0, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.stroke();
+                ctx.restore();
+            } else if (assign.includes('man_cover')) {
+                ctx.strokeStyle = '#cbd5e1';
+                ctx.lineWidth = 1.5;
+                ctx.setLineDash([2, 2]);
+                ctx.beginPath();
+                ctx.moveTo(px, py);
+                ctx.lineTo(px, toY(0));
+                ctx.stroke();
+            }
+        });
+    }
+}
+
+/**
+ * Opens an in-game chalkboard popup modal detailing the play, routes, reads, and lore.
+ */
+window.app_previewPlay = function(playKey, side) {
+    const gs = getGameState();
+    const team = gs?.playerTeam;
+    const play = side === 'offense' ? offensivePlaybook[playKey] : defensivePlaybook[playKey];
+    if (!play) return;
+
+    const playTitle = play.name || playKey.replace('Uni_', '').replace('PA_', 'Play-Action ');
+    const reads = play.readProgression && play.readProgression.length > 0
+        ? play.readProgression.map((r, i) => `<span class="bg-slate-800 text-amber-400 font-mono px-1.5 py-0.5 rounded text-[11px]">${i + 1}. ${r}</span>`).join(' → ')
+        : '<span class="text-slate-400 italic">Pre-snap read / Ballcarrier run design</span>';
+
+    const tags = (play.tags || []).map(t => `<span class="bg-slate-200 text-slate-700 px-1.5 py-0.5 rounded text-[10px] font-bold uppercase">${t}</span>`).join(' ');
+
+    let loreText = "Standard sandbox concept. Run with precision to stress defensive boundaries.";
+    if (play.tags?.includes('screen')) loreText = "Lets blitzing rushers over-penetrate, then slips the ball into open alley with pulling offensive linemen.";
+    else if (play.tags?.includes('pa')) loreText = "Heavy play-action fake freezes linebackers near the line of scrimmage, opening up deep crossing windows.";
+    else if (play.tags?.includes('quick') || play.tags?.includes('short')) loreText = "Quick rhythm passing. Ball comes out in under 1.5 seconds to neutralize aggressive pressure.";
+    else if (play.tags?.includes('deep') || play.tags?.includes('vertical')) loreText = "Stretches deep coverage vertically. Punishes single-high safeties when given adequate pass protection.";
+    else if (play.tags?.includes('cross') || play.tags?.includes('mesh')) loreText = "Horizontal rub concept that creates natural picks against tight man-to-man coverage.";
+    else if (play.tags?.includes('runStop') || play.blitz) loreText = "Brings heat into the gaps to blow up run lanes and collapse the pocket before deep passes develop.";
+    else if (play.concept === 'Zone') loreText = "Discipline-first coverage shell. Keeps the ball in front to prevent explosive chunk plays.";
+
+    const modalHtml = `
+        <div class="space-y-3 text-left">
+            <!-- Canvas Container -->
+            <div class="flex justify-center bg-slate-950 p-2 rounded border border-slate-700 shadow-inner">
+                <canvas id="play-diagram-canvas" width="340" height="260" class="rounded shadow"></canvas>
+            </div>
+
+            <!-- Progression & Reads -->
+            <div class="bg-slate-50 border border-slate-200 p-2.5 rounded text-xs space-y-1">
+                <span class="font-bold text-[10px] uppercase tracking-wider text-slate-500 block">QB Progression & Focal Reads</span>
+                <div class="flex items-center gap-1.5 flex-wrap">${reads}</div>
+            </div>
+
+            <!-- Tactical Lore -->
+            <div class="bg-amber-50/80 border border-amber-200 p-2.5 rounded text-xs text-slate-800">
+                <span class="font-bold text-[10px] uppercase tracking-wider text-amber-900 block mb-0.5">Tactical Lore & Play Identity</span>
+                <p class="italic text-[11px] leading-relaxed">"${loreText}"</p>
+            </div>
+
+            <div class="flex items-center justify-between text-[11px] text-slate-500 pt-1">
+                <div>Tags: ${tags}</div>
+                <div class="font-mono text-slate-400">Scheme: ${side === 'offense' ? (team?.formations?.offense || 'Balanced') : (team?.formations?.defense || '3-2-3')}</div>
+            </div>
+        </div>
+    `;
+
+    showModal(`📋 Play Chalkboard: ${playTitle}`, modalHtml, null, null, null, "Close Chalkboard");
+
+    // Render vector lines once the modal DOM element is present
+    setTimeout(() => {
+        const canvas = document.getElementById('play-diagram-canvas');
+        if (canvas) drawPlayDiagram(canvas, playKey, side, team);
+    }, 20);
+};
 
 export function skipLiveGameSim() { isSkipping = true; isPaused = false; }
 export function togglePause() { isPaused = !isPaused; return isPaused; }
