@@ -1266,15 +1266,36 @@ export function renderStaffTab(gameState) {
     ];
 
     window.app_fireStaff = (roleKey) => {
-        if (confirm(`Relieve your ${roleKey.toUpperCase()} of duties?`)) {
-            const old = team.staff[roleKey];
-            if (old) {
-                old.teamId = null;
-                gameState.availableStaff.push(old);
-            }
-            team.staff[roleKey] = null;
-            renderStaffTab(gameState);
-        }
+        const member = team.staff[roleKey];
+        if (!member) return;
+        const roleLabels = { coach: 'Head Coach', scout: 'Park Scout', trainer: 'Sideline Trainer' };
+        const roleLabel = roleLabels[roleKey] || roleKey.toUpperCase();
+
+        const modalHtml = `
+            <div class="space-y-3 text-left text-xs">
+                <p class="text-slate-700 leading-relaxed">
+                    Are you sure you want to relieve <b>${member.name}</b> (${roleLabel}) of their duties?
+                </p>
+                <div class="bg-amber-50 border border-amber-200 p-2.5 rounded text-amber-900 text-[11px]">
+                    They will pack up their clipboard and return to the neighborhood sideline market. Your ${roleLabel} position will be vacant until you hire a replacement.
+                </div>
+            </div>
+        `;
+
+        showModal(
+            `Relieve ${roleLabel} of Duties?`,
+            modalHtml,
+            () => {
+                member.teamId = null;
+                if (gameState.availableStaff) gameState.availableStaff.push(member);
+                team.staff[roleKey] = null;
+                if (roleKey === 'coach') team.coach = null;
+                renderStaffTab(gameState);
+            },
+            "Relieve of Duties",
+            null,
+            "Keep on Staff"
+        );
     };
 
     window.app_hireStaff = (staffId, roleKey) => {
@@ -1284,75 +1305,135 @@ export function renderStaffTab(gameState) {
         const tokensAvailable = team.socialProfile?.favorTokens || 0;
         const roleLabels = { coach: 'Head Coach', scout: 'Park Scout', trainer: 'Sideline Trainer' };
         const roleName = roleLabels[roleKey] || roleKey.toUpperCase();
+        const isHeadCoach = roleKey === 'coach';
 
         const pitchModalHtml = `
-            <div class="space-y-4 text-left">
-                <div class="bg-slate-50 p-3 rounded border border-slate-200">
-                    <div class="flex justify-between items-start">
-                        <div>
-                            <h4 class="font-black text-sm text-slate-900">${staff.name}</h4>
-                            <p class="text-[11px] text-slate-500">${staff.age}yo • ${staff.biases.personality.name}</p>
+            <div class="space-y-3.5 text-left text-xs">
+                <!-- Candidate Identity Header -->
+                <div class="bg-slate-900 text-white p-3 rounded flex justify-between items-start">
+                    <div>
+                        <div class="flex items-center gap-2">
+                            <h4 class="font-black text-sm text-white">${staff.name}</h4>
+                            <span class="text-[9px] bg-slate-800 text-amber-400 font-bold px-1.5 py-0.5 rounded border border-slate-700">${staff.age}yo</span>
                         </div>
-                        <span class="text-xs bg-amber-100 text-amber-900 font-bold px-2 py-0.5 rounded border border-amber-300">
-                            Target: ${roleName}
-                        </span>
+                        <p class="text-[11px] text-slate-400 mt-0.5 font-sans">${staff.biases.personality.name} • ${staff.biases.tactical?.name || 'Tactician'}</p>
                     </div>
-                    ${staff.formerPlayerBio ? `<p class="text-[10px] text-amber-800 font-bold mt-1">🎓 ${staff.formerPlayerBio}</p>` : ''}
-                    <p class="text-[11px] text-slate-600 italic mt-1">"${staff.biases.tactical?.desc || staff.biases.personality.desc}"</p>
+                    <span class="text-xs bg-amber-500 text-slate-950 font-black px-2 py-0.5 rounded uppercase">
+                        ${roleName}
+                    </span>
                 </div>
 
-                <div>
-                    <label class="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-                        Offer Favor Tokens (Available: ${tokensAvailable})
-                    </label>
-                    <select id="staff-pitch-tokens" class="w-full p-2 border border-slate-300 rounded font-bold text-slate-800 outline-none">
-                        <option value="0">0 Tokens (Standard neighborhood handshake)</option>
-                        ${tokensAvailable >= 1 ? '<option value="1" selected>1 Favor Token (Lend your bike / ride favors)</option>' : ''}
-                        ${tokensAvailable >= 2 ? '<option value="2">2 Favor Tokens (Major favors owed)</option>' : ''}
-                    </select>
-                    <p class="text-[10px] text-slate-500 mt-1">High-rated candidates or coaches with big reputations require Favor Tokens to convince them to sign.</p>
+                ${staff.formerPlayerBio ? `
+                <div class="bg-amber-50 border border-amber-200 p-2 rounded text-amber-900 font-bold text-[10px]">
+                    🎓 Park Alumni: ${staff.formerPlayerBio}
+                </div>` : ''}
+
+                <!-- Candidate Philosophy Bio -->
+                <div class="bg-slate-50 border border-slate-200 p-2.5 rounded text-slate-700 italic text-[11px]">
+                    "${staff.biases.tactical?.desc || staff.biases.personality.desc}"
+                </div>
+
+                <!-- Deep Pitch Options -->
+                <div class="space-y-2.5">
+                    ${isHeadCoach ? `
+                    <div>
+                        <label class="block text-[10px] font-black uppercase tracking-wider text-slate-600 mb-1">
+                            Scheme Autonomy & Play-Calling Rights
+                        </label>
+                        <select id="staff-scheme-promise" class="w-full p-2 border border-slate-300 rounded font-bold text-slate-800 bg-white text-xs outline-none">
+                            <option value="COACH_CHOICE" selected>Full Autonomy: Coach sets offensive/defensive gameplan (+Interest)</option>
+                            <option value="GM_CHOICE">GM Override: Front office dictates formations</option>
+                        </select>
+                    </div>` : ''}
+
+                    <div>
+                        <label class="block text-[10px] font-black uppercase tracking-wider text-slate-600 mb-1">
+                            Program Practice Focus & Sideline Culture
+                        </label>
+                        <select id="staff-practice-focus" class="w-full p-2 border border-slate-300 rounded font-bold text-slate-800 bg-white text-xs outline-none">
+                            <option value="CONDITIONING">Grit & Conditioning (Tree runs, tire drills; favors tough coaches)</option>
+                            <option value="CHALK_TALK">Chalk Talks & Film (Napkin route design, high playbook IQ study)</option>
+                            <option value="FUN_SCRIMMAGE">Sandlot Chemistry (Scrimmages, freeze-pop breaks; favors player coaches)</option>
+                        </select>
+                    </div>
+
+                    <div>
+                        <label class="block text-[10px] font-black uppercase tracking-wider text-slate-600 mb-1">
+                            Favor Token Sweetener (Available: ${tokensAvailable})
+                        </label>
+                        <select id="staff-pitch-tokens" class="w-full p-2 border border-slate-300 rounded font-bold text-slate-800 bg-white text-xs outline-none">
+                            <option value="0">0 Tokens (Handshake & standard program pitch)</option>
+                            ${tokensAvailable >= 1 ? '<option value="1">1 Token (Lend your bike, extra equipment)</option>' : ''}
+                            ${tokensAvailable >= 2 ? '<option value="2">2 Tokens (Major favors, mowing park field, big concessions)</option>' : ''}
+                        </select>
+                    </div>
                 </div>
             </div>
         `;
 
-        showModal(`Recruit ${roleName}`, pitchModalHtml, () => {
+        showModal(`Recruit ${roleName}: ${staff.name}`, pitchModalHtml, () => {
             const tokensOffered = parseInt(document.getElementById('staff-pitch-tokens')?.value || '0', 10);
+            const schemePromise = document.getElementById('staff-scheme-promise')?.value || 'GM_CHOICE';
+            const practiceFocus = document.getElementById('staff-practice-focus')?.value || 'BALANCED';
 
-            if (tokensOffered > tokensAvailable) {
-                alert("You do not have enough Favor Tokens.");
-                return;
+            const pitch = { tokensOffered, schemePromise, practiceFocus };
+            const negotiation = Game.evaluateStaffNegotiation(staff, team, roleKey, pitch);
+
+            const resultHtml = `
+                <div class="space-y-3 text-left text-xs">
+                    <div class="p-3 rounded border ${negotiation.accepted ? 'bg-emerald-50 border-emerald-300 text-emerald-950' : 'bg-rose-50 border-rose-300 text-rose-950'}">
+                        <div class="flex items-center gap-2 mb-1">
+                            <span class="text-base">${negotiation.accepted ? '🤝' : '✋'}</span>
+                            <h4 class="font-black text-sm uppercase">${negotiation.accepted ? 'Offer Accepted!' : 'Offer Declined'}</h4>
+                        </div>
+                        <p class="italic text-[11px] leading-relaxed mb-2">${negotiation.quote}</p>
+                        <div class="text-[10px] font-mono border-t pt-1.5 ${negotiation.accepted ? 'border-emerald-200' : 'border-rose-200'}">
+                            Interest Score: <b>${negotiation.interestScore}/100</b> (Threshold: 45)
+                        </div>
+                    </div>
+
+                    <div class="bg-slate-50 border border-slate-200 p-2.5 rounded">
+                        <span class="font-black text-[10px] uppercase text-slate-500 block mb-1">Negotiation Factors</span>
+                        <ul class="space-y-0.5 text-[11px] font-mono text-slate-700">
+                            ${negotiation.reasons.map(r => `<li>• ${r}</li>`).join('')}
+                        </ul>
+                    </div>
+                </div>
+            `;
+
+            if (negotiation.accepted) {
+                if (tokensOffered > 0) {
+                    team.socialProfile.favorTokens = Math.max(0, team.socialProfile.favorTokens - tokensOffered);
+                }
+
+                const oldStaff = team.staff[roleKey];
+                if (oldStaff) {
+                    oldStaff.teamId = null;
+                    gameState.availableStaff.push(oldStaff);
+                }
+
+                const idx = gameState.availableStaff.findIndex(s => s.id === staffId);
+                if (idx > -1) gameState.availableStaff.splice(idx, 1);
+
+                staff.role = roleKey;
+                staff.teamId = team.id;
+                team.staff[roleKey] = staff;
+
+                if (roleKey === 'coach') {
+                    team.coach = staff;
+                    if (schemePromise === 'COACH_CHOICE' && staff.preferredOffense) {
+                        team.formations.offense = staff.preferredOffense;
+                    }
+                    if (schemePromise === 'COACH_CHOICE' && staff.preferredDefense) {
+                        team.formations.defense = staff.preferredDefense;
+                    }
+                }
+
+                renderStaffTab(gameState);
+                showModal("Contract Finalized 🤝", resultHtml, null, null, null, "Great, Welcome Aboard!");
+            } else {
+                showModal("Pitch Rejected ✋", resultHtml, null, null, null, "Understood");
             }
-
-            const negotiation = Game.evaluateStaffNegotiation(staff, team, roleKey, tokensOffered);
-
-            if (!negotiation.accepted) {
-                alert(`✋ ${staff.name} declined the offer: \n\n• ${negotiation.reasons.join('\n• ')}\n\nTry offering a Favor Token or raising your Street Cred.`);
-                return;
-            }
-
-            // Deduct offered tokens
-            if (tokensOffered > 0) {
-                team.socialProfile.favorTokens -= tokensOffered;
-            }
-
-            // Remove previous role holder and put on market
-            const oldStaff = team.staff[roleKey];
-            if (oldStaff) {
-                oldStaff.teamId = null;
-                gameState.availableStaff.push(oldStaff);
-            }
-
-            // Move candidate to team staff
-            const idx = gameState.availableStaff.findIndex(s => s.id === staffId);
-            if (idx > -1) gameState.availableStaff.splice(idx, 1);
-
-            staff.role = roleKey;
-            staff.teamId = team.id;
-            team.staff[roleKey] = staff;
-            if (roleKey === 'coach') team.coach = staff;
-
-            renderStaffTab(gameState);
-            alert(`🤝 ${staff.name} agreed to join as ${roleName}!\n\nReasons: ${negotiation.reasons.join(', ')}`);
         }, "Submit Contract Offer");
     };
 
@@ -2677,16 +2758,267 @@ export function setupDepthChartTabs() {
             const defensePane = document.getElementById("depth-chart-defense-pane");
             const overallsPane = document.getElementById("positional-overalls-container");
             const depthOrderPane = document.getElementById("depth-order-container");
+            const playbookPane = document.getElementById("playbook-manager-container");
+            const practicePane = document.getElementById("practice-manager-container");
 
             if (offensePane) offensePane.classList.toggle("hidden", subTab !== "offense");
             if (defensePane) defensePane.classList.toggle("hidden", subTab !== "defense");
             if (overallsPane) overallsPane.classList.toggle("hidden", subTab !== "overalls");
             if (depthOrderPane) depthOrderPane.classList.toggle("hidden", subTab !== "depth-order");
+            if (playbookPane) playbookPane.classList.toggle("hidden", subTab !== "playbook");
+            if (practicePane) practicePane.classList.toggle("hidden", subTab !== "practice");
 
             if (subTab === "overalls") renderPositionalOveralls();
             if (subTab === "depth-order") renderDepthOrderPane(getGameState());
+            if (subTab === "playbook") renderPlaybookManager(getGameState());
+            if (subTab === "practice") renderPracticeManager(getGameState());
         });
     });
+}
+
+export function renderPlaybookManager(gameState) {
+    const container = document.getElementById('playbook-manager-container');
+    if (!container || !gameState?.playerTeam) return;
+
+    const team = gameState.playerTeam;
+    if (!team.gameplan) team.gameplan = { installedOffense: [], installedDefense: [], mastery: {} };
+
+    const BASICS_OFF = ['Uni_InsideZone', 'Uni_QuickSlants', 'Uni_FourVerts'];
+    const BASICS_DEF = ['Cover_2_Zone_Base', 'Cover_1_Robber', 'GoalLine_RunStuff'];
+
+    window.app_toggleInstallPlay = (key, side) => {
+        const list = side === 'offense' ? team.gameplan.installedOffense : team.gameplan.installedDefense;
+        const max = side === 'offense' ? 6 : 4;
+        const idx = list.indexOf(key);
+
+        if (idx > -1) {
+            list.splice(idx, 1);
+        } else {
+            if (list.length >= max) {
+                alert(`Playbook full! You can only install ${max} ${side} plays on your cafeteria napkin.`);
+                return;
+            }
+            list.push(key);
+            if (!team.gameplan.mastery[key]) team.gameplan.mastery[key] = 35; // Initial familiarity
+        }
+        renderPlaybookManager(gameState);
+        saveGameState();
+    };
+
+    container.innerHTML = `
+        <div class="space-y-4 text-xs font-sans">
+            <!-- Strategic Header -->
+            <div class="bg-slate-900 text-white p-3.5 rounded flex justify-between items-center shadow-sm">
+                <div>
+                    <h4 class="font-black text-sm uppercase tracking-wider text-amber-400">Cafeteria Napkin Playbook (Active Gameplan)</h4>
+                    <p class="text-slate-400 text-[11px] mt-0.5">Kids only execute installed plays. Unpracticed plays cause assignment hesitation; mastered plays execute with razor timing.</p>
+                </div>
+                <div class="text-right font-mono text-[11px]">
+                    <span class="bg-blue-900 text-blue-200 px-2 py-0.5 rounded border border-blue-700">Offense: ${team.gameplan.installedOffense.length}/6</span>
+                    <span class="bg-red-900 text-red-200 px-2 py-0.5 rounded border border-red-700 ml-1">Defense: ${team.gameplan.installedDefense.length}/4</span>
+                </div>
+            </div>
+
+            <!-- Offense Installed & Library -->
+            <div class="bg-white border border-slate-300 rounded p-3 shadow-sm">
+                <h5 class="font-black uppercase tracking-wider text-slate-800 border-b pb-1 mb-2">Offensive Gameplan (${team.gameplan.installedOffense.length}/6 Installed)</h5>
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
+                    ${Object.entries(Game.offensivePlaybook || {}).filter(([k]) => k !== 'Punt_Punt').map(([key, play]) => {
+                        const isBasic = BASICS_OFF.includes(key);
+                        const isInstalled = team.gameplan.installedOffense.includes(key);
+                        const mastery = team.gameplan.mastery[key] || (isBasic ? 85 : 35);
+
+                        let color = mastery >= 75 ? 'bg-emerald-500' : (mastery >= 50 ? 'bg-amber-500' : 'bg-rose-500');
+
+                        return `
+                        <div class="p-2 rounded border ${isInstalled || isBasic ? 'border-blue-400 bg-blue-50/40' : 'border-slate-200 bg-slate-50'} flex flex-col justify-between">
+                            <div>
+                                <div class="flex justify-between items-start">
+                                    <span class="font-bold text-slate-900 truncate">${key.replace('Uni_', '').replace('PA_', 'PA ')}</span>
+                                    ${isBasic ? '<span class="text-[9px] bg-slate-200 text-slate-700 font-bold px-1 rounded uppercase">Basics</span>' : (isInstalled ? '<span class="text-[9px] bg-blue-600 text-white font-bold px-1 rounded uppercase">Active</span>' : '')}
+                                </div>
+                                <div class="mt-1 flex items-center justify-between text-[10px] text-slate-500">
+                                    <span>Mastery: <b class="text-slate-800">${mastery}%</b></span>
+                                    <div class="w-16 bg-slate-200 rounded-full h-1.5 overflow-hidden">
+                                        <div class="${color} h-full" style="width: ${mastery}%"></div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="mt-2 pt-1 border-t border-slate-200 flex justify-end">
+                                ${isBasic ? '<span class="text-[10px] text-slate-400 italic">Universal Safety Net</span>' : `
+                                <button class="px-2 py-0.5 rounded text-[10px] font-bold uppercase ${isInstalled ? 'bg-rose-100 text-rose-700 hover:bg-rose-200' : 'bg-slate-900 text-white hover:bg-slate-800'}" onclick="app_toggleInstallPlay('${key}', 'offense')">
+                                    ${isInstalled ? 'Uninstall' : 'Install on Napkin'}
+                                </button>`}
+                            </div>
+                        </div>`;
+                    }).join('')}
+                </div>
+            </div>
+
+            <!-- Defense Installed & Library -->
+            <div class="bg-white border border-slate-300 rounded p-3 shadow-sm">
+                <h5 class="font-black uppercase tracking-wider text-slate-800 border-b pb-1 mb-2">Defensive Gameplan (${team.gameplan.installedDefense.length}/4 Installed)</h5>
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
+                    ${Object.entries(Game.defensivePlaybook || {}).filter(([k]) => k !== 'PuntReturn_Classic').map(([key, play]) => {
+                        const isBasic = BASICS_DEF.includes(key);
+                        const isInstalled = team.gameplan.installedDefense.includes(key);
+                        const mastery = team.gameplan.mastery[key] || (isBasic ? 85 : 35);
+                        let color = mastery >= 75 ? 'bg-emerald-500' : (mastery >= 50 ? 'bg-amber-500' : 'bg-rose-500');
+
+                        return `
+                        <div class="p-2 rounded border ${isInstalled || isBasic ? 'border-red-400 bg-red-50/40' : 'border-slate-200 bg-slate-50'} flex flex-col justify-between">
+                            <div>
+                                <div class="flex justify-between items-start">
+                                    <span class="font-bold text-slate-900 truncate">${play.name || key}</span>
+                                    ${isBasic ? '<span class="text-[9px] bg-slate-200 text-slate-700 font-bold px-1 rounded uppercase">Basics</span>' : (isInstalled ? '<span class="text-[9px] bg-red-600 text-white font-bold px-1 rounded uppercase">Active</span>' : '')}
+                                </div>
+                                <div class="mt-1 flex items-center justify-between text-[10px] text-slate-500">
+                                    <span>Mastery: <b class="text-slate-800">${mastery}%</b></span>
+                                    <div class="w-16 bg-slate-200 rounded-full h-1.5 overflow-hidden">
+                                        <div class="${color} h-full" style="width: ${mastery}%"></div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="mt-2 pt-1 border-t border-slate-200 flex justify-end">
+                                ${isBasic ? '<span class="text-[10px] text-slate-400 italic">Universal Safety Net</span>' : `
+                                <button class="px-2 py-0.5 rounded text-[10px] font-bold uppercase ${isInstalled ? 'bg-rose-100 text-rose-700 hover:bg-rose-200' : 'bg-slate-900 text-white hover:bg-slate-800'}" onclick="app_toggleInstallPlay('${key}', 'defense')">
+                                    ${isInstalled ? 'Uninstall' : 'Install on Napkin'}
+                                </button>`}
+                            </div>
+                        </div>`;
+                    }).join('')}
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+export function renderPracticeManager(gameState) {
+    const container = document.getElementById('practice-manager-container');
+    if (!container || !gameState?.playerTeam) return;
+
+    const team = gameState.playerTeam;
+    if (!team.gameplan) {
+        team.gameplan = {
+            weeklyPractice: 'chalk_talk',
+            installedOffense: [],
+            installedDefense: [],
+            mastery: {},
+            delegatePractice: false,
+            delegateGameplan: false,
+            gmDirective: 'COACH_AUTONOMY'
+        };
+    }
+
+    const coach = team.staff?.coach;
+    const isDelegated = !!team.gameplan.delegatePractice;
+    const directive = team.gameplan.gmDirective || 'COACH_AUTONOMY';
+    const currentPlan = team.gameplan.weeklyPractice || 'chalk_talk';
+
+    window.app_setPracticePlan = (plan) => {
+        if (team.gameplan.delegatePractice) return;
+        team.gameplan.weeklyPractice = plan;
+        saveGameState();
+        renderPracticeManager(gameState);
+    };
+
+    window.app_togglePracticeDelegation = (checked) => {
+        team.gameplan.delegatePractice = checked;
+        if (checked) {
+            import('./game/staff.js').then(s => {
+                team.gameplan.weeklyPractice = s.aiChooseWeeklyPractice(team, null, team.gameplan.gmDirective);
+                saveGameState();
+                renderPracticeManager(gameState);
+            }).catch(() => {});
+        } else {
+            saveGameState();
+            renderPracticeManager(gameState);
+        }
+    };
+
+    window.app_setGmDirective = (newDirective) => {
+        team.gameplan.gmDirective = newDirective;
+        if (team.gameplan.delegatePractice) {
+            import('./game/staff.js').then(s => {
+                team.gameplan.weeklyPractice = s.aiChooseWeeklyPractice(team, null, newDirective);
+                saveGameState();
+                renderPracticeManager(gameState);
+            }).catch(() => {});
+        } else {
+            saveGameState();
+            renderPracticeManager(gameState);
+        }
+    };
+
+    const plans = [
+        { key: 'chalk_talk', title: '📋 Cafeteria Napkins & Walk-Throughs', badge: 'Playbook Mastery', desc: 'Focus on route timing and assignment mastery (+15% familiarity gain on active plays). Young prospects gain Playbook IQ reps.' },
+        { key: 'conditioning', title: '🏃 Tire Pits & Sideline Tree Runs', badge: 'Conditioning', desc: 'Punishing physical conditioning. Increases player Stamina and Toughness; builds fourth-quarter closing endurance.' },
+        { key: 'scrimmage', title: '🧃 Two-Hand Touch & Freeze Pops', badge: 'Morale & Skills', desc: 'Light sandlot scrimmage followed by team freeze-pops. Accelerates recovery, builds chemistry, and sharpens catching/tackling hands.' },
+        { key: 'scouting', title: '🕵️ Spying on the Opponent at Recess', badge: 'Anti-Exploit Prep', desc: 'Watch your upcoming opponent practice to decode their go-to formation. Gives your defense a speed-reaction bonus on game day.' }
+    ];
+
+    container.innerHTML = `
+        <div class="space-y-4 text-xs font-sans">
+            <!-- Header & Front-Office Delegation Bar -->
+            <div class="bg-slate-900 text-white p-3.5 rounded flex flex-col md:flex-row justify-between items-start md:items-center gap-3 shadow-sm">
+                <div>
+                    <h4 class="font-black text-sm uppercase tracking-wider text-emerald-400">After-School Sandlot Practice Schedule</h4>
+                    <p class="text-slate-400 text-[11px] mt-0.5">Set weekly focus or delegate to Coach ${coach?.name || 'Coach'} according to your organizational directive.</p>
+                </div>
+                <div class="flex items-center gap-3 bg-slate-800 p-2 rounded border border-slate-700">
+                    <label class="flex items-center gap-2 cursor-pointer text-[11px] font-bold text-amber-400">
+                        <input type="checkbox" ${isDelegated ? 'checked' : ''} onchange="app_togglePracticeDelegation(this.checked)" class="rounded text-amber-500">
+                        <span>Delegate to Head Coach</span>
+                    </label>
+                </div>
+            </div>
+
+            <!-- GM Directives Policy Card -->
+            <div class="bg-white border border-slate-200 rounded p-3 shadow-sm flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
+                <div>
+                    <span class="font-black uppercase text-[10px] tracking-wider text-slate-500 block">General Manager Directive to Staff</span>
+                    <p class="text-[11px] text-slate-700">How Coach ${coach?.name || 'Coach'} prioritizes drills when managing autonomously.</p>
+                </div>
+                <select class="p-1.5 border border-slate-300 rounded font-bold text-slate-800 text-xs bg-slate-50 outline-none" onchange="app_setGmDirective(this.value)">
+                    <option value="COACH_AUTONOMY" ${directive === 'COACH_AUTONOMY' ? 'selected' : ''}>Full Coach Autonomy (Follows Coach's Biases)</option>
+                    <option value="WIN_NOW" ${directive === 'WIN_NOW' ? 'selected' : ''}>Win-Now (Prioritizes Recess Opponent Prep)</option>
+                    <option value="DEVELOP_YOUTH" ${directive === 'DEVELOP_YOUTH' ? 'selected' : ''}>Youth Development (Chalk Talks & Playbook IQ)</option>
+                    <option value="HARD_CONDITIONING" ${directive === 'HARD_CONDITIONING' ? 'selected' : ''}>Physical Grit (Tire Runs & Fourth-Quarter Stamina)</option>
+                </select>
+            </div>
+
+            ${isDelegated ? `
+            <div class="p-3 bg-amber-50 border border-amber-300 rounded text-amber-950 flex items-center justify-between">
+                <div>
+                    <span class="font-black text-xs uppercase block">🤖 Coach's Decision: ${plans.find(p => p.key === currentPlan)?.title}</span>
+                    <p class="text-[11px] text-amber-800 italic mt-0.5">"Running ${plans.find(p => p.key === currentPlan)?.badge} drills aligned with our directive. Discipline: ${coach?.ratings?.practiceDiscipline || 50}/100."</p>
+                </div>
+                <span class="text-[10px] bg-amber-200 text-amber-900 font-mono font-bold px-2 py-1 rounded">AUTOMATED</span>
+            </div>` : ''}
+
+            <!-- Practice Options Grid -->
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                ${plans.map(p => {
+                    const isSelected = p.key === currentPlan;
+                    const disabledClass = isDelegated ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer hover:border-slate-300';
+                    return `
+                    <div class="p-3.5 rounded border ${isSelected ? 'border-emerald-500 bg-emerald-50/50 shadow-sm' : 'border-slate-200 bg-white'} ${disabledClass} flex flex-col justify-between transition" onclick="app_setPracticePlan('${p.key}')">
+                        <div>
+                            <div class="flex justify-between items-start mb-1">
+                                <h5 class="font-black text-sm text-slate-900">${p.title}</h5>
+                                <span class="text-[9px] font-bold px-1.5 py-0.5 rounded uppercase ${isSelected ? 'bg-emerald-600 text-white' : 'bg-slate-100 text-slate-600'}">${p.badge}</span>
+                            </div>
+                            <p class="text-slate-600 text-[11px] leading-relaxed mt-1">${p.desc}</p>
+                        </div>
+                        <div class="mt-3 pt-2 border-t border-slate-100 flex justify-between items-center">
+                            <span class="text-[10px] font-bold ${isSelected ? 'text-emerald-700' : 'text-slate-400'}">${isSelected ? '✓ Active Plan' : (isDelegated ? 'Controlled by Coach' : 'Click to select')}</span>
+                            <input type="radio" name="practice_choice" ${isSelected ? 'checked' : ''} ${isDelegated ? 'disabled' : ''} class="text-emerald-600">
+                        </div>
+                    </div>`;
+                }).join('')}
+            </div>
+        </div>
+    `;
 }
 
 export function setupFormationListeners() {

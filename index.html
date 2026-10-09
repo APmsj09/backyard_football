@@ -127,44 +127,59 @@
 
         <section id="team-creation-screen" class="screen hidden flex flex-col items-center justify-center h-full">
             <!-- Handled dynamically by main.js -->
-            <div></div> 
+            <div></div>
         </section>
 
         <section id="team-select-screen" class="screen hidden h-full flex flex-col overflow-hidden bg-slate-100">
-            <div class="p-4 bg-slate-900 text-white shrink-0 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 border-b border-slate-700">
+            <div
+                class="p-4 bg-slate-900 text-white shrink-0 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 border-b border-slate-700">
                 <div>
                     <h2 class="text-2xl font-black uppercase tracking-wider">Take Over a Franchise</h2>
-                    <p class="text-xs text-slate-400">4 years of backyard history have concluded. Select an established team to lead into the Year 5 Rookie Draft.</p>
+                    <p class="text-xs text-slate-400">4 years of backyard history have concluded. Select an established
+                        team to lead into the Year 5 Rookie Draft.</p>
                 </div>
                 <div class="flex gap-2">
-                    <button id="filter-tier-all" class="px-3 py-1 bg-emerald-600 text-white text-xs font-bold rounded-sm">All (20)</button>
-                    <button id="filter-tier-1" class="px-3 py-1 bg-slate-800 text-slate-300 text-xs font-bold rounded-sm hover:text-white">Tier 1 (10)</button>
-                    <button id="filter-tier-2" class="px-3 py-1 bg-slate-800 text-slate-300 text-xs font-bold rounded-sm hover:text-white">Tier 2 (10)</button>
+                    <button id="filter-tier-all"
+                        class="px-3 py-1 bg-emerald-600 text-white text-xs font-bold rounded-sm">All (20)</button>
+                    <button id="filter-tier-1"
+                        class="px-3 py-1 bg-slate-800 text-slate-300 text-xs font-bold rounded-sm hover:text-white">Tier
+                        1 (10)</button>
+                    <button id="filter-tier-2"
+                        class="px-3 py-1 bg-slate-800 text-slate-300 text-xs font-bold rounded-sm hover:text-white">Tier
+                        2 (10)</button>
                 </div>
             </div>
-            <div id="team-select-grid" class="flex-grow overflow-y-auto p-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 min-h-0"></div>
+            <div id="team-select-grid"
+                class="flex-grow overflow-y-auto p-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 min-h-0">
+            </div>
         </section>
 
         <section id="draft-screen" class="screen hidden h-full flex flex-col overflow-hidden">
             <!-- Header & War Room Telemetry -->
-            <div id="draft-header" class="flex-shrink-0 p-3 bg-slate-900 text-white rounded-sm shadow-sm mb-2 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 border-b border-slate-700">
+            <div id="draft-header"
+                class="flex-shrink-0 p-3 bg-slate-900 text-white rounded-sm shadow-sm mb-2 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 border-b border-slate-700">
                 <div>
                     <div class="flex items-center gap-3">
                         <h2 class="text-2xl font-display tracking-wide">Season <span id="draft-year">?</span> Draft</h2>
-                        <span id="draft-user-picks" class="text-[11px] bg-slate-800 text-amber-400 font-mono px-2 py-0.5 rounded border border-slate-700">Your Picks: Calculating...</span>
+                        <span id="draft-user-picks"
+                            class="text-[11px] bg-slate-800 text-amber-400 font-mono px-2 py-0.5 rounded border border-slate-700">Your
+                            Picks: Calculating...</span>
                     </div>
                     <p class="text-xs text-slate-400">War Room: Select future franchise stars.</p>
                 </div>
                 <div class="flex items-center gap-3 bg-slate-800 px-4 py-1.5 rounded border border-slate-700">
                     <span class="text-[10px] text-slate-400 uppercase tracking-widest font-bold">On The Clock:</span>
                     <span class="text-xl font-black text-white" id="draft-pick-number">#1</span>
-                    <span class="text-sm text-amber-400 font-bold truncate max-w-[160px]" id="draft-picking-team">?</span>
+                    <span class="text-sm text-amber-400 font-bold truncate max-w-[160px]"
+                        id="draft-picking-team">?</span>
                 </div>
             </div>
 
             <!-- Recent Picks Ticker -->
-            <div id="draft-recent-ticker" class="flex-shrink-0 mb-2 py-1.5 px-3 bg-slate-800 border border-slate-700 rounded text-xs text-slate-300 flex items-center gap-2 overflow-x-auto whitespace-nowrap">
-                <span class="text-amber-400 font-bold uppercase text-[10px] tracking-wider shrink-0">Recent Picks:</span>
+            <div id="draft-recent-ticker"
+                class="flex-shrink-0 mb-2 py-1.5 px-3 bg-slate-800 border border-slate-700 rounded text-xs text-slate-300 flex items-center gap-2 overflow-x-auto whitespace-nowrap">
+                <span class="text-amber-400 font-bold uppercase text-[10px] tracking-wider shrink-0">Recent
+                    Picks:</span>
                 <div id="draft-ticker-items" class="flex items-center gap-3 text-slate-300 font-mono text-[11px]">
                     <span class="text-slate-500 italic">Draft commencing...</span>
                 </div>
@@ -172,24 +187,34 @@
 
             <div class="flex-grow grid grid-cols-1 lg:grid-cols-12 gap-3 min-h-0">
                 <!-- Left Column (8 cols): Draft Board with Sub-Views -->
-                <div class="lg:col-span-8 bg-white rounded-sm shadow-sm flex flex-col overflow-hidden border border-slate-300">
+                <div
+                    class="lg:col-span-8 bg-white rounded-sm shadow-sm flex flex-col overflow-hidden border border-slate-300">
                     <!-- Main Navigation Tabs -->
                     <div class="p-2 border-b border-slate-200 flex items-center justify-between bg-slate-900 shrink-0">
                         <div class="flex items-center gap-1.5">
-                            <button class="draft-tab-btn active px-3 py-1.5 rounded text-xs font-bold text-white bg-amber-600 transition" data-draft-tab="pool">Draft Board</button>
-                            <button class="draft-tab-btn px-3 py-1.5 rounded text-xs font-bold text-slate-400 hover:text-white transition" data-draft-tab="history">Full Pick History</button>
-                            <button class="draft-tab-btn px-3 py-1.5 rounded text-xs font-bold text-slate-400 hover:text-white transition" data-draft-tab="teams">League Rosters</button>
+                            <button
+                                class="draft-tab-btn active px-3 py-1.5 rounded text-xs font-bold text-white bg-amber-600 transition"
+                                data-draft-tab="pool">Draft Board</button>
+                            <button
+                                class="draft-tab-btn px-3 py-1.5 rounded text-xs font-bold text-slate-400 hover:text-white transition"
+                                data-draft-tab="history">Full Pick History</button>
+                            <button
+                                class="draft-tab-btn px-3 py-1.5 rounded text-xs font-bold text-slate-400 hover:text-white transition"
+                                data-draft-tab="teams">League Rosters</button>
                         </div>
                     </div>
 
                     <!-- Tab 1: Available Prospects -->
                     <div id="draft-tab-pool" class="draft-tab-content flex flex-col flex-grow overflow-hidden">
                         <!-- Filters & Stat View Tabs -->
-                        <div class="p-2.5 border-b border-slate-200 flex flex-wrap justify-between items-center bg-slate-50 gap-2 shrink-0">
+                        <div
+                            class="p-2.5 border-b border-slate-200 flex flex-wrap justify-between items-center bg-slate-50 gap-2 shrink-0">
                             <!-- Left: Search & Pos Filter -->
                             <div class="flex items-center gap-2">
-                                <input type="text" id="draft-search" placeholder="Search prospects..." class="p-1.5 border border-slate-300 rounded text-xs w-36 outline-none focus:border-amber-500">
-                                <select id="draft-filter-pos" class="p-1.5 border border-slate-300 rounded text-xs bg-white outline-none">
+                                <input type="text" id="draft-search" placeholder="Search prospects..."
+                                    class="p-1.5 border border-slate-300 rounded text-xs w-36 outline-none focus:border-amber-500">
+                                <select id="draft-filter-pos"
+                                    class="p-1.5 border border-slate-300 rounded text-xs bg-white outline-none">
                                     <option value="">All Positions</option>
                                     <option value="QB">QB</option>
                                     <option value="RB">RB</option>
@@ -203,18 +228,27 @@
                             </div>
 
                             <!-- Right: Stat View Tabs -->
-                            <div id="draft-view-tabs" class="flex bg-slate-200 rounded p-0.5 border border-slate-300 text-xs font-bold">
-                                <button class="draft-view-btn active px-2.5 py-1 rounded bg-white text-slate-900 shadow-sm" data-view="overview">Overview</button>
-                                <button class="draft-view-btn px-2.5 py-1 rounded text-slate-600 hover:text-slate-900" data-view="physicals">Physicals</button>
-                                <button class="draft-view-btn px-2.5 py-1 rounded text-slate-600 hover:text-slate-900" data-view="skills">Skills</button>
-                                <button class="draft-view-btn px-2.5 py-1 rounded text-amber-700 hover:text-amber-900 flex items-center gap-1" data-view="watchlist">★ Watchlist (<span id="draft-watchlist-count">0</span>)</button>
+                            <div id="draft-view-tabs"
+                                class="flex bg-slate-200 rounded p-0.5 border border-slate-300 text-xs font-bold">
+                                <button
+                                    class="draft-view-btn active px-2.5 py-1 rounded bg-white text-slate-900 shadow-sm"
+                                    data-view="overview">Overview</button>
+                                <button class="draft-view-btn px-2.5 py-1 rounded text-slate-600 hover:text-slate-900"
+                                    data-view="physicals">Physicals</button>
+                                <button class="draft-view-btn px-2.5 py-1 rounded text-slate-600 hover:text-slate-900"
+                                    data-view="skills">Skills</button>
+                                <button
+                                    class="draft-view-btn px-2.5 py-1 rounded text-amber-700 hover:text-amber-900 flex items-center gap-1"
+                                    data-view="watchlist">★ Watchlist (<span
+                                        id="draft-watchlist-count">0</span>)</button>
                             </div>
                         </div>
 
                         <!-- The Clean Prospect Table -->
                         <div class="overflow-auto flex-grow">
                             <table class="min-w-full text-xs">
-                                <thead id="draft-pool-thead" class="bg-slate-100 text-slate-700 sticky top-0 z-10 shadow-sm uppercase font-bold text-[10px] select-none">
+                                <thead id="draft-pool-thead"
+                                    class="bg-slate-100 text-slate-700 sticky top-0 z-10 shadow-sm uppercase font-bold text-[10px] select-none">
                                     <!-- Dynamic header injected by ui.js based on current view tab -->
                                 </thead>
                                 <tbody id="draft-pool-tbody" class="divide-y divide-slate-100 font-mono"></tbody>
@@ -223,15 +257,19 @@
                     </div>
 
                     <!-- Tab 2: Pick History -->
-                    <div id="draft-tab-history" class="draft-tab-content hidden flex-grow overflow-y-auto p-4 bg-slate-50">
+                    <div id="draft-tab-history"
+                        class="draft-tab-content hidden flex-grow overflow-y-auto p-4 bg-slate-50">
                         <div id="draft-history-list" class="space-y-1.5"></div>
                     </div>
 
                     <!-- Tab 3: League Rosters -->
-                    <div id="draft-tab-teams" class="draft-tab-content hidden flex-grow flex flex-col overflow-hidden bg-slate-50">
+                    <div id="draft-tab-teams"
+                        class="draft-tab-content hidden flex-grow flex flex-col overflow-hidden bg-slate-50">
                         <div class="p-3 bg-white border-b border-slate-200 shrink-0">
-                            <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Select Team</label>
-                            <select id="draft-team-selector" class="w-full p-2 border border-slate-300 rounded font-bold text-slate-800 outline-none"></select>
+                            <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Select
+                                Team</label>
+                            <select id="draft-team-selector"
+                                class="w-full p-2 border border-slate-300 rounded font-bold text-slate-800 outline-none"></select>
                         </div>
                         <div id="draft-team-roster" class="p-4 overflow-y-auto flex-grow"></div>
                     </div>
@@ -243,35 +281,54 @@
                     <div class="bg-slate-50 rounded-sm shadow-sm p-3 border border-slate-300 shrink-0 flex flex-col">
                         <div class="flex justify-between items-center mb-1.5 border-b border-slate-200 pb-1">
                             <div class="flex items-center gap-1.5">
-                                <h4 class="text-xs font-bold uppercase tracking-widest text-slate-700">Prospect Scout</h4>
+                                <h4 class="text-xs font-bold uppercase tracking-widest text-slate-700">Prospect Scout
+                                </h4>
                                 <div id="dossier-subtabs" class="flex gap-1 text-[10px] font-bold">
-                                    <button class="dossier-tab-btn active px-1.5 py-0.5 rounded bg-slate-900 text-white" data-dtab="overview" onclick="window.app_switchDossierTab('overview')">Card</button>
-                                    <button class="dossier-tab-btn px-1.5 py-0.5 rounded bg-slate-200 text-slate-700 hover:bg-slate-300" data-dtab="matrix" onclick="window.app_switchDossierTab('matrix')">Suitability</button>
-                                    <button class="dossier-tab-btn px-1.5 py-0.5 rounded bg-slate-200 text-slate-700 hover:bg-slate-300" data-dtab="bio" onclick="window.app_switchDossierTab('bio')">Lore</button>
+                                    <button class="dossier-tab-btn active px-1.5 py-0.5 rounded bg-slate-900 text-white"
+                                        data-dtab="overview"
+                                        onclick="window.app_switchDossierTab('overview')">Card</button>
+                                    <button
+                                        class="dossier-tab-btn px-1.5 py-0.5 rounded bg-slate-200 text-slate-700 hover:bg-slate-300"
+                                        data-dtab="matrix"
+                                        onclick="window.app_switchDossierTab('matrix')">Suitability</button>
+                                    <button
+                                        class="dossier-tab-btn px-1.5 py-0.5 rounded bg-slate-200 text-slate-700 hover:bg-slate-300"
+                                        data-dtab="bio" onclick="window.app_switchDossierTab('bio')">Lore</button>
                                 </div>
                             </div>
                             <span id="dossier-est-pos" class="text-[10px] font-bold text-slate-500"></span>
                         </div>
                         <div id="selected-player-card">
-                            <p class="text-slate-400 text-xs italic text-center py-4">Select a prospect from the board to examine report.</p>
+                            <p class="text-slate-400 text-xs italic text-center py-4">Select a prospect from the board
+                                to examine report.</p>
                         </div>
-                        <button id="draft-player-btn" class="btn bg-emerald-700 hover:bg-emerald-800 text-white w-full font-bold py-2 px-3 rounded mt-2 shadow-sm disabled:bg-slate-200 disabled:border-slate-300 disabled:text-slate-400 disabled:shadow-none disabled:cursor-not-allowed transition-all uppercase tracking-wider border border-emerald-900 text-xs" disabled>
+                        <button id="draft-player-btn"
+                            class="btn bg-emerald-700 hover:bg-emerald-800 text-white w-full font-bold py-2 px-3 rounded mt-2 shadow-sm disabled:bg-slate-200 disabled:border-slate-300 disabled:text-slate-400 disabled:shadow-none disabled:cursor-not-allowed transition-all uppercase tracking-wider border border-emerald-900 text-xs"
+                            disabled>
                             Draft Player
                         </button>
                     </div>
 
                     <!-- Team War Room (Tabbed View: Full Roster vs. 2-Way Depth & Quality) -->
-                    <div class="bg-white rounded-sm shadow-sm flex-grow flex flex-col overflow-hidden border border-slate-300 min-h-0">
+                    <div
+                        class="bg-white rounded-sm shadow-sm flex-grow flex flex-col overflow-hidden border border-slate-300 min-h-0">
                         <div class="flex justify-between items-center p-2 border-b bg-slate-100 shrink-0">
                             <div class="flex items-center gap-1">
-                                <button id="draft-tab-roster-btn" class="px-2.5 py-1 text-xs font-bold rounded bg-slate-900 text-white transition-all shadow-sm" onclick="window.app_switchDraftTeamTab('roster')">
+                                <button id="draft-tab-roster-btn"
+                                    class="px-2.5 py-1 text-xs font-bold rounded bg-slate-900 text-white transition-all shadow-sm"
+                                    onclick="window.app_switchDraftTeamTab('roster')">
                                     📋 Roster (<span id="roster-count">0/18</span>)
                                 </button>
-                                <button id="draft-tab-needs-btn" class="px-2.5 py-1 text-xs font-bold rounded bg-slate-200 text-slate-700 hover:bg-slate-300 transition-all" onclick="window.app_switchDraftTeamTab('needs')">
+                                <button id="draft-tab-needs-btn"
+                                    class="px-2.5 py-1 text-xs font-bold rounded bg-slate-200 text-slate-700 hover:bg-slate-300 transition-all"
+                                    onclick="window.app_switchDraftTeamTab('needs')">
                                     ⚡ 2-Way Depth & Quality
                                 </button>
                             </div>
-                            <button id="draft-popout-btn" class="text-slate-600 hover:text-slate-900 bg-white border border-slate-300 px-2 py-0.5 rounded text-[11px] font-bold flex items-center gap-1 shadow-sm transition" title="Open full-screen roster and depth analysis" onclick="window.app_openDraftTeamModal()">
+                            <button id="draft-popout-btn"
+                                class="text-slate-600 hover:text-slate-900 bg-white border border-slate-300 px-2 py-0.5 rounded text-[11px] font-bold flex items-center gap-1 shadow-sm transition"
+                                title="Open full-screen roster and depth analysis"
+                                onclick="window.app_openDraftTeamModal()">
                                 <span>⛶</span> <span class="hidden sm:inline">Expand</span>
                             </button>
                         </div>
@@ -292,21 +349,29 @@
 
         <section id="offseason-fa-screen" class="screen hidden h-full flex flex-col overflow-hidden bg-slate-100">
             <!-- Header -->
-            <div class="flex-shrink-0 p-3.5 bg-slate-900 text-white flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 border-b border-slate-700 shadow-sm">
+            <div
+                class="flex-shrink-0 p-3.5 bg-slate-900 text-white flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 border-b border-slate-700 shadow-sm">
                 <div>
                     <div class="flex items-center gap-2">
                         <span class="text-xl">🤝</span>
-                        <h2 class="text-xl font-black uppercase tracking-wider text-amber-400">Post-Draft Free Agency War Room</h2>
-                        <span id="fa-round-indicator" class="text-xs bg-slate-800 text-slate-200 font-bold px-2 py-0.5 rounded border border-slate-700 font-mono">Day 1 of 3</span>
+                        <h2 class="text-xl font-black uppercase tracking-wider text-amber-400">Post-Draft Free Agency
+                            War Room</h2>
+                        <span id="fa-round-indicator"
+                            class="text-xs bg-slate-800 text-slate-200 font-bold px-2 py-0.5 rounded border border-slate-700 font-mono">Day
+                            1 of 3</span>
                     </div>
-                    <p class="text-[11px] text-slate-400 mt-0.5">Place role & token bids on neighborhood talent. Bids across all 20 teams resolve at the end of each day.</p>
+                    <p class="text-[11px] text-slate-400 mt-0.5">Place role & token bids on neighborhood talent. Bids
+                        across all 20 teams resolve at the end of each day.</p>
                 </div>
                 <div class="flex items-center gap-3">
                     <div class="text-right text-xs bg-slate-800 px-3 py-1.5 rounded border border-slate-700">
                         <span class="text-slate-400 text-[10px] uppercase font-bold block">Budget & Roster</span>
-                        <span class="font-bold text-white"><span id="fa-user-tokens">3</span> Tokens • <span id="fa-user-roster-count">0/18</span></span>
+                        <span class="font-bold text-white"><span id="fa-user-tokens">3</span> Tokens • <span
+                                id="fa-user-roster-count">0/18</span></span>
                     </div>
-                    <button id="fa-advance-day-btn" class="bg-emerald-700 hover:bg-emerald-800 text-white font-bold px-4 py-2 rounded text-xs uppercase tracking-wider shadow-sm transition" onclick="app.advanceOffseasonFADay()">
+                    <button id="fa-advance-day-btn"
+                        class="bg-emerald-700 hover:bg-emerald-800 text-white font-bold px-4 py-2 rounded text-xs uppercase tracking-wider shadow-sm transition"
+                        onclick="app.advanceOffseasonFADay()">
                         Submit Bids & Advance Day →
                     </button>
                 </div>
@@ -315,10 +380,14 @@
             <!-- Main Content Grid -->
             <div class="flex-grow grid grid-cols-1 lg:grid-cols-12 gap-3 p-3 overflow-hidden min-h-0">
                 <!-- Available Prospects Pool (8 cols) -->
-                <div class="lg:col-span-8 bg-white border border-slate-300 rounded-sm shadow-sm flex flex-col overflow-hidden min-h-0">
+                <div
+                    class="lg:col-span-8 bg-white border border-slate-300 rounded-sm shadow-sm flex flex-col overflow-hidden min-h-0">
                     <div class="p-2 border-b border-slate-200 bg-slate-50 flex justify-between items-center shrink-0">
-                        <span class="font-bold text-xs uppercase tracking-wider text-slate-700">Available Neighborhood Prospects</span>
-                        <select id="fa-minigame-filter-pos" class="p-1 border border-slate-300 rounded text-xs bg-white font-bold text-slate-700 outline-none" onchange="app.renderFAPool()">
+                        <span class="font-bold text-xs uppercase tracking-wider text-slate-700">Available Neighborhood
+                            Prospects</span>
+                        <select id="fa-minigame-filter-pos"
+                            class="p-1 border border-slate-300 rounded text-xs bg-white font-bold text-slate-700 outline-none"
+                            onchange="app.renderFAPool()">
                             <option value="">All Positions</option>
                             <option value="QB">QB</option>
                             <option value="RB">RB</option>
@@ -336,21 +405,29 @@
                 <!-- Active Bids & Day Recap (4 cols) -->
                 <div class="lg:col-span-4 flex flex-col gap-3 min-h-0">
                     <!-- Your Active Day Bids -->
-                    <div class="bg-white border border-slate-300 rounded-sm shadow-sm p-3 flex flex-col shrink-0 max-h-56">
+                    <div
+                        class="bg-white border border-slate-300 rounded-sm shadow-sm p-3 flex flex-col shrink-0 max-h-56">
                         <div class="flex justify-between items-center border-b border-slate-200 pb-1 mb-2">
-                            <h4 class="font-bold text-xs uppercase tracking-wider text-slate-800">Your Pending Bids Today</h4>
-                            <span id="fa-bids-count" class="text-[10px] font-mono text-slate-500 font-bold">0 Pending</span>
+                            <h4 class="font-bold text-xs uppercase tracking-wider text-slate-800">Your Pending Bids
+                                Today</h4>
+                            <span id="fa-bids-count" class="text-[10px] font-mono text-slate-500 font-bold">0
+                                Pending</span>
                         </div>
                         <div id="fa-pending-bids-list" class="space-y-1.5 overflow-y-auto flex-grow text-xs">
-                            <p class="text-slate-400 italic text-center py-4 text-[11px]">No bids placed yet today. Click "Bid" on any prospect to make an offer.</p>
+                            <p class="text-slate-400 italic text-center py-4 text-[11px]">No bids placed yet today.
+                                Click "Bid" on any prospect to make an offer.</p>
                         </div>
                     </div>
 
                     <!-- Daily News & Signings Ticker -->
-                    <div class="bg-white border border-slate-300 rounded-sm shadow-sm p-3 flex flex-col flex-grow overflow-hidden min-h-0">
-                        <h4 class="font-bold text-xs uppercase tracking-wider text-slate-800 border-b border-slate-200 pb-1 mb-2">Neighborhood Wire & Signings</h4>
+                    <div
+                        class="bg-white border border-slate-300 rounded-sm shadow-sm p-3 flex flex-col flex-grow overflow-hidden min-h-0">
+                        <h4
+                            class="font-bold text-xs uppercase tracking-wider text-slate-800 border-b border-slate-200 pb-1 mb-2">
+                            Neighborhood Wire & Signings</h4>
                         <div id="fa-daily-wire-list" class="space-y-1.5 overflow-y-auto flex-grow text-xs">
-                            <p class="text-slate-400 italic text-center py-6 text-[11px]">Free Agency commences on Day 1. Offers will be reviewed by players at the end of each day.</p>
+                            <p class="text-slate-400 italic text-center py-6 text-[11px]">Free Agency commences on Day
+                                1. Offers will be reviewed by players at the end of each day.</p>
                         </div>
                     </div>
                 </div>
@@ -412,8 +489,8 @@
                             class="text-base mr-1">📜</span> History</button>
                     <button class="tab-button whitespace-nowrap" data-tab="free-agents"><span
                             class="text-base mr-1">🏃</span> Free Agents</button>
-                    <button class="tab-button whitespace-nowrap" data-tab="staff"><span
-                            class="text-base mr-1">👔</span> Staff</button>
+                    <button class="tab-button whitespace-nowrap" data-tab="staff"><span class="text-base mr-1">👔</span>
+                        Staff</button>
                     <button class="tab-button relative whitespace-nowrap" data-tab="messages">
                         <span class="text-base mr-1">📩</span> Messages
                         <span id="messages-notification-dot"
@@ -434,18 +511,22 @@
                         <div
                             class="p-3 border-b border-gray-100 bg-gray-50 flex flex-wrap gap-2 items-center justify-between shrink-0">
                             <h3 class="text-xl font-bold text-gray-800 mr-4">Strategy</h3>
-                            <div id="depth-chart-subtabs" class="flex bg-white rounded-lg p-1 border shadow-sm">
+                            <div id="depth-chart-subtabs" class="flex bg-white rounded-lg p-1 border shadow-sm text-xs">
                                 <button
-                                    class="depth-chart-tab active px-4 py-1.5 rounded-md text-sm font-semibold transition-colors"
+                                    class="depth-chart-tab active px-3 py-1.5 rounded-md font-semibold transition-colors"
                                     data-sub-tab="offense">Offense</button>
-                                <button
-                                    class="depth-chart-tab px-4 py-1.5 rounded-md text-sm font-semibold transition-colors"
+                                <button class="depth-chart-tab px-3 py-1.5 rounded-md font-semibold transition-colors"
                                     data-sub-tab="defense">Defense</button>
                                 <button
-                                    class="depth-chart-tab px-4 py-1.5 rounded-md text-sm font-semibold transition-colors"
+                                    class="depth-chart-tab px-3 py-1.5 rounded-md font-semibold transition-colors bg-blue-50 text-blue-900 border border-blue-200"
+                                    data-sub-tab="playbook">📖 Playbook</button>
+                                <button
+                                    class="depth-chart-tab px-3 py-1.5 rounded-md font-semibold transition-colors bg-emerald-50 text-emerald-900 border border-emerald-200"
+                                    data-sub-tab="practice">🏋️ Practice</button>
+                                <button class="depth-chart-tab px-3 py-1.5 rounded-md font-semibold transition-colors"
                                     data-sub-tab="overalls">Ratings</button>
                                 <button
-                                    class="depth-chart-tab px-4 py-1.5 rounded-md text-sm font-semibold transition-colors text-amber-700 bg-amber-50 border border-amber-200"
+                                    class="depth-chart-tab px-3 py-1.5 rounded-md font-semibold transition-colors text-amber-700 bg-amber-50 border border-amber-200"
                                     data-sub-tab="depth-order">Depth Order</button>
                             </div>
                         </div>
@@ -465,8 +546,7 @@
                                         OFFENSE</div>
                                     <div id="offense-visual-field" class="w-full h-full relative"></div>
                                 </div>
-                                <div
-                                    class="bg-white p-4 rounded-lg border shadow-sm flex flex-col shrink-0 min-h-0">
+                                <div class="bg-white p-4 rounded-lg border shadow-sm flex flex-col shrink-0 min-h-0">
                                     <h4 class="font-bold text-gray-700 mb-2 shrink-0">Deployment & Roster Telemetry</h4>
                                     <div id="offense-bench-table" class="w-full overflow-x-auto min-h-0 pb-6"></div>
                                 </div>
@@ -486,8 +566,7 @@
                                         DEFENSE</div>
                                     <div id="defense-visual-field" class="w-full h-full relative"></div>
                                 </div>
-                                <div
-                                    class="bg-white p-4 rounded-lg border shadow-sm flex flex-col shrink-0 min-h-0">
+                                <div class="bg-white p-4 rounded-lg border shadow-sm flex flex-col shrink-0 min-h-0">
                                     <h4 class="font-bold text-gray-700 mb-2 shrink-0">Deployment & Roster Telemetry</h4>
                                     <div id="defense-bench-table" class="w-full overflow-x-auto min-h-0 pb-6"></div>
                                 </div>
@@ -496,6 +575,10 @@
                             <div id="positional-overalls-container" class="depth-chart-sub-pane hidden flex-grow"></div>
                             <div id="depth-order-container"
                                 class="depth-chart-sub-pane hidden h-full flex-col overflow-hidden"></div>
+                            <div id="playbook-manager-container"
+                                class="depth-chart-sub-pane hidden flex-grow overflow-y-auto"></div>
+                            <div id="practice-manager-container"
+                                class="depth-chart-sub-pane hidden flex-grow overflow-y-auto"></div>
                         </div>
                     </div>
 
@@ -542,13 +625,17 @@
                     </div>
 
                     <div id="tab-content-free-agents" class="tab-pane hidden flex flex-col h-full min-h-0">
-                        <div class="p-3 border-b border-slate-200 bg-slate-50 flex flex-wrap gap-2 items-center justify-between shrink-0">
+                        <div
+                            class="p-3 border-b border-slate-200 bg-slate-50 flex flex-wrap gap-2 items-center justify-between shrink-0">
                             <div>
-                                <h3 class="text-lg font-black uppercase tracking-wider text-slate-800">Park Free Agents & Walk-Ons</h3>
-                                <p class="text-[11px] text-slate-500">Unsigned neighborhood talent ready to sign contracts and fill out roster depth.</p>
+                                <h3 class="text-lg font-black uppercase tracking-wider text-slate-800">Park Free Agents
+                                    & Walk-Ons</h3>
+                                <p class="text-[11px] text-slate-500">Unsigned neighborhood talent ready to sign
+                                    contracts and fill out roster depth.</p>
                             </div>
                             <div class="flex items-center gap-2">
-                                <select id="fa-filter-pos" class="p-1.5 border border-slate-300 rounded text-xs bg-white font-bold text-slate-700 outline-none">
+                                <select id="fa-filter-pos"
+                                    class="p-1.5 border border-slate-300 rounded text-xs bg-white font-bold text-slate-700 outline-none">
                                     <option value="">All Positions</option>
                                     <option value="QB">QB</option>
                                     <option value="RB">RB</option>
@@ -559,7 +646,9 @@
                                     <option value="LB">LB</option>
                                     <option value="DB">DB</option>
                                 </select>
-                                <button class="bg-emerald-700 hover:bg-emerald-800 text-white font-bold px-3 py-1.5 rounded text-xs uppercase tracking-wider shadow-sm transition" onclick="app.autoFillRoster()">
+                                <button
+                                    class="bg-emerald-700 hover:bg-emerald-800 text-white font-bold px-3 py-1.5 rounded text-xs uppercase tracking-wider shadow-sm transition"
+                                    onclick="app.autoFillRoster()">
                                     ⚡ Auto-Fill Walk-Ons (14)
                                 </button>
                             </div>
@@ -584,7 +673,8 @@
                 <!-- Away Team (Left) -->
                 <div class="flex items-center justify-start gap-4 w-1/3 pl-4">
                     <div class="text-right flex flex-col items-end">
-                        <h2 id="sim-away-team" class="text-xl font-bold text-gray-200 leading-tight truncate max-w-[140px]">AWAY</h2>
+                        <h2 id="sim-away-team"
+                            class="text-xl font-bold text-gray-200 leading-tight truncate max-w-[140px]">AWAY</h2>
                         <div id="sim-banner-defense"
                             class="mt-1 bg-red-900/80 text-red-200 text-[10px] px-2 py-0.5 rounded border border-red-700 font-bold uppercase tracking-tight truncate max-w-[140px]">
                             DEFENSE
@@ -595,16 +685,20 @@
 
                 <!-- Game Status (Center) -->
                 <div class="flex flex-col items-center justify-center w-1/3 text-center">
-                    <div id="sim-game-drive" class="text-amber-400 font-mono font-bold text-sm tracking-widest">Q1 | 7:00</div>
+                    <div id="sim-game-drive" class="text-amber-400 font-mono font-bold text-sm tracking-widest">Q1 |
+                        7:00</div>
                     <div id="sim-game-down" class="text-white font-black text-base tracking-wider mt-0.5">1 & 10</div>
-                    <div id="sim-possession" class="text-[11px] text-slate-400 font-semibold truncate max-w-[180px] mt-0.5">🏈 Possession</div>
+                    <div id="sim-possession"
+                        class="text-[11px] text-slate-400 font-semibold truncate max-w-[180px] mt-0.5">🏈 Possession
+                    </div>
                 </div>
 
                 <!-- Home Team (Right) -->
                 <div class="flex items-center justify-end gap-4 w-1/3 pr-4">
                     <div id="sim-home-score" class="text-4xl font-display text-white drop-shadow-md">0</div>
                     <div class="text-left flex flex-col items-start">
-                        <h2 id="sim-home-team" class="text-xl font-bold text-gray-200 leading-tight truncate max-w-[140px]">HOME</h2>
+                        <h2 id="sim-home-team"
+                            class="text-xl font-bold text-gray-200 leading-tight truncate max-w-[140px]">HOME</h2>
                         <div id="sim-banner-offense"
                             class="mt-1 bg-blue-900/80 text-blue-200 text-[10px] px-2 py-0.5 rounded border border-blue-700 font-bold uppercase tracking-tight truncate max-w-[140px]">
                             OFFENSE
@@ -613,69 +707,89 @@
                 </div>
             </div>
 
-        <!-- NEW: Recent Play Ticker -->
-        <div class="bg-gray-950 border-b border-gray-800 py-1.5 px-4 text-xs font-mono text-amber-400 flex items-center justify-center shrink-0 z-30 shadow-md">
-            <span class="mr-2 font-bold text-gray-500 uppercase tracking-widest text-[10px]">Last Play:</span>
-            <span id="sim-last-play-ticker" class="truncate max-w-3xl">Waiting for kickoff...</span>
-        </div>
-
-        <!-- Unified 2-Panel Layout -->
-        <div class="flex flex-grow overflow-hidden relative">
-            
-            <!-- 1. Center Field Canvas -->
-            <div class="flex-grow relative bg-green-900 flex justify-center items-center overflow-hidden">
-                <canvas id="field-canvas" width="1200" height="1000"
-                    class="h-full w-auto shadow-[0_0_40px_rgba(0,0,0,0.8)] border-x-4 border-black/30"></canvas>
-                <div id="sim-play-overlay"
-                    class="absolute bottom-8 left-1/2 -translate-x-1/2 bg-black/80 backdrop-blur-md border border-white/10 text-white px-8 py-3 rounded-full font-sans font-bold text-lg tracking-wide shadow-2xl whitespace-nowrap pointer-events-none opacity-0 transition-opacity duration-300 z-40 transform scale-105">
-                    Play Result
-                </div>
+            <!-- NEW: Recent Play Ticker -->
+            <div
+                class="bg-gray-950 border-b border-gray-800 py-1.5 px-4 text-xs font-mono text-amber-400 flex items-center justify-center shrink-0 z-30 shadow-md">
+                <span class="mr-2 font-bold text-gray-500 uppercase tracking-widest text-[10px]">Last Play:</span>
+                <span id="sim-last-play-ticker" class="truncate max-w-3xl">Waiting for kickoff...</span>
             </div>
 
-            <!-- 2. Unified Right Sidebar (4 Tabs) -->
-            <div class="w-80 md:w-96 bg-gray-900 border-l border-gray-800 flex flex-col shrink-0 z-20 shadow-[-4px_0_15px_rgba(0,0,0,0.5)]">
-                <div class="flex bg-gray-800 border-b border-gray-700 text-[10px] sm:text-xs">
-                    <button id="tab-btn-log" class="flex-1 py-3 font-black text-white bg-gray-900 border-t-2 border-blue-500 transition-colors tracking-wider">LOG</button>
-                    <button id="tab-btn-subs" class="flex-1 py-3 font-bold text-gray-400 hover:text-white border-t-2 border-transparent bg-gray-800 transition-colors tracking-wider">FIELD</button>
-                    <button id="tab-btn-stats" class="flex-1 py-3 font-bold text-gray-400 hover:text-white border-t-2 border-transparent bg-gray-800 transition-colors tracking-wider">STATS</button>
-                    <button id="tab-btn-strategy" class="flex-1 py-3 font-bold text-gray-400 hover:text-white border-t-2 border-transparent bg-gray-800 transition-colors tracking-wider">PLAN</button>
+            <!-- Unified 2-Panel Layout -->
+            <div class="flex flex-grow overflow-hidden relative">
+
+                <!-- 1. Center Field Canvas -->
+                <div class="flex-grow relative bg-green-900 flex justify-center items-center overflow-hidden">
+                    <canvas id="field-canvas" width="1200" height="1000"
+                        class="h-full w-auto shadow-[0_0_40px_rgba(0,0,0,0.8)] border-x-4 border-black/30"></canvas>
+                    <div id="sim-play-overlay"
+                        class="absolute bottom-8 left-1/2 -translate-x-1/2 bg-black/80 backdrop-blur-md border border-white/10 text-white px-8 py-3 rounded-full font-sans font-bold text-lg tracking-wide shadow-2xl whitespace-nowrap pointer-events-none opacity-0 transition-opacity duration-300 z-40 transform scale-105">
+                        Play Result
+                    </div>
                 </div>
-                
-                <div class="flex-grow relative">
-                    <!-- Tab 1: Play Log -->
-                    <div id="pane-log" class="absolute inset-0 flex flex-col bg-gray-900">
-                        <div id="sim-play-log" class="flex-grow overflow-y-auto p-3 font-mono text-[11px] text-gray-300 scroll-smooth space-y-2"></div>
-                    </div>
-                    
-                    <!-- Tab 2: On Field -->
-                    <div id="pane-subs" class="absolute inset-0 hidden overflow-y-auto flex flex-col pb-2 bg-gray-900">
-                        <div id="sim-field-players" class="flex-grow flex flex-col p-0"></div>
-                    </div>
-                    
-                    <!-- Tab 3: Box Score -->
-                    <div id="pane-stats" class="absolute inset-0 hidden flex flex-col p-3 bg-gray-900">
-                        <div id="sim-live-stats" class="text-sm flex flex-col h-full gap-3">
-                            <div id="sim-stats-away" class="flex-1 bg-gray-800 p-3 rounded border border-gray-700 overflow-y-auto"></div>
-                            <div id="sim-stats-home" class="flex-1 bg-gray-800 p-3 rounded border border-gray-700 overflow-y-auto"></div>
-                        </div>
+
+                <!-- 2. Unified Right Sidebar (4 Tabs) -->
+                <div
+                    class="w-80 md:w-96 bg-gray-900 border-l border-gray-800 flex flex-col shrink-0 z-20 shadow-[-4px_0_15px_rgba(0,0,0,0.5)]">
+                    <div class="flex bg-gray-800 border-b border-gray-700 text-[10px] sm:text-xs">
+                        <button id="tab-btn-log"
+                            class="flex-1 py-3 font-black text-white bg-gray-900 border-t-2 border-blue-500 transition-colors tracking-wider">LOG</button>
+                        <button id="tab-btn-subs"
+                            class="flex-1 py-3 font-bold text-gray-400 hover:text-white border-t-2 border-transparent bg-gray-800 transition-colors tracking-wider">FIELD</button>
+                        <button id="tab-btn-stats"
+                            class="flex-1 py-3 font-bold text-gray-400 hover:text-white border-t-2 border-transparent bg-gray-800 transition-colors tracking-wider">STATS</button>
+                        <button id="tab-btn-strategy"
+                            class="flex-1 py-3 font-bold text-gray-400 hover:text-white border-t-2 border-transparent bg-gray-800 transition-colors tracking-wider">PLAN</button>
                     </div>
 
-                    <!-- Tab 4: Strategy -->
-                    <div id="pane-strategy" class="absolute inset-0 hidden overflow-y-auto p-4 flex flex-col gap-4 bg-gray-900">
-                        <div class="bg-gray-800 p-3 rounded border border-gray-700 shadow-sm">
-                            <label class="block text-[10px] uppercase font-bold text-gray-400 mb-1">Offensive Gameplan</label>
-                            <select id="sim-offense-formation" class="w-full bg-gray-900 text-white text-xs border border-gray-600 rounded p-1.5 focus:border-amber-500 outline-none mb-1"></select>
-                            <div id="sim-offense-personnel" class="text-[10px] text-amber-400 font-mono font-bold mt-1 bg-gray-900 px-2 py-1 rounded inline-block"></div>
+                    <div class="flex-grow relative">
+                        <!-- Tab 1: Play Log -->
+                        <div id="pane-log" class="absolute inset-0 flex flex-col bg-gray-900">
+                            <div id="sim-play-log"
+                                class="flex-grow overflow-y-auto p-3 font-mono text-[11px] text-gray-300 scroll-smooth space-y-2">
+                            </div>
                         </div>
-                        <div class="bg-gray-800 p-3 rounded border border-gray-700 shadow-sm">
-                            <label class="block text-[10px] uppercase font-bold text-gray-400 mb-1">Defensive Gameplan</label>
-                            <select id="sim-defense-formation" class="w-full bg-gray-900 text-white text-xs border border-gray-600 rounded p-1.5 focus:border-amber-500 outline-none mb-1"></select>
-                            <div id="sim-defense-personnel" class="text-[10px] text-blue-400 font-mono font-bold mt-1 bg-gray-900 px-2 py-1 rounded inline-block"></div>
+
+                        <!-- Tab 2: On Field -->
+                        <div id="pane-subs"
+                            class="absolute inset-0 hidden overflow-y-auto flex flex-col pb-2 bg-gray-900">
+                            <div id="sim-field-players" class="flex-grow flex flex-col p-0"></div>
+                        </div>
+
+                        <!-- Tab 3: Box Score -->
+                        <div id="pane-stats" class="absolute inset-0 hidden flex flex-col p-3 bg-gray-900">
+                            <div id="sim-live-stats" class="text-sm flex flex-col h-full gap-3">
+                                <div id="sim-stats-away"
+                                    class="flex-1 bg-gray-800 p-3 rounded border border-gray-700 overflow-y-auto"></div>
+                                <div id="sim-stats-home"
+                                    class="flex-1 bg-gray-800 p-3 rounded border border-gray-700 overflow-y-auto"></div>
+                            </div>
+                        </div>
+
+                        <!-- Tab 4: Strategy -->
+                        <div id="pane-strategy"
+                            class="absolute inset-0 hidden overflow-y-auto p-4 flex flex-col gap-4 bg-gray-900">
+                            <div class="bg-gray-800 p-3 rounded border border-gray-700 shadow-sm">
+                                <label class="block text-[10px] uppercase font-bold text-gray-400 mb-1">Offensive
+                                    Gameplan</label>
+                                <select id="sim-offense-formation"
+                                    class="w-full bg-gray-900 text-white text-xs border border-gray-600 rounded p-1.5 focus:border-amber-500 outline-none mb-1"></select>
+                                <div id="sim-offense-personnel"
+                                    class="text-[10px] text-amber-400 font-mono font-bold mt-1 bg-gray-900 px-2 py-1 rounded inline-block">
+                                </div>
+                            </div>
+                            <div class="bg-gray-800 p-3 rounded border border-gray-700 shadow-sm">
+                                <label class="block text-[10px] uppercase font-bold text-gray-400 mb-1">Defensive
+                                    Gameplan</label>
+                                <select id="sim-defense-formation"
+                                    class="w-full bg-gray-900 text-white text-xs border border-gray-600 rounded p-1.5 focus:border-amber-500 outline-none mb-1"></select>
+                                <div id="sim-defense-personnel"
+                                    class="text-[10px] text-blue-400 font-mono font-bold mt-1 bg-gray-900 px-2 py-1 rounded inline-block">
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
             </div>
-        </div>
 
             <div class="bg-gray-900 border-t border-gray-800 p-3 flex justify-between items-center shrink-0 z-30">
                 <div class="flex items-center gap-3">
@@ -693,7 +807,7 @@
                     </div>
                 </div>
 
-               <button id="sim-debug-dump-btn"
+                <button id="sim-debug-dump-btn"
                     class="bg-gray-800 hover:bg-slate-700 border border-gray-700 text-gray-400 hover:text-amber-400 px-3 py-2 rounded-lg font-mono text-xs transition-colors flex items-center gap-1.5"
                     title="View and copy detailed telemetry of recent plays">
                     <span>🐛</span>
@@ -754,7 +868,8 @@
             class="bg-white rounded-sm shadow-xl w-full max-w-3xl overflow-hidden transform transition-all scale-100 flex flex-col max-h-[90vh] border border-slate-300 min-h-0">
             <div class="p-3 border-b flex justify-between items-center bg-slate-50 shrink-0">
                 <h3 id="modal-title" class="text-sm font-bold uppercase tracking-wider text-slate-600">Title</h3>
-                <button id="modal-default-close" class="text-slate-400 hover:text-slate-700 text-2xl leading-none">&times;</button>
+                <button id="modal-default-close"
+                    class="text-slate-400 hover:text-slate-700 text-2xl leading-none">&times;</button>
             </div>
             <div id="modal-body" class="p-6 overflow-y-auto text-slate-800 bg-slate-100 flex-grow min-h-0"></div>
         </div>

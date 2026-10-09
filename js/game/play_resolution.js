@@ -37,10 +37,31 @@ const FIELD_WIDTH = 53.3;
 const FIELD_LENGTH = 120;
 const WEEKS_IN_SEASON = 9;
 
-export function determinePuntDecision(down, yardsToGo, ballOn) {
+export function determinePuntDecision(down, yardsToGo, ballOn, offenseTeam = null, scoreDiff = 0, timeRemaining = 420) {
     if (down !== 4) return false;
-    if (ballOn >= 60) return false;
-    if (yardsToGo <= 2 && ballOn > 40) return false;
+    if (ballOn >= 60) return false; // In field goal / red zone territory
+
+    // Trailing late in 4th quarter: always go for it
+    if (timeRemaining < 180 && scoreDiff < 0) return false;
+
+    const coach = offenseTeam?.staff?.coach || offenseTeam?.coach;
+    const tactical = coach?.biases?.tactical?.name;
+    const personality = coach?.biases?.personality?.name;
+    const clockIQ = coach?.ratings?.clockIQ || 50;
+    const gmDirective = offenseTeam?.gameplan?.gmDirective;
+
+    // 1. Conservative Turtler / Has-Been Dad
+    if (tactical === 'Conservative Turtler' || coach?.type === 'The Has-Been Dad') {
+        if (yardsToGo > 1 || ballOn < 50) return true; // Punts conservatively
+    }
+
+    // 2. Aggressive Playground Alpha / Blitz Addict / Win-Now Directive
+    if (tactical === 'Blitz Addict' || personality === "Peaked in '94" || gmDirective === 'WIN_NOW') {
+        if (yardsToGo <= 3 && ballOn >= 38) return false; // Backyard gamble!
+    }
+
+    // Baseline rule
+    if (yardsToGo <= 2 && ballOn > 42 && clockIQ > 45) return false;
     return true;
 }
 
@@ -208,7 +229,20 @@ export function determinePlayCall(offense, defense, down, yardsToGo, ballOn, sco
     // IMPORTANT:
     // Do not split into run/pass candidates first.
     // A strong pass should be able to beat a mediocre run, and vice versa.
-    const candidateKeys = formationPlays;
+    // Lore: Kids only call what's written on Coach's cafeteria napkin + the 3 Backyard Basics
+    const BACKYARD_BASICS_OFF = ['Uni_InsideZone', 'Uni_QuickSlants', 'Uni_FourVerts'];
+    const installed = offense.gameplan?.installedOffense || [];
+    const activePlaybookKeys = Array.from(new Set([...BACKYARD_BASICS_OFF, ...installed]));
+
+    // Match active playbook against current formation
+    let candidateKeys = activePlaybookKeys.filter(key => {
+        const p = offensivePlaybook[key];
+        if (!p) return false;
+        if (p.compatibleFormations) return p.compatibleFormations.includes(formationName);
+        return key.startsWith(formationName) || key.startsWith('Uni_') || key.startsWith('PA_') || key.startsWith('RPO_') || key.startsWith('Trick_');
+    });
+
+    if (candidateKeys.length === 0) candidateKeys = BACKYARD_BASICS_OFF;
 
     // Ensure target history array exists
     if (!offense.recentTargets) offense.recentTargets = [];
@@ -229,6 +263,10 @@ export function determinePlayCall(offense, defense, down, yardsToGo, ballOn, sco
             : (1 - runProbability);
 
         score += (typePrior - 0.5) * 30;
+
+        // PLAY MASTERY INFLUENCE: Kids prefer plays they've actually practiced!
+        const playMastery = offense.gameplan?.mastery?.[key] || 40;
+        score += (playMastery - 50) * 0.35; // Mastered plays (+15 score) beat unfamiliar plays (-10 score)
 
         // ======================================================
         // 2. SITUATIONAL FOOTBALL
@@ -475,9 +513,16 @@ export function determineDefensiveFormation(defense, offenseFormationName, down,
 
 export function determineDefensivePlayCall(defense, offense, down, yardsToGo, ballOn, scoreDiff, gameLog, drivesRemaining) {
     const defenseFormationName = defense.formations.defense;
-    const availablePlays = Object.keys(defensivePlaybook).filter(key =>
+    // Lore: Defensive gameplan is restricted to installed schemes + Universal Safety Nets
+    const BACKYARD_BASICS_DEF = ['Cover_2_Zone_Base', 'Cover_1_Robber', 'GoalLine_RunStuff'];
+    const installedDef = defense.gameplan?.installedDefense || [];
+    const activeDefKeys = Array.from(new Set([...BACKYARD_BASICS_DEF, ...installedDef]));
+
+    let availablePlays = activeDefKeys.filter(key =>
         isPlayCompatibleWithDefense(defensivePlaybook[key], defenseFormationName)
     );
+
+    if (availablePlays.length === 0) availablePlays = BACKYARD_BASICS_DEF;
 
     if (availablePlays.length === 0) return 'Cover_2_Zone_Base';
 
@@ -976,7 +1021,7 @@ export function simulateLivePlayStep(gameInstance, mode = 'live') {
         gameInstance.down = 1; gameInstance.yardsToGo = 3; gameInstance.ballOn = 97;
         offense.formations.offense = 'Balanced'; defense.formations.defense = '4-2-2';
         offPlayKey = 'Uni_QuickSlants'; defPlayKey = 'GoalLine_RunStuff';
-    } else if (determinePuntDecision(gameInstance.down, gameInstance.yardsToGo, gameInstance.ballOn)) {
+    } else if (determinePuntDecision(gameInstance.down, gameInstance.yardsToGo, gameInstance.ballOn, offense, (offense.id === gameInstance.homeTeam.id ? (gameInstance.homeScore - gameInstance.awayScore) : (gameInstance.awayScore - gameInstance.homeScore)), gameInstance.clock)) {
         offense.formations.offense = 'Punt'; defense.formations.defense = 'Punt_Return';
         offPlayKey = 'Punt_Punt'; defPlayKey = 'PuntReturn_Classic';
     } else {

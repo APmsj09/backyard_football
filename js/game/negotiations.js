@@ -273,23 +273,30 @@ export function evaluatePlayerNegotiation(player, team, offer = {}) {
 /**
  * Evaluates whether an available staff member agrees to sign.
  */
-export function evaluateStaffNegotiation(staff, team, roleKey, tokensOffered = 0) {
+export function evaluateStaffNegotiation(staff, team, roleKey, pitch = {}) {
+    const tokensOffered = typeof pitch === 'number' ? pitch : (pitch.tokensOffered || 0);
+    const schemePromise = typeof pitch === 'object' ? (pitch.schemePromise || 'GM_CHOICE') : 'GM_CHOICE';
+    const practiceFocus = typeof pitch === 'object' ? (pitch.practiceFocus || 'BALANCED') : 'BALANCED';
+
     const cred = team.socialProfile?.streetCred || 50;
-    let interest = Math.round(cred * 0.65);
+    let interest = Math.round(cred * 0.55);
     const reasons = [];
 
     if (team.tier === 1) {
-        interest += 15;
-        reasons.push("Premier Parks floodlights prestige (+15)");
+        interest += 14;
+        reasons.push("Premier Parks floodlights prestige (+14)");
     } else {
-        reasons.push("Sandlot Circuit grassroots challenge");
+        interest += 4;
+        reasons.push("Sandlot Circuit grassroots challenge (+4)");
     }
 
+    // Former player loyalty bonus
     if (staff.formerPlayerBio && staff.formerPlayerBio.includes(team.name)) {
         interest += 30;
         reasons.push(`🎓 Alma mater loyalty to ${team.name} (+30)`);
     }
 
+    // High reputation demands
     const ratingAvg = Math.round(
         ((staff.ratings?.offSchemeMastery || 50) + 
          (staff.ratings?.evalPhysicals || 50) + 
@@ -297,9 +304,9 @@ export function evaluateStaffNegotiation(staff, team, roleKey, tokensOffered = 0
     );
 
     if (ratingAvg > 68) {
-        const prestigeDemand = Math.round((ratingAvg - 68) * 0.9);
+        const prestigeDemand = Math.round((ratingAvg - 68) * 0.85);
         interest -= prestigeDemand;
-        reasons.push(`High reputation expectations (-${prestigeDemand})`);
+        reasons.push(`High reputation standard (-${prestigeDemand})`);
     }
 
     const roster = getRosterObjects(team);
@@ -307,58 +314,117 @@ export function evaluateStaffNegotiation(staff, team, roleKey, tokensOffered = 0
     const tactical = staff.biases?.tactical?.name;
     const teamOffense = team.formations?.offense || 'Balanced';
 
-    if (roleKey === 'coach' && tactical) {
+    // 1. Tactical Autonomy & Scheme Fit
+    if (roleKey === 'coach') {
+        if (schemePromise === 'COACH_CHOICE') {
+            interest += 16;
+            reasons.push("Granted Full Scheme Autonomy (+16)");
+        } else {
+            if (tactical === 'Air Raid Purist' || tactical === 'Smashmouth Zealot') {
+                interest -= 12;
+                reasons.push("Resents GM meddling with play calls (-12)");
+            }
+        }
+
         if (tactical === 'Air Raid Purist') {
-            if (['Spread', 'Empty', 'Trips'].includes(teamOffense)) {
-                interest += 15;
-                reasons.push("Loves your Spread passing formation (+15)");
-            } else if (['Power', 'Jumbo'].includes(teamOffense)) {
-                interest -= 25;
-                reasons.push("Refuses to coach heavy under-center Power offense (-25)");
+            if (['Spread', 'Empty', 'Trips', 'TripsLeft'].includes(teamOffense)) {
+                interest += 12;
+                reasons.push("Excited by current Spread passing attack (+12)");
+            } else if (['Power', 'Jumbo'].includes(teamOffense) && schemePromise !== 'COACH_CHOICE') {
+                interest -= 22;
+                reasons.push("Refuses to coach rigid Power run offense (-22)");
             }
         } else if (tactical === 'Smashmouth Zealot') {
             if (['Power', 'Jumbo', 'Pistol'].includes(teamOffense)) {
-                interest += 15;
-                reasons.push("Loves your physical run-first offensive formation (+15)");
-            } else if (['Spread', 'Empty'].includes(teamOffense)) {
-                interest -= 25;
-                reasons.push("Dislikes finesse spread formations (-25)");
+                interest += 12;
+                reasons.push("Approves of physical downhill rushing lineup (+12)");
+            } else if (['Spread', 'Empty'].includes(teamOffense) && schemePromise !== 'COACH_CHOICE') {
+                interest -= 22;
+                reasons.push("Dislikes finesse spread formations (-22)");
             }
         }
     }
 
+    // 2. Practice Culture Alignment
+    if (practiceFocus === 'CONDITIONING') {
+        if (personality === 'Old-School Disciplinarian' || personality === "Peaked in '94") {
+            interest += 14;
+            reasons.push("Loves heavy conditioning & tree-run drills (+14)");
+        } else if (personality === "Players' Coach") {
+            interest -= 10;
+            reasons.push("Worried conditioning will burn out the kids (-10)");
+        }
+    } else if (practiceFocus === 'CHALK_TALK') {
+        if (personality === 'Analytical Savant' || roleKey === 'scout') {
+            interest += 14;
+            reasons.push("Enthusiastic about chalkboard napkin film study (+14)");
+        }
+    } else if (practiceFocus === 'FUN_SCRIMMAGE') {
+        if (personality === "Players' Coach") {
+            interest += 14;
+            reasons.push("Loves relaxed sandlot scrimmage vibe (+14)");
+        } else if (personality === 'Old-School Disciplinarian') {
+            interest -= 18;
+            reasons.push("Disgusted by lack of discipline and freeze-pop breaks (-18)");
+        }
+    }
+
+    // 3. Roster Chemistry Fit
     if (personality === 'Old-School Disciplinarian') {
         const divasOnTeam = roster.filter(p => (p.personality?.ego || 50) > 75).length;
         if (divasOnTeam >= 2) {
-            interest -= 20;
-            reasons.push(`Refuses to babysit ${divasOnTeam} high-ego divas on roster (-20)`);
+            interest -= 18;
+            reasons.push(`Hesitant to babysit ${divasOnTeam} high-ego divas (-18)`);
         } else {
-            interest += 10;
-            reasons.push("Respects your humble, hard-working locker room (+10)");
+            interest += 8;
+            reasons.push("Respects your humble locker room (+8)");
         }
     } else if (personality === "Peaked in '94") {
-        if (cred < 55) {
-            interest -= 15;
-            reasons.push("Demands a team with higher neighborhood street respect (-15)");
+        if (cred < 50) {
+            interest -= 12;
+            reasons.push("Demands a team with higher neighborhood street respect (-12)");
         }
     } else if (personality === "Players' Coach") {
-        interest += 10;
-        reasons.push("Excited to work with your young roster (+10)");
+        interest += 8;
+        reasons.push("Eager to develop young neighborhood talent (+8)");
     }
 
+    // 4. Token Sweeteners
     if (tokensOffered > 0) {
-        const tokenBoost = tokensOffered * 22;
+        const tokenBoost = tokensOffered === 1 ? 20 : 38;
         interest += tokenBoost;
-        reasons.push(`Offered ${tokensOffered} Favor Token(s) (+${tokenBoost})`);
+        reasons.push(`🤝 Favor Tokens offered (+${tokenBoost})`);
     }
 
-    const threshold = 40;
-    const accepted = interest >= threshold;
+    const accepted = interest >= 45;
+
+    // Lore Reaction Quote
+    let quote = "";
+    if (accepted) {
+        if (personality === 'Old-School Disciplinarian') {
+            quote = `"You've got a deal. Tell the kids to lace their cleats tight and be at the park by 7 AM sharp."`;
+        } else if (personality === "Players' Coach") {
+            quote = `"Sounds like a great group. I'll bring an extra cooler of freeze pops for Saturday's game."`;
+        } else if (personality === 'Analytical Savant') {
+            quote = `"The data checks out. I've already mapped out our red zone efficiency models."`;
+        } else {
+            quote = `"Deal. Let's show the rest of the neighborhood how football is played."`;
+        }
+    } else {
+        if (interest < 30) {
+            quote = `"Not a chance. I'm not wasting my Saturdays on a program that doesn't share my vision."`;
+        } else {
+            quote = `"I'm intrigued, but the terms just aren't there yet. Sweeten the pitch or give me more control."`;
+        }
+    }
 
     return {
         accepted,
         interestScore: Math.max(0, Math.min(100, interest)),
-        reasons
+        reasons,
+        quote,
+        schemePromise,
+        practiceFocus
     };
 }
 

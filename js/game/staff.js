@@ -41,9 +41,10 @@ export function generateStaffMember(role = 'coach', minAge = 25, maxAge = 55, fo
         formerPlayerId: formerPlayer?.id || null,
         formerPlayerBio: formerPlayer ? `Former ${formerPlayer.pos} legend (${formerPlayer.careerStats?.touchdowns || 0} TDs, ${formerPlayer.careerStats?.seasonsPlayed || 0} yrs played)` : null,
         ratings: {
-            // Tactical Acumen
+            // Tactical Acumen & Gameplanning
             offSchemeMastery: formerPlayer?.pos === 'QB' ? getRandomInt(65, 85) : baseVal(),
             defSchemeMastery: ['DL', 'LB', 'DB'].includes(formerPlayer?.pos) ? getRandomInt(65, 85) : baseVal(),
+            gameplanInstinct: baseVal(), // How smartly coach designs gameplans against opponent schemes
             inGameAdjustments: baseVal(),
             clockIQ: baseVal(),
 
@@ -52,10 +53,11 @@ export function generateStaffMember(role = 'coach', minAge = 25, maxAge = 55, fo
             evalTechnique: formerPlayer ? getRandomInt(60, 80) : baseVal(),
             evalCharacter: baseVal(),
 
-            // Leadership & Development
+            // Leadership & Drill Execution
             teaching: formerPlayer?.attributes?.mental?.playbookIQ ? Math.min(95, formerPlayer.attributes.mental.playbookIQ + 5) : baseVal(),
+            practiceDiscipline: baseVal(), // Drill efficiency, accelerates play mastery and retention
             conditioning: baseVal(),
-            authority: formerPlayer ? 45 : getRandomInt(50, 80) // Young ex-players start with raw authority
+            authority: formerPlayer ? 45 : getRandomInt(50, 80)
         },
         biases: {
             tactical: getRandom(tacticalBiases),
@@ -157,4 +159,79 @@ export function aiManageTeamStaff(team, gameState) {
             }
         }
     });
+}
+
+/**
+ * AI Coach evaluates roster, opponent, and GM directives to install plays autonomously.
+ */
+export function aiBuildGameplan(team, opponent = null, gmDirective = 'COACH_AUTONOMY') {
+    if (!team || !team.gameplan) return;
+
+    const coach = team.staff?.coach;
+    const tactical = coach?.biases?.tactical?.name || 'Balanced Tactician';
+    const instinct = coach?.ratings?.gameplanInstinct || 50;
+    const currentOffForm = team.formations?.offense || 'Balanced';
+
+    const allOffKeys = Object.keys(offensivePlaybook).filter(k => k !== 'Punt_Punt' && !['Uni_InsideZone', 'Uni_QuickSlants', 'Uni_FourVerts'].includes(k));
+    const allDefKeys = Object.keys(defensivePlaybook).filter(k => k !== 'PuntReturn_Classic' && !['Cover_2_Zone_Base', 'Cover_1_Robber', 'GoalLine_RunStuff'].includes(k));
+
+    // Score offensive plays based on Coach Bias + Roster Fit + GM Directive
+    const scoredOff = allOffKeys.map(key => {
+        const play = offensivePlaybook[key];
+        let score = 50;
+
+        if (tactical === 'Air Raid Purist' && play.type === 'pass') score += 25;
+        if (tactical === 'Smashmouth Zealot' && play.type === 'run') score += 25;
+        if (play.tags?.includes('pa') || play.tags?.includes('trick')) score += (instinct > 65 ? 15 : 5);
+
+        if (gmDirective === 'WIN_NOW' && opponent) {
+            // Exploit opponent defensive style if coach has high gameplan instinct
+            const oppDef = opponent.formations?.defense || '';
+            if (oppDef.includes('4-2-2') && play.type === 'pass') score += 20; // Pass against run-heavy fronts
+            if (oppDef.includes('3-0-5') && play.type === 'run') score += 20;  // Run against dime looks
+        }
+
+        return { key, score: score + Math.random() * 10 };
+    }).sort((a, b) => b.score - a.score);
+
+    // Score defensive schemes
+    const scoredDef = allDefKeys.map(key => {
+        const play = defensivePlaybook[key];
+        let score = 50;
+
+        if (tactical === 'Blitz Addict' && play.blitz) score += 30;
+        if (tactical === 'Conservative Turtler' && !play.blitz) score += 20;
+
+        if (gmDirective === 'WIN_NOW' && opponent) {
+            const oppOff = opponent.formations?.offense || '';
+            if (oppOff.includes('Spread') && play.concept === 'Zone') score += 20;
+            if (oppOff.includes('Power') && play.concept === 'Run') score += 25;
+        }
+
+        return { key, score: score + Math.random() * 10 };
+    }).sort((a, b) => b.score - a.score);
+
+    team.gameplan.installedOffense = scoredOff.slice(0, 6).map(s => s.key);
+    team.gameplan.installedDefense = scoredDef.slice(0, 4).map(s => s.key);
+}
+
+/**
+ * AI Coach chooses weekly practice focus based on staff traits and GM Directives.
+ */
+export function aiChooseWeeklyPractice(team, opponent = null, gmDirective = 'COACH_AUTONOMY') {
+    if (!team || !team.gameplan) return 'chalk_talk';
+
+    const coach = team.staff?.coach;
+    const personality = coach?.biases?.personality?.name;
+
+    if (gmDirective === 'DEVELOP_YOUTH') return 'chalk_talk';
+    if (gmDirective === 'HARD_CONDITIONING') return 'conditioning';
+    if (gmDirective === 'WIN_NOW') return 'scouting';
+
+    // Coach Autonomy
+    if (personality === 'Old-School Disciplinarian') return 'conditioning';
+    if (personality === 'Analytical Savant') return 'chalk_talk';
+    if (personality === "Players' Coach") return 'scrimmage';
+
+    return Math.random() < 0.5 ? 'chalk_talk' : 'scouting';
 }

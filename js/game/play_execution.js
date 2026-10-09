@@ -834,6 +834,21 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                         break;
                     }
 
+                    // PLAY MASTERY EXECUTION IMPACT
+                    const playKey = playState.playKey || '';
+                    const offTeam = game?.teams?.find(t => t.id === pState.teamId);
+                    const mastery = offTeam?.gameplan?.mastery?.[playKey] ?? 70;
+
+                    // 1. Raw / Unpracticed (<45%): Assignment Hesitation & Blown Cuts
+                    if (mastery < 45 && playState.tick === 12 && pState.currentPathIndex === 0) {
+                        if (Math.random() < 0.22) {
+                            pState.stunnedTicks = 4; // 0.2s pause trying to remember the napkin route!
+                            if (gameLog && Math.random() < 0.15) {
+                                pushGameLog(gameLog, `⚠️ [Tick ${playState.tick}] ${pState.name} hesitates on unfamiliar route assignment!`, playState);
+                            }
+                        }
+                    }
+
                     const pt = pState.routePath[pState.currentPathIndex];
                     const distToNode = getDistance(pState, pt);
                     const isFinalNode = pState.currentPathIndex === pState.routePath.length - 1;
@@ -922,8 +937,10 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                                 }
                             }
                         }
-                        pState.vx *= 1.25;
-                        pState.vy *= 1.25;
+                        // 2. Mastered (>=80%): Muscle Memory route burst
+                        const masteryBurst = mastery >= 80 ? 1.40 : 1.25;
+                        pState.vx *= masteryBurst;
+                        pState.vy *= masteryBurst;
                     }
                     break;
                 }

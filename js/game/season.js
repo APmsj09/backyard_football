@@ -174,6 +174,33 @@ export async function initializeLeague(onProgress) {
             socialProfile: {
                 streetCred: tier === 1 ? 60 : 35,
                 favorTokens: 3
+            },
+            gameplan: {
+                weeklyPractice: 'chalk_talk',
+                delegatePractice: false,
+                delegateGameplan: false,
+                delegateDepthChart: false,
+                gmDirective: 'COACH_AUTONOMY', // 'COACH_AUTONOMY', 'WIN_NOW', 'DEVELOP_YOUTH', 'HARD_CONDITIONING'
+                installedOffense: ['Uni_StretchRight', 'Uni_Stick', 'Uni_Drive', 'Uni_HB_Screen', 'PA_Crossers', 'Uni_Mesh'],
+                installedDefense: ['Cover_3_Sky', 'Man_Blitz_Base', 'Nickel_Tampa_2', 'Fire_Zone_3'],
+                mastery: {
+                    'Uni_InsideZone': 85,
+                    'Uni_QuickSlants': 85,
+                    'Uni_FourVerts': 80,
+                    'Cover_2_Zone_Base': 85,
+                    'Cover_1_Robber': 80,
+                    'GoalLine_RunStuff': 85,
+                    'Uni_StretchRight': 55,
+                    'Uni_Stick': 60,
+                    'Uni_Drive': 50,
+                    'Uni_HB_Screen': 45,
+                    'PA_Crossers': 40,
+                    'Uni_Mesh': 50,
+                    'Cover_3_Sky': 55,
+                    'Man_Blitz_Base': 50,
+                    'Nickel_Tampa_2': 45,
+                    'Fire_Zone_3': 40
+                }
             }
         };
         initializeTeamStaff(team);
@@ -872,6 +899,31 @@ export function processEndOfWeek() {
     updatePlayerStatuses();
     generateWeeklyEvents();
     processRelationshipEvents();
+
+    // Process Coach-Player Culture & Morale across all teams
+    game.teams.forEach(t => {
+        processLockerRoomCulture(t, game.gameLog);
+    });
+    
+    // Process gameplans & practices across the league (including delegated user team)
+    game.teams.forEach(t => {
+        const isDelegated = t.isPlayerControlled && (t.gameplan?.delegatePractice || t.gameplan?.delegateGameplan);
+
+        if (!t.isPlayerControlled || isDelegated) {
+            import('./staff.js').then(staffModule => {
+                const directive = t.gameplan?.gmDirective || 'COACH_AUTONOMY';
+                if (!t.isPlayerControlled || t.gameplan?.delegateGameplan) {
+                    staffModule.aiBuildGameplan(t, null, directive);
+                }
+                if (!t.isPlayerControlled || t.gameplan?.delegatePractice) {
+                    t.gameplan.weeklyPractice = staffModule.aiChooseWeeklyPractice(t, null, directive);
+                }
+            }).catch(() => {});
+        }
+
+        processWeeklyPractice(t, game.gameLog);
+    });
+
     processWeeklyPlayerGrowth();
     endOfWeekCleanup();
 }
@@ -1010,6 +1062,50 @@ export function callFriend(playerId) {
         addMessage("Roster Update: Invite Declined", message);
         return { success: false, message };
     }
+}
+
+export function processLockerRoomCulture(team, gameLog = null) {
+    if (!team || !team.roster) return;
+
+    const coach = team.staff?.coach || team.coach;
+    if (!coach) return;
+
+    const personality = coach.biases?.personality?.name || coach.type;
+    const roster = getRosterObjects(team);
+
+    roster.forEach(player => {
+        if (!player.personality) return;
+        const ethic = player.personality.workEthic || 50;
+        const ego = player.personality.ego || 50;
+
+        if (!player.expectations) player.expectations = { happiness: 100 };
+
+        // 1. Disciplinarian Culture Clash / Growth
+        if (personality === 'Old-School Disciplinarian' || personality === 'The Strict Parent') {
+            if (ego > 75) {
+                // Divas hate strict authority
+                player.expectations.happiness = Math.max(10, player.expectations.happiness - 4);
+                if (team.id === game?.playerTeam?.id && Math.random() < 0.08) {
+                    gameLog?.push(`⚡ Locker Room Drama: ${player.name} complained to his parents about Coach ${coach.name}'s strict drills.`);
+                }
+            } else if (ethic > 70) {
+                // Hard-working gym rats thrive
+                player.personality.loyalty = Math.min(99, (player.personality.loyalty || 50) + 1);
+            }
+        }
+
+        // 2. Players' Coach High Morale
+        else if (personality === "Players' Coach" || personality === 'The Rec Center Director') {
+            player.expectations.happiness = Math.min(100, player.expectations.happiness + 3);
+        }
+
+        // 3. Peaked in '94 Toughness
+        else if (personality === "Peaked in '94" || personality === 'The Has-Been Dad') {
+            if (player.attributes?.mental?.toughness && player.attributes.mental.toughness < 90) {
+                if (Math.random() < 0.10) player.attributes.mental.toughness += 1;
+            }
+        }
+    });
 }
 
 export function processOffseasonFADay(gameState, userBids = []) {
@@ -1412,6 +1508,84 @@ export function developPlayer(player, team = null) {
     player.careerStats.snapsThisSeason = 0;
 
     return developmentReport;
+}
+
+export function processWeeklyPractice(team, gameLog = null) {
+    if (!team || !team.gameplan) return;
+
+    const coach = team.staff?.coach;
+    const discipline = coach?.ratings?.practiceDiscipline || 50;
+    const teaching = coach?.ratings?.teaching || 50;
+    const mastery = team.gameplan.mastery = team.gameplan.mastery || {};
+    const plan = team.gameplan.weeklyPractice || 'chalk_talk';
+    const roster = getRosterObjects(team);
+
+    // 1. FAMILIARITY DECAY: Uninstalled plays fade from memory (-4% per week down to 25% floor)
+    const activeInstalled = new Set([
+        'Uni_InsideZone', 'Uni_QuickSlants', 'Uni_FourVerts',
+        'Cover_2_Zone_Base', 'Cover_1_Robber', 'GoalLine_RunStuff',
+        ...(team.gameplan.installedOffense || []),
+        ...(team.gameplan.installedDefense || [])
+    ]);
+
+    // Discipline cuts decay in half
+    const decayRate = discipline > 65 ? 2 : 4;
+    Object.keys(mastery).forEach(key => {
+        if (!activeInstalled.has(key) && mastery[key] > 25) {
+            mastery[key] = Math.max(25, mastery[key] - decayRate);
+        }
+    });
+
+    // 2. DRILL EXECUTION
+    const disciplineBonus = Math.round((discipline - 50) / 10); // -2 to +4 bonus
+
+    if (plan === 'chalk_talk') {
+        const installGains = Math.max(10, Math.round(12 + (teaching / 10) + disciplineBonus));
+        activeInstalled.forEach(key => {
+            mastery[key] = Math.min(100, (mastery[key] || 35) + installGains);
+        });
+
+        // Youth IQ mentorship
+        roster.forEach(p => {
+            if (p.age <= 15 && Math.random() < 0.25 && (p.attributes?.mental?.playbookIQ || 50) < 95) {
+                p.attributes.mental.playbookIQ += 1;
+            }
+        });
+        if (team.id === game?.playerTeam?.id && gameLog) {
+            gameLog.push(`📋 Chalk Talk: Kids studied napkin schemes (+${installGains}% mastery). IQ reps gained!`);
+        }
+    } else if (plan === 'conditioning') {
+        const condGainChance = 0.15 + (coach?.ratings?.conditioning || 50) / 300;
+        roster.forEach(p => {
+            if (Math.random() < condGainChance && (p.attributes?.physical?.stamina || 50) < 95) {
+                p.attributes.physical.stamina += 1;
+            }
+            if (Math.random() < 0.12 && (p.attributes?.mental?.toughness || 50) < 95) {
+                p.attributes.mental.toughness += 1;
+            }
+        });
+        if (team.id === game?.playerTeam?.id && gameLog) {
+            gameLog.push("🏃 Tire Drills: Sprints in full sun toughened up fourth-quarter stamina!");
+        }
+    } else if (plan === 'scrimmage') {
+        roster.forEach(p => {
+            p.fatigue = Math.max(0, (p.fatigue || 0) - 25); // Refreshes kids
+            if (Math.random() < 0.18 && (p.attributes?.technical?.catchingHands || 50) < 95) {
+                p.attributes.technical.catchingHands += 1;
+            }
+            if (Math.random() < 0.18 && (p.attributes?.technical?.tackling || 50) < 95) {
+                p.attributes.technical.tackling += 1;
+            }
+        });
+        if (team.id === game?.playerTeam?.id && gameLog) {
+            gameLog.push("🧃 Sandlot Scrimmage: Two-hand touch & freeze pops healed fatigue and built hands!");
+        }
+    } else if (plan === 'scouting') {
+        team.scoutingBoostActive = true;
+        if (team.id === game?.playerTeam?.id && gameLog) {
+            gameLog.push("🕵️ Recess Recon: Spied on next opponent's favorite plays. Defensive boost active!");
+        }
+    }
 }
 
 export function advanceToOffseason() {

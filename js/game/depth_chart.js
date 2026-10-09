@@ -83,10 +83,42 @@ export function populateNaturalDepthOrder(team) {
         'DL': [], 'LB': [], 'DB': []
     };
 
+    const coach = team.staff?.coach || team.coach;
+    const personality = coach?.biases?.personality?.name;
+    const gmDirective = team.gameplan?.gmDirective || 'COACH_AUTONOMY';
+
+    // Coach evaluates player culture & fits based on archetype
+    const getCoachEvaluationScore = (p, pos) => {
+        let score = calculateOverall(p, pos);
+        const ethic = p.personality?.workEthic || 50;
+        const ego = p.personality?.ego || 50;
+        const toughness = p.attributes?.mental?.toughness || 50;
+
+        if (personality === 'Old-School Disciplinarian') {
+            if (ethic < 40) score -= 8; // Disciplinarian refuses to start lazy kids
+            if (ego > 75) score -= 6;   // Clashes with divas
+            if (toughness > 65) score += 5; // Loves hard-nosed grinders
+        } else if (personality === "Peaked in '94") {
+            const str = p.attributes?.physical?.strength || 50;
+            const wgt = p.attributes?.physical?.weight || 150;
+            if (str > 60 || wgt > 180) score += 6; // Values raw size and brute power
+        } else if (personality === "Players' Coach") {
+            const loyalty = p.personality?.loyalty || 50;
+            if (loyalty > 65) score += 4; // Rewards loyal team players
+        }
+
+        // GM Directives override
+        if (gmDirective === 'DEVELOP_YOUTH' && p.age <= 14) {
+            score += 7; // Pushes young prospects into starting depth
+        }
+
+        return score;
+    };
+
     const positions = ['QB', 'RB', 'WR', 'TE', 'OL', 'DL', 'LB', 'DB'];
     positions.forEach(pos => {
         const viable = rosterObjs.filter(p => isPlayerViableForPosition(p, pos));
-        viable.sort((a, b) => calculateOverall(b, pos) - calculateOverall(a, pos));
+        viable.sort((a, b) => getCoachEvaluationScore(b, pos) - getCoachEvaluationScore(a, pos));
         team.depthOrder[pos] = viable.map(p => p.id);
     });
 }
@@ -414,8 +446,21 @@ export function substitutePlayers(teamId, outPlayerId, inPlayerId, gameLog = nul
 export function autoMakeSubstitutions(team, options = {}, gameLog = null) {
     if (!team || !team.depthChart || !team.roster || !team.depthOrder) return 0;
 
-    const fatigueLimit = options.thresholdFatigue || 75;
-    const recoverLimit = 40;
+    const coach = team.staff?.coach || team.coach;
+    const personality = coach?.biases?.personality?.name;
+
+    // Coach personality shapes in-game rotation patience
+    let fatigueLimit = options.thresholdFatigue || 75;
+    let recoverLimit = 40;
+
+    if (personality === 'Old-School Disciplinarian') {
+        fatigueLimit = 85; // Expects kids to push through burning lungs
+        recoverLimit = 50;
+    } else if (personality === "Players' Coach") {
+        fatigueLimit = 65; // Rests starters early so every kid gets on the field
+        recoverLimit = 35;
+    }
+
     const fullRoster = getRosterObjects(team);
     let subsDone = 0;
 
