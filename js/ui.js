@@ -1042,6 +1042,7 @@ let offseasonFADay = 1;
 export function startOffseasonFAMinigame(gameState) {
     offseasonFABids = [];
     offseasonFADay = 1;
+    Game.clearPlayerMarketCache?.(gameState);
     showScreen('offseason-fa-screen');
     renderOffseasonFAScreen(gameState);
 }
@@ -1054,16 +1055,31 @@ export function renderOffseasonFAScreen(gameState) {
     const userRosterEl = document.getElementById('fa-user-roster-count');
     const advanceBtn = document.getElementById('fa-advance-day-btn');
 
-    if (roundIndicator) roundIndicator.textContent = `Day ${offseasonFADay} of 3`;
-    if (userTokensEl) userTokensEl.textContent = gameState.playerTeam.socialProfile?.favorTokens || 0;
-    if (userRosterEl) userRosterEl.textContent = `${gameState.playerTeam.roster.length}/18`;
+    const totalTokens = gameState.playerTeam.socialProfile?.favorTokens || 0;
+    const committedTokens = offseasonFABids.reduce((s, b) => s + (b.offer.tokensOffered || 0), 0);
+    const availableTokens = Math.max(0, totalTokens - committedTokens);
+
+    if (roundIndicator) {
+        roundIndicator.textContent = offseasonFADay >= 3 ? "Day 3 of 3 (Final Day)" : `Day ${offseasonFADay} of 3`;
+    }
+    if (userTokensEl) {
+        userTokensEl.textContent = `${availableTokens} (${committedTokens} committed)`;
+    }
+    if (userRosterEl) {
+        userRosterEl.textContent = `${gameState.playerTeam.roster.length}/18`;
+    }
     if (advanceBtn) {
-        advanceBtn.textContent = offseasonFADay >= 3 ? "Finalize Free Agency & Head to Kickoff →" : `Submit Bids & Advance to Day ${offseasonFADay + 1} →`;
+        advanceBtn.className = "bg-emerald-700 hover:bg-emerald-800 text-white font-bold px-4 py-2 rounded text-xs uppercase tracking-wider shadow-sm transition";
+        advanceBtn.onclick = () => window.app.advanceOffseasonFADay();
+        advanceBtn.textContent = offseasonFADay >= 3 
+            ? "Submit Final Bids & Resolve Day 3 →" 
+            : `Submit Bids & Advance to Day ${offseasonFADay + 1} →`;
     }
 
     renderOffseasonFAPool(gameState);
     renderPendingBidsList(gameState);
 }
+
 
 export function renderOffseasonFAPool(gameState) {
     const container = document.getElementById('fa-minigame-pool-tbody');
@@ -1087,17 +1103,22 @@ export function renderOffseasonFAPool(gameState) {
         return ovrB - ovrA;
     });
 
+    if (pool.length === 0) {
+        container.innerHTML = `<p class="p-8 text-center text-slate-400 italic text-xs">No free agents available matching this filter.</p>`;
+        return;
+    }
+
     container.innerHTML = `
         <table class="min-w-full text-xs font-mono">
             <thead class="bg-slate-900 text-white uppercase text-[10px] select-none sticky top-0 z-10">
                 <tr>
-                    <th class="py-2.5 px-3 text-left font-sans">Prospect Name</th>
+                    <th class="py-2 px-3 text-left font-sans">Prospect Name</th>
                     <th class="py-2 px-2 text-center">Pos</th>
                     <th class="py-2 px-2 text-center">OVR</th>
-                    <th class="py-2 px-2 text-center">Age</th>
                     <th class="py-2 px-2 text-center">Pot</th>
                     <th class="py-2 px-2 text-center text-blue-400">SPD</th>
                     <th class="py-2 px-2 text-center">STR</th>
+                    <th class="py-2 px-3 text-left font-sans">Blacktop Grapevine & Suitors</th>
                     <th class="py-2 px-3 text-right font-sans">Action</th>
                 </tr>
             </thead>
@@ -1105,22 +1126,41 @@ export function renderOffseasonFAPool(gameState) {
                 ${pool.map(p => {
                     const pos = p.pos || estimateBestPosition(p);
                     const ovr = calculateOverall(p, pos);
-                    const hasBid = offseasonFABids.some(b => b.playerId === p.id);
+                    const userBid = offseasonFABids.find(b => b.playerId === p.id);
+                    const intel = Game.getPlayerMarketIntel(p, gameState);
+
+                    let heatBadge = '<span class="bg-slate-100 text-slate-500 font-bold px-1.5 py-0.5 rounded text-[9px]">💤 Quiet</span>';
+                    if (intel.heat === 'HOT') {
+                        heatBadge = `<span class="bg-rose-100 text-rose-800 border border-rose-300 font-bold px-1.5 py-0.5 rounded text-[9px]" title="${intel.suitorNames.join(', ')}">🔥 Hot (${intel.suitorNames.map(n => n.replace('The ', '')).join(', ')})</span>`;
+                    } else if (intel.heat === 'WARM') {
+                        heatBadge = `<span class="bg-amber-100 text-amber-900 border border-amber-300 font-bold px-1.5 py-0.5 rounded text-[9px]" title="${intel.suitorNames.join(', ')}">💬 Warm (${intel.suitorNames.map(n => n.replace('The ', '')).join(', ')})</span>`;
+                    }
+
                     return `
                     <tr class="hover:bg-slate-50 transition cursor-pointer" onclick="app.openPlayerCard('${p.id}')">
-                        <td class="py-2 px-3 font-sans font-semibold text-slate-900 truncate">
+                        <td class="py-2 px-3 font-sans font-semibold text-slate-900 truncate max-w-[130px]">
                             <span>${p.name}</span>
-                            <span class="text-slate-400 text-[10px] ml-1 font-mono">(${p.archetypeName || 'Athlete'})</span>
+                            <span class="text-slate-400 text-[10px] ml-1 font-mono">(${p.age}yo)</span>
                         </td>
                         <td class="text-center py-2 px-2"><span class="bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded font-bold text-[10px]">${pos}</span></td>
                         <td class="text-center py-2 px-2 font-black text-slate-900">${ovr}</td>
-                        <td class="text-center py-2 px-2 text-slate-600">${p.age}</td>
                         <td class="text-center py-2 px-2 font-bold ${p.potential === 'A' ? 'text-amber-600' : 'text-slate-500'}">${p.potential || '?'}</td>
                         <td class="text-center py-2 px-2 text-blue-600 font-bold">${p.attributes?.physical?.speed || 0}</td>
                         <td class="text-center py-2 px-2 text-slate-700">${p.attributes?.physical?.strength || 0}</td>
+                        <td class="py-2 px-3 font-sans">
+                            <div class="flex items-center gap-1.5 truncate max-w-[240px]">
+                                ${heatBadge}
+                                <span class="text-[10px] text-slate-500 truncate italic" title="${intel.rumorText}">${intel.rumorText}</span>
+                            </div>
+                        </td>
                         <td class="text-right py-2 px-3 font-sans" onclick="event.stopPropagation()">
-                            ${hasBid ? `<span class="bg-amber-100 text-amber-800 border border-amber-300 font-bold px-2 py-0.5 rounded text-[10px]">Bid Active</span>` : `
-                            <button class="bg-slate-900 hover:bg-slate-800 text-white font-bold px-3 py-1 rounded text-[10px] uppercase tracking-wider" onclick="app.openBidModal('${p.id}')">
+                            ${userBid ? `
+                            <button class="bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300 font-bold px-2 py-1 rounded text-[10px] uppercase tracking-tight flex items-center gap-1 shadow-sm transition" onclick="app.openBidModal('${p.id}')" title="Edit your offer">
+                                <span>Bid: ${userBid.offer.role}</span>
+                                <span class="text-amber-700 font-mono">(${userBid.offer.tokensOffered}🪙)</span>
+                                <span>✏️</span>
+                            </button>` : `
+                            <button class="bg-slate-900 hover:bg-slate-800 text-white font-bold px-3 py-1 rounded text-[10px] uppercase tracking-wider transition shadow-sm" onclick="app.openBidModal('${p.id}')">
                                 Bid
                             </button>`}
                         </td>
@@ -1138,26 +1178,66 @@ export function renderPendingBidsList(gameState) {
 
     if (countEl) countEl.textContent = `${offseasonFABids.length} Active`;
 
+    const totalTokens = gameState?.playerTeam?.socialProfile?.favorTokens || 0;
+    const committedTokens = offseasonFABids.reduce((s, b) => s + (b.offer.tokensOffered || 0), 0);
+
     if (offseasonFABids.length === 0) {
-        list.innerHTML = `<p class="text-slate-400 italic text-center py-4 text-[11px]">No bids placed yet today. Click "Bid" on any prospect to make an offer.</p>`;
+        list.innerHTML = `
+            <div class="p-4 text-center text-slate-400 italic text-[11px] bg-slate-50 border border-dashed rounded">
+                No bids placed yet today. Click "Bid" on any prospect to make an offer.
+            </div>`;
         return;
     }
 
-    list.innerHTML = offseasonFABids.map((b, idx) => {
-        const p = Game.getPlayer(b.playerId);
-        return `
-        <div class="bg-slate-50 border border-slate-200 p-2 rounded flex justify-between items-center text-xs">
-            <div>
-                <span class="font-bold text-slate-900">${p?.name || 'Prospect'}</span>
-                <span class="text-[10px] text-slate-500 block">${b.offer.role} • ${b.offer.tokensOffered} Tokens</span>
-            </div>
-            <button class="text-rose-600 hover:text-rose-800 font-bold text-xs p-1" onclick="app.cancelOffseasonBid(${idx})" title="Cancel bid">✕</button>
-        </div>`;
-    }).join('');
+    list.innerHTML = `
+        <div class="text-[10px] font-mono text-slate-500 mb-1 flex justify-between border-b pb-1">
+            <span>Tokens: <b>${committedTokens} Committed</b></span>
+            <span>Available: <b>${Math.max(0, totalTokens - committedTokens)} Left</b></span>
+        </div>
+        <div class="space-y-1.5">
+            ${offseasonFABids.map((b, idx) => {
+                const p = Game.getPlayer(b.playerId);
+                const pos = p ? (p.pos || estimateBestPosition(p)) : 'UTIL';
+                const ovr = p ? calculateOverall(p, pos) : 0;
+                const intel = p ? Game.getPlayerMarketIntel(p, gameState) : { heat: 'QUIET', suitorNames: [] };
+
+                let heatNote = `<span class="text-[9px] text-slate-400 font-mono">💤 Uncontested</span>`;
+                if (intel.heat === 'HOT') heatNote = `<span class="text-[9px] text-rose-600 font-bold font-mono">🔥 vs. ${intel.suitorNames.map(n => n.replace('The ', '')).join(', ')}</span>`;
+                else if (intel.heat === 'WARM') heatNote = `<span class="text-[9px] text-amber-600 font-bold font-mono">💬 vs. ${intel.suitorNames.map(n => n.replace('The ', '')).join(', ')}</span>`;
+
+                return `
+                <div class="bg-slate-50 border border-slate-200 p-2 rounded flex justify-between items-center text-xs hover:border-slate-300 transition">
+                    <div class="truncate pr-2">
+                        <div class="flex items-center gap-1.5">
+                            <span class="font-bold text-slate-900 truncate">${p?.name || 'Prospect'}</span>
+                            <span class="bg-slate-200 text-slate-700 text-[9px] font-mono font-bold px-1 rounded">${pos} ${ovr}</span>
+                        </div>
+                        <div class="text-[10px] text-slate-500 flex items-center gap-1 mt-0.5">
+                            <span class="font-bold text-slate-700">${b.offer.role}</span>
+                            ${b.offer.promiseTouches === 'FEATURED' ? '• <span class="text-blue-600 font-bold">Focal</span>' : ''}
+                            • <span>${b.offer.tokensOffered} Token(s)</span>
+                        </div>
+                        <div class="mt-0.5">${heatNote}</div>
+                    </div>
+                    <div class="flex items-center gap-1 shrink-0">
+                        <button class="text-slate-500 hover:text-slate-800 bg-white border border-slate-200 font-bold text-[10px] px-1.5 py-0.5 rounded shadow-sm" onclick="app.openBidModal('${b.playerId}')" title="Edit offer">✏️</button>
+                        <button class="text-rose-600 hover:text-rose-800 bg-white border border-rose-200 font-bold text-xs px-1.5 py-0.5 rounded shadow-sm" onclick="app.cancelOffseasonBid(${idx})" title="Cancel bid">✕</button>
+                    </div>
+                </div>`;
+            }).join('')}
+        </div>
+    `;
 }
 
 export function getOffseasonFABids() { return offseasonFABids; }
-export function addOffseasonFABid(bid) { offseasonFABids.push(bid); }
+export function addOffseasonFABid(bid) {
+    const existingIndex = offseasonFABids.findIndex(b => b.playerId === bid.playerId);
+    if (existingIndex >= 0) {
+        offseasonFABids[existingIndex] = bid;
+    } else {
+        offseasonFABids.push(bid);
+    }
+}
 export function removeOffseasonFABid(idx) { offseasonFABids.splice(idx, 1); }
 export function getOffseasonFADay() { return offseasonFADay; }
 export function incrementOffseasonFADay() { offseasonFADay++; }

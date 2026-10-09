@@ -918,110 +918,210 @@ window.app = {
     openBidModal: (playerId) => {
         const p = Game.getPlayer(playerId);
         if (!p) return;
-        const availableTokens = gameState?.playerTeam?.socialProfile?.favorTokens || 0;
+
+        const isOffseason = document.getElementById('offseason-fa-screen')?.classList.contains('hidden') === false;
+        const totalTokens = gameState?.playerTeam?.socialProfile?.favorTokens || 0;
+        const pendingBids = isOffseason ? (UI.getOffseasonFABids() || []) : [];
+        const existingBid = pendingBids.find(b => b.playerId === p.id);
+
+        const committedOtherTokens = pendingBids
+            .filter(b => b.playerId !== p.id)
+            .reduce((sum, b) => sum + (b.offer.tokensOffered || 0), 0);
+
+        const maxTokensForThisBid = Math.max(0, totalTokens - committedOtherTokens);
+        const intel = Game.getPlayerMarketIntel(p, gameState);
+
+        const pos = p.pos || Game.estimateBestPosition(p);
+        const ovr = Game.calculateOverall(p, pos);
+
+        const curRole = existingBid?.offer?.role || 'STARTER';
+        const curTouches = existingBid?.offer?.promiseTouches || 'NORMAL';
+        const curTokens = existingBid?.offer?.tokensOffered ?? (maxTokensForThisBid >= 1 ? 0 : 0);
+
+        let heatLabel = '<span class="bg-slate-200 text-slate-700 px-1.5 py-0.5 rounded text-[10px] font-bold">💤 Quiet Market</span>';
+        if (intel.heat === 'HOT') {
+            heatLabel = `<span class="bg-rose-100 text-rose-800 border border-rose-300 px-1.5 py-0.5 rounded text-[10px] font-bold">🔥 Hot Market (Suitors: ${intel.suitorNames.join(', ')})</span>`;
+        } else if (intel.heat === 'WARM') {
+            heatLabel = `<span class="bg-amber-100 text-amber-900 border border-amber-300 px-1.5 py-0.5 rounded text-[10px] font-bold">💬 Moderate Buzz (Suitors: ${intel.suitorNames.join(', ')})</span>`;
+        }
 
         const modalHtml = `
-            <div class="space-y-3 text-left">
-                <div class="p-2.5 bg-slate-50 border rounded flex justify-between items-center text-xs">
+            <div class="space-y-3.5 text-left text-xs">
+                <!-- Prospect Profile Header -->
+                <div class="p-3 bg-slate-900 text-white rounded flex justify-between items-center">
                     <div>
-                        <span class="font-bold text-slate-900 text-sm block">${p.name}</span>
-                        <span class="text-slate-500 font-mono">${p.age}yo • ${p.archetypeName || 'Athlete'}</span>
+                        <div class="flex items-center gap-2">
+                            <span class="font-black text-sm text-white">${p.name}</span>
+                            <span class="bg-slate-800 text-amber-400 font-bold px-1.5 py-0.2 rounded font-mono text-[10px]">${pos}</span>
+                        </div>
+                        <span class="text-slate-400 font-mono text-[11px]">${p.age}yo • ${p.archetypeName || 'Athlete'} • Potential: ${p.potential || 'C'}</span>
                     </div>
-                    <span class="text-sm font-black text-slate-900 bg-white px-2 py-0.5 rounded border">${Game.calculateOverall(p, p.pos || Game.estimateBestPosition(p))} OVR</span>
+                    <div class="text-right">
+                        <span class="text-xl font-black text-white">${ovr}</span>
+                        <span class="text-[9px] text-slate-400 block uppercase font-bold -mt-1">OVR</span>
+                    </div>
                 </div>
-                <div class="grid grid-cols-3 gap-2 text-xs">
-                    <div>
-                        <label class="block text-[10px] text-slate-500 font-bold uppercase mb-1">Role Promised</label>
-                        <select id="bid-role" class="w-full p-1 border rounded bg-white font-bold text-slate-800">
-                            <option value="STARTER">Starter</option>
-                            <option value="ROTATION" selected>Rotation</option>
-                            <option value="BENCH">Reserve</option>
-                        </select>
+
+                <!-- Blacktop Rumors & Grapevine Card -->
+                <div class="p-3 bg-amber-50/80 border border-amber-200 rounded text-slate-800 space-y-1">
+                    <div class="flex justify-between items-center mb-1">
+                        <span class="font-black text-[10px] text-amber-900 uppercase tracking-wider flex items-center gap-1">
+                            <span>🚲</span> Blacktop Grapevine & Market Rumors
+                        </span>
+                        ${heatLabel}
                     </div>
-                    <div>
-                        <label class="block text-[10px] text-slate-500 font-bold uppercase mb-1">Touches</label>
-                        <select id="bid-touches" class="w-full p-1 border rounded bg-white font-bold text-slate-800">
-                            <option value="NORMAL" selected>Normal</option>
-                            <option value="FEATURED">Focal</option>
-                        </select>
+                    <p class="text-[11px] text-slate-700 italic">"${intel.rumorText}"</p>
+                    <div class="text-[10px] text-slate-500 font-mono pt-1 border-t border-amber-200/60 flex flex-wrap gap-2">
+                        <span>Work Ethic: <b>${p.personality?.workEthic || 50}</b></span>
+                        <span>•</span>
+                        <span>Ego: <b class="${(p.personality?.ego || 50) > 70 ? 'text-rose-600' : 'text-slate-700'}">${p.personality?.ego || 50}</b></span>
+                        <span>•</span>
+                        <span>Clique: <b>${p.personality?.clique || 'Regular'}</b></span>
                     </div>
-                    <div>
-                        <label class="block text-[10px] text-slate-500 font-bold uppercase mb-1">Tokens (Have: ${availableTokens})</label>
-                        <select id="bid-tokens" class="w-full p-1 border rounded bg-white font-bold text-slate-800">
-                            <option value="0">0 Tokens</option>
-                            ${availableTokens >= 1 ? '<option value="1">1 Token</option>' : ''}
-                            ${availableTokens >= 2 ? '<option value="2">2 Tokens</option>' : ''}
-                        </select>
+                </div>
+
+                <!-- Contract Terms Form -->
+                <div>
+                    <h5 class="font-black text-xs uppercase tracking-wider text-slate-700 mb-2">Offer Terms & Playing Promise</h5>
+                    <div class="grid grid-cols-3 gap-2.5">
+                        <div>
+                            <label class="block text-[10px] text-slate-500 font-bold uppercase mb-1">Role Promised</label>
+                            <select id="bid-role" class="w-full p-1.5 border border-slate-300 rounded bg-white font-bold text-slate-800 outline-none">
+                                <option value="STARTER" ${curRole === 'STARTER' ? 'selected' : ''}>Starter (Promised)</option>
+                                <option value="ROTATION" ${curRole === 'ROTATION' ? 'selected' : ''}>Rotation (Core Sub)</option>
+                                <option value="BENCH" ${curRole === 'BENCH' ? 'selected' : ''}>Reserve (Depth)</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-[10px] text-slate-500 font-bold uppercase mb-1">Touches</label>
+                            <select id="bid-touches" class="w-full p-1.5 border border-slate-300 rounded bg-white font-bold text-slate-800 outline-none">
+                                <option value="NORMAL" ${curTouches === 'NORMAL' ? 'selected' : ''}>Standard</option>
+                                <option value="FEATURED" ${curTouches === 'FEATURED' ? 'selected' : ''}>Focal Option</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-[10px] text-slate-500 font-bold uppercase mb-1">Favor Tokens</label>
+                            <select id="bid-tokens" class="w-full p-1.5 border border-slate-300 rounded bg-white font-bold text-slate-800 outline-none">
+                                <option value="0" ${curTokens === 0 ? 'selected' : ''}>0 Tokens</option>
+                                ${maxTokensForThisBid >= 1 ? `<option value="1" ${curTokens === 1 ? 'selected' : ''}>1 Token</option>` : ''}
+                                ${maxTokensForThisBid >= 2 ? `<option value="2" ${curTokens === 2 ? 'selected' : ''}>2 Tokens</option>` : ''}
+                            </select>
+                        </div>
                     </div>
+                </div>
+
+                <div class="text-[10px] text-slate-500 bg-slate-50 p-2 rounded border border-slate-200">
+                    Favor Tokens: <b>${maxTokensForThisBid} Available for this bid</b> (Total: ${totalTokens}, Committed to other active offers: ${committedOtherTokens}).
                 </div>
             </div>
         `;
 
-        UI.showModal(`Submit Offer: ${p.name}`, modalHtml, () => {
-            const role = document.getElementById('bid-role')?.value || 'ROTATION';
+        UI.showModal(`Recruit Prospect: ${p.name}`, modalHtml, () => {
+            const role = document.getElementById('bid-role')?.value || 'STARTER';
             const promiseTouches = document.getElementById('bid-touches')?.value || 'NORMAL';
             const tokensOffered = parseInt(document.getElementById('bid-tokens')?.value || '0', 10);
 
-            // In Offseason Mini-Game: Queue bid for end-of-day resolution
-            if (document.getElementById('offseason-fa-screen')?.classList.contains('hidden') === false) {
+            if (isOffseason) {
                 UI.addOffseasonFABid({ playerId: p.id, offer: { role, promiseTouches, tokensOffered } });
                 UI.renderOffseasonFAScreen(gameState);
             } else {
-                // In-Season Bidding: Check for instant commit or queue for end-of-week
                 const evalResult = Game.evaluatePlayerNegotiation(p, gameState.playerTeam, { role, promiseTouches, tokensOffered });
                 const isInstant = Game.checkInstantCommit(p, gameState.playerTeam, evalResult, { role, promiseTouches, tokensOffered });
 
                 if (isInstant) {
                     Game.playerSignFreeAgent(p.id, { role, promiseTouches, tokensOffered });
-                    alert(`⚡ INSTANT COMMITMENT!\n\n${p.name} was blown away by your offer and immediately signed with ${gameState.playerTeam.name}!`);
+                    alert(`⚡ INSTANT COMMITMENT!\n\n${p.name} loved your offer and signed immediately with ${gameState.playerTeam.name}!`);
                 } else if (evalResult.accepted) {
                     gameState.weeklyBids = gameState.weeklyBids || [];
                     gameState.weeklyBids.push({ playerId: p.id, team: gameState.playerTeam, teamId: gameState.playerTeam.id, offer: { role, promiseTouches, tokensOffered } });
-                    alert(`📋 Offer Submitted!\n\n${p.name} is considering your proposal alongside other interest. Bids will resolve at the end of the week.`);
+                    alert(`📋 Offer Submitted!\n\n${p.name} is considering your offer alongside other interest. Bids resolve at the end of the week.`);
                 } else {
-                    alert(`✋ Pitch Rejected: ${evalResult.reasons.join('\n• ')}`);
+                    alert(`✋ Offer Declined: ${evalResult.reasons.join('\n• ')}`);
                 }
                 UI.switchTab('free-agents', gameState);
             }
-        }, "Submit Offer");
+        }, existingBid ? "Update Offer" : "Submit Offer");
     },
+
     cancelOffseasonBid: (idx) => {
         UI.removeOffseasonFABid(idx);
         UI.renderOffseasonFAScreen(gameState);
     },
+
     advanceOffseasonFADay: () => {
         const currentDay = UI.getOffseasonFADay();
         const userBids = UI.getOffseasonFABids();
-        const signings = Game.processOffseasonFADay(gameState, userBids);
+        const result = Game.processOffseasonFADay(gameState, userBids);
+        const { daySignings, userBidResults, rejectedBids } = result;
 
-        // Update ticker and report
         const wireList = document.getElementById('fa-daily-wire-list');
         if (wireList) {
-            const dayHtml = signings.map(s => `
-                <div class="bg-slate-50 border p-1.5 rounded text-[11px]">
+            let feedbackHtml = '';
+
+            // 1. Highlight user bid outcomes prominently
+            if (userBidResults && userBidResults.length > 0) {
+                feedbackHtml += `
+                    <div class="mb-2 p-2 rounded bg-amber-50 border border-amber-300 space-y-1">
+                        <span class="text-[9px] font-black uppercase text-amber-900 block tracking-wider">Your Offer Results (Day ${currentDay}):</span>
+                        ${userBidResults.map(r => `
+                            <div class="text-[11px] font-bold ${r.won ? 'text-emerald-700' : 'text-rose-700'}">
+                                ${r.message}
+                            </div>
+                        `).join('')}
+                    </div>
+                `;
+            }
+
+            // 2. League-wide signings for this day
+            const signingsHtml = daySignings.map(s => `
+                <div class="bg-slate-50 border p-1.5 rounded text-[11px] ${s.userWon ? 'border-emerald-300 bg-emerald-50/50 font-bold' : ''}">
                     <span class="font-bold text-slate-900">${s.player.name}</span> signed with <b class="text-blue-700">${s.team.name}</b>
-                    ${s.runnerUp ? `<span class="text-slate-400 block text-[9px]">(Chose over ${s.runnerUp.name})</span>` : ''}
+                    ${s.tokens > 0 ? `<span class="text-[9px] text-amber-600 font-mono">(${s.tokens}🪙)</span>` : ''}
+                    ${s.runnerUp ? `<span class="text-slate-400 block text-[9px] font-normal">(Chose over ${s.runnerUp.name})</span>` : ''}
                 </div>
             `).join('') || '<p class="text-slate-400 italic text-[11px]">No signings reached consensus today.</p>';
 
-            wireList.innerHTML = `<div class="font-bold text-[10px] text-amber-700 border-b pb-0.5 mb-1 uppercase">Day ${currentDay} Signings</div>` + dayHtml;
+            wireList.innerHTML = `<div class="font-bold text-[10px] text-slate-700 border-b pb-0.5 mb-1 uppercase tracking-wider">Day ${currentDay} Signings & Wire</div>` + feedbackHtml + signingsHtml;
         }
 
         if (currentDay >= 3) {
-            alert("🏆 Free Agency has officially concluded! Time to take the field for Season Kickoff.");
-            finishOffseasonFAMinigame();
+            // Day 3 concluded: Update button and display recap modal
+            const advanceBtn = document.getElementById('fa-advance-day-btn');
+            if (advanceBtn) {
+                advanceBtn.textContent = "🏆 Proceed to Season Kickoff (Week 1) →";
+                advanceBtn.className = "bg-blue-700 hover:bg-blue-800 text-white font-black px-4 py-2 rounded text-xs uppercase tracking-wider shadow-md animate-pulse";
+                advanceBtn.onclick = () => window.app.finishOffseasonFAMinigame();
+            }
+
+            const mySignings = (daySignings || []).filter(s => s.userWon);
+            const recapHtml = `
+                <div class="space-y-3 text-left text-xs">
+                    <p class="text-slate-700 leading-relaxed">
+                        Free Agency has concluded! Your front office has finished recruitment before Week 1.
+                    </p>
+                    <div class="p-3 bg-slate-50 border border-slate-200 rounded space-y-1">
+                        <span class="font-black text-slate-900 block text-xs uppercase">Your Final Roster Count</span>
+                        <p class="font-bold text-emerald-700 text-sm">${gameState.playerTeam.roster.length} / 18 Players Under Contract</p>
+                        <p class="text-[11px] text-slate-500 font-mono">Favor Tokens Remaining: ${gameState.playerTeam.socialProfile?.favorTokens || 0}</p>
+                    </div>
+                </div>
+            `;
+            UI.showModal("Free Agency Concluded", recapHtml, () => {
+                window.app.finishOffseasonFAMinigame();
+            }, "Proceed to Kickoff");
         } else {
             UI.incrementOffseasonFADay();
             UI.clearOffseasonFABids();
             UI.renderOffseasonFAScreen(gameState);
         }
     },
-    renderFAPool: () => {
-        UI.renderOffseasonFAPool(gameState);
+
+    finishOffseasonFAMinigame: () => {
+        finishOffseasonFAMinigame();
     },
+
     negotiatePlayer: (id) => {
         app.openBidModal(id);
-        UI.hideModal();
     },
     handleSaveTestRoster,
     openPlayerCard,

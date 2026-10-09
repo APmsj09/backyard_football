@@ -1013,20 +1013,26 @@ export function callFriend(playerId) {
 }
 
 export function processOffseasonFADay(gameState, userBids = []) {
-    if (!gameState || !gameState.players) return [];
+    if (!gameState || !gameState.players) return { daySignings: [], rejectedBids: [], userBidResults: [] };
 
     const activeTeams = gameState.teams.filter(t => t.leagueType === 'main');
     const daySignings = [];
+    const rejectedBids = [];
+    const userBidResults = [];
     const playerBidsMap = new Map();
 
-    // 1. Register User Bids
+    // 1. Register User Bids (deduplicated by playerId)
+    const seenUserPlayerIds = new Set();
     userBids.forEach(ub => {
+        if (seenUserPlayerIds.has(ub.playerId)) return;
+        seenUserPlayerIds.add(ub.playerId);
+
         const pList = playerBidsMap.get(ub.playerId) || [];
         pList.push({ team: gameState.playerTeam, teamId: gameState.playerTeam.id, offer: ub.offer });
         playerBidsMap.set(ub.playerId, pList);
     });
 
-    // 2. Generate Intelligent AI Bids
+    // 2. Generate Intelligent AI Bids based on actual team deficits and rumor targets
     const positions = ['QB', 'RB', 'WR', 'TE', 'OL', 'DL', 'LB', 'DB'];
     const idealCounts = { QB: 1, RB: 2, WR: 3, TE: 1, OL: 3, DL: 3, LB: 2, DB: 3 };
 
@@ -1036,37 +1042,63 @@ export function processOffseasonFADay(gameState, userBids = []) {
         const roster = getRosterObjects(aiTeam);
         const tokensAvailable = aiTeam.socialProfile?.favorTokens || 0;
 
-        // Find biggest positional hole
         const needs = positions.map(pos => {
             const count = roster.filter(p => isPlayerViableForPosition(p, pos)).length;
-            return { pos, deficit: idealCounts[pos] - count };
-        }).sort((a, b) => b.deficit - a.deficit);
+            return { pos, deficit: idealCounts[pos] - count, currentCount: count };
+        }).filter(n => n.deficit > 0).sort((a, b) => b.deficit - a.deficit);
 
-        const primaryNeed = needs[0]?.pos;
-        if (!primaryNeed) return;
+        if (needs.length === 0) return;
 
-        // Find top unassigned prospect matching need
-        const candidate = gameState.players.find(p =>
-            !p.teamId &&
-            p.status?.type !== 'retired' &&
-            p.status?.type !== 'departed' &&
-            p.age >= 12 && p.age <= 18 &&
-            isPlayerViableForPosition(p, primaryNeed) &&
-            !playerBidsMap.get(p.id)?.some(b => b.teamId === aiTeam.id)
-        );
+        const targetPositions = needs.slice(0, 2);
 
-        if (candidate) {
-            const tokensToSpend = tokensAvailable > 0 && Math.random() < 0.45 ? 1 : 0;
+        targetPositions.forEach(need => {
+            const candidates = gameState.players.filter(p =>
+                !p.teamId &&
+                p.status?.type !== 'retired' &&
+                p.status?.type !== 'departed' &&
+                p.age >= 12 && p.age <= 18 &&
+                isPlayerViableForPosition(p, need.pos) &&
+                !playerBidsMap.get(p.id)?.some(b => b.teamId === aiTeam.id)
+            );
+
+            if (candidates.length === 0) return;
+
+            candidates.sort((a, b) => {
+                const ovrA = calculateOverall(a, need.pos);
+                const ovrB = calculateOverall(b, need.pos);
+                const friendsA = roster.filter(r => a.social?.goodFriendIds?.includes(r.id)).length;
+                const friendsB = roster.filter(r => b.social?.goodFriendIds?.includes(r.id)).length;
+                return (ovrB + friendsB * 6) - (ovrA + friendsA * 6);
+            });
+
+            const target = candidates[0];
+            if (!target) return;
+
+            const targetOvr = calculateOverall(target, need.pos);
+            const role = need.currentCount === 0 || targetOvr >= 50 ? 'STARTER' : (target.expectations?.desiredRole || 'ROTATION');
+            const promiseTouches = (target.personality?.ego > 65 && ['QB', 'RB', 'WR'].includes(need.pos)) ? 'FEATURED' : 'NORMAL';
+
+            // Spend a token if user is contesting or target is a high-OVR recruit
+            const isUserContesting = userBids.some(ub => ub.playerId === target.id);
+            let tokensToSpend = 0;
+            if (tokensAvailable > 0) {
+                if (isUserContesting && Math.random() < 0.60) {
+                    tokensToSpend = 1;
+                } else if ((targetOvr >= 52 || target.potential === 'A') && Math.random() < 0.40) {
+                    tokensToSpend = 1;
+                }
+            }
+
             const offer = {
-                role: candidate.expectations?.desiredRole || 'ROTATION',
-                promiseTouches: candidate.personality?.ego > 65 ? 'FEATURED' : 'NORMAL',
+                role,
+                promiseTouches,
                 tokensOffered: tokensToSpend
             };
 
-            const pList = playerBidsMap.get(candidate.id) || [];
+            const pList = playerBidsMap.get(target.id) || [];
             pList.push({ team: aiTeam, teamId: aiTeam.id, offer });
-            playerBidsMap.set(candidate.id, pList);
-        }
+            playerBidsMap.set(target.id, pList);
+        });
     });
 
     // 3. Resolve Bids for Each Contested Player
@@ -1075,6 +1107,8 @@ export function processOffseasonFADay(gameState, userBids = []) {
         if (!player || player.teamId) return;
 
         const resolution = resolvePlayerBiddingWar(player, bids);
+        const userBidOnThisPlayer = bids.find(b => b.teamId === gameState.playerTeam.id);
+
         if (resolution?.winner) {
             const win = resolution.winner;
             const team = win.team;
@@ -1091,17 +1125,58 @@ export function processOffseasonFADay(gameState, userBids = []) {
             if (addPlayerToTeam(player, team)) {
                 player.status = { type: 'healthy', description: '', duration: 0 };
                 aiSetDepthChart(team);
-                daySignings.push({
+
+                const signingRecord = {
                     player,
                     team,
                     runnerUp: resolution.competingBids[1]?.team || null,
-                    tokens: win.offer.tokensOffered
+                    tokens: win.offer.tokensOffered,
+                    userWon: team.id === gameState.playerTeam.id,
+                    wasUserBid: !!userBidOnThisPlayer
+                };
+
+                daySignings.push(signingRecord);
+
+                if (userBidOnThisPlayer) {
+                    if (team.id === gameState.playerTeam.id) {
+                        const runnerUpName = resolution.competingBids[1]?.team?.name;
+                        userBidResults.push({
+                            player,
+                            won: true,
+                            tokensSpent: win.offer.tokensOffered,
+                            message: `🎉 SIGNED! ${player.name} accepted your offer!${runnerUpName ? ` (Beat out ${runnerUpName})` : ''}`
+                        });
+                    } else {
+                        userBidResults.push({
+                            player,
+                            won: false,
+                            winnerTeam: team.name,
+                            message: `❌ MISSED! ${player.name} signed with ${team.name} instead of your squad.`
+                        });
+                    }
+                }
+            }
+        } else {
+            const reason = resolution?.rejectedReason || "Offers didn't satisfy player expectations.";
+            rejectedBids.push({ player, reason });
+
+            if (userBidOnThisPlayer) {
+                userBidResults.push({
+                    player,
+                    won: false,
+                    rejected: true,
+                    message: `✋ REJECTED: ${player.name} rejected your pitch: ${reason}`
                 });
             }
         }
     });
 
-    return daySignings;
+    // Clear rumors cache so the next day generates fresh market chatter
+    import('./negotiations.js').then(n => {
+        if (n.clearPlayerMarketCache) n.clearPlayerMarketCache(gameState);
+    }).catch(() => {});
+
+    return { daySignings, rejectedBids, userBidResults };
 }
 
 export function autoFillTeamWalkOns(team, targetSize = 14) {

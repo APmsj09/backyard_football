@@ -15,6 +15,11 @@ export * from './game/play_resolution.js';
 export * from './game/telemetry.js';
 export * from './game/staff.js';
 export * from './game/negotiations.js';
+export {
+    generatePlayerRumors,
+    getPlayerMarketIntel,
+    clearPlayerMarketCache
+} from './game/negotiations.js';
 
 import { getRosterObjects } from './game/state.js';
 import { changeFormation } from './game/depth_chart.js';
