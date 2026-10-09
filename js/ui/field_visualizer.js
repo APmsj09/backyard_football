@@ -25,6 +25,12 @@ export function showPlayOverlay(text) {
 export function drawFieldVisualization(canvas, ctx, frameData, homeColor = '#0000aa', awayColor = '#aa0000', homeName = 'HOME', awayName = 'AWAY') {
     if (!canvas || !ctx || !frameData) return;
 
+    // Dynamically match internal canvas resolution to full container display size
+    if (canvas.clientWidth > 0 && (canvas.width !== canvas.clientWidth || canvas.height !== canvas.clientHeight)) {
+        canvas.width = canvas.clientWidth;
+        canvas.height = canvas.clientHeight;
+    }
+
     const w = canvas.width;
     const h = canvas.height;
     if (w === 0 || h === 0) return;
@@ -33,11 +39,15 @@ export function drawFieldVisualization(canvas, ctx, frameData, homeColor = '#000
     const VIEW_LENGTH_YARDS = w / ppY;
     const ballY = frameData.ball ? frameData.ball.y : 60;
 
-    const MIN_CAM_Y = 0;
-    const MAX_CAM_Y = FIELD_LENGTH_YARDS - VIEW_LENGTH_YARDS;
-
-    let camBottomY = ballY - (VIEW_LENGTH_YARDS / 2);
-    camBottomY = Math.max(MIN_CAM_Y, Math.min(MAX_CAM_Y, camBottomY));
+    // Smooth widescreen camera positioning
+    let camBottomY = 0;
+    if (VIEW_LENGTH_YARDS >= FIELD_LENGTH_YARDS) {
+        camBottomY = (FIELD_LENGTH_YARDS - VIEW_LENGTH_YARDS) / 2;
+    } else {
+        camBottomY = ballY - (VIEW_LENGTH_YARDS / 2);
+        const maxCamY = FIELD_LENGTH_YARDS - VIEW_LENGTH_YARDS;
+        camBottomY = Math.max(0, Math.min(maxCamY, camBottomY));
+    }
 
     const toScreenX = (fieldY) => (fieldY - camBottomY) * ppY;
     const toScreenY = (fieldX) => (fieldX + PADDING_Y_YARDS) * ppY;
@@ -216,13 +226,14 @@ export function drawFieldVisualization(canvas, ctx, frameData, homeColor = '#000
         frameData.players.forEach(p => {
             const px = toScreenX(p.y);
             const py = toScreenY(p.x);
-            const baseSize = ppY * 0.7;
-            const weightScale = 0.7 + ((p.wgt || 200) / 300);
-            const heightScale = 0.8 + ((p.hgt || 70) / 100);
+            // Boosted scale: ~2x larger player models for clear arcade readability
+            const baseSize = ppY * 1.35;
+            const weightScale = 0.75 + ((p.wgt || 200) / 350);
+            const heightScale = 0.85 + ((p.hgt || 70) / 120);
 
             ctx.save();
-            let jitterX = p.isStunned ? (Math.random() - 0.5) * 2 : 0;
-            let jitterY = p.isStunned ? (Math.random() - 0.5) * 2 : 0;
+            let jitterX = p.isStunned ? (Math.random() - 0.5) * 3 : 0;
+            let jitterY = p.isStunned ? (Math.random() - 0.5) * 3 : 0;
             ctx.translate(px + jitterX, py + jitterY);
 
             ctx.save();
@@ -231,34 +242,37 @@ export function drawFieldVisualization(canvas, ctx, frameData, homeColor = '#000
             const jerseyColor = p.isStunned ? "#4b5563" : (p.primaryColor || "#333");
             const helmetColor = p.isStunned ? "#9ca3af" : (p.secondaryColor || "#fff");
 
+            // Chunkier shoulder pads
             ctx.fillStyle = jerseyColor;
-            const padThickness = baseSize * heightScale;
-            const padWidth = baseSize * 2.2 * weightScale;
+            const padThickness = baseSize * 0.9 * heightScale;
+            const padWidth = baseSize * 2.1 * weightScale;
 
             ctx.beginPath();
-            ctx.roundRect(-padThickness / 2, -padWidth / 2, padThickness, padWidth, 4);
+            ctx.roundRect(-padThickness / 2, -padWidth / 2, padThickness, padWidth, 6);
             ctx.fill();
-            ctx.strokeStyle = "rgba(0,0,0,0.6)";
-            ctx.lineWidth = 1.2;
+            ctx.strokeStyle = "rgba(0,0,0,0.7)";
+            ctx.lineWidth = 1.5;
             ctx.stroke();
 
+            // Sizable helmet with face mask bar
             ctx.fillStyle = helmetColor;
-            const helmetRadius = baseSize * 0.7 * (0.9 + (p.hgt || 70) / 150);
+            const helmetRadius = baseSize * 0.65 * (0.9 + (p.hgt || 70) / 150);
             ctx.beginPath();
             ctx.arc(padThickness * 0.2, 0, helmetRadius, 0, Math.PI * 2);
             ctx.fill();
 
             ctx.strokeStyle = "#111";
-            ctx.lineWidth = ppY * 0.18;
+            ctx.lineWidth = Math.max(2, ppY * 0.22);
             ctx.beginPath();
             ctx.arc(padThickness * 0.2, 0, helmetRadius, -Math.PI / 3, Math.PI / 3);
             ctx.stroke();
 
+            // Bold, highly legible jersey number
             if (!p.isStunned && p.number) {
                 ctx.save();
                 ctx.rotate(-p.angle);
                 ctx.fillStyle = p.secondaryColor || "#fff";
-                ctx.font = `bold ${ppY * 0.65 * weightScale}px Arial`;
+                ctx.font = `black ${Math.max(10, baseSize * 0.65 * weightScale)}px sans-serif`;
                 ctx.textAlign = "center";
                 ctx.textBaseline = "middle";
                 ctx.fillText(p.number, 0, 0);
@@ -355,7 +369,8 @@ export function drawFieldVisualization(canvas, ctx, frameData, homeColor = '#000
         const bx = toScreenX(frameData.ball.y);
         const by = toScreenY(frameData.ball.x);
         const bz = frameData.ball.z || 0;
-        const ballRadius = ppY * 0.35 * (1 + bz * 0.15);
+        // Scaled up ball radius for clear visibility in flight and on the ground
+        const ballRadius = ppY * 0.55 * (1 + bz * 0.2);
 
         ctx.fillStyle = `rgba(0,0,0,${Math.max(0.15, 0.5 - bz * 0.1)})`;
         ctx.beginPath();
