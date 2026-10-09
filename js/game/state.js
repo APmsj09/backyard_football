@@ -384,25 +384,46 @@ const DEFAULT_SAVE_KEY = 'backyardFootballGameState';
 export function saveGameState(saveKey = DEFAULT_SAVE_KEY) {
     try {
         const dataToSave = { ...game };
-        delete dataToSave.relationships; // Removed massive bloat!
+        delete dataToSave.relationships;
+        delete dataToSave._faMarketCache;
 
-        // 🚀 COMPRESSION & EFFICIENCY FIXES
-        // Strip out bloated, transient, and unnecessary data before serialization
-        dataToSave.players = (dataToSave.players || []).map(p => {
-            const cleanP = { ...p };
-            delete cleanP.gameStats;     // Transient in-game stats
-            delete cleanP.fatigue;       // Transient energy
-            delete cleanP.isResting;
-            delete cleanP._distToCarrier;
-            delete cleanP.velocity;
-            
-            // If completely healthy, don't store the verbose status object
-            if (cleanP.status && cleanP.status.type === 'healthy' && cleanP.status.duration === 0) {
-                delete cleanP.status;
-            }
-            return cleanP;
-        });
+        // 1. COMPRESS SCHEDULE: Store IDs only (prevents serializing 230+ full team objects)
+        if (Array.isArray(dataToSave.schedule)) {
+            dataToSave.schedule = dataToSave.schedule.map(m => ({
+                homeId: m.home?.id || m.homeId,
+                awayId: m.away?.id || m.awayId
+            }));
+        }
 
+        // 2. PURGE DEPARTED/RETIRED NON-HOF PLAYERS & COMPACT ACTIVE PLAYERS
+        const hofIds = new Set((game.hallOfFame || []).map(p => p.id));
+        dataToSave.players = (dataToSave.players || [])
+            .filter(p => {
+                if (p.status?.type === 'retired' || p.status?.type === 'departed') {
+                    return hofIds.has(p.id);
+                }
+                return true;
+            })
+            .map(p => {
+                const cleanP = { ...p };
+                delete cleanP.gameStats;
+                delete cleanP.fatigue;
+                delete cleanP.isResting;
+                delete cleanP._distToCarrier;
+                delete cleanP.velocity;
+                delete cleanP.scouting;
+
+                if (cleanP.progression && cleanP.progression.length > 5) {
+                    cleanP.progression = cleanP.progression.slice(-5);
+                }
+
+                if (cleanP.status && cleanP.status.type === 'healthy' && cleanP.status.duration === 0) {
+                    delete cleanP.status;
+                }
+                return cleanP;
+            });
+
+        // 3. CLEAN TEAMS
         dataToSave.teams = (dataToSave.teams || []).map(team => {
             const cleanTeam = { ...team };
             delete cleanTeam.recentPlayHistory;
@@ -410,33 +431,60 @@ export function saveGameState(saveKey = DEFAULT_SAVE_KEY) {
             return cleanTeam;
         });
 
-        // Aggressive limiting on bloated arrays
-        if (dataToSave.messages?.length > 25) {
-            dataToSave.messages = dataToSave.messages.slice(0, 25);
+        // 4. CAP ARRAY HISTORIES
+        if (dataToSave.messages?.length > 20) {
+            dataToSave.messages = dataToSave.messages.slice(0, 20);
         }
 
         if (dataToSave.gameResults) {
-            dataToSave.gameResults = dataToSave.gameResults.slice(-10).map(res => ({
+            dataToSave.gameResults = dataToSave.gameResults.slice(-8).map(res => ({
                 ...res,
-                gameLog: [] // NEVER save full logs
+                gameLog: []
             }));
         }
 
-        if (dataToSave.pickHistory?.length > 100) {
-            dataToSave.pickHistory = dataToSave.pickHistory.slice(-100);
+        if (dataToSave.pickHistory?.length > 60) {
+            dataToSave.pickHistory = dataToSave.pickHistory.slice(-60);
+        }
+
+        if (dataToSave.history?.seasons?.length > 12) {
+            dataToSave.history.seasons = dataToSave.history.seasons.slice(-12);
         }
 
         localStorage.setItem(saveKey, JSON.stringify(dataToSave));
     } catch (e) {
-        console.error('Save failed. LocalStorage limit likely reached:', e);
-        // Fallback: Ultra aggressive wipe
-        if (game?.gameResults) game.gameResults = [];
-        if (game?.messages) game.messages = [];
-        if (game?.pickHistory) game.pickHistory = [];
+        console.warn('Primary save exceeded quota. Running emergency compression...', e);
         try {
-            localStorage.setItem(saveKey, JSON.stringify(game));
-        } catch(fallbackErr) {
-            console.error('Critical save failure.', fallbackErr);
+            // Emergency compression pass
+            const dataToSave = { ...game };
+            delete dataToSave.relationships;
+            delete dataToSave._faMarketCache;
+            delete dataToSave.messages;
+            delete dataToSave.gameResults;
+            delete dataToSave.pickHistory;
+
+            if (Array.isArray(dataToSave.schedule)) {
+                dataToSave.schedule = dataToSave.schedule.map(m => ({
+                    homeId: m.home?.id || m.homeId,
+                    awayId: m.away?.id || m.awayId
+                }));
+            }
+
+            const hofIds = new Set((game.hallOfFame || []).map(p => p.id));
+            dataToSave.players = (dataToSave.players || [])
+                .filter(p => !p.status || p.status.type !== 'retired')
+                .map(p => {
+                    const cp = { ...p };
+                    delete cp.gameStats;
+                    delete cp.bio;
+                    delete cp.scouting;
+                    if (cp.progression) cp.progression = cp.progression.slice(-2);
+                    return cp;
+                });
+
+            localStorage.setItem(saveKey, JSON.stringify(dataToSave));
+        } catch (fallbackErr) {
+            console.error('Critical save failure:', fallbackErr);
         }
     }
 }

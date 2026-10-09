@@ -1,7 +1,7 @@
 //play_execution.js
 
 import { getDistance } from './physics.js';
-import { getPlayer } from './state.js';
+import { getPlayer, game } from './state.js';
 import {
     routeTree, offenseFormations, defenseFormations, defensivePlaybook
 } from '../data.js';
@@ -36,6 +36,8 @@ export function setupInitialPlayerStates(playState, offense, defense, play, assi
     playState.type = play.type;
     playState.readProgression = play.readProgression || [];
     playState.playKey = offensivePlayKey || null;
+    playState.offenseTeam = offense;
+    playState.defenseTeam = defense;
 
     playState.defensivePlayKey = defensivePlayKey;
     let defPlay = defensivePlaybook[defensivePlayKey] || defensivePlaybook['Cover_2_Zone_Base'] || { name: 'Emergency Default', assignments: {} };
@@ -836,7 +838,7 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
 
                     // PLAY MASTERY EXECUTION IMPACT
                     const playKey = playState.playKey || '';
-                    const offTeam = game?.teams?.find(t => t.id === pState.teamId);
+                    const offTeam = playState.offenseTeam || game?.teams?.find(t => t && t.id === pState.teamId);
                     const mastery = offTeam?.gameplan?.mastery?.[playKey] ?? 70;
 
                     // 1. Raw / Unpracticed (<45%): Assignment Hesitation & Blown Cuts
