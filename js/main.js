@@ -756,6 +756,7 @@ export function openPlayerCard(playerId) {
                 <div class="bg-white p-3 rounded border border-slate-200">
                     <h5 class="font-bold text-xs uppercase text-slate-400 tracking-wider mb-2 border-b pb-1">Mental & IQ</h5>
                     ${renderAttrBar('Playbook IQ', ment.playbookIQ || 50)}
+                    ${renderAttrBar('Decision Making', ment.decisionMaking || 50)}
                     ${renderAttrBar('Toughness', ment.toughness || 50)}
                     ${renderAttrBar('Consistency', ment.consistency || 50)}
                     ${renderAttrBar('Clutch', ment.clutch || 50)}
@@ -783,7 +784,10 @@ export function openPlayerCard(playerId) {
 
             <!-- Bottom Actions -->
             ${isMyTeam ? `
-                <div class="pt-2 border-t border-slate-200 flex justify-end">
+                <div class="pt-2 border-t border-slate-200 flex justify-between items-center">
+                    <button class="bg-slate-800 hover:bg-slate-700 text-amber-400 border border-slate-600 px-3 py-1.5 rounded font-bold text-xs uppercase tracking-wider shadow-sm flex items-center gap-1.5 transition" onclick="app.openPositionDialog('${player.id}')">
+                        <span>💬</span> Talk Position Change
+                    </button>
                     <button class="bg-rose-700 hover:bg-rose-800 text-white px-4 py-1.5 rounded font-bold text-xs uppercase tracking-wider shadow-sm" onclick="app.cutPlayer('${player.id}')">Release Player</button>
                 </div>
             ` : (!player.teamId ? `
@@ -1046,6 +1050,88 @@ window.app = {
     cancelOffseasonBid: (idx) => {
         UI.removeOffseasonFABid(idx);
         UI.renderOffseasonFAScreen(gameState);
+    },
+
+    openPositionDialog: (playerId) => {
+        const p = Game.getPlayer(playerId);
+        if (!p) return;
+
+        const currentPos = p.pos || Game.estimateBestPosition(p);
+        const positions = ['QB', 'RB', 'WR', 'TE', 'OL', 'DL', 'LB', 'DB'].filter(pos => pos !== currentPos);
+        const tokens = gameState?.playerTeam?.socialProfile?.favorTokens || 0;
+
+        const modalHtml = `
+            <div class="space-y-3.5 text-left text-xs">
+                <div class="bg-slate-900 text-white p-3 rounded flex justify-between items-center">
+                    <div>
+                        <h4 class="font-black text-sm text-white">${p.name}</h4>
+                        <span class="text-slate-400 font-mono text-[11px]">Current: <b class="text-amber-400">${currentPos}</b> • Ethic: ${p.personality?.workEthic || 50} • Ego: ${p.personality?.ego || 50}</span>
+                    </div>
+                    <span class="text-[10px] bg-slate-800 text-slate-300 font-bold px-2 py-1 rounded border border-slate-700">Tokens: ${tokens}</span>
+                </div>
+
+                <div>
+                    <label class="block text-[10px] font-black uppercase tracking-wider text-slate-600 mb-1">Proposed New Position</label>
+                    <select id="target-pos-select" class="w-full p-2 border border-slate-300 rounded font-bold text-slate-800 bg-white text-xs outline-none">
+                        ${positions.map(pos => `<option value="${pos}">${pos} (${Game.calculateOverall(p, pos)} OVR suitability)</option>`).join('')}
+                    </select>
+                </div>
+
+                <div class="p-2.5 bg-amber-50 border border-amber-200 rounded text-slate-700 italic text-[11px]">
+                    "Kids with high ego will resist moving from glamour positions (QB/WR) to the trenches. Grinders with high work ethic will play wherever the squad needs them."
+                </div>
+            </div>
+        `;
+
+        UI.showModal(`Sideline Conversation: ${p.name}`, modalHtml, () => {
+            const targetPos = document.getElementById('target-pos-select')?.value;
+            const res = Game.discussPositionChange(p, targetPos, gameState.playerTeam, false);
+
+            const resultHtml = `
+                <div class="space-y-3 text-left text-xs">
+                    <div class="p-3 rounded border ${res.accepted ? 'bg-emerald-50 border-emerald-300 text-emerald-950' : 'bg-rose-50 border-rose-300 text-rose-950'}">
+                        <div class="flex items-center gap-2 mb-1">
+                            <span class="text-base">${res.accepted ? '✅' : '❌'}</span>
+                            <h4 class="font-black text-sm uppercase">${res.accepted ? 'Agreed to Switch!' : 'Refused Position Change'}</h4>
+                        </div>
+                        <p class="italic text-[11px] leading-relaxed mb-2">${res.quote}</p>
+                    </div>
+
+                    <div class="bg-slate-50 border border-slate-200 p-2 rounded">
+                        <span class="font-bold text-[10px] uppercase text-slate-500 block mb-1">Conversation Factors:</span>
+                        <ul class="text-[11px] font-mono space-y-0.5 text-slate-700">
+                            ${res.reasons.map(r => `<li>• ${r}</li>`).join('')}
+                        </ul>
+                    </div>
+
+                    ${res.canPersuade && tokens > 0 ? `
+                    <div class="p-2 bg-blue-50 border border-blue-200 rounded text-blue-900 flex justify-between items-center">
+                        <span>He's on the fence. Offer 1 Favor Token (candy/bike bribe) to convince him?</span>
+                        <button class="bg-blue-600 hover:bg-blue-700 text-white font-bold px-3 py-1 rounded text-[10px] uppercase" onclick="app.persuadePosition('${p.id}', '${targetPos}')">Persuade (1🪙)</button>
+                    </div>` : ''}
+                </div>
+            `;
+
+            if (res.accepted) {
+                Game.rebuildDepthChartFromOrder(gameState.playerTeam);
+                Game.saveGameState();
+                UI.renderDashboard(gameState);
+            }
+
+            UI.showModal("Conversation Outcome", resultHtml, null, null, null, "Close Chat");
+        }, "Pitch Position Change");
+    },
+
+    persuadePosition: (playerId, targetPos) => {
+        const p = Game.getPlayer(playerId);
+        const res = Game.discussPositionChange(p, targetPos, gameState.playerTeam, true);
+        if (res.accepted) {
+            Game.rebuildDepthChartFromOrder(gameState.playerTeam);
+            Game.saveGameState();
+            UI.renderDashboard(gameState);
+            alert(`🤝 Persuaded!\n\n${res.quote}\n\n${p.name} is now practicing at ${targetPos}!`);
+            UI.hideModal();
+        }
     },
 
     advanceOffseasonFADay: () => {

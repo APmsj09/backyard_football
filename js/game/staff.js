@@ -235,3 +235,62 @@ export function aiChooseWeeklyPractice(team, opponent = null, gmDirective = 'COA
 
     return Math.random() < 0.5 ? 'chalk_talk' : 'scouting';
 }
+
+/**
+ * AI Coach logically evaluates roster surpluses and deficits to transition players without spam.
+ */
+export function aiEvaluatePositionChanges(team, gameState) {
+    if (!team || team.isPlayerControlled) return;
+
+    const coach = team.staff?.coach || team.coach;
+    const roster = getRosterObjects(team);
+    const positions = ['QB', 'RB', 'WR', 'TE', 'OL', 'DL', 'LB', 'DB'];
+    const idealCounts = { QB: 1, RB: 2, WR: 3, TE: 1, OL: 3, DL: 3, LB: 2, DB: 3 };
+
+    // Find major surplus positions and deficit positions
+    const counts = {};
+    positions.forEach(pos => {
+        counts[pos] = roster.filter(p => isPlayerViableForPosition(p, pos)).length;
+    });
+
+    const deficits = positions.filter(pos => counts[pos] < idealCounts[pos]);
+    if (deficits.length === 0) return; // Roster is balanced
+
+    // Candidate pool: only young kids (age <= 15) who haven't changed positions recently
+    const eligibleKids = roster.filter(p => 
+        p.age <= 15 && 
+        (!p.positionChangedYear || (gameState.year - p.positionChangedYear) >= 2) &&
+        (p.personality?.ego || 50) < 70 // High ego divas refuse conversions
+    );
+
+    for (const targetPos of deficits) {
+        // Find candidate from a surplus position who is viable at targetPos
+        const bestCandidate = eligibleKids.find(kid => {
+            const currentPos = kid.pos || estimateBestPosition(kid);
+            const isSurplus = counts[currentPos] > idealCounts[currentPos];
+            const isViableAtNew = isPlayerViableForPosition(kid, targetPos);
+            const targetOvr = calculateOverall(kid, targetPos);
+            const currentOvr = calculateOverall(kid, currentPos);
+
+            // Move if surplus and either viable or an upgrade (+3 OVR)
+            return isSurplus && isViableAtNew && (targetOvr >= currentOvr - 2);
+        });
+
+        if (bestCandidate) {
+            const oldPos = bestCandidate.pos || estimateBestPosition(bestCandidate);
+            bestCandidate.pos = targetPos;
+            if (['QB', 'RB', 'WR', 'TE', 'OL'].includes(targetPos)) {
+                bestCandidate.favoriteOffensivePosition = targetPos;
+            } else {
+                bestCandidate.favoriteDefensivePosition = targetPos;
+            }
+            bestCandidate.positionChangedYear = gameState.year;
+            counts[oldPos]--;
+            counts[targetPos]++;
+
+            // Update depth chart
+            rebuildDepthChartFromOrder(team);
+            break; // One logical transition per team per offseason
+        }
+    }
+}

@@ -1072,6 +1072,13 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
         let adjustedAccuracy = Number(qbAcc) || 50;
         let pPenalty = 0;
 
+        // Hook up Clutch: Boosts or hurts late-game / 4th-quarter crunch time
+        const qbClutch = qbAttrs.mental?.clutch ?? 50;
+        if (isDesperationTime || (playState.down >= 3 && playState.yardsToGo >= 6)) {
+            const clutchDelta = (qbClutch - 50) * 0.25; // -7.5 to +12.5% accuracy under crunch
+            adjustedAccuracy += clutchDelta;
+        }
+
         if (isPressured) {
             const pCount = Number(pressureCount) || 0;
             const qbIQNum = Number(qbState.playbookIQ || qbState.iq || 50);
@@ -1079,6 +1086,9 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
             const basePenalty = 15;
             const IQ_MITIGATION = (qbIQNum / 100) * 0.5;
             pPenalty = basePenalty + (pCount * 5) - (basePenalty * IQ_MITIGATION);
+
+            // High clutch QBs stay cooler under heavy rush
+            if (qbClutch > 70) pPenalty *= 0.75;
 
             adjustedAccuracy = Math.max(30, adjustedAccuracy - pPenalty);
         }

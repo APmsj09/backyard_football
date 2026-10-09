@@ -1437,8 +1437,108 @@ export function developPlayer(player, team = null) {
     }
 
     // =========================================================================
-    // 3. TARGETED SKILL DRILL GAINS
+    // 3. REALISTIC POSITION TRANSITION DYNAMICS & PHYSICAL ADAPTATION
     // =========================================================================
+    let transitionBoost = 0;
+    if (player.positionChangedYear && (game.year - player.positionChangedYear) === 1) {
+        const currWgt = player.attributes.physical?.weight || 150;
+        const ceilingWgt = player.talentAttributes?.physical?.weight || currWgt + 15;
+        const currSpd = player.attributes.physical?.speed || 50;
+        const currAgi = player.attributes.physical?.agility || 50;
+        const coachDiscipline = team?.staff?.coach?.ratings?.practiceDiscipline || 50;
+
+        // Transition Success Score (Ethic + Frame Compatibility + Discipline)
+        const frameHeadroom = ceilingWgt - currWgt;
+        const dedicationScore = (ethic * 0.45) + (coachDiscipline * 0.35) + (Math.random() * 20);
+
+        const currStr = player.attributes.physical?.strength || 50;
+        const isNaturallyBig = currWgt >= 168 && currStr >= 54;
+        const isTwitchyAthlete = currSpd >= 68 && currAgi >= 65;
+
+        // A. TRANSITIONING INTO THE TRENCHES (OL / DL)
+        if (['OL', 'DL'].includes(player.pos)) {
+            // CASE 1: The Naturally Big "Tweener" (e.g. 170 lb WR/TE moving to OL)
+            if (isNaturallyBig && frameHeadroom >= 12 && dedicationScore >= 45) {
+                const bulkGain = getRandomInt(10, 18);
+                player.attributes.physical.weight = currWgt + bulkGain;
+                player.attributes.physical.strength = Math.min(99, currStr + 4);
+                // Retains rare mobility for an 8v8 pulling lineman!
+                player.attributes.technical.blocking = Math.min(99, (player.attributes.technical?.blocking || 40) + 5);
+                transitionBoost = 3;
+                developmentReport.improvements.push({ 
+                    attr: `🛡️ Athletic Trench Bloom (+${bulkGain} lbs, +4 STR, +5 BLK: Retained Mobility)`, 
+                    increase: bulkGain 
+                });
+            } 
+            // CASE 2: Standard Functional Bulk
+            else if (frameHeadroom >= 15 && dedicationScore >= 52) {
+                const weightGain = getRandomInt(8, 14);
+                player.attributes.physical.weight = currWgt + weightGain;
+                player.attributes.physical.strength = Math.min(99, currStr + 3);
+                transitionBoost = 2;
+                developmentReport.improvements.push({ attr: `💪 Functional Trench Bulk (+${weightGain} lbs, +3 STR)`, increase: weightGain });
+            } 
+            // CASE 3: Frame Rejection (True skinny hard-gainer)
+            else if (frameHeadroom < 10 || currWgt < 145) {
+                developmentReport.improvements.push({ attr: '⚠️ Frame Rejection: Body cannot support interior line mass', increase: 0 });
+                if (player.expectations) player.expectations.happiness = Math.max(20, player.expectations.happiness - 10);
+            } 
+            // CASE 4: The Sloppy Bulk
+            else {
+                const sloppyGain = getRandomInt(6, 12);
+                player.attributes.physical.weight = currWgt + sloppyGain;
+                player.attributes.physical.speed = Math.max(25, currSpd - 3);
+                player.attributes.physical.agility = Math.max(25, currAgi - 3);
+                developmentReport.improvements.push({ attr: `🍔 Sloppy Bulk: Gained ${sloppyGain} lbs of unconditioned weight (-3 SPD, -3 AGI)`, increase: -3 });
+            }
+        }
+
+        // B. THE EDELMAN/TWITCH TRANSITION (QB/RB ➔ WR/DB)
+        else if (['WR', 'DB'].includes(player.pos) && isTwitchyAthlete) {
+            player.attributes.technical.catchingHands = Math.min(99, (player.attributes.technical?.catchingHands || 40) + 5);
+            player.attributes.physical.agility = Math.min(99, currAgi + 3);
+            transitionBoost = 3;
+            developmentReport.improvements.push({ 
+                attr: '⚡ Twitch Playmaker Transition (+5 HND, +3 AGI: Converted quarterback/runner twitch)', 
+                increase: 5 
+            });
+        }
+
+        // C. THE BOX ENFORCER (DB ➔ LB)
+        else if (player.pos === 'LB' && currWgt >= 165 && (player.attributes.technical?.tackling || 50) >= 50) {
+            player.attributes.physical.strength = Math.min(99, currStr + 3);
+            player.attributes.technical.tackling = Math.min(99, (player.attributes.technical?.tackling || 50) + 4);
+            transitionBoost = 2;
+            developmentReport.improvements.push({ 
+                attr: '💥 Hybrid Enforcer Bloom (+4 TKL, +3 STR: Sideline-to-sideline pursuit range)', 
+                increase: 4 
+            });
+        }
+
+        // B. TRANSITIONING TO BOUNDARY SPEED (WR / DB)
+        else if (['WR', 'DB'].includes(player.pos)) {
+            if (currWgt <= 185 && dedicationScore >= 45) {
+                // SUCCESSFUL LEAN & AGILITY CUT
+                player.attributes.physical.agility = Math.min(99, currAgi + 3);
+                if (currWgt > 165) player.attributes.physical.weight = currWgt - getRandomInt(4, 8);
+                transitionBoost = 2;
+                developmentReport.improvements.push({ attr: '⚡ Boundary Footwork Polish (+3 AGI, Leaned Out)', increase: 3 });
+            } else if (currWgt > 195) {
+                // HEAVY FRAME STRUGGLE: Stiff hips on the boundary
+                player.attributes.physical.agility = Math.max(25, currAgi - 2);
+                developmentReport.improvements.push({ attr: '⚠️ Heavy Hips: Frame too thick to stick with fast receivers (-2 AGI)', increase: -2 });
+                if (player.expectations) player.expectations.happiness = Math.max(20, player.expectations.happiness - 12);
+            }
+        }
+
+        // C. TEMPORARY INSTALL LEARNING CURVE
+        // First year at a new position incurs a minor tactical learning tax (-2 Playbook IQ temporary adjustment)
+        if (dedicationScore < 55 && (player.attributes.mental?.playbookIQ || 50) > 40) {
+            player.attributes.mental.playbookIQ -= 2;
+            developmentReport.improvements.push({ attr: '🧠 Assignment Growing Pains (-2 Playbook IQ)', increase: -2 });
+        }
+    }
+
     let mentorBoost = 0;
     if (team && player.age <= 14) {
         const roster = getRosterObjects(team);
@@ -1454,7 +1554,7 @@ export function developPlayer(player, team = null) {
 
     const pos = player.pos || estimateBestPosition(player);
     let focusGroup = [];
-    if (pos === 'QB') focusGroup = ['throwingAccuracy', 'playbookIQ', 'speed', 'consistency'];
+    if (pos === 'QB') focusGroup = ['throwingAccuracy', 'playbookIQ', 'decisionMaking', 'speed', 'consistency'];
     else if (pos === 'RB') focusGroup = ['speed', 'agility', 'strength', 'catchingHands', 'toughness'];
     else if (pos === 'WR') focusGroup = ['speed', 'catchingHands', 'agility', 'playbookIQ'];
     else if (pos === 'TE') focusGroup = ['catchingHands', 'blocking', 'strength', 'toughness'];
@@ -1463,7 +1563,7 @@ export function developPlayer(player, team = null) {
     else if (pos === 'LB') focusGroup = ['tackling', 'playbookIQ', 'speed', 'blockShedding'];
     else if (pos === 'DB') focusGroup = ['speed', 'coverage', 'agility', 'catchingHands', 'playbookIQ'];
 
-    let totalUpgradePoints = Math.round(basePoints * experienceMod) + mentorBoost;
+    let totalUpgradePoints = Math.round(basePoints * experienceMod) + mentorBoost + transitionBoost;
 
     // Slacker Stagnation / Regression: Low work-ethic teens (16-18) with high ego can regress
     if (ethic < 35 && ego > 70 && player.age >= 16 && Math.random() < 0.40) {

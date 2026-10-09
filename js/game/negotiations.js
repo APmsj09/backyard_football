@@ -462,3 +462,134 @@ export function evaluatePlayerRetention(player, team, snapsThisSeason = 0) {
 
     return { willStay, reason, stayScore: Math.round(stayScore) };
 }
+
+/**
+ * Evaluates a player position conversion pitch.
+ */
+export function discussPositionChange(player, targetPos, team, useToken = false) {
+    if (!player || !targetPos) return { success: false, message: "Invalid discussion." };
+
+    const currentPos = player.pos || estimateBestPosition(player);
+    if (currentPos === targetPos) {
+        return { success: false, message: `${player.name} already plays ${targetPos}.` };
+    }
+
+    const ethic = player.personality?.workEthic || 50;
+    const ego = player.personality?.ego || 50;
+    const loyalty = player.personality?.loyalty || 50;
+    const wgt = player.attributes?.physical?.weight || 150;
+    const spd = player.attributes?.physical?.speed || 50;
+
+    let interest = 45;
+    const reasons = [];
+
+    // Position Cluster Proximity Analysis
+    const getCluster = (pos) => {
+        if (['WR', 'DB'].includes(pos)) return 'BOUNDARY_SPEED';
+        if (['RB'].includes(pos)) return 'SKILL_BALLCARRIER';
+        if (['TE', 'LB'].includes(pos)) return 'HYBRID_SPACE';
+        if (['OL', 'DL'].includes(pos)) return 'TRENCHES';
+        return 'SIGNAL_CALLER'; // QB
+    };
+
+    const currentCluster = getCluster(currentPos);
+    const targetCluster = getCluster(targetPos);
+    const ceilingWgt = player.talentAttributes?.physical?.weight || wgt + 20;
+
+    let transitionDifficulty = 'LOW';
+    if (currentCluster === targetCluster) {
+        transitionDifficulty = 'NATURAL';
+        interest += 22;
+        reasons.push("Natural sibling position transition (+22)");
+    } else if (
+        (currentCluster === 'HYBRID_SPACE' && targetCluster === 'TRENCHES') ||
+        (currentCluster === 'SKILL_BALLCARRIER' && targetCluster === 'BOUNDARY_SPEED') ||
+        (currentCluster === 'SIGNAL_CALLER' && targetCluster === 'BOUNDARY_SPEED')
+    ) {
+        transitionDifficulty = 'MODERATE';
+        interest += 8;
+        reasons.push("Manageable athletic cross-training (+8)");
+    } else {
+        transitionDifficulty = 'EXTREME';
+        interest -= 35;
+        reasons.push("Radical cross-cluster shift: High risk of failure (-35)");
+    }
+
+    // Frame Ceiling Reality Check
+    if (['OL', 'DL'].includes(targetPos)) {
+        if (ceilingWgt < 170) {
+            interest -= 30;
+            reasons.push("Genetic frame ceiling too small for trench work (-30)");
+        } else if (wgt < 150) {
+            interest -= 15;
+            reasons.push("Underweight for interior line; will need intense bulking (-15)");
+        }
+    } else if (['WR', 'DB'].includes(targetPos)) {
+        if (wgt > 205) {
+            interest -= 25;
+            reasons.push("Frame is too heavy for boundary footwork and cuts (-25)");
+        }
+        if (spd < 45) {
+            interest -= 20;
+            reasons.push("Lacks foot speed for island coverage / deep routes (-20)");
+        }
+    }
+
+    // 2. Personality
+    if (ethic >= 70) {
+        interest += 25;
+        reasons.push("Selfless team-first grinder (+25)");
+    }
+    if (loyalty >= 75) {
+        interest += 15;
+        reasons.push("Trusts Coach completely (+15)");
+    }
+
+    // 3. Ego Penalties (Moving away from glory positions)
+    const gloryPositions = ['QB', 'RB', 'WR'];
+    const trenchPositions = ['OL', 'DL'];
+    if (gloryPositions.includes(currentPos) && trenchPositions.includes(targetPos)) {
+        if (ego > 65) {
+            interest -= 35;
+            reasons.push("High ego resists moving from the spotlight to the line (-35)");
+        }
+    }
+
+    // 4. Token Persuasion (Borrowing a bike, candy bribe)
+    if (useToken) {
+        interest += 30;
+        reasons.push("Persuaded with a Favor Token sweetener (+30)");
+    }
+
+    const accepted = interest >= 50;
+    let quote = "";
+
+    if (accepted) {
+        player.pos = targetPos;
+        if (['QB', 'RB', 'WR', 'TE', 'OL'].includes(targetPos)) {
+            player.favoriteOffensivePosition = targetPos;
+        } else {
+            player.favoriteDefensivePosition = targetPos;
+        }
+
+        if (useToken && team?.socialProfile) {
+            team.socialProfile.favorTokens = Math.max(0, (team.socialProfile.favorTokens || 1) - 1);
+        }
+
+        quote = ethic >= 65 
+            ? `"Whatever helps the team win, Coach. I'll start practicing my new footwork today."`
+            : `"Alright, fine. But you owe me big time for this."`;
+    } else {
+        quote = ego >= 70
+            ? `"No chance, Coach! I'm a ${currentPos}, not a ${targetPos}. If you don't want me with the ball, trade me."`
+            : `"I don't think I'm cut out for ${targetPos}, Coach. I'd rather stick where I'm comfortable."`;
+    }
+
+    return {
+        accepted,
+        interest,
+        quote,
+        reasons,
+        canPersuade: !accepted && (interest >= 25 && interest < 50) && !useToken
+    };
+}
