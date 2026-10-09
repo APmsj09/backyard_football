@@ -59,24 +59,25 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
     const dy = targetY - pState.y;
     const distToTarget = Math.sqrt(dx * dx + dy * dy);
 
-    // Deadzone and arrival speed dampening
-    const isContinuousAction = ['run_path', 'pursuit', 'tracking_ball', 'run_route', 'qb_scramble'].includes(pState.action);
+    // --- TRUE ARRIVAL DEADZONE & SMOOTH TAPER ---
+    // If we are within 0.4 yards of our destination, scale velocity smoothly down 
+    // to zero so players glide to a stop without any back-and-forth micro-jitter.
+    if (distToTarget < 0.4) {
+        const approachRatio = distToTarget / 0.4; // 1.0 at outer edge, 0.0 at target
+        
+        // Smoothly scale velocity multiplier from 1.0 down to 0.3
+        const glideFactor = 0.3 + (0.7 * approachRatio);
+        pState.vx *= glideFactor;
+        pState.vy *= glideFactor;
 
-    if (pState.action === 'tracking_ball' && distToTarget < 1.0) {
-        pState.vx *= 0.5;
-        pState.vy *= 0.5;
-    } else if (distToTarget < 0.15) {
-        pState.vx *= 0.3;
-        pState.vy *= 0.3;
-
-        if (!isContinuousAction) {
-            if (Math.abs(pState.vx) < 0.2 && Math.abs(pState.vy) < 0.2) {
-                pState.x = targetX;
-                pState.y = targetY;
-                pState.vx = 0;
-                pState.vy = 0;
-                return;
-            }
+        // If extremely close and moving slow, lock directly to coordinate
+        if (distToTarget < 0.15 && Math.abs(pState.vx) < 0.5 && Math.abs(pState.vy) < 0.5) {
+            pState.x = targetX;
+            pState.y = targetY;
+            pState.vx = 0;
+            pState.vy = 0;
+            pState.currentSpeedYPS = 0;
+            return;
         }
     }
 
@@ -141,8 +142,12 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
         accelRate *= brakePower;
     }
 
-    // --- 9. APPLY NEWTONIAN ACCELERATION (Clamp speed to prevent overshoot oscillation) ---
-    const maxSafeSpeed = distToTarget / Math.max(timeDelta, 0.05);
+    // --- 9. APPLY NEWTONIAN ACCELERATION WITH DISTANCE GATING ---
+    // Safely gate timeDelta to prevent division-by-zero or NaN
+    const safeTimeDelta = Math.max(timeDelta, 0.05);
+    
+    // Mathematically restrict speed so a player can NEVER jump past their target in a single tick
+    const maxSafeSpeed = (distToTarget / safeTimeDelta) * 0.8; 
     const clampedTargetSpeed = Math.min(effectiveMaxSpeed * arrivalFactor, maxSafeSpeed);
 
     const safeDist = Math.max(0.001, distToTarget);
