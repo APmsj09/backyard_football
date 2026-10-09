@@ -58,9 +58,15 @@ export function estimateBestPosition(scoutedPlayer) {
     // Start with the player's actual offensive/defensive identity.
     // Then allow only natural backyard-football conversions.
     const candidatePositions = new Set([
+        scoutedPlayer.pos,
         scoutedPlayer.favoriteOffensivePosition,
         scoutedPlayer.favoriteDefensivePosition
     ].filter(pos => allPositions.includes(pos)));
+
+    // If an explicit position has been chosen/assigned, honor it as the top candidate
+    if (scoutedPlayer.pos && allPositions.includes(scoutedPlayer.pos)) {
+        candidatePositions.add(scoutedPlayer.pos);
+    }
 
     // Natural cross-training / two-way conversions.
     // These are possibilities, not automatic position changes.
@@ -102,15 +108,19 @@ export function estimateBestPosition(scoutedPlayer) {
     candidatePositions.forEach(pos => {
         let score = calculateOverall(scoutedPlayer, pos);
 
+        const isAssignedPos = pos === scoutedPlayer.pos;
         const isIdentityPosition =
+            isAssignedPos ||
             pos === scoutedPlayer.favoriteOffensivePosition ||
             pos === scoutedPlayer.favoriteDefensivePosition;
 
-        // Identity should normally win unless the conversion is meaningfully better.
-        if (isIdentityPosition) {
+        // Assigned position has highest priority; identity gets second priority
+        if (isAssignedPos) {
+            score += 15; // Strongly locks in manual switch
+        } else if (isIdentityPosition) {
             score += 3;
         } else {
-            score -= 5;
+            score -= 8;
         }
 
         // --- GATEKEEPER SANITY RULES ---

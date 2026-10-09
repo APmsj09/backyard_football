@@ -66,30 +66,26 @@ export function determinePuntDecision(down, yardsToGo, ballOn, offenseTeam = nul
 }
 
 export function findAudiblePlay(offense, desiredType, desiredTag = null) {
-    const offenseFormationName = offense.formations.offense;
-    let possiblePlays = Object.keys(offensivePlaybook).filter(key => {
+    const offenseFormationName = offense.formations?.offense || 'Balanced';
+    const basics = ['Uni_InsideZone', 'Uni_QuickSlants', 'Uni_FourVerts'];
+    const installed = offense.gameplan?.installedOffense || [];
+    const pool = Array.from(new Set([...basics, ...installed]));
+
+    let possiblePlays = pool.filter(key => {
         const play = offensivePlaybook[key];
-        const nameMatch = key.startsWith(offenseFormationName) || key.startsWith('Uni_') || key.startsWith('PA_');
-        const typeMatch = play.type === desiredType;
-        return nameMatch && typeMatch;
+        if (!play) return false;
+        const matchesType = play.type === desiredType;
+        const matchesForm = !play.compatibleFormations || play.compatibleFormations.includes(offenseFormationName);
+        return matchesType && matchesForm;
     });
 
-    if (possiblePlays.length === 0) {
-        possiblePlays = Object.keys(offensivePlaybook).filter(key => key.startsWith(offenseFormationName));
-        if (possiblePlays.length === 0) {
-            possiblePlays = Object.keys(offensivePlaybook).filter(key => key.startsWith('Balanced'));
-        }
-        if (possiblePlays.length === 0) {
-            const allPlays = Object.keys(offensivePlaybook);
-            return allPlays.length > 0 ? getRandom(allPlays) : null;
-        }
+    if (desiredTag && possiblePlays.length > 0) {
+        const tagged = possiblePlays.filter(key => offensivePlaybook[key]?.tags?.includes(desiredTag));
+        if (tagged.length > 0) return getRandom(tagged);
     }
 
-    if (desiredTag) {
-        const taggedPlays = possiblePlays.filter(key => offensivePlaybook[key]?.tags?.includes(desiredTag));
-        if (taggedPlays.length > 0) return getRandom(taggedPlays);
-    }
-    return getRandom(possiblePlays);
+    if (possiblePlays.length > 0) return getRandom(possiblePlays);
+    return desiredType === 'pass' ? 'Uni_QuickSlants' : 'Uni_InsideZone';
 }
 
 export function aiCheckAudible(offense, offensivePlayKey, defense, defensivePlayKey, gameLog) {
@@ -1017,13 +1013,19 @@ export function simulateLivePlayStep(gameInstance, mode = 'live') {
     let offPlayKey = '';
     let defPlayKey = '';
 
+    // Remember custom user schemes before special-teams overrides
+    if (!offense._savedOffForm && offense.formations.offense !== 'Punt') {
+        offense._savedOffForm = offense.formations.offense;
+    }
+
     if (gameInstance.isConversionAttempt) {
         gameInstance.down = 1; gameInstance.yardsToGo = 3; gameInstance.ballOn = 97;
-        offense.formations.offense = 'Balanced'; defense.formations.defense = '4-2-2';
         offPlayKey = 'Uni_QuickSlants'; defPlayKey = 'GoalLine_RunStuff';
     } else if (determinePuntDecision(gameInstance.down, gameInstance.yardsToGo, gameInstance.ballOn, offense, (offense.id === gameInstance.homeTeam.id ? (gameInstance.homeScore - gameInstance.awayScore) : (gameInstance.awayScore - gameInstance.homeScore)), gameInstance.clock)) {
-        offense.formations.offense = 'Punt'; defense.formations.defense = 'Punt_Return';
-        offPlayKey = 'Punt_Punt'; defPlayKey = 'PuntReturn_Classic';
+        offense.formations.offense = 'Punt'; 
+        defense.formations.defense = 'Punt_Return';
+        offPlayKey = 'Punt_Punt'; 
+        defPlayKey = 'PuntReturn_Classic';
     } else {
         const scoreDiff = (offense.id === gameInstance.homeTeam.id)
             ? (gameInstance.homeScore - gameInstance.awayScore)
@@ -1035,8 +1037,9 @@ export function simulateLivePlayStep(gameInstance, mode = 'live') {
         const timeRemaining = gameInstance.quarter < 5 ? gameInstance.clock + ((4 - gameInstance.quarter) * 420) : gameInstance.clock;
         const drivesRemaining = Math.max(1, Math.ceil(timeRemaining / 120));
 
+        // Restore user scheme cleanly after punt
         if (offense.formations.offense === 'Punt') {
-            offense.formations.offense = offense.coach?.preferredOffense || 'Balanced';
+            offense.formations.offense = offense._savedOffForm || offense.coach?.preferredOffense || 'Balanced';
         }
         if (!offense.isPlayerControlled) {
             offense.formations.offense = offense.coach?.preferredOffense || 'Balanced';

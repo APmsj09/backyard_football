@@ -136,14 +136,20 @@ export function aiManageTeamStaff(team, gameState) {
                 const bScore = (b.ratings?.offSchemeMastery || 0) + (b.ratings?.defSchemeMastery || 0);
                 return bScore - aScore;
             });
-            const candidateIdx = gameState.availableStaff.findIndex(s => s.role === 'coach' || s.formerPlayerBio);
+            let candidateIdx = gameState.availableStaff.findIndex(s => s.role === 'coach' || s.formerPlayerBio);
+            let newHire = null;
+
             if (candidateIdx > -1) {
-                const newHire = gameState.availableStaff.splice(candidateIdx, 1)[0];
-                newHire.teamId = team.id;
-                newHire.role = 'coach';
-                team.staff.coach = newHire;
-                team.coach = newHire; // Sync legacy pointer
+                newHire = gameState.availableStaff.splice(candidateIdx, 1)[0];
+            } else {
+                // Emergency hire: Rec center volunteer step-in so team is never headless
+                newHire = generateStaffMember('coach', 28, 50);
             }
+
+            newHire.teamId = team.id;
+            newHire.role = 'coach';
+            team.staff.coach = newHire;
+            team.coach = newHire;
         }
     }
 
@@ -278,19 +284,31 @@ export function aiEvaluatePositionChanges(team, gameState) {
 
         if (bestCandidate) {
             const oldPos = bestCandidate.pos || estimateBestPosition(bestCandidate);
+            const isOff = ['QB', 'RB', 'WR', 'TE', 'OL'].includes(targetPos);
+
             bestCandidate.pos = targetPos;
-            if (['QB', 'RB', 'WR', 'TE', 'OL'].includes(targetPos)) {
+            bestCandidate.bestPosition = targetPos;
+            bestCandidate.primarySide = isOff ? 'offense' : 'defense';
+            if (bestCandidate.scouting) bestCandidate.scouting.bestPosition = targetPos;
+
+            if (isOff) {
                 bestCandidate.favoriteOffensivePosition = targetPos;
+                if (['OL', 'TE'].includes(targetPos) && bestCandidate.favoriteDefensivePosition === 'DB') {
+                    bestCandidate.favoriteDefensivePosition = 'DL';
+                }
             } else {
                 bestCandidate.favoriteDefensivePosition = targetPos;
+                if (targetPos === 'DL' && ['WR', 'QB'].includes(bestCandidate.favoriteOffensivePosition)) {
+                    bestCandidate.favoriteOffensivePosition = 'OL';
+                }
             }
+
             bestCandidate.positionChangedYear = gameState.year;
             counts[oldPos]--;
             counts[targetPos]++;
 
-            // Update depth chart
             rebuildDepthChartFromOrder(team);
-            break; // One logical transition per team per offseason
+            break;
         }
     }
 }

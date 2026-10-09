@@ -2220,6 +2220,13 @@ export function playerCut(playerId) {
                 }
             }
         }
+
+        // Clean up captaincy if captain was cut
+        if (team.captainId === playerId) {
+            team.captainId = null;
+            assignTeamCaptain(team);
+        }
+
         aiSetDepthChart(team);
         addMessage("Roster Move", `${player.name} has been cut from the team.`);
         team.roster.forEach(rosterPlayerId => {

@@ -222,7 +222,10 @@ export function showModal(title, bodyHtml, onConfirm = null, confirmText = 'Conf
         const confirmBtn = document.createElement('button');
         confirmBtn.textContent = confirmText;
         confirmBtn.className = 'btn bg-amber-500 hover:bg-amber-600 text-white font-bold py-2 px-6 rounded-lg text-sm';
-        confirmBtn.onclick = () => { onConfirm(); hideModal(); };
+        confirmBtn.onclick = () => {
+            hideModal();
+            if (onConfirm) onConfirm();
+        };
         actionsDiv.appendChild(confirmBtn);
     }
 

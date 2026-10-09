@@ -565,11 +565,25 @@ export function discussPositionChange(player, targetPos, team, useToken = false)
     let quote = "";
 
     if (accepted) {
+        const isOffensive = ['QB', 'RB', 'WR', 'TE', 'OL'].includes(targetPos);
+        
         player.pos = targetPos;
-        if (['QB', 'RB', 'WR', 'TE', 'OL'].includes(targetPos)) {
+        player.bestPosition = targetPos;
+        player.primarySide = isOffensive ? 'offense' : 'defense';
+        if (player.scouting) player.scouting.bestPosition = targetPos;
+
+        if (isOffensive) {
             player.favoriteOffensivePosition = targetPos;
+            // Clean up defensive counterpart so frame makes sense
+            if (['OL', 'TE'].includes(targetPos) && ['DB'].includes(player.favoriteDefensivePosition)) {
+                player.favoriteDefensivePosition = 'DL'; // Bulked up kids can't be DBs
+            }
         } else {
             player.favoriteDefensivePosition = targetPos;
+            // Clean up offensive counterpart
+            if (['DL'].includes(targetPos) && ['WR', 'QB'].includes(player.favoriteOffensivePosition)) {
+                player.favoriteOffensivePosition = 'OL';
+            }
         }
 
         if (useToken && team?.socialProfile) {
