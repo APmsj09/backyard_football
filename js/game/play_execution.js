@@ -998,8 +998,8 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                                 }
                             }
                         }
-                        // 2. Mastered (>=80%): Muscle Memory route burst
-                        const masteryBurst = mastery >= 80 ? 1.40 : 1.25;
+                        // 2. Mastered (>=80%): Crisp, controlled route cut (mild 4-8% burst, no physics-breaking rocket boost)
+                        const masteryBurst = mastery >= 80 ? 1.08 : 1.04;
                         pState.vx *= masteryBurst;
                         pState.vy *= masteryBurst;
                     }

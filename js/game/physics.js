@@ -128,7 +128,8 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
         actionMult *= 0.60; // 40% speed reduction when physically jammed
     }
 
-    const maxPossibleSpeed = baseMaxSpeed * weightSpeedPenalty * actionMult * gapFriction * (pState.contactReduction || 1.0);
+    //const maxPossibleSpeed = baseMaxSpeed * weightSpeedPenalty * actionMult * gapFriction * (pState.contactReduction || 1.0);
+    const maxPossibleSpeed = baseMaxSpeed * weightSpeedPenalty * actionMult * gapFriction;
 
     // --- 6. CARRYING MOMENTUM & CUTTING ---
     const currentSpeed = Math.sqrt(pState.vx ** 2 + pState.vy ** 2);

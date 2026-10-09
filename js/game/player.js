@@ -239,7 +239,7 @@ const archetypes = [
 
     // --- BALL CARRIERS ---
     { name: 'Power Back', off: 'RB', def: 'LB', weightMod: 1.25, heightMod: -1, keyAttrs: ['strength', 'toughness', 'tackling', 'stamina'], speedMod: 0.9, strMod: 1.2 },
-    { name: 'Speed Back', off: 'RB', def: 'DB', weightMod: 0.85, heightMod: -2, keyAttrs: ['speed', 'agility', 'clutch', 'catchingHands'], speedMod: 1.25, strMod: 0.75 },
+    { name: 'Speed Back', off: 'RB', def: 'DB', weightMod: 0.85, heightMod: -2, keyAttrs: ['speed', 'agility', 'clutch', 'catchingHands'], speedMod: 1.10, strMod: 0.7 },
     { name: 'Workhorse', off: 'RB', def: 'LB', weightMod: 1.1, heightMod: 0, keyAttrs: ['stamina', 'consistency', 'tackling', 'toughness'], speedMod: 1.0, strMod: 1.0 },
     { name: 'Receiving Back', off: 'RB', def: 'DB', weightMod: 0.9, heightMod: -1, keyAttrs: ['catchingHands', 'agility', 'speed', 'coverage'], speedMod: 1.1, strMod: 0.8 },
     { name: 'Bruiser', off: 'RB', def: 'DL', weightMod: 1.4, heightMod: 0, keyAttrs: ['strength', 'toughness', 'stamina', 'blocking'], speedMod: 0.75, strMod: 1.3 },
@@ -248,7 +248,7 @@ const archetypes = [
     { name: 'Slashing Back', off: 'RB', def: 'LB', weightMod: 1.0, heightMod: 0, keyAttrs: ['agility', 'speed', 'playbookIQ', 'consistency'], speedMod: 1.1, strMod: 1.0 },
 
     // --- PASS CATCHERS ---
-    { name: 'Deep Threat', off: 'WR', def: 'DB', weightMod: 0.85, heightMod: 1, keyAttrs: ['speed', 'agility', 'clutch', 'coverage'], speedMod: 1.3, strMod: 0.7 },
+    { name: 'Deep Threat', off: 'WR', def: 'DB', weightMod: 0.85, heightMod: 1, keyAttrs: ['speed', 'agility', 'clutch', 'coverage'], speedMod: 1.12, strMod: 0.7 },
     { name: 'Route Technician', off: 'WR', def: 'DB', weightMod: 1.0, heightMod: 0, keyAttrs: ['agility', 'playbookIQ', 'catchingHands', 'consistency'], speedMod: 1.0, strMod: 1.0 },
     { name: 'Red Zone Specialist', off: 'WR', def: 'LB', weightMod: 1.15, heightMod: 7, keyAttrs: ['height', 'catchingHands', 'strength', 'clutch'], speedMod: 0.8, strMod: 1.15 },
     { name: 'Slot Brawler', off: 'WR', def: 'LB', weightMod: 1.1, heightMod: 0, keyAttrs: ['toughness', 'catchingHands', 'tackling', 'strength'], speedMod: 0.95, strMod: 1.1 },
@@ -281,25 +281,25 @@ const archetypes = [
     { name: 'Versatile End', off: 'TE', def: 'DL', weightMod: 1.4, heightMod: 4, keyAttrs: ['blockShedding', 'tackling', 'playbookIQ', 'strength'], speedMod: 0.85, strMod: 1.2 },
     { name: 'Nose Tackle', off: 'OL', def: 'DL', weightMod: 2.2, heightMod: 0, keyAttrs: ['weight', 'strength', 'tackling', 'toughness'], speedMod: 0.3, strMod: 1.6 },
     { name: 'Edge Setter', off: 'TE', def: 'DL', weightMod: 1.3, heightMod: 2, keyAttrs: ['strength', 'tackling', 'playbookIQ', 'blocking'], speedMod: 0.8, strMod: 1.2 },
-    { name: 'Pass Rush Specialist', off: 'WR', def: 'DL', weightMod: 1.0, heightMod: 1, keyAttrs: ['speed', 'blockShedding', 'agility', 'stamina'], speedMod: 1.2, strMod: 0.9 },
+    { name: 'Pass Rush Specialist', off: 'WR', def: 'DL', weightMod: 1.0, heightMod: 1, keyAttrs: ['speed', 'blockShedding', 'agility', 'stamina'], speedMod: 1.06, strMod: 0.9 },
 
     // --- LINEBACKERS ---
     { name: 'Middle Hawk', off: 'RB', def: 'LB', weightMod: 1.15, heightMod: 1, keyAttrs: ['playbookIQ', 'tackling', 'coverage', 'speed'], speedMod: 1.0, strMod: 1.0 },
     { name: 'Hard Hitter', off: 'RB', def: 'LB', weightMod: 1.3, heightMod: 0, keyAttrs: ['tackling', 'strength', 'toughness', 'clutch'], speedMod: 0.9, strMod: 1.25 },
     { name: 'Blitz Specialist', off: 'WR', def: 'LB', weightMod: 1.1, heightMod: 2, keyAttrs: ['speed', 'blockShedding', 'tackling', 'agility'], speedMod: 1.15, strMod: 1.05 },
     { name: 'Coverage LB', off: 'TE', def: 'LB', weightMod: 1.05, heightMod: 3, keyAttrs: ['coverage', 'agility', 'playbookIQ', 'catchingHands'], speedMod: 1.05, strMod: 0.95 },
-    { name: 'Sideline-to-Sideline', off: 'RB', def: 'LB', weightMod: 0.95, heightMod: 0, keyAttrs: ['speed', 'agility', 'tackling', 'stamina'], speedMod: 1.2, strMod: 0.9 },
+    { name: 'Sideline-to-Sideline', off: 'RB', def: 'LB', weightMod: 0.95, heightMod: 0, keyAttrs: ['speed', 'agility', 'tackling', 'stamina'], speedMod: 1.08, strMod: 0.9 },
     { name: 'Thumper', off: 'OL', def: 'LB', weightMod: 1.4, heightMod: -1, keyAttrs: ['tackling', 'strength', 'toughness', 'blocking'], speedMod: 0.7, strMod: 1.3 },
     { name: 'Hybrid Safety', off: 'WR', def: 'LB', weightMod: 0.9, heightMod: 1, keyAttrs: ['coverage', 'speed', 'tackling', 'agility'], speedMod: 1.15, strMod: 0.85 },
 
     // --- SECONDARY ---
-    { name: 'Island Corner', off: 'WR', def: 'DB', weightMod: 0.85, heightMod: 0, keyAttrs: ['coverage', 'speed', 'agility', 'consistency'], speedMod: 1.3, strMod: 0.8 },
+    { name: 'Island Corner', off: 'WR', def: 'DB', weightMod: 0.85, heightMod: 0, keyAttrs: ['coverage', 'speed', 'agility', 'consistency'], speedMod: 1.12, strMod: 0.8 },
     { name: 'Ballhawk Safety', off: 'WR', def: 'DB', weightMod: 0.95, heightMod: 2, keyAttrs: ['catchingHands', 'playbookIQ', 'coverage', 'clutch'], speedMod: 1.1, strMod: 0.9 },
     { name: 'Nickel Stopper', off: 'RB', def: 'DB', weightMod: 1.05, heightMod: -1, keyAttrs: ['tackling', 'agility', 'speed', 'toughness'], speedMod: 1.1, strMod: 1.1 },
     { name: 'Zone Specialist', off: 'WR', def: 'DB', weightMod: 1.0, heightMod: 3, keyAttrs: ['playbookIQ', 'coverage', 'height', 'catchingHands'], speedMod: 0.95, strMod: 1.0 },
     { name: 'Press Corner', off: 'WR', def: 'DB', weightMod: 1.1, heightMod: 2, keyAttrs: ['strength', 'coverage', 'toughness', 'speed'], speedMod: 1.0, strMod: 1.2 },
     { name: 'Box Safety', off: 'RB', def: 'DB', weightMod: 1.15, heightMod: 0, keyAttrs: ['tackling', 'strength', 'playbookIQ', 'toughness'], speedMod: 0.9, strMod: 1.1 },
-    { name: 'Free Safety', off: 'WR', def: 'DB', weightMod: 0.9, heightMod: 1, keyAttrs: ['speed', 'coverage', 'playbookIQ', 'agility'], speedMod: 1.15, strMod: 0.85 }
+     { name: 'Free Safety', off: 'WR', def: 'DB', weightMod: 0.9, heightMod: 1, keyAttrs: ['speed', 'coverage', 'playbookIQ', 'agility'], speedMod: 1.06, strMod: 0.85 }
 ];
 
 // Targeted signature boosts for specific archetypes
