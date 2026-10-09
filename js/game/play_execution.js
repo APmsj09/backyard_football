@@ -765,6 +765,9 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                 case 'handoff_receive':
                 case 'run_path':
                 case 'run_fake':
+                    // Clear any lingering hold locks when moving dynamically
+                    pState._holdX = undefined;
+                    pState._holdY = undefined;
                     break;
 
                 case 'qb_setup': {
@@ -992,54 +995,102 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                 }
 
                 case 'route_complete': {
-                    if (qbState && qbState.action === 'qb_scramble') {
-                        const recIQ = pState.playbookIQ || 50;
-                        const reactionTicks = Math.max(4, 24 - Math.floor(recIQ / 5));
+                    // 1. SCRAMBLE DRILL: If QB breaks the pocket, receivers take open space into account based on IQ & Decision Making
+                    if (qbState && (qbState.action === 'qb_scramble' || playState.qbIntent === 'scramble')) {
+                        const rolloutDir = qbState.rolloutDir || (qbState.x > CENTER_X ? 1 : -1);
+                        const iq = pState.playbookIQ || 50;
+                        const decision = pState.decisionMaking || 50;
 
-                        if (playState.tick % reactionTicks === 0) {
-                            const rolloutDir = qbState.rolloutDir || (qbState.x > CENTER_X ? 1 : -1);
-                            const distFromLOS = pState.y - LOS;
-
-                            if (distFromLOS > 14) {
-                                pState.targetX = qbState.x + (rolloutDir * 6);
-                                pState.targetY = Math.max(LOS + 5, pState.y - 6);
-                            } else {
-                                const sidelineX = rolloutDir === 1 ? FIELD_WIDTH - 4 : 4;
-                                pState.targetX = sidelineX;
-                                pState.targetY = pState.y + 8;
-                            }
-                            pState.contactReduction = 1.1;
-                            break;
+                        // ATTRIBUTE 1: Reaction Time (Low IQ/Decision players hesitate longer before reacting to a scramble)
+                        if (!pState._scrambleReactionTick) {
+                            const delayTicks = Math.max(2, Math.round(25 - ((iq + decision) / 5)));
+                            pState._scrambleReactionTick = playState.tick + delayTicks;
                         }
+                        if (playState.tick < pState._scrambleReactionTick) {
+                            break; // Still looking downfield, hasn't noticed the QB broke pocket yet
+                        }
+
+                        // ATTRIBUTE 2: Scan Frequency & Vision (High-IQ players constantly re-scan for better open space)
+                        const scanInterval = Math.max(10, Math.round(40 - (iq * 0.3)));
+
+                        if (pState._scrambleTargetX === undefined || playState.tick % scanInterval === 0) {
+                            // Low-IQ players have narrower vision and might accidentally pick a candidate near a defender
+                            const visionWidth = 4.0 + (iq * 0.05);
+
+                            const candidates = [
+                                { x: pState.x + (rolloutDir * visionWidth), y: pState.y + 2.0 }, 
+                                { x: pState.x - (rolloutDir * 2.0), y: pState.y + 3.0 }, 
+                                { x: qbState.x + (rolloutDir * 4.0), y: Math.max(LOS + 3, qbState.y + 2.0) }, 
+                                { x: pState.x, y: pState.y + 5.0 } 
+                            ];
+
+                            let bestX = pState.x;
+                            let bestY = pState.y;
+                            let maxOpenScore = -Infinity;
+
+                            candidates.forEach(pt => {
+                                if (pt.x < 2 || pt.x > FIELD_WIDTH - 2 || pt.y < LOS || pt.y > 115) return;
+                                
+                                let minDefDist = Infinity;
+                                defenseStates.forEach(def => {
+                                    const d = Math.hypot(pt.x - def.x, pt.y - def.y);
+                                    if (d < minDefDist) minDefDist = d;
+                                });
+
+                                // ATTRIBUTE 3: Decision Making Quality 
+                                // High decision-making players accurately weigh defender distance. 
+                                // Low-decision players have blind spots (random noise added to their evaluation).
+                                const decisionFlaw = decision < 50 ? (Math.random() - 0.5) * (60 - decision) * 0.15 : 0;
+                                const qbDistancePenalty = Math.abs(pt.y - (qbState.y + 3)) * 0.4;
+                                const score = (minDefDist + decisionFlaw) - qbDistancePenalty;
+
+                                if (score > maxOpenScore) {
+                                    maxOpenScore = score;
+                                    bestX = pt.x;
+                                    bestY = pt.y;
+                                }
+                            });
+
+                            pState._scrambleTargetX = bestX;
+                            pState._scrambleTargetY = bestY;
+                        }
+
+                        // Smoothly glide towards the open space target
+                        if (pState._scrambleTargetX !== undefined) {
+                            // Smart players adjust sharper; slow players have sluggish inertia
+                            const smoothSpeed = 0.85 + (decision / 300); 
+                            pState.targetX = (pState.targetX * smoothSpeed) + (pState._scrambleTargetX * (1 - smoothSpeed));
+                            pState.targetY = (pState.targetY * smoothSpeed) + (pState._scrambleTargetY * (1 - smoothSpeed));
+                        }
+                        pState.contactReduction = 1.1;
+                        break;
                     }
 
-                    if (playState.tick % 20 === 0) {
-                        let bestX = pState.x;
-                        let bestY = pState.y + 2;
-                        let maxDistToDef = 0;
-                        const searchPoints = [
-                            { x: pState.x + 4, y: pState.y + 2 }, { x: pState.x - 4, y: pState.y + 2 },
-                            { x: pState.x + 3, y: pState.y - 2 }, { x: pState.x - 3, y: pState.y - 2 }
-                        ];
+                    // Reset scramble trigger if play resets
+                    pState._scrambleReactionTick = undefined;
 
-                        searchPoints.forEach(p => {
-                            if (p.x < 2 || p.x > FIELD_WIDTH - 2) return;
-                            const closestDef = defenseStates.reduce((min, d) => Math.min(min, getDistance(p, d)), 100);
-                            if (closestDef > maxDistToDef) {
-                                maxDistToDef = closestDef;
-                                bestX = p.x;
-                                bestY = p.y;
-                            }
-                        });
-
-                        pState.targetX = bestX;
-                        pState.targetY = bestY;
+                    // 2. POCKET CHECKDOWN SETTLE: If QB is standing in the pocket
+                    if (qbState) {
+                        if (pState._settleTargetX === undefined) {
+                            const centerBias = pState.x < CENTER_X ? 1.2 : -1.2;
+                            pState._settleTargetX = Math.max(3, Math.min(FIELD_WIDTH - 3, pState.x + centerBias));
+                            pState._settleTargetY = Math.max(LOS + 2, pState.y - 0.8);
+                        }
+                        pState.targetX = pState._settleTargetX;
+                        pState.targetY = pState._settleTargetY;
                     }
                     break;
                 }
 
                 default:
-                    pState.targetX = pState.x; pState.targetY = pState.y;
+                    // Latch target ONCE when entering idle/complete, allowing physics to brake to a dead stop
+                    if (!pState._holdX || pState.action !== pState._lastActionForHold) {
+                        pState._holdX = pState.x;
+                        pState._holdY = pState.y;
+                        pState._lastActionForHold = pState.action;
+                    }
+                    pState.targetX = pState._holdX;
+                    pState.targetY = pState._holdY;
                     break;
             }
             return;

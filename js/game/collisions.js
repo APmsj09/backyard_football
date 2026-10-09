@@ -458,7 +458,7 @@ export function resolveOngoingBlocks(playState, gameLog, offenseStates = [], def
                 let dy = defender.y - blocker.y;
 
                 // 2. Bulldozer Bull Rush: Massive DL pushes blocker straight back toward the QB
-                if (isPassRush && defStr > blkStr + 14) {
+                if (isPassRush && defStr > blkStr + 20) {
                     const qb = offenseStates?.find(p => p.slot?.startsWith('QB'));
                     if (qb) {
                         dx = qb.x - defender.x;
@@ -739,7 +739,7 @@ export function handleBallArrival(playState, carrier, playResult, gameLog) {
             else catchScore *= 0.60;
         }
 
-        catchScore = Math.max(1.0, Math.min(99.0, catchScore));
+        catchScore = Math.max(1.0, Math.min(100.0, catchScore));
 
         if (Math.random() * 100 < catchScore) {
             const isOutOfBounds = bestCandidate.y >= 120 || bestCandidate.y <= 0 ||

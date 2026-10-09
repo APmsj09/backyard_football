@@ -160,8 +160,8 @@ export function diagnosePlay(pState, tick, offenseStates, truePlayType, offensiv
         dirConfidence = centerScore / totalDirScore;
     }
 
-    // Committed reads maintain a minimum confidence floor of 0.60
-    const finalConfidence = (guess === 'read') ? confidence : Math.max(0.60, confidence);
+    // Committed reads maintain a minimum confidence floor of 0.30
+    const finalConfidence = (guess === 'read') ? confidence : Math.max(0.30, confidence);
 
     pState._diagnosedDirection = direction;
     pState._diagnosedDirConfidence = dirConfidence;
