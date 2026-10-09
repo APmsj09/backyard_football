@@ -3,7 +3,7 @@ import {
     saveGameState, getRelationshipLevel, getScoutedPlayerInfo, getGameState,
     getRosterObjects, getPlayer, rebuildDepthChartFromOrder, assignPlayerToSlot
 } from './game.js';
-import { offenseFormations, defenseFormations, relationshipLevels, firstNames, lastNames } from './data.js';
+import { offenseFormations, defenseFormations, relationshipLevels, firstNames, lastNames, offensivePlaybook, defensivePlaybook } from './data.js';
 import { positionOverallWeights, estimateBestPosition, calculateOverall, getProspectSignatureSkills } from './game/player.js';
 import { formatHeight } from './utils.js';
 import { drawFieldVisualization, formatGameClock, showPlayOverlay } from './ui/field_visualizer.js';
@@ -2785,7 +2785,13 @@ export function renderPlaybookManager(gameState) {
     if (!container || !gameState?.playerTeam) return;
 
     const team = gameState.playerTeam;
-    if (!team.gameplan) team.gameplan = { installedOffense: [], installedDefense: [], mastery: {} };
+    if (!team.gameplan) {
+        team.gameplan = {
+            installedOffense: ['Uni_StretchRight', 'Uni_Stick', 'Uni_Drive', 'Uni_HB_Screen', 'PA_Crossers', 'Uni_Mesh'],
+            installedDefense: ['Cover_3_Sky', 'Man_Blitz_Base', 'Nickel_Tampa_2', 'Fire_Zone_3'],
+            mastery: {}
+        };
+    }
 
     const BASICS_OFF = ['Uni_InsideZone', 'Uni_QuickSlants', 'Uni_FourVerts'];
     const BASICS_DEF = ['Cover_2_Zone_Base', 'Cover_1_Robber', 'GoalLine_RunStuff'];
@@ -2799,23 +2805,32 @@ export function renderPlaybookManager(gameState) {
             list.splice(idx, 1);
         } else {
             if (list.length >= max) {
-                alert(`Playbook full! You can only install ${max} ${side} plays on your cafeteria napkin.`);
+                // Helpful feedback: Tell the player how to make room
+                showModal("Playbook Full", `
+                    <div class="text-xs text-slate-700 space-y-2">
+                        <p>Your cafeteria napkin has all <b>${max} ${side}</b> slots filled.</p>
+                        <p class="text-slate-500 italic">Click <b>"Uninstall"</b> on any active play above to free up space before installing a new one.</p>
+                    </div>
+                `);
                 return;
             }
             list.push(key);
-            if (!team.gameplan.mastery[key]) team.gameplan.mastery[key] = 35; // Initial familiarity
+            if (!team.gameplan.mastery[key]) team.gameplan.mastery[key] = 35;
         }
         renderPlaybookManager(gameState);
         saveGameState();
     };
 
+    const offAvailable = Object.entries(offensivePlaybook || {}).filter(([k]) => k !== 'Punt_Punt' && !BASICS_OFF.includes(k));
+    const defAvailable = Object.entries(defensivePlaybook || {}).filter(([k]) => k !== 'PuntReturn_Classic' && !BASICS_DEF.includes(k));
+
     container.innerHTML = `
-        <div class="space-y-4 text-xs font-sans">
+        <div class="space-y-4 text-xs font-sans pb-6">
             <!-- Strategic Header -->
             <div class="bg-slate-900 text-white p-3.5 rounded flex justify-between items-center shadow-sm">
                 <div>
                     <h4 class="font-black text-sm uppercase tracking-wider text-amber-400">Cafeteria Napkin Playbook (Active Gameplan)</h4>
-                    <p class="text-slate-400 text-[11px] mt-0.5">Kids only execute installed plays. Unpracticed plays cause assignment hesitation; mastered plays execute with razor timing.</p>
+                    <p class="text-slate-400 text-[11px] mt-0.5">Kids only call installed plays. Unpracticed plays hesitate; mastered plays explode with muscle memory.</p>
                 </div>
                 <div class="text-right font-mono text-[11px]">
                     <span class="bg-blue-900 text-blue-200 px-2 py-0.5 rounded border border-blue-700">Offense: ${team.gameplan.installedOffense.length}/6</span>
@@ -2823,74 +2838,131 @@ export function renderPlaybookManager(gameState) {
                 </div>
             </div>
 
-            <!-- Offense Installed & Library -->
-            <div class="bg-white border border-slate-300 rounded p-3 shadow-sm">
-                <h5 class="font-black uppercase tracking-wider text-slate-800 border-b pb-1 mb-2">Offensive Gameplan (${team.gameplan.installedOffense.length}/6 Installed)</h5>
-                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
-                    ${Object.entries(Game.offensivePlaybook || {}).filter(([k]) => k !== 'Punt_Punt').map(([key, play]) => {
-                        const isBasic = BASICS_OFF.includes(key);
-                        const isInstalled = team.gameplan.installedOffense.includes(key);
-                        const mastery = team.gameplan.mastery[key] || (isBasic ? 85 : 35);
+            <!-- OFFENSIVE SECTION -->
+            <div class="bg-white border border-slate-300 rounded p-3 shadow-sm space-y-3">
+                <div class="flex justify-between items-center border-b pb-1">
+                    <h5 class="font-black uppercase tracking-wider text-blue-950">Active Offensive Napkin (${team.gameplan.installedOffense.length}/6 Installed)</h5>
+                    <span class="text-[10px] text-slate-500 font-mono">3 Basics + 6 Napkin Plays</span>
+                </div>
 
-                        let color = mastery >= 75 ? 'bg-emerald-500' : (mastery >= 50 ? 'bg-amber-500' : 'bg-rose-500');
+                <!-- Installed + Basics Grid -->
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
+                    ${[...BASICS_OFF, ...team.gameplan.installedOffense].map(key => {
+                        const play = offensivePlaybook[key] || { tags: ['run'] };
+                        const isBasic = BASICS_OFF.includes(key);
+                        const mastery = team.gameplan.mastery[key] || (isBasic ? 85 : 40);
+                        let barColor = mastery >= 75 ? 'bg-emerald-500' : (mastery >= 50 ? 'bg-amber-500' : 'bg-rose-500');
 
                         return `
-                        <div class="p-2 rounded border ${isInstalled || isBasic ? 'border-blue-400 bg-blue-50/40' : 'border-slate-200 bg-slate-50'} flex flex-col justify-between">
+                        <div class="p-2.5 rounded border border-blue-300 bg-blue-50/50 flex flex-col justify-between shadow-sm">
                             <div>
                                 <div class="flex justify-between items-start">
                                     <span class="font-bold text-slate-900 truncate">${key.replace('Uni_', '').replace('PA_', 'PA ')}</span>
-                                    ${isBasic ? '<span class="text-[9px] bg-slate-200 text-slate-700 font-bold px-1 rounded uppercase">Basics</span>' : (isInstalled ? '<span class="text-[9px] bg-blue-600 text-white font-bold px-1 rounded uppercase">Active</span>' : '')}
+                                    <span class="text-[9px] font-black uppercase px-1 rounded ${isBasic ? 'bg-slate-200 text-slate-700' : 'bg-blue-700 text-white'}">
+                                        ${isBasic ? 'Safety Net' : 'Installed'}
+                                    </span>
                                 </div>
-                                <div class="mt-1 flex items-center justify-between text-[10px] text-slate-500">
-                                    <span>Mastery: <b class="text-slate-800">${mastery}%</b></span>
+                                <div class="mt-1 flex items-center justify-between text-[10px] text-slate-600 font-mono">
+                                    <span>Mastery: <b>${mastery}%</b></span>
                                     <div class="w-16 bg-slate-200 rounded-full h-1.5 overflow-hidden">
-                                        <div class="${color} h-full" style="width: ${mastery}%"></div>
+                                        <div class="${barColor} h-full" style="width: ${mastery}%"></div>
                                     </div>
                                 </div>
                             </div>
-                            <div class="mt-2 pt-1 border-t border-slate-200 flex justify-end">
-                                ${isBasic ? '<span class="text-[10px] text-slate-400 italic">Universal Safety Net</span>' : `
-                                <button class="px-2 py-0.5 rounded text-[10px] font-bold uppercase ${isInstalled ? 'bg-rose-100 text-rose-700 hover:bg-rose-200' : 'bg-slate-900 text-white hover:bg-slate-800'}" onclick="app_toggleInstallPlay('${key}', 'offense')">
-                                    ${isInstalled ? 'Uninstall' : 'Install on Napkin'}
+                            <div class="mt-2 pt-1 border-t border-blue-200 flex justify-end">
+                                ${isBasic ? '<span class="text-[9px] text-slate-400 italic">Always Active</span>' : `
+                                <button class="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-rose-100 text-rose-800 hover:bg-rose-200 border border-rose-300 transition" onclick="app_toggleInstallPlay('${key}', 'offense')">
+                                    Uninstall
                                 </button>`}
                             </div>
                         </div>`;
                     }).join('')}
                 </div>
+
+                <!-- Available Offense Library -->
+                <div class="pt-2 border-t">
+                    <span class="font-bold text-[10px] uppercase text-slate-500 block mb-1.5">Available Offense Library (Click to Install)</span>
+                    <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-1.5">
+                        ${offAvailable.map(([key, play]) => {
+                            const isInstalled = team.gameplan.installedOffense.includes(key);
+                            if (isInstalled) return '';
+                            const mastery = team.gameplan.mastery[key] || 35;
+                            return `
+                            <div class="p-2 rounded border border-slate-200 bg-slate-50 hover:bg-white flex justify-between items-center transition">
+                                <div class="truncate pr-1">
+                                    <span class="font-semibold text-slate-800 truncate block text-[11px]">${key.replace('Uni_', '').replace('PA_', 'PA ')}</span>
+                                    <span class="text-[9px] text-slate-400 font-mono">${mastery}% Mst</span>
+                                </div>
+                                <button class="shrink-0 px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-slate-900 text-white hover:bg-slate-800 transition shadow-sm" onclick="app_toggleInstallPlay('${key}', 'offense')">
+                                    Install
+                                </button>
+                            </div>`;
+                        }).join('')}
+                    </div>
+                </div>
             </div>
 
-            <!-- Defense Installed & Library -->
-            <div class="bg-white border border-slate-300 rounded p-3 shadow-sm">
-                <h5 class="font-black uppercase tracking-wider text-slate-800 border-b pb-1 mb-2">Defensive Gameplan (${team.gameplan.installedDefense.length}/4 Installed)</h5>
+            <!-- DEFENSIVE SECTION -->
+            <div class="bg-white border border-slate-300 rounded p-3 shadow-sm space-y-3">
+                <div class="flex justify-between items-center border-b pb-1">
+                    <h5 class="font-black uppercase tracking-wider text-red-950">Active Defensive Gameplan (${team.gameplan.installedDefense.length}/4 Installed)</h5>
+                    <span class="text-[10px] text-slate-500 font-mono">3 Basics + 4 Napkin Schemes</span>
+                </div>
+
+                <!-- Installed + Basics Grid -->
                 <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
-                    ${Object.entries(Game.defensivePlaybook || {}).filter(([k]) => k !== 'PuntReturn_Classic').map(([key, play]) => {
+                    ${[...BASICS_DEF, ...team.gameplan.installedDefense].map(key => {
+                        const play = defensivePlaybook[key] || { name: key };
                         const isBasic = BASICS_DEF.includes(key);
-                        const isInstalled = team.gameplan.installedDefense.includes(key);
-                        const mastery = team.gameplan.mastery[key] || (isBasic ? 85 : 35);
-                        let color = mastery >= 75 ? 'bg-emerald-500' : (mastery >= 50 ? 'bg-amber-500' : 'bg-rose-500');
+                        const mastery = team.gameplan.mastery[key] || (isBasic ? 85 : 40);
+                        let barColor = mastery >= 75 ? 'bg-emerald-500' : (mastery >= 50 ? 'bg-amber-500' : 'bg-rose-500');
 
                         return `
-                        <div class="p-2 rounded border ${isInstalled || isBasic ? 'border-red-400 bg-red-50/40' : 'border-slate-200 bg-slate-50'} flex flex-col justify-between">
+                        <div class="p-2.5 rounded border border-red-300 bg-red-50/50 flex flex-col justify-between shadow-sm">
                             <div>
                                 <div class="flex justify-between items-start">
                                     <span class="font-bold text-slate-900 truncate">${play.name || key}</span>
-                                    ${isBasic ? '<span class="text-[9px] bg-slate-200 text-slate-700 font-bold px-1 rounded uppercase">Basics</span>' : (isInstalled ? '<span class="text-[9px] bg-red-600 text-white font-bold px-1 rounded uppercase">Active</span>' : '')}
+                                    <span class="text-[9px] font-black uppercase px-1 rounded ${isBasic ? 'bg-slate-200 text-slate-700' : 'bg-red-700 text-white'}">
+                                        ${isBasic ? 'Safety Net' : 'Installed'}
+                                    </span>
                                 </div>
-                                <div class="mt-1 flex items-center justify-between text-[10px] text-slate-500">
-                                    <span>Mastery: <b class="text-slate-800">${mastery}%</b></span>
+                                <div class="mt-1 flex items-center justify-between text-[10px] text-slate-600 font-mono">
+                                    <span>Mastery: <b>${mastery}%</b></span>
                                     <div class="w-16 bg-slate-200 rounded-full h-1.5 overflow-hidden">
-                                        <div class="${color} h-full" style="width: ${mastery}%"></div>
+                                        <div class="${barColor} h-full" style="width: ${mastery}%"></div>
                                     </div>
                                 </div>
                             </div>
-                            <div class="mt-2 pt-1 border-t border-slate-200 flex justify-end">
-                                ${isBasic ? '<span class="text-[10px] text-slate-400 italic">Universal Safety Net</span>' : `
-                                <button class="px-2 py-0.5 rounded text-[10px] font-bold uppercase ${isInstalled ? 'bg-rose-100 text-rose-700 hover:bg-rose-200' : 'bg-slate-900 text-white hover:bg-slate-800'}" onclick="app_toggleInstallPlay('${key}', 'defense')">
-                                    ${isInstalled ? 'Uninstall' : 'Install on Napkin'}
+                            <div class="mt-2 pt-1 border-t border-red-200 flex justify-end">
+                                ${isBasic ? '<span class="text-[9px] text-slate-400 italic">Always Active</span>' : `
+                                <button class="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-rose-100 text-rose-800 hover:bg-rose-200 border border-rose-300 transition" onclick="app_toggleInstallPlay('${key}', 'defense')">
+                                    Uninstall
                                 </button>`}
                             </div>
                         </div>`;
                     }).join('')}
+                </div>
+
+                <!-- Available Defense Library -->
+                <div class="pt-2 border-t">
+                    <span class="font-bold text-[10px] uppercase text-slate-500 block mb-1.5">Available Defense Library (Click to Install)</span>
+                    <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-1.5">
+                        ${defAvailable.map(([key, play]) => {
+                            const isInstalled = team.gameplan.installedDefense.includes(key);
+                            if (isInstalled) return '';
+                            const mastery = team.gameplan.mastery[key] || 35;
+                            return `
+                            <div class="p-2 rounded border border-slate-200 bg-slate-50 hover:bg-white flex justify-between items-center transition">
+                                <div class="truncate pr-1">
+                                    <span class="font-semibold text-slate-800 truncate block text-[11px]">${play.name || key}</span>
+                                    <span class="text-[9px] text-slate-400 font-mono">${mastery}% Mst</span>
+                                </div>
+                                <button class="shrink-0 px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-slate-900 text-white hover:bg-slate-800 transition shadow-sm" onclick="app_toggleInstallPlay('${key}', 'defense')">
+                                    Install
+                                </button>
+                            </div>`;
+                        }).join('')}
+                    </div>
                 </div>
             </div>
         </div>
