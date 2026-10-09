@@ -9,20 +9,59 @@ const CENTER_X = FIELD_WIDTH / 2;
 const HASH_LEFT_X = 18.0;
 const HASH_RIGHT_X = 35.3;
 
-export function diagnosePlay(pState, tick, offenseStates, truePlayType, offensivePlayKey) {
+export function diagnosePlay(pState, tick, offenseStates, truePlayType, offensivePlayKey, playState = null) {
     const iq = pState.playbookIQ || 50;
-
-    let runScore = 0; let passScore = 0;
-    let leftScore = 10; let rightScore = 10; let centerScore = 15;
-
     const qb = offenseStates.find(p => p.slot.startsWith('QB'));
     const rbs = offenseStates.filter(p => p.slot.startsWith('RB'));
     const ol = offenseStates.filter(p => p.slot.startsWith('OL'));
 
+    // 1. DEFINITIVE GAME-STATE RECOGNITION (Locked when reality is revealed)
+    const isBallInAir = playState?.ballState?.inAir || playState?.ballState?.throwInitiated;
+    const handoffOccurred = playState?.handoffOccurred;
+    const qbScramble = playState?.qbIntent === 'scramble' || qb?.action === 'qb_scramble' || (qb && qb.y > (playState?.lineOfScrimmage || 0) + 0.5);
+
+    if (isBallInAir) {
+        pState._diagnosedGuess = 'pass';
+        pState._diagnosedConfidence = 1.0;
+        if (pState._lastLoggedGuess !== 'pass') {
+            logPlayDebug('DEF_READ', `${pState.name} (${pState.role}) committed to [PASS] (Ball In Air)`, {
+                confidence: 1.0, direction: pState._diagnosedDirection || 'center', dirConfidence: 1.0
+            });
+            pState._lastLoggedGuess = 'pass';
+        }
+        return { guess: 'pass', confidence: 1.0, direction: pState._diagnosedDirection || 'center', dirConfidence: 1.0 };
+    }
+
+    if (handoffOccurred || qbScramble) {
+        pState._diagnosedGuess = 'run';
+        pState._diagnosedConfidence = 1.0;
+        if (pState._lastLoggedGuess !== 'run') {
+            logPlayDebug('DEF_READ', `${pState.name} (${pState.role}) committed to [RUN] (${handoffOccurred ? 'Handoff' : 'Scramble'})`, {
+                confidence: 1.0, direction: pState._diagnosedDirection || 'center', dirConfidence: 1.0
+            });
+            pState._lastLoggedGuess = 'run';
+        }
+        return { guess: 'run', confidence: 1.0, direction: pState._diagnosedDirection || 'center', dirConfidence: 1.0 };
+    }
+
+    // A defender who already committed to 'pass' on a pass play NEVER reverts to 'run'
+    if (pState._diagnosedGuess === 'pass' && truePlayType === 'pass') {
+        return {
+            guess: 'pass',
+            confidence: pState._diagnosedConfidence || 0.85,
+            direction: pState._diagnosedDirection || 'center',
+            dirConfidence: pState._diagnosedDirConfidence || 0.75
+        };
+    }
+
+    // 2. ACCUMULATE FOOTBALL KEYS
+    let runScore = 0; let passScore = 0;
+    let leftScore = 10; let rightScore = 10; let centerScore = 15;
+
     if (qb) {
         if (qb.action === 'qb_setup' && qb.hasCompletedDropback) passScore += 45;
-        else if (qb.action === 'qb_setup' && !qb.hasCompletedDropback) passScore += 15;
-        else if (qb.action === 'handoff_setup') runScore += 40;
+        else if (qb.action === 'qb_setup' && !qb.hasCompletedDropback) passScore += 20;
+        else if (qb.action === 'handoff_setup') runScore += 45;
 
         if (qb.vx > 1.5) rightScore += 30;
         else if (qb.vx < -1.5) leftScore += 30;
@@ -47,56 +86,88 @@ export function diagnosePlay(pState, tick, offenseStates, truePlayType, offensiv
     rbs.forEach(rb => {
         if (rb.isBallCarrier) runScore += 60;
         else if (rb.action === 'run_path' && rb.y > (qb?.y || 0)) runScore += 20;
-        else if (rb.action === 'pass_block') passScore += 15;
+        else if (rb.action === 'pass_block') passScore += 20;
 
         if (rb.vx > 2.0) rightScore += 40;
         else if (rb.vx < -2.0) leftScore += 40;
         else if (rb.vy > 1.5) centerScore += 30;
     });
 
-    const isPlayAction = offensivePlayKey.includes('PA_');
-    if (isPlayAction && tick < 25) {
-        runScore += 50;
-        if (offensivePlayKey.includes('Bootleg_Right')) leftScore += 40;
-        if (offensivePlayKey.includes('Bootleg_Left')) rightScore += 40;
+    const isPlayAction = offensivePlayKey && offensivePlayKey.includes('PA_');
+    if (isPlayAction) {
+        if (tick < 25) {
+            runScore += Math.max(25, 60 - (iq * 0.35));
+            if (offensivePlayKey.includes('Bootleg_Right')) leftScore += 40;
+            if (offensivePlayKey.includes('Bootleg_Left')) rightScore += 40;
+        } else {
+            const realizeTick = 25 + Math.max(0, Math.floor((100 - iq) / 10));
+            if (tick >= realizeTick) {
+                passScore += 70; // IQ-based play-action recovery
+            }
+        }
     }
 
-    const timeFactor = Math.min(1.0, tick / 35);
+    // 3. LOW-PASS FILTERED PERCEPTION BIAS (No 20Hz noise spikes)
+    const timeFactor = Math.min(1.0, tick / 30);
     const iqFactor = iq / 100;
-    const noiseMax = 30 * (1.0 - iqFactor);
-    const applyNoise = (score) => score * timeFactor * (0.5 + (iqFactor / 2)) + ((Math.random() * noiseMax) - (noiseMax / 2));
+    const noiseMax = 20 * (1.0 - iqFactor);
 
-    const finalRunScore = applyNoise(runScore) + (pState.role === 'LB' ? 15 : 0);
-    const finalPassScore = applyNoise(passScore) + (pState.role === 'DB' ? 15 : 0);
-    const finalLeft = applyNoise(leftScore);
-    const finalRight = applyNoise(rightScore);
-    const finalCenter = applyNoise(centerScore);
-
-    let guess = 'read';
-    let confidence = Math.max(0, Math.min(1.0, Math.abs(finalRunScore - finalPassScore) / 60));
-    const commitThreshold = 0.60 - (iqFactor * 0.3);
-
-    if (confidence > commitThreshold || tick > 40) {
-        guess = finalRunScore > finalPassScore ? 'run' : 'pass';
-        if (tick > 50 && truePlayType === 'pass') { guess = 'pass'; confidence = 1.0; }
+    if (pState._diagNoise === undefined) {
+        pState._diagNoise = (Math.random() - 0.5) * noiseMax;
+    } else {
+        pState._diagNoise = (pState._diagNoise * 0.94) + (((Math.random() - 0.5) * noiseMax) * 0.06);
     }
 
-    let direction = 'center';
-    let dirConfidence = 0;
-    const totalDirScore = Math.max(1, finalLeft + finalRight + finalCenter);
+    const finalRunScore = (runScore * timeFactor * (0.6 + iqFactor * 0.4)) + pState._diagNoise + (pState.role === 'LB' ? 12 : 0);
+    const finalPassScore = (passScore * timeFactor * (0.6 + iqFactor * 0.4)) - pState._diagNoise + (pState.role === 'DB' ? 12 : 0);
 
-    if (finalRight > finalLeft && finalRight > finalCenter) {
+    // 4. HYSTERESIS COMMITMENT (Requires a 20-point margin to flip an existing read)
+    let currentGuess = pState._diagnosedGuess || 'read';
+    let guess = currentGuess;
+    const confidence = Math.max(0, Math.min(1.0, Math.abs(finalRunScore - finalPassScore) / 50));
+    const commitThreshold = 0.55 - (iqFactor * 0.25);
+
+    if (currentGuess === 'read') {
+        if (confidence > commitThreshold || tick > 35) {
+            guess = finalRunScore >= finalPassScore ? 'run' : 'pass';
+        }
+    } else if (currentGuess === 'run') {
+        if (finalPassScore > finalRunScore + 20) {
+            guess = 'pass';
+        }
+    } else if (currentGuess === 'pass') {
+        if (finalRunScore > finalPassScore + 20 && truePlayType !== 'pass') {
+            guess = 'run';
+        }
+    }
+
+    // 5. STABLE DIRECTION WITH DEADZONE
+    let direction = 'center';
+    let dirConfidence = centerScore / totalDirScore;
+
+    const totalDirScore = Math.max(1, leftScore + rightScore + centerScore);
+    const rightMargin = rightScore - Math.max(leftScore, centerScore);
+    const leftMargin = leftScore - Math.max(rightScore, centerScore);
+
+    if (rightMargin > 15) {
         direction = 'right';
-        dirConfidence = finalRight / totalDirScore;
-    } else if (finalLeft > finalRight && finalLeft > finalCenter) {
+        dirConfidence = rightScore / totalDirScore;
+    } else if (leftMargin > 15) {
         direction = 'left';
-        dirConfidence = finalLeft / totalDirScore;
+        dirConfidence = leftScore / totalDirScore;
     } else {
         direction = 'center';
-        dirConfidence = finalCenter / totalDirScore;
+        dirConfidence = centerScore / totalDirScore;
     }
 
-    // Only log telemetry when the defender's diagnosis changes to prevent flooding
+    // Committed reads maintain a minimum confidence floor of 0.60
+    const finalConfidence = (guess === 'read') ? confidence : Math.max(0.60, confidence);
+
+    pState._diagnosedDirection = direction;
+    pState._diagnosedDirConfidence = dirConfidence;
+    pState._diagnosedGuess = guess;
+    pState._diagnosedConfidence = finalConfidence;
+
     if (pState._lastLoggedGuess !== guess && guess !== 'read') {
         logPlayDebug('DEF_READ', `${pState.name} (${pState.role}) committed to [${guess.toUpperCase()}]`, {
             confidence: Number(confidence.toFixed(2)),
@@ -287,6 +358,9 @@ export function getSmartCarrierTarget(runner, defenseStates, offenseStates, fiel
     let bestScore = -Infinity;
     let bestTargetX = runner.x;
     let bestTargetY = runner.y + visionDepth;
+    let bestOffset = 0;
+
+    const prevOffset = runner._chosenLaneOffset !== undefined ? runner._chosenLaneOffset : 0;
 
     laneOffsets.forEach((offset) => {
         const testX = runner.x + offset;
@@ -301,6 +375,19 @@ export function getSmartCarrierTarget(runner, defenseStates, offenseStates, fiel
         score -= (momentumConflict * 4.0 * agilityMitigation);
 
         if (inTraffic) score -= (lateralShift * 12.0);
+
+        // Hysteresis: Keep momentum in currently selected lane
+        const offsetDiffFromPrev = Math.abs(offset - prevOffset);
+        if (offsetDiffFromPrev < 0.5) {
+            score += 25; // Stickiness bonus
+        } else {
+            score -= (offsetDiffFromPrev * 3.5);
+        }
+
+        // Heavy penalty against rapid full-reversal flips (e.g. +5 to -5)
+        if (prevOffset !== 0 && offset !== 0 && Math.sign(offset) !== Math.sign(prevOffset)) {
+            score -= 35;
+        }
 
         const isLateTrailing = (playState.quarter >= 4 || playState.quarter === 'OT') &&
             (playState.timeRemaining <= 150) &&
@@ -323,7 +410,6 @@ export function getSmartCarrierTarget(runner, defenseStates, offenseStates, fiel
         offenseStates.forEach(blocker => {
             if (blocker.id !== runner.id && (blocker.action?.includes('block') || blocker.action === 'run_path')) {
                 const distToBlocker = Math.hypot(testX - blocker.x, testY - blocker.y);
-                // Follow behind blocker's hip
                 if (distToBlocker < 2.5 && blocker.y > runner.y) {
                     score += 45;
                 }
@@ -338,15 +424,16 @@ export function getSmartCarrierTarget(runner, defenseStates, offenseStates, fiel
             const distToPredicted = Math.hypot(testX - defPredX, testY - defPredY);
 
             if (!def.isBlocked && !def.isEngaged) {
-                if (distToPredicted < 4.5) {
-                    laneThreat += (350 / (distToPredicted + 0.4));
+                // Smooth threat attenuation: continuous drop-off without hard cliff at 4.5
+                if (distToPredicted < 5.5) {
+                    const threatFalloff = Math.max(0, 1.0 - (distToPredicted / 5.5));
+                    laneThreat += (280 / (distToPredicted + 0.6)) * threatFalloff;
 
                     const defLateralSpeed = def.vx || 0;
                     if (Math.abs(defLateralSpeed) > 2.5) {
                         const defGoingRight = defLateralSpeed > 0;
-                        const laneGoingLeft = offset < 0;
-                        if ((defGoingRight && laneGoingLeft) || (!defGoingRight && !laneGoingLeft)) {
-                            overPursuitDetected = true; // Cutback lane discovered!
+                        if ((defGoingRight && offset < -1.0) || (!defGoingRight && offset > 1.0)) {
+                            overPursuitDetected = true;
                         }
                     }
                 }
@@ -367,14 +454,23 @@ export function getSmartCarrierTarget(runner, defenseStates, offenseStates, fiel
         });
 
         score -= laneThreat;
-        if (iq > 70 && overPursuitDetected) score += 80;
+        if (iq > 70 && overPursuitDetected) score += 40;
 
         if (score > bestScore) {
             bestScore = score;
             bestTargetX = testX;
             bestTargetY = testY;
+            bestOffset = offset;
         }
     });
+
+    runner._chosenLaneOffset = bestOffset;
+
+    // Smooth lateral target interpolation to prevent instant hash-to-hash snapping
+    if (runner._smoothTargetX === undefined) runner._smoothTargetX = runner.x;
+    const smoothAlpha = 0.35 + (agility / 200);
+    bestTargetX = (runner._smoothTargetX * (1 - smoothAlpha)) + (bestTargetX * smoothAlpha);
+    runner._smoothTargetX = bestTargetX;
 
     const immediateThreat = nearbyDefenders.sort((a, b) => getDistance(runner, a) - getDistance(runner, b))[0];
 
@@ -387,28 +483,42 @@ export function getSmartCarrierTarget(runner, defenseStates, offenseStates, fiel
             bestTargetY = immediateThreat.y + 1.5;
             runner.contactReduction = 0.9;
         } else {
-            let dodgeDir = runner.x < immediateThreat.x ? -1 : 1;
-            if ((immediateThreat.vx || 0) < -2.0) dodgeDir = 1;
-            else if ((immediateThreat.vx || 0) > 2.0) dodgeDir = -1;
+            // Dodge persistence cooldown to prevent 20Hz vibration
+            let dodgeDir = runner._dodgeDir || (runner.x < immediateThreat.x ? -1 : 1);
+            if (!runner._dodgeCooldown || runner._dodgeCooldown <= 0) {
+                if ((immediateThreat.vx || 0) < -2.0) dodgeDir = 1;
+                else if ((immediateThreat.vx || 0) > 2.0) dodgeDir = -1;
+                else dodgeDir = runner.x < immediateThreat.x ? -1 : 1;
 
-            if (runner.x < 4) dodgeDir = 1;
-            if (runner.x > fieldWidth - 4) dodgeDir = -1;
+                if (runner.x < 4) dodgeDir = 1;
+                if (runner.x > fieldWidth - 4) dodgeDir = -1;
 
-            const dodgeWidth = 1.2 + (agility / 40);
-            bestTargetX = (bestTargetX * 0.3) + ((runner.x + (dodgeDir * dodgeWidth)) * 0.7);
+                runner._dodgeDir = dodgeDir;
+                runner._dodgeCooldown = 8;
+            } else {
+                runner._dodgeCooldown--;
+            }
+
+            const dodgeWidth = 1.0 + (agility / 50);
+            bestTargetX = (bestTargetX * 0.4) + ((runner.x + (dodgeDir * dodgeWidth)) * 0.6);
             bestTargetY = Math.min(bestTargetY, runner.y + 1.5);
         }
     }
 
     bestTargetX = Math.max(1.0, Math.min(fieldWidth - 1.0, bestTargetX));
+    // Keep smoothing anchor synchronized with final post-dodge position
+    runner._smoothTargetX = bestTargetX;
 
-    if (inTraffic || Math.abs(bestTargetX - runner.x) > 1.5) {
+    // Only log when a meaningful cut/lane shift happens (prevents flooding while running straight in traffic)
+    const cutDistance = Math.abs(bestTargetX - (runner._lastLoggedTargetX || runner.x));
+    if (cutDistance > 2.0) {
         logPlayDebug('CARRIER_VISION', `${runner.name} evaluated lanes`, {
             offset: Number((bestTargetX - runner.x).toFixed(1)),
             bestScore: Math.round(bestScore),
             inTraffic,
             action: runner.action
         });
+        runner._lastLoggedTargetX = bestTargetX;
     }
 
     return { x: bestTargetX, y: bestTargetY };

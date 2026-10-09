@@ -532,8 +532,8 @@ export function resolvePlayerCollisions(playState) {
                 p2.isSqueezing = true;
 
                 const totalWeight = (p1.weight || 200) + (p2.weight || 200);
-                const pushFactorP1 = ((p2.weight || 200) / totalWeight) * 0.4;
-                const pushFactorP2 = ((p1.weight || 200) / totalWeight) * 0.4;
+                const pushFactorP1 = ((p2.weight || 200) / totalWeight) * 0.25;
+                const pushFactorP2 = ((p1.weight || 200) / totalWeight) * 0.25;
 
                 const pushX = (dx / dist) * overlap;
                 const pushY = (dy / dist) * overlap;

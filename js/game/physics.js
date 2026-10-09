@@ -59,26 +59,25 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
     const dy = targetY - pState.y;
     const distToTarget = Math.sqrt(dx * dx + dy * dy);
 
-    // Deadzone for stationary actions to stop micro-oscillations (Jitter)
+    // Deadzone and arrival speed dampening
     const isContinuousAction = ['run_path', 'pursuit', 'tracking_ball', 'run_route', 'qb_scramble'].includes(pState.action);
 
     if (pState.action === 'tracking_ball' && distToTarget < 1.0) {
-        // Bleed off speed so they settle under the ball instead of running past it
         pState.vx *= 0.5;
         pState.vy *= 0.5;
-    } else if (distToTarget < 0.15 && !isContinuousAction) {
-        // Bleed off speed heavily when arriving
-        pState.vx *= 0.2;
-        pState.vy *= 0.2;
+    } else if (distToTarget < 0.15) {
+        pState.vx *= 0.3;
+        pState.vy *= 0.3;
 
-        // Snap directly to the target if moving very slowly
-        if (Math.abs(pState.vx) < 0.2 && Math.abs(pState.vy) < 0.2) {
-            pState.x = targetX;
-            pState.y = targetY;
-            pState.vx = 0;
-            pState.vy = 0;
+        if (!isContinuousAction) {
+            if (Math.abs(pState.vx) < 0.2 && Math.abs(pState.vy) < 0.2) {
+                pState.x = targetX;
+                pState.y = targetY;
+                pState.vx = 0;
+                pState.vy = 0;
+                return;
+            }
         }
-        return;
     }
 
     // --- 5. TOP SPEED CALCULATION ---
@@ -142,10 +141,13 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
         accelRate *= brakePower;
     }
 
-    // --- 9. APPLY NEWTONIAN ACCELERATION ---
+    // --- 9. APPLY NEWTONIAN ACCELERATION (Clamp speed to prevent overshoot oscillation) ---
+    const maxSafeSpeed = distToTarget / Math.max(timeDelta, 0.05);
+    const clampedTargetSpeed = Math.min(effectiveMaxSpeed * arrivalFactor, maxSafeSpeed);
+
     const safeDist = Math.max(0.001, distToTarget);
-    const targetVx = (dx / safeDist) * effectiveMaxSpeed * arrivalFactor;
-    const targetVy = (dy / safeDist) * effectiveMaxSpeed * arrivalFactor;
+    const targetVx = (dx / safeDist) * clampedTargetSpeed;
+    const targetVy = (dy / safeDist) * clampedTargetSpeed;
 
     pState.vx += (targetVx - pState.vx) * accelRate * timeDelta;
     pState.vy += (targetVy - pState.vy) * accelRate * timeDelta;
@@ -232,16 +234,18 @@ function resolveNewtonianCollisions(pState, allPlayers) {
             const totalW = myWeight + theirWeight;
             const myMoveRatio = theirWeight / totalW;
 
-            // 1. Positional Push (Prevents rendering inside each other)
-            pState.x += dx_norm * overlap * myMoveRatio * 0.3;
-            pState.y += dy_norm * overlap * myMoveRatio * 0.3;
+            // Gentle positional separation without injecting chaotic bounce velocity
+            pState.x += dx_norm * overlap * myMoveRatio * 0.25;
+            pState.y += dy_norm * overlap * myMoveRatio * 0.25;
 
-            // 2. Velocity Deflection (Momentum bump)
-            const relativeSpeed = Math.hypot(pState.vx - (other.vx || 0), pState.vy - (other.vy || 0));
-            if (relativeSpeed > 1.0) {
-                const bounce = Math.min(0.4, relativeSpeed * 0.05);
-                pState.vx += dx_norm * bounce * myMoveRatio;
-                pState.vy += dy_norm * bounce * myMoveRatio;
+            // Dampen relative velocity along the collision normal so players slide past each other
+            const relVx = pState.vx - (other.vx || 0);
+            const relVy = pState.vy - (other.vy || 0);
+            const normalVelocity = (relVx * dx_norm) + (relVy * dy_norm);
+
+            if (normalVelocity < 0) {
+                pState.vx -= dx_norm * normalVelocity * myMoveRatio * 0.5;
+                pState.vy -= dy_norm * normalVelocity * myMoveRatio * 0.5;
             }
         }
     }

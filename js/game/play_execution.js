@@ -497,7 +497,16 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
             return (laneDiffA + doubleTeamPenaltyA) - (laneDiffB + doubleTeamPenaltyB);
         });
 
-        if (sortedThreats.length > 0) {
+        // Blocker stickiness: don't switch rush targets on every frame
+        if (blocker.dynamicTargetId) {
+            const currentThreat = validThreats.find(t => t.id === blocker.dynamicTargetId && !t.isEngaged && !t.isBlocked);
+            if (currentThreat) {
+                target = currentThreat;
+                assignedThreats.add(target.id);
+            }
+        }
+
+        if (!target && sortedThreats.length > 0) {
             target = sortedThreats[0];
             blocker.dynamicTargetId = target.id;
             assignedThreats.add(target.id);
@@ -668,15 +677,14 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                     }
                 }
 
-                // --- DYNAMIC RB VISION & CUTBACK SYSTEM ---
-                if (pState.role === 'RB' && playState.handoffOccurred) {
-                    // Running back takes over with dynamic Vision AI immediately at handoff
-                    const smartTarget = getSmartCarrierTarget(pState, defenseStates, offenseStates, FIELD_WIDTH, playState);
-                    targetX = smartTarget.x;
-                    targetY = smartTarget.y;
-                    pState.action = 'run_path';
-                    pState.contactReduction = 1.15; // Give RB physical momentum at the line
-                } else if (pState.routePath && pState.currentPathIndex < pState.routePath.length) {
+                // Only RBs on designed RUN plays follow routePath through the hole
+                const isRunHolePhase = playType === 'run' && 
+                                       pState.role === 'RB' && 
+                                       pState.routePath && 
+                                       pState.currentPathIndex < pState.routePath.length && 
+                                       pState.y < LOS + 1.5;
+
+                if (isRunHolePhase) {
                     const pt = pState.routePath[pState.currentPathIndex];
                     targetX = pt.x;
                     targetY = pt.y;
@@ -684,8 +692,14 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                     const distToNode = getDistance(pState, pt);
                     if (distToNode < 1.5) {
                         pState.currentPathIndex++;
-                        // NO BRAKING GLITCH: Maintain explosive momentum into the hole!
                     }
+                    pState.action = 'run_path';
+                    pState.contactReduction = 1.15;
+                } else if (pState.role === 'RB' && playState.handoffOccurred) {
+                    // Vision AI steers into open grass once through the hole or past LOS
+                    const smartTarget = getSmartCarrierTarget(pState, defenseStates, offenseStates, FIELD_WIDTH, playState);
+                    targetX = smartTarget.x;
+                    targetY = smartTarget.y;
                     pState.action = 'run_path';
                 } else if (pState.role === 'QB' && pState.action === 'qb_scramble' && pState.y < LOS) {
                     const rollDir = pState.rolloutDir || (pState.x > CENTER_X ? 1 : -1);
@@ -1013,7 +1027,8 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
             let dirConfidence = 1.0;
 
             if (!isDL) {
-                const diag = diagnosePlay(pState, playState.tick, offenseStates, playType, offensivePlayKey);
+                // Pass playState into diagnosePlay for ground-truth recognition
+                const diag = diagnosePlay(pState, playState.tick, offenseStates, playType, offensivePlayKey, playState);
                 playDiagnosis = diag.guess;
                 diagConfidence = diag.confidence;
                 diagDirection = diag.direction;
@@ -1027,10 +1042,11 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
             const qbScrambling = carrierIsPasser && (isBallPastLOS || ballCarrierState.action === 'qb_scramble');
             const assignment = pState.assignment;
 
+            // While reading, defenders execute their base assignment instead of freezing
             if (playDiagnosis === 'read') {
-                pState.action = 'idle';
-                pState.targetX = pState.x;
-                pState.targetY = pState.y;
+                executeAssignment(pState, assignment, offenseStates, LOS, playState, ballCarrierState);
+                pState.targetX = Math.max(1, Math.min(52.3, pState.targetX));
+                pState.targetY = Math.max(1, Math.min(119.0, pState.targetY));
                 return;
             }
 
@@ -1059,7 +1075,6 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                     const dist = getDistance(pState, chaseTarget);
                     const iq = pState.playbookIQ || 50;
 
-                    // Playground PA Bite: Low-IQ defenders charge downhill to the line of scrimmage
                     if (isFooledByPA && iq < 60) {
                         pState.targetX = chaseTarget.x;
                         pState.targetY = Math.min(chaseTarget.y, LOS + 0.5);
@@ -1072,47 +1087,33 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                         return;
                     }
 
-                    if (dist < 2.5) {
-                        pState.targetX = chaseTarget.x;
-                        pState.targetY = chaseTarget.y;
-                        pState.contactReduction = 1.0;
-                    } else {
-                        const maxLeadTime = 1.2;
-                        const leadTime = Math.min(maxLeadTime, dist / (16 + (iq / 4)));
-                        let predX = chaseTarget.x + ((chaseTarget.vx || 0) * leadTime);
-                        let predY = chaseTarget.y + ((chaseTarget.vy || 0) * leadTime);
+                    // Continuous pursuit lead blending to eliminate 4-yard jump at dist = 2.5
+                    const blendFactor = Math.min(1.0, Math.max(0.0, (dist - 1.5) / 3.0));
+                    const maxLeadTime = 1.0;
+                    const leadTime = Math.min(maxLeadTime, dist / (16 + (iq / 4))) * blendFactor;
+                    let predX = chaseTarget.x + ((chaseTarget.vx || 0) * leadTime);
+                    let predY = chaseTarget.y + ((chaseTarget.vy || 0) * leadTime);
 
-                        const isOutsideRun = Math.abs(chaseTarget.x - CENTER_X) > 12.0;
-                        const isWidestDefender = (chaseTarget.x > CENTER_X && pState.x >= chaseTarget.x) ||
-                            (chaseTarget.x < CENTER_X && pState.x <= chaseTarget.x);
+                    const isOutsideRun = Math.abs(chaseTarget.x - CENTER_X) > 12.0;
+                    const isWidestDefender = (chaseTarget.x > CENTER_X && pState.x >= chaseTarget.x) ||
+                        (chaseTarget.x < CENTER_X && pState.x <= chaseTarget.x);
 
-                        if (isOutsideRun && isWidestDefender && pState.role === 'DB' && iq > 55) {
-                            const boundaryBias = chaseTarget.x > CENTER_X ? 2.5 : -2.5;
-                            predX = Math.max(2.0, Math.min(FIELD_WIDTH - 2.0, chaseTarget.x + boundaryBias));
-                            predY = Math.max(chaseTarget.y + 1.0, predY);
-                        }
-
-                        if (dirConfidence > 0.45 && !isFooledByPA) {
-                            const cheatAmount = 4.0 * dirConfidence * (iq / 100);
-                            if (diagDirection === 'right' && predX < FIELD_WIDTH - 5) predX += cheatAmount;
-                            else if (diagDirection === 'left' && predX > 5) predX -= cheatAmount;
-                        }
-
-                        if (iq > 65 && dist > 5.0) {
-                            if (predX > CENTER_X && pState.x < predX) predX -= 1.5;
-                            else if (predX <= CENTER_X && pState.x > predX) predX += 1.5;
-                        }
-
-                        pState.targetX = predX;
-                        pState.targetY = predY;
-                        pState.contactReduction = 0.6 + (diagConfidence * 0.4);
+                    if (isOutsideRun && isWidestDefender && pState.role === 'DB' && iq > 55) {
+                        const boundaryBias = (chaseTarget.x > CENTER_X ? 2.5 : -2.5) * blendFactor;
+                        predX = Math.max(2.0, Math.min(FIELD_WIDTH - 2.0, chaseTarget.x + boundaryBias));
+                        predY = Math.max(chaseTarget.y + 0.5, predY);
                     }
 
+                    if (dirConfidence > 0.45 && !isFooledByPA) {
+                        const cheatAmount = 3.0 * dirConfidence * (iq / 100) * blendFactor;
+                        if (diagDirection === 'right' && predX < FIELD_WIDTH - 5) predX += cheatAmount;
+                        else if (diagDirection === 'left' && predX > 5) predX -= cheatAmount;
+                    }
+
+                    pState.targetX = predX;
+                    pState.targetY = predY;
+                    pState.contactReduction = 0.7 + (diagConfidence * 0.3);
                     pState.action = 'pursuit';
-                    if (isFooledByPA && !pState.loggedPA && gameLog && Math.random() < 0.05) {
-                        pushGameLog(gameLog, `[Tick ${playState.tick}] 🎣 ${pState.name} bites on the play action!`, playState);
-                        pState.loggedPA = true;
-                    }
                 }
             } else if (isBallInAir) {
                 const iq = pState.playbookIQ || 50;
