@@ -350,9 +350,9 @@ export function getSmartCarrierTarget(runner, defenseStates, offenseStates, fiel
         }
     });
 
-    if (Math.abs(currentVx) > 1.0 && Math.abs(currentVx) <= maxLateral) {
+    /*if (Math.abs(currentVx) > 1.0 && Math.abs(currentVx) <= maxLateral) {
         laneOffsets.push(currentVx);
-    }
+    }*/
 
     const visionDepth = 3.5 + (iq / 25);
     let bestScore = -Infinity;
@@ -468,8 +468,9 @@ export function getSmartCarrierTarget(runner, defenseStates, offenseStates, fiel
 
     // Telemetry: Log when the running back switches running lanes, showing the top scores evaluated
     if (bestOffset !== prevOffset) {
+        runner._laneLockTicks = 12; // Lock into this lane for 12 ticks (~0.6s) to prevent stutter-stepping
         evaluatedLanesTracker.sort((a, b) => b.score - a.score);
-        logPlayDebug('RB_LANE_EVAL', `${runner.name} switched running lanes`, {
+        logPlayDebug('RB_LANE_FLIP', `${runner.name} switched running lanes`, {
             fromOffset: prevOffset,
             toOffset: bestOffset,
             topChoices: evaluatedLanesTracker.slice(0, 3)
@@ -548,6 +549,9 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
     if (!qbState || !qbState.hasBall || playState.ballState.inAir || playState.ballState.throwInitiated) return;
     if (qbState.isEngaged || qbState.stunnedTicks > 0) return;
     if (qbState.action === 'sacked') return;
+
+    if (typeof qbState.ticksInPocket === 'undefined') qbState.ticksInPocket = 0;
+    qbState.ticksInPocket++;
 
     const scoreDiff = (playState.offenseScore || 0) - (playState.defenseScore || 0);
     const currentQuarter = playState.quarter || 1;
@@ -1023,8 +1027,8 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
         scanSpeedBase *= Math.max(0.60, pressureProcessingMod);
     }
 
-    if (typeof qbState.ticksInPocket === 'undefined') qbState.ticksInPocket = 0;
-    qbState.ticksInPocket++;
+    /*if (typeof qbState.ticksInPocket === 'undefined') qbState.ticksInPocket = 0;
+    qbState.ticksInPocket++;*/
 
     const numReadsVisible = Math.min(progression.length, 1 + Math.floor(qbState.ticksInPocket / scanSpeedBase));
 
