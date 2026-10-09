@@ -1263,14 +1263,17 @@ export function executeThrow(qbState, target, strength, accuracy, playState, gam
     let aimY = target.y;
 
     if (target.action === 'run_route' || target.action === 'route_complete' || target.isBallCarrier) {
-        const flightTime = throwDistance / ballSpeed;
         const targetWgt = target.weight || target.wgt || 200;
         const targetSpd = target.speed || target.spd || 50;
-        const targetAgi = target.agility || target.agi || 50;
 
         const weightSpeedPenalty = Math.max(0.80, 1.0 - ((targetWgt - 200) / 1000));
-        const trackingSprintBoost = 1.1 + (targetAgi / 250);
-        const recYPS = (7.0 + (targetSpd / 100) * 4.0) * (target.fatigueModifier || 1.0) * weightSpeedPenalty * trackingSprintBoost;
+        // Aligned strictly with physics engine top speed formula (no artificial sprint boost inflation)
+        const recYPS = (7.0 + (targetSpd / 100) * 4.0) * (target.fatigueModifier || 1.0) * weightSpeedPenalty;
+
+        // Corrected Flight Time: Account for downfield receiver velocity relative to ball speed
+        const recVy = target.vy || 0;
+        const effectiveBallSpeed = Math.max(8.0, ballSpeed - (recVy * 0.65));
+        const flightTime = throwDistance / effectiveBallSpeed;
 
         const qbIQ = qbState.playbookIQ || 50;
         const qbCons = qbState.consistency || 50;
@@ -1280,8 +1283,8 @@ export function executeThrow(qbState, target, strength, accuracy, playState, gam
         const consistencyRoll = (Math.random() * (100 - qbCons)) / 100;
         let qbEstimation = 1.0 + (errorRoll * maxError) + (errorRoll * consistencyRoll * 0.1);
 
-        if (passType === 'bullet') qbEstimation *= 0.92;
-        if (passType === 'lob') qbEstimation *= 1.08;
+        if (passType === 'bullet') qbEstimation *= 0.96; // Softer modifier
+        if (passType === 'lob') qbEstimation *= 1.04;
 
         let distanceToTravel = recYPS * flightTime * qbEstimation;
 
