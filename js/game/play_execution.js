@@ -776,16 +776,21 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                         pState.targetX = pState.initialX;
                         pState.targetY = pState.dropbackTargetY;
                         pState.contactReduction = 1.4;
-                        if (Math.abs(pState.y - pState.dropbackTargetY) < 0.5) {
+                        
+                        // When he reaches the end of his dropback, anchor him to his exact stopping spot
+                        if (Math.abs(pState.y - pState.dropbackTargetY) < 0.4) {
                             pState.hasCompletedDropback = true;
                             pState.dropbackPhase = 'set';
+                            pState._pocketAnchorX = pState.x;
+                            pState._pocketAnchorY = pState.y;
                         }
                         break;
                     }
 
                     pState.contactReduction = 1.0;
-                    let idealX = pState.initialX;
-                    let idealY = pState.dropbackTargetY;
+                    // Use his actual natural stopping position as the anchor, preventing rubber-banding
+                    let idealX = pState._pocketAnchorX !== undefined ? pState._pocketAnchorX : pState.initialX;
+                    let idealY = pState._pocketAnchorY !== undefined ? pState._pocketAnchorY : pState.dropbackTargetY;
 
                     // Sense BOTH unblocked rushers AND collapsing engaged linemen
                     const unblockedRushers = defenseStates.filter(d => !d.isBlocked && !d.isEngaged && d.stunnedTicks === 0 && getDistance(pState, d) < 5.5);

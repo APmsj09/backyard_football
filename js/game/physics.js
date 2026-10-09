@@ -52,9 +52,36 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
     const strengthFactor = strength / 100;
     const agiFactor = agility / 100;
 
-    // --- 4. TARGETING MATH ---
-    const targetX = pState.targetX ?? pState.x;
-    const targetY = pState.targetY ?? pState.y;
+    // --- 4. TARGETING MATH & STATION-HOLDING HYSTERESIS ---
+    let targetX = pState.targetX ?? pState.x;
+    let targetY = pState.targetY ?? pState.y;
+
+    // Prevent AI micro-adjustments from causing 20Hz twitching when standing still or holding position
+    if (pState._lockedTargetX !== undefined && pState._lockedTargetY !== undefined) {
+        const shiftFromLock = Math.hypot(targetX - pState._lockedTargetX, targetY - pState._lockedTargetY);
+        const currentDistToLock = Math.hypot(targetX - pState.x, targetY - pState.y);
+        
+        if (shiftFromLock < 0.45 && currentDistToLock < 0.6) {
+            targetX = pState._lockedTargetX;
+            targetY = pState._lockedTargetY;
+        } else {
+            pState._lockedTargetX = targetX;
+            pState._lockedTargetY = targetY;
+        }
+    } else {
+        pState._lockedTargetX = targetX;
+        pState._lockedTargetY = targetY;
+    }
+
+    // Telemetry: Track when a player's destination snaps or shifts abruptly by more than 2 yards
+    if (pState._lastLoggedTargetX !== targetX && Math.abs(targetX - (pState._lastLoggedTargetX || 0)) > 2.0) {
+        logPlayDebug('TARGET_SHIFT', `${pState.name} shifted target significantly`, { 
+            from: Number((pState._lastLoggedTargetX || 0).toFixed(1)), 
+            to: Number(targetX.toFixed(1)) 
+        });
+        pState._lastLoggedTargetX = targetX;
+    }
+
     const dx = targetX - pState.x;
     const dy = targetY - pState.y;
     const distToTarget = Math.sqrt(dx * dx + dy * dy);
