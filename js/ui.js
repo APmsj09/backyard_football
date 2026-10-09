@@ -1984,50 +1984,64 @@ function renderDepthChartSide(side, gameState) {
 
     visualField.innerHTML = '';
         const losMarker = document.createElement('div');
-        losMarker.className = 'absolute left-0 w-full h-1 bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.8)] z-0';
-        losMarker.style.top = side === 'offense' ? '22%' : '78%';
+        losMarker.className = 'absolute left-0 w-full h-1.5 bg-blue-500 shadow-[0_0_10px_rgba(59,130,246,0.9)] z-0';
+        losMarker.style.top = side === 'offense' ? '18%' : '82%';
         visualField.appendChild(losMarker);
 
-        // Smart projection: Expands cramped interior trenches while keeping boundary WRs in bounds
+        // Smart projection: Generous vertical tiers and expanded trench spacing
         const getVisualCoordinates = (rawX, rawY, currentSide) => {
             // 1. Horizontal De-Clustering
             let visualX = rawX;
             if (Math.abs(rawX) <= 4.0) {
-                // Expand trench spacing by 2.1x so OL, TE, and DL never touch
-                visualX = rawX * 2.1;
+                // Wide trench expansion: prevents OL1, OL2, OL3, and TE from bumping
+                visualX = rawX * 2.15;
             } else {
                 const sign = Math.sign(rawX);
                 const excess = Math.abs(rawX) - 4.0;
-                visualX = sign * (4.0 * 2.1 + excess * 1.3);
+                visualX = sign * (4.0 * 2.15 + excess * 1.3);
             }
             visualX = Math.max(-21.5, Math.min(21.5, visualX));
-            const leftPercent = 50 + (visualX * 1.9);
+            const leftPercent = 50 + (visualX * 1.95);
 
-            // 2. Vertical Staggering & Tier Alignment
-            let visualY = rawY;
+            // 2. High-Spaced Vertical Tiers
+            let topPercent = 50;
+
             if (currentSide === 'offense') {
-                if (rawY < -0.5 && rawY > -2.0) {
-                    visualY = -2.2; // Push under-center QB down so he doesn't collide with the Center
-                } else if (rawY <= -2.0 && rawY > -4.5) {
-                    visualY = rawY * 1.25; // Fullback depth
-                } else if (rawY <= -4.5) {
-                    visualY = -5.0 + (rawY + 4.5) * 1.1; // Shotgun / Deep tailback
+                if (rawY >= -0.3) {
+                    // Line of Scrimmage (OL and WRs on the line)
+                    topPercent = 18.0;
+                } else if (rawY > -1.5) {
+                    // Under Center QB: Clean 15% drop below the Center
+                    topPercent = 33.0;
+                } else if (rawY <= -1.5 && rawY > -3.5) {
+                    // Fullback / Offset Shotgun RB / Pistol QB
+                    topPercent = 52.0;
+                } else if (rawY <= -3.5 && rawY > -5.0) {
+                    // Shotgun QB
+                    topPercent = 56.0;
+                } else if (rawY <= -5.0 && rawY > -6.5) {
+                    // Deep Tailback (Power I) / Shotgun Back
+                    topPercent = 74.0;
+                } else {
+                    // Deep Pistol Tailback / Punter
+                    topPercent = 86.0;
                 }
             } else {
-                if (rawY >= 0.5 && rawY <= 2.0) {
-                    visualY = 1.3; // DL on the line
-                } else if (rawY > 2.0 && rawY <= 5.5) {
-                    visualY = 4.4; // Linebackers at clean 2nd level
-                } else if (rawY > 5.5 && rawY <= 9.0) {
-                    visualY = 8.0; // Cornerbacks / Nickel
-                } else if (rawY > 9.0) {
-                    visualY = 12.8; // Deep Safeties
+                // DEFENSIVE TIERS (Generous separation from DL to LBs)
+                if (rawY <= 1.5) {
+                    // Defensive Line (Right along the scrimmage line)
+                    topPercent = 76.0;
+                } else if (rawY > 1.5 && rawY <= 4.5) {
+                    // Linebackers (Dedicated second-level room: 22% gap above DL!)
+                    topPercent = 54.0;
+                } else if (rawY > 4.5 && rawY <= 8.5) {
+                    // Cornerbacks / Slot DBs
+                    topPercent = 37.0;
+                } else {
+                    // Deep Safeties (Cover 2 / Cover 3 centerfield shells)
+                    topPercent = 16.0;
                 }
             }
-
-            const topPercent = currentSide === 'offense'
-                ? Math.max(10, Math.min(88, 22 - (visualY * 4.2)))
-                : Math.max(10, Math.min(88, 78 - (visualY * 4.2)));
 
             return { leftPercent, topPercent };
         };
@@ -2067,32 +2081,32 @@ function renderDepthChartSide(side, gameState) {
                     else ringColor = 'border-rose-500 animate-pulse';
                 }
 
-                // Compact layout: avatar shrunk from w-11 to w-9, two-way badge pinned to avatar corner
+                // Enriched, larger card geometry (w-11 h-11 avatar with crisp typography)
                 slotEl.className = 'absolute transform -translate-x-1/2 -translate-y-1/2 flex flex-col items-center group z-10 cursor-pointer select-none';
                 slotEl.innerHTML = `
                     <div class="relative flex flex-col items-center">
-                        <!-- Floating Slot Pill -->
-                        <span class="absolute -top-2.5 z-20 text-[7.5px] font-black tracking-wider uppercase px-1 rounded shadow-sm ${side === 'offense' ? 'bg-blue-900 text-blue-200 border border-blue-700' : 'bg-red-900 text-red-200 border border-red-700'}">
+                        <!-- Floating Slot Badge -->
+                        <span class="absolute -top-3 z-20 text-[8.5px] font-black tracking-wider uppercase px-1.5 py-0.2 rounded shadow-md ${side === 'offense' ? 'bg-blue-900 text-blue-200 border border-blue-700' : 'bg-red-900 text-red-200 border border-red-700'}">
                             ${slotId}
                         </span>
 
-                        <!-- Compact Avatar Circle -->
-                        <div class="relative w-9 h-9 rounded-full border-2 ${ringColor} shadow-lg flex flex-col items-center justify-center ${player ? 'bg-slate-900 text-white' : 'bg-slate-800/90 border-dashed border-slate-500 text-slate-400'}">
-                            <span class="text-[7px] font-mono text-slate-400 leading-none">${posKey}</span>
-                            <span class="text-xs font-black leading-none">${ovr}</span>
-                            ${isUnavailable ? '<span class="absolute -top-1 -right-1 text-[9px]">🩹</span>' : ''}
+                        <!-- Punchy, Scaled-Up Avatar Circle (w-11 h-11) -->
+                        <div class="relative w-11 h-11 rounded-full border-2 ${ringColor} shadow-xl flex flex-col items-center justify-center ${player ? 'bg-slate-900 text-white' : 'bg-slate-800/90 border-dashed border-slate-500 text-slate-400'} group-hover:scale-105 transition-transform">
+                            <span class="text-[8px] font-mono text-slate-400 leading-none">${posKey}</span>
+                            <span class="text-sm font-black leading-none mt-0.5">${ovr}</span>
+                            ${isUnavailable ? '<span class="absolute -top-1 -right-1 text-[10px]">🩹</span>' : ''}
                             
-                            <!-- Ironman Tag as Corner Badge (Saves vertical space) -->
+                            <!-- Integrated Two-Way Ironman Badge -->
                             ${otherSlot ? `
-                                <span class="absolute -bottom-1 -right-1.5 z-20 text-[7px] font-black uppercase px-1 rounded shadow border ${side === 'offense' ? 'bg-rose-950 text-rose-300 border-rose-800' : 'bg-blue-950 text-blue-300 border-blue-800'}" title="Also starts at ${otherSlot}">
+                                <span class="absolute -bottom-1 -right-1.5 z-20 text-[7.5px] font-black uppercase px-1 py-0.2 rounded shadow-md border ${side === 'offense' ? 'bg-rose-950 text-rose-300 border-rose-800' : 'bg-blue-950 text-blue-300 border-blue-800'}" title="Also starts at ${otherSlot} on ${otherSide}">
                                     ⚡${otherSlot.substring(0, 2)}
                                 </span>
                             ` : ''}
                         </div>
                     </div>
 
-                    <!-- Sleek Name Pill -->
-                    <div class="mt-0.5 bg-slate-950 text-white text-[8.5px] font-bold px-1.5 py-0.5 rounded shadow text-center max-w-[64px] truncate border border-slate-700 group-hover:border-amber-400 transition-colors">
+                    <!-- Clean Name Tag -->
+                    <div class="mt-1 bg-slate-950 text-white text-[9px] font-bold px-2 py-0.5 rounded shadow-md text-center max-w-[76px] truncate border border-slate-700 group-hover:border-amber-400 transition-colors">
                         ${shortName}
                     </div>
                 `;
