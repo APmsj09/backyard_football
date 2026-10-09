@@ -170,14 +170,14 @@ export function diagnosePlay(pState, tick, offenseStates, truePlayType, offensiv
 
     if (pState._lastLoggedGuess !== guess && guess !== 'read') {
         logPlayDebug('DEF_READ', `${pState.name} (${pState.role}) committed to [${guess.toUpperCase()}]`, {
-            confidence: Number(confidence.toFixed(2)),
+            confidence: Number(finalConfidence.toFixed(2)),
             direction,
             dirConfidence: Number(dirConfidence.toFixed(2))
         });
         pState._lastLoggedGuess = guess;
     }
 
-    return { guess, confidence, direction, dirConfidence };
+    return { guess, confidence: finalConfidence, direction, dirConfidence };
 }
 
 export function calculateSafetyHelp(safetyState, defenseStates, offenseStates, ballCarrierState, playState, isBallInAir) {
