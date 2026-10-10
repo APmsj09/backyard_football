@@ -710,32 +710,41 @@ export function handleBallArrival(playState, carrier, playResult, gameLog) {
         const fatPct = Math.round((bestCandidate.fatigueModifier || 1) * 100);
         const isDefense = !bestCandidate.isOffense;
 
-        // Base catch: Give a higher floor so wide-open players don't drop everything
         let catchScore = (catching * 0.50) + (agility * 0.20) + 40;
 
         const defendersNear = playersInRange.filter(p => !p.isOffense).length;
-        const attackersNear = playersInRange.filter(p => p.isOffense).length;
+        let attackersNear = playersInRange.filter(p => p.isOffense).length;
+
+        // If the intended receiver is within 2.5 yards of the catch point, they are actively contesting!
+        const intendedTarget = playState.activePlayers.find(p => p.id === ball.targetPlayerId);
+        if (intendedTarget && getDistance(intendedTarget, ball) < 2.5 && attackersNear === 0) {
+            attackersNear = 1;
+        }
 
         if (isDefense) {
             const isPunt = playState.type === 'punt';
-            const ticksInAir = playState.tick - (ball.throwTick || 0);
-            const floatBonus = ticksInAir > 40 ? 15 : 0;
-            const handsFactor = Math.min(1.0, catching / 70);
+            const handsFactor = Math.min(1.0, catching / 80);
 
             if (isPunt) {
-                catchScore = (catchScore * 0.85) + 20; // Punt returns are standard catches
+                catchScore = (catchScore * 0.85) + 20;
                 logPlayDebug('PUNT_CATCH_ATTEMPT', `${bestCandidate.name} fielding punt`, {
                     catchProbability: `${Math.round(catchScore)}%`,
                     hands: hndEff
                 });
             } else {
-                catchScore = (catchScore * (0.25 * handsFactor)) + floatBonus;
-                if (attackersNear > 0) catchScore *= 0.50;
+                // Realistic INT rate: Interceptions require exceptional hands and positioning.
+                // Normal defensive plays result in incomplete passes (swats/PBUs), not turnovers.
+                catchScore = catchScore * (0.12 * handsFactor);
+                
+                // If receiver is fighting for the ball, INT chance is halved
+                if (attackersNear > 0) catchScore *= 0.45;
+
+                // Cap defensive INT chance on standard passes to 18% max (elite ballhawks)
+                catchScore = Math.min(18.0, catchScore);
 
                 logPlayDebug('DEF_BALL_ATTEMPT', `${bestCandidate.name} attempted INT/Swat`, {
                     intProbability: `${Math.round(catchScore)}%`,
                     hands: hndEff,
-                    floatBonusActive: floatBonus > 0,
                     attackersContesting: attackersNear
                 });
             }

@@ -758,6 +758,14 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
 
             if (projDist < 4.0) defendersClosingIn++;
 
+            // Check if defender is "capping" the route over the top (deep safeties)
+            const isCappingDeep = d.y > (rec.y - 1.0) && Math.abs(d.x - rec.x) < 5.5;
+            if (depth > 12 && isCappingDeep) {
+                // Safeties sitting over the top will break on the ball; reduce false separation
+                minProjectedSeparation = Math.min(minProjectedSeparation, Math.hypot(rec.x - d.x, rec.y - d.y));
+                defendersClosingIn += 2;
+            }
+
             const distDefToQB = Math.hypot(projDefX - qbState.x, projDefY - qbState.y);
             if (distDefToQB < distFromQB - 1.5) {
                 const dx = projRecX - qbState.x;
@@ -765,9 +773,10 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
                 const defDx = projDefX - qbState.x;
                 const defDy = projDefY - qbState.y;
 
+                // Expanded undercut cone (from 0.95 to 0.88) so linebackers sitting in throwing lanes are respected
                 const dot = (dx * defDx + dy * defDy) / (distFromQB * distDefToQB);
-                if (dot > 0.95) {
-                    undercutThreat += (4.0 - (distDefToQB / distFromQB) * 4.0);
+                if (dot > 0.88) {
+                    undercutThreat += (4.5 - (distDefToQB / distFromQB) * 4.0);
                 }
             }
         });
@@ -795,18 +804,17 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
         // SITUATIONAL VALUE
         // ======================================================
 
-        // Throwing beyond the sticks is valuable, but not mandatory.
         if (targetAtOrBeyondFirstDown) {
-            score += 18;
+            // Reward first-down targets, but stay patient on 1st & 10
+            score += (down >= 3) ? 22 : 10;
         } else {
-            // Short targets are perfectly reasonable on early downs,
-            // but become less attractive when a first down is required.
             const yardsShort = yardsToGo - Math.max(0, distanceBeyondLOS);
 
             if (down >= 3 && yardsShort > 3) {
                 score -= Math.min(24, yardsShort * 3);
             } else if (down <= 2) {
-                score -= Math.min(8, yardsShort * 1.5);
+                // Don't punish high-percentage 4-7 yard completions on early downs
+                score += (distanceBeyondLOS >= 3) ? 8 : -4;
             }
         }
 
@@ -860,17 +868,19 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
         }
 
         if (depth > 14) {
-            // Deep balls require both physical ability and a meaningful window.
             if (qbStrength < 60) {
                 score -= (60 - qbStrength) * 2.0;
             }
 
-            if (minProjectedSeparation >= 3.0) {
-                score += 12 + (qbIQ * 0.05);
+            // Heavy coverage penalty for chucking deep into multiple defenders or safeties
+            if (defendersClosingIn >= 1) {
+                score -= 25 + ((100 - qbDecision) * 0.35);
+            }
+
+            if (minProjectedSeparation >= 3.5 && defendersClosingIn === 0) {
+                score += 14 + (qbIQ * 0.05);
             } else {
-                // Good QBs can still attempt difficult throws,
-                // but poor QBs should usually move on.
-                score -= Math.max(10, (60 - qbDecision) * 0.6);
+                score -= Math.max(16, (75 - qbDecision) * 0.8);
             }
         }
 

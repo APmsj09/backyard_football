@@ -14,7 +14,7 @@ import {
 import { pushGameLog } from './collisions.js';
 import { logPlayDebug } from './telemetry.js';
 import {
-    initMovementIntent, setPointIntent, setHoldIntent, setTrackIntent, setLaneIntent, resolveMovementIntent
+    initMovementIntent, setPointIntent, setHoldIntent, setTrackIntent, setLaneIntent, setRouteIntent, resolveMovementIntent
 } from './movement_intent.js';
 
 const FIELD_WIDTH = 53.3;
@@ -697,7 +697,7 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                     }
                     pState.action = 'run_path';
                     pState.contactReduction = 1.15;
-                    setPointIntent(pState, targetX, targetY, 0.5);
+                    setRouteIntent(pState, targetX, targetY, 0.6);
                 } else if (pState.role === 'QB' && pState.action === 'qb_scramble' && pState.y < LOS) {
                     // 2. QB Scramble behind LOS: Angle wide to escape the pocket
                     const rollDir = pState.rolloutDir || (pState.x > CENTER_X ? 1 : -1);
@@ -904,10 +904,21 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                     }
 
                     pState.contactReduction = distToNode < 1.0 ? 0.8 : 1.0;
-                    setPointIntent(pState, pt.x, pt.y, 0.5);
 
                     if (distToNode < 0.6) {
                         pState.currentPathIndex++;
+
+                        // Case A: Still running route -> immediately target next node without 1-tick lag
+                        if (pState.currentPathIndex < pState.routePath.length) {
+                            const nextPt = pState.routePath[pState.currentPathIndex];
+                            setRouteIntent(pState, nextPt.x, nextPt.y, 0.6);
+                        } else {
+                            // Case B: Final node reached -> immediately transition to route_complete and hold station
+                            pState.action = 'route_complete';
+                            setHoldIntent(pState, pt.x, pt.y);
+                        }
+
+                        // --- ROUTE BREAK & CUT REACTIONS ---
                         const coverageDefender = defenseStates.find(d =>
                             (d.assignment?.includes(pState.slot) || d.assignedPlayerSlot === pState.slot) &&
                             getDistance(pState, d) < 5.0
@@ -923,6 +934,7 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                             const isDoubleMove = ['Sluggo', 'Out_And_Up', 'Hitch_And_Go', 'PostCorner'].some(r => pState.assignment?.includes(r));
                             let separated = false;
 
+                            // 1. Playground Double-Move Trap
                             if (isDoubleMove && dbIQ < 60 && Math.random() < 0.65) {
                                 coverageDefender.stunnedTicks = Math.max(14, 30 - Math.floor(dbIQ / 3));
                                 coverageDefender.vx = 0;
@@ -940,6 +952,7 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                                 }
                             }
 
+                            // 2. Uncalled Playground Shove
                             if (!separated && wrStrength > dbStrength + 8 && Math.random() < 0.35) {
                                 const pushDx = (coverageDefender.x - pState.x) || 1;
                                 const pushDy = (coverageDefender.y - pState.y) || 1;
@@ -953,6 +966,7 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                                 }
                             }
 
+                            // 3. Momentum Overshoot on the Cut
                             if (!separated) {
                                 const shakeChance = (wrAgility / (dbAgility + 10)) * (1.2 - (dbIQ / 150));
                                 if (Math.random() < shakeChance * 0.45) {
@@ -965,9 +979,13 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                                 }
                             }
                         }
+
                         const masteryBurst = mastery >= 80 ? 1.08 : 1.04;
                         pState.vx *= masteryBurst;
                         pState.vy *= masteryBurst;
+                    } else {
+                        // Still tracking toward current waypoint
+                        setRouteIntent(pState, pt.x, pt.y, 0.6);
                     }
                     break;
                 }

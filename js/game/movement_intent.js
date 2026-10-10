@@ -94,3 +94,17 @@ export function resolveMovementIntent(pState) {
         pState.arrivalRadius = 0.35;
     }
 }
+
+/**
+ * Dynamic waypoint navigation for route runners (does not brake at intermediate cuts)
+ */
+export function setRouteIntent(pState, x, y, arrivalRadius = 0.60) {
+    if (!pState._intent) initMovementIntent(pState);
+    const intent = pState._intent;
+    intent.mode = 'ROUTE';
+    intent.targetX = x;
+    intent.targetY = y;
+    intent.arrivalRadius = arrivalRadius;
+    intent.settled = false;
+    intent.isExplicit = true;
+}

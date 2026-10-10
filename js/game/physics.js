@@ -142,7 +142,7 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
     }
 
     // --- 8. DECELERATION (Braking / Planting) ---
-    const isStopping = distToTarget < 2.5 && !['run_path', 'tracking_ball', 'pursuit'].includes(pState.action);
+    const isStopping = distToTarget < 2.5 && !['run_path', 'run_route', 'tracking_ball', 'pursuit'].includes(pState.action);
     let arrivalFactor = 1.0;
 
     if (isStopping) {
@@ -158,9 +158,9 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
     // --- 9. APPLY NEWTONIAN ACCELERATION WITH DISTANCE GATING ---
     // Safely gate timeDelta to prevent division-by-zero or NaN
     const safeTimeDelta = Math.max(timeDelta, 0.05);
-    
+
     // Mathematically restrict speed so a player can NEVER jump past their target in a single tick
-    const maxSafeSpeed = (distToTarget / safeTimeDelta) * 0.8; 
+    const maxSafeSpeed = (distToTarget / safeTimeDelta) * 0.8;
     const clampedTargetSpeed = Math.min(effectiveMaxSpeed * arrivalFactor, maxSafeSpeed);
 
     const safeDist = Math.max(0.001, distToTarget);
@@ -239,9 +239,11 @@ function resolveNewtonianCollisions(pState, allPlayers) {
         // Respect ghostTicks to prevent QB/RB explosion after handoffs
         if (pState.ghostTicks > 0 || other.ghostTicks > 0) continue;
 
-        // Skip QB/RB collisions to prevent handoff mesh jittering
-        const isHandoffPair = (pState.role === 'QB' && other.role === 'RB') || (pState.role === 'RB' && other.role === 'QB');
-        if (isHandoffPair) continue;
+        const isHandoffPair = (p1.role === 'QB' && p2.role === 'RB') || (p1.role === 'RB' && p2.role === 'QB');
+        // Exempt QB/RB from body bumping in the backfield during dropbacks, handoffs, and route releases
+        if (isHandoffPair && !playState.ballState.inAir && !playState.handoffOccurred) {
+            continue;
+        }
 
         const dist = getDistance(pState, other);
         const theirWeight = other.weight || other.wgt || 200;
