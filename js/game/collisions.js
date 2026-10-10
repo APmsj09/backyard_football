@@ -553,8 +553,21 @@ export function resolvePlayerCollisions(playState) {
                 p2.isSqueezing = true;
 
                 const totalWeight = (p1.weight || 200) + (p2.weight || 200);
-                const pushFactorP1 = ((p2.weight || 200) / totalWeight) * 0.25;
-                const pushFactorP2 = ((p1.weight || 200) / totalWeight) * 0.25;
+                let pushFactorP1 = ((p2.weight || 200) / totalWeight) * 0.20;
+                let pushFactorP2 = ((p1.weight || 200) / totalWeight) * 0.20;
+
+                // If one player is settled holding station (QB in pocket / settled WR), 
+                // the active moving player absorbs the separation so the settled player doesn't vibrate
+                const p1Settled = p1.movementMode === 'HOLD' && p1._intent?.settled;
+                const p2Settled = p2.movementMode === 'HOLD' && p2._intent?.settled;
+
+                if (p1Settled && !p2Settled) {
+                    pushFactorP1 = 0.0;
+                    pushFactorP2 = 0.35;
+                } else if (p2Settled && !p1Settled) {
+                    pushFactorP1 = 0.35;
+                    pushFactorP2 = 0.0;
+                }
 
                 const pushX = (dx / dist) * overlap;
                 const pushY = (dy / dist) * overlap;

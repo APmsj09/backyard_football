@@ -362,6 +362,16 @@ export function getSmartCarrierTarget(runner, defenseStates, offenseStates, fiel
 
     const prevOffset = runner._chosenLaneOffset !== undefined ? runner._chosenLaneOffset : 0;
 
+    // Enforce lane commitment unless an unblocked defender is an immediate tackle threat (< 2.2 yards)
+    const immediateTackleThreat = nearbyDefenders.find(d => getDistance(runner, d) < 2.2);
+    if (!immediateTackleThreat && runner._laneLockTicks > 0 && runner._lockedLaneX !== undefined) {
+        runner._laneLockTicks--;
+        bestTargetX = runner._lockedLaneX;
+        bestTargetY = runner.y + visionDepth;
+        runner._smoothTargetX = bestTargetX;
+        return { x: bestTargetX, y: bestTargetY };
+    }
+
     let evaluatedLanesTracker = []; // Track choices for telemetry
 
     laneOffsets.forEach((offset) => {
@@ -388,7 +398,7 @@ export function getSmartCarrierTarget(runner, defenseStates, offenseStates, fiel
 
         // Heavy penalty against rapid full-reversal flips (e.g. +5 to -5)
         if (prevOffset !== 0 && offset !== 0 && Math.sign(offset) !== Math.sign(prevOffset)) {
-            score -= 35; 
+            score -= 35;
         }
 
         const isLateTrailing = (playState.quarter >= 4 || playState.quarter === 'OT') &&
@@ -466,15 +476,18 @@ export function getSmartCarrierTarget(runner, defenseStates, offenseStates, fiel
         }
     });
 
-    // Telemetry: Log when the running back switches running lanes, showing the top scores evaluated
+    // Latch absolute field corridor when committing to a cut
     if (bestOffset !== prevOffset) {
-        runner._laneLockTicks = 12; // Lock into this lane for 12 ticks (~0.6s) to prevent stutter-stepping
+        runner._laneLockTicks = 10; // Lock into this lane for 10 ticks (~0.5s)
+        runner._lockedLaneX = bestTargetX;
         evaluatedLanesTracker.sort((a, b) => b.score - a.score);
         logPlayDebug('RB_LANE_FLIP', `${runner.name} switched running lanes`, {
             fromOffset: prevOffset,
             toOffset: bestOffset,
             topChoices: evaluatedLanesTracker.slice(0, 3)
         });
+    } else if (runner._lockedLaneX === undefined) {
+        runner._lockedLaneX = bestTargetX;
     }
 
     runner._chosenLaneOffset = bestOffset;
@@ -495,7 +508,7 @@ export function getSmartCarrierTarget(runner, defenseStates, offenseStates, fiel
             bestTargetX = immediateThreat.x + (immediateThreat.x > runner.x ? -0.4 : 0.4);
             bestTargetY = immediateThreat.y + 1.5;
             runner.contactReduction = 0.9;
-            
+
             if (runner._lastLoggedAction !== 'trucking') {
                 logPlayDebug('CARRIER_DECISION', `${runner.name} lowers shoulder to TRUCK`, { threat: immediateThreat.name });
                 runner._lastLoggedAction = 'trucking';
@@ -513,7 +526,7 @@ export function getSmartCarrierTarget(runner, defenseStates, offenseStates, fiel
 
                 runner._dodgeDir = dodgeDir;
                 runner._dodgeCooldown = 8;
-                
+
                 logPlayDebug('CARRIER_DECISION', `${runner.name} EVADES ${dodgeDir === 1 ? 'right' : 'left'}`, { threat: immediateThreat.name });
                 runner._lastLoggedAction = 'dodge';
             } else {
@@ -655,7 +668,7 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
                 Math.sign(o.initialX - 26.6) !== Math.sign(trueTarget.initialX - 26.6)
             );
             if (decoy) {
-                qbState.currentReadTargetSlot = decoy.slot; 
+                qbState.currentReadTargetSlot = decoy.slot;
                 if (qbState._lastLoggedDecoy !== decoy.slot) {
                     logPlayDebug('QB_EYE_MANIPULATION', `${qbState.name} uses eyes to look safety off primary read (${progression[0]}) using decoy ${decoy.slot}`, {
                         trueRead: progression[0],
@@ -675,7 +688,7 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
     } else {
         // Normal progression tracking with telemetry on read transitions
         const readIndex = Math.min(progression.length - 1, Math.floor(qbState.ticksInPocket / (Math.max(8, (110 - qbIQ) / 3))));
-        
+
         if (qbState._lastReadIndex !== readIndex) {
             logPlayDebug('QB_READ_PROGRESSION', `${qbState.name} advances to read #${readIndex + 1} (${progression[readIndex]})`, {
                 tick: playState.tick,
@@ -1293,7 +1306,12 @@ export function executeThrow(qbState, target, strength, accuracy, playState, gam
     let aimX = target.x;
     let aimY = target.y;
 
-    if (target.action === 'run_route' || target.action === 'route_complete' || target.isBallCarrier) {
+    // Only lead receivers who are actively moving; throw directly to stationary/settled targets
+    const isMovingTarget = target.action === 'run_route' || 
+                           target.isBallCarrier || 
+                           (target.action === 'route_complete' && Math.hypot(target.vx || 0, target.vy || 0) > 0.8);
+
+    if (isMovingTarget) {
         const targetWgt = target.weight || target.wgt || 200;
         const targetSpd = target.speed || target.spd || 50;
 

@@ -54,58 +54,41 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
     const strengthFactor = strength / 100;
     const agiFactor = agility / 100;
 
-    // --- 4. TARGETING MATH & STATION-HOLDING HYSTERESIS ---
+    // --- 4. TARGETING MATH & CLEAN ARRIVAL RESOLUTION ---
     let targetX = pState.targetX ?? pState.x;
     let targetY = pState.targetY ?? pState.y;
-
-    // Prevent AI micro-adjustments from causing 20Hz twitching when standing still or holding position
-    if (pState._lockedTargetX !== undefined && pState._lockedTargetY !== undefined) {
-        const shiftFromLock = Math.hypot(targetX - pState._lockedTargetX, targetY - pState._lockedTargetY);
-        const currentDistToLock = Math.hypot(targetX - pState.x, targetY - pState.y);
-        
-        if (shiftFromLock < 0.45 && currentDistToLock < 0.6) {
-            targetX = pState._lockedTargetX;
-            targetY = pState._lockedTargetY;
-        } else {
-            pState._lockedTargetX = targetX;
-            pState._lockedTargetY = targetY;
-        }
-    } else {
-        pState._lockedTargetX = targetX;
-        pState._lockedTargetY = targetY;
-    }
-
-    // Telemetry: Track when a player's destination snaps or shifts abruptly by more than 2 yards
-    if (pState._lastLoggedTargetX !== targetX && Math.abs(targetX - (pState._lastLoggedTargetX || 0)) > 2.0) {
-        logPlayDebug('TARGET_SHIFT', `${pState.name} shifted target significantly`, { 
-            from: Number((pState._lastLoggedTargetX || 0).toFixed(1)), 
-            to: Number(targetX.toFixed(1)) 
-        });
-        pState._lastLoggedTargetX = targetX;
-    }
 
     const dx = targetX - pState.x;
     const dy = targetY - pState.y;
     const distToTarget = Math.sqrt(dx * dx + dy * dy);
+    const arrivalRadius = pState.arrivalRadius || 0.30;
 
-    // --- TRUE ARRIVAL DEADZONE & SMOOTH TAPER ---
-    // If we are within 0.4 yards of our destination, scale velocity smoothly down 
-    // to zero so players glide to a stop without any back-and-forth micro-jitter.
-    if (distToTarget < 0.4) {
-        const approachRatio = distToTarget / 0.4; // 1.0 at outer edge, 0.0 at target
-        
-        // Smoothly scale velocity multiplier from 1.0 down to 0.3
-        const glideFactor = 0.3 + (0.7 * approachRatio);
-        pState.vx *= glideFactor;
-        pState.vy *= glideFactor;
+    // DECISIVE BRAKING FOR FIXED TARGETS (HOLD & POINT)
+    if (pState.movementMode === 'HOLD' || pState.movementMode === 'POINT') {
+        if (distToTarget <= arrivalRadius) {
+            // Apply heavy braking friction
+            pState.vx *= 0.40;
+            pState.vy *= 0.40;
 
-        // If extremely close and moving slow, lock directly to coordinate
-        if (distToTarget < 0.15 && Math.abs(pState.vx) < 0.5 && Math.abs(pState.vy) < 0.5) {
-            pState.x = targetX;
-            pState.y = targetY;
-            pState.vx = 0;
-            pState.vy = 0;
-            pState.currentSpeedYPS = 0;
+            // Direct snap to stop when speed has bled off
+            if (distToTarget < 0.16 || (distToTarget < 0.22 && Math.hypot(pState.vx, pState.vy) < 0.35)) {
+                pState.x = targetX;
+                pState.y = targetY;
+                pState.vx = 0;
+                pState.vy = 0;
+                pState.currentSpeedYPS = 0;
+                pState.velocity = { x: 0, y: 0 };
+                if (pState._intent) pState._intent.settled = true;
+                clampToField(pState);
+                return;
+            }
+
+            // Advance deceleration step and return immediately (prevents Section 9 re-acceleration)
+            pState.x += pState.vx * timeDelta;
+            pState.y += pState.vy * timeDelta;
+            pState.currentSpeedYPS = Math.hypot(pState.vx, pState.vy);
+            pState.velocity = { x: pState.vx, y: pState.vy };
+            clampToField(pState);
             return;
         }
     }
