@@ -864,44 +864,102 @@ export function processWeeklyPlayerGrowth() {
 export function processEndOfWeek() {
     if (!game) return;
 
-    // === PROCESS FINANCES & SNACK FUND ===
-    if (game.playerTeam) {
-        if (!game.playerTeam.finances) {
-            game.playerTeam.finances = { balance: 10.00, waivedDues: [] };
+    // === PROCESS FINANCES & SNACK FUND (UNIVERSAL AI & PLAYER) ===
+    const mainTeams = game.teams.filter(t => t.leagueType === 'main');
+
+    mainTeams.forEach(team => {
+        if (!team.finances) {
+            team.finances = { balance: 10.00, waivedDues: [] };
         }
-        
-        let weeklyIncome = 5.00; // Standard Allowance
+
+        const coach = team.staff?.coach || team.coach;
+        const personality = coach?.biases?.personality?.name || 'Balanced Tactician';
+        const discipline = coach?.ratings?.practiceDiscipline || 50;
+        const gmDirective = team.gameplan?.gmDirective || 'COACH_AUTONOMY';
+        const isUser = team.isPlayerControlled;
+        const roster = getRosterObjects(team);
+
+        // --- 1. AI WAIVE DUES PHASE (Players' Coach is soft on unhappy kids) ---
+        if (!isUser) {
+            roster.forEach(p => {
+                const happiness = p.expectations?.happiness || 100;
+                if (personality === "Players' Coach" && happiness < 60) {
+                    team.finances.waivedDues.push(p.id);
+                }
+            });
+        }
+
+        // --- 2. INCOME & DUES COLLECTION ---
+        let weeklyIncome = 5.00; // Base Coach Allowance
         let duesCollected = 0;
-        
-        const roster = getRosterObjects(game.playerTeam);
-        
-        // Collect $1.00 Team Dues from players
+
         roster.forEach(p => {
-            const isWaived = game.playerTeam.finances.waivedDues.includes(p.id);
+            const isWaived = team.finances.waivedDues.includes(p.id);
             const ego = p.personality?.ego || 50;
 
             if (isWaived) {
                 // Waiving fees builds morale but looks soft
                 if (p.expectations) p.expectations.happiness = Math.min(100, (p.expectations.happiness || 50) + 10);
             } else {
-                if (ego > 80 && Math.random() < 0.4) {
-                    // High ego divas "forget their wallet"
-                    if (game.gameLog) game.gameLog.push(`💸 ${p.name} claimed he forgot his wallet and skipped paying team dues this week.`);
+                // High-ego divas try to "forget their wallet", but Strict Coaches enforce the rules
+                const fearFactor = discipline / 150; // High discipline limits shenanigans
+                const forgetChance = ego > 75 ? (0.50 - fearFactor) : 0; 
+
+                if (Math.random() < forgetChance) {
+                    if (isUser && game.gameLog) game.gameLog.push(`💸 ${p.name} claimed he forgot his wallet and skipped paying team dues this week.`);
                 } else {
                     duesCollected += 1.00;
                 }
             }
         });
 
-        game.playerTeam.finances.balance += weeklyIncome + duesCollected;
-        
-        // Reset weekly waivers
-        game.playerTeam.finances.waivedDues = [];
-        
-        if (game.gameLog) {
-            game.gameLog.push(`💰 Snack Fund Update: Added $${(weeklyIncome + duesCollected).toFixed(2)} (Allowance: $${weeklyIncome.toFixed(2)}, Dues: $${duesCollected.toFixed(2)}).`);
+        team.finances.balance += (weeklyIncome + duesCollected);
+
+        if (isUser && game.gameLog) {
+            game.gameLog.push(`💰 Snack Fund Update: Added $${(weeklyIncome + duesCollected).toFixed(2)} (Allowance: $${weeklyIncome.toFixed(2)}, Dues: $${duesCollected.toFixed(2)}). Balance: $${team.finances.balance.toFixed(2)}`);
         }
-    }
+
+        // --- 3. AI INTELLIGENT SPENDING PHASE ---
+        if (!isUser) {
+            const avgFatigue = roster.reduce((sum, p) => sum + (p.fatigue || 0), 0) / Math.max(1, roster.length);
+            const avgHappiness = roster.reduce((sum, p) => sum + (p.expectations?.happiness || 100), 0) / Math.max(1, roster.length);
+            const hasLockerRoomBeef = roster.some(p => p.social?.rivalIds?.some(rId => team.roster.includes(rId)));
+
+            // A. PIZZA PARTY ($25) - Morale
+            // Players' Coach buys it instantly if morale dips; Disciplinarians refuse to coddle kids.
+            if (team.finances.balance >= 25.00 && (avgHappiness < 65 || hasLockerRoomBeef) && personality !== 'Old-School Disciplinarian') {
+                team.finances.balance -= 25.00;
+                roster.forEach(p => {
+                    if (p.expectations) p.expectations.happiness = 100;
+                    if (p.social) p.social.rivalIds = []; // Pizza squashes all beefs
+                });
+            }
+            // B. CAPRI SUNS ($6) & ORANGES ($2) - Energy
+            // Disciplinarians buy these so they can run harder practices.
+            else if (avgFatigue > 45 && team.finances.balance >= 6.00) {
+                team.finances.balance -= 6.00;
+                roster.forEach(p => p.fatigue = Math.max(0, (p.fatigue || 0) - 30));
+            } else if (avgFatigue > 25 && team.finances.balance >= 2.00) {
+                team.finances.balance -= 2.00;
+                roster.forEach(p => p.fatigue = Math.max(0, (p.fatigue || 0) - 10));
+            }
+
+            // C. BUYING FAVOR TOKENS ($3) - Recruiting
+            // Analytical/Win-Now coaches hoard money to buy tokens for Free Agency bidding wars
+            const isAggressiveFA = gmDirective === 'WIN_NOW' || personality === 'Analytical Savant';
+            const tokenHoardTarget = isAggressiveFA ? 4 : 2; // Aggressive GMs stock up on tokens
+
+            // If team has leftover cash and needs tokens, buy them!
+            if (team.finances.balance >= 3.00 && (team.socialProfile?.favorTokens || 0) < tokenHoardTarget) {
+                team.finances.balance -= 3.00;
+                if (!team.socialProfile) team.socialProfile = { favorTokens: 0, streetCred: 50 };
+                team.socialProfile.favorTokens += 1;
+            }
+        }
+
+        // Cleanup waivers for the next week
+        team.finances.waivedDues = [];
+    });
 
     // Resolve In-Season Weekly Bids
     if (game.weeklyBids && game.weeklyBids.length > 0) {
