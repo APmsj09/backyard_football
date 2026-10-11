@@ -966,9 +966,9 @@ export function switchTab(tabId, gameState) {
         
         case 'front-office': 
             const foSub = document.querySelector('.fo-tab.active')?.dataset.subTab || 'staff';
-            if (foSub === 'staff') renderStaffTab(gameState);
-            if (foSub === 'finances') renderStoreTab(gameState);
-            if (foSub === 'social') renderSocialNetworkTab(gameState);
+            if (foSub === 'staff') UI.renderStaffTab(gameState);
+            if (foSub === 'finances') window.app.renderStoreTab(gameState); // Calls it from window.app
+            if (foSub === 'social') UI.renderSocialNetworkTab(gameState);
             break;
             
         case 'league':
