@@ -954,14 +954,24 @@ export function switchTab(tabId, gameState) {
     switch (tabId) {
         case 'my-team': renderMyTeamTab(gameState); break;
         case 'depth-chart': renderDepthChartTab(gameState); break;
-        case 'schedule': renderScheduleTab(gameState); break;
-        case 'standings': renderStandingsTab(gameState); break;
-        case 'player-stats': renderPlayerStatsTab(gameState); break;
-        case 'hall-of-fame': renderHallOfFameTab(gameState); break;
-        case 'history': renderHistoryTab(gameState); break;
         case 'free-agents': renderFreeAgentsTab(gameState); break;
-        case 'staff': renderStaffTab(gameState); break;
         case 'messages': renderMessagesTab(gameState); break;
+        
+        case 'front-office': 
+            const foSub = document.querySelector('.fo-tab.active')?.dataset.subTab || 'staff';
+            if (foSub === 'staff') UI.renderStaffTab(gameState);
+            if (foSub === 'finances') window.app.renderStoreTab(gameState);
+            if (foSub === 'social') UI.renderSocialNetworkTab(gameState);
+            break;
+            
+        case 'league':
+            const lgSub = document.querySelector('.league-tab.active')?.dataset.subTab || 'standings';
+            if (lgSub === 'standings') UI.renderStandingsTab(gameState);
+            if (lgSub === 'schedule') UI.renderScheduleTab(gameState);
+            if (lgSub === 'player-stats') UI.renderPlayerStatsTab(gameState);
+            if (lgSub === 'history') UI.renderHistoryTab(gameState);
+            if (lgSub === 'hall-of-fame') UI.renderHallOfFameTab(gameState);
+            break;
     }
 }
 

@@ -435,9 +435,7 @@ function handleTabSwitch(e) {
         const tabId = button.dataset.tab;
         gameState = Game.getGameState();
         if (gameState) {
-            UI.switchTab(tabId, gameState);
-            if (tabId === 'social') renderSocialNetworkTab(gameState); // Render our new tab!
-            if (tabId === 'finances') renderStoreTab(gameState); // Render our new tab!
+            switchTab(tabId, gameState);
         }
     }
 }
@@ -1400,41 +1398,51 @@ function main() {
     Game.loadGameState();
     gameState = Game.getGameState();
 
-    // Dynamically inject the Social Network Tab
-    const dashTabs = document.getElementById('dashboard-tabs');
-    if (dashTabs && !document.querySelector('[data-tab="social"]')) {
-        const socialBtn = document.createElement('button');
-        socialBtn.className = 'tab-button whitespace-nowrap';
-        socialBtn.dataset.tab = 'social';
-        socialBtn.innerHTML = '<span class="text-base mr-1">💬</span> Social';
-        dashTabs.appendChild(socialBtn);
+    // Front Office Sub-Tab Listeners
+    document.querySelectorAll('.fo-tab').forEach(btn => {
+        btn.addEventListener('click', () => {
+            document.querySelectorAll('.fo-tab').forEach(b => {
+                b.classList.remove('active', 'bg-slate-900', 'text-white', 'shadow-sm');
+                b.classList.add('text-slate-600');
+            });
+            
+            btn.classList.add('active', 'bg-slate-900', 'text-white', 'shadow-sm');
+            btn.classList.remove('text-slate-600');
+            
+            document.querySelectorAll('.fo-sub-pane').forEach(p => p.classList.add('hidden'));
+            document.getElementById(`fo-pane-${btn.dataset.subTab}`)?.classList.remove('hidden');
+            
+            if (gameState) {
+                if (btn.dataset.subTab === 'staff') UI.renderStaffTab(gameState);
+                if (btn.dataset.subTab === 'finances') window.app.renderStoreTab(gameState);
+                if (btn.dataset.subTab === 'social') UI.renderSocialNetworkTab(gameState);
+            }
+        });
+    });
 
-        const dashContent = document.getElementById('dashboard-content');
-        const socialPane = document.createElement('div');
-        socialPane.id = 'tab-content-social';
-        socialPane.className = 'tab-pane hidden flex flex-col h-full min-h-0 overflow-y-auto bg-slate-100';
-        socialPane.innerHTML = `
-            <div class="p-4 border-b bg-white shrink-0 sticky top-0 z-10 shadow-sm">
-                <h3 class="text-xl font-bold text-slate-800 uppercase tracking-wider">Locker Room Network</h3>
-                <p class="text-xs text-slate-500">Manage chemistry, cliques, and morale.</p>
-            </div>
-            <div id="social-network-container" class="p-4 flex-grow min-h-0 pb-12"></div>
-        `;
-        dashContent.appendChild(socialPane);
-
-        // Inject the Corner Store Tab Shell
-        const financeBtn = document.createElement('button');
-        financeBtn.className = 'tab-button whitespace-nowrap text-emerald-800 bg-emerald-100 border border-emerald-300 font-bold';
-        financeBtn.dataset.tab = 'finances';
-        financeBtn.innerHTML = '<span class="text-base mr-1">🏪</span> Corner Store';
-        dashTabs.appendChild(financeBtn);
-
-        const financePane = document.createElement('div');
-        financePane.id = 'tab-content-finances';
-        financePane.className = 'tab-pane hidden flex flex-col h-full min-h-0 overflow-y-auto bg-slate-100';
-        // Empty shell; rendering logic is entirely handled by app.renderStoreTab() now!
-        dashContent.appendChild(financePane);
-    }
+    // League Hub Sub-Tab Listeners
+    document.querySelectorAll('.league-tab').forEach(btn => {
+        btn.addEventListener('click', () => {
+            document.querySelectorAll('.league-tab').forEach(b => {
+                b.classList.remove('active', 'bg-slate-900', 'text-white', 'shadow-sm');
+                b.classList.add('text-slate-600');
+            });
+            
+            btn.classList.add('active', 'bg-slate-900', 'text-white', 'shadow-sm');
+            btn.classList.remove('text-slate-600');
+            
+            document.querySelectorAll('.league-sub-pane').forEach(p => p.classList.add('hidden'));
+            document.getElementById(`league-pane-${btn.dataset.subTab}`)?.classList.remove('hidden');
+            
+            if (gameState) {
+                if (btn.dataset.subTab === 'standings') UI.renderStandingsTab(gameState);
+                if (btn.dataset.subTab === 'schedule') UI.renderScheduleTab(gameState);
+                if (btn.dataset.subTab === 'player-stats') UI.renderPlayerStatsTab(gameState);
+                if (btn.dataset.subTab === 'history') UI.renderHistoryTab(gameState);
+                if (btn.dataset.subTab === 'hall-of-fame') UI.renderHallOfFameTab(gameState);
+            }
+        });
+    });
 
     document.getElementById('start-game-btn')?.addEventListener('click', startNewGame);
     document.getElementById('load-game-btn')?.addEventListener('click', () => handleLoadGame());
