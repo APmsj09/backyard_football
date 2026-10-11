@@ -146,21 +146,23 @@ export function captureFrame(playState, gameLog) {
         },
         players: playState.activePlayers.map(p => {
             let rawAngle;
-            // If basically stopped, HOLD the previous angle instead of snapping to 0 or PI
             if (Math.abs(p.vx) < 0.2 && Math.abs(p.vy) < 0.2) {
                 rawAngle = p._visualAngle !== undefined ? p._visualAngle : (p.isOffense ? 0 : Math.PI);
             } else {
                 rawAngle = Math.atan2(p.vx, p.vy);
             }
 
-            // Interpolate angle to prevent visual rapid flips
             if (p._visualAngle === undefined) p._visualAngle = rawAngle;
 
             let diff = rawAngle - p._visualAngle;
             while (diff > Math.PI) diff -= Math.PI * 2;
             while (diff < -Math.PI) diff += Math.PI * 2;
             
-            p._visualAngle += diff * 0.35; // Smooths the turn frame-over-frame
+            p._visualAngle += diff * 0.35;
+
+            // Detect if player is actively leaping for a high pass in flight
+            const ball = playState.ballState;
+            const isJumping = p.action === 'tracking_ball' && ball.inAir && ball.z > 1.2 && getDistance(p, ball) < 2.0;
 
             return {
                 id: p.id,
@@ -173,6 +175,7 @@ export function captureFrame(playState, gameLog) {
                 isOffense: p.isOffense,
                 hasBall: p.hasBall,
                 isStunned: p.stunnedTicks > 0,
+                isJumping,
                 primaryColor: p.primaryColor,
                 secondaryColor: p.secondaryColor,
                 number: p.number,

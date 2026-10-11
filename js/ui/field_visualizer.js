@@ -297,12 +297,27 @@ export function drawFieldVisualization(canvas, ctx, frameData, homeColor = '#000
             const weightScale = 0.80 + ((p.wgt || 200) / 500);
             const heightScale = 0.85 + ((p.hgt || 70) / 150);
 
+            // JUMP ANIMATION: If jumping for a pass, scale sprite up slightly to pop off the turf
+            const jumpScale = p.isJumping ? 1.20 : 1.0;
+
             ctx.save();
             let jitterX = p.isStunned ? (Math.random() - 0.5) * 2.5 : 0;
             let jitterY = p.isStunned ? (Math.random() - 0.5) * 2.5 : 0;
-            ctx.translate(px + jitterX, py + jitterY);
+            
+            // Draw a grounded shadow slightly offset if the player is airborne/jumping
+            if (p.isJumping) {
+                ctx.save();
+                ctx.fillStyle = "rgba(0,0,0,0.3)";
+                ctx.beginPath();
+                ctx.ellipse(px + 4, py + 6, baseSize * 0.6, baseSize * 0.3, 0, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.restore();
+            }
+
+            ctx.translate(px + jitterX, (p.isJumping ? py - 6 : py) + jitterY);
 
             ctx.save();
+            ctx.scale(jumpScale, jumpScale);
             ctx.rotate(p.angle);
 
             const jerseyColor = p.isStunned ? "#4b5563" : (p.primaryColor || "#333");

@@ -305,6 +305,7 @@ export function setupInitialPlayerStates(playState, offense, defense, play, assi
             const speed = player.attributes?.physical?.speed || 50;
             const agility = player.attributes?.physical?.agility || 50;
             const strength = player.attributes?.physical?.strength || 50;
+            const jumping = player.attributes?.physical?.jumping || 50;
             const weight = player.attributes?.physical?.weight || 150;
             const height = player.attributes?.physical?.height || 68;
             const toughness = player.attributes?.mental?.toughness || 50;
@@ -328,8 +329,9 @@ export function setupInitialPlayerStates(playState, offense, defense, play, assi
                 x: startX, y: startY, initialX: startX, initialY: startY,
                 targetX, targetY,
                 fatigueModifier: fatigueMod,
-                spd: speed, agi: agility, str: strength,
+                spd: speed, agi: agility, str: strength, jump: jumping,
                 wgt: weight, hgt: height, iq: playerIQ,
+                speed, agility, strength, jumping, weight, height, playbookIQ: playerIQ,
                 cons: consistency, tgh: toughness, ctch: catching,
                 tkl: tackling, blk: blocking, shed: blockShedding,
                 acc: accuracy, cov: coverage,

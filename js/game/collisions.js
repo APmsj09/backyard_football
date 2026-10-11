@@ -663,12 +663,13 @@ export function handleBallArrival(playState, carrier, playResult, gameLog) {
             }
         }
 
-        const verticalLeap = (p.jumping || p.agility || 50) / 100;
-        const maxCatchHeight = (playerHeight / 36) + 1.2 + (verticalLeap * 1.5);
+        const verticalLeap = (p.jumping || p.agi || p.agility || 50) / 100;
+        // Balanced backyard vertical: Max leap adds ~0.7 yards (~2 feet) to catch reach
+        const maxCatchHeight = (playerHeight / 36) + 1.2 + (verticalLeap * 0.7);
         if (ball.inAir && ball.z > maxCatchHeight) return false;
 
         const heightBonus = Math.max(0, (playerHeight - 65) * 0.04);
-        let dynamicCatchRadius = BASE_CATCH_RADIUS + heightBonus + (verticalLeap * 0.2);
+        let dynamicCatchRadius = BASE_CATCH_RADIUS + heightBonus + (verticalLeap * 0.10);
         const CATCH_TOLERANCE = 0.25;
 
         if (p.action === 'tracking_ball') dynamicCatchRadius *= 1.8;
