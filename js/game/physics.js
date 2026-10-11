@@ -236,12 +236,12 @@ function resolveNewtonianCollisions(pState, allPlayers) {
     for (const other of allPlayers) {
         if (other.id === pState.id || other.isEngaged || pState.isEngaged) continue;
 
-        // Respect ghostTicks to prevent QB/RB explosion after handoffs
+        // Respect ghostTicks to prevent QB/RB collision snags after handoffs
         if (pState.ghostTicks > 0 || other.ghostTicks > 0) continue;
 
-        const isHandoffPair = (p1.role === 'QB' && p2.role === 'RB') || (p1.role === 'RB' && p2.role === 'QB');
+        const isHandoffPair = (pState.role === 'QB' && other.role === 'RB') || (pState.role === 'RB' && other.role === 'QB');
         // Exempt QB/RB from body bumping in the backfield during dropbacks, handoffs, and route releases
-        if (isHandoffPair && !playState.ballState.inAir && !playState.handoffOccurred) {
+        if (isHandoffPair && (pState.action === 'handoff_setup' || other.action === 'handoff_setup')) {
             continue;
         }
 
@@ -258,11 +258,9 @@ function resolveNewtonianCollisions(pState, allPlayers) {
             const totalW = myWeight + theirWeight;
             const myMoveRatio = theirWeight / totalW;
 
-            // Gentle positional separation without injecting chaotic bounce velocity
             pState.x += dx_norm * overlap * myMoveRatio * 0.25;
             pState.y += dy_norm * overlap * myMoveRatio * 0.25;
 
-            // Dampen relative velocity along the collision normal so players slide past each other
             const relVx = pState.vx - (other.vx || 0);
             const relVy = pState.vy - (other.vy || 0);
             const normalVelocity = (relVx * dx_norm) + (relVy * dy_norm);

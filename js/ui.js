@@ -2933,7 +2933,7 @@ export function renderPlaybookManager(gameState) {
                             </div>
                             <div class="mt-2 pt-1 border-t border-blue-200 flex justify-end">
                                 ${isBasic ? '<span class="text-[9px] text-slate-400 italic">Always Active</span>' : `
-                                <button class="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-rose-100 text-rose-800 hover:bg-rose-200 border border-rose-300 transition" onclick="app_toggleInstallPlay('${key}', 'offense')">
+                                <button class="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-rose-100 text-rose-800 hover:bg-rose-200 border border-rose-300 transition" onclick="event.stopPropagation(); app_toggleInstallPlay('${key}', 'offense')">
                                     Uninstall
                                 </button>`}
                             </div>
@@ -2997,7 +2997,7 @@ export function renderPlaybookManager(gameState) {
                             </div>
                             <div class="mt-2 pt-1 border-t border-red-200 flex justify-end">
                                 ${isBasic ? '<span class="text-[9px] text-slate-400 italic">Always Active</span>' : `
-                                <button class="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-rose-100 text-rose-800 hover:bg-rose-200 border border-rose-300 transition" onclick="app_toggleInstallPlay('${key}', 'defense')">
+                                <button class="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-rose-100 text-rose-800 hover:bg-rose-200 border border-rose-300 transition" onclick="event.stopPropagation(); app_toggleInstallPlay('${key}', 'defense')">
                                     Uninstall
                                 </button>`}
                             </div>

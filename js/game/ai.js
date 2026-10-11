@@ -233,7 +233,7 @@ export function calculateSafetyHelp(safetyState, defenseStates, offenseStates, b
 
     if (!shouldHelp) return null;
 
-    const ballFlightTime = isBallInAir ? playState.tick - playState.ballState.releaseeTick : 0;
+    const ballFlightTime = isBallInAir ? playState.tick - (playState.ballState.releaseTick || playState.ballState.throwTick || 0) : 0;
     const MIN_FLIGHT_TICKS = 5;
 
     if (isBallInAir && ballFlightTime < MIN_FLIGHT_TICKS) return null;
@@ -741,6 +741,7 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
         const projRecX = rec.x + (rec.vx || 0) * estimatedFlightTime;
         const projRecY = rec.y + (rec.vy || 0) * estimatedFlightTime;
 
+        const depth = rec.y - (playState.lineOfScrimmage || 0);
         let minProjectedSeparation = 20;
         let defendersClosingIn = 0;
         let undercutThreat = 0;
@@ -781,12 +782,10 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
             }
         });
 
-        const depth = rec.y - playState.lineOfScrimmage;
-
         let score = Math.min(minProjectedSeparation, 6) * 10;
 
         if (rec.assignment === 'Screen_Wait') {
-            if (playState.tick < 45) return { score: -100, info: { state: rec, separation: minProjectedSeparation } };
+            if (playState.tick < 45) return { score: -100, separation: minProjectedSeparation, info: { state: rec, separation: minProjectedSeparation } };
             score += 80;
 
             if (minProjectedSeparation < 1.0) {
@@ -1421,7 +1420,7 @@ export function executeThrow(qbState, target, strength, accuracy, playState, gam
     const vz = (deltaZ + (4.9 * t * t)) / t;
 
     playState.ballState = {
-        x: startX, y: startY, z: startZ, inAir: true, throwTick: playState.tick, releaseeTick: playState.tick,
+        x: startX, y: startY, z: startZ, inAir: true, throwTick: playState.tick, releaseTick: playState.tick,
         vx: (aimX - startX) / t, vy: (aimY - startY) / t, vz: vz,
         targetX: aimX, targetY: aimY, targetPlayerId: target.id, throwerId: qbState.id, isThrowAway: false
     };

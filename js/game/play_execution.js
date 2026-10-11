@@ -761,6 +761,11 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                     setPointIntent(pState, pState.targetX, pState.targetY, 0.35);
                     break;
 
+                case 'pass_block':
+                case 'run_block':
+                    setPointIntent(pState, pState.targetX, pState.targetY, 0.35);
+                    break;
+
                 case 'run_path':
                 case 'run_fake':
                     break;

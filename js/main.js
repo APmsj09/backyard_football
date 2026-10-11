@@ -417,9 +417,8 @@ function handleLoadTestRoster() {
 
 function handleSaveTestRoster() {
     if (!gameState) return;
-    Game.saveGameState('my_test_roster');
-    activeSaveKey = 'my_test_roster';
-    UI.showModal("Saved", "<p>Game saved as 'Test Roster'.</p>");
+    Game.saveGameState(activeSaveKey);
+    UI.showModal("Saved", `<p>Game saved successfully to slot '${activeSaveKey}'.</p>`);
 }
 
 function handleTabSwitch(e) {
@@ -919,6 +918,9 @@ window.app = {
     startNewGame,
     handleLoadGame,
     handleLoadTestRoster,
+    renderFAPool: () => {
+        if (gameState) UI.renderOffseasonFAPool(gameState);
+    },
     openBidModal: (playerId) => {
         const p = Game.getPlayer(playerId);
         if (!p) return;
