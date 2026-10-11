@@ -409,6 +409,7 @@ export function getSmartCarrierTarget(runner, defenseStates, offenseStates, fiel
             score -= 35;
         }
 
+        // LATE GAME CLOCK MANAGEMENT: Run out of bounds if trailing in the 4th quarter
         const isLateTrailing = (playState.quarter >= 4 || playState.quarter === 'OT') &&
             (playState.timeRemaining <= 150) &&
             ((playState.offenseScore || 0) < (playState.defenseScore || 0));
@@ -424,6 +425,7 @@ export function getSmartCarrierTarget(runner, defenseStates, offenseStates, fiel
         }
 
         let laneThreat = 0;
+        let nearestDefDist = Infinity; // Track absolute closest defender for open-space scoring
         let overPursuitDetected = false;
 
         offenseStates.forEach(blocker => {
@@ -434,10 +436,10 @@ export function getSmartCarrierTarget(runner, defenseStates, offenseStates, fiel
                 if (isAhead) {
                     if (lateralDist < 0.85) {
                         // COLLISION PENALTY: Do NOT run directly into the back of your own lineman!
-                        score -= 95;
-                    } else if (lateralDist >= 1.0 && lateralDist <= 2.4) {
-                        // REWARD RUNNING OFF THE HIP: Run into the daylight right next to your blocker's seal
-                        score += 55;
+                        score -= 110;
+                    } else if (lateralDist >= 1.0 && lateralDist <= 2.5) {
+                        // REWARD RUNNING OFF THE HIP: Run into daylight right next to your blocker's seal
+                        score += 65;
                     }
                 }
             }
@@ -450,11 +452,17 @@ export function getSmartCarrierTarget(runner, defenseStates, offenseStates, fiel
             const defPredY = def.y + ((def.vy || 0) * 0.3);
             const distToPredicted = Math.hypot(testX - defPredX, testY - defPredY);
 
+            // Open-Space tracking: Update nearest defender (even if they are blocked, they are still a physical body in the way)
+            if (distToPredicted < nearestDefDist) {
+                nearestDefDist = distToPredicted;
+            }
+
             if (!def.isBlocked && !def.isEngaged) {
                 if (distToPredicted < 5.5) {
                     const threatFalloff = Math.max(0, 1.0 - (distToPredicted / 5.5));
                     laneThreat += (280 / (distToPredicted + 0.6)) * threatFalloff;
 
+                    // Detect Overpursuit for Cutback lanes
                     const defLateralSpeed = def.vx || 0;
                     if (Math.abs(defLateralSpeed) > 2.5) {
                         const defGoingRight = defLateralSpeed > 0;
@@ -464,9 +472,11 @@ export function getSmartCarrierTarget(runner, defenseStates, offenseStates, fiel
                     }
                 }
             } else {
+                // Defender is engaged with a blocker: reward running to the open side of the block
                 const blocker = (typeof def.blockedBy === 'object' && def.blockedBy !== null) ? def.blockedBy :
                     (typeof def.engagedWith === 'object' && def.engagedWith !== null) ? def.engagedWith :
                         offenseStates.find(o => o.id === def.blockedBy || o.id === def.engagedWith);
+                
                 if (blocker) {
                     const distToBlock = Math.hypot(testX - blocker.x, testY - blocker.y);
                     if (distToBlock >= 1.0 && distToBlock <= 3.0 && blocker.y > runner.y) {
@@ -480,7 +490,19 @@ export function getSmartCarrierTarget(runner, defenseStates, offenseStates, fiel
         });
 
         score -= laneThreat;
-        if (iq > 70 && overPursuitDetected) score += 40;
+
+        // OPEN-SPACE & IQ-SCALED VISION:
+        // Smart runners evaluate green grass and open space much better than low-IQ runners.
+        const iqFactor = iq / 100; // 0.2 to 1.0 scale
+        const openSpaceReward = Math.min(75, nearestDefDist * 10) * (0.4 + (iqFactor * 0.6));
+        score += openSpaceReward;
+
+        // CUTBACK VISION (IQ-Scaled):
+        // If defenders overpursue, high-IQ runners spot backside cutback lanes against the grain
+        if (iq >= 60 && overPursuitDetected) {
+            const cutbackMultiplier = (iq - 50) / 50; // 0.2 to 1.0
+            score += 70 * cutbackMultiplier;
+        }
 
         evaluatedLanesTracker.push({ offset, score: Math.round(score), threat: Math.round(laneThreat) });
 
