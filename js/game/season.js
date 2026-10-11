@@ -601,6 +601,12 @@ export function simulateHistoricalMatch(homeTeam, awayTeam) {
     generateHistoricalStats(homeTeam, homeScore);
     generateHistoricalStats(awayTeam, awayScore);
 
+    // Record realistic snap counts so retention logic doesn't penalize starters as "benched"
+    [...getRosterObjects(homeTeam), ...getRosterObjects(awayTeam)].forEach(p => {
+        if (!p.careerStats) p.careerStats = { seasonsPlayed: 0 };
+        p.careerStats.snapsThisSeason = (p.careerStats.snapsThisSeason || 0) + 38;
+    });
+
     finalizeGameResults(homeTeam, awayTeam, homeScore, awayScore);
 }
 
@@ -2216,6 +2222,11 @@ export function advanceToOffseason() {
         team.roster = game.players
             .filter(p => p.teamId === team.id && (!p.status || p.status.duration === 0 || p.status.type === 'healthy'))
             .map(p => p.id);
+
+        // Safeguard: Never let CPU teams drop below the threshold needed to field an 8v8 unit
+        if (!team.isPlayerControlled && team.leagueType === 'main' && team.roster.length < 11) {
+            autoFillTeamWalkOns(team, 11);
+        }
 
         if (team.depthChart && team.formations) {
             const offSlots = offenseFormations[team.formations.offense]?.slots || [];

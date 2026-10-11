@@ -40,6 +40,14 @@ async function startNewGame() {
             Game.simulateHistoricalSeason(y, gameState);
             Game.advanceToOffseason();
             Game.simulateHistoricalDraft(y);
+
+            // Replenish rosters after each historical draft so teams don't bleed out
+            gameState.teams.forEach(team => {
+                if (team && team.leagueType === 'main') {
+                    Game.autoFillTeamWalkOns(team, 13);
+                    Game.aiSetDepthChart(team);
+                }
+            });
         }
 
         UI.stopLoadingMessages();

@@ -661,14 +661,15 @@ export function evaluatePlayerRetention(player, team, snapsThisSeason = 0) {
     }
 
     // 3. LOSING PROGRAM & RELEGATION STIGMA
+    // Tuned so struggling franchises don't suffer total squad walkouts
     if (team.wins <= 2) {
-        if (ego > 65) stayScore -= 24;
-        else stayScore -= 12;
+        if (ego > 70) stayScore -= 14;
+        else if (ego > 50) stayScore -= 6;
     }
 
-    // Stars on Tier 2 teams want to play in Tier 1 before graduating
-    if (team.tier === 2 && ovr >= 54 && player.age >= 16) {
-        stayScore -= 22;
+    // High-ego stars on Tier 2 teams seek Tier 1 competition
+    if (team.tier === 2 && ovr >= 60 && player.age >= 17 && ego > 65) {
+        stayScore -= 14;
     }
 
     // Retention threshold scales with player ego and age
