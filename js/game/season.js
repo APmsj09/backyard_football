@@ -904,7 +904,7 @@ export function processEndOfWeek() {
     game.teams.forEach(t => {
         processLockerRoomCulture(t, game.gameLog);
     });
-    
+
     // Process gameplans & practices across the league (including delegated user team)
     game.teams.forEach(t => {
         const isDelegated = t.isPlayerControlled && (t.gameplan?.delegatePractice || t.gameplan?.delegateGameplan);
@@ -918,7 +918,7 @@ export function processEndOfWeek() {
                 if (!t.isPlayerControlled || t.gameplan?.delegatePractice) {
                     t.gameplan.weeklyPractice = staffModule.aiChooseWeeklyPractice(t, null, directive);
                 }
-            }).catch(() => {});
+            }).catch(() => { });
         }
 
         processWeeklyPractice(t, game.gameLog);
@@ -1018,26 +1018,43 @@ export function callFriend(playerId) {
         decisionReasons.push(`refuses to wear the same jersey as his rival ${rivalOnTeam.name}`);
     }
 
-    // 3. Ego vs. Role Evaluation
+    // 3. Caliber, Ego & Positional Reality Check
     const bestPos = player.pos || estimateBestPosition(player);
     const myOvr = calculateOverall(player, bestPos);
-    const isStarterWorthy = myOvr >= 45 || healthyCount < 9;
+    const ego = player.personality?.ego || 50;
 
-    if (isStarterWorthy) {
-        interestScore += 15;
-    } else {
-        const ego = player.personality?.ego || 50;
-        if (ego > 70) {
-            const egoPenalty = Math.round((ego - 50) * 0.9);
-            interestScore -= egoPenalty;
-            decisionReasons.push(`refuses to ride the bench with his high ego`);
+    // Check competitor caliber at position
+    const posCompetitors = roster.filter(p => isPlayerViableForPosition(p, bestPos));
+    const topStarterOvr = posCompetitors.map(p => calculateOverall(p, bestPos)).sort((a, b) => b - a)[0] || 0;
+
+    if (topStarterOvr >= myOvr + 4 && ego > 60) {
+        interestScore -= 24;
+        decisionReasons.push(`won't ride the pine behind established starter at ${bestPos}`);
+    } else if (myOvr >= 45 || healthyCount < 9) {
+        interestScore += 14;
+    } else if (ego > 65) {
+        interestScore -= 20;
+        decisionReasons.push(`demands real playing time before lending a hand`);
+    }
+
+    // Pass catchers check the QB before burning their Saturday
+    if (['WR', 'TE'].includes(bestPos)) {
+        const qb1 = roster.find(p => isPlayerViableForPosition(p, 'QB'));
+        if ((qb1?.attributes?.technical?.throwingAccuracy || 35) < 40) {
+            interestScore -= 16;
+            decisionReasons.push(`doesn't want to run wind sprints for an inaccurate QB`);
         }
     }
+
+    // Dynamic threshold: Stars won't show up for a simple favor without massive friendship ties
+    let callThreshold = 50;
+    if (myOvr >= 58) callThreshold = 66;
+    else if (myOvr >= 48) callThreshold = 56;
 
     // Remove from the weekly free agent screen
     game.freeAgents = game.freeAgents.filter(p => p && p.id !== playerId);
 
-    if (interestScore >= 50) {
+    if (interestScore >= callThreshold) {
         // Player accepts offer!
         player.status = { type: 'temporary', description: 'Helping Out', duration: 1 };
         if (addPlayerToTeam(player, team)) {
@@ -1109,15 +1126,19 @@ export function processLockerRoomCulture(team, gameLog = null) {
 }
 
 export function processOffseasonFADay(gameState, userBids = []) {
-    if (!gameState || !gameState.players) return { daySignings: [], rejectedBids: [], userBidResults: [] };
+    if (!gameState || !gameState.players) return { daySignings: [], rejectedBids: [], userBidResults: [], activeNegotiations: [] };
 
     const activeTeams = gameState.teams.filter(t => t.leagueType === 'main');
     const daySignings = [];
     const rejectedBids = [];
     const userBidResults = [];
+    const activeNegotiations = [];
     const playerBidsMap = new Map();
 
-    // 1. Register User Bids (deduplicated by playerId)
+    const currentDay = gameState._faDay || 1;
+    gameState._activeFaMarket = gameState._activeFaMarket || new Map();
+
+    // 1. REGISTER USER BIDS
     const seenUserPlayerIds = new Set();
     userBids.forEach(ub => {
         if (seenUserPlayerIds.has(ub.playerId)) return;
@@ -1128,76 +1149,36 @@ export function processOffseasonFADay(gameState, userBids = []) {
         playerBidsMap.set(ub.playerId, pList);
     });
 
-    // 2. Generate Intelligent AI Bids based on actual team deficits and rumor targets
-    const positions = ['QB', 'RB', 'WR', 'TE', 'OL', 'DL', 'LB', 'DB'];
-    const idealCounts = { QB: 1, RB: 2, WR: 3, TE: 1, OL: 3, DL: 3, LB: 2, DB: 3 };
-
+    // 2. SMART AI BIDDING & COUNTER-BIDDING
+    // AI coaches evaluate their true needs, calculate upgrade margins, and react to clubhouse leaders
     activeTeams.forEach(aiTeam => {
-        if (aiTeam.isPlayerControlled || aiTeam.roster.length >= 16) return;
+        if (aiTeam.isPlayerControlled || (aiTeam.roster?.length || 0) >= 17) return;
 
-        const roster = getRosterObjects(aiTeam);
-        const tokensAvailable = aiTeam.socialProfile?.favorTokens || 0;
+        const availableProspects = gameState.players.filter(p =>
+            !p.teamId && p.status?.type !== 'retired' && p.status?.type !== 'departed' && p.age >= 12 && p.age <= 18
+        );
 
-        const needs = positions.map(pos => {
-            const count = roster.filter(p => isPlayerViableForPosition(p, pos)).length;
-            return { pos, deficit: idealCounts[pos] - count, currentCount: count };
-        }).filter(n => n.deficit > 0).sort((a, b) => b.deficit - a.deficit);
+        // Sort potential targets by upgrade value for this specific AI team
+        const evaluatedTargets = availableProspects.map(prospect => {
+            const activeLead = gameState._activeFaMarket.get(prospect.id);
+            const currentTopScore = activeLead ? activeLead.topScore : 0;
+            const evalResult = calculateAiTeamNeedAndDesire(aiTeam, prospect, gameState, currentTopScore);
+            return { prospect, ...evalResult };
+        }).filter(t => t.shouldBid).sort((a, b) => b.desireScore - a.desireScore);
 
-        if (needs.length === 0) return;
+        // Top 2 targets maximum per AI team to preserve tokens and prevent roster bloat
+        const teamBids = evaluatedTargets.slice(0, 2);
 
-        const targetPositions = needs.slice(0, 2);
-
-        targetPositions.forEach(need => {
-            const candidates = gameState.players.filter(p =>
-                !p.teamId &&
-                p.status?.type !== 'retired' &&
-                p.status?.type !== 'departed' &&
-                p.age >= 12 && p.age <= 18 &&
-                isPlayerViableForPosition(p, need.pos) &&
-                !playerBidsMap.get(p.id)?.some(b => b.teamId === aiTeam.id)
-            );
-
-            if (candidates.length === 0) return;
-
-            candidates.sort((a, b) => {
-                const ovrA = calculateOverall(a, need.pos);
-                const ovrB = calculateOverall(b, need.pos);
-                const friendsA = roster.filter(r => a.social?.goodFriendIds?.includes(r.id)).length;
-                const friendsB = roster.filter(r => b.social?.goodFriendIds?.includes(r.id)).length;
-                return (ovrB + friendsB * 6) - (ovrA + friendsA * 6);
-            });
-
-            const target = candidates[0];
-            if (!target) return;
-
-            const targetOvr = calculateOverall(target, need.pos);
-            const role = need.currentCount === 0 || targetOvr >= 50 ? 'STARTER' : (target.expectations?.desiredRole || 'ROTATION');
-            const promiseTouches = (target.personality?.ego > 65 && ['QB', 'RB', 'WR'].includes(need.pos)) ? 'FEATURED' : 'NORMAL';
-
-            // Spend a token if user is contesting or target is a high-OVR recruit
-            const isUserContesting = userBids.some(ub => ub.playerId === target.id);
-            let tokensToSpend = 0;
-            if (tokensAvailable > 0) {
-                if (isUserContesting && Math.random() < 0.60) {
-                    tokensToSpend = 1;
-                } else if ((targetOvr >= 52 || target.potential === 'A') && Math.random() < 0.40) {
-                    tokensToSpend = 1;
-                }
-            }
-
-            const offer = {
-                role,
-                promiseTouches,
-                tokensOffered: tokensToSpend
-            };
-
-            const pList = playerBidsMap.get(target.id) || [];
-            pList.push({ team: aiTeam, teamId: aiTeam.id, offer });
-            playerBidsMap.set(target.id, pList);
+        teamBids.forEach(bidTarget => {
+            const pList = playerBidsMap.get(bidTarget.prospect.id) || [];
+            pList.push({ team: aiTeam, teamId: aiTeam.id, offer: bidTarget.offer });
+            playerBidsMap.set(bidTarget.prospect.id, pList);
         });
     });
 
-    // 3. Resolve Bids for Each Contested Player
+    // 3. MULTI-DAY BID RESOLUTION
+    // Day 1 & Day 2: Contested high-OVR players remain in active negotiation allowing counter-offers.
+    // Day 3 (Final Day): All remaining negotiations finalize.
     playerBidsMap.forEach((bids, playerId) => {
         const player = getPlayer(playerId);
         if (!player || player.teamId) return;
@@ -1205,72 +1186,107 @@ export function processOffseasonFADay(gameState, userBids = []) {
         const resolution = resolvePlayerBiddingWar(player, bids);
         const userBidOnThisPlayer = bids.find(b => b.teamId === gameState.playerTeam.id);
 
-        if (resolution?.winner) {
-            const win = resolution.winner;
-            const team = win.team;
-
-            if (win.offer.tokensOffered > 0 && team.socialProfile) {
-                team.socialProfile.favorTokens = Math.max(0, team.socialProfile.favorTokens - win.offer.tokensOffered);
+        if (!resolution?.winner) {
+            const reason = resolution?.rejectedReason || "Offers failed to satisfy player caliber.";
+            rejectedBids.push({ player, reason });
+            if (userBidOnThisPlayer) {
+                userBidResults.push({ player, won: false, rejected: true, message: `✋ REJECTED: ${player.name} rejected your pitch: ${reason}` });
             }
+            gameState._activeFaMarket.delete(playerId);
+            return;
+        }
 
+        const win = resolution.winner;
+        const leaderTeam = win.team;
+        const leaderScore = win.score;
+        const pos = player.pos || estimateBestPosition(player);
+        const playerOvr = calculateOverall(player, pos);
+
+        // Determine if player finalizes today or remains in negotiation for counter-offers
+        const isBlowaway = win.offer.tokensOffered >= 2 && win.offer.role === 'STARTER' && win.evaluation.interestScore >= 82;
+        const isLowTierUncontested = bids.length === 1 && playerOvr < 48;
+        const shouldFinalizeNow = currentDay >= 3 || isBlowaway || isLowTierUncontested;
+
+        if (shouldFinalizeNow) {
+            // FINALIZE CONTRACT
+            if (win.offer.tokensOffered > 0 && leaderTeam.socialProfile) {
+                leaderTeam.socialProfile.favorTokens = Math.max(0, leaderTeam.socialProfile.favorTokens - win.offer.tokensOffered);
+            }
             player.activePromise = {
                 role: win.offer.role || 'ROTATION',
                 promiseTouches: win.offer.promiseTouches || 'NORMAL'
             };
 
-            if (addPlayerToTeam(player, team)) {
+            if (addPlayerToTeam(player, leaderTeam)) {
                 player.status = { type: 'healthy', description: '', duration: 0 };
-                aiSetDepthChart(team);
+                aiSetDepthChart(leaderTeam);
 
-                const signingRecord = {
+                daySignings.push({
                     player,
-                    team,
+                    team: leaderTeam,
                     runnerUp: resolution.competingBids[1]?.team || null,
                     tokens: win.offer.tokensOffered,
-                    userWon: team.id === gameState.playerTeam.id,
+                    userWon: leaderTeam.id === gameState.playerTeam.id,
                     wasUserBid: !!userBidOnThisPlayer
-                };
-
-                daySignings.push(signingRecord);
+                });
 
                 if (userBidOnThisPlayer) {
-                    if (team.id === gameState.playerTeam.id) {
+                    if (leaderTeam.id === gameState.playerTeam.id) {
                         const runnerUpName = resolution.competingBids[1]?.team?.name;
                         userBidResults.push({
-                            player,
-                            won: true,
-                            tokensSpent: win.offer.tokensOffered,
+                            player, won: true, tokensSpent: win.offer.tokensOffered,
                             message: `🎉 SIGNED! ${player.name} accepted your offer!${runnerUpName ? ` (Beat out ${runnerUpName})` : ''}`
                         });
                     } else {
                         userBidResults.push({
-                            player,
-                            won: false,
-                            winnerTeam: team.name,
-                            message: `❌ MISSED! ${player.name} signed with ${team.name} instead of your squad.`
+                            player, won: false, winnerTeam: leaderTeam.name,
+                            message: `❌ OUTBID! ${player.name} signed with ${leaderTeam.name} over your pitch.`
                         });
                     }
                 }
             }
+            gameState._activeFaMarket.delete(playerId);
         } else {
-            const reason = resolution?.rejectedReason || "Offers didn't satisfy player expectations.";
-            rejectedBids.push({ player, reason });
+            // REMAINS IN ACTIVE NEGOTIATION FOR NEXT DAY'S COUNTER-BIDS
+            gameState._activeFaMarket.set(playerId, {
+                playerId,
+                leaderTeamId: leaderTeam.id,
+                leaderTeamName: leaderTeam.name,
+                topScore: leaderScore,
+                leaderOffer: win.offer,
+                bidsCount: bids.length
+            });
+
+            activeNegotiations.push({
+                player,
+                leaderTeam,
+                leaderOffer: win.offer,
+                bidsCount: bids.length,
+                isUserLeading: leaderTeam.id === gameState.playerTeam.id
+            });
 
             if (userBidOnThisPlayer) {
-                userBidResults.push({
-                    player,
-                    won: false,
-                    rejected: true,
-                    message: `✋ REJECTED: ${player.name} rejected your pitch: ${reason}`
-                });
+                if (leaderTeam.id === gameState.playerTeam.id) {
+                    userBidResults.push({
+                        player, won: false, inProgress: true,
+                        message: `⏳ LEADING! You currently lead negotiations for ${player.name}. Rival coaches may counter tomorrow!`
+                    });
+                } else {
+                    userBidResults.push({
+                        player, won: false, outbid: true,
+                        message: `⚠️ OUTBID! ${leaderTeam.name} leads for ${player.name} (${win.offer.role}, ${win.offer.tokensOffered}🪙). You can counter-bid tomorrow!`
+                    });
+                }
             }
         }
     });
 
+    gameState._faDay = currentDay + 1;
+
     // Clear rumors cache so the next day generates fresh market chatter
     import('./negotiations.js').then(n => {
         if (n.clearPlayerMarketCache) n.clearPlayerMarketCache(gameState);
-    }).catch(() => {});
+    }).catch(() => { });
 
     return { daySignings, rejectedBids, userBidResults };
 }
@@ -1421,11 +1437,11 @@ export function developPlayer(player, team = null) {
 
     if (hitBreakthrough) {
         const sigStat = player.pos === 'QB' ? 'throwingAccuracy' :
-                        player.pos === 'RB' ? 'speed' :
-                        player.pos === 'WR' ? 'catchingHands' :
-                        player.pos === 'OL' ? 'blocking' :
+            player.pos === 'RB' ? 'speed' :
+                player.pos === 'WR' ? 'catchingHands' :
+                    player.pos === 'OL' ? 'blocking' :
                         player.pos === 'DL' ? 'blockShedding' :
-                        player.pos === 'LB' ? 'tackling' : 'coverage';
+                            player.pos === 'LB' ? 'tackling' : 'coverage';
 
         for (const cat of ['technical', 'physical', 'mental']) {
             if (player.attributes[cat]?.[sigStat] !== undefined) {
@@ -1465,11 +1481,11 @@ export function developPlayer(player, team = null) {
                 // Retains rare mobility for an 8v8 pulling lineman!
                 player.attributes.technical.blocking = Math.min(99, (player.attributes.technical?.blocking || 40) + 5);
                 transitionBoost = 3;
-                developmentReport.improvements.push({ 
-                    attr: `🛡️ Athletic Trench Bloom (+${bulkGain} lbs, +4 STR, +5 BLK: Retained Mobility)`, 
-                    increase: bulkGain 
+                developmentReport.improvements.push({
+                    attr: `🛡️ Athletic Trench Bloom (+${bulkGain} lbs, +4 STR, +5 BLK: Retained Mobility)`,
+                    increase: bulkGain
                 });
-            } 
+            }
             // CASE 2: Standard Functional Bulk
             else if (frameHeadroom >= 15 && dedicationScore >= 52) {
                 const weightGain = getRandomInt(8, 14);
@@ -1477,12 +1493,12 @@ export function developPlayer(player, team = null) {
                 player.attributes.physical.strength = Math.min(99, currStr + 3);
                 transitionBoost = 2;
                 developmentReport.improvements.push({ attr: `💪 Functional Trench Bulk (+${weightGain} lbs, +3 STR)`, increase: weightGain });
-            } 
+            }
             // CASE 3: Frame Rejection (True skinny hard-gainer)
             else if (frameHeadroom < 10 || currWgt < 145) {
                 developmentReport.improvements.push({ attr: '⚠️ Frame Rejection: Body cannot support interior line mass', increase: 0 });
                 if (player.expectations) player.expectations.happiness = Math.max(20, player.expectations.happiness - 10);
-            } 
+            }
             // CASE 4: The Sloppy Bulk
             else {
                 const sloppyGain = getRandomInt(6, 12);
@@ -1498,9 +1514,9 @@ export function developPlayer(player, team = null) {
             player.attributes.technical.catchingHands = Math.min(99, (player.attributes.technical?.catchingHands || 40) + 5);
             player.attributes.physical.agility = Math.min(99, currAgi + 3);
             transitionBoost = 3;
-            developmentReport.improvements.push({ 
-                attr: '⚡ Twitch Playmaker Transition (+5 HND, +3 AGI: Converted quarterback/runner twitch)', 
-                increase: 5 
+            developmentReport.improvements.push({
+                attr: '⚡ Twitch Playmaker Transition (+5 HND, +3 AGI: Converted quarterback/runner twitch)',
+                increase: 5
             });
         }
 
@@ -1509,9 +1525,9 @@ export function developPlayer(player, team = null) {
             player.attributes.physical.strength = Math.min(99, currStr + 3);
             player.attributes.technical.tackling = Math.min(99, (player.attributes.technical?.tackling || 50) + 4);
             transitionBoost = 2;
-            developmentReport.improvements.push({ 
-                attr: '💥 Hybrid Enforcer Bloom (+4 TKL, +3 STR: Sideline-to-sideline pursuit range)', 
-                increase: 4 
+            developmentReport.improvements.push({
+                attr: '💥 Hybrid Enforcer Bloom (+4 TKL, +3 STR: Sideline-to-sideline pursuit range)',
+                increase: 4
             });
         }
 

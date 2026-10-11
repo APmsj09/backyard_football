@@ -759,12 +759,20 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
 
             if (projDist < 4.0) defendersClosingIn++;
 
-            // Check if defender is "capping" the route over the top (deep safeties)
-            const isCappingDeep = d.y > (rec.y - 1.0) && Math.abs(d.x - rec.x) < 5.5;
-            if (depth > 12 && isCappingDeep) {
-                // Safeties sitting over the top will break on the ball; reduce false separation
-                minProjectedSeparation = Math.min(minProjectedSeparation, Math.hypot(rec.x - d.x, rec.y - d.y));
-                defendersClosingIn += 2;
+            // Dynamic IQ-Weighted Deep Safety & Over-The-Top Capping
+            const isSafetyOrDeepDB = d.role === 'DB' && (d.y > playState.lineOfScrimmage + 9);
+            const rawDistToRec = Math.hypot(rec.x - d.x, rec.y - d.y);
+            const isOverTheTop = d.y > (rec.y - 1.2) && Math.abs(projDefX - projRecX) < 6.0;
+            const isBaitingShallow = isSafetyOrDeepDB && (d.y >= rec.y - 3.5 && d.y <= rec.y) && Math.abs(d.x - rec.x) < 4.5;
+
+            // IQ Layer: High IQ QBs detect safety closing speed and trap baiting.
+            // Low IQ QBs have tunnel vision and miss closing safeties.
+            const qbSafetyVision = Math.max(0.2, (qbIQ - 20) / 75);
+
+            if (depth > 10 && (isOverTheTop || (isBaitingShallow && qbIQ > 68))) {
+                const effectiveCappingDist = Math.min(projDist, rawDistToRec);
+                minProjectedSeparation = Math.min(minProjectedSeparation, effectiveCappingDist * (1.2 - (qbSafetyVision * 0.4)));
+                defendersClosingIn += Math.round(2 * qbSafetyVision);
             }
 
             const distDefToQB = Math.hypot(projDefX - qbState.x, projDefY - qbState.y);
@@ -774,13 +782,39 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
                 const defDx = projDefX - qbState.x;
                 const defDy = projDefY - qbState.y;
 
-                // Expanded undercut cone (from 0.95 to 0.88) so linebackers sitting in throwing lanes are respected
+                // IQ Layer: Undercut recognition expands for smart QBs
+                const undercutSensitivity = 0.84 + ((100 - qbIQ) / 100) * 0.08;
                 const dot = (dx * defDx + dy * defDy) / (distFromQB * distDefToQB);
-                if (dot > 0.88) {
-                    undercutThreat += (4.5 - (distDefToQB / distFromQB) * 4.0);
+                if (dot > undercutSensitivity) {
+                    undercutThreat += (4.5 - (distDefToQB / distFromQB) * 4.0) * qbSafetyVision;
                 }
             }
         });
+
+        // Pre-snap / Post-snap Shell Recognition (Cover 2 vs Cover 3)
+        const coverageShell = evaluateCoverageAlignment(defenseStates, playState);
+        const isMiddleOfFieldRoute = Math.abs(rec.x - CENTER_X) < 8.0;
+
+        if (depth > 14 && qbIQ >= 55) {
+            const shellAwareness = (qbIQ - 50) / 50; // 0.1 to 1.0 multiplier
+            if (coverageShell.isTwoHigh) {
+                // Two-High (Cover 2): Middle of field is OPEN (MOFO). Seams and posts between safeties thrive.
+                if (isMiddleOfFieldRoute) {
+                    score += 18 * shellAwareness;
+                } else if (Math.abs(rec.x - CENTER_X) > 16.0) {
+                    // Deep boundary hole shot against 2-high is a tough window
+                    score -= 10 * shellAwareness;
+                }
+            } else if (coverageShell.isSingleHigh) {
+                // Single-High (Cover 1 / Cover 3): Middle is CLOSED (MOFC) by deep centerfield safety.
+                if (isMiddleOfFieldRoute) {
+                    score -= 16 * shellAwareness;
+                } else {
+                    // Outside boundary 1-on-1s are favored
+                    score += 12 * shellAwareness;
+                }
+            }
+        }
 
         let score = Math.min(minProjectedSeparation, 6) * 10;
 

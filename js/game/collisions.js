@@ -184,9 +184,16 @@ export function checkTackleCollisions(playState, gameLog) {
             const canPerformMove = (!carrier.moveCooldown || carrier.moveCooldown <= 0) && carrier.action !== 'handoff_setup';
 
             if (canPerformMove) {
+                const carrierIQ = carrier.playbookIQ || carrier.iq || 50;
+                const defenderIQ = defender.playbookIQ || defender.iq || 50;
+
                 const agiDiff = (carrier.agi || 50) - (defender.tkl || 50);
                 const strDiff = (carrier.str || 50) - (defender.str || 50);
-                const evadeChance = Math.max(0.05, Math.min(0.35, 0.16 + (Math.max(agiDiff, strDiff) / 250)));
+                const iqDiff = carrierIQ - defenderIQ;
+
+                // IQ Layer: High IQ carriers set up defenders; High IQ defenders take sound tackling angles
+                const iqModifier = (iqDiff / 300);
+                const evadeChance = Math.max(0.05, Math.min(0.40, 0.16 + (Math.max(agiDiff, strDiff) / 250) + iqModifier));
 
                 if (Math.random() < evadeChance) {
                     carrier.moveCooldown = 35;

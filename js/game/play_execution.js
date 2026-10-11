@@ -494,12 +494,34 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
         let target = null;
         const isPassPlay = playType === 'pass';
 
+        const blockerIQ = blocker.playbookIQ || blocker.iq || 50;
+        const qb = offenseStates.find(p => p.slot.startsWith('QB'));
+
         let sortedThreats = validThreats.sort((a, b) => {
             const laneDiffA = Math.abs(a.x - blocker.initialX);
             const laneDiffB = Math.abs(b.x - blocker.initialX);
-            const doubleTeamPenaltyA = assignedThreats.has(a.id) ? 15 : 0;
-            const doubleTeamPenaltyB = assignedThreats.has(b.id) ? 15 : 0;
-            return (laneDiffA + doubleTeamPenaltyA) - (laneDiffB + doubleTeamPenaltyB);
+
+            // IQ Layer: Smart linemen (IQ > 60) identify interior A/B gap blitzes threatening the QB
+            let dangerPriorityA = 0;
+            let dangerPriorityB = 0;
+
+            if (blockerIQ > 55 && qb) {
+                const distToQBA = Math.hypot(a.x - qb.x, a.y - qb.y);
+                const distToQBB = Math.hypot(b.x - qb.x, b.y - qb.y);
+                const iqWeight = (blockerIQ - 50) * 0.35;
+
+                if (distToQBA < 4.5) dangerPriorityA -= (5.0 - distToQBA) * iqWeight;
+                if (distToQBB < 4.5) dangerPriorityB -= (5.0 - distToQBB) * iqWeight;
+
+                // High IQ centers/guards prioritize A-gap rushers over outside stunts
+                if (Math.abs(a.x - CENTER_X) < 2.5 && (a.assignment?.includes('blitz') || a.assignment?.includes('rush'))) dangerPriorityA -= 8;
+                if (Math.abs(b.x - CENTER_X) < 2.5 && (b.assignment?.includes('blitz') || b.assignment?.includes('rush'))) dangerPriorityB -= 8;
+            }
+
+            const doubleTeamPenaltyA = assignedThreats.has(a.id) ? (blockerIQ > 65 ? 25 : 12) : 0;
+            const doubleTeamPenaltyB = assignedThreats.has(b.id) ? (blockerIQ > 65 ? 25 : 12) : 0;
+
+            return (laneDiffA + dangerPriorityA + doubleTeamPenaltyA) - (laneDiffB + dangerPriorityB + doubleTeamPenaltyB);
         });
 
         if (blocker.dynamicTargetId) {
@@ -887,23 +909,26 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                     const pt = pState.routePath[pState.currentPathIndex];
                     const distToNode = getDistance(pState, pt);
                     const isFinalNode = pState.currentPathIndex === pState.routePath.length - 1;
-                    const isHookRoute = ['Hitch', 'Curl', 'Dig', 'In'].some(r => pState.assignment?.includes(r));
-                    const recIQ = pState.playbookIQ || 50;
+                    const isSettleRoute = ['Hitch', 'Curl', 'Dig', 'In', 'Drag', 'Slant'].some(r => pState.assignment?.includes(r));
+                    const recIQ = pState.playbookIQ || pState.iq || 50;
 
-                    if (isHookRoute && isFinalNode && distToNode < 1.5 && recIQ > 65) {
+                    // IQ Layer: High IQ receivers (IQ >= 60) read zone voids and throttle down in windows
+                    // Low IQ receivers run blindly into zone defenders
+                    if (isSettleRoute && distToNode < 2.0 && recIQ >= 60) {
                         const nearbyZoneDefenders = defenseStates.filter(d =>
-                            !d.isBlocked && d.y >= LOS + 4.0 && getDistance(pState, d) < 4.0
+                            !d.isBlocked && d.y >= LOS + 2.0 && getDistance(pState, d) < 3.2
                         );
 
                         if (nearbyZoneDefenders.length > 0) {
                             if (pState._hookDriftX === undefined) {
                                 const nearest = nearbyZoneDefenders.sort((a, b) => getDistance(pState, a) - getDistance(pState, b))[0];
                                 const driftDirX = pState.x > nearest.x ? 1.0 : -1.0;
-                                pState._hookDriftX = pState.x + (driftDirX * 1.2);
-                                pState._hookDriftY = pState.y - 0.5;
+                                const iqSettlingSpace = 0.8 + ((recIQ - 60) / 40) * 0.8;
+                                pState._hookDriftX = pState.x + (driftDirX * iqSettlingSpace);
+                                pState._hookDriftY = Math.max(LOS + 1.0, pState.y - 0.4);
                             }
                             setPointIntent(pState, pState._hookDriftX, pState._hookDriftY, 0.3);
-                            pState.contactReduction = 0.5;
+                            pState.contactReduction = 0.6;
                             break;
                         }
                     }

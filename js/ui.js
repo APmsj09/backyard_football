@@ -1136,11 +1136,19 @@ export function renderOffseasonFAPool(gameState) {
                     const userBid = offseasonFABids.find(b => b.playerId === p.id);
                     const intel = Game.getPlayerMarketIntel(p, gameState);
 
-                    let heatBadge = '<span class="bg-slate-100 text-slate-500 font-bold px-1.5 py-0.5 rounded text-[9px]">💤 Quiet</span>';
-                    if (intel.heat === 'HOT') {
-                        heatBadge = `<span class="bg-rose-100 text-rose-800 border border-rose-300 font-bold px-1.5 py-0.5 rounded text-[9px]" title="${intel.suitorNames.join(', ')}">🔥 Hot (${intel.suitorNames.map(n => n.replace('The ', '')).join(', ')})</span>`;
-                    } else if (intel.heat === 'WARM') {
-                        heatBadge = `<span class="bg-amber-100 text-amber-900 border border-amber-300 font-bold px-1.5 py-0.5 rounded text-[9px]" title="${intel.suitorNames.join(', ')}">💬 Warm (${intel.suitorNames.map(n => n.replace('The ', '')).join(', ')})</span>`;
+                    // Check active multi-day negotiation state
+                    const marketState = gameState._activeFaMarket?.get(p.id);
+                    let marketStatusHtml = '';
+
+                    if (marketState) {
+                        const isUserLeading = marketState.leaderTeamId === gameState.playerTeam.id;
+                        marketStatusHtml = isUserLeading
+                            ? `<span class="bg-emerald-100 text-emerald-800 border border-emerald-300 font-black px-1.5 py-0.5 rounded text-[9px] animate-pulse">👑 You Lead (${marketState.leaderOffer.role}, ${marketState.leaderOffer.tokensOffered}🪙)</span>`
+                            : `<span class="bg-rose-100 text-rose-800 border border-rose-300 font-black px-1.5 py-0.5 rounded text-[9px]">⚠️ ${marketState.leaderTeamName} Leads (${marketState.leaderOffer.tokensOffered}🪙)</span>`;
+                    } else if (intel.heat === 'HOT') {
+                        marketStatusHtml = `<span class="bg-amber-100 text-amber-900 border border-amber-300 font-bold px-1.5 py-0.5 rounded text-[9px]">🔥 Hot (${intel.suitorNames.map(n => n.replace('The ', '')).join(', ')})</span>`;
+                    } else {
+                        marketStatusHtml = `<span class="bg-slate-100 text-slate-500 font-bold px-1.5 py-0.5 rounded text-[9px]">💤 Uncontested</span>`;
                     }
 
                     return `
@@ -1155,20 +1163,20 @@ export function renderOffseasonFAPool(gameState) {
                         <td class="text-center py-2 px-2 text-blue-600 font-bold">${p.attributes?.physical?.speed || 0}</td>
                         <td class="text-center py-2 px-2 text-slate-700">${p.attributes?.physical?.strength || 0}</td>
                         <td class="py-2 px-3 font-sans">
-                            <div class="flex items-center gap-1.5 truncate max-w-[240px]">
-                                ${heatBadge}
+                            <div class="flex items-center gap-1.5 truncate max-w-[260px]">
+                                ${marketStatusHtml}
                                 <span class="text-[10px] text-slate-500 truncate italic" title="${intel.rumorText}">${intel.rumorText}</span>
                             </div>
                         </td>
                         <td class="text-right py-2 px-3 font-sans" onclick="event.stopPropagation()">
                             ${userBid ? `
-                            <button class="bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300 font-bold px-2 py-1 rounded text-[10px] uppercase tracking-tight flex items-center gap-1 shadow-sm transition" onclick="app.openBidModal('${p.id}')" title="Edit your offer">
+                            <button class="bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300 font-bold px-2 py-1 rounded text-[10px] uppercase tracking-tight flex items-center gap-1 shadow-sm transition" onclick="app.openBidModal('${p.id}')" title="Counter-bid or modify terms">
                                 <span>Bid: ${userBid.offer.role}</span>
                                 <span class="text-amber-700 font-mono">(${userBid.offer.tokensOffered}🪙)</span>
                                 <span>✏️</span>
                             </button>` : `
                             <button class="bg-slate-900 hover:bg-slate-800 text-white font-bold px-3 py-1 rounded text-[10px] uppercase tracking-wider transition shadow-sm" onclick="app.openBidModal('${p.id}')">
-                                Bid
+                                ${marketState ? 'Counter' : 'Bid'}
                             </button>`}
                         </td>
                     </tr>`;
