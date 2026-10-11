@@ -143,10 +143,10 @@ export const routeTree = {
     'run_iso_r': { path: [{ x: 1.5, y: 1 }, { x: 1.5, y: 5 }], mirror: false },
     'run_stretch_r': { path: [{ x: 6, y: 0.5 }, { x: 10, y: 4 }], mirror: false },
     'run_stretch_l': { path: [{ x: -6, y: 0.5 }, { x: -10, y: 4 }], mirror: false },
-    'run_counter_r': { path: [{ x: -2, y: -0.5 }, { x: 1, y: 1 }, { x: 5, y: 5 }], mirror: false },
-    'run_counter_l': { path: [{ x: 2, y: -0.5 }, { x: -1, y: 1 }, { x: -5, y: 5 }], mirror: false },
-    'run_toss_r': { path: [{ x: 10, y: -1 }, { x: 14, y: 4 }], mirror: false },
-    'run_toss_l': { path: [{ x: -10, y: -1 }, { x: -14, y: 4 }], mirror: false },
+    'run_counter_r': { path: [{ x: -1.5, y: 0.5 }, { x: 1.5, y: 2 }, { x: 5, y: 5 }], mirror: false },
+    'run_counter_l': { path: [{ x: 1.5, y: 0.5 }, { x: -1.5, y: 2 }, { x: -5, y: 5 }], mirror: false },
+    'run_toss_r': { path: [{ x: 6, y: 0.5 }, { x: 12, y: 4 }], mirror: false },
+    'run_toss_l': { path: [{ x: -6, y: 0.5 }, { x: -12, y: 4 }], mirror: false },
 
     // --- ADVANCED BLOCKING ROUTES ---
     'run_block': { path: [{ x: 0, y: 0 }] }, // Stationary target seeking

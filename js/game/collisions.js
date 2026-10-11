@@ -407,9 +407,14 @@ export function resolveOngoingBlocks(playState, gameLog, offenseStates = [], def
 
         const ticksInBlock = playState.tick - battle.startTick;
         const isPassBlock = blocker.action === 'pass_block';
+        const isRunBlock = blocker.action === 'run_block';
+
         if (isPassBlock && ticksInBlock < 30) {
             // Pass blockers anchor against immediate collapse without auto-pancaking
             blockPower *= 1.25;
+        } else if (isRunBlock && ticksInBlock < 25) {
+            // Run blockers fire off the ball with an initial surge to drive defenders back and open lanes
+            blockPower *= 1.35;
         }
 
         if (ticksInBlock > 60) {
@@ -417,7 +422,8 @@ export function resolveOngoingBlocks(playState, gameLog, offenseStates = [], def
             blockPower *= Math.max(0.5, fatiguePenalty);
         }
 
-        const isPassRush = defender.assignment?.includes('rush') || defender.assignment?.includes('blitz');
+        // Bull rush / pass-rush moves should ONLY trigger against pass protection, never against run blocks
+        const isPassRush = (defender.assignment?.includes('rush') || defender.assignment?.includes('blitz')) && isPassBlock && playState.type !== 'run';
 
         if (isPassRush && defender.isBlocked && blocker) {
             if (typeof defender.moveCooldown === 'undefined') defender.moveCooldown = 15;
@@ -482,22 +488,24 @@ export function resolveOngoingBlocks(playState, gameLog, offenseStates = [], def
 
                 const dist = Math.max(0.1, Math.sqrt(dx * dx + dy * dy));
 
-                // Battle score is a gameplay calculation, not a physical distance.
-                // Cap the displacement to prevent large per-tick jumps.
-                const pushDirection = Math.sign(pushAmount);
-                const pushMagnitude =
-                    Math.min(0.08, Math.abs(pushAmount) * 0.15) * pushDirection;
+                // Cap displacement to realistic per-tick steps
+                const pushMagnitude = Math.min(0.09, Math.abs(pushAmount) * 0.16);
+                const uX = dx / dist;
+                const uY = dy / dist;
 
-                const pushX = (dx / dist) * pushMagnitude;
-                const pushY = (dy / dist) * pushMagnitude;
-
-                // The player losing the battle should visibly give ground.
-                blocker.x += pushX;
-                blocker.y += pushY;
-
-                // The opponent moves too, but much less.
-                defender.x += pushX * 0.25;
-                defender.y += pushY * 0.25;
+                if (pushAmount > 0) {
+                    // Blocker is WINNING (driving defender backward toward defensive side)
+                    defender.x += uX * pushMagnitude;
+                    defender.y += uY * pushMagnitude;
+                    blocker.x += uX * pushMagnitude * 0.8;
+                    blocker.y += uY * pushMagnitude * 0.8;
+                } else if (pushAmount < 0) {
+                    // Defender is WINNING (shoving blocker backward into offensive backfield)
+                    blocker.x -= uX * pushMagnitude;
+                    blocker.y -= uY * pushMagnitude;
+                    defender.x -= uX * pushMagnitude * 0.8;
+                    defender.y -= uY * pushMagnitude * 0.8;
+                }
             }
         }
 

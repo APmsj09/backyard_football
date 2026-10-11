@@ -335,12 +335,20 @@ export function getSmartCarrierTarget(runner, defenseStates, offenseStates, fiel
     if (currentSpeed > 4.5) maxLateral = 5.0;
     if (currentSpeed > 7.0) maxLateral = 2.5;
 
+    // Strict Backfield Discipline: RBs must not dance laterally or drift wide behind the line of scrimmage
+    const LOS = playState.lineOfScrimmage || 60;
+    const isBehindLine = runner.y < LOS + 1.2;
+
+    if (isBehindLine) {
+        maxLateral = Math.min(maxLateral, 1.8); // Force tight north-south movement in the backfield
+    }
+
     const nearbyDefenders = defenseStates.filter(d =>
         !d.isBlocked && d.stunnedTicks === 0 && getDistance(runner, d) < 4.0 && d.y > runner.y - 1
     );
     const inTraffic = nearbyDefenders.length >= 2;
 
-    if (inTraffic) maxLateral = Math.min(maxLateral, 2.5);
+    if (inTraffic || isBehindLine) maxLateral = Math.min(maxLateral, 1.8);
 
     const laneOffsets = [0];
     [1.5, 3.0, 5.0, 8.0, 10.0].forEach(off => {
@@ -420,9 +428,17 @@ export function getSmartCarrierTarget(runner, defenseStates, offenseStates, fiel
 
         offenseStates.forEach(blocker => {
             if (blocker.id !== runner.id && (blocker.action?.includes('block') || blocker.action === 'run_path')) {
-                const distToBlocker = Math.hypot(testX - blocker.x, testY - blocker.y);
-                if (distToBlocker < 2.5 && blocker.y > runner.y) {
-                    score += 45;
+                const lateralDist = Math.abs(testX - blocker.x);
+                const isAhead = blocker.y >= runner.y && blocker.y <= runner.y + 2.8;
+
+                if (isAhead) {
+                    if (lateralDist < 0.85) {
+                        // COLLISION PENALTY: Do NOT run directly into the back of your own lineman!
+                        score -= 95;
+                    } else if (lateralDist >= 1.0 && lateralDist <= 2.4) {
+                        // REWARD RUNNING OFF THE HIP: Run into the daylight right next to your blocker's seal
+                        score += 55;
+                    }
                 }
             }
         });

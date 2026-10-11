@@ -704,15 +704,25 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                     }
                 }
 
+                const pt = (pState.routePath && pState.currentPathIndex < pState.routePath.length) 
+                    ? pState.routePath[pState.currentPathIndex] 
+                    : null;
+
+                // Check if an engaged blocker or penetrating defender is standing directly in the designed hole
+                const holeClogged = pt && (
+                    offenseStates.some(o => o.id !== pState.id && Math.abs(o.x - pt.x) < 1.0 && Math.abs(o.y - pt.y) < 1.4) ||
+                    defenseStates.some(d => !d.isBlocked && Math.abs(d.x - pt.x) < 1.2 && d.y > pState.y && d.y < LOS + 1.0)
+                );
+
                 const isRunHolePhase = playType === 'run' &&
                     pState.role === 'RB' &&
-                    pState.routePath &&
-                    pState.currentPathIndex < pState.routePath.length &&
-                    pState.y < LOS + 1.5;
+                    pt !== null &&
+                    pState.y < LOS + 1.0 &&
+                    !holeClogged &&
+                    playState.tick < (pState._handoffTick || 18) + 12;
 
                 if (isRunHolePhase) {
-                    // 1. Designed run through the hole
-                    const pt = pState.routePath[pState.currentPathIndex];
+                    // 1. Designed run through the open hole
                     targetX = pt.x;
                     targetY = pt.y;
                     if (getDistance(pState, pt) < 1.5) {
