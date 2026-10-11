@@ -530,11 +530,25 @@ export function getSmartCarrierTarget(runner, defenseStates, offenseStates, fiel
 
     runner._chosenLaneOffset = bestOffset;
 
+    // BACKFIELD PATIENCE (High-IQ Feature):
+    // If behind or right at the line of scrimmage and traffic is clogged,
+    // a smart, high-IQ runner will throttle down their forward momentum to let blocks develop,
+    // rather than blindly crashing into the back of their own linemen at full speed.
+
+    if (isBehindLine && inTraffic && iq >= 70) {
+        // Poise scales with IQ: 90 IQ runners exhibit superior patience compared to 70 IQ runners
+        const poiseFactor = Math.max(0.35, 1.0 - ((iq - 65) / 45)); 
+        bestTargetY = runner.y + (visionDepth * poiseFactor); // Shorten target depth to stall forward rush
+        runner.vx *= 0.80; // Gentle velocity check to simulate setting feet behind the block
+        runner.vy *= 0.80;
+    }
+
     // Smooth lateral target interpolation to prevent instant hash-to-hash snapping
     if (runner._smoothTargetX === undefined) runner._smoothTargetX = runner.x;
     const smoothAlpha = 0.35 + (agility / 200);
     bestTargetX = (runner._smoothTargetX * (1 - smoothAlpha)) + (bestTargetX * smoothAlpha);
     runner._smoothTargetX = bestTargetX;
+
 
     const immediateThreat = nearbyDefenders.sort((a, b) => getDistance(runner, a) - getDistance(runner, b))[0];
 
