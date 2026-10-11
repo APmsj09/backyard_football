@@ -435,7 +435,7 @@ function handleTabSwitch(e) {
         const tabId = button.dataset.tab;
         gameState = Game.getGameState();
         if (gameState) {
-            switchTab(tabId, gameState);
+            UI.switchTab(tabId, gameState); // Routes correctly to the UI module export
         }
     }
 }
@@ -1265,7 +1265,7 @@ window.app = {
         if (!team.finances) team.finances = { balance: 10.00, waivedDues: [], autoSnack: 'none' };
         
         const autoSnack = team.finances.autoSnack || 'none';
-        const pane = document.getElementById('tab-content-finances');
+        const pane = document.getElementById('fo-pane-finances');
         if (!pane) return;
 
         pane.innerHTML = `
@@ -1361,7 +1361,6 @@ window.app = {
     },
     handleSaveTestRoster,
     openPlayerCard,
-    // handleConfirmTeam,
     handleDraftPlayer,
     onDraftSelect: handlePlayerSelectInDraft,
     setCaptain: handleSetCaptain,

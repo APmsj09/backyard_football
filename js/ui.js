@@ -952,28 +952,36 @@ export function switchTab(tabId, gameState) {
     if (!gameState) return;
 
     switch (tabId) {
-        case 'my-team': renderMyTeamTab(gameState); break;
-        case 'depth-chart': renderDepthChartTab(gameState); break;
+        case 'my-team': 
+            if (gameState.playerTeam) renderPlayerRoster(gameState.playerTeam); 
+            break;
+        case 'depth-chart': 
+            if (gameState.playerTeam) {
+                renderFormationDropdown('offense', offenseFormations, gameState.playerTeam.formations.offense);
+                renderFormationDropdown('defense', defenseFormations, gameState.playerTeam.formations.defense);
+            }
+            break;
         case 'free-agents': renderFreeAgentsTab(gameState); break;
         case 'messages': renderMessagesTab(gameState); break;
         
         case 'front-office': 
             const foSub = document.querySelector('.fo-tab.active')?.dataset.subTab || 'staff';
-            if (foSub === 'staff') UI.renderStaffTab(gameState);
-            if (foSub === 'finances') window.app.renderStoreTab(gameState);
-            if (foSub === 'social') UI.renderSocialNetworkTab(gameState);
+            if (foSub === 'staff') renderStaffTab(gameState);
+            if (foSub === 'finances') renderStoreTab(gameState);
+            if (foSub === 'social') renderSocialNetworkTab(gameState);
             break;
             
         case 'league':
             const lgSub = document.querySelector('.league-tab.active')?.dataset.subTab || 'standings';
-            if (lgSub === 'standings') UI.renderStandingsTab(gameState);
-            if (lgSub === 'schedule') UI.renderScheduleTab(gameState);
-            if (lgSub === 'player-stats') UI.renderPlayerStatsTab(gameState);
-            if (lgSub === 'history') UI.renderHistoryTab(gameState);
-            if (lgSub === 'hall-of-fame') UI.renderHallOfFameTab(gameState);
+            if (lgSub === 'standings') renderStandingsTab(gameState);
+            if (lgSub === 'schedule') renderScheduleTab(gameState);
+            if (lgSub === 'player-stats') renderPlayerStatsTab(gameState);
+            if (lgSub === 'history') renderHistoryTab(gameState);
+            if (lgSub === 'hall-of-fame') renderHallOfFameTab(gameState);
             break;
     }
 }
+
 
 export function renderFreeAgentsTab(gameState) {
     const container = document.getElementById('free-agents-container');
