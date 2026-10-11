@@ -429,6 +429,7 @@ function handleTabSwitch(e) {
         if (gameState) {
             UI.switchTab(tabId, gameState);
             if (tabId === 'social') renderSocialNetworkTab(gameState); // Render our new tab!
+            if (tabId === 'finances') renderStoreTab(gameState); // Render our new tab!
         }
     }
 }
@@ -1204,6 +1205,80 @@ window.app = {
         }
     },
 
+    buyStoreItem: (item, cost) => {
+        const gs = Game.getGameState();
+        const team = gs?.playerTeam;
+        if (!team) return;
+        if (!team.finances) team.finances = { balance: 10.00, waivedDues: [] };
+
+        if (team.finances.balance < cost) {
+            alert(`You don't have enough money in the Snack Fund! (Need $${cost.toFixed(2)})`);
+            return;
+        }
+
+        team.finances.balance -= cost;
+
+        if (item === 'token') {
+            team.socialProfile.favorTokens = (team.socialProfile.favorTokens || 0) + 1;
+            alert("🎟️ Bought 1 Favor Token for recruiting!");
+        } else if (item === 'orange') {
+            Game.getUIRosterObjects(team).forEach(p => p.fatigue = Math.max(0, (p.fatigue || 0) - 10));
+            alert("🍊 The team feels slightly refreshed (+10 Energy)!");
+        } else if (item === 'caprisun') {
+            Game.getUIRosterObjects(team).forEach(p => p.fatigue = Math.max(0, (p.fatigue || 0) - 30));
+            alert("🧃 The team is hydrated and ready to go (+30 Energy)!");
+        } else if (item === 'pizza') {
+            Game.getUIRosterObjects(team).forEach(p => {
+                if (p.expectations) p.expectations.happiness = 100;
+                if (p.social) p.social.rivalIds = []; // Squash the beefs!
+            });
+            alert("🍕 Pizza Party! Team happiness maxed out and locker room beefs squashed.");
+        }
+
+        Game.saveGameState();
+        window.app.renderStoreTab(gs); // Refreshes UI
+    },
+
+    waivePlayerDues: (playerId) => {
+        const gs = Game.getGameState();
+        const team = gs?.playerTeam;
+        if (!team || !team.finances) return;
+        
+        if (!team.finances.waivedDues.includes(playerId)) {
+            team.finances.waivedDues.push(playerId);
+            // Waiving fees loses you street cred!
+            if (team.socialProfile) {
+                team.socialProfile.streetCred = Math.max(0, (team.socialProfile.streetCred || 50) - 2);
+            }
+            Game.saveGameState();
+            window.app.renderStoreTab(gs);
+        }
+    },
+
+    renderStoreTab: (gameState) => {
+        const team = gameState?.playerTeam;
+        if (!team) return;
+        if (!team.finances) team.finances = { balance: 10.00, waivedDues: [] };
+
+        const balEl = document.getElementById('snack-fund-balance');
+        if (balEl) balEl.textContent = `$${team.finances.balance.toFixed(2)}`;
+
+        const rosterList = document.getElementById('store-roster-list');
+        if (rosterList) {
+            rosterList.innerHTML = Game.getUIRosterObjects(team).map(p => {
+                const isWaived = team.finances.waivedDues.includes(p.id);
+                return `
+                <div class="flex justify-between items-center bg-slate-50 p-1.5 rounded border border-slate-200">
+                    <span class="font-bold text-xs truncate max-w-[120px]">${p.name}</span>
+                    ${isWaived 
+                        ? `<span class="text-[9px] bg-emerald-100 text-emerald-800 font-bold px-2 py-1 rounded">Dues Waived</span>`
+                        : `<button class="text-[9px] bg-slate-900 text-white font-bold px-2 py-1 rounded hover:bg-slate-700" onclick="app.waivePlayerDues('${p.id}')">Waive $1.00 Dues</button>`
+                    }
+                </div>`;
+            }).join('');
+        }
+    },
+
     finishOffseasonFAMinigame: () => {
         finishOffseasonFAMinigame();
     },
@@ -1271,6 +1346,79 @@ function main() {
             <div id="social-network-container" class="p-4 flex-grow min-h-0 pb-12"></div>
         `;
         dashContent.appendChild(socialPane);
+
+        // Inject the Corner Store Tab
+        const financeBtn = document.createElement('button');
+        financeBtn.className = 'tab-button whitespace-nowrap text-emerald-800 bg-emerald-100 border border-emerald-300 font-bold';
+        financeBtn.dataset.tab = 'finances';
+        financeBtn.innerHTML = '<span class="text-base mr-1">🏪</span> Corner Store';
+        dashTabs.appendChild(financeBtn);
+
+        const financePane = document.createElement('div');
+        financePane.id = 'tab-content-finances';
+        financePane.className = 'tab-pane hidden flex flex-col h-full min-h-0 overflow-y-auto bg-slate-100';
+        financePane.innerHTML = `
+            <div class="p-4 border-b bg-white shrink-0 sticky top-0 z-10 shadow-sm flex justify-between items-center">
+                <div>
+                    <h3 class="text-xl font-bold text-slate-800 uppercase tracking-wider">The Corner Store</h3>
+                    <p class="text-xs text-slate-500">Spend the Snack Fund to boost morale, recover energy, or buy recruiting bribes.</p>
+                </div>
+                <div class="text-right bg-emerald-900 text-white px-4 py-2 rounded-sm shadow-inner">
+                    <span class="text-[10px] uppercase font-bold text-emerald-300 block tracking-widest">Snack Fund Balance</span>
+                    <span class="text-2xl font-black font-mono" id="snack-fund-balance">$0.00</span>
+                </div>
+            </div>
+            <div class="p-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+                
+                <!-- PURCHASABLE UPGRADES -->
+                <div class="bg-white rounded-sm border border-slate-300 shadow-sm p-4">
+                    <h4 class="font-black text-sm uppercase text-slate-800 mb-3 border-b pb-1">Buy Snacks & Bribes</h4>
+                    <div class="space-y-3">
+                        <div class="flex justify-between items-center bg-slate-50 p-2 border border-slate-200 rounded">
+                            <div>
+                                <span class="font-bold text-sm">🎟️ Buy Favor Token</span>
+                                <p class="text-[10px] text-slate-500">Add 1 Favor Token to your recruiting budget.</p>
+                            </div>
+                            <button class="bg-emerald-600 text-white font-bold px-3 py-1.5 rounded text-xs hover:bg-emerald-700 shadow" onclick="app.buyStoreItem('token', 3.00)">$3.00</button>
+                        </div>
+                        <div class="flex justify-between items-center bg-orange-50 p-2 border border-orange-200 rounded">
+                            <div>
+                                <span class="font-bold text-sm text-orange-900">🍊 Orange Slices</span>
+                                <p class="text-[10px] text-orange-700">Recovers 10% fatigue for the entire roster.</p>
+                            </div>
+                            <button class="bg-orange-500 text-white font-bold px-3 py-1.5 rounded text-xs hover:bg-orange-600 shadow" onclick="app.buyStoreItem('orange', 2.00)">$2.00</button>
+                        </div>
+                        <div class="flex justify-between items-center bg-blue-50 p-2 border border-blue-200 rounded">
+                            <div>
+                                <span class="font-bold text-sm text-blue-900">🧃 Cooler of Capri Suns</span>
+                                <p class="text-[10px] text-blue-700">Recovers 30% fatigue for the entire roster.</p>
+                            </div>
+                            <button class="bg-blue-600 text-white font-bold px-3 py-1.5 rounded text-xs hover:bg-blue-700 shadow" onclick="app.buyStoreItem('caprisun', 6.00)">$6.00</button>
+                        </div>
+                        <div class="flex justify-between items-center bg-rose-50 p-2 border border-rose-200 rounded">
+                            <div>
+                                <span class="font-bold text-sm text-rose-900">🍕 Pizza Party</span>
+                                <p class="text-[10px] text-rose-700">Maxes team happiness and clears rivalries.</p>
+                            </div>
+                            <button class="bg-rose-600 text-white font-bold px-3 py-1.5 rounded text-xs hover:bg-rose-700 shadow" onclick="app.buyStoreItem('pizza', 25.00)">$25.00</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- WAIVE DUES MANAGEMENT -->
+                <div class="bg-white rounded-sm border border-slate-300 shadow-sm p-4 flex flex-col h-[400px]">
+                    <div class="mb-2">
+                        <h4 class="font-black text-sm uppercase text-slate-800 border-b pb-1">Weekly Dues Management</h4>
+                        <p class="text-[10px] text-slate-500 mt-1">Players pay $1.00/wk. Waiving fees boosts their loyalty but costs you -2 Street Cred (looks soft).</p>
+                    </div>
+                    <div class="overflow-y-auto flex-grow space-y-1" id="store-roster-list">
+                        <!-- Populated by JS -->
+                    </div>
+                </div>
+
+            </div>
+        `;
+        dashContent.appendChild(financePane);
     }
 
     document.getElementById('start-game-btn')?.addEventListener('click', startNewGame);

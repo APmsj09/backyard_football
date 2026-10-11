@@ -718,7 +718,8 @@ export function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey
                 if (loopType === 'pass') {
                     updateQBDecision(qb1, activeOffense, activeDefense, playState, playState.assignments, gameLog);
                 } else if (loopType === 'punt') {
-                    updatePunterDecision(playState, activeOffense, gameLog);
+                    // "Punt" play type now correctly triggers the deep arm throwoff
+                    updateThrowoffDecision(playState, activeOffense, gameLog);
                 }
             }
 

@@ -1486,67 +1486,62 @@ export function executeThrow(qbState, target, strength, accuracy, playState, gam
     }
 }
 
-export function updatePunterDecision(playState, offenseStates, gameLog) {
-    const punter = offenseStates.find(p => p.slot === 'QB1');
-    if (!punter || !punter.hasBall) return;
+export function updateThrowoffDecision(playState, offenseStates, gameLog) {
+    const qb = offenseStates.find(p => p.slot === 'QB1');
+    if (!qb || !qb.hasBall) return;
 
-    const snapDuration = 15;
-    if (playState.tick < snapDuration) {
-        const pct = playState.tick / snapDuration;
-        const snapStartY = playState.lineOfScrimmage - 0.5;
-        playState.ballState.x = punter.x;
-        playState.ballState.y = snapStartY + (punter.y - snapStartY) * pct;
-        playState.ballState.z = 0.5 + (pct * 0.5);
+    // Simulate a deep 7-step dropback to heave the ball
+    if (playState.tick < 35) {
+        qb.targetX = qb.initialX;
+        qb.targetY = playState.lineOfScrimmage - 7.0;
+        qb.action = 'qb_setup';
+        playState.ballState.x = qb.x;
+        playState.ballState.y = qb.y;
+        playState.ballState.z = 1.8;
         return;
     }
 
-    if (playState.tick < 25) {
-        playState.ballState.x = punter.x;
-        playState.ballState.y = punter.y;
-        playState.ballState.z = 1.2;
-        return;
-    }
+    const armStrength = qb.strength || qb.attributes?.physical?.strength || 50;
+    const throwAcc = qb.throwingAccuracy || qb.attributes?.technical?.throwingAccuracy || 50;
 
-    const punterPower = punter.attributes?.physical?.strength || 50;
-    const punterAcc = punter.attributes?.technical?.kickingAccuracy || 50;
-
-    const isLeftHash = punter.x < 26.6;
+    const isLeftHash = qb.x < 26.6;
     const targetX = isLeftHash ? 42.0 : 11.0;
 
-    const baseDistance = 34 + ((punterPower / 100) * 16);
-    const varianceY = (Math.random() - 0.5) * 14;
-    let puntDistance = Math.max(25, baseDistance + varianceY);
+    // A throwoff relies entirely on arm strength (same as executing a deep pass)
+    const baseDistance = 25 + ((armStrength / 100) * 35);
+    const varianceY = (Math.random() - 0.5) * 8;
+    let puntDistance = Math.max(20, baseDistance + varianceY);
 
-    if (playState.lineOfScrimmage + puntDistance > 106) {
-        puntDistance = Math.max(20, 104 - playState.lineOfScrimmage);
+    if (playState.lineOfScrimmage + puntDistance > 115) {
+        puntDistance = Math.max(15, 112 - playState.lineOfScrimmage);
     }
 
     const targetY = playState.lineOfScrimmage + puntDistance;
-    const errorX = (Math.random() - 0.5) * ((100 - punterAcc) / 100) * 10;
-    const errorY = (Math.random() - 0.5) * 4;
+    const errorX = (Math.random() - 0.5) * ((100 - throwAcc) / 100) * 15;
+    const errorY = (Math.random() - 0.5) * 8;
 
     const finalTargetX = Math.max(2, Math.min(51, targetX + errorX));
     const finalTargetY = Math.min(118, targetY + errorY);
 
-    const hangTime = 4.0 + (punterPower / 65);
+    const hangTime = 3.5 + (armStrength / 75);
 
-    playState.ballState.vx = (finalTargetX - punter.x) / hangTime;
-    playState.ballState.vy = (finalTargetY - punter.y) / hangTime;
+    playState.ballState.vx = (finalTargetX - qb.x) / hangTime;
+    playState.ballState.vy = (finalTargetY - qb.y) / hangTime;
     playState.ballState.vz = 4.9 * hangTime;
 
     playState.ballState.inAir = true;
-    playState.ballState.throwerId = punter.id;
-    playState.ballState.x = punter.x;
-    playState.ballState.y = punter.y;
-    playState.ballState.z = 1.5;
+    playState.ballState.throwerId = qb.id;
+    playState.ballState.x = qb.x;
+    playState.ballState.y = qb.y;
+    playState.ballState.z = 2.2;
 
     playState.ballState.targetX = finalTargetX;
     playState.ballState.targetY = finalTargetY;
     playState.ballState.throwTick = playState.tick;
 
-    punter.hasBall = false;
-    punter.isBallCarrier = false;
-    punter.action = 'idle';
+    qb.hasBall = false;
+    qb.isBallCarrier = false;
+    qb.action = 'idle';
 
-    if (gameLog) gameLog.push(`[Tick ${playState.tick}] 👟 ${punter.name} punts the ball! (${Math.round(puntDistance)} yards)`);
+    if (gameLog) gameLog.push(`[Tick ${playState.tick}] 🏈 ${qb.name} heaves a deep throwoff downfield! (${Math.round(puntDistance)} yards)`);
 }

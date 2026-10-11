@@ -26,11 +26,11 @@ export function pushGameLog(gameLog, message, playState = null) {
 export function checkFumble(ballCarrierState, tacklerState, playState, gameLog) {
     if (!ballCarrierState.hasBall) return false;
 
-    const toughness = Number(ballCarrierState.toughness) || 50;
+    const ballSecurity = Number(ballCarrierState.carrying) || Number(ballCarrierState.toughness) || 50;
     const strength = Number(tacklerState.strength) || 50;
     const tackling = Number(tacklerState.tackling) || 50;
 
-    const carrierMod = (toughness / 100) * (ballCarrierState.fatigueModifier || 1);
+    const carrierMod = (ballSecurity / 100) * (ballCarrierState.fatigueModifier || 1);
     const tacklerMod = ((strength + tackling) / 200) * (tacklerState.fatigueModifier || 1);
 
     let fumbleChance = FUMBLE_CHANCE_BASE * (tacklerMod / (carrierMod + 0.2));
@@ -655,11 +655,12 @@ export function handleBallArrival(playState, carrier, playResult, gameLog) {
             }
         }
 
-        const maxCatchHeight = (playerHeight / 36) + 1.2;
+        const verticalLeap = (p.jumping || p.agility || 50) / 100;
+        const maxCatchHeight = (playerHeight / 36) + 1.2 + (verticalLeap * 1.5);
         if (ball.inAir && ball.z > maxCatchHeight) return false;
 
         const heightBonus = Math.max(0, (playerHeight - 65) * 0.04);
-        let dynamicCatchRadius = BASE_CATCH_RADIUS + heightBonus;
+        let dynamicCatchRadius = BASE_CATCH_RADIUS + heightBonus + (verticalLeap * 0.2);
         const CATCH_TOLERANCE = 0.25;
 
         if (p.action === 'tracking_ball') dynamicCatchRadius *= 1.8;

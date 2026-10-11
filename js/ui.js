@@ -3252,7 +3252,16 @@ function updateLiveScoreboard() {
     if (elements.simPossession && activeLiveGame.possession) {
         elements.simPossession.textContent = `🏈 ${activeLiveGame.possession.name}`;
     }
-    if (elements.simGameDown) elements.simGameDown.textContent = `${activeLiveGame.down} & ${activeLiveGame.yardsToGo}`;
+    
+    // UI Fix: Explicitly show '2PT TRY' instead of '1 & 3' during conversions
+    if (elements.simGameDown) {
+        if (activeLiveGame.isConversionAttempt) {
+            elements.simGameDown.textContent = `2PT TRY`;
+        } else {
+            elements.simGameDown.textContent = `${activeLiveGame.down} & ${activeLiveGame.yardsToGo}`;
+        }
+    }
+    
     if (elements.simGameDrive) elements.simGameDrive.textContent = `Q${activeLiveGame.quarter || 1} | ${formatGameClock(activeLiveGame.clock)}`;
 
     // Dynamically show which team is on Offense / Defense

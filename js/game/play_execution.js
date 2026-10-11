@@ -271,7 +271,8 @@ export function setupInitialPlayerStates(playState, offense, defense, play, assi
             }
 
             startX = Math.max(0.5, Math.min(53.3 - 0.5, startX));
-            startY = Math.max(10.5, Math.min(110.0 - 10.5, startY));
+            // Allow players to line up inside the endzones (0.5 to 119.5) for Goal Line / Conversion plays
+            startY = Math.max(0.5, Math.min(119.5, startY));
 
             if (isOffense) {
                 if (startY > playState.lineOfScrimmage - 0.2) {

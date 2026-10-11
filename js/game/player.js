@@ -7,26 +7,26 @@ const offensivePositions = ['QB', 'RB', 'WR', 'TE', 'OL'];
 const defensivePositions = ['DL', 'LB', 'DB'];
 
 export const positionOverallWeights = {
-    // Give QBs more weight to pure throwing accuracy and mobility
+    // Give QBs more weight to arm talent, accuracy, and mobility
     QB: {
-        throwingAccuracy: 0.42,
-        playbookIQ: 0.20,
-        decisionMaking: 0.13,
+        throwingAccuracy: 0.35,
+        throwPower: 0.25,
+        playbookIQ: 0.15,
+        decisionMaking: 0.10,
         speed: 0.10,
-        consistency: 0.10,
-        strength: 0.05
+        consistency: 0.05
     },
 
     // Skill positions
-    RB: { speed: 0.35, agility: 0.25, strength: 0.15, catchingHands: 0.15, toughness: 0.10 },
-    WR: { speed: 0.40, catchingHands: 0.35, agility: 0.20, playbookIQ: 0.05 },
-    TE: { catchingHands: 0.30, blocking: 0.30, strength: 0.25, speed: 0.15 },
+    RB: { speed: 0.30, carrying: 0.25, agility: 0.20, strength: 0.15, catchingHands: 0.10 },
+    WR: { speed: 0.35, catchingHands: 0.30, agility: 0.20, jumping: 0.15 },
+    TE: { catchingHands: 0.30, blocking: 0.25, strength: 0.20, jumping: 0.15, speed: 0.10 },
 
     // Spread OL across technique and pass/run blocking instincts so pure weight/strength doesn't break it
     OL: { strength: 0.35, blocking: 0.40, playbookIQ: 0.15, weight: 0.05, toughness: 0.05 },
     DL: { strength: 0.35, blockShedding: 0.35, tackling: 0.20, speed: 0.10 },
     LB: { tackling: 0.30, playbookIQ: 0.25, speed: 0.25, blockShedding: 0.20 },
-    DB: { speed: 0.35, coverage: 0.35, agility: 0.20, catchingHands: 0.10 }
+    DB: { speed: 0.35, coverage: 0.30, agility: 0.20, jumping: 0.15 }
 };
 
 export function estimateBestPosition(scoutedPlayer) {
@@ -512,6 +512,7 @@ export function generatePlayer(minAge = 12, maxAge = 18, classModifiers = null) 
             speed: generateTalentValue('speed'),
             strength: generateTalentValue('strength'),
             agility: generateTalentValue('agility'),
+            jumping: generateTalentValue('jumping'),
             // Youth Stamina Buff: Young kids can run forever.
             stamina: Math.max(30, Math.min(99, generateTalentValue('stamina') + (16 - age) * 5)),
             height: 0,
@@ -527,6 +528,7 @@ export function generatePlayer(minAge = 12, maxAge = 18, classModifiers = null) 
         technical: {
             throwingAccuracy: generateTalentValue('throwingAccuracy'),
             catchingHands: generateTalentValue('catchingHands'),
+            carrying: generateTalentValue('carrying'),
             tackling: generateTalentValue('tackling'),
             blocking: generateTalentValue('blocking'),
             blockShedding: generateTalentValue('blockShedding'),

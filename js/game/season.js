@@ -864,6 +864,45 @@ export function processWeeklyPlayerGrowth() {
 export function processEndOfWeek() {
     if (!game) return;
 
+    // === PROCESS FINANCES & SNACK FUND ===
+    if (game.playerTeam) {
+        if (!game.playerTeam.finances) {
+            game.playerTeam.finances = { balance: 10.00, waivedDues: [] };
+        }
+        
+        let weeklyIncome = 5.00; // Standard Allowance
+        let duesCollected = 0;
+        
+        const roster = getRosterObjects(game.playerTeam);
+        
+        // Collect $1.00 Team Dues from players
+        roster.forEach(p => {
+            const isWaived = game.playerTeam.finances.waivedDues.includes(p.id);
+            const ego = p.personality?.ego || 50;
+
+            if (isWaived) {
+                // Waiving fees builds morale but looks soft
+                if (p.expectations) p.expectations.happiness = Math.min(100, (p.expectations.happiness || 50) + 10);
+            } else {
+                if (ego > 80 && Math.random() < 0.4) {
+                    // High ego divas "forget their wallet"
+                    if (game.gameLog) game.gameLog.push(`💸 ${p.name} claimed he forgot his wallet and skipped paying team dues this week.`);
+                } else {
+                    duesCollected += 1.00;
+                }
+            }
+        });
+
+        game.playerTeam.finances.balance += weeklyIncome + duesCollected;
+        
+        // Reset weekly waivers
+        game.playerTeam.finances.waivedDues = [];
+        
+        if (game.gameLog) {
+            game.gameLog.push(`💰 Snack Fund Update: Added $${(weeklyIncome + duesCollected).toFixed(2)} (Allowance: $${weeklyIncome.toFixed(2)}, Dues: $${duesCollected.toFixed(2)}).`);
+        }
+    }
+
     // Resolve In-Season Weekly Bids
     if (game.weeklyBids && game.weeklyBids.length > 0) {
         const processedPlayers = new Set();
