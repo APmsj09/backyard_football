@@ -25,22 +25,45 @@ export function calculateDraftValue(player, team) {
     const pos = estimateBestPosition(player);
     const ovr = Math.max(20, Math.min(99, calculateOverall(player, pos) + noise));
 
-    // 1. Perceived Ability
-    let abilityScore = ovr * 0.35;
+    const gmDirective = team.gameplan?.gmDirective || 'COACH_AUTONOMY';
+    const coachPersonality = coach?.biases?.personality?.name;
+    const ego = player.personality?.ego || 50;
+    const ethic = player.personality?.workEthic || 50;
 
-    // SCOUT BIAS EFFECT: Scout's personal bias distorts player value
+    // Dynamic Weights by GM Directive:
+    // WIN_NOW values day-one ability (45%) over raw ceiling (15%)
+    // DEVELOP_YOUTH values ceiling/potential (45%) over current polish (20%)
+    let abilityWeight = 0.35;
+    let potentialWeight = 0.30;
+
+    if (gmDirective === 'WIN_NOW') {
+        abilityWeight = 0.45;
+        potentialWeight = 0.15;
+    } else if (gmDirective === 'DEVELOP_YOUTH') {
+        abilityWeight = 0.20;
+        potentialWeight = 0.45;
+    }
+
+    // 1. Perceived Ability
+    let abilityScore = ovr * abilityWeight;
+
+    // Scout & Coach Personality Bias
     const scoutBias = scout?.biases?.scouting?.name;
     if (scoutBias === 'Speed Chaser') {
         const spd = player.attributes?.physical?.speed || 50;
-        if (spd > 70) abilityScore += (spd - 70) * 0.4; // AI overvalues speed
-    } else if (scoutBias === 'Character First') {
-        const ego = player.personality?.ego || 50;
-        if (ego > 70) abilityScore -= (ego - 70) * 0.5; // AI avoids divas
+        if (spd > 68) abilityScore += (spd - 68) * 0.45;
+    } else if (scoutBias === 'Character First' || coachPersonality === 'Old-School Disciplinarian') {
+        if (ego > 70) abilityScore -= (ego - 70) * 0.60; // Strictly devalues divas
+        if (ethic > 70) abilityScore += (ethic - 70) * 0.35; // Reaches for gym rats
     }
 
-    // 2. Potential / Ceiling (30%)
+    // 2. Potential / Ceiling
     const potentialMap = { 'A': 95, 'B': 82, 'C': 68, 'D': 52, 'F': 35 };
-    const potScore = (potentialMap[player.potential] || 65) * 0.30;
+    let potScore = (potentialMap[player.potential] || 65) * potentialWeight;
+
+    if (gmDirective === 'DEVELOP_YOUTH' && player.age <= 12 && (player.potential === 'A' || player.potential === 'B')) {
+        potScore += 12; // Massive premium on 12-year-old wonderkids
+    }
 
     // 3. Positional Need (25%)
     // Use the team's actual formations as a soft roster-building target.

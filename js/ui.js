@@ -1373,6 +1373,22 @@ export function renderStaffTab(gameState) {
                     </div>
 
                     <div>
+                        <div class="flex justify-between items-center mb-1">
+                            <label class="text-[10px] font-black uppercase tracking-wider text-slate-600">
+                                Upfront Equipment & Coffee Stipend
+                            </label>
+                            <span class="text-[9px] font-mono text-emerald-700 font-bold">Fund: $${(team.finances?.balance || 0).toFixed(2)}</span>
+                        </div>
+                        <select id="staff-pitch-cash" class="w-full p-2 border border-slate-300 rounded font-bold text-slate-800 bg-white text-xs outline-none mb-2">
+                            <option value="0">$0.00 (Volunteer / No upfront compensation)</option>
+                            ${(team.finances?.balance || 0) >= 3 ? '<option value="3">$3.00 (Gas money / Whistle fund)</option>' : ''}
+                            ${(team.finances?.balance || 0) >= 6 ? '<option value="6">$6.00 (New clipboard, cones & breakfast donuts)</option>' : ''}
+                            ${(team.finances?.balance || 0) >= 10 ? '<option value="10">$10.00 (Full equipment bag & personal cooler)</option>' : ''}
+                            ${(team.finances?.balance || 0) >= 15 ? '<option value="15">$15.00 (Premium sideline buyout)</option>' : ''}
+                        </select>
+                    </div>
+
+                    <div>
                         <label class="block text-[10px] font-black uppercase tracking-wider text-slate-600 mb-1">
                             Favor Token Sweetener (Available: ${tokensAvailable})
                         </label>
@@ -1388,10 +1404,11 @@ export function renderStaffTab(gameState) {
 
         showModal(`Recruit ${roleName}: ${staff.name}`, pitchModalHtml, () => {
             const tokensOffered = parseInt(document.getElementById('staff-pitch-tokens')?.value || '0', 10);
+            const cashOffered = parseFloat(document.getElementById('staff-pitch-cash')?.value || '0');
             const schemePromise = document.getElementById('staff-scheme-promise')?.value || 'GM_CHOICE';
             const practiceFocus = document.getElementById('staff-practice-focus')?.value || 'BALANCED';
 
-            const pitch = { tokensOffered, schemePromise, practiceFocus };
+            const pitch = { tokensOffered, cashOffered, schemePromise, practiceFocus };
             const negotiation = Game.evaluateStaffNegotiation(staff, team, roleKey, pitch);
 
             const resultHtml = `
@@ -1419,6 +1436,9 @@ export function renderStaffTab(gameState) {
             if (negotiation.accepted) {
                 if (tokensOffered > 0) {
                     team.socialProfile.favorTokens = Math.max(0, team.socialProfile.favorTokens - tokensOffered);
+                }
+                if (cashOffered > 0 && team.finances) {
+                    team.finances.balance = Math.max(0, team.finances.balance - cashOffered);
                 }
 
                 const oldStaff = team.staff[roleKey];

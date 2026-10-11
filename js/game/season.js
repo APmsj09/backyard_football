@@ -19,7 +19,7 @@ import {
     initializeTeamStaff, generateStaffPool, checkRetiredPlayerToCoach, aiManageTeamStaff
 } from './staff.js';
 import {
-    evaluatePlayerRetention, evaluatePlayerNegotiation, resolvePlayerBiddingWar
+    evaluatePlayerRetention, evaluatePlayerNegotiation, resolvePlayerBiddingWar, calculateAiTeamNeedAndDesire
 } from './negotiations.js';
 
 export const ROSTER_LIMIT = 18;
@@ -893,6 +893,8 @@ export function processEndOfWeek() {
         let weeklyIncome = 5.00; // Base Coach Allowance
         let duesCollected = 0;
 
+        // Note: Hustle chore income is dynamically processed in processWeeklyPractice
+
         roster.forEach(p => {
             const isWaived = team.finances.waivedDues.includes(p.id);
             const ego = p.personality?.ego || 50;
@@ -916,7 +918,36 @@ export function processEndOfWeek() {
         team.finances.balance += (weeklyIncome + duesCollected);
 
         if (isUser && game.gameLog) {
-            game.gameLog.push(`💰 Snack Fund Update: Added $${(weeklyIncome + duesCollected).toFixed(2)} (Allowance: $${weeklyIncome.toFixed(2)}, Dues: $${duesCollected.toFixed(2)}). Balance: $${team.finances.balance.toFixed(2)}`);
+            game.gameLog.push(`💰 Snack Fund Update: Added $${(weeklyIncome + duesCollected).toFixed(2)} (Allowance: $${weeklyIncome.toFixed(2)}, Dues: $${duesCollected.toFixed(2)}).`);
+            
+            // --- USER AUTO-SNACK SUBSCRIPTION ---
+            const autoSnack = team.finances.autoSnack || 'none';
+            const snackCosts = { none: 0, orange: 2.00, caprisun: 6.00, pizza: 25.00 };
+            const cost = snackCosts[autoSnack];
+
+            if (autoSnack !== 'none') {
+                if (team.finances.balance >= cost) {
+                    team.finances.balance -= cost;
+                    if (autoSnack === 'orange') {
+                        roster.forEach(p => p.fatigue = Math.max(0, (p.fatigue || 0) - 10));
+                        game.gameLog.push(`🍊 Weekly Snacks: Auto-purchased Orange Slices (-$2.00). Team recovered +10 Energy.`);
+                    } else if (autoSnack === 'caprisun') {
+                        roster.forEach(p => p.fatigue = Math.max(0, (p.fatigue || 0) - 30));
+                        game.gameLog.push(`🧃 Weekly Snacks: Auto-purchased Capri Suns (-$6.00). Team recovered +30 Energy.`);
+                    } else if (autoSnack === 'pizza') {
+                        roster.forEach(p => {
+                            if (p.expectations) p.expectations.happiness = 100;
+                            if (p.social) p.social.rivalIds = []; // Squash the beefs!
+                        });
+                        game.gameLog.push(`🍕 Weekly Snacks: Auto-purchased Pizza Party (-$25.00). Morale maxed, locker room beefs squashed.`);
+                    }
+                } else {
+                    game.gameLog.push(`❌ Snack Fund Alert: Insufficient funds for planned ${autoSnack.toUpperCase()} snacks (Needed $${cost.toFixed(2)}).`);
+                }
+            }
+            
+            // Re-log the final balance so user knows exactly what they have entering next week
+            game.gameLog.push(`💵 Final Snack Fund Balance: $${team.finances.balance.toFixed(2)}`);
         }
 
         // --- 3. AI INTELLIGENT SPENDING PHASE ---
@@ -996,6 +1027,11 @@ export function processEndOfWeek() {
     updatePlayerStatuses();
     generateWeeklyEvents();
     processRelationshipEvents();
+
+    // Decay demands for unemployed coaches on the market
+    import('./staff.js').then(s => {
+        if (s.processStaffMarketDecay) s.processStaffMarketDecay(game);
+    }).catch(() => {});
 
     // Process Coach-Player Culture & Morale across all teams
     game.teams.forEach(t => {
@@ -1828,6 +1864,54 @@ export function processWeeklyPractice(team, gameLog = null) {
         team.scoutingBoostActive = true;
         if (team.id === game?.playerTeam?.id && gameLog) {
             gameLog.push("🕵️ Recess Recon: Spied on next opponent's favorite plays. Defensive boost active!");
+        }
+    } else if (plan === 'hustle') {
+        // === THE HUSTLE: MOWING LAWNS & WASHING CARS ===
+        let workersCount = 0;
+        let skippedWorkers = [];
+        const coachAuth = coach?.ratings?.authority || 50;
+
+        roster.forEach(p => {
+            const ego = p.personality?.ego || 50;
+            const ethic = p.personality?.workEthic || 50;
+            const age = p.age || 14;
+
+            // Compliance Check: Divas & older teens with cars resist manual labor
+            // Coach authority reduces the chance of skipping
+            const divaResistance = (ego > 70 ? (ego - 60) * 0.012 : 0) + (age >= 17 ? 0.20 : 0);
+            const coachFear = (coachAuth / 200);
+            const skipChance = Math.max(0, Math.min(0.75, divaResistance - (ethic * 0.005) - coachFear));
+
+            if (Math.random() < skipChance) {
+                skippedWorkers.push(p.name.split(' ')[0]);
+                // Resentment: skipping chore day harms reputation with teammates
+                if (p.expectations) p.expectations.happiness = Math.max(10, (p.expectations.happiness || 100) - 12);
+            } else {
+                workersCount++;
+                // Grinders build grit through labor
+                if (ethic >= 70 && Math.random() < 0.15 && (p.attributes?.mental?.toughness || 50) < 95) {
+                    p.attributes.mental.toughness += 1;
+                }
+                // Modest happiness drop for regular kids who'd rather play ball
+                if (ethic < 60 && p.expectations) {
+                    p.expectations.happiness = Math.max(20, (p.expectations.happiness || 100) - 4);
+                }
+            }
+        });
+
+        // Dynamic cash yield: Each working player earns $0.85 to $1.15
+        const cashEarned = Number((workersCount * (0.85 + Math.random() * 0.30)).toFixed(2));
+        if (!team.finances) team.finances = { balance: 0, waivedDues: [] };
+        team.finances.balance += cashEarned;
+
+        // Scheme rust penalty: No football was practiced this week (-4% familiarity)
+        Object.keys(mastery).forEach(key => {
+            if (mastery[key] > 30) mastery[key] = Math.max(30, mastery[key] - 4);
+        });
+
+        if (team.id === game?.playerTeam?.id && gameLog) {
+            const skipMsg = skippedWorkers.length > 0 ? ` (Boycotted by: ${skippedWorkers.slice(0, 3).join(', ')})` : '';
+            gameLog.push(`🧹 Neighborhood Hustle: ${workersCount}/${roster.length} kids washed cars and mowed lawns, raising $${cashEarned.toFixed(2)}${skipMsg}. Schemes suffered slight rust (-4% mastery).`);
         }
     }
 }

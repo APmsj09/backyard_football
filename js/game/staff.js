@@ -1,7 +1,10 @@
 // js/game/staff.js - Coaching, Scouting & Front Office System
 
 import { getRandom, getRandomInt } from '../utils.js';
-import { firstNames, lastNames } from '../data.js';
+import { firstNames, lastNames, offensivePlaybook, defensivePlaybook } from '../data.js';
+import { getRosterObjects } from './state.js';
+import { calculateOverall, estimateBestPosition } from './player.js';
+import { isPlayerViableForPosition, rebuildDepthChartFromOrder } from './depth_chart.js';
 
 export const tacticalBiases = [
     { name: 'Smashmouth Zealot', desc: 'Runs the ball heavily; boosts OL/DL development.', runModifier: 0.20, passModifier: -0.20 },
@@ -32,6 +35,17 @@ export function generateStaffMember(role = 'coach', minAge = 25, maxAge = 55, fo
 
     const baseVal = () => getRandomInt(45, 75);
 
+    // Initial trait rolls to calculate market demands
+    const personality = getRandom(personalityTraits);
+    const tactical = getRandom(tacticalBiases);
+    const scouting = getRandom(scoutingBiases);
+
+    // Personality dictates market stubbornness
+    let stubbornness = 0.75;
+    if (personality.name === "Peaked in '94" || personality.name === "Old-School Disciplinarian") stubbornness = 0.92;
+    else if (personality.name === "Players' Coach") stubbornness = 0.58;
+    else if (personality.name === "Analytical Savant") stubbornness = 0.70;
+
     return {
         id: crypto.randomUUID(),
         name: formerPlayer ? formerPlayer.name : `${firstName} ${lastName}`,
@@ -40,6 +54,10 @@ export function generateStaffMember(role = 'coach', minAge = 25, maxAge = 55, fo
         teamId: null,
         formerPlayerId: formerPlayer?.id || null,
         formerPlayerBio: formerPlayer ? `Former ${formerPlayer.pos} legend (${formerPlayer.careerStats?.touchdowns || 0} TDs, ${formerPlayer.careerStats?.seasonsPlayed || 0} yrs played)` : null,
+        // Financial & Market Demands
+        stipendDemand: 0, // Calculated dynamically by reputation
+        weeksUnemployed: 0,
+        stubbornness,
         ratings: {
             // Tactical Acumen & Gameplanning
             offSchemeMastery: formerPlayer?.pos === 'QB' ? getRandomInt(65, 85) : baseVal(),
@@ -111,45 +129,101 @@ export function aiManageTeamStaff(team, gameState) {
     if (!coach) return;
 
     const wins = team.wins || 0;
-    const losses = team.losses || 0;
+    const roster = getRosterObjects(team);
+    const teamOvr = roster.length > 0 ? Math.round(roster.reduce((sum, p) => sum + (calculateOverall(p, p.pos || 'ATH')), 0) / roster.length) : 50;
+    const avgHappiness = roster.length > 0 ? Math.round(roster.reduce((sum, p) => sum + (p.expectations?.happiness || 100), 0) / roster.length) : 100;
+    const gmDirective = team.gameplan?.gmDirective || 'COACH_AUTONOMY';
+
     let shouldFireCoach = false;
 
-    // Tier 1 has high standards: Relegated or < 3 wins = Fired
-    if (team.tier === 1 && (wins <= 2 || team.relegatedThisYear)) {
-        shouldFireCoach = true;
+    // 1. PERFORMANCE VS EXPECTATIONS
+    // Expected wins scale with roster talent (55 OVR expects ~4.5 wins; 65+ OVR expects 6+ wins)
+    const expectedWins = Math.max(2, Math.round((teamOvr - 40) * 0.25));
+    const winDeficit = expectedWins - wins;
+
+    if (team.tier === 1 && (wins <= 2 || winDeficit >= 3)) {
+        shouldFireCoach = true; // High-expectations failure
+    } else if (team.tier === 2 && wins <= 1 && winDeficit >= 2) {
+        shouldFireCoach = Math.random() < 0.70;
     }
-    // Tier 2 losing season check
-    else if (team.tier === 2 && wins <= 1) {
-        shouldFireCoach = Math.random() < 0.60;
+
+    // 2. LOCKER ROOM MORALE REVOLT
+    if (avgHappiness < 42 && wins < 4) {
+        shouldFireCoach = true; // Lost the team
+    }
+
+    // WIN_NOW GMs have zero patience
+    if (gmDirective === 'WIN_NOW' && wins < 5 && Math.random() < 0.50) {
+        shouldFireCoach = true;
     }
 
     if (shouldFireCoach) {
         coach.teamId = null;
+        coach.weeksUnemployed = 0;
         if (gameState?.availableStaff) gameState.availableStaff.push(coach);
         team.staff.coach = null;
 
-        // Hire best fitting available replacement
+        // HIRE REPLACEMENT: CONSTRAINED BY BUDGET, SCHEME FIT, TIER, & DIRECTIVES
         if (gameState?.availableStaff && gameState.availableStaff.length > 0) {
-            // Find coach with highest scheme mastery (safely default to 0 for scouts/trainers)
-            gameState.availableStaff.sort((a, b) => {
-                const aScore = (a.ratings?.offSchemeMastery || 0) + (a.ratings?.defSchemeMastery || 0);
-                const bScore = (b.ratings?.offSchemeMastery || 0) + (b.ratings?.defSchemeMastery || 0);
-                return bScore - aScore;
-            });
-            let candidateIdx = gameState.availableStaff.findIndex(s => s.role === 'coach' || s.formerPlayerBio);
-            let newHire = null;
+            const teamBalance = team.finances?.balance || 5.00;
+            const teamTokens = team.socialProfile?.favorTokens || 0;
+            const teamOffForm = team.formations?.offense || 'Balanced';
 
-            if (candidateIdx > -1) {
-                newHire = gameState.availableStaff.splice(candidateIdx, 1)[0];
+            // Comprehensive, nuanced candidate evaluation
+            const affordableCandidates = gameState.availableStaff
+                .filter(s => s.role === 'coach' || s.formerPlayerBio)
+                .map(cand => {
+                    // Reputation & Market Demand calculation
+                    const rep = Math.round(((cand.ratings?.offSchemeMastery || 50) + (cand.ratings?.defSchemeMastery || 50) + (cand.ratings?.teaching || 50)) / 3);
+                    const decay = Math.pow(cand.stubbornness || 0.75, cand.weeksUnemployed || 0);
+                    const requiredStipend = Math.max(0, Math.round(Math.max(0, (rep - 52) * 0.45) * decay));
+                    const requiredTokens = rep >= 75 && (cand.weeksUnemployed || 0) < 3 ? 1 : 0;
+
+                    const canAfford = teamBalance >= requiredStipend && teamTokens >= requiredTokens;
+                    
+                    let fitScore = rep;
+                    const tactical = cand.biases?.tactical?.name;
+                    const personality = cand.biases?.personality?.name;
+
+                    // 1. Scheme Alignment
+                    if (['Spread', 'Empty', 'Trips', 'TripsLeft'].includes(teamOffForm) && tactical === 'Air Raid Purist') fitScore += 25;
+                    if (['Power', 'Jumbo', 'Pistol'].includes(teamOffForm) && tactical === 'Smashmouth Zealot') fitScore += 25;
+
+                    // 2. GM Directive Alignment
+                    if (gmDirective === 'WIN_NOW' && (cand.ratings?.inGameAdjustments || 50) > 65) fitScore += 20;
+                    if (gmDirective === 'DEVELOP_YOUTH' && (cand.ratings?.teaching || 50) > 65) fitScore += 22;
+                    if (gmDirective === 'HARD_CONDITIONING' && personality === 'Old-School Disciplinarian') fitScore += 24;
+
+                    // 3. League Tier Expectations
+                    if (team.tier === 1 && rep >= 68) fitScore += 15; // Premier Parks expect proven tacticians
+                    if (team.tier === 2 && (cand.ratings?.teaching || 50) >= 60) fitScore += 12; // Sandlot Circuit values development
+
+                    // 4. Bargain Pouncing: Smart GMs spot elite coaches whose demands have decayed
+                    if (decay < 0.70 && rep > 68) fitScore += 18;
+
+                    return { cand, canAfford, requiredStipend, fitScore };
+                })
+                .filter(c => c.canAfford)
+                .sort((a, b) => b.fitScore - a.fitScore);
+
+            let newHire = null;
+            if (affordableCandidates.length > 0) {
+                const chosen = affordableCandidates[0];
+                const idx = gameState.availableStaff.indexOf(chosen.cand);
+                newHire = gameState.availableStaff.splice(idx, 1)[0];
+                if (team.finances) team.finances.balance = Math.max(0, team.finances.balance - chosen.requiredStipend);
             } else {
-                // Emergency hire: Rec center volunteer step-in so team is never headless
+                // Emergency volunteer: If the franchise is completely broke and cannot afford
+                // anyone on the open market, a parent/rec volunteer steps in at $0 stipend
                 newHire = generateStaffMember('coach', 28, 50);
             }
 
-            newHire.teamId = team.id;
-            newHire.role = 'coach';
-            team.staff.coach = newHire;
-            team.coach = newHire;
+            if (newHire) {
+                newHire.teamId = team.id;
+                newHire.role = 'coach';
+                team.staff.coach = newHire;
+                team.coach = newHire;
+            }
         }
     }
 
@@ -229,14 +303,22 @@ export function aiChooseWeeklyPractice(team, opponent = null, gmDirective = 'COA
 
     const coach = team.staff?.coach;
     const personality = coach?.biases?.personality?.name;
+    const balance = team.finances?.balance || 0;
+    const tokens = team.socialProfile?.favorTokens || 0;
+
+    // Financial Awareness: If team is completely broke (< $3) and out of tokens,
+    // pragmatic coaches sacrifice practice to run chores/mow lawns for cash
+    if (balance < 3.00 && tokens === 0 && Math.random() < 0.45) {
+        return 'hustle';
+    }
 
     if (gmDirective === 'DEVELOP_YOUTH') return 'chalk_talk';
     if (gmDirective === 'HARD_CONDITIONING') return 'conditioning';
-    if (gmDirective === 'WIN_NOW') return 'scouting';
+    if (gmDirective === 'WIN_NOW') return balance >= 2.00 ? 'scouting' : 'hustle';
 
     // Coach Autonomy
     if (personality === 'Old-School Disciplinarian') return 'conditioning';
-    if (personality === 'Analytical Savant') return 'chalk_talk';
+    if (personality === 'Analytical Savant') return balance < 6.00 ? 'hustle' : 'chalk_talk';
     if (personality === "Players' Coach") return 'scrimmage';
 
     return Math.random() < 0.5 ? 'chalk_talk' : 'scouting';
@@ -311,4 +393,22 @@ export function aiEvaluatePositionChanges(team, gameState) {
             break;
         }
     }
+}
+
+/**
+ * Processes weekly market decay for unemployed staff on the market.
+ * Stubborn coaches hold out longer; humble coaches drop demands quickly.
+ */
+export function processStaffMarketDecay(gameState) {
+    if (!gameState?.availableStaff) return;
+
+    gameState.availableStaff.forEach(staff => {
+        staff.weeksUnemployed = (staff.weeksUnemployed || 0) + 1;
+        const rep = Math.round(((staff.ratings?.offSchemeMastery || 50) + (staff.ratings?.defSchemeMastery || 50) + (staff.ratings?.teaching || 50)) / 3);
+        const baseDemand = Math.max(0, Math.round((rep - 52) * 0.50));
+
+        // Exponential stubbornness curve
+        const decayMultiplier = Math.pow(staff.stubbornness || 0.75, staff.weeksUnemployed);
+        staff.stipendDemand = Math.max(0, Math.round(baseDemand * decayMultiplier));
+    });
 }

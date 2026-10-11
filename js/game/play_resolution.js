@@ -11,7 +11,7 @@ import {
     generateSchedule // <-- Added
 } from './season.js';
 import {
-    updateQBDecision, updatePunterDecision
+    updateQBDecision, updateThrowoffDecision
 } from './ai.js';
 import {
     initPlayTelemetry, finalizePlayTelemetry
@@ -718,7 +718,7 @@ export function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey
                 if (loopType === 'pass') {
                     updateQBDecision(qb1, activeOffense, activeDefense, playState, playState.assignments, gameLog);
                 } else if (loopType === 'punt') {
-                    // "Punt" play type now correctly triggers the deep arm throwoff
+                    // Triggers the backyard arm-heave instead of a traditional punt
                     updateThrowoffDecision(playState, activeOffense, gameLog);
                 }
             }
@@ -1033,9 +1033,17 @@ export function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey
     if (playState.incomplete) clockBurn = Math.floor(Math.random() * 8) + 18; // Even an incompletion burns 18-25 secs fetching the ball
     else if (playResult.possessionChange || playState.touchdown || playState.safety) clockBurn = 40; // Turnovers take a while to reset
 
-    // Late 4th quarter hurry-up offense (if losing)
+    // Late 4th-Quarter Hurry-Up: Scaled strictly by Coach Clock IQ
     const isLateTrailing = quarter >= 4 && timeRemaining < 120 && scoreDiff < 0;
-    if (isLateTrailing) clockBurn = Math.floor(clockBurn * 0.6);
+    if (isLateTrailing) {
+        const coach = offense?.staff?.coach || offense?.coach;
+        const clockIQ = coach?.ratings?.clockIQ || 50;
+
+        // Elite Clock IQ (75-99): Crisp 2-minute drill burns only 12-18 seconds
+        // Low Clock IQ (20-45): Flustered kids dawdle in the huddle, burning 26-34 seconds
+        const iqHurryMultiplier = 0.85 - ((clockIQ / 100) * 0.45); // 0.40 to 0.75
+        clockBurn = Math.max(12, Math.floor(clockBurn * iqHurryMultiplier));
+    }
 
     playResult.clockBurn = clockBurn;
 

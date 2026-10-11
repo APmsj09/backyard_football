@@ -457,11 +457,12 @@ export function evaluatePlayerNegotiation(player, team, offer = {}) {
  */
 export function evaluateStaffNegotiation(staff, team, roleKey, pitch = {}) {
     const tokensOffered = typeof pitch === 'number' ? pitch : (pitch.tokensOffered || 0);
+    const cashOffered = typeof pitch === 'object' ? (pitch.cashOffered || 0) : 0;
     const schemePromise = typeof pitch === 'object' ? (pitch.schemePromise || 'GM_CHOICE') : 'GM_CHOICE';
     const practiceFocus = typeof pitch === 'object' ? (pitch.practiceFocus || 'BALANCED') : 'BALANCED';
 
     const cred = team.socialProfile?.streetCred || 50;
-    let interest = Math.round(cred * 0.45);
+    let interest = Math.round(cred * 0.42);
     const reasons = [];
 
     const ratingAvg = Math.round(
@@ -469,6 +470,34 @@ export function evaluateStaffNegotiation(staff, team, roleKey, pitch = {}) {
          (staff.ratings?.defSchemeMastery || 50) + 
          (staff.ratings?.teaching || 50)) / 3
     );
+
+    // 1. FINANCIAL STIPEND & MARKET DESPERATION EVALUATION
+    const weeksUnemployed = staff.weeksUnemployed || 0;
+    const baseStipend = Math.max(0, Math.round((ratingAvg - 52) * 0.50));
+    const marketDecay = Math.pow(staff.stubbornness || 0.75, weeksUnemployed);
+    const requiredStipend = Math.max(0, Math.round(baseStipend * marketDecay));
+
+    if (cashOffered < requiredStipend) {
+        const stipendDeficit = requiredStipend - cashOffered;
+        const penalty = Math.min(45, stipendDeficit * 7);
+        interest -= penalty;
+        reasons.push(`❌ Insulted by inadequate stipend: Demanded $${requiredStipend.toFixed(2)} for equipment/coffee (-${penalty})`);
+    } else if (cashOffered > requiredStipend && requiredStipend > 0) {
+        const bonus = Math.min(22, (cashOffered - requiredStipend) * 4);
+        interest += bonus;
+        reasons.push(`💰 Impressed by generous $${cashOffered.toFixed(2)} upfront equipment stipend (+${bonus})`);
+    } else if (requiredStipend === 0) {
+        reasons.push("🤝 Volunteer/humble coach: Asks $0.00 upfront stipend (+0)");
+    }
+
+    // Unemployment Desperation Bonus (Humble coaches get desperate; stubborn hold out)
+    if (weeksUnemployed >= 2) {
+        const desperationBonus = Math.round(weeksUnemployed * 6 * (1.0 - (staff.stubbornness || 0.75)));
+        if (desperationBonus > 0) {
+            interest += desperationBonus;
+            reasons.push(`⏳ Eager to return to sideline after ${weeksUnemployed} weeks without team (+${desperationBonus})`);
+        }
+    }
 
     // 1. TIER STANDARDS & REPUTATION
     if (team.tier === 1) {
