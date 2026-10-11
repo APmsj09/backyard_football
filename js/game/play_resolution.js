@@ -265,71 +265,79 @@ export function determinePlayCall(offense, defense, down, yardsToGo, ballOn, sco
         score += (playMastery - 50) * 0.35; // Mastered plays (+15 score) beat unfamiliar plays (-10 score)
 
         // ======================================================
-        // 2. SITUATIONAL FOOTBALL
+        // 2. SITUATIONAL FOOTBALL (TIERED BY COACH INSTINCT & BIAS)
         // ======================================================
-        // QB intelligence affects how strongly the AI responds
-        // to situation, rather than directly forcing a player.
+        const coachInstinct = offense.staff?.coach?.ratings?.gameplanInstinct || 50;
+        const coachIQFactor = coachInstinct / 100; // 0.0 to 1.0 scale
+        
+        // --- LEVEL 1: BASIC FOOTBALL LOGIC (Universal) ---
         if (isShort) {
-            if (play.type === 'run' && tags.includes('inside')) {
-                score += 30 * situationalWeight;
-            }
-
-            if (play.type === 'run' && tags.includes('power')) {
-                score += 35 * situationalWeight;
-            }
-
-            if (play.type === 'pass' && tags.includes('short')) {
-                score += 10 * situationalWeight;
-            }
+            if (play.type === 'run') score += 15 * situationalWeight;
+            if (tags.includes('inside') || tags.includes('power')) score += 20 * situationalWeight;
+            if (play.type === 'pass' && tags.includes('short')) score += 15 * situationalWeight;
+            if (tags.includes('deep')) score -= 25; // Stop throwing bombs on 3rd & 1
         }
-
+        
         if (isLong) {
-            if (play.type === 'run') {
-                score -= 20 * situationalWeight;
-            }
-
-            if (tags.includes('deep')) {
-                score += 30 * situationalWeight;
-            } else if (tags.includes('medium')) {
-                score += 18 * situationalWeight;
-            }
-
-            if (play.type === 'pass' && tags.includes('short')) {
-                score -= 8 * situationalWeight;
-            }
+            if (play.type === 'run') score -= 20 * situationalWeight;
+            if (tags.includes('deep')) score += 25 * situationalWeight;
+            if (tags.includes('medium')) score += 15 * situationalWeight;
+            if (play.type === 'pass' && tags.includes('short')) score -= 10 * situationalWeight;
+        }
+        
+        if (isGoalLine) {
+            if (play.type === 'run') score += 25 * situationalWeight;
+            if (tags.includes('short')) score += 15 * situationalWeight;
+            if (tags.includes('deep') || tags.includes('vertical')) score -= 60; // Field gets compressed!
+        }
+        
+        if (isBackedUp) {
+            if (tags.includes('inside')) score += 15 * situationalWeight;
+            if (tags.includes('deep')) score -= 20; // Too risky near own endzone
         }
 
         if (down === 1 && !isDesperation && !isChewClock) {
-            if (play.type === 'run') {
-                score += 8 * situationalWeight;
-            }
-
-            if (tags.includes('pa')) {
-                score += 12 * situationalWeight;
-            }
+            if (play.type === 'run') score += 10 * situationalWeight;
+            if (tags.includes('pa')) score += 15 * situationalWeight;
         }
 
-        if (isGoalLine) {
-            if (play.type === 'run') {
-                score += 20 * situationalWeight;
-            }
-
-            if (tags.includes('short') || tags.includes('inside')) {
-                score += 8 * situationalWeight;
-            }
+        // --- LEVEL 2: COACH TACTICAL BIAS ---
+        const tacticalBias = offense.staff?.coach?.biases?.tactical?.name;
+        if (tacticalBias === 'Smashmouth Zealot') {
+            if (play.type === 'run') score += 18;
+            if (tags.includes('power') || tags.includes('inside')) score += 15;
+            if (play.type === 'pass' && !tags.includes('pa')) score -= 10;
+        } else if (tacticalBias === 'Air Raid Purist') {
+            if (play.type === 'pass') score += 20;
+            if (tags.includes('spread') || tags.includes('quick')) score += 15;
+            if (play.type === 'run' && !tags.includes('outside')) score -= 15;
+        } else if (tacticalBias === 'Conservative Turtler') {
+            if (play.type === 'run') score += 12;
+            if (tags.includes('deep') || tags.includes('trick')) score -= 25;
+            if (tags.includes('screen')) score += 10;
         }
 
-        if (isBackedUp) {
-            if (tags.includes('inside')) {
-                score += 10 * situationalWeight;
-            }
+        // --- LEVEL 3: ELITE COACH INSTINCTS (Adjusting to Game State & Opponent) ---
+        if (coachInstinct >= 60) {
+            // Smart coaches actively avoid calling the exact same play twice in a row
+            const lastPlay = recentPlays[recentPlays.length - 1];
+            if (lastPlay === key) score -= (30 * coachIQFactor);
 
-            if (tags.includes('short')) {
-                score += 8 * situationalWeight;
+            // 2nd and Short is a prime passing down for aggressive/smart play-callers
+            if (down === 2 && isShort && !isChewClock) {
+                if (tags.includes('deep') || tags.includes('pa')) score += (25 * coachIQFactor);
             }
-
-            if (tags.includes('deep')) {
-                score -= 8 * situationalWeight;
+            
+            // Adjust based on defense if known (Advanced Scheme Countering)
+            const defFormation = defense?.formations?.defense || '';
+            if (defFormation.includes('4-2-2') || defFormation.includes('GoalLine')) {
+                // Heavy run stop defense: Smart coach calls play-action or spread passing
+                if (tags.includes('pa') || tags.includes('screen')) score += (22 * coachIQFactor);
+                if (play.type === 'run' && tags.includes('inside')) score -= (18 * coachIQFactor);
+            } else if (defFormation.includes('Dime') || defFormation.includes('3-0-5')) {
+                // Light pass defense: Smart coach runs the ball down their throat
+                if (play.type === 'run') score += (28 * coachIQFactor);
+                if (tags.includes('deep')) score -= (15 * coachIQFactor);
             }
         }
 
@@ -1139,6 +1147,7 @@ export function simulateLivePlayStep(gameInstance, mode = 'live') {
         gameInstance.ballOn = 20;
         gameInstance.down = 1;
         gameInstance.yardsToGo = 10;
+        gameInstance.possession.recentPlayHistory = [];
     } else if (playResult.score === 'TD') {
         let scoringTeam = offense;
         if (playResult.defensiveTD) {
@@ -1147,7 +1156,12 @@ export function simulateLivePlayStep(gameInstance, mode = 'live') {
         }
         if (scoringTeam.id === gameInstance.homeTeam.id) gameInstance.homeScore += 6;
         else gameInstance.awayScore += 6;
+        
+        // Immediately set up the conversion field state so the UI scoreboard and next tick are synced
         gameInstance.isConversionAttempt = true;
+        gameInstance.ballOn = 97;
+        gameInstance.down = 1;
+        gameInstance.yardsToGo = 3;
     } else if (playResult.safety) {
         if (defense.id === gameInstance.homeTeam.id) gameInstance.homeScore += 2;
         else gameInstance.awayScore += 2;

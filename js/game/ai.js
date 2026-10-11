@@ -663,7 +663,9 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
         if (trueTarget && trueTarget.initialX !== undefined) {
             const decoy = offenseStates.find(o =>
                 o.slot !== 'QB1' &&
+                !o.slot.startsWith('OL') &&
                 o.slot !== trueTarget.slot &&
+                (o.action?.includes('route') || o.action === 'run_path') &&
                 o.initialX !== undefined &&
                 Math.sign(o.initialX - 26.6) !== Math.sign(trueTarget.initialX - 26.6)
             );
@@ -818,12 +820,15 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
 
         let score = Math.min(minProjectedSeparation, 6) * 10;
 
-        if (rec.assignment === 'Screen_Wait') {
-            if (playState.tick < 45) return { score: -100, separation: minProjectedSeparation, info: { state: rec, separation: minProjectedSeparation } };
-            score += 80;
+        const isScreenRoute = rec.assignment === 'Screen_Wait' || rec.assignment === 'Slip_Screen' || rec.assignment === 'Screen';
+        if (isScreenRoute) {
+            if (playState.tick < 22 && rec.assignment === 'Screen_Wait') {
+                return { score: -100, separation: minProjectedSeparation, info: { state: rec, separation: minProjectedSeparation } };
+            }
+            score += 65;
 
             if (minProjectedSeparation < 1.0) {
-                score -= 150;
+                score -= 80;
             }
         }
 
@@ -907,13 +912,15 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
 
             // Heavy coverage penalty for chucking deep into multiple defenders or safeties
             if (defendersClosingIn >= 1) {
-                score -= 25 + ((100 - qbDecision) * 0.35);
+                // Penalize heavily based on how long the ball is in the air
+                const hangTimePenalty = Math.max(1.0, estimatedFlightTime / 1.5);
+                score -= (25 + ((100 - qbDecision) * 0.45)) * hangTimePenalty * defendersClosingIn;
             }
 
             if (minProjectedSeparation >= 3.5 && defendersClosingIn === 0) {
                 score += 14 + (qbIQ * 0.05);
-            } else {
-                score -= Math.max(16, (75 - qbDecision) * 0.8);
+            } else if (defendersClosingIn > 0) {
+                score -= Math.max(20, (85 - qbDecision) * 1.2);
             }
         }
 
@@ -1343,8 +1350,8 @@ export function executeThrow(qbState, target, strength, accuracy, playState, gam
 
     const maxArmVelocity = 16 + (strength / 100) * 14.0;
     let ballSpeed = maxArmVelocity;
-    if (passType === 'lob') ballSpeed *= 0.70;
-    else if (passType === 'touch') ballSpeed *= 0.85;
+    if (passType === 'lob') ballSpeed *= 0.84; // Faster lobs prevent waiting
+    else if (passType === 'touch') ballSpeed *= 0.92;
 
     let aimX = target.x;
     let aimY = target.y;

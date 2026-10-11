@@ -406,9 +406,10 @@ export function resolveOngoingBlocks(playState, gameLog, offenseStates = [], def
         }
 
         const ticksInBlock = playState.tick - battle.startTick;
-        if (ticksInBlock < 35) {
-            // Give pass blockers solid early-snap anchor so QBs can complete 3-step drops
-            blockPower *= 1.60;
+        const isPassBlock = blocker.action === 'pass_block';
+        if (isPassBlock && ticksInBlock < 30) {
+            // Pass blockers anchor against immediate collapse without auto-pancaking
+            blockPower *= 1.25;
         }
 
         if (ticksInBlock > 60) {
@@ -832,6 +833,11 @@ export function handleBallArrival(playState, carrier, playResult, gameLog) {
 
             if (isDefense) {
                 if (gameLog) pushGameLog(gameLog, `[Tick ${playState.tick}] ❗ INTERCEPTION! ${bestCandidate.role} ${bestCandidate.name} at (${actionX}, ${actionY})`, playState);
+                logPlayDebug('INTERCEPTION', `${bestCandidate.name} intercepted pass`, {
+                    interceptor: bestCandidate.name,
+                    returnStartY: Number(bestCandidate.y.toFixed(1)),
+                    tick: playState.tick
+                });
                 playState.interceptionOccurred = true;
                 playState.possessionChanged = true;
                 playState.turnover = true;
