@@ -4,6 +4,7 @@ import { getPlayer } from './state.js';
 import { calculateSlotSuitability } from './player.js';
 import { getPriority } from './depth_chart.js';
 import { offenseFormations, defenseFormations, routeTree } from '../data.js';
+import { getDistance } from './physics.js';
 
 const FIELD_WIDTH = 53.3;
 const FIELD_LENGTH = 120;
@@ -162,7 +163,13 @@ export function captureFrame(playState, gameLog) {
 
             // Detect if player is actively leaping for a high pass in flight
             const ball = playState.ballState;
-            const isJumping = p.action === 'tracking_ball' && ball.inAir && ball.z > 1.2 && getDistance(p, ball) < 2.0;
+            const isJumping = Boolean(
+                p.action === 'tracking_ball' &&
+                ball?.inAir &&
+                ball?.z > 1.2 &&
+                typeof getDistance === 'function' &&
+                getDistance(p, ball) < 2.0
+            );
 
             return {
                 id: p.id,
