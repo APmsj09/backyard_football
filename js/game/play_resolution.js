@@ -718,12 +718,14 @@ export function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey
                 if (loopType === 'pass') {
                     updateQBDecision(qb1, activeOffense, activeDefense, playState, playState.assignments, gameLog);
                 } else if (loopType === 'punt') {
-                    // Triggers the backyard arm-heave instead of a traditional punt
                     updateThrowoffDecision(playState, activeOffense, gameLog);
                 }
             }
 
             if (!playState.playIsLive) break;
+
+            // CRITICAL FIX: Refresh ballPos reference in case the QB just threw the ball and created a new object
+            const currentBall = playState.ballState;
 
             if (playState.handoffRequired && !playState.handoffOccurred) {
                 if (qb1 && rb1) {
@@ -769,37 +771,37 @@ export function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey
                     }
                 }
             });
-            if (ballPos.inAir || (ballPos.isLoose && playState.type === 'punt')) {
-                ballPos.prevX = ballPos.x;
-                ballPos.prevY = ballPos.y;
-                ballPos.prevZ = ballPos.z;
+            if (currentBall.inAir || (currentBall.isLoose && playState.type === 'punt')) {
+                currentBall.prevX = currentBall.x;
+                currentBall.prevY = currentBall.y;
+                currentBall.prevZ = currentBall.z;
 
-                ballPos.x += (ballPos.vx || 0) * timeDelta;
-                ballPos.y += (ballPos.vy || 0) * timeDelta;
-                ballPos.z += (ballPos.vz || 0) * timeDelta;
-                ballPos.vz = (ballPos.vz || 0) - 9.8 * timeDelta;
+                currentBall.x += (currentBall.vx || 0) * timeDelta;
+                currentBall.y += (currentBall.vy || 0) * timeDelta;
+                currentBall.z += (currentBall.vz || 0) * timeDelta;
+                currentBall.vz = (currentBall.vz || 0) - 9.8 * timeDelta;
 
-                ballPos.x = Math.max(-10.0, Math.min(FIELD_WIDTH + 10.0, ballPos.x));
-                ballPos.y = Math.max(-10.0, Math.min(FIELD_LENGTH + 10.0, ballPos.y));
+                currentBall.x = Math.max(-10.0, Math.min(FIELD_WIDTH + 10.0, currentBall.x));
+                currentBall.y = Math.max(-10.0, Math.min(FIELD_LENGTH + 10.0, currentBall.y));
 
                 handleBallArrival(playState, ballCarrierState, playResult, gameLog);
 
-                if (ballPos.z < 0) {
-                    ballPos.z = 0;
-                    if (ballPos.vz <= 0) {
-                        ballPos.vz = 0;
-                        if (ballPos.inAir) {
-                            ballPos.inAir = false;
-                            if (playState.type === 'punt') ballPos.isLoose = true;
+                if (currentBall.z < 0) {
+                    currentBall.z = 0;
+                    if (currentBall.vz <= 0) {
+                        currentBall.vz = 0;
+                        if (currentBall.inAir) {
+                            currentBall.inAir = false;
+                            if (playState.type === 'punt') currentBall.isLoose = true;
                         }
                     }
                 }
             } else if (ballCarrierState) {
-                ballPos.x = ballCarrierState.x;
-                ballPos.y = ballCarrierState.y;
-                ballPos.z = 0.5;
-                ballPos.x = Math.max(0.5, Math.min(FIELD_WIDTH - 0.5, ballPos.x));
-                ballPos.y = Math.max(0.0, Math.min(FIELD_LENGTH, ballPos.y));
+                currentBall.x = ballCarrierState.x;
+                currentBall.y = ballCarrierState.y;
+                currentBall.z = 0.5;
+                currentBall.x = Math.max(0.5, Math.min(FIELD_WIDTH - 0.5, currentBall.x));
+                currentBall.y = Math.max(0.0, Math.min(FIELD_LENGTH, currentBall.y));
             }
 
             resolvePlayerCollisions(playState);
