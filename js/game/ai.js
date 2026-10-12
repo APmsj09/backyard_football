@@ -845,32 +845,29 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
             }
         });
 
-        // Pre-snap / Post-snap Shell Recognition (Cover 2 vs Cover 3)
+        let score = Math.min(minProjectedSeparation, 6) * 10;
+
+        // Pre-snap / Post-snap Shell Recognition
         const coverageShell = evaluateCoverageAlignment(defenseStates, playState);
         const isMiddleOfFieldRoute = Math.abs(rec.x - CENTER_X) < 8.0;
 
         if (depth > 14 && qbIQ >= 55) {
-            const shellAwareness = (qbIQ - 50) / 50; // 0.1 to 1.0 multiplier
+            const shellAwareness = (qbIQ - 50) / 50;
+
             if (coverageShell.isTwoHigh) {
-                // Two-High (Cover 2): Middle of field is OPEN (MOFO). Seams and posts between safeties thrive.
                 if (isMiddleOfFieldRoute) {
                     score += 18 * shellAwareness;
                 } else if (Math.abs(rec.x - CENTER_X) > 16.0) {
-                    // Deep boundary hole shot against 2-high is a tough window
                     score -= 10 * shellAwareness;
                 }
             } else if (coverageShell.isSingleHigh) {
-                // Single-High (Cover 1 / Cover 3): Middle is CLOSED (MOFC) by deep centerfield safety.
                 if (isMiddleOfFieldRoute) {
-                    score -= 16 * shellAwareness;
+            score -= 16 * shellAwareness;
                 } else {
-                    // Outside boundary 1-on-1s are favored
-                    score += 12 * shellAwareness;
+            score += 12 * shellAwareness;
                 }
             }
         }
-
-        let score = Math.min(minProjectedSeparation, 6) * 10;
 
         const isScreenRoute = rec.assignment === 'Screen_Wait' || rec.assignment === 'Slip_Screen' || rec.assignment === 'Screen';
         if (isScreenRoute) {
