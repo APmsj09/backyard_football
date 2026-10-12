@@ -239,7 +239,9 @@ function resolveNewtonianCollisions(pState, allPlayers) {
     const myRadius = BASE_RADIUS + (myWeight / 1000);
 
     for (const other of allPlayers) {
-        if (other.id === pState.id || other.isEngaged || pState.isEngaged) continue;
+        if (other.id === pState.id) continue;
+        // Do not collide an engaged player with their own blocking partner
+        if (pState.engagedWith === other || other.engagedWith === pState) continue;
 
         // Respect ghostTicks to prevent QB/RB collision snags after handoffs
         if (pState.ghostTicks > 0 || other.ghostTicks > 0) continue;
