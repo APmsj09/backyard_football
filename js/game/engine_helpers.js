@@ -166,6 +166,7 @@ export function captureFrame(playState, gameLog) {
 
             return {
                 id: p.id,
+                name: p.name,
                 teamId: p.teamId,
                 fatigue: p.fatigue,
                 slot: p.slot,
