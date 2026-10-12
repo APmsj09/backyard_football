@@ -502,7 +502,7 @@ export const offensivePlaybook = {
     // ===================================
     'Uni_FourVerts': {
         type: 'pass', tags: ['pass', 'deep', 'vertical'],
-        readProgression: ['X', 'Z', 'H', 'Y'],
+        readProgression: ['X', 'RB', 'Z', 'H', 'Y'],
         assignments: {
             'QB': 'qb_setup', 'X': 'Fly', 'Z': 'Fly', 'H': 'Seam',
             'Y': 'Seam', 'RB': 'CheckRelease', 'OL': 'pass_block'
