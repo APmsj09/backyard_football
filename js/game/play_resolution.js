@@ -731,23 +731,41 @@ export function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey
                 if (qb1 && rb1) {
                     const qbDepth = playState.lineOfScrimmage - qb1.initialY;
                     const dist = getDistance(qb1, rb1);
-                    const handoffTickThreshold = qbDepth < 4.0 ? 18 : 24;
+                    const isTossPlay = rb1.assignment?.includes('toss');
+                    // Tosses release quicker and allow a wider pitch distance
+                    const handoffDistThreshold = isTossPlay ? 3.8 : 1.8;
+                    const handoffTickThreshold = isTossPlay ? 12 : (qbDepth < 4.0 ? 16 : 22);
 
-                    if ((dist < 1.8 && playState.tick > 5) || (playState.tick >= handoffTickThreshold)) {
+                    if ((dist < handoffDistThreshold && playState.tick > 5) || (playState.tick >= handoffTickThreshold)) {
                         qb1.hasBall = false;
                         rb1.hasBall = true;
                         rb1.isBallCarrier = true;
                         playState.handoffOccurred = true;
-                        qb1.ghostTicks = 25;
-                        rb1.ghostTicks = 25;
-                        rb1.contactReduction = 1.2;
+                        rb1._handoffTick = playState.tick;
+
+                        // Give both ghost ticks and clear target locking so they don't stutter
+                        qb1.ghostTicks = 30;
+                        rb1.ghostTicks = 30;
                         rb1.action = 'run_path';
+                        qb1.action = 'idle';
                     } else {
-                        qb1.targetX = qb1.initialX + (rb1.initialX > qb1.initialX ? 1 : -1);
-                        qb1.targetY = qbDepth < 4.0 ? (playState.lineOfScrimmage - 4.5) : (qb1.initialY + 1.0);
+                        // QB steps to mesh point
                         qb1.action = 'handoff_setup';
-                        rb1.targetX = qb1.targetX;
-                        rb1.targetY = qb1.targetY;
+                        qb1.targetX = qb1.initialX + (rb1.initialX > qb1.initialX ? 0.8 : -0.8);
+                        qb1.targetY = qbDepth < 4.0 ? (playState.lineOfScrimmage - 4.2) : (qb1.initialY + 0.8);
+
+                        if (isTossPlay) {
+                            // On tosses, RB tracks their designed perimeter route rather than running into the QB
+                            const pt = rb1.routePath?.[rb1.currentPathIndex] || { x: rb1.x + (rb1.assignment.includes('r') ? 5 : -5), y: rb1.y + 0.5 };
+                            rb1.targetX = pt.x;
+                            rb1.targetY = pt.y;
+                            rb1.action = 'run_path';
+                        } else {
+                            // On inside handoffs, RB approaches mesh point smoothly without snapping
+                            rb1.action = 'handoff_receive';
+                            rb1.targetX = qb1.targetX + (rb1.initialX > qb1.initialX ? 0.6 : -0.6);
+                            rb1.targetY = qb1.targetY;
+                        }
                     }
                 }
             }
