@@ -165,7 +165,10 @@ export function determinePlayCall(offense, defense, down, yardsToGo, ballOn, sco
     const isGoalLine = ballOn >= 90;
     const isBackedUp = ballOn <= 10;
     const isShort = yardsToGo <= 2;
-    const isLong = yardsToGo >= 8;
+    const isLong =
+        (down === 3 && yardsToGo >= 8) ||
+        (down === 4 && yardsToGo >= 5) ||
+        (down === 2 && yardsToGo >= 10);
     const isDesperation = drivesRemaining <= 2 && scoreDiff <= -8;
     const isChewClock = drivesRemaining <= 2 && scoreDiff >= 8;
 
@@ -466,7 +469,7 @@ export function isPlayCompatibleWithDefense(play, formationName) {
     return false;
 }
 
-export function determineDefensiveFormation(defense, offenseFormationName, down, yardsToGo, gameLog) {
+export function determineDefensiveFormation(defense, offenseFormationName, down, yardsToGo, gameLog, ballOn = 50) {
     if (offenseFormationName === 'Punt') return 'Punt_Return';
 
     const captainIsSharp = checkCaptainDiscipline(defense, gameLog);
@@ -477,7 +480,17 @@ export function determineDefensiveFormation(defense, offenseFormationName, down,
     let coachPref = defense.coach?.preferredDefense || null;
     if (!coachPref || !defenseFormations[coachPref]) coachPref = null;
 
-    const defEntries = Object.entries(defenseFormations);
+    const isGoalLineSituation = ballOn >= 95 && yardsToGo <= 3;
+
+    const defEntries = Object.entries(defenseFormations).filter(([key]) =>
+        key !== 'Punt_Return' &&
+        (isGoalLineSituation || !/goal.?line/i.test(key))
+    );
+
+    // Don't preserve a coach preference that is illegal for this situation.
+    if (coachPref && !defEntries.some(([key]) => key === coachPref)) {
+        coachPref = null;
+    }
     const pickMax = (scoreFn) => {
         let best = null; let bestScore = -Infinity;
         for (const [key, val] of defEntries) {
@@ -488,8 +501,18 @@ export function determineDefensiveFormation(defense, offenseFormationName, down,
     };
 
     if (captainIsSharp) {
-        if (yardsToGo <= 2) {
-            return pickMax(v => (v.personnel?.DL || 0) + (v.personnel?.LB || 0)) || coachPref || Object.keys(defenseFormations)[0];
+        if (yardsToGo <= 2 && isGoalLineSituation) {
+            return pickMax(v =>
+                (v.personnel?.DL || 0) + (v.personnel?.LB || 0)
+            ) || coachPref || defEntries[0]?.[0];
+        }
+
+        // Away from the goal line, a sharp captain sometimes uses a heavy front,
+        // but should not automatically do so on every short-yardage play.
+        if (yardsToGo <= 2 && Math.random() < 0.40) {
+            return pickMax(v =>
+                (v.personnel?.DL || 0) + (v.personnel?.LB || 0)
+            ) || coachPref || defEntries[0]?.[0];
         }
         if ((down === 3 && yardsToGo > 8) || (down === 4 && yardsToGo > 5)) {
             const candidate = pickMax(v => (v.personnel?.DB || 0));
@@ -506,12 +529,19 @@ export function determineDefensiveFormation(defense, offenseFormationName, down,
         if (coachPref) return coachPref;
         return pickMax(v => -Math.abs((v.personnel?.DB || 0) - wrCount)) || Object.keys(defenseFormations)[0];
     } else {
+        const validFormations = defEntries.map(([key]) => key);
+        const currentFormation = defense.formations?.defense;
+
         if (Math.random() < 0.5) {
-            if (defense.formations?.defense === 'Punt_Return') return coachPref || Object.keys(defenseFormations)[0];
-            return (defense.formations?.defense && defenseFormations[defense.formations.defense]) ? defense.formations.defense : (coachPref || Object.keys(defenseFormations)[0]);
+            if (validFormations.includes(currentFormation)) {
+                return currentFormation;
+            }
+            if (coachPref && validFormations.includes(coachPref)) {
+                return coachPref;
+            }
         }
-        const validFormations = Object.keys(defenseFormations).filter(key => key !== 'Punt_Return');
-        return getRandom(validFormations);
+
+        return getRandom(validFormations) || '3-2-3';
     }
 }
 
@@ -531,10 +561,12 @@ export function determineDefensivePlayCall(defense, offense, down, yardsToGo, ba
 
     const isGoalLine = ballOn >= 90;
 
-    // Goal-line plays must never be selected outside the goal-line area.
-    const isEligibleOutsideGoalLine = key =>
-        isGoalLine || !key.includes('GoalLine');
+    const isGoalLineSituation = ballOn >= 95 && yardsToGo <= 3;
 
+    // Reserve goal-line calls for short-yardage situations near the end zone.
+    const isEligibleOutsideGoalLine = key =>
+        isGoalLineSituation || !/goal.?line/i.test(key);
+    
     let availablePlays = activeDefKeys.filter(key =>
         isEligibleOutsideGoalLine(key) &&
         isPlayCompatibleWithDefense(
@@ -561,7 +593,10 @@ export function determineDefensivePlayCall(defense, offense, down, yardsToGo, ba
         ) || Object.keys(defensivePlaybook)[0];
     }
     const isShort = yardsToGo <= 2;
-    const isLong = yardsToGo >= 8;
+    const isLong =
+        (down === 3 && yardsToGo >= 8) ||
+        (down === 4 && yardsToGo >= 5) ||
+        (down === 2 && yardsToGo >= 10);
     const captainIsSharp = checkCaptainDiscipline(defense, gameLog);
 
     // ==========================================================
@@ -588,8 +623,14 @@ export function determineDefensivePlayCall(defense, offense, down, yardsToGo, ba
         let score = 50;
 
         // Opponent-specific adjustments
-        if (isRunHeavyThreat && tags.includes('runStop')) score += 35; // Stack the box against star RBs
-        if (isPassHeavyThreat && (tags.includes('cover2') || tags.includes('double-team') || tags.includes('cover4'))) score += 35; // Play shell against elite passing attacks
+        if (isRunHeavyThreat && tags.includes('runStop')) score += 15;
+
+        if (isPassHeavyThreat &&
+            (tags.includes('cover2') ||
+             tags.includes('double-team') ||
+             tags.includes('cover4'))) {
+            score += 15;
+        }
 
         // FIELD POSITION SANITY CHECKS:
         // Do not call Goal Line defense at midfield, and do not call Prevent in the red zone
@@ -601,19 +642,23 @@ export function determineDefensivePlayCall(defense, offense, down, yardsToGo, ba
         }
 
         if (captainIsSharp) {
-            if (isGoalLine || isShort) {
-                if (tags.includes('runStop')) score += 60;
-                if (tags.includes('blitz')) score += 30;
+            if (isGoalLineSituation) {
+                if (tags.includes('runStop')) score += 35;
+                if (tags.includes('blitz')) score += 12;
+            } else if (isShort) {
+                // Anticipate the run without treating it as a certainty.
+                if (tags.includes('runStop')) score += 14;
+                if (tags.includes('blitz')) score += 6;
             } else if (isLong) {
-                if (tags.includes('prevent') && ballOn < 80) score += 60;
-                if (tags.includes('cover3')) score += 25;
+                if (tags.includes('prevent') && ballOn < 80) score += 25;
+                if (tags.includes('cover3')) score += 15;
             }
         }
         return { key, score: Math.max(1, score) };
     });
 
     scoredPlays.sort((a, b) => b.score - a.score);
-    const topOptions = scoredPlays.slice(0, 3);
+    const topOptions = scoredPlays.slice(0, 5);
     const totalScore = topOptions.reduce((sum, p) => sum + p.score, 0);
 
     let roll = Math.random() * totalScore;
@@ -1131,9 +1176,43 @@ export function simulateLivePlayStep(gameInstance, mode = 'live') {
             defense.formations.defense = defense.coach?.preferredDefense || '3-2-3';
         }
         if (!defense.isPlayerControlled) {
-            defense.formations.defense = determineDefensiveFormation(defense, offense.formations.offense, gameInstance.down, gameInstance.yardsToGo, gameInstance.gameLog);
+            defense.formations.defense = determineDefensiveFormation(
+                defense,
+                offense.formations.offense,
+                gameInstance.down,
+                gameInstance.yardsToGo,
+                gameInstance.gameLog,
+                gameInstance.ballOn
+            );
         }
-        defPlayKey = determineDefensivePlayCall(defense, offense, gameInstance.down, gameInstance.yardsToGo, gameInstance.ballOn, scoreDiff, gameInstance.gameLog, drivesRemaining);
+        defPlayKey = determineDefensivePlayCall(
+            defense,
+            offense,
+            gameInstance.down,
+            gameInstance.yardsToGo,
+            gameInstance.ballOn,
+            scoreDiff,
+            gameInstance.gameLog,
+            drivesRemaining
+        );
+
+        const legalGoalLineCall =
+            gameInstance.ballOn >= 95 &&
+            gameInstance.yardsToGo <= 3;
+
+        if (/goal.?line/i.test(defPlayKey) && !legalGoalLineCall) {
+            gameInstance.gameLog?.push(
+                `[AI GUARD] Rejected ${defPlayKey}: ` +
+                `ballOn=${gameInstance.ballOn}, ` +
+                `down=${gameInstance.down}&${gameInstance.yardsToGo}`
+            );
+
+            defPlayKey = defensivePlaybook['Cover_2_Zone_Base']
+                ? 'Cover_2_Zone_Base'
+                : Object.keys(defensivePlaybook).find(
+                    key => !/goal.?line/i.test(key)
+                );
+        }
     }
 
     const context = {
