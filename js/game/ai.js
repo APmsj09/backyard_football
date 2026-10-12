@@ -131,7 +131,7 @@ export function diagnosePlay(pState, tick, offenseStates, playState = null) {
         else if (rb.vy > 1.5) centerScore += 30;
     });
 
-    const isPlayAction = offensivePlayKey && offensivePlayKey.includes('PA_');
+    /*const isPlayAction = offensivePlayKey && offensivePlayKey.includes('PA_');
     if (isPlayAction) {
         if (tick < 25) {
             runScore += Math.max(25, 60 - (iq * 0.35));
@@ -143,7 +143,7 @@ export function diagnosePlay(pState, tick, offenseStates, playState = null) {
                 passScore += 70; // IQ-based play-action recovery
             }
         }
-    }
+    }*/
 
     // 3. LOW-PASS FILTERED PERCEPTION BIAS (No 20Hz noise spikes)
     const timeFactor = Math.min(1.0, tick / 30);
