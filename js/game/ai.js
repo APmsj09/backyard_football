@@ -378,15 +378,23 @@ export function getSmartCarrierTarget(runner, defenseStates, offenseStates, fiel
     const isBehindLine = runner.y < LOS + 1.2;
 
     if (isBehindLine) {
-        maxLateral = Math.min(maxLateral, 1.8); // Force tight north-south movement in the backfield
+        maxLateral = Math.min(maxLateral, 2);
     }
 
     const nearbyDefenders = defenseStates.filter(d =>
-        !d.isBlocked && d.stunnedTicks === 0 && getDistance(runner, d) < 4.0 && d.y > runner.y - 1
+        !d.isBlocked &&
+        d.stunnedTicks === 0 &&
+        getDistance(runner, d) < 4.0 &&
+        d.y > runner.y - 1
     );
+
     const inTraffic = nearbyDefenders.length >= 2;
 
-    if (inTraffic || isBehindLine) maxLateral = Math.min(maxLateral, 1.8);
+    // Traffic should encourage smarter lane evaluation, not prevent an outside run.
+    // Only restrict lateral movement in the backfield, before the runner reaches the LOS.
+    if (isBehindLine) {
+        maxLateral = Math.min(maxLateral, 2);
+    }
 
     const laneOffsets = [0];
     [1.5, 3.0, 5.0, 8.0, 10.0].forEach(off => {
