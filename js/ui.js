@@ -964,12 +964,24 @@ export function switchTab(tabId, gameState) {
         case 'free-agents': renderFreeAgentsTab(gameState); break;
         case 'messages': renderMessagesTab(gameState); break;
         
-        case 'front-office': 
-            const foSub = document.querySelector('.fo-tab.active')?.dataset.subTab || 'staff';
-            if (foSub === 'staff') UI.renderStaffTab(gameState);
-            if (foSub === 'finances') window.app.renderStoreTab(gameState); // Calls it from window.app
-            if (foSub === 'social') UI.renderSocialNetworkTab(gameState);
+        case 'front-office': {
+            const foSub =
+                document.querySelector('.fo-tab.active')?.dataset.subTab || 'staff';
+
+            if (foSub === 'staff') {
+                renderStaffTab(gameState);
+            }
+
+            if (foSub === 'finances') {
+                window.app?.renderStoreTab?.(gameState);
+            }
+
+            if (foSub === 'social') {
+                window.app?.renderSocialNetworkTab?.(gameState);
+            }
+
             break;
+        }
             
         case 'league':
             const lgSub = document.querySelector('.league-tab.active')?.dataset.subTab || 'standings';
@@ -3316,6 +3328,8 @@ function updateLiveScoreboard() {
 function runLiveGameStep() {
     if (!activeLiveGame) return;
     if (activeLiveGame.isGameOver) {
+        updateLiveScoreboard();
+        renderLiveBoxScore(activeLiveGame);
         finishLiveGame();
         return;
     }
@@ -3411,6 +3425,25 @@ function flushLiveLogs() {
     }
 }
 
+function drawLiveGameFieldFrame(frame) {
+    if (!frame || !elements.fieldCanvas || !elements.fieldCanvasCtx) {
+        return;
+    }
+
+    const homeTeam = activeLiveGame?.homeTeam;
+    const awayTeam = activeLiveGame?.awayTeam;
+
+    drawFieldVisualization(
+        elements.fieldCanvas,
+        elements.fieldCanvasCtx,
+        frame,
+        homeTeam?.primaryColor || '#0000aa',
+        awayTeam?.primaryColor || '#aa0000',
+        homeTeam?.name || 'HOME',
+        awayTeam?.name || 'AWAY'
+    );
+}
+
 function playVisualization(frames, onComplete) {
     let index = 0;
     const runNext = () => {
@@ -3420,16 +3453,27 @@ function playVisualization(frames, onComplete) {
         }
         if (isSkipping) {
             const lastFrame = frames[frames.length - 1];
+
             if (lastFrame && elements.fieldCanvas && elements.fieldCanvasCtx) {
-                drawFieldVisualization(elements.fieldCanvas, elements.fieldCanvasCtx, lastFrame);
+                drawLiveGameFieldFrame(lastFrame);
+
+                if (activeLiveGame) {
+                    renderLiveFieldLineup(lastFrame, getGameState());
+                }
             }
+
             if (onComplete) onComplete();
             return;
         }
+
         const frame = frames[index];
+
         if (frame && elements.fieldCanvas && elements.fieldCanvasCtx) {
-            drawFieldVisualization(elements.fieldCanvas, elements.fieldCanvasCtx, frame);
-            if (activeLiveGame) renderLiveFieldLineup(frame, getGameState());
+            drawLiveGameFieldFrame(frame);
+
+            if (activeLiveGame) {
+                renderLiveFieldLineup(frame, getGameState());
+            }
         }
         index++;
         if (index >= frames.length) {
