@@ -9,16 +9,30 @@ const CENTER_X = FIELD_WIDTH / 2;
 const HASH_LEFT_X = 18.0;
 const HASH_RIGHT_X = 35.3;
 
-export function diagnosePlay(pState, tick, offenseStates, truePlayType, offensivePlayKey, playState = null) {
+export function diagnosePlay(pState, tick, offenseStates, playState = null) {
     const iq = pState.playbookIQ || 50;
-    const qb = offenseStates.find(p => p.slot.startsWith('QB'));
-    const rbs = offenseStates.filter(p => p.slot.startsWith('RB'));
-    const ol = offenseStates.filter(p => p.slot.startsWith('OL'));
+    const qb = offenseStates.find(p => p.slot?.startsWith('QB'));
+    const rbs = offenseStates.filter(p => p.slot?.startsWith('RB'));
+    const ol = offenseStates.filter(p => p.slot?.startsWith('OL'));
 
-    // 1. DEFINITIVE GAME-STATE RECOGNITION (Locked when reality is revealed)
-    const isBallInAir = playState?.ballState?.inAir || playState?.ballState?.throwInitiated;
-    const handoffOccurred = playState?.handoffOccurred;
-    const qbScramble = playState?.qbIntent === 'scramble' || qb?.action === 'qb_scramble' || (qb && qb.y > (playState?.lineOfScrimmage || 0) + 0.5);
+    // Read only observable game state, not the offensive play call.
+    const observedCarrier = offenseStates.find(p => p.hasBall || p.isBallCarrier);
+    const isBallInAir = Boolean(
+        playState?.ballState?.inAir ||
+        playState?.ballState?.throwInitiated
+    );
+
+    const observedRunCarrier =
+        Boolean(observedCarrier && observedCarrier.role !== 'QB');
+
+    const qbScramble =
+        qb?.action === 'qb_scramble' ||
+        Boolean(
+            qb &&
+            observedCarrier?.id === qb.id &&
+            Number.isFinite(playState?.lineOfScrimmage) &&
+            qb.y > playState.lineOfScrimmage + 0.5
+        );
 
     if (isBallInAir) {
         pState._diagnosedGuess = 'pass';
@@ -32,11 +46,11 @@ export function diagnosePlay(pState, tick, offenseStates, truePlayType, offensiv
         return { guess: 'pass', confidence: 1.0, direction: pState._diagnosedDirection || 'center', dirConfidence: 1.0 };
     }
 
-    if (handoffOccurred || qbScramble) {
+    if (observedRunCarrier || qbScramble) {
         pState._diagnosedGuess = 'run';
         pState._diagnosedConfidence = 1.0;
         if (pState._lastLoggedGuess !== 'run') {
-            logPlayDebug('DEF_READ', `${pState.name} (${pState.role}) committed to [RUN] (${handoffOccurred ? 'Handoff' : 'Scramble'})`, {
+            logPlayDebug('DEF_READ', `${pState.name} (${pState.role}) committed to [RUN] (${observedRunCarrier ? 'Observed ball carrier' : 'QB scramble'})`, {
                 confidence: 1.0, direction: pState._diagnosedDirection || 'center', dirConfidence: 1.0
             });
             pState._lastLoggedGuess = 'run';
@@ -44,7 +58,7 @@ export function diagnosePlay(pState, tick, offenseStates, truePlayType, offensiv
         return { guess: 'run', confidence: 1.0, direction: pState._diagnosedDirection || 'center', dirConfidence: 1.0 };
     }
 
-    // A defender who already committed to 'pass' on a pass play NEVER reverts to 'run'
+    /*// A defender who already committed to 'pass' on a pass play NEVER reverts to 'run'
     if (pState._diagnosedGuess === 'pass' && truePlayType === 'pass') {
         return {
             guess: 'pass',
@@ -52,7 +66,7 @@ export function diagnosePlay(pState, tick, offenseStates, truePlayType, offensiv
             direction: pState._diagnosedDirection || 'center',
             dirConfidence: pState._diagnosedDirConfidence || 0.75
         };
-    }
+    }*/
 
     // 2. ACCUMULATE FOOTBALL KEYS
     let runScore = 0; let passScore = 0;
@@ -67,21 +81,45 @@ export function diagnosePlay(pState, tick, offenseStates, truePlayType, offensiv
         else if (qb.vx < -1.5) leftScore += 30;
     }
 
-    let passBlocks = 0; let runBlocks = 0;
-    ol.forEach(lineman => {
-        if (lineman.action === 'pass_block') passBlocks++;
-        else if (lineman.action === 'run_block') runBlocks++;
+    let passBlocks = 0;
+    let runBlocks = 0;
 
-        if (lineman.assignment && lineman.assignment.includes('pull_right')) {
-            runScore += 40; rightScore += 70;
+    ol.forEach(lineman => {
+        // Give defenders a few ticks to observe the first step.
+        if (tick < 4) return;
+
+        const initialX = lineman.initialX ?? lineman.x;
+        const initialY = lineman.initialY ?? lineman.y;
+
+        const lateralStep = lineman.x - initialX;
+        const forwardStep = lineman.y - initialY;
+
+        // Pass sets tend to retreat; run blocks tend to drive forward.
+        // These cues depend on actual movement, not assignment names.
+        if (forwardStep < -0.12 || (lineman.vy || 0) < -0.75) {
+            passBlocks++;
+        } else if (forwardStep > 0.12 || (lineman.vy || 0) > 0.75) {
+            runBlocks++;
         }
-        if (lineman.assignment && lineman.assignment.includes('pull_left')) {
-            runScore += 40; leftScore += 70;
+
+        // A pulling lineman reveals direction by moving laterally
+        // while advancing toward the defensive side.
+        if (forwardStep > 0.15 && lateralStep > 0.65) {
+            runScore += 18;
+            rightScore += 35;
+        } else if (forwardStep > 0.15 && lateralStep < -0.65) {
+            runScore += 18;
+            leftScore += 35;
         }
     });
 
-    if (passBlocks > runBlocks) passScore += (passBlocks * 12);
-    if (runBlocks > passBlocks) runScore += (runBlocks * 10);
+    if (passBlocks > runBlocks) {
+        passScore += Math.min(30, passBlocks * 8);
+    }
+
+    if (runBlocks > passBlocks) {
+        runScore += Math.min(30, runBlocks * 8);
+    }
 
     rbs.forEach(rb => {
         if (rb.isBallCarrier) runScore += 60;
@@ -136,7 +174,7 @@ export function diagnosePlay(pState, tick, offenseStates, truePlayType, offensiv
             guess = 'pass';
         }
     } else if (currentGuess === 'pass') {
-        if (finalRunScore > finalPassScore + 20 && truePlayType !== 'pass') {
+        if (finalRunScore > finalPassScore + 20) {
             guess = 'run';
         }
     }
