@@ -44,13 +44,26 @@ export function checkFumble(ballCarrierState, tacklerState, playState, gameLog) 
         playState.ballState.droppedTick = playState.tick;
 
         if (gameLog) {
-            const hitPower = Math.round(((strength + tackling) / 2) * tacklerState.fatigueModifier);
-            const security = Math.round(toughness * ballCarrierState.fatigueModifier);
+            const tacklerFatigue = tacklerState.fatigueModifier || 1;
+            const carrierFatigue = ballCarrierState.fatigueModifier || 1;
+
+            const hitPower = Math.round(
+                ((strength + tackling) / 2) * tacklerFatigue
+            );
+
+            const security = Math.round(
+                ballSecurity * carrierFatigue
+            );
+
             const actionX = ballCarrierState.x.toFixed(1);
             const actionY = ballCarrierState.y.toFixed(1);
-            const yardage = (ballCarrierState.y - playState.lineOfScrimmage).toFixed(1);
+            const yardage = (
+                ballCarrierState.y - playState.lineOfScrimmage
+            ).toFixed(1);
 
-            gameLog.push(`[Tick ${playState.tick}] ❗ FUMBLE! ${tacklerState.name} jars it loose at (${actionX}, ${actionY}) | Gain: ${yardage}y | (Hit: ${hitPower} vs Sec: ${security})`);
+            gameLog.push(
+                `[Tick ${playState.tick}] ❗ FUMBLE! ${tacklerState.name} jars it loose at (${actionX}, ${actionY}) | Gain: ${yardage}y | (Hit: ${hitPower} vs Sec: ${security})`
+            );
         }
 
         playState.fumbleOccurred = true;
