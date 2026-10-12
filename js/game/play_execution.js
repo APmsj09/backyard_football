@@ -712,8 +712,21 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
 
                 // Check if an engaged blocker or penetrating defender is standing directly in the designed hole
                 const holeClogged = pt && (
-                    offenseStates.some(o => o.id !== pState.id && Math.abs(o.x - pt.x) < 1.0 && Math.abs(o.y - pt.y) < 1.4) ||
-                    defenseStates.some(d => !d.isBlocked && Math.abs(d.x - pt.x) < 1.2 && d.y > pState.y && d.y < LOS + 1.0)
+                    offenseStates.some(o =>
+                        o.id !== pState.id &&
+                        !o.action?.includes('block') &&
+                        !/pull|lead/i.test(o.assignment || '') &&
+                        o.action !== 'run_path' &&
+                        Math.abs(o.x - pt.x) < 0.55 &&
+                        Math.abs(o.y - pt.y) < 0.85
+                    ) ||
+                    defenseStates.some(d =>
+                        !d.isBlocked &&
+                        !d.isEngaged &&
+                        Math.abs(d.x - pt.x) < 1.2 &&
+                        d.y > pState.y &&
+                        d.y < LOS + 1.0
+                    )
                 );
 
                 const isRunHolePhase = playType === 'run' &&
@@ -802,8 +815,45 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                     break;
 
                 case 'run_path':
-                case 'run_fake':
+                case 'run_fake': {
+                    const hasNextPoint =
+                        pState.routePath &&
+                        pState.currentPathIndex < pState.routePath.length;
+
+                    if (hasNextPoint) {
+                        const pt = pState.routePath[pState.currentPathIndex];
+
+                        if (getDistance(pState, pt) < 0.65) {
+                            pState.currentPathIndex++;
+                        }
+
+                        const nextPt = pState.routePath[pState.currentPathIndex];
+
+                        if (nextPt) {
+                            setRouteIntent(pState, nextPt.x, nextPt.y, 0.6);
+                        } else if (pState.slot?.startsWith('OL')) {
+                            // Puller has reached his designed path and can engage
+                            // the blocker target assigned earlier this tick.
+                            setPointIntent(
+                                pState,
+                                pState.targetX ?? pState.x,
+                                pState.targetY ?? pState.y,
+                                0.5
+                            );
+                        } else {
+                            setHoldIntent(pState, pState.x, pState.y);
+                        }
+                    } else {
+                        setPointIntent(
+                            pState,
+                            pState.targetX ?? pState.x,
+                            pState.targetY ?? pState.y,
+                            0.5
+                        );
+                    }
+
                     break;
+                }
 
                 case 'qb_setup': {
                     const qbIQ = pState.playbookIQ || 50;
@@ -1125,24 +1175,43 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
 
         if (!pState.isOffense) {
             const isDL = pState.role === 'DL';
-            let playDiagnosis = playType;
-            let diagConfidence = 1.0;
-            let diagDirection = 'center';
-            let dirConfidence = 1.0;
 
-            if (!isDL) {
-                const diag = diagnosePlay(pState, playState.tick, offenseStates, playType, offensivePlayKey, playState);
-                playDiagnosis = diag.guess;
-                diagConfidence = diag.confidence;
-                diagDirection = diag.direction;
-                dirConfidence = diag.dirConfidence;
-            }
+            const diag = diagnosePlay(
+                pState,
+                playState.tick,
+                offenseStates,
+                playState
+            );
+
+            let playDiagnosis = diag.guess;
+            let diagConfidence = diag.confidence;
+            let diagDirection = diag.direction;
+            let dirConfidence = diag.dirConfidence;
 
             const isRunRead = playDiagnosis === 'run';
-            const isFooledByPA = (playDiagnosis === 'run' && playType === 'pass' && !isDL);
-            const carrierIsPasser = ballCarrierState && !playState.handoffOccurred && !playState.fumbleOccurred;
-            const isBallPastLOS = ballCarrierState && ballCarrierState.y > LOS + 0.5;
-            const qbScrambling = carrierIsPasser && (isBallPastLOS || ballCarrierState.action === 'qb_scramble');
+
+            const carrierIsPasser =
+                Boolean(
+                    ballCarrierState &&
+                    ballCarrierState.role === 'QB' &&
+                    !playState.fumbleOccurred &&
+                    !isBallInAir
+                );
+
+            const isBallPastLOS =
+                ballCarrierState && ballCarrierState.y > LOS + 0.5;
+
+            const qbScrambling =
+                carrierIsPasser &&
+                (isBallPastLOS || ballCarrierState.action === 'qb_scramble');
+
+            // Observable situation: defenders have read run, but the QB
+            // still has the ball and has not visibly started a scramble.
+            const isRunReadAtMesh =
+                isRunRead &&
+                carrierIsPasser &&
+                !qbScrambling;
+
             const assignment = pState.assignment;
 
             if (playDiagnosis === 'read') {
@@ -1153,31 +1222,35 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
             let shouldPursue = false;
             if (ballCarrierState) {
                 if (isBallInAir) shouldPursue = false;
-                else if (isFooledByPA) shouldPursue = true;
+                else if (isRunReadAtMesh) shouldPursue = true;
                 else if (isRunRead) shouldPursue = true;
                 else if (ballCarrierState.role !== 'QB' || qbScrambling) shouldPursue = true;
                 else if (assignment?.includes('blitz') || assignment?.includes('rush') || isDL) shouldPursue = true;
             }
 
-            if (assignment?.startsWith('man_cover_') && shouldPursue && !isFooledByPA && !isDL) {
+            if (assignment?.startsWith('man_cover_') && shouldPursue && !isRunReadAtMesh && !isDL) {
                 const targetSlot = assignment.replace('man_cover_', '');
                 const carrierSlot = ballCarrierState?.slot;
                 if (carrierSlot !== targetSlot && !isRunRead && !qbScrambling) shouldPursue = false;
             }
-            if (assignment?.startsWith('zone_') && pState.slot.startsWith('LB') && carrierIsPasser && !qbScrambling && !isFooledByPA) {
+            if (assignment?.startsWith('zone_') && pState.slot.startsWith('LB') && carrierIsPasser && !qbScrambling && !isRunReadAtMesh) {
                 shouldPursue = false;
             }
 
             if (shouldPursue && ballCarrierState) {
-                const chaseTarget = (isFooledByPA ? offenseStates.find(o => o.slot.startsWith('RB')) : null) || ballCarrierState;
+                const chaseTarget = (isRunReadAtMesh ? offenseStates.find(o => o.slot.startsWith('RB')) : null) || ballCarrierState;
 
                 if (chaseTarget) {
                     const dist = getDistance(pState, chaseTarget);
                     const iq = pState.playbookIQ || 50;
 
-                    if (isFooledByPA && iq < 60) {
-                        pState.targetX = chaseTarget.x;
-                        pState.targetY = Math.min(chaseTarget.y, LOS + 0.5);
+                    if (isRunReadAtMesh && iq < 60) {
+                        setPointIntent(
+                            pState,
+                            chaseTarget.x,
+                            Math.min(chaseTarget.y, LOS + 0.5),
+                            0.5
+                        );
                         pState.action = 'pursuit';
                         pState.contactReduction = 1.2;
                         if (!pState.loggedPA && gameLog && Math.random() < 0.2) {
@@ -1203,14 +1276,14 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                         predY = Math.max(chaseTarget.y + 0.5, predY);
                     }
 
-                    if (dirConfidence > 0.45 && !isFooledByPA) {
+                    if (dirConfidence > 0.45 && !isRunReadAtMesh) {
                         const cheatAmount = 3.0 * dirConfidence * (iq / 100) * blendFactor;
                         if (diagDirection === 'right' && predX < FIELD_WIDTH - 5) predX += cheatAmount;
                         else if (diagDirection === 'left' && predX > 5) predX -= cheatAmount;
                     }
 
-                    pState.targetX = predX;
-                    pState.targetY = predY;
+                    setPointIntent(pState, predX, predY, 0.5);
+
                     pState.contactReduction = 0.7 + (diagConfidence * 0.3);
                     pState.action = 'pursuit';
                 }
@@ -1225,14 +1298,19 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                         pState.targetX = pState.x; pState.targetY = pState.y;
                     } else {
                         const targetRec = offenseStates.find(o => o.id === ballPos.targetPlayerId);
+                        let targetX = ballPos.targetX;
+                        let targetY = ballPos.targetY;
+
                         if (targetRec && iq > 60) {
-                            pState.targetX = (ballPos.targetX * 0.7) + (targetRec.x * 0.3);
-                            pState.targetY = (ballPos.targetY * 0.7) + (targetRec.y * 0.3);
-                            if (pState.slot === 'DB3' || pState.role === 'S') pState.targetY += 1.5;
-                        } else {
-                            pState.targetX = ballPos.targetX;
-                            pState.targetY = ballPos.targetY;
+                            targetX = (ballPos.targetX * 0.7) + (targetRec.x * 0.3);
+                            targetY = (ballPos.targetY * 0.7) + (targetRec.y * 0.3);
+
+                            if (pState.slot === 'DB3' || pState.role === 'S') {
+                                targetY += 1.5;
+                            }
                         }
+
+                        setPointIntent(pState, targetX, targetY, 0.5);
                         pState.action = 'tracking_ball';
                     }
                 } else {
@@ -1264,8 +1342,7 @@ export function executeAssignment(pState, assignment, offenseStates, LOS, playSt
     if (pState.role === 'DB' && assignment.includes('zone_deep') && !assignment.includes('blitz')) {
         const safetyHelp = calculateSafetyHelp(pState, playState.activePlayers.filter(p => !p.isOffense), offenseStates, null, playState, isBallInAir);
         if (safetyHelp && safetyHelp.type === 'help') {
-            pState.targetX = safetyHelp.helpX;
-            pState.targetY = safetyHelp.helpY;
+            setPointIntent(pState, safetyHelp.helpX, safetyHelp.helpY, 0.5);
             return;
         }
     }
@@ -1312,6 +1389,15 @@ export function executeAssignment(pState, assignment, offenseStates, LOS, playSt
 
                 pState.targetX = targetRec.x - (dx / dist) * 0.5;
                 pState.targetY = targetRec.y + (dy / dist) * 0.5;
+
+                // Keep movement intent synchronized before the early return.
+                setPointIntent(
+                    pState,
+                    pState.targetX,
+                    pState.targetY,
+                    0.5
+                );
+
                 targetRec.jammedTicks = 15;
                 return;
             } else {
@@ -1346,6 +1432,15 @@ export function executeAssignment(pState, assignment, offenseStates, LOS, playSt
             pState.targetX = z.x;
             pState.targetY = z.y;
         }
+
+        // Sync the final man-coverage target with the movement intent.
+        setPointIntent(
+            pState,
+            pState.targetX,
+            pState.targetY,
+            0.5
+        );
+
     } else if (assignment?.startsWith('zone_')) {
         const zone = zoneBoundaries[assignment];
         const zoneCenter = getZoneCenter(assignment, LOS);
@@ -1439,6 +1534,15 @@ export function executeAssignment(pState, assignment, offenseStates, LOS, playSt
             pState.targetX = pState.dynamicTargetX || zoneCenter.x;
             pState.targetY = pState.dynamicTargetY || zoneCenter.y;
         }
+
+        // Sync whichever zone-coverage target was selected.
+        setPointIntent(
+            pState,
+            pState.targetX,
+            pState.targetY,
+            0.5
+        );
+
     } else if (assignment === 'spy_QB') {
         const target = ballCarrierState && ballCarrierState.y < LOS + 1
             ? ballCarrierState
@@ -1447,11 +1551,25 @@ export function executeAssignment(pState, assignment, offenseStates, LOS, playSt
         if (target) {
             pState.targetX = target.x;
             pState.targetY = Math.max(LOS + 3.0, pState.y);
+
+            setPointIntent(
+                pState,
+                pState.targetX,
+                pState.targetY,
+                0.5
+            );
         }
     } else if (assignment?.includes('rush') || assignment?.includes('blitz') || assignment?.includes('run_gap')) {
         if (playState.handoffOccurred && ballCarrierState) {
             pState.targetX = ballCarrierState.x;
             pState.targetY = ballCarrierState.y;
+
+            setPointIntent(
+                pState,
+                pState.targetX,
+                pState.targetY,
+                0.5
+            );
         } else {
             const qb = offenseStates.find(p => p.slot.startsWith('QB'));
             if (qb) {
@@ -1469,12 +1587,10 @@ export function executeAssignment(pState, assignment, offenseStates, LOS, playSt
 
                     setTrackIntent(pState, { id: qb.id, x: qb.x + (escapeAngle * rushWidth), y: rushDepth }, 0, 0.5);
                 } else {
-                    pState.targetX = qb.x;
-                    pState.targetY = qb.y + 0.5;
+                    setPointIntent(pState, qb.x, qb.y + 0.5, 0.5);
                 }
             } else {
-                pState.targetX = pState.x;
-                pState.targetY = LOS - 5;
+                setPointIntent(pState, pState.x, LOS - 5, 0.5);
             }
         }
     }
