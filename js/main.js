@@ -931,7 +931,7 @@ window.app = {
         }
     },
     renderFAPool: () => {
-        if (gameState) UI.renderOffseasonFAPool(gameState);
+        if (gameState) renderOffseasonFAPool(gameState);
     },
     openBidModal: (playerId) => {
         const p = Game.getPlayer(playerId);
@@ -939,7 +939,7 @@ window.app = {
 
         const isOffseason = document.getElementById('offseason-fa-screen')?.classList.contains('hidden') === false;
         const totalTokens = gameState?.playerTeam?.socialProfile?.favorTokens || 0;
-        const pendingBids = isOffseason ? (UI.getOffseasonFABids() || []) : [];
+        const pendingBids = isOffseason ? (getOffseasonFABids() || []) : [];
         const existingBid = pendingBids.find(b => b.playerId === p.id);
 
         const committedOtherTokens = pendingBids
@@ -1034,14 +1034,14 @@ window.app = {
             </div>
         `;
 
-        UI.showModal(`Recruit Prospect: ${p.name}`, modalHtml, () => {
+        showModal(`Recruit Prospect: ${p.name}`, modalHtml, () => {
             const role = document.getElementById('bid-role')?.value || 'STARTER';
             const promiseTouches = document.getElementById('bid-touches')?.value || 'NORMAL';
             const tokensOffered = parseInt(document.getElementById('bid-tokens')?.value || '0', 10);
 
             if (isOffseason) {
-                UI.addOffseasonFABid({ playerId: p.id, offer: { role, promiseTouches, tokensOffered } });
-                UI.renderOffseasonFAScreen(gameState);
+                addOffseasonFABid({ playerId: p.id, offer: { role, promiseTouches, tokensOffered } });
+                renderOffseasonFAScreen(gameState);
             } else {
                 const evalResult = Game.evaluatePlayerNegotiation(p, gameState.playerTeam, { role, promiseTouches, tokensOffered });
                 const isInstant = Game.checkInstantCommit(p, gameState.playerTeam, evalResult, { role, promiseTouches, tokensOffered });
@@ -1056,14 +1056,14 @@ window.app = {
                 } else {
                     alert(`✋ Offer Declined: ${evalResult.reasons.join('\n• ')}`);
                 }
-                UI.switchTab('free-agents', gameState);
+                switchTab('free-agents', gameState);
             }
         }, existingBid ? "Update Offer" : "Submit Offer");
     },
 
     cancelOffseasonBid: (idx) => {
-        UI.removeOffseasonFABid(idx);
-        UI.renderOffseasonFAScreen(gameState);
+        removeOffseasonFABid(idx);
+        renderOffseasonFAScreen(gameState);
     },
 
     openPositionDialog: (playerId) => {
@@ -1149,8 +1149,8 @@ window.app = {
     },
 
     advanceOffseasonFADay: () => {
-        const currentDay = UI.getOffseasonFADay();
-        const userBids = UI.getOffseasonFABids();
+        const currentDay = getOffseasonFADay();
+        const userBids = getOffseasonFABids();
         const result = Game.processOffseasonFADay(gameState, userBids);
         const { daySignings, userBidResults, rejectedBids } = result;
 
@@ -1206,13 +1206,13 @@ window.app = {
                     </div>
                 </div>
             `;
-            UI.showModal("Free Agency Concluded", recapHtml, () => {
+            showModal("Free Agency Concluded", recapHtml, () => {
                 window.app.finishOffseasonFAMinigame();
             }, "Proceed to Kickoff");
         } else {
-            UI.incrementOffseasonFADay();
-            UI.clearOffseasonFABids();
-            UI.renderOffseasonFAScreen(gameState);
+            incrementOffseasonFADay();
+            clearOffseasonFABids();
+            renderOffseasonFAScreen(gameState);
         }
     },
 
@@ -1371,26 +1371,26 @@ window.app = {
     setCaptain: handleSetCaptain,
     handleAdvanceWeek,
     handleGoToNextDraft,
-    skipSim: () => UI.skipLiveGameSim(),
-    setSpeed: (s) => UI.setSimSpeed(s),
+    skipSim: () => skipLiveGameSim(),
+    setSpeed: (s) => setSimSpeed(s),
     switchTab: (tabId) => {
         gameState = Game.getGameState();
-        if (gameState) UI.switchTab(tabId, gameState);
+        if (gameState) switchTab(tabId, gameState);
     },
     autoFillRoster: () => {
         gameState = Game.getGameState();
         if (!gameState?.playerTeam) return;
         const count = Game.autoFillTeamWalkOns(gameState.playerTeam, 14);
         Game.saveGameState(activeSaveKey);
-        UI.renderDashboard(gameState);
+        renderDashboard(gameState);
         alert(`Signed ${count} walk-on prospect(s) from the park! Roster now at ${gameState.playerTeam.roster.length} players.`);
     },
     cutPlayer: (id) => {
         if (confirm("Cut this player?")) {
             Game.playerCut(id);
-            UI.hideModal();
+            hideModal();
             gameState = Game.getGameState();
-            UI.switchTab('my-team', gameState);
+            switchTab('my-team', gameState);
         }
     }
 };
