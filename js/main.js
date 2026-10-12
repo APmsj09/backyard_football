@@ -1589,13 +1589,18 @@ function main() {
         if (gameState) UI.switchTab('free-agents', gameState);
     });
     document.getElementById('stats-filter-team')?.addEventListener('change', () => {
-        if (gameState) UI.switchTab('player-stats', gameState);
+        gameState = Game.getGameState();
+        if (gameState) UI.renderPlayerStatsTab(gameState);
     });
+
     document.getElementById('stats-filter-league')?.addEventListener('change', () => {
-        if (gameState) UI.switchTab('player-stats', gameState);
+        gameState = Game.getGameState();
+        if (gameState) UI.renderPlayerStatsTab(gameState);
     });
+
     document.getElementById('stats-sort')?.addEventListener('change', () => {
-        if (gameState) UI.switchTab('player-stats', gameState);
+        gameState = Game.getGameState();
+        if (gameState) UI.renderPlayerStatsTab(gameState);
     });
 
     // Inbox Messages
