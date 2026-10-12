@@ -357,17 +357,20 @@ export function checkFumbleRecovery(playState, gameLog, tackleRange) {
 export function resolveBattle(powerA, powerB, battle) {
     const BASE_DIFF = powerA - powerB;
     const roll = getRandomInt(-10, 10);
+    const finalDiff = (BASE_DIFF + roll) / 350;
 
-    // Strength and technique differences should resolve within a play,
-    // not require hundreds of ticks of accumulated advantage.
-    const finalDiff = (BASE_DIFF + roll) / 150;
+    // Initialize once; do not reset the score on every tick.
+    if (!Number.isFinite(battle.battleScore)) {
+        battle.battleScore = 0;
+    }
+
     battle.battleScore += finalDiff;
 
-    const WIN_SCORE = 4;
+    const WIN_SCORE = 15;
 
-    if (battle.battleScore > WIN_SCORE) {
+    if (battle.battleScore >= WIN_SCORE) {
         battle.status = 'win_A';
-    } else if (battle.battleScore < -WIN_SCORE) {
+    } else if (battle.battleScore <= -WIN_SCORE) {
         battle.status = 'win_B';
     } else {
         battle.status = 'ongoing';
@@ -432,12 +435,12 @@ export function resolveOngoingBlocks(playState, gameLog, offenseStates = [], def
                 /pull|lead/i.test(blocker.assignment || '')
             );
 
-        if (isPassBlock && ticksInBlock < 30) {
-            // Pass blockers anchor against immediate collapse without auto-pancaking
-            blockPower *= 1.25;
-        } else if (isRunBlock && ticksInBlock < 25) {
-            // Run blockers fire off the ball with an initial surge to drive defenders back and open lanes
-            blockPower *= 1.35;
+        if (isPassBlock && ticksInBlock < 20) {
+            // Modest initial anchor advantage; defenders can still win the rep.
+            blockPower *= 1.08;
+        } else if (isRunBlock && ticksInBlock < 12) {
+            // Short, modest run-block surge instead of prolonged offensive dominance.
+            blockPower *= 1.10;
         }
 
         if (ticksInBlock > 60) {
@@ -559,15 +562,30 @@ export function resolveOngoingBlocks(playState, gameLog, offenseStates = [], def
             defender.isBlocked = false; defender.blockedBy = null; defender.isEngaged = false;
             defender.action = 'pursuit';
             battlesToRemove.push(index);
-        } else if (battle.status === 'win_A') {
-            const dur = playState.tick - battle.startTick;
-            logPlayDebug('PANCAKE_BLOCK', `${blocker.name} flattened ${defender.name}`, { durationTicks: dur });
-            defender.stunnedTicks = 40;
-            blocker.engagedWith = null; blocker.isEngaged = false;
-            defender.isBlocked = false; defender.blockedBy = null; defender.isEngaged = false;
-            battlesToRemove.push(index);
-        }
-    });
+            } else if (battle.status === 'win_A') {
+                const dur = playState.tick - battle.startTick;
+                logPlayDebug('PANCAKE_BLOCK', `${blocker.name} flattened ${defender.name}`, {
+                    durationTicks: dur
+                });
+
+                // A pancake is a major win, but it should not erase a defender
+                // for most of the remaining play.
+                defender.stunnedTicks = 8 + Math.floor(
+                    Math.random() * 5
+                ); // 8–12 ticks
+    
+                blocker.engagedWith = null;
+                blocker.isEngaged = false;
+
+                defender.isBlocked = false;
+                defender.blockedBy = null;
+                defender.isEngaged = false;
+
+                // Give the defender a chance to recover and pursue.
+                defender.action = 'pursuit';
+                battlesToRemove.push(index);
+            }
+   });
 
     for (let i = battlesToRemove.length - 1; i >= 0; i--) {
         playState.blockBattles.splice(battlesToRemove[i], 1);
