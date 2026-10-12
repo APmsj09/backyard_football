@@ -284,9 +284,12 @@ export function assignPlayerToSlot(team, playerId, slot, side) {
         return true;
     }
 
-    // 2. ASSIGN SLOT: Lock assignment and promote player in group
-    team.slotOverrides[side][slot] = playerId;
-    team.depthChart[side][slot] = playerId;
+    // 2. ASSIGN SLOT: Validate before locking the assignment.
+    if (!['offense', 'defense'].includes(side)) return false;
+
+    if (!Array.isArray(team.roster) || !team.roster.includes(playerId)) {
+        return false;
+    }
 
     let posKey = slot.replace(/\d+/g, '');
     if (['OT', 'OG', 'C'].includes(posKey)) posKey = 'OL';
@@ -294,6 +297,16 @@ export function assignPlayerToSlot(team, playerId, slot, side) {
     if (['CB', 'S', 'FS', 'SS'].includes(posKey)) posKey = 'DB';
     if (['DE', 'DT', 'NT'].includes(posKey)) posKey = 'DL';
 
+    const player = getPlayer(playerId);
+
+    if (!isPlayerViableForPosition(player, posKey)) {
+        return false;
+    }
+
+    // Lock the assignment only after validation succeeds.
+    team.slotOverrides[side][slot] = playerId;
+    team.depthChart[side][slot] = playerId;
+    
     if (!team.depthOrder) team.depthOrder = {};
     if (!team.depthOrder[posKey]) team.depthOrder[posKey] = [];
 
