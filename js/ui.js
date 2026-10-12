@@ -3708,7 +3708,20 @@ function drawPlayDiagram(canvas, playKey, side, team) {
 
     if (side === 'offense') {
         const play = offensivePlaybook[playKey] || {};
-        const formKey = team?.formations?.offense || 'Balanced';
+        
+        // 1. CHOOSE THE PLAY'S INTENDED FORMATION:
+        // Prioritize compatible formation if defined (e.g. Trips, Spread), otherwise fallback to team's scheme
+        let formKey = team?.formations?.offense || 'Balanced';
+        if (play.compatibleFormations && play.compatibleFormations.length > 0) {
+            formKey = play.compatibleFormations.includes(formKey) ? formKey : play.compatibleFormations[0];
+        } else if (playKey.includes('Trips')) {
+            formKey = 'Trips';
+        } else if (playKey.includes('Spread')) {
+            formKey = 'Spread';
+        } else if (playKey.includes('Power')) {
+            formKey = 'Power';
+        }
+
         const form = offenseFormations[formKey] || offenseFormations['Balanced'];
         const coords = form.coordinates || {};
         const mapping = form.mapping || {};
@@ -3724,7 +3737,7 @@ function drawPlayDiagram(canvas, playKey, side, team) {
             'H': mapping.H || 'WR3'
         };
 
-        // Draw Offensive Linemen
+        // Draw Offensive Linemen with proper pulling & screen release diagrams
         ['OL1', 'OL2', 'OL3'].forEach(olSlot => {
             const pt = coords[olSlot] || [0, -1.5];
             const px = toX(pt[0]);
@@ -3733,13 +3746,22 @@ function drawPlayDiagram(canvas, playKey, side, team) {
             ctx.fillStyle = '#64748b';
             ctx.fillRect(px - 4, py - 4, 8, 8);
 
-            const assign = assignments.OL || assignments[olSlot] || 'pass_block';
-            if (assign.includes('pull_right')) {
-                drawArrow(px, py, px + 28, toY(2), '#fbbf24');
-            } else if (assign.includes('pull_left')) {
-                drawArrow(px, py, px - 28, toY(2), '#fbbf24');
+            const assign = assignments[olSlot] || assignments.OL || 'pass_block';
+
+            if (assign.includes('pull_right') || assign.includes('pull_right_wide')) {
+                drawArrow(px, py, px + 36, toY(2.5), '#fbbf24');
+            } else if (assign.includes('pull_left') || assign.includes('pull_left_wide')) {
+                drawArrow(px, py, px - 36, toY(2.5), '#fbbf24');
+            } else if (assign.includes('screen_block') || assign.includes('Wall_Alley_Left')) {
+                // Linemen slip out to the flat to build a screen wall
+                drawArrow(px, py, px - 45, toY(4.5), '#38bdf8', true);
+            } else if (assign.includes('Wall_Alley_Right')) {
+                drawArrow(px, py, px + 45, toY(4.5), '#38bdf8', true);
+            } else if (assign.includes('run_block')) {
+                // Downhill run block arrow
+                drawArrow(px, py, px, toY(2.0), '#f97316');
             } else {
-                // T-Bar block line
+                // Standard Pass Block T-Bar
                 ctx.strokeStyle = '#94a3b8';
                 ctx.lineWidth = 1.5;
                 ctx.beginPath();
