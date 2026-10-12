@@ -357,10 +357,14 @@ export function checkFumbleRecovery(playState, gameLog, tackleRange) {
 export function resolveBattle(powerA, powerB, battle) {
     const BASE_DIFF = powerA - powerB;
     const roll = getRandomInt(-10, 10);
-    const finalDiff = (BASE_DIFF + roll) / 350;
+
+    // Strength and technique differences should resolve within a play,
+    // not require hundreds of ticks of accumulated advantage.
+    const finalDiff = (BASE_DIFF + roll) / 150;
     battle.battleScore += finalDiff;
 
-    const WIN_SCORE = 15;
+    const WIN_SCORE = 4;
+
     if (battle.battleScore > WIN_SCORE) {
         battle.status = 'win_A';
     } else if (battle.battleScore < -WIN_SCORE) {
@@ -368,6 +372,7 @@ export function resolveBattle(powerA, powerB, battle) {
     } else {
         battle.status = 'ongoing';
     }
+
     return finalDiff;
 }
 
@@ -420,7 +425,12 @@ export function resolveOngoingBlocks(playState, gameLog, offenseStates = [], def
 
         const ticksInBlock = playState.tick - battle.startTick;
         const isPassBlock = blocker.action === 'pass_block';
-        const isRunBlock = blocker.action === 'run_block';
+        const isRunBlock =
+            playState.type === 'run' &&
+            (
+                blocker.action === 'run_block' ||
+                /pull|lead/i.test(blocker.assignment || '')
+            );
 
         if (isPassBlock && ticksInBlock < 30) {
             // Pass blockers anchor against immediate collapse without auto-pancaking
@@ -507,13 +517,27 @@ export function resolveOngoingBlocks(playState, gameLog, offenseStates = [], def
                 const uY = dy / dist;
 
                 if (pushAmount > 0) {
-                    // Blocker is WINNING (driving defender backward toward defensive side)
-                    defender.x += uX * pushMagnitude;
-                    defender.y += uY * pushMagnitude;
-                    blocker.x += uX * pushMagnitude * 0.8;
-                    blocker.y += uY * pushMagnitude * 0.8;
+                    if (isRunBlock && Number.isFinite(blocker.blockLaneX)) {
+                        // Winning run blocks widen the intended lane by sealing
+                        // defenders laterally away from it.
+                        const outsideDirection =
+                            defender.x < blocker.blockLaneX ? -1 : 1;
+
+                        defender.x += outsideDirection * pushMagnitude * 1.25;
+                        defender.y += pushMagnitude * 0.45;
+
+                        // The blocker follows slightly instead of abandoning contact.
+                        blocker.x += outsideDirection * pushMagnitude * 0.25;
+                        blocker.y += pushMagnitude * 0.15;
+                    } else {
+                        // Keep existing pass-block and non-lane-block behavior.
+                        defender.x += uX * pushMagnitude;
+                        defender.y += uY * pushMagnitude;
+                        blocker.x += uX * pushMagnitude * 0.8;
+                        blocker.y += uY * pushMagnitude * 0.8;
+                    }
                 } else if (pushAmount < 0) {
-                    // Defender is WINNING (shoving blocker backward into offensive backfield)
+                    // Defender wins: drive the blocker into the backfield.
                     blocker.x -= uX * pushMagnitude;
                     blocker.y -= uY * pushMagnitude;
                     defender.x -= uX * pushMagnitude * 0.8;
