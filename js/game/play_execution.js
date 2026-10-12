@@ -1247,8 +1247,12 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
     // --- SINGLE AUTHORITATIVE PASS FOR ALL PLAYERS (Offense & Defense) ---
     playState.activePlayers.forEach(pState => {
         if (pState.stunnedTicks <= 0 && !pState.isBlocked && !pState.isEngaged) {
-            pState.targetX = Math.max(1, Math.min(52.3, pState.targetX));
-            pState.targetY = Math.max(1, Math.min(119.0, pState.targetY));
+            // Safely fallback to current coordinates if target is undefined to prevent NaN poisoning
+            const safeTargetX = pState.targetX ?? pState.x;
+            const safeTargetY = pState.targetY ?? pState.y;
+
+            pState.targetX = Math.max(1, Math.min(52.3, safeTargetX));
+            pState.targetY = Math.max(1, Math.min(119.0, safeTargetY));
             resolveMovementIntent(pState);
         }
     });
