@@ -925,6 +925,11 @@ window.app = {
     startNewGame,
     handleLoadGame,
     handleLoadTestRoster,
+    renderSocialNetworkTab: () => {
+        if (gameState) {
+            renderSocialNetworkTab(gameState);
+        }
+    },
     renderFAPool: () => {
         if (gameState) UI.renderOffseasonFAPool(gameState);
     },
@@ -1414,7 +1419,7 @@ function main() {
             if (gameState) {
                 if (btn.dataset.subTab === 'staff') UI.renderStaffTab(gameState);
                 if (btn.dataset.subTab === 'finances') window.app.renderStoreTab(gameState);
-                if (btn.dataset.subTab === 'social') UI.renderSocialNetworkTab(gameState);
+                if (btn.dataset.subTab === 'social') renderSocialNetworkTab(gameState);
             }
         });
     });
