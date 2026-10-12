@@ -931,7 +931,7 @@ window.app = {
         }
     },
     renderFAPool: () => {
-        if (gameState) renderOffseasonFAPool(gameState);
+        if (gameState) UI.renderOffseasonFAPool(gameState);
     },
     openBidModal: (playerId) => {
         const p = Game.getPlayer(playerId);
@@ -1034,17 +1034,14 @@ window.app = {
             </div>
         `;
 
-        showModal(`Recruit Prospect: ${p.name}`, modalHtml, () => {
+        UI.showModal(`Recruit Prospect: ${p.name}`, modalHtml, () => {
             const role = document.getElementById('bid-role')?.value || 'STARTER';
             const promiseTouches = document.getElementById('bid-touches')?.value || 'NORMAL';
             const tokensOffered = parseInt(document.getElementById('bid-tokens')?.value || '0', 10);
 
             if (isOffseason) {
-                UI.addOffseasonFABid({
-                    playerId: p.id,
-                    offer: { role, promiseTouches, tokensOffered }
-                });
-                renderOffseasonFAScreen(gameState);
+                UI.addOffseasonFABid({ playerId: p.id, offer: { role, promiseTouches, tokensOffered } });
+                UI.renderOffseasonFAScreen(gameState);
             } else {
                 const evalResult = Game.evaluatePlayerNegotiation(p, gameState.playerTeam, { role, promiseTouches, tokensOffered });
                 const isInstant = Game.checkInstantCommit(p, gameState.playerTeam, evalResult, { role, promiseTouches, tokensOffered });
@@ -1066,7 +1063,7 @@ window.app = {
 
     cancelOffseasonBid: (idx) => {
         UI.removeOffseasonFABid(idx);
-        renderOffseasonFAScreen(gameState);
+        UI.renderOffseasonFAScreen(gameState);
     },
 
     openPositionDialog: (playerId) => {
