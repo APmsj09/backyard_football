@@ -66,6 +66,7 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
     const dx = targetX - pState.x;
     const dy = targetY - pState.y;
     const distToTarget = Math.sqrt(dx * dx + dy * dy);
+    const arrivalRadius = pState.arrivalRadius || 0.30;
     
      // A settled player should remain stopped until their target changes.
     if (
