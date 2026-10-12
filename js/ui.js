@@ -2693,12 +2693,26 @@ export function renderHallOfFameTab(gameState) {
         elements.hallOfFameList.innerHTML = `<p class="text-gray-400 text-sm text-center py-12">Hall of Fame is empty.</p>`;
         return;
     }
-    elements.hallOfFameList.innerHTML = gameState.hallOfFame.map(p => `
-        <div class="bg-white p-3 rounded-lg border border-amber-200 shadow-sm mb-2">
-            <h4 class="font-bold text-amber-800">${p.name}</h4>
-            <p class="text-xs text-gray-600">Total TDs: ${p.careerStats?.touchdowns || 0}</p>
-        </div>
-    `).join('');
+    elements.hallOfFameList.innerHTML = gameState.hallOfFame.map(p => {
+        const stats = p.careerStats || {};
+
+        return `
+            <div class="bg-white p-3 rounded-lg border border-amber-200 shadow-sm mb-2">
+                <h4 class="font-bold text-amber-800">${p.name}</h4>
+
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-2 mt-2 text-xs text-gray-600">
+                    <span>TDs: <b>${stats.touchdowns || 0}</b></span>
+                    <span>Pass Yds: <b>${stats.passYards || 0}</b></span>
+                    <span>Rush Yds: <b>${stats.rushYards || 0}</b></span>
+                    <span>Rec Yds: <b>${stats.recYards || 0}</b></span>
+                    <span>Tackles: <b>${stats.tackles || 0}</b></span>
+                    <span>Sacks: <b>${stats.sacks || 0}</b></span>
+                    <span>INTs: <b>${stats.interceptions || 0}</b></span>
+                    <span>Seasons: <b>${stats.seasonsPlayed || 0}</b></span>
+                </div>
+            </div>
+        `;
+    }).join('');
 }
 
 export function renderHistoryTab(gameState) {
@@ -3507,10 +3521,28 @@ export function renderLiveBoxScore(activeGame) {
 
     const renderTeamStats = (team, container) => {
         const players = getUIRosterObjects(team);
-        const passers = players.filter(p => (p.gameStats?.passAttempts || 0) > 0);
-        const rushers = players.filter(p => (p.gameStats?.rushAttempts || 0) > 0);
-        const receivers = players.filter(p => (p.gameStats?.receptions || 0) > 0 || (p.gameStats?.targets || 0) > 0);
-        const tacklers = players.filter(p => (p.gameStats?.tackles || 0) > 0 || (p.gameStats?.sacks || 0) > 0);
+        const passers = players.filter(
+            p => (p.gameStats?.passAttempts || 0) > 0
+        );
+        const rushers = players.filter(
+            p => (p.gameStats?.rushAttempts || 0) > 0
+        );
+        const receivers = players.filter(p =>
+            (p.gameStats?.receptions || 0) > 0 ||
+            (p.gameStats?.targets || 0) > 0 ||
+            (p.gameStats?.drops || 0) > 0
+        );
+        const tacklers = players.filter(p =>
+            (p.gameStats?.tackles || 0) > 0 ||
+            (p.gameStats?.sacks || 0) > 0
+        );
+        const turnoverPlayers = players.filter(p =>
+            (p.gameStats?.interceptions || 0) > 0 ||
+            (p.gameStats?.interceptionsThrown || 0) > 0 ||
+            (p.gameStats?.fumbles || 0) > 0 ||
+            (p.gameStats?.fumblesLost || 0) > 0 ||
+            (p.gameStats?.fumblesRecovered || 0) > 0
+        );
 
         let html = `
             <div class="font-black text-xs uppercase tracking-wider mb-2 text-slate-200 border-b border-slate-700 pb-1">
@@ -3522,7 +3554,10 @@ export function renderLiveBoxScore(activeGame) {
         if (passers.length > 0) {
             html += `<div><span class="text-slate-400 font-sans font-bold text-[10px] uppercase block">Passing</span>`;
             passers.forEach(p => {
-                html += `<div class="flex justify-between"><span>${p.name.split(' ')[0]}</span><span>${p.gameStats.passCompletions}/${p.gameStats.passAttempts}, ${p.gameStats.passYards}y, ${p.gameStats.touchdowns || 0}TD</span></div>`;
+                html += `<div class="flex justify-between gap-2">
+                    <span>${p.name.split(' ')[0]}</span>
+                    <span>${p.gameStats.passCompletions || 0}/${p.gameStats.passAttempts || 0}, ${p.gameStats.passYards || 0}y, ${p.gameStats.touchdowns || 0}TD, ${p.gameStats.interceptionsThrown || 0}INT</span>
+                </div>`;
             });
             html += `</div>`;
         }
@@ -3530,7 +3565,7 @@ export function renderLiveBoxScore(activeGame) {
         if (rushers.length > 0) {
             html += `<div><span class="text-slate-400 font-sans font-bold text-[10px] uppercase block">Rushing</span>`;
             rushers.forEach(p => {
-                html += `<div class="flex justify-between"><span>${p.name.split(' ')[0]}</span><span>${p.gameStats.rushAttempts} car, ${p.gameStats.rushYards}y</span></div>`;
+                html += `<div class="flex justify-between gap-2"><span>${p.name.split(' ')[0]}</span><span>${p.gameStats.rushAttempts || 0} car, ${p.gameStats.rushYards || 0}y</span></div>`;
             });
             html += `</div>`;
         }
@@ -3538,7 +3573,10 @@ export function renderLiveBoxScore(activeGame) {
         if (receivers.length > 0) {
             html += `<div><span class="text-slate-400 font-sans font-bold text-[10px] uppercase block">Receiving</span>`;
             receivers.forEach(p => {
-                html += `<div class="flex justify-between"><span>${p.name.split(' ')[0]}</span><span>${p.gameStats.receptions} rec, ${p.gameStats.recYards}y</span></div>`;
+                html += `<div class="flex justify-between gap-2">
+                    <span>${p.name.split(' ')[0]}</span>
+                    <span>${p.gameStats.receptions || 0} rec/${p.gameStats.targets || 0} tgt, ${p.gameStats.recYards || 0}y, ${p.gameStats.drops || 0} drop</span>
+                </div>`;
             });
             html += `</div>`;
         }
@@ -3546,8 +3584,35 @@ export function renderLiveBoxScore(activeGame) {
         if (tacklers.length > 0) {
             html += `<div><span class="text-slate-400 font-sans font-bold text-[10px] uppercase block">Defense</span>`;
             tacklers.forEach(p => {
-                html += `<div class="flex justify-between"><span>${p.name.split(' ')[0]}</span><span>${p.gameStats.tackles || 0} tkl, ${p.gameStats.sacks || 0} sck</span></div>`;
+                html += `<div class="flex justify-between gap-2"><span>${p.name.split(' ')[0]}</span><span>${p.gameStats.tackles || 0} tkl, ${p.gameStats.sacks || 0} sck</span></div>`;
             });
+            html += `</div>`;
+        }
+
+        if (turnoverPlayers.length > 0) {
+            html += `
+                <div>
+                    <span class="text-slate-400 font-sans font-bold text-[10px] uppercase block">
+                        Turnovers
+                    </span>
+            `;
+
+            turnoverPlayers.forEach(p => {
+                const stats = p.gameStats || {};
+
+                html += `
+                    <div class="flex justify-between gap-2">
+                        <span>${p.name.split(' ')[0]}</span>
+                        <span>
+                            ${stats.interceptions || 0} INT,
+                            ${stats.fumbles || 0} FUM
+                            (${stats.fumblesLost || 0} lost),
+                            ${stats.fumblesRecovered || 0} FR
+                        </span>
+                    </div>
+                `;
+            });
+
             html += `</div>`;
         }
 
