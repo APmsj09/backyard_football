@@ -1079,6 +1079,12 @@ let offseasonFADay = 1;
 export function startOffseasonFAMinigame(gameState) {
     offseasonFABids = [];
     offseasonFADay = 1;
+
+    if (gameState) {
+        gameState._faDay = 1;
+        gameState._activeFaMarket = new Map();
+    }
+
     Game.clearPlayerMarketCache?.(gameState);
     showScreen('offseason-fa-screen');
     renderOffseasonFAScreen(gameState);
