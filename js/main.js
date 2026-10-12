@@ -1056,7 +1056,7 @@ window.app = {
                 } else {
                     alert(`✋ Offer Declined: ${evalResult.reasons.join('\n• ')}`);
                 }
-                switchTab('free-agents', gameState);
+                UI.switchTab('free-agents', gameState);
             }
         }, existingBid ? "Update Offer" : "Submit Offer");
     },
@@ -1375,7 +1375,7 @@ window.app = {
     setSpeed: (s) => setSimSpeed(s),
     switchTab: (tabId) => {
         gameState = Game.getGameState();
-        if (gameState) switchTab(tabId, gameState);
+        if (gameState) UI.switchTab(tabId, gameState);
     },
     autoFillRoster: () => {
         gameState = Game.getGameState();
