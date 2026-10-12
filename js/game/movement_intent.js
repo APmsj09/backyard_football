@@ -28,17 +28,46 @@ export function setPointIntent(pState, x, y, arrivalRadius = 0.30) {
     intent.isExplicit = true;
 }
 
-export function setHoldIntent(pState, anchorX = null, anchorY = null, arrivalRadius = 0.25) {
+export function setHoldIntent(
+    pState,
+    anchorX = null,
+    anchorY = null,
+    arrivalRadius = 0.25
+) {
     if (!pState._intent) initMovementIntent(pState);
+
     const intent = pState._intent;
-    if (intent.mode === 'HOLD' && intent.settled && anchorX === null) return;
+
+    if (
+        intent.mode === 'HOLD' &&
+        intent.settled &&
+        anchorX === null &&
+        anchorY === null
+    ) {
+        return;
+    }
+
+    const nextAnchorX = anchorX !== null ? anchorX : pState.x;
+    const nextAnchorY = anchorY !== null ? anchorY : pState.y;
+
+    const anchorChanged =
+        intent.mode !== 'HOLD' ||
+        Math.hypot(
+            nextAnchorX - intent.anchorX,
+            nextAnchorY - intent.anchorY
+        ) > 0.05;
 
     intent.mode = 'HOLD';
-    intent.anchorX = anchorX !== null ? anchorX : pState.x;
-    intent.anchorY = anchorY !== null ? anchorY : pState.y;
-    intent.targetX = intent.anchorX;
-    intent.targetY = intent.anchorY;
+    intent.anchorX = nextAnchorX;
+    intent.anchorY = nextAnchorY;
+    intent.targetX = nextAnchorX;
+    intent.targetY = nextAnchorY;
     intent.arrivalRadius = arrivalRadius;
+
+    if (anchorChanged) {
+        intent.settled = false;
+    }
+
     intent.isExplicit = true;
 }
 
