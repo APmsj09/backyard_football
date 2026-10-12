@@ -7,8 +7,18 @@ import { calculateOverall, positionOverallWeights } from './game/player.js';
 export function computeStarterAssignments(roster) {
     if (!Array.isArray(roster)) return {};
 
-    // Filter out temporary/injured players as the UI expects
-    let availablePlayers = roster.filter(p => p && p.attributes && p.status?.type !== 'temporary' && p.status?.duration === 0);
+    // Exclude temporary or unavailable players.
+    // Older player objects without status metadata remain eligible.
+    let availablePlayers = roster.filter(p => {
+        if (!p?.attributes) return false;
+
+        const status = p.status;
+
+        if (!status) return true;
+        if (status.type === 'temporary') return false;
+
+        return (status.duration ?? 0) === 0;
+    });
 
     const playersByBestPos = {};
     availablePlayers.forEach(p => {
