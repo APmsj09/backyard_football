@@ -953,7 +953,7 @@ export function switchTab(tabId, gameState) {
 
     switch (tabId) {
         case 'my-team': 
-            if (gameState.playerTeam) renderPlayerRoster(gameState.playerTeam); 
+            if (gameState.playerTeam) renderMyTeamTab(gameState); 
             break;
         case 'depth-chart': 
             if (gameState.playerTeam) {
