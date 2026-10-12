@@ -2277,20 +2277,35 @@ window.app_openSlotModal = function (side, slotId) {
     const currentId = currentChart[slotId];
 
     let posKey = slotId.replace(/\d+/g, '');
-    if (['OT', 'OG', 'C'].includes(posKey)) posKey = 'OL';
-    if (['DE', 'DT', 'NT'].includes(posKey)) posKey = 'DL';
-    if (['CB', 'S'].includes(posKey)) posKey = 'DB';
 
-    const candidates = roster.filter(p => p && (!Object.values(currentChart).includes(p.id) || p.id === currentId));
+    if (['OT', 'OG', 'C'].includes(posKey)) posKey = 'OL';
+    if (posKey === 'FB') posKey = 'RB';
+    if (['DE', 'DT', 'NT'].includes(posKey)) posKey = 'DL';
+    if (['CB', 'S', 'FS', 'SS'].includes(posKey)) posKey = 'DB';
+
+    const candidates = roster.filter(p =>
+        p &&
+        (p.id === currentId || Game.isPlayerViableForPosition(p, posKey)) &&
+        (!Object.values(currentChart).includes(p.id) || p.id === currentId)
+    );
     candidates.sort((a, b) => calculateOverall(b, posKey) - calculateOverall(a, posKey));
 
     window.app_assignSlot = function (s, slot, pid) {
-        assignPlayerToSlot(gs.playerTeam, pid, slot, s);
+        const assigned = assignPlayerToSlot(gs.playerTeam, pid, slot, s);
+
+        if (!assigned && pid) {
+            alert(
+                'This player is not eligible for that position. ' +
+                'Use the position-change process first.'
+            );
+            return;
+        }
+
         saveGameState();
         renderDepthChartTab(gs);
         hideModal();
     };
-
+    
     let modalHtml = `
     <div class="mb-3 p-2 bg-slate-100 rounded text-xs text-slate-600 flex justify-between items-center">
         <span>Target: <b class="text-slate-900">${side.toUpperCase()} ${slotId}</b> (${posKey})</span>
