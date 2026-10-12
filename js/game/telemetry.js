@@ -12,10 +12,10 @@ export function initPlayTelemetry(context, playState, offPlayKey, defPlayKey) {
     const playData = {
         id: `Q${context.quarter || 1}_${context.down || 1}and${context.yardsToGo || 10}_${Date.now()}`,
         meta: {
-            quarter: context.quarter || 1,
-            down: context.down || 1,
-            yardsToGo: context.yardsToGo || 10,
-            ballOn: context.ballOn || 35,
+            quarter: context.quarter ?? 1,
+            down: context.down ?? 1,
+            yardsToGo: context.yardsToGo ?? 10,
+            ballOn: context.ballOn ?? 35,
             hash: context.ballHash || 'M',
             offPlayKey,
             defPlayKey
@@ -65,7 +65,7 @@ export function generatePlayDebugReport() {
         lines.push(`[PLAY ${index + 1} OF ${playHistoryBuffer.length}] ${play.id}`);
         lines.push(`Situation:   Q${m.quarter} | ${m.down} & ${m.yardsToGo} on ${m.ballOn}yd line (Hash: ${m.hash})`);
         lines.push(`Play Calls:  Offense: "${m.offPlayKey}" | Defense: "${m.defPlayKey}"`);
-        lines.push(`Outcome:     Outcome: ${r.outcome || 'N/A'} | Gain: ${r.yards ?? 0}y | Final Ball: ${r.finalBallY ?? 'N/A'}y`);
+        lines.push(`Outcome:     ${r.outcome || 'N/A'} | Gain: ${r.yards ?? 0}y | Final Ball: ${r.finalBallY ?? 'N/A'}y`);
         lines.push(`--------------------------------------------------------------------------------`);
         lines.push("AI DECISION TRACE & MICRO-CALCULATIONS:");
 
