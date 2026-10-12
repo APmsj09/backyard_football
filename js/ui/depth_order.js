@@ -2,6 +2,7 @@ import * as Game from '../game.js';
 import { getGameState, saveGameState, getPlayer } from '../game/state.js';
 import { positionOverallWeights, estimateBestPosition, calculateOverall } from '../game/player.js';
 import { formatHeight } from '../utils.js';
+import { isPlayerViableForPosition } from '../game/depth_chart.js';
 
 let depthOrderSortCol = 'overall';
 let depthOrderSortDir = 'desc';
@@ -256,13 +257,40 @@ export function renderDepthOrderPane(gameState) {
     `;
 
     const autoBtn = pane.querySelector('#auto-reorder-btn');
+
     if (autoBtn) {
         autoBtn.onclick = () => {
-            if (confirm("Auto-set lineup by overall rating?")) {
-                Game.aiSetDepthChart(gameState.playerTeam);
-                saveGameState();
-                document.dispatchEvent(new CustomEvent('refresh-ui'));
+            if (!confirm(
+                'Sort every eligible depth group by overall rating? Manual slot assignments will remain locked.'
+            )) {
+                return;
             }
+
+            const team = gameState.playerTeam;
+
+            Object.keys(team.depthOrder || {}).forEach(pos => {
+                const ids = team.depthOrder[pos] || [];
+
+                team.depthOrder[pos] = ids
+                    .filter(id => {
+                        const player = getPlayer(id);
+
+                        return player &&
+                            isPlayerViableForPosition(player, pos);
+                    })
+                    .sort((idA, idB) => {
+                        const a = getPlayer(idA);
+                        const b = getPlayer(idB);
+
+                        return calculateOverall(b, pos) - calculateOverall(a, pos);
+                    });
+            });
+
+            Game.rebuildDepthChartFromOrder(team);
+            saveGameState();
+
+            renderDepthOrderPane(gameState);
+            document.dispatchEvent(new CustomEvent('refresh-ui'));
         };
     }
     setupDepthOrderDragEvents();
@@ -280,8 +308,15 @@ export function setupDepthOrderDragEvents() {
                 const group = removeBtn.dataset.group;
                 const gs = getGameState();
                 if (gs?.playerTeam?.depthOrder?.[group]) {
-                    gs.playerTeam.depthOrder[group] = gs.playerTeam.depthOrder[group].filter(id => id !== pid);
-                    applyDepthOrderToChart();
+                    const order = gs.playerTeam.depthOrder[group];
+                    const index = order.indexOf(pid);
+
+                    if (index !== -1) {
+                        order.splice(index, 1);
+                        order.push(pid);
+
+                        applyDepthOrderToChart();
+                    }
                 }
             }
         });
@@ -310,16 +345,63 @@ export function setupDepthOrderDragEvents() {
 
         container.ondrop = (e) => {
             e.preventDefault();
+
             const playerId = e.dataTransfer.getData('text/plain');
             const groupKey = container.dataset.group;
+
             if (!playerId || !groupKey) return;
 
             const gs = getGameState();
             if (!gs?.playerTeam?.depthOrder) return;
-            if (!gs.playerTeam.depthOrder[groupKey]) gs.playerTeam.depthOrder[groupKey] = [];
 
-            gs.playerTeam.depthOrder[groupKey] = gs.playerTeam.depthOrder[groupKey].filter(id => id !== playerId);
-            gs.playerTeam.depthOrder[groupKey].unshift(playerId);
+            const player = getPlayer(playerId);
+
+            if (!player || !isPlayerViableForPosition(player, groupKey)) {
+                alert(
+                    `${player?.name || 'That player'} is not eligible for the ${groupKey} depth group.`
+                );
+                return;
+            }
+
+            const targetOrder = gs.playerTeam.depthOrder[groupKey] || [];
+            const targetItem = e.target.closest('.depth-order-item');
+
+            // Dropping a player onto itself should not change their rank.
+            if (targetItem && targetItem.dataset.playerId === playerId) {
+                return;
+            }
+
+            // Default to the bottom if dropped into empty space.
+            let insertAt = targetOrder.length;
+
+            if (targetItem && container.contains(targetItem)) {
+                const targetId = targetItem.dataset.playerId;
+                const targetIndex = targetOrder.indexOf(targetId);
+
+                if (targetIndex >= 0) {
+                    const rect = targetItem.getBoundingClientRect();
+                    const dropBelowMidpoint =
+                        e.clientY > rect.top + rect.height / 2;
+
+                    insertAt = targetIndex + (dropBelowMidpoint ? 1 : 0);
+                }
+            }
+
+            // Remove any existing entry in this group before reinserting.
+            const existingIndex = targetOrder.indexOf(playerId);
+
+            if (existingIndex >= 0) {
+                targetOrder.splice(existingIndex, 1);
+
+                if (existingIndex < insertAt) {
+                    insertAt--;
+                }
+            }
+
+            insertAt = Math.max(0, Math.min(insertAt, targetOrder.length));
+            targetOrder.splice(insertAt, 0, playerId);
+
+            gs.playerTeam.depthOrder[groupKey] = targetOrder;
 
             applyDepthOrderToChart();
         };
