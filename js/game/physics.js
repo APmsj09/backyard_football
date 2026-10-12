@@ -66,7 +66,34 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
     const dx = targetX - pState.x;
     const dy = targetY - pState.y;
     const distToTarget = Math.sqrt(dx * dx + dy * dy);
-    const arrivalRadius = pState.arrivalRadius || 0.30;
+    
+     // A settled player should remain stopped until their target changes.
+    if (
+        (pState.movementMode === 'HOLD' || pState.movementMode === 'POINT') &&
+        pState._intent?.settled
+    ) {
+        const intent = pState._intent;
+
+        const targetChanged = Math.hypot(
+            targetX - intent.targetX,
+            targetY - intent.targetY
+        ) > 0.05;
+
+        if (!targetChanged) {
+            pState.x = targetX;
+            pState.y = targetY;
+            pState.vx = 0;
+            pState.vy = 0;
+            pState.currentSpeedYPS = 0;
+            pState.velocity = { x: 0, y: 0 };
+
+            clampToField(pState);
+            return;
+        }
+
+        // A legacy/direct target change invalidates the old settled state.
+        intent.settled = false;
+    }
 
     // DECISIVE BRAKING FOR FIXED TARGETS (HOLD & POINT)
     if (pState.movementMode === 'HOLD' || pState.movementMode === 'POINT') {
@@ -76,7 +103,7 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
             pState.vy *= 0.40;
 
             // Direct snap to stop when speed has bled off
-            if (distToTarget < 0.16 || (distToTarget < 0.22 && Math.hypot(pState.vx, pState.vy) < 0.35)) {
+            if (Math.hypot(pState.vx, pState.vy) < 0.35) {
                 pState.x = targetX;
                 pState.y = targetY;
                 pState.vx = 0;
@@ -172,8 +199,10 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
     const targetVx = (dx / safeDist) * clampedTargetSpeed;
     const targetVy = (dy / safeDist) * clampedTargetSpeed;
 
-    pState.vx += (targetVx - pState.vx) * accelRate * timeDelta;
-    pState.vy += (targetVy - pState.vy) * accelRate * timeDelta;
+    const steeringAlpha = 1 - Math.exp(-Math.max(0, accelRate) * Math.max(0, timeDelta));
+
+    pState.vx += (targetVx - pState.vx) * steeringAlpha;
+    pState.vy += (targetVy - pState.vy) * steeringAlpha;
 
     // Soft Speed Clamp (Retain slight over-speed from being bumped, but bleed it off)
     const speedAfter = Math.sqrt(pState.vx ** 2 + pState.vy ** 2);
