@@ -35,9 +35,14 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
         const friction = 0.85;
         pState.vx *= friction;
         pState.vy *= friction;
+
         pState.x += pState.vx * timeDelta;
         pState.y += pState.vy * timeDelta;
-        pState.currentSpeedYPS = Math.sqrt(pState.vx ** 2 + pState.vy ** 2);
+
+        pState.currentSpeedYPS = Math.hypot(pState.vx, pState.vy);
+        pState.velocity = { x: pState.vx, y: pState.vy };
+
+        clampToField(pState);
         return;
     }
 
