@@ -1149,8 +1149,8 @@ window.app = {
     },
 
     advanceOffseasonFADay: () => {
-        const currentDay = getOffseasonFADay();
-        const userBids = getOffseasonFABids();
+        const currentDay = UI.getOffseasonFADay();
+        const userBids = UI.getOffseasonFABids();
         const result = Game.processOffseasonFADay(gameState, userBids);
         const { daySignings, userBidResults, rejectedBids } = result;
 
@@ -1206,13 +1206,13 @@ window.app = {
                     </div>
                 </div>
             `;
-            showModal("Free Agency Concluded", recapHtml, () => {
+            UI.showModal("Free Agency Concluded", recapHtml, () => {
                 window.app.finishOffseasonFAMinigame();
             }, "Proceed to Kickoff");
         } else {
-            incrementOffseasonFADay();
-            clearOffseasonFABids();
-            renderOffseasonFAScreen(gameState);
+            UI.incrementOffseasonFADay();
+            UI.clearOffseasonFABids();
+            UI.renderOffseasonFAScreen(gameState);
         }
     },
 
