@@ -953,6 +953,17 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
             score -= 18;
         }
 
+        if (targetDepth > 14) {
+            const deepPenalty =
+                down <= 2
+                    ? 10
+                    : yardsToGo >= 8
+                        ? 3
+                        : 7;
+            // Longer throws have more time for safeties and corners to recover.
+            score -= deepPenalty + Math.min(8, (targetDepth - 14) * 0.25);
+        }
+
         // ======================================================
         // COVERAGE / SEPARATION QUALITY
         // ======================================================
@@ -960,7 +971,9 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
         // Separation matters, but returns diminish quickly.
         // Being 8 yards open isn't four times better than being 2 yards open.
         if (minProjectedSeparation >= 2.0) {
-            score += Math.min(18, (minProjectedSeparation - 2.0) * 6);
+            // Separation is already represented in the base score.
+            // Reward a clean window, but don't count it twice at full strength.
+            score += Math.min(8, (minProjectedSeparation - 2.0) * 2.5);
         }
 
         // Tight-window throws should be possible for good QBs,
@@ -1005,7 +1018,7 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
             }
 
             if (minProjectedSeparation >= 3.5 && defendersClosingIn === 0) {
-                score += 14 + (qbIQ * 0.05);
+                score += 5 + (qbIQ * 0.03);
             } else if (defendersClosingIn > 0) {
                 score -= Math.max(20, (85 - qbDecision) * 1.2);
             }
