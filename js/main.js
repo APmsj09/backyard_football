@@ -939,7 +939,7 @@ window.app = {
 
         const isOffseason = document.getElementById('offseason-fa-screen')?.classList.contains('hidden') === false;
         const totalTokens = gameState?.playerTeam?.socialProfile?.favorTokens || 0;
-        const pendingBids = isOffseason ? (getOffseasonFABids() || []) : [];
+        const pendingBids = isOffseason ? (UI.getOffseasonFABids() || []) : [];
         const existingBid = pendingBids.find(b => b.playerId === p.id);
 
         const committedOtherTokens = pendingBids
@@ -1040,7 +1040,10 @@ window.app = {
             const tokensOffered = parseInt(document.getElementById('bid-tokens')?.value || '0', 10);
 
             if (isOffseason) {
-                addOffseasonFABid({ playerId: p.id, offer: { role, promiseTouches, tokensOffered } });
+                UI.addOffseasonFABid({
+                    playerId: p.id,
+                    offer: { role, promiseTouches, tokensOffered }
+                });
                 renderOffseasonFAScreen(gameState);
             } else {
                 const evalResult = Game.evaluatePlayerNegotiation(p, gameState.playerTeam, { role, promiseTouches, tokensOffered });
@@ -1062,7 +1065,7 @@ window.app = {
     },
 
     cancelOffseasonBid: (idx) => {
-        removeOffseasonFABid(idx);
+        UI.removeOffseasonFABid(idx);
         renderOffseasonFAScreen(gameState);
     },
 
