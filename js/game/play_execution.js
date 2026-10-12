@@ -183,8 +183,59 @@ export function setupInitialPlayerStates(playState, offense, defense, play, assi
                     } else if (assignment.includes('run_')) {
                         action = 'run_path';
                         routePath = calculateRoutePath(assignment, startX, startY);
+
+                        // Interior runs should target a gap between offensive linemen,
+                        // rather than the center of a lineman's body.
+                        if (
+                            slot.startsWith('RB') &&
+                            play.type === 'run' &&
+                            routePath?.length &&
+                            ['run_dive', 'run_iso_l', 'run_iso_r'].includes(assignment)
+                        ) {
+                            const olXs = initialOffenseStates
+                                .filter(s => s.slot.startsWith('OL'))
+                                .map(s => s.x)
+                                .sort((a, b) => a - b);
+
+                            const gapXs = [];
+                            for (let i = 0; i < olXs.length - 1; i++) {
+                                gapXs.push((olXs[i] + olXs[i + 1]) / 2);
+                            }
+
+                            const lastIndex = routePath.length - 1;
+                            const desiredX = routePath[lastIndex].x;
+                            const direction = assignment.endsWith('_r')
+                                ? 1
+                                : assignment.endsWith('_l')
+                                    ? -1
+                                    : 0;
+
+                            const eligibleGaps = gapXs.filter(gapX => {
+                                if (direction === 0) return true;
+                                return direction > 0
+                                    ? gapX >= desiredX
+                                    : gapX <= desiredX;
+                            });
+
+                            if (eligibleGaps.length > 0) {
+                                const targetGapX = eligibleGaps.reduce((best, gapX) =>
+                                    Math.abs(gapX - desiredX) < Math.abs(best - desiredX)
+                                        ? gapX
+                                        : best
+                                );
+
+                                const shiftX = targetGapX - desiredX;
+
+                                routePath = routePath.map(pt => ({
+                                    ...pt,
+                                    x: pt.x + shiftX
+                                }));
+                            }
+                        }
+
                         if (routePath && routePath.length > 0) {
-                            targetX = routePath[0].x; targetY = routePath[0].y;
+                            targetX = routePath[0].x;
+                            targetY = routePath[0].y;
                         } else {
                             targetY = startY + 5;
                         }
@@ -464,12 +515,47 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
         return false;
     });
 
-    const linemen = offenseStates.filter(p => !p.isEngaged && p.slot.startsWith('OL'));
-    const otherBlockers = offenseStates.filter(p => !p.isEngaged && !p.slot.startsWith('OL') && (p.action === 'pass_block' || p.action === 'run_block'));
+    const linemen = offenseStates.filter(
+        p => !p.isEngaged && p.slot.startsWith('OL')
+    );
+    const otherBlockers = offenseStates.filter(
+        p => !p.isEngaged &&
+             !p.slot.startsWith('OL') &&
+             (p.action === 'pass_block' || p.action === 'run_block')
+    );
     const assignedThreats = new Set();
+
+    const runCarrierForBlocking =
+    // Prefer the designed RB path during a normal handoff run.
+    offenseStates.find(p =>
+        p.slot === 'RB1' &&
+        p.routePath?.length
+    ) ||
+    // Otherwise use another ball carrier with a defined path,
+    // which also supports designed QB runs.
+    offenseStates.find(p =>
+        p.isBallCarrier &&
+        p.routePath?.length &&
+        p.action !== 'handoff_setup'
+    ) ||
+    offenseStates.find(p => p.slot === 'RB1') ||
+    offenseStates.find(p => p.isBallCarrier);
+
+    const runLanePoint =
+        runCarrierForBlocking?.routePath?.[
+            (runCarrierForBlocking.routePath?.length || 1) - 1
+        ];
+
+    const runLaneX =
+        runLanePoint?.x ??
+        runCarrierForBlocking?.x ??
+        CENTER_X;
 
     const assignBlockerTarget = (blocker, threats) => {
         if (blocker.isEngaged) return;
+        if (playType === 'run' && Number.isFinite(runLaneX)) {
+            blocker.blockLaneX = runLaneX;
+        }
         const isScreenPlay = playState.playKey?.includes('Screen');
 
         if (isScreenPlay && blocker.assignment?.includes('Wall')) {
@@ -566,14 +652,41 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                 }
 
                 if (climbTarget) {
-                    blocker.targetX = climbTarget.x;
-                    blocker.targetY = climbTarget.y;
                     blocker.dynamicTargetId = climbTarget.id;
                     target = climbTarget;
+                }
+
+                // Run blockers approach the defender from the side
+                // away from the designed running lane.
+                const laneX = blocker.blockLaneX ?? runLaneX;
+
+                if (
+                    playType === 'run' &&
+                    Number.isFinite(laneX)
+                ) {
+                    const defenderX = target.x;
+
+                    // Move the blocking target to the outside of
+                    // the defender, away from the intended run lane.
+                    let sealDirection = defenderX < laneX ? -1 : 1;
+
+                    // When the defender is almost directly in the lane,
+                    // use the blocker's original alignment to pick a side.
+                    if (Math.abs(defenderX - laneX) < 0.6) {
+                        sealDirection =
+                            blocker.initialX < laneX ? -1 : 1;
+                    }
+
+                    blocker.targetX =
+                        defenderX + (sealDirection * 0.65);
+
+                    blocker.targetY = target.y + 0.2;
                 } else {
+                    // Preserve the existing behavior for other plays.
                     blocker.targetX = target.x;
                     blocker.targetY = target.y;
                 }
+
                 blocker.contactReduction = 1.2;
             }
 
@@ -1237,6 +1350,62 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                 shouldPursue = false;
             }
 
+            // Early run fit: linebackers protect their alignment and fill a lane
+            // before abandoning everything to chase the carrier.
+            // During a mesh read, the QB may still hold the ball.
+            // Use the RB's position/path as a provisional run-lane cue,
+            // without assuming that the eventual carrier must be the RB.
+            const runFitCarrier =
+                ballCarrierState?.isOffense &&
+                ballCarrierState.role === 'RB'
+                    ? ballCarrierState
+                    : (
+                        isRunReadAtMesh
+                            ? offenseStates.find(p =>
+                                p.isOffense &&
+                                p.role === 'RB' &&
+                                p.slot?.startsWith('RB')
+                            )
+                            : null
+                    );
+
+            const isEarlyLinebackerRunFit =
+                Boolean(
+                    !isBallInAir &&
+                    pState.role === 'LB' &&
+                    isRunRead &&
+                    runFitCarrier &&
+                    runFitCarrier.y < LOS + 1.5 &&
+                    !assignment?.includes('blitz')
+                );
+
+            if (isEarlyLinebackerRunFit) {
+                const routeEnd =
+                    runFitCarrier.routePath?.[
+                        (runFitCarrier.routePath?.length || 1) - 1
+                    ];
+
+                const laneX = routeEnd?.x ?? runFitCarrier.x;
+
+                // Fit toward the likely lane without abandoning the LB's alignment.
+                const lateralCorrection = Math.max(
+                    -1.25,
+                    Math.min(1.25, laneX - pState.initialX)
+                );
+
+                const fitX = Math.max(
+                    1,
+                    Math.min(
+                        FIELD_WIDTH - 1,
+                        pState.initialX + lateralCorrection
+                    )
+                );
+
+                setPointIntent(pState, fitX, LOS + 1.2, 0.6);
+                pState.action = 'pursuit';
+                return;
+            }
+    
             if (shouldPursue && ballCarrierState) {
                 const chaseTarget = (isRunReadAtMesh ? offenseStates.find(o => o.slot.startsWith('RB')) : null) || ballCarrierState;
 
@@ -1253,9 +1422,13 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                         );
                         pState.action = 'pursuit';
                         pState.contactReduction = 1.2;
-                        if (!pState.loggedPA && gameLog && Math.random() < 0.2) {
-                            pushGameLog(gameLog, `[Tick ${playState.tick}] 🎣 ${pState.name} bites hard downhill on the play action!`, playState);
-                            pState.loggedPA = true;
+                        if (!pState.loggedRunRead && gameLog && Math.random() < 0.2) {
+                            pushGameLog(
+                                gameLog,
+                                `[Tick ${playState.tick}] ${pState.name} commits downhill on the run read while the QB still has the ball.`,
+                                playState
+                            );
+                            pState.loggedRunRead = true;
                         }
                         return;
                     }
