@@ -1513,7 +1513,7 @@ export function executeThrow(qbState, target, strength, accuracy, playState, gam
     const vz = (deltaZ + (4.9 * t * t)) / t;
 
     playState.ballState = {
-        x: startX, y: startY, z: startZ, inAir: true, throwTick: playState.tick, releaseTick: playState.tick,
+        x: startX, y: startY, z: startZ, inAir: true, isLoose: false, throwTick: playState.tick, releaseTick: playState.tick,
         vx: (aimX - startX) / t, vy: (aimY - startY) / t, vz: vz,
         targetX: aimX, targetY: aimY, targetPlayerId: target.id, throwerId: qbState.id, isThrowAway: false
     };
