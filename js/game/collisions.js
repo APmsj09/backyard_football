@@ -245,18 +245,27 @@ export function checkTackleCollisions(playState, gameLog) {
         const momRatio = tMomentum / Math.max(1, rMomentum);
         successChance += (momRatio - 1.0) * 0.2;
 
-        const defendersInRange = tacklingTeam.filter(d => d.stunnedTicks === 0 && !isNaN(d._distToCarrier) && d._distToCarrier < TACKLE_RANGE);
+        const defendersInRange = tacklingTeam.filter(d =>
+            d.stunnedTicks === 0 &&
+            !isNaN(d._distToCarrier) &&
+            d._distToCarrier < TACKLE_RANGE
+        );
+
+        // Additional defenders help, but shouldn't make a tackle nearly automatic.
         if (defendersInRange.length > 1) {
-            successChance += 0.35;
+        successChance += Math.min(0.16, (defendersInRange.length - 1) * 0.08);
         }
 
         successChance += (tPower - rPower) * 0.005;
 
+        // Broken tackles give defenders a modest advantage on later attempts.
+        // Cap the cumulative bonus so a slippery runner isn't automatically tackled
+        // simply because several defenders have already missed.
         const brokenCount = carrier.tacklesBrokenThisPlay || 0;
-        successChance += (brokenCount * 0.25);
+        successChance += Math.min(0.12, brokenCount * 0.06);
 
         successChance = Math.max(0.10, Math.min(0.95, successChance));
-        if (isNaN(successChance)) successChance = 0.65;
+        if (!Number.isFinite(successChance)) successChance = 0.65;
 
         logPlayDebug('TACKLE_CALC', `${defender.name} vs ${carrier.name}`, {
             distance: Number(distance.toFixed(2)),
