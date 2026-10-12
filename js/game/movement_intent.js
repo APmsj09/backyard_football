@@ -19,12 +19,25 @@ export function initMovementIntent(pState) {
 
 export function setPointIntent(pState, x, y, arrivalRadius = 0.30) {
     if (!pState._intent) initMovementIntent(pState);
+
     const intent = pState._intent;
+
+    const modeChanged = intent.mode !== 'POINT';
+    const targetChanged = Math.hypot(
+        x - intent.targetX,
+        y - intent.targetY
+    ) > 0.05;
+
     intent.mode = 'POINT';
     intent.targetX = x;
     intent.targetY = y;
     intent.arrivalRadius = arrivalRadius;
-    intent.settled = false;
+
+    // Preserve arrival state when the same target is reissued.
+    if (modeChanged || targetChanged) {
+        intent.settled = false;
+    }
+
     intent.isExplicit = true;
 }
 
@@ -129,11 +142,23 @@ export function resolveMovementIntent(pState) {
  */
 export function setRouteIntent(pState, x, y, arrivalRadius = 0.60) {
     if (!pState._intent) initMovementIntent(pState);
+
     const intent = pState._intent;
+
+    const modeChanged = intent.mode !== 'ROUTE';
+    const targetChanged = Math.hypot(
+        x - intent.targetX,
+        y - intent.targetY
+    ) > 0.05;
+
     intent.mode = 'ROUTE';
     intent.targetX = x;
     intent.targetY = y;
     intent.arrivalRadius = arrivalRadius;
-    intent.settled = false;
+
+    if (modeChanged || targetChanged) {
+        intent.settled = false;
+    }
+
     intent.isExplicit = true;
 }
