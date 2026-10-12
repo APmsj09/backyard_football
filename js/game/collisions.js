@@ -564,16 +564,15 @@ export function resolveOngoingBlocks(playState, gameLog, offenseStates = [], def
             battlesToRemove.push(index);
             } else if (battle.status === 'win_A') {
                 const dur = playState.tick - battle.startTick;
+
                 logPlayDebug('PANCAKE_BLOCK', `${blocker.name} flattened ${defender.name}`, {
-                    durationTicks: dur
+                    engagementDurationTicks: dur,
+                    stunTicks: 10
                 });
 
-                // A pancake is a major win, but it should not erase a defender
-                // for most of the remaining play.
-                defender.stunnedTicks = 8 + Math.floor(
-                    Math.random() * 5
-                ); // 8–12 ticks
-    
+                defender.stunnedTicks = 10;
+                defender.action = 'pursuit';
+
                 blocker.engagedWith = null;
                 blocker.isEngaged = false;
 
@@ -581,8 +580,6 @@ export function resolveOngoingBlocks(playState, gameLog, offenseStates = [], def
                 defender.blockedBy = null;
                 defender.isEngaged = false;
 
-                // Give the defender a chance to recover and pursue.
-                defender.action = 'pursuit';
                 battlesToRemove.push(index);
             }
    });
@@ -656,6 +653,12 @@ export function handleBallArrival(playState, carrier, playResult, gameLog) {
     const ball = playState.ballState;
     if (!ball.inAir && !ball.isLoose) return;
 
+    // A player gets one catch attempt per ball-contact phase.
+     // A tip, bobble, or muff creates a new phase.
+     if (!(ball._attemptedCatchPlayerIds instanceof Set)) {
+         ball._attemptedCatchPlayerIds = new Set();
+    }
+
     if (ball.isSwatted) {
         if (ball.z <= 0) {
             ball.z = 0;
@@ -683,6 +686,10 @@ export function handleBallArrival(playState, carrier, playResult, gameLog) {
     const BASE_CATCH_RADIUS = 0.45;
 
     const playersInRange = playState.activePlayers.filter(p => {
+        // Do not roll another catch attempt for a player who already
+        // attempted to catch the ball during this contact phase.
+        if (ball._attemptedCatchPlayerIds.has(p.id)) return false;
+
         if (ball.isLoose && p.id === ball.lastDroppedById) {
             const ticksSinceDrop = playState.tick - (ball.droppedTick || 0);
             if (ticksSinceDrop < 25) return false;
@@ -759,7 +766,13 @@ export function handleBallArrival(playState, carrier, playResult, gameLog) {
                 highestRoll = roll;
                 bestCandidate = p;
             }
-        });
+            });
+
+            if (!bestCandidate) return;
+
+            // Mark before resolving the catch so this player cannot roll again
+            // on the next tick while still inside the catch radius.
+            ball._attemptedCatchPlayerIds.add(bestCandidate.id);
 
         let catching = bestCandidate.ctch || bestCandidate.catchingHands;
         let agility = bestCandidate.agi || bestCandidate.agility;
@@ -816,7 +829,7 @@ export function handleBallArrival(playState, carrier, playResult, gameLog) {
                 catchScore = Math.min(18.0, catchScore);
 
                 logPlayDebug('DEF_BALL_ATTEMPT', `${bestCandidate.name} attempted INT/Swat`, {
-                    intProbability: `${Math.round(catchScore)}%`,
+                    rawIntProbability: `${Math.round(catchScore)}%`,
                     hands: hndEff,
                     attackersContesting: attackersNear
                 });
@@ -832,7 +845,7 @@ export function handleBallArrival(playState, carrier, playResult, gameLog) {
             }
 
             logPlayDebug('REC_CATCH_ATTEMPT', `${bestCandidate.name} attempted catch`, {
-                finalCatchOdds: `${Math.round(catchScore)}%`,
+                rawCatchOdds: `${Math.round(catchScore)}%`,
                 baseHands: hndEff,
                 defendersClosingIn: defendersNear,
                 isWideOpen: defendersNear === 0
@@ -849,7 +862,16 @@ export function handleBallArrival(playState, carrier, playResult, gameLog) {
 
         catchScore = Math.max(1.0, Math.min(100.0, catchScore));
 
-        if (Math.random() * 100 < catchScore) {
+            // This is the probability actually used by the catch roll.
+            logPlayDebug('CATCH_RESOLUTION', `${bestCandidate.name} catch roll`, {
+                effectiveCatchOdds: `${Math.round(catchScore)}%`,
+                tick: playState.tick,
+                ballType: playState.type,
+                candidateIsDefense: !bestCandidate.isOffense,
+                ballHeight: Number((ball.z || 0).toFixed(2))
+            });
+
+            if (Math.random() * 100 < catchScore) {
             const isOutOfBounds = bestCandidate.y >= 120 || bestCandidate.y <= 0 ||
                 bestCandidate.x >= FIELD_WIDTH || bestCandidate.x <= 0;
 
@@ -925,6 +947,7 @@ export function handleBallArrival(playState, carrier, playResult, gameLog) {
                     const isTip = (Math.random() < 0.25) && ball.tipCount < 3;
 
                     if (isTip) {
+                        ball._attemptedCatchPlayerIds.clear();
                         if (gameLog) pushGameLog(gameLog, `[Tick ${playState.tick}] 🖐️ ${bestCandidate.name} tips pass! (Hands: ${hndEff}, Energy: ${fatPct}%)`, playState);
                         ball.vz = 3.0 + (Math.random() * 2);
                         ball.vx += (Math.random() - 0.5) * 6;
@@ -942,6 +965,7 @@ export function handleBallArrival(playState, carrier, playResult, gameLog) {
                     const isBobble = (Math.random() < 0.20) && ball.tipCount < 3;
 
                     if (isBobble) {
+                        ball._attemptedCatchPlayerIds.clear();
                         if (gameLog) pushGameLog(gameLog, `[Tick ${playState.tick}] 🖐️ ${bestCandidate.name} bobbles the ball! (Hands: ${hndEff}, Energy: ${fatPct}%)`, playState);
                         ball.vz = 2.5 + Math.random();
                         ball.vx += (Math.random() - 0.5) * 3;
@@ -949,6 +973,7 @@ export function handleBallArrival(playState, carrier, playResult, gameLog) {
                         ball.lastInteraction = { tick: playState.tick, playerId: bestCandidate.id, type: 'bobble' };
                     } else {
                         if (playState.type === 'punt') {
+                            ball._attemptedCatchPlayerIds.clear();
                             if (gameLog) pushGameLog(gameLog, `[Tick ${playState.tick}] ❌ ${bestCandidate.name} muffs the punt!`, playState);
                             playState.statEvents.push({ type: 'fumble', playerId: bestCandidate.id });
                             playState.fumbleOccurred = true;
