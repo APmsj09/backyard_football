@@ -284,13 +284,13 @@ export function evaluatePlayerNegotiation(player, team, offer = {}) {
 
     // 1. TALENT LEVERAGE & AGE BASELINE
     // Superstars have leverage and demand serious incentives. Raw developmental kids just want a jersey.
-    let interest = 32;
+    let interest = 36;
     if (playerOvr >= 62) {
-        interest = 14; // Star leverage: high skepticism of empty pitches
+        interest = 18; // Star leverage: high skepticism of empty pitches
     } else if (playerOvr >= 52) {
-        interest = 22;
+        interest = 28;
     } else if (playerOvr < 40) {
-        interest = 38; // Eager walk-on bench candidate
+        interest = 44; // Eager walk-on bench candidate
     }
 
     // Older teens (17-18) have cars, jobs, and varsity options; young kids (12-13) are eager
@@ -434,9 +434,9 @@ export function evaluatePlayerNegotiation(player, team, offer = {}) {
 
     // 10. DYNAMIC CALIBER THRESHOLD
     // Superstars demand deep courtship (62+ interest). Bench walk-ons accept at 45.
-    let threshold = 46;
-    if (playerOvr >= 62) threshold += 14;     // Threshold = 60
-    else if (playerOvr >= 52) threshold += 8; // Threshold = 54
+    let threshold = 42;
+    if (playerOvr >= 62) threshold += 12;     // Threshold = 54
+    else if (playerOvr >= 52) threshold += 6; // Threshold = 48
     if (ego > 75) threshold += 6;             // Divas are harder to satisfy
     if (age >= 17) threshold += 4;
 
