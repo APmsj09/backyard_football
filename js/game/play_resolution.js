@@ -710,7 +710,7 @@ export function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey
         resolvedDepth: null
     };
 
-    initPlayTelemetry(context, playState, finalOffensivePlayKey, defensivePlayKey);
+    //initPlayTelemetry(context, playState, finalOffensivePlayKey, defensivePlayKey);
 
     try {
         setupInitialPlayerStates(
@@ -725,6 +725,7 @@ export function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey
             finalOffensivePlayKey
         );
 
+        initPlayTelemetry(context, playState, finalOffensivePlayKey, defensivePlayKey);
         // Record the actual starting state AFTER player setup.
         logPlayDebug(
             'PLAY_START',
@@ -938,6 +939,17 @@ export function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey
                         playState.touchdown = true;
                         playState.playIsLive = false;
                         ballCarrierState.y = 110.0;
+
+                        // Sync the ball to the scoring carrier at the goal line.
+                        playState.ballState.x = ballCarrierState.x;
+                        playState.ballState.y = 110.0;
+                        playState.ballState.z = 0.5;
+                        playState.ballState.vx = 0;
+                        playState.ballState.vy = 0;
+                        playState.ballState.vz = 0;
+                        playState.ballState.inAir = false;
+                        playState.ballState.isLoose = false;
+
                         playState.finalBallY = 110.0;
                         playState.yards = 110.0 - playState.lineOfScrimmage;
                         if (gameLog) gameLog.push(`🎉 TOUCHDOWN ${ballCarrierState.name}!`);
@@ -1186,6 +1198,18 @@ export function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey
         playResult.outcome = 'incomplete';
         playResult.yards = 0;
         playState.finalBallY = playState.lineOfScrimmage;
+
+        // The pass is dead. Keep the physical ball state consistent.
+        const deadBall = playState.ballState;
+
+        if (deadBall) {
+            deadBall.z = 0;
+            deadBall.vx = 0;
+            deadBall.vy = 0;
+            deadBall.vz = 0;
+            deadBall.inAir = false;
+            deadBall.isLoose = false;
+        }
     } else if (playState.touchdown) {
         playResult.outcome = 'complete';
         playResult.score = 'TD';
@@ -1241,6 +1265,28 @@ export function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey
 
     playResult.clockBurn = clockBurn;
     playResult.touchback = Boolean(playState.touchback);
+
+    // Ensure the last visual frame reflects the actual terminal play state.
+    if (
+        isLive &&
+        gameLog &&
+        Array.isArray(playState.visualizationFrames)
+    ) {
+        const frames = playState.visualizationFrames;
+        const terminalFrame = captureFrame(playState, gameLog);
+        const lastIndex = frames.length - 1;
+
+        if (
+            lastIndex >= 0 &&
+            frames[lastIndex]?.tick === playState.tick
+        ) {
+            // Replace a same-tick frame so cleanup and scoring changes are visible.
+            frames[lastIndex] = terminalFrame;
+        } else {
+            // The loop may have broken before recording its final tick.
+            frames.push(terminalFrame);
+        }
+    }
 
     finalizePlayTelemetry(
         playResult,
