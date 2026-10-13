@@ -760,16 +760,20 @@ export function handleBallArrival(playState, carrier, playResult, gameLog) {
         }
 
         const ticksSinceKick = playState.tick - (ball.throwTick || 0);
-        if (p.id === ball.throwerId && ticksSinceKick < 20) return false;
+        const throwerCatchLock = ball.isLateral ? 40 : 20;
 
+        if (p.id === ball.throwerId && ticksSinceKick < throwerCatchLock) {
+            return false;
+        }
+        
         if (playState.type === 'punt' && p.isOffense && ball.z > 0.5) return false;
         if (ball.droppedById === p.id) return false;
 
-        if (p.isOffense && p.slot.startsWith('OL') && playState.type === 'pass' && !ball.isLoose && !ball.tipCount) {
+        if (p.isOffense && p.slot.startsWith('OL') && playState.type === 'pass' && !ball.isLoose && !ball.tipCount && !ball.isLateral) {
             return false;
         }
 
-        if (p.isOffense && playState.type === 'pass' && !ball.isLoose && !ball.tipCount) {
+        if (p.isOffense && playState.type === 'pass' && !ball.isLoose && !ball.tipCount && !ball.isLateral) {
             if (p.id !== ball.targetPlayerId) {
                 const targetPlayer = playState.activePlayers.find(t => t.id === ball.targetPlayerId);
                 if (targetPlayer) {
@@ -871,7 +875,15 @@ export function handleBallArrival(playState, carrier, playResult, gameLog) {
             attackersNear = 1;
         }
 
-        if (isDefense) {
+        if (isDefense && ball.isLateral) {
+            // A backward pitch is recoverable by either team.
+            // Do not treat a defensive recovery as a forward-pass INT.
+            catchScore = Math.min(85.0, catchScore);
+
+            if (attackersNear > 0) {
+                catchScore *= 0.75;
+            }
+        } else if (isDefense) {
             const isPunt = playState.type === 'punt';
             const handsFactor = Math.min(1.0, catching / 80);
 
@@ -919,7 +931,7 @@ export function handleBallArrival(playState, carrier, playResult, gameLog) {
         if (playState.type === 'punt') catchScore += 15;
 
         const ticksInAir = playState.tick - (ball.throwTick || 0);
-        if (ticksInAir < 15 && isDefense && playState.type === 'pass') {
+        if (ticksInAir < 15 && isDefense && playState.type === 'pass' && !ball.isLateral) {
             if (bestCandidate.role === 'DL') catchScore *= 0.10;
             else catchScore *= 0.60;
         }
@@ -935,15 +947,69 @@ export function handleBallArrival(playState, carrier, playResult, gameLog) {
                 ballHeight: Number((ball.z || 0).toFixed(2))
             });
 
-            if (Math.random() * 100 < catchScore) {
+                    if (Math.random() * 100 < catchScore) {
+            const wasLateral = Boolean(ball.isLateral);
+            const lateralPurpose = ball.lateralPurpose;
+            const lateralThrowerId = ball.throwerId;
+
             const isOutOfBounds = bestCandidate.y >= 120 || bestCandidate.y <= 0 ||
                 bestCandidate.x >= FIELD_WIDTH || bestCandidate.x <= 0;
 
             if (isOutOfBounds) {
-                ball.isSwatted = true;
-                ball.vz = -2;
-                if (gameLog) pushGameLog(gameLog, `[Tick ${playState.tick}] 🚩 OUT OF BOUNDS! ${bestCandidate.name} caught it out of bounds.`, playState);
+                if (wasLateral) {
+                    // An out-of-bounds lateral ends the play at the spot.
+                    playState.playIsLive = false;
+                    playState.yards =
+                        ball.y - playState.lineOfScrimmage;
+                    playState.finalBallY = ball.y;
+
+                    playState.activePlayers.forEach(p => {
+                        p.hasBall = false;
+                        p.isBallCarrier = false;
+                    });
+
+                    ball.inAir = false;
+                    ball.isLoose = false;
+                    ball.vx = 0;
+                    ball.vy = 0;
+                    ball.vz = 0;
+                    ball.isLateral = false;
+                    ball.lateralPurpose = null;
+                    ball.targetPlayerId = null;
+                    ball.targetX = null;
+                    ball.targetY = null;
+                    ball.throwerId = null;
+                    ball.throwTick = null;
+
+                    if (gameLog) {
+                        pushGameLog(
+                            gameLog,
+                            `[Tick ${playState.tick}] 💨 Lateral goes out of bounds.`,
+                            playState
+                        );
+                    }
+                } else {
+                    ball.isSwatted = true;
+                    ball.vz = -2;
+
+                    if (gameLog) {
+                        pushGameLog(
+                            gameLog,
+                            `[Tick ${playState.tick}] 🚩 OUT OF BOUNDS! ${bestCandidate.name} caught it out of bounds.`,
+                            playState
+                        );
+                    }
+                }
+
                 return;
+            }
+
+            if (wasLateral) {
+                // A lateral can change possession, so clear stale flags first.
+                playState.activePlayers.forEach(p => {
+                    p.hasBall = false;
+                    p.isBallCarrier = false;
+                });
             }
 
             // Preserve the incoming punt position before snapping the ball
@@ -990,6 +1056,111 @@ export function handleBallArrival(playState, carrier, playResult, gameLog) {
                     p.snapReactionTimer = 0;
                 }
             });
+
+                        if (wasLateral) {
+                // Do not leave lateral state behind to contaminate later throws.
+                ball.isLateral = false;
+                ball.lateralPurpose = null;
+                ball.targetPlayerId = null;
+                ball.targetX = null;
+                ball.targetY = null;
+                ball.throwerId = null;
+                ball.throwTick = null;
+
+                if (isDefense) {
+                    playState.fumbleOccurred = true;
+                    playState.possessionChanged = true;
+                    playState.turnover = true;
+
+                    if (lateralThrowerId) {
+                        playState.statEvents.push({
+                            type: 'fumble',
+                            playerId: lateralThrowerId
+                        });
+                    }
+
+                    playState.statEvents.push({
+                        type: 'fumble_recovery',
+                        playerId: bestCandidate.id
+                    });
+
+                    logPlayDebug(
+                        'LATERAL_TURNOVER',
+                        `${bestCandidate.name} recovers the opponent's lateral`,
+                        {
+                            recoveredBy: bestCandidate.id,
+                            throwerId: lateralThrowerId
+                        },
+                        playState.tick
+                    );
+
+                    if (gameLog) {
+                        pushGameLog(
+                            gameLog,
+                            `[Tick ${playState.tick}] 🏈 ${bestCandidate.name} recovers the loose lateral!`,
+                            playState
+                        );
+                    }
+
+                    return;
+                }
+
+                if (
+                    playState.playKey === 'Trick_Flea_Flicker' &&
+                    lateralPurpose === 'flea_return' &&
+                    bestCandidate.role === 'QB'
+                ) {
+                    // The QB has recovered the ball and can resume the pass play.
+                    playState.fleaFlickerPhase = 'qb_pass';
+
+                    bestCandidate.hasBall = true;
+                    bestCandidate.isBallCarrier = false;
+                    bestCandidate.action = 'qb_setup';
+                    bestCandidate.hasCompletedDropback = false;
+                    bestCandidate.dropbackPhase = 'dropping';
+                    bestCandidate.ticksOnCurrentRead = 0;
+                    bestCandidate.currentReadTargetSlot =
+                        bestCandidate.readProgression?.[0] || null;
+                    bestCandidate._pocketSlideLock = 0;
+
+                    delete bestCandidate._pocketAnchorX;
+                    delete bestCandidate._pocketAnchorY;
+
+                    logPlayDebug(
+                        'FLEA_FLICKER_RETURN',
+                        `${bestCandidate.name} catches the return pitch and resets to pass`,
+                        {
+                            quarterbackId: bestCandidate.id,
+                            tick: playState.tick
+                        },
+                        playState.tick
+                    );
+
+                    if (gameLog) {
+                        pushGameLog(
+                            gameLog,
+                            `[Tick ${playState.tick}] 🎯 ${bestCandidate.name} catches the return pitch!`,
+                            playState
+                        );
+                    }
+                } else if (
+                    playState.playKey === 'Trick_Flea_Flicker' &&
+                    lateralPurpose === 'flea_return'
+                ) {
+                    // If another offensive player catches it, this is now
+                    // a live run after the lateral, not a normal QB pass.
+                    playState.fleaFlickerPhase = 'live_after_lateral';
+                } else if (gameLog) {
+                    pushGameLog(
+                        gameLog,
+                        `[Tick ${playState.tick}] 🏈 ${bestCandidate.name} catches the toss!`,
+                        playState
+                    );
+                }
+
+                // Never record a lateral as an ordinary pass completion.
+                return;
+            }
 
             if (playState.type === 'punt' && !bestCandidate.isOffense) {
                 playState.possessionChanged = true;
@@ -1123,6 +1294,9 @@ export function handleBallArrival(playState, carrier, playResult, gameLog) {
             playState.statEvents.push({ type: 'completion', receiverId: bestCandidate.id, qbId: ball.throwerId, yards: 0 });
             return;
 
+        } else if (ball.isLateral) {
+            // Keep a failed lateral attempt in flight. If it hits the ground,
+            // the ground handler below turns it into a loose ball.
         } else {
             const last = ball.lastInteraction;
             if (!(last && last.playerId === bestCandidate.id && (playState.tick - last.tick) <= 5)) {
@@ -1189,6 +1363,64 @@ export function handleBallArrival(playState, carrier, playResult, gameLog) {
 
     if (ball.z <= 0) {
         ball.z = 0;
+
+        if (ball.isLateral) {
+            const lateralThrowerId = ball.throwerId;
+            const thrower = playState.activePlayers.find(
+                p => p.id === lateralThrowerId
+            );
+
+            // The backward pitch hit the turf: the ball is now recoverable.
+            ball.vx = 0;
+            ball.vy = 0;
+            ball.vz = 0;
+            ball.inAir = false;
+            ball.isLoose = true;
+            ball.isLateral = false;
+            ball.lateralPurpose = null;
+
+            ball.lastDroppedById = lateralThrowerId;
+            ball.droppedTick = playState.tick;
+            ball.droppedById = lateralThrowerId;
+
+            ball.targetPlayerId = null;
+            ball.targetX = null;
+            ball.targetY = null;
+            ball.throwerId = null;
+            ball.throwTick = null;
+
+            if (!playState.fumbleOccurred) {
+                playState.fumbleOccurred = true;
+
+                if (lateralThrowerId) {
+                    playState.statEvents.push({
+                        type: 'fumble',
+                        playerId: lateralThrowerId
+                    });
+                }
+            }
+
+            logPlayDebug(
+                'LATERAL_DROPPED',
+                `${thrower?.name || 'Player'}'s lateral hits the turf`,
+                {
+                    throwerId: lateralThrowerId,
+                    ballX: Number(ball.x.toFixed(2)),
+                    ballY: Number(ball.y.toFixed(2))
+                },
+                playState.tick
+            );
+
+            if (gameLog) {
+                pushGameLog(
+                    gameLog,
+                    `[Tick ${playState.tick}] 💥 ${thrower?.name || 'Player'}'s lateral hits the turf! Loose ball.`,
+                    playState
+                );
+            }
+
+            return;
+        }
 
         if (ball.isThrowAway) {
             ball.vz = 0; ball.vx = 0; ball.vy = 0;
