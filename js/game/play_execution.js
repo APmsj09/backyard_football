@@ -750,55 +750,121 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                 return;
             }
 
-            if (isReturnTeam) {
-                if (pState.assignment === 'punt_return' || pState.isBallCarrier) {
-                    if (pState.isBallCarrier) return;
-                    else if (ballInAir) {
-                        const landX = ballPos.targetX || ballPos.x;
-                        const landY = ballPos.targetY || ballPos.y;
+                        if (isReturnTeam) {
+                // The actual returner fields the punt. Everyone else prepares
+                // the blocking wall, then looks for a kick-coverage defender.
+                if (pState.isBallCarrier) return;
+
+                const primaryReturner =
+                    playState.activePlayers.find(
+                        p => !p.isOffense && p.slot === 'DB3'
+                    ) ||
+                    playState.activePlayers.find(
+                        p => !p.isOffense && p.slot === 'DB4'
+                    );
+
+                if (ballInAir) {
+                    const landX = Number.isFinite(ballPos.targetX)
+                        ? ballPos.targetX
+                        : ballPos.x;
+                    const landY = Number.isFinite(ballPos.targetY)
+                        ? ballPos.targetY
+                        : ballPos.y;
+
+                    if (pState.id === primaryReturner?.id) {
+                        // Only the designated returner tracks the ball itself.
                         pState.targetX = landX;
                         pState.targetY = landY;
                         pState.action = 'pursuit';
+
                         if (getDistance(pState, { x: landX, y: landY }) < 2.0) {
-                            pState.vx = 0; pState.vy = 0;
-                        }
-                        return;
-                    }
-                } else {
-                    if (returnerHasBall) {
-                        const returnerY = ballCarrierState.y;
-                        const threat = offenseStates
-                            .filter(e => !e.isBlocked && !e.isEngaged && e.y < returnerY + 15 && e.y > returnerY - 5)
-                            .sort((a, b) => getDistance(pState, a) - getDistance(pState, b))[0];
-
-                        if (threat) {
-                            pState.targetX = threat.x; pState.targetY = threat.y;
-                            if (getDistance(pState, threat) < 2.0) {
-                                pState.isEngaged = true; pState.engagedWith = threat;
-                                threat.isEngaged = true; threat.isBlocked = true; threat.blockedBy = pState;
-
-                                playState.blockBattles.push({
-                                    blocker: pState,
-                                    defender: threat,
-                                    status: 'ongoing',
-                                    battleScore: 0,
-                                    startTick: playState.tick
-                                });
-                            }
-                        } else {
-                            pState.targetX = ballCarrierState.x + (pState.x < ballCarrierState.x ? -3 : 3);
-                            pState.targetY = ballCarrierState.y - 2;
+                            pState.vx = 0;
+                            pState.vy = 0;
                         }
                     } else {
-                        const landY = ballPos.targetY || 20;
-                        const landX = ballPos.targetX || CENTER_X;
-                        const xOffset = (pState.initialX - CENTER_X) * 0.8;
-                        pState.targetX = landX + xOffset;
-                        pState.targetY = Math.max(landY - 15, 10);
+                        // Establish a staggered wall instead of crowding the catch.
+                        const xOffset =
+                            (pState.initialX - CENTER_X) * 0.55;
+                        const isUpReturner = pState.slot === 'DB4';
+                        const depthAhead = isUpReturner ? 6 : 12;
+
+                        pState.targetX = Math.max(
+                            1,
+                            Math.min(52.3, landX + xOffset)
+                        );
+                        pState.targetY = Math.max(10, landY - depthAhead);
+                        pState.action = 'run_block';
                     }
-                    pState.action = 'run_block';
+
                     return;
                 }
+
+                if (returnerHasBall) {
+                    const returnerY = ballCarrierState.y;
+
+                    // The return runs toward decreasing Y. Find kick coverage
+                    // in the lane ahead of the returner, not only within 5 yards.
+                    const threat = offenseStates
+                        .filter(e =>
+                            !e.isBlocked &&
+                            !e.isEngaged &&
+                            e.y < returnerY + 2 &&
+                            e.y > returnerY - 22
+                        )
+                        .sort(
+                            (a, b) =>
+                                getDistance(pState, a) -
+                                getDistance(pState, b)
+                        )[0];
+
+                    if (threat) {
+                        pState.targetX = threat.x;
+                        pState.targetY = threat.y;
+                        pState.action = 'run_block';
+
+                        if (getDistance(pState, threat) < 2.0) {
+                            pState.isEngaged = true;
+                            pState.engagedWith = threat;
+                            threat.isEngaged = true;
+                            threat.isBlocked = true;
+                            threat.blockedBy = pState;
+
+                            playState.blockBattles.push({
+                                blocker: pState,
+                                defender: threat,
+                                status: 'ongoing',
+                                battleScore: 0,
+                                startTick: playState.tick
+                            });
+                        }
+                    } else {
+                        // No immediate threat: escort the carrier on the
+                        // scoring side, rather than running into the carrier.
+                        pState.targetX = ballCarrierState.x +
+                            (pState.x < ballCarrierState.x ? -3 : 3);
+                        pState.targetY = ballCarrierState.y - 3;
+                        pState.action = 'run_block';
+                    }
+
+                    return;
+                }
+
+                // Safe fallback if there is no active carrier yet.
+                const landX = Number.isFinite(ballPos.targetX)
+                    ? ballPos.targetX
+                    : ballPos.x;
+                const landY = Number.isFinite(ballPos.targetY)
+                    ? ballPos.targetY
+                    : 20;
+                const xOffset = (pState.initialX - CENTER_X) * 0.55;
+
+                pState.targetX = Math.max(
+                    1,
+                    Math.min(52.3, landX + xOffset)
+                );
+                pState.targetY = Math.max(10, landY - 8);
+                pState.action = 'run_block';
+                return;
             }
         }
 
