@@ -20,8 +20,41 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
     pState.vx = pState.vx || 0;
     pState.vy = pState.vy || 0;
 
-    // --- 1. SNAP REACTION TIMER ---
+    const telemetryActive =
+        typeof window !== 'undefined' &&
+        Boolean(window.__ACTIVE_PLAY_TELEMETRY__);
+
+    const telemetryTick =
+        telemetryActive && Number.isFinite(window.__CURRENT_TICK__)
+            ? window.__CURRENT_TICK__
+            : 0;
+    
+     // --- 1. SNAP REACTION TIMER ---
     if (pState.snapReactionTimer > 0) {
+        if (telemetryActive && pState._telemetryMotionPause !== 'snap_reaction') {
+            logPlayDebug(
+                'MOVEMENT_PAUSED',
+                `${pState.name} paused by snap reaction`,
+                {
+                    reason: 'snap_reaction',
+                    action: pState.action ?? null,
+                    movementMode: pState.movementMode ?? null,
+                    position: {
+                        x: pState.x,
+                        y: pState.y
+                    },
+                    target: {
+                        x: pState.targetX ?? null,
+                        y: pState.targetY ?? null
+                    },
+                    snapReactionTimer: pState.snapReactionTimer
+                },
+                telemetryTick
+            );
+
+            pState._telemetryMotionPause = 'snap_reaction';
+        }
+
         pState.snapReactionTimer--;
         pState.vx = 0;
         pState.vy = 0;
@@ -32,6 +65,38 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
 
     // --- 2. PASSIVE STATES (Stunned/Blocked) ---
     if (pState.stunnedTicks > 0 || pState.isBlocked || pState.isEngaged) {
+        const passiveReason = pState.stunnedTicks > 0
+            ? 'stunned'
+            : pState.isBlocked
+                ? 'blocked'
+                : 'engaged';
+
+        if (telemetryActive && pState._telemetryMotionPause !== passiveReason) {
+            logPlayDebug(
+                'MOVEMENT_PAUSED',
+                `${pState.name} movement restricted: ${passiveReason}`,
+                {
+                    reason: passiveReason,
+                    action: pState.action ?? null,
+                    movementMode: pState.movementMode ?? null,
+                    position: {
+                        x: pState.x,
+                        y: pState.y
+                    },
+                    velocity: {
+                        vx: pState.vx,
+                        vy: pState.vy
+                    },
+                    stunnedTicks: pState.stunnedTicks ?? 0,
+                    isBlocked: Boolean(pState.isBlocked),
+                    isEngaged: Boolean(pState.isEngaged)
+                },
+                telemetryTick
+            );
+
+            pState._telemetryMotionPause = passiveReason;
+        }
+
         const friction = 0.85;
         pState.vx *= friction;
         pState.vy *= friction;
@@ -67,6 +132,86 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
     const dy = targetY - pState.y;
     const distToTarget = Math.sqrt(dx * dx + dy * dy);
     const arrivalRadius = pState.arrivalRadius || 0.30;
+
+    // Record the initial target and significant changes, not every tick.
+    if (telemetryActive) {
+        const action = pState.action ?? 'idle';
+        const movementMode = pState.movementMode ?? null;
+
+        const previousState = pState._telemetryLastMovementState;
+        const previousTarget = pState._telemetryLastLoggedTarget;
+
+        const targetShift = previousTarget
+            ? Math.hypot(
+                targetX - previousTarget.x,
+                targetY - previousTarget.y
+            )
+            : Infinity;
+
+        const stateChanged =
+            !previousState ||
+            previousState.action !== action ||
+            previousState.movementMode !== movementMode;
+
+        const lastLogTick = pState._telemetryLastTargetLogTick ?? -Infinity;
+        const ticksSinceLastLog = telemetryTick - lastLogTick;
+
+        const shouldLogTarget =
+            !previousTarget ||
+            targetShift >= 4.0 ||
+            (
+                (targetShift >= 1.5 || stateChanged) &&
+                ticksSinceLastLog >= 5
+            );
+
+        if (shouldLogTarget) {
+            logPlayDebug(
+                'MOVEMENT_TARGET_SET',
+                `${pState.name} has a new movement target`,
+                {
+                    action,
+                    movementMode,
+
+                    position: {
+                        x: Number(pState.x.toFixed(2)),
+                        y: Number(pState.y.toFixed(2))
+                    },
+
+                    target: {
+                        x: Number(targetX.toFixed(2)),
+                        y: Number(targetY.toFixed(2))
+                    },
+
+                    previousTarget: previousTarget
+                        ? {
+                            x: Number(previousTarget.x.toFixed(2)),
+                            y: Number(previousTarget.y.toFixed(2))
+                        }
+                        : null,
+
+                    targetShift: Number(
+                        (Number.isFinite(targetShift) ? targetShift : 0).toFixed(2)
+                    ),
+
+                    distanceToTarget: Number(distToTarget.toFixed(2)),
+                    speed: Number(Math.hypot(pState.vx, pState.vy).toFixed(2))
+                },
+                telemetryTick
+            );
+
+            pState._telemetryLastLoggedTarget = {
+                x: targetX,
+                y: targetY
+            };
+
+            pState._telemetryLastTargetLogTick = telemetryTick;
+        }
+
+        pState._telemetryLastMovementState = {
+            action,
+            movementMode
+        };
+    }
     
      // A settled player should remain stopped until their target changes.
     if (
@@ -223,6 +368,119 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
     pState.y += pState.vy * timeDelta;
 
     clampToField(pState);
+
+    // Detect sustained failure to approach a movement target.
+    // This runs only during plays that have active telemetry.
+    if (telemetryActive) {
+        const remainingDistance = Math.hypot(
+            targetX - pState.x,
+            targetY - pState.y
+        );
+
+        const progressTowardTarget = distToTarget - remainingDistance;
+
+        const previousStallTarget = pState._telemetryStallTarget;
+
+        const stallTargetChanged =
+            !previousStallTarget ||
+            Math.hypot(
+                targetX - previousStallTarget.x,
+                targetY - previousStallTarget.y
+            ) > 0.5;
+
+        if (stallTargetChanged) {
+            pState._telemetryStallTicks = 0;
+            pState._telemetryStallLogged = false;
+        }
+
+        pState._telemetryStallTarget = {
+            x: targetX,
+            y: targetY
+        };
+
+        const isMakingProgress =
+            progressTowardTarget >= 0.03;
+
+        const isStalled =
+            distToTarget > 2.0 &&
+            !isMakingProgress &&
+            !pState._intent?.settled;
+
+        if (isStalled) {
+            pState._telemetryStallTicks =
+                (pState._telemetryStallTicks || 0) + 1;
+
+            if (
+                pState._telemetryStallTicks >= 8 &&
+                !pState._telemetryStallLogged
+            ) {
+                const nearbyPlayers = allPlayers
+                    .filter(other =>
+                        other.id !== pState.id &&
+                        getDistance(pState, other) < 1.5
+                    )
+                    .slice(0, 4)
+                    .map(other => ({
+                        id: other.id,
+                        name: other.name,
+                        action: other.action ?? null,
+                        distance: Number(
+                            getDistance(pState, other).toFixed(2)
+                        ),
+                        isBlocked: Boolean(other.isBlocked),
+                        isEngaged: Boolean(other.isEngaged),
+                        stunnedTicks: other.stunnedTicks ?? 0
+                    }));
+
+                logPlayDebug(
+                    'MOVEMENT_STALL',
+                    `${pState.name} is failing to approach the target`,
+                    {
+                        action: pState.action ?? null,
+                        movementMode: pState.movementMode ?? null,
+
+                        position: {
+                            x: Number(pState.x.toFixed(2)),
+                            y: Number(pState.y.toFixed(2))
+                        },
+
+                        target: {
+                            x: Number(targetX.toFixed(2)),
+                            y: Number(targetY.toFixed(2))
+                        },
+
+                        distanceAtStart: Number(distToTarget.toFixed(2)),
+                        distanceAfter: Number(remainingDistance.toFixed(2)),
+                        progressThisTick: Number(
+                            progressTowardTarget.toFixed(3)
+                        ),
+
+                        stallTicks: pState._telemetryStallTicks,
+
+                        velocity: {
+                            vx: Number(pState.vx.toFixed(2)),
+                            vy: Number(pState.vy.toFixed(2)),
+                            speed: Number(
+                                Math.hypot(pState.vx, pState.vy).toFixed(2)
+                            )
+                        },
+
+                        maxPossibleSpeed: Number(maxPossibleSpeed.toFixed(2)),
+                        gapFriction: Number(gapFriction.toFixed(2)),
+                        isSqueezing: Boolean(pState.isSqueezing),
+
+                        nearbyPlayers
+                    },
+                    telemetryTick
+                );
+
+                pState._telemetryStallLogged = true;
+            }
+        } else {
+            pState._telemetryStallTicks = 0;
+            pState._telemetryStallLogged = false;
+        }
+    }
 
     // Update metadata for AI logic and Visualizer angle rendering
     pState.currentSpeedYPS = Math.sqrt(pState.vx ** 2 + pState.vy ** 2);
