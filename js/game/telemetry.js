@@ -1,7 +1,7 @@
 // js/game/telemetry.js
 
-const MAX_BUFFERED_PLAYS = 3;
-const MAX_DECISIONS_PER_PLAY = 3000;
+const MAX_BUFFERED_PLAYS = 2;
+const MAX_DECISIONS_PER_PLAY = 4000;
 
 let playHistoryBuffer = [];
 let nextPlaySequence = 1;
@@ -53,7 +53,18 @@ export function clearPlayTelemetry() {
     window.__ACTIVE_PLAY_TELEMETRY__ = null;
 }
 
-export function initPlayTelemetry(context, playState, offPlayKey, defPlayKey) {
+export function initPlayTelemetry(context, playState, offPlayKey, defPlayKey, enabled = true) {
+    if (!enabled) {
+        // Stop events from a fast-simulated play attaching to the
+        // previous live play's telemetry record.
+        window.__ACTIVE_PLAY_TELEMETRY__ = null;
+        return;
+    }
+
+    if (typeof window !== 'undefined') {
+        window.__CURRENT_TICK__ = playState?.tick ?? 0;
+    }
+
     const sequence = nextPlaySequence++;
 
     const playData = {
