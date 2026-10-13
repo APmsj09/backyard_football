@@ -37,6 +37,117 @@ const FIELD_WIDTH = 53.3;
 const FIELD_LENGTH = 120;
 const WEEKS_IN_SEASON = 9;
 
+
+function initiateLateralToss(playState, thrower, receiver, purpose) {
+    if (
+        !playState?.ballState ||
+        !thrower ||
+        !receiver ||
+        thrower.id === receiver.id
+    ) {
+        return false;
+    }
+
+    const ball = playState.ballState;
+    const initialDistance = getDistance(thrower, receiver);
+
+    // Bound the flight duration to avoid excessively long exchanges.
+    const flightTicks = Math.max(
+        5,
+        Math.min(20, Math.ceil(initialDistance / 0.55))
+    );
+
+    const flightTime = flightTicks * TICK_DURATION_SECONDS;
+
+    // Lead the receiver slightly based on their current movement.
+    const targetX = Math.max(
+        0.5,
+        Math.min(
+            FIELD_WIDTH - 0.5,
+            receiver.x + (receiver.vx || 0) * flightTime
+        )
+    );
+
+    const targetY = Math.max(
+        0.5,
+        Math.min(
+            FIELD_LENGTH - 0.5,
+            receiver.y + (receiver.vy || 0) * flightTime
+        )
+    );
+
+    const dx = targetX - thrower.x;
+    const dy = targetY - thrower.y;
+
+    // Start a short airborne pitch using the existing ball physics.
+    ball.x = thrower.x;
+    ball.y = thrower.y;
+    ball.z = 1.0;
+
+    ball.prevX = ball.x;
+    ball.prevY = ball.y;
+    ball.prevZ = ball.z;
+
+    ball.vx = dx / flightTime;
+    ball.vy = dy / flightTime;
+    ball.vz =
+        9.8 * (flightTime - TICK_DURATION_SECONDS) / 2;
+
+    ball.targetX = targetX;
+    ball.targetY = targetY;
+    ball.targetPlayerId = receiver.id;
+
+    ball.throwerId = thrower.id;
+    ball.throwTick = playState.tick;
+
+    ball.inAir = true;
+    ball.isLoose = false;
+    ball.isLateral = true;
+    ball.lateralPurpose = purpose;
+    ball.isThrowAway = false;
+    ball.isSwatted = false;
+
+    ball.tipCount = 0;
+    ball._attemptedCatchPlayerIds = new Set();
+    ball.lastInteraction = null;
+    ball.lastDroppedById = null;
+    ball.droppedById = null;
+
+    // A lateral has no owner while it is traveling.
+    thrower.hasBall = false;
+    thrower.isBallCarrier = false;
+    thrower.action = 'idle';
+
+    receiver.hasBall = false;
+    receiver.isBallCarrier = false;
+    receiver.action = 'tracking_ball';
+
+    if (receiver.slot?.startsWith('RB')) {
+        receiver._handoffTick = playState.tick;
+    }
+
+    playState.handoffRequired = false;
+    playState.handoffOccurred = true;
+
+    if (purpose === 'flea_return') {
+        playState.fleaFlickerPhase = 'return_pitch';
+    }
+
+    logPlayDebug(
+        'LATERAL_RELEASE',
+        `${thrower.name} pitches the ball to ${receiver.name}`,
+        {
+            purpose,
+            distance: Number(initialDistance.toFixed(2)),
+            flightTicks,
+            targetPlayerId: receiver.id
+        },
+        playState.tick
+    );
+
+    return true;
+}
+
 export function determinePuntDecision(down, yardsToGo, ballOn, offenseTeam = null, scoreDiff = 0, timeRemaining = 420) {
     if (down !== 4) return false;
     if (ballOn >= 60) return false; // In field goal / red zone territory
@@ -838,7 +949,20 @@ export function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey
 
             if (playState.playIsLive && !ballPos.inAir && !ballPos.isLoose && !playState.turnover && !playState.sack) {
                 if (loopType === 'pass') {
-                    updateQBDecision(qb1, activeOffense, activeDefense, playState, playState.assignments, gameLog);
+                    const mayProcessQBDecision =
+                        playState.playKey !== 'Trick_Flea_Flicker' ||
+                        playState.fleaFlickerPhase === 'qb_pass';
+
+                    if (mayProcessQBDecision) {
+                        updateQBDecision(
+                            qb1,
+                            activeOffense,
+                            activeDefense,
+                            playState,
+                            playState.assignments,
+                            gameLog
+                        );
+                    }
                 } else if (loopType === 'punt') {
                     updateThrowoffDecision(playState, activeOffense, gameLog);
                 }
@@ -856,23 +980,41 @@ export function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey
                     const isTossPlay = rb1.assignment?.includes('toss');
                     // Tosses release quicker and allow a wider pitch distance
                     const handoffDistThreshold = isTossPlay ? 3.8 : 1.8;
-                    const handoffTickThreshold = isTossPlay ? 12 : (qbDepth < 4.0 ? 16 : 22);
-
                     if ((dist < handoffDistThreshold && playState.tick > 5) || (playState.tick >= handoffTickThreshold)) {
-                        qb1.hasBall = false;
-                        rb1.hasBall = true;
-                        rb1.isBallCarrier = true;
-                        playState.handoffOccurred = true;
-                        rb1._handoffTick = playState.tick;
+                        if (isTossPlay) {
+                            // Ordinary toss plays use the airborne lateral.
+                            if (initiateLateralToss(
+                                playState,
+                                qb1,
+                                rb1,
+                                'run_toss'
+                            )) {
+                                qb1.ghostTicks = 10;
+                            }
+                        } else {
+                            // Preserve the existing instant exchange for
+                            // ordinary handoffs and the flea-flicker's mesh.
+                            qb1.hasBall = false;
+                            qb1.isBallCarrier = false;
 
-                        // Give both ghost ticks and clear target locking so they don't stutter
-                        qb1.ghostTicks = 30;
-                        rb1.ghostTicks = 30;
-                        rb1.action = 'run_path';
-                        qb1.action = 'idle';
+                            rb1.hasBall = true;
+                            rb1.isBallCarrier = true;
+
+                            playState.handoffOccurred = true;
+                            playState.handoffRequired = false;
+                            rb1._handoffTick = playState.tick;
+
+                            qb1.ghostTicks = 30;
+                            rb1.ghostTicks = 30;
+                            rb1.action = 'run_path';
+                            qb1.action = 'idle';
+
+                            if (playState.playKey === 'Trick_Flea_Flicker') {
+                                playState.fleaFlickerPhase = 'rb_fake_run';
+                            }
+                        }
                     } else {
                         // QB steps to mesh point
-                        qb1.action = 'handoff_setup';
                         qb1.targetX = qb1.initialX + (rb1.initialX > qb1.initialX ? 0.8 : -0.8);
                         qb1.targetY = qbDepth < 4.0 ? (playState.lineOfScrimmage - 4.2) : (qb1.initialY + 0.8);
 
@@ -890,6 +1032,23 @@ export function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey
                         }
                     }
                 }
+            }
+
+            // The RB has finished the flea-flicker fake run.
+            // Pitch the ball backward to the quarterback.
+            if (
+                playState.playKey === 'Trick_Flea_Flicker' &&
+                playState.fleaFlickerPhase === 'rb_fake_run' &&
+                rb1?.hasBall &&
+                rb1.routePath?.length &&
+                rb1.currentPathIndex >= rb1.routePath.length
+            ) {
+                initiateLateralToss(
+                    playState,
+                    rb1,
+                    qb1,
+                    'flea_return'
+                );
             }
 
             updatePlayerTargets(
