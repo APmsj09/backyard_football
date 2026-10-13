@@ -210,8 +210,25 @@ export function diagnosePlay(pState, tick, offenseStates, playState = null) {
         logPlayDebug('DEF_READ', `${pState.name} (${pState.role}) committed to [${guess.toUpperCase()}]`, {
             confidence: Number(finalConfidence.toFixed(2)),
             direction,
-            dirConfidence: Number(dirConfidence.toFixed(2))
-        });
+            dirConfidence: Number(dirConfidence.toFixed(2)),
+            runScore: Number(finalRunScore.toFixed(1)),
+            passScore: Number(finalPassScore.toFixed(1)),
+            scoreMargin: Number(Math.abs(finalRunScore - finalPassScore).toFixed(1)),
+            commitThreshold: Number(commitThreshold.toFixed(2)),
+            iq,
+            passBlocks,
+            runBlocks,
+            timeFactor: Number(timeFactor.toFixed(2)),
+            qbAction: qb?.action ?? null,
+            observedCarrier: observedCarrier ? {
+                id: observedCarrier.id,
+                name: observedCarrier.name,
+                role: observedCarrier.role,
+                x: observedCarrier.x,
+                y: observedCarrier.y
+            } : null
+        }, tick);
+
         pState._lastLoggedGuess = guess;
     }
 
@@ -278,6 +295,27 @@ export function calculateSafetyHelp(safetyState, defenseStates, offenseStates, b
     if (isBallInAir && maxPressure < 6.0 && ballFlightTime < MIN_FLIGHT_TICKS + 3) return null;
 
     if (helpTarget && helpTarget.receiver) {
+        const helpTargetId = helpTarget.receiver.id;
+
+        if (safetyState._lastLoggedHelpTargetId !== helpTargetId) {
+            logPlayDebug(
+                'SAFETY_HELP_DECISION',
+                `${safetyState.name} commits to help on ${helpTarget.receiver.name}`,
+                {
+                    coverage: isCover2 ? 'Cover_2' : isCover3 ? 'Cover_3' : isCover1 ? 'Cover_1' : 'Other',
+                    targetReceiver: helpTarget.receiver.name,
+                    targetCorner: helpTarget.corner.name,
+                    pressureScore: Number(maxPressure.toFixed(2)),
+                    separation: Number(getDistance(helpTarget.corner, helpTarget.receiver).toFixed(2)),
+                    ballInAir: isBallInAir,
+                    ballFlightTime: Number(ballFlightTime.toFixed(1))
+                },
+                playState.tick
+            );
+
+            safetyState._lastLoggedHelpTargetId = helpTargetId;
+        }
+
         const helpX = (helpTarget.corner.x * 0.3) + (helpTarget.receiver.x * 0.7);
         const helpY = Math.max(helpTarget.receiver.y + 1.5, LOS + 10);
 
@@ -568,8 +606,42 @@ export function getSmartCarrierTarget(runner, defenseStates, offenseStates, fiel
         logPlayDebug('RB_LANE_FLIP', `${runner.name} switched running lanes`, {
             fromOffset: prevOffset,
             toOffset: bestOffset,
+
+            position: {
+                x: Number(runner.x.toFixed(2)),
+                y: Number(runner.y.toFixed(2))
+            },
+
+            velocity: {
+                vx: Number((runner.vx || 0).toFixed(2)),
+                vy: Number((runner.vy || 0).toFixed(2)),
+                speed: Number(currentSpeed.toFixed(2))
+            },
+
+            chosenTarget: {
+                x: Number(bestTargetX.toFixed(2)),
+                y: Number(bestTargetY.toFixed(2))
+            },
+
+            maxLateral,
+            isBehindLine,
+            inTraffic,
+
+            nearbyDefenders: nearbyDefenders
+                .slice()
+                .sort((a, b) => getDistance(runner, a) - getDistance(runner, b))
+                .slice(0, 3)
+                .map(d => ({
+                    name: d.name,
+                    x: Number(d.x.toFixed(2)),
+                    y: Number(d.y.toFixed(2)),
+                    distance: Number(getDistance(runner, d).toFixed(2)),
+                    vx: Number((d.vx || 0).toFixed(2)),
+                    vy: Number((d.vy || 0).toFixed(2))
+                })),
+
             topChoices: evaluatedLanesTracker.slice(0, 3)
-        });
+        }, playState.tick);
     } else if (runner._lockedLaneX === undefined) {
         runner._lockedLaneX = bestTargetX;
     }
@@ -647,9 +719,33 @@ export function getSmartCarrierTarget(runner, defenseStates, offenseStates, fiel
         logPlayDebug('CARRIER_VISION', `${runner.name} evaluated lanes`, {
             offset: Number((bestTargetX - runner.x).toFixed(1)),
             bestScore: Math.round(bestScore),
+
+            position: {
+                x: Number(runner.x.toFixed(2)),
+                y: Number(runner.y.toFixed(2))
+            },
+
+            target: {
+                x: Number(bestTargetX.toFixed(2)),
+                y: Number(bestTargetY.toFixed(2))
+            },
+
+            velocity: {
+                vx: Number((runner.vx || 0).toFixed(2)),
+                vy: Number((runner.vy || 0).toFixed(2)),
+                speed: Number(currentSpeed.toFixed(2))
+            },
+
+            chosenOffset: bestOffset,
             inTraffic,
-            action: runner.action
-        });
+            action: runner.action,
+
+            topChoices: evaluatedLanesTracker
+                .slice()
+                .sort((a, b) => b.score - a.score)
+                .slice(0, 3)
+        }, playState.tick);
+
         runner._lastLoggedTargetX = bestTargetX;
     }
 
@@ -1285,12 +1381,50 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
                 action: actionTaken,
                 readProgress: `${numReadsVisible}/${progression.length}`,
                 evaluatedScores: readDebugLog,
-                isPressured
-            });
+                selectedScore: Number(bestTargetEval.score.toFixed(1)),
+                throwThreshold: Number(THROW_THRESHOLD.toFixed(1)),
+                scoreMargin: Number((bestTargetEval.score - THROW_THRESHOLD).toFixed(1)),
+                isPressured,
+                pressureCount,
+                pressureDefender: pressureDefender ? {
+                    name: pressureDefender.name,
+                    distance: Number(getDistance(qbState, pressureDefender).toFixed(2))
+                } : null
+            }, playState.tick);
 
             if (gameLog) {
                 const readProgress = `${numReadsVisible}/${progression.length}`;
                 gameLog.push(`[Tick ${playState.tick}] 🧠 QB Reads (${readProgress}): [${readDebugLog.join(', ')}] -> Selected: ${targetPlayerState.slot}`);
+            }
+        } else if (bestTargetEval) {
+            // Log rejected targets when the visible reads change, then
+            // at most once every 10 ticks while the QB continues holding.
+            const previousHoldTick = qbState._lastLoggedHoldTick ?? -Infinity;
+
+            const shouldLogHold =
+                qbState._lastLoggedHoldReadCount !== numReadsVisible ||
+                playState.tick - previousHoldTick >= 10;
+
+            if (shouldLogHold) {
+                logPlayDebug('QB_HOLD', `${qbState.name} continues scanning instead of throwing`, {
+                    visibleReads: numReadsVisible,
+                    totalReads: progression.length,
+                    evaluatedScores: readDebugLog,
+                    bestTarget: bestTargetEval.info.state.slot,
+                    bestScore: Number(bestTargetEval.score.toFixed(1)),
+                    throwThreshold: Number(THROW_THRESHOLD.toFixed(1)),
+                    scoreMargin: Number((bestTargetEval.score - THROW_THRESHOLD).toFixed(1)),
+                    isPressured,
+                    pressureCount,
+                    pressureDefender: pressureDefender ? {
+                        name: pressureDefender.name,
+                        distance: Number(getDistance(qbState, pressureDefender).toFixed(2))
+                    } : null,
+                    hasCompletedDropback: Boolean(qbState.hasCompletedDropback)
+                }, playState.tick);
+
+                qbState._lastLoggedHoldReadCount = numReadsVisible;
+                qbState._lastLoggedHoldTick = playState.tick;
             }
         }
 
