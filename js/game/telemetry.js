@@ -1,6 +1,6 @@
 // js/game/telemetry.js
 
-const MAX_BUFFERED_PLAYS = 2;
+const MAX_BUFFERED_PLAYS = 3;
 const MAX_DECISIONS_PER_PLAY = 4000;
 
 let playHistoryBuffer = [];
