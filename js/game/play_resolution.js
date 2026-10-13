@@ -1263,6 +1263,8 @@ export function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey
                         // with the player who recovered it.
                         ball.isLoose = false;
                         ball.inAir = false;
+                        ball.isLateral = false;
+                        ball.lateralPurpose = null;
                         ball.vx = 0;
                         ball.vy = 0;
                         ball.vz = 0;
