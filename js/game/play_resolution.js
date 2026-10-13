@@ -1258,6 +1258,12 @@ export function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey
         const deadBall = playState.ballState;
 
         if (deadBall) {
+            // Keep the dead ball inside the field boundaries.
+            deadBall.x = Math.max(
+                0.5,
+                Math.min(FIELD_WIDTH - 0.5, deadBall.x)
+            );
+
             // Synchronize the physical ball with the official dead-ball spot.
             deadBall.y = playState.finalBallY;
             deadBall.z = 0;
