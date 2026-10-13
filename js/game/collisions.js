@@ -185,13 +185,68 @@ export function checkTackleCollisions(playState, gameLog) {
                     if (dot > 0.4) return false;
                 }
             }
-            return dist < 0.5;
+            // A defender still engaged with a blocker can only reach out
+            // for a weak arm tackle at very close range.
+            return dist < 0.8;
         }
         return true;
     });
 
     for (const defender of defenders) {
         const distance = getDistance(carrier, defender);
+        const isEngagedTackler = defender.isBlocked || defender.isEngaged;
+
+        if (isEngagedTackler) {
+            // Arm-tackle attempts are limited to avoid applying contact
+            // slowdown on every single simulation tick.
+            const lastArmTackleTick =
+                defender._lastArmTackleTick ?? -Infinity;
+
+            if (
+                distance < 0.8 &&
+                playState.tick - lastArmTackleTick >= 6
+            ) {
+                defender._lastArmTackleTick = playState.tick;
+
+                const armTackleSkill =
+                    ((defender.tkl || 50) * 0.6) +
+                    ((defender.str || 50) * 0.4);
+
+                // Stronger tacklers can slow the runner a little more,
+                // but engaged contact cannot directly end the play.
+                const slowFactor = Math.max(
+                    0.84,
+                    Math.min(
+                        0.94,
+                        0.91 - ((armTackleSkill - 50) * 0.001)
+                    )
+                );
+
+                carrier.vx *= slowFactor;
+                carrier.vy *= slowFactor;
+                carrier.moveCooldown = Math.max(
+                    carrier.moveCooldown || 0,
+                    4
+                );
+
+                logPlayDebug(
+                    'ARM_TACKLE_CONTACT',
+                    `${defender.name} reached ${carrier.name} while engaged`,
+                    {
+                        distance: Number(distance.toFixed(2)),
+                        armTackleSkill,
+                        speedReductionPercent: Math.round(
+                            (1 - slowFactor) * 100
+                        )
+                    },
+                    playState.tick
+                );
+            }
+
+            // Don't let the engaged defender proceed into the ordinary
+            // full tackle or fumble-resolution code.
+            continue;
+        }
 
         if (distance < 1.4) {
             const canPerformMove = (!carrier.moveCooldown || carrier.moveCooldown <= 0) && carrier.action !== 'handoff_setup';
