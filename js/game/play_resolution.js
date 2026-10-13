@@ -1098,16 +1098,56 @@ export function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey
                     const recovery = checkFumbleRecovery(playState, gameLog, 3.0);
                     if (recovery) {
                         const recPlayer = recovery.playerState;
-                        playState.ballState.isLoose = false;
-                        playState.ballState.inAir = false;
+                        const ball = playState.ballState;
+
+                        // End loose-ball physics and synchronize the ball
+                        // with the player who recovered it.
+                        ball.isLoose = false;
+                        ball.inAir = false;
+                        ball.vx = 0;
+                        ball.vy = 0;
+                        ball.vz = 0;
+                        ball.x = recPlayer.x;
+                        ball.y = recPlayer.y;
+                        ball.z = 0.5;
+                        ball.targetPlayerId = null;
+                        ball.targetX = null;
+                        ball.targetY = null;
+
                         recPlayer.hasBall = true;
                         recPlayer.isBallCarrier = true;
                         recPlayer.action = 'run_path';
+
                         ballCarrierState = recPlayer;
                         playState.possessionChanged = recovery.possessionChange;
                         playState.returnStartY = recPlayer.y;
+
+                        logPlayDebug(
+                            'FUMBLE_RECOVERY',
+                            `${recPlayer.name} recovered the loose ball`,
+                            {
+                                playerId: recPlayer.id,
+                                playerName: recPlayer.name,
+                                isOffense: recPlayer.isOffense,
+                                possessionChanged: recovery.possessionChange,
+                                recoverySpot: {
+                                    x: recPlayer.x,
+                                    y: recPlayer.y
+                                },
+                                ballVelocity: {
+                                    vx: ball.vx,
+                                    vy: ball.vy,
+                                    vz: ball.vz
+                                }
+                            },
+                            playState.tick
+                        );
+
                         if (gameLog) gameLog.push(`🏈 ${recPlayer.name} recovers!`);
-                        playState.statEvents.push({ type: 'fumble_recovery', playerId: recPlayer.id });
+                        playState.statEvents.push({
+                            type: 'fumble_recovery',
+                            playerId: recPlayer.id
+                        });
                     }
                 }
             }
