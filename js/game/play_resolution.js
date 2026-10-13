@@ -411,6 +411,21 @@ export function determinePlayCall(offense, defense, down, yardsToGo, ballOn, sco
             }
         }
 
+        // Late-down short-yardage discipline:
+        // Favor a run when the offense needs only a few feet.
+        // Keep desperation situations flexible.
+        if (
+            !isDesperation &&
+            yardsToGo <= 1.5 &&
+            (down === 3 || down === 4)
+        ) {
+            if (play.type === 'run') {
+                score += down === 4 ? 40 : 28;
+            } else {
+                score -= down === 4 ? 10 : 6;
+            }
+        }
+
         return {
             key,
             score: Math.max(1, score)
