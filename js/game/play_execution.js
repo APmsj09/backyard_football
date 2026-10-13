@@ -1187,19 +1187,33 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                         }
 
                         // --- ROUTE BREAK & CUT REACTIONS ---
+                        const isDoubleMoveRoute = [
+                            'Sluggo',
+                            'Out_And_Up',
+                            'Hitch_And_Go',
+                            'PostCorner'
+                        ].some(r => pState.assignment?.includes(r));
+
+                        // Evaluate double-move reactions only when transitioning
+                        // into the final route segment, not at every waypoint.
+                        const isDesignatedDoubleMoveBreak =
+                            isDoubleMoveRoute &&
+                            pState.routePath?.length > 1 &&
+                            pState.currentPathIndex === pState.routePath.length - 1;
+
                         const coverageDefender = defenseStates.find(d =>
                             (d.assignment?.includes(pState.slot) || d.assignedPlayerSlot === pState.slot) &&
                             getDistance(pState, d) < 5.0
                         );
 
-                        if (coverageDefender) {
+                        if (coverageDefender && (!isDoubleMoveRoute || isDesignatedDoubleMoveBreak)) {
                             const wrAgility = pState.agility || 50;
                             const dbAgility = coverageDefender.agility || 50;
                             const dbIQ = coverageDefender.playbookIQ || 50;
                             const wrStrength = pState.strength || 50;
                             const dbStrength = coverageDefender.strength || 50;
 
-                            const isDoubleMove = ['Sluggo', 'Out_And_Up', 'Hitch_And_Go', 'PostCorner'].some(r => pState.assignment?.includes(r));
+                            const isDoubleMove = isDoubleMoveRoute;
                             let separated = false;
 
                             // 1. Playground Double-Move Trap
