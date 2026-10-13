@@ -947,7 +947,12 @@ export function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey
                         }
                         break;
                     }
-                    if (!ballCarrierState.isOffense && ballCarrierState.y <= 10.0) {
+                    if (
+                        ballCarrierState &&
+                        (ballCarrierState.hasBall || ballCarrierState.isBallCarrier) &&
+                        !ballCarrierState.isOffense &&
+                        ballCarrierState.y <= 10.0
+                    ) {
                         if (playState.type === 'punt') {
                             logPlayDebug(
                                 'PUNT_TD_DIAGNOSTIC',
