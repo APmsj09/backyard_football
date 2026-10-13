@@ -8,14 +8,10 @@ import {
 import {
     getZoneCenter, calculateRoutePath, resolveDepthForPlay, getAssignment, zoneBoundaries
 } from './engine_helpers.js';
-import {
-    calculateSafetyHelp, diagnosePlay, getSmartCarrierTarget
-} from './ai.js';
+import { calculateSafetyHelp, diagnosePlay, getSmartCarrierTarget } from './ai.js';
 import { pushGameLog } from './collisions.js';
-import { logPlayDebug } from './telemetry.js';
-import {
-    initMovementIntent, setPointIntent, setHoldIntent, setTrackIntent, setLaneIntent, setRouteIntent, resolveMovementIntent
-} from './movement_intent.js';
+import { initPlayTelemetry, finalizePlayTelemetry, logPlayDebug } from './telemetry.js';
+import { initMovementIntent, setPointIntent, setHoldIntent, setTrackIntent, setLaneIntent, setRouteIntent, resolveMovementIntent } from './movement_intent.js';
 
 const FIELD_WIDTH = 53.3;
 const FIELD_LENGTH = 120;
