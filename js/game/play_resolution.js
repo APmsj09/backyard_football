@@ -1258,10 +1258,14 @@ export function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey
         const deadBall = playState.ballState;
 
         if (deadBall) {
+            // Synchronize the physical ball with the official dead-ball spot.
+            deadBall.y = playState.finalBallY;
             deadBall.z = 0;
+
             deadBall.vx = 0;
             deadBall.vy = 0;
             deadBall.vz = 0;
+
             deadBall.inAir = false;
             deadBall.isLoose = false;
         }
