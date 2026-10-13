@@ -225,7 +225,7 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
             targetY - intent.targetY
         ) > 0.05;
 
-        if (!targetChanged) {
+        if (!targetChanged && distToTarget <= arrivalRadius) {
             pState.x = targetX;
             pState.y = targetY;
             pState.vx = 0;
@@ -237,7 +237,7 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
             return;
         }
 
-        // A legacy/direct target change invalidates the old settled state.
+        // A changed or distant target invalidates the old settled state.
         intent.settled = false;
     }
 
