@@ -891,12 +891,32 @@ export function handleBallArrival(playState, carrier, playResult, gameLog) {
                 return;
             }
 
+            // Preserve the incoming punt position before snapping the ball
+            // to the player's coordinates.
+            const puntBallAtContact =
+                playState.type === 'punt' && !bestCandidate.isOffense
+                    ? {
+                        x: ball.x,
+                        y: ball.y,
+                        z: ball.z,
+                        prevX: ball.prevX ?? null,
+                        prevY: ball.prevY ?? null,
+                        targetX: ball.targetX ?? null,
+                        targetY: ball.targetY ?? null,
+                        vx: ball.vx ?? null,
+                        vy: ball.vy ?? null,
+                        vz: ball.vz ?? null
+                    }
+                    : null;
+
             ball.inAir = false;
             ball.isLoose = false;
             ball.x = bestCandidate.x;
             ball.y = bestCandidate.y;
             ball.z = 1.0;
-            ball.vx = 0; ball.vy = 0; ball.vz = 0;
+            ball.vx = 0;
+            ball.vy = 0;
+            ball.vz = 0;
 
             bestCandidate.hasBall = true;
             bestCandidate.isBallCarrier = true;
@@ -917,9 +937,111 @@ export function handleBallArrival(playState, carrier, playResult, gameLog) {
             });
 
             if (playState.type === 'punt' && !bestCandidate.isOffense) {
-                if (gameLog) pushGameLog(gameLog, `[Tick ${playState.tick}] 🏈 ${bestCandidate.name} catches the punt! Return started.`, playState);
                 playState.possessionChanged = true;
                 playState.returnStartY = bestCandidate.y;
+
+                const qbState = playState.activePlayers.find(
+                    p => p.slot === 'QB1' && p.isOffense
+                );
+
+                // Centralized punt-catch diagnostics.
+                logPlayDebug(
+                    'PUNT_CATCH_STATE',
+                    'Defensive punt catch resolved',
+                    {
+                        returner: {
+                            id: bestCandidate.id,
+                            name: bestCandidate.name,
+                            slot: bestCandidate.slot,
+                            x: bestCandidate.x,
+                            y: bestCandidate.y,
+                            isOffense: bestCandidate.isOffense,
+                            hasBall: bestCandidate.hasBall,
+                            isBallCarrier: bestCandidate.isBallCarrier
+                        },
+
+                        ballAtContact: puntBallAtContact,
+
+                        ballAfterCatch: {
+                            x: ball.x,
+                            y: ball.y,
+                            z: ball.z,
+                            inAir: ball.inAir,
+                            isLoose: ball.isLoose,
+                            targetY: ball.targetY ?? null
+                        },
+
+                        returnStartY: playState.returnStartY,
+                        lineOfScrimmage: playState.lineOfScrimmage,
+
+                        qb: qbState ? {
+                            id: qbState.id,
+                            name: qbState.name,
+                            x: qbState.x,
+                            y: qbState.y,
+                            action: qbState.action,
+                            hasBall: qbState.hasBall,
+                            isBallCarrier: qbState.isBallCarrier,
+                            ghostTicks: qbState.ghostTicks ?? 0
+                        } : null,
+
+                        flaggedCarriers: playState.activePlayers
+                            .filter(p => p.hasBall || p.isBallCarrier)
+                            .map(p => ({
+                                id: p.id,
+                                name: p.name,
+                                slot: p.slot,
+                                isOffense: p.isOffense,
+                                x: p.x,
+                                y: p.y,
+                                hasBall: p.hasBall,
+                                isBallCarrier: p.isBallCarrier
+                            }))
+                    },
+                    playState.tick
+                );
+
+                // In this simulation, y >= 110 is the receiving team's
+                // own end zone. A catch there ends the play as a touchback.
+                if (bestCandidate.y >= 110.0) {
+                    playState.touchback = true;
+                    playState.playIsLive = false;
+
+                    // resolvePlay converts this field coordinate with:
+                    // gameInstance.ballOn = 110 - finalBallY
+                    // Therefore, 90 places the receiving team at its 20.
+                    playState.finalBallY = 90.0;
+
+                    logPlayDebug(
+                        'PUNT_TOUCHBACK',
+                        'Punt caught in receiving team end zone',
+                        {
+                            returner: bestCandidate.name,
+                            catchY: bestCandidate.y,
+                            finalBallY: playState.finalBallY
+                        },
+                        playState.tick
+                    );
+
+                    if (gameLog) {
+                        pushGameLog(
+                            gameLog,
+                            `[Tick ${playState.tick}] 🏈 Touchback! Punt caught in the end zone.`,
+                            playState
+                        );
+                    }
+
+                    return;
+                }
+
+                if (gameLog) {
+                    pushGameLog(
+                        gameLog,
+                        `[Tick ${playState.tick}] 🏈 ${bestCandidate.name} catches the punt! Return started.`,
+                        playState
+                    );
+                }
+
                 return;
             }
 
