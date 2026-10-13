@@ -993,24 +993,9 @@ export function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey
                                 playState.tick
                             );
                         }
-                        // A punt caught in the receiving team's end zone is a touchback,
-                        // not a defensive touchdown. A returner must enter the end zone
-                        // from the field of play to score.
-                        const caughtPuntInEndzone =
-                            playState.type === 'punt' &&
-                            playState.returnStartY !== null &&
-                            playState.returnStartY <= 10.0;
-
-                        if (caughtPuntInEndzone) {
-                            playState.touchback = true;
-                            playState.playIsLive = false;
-                            playState.possessionChanged = true;
-                            playState.finalBallY = 20.0; // Touchback spot; adjust if your rules differ.
-                            if (gameLog) {
-                                gameLog.push(`🏈 Touchback! Punt caught in the end zone.`);
-                            }
-                            break;
-                        }
+                        // Reaching y <= 10 is reaching the returner's
+                        // scoring end zone. Punt touchbacks are handled
+                        // at catch resolution in collisions.js.
 
                         playState.touchdown = true;
                         playState.defensiveTD = true;
@@ -1250,13 +1235,14 @@ export function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey
     }
 
     playResult.clockBurn = clockBurn;
+    playResult.touchback = Boolean(playState.touchback);
 
     finalizePlayTelemetry(
         playResult,
         playState.finalBallY,
         playState
     );
-
+    
     return {
         playResult,
         finalBallY: playState.finalBallY,
