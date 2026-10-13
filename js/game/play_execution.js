@@ -412,11 +412,22 @@ export function setupInitialPlayerStates(playState, offense, defense, play, assi
         playState.ballState.y = snapTaker.y;
         playState.ballState.z = 1.0;
 
-        if (play.type === 'run') {
-            const runner = playState.activePlayers.find(p => p.isOffense && p.assignment?.startsWith('run_') && p.id !== snapTaker.id);
+        const isFleaFlicker = offensivePlayKey === 'Trick_Flea_Flicker';
+
+        if (play.type === 'run' || isFleaFlicker) {
+            const runner = playState.activePlayers.find(p =>
+                p.isOffense &&
+                p.assignment?.startsWith('run_') &&
+                p.id !== snapTaker.id
+            );
+
             if (runner) {
                 playState.handoffRequired = true;
                 playState.handoffTargetSlot = runner.slot;
+
+                if (isFleaFlicker) {
+                    playState.fleaFlickerPhase = 'qb_mesh';
+                }
             } else {
                 snapTaker.isBallCarrier = true;
             }
@@ -869,6 +880,45 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
 
             if (isRunner) {
                 pState.isBallCarrier = true;
+
+                // During the flea-flicker's fake run, follow the designed
+                // RB route instead of switching immediately to open-field AI.
+                if (
+                    playState.playKey === 'Trick_Flea_Flicker' &&
+                    playState.fleaFlickerPhase === 'rb_fake_run' &&
+                    pState.slot === 'RB1'
+                ) {
+                    const routePath = pState.routePath || [];
+
+                    if (pState.currentPathIndex < routePath.length) {
+                        const routePoint = routePath[pState.currentPathIndex];
+
+                        if (getDistance(pState, routePoint) < 0.65) {
+                            pState.currentPathIndex++;
+                        }
+                    }
+
+                    const nextPoint = routePath[pState.currentPathIndex];
+
+                    if (nextPoint) {
+                        pState.action = 'run_path';
+                        pState.targetX = nextPoint.x;
+                        pState.targetY = nextPoint.y;
+
+                        setRouteIntent(
+                            pState,
+                            nextPoint.x,
+                            nextPoint.y,
+                            0.6
+                        );
+                    } else {
+                        setHoldIntent(pState, pState.x, pState.y);
+                    }
+
+                    return;
+                }       
+                
+                
                 let targetX = pState.x;
                 let targetY = pState.y;
 
@@ -965,7 +1015,12 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                 }
             }
 
-            if (pState.role === 'QB' && playState.handoffOccurred) {
+            if (
+                pState.role === 'QB' &&
+                playState.handoffOccurred &&
+                !pState.hasBall &&
+                playState.fleaFlickerPhase !== 'return_pitch'
+            ) {
                 const driftSide = pState.initialX > CENTER_X ? 1 : -1;
                 setPointIntent(pState, pState.initialX + (driftSide * 2), playState.lineOfScrimmage - 5.0, 0.4);
                 pState.action = 'idle';
