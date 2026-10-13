@@ -14,7 +14,7 @@ import {
     updateQBDecision, updateThrowoffDecision
 } from './ai.js';
 import {
-    initPlayTelemetry, finalizePlayTelemetry
+    initPlayTelemetry, finalizePlayTelemetry,logPlayDebug
 } from './telemetry.js';
 import {
     captureFrame
@@ -713,14 +713,75 @@ export function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey
     initPlayTelemetry(context, playState, finalOffensivePlayKey, defensivePlayKey);
 
     try {
-        setupInitialPlayerStates(playState, offense, defense, play, playState.assignments, ballOn, defensivePlayKey, ballHash, finalOffensivePlayKey);
+        setupInitialPlayerStates(
+            playState,
+            offense,
+            defense,
+            play,
+            playState.assignments,
+            ballOn,
+            defensivePlayKey,
+            ballHash,
+            finalOffensivePlayKey
+        );
+
+        // Record the actual starting state AFTER player setup.
+        logPlayDebug(
+            'PLAY_START',
+            'Play setup complete; simulation ready',
+            {
+                type: playState.type,
+                lineOfScrimmage: playState.lineOfScrimmage,
+
+                ball: {
+                    x: playState.ballState?.x ?? null,
+                    y: playState.ballState?.y ?? null,
+                    z: playState.ballState?.z ?? null,
+                    inAir: playState.ballState?.inAir ?? null
+                },
+
+                flaggedCarriers: playState.activePlayers
+                    .filter(p => p.hasBall || p.isBallCarrier)
+                    .map(p => ({
+                        id: p.id,
+                        name: p.name,
+                        slot: p.slot,
+                        x: p.x,
+                        y: p.y,
+                        isOffense: p.isOffense,
+                        hasBall: p.hasBall,
+                        isBallCarrier: p.isBallCarrier
+                    }))
+            },
+            playState.tick
+        );
+
         if (isLive && gameLog) {
-            playState.visualizationFrames.push(captureFrame(playState, gameLog));
+            playState.visualizationFrames.push(
+                captureFrame(playState, gameLog)
+            );
         }
     } catch (setupError) {
         playResult.outcome = 'turnover';
         playResult.possessionChange = true;
-        return { playResult, finalBallY: ballOn, log: gameLog, visualizationFrames: [] };
+
+        logPlayDebug(
+            'PLAY_SETUP_ERROR',
+            'Player setup failed; simulation did not start',
+            {
+                message: setupError?.message ?? String(setupError)
+            },
+            playState.tick
+        );
+
+        finalizePlayTelemetry(playResult, ballOn, playState);
+
+        return {
+            playResult,
+            finalBallY: ballOn,
+            log: gameLog,
+            visualizationFrames: []
+        };
     }
 
     let ballCarrierState = null;
@@ -887,6 +948,51 @@ export function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey
                         break;
                     }
                     if (!ballCarrierState.isOffense && ballCarrierState.y <= 10.0) {
+                        if (playState.type === 'punt') {
+                            logPlayDebug(
+                                'PUNT_TD_DIAGNOSTIC',
+                                'Defensive player reached the scoring check',
+                                {
+                                    detectedCarrier: {
+                                        id: ballCarrierState.id,
+                                        name: ballCarrierState.name,
+                                        slot: ballCarrierState.slot,
+                                        role: ballCarrierState.role,
+                                        isOffense: ballCarrierState.isOffense,
+                                        x: ballCarrierState.x,
+                                        y: ballCarrierState.y,
+                                        hasBall: ballCarrierState.hasBall,
+                                        isBallCarrier: ballCarrierState.isBallCarrier
+                                    },
+
+                                    returnStartY: playState.returnStartY ?? null,
+                                    lineOfScrimmage: playState.lineOfScrimmage,
+
+                                    ball: {
+                                        x: playState.ballState.x,
+                                        y: playState.ballState.y,
+                                        z: playState.ballState.z,
+                                        inAir: playState.ballState.inAir,
+                                        isLoose: playState.ballState.isLoose,
+                                        targetY: playState.ballState.targetY ?? null
+                                    },
+
+                                    flaggedCarriers: playState.activePlayers
+                                        .filter(p => p.hasBall || p.isBallCarrier)
+                                        .map(p => ({
+                                            id: p.id,
+                                            name: p.name,
+                                            slot: p.slot,
+                                            isOffense: p.isOffense,
+                                            x: p.x,
+                                            y: p.y,
+                                            hasBall: p.hasBall,
+                                            isBallCarrier: p.isBallCarrier
+                                        }))
+                                },
+                                playState.tick
+                            );
+                        }
                         // A punt caught in the receiving team's end zone is a touchback,
                         // not a defensive touchdown. A returner must enter the end zone
                         // from the field of play to score.
@@ -1009,7 +1115,20 @@ export function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey
                 playState.visualizationFrames.push(captureFrame(playState, gameLog));
             }
         }
-    } catch (e) {
+     } catch (e) {
+        logPlayDebug(
+            'PLAY_SIMULATION_ERROR',
+            'Simulation loop crashed',
+            {
+                message: e?.message ?? String(e),
+                name: e?.name ?? 'Error',
+                tick: playState.tick,
+                playType: playState.type,
+                playIsLive: playState.playIsLive
+            },
+            playState.tick
+        );
+
         console.error("Simulation Loop Crash:", e);
     }
 
@@ -1132,7 +1251,11 @@ export function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey
 
     playResult.clockBurn = clockBurn;
 
-    finalizePlayTelemetry(playResult, playState.finalBallY);
+    finalizePlayTelemetry(
+        playResult,
+        playState.finalBallY,
+        playState
+    );
 
     return {
         playResult,
