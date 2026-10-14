@@ -1526,10 +1526,9 @@ window.app_updateClipboard = (field, value) => {
         Game.aiSetSituationalGameplan(team);
     }
     
-    // We do NOT want to fully re-render the whole screen while dragging a slider (kills performance),
-    // so we only fully re-render if the playcaller dropdown changed.
+    // Call via the UI namespace since the function is defined in ui.js
     if (field === 'playcaller') {
-        renderPlaybookManager(gs);
+        UI.renderPlaybookManager(gs);
     } else {
         // Update the textual clash warning dynamically
         const clash = Game.calculateSchemeClash(team);
