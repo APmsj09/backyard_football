@@ -241,6 +241,33 @@ export function aiManageTeamStaff(team, gameState) {
     });
 }
 
+export function calculateSchemeClash(team) {
+    if (!team || !team.gameplan || !team.gameplan.situational) return 0;
+    if (team.gameplan.situational.playcaller !== 'GM') return 0;
+
+    const coach = team.staff?.coach || team.coach;
+    const tactical = coach?.biases?.tactical?.name || 'Balanced Tactician';
+    const sit = team.gameplan.situational;
+
+    let expectedRun = 50;
+    let expectedDefAggro = 50;
+
+    if (tactical === 'Smashmouth Zealot') expectedRun += 30;
+    if (tactical === 'Air Raid Purist') expectedRun -= 30;
+    if (tactical === 'Blitz Addict') expectedDefAggro += 35;
+    if (tactical === 'Conservative Turtler') expectedDefAggro -= 25;
+
+    const runDiff = Math.abs(sit.earlyDownTendency - expectedRun);
+    const aggroDiff = Math.abs(sit.defenseAggressiveness - expectedDefAggro);
+
+    // Minor deviations are ignored. Major philosophical clashes cause confusion.
+    const totalClash = (runDiff + aggroDiff) / 2;
+    if (totalClash <= 15) return 0; 
+
+    // Max penalty is around -18 IQ for total philosophical opposites
+    return Math.floor((totalClash - 15) * 0.35); 
+}
+
 export function aiSetSituationalGameplan(team) {
     if (!team || !team.gameplan) return;
     
