@@ -293,6 +293,7 @@ class DebugCollector {
 
         this.report4_offseason.marketCompetition[`day${dayNum}Activity`] = {
             totalSignings: (result.daySignings || []).length,
+            aiBidAudit: result.aiBidAudit || null,
 
             userBidsWon: userResults.filter(r => r.won).length,
             userBidsLost: userResults.filter(
