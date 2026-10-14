@@ -242,42 +242,90 @@ export async function initializeLeague(onProgress) {
         game.teams.push(yTeam); // ✅ Now unified in game.teams
     }
 
-    // Populate Initial Main Team Rosters with Natural Tier Variance
+    // Populate initial main-team rosters with positional balance and tier variance.
     const tier1Teams = game.teams.filter(t => t.tier === 1);
     const tier2Teams = game.teams.filter(t => t.tier === 2);
 
-    // Sort pool by best overall rating so elite teams get elite talent
+    const INITIAL_POSITION_TARGETS = {
+        QB: 1,
+        RB: 1,
+        WR: 2,
+        TE: 1,
+        OL: 3,
+        DL: 2,
+        LB: 1,
+        DB: 2
+    };
+
+    // Keep the overall talent pool sorted. Position-specific selections below
+    // preserve that ordering, allowing Tier 1 to draw from stronger candidates.
     const unassigned = game.players
         .filter(p => !p.teamId && p.age >= 12 && p.age <= 18)
-        .sort((a, b) => calculateOverall(b, estimateBestPosition(b)) - calculateOverall(a, estimateBestPosition(a)));
+        .sort((a, b) =>
+            calculateOverall(b, estimateBestPosition(b)) -
+            calculateOverall(a, estimateBestPosition(a))
+        );
 
-    // 1. Tier 1 (Premier Parks): Draft higher-tier veterans first (creates 58-68 OVR powerhouses)
-    tier1Teams.forEach(team => {
+    const pickInitialPlayer = (team, position, tier) => {
+        const positionPool = unassigned.filter(
+            p => (p.pos || estimateBestPosition(p)) === position
+        );
+
+        if (positionPool.length === 0) return false;
+
+        // Tier 1 selects from the top 40% of available players at that position.
+        // Tier 2 draws from the remaining pool.
+        const candidatePool = tier === 1
+            ? positionPool.slice(
+                0,
+                Math.max(1, Math.ceil(positionPool.length * 0.4))
+            )
+            : positionPool;
+
+        const player = getRandom(candidatePool);
+        if (!player || !addPlayerToTeam(player, team)) return false;
+
+        const poolIndex = unassigned.findIndex(p => p.id === player.id);
+        if (poolIndex !== -1) unassigned.splice(poolIndex, 1);
+
+        return true;
+    };
+
+    const fillInitialRoster = (team, tier) => {
         const targetRosterSize = 14;
-        for (let i = 0; i < targetRosterSize; i++) {
-            if (unassigned.length > 0) {
-                // Tier 1 draws from the top 40% of the available talent pool
-                const poolWindow = Math.min(unassigned.length - 1, Math.max(0, Math.floor(unassigned.length * 0.4)));
-                const idx = getRandomInt(0, poolWindow);
-                const p = unassigned.splice(idx, 1)[0];
-                addPlayerToTeam(p, team);
+
+        // Fill the required positional groups first.
+        for (const [position, targetCount] of Object.entries(INITIAL_POSITION_TARGETS)) {
+            let assignedCount = 0;
+
+            while (assignedCount < targetCount && team.roster.length < targetRosterSize) {
+                if (!pickInitialPlayer(team, position, tier)) break;
+                assignedCount++;
             }
         }
-        aiSetDepthChart(team);
-    });
 
-    // 2. Tier 2 (Sandlot Circuit): Receives developing talent & raw prospects (creates 44-54 OVR teams)
-    tier2Teams.forEach(team => {
-        const targetRosterSize = 14;
-        for (let i = 0; i < targetRosterSize; i++) {
-            if (unassigned.length > 0) {
-                const idx = getRandomInt(0, unassigned.length - 1);
-                const p = unassigned.splice(idx, 1)[0];
-                addPlayerToTeam(p, team);
-            }
+        // Use the remaining roster spot(s) for best available talent.
+        while (team.roster.length < targetRosterSize && unassigned.length > 0) {
+            const candidatePool = tier === 1
+                ? unassigned.slice(
+                    0,
+                    Math.max(1, Math.ceil(unassigned.length * 0.4))
+                )
+                : unassigned;
+
+            const player = getRandom(candidatePool);
+            if (!player || !addPlayerToTeam(player, team)) break;
+
+            const poolIndex = unassigned.findIndex(p => p.id === player.id);
+            if (poolIndex !== -1) unassigned.splice(poolIndex, 1);
         }
+
         aiSetDepthChart(team);
-    });
+    };
+
+    // Tier 1 receives stronger options at each position before Tier 2 is filled.
+    tier1Teams.forEach(team => fillInitialRoster(team, 1));
+    tier2Teams.forEach(team => fillInitialRoster(team, 2));
 
     if (onProgress) onProgress(1.0);
     addMessage("Ready!", "League generated. Time to create your team.");
