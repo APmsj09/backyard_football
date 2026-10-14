@@ -2184,14 +2184,27 @@ export function advanceToOffseason() {
     const teammateImproveChance = 0.15;
     game.teams.forEach(team => {
         if (!team || !team.roster || team.roster.length < 2) return;
+
         const fullRoster = getRosterObjects(team);
         if (fullRoster.length < 2) return;
+
+        const gmRelationshipBonus = team.id === game.playerTeam?.id
+            ? (team.gmProfile?.bonuses?.relationshipGrowth || 0)
+            : 0;
+
+        const relationshipImproveChance = Math.min(
+            0.5,
+            teammateImproveChance + gmRelationshipBonus
+        );
 
         for (let i = 0; i < fullRoster.length; i++) {
             for (let j = i + 1; j < fullRoster.length; j++) {
                 const p1 = fullRoster[i]; const p2 = fullRoster[j];
                 if (!p1 || !p2) continue;
-                if (Math.random() < teammateImproveChance) improveRelationship(p1.id, p2.id);
+
+                if (Math.random() < relationshipImproveChance) {
+                    improveRelationship(p1.id, p2.id);
+                }
             }
         }
     });
