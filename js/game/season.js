@@ -1435,7 +1435,12 @@ export function processOffseasonFADay(gameState, userBids = []) {
         if (n.clearPlayerMarketCache) n.clearPlayerMarketCache(gameState);
     }).catch(() => { });
 
-    return { daySignings, rejectedBids, userBidResults };
+    return {
+        daySignings,
+        rejectedBids,
+        userBidResults,
+        activeNegotiations
+    };
 }
 
 export function executeAICutDowns() {
@@ -1567,6 +1572,17 @@ export function developPlayer(player, team = null) {
     if (!player || !player.attributes) return { player, improvements: [] };
     const developmentReport = { player, improvements: [] };
 
+    const attributesBefore = Object.fromEntries(
+        Object.entries(player.attributes).map(([category, attributes]) => [
+            category,
+            Object.fromEntries(
+                Object.entries(attributes || {}).filter(
+                    ([, value]) => typeof value === 'number'
+                )
+            )
+        ])
+    );
+    
     const potentialMultipliers = { 'A': 1.60, 'B': 1.30, 'C': 1.05, 'D': 0.85, 'F': 0.65 };
     const potMod = potentialMultipliers[player.potential] || 1.0;
     const ethic = player.personality?.workEthic || 50;
@@ -1832,6 +1848,30 @@ export function developPlayer(player, team = null) {
 
     if (!player.careerStats) player.careerStats = {};
     player.careerStats.snapsThisSeason = 0;
+
+    developmentReport.actualAttributeChanges = [];
+
+    Object.entries(player.attributes).forEach(([category, attributes]) => {
+        Object.entries(attributes || {}).forEach(([attr, after]) => {
+            const before = attributesBefore[category]?.[attr];
+
+            if (
+                typeof before !== 'number' ||
+                typeof after !== 'number' ||
+                before === after
+            ) {
+                return;
+            }
+
+            developmentReport.actualAttributeChanges.push({
+                category,
+                attr,
+                before,
+                after,
+                increase: after - before
+            });
+        });
+    });
 
     return developmentReport;
 }
@@ -2164,7 +2204,7 @@ export function advanceToOffseason() {
 
         // Run full player development (biological maturation + drill points)
         const devReport = developPlayer(player, team);
-        if (team && team.id === game.playerTeam?.id) developmentResults.push(devReport);
+        developmentResults.push(devReport);
 
         // Record End-of-Year Progression Snapshot WITH DETAILED ATTRIBUTE GAINS
         if (!player.progression) player.progression = [];
