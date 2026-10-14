@@ -268,13 +268,7 @@ export function calculateSchemeClash(team) {
     return Math.floor((totalClash - 15) * 0.35); 
 }
 
-export function aiSetSituationalGameplan(team) {
-    if (!team || !team.gameplan) return;
-    
-    // If GM is calling plays manually, do not overwrite their sliders
-    if (team.gameplan.situational?.playcaller === 'GM') return;
-
-    const coach = team.staff?.coach || team.coach;
+export function previewCoachTendencies(coach, team) {
     const tactical = coach?.biases?.tactical?.name || 'Balanced Tactician';
     const personality = coach?.biases?.personality?.name || 'Balanced';
     const iq = coach?.ratings?.gameplanInstinct || 50;
@@ -332,13 +326,25 @@ export function aiSetSituationalGameplan(team) {
     
     const targetDefAggro = 50 + (rosterBlitzPreference * 1.0);
     defAggro = (defAggro * stubbornness) + (targetDefAggro * adaptability);
-    
-    team.gameplan.situational = {
-        playcaller: 'COACH',
+
+    return {
         earlyDownTendency: Math.max(0, Math.min(100, Math.round(earlyDownTendency))),
         thirdAndLongAggressiveness: Math.max(0, Math.min(100, Math.round(thirdLongAggro))),
         fourthDownBravery: Math.max(0, Math.min(100, Math.round(fourthBravery))),
         defenseAggressiveness: Math.max(0, Math.min(100, Math.round(defAggro)))
+    };
+}
+
+export function aiSetSituationalGameplan(team) {
+    if (!team || !team.gameplan) return;
+    
+    // If GM is calling plays manually, do not overwrite their sliders
+    if (team.gameplan.situational?.playcaller === 'GM') return;
+
+    const coach = team.staff?.coach || team.coach;
+    team.gameplan.situational = {
+        playcaller: 'COACH',
+        ...previewCoachTendencies(coach, team)
     };
 }
 
