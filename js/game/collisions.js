@@ -172,6 +172,39 @@ export function checkTackleCollisions(playState, gameLog) {
         const dist = p._distToCarrier;
         if (dist === undefined || dist > TACKLE_RANGE) return false;
 
+        // Reject a tackle attempt when another player's body obstructs
+        // the direct path between the defender and the ball carrier.
+        const dxToCarrier = carrier.x - p.x;
+        const dyToCarrier = carrier.y - p.y;
+        const segmentLengthSq =
+            dxToCarrier * dxToCarrier + dyToCarrier * dyToCarrier;
+
+        const hasPlayerBetween = segmentLengthSq > 0.01 &&
+            playState.activePlayers.some(other => {
+                if (other === p || other === carrier) return false;
+
+                const along = (
+                    (other.x - p.x) * dxToCarrier +
+                    (other.y - p.y) * dyToCarrier
+                ) / segmentLengthSq;
+
+                // Only count players between the defender and carrier.
+                if (along <= 0.08 || along >= 0.92) return false;
+
+                const nearestX = p.x + along * dxToCarrier;
+                const nearestY = p.y + along * dyToCarrier;
+
+                // Field coordinates are in yards. Allow a small margin
+                // for players whose centers are not exactly aligned.
+                return Math.hypot(
+                    other.x - nearestX,
+                    other.y - nearestY
+                ) < 0.65;
+            });
+
+        if (hasPlayerBetween) return false;
+
+        // Keep the existing blocked/engaged defender check unchanged.
         if (p.isBlocked || p.isEngaged) {
             const blocker = p.blockedBy || p.engagedWith;
             if (blocker && typeof blocker === 'object') {
