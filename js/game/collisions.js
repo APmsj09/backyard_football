@@ -183,8 +183,8 @@ export function checkTackleCollisions(playState, gameLog) {
         const segmentLengthSq =
             dxToCarrier * dxToCarrier + dyToCarrier * dyToCarrier;
 
-        const hasPlayerBetween = segmentLengthSq > 0.01 &&
-            playState.activePlayers.some(other => {
+        const obstruction = segmentLengthSq > 0.01
+            ? playState.activePlayers.find(other => {
                 if (other === p || other === carrier) return false;
 
                 const along = (
@@ -192,21 +192,44 @@ export function checkTackleCollisions(playState, gameLog) {
                     (other.y - p.y) * dyToCarrier
                 ) / segmentLengthSq;
 
-                // Only count players between the defender and carrier.
                 if (along <= 0.08 || along >= 0.92) return false;
 
                 const nearestX = p.x + along * dxToCarrier;
                 const nearestY = p.y + along * dyToCarrier;
 
-                // Field coordinates are in yards. Allow a small margin
-                // for players whose centers are not exactly aligned.
                 return Math.hypot(
                     other.x - nearestX,
                     other.y - nearestY
                 ) < 0.65;
-            });
+            })
+            : null;
 
-        if (hasPlayerBetween) return false;
+        if (obstruction) {
+            const lastLogTick = p._lastTackleBlockedLogTick ?? -Infinity;
+
+            // Avoid flooding telemetry with the same blocked attempt.
+            if (playState.tick - lastLogTick >= 5) {
+                p._lastTackleBlockedLogTick = playState.tick;
+
+                logPlayDebug(
+                    'TACKLE_PATH_BLOCKED',
+                    `${p.name} cannot reach ${carrier.name}; ${obstruction.name} obstructs the path`,
+                    {
+                        defender: p.name,
+                        carrier: carrier.name,
+                        obstruction: obstruction.name,
+                        obstructionSlot: obstruction.slot,
+                        obstructionIsOffense: obstruction.isOffense,
+                        distance: Number(
+                            getDistance(p, carrier).toFixed(2)
+                        )
+                    },
+                    playState.tick
+                );
+            }
+
+            return false;
+        }
 
         // Keep the existing blocked/engaged defender check unchanged.
         if (p.isBlocked || p.isEngaged) {
