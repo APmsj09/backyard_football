@@ -22,8 +22,14 @@ import {
     evaluatePlayerRetention, evaluatePlayerNegotiation, resolvePlayerBiddingWar, calculateAiTeamNeedAndDesire
 } from './negotiations.js';
 
-export const ROSTER_LIMIT = 18;
+export const REGULAR_SEASON_ROSTER_LIMIT = 18;
+export const SUMMER_ROSTER_LIMIT = 24;
 export const MIN_HEALTHY_PLAYERS = 8;
+
+export function getCurrentRosterLimit(gameState) {
+    // Week 0 is the Offseason/Summer. Limits expand to 24.
+    return (gameState && gameState.currentWeek === 0) ? SUMMER_ROSTER_LIMIT : REGULAR_SEASON_ROSTER_LIMIT;
+}
 
 const teamColors = [
     { primary: '#DC2626', secondary: '#FFFFFF' },
@@ -359,7 +365,8 @@ export function createPlayerTeam(teamName, options = {}) {
 */
 export function addPlayerToTeam(player, team) {
     if (!player || !team || !team.roster || typeof player.id === 'undefined') return false;
-    if (team.roster.length >= ROSTER_LIMIT) return false;
+    const currentLimit = getCurrentRosterLimit(game);
+    if (team.roster.length >= currentLimit) return false;
     if (team.roster.includes(player.id)) return false;
 
     if (player.number == null) {
@@ -1430,10 +1437,42 @@ export function processOffseasonFADay(gameState, userBids = []) {
     return { daySignings, rejectedBids, userBidResults };
 }
 
+export function executeAICutDowns() {
+    if (!game || !game.teams) return;
+    const limit = REGULAR_SEASON_ROSTER_LIMIT;
+
+    game.teams.forEach(team => {
+        if (team.isPlayerControlled || !team.roster || team.roster.length <= limit) return;
+
+        const rosterObjs = getRosterObjects(team);
+        
+        // Sort players: Keep high OVR and high potential kids. Cut the worst.
+        rosterObjs.sort((a, b) => {
+            const valA = calculateOverall(a, estimateBestPosition(a)) + (a.potential === 'A' ? 10 : (a.potential === 'B' ? 5 : 0));
+            const valB = calculateOverall(b, estimateBestPosition(b)) + (b.potential === 'A' ? 10 : (b.potential === 'B' ? 5 : 0));
+            return valB - valA; // Highest value first
+        });
+
+        // Identify who is getting cut
+        const playersToKeep = rosterObjs.slice(0, limit);
+        const playersToCut = rosterObjs.slice(limit);
+
+        playersToCut.forEach(p => {
+            p.teamId = null;
+            p.number = null;
+            p.status = { type: 'healthy', description: 'Cut during summer tryouts', duration: 0 };
+            team.roster = team.roster.filter(id => id !== p.id);
+        });
+
+        aiSetDepthChart(team);
+    });
+}
+
 export function autoFillTeamWalkOns(team, targetSize = 14) {
     if (!team || !game || !game.players) return 0;
     let added = 0;
-    while (team.roster.length < targetSize && team.roster.length < ROSTER_LIMIT) {
+    const limit = getCurrentRosterLimit(game);
+    while (team.roster.length < targetSize && team.roster.length < limit) {
         const unassigned = game.players.filter(p =>
             p && !p.teamId &&
             p.status?.type !== 'retired' &&
@@ -2451,8 +2490,9 @@ export function playerSignFreeAgent(playerId, offer = {}) {
     }
     const team = game.playerTeam;
     const roster = getRosterObjects(team);
-    if (roster.length >= ROSTER_LIMIT) {
-        return { success: false, message: `Roster is full (${ROSTER_LIMIT} players max).` };
+    const limit = getCurrentRosterLimit(game);
+    if (roster.length >= limit) {
+        return { success: false, message: `Summer Roster is full (${limit} players max).` };
     }
 
     const player = game.players.find(p => p && p.id === playerId && !p.teamId);
