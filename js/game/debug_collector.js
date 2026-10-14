@@ -11,6 +11,7 @@ class DebugCollector {
         this.report1_initialLeague = null;
         this.report2_history = [];
         this.report3_draft = null;
+        this.draftInitialProspectIds = [];
         this.report4_offseason = null;
         this.events = [];
         this.sequence = 1;
@@ -124,7 +125,11 @@ class DebugCollector {
         devResults.forEach(r => {
             const age = r.player?.age || 'unknown';
             if (!ageDevAudit[age]) ageDevAudit[age] = { count: 0, netPoints: 0 };
-            const totalGain = (r.improvements || []).reduce((sum, imp) => sum + (imp.increase || 0), 0);
+            const changes = r.actualAttributeChanges || r.improvements || [];
+            const totalGain = changes.reduce(
+                (sum, change) => sum + (change.increase || 0),
+                0
+            );
             ageDevAudit[age].count++;
             ageDevAudit[age].netPoints += totalGain;
         });
@@ -161,12 +166,17 @@ class DebugCollector {
     initDraftReport(gameState) {
         if (!isDebugMode() || !gameState) return;
 
+        this.draftInitialProspectIds = (gameState.draftClass || [])
+            .filter(p => p && !p.teamId)
+            .map(p => p.id);
+
         this.report3_draft = {
             startedAt: new Date().toISOString(),
             draftYear: gameState.year,
             totalPicksScheduled: gameState.draftOrder?.length || 0,
-            initialPoolSize: (gameState.draftClass || []).length,
-            aiDecisionLog: []
+            initialPoolSize: this.draftInitialProspectIds.length,
+            aiDecisionLog: [],
+            skippedPicks: []
         };
     }
 
@@ -193,10 +203,67 @@ class DebugCollector {
         });
     }
 
+    recordDraftSkip({
+        pick,
+        teamName,
+        reason,
+        rosterSize = null,
+        rosterLimit = null
+    }) {
+        if (!isDebugMode() || !this.report3_draft) return;
+
+        this.report3_draft.skippedPicks.push({
+            pick,
+            team: teamName || 'Unknown team',
+            reason,
+            rosterSize,
+            rosterLimit
+        });
+    }
+
     finalizeDraftReport(gameState) {
         if (!isDebugMode() || !this.report3_draft) return;
+
+        const playersById = new Map(
+            (gameState.players || []).map(p => [p.id, p])
+        );
+
+        const undraftedPlayers = this.draftInitialProspectIds
+            .map(id => playersById.get(id))
+            .filter(p => p && !p.teamId);
+
+        const recordedPicks = new Set(
+            this.report3_draft.aiDecisionLog.map(entry => entry.pick)
+        );
+
+        const skippedPicks = new Set(
+            this.report3_draft.skippedPicks.map(entry => entry.pick)
+        );
+
+        const accountedPicks = new Set([
+            ...recordedPicks,
+            ...skippedPicks
+        ]);
+
         this.report3_draft.completedAt = new Date().toISOString();
-        this.report3_draft.undraftedCount = (gameState.players || []).filter(p => !p.teamId && p.age <= 13).length;
+        this.report3_draft.selectionsRecorded =
+            this.report3_draft.aiDecisionLog.length;
+        this.report3_draft.skippedPickCount =
+            this.report3_draft.skippedPicks.length;
+
+        this.report3_draft.unaccountedPickNumbers = Array.from(
+            { length: this.report3_draft.totalPicksScheduled },
+            (_, index) => index + 1
+        ).filter(pick => !accountedPicks.has(pick));
+
+        this.report3_draft.undraftedCount = undraftedPlayers.length;
+        this.report3_draft.undraftedPlayers = undraftedPlayers.map(p => ({
+            id: p.id,
+            name: p.name,
+            pos: p.pos || estimateBestPosition(p),
+            age: p.age,
+            potential: p.potential
+        }));
     }
 
     // =========================================================================
