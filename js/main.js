@@ -1,6 +1,7 @@
 // js/main.js
 import * as Game from './game.js';
 import * as UI from './ui.js';
+import { isDebugMode, setDebugMode, debugCollector } from './game.js';
 import { positionOverallWeights, estimateBestPosition, calculateOverall } from './game/player.js';
 import { coachPersonalities, offenseFormations, defenseFormations } from './data.js';
 import { formatHeight } from './utils.js';
@@ -27,12 +28,19 @@ async function startNewGame() {
         UI.startLoadingMessages();
         await new Promise(resolve => setTimeout(resolve, 50));
 
+        // Reset debug collector for new game session
+        debugCollector.reset();
+
         // Generate the 20 main teams + 6 youth teams
         await Game.initializeLeague((progress) => {
             UI.updateLoadingProgress(Math.round(progress * 30));
         });
 
         gameState = Game.getGameState();
+
+        // REPORT 1: Capture Generated League & Players Baseline
+        debugCollector.captureInitialLeague(gameState);
+
         const loadingMsgEl = document.getElementById('loading-message');
 
         // Simulate 4 Seasons of pure history before player chooses a team (Complete 4-Year Youth Cycle)
@@ -42,8 +50,22 @@ async function startNewGame() {
             await new Promise(resolve => setTimeout(resolve, 50));
 
             Game.simulateHistoricalSeason(y, gameState);
-            Game.advanceToOffseason();
-            Game.simulateHistoricalDraft(y);
+            const offseasonReport = Game.advanceToOffseason();
+            const draftResults = Game.simulateHistoricalDraft(y);
+
+            // REPORT 2: Record each historical season with age development curves
+            debugCollector.recordHistoricalSeason(y, {
+                historyEntry: (gameState.history?.seasons || []).find(s => s.year === y),
+                standings: gameState.teams.map(t => ({
+                    id: t.id,
+                    name: t.name,
+                    tier: t.tier,
+                    wins: t.wins || 0,
+                    losses: t.losses || 0
+                })),
+                offseasonReport,
+                draftResults
+            });
 
             // Replenish rosters after each historical draft so teams don't bleed out
             gameState.teams.forEach(team => {
@@ -232,6 +254,8 @@ function confirmFranchiseTakeover(teamId, coachDetails) {
     Game.setupDraft();
     gameState.draftCompleted = false;
 
+    // REPORT 3: Initialize First Player Draft report
+    debugCollector.initDraftReport(gameState);
     generateDraftPreviewMessage();
 
     const advBtn = document.getElementById('advance-week-btn');
@@ -290,14 +314,40 @@ function handleDraftPlayer() {
             }
             if (!gs.pickHistory) gs.pickHistory = [];
 
+            const userPos = estimateBestPosition(player);
+            const userOvr = Game.calculateOverall(player, userPos);
+
             gs.pickHistory.push({
                 pick: gs.currentPick + 1,
                 teamName: team.name,
                 teamId: team.id,
                 playerName: player.name,
-                pos: estimateBestPosition(player),
-                ovr: Game.calculateOverall(player, estimateBestPosition(player)),
+                pos: userPos,
+                ovr: userOvr,
                 potential: player.potential
+            });
+
+            // Capture top alternatives on the board when the user picked
+            const availableAlternatives = (gs.draftClass || [])
+                .filter(p => p.id !== player.id)
+                .slice(0, 3)
+                .map(alt => ({
+                    name: alt.name,
+                    pos: estimateBestPosition(alt),
+                    ovr: Game.calculateOverall(alt, estimateBestPosition(alt)),
+                    potential: alt.potential
+                }));
+
+            debugCollector.recordDraftDecision({
+                pick: gs.currentPick + 1,
+                teamName: team.name,
+                isUser: true,
+                player,
+                pos: userPos,
+                ovr: userOvr,
+                teamNeed: 'User Choice',
+                alternatives: availableAlternatives,
+                reasoning: 'Human GM selection'
             });
 
             selectedPlayerId = null;
@@ -340,17 +390,46 @@ async function runAIDraftPicks() {
             if (!currentPickingTeam || !currentPickingTeam.roster || currentPickingTeam.roster.length >= ROSTER_LIMIT) {
                 gameState.currentPick++;
             } else {
+                // Capture candidates available immediately before the AI selects
+                const topAlternatives = (gameState.draftClass || [])
+                    .slice(0, 4)
+                    .map(alt => ({
+                        name: alt.name,
+                        pos: estimateBestPosition(alt),
+                        ovr: Game.calculateOverall(alt, estimateBestPosition(alt)),
+                        potential: alt.potential
+                    }));
+
                 const picked = Game.simulateAIPick(currentPickingTeam);
                 if (picked) {
+                    const pickedPos = estimateBestPosition(picked);
+                    const pickedOvr = Game.calculateOverall(picked, pickedPos);
+
                     if (!gameState.pickHistory) gameState.pickHistory = [];
                     gameState.pickHistory.push({
                         pick: gameState.currentPick + 1,
                         teamName: currentPickingTeam.name,
                         teamId: currentPickingTeam.id,
                         playerName: picked.name,
-                        pos: estimateBestPosition(picked),
-                        ovr: Game.calculateOverall(picked, estimateBestPosition(picked)),
+                        pos: pickedPos,
+                        ovr: pickedOvr,
                         potential: picked.potential
+                    });
+
+                    // Count team's existing players at this position to determine need
+                    const teamRoster = Game.getRosterObjects(currentPickingTeam);
+                    const depthAtPos = teamRoster.filter(p => (p.pos || estimateBestPosition(p)) === pickedPos).length;
+
+                    debugCollector.recordDraftDecision({
+                        pick: gameState.currentPick + 1,
+                        teamName: currentPickingTeam.name,
+                        isUser: false,
+                        player: picked,
+                        pos: pickedPos,
+                        ovr: pickedOvr,
+                        currentDepthAtPos: depthAtPos,
+                        alternatives: topAlternatives.filter(a => a.name !== picked.name).slice(0, 3),
+                        reasoning: depthAtPos === 0 ? `Critical Positional Need (${pickedPos})` : `Best Player Available (${pickedOvr} OVR, ${picked.potential} Pot)`
                     });
                 }
                 gameState.currentPick++;
@@ -372,6 +451,12 @@ async function handleDraftEnd() {
     gameState = Game.getGameState();
     gameState.draftCompleted = true;
 
+    // REPORT 3: Finalize Draft Report
+    debugCollector.finalizeDraftReport(gameState);
+
+    // REPORT 4: Initialize Offseason FA Mini-Game Report
+    debugCollector.initOffseasonReport(gameState);
+
     // Launch the Post-Draft Free Agency Mini-Game!
     UI.startOffseasonFAMinigame(gameState);
 }
@@ -384,6 +469,9 @@ function finishOffseasonFAMinigame() {
         }
         try { Game.aiSetDepthChart(team); } catch (error) { console.error(error); }
     }
+
+    // REPORT 4: Finalize Offseason Report (Roster health verification)
+    debugCollector.finalizeOffseasonReport(gameState);
 
     const advBtn = document.getElementById('advance-week-btn');
     if (advBtn) {
@@ -1158,6 +1246,8 @@ window.app = {
         const result = Game.processOffseasonFADay(gameState, userBids);
         const { daySignings, userBidResults, rejectedBids } = result;
 
+        // REPORT 4: Record Day Activity (Contested vs Uncontested signings, tokens spent)
+        debugCollector.recordOffseasonDay(currentDay, result);
         const wireList = document.getElementById('fa-daily-wire-list');
         if (wireList) {
             let feedbackHtml = '';
@@ -1401,10 +1491,88 @@ window.app = {
 
 window.app_toggleWatchlist = (id) => UI.toggleWatchlistPlayer(id);
 
+function openDebugReportModal(initialReport = 1) {
+    let activeReport = initialReport;
+
+    const renderModalContent = () => {
+        const text = debugCollector.getReportText(activeReport);
+        return `
+            <div class="flex flex-col gap-3 text-xs">
+                <div class="flex flex-wrap justify-between items-center gap-2 border-b border-slate-200 pb-2">
+                    <!-- Tab Switcher -->
+                    <div class="flex bg-slate-200 rounded p-0.5 text-xs font-bold font-mono">
+                        <button class="debug-modal-tab px-2.5 py-1 rounded transition ${activeReport === 1 ? 'bg-slate-900 text-white shadow' : 'text-slate-600 hover:text-slate-900'}" data-rep="1">1. League</button>
+                        <button class="debug-modal-tab px-2.5 py-1 rounded transition ${activeReport === 2 ? 'bg-slate-900 text-white shadow' : 'text-slate-600 hover:text-slate-900'}" data-rep="2">2. History</button>
+                        <button class="debug-modal-tab px-2.5 py-1 rounded transition ${activeReport === 3 ? 'bg-slate-900 text-white shadow' : 'text-slate-600 hover:text-slate-900'}" data-rep="3">3. Draft</button>
+                        <button class="debug-modal-tab px-2.5 py-1 rounded transition ${activeReport === 4 ? 'bg-slate-900 text-white shadow' : 'text-slate-600 hover:text-slate-900'}" data-rep="4">4. Offseason</button>
+                        <button class="debug-modal-tab px-2.5 py-1 rounded transition ${activeReport === 'all' ? 'bg-slate-900 text-white shadow' : 'text-slate-600 hover:text-slate-900'}" data-rep="all">All</button>
+                    </div>
+                    <!-- Copy Button -->
+                    <button id="copy-debug-report-btn" class="bg-slate-900 hover:bg-slate-800 text-amber-400 border border-slate-700 font-mono px-3 py-1.5 rounded transition shadow-sm font-bold text-xs flex items-center gap-1.5">
+                        <span>📋</span>
+                        <span id="copy-debug-label">Copy to Clipboard</span>
+                    </button>
+                </div>
+                <pre id="debug-report-pre" class="bg-slate-950 text-emerald-400 p-4 rounded text-[11px] font-mono overflow-auto max-h-[60vh] select-all whitespace-pre-wrap leading-relaxed border border-slate-800 shadow-inner">${text}</pre>
+            </div>
+        `;
+    };
+
+    const bindModalEvents = () => {
+        document.querySelectorAll('.debug-modal-tab').forEach(btn => {
+            btn.onclick = () => {
+                const repVal = btn.dataset.rep;
+                activeReport = repVal === 'all' ? 'all' : parseInt(repVal, 10);
+                const body = document.getElementById('modal-body');
+                if (body) {
+                    body.innerHTML = renderModalContent();
+                    bindModalEvents();
+                }
+            };
+        });
+
+        document.getElementById('copy-debug-report-btn')?.addEventListener('click', () => {
+            const text = debugCollector.getReportText(activeReport);
+            navigator.clipboard.writeText(text).then(() => {
+                const label = document.getElementById('copy-debug-label');
+                if (label) label.textContent = 'Copied!';
+                setTimeout(() => { if (label) label.textContent = 'Copy to Clipboard'; }, 2000);
+            });
+        });
+    };
+
+    UI.showModal("Diagnostic Reports Viewer", renderModalContent());
+    bindModalEvents();
+}
+
 function main() {
     UI.setupElements();
     Game.loadGameState();
     gameState = Game.getGameState();
+
+    // Startup Debug Mode Checkbox & Diagnostics Bar Handling
+    const startupCheckbox = document.getElementById('startup-debug-mode');
+    const diagnosticsBar = document.getElementById('debug-diagnostics-bar');
+
+    function syncDebugUI(enabled) {
+        if (startupCheckbox) startupCheckbox.checked = enabled;
+        if (diagnosticsBar) diagnosticsBar.classList.toggle('hidden', !enabled);
+    }
+
+    startupCheckbox?.addEventListener('change', (e) => {
+        setDebugMode(e.target.checked);
+        syncDebugUI(e.target.checked);
+    });
+
+    syncDebugUI(isDebugMode());
+
+    // Report Viewer Button Handlers
+    document.querySelectorAll('.open-debug-report-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const rep = btn.dataset.report;
+            openDebugReportModal(rep === 'all' ? 'all' : parseInt(rep, 10));
+        });
+    });
 
     // Front Office Sub-Tab Listeners
     document.querySelectorAll('.fo-tab').forEach(btn => {
