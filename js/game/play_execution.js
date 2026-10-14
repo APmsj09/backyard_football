@@ -978,12 +978,44 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                     pState.contactReduction = 1.15;
                     setRouteIntent(pState, targetX, targetY, 0.6);
                 } else if (pState.role === 'QB' && pState.action === 'qb_scramble' && pState.y < LOS) {
-                    // 2. QB Scramble behind LOS: Angle wide to escape the pocket
-                    const rollDir = pState.rolloutDir || (pState.x > CENTER_X ? 1 : -1);
-                    targetX = Math.max(3, Math.min(FIELD_WIDTH - 3, pState.x + (rollDir * 8)));
-                    targetY = pState.y + 1.0;
-                    pState.action = 'qb_scramble';
-                    setPointIntent(pState, targetX, targetY, 0.5);
+                    // 2. QB Scramble behind LOS: Angle wide to escape the pocket.
+                    // The designed bootleg rolls right to a fixed launch point.
+                    if (playState.playKey === 'PA_Bootleg_Right') {
+                        const rolloutTargetX = Math.max(
+                            3,
+                            Math.min(FIELD_WIDTH - 3, pState.initialX + 5.5)
+                        );
+
+                        const rolloutTargetY = Math.min(
+                            LOS - 1.2,
+                            pState.initialY + 2.0
+                        );
+
+                        const rolloutDistance = Math.hypot(
+                            pState.x - rolloutTargetX,
+                            pState.y - rolloutTargetY
+                        );
+
+                        pState.action = 'qb_scramble';
+
+                        if (rolloutDistance <= 0.85) {
+                            pState._bootlegRolloutReady = true;
+                            targetX = pState.x;
+                            targetY = pState.y;
+                            setHoldIntent(pState, targetX, targetY);
+                        } else {
+                            targetX = rolloutTargetX;
+                            targetY = rolloutTargetY;
+                            setPointIntent(pState, targetX, targetY, 0.5);
+                        }
+                    } else {
+                        // Preserve the existing behavior for ordinary scrambles.
+                        const rollDir = pState.rolloutDir || (pState.x > CENTER_X ? 1 : -1);
+                        targetX = Math.max(3, Math.min(FIELD_WIDTH - 3, pState.x + (rollDir * 8)));
+                        targetY = pState.y + 1.0;
+                        pState.action = 'qb_scramble';
+                        setPointIntent(pState, targetX, targetY, 0.5);
+                    }
                 } else {
                     // 3. Open-field running with lane locking
                     const smartTarget = getSmartCarrierTarget(pState, defenseStates, offenseStates, FIELD_WIDTH, playState);
