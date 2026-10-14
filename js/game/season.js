@@ -1314,7 +1314,7 @@ export function processOffseasonFADay(gameState, userBids = []) {
         const evaluatedTargets = availableProspects.map(prospect => {
             const activeLead = gameState._activeFaMarket.get(prospect.id);
             const currentTopScore = activeLead ? activeLead.topScore : 0;
-            const evalResult = calculateAiTeamNeedAndDesire(aiTeam, prospect, gameState, currentTopScore);
+            const evalResult = calculateAiTeamNeedAndDesire(aiTeam, prospect, gameState, currentTopScore, rosterLimit);
             return { prospect, ...evalResult };
         }).filter(t => t.shouldBid).sort((a, b) => b.desireScore - a.desireScore);
 
