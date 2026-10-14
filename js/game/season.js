@@ -22,13 +22,14 @@ import {
     evaluatePlayerRetention, evaluatePlayerNegotiation, resolvePlayerBiddingWar, calculateAiTeamNeedAndDesire
 } from './negotiations.js';
 
+export const ROSTER_LIMIT = 18;
 export const REGULAR_SEASON_ROSTER_LIMIT = 18;
 export const SUMMER_ROSTER_LIMIT = 24;
 export const MIN_HEALTHY_PLAYERS = 8;
 
 export function getCurrentRosterLimit(gameState) {
     // Week 0 is the Offseason/Summer. Limits expand to 24.
-    return (gameState && gameState.currentWeek === 0) ? SUMMER_ROSTER_LIMIT : REGULAR_SEASON_ROSTER_LIMIT;
+    return (gameState && gameState.currentWeek === 0) ? SUMMER_ROSTER_LIMIT : ROSTER_LIMIT;
 }
 
 const teamColors = [
