@@ -443,6 +443,17 @@ export function evaluatePlayerNegotiation(player, team, offer = {}) {
         reasons.push(`🤝 Favor Tokens offered (+${tokenBoost})`);
     }
 
+    // 9A. GENERAL MANAGER RECRUITING PHILOSOPHY
+    const gmNegotiationBonus = team.gmProfile?.bonuses?.negotiationInterest || 0;
+
+    if (gmNegotiationBonus !== 0) {
+        interest += gmNegotiationBonus;
+        reasons.push(
+            `🧠 ${team.gmProfile.archetypeName} influence (` +
+            `${gmNegotiationBonus > 0 ? '+' : ''}${gmNegotiationBonus})`
+        );
+    }
+
     // 10. DYNAMIC CALIBER THRESHOLD
     // Superstars demand deep courtship (62+ interest). Bench walk-ons accept at 45.
     let threshold = 42;
@@ -653,6 +664,10 @@ export function evaluatePlayerRetention(player, team, snapsThisSeason = 0) {
     const ovr = calculateOverall(player, bestPos);
 
     let stayScore = (loyalty * 0.45) + (happiness * 0.35);
+
+    // The GM's culture and management style can help keep players around.
+    const gmRetentionBonus = team.gmProfile?.bonuses?.retention || 0;
+    stayScore += gmRetentionBonus;
 
     // 1. BROKEN PROMISES
     if (player.activePromise?.role === 'STARTER' && !isStarter) {
