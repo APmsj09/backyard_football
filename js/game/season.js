@@ -2103,13 +2103,27 @@ export function processWeeklyPractice(team, gameLog = null) {
 }
 
 export function advanceToOffseason() {
-    if (!game || !game.teams || !game.players) return { retiredPlayers: [], hofInductees: [], developmentResults: [], leavingPlayers: [] };
+    if (!game || !game.teams || !game.players) {
+        return {
+            retiredPlayers: [],
+            hofInductees: [],
+            developmentResults: [],
+            leavingPlayers: [],
+            pendingRetentions: []
+        };
+    }
 
     // Initialize tracking arrays at the top so any offseason phase can safely push to them
     const retiredPlayers = [];
     const hofInductees = [];
     const developmentResults = [];
     const leavingPlayers = [];
+    const pendingRetentions = [];
+    const pendingRetentionIds = new Set();
+
+    // Persist the queue with the game state so the interview flow can access it.
+    game.pendingRetentions = pendingRetentions;
+
     let totalVacancies = 0;
 
     // CAPTURE STANDINGS & HISTORY BEFORE RESETTING STATS
@@ -2138,16 +2152,52 @@ export function advanceToOffseason() {
             addMessage("Promoted!", "We won the Sandlot Circuit! Next year we play with the big dogs in Tier 1.", false, game);
         }
 
-        // Relegation Walkouts: Divas with low loyalty refuse to play in Tier 2
+        // Relegation Walkouts: Divas with low loyalty refuse to play in Tier 2.
+        // User-controlled teams get an exit interview rather than an immediate departure.
         relegated.forEach(relTeam => {
             const teamRoster = getRosterObjects(relTeam);
+
             teamRoster.forEach(p => {
-                if ((p.personality?.streetCred || 50) > 65 && (p.personality?.loyalty || 50) < 45) {
-                    leavingPlayers.push({ player: p, reason: 'Refused to play in Sandlot Circuit (Tier 2)', teamName: relTeam.name });
-                    p.teamId = null;
-                    if (relTeam.id === game.playerTeam?.id) {
-                        addMessage("Relegation Walkout", `🏃 ${p.name} refused to play in Tier 2 and walked away to Free Agency!`);
+                if (
+                    (p.personality?.streetCred || 50) <= 65 ||
+                    (p.personality?.loyalty || 50) >= 45
+                ) {
+                    return;
+                }
+
+                const isUserTeam =
+                    relTeam.id === game.playerTeam?.id;
+
+                const reason = 'Refused to play in Sandlot Circuit (Tier 2)';
+
+                if (isUserTeam && game.year >= 5) {
+                    if (!pendingRetentionIds.has(p.id)) {
+                        pendingRetentions.push({
+                            player: p,
+                            reason,
+                            snapsThisSeason: p.careerStats?.snapsThisSeason || 0
+                        });
+
+                        pendingRetentionIds.add(p.id);
                     }
+
+                    // Keep player.teamId intact until the exit interview resolves.
+                    return;
+                }
+
+                leavingPlayers.push({
+                    player: p,
+                    reason,
+                    teamName: relTeam.name
+                });
+
+                p.teamId = null;
+
+                if (isUserTeam) {
+                    addMessage(
+                        "Relegation Walkout",
+                        `🏃 ${p.name} refused to play in Tier 2 and walked away to Free Agency!`
+                    );
                 }
             });
         });
@@ -2369,23 +2419,65 @@ export function advanceToOffseason() {
             }
         }
         else if (team) {
-            // Realistic Contract Retention & Broken Promise Evaluation
-            const retentionCheck = evaluatePlayerRetention(player, team, snapsThisSeason);
-
-            if (!retentionCheck.willStay) {
-                leavingPlayers.push({ player, reason: retentionCheck.reason, teamName: team.name });
-                playerIsLeaving = true;
-                if (team.id === game.playerTeam?.id) {
-                    addMessage("Contract Departure", `🚶 <b>${player.name}</b> walked away to Free Agency: ${retentionCheck.reason}`);
-                }
+            // A relegation walkout may already be waiting for an exit interview.
+            // Don't roll another departure event or queue the same player twice.
+            if (pendingRetentionIds.has(player.id)) {
+                // Keep the player attached until the interview resolves.
             } else {
-                // Occasional life events (moved away, skateboard accident)
-                for (const event of departureEvents) {
-                    if (Math.random() < event.chance) {
-                        leavingPlayers.push({ player, reason: event.reason, teamName: team.name });
-                        playerIsLeaving = true;
-                        if (team.id === game.playerTeam?.id) addMessage("Player Leaving", `${player.name}: ${event.reason}.`);
-                        break;
+                // Realistic Contract Retention & Broken Promise Evaluation
+                const retentionCheck = evaluatePlayerRetention(
+                    player,
+                    team,
+                    snapsThisSeason
+                );
+
+                let wantsToLeave = !retentionCheck.willStay;
+                let leaveReason = retentionCheck.reason;
+
+                if (!wantsToLeave) {
+                    // Occasional life events (moved away, skateboard accident)
+                    for (const event of departureEvents) {
+                        if (Math.random() < event.chance) {
+                            wantsToLeave = true;
+                            leaveReason = event.reason;
+                            break;
+                        }
+                    }
+                }
+
+                const isUserTeam = team.id === game.playerTeam?.id;
+
+                // Queue persuadable user-team flight risks.
+                // Permanent broken-promise departures will bypass negotiations.
+                if (
+                    wantsToLeave &&
+                    isUserTeam &&
+                    game.year >= 5 &&
+                    !retentionCheck.permanentDeparture
+                ) {
+                    pendingRetentions.push({
+                        player,
+                        reason: leaveReason,
+                        snapsThisSeason
+                    });
+
+                    pendingRetentionIds.add(player.id);
+
+                    // Do not set playerIsLeaving or clear player.teamId.
+                } else if (wantsToLeave) {
+                    leavingPlayers.push({
+                        player,
+                        reason: leaveReason,
+                        teamName: team.name
+                    });
+
+                    playerIsLeaving = true;
+
+                    if (isUserTeam) {
+                        addMessage(
+                            "Contract Departure",
+                            `🚶 <b>${player.name}</b> walked away to Free Agency: ${leaveReason}`
+                        );
                     }
                 }
             }
@@ -2595,7 +2687,7 @@ export function advanceToOffseason() {
         }
     });
 
-    return { retiredPlayers, hofInductees, developmentResults, leavingPlayers };
+    return { retiredPlayers, hofInductees, developmentResults, leavingPlayers, pendingRetentions };
 }
 
 export function playerCut(playerId) {
