@@ -978,8 +978,11 @@ export function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey
                     const qbDepth = playState.lineOfScrimmage - qb1.initialY;
                     const dist = getDistance(qb1, rb1);
                     const isTossPlay = rb1.assignment?.includes('toss');
-                    // Tosses release quicker and allow a wider pitch distance
                     const handoffDistThreshold = isTossPlay ? 3.8 : 1.8;
+                    const handoffTickThreshold = isTossPlay
+                        ? 12
+                        : (qbDepth < 4.0 ? 16 : 22);
+
                     if ((dist < handoffDistThreshold && playState.tick > 5) || (playState.tick >= handoffTickThreshold)) {
                         if (isTossPlay) {
                             // Ordinary toss plays use the airborne lateral.
