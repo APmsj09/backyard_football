@@ -13,6 +13,9 @@ let currentSortDirection = 'desc';
 let activeSaveKey = 'backyardFootballGameState';
 let isDraftingLocked = false;
 
+let isExitInterviewFlowActive = false;
+let renderActiveExitInterview = null;
+
 const ROSTER_LIMIT = 18;
 const MIN_HEALTHY_PLAYERS = 8;
 const WEEKS_IN_SEASON = 9;
@@ -798,8 +801,396 @@ function handleFormationChange(e) {
     document.dispatchEvent(new CustomEvent('refresh-ui'));
 }
 
+
+function startExitInterviewFlow(retentions, onComplete, report = null) {
+    if (!Array.isArray(retentions) || retentions.length === 0) {
+        onComplete?.();
+        return;
+    }
+
+    if (isExitInterviewFlowActive) {
+        renderActiveExitInterview?.();
+        return;
+    }
+
+    isExitInterviewFlowActive = true;
+    const totalInterviews = retentions.length;
+
+    gameState = Game.getGameState();
+    gameState.pendingRetentions = retentions;
+
+    const escapeExitHtml = (value) =>
+        String(value ?? '').replace(/[&<>"']/g, char => ({
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            '"': '&quot;',
+            "'": '&#39;'
+        })[char]);
+
+    const saveAndContinue = () => {
+        // Remove the resolved player before saving, so the same interview
+        // cannot be repeated from the remaining queue.
+        retentions.shift();
+
+        gameState = Game.getGameState();
+        gameState.pendingRetentions = retentions;
+
+        Game.saveGameState(activeSaveKey);
+        renderCurrentInterview();
+    };
+
+    const releaseToFreeAgency = (player, item, team) => {
+        if (!player || !team) return;
+
+        team.roster = (team.roster || []).filter(id => id !== player.id);
+
+        if (player.teamId === team.id) {
+            if (!player.playerHistory) {
+                player.playerHistory = { teamsPlayedFor: [] };
+            }
+
+            if (!Array.isArray(player.playerHistory.teamsPlayedFor)) {
+                player.playerHistory.teamsPlayedFor = [];
+            }
+
+            const completedSeason = Math.max(1, (gameState.year || 1) - 1);
+            const history = player.playerHistory.teamsPlayedFor;
+
+            if (!history.some(entry =>
+                entry.teamId === team.id && entry.year === completedSeason
+            )) {
+                history.push({
+                    teamId: team.id,
+                    teamName: team.name,
+                    year: completedSeason
+                });
+            }
+        }
+
+        player.teamId = null;
+        player.number = null;
+
+        // Keep the player available in Free Agency instead of marking him
+        // "departed", which excludes him from recruitment.
+        player.status = {
+            type: 'healthy',
+            description: item.reason || 'Left the team after the season.',
+            duration: 0
+        };
+
+        if (report && Array.isArray(report.leavingPlayers)) {
+            report.leavingPlayers.push({
+                player,
+                reason: item.reason,
+                teamName: team.name
+            });
+        }
+
+        Game.aiSetDepthChart(team);
+    };
+
+    const finishFlow = () => {
+        UI.hideModal();
+
+        isExitInterviewFlowActive = false;
+        renderActiveExitInterview = null;
+
+        gameState = Game.getGameState();
+        gameState.pendingRetentions = [];
+
+        Game.saveGameState(activeSaveKey);
+        onComplete?.();
+    };
+
+    const renderCurrentInterview = () => {
+        gameState = Game.getGameState();
+
+        if (!retentions.length) {
+            finishFlow();
+            return;
+        }
+
+        const item = retentions[0];
+        const player = item?.player;
+        const team = gameState?.playerTeam;
+
+        // Skip stale queue entries safely if a player no longer belongs
+        // to the user's roster.
+        if (
+            !player ||
+            !team ||
+            player.teamId !== team.id ||
+            !team.roster?.includes(player.id)
+        ) {
+            saveAndContinue();
+            return;
+        }
+
+        const pos = player.pos || Game.estimateBestPosition(player);
+        const ovr = Game.calculateOverall(player, pos);
+        const pitchOptions = Game.getRetentionPitchOptions(player);
+        const tokensAvailable = Math.max(
+            0,
+            Math.floor(team.socialProfile?.favorTokens ?? 0)
+        );
+
+        const defaultRole =
+            player.expectations?.desiredRole === 'STARTER' ||
+            (player.personality?.ego ?? 50) >= 70
+                ? 'STARTER'
+                : 'ROTATION';
+
+        const focusPromise = pitchOptions.focusPromise;
+        const promiseOptionsHtml = focusPromise
+            ? `<option value="${escapeExitHtml(focusPromise.value)}">${escapeExitHtml(focusPromise.label)}</option>`
+            : '';
+
+        const tokenOptionsHtml = [1, 2]
+            .filter(amount => amount <= tokensAvailable)
+            .map(amount =>
+                `<option value="${amount}">${amount} Token${amount > 1 ? 's' : ''}</option>`
+            )
+            .join('');
+
+        const modalHtml = `
+            <div class="space-y-3.5 text-left text-xs font-sans">
+                <div class="bg-slate-900 text-white p-3 rounded flex justify-between items-center">
+                    <div>
+                        <div class="flex items-center gap-2 flex-wrap">
+                            <h4 class="font-black text-sm text-white">${escapeExitHtml(player.name)}</h4>
+                            <span class="bg-slate-800 text-amber-400 font-bold px-1.5 py-0.5 rounded font-mono text-[10px]">
+                                ${escapeExitHtml(pos)} • ${ovr} OVR
+                            </span>
+                        </div>
+                        <span class="text-slate-400 font-mono text-[11px]">
+                            Age ${player.age} • Exit Interview ${totalInterviews - retentions.length + 1} of ${totalInterviews}
+                        </span>
+                    </div>
+                    <span class="text-[10px] bg-amber-500 text-slate-950 font-bold px-2 py-0.5 rounded uppercase">
+                        Flight Risk
+                    </span>
+                </div>
+
+                <div class="p-3 bg-rose-50 border border-rose-200 rounded text-rose-950 space-y-1">
+                    <span class="font-black text-[10px] text-rose-800 uppercase tracking-wider block">
+                        Why he's thinking about leaving
+                    </span>
+                    <p class="text-[11px] font-bold italic leading-relaxed">
+                        "${escapeExitHtml(item.reason)}"
+                    </p>
+                    <div class="text-[10px] font-mono text-slate-600 pt-2 border-t border-rose-200/60 flex flex-wrap gap-3">
+                        <span>Ego: <b>${player.personality?.ego ?? 50}</b></span>
+                        <span>Loyalty: <b>${player.personality?.loyalty ?? 50}</b></span>
+                        <span>Work Ethic: <b>${player.personality?.workEthic ?? 50}</b></span>
+                        <span>Season Snaps: <b>${item.snapsThisSeason ?? 0}</b></span>
+                    </div>
+                </div>
+
+                <div class="space-y-2.5">
+                    <h5 class="font-black text-xs uppercase tracking-wider text-slate-700">
+                        Your Pitch
+                    </h5>
+
+                    <div>
+                        <label class="block text-[10px] font-bold text-slate-500 uppercase mb-1">
+                            Role Commitment
+                        </label>
+                        <select id="retention-role"
+                            class="w-full p-2 border border-slate-300 rounded font-bold text-slate-800 bg-white">
+                            <option value="STARTER" ${defaultRole === 'STARTER' ? 'selected' : ''}>
+                                ${escapeExitHtml(pitchOptions.starterRoleLabel)} — Guaranteed
+                            </option>
+                            <option value="ROTATION" ${defaultRole === 'ROTATION' ? 'selected' : ''}>
+                                ${escapeExitHtml(pitchOptions.rotationRoleLabel)} — Earn Your Reps
+                            </option>
+                        </select>
+                        <p class="text-[10px] text-slate-500 mt-1">
+                            A starting-role promise is a real commitment that will be checked next offseason.
+                        </p>
+                    </div>
+
+                    <div>
+                        <label class="block text-[10px] font-bold text-slate-500 uppercase mb-1">
+                            Position-Specific Commitment
+                        </label>
+                        <select id="retention-promise"
+                            class="w-full p-2 border border-slate-300 rounded font-bold text-slate-800 bg-white">
+                            <option value="NONE">No additional workload guarantee</option>
+                            ${promiseOptionsHtml}
+                        </select>
+                        <p class="text-[10px] text-slate-500 mt-1">
+                            ${escapeExitHtml(
+                                focusPromise
+                                    ? focusPromise.description
+                                    : 'No offensive workload promise is available for this position. Focus on role, trust and team culture.'
+                            )}
+                        </p>
+                    </div>
+
+                    <div>
+                        <label class="block text-[10px] font-bold text-slate-500 uppercase mb-1">
+                            Favor Token Sweetener
+                        </label>
+                        <select id="retention-tokens"
+                            class="w-full p-2 border border-slate-300 rounded font-bold text-slate-800 bg-white">
+                            <option value="0">0 Tokens</option>
+                            ${tokenOptionsHtml}
+                        </select>
+                        <p class="text-[10px] text-slate-500 mt-1">
+                            ${tokensAvailable} token${tokensAvailable === 1 ? '' : 's'} available.
+                            Tokens are spent only if the player accepts.
+                        </p>
+                    </div>
+                </div>
+
+                <div class="p-2 bg-amber-50 border border-amber-200 rounded text-[10px] text-amber-950">
+                    <b>Coach's word matters.</b> If he accepts, your promises become part of his player record.
+                    Breaking a recorded commitment can destroy his trust permanently.
+                </div>
+
+                <div class="flex justify-between items-center pt-2 border-t border-slate-200 gap-3">
+                    <button id="retention-let-walk"
+                        class="text-rose-700 hover:text-rose-900 font-bold uppercase text-[10px] tracking-wider px-2 py-2">
+                        Let Him Walk →
+                    </button>
+                    <button id="retention-submit-pitch"
+                        class="bg-emerald-700 hover:bg-emerald-800 text-white font-bold px-4 py-2 rounded text-xs uppercase tracking-wider shadow-sm">
+                        Make the Pitch 🤝
+                    </button>
+                </div>
+            </div>
+        `;
+
+        UI.showModal(`Exit Interview: ${player.name}`, modalHtml);
+
+        document.getElementById('retention-let-walk')?.addEventListener('click', () => {
+            releaseToFreeAgency(player, item, team);
+
+            Game.addMessage(
+                'Player Departed',
+                `🚲 <b>${escapeExitHtml(player.name)}</b> chose a fresh start in Free Agency: ${escapeExitHtml(item.reason)}`
+            );
+
+            saveAndContinue();
+        });
+
+        document.getElementById('retention-submit-pitch')?.addEventListener('click', () => {
+            const rolePromised =
+                document.getElementById('retention-role')?.value || 'ROTATION';
+
+            const promiseType =
+                document.getElementById('retention-promise')?.value || 'NONE';
+
+            const tokensOffered = Number(
+                document.getElementById('retention-tokens')?.value || 0
+            );
+
+            // Recheck available resources at the point of submission.
+            const latestTokens = Math.max(
+                0,
+                Math.floor(team.socialProfile?.favorTokens ?? 0)
+            );
+
+            if (
+                !Number.isInteger(tokensOffered) ||
+                tokensOffered < 0 ||
+                tokensOffered > 2 ||
+                tokensOffered > latestTokens
+            ) {
+                alert('Your available Favor Tokens changed. Please update the offer.');
+                renderCurrentInterview();
+                return;
+            }
+
+            const pitchResult = Game.evaluateRetentionPitch(player, team, {
+                rolePromised,
+                promiseType,
+                tokensOffered
+            });
+
+            if (!pitchResult.accepted) {
+                releaseToFreeAgency(player, item, team);
+
+                Game.addMessage(
+                    'Player Departed',
+                    `🚲 <b>${escapeExitHtml(player.name)}</b> rejected the retention pitch and entered Free Agency.`
+                );
+
+                alert(
+                    `✋ PITCH DECLINED\n\n${pitchResult.quote}\n\n` +
+                    `${player.name} has left for Free Agency.`
+                );
+
+                saveAndContinue();
+                return;
+            }
+
+            // Commit tokens and promises only after acceptance.
+            if (tokensOffered > 0) {
+                team.socialProfile.favorTokens -= tokensOffered;
+            }
+
+            player.activePromise = {
+                role: rolePromised,
+                promiseType,
+                promiseTouches: 'NORMAL',
+                promiseSeason: gameState.year,
+                broken: false
+            };
+
+            player.status = {
+                type: 'healthy',
+                description: '',
+                duration: 0
+            };
+
+            if (player.personality) {
+                player.personality.loyalty = Math.min(
+                    100,
+                    (player.personality.loyalty ?? 50) + 5
+                );
+            }
+
+            if (player.expectations) {
+                player.expectations.happiness = Math.min(
+                    100,
+                    (player.expectations.happiness ?? 50) + 8
+                );
+            }
+
+            Game.aiSetDepthChart(team);
+
+            Game.addMessage(
+                'Player Retained',
+                `🤝 <b>${escapeExitHtml(player.name)}</b> agreed to stay for Season ${gameState.year}.`
+            );
+
+            alert(
+                `🤝 PLAYER RETAINED\n\n${pitchResult.quote}\n\n` +
+                `${player.name} agreed to return for Season ${gameState.year}.\n\n` +
+                `Promise recorded: ${rolePromised}` +
+                (promiseType !== 'NONE' ? ` + ${promiseType}` : '') +
+                (tokensOffered > 0 ? `\nFavor Tokens spent: ${tokensOffered}` : '')
+            );
+
+            saveAndContinue();
+        });
+    };
+
+    renderActiveExitInterview = renderCurrentInterview;
+    renderCurrentInterview();
+}
+
+
 async function handleAdvanceWeek() {
     if (!gameState) return;
+
+    // Never allow the season to advance around an unresolved exit interview.
+    if (isExitInterviewFlowActive) {
+        renderActiveExitInterview?.();
+        return;
+    }
 
     // 1. Initial Draft (Year 1/Year 4 pre-season)
     if (gameState.currentWeek === 0 && !gameState.draftCompleted) {
@@ -814,13 +1205,36 @@ async function handleAdvanceWeek() {
         return;
     }
 
-    // 2. THIS WAS MISSING: Advance to Offseason when Week 9 ends!
+    // 2. Advance to Offseason, resolving user-team flight risks first.
     if (gameState.currentWeek >= WEEKS_IN_SEASON) {
         const report = Game.advanceToOffseason();
+
         gameState = Game.getGameState();
         Game.saveGameState(activeSaveKey);
-        UI.renderOffseasonScreen(report, gameState.year);
-        UI.showScreen('offseason-screen');
+
+        const retentions = Array.isArray(report.pendingRetentions)
+            ? report.pendingRetentions
+            : [];
+
+        const proceedToOffseasonScreen = () => {
+            gameState = Game.getGameState();
+            gameState.pendingRetentions = [];
+
+            Game.saveGameState(activeSaveKey);
+            UI.renderOffseasonScreen(report, gameState.year);
+            UI.showScreen('offseason-screen');
+        };
+
+        if (retentions.length > 0) {
+            startExitInterviewFlow(
+                retentions,
+                proceedToOffseasonScreen,
+                report
+            );
+        } else {
+            proceedToOffseasonScreen();
+        }
+
         return;
     }
 
