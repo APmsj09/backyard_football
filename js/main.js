@@ -1518,6 +1518,34 @@ window.app = {
 
 window.app_toggleWatchlist = (id) => UI.toggleWatchlistPlayer(id);
 
+window.app_updateClipboard = (field, value) => {
+    const gs = Game.getGameState();
+    const team = gs?.playerTeam;
+    if (!team || !team.gameplan || !team.gameplan.situational) return;
+    
+    team.gameplan.situational[field] = (value === 'GM' || value === 'COACH') ? value : parseInt(value, 10);
+    
+    // Auto-update Coach UI context if delegating
+    if (field === 'playcaller' && value === 'COACH') {
+        Game.aiSetSituationalGameplan(team);
+    }
+    
+    // We do NOT want to fully re-render the whole screen while dragging a slider (kills performance),
+    // so we only fully re-render if the playcaller dropdown changed.
+    if (field === 'playcaller') {
+        renderPlaybookManager(gs);
+    } else {
+        // Update the textual clash warning dynamically
+        const clash = Game.calculateSchemeClash(team);
+        const warnEl = document.getElementById('clipboard-clash-warning');
+        if (warnEl) {
+            if (clash === 0) warnEl.innerHTML = `<span class="text-emerald-600 font-bold">Coach is aligned with your gameplan.</span>`;
+            else if (clash < 6) warnEl.innerHTML = `<span class="text-amber-600 font-bold">Coach is annoyed by your scheme (-${clash} IQ Penalty).</span>`;
+            else warnEl.innerHTML = `<span class="text-rose-600 font-bold">Coach is furious! Kids are confused (-${clash} IQ Penalty).</span>`;
+        }
+    }
+};
+
 function openDebugReportModal(initialReport = 1) {
     let activeReport = initialReport;
 
