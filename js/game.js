@@ -21,6 +21,10 @@ export {
     clearPlayerMarketCache
 } from './game/negotiations.js';
 
+
+export * from './game/debug_mode.js';
+export * from './game/debug_collector.js';
+
 import { getRosterObjects } from './game/state.js';
 import { changeFormation } from './game/depth_chart.js';
 export const getUIRosterObjects = getRosterObjects;
