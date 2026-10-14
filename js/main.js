@@ -4,6 +4,10 @@ import * as UI from './ui.js';
 import { positionOverallWeights, estimateBestPosition, calculateOverall } from './game/player.js';
 import { coachPersonalities, offenseFormations, defenseFormations } from './data.js';
 import { formatHeight } from './utils.js';
+import {
+    isDebugMode,
+    setDebugMode
+} from './game/debug_mode.js';
 
 let gameState = null;
 let selectedPlayerId = null;
@@ -1456,6 +1460,35 @@ function main() {
     document.getElementById('advance-week-btn')?.addEventListener('click', handleAdvanceWeek);
     document.getElementById('dashboard-tabs')?.addEventListener('click', handleTabSwitch);
     document.getElementById('go-to-next-draft-btn')?.addEventListener('click', handleGoToNextDraft);
+
+    // Debug Mode Toggle
+    const debugModeBtn = document.getElementById('sim-debug-mode-btn');
+    const debugModeLabel = document.getElementById('sim-debug-mode-label');
+
+    function refreshDebugModeButton() {
+        if (!debugModeBtn || !debugModeLabel) return;
+
+        const enabled = isDebugMode();
+
+        debugModeLabel.textContent = enabled ? 'Debug ON' : 'Debug OFF';
+        debugModeBtn.setAttribute('aria-pressed', String(enabled));
+        debugModeBtn.title = enabled
+            ? 'Developer diagnostics enabled'
+            : 'Developer diagnostics disabled';
+
+        debugModeBtn.classList.toggle('text-amber-300', enabled);
+        debugModeBtn.classList.toggle('text-gray-400', !enabled);
+        debugModeBtn.classList.toggle('border-amber-500', enabled);
+        debugModeBtn.classList.toggle('border-gray-700', !enabled);
+    }
+
+    debugModeBtn?.addEventListener('click', () => {
+        setDebugMode(!isDebugMode());
+        refreshDebugModeButton();
+    });
+
+    // Initialize the button from the saved setting.
+    refreshDebugModeButton();
 
     // Live Sim Speed Controls
     document.getElementById('sim-speed-pause')?.addEventListener('click', () => UI.togglePause());
