@@ -14,6 +14,7 @@ export * from './game/play_execution.js';
 export * from './game/play_resolution.js';
 export * from './game/telemetry.js';
 export * from './game/staff.js';
+export { aiSetSituationalGameplan, calculateSchemeClash } from './game/staff.js';
 export * from './game/negotiations.js';
 export {
     generatePlayerRumors,
