@@ -1568,6 +1568,28 @@ export function renderStaffTab(gameState) {
                         <div>Scout: <b class="text-slate-800">${Math.round((rt.evalPhysicals + rt.evalTechnique) / 2)}</b></div>
                         <div>Teach: <b class="text-slate-800">${rt.teaching}</b></div>
                     </div>
+                    
+                    ${r.key === 'coach' ? (() => {
+                        const tend = Game.previewCoachTendencies(member, team);
+                        return `
+                        <div class="mt-2 pt-2 border-t border-slate-200">
+                            <span class="text-[9px] font-black uppercase text-slate-500 block mb-1">Playcalling DNA</span>
+                            <div class="space-y-1.5 text-[9px] font-mono text-slate-700">
+                                <div>
+                                    <div class="flex justify-between mb-0.5"><span>Run/Pass</span><span>${tend.earlyDownTendency}% Run</span></div>
+                                    <div class="w-full bg-slate-200 rounded-full h-1.5"><div class="bg-amber-500 h-1.5 rounded-full" style="width: ${tend.earlyDownTendency}%"></div></div>
+                                </div>
+                                <div>
+                                    <div class="flex justify-between mb-0.5"><span>4th Dn Bravery</span><span>${tend.fourthDownBravery}%</span></div>
+                                    <div class="w-full bg-slate-200 rounded-full h-1.5"><div class="bg-emerald-500 h-1.5 rounded-full" style="width: ${tend.fourthDownBravery}%"></div></div>
+                                </div>
+                                <div>
+                                    <div class="flex justify-between mb-0.5"><span>Defense Blitz</span><span>${tend.defenseAggressiveness}%</span></div>
+                                    <div class="w-full bg-slate-200 rounded-full h-1.5"><div class="bg-rose-500 h-1.5 rounded-full" style="width: ${tend.defenseAggressiveness}%"></div></div>
+                                </div>
+                            </div>
+                        </div>`;
+                    })() : ''}
                 </div>
 
                 ${!isUserGM ? `
@@ -1605,6 +1627,19 @@ export function renderStaffTab(gameState) {
                                 <div class="bg-white p-1 rounded border"><span>Scout</span><br><b>${s.ratings.evalPhysicals}</b></div>
                                 <div class="bg-white p-1 rounded border"><span>Teach</span><br><b>${s.ratings.teaching}</b></div>
                             </div>
+                            
+                            ${(() => {
+                                const tend = Game.previewCoachTendencies(s, team);
+                                return `
+                                <div class="mt-1 pt-1.5 border-t border-slate-100">
+                                    <span class="text-[9px] font-black uppercase text-slate-500 block mb-1">Expected Playcalling DNA</span>
+                                    <div class="flex gap-2 text-[9px] font-mono text-slate-600">
+                                        <span class="bg-slate-200 px-1 rounded border border-slate-300">Run: <b>${tend.earlyDownTendency}%</b></span>
+                                        <span class="bg-slate-200 px-1 rounded border border-slate-300">Blitz: <b>${tend.defenseAggressiveness}%</b></span>
+                                        <span class="bg-slate-200 px-1 rounded border border-slate-300">4th Dn: <b>${tend.fourthDownBravery}%</b></span>
+                                    </div>
+                                </div>`;
+                            })()}
                         </div>
 
                         <div class="flex gap-1.5 border-t border-slate-200 pt-2">
