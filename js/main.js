@@ -5,10 +5,6 @@ import { isDebugMode, setDebugMode, debugCollector } from './game.js';
 import { positionOverallWeights, estimateBestPosition, calculateOverall } from './game/player.js';
 import { coachPersonalities, offenseFormations, defenseFormations } from './data.js';
 import { formatHeight } from './utils.js';
-import {
-    isDebugMode,
-    setDebugMode
-} from './game/debug_mode.js';
 
 let gameState = null;
 let selectedPlayerId = null;
