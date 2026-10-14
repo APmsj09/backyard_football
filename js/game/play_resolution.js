@@ -975,9 +975,25 @@ export function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey
 
             if (playState.playIsLive && !ballPos.inAir && !ballPos.isLoose && !playState.turnover && !playState.sack) {
                 if (loopType === 'pass') {
+                    const isFleaFlicker =
+                        playState.playKey === 'Trick_Flea_Flicker';
+
+                    const isPlayAction =
+                        playState.playKey?.startsWith('PA_');
+
+                    const isBootleg =
+                        playState.playKey === 'PA_Bootleg_Right';
+
+                    const playActionReady = !isPlayAction
+                        ? true
+                        : isBootleg
+                            ? qb1?._bootlegRolloutReady === true
+                            : qb1?.hasCompletedDropback === true;
+
                     const mayProcessQBDecision =
-                        playState.playKey !== 'Trick_Flea_Flicker' ||
-                        playState.fleaFlickerPhase === 'qb_pass';
+                        (!isFleaFlicker ||
+                            playState.fleaFlickerPhase === 'qb_pass') &&
+                        playActionReady;
 
                     if (mayProcessQBDecision) {
                         updateQBDecision(
