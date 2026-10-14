@@ -244,6 +244,8 @@ export function simulateHistoricalDraft(yearNum) {
         const season = game.history.seasons.find(s => s.year === yearNum);
         if (season) season.draftResults = draftResults;
     }
+
+    return draftResults;
 }
 /**
  * Concludes the draft: undrafted rookies become active street Free Agents.
