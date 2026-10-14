@@ -9,8 +9,19 @@ import { isPlayerViableForPosition } from './depth_chart.js';
  * Evaluates whether an AI team genuinely needs and desires a free agent
  * based on Coach Intelligence, Tactical/Scouting Biases, GM Directives, and Value-Over-Replacement (VOR).
  */
-export function calculateAiTeamNeedAndDesire(aiTeam, player, gameState, currentTopBidScore = 0) {
-    if (!aiTeam || !player || aiTeam.isPlayerControlled || (aiTeam.roster?.length || 0) >= 18) {
+export function calculateAiTeamNeedAndDesire(
+    aiTeam,
+    player,
+    gameState,
+    currentTopBidScore = 0,
+    rosterLimit = (gameState?.currentWeek === 0 ? 24 : 18)
+) {
+    if (
+        !aiTeam ||
+        !player ||
+        aiTeam.isPlayerControlled ||
+        (aiTeam.roster?.length || 0) >= rosterLimit
+    ) {
         return { shouldBid: false, desireScore: 0, offer: null, reason: 'Ineligible' };
     }
 
