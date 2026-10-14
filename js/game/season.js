@@ -1297,9 +1297,14 @@ export function processOffseasonFADay(gameState, userBids = []) {
     });
 
     // 2. SMART AI BIDDING & COUNTER-BIDDING
-    // AI coaches evaluate their true needs, calculate upgrade margins, and react to clubhouse leaders
+    // AI coaches recruit up to the current phase's roster limit.
+    const rosterLimit = getCurrentRosterLimit(gameState);
+
     activeTeams.forEach(aiTeam => {
-        if (aiTeam.isPlayerControlled || (aiTeam.roster?.length || 0) >= 17) return;
+        const rosterSize = aiTeam.roster?.length || 0;
+        const rosterSpots = Math.max(0, rosterLimit - rosterSize);
+
+        if (aiTeam.isPlayerControlled || rosterSpots === 0) return;
 
         const availableProspects = gameState.players.filter(p =>
             !p.teamId && p.status?.type !== 'retired' && p.status?.type !== 'departed' && p.age >= 12 && p.age <= 18
@@ -1313,9 +1318,12 @@ export function processOffseasonFADay(gameState, userBids = []) {
             return { prospect, ...evalResult };
         }).filter(t => t.shouldBid).sort((a, b) => b.desireScore - a.desireScore);
 
-        // Top 2 targets maximum per AI team to preserve tokens and prevent roster bloat
-        const teamBids = evaluatedTargets.slice(0, 2);
-
+        // Limit targets to two, or the team's remaining roster vacancies.
+        const teamBids = evaluatedTargets.slice(
+            0,
+            Math.min(2, rosterSpots)
+        );
+        
         teamBids.forEach(bidTarget => {
             const pList = playerBidsMap.get(bidTarget.prospect.id) || [];
             pList.push({ team: aiTeam, teamId: aiTeam.id, offer: bidTarget.offer });
