@@ -169,8 +169,12 @@ export function checkTackleCollisions(playState, gameLog) {
 
     const defenders = tacklingTeam.filter(p => {
         if (p.stunnedTicks > 0) return false;
-        const dist = p._distToCarrier;
-        if (dist === undefined || dist > TACKLE_RANGE) return false;
+
+        // Refresh distance after movement; the cached value may be stale.
+        const dist = getDistance(p, carrier);
+        p._distToCarrier = dist;
+
+        if (!Number.isFinite(dist) || dist > TACKLE_RANGE) return false;
 
         // Reject a tackle attempt when another player's body obstructs
         // the direct path between the defender and the ball carrier.
@@ -333,10 +337,13 @@ export function checkTackleCollisions(playState, gameLog) {
         const momRatio = tMomentum / Math.max(1, rMomentum);
         successChance += (momRatio - 1.0) * 0.2;
 
-        const defendersInRange = tacklingTeam.filter(d =>
+        // Only defenders who passed the reach and obstruction checks
+        // can contribute to the gang-tackle success bonus.
+        const defendersInRange = defenders.filter(d =>
             d.stunnedTicks === 0 &&
-            !isNaN(d._distToCarrier) &&
-            d._distToCarrier < TACKLE_RANGE
+            !d.isBlocked &&
+            !d.isEngaged &&
+            getDistance(d, carrier) < TACKLE_RANGE
         );
 
         // Additional defenders help, but shouldn't make a tackle nearly automatic.
