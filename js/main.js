@@ -374,6 +374,14 @@ async function runAIDraftPicks() {
 
             if (currentPickingTeam && currentPickingTeam.id === gameState.playerTeam.id) {
                 if (gameState.playerTeam.roster.length >= ROSTER_LIMIT) {
+                    debugCollector.recordDraftSkip({
+                        pick: gameState.currentPick + 1,
+                        teamName: currentPickingTeam.name,
+                        reason: 'Player team roster limit reached',
+                        rosterSize: gameState.playerTeam.roster.length,
+                        rosterLimit: ROSTER_LIMIT
+                    });
+
                     gameState.currentPick++;
                     UI.renderSelectedPlayerCard(null, gameState);
                     continue;
@@ -384,6 +392,18 @@ async function runAIDraftPicks() {
             }
 
             if (!currentPickingTeam || !currentPickingTeam.roster || currentPickingTeam.roster.length >= ROSTER_LIMIT) {
+                debugCollector.recordDraftSkip({
+                    pick: gameState.currentPick + 1,
+                    teamName: currentPickingTeam?.name || 'Unknown team',
+                    reason: !currentPickingTeam
+                        ? 'Missing team in draft order'
+                        : !currentPickingTeam.roster
+                            ? 'Missing roster array'
+                            : 'Roster limit reached',
+                    rosterSize: currentPickingTeam?.roster?.length ?? null,
+                    rosterLimit: ROSTER_LIMIT
+                });
+
                 gameState.currentPick++;
             } else {
                 // Capture candidates available immediately before the AI selects
@@ -426,6 +446,14 @@ async function runAIDraftPicks() {
                         currentDepthAtPos: depthAtPos,
                         alternatives: topAlternatives.filter(a => a.name !== picked.name).slice(0, 3),
                         reasoning: depthAtPos === 0 ? `Critical Positional Need (${pickedPos})` : `Best Player Available (${pickedOvr} OVR, ${picked.potential} Pot)`
+                    });
+                } else {
+                    debugCollector.recordDraftSkip({
+                        pick: gameState.currentPick + 1,
+                        teamName: currentPickingTeam.name,
+                        reason: 'AI pick returned no player',
+                        rosterSize: currentPickingTeam.roster?.length ?? null,
+                        rosterLimit: ROSTER_LIMIT
                     });
                 }
                 gameState.currentPick++;
