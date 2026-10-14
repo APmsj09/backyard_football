@@ -241,11 +241,84 @@ export function aiManageTeamStaff(team, gameState) {
     });
 }
 
-/**
- * AI Coach evaluates roster, opponent, and GM directives to install plays autonomously.
- */
+export function aiSetSituationalGameplan(team) {
+    if (!team || !team.gameplan) return;
+    
+    // If GM is calling plays manually, do not overwrite their sliders
+    if (team.gameplan.situational?.playcaller === 'GM') return;
+
+    const coach = team.staff?.coach || team.coach;
+    const tactical = coach?.biases?.tactical?.name || 'Balanced Tactician';
+    const personality = coach?.biases?.personality?.name || 'Balanced';
+    const iq = coach?.ratings?.gameplanInstinct || 50;
+    
+    const roster = getRosterObjects(team);
+    
+    // Evaluate Offense (Calculate Best OVRs for QB, RB, WR)
+    const qbs = roster.filter(p => isPlayerViableForPosition(p, 'QB')).map(p => calculateOverall(p, 'QB'));
+    const rbs = roster.filter(p => isPlayerViableForPosition(p, 'RB')).map(p => calculateOverall(p, 'RB'));
+    const wrs = roster.filter(p => isPlayerViableForPosition(p, 'WR')).map(p => calculateOverall(p, 'WR'));
+    
+    const qbOvr = qbs.sort((a,b) => b-a)[0] || 50;
+    const rbOvr = rbs.sort((a,b) => b-a)[0] || 50;
+    const wrOvr = wrs.sort((a,b) => b-a)[0] || 50;
+    
+    const passStrength = (qbOvr + wrOvr) / 2;
+    const runStrength = rbOvr;
+    const rosterRunPreference = runStrength - passStrength; // Positive = Better at running
+    
+    // Evaluate Defense
+    const dbs = roster.filter(p => isPlayerViableForPosition(p, 'DB')).map(p => calculateOverall(p, 'DB'));
+    const dbOvr = dbs.sort((a,b) => b-a)[0] || 50;
+    const rosterBlitzPreference = dbOvr - 50; // Better DBs = Safer to blitz
+    
+    let earlyDownTendency = 50; // 0 = Heavy Pass, 100 = Heavy Run
+    let thirdLongAggro = 50;    // 0 = Safe/Draws, 100 = Deep Bombs
+    let fourthBravery = 50;     // 0 = Punt Always, 100 = Riverboat Gambler
+    let defAggro = 50;          // 0 = Safe Zone/Prevent, 100 = House Fire Blitz
+    
+    // 1. Tactical Bias
+    if (tactical === 'Smashmouth Zealot') earlyDownTendency += 25;
+    if (tactical === 'Air Raid Purist') earlyDownTendency -= 25;
+    if (tactical === 'Conservative Turtler') {
+        thirdLongAggro -= 30;
+        fourthBravery -= 30;
+        defAggro -= 20;
+    }
+    if (tactical === 'Blitz Addict') {
+        defAggro += 35;
+        thirdLongAggro += 15;
+    }
+    
+    // 2. Personality
+    if (personality === "Peaked in '94") fourthBravery += 20;
+    if (personality === "Old-School Disciplinarian") earlyDownTendency += 10;
+    if (personality === "Analytical Savant") fourthBravery += 15; // Analytics say go for it
+    
+    // 3. Roster Adaptability (Scaled by IQ)
+    const adaptability = iq / 100;
+    const stubbornness = coach?.stubbornness || 0.75;
+    
+    // Blend bias with roster reality
+    const targetRunTendency = 50 + (rosterRunPreference * 1.5);
+    earlyDownTendency = (earlyDownTendency * stubbornness) + (targetRunTendency * adaptability);
+    
+    const targetDefAggro = 50 + (rosterBlitzPreference * 1.0);
+    defAggro = (defAggro * stubbornness) + (targetDefAggro * adaptability);
+    
+    team.gameplan.situational = {
+        playcaller: 'COACH',
+        earlyDownTendency: Math.max(0, Math.min(100, Math.round(earlyDownTendency))),
+        thirdAndLongAggressiveness: Math.max(0, Math.min(100, Math.round(thirdLongAggro))),
+        fourthDownBravery: Math.max(0, Math.min(100, Math.round(fourthBravery))),
+        defenseAggressiveness: Math.max(0, Math.min(100, Math.round(defAggro)))
+    };
+}
+
 export function aiBuildGameplan(team, opponent = null, gmDirective = 'COACH_AUTONOMY') {
     if (!team || !team.gameplan) return;
+
+    aiSetSituationalGameplan(team);
 
     const coach = team.staff?.coach;
     const tactical = coach?.biases?.tactical?.name || 'Balanced Tactician';
