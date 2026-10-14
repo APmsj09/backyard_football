@@ -2948,6 +2948,25 @@ export function renderPlaybookManager(gameState) {
         };
     }
 
+    if (!team.gameplan.situational) {
+        Game.aiSetSituationalGameplan(team);
+    }
+
+    const sit = team.gameplan.situational;
+    const isGM = sit.playcaller === 'GM';
+    const clash = Game.calculateSchemeClash(team);
+    const disabledAttr = isGM ? '' : 'disabled';
+    const sliderOpac = isGM ? 'opacity-100' : 'opacity-50 cursor-not-allowed';
+
+    let clashHtml = '';
+    if (isGM) {
+        if (clash === 0) clashHtml = `<span class="text-emerald-600 font-bold">Coach is aligned with your gameplan.</span>`;
+        else if (clash < 6) clashHtml = `<span class="text-amber-600 font-bold">Coach is annoyed by your scheme (-${clash} IQ Penalty).</span>`;
+        else clashHtml = `<span class="text-rose-600 font-bold">Coach is furious! Kids are confused (-${clash} IQ Penalty).</span>`;
+    } else {
+        clashHtml = `<span class="text-blue-600 font-bold">Coach has full control. Synergy bonuses active.</span>`;
+    }
+
     const BASICS_OFF = ['Uni_InsideZone', 'Uni_QuickSlants', 'Uni_FourVerts'];
     const BASICS_DEF = ['Cover_2_Zone_Base', 'Cover_1_Robber', 'GoalLine_RunStuff'];
 
@@ -2981,6 +3000,71 @@ export function renderPlaybookManager(gameState) {
 
     container.innerHTML = `
         <div class="space-y-4 text-xs font-sans pb-6">
+            
+            <!-- SIDELINE CLIPBOARD (SITUATIONAL TENDENCIES) -->
+            <div class="bg-white border border-slate-300 rounded p-4 shadow-sm space-y-4">
+                <div class="flex justify-between items-center border-b border-slate-200 pb-2">
+                    <div>
+                        <h4 class="font-black text-sm uppercase tracking-wider text-slate-900">Sideline Clipboard (Tendencies)</h4>
+                        <p id="clipboard-clash-warning" class="text-[11px] mt-0.5">${clashHtml}</p>
+                    </div>
+                    <select class="p-1.5 border border-slate-300 rounded font-bold text-slate-800 bg-slate-50 outline-none" onchange="app_updateClipboard('playcaller', this.value)">
+                        <option value="COACH" ${!isGM ? 'selected' : ''}>Delegate to Coach (Auto)</option>
+                        <option value="GM" ${isGM ? 'selected' : ''}>GM Manual Control</option>
+                    </select>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4 ${sliderOpac}">
+                    <!-- Offense Early Downs -->
+                    <div>
+                        <div class="flex justify-between text-[10px] font-bold text-slate-500 uppercase mb-1">
+                            <span>Air it Out</span>
+                            <span>Early Downs (1st & 2nd)</span>
+                            <span>Ground & Pound</span>
+                        </div>
+                        <input type="range" min="0" max="100" value="${sit.earlyDownTendency}" class="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-amber-500" ${disabledAttr}
+                            onchange="app_updateClipboard('earlyDownTendency', this.value)" oninput="document.getElementById('val-edt').textContent = this.value + '% Run'">
+                        <div class="text-center text-[10px] font-mono text-slate-600 mt-0.5" id="val-edt">${sit.earlyDownTendency}% Run</div>
+                    </div>
+
+                    <!-- Offense 3rd Down -->
+                    <div>
+                        <div class="flex justify-between text-[10px] font-bold text-slate-500 uppercase mb-1">
+                            <span>Safe / Draws</span>
+                            <span>3rd & Long Aggression</span>
+                            <span>Playground Hero</span>
+                        </div>
+                        <input type="range" min="0" max="100" value="${sit.thirdAndLongAggressiveness}" class="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-blue-500" ${disabledAttr}
+                            onchange="app_updateClipboard('thirdAndLongAggressiveness', this.value)" oninput="document.getElementById('val-3rd').textContent = this.value + '% Aggro'">
+                        <div class="text-center text-[10px] font-mono text-slate-600 mt-0.5" id="val-3rd">${sit.thirdAndLongAggressiveness}% Aggro</div>
+                    </div>
+
+                    <!-- 4th Down Bravery -->
+                    <div>
+                        <div class="flex justify-between text-[10px] font-bold text-slate-500 uppercase mb-1">
+                            <span>Always Punt</span>
+                            <span>4th Down Bravery</span>
+                            <span>Riverboat Gambler</span>
+                        </div>
+                        <input type="range" min="0" max="100" value="${sit.fourthDownBravery}" class="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-emerald-500" ${disabledAttr}
+                            onchange="app_updateClipboard('fourthDownBravery', this.value)" oninput="document.getElementById('val-4th').textContent = this.value + '% Gambler'">
+                        <div class="text-center text-[10px] font-mono text-slate-600 mt-0.5" id="val-4th">${sit.fourthDownBravery}% Gambler</div>
+                    </div>
+
+                    <!-- Defense Aggressiveness -->
+                    <div>
+                        <div class="flex justify-between text-[10px] font-bold text-slate-500 uppercase mb-1">
+                            <span>Soft Zone / Prevent</span>
+                            <span>Defense Aggression</span>
+                            <span>Heavy Blitz / Man</span>
+                        </div>
+                        <input type="range" min="0" max="100" value="${sit.defenseAggressiveness}" class="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-rose-500" ${disabledAttr}
+                            onchange="app_updateClipboard('defenseAggressiveness', this.value)" oninput="document.getElementById('val-def').textContent = this.value + '% Blitz'">
+                        <div class="text-center text-[10px] font-mono text-slate-600 mt-0.5" id="val-def">${sit.defenseAggressiveness}% Blitz</div>
+                    </div>
+                </div>
+            </div>
+
             <!-- Strategic Header -->
             <div class="bg-slate-900 text-white p-3.5 rounded flex justify-between items-center shadow-sm">
                 <div>
