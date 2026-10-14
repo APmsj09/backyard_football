@@ -12,6 +12,7 @@ import { calculateSafetyHelp, diagnosePlay, getSmartCarrierTarget } from './ai.j
 import { pushGameLog } from './collisions.js';
 import { initPlayTelemetry, finalizePlayTelemetry, logPlayDebug } from './telemetry.js';
 import { initMovementIntent, setPointIntent, setHoldIntent, setTrackIntent, setLaneIntent, setRouteIntent, resolveMovementIntent } from './movement_intent.js';
+import { calculateSchemeClash } from './staff.js';
 
 const FIELD_WIDTH = 53.3;
 const FIELD_LENGTH = 120;
@@ -336,12 +337,17 @@ export function setupInitialPlayerStates(playState, offense, defense, play, assi
 
             const isPreferredOffense = offense.formations.offense === offense.coach?.preferredOffense;
             const isPreferredDefense = defense.formations.defense === defense.coach?.preferredDefense;
+            
+            // Scheme Clash Penalty (GM vs Coach)
+            const teamRef = isOffense ? offense : defense;
+            const clashPenalty = calculateSchemeClash(teamRef);
+
             let schemeBoost = 0;
             if (isOffense && isPreferredOffense) schemeBoost = 5;
             else if (!isOffense && isPreferredDefense) schemeBoost = 5;
 
-            const playerIQ = Math.min(99, (player.attributes?.mental?.playbookIQ || 50) + schemeBoost);
-            const consistency = Math.min(99, (player.attributes?.mental?.consistency || 50) + schemeBoost);
+            const playerIQ = Math.max(10, Math.min(99, (player.attributes?.mental?.playbookIQ || 50) + schemeBoost - clashPenalty));
+            const consistency = Math.max(10, Math.min(99, (player.attributes?.mental?.consistency || 50) + schemeBoost - clashPenalty));
 
             let reactionTicks = 0;
             if (slot !== 'QB1' && slot !== 'OL2') {
