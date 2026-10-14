@@ -102,8 +102,35 @@
                         Test Roster
                     </button>
                 </div>
+
+                <!-- Startup Debug Mode Checkbox -->
+                <div class="mt-2 p-3 bg-white border border-slate-300 rounded-sm w-full text-left flex items-start gap-3 shadow-sm">
+                    <input type="checkbox" id="startup-debug-mode" class="mt-1 w-4 h-4 text-amber-600 rounded border-slate-300 focus:ring-amber-500 cursor-pointer">
+                    <label for="startup-debug-mode" class="cursor-pointer select-none">
+                        <span class="block font-bold text-xs uppercase tracking-wider text-slate-800">Debug Mode</span>
+                        <span class="block text-[11px] text-slate-500 leading-tight mt-0.5">
+                            Enable diagnostic reports for league generation, historical seasons, the rookie draft, and offseason activities.
+                        </span>
+                        <span class="inline-block mt-1 text-[9px] font-mono text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded">Off by default</span>
+                    </label>
+                </div>
             </div>
         </section>
+
+        <!-- In-Game Diagnostics Bar (Visible only when Debug Mode is ON) -->
+        <div id="debug-diagnostics-bar" class="hidden shrink-0 bg-slate-900 text-white border-b border-amber-500/50 px-4 py-1.5 text-xs flex flex-wrap justify-between items-center z-50">
+            <div class="flex items-center gap-2">
+                <span class="font-bold text-amber-400 flex items-center gap-1">⚙️ <span>DEBUG ON</span></span>
+                <span class="text-slate-400 text-[10px] hidden md:inline">| Diagnostic Reports:</span>
+            </div>
+            <div class="flex items-center gap-1 font-mono text-[11px]">
+                <button class="open-debug-report-btn bg-slate-800 hover:bg-slate-700 text-amber-300 px-2 py-0.5 rounded border border-slate-700" data-report="1">1. League</button>
+                <button class="open-debug-report-btn bg-slate-800 hover:bg-slate-700 text-amber-300 px-2 py-0.5 rounded border border-slate-700" data-report="2">2. History</button>
+                <button class="open-debug-report-btn bg-slate-800 hover:bg-slate-700 text-amber-300 px-2 py-0.5 rounded border border-slate-700" data-report="3">3. Draft</button>
+                <button class="open-debug-report-btn bg-slate-800 hover:bg-slate-700 text-amber-300 px-2 py-0.5 rounded border border-slate-700" data-report="4">4. Offseason</button>
+                <button class="open-debug-report-btn bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold px-2 py-0.5 rounded shadow-sm" data-report="all">View All</button>
+            </div>
+        </div>
 
         <section id="loading-screen"
             class="screen hidden flex flex-col items-center justify-center text-center p-8 bg-gray-900 text-white rounded-lg shadow-lg h-full">
