@@ -155,25 +155,26 @@ export function determinePuntDecision(down, yardsToGo, ballOn, offenseTeam = nul
     // Trailing late in 4th quarter: always go for it
     if (timeRemaining < 180 && scoreDiff < 0) return false;
 
-    const coach = offenseTeam?.staff?.coach || offenseTeam?.coach;
-    const tactical = coach?.biases?.tactical?.name;
-    const personality = coach?.biases?.personality?.name;
-    const clockIQ = coach?.ratings?.clockIQ || 50;
-    const gmDirective = offenseTeam?.gameplan?.gmDirective;
+    const sit = offenseTeam?.gameplan?.situational || { fourthDownBravery: 50 };
+    const bravery = sit.fourthDownBravery; // 0 to 100
 
-    // 1. Conservative Turtler / Has-Been Dad
-    if (tactical === 'Conservative Turtler' || coach?.type === 'The Has-Been Dad') {
-        if (yardsToGo > 1 || ballOn < 50) return true; // Punts conservatively
+    // Bravery mapping:
+    // 0-30: Very conservative. Punts if >1 yard or own territory.
+    // 31-60: Standard. Punts if >2 yards or own territory.
+    // 61-85: Aggressive. Goes for it on 4th & 3 or anywhere past own 40.
+    // 86-100: Gambler. Goes for it on 4th & 5 or anywhere past own 30.
+
+    if (bravery < 30) {
+        if (yardsToGo > 1 || ballOn < 55) return true;
+    } else if (bravery < 60) {
+        if (yardsToGo > 2 || ballOn < 45) return true;
+    } else if (bravery < 85) {
+        if (yardsToGo > 3 && ballOn < 40) return true;
+    } else {
+        if (yardsToGo > 5 && ballOn < 30) return true;
     }
 
-    // 2. Aggressive Playground Alpha / Blitz Addict / Win-Now Directive
-    if (tactical === 'Blitz Addict' || personality === "Peaked in '94" || gmDirective === 'WIN_NOW') {
-        if (yardsToGo <= 3 && ballOn >= 38) return false; // Backyard gamble!
-    }
-
-    // Baseline rule
-    if (yardsToGo <= 2 && ballOn > 42 && clockIQ > 45) return false;
-    return true;
+    return false;
 }
 
 export function findAudiblePlay(offense, desiredType, desiredTag = null) {
@@ -283,17 +284,9 @@ export function determinePlayCall(offense, defense, down, yardsToGo, ballOn, sco
     const isDesperation = drivesRemaining <= 2 && scoreDiff <= -8;
     const isChewClock = drivesRemaining <= 2 && scoreDiff >= 8;
 
-    // Base run probability influenced by Head Coach tactical bias
-    let runProbability = 0.55;
-
-    const tacticalBias = offense.staff?.coach?.biases?.tactical;
-    if (tacticalBias?.runModifier) {
-        runProbability += tacticalBias.runModifier;
-    } else if (coach?.type === 'Ground and Pound' || coach?.type === 'Trench Warfare') {
-        runProbability += 0.20;
-    } else if (coach?.type === 'Air Raid') {
-        runProbability -= 0.20;
-    }
+    // Base run probability influenced by Situational Clipboard
+    const sit = offense.gameplan?.situational || { earlyDownTendency: 55, thirdAndLongAggressiveness: 50 };
+    let runProbability = sit.earlyDownTendency / 100; // 0.0 to 1.0
 
     // Normal downs/distances
     if (isShort) runProbability += 0.30;
@@ -415,20 +408,13 @@ export function determinePlayCall(offense, defense, down, yardsToGo, ballOn, sco
             if (tags.includes('pa')) score += 15 * situationalWeight;
         }
 
-        // --- LEVEL 2: COACH TACTICAL BIAS ---
-        const tacticalBias = offense.staff?.coach?.biases?.tactical?.name;
-        if (tacticalBias === 'Smashmouth Zealot') {
-            if (play.type === 'run') score += 18;
-            if (tags.includes('power') || tags.includes('inside')) score += 15;
-            if (play.type === 'pass' && !tags.includes('pa')) score -= 10;
-        } else if (tacticalBias === 'Air Raid Purist') {
-            if (play.type === 'pass') score += 20;
-            if (tags.includes('spread') || tags.includes('quick')) score += 15;
-            if (play.type === 'run' && !tags.includes('outside')) score -= 15;
-        } else if (tacticalBias === 'Conservative Turtler') {
-            if (play.type === 'run') score += 12;
-            if (tags.includes('deep') || tags.includes('trick')) score -= 25;
-            if (tags.includes('screen')) score += 10;
+        // --- LEVEL 2: SITUATIONAL CLIPBOARD SETTINGS ---
+        
+        // Aggressiveness on 3rd & Long
+        if (isLong) {
+            const aggro = (sit.thirdAndLongAggressiveness || 50) / 100; // 0.0 to 1.0
+            if (tags.includes('deep')) score += (aggro - 0.5) * 40; // Aggressive loves deep, conservative hates it
+            if (tags.includes('screen') || tags.includes('short')) score -= (aggro - 0.5) * 30;
         }
 
         // --- LEVEL 3: ELITE COACH INSTINCTS (Adjusting to Game State & Opponent) ---
@@ -743,10 +729,24 @@ export function determineDefensivePlayCall(defense, offense, down, yardsToGo, ba
     const isRunHeavyThreat = oppRB > 65 && (oppRB - oppQB > 10);
     const isPassHeavyThreat = oppQB > 65 && oppWR1 > 65 && (oppWR1 - oppRB > 10);
 
+    const sit = defense.gameplan?.situational || { defenseAggressiveness: 50 };
+    const aggro = (sit.defenseAggressiveness || 50) / 100; // 0.0 to 1.0
+
     let scoredPlays = availablePlays.map(key => {
         const play = defensivePlaybook[key];
         const tags = play.tags || [];
         let score = 50;
+
+        // Incorporate Defense Aggressiveness Setting
+        if (play.blitz) {
+            score += (aggro - 0.5) * 50; // High aggro heavily boosts blitzes
+        }
+        if (play.concept === 'Man') {
+            score += (aggro - 0.5) * 20; // High aggro prefers Man
+        }
+        if (tags.includes('prevent') || tags.includes('safeZone')) {
+            score -= (aggro - 0.5) * 40; // Low aggro heavily boosts prevent/safe zones
+        }
 
         // Opponent-specific adjustments
         if (isRunHeavyThreat && tags.includes('runStop')) score += 15;
