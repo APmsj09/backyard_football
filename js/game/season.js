@@ -1299,12 +1299,38 @@ export function processOffseasonFADay(gameState, userBids = []) {
     // 2. SMART AI BIDDING & COUNTER-BIDDING
     // AI coaches recruit up to the current phase's roster limit.
     const rosterLimit = getCurrentRosterLimit(gameState);
+    const aiBidAudit = {
+        currentWeek: gameState.currentWeek ?? null,
+        rosterLimit,
+        teamsEvaluated: 0,
+        teamsAtRosterCap: 0,
+        prospectsEvaluated: 0,
+        candidatesPassingFilters: 0,
+        teamsWithCandidates: 0,
+        offersGenerated: 0,
+        teamDetails: []
+    };
 
     activeTeams.forEach(aiTeam => {
+        if (aiTeam.isPlayerControlled) return;
+
         const rosterSize = aiTeam.roster?.length || 0;
         const rosterSpots = Math.max(0, rosterLimit - rosterSize);
 
-        if (aiTeam.isPlayerControlled || rosterSpots === 0) return;
+        aiBidAudit.teamsEvaluated++;
+
+        if (rosterSpots === 0) {
+            aiBidAudit.teamsAtRosterCap++;
+            aiBidAudit.teamDetails.push({
+                team: aiTeam.name,
+                rosterSize,
+                rosterSpots,
+                availableProspects: 0,
+                candidatesPassingFilters: 0,
+                offersGenerated: 0
+            });
+            return;
+        }
 
         const availableProspects = gameState.players.filter(p =>
             !p.teamId && p.status?.type !== 'retired' && p.status?.type !== 'departed' && p.age >= 12 && p.age <= 18
@@ -1323,7 +1349,24 @@ export function processOffseasonFADay(gameState, userBids = []) {
             0,
             Math.min(2, rosterSpots)
         );
-        
+
+        aiBidAudit.prospectsEvaluated += availableProspects.length;
+        aiBidAudit.candidatesPassingFilters += evaluatedTargets.length;
+
+        if (evaluatedTargets.length > 0) {
+            aiBidAudit.teamsWithCandidates++;
+        }
+
+        aiBidAudit.offersGenerated += teamBids.length;
+        aiBidAudit.teamDetails.push({
+            team: aiTeam.name,
+            rosterSize,
+            rosterSpots,
+            availableProspects: availableProspects.length,
+            candidatesPassingFilters: evaluatedTargets.length,
+            offersGenerated: teamBids.length
+        });
+
         teamBids.forEach(bidTarget => {
             const pList = playerBidsMap.get(bidTarget.prospect.id) || [];
             pList.push({ team: aiTeam, teamId: aiTeam.id, offer: bidTarget.offer });
@@ -1447,7 +1490,8 @@ export function processOffseasonFADay(gameState, userBids = []) {
         daySignings,
         rejectedBids,
         userBidResults,
-        activeNegotiations
+        activeNegotiations,
+        aiBidAudit
     };
 }
 
