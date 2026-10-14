@@ -107,12 +107,30 @@ export function getScoutedPlayerInfo(player, relationshipLevelNum) {
     const levelInfo = Object.values(relationshipLevels).find(rl => rl.level === relationshipLevelNum) || relationshipLevels.STRANGER;
     let accuracy = levelInfo.scoutAccuracy;
 
-    // Park Scout Rating adjusts scouting clarity (+/- 15%)
+    // Park Scout Rating adjusts scouting clarity (+/- 15%).
     const userScout = game?.playerTeam?.staff?.scout;
     if (userScout) {
-        const evalScore = (userScout.ratings?.evalTechnique + userScout.ratings?.evalPhysicals) / 200;
-        accuracy = Math.min(1.0, Math.max(0.2, accuracy + (evalScore - 0.5) * 0.3));
+        const evalScore = (
+            (userScout.ratings?.evalTechnique ?? 50) +
+            (userScout.ratings?.evalPhysicals ?? 50)
+        ) / 200;
+
+        accuracy = accuracy + (evalScore - 0.5) * 0.3;
     }
+
+    // The GM contributes general scouting ability and specialist knowledge.
+    const gmProfile = game?.playerTeam?.gmProfile;
+
+    accuracy += gmProfile?.bonuses?.scoutingAccuracy || 0;
+
+    const actualPosition = player.pos || estimateBestPosition(player);
+
+    if (gmProfile?.expertisePositions?.includes(actualPosition)) {
+        accuracy += gmProfile.expertiseScoutingBonus || 0;
+    }
+
+    // Combine all scouting influences before concealing the player's attributes.
+    accuracy = Math.min(1.0, Math.max(0.2, accuracy));
 
     const scoutedPlayer = JSON.parse(JSON.stringify(player));
     scoutedPlayer.relationshipName = levelInfo.name;
