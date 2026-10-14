@@ -1157,3 +1157,153 @@ export const coachPersonalities = [
     { type: 'The Playground Alpha', preferredOffense: 'Empty', preferredDefense: '3-0-5', attributePreferences: { physical: { speed: 1.8 }, mental: { clutch: 2.0 }, technical: { throwingAccuracy: 1.5 } } },
     { type: 'The Strict Parent', preferredOffense: 'Balanced', preferredDefense: '4-1-3', attributePreferences: { mental: { playbookIQ: 2.0, consistency: 1.5 }, technical: { blocking: 1.5, tackling: 1.5 } } }
 ];
+
+// --- GM CHARACTER CREATION: BACKGROUND ---
+export const gmBackgrounds = [
+    {
+        id: 'park_legend',
+        name: 'Former Park Legend',
+        lore: 'You used to own Saturday afternoons. Kids still argue about your greatest game.',
+        effect: '+12 Street Cred and +1 Favor Token at takeover.',
+        tradeoff: 'Your reputation comes with expectations.',
+        startingStreetCredBonus: 12,
+        startingFavorTokenBonus: 1,
+        modifiers: {}
+    },
+    {
+        id: 'rec_center_regular',
+        name: 'Rec-Center Regular',
+        lore: 'You know the families, the rivalries, and which kid needs a ride home.',
+        effect: '+6 Street Cred, +2 Favor Tokens, stronger teammate relationships.',
+        tradeoff: 'You build trust more easily than you win bidding wars.',
+        startingStreetCredBonus: 6,
+        startingFavorTokenBonus: 2,
+        modifiers: {
+            retention: 2,
+            relationshipGrowth: 0.04
+        }
+    },
+    {
+        id: 'overlooked_prospect',
+        name: 'The Overlooked One',
+        lore: 'Nobody recruited you. You learned to spot potential in kids everyone else ignored.',
+        effect: 'Scouting reports are slightly more accurate.',
+        tradeoff: 'You start without much neighborhood prestige.',
+        startingStreetCredBonus: 0,
+        startingFavorTokenBonus: 1,
+        modifiers: {
+            scoutingAccuracy: 0.04
+        }
+    }
+];
+
+// --- GM CHARACTER CREATION: MANAGEMENT ARCHETYPE ---
+export const gmArchetypes = [
+    {
+        id: 'film_room_rat',
+        name: 'The Film-Room Rat',
+        lore: 'You rewatch the same play until you understand what everyone else missed.',
+        effect: 'More accurate scouting reports across the roster.',
+        tradeoff: 'Recruitment pitches are less persuasive.',
+        modifiers: {
+            scoutingAccuracy: 0.08,
+            negotiationInterest: -3
+        }
+    },
+    {
+        id: 'neighborhood_builder',
+        name: 'The Neighborhood Builder',
+        lore: 'You are building a team that kids want to belong to, not just one they want to win for.',
+        effect: 'Teammate relationships improve more often; retention gets a small boost.',
+        tradeoff: 'You are less effective in recruitment negotiations.',
+        modifiers: {
+            relationshipGrowth: 0.06,
+            retention: 4,
+            negotiationInterest: -2
+        }
+    },
+    {
+        id: 'deal_maker',
+        name: 'The Deal Maker',
+        lore: 'You know who to call, what to promise, and when to spend a favor.',
+        effect: 'Your recruitment pitches are more persuasive.',
+        tradeoff: 'Players are more likely to leave if the season or their role disappoints.',
+        modifiers: {
+            negotiationInterest: 8,
+            retention: -5
+        }
+    },
+    {
+        id: 'culture_keeper',
+        name: 'The Culture Keeper',
+        lore: 'You remember who stayed after practice, who got left out, and who deserves another chance.',
+        effect: 'Players are more likely to stay with the team.',
+        tradeoff: 'You are less effective at recruitment negotiations.',
+        modifiers: {
+            retention: 12,
+            negotiationInterest: -3
+        }
+    },
+    {
+        id: 'tactical_innovator',
+        name: 'The Tactical Innovator',
+        lore: 'You draw up plays in notebooks and see a new answer every time a defense changes.',
+        effect: 'Improves your head coach’s play-planning and scheme mastery ratings.',
+        tradeoff: 'You sacrifice some influence in recruitment negotiations.',
+        modifiers: {
+            negotiationInterest: -2
+        },
+        coachRatingBonuses: {
+            gameplanInstinct: 5,
+            offSchemeMastery: 5,
+            defSchemeMastery: 5
+        }
+    },
+    {
+        id: 'win_now_gambler',
+        name: 'The Win-Now Gambler',
+        lore: 'The championship is right there. You are willing to bet the neighborhood on it.',
+        effect: 'More persuasive recruitment pitches.',
+        tradeoff: 'Players are more likely to leave when things go wrong.',
+        modifiers: {
+            negotiationInterest: 6,
+            retention: -8
+        }
+    }
+];
+
+// --- GM CHARACTER CREATION: FOOTBALL EXPERTISE ---
+export const footballExpertises = [
+    {
+        id: 'quarterback_room',
+        name: 'Quarterback Room',
+        lore: 'You understand reads, throwing mechanics, decision-making, and what makes a field general.',
+        effect: 'More accurate scouting reports on quarterbacks.',
+        positions: ['QB'],
+        scoutingAccuracyBonus: 0.12
+    },
+    {
+        id: 'trenches',
+        name: 'The Trenches',
+        lore: 'You see leverage, blocking technique, hand placement, and pass-rush potential.',
+        effect: 'More accurate scouting reports on offensive and defensive linemen.',
+        positions: ['OL', 'DL'],
+        scoutingAccuracyBonus: 0.12
+    },
+    {
+        id: 'skill_positions',
+        name: 'Skill Positions',
+        lore: 'You can spot separation, ball skills, athletic upside, and the difference between speed and football ability.',
+        effect: 'More accurate scouting reports on RBs, WRs, and TEs.',
+        positions: ['RB', 'WR', 'TE'],
+        scoutingAccuracyBonus: 0.12
+    },
+    {
+        id: 'defensive_mind',
+        name: 'Defensive Mind',
+        lore: 'You recognize pursuit angles, coverage instincts, pressure potential, and defensive versatility.',
+        effect: 'More accurate scouting reports on defensive linemen, linebackers, and defensive backs.',
+        positions: ['DL', 'LB', 'DB'],
+        scoutingAccuracyBonus: 0.12
+    }
+];
