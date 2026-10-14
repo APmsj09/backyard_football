@@ -287,10 +287,49 @@ class DebugCollector {
     recordOffseasonDay(dayNum, result) {
         if (!isDebugMode() || !this.report4_offseason) return;
 
+        const userResults = result.userBidResults || [];
+        const activeNegotiations = result.activeNegotiations || [];
+        const rejectedBids = result.rejectedBids || [];
+
         this.report4_offseason.marketCompetition[`day${dayNum}Activity`] = {
             totalSignings: (result.daySignings || []).length,
-            userBidsWon: (result.userBidResults || []).filter(r => r.won).length,
-            userBidsLost: (result.userBidResults || []).filter(r => !r.won).length,
+
+            userBidsWon: userResults.filter(r => r.won).length,
+            userBidsLost: userResults.filter(
+                r => !r.won && !r.inProgress && !r.outbid
+            ).length,
+            userBidsStillActive: userResults.filter(
+                r => r.inProgress || r.outbid
+            ).length,
+
+            rejectedOfferCount: rejectedBids.length,
+            rejectedOffers: rejectedBids.map(r => ({
+                player: r.player?.name || 'Unknown player',
+                reason: r.reason || 'No rejection reason supplied'
+            })),
+
+            activeNegotiations: activeNegotiations.map(n => ({
+                player: n.player?.name || 'Unknown player',
+                leader: n.leaderTeam?.name || 'Unknown team',
+                bidsCount: n.bidsCount || 0,
+                isUserLeading: Boolean(n.isUserLeading)
+            })),
+
+            userBidResults: userResults.map(r => ({
+                player: r.player?.name || 'Unknown player',
+                status: r.won
+                    ? 'won'
+                    : r.rejected
+                        ? 'rejected'
+                        : r.inProgress
+                            ? 'in_progress'
+                            : r.outbid
+                                ? 'outbid'
+                                : 'lost_or_unknown',
+                winnerTeam: r.winnerTeam || null,
+                message: r.message || ''
+            })),
+
             signingsBreakdown: (result.daySignings || []).map(s => ({
                 player: s.player.name,
                 pos: s.player.pos || estimateBestPosition(s.player),
@@ -308,7 +347,7 @@ class DebugCollector {
             team: t.name,
             tier: t.tier,
             finalRosterSize: t.roster?.length || 0,
-            hasMinimumHealthy: (t.roster?.length || 0) >= 14
+            hasMinimumRosterSize: (t.roster?.length || 0) >= 14
         }));
     }
 
