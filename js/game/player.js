@@ -454,30 +454,48 @@ export function generatePlayer(minAge = 12, maxAge = 18, classModifiers = null) 
     const lastName = Math.random() < 0.4 ? getRandom(nicknames) : getRandom(lastNames);
     const age = getRandomInt(minAge, maxAge);
 
-    // 1. SELECT ARCHETYPE
+    // 1. SELECT ARCHETYPE & PRIMARY POSITION
+    // The chosen position determines which side of the archetype is primary.
+    // Weights reflect the positional mix needed in an 8v8 roster.
     const getWeightedArchetype = () => {
         const roll = Math.random();
-        let targetPos = 'WR';
-        if (roll < 0.18) targetPos = 'OL';
-        else if (roll < 0.36) targetPos = 'DL';
-        else if (roll < 0.56) targetPos = 'WR';
-        else if (roll < 0.76) targetPos = 'DB';
-        else if (roll < 0.88) targetPos = 'LB';
-        else if (roll < 0.96) targetPos = 'RB';
-        else targetPos = 'QB';
+        let targetPos;
 
-        const valid = archetypes.filter(a => a.off === targetPos || a.def === targetPos);
-        return getRandom(valid) || getRandom(archetypes);
+        if (roll < 0.09) targetPos = 'QB';
+        else if (roll < 0.17) targetPos = 'RB';
+        else if (roll < 0.33) targetPos = 'WR';
+        else if (roll < 0.41) targetPos = 'TE';
+        else if (roll < 0.61) targetPos = 'OL';
+        else if (roll < 0.76) targetPos = 'DL';
+        else if (roll < 0.85) targetPos = 'LB';
+        else targetPos = 'DB';
+
+        const primarySide = ['DL', 'LB', 'DB'].includes(targetPos)
+            ? 'defense'
+            : 'offense';
+
+        const valid = archetypes.filter(a => {
+            if (primarySide === 'offense') {
+                return a.off === targetPos;
+            }
+
+            // QB archetypes must remain QB-primary, not become defensive-primary
+            // simply because they have a defensive position listed.
+            return a.def === targetPos && a.off !== 'QB';
+        });
+
+        const archetype = getRandom(valid) || getRandom(archetypes);
+        return { archetype, primarySide };
     };
 
-    const archetype = getWeightedArchetype();
+    const { archetype, primarySide } = getWeightedArchetype();
     const favoriteOffensivePosition = archetype.off;
     const favoriteDefensivePosition = archetype.def;
 
     // 2. PRIMARY IDENTITY
-    // If the archetype is a QB, ensure their primary side is always offense
-    const primarySide = archetype.off === 'QB' ? 'offense' : (Math.random() < 0.70 ? 'offense' : 'defense');
-    const bestPosition = primarySide === 'offense' ? favoriteOffensivePosition : favoriteDefensivePosition;
+    const bestPosition = primarySide === 'offense'
+        ? favoriteOffensivePosition
+        : favoriteDefensivePosition;
 
     // 3. CONTROLLED DRAFT CLASS MODIFIERS
     const rawClassShift = classModifiers ? (classModifiers.overallShift || 0) : 0;
