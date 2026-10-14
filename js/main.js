@@ -462,6 +462,9 @@ async function handleDraftEnd() {
 }
 
 function finishOffseasonFAMinigame() {
+    // 1. Let the AI trim their 24-man summer rosters down to the 18-man season limit
+    Game.executeAICutDowns();
+
     for (const team of gameState.teams) {
         if (!team) continue;
         if (!team.isPlayerControlled) {
@@ -471,19 +474,38 @@ function finishOffseasonFAMinigame() {
     }
 
     // REPORT 4: Finalize Offseason Report (Roster health verification)
-    debugCollector.finalizeOffseasonReport(gameState);
-
-    const advBtn = document.getElementById('advance-week-btn');
-    if (advBtn) {
-        advBtn.innerHTML = `<span>Play Week 1</span>`;
-        advBtn.classList.add('bg-amber-500');
-        advBtn.classList.remove('bg-green-600');
-    }
+    if (typeof debugCollector !== 'undefined') debugCollector.finalizeOffseasonReport(gameState);
 
     UI.renderDashboard(gameState);
     UI.switchTab('my-team', gameState);
     UI.showScreen('dashboard-screen');
+
+    checkUserRosterLimit(); // Trigger the cut-down check immediately
 }
+
+// Global helper to validate roster size before games
+window.checkUserRosterLimit = function() {
+    if (!gameState || !gameState.playerTeam) return;
+    
+    const rosterSize = gameState.playerTeam.roster.length;
+    const limit = 18; // Hard limit for regular season
+    const advBtn = document.getElementById('advance-week-btn');
+    
+    if (!advBtn) return;
+
+    if (rosterSize > limit) {
+        advBtn.innerHTML = `<span>⚠️ Cut ${rosterSize - limit} Players</span>`;
+        advBtn.className = 'btn bg-rose-700 hover:bg-rose-800 text-white font-bold py-2 px-6 rounded-sm text-sm uppercase tracking-wider transition shadow-sm border border-rose-900 animate-pulse';
+        advBtn.onclick = () => {
+            alert(`Summer Tryouts are over! You must cut ${rosterSize - limit} player(s) from the 'My Team' tab before Week 1 can begin.`);
+            UI.switchTab('my-team', gameState);
+        };
+    } else {
+        advBtn.innerHTML = `<span>Play Week 1</span>`;
+        advBtn.className = 'btn bg-amber-500 hover:bg-amber-600 text-white font-bold py-2 px-6 rounded-sm text-sm uppercase tracking-wider transition shadow-sm border border-amber-600';
+        advBtn.onclick = handleAdvanceWeek;
+    }
+};
 
 async function handleLoadGame(saveKey) {
     try {
@@ -1482,9 +1504,14 @@ window.app = {
     cutPlayer: (id) => {
         if (confirm("Cut this player?")) {
             Game.playerCut(id);
-            hideModal();
+            UI.hideModal();
             gameState = Game.getGameState();
-            switchTab('my-team', gameState);
+            UI.switchTab('my-team', gameState);
+            
+            // Re-evaluate if we have met the cut-down limit
+            if (gameState.currentWeek === 0 && window.checkUserRosterLimit) {
+                window.checkUserRosterLimit();
+            }
         }
     }
 };
