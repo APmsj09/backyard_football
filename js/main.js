@@ -3,7 +3,7 @@ import * as Game from './game.js';
 import * as UI from './ui.js';
 import { isDebugMode, setDebugMode, debugCollector } from './game.js';
 import { positionOverallWeights, estimateBestPosition, calculateOverall } from './game/player.js';
-import { coachPersonalities, offenseFormations, defenseFormations } from './data.js';
+import { gmBackgrounds, gmArchetypes, footballExpertises, offenseFormations, defenseFormations } from './data.js';
 import { formatHeight } from './utils.js';
 
 let gameState = null;
@@ -167,53 +167,169 @@ function promptCoachCreation(teamId) {
     const team = gameState.teams.find(t => t.id === teamId);
     if (!team) return;
 
-    let archetypeOptions = coachPersonalities.map(c => `<option value="${c.type}">${c.type}</option>`).join('');
-    let offOptions = Object.keys(offenseFormations).filter(k => k !== 'Punt').map(k => `<option value="${k}">${offenseFormations[k].name}</option>`).join('');
-    let defOptions = Object.keys(defenseFormations).filter(k => k !== 'Punt_Return').map(k => `<option value="${k}">${defenseFormations[k].name}</option>`).join('');
+    const buildOptions = (items) => items.map((item, index) =>
+        `<option value="${item.id}" ${index === 0 ? 'selected' : ''}>${item.name}</option>`
+    ).join('');
+
+    const backgroundOptions = buildOptions(gmBackgrounds);
+    const archetypeOptions = buildOptions(gmArchetypes);
+    const expertiseOptions = buildOptions(footballExpertises);
+
+    const currentOffense = team.coach?.preferredOffense || team.formations?.offense;
+    const currentDefense = team.coach?.preferredDefense || team.formations?.defense;
+
+    const offOptions = Object.keys(offenseFormations)
+        .filter(k => k !== 'Punt')
+        .map(k => `<option value="${k}" ${k === currentOffense ? 'selected' : ''}>${offenseFormations[k].name}</option>`)
+        .join('');
+
+    const defOptions = Object.keys(defenseFormations)
+        .filter(k => k !== 'Punt_Return')
+        .map(k => `<option value="${k}" ${k === currentDefense ? 'selected' : ''}>${defenseFormations[k].name}</option>`)
+        .join('');
 
     const modalHtml = `
-        <div class="space-y-4 text-left">
-            <p class="text-sm text-slate-600">You are taking over <strong>${team.name}</strong> as General Manager. Set your front-office identity.</p>
-            
-            <div>
-                <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">General Manager Name (You)</label>
-                <input type="text" id="new-coach-name" class="w-full p-2 border border-slate-300 rounded outline-none focus:border-amber-500" placeholder="e.g. GM Gordon" value="GM">
-            </div>
+        <div class="space-y-5 text-left">
+            <p class="text-sm text-slate-600">
+                You are taking over <strong>${team.name}</strong>.
+                Your history shapes your reputation, your philosophy shapes
+                your decisions, and your football expertise shapes how you
+                evaluate talent.
+            </p>
 
             <div>
-                <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Management Philosophy</label>
-                <select id="new-coach-style" class="w-full p-2 border border-slate-300 rounded outline-none focus:border-amber-500">
+                <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">
+                    Your Name
+                </label>
+                <input type="text" id="new-coach-name"
+                    class="w-full p-2 border border-slate-300 rounded outline-none focus:border-amber-500"
+                    placeholder="e.g. GM Gordon" value="GM">
+            </div>
+
+            <div class="border-t border-slate-200 pt-4">
+                <label class="block text-xs font-bold text-slate-800 uppercase tracking-wider mb-1">
+                    1. Your Roots
+                </label>
+                <select id="new-gm-background"
+                    class="w-full p-2 border border-slate-300 rounded outline-none focus:border-amber-500">
+                    ${backgroundOptions}
+                </select>
+                <div id="gm-background-summary"
+                    class="text-xs text-slate-600 mt-2 leading-relaxed"></div>
+            </div>
+
+            <div class="border-t border-slate-200 pt-4">
+                <label class="block text-xs font-bold text-slate-800 uppercase tracking-wider mb-1">
+                    2. Management Archetype
+                </label>
+                <select id="new-gm-archetype"
+                    class="w-full p-2 border border-slate-300 rounded outline-none focus:border-amber-500">
                     ${archetypeOptions}
                 </select>
-                <p class="text-[10px] text-slate-500 mt-1">Sets your front-office philosophy and organizational reputation.</p>
+                <div id="gm-archetype-summary"
+                    class="text-xs text-slate-600 mt-2 leading-relaxed"></div>
             </div>
 
-            <div class="grid grid-cols-2 gap-4">
-                <div>
-                    <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Preferred Offense</label>
-                    <select id="new-coach-offense" class="w-full p-2 border border-slate-300 rounded outline-none focus:border-amber-500">
-                        ${offOptions}
-                    </select>
-                </div>
+            <div class="border-t border-slate-200 pt-4">
+                <label class="block text-xs font-bold text-slate-800 uppercase tracking-wider mb-1">
+                    3. Football Expertise
+                </label>
+                <select id="new-gm-expertise"
+                    class="w-full p-2 border border-slate-300 rounded outline-none focus:border-amber-500">
+                    ${expertiseOptions}
+                </select>
+                <div id="gm-expertise-summary"
+                    class="text-xs text-slate-600 mt-2 leading-relaxed"></div>
+            </div>
 
-                <div>
-                    <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Preferred Defense</label>
-                    <select id="new-coach-defense" class="w-full p-2 border border-slate-300 rounded outline-none focus:border-amber-500">
-                        ${defOptions}
-                    </select>
-                </div>
+            <div class="border-t border-slate-200 pt-4">
+                <label class="block text-xs font-bold text-slate-800 uppercase tracking-wider mb-1">
+                    Offensive Identity
+                </label>
+                <select id="new-coach-offense"
+                    class="w-full p-2 border border-slate-300 rounded outline-none focus:border-amber-500">
+                    ${offOptions}
+                </select>
+
+                <label class="block text-xs font-bold text-slate-800 uppercase tracking-wider mt-3 mb-1">
+                    Defensive Identity
+                </label>
+                <select id="new-coach-defense"
+                    class="w-full p-2 border border-slate-300 rounded outline-none focus:border-amber-500">
+                    ${defOptions}
+                </select>
+
+                <p class="text-xs text-slate-500 mt-2 leading-relaxed">
+                    These choices set your team's preferred schemes and update
+                    your existing head coach's scheme preferences. They do
+                    not replace your coach.
+                </p>
             </div>
         </div>
     `;
 
-    UI.showModal("General Manager Profile", modalHtml, () => {
-        const name = document.getElementById('new-coach-name').value || 'GM';
-        const style = document.getElementById('new-coach-style').value;
+    UI.showModal("Build Your Football Identity", modalHtml, () => {
+        const name = document.getElementById('new-coach-name').value.trim() || 'GM';
+
+        const backgroundId = document.getElementById('new-gm-background').value;
+        const archetypeId = document.getElementById('new-gm-archetype').value;
+        const expertiseId = document.getElementById('new-gm-expertise').value;
         const off = document.getElementById('new-coach-offense').value;
         const def = document.getElementById('new-coach-defense').value;
 
-        confirmFranchiseTakeover(teamId, { name, style, off, def });
-    }, "Sign Contract");
+        confirmFranchiseTakeover(teamId, {
+            name,
+            backgroundId,
+            archetypeId,
+            expertiseId,
+            off,
+            def
+        });
+    }, "Take the Job");
+
+    const updateChoiceSummaries = () => {
+        const updateSummary = (selectId, summaryId, options) => {
+            const selectedId = document.getElementById(selectId)?.value;
+            const choice = options.find(item => item.id === selectedId);
+            const summary = document.getElementById(summaryId);
+
+            if (!choice || !summary) return;
+
+            summary.innerHTML = `
+                <p class="italic">${choice.lore}</p>
+                <p class="font-semibold text-emerald-700 mt-1">${choice.effect}</p>
+                ${choice.tradeoff
+                    ? `<p class="text-amber-700 mt-1">Trade-off: ${choice.tradeoff}</p>`
+                    : ''}
+            `;
+        };
+
+        updateSummary(
+            'new-gm-background',
+            'gm-background-summary',
+            gmBackgrounds
+        );
+        updateSummary(
+            'new-gm-archetype',
+            'gm-archetype-summary',
+            gmArchetypes
+        );
+        updateSummary(
+            'new-gm-expertise',
+            'gm-expertise-summary',
+            footballExpertises
+        );
+    };
+
+    [
+        'new-gm-background',
+        'new-gm-archetype',
+        'new-gm-expertise'
+    ].forEach(id => {
+        document.getElementById(id)?.addEventListener('change', updateChoiceSummaries);
+    });
+
+    updateChoiceSummaries();
 }
 
 function confirmFranchiseTakeover(teamId, coachDetails) {
@@ -224,20 +340,116 @@ function confirmFranchiseTakeover(teamId, coachDetails) {
     gameState.playerTeam = team;
 
     if (coachDetails) {
+        const background = gmBackgrounds.find(
+            item => item.id === coachDetails.backgroundId
+        ) || gmBackgrounds[0];
+
+        const archetype = gmArchetypes.find(
+            item => item.id === coachDetails.archetypeId
+        ) || gmArchetypes[0];
+
+        const expertise = footballExpertises.find(
+            item => item.id === coachDetails.expertiseId
+        ) || footballExpertises[0];
+
+        const modifierKeys = [
+            'scoutingAccuracy',
+            'negotiationInterest',
+            'retention',
+            'relationshipGrowth'
+        ];
+
+        const bonuses = Object.fromEntries(
+            modifierKeys.map(key => [
+                key,
+                (background.modifiers?.[key] || 0) +
+                (archetype.modifiers?.[key] || 0)
+            ])
+        );
+
+        // Persist GM identity and mechanics as part of the team save.
+        team.gmProfile = {
+            name: coachDetails.name,
+            backgroundId: background.id,
+            backgroundName: background.name,
+            archetypeId: archetype.id,
+            archetypeName: archetype.name,
+            expertiseId: expertise.id,
+            expertiseName: expertise.name,
+            expertisePositions: [...expertise.positions],
+            expertiseScoutingBonus: expertise.scoutingAccuracyBonus,
+            offensiveIdentity: coachDetails.off,
+            defensiveIdentity: coachDetails.def,
+            bonuses
+        };
+
+        // Background affects the team's starting neighborhood resources.
+        if (!team.socialProfile) {
+            team.socialProfile = { streetCred: 50, favorTokens: 3 };
+        }
+
+        team.socialProfile.streetCred = Math.max(
+            0,
+            Math.min(
+                100,
+                (team.socialProfile.streetCred ?? 50) +
+                background.startingStreetCredBonus
+            )
+        );
+
+        team.socialProfile.favorTokens = Math.max(
+            0,
+            (team.socialProfile.favorTokens ?? 3) +
+            background.startingFavorTokenBonus
+        );
+
         team.formations.offense = coachDetails.off;
         team.formations.defense = coachDetails.def;
 
-        // SYNC USER TO GENERAL MANAGER (YOU)
         if (!team.staff) Game.initializeTeamStaff(team);
+
         if (team.staff.gm) {
             team.staff.gm.name = coachDetails.name;
-            team.staff.gm.biases.personality = { name: coachDetails.style, desc: `Prefers ${coachDetails.style} management style.` };
-            team.staff.gm.biases.tactical = { name: coachDetails.off, desc: `Favors ${coachDetails.off} concepts.` };
+
+            if (!team.staff.gm.biases) {
+                team.staff.gm.biases = {};
+            }
+
+            team.staff.gm.biases.personality = {
+                name: archetype.name,
+                desc: archetype.lore
+            };
+
+            team.staff.gm.biases.tactical = {
+                name: coachDetails.off,
+                desc: `The franchise's chosen offensive identity is ${coachDetails.off}.`
+            };
         }
 
-        // Keep the team's existing head coach intact; do NOT overwrite with user's name
-        if (team.staff.coach) {
-            team.coach = team.staff.coach;
+        // Keep the same head coach, but make the selected schemes their working preferences.
+        const headCoach = team.staff?.coach || team.coach;
+
+        if (headCoach) {
+            headCoach.preferredOffense = coachDetails.off;
+            headCoach.preferredDefense = coachDetails.def;
+
+            // Improve the inherited coach without replacing their identity.
+            const coachRatingBonuses = Object.entries(
+                archetype.coachRatingBonuses || {}
+            );
+
+            if (coachRatingBonuses.length > 0) {
+                if (!headCoach.ratings) headCoach.ratings = {};
+
+                coachRatingBonuses.forEach(([rating, bonus]) => {
+                    headCoach.ratings[rating] = Math.min(
+                        99,
+                        (headCoach.ratings[rating] ?? 50) + bonus
+                    );
+                });
+            }
+
+            team.coach = headCoach;
         }
 
         Game.rebuildDepthChartFromOrder(team);
