@@ -663,7 +663,7 @@ export function determineDefensiveFormation(defense, offenseFormationName, down,
                 return currentFormation;
             }
             if (coachPref && validFormations.includes(coachPref)) {
-                return coachPref;
+                return coachPref;f
             }
         }
 
@@ -793,6 +793,32 @@ export function determineDefensivePlayCall(defense, offense, down, yardsToGo, ba
         roll -= option.score;
     }
     return topOptions[0].key;
+}
+
+function shouldReleaseFleaFlickerPitch(rb, playState, tick) {
+    if (!rb || !Number.isFinite(rb._handoffTick)) return false;
+
+    const ticksSinceHandoff = tick - rb._handoffTick;
+
+    // Give the RB a brief fake-run window before pitching back.
+    if (ticksSinceHandoff < 5) return false;
+
+    // Never let the fake run drag on until the RB is tackled.
+    if (ticksSinceHandoff >= 7) return true;
+
+    // If a free defender is closing, release the pitch early.
+    return playState.activePlayers.some(defender => {
+        if (
+            defender.isOffense === rb.isOffense ||
+            defender.stunnedTicks > 0 ||
+            defender.isBlocked ||
+            defender.isEngaged
+        ) {
+            return false;
+        }
+
+        return getDistance(defender, rb) <= 3.5;
+    });
 }
 
 export function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, context, options, isLive = false) {
@@ -1043,8 +1069,17 @@ export function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey
                 playState.playKey === 'Trick_Flea_Flicker' &&
                 playState.fleaFlickerPhase === 'rb_fake_run' &&
                 rb1?.hasBall &&
-                rb1.routePath?.length &&
-                rb1.currentPathIndex >= rb1.routePath.length
+                (
+                    (
+                        rb1.routePath?.length &&
+                        rb1.currentPathIndex >= rb1.routePath.length
+                    ) ||
+                    shouldReleaseFleaFlickerPitch(
+                        rb1,
+                        playState,
+                        playState.tick
+                    )
+                )
             ) {
                 initiateLateralToss(
                     playState,
