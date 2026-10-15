@@ -25,6 +25,15 @@ export function calculateAiTeamNeedAndDesire(
         return { shouldBid: false, desireScore: 0, offer: null, reason: 'Ineligible' };
     }
 
+    if (player.refusedTeamIds?.includes(aiTeam.id)) {
+        return {
+            shouldBid: false,
+            desireScore: 0,
+            offer: null,
+            reason: 'Player refuses to return after a broken promise'
+        };
+    }
+
     const coach = aiTeam.staff?.coach || aiTeam.coach;
     const gm = aiTeam.staff?.gm;
     const roster = getRosterObjects(aiTeam);
@@ -119,8 +128,19 @@ export function calculateAiTeamNeedAndDesire(
     const isConservativeCoach = tactical === 'Conservative Turtler' || personality === 'Analytical Savant';
 
     // Base pitch determination
-    let role = (upgradeDelta >= 2 || isDesperateVoid) ? 'STARTER' : (playerOvr >= 46 ? 'ROTATION' : 'BENCH');
-    let promiseTouches = (ego > 65 && ['QB', 'RB', 'WR'].includes(bestPos) && desireScore > 65) ? 'FEATURED' : 'NORMAL';
+    let role = (upgradeDelta >= 2 || isDesperateVoid)
+        ? 'STARTER'
+        : (playerOvr >= 46 ? 'ROTATION' : 'BENCH');
+
+    const retentionOptions = getRetentionPitchOptions(player);
+
+    // AI teams only offer workload guarantees supported by the shared
+    // position-specific promise definitions.
+    let promiseTouches = (
+        ego > 65 &&
+        retentionOptions.focusPromise &&
+        desireScore > 65
+    ) ? 'FEATURED' : 'NORMAL';
 
     let tokensToSpend = 0;
     if (tokensAvailable > 0) {
@@ -281,9 +301,57 @@ export function resolvePlayerBiddingWar(player, bids = []) {
  */
 export function evaluatePlayerNegotiation(player, team, offer = {}) {
     const roleOffered = offer.role || 'ROTATION';
-    const tokens = offer.tokensOffered || 0;
-    const roster = getRosterObjects(team);
     const reasons = [];
+
+    if (!player || !team) {
+        return {
+            accepted: false,
+            interestScore: 0,
+            threshold: 100,
+            reasons: ['Invalid player or team.'],
+            roleOffered,
+            promiseTouches: offer.promiseTouches || 'NORMAL'
+        };
+    }
+
+    if (player.refusedTeamIds?.includes(team.id)) {
+        return {
+            accepted: false,
+            interestScore: 0,
+            threshold: 100,
+            reasons: [
+                'Player refuses to return after a broken promise.'
+            ],
+            roleOffered,
+            promiseTouches: offer.promiseTouches || 'NORMAL'
+        };
+    }
+
+    const rawTokens = Number(offer.tokensOffered ?? 0);
+    const tokens = Number.isFinite(rawTokens) ? Math.floor(rawTokens) : -1;
+    const tokensAvailable = Math.max(
+        0,
+        Math.floor(Number(team.socialProfile?.favorTokens) || 0)
+    );
+
+    if (
+        !['STARTER', 'ROTATION', 'BENCH'].includes(roleOffered) ||
+        !Number.isInteger(tokens) ||
+        tokens < 0 ||
+        tokens > 2 ||
+        tokens > tokensAvailable
+    ) {
+        return {
+            accepted: false,
+            interestScore: 0,
+            threshold: 100,
+            reasons: ['Invalid role or insufficient Favor Tokens.'],
+            roleOffered,
+            promiseTouches: offer.promiseTouches || 'NORMAL'
+        };
+    }
+
+    const roster = getRosterObjects(team);
 
     const bestPos = player.pos || estimateBestPosition(player);
     const playerOvr = calculateOverall(player, bestPos);
@@ -412,12 +480,22 @@ export function evaluatePlayerNegotiation(player, team, offer = {}) {
         }
     }
 
-    // 7. TOUCH PROMISES
+    // 7. POSITION-SPECIFIC WORKLOAD PROMISES
+    const promiseOptions = getRetentionPitchOptions(player);
+    const focusPromise = promiseOptions.focusPromise;
+
     if (offer.promiseTouches === 'FEATURED') {
-        if (['QB', 'RB', 'WR'].includes(bestPos)) {
+        if (focusPromise) {
             const touchBonus = ego > 65 ? 18 : 10;
             interest += touchBonus;
-            reasons.push(`🏈 Promised focal offensive touches (+${touchBonus})`);
+
+            reasons.push(
+                `🏈 Promised ${focusPromise.label.toLowerCase()} (+${touchBonus})`
+            );
+        } else {
+            reasons.push(
+                `ℹ️ No offensive workload promise applies to ${bestPos} (+0)`
+            );
         }
     }
 
@@ -470,7 +548,10 @@ export function evaluatePlayerNegotiation(player, team, offer = {}) {
         threshold,
         reasons,
         roleOffered,
-        promiseTouches: offer.promiseTouches
+        promiseTouches: offer.promiseTouches || 'NORMAL',
+        promiseType: focusPromise && offer.promiseTouches === 'FEATURED'
+            ? focusPromise.value
+            : 'NONE'
     };
 }
 
@@ -822,7 +903,13 @@ const RETENTION_POSITION_CONFIG = {
  */
 export function getRetentionPitchOptions(player) {
     const position = player?.pos || estimateBestPosition(player);
-    const config = RETENTION_POSITION_CONFIG[position] ||
+    const config = RETENTION_POSITION_CONFIG[position] || {
+        positionLabel: position || 'Player',
+        starterRoleLabel: 'Starting Role',
+        rotationRoleLabel: 'Rotation Role',
+        reserveRoleLabel: 'Reserve Role',
+        focusPromise: null
+    };
         RETENTION_POSITION_CONFIG.WR;
 
     return {
@@ -1215,8 +1302,12 @@ export function evaluateRetentionPitch(player, team, pitch = {}) {
     let threshold = 52;
 
     if (ego > 75) threshold += 12;
-    if ((team.wins ?? 0) <= 2) threshold += 8;
 
+    const completedWins = Number.isFinite(Number(pitch.completedWins))
+        ? Number(pitch.completedWins)
+        : (team.wins ?? 0);
+
+    if (completedWins <= 2) threshold += 8;
     const accepted = score >= threshold;
 
     // 8. Position-aware player response
