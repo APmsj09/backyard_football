@@ -974,7 +974,7 @@ export function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey
             }
 
             if (playState.playIsLive && !ballPos.inAir && !ballPos.isLoose && !playState.turnover && !playState.sack) {
-                if (loopType === 'pass') {
+                if (playState.type === 'pass') {
                     const isFleaFlicker =
                         playState.playKey === 'Trick_Flea_Flicker';
 
@@ -1005,7 +1005,11 @@ export function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey
                             gameLog
                         );
                     }
-                } else if (loopType === 'punt') {
+                } else if (
+                    loopType === 'punt' &&
+                    playState.returnStartY === null &&
+                    !playState.possessionChanged
+                ) {
                     updateThrowoffDecision(playState, activeOffense, gameLog);
                 }
             }
