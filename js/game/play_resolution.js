@@ -822,7 +822,7 @@ function shouldReleaseFleaFlickerPitch(rb, playState, tick) {
 }
 
 export function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, context, options, isLive = false) {
-    const { gameLog = [], ballOn, ballHash = 'M', down, yardsToGo, offenseScore = 0, defenseScore = 0, timeRemaining = 420, quarter = 1 } = context;
+    const { gameLog = [], ballOn, ballHash = 'M', down, yardsToGo, offenseScore = 0, defenseScore = 0, timeRemaining = 420, quarter = 1, isConversionAttempt = false } = context;
     const scoreDiff = offenseScore - defenseScore;
 
     const playResult = {
@@ -1180,10 +1180,13 @@ export function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey
 
                         playState.finalBallY = 110.0;
                         playState.yards = 110.0 - playState.lineOfScrimmage;
-                        if (gameLog) gameLog.push(`🎉 TOUCHDOWN ${ballCarrierState.name}!`);
-                        playState.statEvents.push({ type: 'touchdown', playerId: ballCarrierState.id });
-                        if (playState.type === 'pass' && !playState.fumbleOccurred) {
-                            playState.statEvents.push({ type: 'pass_td', qbId: playState.ballState.throwerId });
+                        if (!isConversionAttempt) {
+                            if (gameLog) gameLog.push(`🎉 TOUCHDOWN ${ballCarrierState.name}!`);
+                            playState.statEvents.push({ type: 'touchdown', playerId: ballCarrierState.id });
+
+                            if (playState.type === 'pass' && !playState.fumbleOccurred) {
+                                playState.statEvents.push({ type: 'pass_td', qbId: playState.ballState.throwerId });
+                            }
                         }
                         break;
                     }
@@ -1518,6 +1521,7 @@ export function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey
         if (player) {
             if (!player.careerStats) player.careerStats = { seasonsPlayed: 0 };
             player.careerStats.snapsThisSeason = (player.careerStats.snapsThisSeason || 0) + 1;
+            player.snapsThisWeek = (player.snapsThisWeek || 0) + 1;
 
             // PASSIVE HUDDLE RECOVERY: Players catch their breath between plays based on their stamina rating
             const staminaRating = player.attributes?.physical?.stamina || 50;
@@ -1678,6 +1682,7 @@ export function simulateLivePlayStep(gameInstance, mode = 'live') {
     const context = {
         gameLog: gameInstance.gameLog,
         weather: gameInstance.weather || 'Sunny',
+        isConversionAttempt: Boolean(gameInstance.isConversionAttempt),
         ballOn: gameInstance.ballOn,
         ballHash: gameInstance.ballHash || 'M',
         down: gameInstance.down,
