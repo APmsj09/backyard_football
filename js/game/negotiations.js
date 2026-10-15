@@ -124,7 +124,10 @@ export function calculateAiTeamNeedAndDesire(
     }
 
     // 7. ROLE & TOKEN BUDGETING (Intelligent Market Escalation & Counter-Bidding)
-    const isAggressiveCoach = personality === 'Peaked in \'94' || tactical === 'Blitz Addict' || gmDirective === 'WIN_NOW';
+    const isAggressiveCoach =
+        personality === "Peaked in '94" ||
+        tactical === 'Blitz Addict' ||
+        gmDirective === 'WIN_NOW';
     const isConservativeCoach = tactical === 'Conservative Turtler' || personality === 'Analytical Savant';
 
     // Base pitch determination
@@ -1292,7 +1295,7 @@ export function evaluateRetentionPitch(player, team, pitch = {}) {
             reasons.push('Analytical coach has a clear role for a high-impact player (+6)');
         } else if (ethic < 40) {
             score -= 5;
-            reasons.push('Coach doubts the player's commitment to the plan (-5)');
+            reasons.push("Coach doubts the player's commitment to the plan (-5)");
         }
     } else if (coachStyle === "Peaked in '94" && playerOvr >= 52) {
         score += 6;
