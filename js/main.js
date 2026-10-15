@@ -503,7 +503,7 @@ function handlePlayerSelectInDraft(playerId) {
     if (draftBtn && gameState.playerTeam) {
         const currentPickingTeam = gameState.draftOrder?.[gameState.currentPick];
         const isMyTurn = currentPickingTeam?.id === gameState.playerTeam.id;
-        const hasRoom = (gameState.playerTeam.roster?.length || 0) < ROSTER_LIMIT;
+        const hasRoom = (gameState.playerTeam.roster?.length || 0) < rosterLimit;
         draftBtn.disabled = !(isMyTurn && hasRoom && player);
     }
 }
@@ -577,11 +577,13 @@ async function runAIDraftPicks() {
     if (!gameState || isDraftingLocked) return;
     isDraftingLocked = true;
 
+    const rosterLimit = getDraftRosterLimit();
+
     try {
         while (true) {
             const pickLimitReached = gameState.currentPick >= gameState.draftOrder.length;
             const noPlayersLeft = gameState.players.filter(p => p && !p.teamId).length === 0;
-            const allTeamsFull = gameState.teams.every(t => !t || !t.roster || t.roster.length >= ROSTER_LIMIT);
+            const allTeamsFull = gameState.teams.every(t => !t || !t.roster || t.roster.length >= rosterLimit);
 
             if (pickLimitReached || noPlayersLeft || allTeamsFull) {
                 await handleDraftEnd();
@@ -591,13 +593,13 @@ async function runAIDraftPicks() {
             let currentPickingTeam = gameState.draftOrder[gameState.currentPick];
 
             if (currentPickingTeam && currentPickingTeam.id === gameState.playerTeam.id) {
-                if (gameState.playerTeam.roster.length >= ROSTER_LIMIT) {
+                if (gameState.playerTeam.roster.length >= rosterLimit) {
                     debugCollector.recordDraftSkip({
                         pick: gameState.currentPick + 1,
                         teamName: currentPickingTeam.name,
                         reason: 'Player team roster limit reached',
                         rosterSize: gameState.playerTeam.roster.length,
-                        rosterLimit: ROSTER_LIMIT
+                        rosterLimit
                     });
 
                     gameState.currentPick++;
@@ -609,7 +611,7 @@ async function runAIDraftPicks() {
                 }
             }
 
-            if (!currentPickingTeam || !currentPickingTeam.roster || currentPickingTeam.roster.length >= ROSTER_LIMIT) {
+            if (!currentPickingTeam || !currentPickingTeam.roster || currentPickingTeam.roster.length >= rosterLimit) {
                 debugCollector.recordDraftSkip({
                     pick: gameState.currentPick + 1,
                     teamName: currentPickingTeam?.name || 'Unknown team',
@@ -619,7 +621,7 @@ async function runAIDraftPicks() {
                             ? 'Missing roster array'
                             : 'Roster limit reached',
                     rosterSize: currentPickingTeam?.roster?.length ?? null,
-                    rosterLimit: ROSTER_LIMIT
+                    rosterLimit: rosterLimit
                 });
 
                 gameState.currentPick++;
@@ -671,7 +673,7 @@ async function runAIDraftPicks() {
                         teamName: currentPickingTeam.name,
                         reason: 'AI pick returned no player',
                         rosterSize: currentPickingTeam.roster?.length ?? null,
-                        rosterLimit: ROSTER_LIMIT
+                        rosterLimit
                     });
                 }
                 gameState.currentPick++;
