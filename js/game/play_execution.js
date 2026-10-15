@@ -9,6 +9,7 @@ import {
     getZoneCenter, calculateRoutePath, resolveDepthForPlay, getAssignment, zoneBoundaries
 } from './engine_helpers.js';
 import { calculateSafetyHelp, diagnosePlay, getSmartCarrierTarget } from './ai.js';
+import { getPerceptionContext, getPerceptionWeight } from './perception.js';
 import { getDecisionProfile } from './decision_model.js';
 import { pushGameLog } from './collisions.js';
 import { initPlayTelemetry, finalizePlayTelemetry, logPlayDebug } from './telemetry.js';
@@ -602,7 +603,8 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
         let target = null;
         const isPassPlay = playType === 'pass';
 
-        const blockerIQ = blocker.playbookIQ || blocker.iq || 50;
+        const blockerProfile = getDecisionProfile(blocker, playState.tick);
+        const blockerIQ = blockerProfile?.awareness ?? (blocker.playbookIQ || blocker.iq || 50);
         const qb = offenseStates.find(p => p.slot.startsWith('QB'));
 
         let sortedThreats = validThreats.sort((a, b) => {
@@ -626,8 +628,18 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                 if (Math.abs(b.x - CENTER_X) < 2.5 && (b.assignment?.includes('blitz') || b.assignment?.includes('rush'))) dangerPriorityB -= 8;
             }
 
-            const doubleTeamPenaltyA = assignedThreats.has(a.id) ? (blockerIQ > 65 ? 25 : 12) : 0;
-            const doubleTeamPenaltyB = assignedThreats.has(b.id) ? (blockerIQ > 65 ? 25 : 12) : 0;
+            const avoidsUnneededDoubleTeam =
+                blockerProfile &&
+                blockerProfile.decisionQuality > 65 &&
+                blockerProfile.assignmentDiscipline > 55;
+
+            const doubleTeamPenaltyA = assignedThreats.has(a.id)
+                ? (avoidsUnneededDoubleTeam ? 25 : 12)
+                : 0;
+
+            const doubleTeamPenaltyB = assignedThreats.has(b.id)
+                ? (avoidsUnneededDoubleTeam ? 25 : 12)
+                : 0;
 
             return (laneDiffA + dangerPriorityA + doubleTeamPenaltyA) - (laneDiffB + dangerPriorityB + doubleTeamPenaltyB);
         });
@@ -661,7 +673,11 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                 }
             } else {
                 const blockerIQ = blocker.playbookIQ || 50;
-                const canClimb = playType === 'run' && playState.tick > 16 && blockerIQ > 60;
+                const canClimb =
+                    playType === 'run' &&
+                    playState.tick > 16 &&
+                    blockerIQ > 60 &&
+                    blockerProfile.assignmentDiscipline >= 45;
                 let climbTarget = null;
                 if (canClimb) {
                     climbTarget = defenseStates.find(d =>
@@ -1247,11 +1263,18 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                     const distToNode = getDistance(pState, pt);
                     const isFinalNode = pState.currentPathIndex === pState.routePath.length - 1;
                     const isSettleRoute = ['Hitch', 'Curl', 'Dig', 'In', 'Drag', 'Slant'].some(r => pState.assignment?.includes(r));
-                    const recIQ = pState.playbookIQ || pState.iq || 50;
-
+                    const receiverProfile = getDecisionProfile(pState, playState.tick);
+                    const recIQ = receiverProfile?.awareness ?? (pState.playbookIQ || pState.iq || 50);
+                    
                     // IQ Layer: High IQ receivers (IQ >= 60) read zone voids and throttle down in windows
                     // Low IQ receivers run blindly into zone defenders
-                    if (isSettleRoute && distToNode < 2.0 && recIQ >= 60) {
+                    if (
+                        isSettleRoute &&
+                        distToNode < 2.0 &&
+                        recIQ >= 60 &&
+                        receiverProfile.decisionQuality >= 55 &&
+                        receiverProfile.assignmentDiscipline >= 35
+                    ) {
                         const nearbyZoneDefenders = defenseStates.filter(d =>
                             !d.isBlocked && d.y >= LOS + 2.0 && getDistance(pState, d) < 3.2
                         );
@@ -1464,6 +1487,8 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
         if (!pState.isOffense) {
             const isDL = pState.role === 'DL';
 
+            const defenderProfile = getDecisionProfile(pState, playState.tick);
+
             const diag = diagnosePlay(
                 pState,
                 playState.tick,
@@ -1478,27 +1503,30 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
 
             const isRunRead = playDiagnosis === 'run';
 
-            const carrierIsPasser =
-                Boolean(
-                    ballCarrierState &&
-                    ballCarrierState.role === 'QB' &&
-                    !playState.fumbleOccurred &&
-                    !isBallInAir
-                );
+            const carrierIsPasser = Boolean(
+                ballCarrierState &&
+                ballCarrierState.role === 'QB' &&
+                !playState.fumbleOccurred &&
+                !isBallInAir &&
+                carrierPerception > 0
+            );
 
-            const isBallPastLOS =
-                ballCarrierState && ballCarrierState.y > LOS + 0.5;
+            const isBallPastLOS = Boolean(
+                carrierPerception > 0 &&
+                ballCarrierState &&
+                ballCarrierState.y > LOS + 0.5
+            );
 
             const qbScrambling =
                 carrierIsPasser &&
                 (isBallPastLOS || ballCarrierState.action === 'qb_scramble');
 
-            // Observable situation: defenders have read run, but the QB
-            // still has the ball and has not visibly started a scramble.
+            // A defender who reads run can key a visible RB near the mesh.
+            // It does not require omniscient knowledge of who has the ball.
             const isRunReadAtMesh =
                 isRunRead &&
-                carrierIsPasser &&
-                !qbScrambling;
+                runTargetPerception > 0 &&
+                !(carrierIsPasser && qbScrambling);
 
             const assignment = pState.assignment;
 
@@ -1508,12 +1536,26 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
             }
 
             let shouldPursue = false;
-            if (ballCarrierState) {
-                if (isBallInAir) shouldPursue = false;
-                else if (isRunReadAtMesh) shouldPursue = true;
-                else if (isRunRead) shouldPursue = true;
-                else if (ballCarrierState.role !== 'QB' || qbScrambling) shouldPursue = true;
-                else if (assignment?.includes('blitz') || assignment?.includes('rush') || isDL) shouldPursue = true;
+
+            if (ballCarrierState && !isBallInAir) {
+                if (isRunReadAtMesh) {
+                    shouldPursue = true;
+                } else if (carrierPerception > 0) {
+                    if (isRunRead) {
+                        shouldPursue = true;
+                    } else if (
+                        ballCarrierState.role !== 'QB' ||
+                        qbScrambling
+                    ) {
+                        shouldPursue = true;
+                    } else if (
+                        assignment?.includes('blitz') ||
+                        assignment?.includes('rush') ||
+                        isDL
+                    ) {
+                        shouldPursue = true;
+                    }
+                }
             }
 
             if (assignment?.startsWith('man_cover_') && shouldPursue && !isRunReadAtMesh && !isDL) {
@@ -1534,16 +1576,12 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                 ballCarrierState?.isOffense &&
                 ballCarrierState.role === 'RB'
                     ? ballCarrierState
-                    : (
-                        isRunReadAtMesh
-                            ? offenseStates.find(p =>
-                                p.isOffense &&
-                                p.role === 'RB' &&
-                                p.slot?.startsWith('RB')
-                            )
-                            : null
-                    );
+                    : (isRunReadAtMesh ? primaryRunTarget : null);
 
+            const runFitPerception = runFitCarrier
+                ? getPerceptionWeight(defenderVision, runFitCarrier)
+                : 0;
+            
             const isEarlyLinebackerRunFit =
                 Boolean(
                     !isBallInAir &&
@@ -1554,13 +1592,11 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                     !assignment?.includes('blitz')
                 );
 
-            if (isEarlyLinebackerRunFit) {
-                const routeEnd =
-                    runFitCarrier.routePath?.[
-                        (runFitCarrier.routePath?.length || 1) - 1
-                    ];
-
-                const laneX = routeEnd?.x ?? runFitCarrier.x;
+            if (isEarlyLinebackerRunFit && runFitPerception > 0) {
+                // Infer the developing lane from visible position and movement,
+                // not the hidden endpoint of the offensive play design.
+                const laneX =
+                    runFitCarrier.x + ((runFitCarrier.vx || 0) * 0.35);
 
                 // Fit toward the likely lane without abandoning the LB's alignment.
                 const lateralCorrection = Math.max(
@@ -1582,11 +1618,13 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
             }
     
             if (shouldPursue && ballCarrierState) {
-                const chaseTarget = (isRunReadAtMesh ? offenseStates.find(o => o.slot.startsWith('RB')) : null) || ballCarrierState;
+                const chaseTarget =
+                    (isRunReadAtMesh ? primaryRunTarget : null) ||
+                    ballCarrierState;
 
                 if (chaseTarget) {
                     const dist = getDistance(pState, chaseTarget);
-                    const iq = pState.playbookIQ || 50;
+                    const iq = defenderProfile?.awareness ?? (pState.playbookIQ || 50);
 
                     if (isRunReadAtMesh && iq < 60) {
                         setPointIntent(
@@ -1608,7 +1646,13 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                         return;
                     }
 
-                    const blendFactor = Math.min(1.0, Math.max(0.0, (dist - 1.5) / 3.0));
+                    const chasePerception = isRunReadAtMesh
+                        ? runTargetPerception
+                        : carrierPerception;
+
+                    const blendFactor =
+                        Math.min(1.0, Math.max(0.0, (dist - 1.5) / 3.0)) *
+                        chasePerception;
                     const maxLeadTime = 1.0;
                     const leadTime = Math.min(maxLeadTime, dist / (16 + (iq / 4))) * blendFactor;
                     let predX = chaseTarget.x + ((chaseTarget.vx || 0) * leadTime);
@@ -1625,7 +1669,12 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                     }
 
                     if (dirConfidence > 0.45 && !isRunReadAtMesh) {
-                        const cheatAmount = 3.0 * dirConfidence * (iq / 100) * blendFactor;
+                        const cheatAmount =
+                            3.0 *
+                            dirConfidence *
+                            (iq / 100) *
+                            blendFactor *
+                            (defenderProfile?.riskTolerance ?? 1.0);
                         if (diagDirection === 'right' && predX < FIELD_WIDTH - 5) predX += cheatAmount;
                         else if (diagDirection === 'left' && predX > 5) predX -= cheatAmount;
                     }
@@ -1705,7 +1754,8 @@ export function executeAssignment(pState, assignment, offenseStates, LOS, playSt
         if (targetRec) {
             const defSpeed = pState.speed || 50;
             const recSpeed = targetRec.speed || 50;
-            const defIQ = pState.playbookIQ || 50;
+            const defProfile = getDecisionProfile(pState, playState.tick);
+            const defIQ = defProfile?.awareness ?? (pState.playbookIQ || 50);
             const defCoverSkill = pState.coverage || 50;
 
             const speedDiff = recSpeed - defSpeed;
@@ -1793,8 +1843,9 @@ export function executeAssignment(pState, assignment, offenseStates, LOS, playSt
         const zone = zoneBoundaries[assignment];
         const zoneCenter = getZoneCenter(assignment, LOS);
         const isDeep = assignment.includes('deep') || pState.slot.startsWith('S');
-        const iq = pState.playbookIQ || 50;
-
+        const defenderProfile = getDecisionProfile(pState, playState.tick);
+        const iq = defenderProfile?.awareness ?? (pState.playbookIQ || 50);
+        
         // 1. "Hero Ball" Safety Creep: Impatient low-IQ deep safeties creep downhill toward LOS
         if (isDeep && iq < 58) {
             zoneCenter.y = Math.max(LOS + 7.0, zoneCenter.y - 3.5);
@@ -1835,7 +1886,13 @@ export function executeAssignment(pState, assignment, offenseStates, LOS, playSt
                 const insideLeverageX = primaryThreat.x < CENTER_X ? 1.0 : -1.0;
 
                 // --- ELITE DB BAITING (Trap Coverage) ---
-                if (iq > 75 && !isBallInAir && playState.tick > 25) {
+                if (
+                    iq > 75 &&
+                    defenderProfile.decisionQuality > 72 &&
+                    defenderProfile.assignmentDiscipline > 50 &&
+                    !isBallInAir &&
+                    playState.tick > 25
+                ) {
                     // Elite safety intentionally "sags" 3 yards shallow and 2 yards inside to make the WR look open
                     pState.targetX = primaryThreat.x + (insideLeverageX * 2.5);
                     pState.targetY = Math.max(zoneCenter.y, primaryThreat.y + 1.0);
