@@ -8,6 +8,7 @@ import { positionOverallWeights, estimateBestPosition, calculateOverall, getPros
 import { formatHeight } from './utils.js';
 import { drawFieldVisualization, formatGameClock, showPlayOverlay } from './ui/field_visualizer.js';
 import { renderDepthOrderPane } from './ui/depth_order.js';
+import { getCurrentRosterLimit } from './game/season.js';
 
 let elements = {};
 let selectedPlayerId = null;
@@ -283,7 +284,7 @@ export function renderTeamNameSuggestions(names, onSelect) {
 export function renderDraftScreen(gameState, onPlayerSelect, currentSelectedId, sortColumn, sortDirection) {
     if (!gameState?.playerTeam) return;
     const { year, draftOrder, currentPick, playerTeam } = gameState;
-    const ROSTER_LIMIT = 18;
+    const rosterLimit = getCurrentRosterLimit(gameState);
 
     if (!draftOrder || currentPick >= draftOrder.length) {
         if (elements.draftHeader) elements.draftHeader.innerHTML = `<h2 class="text-2xl font-bold">Season ${year} Draft Complete</h2>`;
@@ -298,7 +299,7 @@ export function renderDraftScreen(gameState, onPlayerSelect, currentSelectedId, 
     if (!pickingTeam) return;
 
     const currentRosterSize = pickingTeam.roster?.length || 0;
-    const playerCanPick = pickingTeam.id === playerTeam.id && currentRosterSize < ROSTER_LIMIT;
+    const playerCanPick = pickingTeam.id === playerTeam.id && currentRosterSize < rosterLimit;
 
     if (elements.draftYear) elements.draftYear.textContent = year;
     if (elements.draftPickNumber) elements.draftPickNumber.textContent = `#${currentPick + 1}`;
