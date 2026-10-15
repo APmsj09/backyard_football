@@ -500,7 +500,10 @@ export function evaluatePlayerNegotiation(player, team, offer = {}) {
     }
 
     // 8. COACHING CLASHES
-    const coachStyle = team.staff?.coach?.biases?.personality?.name;
+    const coach = team.staff?.coach || team.coach;
+    const coachStyle =
+        coach?.biases?.personality?.name ||
+        coach?.type;
     if (coachStyle === "Old-School Disciplinarian") {
         if (ego > 70 || ethic < 40) {
             interest -= 20;
@@ -910,7 +913,6 @@ export function getRetentionPitchOptions(player) {
         reserveRoleLabel: 'Reserve Role',
         focusPromise: null
     };
-        RETENTION_POSITION_CONFIG.WR;
 
     return {
         position,
@@ -1031,6 +1033,11 @@ function evaluateActivePlayerPromise(
 
     if (!promise) {
         return { status: 'NONE', broken: false };
+    }
+
+    if (promise.teamId && promise.teamId !== team?.id) {
+        player.activePromise = null;
+        return { status: 'SUPERSEDED', broken: false };
     }
 
     const markPermanentDeparture = (reason) => {
@@ -1189,6 +1196,18 @@ export function evaluateRetentionPitch(player, team, pitch = {}) {
         };
     }
 
+    if (player.refusedTeamIds?.includes(team.id)) {
+        return {
+            accepted: false,
+            score: 0,
+            threshold: 100,
+            reasons: [
+                'Player permanently refuses to return after a broken promise.'
+            ],
+            quote: '"You already made your choice, Coach. I am not coming back."'
+        };
+    }
+
     const options = getRetentionPitchOptions(player);
     const position = options.position;
 
@@ -1199,6 +1218,13 @@ export function evaluateRetentionPitch(player, team, pitch = {}) {
     const ethic = player.personality?.workEthic ?? 50;
     const loyalty = player.personality?.loyalty ?? 50;
     const cred = team.socialProfile?.streetCred ?? 50;
+    const playerOvr = calculateOverall(player, position);
+
+    const coach = team.staff?.coach || team.coach;
+    const coachStyle =
+        coach?.biases?.personality?.name ||
+        coach?.type ||
+        'Balanced Tactician';
 
     const rawTokens = Number(pitch.tokensOffered ?? 0);
     const tokens = Number.isFinite(rawTokens) ? Math.floor(rawTokens) : -1;
@@ -1247,6 +1273,31 @@ export function evaluateRetentionPitch(player, team, pitch = {}) {
     let score =
         Math.round(loyalty * 0.40) +
         Math.round((cred - 50) * 0.25);
+
+    // A retention pitch must fit the team's established culture.
+    if (coachStyle === 'Old-School Disciplinarian') {
+        if (ego > 70 || ethic < 40) {
+            score -= 12;
+            reasons.push('Strict coaching culture clashes with the player (-12)');
+        } else if (ethic >= 65) {
+            score += 8;
+            reasons.push('Hard-working player trusts the disciplined program (+8)');
+        }
+    } else if (coachStyle === "Players' Coach") {
+        score += 8;
+        reasons.push('Player-friendly coaching culture encourages him to stay (+8)');
+    } else if (coachStyle === 'Analytical Savant') {
+        if (playerOvr >= 55) {
+            score += 6;
+            reasons.push('Analytical coach has a clear role for a high-impact player (+6)');
+        } else if (ethic < 40) {
+            score -= 5;
+            reasons.push('Coach doubts the player's commitment to the plan (-5)');
+        }
+    } else if (coachStyle === "Peaked in '94" && playerOvr >= 52) {
+        score += 6;
+        reasons.push('Competitive coach wants to keep a key contributor (+6)');
+    }
 
     // 2. Role credibility and ego
     if (rolePromised === 'STARTER') {
@@ -1307,7 +1358,13 @@ export function evaluateRetentionPitch(player, team, pitch = {}) {
         ? Number(pitch.completedWins)
         : (team.wins ?? 0);
 
-    if (completedWins <= 2) threshold += 8;
+    if (completedWins >= 6) {
+        score += 5;
+        reasons.push('Coming off a winning season (+5)');
+    } else if (completedWins <= 2) {
+        threshold += 8;
+    }
+
     const accepted = score >= threshold;
 
     // 8. Position-aware player response
@@ -1336,6 +1393,280 @@ export function evaluateRetentionPitch(player, team, pitch = {}) {
         rolePromised,
         promiseType,
         position
+    };
+}
+
+/**
+ * Builds and evaluates an AI coach's offseason retention offer.
+ * AI and user offers use the same player-acceptance rules.
+ */
+export function evaluateAiRetentionPitch(player, team, context = {}) {
+    if (!player || !team) {
+        return {
+            attempted: false,
+            accepted: false,
+            pitch: null,
+            evaluation: null,
+            reason: 'Player or team is unavailable.'
+        };
+    }
+
+    if (player.refusedTeamIds?.includes(team.id)) {
+        return {
+            attempted: false,
+            accepted: false,
+            pitch: null,
+            evaluation: null,
+            reason: 'Player permanently refuses to return after a broken promise.'
+        };
+    }
+
+    const options = getRetentionPitchOptions(player);
+    const position = options.position;
+    const coach = team.staff?.coach || team.coach;
+    const coachStyle =
+        coach?.biases?.personality?.name ||
+        coach?.type ||
+        'Balanced Tactician';
+    const tactical = coach?.biases?.tactical?.name || 'Balanced Tactician';
+    const gmDirective = team.gameplan?.gmDirective || 'COACH_AUTONOMY';
+
+    const playerOvr = calculateOverall(player, position);
+    const ego = player.personality?.ego ?? 50;
+    const ethic = player.personality?.workEthic ?? 50;
+    const loyalty = player.personality?.loyalty ?? 50;
+    const happiness = player.expectations?.happiness ?? 100;
+
+    const stats = player.seasonStats || {};
+    const snaps = Math.max(
+        0,
+        Number(context.snapsThisSeason ?? player.careerStats?.snapsThisSeason) || 0
+    );
+
+    // Estimate contribution from position-relevant season production.
+    // OL uses tracked snaps and starter status because its box-score stats
+    // are limited compared with skill positions and defenders.
+    let production = 0;
+
+    if (position === 'QB') {
+        production =
+            (stats.passYards || 0) / 20 +
+            (stats.passAttempts || 0) / 3 +
+            (stats.touchdowns || 0) * 4 -
+            (stats.interceptionsThrown || 0) * 3;
+    } else if (position === 'RB') {
+        production =
+            (stats.rushYards || 0) / 12 +
+            (stats.rushAttempts || 0) / 3 +
+            (stats.receptions || 0) * 2 +
+            (stats.touchdowns || 0) * 4;
+    } else if (['WR', 'TE'].includes(position)) {
+        production =
+            (stats.recYards || 0) / 12 +
+            (stats.receptions || 0) * 2 +
+            (stats.targets || 0) * 0.4 +
+            (stats.touchdowns || 0) * 4;
+    } else if (position === 'OL') {
+        production = snaps / 5;
+    } else if (position === 'DL') {
+        production =
+            (stats.tackles || 0) * 1.5 +
+            (stats.sacks || 0) * 6 +
+            (stats.fumblesRecovered || 0) * 4 +
+            (stats.interceptions || 0) * 5;
+    } else {
+        production =
+            (stats.tackles || 0) * 1.2 +
+            (stats.sacks || 0) * 3 +
+            (stats.interceptions || 0) * 8 +
+            (stats.fumblesRecovered || 0) * 4;
+    }
+
+    const productionScore = Math.min(
+        100,
+        Math.max(0, Math.round(production))
+    );
+
+    const currentStarter = isPlayerStarterAtPosition(
+        player,
+        team,
+        position
+    );
+
+    const rosterCompetitors = getRosterObjects(team).filter(
+        p => p && p.id !== player.id && isPlayerViableForPosition(p, position)
+    );
+
+    const requiredStarters = position === 'OL'
+        ? 3
+        : (['WR', 'DB', 'DL'].includes(position) ? 2 : 1);
+
+    const competitorScores = rosterCompetitors
+        .map(p => calculateOverall(p, position))
+        .sort((a, b) => b - a);
+
+    const weakestStarterOvr = competitorScores.length > 0
+        ? competitorScores[
+            Math.min(competitorScores.length - 1, requiredStarters - 1)
+        ]
+        : 0;
+
+    // Avoid making a starting-role promise the roster plainly cannot support.
+    const canCrediblyOfferStarter =
+        currentStarter ||
+        rosterCompetitors.length < requiredStarters ||
+        playerOvr >= weakestStarterOvr - 2;
+
+    const rolePromised = canCrediblyOfferStarter
+        ? 'STARTER'
+        : 'ROTATION';
+
+    const isHighValue =
+        playerOvr >= 52 ||
+        productionScore >= 24 ||
+        currentStarter;
+
+    const isAggressive =
+        coachStyle === "Peaked in '94" ||
+        tactical === 'Blitz Addict' ||
+        gmDirective === 'WIN_NOW';
+
+    const isPlayerFriendly = coachStyle === "Players' Coach";
+    const isConservative =
+        tactical === 'Conservative Turtler' ||
+        coachStyle === 'Analytical Savant';
+
+    // Coaches don't all fight equally hard for every player.
+    // High-value contributors matter most; player-friendly coaches are
+    // more willing to repair a relationship with a lower-rated player.
+    if (!isHighValue && !isPlayerFriendly) {
+        return {
+            attempted: false,
+            accepted: false,
+            pitch: null,
+            evaluation: null,
+            reason: 'AI coach prioritizes retaining more valuable contributors.'
+        };
+    }
+
+    // Strict coaches are less likely to chase a low-value player whose
+    // ego and work ethic conflict with their program.
+    if (
+        coachStyle === 'Old-School Disciplinarian' &&
+        ego >= 82 &&
+        ethic < 40 &&
+        playerOvr < 60
+    ) {
+        return {
+            attempted: false,
+            accepted: false,
+            pitch: null,
+            evaluation: null,
+            reason: 'Coach declines to pursue a poor culture fit.'
+        };
+    }
+
+    const focusPromise = options.focusPromise;
+    let currentWorkload = 0;
+
+    if (position === 'QB') {
+        currentWorkload = stats.passAttempts || 0;
+    } else if (position === 'RB') {
+        currentWorkload =
+            (stats.rushAttempts || 0) +
+            (stats.receptions || 0);
+    } else if (['WR', 'TE'].includes(position)) {
+        currentWorkload = stats.receptions || 0;
+    }
+
+    // AI coaches only promise a workload the player has already demonstrated
+    // he can receive. Non-offensive positions have no workload promise.
+    const shouldPromiseWorkload =
+        focusPromise &&
+        currentWorkload >= focusPromise.target &&
+        (
+            ego > 60 ||
+            loyalty < 50 ||
+            happiness < 65 ||
+            isAggressive ||
+            isPlayerFriendly
+        );
+
+    const promiseType = shouldPromiseWorkload
+        ? focusPromise.value
+        : 'NONE';
+
+    const tokensAvailable = Math.max(
+        0,
+        Math.floor(Number(team.socialProfile?.favorTokens) || 0)
+    );
+
+    let tokensOffered = 0;
+
+    const needsRelationshipRepair =
+        loyalty < 45 || happiness < 50;
+
+    const coachTeaching = coach?.ratings?.teaching ?? 50;
+    const coachAuthority = coach?.ratings?.authority ?? 50;
+    const coachQuality = (coachTeaching + coachAuthority) / 2;
+
+    // Aggressive coaches may spend two tokens on a genuine cornerstone.
+    // Conservative coaches reserve that spend for exceptional players.
+    if (
+        tokensAvailable >= 2 &&
+        playerOvr >= 60 &&
+        isHighValue &&
+        (
+            isAggressive ||
+            loyalty < 35 ||
+            happiness < 40
+        ) &&
+        (
+            !isConservative ||
+            (playerOvr >= 65 && productionScore >= 35)
+        )
+    ) {
+        tokensOffered = 2;
+    } else if (
+        tokensAvailable >= 1 &&
+        isHighValue &&
+        (
+            isAggressive ||
+            (isPlayerFriendly && happiness < 65) ||
+            loyalty < 45 ||
+            happiness < 45 ||
+            (playerOvr >= 58 && coachQuality >= 65)
+        ) &&
+        (
+            !isConservative ||
+            (
+                playerOvr >= 58 &&
+                productionScore >= 30 &&
+                needsRelationshipRepair
+            )
+        )
+    ) {
+        tokensOffered = 1;
+    }
+
+    const pitch = {
+        rolePromised,
+        promiseType,
+        tokensOffered,
+        completedWins: Number(context.completedWins ?? team.wins ?? 0),
+        completedLosses: Number(context.completedLosses ?? team.losses ?? 0)
+    };
+
+    const evaluation = evaluateRetentionPitch(player, team, pitch);
+
+    return {
+        attempted: true,
+        accepted: evaluation.accepted,
+        pitch,
+        evaluation,
+        reason: evaluation.accepted
+            ? 'AI retention pitch accepted.'
+            : 'Player rejected the AI retention pitch.'
     };
 }
 
