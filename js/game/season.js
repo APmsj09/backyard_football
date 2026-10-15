@@ -18,7 +18,14 @@ import {
 import {
     initializeTeamStaff, generateStaffPool, checkRetiredPlayerToCoach, aiManageTeamStaff
 } from './staff.js';
-import { evaluatePlayerRetention, evaluatePlayerNegotiation, resolvePlayerBiddingWar, calculateAiTeamNeedAndDesire, createPlayerPromise } from './negotiations.js';
+import {
+    evaluatePlayerRetention,
+    evaluatePlayerNegotiation,
+    resolvePlayerBiddingWar,
+    calculateAiTeamNeedAndDesire,
+    createPlayerPromise,
+    evaluateAiRetentionPitch
+} from './negotiations.js';
 
 export const ROSTER_LIMIT = 18;
 export const REGULAR_SEASON_ROSTER_LIMIT = 18;
@@ -2472,6 +2479,83 @@ export function advanceToOffseason() {
                 }
 
                 const isUserTeam = team.id === game.playerTeam?.id;
+
+                // AI coaches get one retention attempt for genuine flight risks.
+                // Broken-promise departures are permanent and cannot be negotiated away.
+                if (
+                    wantsToLeave &&
+                    !isUserTeam &&
+                    game.year >= 5 &&
+                    !retentionCheck.willStay &&
+                    !retentionCheck.permanentDeparture
+                ) {
+                    const aiRetention = evaluateAiRetentionPitch(
+                        player,
+                        team,
+                        {
+                            completedWins: team.wins || 0,
+                            completedLosses: team.losses || 0,
+                            snapsThisSeason
+                        }
+                    );
+
+                    if (aiRetention.accepted && aiRetention.pitch) {
+                        const aiOffer = aiRetention.pitch;
+
+                        // Spend tokens only after the player accepts the offer.
+                        if (aiOffer.tokensOffered > 0 && team.socialProfile) {
+                            team.socialProfile.favorTokens = Math.max(
+                                0,
+                                team.socialProfile.favorTokens - aiOffer.tokensOffered
+                            );
+                        }
+
+                        player.activePromise = createPlayerPromise(
+                            player,
+                            team,
+                            {
+                                role: aiOffer.rolePromised,
+                                promiseType: aiOffer.promiseType,
+                                tokensOffered: aiOffer.tokensOffered
+                            },
+                            {
+                                promiseSeason: game.year,
+                                source: 'aiRetention'
+                            }
+                        );
+
+                        // A successful conversation repairs some of the relationship,
+                        // but doesn't guarantee the player will stay forever.
+                        if (player.personality) {
+                            player.personality.loyalty = Math.min(
+                                99,
+                                (player.personality.loyalty ?? 50) + 3
+                            );
+                        }
+
+                        if (!player.expectations) {
+                            player.expectations = { happiness: 50 };
+                        }
+
+                        player.expectations.happiness = Math.min(
+                            100,
+                            (player.expectations.happiness ?? 50) + 8
+                        );
+
+                        player.retentionHistory = player.retentionHistory || [];
+                        player.retentionHistory.push({
+                            year: game.year - 1,
+                            outcome: 'AI_RETAINED',
+                            teamId: team.id,
+                            role: aiOffer.rolePromised,
+                            promiseType: aiOffer.promiseType,
+                            tokensOffered: aiOffer.tokensOffered
+                        });
+
+                        // The normal departure branch below must not release this player.
+                        wantsToLeave = false;
+                    }
+                }
 
                 // Queue persuadable user-team flight risks.
                 // Permanent broken-promise departures will bypass negotiations.
