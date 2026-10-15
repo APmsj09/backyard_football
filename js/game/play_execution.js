@@ -9,6 +9,7 @@ import {
     getZoneCenter, calculateRoutePath, resolveDepthForPlay, getAssignment, zoneBoundaries
 } from './engine_helpers.js';
 import { calculateSafetyHelp, diagnosePlay, getSmartCarrierTarget } from './ai.js';
+import { getDecisionProfile } from './decision_model.js';
 import { pushGameLog } from './collisions.js';
 import { initPlayTelemetry, finalizePlayTelemetry, logPlayDebug } from './telemetry.js';
 import { initMovementIntent, setPointIntent, setHoldIntent, setTrackIntent, setLaneIntent, setRouteIntent, resolveMovementIntent } from './movement_intent.js';
@@ -379,6 +380,11 @@ export function setupInitialPlayerStates(playState, offense, defense, play, assi
                 primaryColor: team.primaryColor,
                 secondaryColor: team.secondaryColor,
                 isOffense, slot,
+                personality: player.personality || null,
+                decisionMaking: player.attributes?.mental?.decisionMaking ??
+                    player.attributes?.mental?.playbookIQ ?? 50,
+                experienceSeasons: player.careerStats?.seasonsPlayed || 0,
+                experienceSnaps: player.careerStats?.snapsThisSeason || 0,
                 x: startX, y: startY, initialX: startX, initialY: startY,
                 targetX, targetY,
                 fatigueModifier: fatigueMod,
