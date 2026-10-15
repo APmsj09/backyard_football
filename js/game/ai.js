@@ -22,6 +22,7 @@ export function diagnosePlay(pState, tick, offenseStates, playState = null) {
         3.25
     );
 
+    const debugEnabled = isDebugMode();
     const iq = pState.playbookIQ || 50;
 
     // Players use only the opponents currently within their perceptual range.
@@ -65,7 +66,7 @@ export function diagnosePlay(pState, tick, offenseStates, playState = null) {
     if (isBallInAir) {
         pState._diagnosedGuess = 'pass';
         pState._diagnosedConfidence = 1.0;
-        if (pState._lastLoggedGuess !== 'pass') {
+        if (debugEnabled && pState._lastLoggedGuess !== 'pass') {
             logPlayDebug('DEF_READ', `${pState.name} (${pState.role}) committed to [PASS] (Ball In Air)`, {
                 confidence: 1.0, direction: pState._diagnosedDirection || 'center', dirConfidence: 1.0
             });
@@ -77,7 +78,7 @@ export function diagnosePlay(pState, tick, offenseStates, playState = null) {
     if (observedRunCarrier || qbScramble) {
         pState._diagnosedGuess = 'run';
         pState._diagnosedConfidence = 1.0;
-        if (pState._lastLoggedGuess !== 'run') {
+        if (debugEnabled && pState._lastLoggedGuess !== 'run') {
             logPlayDebug('DEF_READ', `${pState.name} (${pState.role}) committed to [RUN] (${observedRunCarrier ? 'Observed ball carrier' : 'QB scramble'})`, {
                 confidence: 1.0, direction: pState._diagnosedDirection || 'center', dirConfidence: 1.0
             });
@@ -240,7 +241,7 @@ export function diagnosePlay(pState, tick, offenseStates, playState = null) {
     pState._diagnosedGuess = guess;
     pState._diagnosedConfidence = finalConfidence;
 
-    if (pState._lastLoggedGuess !== guess && guess !== 'read') {
+    if (debugEnabled && pState._lastLoggedGuess !== guess && guess !== 'read') {
         logPlayDebug('DEF_READ', `${pState.name} (${pState.role}) committed to [${guess.toUpperCase()}]`, {
             confidence: Number(finalConfidence.toFixed(2)),
             direction,
@@ -331,7 +332,7 @@ export function calculateSafetyHelp(safetyState, defenseStates, offenseStates, b
     if (helpTarget && helpTarget.receiver) {
         const helpTargetId = helpTarget.receiver.id;
 
-        if (safetyState._lastLoggedHelpTargetId !== helpTargetId) {
+        if (isDebugMode() && safetyState._lastLoggedHelpTargetId !== helpTargetId) {
             logPlayDebug(
                 'SAFETY_HELP_DECISION',
                 `${safetyState.name} commits to help on ${helpTarget.receiver.name}`,
@@ -838,6 +839,8 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
     if (qbState.isEngaged || qbState.stunnedTicks > 0) return;
     if (qbState.action === 'sacked') return;
 
+    const debugEnabled = isDebugMode();
+
     if (typeof qbState.ticksInPocket === 'undefined') qbState.ticksInPocket = 0;
     qbState.ticksInPocket++;
 
@@ -954,7 +957,7 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
             );
             if (decoy) {
                 qbState.currentReadTargetSlot = decoy.slot;
-                if (qbState._lastLoggedDecoy !== decoy.slot) {
+                if (debugEnabled && qbState._lastLoggedDecoy !== decoy.slot) {
                     logPlayDebug('QB_EYE_MANIPULATION', `${qbState.name} uses eyes to look safety off primary read (${progression[0]}) using decoy ${decoy.slot}`, {
                         trueRead: progression[0],
                         decoySlot: decoy.slot
@@ -974,7 +977,7 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
         // Normal progression tracking with telemetry on read transitions
         const readIndex = Math.min(progression.length - 1, Math.floor(qbState.ticksInPocket / (Math.max(8, (110 - qbIQ) / 3))));
 
-        if (qbState._lastReadIndex !== readIndex) {
+        if (debugEnabled && qbState._lastReadIndex !== readIndex) {
             logPlayDebug('QB_READ_PROGRESSION', `${qbState.name} advances to read #${readIndex + 1} (${progression[readIndex]})`, {
                 tick: playState.tick,
                 targetSlot: progression[readIndex],
@@ -1331,7 +1334,12 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
                 const reason = wouldGainFirstDown ? "sees a lane for the first down" : "takes off into open green grass";
                 pushGameLog(gameLog, `[Tick ${playState.tick}] 🏃 ${qbState.name} (IQ:${qbIQ}) ${reason} and tucks it!`, playState);
             }
-            logPlayDebug('QB_SCRAMBLE', `${qbState.name} commits to run`, { openRunningYards: Number(openRunningYards.toFixed(1)), wouldGainFirstDown });
+            if (debugEnabled) {
+                logPlayDebug('QB_SCRAMBLE', `${qbState.name} commits to run`, {
+                    openRunningYards: Number(openRunningYards.toFixed(1)),
+                    wouldGainFirstDown
+                });
+            }
             return;
         }
 
@@ -1345,7 +1353,11 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
         const immediateThreat = defenseStates.find(d => !d.isBlocked && !d.isEngaged && getDistance(qbState, d) < 2.5);
         if (immediateThreat && qbIQ > 60) {
             if (gameLog) pushGameLog(gameLog, `[Tick ${playState.tick}] 👋 ${qbState.name} throws it away under pressure.`, playState);
-            logPlayDebug('QB_THROW_AWAY', `${qbState.name} threw ball away to avoid sack`, { threatDist: Number(getDistance(qbState, immediateThreat).toFixed(2)) });
+            if (debugEnabled) {
+                logPlayDebug('QB_THROW_AWAY', `${qbState.name} threw ball away to avoid sack`, {
+                    threatDist: Number(getDistance(qbState, immediateThreat).toFixed(2))
+                });
+            }
             playState.ballState.inAir = true;
             playState.ballState.throwInitiated = true;
             playState.ballState.throwerId = qbState.id;
@@ -1467,30 +1479,32 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
             actionTaken = isHotReadSituation ? "Hot Read Throw" : "Throw Value Target";
             decisionMade = true;
 
-            logPlayDebug('QB_READ', `${qbState.name} selected target ${targetPlayerState.slot}`, {
-                action: actionTaken,
-                readProgress: `${numReadsVisible}/${progression.length}`,
-                evaluatedScores: readDebugLog,
-                selectedScore: Number(bestTargetEval.score.toFixed(1)),
-                throwThreshold: Number(THROW_THRESHOLD.toFixed(1)),
-                scoreMargin: Number((bestTargetEval.score - THROW_THRESHOLD).toFixed(1)),
-                isPressured,
-                pressureCount,
-                pressureDefender: pressureDefender ? {
-                    name: pressureDefender.name,
-                    distance: Number(getDistance(qbState, pressureDefender).toFixed(2))
-                } : null
-            }, playState.tick);
+            if (debugEnabled) {
+                logPlayDebug('QB_READ', `${qbState.name} selected target ${targetPlayerState.slot}`, {
+                    action: actionTaken,
+                    readProgress: `${numReadsVisible}/${progression.length}`,
+                    evaluatedScores: readDebugLog,
+                    selectedScore: Number(bestTargetEval.score.toFixed(1)),
+                    throwThreshold: Number(THROW_THRESHOLD.toFixed(1)),
+                    scoreMargin: Number((bestTargetEval.score - THROW_THRESHOLD).toFixed(1)),
+                    isPressured,
+                    pressureCount,
+                    pressureDefender: pressureDefender ? {
+                        name: pressureDefender.name,
+                        distance: Number(getDistance(qbState, pressureDefender).toFixed(2))
+                    } : null
+                }, playState.tick);
+            }
 
             if (gameLog) {
                 const readProgress = `${numReadsVisible}/${progression.length}`;
                 gameLog.push(`[Tick ${playState.tick}] 🧠 QB Reads (${readProgress}): [${readDebugLog.join(', ')}] -> Selected: ${targetPlayerState.slot}`);
             }
-        } else if (bestTargetEval) {
+        } else if (debugEnabled && bestTargetEval) {
             // Log rejected targets when the visible reads change, then
             // at most once every 10 ticks while the QB continues holding.
             const previousHoldTick = qbState._lastLoggedHoldTick ?? -Infinity;
-
+            
             const shouldLogHold =
                 qbState._lastLoggedHoldReadCount !== numReadsVisible ||
                 playState.tick - previousHoldTick >= 10;
@@ -1805,12 +1819,14 @@ export function executeThrow(qbState, target, strength, accuracy, playState, gam
     playState.statEvents.push({ type: 'pass_attempt', qbId: qbState.id });
     playState.statEvents.push({ type: 'target', receiverId: target.id });
 
-    logPlayDebug('QB_THROW', `${qbState.name} threw to ${target.name} (${target.slot})`, {
-        passType,
-        airDistance: Number(finalDist.toFixed(1)),
-        accuracyApplied: Math.round(accuracy),
-        flightTimeSec: Number(t.toFixed(2))
-    });
+    if (isDebugMode()) {
+        logPlayDebug('QB_THROW', `${qbState.name} threw to ${target.name} (${target.slot})`, {
+            passType,
+            airDistance: Number(finalDist.toFixed(1)),
+            accuracyApplied: Math.round(accuracy),
+            flightTimeSec: Number(t.toFixed(2))
+        });
+    }
 
     if (gameLog) {
         const passTypeStr = passType.charAt(0).toUpperCase() + passType.slice(1);
