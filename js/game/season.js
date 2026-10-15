@@ -1073,10 +1073,12 @@ export function processEndOfWeek() {
             if (resolution?.winner) {
                 const win = resolution.winner;
                 const team = win.team;
-                if (win.offer.tokensOffered > 0 && team.socialProfile) {
-                    team.socialProfile.favorTokens = Math.max(0, team.socialProfile.favorTokens - win.offer.tokensOffered);
-                }
+
                 if (addPlayerToTeam(player, team)) {
+                    if (win.offer.tokensOffered > 0 && team.socialProfile) {
+                        team.socialProfile.favorTokens = Math.max(0, team.socialProfile.favorTokens - win.offer.tokensOffered);
+                    }
+
                     player.activePromise = createPlayerPromise(
                         player,
                         team,
@@ -1468,10 +1470,11 @@ export function processOffseasonFADay(gameState, userBids = []) {
 
         if (shouldFinalizeNow) {
             // FINALIZE CONTRACT
-            if (win.offer.tokensOffered > 0 && leaderTeam.socialProfile) {
-                leaderTeam.socialProfile.favorTokens = Math.max(0, leaderTeam.socialProfile.favorTokens - win.offer.tokensOffered);
-            }
             if (addPlayerToTeam(player, leaderTeam)) {
+                if (win.offer.tokensOffered > 0 && leaderTeam.socialProfile) {
+                    leaderTeam.socialProfile.favorTokens = Math.max(0, leaderTeam.socialProfile.favorTokens - win.offer.tokensOffered);
+                }
+
                 player.activePromise = createPlayerPromise(
                     player,
                     leaderTeam,
@@ -2491,6 +2494,9 @@ export function advanceToOffseason() {
 
                     // Do not set playerIsLeaving or clear player.teamId.
                 } else if (wantsToLeave) {
+                    permanentWalkout = !!retentionCheck.permanentDeparture;
+                    finalDepartureReason = leaveReason;
+
                     leavingPlayers.push({
                         player,
                         reason: leaveReason,
