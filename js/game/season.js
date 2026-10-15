@@ -1649,7 +1649,7 @@ export function aiManageRoster(team) {
 
     while (
         playableCount < MIN_HEALTHY_PLAYERS &&
-        team.roster.length < ROSTER_LIMIT &&
+        team.roster.length < getCurrentRosterLimit(game) &&
         aiAvailableNetwork.length > 0
     ) {
         const bestFA = aiAvailableNetwork.reduce((best, current) => {
@@ -1677,7 +1677,7 @@ export function aiManageRoster(team) {
         }
     }
 
-    if (team.roster.length < ROSTER_LIMIT && team.socialProfile?.favorTokens > 0) {
+    if (team.roster.length < getCurrentRosterLimit(game) && team.socialProfile?.favorTokens > 0) {
         const topFriend = aiAvailableNetwork.reduce((best, p) => {
             if (p.networkStrength < relationshipLevels.GOOD_FRIEND.level) return best;
             const score = getPlayerScore(p, team.coach) + (p.networkStrength * 20) + (p.personality?.streetCred || 50);
