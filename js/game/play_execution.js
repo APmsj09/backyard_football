@@ -454,6 +454,19 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
     const ballPos = playState.ballState;
     const LOS = playState.lineOfScrimmage;
 
+    const primaryRunTarget =
+        offenseStates.find(p =>
+            p.slot === playState.handoffTargetSlot &&
+            p.assignment?.startsWith('run_') &&
+            p.routePath?.length > 0
+        ) ||
+        offenseStates.find(p =>
+            p.role === 'RB' &&
+            p.assignment?.startsWith('run_') &&
+            p.routePath?.length > 0
+        ) ||
+        null;
+    
     if (playState.ballState.isLoose) {
         const getClosest = (isOff) => playState.activePlayers
             .filter(p => p.isOffense === isOff && p.stunnedTicks <= 0 && !p.isEngaged)
@@ -1485,6 +1498,24 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
         }
 
         if (!pState.isOffense) {
+            const defenderVision = getPerceptionContext(
+                pState,
+                playState.tick,
+                14,
+                21,
+                3.2
+            );
+
+            const carrierPerception =
+                ballCarrierState && !isBallInAir
+                    ? getPerceptionWeight(defenderVision, ballCarrierState)
+                    : 0;
+
+            const runTargetPerception =
+                primaryRunTarget && !isBallInAir
+                    ? getPerceptionWeight(defenderVision, primaryRunTarget)
+                    : 0;
+
             const isDL = pState.role === 'DL';
 
             const defenderProfile = getDecisionProfile(pState, playState.tick);
@@ -1495,7 +1526,7 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                 offenseStates,
                 playState
             );
-
+            
             let playDiagnosis = diag.guess;
             let diagConfidence = diag.confidence;
             let diagDirection = diag.direction;
