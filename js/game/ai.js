@@ -2,6 +2,8 @@ import { getDistance } from './physics.js';
 import { getPlayer } from './state.js';
 import { pushGameLog } from './collisions.js';
 import { logPlayDebug } from './telemetry.js';
+import { getDecisionProfile } from './decision_model.js';
+import { getPerceptionContext, getPerceptionWeight } from './perception.js';
 
 const FIELD_WIDTH = 53.3;
 const FIELD_LENGTH = 120;
@@ -10,13 +12,38 @@ const HASH_LEFT_X = 18.0;
 const HASH_RIGHT_X = 35.3;
 
 export function diagnosePlay(pState, tick, offenseStates, playState = null) {
+    const decisionProfile = getDecisionProfile(pState, tick);
+    const visionContext = getPerceptionContext(
+        pState,
+        tick,
+        18,
+        25,
+        3.25
+    );
+
     const iq = pState.playbookIQ || 50;
-    const qb = offenseStates.find(p => p.slot?.startsWith('QB'));
-    const rbs = offenseStates.filter(p => p.slot?.startsWith('RB'));
-    const ol = offenseStates.filter(p => p.slot?.startsWith('OL'));
+
+    // Players use only the opponents currently within their perceptual range.
+    const qb = offenseStates.find(p =>
+        p.slot?.startsWith('QB') &&
+        getPerceptionWeight(visionContext, p) > 0
+    );
+
+    const rbs = offenseStates.filter(p =>
+        p.slot?.startsWith('RB') &&
+        getPerceptionWeight(visionContext, p) > 0
+    );
+
+    const ol = offenseStates.filter(p =>
+        p.slot?.startsWith('OL') &&
+        getPerceptionWeight(visionContext, p) > 0
+    );
 
     // Read only observable game state, not the offensive play call.
-    const observedCarrier = offenseStates.find(p => p.hasBall || p.isBallCarrier);
+    const observedCarrier = offenseStates.find(p =>
+        (p.hasBall || p.isBallCarrier) &&
+        getPerceptionWeight(visionContext, p) > 0
+    );
     const isBallInAir = Boolean(
         playState?.ballState?.inAir ||
         playState?.ballState?.throwInitiated
@@ -148,7 +175,13 @@ export function diagnosePlay(pState, tick, offenseStates, playState = null) {
     // 3. LOW-PASS FILTERED PERCEPTION BIAS (No 20Hz noise spikes)
     const timeFactor = Math.min(1.0, tick / 30);
     const iqFactor = iq / 100;
-    const noiseMax = 20 * (1.0 - iqFactor);
+
+    const readReliability = (
+        (decisionProfile.decisionQuality * 0.85) +
+        (decisionProfile.assignmentDiscipline * 0.15)
+    ) / 100;
+
+    const noiseMax = 20 * (1.0 - readReliability);
 
     if (pState._diagNoise === undefined) {
         pState._diagNoise = (Math.random() - 0.5) * noiseMax;
@@ -399,13 +432,23 @@ export function analyzePlaySuccess(lastPlayState, offensiveTeam, defensiveTeam) 
 }
 
 export function getSmartCarrierTarget(runner, defenseStates, offenseStates, fieldWidth = 53.3, playState = {}) {
-    const iq = runner.playbookIQ || 50;
+    const decisionProfile = getDecisionProfile(runner, playState.tick);
+    const iq = decisionProfile?.awareness ?? (runner.playbookIQ || 50);
     const agility = runner.agility || 50;
     const strength = runner.strength || 50;
 
     const currentVx = runner.vx || 0;
     const currentVy = runner.vy || 0;
     const currentSpeed = Math.hypot(currentVx, currentVy);
+    const debugEnabled = isDebugMode();
+
+    const visionContext = getPerceptionContext(
+        runner,
+        playState.tick,
+        14,
+        21,
+        3.2
+    );
 
     let maxLateral = 8.0 + (agility / 50);
     if (currentSpeed > 4.5) maxLateral = 5.0;
@@ -419,14 +462,39 @@ export function getSmartCarrierTarget(runner, defenseStates, offenseStates, fiel
         maxLateral = Math.min(maxLateral, 2);
     }
 
-    const nearbyDefenders = defenseStates.filter(d =>
-        !d.isBlocked &&
-        d.stunnedTicks === 0 &&
-        getDistance(runner, d) < 4.0 &&
-        d.y > runner.y - 1
-    );
+    let nearbyDefenderCount = 0;
+    let nearestVisibleDefender = null;
+    let nearestVisibleDefenderDistSq = Infinity;
 
-    const inTraffic = nearbyDefenders.length >= 2;
+    // Single pass: count visible nearby defenders and track the closest one.
+    // No filtered array and no sorting on the normal gameplay path.
+    for (let i = 0; i < defenseStates.length; i++) {
+        const defender = defenseStates[i];
+
+        if (
+            defender.isBlocked ||
+            defender.stunnedTicks > 0 ||
+            defender.y <= runner.y - 1
+        ) {
+            continue;
+        }
+
+        const dx = runner.x - defender.x;
+        const dy = runner.y - defender.y;
+        const distanceSq = (dx * dx) + (dy * dy);
+
+        if (distanceSq >= 16.0) continue;
+        if (getPerceptionWeight(visionContext, defender) <= 0) continue;
+
+        nearbyDefenderCount++;
+
+        if (distanceSq < nearestVisibleDefenderDistSq) {
+            nearestVisibleDefenderDistSq = distanceSq;
+            nearestVisibleDefender = defender;
+        }
+    }
+
+    const inTraffic = nearbyDefenderCount >= 2;
 
     // Traffic should encourage smarter lane evaluation, not prevent an outside run.
     // Only restrict lateral movement in the backfield, before the runner reaches the LOS.
@@ -455,7 +523,7 @@ export function getSmartCarrierTarget(runner, defenseStates, offenseStates, fiel
     const prevOffset = runner._chosenLaneOffset !== undefined ? runner._chosenLaneOffset : 0;
 
     // Enforce lane commitment unless an unblocked defender is an immediate tackle threat (< 2.2 yards)
-    const immediateTackleThreat = nearbyDefenders.find(d => getDistance(runner, d) < 2.2);
+    const immediateTackleThreat = nearestVisibleDefenderDistSq < (2.2 * 2.2);
     if (!immediateTackleThreat && runner._laneLockTicks > 0 && runner._lockedLaneX !== undefined) {
         runner._laneLockTicks--;
         bestTargetX = runner._lockedLaneX;
@@ -464,7 +532,7 @@ export function getSmartCarrierTarget(runner, defenseStates, offenseStates, fiel
         return { x: bestTargetX, y: bestTargetY };
     }
 
-    let evaluatedLanesTracker = []; // Track choices for telemetry
+    const evaluatedLanesTracker = debugEnabled ? [] : null;
 
     laneOffsets.forEach((offset) => {
         const testX = runner.x + offset;
@@ -480,12 +548,18 @@ export function getSmartCarrierTarget(runner, defenseStates, offenseStates, fiel
 
         if (inTraffic) score -= (lateralShift * 12.0);
 
-        // STRENGTHENED HYSTERESIS: Strongly reward staying in the current lane to prevent stutter-stepping
+        // Discipline encourages commitment, while less reliable runners
+        // are more likely to change lanes unnecessarily.
         const offsetDiffFromPrev = Math.abs(offset - prevOffset);
+        const laneStickiness =
+            15 + ((decisionProfile?.assignmentDiscipline ?? 50) * 0.1);
+
         if (offsetDiffFromPrev < 0.5) {
-            score += 25; // Substantial stickiness bonus
+            score += laneStickiness;
         } else {
-            score -= (offsetDiffFromPrev * 3.5); // Steeper penalty for erratic lane changes
+            score -= offsetDiffFromPrev * (
+                2.5 + ((decisionProfile?.assignmentDiscipline ?? 50) * 0.01)
+            );
         }
 
         // Heavy penalty against rapid full-reversal flips (e.g. +5 to -5)
@@ -532,6 +606,13 @@ export function getSmartCarrierTarget(runner, defenseStates, offenseStates, fiel
         defenseStates.forEach(def => {
             if (def.stunnedTicks > 0 || def.y < runner.y - 1.0) return;
 
+            const perceptionWeight = getPerceptionWeight(
+                visionContext,
+                def
+            );
+
+            if (perceptionWeight <= 0) return;
+
             const defPredX = def.x + ((def.vx || 0) * 0.3);
             const defPredY = def.y + ((def.vy || 0) * 0.3);
             const distToPredicted = Math.hypot(testX - defPredX, testY - defPredY);
@@ -544,11 +625,14 @@ export function getSmartCarrierTarget(runner, defenseStates, offenseStates, fiel
             if (!def.isBlocked && !def.isEngaged) {
                 if (distToPredicted < 5.5) {
                     const threatFalloff = Math.max(0, 1.0 - (distToPredicted / 5.5));
-                    laneThreat += (280 / (distToPredicted + 0.6)) * threatFalloff;
+                    laneThreat += (280 / (distToPredicted + 0.6)) * threatFalloff * perceptionWeight;
 
                     // Detect Overpursuit for Cutback lanes
                     const defLateralSpeed = def.vx || 0;
-                    if (Math.abs(defLateralSpeed) > 2.5) {
+                    if (
+                        perceptionWeight >= 0.5 &&
+                        Math.abs(defLateralSpeed) > 2.5
+                    ) {
                         const defGoingRight = defLateralSpeed > 0;
                         if ((defGoingRight && offset < -1.0) || (!defGoingRight && offset > 1.0)) {
                             overPursuitDetected = true;
@@ -573,7 +657,8 @@ export function getSmartCarrierTarget(runner, defenseStates, offenseStates, fiel
             }
         });
 
-        score -= laneThreat;
+        const riskTolerance = decisionProfile?.riskTolerance ?? 1.0;
+        score -= laneThreat * (2.0 - riskTolerance);
 
         // OPEN-SPACE & IQ-SCALED VISION:
         // Smart runners evaluate green grass and open space much better than low-IQ runners.
@@ -588,7 +673,13 @@ export function getSmartCarrierTarget(runner, defenseStates, offenseStates, fiel
             score += 70 * cutbackMultiplier;
         }
 
-        evaluatedLanesTracker.push({ offset, score: Math.round(score), threat: Math.round(laneThreat) });
+        if (debugEnabled) {
+            evaluatedLanesTracker.push({
+                offset,
+                score: Math.round(score),
+                threat: Math.round(laneThreat)
+            });
+        }
 
         if (score > bestScore) {
             bestScore = score;
@@ -600,49 +691,35 @@ export function getSmartCarrierTarget(runner, defenseStates, offenseStates, fiel
 
     // Latch absolute field corridor when committing to a cut
     if (bestOffset !== prevOffset) {
-        runner._laneLockTicks = 10; // Lock into this lane for 10 ticks (~0.5s)
+        runner._laneLockTicks = 10;
         runner._lockedLaneX = bestTargetX;
-        evaluatedLanesTracker.sort((a, b) => b.score - a.score);
-        logPlayDebug('RB_LANE_FLIP', `${runner.name} switched running lanes`, {
-            fromOffset: prevOffset,
-            toOffset: bestOffset,
 
-            position: {
-                x: Number(runner.x.toFixed(2)),
-                y: Number(runner.y.toFixed(2))
-            },
+        if (debugEnabled) {
+            evaluatedLanesTracker.sort((a, b) => b.score - a.score);
 
-            velocity: {
-                vx: Number((runner.vx || 0).toFixed(2)),
-                vy: Number((runner.vy || 0).toFixed(2)),
-                speed: Number(currentSpeed.toFixed(2))
-            },
-
-            chosenTarget: {
-                x: Number(bestTargetX.toFixed(2)),
-                y: Number(bestTargetY.toFixed(2))
-            },
-
-            maxLateral,
-            isBehindLine,
-            inTraffic,
-
-            nearbyDefenders: nearbyDefenders
-                .slice()
-                .sort((a, b) => getDistance(runner, a) - getDistance(runner, b))
-                .slice(0, 3)
-                .map(d => ({
-                    name: d.name,
-                    x: Number(d.x.toFixed(2)),
-                    y: Number(d.y.toFixed(2)),
-                    distance: Number(getDistance(runner, d).toFixed(2)),
-                    vx: Number((d.vx || 0).toFixed(2)),
-                    vy: Number((d.vy || 0).toFixed(2))
-                })),
-
-            topChoices: evaluatedLanesTracker.slice(0, 3)
-        }, playState.tick);
+            logPlayDebug('RB_LANE_FLIP', `${runner.name} switched running lanes`, {
+                fromOffset: prevOffset,
+                toOffset: bestOffset,
+                position: {
+                    x: Number(runner.x.toFixed(2)),
+                    y: Number(runner.y.toFixed(2))
+                },
+                chosenTarget: {
+                    x: Number(bestTargetX.toFixed(2)),
+                    y: Number(bestTargetY.toFixed(2))
+                },
+                maxLateral,
+                isBehindLine,
+                inTraffic,
+                nearestVisibleThreat: nearestVisibleDefender?.name || null,
+                topChoices: evaluatedLanesTracker.slice(0, 3)
+            }, playState.tick);
+        }
     } else if (runner._lockedLaneX === undefined) {
+        runner._lockedLaneX = bestTargetX;
+    }
+
+    runner._chosenLaneOffset = bestOffset; {
         runner._lockedLaneX = bestTargetX;
     }
 
@@ -668,7 +745,7 @@ export function getSmartCarrierTarget(runner, defenseStates, offenseStates, fiel
     runner._smoothTargetX = bestTargetX;
 
 
-    const immediateThreat = nearbyDefenders.sort((a, b) => getDistance(runner, a) - getDistance(runner, b))[0];
+    const immediateThreat = nearestVisibleDefender;
 
     if (immediateThreat && getDistance(runner, immediateThreat) < 2.5) {
         const strengthAdvantage = strength - (immediateThreat.strength || 50);
@@ -713,45 +790,50 @@ export function getSmartCarrierTarget(runner, defenseStates, offenseStates, fiel
     // Keep smoothing anchor synchronized with final post-dodge position
     runner._smoothTargetX = bestTargetX;
 
-    // Only log when a meaningful cut/lane shift happens (prevents flooding while running straight in traffic)
-    const cutDistance = Math.abs(bestTargetX - (runner._lastLoggedTargetX || runner.x));
-    if (cutDistance > 2.0) {
-        logPlayDebug('CARRIER_VISION', `${runner.name} evaluated lanes`, {
-            offset: Number((bestTargetX - runner.x).toFixed(1)),
-            bestScore: Math.round(bestScore),
+    // Only perform diagnostic work when Debug Mode is enabled.
+    // Log only meaningful lane shifts to prevent flooding while running straight.
+    if (debugEnabled) {
+        const cutDistance = Math.abs(
+            bestTargetX - (runner._lastLoggedTargetX ?? runner.x)
+        );
 
-            position: {
-                x: Number(runner.x.toFixed(2)),
-                y: Number(runner.y.toFixed(2))
-            },
+        if (cutDistance > 2.0) {
+            logPlayDebug('CARRIER_VISION', `${runner.name} evaluated lanes`, {
+                offset: Number((bestTargetX - runner.x).toFixed(1)),
+                bestScore: Math.round(bestScore),
 
-            target: {
-                x: Number(bestTargetX.toFixed(2)),
-                y: Number(bestTargetY.toFixed(2))
-            },
+                position: {
+                    x: Number(runner.x.toFixed(2)),
+                    y: Number(runner.y.toFixed(2))
+                },
 
-            velocity: {
-                vx: Number((runner.vx || 0).toFixed(2)),
-                vy: Number((runner.vy || 0).toFixed(2)),
-                speed: Number(currentSpeed.toFixed(2))
-            },
+                target: {
+                    x: Number(bestTargetX.toFixed(2)),
+                    y: Number(bestTargetY.toFixed(2))
+                },
 
-            chosenOffset: bestOffset,
-            inTraffic,
-            action: runner.action,
+                velocity: {
+                    vx: Number((runner.vx || 0).toFixed(2)),
+                    vy: Number((runner.vy || 0).toFixed(2)),
+                    speed: Number(currentSpeed.toFixed(2))
+                },
 
-            topChoices: evaluatedLanesTracker
-                .slice()
-                .sort((a, b) => b.score - a.score)
-                .slice(0, 3)
-        }, playState.tick);
+                chosenOffset: bestOffset,
+                inTraffic,
+                action: runner.action,
 
-        runner._lastLoggedTargetX = bestTargetX;
+                topChoices: evaluatedLanesTracker
+                    .slice()
+                    .sort((a, b) => b.score - a.score)
+                    .slice(0, 3)
+            }, playState.tick);
+
+            runner._lastLoggedTargetX = bestTargetX;
+        }
     }
 
     return { x: bestTargetX, y: bestTargetY };
 }
-
 export function updateQBDecision(qbState, offenseStates, defenseStates, playState, offensiveAssignments, gameLog) {
     if (!qbState || !qbState.hasBall || playState.ballState.inAir || playState.ballState.throwInitiated) return;
     if (qbState.isEngaged || qbState.stunnedTicks > 0) return;
@@ -760,6 +842,7 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
     if (typeof qbState.ticksInPocket === 'undefined') qbState.ticksInPocket = 0;
     qbState.ticksInPocket++;
 
+    const qbProfile = getDecisionProfile(qbState, playState.tick);
     const scoreDiff = (playState.offenseScore || 0) - (playState.defenseScore || 0);
     const currentQuarter = playState.quarter || 1;
     const timeRemaining = playState.timeRemaining || 720;
@@ -798,8 +881,15 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
         technical: { throwingAccuracy: 50 }
     };
 
-    const qbIQ = Math.max(20, Math.min(99, qbAttrs.mental?.playbookIQ ?? 50));
-    const qbDecision = Math.max(20, Math.min(99, qbAttrs.mental?.decisionMaking ?? 50));
+    const qbIQ = Math.max(
+        20,
+        Math.min(99, qbProfile?.awareness ?? qbAttrs.mental?.playbookIQ ?? 50)
+    );
+
+    const qbDecision = Math.max(
+        20,
+        Math.min(99, qbProfile?.decisionMaking ?? qbAttrs.mental?.decisionMaking ?? qbIQ)
+    );
     const qbAgility = qbAttrs.physical?.agility || 50;
     const qbStrength = qbAttrs.physical?.strength || 50;
     const qbAcc = qbAttrs.technical?.throwingAccuracy || 50;
@@ -1175,11 +1265,12 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
         // NOT WHICH PLAYER HE "LIKES"
         // ======================================================
 
-        const riskTolerance = 0.65 + (qbDecision / 100) * 0.35;
+        const decisionRiskTolerance = 0.65 + (qbDecision / 100) * 0.35;
+        const personalityRiskTolerance = qbProfile?.riskTolerance ?? 1.0;
 
-        // Good decision makers get more value from genuinely good windows.
-        // They do NOT get a bonus simply because a receiver is highly rated.
-        score *= riskTolerance;
+        // Decision-making controls evaluation quality; personality modestly
+        // influences willingness to accept risk.
+        score *= decisionRiskTolerance * personalityRiskTolerance;
 
         return {
             score: score,
