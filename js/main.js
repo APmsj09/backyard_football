@@ -1106,7 +1106,9 @@ function startExitInterviewFlow(retentions, onComplete, report = null) {
             const pitchResult = Game.evaluateRetentionPitch(player, team, {
                 rolePromised,
                 promiseType,
-                tokensOffered
+                tokensOffered,
+                completedWins: item.teamWins,
+                completedLosses: item.teamLosses
             });
 
             if (!pitchResult.accepted) {
@@ -1131,13 +1133,18 @@ function startExitInterviewFlow(retentions, onComplete, report = null) {
                 team.socialProfile.favorTokens -= tokensOffered;
             }
 
-            player.activePromise = {
-                role: rolePromised,
-                promiseType,
-                promiseTouches: 'NORMAL',
-                promiseSeason: gameState.year,
-                broken: false
-            };
+            player.activePromise = Game.createPlayerPromise(
+                player,
+                team,
+                {
+                    role: rolePromised,
+                    promiseType
+                },
+                {
+                    promiseSeason: gameState.year,
+                    source: 'exitInterview'
+                }
+            );
 
             player.status = {
                 type: 'healthy',
