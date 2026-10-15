@@ -5,6 +5,7 @@ import { isDebugMode, setDebugMode, debugCollector } from './game.js';
 import { positionOverallWeights, estimateBestPosition, calculateOverall } from './game/player.js';
 import { gmBackgrounds, gmArchetypes, footballExpertises, offenseFormations, defenseFormations } from './data.js';
 import { formatHeight } from './utils.js';
+import { getCurrentRosterLimit } from './game/season.js';
 
 let gameState = null;
 let selectedPlayerId = null;
@@ -16,7 +17,7 @@ let isDraftingLocked = false;
 let isExitInterviewFlowActive = false;
 let renderActiveExitInterview = null;
 
-const ROSTER_LIMIT = 18;
+const getDraftRosterLimit = () => getCurrentRosterLimit(gameState);
 const MIN_HEALTHY_PLAYERS = 8;
 const WEEKS_IN_SEASON = 9;
 
@@ -512,8 +513,10 @@ function handleDraftPlayer() {
     if (selectedPlayerId) {
         const player = gameState.players.find(p => p.id === selectedPlayerId);
         const team = gameState.playerTeam;
-        if (team.roster.length >= ROSTER_LIMIT) {
-            UI.showModal("Roster Full", `<p>Your roster is full (${ROSTER_LIMIT} players).</p>`);
+        const rosterLimit = getDraftRosterLimit();
+
+        if (team.roster.length >= rosterLimit) {
+            UI.showModal("Roster Full", `<p>Your roster is full (${rosterLimit} players).</p>`);
             return;
         }
 
