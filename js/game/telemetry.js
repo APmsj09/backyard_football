@@ -19,6 +19,15 @@ function disableTelemetry() {
     }
 }
 
+// Immediately clear diagnostic data when Debug Mode is switched off.
+if (typeof window !== 'undefined') {
+    window.addEventListener('backyard-debug-mode-changed', event => {
+        if (event.detail?.enabled === false) {
+            disableTelemetry();
+        }
+    });
+}
+
 function snapshotBallState(ball) {
     if (!ball) return null;
 
