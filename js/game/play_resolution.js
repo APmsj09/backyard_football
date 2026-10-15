@@ -649,7 +649,7 @@ export function determineDefensiveFormation(defense, offenseFormationName, down,
                 return currentFormation;
             }
             if (coachPref && validFormations.includes(coachPref)) {
-                return coachPref;f
+                return coachPref;
             }
         }
 
