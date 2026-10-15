@@ -653,9 +653,30 @@ export function evaluateStaffNegotiation(staff, team, roleKey, pitch = {}) {
  * Evaluates offseason retention and enforces any promise due for the
  * completed season. A broken commitment destroys trust permanently.
  */
+/**
+ * Evaluates offseason retention using the shared contract model.
+ */
 export function evaluatePlayerRetention(player, team, snapsThisSeason = 0) {
     if (player.age >= 19) {
-        return { willStay: false, reason: "Graduated High School" };
+        return { willStay: false, reason: 'Graduated High School' };
+    }
+
+    const completedSeason = (game?.year || 1) - 1;
+
+    const promiseResult = evaluateActivePlayerPromise(
+        player,
+        team,
+        snapsThisSeason,
+        completedSeason
+    );
+
+    if (promiseResult.broken) {
+        return {
+            willStay: false,
+            reason: promiseResult.reason,
+            stayScore: 0,
+            permanentDeparture: true
+        };
     }
 
     const ego = player.personality?.ego ?? 50;
@@ -664,149 +685,25 @@ export function evaluatePlayerRetention(player, team, snapsThisSeason = 0) {
     const bestPos = player.pos || estimateBestPosition(player);
     const ovr = calculateOverall(player, bestPos);
 
-    const isStarter =
-        Object.values(team.depthChart?.offense || {}).includes(player.id) ||
-        Object.values(team.depthChart?.defense || {}).includes(player.id);
-
-    const completedSeason = (game?.year || 1) - 1;
-    const promise = player.activePromise;
-
-    // A previously broken commitment cannot be repaired with another pitch.
-    if (promise?.broken) {
-        if (player.personality) player.personality.loyalty = 0;
-
-        return {
-            willStay: false,
-            reason: "Permanent departure: A previous promise was broken.",
-            stayScore: 0,
-            permanentDeparture: true
-        };
-    }
-
-    if (promise) {
-        const recordedPromiseSeason = Number(promise.promiseSeason);
-        const hasPromiseSeason =
-            promise.promiseSeason != null &&
-            Number.isFinite(recordedPromiseSeason);
-
-        const promiseIsDue =
-            !hasPromiseSeason ||
-            recordedPromiseSeason === completedSeason;
-
-        // Expire an outdated promise instead of judging it against the wrong season.
-        if (hasPromiseSeason && recordedPromiseSeason < completedSeason) {
-            player.activePromise = null;
-        } else if (promiseIsDue) {
-            let brokenReason = null;
-
-            // 1. Starting-role promise
-            if (promise.role === 'STARTER' && !isStarter) {
-                brokenReason =
-                    "Broken promise: Guaranteed starting role was not delivered.";
-            }
-
-            // 2. Position-appropriate workload promise
-            let promiseType = promise.promiseType || 'NONE';
-
-            // Support older saves that used promiseTouches: FEATURED.
-            if (
-                promiseType === 'NONE' &&
-                promise.promiseTouches === 'FEATURED'
-            ) {
-                if (bestPos === 'QB') promiseType = 'PASSING_ROLE';
-                else if (bestPos === 'RB') promiseType = 'FEATURED_TOUCHES';
-                else if (['WR', 'TE'].includes(bestPos)) {
-                    promiseType = 'FEATURED_CATCHES';
-                }
-            }
-
-            const stats = player.seasonStats || {};
-            let promiseFulfilled = true;
-
-            if (promiseType === 'PASSING_ROLE' && bestPos === 'QB') {
-                promiseFulfilled = (stats.passAttempts || 0) >= 25;
-                if (!promiseFulfilled) {
-                    brokenReason =
-                        "Broken promise: The promised passing workload never materialized.";
-                }
-            } else if (
-                promiseType === 'FEATURED_TOUCHES' &&
-                bestPos === 'RB'
-            ) {
-                const touches =
-                    (stats.rushAttempts || 0) +
-                    (stats.receptions || 0);
-
-                promiseFulfilled = touches >= 25;
-
-                if (!promiseFulfilled) {
-                    brokenReason =
-                        "Broken promise: The promised featured ball-carrier role never materialized.";
-                }
-            } else if (
-                promiseType === 'FEATURED_CATCHES' &&
-                ['WR', 'TE'].includes(bestPos)
-            ) {
-                promiseFulfilled = (stats.receptions || 0) >= 25;
-
-                if (!promiseFulfilled) {
-                    brokenReason =
-                        "Broken promise: The promised featured receiving role never materialized.";
-                }
-            }
-
-            if (brokenReason) {
-                promise.broken = true;
-                promise.brokenYear = completedSeason;
-
-                if (player.personality) {
-                    player.personality.loyalty = 0;
-                }
-
-                player.retentionHistory = player.retentionHistory || [];
-                player.retentionHistory.push({
-                    year: completedSeason,
-                    outcome: 'BROKEN_PROMISE',
-                    reason: brokenReason
-                });
-
-                return {
-                    willStay: false,
-                    reason: `${brokenReason} Trust destroyed; loyalty fell to 0.`,
-                    stayScore: 0,
-                    permanentDeparture: true
-                };
-            }
-
-            // The commitment was honored. Don't repeatedly evaluate it in later years.
-            player.retentionHistory = player.retentionHistory || [];
-            player.retentionHistory.push({
-                year: completedSeason,
-                outcome: 'PROMISE_KEPT'
-            });
-
-            player.activePromise = null;
-        }
-    }
+    const isStarter = isPlayerStarterAtPosition(player, team, bestPos);
 
     let stayScore = (loyalty * 0.45) + (happiness * 0.35);
 
-    // GM culture and management bonuses
     const gmRetentionBonus = team.gmProfile?.bonuses?.retention || 0;
     stayScore += gmRetentionBonus;
 
-    // Playing-time and role frustration
+    // General playing-time frustration, separate from explicit promises.
     if (player.expectations?.desiredRole === 'STARTER' && snapsThisSeason < 40) {
         stayScore -= 28;
     }
 
-    // Losing-program frustration
+    // Losing-program frustration.
     if (team.wins <= 2) {
         if (ego > 70) stayScore -= 14;
         else if (ego > 50) stayScore -= 6;
     }
 
-    // Older stars may seek stronger competition
+    // High-caliber upperclassmen may want stronger competition.
     if (team.tier === 2 && ovr >= 60 && player.age >= 17 && ego > 65) {
         stayScore -= 14;
     }
@@ -816,92 +713,378 @@ export function evaluatePlayerRetention(player, team, snapsThisSeason = 0) {
     if (player.age >= 17) threshold += 6;
 
     const willStay = stayScore >= threshold;
-    let reason = "Happy with current role and teammates.";
+    let reason = 'Happy with current role and teammates.';
 
     if (!willStay) {
         if (player.expectations?.desiredRole === 'STARTER' && snapsThisSeason < 40) {
-            reason = "Frustrated by insufficient playing time.";
+            reason = 'Frustrated by insufficient playing time.';
+        } else if (!isStarter && ego > 70) {
+            reason = 'High ego demanded a bigger role.';
         } else if (team.tier === 2 && ovr >= 54) {
-            reason = "Demanded transfer to Tier 1 Premier Parks competition.";
+            reason = 'Demanded transfer to Tier 1 Premier Parks competition.';
         } else if (team.wins <= 2) {
-            reason = "Frustrated with losing culture and poor play.";
-        } else if (ego > 70) {
-            reason = "High ego demanded a bigger role.";
+            reason = 'Frustrated with losing culture and poor play.';
         } else {
-            reason = "Wanted a fresh start with new playground opportunities.";
+            reason = 'Wanted a fresh start with new playground opportunities.';
         }
     }
 
     return {
         willStay,
         reason,
-        stayScore: Math.round(stayScore)
+        stayScore: Math.round(stayScore),
+        promiseStatus: promiseResult.status
     };
 }
 
+const RETENTION_POSITION_CONFIG = {
+    QB: {
+        positionLabel: 'Quarterback',
+        starterRoleLabel: 'Starting Quarterback',
+        rotationRoleLabel: 'Backup / Rotation QB',
+        reserveRoleLabel: 'Developmental QB',
+        focusPromise: {
+            value: 'PASSING_ROLE',
+            label: 'Passing-Game Priority',
+            target: 25,
+            description: 'At least 25 pass attempts next season.'
+        }
+    },
+    RB: {
+        positionLabel: 'Running Back',
+        starterRoleLabel: 'Starting Running Back',
+        rotationRoleLabel: 'Rotation Back',
+        reserveRoleLabel: 'Depth Back',
+        focusPromise: {
+            value: 'FEATURED_TOUCHES',
+            label: 'Featured Ball Carrier',
+            target: 25,
+            description: 'At least 25 combined rushing attempts and receptions next season.'
+        }
+    },
+    WR: {
+        positionLabel: 'Wide Receiver',
+        starterRoleLabel: 'Starting Receiver',
+        rotationRoleLabel: 'Rotation Receiver',
+        reserveRoleLabel: 'Depth Receiver',
+        focusPromise: {
+            value: 'FEATURED_CATCHES',
+            label: 'Featured Receiving Role',
+            target: 25,
+            description: 'At least 25 receptions next season.'
+        }
+    },
+    TE: {
+        positionLabel: 'Tight End',
+        starterRoleLabel: 'Starting Tight End',
+        rotationRoleLabel: 'Rotation Tight End',
+        reserveRoleLabel: 'Depth Tight End',
+        focusPromise: {
+            value: 'FEATURED_CATCHES',
+            label: 'Featured Receiving Role',
+            target: 25,
+            description: 'At least 25 receptions next season.'
+        }
+    },
+    OL: {
+        positionLabel: 'Offensive Lineman',
+        starterRoleLabel: 'Starting Offensive Line Role',
+        rotationRoleLabel: 'Rotation Lineman',
+        reserveRoleLabel: 'Developmental Lineman',
+        focusPromise: null
+    },
+    DL: {
+        positionLabel: 'Defensive Lineman',
+        starterRoleLabel: 'Starting Defensive Line Role',
+        rotationRoleLabel: 'Rotation Defensive Lineman',
+        reserveRoleLabel: 'Depth Defensive Lineman',
+        focusPromise: null
+    },
+    LB: {
+        positionLabel: 'Linebacker',
+        starterRoleLabel: 'Starting Linebacker',
+        rotationRoleLabel: 'Rotation Linebacker',
+        reserveRoleLabel: 'Depth Linebacker',
+        focusPromise: null
+    },
+    DB: {
+        positionLabel: 'Defensive Back',
+        starterRoleLabel: 'Starting Defensive Back',
+        rotationRoleLabel: 'Rotation Defensive Back',
+        reserveRoleLabel: 'Depth Defensive Back',
+        focusPromise: null
+    }
+};
+
 /**
- * Returns retention offers that make sense for the player's position.
- * Every workload promise has a corresponding fulfillment check.
+ * Single source of truth for valid player promise options.
+ * Shared by recruiting and retention negotiations.
  */
 export function getRetentionPitchOptions(player) {
     const position = player?.pos || estimateBestPosition(player);
-
-    const positionNames = {
-        QB: 'Quarterback',
-        RB: 'Running Back',
-        WR: 'Wide Receiver',
-        TE: 'Tight End',
-        OL: 'Offensive Lineman',
-        DL: 'Defensive Lineman',
-        LB: 'Linebacker',
-        DB: 'Defensive Back'
-    };
-
-    let focusPromise = null;
-
-    if (position === 'QB') {
-        focusPromise = {
-            value: 'PASSING_ROLE',
-            label: 'Passing-Game Commitment',
-            description: 'At least 25 pass attempts next season.'
-        };
-    } else if (position === 'RB') {
-        focusPromise = {
-            value: 'FEATURED_TOUCHES',
-            label: 'Featured Ball Carrier',
-            description: 'At least 25 combined rush attempts and receptions next season.'
-        };
-    } else if (['WR', 'TE'].includes(position)) {
-        focusPromise = {
-            value: 'FEATURED_CATCHES',
-            label: 'Featured Receiving Role',
-            description: 'At least 25 receptions next season.'
-        };
-    }
-
-    let starterRoleLabel = 'Starting Role';
-
-    if (position === 'QB') {
-        starterRoleLabel = 'Starting Quarterback';
-    } else if (position === 'RB') {
-        starterRoleLabel = 'Starting Running Back';
-    } else if (position === 'WR') {
-        starterRoleLabel = 'Starting Receiver';
-    } else if (position === 'TE') {
-        starterRoleLabel = 'Starting Tight End';
-    } else if (position === 'OL') {
-        starterRoleLabel = 'Starting Offensive Line Role';
-    } else if (['DL', 'LB', 'DB'].includes(position)) {
-        starterRoleLabel = 'Starting Defensive Role';
-    }
+    const config = RETENTION_POSITION_CONFIG[position] ||
+        RETENTION_POSITION_CONFIG.WR;
 
     return {
         position,
-        positionLabel: positionNames[position] || position,
-        starterRoleLabel,
-        rotationRoleLabel: 'Rotation Role',
-        focusPromise
+        positionLabel: config.positionLabel,
+        starterRoleLabel: config.starterRoleLabel,
+        rotationRoleLabel: config.rotationRoleLabel,
+        reserveRoleLabel: config.reserveRoleLabel,
+        focusPromise: config.focusPromise
+            ? { ...config.focusPromise }
+            : null
     };
+}
+
+
+/**
+ * Creates a normalized, season-specific commitment after a player accepts.
+ * Does not spend tokens or modify the roster.
+ */
+export function createPlayerPromise(
+    player,
+    team,
+    offer = {},
+    metadata = {}
+) {
+    if (!player || !team) return null;
+
+    const options = getRetentionPitchOptions(player);
+    const validRoles = ['STARTER', 'ROTATION', 'BENCH'];
+
+    const offeredRole = offer.role ?? offer.rolePromised ?? 'ROTATION';
+    const role = validRoles.includes(offeredRole)
+        ? offeredRole
+        : 'ROTATION';
+
+    let promiseType = offer.promiseType;
+
+    // Normalize legacy recruiting offers that use promiseTouches.
+    if (promiseType == null) {
+        promiseType = offer.promiseTouches === 'FEATURED'
+            ? (options.focusPromise?.value || 'NONE')
+            : 'NONE';
+    }
+
+    // Do not record a workload guarantee that is invalid for the position.
+    if (
+        promiseType !== 'NONE' &&
+        promiseType !== options.focusPromise?.value
+    ) {
+        promiseType = 'NONE';
+    }
+
+    const promiseSeason = Number(
+        metadata.promiseSeason ?? game?.year ?? 1
+    );
+
+    const source = metadata.source || 'recruiting';
+
+    return {
+        version: 1,
+        role,
+        position: options.position,
+        promiseType,
+        promiseTarget: promiseType === options.focusPromise?.value
+            ? options.focusPromise.target
+            : null,
+
+        // Legacy compatibility for older recruiting code and saves.
+        promiseTouches: promiseType === 'NONE' ? 'NORMAL' : 'FEATURED',
+
+        promiseSeason: Number.isFinite(promiseSeason)
+            ? promiseSeason
+            : (game?.year ?? 1),
+
+        source,
+        teamId: team.id,
+        broken: false
+    };
+}
+
+function normalizePromiseSlotPosition(slot) {
+    let position = String(slot || '').replace(/\d+/g, '').toUpperCase();
+
+    if (['OT', 'OG', 'C'].includes(position)) return 'OL';
+    if (position === 'FB') return 'RB';
+    if (['CB', 'S', 'FS', 'SS'].includes(position)) return 'DB';
+    if (['DE', 'DT', 'NT'].includes(position)) return 'DL';
+
+    return position;
+}
+
+function isPlayerStarterAtPosition(player, team, position) {
+    if (!player || !team || !position) return false;
+
+    const charts = [
+        team.depthChart?.offense || {},
+        team.depthChart?.defense || {}
+    ];
+
+    return charts.some(chart =>
+        Object.entries(chart).some(([slot, playerId]) =>
+            playerId === player.id &&
+            normalizePromiseSlotPosition(slot) === position
+        )
+    );
+}
+
+/**
+ * Resolves a player's contract promise for the completed season.
+ * A broken commitment permanently damages trust with the promising team.
+ */
+function evaluateActivePlayerPromise(
+    player,
+    team,
+    snapsThisSeason = 0,
+    completedSeason = (game?.year || 1) - 1
+) {
+    const promise = player?.activePromise;
+
+    if (!promise) {
+        return { status: 'NONE', broken: false };
+    }
+
+    const markPermanentDeparture = (reason) => {
+        promise.broken = true;
+        promise.brokenYear = completedSeason;
+        promise.brokenReason = reason;
+
+        if (player.personality) {
+            player.personality.loyalty = 0;
+        }
+
+        player.refusedTeamIds = [
+            ...new Set([
+                ...(player.refusedTeamIds || []),
+                team.id
+            ])
+        ];
+
+        player.retentionHistory = player.retentionHistory || [];
+
+        if (!player.retentionHistory.some(entry =>
+            entry.year === completedSeason &&
+            entry.outcome === 'BROKEN_PROMISE'
+        )) {
+            player.retentionHistory.push({
+                year: completedSeason,
+                outcome: 'BROKEN_PROMISE',
+                reason
+            });
+        }
+
+        return {
+            status: 'BROKEN',
+            broken: true,
+            permanentDeparture: true,
+            reason
+        };
+    };
+
+    if (promise.broken) {
+        return markPermanentDeparture(
+            promise.brokenReason ||
+            'Permanent departure: A previous promise was broken.'
+        );
+    }
+
+    const promiseSeason = Number(promise.promiseSeason);
+
+    // A promise must not be evaluated before its promised season finishes.
+    if (
+        promise.promiseSeason != null &&
+        Number.isFinite(promiseSeason) &&
+        promiseSeason > completedSeason
+    ) {
+        return { status: 'NOT_DUE', broken: false };
+    }
+
+    const position = promise.position ||
+        player.pos ||
+        estimateBestPosition(player);
+
+    const snaps = Math.max(0, Number(snapsThisSeason) || 0);
+
+    // STARTER and ROTATION have measurable minimum role expectations.
+    if (promise.role === 'STARTER') {
+        if (!isPlayerStarterAtPosition(player, team, position)) {
+            return markPermanentDeparture(
+                `Broken promise: Guaranteed ${position} starting role was not delivered.`
+            );
+        }
+
+        if (snaps < 40) {
+            return markPermanentDeparture(
+                `Broken promise: The promised ${position} starting role did not provide meaningful playing time.`
+            );
+        }
+    } else if (promise.role === 'ROTATION' && snaps < 15) {
+        return markPermanentDeparture(
+            'Broken promise: The promised rotation role did not provide meaningful playing time.'
+        );
+    }
+
+    // Normalize promises from older saves.
+    let promiseType = promise.promiseType;
+
+    if (
+        !promiseType &&
+        promise.promiseTouches === 'FEATURED'
+    ) {
+        const oldPositionConfig = RETENTION_POSITION_CONFIG[position];
+        promiseType = oldPositionConfig?.focusPromise?.value || 'NONE';
+    }
+
+    const stats = player.seasonStats || {};
+    const target = Math.max(
+        0,
+        Number(promise.promiseTarget) ||
+        RETENTION_POSITION_CONFIG[position]?.focusPromise?.target ||
+        25
+    );
+
+    if (promiseType === 'PASSING_ROLE' && position === 'QB') {
+        if ((stats.passAttempts || 0) < target) {
+            return markPermanentDeparture(
+                `Broken promise: The QB's ${target}-attempt passing commitment was not fulfilled.`
+            );
+        }
+    } else if (
+        promiseType === 'FEATURED_TOUCHES' &&
+        position === 'RB'
+    ) {
+        const touches =
+            (stats.rushAttempts || 0) +
+            (stats.receptions || 0);
+
+        if (touches < target) {
+            return markPermanentDeparture(
+                `Broken promise: The RB's ${target}-touch commitment was not fulfilled.`
+            );
+        }
+    } else if (
+        promiseType === 'FEATURED_CATCHES' &&
+        ['WR', 'TE'].includes(position)
+    ) {
+        if ((stats.receptions || 0) < target) {
+            return markPermanentDeparture(
+                `Broken promise: The receiving commitment of ${target} catches was not fulfilled.`
+            );
+        }
+    }
+
+    player.retentionHistory = player.retentionHistory || [];
+    player.retentionHistory.push({
+        year: completedSeason,
+        outcome: 'PROMISE_KEPT'
+    });
+
+    // A successfully completed contract promise is resolved exactly once.
+    player.activePromise = null;
+
+    return { status: 'KEPT', broken: false };
 }
 
 /**
