@@ -503,6 +503,7 @@ function handlePlayerSelectInDraft(playerId) {
     if (draftBtn && gameState.playerTeam) {
         const currentPickingTeam = gameState.draftOrder?.[gameState.currentPick];
         const isMyTurn = currentPickingTeam?.id === gameState.playerTeam.id;
+        const rosterLimit = getDraftRosterLimit();
         const hasRoom = (gameState.playerTeam.roster?.length || 0) < rosterLimit;
         draftBtn.disabled = !(isMyTurn && hasRoom && player);
     }
