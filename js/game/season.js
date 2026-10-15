@@ -18,9 +18,7 @@ import {
 import {
     initializeTeamStaff, generateStaffPool, checkRetiredPlayerToCoach, aiManageTeamStaff
 } from './staff.js';
-import {
-    evaluatePlayerRetention, evaluatePlayerNegotiation, resolvePlayerBiddingWar, calculateAiTeamNeedAndDesire
-} from './negotiations.js';
+import { evaluatePlayerRetention, evaluatePlayerNegotiation, resolvePlayerBiddingWar, calculateAiTeamNeedAndDesire, createPlayerPromise } from './negotiations.js';
 
 export const ROSTER_LIMIT = 18;
 export const REGULAR_SEASON_ROSTER_LIMIT = 18;
@@ -1073,8 +1071,14 @@ export function processEndOfWeek() {
                 if (win.offer.tokensOffered > 0 && team.socialProfile) {
                     team.socialProfile.favorTokens = Math.max(0, team.socialProfile.favorTokens - win.offer.tokensOffered);
                 }
-                player.activePromise = { role: win.offer.role, promiseTouches: win.offer.promiseTouches };
                 if (addPlayerToTeam(player, team)) {
+                    player.activePromise = createPlayerPromise(
+                        player,
+                        team,
+                        win.offer,
+                        { promiseSeason: game.year, source: 'weeklyFA' }
+                    );
+
                     player.status = { type: 'healthy', description: '', duration: 0 };
                     aiSetDepthChart(team);
                     if (team.id === game.playerTeam?.id) {
@@ -1458,12 +1462,14 @@ export function processOffseasonFADay(gameState, userBids = []) {
             if (win.offer.tokensOffered > 0 && leaderTeam.socialProfile) {
                 leaderTeam.socialProfile.favorTokens = Math.max(0, leaderTeam.socialProfile.favorTokens - win.offer.tokensOffered);
             }
-            player.activePromise = {
-                role: win.offer.role || 'ROTATION',
-                promiseTouches: win.offer.promiseTouches || 'NORMAL'
-            };
-
             if (addPlayerToTeam(player, leaderTeam)) {
+                player.activePromise = createPlayerPromise(
+                    player,
+                    leaderTeam,
+                    win.offer,
+                    { promiseSeason: gameState.year, source: 'offseasonFA' }
+                );
+
                 player.status = { type: 'healthy', description: '', duration: 0 };
                 aiSetDepthChart(leaderTeam);
 
@@ -1597,7 +1603,7 @@ export function autoFillTeamWalkOns(team, targetSize = 14) {
         const recruit = unassigned[0];
         if (addPlayerToTeam(recruit, team)) {
             recruit.status = { type: 'healthy', description: '', duration: 0 };
-            recruit.activePromise = { role: 'ROTATION', promiseTouches: 'NORMAL' };
+            //recruit.activePromise = { role: 'ROTATION', promiseTouches: 'NORMAL' };
             added++;
         } else {
             break;
@@ -2754,19 +2760,28 @@ export function playerSignFreeAgent(playerId, offer = {}) {
         };
     }
 
-    // Deduct tokens if offered
-    if (offer.tokensOffered > 0) {
-        team.socialProfile.favorTokens = Math.max(0, (team.socialProfile.favorTokens || 3) - offer.tokensOffered);
-    }
-
-    player.activePromise = {
-        role: offer.role || 'ROTATION',
-        promiseTouches: offer.promiseTouches || 'NORMAL'
-    };
-
     if (addPlayerToTeam(player, team)) {
+        if (offer.tokensOffered > 0) {
+            team.socialProfile.favorTokens = Math.max(
+                0,
+                (team.socialProfile.favorTokens || 0) - offer.tokensOffered
+            );
+        }
+
+        player.activePromise = createPlayerPromise(
+            player,
+            team,
+            offer,
+            { promiseSeason: game.year, source: 'directFA' }
+        );
+
         aiSetDepthChart(team);
-        addMessage("Free Agent Signed", `🤝 <b>${player.name}</b> accepted your contract pitch! (${negotiation.reasons.join(', ')})`);
+
+        addMessage(
+            "Free Agent Signed",
+            `🤝 <b>${player.name}</b> accepted your contract pitch! (${negotiation.reasons.join(', ')})`
+        );
+
         return { success: true, message: `Signed ${player.name}!` };
     }
 
