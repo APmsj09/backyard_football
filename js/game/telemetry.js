@@ -1,10 +1,23 @@
 // js/game/telemetry.js
 
+import { isDebugMode } from './debug_mode.js';
+
 const MAX_BUFFERED_PLAYS = 3;
 const MAX_DECISIONS_PER_PLAY = 4000;
 
 let playHistoryBuffer = [];
 let nextPlaySequence = 1;
+let telemetryEnabled = false;
+
+function disableTelemetry() {
+    telemetryEnabled = false;
+    playHistoryBuffer = [];
+
+    if (typeof window !== 'undefined') {
+        window.__ACTIVE_PLAY_TELEMETRY__ = null;
+        delete window.__CURRENT_TICK__;
+    }
+}
 
 function snapshotBallState(ball) {
     if (!ball) return null;
@@ -49,21 +62,17 @@ function snapshotPlayers(players) {
 }
 
 export function clearPlayTelemetry() {
-    playHistoryBuffer = [];
-    window.__ACTIVE_PLAY_TELEMETRY__ = null;
+    disableTelemetry();
 }
 
 export function initPlayTelemetry(context, playState, offPlayKey, defPlayKey, enabled = true) {
-    if (!enabled) {
-        // Stop events from a fast-simulated play attaching to the
-        // previous live play's telemetry record.
-        window.__ACTIVE_PLAY_TELEMETRY__ = null;
+    if (!enabled || !isDebugMode() || typeof window === 'undefined') {
+        disableTelemetry();
         return;
     }
 
-    if (typeof window !== 'undefined') {
-        window.__CURRENT_TICK__ = playState?.tick ?? 0;
-    }
+    telemetryEnabled = true;
+    window.__CURRENT_TICK__ = playState?.tick ?? 0;
 
     const sequence = nextPlaySequence++;
 
@@ -107,6 +116,15 @@ export function initPlayTelemetry(context, playState, offPlayKey, defPlayKey, en
 }
 
 export function logPlayDebug(category, message, details = null, tick = null) {
+    if (!telemetryEnabled) return;
+
+    if (!isDebugMode()) {
+        disableTelemetry();
+        return;
+    }
+
+    if (typeof window === 'undefined') return;
+
     const current = window.__ACTIVE_PLAY_TELEMETRY__;
     if (!current) return;
 
@@ -133,6 +151,15 @@ export function logPlayDebug(category, message, details = null, tick = null) {
 }
 
 export function finalizePlayTelemetry(playResult, finalBallY, playState = null) {
+    if (!telemetryEnabled) return;
+
+    if (!isDebugMode()) {
+        disableTelemetry();
+        return;
+    }
+
+    if (typeof window === 'undefined') return;
+
     const current = window.__ACTIVE_PLAY_TELEMETRY__;
     if (!current) return;
 
@@ -162,7 +189,12 @@ export function finalizePlayTelemetry(playResult, finalBallY, playState = null) 
 }
 
 export function generatePlayDebugReport() {
-    if (playHistoryBuffer.length === 0) {
+    if (!isDebugMode()) {
+        disableTelemetry();
+        return "Debug Mode is disabled.";
+    }
+
+    if (!telemetryEnabled || playHistoryBuffer.length === 0) {
         return "No telemetry buffered yet.";
     }
 
@@ -266,6 +298,13 @@ export function generatePlayDebugReport() {
 }
 
 export function downloadPlayDebugFile(format = 'json') {
+    if (!isDebugMode()) {
+        disableTelemetry();
+        return;
+    }
+
+    if (!telemetryEnabled) return;
+
     const useJson = format.toLowerCase() === 'json';
 
     const content = useJson
