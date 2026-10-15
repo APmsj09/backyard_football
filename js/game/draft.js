@@ -3,7 +3,7 @@
 import { game, getPlayer, getRosterObjects, addMessage, playerMap } from './state.js';
 import { calculateOverall, estimateBestPosition } from './player.js';
 import { offenseFormations, defenseFormations } from '../data.js';
-import { addPlayerToTeam, ROSTER_LIMIT } from './season.js';
+import { addPlayerToTeam, getCurrentRosterLimit } from './season.js';
 
 export const DRAFT_ROUNDS_ROOKIE = 3;
 
@@ -141,12 +141,13 @@ export function setupDraft() {
     game.pickHistory = [];
 
     const mainTeams = game.teams.filter(t => t.leagueType === 'main');
+    const rosterLimit = getCurrentRosterLimit(game);
 
     if (game.year === 1) {
         const sortedTeams = [...mainTeams].sort(() => 0.5 - Math.random());
         game.draftClass = game.players.filter(p => !p.teamId && p.age >= 11 && p.personality?.entersDraft !== false);
 
-        mainTeams.forEach(t => t.draftNeeds = Math.max(0, ROSTER_LIMIT - (t.roster?.length || 0)));
+        mainTeams.forEach(t => t.draftNeeds = Math.max(0, rosterLimit - (t.roster?.length || 0)));
         const maxNeeds = Math.max(0, ...mainTeams.map(t => t.draftNeeds || 0));
 
         for (let i = 0; i < maxNeeds; i++) {
@@ -193,7 +194,7 @@ export function setupDraft() {
  * AI executes a pick using calculateDraftValue from the eligible draft pool.
  */
 export function simulateAIPick(team) {
-    if (!team || !game || team.roster.length >= ROSTER_LIMIT) return null;
+    if (!team || !game || (team.roster?.length || 0) >= getCurrentRosterLimit(game)) return null;
 
     let availableProspects = (game.draftClass || []).filter(p => !p.teamId);
     if (availableProspects.length === 0) {
