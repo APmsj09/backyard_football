@@ -295,7 +295,9 @@ export function calculateSafetyHelp(safetyState, defenseStates, offenseStates, b
             const separationDist = getDistance(corner, receiver);
             const isBallTargeted = isBallInAir && playState.ballState.targetPlayerId === receiver.id;
 
-            let pressureScore = 10 - separationDist;
+            // Greater separation means greater need for safety help.
+            // A targeted receiver receives additional urgency.
+            let pressureScore = separationDist;
             if (isBallTargeted) pressureScore += 5;
 
             if (pressureScore > maxPressure) {
