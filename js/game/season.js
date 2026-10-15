@@ -412,6 +412,11 @@ export function createPlayerTeam(teamName, options = {}) {
 */
 export function addPlayerToTeam(player, team) {
     if (!player || !team || !team.roster || typeof player.id === 'undefined') return false;
+
+    // A player who permanently walked away over a broken promise cannot
+    // return to that specific team through any recruiting pathway.
+    if (player.refusedTeamIds?.includes(team.id)) return false;
+
     const currentLimit = getCurrentRosterLimit(game);
     if (team.roster.length >= currentLimit) return false;
     if (team.roster.includes(player.id)) return false;
@@ -1132,7 +1137,11 @@ export function getTeamNetworkRecruits(team) {
 
     const rosterIds = new Set(team.roster);
     const unassignedPlayers = game.players.filter(p =>
-        p && !p.teamId && p.status?.type !== 'retired' && p.status?.type !== 'departed'
+        p &&
+        !p.teamId &&
+        p.status?.type !== 'retired' &&
+        p.status?.type !== 'departed' &&
+        !p.refusedTeamIds?.includes(team.id)
     );
 
     const connectedRecruits = [];
@@ -1586,10 +1595,13 @@ export function autoFillTeamWalkOns(team, targetSize = 14) {
     const limit = getCurrentRosterLimit(game);
     while (team.roster.length < targetSize && team.roster.length < limit) {
         const unassigned = game.players.filter(p =>
-            p && !p.teamId &&
+            p &&
+            !p.teamId &&
             p.status?.type !== 'retired' &&
             p.status?.type !== 'departed' &&
-            p.age >= 12 && p.age <= 18
+            p.age >= 12 &&
+            p.age <= 18 &&
+            !p.refusedTeamIds?.includes(team.id)
         );
         if (unassigned.length === 0) break;
 
@@ -2180,8 +2192,11 @@ export function advanceToOffseason() {
                     if (!pendingRetentionIds.has(p.id)) {
                         pendingRetentions.push({
                             player: p,
+                            playerId: p.id,
                             reason,
-                            snapsThisSeason: p.careerStats?.snapsThisSeason || 0
+                            snapsThisSeason: p.careerStats?.snapsThisSeason || 0,
+                            teamWins: relTeam.wins || 0,
+                            teamLosses: relTeam.losses || 0
                         });
 
                         pendingRetentionIds.add(p.id);
@@ -2395,7 +2410,9 @@ export function advanceToOffseason() {
         });
 
         let playerIsLeaving = false;
-
+        let permanentWalkout = false;
+        let finalDepartureReason = '';
+        
         // Everyone retires at age 19 (After their 18yo Senior season), even Free Agents
         if (player.age >= 19) {
             retiredPlayers.push(player);
@@ -2463,8 +2480,11 @@ export function advanceToOffseason() {
                 ) {
                     pendingRetentions.push({
                         player,
+                        playerId: player.id,
                         reason: leaveReason,
-                        snapsThisSeason
+                        snapsThisSeason,
+                        teamWins: team.wins || 0,
+                        teamLosses: team.losses || 0
                     });
 
                     pendingRetentionIds.add(player.id);
@@ -2495,15 +2515,43 @@ export function advanceToOffseason() {
             player.status = { type: 'healthy', description: '', duration: 0 };
         } else {
             if (team) {
-                if (!player.playerHistory) player.playerHistory = { teamsPlayedFor: [] };
-                player.playerHistory.teamsPlayedFor.push({ teamId: team.id, teamName: team.name, year: game.year });
+                if (!player.playerHistory) {
+                    player.playerHistory = { teamsPlayedFor: [] };
+                }
+
+                player.playerHistory.teamsPlayedFor.push({
+                    teamId: team.id,
+                    teamName: team.name,
+                    year: game.year - 1
+                });
             }
+
             player.teamId = null;
-            player.status = {
-                type: player.age >= 19 ? 'retired' : 'departed',
-                description: player.age >= 19 ? 'Graduated High School' : 'Left the league',
-                duration: 0
-            };
+
+            if (player.age >= 19) {
+                player.status = {
+                    type: 'retired',
+                    description: 'Graduated High School',
+                    duration: 0
+                };
+            } else if (permanentWalkout) {
+                // Permanent separation from this team, but still available
+                // to other teams in Free Agency.
+                player.status = {
+                    type: 'healthy',
+                    description: finalDepartureReason || 'Left after a broken promise',
+                    duration: 0
+                };
+
+                player.permanentWalkoutYear = game.year - 1;
+            } else {
+                player.status = {
+                    type: 'departed',
+                    description: 'Left the league',
+                    duration: 0
+                };
+            }
+
             totalVacancies++;
         }
     });
@@ -2549,7 +2597,12 @@ export function advanceToOffseason() {
 
     // 💡 FREE AGENT ATTRITION (Cull unassigned kids so the pool never bloats)
     game.players.forEach(p => {
-        if (!p.teamId && p.status?.type !== 'retired' && p.status?.type !== 'departed') {
+        if (
+            !p.teamId &&
+            p.status?.type !== 'retired' &&
+            p.status?.type !== 'departed' &&
+            p.permanentWalkoutYear !== game.year - 1
+        ) {
             let quitChance = 0.10;
             if (p.age >= 14 && p.age <= 16) quitChance = 0.25;
             if (p.age >= 17) quitChance = 0.40;
