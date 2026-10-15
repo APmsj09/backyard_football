@@ -901,11 +901,8 @@ export function processWeeklyPlayerGrowth() {
         roster.forEach(player => {
             if (!player || !player.attributes) return;
 
-            // In-season growth applies to players getting real snaps (especially young kids 12-15)
-            const snapsThisWeek = (player.gameStats?.passAttempts || 0) +
-                (player.gameStats?.rushAttempts || 0) +
-                (player.gameStats?.targets || 0) +
-                (player.gameStats?.tackles || 0);
+            // Use participation snaps because finalizeGameResults clears gameStats.
+            const snapsThisWeek = player.snapsThisWeek || 0;
 
             const isYoung = player.age <= 15;
             const growthChance = isYoung ? 0.12 : 0.05;
@@ -930,6 +927,11 @@ export function processWeeklyPlayerGrowth() {
                 }
             }
         });
+    });
+
+    // Reset weekly participation only after every team's growth is processed.
+    (game.players || []).forEach(player => {
+        if (player) player.snapsThisWeek = 0;
     });
 }
 
