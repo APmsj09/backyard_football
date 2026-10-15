@@ -4,6 +4,7 @@ import { pushGameLog } from './collisions.js';
 import { logPlayDebug } from './telemetry.js';
 import { getDecisionProfile } from './decision_model.js';
 import { getPerceptionContext, getPerceptionWeight } from './perception.js';
+import { isDebugMode } from './debug_mode.js';
 
 const FIELD_WIDTH = 53.3;
 const FIELD_LENGTH = 120;
@@ -719,10 +720,6 @@ export function getSmartCarrierTarget(runner, defenseStates, offenseStates, fiel
         runner._lockedLaneX = bestTargetX;
     }
 
-    runner._chosenLaneOffset = bestOffset; {
-        runner._lockedLaneX = bestTargetX;
-    }
-
     runner._chosenLaneOffset = bestOffset;
 
     // BACKFIELD PATIENCE (High-IQ Feature):
@@ -756,7 +753,7 @@ export function getSmartCarrierTarget(runner, defenseStates, offenseStates, fiel
             bestTargetY = immediateThreat.y + 1.5;
             runner.contactReduction = 0.9;
 
-            if (runner._lastLoggedAction !== 'trucking') {
+            if (debugEnabled && runner._lastLoggedAction !== 'trucking') {
                 logPlayDebug('CARRIER_DECISION', `${runner.name} lowers shoulder to TRUCK`, { threat: immediateThreat.name });
                 runner._lastLoggedAction = 'trucking';
             }
@@ -774,8 +771,10 @@ export function getSmartCarrierTarget(runner, defenseStates, offenseStates, fiel
                 runner._dodgeDir = dodgeDir;
                 runner._dodgeCooldown = 8;
 
-                logPlayDebug('CARRIER_DECISION', `${runner.name} EVADES ${dodgeDir === 1 ? 'right' : 'left'}`, { threat: immediateThreat.name });
-                runner._lastLoggedAction = 'dodge';
+                if (debugEnabled) {
+                    logPlayDebug('CARRIER_DECISION', `${runner.name} EVADES ${dodgeDir === 1 ? 'right' : 'left'}`, { threat: immediateThreat.name });
+                    runner._lastLoggedAction = 'dodge';
+                }
             } else {
                 runner._dodgeCooldown--;
             }
