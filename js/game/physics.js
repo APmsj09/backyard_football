@@ -322,12 +322,14 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
     // Steering response can change independently of the physical limits.
     let accelRate = maxAccelerationYPS2;
 
-    // Apply Stumble Penalty
-    // If the player recently broke a tackle or got bumped, their acceleration is crippled.
+    // Balance Recovery Penalty
+    // The player recently broke a tackle. The massive momentum loss is now handled
+    // accurately via velocity in collisions.js, so we only apply a mild 15% penalty 
+    // to simulate the runner regaining their footing/stride.
     if (pState.moveCooldown > 0) {
-        accelRate *= 0.15;
-        maxAccelerationYPS2 *= 0.15;
-        maxDecelerationYPS2 *= 0.15;
+        accelRate *= 0.85;
+        maxAccelerationYPS2 *= 0.85;
+        // We do not cap deceleration here; players can still plant and stop normally
     }
 
     // --- 8. DECELERATION (Braking / Planting) ---
