@@ -784,9 +784,9 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
         } else {
             // FIX 3: If no threat exists, advance with the play instead of freezing at pre-snap initialX!
             if (playType === 'run' || isPassCompleted) {
-                // Climb upfield to lead the ball carrier
+                // DEEPER FIX: Set the target far downfield so the blocker sprints instead of stutter-stepping
                 blocker.targetX = blocker.x;
-                blocker.targetY = Math.min(115, blocker.y + 1.5);
+                blocker.targetY = Math.min(115, blocker.y + 15.0); // 15 yards ahead
                 blocker.action = 'run_block';
                 setPointIntent(blocker, blocker.targetX, blocker.targetY, 0.4);
             } else {
@@ -1101,6 +1101,9 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                     }
                 } else {
                     // 3. Open-field running with lane locking
+                    if (pState.role === 'QB' && pState.action === 'qb_scramble') {
+                        pState.action = 'run_path'; // DEEPER FIX: Transition to pure runner once past the LOS
+                    }
                     const smartTarget = getSmartCarrierTarget(pState, defenseStates, offenseStates, FIELD_WIDTH, playState);
                     targetX = smartTarget.x;
                     targetY = smartTarget.y;
@@ -1124,10 +1127,20 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                 const iq = pState.playbookIQ || 50;
                 const flightTime = playState.tick - (playState.ballState.throwTick || 0);
                 const reactionDelay = isIntendedTarget ? 2 : Math.max(5, 20 - Math.floor(iq / 5));
+                const isDeepZoneDB = pState.role === 'DB' && pState.assignment?.includes('zone_deep');
 
-                if (flightTime > reactionDelay) {
+                // DEEPER FIX: Give deep safeties a brief window to execute elite zone/help baiting, 
+                // but eventually force them into generic ball tracking so they don't ignore passes entirely.
+                if (flightTime > reactionDelay && (!isDeepZoneDB || flightTime > reactionDelay + 8)) {
                     const distToLanding = Math.hypot(pState.x - playState.ballState.targetX, pState.y - playState.ballState.targetY);
-                    if (isIntendedTarget || distToLanding < 8.0) {
+                    if (isIntendedTarget || distToLanding < 8.0 || isDeepZoneDB) {
+                        setPointIntent(pState, playState.ballState.targetX, playState.ballState.targetY, 0.4);
+                        pState.action = 'tracking_ball';
+                        pState.contactReduction = 1.1 + ((pState.agility || 50) / 250);
+                        return;
+                    }
+                }
+            }
                         setPointIntent(pState, playState.ballState.targetX, playState.ballState.targetY, 0.4);
                         pState.action = 'tracking_ball';
                         pState.contactReduction = 1.1 + ((pState.agility || 50) / 250);
