@@ -853,15 +853,11 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                         : ballPos.y;
 
                     if (pState.id === primaryReturner?.id) {
-                        // Only the designated returner tracks the ball itself.
+                        // FIX: Returner tracks directly to the landing spot and settles directly under the ball
                         pState.targetX = landX;
                         pState.targetY = landY;
-                        pState.action = 'pursuit';
-
-                        if (getDistance(pState, { x: landX, y: landY }) < 2.0) {
-                            pState.vx = 0;
-                            pState.vy = 0;
-                        }
+                        pState.action = 'tracking_ball'; // Enables catch radius boost in collisions.js
+                        setPointIntent(pState, landX, landY, 0.25); // Smoothly glides to the exact spot without freezing 2 yards away
                     } else {
                         // Establish a staggered wall instead of crowding the catch.
                         const xOffset =
