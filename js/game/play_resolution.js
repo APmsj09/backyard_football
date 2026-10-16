@@ -1532,7 +1532,7 @@ export function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey
         playResult.outcome = 'complete';
         playResult.score = 'TD';
         playResult.defensiveTD = playState.defensiveTD || false;
-    }} else if (playState.safety) {
+    } else if (playState.safety) {
         playResult.safety = true;
         playResult.score = 'SAFETY';
     } else if (playState.sack) {
