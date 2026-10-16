@@ -1281,13 +1281,23 @@ export function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey
                 const isBallOutOfBounds = ball.x <= 0 || ball.x >= FIELD_WIDTH || ball.y <= 0 || ball.y >= FIELD_LENGTH;
                 if (isBallOutOfBounds && (ball.isLoose || (playState.type === 'punt' && !ballCarrierState))) {
                     playState.playIsLive = false;
+
                     const wentOutSideline = ball.x <= 0 || ball.x >= FIELD_WIDTH;
+
                     if (wentOutSideline) {
                         playState.finalBallY = ball.y;
                     } else {
-                        if (ball.y >= 110) {
-                            playState.finalBallY = 110;
+                        if (ball.y >= FIELD_LENGTH) {
+                            if (playState.type === 'punt') {
+                                // Match the existing punt-catch touchback spot:
+                                // 110 - 90 = receiving team's 20-yard line.
+                                playState.finalBallY = 90;
+                            } else {
+                                playState.finalBallY = 110;
+                            }
+
                             playState.touchback = true;
+
                             if (ball.isLoose && !playState.possessionChanged && playState.type !== 'punt') {
                                 playState.possessionChanged = true;
                                 playState.turnover = true;
@@ -1297,6 +1307,16 @@ export function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey
                             playState.finalBallY = 0;
                         }
                     }
+
+                    // The play is dead. Keep the final physical ball state
+                    // consistent with the terminal result and telemetry.
+                    ball.z = 0;
+                    ball.vx = 0;
+                    ball.vy = 0;
+                    ball.vz = 0;
+                    ball.inAir = false;
+                    ball.isLoose = false;
+
                     break;
                 }
             }
@@ -1504,6 +1524,8 @@ export function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey
     } else if (playState.safety) {
         playResult.safety = true;
         playResult.score = 'SAFETY';
+    } else if (playState.sack) {
+        playResult.outcome = 'sack';
     } else if (!playState.playIsLive) {
         // Ordinary tackle or another normal dead-ball event.
         playResult.outcome = 'complete';
