@@ -20,6 +20,42 @@ const FIELD_WIDTH = 53.3;
 const FIELD_LENGTH = 120;
 const CENTER_X = FIELD_WIDTH / 2;
 
+function getPursuitTargetY(pState, carrier, predictedY) {
+    if (
+        !pState ||
+        !carrier ||
+        !Number.isFinite(pState.y) ||
+        !Number.isFinite(carrier.y) ||
+        !Number.isFinite(predictedY)
+    ) {
+        return predictedY;
+    }
+
+    // Once the defender is no longer ahead, resume normal pursuit.
+    if (pState.y <= carrier.y + 1.0) {
+        delete pState._pursuitCutoffY;
+        delete pState._pursuitCutoffCarrierId;
+        return predictedY;
+    }
+
+    const hasMatchingCutoff =
+        Number.isFinite(pState._pursuitCutoffY) &&
+        pState._pursuitCutoffCarrierId === carrier.id;
+
+    // Preserve a downfield cutoff instead of repeatedly targeting
+    // the carrier's current location behind the defender.
+    if (
+        !hasMatchingCutoff ||
+        pState.y > pState._pursuitCutoffY + 1.0 ||
+        carrier.y >= pState._pursuitCutoffY - 1.0
+    ) {
+        pState._pursuitCutoffY = pState.y + 1.0;
+        pState._pursuitCutoffCarrierId = carrier.id;
+    }
+
+    return pState._pursuitCutoffY;
+}
+
 function validateFormationCoordinate(x, y) {
     const minX = 0;
     const maxX = FIELD_WIDTH;
@@ -1571,15 +1607,15 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                 let predX = ballCarrierState.x + ((ballCarrierState.vx || 0) * leadTime);
                 let predY = ballCarrierState.y + Math.max(1.5, (ballCarrierState.vy || 0) * leadTime);
 
-                // FIX: If defender is downfield of the carrier, do NOT let them bite backwards behind the runner.
-                // Maintain a cutoff cushion ahead of the ball carrier.
-                if (pState.y > ballCarrierState.y + 1.0) {
-                    predY = Math.max(ballCarrierState.y + 2.5, Math.min(pState.y - 1.0, predY));
-                }
+                const pursuitTargetY = getPursuitTargetY(
+                    pState,
+                    ballCarrierState,
+                    predY
+                );
 
                 pState.targetX = predX;
-                pState.targetY = predY;
-                setPointIntent(pState, predX, predY, 0.5);
+                pState.targetY = pursuitTargetY;
+                setPointIntent(pState, predX, pursuitTargetY, 0.5);
                 pState.action = 'pursuit';
                 return;
             }
@@ -1820,7 +1856,13 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                         predX += leverageDir;
                     }
 
-                    setPointIntent(pState, predX, predY, 0.5);
+                    const pursuitTargetY = getPursuitTargetY(
+                        pState,
+                        chaseTarget,
+                        predY
+                    );
+
+                    setPointIntent(pState, predX, pursuitTargetY, 0.5);
 
                     pState.contactReduction = 0.7 + (diagConfidence * 0.3);
                     pState.action = 'pursuit';
