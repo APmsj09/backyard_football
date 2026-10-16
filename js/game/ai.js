@@ -1185,14 +1185,30 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
         const down = playState.down ?? 1;
         const targetDepth = depth;
         const distanceBeyondLOS = targetDepth;
-        const isDesignedScreen = String(playState?.playKey || '')
-            .toLowerCase()
-            .includes('screen');
+        const playKey = String(playState?.playKey || '').toLowerCase();
+        const routeAssignment = String(pState?.assignment || '').toLowerCase();
 
-        // An ordinary throw behind the LOS must recover those yards
-        // before it can produce positive field position.
-        if (distanceBeyondLOS < 0 && !isDesignedScreen) {
-            score -= Math.min(28, Math.abs(distanceBeyondLOS) * 5);
+        const isDesignedBehindLOSRoute =
+            playKey.includes('screen') ||
+            routeAssignment === 'flat' ||
+            routeAssignment === 'bubble' ||
+            routeAssignment === 'screen' ||
+            routeAssignment === 'slip_screen' ||
+            routeAssignment === 'screen_wait' ||
+            routeAssignment === 'wr_screen_catch' ||
+            routeAssignment === 'tunnel_screen_catch';
+
+        // Penalize negative-depth throws, but preserve the value of
+        // designed screens, bubbles, and shallow checkdown routes.
+        if (distanceBeyondLOS < 0) {
+            const behindLOSYards = Math.abs(distanceBeyondLOS);
+            const penaltyPerYard = isDesignedBehindLOSRoute ? 2 : 5;
+            const maxPenalty = isDesignedBehindLOSRoute ? 10 : 28;
+
+            score -= Math.min(
+                maxPenalty,
+                behindLOSYards * penaltyPerYard
+            );
         }
 
         const targetAtOrBeyondFirstDown = distanceBeyondLOS >= yardsToGo;
