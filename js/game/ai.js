@@ -5,6 +5,7 @@ import { logPlayDebug } from './telemetry.js';
 import { getDecisionProfile } from './decision_model.js';
 import { getPerceptionContext, getPerceptionWeight } from './perception.js';
 import { isDebugMode } from './debug_mode.js';
+import { getPlayerBaseSpeedYPS } from './movement_profile.js';
 
 const FIELD_WIDTH = 53.3;
 const FIELD_LENGTH = 120;
@@ -1710,12 +1711,7 @@ export function executeThrow(qbState, target, strength, accuracy, playState, gam
                            (target.action === 'route_complete' && Math.hypot(target.vx || 0, target.vy || 0) > 0.8);
 
     if (isMovingTarget) {
-        const targetWgt = target.weight || target.wgt || 200;
-        const targetSpd = target.speed || target.spd || 50;
-
-        const weightSpeedPenalty = Math.max(0.80, 1.0 - ((targetWgt - 200) / 1000));
-        // Aligned strictly with physics engine top speed formula (no artificial sprint boost inflation)
-        const recYPS = (7.0 + (targetSpd / 100) * 4.0) * (target.fatigueModifier || 1.0) * weightSpeedPenalty;
+        const recYPS = getPlayerBaseSpeedYPS(target) * (target.fatigueModifier || 1.0);
 
         // Corrected Flight Time: Account for downfield receiver velocity relative to ball speed
         const recVy = target.vy || 0;
