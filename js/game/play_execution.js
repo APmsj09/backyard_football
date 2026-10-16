@@ -31,29 +31,19 @@ function getPursuitTargetY(pState, carrier, predictedY) {
         return predictedY;
     }
 
-    // Once the defender is no longer ahead, resume normal pursuit.
-    if (pState.y <= carrier.y + 1.0) {
-        delete pState._pursuitCutoffY;
-        delete pState._pursuitCutoffCarrierId;
+    const separation = pState.y - carrier.y;
+
+    // If the defender is no longer meaningfully ahead, resume
+    // direct pursuit of the carrier's predicted position.
+    if (separation <= 1.0) {
         return predictedY;
     }
 
-    const hasMatchingCutoff =
-        Number.isFinite(pState._pursuitCutoffY) &&
-        pState._pursuitCutoffCarrierId === carrier.id;
-
-    // Preserve a downfield cutoff instead of repeatedly targeting
-    // the carrier's current location behind the defender.
-    if (
-        !hasMatchingCutoff ||
-        pState.y > pState._pursuitCutoffY + 1.0 ||
-        carrier.y >= pState._pursuitCutoffY - 1.0
-    ) {
-        pState._pursuitCutoffY = pState.y + 1.0;
-        pState._pursuitCutoffCarrierId = carrier.id;
-    }
-
-    return pState._pursuitCutoffY;
+    // A downfield defender should maintain their depth or move
+    // farther downfield, not turn around to chase the runner's
+    // current position. They can adjust horizontally to close
+    // the lane while the runner approaches.
+    return Math.max(pState.y, predictedY);
 }
 
 function validateFormationCoordinate(x, y) {
