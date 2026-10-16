@@ -176,8 +176,27 @@ export function checkTackleCollisions(playState, gameLog) {
 
         if (!Number.isFinite(dist) || dist > TACKLE_RANGE) return false;
 
+        // DEEPER FIX: Process engaged defenders BEFORE running environmental raycasts!
+        // If a defender is locked in a block, they are not pathfinding. We only check
+        // if they can reach out for a weak arm tackle.
+        if (p.isBlocked || p.isEngaged) {
+            const blocker = p.blockedBy || p.engagedWith;
+            if (blocker && typeof blocker === 'object') {
+                const distToBlocker = getDistance(p, blocker);
+                if (dist > distToBlocker) {
+                    const dxC = carrier.x - p.x;
+                    const dyC = carrier.y - p.y;
+                    const dxB = blocker.x - p.x;
+                    const dyB = blocker.y - p.y;
+                    const dot = (dxC * dxB + dyC * dyB) / (dist * distToBlocker);
+                    if (dot > 0.4) return false;
+                }
+            }
+            return dist < 0.8;
+        }
+
         // Reject a tackle attempt when another player's body obstructs
-        // the direct path between the defender and the ball carrier.
+        // the direct path between the FREE defender and the ball carrier.
         const dxToCarrier = carrier.x - p.x;
         const dyToCarrier = carrier.y - p.y;
         const segmentLengthSq =
@@ -231,24 +250,6 @@ export function checkTackleCollisions(playState, gameLog) {
             return false;
         }
 
-        // Keep the existing blocked/engaged defender check unchanged.
-        if (p.isBlocked || p.isEngaged) {
-            const blocker = p.blockedBy || p.engagedWith;
-            if (blocker && typeof blocker === 'object') {
-                const distToBlocker = getDistance(p, blocker);
-                if (dist > distToBlocker) {
-                    const dxC = carrier.x - p.x;
-                    const dyC = carrier.y - p.y;
-                    const dxB = blocker.x - p.x;
-                    const dyB = blocker.y - p.y;
-                    const dot = (dxC * dxB + dyC * dyB) / (dist * distToBlocker);
-                    if (dot > 0.4) return false;
-                }
-            }
-            // A defender still engaged with a blocker can only reach out
-            // for a weak arm tackle at very close range.
-            return dist < 0.8;
-        }
         return true;
     });
 
@@ -569,9 +570,14 @@ export function resolveOngoingBlocks(playState, gameLog, offenseStates = [], def
             if (distToCarrier < 1.5) {
                 const reactionScore = (defender.playbookIQ || 50) + (defender.blockShedding || 50);
                 if (reactionScore + getRandomInt(0, 50) > 100) {
-                    battle.status = 'win_B';
-                    defender.action = 'pursuit';
+                    // DEEPER FIX: If defender sheds to make an immediate tackle, instantly sever the engagement
+                    blocker.engagedWith = null; blocker.isEngaged = false;
                     blocker.stunnedTicks = 10;
+                    defender.isBlocked = false; defender.blockedBy = null; defender.isEngaged = false;
+                    defender.action = 'pursuit';
+                    battle.status = 'disengaged';
+                    battlesToRemove.push(index);
+                    return;
                 }
             }
         }
@@ -593,10 +599,8 @@ export function resolveOngoingBlocks(playState, gameLog, offenseStates = [], def
             );
 
         if (isPassBlock && ticksInBlock < 20) {
-            // Modest initial anchor advantage; defenders can still win the rep.
             blockPower *= 1.08;
         } else if (isRunBlock && ticksInBlock < 12) {
-            // Short, modest run-block surge instead of prolonged offensive dominance.
             blockPower *= 1.10;
         }
 
@@ -605,7 +609,6 @@ export function resolveOngoingBlocks(playState, gameLog, offenseStates = [], def
             blockPower *= Math.max(0.5, fatiguePenalty);
         }
 
-        // Bull rush / pass-rush moves should ONLY trigger against pass protection, never against run blocks
         const isPassRush = (defender.assignment?.includes('rush') || defender.assignment?.includes('blitz')) && isPassBlock && playState.type !== 'run';
 
         if (isPassRush && defender.isBlocked && blocker) {
@@ -628,16 +631,18 @@ export function resolveOngoingBlocks(playState, gameLog, offenseStates = [], def
                         defender.x += dirX * 0.6;
                         defender.y += dirY * 0.6;
                         blocker.stunnedTicks = 10;
-                        battle.battleScore -= 4.0;
                         defender.moveCooldown = 20;
+                        battle.status = 'win_B'; // Force win to break engagement
+                        battle._bypassedDurationCheck = true; // Bypass premature shed check
                     } else if (escapeScore > 130 && Math.random() < 0.003) {
                         const bx = blocker.x - defender.x;
                         const by = blocker.y - defender.y;
                         defender.x += -by * 0.15;
                         defender.y += bx * 0.15;
                         blocker.stunnedTicks = 5;
-                        battle.battleScore -= 4.0;
                         defender.moveCooldown = 20;
+                        battle.status = 'win_B';
+                        battle._bypassedDurationCheck = true;
                     }
                 }
             }
@@ -654,7 +659,6 @@ export function resolveOngoingBlocks(playState, gameLog, offenseStates = [], def
                 let dx = defender.x - blocker.x;
                 let dy = defender.y - blocker.y;
 
-                // 2. Bulldozer Bull Rush: Massive DL pushes blocker straight back toward the QB
                 if (isPassRush && defStr > blkStr + 20) {
                     const qb = offenseStates?.find(p => p.slot?.startsWith('QB'));
                     if (qb) {
@@ -670,34 +674,27 @@ export function resolveOngoingBlocks(playState, gameLog, offenseStates = [], def
                 }
 
                 const dist = Math.max(0.1, Math.sqrt(dx * dx + dy * dy));
-
-                // Cap displacement to realistic per-tick steps
                 const pushMagnitude = Math.min(0.09, Math.abs(pushAmount) * 0.16);
                 const uX = dx / dist;
                 const uY = dy / dist;
 
                 if (pushAmount > 0) {
                     if (isRunBlock && Number.isFinite(blocker.blockLaneX)) {
-                        // Winning run blocks widen the intended lane by sealing
-                        // defenders laterally away from it.
                         const outsideDirection =
                             defender.x < blocker.blockLaneX ? -1 : 1;
 
                         defender.x += outsideDirection * pushMagnitude * 1.25;
                         defender.y += pushMagnitude * 0.45;
 
-                        // The blocker follows slightly instead of abandoning contact.
                         blocker.x += outsideDirection * pushMagnitude * 0.25;
                         blocker.y += pushMagnitude * 0.15;
                     } else {
-                        // Keep existing pass-block and non-lane-block behavior.
                         defender.x += uX * pushMagnitude;
                         defender.y += uY * pushMagnitude;
                         blocker.x += uX * pushMagnitude * 0.8;
                         blocker.y += uY * pushMagnitude * 0.8;
                     }
                 } else if (pushAmount < 0) {
-                    // Defender wins: drive the blocker into the backfield.
                     blocker.x -= uX * pushMagnitude;
                     blocker.y -= uY * pushMagnitude;
                     defender.x -= uX * pushMagnitude * 0.8;
@@ -708,7 +705,7 @@ export function resolveOngoingBlocks(playState, gameLog, offenseStates = [], def
 
         if (battle.status === 'win_B') {
             const dur = playState.tick - battle.startTick;
-            if (dur < 15 && (defender.blockShedding || 0) < 90) {
+            if (!battle._bypassedDurationCheck && dur < 15 && (defender.blockShedding || 0) < 90) {
                 battle.status = 'ongoing';
                 return;
             }
