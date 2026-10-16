@@ -274,6 +274,13 @@ export function diagnosePlay(pState, tick, offenseStates, playState = null) {
 export function calculateSafetyHelp(safetyState, defenseStates, offenseStates, ballCarrierState, playState, isBallInAir) {
     if (!safetyState || safetyState.role !== 'DB') return null;
 
+    // FIX: Abort safety help if the ball has been completed or is in a live runner's hands
+    const passCompleted = playState.statEvents?.some(e => e.type === 'completion');
+    const runnerHasBall = ballCarrierState && (ballCarrierState.hasBall || ballCarrierState.isBallCarrier) && ballCarrierState.role !== 'QB';
+    if (passCompleted || runnerHasBall || (!isBallInAir && playState.ballState?.throwTick)) {
+        return null;
+    }
+
     const LOS = playState.lineOfScrimmage;
     const defensiveCall = playState.defensiveCall || {};
     const defPlayKey = playState.defensivePlayKey || '';
