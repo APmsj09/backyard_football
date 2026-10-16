@@ -79,6 +79,8 @@ export function diagnosePlay(pState, tick, offenseStates, playState = null) {
     if (observedRunCarrier || qbScramble) {
         pState._diagnosedGuess = 'run';
         pState._diagnosedConfidence = 1.0;
+        pState._sawLiveRunnerTick = tick; // FIX: Remember that we saw a live runner
+
         if (debugEnabled && pState._lastLoggedGuess !== 'run') {
             logPlayDebug('DEF_READ', `${pState.name} (${pState.role}) committed to [RUN] (${observedRunCarrier ? 'Observed ball carrier' : 'QB scramble'})`, {
                 confidence: 1.0, direction: pState._diagnosedDirection || 'center', dirConfidence: 1.0
@@ -86,6 +88,12 @@ export function diagnosePlay(pState, tick, offenseStates, playState = null) {
             pState._lastLoggedGuess = 'run';
         }
         return { guess: 'run', confidence: 1.0, direction: pState._diagnosedDirection || 'center', dirConfidence: 1.0 };
+    }
+
+    // FIX: Once a defender confirms a live runner, do not let them flip back to [PASS] for at least 15 ticks (0.6s)
+    // even if the runner briefly leaves their narrow forward gaze cone while turning.
+    if (pState._diagnosedGuess === 'run' && pState._sawLiveRunnerTick && (tick - pState._sawLiveRunnerTick < 15)) {
+        return { guess: 'run', confidence: pState._diagnosedConfidence || 1.0, direction: pState._diagnosedDirection || 'center', dirConfidence: 1.0 };
     }
 
     /*// A defender who already committed to 'pass' on a pass play NEVER reverts to 'run'
@@ -206,7 +214,10 @@ export function diagnosePlay(pState, tick, offenseStates, playState = null) {
             guess = finalRunScore >= finalPassScore ? 'run' : 'pass';
         }
     } else if (currentGuess === 'run') {
-        if (finalPassScore > finalRunScore + 20) {
+        // FIX: If the defender saw a confirmed live ball carrier, offensive line step cues cannot revert them to PASS
+        if (pState._sawLiveRunnerTick && (tick - pState._sawLiveRunnerTick < 40)) {
+            guess = 'run';
+        } else if (finalPassScore > finalRunScore + 20) {
             guess = 'pass';
         }
     } else if (currentGuess === 'pass') {
