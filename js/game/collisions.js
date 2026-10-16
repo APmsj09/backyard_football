@@ -422,9 +422,10 @@ export function checkTackleCollisions(playState, gameLog) {
 
         } else {
             carrier.tacklesBrokenThisPlay = brokenCount + 1;
-            defender.stunnedTicks = 40;
+            // FIX: 40 ticks (1.6s) is far too long; 20 ticks (~0.8s) allows a realistic recovery attempt
+            defender.stunnedTicks = 20;
 
-            const speedDrain = Math.max(0.40, (defender.wgt / carrier.wgt) * 0.40);
+            const speedDrain = Math.max(0.25, (defender.wgt / carrier.wgt) * 0.30);
             carrier.vx *= (1 - speedDrain);
             carrier.vy *= (1 - speedDrain);
             carrier.moveCooldown = 15;
@@ -691,23 +692,38 @@ export function resolveOngoingBlocks(playState, gameLog, offenseStates = [], def
             battlesToRemove.push(index);
             } else if (battle.status === 'win_A') {
                 const dur = playState.tick - battle.startTick;
+                const blkStr = blocker.strength || blocker.str || 50;
+                const defStr = defender.strength || defender.str || 50;
 
-                logPlayDebug('PANCAKE_BLOCK', `${blocker.name} flattened ${defender.name}`, {
-                    engagementDurationTicks: dur,
-                    stunTicks: 10
-                });
+                // FIX: Only pancake if blocker has a major strength edge, and cap to once per play
+                const hasPancakeStrength = blkStr >= defStr + 15;
+                const isPancake = (hasPancakeStrength || Math.random() < 0.20) && !defender._pancakedThisPlay;
 
-                defender.stunnedTicks = 10;
-                defender.action = 'pursuit';
+                if (isPancake) {
+                    logPlayDebug('PANCAKE_BLOCK', `${blocker.name} flattened ${defender.name}`, {
+                        engagementDurationTicks: dur,
+                        stunTicks: 16
+                    });
 
-                blocker.engagedWith = null;
-                blocker.isEngaged = false;
+                    defender.stunnedTicks = 16;
+                    defender._pancakedThisPlay = true;
+                    defender.action = 'pursuit';
 
-                defender.isBlocked = false;
-                defender.blockedBy = null;
-                defender.isEngaged = false;
+                    blocker.engagedWith = null;
+                    blocker.isEngaged = false;
 
-                battlesToRemove.push(index);
+                    defender.isBlocked = false;
+                    defender.blockedBy = null;
+                    defender.isEngaged = false;
+
+                    battlesToRemove.push(index);
+                } else {
+                    // FIX: Blocker sustains the block and stones the rusher instead of disengaging
+                    battle.status = 'ongoing';
+                    battle.battleScore = 8.0; // Reset buffer so it doesn't repeatedly trigger every tick
+                    defender.vx *= 0.2;
+                    defender.vy *= 0.2;
+                }
             }
    });
 
