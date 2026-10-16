@@ -1418,19 +1418,33 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
     const MIN_DROPBACK_TICKS = 28;
     const canThrowStandard = (playState.tick >= MIN_DROPBACK_TICKS || isHotReadSituation) && (qbState.hasCompletedDropback || isPressured);
 
-    let maxDecisionTimeTicks = 110 + (qbIQ / 3) + (qbAgility / 3);
+    // NATURAL POCKET CLOCK:
+    // Respects QB Awareness (internal rhythm), Decision Making, and Personality (Risk Tolerance).
+    const clockAwareness = (qbProfile?.awareness ?? qbIQ) / 100; // 0.2 to 1.0
+    const disciplineFactor = (qbProfile?.assignmentDiscipline ?? 50) / 100;
+    const riskFactor = qbProfile?.riskTolerance ?? 1.0;
+
+    // Experienced/aware QBs sense pocket expiration earlier; gunslingers hold longer seeking hero plays
+    let maxDecisionTimeTicks = Math.round((85 + (qbAgility / 3) - (clockAwareness * 15)) * riskFactor);
     if (qbState.loggedRollout) maxDecisionTimeTicks += 35;
 
     let decisionMade = false;
     let reason = "";
 
-    if (imminentSackDefender) { decisionMade = true; reason = "Imminent Sack"; }
-    else if (playState.tick >= maxDecisionTimeTicks) { decisionMade = true; reason = "Time Expired"; }
-    else if (isPressured && playState.tick >= 90 && Math.random() < Math.max(0.01, 0.2 - qbIQ / 200)) {
-        decisionMade = true;
-        reason = "Pressure Panic";
+    if (imminentSackDefender) { 
+        decisionMade = true; 
+        reason = "Imminent Sack"; 
+    } else if (playState.tick >= maxDecisionTimeTicks) { 
+        decisionMade = true; 
+        reason = "Time Expired"; 
+    } else if (isPressured && playState.tick >= 75) {
+        // Poised QBs stay calm; flustered/low-decision QBs panic under sustained pressure
+        const panicOdds = Math.max(0.02, (1.1 - (qbDecision / 100)) * 0.15);
+        if (Math.random() < panicOdds) {
+            decisionMade = true;
+            reason = "Pressure Panic";
+        }
     }
-
     let targetPlayerState = null;
     let actionTaken = "None";
     let readDebugLog = [];
@@ -1545,9 +1559,22 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
             }
         }
 
+        // NATURAL SCRAMBLE EVALUATION:
+        // Driven by athleticism (Agility/Speed), personality (Risk Tolerance/Ego), and progression state.
         const openLane = !defenseStates.some(d => !d.isBlocked && !d.isEngaged && Math.abs(d.x - qbState.x) < 3.5 && d.y < qbState.y + 1);
-        if (!decisionMade && openLane && (isPressured || playState.tick > 80)) {
-            const scrambleChance = (playState.tick > 100) ? 0.3 : ((qbAgility / 100) * 0.05);
+        const allReadsExhausted = numReadsVisible >= progression.length && (!bestTargetEval || bestTargetEval.score < THROW_THRESHOLD);
+
+        // A mobile QB doesn't wait for arbitrary Tick 80 if all receivers are blanketed or pressure is closing
+        if (!decisionMade && openLane && (isPressured || allReadsExhausted || playState.tick > 70)) {
+            const qbSpeed = qbAttrs.physical?.speed || 50;
+            const mobilityDesire = ((qbAgility * 0.5) + (qbSpeed * 0.5)) / 100; // 0.2 to 0.95
+            const personalityUrgency = qbProfile?.riskTolerance ?? 1.0;
+
+            // Mobile QBs tuck and run when passing options fail; pocket statues remain patient
+            let scrambleChance = mobilityDesire * 0.18 * personalityUrgency;
+            if (allReadsExhausted) scrambleChance *= 2.0;
+            if (isPressured) scrambleChance *= 1.5;
+
             if (Math.random() < scrambleChance) {
                 qbState.action = 'run_path';
                 qbState.isBallCarrier = true;
@@ -1587,25 +1614,39 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
             gameLog.push(`[Tick ${playState.tick}] 🧠 QB Reads: [${readDebugLog.join(', ')}] -> Result: NO OPEN TARGETS`);
         }
 
-        if (reason === "Imminent Sack") {
-            const chanceToEatSack = (110 - qbIQ) / 100;
-            if (Math.random() < chanceToEatSack) return;
+        // EMERGENT QB RESOLUTION:
+        // The QB's skills and personality determine whether they throw away, force a throw, scramble, or take a sack.
+        const decisionQuality = qbProfile?.decisionQuality ?? qbDecision;
+        const riskTolerance = qbProfile?.riskTolerance ?? 1.0;
 
-            const panicTarget = offenseStates
-                .filter(o => o.slot !== 'QB1' && !o.slot.startsWith('OL'))
-                .map(o => getTargetValue(o.slot))
-                .filter(v => v && v.score > 20)
-                .sort((a, b) => b.score - a.score)[0];
+        // 1. High-IQ / High-Discipline QBs throw it away to live for the next down
+        const throwAwaySkill = (decisionQuality * 0.7) + (qbIQ * 0.3);
+        const willThrowAway = (throwAwaySkill > 55) && (Math.random() < (throwAwaySkill / 100) / riskTolerance);
 
-            if (panicTarget) {
-                targetPlayerState = panicTarget.info.state;
-                actionTaken = "Panic Throw";
-                decisionMade = true;
+        // 2. High-Risk / High-Ego QBs try to force a contested pass into coverage instead of throwing it away
+        const bestAvailableOption = progression
+            .map(s => getTargetValue(s))
+            .filter(v => v !== null)
+            .sort((a, b) => b.score - a.score)[0];
+
+        if (bestAvailableOption && riskTolerance > 1.04 && Math.random() < 0.40) {
+            targetPlayerState = bestAvailableOption.info.state;
+            actionTaken = "Forced Throw";
+            decisionMade = true;
+        } else if (willThrowAway) {
+            actionTaken = "Throw Away";
+        } else if (qbAgility > 65 && Math.random() < 0.50) {
+            // Athletic QBs try a last-ditch scramble out of the pocket
+            qbState.action = 'qb_scramble';
+            qbState.isBallCarrier = true;
+            return;
+        } else {
+            // Low-IQ, indecisive, or trapped QBs hesitate and take the sack
+            if (reason === "Imminent Sack" || isPressured) {
+                return; // Takes the sack naturally
             } else {
                 actionTaken = "Throw Away";
             }
-        } else {
-            actionTaken = "Throw Away";
         }
     }
 
