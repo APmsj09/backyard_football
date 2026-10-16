@@ -427,8 +427,49 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
 
     clampToField(pState);
 
-    // Detect sustained failure to approach a movement target.
-    // This runs only during plays that have active telemetry.
+    // Gameplay route recovery is independent of telemetry and Debug Mode.
+    // This counter exists to advance a route waypoint when physical
+    // obstruction prevents progress; it is not diagnostic event data.
+    const routeRemainingDistance = Math.hypot(
+        targetX - pState.x,
+        targetY - pState.y
+    );
+
+    const routeProgressTowardTarget =
+        distToTarget - routeRemainingDistance;
+
+    const previousRouteStallTarget = pState._routeStallTarget;
+
+    const routeStallTargetChanged =
+        !previousRouteStallTarget ||
+        Math.hypot(
+            targetX - previousRouteStallTarget.x,
+            targetY - previousRouteStallTarget.y
+        ) > 0.5;
+
+    if (routeStallTargetChanged) {
+        pState._routeWaypointStallTicks = 0;
+    }
+
+    pState._routeStallTarget = {
+        x: targetX,
+        y: targetY
+    };
+
+    const isStalledRouteWaypoint =
+        pState.action === 'run_route' &&
+        distToTarget > 2.0 &&
+        routeProgressTowardTarget < 0.03 &&
+        !pState._intent?.settled;
+
+    if (isStalledRouteWaypoint) {
+        pState._routeWaypointStallTicks =
+            (pState._routeWaypointStallTicks || 0) + 1;
+    } else {
+        pState._routeWaypointStallTicks = 0;
+    }
+
+    // Diagnostic stall tracking stays opt-in.
     if (telemetryActive) {
         const remainingDistance = Math.hypot(
             targetX - pState.x,
