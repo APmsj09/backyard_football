@@ -377,6 +377,8 @@ export function setupInitialPlayerStates(playState, offense, defense, play, assi
                 number: player.number,
                 role: slot.replace(/\d+/g, ''),
                 teamId: team.id,
+                age: player.age ?? 12,
+                explosiveness: player.attributes?.physical?.explosiveness ?? 50,
                 snapReactionTimer: reactionTicks,
                 primaryColor: team.primaryColor,
                 secondaryColor: team.secondaryColor,
