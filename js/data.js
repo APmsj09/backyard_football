@@ -502,7 +502,8 @@ export const offensivePlaybook = {
     // ===================================
     'Uni_FourVerts': {
         type: 'pass', tags: ['pass', 'deep', 'vertical'],
-        readProgression: ['X', 'RB', 'Z', 'H', 'Y'],
+        // DEEPER FIX: Check all 4 vertical routes before dumping off to the RB checkdown
+        readProgression: ['X', 'Z', 'H', 'Y', 'RB'],
         assignments: {
             'QB': 'qb_setup', 'X': 'Fly', 'Z': 'Fly', 'H': 'Seam',
             'Y': 'Seam', 'RB': 'CheckRelease', 'OL': 'pass_block'
@@ -510,10 +511,16 @@ export const offensivePlaybook = {
     },
     'Uni_Drive': {
         type: 'pass', tags: ['pass', 'medium', 'cross'],
-        readProgression: ['H', 'Y', 'Z'],
+        // DEEPER FIX: Order reads so Balanced formation (which lacks 'H') reads the Drag route properly
+        readProgression: ['Y', 'X', 'Z', 'RB'],
         assignments: {
-            'QB': 'qb_setup', 'H': 'Drag', 'Y': 'Dig', 'X': 'Fly',
-            'Z': 'Comeback', 'RB': 'Flat', 'OL': 'pass_block'
+            'QB': 'qb_setup', 
+            'Y': 'Drag',      // TE or Slot runs the shallow drag across the formation
+            'X': 'Dig',       // Primary WR runs the 10-yard dig behind the drag
+            'Z': 'Comeback',  // Flanker runs the clear-out/comeback
+            'H': 'Drag',      // Slot runs the drag in 4-WR formations
+            'RB': 'Flat', 
+            'OL': 'pass_block'
         }
     },
 
@@ -686,8 +693,11 @@ export const offensivePlaybook = {
     'Punt_Punt': {
         type: 'punt', tags: ['specialTeams'],
         readProgression: [],
+        // DEEPER FIX: Gunners sprint in pursuit downfield, personal protectors pass block
         assignments: {
-            'QB1': 'punt', 'WR1': 'Fly', 'WR2': 'Fly',
+            'QB1': 'punt', 
+            'WR1': 'run_path', 
+            'WR2': 'run_path',
             'OL1': 'pass_block', 'OL2': 'pass_block', 'OL3': 'pass_block',
             'RB1': 'pass_block', 'TE1': 'pass_block'
         }
