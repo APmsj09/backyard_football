@@ -1397,9 +1397,13 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                     const passedNodeY = (pState.vy > 0 && pState.y >= pt.y) || (pState.vy < 0 && pState.y <= pt.y);
 
                     // Allow progression if they hit the radius, pass the node vertically, or stall out against traffic
-                    if (distToNode < 0.65 || passedNodeY || pState._telemetryStallTicks > 12) {
+                    if (
+                        distToNode < 0.65 ||
+                        passedNodeY ||
+                        pState._routeWaypointStallTicks > 12
+                    ) {
                         pState.currentPathIndex++;
-                        pState._telemetryStallTicks = 0; // Reset stall tracker
+                        pState._routeWaypointStallTicks = 0;
 
                         // Case A: Still running route -> immediately target next node without 1-tick lag
                         if (pState.currentPathIndex < pState.routePath.length) {
