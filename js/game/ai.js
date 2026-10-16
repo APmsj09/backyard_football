@@ -477,12 +477,14 @@ export function getSmartCarrierTarget(runner, defenseStates, offenseStates, fiel
     if (currentSpeed > 4.5) maxLateral = 5.0;
     if (currentSpeed > 7.0) maxLateral = 2.5;
 
-    // Strict Backfield Discipline: RBs must not dance laterally or drift wide behind the line of scrimmage
     const LOS = playState.lineOfScrimmage || 60;
     const isBehindLine = runner.y < LOS + 1.2;
 
+    // DEEPER FIX: IQ-Scaled Backfield Vision
+    // Low-IQ RBs get tunnel vision (2 yards). Elite RBs scan the entire edge (up to 6 yards) looking for a bounce.
     if (isBehindLine) {
-        maxLateral = Math.min(maxLateral, 2);
+        const visionExpansion = Math.max(0, (iq - 50) / 12.5); // 0 to 4 extra yards of lateral vision
+        maxLateral = Math.min(maxLateral, 2.0 + visionExpansion);
     }
 
     let nearbyDefenderCount = 0;
@@ -519,12 +521,6 @@ export function getSmartCarrierTarget(runner, defenseStates, offenseStates, fiel
 
     const inTraffic = nearbyDefenderCount >= 2;
 
-    // Traffic should encourage smarter lane evaluation, not prevent an outside run.
-    // Only restrict lateral movement in the backfield, before the runner reaches the LOS.
-    if (isBehindLine) {
-        maxLateral = Math.min(maxLateral, 2);
-    }
-
     const laneOffsets = [0];
     [1.5, 3.0, 5.0, 8.0, 10.0].forEach(off => {
         if (off <= maxLateral) {
@@ -532,10 +528,6 @@ export function getSmartCarrierTarget(runner, defenseStates, offenseStates, fiel
             laneOffsets.push(-off);
         }
     });
-
-    /*if (Math.abs(currentVx) > 1.0 && Math.abs(currentVx) <= maxLateral) {
-        laneOffsets.push(currentVx);
-    }*/
 
     const visionDepth = 3.5 + (iq / 25);
     let bestScore = -Infinity;
@@ -557,6 +549,14 @@ export function getSmartCarrierTarget(runner, defenseStates, offenseStates, fiel
 
     const evaluatedLanesTracker = debugEnabled ? [] : null;
 
+    // Pre-calculate the threat straight up the middle so we know if we NEED to bounce outside
+    let centerThreat = 0;
+    defenseStates.forEach(def => {
+        if (def.stunnedTicks > 0 || def.y < runner.y - 1.0) return;
+        const dist = Math.hypot(runner.x - def.x, (runner.y + visionDepth) - def.y);
+        if (!def.isBlocked && !def.isEngaged && dist < 4.5) centerThreat += (10 / (dist + 0.1));
+    });
+
     laneOffsets.forEach((offset) => {
         const testX = runner.x + offset;
         const testY = runner.y + visionDepth;
@@ -565,31 +565,43 @@ export function getSmartCarrierTarget(runner, defenseStates, offenseStates, fiel
 
         let score = 100;
         const lateralShift = Math.abs(offset);
+        
+        // DEEPER FIX: Remove the crippling "inTraffic" penalty that forced RBs into the pile.
+        // Instead, we only apply a small physical penalty for changing momentum.
         const agilityMitigation = Math.max(0.3, (120 - agility) / 80);
         const momentumConflict = Math.abs(offset - (currentVx * 0.6));
         score -= (momentumConflict * 4.0 * agilityMitigation);
 
-        if (inTraffic) score -= (lateralShift * 12.0);
+        // "Bounce It Outside" Logic:
+        // If the middle is a disaster, high-IQ/high-agility runners are REWARDED for evaluating outside lanes
+        if (isBehindLine && centerThreat > 6.0 && lateralShift >= 3.0) {
+            const bounceIQ = (iq - 50) / 50; // 0.0 to 1.0
+            if (bounceIQ > 0) {
+                // Completely offsets the momentum penalty for bouncing wide
+                score += (lateralShift * 4.0 * bounceIQ);
+            }
+        }
 
         // Discipline encourages commitment, while less reliable runners
         // are more likely to change lanes unnecessarily.
         const offsetDiffFromPrev = Math.abs(offset - prevOffset);
         const laneStickiness =
-            15 + ((decisionProfile?.assignmentDiscipline ?? 50) * 0.1);
+            20 + ((decisionProfile?.assignmentDiscipline ?? 50) * 0.2); // Buffed stickiness
 
         if (offsetDiffFromPrev < 0.5) {
             score += laneStickiness;
         } else {
+            // DEEPER FIX: Punish ANY large shift, regardless of crossing the 0 bridge
             score -= offsetDiffFromPrev * (
-                2.5 + ((decisionProfile?.assignmentDiscipline ?? 50) * 0.01)
+                4.0 + ((decisionProfile?.assignmentDiscipline ?? 50) * 0.02)
             );
+            
+            // Severe penalty for violent zig-zags within the lane lock window
+            if (offsetDiffFromPrev >= 3.0) {
+                score -= 40; 
+            }
         }
-
-        // Heavy penalty against rapid full-reversal flips (e.g. +5 to -5)
-        if (prevOffset !== 0 && offset !== 0 && Math.sign(offset) !== Math.sign(prevOffset)) {
-            score -= 35;
-        }
-
+        
         // LATE GAME CLOCK MANAGEMENT: Run out of bounds if trailing in the 4th quarter
         const isLateTrailing = (playState.quarter >= 4 || playState.quarter === 'OT') &&
             (playState.timeRemaining <= 150) &&
@@ -714,7 +726,7 @@ export function getSmartCarrierTarget(runner, defenseStates, offenseStates, fiel
 
     // Latch absolute field corridor when committing to a cut
     if (bestOffset !== prevOffset) {
-        runner._laneLockTicks = 10;
+        runner._laneLockTicks = 18; // Increased from 10 to allow cuts to physically develop
         runner._lockedLaneX = bestTargetX;
 
         if (debugEnabled) {
