@@ -1356,8 +1356,13 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
 
                     pState.contactReduction = distToNode < 1.0 ? 0.8 : 1.0;
 
-                    if (distToNode < 0.6) {
+                    // DEEPER FIX: Calculate if the player has physically run past the Y-axis of the node
+                    const passedNodeY = (pState.vy > 0 && pState.y >= pt.y) || (pState.vy < 0 && pState.y <= pt.y);
+
+                    // Allow progression if they hit the radius, pass the node vertically, or stall out against traffic
+                    if (distToNode < 0.65 || passedNodeY || pState._telemetryStallTicks > 12) {
                         pState.currentPathIndex++;
+                        pState._telemetryStallTicks = 0; // Reset stall tracker
 
                         // Case A: Still running route -> immediately target next node without 1-tick lag
                         if (pState.currentPathIndex < pState.routePath.length) {
@@ -1804,7 +1809,11 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                 const flightTime = playState.tick - (playState.ballState.throwTick || 0);
                 const reactionDelay = Math.max(2, 12 - Math.floor(iq / 10));
 
-                if (flightTime > reactionDelay) {
+                // DEEPER FIX: Let deep safeties process elite zone baiting and double-coverage help
+                // in executeAssignment instead of falling back to generic ball tracking immediately.
+                const isDeepZoneDB = pState.role === 'DB' && pState.assignment?.includes('zone_deep');
+
+                if (flightTime > reactionDelay && !isDeepZoneDB) {
                     if (ballPos.isThrowAway) {
                         pState.action = 'idle';
                         pState.targetX = pState.x; pState.targetY = pState.y;
