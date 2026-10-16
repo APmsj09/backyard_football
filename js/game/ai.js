@@ -842,6 +842,9 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
     if (qbState.isEngaged || qbState.stunnedTicks > 0) return;
     if (qbState.action === 'sacked') return;
 
+    // Once the QB commits to a scramble, don't resume passing decisions.
+    if (qbState.action === 'run_path' && playState.qbIntent === 'scramble') return;
+
     const debugEnabled = isDebugMode();
 
     if (typeof qbState.ticksInPocket === 'undefined') qbState.ticksInPocket = 0;
