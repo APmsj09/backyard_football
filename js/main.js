@@ -2400,9 +2400,14 @@ function main() {
             });
         });
     });
-    document.getElementById('sim-speed-play')?.addEventListener('click', () => UI.setSimSpeed(80));
-    document.getElementById('sim-speed-fast')?.addEventListener('click', () => UI.setSimSpeed(40));
-    document.getElementById('sim-speed-faster')?.addEventListener('click', () => UI.setSimSpeed(10));
+    document.getElementById('sim-speed-play')
+    ?.addEventListener('click', () => UI.setSimSpeed(1));
+
+document.getElementById('sim-speed-fast')
+    ?.addEventListener('click', () => UI.setSimSpeed(2));
+
+document.getElementById('sim-speed-faster')
+    ?.addEventListener('click', () => UI.setSimSpeed(5));
 
     // Formation Selectors in Depth Chart
     /*document.getElementById('offense-formation-select')?.addEventListener('change', handleFormationChange);
