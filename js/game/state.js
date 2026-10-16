@@ -1,8 +1,20 @@
 import { relationshipLevels } from '../data.js';
 
 export let game = null;
-export function setGame(g) { game = g; }
 export const playerMap = new Map();
+
+export function setGame(g) {
+    game = g;
+    playerMap.clear();
+
+    if (Array.isArray(g?.players)) {
+        g.players.forEach(p => {
+            if (p && p.id) {
+                playerMap.set(p.id, p);
+            }
+        });
+    }
+}
 
 export function getPlayer(id) {
     if (typeof playerMap !== 'undefined' && playerMap.has(id)) return playerMap.get(id);
