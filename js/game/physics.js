@@ -457,9 +457,14 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
         const isMakingProgress =
             progressTowardTarget >= 0.03;
 
+        // Chasing a moving ball carrier or turning to track an airborne ball 
+        // does not constitute being stuck in geometry or colliding with an obstacle.
+        const isDynamicAction = ['pursuit', 'tracking_ball'].includes(pState.action);
+
         const isStalled =
             distToTarget > 2.0 &&
             !isMakingProgress &&
+            !isDynamicAction &&
             !pState._intent?.settled;
 
         if (isStalled) {
