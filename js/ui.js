@@ -9,6 +9,7 @@ import { formatHeight } from './utils.js';
 import { drawFieldVisualization, formatGameClock, showPlayOverlay } from './ui/field_visualizer.js';
 import { renderDepthOrderPane } from './ui/depth_order.js';
 import { getCurrentRosterLimit } from './game/season.js';
+import { DEFAULT_PLAYBACK_INTERVAL_MS, getPlaybackIntervalMs } from './game/simulation_config.js';
 
 let elements = {};
 let selectedPlayerId = null;
@@ -19,7 +20,7 @@ let depthOrderSortCol = 'overall';
 let depthOrderSortDir = 'desc';
 let activeDepthOrderTab = 'QB';
 
-let liveGameSpeed = 80;
+let liveGameSpeed = DEFAULT_PLAYBACK_INTERVAL_MS;
 let liveGameCurrentIndex = 0;
 let currentLiveGameResult = null;
 let huddleTimeout = null;
@@ -4070,4 +4071,13 @@ window.app_previewPlay = function(playKey, side) {
 
 export function skipLiveGameSim() { isSkipping = true; isPaused = false; }
 export function togglePause() { isPaused = !isPaused; return isPaused; }
-export function setSimSpeed(speed) { liveGameSpeed = speed; isPaused = false; }
+export function setSimSpeed(speedMultiplier) {
+    const multiplier = Number(speedMultiplier);
+
+    if (!Number.isFinite(multiplier) || multiplier <= 0) {
+        return;
+    }
+
+    liveGameSpeed = getPlaybackIntervalMs(multiplier);
+    isPaused = false;
+}
