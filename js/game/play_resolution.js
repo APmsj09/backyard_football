@@ -1447,10 +1447,21 @@ export function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey
         if (playState.type === 'pass' && ballCarrierState.role === 'QB' && !caughtPassThisPlay) {
             if (rushYards < 0) {
                 playState.sack = true; // He didn't make it back to the line, it's a sack!
-                // Assign sack to the nearest unblocked defender
+
+                // A successful tackle may already have recorded this sack.
+                // Only add a fallback event if this QB has no sack event yet.
+                const alreadyCredited = playState.statEvents.some(
+                    e => e.type === 'sack' && e.qbId === ballCarrierState.id
+                );
+
                 const tacklerEvent = playState.statEvents.find(e => e.type === 'tackle');
-                if (tacklerEvent) {
-                    playState.statEvents.push({ type: 'sack', playerId: tacklerEvent.playerId, qbId: ballCarrierState.id });
+
+                if (tacklerEvent && !alreadyCredited) {
+                    playState.statEvents.push({
+                        type: 'sack',
+                        playerId: tacklerEvent.playerId,
+                        qbId: ballCarrierState.id
+                    });
                 }
             } else {
                 // Positive yards on a scramble is a rush
@@ -1521,7 +1532,7 @@ export function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey
         playResult.outcome = 'complete';
         playResult.score = 'TD';
         playResult.defensiveTD = playState.defensiveTD || false;
-    } else if (playState.safety) {
+    }} else if (playState.safety) {
         playResult.safety = true;
         playResult.score = 'SAFETY';
     } else if (playState.sack) {
