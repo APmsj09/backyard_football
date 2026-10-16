@@ -1266,18 +1266,71 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                     let idealX = pState._pocketAnchorX !== undefined ? pState._pocketAnchorX : pState.initialX;
                     let idealY = pState._pocketAnchorY !== undefined ? pState._pocketAnchorY : pState.dropbackTargetY;
 
-                    const unblockedRushers = defenseStates.filter(d => !d.isBlocked && !d.isEngaged && d.stunnedTicks === 0 && getDistance(pState, d) < 5.5);
-                    const collapsingDefenders = defenseStates.filter(d => d.isEngaged && getDistance(pState, d) < 3.0);
-                    const immediateThreat = unblockedRushers.find(r => getDistance(pState, r) < 3.2);
+                    const unblockedRushers = defenseStates.filter(d =>
+                        !d.isBlocked &&
+                        !d.isEngaged &&
+                        d.stunnedTicks === 0 &&
+                        getDistance(pState, d) < 5.5
+                    );
 
-                    if (immediateThreat && (qbIQ > 40 || pState.agility > 45)) {
+                    const collapsingDefenders = defenseStates.filter(d =>
+                        d.isEngaged && getDistance(pState, d) < 3.0
+                    );
+
+                    // Evaluate the closest immediate threat, not whichever
+                    // defender happens to appear first in the array.
+                    const nearestImmediateThreat = unblockedRushers
+                        .map(defender => ({
+                            defender,
+                            distance: getDistance(pState, defender)
+                        }))
+                        .filter(entry => entry.distance < 3.2)
+                        .sort((a, b) => a.distance - b.distance)[0];
+
+                    const immediateThreat = nearestImmediateThreat?.defender ?? null;
+                    const immediateThreatDistance =
+                        nearestImmediateThreat?.distance ?? Infinity;
+
+                    // Scrambling should depend on athletic mobility, not IQ alone.
+                    const qbMobility =
+                        ((pState.agility || pState.agi || 50) * 0.55) +
+                        ((pState.speed || pState.spd || 50) * 0.45);
+
+                    const shouldEmergencyScramble = Boolean(
+                        immediateThreat &&
+                        (
+                            (qbMobility >= 68 && immediateThreatDistance <= 3.2) ||
+                            (qbMobility >= 55 && immediateThreatDistance <= 2.0)
+                        )
+                    );
+
+                    if (shouldEmergencyScramble) {
                         if (!pState.rolloutDir) {
-                            pState.rolloutDir = immediateThreat.x > pState.x ? -1 : 1;
+                            pState.rolloutDir =
+                                immediateThreat.x > pState.x ? -1 : 1;
                         }
+
                         pState.action = 'qb_scramble';
-                        setPointIntent(pState, pState.x + (pState.rolloutDir * 7), pState.y + 1.5, 0.5);
+                        pState.isBallCarrier = true;
+                        playState.qbIntent = 'scramble';
+
+                        setPointIntent(
+                            pState,
+                            pState.x + (pState.rolloutDir * 7),
+                            pState.y + 1.5,
+                            0.5
+                        );
+
                         pState.loggedRollout = true;
-                        if (gameLog) pushGameLog(gameLog, `[Tick ${playState.tick}] 🏃 ${pState.name} senses immediate pressure and scrambles!`, playState);
+
+                        if (gameLog) {
+                            pushGameLog(
+                                gameLog,
+                                `[Tick ${playState.tick}] 🏃 ${pState.name} senses immediate pressure and scrambles!`,
+                                playState
+                            );
+                        }
+
                         break;
                     }
 
