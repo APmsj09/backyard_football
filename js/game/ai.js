@@ -1399,20 +1399,24 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
         return;
     }
 
-    let scanSpeedBase = Math.max(6, (110 - qbProcessing) / 3.5);
+    let scanSpeedBase = Math.max(7, (115 - qbProcessing) / 3.0);
 
-    // Pressure creates urgency.
-    // Good decision makers process that urgency better.
-    // Poor decision makers do not magically scan faster.
     if (isPressured) {
         const pressureProcessingMod = 1.05 - (qbDecision / 220);
         scanSpeedBase *= Math.max(0.60, pressureProcessingMod);
     }
 
-    /*if (typeof qbState.ticksInPocket === 'undefined') qbState.ticksInPocket = 0;
-    qbState.ticksInPocket++;*/
+    // FIX: Progression scanning only starts once the QB plants their back foot.
+    // During the dropback, the QB stays locked on Read #1.
+    if (qbState.hasCompletedDropback) {
+        qbState.ticksSetInPocket = (qbState.ticksSetInPocket || 0) + 1;
+    } else {
+        qbState.ticksSetInPocket = 0;
+    }
 
-    const numReadsVisible = Math.min(progression.length, 1 + Math.floor(qbState.ticksInPocket / scanSpeedBase));
+    const numReadsVisible = isHotReadSituation 
+        ? progression.length 
+        : Math.min(progression.length, 1 + Math.floor(qbState.ticksSetInPocket / scanSpeedBase));
 
     // Lowered minimum dropback ticks to 28 so QBs can deliver quick slants/screens before getting sacked
     const MIN_DROPBACK_TICKS = 28;
