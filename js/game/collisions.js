@@ -324,19 +324,43 @@ export function checkTackleCollisions(playState, gameLog) {
                 const evadeChance = Math.max(0.05, Math.min(0.40, 0.16 + (Math.max(agiDiff, strDiff) / 250) + iqModifier));
 
                 if (Math.random() < evadeChance) {
-                    carrier.moveCooldown = 35;
+                    carrier.moveCooldown = 25; // Prevents spamming evasions
                     carrier.tacklesBrokenThisPlay = (carrier.tacklesBrokenThisPlay || 0) + 1;
+
+                    const defWeight = defender.wgt || defender.weight || 200;
+                    const carWeight = carrier.wgt || carrier.weight || 200;
 
                     if (strDiff > agiDiff && strDiff > 10) {
                         carrier.action = 'stiff_arm';
-                        defender.stunnedTicks = 20;
-                        if (gameLog) pushGameLog(gameLog, `💪 ${carrier.name} stiff-arms ${defender.name}!`, playState);
+                        
+                        // PHYSICS: Defender gets physically knocked back and falls down
+                        defender.stunnedTicks = 22; 
+                        defender.vx = (defender.x - carrier.x) * 2.0; // Shoved away
+                        defender.vy = (defender.y - carrier.y) * 2.0; 
+                        defender.moveCooldown = 25; // Getting back up takes time
+                        
+                        // PHYSICS: Stiff arm absorbs momentum relative to the mass of the defender shoved away
+                        const speedPenalty = Math.min(0.4, (defWeight / (carWeight * 1.5)) * 0.25);
+                        carrier.vx *= (1 - speedPenalty);
+                        carrier.vy *= (1 - speedPenalty);
+
+                        if (gameLog) pushGameLog(gameLog, `💪 ${carrier.name} stiff-arms ${defender.name} to the ground!`, playState);
                     } else {
                         const dir = Math.random() > 0.5 ? 1 : -1;
                         carrier.action = dir === 1 ? 'juke_right' : 'juke_left';
-                        carrier.x += dir * 0.9;
-                        defender.stunnedTicks = 18;
-                        if (gameLog) pushGameLog(gameLog, `⚡ ${carrier.name} shakes free with a quick cut!`, playState);
+                        
+                        // PHYSICS: A hard lateral cut bleeds forward velocity and violently redirects it laterally
+                        carrier.x += dir * 0.8;
+                        carrier.vy *= 0.65; // Bleed 35% of forward momentum planting the foot
+                        carrier.vx += dir * 2.5; // Surge of lateral velocity
+                        
+                        // PHYSICS: Defender bites on the fake. Throw their momentum in the opposite direction.
+                        defender.vx = -dir * 3.5; 
+                        defender.vy += 1.5; // Overpursuit drift
+                        defender.stunnedTicks = 10; // Shorter hard stun (brain catching up)
+                        defender.moveCooldown = 30; // Longer balance recovery (broken ankles)
+                        
+                        if (gameLog) pushGameLog(gameLog, `⚡ ${carrier.name} breaks ${defender.name}'s ankles with a quick cut!`, playState);
                     }
                     continue;
                 }
@@ -422,13 +446,18 @@ export function checkTackleCollisions(playState, gameLog) {
 
         } else {
             carrier.tacklesBrokenThisPlay = brokenCount + 1;
-            // FIX: 40 ticks (1.6s) is far too long; 20 ticks (~0.8s) allows a realistic recovery attempt
-            defender.stunnedTicks = 20;
+            
+            // PHYSICS: Defender bounces off the carrier kintetically
+            defender.stunnedTicks = 16;
+            defender.vx = (defender.x - carrier.x) * 1.8;
+            defender.vy = (defender.y - carrier.y) * 1.8;
+            defender.moveCooldown = 20; // Slow to get back into pursuit
 
-            const speedDrain = Math.max(0.25, (defender.wgt / carrier.wgt) * 0.30);
+            // PHYSICS: Running *through* a defender transfers a massive chunk of momentum based on weight ratio
+            const speedDrain = Math.max(0.15, Math.min(0.60, (defender.wgt / carrier.wgt) * 0.40));
             carrier.vx *= (1 - speedDrain);
             carrier.vy *= (1 - speedDrain);
-            carrier.moveCooldown = 15;
+            carrier.moveCooldown = 20; // Locks out immediate jukes
 
             if (carrier.role === 'QB' && carrier.action === 'qb_setup' && carrier.y < playState.lineOfScrimmage) {
                 carrier.action = 'qb_scramble';
@@ -702,10 +731,15 @@ export function resolveOngoingBlocks(playState, gameLog, offenseStates = [], def
                 if (isPancake) {
                     logPlayDebug('PANCAKE_BLOCK', `${blocker.name} flattened ${defender.name}`, {
                         engagementDurationTicks: dur,
-                        stunTicks: 16
+                        stunTicks: 24
                     });
 
-                    defender.stunnedTicks = 16;
+                    // PHYSICS: Knock the defender backward onto the turf
+                    defender.stunnedTicks = 24; 
+                    defender.vx = (defender.x - blocker.x) * 2.5;
+                    defender.vy = (defender.y - blocker.y) * 2.5;
+                    defender.moveCooldown = 30; // Severe sluggishness getting back up
+                    
                     defender._pancakedThisPlay = true;
                     defender.action = 'pursuit';
 
