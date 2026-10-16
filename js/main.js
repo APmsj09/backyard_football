@@ -1534,6 +1534,7 @@ export function openPlayerCard(playerId) {
                     ${renderAttrBar('Speed', phys.speed || 50)}
                     ${renderAttrBar('Strength', phys.strength || 50)}
                     ${renderAttrBar('Agility', phys.agility || 50)}
+                    ${renderAttrBar('Explosiveness', phys.explosiveness ?? 50)}
                     ${renderAttrBar('Stamina', phys.stamina || 50)}
                 </div>
                 <div class="bg-white p-3 rounded border border-slate-200">
