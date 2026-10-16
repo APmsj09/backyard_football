@@ -1,4 +1,5 @@
 import { logPlayDebug } from './telemetry.js';
+import { TICK_DURATION_SECONDS, scalePerTickFactor } from './simulation_config.js';
 
 /**
  * Calculates Euclidean distance between two points.
@@ -97,10 +98,10 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
             pState._telemetryMotionPause = passiveReason;
         }
 
-        const friction = 0.85;
-        pState.vx *= friction;
-        pState.vy *= friction;
-
+        const passiveFriction = scalePerTickFactor(0.85, timeDelta);
+        pState.vx *= passiveFriction;
+        pState.vy *= passiveFriction;
+        
         pState.x += pState.vx * timeDelta;
         pState.y += pState.vy * timeDelta;
 
@@ -245,8 +246,10 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
     if (pState.movementMode === 'HOLD' || pState.movementMode === 'POINT') {
         if (distToTarget <= arrivalRadius) {
             // Apply heavy braking friction
-            pState.vx *= 0.40;
-            pState.vy *= 0.40;
+            const targetBrakeFactor = scalePerTickFactor(0.40, timeDelta);
+
+                pState.vx *= targetBrakeFactor;
+                pState.vy *= targetBrakeFactor;
 
             // Direct snap to stop when speed has bled off
             if (Math.hypot(pState.vx, pState.vy) < 0.35) {
@@ -335,7 +338,7 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
 
     // --- 9. APPLY NEWTONIAN ACCELERATION WITH DISTANCE GATING ---
     // Safely gate timeDelta to prevent division-by-zero or NaN
-    const safeTimeDelta = Math.max(timeDelta, 0.05);
+    const safeTimeDelta = Math.max( timeDelta, TICK_DURATION_SECONDS );
 
     // Mathematically restrict speed so a player can NEVER jump past their target in a single tick
     const maxSafeSpeed = (distToTarget / safeTimeDelta) * 0.8;
