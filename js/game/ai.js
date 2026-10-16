@@ -1186,7 +1186,7 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
         const targetDepth = depth;
         const distanceBeyondLOS = targetDepth;
         const playKey = String(playState?.playKey || '').toLowerCase();
-        const routeAssignment = String(pState?.assignment || '').toLowerCase();
+        const routeAssignment = String(rec.assignment || '').toLowerCase();
 
         const isDesignedBehindLOSRoute =
             playKey.includes('screen') ||
