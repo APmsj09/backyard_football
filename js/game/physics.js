@@ -1,5 +1,6 @@
 import { logPlayDebug } from './telemetry.js';
 import { TICK_DURATION_SECONDS, scalePerTickFactor } from './simulation_config.js';
+import { getPlayerBaseSpeedYPS } from './movement_profile.js';
 
 /**
  * Calculates Euclidean distance between two points.
@@ -278,11 +279,7 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
     const gapFriction = calculateGapFriction(pState, allPlayers);
     pState.isSqueezing = gapFriction < 0.9;
 
-    // Base Speed: 7.0 yds/sec to 11.0 yds/sec
-    const baseMaxSpeed = (7.0 + (speedStat / 100) * 4.0) * fatigueMod;
-
-    // Weight Penalty: 160lbs = +4% speed | 200lbs = 0% | 350lbs = -15% speed
-    const weightSpeedPenalty = Math.max(0.80, 1.0 - ((weight - 200) / 1000));
+    const baseMaxSpeed = getPlayerBaseSpeedYPS(pState) * fatigueMod;
 
     let actionMult = pState.speedMultiplier || 1.0;
     if (pState.isBallCarrier) actionMult *= 0.92;
@@ -295,7 +292,7 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
     }
 
     //const maxPossibleSpeed = baseMaxSpeed * weightSpeedPenalty * actionMult * gapFriction * (pState.contactReduction || 1.0);
-    const maxPossibleSpeed = baseMaxSpeed * weightSpeedPenalty * actionMult * gapFriction;
+    const maxPossibleSpeed = baseMaxSpeed * actionMult * gapFriction;
 
     // --- 6. CARRYING MOMENTUM & CUTTING ---
     const currentSpeed = Math.sqrt(pState.vx ** 2 + pState.vy ** 2);
