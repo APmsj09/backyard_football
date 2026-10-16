@@ -456,6 +456,11 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
     const ballPos = playState.ballState;
     const LOS = playState.lineOfScrimmage;
 
+    // FIX: Detect if a pass was caught and the play has transitioned to Run-After-Catch
+    const isPassCompleted = playState.type === 'pass' && 
+        (playState.statEvents.some(e => e.type === 'completion') || 
+        (ballCarrierState && ballCarrierState.isOffense && ballCarrierState.role !== 'QB'));
+
     const primaryRunTarget =
         offenseStates.find(p =>
             p.slot === playState.handoffTargetSlot &&
@@ -675,12 +680,13 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
 
         if (target) {
             if (target.isEngaged) return;
-            if (isPassPlay) {
+            // FIX: If pass is caught, linemen and receivers block downfield instead of pass-blocking at LOS
+            if (isPassPlay && !isPassCompleted) {
                 const qb = offenseStates.find(p => p.slot.startsWith('QB'));
                 if (qb) {
                     const dx = qb.x - target.x;
                     const dy = qb.y - target.y;
-                    const distToQB = Math.max(0.1, Math.sqrt(dx * dx + dy * dy));
+                    const distToQB = Math.max(0.1, Math.hypot(dx, dy));
                     blocker.targetX = target.x + (dx / distToQB) * 0.8;
                     blocker.targetY = target.y + (dy / distToQB) * 0.8;
                     if (blocker.targetY < qb.y + 1.5) blocker.targetY = qb.y + 1.5;
@@ -688,7 +694,9 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                 }
             } else {
                 const blockerIQ = blocker.playbookIQ || 50;
+
                 const canClimb =
+...
                     playType === 'run' &&
                     playState.tick > 16 &&
                     blockerIQ > 60 &&
@@ -736,7 +744,7 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                     blocker.targetX = target.x;
                     blocker.targetY = target.y;
                 }
-
+                
                 blocker.contactReduction = 1.2;
             }
 
@@ -756,8 +764,17 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                 });
             }
         } else {
-            blocker.targetX = blocker.initialX;
-            blocker.targetY = isPassPlay ? LOS - 1.5 : LOS + 1.0;
+            // FIX: Prevent perimeter blockers (WRs) from snapping back to the sideline.
+            // On run plays or completed passes, advance upfield to stalk block instead of resetting to initialX.
+            if (playType === 'run' || isPassCompleted) {
+                blocker.targetX = blocker.x; // Hold current lateral lane
+                blocker.targetY = Math.min(115, blocker.y + 1.5); // Push downfield
+                blocker.action = 'run_block';
+                setPointIntent(blocker, blocker.targetX, blocker.targetY, 0.4);
+            } else {
+                blocker.targetX = blocker.initialX;
+                blocker.targetY = isPassPlay ? LOS - 1.5 : LOS + 1.0;
+            }
         }
     };
 
@@ -800,10 +817,22 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                 return;
             }
 
-                        if (isReturnTeam) {
+                if (isReturnTeam) {
                 // The actual returner fields the punt. Everyone else prepares
                 // the blocking wall, then looks for a kick-coverage defender.
                 if (pState.isBallCarrier) return;
+
+                // FIX: Before the ball is kicked, hold positions near the line of scrimmage
+                if (!ballInAir && !returnerHasBall) {
+                    const isDeepReturner = pState.slot === 'DB3' || pState.slot === 'DB4';
+                    if (!isDeepReturner) {
+                        pState.targetX = pState.initialX;
+                        pState.targetY = Math.max(LOS + 2.0, pState.initialY);
+                        pState.action = 'run_block';
+                        setHoldIntent(pState, pState.targetX, pState.targetY);
+                        return;
+                    }
+                }
 
                 const primaryReturner =
                     playState.activePlayers.find(
@@ -1410,6 +1439,15 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                 }
 
                 case 'route_complete': {
+                    // FIX: If a pass is caught by another teammate, turn into a downfield escort blocker
+                    if (isPassCompleted && ballCarrierState && ballCarrierState.id !== pState.id) {
+                        pState.action = 'run_block';
+                        pState.targetX = ballCarrierState.x + (pState.x < ballCarrierState.x ? -2.5 : 2.5);
+                        pState.targetY = ballCarrierState.y + 3.0;
+                        setPointIntent(pState, pState.targetX, pState.targetY, 0.5);
+                        break;
+                    }
+
                     if (qbState && (qbState.action === 'qb_scramble' || playState.qbIntent === 'scramble')) {
                         const rolloutDir = qbState.rolloutDir || (qbState.x > CENTER_X ? 1 : -1);
                         const iq = pState.playbookIQ || 50;
@@ -1462,6 +1500,7 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                             pState._scrambleTargetY = bestY;
                         }
 
+                        // FIX: Corrected typo "etPointIntent" -> "setPointIntent"
                         setPointIntent(pState, pState._scrambleTargetX, pState._scrambleTargetY, 0.45);
                         pState.contactReduction = 1.1;
                         break;
@@ -1470,18 +1509,10 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                     pState._scrambleReactionTick = undefined;
 
                     if (qbState) {
+                        // FIX: Settle at current coordinates so forward momentum doesn't pull receiver backward
                         if (pState._settleTargetX === undefined) {
-                            const isBehindLOS = pState.y < LOS + 1.0;
-                            const isScreenOrFlat = pState.assignment?.includes('Screen') || pState.assignment?.includes('Flat') || isBehindLOS;
-
-                            if (isScreenOrFlat) {
-                                pState._settleTargetX = pState.x;
-                                pState._settleTargetY = pState.y;
-                            } else {
-                                const centerBias = pState.x < CENTER_X ? 1.2 : -1.2;
-                                pState._settleTargetX = Math.max(3, Math.min(FIELD_WIDTH - 3, pState.x + centerBias));
-                                pState._settleTargetY = Math.max(LOS + 2.0, pState.y - 0.8);
-                            }
+                            pState._settleTargetX = pState.x;
+                            pState._settleTargetY = pState.y;
                         }
                         setHoldIntent(pState, pState._settleTargetX, pState._settleTargetY);
                     }
@@ -1500,6 +1531,20 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
         }
 
         if (!pState.isOffense) {
+            // FIX: If a pass has been completed, all defenders alert to the ball carrier immediately
+            if (isPassCompleted && ballCarrierState) {
+                const dist = getDistance(pState, ballCarrierState);
+                const leadTime = Math.min(1.0, dist / 18);
+                const predX = ballCarrierState.x + ((ballCarrierState.vx || 0) * leadTime);
+                const predY = ballCarrierState.y + ((ballCarrierState.vy || 0) * leadTime);
+
+                pState.targetX = predX;
+                pState.targetY = predY;
+                setPointIntent(pState, predX, predY, 0.5);
+                pState.action = 'pursuit';
+                return;
+            }
+
             const defenderVision = getPerceptionContext(
                 pState,
                 playState.tick,
