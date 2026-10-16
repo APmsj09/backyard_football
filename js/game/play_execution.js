@@ -696,7 +696,6 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                 const blockerIQ = blocker.playbookIQ || 50;
 
                 const canClimb =
-...
                     playType === 'run' &&
                     playState.tick > 16 &&
                     blockerIQ > 60 &&
