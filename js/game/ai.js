@@ -1185,24 +1185,23 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
         const down = playState.down ?? 1;
         const targetDepth = depth;
         const distanceBeyondLOS = targetDepth;
+        const isDesignedScreen = String(playState?.playKey || '')
+            .toLowerCase()
+            .includes('screen');
+
+        // An ordinary throw behind the LOS must recover those yards
+        // before it can produce positive field position.
+        if (distanceBeyondLOS < 0 && !isDesignedScreen) {
+            score -= Math.min(28, Math.abs(distanceBeyondLOS) * 5);
+        }
+
         const targetAtOrBeyondFirstDown = distanceBeyondLOS >= yardsToGo;
-
-        // ======================================================
-        // SITUATIONAL VALUE
-        // ======================================================
-
-        if (targetAtOrBeyondFirstDown) {
-            // Reward first-down targets, but stay patient on 1st & 10
-            score += (down >= 3) ? 22 : 10;
-        } else {
-            const yardsShort = yardsToGo - Math.max(0, distanceBeyondLOS);
-
-            if (down >= 3 && yardsShort > 3) {
-                score -= Math.min(24, yardsShort * 3);
-            } else if (down <= 2) {
-                // Don't punish high-percentage 4-7 yard completions on early downs
-                score += (distanceBeyondLOS >= 3) ? 8 : -4;
-            }
+        if (targetAtOrBeyondFirstDown) score += (down >= 3) ? 22 : 10;
+        else {
+            // Negative depth increases the yards still needed after the catch.
+            const yardsShort = yardsToGo - distanceBeyondLOS;
+            if (down >= 3 && yardsShort > 3) score -= Math.min(24, yardsShort * 3);
+            else if (down <= 2) score += (distanceBeyondLOS >= 3) ? 8 : -4;
         }
 
         // Short throws are naturally more attractive when pressure is coming.
