@@ -1799,6 +1799,16 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                         else if (diagDirection === 'left' && predX > 5) predX -= cheatAmount;
                     }
 
+                    // DEEPER FIX: Boids-like Obstacle Avoidance for blocked tackle paths
+                    const isObstructed = pState._lastTackleBlockedLogTick && 
+                                        (playState.tick - pState._lastTackleBlockedLogTick) < 5;
+
+                    if (isObstructed) {
+                        // Steer left or right of the carrier based on current leverage to navigate around the blocker
+                        const leverageDir = pState.x > chaseTarget.x ? 1.8 : -1.8;
+                        predX += leverageDir;
+                    }
+
                     setPointIntent(pState, predX, predY, 0.5);
 
                     pState.contactReduction = 0.7 + (diagConfidence * 0.3);
