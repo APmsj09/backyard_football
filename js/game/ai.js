@@ -1388,7 +1388,7 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
         });
 
         if (rushScore > 25 && rushScore > bestPassScore) {
-            qbState.action = 'run_path';
+            qbState.action = 'qb_scramble'; // DEEPER FIX: Consistently trigger pocket escape logic
             qbState.isBallCarrier = true;
             playState.qbIntent = 'scramble';
 
