@@ -667,14 +667,20 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
             return (laneDiffA + dangerPriorityA + doubleTeamPenaltyA) - (laneDiffB + dangerPriorityB + doubleTeamPenaltyB);
         });
 
+        // FIX: Allow a locked target to remain valid up to 14 yards so blockers don't drop targets on small movements
         if (blocker.dynamicTargetId) {
-            const currentThreat = validThreats.find(t => t.id === blocker.dynamicTargetId && !t.isEngaged && !t.isBlocked);
+            const currentThreat = threats.find(t => 
+                t.id === blocker.dynamicTargetId && 
+                !t.isEngaged && 
+                !t.isBlocked && 
+                getDistance(blocker, t) < 14.0 && 
+                t.y > blocker.y - 2.0
+            );
             if (currentThreat) {
                 target = currentThreat;
                 assignedThreats.add(target.id);
             }
         }
-
         if (!target && sortedThreats.length > 0) {
             target = sortedThreats[0];
             blocker.dynamicTargetId = target.id;
@@ -1622,17 +1628,20 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
 
             let shouldPursue = false;
 
+            // FIX: Once a defender begins pursuing a live runner, remember it for at least 15 ticks (0.6s)
+            // so they do not abandon pursuit just because the runner momentarily cut behind them.
+            const isPersistingPursuit = pState._pursuitLockTicks && pState._pursuitLockTicks > 0;
+            if (isPersistingPursuit) {
+                pState._pursuitLockTicks--;
+            }
+
             if (ballCarrierState && !isBallInAir) {
                 if (isRunReadAtMesh) {
                     shouldPursue = true;
-                } else if (carrierPerception > 0) {
-                    if (isRunRead) {
+                } else if (carrierPerception > 0 || isPersistingPursuit) {
+                    if (isRunRead || ballCarrierState.role !== 'QB' || qbScrambling) {
                         shouldPursue = true;
-                    } else if (
-                        ballCarrierState.role !== 'QB' ||
-                        qbScrambling
-                    ) {
-                        shouldPursue = true;
+                        pState._pursuitLockTicks = 25; // Lock pursuit memory for 1 second
                     } else if (
                         assignment?.includes('blitz') ||
                         assignment?.includes('rush') ||
@@ -1646,7 +1655,15 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
             if (assignment?.startsWith('man_cover_') && shouldPursue && !isRunReadAtMesh && !isDL) {
                 const targetSlot = assignment.replace('man_cover_', '');
                 const carrierSlot = ballCarrierState?.slot;
-                if (carrierSlot !== targetSlot && !isRunRead && !qbScrambling) shouldPursue = false;
+
+                // FIX: If the ball carrier has crossed the line of scrimmage OR is an immediate tackle threat (< 4.5y),
+                // break man coverage and rally to the ball carrier regardless of original assignment!
+                const carrierPastLOS = ballCarrierState && ballCarrierState.y > LOS + 0.5;
+                const carrierIsClose = ballCarrierState && getDistance(pState, ballCarrierState) < 4.5;
+
+                if (carrierSlot !== targetSlot && !isRunRead && !qbScrambling && !carrierPastLOS && !carrierIsClose) {
+                    shouldPursue = false;
+                }
             }
             if (assignment?.startsWith('zone_') && pState.slot.startsWith('LB') && carrierIsPasser && !qbScrambling && !isRunReadAtMesh) {
                 shouldPursue = false;
