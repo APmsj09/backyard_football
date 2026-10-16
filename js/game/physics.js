@@ -375,8 +375,17 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
     const currentVelocityMagnitude = Math.hypot(currentVX, currentVY);
     const desiredSpeed = Math.hypot(targetVx, targetVy);
 
+    const targetDirectionAlignment =
+        currentVelocityMagnitude > 0.05 && desiredSpeed > 0.05
+            ? (
+                (currentVX / currentVelocityMagnitude) * (targetVx / desiredSpeed) +
+                (currentVY / currentVelocityMagnitude) * (targetVy / desiredSpeed)
+            )
+            : 1.0;
+
     const isBraking =
-        desiredSpeed < currentVelocityMagnitude - 0.05;
+        desiredSpeed < currentVelocityMagnitude - 0.05 ||
+        targetDirectionAlignment < 0;
 
     // Apply physical acceleration limits independently of steering response.
     const effectiveAccelerationYPS2 = isBraking
