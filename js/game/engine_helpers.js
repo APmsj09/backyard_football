@@ -5,7 +5,7 @@ import { calculateSlotSuitability } from './player.js';
 import { getPriority } from './depth_chart.js';
 import { offenseFormations, defenseFormations, routeTree } from '../data.js';
 import { getDistance } from './physics.js';
-import { TICK_DURATION_SECONDS } from './simulation_config.js';
+import { TICK_DURATION_SECONDS, scalePerTickAlpha } from './simulation_config.js';
 
 const FIELD_WIDTH = 53.3;
 const FIELD_LENGTH = 120;
@@ -160,7 +160,7 @@ export function captureFrame(playState, gameLog) {
             while (diff > Math.PI) diff -= Math.PI * 2;
             while (diff < -Math.PI) diff += Math.PI * 2;
             
-            p._visualAngle += diff * 0.35;
+            p._visualAngle += diff * scalePerTickAlpha(0.35);
 
             // Detect if player is actively leaping for a high pass in flight
             const ball = playState.ballState;
