@@ -19,6 +19,11 @@ export function getDistance(p1, p2) {
 export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
     if (!pState || typeof pState.x !== 'number') return;
 
+    const dt =
+        Number.isFinite(timeDelta) && timeDelta > 0
+            ? timeDelta
+            : TICK_DURATION_SECONDS;
+
     pState.vx = pState.vx || 0;
     pState.vy = pState.vy || 0;
 
@@ -99,12 +104,12 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
             pState._telemetryMotionPause = passiveReason;
         }
 
-        const passiveFriction = scalePerTickFactor(0.85, timeDelta);
+        const passiveFriction = scalePerTickFactor(0.85, dt);
         pState.vx *= passiveFriction;
         pState.vy *= passiveFriction;
-        
-        pState.x += pState.vx * timeDelta;
-        pState.y += pState.vy * timeDelta;
+
+        pState.x += pState.vx * dt;
+        pState.y += pState.vy * dt;
 
         pState.currentSpeedYPS = Math.hypot(pState.vx, pState.vy);
         pState.velocity = { x: pState.vx, y: pState.vy };
@@ -244,10 +249,10 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
     if (pState.movementMode === 'HOLD' || pState.movementMode === 'POINT') {
         if (distToTarget <= arrivalRadius) {
             // Apply heavy braking friction
-            const targetBrakeFactor = scalePerTickFactor(0.40, timeDelta);
+            const targetBrakeFactor = scalePerTickFactor(0.40, dt);
 
-                pState.vx *= targetBrakeFactor;
-                pState.vy *= targetBrakeFactor;
+            pState.vx *= targetBrakeFactor;
+            pState.vy *= targetBrakeFactor;
 
             // Direct snap to stop when speed has bled off
             if (Math.hypot(pState.vx, pState.vy) < 0.35) {
@@ -263,8 +268,8 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
             }
 
             // Advance deceleration step and return immediately (prevents Section 9 re-acceleration)
-            pState.x += pState.vx * timeDelta;
-            pState.y += pState.vy * timeDelta;
+            pState.x += pState.vx * dt;
+            pState.y += pState.vy * dt;
             pState.currentSpeedYPS = Math.hypot(pState.vx, pState.vy);
             pState.velocity = { x: pState.vx, y: pState.vy };
             clampToField(pState);
@@ -340,14 +345,10 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
     }
 
     // --- 9. APPLY NEWTONIAN ACCELERATION WITH DISTANCE GATING ---
-    // Safely gate timeDelta to prevent division-by-zero or NaN
-    const safeTimeDelta =
-        Number.isFinite(timeDelta) && timeDelta > 0
-            ? timeDelta
-            : TICK_DURATION_SECONDS;
+    // The timestep was validated once at the start of this update.
 
     // Mathematically restrict speed so a player can NEVER jump past their target in a single tick
-    const maxSafeSpeed = (distToTarget / safeTimeDelta) * 0.8;
+    const maxSafeSpeed = (distToTarget / dt) * 0.8;
     const clampedTargetSpeed = Math.min(effectiveMaxSpeed * arrivalFactor, maxSafeSpeed);
 
     const safeDist = Math.max(0.001, distToTarget);
@@ -356,8 +357,7 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
 
     // Smoothly steer toward the desired velocity.
     // The exponential form behaves consistently across different timestep sizes.
-    const steeringAlpha =
-        1 - Math.exp(-Math.max(0, accelRate) * safeTimeDelta);
+     const steeringAlpha = 1 - Math.exp(-Math.max(0, accelRate) * dt);
 
     const currentVX = pState.vx;
     const currentVY = pState.vy;
@@ -383,9 +383,8 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
         ? Math.max(0, maxDecelerationYPS2)
         : Math.max(0, maxAccelerationYPS2);
 
-    const maxVelocityChange =
-        effectiveAccelerationYPS2 * safeTimeDelta;
-
+    const maxVelocityChange = effectiveAccelerationYPS2 * dt;
+    
     if (
         deltaVelocity > maxVelocityChange &&
         deltaVelocity > 0
@@ -412,8 +411,8 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
     resolveNewtonianCollisions(pState, allPlayers);
 
     // --- 11. FINALIZE MOVEMENT ---
-    pState.x += pState.vx * timeDelta;
-    pState.y += pState.vy * timeDelta;
+    pState.x += pState.vx * dt;
+    pState.y += pState.vy * dt;
 
     clampToField(pState);
 
