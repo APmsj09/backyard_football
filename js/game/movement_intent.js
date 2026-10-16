@@ -103,18 +103,29 @@ export function setTrackIntent(pState, entity, leadTime = 0, deadband = 0.60) {
 
 export function setLaneIntent(pState, targetX, targetY, lockDuration = 10) {
     if (!pState._intent) initMovementIntent(pState);
+
     const intent = pState._intent;
-    if (intent.lockTicks > 0) {
+
+    // Preserve the locked lateral lane only while LANE is still the
+    // active intent. Another movement intent must be allowed to interrupt it.
+    if (intent.mode === 'LANE' && intent.lockTicks > 0) {
+        intent.mode = 'LANE';
         intent.lockTicks--;
         intent.targetY = targetY;
+        intent.targetEntityId = null;
+        intent.arrivalRadius = 0.50;
         intent.isExplicit = true;
         return;
     }
+
+    // Start a fresh lane commitment after an interruption or expired lock.
     intent.mode = 'LANE';
     intent.targetX = targetX;
     intent.targetY = targetY;
-    intent.lockTicks = lockDuration;
+    intent.targetEntityId = null;
+    intent.lockTicks = Math.max(0, lockDuration);
     intent.arrivalRadius = 0.50;
+    intent.settled = false;
     intent.isExplicit = true;
 }
 
