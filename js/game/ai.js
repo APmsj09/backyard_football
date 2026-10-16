@@ -1039,8 +1039,18 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
         qbState.currentReadTargetSlot = emergencyProgression[0];
     }
 
-    const unblocked = defenseStates.filter(d => !d.isBlocked && !d.isEngaged && d.stunnedTicks === 0 && getDistance(qbState, d) < 4.5);
-    const pressureDefender = unblocked.length > 0 ? unblocked[0] : null;
+    const unblocked = defenseStates
+        .filter(d =>
+            !d.isBlocked &&
+            !d.isEngaged &&
+            d.stunnedTicks === 0 &&
+            getDistance(qbState, d) < 4.5
+        )
+        .sort((a, b) =>
+            getDistance(qbState, a) - getDistance(qbState, b)
+        );
+
+    const pressureDefender = unblocked[0] ?? null;
     const pressureCount = unblocked.length;
     const isPressured = !!pressureDefender;
     const imminentSackDefender = isPressured && getDistance(qbState, pressureDefender) < 1.2;
