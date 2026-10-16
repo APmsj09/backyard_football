@@ -5,13 +5,14 @@ import { calculateSlotSuitability } from './player.js';
 import { getPriority } from './depth_chart.js';
 import { offenseFormations, defenseFormations, routeTree } from '../data.js';
 import { getDistance } from './physics.js';
+import { TICK_DURATION_SECONDS } from './simulation_config.js';
 
 const FIELD_WIDTH = 53.3;
 const FIELD_LENGTH = 120;
 const CENTER_X = FIELD_WIDTH / 2;
 const HASH_LEFT_X = 18.0;
 const HASH_RIGHT_X = 35.3;
-const TICK_DURATION_SECONDS = 0.05;
+//const TICK_DURATION_SECONDS = 0.05;
 
 export const zoneBoundaries = {
     'zone_flat_left': { minX: 0, maxX: HASH_LEFT_X, minY: -2, maxY: 8 },
