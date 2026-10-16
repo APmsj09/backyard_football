@@ -558,9 +558,12 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
     const linemen = offenseStates.filter(
         p => !p.isEngaged && p.slot.startsWith('OL')
     );
+    // FIX: Only pass designated blockers into assignBlockerTarget.
+    // Do NOT include wide receivers who transitioned to run_block to escort a live ball carrier downfield!
     const otherBlockers = offenseStates.filter(
         p => !p.isEngaged &&
              !p.slot.startsWith('OL') &&
+             p.assignment?.includes('block') &&
              (p.action === 'pass_block' || p.action === 'run_block')
     );
     const assignedThreats = new Set();
@@ -1533,9 +1536,15 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
             // FIX: If a pass has been completed, all defenders alert to the ball carrier immediately
             if (isPassCompleted && ballCarrierState) {
                 const dist = getDistance(pState, ballCarrierState);
-                const leadTime = Math.min(1.0, dist / 18);
-                const predX = ballCarrierState.x + ((ballCarrierState.vx || 0) * leadTime);
-                const predY = ballCarrierState.y + ((ballCarrierState.vy || 0) * leadTime);
+                const leadTime = Math.min(1.2, Math.max(0.3, dist / 16));
+                let predX = ballCarrierState.x + ((ballCarrierState.vx || 0) * leadTime);
+                let predY = ballCarrierState.y + Math.max(1.5, (ballCarrierState.vy || 0) * leadTime);
+
+                // FIX: If defender is downfield of the carrier, do NOT let them bite backwards behind the runner.
+                // Maintain a cutoff cushion ahead of the ball carrier.
+                if (pState.y > ballCarrierState.y + 1.0) {
+                    predY = Math.max(ballCarrierState.y + 2.5, Math.min(pState.y - 1.0, predY));
+                }
 
                 pState.targetX = predX;
                 pState.targetY = predY;
