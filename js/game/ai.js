@@ -1128,12 +1128,16 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
             score -= 30; // Defender is capping the route from above; don't throw into his chest
         }
 
-        // FIX 2: Route Break Timing.
-        // On breaking routes (Slant, Out, Dig, Curl, Comeback), do NOT throw before the cut unless pressured!
+        // DEEPER FIX: Strictly forbid throwing breaking routes before the cut unless under heavy pressure.
+        // A penalty of -35 was easily overridden on 3rd down when thresholds dropped.
         const hasRouteCut = rec.routePath && rec.routePath.length > 1;
         const isBeforeCut = hasRouteCut && rec.currentPathIndex < (rec.routePath.length - 1);
-        if (isBeforeCut && !isPressured) {
-            score -= 35; // Receiver is still running his initial stem; wait for the break!
+        if (isBeforeCut) {
+            if (!isPressured) {
+                return null; // Do NOT throw before the cut when clean in the pocket!
+            } else {
+                score -= 45; // Under pressure, heavily penalize throwing to un-cut receivers
+            }
         }
 
         // FIX 3: Deep Vertical Route Depth Gating.
@@ -1467,10 +1471,12 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
         ? progression.length 
         : Math.min(progression.length, 1 + Math.floor(qbState.ticksSetInPocket / scanSpeedBase));
 
-    // Lowered minimum dropback ticks to 28 so QBs can deliver quick slants/screens before getting sacked
-    const MIN_DROPBACK_TICKS = 28;
+    // DEEPER FIX: Scale dropback duration by play type. 
+    // Quick passes can fire at ~1.3s (32 ticks), but deep drops need at least 1.7s (42 ticks) to develop.
+    const isQuickPlay = playState.playKey?.includes('Quick') || playState.playKey?.includes('Screen');
+    const MIN_DROPBACK_TICKS = isQuickPlay ? 30 : 42;
     const canThrowStandard = (playState.tick >= MIN_DROPBACK_TICKS || isHotReadSituation) && (qbState.hasCompletedDropback || isPressured);
-
+    
     // NATURAL POCKET CLOCK:
     // Respects QB Awareness (internal rhythm), Decision Making, and Personality (Risk Tolerance).
     const clockAwareness = (qbProfile?.awareness ?? qbIQ) / 100; // 0.2 to 1.0
@@ -1866,23 +1872,32 @@ export function executeThrow(qbState, target, strength, accuracy, playState, gam
             }
         }
 
-        if (distanceToTravel > 0) {
+        // DEEPER FIX: If the receiver has completed their route path, DO NOT project them 
+        // sprinting into the bleachers! Only vertical streaks continue running;
+        // all breaking/settling routes settle at the final waypoint.
+        const isContinuousRoute = ['Fly', 'Go', 'Streak', 'Vert', 'Fade'].some(r => target.assignment?.includes(r));
+        if (distanceToTravel > 0 && isContinuousRoute) {
             const dirX = (target.vx && Math.abs(target.vx) > 0.5) ? target.vx / recYPS : lastValidDirX;
             const dirY = (target.vy && Math.abs(target.vy) > 0.5) ? target.vy / recYPS : lastValidDirY;
 
             aimX = currX + (dirX * distanceToTravel);
             aimY = currY + (dirY * distanceToTravel);
+        } else {
+            // Settle cleanly at the final route node
+            aimX = currX;
+            aimY = currY;
         }
     } else {
         aimX = target.x;
         aimY = target.y;
     }
+    // DEEPER FIX: Scale error margin realistically to match receiver catch radii (1.2 - 1.5 yards).
+    // Dividing by 12 produced wild 6-yard misses that receivers couldn't even contest.
+    const distancePower = 1.2 - (accuracy / 120);
+    const distanceFactor = Math.pow(Math.max(0.5, throwDistance / 20), distancePower);
+    let errorMargin = ((100 - accuracy) / 30) * distanceFactor;
 
-    const distancePower = 1.5 - (accuracy / 100);
-    const distanceFactor = Math.pow(throwDistance / 25, distancePower);
-    let errorMargin = ((100 - accuracy) / 12) * distanceFactor;
-
-    if (playState.isPressured) errorMargin *= (2.0 - (qbState.iq / 100));
+    if (playState.isPressured) errorMargin *= (1.5 - ((qbState.iq || 50) / 200));
 
     const dirX = aimX - startX;
     const dirY = aimY - startY;
@@ -1890,9 +1905,9 @@ export function executeThrow(qbState, target, strength, accuracy, playState, gam
     const uX = dirX / mag;
     const uY = dirY / mag;
 
-    const longBias = (Math.random() > 0.3) ? 1.4 : -0.6;
+    const longBias = (Math.random() > 0.4) ? 1.1 : -0.7;
     const longError = (Math.random() * errorMargin) * longBias;
-    const latError = (Math.random() - 0.5) * errorMargin * 1.2;
+    const latError = (Math.random() - 0.5) * errorMargin * 0.9;
 
     aimX += (uX * longError) + (-uY * latError);
     aimY += (uY * longError) + (uX * latError);
