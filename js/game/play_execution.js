@@ -1127,20 +1127,10 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                 const iq = pState.playbookIQ || 50;
                 const flightTime = playState.tick - (playState.ballState.throwTick || 0);
                 const reactionDelay = isIntendedTarget ? 2 : Math.max(5, 20 - Math.floor(iq / 5));
-                const isDeepZoneDB = pState.role === 'DB' && pState.assignment?.includes('zone_deep');
 
-                // DEEPER FIX: Give deep safeties a brief window to execute elite zone/help baiting, 
-                // but eventually force them into generic ball tracking so they don't ignore passes entirely.
-                if (flightTime > reactionDelay && (!isDeepZoneDB || flightTime > reactionDelay + 8)) {
+                if (flightTime > reactionDelay) {
                     const distToLanding = Math.hypot(pState.x - playState.ballState.targetX, pState.y - playState.ballState.targetY);
-                    if (isIntendedTarget || distToLanding < 8.0 || isDeepZoneDB) {
-                        setPointIntent(pState, playState.ballState.targetX, playState.ballState.targetY, 0.4);
-                        pState.action = 'tracking_ball';
-                        pState.contactReduction = 1.1 + ((pState.agility || 50) / 250);
-                        return;
-                    }
-                }
-            }
+                    if (isIntendedTarget || distToLanding < 8.0) {
                         setPointIntent(pState, playState.ballState.targetX, playState.ballState.targetY, 0.4);
                         pState.action = 'tracking_ball';
                         pState.contactReduction = 1.1 + ((pState.agility || 50) / 250);
