@@ -1105,6 +1105,32 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
 
         let score = Math.min(minProjectedSeparation, 6) * 10;
 
+        // FIX 1: Recognize Defensive Cushion vs Real Separation.
+        // If a defender is sitting directly downfield (over the top), that distance is cushion, not separation!
+        const defenderOverTheTop = defenseStates.find(d => 
+            !d.isBlocked && !d.isEngaged && 
+            d.y > rec.y && d.y < rec.y + 7.0 && 
+            Math.abs(d.x - rec.x) < 2.5
+        );
+        if (defenderOverTheTop && !isPressured) {
+            score -= 30; // Defender is capping the route from above; don't throw into his chest
+        }
+
+        // FIX 2: Route Break Timing.
+        // On breaking routes (Slant, Out, Dig, Curl, Comeback), do NOT throw before the cut unless pressured!
+        const hasRouteCut = rec.routePath && rec.routePath.length > 1;
+        const isBeforeCut = hasRouteCut && rec.currentPathIndex < (rec.routePath.length - 1);
+        if (isBeforeCut && !isPressured) {
+            score -= 35; // Receiver is still running his initial stem; wait for the break!
+        }
+
+        // FIX 3: Deep Vertical Route Depth Gating.
+        // On Fly/Go/Streak/FourVerts routes, require the receiver to get at least 9.0 yards downfield before throwing a bomb.
+        const isDeepVertical = ['Fly', 'Go', 'Streak', 'Vert', 'Fade'].some(r => rec.assignment?.includes(r));
+        if (isDeepVertical && depth < 9.0 && !isPressured) {
+            score -= 40; // Let the receiver push downfield and stack the defender before launching
+        }
+
         // Pre-snap / Post-snap Shell Recognition
         const coverageShell = evaluateCoverageAlignment(defenseStates, playState);
         const isMiddleOfFieldRoute = Math.abs(rec.x - CENTER_X) < 8.0;
