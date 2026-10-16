@@ -9,24 +9,73 @@ const defensivePositions = ['DL', 'LB', 'DB'];
 export const positionOverallWeights = {
     // Give QBs more weight to arm talent, accuracy, and mobility
     QB: {
-        throwingAccuracy: 0.35,
-        throwPower: 0.25,
-        playbookIQ: 0.15,
-        decisionMaking: 0.10,
-        speed: 0.10,
-        consistency: 0.05
-    },
+    throwingAccuracy: 0.35,
+    throwPower: 0.25,
+    playbookIQ: 0.15,
+    decisionMaking: 0.10,
+    speed: 0.05,
+    consistency: 0.05,
+    explosiveness: 0.05
+},
 
-    // Skill positions
-    RB: { speed: 0.30, carrying: 0.25, agility: 0.20, strength: 0.15, catchingHands: 0.10 },
-    WR: { speed: 0.35, catchingHands: 0.30, agility: 0.20, jumping: 0.15 },
-    TE: { catchingHands: 0.30, blocking: 0.25, strength: 0.20, jumping: 0.15, speed: 0.10 },
+RB: {
+    speed: 0.25,
+    carrying: 0.25,
+    agility: 0.15,
+    strength: 0.15,
+    catchingHands: 0.10,
+    explosiveness: 0.10
+},
 
-    // Spread OL across technique and pass/run blocking instincts so pure weight/strength doesn't break it
-    OL: { strength: 0.35, blocking: 0.40, playbookIQ: 0.15, weight: 0.05, toughness: 0.05 },
-    DL: { strength: 0.35, blockShedding: 0.35, tackling: 0.20, speed: 0.10 },
-    LB: { tackling: 0.30, playbookIQ: 0.25, speed: 0.25, blockShedding: 0.20 },
-    DB: { speed: 0.35, coverage: 0.30, agility: 0.20, jumping: 0.15 }
+WR: {
+    speed: 0.30,
+    catchingHands: 0.30,
+    agility: 0.15,
+    jumping: 0.15,
+    explosiveness: 0.10
+},
+
+TE: {
+    catchingHands: 0.30,
+    blocking: 0.25,
+    strength: 0.20,
+    jumping: 0.15,
+    speed: 0.05,
+    explosiveness: 0.05
+},
+
+OL: {
+    strength: 0.33,
+    blocking: 0.37,
+    playbookIQ: 0.15,
+    weight: 0.05,
+    toughness: 0.05,
+    explosiveness: 0.05
+},
+
+DL: {
+    strength: 0.33,
+    blockShedding: 0.35,
+    tackling: 0.20,
+    speed: 0.07,
+    explosiveness: 0.05
+},
+
+LB: {
+    tackling: 0.30,
+    playbookIQ: 0.25,
+    speed: 0.20,
+    blockShedding: 0.20,
+    explosiveness: 0.05
+},
+
+DB: {
+    speed: 0.32,
+    coverage: 0.30,
+    agility: 0.15,
+    jumping: 0.15,
+    explosiveness: 0.08
+}
 };
 
 export function estimateBestPosition(scoutedPlayer) {
@@ -239,7 +288,7 @@ const archetypes = [
 
     // --- BALL CARRIERS ---
     { name: 'Power Back', off: 'RB', def: 'LB', weightMod: 1.25, heightMod: -1, keyAttrs: ['strength', 'toughness', 'tackling', 'stamina'], speedMod: 0.9, strMod: 1.2 },
-    { name: 'Speed Back', off: 'RB', def: 'DB', weightMod: 0.85, heightMod: -2, keyAttrs: ['speed', 'agility', 'clutch', 'catchingHands'], speedMod: 1.10, strMod: 0.7 },
+    { name: 'Speed Back', off: 'RB', def: 'DB', weightMod: 0.85, heightMod: -2, keyAttrs: ['speed', 'agility', 'explosiveness', 'clutch', 'catchingHands'], speedMod: 1.10, strMod: 0.7 },
     { name: 'Workhorse', off: 'RB', def: 'LB', weightMod: 1.1, heightMod: 0, keyAttrs: ['stamina', 'consistency', 'tackling', 'toughness'], speedMod: 1.0, strMod: 1.0 },
     { name: 'Receiving Back', off: 'RB', def: 'DB', weightMod: 0.9, heightMod: -1, keyAttrs: ['catchingHands', 'agility', 'speed', 'coverage'], speedMod: 1.1, strMod: 0.8 },
     { name: 'Bruiser', off: 'RB', def: 'DL', weightMod: 1.4, heightMod: 0, keyAttrs: ['strength', 'toughness', 'stamina', 'blocking'], speedMod: 0.75, strMod: 1.3 },
@@ -306,29 +355,29 @@ const archetypes = [
 const archetypeBoosts = {
     // 🔥 BOOSTED QB & RB STATS SO THEY CAN ACTUALLY THROW/RUN EFFECTIVELY
     'Field General': { playbookIQ: 15, throwingAccuracy: 18 },
-    'Scrambler': { speed: 12, agility: 12, throwingAccuracy: 10 },
+    'Scrambler': { speed: 12, agility: 12, explosiveness: 10, throwingAccuracy: 10 },
     'Gunslinger': { throwingAccuracy: 15, strength: 12 },
     'Heavy Crusher QB': { strength: 12, toughness: 10, throwingAccuracy: 8 },
     'Game Manager': { playbookIQ: 12, consistency: 15, throwingAccuracy: 8 },
-    'Dual-Threat': { speed: 8, agility: 8, throwingAccuracy: 10 },
+    'Dual-Threat': { speed: 8, agility: 8, explosiveness: 10, throwingAccuracy: 10 },
     'Backyard Magician': { agility: 15, clutch: 12, throwingAccuracy: 10 },
     'Cannon Arm': { strength: 18, throwingAccuracy: 8 },
 
     'Power Back': { strength: 12, toughness: 10, speed: 6 },
-    'Speed Back': { speed: 15, agility: 12 },
+    'Speed Back': { speed: 15, agility: 12, explosiveness: 12 },
     'Workhorse': { stamina: 15, consistency: 12, speed: 5 },
     'Receiving Back': { catchingHands: 12, agility: 10, speed: 8 },
     'Bruiser': { strength: 12, toughness: 12, stamina: 5 },
     'Third-Down Back': { blocking: 10, catchingHands: 10, playbookIQ: 5 },
-    'Change-of-Pace': { speed: 10, agility: 12 },
+    'Change-of-Pace': { speed: 10, agility: 12, explosiveness: 14 },
     'Slashing Back': { agility: 10, speed: 8, playbookIQ: 5 },
 
-    'Deep Threat': { speed: 8, agility: 5 },
+    'Deep Threat': { speed: 8, agility: 5, explosiveness: 10 },
     'Route Technician': { agility: 7, playbookIQ: 5 },
     'Red Zone Specialist': { catchingHands: 7, strength: 5 },
     'Slot Brawler': { toughness: 6, catchingHands: 5 },
     'Possession Receiver': { catchingHands: 12, clutch: 10, toughness: 5 },
-    'Gadget Player': { agility: 12, speed: 8 },
+    'Gadget Player': { agility: 12, speed: 8, explosiveness: 12 },
     'Jump Ball Specialist': { catchingHands: 12, clutch: 8 },
 
     'Vertical TE': { speed: 6, catchingHands: 6 },
@@ -347,13 +396,13 @@ const archetypeBoosts = {
     'Athletic Tackle': { agility: 12, blocking: 8 },
     'Center/General': { playbookIQ: 15, blocking: 8 },
 
-    'Speed Rusher': { speed: 7, blockShedding: 6 },
+    'Speed Rusher': { speed: 7, blockShedding: 6, explosiveness: 8 },
     'Run Stuffer': { strength: 8, tackling: 6 },
     'Bull Rusher': { strength: 8, blockShedding: 6 },
     'Versatile End': { blockShedding: 6, tackling: 6 },
     'Nose Tackle': { strength: 15, tackling: 10 },
     'Edge Setter': { tackling: 12, strength: 8 },
-    'Pass Rush Specialist': { blockShedding: 12, speed: 10 },
+    'Pass Rush Specialist': { blockShedding: 12, speed: 10, explosiveness: 8 },
 
     'Middle Hawk': { playbookIQ: 7, tackling: 6 },
     'Hard Hitter': { tackling: 7, toughness: 6 },
@@ -527,9 +576,10 @@ export function generatePlayer(minAge = 12, maxAge = 18, classModifiers = null) 
     // 5. HIDDEN TALENT PROFILE (Ceiling Attributes)
     let talentAttributes = {
         physical: {
-            speed: generateTalentValue('speed'),
+            speed: generateTalentValue('speed'),    
             strength: generateTalentValue('strength'),
             agility: generateTalentValue('agility'),
+            explosiveness: generateTalentValue('explosiveness'),
             jumping: generateTalentValue('jumping'),
             // Youth Stamina Buff: Young kids can run forever.
             stamina: Math.max(30, Math.min(99, generateTalentValue('stamina') + (16 - age) * 5)),
