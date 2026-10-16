@@ -1,6 +1,6 @@
 import { logPlayDebug } from './telemetry.js';
 import { TICK_DURATION_SECONDS, scalePerTickFactor } from './simulation_config.js';
-import { getPlayerBaseSpeedYPS } from './movement_profile.js';
+import { getPlayerBaseSpeedYPS, getPlayerAccelerationYPS2 } from './movement_profile.js';
 
 /**
  * Calculates Euclidean distance between two points.
@@ -116,14 +116,11 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
     // --- 3. ATTRIBUTE RETRIEVAL & NORMALIZATION ---
     // Safe fallbacks for mapping structures
     const weight = pState.weight || pState.wgt || 200;
-    const strength = pState.strength || pState.str || 50;
     const agility = pState.agility || pState.agi || 50;
-    const speedStat = pState.speed || pState.spd || 50;
     const fatigueMod = pState.fatigueModifier || 1.0;
 
     // Ratios for physics math (225 lbs is considered the "baseline" 1.0 ratio)
     const weightRatio = weight / 225;
-    const strengthFactor = strength / 100;
     const agiFactor = agility / 100;
 
     // --- 4. TARGETING MATH & CLEAN ARRIVAL RESOLUTION ---
@@ -279,8 +276,9 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
     const gapFriction = calculateGapFriction(pState, allPlayers);
     pState.isSqueezing = gapFriction < 0.9;
 
+    // Age-, speed-rating-, and weight-adjusted top speed
     const baseMaxSpeed = getPlayerBaseSpeedYPS(pState) * fatigueMod;
-
+    
     let actionMult = pState.speedMultiplier || 1.0;
     if (pState.isBallCarrier) actionMult *= 0.92;
     if (pState.action === 'backpedal') actionMult *= 0.55;
@@ -309,14 +307,22 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
     }
     const effectiveMaxSpeed = maxPossibleSpeed * turningPenalty;
 
-    // --- 7. ACCELERATION (Strength vs. Weight) ---
-    const explosiveness = (0.5 + strengthFactor) / weightRatio;
-    let accelRate = (1.5 + (agiFactor * 2.0) + (explosiveness * 2.0)) * fatigueMod;
+    // --- 7. ACCELERATION (Explosiveness, Agility, and Weight) ---
+    let maxAccelerationYPS2 =
+        getPlayerAccelerationYPS2(pState) * fatigueMod;
+
+    // Allow stronger braking than forward acceleration.
+    let maxDecelerationYPS2 = maxAccelerationYPS2 * 1.35;
+
+    // Steering response can change independently of the physical limits.
+    let accelRate = maxAccelerationYPS2;
 
     // Apply Stumble Penalty
     // If the player recently broke a tackle or got bumped, their acceleration is crippled.
     if (pState.moveCooldown > 0) {
-        accelRate *= 0.15; // 85% acceleration penalty while stumbling
+        accelRate *= 0.15;
+        maxAccelerationYPS2 *= 0.15;
+        maxDecelerationYPS2 *= 0.15;
     }
 
     // --- 8. DECELERATION (Braking / Planting) ---
@@ -335,7 +341,10 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
 
     // --- 9. APPLY NEWTONIAN ACCELERATION WITH DISTANCE GATING ---
     // Safely gate timeDelta to prevent division-by-zero or NaN
-    const safeTimeDelta = Math.max( timeDelta, TICK_DURATION_SECONDS );
+    const safeTimeDelta =
+        Number.isFinite(timeDelta) && timeDelta > 0
+            ? timeDelta
+            : TICK_DURATION_SECONDS;
 
     // Mathematically restrict speed so a player can NEVER jump past their target in a single tick
     const maxSafeSpeed = (distToTarget / safeTimeDelta) * 0.8;
@@ -345,10 +354,49 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
     const targetVx = (dx / safeDist) * clampedTargetSpeed;
     const targetVy = (dy / safeDist) * clampedTargetSpeed;
 
-    const steeringAlpha = 1 - Math.exp(-Math.max(0, accelRate) * Math.max(0, timeDelta));
+    // Smoothly steer toward the desired velocity.
+    // The exponential form behaves consistently across different timestep sizes.
+    const steeringAlpha =
+        1 - Math.exp(-Math.max(0, accelRate) * safeTimeDelta);
 
-    pState.vx += (targetVx - pState.vx) * steeringAlpha;
-    pState.vy += (targetVy - pState.vy) * steeringAlpha;
+    const currentVX = pState.vx;
+    const currentVY = pState.vy;
+
+    const proposedVX =
+        currentVX + (targetVx - currentVX) * steeringAlpha;
+    const proposedVY =
+        currentVY + (targetVy - currentVY) * steeringAlpha;
+
+    let deltaVX = proposedVX - currentVX;
+    let deltaVY = proposedVY - currentVY;
+
+    // Enforce a physical acceleration limit on each velocity change.
+    const deltaVelocity = Math.hypot(deltaVX, deltaVY);
+    const currentVelocityMagnitude = Math.hypot(currentVX, currentVY);
+    const desiredSpeed = Math.hypot(targetVx, targetVy);
+
+    const isBraking =
+        desiredSpeed < currentVelocityMagnitude - 0.05;
+
+    // Apply physical acceleration limits independently of steering response.
+    const effectiveAccelerationYPS2 = isBraking
+        ? Math.max(0, maxDecelerationYPS2)
+        : Math.max(0, maxAccelerationYPS2);
+
+    const maxVelocityChange =
+        effectiveAccelerationYPS2 * safeTimeDelta;
+
+    if (
+        deltaVelocity > maxVelocityChange &&
+        deltaVelocity > 0
+    ) {
+        const scale = maxVelocityChange / deltaVelocity;
+        deltaVX *= scale;
+        deltaVY *= scale;
+    }
+
+    pState.vx = currentVX + deltaVX;
+    pState.vy = currentVY + deltaVY;
 
     // Soft Speed Clamp (Retain slight over-speed from being bumped, but bleed it off)
     const speedAfter = Math.sqrt(pState.vx ** 2 + pState.vy ** 2);
