@@ -1603,13 +1603,16 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                 carrierIsPasser &&
                 (isBallPastLOS || ballCarrierState.action === 'qb_scramble');
 
-            // A defender who reads run can key a visible RB near the mesh.
-            // It does not require omniscient knowledge of who has the ball.
+            // FIX: Only consider the play "at the mesh" if the ball is still behind or right at the line of scrimmage!
+            // Once the runner has crossed the line of scrimmage, defenders pursue the runner directly.
+            const isNearMeshPoint = ballCarrierState && ballCarrierState.y <= (LOS + 1.2);
+
             const isRunReadAtMesh =
                 isRunRead &&
+                isNearMeshPoint &&
                 runTargetPerception > 0 &&
                 !(carrierIsPasser && qbScrambling);
-
+            
             const assignment = pState.assignment;
 
             if (playDiagnosis === 'read') {
