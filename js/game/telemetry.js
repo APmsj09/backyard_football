@@ -221,7 +221,12 @@ export function generatePlayDebugReport() {
         lines.push(`[PLAY ${index + 1} OF ${playHistoryBuffer.length}] ${play.id}`);
         lines.push(`Situation:   Q${m.quarter} | ${m.down} & ${m.yardsToGo} on ${m.ballOn}yd line (Hash: ${m.hash})`);
         lines.push(`Play Calls:  Offense: "${m.offPlayKey}" | Defense: "${m.defPlayKey}"`);
-        lines.push(`Outcome:     ${r.outcome || 'N/A'} | Gain: ${r.yards ?? 0}y | Final Ball: ${r.finalBallY ?? 'N/A'}y`);
+        lines.push(
+            `Outcome:     ${r.outcome || 'N/A'} | Result Yards: ${r.yards ?? 0}y | ` +
+            `Final Ball: ${r.finalBallY ?? 'N/A'}y | ` +
+            `Possession Change: ${r.possessionChange ?? 'N/A'} | ` +
+            `Turnover Type: ${r.turnoverType ?? 'none'}`
+        );
 
         if (play.startState) {
             const s = play.startState;
@@ -253,7 +258,9 @@ export function generatePlayDebugReport() {
                 `Final State: Tick=${f.tick} | ` +
                 `Live=${f.playIsLive} | ` +
                 `TD=${f.touchdown} | Defensive TD=${f.defensiveTD} | ` +
-                `Turnover=${f.turnover} | Return Start Y=${f.returnStartY ?? 'N/A'}`
+                `Turnover Flag=${f.turnover} | ` +
+                `Possession Changed=${f.possessionChanged} | ` +
+                `Return Start Y=${f.returnStartY ?? 'N/A'}`
             );
 
             lines.push(`Final Ball: ${JSON.stringify(f.ball)}`);
