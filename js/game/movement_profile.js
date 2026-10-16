@@ -9,11 +9,8 @@ export const MOVEMENT_MODEL = Object.freeze({
     fallbackAge: 12,
 
     // Top speed, in yards per second
-    baseSpeedAtMinAgeYPS: 5.4,
-    maturityBaseSpeedBonusYPS: 1.5,
-    youngestSpeedRatingBonusYPS: 1.5,
-    maturitySpeedRatingBonusYPS: 1.5,
-
+    baseSpeedYPS: 5.4,
+    speedRatingBonusYPS: 4.5,
     // Expected body weight by age
     weightAtMinAgeLbs: 75,
     weightPerYearLbs: 10,
@@ -121,15 +118,11 @@ function getWeightFactor(
 /**
  * Estimates a player's top running speed in yards per second.
  *
- * Uses age, the player's speed rating, and weight relative to
- * an age-based expectation.
+ * The current speed rating already reflects age-based development.
+ * Age additionally determines the expected-weight baseline.
  */
 export function getPlayerBaseSpeedYPS(player = {}) {
     const age = getPlayerAge(player);
-
-    const ageProgress =
-        (age - MOVEMENT_MODEL.minAge) /
-        (MOVEMENT_MODEL.maxAge - MOVEMENT_MODEL.minAge);
 
     const speed = getPhysicalRating(
         player,
@@ -140,23 +133,6 @@ export function getPlayerBaseSpeedYPS(player = {}) {
     const expectedWeight = getExpectedWeight(age);
     const weight = getPlayerWeight(player, expectedWeight);
 
-    const ageAdjustedBaseSpeed =
-        MOVEMENT_MODEL.baseSpeedAtMinAgeYPS +
-        (
-            MOVEMENT_MODEL.maturityBaseSpeedBonusYPS *
-            ageProgress
-        );
-
-    const speedRatingBonus =
-        (speed / 100) *
-        (
-            MOVEMENT_MODEL.youngestSpeedRatingBonusYPS +
-            (
-                MOVEMENT_MODEL.maturitySpeedRatingBonusYPS *
-                ageProgress
-            )
-        );
-
     const weightFactor = getWeightFactor(
         weight,
         expectedWeight,
@@ -164,10 +140,14 @@ export function getPlayerBaseSpeedYPS(player = {}) {
         MOVEMENT_MODEL.minimumSpeedWeightFactor
     );
 
-    return (
-        ageAdjustedBaseSpeed +
-        speedRatingBonus
-    ) * weightFactor;
+    const baseSpeed =
+        MOVEMENT_MODEL.baseSpeedYPS +
+        (
+            (speed / 100) *
+            MOVEMENT_MODEL.speedRatingBonusYPS
+        );
+
+    return baseSpeed * weightFactor;
 }
 
 /**
