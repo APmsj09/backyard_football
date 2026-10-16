@@ -78,9 +78,10 @@ export function calculateRoutePath(routeName, startX, startY) {
     const route = routeTree[routeName];
     if (!route || !route.path) return null;
     const xMirror = (route.mirror !== false && startX < CENTER_X) ? -1 : 1;
+    // FIX: Clamp all waypoints inside field boundaries (Y <= 118.5) so receivers do not run off the field
     return route.path.map(point => ({
-        x: startX + ((point.x || 0) * xMirror),
-        y: startY + (point.y || 0)
+        x: Math.max(1.0, Math.min(FIELD_WIDTH - 1.0, startX + ((point.x || 0) * xMirror))),
+        y: Math.max(1.0, Math.min(118.5, startY + (point.y || 0)))
     }));
 }
 
