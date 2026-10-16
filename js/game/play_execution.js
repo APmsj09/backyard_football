@@ -687,9 +687,52 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
             assignedThreats.add(target.id);
         }
 
+        // FIX 1: If an offensive lineman is UNCOVERED on a run play (or pancaked his man),
+        // actively CLIMB to the second level to block a linebacker or safety ahead of the run!
+        if (!target && (playType === 'run' || isPassCompleted)) {
+            const laneX = blocker.blockLaneX ?? runLaneX;
+            const secondLevelThreat = defenseStates
+                .filter(d => 
+                    !d.isBlocked && 
+                    d.stunnedTicks === 0 && 
+                    d.y > blocker.y - 0.5 && 
+                    d.y < blocker.y + 8.0 &&
+                    Math.abs(d.x - laneX) < 8.0
+                )
+                .sort((a, b) => getDistance(blocker, a) - getDistance(blocker, b))[0];
+
+            if (secondLevelThreat) {
+                target = secondLevelThreat;
+                blocker.dynamicTargetId = target.id;
+                assignedThreats.add(target.id);
+            }
+        }
+
+        // FIX 2: If an offensive lineman is UNCOVERED in pass protection, LOOK FOR WORK!
+        // Slide to double-team or help an adjacent teammate who is getting walked back in a bull rush.
+        if (!target && isPassPlay && !isPassCompleted) {
+            const strugglingBattle = playState.blockBattles?.find(b => 
+                b.status === 'ongoing' && 
+                b.blocker?.id !== blocker.id && 
+                Math.abs((b.blocker?.x ?? 0) - blocker.x) < 2.5 &&
+                (b.battleScore < 0 || b.loggedBullRush)
+            );
+
+            if (strugglingBattle && strugglingBattle.defender) {
+                target = strugglingBattle.defender; // Assist teammate!
+            }
+        }
+
         if (target) {
-            if (target.isEngaged) return;
-            // FIX: If pass is caught, linemen and receivers block downfield instead of pass-blocking at LOS
+            if (target.isEngaged && target.blockedBy?.id !== blocker.id) {
+                // Assisting on a double team: push into the engaged defender
+                blocker.targetX = target.x;
+                blocker.targetY = target.y - 0.4;
+                blocker.action = isPassPlay ? 'pass_block' : 'run_block';
+                setPointIntent(blocker, blocker.targetX, blocker.targetY, 0.4);
+                return;
+            }
+
             if (isPassPlay && !isPassCompleted) {
                 const qb = offenseStates.find(p => p.slot.startsWith('QB'));
                 if (qb) {
@@ -702,61 +745,28 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                     blocker.contactReduction = 1.3;
                 }
             } else {
-                const blockerIQ = blocker.playbookIQ || 50;
-
-                const canClimb =
-                    playType === 'run' &&
-                    playState.tick > 16 &&
-                    blockerIQ > 60 &&
-                    blockerProfile.assignmentDiscipline >= 45;
-                let climbTarget = null;
-                if (canClimb) {
-                    climbTarget = defenseStates.find(d =>
-                        d.role === 'LB' && !d.isBlocked && !d.isEngaged &&
-                        d.y > blocker.y && d.y < blocker.y + 6.0 && Math.abs(d.x - blocker.x) < 4.5
-                    );
-                }
-
-                if (climbTarget) {
-                    blocker.dynamicTargetId = climbTarget.id;
-                    target = climbTarget;
-                }
-
-                // Run blockers approach the defender from the side
-                // away from the designed running lane.
+                // Run blockers approach the defender from the side away from the designed running lane.
                 const laneX = blocker.blockLaneX ?? runLaneX;
 
-                if (
-                    playType === 'run' &&
-                    Number.isFinite(laneX)
-                ) {
+                if (Number.isFinite(laneX)) {
                     const defenderX = target.x;
-
-                    // Move the blocking target to the outside of
-                    // the defender, away from the intended run lane.
                     let sealDirection = defenderX < laneX ? -1 : 1;
 
-                    // When the defender is almost directly in the lane,
-                    // use the blocker's original alignment to pick a side.
                     if (Math.abs(defenderX - laneX) < 0.6) {
-                        sealDirection =
-                            blocker.initialX < laneX ? -1 : 1;
+                        sealDirection = blocker.initialX < laneX ? -1 : 1;
                     }
 
-                    blocker.targetX =
-                        defenderX + (sealDirection * 0.65);
-
+                    blocker.targetX = defenderX + (sealDirection * 0.65);
                     blocker.targetY = target.y + 0.2;
                 } else {
-                    // Preserve the existing behavior for other plays.
                     blocker.targetX = target.x;
                     blocker.targetY = target.y;
                 }
-                
+
                 blocker.contactReduction = 1.2;
             }
 
-            if (getDistance(blocker, target) < 1.8) {
+            if (getDistance(blocker, target) < 1.8 && !target.isEngaged) {
                 const strDiff = (blocker.str || 50) - (target.str || 50);
                 blocker.isEngaged = true;
                 blocker.engagedWith = target;
@@ -772,16 +782,19 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                 });
             }
         } else {
-            // FIX: Prevent perimeter blockers (WRs) from snapping back to the sideline.
-            // On run plays or completed passes, advance upfield to stalk block instead of resetting to initialX.
+            // FIX 3: If no threat exists, advance with the play instead of freezing at pre-snap initialX!
             if (playType === 'run' || isPassCompleted) {
-                blocker.targetX = blocker.x; // Hold current lateral lane
-                blocker.targetY = Math.min(115, blocker.y + 1.5); // Push downfield
+                // Climb upfield to lead the ball carrier
+                blocker.targetX = blocker.x;
+                blocker.targetY = Math.min(115, blocker.y + 1.5);
                 blocker.action = 'run_block';
                 setPointIntent(blocker, blocker.targetX, blocker.targetY, 0.4);
             } else {
+                // In pass pro with no rusher, anchor the pocket front
+                const qb = offenseStates.find(p => p.slot.startsWith('QB'));
                 blocker.targetX = blocker.initialX;
-                blocker.targetY = isPassPlay ? LOS - 1.5 : LOS + 1.0;
+                blocker.targetY = qb ? Math.max(LOS - 2.5, qb.y + 2.0) : (LOS - 1.5);
+                setPointIntent(blocker, blocker.targetX, blocker.targetY, 0.35);
             }
         }
     };
