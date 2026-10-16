@@ -241,8 +241,16 @@ export function setupInitialPlayerStates(playState, offense, defense, play, assi
                     } else if (routeTree[assignment]) {
                         action = 'run_route';
                         routePath = calculateRoutePath(assignment, startX, startY);
+
+                        // DEEPER FIX: Red Zone Route Capping
+                        // Truncate waypoints so receivers never run through the back of the end zone (y > 118.0)
                         if (routePath && routePath.length) {
-                            targetX = routePath[0].x; targetY = routePath[0].y;
+                            routePath = routePath.map(pt => ({
+                                x: Math.max(1.5, Math.min(51.8, pt.x)),
+                                y: Math.min(118.0, pt.y)
+                            }));
+                            targetX = routePath[0].x; 
+                            targetY = routePath[0].y;
                         }
                     }
                 }
