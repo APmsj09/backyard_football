@@ -918,7 +918,7 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
     const qbAttrs = qbPlayer?.attributes || {
         mental: { playbookIQ: 50, decisionMaking: 50 },
         physical: { agility: 50, strength: 50 },
-        technical: { throwingAccuracy: 50 }
+        technical: { throwingAccuracy: 50, throwPower: 50 }
     };
 
     const qbIQ = Math.max(
@@ -932,6 +932,8 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
     );
     const qbAgility = qbAttrs.physical?.agility || 50;
     const qbStrength = qbAttrs.physical?.strength || 50;
+    // Uses throwPower with safe fallback to strength/pState
+    const qbPower = qbAttrs.technical?.throwPower ?? qbState.throwPower ?? qbState.thp ?? qbStrength;
     const qbAcc = qbAttrs.technical?.throwingAccuracy || 50;
 
     // Post-snap processing ability.
@@ -1070,8 +1072,9 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
         const distFromQB = getDistance(qbState, rec);
         let estimatedBallSpeed = 22;
 
-        if (distFromQB > 25) estimatedBallSpeed = 16 + (qbStrength / 100) * 14.0;
-        else if (distFromQB < 12) estimatedBallSpeed = 16 + (qbStrength / 100) * 14.0;
+        // Arm power drives flight speed
+        if (distFromQB > 25) estimatedBallSpeed = 16 + (qbPower / 100) * 14.0;
+        else if (distFromQB < 12) estimatedBallSpeed = 16 + (qbPower / 100) * 14.0;
 
         const estimatedFlightTime = distFromQB / estimatedBallSpeed;
         const projRecX = rec.x + (rec.vx || 0) * estimatedFlightTime;
@@ -1295,8 +1298,9 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
         }
 
         if (depth > 14) {
-            if (qbStrength < 60) {
-                score -= (60 - qbStrength) * 2.0;
+            // Noodle-arm QBs are penalized for chucking deep balls they can't reach
+            if (qbPower < 60) {
+                score -= (60 - qbPower) * 2.0;
             }
 
             // Heavy coverage penalty for chucking deep into multiple defenders or safeties
@@ -1439,7 +1443,7 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
         if (bestTarget && bestPassScore > 15) {
             const onTheRunMod = (qbAgility / 100) * 0.85;
             if (gameLog) pushGameLog(gameLog, `[Tick ${playState.tick}] 🏃‍♂️🎯 ${qbState.name} keeps his eyes downfield and throws on the run!`, playState);
-            executeThrow(qbState, bestTarget, qbStrength, qbAcc * onTheRunMod, playState, gameLog, "Throw on Run");
+            executeThrow(qbState, bestTarget, qbPower, qbAcc * onTheRunMod, playState, gameLog, "Throw on Run");
             return;
         }
 
@@ -1820,13 +1824,13 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
 
         if (deepReceiver && deepReceiver.y > playState.lineOfScrimmage + 10 && Math.random() > 0.4) {
             if (gameLog) gameLog.push(`🚨 ${qbState.name} heaves it downfield in desperation!`);
-            executeThrow(qbState, deepReceiver, qbStrength, qbAcc * 0.4, playState, gameLog, "Desperation Throw");
+            executeThrow(qbState, deepReceiver, qbPower, qbAcc * 0.4, playState, gameLog, "Desperation Throw");
             return;
         }
     }
 }
 
-export function executeThrow(qbState, target, strength, accuracy, playState, gameLog, actionType) {
+export function executeThrow(qbState, target, throwPower, accuracy, playState, gameLog, actionType) {
     const hasQBCrossedLine = qbState.y > (playState.lineOfScrimmage + 0.5);
     const isForwardPass = target.y > qbState.y + 0.25;
 
@@ -1851,7 +1855,8 @@ export function executeThrow(qbState, target, strength, accuracy, playState, gam
         passType = 'lob';
     }
 
-    const maxArmVelocity = 16 + (strength / 100) * 14.0;
+    // Real arm velocity calculation based on throwPower
+    const maxArmVelocity = 16 + (throwPower / 100) * 14.0;
     let ballSpeed = maxArmVelocity;
     if (passType === 'lob') ballSpeed *= 0.84; // Faster lobs prevent waiting
     else if (passType === 'touch') ballSpeed *= 0.92;
@@ -2016,14 +2021,15 @@ export function updateThrowoffDecision(playState, offenseStates, gameLog) {
         return;
     }
 
-    const armStrength = qb.strength || qb.attributes?.physical?.strength || 50;
+    // Throwoff uses arm power with fallback to physical strength
+    const armPower = qb.throwPower || qb.thp || qb.attributes?.technical?.throwPower || qb.strength || 50;
     const throwAcc = qb.throwingAccuracy || qb.attributes?.technical?.throwingAccuracy || 50;
 
     const isLeftHash = qb.x < 26.6;
     const targetX = isLeftHash ? 42.0 : 11.0;
 
-    // A throwoff relies entirely on arm strength (same as executing a deep pass)
-    const baseDistance = 25 + ((armStrength / 100) * 35);
+    // Deep backyard heave scales with throwPower
+    const baseDistance = 25 + ((armPower / 100) * 35);
     const varianceY = (Math.random() - 0.5) * 8;
     let puntDistance = Math.max(20, baseDistance + varianceY);
 
@@ -2038,7 +2044,7 @@ export function updateThrowoffDecision(playState, offenseStates, gameLog) {
     const finalTargetX = Math.max(2, Math.min(51, targetX + errorX));
     const finalTargetY = Math.min(118, targetY + errorY);
 
-    const hangTime = 3.5 + (armStrength / 75);
+    const hangTime = 3.5 + (armPower / 75);
 
     playState.ballState.vx = (finalTargetX - qb.x) / hangTime;
     playState.ballState.vy = (finalTargetY - qb.y) / hangTime;

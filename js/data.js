@@ -181,7 +181,7 @@ export const offenseFormations = {
             OL3: [1.6, -0.2]     // RT
         },
         slotPriorities: {
-            QB1: { throwingAccuracy: 3, playbookIQ: 2 },
+            QB1: { throwingAccuracy: 3, throwPower: 2, playbookIQ: 2 },
             RB1: { speed: 2, agility: 2, catchingHands: 1 },
             WR1: { speed: 3, catchingHands: 3 },
             WR2: { speed: 3, catchingHands: 3 },
@@ -207,7 +207,7 @@ export const offenseFormations = {
             OL3: [1.5, -0.2]
         },
         slotPriorities: {
-            QB1: { throwingAccuracy: 3, playbookIQ: 2 },
+            QB1: { throwingAccuracy: 3, throwPower: 2, playbookIQ: 2 },
             WR1: { speed: 3, catchingHands: 3 },
             WR2: { speed: 3, catchingHands: 3 },
             WR3: { agility: 3, catchingHands: 3, speed: 2 },
@@ -233,7 +233,7 @@ export const offenseFormations = {
             OL3: [1.4, -0.2]
         },
         slotPriorities: {
-            QB1: { strength: 2, playbookIQ: 2 },
+            QB1: { throwPower: 2, strength: 2, playbookIQ: 2 },
             RB1: { strength: 3, speed: 2 },
             RB2: { blocking: 3, strength: 3 },
             WR1: { blocking: 2, catchingHands: 2 },
@@ -258,8 +258,8 @@ export const offenseFormations = {
             OL2: [0, -0.2],
             OL3: [1.5, -0.2]
         },
-        slotPriorities: {
-            QB1: { throwingAccuracy: 3, playbookIQ: 2 },
+         slotPriorities: {
+            QB1: { throwingAccuracy: 3, throwPower: 2, playbookIQ: 2 },
             RB1: { blocking: 2, catchingHands: 2 },
             WR1: { speed: 3, catchingHands: 2 },
             WR2: { agility: 3, catchingHands: 2 },
@@ -364,7 +364,7 @@ export const offenseFormations = {
             OL3: [1.4, -0.2]
         },
         slotPriorities: {
-            QB1: { strength: 3, throwingAccuracy: 2 },
+            QB1: { throwPower: 3, throwingAccuracy: 2 },
             OL1: { blocking: 3, strength: 2 },
             OL2: { blocking: 3, strength: 1 },
             OL3: { blocking: 3, strength: 1 },

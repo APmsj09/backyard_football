@@ -12,6 +12,8 @@ function getStat(player, attrKey) {
     if (!player || !player.attributes) return '-';
     if (attrKey === 'height') return formatHeight(player.attributes.physical?.height);
     if (attrKey === 'weight') return player.attributes.physical?.weight || '-';
+    // Clean fallback to strength if throwPower is not yet set
+    if (attrKey === 'throwPower') return player.attributes.technical?.throwPower ?? player.attributes.physical?.strength ?? '-';
     if (player.attributes.physical?.[attrKey] !== undefined) return player.attributes.physical[attrKey];
     if (player.attributes.mental?.[attrKey] !== undefined) return player.attributes.mental[attrKey];
     if (player.attributes.technical?.[attrKey] !== undefined) return player.attributes.technical[attrKey];
@@ -52,7 +54,7 @@ function createDepthCardHTML(player, index, groupKey, baseGroupKey = null) {
     }
 
     const attrMap = {
-        throwingAccuracy: 'THR', playbookIQ: 'IQ', strength: 'STR',
+        throwingAccuracy: 'ACC', throwPower: 'POW', playbookIQ: 'IQ', strength: 'STR',
         speed: 'SPD', agility: 'AGI', catchingHands: 'HND',
         blocking: 'BLK', tackling: 'TKL', blockShedding: 'BSH',
         stamina: 'STA', toughness: 'TGH'

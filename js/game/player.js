@@ -7,75 +7,86 @@ const offensivePositions = ['QB', 'RB', 'WR', 'TE', 'OL'];
 const defensivePositions = ['DL', 'LB', 'DB'];
 
 export const positionOverallWeights = {
-    // Give QBs more weight to arm talent, accuracy, and mobility
+    // 1. QB: Arm talent, IQ, decision making, mobility
     QB: {
-    throwingAccuracy: 0.35,
-    throwPower: 0.25,
-    playbookIQ: 0.15,
-    decisionMaking: 0.10,
-    speed: 0.05,
-    consistency: 0.05,
-    explosiveness: 0.05
-},
+        throwingAccuracy: 0.30,
+        throwPower: 0.25,
+        playbookIQ: 0.15,
+        decisionMaking: 0.10,
+        speed: 0.08,
+        consistency: 0.07,
+        explosiveness: 0.05
+    },
 
-RB: {
-    speed: 0.25,
-    carrying: 0.25,
-    agility: 0.15,
-    strength: 0.15,
-    catchingHands: 0.10,
-    explosiveness: 0.10
-},
+    // 2. RB: Speed, ball security, elusiveness, and receiving touch
+    RB: {
+        speed: 0.25,
+        carrying: 0.25,
+        agility: 0.15,
+        strength: 0.15,
+        catchingHands: 0.10,
+        explosiveness: 0.10
+    },
 
-WR: {
-    speed: 0.30,
-    catchingHands: 0.30,
-    agility: 0.15,
-    jumping: 0.15,
-    explosiveness: 0.10
-},
+    // 3. WR: Added a pinch of carrying (5%) for YAC ball security
+    WR: {
+        speed: 0.28,
+        catchingHands: 0.28,
+        agility: 0.15,
+        jumping: 0.14,
+        explosiveness: 0.10,
+        carrying: 0.05
+    },
 
-TE: {
-    catchingHands: 0.30,
-    blocking: 0.25,
-    strength: 0.20,
-    jumping: 0.15,
-    speed: 0.05,
-    explosiveness: 0.05
-},
+    // 4. TE: Complete two-way weapon (hands, blocking, size, jumping)
+    TE: {
+        catchingHands: 0.28,
+        blocking: 0.24,
+        strength: 0.18,
+        jumping: 0.12,
+        speed: 0.08,
+        explosiveness: 0.05,
+        carrying: 0.05
+    },
 
-OL: {
-    strength: 0.33,
-    blocking: 0.37,
-    playbookIQ: 0.15,
-    weight: 0.05,
-    toughness: 0.05,
-    explosiveness: 0.05
-},
+    // 5. OL: Trench power, blocking technique, football IQ, frame
+    OL: {
+        strength: 0.33,
+        blocking: 0.37,
+        playbookIQ: 0.15,
+        weight: 0.05,
+        toughness: 0.05,
+        explosiveness: 0.05
+    },
 
-DL: {
-    strength: 0.33,
-    blockShedding: 0.35,
-    tackling: 0.20,
-    speed: 0.07,
-    explosiveness: 0.05
-},
+    // 6. DL: Shedding, anchor strength, wrap-up tackling, burst
+    DL: {
+        strength: 0.33,
+        blockShedding: 0.32,
+        tackling: 0.20,
+        speed: 0.08,
+        explosiveness: 0.07
+    },
 
-LB: {
-    tackling: 0.30,
-    playbookIQ: 0.25,
-    speed: 0.20,
-    blockShedding: 0.20,
-    explosiveness: 0.05
-},
+    // 7. LB: Added coverage (12%) — essential for 8v8 pass defense & hybrid safeties
+    LB: {
+        tackling: 0.26,
+        playbookIQ: 0.20,
+        speed: 0.18,
+        blockShedding: 0.18,
+        coverage: 0.12,
+        explosiveness: 0.06
+    },
 
-DB: {
-    speed: 0.32,
-    coverage: 0.30,
-    agility: 0.15,
-    jumping: 0.15,
-    explosiveness: 0.08
-}
+    // 8. DB: Added tackling (10%) — required for open-field sandlot stops
+    DB: {
+        speed: 0.28,
+        coverage: 0.28,
+        agility: 0.14,
+        tackling: 0.10,
+        jumping: 0.12,
+        explosiveness: 0.08
+    }
 };
 
 export function estimateBestPosition(scoutedPlayer) {
@@ -172,28 +183,31 @@ export function estimateBestPosition(scoutedPlayer) {
             score -= 8;
         }
 
-        // --- GATEKEEPER SANITY RULES ---
+        // --- GATEKEEPER SANITY RULES (Age-Relative & Dynamic) ---
+        const playerAge = scoutedPlayer.age || 14;
+        const expectedWeight = 75 + (Math.max(8, playerAge) - 8) * 10;
 
-        // 1. Cannot be a QB without legitimate throwing skill.
+        // 1. Cannot be a QB without legitimate throwing skill relative to age
         if (pos === 'QB') {
-            if (throwing < 45) score -= 40;
-            if (throwing < 35) score = 0;
+            const minThrowingFloor = playerAge < 12 ? 24 : (playerAge < 15 ? 32 : 40);
+            if (throwing < minThrowingFloor) score -= 30;
+            if (throwing < (minThrowingFloor - 8)) score = 0;
         }
 
-        // 2. Heavy players (>220 lbs) are poor WR/DB fits,
-        //    but can still become useful trench players.
-        if (weight > 220) {
+        // 2. Heavy players relative to age benchmark are poor WR/DB fits, but great trench assets
+        if (weight > expectedWeight * 1.30) {
             if (pos === 'WR' || pos === 'DB') score -= 25;
-            if (pos === 'OL' || pos === 'DL') score += 5;
+            if (pos === 'OL' || pos === 'DL') score += 8;
         }
 
-        // 3. Very light players cannot realistically become OL.
-        if (weight < 155 && pos === 'OL') {
-            score -= 30;
+        // 3. Underweight players relative to age benchmark cannot realistically play OL
+        if (weight < expectedWeight * 0.85 && pos === 'OL') {
+            score -= 25;
         }
 
-        // 4. Slow players are poor WR/DB candidates.
-        if (speed < 45 && (pos === 'WR' || pos === 'DB')) {
+        // 4. Slow players relative to age benchmark are poor WR/DB candidates
+        const minSpeedForSkillPos = playerAge < 12 ? 30 : 42;
+        if (speed < minSpeedForSkillPos && (pos === 'WR' || pos === 'DB')) {
             score -= 20;
         }
 
@@ -260,7 +274,7 @@ export function calculateSlotSuitability(player, slot, side, team) {
                 let value = player.attributes[category][actualAttr];
                 if (typeof value !== 'number') continue;
 
-                if (attr === 'weight') value = Math.max(0, Math.min(100, (value - 100) * 0.66 + 40));
+                if (attr === 'weight') value = Math.max(20, Math.min(85, (value - 120) * 0.35 + 35));
                 if (attr === 'height') value = Math.max(0, Math.min(100, (value - 50) * 4));
 
                 score += value * priorities[attr];
@@ -277,14 +291,14 @@ export function calculateSlotSuitability(player, slot, side, team) {
 
 const archetypes = [
     // --- SIGNAL CALLERS ---
-    { name: 'Field General', off: 'QB', def: 'LB', weightMod: 1.1, heightMod: 2, keyAttrs: ['playbookIQ', 'decisionMaking', 'throwingAccuracy', 'consistency', 'tackling'], speedMod: 0.85, strMod: 1.0 },
-    { name: 'Scrambler', off: 'QB', def: 'DB', weightMod: 0.95, heightMod: -1, keyAttrs: ['speed', 'agility', 'throwingAccuracy', 'stamina'], speedMod: 1.2, strMod: 0.85 },
-    { name: 'Gunslinger', off: 'QB', def: 'DB', weightMod: 1.05, heightMod: 3, keyAttrs: ['throwingAccuracy', 'strength', 'clutch', 'playbookIQ'], speedMod: 0.9, strMod: 1.25 },
-    { name: 'Heavy Crusher QB', off: 'QB', def: 'DL', weightMod: 1.4, heightMod: 4, keyAttrs: ['strength', 'throwingAccuracy', 'toughness', 'blockShedding'], speedMod: 0.65, strMod: 1.3 },
-    { name: 'Game Manager', off: 'QB', def: 'DB', weightMod: 1.0, heightMod: 0, keyAttrs: ['playbookIQ', 'decisionMaking', 'consistency', 'throwingAccuracy', 'coverage'], speedMod: 0.9, strMod: 0.9 },
-    { name: 'Dual-Threat', off: 'QB', def: 'DB', weightMod: 1.0, heightMod: 1, keyAttrs: ['speed', 'throwingAccuracy', 'agility', 'stamina'], speedMod: 1.15, strMod: 1.0 },
+    { name: 'Field General', off: 'QB', def: 'LB', weightMod: 1.05, heightMod: 2, keyAttrs: ['playbookIQ', 'decisionMaking', 'throwingAccuracy', 'throwPower', 'consistency'], speedMod: 0.85, strMod: 1.0 },
+    { name: 'Scrambler', off: 'QB', def: 'DB', weightMod: 0.95, heightMod: -1, keyAttrs: ['speed', 'agility', 'throwingAccuracy', 'throwPower'], speedMod: 1.2, strMod: 0.85 },
+    { name: 'Gunslinger', off: 'QB', def: 'DB', weightMod: 1.05, heightMod: 3, keyAttrs: ['throwingAccuracy', 'throwPower', 'clutch', 'playbookIQ'], speedMod: 0.9, strMod: 1.15 },
+    { name: 'Heavy Crusher QB', off: 'QB', def: 'DL', weightMod: 1.3, heightMod: 3, keyAttrs: ['strength', 'throwingAccuracy', 'throwPower', 'toughness'], speedMod: 0.75, strMod: 1.25 },
+    { name: 'Game Manager', off: 'QB', def: 'DB', weightMod: 1.0, heightMod: 0, keyAttrs: ['playbookIQ', 'decisionMaking', 'consistency', 'throwingAccuracy'], speedMod: 0.9, strMod: 0.9 },
+    { name: 'Dual-Threat', off: 'QB', def: 'DB', weightMod: 1.0, heightMod: 1, keyAttrs: ['speed', 'throwingAccuracy', 'throwPower', 'agility'], speedMod: 1.15, strMod: 1.0 },
     { name: 'Backyard Magician', off: 'QB', def: 'DB', weightMod: 0.9, heightMod: -1, keyAttrs: ['agility', 'clutch', 'throwingAccuracy', 'speed'], speedMod: 1.1, strMod: 0.95 },
-    { name: 'Cannon Arm', off: 'QB', def: 'DL', weightMod: 1.1, heightMod: 2, keyAttrs: ['strength', 'throwingAccuracy', 'tackling'], speedMod: 0.8, strMod: 1.3 },
+    { name: 'Cannon Arm', off: 'QB', def: 'DL', weightMod: 1.1, heightMod: 2, keyAttrs: ['throwPower', 'throwingAccuracy', 'strength'], speedMod: 0.85, strMod: 1.2 },
 
     // --- BALL CARRIERS ---
     { name: 'Power Back', off: 'RB', def: 'LB', weightMod: 1.25, heightMod: -1, keyAttrs: ['strength', 'toughness', 'tackling', 'stamina'], speedMod: 0.9, strMod: 1.2 },
@@ -314,21 +328,21 @@ const archetypes = [
     { name: 'Extra Lineman', off: 'TE', def: 'DL', weightMod: 1.5, heightMod: 2, keyAttrs: ['blocking', 'strength', 'toughness', 'tackling'], speedMod: 0.6, strMod: 1.3 },
     { name: 'H-Back', off: 'TE', def: 'LB', weightMod: 1.2, heightMod: -1, keyAttrs: ['blocking', 'strength', 'speed', 'agility'], speedMod: 0.95, strMod: 1.1 },
 
-    // --- OFFENSIVE LINE ---
-    { name: 'Road Grader', off: 'OL', def: 'DL', weightMod: 1.9, heightMod: 2, keyAttrs: ['strength', 'blocking', 'weight', 'toughness'], speedMod: 0.45, strMod: 1.5 },
-    { name: 'Mobile Guard', off: 'OL', def: 'LB', weightMod: 1.4, heightMod: 1, keyAttrs: ['agility', 'blocking', 'playbookIQ', 'tackling'], speedMod: 0.8, strMod: 1.1 },
-    { name: 'Wall Protector', off: 'OL', def: 'DL', weightMod: 1.6, heightMod: 6, keyAttrs: ['blocking', 'height', 'strength', 'consistency'], speedMod: 0.6, strMod: 1.2 },
-    { name: 'Technician OL', off: 'OL', def: 'DL', weightMod: 1.5, heightMod: 3, keyAttrs: ['playbookIQ', 'blocking', 'consistency', 'blockShedding'], speedMod: 0.7, strMod: 1.1 },
-    { name: 'Mauler', off: 'OL', def: 'DL', weightMod: 2.0, heightMod: 1, keyAttrs: ['strength', 'blocking', 'toughness', 'weight'], speedMod: 0.4, strMod: 1.5 },
-    { name: 'Athletic Tackle', off: 'OL', def: 'DL', weightMod: 1.3, heightMod: 4, keyAttrs: ['agility', 'blocking', 'speed', 'stamina'], speedMod: 0.9, strMod: 1.1 },
-    { name: 'Center/General', off: 'OL', def: 'LB', weightMod: 1.4, heightMod: 0, keyAttrs: ['playbookIQ', 'blocking', 'consistency', 'toughness'], speedMod: 0.7, strMod: 1.1 },
+    // --- OFFENSIVE LINE (Tuned weightMod between 1.25x and 1.48x: 95-115 lbs at age 8; 245-295 lbs at age 18) ---
+    { name: 'Road Grader', off: 'OL', def: 'DL', weightMod: 1.42, heightMod: 2, keyAttrs: ['strength', 'blocking', 'weight', 'toughness'], speedMod: 0.55, strMod: 1.4 },
+    { name: 'Mobile Guard', off: 'OL', def: 'LB', weightMod: 1.25, heightMod: 1, keyAttrs: ['agility', 'blocking', 'playbookIQ', 'tackling'], speedMod: 0.8, strMod: 1.1 },
+    { name: 'Wall Protector', off: 'OL', def: 'DL', weightMod: 1.35, heightMod: 5, keyAttrs: ['blocking', 'height', 'strength', 'consistency'], speedMod: 0.65, strMod: 1.2 },
+    { name: 'Technician OL', off: 'OL', def: 'DL', weightMod: 1.30, heightMod: 2, keyAttrs: ['playbookIQ', 'blocking', 'consistency', 'blockShedding'], speedMod: 0.7, strMod: 1.1 },
+    { name: 'Mauler', off: 'OL', def: 'DL', weightMod: 1.48, heightMod: 1, keyAttrs: ['strength', 'blocking', 'toughness', 'weight'], speedMod: 0.50, strMod: 1.45 },
+    { name: 'Athletic Tackle', off: 'OL', def: 'DL', weightMod: 1.25, heightMod: 4, keyAttrs: ['agility', 'blocking', 'speed', 'stamina'], speedMod: 0.9, strMod: 1.1 },
+    { name: 'Center/General', off: 'OL', def: 'LB', weightMod: 1.28, heightMod: 0, keyAttrs: ['playbookIQ', 'blocking', 'consistency', 'toughness'], speedMod: 0.7, strMod: 1.1 },
 
     // --- DEFENSIVE LINE ---
-    { name: 'Speed Rusher', off: 'OL', def: 'DL', weightMod: 1.25, heightMod: 4, keyAttrs: ['speed', 'blockShedding', 'agility', 'clutch'], speedMod: 1.05, strMod: 1.05 },
-    { name: 'Run Stuffer', off: 'TE', def: 'DL', weightMod: 1.7, heightMod: 1, keyAttrs: ['strength', 'tackling', 'weight', 'toughness'], speedMod: 0.55, strMod: 1.4 },
-    { name: 'Bull Rusher', off: 'OL', def: 'DL', weightMod: 1.6, heightMod: 2, keyAttrs: ['strength', 'blockShedding', 'toughness', 'blocking'], speedMod: 0.7, strMod: 1.35 },
-    { name: 'Versatile End', off: 'TE', def: 'DL', weightMod: 1.4, heightMod: 4, keyAttrs: ['blockShedding', 'tackling', 'playbookIQ', 'strength'], speedMod: 0.85, strMod: 1.2 },
-    { name: 'Nose Tackle', off: 'OL', def: 'DL', weightMod: 2.2, heightMod: 0, keyAttrs: ['weight', 'strength', 'tackling', 'toughness'], speedMod: 0.3, strMod: 1.6 },
+    { name: 'Speed Rusher', off: 'OL', def: 'DL', weightMod: 1.18, heightMod: 3, keyAttrs: ['speed', 'blockShedding', 'agility', 'clutch'], speedMod: 1.05, strMod: 1.05 },
+    { name: 'Run Stuffer', off: 'TE', def: 'DL', weightMod: 1.40, heightMod: 1, keyAttrs: ['strength', 'tackling', 'weight', 'toughness'], speedMod: 0.60, strMod: 1.35 },
+    { name: 'Bull Rusher', off: 'OL', def: 'DL', weightMod: 1.35, heightMod: 2, keyAttrs: ['strength', 'blockShedding', 'toughness', 'blocking'], speedMod: 0.7, strMod: 1.30 },
+    { name: 'Versatile End', off: 'TE', def: 'DL', weightMod: 1.25, heightMod: 3, keyAttrs: ['blockShedding', 'tackling', 'playbookIQ', 'strength'], speedMod: 0.85, strMod: 1.2 },
+    { name: 'Nose Tackle', off: 'OL', def: 'DL', weightMod: 1.50, heightMod: 0, keyAttrs: ['weight', 'strength', 'tackling', 'toughness'], speedMod: 0.45, strMod: 1.5 },
     { name: 'Edge Setter', off: 'TE', def: 'DL', weightMod: 1.3, heightMod: 2, keyAttrs: ['strength', 'tackling', 'playbookIQ', 'blocking'], speedMod: 0.8, strMod: 1.2 },
     { name: 'Pass Rush Specialist', off: 'WR', def: 'DL', weightMod: 1.0, heightMod: 1, keyAttrs: ['speed', 'blockShedding', 'agility', 'stamina'], speedMod: 1.06, strMod: 0.9 },
 
@@ -353,24 +367,25 @@ const archetypes = [
 
 // Targeted signature boosts for specific archetypes
 const archetypeBoosts = {
-    // 🔥 BOOSTED QB & RB STATS SO THEY CAN ACTUALLY THROW/RUN EFFECTIVELY
-    'Field General': { playbookIQ: 15, throwingAccuracy: 18 },
-    'Scrambler': { speed: 12, agility: 12, explosiveness: 10, throwingAccuracy: 10 },
-    'Gunslinger': { throwingAccuracy: 15, strength: 12 },
-    'Heavy Crusher QB': { strength: 12, toughness: 10, throwingAccuracy: 8 },
-    'Game Manager': { playbookIQ: 12, consistency: 15, throwingAccuracy: 8 },
-    'Dual-Threat': { speed: 8, agility: 8, explosiveness: 10, throwingAccuracy: 10 },
-    'Backyard Magician': { agility: 15, clutch: 12, throwingAccuracy: 10 },
-    'Cannon Arm': { strength: 18, throwingAccuracy: 8 },
+    // Balanced QB passing ability & arm strength
+    'Field General': { playbookIQ: 15, throwingAccuracy: 16, throwPower: 10 },
+    'Scrambler': { speed: 12, agility: 12, explosiveness: 10, throwingAccuracy: 8, throwPower: 8 },
+    'Gunslinger': { throwingAccuracy: 14, throwPower: 18, clutch: 8 },
+    'Heavy Crusher QB': { strength: 12, toughness: 10, throwingAccuracy: 8, throwPower: 12 },
+    'Game Manager': { playbookIQ: 14, consistency: 15, throwingAccuracy: 10, throwPower: 8 },
+    'Dual-Threat': { speed: 8, agility: 8, explosiveness: 10, throwingAccuracy: 10, throwPower: 10 },
+    'Backyard Magician': { agility: 14, clutch: 12, throwingAccuracy: 12, throwPower: 8 },
+    'Cannon Arm': { throwPower: 22, strength: 10, throwingAccuracy: 8 },
 
-    'Power Back': { strength: 12, toughness: 10, speed: 6 },
-    'Speed Back': { speed: 15, agility: 12, explosiveness: 12 },
-    'Workhorse': { stamina: 15, consistency: 12, speed: 5 },
-    'Receiving Back': { catchingHands: 12, agility: 10, speed: 8 },
-    'Bruiser': { strength: 12, toughness: 12, stamina: 5 },
-    'Third-Down Back': { blocking: 10, catchingHands: 10, playbookIQ: 5 },
-    'Change-of-Pace': { speed: 10, agility: 12, explosiveness: 14 },
-    'Slashing Back': { agility: 10, speed: 8, playbookIQ: 5 },
+    // Boosted Carrying to match the 25% RB formula weight
+    'Power Back': { strength: 12, toughness: 10, carrying: 14, speed: 6 },
+    'Speed Back': { speed: 14, agility: 12, explosiveness: 10, carrying: 10 },
+    'Workhorse': { stamina: 15, consistency: 12, carrying: 15, speed: 5 },
+    'Receiving Back': { catchingHands: 12, agility: 10, carrying: 10, speed: 8 },
+    'Bruiser': { strength: 12, toughness: 12, carrying: 10, stamina: 5 },
+    'Third-Down Back': { blocking: 10, catchingHands: 10, carrying: 10, playbookIQ: 5 },
+    'Change-of-Pace': { speed: 10, agility: 12, explosiveness: 12, carrying: 8 },
+    'Slashing Back': { agility: 10, speed: 8, carrying: 12, playbookIQ: 5 },
 
     'Deep Threat': { speed: 8, agility: 5, explosiveness: 10 },
     'Route Technician': { agility: 7, playbookIQ: 5 },
@@ -391,8 +406,8 @@ const archetypeBoosts = {
     'Road Grader': { strength: 8, blocking: 7 },
     'Mobile Guard': { agility: 7, blocking: 5 },
     'Wall Protector': { blocking: 8, consistency: 5 },
-    'Technician OL': { playbookIQ: 7, blocking: 6 },
-    'Mauler': { strength: 15, blocking: 10 },
+    'Technician OL': { blocking: 12, playbookIQ: 10, consistency: 8 },
+    'Mauler': { strength: 16, toughness: 12, blocking: 4 },
     'Athletic Tackle': { agility: 12, blocking: 8 },
     'Center/General': { playbookIQ: 15, blocking: 8 },
 
@@ -452,48 +467,57 @@ export function getProspectSignatureSkills(player, pos) {
     switch (pos) {
         case 'QB':
             return [
-                { label: 'THR', val: tech.throwingAccuracy ?? '?' },
+                { label: 'ACC', val: tech.throwingAccuracy ?? '?' },
+                { label: 'POW', val: tech.throwPower ?? phys.strength ?? '?' },
                 { label: 'IQ', val: ment.playbookIQ ?? '?' }
             ];
         case 'RB':
             return [
                 { label: 'SPD', val: phys.speed ?? '?' },
-                { label: 'AGI', val: phys.agility ?? '?' }
+                { label: 'AGI', val: phys.agility ?? '?' },
+                { label: 'CAR', val: tech.carrying ?? '?' }
             ];
         case 'WR':
             return [
                 { label: 'HND', val: tech.catchingHands ?? '?' },
-                { label: 'SPD', val: phys.speed ?? '?' }
+                { label: 'SPD', val: phys.speed ?? '?' },
+                { label: 'AGI', val: phys.agility ?? '?' }
             ];
         case 'TE':
             return [
                 { label: 'HND', val: tech.catchingHands ?? '?' },
-                { label: 'BLK', val: tech.blocking ?? '?' }
+                { label: 'BLK', val: tech.blocking ?? '?' },
+                { label: 'STR', val: phys.strength ?? '?' }
             ];
         case 'OL':
             return [
                 { label: 'BLK', val: tech.blocking ?? '?' },
-                { label: 'STR', val: phys.strength ?? '?' }
+                { label: 'STR', val: phys.strength ?? '?' },
+                { label: 'IQ', val: ment.playbookIQ ?? '?' }
             ];
         case 'DL':
             return [
                 { label: 'BSH', val: tech.blockShedding ?? '?' },
-                { label: 'STR', val: phys.strength ?? '?' }
+                { label: 'STR', val: phys.strength ?? '?' },
+                { label: 'TKL', val: tech.tackling ?? '?' }
             ];
         case 'LB':
             return [
                 { label: 'TKL', val: tech.tackling ?? '?' },
-                { label: 'IQ', val: ment.playbookIQ ?? '?' }
+                { label: 'IQ', val: ment.playbookIQ ?? '?' },
+                { label: 'SPD', val: phys.speed ?? '?' }
             ];
         case 'DB':
             return [
                 { label: 'COV', val: (tech.coverage ?? tech.passCoverage) ?? '?' },
-                { label: 'SPD', val: phys.speed ?? '?' }
+                { label: 'SPD', val: phys.speed ?? '?' },
+                { label: 'TKL', val: tech.tackling ?? '?' }
             ];
         default:
             return [
                 { label: 'SPD', val: phys.speed ?? '?' },
-                { label: 'STR', val: phys.strength ?? '?' }
+                { label: 'STR', val: phys.strength ?? '?' },
+                { label: 'AGI', val: phys.agility ?? '?' }
             ];
     }
 }
@@ -595,6 +619,7 @@ export function generatePlayer(minAge = 12, maxAge = 18, classModifiers = null) 
         },
         technical: {
             throwingAccuracy: generateTalentValue('throwingAccuracy'),
+            throwPower: generateTalentValue('throwPower'),
             catchingHands: generateTalentValue('catchingHands'),
             carrying: generateTalentValue('carrying'),
             tackling: generateTalentValue('tackling'),
@@ -622,17 +647,22 @@ export function generatePlayer(minAge = 12, maxAge = 18, classModifiers = null) 
         )
     );
 
-    // Strict clamp: Non-QBs should strictly have throwing accuracy between 15 and 35
+    // Strict clamp: Non-QBs should strictly have throwing accuracy & arm power between 15 and 35
     if (archetype.off !== 'QB') {
         talentAttributes.technical.throwingAccuracy = Math.min(
             35,
             Math.round(talentAttributes.technical.throwingAccuracy * 0.35)
         );
+        talentAttributes.technical.throwPower = Math.min(
+            35,
+            Math.round(talentAttributes.technical.throwPower * 0.35)
+        );
     }
 
-    // Linemen should never roll decent passing or route-running hands
+    // Linemen should never roll decent passing, arm power, or route-running hands
     if (archetype.off === 'OL') {
         talentAttributes.technical.throwingAccuracy = Math.min(25, talentAttributes.technical.throwingAccuracy);
+        talentAttributes.technical.throwPower = Math.min(25, talentAttributes.technical.throwPower);
         talentAttributes.technical.catchingHands = Math.min(35, talentAttributes.technical.catchingHands);
     }
 
@@ -774,21 +804,34 @@ export function generatePlayer(minAge = 12, maxAge = 18, classModifiers = null) 
         const ethVal = workEthicRoll;
 
         const athleticClues = [
-            speedVal > 65 ? "Won the neighborhood 50-yard dash in untied sneakers." :
-                speedVal < 35 ? "Not the fastest runner on the blacktop, but holds his ground." :
-                    "A balanced athlete who plays every sport at recess.",
-            strVal > 60 ? "Built like a cinder block from helping his uncle haul landscape pavers." :
-                strVal < 30 ? "Relies on quickness rather than brute power in scuffles." :
-                    "Has decent functional strength for his age."
+            speedVal > 65
+                ? "Won the neighborhood 50-yard dash in untied sneakers."
+                : speedVal < 35
+                    ? "Not the fastest runner on the blacktop, but holds his ground against any bull-rush."
+                    : "A balanced multi-sport athlete who plays touch football every recess.",
+            strVal > 65
+                ? "Built like a cinder block from helping his uncle haul landscaping bricks all summer."
+                : strVal < 35
+                    ? "Relies on pure quickness and slippery leverage rather than brute muscle."
+                    : "Possesses solid, dependable functional strength for his age.",
+            attributes.physical?.agility > 65
+                ? "Known to make defenders trip over their own shoelaces in open space."
+                : "A straight-line north-and-south player who doesn't waste steps."
         ];
 
         const mentalClues = [
-            iqVal > 65 ? "Draws up trick plays on cafeteria napkins during lunch." :
-                iqVal < 35 ? "Pure natural athlete who still forgets which hash mark to line up on." :
-                    "Understands the basics of backyard route trees.",
-            egoVal > 75 ? "Once took his ball home from the park because nobody passed to him." :
-                ethVal > 75 ? "First one waiting at the park gates on Saturday mornings." :
-                    "Always brings extra freeze pops for the team after games."
+            iqVal > 65
+                ? "Draws up trick plays on greasy cafeteria napkins during fifth-period lunch."
+                : iqVal < 35
+                    ? "Pure natural instinct player who occasionally lines up on the wrong hash mark."
+                    : "Consistently reads simple backyard coverages and knows his assignments.",
+            egoVal > 75
+                ? "Once took his Wilson football home because the offense ran three straight handoffs away from him."
+                : ethVal > 75
+                    ? "First one waiting at the park chained gates on frosty Saturday mornings."
+                    : likeabilityRoll > 70
+                        ? "Always packs a cooler of freeze pops to share with both squads after scrimmage."
+                        : "Keeps his head down and lets his hits do the talking."
         ];
 
         const quirks = [

@@ -420,6 +420,7 @@ export function setupInitialPlayerStates(playState, offense, defense, play, assi
             const blocking = player.attributes?.technical?.blocking || 50;
             const blockShedding = player.attributes?.technical?.blockShedding || 50;
             const accuracy = player.attributes?.technical?.throwingAccuracy || 50;
+            const throwPower = player.attributes?.technical?.throwPower ?? strength;
 
             const pState = {
                 id: player.id,
@@ -446,10 +447,11 @@ export function setupInitialPlayerStates(playState, offense, defense, play, assi
                 speed, agility, strength, jumping, weight, height, playbookIQ: playerIQ,
                 cons: consistency, tgh: toughness, ctch: catching,
                 tkl: tackling, blk: blocking, shed: blockShedding,
-                acc: accuracy, cov: coverage,
+                acc: accuracy, thp: throwPower, cov: coverage,
                 speed, agility, strength, weight, height, playbookIQ: playerIQ,
                 consistency, toughness, catchingHands: catching,
-                tackling, blocking, blockShedding, throwingAccuracy: accuracy, coverage,
+                tackling, blocking, blockShedding, throwingAccuracy: accuracy,
+                throwPower, coverage,
                 action, assignment, assignedPlayerSlot, routePath,
                 currentPathIndex: 0,
                 readProgression, currentReadTargetSlot: readProgression[0] || null,

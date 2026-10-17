@@ -424,7 +424,8 @@ export function renderDraftPool(gameState, onPlayerSelect, sortColumn = 'potenti
                     <th class="py-2 px-2 text-center w-8">★</th>
                     <th class="py-2 px-2 text-center w-12 cursor-pointer hover:bg-slate-200" data-sort="position">Pos</th>
                     <th class="py-2 px-3 text-left cursor-pointer hover:bg-slate-200" data-sort="name">Prospect</th>
-                    <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-200" data-sort="throwingAccuracy">Throw</th>
+                    <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-200" data-sort="throwingAccuracy">Acc</th>
+                    <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-200" data-sort="throwPower">Pow</th>
                     <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-200" data-sort="catchingHands">Hands</th>
                     <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-200" data-sort="blocking">Block</th>
                     <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-200" data-sort="tackling">Tackle</th>
@@ -539,6 +540,7 @@ export function renderDraftPool(gameState, onPlayerSelect, sortColumn = 'potenti
                 <td class="py-2 px-2 text-center">${posBadge}</td>
                 <td class="py-2 px-3 font-semibold text-slate-900 font-sans truncate max-w-[140px]">${scouted.name}</td>
                 <td class="text-center py-2 px-2">${scouted.attributes?.technical?.throwingAccuracy ?? '?'}</td>
+                <td class="text-center py-2 px-2">${scouted.attributes?.technical?.throwPower ?? scouted.attributes?.physical?.strength ?? '?'}</td>
                 <td class="text-center py-2 px-2">${scouted.attributes?.technical?.catchingHands ?? '?'}</td>
                 <td class="text-center py-2 px-2">${scouted.attributes?.technical?.blocking ?? '?'}</td>
                 <td class="text-center py-2 px-2">${scouted.attributes?.technical?.tackling ?? '?'}</td>
@@ -1864,7 +1866,8 @@ function renderMyTeamTab(gameState) {
                     <th class="py-2.5 px-2 text-center cursor-pointer hover:bg-slate-800" onclick="app_setRosterSort('strength')">STR${getIndicator('strength')}</th>
                     <th class="py-2.5 px-2 text-center cursor-pointer hover:bg-slate-800" onclick="app_setRosterSort('agility')">AGI${getIndicator('agility')}</th>
                     <th class="py-2.5 px-2 text-center cursor-pointer hover:bg-slate-800" onclick="app_setRosterSort('playbookIQ')">IQ${getIndicator('playbookIQ')}</th>
-                    <th class="py-2.5 px-2 text-center cursor-pointer hover:bg-slate-800" onclick="app_setRosterSort('throwingAccuracy')">THR${getIndicator('throwingAccuracy')}</th>
+                    <th class="py-2.5 px-2 text-center cursor-pointer hover:bg-slate-800" onclick="app_setRosterSort('throwingAccuracy')">ACC${getIndicator('throwingAccuracy')}</th>
+                    <th class="py-2.5 px-2 text-center cursor-pointer hover:bg-slate-800" onclick="app_setRosterSort('throwPower')">POW${getIndicator('throwPower')}</th>
                     <th class="py-2.5 px-2 text-center cursor-pointer hover:bg-slate-800" onclick="app_setRosterSort('catchingHands')">HND${getIndicator('catchingHands')}</th>
                     <th class="py-2.5 px-2 text-center cursor-pointer hover:bg-slate-800" onclick="app_setRosterSort('blocking')">BLK${getIndicator('blocking')}</th>
                     <th class="py-2.5 px-2 text-center cursor-pointer hover:bg-slate-800" onclick="app_setRosterSort('tackling')">TKL${getIndicator('tackling')}</th>
@@ -1873,7 +1876,7 @@ function renderMyTeamTab(gameState) {
             <tbody class="divide-y divide-slate-100 font-mono">`;
 
     if (sortedRoster.length === 0) {
-        html += `<tr><td colspan="14" class="p-6 text-center text-slate-400 font-sans italic">Roster empty.</td></tr>`;
+        html += `<tr><td colspan="15" class="p-6 text-center text-slate-400 font-sans italic">Roster empty.</td></tr>`;
     } else {
         sortedRoster.forEach(p => {
             const isCap = gameState.playerTeam.captainId === p.id;
@@ -1908,6 +1911,7 @@ function renderMyTeamTab(gameState) {
                 <td class="text-center py-2 px-2 text-slate-700">${p.attributes?.physical?.agility || 0}</td>
                 <td class="text-center py-2 px-2 text-slate-700">${p.attributes?.mental?.playbookIQ || 0}</td>
                 <td class="text-center py-2 px-2 text-slate-700">${p.attributes?.technical?.throwingAccuracy || 0}</td>
+                <td class="text-center py-2 px-2 text-slate-700">${p.attributes?.technical?.throwPower ?? p.attributes?.physical?.strength ?? 0}</td>
                 <td class="text-center py-2 px-2 text-slate-700">${p.attributes?.technical?.catchingHands || 0}</td>
                 <td class="text-center py-2 px-2 text-slate-700">${p.attributes?.technical?.blocking || 0}</td>
                 <td class="text-center py-2 px-2 text-slate-700">${p.attributes?.technical?.tackling || 0}</td>
@@ -2047,9 +2051,9 @@ function renderPositionalOveralls() {
     // Key attribute definitions per position for compact stat bars
     const keyAttrConfig = {
         QB: [
-            { label: 'THR', get: p => p.attributes?.technical?.throwingAccuracy ?? 50 },
-            { label: 'IQ', get: p => p.attributes?.mental?.playbookIQ ?? 50 },
-            { label: 'SPD', get: p => p.attributes?.physical?.speed ?? 50 }
+            { label: 'ACC', get: p => p.attributes?.technical?.throwingAccuracy ?? 50 },
+            { label: 'POW', get: p => p.attributes?.technical?.throwPower ?? p.attributes?.physical?.strength ?? 50 },
+            { label: 'IQ', get: p => p.attributes?.mental?.playbookIQ ?? 50 }
         ],
         RB: [
             { label: 'SPD', get: p => p.attributes?.physical?.speed ?? 50 },
