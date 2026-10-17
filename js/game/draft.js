@@ -114,7 +114,7 @@ export function calculateDraftValue(player, team) {
 
     // 4. Coach Scheme & Attribute Bias (10%)
     let coachFit = 0;
-    if (coach.attributePreferences) {
+    if (coach?.attributePreferences) {
         for (const cat in player.attributes) {
             for (const attr in player.attributes[cat]) {
                 const weight = coach.attributePreferences[cat]?.[attr] || 1.0;

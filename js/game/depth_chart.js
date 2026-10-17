@@ -49,28 +49,30 @@ export function isPlayerViableForPosition(p, pos) {
     // Direct matches for assigned primary offense or defense
     if (off === pos || def === pos) return true;
 
-    // Strict Offensive Viability (derived from offensive identity only)
+    // Realistic Two-Way Ironman Viability for 8-Man Football
     if (pos === 'QB') return off === 'QB';
-    if (pos === 'RB') return off === 'RB';
+    if (pos === 'RB') {
+        return off === 'RB' || (def === 'LB' && (p.attributes?.physical?.speed || 0) >= 48) || (def === 'DB' && (p.attributes?.physical?.speed || 0) >= 54);
+    }
     if (pos === 'WR') {
-        return off === 'WR' || (off === 'RB' && (p.attributes?.technical?.catchingHands || 0) >= 45);
+        return off === 'WR' || def === 'DB' || (off === 'RB' && (p.attributes?.technical?.catchingHands || 0) >= 45);
     }
     if (pos === 'TE') {
-        return off === 'TE' || (off === 'WR' && (p.attributes?.physical?.strength || 0) >= 48) || (off === 'OL' && (p.attributes?.physical?.speed || 0) >= 35);
+        return off === 'TE' || def === 'LB' || (off === 'WR' && (p.attributes?.physical?.strength || 0) >= 48) || (off === 'OL' && (p.attributes?.physical?.speed || 0) >= 35);
     }
     if (pos === 'OL') {
-        return off === 'OL' || (off === 'TE' && (p.attributes?.physical?.strength || 0) >= 50) || def === 'DL';
+        return off === 'OL' || def === 'DL' || (off === 'TE' && (p.attributes?.physical?.strength || 0) >= 50);
     }
 
-    // Strict Defensive Viability (derived from defensive identity only)
+    // Defensive Viability (supports natural two-way crossovers)
     if (pos === 'DL') {
         return def === 'DL' || off === 'OL' || (def === 'LB' && (p.attributes?.physical?.strength || 0) >= 55);
     }
     if (pos === 'LB') {
-        return def === 'LB' || (def === 'DL' && (p.attributes?.physical?.speed || 0) >= 40) || (def === 'DB' && (p.attributes?.technical?.tackling || 0) >= 45);
+        return def === 'LB' || off === 'TE' || (def === 'DL' && (p.attributes?.physical?.speed || 0) >= 40) || (def === 'DB' && (p.attributes?.technical?.tackling || 0) >= 45) || (off === 'RB' && (p.attributes?.technical?.tackling || 0) >= 42);
     }
     if (pos === 'DB') {
-        return def === 'DB' || (def === 'LB' && (p.attributes?.physical?.speed || 0) >= 52);
+        return def === 'DB' || off === 'WR' || (off === 'QB' && (p.attributes?.physical?.speed || 0) >= 55) || (def === 'LB' && (p.attributes?.physical?.speed || 0) >= 52);
     }
 
     return false;
@@ -302,6 +304,16 @@ export function assignPlayerToSlot(team, playerId, slot, side) {
     if (!isPlayerViableForPosition(player, posKey)) {
         return false;
     }
+
+    // Remove this player from any other slot override on this side to prevent duplicate clones
+    Object.keys(team.slotOverrides[side] || {}).forEach(otherSlot => {
+        if (otherSlot !== slot && team.slotOverrides[side][otherSlot] === playerId) {
+            delete team.slotOverrides[side][otherSlot];
+            if (team.depthChart[side][otherSlot] === playerId) {
+                team.depthChart[side][otherSlot] = null;
+            }
+        }
+    });
 
     // Lock the assignment only after validation succeeds.
     team.slotOverrides[side][slot] = playerId;

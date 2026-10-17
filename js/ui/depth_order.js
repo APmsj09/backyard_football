@@ -34,7 +34,10 @@ function createDepthCardHTML(player, index, groupKey, baseGroupKey = null) {
         else if (groupKey === 'RB' && index === 0) isStarterZone = true;
         else if (groupKey === 'WR' && index <= 2) isStarterZone = true;
         else if (groupKey === 'OL' && index <= 2) isStarterZone = true;
-        else if (['DL', 'LB', 'DB'].includes(groupKey) && index <= 1) isStarterZone = true;
+        else if (groupKey === 'TE' && index === 0) isStarterZone = true;
+        else if (groupKey === 'DL' && index <= 2) isStarterZone = true; // 8-man base front starts 3 DLs
+        else if (groupKey === 'LB' && index <= 1) isStarterZone = true; // Base starts 2 LBs
+        else if (groupKey === 'DB' && index <= 2) isStarterZone = true; // Base starts 3 DBs (up to 5 in dime)
     }
 
     const rankStyle = isStarterZone ? 'border-l-4 border-green-500' : 'border-l-4 border-gray-300';

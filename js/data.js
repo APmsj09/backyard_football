@@ -418,6 +418,80 @@ export const offensivePlaybook = {
         }
     },
 
+    // --- FORMATION-TAILORED POWER & HEAVY CONCEPTS ---
+    'Power_FB_Dive': {
+        name: 'Fullback Belly Dive',
+        type: 'run', tags: ['run', 'inside', 'power'],
+        compatibleFormations: ['Power', 'Jumbo'],
+        assignments: {
+            'QB': 'qb_setup', 'RB2': 'run_dive', 'RB': 'run_stretch_r',
+            'OL': 'run_block', 'Y': 'run_block', 'X': 'run_block'
+        }
+    },
+    'Power_Counter_Trey': {
+        name: 'Power Counter Trey',
+        type: 'run', tags: ['run', 'counter', 'power'],
+        compatibleFormations: ['Power', 'Jumbo'],
+        assignments: {
+            'QB': 'qb_setup', 'RB': 'run_counter_r', 'RB2': 'lead_right',
+            'OL1': 'pull_right', 'OL2': 'run_block', 'OL3': 'run_block',
+            'Y': 'run_block', 'X': 'run_block'
+        }
+    },
+    'Power_PA_Rollout_Slide': {
+        name: 'Power PA Rollout Slide',
+        type: 'pass', tags: ['pass', 'pa', 'rollout'],
+        compatibleFormations: ['Power', 'Jumbo'],
+        readProgression: ['RB2', 'Y', 'X'],
+        assignments: {
+            'QB': 'qb_scramble', 'RB': 'run_iso_r', 'RB2': 'Flat',
+            'Y': 'Corner', 'X': 'Post', 'OL': 'pass_block'
+        }
+    },
+
+    // --- FORMATION-TAILORED SPREAD & EMPTY CONCEPTS ---
+    'Spread_Smash': {
+        name: 'Spread Smash Concept',
+        type: 'pass', tags: ['pass', 'short', 'spread'],
+        compatibleFormations: ['Spread', 'Empty', 'Balanced'],
+        readProgression: ['WR3', 'WR1', 'WR4'],
+        assignments: {
+            'QB': 'qb_setup', 'WR1': 'Hitch', 'WR3': 'Corner',
+            'WR2': 'Hitch', 'WR4': 'Corner', 'OL': 'pass_block', 'RB': 'Flat'
+        }
+    },
+    'Spread_QB_Draw': {
+        name: 'Spread 4-WR QB Draw',
+        type: 'run', tags: ['run', 'draw', 'qb'],
+        compatibleFormations: ['Spread', 'Empty'],
+        assignments: {
+            'QB': 'run_dive', 'WR1': 'Fly', 'WR2': 'Fly',
+            'WR3': 'Drag', 'WR4': 'Drag', 'OL': 'pass_block'
+        }
+    },
+
+    // --- FORMATION-TAILORED TRIPS CONCEPTS ---
+    'Trips_Flood_Sail': {
+        name: 'Trips Sail Flood',
+        type: 'pass', tags: ['pass', 'flood', 'trips'],
+        compatibleFormations: ['Trips', 'TripsLeft'],
+        readProgression: ['WR2', 'WR3', 'WR1'],
+        assignments: {
+            'QB': 'qb_setup', 'WR1': 'Fly', 'WR2': 'Out',
+            'WR3': 'Flat', 'RB': 'pass_block', 'OL': 'pass_block'
+        }
+    },
+    'Trips_FourVerts': {
+        name: 'Trips 4-Verts Seam Stress',
+        type: 'pass', tags: ['pass', 'deep', 'trips'],
+        compatibleFormations: ['Trips', 'TripsLeft'],
+        readProgression: ['WR2', 'WR3', 'WR1', 'RB'],
+        assignments: {
+            'QB': 'qb_setup', 'WR1': 'Fade', 'WR2': 'Seam',
+            'WR3': 'Seam', 'RB': 'Wheel', 'OL': 'pass_block'
+        }
+    },
+
     // ===================================
     // --- PASSING CONCEPTS (QUICK / SCREENS)
     // ===================================
@@ -1075,6 +1149,31 @@ export const defensivePlaybook = {
             'DL1': 'pass_rush', 'DL2': 'pass_rush', 'DL3': 'pass_rush',
             'LB1': 'zone_hook_curl_left',
             'DB1': 'zone_deep_half_left', 'DB2': 'zone_deep_third_right', 'DB3': 'zone_short_middle', 'DB4': 'zone_deep_middle'
+        }
+    },
+
+    // --- NEW MODERN & LORE DEFENSIVE SCHEMES ---
+    'Cover_4_Quarters': {
+        name: 'Cover 4 Quarters (Anti-Deep)',
+        concept: 'Zone', blitz: false,
+        compatibleFormations: ['3-1-4', '3-0-5', '2-3-3'],
+        tags: ['zone', 'cover4', 'anti-deep'],
+        assignments: {
+            'DL1': 'pass_rush', 'DL2': 'pass_rush', 'DL3': 'pass_rush',
+            'LB1': 'zone_hook_curl_middle',
+            'DB1': 'zone_deep_third_left', 'DB2': 'zone_deep_third_right',
+            'DB3': 'zone_deep_half_left', 'DB4': 'zone_deep_half_right'
+        }
+    },
+    'Double_A_Gap_Mug': {
+        name: 'Double A-Gap Overload',
+        concept: 'Man', blitz: true,
+        compatibleFormations: ['3-2-3', '2-3-3', '4-2-2'],
+        tags: ['man', 'blitz', 'aggro'],
+        assignments: {
+            'DL1': 'pass_rush', 'DL2': 'pass_rush', 'DL3': 'pass_rush',
+            'LB1': 'blitz_gap', 'LB2': 'blitz_gap',
+            'DB1': 'man_cover_X', 'DB2': 'man_cover_Z', 'DB3': 'zone_deep_middle'
         }
     },
     'Hybrid_Man_Free': {

@@ -674,18 +674,42 @@ export function renderSelectedPlayerCard(player, gameState) {
     });
     overallsHtml += '</div>';
 
+    // Identify top secondary position for two-way scouting preview
+    const secPosList = ['QB', 'RB', 'WR', 'TE', 'OL', 'DL', 'LB', 'DB'].filter(pKey => pKey !== pos);
+    const topSecPos = secPosList.map(pKey => ({ pos: pKey, ovr: calculateOverall(scouted, pKey) }))
+                                .sort((a, b) => b.ovr - a.ovr)[0];
+    const twoWaySnippet = topSecPos && topSecPos.ovr >= ovr - 8
+        ? `<span class="bg-indigo-50 text-indigo-700 border border-indigo-200 px-1 py-0.2 rounded text-[8px] font-bold">2-Way: ${topSecPos.pos} (${topSecPos.ovr})</span>`
+        : '';
+
     elements.selectedPlayerCard.innerHTML = `
         <div class="flex flex-col">
             <!-- Compact Header -->
             <div class="flex justify-between items-center mb-1.5 pb-1 border-b border-slate-200">
                 <div class="truncate pr-1">
-                    <h3 class="font-black text-sm text-slate-900 truncate leading-tight">${scouted.name}</h3>
+                    <div class="flex items-center gap-1.5">
+                        <h3 class="font-black text-sm text-slate-900 truncate leading-tight">${scouted.name}</h3>
+                        ${twoWaySnippet}
+                    </div>
                     <p class="text-[10px] text-slate-500 font-mono">${scouted.age}yo • ${formatHeight(scouted.attributes?.physical?.height)} • ${scouted.attributes?.physical?.weight}#</p>
                 </div>
                 <div class="text-right bg-slate-900 text-white px-2 py-0.5 rounded shrink-0">
                     <span class="text-[8px] uppercase tracking-wider block text-slate-400">${pos}</span>
                     <span class="text-base font-black leading-none">${ovr}</span>
                 </div>
+            </div>
+
+            <!-- Dossier Navigation Tabs -->
+            <div class="flex gap-1 mb-2 border-b border-slate-200 pb-1.5">
+                <button class="dossier-tab-btn flex-1 py-1 rounded text-[10px] font-bold transition ${activeDossierTab === 'overview' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}" data-dtab="overview" onclick="window.app_switchDossierTab('overview')">
+                    Overview
+                </button>
+                <button class="dossier-tab-btn flex-1 py-1 rounded text-[10px] font-bold transition ${activeDossierTab === 'matrix' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}" data-dtab="matrix" onclick="window.app_switchDossierTab('matrix')">
+                    8-Way Matrix
+                </button>
+                <button class="dossier-tab-btn flex-1 py-1 rounded text-[10px] font-bold transition ${activeDossierTab === 'bio' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}" data-dtab="bio" onclick="window.app_switchDossierTab('bio')">
+                    Scouting Bio
+                </button>
             </div>
 
             <!-- Tab 1: Overview Pane (Clean & Compact) -->
@@ -1296,6 +1320,102 @@ export function getOffseasonFADay() { return offseasonFADay; }
 export function incrementOffseasonFADay() { offseasonFADay++; }
 export function clearOffseasonFABids() { offseasonFABids = []; }
 
+window.app_openBidModal = function(playerId) {
+    const gs = getGameState();
+    if (!gs?.playerTeam) return;
+
+    const player = Game.getPlayer(playerId) || gs.players.find(p => p.id === playerId);
+    if (!player) return;
+
+    const team = gs.playerTeam;
+    const pos = player.pos || estimateBestPosition(player);
+    const ovr = calculateOverall(player, pos);
+    const existingBid = offseasonFABids.find(b => b.playerId === playerId);
+
+    const availableTokens = (team.socialProfile?.favorTokens || 0) -
+        offseasonFABids.filter(b => b.playerId !== playerId).reduce((sum, b) => sum + (b.offer.tokensOffered || 0), 0);
+
+    const intel = Game.getPlayerMarketIntel ? Game.getPlayerMarketIntel(player, gs) : { heat: 'QUIET', rumorText: 'No other active suitors.' };
+
+    const modalHtml = `
+        <div class="space-y-3.5 text-left text-xs">
+            <!-- Prospect Snapshot Header -->
+            <div class="bg-slate-900 text-white p-3 rounded flex justify-between items-center shadow-sm">
+                <div>
+                    <div class="flex items-center gap-2">
+                        <h4 class="font-black text-sm text-white">${player.name}</h4>
+                        <span class="bg-slate-800 text-amber-400 font-bold px-1.5 py-0.5 rounded text-[10px]">${player.age}yo • ${pos}</span>
+                    </div>
+                    <p class="text-[11px] text-slate-400 mt-0.5">${player.archetypeName || 'Athlete'} • Style: ${player.personality?.clique || 'Regular'}</p>
+                </div>
+                <div class="text-right">
+                    <span class="text-[9px] uppercase tracking-wider text-slate-400 block">Rating</span>
+                    <span class="font-black text-lg text-amber-400">${ovr} OVR</span>
+                </div>
+            </div>
+
+            <!-- Market Intel Banner -->
+            <div class="p-2.5 rounded border ${intel.heat === 'HOT' ? 'bg-rose-50 border-rose-300 text-rose-950' : 'bg-slate-50 border-slate-200 text-slate-700'} text-[11px]">
+                <span class="font-bold uppercase tracking-wider block text-[9px] text-slate-500 mb-0.5">Blacktop Grapevine</span>
+                <p class="italic">"${intel.rumorText || 'Listening to pitches across the neighborhood.'}"</p>
+            </div>
+
+            <!-- Pitch Parameters -->
+            <div class="space-y-3 bg-white p-3 border border-slate-200 rounded">
+                <div>
+                    <label class="block text-[10px] font-black uppercase tracking-wider text-slate-600 mb-1">
+                        Promised Roster Role
+                    </label>
+                    <select id="fa-pitch-role" class="w-full p-2 border border-slate-300 rounded font-bold text-slate-800 bg-white text-xs outline-none">
+                        <option value="STARTER" ${(existingBid?.offer?.role === 'STARTER' || !existingBid) ? 'selected' : ''}>Guaranteed Starter (High attraction for top players)</option>
+                        <option value="ROTATIONAL" ${existingBid?.offer?.role === 'ROTATIONAL' ? 'selected' : ''}>Key Rotational Reserve / Two-Way Specialist</option>
+                        <option value="DEVELOPMENTAL" ${existingBid?.offer?.role === 'DEVELOPMENTAL' ? 'selected' : ''}>Developmental Prospect (Low expectation)</option>
+                    </select>
+                </div>
+
+                <div>
+                    <label class="block text-[10px] font-black uppercase tracking-wider text-slate-600 mb-1">
+                        Offensive Focal Point Guarantee
+                    </label>
+                    <select id="fa-pitch-touches" class="w-full p-2 border border-slate-300 rounded font-bold text-slate-800 bg-white text-xs outline-none">
+                        <option value="BALANCED" ${(existingBid?.offer?.promiseTouches === 'BALANCED' || !existingBid) ? 'selected' : ''}>Team-First / Balanced Touch Distribution</option>
+                        <option value="FEATURED" ${existingBid?.offer?.promiseTouches === 'FEATURED' ? 'selected' : ''}>Featured Weapon (High targets & handoff share)</option>
+                    </select>
+                </div>
+
+                <div>
+                    <div class="flex justify-between items-center mb-1">
+                        <label class="text-[10px] font-black uppercase tracking-wider text-slate-600">
+                            Favor Token Sweetener
+                        </label>
+                        <span class="text-[10px] text-slate-500 font-mono">Available: <b>${Math.max(0, availableTokens)}</b></span>
+                    </div>
+                    <select id="fa-pitch-tokens" class="w-full p-2 border border-slate-300 rounded font-bold text-slate-800 bg-white text-xs outline-none">
+                        <option value="0" ${(!existingBid || existingBid?.offer?.tokensOffered === 0) ? 'selected' : ''}>0 Tokens (Standard pitch)</option>
+                        ${availableTokens >= 1 ? `<option value="1" ${existingBid?.offer?.tokensOffered === 1 ? 'selected' : ''}>1 Token (Bike lend, new gloves, playground concessions)</option>` : ''}
+                        ${availableTokens >= 2 ? `<option value="2" ${existingBid?.offer?.tokensOffered === 2 ? 'selected' : ''}>2 Tokens (Substantial commitment & personal favors)</option>` : ''}
+                        ${availableTokens >= 3 ? `<option value="3" ${existingBid?.offer?.tokensOffered === 3 ? 'selected' : ''}>3 Tokens (All-in neighborhood recruit)</option>` : ''}
+                    </select>
+                </div>
+            </div>
+        </div>
+    `;
+
+    showModal(`Recruit Prospect: ${player.name}`, modalHtml, () => {
+        const role = document.getElementById('fa-pitch-role')?.value || 'STARTER';
+        const promiseTouches = document.getElementById('fa-pitch-touches')?.value || 'BALANCED';
+        const tokensOffered = parseInt(document.getElementById('fa-pitch-tokens')?.value || '0', 10);
+
+        addOffseasonFABid({
+            playerId: player.id,
+            teamId: team.id,
+            offer: { role, promiseTouches, tokensOffered }
+        });
+
+        renderOffseasonFAScreen(gs);
+    }, existingBid ? "Update Offer" : "Submit Contract Offer");
+};
+
 export function renderStaffTab(gameState) {
     const container = document.getElementById('staff-container');
     if (!container || !gameState?.playerTeam) return;
@@ -1816,12 +1936,21 @@ function renderFormationDropdown(side, formationMap, selectedKey) {
         .map(([k, v]) => `<option value="${k}" ${k === selectedKey ? 'selected' : ''}>${v.name}</option>`)
         .join('');
 
-    /*select.onchange = (e) => {
-        const team = getGameState().playerTeam;
+    // Instant live synchronization: immediately update diagram and positions upon selection
+    select.onchange = (e) => {
+        const gs = getGameState();
+        const team = gs?.playerTeam;
+        if (!team) return;
+
         team.formations[side] = e.target.value;
         rebuildDepthChartFromOrder(team);
-        document.dispatchEvent(new CustomEvent('refresh-ui'));
-    };*/
+        saveGameState();
+
+        // Immediately update visual field and depth breakdown without tab hopping
+        renderDepthChartSide(side, gs);
+        renderPositionalOveralls();
+        renderFormationDropdown(side, formationMap, team.formations[side]);
+    };
 
     // Add an inline Auto-Set button right next to the formation dropdown if not already present
     const parentContainer = select.parentElement;
@@ -2326,22 +2455,26 @@ window.app_openSlotModal = function (side, slotId) {
     if (['DE', 'DT', 'NT'].includes(posKey)) posKey = 'DL';
     if (['CB', 'S', 'FS', 'SS'].includes(posKey)) posKey = 'DB';
 
-    const candidates = roster.filter(p =>
-        p &&
-        (p.id === currentId || Game.isPlayerViableForPosition(p, posKey)) &&
-        (!Object.values(currentChart).includes(p.id) || p.id === currentId)
-    );
+    // Allow any viable player on the roster to be chosen, enabling starter swaps
+    const candidates = roster.filter(p => p && (p.id === currentId || Game.isPlayerViableForPosition(p, posKey)));
     candidates.sort((a, b) => calculateOverall(b, posKey) - calculateOverall(a, posKey));
 
-    window.app_assignSlot = function (s, slot, pid) {
-        const assigned = assignPlayerToSlot(gs.playerTeam, pid, slot, s);
+    window.app_assignSlot = function (s, targetSlot, selectedPid) {
+        if (!selectedPid) {
+            // Clearing slot
+            gs.playerTeam.depthChart[s][targetSlot] = null;
+        } else {
+            // Check if player currently starts in another slot on THIS side (Trigger a Swap)
+            const existingSlot = Object.entries(gs.playerTeam.depthChart[s] || {})
+                .find(([sl, id]) => id === selectedPid && sl !== targetSlot)?.[0];
 
-        if (!assigned && pid) {
-            alert(
-                'This player is not eligible for that position. ' +
-                'Use the position-change process first.'
-            );
-            return;
+            if (existingSlot) {
+                // Swap the outgoing starter into the displaced player's old slot
+                const displacedPid = gs.playerTeam.depthChart[s][targetSlot] || null;
+                gs.playerTeam.depthChart[s][existingSlot] = displacedPid;
+            }
+
+            assignPlayerToSlot(gs.playerTeam, selectedPid, targetSlot, s);
         }
 
         saveGameState();
@@ -2364,6 +2497,7 @@ window.app_openSlotModal = function (side, slotId) {
         const otherSlot = Object.entries(otherChart).find(([_, id]) => id === p.id)?.[0] || null;
         const isCurrent = p.id === currentId;
 
+        const existingStarterSlotThisSide = Object.entries(currentChart).find(([sl, id]) => id === p.id && sl !== slotId)?.[0];
         let borderClass = isCurrent ? 'bg-amber-50 border-amber-400' : 'bg-white border-slate-200 hover:border-slate-400';
         let energyColor = energy >= 75 ? 'text-emerald-600' : (energy >= 50 ? 'text-amber-600' : 'text-rose-600 font-bold');
 
@@ -2373,6 +2507,7 @@ window.app_openSlotModal = function (side, slotId) {
                     <div class="flex items-center gap-2">
                         <span class="font-bold text-slate-900 text-sm truncate">${p.name}</span>
                         ${isCurrent ? '<span class="text-[9px] bg-amber-200 text-amber-900 px-1 rounded font-bold uppercase">Current Starter</span>' : ''}
+                        ${existingStarterSlotThisSide ? `<span class="text-[9px] bg-blue-100 text-blue-900 border border-blue-300 px-1 rounded font-bold uppercase">⇄ Swap from ${existingStarterSlotThisSide}</span>` : ''}
                         ${isUnavailable ? `<span class="text-[9px] bg-rose-100 text-rose-800 px-1 rounded font-bold">🩹 Out ${p.status.duration}w</span>` : ''}
                     </div>
                     <div class="flex flex-wrap items-center gap-2 text-[11px] text-slate-500 mt-1 font-mono">
@@ -3004,29 +3139,42 @@ export function renderPlaybookManager(gameState) {
         clashHtml = `<span class="text-blue-600 font-bold">Coach has full control. Synergy bonuses active.</span>`;
     }
 
-    const BASICS_OFF = ['Uni_InsideZone', 'Uni_QuickSlants', 'Uni_FourVerts'];
-    const BASICS_DEF = ['Cover_2_Zone_Base', 'Cover_1_Robber', 'GoalLine_RunStuff'];
+    // 4 Locked Standard Fundamentals per side (12 Total: 4 Fundamentals + 8 Napkin slots)
+    const BASICS_OFF = ['Uni_InsideZone', 'Uni_StretchRight', 'Uni_QuickSlants', 'Uni_FourVerts'];
+    const BASICS_DEF = ['Cover_2_Zone_Base', 'Cover_1_Robber', 'Man_Blitz_Base', 'GoalLine_RunStuff'];
+
+    if (!team.gameplan.installedOffense) team.gameplan.installedOffense = ['Uni_Stick', 'Uni_Drive', 'Uni_HB_Screen', 'PA_Crossers', 'Uni_Mesh', 'Uni_Counter_Trap', 'Uni_PowerLead', 'Uni_Double_Moves'];
+    if (!team.gameplan.installedDefense) team.gameplan.installedDefense = ['Cover_3_Sky', 'Nickel_Tampa_2', 'Fire_Zone_3', 'Cover_6_Split', 'Cover_3_Drop', 'Nickel_Strong_Blitz', 'Overload_Blitz_Right', 'Dime_Lockdown'];
+
+    // Active Library Filter Sub-Tab State
+    window._activePlaybookTabOff = window._activePlaybookTabOff || 'all';
+    window._activePlaybookTabDef = window._activePlaybookTabDef || 'all';
+
+    window.app_setPlaybookTab = (side, tabKey) => {
+        if (side === 'offense') window._activePlaybookTabOff = tabKey;
+        else window._activePlaybookTabDef = tabKey;
+        renderPlaybookManager(gameState);
+    };
 
     window.app_toggleInstallPlay = (key, side) => {
         const list = side === 'offense' ? team.gameplan.installedOffense : team.gameplan.installedDefense;
-        const max = side === 'offense' ? 6 : 4;
+        const maxCustom = 8; // Exactly 8 custom slots + 4 standard locks = 12 Total
         const idx = list.indexOf(key);
 
         if (idx > -1) {
             list.splice(idx, 1);
         } else {
-            if (list.length >= max) {
-                // Helpful feedback: Tell the player how to make room
-                showModal("Playbook Full", `
+            if (list.length >= maxCustom) {
+                showModal("Gameplan Napkin Full", `
                     <div class="text-xs text-slate-700 space-y-2">
-                        <p>Your cafeteria napkin has all <b>${max} ${side}</b> slots filled.</p>
-                        <p class="text-slate-500 italic">Click <b>"Uninstall"</b> on any active play above to free up space before installing a new one.</p>
+                        <p>Your team's active gameplan already has all <b>${maxCustom} custom slots filled</b> (12 total plays with fundamentals).</p>
+                        <p class="text-slate-500 italic">Click <b>"Uninstall"</b> on any custom play above to free up a slot for this concept.</p>
                     </div>
                 `);
                 return;
             }
             list.push(key);
-            if (!team.gameplan.mastery[key]) team.gameplan.mastery[key] = 35;
+            if (!team.gameplan.mastery[key]) team.gameplan.mastery[key] = 40;
         }
         renderPlaybookManager(gameState);
         saveGameState();
@@ -3105,24 +3253,116 @@ export function renderPlaybookManager(gameState) {
             <!-- Strategic Header -->
             <div class="bg-slate-900 text-white p-3.5 rounded flex justify-between items-center shadow-sm">
                 <div>
-                    <h4 class="font-black text-sm uppercase tracking-wider text-amber-400">Cafeteria Napkin Playbook (Active Gameplan)</h4>
-                    <p class="text-slate-400 text-[11px] mt-0.5">Kids only call installed plays. Unpracticed plays hesitate; mastered plays explode with muscle memory.</p>
+                    <h4 class="font-black text-sm uppercase tracking-wider text-amber-400">Cafeteria Napkin Playbook (12 Offense / 12 Defense)</h4>
+                    <p class="text-slate-400 text-[11px] mt-0.5">Each unit carries 4 Standard Fundamentals plus 8 Custom Gameplan concepts.</p>
                 </div>
-                <div class="text-right font-mono text-[11px]">
-                    <span class="bg-blue-900 text-blue-200 px-2 py-0.5 rounded border border-blue-700">Offense: ${team.gameplan.installedOffense.length}/6</span>
-                    <span class="bg-red-900 text-red-200 px-2 py-0.5 rounded border border-red-700 ml-1">Defense: ${team.gameplan.installedDefense.length}/4</span>
+                <div class="text-right font-mono text-[11px] flex gap-2">
+                    <span class="bg-blue-950 text-blue-300 px-2 py-1 rounded border border-blue-800">🏈 Off: 4 Locks + ${team.gameplan.installedOffense.length}/8 Napkin (${4 + team.gameplan.installedOffense.length}/12)</span>
+                    <span class="bg-red-950 text-red-300 px-2 py-1 rounded border border-red-800">🛡️ Def: 4 Locks + ${team.gameplan.installedDefense.length}/8 Napkin (${4 + team.gameplan.installedDefense.length}/12)</span>
                 </div>
             </div>
 
-            <!-- OFFENSIVE SECTION -->
+            <!-- OFFENSIVE SECTION (4-IN-A-ROW GRID) -->
             <div class="bg-white border border-slate-300 rounded p-3 shadow-sm space-y-3">
-                <div class="flex justify-between items-center border-b pb-1">
-                    <h5 class="font-black uppercase tracking-wider text-blue-950">Active Offensive Napkin (${team.gameplan.installedOffense.length}/6 Installed)</h5>
-                    <span class="text-[10px] text-slate-500 font-mono">3 Basics + 6 Napkin Plays</span>
+                <div class="flex flex-wrap justify-between items-center border-b pb-2 gap-2">
+                    <div>
+                        <h5 class="font-black uppercase tracking-wider text-blue-950 text-xs">Active Offensive Gameplan (${4 + team.gameplan.installedOffense.length}/12 Plays Active)</h5>
+                        <p class="text-[10px] text-slate-500 font-mono">Row 1: 4 Standard Fundamentals • Rows 2 & 3: Up to 8 Custom Installs</p>
+                    </div>
+                    <span class="text-[10px] font-mono bg-blue-50 text-blue-800 border border-blue-200 px-2 py-0.5 rounded font-bold">
+                        Scheme: ${team.formations?.offense || 'Balanced'}
+                    </span>
                 </div>
 
-                <!-- Installed + Basics Grid -->
-                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
+                <!-- Active 12-Play Grid: Exactly 4 in a row -->
+                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
+                    ${[...BASICS_OFF, ...team.gameplan.installedOffense].map((key, idx) => {
+                        const play = offensivePlaybook[key] || { tags: ['run'] };
+                        const isBasic = BASICS_OFF.includes(key);
+                        const mastery = team.gameplan.mastery[key] || (isBasic ? 85 : 40);
+                        let barColor = mastery >= 75 ? 'bg-emerald-500' : (mastery >= 50 ? 'bg-amber-500' : 'bg-rose-500');
+
+                        return `
+                        <div class="p-2.5 rounded border ${isBasic ? 'border-slate-300 bg-slate-50' : 'border-blue-300 bg-blue-50/50'} hover:shadow-md transition cursor-pointer flex flex-col justify-between group" onclick="app_previewPlay('${key}', 'offense')">
+                            <div>
+                                <div class="flex justify-between items-start mb-1">
+                                    <span class="font-bold text-slate-900 group-hover:text-blue-700 transition truncate text-[11px]">${key.replace('Uni_', '').replace('PA_', 'PA ')} 🔍</span>
+                                    <span class="text-[8px] font-black uppercase px-1 rounded ${isBasic ? 'bg-slate-200 text-slate-700' : 'bg-blue-700 text-white'}">
+                                        ${isBasic ? 'LOCKED' : `#${idx - 3}`}
+                                    </span>
+                                </div>
+                                <div class="flex items-center justify-between text-[9px] text-slate-500 font-mono">
+                                    <span>Mastery: <b>${mastery}%</b></span>
+                                    <div class="w-12 bg-slate-200 rounded-full h-1.5 overflow-hidden">
+                                        <div class="${barColor} h-full" style="width: ${mastery}%"></div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="mt-2 pt-1 border-t ${isBasic ? 'border-slate-200' : 'border-blue-200'} flex justify-between items-center text-[9px]">
+                                <span class="text-slate-400 capitalize truncate">${play.tags?.[0] || play.type}</span>
+                                ${isBasic ? '<span class="text-slate-400 font-bold uppercase">Basic</span>' : `
+                                <button class="px-1.5 py-0.5 rounded font-bold uppercase bg-rose-100 text-rose-800 hover:bg-rose-200 transition" onclick="event.stopPropagation(); app_toggleInstallPlay('${key}', 'offense')">
+                                    Uninstall
+                                </button>`}
+                            </div>
+                        </div>`;
+                    }).join('')}
+                    ${Array.from({ length: Math.max(0, 8 - team.gameplan.installedOffense.length) }).map(() => `
+                        <div class="p-3 rounded border border-dashed border-slate-300 bg-slate-50/50 flex flex-col items-center justify-center text-center text-slate-400 min-h-[75px]">
+                            <span class="text-xs font-bold">+ Empty Slot</span>
+                            <span class="text-[9px] text-slate-400">Install from library below</span>
+                        </div>
+                    `).join('')}
+                </div>
+
+                <!-- Available Library with Category Filter Tabs -->
+                <div class="pt-3 border-t">
+                    <div class="flex flex-wrap justify-between items-center mb-2 gap-2">
+                        <span class="font-bold text-[10px] uppercase text-slate-600 tracking-wider">Offensive Library (Click to Install into Open Slots)</span>
+                        <div class="flex bg-slate-100 p-0.5 rounded border border-slate-300 text-[10px] font-bold">
+                            <button class="px-2 py-0.5 rounded ${window._activePlaybookTabOff === 'all' ? 'bg-slate-900 text-white' : 'text-slate-600'}" onclick="app_setPlaybookTab('offense', 'all')">All</button>
+                            <button class="px-2 py-0.5 rounded ${window._activePlaybookTabOff === 'run' ? 'bg-slate-900 text-white' : 'text-slate-600'}" onclick="app_setPlaybookTab('offense', 'run')">Runs</button>
+                            <button class="px-2 py-0.5 rounded ${window._activePlaybookTabOff === 'quick' ? 'bg-slate-900 text-white' : 'text-slate-600'}" onclick="app_setPlaybookTab('offense', 'quick')">Quick & Screens</button>
+                            <button class="px-2 py-0.5 rounded ${window._activePlaybookTabOff === 'deep' ? 'bg-slate-900 text-white' : 'text-slate-600'}" onclick="app_setPlaybookTab('offense', 'deep')">Deep & Cross</button>
+                            <button class="px-2 py-0.5 rounded ${window._activePlaybookTabOff === 'action' ? 'bg-slate-900 text-white' : 'text-slate-600'}" onclick="app_setPlaybookTab('offense', 'action')">PA & RPO</button>
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
+                        ${offAvailable.filter(([k, play]) => {
+                            if (window._activePlaybookTabOff === 'run') return play.type === 'run';
+                            if (window._activePlaybookTabOff === 'quick') return play.tags?.includes('quick') || play.tags?.includes('short') || play.tags?.includes('screen');
+                            if (window._activePlaybookTabOff === 'deep') return play.tags?.includes('deep') || play.tags?.includes('cross') || play.tags?.includes('flood');
+                            if (window._activePlaybookTabOff === 'action') return play.tags?.includes('pa') || play.tags?.includes('rpo') || play.tags?.includes('trick');
+                            return true;
+                        }).map(([key, play]) => {
+                            const isInstalled = team.gameplan.installedOffense.includes(key);
+                            if (isInstalled) return '';
+                            const mastery = team.gameplan.mastery[key] || 35;
+                            const isCompatible = !play.compatibleFormations || play.compatibleFormations.includes(team.formations?.offense || 'Balanced');
+
+                            return `
+                            <div class="p-2 rounded border ${isCompatible ? 'border-slate-200 bg-white hover:border-blue-400' : 'border-slate-200 bg-slate-50 opacity-60'} flex flex-col justify-between transition cursor-pointer group shadow-sm" onclick="app_previewPlay('${key}', 'offense')">
+                                <div class="truncate mb-1.5">
+                                    <div class="flex justify-between items-start">
+                                        <span class="font-bold text-slate-800 group-hover:text-blue-700 truncate text-[11px]">${key.replace('Uni_', '').replace('PA_', 'PA ')} 🔍</span>
+                                    </div>
+                                    <div class="flex items-center gap-1 mt-0.5">
+                                        <span class="text-[8px] bg-slate-100 text-slate-600 px-1 rounded uppercase font-bold">${play.tags?.[0] || play.type}</span>
+                                        ${play.compatibleFormations ? `<span class="text-[8px] text-blue-700 font-bold">${play.compatibleFormations[0]}</span>` : '<span class="text-[8px] text-slate-400">All Forms</span>'}
+                                    </div>
+                                </div>
+                                <div class="flex justify-between items-center border-t pt-1">
+                                    <span class="text-[9px] text-slate-400 font-mono">${mastery}% Mst</span>
+                                    <button class="px-2 py-0.5 rounded text-[9px] font-bold uppercase bg-slate-900 text-white hover:bg-slate-800 transition" onclick="event.stopPropagation(); app_toggleInstallPlay('${key}', 'offense')">
+                                        + Install
+                                    </button>
+                                </div>
+                            </div>`;
+                        }).join('')}
+                    </div>
+                </div>
+            </div>
                     ${[...BASICS_OFF, ...team.gameplan.installedOffense].map(key => {
                         const play = offensivePlaybook[key] || { tags: ['run'] };
                         const isBasic = BASICS_OFF.includes(key);

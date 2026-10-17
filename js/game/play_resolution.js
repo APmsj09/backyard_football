@@ -332,9 +332,9 @@ export function determinePlayCall(offense, defense, down, yardsToGo, ballOn, sco
     // IMPORTANT:
     // Do not split into run/pass candidates first.
     // A strong pass should be able to beat a mediocre run, and vice versa.
-    // Lore: Kids only call what's written on Coach's cafeteria napkin + the 3 Backyard Basics
-    const BACKYARD_BASICS_OFF = ['Uni_InsideZone', 'Uni_QuickSlants', 'Uni_FourVerts'];
-    const installed = offense.gameplan?.installedOffense || [];
+    // 4 Standard Backyard Fundamentals (Always locked: 1 inside run, 1 outside run, 1 quick pass, 1 deep pass)
+    const BACKYARD_BASICS_OFF = ['Uni_InsideZone', 'Uni_StretchRight', 'Uni_QuickSlants', 'Uni_FourVerts'];
+    const installed = (offense.gameplan?.installedOffense || []).slice(0, 8); // Max 8 custom napkin plays
     const activePlaybookKeys = Array.from(new Set([...BACKYARD_BASICS_OFF, ...installed]));
 
     // Match active playbook against current formation
@@ -659,14 +659,15 @@ export function determineDefensiveFormation(defense, offenseFormationName, down,
 
 export function determineDefensivePlayCall(defense, offense, down, yardsToGo, ballOn, scoreDiff, gameLog, drivesRemaining) {
     const defenseFormationName = defense.formations.defense;
-    // Lore: Defensive gameplan is restricted to installed schemes + Universal Safety Nets
+    // 4 Standard Defensive Fundamentals (Always locked: Cover 2, Cover 1 Man, Man Blitz, Goal Line)
     const BACKYARD_BASICS_DEF = [
         'Cover_2_Zone_Base',
         'Cover_1_Robber',
+        'Man_Blitz_Base',
         'GoalLine_RunStuff'
     ];
 
-    const installedDef = defense.gameplan?.installedDefense || [];
+    const installedDef = (defense.gameplan?.installedDefense || []).slice(0, 8); // Max 8 custom schemes
     const activeDefKeys = Array.from(
         new Set([...BACKYARD_BASICS_DEF, ...installedDef])
     );
