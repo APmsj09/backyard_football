@@ -663,8 +663,8 @@ export function resolveOngoingBlocks(playState, gameLog, offenseStates = [], def
             }
         }
 
-        let blockPower = (((blocker.blocking || 50) * 1.25) + (blocker.strength || 50)) * blocker.fatigueModifier;
-        let shedPower = ((defender.blockShedding || 50) + (defender.strength || 50)) * defender.fatigueModifier;
+        let blockPower = (((blocker.blocking || 50) * 1.15) + (blocker.strength || 50)) * blocker.fatigueModifier;
+        let shedPower = (((defender.blockShedding || 50) * 1.15) + (defender.strength || 50)) * defender.fatigueModifier;
 
         if (playState.playKey?.includes('Screen') && playState.tick < 20) {
             blockPower *= 0.1;

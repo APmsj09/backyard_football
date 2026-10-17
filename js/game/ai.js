@@ -638,12 +638,12 @@ export function getSmartCarrierTarget(runner, defenseStates, offenseStates, fiel
                 const isAhead = blocker.y >= runner.y && blocker.y <= runner.y + 4.0;
 
                 if (isAhead) {
-                    if (lateralDist < 1.0) {
+                    if (lateralDist < 0.7) {
                         // Heavy collision penalty for running straight into the back of your own lineman
-                        score -= 130;
-                    } else if (lateralDist >= 1.2 && lateralDist <= 2.8) {
-                        // Reward daylight off the hip
-                        score += 70;
+                        score -= 100;
+                    } else if (lateralDist >= 1.0 && lateralDist <= 2.5) {
+                        // Reward daylight off the hip / in the gap
+                        score += 50;
                     }
                 }
             }
@@ -687,6 +687,9 @@ export function getSmartCarrierTarget(runner, defenseStates, offenseStates, fiel
                 }
             } else {
                 // Engaged defenders are STILL a physical obstacle!
+                if (distToPredicted < 2.5) {
+                    score -= (2.5 - distToPredicted) * 40; 
+                }
                 if (distToPredicted < 1.2) {
                     score -= 100; // Do not run straight into an engaged defender's back!
                 }
@@ -1091,8 +1094,52 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
         else if (distFromQB < 12) estimatedBallSpeed = 16 + (qbPower / 100) * 14.0;
 
         const estimatedFlightTime = distFromQB / estimatedBallSpeed;
-        const projRecX = rec.x + (rec.vx || 0) * estimatedFlightTime;
-        const projRecY = rec.y + (rec.vy || 0) * estimatedFlightTime;
+        
+        // Route projection logic
+        const recYPS = getPlayerBaseSpeedYPS(rec) * (rec.fatigueModifier || 1.0);
+        let distanceToTravel = recYPS * estimatedFlightTime;
+
+        let currX = rec.x;
+        let currY = rec.y;
+        let lastValidDirX = 0;
+        let lastValidDirY = 1;
+
+        if (rec.routePath && rec.currentPathIndex < rec.routePath.length) {
+            for (let i = rec.currentPathIndex; i < rec.routePath.length; i++) {
+                const nextNode = rec.routePath[i];
+                const dx = nextNode.x - currX;
+                const dy = nextNode.y - currY;
+                const distToNext = Math.hypot(dx, dy);
+
+                if (distToNext > 0.1) {
+                    lastValidDirX = dx / distToNext;
+                    lastValidDirY = dy / distToNext;
+                }
+
+                if (distanceToTravel > distToNext) {
+                    distanceToTravel -= distToNext;
+                    currX = nextNode.x;
+                    currY = nextNode.y;
+                } else {
+                    const ratio = distanceToTravel / distToNext;
+                    currX = currX + dx * ratio;
+                    currY = currY + dy * ratio;
+                    distanceToTravel = 0;
+                    break;
+                }
+            }
+            const isContinuousRoute = ['Fly', 'Go', 'Streak', 'Vert', 'Fade'].some(r => rec.assignment?.includes(r));
+            if (distanceToTravel > 0 && isContinuousRoute) {
+                currX += lastValidDirX * distanceToTravel;
+                currY += lastValidDirY * distanceToTravel;
+            }
+        } else {
+            currX += (rec.vx || 0) * estimatedFlightTime;
+            currY += (rec.vy || 0) * estimatedFlightTime;
+        }
+
+        const projRecX = currX;
+        const projRecY = currY;
 
         const depth = rec.y - (playState.lineOfScrimmage || 0);
         let minProjectedSeparation = 20;
@@ -1110,7 +1157,7 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
                 minProjectedSeparation = projDist;
             }
 
-            if (projDist < 4.0) defendersClosingIn++;
+            if (projDist < 2.5) defendersClosingIn++; // Fixed: Reduced from 4.0 to 2.5
 
             // Dynamic IQ-Weighted Deep Safety & Over-The-Top Capping
             const isSafetyOrDeepDB = d.role === 'DB' && (d.y > playState.lineOfScrimmage + 9);

@@ -1897,12 +1897,23 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                 const carrierPastLOS = ballCarrierState && ballCarrierState.y > LOS + 0.5;
                 const carrierIsClose = ballCarrierState && getDistance(pState, ballCarrierState) < 4.5;
 
-                if (carrierSlot !== targetSlot && !isRunRead && !qbScrambling && !carrierPastLOS && !carrierIsClose) {
+                // DEEPER FIX: Do not abandon man coverage on low-confidence run reads (diagConfidence < 0.65)
+                const isConfidentRun = isRunRead && diagConfidence >= 0.65;
+
+                if (carrierSlot !== targetSlot && !isConfidentRun && !qbScrambling && !carrierPastLOS && !carrierIsClose) {
                     shouldPursue = false;
                 }
             }
-            if (assignment?.startsWith('zone_') && pState.slot.startsWith('LB') && carrierIsPasser && !qbScrambling && !isRunReadAtMesh) {
-                shouldPursue = false;
+            
+            if (assignment?.startsWith('zone_') && shouldPursue && !isDL) {
+                const carrierPastLOS = ballCarrierState && ballCarrierState.y > LOS + 0.5;
+                const isConfidentRun = isRunRead && diagConfidence >= 0.65;
+                
+                // DEEPER FIX: Zone defenders (DBs/LBs) hold their zone unless there's a highly confident run read
+                // or the runner has clearly crossed the line of scrimmage.
+                if (!isConfidentRun && !qbScrambling && !carrierPastLOS && !isRunReadAtMesh) {
+                    shouldPursue = false;
+                }
             }
 
             // Early run fit: linebackers protect their alignment and fill a lane
@@ -2295,10 +2306,14 @@ export function executeAssignment(pState, assignment, offenseStates, LOS, playSt
                 pState.zoneDriftTick = playState.tick;
                 let driftX = zoneCenter.x;
                 const qb = offenseStates.find(p => p.slot.startsWith('QB'));
-                if (qb) driftX += (qb.x < CENTER_X ? -1.5 : 1.5);
+                
+                // Zone defenders cleanly track the side of the field the QB is standing on
+                if (qb) {
+                    driftX += (qb.x < CENTER_X ? -2.5 : 2.5);
+                }
 
-                pState.dynamicTargetX = driftX + (Math.random() - 0.5) * 2;
-                pState.dynamicTargetY = zoneCenter.y + (Math.random() - 0.5) * 1.5;
+                pState.dynamicTargetX = driftX;
+                pState.dynamicTargetY = zoneCenter.y;
             }
             pState.targetX = pState.dynamicTargetX || zoneCenter.x;
             pState.targetY = pState.dynamicTargetY || zoneCenter.y;
