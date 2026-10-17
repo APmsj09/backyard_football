@@ -1452,14 +1452,29 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
 
                     pState.contactReduction = distToNode < 1.0 ? 0.8 : 1.0;
 
-                    // DEEPER FIX: Calculate if the player has physically run past the Y-axis of the node
-                    const passedNodeY = (pState.vy > 0 && pState.y >= pt.y) || (pState.vy < 0 && pState.y <= pt.y);
+                    // Only count passing the waypoint vertically when the player
+                    // is also physically close to it. Crossing its Y-coordinate
+                    // from far away horizontally must not skip the route segment.
+                    const hasPassedNodeY =
+                        (pState.vy > 0 && pState.y >= pt.y) ||
+                        (pState.vy < 0 && pState.y <= pt.y);
 
-                    // Allow progression if they hit the radius, pass the node vertically, or stall out against traffic
+                    const passedNodeY =
+                        hasPassedNodeY &&
+                        Math.abs(pState.y - pt.y) <= 1.5 &&
+                        Math.abs(pState.x - pt.x) <= 1.5;
+
+                    // A stalled receiver may advance only when already near the
+                    // waypoint. Never skip a distant waypoint just because
+                    // movement has made little progress for several ticks.
+                    const stalledNearNode =
+                        pState._routeWaypointStallTicks > 12 &&
+                        distToNode < 2.5;
+
                     if (
                         distToNode < 0.65 ||
                         passedNodeY ||
-                        pState._routeWaypointStallTicks > 12
+                        stalledNearNode
                     ) {
                         pState.currentPathIndex++;
                         pState._routeWaypointStallTicks = 0;
