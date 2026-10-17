@@ -174,27 +174,31 @@ export function finalizePlayTelemetry(playResult, finalBallY, playState = null) 
 
     current.result = { ...playResult, finalBallY };
 
-    if (!playState) return;
+    if (playState) {
+        const flaggedCarriers = (playState.activePlayers || [])
+            .filter(p => p.hasBall || p.isBallCarrier);
 
-    const flaggedCarriers = (playState.activePlayers || [])
-        .filter(p => p.hasBall || p.isBallCarrier);
+        current.finalState = {
+            tick: playState.tick ?? null,
+            playIsLive: playState.playIsLive ?? null,
 
-    current.finalState = {
-        tick: playState.tick ?? null,
-        playIsLive: playState.playIsLive ?? null,
+            touchdown: playState.touchdown ?? false,
+            defensiveTD: playState.defensiveTD ?? false,
+            turnover: playState.turnover ?? false,
+            safety: playState.safety ?? false,
+            possessionChanged: playState.possessionChanged ?? false,
 
-        touchdown: playState.touchdown ?? false,
-        defensiveTD: playState.defensiveTD ?? false,
-        turnover: playState.turnover ?? false,
-        safety: playState.safety ?? false,
-        possessionChanged: playState.possessionChanged ?? false,
+            returnStartY: playState.returnStartY ?? null,
+            lineOfScrimmage: playState.lineOfScrimmage ?? null,
 
-        returnStartY: playState.returnStartY ?? null,
-        lineOfScrimmage: playState.lineOfScrimmage ?? null,
+            ball: snapshotBallState(playState.ballState),
+            flaggedCarriers: snapshotPlayers(flaggedCarriers)
+        };
+    }
 
-        ball: snapshotBallState(playState.ballState),
-        flaggedCarriers: snapshotPlayers(flaggedCarriers)
-    };
+    // Close collection for this play while preserving the buffered report.
+    window.__ACTIVE_PLAY_TELEMETRY__ = null;
+    delete window.__CURRENT_TICK__;
 }
 
 export function generatePlayDebugReport() {

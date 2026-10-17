@@ -475,16 +475,17 @@ export function getSmartCarrierTarget(runner, defenseStates, offenseStates, fiel
 
     let maxLateral = 8.0 + (agility / 50);
     if (currentSpeed > 4.5) maxLateral = 5.0;
-    if (currentSpeed > 7.0) maxLateral = 2.5;
+    if (currentSpeed > 7.0) maxLateral = 4.0;
 
     const LOS = playState.lineOfScrimmage || 60;
     const isBehindLine = runner.y < LOS + 1.2;
 
-    // DEEPER FIX: IQ-Scaled Backfield Vision
-    // Low-IQ RBs get tunnel vision (2 yards). Elite RBs scan the entire edge (up to 6 yards) looking for a bounce.
+    // Backfield vision should include a usable bounce lane for ordinary runners.
+    // IQ expands that search, while speed still limits how sharply a runner
+    // can redirect without losing momentum.
     if (isBehindLine) {
-        const visionExpansion = Math.max(0, (iq - 50) / 12.5); // 0 to 4 extra yards of lateral vision
-        maxLateral = Math.min(maxLateral, 2.0 + visionExpansion);
+        const visionExpansion = Math.max(0, (iq - 50) / 12.5);
+        maxLateral = Math.min(maxLateral, 3.0 + visionExpansion);
     }
 
     let nearbyDefenderCount = 0;
@@ -572,14 +573,14 @@ export function getSmartCarrierTarget(runner, defenseStates, offenseStates, fiel
         const momentumConflict = Math.abs(offset - (currentVx * 0.6));
         score -= (momentumConflict * 4.0 * agilityMitigation);
 
-        // "Bounce It Outside" Logic:
-        // If the middle is a disaster, high-IQ/high-agility runners are REWARDED for evaluating outside lanes
-        if (isBehindLine && centerThreat > 6.0 && lateralShift >= 3.0) {
-            const bounceIQ = (iq - 50) / 50; // 0.0 to 1.0
-            if (bounceIQ > 0) {
-                // Completely offsets the momentum penalty for bouncing wide
-                score += (lateralShift * 4.0 * bounceIQ);
-            }
+        // When the middle is congested, make a wider lane a genuine option.
+        // IQ increases the preference but does not determine whether the runner
+        // can recognize an obvious outside opening at all.
+        const centerThreatDetected = isBehindLine && centerThreat > 6.0;
+
+        if (centerThreatDetected && lateralShift >= 3.0) {
+            const bounceIQ = Math.max(0, (iq - 50) / 50);
+            score += 24 + (lateralShift * 4.0 * bounceIQ);
         }
 
         // Discipline encourages commitment, while less reliable runners
@@ -590,15 +591,16 @@ export function getSmartCarrierTarget(runner, defenseStates, offenseStates, fiel
 
         if (offsetDiffFromPrev < 0.5) {
             score += laneStickiness;
-        } else {
-            // DEEPER FIX: Punish ANY large shift, regardless of crossing the 0 bridge
+        } else if (!(centerThreatDetected && lateralShift >= 3.0)) {
+            // Normally discourage unnecessary lane changes.
+            // Do not let that penalty trap the runner behind a congested middle.
             score -= offsetDiffFromPrev * (
                 4.0 + ((decisionProfile?.assignmentDiscipline ?? 50) * 0.02)
             );
-            
-            // Severe penalty for violent zig-zags within the lane lock window
+
+            // Severe penalty for unnecessary zig-zags.
             if (offsetDiffFromPrev >= 3.0) {
-                score -= 40; 
+                score -= 40;
             }
         }
         
@@ -1500,7 +1502,7 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
     // Quick passes can fire at ~1.3s (32 ticks), but deep drops need at least 1.7s (42 ticks) to develop.
     const isQuickPlay = playState.playKey?.includes('Quick') || playState.playKey?.includes('Screen');
     const MIN_DROPBACK_TICKS = isQuickPlay ? 30 : 42;
-    const canThrowStandard = (playState.tick >= MIN_DROPBACK_TICKS || isHotReadSituation) && (qbState.hasCompletedDropback || isPressured);
+    // canThrowStandard is calculated below, after the pocket deadline is known.
     
     // NATURAL POCKET CLOCK:
     // Respects QB Awareness (internal rhythm), Decision Making, and Personality (Risk Tolerance).
@@ -1512,17 +1514,27 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
     let maxDecisionTimeTicks = Math.round((85 + (qbAgility / 3) - (clockAwareness * 15)) * riskFactor);
     if (qbState.loggedRollout) maxDecisionTimeTicks += 35;
 
+    const pocketTimeExpired = playState.tick >= maxDecisionTimeTicks;
+    const canThrowStandard =
+        (
+            playState.tick >= MIN_DROPBACK_TICKS ||
+            isHotReadSituation ||
+            pocketTimeExpired
+        ) &&
+        (
+            qbState.hasCompletedDropback ||
+            isPressured ||
+            pocketTimeExpired
+        );
+
     let decisionMade = false;
     let reason = "";
 
-    if (imminentSackDefender) { 
-        decisionMade = true; 
-        reason = "Imminent Sack"; 
-    } else if (playState.tick >= maxDecisionTimeTicks) { 
-        decisionMade = true; 
-        reason = "Time Expired"; 
+    if (imminentSackDefender) {
+        decisionMade = true;
+        reason = "Imminent Sack";
     } else if (isPressured && playState.tick >= 75) {
-        // Poised QBs stay calm; flustered/low-decision QBs panic under sustained pressure
+        // Poised QBs stay calm; flustered/low-decision QBs panic under sustained pressure.
         const panicOdds = Math.max(0.02, (1.1 - (qbDecision / 100)) * 0.15);
         if (Math.random() < panicOdds) {
             decisionMade = true;
@@ -1641,6 +1653,13 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
                 qbState._lastLoggedHoldReadCount = numReadsVisible;
                 qbState._lastLoggedHoldTick = playState.tick;
             }
+        }
+
+        // Give the QB one final target evaluation at the pocket deadline.
+        // Only force an emergency resolution if no throw was selected.
+        if (!decisionMade && pocketTimeExpired) {
+            decisionMade = true;
+            reason = "Time Expired";
         }
 
         // NATURAL SCRAMBLE EVALUATION:

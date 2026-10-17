@@ -8,6 +8,7 @@ const FIELD_LENGTH = 120;
 const TACKLE_RANGE = 2.2;
 const FUMBLE_CHANCE_BASE = 0.015;
 const DEBUG_MODE = false;
+const BLOCK_WIN_SCORE = 10;
 
 export function pushGameLog(gameLog, message, playState = null) {
     if (!gameLog) return;
@@ -515,7 +516,9 @@ export function checkFumbleRecovery(playState, gameLog, tackleRange) {
 export function resolveBattle(powerA, powerB, battle) {
     const BASE_DIFF = powerA - powerB;
     const roll = getRandomInt(-10, 10);
-    const finalDiff = (BASE_DIFF + roll) / 350;
+
+    // Convert the matchup advantage into a meaningful per-tick battle change.
+    const finalDiff = (BASE_DIFF + roll) / 40;
 
     // Initialize once; do not reset the score on every tick.
     if (!Number.isFinite(battle.battleScore)) {
@@ -524,11 +527,9 @@ export function resolveBattle(powerA, powerB, battle) {
 
     battle.battleScore += finalDiff;
 
-    const WIN_SCORE = 15;
-
-    if (battle.battleScore >= WIN_SCORE) {
+    if (battle.battleScore >= BLOCK_WIN_SCORE) {
         battle.status = 'win_A';
-    } else if (battle.battleScore <= -WIN_SCORE) {
+    } else if (battle.battleScore <= -BLOCK_WIN_SCORE) {
         battle.status = 'win_B';
     } else {
         battle.status = 'ongoing';
@@ -680,21 +681,80 @@ export function resolveOngoingBlocks(playState, gameLog, offenseStates = [], def
 
                 if (pushAmount > 0) {
                     if (isRunBlock && Number.isFinite(blocker.blockLaneX)) {
+                        // Push the defender away from the intended running lane.
                         const outsideDirection =
                             defender.x < blocker.blockLaneX ? -1 : 1;
 
-                        defender.x += outsideDirection * pushMagnitude * 1.25;
-                        defender.y += pushMagnitude * 0.45;
+                        defender.x = Math.max(
+                            0.5,
+                            Math.min(
+                                FIELD_WIDTH - 0.5,
+                                defender.x + outsideDirection * pushMagnitude * 1.25
+                            )
+                        );
 
-                        blocker.x += outsideDirection * pushMagnitude * 0.25;
-                        blocker.y += pushMagnitude * 0.15;
+                        defender.y = Math.min(
+                            FIELD_LENGTH - 0.5,
+                            defender.y + pushMagnitude * 0.45
+                        );
+
+                        // Keep the blocker laterally stable so adjacent OL
+                        // do not all slide toward the same gap.
+                        blocker.y = Math.min(
+                            FIELD_LENGTH - 0.5,
+                            blocker.y + pushMagnitude * 0.15
+                        );
+                    } else if (isPassBlock) {
+                        // Pass protection: push the rusher away from the QB
+                        // while keeping the blocker laterally stable.
+                        const qb = offenseStates.find(
+                            p => p.slot?.startsWith('QB')
+                        );
+
+                        let awayX = uX;
+                        let awayY = uY;
+
+                        if (qb) {
+                            const dxFromQB = defender.x - qb.x;
+                            const dyFromQB = defender.y - qb.y;
+                            const distanceFromQB = Math.max(
+                                0.1,
+                                Math.hypot(dxFromQB, dyFromQB)
+                            );
+
+                            awayX = dxFromQB / distanceFromQB;
+                            awayY = dyFromQB / distanceFromQB;
+                        }
+
+                        defender.x = Math.max(
+                            0.5,
+                            Math.min(
+                                FIELD_WIDTH - 0.5,
+                                defender.x + awayX * pushMagnitude
+                            )
+                        );
+
+                        defender.y = Math.max(
+                            0.5,
+                            Math.min(
+                                FIELD_LENGTH - 0.5,
+                                defender.y + awayY * pushMagnitude
+                            )
+                        );
+
+                        // Avoid pulling adjacent linemen sideways out of
+                        // their assigned pocket positions.
+                        blocker.y += Math.max(0, uY) * pushMagnitude * 0.15;
                     } else {
+                        // Other blocking assignments use direct displacement.
                         defender.x += uX * pushMagnitude;
                         defender.y += uY * pushMagnitude;
                         blocker.x += uX * pushMagnitude * 0.8;
                         blocker.y += uY * pushMagnitude * 0.8;
                     }
                 } else if (pushAmount < 0) {
+                    // When the defender wins ground, the blocker is driven
+                    // backward and the defender advances toward the backfield.
                     blocker.x -= uX * pushMagnitude;
                     blocker.y -= uY * pushMagnitude;
                     defender.x -= uX * pushMagnitude * 0.8;
@@ -721,9 +781,21 @@ export function resolveOngoingBlocks(playState, gameLog, offenseStates = [], def
                 const blkStr = blocker.strength || blocker.str || 50;
                 const defStr = defender.strength || defender.str || 50;
 
-                // FIX: Only pancake if blocker has a major strength edge, and cap to once per play
+                // A major strength advantage can finish the block decisively.
+                // Otherwise, a pancake is possible but remains uncommon;
+                // blocking technique versus block shedding adjusts the odds.
                 const hasPancakeStrength = blkStr >= defStr + 15;
-                const isPancake = (hasPancakeStrength || Math.random() < 0.20) && !defender._pancakedThisPlay;
+                const techniqueEdge =
+                    (blocker.blocking || 50) -
+                    (defender.blockShedding || 50);
+                const pancakeChance = Math.max(
+                    0.03,
+                    Math.min(0.13, 0.08 + (techniqueEdge * 0.001))
+                );
+                const isPancake =
+                    (hasPancakeStrength || Math.random() < pancakeChance) &&
+                    !defender._pancakedThisPlay;
+
 
                 if (isPancake) {
                     logPlayDebug('PANCAKE_BLOCK', `${blocker.name} flattened ${defender.name}`, {
@@ -740,8 +812,11 @@ export function resolveOngoingBlocks(playState, gameLog, offenseStates = [], def
                     defender._pancakedThisPlay = true;
                     defender.action = 'pursuit';
 
+                    // A pancake finishes this engagement. The OL is now free
+                    // to choose a new assignment on the next target update.
                     blocker.engagedWith = null;
                     blocker.isEngaged = false;
+                    blocker.dynamicTargetId = null;
 
                     defender.isBlocked = false;
                     defender.blockedBy = null;
@@ -749,9 +824,11 @@ export function resolveOngoingBlocks(playState, gameLog, offenseStates = [], def
 
                     battlesToRemove.push(index);
                 } else {
-                    // FIX: Blocker sustains the block and stones the rusher instead of disengaging
+                    // Winning a block is not the end of the engagement.
+                    // Keep the block active, but retain a meaningful lead that
+                    // the defender can still overcome by shedding the block.
                     battle.status = 'ongoing';
-                    battle.battleScore = 8.0; // Reset buffer so it doesn't repeatedly trigger every tick
+                    battle.battleScore = WIN_SCORE * 0.5;
                     defender.vx *= 0.2;
                     defender.vy *= 0.2;
                 }

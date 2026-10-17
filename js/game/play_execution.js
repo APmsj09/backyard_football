@@ -659,9 +659,37 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
             }
         }
 
-        const isPulling = blocker.routePath && blocker.currentPathIndex < blocker.routePath.length;
+        const isPulling = Boolean(
+            blocker.routePath &&
+            blocker.currentPathIndex < blocker.routePath.length
+        );
+
+        // A pulling lineman must complete the designed path before
+        // choosing a defender to block.
+        if (playType === 'run' && isPulling) {
+            const pullPoint = blocker.routePath[blocker.currentPathIndex];
+
+            if (pullPoint) {
+                blocker.action = 'run_path';
+                blocker.targetX = pullPoint.x;
+                blocker.targetY = pullPoint.y;
+
+                setRouteIntent(
+                    blocker,
+                    pullPoint.x,
+                    pullPoint.y,
+                    0.6
+                );
+                return;
+            }
+        }
+
         const VISION_RANGE = isPulling ? 2.0 : 10.0;
-        const validThreats = threats.filter(t => getDistance(blocker, t) < VISION_RANGE && t.y > blocker.y - 1.5);
+        const validThreats = threats.filter(t =>
+            !assignedThreats.has(t.id) &&
+            getDistance(blocker, t) < VISION_RANGE &&
+            t.y > blocker.y - 1.5
+        );
 
         let target = null;
         const isPassPlay = playType === 'pass';
@@ -691,6 +719,47 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                 if (Math.abs(b.x - CENTER_X) < 2.5 && (b.assignment?.includes('blitz') || b.assignment?.includes('rush'))) dangerPriorityB -= 8;
             }
 
+            // TEAM PRIORITY:
+            // On pass plays, protect the QB first. Rushers closest to the QB,
+            // especially through the interior, receive higher blocking priority.
+            let pocketPriorityA = 0;
+            let pocketPriorityB = 0;
+
+            if (isPassPlay && qb) {
+                const qbDistA = getDistance(a, qb);
+                const qbDistB = getDistance(b, qb);
+
+                if (qbDistA < 7.0) {
+                    pocketPriorityA -= (7.0 - qbDistA) * 3.0;
+                }
+
+                if (qbDistB < 7.0) {
+                    pocketPriorityB -= (7.0 - qbDistB) * 3.0;
+                }
+
+                const interiorThreatA =
+                    a.y >= qb.y &&
+                    Math.abs(a.x - qb.x) < 3.0;
+
+                const interiorThreatB =
+                    b.y >= qb.y &&
+                    Math.abs(b.x - qb.x) < 3.0;
+
+                if (interiorThreatA) pocketPriorityA -= 3.0;
+                if (interiorThreatB) pocketPriorityB -= 3.0;
+            }
+
+            // On runs, favor defenders who can threaten the designed lane,
+            // while still accounting for each lineman's starting alignment.
+            let lanePriorityA = 0;
+            let lanePriorityB = 0;
+            const priorityLaneX = blocker.blockLaneX ?? runLaneX;
+
+            if (!isPassPlay && Number.isFinite(priorityLaneX)) {
+                lanePriorityA = Math.abs(a.x - priorityLaneX) * 0.75;
+                lanePriorityB = Math.abs(b.x - priorityLaneX) * 0.75;
+            }
+
             const avoidsUnneededDoubleTeam =
                 blockerProfile &&
                 blockerProfile.decisionQuality > 65 &&
@@ -704,16 +773,29 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                 ? (avoidsUnneededDoubleTeam ? 25 : 12)
                 : 0;
 
-            return (laneDiffA + dangerPriorityA + doubleTeamPenaltyA) - (laneDiffB + dangerPriorityB + doubleTeamPenaltyB);
+            return (
+                laneDiffA +
+                dangerPriorityA +
+                pocketPriorityA +
+                lanePriorityA +
+                doubleTeamPenaltyA
+            ) - (
+                laneDiffB +
+                dangerPriorityB +
+                pocketPriorityB +
+                lanePriorityB +
+                doubleTeamPenaltyB
+            );
         });
 
         // FIX: Allow a locked target to remain valid up to 14 yards so blockers don't drop targets on small movements
         if (blocker.dynamicTargetId) {
-            const currentThreat = threats.find(t => 
-                t.id === blocker.dynamicTargetId && 
-                !t.isEngaged && 
-                !t.isBlocked && 
-                getDistance(blocker, t) < 14.0 && 
+            const currentThreat = threats.find(t =>
+                t.id === blocker.dynamicTargetId &&
+                !assignedThreats.has(t.id) &&
+                !t.isEngaged &&
+                !t.isBlocked &&
+                getDistance(blocker, t) < 14.0 &&
                 t.y > blocker.y - 2.0
             );
             if (currentThreat) {
@@ -732,10 +814,12 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
         if (!target && (playType === 'run' || isPassCompleted)) {
             const laneX = blocker.blockLaneX ?? runLaneX;
             const secondLevelThreat = defenseStates
-                .filter(d => 
-                    !d.isBlocked && 
-                    d.stunnedTicks === 0 && 
-                    d.y > blocker.y - 0.5 && 
+                .filter(d =>
+                    !d.isBlocked &&
+                    !d.isEngaged &&
+                    !assignedThreats.has(d.id) &&
+                    d.stunnedTicks === 0 &&
+                    d.y > blocker.y - 0.5 &&
                     d.y < blocker.y + 8.0 &&
                     Math.abs(d.x - laneX) < 8.0
                 )
@@ -1077,9 +1161,10 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                     defenseStates.some(d =>
                         !d.isBlocked &&
                         !d.isEngaged &&
-                        Math.abs(d.x - pt.x) < 1.2 &&
-                        d.y > pState.y &&
-                        d.y < LOS + 1.0
+                        d.stunnedTicks <= 0 &&
+                        d.y > pState.y - 0.5 &&
+                        d.y <= pt.y + 2.0 &&
+                        getDistance(d, pt) < 2.25
                     )
                 );
 
