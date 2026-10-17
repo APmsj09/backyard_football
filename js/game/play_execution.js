@@ -485,6 +485,12 @@ export function setupInitialPlayerStates(playState, offense, defense, play, assi
 }
 
 export function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrierState, playType, offensivePlayKey, offensiveAssignments, defensivePlayKey, gameLog) {
+    // Reset per-tick speed modifiers so temporary contact effects do not persist.
+    // The logic below reapplies any modifier required for this tick.
+    playState.activePlayers.forEach(pState => {
+        pState.contactReduction = 1.0;
+    });
+
     const qbState = offenseStates.find(p => p.slot?.startsWith('QB'));
     const isBallInAir = playState.ballState.inAir;
     const ballPos = playState.ballState;
