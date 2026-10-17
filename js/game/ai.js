@@ -55,8 +55,9 @@ export function diagnosePlay(pState, tick, offenseStates, playState = null) {
     const observedRunCarrier =
         Boolean(observedCarrier && observedCarrier.role !== 'QB');
 
+    // A QB rollout behind the line of scrimmage is a passing threat, not a confirmed run!
     const qbScramble =
-        qb?.action === 'qb_scramble' ||
+        (qb?.action === 'qb_scramble' && qb.y > (playState?.lineOfScrimmage || 0)) ||
         Boolean(
             qb &&
             observedCarrier?.id === qb.id &&
@@ -124,7 +125,7 @@ export function diagnosePlay(pState, tick, offenseStates, playState = null) {
 
     ol.forEach(lineman => {
         // Give defenders a few ticks to observe the first step.
-        if (tick < 4) return;
+        if (tick < 5) return;
 
         const initialX = lineman.initialX ?? lineman.x;
         const initialY = lineman.initialY ?? lineman.y;
@@ -132,11 +133,12 @@ export function diagnosePlay(pState, tick, offenseStates, playState = null) {
         const lateralStep = lineman.x - initialX;
         const forwardStep = lineman.y - initialY;
 
-        // Pass sets tend to retreat; run blocks tend to drive forward.
-        // These cues depend on actual movement, not assignment names.
-        if (forwardStep < -0.12 || (lineman.vy || 0) < -0.75) {
+        // An OL holding pass pro might get shoved downfield; don't count that as a run block!
+        const isPassAssignment = lineman.action === 'pass_block' || lineman.assignment === 'pass_block';
+
+        if (forwardStep < -0.12 || (lineman.vy || 0) < -0.75 || (isPassAssignment && tick < 35)) {
             passBlocks++;
-        } else if (forwardStep > 0.12 || (lineman.vy || 0) > 0.75) {
+        } else if (forwardStep > 0.25 && !isPassAssignment) {
             runBlocks++;
         }
 
@@ -554,8 +556,14 @@ export function getSmartCarrierTarget(runner, defenseStates, offenseStates, fiel
     let centerThreat = 0;
     defenseStates.forEach(def => {
         if (def.stunnedTicks > 0 || def.y < runner.y - 1.0) return;
-        const dist = Math.hypot(runner.x - def.x, (runner.y + visionDepth) - def.y);
-        if (!def.isBlocked && !def.isEngaged && dist < 4.5) centerThreat += (10 / (dist + 0.1));
+        // Focus center threat specifically on the immediate 3-yard tunnel ahead
+        const dist = Math.hypot(runner.x - def.x, (runner.y + Math.min(visionDepth, 3.0)) - def.y);
+        
+        if (dist < 4.5) {
+            // Both unblocked AND engaged defenders physically clog the middle!
+            const weight = (def.isBlocked || def.isEngaged) ? 6 : 10;
+            centerThreat += (weight / (dist + 0.1));
+        }
     });
 
     laneOffsets.forEach((offset) => {
@@ -626,15 +634,16 @@ export function getSmartCarrierTarget(runner, defenseStates, offenseStates, fiel
         offenseStates.forEach(blocker => {
             if (blocker.id !== runner.id && (blocker.action?.includes('block') || blocker.action === 'run_path')) {
                 const lateralDist = Math.abs(testX - blocker.x);
-                const isAhead = blocker.y >= runner.y && blocker.y <= runner.y + 2.8;
+                // Expand vision ahead so RBs detect the pile before running into it
+                const isAhead = blocker.y >= runner.y && blocker.y <= runner.y + 4.0;
 
                 if (isAhead) {
-                    if (lateralDist < 0.85) {
-                        // COLLISION PENALTY: Do NOT run directly into the back of your own lineman!
-                        score -= 110;
-                    } else if (lateralDist >= 1.0 && lateralDist <= 2.5) {
-                        // REWARD RUNNING OFF THE HIP: Run into daylight right next to your blocker's seal
-                        score += 65;
+                    if (lateralDist < 1.0) {
+                        // Heavy collision penalty for running straight into the back of your own lineman
+                        score -= 130;
+                    } else if (lateralDist >= 1.2 && lateralDist <= 2.8) {
+                        // Reward daylight off the hip
+                        score += 70;
                     }
                 }
             }
@@ -677,6 +686,11 @@ export function getSmartCarrierTarget(runner, defenseStates, offenseStates, fiel
                     }
                 }
             } else {
+                // Engaged defenders are STILL a physical obstacle!
+                if (distToPredicted < 1.2) {
+                    score -= 100; // Do not run straight into an engaged defender's back!
+                }
+
                 // Defender is engaged with a blocker: reward running to the open side of the block
                 const blocker = (typeof def.blockedBy === 'object' && def.blockedBy !== null) ? def.blockedBy :
                     (typeof def.engagedWith === 'object' && def.engagedWith !== null) ? def.engagedWith :
@@ -1677,10 +1691,10 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
             const mobilityDesire = ((qbAgility * 0.5) + (qbSpeed * 0.5)) / 100; // 0.2 to 0.95
             const personalityUrgency = qbProfile?.riskTolerance ?? 1.0;
 
-            // Mobile QBs tuck and run when passing options fail; pocket statues remain patient
-            let scrambleChance = mobilityDesire * 0.18 * personalityUrgency;
-            if (allReadsExhausted) scrambleChance *= 2.0;
-            if (isPressured) scrambleChance *= 1.5;
+            // Math Fix: Drastically reduce base chance so it scales correctly across 25 simulation ticks per second
+            let scrambleChance = mobilityDesire * 0.006 * personalityUrgency;
+            if (allReadsExhausted) scrambleChance *= 2.5;
+            if (isPressured) scrambleChance *= 2.0;
 
             if (Math.random() < scrambleChance) {
                 qbState.action = 'run_path';

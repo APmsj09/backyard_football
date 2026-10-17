@@ -2094,8 +2094,9 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
 export function executeAssignment(pState, assignment, offenseStates, LOS, playState, ballCarrierState) {
     const isBallInAir = playState.ballState.inAir;
 
+    // Pass the real ballCarrierState so safeties don't provide double-team help while an RB is running with the ball!
     if (pState.role === 'DB' && assignment.includes('zone_deep') && !assignment.includes('blitz')) {
-        const safetyHelp = calculateSafetyHelp(pState, playState.activePlayers.filter(p => !p.isOffense), offenseStates, null, playState, isBallInAir);
+        const safetyHelp = calculateSafetyHelp(pState, playState.activePlayers.filter(p => !p.isOffense), offenseStates, ballCarrierState, playState, isBallInAir);
         if (safetyHelp && safetyHelp.type === 'help') {
             setPointIntent(pState, safetyHelp.helpX, safetyHelp.helpY, 0.5);
             return;

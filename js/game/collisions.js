@@ -965,21 +965,21 @@ export function resolveOngoingBlocks(playState, gameLog, offenseStates = [], def
                 const blkStr = blocker.strength || blocker.str || 50;
                 const defStr = defender.strength || defender.str || 50;
 
-                // A major strength advantage can finish the block decisively.
-                // Otherwise, a pancake is possible but remains uncommon;
-                // blocking technique versus block shedding adjusts the odds.
-                const hasPancakeStrength = blkStr >= defStr + 15;
-                const techniqueEdge =
-                    (blocker.blocking || 50) -
-                    (defender.blockShedding || 50);
-                const pancakeChance = Math.max(
-                    0.03,
-                    Math.min(0.13, 0.08 + (techniqueEdge * 0.001))
-                );
-                const isPancake =
-                    (hasPancakeStrength || Math.random() < pancakeChance) &&
-                    !defender._pancakedThisPlay;
+                // A pancake requires at least 20 ticks (0.8s) of sustained drive
+                const hasSustainedDrive = dur >= 20;
+                const strAdvantage = Math.max(0, blkStr - defStr);
+                const techniqueEdge = (blocker.blocking || 50) - (defender.blockShedding || 50);
 
+                // Base chance scales with strength gap and technique; never automatic 100%
+                const pancakeChance = Math.max(
+                    0.02,
+                    Math.min(0.25, 0.04 + (strAdvantage * 0.006) + (techniqueEdge * 0.002))
+                );
+
+                const isPancake =
+                    hasSustainedDrive &&
+                    Math.random() < pancakeChance &&
+                    !defender._pancakedThisPlay;
 
                 if (isPancake) {
                     const pancakeDx = defender.x - blocker.x;
