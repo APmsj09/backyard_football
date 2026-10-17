@@ -828,7 +828,7 @@ export function resolveOngoingBlocks(playState, gameLog, offenseStates = [], def
                     // Keep the block active, but retain a meaningful lead that
                     // the defender can still overcome by shedding the block.
                     battle.status = 'ongoing';
-                    battle.battleScore = WIN_SCORE * 0.5;
+                    battle.battleScore = BLOCK_WIN_SCORE * 0.5;
                     defender.vx *= 0.2;
                     defender.vy *= 0.2;
                 }
