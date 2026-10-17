@@ -1575,35 +1575,10 @@ export function openPlayerCard(playerId) {
                     <button class="bg-rose-700 hover:bg-rose-800 text-white px-4 py-1.5 rounded font-bold text-xs uppercase tracking-wider shadow-sm" onclick="app.cutPlayer('${player.id}')">Release Player</button>
                 </div>
             ` : (!player.teamId ? `
-                <div class="pt-3 border-t border-slate-200 bg-slate-50 p-3 rounded">
-                    <h5 class="text-xs font-bold text-slate-800 uppercase tracking-wider mb-2">Offer Contract & Role Pitch</h5>
-                    <div class="grid grid-cols-3 gap-2 text-xs mb-3">
-                        <div>
-                            <label class="block text-[10px] text-slate-500 font-bold uppercase">Role Promised</label>
-                            <select id="pitch-role" class="w-full p-1 border rounded bg-white font-bold text-slate-800">
-                                <option value="STARTER">Starter</option>
-                                <option value="ROTATION" selected>Rotation</option>
-                                <option value="BENCH">Reserve</option>
-                            </select>
-                        </div>
-                        <div>
-                            <label class="block text-[10px] text-slate-500 font-bold uppercase">Touches Promised</label>
-                            <select id="pitch-touches" class="w-full p-1 border rounded bg-white font-bold text-slate-800">
-                                <option value="NORMAL">Standard</option>
-                                <option value="FEATURED">Focal Option</option>
-                            </select>
-                        </div>
-                        <div>
-                            <label class="block text-[10px] text-slate-500 font-bold uppercase">Favor Tokens</label>
-                            <select id="pitch-tokens" class="w-full p-1 border rounded bg-white font-bold text-slate-800">
-                                <option value="0">0 Tokens</option>
-                                <option value="1">1 Token</option>
-                                <option value="2">2 Tokens</option>
-                            </select>
-                        </div>
-                    </div>
-                    <button class="w-full bg-emerald-700 hover:bg-emerald-800 text-white font-bold py-2 rounded text-xs uppercase tracking-wider" onclick="app.negotiatePlayer('${player.id}')">
-                        Submit Contract Pitch
+                <div class="pt-3 border-t border-slate-200 flex justify-between items-center bg-slate-50 p-2.5 rounded">
+                    <span class="text-xs text-slate-600 font-bold">Unsigned Neighborhood Free Agent</span>
+                    <button class="bg-emerald-700 hover:bg-emerald-800 text-white font-bold px-4 py-2 rounded text-xs uppercase tracking-wider shadow-sm transition" onclick="app.openBidModal('${player.id}')">
+                        Negotiate Contract 🤝
                     </button>
                 </div>
             ` : '')}
@@ -1712,7 +1687,7 @@ window.app = {
         if (gameState) UI.renderOffseasonFAPool(gameState);
     },
     openBidModal: (playerId) => {
-        const p = Game.getPlayer(playerId);
+        const p = Game.getPlayer(playerId) || gameState.players?.find(pl => pl.id === playerId);
         if (!p) return;
 
         const isOffseason = document.getElementById('offseason-fa-screen')?.classList.contains('hidden') === false;
@@ -1730,9 +1705,20 @@ window.app = {
         const pos = p.pos || Game.estimateBestPosition(p);
         const ovr = Game.calculateOverall(p, pos);
 
+        // Fetch position-specific promise options from the contract suite
+        const pitchOptions = Game.getRetentionPitchOptions(p);
+        const focusPromise = pitchOptions.focusPromise;
+
         const curRole = existingBid?.offer?.role || 'STARTER';
         const curTouches = existingBid?.offer?.promiseTouches || 'NORMAL';
-        const curTokens = existingBid?.offer?.tokensOffered ?? (maxTokensForThisBid >= 1 ? 0 : 0);
+        const curTokens = existingBid?.offer?.tokensOffered ?? 0;
+
+        // Contextual intel from negotiations.js
+        const teamRoster = Game.getRosterObjects(gameState.playerTeam);
+        const hasBFF = p.social?.bestFriendId && teamRoster.some(r => r.id === p.social.bestFriendId);
+        const hasRival = teamRoster.some(r => p.social?.rivalIds?.includes(r.id));
+        const qb1 = teamRoster.find(r => Game.isPlayerViableForPosition(r, 'QB'));
+        const teamOffense = gameState.playerTeam?.formations?.offense || 'Balanced';
 
         let heatLabel = '<span class="bg-slate-200 text-slate-700 px-1.5 py-0.5 rounded text-[10px] font-bold">💤 Quiet Market</span>';
         if (intel.heat === 'HOT') {
@@ -1744,11 +1730,13 @@ window.app = {
         const modalHtml = `
             <div class="space-y-3.5 text-left text-xs">
                 <!-- Prospect Profile Header -->
-                <div class="p-3 bg-slate-900 text-white rounded flex justify-between items-center">
+                <div class="p-3 bg-slate-900 text-white rounded flex justify-between items-center shadow-sm">
                     <div>
                         <div class="flex items-center gap-2">
                             <span class="font-black text-sm text-white">${p.name}</span>
                             <span class="bg-slate-800 text-amber-400 font-bold px-1.5 py-0.2 rounded font-mono text-[10px]">${pos}</span>
+                            ${hasBFF ? '<span class="bg-amber-400 text-slate-950 font-black px-1.5 py-0.2 rounded text-[9px]">🤝 BFF ON TEAM</span>' : ''}
+                            ${hasRival ? '<span class="bg-rose-500 text-white font-black px-1.5 py-0.2 rounded text-[9px]">⚠️ RIVAL ON TEAM</span>' : ''}
                         </div>
                         <span class="text-slate-400 font-mono text-[11px]">${p.age}yo • ${p.archetypeName || 'Athlete'} • Potential: ${p.potential || 'C'}</span>
                     </div>
@@ -1758,56 +1746,61 @@ window.app = {
                     </div>
                 </div>
 
-                <!-- Blacktop Rumors & Grapevine Card -->
+                <!-- Blacktop Rumors & Scouting Context -->
                 <div class="p-3 bg-amber-50/80 border border-amber-200 rounded text-slate-800 space-y-1">
                     <div class="flex justify-between items-center mb-1">
                         <span class="font-black text-[10px] text-amber-900 uppercase tracking-wider flex items-center gap-1">
-                            <span>🚲</span> Blacktop Grapevine & Market Rumors
+                            <span>🚲</span> Blacktop Grapevine & Rumors
                         </span>
                         ${heatLabel}
                     </div>
                     <p class="text-[11px] text-slate-700 italic">"${intel.rumorText}"</p>
-                    <div class="text-[10px] text-slate-500 font-mono pt-1 border-t border-amber-200/60 flex flex-wrap gap-2">
-                        <span>Work Ethic: <b>${p.personality?.workEthic || 50}</b></span>
+                    <div class="text-[10px] text-slate-500 font-mono pt-1.5 border-t border-amber-200/60 flex flex-wrap gap-2">
+                        <span>Scheme: <b>${teamOffense}</b></span>
                         <span>•</span>
-                        <span>Ego: <b class="${(p.personality?.ego || 50) > 70 ? 'text-rose-600' : 'text-slate-700'}">${p.personality?.ego || 50}</b></span>
+                        <span>Passer: <b>${qb1 ? `${qb1.name.split(' ')[0]} (${qb1.attributes?.technical?.throwingAccuracy || 50} THR)` : 'None'}</b></span>
                         <span>•</span>
                         <span>Clique: <b>${p.personality?.clique || 'Regular'}</b></span>
+                        <span>•</span>
+                        <span>Ego: <b class="${(p.personality?.ego || 50) > 70 ? 'text-rose-600' : 'text-slate-700'}">${p.personality?.ego || 50}</b></span>
                     </div>
                 </div>
 
-                <!-- Contract Terms Form -->
-                <div>
-                    <h5 class="font-black text-xs uppercase tracking-wider text-slate-700 mb-2">Offer Terms & Playing Promise</h5>
-                    <div class="grid grid-cols-3 gap-2.5">
+                <!-- Official Contract Terms Form -->
+                <div class="space-y-3 bg-white p-3 border border-slate-200 rounded">
+                    <h5 class="font-black text-xs uppercase tracking-wider text-slate-700">Contract Terms & Role Pitch</h5>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
                         <div>
-                            <label class="block text-[10px] text-slate-500 font-bold uppercase mb-1">Role Promised</label>
-                            <select id="bid-role" class="w-full p-1.5 border border-slate-300 rounded bg-white font-bold text-slate-800 outline-none">
-                                <option value="STARTER" ${curRole === 'STARTER' ? 'selected' : ''}>Starter (Promised)</option>
-                                <option value="ROTATION" ${curRole === 'ROTATION' ? 'selected' : ''}>Rotation (Core Sub)</option>
-                                <option value="BENCH" ${curRole === 'BENCH' ? 'selected' : ''}>Reserve (Depth)</option>
+                            <label class="block text-[10px] text-slate-500 font-bold uppercase mb-1">Role Commitment</label>
+                            <select id="bid-role" class="w-full p-2 border border-slate-300 rounded bg-white font-bold text-slate-800 outline-none text-xs">
+                                <option value="STARTER" ${curRole === 'STARTER' ? 'selected' : ''}>${pitchOptions.starterRoleLabel} (Promised)</option>
+                                <option value="ROTATION" ${curRole === 'ROTATION' ? 'selected' : ''}>${pitchOptions.rotationRoleLabel} (Core Sub)</option>
+                                <option value="BENCH" ${curRole === 'BENCH' ? 'selected' : ''}>${pitchOptions.reserveRoleLabel} (Depth)</option>
                             </select>
+                            <p class="text-[9px] text-slate-400 mt-0.5">Fake starter promises are penalized if a better starter already leads the room.</p>
                         </div>
+
                         <div>
-                            <label class="block text-[10px] text-slate-500 font-bold uppercase mb-1">Touches</label>
-                            <select id="bid-touches" class="w-full p-1.5 border border-slate-300 rounded bg-white font-bold text-slate-800 outline-none">
-                                <option value="NORMAL" ${curTouches === 'NORMAL' ? 'selected' : ''}>Standard</option>
-                                <option value="FEATURED" ${curTouches === 'FEATURED' ? 'selected' : ''}>Focal Option</option>
+                            <label class="block text-[10px] text-slate-500 font-bold uppercase mb-1">Position Workload Guarantee</label>
+                            <select id="bid-touches" class="w-full p-2 border border-slate-300 rounded bg-white font-bold text-slate-800 outline-none text-xs">
+                                <option value="NORMAL" ${curTouches === 'NORMAL' ? 'selected' : ''}>Team-First / Balanced Usage</option>
+                                ${focusPromise ? `<option value="FEATURED" ${curTouches === 'FEATURED' ? 'selected' : ''}>${focusPromise.label} (${focusPromise.target}+ Target)</option>` : ''}
                             </select>
-                        </div>
-                        <div>
-                            <label class="block text-[10px] text-slate-500 font-bold uppercase mb-1">Favor Tokens</label>
-                            <select id="bid-tokens" class="w-full p-1.5 border border-slate-300 rounded bg-white font-bold text-slate-800 outline-none">
-                                <option value="0" ${curTokens === 0 ? 'selected' : ''}>0 Tokens</option>
-                                ${maxTokensForThisBid >= 1 ? `<option value="1" ${curTokens === 1 ? 'selected' : ''}>1 Token</option>` : ''}
-                                ${maxTokensForThisBid >= 2 ? `<option value="2" ${curTokens === 2 ? 'selected' : ''}>2 Tokens</option>` : ''}
-                            </select>
+                            <p class="text-[9px] text-slate-400 mt-0.5">${focusPromise ? focusPromise.description : 'No offensive workload promise applies to this position.'}</p>
                         </div>
                     </div>
-                </div>
 
-                <div class="text-[10px] text-slate-500 bg-slate-50 p-2 rounded border border-slate-200">
-                    Favor Tokens: <b>${maxTokensForThisBid} Available for this bid</b> (Total: ${totalTokens}, Committed to other active offers: ${committedOtherTokens}).
+                    <div>
+                        <div class="flex justify-between items-center mb-1">
+                            <label class="text-[10px] text-slate-500 font-bold uppercase">Favor Token Sweetener</label>
+                            <span class="text-[10px] font-mono text-slate-500">Available: <b>${maxTokensForThisBid}</b></span>
+                        </div>
+                        <select id="bid-tokens" class="w-full p-2 border border-slate-300 rounded bg-white font-bold text-slate-800 outline-none text-xs">
+                            <option value="0" ${curTokens === 0 ? 'selected' : ''}>0 Tokens (Standard pitch)</option>
+                            ${maxTokensForThisBid >= 1 ? `<option value="1" ${curTokens === 1 ? 'selected' : ''}>1 Token (Lend bike, concessions, personal favors)</option>` : ''}
+                            ${maxTokensForThisBid >= 2 ? `<option value="2" ${curTokens === 2 ? 'selected' : ''}>2 Tokens (Substantial commitment & recruiting push)</option>` : ''}
+                        </select>
+                    </div>
                 </div>
             </div>
         `;
@@ -1816,27 +1809,55 @@ window.app = {
             const role = document.getElementById('bid-role')?.value || 'STARTER';
             const promiseTouches = document.getElementById('bid-touches')?.value || 'NORMAL';
             const tokensOffered = parseInt(document.getElementById('bid-tokens')?.value || '0', 10);
+            const offer = { role, promiseTouches, tokensOffered };
 
             if (isOffseason) {
-                UI.addOffseasonFABid({ playerId: p.id, offer: { role, promiseTouches, tokensOffered } });
+                UI.addOffseasonFABid({ playerId: p.id, teamId: gameState.playerTeam.id, offer });
                 UI.renderOffseasonFAScreen(gameState);
             } else {
-                const evalResult = Game.evaluatePlayerNegotiation(p, gameState.playerTeam, { role, promiseTouches, tokensOffered });
-                const isInstant = Game.checkInstantCommit(p, gameState.playerTeam, evalResult, { role, promiseTouches, tokensOffered });
+                const evalResult = Game.evaluatePlayerNegotiation(p, gameState.playerTeam, offer);
+                const isInstant = Game.checkInstantCommit(p, gameState.playerTeam, evalResult, offer);
+
+                // Build rich feedback modal displaying the full negotiations suite
+                const outcomeHtml = `
+                    <div class="space-y-3 text-left text-xs">
+                        <div class="p-3 rounded border ${evalResult.accepted ? 'bg-emerald-50 border-emerald-300 text-emerald-950' : 'bg-rose-50 border-rose-300 text-rose-950'}">
+                            <div class="flex items-center gap-2 mb-1">
+                                <span class="text-base">${evalResult.accepted ? '🤝' : '✋'}</span>
+                                <h4 class="font-black text-sm uppercase">${isInstant ? 'Instant Commitment!' : (evalResult.accepted ? 'Offer Accepted!' : 'Offer Declined')}</h4>
+                            </div>
+                            <p class="text-[11px] font-mono border-t pt-1 ${evalResult.accepted ? 'border-emerald-200' : 'border-rose-200'}">
+                                Interest Score: <b>${evalResult.interestScore} / 100</b> (Threshold: ${evalResult.threshold})
+                            </p>
+                        </div>
+
+                        <div class="bg-slate-50 border border-slate-200 p-2.5 rounded">
+                            <span class="font-black text-[10px] uppercase text-slate-500 block mb-1">Negotiation Factors & Player Reactions:</span>
+                            <ul class="space-y-0.5 text-[11px] font-mono text-slate-700">
+                                ${evalResult.reasons.map(r => `<li>• ${r}</li>`).join('')}
+                            </ul>
+                        </div>
+                    </div>
+                `;
 
                 if (isInstant) {
-                    Game.playerSignFreeAgent(p.id, { role, promiseTouches, tokensOffered });
-                    alert(`⚡ INSTANT COMMITMENT!\n\n${p.name} loved your offer and signed immediately with ${gameState.playerTeam.name}!`);
+                    if (tokensOffered > 0) {
+                        gameState.playerTeam.socialProfile.favorTokens = Math.max(0, (gameState.playerTeam.socialProfile.favorTokens || 0) - tokensOffered);
+                    }
+                    Game.playerSignFreeAgent(p.id, offer);
+                    p.activePromise = Game.createPlayerPromise(p, gameState.playerTeam, offer, { promiseSeason: gameState.year, source: 'freeAgency' });
+                    UI.showModal("Contract Signed! 🤝", outcomeHtml, null, null, null, "Welcome to the Squad!");
                 } else if (evalResult.accepted) {
                     gameState.weeklyBids = gameState.weeklyBids || [];
-                    gameState.weeklyBids.push({ playerId: p.id, team: gameState.playerTeam, teamId: gameState.playerTeam.id, offer: { role, promiseTouches, tokensOffered } });
-                    alert(`📋 Offer Submitted!\n\n${p.name} is considering your offer alongside other interest. Bids resolve at the end of the week.`);
+                    gameState.weeklyBids.push({ playerId: p.id, team: gameState.playerTeam, teamId: gameState.playerTeam.id, offer });
+                    UI.showModal("Offer Submitted 📋", outcomeHtml, null, null, null, "Understood");
                 } else {
-                    alert(`✋ Offer Declined: ${evalResult.reasons.join('\n• ')}`);
+                    UI.showModal("Offer Declined ✋", outcomeHtml, null, null, null, "Close");
                 }
+
                 UI.switchTab('free-agents', gameState);
             }
-        }, existingBid ? "Update Offer" : "Submit Offer");
+        }, existingBid ? "Update Offer" : "Submit Contract Offer");
     },
 
     cancelOffseasonBid: (idx) => {

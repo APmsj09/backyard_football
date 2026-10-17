@@ -1088,8 +1088,8 @@ export function renderFreeAgentsTab(gameState) {
                         <td class="text-center py-2 px-2">${p.attributes?.technical?.catchingHands || 0}</td>
                         <td class="text-center py-2 px-2">${p.attributes?.technical?.tackling || 0}</td>
                         <td class="text-right py-2 px-3 font-sans" onclick="event.stopPropagation()">
-                            <button class="bg-slate-900 hover:bg-slate-800 text-white font-bold px-2.5 py-1 rounded text-[10px] uppercase tracking-wider" onclick="app.openPlayerCard('${p.id}')">
-                                Pitch Contract
+                            <button class="bg-emerald-700 hover:bg-emerald-800 text-white font-bold px-2.5 py-1 rounded text-[10px] uppercase tracking-wider shadow-sm transition" onclick="app.openBidModal('${p.id}')">
+                                Pitch Contract 🤝
                             </button>
                         </td>
                     </tr>`;
