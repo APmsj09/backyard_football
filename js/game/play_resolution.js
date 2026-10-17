@@ -1431,6 +1431,64 @@ export function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey
         console.error("Simulation Loop Crash:", e);
     }
 
+    
+
+    // Reconcile the final spot from the actual carrier after the loop ends.
+    if (!playState.playIsLive) {
+        const terminalCarrier = playState.activePlayers.find(
+            p => p.hasBall || p.isBallCarrier
+        ) || null;
+
+        if (
+            terminalCarrier &&
+            !playState.touchdown &&
+            !playState.safety &&
+            !playState.touchback
+        ) {
+            ballCarrierState = terminalCarrier;
+            playState.finalBallY = terminalCarrier.y;
+
+            if (
+                !playState.possessionChanged &&
+                !playState.turnover &&
+                !playState.fumbleOccurred &&
+                !playState.interceptionOccurred
+            ) {
+                playState.yards =
+                    terminalCarrier.y - playState.lineOfScrimmage;
+            }
+
+            // Synchronize the physical ball with its terminal carrier.
+            const terminalBall = playState.ballState;
+
+            if (terminalBall) {
+                terminalBall.x = terminalCarrier.x;
+                terminalBall.y = terminalCarrier.y;
+                terminalBall.z = 0.5;
+
+                terminalBall.vx = 0;
+                terminalBall.vy = 0;
+                terminalBall.vz = 0;
+
+                terminalBall.inAir = false;
+                terminalBall.isLoose = false;
+            }
+        } else if (playState.type === 'punt' && playState.ballState) {
+            // Dead punts must not retain airborne or moving physics.
+            const terminalBall = playState.ballState;
+
+            terminalBall.y = playState.finalBallY;
+            terminalBall.z = 0;
+
+            terminalBall.vx = 0;
+            terminalBall.vy = 0;
+            terminalBall.vz = 0;
+
+            terminalBall.inAir = false;
+            terminalBall.isLoose = false;
+        }
+    }
+
     if (playState.returnStartY !== null && ballCarrierState) {
         const returnYards = Math.abs(ballCarrierState.y - playState.returnStartY);
         if (returnYards > 0) {
@@ -1533,6 +1591,7 @@ export function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey
         playResult.score = 'TD';
         playResult.defensiveTD = playState.defensiveTD || false;
     } else if (playState.safety) {
+        playResult.outcome = 'safety';
         playResult.safety = true;
         playResult.score = 'SAFETY';
     } else if (playState.sack) {
@@ -1543,12 +1602,17 @@ export function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey
     }
 
     if (playState.possessionChanged || playState.turnover || playState.type === 'punt') {
-        playResult.outcome = 'turnover';
         playResult.possessionChange = true;
+
         if (playState.interceptionOccurred) playResult.turnoverType = 'interception';
         else if (playState.fumbleOccurred) playResult.turnoverType = 'fumble';
         else if (playState.type === 'punt') playResult.turnoverType = 'punt';
         else if (!playResult.turnoverType && down === 4) playResult.turnoverType = 'downs';
+
+        // Preserve scoring outcomes instead of relabeling them as turnovers.
+        if (!playState.touchdown && !playState.safety) {
+            playResult.outcome = 'turnover';
+        }
     }
 
     applyStatEvents(playState.statEvents);

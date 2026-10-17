@@ -1541,19 +1541,51 @@ export function handleBallArrival(playState, carrier, playResult, gameLog) {
             }
             return;
         }
+if (playState.type === 'punt') {
+            ball.vz = -ball.vz * 0.4;
+            ball.vx *= 0.8;
+            ball.vy *= 0.8;
 
-        if (playState.type === 'punt') {
-            ball.vz = -ball.vz * 0.4; ball.vx *= 0.8; ball.vy *= 0.8;
             if (Math.abs(ball.vx) < 0.5 && Math.abs(ball.vy) < 0.5) {
-                if (gameLog && playState.playIsLive) pushGameLog(gameLog, `[Tick ${playState.tick}] ⏱️ Punt downed.`, playState);
-                playState.playIsLive = false; playState.possessionChanged = true;
+                if (gameLog && playState.playIsLive) {
+                    pushGameLog(
+                        gameLog,
+                        `[Tick ${playState.tick}] ⏱️ Punt downed.`,
+                        playState
+                    );
+                }
+
+                playState.playIsLive = false;
+                playState.possessionChanged = true;
                 playState.finalBallY = ball.y;
             }
-            const downingPlayer = playState.activePlayers.find(p => p.isOffense && getDistance(p, ball) < 1.0);
+
+            const downingPlayer = playState.activePlayers.find(
+                p => p.isOffense && getDistance(p, ball) < 1.0
+            );
+
             if (downingPlayer && playState.playIsLive) {
-                if (gameLog) pushGameLog(gameLog, `🛑 ${downingPlayer.name} downs the punt.`, playState);
-                playState.playIsLive = false; playState.possessionChanged = true;
+                if (gameLog) {
+                    pushGameLog(
+                        gameLog,
+                        `🛑 ${downingPlayer.name} downs the punt.`,
+                        playState
+                    );
+                }
+
+                playState.playIsLive = false;
+                playState.possessionChanged = true;
                 playState.finalBallY = ball.y;
+            }
+
+            // A dead punt must not retain airborne or moving physics.
+            if (!playState.playIsLive && playState.possessionChanged) {
+                ball.z = 0;
+                ball.vx = 0;
+                ball.vy = 0;
+                ball.vz = 0;
+                ball.inAir = false;
+                ball.isLoose = false;
             }
         } else if (playState.type === 'pass' && !ball.isLoose) {
             const wasCaught = playState.statEvents.some(e => e.type === 'completion' || e.type === 'interception');
