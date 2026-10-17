@@ -1956,8 +1956,14 @@ export function executeThrow(qbState, target, strength, accuracy, playState, gam
     aimX += (uX * longError) + (-uY * latError);
     aimY += (uY * longError) + (uX * latError);
 
-    aimX = Math.max(-5, Math.min(FIELD_WIDTH + 5, aimX));
-    aimY = Math.max(0.5, Math.min(FIELD_LENGTH - 0.5, aimY));
+    // Keep standard pass attempts inside the boundary lines (only intentional throw-aways leave the field)
+    if (!playState.ballState.isThrowAway) {
+        aimX = Math.max(1.0, Math.min(FIELD_WIDTH - 1.0, aimX));
+        aimY = Math.max(1.0, Math.min(118.5, aimY));
+    } else {
+        aimX = Math.max(-5, Math.min(FIELD_WIDTH + 5, aimX));
+        aimY = Math.max(0.5, Math.min(FIELD_LENGTH - 0.5, aimY));
+    }
 
     const finalDist = Math.hypot(aimX - startX, aimY - startY);
     const t = Math.max(0.1, finalDist / ballSpeed);

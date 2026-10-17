@@ -175,7 +175,7 @@ export const offenseFormations = {
             RB1: [-1.8, -6.0],   // Offset Left
             WR1: [-15.0, -0.2],  // X: Wide Left on the line
             WR2: [15.0, -1.2],   // Z: Wide Right off the line (flanker)
-            TE1: [2.8, -0.2],    // Y: Inline TE on the line next to RT
+            TE1: [3.1, -0.2],    // Y: Inline TE on the line (1.5yd gap from RT avoids overlap)
             OL1: [-1.6, -0.2],   // LT
             OL2: [0, -0.2],      // Center
             OL3: [1.6, -0.2]     // RT
@@ -223,11 +223,11 @@ export const offenseFormations = {
         personnel: { QB: 1, RB: 2, WR: 1, TE: 1, OL: 3 },
         mapping: { QB: 'QB1', RB: 'RB1', RB2: 'RB2', X: 'WR1', Y: 'TE1', OL: ['OL1', 'OL2', 'OL3'] },
         coordinates: {
-            QB1: [0, -1.0],     // True Under Center
-            RB2: [0, -3.2],     // FB in the hole
-            RB1: [0, -5.5],     // Deep Tailback
+            QB1: [0, -1.5],     // Under Center (clears Center collision radius)
+            RB2: [0, -3.4],     // FB in the hole
+            RB1: [0, -5.6],     // Deep Tailback
             WR1: [14.0, -0.2],  // X: Solo WR on the line
-            TE1: [-2.6, -0.2],  // Y: Inline TE Left on the line
+            TE1: [-2.9, -0.2],  // Y: Inline TE Left (1.5yd gap from LT)
             OL1: [-1.4, -0.2],
             OL2: [0, -0.2],
             OL3: [1.4, -0.2]
@@ -323,11 +323,11 @@ export const offenseFormations = {
         slots: ['QB1', 'RB1', 'RB2', 'TE1', 'TE2', 'OL1', 'OL2', 'OL3'],
         mapping: { QB: 'QB1', RB: 'RB1', RB2: 'RB2', X: 'TE1', Y: 'TE2', OL: ['OL1', 'OL2', 'OL3'] },
         coordinates: {
-            QB1: [0, -1.0],     // Under Center
-            RB2: [0, -2.8],     // FB
-            RB1: [0, -5.0],     // TB
-            TE1: [-2.6, -0.2],  // Left TE on line
-            TE2: [2.6, -0.2],   // Right TE on line
+            QB1: [0, -1.5],     // Under Center (clears Center collision radius)
+            RB2: [0, -3.2],     // FB
+            RB1: [0, -5.4],     // TB
+            TE1: [-2.9, -0.2],  // Left TE on line (1.5yd gap from LT)
+            TE2: [2.9, -0.2],   // Right TE on line (1.5yd gap from RT)
             OL1: [-1.4, -0.2],
             OL2: [0, -0.2],
             OL3: [1.4, -0.2]
@@ -711,9 +711,9 @@ export const defenseFormations = {
         slots: ['DL1', 'DL2', 'DL3', 'LB1', 'LB2', 'DB1', 'DB2', 'DB3'],
         personnel: { DL: 3, LB: 2, DB: 3 },
         coordinates: {
-            DL1: [-2.1, 1.0],  // DE Left
-            DL2: [0, 1.0],     // NT
-            DL3: [2.1, 1.0],   // DE Right
+            DL1: [-2.1, 1.25], // DE Left (neutral zone clearance from OL)
+            DL2: [0, 1.3],     // NT (1.5yd gap from Center at -0.2)
+            DL3: [2.1, 1.25],  // DE Right
             LB1: [-3.0, 4.0],  // Will LB
             LB2: [3.0, 4.0],   // Sam LB
             DB1: [-14.0, 5.5], // Corner Left (Flat/Cushion)

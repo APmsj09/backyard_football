@@ -954,6 +954,13 @@ export function resolvePlayerCollisions(playState) {
                 continue;
             }
 
+            // Exempt Under-Center QB and Center from pre-snap and dropback repelling
+            const isQBCenterPreSnap = ((p1.role === 'QB' && p2.slot === 'OL2') || (p2.role === 'QB' && p1.slot === 'OL2')) &&
+                (playState.tick < 8 || (p1.role === 'QB' ? p1.action === 'qb_setup' && !p1.hasCompletedDropback : p2.action === 'qb_setup' && !p2.hasCompletedDropback));
+            if (isQBCenterPreSnap) {
+                continue;
+            }
+
             const dx = p1.x - p2.x;
             const dy = p1.y - p2.y;
             const dist = Math.sqrt(dx * dx + dy * dy);

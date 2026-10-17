@@ -3929,8 +3929,9 @@ function drawPlayDiagram(canvas, playKey, side, team) {
                 let curY = sy;
 
                 route.path.forEach((node, i) => {
-                    const nextX = curX + (node.x * mirror);
-                    const nextY = curY + node.y;
+                    // Nodes in routeTree are relative to player's starting [sx, sy]
+                    const nextX = sx + (node.x * mirror);
+                    const nextY = sy + node.y;
                     const isLast = i === route.path.length - 1;
 
                     if (isLast) {

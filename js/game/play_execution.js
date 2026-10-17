@@ -87,6 +87,14 @@ export function setupInitialPlayerStates(playState, offense, defense, play, assi
             const relCoords = offenseFormationData.coordinates[slot] || [0, 0];
             let startX = ballX + relCoords[0];
             let startY = playState.lineOfScrimmage + relCoords[1];
+
+            // Compress wide receivers near boundary when ball is on hashes (18.0 or 35.3)
+            if (slot.startsWith('WR') || slot.startsWith('TE')) {
+                const MIN_SIDELINE_BUFFER = 4.2;
+                if (startX > FIELD_WIDTH - MIN_SIDELINE_BUFFER) startX = FIELD_WIDTH - MIN_SIDELINE_BUFFER;
+                else if (startX < MIN_SIDELINE_BUFFER) startX = MIN_SIDELINE_BUFFER;
+            }
+
             const validated = validateFormationCoordinate(startX, startY);
             initialOffenseStates.push({ slot, x: validated.x, y: validated.y });
         });
@@ -118,6 +126,13 @@ export function setupInitialPlayerStates(playState, offense, defense, play, assi
             const relCoords = formationData.coordinates[slot] || [0, 0];
             let startX = ballX + relCoords[0];
             let startY = playState.lineOfScrimmage + relCoords[1];
+
+            // Compress wide receivers near boundary when ball is on hashes
+            if (isOffense && (slot.startsWith('WR') || slot.startsWith('TE'))) {
+                const MIN_SIDELINE_BUFFER = 4.2;
+                if (startX > FIELD_WIDTH - MIN_SIDELINE_BUFFER) startX = FIELD_WIDTH - MIN_SIDELINE_BUFFER;
+                else if (startX < MIN_SIDELINE_BUFFER) startX = MIN_SIDELINE_BUFFER;
+            }
 
             const validated = validateFormationCoordinate(startX, startY);
             startX = validated.x;
@@ -363,8 +378,9 @@ export function setupInitialPlayerStates(playState, offense, defense, play, assi
                     startY = playState.lineOfScrimmage - 0.2;
                 }
             } else {
-                if (startY < playState.lineOfScrimmage + 0.8) {
-                    startY = playState.lineOfScrimmage + 0.8;
+                // Minimum 1.25 yds across LOS gives 1.45 yds gap from OL (-0.2), preventing pre-snap overlap
+                if (startY < playState.lineOfScrimmage + 1.25) {
+                    startY = playState.lineOfScrimmage + 1.25;
                 }
             }
 

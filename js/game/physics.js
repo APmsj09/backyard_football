@@ -668,6 +668,12 @@ function resolveNewtonianCollisions(pState, allPlayers) {
             continue;
         }
 
+        // Exempt QB and Center while under center and during the initial dropback step
+        const isQBCenter = (pState.role === 'QB' && other.slot === 'OL2') || (other.role === 'QB' && pState.slot === 'OL2');
+        if (isQBCenter && (pState.action === 'qb_setup' || other.action === 'qb_setup') && (!pState.hasCompletedDropback || !other.hasCompletedDropback)) {
+            continue;
+        }
+
         const dist = getDistance(pState, other);
         const theirWeight = other.weight || other.wgt || 200;
         const theirRadius = BASE_RADIUS + (theirWeight / 1000);
