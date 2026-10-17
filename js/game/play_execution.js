@@ -2051,7 +2051,12 @@ export function executeAssignment(pState, assignment, offenseStates, LOS, playSt
                     0.5
                 );
 
-                targetRec.jammedTicks = 15;
+                // Preserve the current jam's remaining duration, including
+                // this tick, without restarting a full 15-tick penalty.
+                targetRec.jammedTicks = Math.max(
+                    targetRec.jammedTicks || 0,
+                    pState.jamTicks + 1
+                );
                 return;
             } else {
                 targetRec.contactReduction = 1.0;

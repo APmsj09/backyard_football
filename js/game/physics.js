@@ -27,6 +27,16 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
     pState.vx = pState.vx || 0;
     pState.vy = pState.vy || 0;
 
+    // Advance jam duration once per simulation tick, including ticks
+    // where movement returns early because the player is restricted.
+    const isJammedThisTick =
+        Number.isFinite(pState.jammedTicks) &&
+        pState.jammedTicks > 0;
+
+    if (isJammedThisTick) {
+        pState.jammedTicks = Math.max(0, pState.jammedTicks - 1);
+    }
+
     const telemetryActive =
         typeof window !== 'undefined' &&
         Boolean(window.__ACTIVE_PLAY_TELEMETRY__);
@@ -61,6 +71,8 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
 
             pState._telemetryMotionPause = 'snap_reaction';
         }
+
+        pState._routeWaypointStallTicks = 0;
 
         pState.snapReactionTimer--;
         pState.vx = 0;
@@ -103,6 +115,10 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
 
             pState._telemetryMotionPause = passiveReason;
         }
+
+         // A movement-restricted player is not evidence of a failed
+        // route-navigation attempt. Do not carry stale stall ticks forward.
+        pState._routeWaypointStallTicks = 0;
 
         const passiveFriction = scalePerTickFactor(0.85, dt);
         pState.vx *= passiveFriction;
@@ -289,9 +305,8 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
     if (pState.action === 'backpedal') actionMult *= 0.55;
     if (pState.action === 'trucking') actionMult *= 0.75;
 
-    if (pState.jammedTicks > 0) {
-        pState.jammedTicks--;
-        actionMult *= 0.60; // 40% speed reduction when physically jammed
+    if (isJammedThisTick) {
+        actionMult *= 0.70; // 30% speed reduction while jammed
     }
 
     // Contact and assignment modifiers are set by the play logic.
@@ -468,6 +483,7 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
         pState.action === 'run_route' &&
         distToTarget > 2.0 &&
         routeProgressTowardTarget < 0.03 &&
+        !isJammedThisTick &&
         !pState._intent?.settled;
 
     if (isStalledRouteWaypoint) {

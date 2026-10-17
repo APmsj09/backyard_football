@@ -87,16 +87,27 @@ export function setHoldIntent(
 export function setTrackIntent(pState, entity, leadTime = 0, deadband = 0.60) {
     if (!pState._intent) initMovementIntent(pState);
     const intent = pState._intent;
-    intent.mode = 'TRACK';
-    intent.targetEntityId = entity.id;
 
     const rawX = entity.x + ((entity.vx || 0) * leadTime);
     const rawY = entity.y + ((entity.vy || 0) * leadTime);
 
-    if (intent.targetX === undefined || Math.hypot(rawX - intent.targetX, rawY - intent.targetY) > deadband) {
+    const modeChanged = intent.mode !== 'TRACK';
+    const targetChanged =
+        intent.targetX === undefined ||
+        Math.hypot(
+            rawX - intent.targetX,
+            rawY - intent.targetY
+        ) > deadband;
+
+    intent.mode = 'TRACK';
+    intent.targetEntityId = entity.id;
+
+    if (modeChanged || targetChanged) {
         intent.targetX = rawX;
         intent.targetY = rawY;
+        intent.settled = false;
     }
+
     intent.arrivalRadius = 0.40;
     intent.isExplicit = true;
 }
@@ -140,9 +151,20 @@ export function resolveMovementIntent(pState) {
         pState.arrivalRadius = intent.arrivalRadius;
         intent.isExplicit = false; // Reset for next tick
     } else {
-        // Safe legacy fallback: adopt raw coordinates, set mode to POINT
-        intent.targetX = pState.targetX ?? pState.x;
-        intent.targetY = pState.targetY ?? pState.y;
+        // Safe legacy fallback: adopt raw coordinates and synchronize
+        // both the public movement mode and the internal intent mode.
+        const targetX = pState.targetX ?? pState.x;
+        const targetY = pState.targetY ?? pState.y;
+
+        if (intent.mode !== 'POINT') {
+            intent.settled = false;
+        }
+
+        intent.mode = 'POINT';
+        intent.targetEntityId = null;
+        intent.targetX = targetX;
+        intent.targetY = targetY;
+
         pState.movementMode = 'POINT';
         pState.arrivalRadius = 0.35;
     }
