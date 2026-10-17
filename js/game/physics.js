@@ -13,6 +13,110 @@ export function getDistance(p1, p2) {
 }
 
 /**
+ * Applies a physical disruption without freezing the player in place.
+ * impactSeverity is an authored 0-100 gameplay scale, not raw force units.
+ * Returns true when the player is downed, false when they remain upright.
+ */
+export function applyImpactDisruption(
+    pState,
+    impactSeverity,
+    impulseX = 0,
+    impulseY = 0,
+    forceKnockdown = false
+) {
+    if (!pState) return false;
+
+    const severity = Math.max(0, Math.min(100, Number(impactSeverity) || 0));
+    if (severity <= 0) return false;
+
+    const agility = Math.max(20, Math.min(99, Number(pState.agility ?? pState.agi) || 50));
+    const strength = Math.max(20, Math.min(99, Number(pState.strength ?? pState.str) || 50));
+    const weightValue = Number(pState.weight ?? pState.wgt);
+    const weight = Number.isFinite(weightValue) ? weightValue : 200;
+    const fatigueModifier = Number.isFinite(pState.fatigueModifier)
+        ? Math.max(0.5, Math.min(1.0, pState.fatigueModifier))
+        : 1.0;
+    const fatiguePenalty = 1.0 - fatigueModifier;
+
+    const vx = Number.isFinite(pState.vx) ? pState.vx : 0;
+    const vy = Number.isFinite(pState.vy) ? pState.vy : 0;
+    const speedBeforeImpact = Math.hypot(vx, vy);
+    const safeImpulseX = Number.isFinite(impulseX) ? impulseX : 0;
+    const safeImpulseY = Number.isFinite(impulseY) ? impulseY : 0;
+    const impulseSpeed = Math.hypot(safeImpulseX, safeImpulseY);
+    const wasOffBalance =
+        pState.balanceState === 'off_balance' ||
+        (pState.offBalanceTicks || 0) > 0;
+
+    // Preserve and redirect momentum rather than teleporting or freezing.
+    pState.vx = vx + safeImpulseX;
+    pState.vy = vy + safeImpulseY;
+
+    const knockdownChance = Math.max(
+        0,
+        Math.min(
+            0.85,
+            ((severity - 52) * 0.012) +
+            Math.min(0.18, (speedBeforeImpact + impulseSpeed * 0.5) * 0.022) +
+            (wasOffBalance ? 0.14 : 0) +
+            (fatiguePenalty * 0.15) -
+            ((agility - 50) * 0.0022) -
+            ((strength - 50) * 0.0012) -
+            ((weight - 220) * 0.0006)
+        )
+    );
+
+    const knockedDown =
+        forceKnockdown ||
+        (knockdownChance > 0 && Math.random() < knockdownChance);
+
+    if (knockedDown) {
+        const recoveryTicks = Math.max(
+            10,
+            Math.min(
+                48,
+                Math.round(
+                    10 +
+                    (severity * 0.16) +
+                    Math.min(6, (speedBeforeImpact + impulseSpeed * 0.5) * 0.65) +
+                    (fatiguePenalty * 8) +
+                    ((weight - 220) * 0.03) -
+                    ((agility - 50) * 0.08) -
+                    ((strength - 50) * 0.035)
+                )
+            )
+        );
+
+        pState.balanceState = 'downed';
+        pState.downedTicks = Math.max(pState.downedTicks || 0, recoveryTicks);
+        pState.offBalanceTicks = 0;
+        pState.balanceSeverity = severity;
+        pState.stunnedTicks = 0;
+        return true;
+    }
+
+    const stumbleTicks = Math.max(
+        3,
+        Math.min(
+            18,
+            Math.round(
+                4 +
+                (severity * 0.09) +
+                Math.min(4, (speedBeforeImpact + impulseSpeed * 0.25) * 0.30) +
+                (fatiguePenalty * 4) -
+                ((agility - 50) * 0.04)
+            )
+        )
+    );
+
+    pState.balanceState = 'off_balance';
+    pState.offBalanceTicks = Math.max(pState.offBalanceTicks || 0, stumbleTicks);
+    pState.balanceSeverity = Math.max(pState.balanceSeverity || 0, severity);
+
+    return false;
+}
+
+/**
  * Main Physics and Movement Engine
  * Handles momentum, mass-based inertia, gap friction, and Newtonian collisions.
  */
@@ -46,7 +150,43 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
             ? window.__CURRENT_TICK__
             : 0;
     
-     // --- 1. SNAP REACTION TIMER ---
+    // A downed player slides on remaining momentum but cannot steer or act.
+    // Recovery advances once per movement update; no per-tick player scan is needed.
+    if (pState.balanceState === 'downed') {
+        const remainingDownedTicks = Number.isFinite(pState.downedTicks)
+            ? Math.max(0, pState.downedTicks)
+            : 0;
+
+        if (remainingDownedTicks > 0) {
+            pState.downedTicks = remainingDownedTicks - 1;
+
+            const downedFriction = scalePerTickFactor(0.70, dt);
+            pState.vx *= downedFriction;
+            pState.vy *= downedFriction;
+            pState.x += pState.vx * dt;
+            pState.y += pState.vy * dt;
+
+            if (pState.downedTicks === 0) {
+                pState.balanceState = 'stable';
+                pState.offBalanceTicks = 0;
+                pState.balanceSeverity = 0;
+                pState.vx = 0;
+                pState.vy = 0;
+            }
+
+            pState.currentSpeedYPS = Math.hypot(pState.vx, pState.vy);
+            pState.velocity = { x: pState.vx, y: pState.vy };
+            clampToField(pState);
+            return;
+        }
+
+        pState.balanceState = 'stable';
+        pState.downedTicks = 0;
+        pState.offBalanceTicks = 0;
+        pState.balanceSeverity = 0;
+    }
+
+    // --- 1. SNAP REACTION TIMER ---
     if (pState.snapReactionTimer > 0) {
         if (telemetryActive && pState._telemetryMotionPause !== 'snap_reaction') {
             logPlayDebug(
@@ -132,6 +272,28 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
 
         clampToField(pState);
         return;
+    }
+
+    // Off-balance players retain momentum but cannot redirect it as quickly.
+    // The timer advances once when normal movement control is available.
+    const isOffBalanceThisTick =
+        pState.balanceState === 'off_balance' &&
+        Number.isFinite(pState.offBalanceTicks) &&
+        pState.offBalanceTicks > 0;
+    const offBalanceSeverityThisTick = isOffBalanceThisTick
+        ? (pState.balanceSeverity || 40)
+        : 0;
+
+    if (isOffBalanceThisTick) {
+        pState.offBalanceTicks = Math.max(0, pState.offBalanceTicks - 1);
+        if (pState.offBalanceTicks === 0) {
+            pState.balanceState = 'stable';
+            pState.balanceSeverity = 0;
+        }
+    } else if (pState.balanceState === 'off_balance') {
+        pState.balanceState = 'stable';
+        pState.offBalanceTicks = 0;
+        pState.balanceSeverity = 0;
     }
 
     // --- 3. ATTRIBUTE RETRIEVAL & NORMALIZATION ---
@@ -235,6 +397,7 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
     
      // A settled player should remain stopped until their target changes.
     if (
+        !isOffBalanceThisTick &&
         (pState.movementMode === 'HOLD' || pState.movementMode === 'POINT') &&
         pState._intent?.settled
     ) {
@@ -262,7 +425,10 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
     }
 
     // DECISIVE BRAKING FOR FIXED TARGETS (HOLD & POINT)
-    if (pState.movementMode === 'HOLD' || pState.movementMode === 'POINT') {
+    if (
+        !isOffBalanceThisTick &&
+        (pState.movementMode === 'HOLD' || pState.movementMode === 'POINT')
+    ) {
         if (distToTarget <= arrivalRadius) {
             // Apply heavy braking friction
             const targetBrakeFactor = scalePerTickFactor(0.40, dt);
@@ -367,6 +533,23 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
         // Agility helps plant the feet.
         const brakePower = (2.0 + (agiFactor * 4.0)) / Math.sqrt(weightRatio);
         accelRate *= brakePower;
+    }
+
+    if (isOffBalanceThisTick) {
+        // Agile players regain control sooner; severe impacts reduce control more.
+        const agilityControl = Math.max(
+            0.35,
+            Math.min(0.75, 0.30 + (agiFactor * 0.45))
+        );
+        const impactControl = Math.max(
+            0.65,
+            1.0 - (offBalanceSeverityThisTick * 0.0035)
+        );
+        const controlFactor = agilityControl * impactControl;
+
+        accelRate *= controlFactor;
+        maxAccelerationYPS2 *= controlFactor;
+        maxDecelerationYPS2 *= controlFactor;
     }
 
     // --- 9. APPLY NEWTONIAN ACCELERATION WITH DISTANCE GATING ---

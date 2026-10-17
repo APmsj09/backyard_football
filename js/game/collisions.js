@@ -1,4 +1,4 @@
-import { getDistance } from './physics.js';
+import { getDistance, applyImpactDisruption } from './physics.js';
 import { getRandomInt, formatHeight } from '../utils.js';
 import { getPlayer } from './state.js';
 import { logPlayDebug } from './telemetry.js';
@@ -81,8 +81,22 @@ export function checkFumble(ballCarrierState, tacklerState, playState, gameLog) 
 
         ballCarrierState.isBallCarrier = false;
         ballCarrierState.hasBall = false;
-        ballCarrierState.stunnedTicks = 40;
-        tacklerState.stunnedTicks = 10;
+        const impactDistance = Math.max(0.1, Math.hypot(dx, dy));
+        const impactDirX = dx / impactDistance;
+        const impactDirY = dy / impactDistance;
+
+        applyImpactDisruption(
+            ballCarrierState,
+            66,
+            impactDirX * 2.2,
+            impactDirY * 2.2
+        );
+        applyImpactDisruption(
+            tacklerState,
+            20,
+            -impactDirX * 0.6,
+            -impactDirY * 0.6
+        );
 
         playState.statEvents.push({
             type: 'fumble',
@@ -95,8 +109,18 @@ export function checkFumble(ballCarrierState, tacklerState, playState, gameLog) 
 }
 
 export function checkBlockCollisions(playState, gameLog = null) {
-    const blockers = playState.activePlayers.filter(p => p.isOffense && !p.isEngaged && p.stunnedTicks === 0);
-    const defenders = playState.activePlayers.filter(p => !p.isOffense && p.stunnedTicks <= 0 && !p.isEngaged);
+    const blockers = playState.activePlayers.filter(p =>
+        p.isOffense &&
+        !p.isEngaged &&
+        p.stunnedTicks === 0 &&
+        p.balanceState !== 'downed'
+    );
+    const defenders = playState.activePlayers.filter(p =>
+        !p.isOffense &&
+        p.stunnedTicks <= 0 &&
+        p.balanceState !== 'downed' &&
+        !p.isEngaged
+    );
 
     blockers.forEach(blocker => {
         const isBlockingDuty = blocker.action.includes('block') ||
@@ -128,7 +152,19 @@ export function checkBlockCollisions(playState, gameLog = null) {
             // 1. Speed Edge Dip: Fast rusher blows by the tackle on the outside arc
             const isEdgeAlignment = Math.abs(target.initialX - blocker.initialX) > 1.4;
             if (isPassRush && isEdgeAlignment && targetSpd > blockerAgi + 14 && Math.random() < 0.28) {
-                blocker.stunnedTicks = 12;
+                const awayX = blocker.x - target.x;
+                const awayY = blocker.y - target.y;
+                const awayDist = Math.max(0.1, Math.hypot(awayX, awayY));
+
+                // The blocker loses his base while reacting to the speed rush;
+                // momentum and reduced steering carry him off his ideal path.
+                applyImpactDisruption(
+                    blocker,
+                    32,
+                    (awayX / awayDist) * 1.2,
+                    (awayY / awayDist) * 1.2
+                );
+
                 target.action = 'pursuit';
 
                 logPlayDebug('TRENCH_EDGE_BURN', `${target.name} beat ${blocker.name} with pure edge speed`, {
@@ -169,7 +205,7 @@ export function checkTackleCollisions(playState, gameLog) {
     const tacklingTeam = playState.activePlayers.filter(p => p.isOffense !== carrier.isOffense);
 
     const defenders = tacklingTeam.filter(p => {
-        if (p.stunnedTicks > 0) return false;
+        if (p.stunnedTicks > 0 || p.balanceState === 'downed') return false;
 
         // Refresh distance after movement; the cached value may be stale.
         const dist = getDistance(p, carrier);
@@ -335,18 +371,35 @@ export function checkTackleCollisions(playState, gameLog) {
                     if (strDiff > agiDiff && strDiff > 10) {
                         carrier.action = 'stiff_arm';
                         
-                        // PHYSICS: Defender gets physically knocked back and falls down
-                        defender.stunnedTicks = 22; 
-                        defender.vx = (defender.x - carrier.x) * 2.0; // Shoved away
-                        defender.vy = (defender.y - carrier.y) * 2.0; 
-                        defender.moveCooldown = 25; // Getting back up takes time
+                        // A stiff arm redirects the defender; impact severity and
+                        // balance attributes decide whether he stumbles or falls.
+                        const impactDx = defender.x - carrier.x;
+                        const impactDy = defender.y - carrier.y;
+                        const impactDistance = Math.max(
+                            0.1,
+                            Math.hypot(impactDx, impactDy)
+                        );
+                        const knockedDown = applyImpactDisruption(
+                            defender,
+                            68,
+                            (impactDx / impactDistance) * 2.5,
+                            (impactDy / impactDistance) * 2.5
+                        );
                         
                         // PHYSICS: Stiff arm absorbs momentum relative to the mass of the defender shoved away
                         const speedPenalty = Math.min(0.4, (defWeight / (carWeight * 1.5)) * 0.25);
                         carrier.vx *= (1 - speedPenalty);
                         carrier.vy *= (1 - speedPenalty);
 
-                        if (gameLog) pushGameLog(gameLog, `💪 ${carrier.name} stiff-arms ${defender.name} to the ground!`, playState);
+                        if (gameLog) {
+                            pushGameLog(
+                                gameLog,
+                                knockedDown
+                                    ? `💪 ${carrier.name} stiff-arms ${defender.name} to the ground!`
+                                    : `💪 ${carrier.name} stiff-arms ${defender.name} off balance!`,
+                                playState
+                            );
+                        }
                     } else {
                         const dir = Math.random() > 0.5 ? 1 : -1;
                         carrier.action = dir === 1 ? 'juke_right' : 'juke_left';
@@ -356,13 +409,24 @@ export function checkTackleCollisions(playState, gameLog) {
                         carrier.vy *= 0.65; // Bleed 35% of forward momentum planting the foot
                         carrier.vx += dir * 2.5; // Surge of lateral velocity
                         
-                        // PHYSICS: Defender bites on the fake. Throw their momentum in the opposite direction.
-                        defender.vx = -dir * 3.5; 
-                        defender.vy += 1.5; // Overpursuit drift
-                        defender.stunnedTicks = 10; // Shorter hard stun (brain catching up)
-                        defender.moveCooldown = 30; // Longer balance recovery (broken ankles)
-                        
-                        if (gameLog) pushGameLog(gameLog, `⚡ ${carrier.name} breaks ${defender.name}'s ankles with a quick cut!`, playState);
+                        // The defender's momentum carries him past the cut;
+                        // agility determines how quickly he regains steering.
+                        const knockedDown = applyImpactDisruption(
+                            defender,
+                            42,
+                            -dir * 2.5,
+                            1.0
+                        );
+
+                        if (gameLog) {
+                            pushGameLog(
+                                gameLog,
+                                knockedDown
+                                    ? `⚡ ${carrier.name}'s cut sends ${defender.name} to the ground!`
+                                    : `⚡ ${carrier.name}'s cut leaves ${defender.name} off balance!`,
+                                playState
+                            );
+                        }
                     }
                     continue;
                 }
@@ -448,13 +512,20 @@ export function checkTackleCollisions(playState, gameLog) {
 
         } else {
             carrier.tacklesBrokenThisPlay = brokenCount + 1;
-            
-            // PHYSICS: Defender bounces off the carrier kintetically
-            defender.stunnedTicks = 16;
-            defender.vx = (defender.x - carrier.x) * 1.8;
-            defender.vy = (defender.y - carrier.y) * 1.8;
-            defender.moveCooldown = 20; // Slow to get back into pursuit
 
+            // A failed tackle redirects the defender and disrupts his balance.
+            const bounceX = defender.x - carrier.x;
+            const bounceY = defender.y - carrier.y;
+            const bounceDistance = Math.max(
+                0.1,
+                Math.hypot(bounceX, bounceY)
+            );
+            applyImpactDisruption(
+                defender,
+                34,
+                (bounceX / bounceDistance) * 1.6,
+                (bounceY / bounceDistance) * 1.6
+            );
             // PHYSICS: Running *through* a defender transfers a massive chunk of momentum based on weight ratio
             const speedDrain = Math.max(0.15, Math.min(0.60, (defender.wgt / carrier.wgt) * 0.40));
             carrier.vx *= (1 - speedDrain);
@@ -479,6 +550,7 @@ export function checkFumbleRecovery(playState, gameLog, tackleRange) {
 
     const playersInRange = playState.activePlayers.filter(p =>
         p.stunnedTicks === 0 &&
+        p.balanceState !== 'downed' &&
         !p.isEngaged &&
         getDistance(p, ballPos) < tackleRange
     );
@@ -561,6 +633,8 @@ export function resolveOngoingBlocks(playState, gameLog, offenseStates = [], def
             defender.blockedBy !== blocker ||
             blocker.stunnedTicks > 0 ||
             defender.stunnedTicks > 0 ||
+            blocker.balanceState === 'downed' ||
+            defender.balanceState === 'downed' ||
             getDistance(blocker, defender) > MAX_BLOCK_SEPARATION
         ) {
 
@@ -579,7 +653,7 @@ export function resolveOngoingBlocks(playState, gameLog, offenseStates = [], def
                 if (reactionScore + getRandomInt(0, 50) > 100) {
                     // DEEPER FIX: If defender sheds to make an immediate tackle, instantly sever the engagement
                     blocker.engagedWith = null; blocker.isEngaged = false;
-                    blocker.stunnedTicks = 10;
+                    applyImpactDisruption(blocker, 28, 0, 0);
                     defender.isBlocked = false; defender.blockedBy = null; defender.isEngaged = false;
                     defender.action = 'pursuit';
                     battle.status = 'disengaged';
@@ -866,8 +940,22 @@ export function resolveOngoingBlocks(playState, gameLog, offenseStates = [], def
                 return;
             }
             if (isPassRush) logPlayDebug('BLOCK_SHED', `${defender.name} defeated ${blocker.name}'s block`, { durationTicks: dur });
+
+            const blockerAwayX = blocker.x - defender.x;
+            const blockerAwayY = blocker.y - defender.y;
+            const blockerAwayDistance = Math.max(
+                0.1,
+                Math.hypot(blockerAwayX, blockerAwayY)
+            );
+
+            applyImpactDisruption(
+                blocker,
+                isPassRush ? 40 : 30,
+                (blockerAwayX / blockerAwayDistance) * (isPassRush ? 1.5 : 1.0),
+                (blockerAwayY / blockerAwayDistance) * (isPassRush ? 1.5 : 1.0)
+            );
+
             blocker.engagedWith = null; blocker.isEngaged = false;
-            blocker.stunnedTicks = 15;
             defender.stunnedTicks = 0;
             defender.isBlocked = false; defender.blockedBy = null; defender.isEngaged = false;
             defender.action = 'pursuit';
@@ -894,17 +982,26 @@ export function resolveOngoingBlocks(playState, gameLog, offenseStates = [], def
 
 
                 if (isPancake) {
+                    const pancakeDx = defender.x - blocker.x;
+                    const pancakeDy = defender.y - blocker.y;
+                    const pancakeDistance = Math.max(
+                        0.1,
+                        Math.hypot(pancakeDx, pancakeDy)
+                    );
+
+                    applyImpactDisruption(
+                        defender,
+                        90,
+                        (pancakeDx / pancakeDistance) * 2.4,
+                        (pancakeDy / pancakeDistance) * 2.4,
+                        true
+                    );
+
                     logPlayDebug('PANCAKE_BLOCK', `${blocker.name} flattened ${defender.name}`, {
                         engagementDurationTicks: dur,
-                        stunTicks: 24
+                        downedTicks: defender.downedTicks
                     });
 
-                    // PHYSICS: Knock the defender backward onto the turf
-                    defender.stunnedTicks = 24; 
-                    defender.vx = (defender.x - blocker.x) * 2.5;
-                    defender.vy = (defender.y - blocker.y) * 2.5;
-                    defender.moveCooldown = 30; // Severe sluggishness getting back up
-                    
                     defender._pancakedThisPlay = true;
                     defender.action = 'pursuit';
 

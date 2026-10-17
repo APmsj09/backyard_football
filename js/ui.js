@@ -3143,8 +3143,28 @@ export function renderPlaybookManager(gameState) {
     const BASICS_OFF = ['Uni_InsideZone', 'Uni_StretchRight', 'Uni_QuickSlants', 'Uni_FourVerts'];
     const BASICS_DEF = ['Cover_2_Zone_Base', 'Cover_1_Robber', 'Man_Blitz_Base', 'GoalLine_RunStuff'];
 
-    if (!team.gameplan.installedOffense) team.gameplan.installedOffense = ['Uni_Stick', 'Uni_Drive', 'Uni_HB_Screen', 'PA_Crossers', 'Uni_Mesh', 'Uni_Counter_Trap', 'Uni_PowerLead', 'Uni_Double_Moves'];
-    if (!team.gameplan.installedDefense) team.gameplan.installedDefense = ['Cover_3_Sky', 'Nickel_Tampa_2', 'Fire_Zone_3', 'Cover_6_Split', 'Cover_3_Drop', 'Nickel_Strong_Blitz', 'Overload_Blitz_Right', 'Dime_Lockdown'];
+    if (!team.gameplan) team.gameplan = {};
+
+    // 1. Strip any locked BASICS out of custom arrays and eliminate any duplicate entries
+    team.gameplan.installedOffense = Array.from(new Set(team.gameplan.installedOffense || []))
+        .filter(k => !BASICS_OFF.includes(k) && offensivePlaybook[k])
+        .slice(0, 8);
+
+    team.gameplan.installedDefense = Array.from(new Set(team.gameplan.installedDefense || []))
+        .filter(k => !BASICS_DEF.includes(k) && defensivePlaybook[k])
+        .slice(0, 8);
+
+    // Default starters if empty
+    if (team.gameplan.installedOffense.length === 0) {
+        team.gameplan.installedOffense = ['Uni_Stick', 'Uni_Drive', 'Uni_HB_Screen', 'PA_Crossers', 'Uni_Mesh', 'Uni_Counter_Trap', 'Uni_PowerLead', 'Uni_Double_Moves'];
+    }
+    if (team.gameplan.installedDefense.length === 0) {
+        team.gameplan.installedDefense = ['Cover_3_Sky', 'Nickel_Tampa_2', 'Fire_Zone_3', 'Cover_6_Split', 'Cover_3_Drop', 'Nickel_Strong_Blitz', 'Overload_Blitz_Right', 'Dime_Lockdown'];
+    }
+
+    // Active 12-play unified lists (Guaranteed 0 duplicates)
+    const activeOffKeys = [...BASICS_OFF, ...team.gameplan.installedOffense];
+    const activeDefKeys = [...BASICS_DEF, ...team.gameplan.installedDefense];
 
     // Active Library Filter Sub-Tab State
     window._activePlaybookTabOff = window._activePlaybookTabOff || 'all';
@@ -3276,9 +3296,10 @@ export function renderPlaybookManager(gameState) {
 
                 <!-- Active 12-Play Grid: Exactly 4 in a row -->
                 <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
-                    ${[...BASICS_OFF, ...team.gameplan.installedOffense].map((key, idx) => {
+                    ${activeOffKeys.map((key, idx) => {
                         const play = offensivePlaybook[key] || { tags: ['run'] };
-                        const isBasic = BASICS_OFF.includes(key);
+                        const isBasic = idx < BASICS_OFF.length;
+                        const customSlotNum = idx - BASICS_OFF.length + 1;
                         const mastery = team.gameplan.mastery[key] || (isBasic ? 85 : 40);
                         let barColor = mastery >= 75 ? 'bg-emerald-500' : (mastery >= 50 ? 'bg-amber-500' : 'bg-rose-500');
 
@@ -3288,7 +3309,7 @@ export function renderPlaybookManager(gameState) {
                                 <div class="flex justify-between items-start mb-1">
                                     <span class="font-bold text-slate-900 group-hover:text-blue-700 transition truncate text-[11px]">${key.replace('Uni_', '').replace('PA_', 'PA ')} 🔍</span>
                                     <span class="text-[8px] font-black uppercase px-1 rounded ${isBasic ? 'bg-slate-200 text-slate-700' : 'bg-blue-700 text-white'}">
-                                        ${isBasic ? 'LOCKED' : `#${idx - 3}`}
+                                        ${isBasic ? 'LOCKED' : `#${customSlotNum}`}
                                     </span>
                                 </div>
                                 <div class="flex items-center justify-between text-[9px] text-slate-500 font-mono">
@@ -3336,8 +3357,9 @@ export function renderPlaybookManager(gameState) {
                             if (window._activePlaybookTabOff === 'action') return play.tags?.includes('pa') || play.tags?.includes('rpo') || play.tags?.includes('trick');
                             return true;
                         }).map(([key, play]) => {
-                            const isInstalled = team.gameplan.installedOffense.includes(key);
-                            if (isInstalled) return '';
+                            // Check activeOffKeys so neither locked basics nor installed custom plays ever appear in the library
+                            const isAlreadyActive = activeOffKeys.includes(key);
+                            if (isAlreadyActive) return '';
                             const mastery = team.gameplan.mastery[key] || 35;
                             const isCompatible = !play.compatibleFormations || play.compatibleFormations.includes(team.formations?.offense || 'Balanced');
 
@@ -3363,119 +3385,104 @@ export function renderPlaybookManager(gameState) {
                     </div>
                 </div>
             </div>
-                    ${[...BASICS_OFF, ...team.gameplan.installedOffense].map(key => {
-                        const play = offensivePlaybook[key] || { tags: ['run'] };
-                        const isBasic = BASICS_OFF.includes(key);
-                        const mastery = team.gameplan.mastery[key] || (isBasic ? 85 : 40);
-                        let barColor = mastery >= 75 ? 'bg-emerald-500' : (mastery >= 50 ? 'bg-amber-500' : 'bg-rose-500');
 
-                        return `
-                        <div class="p-2.5 rounded border border-blue-300 bg-blue-50/50 hover:bg-blue-100/60 transition cursor-pointer flex flex-col justify-between shadow-sm group" onclick="app_previewPlay('${key}', 'offense')">
-                            <div>
-                                <div class="flex justify-between items-start">
-                                    <span class="font-bold text-slate-900 group-hover:text-blue-700 transition truncate">${key.replace('Uni_', '').replace('PA_', 'PA ')} 🔍</span>
-                                    <span class="text-[9px] font-black uppercase px-1 rounded ${isBasic ? 'bg-slate-200 text-slate-700' : 'bg-blue-700 text-white'}">
-                                        ${isBasic ? 'Safety Net' : 'Installed'}
-                                    </span>
-                                </div>
-                                <div class="mt-1 flex items-center justify-between text-[10px] text-slate-600 font-mono">
-                                    <span>Mastery: <b>${mastery}%</b></span>
-                                    <div class="w-16 bg-slate-200 rounded-full h-1.5 overflow-hidden">
-                                        <div class="${barColor} h-full" style="width: ${mastery}%"></div>
-                                    </div>
-                                </div>
-                            </div>
-                            <div class="mt-2 pt-1 border-t border-blue-200 flex justify-end">
-                                ${isBasic ? '<span class="text-[9px] text-slate-400 italic">Always Active</span>' : `
-                                <button class="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-rose-100 text-rose-800 hover:bg-rose-200 border border-rose-300 transition" onclick="event.stopPropagation(); app_toggleInstallPlay('${key}', 'offense')">
-                                    Uninstall
-                                </button>`}
-                            </div>
-                        </div>`;
-                    }).join('')}
-                </div>
-
-                <!-- Available Offense Library -->
-                <div class="pt-2 border-t">
-                    <span class="font-bold text-[10px] uppercase text-slate-500 block mb-1.5">Available Offense Library (Click to Install)</span>
-                    <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-1.5">
-                        ${offAvailable.map(([key, play]) => {
-                            const isInstalled = team.gameplan.installedOffense.includes(key);
-                            if (isInstalled) return '';
-                            const mastery = team.gameplan.mastery[key] || 35;
-                            return `
-                            <div class="p-2 rounded border border-slate-200 bg-slate-50 hover:bg-white flex justify-between items-center transition cursor-pointer group" onclick="app_previewPlay('${key}', 'offense')">
-                                <div class="truncate pr-1">
-                                    <span class="font-semibold text-slate-800 group-hover:text-blue-700 transition truncate block text-[11px]">${key.replace('Uni_', '').replace('PA_', 'PA ')} 🔍</span>
-                                    <span class="text-[9px] text-slate-400 font-mono">${mastery}% Mst</span>
-                                </div>
-                                <button class="shrink-0 px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-slate-900 text-white hover:bg-slate-800 transition shadow-sm" onclick="event.stopPropagation(); app_toggleInstallPlay('${key}', 'offense')">
-                                    Install
-                                </button>
-                            </div>`;
-                        }).join('')}
-                    </div>
-                </div>
-            </div>
-
-            <!-- DEFENSIVE SECTION -->
+            <!-- DEFENSIVE SECTION (4-IN-A-ROW GRID) -->
             <div class="bg-white border border-slate-300 rounded p-3 shadow-sm space-y-3">
-                <div class="flex justify-between items-center border-b pb-1">
-                    <h5 class="font-black uppercase tracking-wider text-red-950">Active Defensive Gameplan (${team.gameplan.installedDefense.length}/4 Installed)</h5>
-                    <span class="text-[10px] text-slate-500 font-mono">3 Basics + 4 Napkin Schemes</span>
+                <div class="flex flex-wrap justify-between items-center border-b pb-2 gap-2">
+                    <div>
+                        <h5 class="font-black uppercase tracking-wider text-red-950 text-xs">Active Defensive Gameplan (${4 + team.gameplan.installedDefense.length}/12 Plays Active)</h5>
+                        <p class="text-[10px] text-slate-500 font-mono">Row 1: 4 Standard Fundamentals • Rows 2 & 3: Up to 8 Custom Installs</p>
+                    </div>
+                    <span class="text-[10px] font-mono bg-red-50 text-red-800 border border-red-200 px-2 py-0.5 rounded font-bold">
+                        Scheme: ${team.formations?.defense || '3-2-3'}
+                    </span>
                 </div>
 
-                <!-- Installed + Basics Grid -->
-                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
-                    ${[...BASICS_DEF, ...team.gameplan.installedDefense].map(key => {
+                <!-- Active 12-Play Grid: Exactly 4 in a row -->
+                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
+                    ${activeDefKeys.map((key, idx) => {
                         const play = defensivePlaybook[key] || { name: key };
-                        const isBasic = BASICS_DEF.includes(key);
+                        const isBasic = idx < BASICS_DEF.length;
+                        const customSlotNum = idx - BASICS_DEF.length + 1;
                         const mastery = team.gameplan.mastery[key] || (isBasic ? 85 : 40);
                         let barColor = mastery >= 75 ? 'bg-emerald-500' : (mastery >= 50 ? 'bg-amber-500' : 'bg-rose-500');
 
                         return `
-                        <div class="p-2.5 rounded border border-red-300 bg-red-50/50 hover:bg-red-100/60 transition cursor-pointer flex flex-col justify-between shadow-sm group" onclick="app_previewPlay('${key}', 'defense')">
+                        <div class="p-2.5 rounded border ${isBasic ? 'border-slate-300 bg-slate-50' : 'border-red-300 bg-red-50/50'} hover:shadow-md transition cursor-pointer flex flex-col justify-between group" onclick="app_previewPlay('${key}', 'defense')">
                             <div>
-                                <div class="flex justify-between items-start">
-                                    <span class="font-bold text-slate-900 group-hover:text-rose-700 transition truncate">${play.name || key} 🔍</span>
-                                    <span class="text-[9px] font-black uppercase px-1 rounded ${isBasic ? 'bg-slate-200 text-slate-700' : 'bg-red-700 text-white'}">
-                                        ${isBasic ? 'Safety Net' : 'Installed'}
+                                <div class="flex justify-between items-start mb-1">
+                                    <span class="font-bold text-slate-900 group-hover:text-rose-700 transition truncate text-[11px]">${play.name || key} 🔍</span>
+                                    <span class="text-[8px] font-black uppercase px-1 rounded ${isBasic ? 'bg-slate-200 text-slate-700' : 'bg-red-700 text-white'}">
+                                        ${isBasic ? 'LOCKED' : `#${customSlotNum}`}
                                     </span>
                                 </div>
-                                <div class="mt-1 flex items-center justify-between text-[10px] text-slate-600 font-mono">
+                                <div class="flex items-center justify-between text-[9px] text-slate-500 font-mono">
                                     <span>Mastery: <b>${mastery}%</b></span>
-                                    <div class="w-16 bg-slate-200 rounded-full h-1.5 overflow-hidden">
+                                    <div class="w-12 bg-slate-200 rounded-full h-1.5 overflow-hidden">
                                         <div class="${barColor} h-full" style="width: ${mastery}%"></div>
                                     </div>
                                 </div>
                             </div>
-                            <div class="mt-2 pt-1 border-t border-red-200 flex justify-end">
-                                ${isBasic ? '<span class="text-[9px] text-slate-400 italic">Always Active</span>' : `
-                                <button class="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-rose-100 text-rose-800 hover:bg-rose-200 border border-rose-300 transition" onclick="event.stopPropagation(); app_toggleInstallPlay('${key}', 'defense')">
+                            <div class="mt-2 pt-1 border-t ${isBasic ? 'border-slate-200' : 'border-red-200'} flex justify-between items-center text-[9px]">
+                                <span class="text-slate-400 capitalize truncate">${play.concept || 'Scheme'}</span>
+                                ${isBasic ? '<span class="text-slate-400 font-bold uppercase">Basic</span>' : `
+                                <button class="px-1.5 py-0.5 rounded font-bold uppercase bg-rose-100 text-rose-800 hover:bg-rose-200 transition" onclick="event.stopPropagation(); app_toggleInstallPlay('${key}', 'defense')">
                                     Uninstall
                                 </button>`}
                             </div>
                         </div>`;
                     }).join('')}
+                    ${Array.from({ length: Math.max(0, 8 - team.gameplan.installedDefense.length) }).map(() => `
+                        <div class="p-3 rounded border border-dashed border-slate-300 bg-slate-50/50 flex flex-col items-center justify-center text-center text-slate-400 min-h-[75px]">
+                            <span class="text-xs font-bold">+ Empty Slot</span>
+                            <span class="text-[9px] text-slate-400">Install from library below</span>
+                        </div>
+                    `).join('')}
                 </div>
 
-                <!-- Available Defense Library -->
-                <div class="pt-2 border-t">
-                    <span class="font-bold text-[10px] uppercase text-slate-500 block mb-1.5">Available Defense Library (Click to Install)</span>
-                    <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-1.5">
-                        ${defAvailable.map(([key, play]) => {
-                            const isInstalled = team.gameplan.installedDefense.includes(key);
-                            if (isInstalled) return '';
+                <!-- Available Library with Category Filter Tabs -->
+                <div class="pt-3 border-t">
+                    <div class="flex flex-wrap justify-between items-center mb-2 gap-2">
+                        <span class="font-bold text-[10px] uppercase text-slate-600 tracking-wider">Defensive Library (Click to Install into Open Slots)</span>
+                        <div class="flex bg-slate-100 p-0.5 rounded border border-slate-300 text-[10px] font-bold">
+                            <button class="px-2 py-0.5 rounded ${window._activePlaybookTabDef === 'all' ? 'bg-slate-900 text-white' : 'text-slate-600'}" onclick="app_setPlaybookTab('defense', 'all')">All</button>
+                            <button class="px-2 py-0.5 rounded ${window._activePlaybookTabDef === 'zone' ? 'bg-slate-900 text-white' : 'text-slate-600'}" onclick="app_setPlaybookTab('defense', 'zone')">Zone</button>
+                            <button class="px-2 py-0.5 rounded ${window._activePlaybookTabDef === 'man' ? 'bg-slate-900 text-white' : 'text-slate-600'}" onclick="app_setPlaybookTab('defense', 'man')">Man</button>
+                            <button class="px-2 py-0.5 rounded ${window._activePlaybookTabDef === 'blitz' ? 'bg-slate-900 text-white' : 'text-slate-600'}" onclick="app_setPlaybookTab('defense', 'blitz')">Blitzes</button>
+                            <button class="px-2 py-0.5 rounded ${window._activePlaybookTabDef === 'short' ? 'bg-slate-900 text-white' : 'text-slate-600'}" onclick="app_setPlaybookTab('defense', 'short')">Run Stop / Prevent</button>
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
+                        ${defAvailable.filter(([k, play]) => {
+                            if (window._activePlaybookTabDef === 'zone') return play.concept === 'Zone' && !play.blitz;
+                            if (window._activePlaybookTabDef === 'man') return play.concept === 'Man' && !play.blitz;
+                            if (window._activePlaybookTabDef === 'blitz') return play.blitz === true;
+                            if (window._activePlaybookTabDef === 'short') return play.tags?.includes('runStop') || play.tags?.includes('prevent');
+                            return true;
+                        }).map(([key, play]) => {
+                            const isAlreadyActive = activeDefKeys.includes(key);
+                            if (isAlreadyActive) return '';
                             const mastery = team.gameplan.mastery[key] || 35;
+                            const isCompatible = !play.compatibleFormations || play.compatibleFormations.includes(team.formations?.defense || '3-2-3');
+
                             return `
-                            <div class="p-2 rounded border border-slate-200 bg-slate-50 hover:bg-white flex justify-between items-center transition cursor-pointer group" onclick="app_previewPlay('${key}', 'defense')">
-                                <div class="truncate pr-1">
-                                    <span class="font-semibold text-slate-800 group-hover:text-rose-700 transition truncate block text-[11px]">${play.name || key} 🔍</span>
-                                    <span class="text-[9px] text-slate-400 font-mono">${mastery}% Mst</span>
+                            <div class="p-2 rounded border ${isCompatible ? 'border-slate-200 bg-white hover:border-red-400' : 'border-slate-200 bg-slate-50 opacity-60'} flex flex-col justify-between transition cursor-pointer group shadow-sm" onclick="app_previewPlay('${key}', 'defense')">
+                                <div class="truncate mb-1.5">
+                                    <div class="flex justify-between items-start">
+                                        <span class="font-bold text-slate-800 group-hover:text-rose-700 truncate text-[11px]">${play.name || key} 🔍</span>
+                                    </div>
+                                    <div class="flex items-center gap-1 mt-0.5">
+                                        <span class="text-[8px] bg-slate-100 text-slate-600 px-1 rounded uppercase font-bold">${play.concept || 'Scheme'}</span>
+                                        ${play.compatibleFormations ? `<span class="text-[8px] text-red-700 font-bold">${play.compatibleFormations[0]}</span>` : '<span class="text-[8px] text-slate-400">All Forms</span>'}
+                                    </div>
                                 </div>
-                                <button class="shrink-0 px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-slate-900 text-white hover:bg-slate-800 transition shadow-sm" onclick="event.stopPropagation(); app_toggleInstallPlay('${key}', 'defense')">
-                                    Install
-                                </button>
+                                <div class="flex justify-between items-center border-t pt-1">
+                                    <span class="text-[9px] text-slate-400 font-mono">${mastery}% Mst</span>
+                                    <button class="px-2 py-0.5 rounded text-[9px] font-bold uppercase bg-slate-900 text-white hover:bg-slate-800 transition" onclick="event.stopPropagation(); app_toggleInstallPlay('${key}', 'defense')">
+                                        + Install
+                                    </button>
+                                </div>
                             </div>`;
                         }).join('')}
                     </div>
