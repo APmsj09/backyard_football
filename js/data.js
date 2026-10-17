@@ -768,7 +768,7 @@ export const offensivePlaybook = {
         type: 'pass', tags: ['pass', 'pa', 'rollout'],
         readProgression: ['Z', 'Y', 'H'],
         assignments: {
-            'QB': 'qb_setup', 'RB': 'run_stretch_l',
+            'QB': 'qb_scramble', 'RB': 'run_stretch_l',
             'Z': 'Corner', 'Y': 'Drag', 'X': 'Dig', 'H': 'Flat', 'OL': 'pass_block'
         }
     },

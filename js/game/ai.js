@@ -202,8 +202,15 @@ export function diagnosePlay(pState, tick, offenseStates, playState = null) {
         pState._diagNoise = (pState._diagNoise * 0.94) + (((Math.random() - 0.5) * noiseMax) * 0.06);
     }
 
-    const finalRunScore = (runScore * timeFactor * (0.6 + iqFactor * 0.4)) + pState._diagNoise + (pState.role === 'LB' ? 12 : 0);
-    const finalPassScore = (passScore * timeFactor * (0.6 + iqFactor * 0.4)) - pState._diagNoise + (pState.role === 'DB' ? 12 : 0);
+    const rawRunScore = (runScore * timeFactor * (0.6 + iqFactor * 0.4)) + pState._diagNoise + (pState.role === 'LB' ? 12 : 0);
+    const rawPassScore = (passScore * timeFactor * (0.6 + iqFactor * 0.4)) - pState._diagNoise + (pState.role === 'DB' ? 12 : 0);
+
+    // Smooth the raw scores to prevent flickering when players enter/exit vision
+    pState._smoothedRunScore = ((pState._smoothedRunScore || rawRunScore) * 0.8) + (rawRunScore * 0.2);
+    pState._smoothedPassScore = ((pState._smoothedPassScore || rawPassScore) * 0.8) + (rawPassScore * 0.2);
+
+    const finalRunScore = pState._smoothedRunScore;
+    const finalPassScore = pState._smoothedPassScore;
 
     // 4. HYSTERESIS COMMITMENT (Requires a 20-point margin to flip an existing read)
     let currentGuess = pState._diagnosedGuess || 'read';
@@ -315,10 +322,11 @@ export function calculateSafetyHelp(safetyState, defenseStates, offenseStates, b
         if (receiver) {
             const separationDist = getDistance(corner, receiver);
             const isBallTargeted = isBallInAir && playState.ballState.targetPlayerId === receiver.id;
+            const distFromSafety = getDistance(safetyState, receiver);
 
             // Greater separation means greater need for safety help.
-            // A targeted receiver receives additional urgency.
-            let pressureScore = separationDist;
+            // Safeties prioritize helping receivers closer to their side of the field.
+            let pressureScore = separationDist - (distFromSafety * 0.15);
             if (isBallTargeted) pressureScore += 5;
 
             if (pressureScore > maxPressure) {
@@ -1204,15 +1212,15 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
             score -= 30; // Defender is capping the route from above; don't throw into his chest
         }
 
-        // DEEPER FIX: Strictly forbid throwing breaking routes before the cut unless under heavy pressure.
-        // A penalty of -35 was easily overridden on 3rd down when thresholds dropped.
+        // FIX: Only make the QB wait for the cut on sharp-breaking routes, so we don't break Drags and Flats!
+        const needsToWait = ['Dig', 'Corner', 'Post', 'Out', 'In', 'Comeback', 'PostCorner', 'Sluggo', 'Out_And_Up', 'Hitch_And_Go', 'Texas'].some(r => routeAssignment.includes(r.toLowerCase()));
         const hasRouteCut = rec.routePath && rec.routePath.length > 1;
-        const isBeforeCut = hasRouteCut && rec.currentPathIndex < (rec.routePath.length - 1);
+        const isBeforeCut = needsToWait && hasRouteCut && rec.currentPathIndex < (rec.routePath.length - 1);
         if (isBeforeCut) {
             if (!isPressured) {
-                return null; // Do NOT throw before the cut when clean in the pocket!
+                score -= 25; // Let the receiver make his break, but don't go completely blind
             } else {
-                score -= 45; // Under pressure, heavily penalize throwing to un-cut receivers
+                score -= 15; // When pressured, the QB is more willing to throw early anticipation passes
             }
         }
 
@@ -1484,7 +1492,7 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
         });
 
         if (rushScore > 25 && rushScore > bestPassScore) {
-            qbState.action = 'qb_scramble'; // DEEPER FIX: Consistently trigger pocket escape logic
+            qbState.action = 'run_path'; // BREAK OUT OF QB_SCRAMBLE LOCK
             qbState.isBallCarrier = true;
             playState.qbIntent = 'scramble';
 
@@ -1766,7 +1774,8 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
                 actionTaken = "Desperation Throw";
                 decisionMade = true;
             } else {
-                qbState.action = 'qb_scramble';
+                qbState.action = 'run_path'; // BREAK OUT OF QB_SCRAMBLE LOCK
+                playState.qbIntent = 'scramble';
                 qbState.isBallCarrier = true;
                 if (gameLog && !qbState.hasLoggedPanic) {
                     gameLog.push(`🏃 ${qbState.name} can't find anyone and takes off!`);

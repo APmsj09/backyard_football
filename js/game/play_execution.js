@@ -974,7 +974,11 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                     pState.targetX = ballCarrierState.x + (ballCarrierState.velocity?.x || 0) * lead;
                     pState.targetY = ballCarrierState.y + (ballCarrierState.velocity?.y || 0) * lead;
                 } else {
-                    pState.targetX = ballPos.targetX || ballPos.x;
+                    // Maintain punt coverage lanes instead of clustering on the exact landing spot
+                    const ballTargetX = ballPos.targetX || ballPos.x;
+                    const laneDrift = ballTargetX > pState.initialX ? 1.5 : -1.5;
+                    
+                    pState.targetX = pState.initialX + laneDrift;
                     pState.targetY = ballPos.targetY || ballPos.y;
                 }
                 return;
@@ -1683,7 +1687,9 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                     if (isPassCompleted && ballCarrierState && ballCarrierState.id !== pState.id) {
                         pState.action = 'run_block';
                         pState.targetX = ballCarrierState.x + (pState.x < ballCarrierState.x ? -2.5 : 2.5);
-                        pState.targetY = ballCarrierState.y + 3.0;
+                        // If the receiver is already ahead of the carrier, keep pushing downfield to clear the way
+                        const escortDepth = ballCarrierState.y + 4.0;
+                        pState.targetY = Math.max(pState.y + 2.0, escortDepth);
                         setPointIntent(pState, pState.targetX, pState.targetY, 0.5);
                         break;
                     }
