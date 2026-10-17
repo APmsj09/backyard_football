@@ -944,14 +944,24 @@ export function renderDashboard(gameState) {
     if (elements.dashboardYear) elements.dashboardYear.textContent = year || '1';
     if (elements.dashboardWeek) elements.dashboardWeek.textContent = currentW;
 
-    // Update the button appearance based on current phase
+    // Update the button appearance based on current phase and roster limit
     if (elements.advanceWeekBtn) {
+        const rosterLimit = getCurrentRosterLimit(gameState);
+        const isOverLimit = gameState.draftCompleted && (playerTeam.roster?.length || 0) > rosterLimit;
+
         if (currentWeek === 0 && !gameState.draftCompleted) {
             elements.advanceWeekBtn.innerHTML = `<span>Start Draft</span>`;
+            elements.advanceWeekBtn.className = 'btn bg-emerald-700 hover:bg-emerald-800 text-white font-bold py-2 px-6 rounded-sm text-sm uppercase tracking-wider transition shadow-sm border border-emerald-900 flex items-center gap-2';
+        } else if (isOverLimit) {
+            const excess = playerTeam.roster.length - rosterLimit;
+            elements.advanceWeekBtn.innerHTML = `<span>⚠️ Cut ${excess} Player${excess > 1 ? 's' : ''}</span>`;
+            elements.advanceWeekBtn.className = 'btn bg-rose-700 hover:bg-rose-800 text-white font-bold py-2 px-6 rounded-sm text-sm uppercase tracking-wider transition shadow-sm border border-rose-900 animate-pulse flex items-center gap-2';
         } else if (currentWeek >= 9) {
             elements.advanceWeekBtn.innerHTML = `<span>Advance to Offseason →</span>`;
+            elements.advanceWeekBtn.className = 'btn bg-emerald-700 hover:bg-emerald-800 text-white font-bold py-2 px-6 rounded-sm text-sm uppercase tracking-wider transition shadow-sm border border-emerald-900 flex items-center gap-2';
         } else {
             elements.advanceWeekBtn.innerHTML = `<span>Play Week ${currentWeek + 1}</span>`;
+            elements.advanceWeekBtn.className = 'btn bg-emerald-700 hover:bg-emerald-800 text-white font-bold py-2 px-6 rounded-sm text-sm uppercase tracking-wider transition shadow-sm border border-emerald-900 flex items-center gap-2';
         }
     }
 
@@ -3190,8 +3200,8 @@ export function renderPlaybookManager(gameState) {
     const activeOffKeys = [...BASICS_OFF, ...team.gameplan.installedOffense];
     const activeDefKeys = [...BASICS_DEF, ...team.gameplan.installedDefense];
 
-    // Active Unit Switcher & Library Filter Sub-Tab State
-    window._activePlaybookUnit = window._activePlaybookUnit || 'offense'; // 'offense' or 'defense'
+    // Active Unit Switcher ('offense' vs 'defense') & Library Filter State
+    window._activePlaybookUnit = window._activePlaybookUnit || 'offense';
     window._activePlaybookTabOff = window._activePlaybookTabOff || 'all';
     window._activePlaybookTabDef = window._activePlaybookTabDef || 'all';
 
@@ -3205,6 +3215,8 @@ export function renderPlaybookManager(gameState) {
         else window._activePlaybookTabDef = tabKey;
         renderPlaybookManager(gameState);
     };
+
+    const isOffense = window._activePlaybookUnit === 'offense';
 
     window.app_toggleInstallPlay = (key, side) => {
         const list = side === 'offense' ? team.gameplan.installedOffense : team.gameplan.installedDefense;
@@ -3300,18 +3312,25 @@ export function renderPlaybookManager(gameState) {
                 </div>
             </div>
 
-            <!-- Strategic Header -->
-            <div class="bg-slate-900 text-white p-3.5 rounded flex justify-between items-center shadow-sm">
+            <!-- Strategic Header & Unit Toggle Bar -->
+            <div class="bg-slate-900 text-white p-3.5 rounded flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 shadow-sm">
                 <div>
-                    <h4 class="font-black text-sm uppercase tracking-wider text-amber-400">Cafeteria Napkin Playbook (12 Offense / 12 Defense)</h4>
-                    <p class="text-slate-400 text-[11px] mt-0.5">Each unit carries 4 Standard Fundamentals plus 8 Custom Gameplan concepts.</p>
+                    <h4 class="font-black text-sm uppercase tracking-wider text-amber-400">Cafeteria Napkin Playbook (12 Plays Total)</h4>
+                    <p class="text-slate-400 text-[11px] mt-0.5">4 Standard Fundamentals (Locked) + 8 Custom Gameplan Napkin slots.</p>
                 </div>
-                <div class="text-right font-mono text-[11px] flex gap-2">
-                    <span class="bg-blue-950 text-blue-300 px-2 py-1 rounded border border-blue-800">🏈 Off: 4 Locks + ${team.gameplan.installedOffense.length}/8 Napkin (${4 + team.gameplan.installedOffense.length}/12)</span>
-                    <span class="bg-red-950 text-red-300 px-2 py-1 rounded border border-red-800">🛡️ Def: 4 Locks + ${team.gameplan.installedDefense.length}/8 Napkin (${4 + team.gameplan.installedDefense.length}/12)</span>
+                
+                <!-- The Primary Offense / Defense Toggle Bar -->
+                <div class="flex bg-slate-950 p-1 rounded border border-slate-700 gap-1 w-full sm:w-auto">
+                    <button class="flex-1 sm:flex-none px-4 py-2 rounded text-xs font-black uppercase tracking-wider transition ${isOffense ? 'bg-blue-600 text-white shadow-md' : 'text-slate-400 hover:text-white bg-slate-800/80'}" onclick="app_setPlaybookUnit('offense')">
+                        🏈 Offense (${4 + team.gameplan.installedOffense.length}/12)
+                    </button>
+                    <button class="flex-1 sm:flex-none px-4 py-2 rounded text-xs font-black uppercase tracking-wider transition ${!isOffense ? 'bg-rose-600 text-white shadow-md' : 'text-slate-400 hover:text-white bg-slate-800/80'}" onclick="app_setPlaybookUnit('defense')">
+                        🛡️ Defense (${4 + team.gameplan.installedDefense.length}/12)
+                    </button>
                 </div>
             </div>
 
+            ${isOffense ? `
             <!-- OFFENSIVE SECTION (4-IN-A-ROW GRID) -->
             <div class="bg-white border border-slate-300 rounded p-3 shadow-sm space-y-3">
                 <div class="flex flex-wrap justify-between items-center border-b pb-2 gap-2">
@@ -3430,7 +3449,7 @@ export function renderPlaybookManager(gameState) {
                     </div>
                 </div>
             </div>
-
+            ` : `
             <!-- DEFENSIVE SECTION (4-IN-A-ROW GRID) -->
             <div class="bg-white border border-slate-300 rounded p-3 shadow-sm space-y-3">
                 <div class="flex flex-wrap justify-between items-center border-b pb-2 gap-2">
@@ -3533,6 +3552,7 @@ export function renderPlaybookManager(gameState) {
                     </div>
                 </div>
             </div>
+            `}
         </div>
     `;
 }

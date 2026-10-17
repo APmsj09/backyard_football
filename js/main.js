@@ -707,6 +707,9 @@ async function handleDraftEnd() {
 }
 
 function finishOffseasonFAMinigame() {
+    // Mark summer FA complete so the hard 18-player limit activates
+    gameState.offseasonFACompleted = true;
+
     // 1. Let the AI trim their 24-man summer rosters down to the 18-man season limit
     Game.executeAICutDowns();
 
@@ -1203,6 +1206,26 @@ async function handleAdvanceWeek() {
     if (isExitInterviewFlowActive) {
         renderActiveExitInterview?.();
         return;
+    }
+
+    // HARD GUARD: Block advancing if user roster exceeds the limit
+    if (gameState.draftCompleted && gameState.playerTeam) {
+        const rosterSize = gameState.playerTeam.roster.length;
+        const limit = getCurrentRosterLimit(gameState);
+
+        if (rosterSize > limit) {
+            const excess = rosterSize - limit;
+            UI.showModal(
+                "Roster Limit Exceeded",
+                `<div class="space-y-2 text-sm text-slate-700">
+                    <p>Your team has <b>${rosterSize}</b> players, but the limit is <b>${limit}</b>.</p>
+                    <p class="text-rose-600 font-bold">You must cut ${excess} player${excess > 1 ? 's' : ''} from the Roster tab before you can advance.</p>
+                </div>`,
+                () => { UI.switchTab('my-team', gameState); },
+                "Go to Roster"
+            );
+            return;
+        }
     }
 
     // 1. Initial Draft (Year 1/Year 4 pre-season)

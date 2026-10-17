@@ -466,8 +466,19 @@ export function aiEvaluatePositionChanges(team, gameState) {
             const targetOvr = calculateOverall(kid, targetPos);
             const currentOvr = calculateOverall(kid, currentPos);
 
-            // Move if surplus and either viable or an upgrade (+3 OVR)
-            return isSurplus && isViableAtNew && (targetOvr >= currentOvr - 2);
+            // Personality-driven conversion willingness
+            let threshold = currentOvr - 2;
+            const personality = coach?.biases?.personality?.name;
+            const ethic = kid.personality?.workEthic || 50;
+
+            if (personality === 'Old-School Disciplinarian' && ethic >= 65) {
+                threshold -= 4; // Disciplinarian demands hard workers fill voids even if raw
+            } else if (personality === "Peaked in '94" && ['OL', 'DL'].includes(targetPos)) {
+                const str = kid.attributes?.physical?.strength || 50;
+                if (str >= 55) threshold -= 5; // Loves converting strong kids into linemen
+            }
+
+            return isSurplus && isViableAtNew && (targetOvr >= threshold);
         });
 
         if (bestCandidate) {

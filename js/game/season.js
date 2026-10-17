@@ -33,8 +33,11 @@ export const SUMMER_ROSTER_LIMIT = 24;
 export const MIN_HEALTHY_PLAYERS = 8;
 
 export function getCurrentRosterLimit(gameState) {
-    // Week 0 is the Offseason/Summer. Limits expand to 24.
-    return (gameState && gameState.currentWeek === 0) ? SUMMER_ROSTER_LIMIT : ROSTER_LIMIT;
+    // Week 0 Summer expansion (24) only applies while draft and offseason FA are active
+    if (gameState && gameState.currentWeek === 0 && !gameState.offseasonFACompleted) {
+        return SUMMER_ROSTER_LIMIT;
+    }
+    return ROSTER_LIMIT;
 }
 
 const teamColors = [
@@ -1578,13 +1581,48 @@ export function executeAICutDowns() {
         if (team.isPlayerControlled || !team.roster || team.roster.length <= limit) return;
 
         const rosterObjs = getRosterObjects(team);
-        
-        // Sort players: Keep high OVR and high potential kids. Cut the worst.
-        rosterObjs.sort((a, b) => {
-            const valA = calculateOverall(a, estimateBestPosition(a)) + (a.potential === 'A' ? 10 : (a.potential === 'B' ? 5 : 0));
-            const valB = calculateOverall(b, estimateBestPosition(b)) + (b.potential === 'A' ? 10 : (b.potential === 'B' ? 5 : 0));
-            return valB - valA; // Highest value first
-        });
+        const coach = team.staff?.coach || team.coach;
+        const scout = team.staff?.scout;
+        const personality = coach?.biases?.personality?.name;
+        const gmDirective = team.gameplan?.gmDirective || 'COACH_AUTONOMY';
+
+        // Scout evaluation accuracy adds realistic Fog of War
+        const scoutAcc = scout ? ((scout.ratings?.evalTechnique || 50) + (scout.ratings?.evalPhysicals || 50)) / 200 : 0.5;
+
+        // Personality-driven roster valuation
+        const getCutEvaluationScore = (p) => {
+            const pos = p.pos || estimateBestPosition(p);
+            // Subjective perceived rating (Noise depends on scout quality)
+            const noise = Math.round((Math.sin(p.id.charCodeAt(0) + game.year) * (1.0 - scoutAcc) * 10));
+            let val = calculateOverall(p, pos) + noise;
+
+            // Potential value
+            if (p.potential === 'A') val += (gmDirective === 'DEVELOP_YOUTH' ? 15 : 8);
+            else if (p.potential === 'B') val += (gmDirective === 'DEVELOP_YOUTH' ? 8 : 4);
+
+            const ethic = p.personality?.workEthic || 50;
+            const ego = p.personality?.ego || 50;
+            const toughness = p.attributes?.mental?.toughness || 50;
+
+            // Coach bias adjustments on cut-day
+            if (personality === 'Old-School Disciplinarian') {
+                if (ethic < 40) val -= 12; // Disciplinarians cut slackers first
+                if (ego > 75) val -= 10;   // Cuts toxic divas
+                if (toughness > 65) val += 6;
+            } else if (personality === "Peaked in '94") {
+                const str = p.attributes?.physical?.strength || 50;
+                if (str > 60) val += 6;    // Loves raw power
+            } else if (personality === "Players' Coach") {
+                const loyalty = p.personality?.loyalty || 50;
+                if (loyalty > 65) val += 8; // Protects loyal kids
+            }
+
+            if (gmDirective === 'WIN_NOW' && p.age >= 16) val += 5; // Prefers experienced players
+            return val;
+        };
+
+        // Sort by perceived value (highest value kept, lowest cut)
+        rosterObjs.sort((a, b) => getCutEvaluationScore(b) - getCutEvaluationScore(a));
 
         // Identify who is getting cut
         const playersToKeep = rosterObjs.slice(0, limit);
