@@ -541,6 +541,7 @@ export function resolveBattle(powerA, powerB, battle) {
 export function resolveOngoingBlocks(playState, gameLog, offenseStates = [], defenseStates = []) {
     const battlesToRemove = [];
     const ballCarrier = playState.activePlayers.find(p => p.isBallCarrier);
+    const MAX_BLOCK_SEPARATION = 2.5;
 
     playState.blockBattles.forEach((battle, index) => {
         if (battle.startTick === playState.tick) return;
@@ -553,10 +554,15 @@ export function resolveOngoingBlocks(playState, gameLog, offenseStates = [], def
         const blocker = battle.blocker;
         const defender = battle.defender;
 
-        if (!blocker || !defender ||
+        if (
+            !blocker ||
+            !defender ||
             blocker.engagedWith !== defender ||
             defender.blockedBy !== blocker ||
-            blocker.stunnedTicks > 0 || defender.stunnedTicks > 0) {
+            blocker.stunnedTicks > 0 ||
+            defender.stunnedTicks > 0 ||
+            getDistance(blocker, defender) > MAX_BLOCK_SEPARATION
+        ) {
 
             if (blocker) { blocker.engagedWith = null; blocker.isEngaged = false; }
             if (defender) { defender.isBlocked = false; defender.blockedBy = null; defender.isEngaged = false; }
@@ -659,12 +665,14 @@ export function resolveOngoingBlocks(playState, gameLog, offenseStates = [], def
 
                 let dx = defender.x - blocker.x;
                 let dy = defender.y - blocker.y;
+                let bullRushTowardQB = false;
 
                 if (isPassRush && defStr > blkStr + 20) {
                     const qb = offenseStates?.find(p => p.slot?.startsWith('QB'));
                     if (qb) {
                         dx = qb.x - defender.x;
                         dy = qb.y - defender.y;
+                        bullRushTowardQB = true;
                     }
                     pushAmount = Math.max(0.2, pushAmount + 0.15);
 
@@ -705,46 +713,79 @@ export function resolveOngoingBlocks(playState, gameLog, offenseStates = [], def
                             blocker.y + pushMagnitude * 0.15
                         );
                     } else if (isPassBlock) {
-                        // Pass protection: push the rusher away from the QB
-                        // while keeping the blocker laterally stable.
-                        const qb = offenseStates.find(
-                            p => p.slot?.startsWith('QB')
+                        const qb = offenseStates?.find(
+                            p => p.slot?.startsWith?.('QB')
                         );
 
-                        let awayX = uX;
-                        let awayY = uY;
+                        if (bullRushTowardQB) {
+                            // A dominant bull rush drives toward the QB.
+                            // The blocker retreats, but more slowly.
+                            const blockerRetreatFactor = 0.55;
 
-                        if (qb) {
-                            const dxFromQB = defender.x - qb.x;
-                            const dyFromQB = defender.y - qb.y;
-                            const distanceFromQB = Math.max(
-                                0.1,
-                                Math.hypot(dxFromQB, dyFromQB)
+                            defender.x = Math.max(
+                                0.5,
+                                Math.min(
+                                    FIELD_WIDTH - 0.5,
+                                    defender.x + uX * pushMagnitude
+                                )
+                            );
+                            defender.y = Math.max(
+                                0.5,
+                                Math.min(
+                                    FIELD_LENGTH - 0.5,
+                                    defender.y + uY * pushMagnitude
+                                )
                             );
 
-                            awayX = dxFromQB / distanceFromQB;
-                            awayY = dyFromQB / distanceFromQB;
+                            blocker.x = Math.max(
+                                0.5,
+                                Math.min(
+                                    FIELD_WIDTH - 0.5,
+                                    blocker.x + uX * pushMagnitude * blockerRetreatFactor
+                                )
+                            );
+                            blocker.y = Math.max(
+                                0.5,
+                                Math.min(
+                                    FIELD_LENGTH - 0.5,
+                                    blocker.y + uY * pushMagnitude * blockerRetreatFactor
+                                )
+                            );
+                        } else {
+                            // OL wins: shove the rusher away from the QB.
+                            // The blocker holds his position to protect the pocket.
+                            let awayX = uX;
+                            let awayY = uY;
+
+                            if (qb) {
+                                const dxFromQB = defender.x - qb.x;
+                                const dyFromQB = defender.y - qb.y;
+                                const distanceFromQB = Math.max(
+                                    0.1,
+                                    Math.hypot(dxFromQB, dyFromQB)
+                                );
+
+                                awayX = dxFromQB / distanceFromQB;
+                                awayY = dyFromQB / distanceFromQB;
+                            }
+
+                            defender.x = Math.max(
+                                0.5,
+                                Math.min(
+                                    FIELD_WIDTH - 0.5,
+                                    defender.x + awayX * pushMagnitude
+                                )
+                            );
+                            defender.y = Math.max(
+                                0.5,
+                                Math.min(
+                                    FIELD_LENGTH - 0.5,
+                                    defender.y + awayY * pushMagnitude
+                                )
+                            );
+
+                            // Intentionally leave the blocker stationary.
                         }
-
-                        defender.x = Math.max(
-                            0.5,
-                            Math.min(
-                                FIELD_WIDTH - 0.5,
-                                defender.x + awayX * pushMagnitude
-                            )
-                        );
-
-                        defender.y = Math.max(
-                            0.5,
-                            Math.min(
-                                FIELD_LENGTH - 0.5,
-                                defender.y + awayY * pushMagnitude
-                            )
-                        );
-
-                        // Avoid pulling adjacent linemen sideways out of
-                        // their assigned pocket positions.
-                        blocker.y += Math.max(0, uY) * pushMagnitude * 0.15;
                     } else {
                         // Other blocking assignments use direct displacement.
                         defender.x += uX * pushMagnitude;
@@ -753,12 +794,67 @@ export function resolveOngoingBlocks(playState, gameLog, offenseStates = [], def
                         blocker.y += uY * pushMagnitude * 0.8;
                     }
                 } else if (pushAmount < 0) {
-                    // When the defender wins ground, the blocker is driven
-                    // backward and the defender advances toward the backfield.
-                    blocker.x -= uX * pushMagnitude;
-                    blocker.y -= uY * pushMagnitude;
-                    defender.x -= uX * pushMagnitude * 0.8;
-                    defender.y -= uY * pushMagnitude * 0.8;
+                    if (isPassBlock) {
+                        // DL wins: advance toward the QB while the blocker
+                        // gives ground more slowly.
+                        const qb = offenseStates?.find(
+                            p => p.slot?.startsWith?.('QB')
+                        );
+
+                        let towardQBX = -uX;
+                        let towardQBY = -uY;
+
+                        if (qb) {
+                            const dxToQB = qb.x - defender.x;
+                            const dyToQB = qb.y - defender.y;
+                            const distanceToQB = Math.max(
+                                0.1,
+                                Math.hypot(dxToQB, dyToQB)
+                            );
+
+                            towardQBX = dxToQB / distanceToQB;
+                            towardQBY = dyToQB / distanceToQB;
+                        }
+
+                        const blockerRetreatFactor = 0.55;
+
+                        defender.x = Math.max(
+                            0.5,
+                            Math.min(
+                                FIELD_WIDTH - 0.5,
+                                defender.x + towardQBX * pushMagnitude
+                            )
+                        );
+                        defender.y = Math.max(
+                            0.5,
+                            Math.min(
+                                FIELD_LENGTH - 0.5,
+                                defender.y + towardQBY * pushMagnitude
+                            )
+                        );
+
+                        blocker.x = Math.max(
+                            0.5,
+                            Math.min(
+                                FIELD_WIDTH - 0.5,
+                                blocker.x + towardQBX * pushMagnitude * blockerRetreatFactor
+                            )
+                        );
+                        blocker.y = Math.max(
+                            0.5,
+                            Math.min(
+                                FIELD_LENGTH - 0.5,
+                                blocker.y + towardQBY * pushMagnitude * blockerRetreatFactor
+                            )
+                        );
+                    } else {
+                        // Preserve existing behavior for run blocks and
+                        // other non-pass-block engagements.
+                        blocker.x -= uX * pushMagnitude;
+                        blocker.y -= uY * pushMagnitude;
+                        defender.x -= uX * pushMagnitude * 0.8;
+                        defender.y -= uY * pushMagnitude * 0.8;
+                    }
                 }
             }
         }
