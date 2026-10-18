@@ -1178,22 +1178,30 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
         const playKey = String(playState?.playKey || '').toLowerCase();
 
         const distFromQB = getDistance(qbState, rec);
-        let estimatedBallSpeed = 22;
 
-        // Arm power drives flight speed
-        if (distFromQB > 25) estimatedBallSpeed = 16 + (qbPower / 100) * 14.0;
-        else if (distFromQB < 12) estimatedBallSpeed = 16 + (qbPower / 100) * 14.0;
+        // Match ball speed exactly with executeThrow based on throwPower and pass type
+        let passType = 'touch';
+        if (distFromQB < 12 || ['slant', 'drag', 'curl', 'hitch', 'quick'].some(r => routeAssignment.includes(r))) {
+            passType = 'bullet';
+        } else if (distFromQB > 25 || ['fly', 'go', 'streak', 'post', 'corner'].some(r => routeAssignment.includes(r))) {
+            passType = 'lob';
+        }
+
+        const maxArmVelocity = 16 + (qbPower / 100) * 14.0;
+        let estimatedBallSpeed = maxArmVelocity;
+        if (passType === 'lob') estimatedBallSpeed *= 0.84;
+        else if (passType === 'touch') estimatedBallSpeed *= 0.92;
 
         const estimatedFlightTime = distFromQB / estimatedBallSpeed;
-        
+
         // Route projection logic
         const recYPS = getPlayerBaseSpeedYPS(rec) * (rec.fatigueModifier || 1.0);
         let distanceToTravel = recYPS * estimatedFlightTime;
 
         let currX = rec.x;
         let currY = rec.y;
-        let lastValidDirX = 0;
-        let lastValidDirY = 1;
+        let lastValidDirX = (rec.vx && Math.abs(rec.vx) > 0.5) ? rec.vx / recYPS : 0;
+        let lastValidDirY = (rec.vy && Math.abs(rec.vy) > 0.5) ? rec.vy / recYPS : 1;
 
         if (rec.routePath && rec.currentPathIndex < rec.routePath.length) {
             for (let i = rec.currentPathIndex; i < rec.routePath.length; i++) {
@@ -1219,7 +1227,13 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
                     break;
                 }
             }
-            const isContinuousRoute = ['Fly', 'Go', 'Streak', 'Vert', 'Fade'].some(r => rec.assignment?.includes(r));
+
+            // Include all continuing downfield and crossing route concepts
+            const isContinuousRoute = [
+                'fly', 'go', 'streak', 'vert', 'fade', 'post', 'corner',
+                'cross', 'crosser', 'crossing', 'deep_cross', 'over', 'wheel', 'seam', 'mesh', 'drag'
+            ].some(r => routeAssignment.includes(r));
+
             if (distanceToTravel > 0 && isContinuousRoute) {
                 currX += lastValidDirX * distanceToTravel;
                 currY += lastValidDirY * distanceToTravel;
@@ -1248,104 +1262,71 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
                 minProjectedSeparation = projDist;
             }
 
-            if (projDist < 2.5) defendersClosingIn++; // Fixed: Reduced from 4.0 to 2.5
-
-            // Dynamic IQ-Weighted Deep Safety & Over-The-Top Capping
-            const isSafetyOrDeepDB = d.role === 'DB' && (d.y > playState.lineOfScrimmage + 9);
-            const rawDistToRec = Math.hypot(rec.x - d.x, rec.y - d.y);
-            const isOverTheTop = d.y > (rec.y - 1.2) && Math.abs(projDefX - projRecX) < 6.0;
-            const isBaitingShallow = isSafetyOrDeepDB && (d.y >= rec.y - 3.5 && d.y <= rec.y) && Math.abs(d.x - rec.x) < 4.5;
-
-            // IQ Layer: High IQ QBs detect safety closing speed and trap baiting.
-            // Low IQ QBs have tunnel vision and miss closing safeties.
-            const qbSafetyVision = Math.max(0.2, (qbIQ - 20) / 75);
-
-            if (depth > 10 && (isOverTheTop || (isBaitingShallow && qbIQ > 68))) {
-                const effectiveCappingDist = Math.min(projDist, rawDistToRec);
-                minProjectedSeparation = Math.min(minProjectedSeparation, effectiveCappingDist * (1.2 - (qbSafetyVision * 0.4)));
-                defendersClosingIn += Math.round(2 * qbSafetyVision);
+            if (projDist < 2.5) {
+                defendersClosingIn = Math.min(3, defendersClosingIn + 1);
             }
 
+            // Deep safety over-the-top capping check (caps at max 2)
+            const isSafetyOrDeepDB = d.role === 'DB' && (d.y > playState.lineOfScrimmage + 9);
+            const isOverTheTop = d.y > (rec.y - 1.0) && Math.abs(projDefX - projRecX) < 4.5 && projDist < 6.0;
+
+            if (depth > 10 && (isOverTheTop || (isSafetyOrDeepDB && projDist < 5.0))) {
+                minProjectedSeparation = Math.min(minProjectedSeparation, projDist * 0.85);
+                defendersClosingIn = Math.min(3, defendersClosingIn + 1);
+            }
+
+            // Undercut recognition: capped so it cannot blow up exponentially
             const distDefToQB = Math.hypot(projDefX - qbState.x, projDefY - qbState.y);
-            if (distDefToQB < distFromQB - 1.5) {
+            if (distDefToQB < distFromQB - 2.0 && distDefToQB > 3.0) {
                 const dx = projRecX - qbState.x;
                 const dy = projRecY - qbState.y;
                 const defDx = projDefX - qbState.x;
                 const defDy = projDefY - qbState.y;
-
-                // IQ Layer: Undercut recognition expands for smart QBs
-                const undercutSensitivity = 0.84 + ((100 - qbIQ) / 100) * 0.08;
                 const dot = (dx * defDx + dy * defDy) / (distFromQB * distDefToQB);
-                if (dot > undercutSensitivity) {
-                    undercutThreat += (4.5 - (distDefToQB / distFromQB) * 4.0) * qbSafetyVision;
+                if (dot > 0.92) {
+                    undercutThreat = Math.min(2.0, undercutThreat + 1.0);
                 }
             }
         });
 
+        // Base score directly proportional to projected separation
         let score = Math.min(minProjectedSeparation, 6) * 10;
 
-        // FIX 1: Recognize Defensive Cushion vs Real Separation.
-        // If a defender is sitting directly downfield (over the top), that distance is cushion, not separation!
-        const defenderOverTheTop = defenseStates.find(d => 
-            !d.isBlocked && !d.isEngaged && 
-            d.y > rec.y && d.y < rec.y + 7.0 && 
-            Math.abs(d.x - rec.x) < 2.5
-        );
-        if (defenderOverTheTop && !isPressured) {
-            score -= 30; // Defender is capping the route from above; don't throw into his chest
-        }
-
-        // FIX: Only make the QB wait for the cut on sharp-breaking routes, so we don't break Drags and Flats!
-        const needsToWait = ['Dig', 'Corner', 'Post', 'Out', 'In', 'Comeback', 'PostCorner', 'Sluggo', 'Out_And_Up', 'Hitch_And_Go', 'Texas'].some(r => routeAssignment.includes(r.toLowerCase()));
+        // Waiting on breaking routes before the cut (allow anticipation when pressured)
+        const needsToWait = ['dig', 'corner', 'post', 'out', 'in', 'comeback', 'postcorner', 'sluggo', 'out_and_up', 'hitch_and_go', 'texas'].some(r => routeAssignment.includes(r));
         const hasRouteCut = rec.routePath && rec.routePath.length > 1;
         const isBeforeCut = needsToWait && hasRouteCut && rec.currentPathIndex < (rec.routePath.length - 1);
         if (isBeforeCut) {
-            if (!isPressured) {
-                score -= 25; // Let the receiver make his break, but don't go completely blind
-            } else {
-                score -= 15; // When pressured, the QB is more willing to throw early anticipation passes
-            }
+            score -= isPressured ? 10 : 20;
         }
 
-        // FIX 3: Deep Vertical Route Depth Gating.
-        // On Fly/Go/Streak/FourVerts routes, require the receiver to get at least 9.0 yards downfield before throwing a bomb.
-        const isDeepVertical = ['Fly', 'Go', 'Streak', 'Vert', 'Fade'].some(r => rec.assignment?.includes(r));
-        if (isDeepVertical && depth < 9.0 && !isPressured) {
-            score -= 40; // Let the receiver push downfield and stack the defender before launching
+        // Deep vertical gating: ensure vertical routes develop at least 7.0 yards downfield
+        const isDeepVertical = ['fly', 'go', 'streak', 'vert', 'fade'].some(r => routeAssignment.includes(r));
+        if (isDeepVertical && depth < 7.0 && !isPressured) {
+            score -= 25;
         }
 
-        // Pre-snap / Post-snap Shell Recognition
+        // Coverage Shell Recognition
         const coverageShell = evaluateCoverageAlignment(defenseStates, playState);
         const isMiddleOfFieldRoute = Math.abs(rec.x - CENTER_X) < 8.0;
 
-        if (depth > 14 && qbIQ >= 55) {
+        if (depth > 12 && qbIQ >= 55) {
             const shellAwareness = (qbIQ - 50) / 50;
-
             if (coverageShell.isTwoHigh) {
-                if (isMiddleOfFieldRoute) {
-                    score += 18 * shellAwareness;
-                } else if (Math.abs(rec.x - CENTER_X) > 16.0) {
-                    score -= 10 * shellAwareness;
-                }
+                score += isMiddleOfFieldRoute ? (15 * shellAwareness) : (-8 * shellAwareness);
             } else if (coverageShell.isSingleHigh) {
-                if (isMiddleOfFieldRoute) {
-            score -= 16 * shellAwareness;
-                } else {
-            score += 12 * shellAwareness;
-                }
+                score += isMiddleOfFieldRoute ? (-12 * shellAwareness) : (10 * shellAwareness);
             }
         }
 
+        // Screen route bonus
         const isScreenRoute = rec.assignment === 'Screen_Wait' || rec.assignment === 'Slip_Screen' || rec.assignment === 'Screen';
         if (isScreenRoute) {
             if (playState.tick < 22 && rec.assignment === 'Screen_Wait') {
                 return { score: -100, separation: minProjectedSeparation, info: { state: rec, separation: minProjectedSeparation } };
             }
-            score += 65;
-
-            if (minProjectedSeparation < 1.0) {
-                score -= 80;
-            }
+            score += 50;
+            if (minProjectedSeparation < 1.0) score -= 60;
         }
 
         const yardsToGo = playState.yardsToGo ?? 10;
@@ -1353,128 +1334,67 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
         const targetDepth = depth;
         const distanceBeyondLOS = targetDepth;
 
-        const isDesignedBehindLOSRoute =
-            playKey.includes('screen') ||
-            routeAssignment === 'flat' ||
-            routeAssignment === 'bubble' ||
-            routeAssignment === 'screen' ||
-            routeAssignment === 'slip_screen' ||
-            routeAssignment === 'screen_wait' ||
-            routeAssignment === 'wr_screen_catch' ||
-            routeAssignment === 'tunnel_screen_catch';
-
-        // Penalize negative-depth throws, but preserve the value of
-        // designed screens, bubbles, and shallow checkdown routes.
-        if (distanceBeyondLOS < 0) {
-            const behindLOSYards = Math.abs(distanceBeyondLOS);
-            const penaltyPerYard = isDesignedBehindLOSRoute ? 2 : 5;
-            const maxPenalty = isDesignedBehindLOSRoute ? 10 : 28;
-
-            score -= Math.min(
-                maxPenalty,
-                behindLOSYards * penaltyPerYard
-            );
-        }
-
+        // First down and down/distance contextual scaling
         const targetAtOrBeyondFirstDown = distanceBeyondLOS >= yardsToGo;
-        if (targetAtOrBeyondFirstDown) score += (down >= 3) ? 22 : 10;
-        else {
-            // Negative depth increases the yards still needed after the catch.
+        if (targetAtOrBeyondFirstDown) {
+            score += (down >= 3) ? 18 : 8;
+        } else {
             const yardsShort = yardsToGo - distanceBeyondLOS;
-            if (down >= 3 && yardsShort > 3) score -= Math.min(24, yardsShort * 3);
-            else if (down <= 2) score += (distanceBeyondLOS >= 3) ? 8 : -4;
+            if (down >= 3 && yardsShort > 3) score -= Math.min(20, yardsShort * 2.5);
+            else if (down <= 2) score += (distanceBeyondLOS >= 3) ? 6 : -3;
         }
 
-        // Short throws are naturally more attractive when pressure is coming.
-        if (isPressured && targetDepth >= 0 && targetDepth <= 8) {
-            score += 30;
+        // Pressure adjustments
+        if (isPressured) {
+            if (targetDepth >= 0 && targetDepth <= 8) score += 25;
+            if (targetDepth > 14) score -= 15;
         }
 
-        // Under heavy pressure, don't wait for a perfect deep window.
-        if (isPressured && targetDepth > 14) {
-            score -= 18;
-        }
-
-        if (targetDepth > 14) {
-            const deepPenalty =
-                down <= 2
-                    ? 10
-                    : yardsToGo >= 8
-                        ? 3
-                        : 7;
-            // Longer throws have more time for safeties and corners to recover.
-            score -= deepPenalty + Math.min(8, (targetDepth - 14) * 0.25);
-        }
-
-        // ======================================================
-        // COVERAGE / SEPARATION QUALITY
-        // ======================================================
-
-        // Separation matters, but returns diminish quickly.
-        // Being 8 yards open isn't four times better than being 2 yards open.
+        // Separation bonus and tight-window penalties
         if (minProjectedSeparation >= 2.0) {
-            // Separation is already represented in the base score.
-            // Reward a clean window, but don't count it twice at full strength.
-            score += Math.min(8, (minProjectedSeparation - 2.0) * 2.5);
+            score += Math.min(10, (minProjectedSeparation - 2.0) * 2.5);
         }
 
-        // Tight-window throws should be possible for good QBs,
-        // but become increasingly unattractive for poor decision makers.
         if (minProjectedSeparation < 1.5) {
-            const tightWindowPenalty = (1.5 - minProjectedSeparation) *
-                (2.0 + ((100 - qbDecision) / 18));
-
-            score -= tightWindowPenalty * 4;
+            const tightWindowPenalty = (1.5 - minProjectedSeparation) * (2.0 + ((100 - qbDecision) / 25));
+            score -= tightWindowPenalty * 3.0;
         }
 
-        // Multiple defenders closing on the target is a major warning.
-        if (defendersClosingIn >= 2) {
-            score -= 25 + ((100 - qbDecision) * 0.18);
+        // Clean, non-multiplying penalties for closing defenders
+        if (defendersClosingIn === 1) {
+            score -= 12;
+        } else if (defendersClosingIn === 2) {
+            score -= 24 + ((100 - qbDecision) * 0.12);
+        } else if (defendersClosingIn >= 3) {
+            score -= 38 + ((100 - qbDecision) * 0.18);
         }
 
-        if (defendersClosingIn >= 3) {
-            score -= 35 + ((100 - qbDecision) * 0.25);
-        }
-
-        // ======================================================
-        // THROW DIFFICULTY / ARM STRENGTH
-        // ======================================================
-
-        if (depth >= 2 && depth <= 14) {
-            // Intermediate throws are the normal bread-and-butter option.
-            if (minProjectedSeparation > 1.2) {
-                score += 20;
-            }
-        }
-
+        // Deep throw difficulty scaling (clean and proportional)
         if (depth > 14) {
-            // Noodle-arm QBs are penalized for chucking deep balls they can't reach
             if (qbPower < 60) {
-                score -= (60 - qbPower) * 2.0;
+                score -= (60 - qbPower) * 1.0;
             }
-
-            // Heavy coverage penalty for chucking deep into multiple defenders or safeties
-            if (defendersClosingIn >= 1) {
-                // Penalize heavily based on how long the ball is in the air
-                const hangTimePenalty = Math.max(1.0, estimatedFlightTime / 1.5);
-                score -= (25 + ((100 - qbDecision) * 0.45)) * hangTimePenalty * defendersClosingIn;
-            }
-
-            if (minProjectedSeparation >= 3.5 && defendersClosingIn === 0) {
-                score += 5 + (qbIQ * 0.03);
-            } else if (defendersClosingIn > 0) {
-                score -= Math.max(20, (85 - qbDecision) * 1.2);
+            if (minProjectedSeparation >= 3.0 && defendersClosingIn === 0) {
+                score += 10 + (qbIQ * 0.05);
             }
         }
 
-        // ======================================================
-        // UNDERCUT / DEFENDER leverage
-        // ======================================================
-
+        // Undercut penalty
         if (undercutThreat > 0) {
-            const leveragePenalty = 22 + ((100 - qbDecision) * 0.20);
-            score -= undercutThreat * leveragePenalty;
+            score -= undercutThreat * 15;
         }
+
+        // Risk tolerance and decision-making modifier
+        const decisionRiskTolerance = 0.70 + (qbDecision / 100) * 0.30;
+        const personalityRiskTolerance = qbProfile?.riskTolerance ?? 1.0;
+        score *= decisionRiskTolerance * personalityRiskTolerance;
+
+        return {
+            score: score,
+            separation: minProjectedSeparation,
+            info: { state: rec, separation: minProjectedSeparation }
+        };
+    };
 
         // ======================================================
         // GAME SITUATION
@@ -2135,16 +2055,28 @@ export function executeThrow(qbState, target, throwPower, accuracy, playState, g
     const finalDist = Math.hypot(aimX - startX, aimY - startY);
     const t = Math.max(0.1, finalDist / ballSpeed);
 
-    const targetZ = 1.0;
+    // Target the receiver's chest (1.6 yds = ~4.8 ft) instead of waist/knees (1.0 yd).
+    const targetZ = 1.6;
     const startZ = 2.2;
     const deltaZ = targetZ - startZ;
-    const vz = (deltaZ + (4.9 * t * t)) / t;
+    let vz = (deltaZ + (4.9 * t * t)) / t;
+
+    // For touch and lob passes crossing downfield over the line of scrimmage,
+    // enforce an upward arc so passes clear the defensive line helmet level.
+    if ((passType === 'touch' || passType === 'lob') && aimY > playState.lineOfScrimmage) {
+        const minApexZ = passType === 'lob' ? 3.5 : 2.7;
+        const minVz = Math.sqrt(2 * 9.8 * Math.max(0.2, minApexZ - startZ));
+        if (vz < minVz) {
+            vz = minVz;
+        }
+    }
 
     playState.ballState = {
         x: startX, y: startY, z: startZ, inAir: true, isLoose: false, throwTick: playState.tick, releaseTick: playState.tick,
         vx: (aimX - startX) / t, vy: (aimY - startY) / t, vz: vz,
         targetX: aimX, targetY: aimY, targetPlayerId: target.id, throwerId: qbState.id, isThrowAway: false
     };
+
 
     qbState.hasBall = false;
     qbState.isBallCarrier = false;

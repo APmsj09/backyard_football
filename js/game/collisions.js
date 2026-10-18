@@ -1223,8 +1223,10 @@ export function handleBallArrival(playState, carrier, playResult, gameLog) {
     const BASE_CATCH_RADIUS = 0.45;
 
     const playersInRange = playState.activePlayers.filter(p => {
-        // Do not roll another catch attempt for a player who already
-        // attempted to catch the ball during this contact phase.
+        // Engaged/blocked defenders or stunned players cannot catch or swat passes mid-flight
+        if (p.isBlocked || p.isEngaged || p.stunnedTicks > 0) return false;
+
+        // Do not roll another catch attempt for a player who already attempted this phase
         if (ball._attemptedCatchPlayerIds.has(p.id)) return false;
 
         if (ball.isLoose && p.id === ball.lastDroppedById) {
@@ -1248,8 +1250,6 @@ export function handleBallArrival(playState, carrier, playResult, gameLog) {
 
         if (p.isOffense && playState.type === 'pass' && !ball.isLoose && !ball.tipCount && !ball.isLateral) {
             if (p.id !== ball.targetPlayerId) {
-                // If this is an offensive player who is NOT the intended target, 
-                // they can only catch it if the ball is tipped.
                 return false;
             }
         }
@@ -1265,15 +1265,30 @@ export function handleBallArrival(playState, carrier, playResult, gameLog) {
         }
 
         const verticalLeap = (p.jumping || p.agi || p.agility || 50) / 100;
-        // Balanced backyard vertical: Max leap adds ~0.7 yards (~2 feet) to catch reach
-        const maxCatchHeight = (playerHeight / 36) + 1.2 + (verticalLeap * 0.7);
+        const standingReach = (playerHeight / 36) + 0.6; // ~2.5 yards
+
+        // Only active ball-trackers can leap for high passes; others are limited to standing reach
+        const isTracking = p.action === 'tracking_ball';
+        const maxCatchHeight = isTracking 
+            ? (playerHeight / 36) + 1.1 + (verticalLeap * 0.7)
+            : standingReach;
+
         if (ball.inAir && ball.z > maxCatchHeight) return false;
+
+        // Pass rushers (DL/blitzers) can only bat down balls right at the line within 2.5y of release
+        const isPassRusher = !p.isOffense && (p.role === 'DL' || p.assignment?.includes('rush') || p.assignment?.includes('blitz'));
+        if (isPassRusher && playState.type === 'pass' && !ball.isLoose && !ball.tipCount) {
+            const distFromRelease = Math.hypot(p.x - (ball.prevX || ball.x), p.y - (ball.prevY || ball.y));
+            if (ticksSinceKick > 8 || distFromRelease > 2.5 || ball.z > standingReach) {
+                return false;
+            }
+        }
 
         const heightBonus = Math.max(0, (playerHeight - 65) * 0.04);
         let dynamicCatchRadius = BASE_CATCH_RADIUS + heightBonus + (verticalLeap * 0.10);
         const CATCH_TOLERANCE = 0.25;
 
-        if (p.action === 'tracking_ball') dynamicCatchRadius *= 1.8;
+        if (isTracking) dynamicCatchRadius *= 1.8;
 
         const distNow = Math.sqrt((p.x - ball.x) ** 2 + (p.y - ball.y) ** 2);
         if (distNow <= (dynamicCatchRadius + CATCH_TOLERANCE)) return true;
@@ -1766,64 +1781,67 @@ export function handleBallArrival(playState, carrier, playResult, gameLog) {
             return;
 
         } else if (ball.isLateral) {
-            // Keep a failed lateral attempt in flight. If it hits the ground,
-            // the ground handler below turns it into a loose ball.
+            // Keep a failed lateral attempt in flight.
         } else {
             const last = ball.lastInteraction;
             if (!(last && last.playerId === bestCandidate.id && (playState.tick - last.tick) <= 5)) {
-                ball.tipCount = (ball.tipCount || 0) + 1;
-
                 if (isDefense) {
                     if (playState.type === 'punt') return;
                     
-                    // Determine if the defender actually manages to touch the ball to disrupt it
                     let touchChance = 0;
                     const isLineSwat = bestCandidate.role === 'DL' || (bestCandidate.role === 'LB' && bestCandidate.y < playState.lineOfScrimmage + 5);
                     
                     if (isLineSwat) {
                         const playerHeight = bestCandidate.hgt || bestCandidate.height || 70;
                         const heightAdv = Math.max(0, playerHeight - 72);
-                        touchChance = 5 + (heightAdv * 2); // 5-15% chance for a DL to bat a pass
-                        if (bestCandidate.isEngaged || bestCandidate.isBlocked) touchChance *= 0.4;
+                        touchChance = 4 + (heightAdv * 1.5);
                     } else {
                         const coverageSkill = bestCandidate.cov || bestCandidate.coverage || 50;
-                        touchChance = 20 + (coverageSkill * 0.4); // 40-60% chance for DB to get a hand on it
-                        if (attackersNear > 0) touchChance += 25; // Easier to disrupt if contesting the catch
+                        touchChance = 20 + (coverageSkill * 0.4);
+                        if (attackersNear > 0) touchChance += 20;
                     }
                     
-                    // Height penalty: if the ball is well above their head, it's hard to get a solid hand on it
                     const playerHeight = bestCandidate.hgt || bestCandidate.height || 70;
-                    const standingReach = (playerHeight / 36) + 0.6; // ~2.5 yards
+                    const standingReach = (playerHeight / 36) + 0.6;
                     if (ball.z > standingReach) {
-                        touchChance *= 0.25; // Severely reduce chance to swat balls that are high in the air
+                        touchChance *= 0.15;
                     }
                     
+                    // ONLY update ball physics if the defender ACTUALLY manages to touch/deflect the ball!
                     if (Math.random() * 100 < touchChance) {
                         ball.tipCount = (ball.tipCount || 0) + 1;
                         
-                        // High coverage/IQ defenders swat cleanly; clumsy defenders or DL are more likely to tip it up
                         const coverageSkill = bestCandidate.cov || bestCandidate.coverage || 50;
                         const defIQ = bestCandidate.iq || bestCandidate.playbookIQ || 50;
-                        const swatChance = 0.30 + ((coverageSkill + defIQ) / 400); // ~55% to ~80% chance to swat cleanly
+                        const swatChance = 0.35 + ((coverageSkill + defIQ) / 400);
                         
                         const isTip = (Math.random() > swatChance) && ball.tipCount < 3;
 
                         if (isTip) {
                             ball._attemptedCatchPlayerIds.clear();
                             if (gameLog) pushGameLog(gameLog, `[Tick ${playState.tick}] 🖐️ ${bestCandidate.name} tips pass!`, playState);
-                            ball.vz = 3.0 + (Math.random() * 2);
-                            ball.vx += (Math.random() - 0.5) * 6;
-                            ball.vy += (Math.random() - 0.5) * 6;
+                            ball.vz = 2.5 + (Math.random() * 2);
+                            ball.vx = (ball.vx * 0.5) + (Math.random() - 0.5) * 3;
+                            ball.vy = (ball.vy * 0.5) + (Math.random() - 0.5) * 3;
                             ball.lastInteraction = { tick: playState.tick, playerId: bestCandidate.id, type: 'tip' };
+
+                            // Solve realistic landing spot for tipped ball
+                            const tLand = (ball.vz + Math.sqrt(Math.max(0.1, ball.vz * ball.vz + 2 * 9.8 * Math.max(0.1, ball.z)))) / 9.8;
+                            ball.targetX = ball.x + (ball.vx * tLand);
+                            ball.targetY = ball.y + (ball.vy * tLand);
+                            ball.targetPlayerId = null;
                         } else {
                             if (gameLog) pushGameLog(gameLog, `[Tick ${playState.tick}] 🚫 ${bestCandidate.name} swats the pass away!`, playState);
                             ball.vz = -8.0;
-                            ball.vx *= 0.3;
-                            ball.vy *= 0.3;
+                            ball.vx *= 0.2;
+                            ball.vy *= 0.2;
                             ball.isSwatted = true;
                             ball.lastInteraction = { tick: playState.tick, playerId: bestCandidate.id, type: 'swat' };
+                            ball.targetX = ball.x + (ball.vx * 0.2);
+                            ball.targetY = ball.y + (ball.vy * 0.2);
                         }
                     }
+                    // CRITICAL: If defender failed to touch the ball, DO NOT corrupt ball.targetX/Y!
                 } else {
                     ball.tipCount = (ball.tipCount || 0) + 1;
                     const isBobble = (Math.random() < 0.20) && ball.tipCount < 3;
@@ -1832,9 +1850,13 @@ export function handleBallArrival(playState, carrier, playResult, gameLog) {
                         ball._attemptedCatchPlayerIds.clear();
                         if (gameLog) pushGameLog(gameLog, `[Tick ${playState.tick}] 🖐️ ${bestCandidate.name} bobbles the ball! (Hands: ${hndEff}, Energy: ${fatPct}%)`, playState);
                         ball.vz = 2.5 + Math.random();
-                        ball.vx += (Math.random() - 0.5) * 3;
-                        ball.vy += (Math.random() - 0.5) * 3;
+                        ball.vx += (Math.random() - 0.5) * 2;
+                        ball.vy += (Math.random() - 0.5) * 2;
                         ball.lastInteraction = { tick: playState.tick, playerId: bestCandidate.id, type: 'bobble' };
+                        
+                        const tLand = (ball.vz + Math.sqrt(Math.max(0.1, ball.vz * ball.vz + 2 * 9.8 * Math.max(0.1, ball.z)))) / 9.8;
+                        ball.targetX = ball.x + (ball.vx * tLand);
+                        ball.targetY = ball.y + (ball.vy * tLand);
                     } else {
                         if (playState.type === 'punt') {
                             ball._attemptedCatchPlayerIds.clear();
@@ -1842,8 +1864,8 @@ export function handleBallArrival(playState, carrier, playResult, gameLog) {
                             playState.statEvents.push({ type: 'fumble', playerId: bestCandidate.id });
                             playState.fumbleOccurred = true;
                             ball.vz = -2.0;
-                            ball.vx += (Math.random() - 0.5) * 4;
-                            ball.vy += (Math.random() - 0.5) * 4;
+                            ball.vx += (Math.random() - 0.5) * 3;
+                            ball.vy += (Math.random() - 0.5) * 3;
                             ball.droppedById = bestCandidate.id;
                             ball.isLoose = true;
                             ball.lastInteraction = { tick: playState.tick, playerId: bestCandidate.id, type: 'muff' };
@@ -1859,8 +1881,6 @@ export function handleBallArrival(playState, carrier, playResult, gameLog) {
                         }
                     }
                 }
-                ball.targetX = ball.x + ball.vx;
-                ball.targetY = ball.y + ball.vy;
             }
         }
     }

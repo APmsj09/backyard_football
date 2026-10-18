@@ -42,6 +42,17 @@ function getReachablePassInterceptionPoint(pState, ballState) {
         return null;
     }
 
+    // Defensive linemen and blitzers rushing the passer should not peel off 
+    // to calculate downfield trajectory interceptions intended for receivers behind them.
+    const isPassRusher = pState.role === 'DL' ||
+        pState.assignment?.includes('rush') ||
+        pState.assignment?.includes('blitz') ||
+        pState.action === 'pass_rush';
+
+    if (isPassRusher) {
+        return null;
+    }
+
     const pathDX = ballState.targetX - ballState.x;
     const pathDY = ballState.targetY - ballState.y;
     const remainingDistance = Math.hypot(pathDX, pathDY);
@@ -57,14 +68,9 @@ function getReachablePassInterceptionPoint(pState, ballState) {
     const remainingFlightSeconds = remainingDistance / ballSpeedYPS;
 
     const fatigueMod = pState.fatigueModifier || 1.0;
+    const maxSpeedYPS = getPlayerBaseSpeedYPS(pState) * fatigueMod;
 
-    const maxSpeedYPS =
-        getPlayerBaseSpeedYPS(pState) * fatigueMod;
-
-    let accelerationYPS2 =
-        getPlayerAccelerationYPS2(pState) * fatigueMod;
-
-    // Match the movement engine's balance-recovery penalty.
+    let accelerationYPS2 = getPlayerAccelerationYPS2(pState) * fatigueMod;
     if (pState.moveCooldown > 0) {
         accelerationYPS2 *= 0.85;
     }
@@ -81,29 +87,34 @@ function getReachablePassInterceptionPoint(pState, ballState) {
     const playerVX = Number.isFinite(pState.vx) ? pState.vx : 0;
     const playerVY = Number.isFinite(pState.vy) ? pState.vy : 0;
 
-    // Test points in chronological order along the remaining pass trajectory.
-    // The defender can break only if they can plausibly arrive before the ball.
-    for (let step = 0; step <= PASS_INTERCEPT_STEPS; step++) {
+    // Check vertical reach (standing reach + vertical jump) ~2.3 - 2.8 yards
+    const jumpingStat = pState.jump || pState.jumping || 50;
+    const maxVerticalReach = 2.1 + (jumpingStat / 100) * 0.7;
+
+    const startZ = Number.isFinite(ballState.z) ? ballState.z : 2.0;
+    const ballVZ = Number.isFinite(ballState.vz) ? ballState.vz : 0;
+
+    // Start at step = 1 (ignore step 0 directly at QB's hand)
+    for (let step = 1; step <= PASS_INTERCEPT_STEPS; step++) {
         const fraction = step / PASS_INTERCEPT_STEPS;
 
         const pointX = ballState.x + (pathDX * fraction);
         const pointY = ballState.y + (pathDY * fraction);
         const timeToPoint = remainingFlightSeconds * fraction;
 
+        // Verify ball height at this point: z(t) = z0 + vz*t - 0.5*g*t^2
+        const ballZAtPoint = startZ + (ballVZ * timeToPoint) - (0.5 * 9.8 * timeToPoint * timeToPoint);
+        if (ballZAtPoint > maxVerticalReach) {
+            continue;
+        }
+
         const toPointDX = pointX - pState.x;
         const toPointDY = pointY - pState.y;
         const distanceToPoint = Math.hypot(toPointDX, toPointDY);
 
-        const directionX = distanceToPoint > 0.001
-            ? toPointDX / distanceToPoint
-            : 0;
+        const directionX = distanceToPoint > 0.001 ? toPointDX / distanceToPoint : 0;
+        const directionY = distanceToPoint > 0.001 ? toPointDY / distanceToPoint : 0;
 
-        const directionY = distanceToPoint > 0.001
-            ? toPointDY / distanceToPoint
-            : 0;
-
-        // Existing momentum helps if the defender is already moving toward
-        // the interception point, but movement away from it is not rewarded.
         const velocityTowardPoint = Math.max(
             0,
             (playerVX * directionX) + (playerVY * directionY)
@@ -113,8 +124,6 @@ function getReachablePassInterceptionPoint(pState, ballState) {
             (velocityTowardPoint * timeToPoint) +
             (0.5 * accelerationYPS2 * timeToPoint * timeToPoint);
 
-        // Reduce the theoretical top-speed distance to account for turning,
-        // acceleration, and the fact that the defender is reacting mid-play.
         const topSpeedReach =
             maxSpeedYPS *
             timeToPoint *
