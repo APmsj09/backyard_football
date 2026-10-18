@@ -31,6 +31,20 @@ function getPursuitTargetY(pState, carrier, predictedY) {
         return predictedY;
     }
 
+    const isQBPassRush =
+        carrier.role === 'QB' &&
+        (
+            pState.role === 'DL' ||
+            pState.assignment?.includes('rush') ||
+            pState.assignment?.includes('blitz')
+        );
+
+    // Pass rushers must be able to close on a QB behind them.
+    // Do not apply the depth-preservation rule to pocket pressure.
+    if (isQBPassRush) {
+        return predictedY;
+    }
+
     const separation = pState.y - carrier.y;
 
     // If the defender is no longer meaningfully ahead, resume
@@ -39,10 +53,8 @@ function getPursuitTargetY(pState, carrier, predictedY) {
         return predictedY;
     }
 
-    // A downfield defender should maintain their depth or move
-    // farther downfield, not turn around to chase the runner's
-    // current position. They can adjust horizontally to close
-    // the lane while the runner approaches.
+    // Other defenders preserve downfield leverage rather than
+    // retreating toward the carrier's current position.
     return Math.max(pState.y, predictedY);
 }
 
@@ -1890,6 +1902,7 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                         isDL
                     ) {
                         shouldPursue = true;
+                        pState._pursuitLockTicks = 25;
                     }
                 }
             }

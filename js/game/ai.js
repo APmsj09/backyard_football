@@ -1575,7 +1575,7 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
     // DEEPER FIX: Scale dropback duration by play type. 
     // Quick passes can fire at ~1.3s (32 ticks), but deep drops need at least 1.7s (42 ticks) to develop.
     const isQuickPlay = playState.playKey?.includes('Quick') || playState.playKey?.includes('Screen');
-    const MIN_DROPBACK_TICKS = isQuickPlay ? 30 : 42;
+    const MIN_DROPBACK_TICKS = isQuickPlay ? 34 : 47;
     // canThrowStandard is calculated below, after the pocket deadline is known.
     
     // NATURAL POCKET CLOCK:
