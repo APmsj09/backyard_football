@@ -819,6 +819,14 @@ function calculateGapFriction(pState, allPlayers) {
 
                 if (distToGap < 0.8) {
                     let friction = (gapWidth - 0.7) / (1.4 - 0.7);
+                    
+                    // Power backs and strong linemen push through tight gaps with less friction
+                    const pStr = pState.str || pState.strength || 50;
+                    const pWgt = pState.wgt || pState.weight || 200;
+                    const powerFactor = ((pStr / 100) * 0.6) + (((pWgt - 180) / 140) * 0.4); // 0.0 to ~1.0
+                    
+                    friction += (powerFactor * 0.35); // Boost friction modifier (less slowdown)
+                    
                     friction = Math.max(0.35, Math.min(1.0, friction));
                     if (friction < minFriction) minFriction = friction;
                 }

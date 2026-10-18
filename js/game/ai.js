@@ -918,7 +918,7 @@ export function getSmartCarrierTarget(runner, defenseStates, offenseStates, fiel
 
             const dodgeWidth = 1.0 + (agility / 50);
             bestTargetX = (bestTargetX * 0.4) + ((runner.x + (dodgeDir * dodgeWidth)) * 0.6);
-            bestTargetY = Math.min(bestTargetY, runner.y + 1.5);
+            bestTargetY = Math.min(bestTargetY, runner.y + 3.0); // Allow more forward progress during dodge
         }
     }
 
@@ -1628,6 +1628,8 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
             playState.ballState.vz = (-0.3 + (4.9 * t * t)) / t;
             playState.ballState.throwTick = playState.tick;
             qbState.hasBall = false;
+            
+            playState.statEvents.push({ type: 'pass_attempt', qbId: qbState.id });
             return;
         }
         return;
@@ -1941,6 +1943,8 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
 
         playState.ballState.throwTick = playState.tick;
         qbState.hasBall = false;
+        
+        playState.statEvents.push({ type: 'pass_attempt', qbId: qbState.id });
         return;
     }
 

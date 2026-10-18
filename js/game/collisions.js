@@ -430,7 +430,9 @@ export function checkTackleCollisions(playState, gameLog) {
                         );
                         
                         // PHYSICS: Stiff arm absorbs momentum relative to the mass of the defender shoved away
-                        const speedPenalty = Math.min(0.4, (defWeight / (carWeight * 1.5)) * 0.25);
+                        // Stronger carriers lose less momentum during the stiff arm
+                        const strengthMitigation = Math.max(0.5, 1.0 - ((carrier.str || 50) / 200));
+                        const speedPenalty = Math.min(0.4, (defWeight / (carWeight * 1.5)) * 0.25) * strengthMitigation;
                         carrier.vx *= (1 - speedPenalty);
                         carrier.vy *= (1 - speedPenalty);
 
@@ -447,10 +449,12 @@ export function checkTackleCollisions(playState, gameLog) {
                         const dir = Math.random() > 0.5 ? 1 : -1;
                         carrier.action = dir === 1 ? 'juke_right' : 'juke_left';
                         
-                        // PHYSICS: A hard lateral cut bleeds forward velocity and violently redirects it laterally
-                        carrier.x += dir * 0.8;
-                        carrier.vy *= 0.65; // Bleed 35% of forward momentum planting the foot
-                        carrier.vx += dir * 2.5; // Surge of lateral velocity
+                        const agiFactor = (carrier.agi || 50) / 100;
+                        const jukePower = 1.8 + (agiFactor * 2.0); // 2.0 to 3.8 lateral impulse
+                        
+                        // PHYSICS: A hard lateral cut bleeds forward velocity and redirects it laterally
+                        carrier.vy *= (0.4 + (agiFactor * 0.4)); // High agility retains more forward speed through the cut
+                        carrier.vx = dir * jukePower; // Hard set the velocity instead of adding to avoid insane compounding speeds
                         
                         // The defender's momentum carries him past the cut;
                         // agility determines how quickly he regains steering.
@@ -577,6 +581,10 @@ export function checkTackleCollisions(playState, gameLog) {
                 (bounceX / bounceDistance) * (isTruckAttempt ? 1.9 : 1.6),
                 (bounceY / bounceDistance) * (isTruckAttempt ? 1.9 : 1.6)
             );
+            
+            // Add explicit tackle miss cooldown to prevent consecutive immediate attempts
+            defender.stunnedTicks = Math.max(defender.stunnedTicks || 0, 10);
+            
             // PHYSICS: Running *through* a defender transfers a massive chunk of momentum based on weight ratio
             const baseSpeedDrain = Math.max(
                 0.15,
@@ -738,8 +746,11 @@ export function resolveOngoingBlocks(playState, gameLog, offenseStates = [], def
             }
         }
 
-        let blockPower = (((blocker.blocking || 50) * 1.15) + (blocker.strength || 50)) * blocker.fatigueModifier;
-        let shedPower = (((defender.blockShedding || 50) * 1.15) + (defender.strength || 50)) * defender.fatigueModifier;
+        const blockerIQ = blocker.iq || blocker.playbookIQ || 50;
+        const defenderIQ = defender.iq || defender.playbookIQ || 50;
+        
+        let blockPower = (((blocker.blocking || 50) * 1.15) + (blocker.strength || 50) + (blockerIQ * 0.3)) * blocker.fatigueModifier;
+        let shedPower = (((defender.blockShedding || 50) * 1.15) + (defender.strength || 50) + (defenderIQ * 0.3)) * defender.fatigueModifier;
 
         if (playState.playKey?.includes('Screen') && playState.tick < 20) {
             blockPower *= 0.1;
@@ -1766,24 +1777,57 @@ export function handleBallArrival(playState, carrier, playResult, gameLog) {
 
                 if (isDefense) {
                     if (playState.type === 'punt') return;
-                    const isTip = (Math.random() < 0.25) && ball.tipCount < 3;
-
-                    if (isTip) {
-                        ball._attemptedCatchPlayerIds.clear();
-                        if (gameLog) pushGameLog(gameLog, `[Tick ${playState.tick}] 🖐️ ${bestCandidate.name} tips pass! (Hands: ${hndEff}, Energy: ${fatPct}%)`, playState);
-                        ball.vz = 3.0 + (Math.random() * 2);
-                        ball.vx += (Math.random() - 0.5) * 6;
-                        ball.vy += (Math.random() - 0.5) * 6;
-                        ball.lastInteraction = { tick: playState.tick, playerId: bestCandidate.id, type: 'tip' };
+                    
+                    // Determine if the defender actually manages to touch the ball to disrupt it
+                    let touchChance = 0;
+                    const isLineSwat = bestCandidate.role === 'DL' || (bestCandidate.role === 'LB' && bestCandidate.y < playState.lineOfScrimmage + 5);
+                    
+                    if (isLineSwat) {
+                        const playerHeight = bestCandidate.hgt || bestCandidate.height || 70;
+                        const heightAdv = Math.max(0, playerHeight - 72);
+                        touchChance = 5 + (heightAdv * 2); // 5-15% chance for a DL to bat a pass
+                        if (bestCandidate.isEngaged || bestCandidate.isBlocked) touchChance *= 0.4;
                     } else {
-                        if (gameLog) pushGameLog(gameLog, `[Tick ${playState.tick}] 🚫 ${bestCandidate.name} swats the pass away! (Hands: ${hndEff}, Energy: ${fatPct}%)`, playState);
-                        ball.vz = -8.0;
-                        ball.vx *= 0.3;
-                        ball.vy *= 0.3;
-                        ball.isSwatted = true;
-                        ball.lastInteraction = { tick: playState.tick, playerId: bestCandidate.id, type: 'swat' };
+                        const coverageSkill = bestCandidate.cov || bestCandidate.coverage || 50;
+                        touchChance = 20 + (coverageSkill * 0.4); // 40-60% chance for DB to get a hand on it
+                        if (attackersNear > 0) touchChance += 25; // Easier to disrupt if contesting the catch
+                    }
+                    
+                    // Height penalty: if the ball is well above their head, it's hard to get a solid hand on it
+                    const playerHeight = bestCandidate.hgt || bestCandidate.height || 70;
+                    const standingReach = (playerHeight / 36) + 0.6; // ~2.5 yards
+                    if (ball.z > standingReach) {
+                        touchChance *= 0.25; // Severely reduce chance to swat balls that are high in the air
+                    }
+                    
+                    if (Math.random() * 100 < touchChance) {
+                        ball.tipCount = (ball.tipCount || 0) + 1;
+                        
+                        // High coverage/IQ defenders swat cleanly; clumsy defenders or DL are more likely to tip it up
+                        const coverageSkill = bestCandidate.cov || bestCandidate.coverage || 50;
+                        const defIQ = bestCandidate.iq || bestCandidate.playbookIQ || 50;
+                        const swatChance = 0.30 + ((coverageSkill + defIQ) / 400); // ~55% to ~80% chance to swat cleanly
+                        
+                        const isTip = (Math.random() > swatChance) && ball.tipCount < 3;
+
+                        if (isTip) {
+                            ball._attemptedCatchPlayerIds.clear();
+                            if (gameLog) pushGameLog(gameLog, `[Tick ${playState.tick}] 🖐️ ${bestCandidate.name} tips pass!`, playState);
+                            ball.vz = 3.0 + (Math.random() * 2);
+                            ball.vx += (Math.random() - 0.5) * 6;
+                            ball.vy += (Math.random() - 0.5) * 6;
+                            ball.lastInteraction = { tick: playState.tick, playerId: bestCandidate.id, type: 'tip' };
+                        } else {
+                            if (gameLog) pushGameLog(gameLog, `[Tick ${playState.tick}] 🚫 ${bestCandidate.name} swats the pass away!`, playState);
+                            ball.vz = -8.0;
+                            ball.vx *= 0.3;
+                            ball.vy *= 0.3;
+                            ball.isSwatted = true;
+                            ball.lastInteraction = { tick: playState.tick, playerId: bestCandidate.id, type: 'swat' };
+                        }
                     }
                 } else {
+                    ball.tipCount = (ball.tipCount || 0) + 1;
                     const isBobble = (Math.random() < 0.20) && ball.tipCount < 3;
 
                     if (isBobble) {

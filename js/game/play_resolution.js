@@ -1275,6 +1275,7 @@ export function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey
                         playState.playIsLive = false;
                         playState.yards = ballCarrierState.y - playState.lineOfScrimmage;
                         playState.finalBallY = ballCarrierState.y;
+                        playState.outOfBounds = true;
                         if (gameLog) gameLog.push(`💨 ${ballCarrierState.name} steps out of bounds.`);
                         if (ballCarrierState.role === 'QB' && playState.yards < 0 && playState.type === 'pass') {
                             playState.sack = true;
@@ -1287,6 +1288,7 @@ export function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey
                 const isBallOutOfBounds = ball.x <= 0 || ball.x >= FIELD_WIDTH || ball.y <= 0 || ball.y >= FIELD_LENGTH;
                 if (isBallOutOfBounds && (ball.isLoose || (playState.type === 'punt' && !ballCarrierState))) {
                     playState.playIsLive = false;
+                    playState.outOfBounds = true;
 
                     const wentOutSideline = ball.x <= 0 || ball.x >= FIELD_WIDTH;
 
@@ -1639,7 +1641,7 @@ export function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey
 
     // BACKYARD CLOCK BURN: Plays take time to set up, kids have to retrieve incomplete passes from the bushes
     let clockBurn = Math.floor(Math.random() * 10) + 30; // 30 to 39 seconds for a normal play + huddle
-    if (playState.incomplete) clockBurn = Math.floor(Math.random() * 8) + 18; // Even an incompletion burns 18-25 secs fetching the ball
+    if (playState.incomplete || playState.outOfBounds) clockBurn = Math.floor(Math.random() * 8) + 18; // Fetching ball stops clock temporarily
     else if (playResult.possessionChange || playState.touchdown || playState.safety) clockBurn = 40; // Turnovers take a while to reset
 
     // Late 4th-Quarter Hurry-Up: Scaled strictly by Coach Clock IQ

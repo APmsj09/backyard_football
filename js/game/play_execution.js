@@ -649,7 +649,7 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
     // FIX: Detect if a pass was caught and the play has transitioned to Run-After-Catch
     const isPassCompleted = playState.type === 'pass' && 
         (playState.statEvents.some(e => e.type === 'completion') || 
-        (ballCarrierState && ballCarrierState.isOffense && ballCarrierState.role !== 'QB'));
+        (ballCarrierState && ballCarrierState.isOffense && ballCarrierState.role !== 'QB' && !playState.handoffOccurred));
 
     const primaryRunTarget =
         offenseStates.find(p =>
