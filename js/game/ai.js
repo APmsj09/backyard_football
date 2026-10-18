@@ -1094,6 +1094,9 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
 
         if (!rec || !rec.action.includes('route')) return null;
 
+        const routeAssignment = String(rec.assignment || '').toLowerCase();
+        const playKey = String(playState?.playKey || '').toLowerCase();
+
         const distFromQB = getDistance(qbState, rec);
         let estimatedBallSpeed = 22;
 
@@ -1269,8 +1272,6 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
         const down = playState.down ?? 1;
         const targetDepth = depth;
         const distanceBeyondLOS = targetDepth;
-        const playKey = String(playState?.playKey || '').toLowerCase();
-        const routeAssignment = String(rec.assignment || '').toLowerCase();
 
         const isDesignedBehindLOSRoute =
             playKey.includes('screen') ||
