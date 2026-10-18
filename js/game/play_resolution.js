@@ -1110,6 +1110,11 @@ export function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey
                 );
             }
 
+            // Refresh possession after any throw, handoff, or lateral this tick.
+            ballCarrierState = playState.activePlayers.find(
+                p => p.hasBall || p.isBallCarrier
+            ) || null;
+
             updatePlayerTargets(
                 playState, activeOffense, activeDefense, ballCarrierState,
                 loopType, finalOffensivePlayKey, playState.assignments, defensivePlayKey, gameLog

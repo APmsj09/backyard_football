@@ -1588,6 +1588,10 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
     let maxDecisionTimeTicks = Math.round((85 + (qbAgility / 3) - (clockAwareness * 15)) * riskFactor);
     if (qbState.loggedRollout) maxDecisionTimeTicks += 35;
 
+    // A clean pocket gives deeper concepts more time to develop.
+    // 30 ticks = 0.72 seconds at 25 Hz.
+    if (!isPressured) maxDecisionTimeTicks += 30;
+
     const pocketTimeExpired = playState.tick >= maxDecisionTimeTicks;
     const canThrowStandard =
         (
@@ -1885,7 +1889,7 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
             adjustedAccuracy = Math.max(30, adjustedAccuracy - pPenalty);
         }
 
-        executeThrow(qbState, targetPlayerState, qbStrength, adjustedAccuracy, playState, gameLog, actionTaken);
+        executeThrow(qbState, targetPlayerState, qbPower, adjustedAccuracy, playState, gameLog, actionTaken);
     }
 
     if (isDesperationTime && !decisionMade && !targetPlayerState && playState.tick >= 35) {
@@ -1960,6 +1964,7 @@ export function executeThrow(qbState, target, throwPower, accuracy, playState, g
         if (passType === 'lob') qbEstimation *= 1.04;
 
         let distanceToTravel = recYPS * flightTime * qbEstimation;
+        let projectedWithinRoute = false;
 
         let currX = target.x;
         let currY = target.y;
@@ -1987,6 +1992,7 @@ export function executeThrow(qbState, target, throwPower, accuracy, playState, g
                     aimX = currX + dx * ratio;
                     aimY = currY + dy * ratio;
                     distanceToTravel = 0;
+                    projectedWithinRoute = true;
                     break;
                 }
             }
@@ -2002,8 +2008,9 @@ export function executeThrow(qbState, target, throwPower, accuracy, playState, g
 
             aimX = currX + (dirX * distanceToTravel);
             aimY = currY + (dirY * distanceToTravel);
-        } else {
-            // Settle cleanly at the final route node
+        } else if (!projectedWithinRoute) {
+            // If projection exhausted the route, settle at its final node.
+            // Otherwise, preserve the interpolated point within the segment.
             aimX = currX;
             aimY = currY;
         }

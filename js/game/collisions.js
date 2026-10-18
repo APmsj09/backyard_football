@@ -6,6 +6,7 @@ import { logPlayDebug } from './telemetry.js';
 const FIELD_WIDTH = 53.3;
 const FIELD_LENGTH = 120;
 const TACKLE_RANGE = 2.2;
+const TACKLE_CONTACT_RANGE = 1.4;
 const FUMBLE_CHANCE_BASE = 0.015;
 const DEBUG_MODE = false;
 const BLOCK_WIN_SCORE = 10;
@@ -346,7 +347,7 @@ export function checkTackleCollisions(playState, gameLog) {
             continue;
         }
 
-        if (distance < 1.4) {
+        if (distance < TACKLE_CONTACT_RANGE) {
             const canPerformMove = (!carrier.moveCooldown || carrier.moveCooldown <= 0) && carrier.action !== 'handoff_setup';
 
             if (canPerformMove) {
@@ -456,7 +457,7 @@ export function checkTackleCollisions(playState, gameLog) {
             d.stunnedTicks === 0 &&
             !d.isBlocked &&
             !d.isEngaged &&
-            getDistance(d, carrier) < TACKLE_RANGE
+            getDistance(d, carrier) < TACKLE_CONTACT_RANGE
         );
 
         // Additional defenders help, but shouldn't make a tackle nearly automatic.
@@ -612,7 +613,9 @@ export function resolveBattle(powerA, powerB, battle) {
 
 export function resolveOngoingBlocks(playState, gameLog, offenseStates = [], defenseStates = []) {
     const battlesToRemove = [];
-    const ballCarrier = playState.activePlayers.find(p => p.isBallCarrier);
+    const ballCarrier = playState.activePlayers.find(
+        p => p.hasBall || p.isBallCarrier
+    );
     const MAX_BLOCK_SEPARATION = 2.5;
 
     playState.blockBattles.forEach((battle, index) => {
