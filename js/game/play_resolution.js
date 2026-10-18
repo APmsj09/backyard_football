@@ -1134,7 +1134,7 @@ export function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey
                     }
                 }
             });
-            if (currentBall.inAir || (currentBall.isLoose && playState.type === 'punt')) {
+            if (currentBall.inAir || currentBall.isLoose) {
                 currentBall.prevX = currentBall.x;
                 currentBall.prevY = currentBall.y;
                 currentBall.prevZ = currentBall.z;

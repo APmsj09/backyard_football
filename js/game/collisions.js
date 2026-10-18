@@ -1248,11 +1248,9 @@ export function handleBallArrival(playState, carrier, playResult, gameLog) {
 
         if (p.isOffense && playState.type === 'pass' && !ball.isLoose && !ball.tipCount && !ball.isLateral) {
             if (p.id !== ball.targetPlayerId) {
-                const targetPlayer = playState.activePlayers.find(t => t.id === ball.targetPlayerId);
-                if (targetPlayer) {
-                    const distToTarget = Math.sqrt((p.x - targetPlayer.x) ** 2 + (p.y - targetPlayer.y) ** 2);
-                    if (distToTarget > 4.0) return false;
-                }
+                // If this is an offensive player who is NOT the intended target, 
+                // they can only catch it if the ball is tipped.
+                return false;
             }
         }
 
