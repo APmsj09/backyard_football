@@ -347,7 +347,49 @@ export function checkTackleCollisions(playState, gameLog) {
             continue;
         }
 
-        if (distance < TACKLE_CONTACT_RANGE) {
+        // Trucking is resolved as a power contest, not as a generic juke.
+        // Only free defenders reach this point; engaged defenders use the
+        // separate arm-tackle handling above.
+        const isTruckAttempt = carrier.action === 'trucking';
+
+        const carrierDrivePower =
+            ((carrier.str || carrier.strength || 50) * 0.65) +
+            ((carrier.tgh || carrier.toughness || 50) * 0.35);
+
+        const defenderStopPower =
+            ((defender.tkl || defender.tackling || 50) * 0.65) +
+            ((defender.str || defender.strength || 50) * 0.35);
+
+        const carrierWeight = carrier.wgt || carrier.weight || 200;
+        const defenderWeight = defender.wgt || defender.weight || 200;
+
+        const carrierSpeed = Math.hypot(
+            carrier.vx || 0,
+            carrier.vy || 0
+        );
+
+        const defenderSpeed = Math.hypot(
+            defender.vx || 0,
+            defender.vy || 0
+        );
+
+        // Positive values favor the runner; negative values favor the tackler.
+        // Strength/technique, weight, and current momentum all contribute.
+        const truckAdvantage = isTruckAttempt
+            ? Math.max(
+                -0.15,
+                Math.min(
+                    0.18,
+                    ((carrierDrivePower - defenderStopPower) * 0.004) +
+                    ((carrierWeight - defenderWeight) * 0.0004) +
+                    ((carrierSpeed - defenderSpeed) * 0.008)
+                )
+            )
+            : 0;
+
+        // A truck has its own contact resolution below. Do not replace it
+        // with a random juke or stiff arm.
+        if (distance < TACKLE_CONTACT_RANGE && !isTruckAttempt) {
             const canPerformMove = (!carrier.moveCooldown || carrier.moveCooldown <= 0) && carrier.action !== 'handoff_setup';
 
             if (canPerformMove) {
@@ -467,6 +509,12 @@ export function checkTackleCollisions(playState, gameLog) {
 
         successChance += (tPower - rPower) * 0.005;
 
+        // A truck makes the runner harder to stop when the power contest
+        // favors them, but a strong tackler can still win the contact.
+        if (isTruckAttempt) {
+            successChance -= truckAdvantage;
+        }
+
         // Broken tackles give defenders a modest advantage on later attempts.
         // Cap the cumulative bonus so a slippery runner isn't automatically tackled
         // simply because several defenders have already missed.
@@ -479,7 +527,9 @@ export function checkTackleCollisions(playState, gameLog) {
         logPlayDebug('TACKLE_CALC', `${defender.name} vs ${carrier.name}`, {
             distance: Number(distance.toFixed(2)),
             successChance: `${Math.round(successChance * 100)}%`,
-            carrierBrokenTackles: carrier.tacklesBrokenThisPlay || 0
+            carrierBrokenTackles: carrier.tacklesBrokenThisPlay || 0,
+            move: isTruckAttempt ? 'trucking' : 'standard',
+            truckAdvantage: Number(truckAdvantage.toFixed(3))
         });
 
         if (Math.random() < successChance) {
@@ -523,12 +573,28 @@ export function checkTackleCollisions(playState, gameLog) {
             );
             applyImpactDisruption(
                 defender,
-                34,
-                (bounceX / bounceDistance) * 1.6,
-                (bounceY / bounceDistance) * 1.6
+                isTruckAttempt ? 42 : 34,
+                (bounceX / bounceDistance) * (isTruckAttempt ? 1.9 : 1.6),
+                (bounceY / bounceDistance) * (isTruckAttempt ? 1.9 : 1.6)
             );
             // PHYSICS: Running *through* a defender transfers a massive chunk of momentum based on weight ratio
-            const speedDrain = Math.max(0.15, Math.min(0.60, (defender.wgt / carrier.wgt) * 0.40));
+            const baseSpeedDrain = Math.max(
+                0.15,
+                Math.min(
+                    0.60,
+                    (defenderWeight / carrierWeight) * 0.40
+                )
+            );
+
+            // A successful power-through loses less momentum when the
+            // carrier wins the truck contest.
+            const speedDrain = isTruckAttempt
+                ? Math.max(
+                    0.12,
+                    Math.min(0.60, baseSpeedDrain - truckAdvantage)
+                )
+                : baseSpeedDrain;
+
             carrier.vx *= (1 - speedDrain);
             carrier.vy *= (1 - speedDrain);
             carrier.moveCooldown = 20; // Locks out immediate jukes
@@ -538,7 +604,13 @@ export function checkTackleCollisions(playState, gameLog) {
                 carrier.rolloutDir = carrier.x > (FIELD_WIDTH / 2) ? -1 : 1;
             }
 
-            if (gameLog) pushGameLog(gameLog, `[Tick ${playState.tick}] 💪 ${carrier.name} runs THROUGH ${defender.name}!`, playState);
+            if (gameLog) {
+                const message = isTruckAttempt
+                    ? `[Tick ${playState.tick}] 💥 ${carrier.name} powers through ${defender.name}'s tackle!`
+                    : `[Tick ${playState.tick}] 💪 ${carrier.name} runs THROUGH ${defender.name}!`;
+
+                pushGameLog(gameLog, message, playState);
+            }
             break;
         }
     }

@@ -1327,7 +1327,8 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                     pt !== null &&
                     pState.y < LOS + 1.0 &&
                     !holeClogged &&
-                    playState.tick < (pState._handoffTick || 18) + 12;
+                    pState.tick < (pState._handoffTick || 18) + 12 &&
+                    pState.action !== 'trucking';
 
                 if (isRunHolePhase) {
                     // 1. Designed run through the open hole
@@ -2284,6 +2285,11 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
 
 export function executeAssignment(pState, assignment, offenseStates, LOS, playState, ballCarrierState) {
     const isBallInAir = playState.ballState.inAir;
+    // Clear stale ball-tracking state before resolving the current assignment.
+    // A reachable interception below can explicitly restore tracking_ball.
+    if (pState.action === 'tracking_ball') {
+        pState.action = assignment || 'idle';
+    }
 
     // Pass the real ballCarrierState so safeties don't provide double-team help while an RB is running with the ball!
     if (pState.role === 'DB' && assignment.includes('zone_deep') && !assignment.includes('blitz')) {
