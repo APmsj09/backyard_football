@@ -474,6 +474,7 @@ export function getSmartCarrierTarget(runner, defenseStates, offenseStates, fiel
     const currentVy = runner.vy || 0;
     const currentSpeed = Math.hypot(currentVx, currentVy);
     const debugEnabled = isDebugMode();
+    let carrierDecisionAction = null;
 
     const visionContext = getPerceptionContext(
         runner,
@@ -498,6 +499,10 @@ export function getSmartCarrierTarget(runner, defenseStates, offenseStates, fiel
         maxLateral = Math.min(maxLateral, 3.0 + visionExpansion);
     }
 
+    const DEFENDER_REACTION_RANGE = 6.5;
+    const DEFENDER_REACTION_RANGE_SQ =
+        DEFENDER_REACTION_RANGE * DEFENDER_REACTION_RANGE;
+
     let nearbyDefenderCount = 0;
     let nearestVisibleDefender = null;
     let nearestVisibleDefenderDistSq = Infinity;
@@ -519,10 +524,24 @@ export function getSmartCarrierTarget(runner, defenseStates, offenseStates, fiel
         const dy = runner.y - defender.y;
         const distanceSq = (dx * dx) + (dy * dy);
 
-        if (distanceSq >= 16.0) continue;
-        if (getPerceptionWeight(visionContext, defender) <= 0) continue;
+        if (distanceSq > DEFENDER_REACTION_RANGE_SQ) continue;
 
-        nearbyDefenderCount++;
+        const perceptionWeight = getPerceptionWeight(
+            visionContext,
+            defender
+        );
+
+        if (perceptionWeight <= 0) continue;
+
+        // Keep traffic density local; a defender farther away does not
+        // automatically count as immediate congestion.
+        if (distanceSq < 16.0) {
+            nearbyDefenderCount++;
+        }
+
+        // Track a defender who is ahead and close enough to affect the
+        // current running lane. Ignore wide defenders for this response.
+        if (Math.abs(dx) > 4.5) continue;
 
         if (distanceSq < nearestVisibleDefenderDistSq) {
             nearestVisibleDefenderDistSq = distanceSq;
@@ -548,14 +567,26 @@ export function getSmartCarrierTarget(runner, defenseStates, offenseStates, fiel
 
     const prevOffset = runner._chosenLaneOffset !== undefined ? runner._chosenLaneOffset : 0;
 
-    // Enforce lane commitment unless an unblocked defender is an immediate tackle threat (< 2.2 yards)
-    const immediateTackleThreat = nearestVisibleDefenderDistSq < (2.2 * 2.2);
-    if (!immediateTackleThreat && runner._laneLockTicks > 0 && runner._lockedLaneX !== undefined) {
+    // Preserve lane commitment unless a visible defender enters the
+    // reaction window. A safety should not need to be within tackle
+    // range before the RB can reconsider his path.
+    const defenderInReactionWindow =
+        nearestVisibleDefenderDistSq <= DEFENDER_REACTION_RANGE_SQ;
+
+    if (
+        !defenderInReactionWindow &&
+        runner._laneLockTicks > 0 &&
+        runner._lockedLaneX !== undefined
+    ) {
         runner._laneLockTicks--;
         bestTargetX = runner._lockedLaneX;
         bestTargetY = runner.y + visionDepth;
         runner._smoothTargetX = bestTargetX;
-        return { x: bestTargetX, y: bestTargetY };
+
+        return {
+            x: bestTargetX,
+            y: bestTargetY
+        };
     }
 
     const evaluatedLanesTracker = debugEnabled ? [] : null;
@@ -805,26 +836,71 @@ export function getSmartCarrierTarget(runner, defenseStates, offenseStates, fiel
 
     const immediateThreat = nearestVisibleDefender;
 
-    if (immediateThreat && getDistance(runner, immediateThreat) < 2.5) {
-        const strengthAdvantage = strength - (immediateThreat.strength || 50);
+    if (
+        immediateThreat &&
+        nearestVisibleDefenderDistSq <= DEFENDER_REACTION_RANGE_SQ
+    ) {
+        const threatDistance = Math.sqrt(nearestVisibleDefenderDistSq);
+        const strengthAdvantage =
+            strength - (immediateThreat.strength || 50);
 
-        if (strengthAdvantage > 10 && inTraffic && bestScore < 50) {
-            runner.action = 'trucking';
-            bestTargetX = immediateThreat.x + (immediateThreat.x > runner.x ? -0.4 : 0.4);
+        // A powerful back can choose to challenge a lone defender once
+        // close; strength alone should not force every back to truck.
+        const shouldTruckOneOnOne =
+            !inTraffic &&
+            threatDistance <= 3.75 &&
+            strengthAdvantage > 10 &&
+            strength >= agility;
+
+        if (
+            strengthAdvantage > 10 &&
+            (
+                (inTraffic && bestScore < 50) ||
+                shouldTruckOneOnOne
+            )
+        ) {
+            carrierDecisionAction = 'trucking';
+
+            bestTargetX =
+                immediateThreat.x +
+                (immediateThreat.x > runner.x ? -0.4 : 0.4);
+
             bestTargetY = immediateThreat.y + 1.5;
             runner.contactReduction = 0.9;
 
             if (debugEnabled && runner._lastLoggedAction !== 'trucking') {
-                logPlayDebug('CARRIER_DECISION', `${runner.name} lowers shoulder to TRUCK`, { threat: immediateThreat.name });
+                logPlayDebug(
+                    'CARRIER_DECISION',
+                    `${runner.name} lowers shoulder to TRUCK`,
+                    { threat: immediateThreat.name }
+                );
+
                 runner._lastLoggedAction = 'trucking';
             }
         } else {
             // Dodge persistence cooldown to prevent 20Hz vibration
-            let dodgeDir = runner._dodgeDir || (runner.x < immediateThreat.x ? -1 : 1);
+            let dodgeDir =
+                runner._dodgeDir ||
+                (runner.x <= immediateThreat.x ? -1 : 1);
+
             if (!runner._dodgeCooldown || runner._dodgeCooldown <= 0) {
-                if ((immediateThreat.vx || 0) < -2.0) dodgeDir = 1;
+                const preferredLaneDirection =
+                    Math.abs(bestTargetX - runner.x) > 0.75
+                        ? Math.sign(bestTargetX - runner.x)
+                        : 0;
+
+                if (preferredLaneDirection !== 0) {
+                    dodgeDir = preferredLaneDirection;
+                } else if ((immediateThreat.vx || 0) < -2.0) {
+                    dodgeDir = 1;
+                } else if ((immediateThreat.vx || 0) > 2.0) {
+                    dodgeDir = -1;
+                } else {
+                    dodgeDir = runner.x <= immediateThreat.x ? -1 : 1;
+                }
+                /*if ((immediateThreat.vx || 0) < -2.0) dodgeDir = 1;
                 else if ((immediateThreat.vx || 0) > 2.0) dodgeDir = -1;
-                else dodgeDir = runner.x < immediateThreat.x ? -1 : 1;
+                else dodgeDir = runner.x < immediateThreat.x ? -1 : 1;*/
 
                 if (runner.x < 4) dodgeDir = 1;
                 if (runner.x > fieldWidth - 4) dodgeDir = -1;
@@ -892,7 +968,11 @@ export function getSmartCarrierTarget(runner, defenseStates, offenseStates, fiel
         }
     }
 
-    return { x: bestTargetX, y: bestTargetY };
+    return {
+        x: bestTargetX,
+        y: bestTargetY,
+        action: carrierDecisionAction
+    };
 }
 export function updateQBDecision(qbState, offenseStates, defenseStates, playState, offensiveAssignments, gameLog) {
     if (!qbState || !qbState.hasBall || playState.ballState.inAir || playState.ballState.throwInitiated) return;

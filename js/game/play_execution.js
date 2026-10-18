@@ -161,15 +161,20 @@ function getPursuitTargetY(pState, carrier, predictedY) {
     }
 
     const separation = pState.y - carrier.y;
+    const distanceToCarrier = getDistance(pState, carrier);
 
-    // If the defender is no longer meaningfully ahead, resume
-    // direct pursuit of the carrier's predicted position.
-    if (separation <= 1.0) {
+    // Once the runner is close, stop holding the downfield landmark.
+    // Close the gap and pursue the carrier's predicted position instead.
+    const PURSUIT_CLOSE_GAP_DISTANCE = 8.0;
+
+    if (
+        separation <= 1.0 ||
+        distanceToCarrier <= PURSUIT_CLOSE_GAP_DISTANCE
+    ) {
         return predictedY;
     }
 
-    // Other defenders preserve downfield leverage rather than
-    // retreating toward the carrier's current position.
+    // At greater distances, preserve downfield leverage.
     return Math.max(pState.y, predictedY);
 }
 
@@ -1378,11 +1383,28 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                     if (pState.role === 'QB' && pState.action === 'qb_scramble') {
                         pState.action = 'run_path'; // DEEPER FIX: Transition to pure runner once past the LOS
                     }
-                    const smartTarget = getSmartCarrierTarget(pState, defenseStates, offenseStates, FIELD_WIDTH, playState);
+                    const smartTarget = getSmartCarrierTarget(
+                        pState,
+                        defenseStates,
+                        offenseStates,
+                        FIELD_WIDTH,
+                        playState
+                    );
+
                     targetX = smartTarget.x;
                     targetY = smartTarget.y;
-                    pState.action = 'run_path';
-                    setLaneIntent(pState, targetX, targetY, pState._laneLockTicks || 10);
+
+                    pState.action =
+                        smartTarget.action === 'trucking'
+                            ? 'trucking'
+                            : 'run_path';
+
+                    setLaneIntent(
+                        pState,
+                        targetX,
+                        targetY,
+                        pState._laneLockTicks || 10
+                    );
 
                     // Restored: Crowd slowdown when fighting through traffic
                     const defendersNear = defenseStates.filter(d => getDistance(pState, d) < 2.5).length;
