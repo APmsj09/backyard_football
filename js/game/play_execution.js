@@ -15,10 +15,125 @@ import { pushGameLog } from './collisions.js';
 import { initPlayTelemetry, finalizePlayTelemetry, logPlayDebug } from './telemetry.js';
 import { initMovementIntent, setPointIntent, setHoldIntent, setTrackIntent, setLaneIntent, setRouteIntent, resolveMovementIntent } from './movement_intent.js';
 import { calculateSchemeClash } from './staff.js';
+import {
+    getPlayerBaseSpeedYPS,
+    getPlayerAccelerationYPS2
+} from './movement_profile.js';
 
 const FIELD_WIDTH = 53.3;
 const FIELD_LENGTH = 120;
 const CENTER_X = FIELD_WIDTH / 2;
+
+const PASS_INTERCEPT_STEPS = 12;
+const PASS_INTERCEPT_SPEED_FACTOR = 0.82;
+const PASS_INTERCEPT_MARGIN = 0.85;
+
+function getReachablePassInterceptionPoint(pState, ballState) {
+    if (
+        !pState ||
+        !ballState ||
+        !Number.isFinite(pState.x) ||
+        !Number.isFinite(pState.y) ||
+        !Number.isFinite(ballState.x) ||
+        !Number.isFinite(ballState.y) ||
+        !Number.isFinite(ballState.targetX) ||
+        !Number.isFinite(ballState.targetY)
+    ) {
+        return null;
+    }
+
+    const pathDX = ballState.targetX - ballState.x;
+    const pathDY = ballState.targetY - ballState.y;
+    const remainingDistance = Math.hypot(pathDX, pathDY);
+
+    const ballVX = Number.isFinite(ballState.vx) ? ballState.vx : 0;
+    const ballVY = Number.isFinite(ballState.vy) ? ballState.vy : 0;
+    const ballSpeedYPS = Math.hypot(ballVX, ballVY);
+
+    if (remainingDistance <= 0.25 || ballSpeedYPS <= 1.0) {
+        return null;
+    }
+
+    const remainingFlightSeconds = remainingDistance / ballSpeedYPS;
+
+    const fatigueMod = pState.fatigueModifier || 1.0;
+
+    const maxSpeedYPS =
+        getPlayerBaseSpeedYPS(pState) * fatigueMod;
+
+    let accelerationYPS2 =
+        getPlayerAccelerationYPS2(pState) * fatigueMod;
+
+    // Match the movement engine's balance-recovery penalty.
+    if (pState.moveCooldown > 0) {
+        accelerationYPS2 *= 0.85;
+    }
+
+    if (
+        !Number.isFinite(maxSpeedYPS) ||
+        maxSpeedYPS <= 0 ||
+        !Number.isFinite(accelerationYPS2) ||
+        accelerationYPS2 <= 0
+    ) {
+        return null;
+    }
+
+    const playerVX = Number.isFinite(pState.vx) ? pState.vx : 0;
+    const playerVY = Number.isFinite(pState.vy) ? pState.vy : 0;
+
+    // Test points in chronological order along the remaining pass trajectory.
+    // The defender can break only if they can plausibly arrive before the ball.
+    for (let step = 0; step <= PASS_INTERCEPT_STEPS; step++) {
+        const fraction = step / PASS_INTERCEPT_STEPS;
+
+        const pointX = ballState.x + (pathDX * fraction);
+        const pointY = ballState.y + (pathDY * fraction);
+        const timeToPoint = remainingFlightSeconds * fraction;
+
+        const toPointDX = pointX - pState.x;
+        const toPointDY = pointY - pState.y;
+        const distanceToPoint = Math.hypot(toPointDX, toPointDY);
+
+        const directionX = distanceToPoint > 0.001
+            ? toPointDX / distanceToPoint
+            : 0;
+
+        const directionY = distanceToPoint > 0.001
+            ? toPointDY / distanceToPoint
+            : 0;
+
+        // Existing momentum helps if the defender is already moving toward
+        // the interception point, but movement away from it is not rewarded.
+        const velocityTowardPoint = Math.max(
+            0,
+            (playerVX * directionX) + (playerVY * directionY)
+        );
+
+        const accelerationReach =
+            (velocityTowardPoint * timeToPoint) +
+            (0.5 * accelerationYPS2 * timeToPoint * timeToPoint);
+
+        // Reduce the theoretical top-speed distance to account for turning,
+        // acceleration, and the fact that the defender is reacting mid-play.
+        const topSpeedReach =
+            maxSpeedYPS *
+            timeToPoint *
+            PASS_INTERCEPT_SPEED_FACTOR;
+
+        const reachableDistance =
+            Math.min(accelerationReach, topSpeedReach) +
+            PASS_INTERCEPT_MARGIN;
+
+        if (distanceToPoint <= reachableDistance) {
+            return {
+                x: pointX,
+                y: pointY
+            };
+        }
+    }
+
+    return null;
+}
 
 function getPursuitTargetY(pState, carrier, predictedY) {
     if (
@@ -2073,36 +2188,60 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                 const flightTime = playState.tick - (playState.ballState.throwTick || 0);
                 const reactionDelay = Math.max(2, 12 - Math.floor(iq / 10));
 
-                // DEEPER FIX: Let deep safeties process elite zone baiting and double-coverage help
-                // in executeAssignment instead of falling back to generic ball tracking immediately.
-                const isDeepZoneDB = pState.role === 'DB' && pState.assignment?.includes('zone_deep');
+                // Let deep safeties process coverage assignments in executeAssignment.
+                const isDeepZoneDB =
+                    pState.role === 'DB' &&
+                    pState.assignment?.includes('zone_deep');
 
                 if (flightTime > reactionDelay && !isDeepZoneDB) {
                     if (ballPos.isThrowAway) {
+                        setHoldIntent(pState, pState.x, pState.y);
                         pState.action = 'idle';
-                        pState.targetX = pState.x; pState.targetY = pState.y;
                     } else {
-                        const targetRec = offenseStates.find(o => o.id === ballPos.targetPlayerId);
-                        let targetX = ballPos.targetX;
-                        let targetY = ballPos.targetY;
+                        const interceptionPoint =
+                            getReachablePassInterceptionPoint(pState, ballPos);
 
-                        if (targetRec && iq > 60) {
-                            targetX = (ballPos.targetX * 0.7) + (targetRec.x * 0.3);
-                            targetY = (ballPos.targetY * 0.7) + (targetRec.y * 0.3);
+                        if (interceptionPoint) {
+                            setPointIntent(
+                                pState,
+                                interceptionPoint.x,
+                                interceptionPoint.y,
+                                0.5
+                            );
 
-                            if (pState.slot === 'DB3' || pState.role === 'S') {
-                                targetY += 1.5;
-                            }
+                            pState.action = 'tracking_ball';
+                        } else {
+                            // The pass is not realistically reachable.
+                            // Preserve the player's existing assignment.
+                            executeAssignment(
+                                pState,
+                                assignment,
+                                offenseStates,
+                                LOS,
+                                playState,
+                                ballCarrierState
+                            );
                         }
-
-                        setPointIntent(pState, targetX, targetY, 0.5);
-                        pState.action = 'tracking_ball';
                     }
                 } else {
-                    executeAssignment(pState, assignment, offenseStates, LOS, playState, ballCarrierState);
+                    executeAssignment(
+                        pState,
+                        assignment,
+                        offenseStates,
+                        LOS,
+                        playState,
+                        ballCarrierState
+                    );
                 }
             } else {
-                executeAssignment(pState, assignment, offenseStates, LOS, playState, ballCarrierState);
+                executeAssignment(
+                    pState,
+                    assignment,
+                    offenseStates,
+                    LOS,
+                    playState,
+                    ballCarrierState
+                );
             }
         }
     });
@@ -2280,6 +2419,22 @@ export function executeAssignment(pState, assignment, offenseStates, LOS, playSt
                 const insideLeverageX = primaryThreat.x < CENTER_X ? 1.0 : -1.0;
 
                 // --- ELITE DB BAITING (Trap Coverage) ---
+                const flightTime =
+                    playState.tick - (playState.ballState.throwTick || 0);
+
+                const reactionDelay =
+                    Math.max(2, 12 - Math.floor(iq / 10));
+
+                const interceptionPoint =
+                    isBallInAir &&
+                    playState.ballState.targetPlayerId === primaryThreat.id &&
+                    flightTime > reactionDelay
+                        ? getReachablePassInterceptionPoint(
+                            pState,
+                            playState.ballState
+                        )
+                        : null;
+
                 if (
                     iq > 75 &&
                     defenderProfile.decisionQuality > 72 &&
@@ -2287,16 +2442,17 @@ export function executeAssignment(pState, assignment, offenseStates, LOS, playSt
                     !isBallInAir &&
                     playState.tick > 25
                 ) {
-                    // Elite safety intentionally "sags" 3 yards shallow and 2 yards inside to make the WR look open
+                    // Elite safety intentionally sags to bait the throw.
                     pState.targetX = primaryThreat.x + (insideLeverageX * 2.5);
                     pState.targetY = Math.max(zoneCenter.y, primaryThreat.y + 1.0);
-                } else if (isBallInAir && playState.ballState.targetPlayerId === primaryThreat.id) {
-                    // Ball is thrown! Elite safety gets an explosive break on the ball
-                    pState.targetX = playState.ballState.targetX;
-                    pState.targetY = playState.ballState.targetY;
-                    pState.contactReduction = 1.3; // Break on the ball hard!
+                } else if (interceptionPoint) {
+                    // Break on the ball only when a physical contest is plausible.
+                    pState.targetX = interceptionPoint.x;
+                    pState.targetY = interceptionPoint.y;
+                    pState.action = 'tracking_ball';
+                    pState.contactReduction = 1.3;
                 } else {
-                    // Standard deep coverage (stay on top)
+                    // No reachable interception: maintain deep coverage leverage.
                     pState.targetX = primaryThreat.x + insideLeverageX;
                     pState.targetY = Math.max(zoneCenter.y, primaryThreat.y + 3.5);
                 }
