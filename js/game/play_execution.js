@@ -420,12 +420,16 @@ export function setupInitialPlayerStates(playState, offense, defense, play, assi
                         } else {
                             targetY = startY + 5;
                         }
+                    } else if (assignment === 'CheckRelease') {
+                        action = 'check_release';
+                        routePath = calculateRoutePath(assignment, startX, startY);
+                        targetX = startX;
+                        targetY = startY;
                     } else if (routeTree[assignment]) {
                         action = 'run_route';
                         routePath = calculateRoutePath(assignment, startX, startY);
 
                         // DEEPER FIX: Red Zone Route Capping
-                        // Truncate waypoints so receivers never run through the back of the end zone (y > 118.0)
                         if (routePath && routePath.length) {
                             routePath = routePath.map(pt => ({
                                 x: Math.max(1.5, Math.min(51.8, pt.x)),
@@ -755,7 +759,8 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
         if (d.isBlocked || d.isEngaged || d.stunnedTicks > 0) return false;
         if (d.assignment?.includes('rush') || d.assignment?.includes('blitz')) return true;
         if (d.role === 'DL') return true;
-        if (d.y < LOS + 3.0 && Math.abs(d.x - CENTER_X) < 10) return true;
+        // FIX: Proximity check only applies on RUN plays. On pass plays, coverage LBs are NOT blocking targets!
+        if (playType === 'run' && d.y < LOS + 3.0 && Math.abs(d.x - CENTER_X) < 10) return true;
         return false;
     });
 
@@ -1475,10 +1480,71 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                     setPointIntent(pState, pState.targetX, pState.targetY, 0.35);
                     break;
 
+                
+
+                case 'check_release': {
+                    const qb = offenseStates.find(p => p.slot.startsWith('QB'));
+                    const qbY = qb ? qb.y : pState.initialY;
+
+                    // 1. SCAN FOR BLITZERS: Check for unblocked threats penetrating the pocket
+                    const unblockedThreats = defenseStates.filter(d =>
+                        !d.isBlocked &&
+                        !d.isEngaged &&
+                        d.stunnedTicks === 0 &&
+                        (d.assignment?.includes('rush') || d.assignment?.includes('blitz') || d.role === 'DL' || d.role === 'LB') &&
+                        d.y < LOS + 2.0 && // Approaching or past line of scrimmage
+                        getDistance(pState, d) < 4.2
+                    );
+
+                    const incomingBlitzer = unblockedThreats.sort((a, b) => getDistance(pState, a) - getDistance(pState, b))[0];
+
+                    if (incomingBlitzer) {
+                        // Found a blitzer! Commit to pass protection
+                        pState.action = 'pass_block';
+                        pState.targetX = incomingBlitzer.x;
+                        pState.targetY = incomingBlitzer.y - 0.4;
+                        setPointIntent(pState, pState.targetX, pState.targetY, 0.45);
+
+                        // If close enough, physically lock into block battle
+                        if (getDistance(pState, incomingBlitzer) < 1.8 && !incomingBlitzer.isEngaged) {
+                            pState.isEngaged = true;
+                            pState.engagedWith = incomingBlitzer;
+                            incomingBlitzer.isEngaged = true;
+                            incomingBlitzer.isBlocked = true;
+                            incomingBlitzer.blockedBy = pState;
+
+                            playState.blockBattles.push({
+                                blocker: pState,
+                                defender: incomingBlitzer,
+                                status: 'ongoing',
+                                battleScore: ((pState.str || 50) - (incomingBlitzer.str || 50)) / 10,
+                                startTick: playState.tick
+                            });
+                        }
+                        break;
+                    }
+
+                    // 2. RELEASE WINDOW: If scan time has expired (~1s) and pocket is clean, release into route
+                    if (playState.tick >= 25) {
+                        pState.action = 'run_route';
+                        if (pState.routePath && pState.routePath.length > 0) {
+                            const pt = pState.routePath[pState.currentPathIndex || 0];
+                            setRouteIntent(pState, pt.x, pt.y, 0.6);
+                        }
+                        break;
+                    }
+
+                    // 3. HOLD STATION: Stay anchored in pocket posture protecting the QB's blindside
+                    const holdY = Math.max(qbY + 0.8, pState.initialY);
+                    setHoldIntent(pState, pState.initialX, holdY);
+                    break;
+                }
+
                 case 'pass_block':
                 case 'run_block':
                     setPointIntent(pState, pState.targetX, pState.targetY, 0.35);
                     break;
+
 
                 case 'run_path':
                 case 'run_fake': {
@@ -2193,6 +2259,14 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                         predY = Math.max(chaseTarget.y + 0.5, predY);
                     }
 
+                    // FIX: Prevent the "Sideline Conga Line". If a runner is breaking up the sideline,
+                    // pursuers downfield cut off the boundary lane ahead of him instead of trailing behind his heels.
+                    const isNearBoundary = chaseTarget.x < 5.0 || chaseTarget.x > (FIELD_WIDTH - 5.0);
+                    if (isNearBoundary && pState.y > chaseTarget.y + 2.0) {
+                        const boundaryPinX = chaseTarget.x < 5.0 ? 1.5 : (FIELD_WIDTH - 1.5);
+                        predX = (predX * 0.35) + (boundaryPinX * 0.65);
+                    }
+
                     if (dirConfidence > 0.45 && !isRunReadAtMesh) {
                         const cheatAmount =
                             3.0 *
@@ -2387,6 +2461,15 @@ export function executeAssignment(pState, assignment, offenseStates, LOS, playSt
 
             let perfectX = targetRec.x + cushionX;
             let perfectY = targetRec.y + cushionY;
+
+            // FIX: If covering a backfield RB, hold leverage at the line of scrimmage (LOS + 1.2y) 
+            // instead of diving into the interior pocket where linemen are blocking.
+            if (targetSlot.startsWith('RB') && targetRec.y < LOS) {
+                perfectY = Math.max(LOS + 1.2, perfectY);
+                // Maintain outside leverage to meet the RB at the sideline
+                const outsideDir = targetRec.x < CENTER_X ? -1.5 : 1.5;
+                perfectX += outsideDir;
+            }
 
             const wrAgility = targetRec.agility || 50;
             const dbAgility = pState.agility || 50;

@@ -130,15 +130,22 @@ export function checkBlockCollisions(playState, gameLog = null) {
 
         if (!isBlockingDuty) return;
 
+        // FIX: In pass pro, linemen only block rushers/blitzers. 
+        // Do NOT let OL block defenders who are running in man/zone coverage!
+        const isPassBlock = blocker.action === 'pass_block';
+        const eligibleDefenders = isPassBlock
+            ? defenders.filter(d => d.role === 'DL' || d.assignment?.includes('rush') || d.assignment?.includes('blitz'))
+            : defenders;
+
         let target = null;
-        const imminentThreat = defenders
+        const imminentThreat = eligibleDefenders
             .filter(d => getDistance(blocker, d) < 1.8 && d.y > blocker.y - 1.5)
             .sort((a, b) => getDistance(blocker, a) - getDistance(blocker, b))[0];
 
         if (imminentThreat && !imminentThreat.isEngaged && !imminentThreat.isBlocked) {
             target = imminentThreat;
         } else if (blocker.dynamicTargetId) {
-            target = defenders.find(d => d.id === blocker.dynamicTargetId);
+            target = eligibleDefenders.find(d => d.id === blocker.dynamicTargetId);
             if (!target || target.isEngaged || getDistance(blocker, target) > 3.0) {
                 target = null;
             }
@@ -149,12 +156,16 @@ export function checkBlockCollisions(playState, gameLog = null) {
             const targetStr = target.str || target.strength || 50;
             const targetSpd = target.spd || target.speed || 50;
             const blockerAgi = blocker.agi || blocker.agility || 50;
-            const isPassRush = target.assignment?.includes('rush') || target.assignment?.includes('blitz');
+
+            // FIX: Pass-rush edge burns ONLY apply in the pocket before the ball is thrown
+            const isPassRush = (target.assignment?.includes('rush') || target.assignment?.includes('blitz')) &&
+                playState.type === 'pass' &&
+                !playState.ballState?.throwTick &&
+                target.y < playState.lineOfScrimmage + 3.0;
 
             // 1. Speed Edge Dip: Fast rusher blows by the tackle on the outside arc
             const isEdgeAlignment = Math.abs(target.initialX - blocker.initialX) > 1.4;
-            // FIX: Ensure this is actually a pass play!
-            if (playState.type === 'pass' && isPassRush && isEdgeAlignment && targetSpd > blockerAgi + 14 && Math.random() < 0.28) {
+            if (isPassRush && isEdgeAlignment && targetSpd > blockerAgi + 14 && Math.random() < 0.28) {
                 const awayX = blocker.x - target.x;
                 const awayY = blocker.y - target.y;
                 const awayDist = Math.max(0.1, Math.hypot(awayX, awayY));

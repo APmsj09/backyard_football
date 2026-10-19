@@ -84,38 +84,42 @@ export const ZONES = {
 };
 
 // --- ENHANCED ROUTE TREE ---
-// Paths are relative to the player's starting [x, y].
 export const routeTree = {
     // --- Short / Quick Routes (0-5 yards) ---
     'Flat': { path: [{ x: 3, y: 1 }, { x: 8, y: 1.5 }] },
-    'Slant': { path: [{ x: 0, y: 1.5 }, { x: -6, y: 6 }] }, // Stem up, hard cut in
+    'Slant': { path: [{ x: 0, y: 2.0 }, { x: -6, y: 6.5 }] }, 
     'QuickOut': { path: [{ x: 0, y: 3 }, { x: 5, y: 3.5 }] },
-    'Hitch': { path: [{ x: 0, y: 6 }, { x: 1, y: 5 }] }, // Run 6, turn back to 5
-    'Drag': { path: [{ x: 0, y: 1.5 }, { x: -10, y: 2.5 }, { x: -20, y: 3.5 }] },
+    'Hitch': { path: [{ x: 0, y: 6 }, { x: 0.5, y: 5 }] }, 
+    'Drag': { path: [{ x: 0, y: 4.0 }, { x: -8, y: 4.5 }, { x: -20, y: 5.0 }] },
+    'Drag_Right': { path: [{ x: 0, y: 4.0 }, { x: 8, y: 4.5 }, { x: 20, y: 5.0 }], mirror: false },
+    'Drag_Left': { path: [{ x: 0, y: 4.0 }, { x: -8, y: 4.5 }, { x: -20, y: 5.0 }], mirror: false },
+    'Deep_Over': { path: [{ x: 0, y: 7.0 }, { x: -6, y: 11.0 }, { x: -18, y: 13.0 }] },
+    'Y_Cross': { path: [{ x: 0, y: 4.5 }, { x: 5, y: 8.0 }, { x: 16, y: 12.0 }] },
+
     'Whip': { path: [{ x: 0, y: 4 }, { x: -2, y: 4 }, { x: 4, y: 4 }] },
     'Bubble': { path: [{ x: 4, y: -1 }, { x: 8, y: 0 }] },
-    'Jet_Motion': { path: [{ x: 12, y: -1 }] }, // Fast motion across formation
+    'Jet_Motion': { path: [{ x: 12, y: -1 }] },
 
     // --- Medium Routes (8-15 yards) ---
     'Out': { path: [{ x: 0, y: 10 }, { x: 8, y: 10 }] },
     'In': { path: [{ x: 0, y: 10 }, { x: -8, y: 10 }] },
-    'Dig': { path: [{ x: 0, y: 12 }, { x: -10, y: 12 }] }, // Deeper square in
-    'Curl': { path: [{ x: 0, y: 12 }, { x: 2, y: 12 }, { x: 2, y: 10 }] },
-    'Comeback': { path: [{ x: 0, y: 15 }, { x: 2, y: 15.5 }, { x: 6, y: 12 }] },
-    'Corner': { path: [{ x: 0, y: 10 }, { x: -1, y: 12 }, { x: 10, y: 22 }] }, // Stem, fake in, break out
-    'Post': { path: [{ x: 0, y: 10 }, { x: 1, y: 12 }, { x: -10, y: 22 }] },   // Stem, fake out, break in
+    'Dig': { path: [{ x: 0, y: 11 }, { x: -10, y: 11 }] }, 
+    'Curl': { path: [{ x: 0, y: 11 }, { x: 1.5, y: 11 }, { x: 1.5, y: 9.5 }] },
+    'Comeback': { path: [{ x: 0, y: 14 }, { x: 1.5, y: 14.5 }, { x: 5, y: 11.5 }] },
+    'Corner': { path: [{ x: 0, y: 10 }, { x: -1, y: 11.5 }, { x: 10, y: 22 }] }, 
+    'Post': { path: [{ x: 0, y: 10 }, { x: 1, y: 11.5 }, { x: -10, y: 22 }] },   
 
     // --- Deep Routes (20+ yards) ---
-    'Fly': { path: [{ x: 0, y: 10 }, { x: 0.5, y: 20 }, { x: 0, y: 40 }] },   // Slight weave to shake press
+    'Fly': { path: [{ x: 0, y: 10 }, { x: 0.5, y: 20 }, { x: 0, y: 40 }] },   
     'Seam': { path: [{ x: 0, y: 40 }] },
     'Fade': { path: [{ x: 1, y: 10 }, { x: 3, y: 35 }] },
-    'PostCorner': { path: [{ x: 0, y: 12 }, { x: -4, y: 16 }, { x: 8, y: 25 }] }, // Double move
+    'PostCorner': { path: [{ x: 0, y: 12 }, { x: -3, y: 15 }, { x: 8, y: 25 }] }, 
     'Sluggo': { path: [{ x: -1, y: 2 }, { x: -3, y: 5 }, { x: -3, y: 25 }] },
 
     // --- Receiver Screen Specific ---
-    'WR_Screen_Catch': { path: [{ x: -2, y: -1 }, { x: 2, y: 0 }] }, // Step back/lateral to catch
-    'WR_Screen_Lead': { path: [{ x: 0, y: 1 }, { x: 3, y: 2 }] },   // Drive defender back then seal
-    'Tunnel_Screen_Catch': { path: [{ x: 5, y: -1 }, { x: 2, y: 1 }] }, // Run inside toward the OL for a wall
+    'WR_Screen_Catch': { path: [{ x: -2, y: -1 }, { x: 2, y: 0 }] }, 
+    'WR_Screen_Lead': { path: [{ x: 0, y: 1 }, { x: 3, y: 2.5 }] },   
+    'Tunnel_Screen_Catch': { path: [{ x: 5, y: -1 }, { x: 2, y: 1 }] }, 
 
     // --- Advanced Double Moves ---
     'Out_And_Up': { path: [{ x: 0, y: 5 }, { x: 6, y: 5 }, { x: 6, y: 30 }] },
@@ -124,43 +128,60 @@ export const routeTree = {
     // --- Passing Concept Routes ---
     'Scissors_Corner': { path: [{ x: 0, y: 8 }, { x: 10, y: 20 }] },
     'Scissors_Post': { path: [{ x: 0, y: 12 }, { x: -8, y: 30 }] },
-    'Mesh_Right': { path: [{ x: 3, y: 3 }, { x: 15, y: 4 }], mirror: false },
-    'Mesh_Left': { path: [{ x: -3, y: 3 }, { x: -15, y: 4 }], mirror: false },
+    // FIX: Raised mesh intersection from 3.0y -> 4.2y to clear engaged pass rushers
+    'Mesh_Right': { path: [{ x: 1, y: 3.8 }, { x: 6, y: 4.4 }, { x: 16, y: 4.8 }], mirror: false },
+    'Mesh_Left': { path: [{ x: -1, y: 3.8 }, { x: -6, y: 4.4 }, { x: -16, y: 4.8 }], mirror: false },
     'Flood_Deep': { path: [{ x: 0, y: 10 }, { x: 10, y: 25 }] },
-    'Flood_Out': { path: [{ x: 0, y: 12 }, { x: 10, y: 12 }] },
+    'Flood_Out': { path: [{ x: 0, y: 11 }, { x: 8, y: 11 }] },
 
     // --- Running Back Pass Routes ---
     'Wheel': { path: [{ x: 4, y: 1 }, { x: 6, y: 8 }, { x: 6, y: 25 }] },
     'Angle': { path: [{ x: 3, y: 2 }, { x: -2, y: 6 }] },
     'Screen': { path: [{ x: -2, y: -1 }, { x: -4, y: -0.5 }] },
-    'Slip_Screen': { path: [{ x: 0, y: 2 }, { x: 4, y: 0 }] }, // Fake block, slip out
+    'Slip_Screen': { path: [{ x: 0, y: 2 }, { x: 4, y: 0 }] }, 
     'CheckRelease': { path: [{ x: 0, y: 1 }, { x: 2, y: 1 }, { x: 3, y: 4 }] },
-    'Texas': { path: [{ x: 3, y: 1 }, { x: 5, y: 4 }, { x: -3, y: 9 }] }, // RB angle route
+    'Texas': { path: [{ x: 3, y: 1 }, { x: 5, y: 4 }, { x: -3, y: 9 }] },
+
+    // --- Fullback (RB2) Specific Pass & Leak Routes ---
+    'FB_Flat': { path: [{ x: 3, y: 0.5 }, { x: 7, y: 2.0 }] },
+    'FB_Flat_Left': { path: [{ x: -3, y: 0.5 }, { x: -7, y: 2.0 }], mirror: false },
+    'FB_Wheel': { path: [{ x: 3.5, y: 0.5 }, { x: 6, y: 4.0 }, { x: 6, y: 22.0 }] },
+    'FB_Leak': { path: [{ x: -2, y: 1.0 }, { x: -5, y: 2.0 }, { x: -6, y: 10.0 }] },
 
     // --- RB Run Designs (Initial Paths) ---
     'run_dive': { path: [{ x: 0, y: 2 }, { x: 0, y: 5 }] },
     'run_iso_l': { path: [{ x: -1.5, y: 1 }, { x: -1.5, y: 5 }], mirror: false },
     'run_iso_r': { path: [{ x: 1.5, y: 1 }, { x: 1.5, y: 5 }], mirror: false },
+    'run_power_o_r': { path: [{ x: 1.0, y: 0.8 }, { x: 3.2, y: 4.5 }], mirror: false },
+    'run_power_o_l': { path: [{ x: -1.0, y: 0.8 }, { x: -3.2, y: 4.5 }], mirror: false },
     'run_stretch_r': { path: [{ x: 6, y: 0.5 }, { x: 10, y: 4 }], mirror: false },
     'run_stretch_l': { path: [{ x: -6, y: 0.5 }, { x: -10, y: 4 }], mirror: false },
     'run_counter_r': { path: [{ x: -1.5, y: 0.5 }, { x: 1.5, y: 2 }, { x: 5, y: 5 }], mirror: false },
     'run_counter_l': { path: [{ x: 1.5, y: 0.5 }, { x: -1.5, y: 2 }, { x: -5, y: 5 }], mirror: false },
     'run_toss_r': { path: [{ x: 6, y: 0.5 }, { x: 12, y: 4 }], mirror: false },
     'run_toss_l': { path: [{ x: -6, y: 0.5 }, { x: -12, y: 4 }], mirror: false },
+    'run_fb_dive': { path: [{ x: 0, y: 1.5 }, { x: 0, y: 4.0 }] },
+    'run_fb_trap': { path: [{ x: 0.8, y: 1.0 }, { x: 1.2, y: 4.5 }], mirror: false },
+    'run_wham': { path: [{ x: 0.4, y: 1.0 }, { x: 0.4, y: 4.5 }], mirror: false },
 
-    // --- ADVANCED BLOCKING ROUTES ---
-    'run_block': { path: [{ x: 0, y: 0 }] }, // Stationary target seeking
+    // --- FULLBACK LEAD BLOCKING ROUTES ---
+    'run_block': { path: [{ x: 0, y: 0 }] }, 
     'pass_block': { path: [{ x: 0, y: -1.0 }] },
+    'lead_iso_r': { path: [{ x: 1.5, y: 1.5 }, { x: 2.0, y: 4.5 }] },
+    'lead_iso_l': { path: [{ x: -1.5, y: 1.5 }, { x: -2.0, y: 4.5 }] },
+    'lead_right': { path: [{ x: 3, y: 1 }, { x: 4.5, y: 4 }] },
+    'lead_left': { path: [{ x: -3, y: 1 }, { x: -4.5, y: 4 }] },
+    'lead_right_wide': { path: [{ x: 5, y: 0.8 }, { x: 8, y: 4 }] },
+    'lead_left_wide': { path: [{ x: -5, y: 0.8 }, { x: -8, y: 4 }] },
+    'lead_wedge': { path: [{ x: 0, y: 1.0 }, { x: 0, y: 3.5 }] },
     'pull_right': { path: [{ x: -0.5, y: -1.0 }, { x: 4, y: -0.5 }, { x: 5, y: 3 }], mirror: false },
     'pull_left': { path: [{ x: 0.5, y: -1.0 }, { x: -4, y: -0.5 }, { x: -5, y: 3 }], mirror: false },
     'pull_right_wide': { path: [{ x: -0.5, y: -1.0 }, { x: 6, y: -0.5 }, { x: 7, y: 4 }], mirror: false },
     'pull_left_wide': { path: [{ x: 0.5, y: -1.0 }, { x: -6, y: -0.5 }, { x: -7, y: 4 }], mirror: false },
-    'lead_right': { path: [{ x: 3, y: 1 }, { x: 4, y: 4 }] }, // FB leading off tackle
-    'lead_left': { path: [{ x: -3, y: 1 }, { x: -4, y: 4 }] },
-    'screen_block': { path: [{ x: 0, y: -1 }, { x: -5, y: -0.5 }, { x: -8, y: 5 }] }, // Let DL past, set up wall
-    'Screen_Wait': { path: [{ x: 0, y: -1 }, { x: 4, y: -1 }, { x: 5, y: 1 }] }, // Step back, drift wide, wait
-    'Wall_Alley_Left': { path: [{ x: -2, y: -1 }, { x: -8, y: 1 }, { x: -10, y: 5 }] }, // Leak, then set alley
-    'Wall_Alley_Right': { path: [{ x: 2, y: -1 }, { x: 8, y: 1 }, { x: 10, y: 5 }] },
+    'screen_block': { path: [{ x: 0, y: -1 }, { x: -5, y: -0.5 }, { x: -8, y: 5 }] },
+    'Screen_Wait': { path: [{ x: 0, y: -1 }, { x: 4, y: -1 }, { x: 5, y: 1 }] },
+    'Wall_Alley_Left': { path: [{ x: -2, y: -1 }, { x: -8, y: 1 }, { x: -10, y: 5 }] },
+    'Wall_Alley_Right': { path: [{ x: 2, y: -1 }, { x: 8, y: 1 }, { x: 10, y: 5 }] }
 };
 
 // --- OFFENSIVE FORMATIONS (Corrected 8-Man Alignments) ---
@@ -376,12 +397,13 @@ export const offenseFormations = {
     }
 };
 
-// --- OFFENSIVE PLAYBOOK (8-Man Optimized) ---
+// --- EXPANDED OFFENSIVE PLAYBOOK ---
 export const offensivePlaybook = {
-    // ===================================
-    // --- RUNNING CONCEPTS
-    // ===================================
+    // ==========================================================
+    // 1. UNIVERSAL STAPLES (Any Formation)
+    // ==========================================================
     'Uni_InsideZone': {
+        name: 'Inside Zone Split',
         type: 'run', tags: ['run', 'inside'],
         assignments: {
             'QB': 'qb_setup', 'RB': 'run_dive', 'OL': 'run_block',
@@ -389,13 +411,23 @@ export const offensivePlaybook = {
         }
     },
     'Uni_StretchRight': {
+        name: 'Outside Zone Stretch Right',
         type: 'run', tags: ['run', 'outside'],
         assignments: {
             'QB': 'qb_setup', 'RB': 'run_stretch_r', 'OL': 'run_block',
             'X': 'run_block', 'Z': 'run_block', 'Y': 'run_block', 'H': 'run_block'
         }
     },
+    'Uni_StretchLeft': {
+        name: 'Outside Zone Stretch Left',
+        type: 'run', tags: ['run', 'outside'],
+        assignments: {
+            'QB': 'qb_setup', 'RB': 'run_stretch_l', 'OL': 'run_block',
+            'X': 'run_block', 'Z': 'run_block', 'Y': 'run_block', 'H': 'run_block'
+        }
+    },
     'Uni_Counter_Trap': {
+        name: 'Counter Guard Trap',
         type: 'run', tags: ['run', 'counter', 'misdirection'],
         assignments: {
             'QB': 'qb_setup', 'RB': 'run_counter_r',
@@ -403,171 +435,55 @@ export const offensivePlaybook = {
             'Y': 'run_block', 'X': 'run_block', 'Z': 'run_block', 'H': 'run_block'
         }
     },
-    'Uni_PowerLead': {
-        type: 'run', tags: ['run', 'inside', 'power'],
+    'Uni_QuickSlants': {
+        name: 'Quick Slants Rhythm',
+        type: 'pass', tags: ['pass', 'quick', 'short'],
+        // Reads are the slants; RB is only a late emergency checkdown
+        readProgression: ['X', 'Z', 'H', 'Y', 'RB'],
         assignments: {
-            'QB': 'qb_setup', 'RB': 'run_iso_r', 'RB2': 'lead_right',
-            'OL': 'run_block', 'Y': 'run_block', 'X': 'run_block', 'Z': 'run_block'
-        }
-    },
-    'Uni_JetSweep': {
-        type: 'run', tags: ['run', 'outside', 'speed'],
-        assignments: {
-            'QB': 'qb_setup', 'RB': 'run_block', 'H': 'run_stretch_l',
-            'OL': 'run_block', 'X': 'run_block', 'Z': 'run_block', 'Y': 'pull_left'
-        }
-    },
-
-    // --- FORMATION-TAILORED POWER & HEAVY CONCEPTS ---
-    'Power_FB_Dive': {
-        name: 'Fullback Belly Dive',
-        type: 'run', tags: ['run', 'inside', 'power'],
-        compatibleFormations: ['Power', 'Jumbo'],
-        assignments: {
-            'QB': 'qb_setup', 'RB2': 'run_dive', 'RB': 'run_stretch_r',
-            'OL': 'run_block', 'Y': 'run_block', 'X': 'run_block'
-        }
-    },
-    'Power_Counter_Trey': {
-        name: 'Power Counter Trey',
-        type: 'run', tags: ['run', 'counter', 'power'],
-        compatibleFormations: ['Power', 'Jumbo'],
-        assignments: {
-            'QB': 'qb_setup', 'RB': 'run_counter_r', 'RB2': 'lead_right',
-            'OL1': 'pull_right', 'OL2': 'run_block', 'OL3': 'run_block',
-            'Y': 'run_block', 'X': 'run_block'
-        }
-    },
-    'Power_PA_Rollout_Slide': {
-        name: 'Power PA Rollout Slide',
-        type: 'pass', tags: ['pass', 'pa', 'rollout'],
-        compatibleFormations: ['Power', 'Jumbo'],
-        readProgression: ['RB2', 'Y', 'X'],
-        assignments: {
-            'QB': 'qb_scramble', 'RB': 'run_iso_r', 'RB2': 'Flat',
-            'Y': 'Corner', 'X': 'Post', 'OL': 'pass_block'
-        }
-    },
-    'Power_HB_Toss_Sweep': {
-        name: 'Power Lead Toss Sweep',
-        type: 'run', tags: ['run', 'outside', 'toss'],
-        compatibleFormations: ['Power', 'Jumbo'],
-        assignments: {
-            'QB': 'qb_setup', 'RB': 'run_toss_r', 'RB2': 'lead_right',
-            'OL1': 'run_block', 'OL2': 'run_block', 'OL3': 'pull_right_wide',
-            'Y': 'run_block', 'X': 'run_block'
-        }
-    },
-    'Power_PA_Deep_Post': {
-        name: 'Power PA Max Protect Shot',
-        type: 'pass', tags: ['pass', 'pa', 'deep'],
-        compatibleFormations: ['Power', 'Jumbo'],
-        readProgression: ['X', 'Y'],
-        assignments: {
-            'QB': 'qb_setup', 'RB': 'run_dive', 'RB2': 'pass_block',
-            'X': 'Post', 'Y': 'Seam', 'OL': 'pass_block'
-        }
-    },
-    'Spread_Mesh_Crossers': {
-        name: 'Spread 4-WR Mesh',
-        type: 'pass', tags: ['pass', 'short', 'cross'],
-        compatibleFormations: ['Spread', 'Empty'],
-        readProgression: ['WR3', 'WR4', 'WR1', 'WR2'],
-        assignments: {
-            'QB': 'qb_setup',
-            'WR3': 'Mesh_Right', 'WR4': 'Mesh_Left',
-            'WR1': 'Dig', 'WR2': 'Fly',
+            'QB': 'qb_setup', 
+            'X': 'Slant', 
+            'Z': 'Slant', 
+            'H': 'Slant',
+            'Y': 'Hitch', 
+            'RB': 'CheckRelease', // FIX: RB scans for blitzers before leaking out late
             'OL': 'pass_block'
         }
     },
-    'Trips_Bubble_Screen': {
-        name: 'Trips Quick Bubble',
-        type: 'pass', tags: ['pass', 'screen', 'quick'],
-        compatibleFormations: ['Trips', 'TripsLeft'],
-        readProgression: ['WR1'],
-        assignments: {
-            'QB': 'qb_setup',
-            'WR1': 'Bubble',
-            'WR2': 'WR_Screen_Lead',
-            'WR3': 'WR_Screen_Lead',
-            'RB': 'pass_block',
-            'OL': 'run_block'
-        }
-    },
-    'Trips_Weakside_Counter': {
-        name: 'Trips Weakside Counter',
-        type: 'run', tags: ['run', 'counter', 'misdirection'],
-        compatibleFormations: ['Trips'],
-        assignments: {
-            'QB': 'qb_setup', 'RB': 'run_counter_l',
-            'OL1': 'run_block', 'OL2': 'run_block', 'OL3': 'pull_left',
-            'WR1': 'run_block', 'WR2': 'run_block', 'WR3': 'run_block'
-        }
-    },
-
-    // --- FORMATION-TAILORED SPREAD & EMPTY CONCEPTS ---
-    'Spread_Smash': {
-        name: 'Spread Smash Concept',
-        type: 'pass', tags: ['pass', 'short', 'spread'],
-        compatibleFormations: ['Spread', 'Empty', 'Balanced'],
-        readProgression: ['WR3', 'WR1', 'WR4'],
-        assignments: {
-            'QB': 'qb_setup', 'WR1': 'Hitch', 'WR3': 'Corner',
-            'WR2': 'Hitch', 'WR4': 'Corner', 'OL': 'pass_block', 'RB': 'Flat'
-        }
-    },
-    'Spread_QB_Draw': {
-        name: 'Spread 4-WR QB Draw',
-        type: 'run', tags: ['run', 'draw', 'qb'],
-        compatibleFormations: ['Spread', 'Empty'],
-        assignments: {
-            'QB': 'run_dive', 'WR1': 'Fly', 'WR2': 'Fly',
-            'WR3': 'Drag', 'WR4': 'Drag', 'OL': 'pass_block'
-        }
-    },
-
-    // --- FORMATION-TAILORED TRIPS CONCEPTS ---
-    'Trips_Flood_Sail': {
-        name: 'Trips Sail Flood',
-        type: 'pass', tags: ['pass', 'flood', 'trips'],
-        compatibleFormations: ['Trips', 'TripsLeft'],
-        readProgression: ['WR2', 'WR3', 'WR1'],
-        assignments: {
-            'QB': 'qb_setup', 'WR1': 'Fly', 'WR2': 'Out',
-            'WR3': 'Flat', 'RB': 'pass_block', 'OL': 'pass_block'
-        }
-    },
-    'Trips_FourVerts': {
-        name: 'Trips 4-Verts Seam Stress',
-        type: 'pass', tags: ['pass', 'deep', 'trips'],
-        compatibleFormations: ['Trips', 'TripsLeft'],
-        readProgression: ['WR2', 'WR3', 'WR1', 'RB'],
-        assignments: {
-            'QB': 'qb_setup', 'WR1': 'Fade', 'WR2': 'Seam',
-            'WR3': 'Seam', 'RB': 'Wheel', 'OL': 'pass_block'
-        }
-    },
-
-    // ===================================
-    // --- PASSING CONCEPTS (QUICK / SCREENS)
-    // ===================================
-    'Uni_QuickSlants': {
-        type: 'pass', tags: ['pass', 'quick', 'short'],
-        readProgression: ['X', 'Z', 'H', 'RB'],
-        assignments: {
-            'QB': 'qb_setup', 'X': 'Slant', 'Z': 'Slant', 'H': 'Slant',
-            'Y': 'Hitch', 'RB': 'Flat', 'OL': 'pass_block'
-        }
-    },
     'Uni_Stick': {
-        type: 'pass', tags: ['pass', 'short'],
+        name: 'Stick Quick Concept',
+        type: 'pass', tags: ['pass', 'short', 'quick'],
         readProgression: ['Y', 'H', 'RB'],
         assignments: {
             'QB': 'qb_setup', 'Y': 'QuickOut', 'H': 'Hitch', 'X': 'Fade',
             'Z': 'Fade', 'RB': 'Flat', 'OL': 'pass_block'
         }
     },
+    'Uni_FourVerts': {
+        name: 'Four Verticals All-Out',
+        type: 'pass', tags: ['pass', 'deep', 'vertical'],
+        readProgression: ['X', 'Z', 'H', 'Y', 'RB'],
+        assignments: {
+            'QB': 'qb_setup', 'X': 'Fly', 'Z': 'Fly', 'H': 'Seam',
+            'Y': 'Seam', 'RB': 'CheckRelease', 'OL': 'pass_block'
+        }
+    },
+    'Uni_Drive': {
+        name: 'Drive Shallow Cross',
+        type: 'pass', tags: ['pass', 'medium', 'cross'],
+        readProgression: ['Y', 'X', 'Z', 'RB'],
+        assignments: {
+            'QB': 'qb_setup', 
+            'Y': 'Drag',
+            'X': 'Dig',
+            'Z': 'Comeback',
+            'H': 'Drag',
+            'RB': 'Flat', 
+            'OL': 'pass_block'
+        }
+    },
     'Uni_HB_Screen': {
+        name: 'HB Slip Screen Right',
         type: 'pass', tags: ['pass', 'screen'],
         readProgression: ['RB', 'X'],
         assignments: {
@@ -576,161 +492,8 @@ export const offensivePlaybook = {
             'OL1': 'screen_block', 'OL2': 'screen_block', 'OL3': 'pass_block'
         }
     },
-
-    // ===================================
-    // --- SCREEN CONCEPTS
-    // ===================================
-    'Uni_Trips_WR_Screen': {
-        type: 'pass', tags: ['pass', 'screen', 'trips'],
-        compatibleFormations: ['Trips', 'TripsLeft', 'Spread'],
-        readProgression: ['H', 'X'],
-        assignments: {
-            'QB': 'qb_setup',
-            'H': 'WR_Screen_Catch',
-            'X': 'WR_Screen_Lead',
-            'Y': 'WR_Screen_Lead',
-            'Z': 'Fly',
-            'RB': 'pass_block',
-            'OL': 'screen_block'
-        }
-    },
-    'Uni_Tunnel_Screen': {
-        type: 'pass', tags: ['pass', 'screen', 'quick'],
-        readProgression: ['X', 'RB'],
-        assignments: {
-            'QB': 'qb_setup',
-            'X': 'Tunnel_Screen_Catch',
-            'H': 'WR_Screen_Lead',
-            'OL1': 'screen_block', 'OL2': 'screen_block', 'OL3': 'run_block',
-            'Z': 'Fly', 'RB': 'Flat'
-        }
-    },
-    'Uni_HB_Screen_Left': {
-        type: 'pass', tags: ['pass', 'screen', 'slow-mesh'],
-        readProgression: ['RB'],
-        assignments: {
-            'QB': 'qb_screen_retreat',
-            'RB': 'Screen_Wait',
-            'OL1': 'Wall_Alley_Left', 'OL2': 'Wall_Alley_Left', 'OL3': 'pass_block',
-            'X': 'Fly', 'Z': 'Post', 'Y': 'Fly'
-        }
-    },
-    'Uni_WR_Screen_Right': {
-        type: 'pass', tags: ['pass', 'screen', 'quick'],
-        readProgression: ['Z'],
-        assignments: {
-            'QB': 'qb_setup',
-            'Z': 'Screen_Wait',
-            'RB': 'pass_block',
-            'OL1': 'pass_block', 'OL2': 'Wall_Alley_Right', 'OL3': 'Wall_Alley_Right',
-            'X': 'Fly', 'Y': 'Seam'
-        }
-    },
-
-    // ===================================
-    // --- PASSING CONCEPTS (MEDIUM / DEEP)
-    // ===================================
-    'Uni_FourVerts': {
-        type: 'pass', tags: ['pass', 'deep', 'vertical'],
-        // DEEPER FIX: Check all 4 vertical routes before dumping off to the RB checkdown
-        readProgression: ['X', 'Z', 'H', 'Y', 'RB'],
-        assignments: {
-            'QB': 'qb_setup', 'X': 'Fly', 'Z': 'Fly', 'H': 'Seam',
-            'Y': 'Seam', 'RB': 'CheckRelease', 'OL': 'pass_block'
-        }
-    },
-    'Uni_Drive': {
-        type: 'pass', tags: ['pass', 'medium', 'cross'],
-        // DEEPER FIX: Order reads so Balanced formation (which lacks 'H') reads the Drag route properly
-        readProgression: ['Y', 'X', 'Z', 'RB'],
-        assignments: {
-            'QB': 'qb_setup', 
-            'Y': 'Drag',      // TE or Slot runs the shallow drag across the formation
-            'X': 'Dig',       // Primary WR runs the 10-yard dig behind the drag
-            'Z': 'Comeback',  // Flanker runs the clear-out/comeback
-            'H': 'Drag',      // Slot runs the drag in 4-WR formations
-            'RB': 'Flat', 
-            'OL': 'pass_block'
-        }
-    },
-
-    'Uni_Scissors': {
-        type: 'pass', tags: ['pass', 'deep', 'cross'],
-        readProgression: ['Z', 'X', 'Y'],
-        assignments: {
-            'QB': 'qb_setup',
-            'Z': 'Scissors_Post',
-            'X': 'Scissors_Corner',
-            'Y': 'In',
-            'H': 'Drag',
-            'RB': 'CheckRelease', 'OL': 'pass_block'
-        }
-    },
-    'Uni_Levels': {
-        type: 'pass', tags: ['pass', 'medium', 'zone-beater'],
-        readProgression: ['H', 'Y', 'RB'],
-        assignments: {
-            'QB': 'qb_setup',
-            'X': 'Fly',
-            'Z': 'In',
-            'Y': 'Dig',
-            'H': 'Out',
-            'RB': 'Flat',
-            'OL': 'pass_block'
-        }
-    },
-    'Uni_Dagger': {
-        type: 'pass', tags: ['pass', 'deep', 'seam'],
-        readProgression: ['X', 'H', 'Y'],
-        assignments: {
-            'QB': 'qb_setup',
-            'H': 'Seam',
-            'X': 'Dig',
-            'Z': 'Fly',
-            'Y': 'Drag',
-            'RB': 'pass_block', 'OL': 'pass_block'
-        }
-    },
-    'Uni_Double_Moves': {
-        type: 'pass', tags: ['pass', 'deep', 'trick'],
-        readProgression: ['X', 'Z'],
-        assignments: {
-            'QB': 'qb_setup',
-            'X': 'Sluggo',
-            'Z': 'Out_And_Up',
-            'Y': 'Seam',
-            'H': 'Hitch_And_Go',
-            'RB': 'pass_block', 'OL': 'pass_block'
-        }
-    },
-
-    // --- SYMMETRICAL RUNS ---
-    'Uni_PowerLead_Left': {
-        type: 'run', tags: ['run', 'inside', 'power'],
-        assignments: {
-            'QB': 'qb_setup', 'RB': 'run_iso_l', 'RB2': 'lead_left',
-            'OL': 'run_block', 'Y': 'run_block', 'X': 'run_block', 'Z': 'run_block'
-        }
-    },
-    'Uni_Toss_Right': {
-        type: 'run', tags: ['run', 'outside', 'toss'],
-        assignments: {
-            'QB': 'qb_setup', 'RB': 'run_toss_r',
-            'OL1': 'pull_right_wide', 'OL2': 'run_block', 'OL3': 'run_block',
-            'Y': 'run_block', 'X': 'run_block', 'Z': 'run_block', 'H': 'run_block'
-        }
-    },
-    'Uni_Toss_Left': {
-        type: 'run', tags: ['run', 'outside', 'toss'],
-        assignments: {
-            'QB': 'qb_setup', 'RB': 'run_toss_l',
-            'OL1': 'run_block', 'OL2': 'run_block', 'OL3': 'pull_left_wide',
-            'Y': 'run_block', 'X': 'run_block', 'Z': 'run_block', 'H': 'run_block'
-        }
-    },
-
-    // --- SYMMETRICAL / CONCEPT PASSES ---
     'Uni_Mesh': {
+        name: 'Mesh Underneath Crossers',
         type: 'pass', tags: ['pass', 'short', 'cross'],
         readProgression: ['X', 'Z', 'RB'],
         assignments: {
@@ -740,77 +503,495 @@ export const offensivePlaybook = {
             'RB': 'Texas', 'OL': 'pass_block'
         }
     },
-    'Uni_Flood_Right': {
-        type: 'pass', tags: ['pass', 'medium', 'flood'],
-        readProgression: ['Z', 'H', 'Y'],
+
+    // ==========================================================
+    // 2. 2-RB & FULLBACK LEAD CONCEPTS (Power & Jumbo)
+    // ==========================================================
+    'Power_I_Lead_Iso_Right': {
+        name: 'Power I FB Lead Iso Strong',
+        type: 'run', tags: ['run', 'inside', 'power', 'lead'],
+        compatibleFormations: ['Power', 'Jumbo'],
         assignments: {
-            'QB': 'qb_setup',
-            'Z': 'Flood_Deep',
-            'H': 'Flood_Out',
-            'Y': 'Flat',
-            'X': 'Dig',
-            'RB': 'pass_block', 'OL': 'pass_block'
+            'QB': 'qb_setup', 
+            'RB': 'run_iso_r', 
+            'RB2': 'lead_iso_r', 
+            'OL': 'run_block', 
+            'Y': 'run_block', 
+            'X': 'run_block'
+        }
+    },
+    'Power_I_Lead_Iso_Left': {
+        name: 'Power I FB Lead Iso Weak',
+        type: 'run', tags: ['run', 'inside', 'power', 'lead'],
+        compatibleFormations: ['Power', 'Jumbo'],
+        assignments: {
+            'QB': 'qb_setup', 
+            'RB': 'run_iso_l', 
+            'RB2': 'lead_iso_l', 
+            'OL': 'run_block', 
+            'Y': 'run_block', 
+            'X': 'run_block'
+        }
+    },
+    'Power_I_Power_O': {
+        name: 'Power O Guard Pull & FB Kick',
+        type: 'run', tags: ['run', 'power', 'pull', 'lead'],
+        compatibleFormations: ['Power', 'Jumbo'],
+        assignments: {
+            'QB': 'qb_setup', 
+            'RB': 'run_power_o_r', 
+            'RB2': 'lead_right', 
+            'OL1': 'pull_right', 
+            'OL2': 'run_block', 
+            'OL3': 'run_block',
+            'Y': 'run_block', 
+            'X': 'run_block'
+        }
+    },
+    'Power_I_Power_O_Left': {
+        name: 'Power O Left Guard Pull',
+        type: 'run', tags: ['run', 'power', 'pull', 'lead'],
+        compatibleFormations: ['Power', 'Jumbo'],
+        assignments: {
+            'QB': 'qb_setup', 
+            'RB': 'run_power_o_l', 
+            'RB2': 'lead_left', 
+            'OL1': 'run_block', 
+            'OL2': 'run_block', 
+            'OL3': 'pull_left',
+            'Y': 'run_block', 
+            'X': 'run_block'
+        }
+    },
+    'Power_I_FB_Dive': {
+        name: 'FB Belly Quick Hit Dive',
+        type: 'run', tags: ['run', 'inside', 'power', 'fb'],
+        compatibleFormations: ['Power', 'Jumbo'],
+        assignments: {
+            'QB': 'qb_setup', 
+            'RB2': 'run_fb_dive', 
+            'RB': 'run_stretch_r', 
+            'OL': 'run_block', 
+            'Y': 'run_block', 
+            'X': 'run_block'
+        }
+    },
+    'Power_I_FB_Trap': {
+        name: 'Fullback Interior Quick Trap',
+        type: 'run', tags: ['run', 'inside', 'trap', 'fb'],
+        compatibleFormations: ['Power', 'Jumbo'],
+        assignments: {
+            'QB': 'qb_setup', 
+            'RB2': 'run_fb_trap', 
+            'RB': 'run_toss_r', 
+            'OL1': 'run_block', 
+            'OL2': 'pull_right', 
+            'OL3': 'run_block', 
+            'Y': 'run_block', 
+            'X': 'run_block'
+        }
+    },
+    'Power_I_HB_Toss_Lead': {
+        name: 'Power Lead Pitch Sweep',
+        type: 'run', tags: ['run', 'outside', 'toss', 'lead'],
+        compatibleFormations: ['Power', 'Jumbo'],
+        assignments: {
+            'QB': 'qb_setup', 
+            'RB': 'run_toss_r', 
+            'RB2': 'lead_right_wide', 
+            'OL1': 'run_block', 
+            'OL2': 'run_block', 
+            'OL3': 'pull_right_wide', 
+            'Y': 'run_block', 
+            'X': 'run_block'
+        }
+    },
+    'Power_I_Counter_Trey': {
+        name: 'Power Counter Trey Pull',
+        type: 'run', tags: ['run', 'counter', 'power', 'lead'],
+        compatibleFormations: ['Power', 'Jumbo'],
+        assignments: {
+            'QB': 'qb_setup', 
+            'RB': 'run_counter_r', 
+            'RB2': 'lead_right', 
+            'OL1': 'pull_right', 
+            'OL2': 'run_block', 
+            'OL3': 'run_block', 
+            'Y': 'run_block', 
+            'X': 'run_block'
+        }
+    },
+    'Power_PA_FB_Wheel': {
+        name: 'Power PA FB Wheel Shot',
+        type: 'pass', tags: ['pass', 'pa', 'deep', 'wheel'],
+        compatibleFormations: ['Power', 'Jumbo'],
+        readProgression: ['RB2', 'X', 'Y'],
+        assignments: {
+            'QB': 'qb_setup', 
+            'RB': 'run_dive', 
+            'RB2': 'FB_Wheel', 
+            'X': 'Post', 
+            'Y': 'Drag', 
+            'OL': 'pass_block'
+        }
+    },
+    'Power_PA_PowerPass_Slide': {
+        name: 'Power PA Rollout FB Slide',
+        type: 'pass', tags: ['pass', 'pa', 'rollout', 'short'],
+        compatibleFormations: ['Power', 'Jumbo'],
+        readProgression: ['RB2', 'Y', 'X'],
+        assignments: {
+            'QB': 'qb_scramble', 
+            'RB': 'run_iso_r', 
+            'RB2': 'FB_Flat', 
+            'Y': 'Corner', 
+            'X': 'Post', 
+            'OL': 'pass_block'
+        }
+    },
+    'Power_PA_Boot_Leak': {
+        name: 'Power PA Bootleg Weakside Leak',
+        type: 'pass', tags: ['pass', 'pa', 'rollout', 'leak'],
+        compatibleFormations: ['Power', 'Jumbo'],
+        readProgression: ['RB2', 'Y', 'X'],
+        assignments: {
+            'QB': 'qb_scramble', 
+            'RB': 'run_stretch_l', 
+            'RB2': 'FB_Leak', 
+            'Y': 'Dig', 
+            'X': 'Comeback', 
+            'OL': 'pass_block'
+        }
+    },
+    'Jumbo_GoalLine_Wedge': {
+        name: 'Jumbo Goal Line Power Wedge',
+        type: 'run', tags: ['run', 'inside', 'power', 'goalline'],
+        compatibleFormations: ['Jumbo', 'Power'],
+        assignments: {
+            'QB': 'qb_setup', 
+            'RB2': 'run_fb_dive', 
+            'RB': 'lead_wedge', 
+            'OL': 'run_block', 
+            'X': 'run_block', 
+            'Y': 'run_block'
+        }
+    },
+    'Jumbo_GoalLine_OffTackle': {
+        name: 'Jumbo Off-Tackle FB Lead',
+        type: 'run', tags: ['run', 'outside', 'power', 'goalline'],
+        compatibleFormations: ['Jumbo', 'Power'],
+        assignments: {
+            'QB': 'qb_setup', 
+            'RB': 'run_iso_r', 
+            'RB2': 'lead_right', 
+            'OL1': 'run_block', 
+            'OL2': 'run_block', 
+            'OL3': 'run_block', 
+            'X': 'run_block', 
+            'Y': 'run_block'
+        }
+    },
+    'Jumbo_PA_PopPass': {
+        name: 'Jumbo Goal Line Pop Pass',
+        type: 'pass', tags: ['pass', 'pa', 'short', 'goalline'],
+        compatibleFormations: ['Jumbo', 'Power'],
+        readProgression: ['X', 'Y', 'RB2'],
+        assignments: {
+            'QB': 'qb_setup', 
+            'RB': 'run_dive', 
+            'RB2': 'pass_block', 
+            'X': 'Seam', 
+            'Y': 'Flat', 
+            'OL': 'pass_block'
         }
     },
 
-    // ===================================
-    // --- PLAY ACTION CONCEPTS
-    // ===================================
-    'PA_Crossers': {
-        type: 'pass', tags: ['pass', 'pa', 'deep'],
-        readProgression: ['Y', 'Z', 'X'],
+    // ==========================================================
+    // 3. BALANCED FORMATION AIR RAID & PRO CONCEPTS
+    // ==========================================================
+    'Balanced_Y_Cross': {
+        name: 'Balanced Y-Cross Over',
+        type: 'pass', tags: ['pass', 'medium', 'cross', 'air-raid'],
+        compatibleFormations: ['Balanced'],
+        readProgression: ['Y', 'X', 'Z', 'RB'],
         assignments: {
-            'QB': 'qb_setup', 'RB': 'run_dive',
-            'X': 'Post', 'Y': 'Drag', 'Z': 'Dig', 'H': 'Corner', 'OL': 'pass_block'
+            'QB': 'qb_setup', 
+            'Y': 'Deep_Over', 
+            'X': 'Post', 
+            'Z': 'Dig', 
+            'RB': 'Flat', 
+            'OL': 'pass_block'
         }
     },
+    'Balanced_Yankee_Shot': {
+        name: 'Balanced PA Yankee Deep Shot',
+        type: 'pass', tags: ['pass', 'pa', 'deep', 'shot'],
+        compatibleFormations: ['Balanced', 'Pistol'],
+        readProgression: ['X', 'Z', 'Y'],
+        assignments: {
+            'QB': 'qb_setup', 
+            'RB': 'run_dive', 
+            'X': 'Post', 
+            'Z': 'Deep_Over', 
+            'Y': 'Flat', 
+            'OL': 'pass_block'
+        }
+    },
+    'Balanced_Smash_Divide': {
+        name: 'Balanced Smash Divide',
+        type: 'pass', tags: ['pass', 'medium', 'corner'],
+        compatibleFormations: ['Balanced', 'Pistol'],
+        readProgression: ['Y', 'Z', 'X', 'RB'],
+        assignments: {
+            'QB': 'qb_setup', 
+            'Z': 'Hitch', 
+            'Y': 'Corner', 
+            'X': 'Post', 
+            'RB': 'Flat', 
+            'OL': 'pass_block'
+        }
+    },
+    'Balanced_Slant_Flat': {
+        name: 'Balanced Slant-Flat Read',
+        type: 'pass', tags: ['pass', 'quick', 'short'],
+        compatibleFormations: ['Balanced', 'Pistol'],
+        readProgression: ['X', 'Y', 'Z', 'RB'],
+        assignments: {
+            'QB': 'qb_setup', 
+            'X': 'Slant', 
+            'Y': 'Flat', 
+            'Z': 'Slant', 
+            'RB': 'CheckRelease', 
+            'OL': 'pass_block'
+        }
+    },
+
+    // ==========================================================
+    // 4. SPREAD & EMPTY 4-WR PASSING & RPO
+    // ==========================================================
+    'Spread_Y_Cross': {
+        name: 'Spread 4-WR Crossers',
+        type: 'pass', tags: ['pass', 'medium', 'cross', 'spread'],
+        compatibleFormations: ['Spread', 'Empty'],
+        readProgression: ['H', 'Y', 'X', 'Z'],
+        assignments: {
+            'QB': 'qb_setup', 
+            'H': 'Deep_Over', 
+            'Y': 'Drag', 
+            'X': 'Dig', 
+            'Z': 'Post', 
+            'OL': 'pass_block'
+        }
+    },
+    'Spread_FourVerts_Switch': {
+        name: 'Spread 4-Verts Seam Switch',
+        type: 'pass', tags: ['pass', 'deep', 'vertical', 'spread'],
+        compatibleFormations: ['Spread', 'Empty'],
+        readProgression: ['H', 'Y', 'X', 'Z'],
+        assignments: {
+            'QB': 'qb_setup', 
+            'X': 'Fade', 
+            'H': 'Seam', 
+            'Y': 'Seam', 
+            'Z': 'Fade', 
+            'OL': 'pass_block'
+        }
+    },
+    'Spread_Levels_HiLo': {
+        name: 'Spread Levels In-Cut Hi-Lo',
+        type: 'pass', tags: ['pass', 'medium', 'zone-beater', 'spread'],
+        compatibleFormations: ['Spread', 'Empty'],
+        readProgression: ['H', 'Y', 'X'],
+        assignments: {
+            'QB': 'qb_setup', 
+            'X': 'Fly', 
+            'Z': 'In', 
+            'H': 'Dig', 
+            'Y': 'QuickOut', 
+            'OL': 'pass_block'
+        }
+    },
+    'Spread_Tunnel_Screen': {
+        name: 'Spread 4-WR Tunnel Screen',
+        type: 'pass', tags: ['pass', 'screen', 'quick', 'spread'],
+        compatibleFormations: ['Spread', 'Empty'],
+        readProgression: ['X', 'H'],
+        assignments: {
+            'QB': 'qb_setup', 
+            'X': 'Tunnel_Screen_Catch', 
+            'H': 'WR_Screen_Lead', 
+            'Z': 'Fly', 
+            'Y': 'Drag', 
+            'OL1': 'screen_block', 
+            'OL2': 'screen_block', 
+            'OL3': 'run_block'
+        }
+    },
+    'Spread_QB_Draw': {
+        name: 'Spread 4-WR QB Draw',
+        type: 'run', tags: ['run', 'draw', 'qb'],
+        compatibleFormations: ['Spread', 'Empty'],
+        assignments: {
+            'QB': 'run_dive', 'X': 'Fly', 'Z': 'Fly',
+            'H': 'Drag', 'Y': 'Drag', 'OL': 'pass_block'
+        }
+    },
+    'Empty_Stick_Spacing': {
+        name: 'Empty Quick Spacing & Curls',
+        type: 'pass', tags: ['pass', 'short', 'quick', 'empty'],
+        compatibleFormations: ['Empty', 'Spread'],
+        readProgression: ['H', 'Y', 'X', 'Z'],
+        assignments: {
+            'QB': 'qb_setup', 
+            'X': 'Hitch', 
+            'H': 'QuickOut', 
+            'Y': 'Hitch', 
+            'Z': 'Flat', 
+            'OL': 'pass_block'
+        }
+    },
+
+    // ==========================================================
+    // 5. TRIPS & TRIPS-LEFT OVERLOAD CONCEPTS
+    // ==========================================================
+    'Trips_Flood_Sail': {
+        name: 'Trips Sail 3-Level Flood',
+        type: 'pass', tags: ['pass', 'flood', 'trips'],
+        compatibleFormations: ['Trips', 'TripsLeft'],
+        readProgression: ['H', 'Y', 'X'],
+        assignments: {
+            'QB': 'qb_setup', 
+            'X': 'Fly', 
+            'H': 'Flood_Out', 
+            'Y': 'Flat', 
+            'RB': 'pass_block', 
+            'OL': 'pass_block'
+        }
+    },
+    'Trips_Dagger_Seam': {
+        name: 'Trips Dagger Post-Dig Clearout',
+        type: 'pass', tags: ['pass', 'deep', 'seam', 'trips'],
+        compatibleFormations: ['Trips', 'TripsLeft'],
+        readProgression: ['H', 'Y', 'X', 'RB'],
+        assignments: {
+            'QB': 'qb_setup', 
+            'X': 'Dig', 
+            'H': 'Seam', 
+            'Y': 'Drag', 
+            'RB': 'Flat', 
+            'OL': 'pass_block'
+        }
+    },
+    'Trips_Bubble_Screen': {
+        name: 'Trips Quick Bubble Screen',
+        type: 'pass', tags: ['pass', 'screen', 'quick', 'trips'],
+        compatibleFormations: ['Trips', 'TripsLeft'],
+        readProgression: ['X'],
+        assignments: {
+            'QB': 'qb_setup',
+            'X': 'Bubble',
+            'H': 'WR_Screen_Lead',
+            'Y': 'WR_Screen_Lead',
+            'RB': 'pass_block',
+            'OL': 'run_block'
+        }
+    },
+    'Trips_FourVerts': {
+        name: 'Trips 4-Verts Seam Stress',
+        type: 'pass', tags: ['pass', 'deep', 'trips', 'vertical'],
+        compatibleFormations: ['Trips', 'TripsLeft'],
+        readProgression: ['H', 'Y', 'X', 'RB'],
+        assignments: {
+            'QB': 'qb_setup', 
+            'X': 'Fade', 
+            'H': 'Seam', 
+            'Y': 'Seam', 
+            'RB': 'Wheel', 
+            'OL': 'pass_block'
+        }
+    },
+    'Trips_Weakside_Counter': {
+        name: 'Trips Weakside Counter Pull',
+        type: 'run', tags: ['run', 'counter', 'misdirection', 'trips'],
+        compatibleFormations: ['Trips'],
+        assignments: {
+            'QB': 'qb_setup', 
+            'RB': 'run_counter_l',
+            'OL1': 'run_block', 'OL2': 'run_block', 'OL3': 'pull_left',
+            'X': 'run_block', 'H': 'run_block', 'Y': 'run_block'
+        }
+    },
+
+    // ==========================================================
+    // 6. PISTOL FORMATION CONCEPTS
+    // ==========================================================
+    'Pistol_Downhill_InsideZone': {
+        name: 'Pistol Downhill Inside Zone',
+        type: 'run', tags: ['run', 'inside', 'pistol'],
+        compatibleFormations: ['Pistol'],
+        assignments: {
+            'QB': 'qb_setup', 
+            'RB': 'run_dive', 
+            'OL': 'run_block', 
+            'X': 'run_block', 
+            'Z': 'run_block', 
+            'Y': 'run_block'
+        }
+    },
+    'Pistol_Stretch_Sweep': {
+        name: 'Pistol Outside Stretch Sweep',
+        type: 'run', tags: ['run', 'outside', 'pistol'],
+        compatibleFormations: ['Pistol'],
+        assignments: {
+            'QB': 'qb_setup', 
+            'RB': 'run_stretch_r', 
+            'OL1': 'run_block', 'OL2': 'run_block', 'OL3': 'pull_right', 
+            'X': 'run_block', 'Z': 'run_block', 'Y': 'run_block'
+        }
+    },
+    'Pistol_PA_Crossers': {
+        name: 'Pistol PA Deep Crossers',
+        type: 'pass', tags: ['pass', 'pa', 'deep', 'cross', 'pistol'],
+        compatibleFormations: ['Pistol'],
+        readProgression: ['Y', 'Z', 'X', 'RB'],
+        assignments: {
+            'QB': 'qb_setup', 
+            'RB': 'run_dive', 
+            'Y': 'Deep_Over', 
+            'Z': 'Dig', 
+            'X': 'Post', 
+            'OL': 'pass_block'
+        }
+    },
+    'Pistol_HB_Delay_Screen': {
+        name: 'Pistol Delay Slip Screen',
+        type: 'pass', tags: ['pass', 'screen', 'pistol'],
+        compatibleFormations: ['Pistol'],
+        readProgression: ['RB', 'Y'],
+        assignments: {
+            'QB': 'qb_setup', 
+            'RB': 'Slip_Screen', 
+            'X': 'Fly', 
+            'Z': 'Fly', 
+            'Y': 'Drag', 
+            'OL1': 'screen_block', 'OL2': 'screen_block', 'OL3': 'pass_block'
+        }
+    },
+
+    // ==========================================================
+    // 7. TRICK, RPO & SPECIAL TEAMS
+    // ==========================================================
     'PA_Bootleg_Right': {
+        name: 'Naked Bootleg Right',
         type: 'pass', tags: ['pass', 'pa', 'rollout'],
         readProgression: ['Z', 'Y', 'H'],
         assignments: {
             'QB': 'qb_scramble', 'RB': 'run_stretch_l',
-            'Z': 'Corner', 'Y': 'Drag', 'X': 'Dig', 'H': 'Flat', 'OL': 'pass_block'
+            'Z': 'Corner', 'Y': 'Drag_Right', 'X': 'Dig', 'H': 'Flat', 'OL': 'pass_block'
         }
     },
-    'PA_Deep_Shot': {
-        type: 'pass', tags: ['pass', 'pa', 'deep'],
-        readProgression: ['X', 'Z', 'Y'],
-        assignments: {
-            'QB': 'qb_setup',
-            'RB': 'run_dive',
-            'X': 'PostCorner', 'Z': 'Fly', 'Y': 'Seam',
-            'H': 'Drag', 'OL': 'pass_block'
-        }
-    },
-    'RPO_Bubble_Slant': {
-        type: 'pass', tags: ['rpo', 'quick'],
-        readProgression: ['H', 'X', 'RB'],
-        assignments: {
-            'QB': 'qb_rpo_read',
-            'RB': 'run_dive',
-            'H': 'Bubble',
-            'X': 'Slant',
-            'Z': 'Fly',
-            'OL': 'run_block'
-        }
-    },
-
-    // ===================================
-    // --- RPO CONCEPTS
-    // ===================================
-    'RPO_Slant_Dive': {
-        type: 'pass', tags: ['rpo', 'quick'],
-        readProgression: ['H', 'X', 'RB'],
-        assignments: {
-            'QB': 'qb_rpo_read', 'RB': 'run_dive', 'X': 'Slant',
-            'Z': 'Fly', 'H': 'Slant', 'Y': 'run_block', 'OL': 'run_block'
-        }
-    },
-
-    // ===================================
-    // --- TRICK PLAYS
-    // ===================================
     'Trick_Flea_Flicker': {
+        name: 'Flea Flicker',
         type: 'pass', tags: ['trick', 'deep'],
         readProgression: ['Z', 'X', 'Y', 'H'],
         assignments: {
@@ -818,12 +999,19 @@ export const offensivePlaybook = {
             'Z': 'PostCorner', 'Y': 'Seam', 'H': 'Fly', 'OL': 'pass_block'
         }
     },
-
-    // --- Special Teams ---
+    'RPO_Slant_Dive': {
+        name: 'RPO Slant-Dive Read',
+        type: 'pass', tags: ['rpo', 'quick'],
+        readProgression: ['H', 'X', 'RB'],
+        assignments: {
+            'QB': 'qb_rpo_read', 'RB': 'run_dive', 'X': 'Slant',
+            'Z': 'Fly', 'H': 'Slant', 'Y': 'run_block', 'OL': 'run_block'
+        }
+    },
     'Punt_Punt': {
+        name: 'Punt Punt',
         type: 'punt', tags: ['specialTeams'],
         readProgression: [],
-        // DEEPER FIX: Gunners sprint in pursuit downfield, personal protectors pass block
         assignments: {
             'QB1': 'punt', 
             'WR1': 'run_path', 

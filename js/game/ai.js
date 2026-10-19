@@ -630,11 +630,12 @@ export function getSmartCarrierTarget(runner, defenseStates, offenseStates, fiel
     const defenderInReactionWindow =
         nearestVisibleDefenderDistSq <= DEFENDER_REACTION_RANGE_SQ;
 
-    if (
-        !defenderInReactionWindow &&
-        runner._laneLockTicks > 0 &&
-        runner._lockedLaneX !== undefined
-    ) {
+    // FIX: Behind the line of scrimmage, enforce lane commitment so the RB 
+    // hits the hole with speed instead of flipping lanes every tick.
+    const shouldHoldLane = runner._laneLockTicks > 0 && runner._lockedLaneX !== undefined &&
+        (!defenderInReactionWindow || (isBehindLine && runner._laneLockTicks > 6));
+
+    if (shouldHoldLane) {
         runner._laneLockTicks--;
         bestTargetX = runner._lockedLaneX;
         bestTargetY = runner.y + visionDepth;
@@ -642,7 +643,8 @@ export function getSmartCarrierTarget(runner, defenseStates, offenseStates, fiel
 
         return {
             x: bestTargetX,
-            y: bestTargetY
+            y: bestTargetY,
+            action: runner.action
         };
     }
 
