@@ -491,7 +491,7 @@ export function setupInitialPlayerStates(playState, offense, defense, play, assi
                     if (tState) {
                         const isSlot = tSlot.includes('TE') || tSlot === 'WR3';
                         let xOffset = (tState.x < CENTER_X) ? (isSlot ? 1.0 : -0.5) : (isSlot ? -1.0 : 0.5);
-                        let yOffset = 2.0;
+                        let yOffset = playState.lineOfScrimmage >= 95 ? 1.0 : 2.0;
 
                         const existingCoverers = playState.activePlayers.filter(p => p.assignment === assignment).length;
                         if (existingCoverers === 1) {
@@ -2248,11 +2248,23 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                         ? runTargetPerception
                         : carrierPerception;
 
+                    const TACKLE_CUTOFF_DISTANCE = 4.5;
+
                     const blendFactor =
                         Math.min(1.0, Math.max(0.0, (dist - 1.5) / 3.0)) *
                         chasePerception;
-                    const maxLeadTime = 1.0;
-                    const leadTime = Math.min(maxLeadTime, dist / (16 + (iq / 4))) * blendFactor;
+
+                    const leadDistanceFactor = Math.max(
+                        0.0,
+                        Math.min(1.0, (dist - TACKLE_CUTOFF_DISTANCE) / 6.0)
+                    );
+
+                    const maxLeadTime = 0.35;
+                    const leadTime =
+                        Math.min(maxLeadTime, dist / (16 + (iq / 4))) *
+                        blendFactor *
+                        leadDistanceFactor;
+
                     let predX = chaseTarget.x + ((chaseTarget.vx || 0) * leadTime);
                     let predY = chaseTarget.y + ((chaseTarget.vy || 0) * leadTime);
 
@@ -2293,6 +2305,19 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                         // Steer left or right of the carrier based on current leverage to navigate around the blocker
                         const leverageDir = pState.x > chaseTarget.x ? 1.8 : -1.8;
                         predX += leverageDir;
+                    }
+
+                    if (dist <= TACKLE_CUTOFF_DISTANCE) {
+                        const dxToCarrier = chaseTarget.x - pState.x;
+                        const dyToCarrier = chaseTarget.y - pState.y;
+                        const gap = Math.max(0.001, Math.hypot(dxToCarrier, dyToCarrier));
+
+                        // Aim just short of the carrier's center so the defender
+                        // approaches tackle range rather than charging through the target.
+                        const approachGap = Math.min(1.15, Math.max(0, dist - 0.25));
+
+                        predX = chaseTarget.x - (dxToCarrier / gap) * approachGap;
+                        predY = chaseTarget.y - (dyToCarrier / gap) * approachGap;
                     }
 
                     const pursuitTargetY = getPursuitTargetY(
@@ -2470,9 +2495,8 @@ export function executeAssignment(pState, assignment, offenseStates, LOS, playSt
                 const dy = targetRec.y - pState.y;
                 const dist = Math.max(0.1, Math.hypot(dx, dy));
 
-                targetRec.x += (dx / dist) * 0.08;
-                targetRec.y += (dy / dist) * 0.08;
-
+                // A jam should disrupt the release through coverage,
+                // not directly move the receiver's world coordinates.
                 pState.targetX = targetRec.x - (dx / dist) * 0.5;
                 pState.targetY = targetRec.y + (dy / dist) * 0.5;
 

@@ -522,17 +522,44 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
     }
 
     // --- 8. DECELERATION (Braking / Planting) ---
-    const isStopping = distToTarget < 2.5 && !['run_path', 'run_route', 'tracking_ball', 'pursuit'].includes(pState.action);
+    const pursuitStopDistance =
+    pState.action === 'pursuit'
+        ? Math.max(
+            4.5,
+            (currentSpeed * currentSpeed) /
+                (2 * Math.max(0.1, maxDecelerationYPS2)) +
+                arrivalRadius
+        )
+        : 0;
+
+    const isPursuitApproach =
+        pState.action === 'pursuit' &&
+        distToTarget < pursuitStopDistance;
+
+    const isStopping =
+        isPursuitApproach ||
+        (
+            distToTarget < 2.5 &&
+            !['run_path', 'run_route', 'tracking_ball', 'pursuit'].includes(pState.action)
+        );
+
     let arrivalFactor = 1.0;
 
     if (isStopping) {
-        arrivalFactor = distToTarget / 2.5; // Throttle down smoothly
+        const stoppingDistance = isPursuitApproach
+            ? pursuitStopDistance
+            : 2.5;
+
+        arrivalFactor = Math.max(
+            0,
+        Math.min(1, distToTarget / stoppingDistance)
+        );
 
         // WEIGHT IMPACT ON BRAKING (Inertia):
         // Heavy players require much more time/distance to slow down.
         // Agility helps plant the feet.
         const brakePower = (2.0 + (agiFactor * 4.0)) / Math.sqrt(weightRatio);
-        accelRate *= brakePower;
+            accelRate *= brakePower;
     }
 
     if (isOffBalanceThisTick) {
