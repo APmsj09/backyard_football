@@ -2432,6 +2432,8 @@ export function executeAssignment(pState, assignment, offenseStates, LOS, playSt
             let baseCushionX = (targetRec.x < CENTER_X) ? 0.5 : -0.5; // Inside leverage
 
             // Attribute Scaling: High-IQ / High-Agility DBs squeeze tighter; low-IQ DBs play soft and give cushion
+
+            const defAgility = pState.agility || pState.agi || 50;  
             let agilityFactor = (defAgility / 50);
             let cushionY = Math.max(0.6, baseCushionY - (iqFactor * 0.5) - ((agilityFactor - 1) * 0.3));
             let cushionX = baseCushionX * (0.8 + (iqFactor * 0.2));
