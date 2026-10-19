@@ -1041,7 +1041,14 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                 // Run blockers approach the defender from the side away from the designed running lane.
                 const laneX = blocker.blockLaneX ?? runLaneX;
 
-                if (Number.isFinite(laneX)) {
+                const isOutsideRun = playState.playKey?.includes('Stretch') || playState.playKey?.includes('Toss');
+                const runDir = playState.playKey?.endsWith('Left') || playState.playKey?.includes('_l') ? -1 : 1;
+
+                if (isOutsideRun) {
+                    // On outside stretch/toss plays, blockers reach-block the outside shoulder to seal the perimeter
+                    blocker.targetX = target.x + (runDir * 0.75);
+                    blocker.targetY = target.y + 0.2;
+                } else if (Number.isFinite(laneX)) {
                     const defenderX = target.x;
                     let sealDirection = defenderX < laneX ? -1 : 1;
 
