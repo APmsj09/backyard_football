@@ -2498,7 +2498,7 @@ export function executeAssignment(pState, assignment, offenseStates, LOS, playSt
                 // A jam should disrupt the release through coverage,
                 // not directly move the receiver's world coordinates.
                 pState.targetX = targetRec.x - (dx / dist) * 0.5;
-                pState.targetY = targetRec.y + (dy / dist) * 0.5;
+                pState.targetY = targetRec.y - (dy / dist) * 0.5;
 
                 // Keep movement intent synchronized before the early return.
                 setPointIntent(
