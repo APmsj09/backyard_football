@@ -69,6 +69,7 @@ export function checkFumble(ballCarrierState, tacklerState, playState, gameLog) 
         }
 
         playState.fumbleOccurred = true;
+        playState.fumbleYards = ballCarrierState.y - playState.lineOfScrimmage; // ADD THIS LINE
         playState.ballState.isLoose = true;
         playState.ballState.inAir = false;
 
@@ -152,7 +153,8 @@ export function checkBlockCollisions(playState, gameLog = null) {
 
             // 1. Speed Edge Dip: Fast rusher blows by the tackle on the outside arc
             const isEdgeAlignment = Math.abs(target.initialX - blocker.initialX) > 1.4;
-            if (isPassRush && isEdgeAlignment && targetSpd > blockerAgi + 14 && Math.random() < 0.28) {
+            // FIX: Ensure this is actually a pass play!
+            if (playState.type === 'pass' && isPassRush && isEdgeAlignment && targetSpd > blockerAgi + 14 && Math.random() < 0.28) {
                 const awayX = blocker.x - target.x;
                 const awayY = blocker.y - target.y;
                 const awayDist = Math.max(0.1, Math.hypot(awayX, awayY));

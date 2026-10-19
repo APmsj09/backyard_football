@@ -1562,7 +1562,10 @@ export function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey
 
     const completionEvent = playState.statEvents.find(e => e.type === 'completion');
     if (completionEvent) {
-        completionEvent.yards = playState.yards;
+        // FIX: If a fumble occurred after the catch, don't use the defensive return spot for the receiver's yards!
+        completionEvent.yards = (playState.fumbleOccurred && playState.fumbleYards !== undefined) 
+            ? playState.fumbleYards 
+            : playState.yards;
     }
 
     playResult.yards = Math.round(playState.yards);

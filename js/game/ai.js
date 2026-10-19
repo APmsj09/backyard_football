@@ -294,13 +294,38 @@ export function diagnosePlay(pState, tick, offenseStates, playState = null) {
 export function calculateSafetyHelp(safetyState, defenseStates, offenseStates, ballCarrierState, playState, isBallInAir) {
     if (!safetyState || safetyState.role !== 'DB') return null;
 
-    // FIX: Abort safety help if the ball has been completed or is in a live runner's hands
     const passCompleted = playState.statEvents?.some(e => e.type === 'completion');
     const runnerHasBall = ballCarrierState && (ballCarrierState.hasBall || ballCarrierState.isBallCarrier) && ballCarrierState.role !== 'QB';
     if (passCompleted || runnerHasBall || (!isBallInAir && playState.ballState?.throwTick)) {
         return null;
     }
 
+    // 1. BALL IN AIR: Everyone breaks on the ball! (Stops DBs from staring into space while passes fly over)
+    if (isBallInAir && playState.ballState && playState.ballState.targetX !== undefined) {
+        const ballFlightTime = playState.tick - (playState.ballState.releaseTick || playState.ballState.throwTick || 0);
+        const iq = safetyState.playbookIQ || 50;
+        
+        // High IQ reacts in ~3 ticks (0.12s), Low IQ in ~7 ticks (0.28s)
+        const reactionTicks = Math.max(3, 11 - Math.floor(iq / 12)); 
+        
+        if (ballFlightTime >= reactionTicks) {
+            const targetId = playState.ballState.targetPlayerId;
+            const receiver = offenseStates.find(o => o.id === targetId);
+            
+            // Absolute priority: Abandon zone drops and break directly to the ball's landing spot
+            return {
+                type: 'help',
+                helpX: playState.ballState.targetX,
+                helpY: playState.ballState.targetY,
+                targetReceiver: receiver || null,
+                targetCorner: null,
+                pressureScore: 100.0, 
+                delayedHelp: false
+            };
+        }
+    }
+
+    // 2. PRE-THROW ZONE MATCHING / MAN HELP
     const LOS = playState.lineOfScrimmage;
     const defensiveCall = playState.defensiveCall || {};
     const defPlayKey = playState.defensivePlayKey || '';
@@ -315,75 +340,107 @@ export function calculateSafetyHelp(safetyState, defenseStates, offenseStates, b
     let helpTarget = null;
     let maxPressure = 0;
 
+    // A. Man Coverage Help Priority
     inManCoverage.forEach(corner => {
         const targetSlot = corner.assignment.replace('man_cover_', '');
         const receiver = offenseStates.find(r => r.slot === targetSlot);
 
         if (receiver) {
             const separationDist = getDistance(corner, receiver);
-            const isBallTargeted = isBallInAir && playState.ballState.targetPlayerId === receiver.id;
             const distFromSafety = getDistance(safetyState, receiver);
 
-            // Greater separation means greater need for safety help.
-            // Safeties prioritize helping receivers closer to their side of the field.
             let pressureScore = separationDist - (distFromSafety * 0.15);
-            if (isBallTargeted) pressureScore += 5;
 
             if (pressureScore > maxPressure) {
                 maxPressure = pressureScore;
-                helpTarget = { corner, receiver };
+                helpTarget = { corner, receiver, type: 'man_help' };
             }
         }
     });
 
-    let shouldHelp = maxPressure > 4.0;
+    // B. Zone Coverage Pattern Match (Stop DBs from sitting at an empty waypoint)
+    if (safetyState.assignment && safetyState.assignment.includes('zone_deep')) {
+        offenseStates.forEach(receiver => {
+            if (receiver.role === 'QB' || !receiver.action?.includes('route')) return;
 
-    if (isCover2) {
-        const helperHalf = safetyState.x < CENTER_X ? 'left' : 'right';
-        const cornerHalf = helpTarget?.corner.x < CENTER_X ? 'left' : 'right';
-        shouldHelp = shouldHelp && (helperHalf === cornerHalf) && (maxPressure > 6.0);
-    } else if (isCover3) {
-        if (safetyState.x < HASH_LEFT_X || safetyState.x > HASH_RIGHT_X) {
-            shouldHelp = maxPressure > 5.0;
+            const recDepth = receiver.y - LOS;
+            if (recDepth < 8) return; // Only match vertical threats
+
+            const distFromSafety = getDistance(safetyState, receiver);
+            if (distFromSafety > 18) return; // Ignore threats all the way across the field
+
+            const isMiddle = Math.abs(receiver.x - CENTER_X) < 12;
+            const isMySide = Math.sign(receiver.x - CENTER_X) === Math.sign(safetyState.x - CENTER_X);
+
+            let pressureScore = (recDepth * 0.2) - (distFromSafety * 0.15);
+
+            if (safetyState.assignment.includes('middle') && isMiddle) pressureScore += 3;
+            else if (!safetyState.assignment.includes('middle') && isMySide) pressureScore += 3;
+
+            // Extra priority if the receiver is uncovered
+            const closestDefenderDist = Math.min(
+                ...defenseStates.filter(d => d.id !== safetyState.id).map(d => getDistance(d, receiver))
+            );
+            if (closestDefenderDist > 3.5) pressureScore += 2;
+
+            if (pressureScore > maxPressure) {
+                maxPressure = pressureScore;
+                helpTarget = { corner: null, receiver, type: 'zone_match' };
+            }
+        });
+    }
+
+    let shouldHelp = false;
+
+    if (helpTarget?.type === 'man_help') {
+        if (isCover2) {
+            const helperHalf = safetyState.x < CENTER_X ? 'left' : 'right';
+            const cornerHalf = helpTarget.corner.x < CENTER_X ? 'left' : 'right';
+            shouldHelp = (helperHalf === cornerHalf) && (maxPressure > 6.0);
+        } else if (isCover3) {
+            if (safetyState.x < HASH_LEFT_X || safetyState.x > HASH_RIGHT_X) {
+                shouldHelp = maxPressure > 5.0;
+            } else {
+                shouldHelp = maxPressure > 4.0;
+            }
+        } else if (isCover1) {
+            shouldHelp = maxPressure > 3.0;
         } else {
             shouldHelp = maxPressure > 4.0;
         }
-    } else if (isCover1) {
-        shouldHelp = maxPressure > 3.0;
+    } else if (helpTarget?.type === 'zone_match') {
+        // Deep zone defenders should actively bracket or match threats
+        shouldHelp = maxPressure > 2.0; 
     }
 
     if (!shouldHelp) return null;
 
-    const ballFlightTime = isBallInAir ? playState.tick - (playState.ballState.releaseTick || playState.ballState.throwTick || 0) : 0;
-    const MIN_FLIGHT_TICKS = 5;
-
-    if (isBallInAir && ballFlightTime < MIN_FLIGHT_TICKS) return null;
-    if (isBallInAir && maxPressure < 6.0 && ballFlightTime < MIN_FLIGHT_TICKS + 3) return null;
-
     if (helpTarget && helpTarget.receiver) {
+        let helpX = helpTarget.receiver.x;
+        let helpY = Math.max(helpTarget.receiver.y + 1.5, LOS + 10);
+
+        if (helpTarget.type === 'man_help') {
+            helpX = (helpTarget.corner.x * 0.3) + (helpTarget.receiver.x * 0.7);
+        } else {
+            // Zone match: Sit slightly deeper than the receiver to cap the route
+            helpY = helpTarget.receiver.y + 3.0; 
+        }
+
         const helpTargetId = helpTarget.receiver.id;
 
         if (isDebugMode() && safetyState._lastLoggedHelpTargetId !== helpTargetId) {
             logPlayDebug(
-                'SAFETY_HELP_DECISION',
-                `${safetyState.name} commits to help on ${helpTarget.receiver.name}`,
+                'DB_COVERAGE_HELP',
+                `${safetyState.name} adjusting coverage to ${helpTarget.type} on ${helpTarget.receiver.name}`,
                 {
-                    coverage: isCover2 ? 'Cover_2' : isCover3 ? 'Cover_3' : isCover1 ? 'Cover_1' : 'Other',
-                    targetReceiver: helpTarget.receiver.name,
-                    targetCorner: helpTarget.corner.name,
+                    type: helpTarget.type,
                     pressureScore: Number(maxPressure.toFixed(2)),
-                    separation: Number(getDistance(helpTarget.corner, helpTarget.receiver).toFixed(2)),
-                    ballInAir: isBallInAir,
-                    ballFlightTime: Number(ballFlightTime.toFixed(1))
+                    ballInAir: isBallInAir
                 },
                 playState.tick
             );
-
             safetyState._lastLoggedHelpTargetId = helpTargetId;
         }
-
-        const helpX = (helpTarget.corner.x * 0.3) + (helpTarget.receiver.x * 0.7);
-        const helpY = Math.max(helpTarget.receiver.y + 1.5, LOS + 10);
 
         return {
             type: 'help',
@@ -392,7 +449,7 @@ export function calculateSafetyHelp(safetyState, defenseStates, offenseStates, b
             targetReceiver: helpTarget.receiver,
             targetCorner: helpTarget.corner,
             pressureScore: maxPressure,
-            delayedHelp: true
+            delayedHelp: helpTarget.type === 'man_help'
         };
     }
 
@@ -1914,18 +1971,18 @@ export function executeThrow(qbState, target, throwPower, accuracy, playState, g
     const throwDistance = Math.hypot(target.x - startX, target.y - startY);
 
     let passType = 'touch';
-    const assignment = target.assignment || '';
+    const assignmentStr = String(target.assignment || '').toLowerCase();
 
-    if (throwDistance < 12 || ['Slant', 'Drag', 'Curl', 'Hitch', 'Quick'].some(r => assignment.includes(r))) {
+    if (throwDistance < 12 || ['slant', 'drag', 'curl', 'hitch', 'quick'].some(r => assignmentStr.includes(r))) {
         passType = 'bullet';
-    } else if (throwDistance > 25 || ['Fly', 'Go', 'Streak', 'Post'].some(r => assignment.includes(r))) {
+    } else if (throwDistance > 25 || ['fly', 'go', 'streak', 'post'].some(r => assignmentStr.includes(r))) {
         passType = 'lob';
     }
 
     // Real arm velocity calculation based on throwPower
     const maxArmVelocity = 16 + (throwPower / 100) * 14.0;
     let ballSpeed = maxArmVelocity;
-    if (passType === 'lob') ballSpeed *= 0.84; // Faster lobs prevent waiting
+    if (passType === 'lob') ballSpeed *= 0.84; 
     else if (passType === 'touch') ballSpeed *= 0.92;
 
     let aimX = target.x;
@@ -1934,6 +1991,7 @@ export function executeThrow(qbState, target, throwPower, accuracy, playState, g
     // Only lead receivers who are actively moving; throw directly to stationary/settled targets
     const isMovingTarget = target.action === 'run_route' || 
                            target.isBallCarrier || 
+                           target.action === 'run_path' ||
                            (target.action === 'route_complete' && Math.hypot(target.vx || 0, target.vy || 0) > 0.8);
 
     if (isMovingTarget) {
@@ -1952,11 +2010,10 @@ export function executeThrow(qbState, target, throwPower, accuracy, playState, g
         const consistencyRoll = (Math.random() * (100 - qbCons)) / 100;
         let qbEstimation = 1.0 + (errorRoll * maxError) + (errorRoll * consistencyRoll * 0.1);
 
-        if (passType === 'bullet') qbEstimation *= 0.96; // Softer modifier
+        if (passType === 'bullet') qbEstimation *= 0.96;
         if (passType === 'lob') qbEstimation *= 1.04;
 
         let distanceToTravel = recYPS * flightTime * qbEstimation;
-        let projectedWithinRoute = false;
 
         let currX = target.x;
         let currY = target.y;
@@ -1964,6 +2021,7 @@ export function executeThrow(qbState, target, throwPower, accuracy, playState, g
         let lastValidDirY = 1;
 
         if (target.routePath && target.currentPathIndex < target.routePath.length) {
+            let projectedWithinRoute = false;
             for (let i = target.currentPathIndex; i < target.routePath.length; i++) {
                 const nextNode = target.routePath[i];
                 const dx = nextNode.x - currX;
@@ -1988,30 +2046,33 @@ export function executeThrow(qbState, target, throwPower, accuracy, playState, g
                     break;
                 }
             }
-        }
 
-        // DEEPER FIX: If the receiver has completed their route path, DO NOT project them 
-        // sprinting into the bleachers! Only vertical streaks continue running;
-        // all breaking/settling routes settle at the final waypoint.
-        const isContinuousRoute = ['Fly', 'Go', 'Streak', 'Vert', 'Fade'].some(r => target.assignment?.includes(r));
-        if (distanceToTravel > 0 && isContinuousRoute) {
-            const dirX = (target.vx && Math.abs(target.vx) > 0.5) ? target.vx / recYPS : lastValidDirX;
-            const dirY = (target.vy && Math.abs(target.vy) > 0.5) ? target.vy / recYPS : lastValidDirY;
+            // DEEPER FIX: Expanded continuous routes list to include Crossers/Drags/Slants so they aren't thrown behind
+            const isContinuousRoute = [
+                'fly', 'go', 'streak', 'vert', 'fade', 'post', 'corner',
+                'cross', 'crosser', 'crossing', 'deep_cross', 'over', 'wheel', 'seam', 'mesh', 'drag', 'slant'
+            ].some(r => assignmentStr.includes(r));
+            
+            if (distanceToTravel > 0 && isContinuousRoute) {
+                const dirX = (target.vx && Math.abs(target.vx) > 0.5) ? target.vx / recYPS : lastValidDirX;
+                const dirY = (target.vy && Math.abs(target.vy) > 0.5) ? target.vy / recYPS : lastValidDirY;
 
-            aimX = currX + (dirX * distanceToTravel);
-            aimY = currY + (dirY * distanceToTravel);
-        } else if (!projectedWithinRoute) {
-            // If projection exhausted the route, settle at its final node.
-            // Otherwise, preserve the interpolated point within the segment.
-            aimX = currX;
-            aimY = currY;
+                aimX = currX + (dirX * distanceToTravel);
+                aimY = currY + (dirY * distanceToTravel);
+            } else if (!projectedWithinRoute) {
+                aimX = currX;
+                aimY = currY;
+            }
+        } else {
+            // DEEPER FIX: Linear projection. Accurately lead moving receivers even if they lack a defined route path (Screens, scrambles)
+            aimX = currX + (target.vx || 0) * flightTime * qbEstimation;
+            aimY = currY + (target.vy || 0) * flightTime * qbEstimation;
         }
     } else {
         aimX = target.x;
         aimY = target.y;
     }
-    // DEEPER FIX: Scale error margin realistically to match receiver catch radii (1.2 - 1.5 yards).
-    // Dividing by 12 produced wild 6-yard misses that receivers couldn't even contest.
+
     const distancePower = 1.2 - (accuracy / 120);
     const distanceFactor = Math.pow(Math.max(0.5, throwDistance / 20), distancePower);
     let errorMargin = ((100 - accuracy) / 30) * distanceFactor;
@@ -2031,7 +2092,7 @@ export function executeThrow(qbState, target, throwPower, accuracy, playState, g
     aimX += (uX * longError) + (-uY * latError);
     aimY += (uY * longError) + (uX * latError);
 
-    // Keep standard pass attempts inside the boundary lines (only intentional throw-aways leave the field)
+    // Keep standard pass attempts inside the boundary lines
     if (!playState.ballState.isThrowAway) {
         aimX = Math.max(1.0, Math.min(FIELD_WIDTH - 1.0, aimX));
         aimY = Math.max(1.0, Math.min(118.5, aimY));
@@ -2043,14 +2104,11 @@ export function executeThrow(qbState, target, throwPower, accuracy, playState, g
     const finalDist = Math.hypot(aimX - startX, aimY - startY);
     const t = Math.max(0.1, finalDist / ballSpeed);
 
-    // Target the receiver's chest (1.6 yds = ~4.8 ft) instead of waist/knees (1.0 yd).
     const targetZ = 1.6;
     const startZ = 2.2;
     const deltaZ = targetZ - startZ;
     let vz = (deltaZ + (4.9 * t * t)) / t;
 
-    // For touch and lob passes crossing downfield over the line of scrimmage,
-    // enforce an upward arc so passes clear the defensive line helmet level.
     if ((passType === 'touch' || passType === 'lob') && aimY > playState.lineOfScrimmage) {
         const minApexZ = passType === 'lob' ? 3.5 : 2.7;
         const minVz = Math.sqrt(2 * 9.8 * Math.max(0.2, minApexZ - startZ));
@@ -2065,11 +2123,10 @@ export function executeThrow(qbState, target, throwPower, accuracy, playState, g
         targetX: aimX, targetY: aimY, targetPlayerId: target.id, throwerId: qbState.id, isThrowAway: false
     };
 
-
     qbState.hasBall = false;
     qbState.isBallCarrier = false;
     qbState.action = 'idle';
-    qbState.hasCompletedDropback = true; // Prevents re-entering dropback loops
+    qbState.hasCompletedDropback = true; 
 
     playState.statEvents.push({ type: 'pass_attempt', qbId: qbState.id });
     playState.statEvents.push({ type: 'target', receiverId: target.id });

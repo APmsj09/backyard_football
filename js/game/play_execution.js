@@ -737,10 +737,11 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                 const carrierVy = ballCarrierState.vy || 0;
                 pState.targetX = ballCarrierState.x + (carrierVx * leadTime);
                 pState.targetY = ballCarrierState.y + (carrierVy * leadTime);
-                pState.action = 'run_path';
+                pState.action = 'pursuit'; // FIX: Was 'run_path'
             }
             pState.targetX = Math.max(1, Math.min(52.3, pState.targetX));
             pState.targetY = Math.max(1, Math.min(119.0, pState.targetY));
+            setPointIntent(pState, pState.targetX, pState.targetY, 0.5); // FIX: Ensure proper intent is set
             resolveMovementIntent(pState);
         });
         return;
@@ -2305,6 +2306,9 @@ export function executeAssignment(pState, assignment, offenseStates, LOS, playSt
         const safetyHelp = calculateSafetyHelp(pState, playState.activePlayers.filter(p => !p.isOffense), offenseStates, ballCarrierState, playState, isBallInAir);
         if (safetyHelp && safetyHelp.type === 'help') {
             setPointIntent(pState, safetyHelp.helpX, safetyHelp.helpY, 0.5);
+            // FIX: Allow safeties breaking on the ball to use the leaping catch radius
+            if (isBallInAir) pState.action = 'tracking_ball'; 
+            else pState.action = 'pursuit';
             return;
         }
     }
@@ -2506,7 +2510,8 @@ export function executeAssignment(pState, assignment, offenseStates, LOS, playSt
             }
 
             const TETHER_LIMIT_X = isDeep ? 10.0 : 6.0;
-            pState.targetX = Math.max(zoneCenter.x - TETHER_LIMIT_X, Math.min(zoneCenter.x + TETHER_LIMIT_X, pState.targetX));
+            const activeTether = primaryThreat ? TETHER_LIMIT_X * 1.5 : TETHER_LIMIT_X;
+            pState.targetX = Math.max(zoneCenter.x - activeTether, Math.min(zoneCenter.x + activeTether, pState.targetX));
 
             if (!isDeep) {
                 const maxSinkDepth = LOS + (zone?.maxY || 15.0);
