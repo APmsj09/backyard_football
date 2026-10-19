@@ -13,6 +13,37 @@ const CENTER_X = FIELD_WIDTH / 2;
 const HASH_LEFT_X = 18.0;
 const HASH_RIGHT_X = 35.3;
 
+function getReceiverProjectionSpeedYPS(receiver) {
+    const baseSpeedYPS =
+        getPlayerBaseSpeedYPS(receiver) * (receiver.fatigueModifier || 1.0);
+
+    const currentSpeedYPS = Math.hypot(
+        receiver.vx || 0,
+        receiver.vy || 0
+    );
+
+    const routeStallTicks =
+        Number(receiver._routeWaypointStallTicks) || 0;
+
+    // A sustained route stall removes the normal projection-speed floor.
+    // Use observed movement rather than assuming the designed route is progressing.
+    if (
+        receiver.action === 'run_route' &&
+        routeStallTicks >= 8
+    ) {
+        return Math.min(
+            baseSpeedYPS,
+            Math.max(0.25, currentSpeedYPS * 1.15)
+        );
+    }
+
+    // Preserve the existing projection behavior for normal route movement.
+    return Math.min(
+        baseSpeedYPS,
+        Math.max(baseSpeedYPS * 0.55, currentSpeedYPS * 1.15)
+    );
+}
+
 export function diagnosePlay(pState, tick, offenseStates, playState = null) {
     const decisionProfile = getDecisionProfile(pState, tick);
     const visionContext = getPerceptionContext(
@@ -1254,7 +1285,7 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
         const estimatedFlightTime = distFromQB / estimatedBallSpeed;
 
         // Route projection logic
-        const recYPS = getPlayerBaseSpeedYPS(rec) * (rec.fatigueModifier || 1.0);
+        const recYPS = getReceiverProjectionSpeedYPS(rec);
         let distanceToTravel = recYPS * estimatedFlightTime;
 
         let currX = rec.x;
@@ -1997,11 +2028,7 @@ export function executeThrow(qbState, target, throwPower, accuracy, playState, g
                            (target.action === 'route_complete' && Math.hypot(target.vx || 0, target.vy || 0) > 0.8);
 
     if (isMovingTarget) {
-        const baseRecYPS = getPlayerBaseSpeedYPS(target) * (target.fatigueModifier || 1.0);
-        const currentSpeed = Math.hypot(target.vx || 0, target.vy || 0);
-
-        // FIX: If the receiver is making a break, settling, or not at a full sprint, don't project them at 100% max speed!
-        const recYPS = Math.min(baseRecYPS, Math.max(baseRecYPS * 0.55, currentSpeed * 1.15));
+        const recYPS = getReceiverProjectionSpeedYPS(target);
 
         const recVy = target.vy || 0;
         const effectiveBallSpeed = Math.max(8.0, ballSpeed - (recVy * 0.65));
