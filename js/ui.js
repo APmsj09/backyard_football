@@ -2437,7 +2437,7 @@ function renderDepthChartSide(side, gameState) {
                 if (['CB', 'S'].includes(posKey)) posKey = 'DB';
 
                 const ovr = player ? calculateOverall(player, posKey) : '--';
-                const shortName = player ? player.name.split(' ')[0] : 'EMPTY';
+                const shortName = player ? getPlayerLastNameForStats(player) : 'EMPTY';
                 const energy = player ? Math.max(0, Math.round(100 - (player.fatigue || 0))) : 100;
                 const isUnavailable = player && player.status?.duration > 0;
 
@@ -3423,16 +3423,63 @@ export function setupDragAndDrop(onDrop) { }
 
 export function setupDepthChartTabs() {
     const subTabs = document.querySelectorAll(".depth-chart-tab");
+
+    const legacyTabClasses = [
+        "bg-blue-50",
+        "text-blue-900",
+        "border-blue-200",
+        "bg-emerald-50",
+        "text-emerald-900",
+        "border-emerald-200",
+        "text-amber-700",
+        "bg-amber-50",
+        "border-amber-200",
+        "text-amber-600",
+        "border-amber-500",
+        "bg-slate-900",
+        "text-white",
+        "border-slate-900",
+        "bg-white",
+        "text-slate-600",
+        "border-transparent",
+        "shadow-sm",
+        "border"
+    ];
+
+    const setActiveTabStyle = (activeSubTab) => {
+        subTabs.forEach(t => {
+            t.classList.remove(...legacyTabClasses);
+
+            if (t.dataset.subTab === activeSubTab) {
+                t.classList.add(
+                    "active",
+                    "bg-slate-900",
+                    "text-white",
+                    "border",
+                    "border-slate-900",
+                    "shadow-sm"
+                );
+            } else {
+                t.classList.remove("active");
+                t.classList.add(
+                    "bg-white",
+                    "text-slate-600",
+                    "border",
+                    "border-transparent"
+                );
+            }
+        });
+    };
+
+    // Normalize the initial state as well as later tab changes.
+    setActiveTabStyle(
+        document.querySelector(".depth-chart-tab.active")?.dataset.subTab || "offense"
+    );
+
     subTabs.forEach(tab => {
         tab.addEventListener("click", () => {
             const subTab = tab.dataset.subTab;
-            subTabs.forEach(t => {
-                if (t.dataset.subTab === subTab) {
-                    t.classList.add("active", "text-amber-600", "border-amber-500");
-                } else {
-                    t.classList.remove("active", "text-amber-600", "border-amber-500");
-                }
-            });
+            setActiveTabStyle(subTab);
 
             const offensePane = document.getElementById("depth-chart-offense-pane");
             const defensePane = document.getElementById("depth-chart-defense-pane");
@@ -4212,6 +4259,21 @@ function runLiveGameStep() {
     }
 }
 
+function getPlayerLastNameForStats(player) {
+    if (typeof player?.lastName === 'string' && player.lastName.trim()) {
+        return player.lastName.trim();
+    }
+
+    const fullName = typeof player?.name === 'string'
+        ? player.name.trim()
+        : '';
+
+    if (!fullName) return 'Player';
+
+    const nameParts = fullName.split(/\s+/);
+    return nameParts[nameParts.length - 1] || 'Player';
+}
+
 export function renderLiveFieldLineup(frameData, gameState) {
     const container = document.getElementById('sim-field-players');
     if (!container || !frameData?.players || !gameState?.playerTeam) return;
@@ -4246,7 +4308,7 @@ export function renderLiveFieldLineup(frameData, gameState) {
                         ${p.slot || 'P'}
                     </span>
                     <div class="flex flex-col truncate">
-                        <span class="font-bold text-slate-200 truncate">${fullPlayer?.name || 'Player'}</span>
+                        <span class="font-bold text-slate-200 truncate">${getPlayerLastNameForStats(fullPlayer)}</span>
                         <span class="text-[9px] text-slate-400 capitalize truncate">${actionText}</span>
                     </div>
                 </div>
@@ -4450,7 +4512,7 @@ export function renderLiveBoxScore(activeGame) {
 
                 html += `
                     <div class="flex justify-between gap-2">
-                        <span>${p.name.split(' ')[0]}</span>
+                        <span>${getPlayerLastNameForStats(p)}</span>
                         <span>
                             ${stats.interceptions || 0} INT,
                             ${stats.fumbles || 0} FUM

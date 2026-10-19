@@ -459,9 +459,29 @@ function confirmFranchiseTakeover(teamId, coachDetails) {
         Game.rebuildDepthChartFromOrder(team);
     }
 
-    // Initialize Year 5 Draft for the human player and wipe any historical stats for the new season
+    // Initialize Year 5 Draft and reset all tracked stats for the new season.
     gameState.players.forEach(p => {
-        p.seasonStats = { receptions: 0, recYards: 0, passYards: 0, rushYards: 0, touchdowns: 0, tackles: 0, sacks: 0, interceptions: 0, passAttempts: 0, passCompletions: 0, interceptionsThrown: 0 };
+        p.seasonStats = {
+            passYards: 0,
+            passAttempts: 0,
+            passCompletions: 0,
+            interceptionsThrown: 0,
+            rushYards: 0,
+            rushAttempts: 0,
+            recYards: 0,
+            receptions: 0,
+            targets: 0,
+            drops: 0,
+            tackles: 0,
+            sacks: 0,
+            interceptions: 0,
+            fumbles: 0,
+            fumblesLost: 0,
+            fumblesRecovered: 0,
+            touchdowns: 0,
+            returnYards: 0,
+            safeties: 0
+        };
     });
     Game.setupDraft();
     gameState.draftCompleted = false;
@@ -744,14 +764,9 @@ window.checkUserRosterLimit = function() {
     if (rosterSize > limit) {
         advBtn.innerHTML = `<span>⚠️ Cut ${rosterSize - limit} Players</span>`;
         advBtn.className = 'btn bg-rose-700 hover:bg-rose-800 text-white font-bold py-2 px-6 rounded-sm text-sm uppercase tracking-wider transition shadow-sm border border-rose-900 animate-pulse';
-        advBtn.onclick = () => {
-            alert(`Summer Tryouts are over! You must cut ${rosterSize - limit} player(s) from the 'My Team' tab before Week 1 can begin.`);
-            UI.switchTab('my-team', gameState);
-        };
     } else {
         advBtn.innerHTML = `<span>Play Week 1</span>`;
         advBtn.className = 'btn bg-amber-500 hover:bg-amber-600 text-white font-bold py-2 px-6 rounded-sm text-sm uppercase tracking-wider transition shadow-sm border border-amber-600';
-        advBtn.onclick = handleAdvanceWeek;
     }
 };
 
@@ -879,6 +894,7 @@ function startExitInterviewFlow(retentions, onComplete, report = null) {
 
         player.teamId = null;
         player.number = null;
+        player.activePromise = null;
 
         // Keep the player available in Free Agency instead of marking him
         // "departed", which excludes him from recruitment.
@@ -1462,39 +1478,114 @@ export function openPlayerCard(playerId) {
             </div>`;
     }
 
-    // Tab 4: Career Stats Log
-    let statsTableHtml = '<p class="text-xs text-slate-400 italic py-4">No stats recorded yet.</p>';
-    if (player.progression && player.progression.length > 0) {
-        statsTableHtml = `
-            <table class="min-w-full text-xs font-mono">
-                <thead class="bg-slate-100 text-slate-600 uppercase text-[10px]">
-                    <tr>
-                        <th class="p-1.5 text-left">Yr</th>
-                        <th class="p-1.5 text-left">Team</th>
-                        <th class="p-1.5 text-center">Pass Yds</th>
-                        <th class="p-1.5 text-center">Rush Yds</th>
-                        <th class="p-1.5 text-center">Rec Yds</th>
-                        <th class="p-1.5 text-center">TDs</th>
-                        <th class="p-1.5 text-center">Tkls</th>
-                    </tr>
-                </thead>
-                <tbody class="divide-y divide-slate-100 text-[11px]">
-                    ${player.progression.map(pr => {
-            const st = pr.stats || {};
-            return `
-                        <tr>
-                            <td class="p-1.5 font-bold">Y${pr.year}</td>
-                            <td class="p-1.5 font-sans truncate max-w-[90px]">${pr.teamName}</td>
-                            <td class="p-1.5 text-center">${st.passYards || 0}</td>
-                            <td class="p-1.5 text-center">${st.rushYards || 0}</td>
-                            <td class="p-1.5 text-center">${st.recYards || 0}</td>
-                            <td class="p-1.5 text-center font-bold text-amber-600">${st.touchdowns || 0}</td>
-                            <td class="p-1.5 text-center">${st.tackles || 0}</td>
-                        </tr>`;
-        }).join('')}
-                </tbody>
-            </table>`;
-    }
+        // Tab 4: Career Totals + Season-by-Season Stats
+    const careerStats = player.careerStats || {};
+
+    const careerStatColumns = [
+        { key: 'passYards', label: 'Pass Yds' },
+        { key: 'passAttempts', label: 'Pass Att' },
+        { key: 'passCompletions', label: 'Pass Comp' },
+        { key: 'interceptionsThrown', label: 'INT Thrown' },
+        { key: 'rushYards', label: 'Rush Yds' },
+        { key: 'rushAttempts', label: 'Rush Att' },
+        { key: 'recYards', label: 'Rec Yds' },
+        { key: 'receptions', label: 'Receptions' },
+        { key: 'targets', label: 'Targets' },
+        { key: 'drops', label: 'Drops' },
+        { key: 'touchdowns', label: 'TDs' },
+        { key: 'tackles', label: 'Tackles' },
+        { key: 'sacks', label: 'Sacks' },
+        { key: 'interceptions', label: 'INTs' },
+        { key: 'fumbles', label: 'Fumbles' },
+        { key: 'fumblesLost', label: 'Fumbles Lost' },
+        { key: 'fumblesRecovered', label: 'Fumbles Rec.' },
+        { key: 'returnYards', label: 'Return Yds' },
+        { key: 'safeties', label: 'Safeties' }
+    ];
+
+    const careerTotalsHtml = `
+        <div class="border border-slate-200 rounded p-3">
+            <h5 class="font-bold text-xs uppercase tracking-wider text-slate-600 mb-2">
+                Career Totals
+            </h5>
+            <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-1.5">
+                ${careerStatColumns.map(stat => `
+                    <div class="bg-slate-50 border border-slate-100 rounded p-2">
+                        <span class="block text-[9px] uppercase tracking-wide text-slate-500">
+                            ${stat.label}
+                        </span>
+                        <span class="block text-sm font-black font-mono text-slate-900">
+                            ${Number(careerStats[stat.key]) || 0}
+                        </span>
+                    </div>
+                `).join('')}
+                <div class="bg-slate-50 border border-slate-100 rounded p-2">
+                    <span class="block text-[9px] uppercase tracking-wide text-slate-500">
+                        Seasons
+                    </span>
+                    <span class="block text-sm font-black font-mono text-slate-900">
+                        ${Number(careerStats.seasonsPlayed) || 0}
+                    </span>
+                </div>
+            </div>
+        </div>`;
+
+    const progressionHistory = Array.isArray(player.progression)
+        ? player.progression
+        : [];
+
+    const seasonStatsTableHtml = progressionHistory.length > 0
+        ? `
+            <div class="border border-slate-200 rounded p-3">
+                <h5 class="font-bold text-xs uppercase tracking-wider text-slate-600 mb-2">
+                    Season-by-Season
+                </h5>
+                <div class="overflow-x-auto">
+                    <table class="min-w-full text-xs font-mono">
+                        <thead class="bg-slate-100 text-slate-600 uppercase text-[10px]">
+                            <tr>
+                                <th class="p-1.5 text-left">Yr</th>
+                                <th class="p-1.5 text-left">Team</th>
+                                <th class="p-1.5 text-center">Pass Yds</th>
+                                <th class="p-1.5 text-center">Rush Yds</th>
+                                <th class="p-1.5 text-center">Rec Yds</th>
+                                <th class="p-1.5 text-center">TDs</th>
+                                <th class="p-1.5 text-center">Tkls</th>
+                                <th class="p-1.5 text-center">Sacks</th>
+                                <th class="p-1.5 text-center">INTs</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-slate-100 text-[11px]">
+                            ${progressionHistory.map(pr => {
+                                const st = pr.stats || {};
+                                return `
+                                    <tr>
+                                        <td class="p-1.5 font-bold">Y${pr.year}</td>
+                                        <td class="p-1.5 font-sans truncate max-w-[90px]">
+                                            ${pr.teamName || '—'}
+                                        </td>
+                                        <td class="p-1.5 text-center">${Number(st.passYards) || 0}</td>
+                                        <td class="p-1.5 text-center">${Number(st.rushYards) || 0}</td>
+                                        <td class="p-1.5 text-center">${Number(st.recYards) || 0}</td>
+                                        <td class="p-1.5 text-center font-bold text-amber-600">
+                                            ${Number(st.touchdowns) || 0}
+                                        </td>
+                                        <td class="p-1.5 text-center">${Number(st.tackles) || 0}</td>
+                                        <td class="p-1.5 text-center">${Number(st.sacks) || 0}</td>
+                                        <td class="p-1.5 text-center">${Number(st.interceptions) || 0}</td>
+                                    </tr>`;
+                            }).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            </div>`
+        : '<p class="text-xs text-slate-400 italic py-2">No season-by-season history recorded yet.</p>';
+
+    const statsTableHtml = `
+        <div class="space-y-3">
+            ${careerTotalsHtml}
+            ${seasonStatsTableHtml}
+        </div>`;
 
     const modalHtml = `
         <div class="flex flex-col gap-3">
@@ -1950,7 +2041,7 @@ window.app = {
 
             if (res.accepted) {
                 Game.rebuildDepthChartFromOrder(gameState.playerTeam);
-                Game.saveGameState();
+                Game.saveGameState(activeSaveKey);
                 UI.renderDashboard(gameState);
             }
 
@@ -1963,7 +2054,7 @@ window.app = {
         const res = Game.discussPositionChange(p, targetPos, gameState.playerTeam, true);
         if (res.accepted) {
             Game.rebuildDepthChartFromOrder(gameState.playerTeam);
-            Game.saveGameState();
+            Game.saveGameState(activeSaveKey);
             UI.renderDashboard(gameState);
             alert(`🤝 Persuaded!\n\n${res.quote}\n\n${p.name} is now practicing at ${targetPos}!`);
             UI.hideModal();
@@ -2083,7 +2174,7 @@ window.app = {
             if (team.socialProfile) {
                 team.socialProfile.streetCred = Math.max(0, (team.socialProfile.streetCred || 50) - 2);
             }
-            Game.saveGameState();
+            Game.saveGameState(activeSaveKey);
             window.app.renderStoreTab(gs);
         }
     },
@@ -2212,6 +2303,7 @@ window.app = {
     cutPlayer: (id) => {
         if (confirm("Cut this player?")) {
             Game.playerCut(id);
+            Game.saveGameState(activeSaveKey);
             UI.hideModal();
             gameState = Game.getGameState();
             UI.switchTab('my-team', gameState);
@@ -2322,8 +2414,10 @@ function main() {
     }
 
     startupCheckbox?.addEventListener('change', (e) => {
-        setDebugMode(e.target.checked);
-        syncDebugUI(e.target.checked);
+        const enabled = e.target.checked;
+        setDebugMode(enabled);
+        syncDebugUI(enabled);
+        refreshDebugModeButton();
     });
 
     syncDebugUI(isDebugMode());
@@ -2413,7 +2507,9 @@ function main() {
     }
 
     debugModeBtn?.addEventListener('click', () => {
-        setDebugMode(!isDebugMode());
+        const enabled = !isDebugMode();
+        setDebugMode(enabled);
+        syncDebugUI(enabled);
         refreshDebugModeButton();
     });
 

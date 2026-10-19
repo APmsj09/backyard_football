@@ -16,7 +16,8 @@ import {
     rebuildDepthChartFromOrder, aiSetDepthChart, assignTeamCaptain, isPlayerViableForPosition
 } from './depth_chart.js';
 import {
-    initializeTeamStaff, generateStaffPool, checkRetiredPlayerToCoach, aiManageTeamStaff
+    initializeTeamStaff, generateStaffPool, checkRetiredPlayerToCoach,
+    aiManageTeamStaff, aiBuildGameplan, aiChooseWeeklyPractice
 } from './staff.js';
 import {
     evaluatePlayerRetention,
@@ -31,6 +32,28 @@ export const ROSTER_LIMIT = 18;
 export const REGULAR_SEASON_ROSTER_LIMIT = 18;
 export const SUMMER_ROSTER_LIMIT = 24;
 export const MIN_HEALTHY_PLAYERS = 8;
+
+const createEmptySeasonStats = () => ({
+    passYards: 0,
+    passAttempts: 0,
+    passCompletions: 0,
+    interceptionsThrown: 0,
+    rushYards: 0,
+    rushAttempts: 0,
+    recYards: 0,
+    receptions: 0,
+    targets: 0,
+    drops: 0,
+    tackles: 0,
+    sacks: 0,
+    interceptions: 0,
+    fumbles: 0,
+    fumblesLost: 0,
+    fumblesRecovered: 0,
+    touchdowns: 0,
+    returnYards: 0,
+    safeties: 0
+});
 
 export function getCurrentRosterLimit(gameState) {
     // Week 0 Summer expansion (24) only applies while draft and offseason FA are active
@@ -774,7 +797,7 @@ export function updatePlayerStatuses() {
         if (!player || !player.status) continue;
         if (player.status.duration > 0) {
             player.status.duration--;
-            if (player.status.duration === 0) {
+            if (player.status.duration === 0 && player.status.type !== 'temporary') {
                 player.status.type = 'healthy';
                 player.status.description = '';
                 if (player.teamId === game.playerTeam?.id) {
@@ -1123,20 +1146,23 @@ export function processEndOfWeek() {
         processLockerRoomCulture(t, game.gameLog);
     });
 
-    // Process gameplans & practices across the league (including delegated user team)
+    // Process gameplans & practices before applying this week's practice.
+    // These staff functions are statically imported, so their results are
+    // available immediately rather than arriving after practice has run.
     game.teams.forEach(t => {
-        const isDelegated = t.isPlayerControlled && (t.gameplan?.delegatePractice || t.gameplan?.delegateGameplan);
+        const isDelegated = t.isPlayerControlled &&
+            (t.gameplan?.delegatePractice || t.gameplan?.delegateGameplan);
 
         if (!t.isPlayerControlled || isDelegated) {
-            import('./staff.js').then(staffModule => {
-                const directive = t.gameplan?.gmDirective || 'COACH_AUTONOMY';
-                if (!t.isPlayerControlled || t.gameplan?.delegateGameplan) {
-                    staffModule.aiBuildGameplan(t, null, directive);
-                }
-                if (!t.isPlayerControlled || t.gameplan?.delegatePractice) {
-                    t.gameplan.weeklyPractice = staffModule.aiChooseWeeklyPractice(t, null, directive);
-                }
-            }).catch(() => { });
+            const directive = t.gameplan?.gmDirective || 'COACH_AUTONOMY';
+
+            if (!t.isPlayerControlled || t.gameplan?.delegateGameplan) {
+                aiBuildGameplan(t, null, directive);
+            }
+
+            if (!t.isPlayerControlled || t.gameplan?.delegatePractice) {
+                t.gameplan.weeklyPractice = aiChooseWeeklyPractice(t, null, directive);
+            }
         }
 
         processWeeklyPractice(t, game.gameLog);
@@ -2233,10 +2259,27 @@ export function advanceToOffseason() {
                     return;
                 }
 
+                // Age-18 seniors are retiring in the lifecycle pass below.
+                // Leave them attached so retirement and player history are processed normally.
+                if (p.age >= 18) return;
+
                 const isUserTeam =
                     relTeam.id === game.playerTeam?.id;
 
                 const reason = 'Refused to play in Sandlot Circuit (Tier 2)';
+
+                // Resolve due promises before allowing an exit interview.
+                const retentionCheck = evaluatePlayerRetention(
+                    p,
+                    relTeam,
+                    p.careerStats?.snapsThisSeason || 0
+                );
+
+                if (retentionCheck.permanentDeparture) {
+                    // Do not queue an interview. Keep the player attached so
+                    // the normal lifecycle records the permanent departure.
+                    return;
+                }
 
                 if (isUserTeam && game.year >= 5) {
                     if (!pendingRetentionIds.has(p.id)) {
@@ -2443,7 +2486,7 @@ export function advanceToOffseason() {
         // Record End-of-Year Progression Snapshot WITH DETAILED ATTRIBUTE GAINS
         if (!player.progression) player.progression = [];
         player.progression.push({
-            year: game.year,
+            year: game.year - 1,
             age: player.age,
             teamName: teamName,
             ovr: calculateOverall(player, estimateBestPosition(player)),
@@ -2639,7 +2682,7 @@ export function advanceToOffseason() {
             }
         }
 
-        player.seasonStats = { receptions: 0, recYards: 0, passYards: 0, rushYards: 0, touchdowns: 0, tackles: 0, sacks: 0, interceptions: 0, passAttempts: 0, passCompletions: 0, interceptionsThrown: 0 };
+        player.seasonStats = createEmptySeasonStats();
         if (!playerIsLeaving) {
             if (!player.status) player.status = {};
             player.status = { type: 'healthy', description: '', duration: 0 };
@@ -2760,7 +2803,7 @@ export function advanceToOffseason() {
             kid.careerStats.seasonsPlayed = (kid.careerStats.seasonsPlayed || 0) + 1;
 
             // Reset season stats for all returning youth players
-            kid.seasonStats = { receptions: 0, recYards: 0, passYards: 0, rushYards: 0, touchdowns: 0, tackles: 0, sacks: 0, interceptions: 0, passAttempts: 0, passCompletions: 0, interceptionsThrown: 0 };
+            kid.seasonStats = createEmptySeasonStats();
 
             // Pee-Wee graduates at age 12 into the Rookie Draft
             if (kid.age >= 12) {
@@ -2867,6 +2910,9 @@ export function advanceToOffseason() {
 
     game.gameResults = [];
     game.breakthroughs = [];
+    game.offseasonFACompleted = false;
+    game._faDay = 1;
+    game._activeFaMarket = new Map();
     game.currentWeek = 0;
     // AUTONOMOUS AI CAROUSEL: AI GMs manage staff, fire bad coaches, hire legends
     game.teams.forEach(t => {
