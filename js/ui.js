@@ -1793,6 +1793,7 @@ export function renderStaffTab(gameState) {
 let rosterSortCol = 'ovr';
 let rosterSortDir = 'desc';
 let myRosterView = 'skills';
+let leagueStatsView = 'all';
 
 // These are the stat fields accumulated into seasonStats and careerStats.
 const PLAYER_STAT_COLUMNS = [
@@ -2947,24 +2948,124 @@ export function renderStandingsTab(gameState) {
     `;
 }
 
+window.app_setLeagueStatsView = function (view) {
+    if (!['all', 'offense', 'defense'].includes(view)) return;
+
+    leagueStatsView = view;
+    renderPlayerStatsTab(getGameState());
+};
+
 export function renderPlayerStatsTab(gameState) {
     if (!elements.playerStatsContainer || !Array.isArray(gameState?.players)) return;
 
-    // Before Week 1, clear stale tracked season stats and show kickoff state.
+    const teams = Array.isArray(gameState.teams) ? gameState.teams : [];
+    const teamById = new Map(teams.map(team => [String(team.id), team]));
+
+    // Populate the Team dropdown before any early returns.
+    // The HTML contains this select, but no initial team options.
+    if (elements.statsFilterTeam) {
+        const previousTeamId = elements.statsFilterTeam.value || '';
+
+        const teamOptions = [...teams]
+            .sort((a, b) => (a.name || '').localeCompare(b.name || ''))
+            .map(team =>
+                `<option value="${team.id}">${team.name || 'Unnamed Team'}</option>`
+            )
+            .join('');
+
+        elements.statsFilterTeam.innerHTML =
+            `<option value="">All Teams</option>${teamOptions}`;
+
+        elements.statsFilterTeam.value = teams.some(
+            team => String(team.id) === previousTeamId
+        ) ? previousTeamId : '';
+    }
+
+    const leagueSelect = document.getElementById('stats-filter-league');
+
+    // Explicitly connect filter and sorting changes to the current renderer.
+    if (elements.statsFilterTeam) {
+        elements.statsFilterTeam.onchange = () =>
+            renderPlayerStatsTab(getGameState());
+    }
+
+    if (leagueSelect) {
+        leagueSelect.onchange = () =>
+            renderPlayerStatsTab(getGameState());
+    }
+
+    if (elements.statsSort) {
+        elements.statsSort.onchange = () =>
+            renderPlayerStatsTab(getGameState());
+    }
+
+    // Offensive statistics.
+    const offensiveStatKeys = [
+        'passYards',
+        'passAttempts',
+        'passCompletions',
+        'interceptionsThrown',
+        'rushYards',
+        'rushAttempts',
+        'recYards',
+        'receptions',
+        'targets',
+        'drops',
+        'touchdowns',
+        'fumbles',
+        'fumblesLost',
+        'returnYards'
+    ];
+
+    // Defensive statistics.
+    const defensiveStatKeys = [
+        'tackles',
+        'sacks',
+        'interceptions',
+        'fumblesRecovered',
+        'safeties',
+        'touchdowns'
+    ];
+
+    const activeStatColumns = leagueStatsView === 'offense'
+        ? PLAYER_STAT_COLUMNS.filter(stat => offensiveStatKeys.includes(stat.key))
+        : leagueStatsView === 'defense'
+            ? PLAYER_STAT_COLUMNS.filter(stat => defensiveStatKeys.includes(stat.key))
+            : PLAYER_STAT_COLUMNS;
+
+    // Keep the sort dropdown synchronized with the active stat view.
+    const previousSort = elements.statsSort?.value || 'touchdowns';
+
+    const sortStat = activeStatColumns.some(stat => stat.key === previousSort)
+        ? previousSort
+        : activeStatColumns.find(stat => stat.key === 'touchdowns')?.key
+            || activeStatColumns[0]?.key
+            || 'touchdowns';
+
+    if (elements.statsSort) {
+        elements.statsSort.innerHTML = activeStatColumns.map(stat =>
+            `<option value="${stat.key}">Sort by: ${stat.label}</option>`
+        ).join('');
+
+        elements.statsSort.value = sortStat;
+    }
+
+    // Before Week 1, clear stale stats and show the kickoff message.
+    // Dropdowns are now initialized even when this early return runs.
     if (gameState.currentWeek === 0) {
-        const zeroedSeasonStats = Object.fromEntries(
+        const zeroedStats = Object.fromEntries(
             PLAYER_STAT_COLUMNS.map(stat => [stat.key, 0])
         );
 
-        gameState.players.forEach(p => {
-            if (!p?.seasonStats) return;
+        gameState.players.forEach(player => {
+            if (!player?.seasonStats) return;
 
             const hasStats = PLAYER_STAT_COLUMNS.some(
-                stat => Number(p.seasonStats[stat.key]) !== 0
+                stat => Number(player.seasonStats[stat.key]) > 0
             );
 
             if (hasStats) {
-                p.seasonStats = { ...zeroedSeasonStats };
+                player.seasonStats = { ...zeroedStats };
             }
         });
 
@@ -2981,41 +3082,23 @@ export function renderPlayerStatsTab(gameState) {
         return;
     }
 
-    const teamById = new Map(
-        (gameState.teams || []).map(team => [team.id, team])
-    );
-
     const teamIdFilter = elements.statsFilterTeam?.value || '';
-    const leagueFilter = document.getElementById('stats-filter-league')?.value || '';
+    const leagueFilter = leagueSelect?.value || '';
 
-    // Expand the existing sort dropdown to include every tracked season stat.
-    const previousSort = elements.statsSort?.value || 'touchdowns';
-    const validSort = PLAYER_STAT_COLUMNS.some(stat => stat.key === previousSort)
-        ? previousSort
-        : 'touchdowns';
+    let players = gameState.players.filter(player => {
+        if (!player?.teamId) return false;
 
-    if (elements.statsSort) {
-        elements.statsSort.innerHTML = PLAYER_STAT_COLUMNS.map(stat =>
-            `<option value="${stat.key}">${stat.label.toUpperCase()}</option>`
-        ).join('');
-
-        elements.statsSort.value = validSort;
-    }
-
-    const sortStat = elements.statsSort?.value || 'touchdowns';
-
-    let players = gameState.players.filter(p => {
-        if (!p?.teamId) return false;
-
-        if (teamIdFilter && p.teamId !== teamIdFilter) {
+        if (
+            teamIdFilter &&
+            String(player.teamId) !== String(teamIdFilter)
+        ) {
             return false;
         }
 
-        const team = teamById.get(p.teamId);
+        const team = teamById.get(String(player.teamId));
 
         if (leagueFilter) {
             if (!team) return false;
-
             if (leagueFilter === 'tier1' && team.tier !== 1) return false;
             if (leagueFilter === 'tier2' && team.tier !== 2) return false;
             if (leagueFilter === 'youth' && team.leagueType !== 'youth') return false;
@@ -3029,16 +3112,22 @@ export function renderPlayerStatsTab(gameState) {
         (Number(a.seasonStats?.[sortStat]) || 0)
     );
 
+    // Preserve the existing 50-player display limit.
     players = players.slice(0, 50);
 
-    const statHeaders = PLAYER_STAT_COLUMNS.map(stat =>
+    const tabClass = view => leagueStatsView === view
+        ? 'bg-slate-900 text-white shadow-sm'
+        : 'text-slate-600 hover:bg-white';
+
+    const statHeaders = activeStatColumns.map(stat =>
         `<th class="py-2 px-2 text-center whitespace-nowrap">${stat.label}</th>`
     ).join('');
 
     const playerRows = players.length > 0
-        ? players.map(p => {
-            const stats = p.seasonStats || {};
-            const team = teamById.get(p.teamId);
+        ? players.map(player => {
+            const stats = player.seasonStats || {};
+            const team = teamById.get(String(player.teamId));
+            const pos = player.pos || estimateBestPosition(player);
 
             const leagueName = !team
                 ? '—'
@@ -3050,17 +3139,17 @@ export function renderPlayerStatsTab(gameState) {
                             ? 'Sandlot Circuit'
                             : '—';
 
-            const pos = p.pos || estimateBestPosition(p);
-
-            const statCells = PLAYER_STAT_COLUMNS.map(stat =>
-                `<td class="py-1.5 px-2 text-center whitespace-nowrap">${Number(stats[stat.key]) || 0}</td>`
+            const statCells = activeStatColumns.map(stat =>
+                `<td class="py-1.5 px-2 text-center whitespace-nowrap">
+                    ${Number(stats[stat.key]) || 0}
+                </td>`
             ).join('');
 
             return `
                 <tr class="hover:bg-gray-50 cursor-pointer transition"
-                    onclick="app.openPlayerCard('${p.id}')">
+                    onclick="app.openPlayerCard('${player.id}')">
                     <td class="py-1.5 px-3 font-semibold text-gray-800 whitespace-nowrap">
-                        ${p.name}
+                        ${player.name}
                     </td>
                     <td class="py-1.5 px-3 text-gray-700 whitespace-nowrap">
                         ${team?.name || '—'}
@@ -3068,19 +3157,44 @@ export function renderPlayerStatsTab(gameState) {
                     <td class="py-1.5 px-3 text-gray-600 whitespace-nowrap">
                         ${leagueName}
                     </td>
-                    <td class="py-1.5 px-2 text-center">${p.age ?? '—'}</td>
+                    <td class="py-1.5 px-2 text-center">${player.age ?? '—'}</td>
                     <td class="py-1.5 px-2 text-center font-bold">${pos}</td>
                     ${statCells}
                 </tr>`;
         }).join('')
         : `<tr>
-            <td colspan="${5 + PLAYER_STAT_COLUMNS.length}"
+            <td colspan="${5 + activeStatColumns.length}"
                 class="p-6 text-center text-slate-400 italic">
                 No players match the current filters.
             </td>
         </tr>`;
 
     elements.playerStatsContainer.innerHTML = `
+        <div class="sticky top-0 z-20 bg-slate-50 border-b border-slate-200 p-3
+                    flex flex-wrap items-center justify-between gap-3">
+            <div class="flex flex-wrap gap-1 rounded border border-slate-300
+                        bg-slate-200 p-1 text-xs font-bold">
+                <button
+                    class="px-3 py-1.5 rounded transition ${tabClass('all')}"
+                    onclick="app_setLeagueStatsView('all')">
+                    All Stats
+                </button>
+                <button
+                    class="px-3 py-1.5 rounded transition ${tabClass('offense')}"
+                    onclick="app_setLeagueStatsView('offense')">
+                    🏈 Offense
+                </button>
+                <button
+                    class="px-3 py-1.5 rounded transition ${tabClass('defense')}"
+                    onclick="app_setLeagueStatsView('defense')">
+                    🛡️ Defense
+                </button>
+            </div>
+            <span class="text-[10px] text-slate-500 font-mono">
+                Showing ${players.length} players · Sorted by ${activeStatColumns.find(stat => stat.key === sortStat)?.label || sortStat}
+            </span>
+        </div>
+
         <div class="overflow-x-auto">
             <table class="min-w-full bg-white text-xs">
                 <thead class="bg-gray-800 text-white uppercase text-[10px] tracking-wider">
