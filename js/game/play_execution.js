@@ -2418,11 +2418,28 @@ export function executeAssignment(pState, assignment, offenseStates, LOS, playSt
             const defCoverSkill = pState.coverage || 50;
 
             const speedDiff = recSpeed - defSpeed;
-            let cushionY = (targetRec.y > LOS + 15) ? 2.5 : 1.5;
-            if (speedDiff > 10) cushionY += 2.0;
-            if (speedDiff < -15) cushionY = Math.max(1.0, cushionY - 1.0);
+            
+            // REALISM FIX: DBs don't know the route name. They read the receiver's alignment.
+            // Receivers lined up close to the formation (tight splits / slots) have limited room to run deep,
+            // so high-IQ DBs naturally squeeze them. Wide splits require deeper cushions.
+            const receiverWidth = Math.abs(targetRec.x - CENTER_X);
+            const isTightSplit = receiverWidth < 10.0; // Slot or compressed alignment
+            
+            const iqFactor = Math.max(-0.6, Math.min(1.0, (defIQ - 50) / 40)); // -0.6 (slow learner) to +1.0 (shut-down lock)
+            
+            // Base cushion depends entirely on pre-snap alignment width, NOT the play call
+            let baseCushionY = isTightSplit ? 1.1 : 2.2; 
+            let baseCushionX = (targetRec.x < CENTER_X) ? 0.5 : -0.5; // Inside leverage
 
-            let cushionX = (targetRec.x < CENTER_X) ? 0.5 : -0.5;
+            // Attribute Scaling: High-IQ / High-Agility DBs squeeze tighter; low-IQ DBs play soft and give cushion
+            let agilityFactor = (defAgility / 50);
+            let cushionY = Math.max(0.6, baseCushionY - (iqFactor * 0.5) - ((agilityFactor - 1) * 0.3));
+            let cushionX = baseCushionX * (0.8 + (iqFactor * 0.2));
+
+            // Speed mismatch adjustment: If the receiver is a burner, smart DBs bail out deeper to prevent getting beat deep
+            if (speedDiff > 12 && defIQ >= 50) {
+                cushionY += 1.5; // Respect deep speed
+            }
 
             if (targetRec.y < LOS + 3 && getDistance(pState, targetRec) < 3.0) {
                 if (typeof pState.jamDecisionMade === 'undefined') {
