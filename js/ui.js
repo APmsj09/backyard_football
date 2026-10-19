@@ -3758,27 +3758,44 @@ export function renderPlaybookManager(gameState) {
                             const isLockedBasic = BASICS_OFF.includes(key);
                             const isActive = isInstalledCustom || isLockedBasic;
                             const mastery = team.gameplan.mastery[key] || (isLockedBasic ? 85 : 35);
-                            const isCompatible = !play.compatibleFormations || play.compatibleFormations.includes(team.formations?.offense || 'Balanced');
+                            const isCompatible = !play.compatibleFormations ||
+                                play.compatibleFormations.includes(team.formations?.offense || 'Balanced');
                             const cleanName = getPlayDisplayName(play, key);
                             const personnelBadge = getPlayPersonnelBadge(play, team.formations?.offense);
 
+                            const schemeFitBadge = !play.compatibleFormations
+                                ? '<span class="text-[8px] bg-slate-100 text-slate-500 px-1 rounded">All Formations</span>'
+                                : isCompatible
+                                    ? '<span class="text-[8px] bg-emerald-100 text-emerald-800 px-1 rounded font-bold">✓ Scheme Fit</span>'
+                                    : `<span class="text-[8px] bg-slate-100 text-slate-600 px-1 rounded font-bold"
+                                               title="Compatible formations: ${play.compatibleFormations.join(', ')}">
+                                           Fits: ${play.compatibleFormations.join(', ')}
+                                       </span>`;
+
                             return `
-                            <div class="p-2 rounded border ${isActive ? 'border-emerald-300 bg-emerald-50/30' : (isCompatible ? 'border-slate-200 bg-white hover:border-blue-400' : 'border-slate-200 bg-slate-50 opacity-60')} flex flex-col justify-between transition cursor-pointer group shadow-sm" onclick="app_previewPlay('${key}', 'offense')">
+                            <div class="p-2 rounded border ${isActive ? 'border-emerald-300 bg-emerald-50/30' : 'border-slate-200 bg-white hover:border-blue-400'} flex flex-col justify-between transition cursor-pointer group shadow-sm" onclick="app_previewPlay('${key}', 'offense')">
                                 <div class="truncate mb-1.5">
                                     <div class="flex justify-between items-start">
                                         <span class="font-bold text-slate-800 group-hover:text-blue-700 truncate text-[11px]" title="${cleanName}">${cleanName} 🔍</span>
                                     </div>
                                     <div class="flex items-center gap-1 mt-0.5">
                                         <span class="text-[8px] bg-slate-100 text-slate-600 px-1 rounded font-mono">${personnelBadge}</span>
-                                        ${play.compatibleFormations ? `<span class="text-[8px] text-blue-700 font-bold">${play.compatibleFormations[0]}</span>` : '<span class="text-[8px] text-slate-400">All Forms</span>'}
+                                        ${schemeFitBadge}
                                     </div>
                                 </div>
                                 <div class="flex justify-between items-center border-t pt-1">
                                     <span class="text-[9px] text-slate-400 font-mono">${mastery}% Mst</span>
-                                    ${isActive ? `
-                                        <span class="text-[9px] font-black uppercase text-emerald-700 bg-emerald-100 px-1.5 py-0.5 rounded">✓ In Plan</span>
+                                    ${isInstalledCustom ? `
+                                        <div class="flex items-center gap-1">
+                                            <span class="text-[9px] font-black uppercase text-emerald-700 bg-emerald-100 px-1.5 py-0.5 rounded">✓ In Plan</span>
+                                            <button class="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase bg-rose-100 text-rose-800 hover:bg-rose-200 transition"
+                                                    onclick="event.stopPropagation(); app_toggleInstallPlay('${key}', 'offense')">
+                                                Uninstall
+                                            </button>
+                                        </div>
                                     ` : `
-                                        <button class="px-2 py-0.5 rounded text-[9px] font-bold uppercase bg-slate-900 text-white hover:bg-slate-800 transition" onclick="event.stopPropagation(); app_toggleInstallPlay('${key}', 'offense')">
+                                        <button class="px-2 py-0.5 rounded text-[9px] font-bold uppercase bg-slate-900 text-white hover:bg-slate-800 transition"
+                                                onclick="event.stopPropagation(); app_toggleInstallPlay('${key}', 'offense')">
                                             + Install
                                         </button>
                                     `}
@@ -3808,17 +3825,31 @@ export function renderPlaybookManager(gameState) {
                         const isBasic = idx < BASICS_DEF.length;
                         const customSlotNum = idx - BASICS_DEF.length + 1;
                         const mastery = team.gameplan.mastery[key] || (isBasic ? 85 : 40);
-                        let barColor = mastery >= 75 ? 'bg-emerald-500' : (mastery >= 50 ? 'bg-amber-500' : 'bg-rose-500');
+                        const cleanName = getPlayDisplayName(play, key);
+                        const conceptLabel = play.concept || 'Scheme';
+                        const tagLabel = (play.tags?.[0] || (play.blitz ? 'blitz' : 'coverage'))
+                            .replace(/_/g, ' ');
+                        const barColor = mastery >= 75
+                            ? 'bg-emerald-500'
+                            : (mastery >= 50 ? 'bg-amber-500' : 'bg-rose-500');
 
                         return `
-                        <div class="p-2.5 rounded border ${isBasic ? 'border-slate-300 bg-slate-50' : 'border-red-300 bg-red-50/50'} hover:shadow-md transition cursor-pointer flex flex-col justify-between group" onclick="app_previewPlay('${key}', 'defense')">
+                        <div class="p-2.5 rounded border ${isBasic ? 'border-slate-300 bg-slate-50' : 'border-red-300 bg-red-50/50'} hover:shadow-md transition cursor-pointer flex flex-col justify-between group"
+                             onclick="app_previewPlay('${key}', 'defense')">
                             <div>
                                 <div class="flex justify-between items-start mb-1">
-                                    <span class="font-bold text-slate-900 group-hover:text-rose-700 transition truncate text-[11px]">${play.name || key} 🔍</span>
+                                    <span class="font-bold text-slate-900 group-hover:text-rose-700 transition truncate text-[11px]"
+                                          title="${cleanName}">${cleanName} 🔍</span>
                                     <span class="text-[8px] font-black uppercase px-1 rounded ${isBasic ? 'bg-slate-200 text-slate-700' : 'bg-red-700 text-white'}">
                                         ${isBasic ? 'LOCKED' : `#${customSlotNum}`}
                                     </span>
                                 </div>
+
+                                <div class="flex items-center gap-1.5 mb-1.5">
+                                    <span class="text-[8px] bg-white border border-slate-200 text-slate-600 px-1 rounded font-mono">${conceptLabel}</span>
+                                    <span class="text-[8px] bg-red-100 text-red-900 px-1 rounded font-bold uppercase">${tagLabel}</span>
+                                </div>
+
                                 <div class="flex items-center justify-between text-[9px] text-slate-500 font-mono">
                                     <span>Mastery: <b>${mastery}%</b></span>
                                     <div class="w-12 bg-slate-200 rounded-full h-1.5 overflow-hidden">
@@ -3826,10 +3857,12 @@ export function renderPlaybookManager(gameState) {
                                     </div>
                                 </div>
                             </div>
+
                             <div class="mt-2 pt-1 border-t ${isBasic ? 'border-slate-200' : 'border-red-200'} flex justify-between items-center text-[9px]">
-                                <span class="text-slate-400 capitalize truncate">${play.concept || 'Scheme'}</span>
+                                <span class="text-slate-400 capitalize truncate">${isBasic ? 'Backyard Basic' : 'Custom Gameplan'}</span>
                                 ${isBasic ? '<span class="text-slate-400 font-bold uppercase">Basic</span>' : `
-                                <button class="px-1.5 py-0.5 rounded font-bold uppercase bg-rose-100 text-rose-800 hover:bg-rose-200 transition" onclick="event.stopPropagation(); app_toggleInstallPlay('${key}', 'defense')">
+                                <button class="px-1.5 py-0.5 rounded font-bold uppercase bg-rose-100 text-rose-800 hover:bg-rose-200 transition"
+                                        onclick="event.stopPropagation(); app_toggleInstallPlay('${key}', 'defense')">
                                     Uninstall
                                 </button>`}
                             </div>
@@ -3864,27 +3897,49 @@ export function renderPlaybookManager(gameState) {
                             if (window._activePlaybookTabDef === 'short') return play.tags?.includes('runStop') || play.tags?.includes('prevent');
                             return true;
                         }).map(([key, play]) => {
-                            const isAlreadyActive = activeDefKeys.includes(key);
-                            if (isAlreadyActive) return '';
+                            const isInstalledCustom = team.gameplan.installedDefense.includes(key);
                             const mastery = team.gameplan.mastery[key] || 35;
-                            const isCompatible = !play.compatibleFormations || play.compatibleFormations.includes(team.formations?.defense || '3-2-3');
+                            const isCompatible = !play.compatibleFormations ||
+                                play.compatibleFormations.includes(team.formations?.defense || '3-2-3');
+
+                            const schemeFitBadge = !play.compatibleFormations
+                                ? '<span class="text-[8px] bg-slate-100 text-slate-500 px-1 rounded">All Formations</span>'
+                                : isCompatible
+                                    ? '<span class="text-[8px] bg-emerald-100 text-emerald-800 px-1 rounded font-bold">✓ Scheme Fit</span>'
+                                    : `<span class="text-[8px] bg-slate-100 text-slate-600 px-1 rounded font-bold"
+                                               title="Compatible formations: ${play.compatibleFormations.join(', ')}">
+                                           Fits: ${play.compatibleFormations.join(', ')}
+                                       </span>`;
 
                             return `
-                            <div class="p-2 rounded border ${isCompatible ? 'border-slate-200 bg-white hover:border-red-400' : 'border-slate-200 bg-slate-50 opacity-60'} flex flex-col justify-between transition cursor-pointer group shadow-sm" onclick="app_previewPlay('${key}', 'defense')">
+                            <div class="p-2 rounded border ${isInstalledCustom ? 'border-emerald-300 bg-emerald-50/30' : 'border-slate-200 bg-white hover:border-red-400'} flex flex-col justify-between transition cursor-pointer group shadow-sm"
+                                 onclick="app_previewPlay('${key}', 'defense')">
                                 <div class="truncate mb-1.5">
                                     <div class="flex justify-between items-start">
-                                        <span class="font-bold text-slate-800 group-hover:text-rose-700 truncate text-[11px]">${play.name || key} 🔍</span>
+                                        <span class="font-bold text-slate-800 group-hover:text-rose-700 truncate text-[11px]"
+                                              title="${play.name || key}">${play.name || getPlayDisplayName(play, key)} 🔍</span>
                                     </div>
-                                    <div class="flex items-center gap-1 mt-0.5">
+                                    <div class="flex items-center gap-1 mt-0.5 flex-wrap">
                                         <span class="text-[8px] bg-slate-100 text-slate-600 px-1 rounded uppercase font-bold">${play.concept || 'Scheme'}</span>
-                                        ${play.compatibleFormations ? `<span class="text-[8px] text-red-700 font-bold">${play.compatibleFormations[0]}</span>` : '<span class="text-[8px] text-slate-400">All Forms</span>'}
+                                        ${schemeFitBadge}
                                     </div>
                                 </div>
-                                <div class="flex justify-between items-center border-t pt-1">
+                                <div class="flex justify-between items-center border-t pt-1 mt-1">
                                     <span class="text-[9px] text-slate-400 font-mono">${mastery}% Mst</span>
-                                    <button class="px-2 py-0.5 rounded text-[9px] font-bold uppercase bg-slate-900 text-white hover:bg-slate-800 transition" onclick="event.stopPropagation(); app_toggleInstallPlay('${key}', 'defense')">
-                                        + Install
-                                    </button>
+                                    ${isInstalledCustom ? `
+                                        <div class="flex items-center gap-1">
+                                            <span class="text-[9px] font-black uppercase text-emerald-700 bg-emerald-100 px-1.5 py-0.5 rounded">✓ In Plan</span>
+                                            <button class="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase bg-rose-100 text-rose-800 hover:bg-rose-200 transition"
+                                                    onclick="event.stopPropagation(); app_toggleInstallPlay('${key}', 'defense')">
+                                                Uninstall
+                                            </button>
+                                        </div>
+                                    ` : `
+                                        <button class="px-2 py-0.5 rounded text-[9px] font-bold uppercase bg-slate-900 text-white hover:bg-slate-800 transition"
+                                                onclick="event.stopPropagation(); app_toggleInstallPlay('${key}', 'defense')">
+                                            + Install
+                                        </button>
+                                    `}
                                 </div>
                             </div>`;
                         }).join('')}
@@ -4514,15 +4569,37 @@ function drawPlayDiagram(canvas, playKey, side, team) {
         const mapping = form.mapping || {};
         const assignments = play.assignments || {};
 
-        // Resolve each player's starting coordinate and draw
-        const roleSlots = {
-            'QB': mapping.QB || 'QB1',
-            'RB': mapping.RB || 'RB1',
-            'X': mapping.X || 'WR1',
-            'Z': mapping.Z || 'WR2',
-            'Y': mapping.Y || 'TE1',
-            'H': mapping.H || 'WR3'
+        // Resolve diagram roles from the actual formation slots.
+        // Extra backs such as RB2 are included when the formation contains them.
+        const fallbackRoleBySlot = {
+            QB1: 'QB',
+            RB1: 'RB',
+            RB2: 'RB2',
+            FB: 'FB',
+            WR1: 'X',
+            WR2: 'Z',
+            WR3: 'H',
+            TE1: 'Y'
         };
+
+        const roleSlots = (form.slots || Object.keys(coords))
+            .filter(slot => coords[slot] && !/^OL\d+$/.test(slot))
+            .map(slot => {
+                const mappedRole = Object.entries(mapping)
+                    .find(([role, mappedSlot]) =>
+                        !Array.isArray(mappedSlot) && mappedSlot === slot
+                    )?.[0];
+
+                const role = mappedRole || fallbackRoleBySlot[slot] || slot;
+                const isFullback = slot === 'RB2' || slot === 'FB' ||
+                    role === 'RB2' || role === 'FB';
+
+                return {
+                    role,
+                    slot,
+                    label: isFullback ? 'FB' : role
+                };
+            });
 
         // Draw Offensive Linemen with proper pulling & screen release diagrams
         ['OL1', 'OL2', 'OL3'].forEach(olSlot => {
@@ -4563,7 +4640,7 @@ function drawPlayDiagram(canvas, playKey, side, team) {
         });
 
         // Draw Skill Players and Routes
-        Object.entries(roleSlots).forEach(([role, slot]) => {
+        roleSlots.forEach(({ role, slot, label }) => {
             const startPt = coords[slot];
             if (!startPt) return;
 
@@ -4582,9 +4659,11 @@ function drawPlayDiagram(canvas, playKey, side, team) {
             ctx.font = 'bold 8px sans-serif';
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
-            ctx.fillText(role, px, py);
+            ctx.fillText(label, px, py);
 
-            const assign = assignments[role] || (role === 'RB' ? assignments.RB : null);
+            const assign = assignments[role] ||
+                assignments[slot] ||
+                (label === 'FB' ? assignments.FB : null);
             if (!assign) return;
 
             // Route Path tracing
@@ -4613,11 +4692,33 @@ function drawPlayDiagram(canvas, playKey, side, team) {
                     curX = nextX;
                     curY = nextY;
                 });
-            } else if (assign.startsWith('run_')) {
-                // Ball carrier run design
-                const destX = assign.includes('right') ? sx + 10 : (assign.includes('left') ? sx - 10 : sx);
+            } else if (assign.startsWith('run_') && assign !== 'run_block') {
+                // Ball-carrier run design; support directional suffixes like _r and _l.
+                const goesRight = assign.includes('right') || /_r$/.test(assign);
+                const goesLeft = assign.includes('left') || /_l$/.test(assign);
+                const destX = goesRight ? sx + 10 : (goesLeft ? sx - 10 : sx);
                 const destY = 6;
+
                 drawArrow(px, py, toX(destX), toY(destY), '#fb923c', true);
+            } else if (assign.startsWith('lead_') || assign.startsWith('pull_')) {
+                // Lead blockers and pullers get a forward directional arrow.
+                const goesRight = assign.includes('right') || /_r$/.test(assign);
+                const goesLeft = assign.includes('left') || /_l$/.test(assign);
+                const destX = sx + (goesRight ? 4 : (goesLeft ? -4 : 0));
+
+                drawArrow(px, py, toX(destX), toY(sy + 3), '#fbbf24');
+            } else if (assign === 'run_block' || assign === 'pass_block') {
+                // Blocking assignment, not a ball-carrier run.
+                const blockY = toY(sy + 1.2);
+
+                ctx.strokeStyle = '#94a3b8';
+                ctx.lineWidth = 1.5;
+                ctx.beginPath();
+                ctx.moveTo(px, py);
+                ctx.lineTo(toX(sx), blockY);
+                ctx.moveTo(toX(sx) - 4, blockY);
+                ctx.lineTo(toX(sx) + 4, blockY);
+                ctx.stroke();
             }
         });
 
