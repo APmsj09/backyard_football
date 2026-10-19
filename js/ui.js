@@ -1792,6 +1792,30 @@ export function renderStaffTab(gameState) {
 
 let rosterSortCol = 'ovr';
 let rosterSortDir = 'desc';
+let myRosterView = 'skills';
+
+// These are the stat fields accumulated into seasonStats and careerStats.
+const PLAYER_STAT_COLUMNS = [
+    { key: 'passYards', label: 'Pass Yds' },
+    { key: 'passAttempts', label: 'Pass Att' },
+    { key: 'passCompletions', label: 'Pass Comp' },
+    { key: 'interceptionsThrown', label: 'INT Thrown' },
+    { key: 'rushYards', label: 'Rush Yds' },
+    { key: 'rushAttempts', label: 'Rush Att' },
+    { key: 'recYards', label: 'Rec Yds' },
+    { key: 'receptions', label: 'Receptions' },
+    { key: 'targets', label: 'Targets' },
+    { key: 'drops', label: 'Drops' },
+    { key: 'tackles', label: 'Tackles' },
+    { key: 'sacks', label: 'Sacks' },
+    { key: 'interceptions', label: 'INT' },
+    { key: 'fumbles', label: 'Fumbles' },
+    { key: 'fumblesLost', label: 'Fumbles Lost' },
+    { key: 'fumblesRecovered', label: 'Fumbles Rec.' },
+    { key: 'touchdowns', label: 'TD' },
+    { key: 'returnYards', label: 'Return Yds' },
+    { key: 'safeties', label: 'Safeties' }
+];
 
 window.app_setRosterSort = function (col) {
     if (rosterSortCol === col) {
@@ -1800,6 +1824,13 @@ window.app_setRosterSort = function (col) {
         rosterSortCol = col;
         rosterSortDir = 'desc';
     }
+    renderMyTeamTab(getGameState());
+};
+
+window.app_setMyRosterView = function (view) {
+    if (!['skills', 'season', 'career'].includes(view)) return;
+
+    myRosterView = view;
     renderMyTeamTab(getGameState());
 };
 
@@ -1851,7 +1882,101 @@ function renderMyTeamTab(gameState) {
         </div>`;
     }
 
-    let html = rosterNotice + `
+        const viewTabs = `
+        <div class="flex flex-wrap items-center justify-between gap-2 px-3 py-2 bg-white border-b border-slate-200">
+            <div class="flex flex-wrap gap-1 rounded border border-slate-300 bg-slate-100 p-1 text-[11px] font-bold">
+                <button
+                    class="px-3 py-1.5 rounded transition ${myRosterView === 'skills' ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-600 hover:bg-white'}"
+                    onclick="app_setMyRosterView('skills')">
+                    Skills
+                </button>
+                <button
+                    class="px-3 py-1.5 rounded transition ${myRosterView === 'season' ? 'bg-amber-500 text-slate-950 shadow-sm' : 'text-slate-600 hover:bg-white'}"
+                    onclick="app_setMyRosterView('season')">
+                    Season Stats
+                </button>
+                <button
+                    class="px-3 py-1.5 rounded transition ${myRosterView === 'career' ? 'bg-blue-700 text-white shadow-sm' : 'text-slate-600 hover:bg-white'}"
+                    onclick="app_setMyRosterView('career')">
+                    Career Stats
+                </button>
+            </div>
+            <span class="text-[10px] font-mono uppercase tracking-wider text-slate-500">
+                ${roster.length} players
+            </span>
+        </div>`;
+
+    if (myRosterView === 'season' || myRosterView === 'career') {
+        const isCareer = myRosterView === 'career';
+        const statsKey = isCareer ? 'careerStats' : 'seasonStats';
+
+        const statHeaders = PLAYER_STAT_COLUMNS
+            .map(stat => `<th class="py-2 px-2 text-center whitespace-nowrap">${stat.label}</th>`)
+            .join('');
+
+        const extraHeader = isCareer
+            ? `<th class="py-2 px-2 text-center whitespace-nowrap">Seasons</th>`
+            : '';
+
+        const statRows = sortedRoster.length > 0
+            ? sortedRoster.map(p => {
+                const stats = p[statsKey] || {};
+                const pos = p.pos || estimateBestPosition(p);
+
+                const statCells = PLAYER_STAT_COLUMNS.map(stat =>
+                    `<td class="py-2 px-2 text-center text-slate-700">${Number(stats[stat.key]) || 0}</td>`
+                ).join('');
+
+                const seasonsCell = isCareer
+                    ? `<td class="py-2 px-2 text-center font-bold text-slate-700">${Number(stats.seasonsPlayed) || 0}</td>`
+                    : '';
+
+                return `
+                    <tr class="hover:bg-slate-50 transition cursor-pointer"
+                        onclick="app.openPlayerCard('${p.id}')">
+                        <td class="py-2 px-3 font-semibold text-slate-900 whitespace-nowrap">
+                            <span class="font-mono text-[10px] text-slate-400 mr-1">#${p.number || '--'}</span>
+                            ${p.name}
+                        </td>
+                        <td class="py-2 px-2 text-center">
+                            <span class="font-bold text-[10px] bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded">
+                                ${pos}
+                            </span>
+                        </td>
+                        <td class="py-2 px-2 text-center text-slate-600">${p.age ?? '--'}</td>
+                        ${statCells}
+                        ${seasonsCell}
+                    </tr>`;
+            }).join('')
+            : `<tr>
+                <td colspan="${3 + PLAYER_STAT_COLUMNS.length + (isCareer ? 1 : 0)}"
+                    class="p-6 text-center text-slate-400 italic">
+                    Roster empty.
+                </td>
+            </tr>`;
+
+        elements.myTeamRoster.innerHTML = rosterNotice + viewTabs + `
+            <div class="overflow-x-auto">
+                <table class="min-w-full bg-white text-xs">
+                    <thead class="bg-slate-900 text-white sticky top-0 z-10 uppercase tracking-wider text-[10px]">
+                        <tr>
+                            <th class="py-2 px-3 text-left whitespace-nowrap">Player</th>
+                            <th class="py-2 px-2 text-center">Pos</th>
+                            <th class="py-2 px-2 text-center">Age</th>
+                            ${statHeaders}
+                            ${extraHeader}
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-slate-100 font-mono">
+                        ${statRows}
+                    </tbody>
+                </table>
+            </div>`;
+
+        return;
+    }
+
+    let html = rosterNotice + viewTabs + `
     <div class="overflow-x-auto">
         <table class="min-w-full bg-white text-xs">
             <thead class="bg-slate-900 text-white sticky top-0 z-10 select-none uppercase tracking-wider text-[11px]">
@@ -2823,60 +2948,156 @@ export function renderStandingsTab(gameState) {
 }
 
 export function renderPlayerStatsTab(gameState) {
-    if (!elements.playerStatsContainer || !gameState?.players) return;
+    if (!elements.playerStatsContainer || !Array.isArray(gameState?.players)) return;
 
-    // Before Week 1 games are played, clean any stale stats and show kickoff state
+    // Before Week 1, clear stale tracked season stats and show kickoff state.
     if (gameState.currentWeek === 0) {
+        const zeroedSeasonStats = Object.fromEntries(
+            PLAYER_STAT_COLUMNS.map(stat => [stat.key, 0])
+        );
+
         gameState.players.forEach(p => {
-            if (p.seasonStats && (p.seasonStats.touchdowns > 0 || p.seasonStats.passYards > 0 || p.seasonStats.rushYards > 0)) {
-                p.seasonStats = { receptions: 0, recYards: 0, passYards: 0, rushYards: 0, touchdowns: 0, tackles: 0, sacks: 0, interceptions: 0, passAttempts: 0, passCompletions: 0, interceptionsThrown: 0 };
+            if (!p?.seasonStats) return;
+
+            const hasStats = PLAYER_STAT_COLUMNS.some(
+                stat => Number(p.seasonStats[stat.key]) !== 0
+            );
+
+            if (hasStats) {
+                p.seasonStats = { ...zeroedSeasonStats };
             }
         });
+
         elements.playerStatsContainer.innerHTML = `
             <div class="p-8 text-center text-slate-400 font-sans">
                 <span class="text-3xl block mb-2">🏈</span>
-                <p class="font-bold text-sm text-slate-700 uppercase tracking-wider">Season ${gameState.year || 1} Has Not Started</p>
-                <p class="text-xs text-slate-500 mt-1">League leaders will update after Week 1 kickoff.</p>
+                <p class="font-bold text-sm text-slate-700 uppercase tracking-wider">
+                    Season ${gameState.year || 1} Has Not Started
+                </p>
+                <p class="text-xs text-slate-500 mt-1">
+                    League leaders will update after Week 1 kickoff.
+                </p>
             </div>`;
         return;
     }
 
+    const teamById = new Map(
+        (gameState.teams || []).map(team => [team.id, team])
+    );
+
     const teamIdFilter = elements.statsFilterTeam?.value || '';
     const leagueFilter = document.getElementById('stats-filter-league')?.value || '';
+
+    // Expand the existing sort dropdown to include every tracked season stat.
+    const previousSort = elements.statsSort?.value || 'touchdowns';
+    const validSort = PLAYER_STAT_COLUMNS.some(stat => stat.key === previousSort)
+        ? previousSort
+        : 'touchdowns';
+
+    if (elements.statsSort) {
+        elements.statsSort.innerHTML = PLAYER_STAT_COLUMNS.map(stat =>
+            `<option value="${stat.key}">${stat.label.toUpperCase()}</option>`
+        ).join('');
+
+        elements.statsSort.value = validSort;
+    }
+
     const sortStat = elements.statsSort?.value || 'touchdowns';
 
     let players = gameState.players.filter(p => {
-        if (teamIdFilter && p.teamId !== teamIdFilter) return false;
+        if (!p?.teamId) return false;
+
+        if (teamIdFilter && p.teamId !== teamIdFilter) {
+            return false;
+        }
+
+        const team = teamById.get(p.teamId);
+
         if (leagueFilter) {
-            const team = gameState.teams.find(t => t.id === p.teamId);
             if (!team) return false;
+
             if (leagueFilter === 'tier1' && team.tier !== 1) return false;
             if (leagueFilter === 'tier2' && team.tier !== 2) return false;
             if (leagueFilter === 'youth' && team.leagueType !== 'youth') return false;
         }
-        return p.teamId; // Only show players currently on a team
+
+        return true;
     });
-    players.sort((a, b) => ((b.seasonStats?.[sortStat]) || 0) - ((a.seasonStats?.[sortStat]) || 0));
+
+    players.sort((a, b) =>
+        (Number(b.seasonStats?.[sortStat]) || 0) -
+        (Number(a.seasonStats?.[sortStat]) || 0)
+    );
+
     players = players.slice(0, 50);
 
+    const statHeaders = PLAYER_STAT_COLUMNS.map(stat =>
+        `<th class="py-2 px-2 text-center whitespace-nowrap">${stat.label}</th>`
+    ).join('');
+
+    const playerRows = players.length > 0
+        ? players.map(p => {
+            const stats = p.seasonStats || {};
+            const team = teamById.get(p.teamId);
+
+            const leagueName = !team
+                ? '—'
+                : team.leagueType === 'youth'
+                    ? 'Pee-Wee League'
+                    : team.tier === 1
+                        ? 'Premier Parks'
+                        : team.tier === 2
+                            ? 'Sandlot Circuit'
+                            : '—';
+
+            const pos = p.pos || estimateBestPosition(p);
+
+            const statCells = PLAYER_STAT_COLUMNS.map(stat =>
+                `<td class="py-1.5 px-2 text-center whitespace-nowrap">${Number(stats[stat.key]) || 0}</td>`
+            ).join('');
+
+            return `
+                <tr class="hover:bg-gray-50 cursor-pointer transition"
+                    onclick="app.openPlayerCard('${p.id}')">
+                    <td class="py-1.5 px-3 font-semibold text-gray-800 whitespace-nowrap">
+                        ${p.name}
+                    </td>
+                    <td class="py-1.5 px-3 text-gray-700 whitespace-nowrap">
+                        ${team?.name || '—'}
+                    </td>
+                    <td class="py-1.5 px-3 text-gray-600 whitespace-nowrap">
+                        ${leagueName}
+                    </td>
+                    <td class="py-1.5 px-2 text-center">${p.age ?? '—'}</td>
+                    <td class="py-1.5 px-2 text-center font-bold">${pos}</td>
+                    ${statCells}
+                </tr>`;
+        }).join('')
+        : `<tr>
+            <td colspan="${5 + PLAYER_STAT_COLUMNS.length}"
+                class="p-6 text-center text-slate-400 italic">
+                No players match the current filters.
+            </td>
+        </tr>`;
+
     elements.playerStatsContainer.innerHTML = `
-        <table class="min-w-full bg-white text-xs"><thead class="bg-gray-800 text-white"><tr>
-            <th class="py-2 px-3 text-left">Name</th>
-            <th class="py-2 px-3 text-center">PASS YDS</th>
-            <th class="py-2 px-3 text-center">RUSH YDS</th>
-            <th class="py-2 px-3 text-center">REC YDS</th>
-            <th class="py-2 px-3 text-center">TDS</th>
-            <th class="py-2 px-3 text-center">TKLS</th>
-        </tr></thead><tbody class="divide-y">
-            ${players.map(p => `<tr class="hover:bg-gray-50 cursor-pointer" onclick="app.openPlayerCard('${p.id}')">
-                <td class="py-1.5 px-3 font-semibold text-gray-800">${p.name}</td>
-                <td class="py-1.5 px-3 text-center">${p.seasonStats?.passYards || 0}</td>
-                <td class="py-1.5 px-3 text-center">${p.seasonStats?.rushYards || 0}</td>
-                <td class="py-1.5 px-3 text-center">${p.seasonStats?.recYards || 0}</td>
-                <td class="py-1.5 px-3 text-center font-bold text-amber-600">${p.seasonStats?.touchdowns || 0}</td>
-                <td class="py-1.5 px-3 text-center">${p.seasonStats?.tackles || 0}</td>
-            </tr>`).join('')}
-        </tbody></table>`;
+        <div class="overflow-x-auto">
+            <table class="min-w-full bg-white text-xs">
+                <thead class="bg-gray-800 text-white uppercase text-[10px] tracking-wider">
+                    <tr>
+                        <th class="py-2 px-3 text-left whitespace-nowrap">Player</th>
+                        <th class="py-2 px-3 text-left whitespace-nowrap">Team</th>
+                        <th class="py-2 px-3 text-left whitespace-nowrap">League</th>
+                        <th class="py-2 px-2 text-center">Age</th>
+                        <th class="py-2 px-2 text-center">Pos</th>
+                        ${statHeaders}
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-100">
+                    ${playerRows}
+                </tbody>
+            </table>
+        </div>`;
 }
 
 export function renderHallOfFameTab(gameState) {
@@ -3957,6 +4178,21 @@ function playVisualization(frames, onComplete) {
     runNext();
 }
 
+function getPlayerLastNameForStats(player) {
+    if (typeof player?.lastName === 'string' && player.lastName.trim()) {
+        return player.lastName.trim();
+    }
+
+    const fullName = typeof player?.name === 'string'
+        ? player.name.trim()
+        : '';
+
+    if (!fullName) return 'Player';
+
+    const nameParts = fullName.split(/\s+/);
+    return nameParts[nameParts.length - 1] || fullName;
+}
+
 export function renderLiveBoxScore(activeGame) {
     const awayContainer = document.getElementById('sim-stats-away');
     const homeContainer = document.getElementById('sim-stats-home');
@@ -3998,7 +4234,7 @@ export function renderLiveBoxScore(activeGame) {
             html += `<div><span class="text-slate-400 font-sans font-bold text-[10px] uppercase block">Passing</span>`;
             passers.forEach(p => {
                 html += `<div class="flex justify-between gap-2">
-                    <span>${p.name.split(' ')[0]}</span>
+                    <span>${getPlayerLastNameForStats(p)}</span>
                     <span>${p.gameStats.passCompletions || 0}/${p.gameStats.passAttempts || 0}, ${p.gameStats.passYards || 0}y, ${p.gameStats.touchdowns || 0}TD, ${p.gameStats.interceptionsThrown || 0}INT</span>
                 </div>`;
             });
@@ -4008,7 +4244,7 @@ export function renderLiveBoxScore(activeGame) {
         if (rushers.length > 0) {
             html += `<div><span class="text-slate-400 font-sans font-bold text-[10px] uppercase block">Rushing</span>`;
             rushers.forEach(p => {
-                html += `<div class="flex justify-between gap-2"><span>${p.name.split(' ')[0]}</span><span>${p.gameStats.rushAttempts || 0} car, ${p.gameStats.rushYards || 0}y</span></div>`;
+                html += `<div class="flex justify-between gap-2"><span>${getPlayerLastNameForStats(p)}</span><span>${p.gameStats.rushAttempts || 0} car, ${p.gameStats.rushYards || 0}y</span></div>`;
             });
             html += `</div>`;
         }
@@ -4017,7 +4253,7 @@ export function renderLiveBoxScore(activeGame) {
             html += `<div><span class="text-slate-400 font-sans font-bold text-[10px] uppercase block">Receiving</span>`;
             receivers.forEach(p => {
                 html += `<div class="flex justify-between gap-2">
-                    <span>${p.name.split(' ')[0]}</span>
+                    <span>${getPlayerLastNameForStats(p)}</span>
                     <span>${p.gameStats.receptions || 0} rec/${p.gameStats.targets || 0} tgt, ${p.gameStats.recYards || 0}y, ${p.gameStats.drops || 0} drop</span>
                 </div>`;
             });
@@ -4027,7 +4263,7 @@ export function renderLiveBoxScore(activeGame) {
         if (tacklers.length > 0) {
             html += `<div><span class="text-slate-400 font-sans font-bold text-[10px] uppercase block">Defense</span>`;
             tacklers.forEach(p => {
-                html += `<div class="flex justify-between gap-2"><span>${p.name.split(' ')[0]}</span><span>${p.gameStats.tackles || 0} tkl, ${p.gameStats.sacks || 0} sck</span></div>`;
+                html += `<div class="flex justify-between gap-2"><span>${getPlayerLastNameForStats(p)}</span><span>${p.gameStats.tackles || 0} tkl, ${p.gameStats.sacks || 0} sck</span></div>`;
             });
             html += `</div>`;
         }
