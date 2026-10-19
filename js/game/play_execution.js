@@ -2435,8 +2435,8 @@ export function executeAssignment(pState, assignment, offenseStates, LOS, playSt
 
             const defAgility = pState.agility || pState.agi || 50;  
             let agilityFactor = (defAgility / 50);
-            let cushionY = Math.max(0.6, baseCushionY - (iqFactor * 0.5) - ((agilityFactor - 1) * 0.3));
-            let cushionX = baseCushionX * (0.8 + (iqFactor * 0.2));
+            let cushionY = Math.max(0.6, (baseCushionY * cushionShrink) - (iqFactor * 0.5) - ((agilityFactor - 1) * 0.3));
+            let cushionX = (baseCushionX * cushionShrink) * (0.8 + (iqFactor * 0.2));
 
             // Speed mismatch adjustment: If the receiver is a burner, smart DBs bail out deeper to prevent getting beat deep
             if (speedDiff > 12 && defIQ >= 50) {
@@ -2537,13 +2537,46 @@ export function executeAssignment(pState, assignment, offenseStates, LOS, playSt
         const isDeep = assignment.includes('deep') || pState.slot.startsWith('S');
         const defenderProfile = getDecisionProfile(pState, playState.tick);
         const iq = defenderProfile?.awareness ?? (pState.playbookIQ || 50);
+
+        if (ballCarrierState && ballCarrierState.isOffense) {
+            const distToCarrier = getDistance(pState, ballCarrierState);
+            if (distToCarrier < 15.0) {
+                const flowIntensity = 0.2 + (iq / 200); // Higher IQ = stronger flow
+                zoneCenter.x = (zoneCenter.x * (1 - flowIntensity)) + (ballCarrierState.x * flowIntensity);
+                zoneCenter.y = (zoneCenter.y * (1 - flowIntensity)) + (ballCarrierState.y * flowIntensity);
+            }
+        }
+
+        // --- RED ZONE COMPRESSION ---
+        // As the ball gets closer to the goal line (LOS > 90), 
+        // the cushion shrinks automatically. The field is smaller, 
+        // so DBs play tighter.
+        const distanceToGoal = 110 - LOS; // LOS 110 is the endzone
+        const redZoneMultiplier = Math.max(0.2, Math.min(1.0, distanceToGoal / 20.0));
+        
+        // Low IQ players still struggle to compress, High IQ players squeeze the route
+        const compressionIQ = (iq / 100); 
+        const cushionShrink = 1.0 - (compressionIQ * 0.5 * (1.0 - redZoneMultiplier));
         
         // 1. "Hero Ball" Safety Creep: Impatient low-IQ deep safeties creep downhill toward LOS
         if (isDeep && iq < 58) {
             zoneCenter.y = Math.max(LOS + 7.0, zoneCenter.y - 3.5);
         }
 
-        // 2. QB Stare-Down Tracking: If QB has low IQ, zone defenders cheat toward his target
+        // 2. Zone Breakdown / Pursuit Trigger
+        // If a runner is in the red zone, abandon the zone assignment if the runner is within 8 yards
+        if (ballCarrierState && ballCarrierState.isOffense && distanceToGoal < 25) {
+            const distToCarrier = getDistance(pState, ballCarrierState);
+            if (distToCarrier < 8.0) {
+                pState.action = 'pursuit';
+                pState.targetX = ballCarrierState.x;
+                pState.targetY = ballCarrierState.y;
+                setPointIntent(pState, pState.targetX, pState.targetY, 0.6);
+                return; // Override assignment and go tackle
+            }
+        }
+
+        // 3. QB Stare-Down Tracking: If QB has low IQ, zone defenders cheat toward his target
         const qb = offenseStates.find(o => o.slot?.startsWith('QB'));
         if (qb && (qb.playbookIQ || 50) < 65 && qb.currentReadTargetSlot) {
             const primaryRec = offenseStates.find(o => o.slot === qb.currentReadTargetSlot);
