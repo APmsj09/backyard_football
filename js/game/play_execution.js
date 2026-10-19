@@ -2417,6 +2417,16 @@ export function executeAssignment(pState, assignment, offenseStates, LOS, playSt
             const defIQ = defProfile?.awareness ?? (pState.playbookIQ || 50);
             const defCoverSkill = pState.coverage || 50;
 
+            // Red-zone cushion compression for man coverage.
+            const distanceToGoal = 110 - LOS;
+            const redZoneMultiplier = Math.max(
+                0.2,
+                Math.min(1.0, distanceToGoal / 20.0)
+            );
+            const compressionIQ = defIQ / 100;
+            const cushionShrink =
+                1.0 - (compressionIQ * 0.5 * (1.0 - redZoneMultiplier));
+
             const speedDiff = recSpeed - defSpeed;
             
             // REALISM FIX: DBs don't know the route name. They read the receiver's alignment.
