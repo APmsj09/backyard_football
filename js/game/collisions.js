@@ -202,7 +202,7 @@ export function checkBlockCollisions(playState, gameLog = null) {
 }
 
 export function checkTackleCollisions(playState, gameLog) {
-    const carrier = playState.activePlayers.find(p => p.hasBall === true && !playState.ballState.isLoose);
+    const carrier = playState.activePlayers.find(p => (p.hasBall || p.isBallCarrier) && !playState.ballState.isLoose);
     if (!carrier) return false;
 
     const tacklingTeam = playState.activePlayers.filter(p => p.isOffense !== carrier.isOffense);
@@ -1244,7 +1244,7 @@ export function handleBallArrival(playState, carrier, playResult, gameLog) {
         }
         
         if (playState.type === 'punt' && p.isOffense && ball.z > 0.5) return false;
-        if (ball.droppedById === p.id) return false;
+        if ((ball.droppedById === p.id) || (ball.lastDroppedById === p.id)) return false; // FIX: Mislabeled property
 
         if (p.isOffense && p.slot.startsWith('OL') && playState.type === 'pass' && !ball.isLoose && !ball.tipCount && !ball.isLateral) {
             return false;

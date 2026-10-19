@@ -555,6 +555,7 @@ export function setupInitialPlayerStates(playState, offense, defense, play, assi
             const weight = player.attributes?.physical?.weight || 150;
             const height = player.attributes?.physical?.height || 68;
             const toughness = player.attributes?.mental?.toughness || 50;
+            const carrying = player.attributes?.technical?.carrying || player.attributes?.offense?.carrying || toughness; // ADD THIS
             const catching = player.attributes?.technical?.catchingHands || 50;
             const tackling = player.attributes?.technical?.tackling || player.attributes?.defense?.tackling || 50;
             const coverage = player.attributes?.technical?.coverage || player.attributes?.technical?.passCoverage || 50;
@@ -566,6 +567,7 @@ export function setupInitialPlayerStates(playState, offense, defense, play, assi
             const pState = {
                 id: player.id,
                 name: player.name,
+                carrying,
                 number: player.number,
                 role: slot.replace(/\d+/g, ''),
                 teamId: team.id,
@@ -716,6 +718,7 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                 pState.targetY = 10;
                 pState.action = 'run_path';
                 pState.contactReduction = nearestOff ? 0.9 : 1.0;
+                setPointIntent(pState, pState.targetX, pState.targetY, 0.6); // FIX: Returner needed movement intent
             } else if (!pState.isOffense) {
                 const nearestOff = offenseStates
                     .filter(o => !o.isEngaged && o.y < pState.y + 5 && o.y > pState.y - 15)
@@ -728,8 +731,9 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                 } else {
                     pState.targetX = ballCarrierState.x + (pState.x < ballCarrierState.x ? -3 : 3);
                     pState.targetY = ballCarrierState.y - 3;
-                    pState.action = 'run_path';
+                    pState.action = 'run_block'; // FIX: Was mislabeled as 'run_path' for blockers
                 }
+                setPointIntent(pState, pState.targetX, pState.targetY, 0.45); // FIX: Escort blockers needed movement intent
             } else if (pState.isOffense) {
                 const dist = getDistance(pState, ballCarrierState);
                 const leadTime = dist / 15;
@@ -737,11 +741,11 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                 const carrierVy = ballCarrierState.vy || 0;
                 pState.targetX = ballCarrierState.x + (carrierVx * leadTime);
                 pState.targetY = ballCarrierState.y + (carrierVy * leadTime);
-                pState.action = 'pursuit'; // FIX: Was 'run_path'
+                pState.action = 'pursuit'; // FIX: Was mislabeled as 'run_path'
+                setPointIntent(pState, pState.targetX, pState.targetY, 0.5); // FIX: Offensive tacklers needed movement intent
             }
             pState.targetX = Math.max(1, Math.min(52.3, pState.targetX));
             pState.targetY = Math.max(1, Math.min(119.0, pState.targetY));
-            setPointIntent(pState, pState.targetX, pState.targetY, 0.5); // FIX: Ensure proper intent is set
             resolveMovementIntent(pState);
         });
         return;
@@ -1107,6 +1111,7 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                         pState.targetX = pState.initialX;
                         pState.targetY = LOS - 1;
                     }
+                    setPointIntent(pState, pState.targetX, pState.targetY, 0.35); // FIX: Added missing intent
                     return;
                 }
                 pState.action = 'pursuit';
@@ -1116,13 +1121,13 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                     pState.targetX = ballCarrierState.x + (ballCarrierState.velocity?.x || 0) * lead;
                     pState.targetY = ballCarrierState.y + (ballCarrierState.velocity?.y || 0) * lead;
                 } else {
-                    // Maintain punt coverage lanes instead of clustering on the exact landing spot
                     const ballTargetX = ballPos.targetX || ballPos.x;
                     const laneDrift = ballTargetX > pState.initialX ? 1.5 : -1.5;
                     
                     pState.targetX = pState.initialX + laneDrift;
                     pState.targetY = ballPos.targetY || ballPos.y;
                 }
+                setPointIntent(pState, pState.targetX, pState.targetY, 0.5); // FIX: Added missing intent
                 return;
             }
 
@@ -1719,9 +1724,13 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
 
                     pState.contactReduction = distToNode < 1.0 ? 0.8 : 1.0;
 
-                    // Only count passing the waypoint vertically when the player
-                    // is also physically close to it. Crossing its Y-coordinate
-                    // from far away horizontally must not skip the route segment.
+                    // FIX: Increment stall counter when player is making negligible progress
+                    if (Math.hypot(pState.vx || 0, pState.vy || 0) < 0.8) {
+                        pState._routeWaypointStallTicks = (pState._routeWaypointStallTicks || 0) + 1;
+                    } else {
+                        pState._routeWaypointStallTicks = Math.max(0, (pState._routeWaypointStallTicks || 0) - 1);
+                    }
+
                     const hasPassedNodeY =
                         (pState.vy > 0 && pState.y >= pt.y) ||
                         (pState.vy < 0 && pState.y <= pt.y);
