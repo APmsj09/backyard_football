@@ -1384,18 +1384,6 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
             score -= undercutThreat * 15;
         }
 
-        // Risk tolerance and decision-making modifier
-        const decisionRiskTolerance = 0.70 + (qbDecision / 100) * 0.30;
-        const personalityRiskTolerance = qbProfile?.riskTolerance ?? 1.0;
-        score *= decisionRiskTolerance * personalityRiskTolerance;
-
-        return {
-            score: score,
-            separation: minProjectedSeparation,
-            info: { state: rec, separation: minProjectedSeparation }
-        };
-    };
-
         // ======================================================
         // GAME SITUATION
         // ======================================================
