@@ -244,7 +244,8 @@ export function checkTackleCollisions(playState, gameLog) {
 
         const obstruction = segmentLengthSq > 0.01
             ? playState.activePlayers.find(other => {
-                if (other === p || other === carrier) return false;
+                // FIX: Teammates swarming the carrier do NOT obstruct each other; only opposing blockers do!
+                if (other === p || other === carrier || other.isOffense === p.isOffense) return false;
 
                 const along = (
                     (other.x - p.x) * dxToCarrier +
@@ -1531,7 +1532,12 @@ export function handleBallArrival(playState, carrier, playResult, gameLog) {
             bestCandidate.isBallCarrier = true;
             bestCandidate.action = 'run_path';
 
-            if (bestCandidate.vy < 0) {
+            if (isDefense) {
+                // FIX: Interceptors need to immediately redirect downhill towards the opponent's endzone (y <= 10)
+                bestCandidate.vx *= 0.2;
+                bestCandidate.vy = -Math.abs(bestCandidate.vy * 0.1) - (1.5 + (agility / 100));
+                bestCandidate.contactReduction = 0.6;
+            } else if (bestCandidate.vy < 0) {
                 bestCandidate.vy *= 0.1;
                 bestCandidate.vx *= 0.3;
                 bestCandidate.vy += (1.5 + (agility / 100));

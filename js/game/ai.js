@@ -1995,9 +1995,12 @@ export function executeThrow(qbState, target, throwPower, accuracy, playState, g
                            (target.action === 'route_complete' && Math.hypot(target.vx || 0, target.vy || 0) > 0.8);
 
     if (isMovingTarget) {
-        const recYPS = getPlayerBaseSpeedYPS(target) * (target.fatigueModifier || 1.0);
+        const baseRecYPS = getPlayerBaseSpeedYPS(target) * (target.fatigueModifier || 1.0);
+        const currentSpeed = Math.hypot(target.vx || 0, target.vy || 0);
 
-        // Corrected Flight Time: Account for downfield receiver velocity relative to ball speed
+        // FIX: If the receiver is making a break, settling, or not at a full sprint, don't project them at 100% max speed!
+        const recYPS = Math.min(baseRecYPS, Math.max(baseRecYPS * 0.55, currentSpeed * 1.15));
+
         const recVy = target.vy || 0;
         const effectiveBallSpeed = Math.max(8.0, ballSpeed - (recVy * 0.65));
         const flightTime = throwDistance / effectiveBallSpeed;
