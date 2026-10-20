@@ -1439,6 +1439,16 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
             const yardsShort = yardsToGo - distanceBeyondLOS;
             if (down >= 3 && yardsShort > 3) score -= Math.min(20, yardsShort * 2.5);
             else if (down <= 2) score += (distanceBeyondLOS >= 3) ? 6 : -3;
+
+            // Goal-to-go or short yardage: heavily penalize throwing backwards behind the line
+            if (distanceBeyondLOS < 0) {
+                const distanceToGoal = 110 - (playState.lineOfScrimmage || 60);
+                if (distanceToGoal <= 10) {
+                    score -= 45; // Do not throw checkdowns behind the LOS on goal-line stands
+                } else {
+                    score -= 20; // Routine penalty for dumping the ball behind LOS
+                }
+            }
         }
 
         // Pressure adjustments
@@ -2112,11 +2122,12 @@ export function executeThrow(qbState, target, throwPower, accuracy, playState, g
         aimY = target.y;
     }
 
-    const distancePower = 1.2 - (accuracy / 120);
-    const distanceFactor = Math.pow(Math.max(0.5, throwDistance / 20), distancePower);
-    let errorMargin = ((100 - accuracy) / 30) * distanceFactor;
+    // Realistic sandlot dispersion: deep passes and lower-accuracy passers have natural variance
+    const distancePower = 1.35 - (accuracy / 110);
+    const distanceFactor = Math.pow(Math.max(0.6, throwDistance / 18), distancePower);
+    let errorMargin = ((100 - accuracy) / 20) * distanceFactor;
 
-    if (playState.isPressured) errorMargin *= (1.5 - ((qbState.iq || 50) / 200));
+    if (playState.isPressured) errorMargin *= (1.6 - ((qbState.iq || 50) / 200));
 
     const dirX = aimX - startX;
     const dirY = aimY - startY;

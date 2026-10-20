@@ -539,12 +539,11 @@ export function checkTackleCollisions(playState, gameLog) {
         }
 
         // Broken tackles give defenders a modest advantage on later attempts.
-        // Cap the cumulative bonus so a slippery runner isn't automatically tackled
-        // simply because several defenders have already missed.
         const brokenCount = carrier.tacklesBrokenThisPlay || 0;
-        successChance += Math.min(0.12, brokenCount * 0.06);
+        successChance += Math.min(0.18, brokenCount * 0.08);
 
-        successChance = Math.max(0.10, Math.min(0.95, successChance));
+        // Solid floor for open-field tackles (prevents 20% auto-breakaways)
+        successChance = Math.max(0.32, Math.min(0.95, successChance));
         if (!Number.isFinite(successChance)) successChance = 0.65;
 
         logPlayDebug('TACKLE_CALC', `${defender.name} vs ${carrier.name}`, {
@@ -601,8 +600,8 @@ export function checkTackleCollisions(playState, gameLog) {
                 (bounceY / bounceDistance) * (isTruckAttempt ? 1.9 : 1.6)
             );
             
-            // Add explicit tackle miss cooldown to prevent consecutive immediate attempts
-            defender.stunnedTicks = Math.max(defender.stunnedTicks || 0, 10);
+            // Reduced stumble cooldown so trailing pursuers aren't completely frozen out of the play
+            defender.stunnedTicks = Math.max(defender.stunnedTicks || 0, 5);
             
             // PHYSICS: Running *through* a defender transfers a massive chunk of momentum based on weight ratio
             const baseSpeedDrain = Math.max(
@@ -813,22 +812,22 @@ export function resolveOngoingBlocks(playState, gameLog, offenseStates = [], def
                     const dirX = dx / dist;
                     const dirY = dy / dist;
 
-                    if (escapeScore > 120 && Math.random() < 0.005) {
+                    // Block sheds must engage for at least 8 ticks (0.32s) before a technique move can succeed
+                    const minEngagementTicks = 8;
+                    if (ticksInBlock >= minEngagementTicks && escapeScore > 120 && Math.random() < 0.005) {
                         defender.x += dirX * 0.6;
                         defender.y += dirY * 0.6;
-                        blocker.stunnedTicks = 10;
+                        blocker.stunnedTicks = 6;
                         defender.moveCooldown = 20;
-                        battle.status = 'win_B'; // Force win to break engagement
-                        battle._bypassedDurationCheck = true; // Bypass premature shed check
-                    } else if (escapeScore > 130 && Math.random() < 0.003) {
+                        battle.status = 'win_B';
+                    } else if (ticksInBlock >= minEngagementTicks && escapeScore > 130 && Math.random() < 0.003) {
                         const bx = blocker.x - defender.x;
                         const by = blocker.y - defender.y;
                         defender.x += -by * 0.15;
                         defender.y += bx * 0.15;
-                        blocker.stunnedTicks = 5;
+                        blocker.stunnedTicks = 4;
                         defender.moveCooldown = 20;
                         battle.status = 'win_B';
-                        battle._bypassedDurationCheck = true;
                     }
                 }
             }
@@ -1297,7 +1296,8 @@ export function handleBallArrival(playState, carrier, playResult, gameLog) {
             ? (playerHeight / 36) + 1.1 + (verticalLeap * 0.7)
             : standingReach;
 
-        if (ball.inAir && ball.z > maxCatchHeight) return false;
+        // Ball must be in the air and above the turf; never allow catches below ground level
+        if (ball.inAir && (ball.z > maxCatchHeight || ball.z <= 0.05)) return false;
 
         // Pass rushers (DL/blitzers) can only bat down balls right at the line within 2.5y of release
         const isPassRusher = !p.isOffense && (p.role === 'DL' || p.assignment?.includes('rush') || p.assignment?.includes('blitz'));

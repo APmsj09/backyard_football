@@ -68,14 +68,14 @@ export const positionOverallWeights = {
         explosiveness: 0.07
     },
 
-    // 7. LB: Added coverage (12%) — essential for 8v8 pass defense & hybrid safeties
+    // 7. LB: Balanced across open-field tackling, gap power, pursuit speed, and coverage
     LB: {
-        tackling: 0.26,
-        playbookIQ: 0.20,
+        tackling: 0.22,
+        playbookIQ: 0.18,
         speed: 0.18,
-        blockShedding: 0.18,
-        coverage: 0.12,
-        explosiveness: 0.06
+        strength: 0.14,
+        blockShedding: 0.14,
+        coverage: 0.14
     },
 
     // 8. DB: Added tackling (10%) — required for open-field sandlot stops
@@ -387,13 +387,14 @@ const archetypeBoosts = {
     'Change-of-Pace': { speed: 10, agility: 12, explosiveness: 12, carrying: 8 },
     'Slashing Back': { agility: 10, speed: 8, carrying: 12, playbookIQ: 5 },
 
+    // Calibrated hands boosts so 90+ hands are reserved for generational phenoms
     'Deep Threat': { speed: 8, agility: 5, explosiveness: 10 },
     'Route Technician': { agility: 7, playbookIQ: 5 },
-    'Red Zone Specialist': { catchingHands: 7, strength: 5 },
-    'Slot Brawler': { toughness: 6, catchingHands: 5 },
-    'Possession Receiver': { catchingHands: 12, clutch: 10, toughness: 5 },
+    'Red Zone Specialist': { catchingHands: 5, strength: 5 },
+    'Slot Brawler': { toughness: 6, catchingHands: 4 },
+    'Possession Receiver': { catchingHands: 6, clutch: 8, toughness: 5 },
     'Gadget Player': { agility: 12, speed: 8, explosiveness: 12 },
-    'Jump Ball Specialist': { catchingHands: 12, clutch: 8 },
+    'Jump Ball Specialist': { catchingHands: 6, clutch: 6 },
 
     'Vertical TE': { speed: 6, catchingHands: 6 },
     'Jumbo Athlete': { strength: 7, blocking: 6 },
@@ -534,13 +535,14 @@ export function generatePlayer(minAge = 12, maxAge = 18, classModifiers = null) 
         const roll = Math.random();
         let targetPos;
 
+        // Rebalanced quotas: Increases LB generation pool from 9% to 14% to prevent league-wide shortage
         if (roll < 0.09) targetPos = 'QB';
         else if (roll < 0.17) targetPos = 'RB';
-        else if (roll < 0.33) targetPos = 'WR';
-        else if (roll < 0.41) targetPos = 'TE';
-        else if (roll < 0.61) targetPos = 'OL';
-        else if (roll < 0.76) targetPos = 'DL';
-        else if (roll < 0.85) targetPos = 'LB';
+        else if (roll < 0.31) targetPos = 'WR';
+        else if (roll < 0.39) targetPos = 'TE';
+        else if (roll < 0.57) targetPos = 'OL';
+        else if (roll < 0.71) targetPos = 'DL';
+        else if (roll < 0.85) targetPos = 'LB'; // 14% share ensures 70-80 LBs in league
         else targetPos = 'DB';
 
         const primarySide = ['DL', 'LB', 'DB'].includes(targetPos)
@@ -769,7 +771,14 @@ export function generatePlayer(minAge = 12, maxAge = 18, classModifiers = null) 
             const attrVariance = 1 + gaussianRandom(0, 0.05);
             const devFactor = Math.min(1.0, baseScale * playerGrowthTempo * attrVariance);
 
-            const rawVal = Math.round(talentAttributes[cat][attr] * devFactor);
+            let rawVal = Math.round(talentAttributes[cat][attr] * devFactor);
+
+            // Cap catching hands for non-elite youth (under 16) to prevent 95+ hands on 50-OVR players
+            if (attr === 'catchingHands' && age < 16 && !isWonderkid) {
+                const maxYouthHands = potential === 'A' ? 85 : (potential === 'B' ? 76 : 68);
+                rawVal = Math.min(maxYouthHands, rawVal);
+            }
+
             attributes[cat][attr] = Math.max(ratingFloor, Math.min(99, rawVal));
         });
     });
