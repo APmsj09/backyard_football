@@ -5,7 +5,7 @@ import { isDebugMode, setDebugMode, debugCollector } from './game.js';
 import { positionOverallWeights, estimateBestPosition, calculateOverall } from './game/player.js';
 import { gmBackgrounds, gmArchetypes, footballExpertises, offenseFormations, defenseFormations } from './data.js';
 import { formatHeight } from './utils.js';
-import { getCurrentRosterLimit } from './game/season.js';
+import { getCurrentRosterLimit, TEMPORARY_HELP_THRESHOLD } from './game/season.js';
 
 let gameState = null;
 let selectedPlayerId = null;
@@ -1214,6 +1214,159 @@ function startExitInterviewFlow(retentions, onComplete, report = null) {
     renderCurrentInterview();
 }
 
+function showEmergencyFriendCallup(onContinue) {
+    gameState = Game.getGameState();
+
+    if (!gameState?.playerTeam) return;
+
+    const team = gameState.playerTeam;
+
+    const getActiveCount = () => Game.getRosterObjects(team).filter(p =>
+        p && (
+            p.status?.type === 'temporary' ||
+            !p.status ||
+            p.status.duration === 0
+        )
+    ).length;
+
+    const continueFlow = () => {
+        gameState = Game.getGameState();
+        onContinue?.();
+    };
+
+    const activeCount = getActiveCount();
+
+    // Emergency help is unnecessary once the team reaches 12 active players.
+    if (activeCount >= TEMPORARY_HELP_THRESHOLD) {
+        continueFlow();
+        return;
+    }
+
+    const freeAgents = Array.isArray(gameState.freeAgents)
+        ? gameState.freeAgents
+        : [];
+
+    const tokensAvailable = Math.max(
+        0,
+        Number(team.socialProfile?.favorTokens) || 0
+    );
+
+    // No available friends or Favor Tokens.
+    if (freeAgents.length === 0 || tokensAvailable <= 0) {
+        if (activeCount < MIN_HEALTHY_PLAYERS) {
+            const reason = freeAgents.length === 0
+                ? 'No connected friends are available to call.'
+                : 'Your team has no Favor Tokens left to ask for help.';
+
+            UI.showModal(
+                "Warning: Short Roster",
+                `<p>Your team has only ${activeCount} active players. You need at least ${MIN_HEALTHY_PLAYERS} to avoid forfeiting.</p><p>${reason}</p>`,
+                continueFlow,
+                "Proceed Anyway"
+            );
+        } else {
+            continueFlow();
+        }
+
+        return;
+    }
+
+    const escapeHtml = value =>
+        String(value ?? '').replace(/[&<>"']/g, character => ({
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            '"': '&quot;',
+            "'": '&#39;'
+        })[character]);
+
+    const friendsHtml = freeAgents.map(player => {
+        if (!player) return '';
+
+        const bestPos = player.pos || estimateBestPosition(player);
+        const ovr = Game.calculateOverall(player, bestPos);
+        const connection = player.connectedBuddyName
+            ? `Introduced through ${escapeHtml(player.connectedBuddyName)}`
+            : 'Connected to your team network';
+
+        return `
+            <div class="flex items-center justify-between gap-3 p-2.5 bg-slate-50 border border-slate-200 rounded">
+                <div class="min-w-0">
+                    <p class="font-bold text-slate-900">${escapeHtml(player.name)}</p>
+                    <p class="text-[11px] text-slate-600">${connection}</p>
+                    <p class="text-[10px] text-slate-500">
+                        ${escapeHtml(bestPos)} • ${ovr} OVR
+                    </p>
+                </div>
+                <button
+                    type="button"
+                    data-player-id="${escapeHtml(player.id)}"
+                    class="emergency-friend-call-btn shrink-0 bg-emerald-700 hover:bg-emerald-800 text-white font-bold px-3 py-1.5 rounded text-xs"
+                >
+                    CALL
+                </button>
+            </div>
+        `;
+    }).join('');
+
+    const modalHtml = `
+        <div class="space-y-3 text-left">
+            <p class="text-sm text-slate-700">
+                You have <b>${activeCount} active players</b>.
+                Teams below ${TEMPORARY_HELP_THRESHOLD} can call connected friends for emergency help.
+            </p>
+            <p class="text-xs text-slate-600">
+                Each call costs 1 Favor Token. Friends may decline and return to their normal status after the week.
+                You have <b>${tokensAvailable} tokens</b>.
+            </p>
+            <div class="space-y-2 max-h-72 overflow-y-auto">
+                ${friendsHtml}
+            </div>
+        </div>
+    `;
+
+    UI.showModal(
+        "Emergency Call-Up",
+        modalHtml,
+        null,
+        '',
+        continueFlow,
+        activeCount < MIN_HEALTHY_PLAYERS
+            ? "Proceed Shorthanded"
+            : "Continue Without Help"
+    );
+
+    const modalBody = document.getElementById('modal-body');
+    if (!modalBody) return;
+
+    const handleFriendCall = event => {
+        const button = event.target.closest('.emergency-friend-call-btn');
+        if (!button) return;
+
+        modalBody.removeEventListener('click', handleFriendCall);
+
+        const playerId = button.dataset.playerId;
+        if (!playerId) return;
+
+        const result = Game.callFriend(playerId);
+
+        gameState = Game.getGameState();
+        UI.hideModal();
+
+        UI.showModal(
+            result.success ? "Friend's On the Way!" : "Couldn't Make It",
+            `<p>${escapeHtml(result.message)}</p>`,
+            () => {
+                // Let the user call another friend if the roster is still below 12.
+                showEmergencyFriendCallup(continueFlow);
+            },
+            "Continue"
+        );
+    };
+
+    modalBody.addEventListener('click', handleFriendCall);
+}
+
 
 async function handleAdvanceWeek() {
     if (!gameState) return;
@@ -1291,24 +1444,55 @@ async function handleAdvanceWeek() {
     }
 
     // 3. Regular Season game handling
-    const playerTeamId = gameState.playerTeam.id;
-    const gamesPerWeek = gameState.teams.length / 2;
-    const weekGames = gameState.schedule.slice(gameState.currentWeek * gamesPerWeek, (gameState.currentWeek + 1) * gamesPerWeek);
-    const playerGameMatch = weekGames.find(g => g.home.id === playerTeamId || g.away.id === playerTeamId);
+    const proceedToGameDay = () => {
+        gameState = Game.getGameState();
 
-    if (playerGameMatch) {
-        const isHome = playerGameMatch.home.id === playerTeamId;
-        const opponentName = isHome ? playerGameMatch.away.name : playerGameMatch.home.name;
+        if (!gameState?.playerTeam) return;
 
-        UI.showModal(
-            `Game Day: Week ${gameState.currentWeek + 1}`,
-            `<p class="mb-4">Your team is playing <strong>${opponentName}</strong>.</p><p>How do you want to play?</p>`,
-            () => startLiveGame(playerGameMatch), "Watch Game",
-            () => simulateRestOfWeek(), "Quick Sim"
+        const playerTeamId = gameState.playerTeam.id;
+        const gamesPerWeek = gameState.teams.length / 2;
+        const weekGames = gameState.schedule.slice(
+            gameState.currentWeek * gamesPerWeek,
+            (gameState.currentWeek + 1) * gamesPerWeek
         );
-    } else {
-        simulateRestOfWeek();
+
+        const playerGameMatch = weekGames.find(
+            g => g.home.id === playerTeamId || g.away.id === playerTeamId
+        );
+
+        if (playerGameMatch) {
+            const isHome = playerGameMatch.home.id === playerTeamId;
+            const opponentName = isHome
+                ? playerGameMatch.away.name
+                : playerGameMatch.home.name;
+
+            UI.showModal(
+                `Game Day: Week ${gameState.currentWeek + 1}`,
+                `<p class="mb-4">Your team is playing <strong>${opponentName}</strong>.</p><p>How do you want to play?</p>`,
+                () => startLiveGame(playerGameMatch),
+                "Watch Game",
+                () => simulateRestOfWeek(),
+                "Quick Sim"
+            );
+        } else {
+            simulateRestOfWeek();
+        }
+    };
+
+    const activeCount = Game.getRosterObjects(gameState.playerTeam).filter(p =>
+        p && (
+            p.status?.type === 'temporary' ||
+            !p.status ||
+            p.status.duration === 0
+        )
+    ).length;
+
+    if (activeCount < TEMPORARY_HELP_THRESHOLD) {
+        showEmergencyFriendCallup(proceedToGameDay);
+        return;
     }
+
+    proceedToGameDay();
 }
 
 function simulateRestOfWeek() {

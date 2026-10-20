@@ -4259,7 +4259,7 @@ function runLiveGameStep() {
     }
 }
 
-function getPlayerLastNameForStats(player) {
+/*function getPlayerLastNameForStats(player) {
     if (typeof player?.lastName === 'string' && player.lastName.trim()) {
         return player.lastName.trim();
     }
@@ -4272,7 +4272,7 @@ function getPlayerLastNameForStats(player) {
 
     const nameParts = fullName.split(/\s+/);
     return nameParts[nameParts.length - 1] || 'Player';
-}
+}*/
 
 export function renderLiveFieldLineup(frameData, gameState) {
     const container = document.getElementById('sim-field-players');

@@ -32,6 +32,7 @@ export const ROSTER_LIMIT = 18;
 export const REGULAR_SEASON_ROSTER_LIMIT = 18;
 export const SUMMER_ROSTER_LIMIT = 24;
 export const MIN_HEALTHY_PLAYERS = 8;
+export const TEMPORARY_HELP_THRESHOLD = 12;
 
 const createEmptySeasonStats = () => ({
     passYards: 0,
@@ -836,7 +837,7 @@ export function generateWeeklyEvents() {
         if (roster.length === 0) return;
 
         roster.forEach(player => {
-            if (player.status?.duration > 0) return;
+            if (player.status?.type === 'temporary' || player.status?.duration > 0) return;
 
             const dependability = player.personality?.dependability || 60;
             const flakeChance = (100 - dependability) / 1800;
@@ -970,6 +971,10 @@ export function processEndOfWeek() {
     mainTeams.forEach(team => {
         if (!team.finances) {
             team.finances = { balance: 10.00, waivedDues: [] };
+        }
+
+        if (!Array.isArray(team.finances.waivedDues)) {
+            team.finances.waivedDues = [];
         }
 
         const coach = team.staff?.coach || team.coach;
@@ -1226,8 +1231,19 @@ export function callFriend(playerId) {
     const roster = getRosterObjects(team);
     const healthyCount = roster.filter(p => p && (!p.status || p.status.duration === 0)).length;
 
-    if (healthyCount >= 16) {
-        return { success: false, message: "Your roster is full enough (16+ active). Save your favors for when you're desperate." };
+    const activeCount = roster.filter(p =>
+        p && (
+            p.status?.type === 'temporary' ||
+            !p.status ||
+            p.status.duration === 0
+        )
+    ).length;
+
+    if (activeCount >= TEMPORARY_HELP_THRESHOLD) {
+        return {
+            success: false,
+            message: `Your roster has ${activeCount} active players. You can only call a friend when fewer than ${TEMPORARY_HELP_THRESHOLD} are available.`
+        };
     }
     const player = game.freeAgents.find(p => p && p.id === playerId);
     if (!player) return { success: false, message: "That player is no longer hanging around the park this week." };
@@ -1712,7 +1728,7 @@ export function aiManageRoster(team) {
     const aiAvailableNetwork = getTeamNetworkRecruits(team);
 
     while (
-        playableCount < MIN_HEALTHY_PLAYERS &&
+        playableCount < TEMPORARY_HELP_THRESHOLD &&
         team.roster.length < getCurrentRosterLimit(game) &&
         aiAvailableNetwork.length > 0
     ) {
