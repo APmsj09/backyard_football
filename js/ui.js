@@ -160,6 +160,138 @@ function getScoutingAwarePlayerView(player, team, reportOverride = undefined) {
 const OFFENSIVE_POSITION_FITS = ['QB', 'RB', 'WR', 'TE', 'OL'];
 const DEFENSIVE_POSITION_FITS = ['DL', 'LB', 'DB'];
 
+const PUBLIC_STAT_LABELS = {
+    passYards: 'Pass Yds',
+    passCompletions: 'Completions',
+    passAttempts: 'Pass Att',
+    interceptionsThrown: 'INT Thrown',
+    rushYards: 'Rush Yds',
+    rushAttempts: 'Carries',
+    receptions: 'Receptions',
+    recYards: 'Rec Yds',
+    targets: 'Targets',
+    drops: 'Drops',
+    tackles: 'Tackles',
+    sacks: 'Sacks',
+    interceptions: 'INT',
+    touchdowns: 'TD',
+    returnYards: 'Return Yds',
+    fumblesRecovered: 'Fum Rec'
+};
+
+const PUBLIC_STATS_BY_POSITION = {
+    QB: ['passYards', 'passCompletions', 'passAttempts', 'touchdowns', 'interceptionsThrown', 'rushYards'],
+    RB: ['rushYards', 'rushAttempts', 'receptions', 'recYards', 'touchdowns'],
+    WR: ['receptions', 'recYards', 'targets', 'touchdowns', 'drops', 'returnYards'],
+    TE: ['receptions', 'recYards', 'targets', 'touchdowns', 'drops'],
+    OL: ['touchdowns', 'rushYards'],
+    DL: ['tackles', 'sacks', 'interceptions', 'fumblesRecovered', 'touchdowns'],
+    LB: ['tackles', 'sacks', 'interceptions', 'fumblesRecovered', 'touchdowns'],
+    DB: ['tackles', 'interceptions', 'returnYards', 'touchdowns']
+};
+
+function renderPublicStatSummary(stats, position) {
+    if (!stats || typeof stats !== 'object') {
+        return '<span class="text-slate-400 italic">No recorded statistics</span>';
+    }
+
+    const fields = PUBLIC_STATS_BY_POSITION[position] ||
+        Object.keys(PUBLIC_STAT_LABELS);
+
+    const entries = fields
+        .filter(field => Number.isFinite(stats[field]))
+        .map(field => ({
+            label: PUBLIC_STAT_LABELS[field],
+            value: stats[field]
+        }));
+
+    if (entries.length === 0) {
+        return '<span class="text-slate-400 italic">No tracked statistics for this position</span>';
+    }
+
+    return entries.map(entry => `
+        <span class="inline-flex items-center gap-1 bg-white border border-slate-200 rounded px-1.5 py-0.5 whitespace-nowrap">
+            <span class="text-slate-500">${entry.label}</span>
+            <b class="text-slate-800">${entry.value}</b>
+        </span>
+    `).join('');
+}
+
+function renderPublicPlayerRecord(info) {
+    if (!info) {
+        return `
+            <div class="rounded border border-slate-200 bg-slate-50 p-2">
+                <p class="text-slate-500 italic">Public player record unavailable.</p>
+            </div>`;
+    }
+
+    const details = [
+        info.listedPosition ? `Listed: ${info.listedPosition}` : null,
+        info.height != null ? formatHeight(info.height) : null,
+        info.weight != null ? `${info.weight} lbs` : null,
+        info.currentTeamName || null
+    ].filter(Boolean);
+
+    const recentSeasons = Array.isArray(info.recentSeasons)
+        ? info.recentSeasons.slice(-3).reverse()
+        : [];
+
+    const historyHtml = recentSeasons.length > 0
+        ? recentSeasons.map(season => `
+            <div class="border-t border-slate-200 pt-1.5 first:border-t-0 first:pt-0">
+                <div class="flex flex-wrap items-center justify-between gap-1 mb-1">
+                    <span class="font-bold text-slate-700">
+                        ${season.year != null ? `Year ${season.year}` : 'Season record'}
+                        ${season.age != null ? ` · Age ${season.age}` : ''}
+                    </span>
+                    <span class="text-slate-400">${season.teamName || ''}</span>
+                </div>
+                <div class="flex flex-wrap gap-1">
+                    ${renderPublicStatSummary(season.stats, info.listedPosition)}
+                </div>
+            </div>
+        `).join('')
+        : '<p class="text-slate-400 italic">No season history recorded.</p>';
+
+    const careerHtml = info.careerStats
+        ? renderPublicStatSummary(info.careerStats, info.listedPosition)
+        : '<span class="text-slate-400 italic">No career totals recorded</span>';
+
+    return `
+        <section class="rounded border border-slate-200 bg-slate-50 p-2 space-y-2">
+            <div class="flex flex-wrap items-center justify-between gap-1">
+                <span class="font-black tracking-wide text-slate-700">PUBLIC RECORD</span>
+                <span class="text-[9px] text-slate-400">Available without scouting</span>
+            </div>
+
+            <div class="flex flex-wrap gap-1">
+                ${details.map(detail => `
+                    <span class="bg-white border border-slate-200 rounded px-1.5 py-0.5 text-slate-600">
+                        ${detail}
+                    </span>
+                `).join('')}
+            </div>
+
+            <div>
+                <p class="text-[9px] font-bold uppercase tracking-wide text-slate-500 mb-1">
+                    Recent seasons
+                </p>
+                <div class="space-y-1.5">
+                    ${historyHtml}
+                </div>
+            </div>
+
+            <div>
+                <p class="text-[9px] font-bold uppercase tracking-wide text-slate-500 mb-1">
+                    Career totals${info.seasonsPlayed > 0 ? ` · ${info.seasonsPlayed} seasons` : ''}
+                </p>
+                <div class="flex flex-wrap gap-1">
+                    ${careerHtml}
+                </div>
+            </div>
+        </section>`;
+}
+
 function hasScoutingUncertainty(player) {
     return Object.values(player?.attributes || {}).some(category =>
         category &&
@@ -1043,6 +1175,8 @@ export function renderSelectedPlayerCard(player, gameState) {
     const scoutingLabel = SCOUTING_LEVEL_LABELS[scoutingLevel] || 'Known player';
     const characterSummary = scouted.scoutingEvaluation?.characterSummary ||
         (scoutingLevel >= 3 ? 'Not included in this report' : 'Not assessed yet');
+    const publicInfo = Game.getPublicPlayerInfo?.(player) || null;
+    const publicRecordHtml = renderPublicPlayerRecord(publicInfo);
 
     const bestFriend = playerRoster.find(r => r.id === player.social?.bestFriendId);
     const friendsOnTeam = playerRoster.filter(r => player.social?.goodFriendIds?.includes(r.id));
@@ -1137,6 +1271,7 @@ export function renderSelectedPlayerCard(player, gameState) {
 
             <!-- Tab 1: Overview Pane (Clean & Compact) -->
             <div id="dossier-pane-overview" class="dossier-pane ${activeDossierTab === 'overview' ? '' : 'hidden'} text-[10px] space-y-1.5">
+                ${publicRecordHtml}
                 <div class="flex flex-wrap items-center gap-1">
                     <span class="bg-amber-100 text-amber-900 font-bold px-1.5 py-0.5 rounded border border-amber-200">Role: ${scouted.scoutingEvaluation?.projectedRole || (scoutingLevel > 0 ? 'Under evaluation' : 'Unscouted')}</span>
                     <span class="bg-indigo-100 text-indigo-900 font-bold px-1.5 py-0.5 rounded border border-indigo-200">Character: ${characterSummary}</span>

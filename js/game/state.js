@@ -321,6 +321,133 @@ export function getTeamScoutingReport(team, playerId) {
         : null;
 }
 
+const PUBLIC_PERFORMANCE_STAT_FIELDS = [
+    'passAttempts',
+    'passCompletions',
+    'passYards',
+    'interceptionsThrown',
+    'rushAttempts',
+    'rushYards',
+    'receptions',
+    'recYards',
+    'targets',
+    'drops',
+    'tackles',
+    'sacks',
+    'interceptions',
+    'fumbles',
+    'fumblesLost',
+    'fumblesRecovered',
+    'returnYards',
+    'touchdowns',
+    'safeties'
+];
+
+function getPublicPerformanceStats(stats) {
+    if (!stats || typeof stats !== 'object' || Array.isArray(stats)) {
+        return null;
+    }
+
+    const result = {};
+
+    for (const field of PUBLIC_PERFORMANCE_STAT_FIELDS) {
+        const value = stats[field];
+
+        if (Number.isFinite(value)) {
+            result[field] = Math.max(0, Math.round(value));
+        }
+    }
+
+    return Object.keys(result).length > 0 ? result : null;
+}
+
+/**
+ * Returns public-facing player information without exposing hidden ratings,
+ * potential, personality, or private development details.
+ *
+ * Intended for player dossiers and selected-player views, not bulk rendering
+ * of every player in the draft pool.
+ */
+export function getPublicPlayerInfo(player) {
+    if (!player) return null;
+
+    const physical = player.attributes?.physical || {};
+    const team = player.teamId != null
+        ? (game?.teams || []).find(
+            candidate => String(candidate.id) === String(player.teamId)
+        )
+        : null;
+
+    const progression = Array.isArray(player.progression)
+        ? player.progression
+        : [];
+
+    const recentSeasons = progression.slice(-5).map(season => {
+        const stats = getPublicPerformanceStats(season?.stats);
+
+        return {
+            year: Number.isInteger(season?.year) ? season.year : null,
+            age: Number.isInteger(season?.age) ? season.age : null,
+            teamName: typeof season?.teamName === 'string'
+                ? season.teamName
+                : null,
+            stats,
+            hasRecordedStats: stats !== null
+        };
+    });
+
+    const teamHistory = Array.isArray(player.playerHistory?.teamsPlayedFor)
+        ? player.playerHistory.teamsPlayedFor
+            .slice(-5)
+            .map(entry => ({
+                teamName: typeof entry?.teamName === 'string'
+                    ? entry.teamName
+                    : null,
+                year: Number.isInteger(entry?.year) ? entry.year : null
+            }))
+        : [];
+
+    const duration = Number(player.status?.duration) || 0;
+    const statusType = player.status?.type || 'unknown';
+
+    let availability = 'available';
+
+    if (duration > 0) {
+        availability = statusType === 'injured'
+            ? 'injured'
+            : 'unavailable';
+    } else if (statusType === 'retired' || statusType === 'departed') {
+        availability = statusType;
+    } else if (statusType === 'temporary') {
+        availability = 'temporary';
+    }
+
+    return {
+        id: player.id,
+        name: player.name,
+        age: Number.isFinite(player.age) ? player.age : null,
+        listedPosition: typeof player.pos === 'string'
+            ? player.pos
+            : null,
+        currentTeamName: team?.name ||
+            (player.teamId != null ? 'Unknown Team' : 'Free Agent / Draft Pool'),
+        lastTeamName: recentSeasons[recentSeasons.length - 1]?.teamName ||
+            teamHistory[teamHistory.length - 1]?.teamName ||
+            null,
+        height: Number.isFinite(physical.height) ? physical.height : null,
+        weight: Number.isFinite(physical.weight) ? physical.weight : null,
+        availability,
+        weeksUnavailable: Math.max(0, Math.floor(duration)),
+        seasonStats: getPublicPerformanceStats(player.seasonStats),
+        careerStats: getPublicPerformanceStats(player.careerStats),
+        seasonsPlayed: Number.isFinite(player.careerStats?.seasonsPlayed)
+            ? Math.max(0, player.careerStats.seasonsPlayed)
+            : 0,
+        recentSeasons,
+        teamHistory
+    };
+}
+
 /** Stores a compact, team-owned scouting report. */
 export function setTeamScoutingReport(team, playerId, report) {
     if (!team ||
