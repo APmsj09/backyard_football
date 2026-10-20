@@ -125,6 +125,11 @@ export function checkBlockCollisions(playState, gameLog = null) {
     );
 
     blockers.forEach(blocker => {
+        if (blocker.reengageCooldown > 0) {
+            blocker.reengageCooldown--;
+            return;
+        }
+
         const isBlockingDuty = blocker.action.includes('block') ||
             (blocker.assignment && (blocker.assignment.includes('pull') || blocker.assignment.includes('lead') || blocker.assignment.includes('screen_block')));
 
@@ -1055,9 +1060,14 @@ export function resolveOngoingBlocks(playState, gameLog, offenseStates = [], def
                 (blockerAwayY / blockerAwayDistance) * (isPassRush ? 1.5 : 1.0)
             );
 
-            blocker.engagedWith = null; blocker.isEngaged = false;
+            blocker.engagedWith = null; 
+            blocker.isEngaged = false;
+            blocker.reengageCooldown = 12; // 0.48s recovery window so rusher can actually penetrate
+
             defender.stunnedTicks = 0;
-            defender.isBlocked = false; defender.blockedBy = null; defender.isEngaged = false;
+            defender.isBlocked = false; 
+            defender.blockedBy = null; 
+            defender.isEngaged = false;
             defender.action = 'pursuit';
             battlesToRemove.push(index);
             } else if (battle.status === 'win_A') {
@@ -1322,25 +1332,25 @@ export function handleBallArrival(playState, carrier, playResult, gameLog) {
             let posScore = ((p.ctch || p.catchingHands || 50) * 0.4) + ((p.agi || p.agility || 50) * 0.2);
 
             if (p.id === ball.targetPlayerId) {
-                posScore += 50;
+                posScore += 22; // Balanced target priority so defenders in position can contest
             } else if (!p.isOffense) {
-                posScore += ((p.cov || p.coverage || 50) * 0.3) + ((p.iq || p.playbookIQ || 50) * 0.3);
+                posScore += ((p.cov || p.coverage || 50) * 0.45) + ((p.iq || p.playbookIQ || 50) * 0.25);
             }
 
-            posScore += ((p.hgt || 70) > 74 ? 15 : 0);
+            posScore += ((p.hgt || 70) > 74 ? 12 : 0);
 
-            const roll = posScore + (Math.random() * 100);
+            const roll = posScore + (Math.random() * 80);
             if (roll > highestRoll) {
                 highestRoll = roll;
                 bestCandidate = p;
             }
-            });
+        });
 
-            if (!bestCandidate) return;
+        if (!bestCandidate) return;
 
-            // Mark before resolving the catch so this player cannot roll again
-            // on the next tick while still inside the catch radius.
-            ball._attemptedCatchPlayerIds.add(bestCandidate.id);
+        // Mark before resolving the catch so this player cannot roll again
+        // on the next tick while still inside the catch radius.
+        ball._attemptedCatchPlayerIds.add(bestCandidate.id);
 
         let catching = bestCandidate.ctch || bestCandidate.catchingHands;
         let agility = bestCandidate.agi || bestCandidate.agility;
@@ -1364,14 +1374,26 @@ export function handleBallArrival(playState, carrier, playResult, gameLog) {
         const fatPct = Math.round((bestCandidate.fatigueModifier || 1) * 100);
         const isDefense = !bestCandidate.isOffense;
 
-        let catchScore = (catching * 0.50) + (agility * 0.20) + 40;
+        let catchScore = (catching * 0.50) + (agility * 0.20) + 35;
 
-        const defendersNear = playersInRange.filter(p => !p.isOffense).length;
-        let attackersNear = playersInRange.filter(p => p.isOffense).length;
+        // Physical proximity check (within 2.2 yards of catch spot)
+        // Evaluates ALL live players regardless of whether they already rolled an attempt
+        const defendersNear = playState.activePlayers.filter(p =>
+            !p.isOffense &&
+            p.stunnedTicks <= 0 &&
+            !p.isEngaged &&
+            getDistance(p, ball) <= 2.2
+        ).length;
 
-        // If the intended receiver is within 2.5 yards of the catch point, they are actively contesting!
+        let attackersNear = playState.activePlayers.filter(p =>
+            p.isOffense &&
+            p.stunnedTicks <= 0 &&
+            !p.isEngaged &&
+            getDistance(p, ball) <= 2.2
+        ).length;
+
         const intendedTarget = playState.activePlayers.find(p => p.id === ball.targetPlayerId);
-        if (intendedTarget && getDistance(intendedTarget, ball) < 2.5 && attackersNear === 0) {
+        if (intendedTarget && getDistance(intendedTarget, ball) <= 2.2 && attackersNear === 0) {
             attackersNear = 1;
         }
 

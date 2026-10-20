@@ -1329,8 +1329,10 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                     ? pState.routePath[pState.currentPathIndex] 
                     : null;
 
-                // Check if an engaged blocker or penetrating defender is standing directly in the designed hole
-                const holeClogged = pt && (
+                // Allow line blocks to physically engage before testing if the hole is clogged
+                const isEarlySnap = playState.tick < 10;
+
+                const holeClogged = !isEarlySnap && pt && (
                     offenseStates.some(o =>
                         o.id !== pState.id &&
                         !o.action?.includes('block') &&
@@ -1343,18 +1345,18 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                         !d.isBlocked &&
                         !d.isEngaged &&
                         d.stunnedTicks <= 0 &&
-                        d.y > pState.y - 0.5 &&
-                        d.y <= pt.y + 2.0 &&
-                        getDistance(d, pt) < 2.25
+                        d.y > pState.y &&
+                        d.y <= pt.y + 1.0 &&
+                        getDistance(d, pt) < 1.4 // Direct penetration into the hole
                     )
                 );
 
                 const isRunHolePhase = playType === 'run' &&
                     pState.role === 'RB' &&
                     pt !== null &&
-                    pState.y < LOS + 1.0 &&
+                    pState.y < LOS + 0.8 &&
                     !holeClogged &&
-                    pState.tick < (pState._handoffTick || 18) + 12 &&
+                    playState.tick < (pState._handoffTick || 16) + 24 && // Gives full window to hit LOS
                     pState.action !== 'trucking';
 
                 if (isRunHolePhase) {
@@ -1846,8 +1848,24 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                             'PostCorner'
                         ].some(r => pState.assignment?.includes(r));
 
-                        // Evaluate double-move reactions only when transitioning
-                        // into the final route segment, not at every waypoint.
+                        // Calculate actual directional change angle between route nodes
+                        let isSharpCut = false;
+                        if (pState.routePath && pState.currentPathIndex > 0 && pState.currentPathIndex < pState.routePath.length) {
+                            const prevPt = pState.routePath[pState.currentPathIndex - 1];
+                            const currPt = pState.routePath[pState.currentPathIndex];
+                            const v1x = currPt.x - prevPt.x;
+                            const v1y = currPt.y - prevPt.y;
+                            const v2x = (pState.vx || 0);
+                            const v2y = (pState.vy || 0);
+                            const dot = (v1x * v2x) + (v1y * v2y);
+                            const mag1 = Math.hypot(v1x, v1y);
+                            const mag2 = Math.hypot(v2x, v2y);
+                            if (mag1 > 0.5 && mag2 > 0.5) {
+                                const cosTheta = dot / (mag1 * mag2);
+                                isSharpCut = cosTheta < 0.75; // Direction shift >= 40 degrees
+                            }
+                        }
+
                         const isDesignatedDoubleMoveBreak =
                             isDoubleMoveRoute &&
                             pState.routePath?.length > 1 &&
@@ -1855,10 +1873,10 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
 
                         const coverageDefender = defenseStates.find(d =>
                             (d.assignment?.includes(pState.slot) || d.assignedPlayerSlot === pState.slot) &&
-                            getDistance(pState, d) < 5.0
+                            getDistance(pState, d) < 4.0
                         );
 
-                        if (coverageDefender && (!isDoubleMoveRoute || isDesignatedDoubleMoveBreak)) {
+                        if (coverageDefender && (isSharpCut || isDesignatedDoubleMoveBreak)) {
                             const wrAgility = pState.agility || 50;
                             const dbAgility = coverageDefender.agility || 50;
                             const dbIQ = coverageDefender.playbookIQ || 50;
@@ -1868,11 +1886,11 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                             const isDoubleMove = isDoubleMoveRoute;
                             let separated = false;
 
-                            // 1. Playground Double-Move Trap
-                            if (isDoubleMove && dbIQ < 60 && Math.random() < 0.65) {
-                                coverageDefender.stunnedTicks = Math.max(14, 30 - Math.floor(dbIQ / 3));
-                                coverageDefender.vx = 0;
-                                coverageDefender.vy = 0;
+                            // 1. Playground Double-Move Trap (requires double move route design)
+                            if (isDoubleMove && dbIQ < 65 && Math.random() < 0.45) {
+                                coverageDefender.stunnedTicks = Math.max(6, 14 - Math.floor(dbIQ / 8));
+                                coverageDefender.vx *= 0.2;
+                                coverageDefender.vy *= 0.2;
                                 separated = true;
 
                                 logPlayDebug('ROUTE_DOUBLE_MOVE', `${pState.name} froze ${coverageDefender.name} on double move`, {
@@ -1887,27 +1905,28 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                             }
 
                             // 2. Uncalled Playground Shove
-                            if (!separated && wrStrength > dbStrength + 8 && Math.random() < 0.35) {
+                            if (!separated && wrStrength > dbStrength + 12 && Math.random() < 0.20) {
                                 const pushDx = (coverageDefender.x - pState.x) || 1;
                                 const pushDy = (coverageDefender.y - pState.y) || 1;
                                 const pushDist = Math.max(0.1, Math.hypot(pushDx, pushDy));
-                                coverageDefender.x += (pushDx / pushDist) * 1.6;
-                                coverageDefender.y += (pushDy / pushDist) * 1.6;
-                                coverageDefender.stunnedTicks = 12;
+                                coverageDefender.x += (pushDx / pushDist) * 1.0;
+                                coverageDefender.y += (pushDy / pushDist) * 1.0;
+                                coverageDefender.stunnedTicks = 6;
                                 separated = true;
-                                if (gameLog && Math.random() < 0.3) {
+                                if (gameLog && Math.random() < 0.25) {
                                     pushGameLog(gameLog, `[Tick ${playState.tick}] 💪 ${pState.name} gives ${coverageDefender.name} an uncalled playground shove at the break!`, playState);
                                 }
                             }
 
-                            // 3. Momentum Overshoot on the Cut
-                            if (!separated) {
-                                const shakeChance = (wrAgility / (dbAgility + 10)) * (1.2 - (dbIQ / 150));
-                                if (Math.random() < shakeChance * 0.45) {
-                                    coverageDefender.stunnedTicks = Math.max(8, 22 - Math.floor(dbIQ / 5));
-                                    coverageDefender.x += (coverageDefender.vx || 0) * 0.7;
-                                    coverageDefender.y += (coverageDefender.vy || 0) * 0.7;
-                                    if (gameLog && Math.random() < 0.25) {
+                            // 3. Momentum Overshoot on Sharp Cuts (brief 3-5 tick hesitation, not a complete shutdown)
+                            if (!separated && isSharpCut) {
+                                const agiEdge = wrAgility - dbAgility;
+                                const shakeChance = Math.max(0.05, Math.min(0.35, 0.15 + (agiEdge * 0.005) - ((dbIQ - 50) * 0.003)));
+                                if (Math.random() < shakeChance) {
+                                    coverageDefender.stunnedTicks = Math.max(3, 7 - Math.floor(dbIQ / 18));
+                                    coverageDefender.vx *= 0.4;
+                                    coverageDefender.vy *= 0.4;
+                                    if (gameLog && Math.random() < 0.20) {
                                         pushGameLog(gameLog, `[Tick ${playState.tick}] 💨 ${pState.name} shakes ${coverageDefender.name} on the cut!`, playState);
                                     }
                                 }
@@ -2359,16 +2378,27 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
 
                             pState.action = 'tracking_ball';
                         } else {
-                            // The pass is not realistically reachable.
-                            // Preserve the player's existing assignment.
-                            executeAssignment(
-                                pState,
-                                assignment,
-                                offenseStates,
-                                LOS,
-                                playState,
-                                ballCarrierState
-                            );
+                            // Even if an interception trajectory cannot be undercut, defenders covering
+                            // the target receiver MUST converge to contest the catch and make the tackle!
+                            const isAssignedToTarget = assignment?.includes(ballPos.targetPlayerId) ||
+                                (ballPos.targetPlayerId && pState.assignedPlayerSlot === offenseStates.find(o => o.id === ballPos.targetPlayerId)?.slot);
+
+                            const distToLanding = Math.hypot(pState.x - ballPos.targetX, pState.y - ballPos.targetY);
+
+                            if (isAssignedToTarget || distToLanding < 6.5) {
+                                setPointIntent(pState, ballPos.targetX, ballPos.targetY, 0.45);
+                                pState.action = 'tracking_ball';
+                                pState.contactReduction = 1.15;
+                            } else {
+                                executeAssignment(
+                                    pState,
+                                    assignment,
+                                    offenseStates,
+                                    LOS,
+                                    playState,
+                                    ballCarrierState
+                                );
+                            }
                         }
                     }
                 } else {
@@ -2462,15 +2492,18 @@ export function executeAssignment(pState, assignment, offenseStates, LOS, playSt
             
             const iqFactor = Math.max(-0.6, Math.min(1.0, (defIQ - 50) / 40)); // -0.6 (slow learner) to +1.0 (shut-down lock)
             
-            // Base cushion depends entirely on pre-snap alignment width, NOT the play call
+            // Base cushion depends on alignment width and distance to goal line
             let baseCushionY = isTightSplit ? 1.1 : 2.2; 
+            if (distanceToGoal <= 5.0) {
+                baseCushionY = 0.5; // Goal line press alignment
+            }
+
             let baseCushionX = (targetRec.x < CENTER_X) ? 0.5 : -0.5; // Inside leverage
 
             // Attribute Scaling: High-IQ / High-Agility DBs squeeze tighter; low-IQ DBs play soft and give cushion
-
             const defAgility = pState.agility || pState.agi || 50;  
             let agilityFactor = (defAgility / 50);
-            let cushionY = Math.max(0.6, (baseCushionY * cushionShrink) - (iqFactor * 0.5) - ((agilityFactor - 1) * 0.3));
+            let cushionY = Math.max(distanceToGoal <= 5.0 ? 0.3 : 0.6, (baseCushionY * cushionShrink) - (iqFactor * 0.5) - ((agilityFactor - 1) * 0.3));
             let cushionX = (baseCushionX * cushionShrink) * (0.8 + (iqFactor * 0.2));
 
             // Speed mismatch adjustment: If the receiver is a burner, smart DBs bail out deeper to prevent getting beat deep

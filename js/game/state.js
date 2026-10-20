@@ -182,7 +182,245 @@ export function getScoutedPlayerInfo(player, relationshipLevelNum) {
             }
         }
     }
-    return scoutedPlayer;
+        return scoutedPlayer;
+}
+
+const SCOUTING_REPORT_SCHEMA_VERSION = 1;
+
+export const SCOUTING_REPORT_LEVELS = Object.freeze({
+    UNSCOUTED: 0,
+    INITIAL: 1,
+    EVALUATED: 2,
+    DETAILED: 3,
+    FULL: 4
+});
+
+const EMPTY_SCOUTING_REPORTS = Object.freeze({});
+const SCOUTING_OFFENSE_POSITIONS = new Set(['QB', 'RB', 'WR', 'TE', 'OL']);
+const SCOUTING_DEFENSE_POSITIONS = new Set(['DL', 'LB', 'DB']);
+const SCOUTING_POTENTIAL_GRADES = new Set(['A', 'B', 'C', 'D', 'F']);
+
+function normalizeScoutingRange(range) {
+    let low;
+    let high;
+
+    if (typeof range === 'number') {
+        low = range;
+        high = range;
+    } else {
+        if (range?.low == null || range?.high == null) return null;
+        low = Number(range.low);
+        high = Number(range.high);
+    }
+
+    if (!Number.isFinite(low) || !Number.isFinite(high)) return null;
+
+    low = Math.max(1, Math.min(99, Math.round(low)));
+    high = Math.max(1, Math.min(99, Math.round(high)));
+
+    return {
+        low: Math.min(low, high),
+        high: Math.max(low, high)
+    };
+}
+
+function normalizeScoutingAttributeRanges(attributeRanges) {
+    if (!attributeRanges ||
+        typeof attributeRanges !== 'object' ||
+        Array.isArray(attributeRanges)) {
+        return {};
+    }
+
+    const normalized = {};
+
+    for (const [category, values] of Object.entries(attributeRanges)) {
+        if (!values || typeof values !== 'object' || Array.isArray(values)) continue;
+
+        const normalizedValues = {};
+
+        for (const [attribute, range] of Object.entries(values)) {
+            const normalizedRange = normalizeScoutingRange(range);
+            if (normalizedRange) normalizedValues[attribute] = normalizedRange;
+        }
+
+        if (Object.keys(normalizedValues).length > 0) {
+            normalized[category] = normalizedValues;
+        }
+    }
+
+    return normalized;
+}
+
+function normalizeScoutingFit(fit, allowedPositions) {
+    if (!fit ||
+        typeof fit !== 'object' ||
+        !allowedPositions.has(fit.position)) {
+        return null;
+    }
+
+    const range = normalizeScoutingRange(fit);
+    if (!range) return null;
+
+    return {
+        position: fit.position,
+        low: range.low,
+        high: range.high
+    };
+}
+
+function normalizeScoutingNotes(notes) {
+    if (!Array.isArray(notes)) return [];
+
+    return notes
+        .filter(note => typeof note === 'string' && note.trim())
+        .slice(0, 5)
+        .map(note => note.trim().slice(0, 160));
+}
+
+function normalizePotentialRange(range) {
+    if (!range || typeof range !== 'object') return null;
+
+    const bestPossible = range.bestPossible;
+    const worstPossible = range.worstPossible;
+
+    if (!SCOUTING_POTENTIAL_GRADES.has(bestPossible) ||
+        !SCOUTING_POTENTIAL_GRADES.has(worstPossible)) {
+        return null;
+    }
+
+    return { bestPossible, worstPossible };
+}
+
+/** Returns a team's scouting map without allocating or mutating state. */
+export function getTeamScoutingReports(team) {
+    const reports = team?.scoutingReports;
+
+    return reports &&
+        typeof reports === 'object' &&
+        !Array.isArray(reports)
+        ? reports
+        : EMPTY_SCOUTING_REPORTS;
+}
+
+/** Returns a stored report or null when the player is unscouted. */
+export function getTeamScoutingReport(team, playerId) {
+    if (!team || playerId == null) return null;
+
+    const reports = team.scoutingReports;
+
+    if (!reports ||
+        typeof reports !== 'object' ||
+        Array.isArray(reports)) {
+        return null;
+    }
+
+    const key = String(playerId);
+
+    return Object.prototype.hasOwnProperty.call(reports, key)
+        ? reports[key]
+        : null;
+}
+
+/** Stores a compact, team-owned scouting report. */
+export function setTeamScoutingReport(team, playerId, report) {
+    if (!team ||
+        playerId == null ||
+        !report ||
+        typeof report !== 'object') {
+        return false;
+    }
+
+    const level = Number(report.level);
+    const confidence = Number(report.confidence);
+
+    const existingReports = team.scoutingReports &&
+        typeof team.scoutingReports === 'object' &&
+        !Array.isArray(team.scoutingReports)
+        ? team.scoutingReports
+        : null;
+
+    const reportKey = String(playerId);
+    const existingReport = existingReports?.[reportKey] || null;
+    const existingLevel = Number(existingReport?.level);
+    const existingProgress = Number(existingReport?.progressPoints);
+
+    const incomingProgress = Number(report.progressPoints);
+    const progressPoints = report.progressPoints != null &&
+        report.progressPoints !== '' &&
+        Number.isFinite(incomingProgress)
+        ? Math.max(0, incomingProgress)
+        : Number.isFinite(existingProgress)
+            ? Math.max(0, existingProgress)
+            : 0;
+
+    if (!Number.isInteger(level) || level < 0 || level > 4) return false;
+
+    if (level === 0 && progressPoints <= 0) return false;
+
+    if (existingReport &&
+        Number.isInteger(existingLevel) &&
+        level < existingLevel) {
+        return false;
+    }
+
+    if (report.confidence == null || report.confidence === '') return false;
+
+    if (!Number.isFinite(confidence) ||
+        confidence < 0 ||
+        confidence > 1) {
+        return false;
+    }
+
+    if (!team.scoutingReports ||
+        typeof team.scoutingReports !== 'object' ||
+        Array.isArray(team.scoutingReports)) {
+        team.scoutingReports = {};
+    }
+
+    const evaluation = report.evaluation &&
+        typeof report.evaluation === 'object'
+        ? report.evaluation
+        : {};
+
+    team.scoutingReports[reportKey] = {
+        schemaVersion: SCOUTING_REPORT_SCHEMA_VERSION,
+        level,
+        progressPoints,
+        confidence,
+        attributeRanges: normalizeScoutingAttributeRanges(
+            report.attributeRanges
+        ),
+        potentialRange: normalizePotentialRange(report.potentialRange),
+        evaluation: {
+            offenseFit: normalizeScoutingFit(
+                evaluation.offenseFit,
+                SCOUTING_OFFENSE_POSITIONS
+            ),
+            defenseFit: normalizeScoutingFit(
+                evaluation.defenseFit,
+                SCOUTING_DEFENSE_POSITIONS
+            ),
+            strengths: normalizeScoutingNotes(evaluation.strengths),
+            concerns: normalizeScoutingNotes(evaluation.concerns),
+            projectedRole: typeof evaluation.projectedRole === 'string'
+                ? evaluation.projectedRole.slice(0, 80)
+                : null,
+            summary: typeof evaluation.summary === 'string'
+                ? evaluation.summary.slice(0, 500)
+                : null
+        },
+        evaluatorId: typeof report.evaluatorId === 'string'
+            ? report.evaluatorId
+            : null,
+        evaluatedYear: Number.isInteger(report.evaluatedYear)
+            ? report.evaluatedYear
+            : null,
+        evaluatedWeek: Number.isInteger(report.evaluatedWeek)
+            ? report.evaluatedWeek
+            : null
+    };
+
+    return true;
 }
 
 export function getRosterObjects(team) {

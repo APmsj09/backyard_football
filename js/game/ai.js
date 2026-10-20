@@ -167,7 +167,7 @@ export function diagnosePlay(pState, tick, offenseStates, playState = null) {
         // An OL holding pass pro might get shoved downfield; don't count that as a run block!
         const isPassAssignment = lineman.action === 'pass_block' || lineman.assignment === 'pass_block';
 
-        if (forwardStep < -0.12 || (lineman.vy || 0) < -0.75 || (isPassAssignment && tick < 35)) {
+        if (isPassAssignment || forwardStep < -0.12 || (lineman.vy || 0) < -0.75) {
             passBlocks++;
         } else if (forwardStep > 0.25 && !isPassAssignment) {
             runBlocks++;
@@ -658,13 +658,13 @@ export function getSmartCarrierTarget(runner, defenseStates, offenseStates, fiel
     // Preserve lane commitment unless a visible defender enters the
     // reaction window. A safety should not need to be within tackle
     // range before the RB can reconsider his path.
-    const defenderInReactionWindow =
-        nearestVisibleDefenderDistSq <= DEFENDER_REACTION_RANGE_SQ;
+    // Immediate threat check: only an unblocked, close defender (< 2.2y) should force an RB out of his lane
+    const hasImmediatePenetration = nearestVisibleDefender &&
+        nearestVisibleDefenderDistSq <= 4.84; // 2.2 yards squared
 
-    // FIX: Behind the line of scrimmage, enforce lane commitment so the RB 
-    // hits the hole with speed instead of flipping lanes every tick.
+    // Behind LOS, hold the chosen running lane with conviction to hit the hole with speed
     const shouldHoldLane = runner._laneLockTicks > 0 && runner._lockedLaneX !== undefined &&
-        (!defenderInReactionWindow || (isBehindLine && runner._laneLockTicks > 6));
+        (!hasImmediatePenetration || (isBehindLine && runner._laneLockTicks > 4 && !inTraffic));
 
     if (shouldHoldLane) {
         runner._laneLockTicks--;
@@ -711,9 +711,16 @@ export function getSmartCarrierTarget(runner, defenseStates, offenseStates, fiel
         score -= (momentumConflict * 4.0 * agilityMitigation);
 
         // When the middle is congested, make a wider lane a genuine option.
-        // IQ increases the preference but does not determine whether the runner
-        // can recognize an obvious outside opening at all.
         const centerThreatDetected = isBehindLine && centerThreat > 6.0;
+
+        // On designed outside stretch/toss plays, heavily penalize reversing back across the formation
+        const isOutsideRun = playState.playKey?.includes('Stretch') || playState.playKey?.includes('Toss') || playState.playKey?.includes('Sweep');
+        const runDirection = (playState.playKey?.endsWith('Left') || playState.playKey?.includes('_l')) ? -1 : 1;
+        if (isBehindLine && isOutsideRun) {
+            if (Math.sign(offset) !== 0 && Math.sign(offset) !== runDirection) {
+                score -= 80; // Do not bounce away from the designed perimeter stretch
+            }
+        }
 
         if (centerThreatDetected && lateralShift >= 3.0) {
             const bounceIQ = Math.max(0, (iq - 50) / 50);
