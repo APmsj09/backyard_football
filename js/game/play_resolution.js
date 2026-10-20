@@ -1914,6 +1914,10 @@ export function simulateLivePlayStep(gameInstance, mode = 'live') {
             gameInstance.yardsToGo = 10;
         } else if (gameInstance.quarter === 5) {
             if (gameInstance.homeScore !== gameInstance.awayScore) {
+                // Regulation ended with a winner. Do not leave the final
+                // game state labeled as overtime.
+                gameInstance.quarter = 4;
+                gameInstance.clock = 0;
                 gameInstance.isGameOver = true;
             } else {
                 gameInstance.clock = 300;
