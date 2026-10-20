@@ -8,6 +8,32 @@ let depthOrderSortCol = 'overall';
 let depthOrderSortDir = 'desc';
 let activeDepthOrderTab = 'QB';
 
+const OFFENSIVE_POSITION_FITS = ['QB', 'RB', 'WR', 'TE', 'OL'];
+const DEFENSIVE_POSITION_FITS = ['DL', 'LB', 'DB'];
+
+function getBestPositionFit(player, positions) {
+    if (!player) return { position: '—', ovr: 0 };
+
+    const eligiblePositions = positions.filter(position =>
+        positionOverallWeights[position] &&
+        isPlayerViableForPosition(player, position)
+    );
+
+    // Preserve a usable recommendation if no position passes the viability check.
+    const positionsToEvaluate = eligiblePositions.length > 0
+        ? eligiblePositions
+        : positions.filter(position => positionOverallWeights[position]);
+
+    const ratings = positionsToEvaluate.map(position => ({
+        position,
+        ovr: calculateOverall(player, position)
+    }));
+
+    ratings.sort((a, b) => b.ovr - a.ovr);
+
+    return ratings[0] || { position: '—', ovr: 0 };
+}
+
 function getStat(player, attrKey) {
     if (!player || !player.attributes) return '-';
     if (attrKey === 'height') return formatHeight(player.attributes.physical?.height);
@@ -206,10 +232,31 @@ export function renderDepthOrderPane(gameState) {
         </div>`;
     });
 
+    const positionFitsByPlayerId = new Map(
+        roster.map(player => [
+            player.id,
+            {
+                offense: getBestPositionFit(player, OFFENSIVE_POSITION_FITS),
+                defense: getBestPositionFit(player, DEFENSIVE_POSITION_FITS)
+            }
+        ])
+    );
+
     const availableRoster = roster.slice().sort((a, b) => {
-        const valA = depthOrderSortCol === 'overall' ? calculateOverall(a, a.pos || 'ATH') : (a[depthOrderSortCol] || 0);
-        const valB = depthOrderSortCol === 'overall' ? calculateOverall(b, b.pos || 'ATH') : (b[depthOrderSortCol] || 0);
-        return depthOrderSortDir === 'asc' ? (valA < valB ? -1 : 1) : (valB < valA ? -1 : 1);
+        const fitsA = positionFitsByPlayerId.get(a.id);
+        const fitsB = positionFitsByPlayerId.get(b.id);
+
+        const valA = depthOrderSortCol === 'overall'
+            ? Math.max(fitsA.offense.ovr, fitsA.defense.ovr)
+            : (a[depthOrderSortCol] || 0);
+
+        const valB = depthOrderSortCol === 'overall'
+            ? Math.max(fitsB.offense.ovr, fitsB.defense.ovr)
+            : (b[depthOrderSortCol] || 0);
+
+        return depthOrderSortDir === 'asc'
+            ? valA - valB
+            : valB - valA;
     });
 
     pane.innerHTML = `
@@ -235,21 +282,29 @@ export function renderDepthOrderPane(gameState) {
                         <thead class="bg-gray-800 text-white sticky top-0 z-10 shadow-sm">
                             <tr>
                                 <th class="py-1.5 px-2 text-left">Name</th>
-                                <th class="py-1.5 px-1 text-center">Pos</th>
-                                <th class="py-1.5 px-1 text-center">OVR</th>
+                                <th class="py-1.5 px-1 text-center">Off Fit</th>
+                                <th class="py-1.5 px-1 text-center">Def Fit</th>
                                 <th class="py-1.5 px-1 text-center">SPD</th>
                                 <th class="py-1.5 px-1 text-center">STR</th>
                             </tr>
                         </thead>
                         <tbody class="divide-y divide-gray-100">
                             ${availableRoster.map(p => {
-                                const pos = p.pos || estimateBestPosition(p);
-                                const ovr = calculateOverall(p, pos);
+                                const fits = positionFitsByPlayerId.get(p.id);
+                                const offFit = fits.offense;
+                                const defFit = fits.defense;
+
                                 return `
                                 <tr class="roster-row-item cursor-move hover:bg-amber-100 bg-white" draggable="true" data-player-id="${p.id}">
                                     <td class="py-1.5 px-2 font-semibold truncate max-w-[100px]">${p.name}</td>
-                                    <td class="py-1.5 px-1 text-center text-gray-500">${pos}</td>
-                                    <td class="py-1.5 px-1 text-center font-bold ${ovr >= 80 ? 'text-green-600' : 'text-gray-800'}">${ovr}</td>
+                                    <td class="py-1.5 px-1 text-center whitespace-nowrap">
+                                        <span class="font-bold text-emerald-700">${offFit.position}</span>
+                                        <span class="font-black text-gray-800 ml-0.5">${offFit.ovr}</span>
+                                    </td>
+                                    <td class="py-1.5 px-1 text-center whitespace-nowrap">
+                                        <span class="font-bold text-blue-700">${defFit.position}</span>
+                                        <span class="font-black text-gray-800 ml-0.5">${defFit.ovr}</span>
+                                    </td>
                                     <td class="py-1.5 px-1 text-center text-blue-600">${p.attributes?.physical?.speed || 0}</td>
                                     <td class="py-1.5 px-1 text-center text-gray-600">${p.attributes?.physical?.strength || 0}</td>
                                 </tr>`;

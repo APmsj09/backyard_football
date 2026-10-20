@@ -1,11 +1,53 @@
 // js/game/draft.js - Draft Manager
 
 import { game, getPlayer, getRosterObjects, addMessage, playerMap } from './state.js';
-import { calculateOverall, estimateBestPosition } from './player.js';
+import {
+    calculateOverall,
+    estimateBestPosition,
+    positionOverallWeights
+} from './player.js';
+
+import { isPlayerViableForPosition } from './depth_chart.js';
 import { offenseFormations, defenseFormations } from '../data.js';
 import { addPlayerToTeam, getCurrentRosterLimit } from './season.js';
 
 export const DRAFT_ROUNDS_ROOKIE = 3;
+
+const OFFENSIVE_POSITION_FITS = ['QB', 'RB', 'WR', 'TE', 'OL'];
+const DEFENSIVE_POSITION_FITS = ['DL', 'LB', 'DB'];
+
+function getBestPositionFit(player, positions) {
+    if (!player) return { position: '—', ovr: 0 };
+
+    const supportedPositions = positions.filter(position =>
+        positionOverallWeights[position]
+    );
+
+    const viablePositions = supportedPositions.filter(position =>
+        isPlayerViableForPosition(player, position)
+    );
+
+    // Match the UI fallback: evaluate supported positions if none pass viability.
+    const positionsToEvaluate = viablePositions.length > 0
+        ? viablePositions
+        : supportedPositions;
+
+    const ratings = positionsToEvaluate.map(position => ({
+        position,
+        ovr: calculateOverall(player, position)
+    }));
+
+    ratings.sort((a, b) => b.ovr - a.ovr);
+
+    return ratings[0] || { position: '—', ovr: 0 };
+}
+
+function getBestTwoWayFits(player) {
+    return {
+        offense: getBestPositionFit(player, OFFENSIVE_POSITION_FITS),
+        defense: getBestPositionFit(player, DEFENSIVE_POSITION_FITS)
+    };
+}
 
 /**
  * Calculates a prospect's value to a specific team based on ability,
@@ -20,10 +62,24 @@ export function calculateDraftValue(player, team) {
     // AI FOG OF WAR: The AI evaluates players through its Scout's imperfect eyes!
     const scoutAccuracy = scout ? ((scout.ratings?.evalTechnique + scout.ratings?.evalPhysicals) / 200) : 0.5;
 
-    // Add scouting noise/error based on scout rating (Elite scout = accurate; Bad scout = +/- 8 OVR error)
+     // Evaluate the prospect independently on offense and defense.
+    const fits = getBestTwoWayFits(player);
+
+    // Preserve the existing scouting uncertainty.
     const noise = Math.round((Math.random() - 0.5) * (1.0 - scoutAccuracy) * 16);
-    const pos = estimateBestPosition(player);
-    const ovr = Math.max(20, Math.min(99, calculateOverall(player, pos) + noise));
+
+    const offOvr = Math.max(
+        20,
+        Math.min(99, calculateOverall(player, fits.offense.position) + noise)
+    );
+
+    const defOvr = Math.max(
+        20,
+        Math.min(99, calculateOverall(player, fits.defense.position) + noise)
+    );
+
+    // Both sides contribute to perceived player value.
+    const ovr = Math.round((offOvr + defOvr) / 2);
 
     const gmDirective = team.gameplan?.gmDirective || 'COACH_AUTONOMY';
     const coachPersonality = coach?.biases?.personality?.name;
@@ -66,14 +122,18 @@ export function calculateDraftValue(player, team) {
     }
 
     // 3. Positional Need (25%)
-    // Use the team's actual formations as a soft roster-building target.
-    // This creates coherent AI teams without forcing the AI to draft by position.
+    // Evaluate offensive and defensive roster needs independently.
     const roster = getRosterObjects(team);
 
+    // Count every roster player who is viable at each position.
+    // A two-way player may contribute to both an offensive and
+    // a defensive position group.
     const positionCounts = {};
-    roster.forEach(p => {
-        const rosterPos = estimateBestPosition(p);
-        positionCounts[rosterPos] = (positionCounts[rosterPos] || 0) + 1;
+
+    Object.keys(positionOverallWeights).forEach(position => {
+        positionCounts[position] = roster.filter(p =>
+            isPlayerViableForPosition(p, position)
+        ).length;
     });
 
     const offensePersonnel =
@@ -82,35 +142,44 @@ export function calculateDraftValue(player, team) {
     const defensePersonnel =
         defenseFormations[team.formations?.defense]?.personnel || {};
 
-    const formationTarget =
-        (offensePersonnel[pos] || 0) +
-        (defensePersonnel[pos] || 0);
+    function getPositionNeedMultiplier(position, personnel) {
+        const formationTarget = Number(personnel[position]) || 0;
+        const countAtPos = positionCounts[position] || 0;
 
-    const countAtPos = positionCounts[pos] || 0;
+        if (formationTarget <= 0) {
+            // The active formation does not use this position.
+            return 0.75;
+        }
 
-    let needMultiplier = 1.0;
-
-    if (formationTarget <= 0) {
-        // Formation doesn't naturally use this position.
-        // Still draftable if the player is excellent, just less urgent.
-        needMultiplier = 0.75;
-    } else {
         const positionGap = formationTarget - countAtPos;
 
         if (positionGap > 0) {
-            // Bigger hole = stronger preference, but keep it soft.
-            needMultiplier = 1.0 + Math.min(0.55, positionGap * 0.18);
-        } else {
-            // Once the formation position is adequately stocked,
-            // the AI gradually looks elsewhere.
-            needMultiplier = Math.max(
-                0.70,
-                1.0 - Math.min(0.30, Math.abs(positionGap) * 0.10)
-            );
+            // A bigger shortage increases draft priority.
+            return 1.0 + Math.min(0.55, positionGap * 0.18);
         }
+
+        // Reduce urgency as the position becomes adequately staffed.
+        return Math.max(
+            0.70,
+            1.0 - Math.min(0.30, Math.abs(positionGap) * 0.10)
+        );
     }
 
-    const needScore = (ovr * 0.25) * needMultiplier;
+    const offNeedMultiplier = getPositionNeedMultiplier(
+        fits.offense.position,
+        offensePersonnel
+    );
+
+    const defNeedMultiplier = getPositionNeedMultiplier(
+        fits.defense.position,
+        defensePersonnel
+    );
+
+    // Give each side half of the positional-need contribution.
+    const needScore = 0.25 * (
+        offOvr * offNeedMultiplier +
+        defOvr * defNeedMultiplier
+    ) / 2;
 
     // 4. Coach Scheme & Attribute Bias (10%)
     let coachFit = 0;

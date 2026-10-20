@@ -67,6 +67,125 @@ function getUIRosterObjects(team) {
     }).filter(Boolean);
 }
 
+const OFFENSIVE_POSITION_FITS = ['QB', 'RB', 'WR', 'TE', 'OL'];
+const DEFENSIVE_POSITION_FITS = ['DL', 'LB', 'DB'];
+
+function hasScoutingUncertainty(player) {
+    return Object.values(player?.attributes || {}).some(category =>
+        category &&
+        Object.values(category).some(value =>
+            typeof value === 'string' &&
+            (
+                value.trim() === '?' ||
+                /^\d+(?:\.\d+)?\s*-\s*\d+(?:\.\d+)?$/.test(value.trim())
+            )
+        )
+    );
+}
+
+function getPlayerForPositionRatings(player) {
+    if (!player?.attributes) return player;
+
+    const attributes = {};
+
+    for (const [category, values] of Object.entries(player.attributes)) {
+        if (!values || typeof values !== 'object' || Array.isArray(values)) {
+            attributes[category] = values;
+            continue;
+        }
+
+        attributes[category] = {};
+
+        for (const [key, value] of Object.entries(values)) {
+            if (typeof value !== 'string') {
+                attributes[category][key] = value;
+                continue;
+            }
+
+            const trimmed = value.trim();
+            const range = trimmed.match(
+                /^(\d+(?:\.\d+)?)\s*-\s*(\d+(?:\.\d+)?)$/
+            );
+
+            if (range) {
+                // Estimate from the midpoint of the scouting range.
+                attributes[category][key] =
+                    (Number(range[1]) + Number(range[2])) / 2;
+            } else {
+                const parsed = Number(trimmed);
+
+                // Unknown attributes use a neutral estimate, not the hidden rating.
+                attributes[category][key] =
+                    trimmed !== '' && Number.isFinite(parsed) ? parsed : 50;
+            }
+        }
+    }
+
+    return { ...player, attributes };
+}
+
+function calculateDisplayOverall(player, position) {
+    return calculateOverall(
+        getPlayerForPositionRatings(player),
+        position
+    );
+}
+
+function getBestPositionFit(player, positions) {
+    if (!player) {
+        return { position: '—', ovr: 0, estimated: false };
+    }
+
+    const ratingPlayer = getPlayerForPositionRatings(player);
+    const validPositions = positions.filter(position =>
+        positionOverallWeights[position]
+    );
+
+    // Prefer positions the player can actually fill.
+    const viablePositions = validPositions.filter(position =>
+        Game.isPlayerViableForPosition(ratingPlayer, position)
+    );
+
+    // Fall back to the available position ratings if none pass the viability check.
+    const positionsToEvaluate = viablePositions.length > 0
+        ? viablePositions
+        : validPositions;
+
+    const ratings = positionsToEvaluate.map(position => ({
+        position,
+        ovr: calculateOverall(ratingPlayer, position),
+        estimated: hasScoutingUncertainty(player)
+    }));
+
+    ratings.sort((a, b) => b.ovr - a.ovr);
+
+    return ratings[0] || { position: '—', ovr: 0, estimated: false };
+}
+
+function getBestTwoWayFits(player) {
+    return {
+        offense: getBestPositionFit(player, OFFENSIVE_POSITION_FITS),
+        defense: getBestPositionFit(player, DEFENSIVE_POSITION_FITS)
+    };
+}
+
+function renderPositionFit(fit, side, includeSideLabel = false) {
+    const isOffense = side === 'offense';
+    const colorClass = isOffense
+        ? 'text-emerald-700'
+        : 'text-blue-700';
+    const sideLabel = isOffense ? 'OFF' : 'DEF';
+
+    return `
+        <span class="inline-flex items-center gap-1 whitespace-nowrap ${colorClass}">
+            ${includeSideLabel
+                ? `<span class="text-[8px] font-black">${sideLabel}</span>`
+                : ''}
+            <span class="font-black">${fit.position}</span>
+            <span class="font-mono font-bold">${fit.estimated ? '~' : ''}${fit.ovr}</span>
+        </span>`;
+}
+
 export function setupElements() {
     const getEl = (id) => document.getElementById(id);
     elements = {
@@ -396,14 +515,14 @@ export function renderDraftPool(gameState, onPlayerSelect, sortColumn = 'potenti
             thead.innerHTML = `
                 <tr>
                     <th class="py-2 px-2 text-center w-8">★</th>
-                    <th class="py-2 px-2 text-center w-12 cursor-pointer hover:bg-slate-200" data-sort="position">Pos</th>
+                    <th class="py-2 px-2 text-center">Off Fit</th>
+                    <th class="py-2 px-2 text-center">Def Fit</th>
                     <th class="py-2 px-3 text-left cursor-pointer hover:bg-slate-200" data-sort="name">Prospect / Style</th>
                     <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-200" data-sort="age">Age</th>
                     <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-200" data-sort="potential">Pot</th>
                     <th class="py-2 px-2 text-center">Rel</th>
                     <th class="py-2 px-2 text-center">Frame</th>
                     <th class="py-2 px-3 text-center">Key Skills</th>
-                    <th class="py-2 px-2 text-center">Est OVR</th>
                 </tr>`;
         } else if (activeDraftView === 'physicals') {
             thead.innerHTML = `
@@ -490,7 +609,14 @@ export function renderDraftPool(gameState, onPlayerSelect, sortColumn = 'potenti
 
         const relInfo = Object.values(relationshipLevels).find(rl => rl.level === maxLevel) || relationshipLevels.STRANGER;
         const pos = scouted.pos || estimateBestPosition(scouted);
-        const ovr = calculateOverall(scouted, pos);
+        const fits = getBestTwoWayFits(scouted);
+        const offFitHtml = renderPositionFit(fits.offense, 'offense');
+        const defFitHtml = renderPositionFit(fits.defense, 'defense');
+        const bothFitsHtml = `
+            <div class="flex flex-col items-center gap-0.5 text-[10px] leading-tight">
+                ${renderPositionFit(fits.offense, 'offense', true)}
+                ${renderPositionFit(fits.defense, 'defense', true)}
+            </div>`;
         const isStarred = draftWatchlist.has(player.id);
 
         const row = document.createElement('tr');
@@ -510,7 +636,8 @@ export function renderDraftPool(gameState, onPlayerSelect, sortColumn = 'potenti
 
             row.innerHTML = `
                 <td class="py-2 px-2 text-center">${starBtn}</td>
-                <td class="py-2 px-2 text-center">${posBadge}</td>
+                <td class="py-2 px-2 text-center">${offFitHtml}</td>
+                <td class="text-center py-2 px-2">${defFitHtml}</td>
                 <td class="py-2 px-3 font-sans truncate max-w-[150px]">
                     <span class="block font-semibold text-slate-900 truncate leading-tight">${scouted.name}</span>
                     <span class="block text-[10px] text-slate-500 truncate leading-tight">${scouted.archetypeName || 'Athlete'}</span>
@@ -520,12 +647,11 @@ export function renderDraftPool(gameState, onPlayerSelect, sortColumn = 'potenti
                 <td class="text-center py-2 px-2 ${relInfo.color} text-[10px] uppercase font-sans font-bold" title="${relInfo.name}">${relInfo.name.substring(0, 4)}</td>
                 <td class="text-center py-2 px-2 text-slate-500 text-[10px]">${formatHeight(scouted.attributes?.physical?.height)} / ${scouted.attributes?.physical?.weight}#</td>
                 <td class="text-center py-2 px-3 whitespace-nowrap">${sigSkillsHtml}</td>
-                <td class="text-center py-2 px-2 font-black text-slate-900 font-mono">${ovr}</td>
             `;
         } else if (activeDraftView === 'physicals') {
             row.innerHTML = `
                 <td class="py-2 px-2 text-center">${starBtn}</td>
-                <td class="py-2 px-2 text-center">${posBadge}</td>
+                <td class="py-2 px-2 text-center">${bothFitsHtml}</td>
                 <td class="py-2 px-3 font-semibold text-slate-900 font-sans truncate max-w-[140px]">${scouted.name}</td>
                 <td class="text-center py-2 px-2">${formatHeight(scouted.attributes?.physical?.height)}</td>
                 <td class="text-center py-2 px-2">${scouted.attributes?.physical?.weight}#</td>
@@ -537,7 +663,7 @@ export function renderDraftPool(gameState, onPlayerSelect, sortColumn = 'potenti
         } else if (activeDraftView === 'skills') {
             row.innerHTML = `
                 <td class="py-2 px-2 text-center">${starBtn}</td>
-                <td class="py-2 px-2 text-center">${posBadge}</td>
+                <td class="py-2 px-2 text-center">${bothFitsHtml}</td>
                 <td class="py-2 px-3 font-semibold text-slate-900 font-sans truncate max-w-[140px]">${scouted.name}</td>
                 <td class="text-center py-2 px-2">${scouted.attributes?.technical?.throwingAccuracy ?? '?'}</td>
                 <td class="text-center py-2 px-2">${scouted.attributes?.technical?.throwPower ?? scouted.attributes?.physical?.strength ?? '?'}</td>
@@ -550,7 +676,7 @@ export function renderDraftPool(gameState, onPlayerSelect, sortColumn = 'potenti
         } else {
             row.innerHTML = `
                 <td class="py-2 px-2 text-center">${starBtn}</td>
-                <td class="py-2 px-2 text-center">${posBadge}</td>
+                <td class="py-2 px-2 text-center">${bothFitsHtml}</td>
                 <td class="py-2 px-3 font-semibold text-slate-900 font-sans truncate max-w-[140px]">${scouted.name}</td>
                 <td class="text-center py-2 px-2">${scouted.age}</td>
                 <td class="text-center py-2 px-2 font-bold text-amber-600">${scouted.potential}</td>
@@ -648,7 +774,7 @@ export function renderSelectedPlayerCard(player, gameState) {
     const scouted = getScoutedPlayerInfo(player, maxLevel);
 
     const pos = scouted.pos || estimateBestPosition(scouted);
-    const ovr = calculateOverall(scouted, pos);
+    const fits = getBestTwoWayFits(scouted);
 
     const bestFriend = playerRoster.find(r => r.id === player.social?.bestFriendId);
     const friendsOnTeam = playerRoster.filter(r => player.social?.goodFriendIds?.includes(r.id));
@@ -665,24 +791,40 @@ export function renderSelectedPlayerCard(player, gameState) {
 
     const positions = ['QB', 'RB', 'WR', 'TE', 'OL', 'DL', 'LB', 'DB'];
     let overallsHtml = '<div class="grid grid-cols-4 gap-1 text-center">';
+
     positions.forEach(pKey => {
-        const pOvr = calculateOverall(scouted, pKey);
-        const isBest = pKey === pos;
+        const pOvr = calculateDisplayOverall(scouted, pKey);
+        const isBestOffense = pKey === fits.offense.position;
+        const isBestDefense = pKey === fits.defense.position;
+
+        const fitCardClass = isBestOffense
+            ? 'bg-emerald-700 text-white border-emerald-700'
+            : isBestDefense
+                ? 'bg-blue-700 text-white border-blue-700'
+                : 'bg-slate-100 text-slate-700';
+
+        const fitLabelClass = isBestOffense
+            ? 'text-emerald-100'
+            : isBestDefense
+                ? 'text-blue-100'
+                : 'text-slate-400';
+
         overallsHtml += `
-            <div class="${isBest ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-700'} p-1 rounded border border-slate-200">
-                <p class="text-[9px] font-bold uppercase ${isBest ? 'text-amber-400' : 'text-slate-400'}">${pKey}</p>
+            <div class="${fitCardClass} p-1 rounded border">
+                <p class="text-[9px] font-bold uppercase ${fitLabelClass}">${pKey}</p>
                 <p class="font-black text-xs">${pOvr}</p>
             </div>`;
     });
+
     overallsHtml += '</div>';
 
-    // Identify top secondary position for two-way scouting preview
+    /*// Identify top secondary position for two-way scouting preview
     const secPosList = ['QB', 'RB', 'WR', 'TE', 'OL', 'DL', 'LB', 'DB'].filter(pKey => pKey !== pos);
     const topSecPos = secPosList.map(pKey => ({ pos: pKey, ovr: calculateOverall(scouted, pKey) }))
                                 .sort((a, b) => b.ovr - a.ovr)[0];
     const twoWaySnippet = topSecPos && topSecPos.ovr >= ovr - 8
         ? `<span class="bg-indigo-50 text-indigo-700 border border-indigo-200 px-1 py-0.2 rounded text-[8px] font-bold">2-Way: ${topSecPos.pos} (${topSecPos.ovr})</span>`
-        : '';
+        : '';*/
 
     elements.selectedPlayerCard.innerHTML = `
         <div class="flex flex-col">
@@ -691,13 +833,22 @@ export function renderSelectedPlayerCard(player, gameState) {
                 <div class="truncate pr-1">
                     <div class="flex items-center gap-1.5">
                         <h3 class="font-black text-sm text-slate-900 truncate leading-tight">${scouted.name}</h3>
-                        ${twoWaySnippet}
                     </div>
                     <p class="text-[10px] text-slate-500 font-mono">${scouted.age}yo • ${formatHeight(scouted.attributes?.physical?.height)} • ${scouted.attributes?.physical?.weight}#</p>
                 </div>
-                <div class="text-right bg-slate-900 text-white px-2 py-0.5 rounded shrink-0">
-                    <span class="text-[8px] uppercase tracking-wider block text-slate-400">${pos}</span>
-                    <span class="text-base font-black leading-none">${ovr}</span>
+                <div class="flex items-center gap-1 shrink-0">
+                    <div class="text-right bg-emerald-50 border border-emerald-200 px-2 py-1 rounded">
+                        <span class="text-[8px] uppercase tracking-wider block text-emerald-700">Off Fit</span>
+                        <span class="text-sm font-black leading-none text-emerald-800">
+                            ${fits.offense.position} ${fits.offense.estimated ? '~' : ''}${fits.offense.ovr}
+                        </span>
+                    </div>
+                    <div class="text-right bg-blue-50 border border-blue-200 px-2 py-1 rounded">
+                        <span class="text-[8px] uppercase tracking-wider block text-blue-700">Def Fit</span>
+                        <span class="text-sm font-black leading-none text-blue-800">
+                            ${fits.defense.position} ${fits.defense.estimated ? '~' : ''}${fits.defense.ovr}
+                        </span>
+                    </div>
                 </div>
             </div>
 
@@ -819,16 +970,7 @@ export function renderPlayerRoster(playerTeam) {
 
     // 1. Render Unsquished Full-Height Roster List
     elements.draftRosterList.innerHTML = roster.map(p => {
-        const pos = p.pos || estimateBestPosition(p);
-        const ovr = calculateOverall(p, pos);
-
-        // Detect secondary two-way capabilities
-        const secPositions = ['QB', 'RB', 'WR', 'TE', 'OL', 'DL', 'LB', 'DB'].filter(op =>
-            op !== pos && Game.isPlayerViableForPosition(p, op)
-        );
-        const twoWayBadge = secPositions.length > 0
-            ? `<span class="text-[9px] bg-slate-100 text-slate-500 font-bold px-1 rounded ml-1" title="Viable at: ${secPositions.join(', ')}">2W: ${secPositions[0]}</span>`
-            : '';
+        const fits = getBestTwoWayFits(p);
 
         return `
         <li class="py-1.5 px-3 flex justify-between items-center text-xs hover:bg-slate-50 transition cursor-pointer" onclick="app.openPlayerCard('${p.id}')">
@@ -836,11 +978,10 @@ export function renderPlayerRoster(playerTeam) {
                 <span class="text-slate-400 font-mono text-[10px] w-4">#${p.number || '--'}</span>
                 <span class="font-semibold text-slate-900 truncate">${p.name}</span>
                 <span class="text-[10px] text-slate-400 font-mono">(${p.age}yo)</span>
-                ${twoWayBadge}
             </div>
-            <div class="text-right shrink-0">
-                <span class="font-bold text-[10px] bg-slate-100 text-slate-700 px-1 rounded mr-1">${pos}</span>
-                <span class="font-mono text-xs font-black text-slate-900">${ovr}</span>
+            <div class="text-right shrink-0 flex flex-col items-end gap-0.5 text-[10px] leading-tight">
+                ${renderPositionFit(fits.offense, 'offense', true)}
+                ${renderPositionFit(fits.defense, 'defense', true)}
             </div>
         </li>`;
     }).join('') || '<li class="p-6 text-center text-slate-400 text-xs italic">No players drafted yet.</li>';
@@ -1840,10 +1981,10 @@ function renderMyTeamTab(gameState) {
     const roster = getUIRosterObjects(gameState.playerTeam);
 
     const sortedRoster = [...roster].sort((a, b) => {
-        const bestPosA = a.pos || estimateBestPosition(a);
-        const bestPosB = b.pos || estimateBestPosition(b);
-        const ovrA = calculateOverall(a, bestPosA);
-        const ovrB = calculateOverall(b, bestPosB);
+        const fitsA = getBestTwoWayFits(a);
+        const fitsB = getBestTwoWayFits(b);
+        const ovrA = Math.max(fitsA.offense.ovr, fitsA.defense.ovr);
+        const ovrB = Math.max(fitsB.offense.ovr, fitsB.defense.ovr);
 
         let valA, valB;
         if (rosterSortCol === 'name') { valA = a.name; valB = b.name; }
@@ -1983,7 +2124,7 @@ function renderMyTeamTab(gameState) {
             <thead class="bg-slate-900 text-white sticky top-0 z-10 select-none uppercase tracking-wider text-[11px]">
                 <tr>
                     <th class="py-2.5 px-3 text-left sticky left-0 bg-slate-900 z-20 cursor-pointer hover:bg-slate-800" onclick="app_setRosterSort('name')">Player${getIndicator('name')}</th>
-                    <th class="py-2.5 px-2 text-center cursor-pointer hover:bg-slate-800" onclick="app_setRosterSort('ovr')">Pos / OVR${getIndicator('ovr')}</th>
+                    <th class="py-2.5 px-2 text-center cursor-pointer hover:bg-slate-800" onclick="app_setRosterSort('ovr')">OFF / DEF FIT${getIndicator('ovr')}</th>
                     <th class="py-2.5 px-2 text-center" title="Team Captain">Cap</th>
                     <th class="py-2.5 px-2 text-center cursor-pointer hover:bg-slate-800" onclick="app_setRosterSort('age')">Age${getIndicator('age')}</th>
                     <th class="py-2.5 px-2 text-center cursor-pointer hover:bg-slate-800" onclick="app_setRosterSort('pot')">Pot${getIndicator('pot')}</th>
@@ -2006,8 +2147,7 @@ function renderMyTeamTab(gameState) {
     } else {
         sortedRoster.forEach(p => {
             const isCap = gameState.playerTeam.captainId === p.id;
-            const pos = p.pos || estimateBestPosition(p);
-            const ovr = calculateOverall(p, pos);
+            const fits = getBestTwoWayFits(p);
             const energy = Math.max(0, Math.round(100 - (p.fatigue || 0)));
             const energyColor = energy > 75 ? 'bg-emerald-500' : (energy > 50 ? 'bg-amber-500' : 'bg-rose-500');
 
@@ -2019,8 +2159,10 @@ function renderMyTeamTab(gameState) {
                     ${p.status?.duration > 0 ? `<span class="text-[9px] bg-rose-100 text-rose-700 px-1 py-0.5 rounded font-bold" title="${p.status.description}">🩹 ${p.status.duration}w</span>` : ''}
                 </td>
                 <td class="text-center py-2 px-2">
-                    <span class="font-bold text-[10px] bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded mr-1">${pos}</span>
-                    <span class="font-black text-xs ${ovr >= 40 ? 'text-emerald-700' : (ovr >= 30 ? 'text-slate-900' : 'text-slate-500')}">${ovr}</span>
+                    <div class="flex flex-col items-center gap-0.5 text-[10px] leading-tight">
+                        ${renderPositionFit(fits.offense, 'offense', true)}
+                        ${renderPositionFit(fits.defense, 'defense', true)}
+                    </div>
                 </td>
                 <td class="text-center py-2 px-2" onclick="event.stopPropagation(); app.setCaptain('${p.id}');" title="Toggle Captain">
                     <button class="text-base font-bold ${isCap ? 'text-amber-500' : 'text-slate-300 hover:text-amber-400'} transition leading-none">${isCap ? '★' : '☆'}</button>

@@ -21,6 +21,62 @@ const getDraftRosterLimit = () => getCurrentRosterLimit(gameState);
 const MIN_HEALTHY_PLAYERS = 8;
 const WEEKS_IN_SEASON = 9;
 
+const OFFENSIVE_POSITION_FITS = ['QB', 'RB', 'WR', 'TE', 'OL'];
+const DEFENSIVE_POSITION_FITS = ['DL', 'LB', 'DB'];
+
+function getBestPositionFit(player, positions) {
+    if (!player) return { position: '—', ovr: 0 };
+
+    const supportedPositions = positions.filter(position =>
+        positionOverallWeights[position]
+    );
+
+    const viablePositions = supportedPositions.filter(position =>
+        Game.isPlayerViableForPosition(player, position)
+    );
+
+    const positionsToEvaluate = viablePositions.length > 0
+        ? viablePositions
+        : supportedPositions;
+
+    const ratings = positionsToEvaluate.map(position => ({
+        position,
+        ovr: Game.calculateOverall(player, position)
+    }));
+
+    ratings.sort((a, b) => b.ovr - a.ovr);
+
+    return ratings[0] || { position: '—', ovr: 0 };
+}
+
+function getBestTwoWayFits(player) {
+    return {
+        offense: getBestPositionFit(player, OFFENSIVE_POSITION_FITS),
+        defense: getBestPositionFit(player, DEFENSIVE_POSITION_FITS)
+    };
+}
+
+function getTwoWayFitScore(player) {
+    const fits = getBestTwoWayFits(player);
+    return (fits.offense.ovr + fits.defense.ovr) / 2;
+}
+
+function renderTwoWayFitsHtml(fits, stacked = false) {
+    const layoutClass = stacked
+        ? 'flex flex-col items-end gap-0.5'
+        : 'inline-flex flex-wrap items-center gap-2';
+
+    return `
+        <span class="${layoutClass}">
+            <span class="text-emerald-700 font-bold whitespace-nowrap">
+                OFF ${fits.offense.position} ${fits.offense.ovr}
+            </span>
+            <span class="text-blue-700 font-bold whitespace-nowrap">
+                DEF ${fits.defense.position} ${fits.defense.ovr}
+            </span>
+        </span>`;
+}
+
 async function startNewGame() {
     activeSaveKey = 'backyardFootballGameState';
     try {
@@ -107,7 +163,7 @@ function renderTeamChooser(gameState) {
         filtered.forEach(team => {
             const roster = Game.getRosterObjects(team);
             const topPlayers = [...roster]
-                .sort((a, b) => Game.calculateOverall(b, estimateBestPosition(b)) - Game.calculateOverall(a, estimateBestPosition(a)))
+                .sort((a, b) => getTwoWayFitScore(b) - getTwoWayFitScore(a))
                 .slice(0, 3);
 
             // Count historical titles
@@ -138,12 +194,20 @@ function renderTeamChooser(gameState) {
 
                     <p class="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">Key Stars</p>
                     <div class="space-y-1 mb-4">
-                        ${topPlayers.map(p => `
-                            <div class="flex justify-between text-xs">
-                                <span class="font-semibold text-slate-800 truncate">${p.name} (${estimateBestPosition(p)})</span>
-                                <span class="font-black text-slate-900">${Game.calculateOverall(p, estimateBestPosition(p))} OVR</span>
-                            </div>
-                        `).join('')}
+                        ${topPlayers.map(p => {
+                            const fits = getBestTwoWayFits(p);
+
+                            return `
+                                <div class="flex justify-between items-center gap-2 text-xs">
+                                    <span class="font-semibold text-slate-800 truncate">
+                                        ${p.name}
+                                    </span>
+                                    <span class="shrink-0">
+                                        ${renderTwoWayFitsHtml(fits, true)}
+                                    </span>
+                                </div>
+                            `;
+                        }).join('')}
                     </div>
                 </div>
 
@@ -952,8 +1016,7 @@ function startExitInterviewFlow(retentions, onComplete, report = null) {
             return;
         }
 
-        const pos = player.pos || Game.estimateBestPosition(player);
-        const ovr = Game.calculateOverall(player, pos);
+        const fits = getBestTwoWayFits(player);
         const pitchOptions = Game.getRetentionPitchOptions(player);
         const tokensAvailable = Math.max(
             0,
@@ -1614,14 +1677,34 @@ export function openPlayerCard(playerId) {
     // Tab 1: Positional Matrix
     const positions = ['QB', 'RB', 'WR', 'TE', 'OL', 'DL', 'LB', 'DB'];
     let overallsHtml = '<div class="grid grid-cols-4 gap-1.5 text-center">';
+
     positions.forEach(pos => {
-        const isBest = pos === bestPos;
+        const isBestOffense = pos === fits.offense.position;
+        const isBestDefense = pos === fits.defense.position;
+
+        const cardClass = isBestOffense
+            ? 'bg-emerald-700 text-white border-emerald-700'
+            : isBestDefense
+                ? 'bg-blue-700 text-white border-blue-700'
+                : 'bg-slate-100 text-slate-800 border-slate-200';
+
+        const labelClass = isBestOffense
+            ? 'text-emerald-100'
+            : isBestDefense
+                ? 'text-blue-100'
+                : 'text-slate-400';
+
         overallsHtml += `
-            <div class="${isBest ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-800'} p-1.5 rounded border border-slate-200">
-                <span class="text-[9px] font-bold block ${isBest ? 'text-amber-400' : 'text-slate-400'}">${pos}</span>
-                <span class="font-black text-sm">${calculateOverall(player, pos)}</span>
+            <div class="${cardClass} p-1.5 rounded border">
+                <span class="text-[9px] font-bold block ${labelClass}">
+                    ${pos}
+                </span>
+                <span class="font-black text-sm">
+                    ${calculateOverall(player, pos)}
+                </span>
             </div>`;
     });
+
     overallsHtml += '</div>';
 
     // Tab 2: Detailed Attributes View
@@ -1784,9 +1867,24 @@ export function openPlayerCard(playerId) {
                         ${teamName} • ${player.age}yo • ${formatHeight(phys.height)} • ${phys.weight} lbs
                     </p>
                 </div>
-                <div class="text-right bg-slate-800 px-3 py-1.5 rounded border border-slate-700">
-                    <span class="text-[9px] uppercase tracking-widest text-slate-400 block">${bestPos} OVR</span>
-                    <span class="text-2xl font-black text-amber-400">${ovr}</span>
+                <div class="flex flex-col items-end gap-1 shrink-0">
+                    <div class="text-right bg-emerald-950/50 px-2 py-1 rounded border border-emerald-800">
+                        <span class="text-[9px] uppercase tracking-widest text-emerald-300 block">
+                            OFF FIT
+                        </span>
+                        <span class="text-base font-black text-emerald-200">
+                            ${fits.offense.position} ${fits.offense.ovr}
+                        </span>
+                    </div>
+
+                    <div class="text-right bg-blue-950/50 px-2 py-1 rounded border border-blue-800">
+                        <span class="text-[9px] uppercase tracking-widest text-blue-300 block">
+                            DEF FIT
+                        </span>
+                        <span class="text-base font-black text-blue-200">
+                            ${fits.defense.position} ${fits.defense.ovr}
+                        </span>
+                    </div>
                 </div>
             </div>
 
