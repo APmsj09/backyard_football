@@ -1155,8 +1155,25 @@ export function processEndOfWeek() {
     // These staff functions are statically imported, so their results are
     // available immediately rather than arriving after practice has run.
     game.teams.forEach(t => {
+        // Youth teams do not use the main league's weekly gameplan system.
+        if (!t || t.leagueType !== 'main') return;
+
+        // Safeguard older saves or teams missing their gameplan.
+        if (!t.gameplan) {
+            t.gameplan = {
+                weeklyPractice: 'chalk_talk',
+                delegatePractice: false,
+                delegateGameplan: false,
+                delegateDepthChart: false,
+                gmDirective: 'COACH_AUTONOMY',
+                installedOffense: [],
+                installedDefense: [],
+                mastery: {}
+            };
+        }
+
         const isDelegated = t.isPlayerControlled &&
-            (t.gameplan?.delegatePractice || t.gameplan?.delegateGameplan);
+            (t.gameplan.delegatePractice || t.gameplan.delegateGameplan);
 
         if (!t.isPlayerControlled || isDelegated) {
             const directive = t.gameplan?.gmDirective || 'COACH_AUTONOMY';
