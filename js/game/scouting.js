@@ -696,3 +696,128 @@ export function processWeeklyScoutingAssignments(
 
     return { playersUpdated, hoursUsed };
 }
+
+const INHERITED_SCOUTING_THRESHOLDS = [0, 4, 12, 24, 40];
+
+function getInheritedScoutingLevel(team, player, year, priorityIds) {
+    const seed = (stableNoise(
+        `${team.id}|${player.id}|${year}|inherited-scouting`
+    ) + 1) / 2;
+
+    // Players already prioritized by the previous staff have deeper reports.
+    if (priorityIds.has(String(player.id))) {
+        if (seed < 0.05) return 4;
+        if (seed < 0.25) return 3;
+        if (seed < 0.70) return 2;
+        return 1;
+    }
+
+    // Ordinary prospects receive a mix of report levels.
+    if (seed < 0.22) return 0;
+    if (seed < 0.62) return 1;
+    if (seed < 0.86) return 2;
+    if (seed < 0.98) return 3;
+    return 4;
+}
+
+/**
+ * Seeds the organization's inherited scouting knowledge for a draft class.
+ * Call once when preparing the user's incoming draft, not during rendering.
+ *
+ * No report is generated for every prospect: unscouted prospects remain
+ * unscouted, while prior reports are preserved.
+ */
+export function initializeInheritedScoutingReports(
+    team,
+    prospects,
+    year,
+    week = 0
+) {
+    if (
+        !team ||
+        !Array.isArray(prospects) ||
+        !Number.isInteger(year) ||
+        !Number.isInteger(week)
+    ) {
+        return { initialized: 0, skipped: 0, byLevel: {} };
+    }
+
+    const evaluator = team.staff?.scout ||
+        team.staff?.coach ||
+        team.coach ||
+        (Array.isArray(team.coaches)
+            ? team.coaches.find(coach => coach?.id)
+            : null);
+
+    const priorityIds = new Set(
+        (Array.isArray(team.scoutingWatchlist)
+            ? team.scoutingWatchlist
+            : []
+        )
+            .map(item => typeof item === 'object'
+                ? item?.playerId ?? item?.id
+                : item)
+            .filter(id => id != null)
+            .map(String)
+    );
+
+    const rosterIds = new Set(
+        (team.roster || []).map(String)
+    );
+
+    let initialized = 0;
+    let skipped = 0;
+    const byLevel = {};
+
+    for (const player of prospects) {
+        if (
+            !player?.id ||
+            !player.attributes ||
+            player.teamId != null ||
+            rosterIds.has(String(player.id))
+        ) {
+            continue;
+        }
+
+        // Preserve existing reports and any accumulated scouting progress.
+        if (getTeamScoutingReport(team, player.id)) {
+            skipped++;
+            continue;
+        }
+
+        const level = getInheritedScoutingLevel(
+            team,
+            player,
+            year,
+            priorityIds
+        );
+
+        // Level 0 means the prior staff has no stored report for this player.
+        if (level === 0) continue;
+
+        // Convert the intended level into historical scouting work. The
+        // lower-bound productivity factor guarantees the target level.
+        const historicalHours =
+            INHERITED_SCOUTING_THRESHOLDS[level] / 0.75 + 0.01;
+
+        const saved = advanceTeamScoutingReport(
+            team,
+            player,
+            evaluator,
+            historicalHours,
+            year,
+            week
+        );
+
+        if (!saved) continue;
+
+        const stored = getTeamScoutingReport(team, player.id);
+
+        if (stored) {
+            initialized++;
+            byLevel[stored.level] = (byLevel[stored.level] || 0) + 1;
+        }
+    }
+
+    return { initialized, skipped, byLevel };
+}

@@ -6,6 +6,7 @@ import { positionOverallWeights, estimateBestPosition, calculateOverall } from '
 import { gmBackgrounds, gmArchetypes, footballExpertises, offenseFormations, defenseFormations } from './data.js';
 import { formatHeight } from './utils.js';
 import { getCurrentRosterLimit, TEMPORARY_HELP_THRESHOLD } from './game/season.js';
+import { initializeInheritedScoutingReports } from './game/scouting.js';
 
 let gameState = null;
 let selectedPlayerId = null;
@@ -548,6 +549,12 @@ function confirmFranchiseTakeover(teamId, coachDetails) {
         };
     });
     Game.setupDraft();
+    initializeInheritedScoutingReports(
+        team,
+        gameState.draftClass || [],
+        Number.isInteger(gameState.year) ? gameState.year : 5,
+        Number.isInteger(gameState.currentWeek) ? gameState.currentWeek : 0
+    );
     gameState.draftCompleted = false;
 
     // REPORT 3: Initialize First Player Draft report
