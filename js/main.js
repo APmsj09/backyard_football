@@ -1660,7 +1660,7 @@ export function openPlayerCard(playerId) {
     const teamName = team ? team.name : 'Free Agent';
     const isMyTeam = player.teamId === gs.playerTeam?.id;
 
-    cconst fits = getBestTwoWayFits(player);
+    const fits = getBestTwoWayFits(player);
 
     let activeCardTab = 'overview';
     window.app_switchPlayerCardTab = (tab) => {
