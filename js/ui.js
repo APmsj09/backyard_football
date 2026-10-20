@@ -608,8 +608,10 @@ export function renderDraftPool(gameState, onPlayerSelect, sortColumn = 'potenti
         if (!scouted) return;
 
         const relInfo = Object.values(relationshipLevels).find(rl => rl.level === maxLevel) || relationshipLevels.STRANGER;
-        const pos = scouted.pos || estimateBestPosition(scouted);
+         const pos = scouted.pos || estimateBestPosition(scouted);
         const fits = getBestTwoWayFits(scouted);
+        const ovr = calculateDisplayOverall(scouted, pos);
+        const ovrDisplay = `${hasScoutingUncertainty(scouted) ? '~' : ''}${ovrDisplay}`;
         const offFitHtml = renderPositionFit(fits.offense, 'offense');
         const defFitHtml = renderPositionFit(fits.defense, 'defense');
         const bothFitsHtml = `
