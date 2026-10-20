@@ -558,17 +558,38 @@ export function processWeeklyScoutingAssignments(
     year = gameState?.year,
     week = gameState?.currentWeek
 ) {
-    const plan = team?.staffWorkPlan;
-
     if (
         !team ||
         !gameState ||
-        !plan ||
-        !Array.isArray(plan.assignments) ||
         !Number.isInteger(year) ||
         !Number.isInteger(week)
     ) {
         return { playersUpdated: 0, hoursUsed: 0 };
+    }
+
+    let plan = team.staffWorkPlan;
+
+    if (!plan || !Array.isArray(plan.assignments)) {
+        const defaultScout = team.staff?.scout ||
+            team.staff?.coach ||
+            team.coach;
+
+        if (!defaultScout?.id) {
+            return { playersUpdated: 0, hoursUsed: 0 };
+        }
+
+        plan = {
+            weeklyHoursPerCoach: 40,
+            assignments: [{
+                coachId: defaultScout.id,
+                task: 'scouting',
+                hours: 4,
+                focus: 'all',
+                maxTargets: 1
+            }]
+        };
+
+        team.staffWorkPlan = plan;
     }
 
     const scoutingAssignments = plan.assignments.filter(

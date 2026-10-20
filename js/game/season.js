@@ -27,6 +27,7 @@ import {
     createPlayerPromise,
     evaluateAiRetentionPitch
 } from './negotiations.js';
+import { processWeeklyScoutingAssignments } from './scouting.js';
 
 export const ROSTER_LIMIT = 18;
 export const REGULAR_SEASON_ROSTER_LIMIT = 18;
@@ -1188,6 +1189,7 @@ export function processEndOfWeek() {
         }
 
         processWeeklyPractice(t, game.gameLog);
+        processWeeklyScoutingAssignments(t, game, game.year, game.currentWeek);
     });
 
     processWeeklyPlayerGrowth();

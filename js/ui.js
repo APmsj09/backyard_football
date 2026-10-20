@@ -64,7 +64,97 @@ function getUIRosterObjects(team) {
         if (!p && gs?.players) p = gs.players.find(pl => pl.id === id);
         if (!p && typeof id === 'object' && id.id) p = id;
         return p;
-    }).filter(Boolean);
+        }).filter(Boolean);
+}
+
+const SCOUTING_LEVEL_LABELS = [
+    'Unscouted',
+    'Initial',
+    'Evaluated',
+    'Detailed',
+    'Fully scouted'
+];
+const SCOUTING_LEVEL_THRESHOLDS = [0, 4, 12, 24, 40];
+
+function getScoutingAwarePlayerView(player, team, reportOverride = undefined) {
+    if (!player) return null;
+
+    const isOwnedByTeam = player.teamId === team?.id ||
+        (Array.isArray(team?.roster) &&
+            team.roster.some(id => String(id) === String(player.id)));
+
+    // Your own players remain fully known.
+    if (isOwnedByTeam) return player;
+
+    const report = reportOverride === undefined
+        ? Game.getTeamScoutingReport?.(team, player.id) || null
+        : reportOverride;
+
+    const rawLevel = Number(report?.level);
+    const scoutingLevel = Number.isInteger(rawLevel)
+        ? Math.max(0, Math.min(4, rawLevel))
+        : 0;
+
+    const attributes = {};
+
+    // Preserve public measurements; conceal every other attribute until
+    // the team's own scouting report supplies an estimated range.
+    for (const [category, values] of Object.entries(player.attributes || {})) {
+        if (!values || typeof values !== 'object' || Array.isArray(values)) continue;
+
+        const safeValues = {};
+
+        for (const [attribute] of Object.entries(values)) {
+            if (
+                category === 'physical' &&
+                ['height', 'weight'].includes(attribute)
+            ) {
+                safeValues[attribute] = values[attribute];
+                continue;
+            }
+
+            const range = report?.attributeRanges?.[category]?.[attribute];
+
+            safeValues[attribute] =
+                range &&
+                Number.isFinite(range.low) &&
+                Number.isFinite(range.high)
+                    ? `${range.low} - ${range.high}`
+                    : '?';
+        }
+
+        attributes[category] = safeValues;
+    }
+
+    const potentialRange = report?.potentialRange || null;
+
+    return {
+        id: player.id,
+        name: player.name,
+        age: player.age,
+        pos: player.pos || null,
+        teamId: player.teamId,
+        status: player.status
+            ? {
+                type: player.status.type,
+                duration: player.status.duration
+            }
+            : null,
+        attributes,
+        potential: potentialRange
+            ? `${potentialRange.bestPossible}–${potentialRange.worstPossible}`
+            : '?',
+        potentialRange,
+        scoutingLevel,
+        scoutingProgressPoints: Math.max(
+            0,
+            Number(report?.progressPoints) || 0
+        ),
+        scoutingConfidence: Number(report?.confidence) || 0,
+        scoutingEvaluation: report?.evaluation || null,
+        scoutingReport: report,
+        isExternalProspect: true
+    };
 }
 
 const OFFENSIVE_POSITION_FITS = ['QB', 'RB', 'WR', 'TE', 'OL'];
@@ -163,6 +253,38 @@ function getBestPositionFit(player, positions) {
 }
 
 function getBestTwoWayFits(player) {
+    if (player?.isExternalProspect) {
+        const getReportedFit = (fit) => {
+            if (
+                !player.scoutingLevel ||
+                !fit ||
+                !Number.isFinite(fit.low) ||
+                !Number.isFinite(fit.high)
+            ) {
+                return {
+                    position: '—',
+                    ovr: '',
+                    estimated: true,
+                    available: false
+                };
+            }
+
+            return {
+                position: fit.position,
+                ovr: Math.round((fit.low + fit.high) / 2),
+                low: fit.low,
+                high: fit.high,
+                estimated: true,
+                available: true
+            };
+        };
+
+        return {
+            offense: getReportedFit(player.scoutingEvaluation?.offenseFit),
+            defense: getReportedFit(player.scoutingEvaluation?.defenseFit)
+        };
+    }
+
     return {
         offense: getBestPositionFit(player, OFFENSIVE_POSITION_FITS),
         defense: getBestPositionFit(player, DEFENSIVE_POSITION_FITS)
@@ -175,14 +297,22 @@ function renderPositionFit(fit, side, includeSideLabel = false) {
         ? 'text-emerald-700'
         : 'text-blue-700';
     const sideLabel = isOffense ? 'OFF' : 'DEF';
+    const hasFit = fit.available !== false;
+    const title = !hasFit
+        ? 'Unscouted: assign staff time to estimate this fit'
+        : Number.isFinite(fit.low) && Number.isFinite(fit.high)
+            ? `Estimated range: ${fit.low}-${fit.high}`
+            : '';
 
     return `
-        <span class="inline-flex items-center gap-1 whitespace-nowrap ${colorClass}">
+        <span class="inline-flex items-center gap-1 whitespace-nowrap ${colorClass}" title="${title}">
             ${includeSideLabel
                 ? `<span class="text-[8px] font-black">${sideLabel}</span>`
                 : ''}
-            <span class="font-black">${fit.position}</span>
-            <span class="font-mono font-bold">${fit.estimated ? '~' : ''}${fit.ovr}</span>
+            <span class="font-black">${hasFit ? fit.position : '—'}</span>
+            <span class="font-mono font-bold">${hasFit
+                ? `${fit.estimated ? '~' : ''}${fit.ovr}`
+                : 'Unscouted'}</span>
         </span>`;
 }
 
@@ -504,8 +634,16 @@ export function renderDraftPool(gameState, onPlayerSelect, sortColumn = 'potenti
 
     let filtered = undraftedPlayers.filter(p => {
         const matchesName = p.name.toLowerCase().includes(searchTerm);
-        const bestP = p.pos || estimateBestPosition(p);
-        const matchesPos = !posFilter || bestP === posFilter || p.favoriteOffensivePosition === posFilter || p.favoriteDefensivePosition === posFilter;
+        const report = Game.getTeamScoutingReport?.(gameState.playerTeam, p.id);
+        const reportedPositions = [
+            report?.evaluation?.offenseFit?.position,
+            report?.evaluation?.defenseFit?.position
+        ];
+
+        const matchesPos = !posFilter ||
+            p.pos === posFilter ||
+            reportedPositions.includes(posFilter);
+
         return matchesName && matchesPos;
     });
 
@@ -520,7 +658,7 @@ export function renderDraftPool(gameState, onPlayerSelect, sortColumn = 'potenti
                     <th class="py-2 px-3 text-left cursor-pointer hover:bg-slate-200" data-sort="name">Prospect / Style</th>
                     <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-200" data-sort="age">Age</th>
                     <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-200" data-sort="potential">Pot</th>
-                    <th class="py-2 px-2 text-center">Rel</th>
+                    <th class="py-2 px-2 text-center">Scout</th>
                     <th class="py-2 px-2 text-center">Frame</th>
                     <th class="py-2 px-3 text-center">Key Skills</th>
                 </tr>`;
@@ -569,29 +707,125 @@ export function renderDraftPool(gameState, onPlayerSelect, sortColumn = 'potenti
 
     // 3. Sorting
     const potentialOrder = { 'A': 5, 'B': 4, 'C': 3, 'D': 2, 'F': 1 };
+    const scoutingReports = Game.getTeamScoutingReports?.(gameState.playerTeam) || {};
+    const getReport = p => scoutingReports[String(p.id)] || null;
+
+    const getPotentialScore = p => {
+        const range = getReport(p)?.potentialRange;
+        if (!range) return null;
+
+        const best = potentialOrder[range.bestPossible];
+        const worst = potentialOrder[range.worstPossible];
+
+        return Number.isFinite(best) && Number.isFinite(worst)
+            ? (best + worst) / 2
+            : null;
+    };
+
+    const getTwoWayScore = p => {
+        const evaluation = getReport(p)?.evaluation;
+        const fits = [evaluation?.offenseFit, evaluation?.defenseFit]
+            .filter(fit =>
+                fit &&
+                Number.isFinite(fit.low) &&
+                Number.isFinite(fit.high)
+            );
+
+        if (fits.length === 0) return null;
+
+        return fits.reduce(
+            (sum, fit) => sum + (fit.low + fit.high) / 2,
+            0
+        ) / fits.length;
+    };
+
+    const getPositionSortKey = p => {
+        const evaluation = getReport(p)?.evaluation;
+        return p.pos ||
+            evaluation?.offenseFit?.position ||
+            evaluation?.defenseFit?.position ||
+            '—';
+    };
+
+    const getAttributeScore = p => {
+        const report = getReport(p);
+
+        for (const category of ['physical', 'mental', 'technical']) {
+            if (p.attributes?.[category]?.[sortColumn] === undefined) continue;
+
+            if (
+                category === 'physical' &&
+                ['height', 'weight'].includes(sortColumn)
+            ) {
+                return Number.isFinite(p.attributes[category][sortColumn])
+                    ? p.attributes[category][sortColumn]
+                    : null;
+            }
+
+            const range = report?.attributeRanges?.[category]?.[sortColumn];
+
+            return range &&
+                Number.isFinite(range.low) &&
+                Number.isFinite(range.high)
+                ? (range.low + range.high) / 2
+                : null;
+        }
+
+        return null;
+    };
+
+    const compareReportedValues = (a, b) => {
+        if (a == null && b == null) return 0;
+        if (a == null) return 1;
+        if (b == null) return -1;
+
+        return sortDirection === 'asc' ? a - b : b - a;
+    };
+
     filtered.sort((a, b) => {
         if (sortColumn === 'potential') {
-            const valA = potentialOrder[a?.potential] || 0;
-            const valB = potentialOrder[b?.potential] || 0;
-            if (valA !== valB) return sortDirection === 'asc' ? valA - valB : valB - valA;
-            return calculateOverall(b, estimateBestPosition(b)) - calculateOverall(a, estimateBestPosition(a));
-        }
-        if (sortColumn === 'position') {
-            const posA = a.pos || estimateBestPosition(a);
-            const posB = b.pos || estimateBestPosition(b);
-            return sortDirection === 'asc' ? posA.localeCompare(posB) : posB.localeCompare(posA);
-        }
-        if (sortColumn === 'name') return sortDirection === 'asc' ? a.name.localeCompare(b.name) : b.name.localeCompare(a.name);
-        if (sortColumn === 'age') return sortDirection === 'asc' ? a.age - b.age : b.age - a.age;
+            const potentialCompare = compareReportedValues(
+                getPotentialScore(a),
+                getPotentialScore(b)
+            );
+            if (potentialCompare !== 0) return potentialCompare;
 
-        const getAttr = (p) => {
-            const cats = ['physical', 'mental', 'technical'];
-            for (const c of cats) if (p.attributes?.[c]?.[sortColumn] !== undefined) return Number(p.attributes[c][sortColumn]) || 0;
-            return 0;
-        };
-        const valA = getAttr(a);
-        const valB = getAttr(b);
-        return sortDirection === 'asc' ? valA - valB : valB - valA;
+            const fitCompare = compareReportedValues(
+                getTwoWayScore(a),
+                getTwoWayScore(b)
+            );
+            if (fitCompare !== 0) return fitCompare;
+
+            return a.name.localeCompare(b.name);
+        }
+
+        if (sortColumn === 'position') {
+            const posA = getPositionSortKey(a);
+            const posB = getPositionSortKey(b);
+
+            return sortDirection === 'asc'
+                ? posA.localeCompare(posB)
+                : posB.localeCompare(posA);
+        }
+
+        if (sortColumn === 'name') {
+            return sortDirection === 'asc'
+                ? a.name.localeCompare(b.name)
+                : b.name.localeCompare(a.name);
+        }
+
+        if (sortColumn === 'age') {
+            return sortDirection === 'asc'
+                ? a.age - b.age
+                : b.age - a.age;
+        }
+
+        const attrCompare = compareReportedValues(
+            getAttributeScore(a),
+            getAttributeScore(b)
+        );
+
+        return attrCompare || a.name.localeCompare(b.name);
     });
 
     elements.draftPoolTbody.innerHTML = '';
@@ -602,16 +836,38 @@ export function renderDraftPool(gameState, onPlayerSelect, sortColumn = 'potenti
     }
 
     // 4. Render Table Rows
-    filtered.forEach(player => {
-        const maxLevel = playerRoster.reduce((max, rp) => Math.max(max, getRelationshipLevel(rp.id, player.id)), relationshipLevels.STRANGER.level);
-        const scouted = getScoutedPlayerInfo(player, maxLevel);
+        filtered.forEach(player => {
+        const report = getReport(player);
+        const scouted = getScoutingAwarePlayerView(
+            player,
+            gameState.playerTeam,
+            report
+        );
         if (!scouted) return;
 
-        const relInfo = Object.values(relationshipLevels).find(rl => rl.level === maxLevel) || relationshipLevels.STRANGER;
-         const pos = scouted.pos || estimateBestPosition(scouted);
+        const scoutingLevel = scouted.scoutingLevel || 0;
+        const progressPoints = scouted.scoutingProgressPoints || 0;
+        const nextThreshold = SCOUTING_LEVEL_THRESHOLDS[scoutingLevel + 1];
+        const scoutingLabel = SCOUTING_LEVEL_LABELS[scoutingLevel] || 'Unscouted';
+        const scoutingProgressLabel = scoutingLevel < 4
+            ? `${Math.floor(progressPoints)}/${nextThreshold}`
+            : 'Complete';
+        const scoutingStatusHtml = `
+            <span class="text-[10px] font-bold text-slate-600 whitespace-nowrap"
+                title="${scoutingLevel > 0
+                    ? `Estimated confidence: ${Math.round(scouted.scoutingConfidence * 100)}%`
+                    : 'No scouting report yet. Assign weekly staff time to begin.'}">
+                ${scoutingLabel}
+                <span class="block text-[9px] font-normal text-slate-400">${scoutingProgressLabel}</span>
+            </span>`;
+
         const fits = getBestTwoWayFits(scouted);
-        const ovr = calculateDisplayOverall(scouted, pos);
-        const ovrDisplay = `${hasScoutingUncertainty(scouted) ? '~' : ''}${ovr}`;
+        const pos = scouted.pos ||
+            (fits.offense.available !== false ? fits.offense.position : '—');
+        const ovr = scoutingLevel > 0 && pos !== '—'
+            ? Math.round(calculateDisplayOverall(scouted, pos))
+            : null;
+        const ovrDisplay = ovr === null ? 'Unscouted' : `~${ovr}`;
         const offFitHtml = renderPositionFit(fits.offense, 'offense');
         const defFitHtml = renderPositionFit(fits.defense, 'defense');
         const bothFitsHtml = `
@@ -629,12 +885,17 @@ export function renderDraftPool(gameState, onPlayerSelect, sortColumn = 'potenti
         const posBadge = `<span class="bg-slate-100 text-slate-800 font-bold text-[10px] px-1.5 py-0.5 rounded border border-slate-300">${pos}</span>`;
 
         if (activeDraftView === 'overview') {
-            const sigSkills = getProspectSignatureSkills(scouted, pos);
-            const sigSkillsHtml = sigSkills.map(s =>
-                `<span class="inline-block bg-slate-100 text-slate-800 text-[10px] px-1.5 py-0.5 rounded font-mono mr-1 border border-slate-200">
-                    <span class="text-slate-500 font-normal">${s.label}:</span> <b>${s.val}</b>
-                </span>`
-            ).join('');
+            const sigSkills = scoutingLevel > 0
+                ? getProspectSignatureSkills(getPlayerForPositionRatings(scouted), pos)
+                : [];
+
+            const sigSkillsHtml = scoutingLevel === 0
+                ? '<span class="text-[10px] text-slate-400 italic">Scout to reveal skill estimates</span>'
+                : sigSkills.map(s =>
+                    `<span class="inline-block bg-slate-100 text-slate-800 text-[10px] px-1.5 py-0.5 rounded font-mono mr-1 border border-slate-200">
+                        <span class="text-slate-500 font-normal">${s.label}:</span> <b>~${s.val}</b>
+                    </span>`
+                ).join('');
 
             row.innerHTML = `
                 <td class="py-2 px-2 text-center">${starBtn}</td>
@@ -642,11 +903,11 @@ export function renderDraftPool(gameState, onPlayerSelect, sortColumn = 'potenti
                 <td class="text-center py-2 px-2">${defFitHtml}</td>
                 <td class="py-2 px-3 font-sans truncate max-w-[150px]">
                     <span class="block font-semibold text-slate-900 truncate leading-tight">${scouted.name}</span>
-                    <span class="block text-[10px] text-slate-500 truncate leading-tight">${scouted.archetypeName || 'Athlete'}</span>
+                    <span class="block text-[10px] text-slate-500 truncate leading-tight">${scouted.scoutingEvaluation?.projectedRole || (scoutingLevel > 0 ? 'Role projection developing' : 'Unscouted prospect')}</span>
                 </td>
                 <td class="text-center py-2 px-2 text-slate-600 font-mono">${scouted.age}</td>
                 <td class="text-center py-2 px-2 font-bold ${scouted.potential === 'A' ? 'text-amber-600' : (scouted.potential === 'B' ? 'text-blue-600' : 'text-slate-500')}">${scouted.potential}</td>
-                <td class="text-center py-2 px-2 ${relInfo.color} text-[10px] uppercase font-sans font-bold" title="${relInfo.name}">${relInfo.name.substring(0, 4)}</td>
+                 <td class="text-center py-2 px-2">${scoutingStatusHtml}</td>
                 <td class="text-center py-2 px-2 text-slate-500 text-[10px]">${formatHeight(scouted.attributes?.physical?.height)} / ${scouted.attributes?.physical?.weight}#</td>
                 <td class="text-center py-2 px-3 whitespace-nowrap">${sigSkillsHtml}</td>
             `;
@@ -684,7 +945,7 @@ export function renderDraftPool(gameState, onPlayerSelect, sortColumn = 'potenti
                 <td class="text-center py-2 px-2 font-bold text-amber-600">${scouted.potential}</td>
                 <td class="text-center py-2 px-2 text-blue-600 font-bold">${scouted.attributes?.physical?.speed ?? '?'}</td>
                 <td class="text-center py-2 px-2">${scouted.attributes?.technical?.catchingHands ?? '?'}</td>
-                <td class="text-center py-2 px-2 font-black text-slate-900">${ovr}</td>
+                <td class="text-center py-2 px-2 font-black text-slate-900">${ovrDisplay}</td>
             `;
         }
 
@@ -772,11 +1033,16 @@ export function renderSelectedPlayerCard(player, gameState) {
     }
 
     const playerRoster = getUIRosterObjects(gameState.playerTeam);
-    const maxLevel = playerRoster.reduce((max, rp) => Math.max(max, getRelationshipLevel(rp.id, player.id)), relationshipLevels.STRANGER.level);
-    const scouted = getScoutedPlayerInfo(player, maxLevel);
+    const scouted = getScoutingAwarePlayerView(player, gameState.playerTeam);
 
-    const pos = scouted.pos || estimateBestPosition(scouted);
+    if (!scouted) return;
+
+    const pos = scouted.pos || '—';
     const fits = getBestTwoWayFits(scouted);
+    const scoutingLevel = scouted.scoutingLevel || 0;
+    const scoutingLabel = SCOUTING_LEVEL_LABELS[scoutingLevel] || 'Known player';
+    const characterSummary = scouted.scoutingEvaluation?.characterSummary ||
+        (scoutingLevel >= 3 ? 'Not included in this report' : 'Not assessed yet');
 
     const bestFriend = playerRoster.find(r => r.id === player.social?.bestFriendId);
     const friendsOnTeam = playerRoster.filter(r => player.social?.goodFriendIds?.includes(r.id));
@@ -787,15 +1053,16 @@ export function renderSelectedPlayerCard(player, gameState) {
     if (friendsOnTeam.length > 0) socialBadgeHtml += `<span class="bg-emerald-100 text-emerald-800 border border-emerald-300 px-1 py-0.5 rounded text-[9px] font-bold">Friends: ${friendsOnTeam.length}</span>`;
     if (rivalOnTeam) socialBadgeHtml += `<span class="bg-rose-100 text-rose-800 border border-rose-300 px-1 py-0.5 rounded text-[9px] font-bold">⚠️ Rival</span>`;
 
-    const workEthic = player.personality?.workEthic || 50;
-    const ego = player.personality?.ego || 50;
-    const clique = player.personality?.clique || 'Regular';
+    // Character estimates will be displayed only when the scouting report
+    // explicitly includes them. Do not read hidden external-player traits here.
 
     const positions = ['QB', 'RB', 'WR', 'TE', 'OL', 'DL', 'LB', 'DB'];
     let overallsHtml = '<div class="grid grid-cols-4 gap-1 text-center">';
 
     positions.forEach(pKey => {
-        const pOvr = calculateDisplayOverall(scouted, pKey);
+        const pOvr = scouted.isExternalProspect && scoutingLevel === 0
+            ? '—'
+            : `~${Math.round(calculateDisplayOverall(scouted, pKey))}`;
         const isBestOffense = pKey === fits.offense.position;
         const isBestDefense = pKey === fits.defense.position;
 
@@ -837,18 +1104,19 @@ export function renderSelectedPlayerCard(player, gameState) {
                         <h3 class="font-black text-sm text-slate-900 truncate leading-tight">${scouted.name}</h3>
                     </div>
                     <p class="text-[10px] text-slate-500 font-mono">${scouted.age}yo • ${formatHeight(scouted.attributes?.physical?.height)} • ${scouted.attributes?.physical?.weight}#</p>
+                    <p class="text-[9px] text-slate-500">${scoutingLabel}${scoutingLevel > 0 ? ` · ${Math.round(scouted.scoutingConfidence * 100)}% confidence` : ' · Assign scouting time to begin'}</p>
                 </div>
                 <div class="flex items-center gap-1 shrink-0">
                     <div class="text-right bg-emerald-50 border border-emerald-200 px-2 py-1 rounded">
                         <span class="text-[8px] uppercase tracking-wider block text-emerald-700">Off Fit</span>
                         <span class="text-sm font-black leading-none text-emerald-800">
-                            ${fits.offense.position} ${fits.offense.estimated ? '~' : ''}${fits.offense.ovr}
+                            ${fits.offense.available === false ? 'Unscouted' : `${fits.offense.position} ${fits.offense.estimated ? '~' : ''}${fits.offense.ovr}`}
                         </span>
                     </div>
                     <div class="text-right bg-blue-50 border border-blue-200 px-2 py-1 rounded">
                         <span class="text-[8px] uppercase tracking-wider block text-blue-700">Def Fit</span>
                         <span class="text-sm font-black leading-none text-blue-800">
-                            ${fits.defense.position} ${fits.defense.estimated ? '~' : ''}${fits.defense.ovr}
+                             ${fits.defense.available === false ? 'Unscouted' : `${fits.defense.position} ${fits.defense.estimated ? '~' : ''}${fits.defense.ovr}`}
                         </span>
                     </div>
                 </div>
@@ -870,11 +1138,10 @@ export function renderSelectedPlayerCard(player, gameState) {
             <!-- Tab 1: Overview Pane (Clean & Compact) -->
             <div id="dossier-pane-overview" class="dossier-pane ${activeDossierTab === 'overview' ? '' : 'hidden'} text-[10px] space-y-1.5">
                 <div class="flex flex-wrap items-center gap-1">
-                    <span class="bg-amber-100 text-amber-900 font-bold px-1.5 py-0.5 rounded border border-amber-200">Style: ${player.archetypeName || 'Athlete'}</span>
-                    <span class="bg-indigo-100 text-indigo-900 font-bold px-1.5 py-0.5 rounded border border-indigo-200">${clique}</span>
-                    <span class="bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded font-mono">Ethic: <b>${workEthic}</b></span>
-                    <span class="${ego > 70 ? 'bg-rose-100 text-rose-800 font-bold' : 'bg-slate-100 text-slate-700'} px-1.5 py-0.5 rounded font-mono">Ego: <b>${ego}</b></span>
+                    <span class="bg-amber-100 text-amber-900 font-bold px-1.5 py-0.5 rounded border border-amber-200">Role: ${scouted.scoutingEvaluation?.projectedRole || (scoutingLevel > 0 ? 'Under evaluation' : 'Unscouted')}</span>
+                    <span class="bg-indigo-100 text-indigo-900 font-bold px-1.5 py-0.5 rounded border border-indigo-200">Character: ${characterSummary}</span>
                     ${socialBadgeHtml}
+                    <p class="w-full text-slate-600 italic">${scouted.scoutingEvaluation?.summary || (scoutingLevel > 0 ? 'Your staff is still developing this evaluation.' : 'No scouting report yet. Allocate staff time to begin learning about this prospect.')}</p>
                 </div>
             </div>
 
