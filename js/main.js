@@ -6,7 +6,10 @@ import { positionOverallWeights, estimateBestPosition, calculateOverall } from '
 import { gmBackgrounds, gmArchetypes, footballExpertises, offenseFormations, defenseFormations } from './data.js';
 import { formatHeight } from './utils.js';
 import { getCurrentRosterLimit, TEMPORARY_HELP_THRESHOLD } from './game/season.js';
-import { initializeInheritedScoutingReports } from './game/scouting.js';
+import {
+    initializeInheritedScoutingReports,
+    recordScoutingReportOutcome
+} from './game/scouting.js';
 
 let gameState = null;
 let selectedPlayerId = null;
@@ -924,6 +927,15 @@ function handleDraftPlayer() {
         if (player && Game.addPlayerToTeam(player, team)) {
             player.lifecycle = 'active';
             const gs = Game.getGameState();
+
+            recordScoutingReportOutcome(
+                team,
+                player,
+                gs,
+                gs.year,
+                gs.currentWeek
+            );
+
             if (gs.draftClass) {
                 gs.draftClass = gs.draftClass.filter(p => p.id !== player.id);
             }
@@ -1038,6 +1050,14 @@ async function runAIDraftPicks() {
 
                 const picked = Game.simulateAIPick(currentPickingTeam);
                 if (picked) {
+                    recordScoutingReportOutcome(
+                        currentPickingTeam,
+                        picked,
+                        gameState,
+                        gameState.year,
+                        gameState.currentWeek
+                    );
+
                     const pickedPos = estimateBestPosition(picked);
                     const pickedOvr = Game.calculateOverall(picked, pickedPos);
 

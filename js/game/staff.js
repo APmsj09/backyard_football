@@ -1243,8 +1243,6 @@ export function ensureAiStaffWorkPlan(
 
     if (coaches.length === 0) return null;
 
-    const gm = team.aiGmProfile || null;
-
     const gm = team.aiGmProfile || team.staff?.gm || null;
 
     const gmDirective =
