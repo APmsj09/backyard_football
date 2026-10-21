@@ -66,7 +66,6 @@ function renderTwoWayFitsHtml(fits, stacked = false) {
     const layoutClass = stacked
         ? 'flex flex-col items-end gap-0.5'
         : 'inline-flex flex-wrap items-center gap-2';
-
     return `
         <span class="${layoutClass}">
             <span class="text-emerald-700 font-bold whitespace-nowrap">
@@ -76,6 +75,75 @@ function renderTwoWayFitsHtml(fits, stacked = false) {
                 DEF ${fits.defense.position} ${fits.defense.ovr}
             </span>
         </span>`;
+}
+
+function getPickTimeScoutingSnapshot(player, team) {
+    const report = Game.getTeamScoutingReport?.(team, player.id) || null;
+    const evaluation = report?.evaluation || {};
+
+    const getFit = fit => {
+        if (
+            !fit ||
+            !Number.isFinite(fit.low) ||
+            !Number.isFinite(fit.high)
+        ) {
+            return {
+                position: null,
+                low: null,
+                high: null,
+                ovr: null
+            };
+        }
+
+        return {
+            position: fit.position,
+            low: fit.low,
+            high: fit.high,
+            ovr: Math.round((fit.low + fit.high) / 2)
+        };
+    };
+
+    const offense = getFit(evaluation.offenseFit);
+    const defense = getFit(evaluation.defenseFit);
+    const fitRatings = [offense.ovr, defense.ovr]
+        .filter(Number.isFinite);
+    const overall = fitRatings.length > 0
+        ? Math.round(
+            fitRatings.reduce((sum, rating) => sum + rating, 0) /
+            fitRatings.length
+        )
+        : null;
+
+    const potentialRange = report?.potentialRange || null;
+    const potential = potentialRange
+        ? potentialRange.bestPossible === potentialRange.worstPossible
+            ? potentialRange.bestPossible
+            : `${potentialRange.bestPossible}–${potentialRange.worstPossible}`
+        : null;
+
+    return {
+        // Keep the legacy fields for older history renderers and saves.
+        pos: offense.position || player.pos || '—',
+        ovr: overall,
+        potential,
+
+        // New fields preserve the evaluation available at draft time.
+        listedPosition: player.pos || null,
+        offFitPosition: offense.position,
+        offFitLow: offense.low,
+        offFitHigh: offense.high,
+        offFitOvr: offense.ovr,
+        defFitPosition: defense.position,
+        defFitLow: defense.low,
+        defFitHigh: defense.high,
+        defFitOvr: defense.ovr,
+        scoutingLevel: Number.isInteger(report?.level)
+            ? report.level
+            : 0,
+        scoutingConfidence: Number.isFinite(report?.confidence)
+            ? report.confidence
+            : null
+    };
 }
 
 async function startNewGame() {
@@ -549,12 +617,22 @@ function confirmFranchiseTakeover(teamId, coachDetails) {
         };
     });
     Game.setupDraft();
-    initializeInheritedScoutingReports(
-        team,
-        gameState.draftClass || [],
-        Number.isInteger(gameState.year) ? gameState.year : 5,
-        Number.isInteger(gameState.currentWeek) ? gameState.currentWeek : 0
-    );
+
+    const draftYear = Number.isInteger(gameState.year) ? gameState.year : 5;
+    const draftWeek = Number.isInteger(gameState.currentWeek) ? gameState.currentWeek : 0;
+    const incomingDraftClass = gameState.draftClass || [];
+
+    for (const draftTeam of gameState.teams) {
+        if (draftTeam.leagueType !== 'main') continue;
+
+        initializeInheritedScoutingReports(
+            draftTeam,
+            incomingDraftClass,
+            draftYear,
+            draftWeek
+        );
+    }
+
     gameState.draftCompleted = false;
 
     // REPORT 3: Initialize First Player Draft report
@@ -622,15 +700,14 @@ function handleDraftPlayer() {
 
             const userPos = estimateBestPosition(player);
             const userOvr = Game.calculateOverall(player, userPos);
+            const pickSnapshot = getPickTimeScoutingSnapshot(player, team);
 
             gs.pickHistory.push({
                 pick: gs.currentPick + 1,
                 teamName: team.name,
                 teamId: team.id,
                 playerName: player.name,
-                pos: userPos,
-                ovr: userOvr,
-                potential: player.potential
+                ...pickSnapshot
             });
 
             // Capture top alternatives on the board when the user picked
@@ -734,14 +811,17 @@ async function runAIDraftPicks() {
                     const pickedOvr = Game.calculateOverall(picked, pickedPos);
 
                     if (!gameState.pickHistory) gameState.pickHistory = [];
+                    const pickSnapshot = getPickTimeScoutingSnapshot(
+                        picked,
+                        currentPickingTeam
+                    );
+
                     gameState.pickHistory.push({
                         pick: gameState.currentPick + 1,
                         teamName: currentPickingTeam.name,
                         teamId: currentPickingTeam.id,
                         playerName: picked.name,
-                        pos: pickedPos,
-                        ovr: pickedOvr,
-                        potential: picked.potential
+                        ...pickSnapshot
                     });
 
                     // Count team's existing players at this position to determine need
@@ -1024,6 +1104,8 @@ function startExitInterviewFlow(retentions, onComplete, report = null) {
         }
 
         const fits = getBestTwoWayFits(player);
+        const pos = fits.offense.position;
+        const ovr = fits.offense.ovr;
         const pitchOptions = Game.getRetentionPitchOptions(player);
         const tokensAvailable = Math.max(
             0,

@@ -1,6 +1,13 @@
 // js/game/draft.js - Draft Manager
 
-import { game, getPlayer, getRosterObjects, addMessage, playerMap } from './state.js';
+import {
+    game,
+    getPlayer,
+    getRosterObjects,
+    addMessage,
+    playerMap,
+    getTeamScoutingReport
+} from './state.js';
 import {
     calculateOverall,
     estimateBestPosition,
@@ -49,6 +56,281 @@ function getBestTwoWayFits(player) {
     };
 }
 
+const DRAFT_POTENTIAL_SCORE = Object.freeze({
+    A: 95,
+    B: 82,
+    C: 68,
+    D: 52,
+    F: 35
+});
+
+const draftEvaluationCache = new WeakMap();
+
+function getEstimatedProspectForTeam(player, report) {
+    const attributes = {};
+
+    for (const [category, values] of Object.entries(player.attributes || {})) {
+        if (!values || typeof values !== 'object' || Array.isArray(values)) {
+            continue;
+        }
+
+        const estimatedCategory = {};
+
+        for (const [attribute, actualValue] of Object.entries(values)) {
+            if (typeof actualValue !== 'number') continue;
+
+            // Registered measurements remain public.
+            if (
+                category === 'physical' &&
+                (attribute === 'height' || attribute === 'weight')
+            ) {
+                estimatedCategory[attribute] = actualValue;
+                continue;
+            }
+
+            const range = report?.attributeRanges?.[category]?.[attribute];
+
+            estimatedCategory[attribute] =
+                range &&
+                Number.isFinite(range.low) &&
+                Number.isFinite(range.high)
+                    ? Math.round((range.low + range.high) / 2)
+                    : 50;
+        }
+
+        attributes[category] = estimatedCategory;
+    }
+
+    // Do not copy hidden favorite positions, potential, or personality.
+    return {
+        id: player.id,
+        age: player.age,
+        pos: player.pos,
+        attributes
+    };
+}
+
+function getReportedPositionFit(reportFit, fallbackFit, positions) {
+    if (
+        !reportFit ||
+        !positions.includes(reportFit.position) ||
+        !Number.isFinite(reportFit.low) ||
+        !Number.isFinite(reportFit.high)
+    ) {
+        return fallbackFit;
+    }
+
+    return {
+        position: reportFit.position,
+        ovr: Math.round((reportFit.low + reportFit.high) / 2)
+    };
+}
+
+function scorePublicSeasonStats(stats, position) {
+    if (!stats || typeof stats !== 'object') return null;
+
+    const value = key => Number.isFinite(stats[key])
+        ? Math.max(0, stats[key])
+        : 0;
+
+    let observed = false;
+    let score = 50;
+
+    switch (position) {
+        case 'QB':
+            observed = [
+                'passAttempts', 'passCompletions', 'passYards',
+                'interceptionsThrown', 'touchdowns', 'rushYards'
+            ].some(key => value(key) > 0);
+
+            if (!observed) return null;
+
+            score =
+                value('passYards') / 35 +
+                value('passCompletions') / 2 +
+                value('touchdowns') * 2 -
+                value('interceptionsThrown') * 3 +
+                value('rushYards') / 80;
+            break;
+
+        case 'RB':
+            observed = [
+                'rushAttempts', 'rushYards', 'receptions',
+                'recYards', 'touchdowns'
+            ].some(key => value(key) > 0);
+
+            if (!observed) return null;
+
+            score =
+                value('rushYards') / 20 +
+                value('rushAttempts') * 0.2 +
+                value('recYards') / 40 +
+                value('receptions') * 0.8 +
+                value('touchdowns') * 2 -
+                value('fumblesLost') * 2;
+            break;
+
+        case 'WR':
+        case 'TE':
+            observed = [
+                'targets', 'receptions', 'recYards', 'touchdowns'
+            ].some(key => value(key) > 0);
+
+            if (!observed) return null;
+
+            score =
+                value('recYards') / 18 +
+                value('receptions') * 1.2 +
+                value('touchdowns') * 2 -
+                value('drops') * 2;
+            break;
+
+        case 'DL':
+            observed = [
+                'tackles', 'sacks', 'interceptions', 'fumblesRecovered'
+            ].some(key => value(key) > 0);
+
+            if (!observed) return null;
+
+            score =
+                value('tackles') / 2 +
+                value('sacks') * 5 +
+                value('interceptions') * 4 +
+                value('fumblesRecovered') * 3 +
+                value('touchdowns') * 2;
+            break;
+
+        case 'LB':
+            observed = [
+                'tackles', 'sacks', 'interceptions', 'fumblesRecovered'
+            ].some(key => value(key) > 0);
+
+            if (!observed) return null;
+
+            score =
+                value('tackles') / 2.5 +
+                value('sacks') * 4 +
+                value('interceptions') * 4 +
+                value('fumblesRecovered') * 3 +
+                value('touchdowns') * 2;
+            break;
+
+        case 'DB':
+            observed = [
+                'tackles', 'interceptions', 'returnYards', 'touchdowns'
+            ].some(key => value(key) > 0);
+
+            if (!observed) return null;
+
+            score =
+                value('tackles') / 4 +
+                value('interceptions') * 6 +
+                value('returnYards') / 35 +
+                value('touchdowns') * 2;
+            break;
+
+        default:
+            // The available individual statistics aren't sufficient
+            // to estimate offensive-line performance reliably.
+            return null;
+    }
+
+    return Math.max(0, Math.min(100, score));
+}
+
+function getPublicProductionScore(player) {
+    const position = player?.pos;
+
+    if (!position) return null;
+
+    const seasons = Array.isArray(player.progression)
+        ? player.progression
+            .filter(season => season?.stats)
+            .slice(-3)
+        : [];
+
+    let scores = seasons
+        .map(season => scorePublicSeasonStats(season.stats, position))
+        .filter(Number.isFinite);
+
+    // Older saves may have career totals without season-by-season records.
+    if (
+        scores.length === 0 &&
+        player.careerStats &&
+        Number(player.careerStats.seasonsPlayed) > 0
+    ) {
+        const seasonsPlayed = Number(player.careerStats.seasonsPlayed);
+        const averageSeasonStats = {};
+
+        for (const [key, rawValue] of Object.entries(player.careerStats)) {
+            if (Number.isFinite(rawValue)) {
+                averageSeasonStats[key] = rawValue / seasonsPlayed;
+            }
+        }
+
+        const careerScore = scorePublicSeasonStats(
+            averageSeasonStats,
+            position
+        );
+
+        if (Number.isFinite(careerScore)) scores = [careerScore];
+    }
+
+    if (scores.length === 0) return null;
+
+    const average = scores.reduce((sum, score) => sum + score, 0) /
+        scores.length;
+
+    // One recorded season is weak evidence; repeated production is stronger.
+    const evidenceWeight = Math.min(1, scores.length / 3);
+
+    return 50 + (average - 50) * evidenceWeight;
+}
+
+function getDraftEvaluationContext(player, team) {
+    let teamCache = draftEvaluationCache.get(player);
+
+    if (!teamCache) {
+        teamCache = new WeakMap();
+        draftEvaluationCache.set(player, teamCache);
+    }
+
+    const report = getTeamScoutingReport(team, player.id);
+    const cached = teamCache.get(team);
+
+    // A newly generated report replaces the report object and invalidates
+    // the cached projection. Progress-only changes do not alter the estimates.
+    if (cached && cached.report === report) {
+        return cached;
+    }
+
+    const estimatedPlayer = getEstimatedProspectForTeam(player, report);
+    const estimatedFits = getBestTwoWayFits(estimatedPlayer);
+
+    const fits = {
+        offense: getReportedPositionFit(
+            report?.evaluation?.offenseFit,
+            estimatedFits.offense,
+            OFFENSIVE_POSITION_FITS
+        ),
+        defense: getReportedPositionFit(
+            report?.evaluation?.defenseFit,
+            estimatedFits.defense,
+            DEFENSIVE_POSITION_FITS
+        )
+    };
+
+    const context = {
+        report,
+        estimatedPlayer,
+        fits,
+        publicProductionScore: getPublicProductionScore(player)
+    };
+
+    teamCache.set(team, context);
+    return context;
+}
+
 /**
  * Calculates a prospect's value to a specific team based on ability,
  * ceiling (potential), positional need, and coach preference.
@@ -59,32 +341,21 @@ export function calculateDraftValue(player, team) {
     const scout = team.staff?.scout;
     const coach = team.staff?.coach || team.coach;
 
-    // AI FOG OF WAR: The AI evaluates players through its Scout's imperfect eyes!
-    const scoutAccuracy = scout ? ((scout.ratings?.evalTechnique + scout.ratings?.evalPhysicals) / 200) : 0.5;
+    const {
+        report,
+        estimatedPlayer,
+        fits,
+        publicProductionScore
+    } = getDraftEvaluationContext(player, team);
 
-     // Evaluate the prospect independently on offense and defense.
-    const fits = getBestTwoWayFits(player);
-
-    // Preserve the existing scouting uncertainty.
-    const noise = Math.round((Math.random() - 0.5) * (1.0 - scoutAccuracy) * 16);
-
-    const offOvr = Math.max(
-        20,
-        Math.min(99, calculateOverall(player, fits.offense.position) + noise)
-    );
-
-    const defOvr = Math.max(
-        20,
-        Math.min(99, calculateOverall(player, fits.defense.position) + noise)
-    );
+    // Use persistent team-specific estimates instead of fresh random noise.
+    const offOvr = fits.offense.ovr;
+    const defOvr = fits.defense.ovr;
 
     // Both sides contribute to perceived player value.
     const ovr = Math.round((offOvr + defOvr) / 2);
-
     const gmDirective = team.gameplan?.gmDirective || 'COACH_AUTONOMY';
     const coachPersonality = coach?.biases?.personality?.name;
-    const ego = player.personality?.ego || 50;
-    const ethic = player.personality?.workEthic || 50;
 
     // Dynamic Weights by GM Directive:
     // WIN_NOW values day-one ability (45%) over raw ceiling (15%)
@@ -103,22 +374,41 @@ export function calculateDraftValue(player, team) {
     // 1. Perceived Ability
     let abilityScore = ovr * abilityWeight;
 
+    if (Number.isFinite(publicProductionScore)) {
+        abilityScore += ((publicProductionScore - 50) / 50) * 3;
+    }
+
     // Scout & Coach Personality Bias
     const scoutBias = scout?.biases?.scouting?.name;
     if (scoutBias === 'Speed Chaser') {
-        const spd = player.attributes?.physical?.speed || 50;
+        const spd = estimatedPlayer.attributes?.physical?.speed || 50;
         if (spd > 68) abilityScore += (spd - 68) * 0.45;
-    } else if (scoutBias === 'Character First' || coachPersonality === 'Old-School Disciplinarian') {
-        if (ego > 70) abilityScore -= (ego - 70) * 0.60; // Strictly devalues divas
-        if (ethic > 70) abilityScore += (ethic - 70) * 0.35; // Reaches for gym rats
+    } else if (
+        scoutBias === 'Character First' ||
+        coachPersonality === 'Old-School Disciplinarian'
+    ) {
+        // Character-based adjustments wait for explicit scouting estimates.
+        // Never inspect hidden ego or work-ethic values for an external prospect.
     }
 
     // 2. Potential / Ceiling
-    const potentialMap = { 'A': 95, 'B': 82, 'C': 68, 'D': 52, 'F': 35 };
-    let potScore = (potentialMap[player.potential] || 65) * potentialWeight;
+    const potentialRange = report?.potentialRange;
+    const bestPotential = DRAFT_POTENTIAL_SCORE[potentialRange?.bestPossible];
+    const worstPotential = DRAFT_POTENTIAL_SCORE[potentialRange?.worstPossible];
 
-    if (gmDirective === 'DEVELOP_YOUTH' && player.age <= 12 && (player.potential === 'A' || player.potential === 'B')) {
-        potScore += 12; // Massive premium on 12-year-old wonderkids
+    const estimatedPotential = Number.isFinite(bestPotential) &&
+        Number.isFinite(worstPotential)
+        ? (bestPotential + worstPotential) / 2
+        : 65;
+
+    let potScore = estimatedPotential * potentialWeight;
+
+    if (
+        gmDirective === 'DEVELOP_YOUTH' &&
+        player.age <= 12 &&
+        ['A', 'B'].includes(potentialRange?.bestPossible)
+    ) {
+        potScore += 12;
     }
 
     // 3. Positional Need (25%)
@@ -184,10 +474,10 @@ export function calculateDraftValue(player, team) {
     // 4. Coach Scheme & Attribute Bias (10%)
     let coachFit = 0;
     if (coach?.attributePreferences) {
-        for (const cat in player.attributes) {
-            for (const attr in player.attributes[cat]) {
+        for (const cat in estimatedPlayer.attributes) {
+            for (const attr in estimatedPlayer.attributes[cat]) {
                 const weight = coach.attributePreferences[cat]?.[attr] || 1.0;
-                coachFit += (player.attributes[cat][attr] || 0) * (weight - 1.0);
+                coachFit += (estimatedPlayer.attributes[cat][attr] || 0) * (weight - 1.0);
             }
         }
     }

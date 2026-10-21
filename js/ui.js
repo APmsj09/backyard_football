@@ -4704,13 +4704,126 @@ export function setupFormationListeners() {
 export function renderPickHistory(gameState) {
     const list = document.getElementById('draft-history-list');
     if (!list) return;
-    const history = gameState.pickHistory || [];
-    list.innerHTML = history.slice().reverse().map(p => `
-        <div class="flex items-center justify-between p-2 bg-white rounded border border-gray-200 text-xs mb-1">
-            <span class="font-bold">#${p.pick} ${p.playerName} (${p.pos})</span>
-            <span class="text-gray-500">${p.teamName}</span>
-        </div>
-    `).join('') || '<p class="text-gray-400 text-center py-8 text-xs">No picks yet.</p>';
+
+    const history = Array.isArray(gameState.pickHistory)
+        ? gameState.pickHistory
+        : [];
+
+    const scoutingLevelLabels = [
+        'Unscouted',
+        'Initial',
+        'Evaluated',
+        'Detailed',
+        'Fully scouted'
+    ];
+
+    const renderFit = (label, position, ovr, low, high, colorClass) => {
+        if (!position || !Number.isFinite(ovr)) {
+            return `<span class="text-slate-400">${label}: No estimate</span>`;
+        }
+
+        const rangeLabel = Number.isFinite(low) && Number.isFinite(high)
+            ? `<span class="text-slate-400 font-normal">(${low}–${high})</span>`
+            : '';
+
+        return `
+            <span class="${colorClass} font-bold whitespace-nowrap">
+                ${label} ${position} ~${ovr} ${rangeLabel}
+            </span>`;
+    };
+
+    list.innerHTML = history.slice().reverse().map(p => {
+        const hasScoutingSnapshot = Number.isInteger(p.scoutingLevel);
+
+        if (!hasScoutingSnapshot) {
+            // Older saves retain their original single-position history.
+            // Label these values as legacy records rather than implying
+            // they were recorded using the new scouting system.
+            const legacyDetails = [
+                p.pos ? `Recorded position: ${p.pos}` : null,
+                Number.isFinite(p.ovr) ? `Recorded OVR: ${p.ovr}` : null,
+                p.potential ? `Recorded potential: ${p.potential}` : null
+            ].filter(Boolean);
+
+            return `
+                <div class="p-2 bg-white rounded border border-gray-200 text-xs mb-1">
+                    <div class="flex items-center justify-between gap-2">
+                        <span class="font-bold text-slate-900">
+                            #${p.pick} ${p.playerName}
+                        </span>
+                        <span class="text-gray-500">${p.teamName}</span>
+                    </div>
+                    <div class="flex flex-wrap gap-x-3 gap-y-1 mt-1">
+                        ${legacyDetails.map(detail => `
+                            <span class="text-slate-600">${detail}</span>
+                        `).join('')}
+                    </div>
+                    <p class="text-[9px] text-slate-400 mt-1">
+                        Legacy record · Single-position format
+                    </p>
+                </div>`;
+        }
+
+        const level = Math.max(0, Math.min(4, p.scoutingLevel));
+        const levelLabel = scoutingLevelLabels[level];
+        const confidence = Number.isFinite(p.scoutingConfidence)
+            ? `${Math.round(p.scoutingConfidence * 100)}% confidence`
+            : null;
+
+        const fitDetails = level > 0
+            ? `
+                ${renderFit(
+                    'OFF',
+                    p.offFitPosition,
+                    p.offFitOvr,
+                    p.offFitLow,
+                    p.offFitHigh,
+                    'text-emerald-700'
+                )}
+                ${renderFit(
+                    'DEF',
+                    p.defFitPosition,
+                    p.defFitOvr,
+                    p.defFitLow,
+                    p.defFitHigh,
+                    'text-blue-700'
+                )}`
+            : '<span class="text-slate-400">Unscouted at time of pick</span>';
+
+        const potentialDetails = level > 0 && p.potential
+            ? `<span class="text-slate-600">Potential estimate: ${p.potential}</span>`
+            : '<span class="text-slate-400">Potential unknown</span>';
+
+        return `
+            <div class="p-2 bg-white rounded border border-gray-200 text-xs mb-1">
+                <div class="flex items-center justify-between gap-2">
+                    <div class="min-w-0">
+                        <span class="font-bold text-slate-900">
+                            #${p.pick} ${p.playerName}
+                        </span>
+                        ${p.listedPosition
+                            ? `<span class="text-slate-400 ml-1">Listed ${p.listedPosition}</span>`
+                            : ''}
+                    </div>
+                    <span class="text-gray-500 text-right shrink-0">${p.teamName}</span>
+                </div>
+
+                <div class="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1">
+                    ${fitDetails}
+                </div>
+
+                <div class="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1">
+                    <span class="text-slate-600">
+                        ${levelLabel} at pick
+                    </span>
+                    ${confidence
+                        ? `<span class="text-slate-400">${confidence}</span>`
+                        : ''}
+                    ${potentialDetails}
+                </div>
+            </div>`;
+    }).join('') ||
+        '<p class="text-gray-400 text-center py-8 text-xs">No picks yet.</p>';
 }
 
 export function renderDraftTeamView(gameState) {
