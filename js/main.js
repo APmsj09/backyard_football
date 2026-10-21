@@ -350,19 +350,20 @@ function promptCoachCreation(teamId) {
         '</div>' +
         '<div class="grid grid-cols-1 sm:grid-cols-2 gap-3">' +
         coachSkillDefinitions.map(function (skill) {
-            const optionsHtml = coachSkillValues.map(function (value) {
-                return '<option value="' + value + '"' +
-                    (value === 55 ? ' selected' : '') + '>' +
-                    value + '</option>';
-            }).join('');
-
             return '<label class="block rounded border border-slate-200 bg-slate-50 p-3">' +
-                '<span class="block text-xs font-bold text-slate-800 mb-2">' +
-                skill.label + '</span>' +
-                '<select id="new-coach-skill-' + skill.id + '"' +
-                ' class="w-full p-2 border border-slate-300 rounded bg-white text-sm font-bold">' +
-                optionsHtml +
-                '</select></label>';
+                '<span class="flex items-center justify-between gap-2 text-xs font-bold text-slate-800 mb-3">' +
+                '<span>' + skill.label + '</span>' +
+                '<output id="new-coach-skill-value-' + skill.id + '"' +
+                ' class="text-base font-black text-slate-900 tabular-nums">55</output>' +
+                '</span>' +
+                '<input type="range"' +
+                ' id="new-coach-skill-' + skill.id + '"' +
+                ' min="35" max="80" step="5" value="55"' +
+                ' class="w-full accent-amber-500 cursor-pointer">' +
+                '<span class="flex justify-between text-[10px] text-slate-500 mt-1">' +
+                '<span>35 · Developing</span>' +
+                '<span>80 · Elite</span>' +
+                '</span></label>';
         }).join('') +
         '</div>' +
         '<p class="text-xs text-slate-500 mt-2">' +
@@ -536,27 +537,11 @@ function promptCoachCreation(teamId) {
         )
         .filter(Boolean);
 
-    const updateCoachSkillBudget = changedControl => {
-        let total = coachSkillControls.reduce(
+    const updateCoachSkillBudget = () => {
+        const total = coachSkillControls.reduce(
             (sum, control) => sum + Number(control.value || 0),
             0
         );
-
-        // Reject a change that would exceed the shared budget.
-        if (total > coachSkillBudget && changedControl) {
-            changedControl.value =
-                changedControl.dataset.lastValidValue || '55';
-
-            total = coachSkillControls.reduce(
-                (sum, control) => sum + Number(control.value || 0),
-                0
-            );
-        }
-
-        // Remember the latest valid values.
-        coachSkillControls.forEach(control => {
-            control.dataset.lastValidValue = control.value;
-        });
 
         const totalElement = document.getElementById(
             'new-coach-skill-total'
@@ -564,27 +549,50 @@ function promptCoachCreation(teamId) {
 
         if (totalElement) {
             totalElement.textContent =
-                `${total} / ${coachSkillBudget}`;
+                total + ' / ' + coachSkillBudget;
+
+            totalElement.classList.toggle(
+                'text-rose-300',
+                total > coachSkillBudget
+            );
         }
 
-        // Disable choices that would exceed the budget.
         coachSkillControls.forEach(control => {
-            const currentValue = Number(control.value || 0);
+            const currentValue = Number(control.value || 35);
 
-            Array.from(control.options).forEach(option => {
-                option.disabled =
-                    total - currentValue + Number(option.value) >
-                    coachSkillBudget;
-            });
+            const otherSkillsTotal = coachSkillControls.reduce(
+                (sum, otherControl) =>
+                    otherControl !== control
+                        ? sum + Number(otherControl.value || 0)
+                        : sum,
+                0
+            );
+
+            // Prevent this slider from exceeding the remaining budget.
+            control.max = String(
+                Math.max(
+                    35,
+                    Math.min(80, coachSkillBudget - otherSkillsTotal)
+                )
+            );
+
+            const skillId = control.id.replace(
+                'new-coach-skill-',
+                ''
+            );
+
+            const valueOutput = document.getElementById(
+                'new-coach-skill-value-' + skillId
+            );
+
+            if (valueOutput) {
+                valueOutput.textContent = String(currentValue);
+            }
         });
     };
 
     coachSkillControls.forEach(control => {
-        control.dataset.lastValidValue = control.value;
-
-        control.addEventListener('change', () => {
-            updateCoachSkillBudget(control);
-        });
+        control.addEventListener('input', updateCoachSkillBudget);
     });
 
     updateChoiceSummaries();
@@ -774,12 +782,40 @@ function confirmFranchiseTakeover(teamId, coachDetails) {
     );
 
     if (userCoach) {
+        const background = gmBackgrounds.find(
+            item => item.id === coachDetails?.backgroundId
+        ) || gmBackgrounds[0];
+
+        const archetype = gmArchetypes.find(
+            item => item.id === coachDetails?.archetypeId
+        ) || gmArchetypes[0];
+
+        const expertise = footballExpertises.find(
+            item => item.id === coachDetails?.expertiseId
+        ) || footballExpertises[0];
+
+        // Apply the identity selected during coach creation.
+        userCoach.name = coachDetails?.name || 'Coach';
+        userCoach.preferredOffense = coachDetails?.off;
+        userCoach.preferredDefense = coachDetails?.def;
+        userCoach.backgroundId = background.id;
+        userCoach.archetypeId = archetype.id;
+        userCoach.expertiseId = expertise.id;
+        userCoach.isUserCoach = true;
+
+        // Apply the validated skill allocation.
         userCoach.ratings = {
             ...(userCoach.ratings || {}),
             ...validatedSkillRatings
         };
 
+        // Preserve the complete profile for future management systems.
         team.userCoachProfile = userCoach;
+    } else {
+        console.error(
+            'Coach creation: no user coaching profile was initialized.',
+            team.id
+        );
     }
 
     Game.ensureTeamStaffWorkPlan(team);
