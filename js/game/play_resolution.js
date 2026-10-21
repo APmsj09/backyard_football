@@ -346,9 +346,24 @@ export function determinePlayCall(offense, defense, down, yardsToGo, ballOn, sco
     });
 
     if (candidateKeys.length === 0) candidateKeys = BACKYARD_BASICS_OFF;
-
     // Ensure target history array exists
     if (!offense.recentTargets) offense.recentTargets = [];
+
+    const staffPreparation = offense.gameplan?.staffPreparation;
+    const preparationIsCurrent =
+        staffPreparation?.preparedForYear === game?.year &&
+        staffPreparation?.preparedForWeek === game?.currentWeek;
+
+    const offensivePrepPoints = Math.max(
+        0,
+        Math.min(
+            12,
+            preparationIsCurrent &&
+                Number.isFinite(staffPreparation?.offensePoints)
+                ? staffPreparation.offensePoints
+                : 0
+        )
+    );
 
     let scoredPlays = candidateKeys.map(key => {
         const play = offensivePlaybook[key];
@@ -370,6 +385,39 @@ export function determinePlayCall(offense, defense, down, yardsToGo, ballOn, sco
         // PLAY MASTERY INFLUENCE: Kids prefer plays they've actually practiced!
         const playMastery = offense.gameplan?.mastery?.[key] || 40;
         score += (playMastery - 50) * 0.35; // Mastered plays (+15 score) beat unfamiliar plays (-10 score)
+
+        // STAFF PREPARATION: Reward plays suited to the current situation.
+        const preparedForRun =
+            play.type === 'run' && runProbability >= 0.5;
+
+        const preparedForPass =
+            play.type === 'pass' && runProbability < 0.5;
+
+        const preparedForSituation =
+            (isGoalLine && play.type === 'run') ||
+            (isShort &&
+                (
+                    tags.includes('inside') ||
+                    tags.includes('power') ||
+                    tags.includes('short')
+                )) ||
+            (isLong &&
+                (
+                    tags.includes('deep') ||
+                    tags.includes('medium')
+                )) ||
+            (isBackedUp && tags.includes('inside'));
+
+        if (
+            offensivePrepPoints > 0 &&
+            (
+                preparedForRun ||
+                preparedForPass ||
+                preparedForSituation
+            )
+        ) {
+            score += offensivePrepPoints * 0.35;
+        }
 
         // ======================================================
         // 2. SITUATIONAL FOOTBALL (TIERED BY COACH INSTINCT & BIAS)
