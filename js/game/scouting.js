@@ -4,7 +4,8 @@ import { isPlayerViableForPosition } from './depth_chart.js';
 import {
     ensureTeamStaffWorkPlan,
     WEEKLY_COACH_HOURS,
-    getTeamCoachingSpecialist
+    getTeamCoachingSpecialist,
+    recordCoachDevelopmentOutcome
 } from './staff.js';
 
 const OFFENSE = ['QB', 'RB', 'WR', 'TE', 'OL'];
@@ -1236,6 +1237,32 @@ export function processWeeklyScoutingAssignments(
                     trainedThisWeek
                 )) {
                     attributesImproved++;
+
+                    // Successful player development teaches the coach.
+                    const coachLearningSkills = [
+                        'teaching',
+                        'practiceDiscipline'
+                    ];
+
+                    // Physical development also provides feedback about
+                    // the coach's conditioning expertise.
+                    if (category === 'physical') {
+                        coachLearningSkills.push('conditioning');
+                    }
+
+                    recordCoachDevelopmentOutcome(
+                        coach,
+                        'training',
+                        1,
+                        'player-training:' +
+                            String(team.id) + ':' +
+                            String(player.id) + ':' +
+                            category + ':' +
+                            skill,
+                        year,
+                        week,
+                        coachLearningSkills
+                    );
                 }
             }
 

@@ -311,6 +311,175 @@ const COACH_DEVELOPMENT_TASK_SKILLS = {
     ]
 };
 
+/**
+ * Records learning from a real work outcome.
+ *
+ * quality: -1 to 1
+ *   Positive = successful outcome
+ *   Negative = setback that may still teach the coach something
+ *
+ * eventKey must uniquely identify the outcome, e.g. a completed
+ * scouting evaluation or a resolved game-planning result.
+ *
+ * This adds bounded progress only. It never directly raises a rating.
+ */
+export function recordCoachDevelopmentOutcome(
+    coach,
+    task,
+    quality,
+    eventKey,
+    year,
+    week,
+    skillOverrides = null
+) {
+    if (
+        !coach ||
+        !eventKey ||
+        !Number.isInteger(year) ||
+        !Number.isInteger(week) ||
+        !Number.isFinite(Number(quality))
+    ) {
+        return { applied: false, pointsAdded: 0 };
+    }
+
+    const taskSkills = COACH_DEVELOPMENT_TASK_SKILLS[task];
+
+    if (!taskSkills) {
+        return { applied: false, pointsAdded: 0 };
+    }
+
+    const skills = Array.isArray(skillOverrides)
+        ? [...new Set(skillOverrides)]
+            .filter(skill =>
+                taskSkills.includes(skill) &&
+                COACH_DEVELOPMENT_SKILLS.includes(skill)
+            )
+        : taskSkills;
+
+    if (skills.length === 0) {
+        return { applied: false, pointsAdded: 0 };
+    }
+
+    const development = ensureCoachDevelopmentProfile(coach);
+
+    if (!development) {
+        return { applied: false, pointsAdded: 0 };
+    }
+
+    // Prevent the same event from rewarding a coach more than once.
+    const uniqueEventKey = `${year}:${week}:${task}:${eventKey}`;
+
+    if (!Array.isArray(development.processedOutcomeKeys)) {
+        development.processedOutcomeKeys = [];
+    }
+
+    if (development.processedOutcomeKeys.includes(uniqueEventKey)) {
+        return { applied: false, pointsAdded: 0 };
+    }
+
+    development.processedOutcomeKeys.push(uniqueEventKey);
+
+    // Bound persisted de-duplication history.
+    if (development.processedOutcomeKeys.length > 128) {
+        development.processedOutcomeKeys =
+            development.processedOutcomeKeys.slice(-128);
+    }
+
+    const score = Math.max(-1, Math.min(1, Number(quality)));
+
+    // Strong results teach more; setbacks still provide a smaller lesson.
+    const requestedPoints = score >= 0
+        ? score * 8
+        : Math.abs(score) * 3;
+
+    if (requestedPoints <= 0) {
+        return { applied: true, pointsAdded: 0 };
+    }
+
+    const weekKey = `${year}:${week}`;
+
+    if (development.outcomeWeekKey !== weekKey) {
+        development.outcomeWeekKey = weekKey;
+        development.outcomePointsBySkill = {};
+    }
+
+    if (
+        !development.outcomePointsBySkill ||
+        typeof development.outcomePointsBySkill !== 'object'
+    ) {
+        development.outcomePointsBySkill = {};
+    }
+
+    if (
+        !development.progressBySkill ||
+        typeof development.progressBySkill !== 'object'
+    ) {
+        development.progressBySkill = {};
+    }
+
+    const growthRemaining =
+        development.careerGrowthBudget -
+        development.growthPointsUsed;
+
+    if (growthRemaining <= 0) {
+        return { applied: true, pointsAdded: 0 };
+    }
+
+    let pointsAdded = 0;
+
+    for (const skill of skills) {
+        const currentRating = Number(coach.ratings?.[skill]) || 50;
+        const ceiling = Number(
+            development.skillCeilings?.[skill]
+        );
+
+        if (
+            !Number.isFinite(ceiling) ||
+            currentRating >= Math.min(COACH_SKILL_HARD_CAP, ceiling)
+        ) {
+            continue;
+        }
+
+        // Outcome feedback is capped per skill each week.
+        const alreadyEarned = Math.max(
+            0,
+            Number(development.outcomePointsBySkill[skill]) || 0
+        );
+
+        const availableFeedbackPoints = Math.max(
+            0,
+            10 - alreadyEarned
+        );
+
+        const awarded = Math.min(
+            requestedPoints,
+            availableFeedbackPoints
+        );
+
+        if (awarded <= 0) continue;
+
+        const existingProgress = Math.max(
+            0,
+            Number(development.progressBySkill[skill]) || 0
+        );
+
+        development.progressBySkill[skill] = Math.min(
+            199,
+            existingProgress + awarded
+        );
+
+        development.outcomePointsBySkill[skill] =
+            alreadyEarned + awarded;
+
+        pointsAdded += awarded;
+    }
+
+    return {
+        applied: true,
+        pointsAdded
+    };
+}
+
 function getCoachLearningStyleMultiplier(coach, skill) {
     const personality = coach?.biases?.personality?.name;
 
@@ -657,8 +826,6 @@ export function processWeeklyCoachDevelopment(team, year, week) {
 
     return improvements;
 }
-
-export function ensureTeamCoachingStaff(team) {
 
 /**
  * Creates the flexible coaching group while preserving legacy staff references.
