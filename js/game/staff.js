@@ -165,14 +165,7 @@ export function ensureTeamCoachingStaff(team) {
         return team.coaches;
     }
 
-    const existingUserCoach =
-        (Array.isArray(team.coaches)
-            ? team.coaches.find(coach => coach?.isUserCoach)
-            : null) ||
-        team.userCoachProfile ||
-        {};
-
-        const gmProfile = team.gmProfile || {};
+    const gmProfile = team.gmProfile || {};
     const existingUserCoach =
         (Array.isArray(team.coaches)
             ? team.coaches.find(coach => coach?.isUserCoach)
@@ -285,6 +278,195 @@ export function ensureTeamStaffWorkPlan(team) {
     plan.version = 1;
 
     return plan;
+}
+
+function getAiStaffTaskScore(coach, task) {
+    const ratings = coach?.ratings || {};
+    const rating = key => {
+        const value = Number(ratings[key]);
+        return Number.isFinite(value) ? value : 50;
+    };
+
+    if (task === 'scouting') {
+        return (
+            rating('evalPhysicals') +
+            rating('evalTechnique') +
+            rating('evalCharacter')
+        ) / 3;
+    }
+
+    if (task === 'offensePrep') {
+        return (
+            rating('offSchemeMastery') +
+            rating('gameplanInstinct') +
+            rating('inGameAdjustments')
+        ) / 3;
+    }
+
+    return (
+        rating('defSchemeMastery') +
+        rating('gameplanInstinct') +
+        rating('inGameAdjustments')
+    ) / 3;
+}
+
+function getAiTrainingFocus(team) {
+    const roster = getRosterObjects(team).filter(
+        player => player?.attributes
+    );
+
+    const offensePositions = new Set(['QB', 'RB', 'WR', 'TE', 'OL']);
+    const defensePositions = new Set(['DL', 'LB', 'DB']);
+
+    let offenseTotal = 0;
+    let offenseCount = 0;
+    let defenseTotal = 0;
+    let defenseCount = 0;
+
+    for (const player of roster) {
+        const positions = [...new Set([
+            player.pos,
+            player.favoriteOffensivePosition,
+            player.favoriteDefensivePosition
+        ].filter(position =>
+            offensePositions.has(position) ||
+            defensePositions.has(position)
+        ))];
+
+        const offenseFits = positions.filter(
+            position => offensePositions.has(position)
+        );
+        const defenseFits = positions.filter(
+            position => defensePositions.has(position)
+        );
+
+        if (offenseFits.length > 0) {
+            offenseTotal += Math.max(
+                ...offenseFits.map(position =>
+                    calculateOverall(player, position)
+                )
+            );
+            offenseCount++;
+        }
+
+        if (defenseFits.length > 0) {
+            defenseTotal += Math.max(
+                ...defenseFits.map(position =>
+                    calculateOverall(player, position)
+                )
+            );
+            defenseCount++;
+        }
+    }
+
+    // Do not assign training to a side with no eligible players.
+    if (offenseCount === 0) return 'defense';
+    if (defenseCount === 0) return 'offense';
+
+    const offenseScore =
+        offenseTotal / offenseCount + Math.min(offenseCount, 4) * 4;
+    const defenseScore =
+        defenseTotal / defenseCount + Math.min(defenseCount, 4) * 4;
+
+    return offenseScore <= defenseScore ? 'offense' : 'defense';
+}
+
+/**
+ * Builds the AI team's weekly workload.
+ *
+ * Each NPC coach receives 40 hours:
+ * - 16 hours in their strongest specialty
+ * - 24 hours in player development
+ *
+ * The plan is generated once per team, year, and week.
+ * Player-controlled teams retain their own configured assignments.
+ */
+export function ensureAiStaffWorkPlan(
+    team,
+    gameState,
+    year = gameState?.year,
+    week = gameState?.currentWeek
+) {
+    if (
+        !team ||
+        team.isPlayerControlled ||
+        !Number.isInteger(year) ||
+        !Number.isInteger(week)
+    ) {
+        return null;
+    }
+
+    const weekKey = `${year}:${week}`;
+
+    if (
+        team.aiStaffWorkPlanKey === weekKey &&
+        Array.isArray(team.staffWorkPlan?.assignments)
+    ) {
+        return team.staffWorkPlan;
+    }
+
+    const coaches = ensureTeamCoachingStaff(team)
+        .filter(coach => coach?.id && !coach.isUserCoach)
+        .slice(0, 3);
+
+    if (coaches.length === 0) return null;
+
+    const specialties = [
+        {
+            task: 'scouting',
+            trainingFocus: getAiTrainingFocus(team)
+        },
+        {
+            task: 'offensePrep',
+            trainingFocus: 'offense'
+        },
+        {
+            task: 'defensePrep',
+            trainingFocus: 'defense'
+        }
+    ];
+
+    const availableCoaches = [...coaches];
+    const assignments = [];
+
+    for (const specialty of specialties) {
+        if (availableCoaches.length === 0) break;
+
+        availableCoaches.sort(
+            (a, b) =>
+                getAiStaffTaskScore(b, specialty.task) -
+                getAiStaffTaskScore(a, specialty.task)
+        );
+
+        const coach = availableCoaches.shift();
+
+        assignments.push({
+            coachId: coach.id,
+            task: specialty.task,
+            hours: 16,
+            ...(specialty.task === 'scouting'
+                ? { focus: 'all', maxTargets: 4 }
+                : {})
+        });
+
+        assignments.push({
+            coachId: coach.id,
+            task: 'training',
+            hours: 24,
+            focus: specialty.trainingFocus,
+            maxTargets: 6
+        });
+    }
+
+    team.staffWorkPlan = {
+        version: 1,
+        weeklyHoursPerCoach: WEEKLY_COACH_HOURS,
+        assignments
+    };
+
+    team.aiStaffWorkPlanKey = weekKey;
+
+    return team.staffWorkPlan;
 }
 
 export function generateStaffPool(count = 8) {

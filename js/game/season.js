@@ -17,7 +17,8 @@ import {
 } from './depth_chart.js';
 import {
     initializeTeamStaff, generateStaffPool, checkRetiredPlayerToCoach,
-    aiManageTeamStaff, aiBuildGameplan, aiChooseWeeklyPractice
+    aiManageTeamStaff, aiBuildGameplan, aiChooseWeeklyPractice,
+    ensureAiStaffWorkPlan
 } from './staff.js';
 import {
     evaluatePlayerRetention,
@@ -1188,6 +1189,7 @@ export function processEndOfWeek() {
             }
         }
 
+        ensureAiStaffWorkPlan(t, game, game.year, game.currentWeek);
         processWeeklyPractice(t, game.gameLog);
         processWeeklyScoutingAssignments(t, game, game.year, game.currentWeek);
     });
