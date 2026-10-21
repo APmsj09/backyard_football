@@ -411,6 +411,139 @@ export function advanceTeamScoutingReport(
         evaluatedWeek
     });
 }
+
+/**
+ * Evaluates scouting accuracy when a player becomes known to the team.
+ * Awards development progress to the original report evaluator.
+ *
+ * This function must be called at an actual reveal/acquisition event,
+ * never during scouting or UI rendering.
+ */
+export function recordScoutingReportOutcome(
+    team,
+    player,
+    gameState,
+    year,
+    week
+) {
+    if (
+        !team ||
+        !player?.id ||
+        !player.attributes ||
+        !Number.isInteger(year) ||
+        !Number.isInteger(week)
+    ) {
+        return { evaluatedAttributes: 0, feedbackEvents: 0 };
+    }
+
+    const report = getTeamScoutingReport(team, player.id);
+
+    if (
+        !report ||
+        !Number.isInteger(report.level) ||
+        report.level < 1 ||
+        !report.attributeRanges
+    ) {
+        return { evaluatedAttributes: 0, feedbackEvents: 0 };
+    }
+
+    const evaluatorId = report.evaluatorId;
+
+    const evaluator =
+        team.coaches?.find(
+            coach => String(coach?.id) === String(evaluatorId)
+        ) ||
+        gameState?.availableStaff?.find(
+            coach => String(coach?.id) === String(evaluatorId)
+        ) ||
+        gameState?.teams
+            ?.flatMap(otherTeam => otherTeam?.coaches || [])
+            .find(
+                coach => String(coach?.id) === String(evaluatorId)
+            );
+
+    if (!evaluator) {
+        return { evaluatedAttributes: 0, feedbackEvents: 0 };
+    }
+
+    const skillByCategory = {
+        physical: 'evalPhysicals',
+        technical: 'evalTechnique',
+        mental: 'evalCharacter'
+    };
+
+    let evaluatedAttributes = 0;
+    let feedbackEvents = 0;
+
+    for (const [category, attributeRanges] of Object.entries(
+        report.attributeRanges
+    )) {
+        const coachSkill = skillByCategory[category];
+
+        if (!coachSkill || !attributeRanges) continue;
+
+        let totalNormalizedError = 0;
+        let categoryCount = 0;
+
+        for (const [attribute, range] of Object.entries(attributeRanges)) {
+            const actual = player.attributes?.[category]?.[attribute];
+
+            if (
+                !Number.isFinite(actual) ||
+                !Number.isFinite(range?.low) ||
+                !Number.isFinite(range?.high)
+            ) {
+                continue;
+            }
+
+            const estimate = (range.low + range.high) / 2;
+            const halfWidth = Math.max(
+                1,
+                (range.high - range.low) / 2
+            );
+
+            // Normalize error to the report's uncertainty range.
+            const normalizedError = Math.abs(actual - estimate) / halfWidth;
+
+            totalNormalizedError += normalizedError;
+            categoryCount++;
+        }
+
+        if (categoryCount === 0) continue;
+
+        const averageError = totalNormalizedError / categoryCount;
+
+        // Accurate reports produce positive feedback; poor reports
+        // can still teach the evaluator, but may yield negative quality.
+        const quality = Math.max(
+            -1,
+            Math.min(1, 1.1 - averageError)
+        );
+
+        const result = recordCoachDevelopmentOutcome(
+            evaluator,
+            'scouting',
+            quality,
+            `report-reveal:${team.id}:${player.id}:${category}`,
+            year,
+            week,
+            [coachSkill]
+        );
+
+        evaluatedAttributes += categoryCount;
+
+        if (result?.applied) {
+            feedbackEvents++;
+        }
+    }
+
+    return {
+        evaluatedAttributes,
+        feedbackEvents
+    };
+}
+
+
 const SCOUTING_WORK_FOCI = new Set([
     'watchlist',
     'draft',

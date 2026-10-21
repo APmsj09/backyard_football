@@ -1056,9 +1056,7 @@ function getAiStaffTaskScore(coach, task) {
 }
 
 function getAiGmDelegationAdjustment(gm, task) {
-    const personality = gm?.biases?.personality?.name;
-
-    const preferences = {
+    const personalityPreferences = {
         'Analytical Savant': {
             scouting: 3,
             offensePrep: 3,
@@ -1081,19 +1079,7 @@ function getAiGmDelegationAdjustment(gm, task) {
         }
     };
 
-    const authority = Number(gm?.ratings?.authority);
-    const authorityFactor = Number.isFinite(authority)
-        ? Math.max(0.25, Math.min(1, (authority - 40) / 40))
-        : 0.5;
-
-    const preferredAdjustment =
-        preferences[personality]?.[task] || 0;
-
-    return Math.round(preferredAdjustment * authorityFactor);
-}
-
-function getAiGmDelegationAdjustment(gm, task) {
-    const adjustments = {
+    const archetypePreferences = {
         film_room_rat: {
             scouting: 6,
             offensePrep: 0,
@@ -1126,17 +1112,34 @@ function getAiGmDelegationAdjustment(gm, task) {
         }
     };
 
+    const personality = gm?.biases?.personality?.name;
     const archetypeId = gm?.managementArchetypeId;
-    const adjustment = adjustments[archetypeId]?.[task] || 0;
+
+    const personalityAdjustment =
+        personalityPreferences[personality]?.[task] || 0;
+
+    const archetypeAdjustment =
+        archetypePreferences[archetypeId]?.[task] || 0;
+
+    // Personality and archetype both influence delegation, but their
+    // combined effect remains bounded.
+    const combinedAdjustment = Math.max(
+        -8,
+        Math.min(
+            8,
+            personalityAdjustment + archetypeAdjustment
+        )
+    );
 
     const authority = Number(gm?.ratings?.authority);
+
     const normalizedAuthority = Number.isFinite(authority)
         ? Math.max(0, Math.min(1, (authority - 40) / 40))
         : 0.5;
 
     const influence = 0.5 + normalizedAuthority * 0.5;
 
-    return Math.round(adjustment * influence);
+    return Math.round(combinedAdjustment * influence);
 }
 
 function getAiTrainingFocus(team) {
