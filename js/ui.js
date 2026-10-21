@@ -1554,6 +1554,10 @@ export function switchTab(tabId, gameState) {
                 renderStaffTab(gameState);
             }
 
+            if (foSub === 'staff-market') {
+                renderStaffMarketTab(gameState);
+            }
+
             if (foSub === 'finances') {
                 window.app?.renderStoreTab?.(gameState);
             }
@@ -2178,7 +2182,14 @@ export function renderStaffTab(gameState) {
                     }
                 }
 
-                renderStaffTab(gameState);
+                const marketPane = document.getElementById('fo-pane-staff-market');
+
+                if (marketPane && !marketPane.classList.contains('hidden')) {
+                    renderStaffMarketTab(gameState);
+                } else {
+                    renderStaffTab(gameState);
+                }
+
                 showModal("Contract Finalized 🤝", resultHtml, null, null, null, "Great, Welcome Aboard!");
             } else {
                 showModal("Pitch Rejected ✋", resultHtml, null, null, null, "Understood");
@@ -2972,58 +2983,168 @@ export function renderStaffTab(gameState) {
         `;
     }
 
-    // 3. The Sideline Candidate Market (Available Hires)
-    html += `
-        <div class="bg-white rounded border border-slate-300 p-4 shadow-sm">
-            <h4 class="font-black text-xs uppercase tracking-wider text-slate-800 border-b border-slate-200 pb-2 mb-3">
-                Neighborhood Sideline Market (Available Candidates)
-            </h4>
-            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                ${gameState.availableStaff.map(s => {
-        return `
-                    <div class="bg-slate-50 rounded border border-slate-200 p-3 flex flex-col justify-between text-xs hover:border-slate-400 transition">
+    // Staff candidates are displayed in the separate Staff Free Agents pane.
+    container.innerHTML = html;
+}
+
+export function renderStaffMarketTab(gameState) {
+    const container = document.getElementById('staff-market-container');
+
+    if (!container || !gameState?.playerTeam) return;
+
+    // Initialize the hiring handlers and candidate pool.
+    // renderStaffTab no longer renders the candidate market.
+    renderStaffTab(gameState);
+
+    const team = gameState.playerTeam;
+    const candidates = Array.isArray(gameState.availableStaff)
+        ? gameState.availableStaff
+        : [];
+
+    if (candidates.length === 0) {
+        container.innerHTML = `
+            <section class="bg-white rounded border border-slate-300 p-6 text-center">
+                <h3 class="font-black text-sm uppercase tracking-wide text-slate-800">
+                    Staff Free Agents
+                </h3>
+                <p class="text-xs text-slate-500 mt-2">
+                    No candidates are currently available.
+                </p>
+            </section>`;
+        return;
+    }
+
+    container.innerHTML = `
+        <section class="mb-4 bg-slate-900 text-white rounded p-4 border border-slate-700">
+            <div class="flex flex-wrap justify-between items-center gap-3">
+                <div>
+                    <h3 class="text-lg font-black uppercase tracking-wide text-amber-400">
+                        Staff Free Agents
+                    </h3>
+                    <p class="text-xs text-slate-300 mt-1">
+                        Compare coaching strengths, scouting ability, teaching,
+                        personality, and tactical preferences before making an offer.
+                    </p>
+                </div>
+                <span class="text-xs font-mono bg-slate-800 border border-slate-700 rounded px-3 py-2">
+                    ${candidates.length} candidates available
+                </span>
+            </div>
+        </section>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+            ${candidates.map(s => {
+                const ratings = s.ratings || {};
+                const biases = s.biases || {};
+                const personality = biases.personality || {};
+                const tactical = biases.tactical || {};
+                const scouting = biases.scouting || {};
+
+                const tend = Game.previewCoachTendencies(s, team);
+
+                return `
+                    <article class="bg-white rounded border border-slate-300 p-4 shadow-sm flex flex-col justify-between">
                         <div>
-                            <div class="flex justify-between items-start mb-1">
+                            <div class="flex justify-between items-start gap-2 mb-2">
                                 <div>
-                                    <h5 class="font-bold text-slate-900">${s.name}</h5>
-                                    <span class="text-[9px] text-slate-500">${s.age}yo • ${s.biases.personality.name}</span>
+                                    <h4 class="font-black text-sm text-slate-900">
+                                        ${s.name}
+                                    </h4>
+                                    <p class="text-[10px] text-slate-500 mt-0.5">
+                                        Age ${s.age} · ${personality.name || 'Unknown personality'}
+                                    </p>
                                 </div>
-                                ${s.formerPlayerBio ? `<span class="text-[9px] bg-amber-100 text-amber-900 font-bold px-1 rounded" title="${s.formerPlayerBio}">🎓 Legend</span>` : ''}
+                                ${s.formerPlayerBio ? `
+                                    <span
+                                        class="shrink-0 text-[9px] bg-amber-100 text-amber-900 font-bold px-1.5 py-1 rounded"
+                                        title="${s.formerPlayerBio}">
+                                        🎓 Park Legend
+                                    </span>
+                                ` : ''}
                             </div>
-                            <p class="text-[10px] text-slate-600 italic mb-2">"${s.biases.tactical?.desc || s.biases.scouting?.desc || s.biases.personality.desc}"</p>
-                            
-                            <div class="grid grid-cols-3 gap-1 text-[10px] font-mono text-center mb-3">
-                                <div class="bg-white p-1 rounded border"><span>Tactics</span><br><b>${s.ratings.offSchemeMastery}</b></div>
-                                <div class="bg-white p-1 rounded border"><span>Scout</span><br><b>${s.ratings.evalPhysicals}</b></div>
-                                <div class="bg-white p-1 rounded border"><span>Teach</span><br><b>${s.ratings.teaching}</b></div>
+
+                            <p class="text-[11px] text-slate-600 italic mb-3">
+                                ${tactical.desc || scouting.desc || personality.desc || 'No scouting notes available.'}
+                            </p>
+
+                            <div class="grid grid-cols-2 gap-2 mb-3">
+                                <div class="rounded border border-slate-200 bg-slate-50 p-2">
+                                    <span class="block text-[9px] uppercase text-slate-500">
+                                        Offense Tactics
+                                    </span>
+                                    <b class="text-sm text-slate-900">
+                                        ${ratings.offSchemeMastery ?? '—'}
+                                    </b>
+                                </div>
+                                <div class="rounded border border-slate-200 bg-slate-50 p-2">
+                                    <span class="block text-[9px] uppercase text-slate-500">
+                                        Defense Tactics
+                                    </span>
+                                    <b class="text-sm text-slate-900">
+                                        ${ratings.defSchemeMastery ?? '—'}
+                                    </b>
+                                </div>
+                                <div class="rounded border border-slate-200 bg-slate-50 p-2">
+                                    <span class="block text-[9px] uppercase text-slate-500">
+                                        Scouting
+                                    </span>
+                                    <b class="text-sm text-slate-900">
+                                        ${Math.round((
+                                            (Number(ratings.evalPhysicals) || 0) +
+                                            (Number(ratings.evalTechnique) || 0) +
+                                            (Number(ratings.evalCharacter) || 0)
+                                        ) / 3)}
+                                    </b>
+                                </div>
+                                <div class="rounded border border-slate-200 bg-slate-50 p-2">
+                                    <span class="block text-[9px] uppercase text-slate-500">
+                                        Teaching
+                                    </span>
+                                    <b class="text-sm text-slate-900">
+                                        ${ratings.teaching ?? '—'}
+                                    </b>
+                                </div>
                             </div>
-                            
-                            ${(() => {
-                                const tend = Game.previewCoachTendencies(s, team);
-                                return `
-                                <div class="mt-1 pt-1.5 border-t border-slate-100">
-                                    <span class="text-[9px] font-black uppercase text-slate-500 block mb-1">Expected Playcalling DNA</span>
-                                    <div class="flex gap-2 text-[9px] font-mono text-slate-600">
-                                        <span class="bg-slate-200 px-1 rounded border border-slate-300">Run: <b>${tend.earlyDownTendency}%</b></span>
-                                        <span class="bg-slate-200 px-1 rounded border border-slate-300">Blitz: <b>${tend.defenseAggressiveness}%</b></span>
-                                        <span class="bg-slate-200 px-1 rounded border border-slate-300">4th Dn: <b>${tend.fourthDownBravery}%</b></span>
-                                    </div>
-                                </div>`;
-                            })()}
+
+                            <div class="border-t border-slate-200 pt-2">
+                                <span class="block text-[9px] font-black uppercase tracking-wide text-slate-500 mb-1">
+                                    Expected Playcalling DNA
+                                </span>
+                                <div class="flex flex-wrap gap-1.5 text-[10px] text-slate-700">
+                                    <span class="bg-slate-100 border border-slate-200 rounded px-1.5 py-1">
+                                        Run: <b>${tend.earlyDownTendency}%</b>
+                                    </span>
+                                    <span class="bg-slate-100 border border-slate-200 rounded px-1.5 py-1">
+                                        Blitz: <b>${tend.defenseAggressiveness}%</b>
+                                    </span>
+                                    <span class="bg-slate-100 border border-slate-200 rounded px-1.5 py-1">
+                                        4th Down: <b>${tend.fourthDownBravery}%</b>
+                                    </span>
+                                </div>
+                            </div>
                         </div>
 
-                        <div class="flex gap-1.5 border-t border-slate-200 pt-2">
-                            <button class="flex-1 bg-slate-900 hover:bg-slate-800 text-white font-bold py-1 rounded text-[10px]" onclick="app_hireStaff('${s.id}', 'coach')">Hire Coach</button>
-                            <button class="flex-1 bg-slate-200 hover:bg-slate-300 text-slate-800 font-bold py-1 rounded text-[10px]" onclick="app_hireStaff('${s.id}', 'scout')">Hire Scout</button>
-                            <button class="flex-1 bg-slate-200 hover:bg-slate-300 text-slate-800 font-bold py-1 rounded text-[10px]" onclick="app_hireStaff('${s.id}', 'trainer')">Hire Trainer</button>
+                        <div class="grid grid-cols-3 gap-1.5 border-t border-slate-200 pt-3 mt-3">
+                            <button
+                                class="bg-slate-900 hover:bg-slate-800 text-white font-bold py-2 rounded text-[10px]"
+                                onclick="app_hireStaff('${s.id}', 'coach')">
+                                Hire Coach
+                            </button>
+                            <button
+                                class="bg-slate-200 hover:bg-slate-300 text-slate-800 font-bold py-2 rounded text-[10px]"
+                                onclick="app_hireStaff('${s.id}', 'scout')">
+                                Hire Scout
+                            </button>
+                            <button
+                                class="bg-slate-200 hover:bg-slate-300 text-slate-800 font-bold py-2 rounded text-[10px]"
+                                onclick="app_hireStaff('${s.id}', 'trainer')">
+                                Hire Trainer
+                            </button>
                         </div>
-                    </div>`;
-    }).join('')}
-            </div>
+                    </article>`;
+            }).join('')}
         </div>
     `;
-
-    container.innerHTML = html;
 }
 
 let rosterSortCol = 'ovr';
