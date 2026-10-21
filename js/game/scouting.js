@@ -862,13 +862,55 @@ const DEFENSE_PREP_FOUNDATION_PLAYS = [
 
 const MAX_WEEKLY_PREP_POINTS = 12;
 
+function getScheduledOpponentId(team, gameState, week) {
+    if (
+        !team?.id ||
+        !Array.isArray(gameState?.teams) ||
+        !Array.isArray(gameState?.schedule) ||
+        !Number.isInteger(week) ||
+        week < 0
+    ) {
+        return null;
+    }
+
+    // The schedule is flattened in weekly groups.
+    // Keep the indexing consistent with simulateHistoricalSeason().
+    const gamesPerWeek = Math.max(
+        1,
+        Math.floor(gameState.teams.length / 2)
+    );
+
+    const startIndex = week * gamesPerWeek;
+    const endIndex = startIndex + gamesPerWeek;
+
+    const match = gameState.schedule
+        .slice(startIndex, endIndex)
+        .find(entry =>
+            entry?.home?.id != null &&
+            entry?.away?.id != null &&
+            (
+                String(entry.home.id) === String(team.id) ||
+                String(entry.away.id) === String(team.id)
+            )
+        );
+
+    if (!match) return null;
+
+    if (String(match.home.id) === String(team.id)) {
+        return match.away.id;
+    }
+
+    return match.home.id;
+}
+
 function applyWeeklyGamePreparation(
     team,
     coach,
     assignment,
     allocatedHours,
     year,
-    week
+    week,
+    gameState
 ) {
     if (!team || !coach || !Number.isFinite(allocatedHours) || allocatedHours <= 0) {
         return 0;
@@ -945,8 +987,16 @@ function applyWeeklyGamePreparation(
         preparation.offensePoints = currentPoints + pointsAdded;
         preparation.offenseHours = (preparation.offenseHours || 0) + allocatedHours;
     } else {
+        const scheduledOpponentId = getScheduledOpponentId(
+            team,
+            gameState,
+            week
+        );
+
         const opponentId = assignment.opponentTeamId ??
-            assignment.targetOpponentId;
+            assignment.targetOpponentId ??
+            scheduledOpponentId;
+
         const opponentKey = opponentId == null ? '*' : String(opponentId);
 
         const opponentPrep = preparation.defenseByOpponent[opponentKey] || {
@@ -1175,7 +1225,8 @@ export function processWeeklyScoutingAssignments(
                 assignment,
                 allocatedHours,
                 year,
-                week
+                week,
+                gameState
             );
 
             hoursUsed += allocatedHours;
