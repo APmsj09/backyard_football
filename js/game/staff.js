@@ -172,13 +172,45 @@ export function ensureTeamCoachingStaff(team) {
         team.userCoachProfile ||
         {};
 
+        const gmProfile = team.gmProfile || {};
+    const existingUserCoach =
+        (Array.isArray(team.coaches)
+            ? team.coaches.find(coach => coach?.isUserCoach)
+            : null) ||
+        team.userCoachProfile ||
+        {};
+
+    const expertisePositions = Array.isArray(gmProfile.expertisePositions)
+        ? [...gmProfile.expertisePositions]
+        : [];
+
+    const scoutingAccuracyBonus = Math.max(
+        -0.25,
+        Math.min(
+            0.35,
+            (Number(gmProfile.bonuses?.scoutingAccuracy) || 0) +
+            (Number(gmProfile.expertiseScoutingBonus) || 0)
+        )
+    );
+
     const userCoach = {
         ...existingUserCoach,
         id: existingUserCoach.id || `user-coach-${team.id}`,
-        name: existingUserCoach.name || 'You',
+        name: gmProfile.name || existingUserCoach.name || 'You',
         role: 'user-coach',
         isUserCoach: true,
         teamId: team.id,
+        gmBackgroundId: gmProfile.backgroundId || null,
+        gmArchetypeId: gmProfile.archetypeId || null,
+        gmExpertiseId: gmProfile.expertiseId || null,
+        expertisePositions,
+        scoutingAccuracyBonus,
+        preferredOffense: gmProfile.offensiveIdentity ||
+            existingUserCoach.preferredOffense ||
+            null,
+        preferredDefense: gmProfile.defensiveIdentity ||
+            existingUserCoach.preferredDefense ||
+            null,
         ratings: {
             evalPhysicals: 50,
             evalTechnique: 50,

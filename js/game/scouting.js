@@ -28,17 +28,47 @@ function stableNoise(seed) {
     return ((hash >>> 0) / 4294967295) * 2 - 1;
 }
 
-function getEvaluatorProfile(evaluator) {
+function getEvaluatorProfile(evaluator, team, player) {
     const r = evaluator?.ratings || {};
     const physical = clamp(Number(r.evalPhysicals ?? 50), 1, 99);
     const technique = clamp(Number(r.evalTechnique ?? 50), 1, 99);
     const character = clamp(Number(r.evalCharacter ?? 50), 1, 99);
+
+    // GM expertise applies only when the user-coach performs the evaluation.
+    const gmProfile = evaluator?.isUserCoach
+        ? team?.gmProfile
+        : null;
+
+    const rawGeneralBonus = Number(gmProfile?.bonuses?.scoutingAccuracy);
+    const generalAccuracyBonus = Number.isFinite(rawGeneralBonus)
+        ? rawGeneralBonus
+        : 0;
+
+    const expertisePositions = Array.isArray(gmProfile?.expertisePositions)
+        ? gmProfile.expertisePositions
+        : [];
+
+    const rawExpertiseBonus = Number(gmProfile?.expertiseScoutingBonus);
+    const hasRelevantExpertise = Boolean(
+        player?.pos &&
+        expertisePositions.includes(player.pos)
+    );
+
+    const expertiseAccuracyBonus =
+        hasRelevantExpertise && Number.isFinite(rawExpertiseBonus)
+            ? rawExpertiseBonus
+            : 0;
 
     return {
         physical,
         technique,
         character,
         overall: (physical + technique + character) / 3,
+        accuracyBonus: clamp(
+            generalAccuracyBonus + expertiseAccuracyBonus,
+            -0.25,
+            0.35
+        ),
         bias: evaluator?.biases?.scouting?.name ||
             evaluator?.scoutingBias ||
             'Objective Scout'
@@ -72,7 +102,16 @@ function buildAttributeRanges(team, player, evaluator, level, profile) {
                 radius *= category === 'technical' ? 0.85 : 1.1;
             }
 
-            radius = Math.max(2, Math.round(radius));
+            const accuracyMultiplier = clamp(
+                1 - profile.accuracyBonus,
+                0.65,
+                1.25
+            );
+
+            radius = Math.max(
+                2,
+                Math.round(radius * accuracyMultiplier)
+            );
 
             let bias = 0;
 
@@ -286,7 +325,7 @@ export function advanceTeamScoutingReport(
     if (player.teamId === team.id || team.roster?.includes(player.id)) return false;
 
     const previous = getTeamScoutingReport(team, player.id);
-    const profile = getEvaluatorProfile(evaluator);
+    const profile = getEvaluatorProfile(evaluator, team, player);
     const productivity = 0.75 + profile.overall / 200;
 
     const previousProgress = Number.isFinite(Number(previous?.progressPoints))
@@ -348,7 +387,9 @@ export function advanceTeamScoutingReport(
     );
 
     const confidence = clamp(
-        CONFIDENCE[level] + (profile.overall - 50) / 1000,
+        CONFIDENCE[level] +
+            (profile.overall - 50) / 1000 +
+            profile.accuracyBonus * 0.15,
         0.2,
         0.94
     );
