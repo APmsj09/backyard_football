@@ -2339,6 +2339,103 @@ export function renderStaffTab(gameState) {
             ['coverage', 'Coverage']
         ];
 
+        const getPreparationPlayKeys = (task, targetTeam = team) => {
+            const isOffense = task === 'offensePrep';
+            if (!isOffense && task !== 'defensePrep') return [];
+
+            const foundationKeys = isOffense
+                ? [
+                    'Uni_InsideZone',
+                    'Uni_StretchRight',
+                    'Uni_QuickSlants',
+                    'Uni_FourVerts'
+                ]
+                : [
+                    'Cover_2_Zone_Base',
+                    'Cover_1_Robber',
+                    'Man_Blitz_Base',
+                    'GoalLine_RunStuff'
+                ];
+
+            const installedKeys = isOffense
+                ? targetTeam?.gameplan?.installedOffense
+                : targetTeam?.gameplan?.installedDefense;
+
+            return [
+                ...new Set([
+                    ...foundationKeys,
+                    ...(Array.isArray(installedKeys)
+                        ? installedKeys.slice(0, 8)
+                        : [])
+                ])
+            ];
+        };
+
+        const getDefaultPreparationPlayKeys = (
+            task,
+            targetTeam = team
+        ) => {
+            const available = getPreparationPlayKeys(task, targetTeam);
+            const isOffense = task === 'offensePrep';
+
+            if (!available.length) return [];
+
+            const installedKeys = isOffense
+                ? targetTeam?.gameplan?.installedOffense
+                : targetTeam?.gameplan?.installedDefense;
+
+            const foundationKeys = isOffense
+                ? [
+                    'Uni_InsideZone',
+                    'Uni_StretchRight',
+                    'Uni_QuickSlants',
+                    'Uni_FourVerts'
+                ]
+                : [
+                    'Cover_2_Zone_Base',
+                    'Cover_1_Robber',
+                    'Man_Blitz_Base',
+                    'GoalLine_RunStuff'
+                ];
+
+            const priorityInstalled = [
+                ...new Set(
+                    (Array.isArray(installedKeys) ? installedKeys : [])
+                        .slice(0, 8)
+                        .filter(key => available.includes(key))
+                )
+            ].slice(0, 4);
+
+            const foundationFallback = foundationKeys
+                .filter(key =>
+                    available.includes(key) &&
+                    !priorityInstalled.includes(key)
+                )
+                .slice(0, 4 - priorityInstalled.length);
+
+            return [...priorityInstalled, ...foundationFallback];
+        };
+
+        const getPreparationPlayOptions = (task, targetTeam = team) => {
+            const isOffense = task === 'offensePrep';
+            const playbook = isOffense
+                ? offensivePlaybook
+                : defensivePlaybook;
+
+            const installedKeys = isOffense
+                ? targetTeam?.gameplan?.installedOffense || []
+                : targetTeam?.gameplan?.installedDefense || [];
+
+            return getPreparationPlayKeys(task, targetTeam).map(key => [
+                key,
+                `${playbook[key]?.name || key} (${
+                    installedKeys.includes(key)
+                        ? 'Installed'
+                        : 'Foundation'
+                })`
+            ]);
+        };
+
         const workHours = assignment =>
             Math.max(0, Number(assignment.hours) || 0);
 
@@ -2449,11 +2546,11 @@ export function renderStaffTab(gameState) {
                 if (!Object.prototype.hasOwnProperty.call(taskLabels, value)) {
                     return;
                 }
-
                 assignment.task = value;
                 assignment.focus = 'all';
                 delete assignment.skill;
                 delete assignment.opponentTeamId;
+                delete assignment.playKeys;
             } else if (field === 'hours') {
                 const requestedHours = Number(value);
 
@@ -2535,6 +2632,84 @@ export function renderStaffTab(gameState) {
 
             saveGameState();
             renderStaffTab(gs);
+                };
+
+        window.app_toggleStaffWorkPlay = (index, playKey, checked) => {
+            const gs = getGameState();
+            const currentTeam = gs?.playerTeam;
+            const plan = currentTeam?.staffWorkPlan;
+
+            if (
+                !plan ||
+                !Array.isArray(plan.assignments) ||
+                !Number.isInteger(index) ||
+                index < 0 ||
+                index >= plan.assignments.length
+            ) {
+                return;
+            }
+
+            const assignment = plan.assignments[index];
+
+            if (
+                !['offensePrep', 'defensePrep'].includes(assignment.task)
+            ) {
+                return;
+            }
+
+            const allowedKeys = getPreparationPlayKeys(
+                assignment.task,
+                currentTeam
+            );
+
+            if (!allowedKeys.includes(playKey)) return;
+
+            const selected = new Set(
+                Array.isArray(assignment.playKeys)
+                    ? assignment.playKeys
+                    : getDefaultPreparationPlayKeys(
+                        assignment.task,
+                        currentTeam
+                    )
+            );
+
+            if (checked) selected.add(playKey);
+            else selected.delete(playKey);
+
+            assignment.playKeys = allowedKeys.filter(
+                key => selected.has(key)
+            );
+
+            saveGameState();
+            renderStaffTab(gs);
+        };
+
+        window.app_resetStaffWorkPlays = index => {
+            const gs = getGameState();
+            const plan = gs?.playerTeam?.staffWorkPlan;
+
+            if (
+                !plan ||
+                !Array.isArray(plan.assignments) ||
+                !Number.isInteger(index) ||
+                index < 0 ||
+                index >= plan.assignments.length
+            ) {
+                return;
+            }
+
+            const assignment = plan.assignments[index];
+
+            if (
+                !['offensePrep', 'defensePrep'].includes(assignment.task)
+            ) {
+                return;
+            }
+
+            delete assignment.playKeys;
+
+            saveGameState();
+            renderStaffTab(gs);
         };
 
         const totalRequestedHours = workPlan.assignments.reduce(
@@ -2603,6 +2778,15 @@ export function renderStaffTab(gameState) {
                         const focusList = focusOptions[task] || [];
                         const showTargets = task === 'scouting' ||
                             task === 'training';
+
+                        const prepPlayOptions =
+                            getPreparationPlayOptions(task);
+
+                        const selectedPrepPlayKeys = new Set(
+                            Array.isArray(assignment.playKeys)
+                                ? assignment.playKeys
+                                : getDefaultPreparationPlayKeys(task)
+                        );
 
                         const hoursOptions = Array.from(
                             { length: 21 },
@@ -2710,7 +2894,7 @@ export function renderStaffTab(gameState) {
                                     </label>
                                 ` : '<div></div>'}
 
-                                <div class="flex items-end gap-2">
+                                                                <div class="flex items-end gap-2">
                                     <label class="block flex-1 min-w-0">
                                         <span class="block text-[9px] font-bold uppercase text-slate-500 mb-1">Hours</span>
                                         <select class="w-full text-xs border border-slate-300 rounded p-2 bg-white"
@@ -2732,6 +2916,45 @@ export function renderStaffTab(gameState) {
                                         ×
                                     </button>
                                 </div>
+                                ${prepPlayOptions.length > 0 ? `
+                                    <div class="md:col-span-2 xl:col-span-6 rounded border border-slate-200 bg-slate-50 p-3">
+                                        <div class="flex flex-wrap justify-between items-start gap-2 mb-2">
+                                            <div>
+                                                <span class="block text-[10px] font-bold uppercase tracking-wide text-slate-700">
+                                                    Plays to Emphasize
+                                                </span>
+                                                <p class="text-[10px] text-slate-500 mt-1">
+                                                    Select the plays this coach should prepare.
+                                                    Changes are saved immediately.
+                                                </p>
+                                            </div>
+                                            <button
+                                                type="button"
+                                                class="text-[10px] font-bold text-blue-700 hover:text-blue-900 underline"
+                                                onclick="app_resetStaffWorkPlays(${index})">
+                                                Reset to automatic
+                                            </button>
+                                        </div>
+                                        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                                            ${prepPlayOptions.map(([key, label]) => `
+                                                <label class="flex items-start gap-2 rounded border border-slate-200 bg-white p-2 cursor-pointer">
+                                                    <input
+                                                        type="checkbox"
+                                                        class="mt-0.5 accent-blue-600"
+                                                        value="${key}"
+                                                        ${selectedPrepPlayKeys.has(key) ? 'checked' : ''}
+                                                        onchange="app_toggleStaffWorkPlay(${index}, '${key}', this.checked)">
+                                                    <span class="text-[10px] text-slate-700">${label}</span>
+                                                </label>
+                                            `).join('')}
+                                        </div>
+                                        ${selectedPrepPlayKeys.size === 0 ? `
+                                            <p class="text-[10px] text-amber-700 mt-2">
+                                                No plays selected: preparation score can accumulate, but no play mastery will increase.
+                                            </p>
+                                        ` : ''}
+                                    </div>
+                                ` : ''}
                             </div>`;
                     }).join('')}
                 </div>

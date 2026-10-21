@@ -970,8 +970,32 @@ function applyWeeklyGamePreparation(
     ]);
 
     const assignedPlayKeys = Array.isArray(assignment.playKeys)
-        ? assignment.playKeys.filter(key => availablePlays.has(key))
-        : [...availablePlays];
+        ? [...new Set(
+            assignment.playKeys.filter(key => availablePlays.has(key))
+        )]
+        : (() => {
+            // Focus preparation on a small group of priority plays.
+            const priorityInstalled = [
+                ...new Set(
+                    installedPlays
+                        .slice(0, 8)
+                        .filter(key => availablePlays.has(key))
+                )
+            ].slice(0, 4);
+
+            // Use foundation plays to fill any remaining slots.
+            const foundationFallback = foundationPlays
+                .filter(key =>
+                    availablePlays.has(key) &&
+                    !priorityInstalled.includes(key)
+                )
+                .slice(0, Math.max(0, 4 - priorityInstalled.length));
+
+            return [
+                ...priorityInstalled,
+                ...foundationFallback
+            ];
+        })();
 
     // Hours produce a modest preparation score, influenced by coaching skill.
     const rawPoints = allocatedHours * 0.4 * effectiveness;
@@ -1020,9 +1044,9 @@ function applyWeeklyGamePreparation(
         preparation.defenseByOpponent[opponentKey] = opponentPrep;
     }
 
-    // Familiarity directly affects offensive play selection and execution.
-    // Defensive mastery is stored as well; the next engine patch will consume
-    // the opponent-specific preparation score during defensive play-calling.
+    // Preparation improves familiarity with the focused play set.
+    // Offensive mastery influences play selection and execution.
+    // Defensive preparation is also consumed by defensive play-calling.
     if (pointsAdded > 0 && assignedPlayKeys.length > 0) {
         const masteryGain = Math.min(4, pointsAdded * 0.6);
 
