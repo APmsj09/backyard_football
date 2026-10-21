@@ -18,7 +18,8 @@ import {
 import {
     initializeTeamStaff, generateStaffPool, checkRetiredPlayerToCoach,
     aiManageTeamStaff, aiBuildGameplan, aiChooseWeeklyPractice,
-    ensureAiStaffWorkPlan, getTeamCoachingSpecialist
+    ensureAiStaffWorkPlan, getTeamCoachingSpecialist,
+    processWeeklyCoachDevelopment
 } from './staff.js';
 import {
     evaluatePlayerRetention,
@@ -1192,6 +1193,13 @@ export function processEndOfWeek() {
         ensureAiStaffWorkPlan(t, game, game.year, game.currentWeek);
         processWeeklyPractice(t, game.gameLog);
         processWeeklyScoutingAssignments(t, game, game.year, game.currentWeek);
+
+        // Resolve coach skill development once for this team and week.
+        processWeeklyCoachDevelopment(
+            t,
+            game.year,
+            game.currentWeek
+        );
     });
 
     processWeeklyPlayerGrowth();
@@ -1645,13 +1653,51 @@ export function executeAICutDowns() {
         if (team.isPlayerControlled || !team.roster || team.roster.length <= limit) return;
 
         const rosterObjs = getRosterObjects(team);
-        const coach = team.staff?.coach || team.coach;
-        const scout = team.staff?.scout;
+
+        // Use the flexible coaching group for roster evaluation.
+        const coach = getAssignedCoachForTask(team, 'general') ||
+            getTeamCoachingSpecialist(team, 'general');
+
+        const scout = getAssignedCoachForTask(team, 'scouting') ||
+            getTeamCoachingSpecialist(team, 'scouting');
+
         const personality = coach?.biases?.personality?.name;
         const gmDirective = team.gameplan?.gmDirective || 'COACH_AUTONOMY';
 
-        // Scout evaluation accuracy adds realistic Fog of War
-        const scoutAcc = scout ? ((scout.ratings?.evalTechnique || 50) + (scout.ratings?.evalPhysicals || 50)) / 200 : 0.5;
+        // Scouting hours improve the accuracy of roster evaluations.
+        const scoutingHours = (
+            team.staffWorkPlan?.assignments || []
+        ).reduce((total, assignment) => {
+            if (assignment?.task !== 'scouting') return total;
+
+            const hours = Number(assignment.hours);
+
+            return total + (
+                Number.isFinite(hours)
+                    ? Math.max(0, hours)
+                    : 0
+            );
+        }, 0);
+
+        const baseScoutAccuracy = scout
+            ? (
+                (scout.ratings?.evalTechnique ?? 50) +
+                (scout.ratings?.evalPhysicals ?? 50)
+            ) / 200
+            : 0.5;
+
+        // Full scouting effort is reached at 12 assigned hours.
+        // Accuracy remains bounded to preserve uncertainty.
+        const scoutingEffortMultiplier =
+            0.7 + 0.3 * Math.min(1, scoutingHours / 12);
+
+        const scoutAcc = Math.max(
+            0.25,
+            Math.min(
+                0.85,
+                baseScoutAccuracy * scoutingEffortMultiplier
+            )
+        );
 
         // Personality-driven roster valuation
         const getCutEvaluationScore = (p) => {
@@ -1800,6 +1846,89 @@ export function aiManageRoster(team) {
     aiSetDepthChart(team);
 }
 
+function getAssignedCoachForTask(team, task) {
+    const coaches = Array.isArray(team?.coaches)
+        ? team.coaches.filter(coach => coach?.id != null)
+        : [];
+
+    const taskSkills = {
+        training: [
+            'teaching',
+            'practiceDiscipline',
+            'conditioning'
+        ],
+        scouting: [
+            'evalPhysicals',
+            'evalTechnique',
+            'evalCharacter'
+        ],
+        offensePrep: [
+            'offSchemeMastery',
+            'gameplanInstinct',
+            'inGameAdjustments'
+        ],
+        defensePrep: [
+            'defSchemeMastery',
+            'gameplanInstinct',
+            'inGameAdjustments'
+        ]
+    };
+
+    const skills = taskSkills[task] || [];
+
+    const getSkillScore = coach => {
+        if (skills.length === 0) return 50;
+
+        const ratings = coach.ratings || {};
+
+        return skills.reduce((sum, key) => {
+            const value = Number(ratings[key]);
+            return sum + (
+                Number.isFinite(value)
+                    ? Math.max(0, Math.min(100, value))
+                    : 50
+            );
+        }, 0) / skills.length;
+    };
+
+    const hoursByCoach = new Map();
+
+    for (const assignment of team?.staffWorkPlan?.assignments || []) {
+        if (
+            assignment?.task !== task ||
+            assignment.coachId == null
+        ) {
+            continue;
+        }
+
+        const hours = Number(assignment.hours);
+
+        if (!Number.isFinite(hours) || hours <= 0) continue;
+
+        const id = String(assignment.coachId);
+
+        hoursByCoach.set(
+            id,
+            (hoursByCoach.get(id) || 0) + hours
+        );
+    }
+
+    const assignedCoach = coaches
+        .filter(coach => (hoursByCoach.get(String(coach.id)) || 0) > 0)
+        .sort((a, b) => {
+            const hoursDifference =
+                (hoursByCoach.get(String(b.id)) || 0) -
+                (hoursByCoach.get(String(a.id)) || 0);
+
+            return hoursDifference ||
+                getSkillScore(b) - getSkillScore(a);
+        })[0];
+
+    return assignedCoach ||
+        getTeamCoachingSpecialist(team, task) ||
+        null;
+}
+
 export function developPlayer(player, team = null) {
     if (!player || !player.attributes) return { player, improvements: [] };
     const developmentReport = { player, improvements: [] };
@@ -1828,9 +1957,21 @@ export function developPlayer(player, team = null) {
     else if (snaps >= 100) experienceMod = 1.20; // Active rotational contributor
     else if (snaps < 25) experienceMod = 0.65;   // Bench rot penalty
 
-    const coachTeaching = team?.staff?.coach?.ratings?.teaching || 50;
-    const coachDiscipline = team?.staff?.coach?.ratings?.practiceDiscipline || 50;
-    const teachingMod = 0.85 + ((coachTeaching / 100) * 0.25) + ((coachDiscipline / 100) * 0.15);
+    const developmentCoach = getAssignedCoachForTask(
+        team,
+        'training'
+    );
+
+    const coachTeaching =
+        developmentCoach?.ratings?.teaching ?? 50;
+
+    const coachDiscipline =
+        developmentCoach?.ratings?.practiceDiscipline ?? 50;
+
+    const teachingMod =
+        0.85 +
+        ((coachTeaching / 100) * 0.25) +
+        ((coachDiscipline / 100) * 0.15);
 
     // =========================================================================
     // 1. IMPACTFUL BIOLOGICAL MATURATION (Closing the Gap to Adult Ceiling)
@@ -1888,11 +2029,12 @@ export function developPlayer(player, team = null) {
         const ceilingWgt = player.talentAttributes?.physical?.weight || currWgt + 15;
         const currSpd = player.attributes.physical?.speed || 50;
         const currAgi = player.attributes.physical?.agility || 50;
-        const coachDiscipline = team?.staff?.coach?.ratings?.practiceDiscipline || 50;
-
         // Transition Success Score (Ethic + Frame Compatibility + Discipline)
         const frameHeadroom = ceilingWgt - currWgt;
-        const dedicationScore = (ethic * 0.45) + (coachDiscipline * 0.35) + (Math.random() * 20);
+        const dedicationScore =
+            (ethic * 0.45) +
+            (coachDiscipline * 0.35) +
+            (Math.random() * 20);
 
         const currStr = player.attributes.physical?.strength || 50;
         const isNaturallyBig = currWgt >= 168 && currStr >= 54;
@@ -2111,9 +2253,64 @@ export function developPlayer(player, team = null) {
 export function processWeeklyPractice(team, gameLog = null) {
     if (!team || !team.gameplan) return;
 
-    const coach = team.staff?.coach;
-    const discipline = coach?.ratings?.practiceDiscipline || 50;
-    const teaching = coach?.ratings?.teaching || 50;
+    const coaches = Array.isArray(team.coaches)
+        ? team.coaches.filter(coach => coach?.id != null)
+        : [];
+
+    const trainingHours = new Map();
+
+    for (const assignment of team.staffWorkPlan?.assignments || []) {
+        if (
+            assignment?.task !== 'training' ||
+            assignment.coachId == null
+        ) {
+            continue;
+        }
+
+        const hours = Number(assignment.hours);
+
+        if (!Number.isFinite(hours) || hours <= 0) continue;
+
+        const coachId = String(assignment.coachId);
+
+        trainingHours.set(
+            coachId,
+            (trainingHours.get(coachId) || 0) + hours
+        );
+    }
+
+    const getTrainingSkill = coach => {
+        const ratings = coach?.ratings || {};
+
+        const values = [
+            ratings.teaching,
+            ratings.practiceDiscipline,
+            ratings.conditioning
+        ].map(value => {
+            const number = Number(value);
+            return Number.isFinite(number) ? number : 50;
+        });
+
+        return values.reduce((sum, value) => sum + value, 0) /
+            values.length;
+    };
+
+    const assignedTrainingCoach = coaches
+        .filter(coach => (trainingHours.get(String(coach.id)) || 0) > 0)
+        .sort((a, b) => {
+            const hoursDifference =
+                (trainingHours.get(String(b.id)) || 0) -
+                (trainingHours.get(String(a.id)) || 0);
+
+            return hoursDifference ||
+                getTrainingSkill(b) - getTrainingSkill(a);
+        })[0];
+
+    const coach = assignedTrainingCoach ||
+        getTeamCoachingSpecialist(team, 'training');
+
+    const discipline = coach?.ratings?.practiceDiscipline ?? 50;
+    const teaching = coach?.ratings?.teaching ?? 50;
     const mastery = team.gameplan.mastery = team.gameplan.mastery || {};
     const plan = team.gameplan.weeklyPractice || 'chalk_talk';
     const roster = getRosterObjects(team);

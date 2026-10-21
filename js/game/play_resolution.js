@@ -260,7 +260,52 @@ export function determinePlayCall(offense, defense, down, yardsToGo, ballOn, sco
     if (!offense || !offense.formations) return 'Uni_InsideZone';
 
     const formationName = offense.formations.offense;
-    const coach = offense.coach;
+    const staffCoaches = Array.isArray(offense.coaches)
+        ? offense.coaches.filter(coach => coach?.id != null)
+        : [];
+
+    const assignedHours = new Map();
+
+    for (const assignment of offense.staffWorkPlan?.assignments || []) {
+        if (
+            assignment?.task !== 'offensePrep' ||
+            !assignment.coachId
+        ) {
+            continue;
+        }
+
+        const hours = Number(assignment.hours);
+        if (!Number.isFinite(hours) || hours <= 0) continue;
+
+        const id = String(assignment.coachId);
+        assignedHours.set(id, (assignedHours.get(id) || 0) + hours);
+    }
+
+    const offenseSkill = coach => {
+        const ratings = coach?.ratings || {};
+        return (
+            (Number(ratings.offSchemeMastery) || 50) +
+            (Number(ratings.gameplanInstinct) || 50) +
+            (Number(ratings.inGameAdjustments) || 50)
+        ) / 3;
+    };
+
+    const assignedOffenseCoach = staffCoaches
+        .filter(coach => (assignedHours.get(String(coach.id)) || 0) > 0)
+        .sort((a, b) => {
+            const hoursDifference =
+                (assignedHours.get(String(b.id)) || 0) -
+                (assignedHours.get(String(a.id)) || 0);
+
+            return hoursDifference || offenseSkill(b) - offenseSkill(a);
+        })[0];
+
+    const coach = assignedOffenseCoach ||
+        [...staffCoaches].sort(
+            (a, b) => offenseSkill(b) - offenseSkill(a)
+        )[0] ||
+        null;
+
     const recentPlays = offense.recentPlayHistory || [];
 
     const formationPlays = Object.keys(offensivePlaybook).filter(key => {
@@ -422,7 +467,7 @@ export function determinePlayCall(offense, defense, down, yardsToGo, ballOn, sco
         // ======================================================
         // 2. SITUATIONAL FOOTBALL (TIERED BY COACH INSTINCT & BIAS)
         // ======================================================
-        const coachInstinct = offense.staff?.coach?.ratings?.gameplanInstinct || 50;
+        const coachInstinct = coach?.ratings?.gameplanInstinct || 50;
         const coachIQFactor = coachInstinct / 100; // 0.0 to 1.0 scale
         
         // --- LEVEL 1: BASIC FOOTBALL LOGIC (Universal) ---
@@ -801,6 +846,80 @@ export function determineDefensivePlayCall(defense, offense, down, yardsToGo, ba
     const sit = defense.gameplan?.situational || { defenseAggressiveness: 50 };
     const aggro = (sit.defenseAggressiveness || 50) / 100; // 0.0 to 1.0
 
+    const defensiveCoaches = Array.isArray(defense.coaches)
+        ? defense.coaches.filter(coach => coach?.id != null)
+        : [];
+
+    const getDefensiveCoachSkill = coach => {
+        const ratings = coach?.ratings || {};
+
+        const values = [
+            ratings.defSchemeMastery,
+            ratings.gameplanInstinct,
+            ratings.inGameAdjustments
+        ].map(value => {
+            const number = Number(value);
+            return Number.isFinite(number)
+                ? Math.max(0, Math.min(100, number))
+                : 50;
+        });
+
+        return values.reduce((sum, value) => sum + value, 0) /
+            values.length;
+    };
+
+    const defensivePrepHours = new Map();
+
+    for (const assignment of defense.staffWorkPlan?.assignments || []) {
+        if (
+            assignment?.task !== 'defensePrep' ||
+            assignment.coachId == null
+        ) {
+            continue;
+        }
+
+        const hours = Number(assignment.hours);
+
+        if (!Number.isFinite(hours) || hours <= 0) continue;
+
+        const coachId = String(assignment.coachId);
+
+        defensivePrepHours.set(
+            coachId,
+            (defensivePrepHours.get(coachId) || 0) + hours
+        );
+    }
+
+    const assignedDefensiveCoach = [...defensiveCoaches]
+        .filter(coach =>
+            (defensivePrepHours.get(String(coach.id)) || 0) > 0
+        )
+        .sort((a, b) => {
+            const hourDifference =
+                (defensivePrepHours.get(String(b.id)) || 0) -
+                (defensivePrepHours.get(String(a.id)) || 0);
+
+            return hourDifference ||
+                getDefensiveCoachSkill(b) - getDefensiveCoachSkill(a);
+        })[0];
+
+    const defensiveCoach = assignedDefensiveCoach ||
+        [...defensiveCoaches].sort(
+            (a, b) =>
+                getDefensiveCoachSkill(b) -
+                getDefensiveCoachSkill(a)
+        )[0] ||
+        null;
+
+    const defensiveCoachSkill = defensiveCoach
+        ? getDefensiveCoachSkill(defensiveCoach)
+        : 50;
+
+    // A 50-rated coach has a neutral factor. The effect is bounded
+    // so coaching quality influences decisions without dominating them.
+    const defensiveDecisionFactor =
+        0.75 + defensiveCoachSkill / 200;
+
     let scoredPlays = availablePlays.map(key => {
         const play = defensivePlaybook[key];
         const tags = play.tags || [];
@@ -817,14 +936,20 @@ export function determineDefensivePlayCall(defense, offense, down, yardsToGo, ba
             score -= (aggro - 0.5) * 40; // Low aggro heavily boosts prevent/safe zones
         }
 
-        // Opponent-specific adjustments
-        if (isRunHeavyThreat && tags.includes('runStop')) score += 15;
+        // Opponent-specific adjustments scale with defensive coaching quality.
+        if (isRunHeavyThreat && tags.includes('runStop')) {
+            score += 15 * defensiveDecisionFactor;
+        }
 
-        if (isPassHeavyThreat &&
-            (tags.includes('cover2') ||
-             tags.includes('double-team') ||
-             tags.includes('cover4'))) {
-            score += 15;
+        if (
+            isPassHeavyThreat &&
+            (
+                tags.includes('cover2') ||
+                tags.includes('double-team') ||
+                tags.includes('cover4')
+            )
+        ) {
+            score += 15 * defensiveDecisionFactor;
         }
 
         // Staff preparation improves the chance of selecting a suitable call.
@@ -851,7 +976,7 @@ export function determineDefensivePlayCall(defense, offense, down, yardsToGo, ba
                 preparedForPass ||
                 preparedForSituation
             ) {
-                score += defensivePrepPoints * 0.6;
+                score += defensivePrepPoints * 0.6 * defensiveDecisionFactor;
             }
         }
 

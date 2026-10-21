@@ -358,7 +358,7 @@ function promptCoachCreation(teamId) {
                 '</span>' +
                 '<input type="range"' +
                 ' id="new-coach-skill-' + skill.id + '"' +
-                ' min="35" max="80" step="5" value="55"' +
+                ' min="20" max="80" step="1" value="55"' +
                 ' class="w-full accent-amber-500 cursor-pointer">' +
                 '<span class="flex justify-between text-[10px] text-slate-500 mt-1">' +
                 '<span>35 · Developing</span>' +
@@ -571,7 +571,7 @@ function promptCoachCreation(teamId) {
             // Prevent this slider from exceeding the remaining budget.
             control.max = String(
                 Math.max(
-                    35,
+                    20,
                     Math.min(80, coachSkillBudget - otherSkillsTotal)
                 )
             );
@@ -603,9 +603,8 @@ function confirmFranchiseTakeover(teamId, coachDetails) {
     const team = gameState.teams.find(t => t.id === teamId);
     if (!team) return;
 
-    const allowedCoachSkillValues = new Set([
-        35, 40, 45, 50, 55, 60, 65, 70, 75, 80
-    ]);
+    const MIN_COACH_SKILL = 20;
+    const MAX_COACH_SKILL = 80;
 
     const coachSkillGroups = [
         { source: 'offSchemeMastery', keys: ['offSchemeMastery'] },
@@ -632,10 +631,14 @@ function confirmFranchiseTakeover(teamId, coachDetails) {
     for (const group of coachSkillGroups) {
         const value = Number(requestedSkills[group.source] ?? 55);
 
-        if (!allowedCoachSkillValues.has(value)) {
+        if (
+            !Number.isInteger(value) ||
+            value < MIN_COACH_SKILL ||
+            value > MAX_COACH_SKILL
+        ) {
             UI.showModal(
                 'Invalid Coach Build',
-                'Every coaching skill must be between 35 and 80 in increments of 5.'
+                'Every coaching skill must be between 20 and 80.'
             );
             return;
         }

@@ -1,7 +1,13 @@
 // js/game/staff.js - Coaching, Scouting & Front Office System
 
 import { getRandom, getRandomInt } from '../utils.js';
-import { firstNames, lastNames, offensivePlaybook, defensivePlaybook } from '../data.js';
+import {
+    firstNames,
+    lastNames,
+    offensivePlaybook,
+    defensivePlaybook,
+    gmArchetypes
+} from '../data.js';
 import { getRosterObjects } from './state.js';
 import { calculateOverall, estimateBestPosition } from './player.js';
 import { isPlayerViableForPosition, rebuildDepthChartFromOrder } from './depth_chart.js';
@@ -101,10 +107,36 @@ export function initializeTeamStaff(team) {
 
     team.coaches = coaches;
 
-    // Retain legacy references temporarily so older gameplay systems
-    // continue to resolve their expected staff properties.
+    const aiGmProfile =
+        team.aiGmProfile || generateStaffMember('gm', 35, 60);
+
+    const gmArchetype = gmArchetypes.find(
+        archetype =>
+            archetype.id === aiGmProfile.managementArchetypeId
+    ) || getRandom(gmArchetypes);
+
+    const gmStrategyByArchetype = {
+        film_room_rat: 'DEVELOP_YOUTH',
+        neighborhood_builder: 'DEVELOP_YOUTH',
+        deal_maker: 'WIN_NOW',
+        culture_keeper: 'DEVELOP_YOUTH',
+        tactical_innovator: 'COACH_AUTONOMY',
+        win_now_gambler: 'WIN_NOW'
+    };
+
+    aiGmProfile.managementArchetypeId = gmArchetype.id;
+    aiGmProfile.managementArchetypeName = gmArchetype.name;
+    aiGmProfile.strategicDirective =
+        aiGmProfile.strategicDirective ||
+        gmStrategyByArchetype[gmArchetype.id] ||
+        'COACH_AUTONOMY';
+
+    aiGmProfile.teamId = team.id;
+    team.aiGmProfile = aiGmProfile;
+
+    // Temporary compatibility references during the migration.
     team.staff = {
-        gm: generateStaffMember('gm', 35, 60),
+        gm: aiGmProfile,
         coach: coaches[0],
         scout: coaches[1],
         trainer: coaches[2]
@@ -128,6 +160,505 @@ export const STAFF_WORK_TASKS = Object.freeze({
     OFFENSE_PREP: 'offensePrep',
     DEFENSE_PREP: 'defensePrep'
 });
+
+const COACH_DEVELOPMENT_SKILLS = [
+    'offSchemeMastery',
+    'defSchemeMastery',
+    'evalPhysicals',
+    'evalTechnique',
+    'evalCharacter',
+    'teaching',
+    'gameplanInstinct',
+    'inGameAdjustments',
+    'practiceDiscipline',
+    'conditioning'
+];
+
+const COACH_SKILL_HARD_CAP = 95;
+
+export function ensureCoachDevelopmentProfile(coach) {
+    if (!coach || typeof coach !== 'object') return null;
+
+    if (!coach.ratings || typeof coach.ratings !== 'object') {
+        coach.ratings = {};
+    }
+
+    const development =
+        coach.development && typeof coach.development === 'object'
+            ? coach.development
+            : {};
+
+    const skillCeilings =
+        development.skillCeilings &&
+        typeof development.skillCeilings === 'object'
+            ? { ...development.skillCeilings }
+            : {};
+
+    for (const skill of COACH_DEVELOPMENT_SKILLS) {
+        const rating = Number(coach.ratings[skill]);
+        const current = Number.isFinite(rating)
+            ? Math.max(0, Math.min(99, rating))
+            : 50;
+
+        if (!Number.isFinite(Number(coach.ratings[skill]))) {
+            coach.ratings[skill] = current;
+        }
+
+        const existingCeiling = Number(skillCeilings[skill]);
+
+        if (!Number.isFinite(existingCeiling)) {
+            // Potential is established once, not rerolled on each call.
+            skillCeilings[skill] = Math.min(
+                COACH_SKILL_HARD_CAP,
+                current + getRandomInt(4, 15)
+            );
+        } else {
+            // A selected starting rating must never exceed its own ceiling.
+            skillCeilings[skill] = Math.max(
+                current,
+                Math.min(COACH_SKILL_HARD_CAP, existingCeiling)
+            );
+        }
+    }
+
+    const age = Number(coach.age);
+    const learningRate = Number(development.learningRate);
+    const motivation = Number(development.motivation);
+
+    development.version = 1;
+    development.skillCeilings = skillCeilings;
+    development.progressBySkill =
+        development.progressBySkill &&
+        typeof development.progressBySkill === 'object'
+            ? development.progressBySkill
+            : {};
+
+    // Younger coaches generally learn faster; experience will be handled
+    // separately by the weekly development resolver.
+    if (!Number.isFinite(learningRate)) {
+        const ageFactor = !Number.isFinite(age) || age <= 30
+            ? 1.15
+            : age <= 40
+                ? 1.0
+                : age <= 50
+                    ? 0.85
+                    : 0.7;
+
+        development.learningRate = Math.round(
+            (ageFactor + getRandomInt(-10, 10) / 100) * 100
+        ) / 100;
+    }
+
+    if (!Number.isFinite(motivation)) {
+        development.motivation = getRandomInt(85, 115) / 100;
+    }
+
+    if (!Number.isFinite(Number(development.careerGrowthBudget))) {
+        development.careerGrowthBudget = getRandomInt(12, 24);
+    }
+
+    development.careerGrowthBudget = Math.max(
+        0,
+        Math.min(24, Math.floor(development.careerGrowthBudget))
+    );
+
+    const growthUsed = Number(development.growthPointsUsed);
+
+    development.growthPointsUsed = Number.isFinite(growthUsed)
+        ? Math.max(
+            0,
+            Math.min(development.careerGrowthBudget, growthUsed)
+        )
+        : 0;
+
+    development.remainingGrowthPoints =
+        development.careerGrowthBudget -
+        development.growthPointsUsed;
+
+    development.experienceWeeks = Math.max(
+        0,
+        Math.floor(Number(development.experienceWeeks) || 0)
+    );
+
+    development.lastResolvedWeekKey =
+        development.lastResolvedWeekKey || null;
+
+    coach.development = development;
+
+    return development;
+}
+
+const COACH_DEVELOPMENT_TASK_SKILLS = {
+    scouting: [
+        'evalPhysicals',
+        'evalTechnique',
+        'evalCharacter'
+    ],
+    training: [
+        'teaching',
+        'practiceDiscipline',
+        'conditioning'
+    ],
+    offensePrep: [
+        'offSchemeMastery',
+        'gameplanInstinct',
+        'inGameAdjustments'
+    ],
+    defensePrep: [
+        'defSchemeMastery',
+        'gameplanInstinct',
+        'inGameAdjustments'
+    ]
+};
+
+function getCoachLearningStyleMultiplier(coach, skill) {
+    const personality = coach?.biases?.personality?.name;
+
+    if (
+        personality === 'Analytical Savant' &&
+        [
+            'evalPhysicals',
+            'evalTechnique',
+            'evalCharacter',
+            'offSchemeMastery',
+            'defSchemeMastery',
+            'gameplanInstinct',
+            'inGameAdjustments'
+        ].includes(skill)
+    ) {
+        return 1.15;
+    }
+
+    if (
+        personality === "Players' Coach" &&
+        [
+            'teaching',
+            'practiceDiscipline',
+            'conditioning'
+        ].includes(skill)
+    ) {
+        return 1.15;
+    }
+
+    if (
+        personality === 'Old-School Disciplinarian' &&
+        [
+            'practiceDiscipline',
+            'conditioning',
+            'defSchemeMastery'
+        ].includes(skill)
+    ) {
+        return 1.15;
+    }
+
+    if (
+        personality === "Peaked in '94" &&
+        [
+            'practiceDiscipline',
+            'conditioning',
+            'defSchemeMastery'
+        ].includes(skill)
+    ) {
+        return 1.10;
+    }
+
+    if (
+        personality === 'Analytical Savant' &&
+        [
+            'teaching',
+            'conditioning'
+        ].includes(skill)
+    ) {
+        return 0.95;
+    }
+
+    return 1;
+}
+
+function getCoachMentorMultiplier(coach, skill, coaches, hoursByCoach) {
+    const currentRating = Number(coach.ratings?.[skill]) || 50;
+
+    const mentors = coaches.filter(mentor => {
+        if (
+            !mentor ||
+            String(mentor.id) === String(coach.id)
+        ) {
+            return false;
+        }
+
+        const mentorTeaching =
+            Number(mentor.ratings?.teaching) || 50;
+
+        const mentorSkill =
+            Number(mentor.ratings?.[skill]) || 50;
+
+        const mentorWork =
+            hoursByCoach.get(String(mentor.id));
+
+        return (
+            mentorTeaching >= 65 &&
+            mentorSkill >= currentRating + 10 &&
+            (mentorWork?.training || 0) >= 4
+        );
+    });
+
+    if (mentors.length === 0) return 1;
+
+    // A strong teacher with relevant experience can accelerate learning,
+    // but mentorship is a modest bonus rather than a free rating increase.
+    return 1.15;
+}
+
+/**
+ * Advances coach development once per team, year, and week.
+ *
+ * Assigned hours determine the learning opportunities.
+ * Learning rate, motivation, personality, experience, mentorship,
+ * potential ceilings, and remaining career budget determine progression.
+ */
+export function processWeeklyCoachDevelopment(team, year, week) {
+    if (
+        !team ||
+        !Number.isInteger(year) ||
+        !Number.isInteger(week) ||
+        !Array.isArray(team.coaches)
+    ) {
+        return [];
+    }
+
+    const weekKey = `${year}:${week}`;
+
+    const coaches = team.coaches.filter(coach =>
+        coach?.id != null
+    );
+
+    if (coaches.length === 0) return [];
+
+    const profiles = new Map();
+
+    for (const coach of coaches) {
+        profiles.set(
+            String(coach.id),
+            ensureCoachDevelopmentProfile(coach)
+        );
+    }
+
+    // Count assigned hours without allowing an invalid plan to exceed
+    // the 40-hour weekly limit per coach.
+    const hoursByCoach = new Map();
+
+    for (const coach of coaches) {
+        hoursByCoach.set(String(coach.id), {
+            total: 0,
+            scouting: 0,
+            training: 0,
+            offensePrep: 0,
+            defensePrep: 0
+        });
+    }
+
+    for (const assignment of team.staffWorkPlan?.assignments || []) {
+        const coachId = String(assignment?.coachId ?? '');
+        const workload = hoursByCoach.get(coachId);
+
+        if (!workload) continue;
+
+        const task = assignment.task;
+        if (!COACH_DEVELOPMENT_TASK_SKILLS[task]) continue;
+
+        const requestedHours = Number(assignment.hours);
+        if (!Number.isFinite(requestedHours) || requestedHours <= 0) {
+            continue;
+        }
+
+        const availableHours = Math.max(
+            0,
+            WEEKLY_COACH_HOURS - workload.total
+        );
+
+        const allocatedHours = Math.min(
+            requestedHours,
+            availableHours
+        );
+
+        workload[task] += allocatedHours;
+        workload.total += allocatedHours;
+    }
+
+    const improvements = [];
+
+    for (const coach of coaches) {
+        const coachId = String(coach.id);
+        const development = profiles.get(coachId);
+
+        if (
+            !development ||
+            development.lastResolvedWeekKey === weekKey
+        ) {
+            continue;
+        }
+
+        const workload = hoursByCoach.get(coachId);
+
+        const learningRate = Math.max(
+            0.5,
+            Math.min(
+                1.3,
+                Number(development.learningRate) || 1
+            )
+        );
+
+        const motivation = Math.max(
+            0.5,
+            Math.min(
+                1.5,
+                Number(development.motivation) || 1
+            )
+        );
+
+        const experienceMultiplier =
+            1 + Math.min(
+                0.15,
+                development.experienceWeeks / (52 * 15) * 0.15
+            );
+
+        for (const [task, skillKeys] of Object.entries(
+            COACH_DEVELOPMENT_TASK_SKILLS
+        )) {
+            const taskHours = workload?.[task] || 0;
+            if (taskHours <= 0) continue;
+
+            // Hours are shared across the discipline's related skills.
+            const hoursPerSkill = taskHours / skillKeys.length;
+
+            for (const skill of skillKeys) {
+                const currentRating =
+                    Number(coach.ratings?.[skill]) || 50;
+
+                const ceiling = Number(
+                    development.skillCeilings?.[skill]
+                );
+
+                const skillCeiling = Number.isFinite(ceiling)
+                    ? Math.min(COACH_SKILL_HARD_CAP, ceiling)
+                    : Math.min(COACH_SKILL_HARD_CAP, currentRating);
+
+                const growthRemaining =
+                    development.careerGrowthBudget -
+                    development.growthPointsUsed;
+
+                // Reaching either limit stops further learning in this skill.
+                if (
+                    currentRating >= skillCeiling ||
+                    growthRemaining <= 0
+                ) {
+                    development.progressBySkill[skill] = 0;
+                    continue;
+                }
+
+                const headroom = skillCeiling - currentRating;
+
+                // Learning slows as a coach approaches their personal ceiling.
+                const potentialMultiplier = Math.max(
+                    0.35,
+                    Math.min(1, headroom / 5)
+                );
+
+                const personalityMultiplier =
+                    getCoachLearningStyleMultiplier(coach, skill);
+
+                const mentorMultiplier = getCoachMentorMultiplier(
+                    coach,
+                    skill,
+                    coaches,
+                    hoursByCoach
+                );
+
+                const progressEarned =
+                    hoursPerSkill *
+                    1.8 *
+                    learningRate *
+                    motivation *
+                    experienceMultiplier *
+                    personalityMultiplier *
+                    mentorMultiplier *
+                    potentialMultiplier;
+
+                const priorProgress = Math.max(
+                    0,
+                    Number(development.progressBySkill[skill]) || 0
+                );
+
+                development.progressBySkill[skill] =
+                    priorProgress + progressEarned;
+            }
+        }
+
+        // A skill can improve at most once per week.
+        // Each rating point also consumes one lifetime growth point.
+        for (const skill of COACH_DEVELOPMENT_SKILLS) {
+            const progress = Number(
+                development.progressBySkill[skill]
+            ) || 0;
+
+            const currentRating =
+                Number(coach.ratings?.[skill]) || 50;
+
+            const ceiling = Math.min(
+                COACH_SKILL_HARD_CAP,
+                Number(development.skillCeilings?.[skill]) ||
+                    currentRating
+            );
+
+            const growthRemaining =
+                development.careerGrowthBudget -
+                development.growthPointsUsed;
+
+            if (
+                progress < 100 ||
+                currentRating >= ceiling ||
+                growthRemaining <= 0
+            ) {
+                if (currentRating >= ceiling || growthRemaining <= 0) {
+                    development.progressBySkill[skill] = 0;
+                }
+
+                continue;
+            }
+
+            coach.ratings[skill] = Math.min(
+                ceiling,
+                currentRating + 1
+            );
+
+            development.progressBySkill[skill] = progress - 100;
+            development.growthPointsUsed += 1;
+
+            improvements.push({
+                coachId: coach.id,
+                coachName: coach.name,
+                skill,
+                previousRating: currentRating,
+                newRating: coach.ratings[skill],
+                year,
+                week
+            });
+        }
+
+        development.experienceWeeks += 1;
+        development.remainingGrowthPoints = Math.max(
+            0,
+            development.careerGrowthBudget -
+                development.growthPointsUsed
+        );
+
+        development.lastResolvedWeekKey = weekKey;
+    }
+
+    return improvements;
+}
+
+export function ensureTeamCoachingStaff(team) {
 
 /**
  * Creates the flexible coaching group while preserving legacy staff references.
@@ -172,6 +703,9 @@ export function ensureTeamCoachingStaff(team) {
 
     if (!team.isPlayerControlled) {
         team.coaches = npcCoaches;
+
+        team.coaches.forEach(ensureCoachDevelopmentProfile);
+
         return team.coaches;
     }
 
@@ -240,6 +774,8 @@ export function ensureTeamCoachingStaff(team) {
 
     team.userCoachProfile = userCoach;
     team.coaches = [...npcCoaches, userCoach];
+
+    team.coaches.forEach(ensureCoachDevelopmentProfile);
 
     return team.coaches;
 }
@@ -352,6 +888,90 @@ function getAiStaffTaskScore(coach, task) {
     return score;
 }
 
+function getAiGmDelegationAdjustment(gm, task) {
+    const personality = gm?.biases?.personality?.name;
+
+    const preferences = {
+        'Analytical Savant': {
+            scouting: 3,
+            offensePrep: 3,
+            defensePrep: 3
+        },
+        "Players' Coach": {
+            scouting: -2,
+            offensePrep: -3,
+            defensePrep: -3
+        },
+        'Old-School Disciplinarian': {
+            scouting: -3,
+            offensePrep: -1,
+            defensePrep: 2
+        },
+        "Peaked in '94": {
+            scouting: -2,
+            offensePrep: 2,
+            defensePrep: 2
+        }
+    };
+
+    const authority = Number(gm?.ratings?.authority);
+    const authorityFactor = Number.isFinite(authority)
+        ? Math.max(0.25, Math.min(1, (authority - 40) / 40))
+        : 0.5;
+
+    const preferredAdjustment =
+        preferences[personality]?.[task] || 0;
+
+    return Math.round(preferredAdjustment * authorityFactor);
+}
+
+function getAiGmDelegationAdjustment(gm, task) {
+    const adjustments = {
+        film_room_rat: {
+            scouting: 6,
+            offensePrep: 0,
+            defensePrep: 0
+        },
+        neighborhood_builder: {
+            scouting: -2,
+            offensePrep: -4,
+            defensePrep: -4
+        },
+        deal_maker: {
+            scouting: 4,
+            offensePrep: 0,
+            defensePrep: 0
+        },
+        culture_keeper: {
+            scouting: -4,
+            offensePrep: -2,
+            defensePrep: -2
+        },
+        tactical_innovator: {
+            scouting: -2,
+            offensePrep: 4,
+            defensePrep: 4
+        },
+        win_now_gambler: {
+            scouting: -4,
+            offensePrep: 6,
+            defensePrep: 6
+        }
+    };
+
+    const archetypeId = gm?.managementArchetypeId;
+    const adjustment = adjustments[archetypeId]?.[task] || 0;
+
+    const authority = Number(gm?.ratings?.authority);
+    const normalizedAuthority = Number.isFinite(authority)
+        ? Math.max(0, Math.min(1, (authority - 40) / 40))
+        : 0.5;
+
+    const influence = 0.5 + normalizedAuthority * 0.5;
+
+    return Math.round(adjustment * influence);
+}
+
 function getAiTrainingFocus(team) {
     const roster = getRosterObjects(team).filter(
         player => player?.attributes
@@ -453,9 +1073,14 @@ export function ensureAiStaffWorkPlan(
 
     if (coaches.length === 0) return null;
 
-    const gmDirective =
-        team.gameplan?.gmDirective || 'COACH_AUTONOMY';
+    const gm = team.aiGmProfile || null;
 
+    const gm = team.aiGmProfile || team.staff?.gm || null;
+
+    const gmDirective =
+        gm?.strategicDirective ||
+        team.gameplan?.gmDirective ||
+        'COACH_AUTONOMY';
     const isOffseason = week === 0;
     const hasDraftClass =
         Array.isArray(gameState?.draftClass) &&
@@ -522,7 +1147,21 @@ export function ensureAiStaffWorkPlan(
             specialtyHours = 8;
         }
 
-                // Personality changes the balance between specialist work
+        // The GM sets the strategic emphasis for delegated work.
+        // Do not revive game-preparation assignments in the offseason.
+        if (specialtyHours > 0) {
+            specialtyHours += getAiGmDelegationAdjustment(
+                gm,
+                specialty.task
+            );
+
+            specialtyHours = Math.max(
+                0,
+                Math.min(WEEKLY_COACH_HOURS, specialtyHours)
+            );
+        }
+
+        // Personality changes the balance between specialist work
         // and player development. Offseason allocations stay intact.
         if (!isOffseason && specialtyHours > 0) {
             const personality = coach.biases?.personality?.name;
