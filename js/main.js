@@ -422,29 +422,7 @@ function promptCoachCreation(teamId) {
                 <div id="gm-expertise-summary"
                     class="text-xs text-slate-600 mt-2 leading-relaxed"></div>
             </div>
-            <!-- COACH_SKILL_ALLOCATION_BLOCK -->
-                <p class="text-xs text-slate-600 mb-3">
-                    Build your strengths and weaknesses. Each category costs points from the same budget.
-                </p>
-
-                <div class="flex items-center justify-between bg-slate-900 text-white rounded px-3 py-2 mb-3">
-                    <span class="text-xs font-bold uppercase">Skill Budget</span>
-                    <span id="new-coach-skill-total" class="text-sm font-black tabular-nums">
-                        330 / 330
-                    </span>
-                </div>
-
-                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    ${coachSkillDefinitions.map(skill => `
-                        DIL0
-                    `).join('')}
-                </div>
-
-                <p class="text-[11px] text-slate-500 mt-2">
-                    Each skill ranges from 35 to 80. Lower a skill to free points before raising another.
-                </p>
-            </div>
-
+             <!-- COACH_SKILL_ALLOCATION_BLOCK -->
             <div class="border-t border-slate-200 pt-4">
                 <label class="block text-xs font-bold text-slate-800 uppercase tracking-wider mb-1">
                     Offensive Identity
