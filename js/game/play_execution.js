@@ -169,11 +169,16 @@ function getPursuitTargetY(pState, carrier, predictedY) {
         return predictedY;
     }
 
+    // In or near the end zone, defenders must attack downhill to prevent the score;
+    // they cannot freeze or hold deep leverage inside the end zone.
+    if (pState.y >= 106.0) {
+        return predictedY;
+    }
+
     const separation = pState.y - carrier.y;
     const distanceToCarrier = getDistance(pState, carrier);
 
-    // Once the runner is close, stop holding the downfield landmark.
-    // Close the gap and pursue the carrier's predicted position instead.
+    // Once the runner is close or defender is trailing, pursue predicted spot directly.
     const PURSUIT_CLOSE_GAP_DISTANCE = 8.0;
 
     if (
@@ -183,8 +188,10 @@ function getPursuitTargetY(pState, carrier, predictedY) {
         return predictedY;
     }
 
-    // At greater distances, preserve downfield leverage.
-    return Math.max(pState.y, predictedY);
+    // At greater distances, preserve a cushion ahead of the runner without freezing
+    // the defender at their own current Y coordinate.
+    const cushion = Math.min(separation * 0.4, 3.5);
+    return Math.max(carrier.y + cushion, predictedY);
 }
 
 function validateFormationCoordinate(x, y) {
@@ -2617,13 +2624,21 @@ export function executeAssignment(pState, assignment, offenseStates, LOS, playSt
         // --- RED ZONE COMPRESSION ---
         // As the ball gets closer to the goal line (LOS > 90), 
         // the cushion shrinks automatically. The field is smaller, 
-        // so DBs play tighter.
+        // so DBs play tighter and compress zone depths.
         const distanceToGoal = 110 - LOS; // LOS 110 is the endzone
         const redZoneMultiplier = Math.max(0.2, Math.min(1.0, distanceToGoal / 20.0));
         
         // Low IQ players still struggle to compress, High IQ players squeeze the route
         const compressionIQ = (iq / 100); 
         const cushionShrink = 1.0 - (compressionIQ * 0.5 * (1.0 - redZoneMultiplier));
+
+        // FIX: Compress zoneCenter.y so deep DBs do not set waypoints past the goal line
+        if (distanceToGoal < 25 && isDeep) {
+            const rawDepth = Math.max(0, zoneCenter.y - LOS);
+            const compressedDepth = rawDepth * cushionShrink;
+            const maxDropDepth = Math.min(109.0, LOS + (distanceToGoal * 0.75));
+            zoneCenter.y = Math.min(maxDropDepth, LOS + compressedDepth);
+        }
         
         // 1. "Hero Ball" Safety Creep: Impatient low-IQ deep safeties creep downhill toward LOS
         if (isDeep && iq < 58) {
@@ -2654,8 +2669,12 @@ export function executeAssignment(pState, assignment, offenseStates, LOS, playSt
 
         const minX = (zone?.minX || 0) - 3.0;
         const maxX = (zone?.maxX || FIELD_WIDTH) + 3.0;
-        const minY = LOS + (zone?.minY || 0) - 2.0;
-        const maxY = LOS + (zone?.maxY || 25.0) + 3.0;
+        // In the red zone, lower minY so deep third/halves detect intermediate crossers
+        const effectiveZoneMinY = (distanceToGoal < 25 && isDeep)
+            ? Math.min(zone?.minY || 0, 3.0)
+            : (zone?.minY || 0);
+        const minY = LOS + effectiveZoneMinY - 2.0;
+        const maxY = Math.min(115.0, LOS + (zone?.maxY || 25.0) + 3.0);
 
         let zoneThreats = offenseStates.filter(o => {
             if (!o.action.includes('route')) return false;
@@ -2711,9 +2730,12 @@ export function executeAssignment(pState, assignment, offenseStates, LOS, playSt
                     pState.action = 'tracking_ball';
                     pState.contactReduction = 1.3;
                 } else {
-                    // No reachable interception: maintain deep coverage leverage.
+                    // In red zone, cap leverage tight to the receiver rather than pushing deep into endzone
                     pState.targetX = primaryThreat.x + insideLeverageX;
-                    pState.targetY = Math.max(zoneCenter.y, primaryThreat.y + 3.5);
+                    const leverageDepth = distanceToGoal < 25
+                        ? Math.min(zoneCenter.y, primaryThreat.y + 1.8)
+                        : Math.max(zoneCenter.y, primaryThreat.y + 3.5);
+                    pState.targetY = Math.min(110.5, leverageDepth);
                 }
             } else {
                 // Short Zone

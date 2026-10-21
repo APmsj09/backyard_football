@@ -395,7 +395,11 @@ export function calculateSafetyHelp(safetyState, defenseStates, offenseStates, b
             if (receiver.role === 'QB' || !receiver.action?.includes('route')) return;
 
             const recDepth = receiver.y - LOS;
-            if (recDepth < 8) return; // Only match vertical threats
+            // In the red zone (distanceToGoal <= 20), intermediate and crossing routes (3-5 yds)
+            // are immediate scoring threats that deep zone defenders must match.
+            const distanceToGoal = 110 - LOS;
+            const minMatchDepth = distanceToGoal <= 20 ? 3.0 : 8.0;
+            if (recDepth < minMatchDepth) return;
 
             const distFromSafety = getDistance(safetyState, receiver);
             if (distFromSafety > 18) return; // Ignore threats all the way across the field
