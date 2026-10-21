@@ -710,7 +710,27 @@ export function determineDefensivePlayCall(defense, offense, down, yardsToGo, ba
         (down === 3 && yardsToGo >= 8) ||
         (down === 4 && yardsToGo >= 5) ||
         (down === 2 && yardsToGo >= 10);
-    const captainIsSharp = checkCaptainDiscipline(defense, gameLog);
+        const captainIsSharp = checkCaptainDiscipline(defense, gameLog);
+
+    const staffPreparation = defense.gameplan?.staffPreparation;
+    const preparationIsCurrent =
+        staffPreparation?.preparedForYear === game?.year &&
+        staffPreparation?.preparedForWeek === game?.currentWeek;
+
+    const opponentPreparation = preparationIsCurrent
+        ? staffPreparation.defenseByOpponent?.[String(offense.id)] ||
+            staffPreparation.defenseByOpponent?.['*']
+        : null;
+
+    const defensivePrepPoints = Math.max(
+        0,
+        Math.min(
+            12,
+            Number.isFinite(opponentPreparation?.points)
+                ? opponentPreparation.points
+                : 0
+        )
+    );
 
     // ==========================================================
     // DEFENSIVE GAME-PLANNING (SCOUTING THE OPPONENT)
@@ -757,6 +777,34 @@ export function determineDefensivePlayCall(defense, offense, down, yardsToGo, ba
              tags.includes('double-team') ||
              tags.includes('cover4'))) {
             score += 15;
+        }
+
+        // Staff preparation improves the chance of selecting a suitable call.
+        // It does not directly alter player ratings or play physics.
+        if (defensivePrepPoints > 0) {
+            const preparedForRun =
+                isRunHeavyThreat && tags.includes('runStop');
+
+            const preparedForPass =
+                isPassHeavyThreat &&
+                (tags.includes('cover2') ||
+                 tags.includes('double-team') ||
+                 tags.includes('cover4'));
+
+            const preparedForSituation =
+                isGoalLineSituation && tags.includes('runStop') ||
+                isShort && tags.includes('runStop') ||
+                isLong &&
+                    (tags.includes('cover3') ||
+                     tags.includes('safeZone'));
+
+            if (
+                preparedForRun ||
+                preparedForPass ||
+                preparedForSituation
+            ) {
+                score += defensivePrepPoints * 0.6;
+            }
         }
 
         // FIELD POSITION SANITY CHECKS:

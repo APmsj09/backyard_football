@@ -2280,7 +2280,476 @@ export function renderStaffTab(gameState) {
 
     html += `</div>`;
 
-    // 2. The Sideline Candidate Market (Available Hires)
+    // 2. Weekly Staff Workload
+    const workCoaches = Game.ensureTeamCoachingStaff?.(team) ||
+        (Array.isArray(team.coaches) ? team.coaches : []);
+    const workPlan = Game.ensureTeamStaffWorkPlan?.(team);
+
+    if (workPlan && Array.isArray(workPlan.assignments)) {
+        const taskLabels = {
+            scouting: 'Prospect Scouting',
+            training: 'Player Development',
+            offensePrep: 'Offensive Preparation',
+            defensePrep: 'Defensive Preparation'
+        };
+
+        const focusOptions = {
+            scouting: [
+                ['all', 'General scouting'],
+                ['watchlist', 'Watchlist targets'],
+                ['draft', 'Draft prospects'],
+                ['freeAgents', 'Free agents'],
+                ['opponents', 'Players on other teams']
+            ],
+            training: [
+                ['all', 'All position groups'],
+                ['offense', 'Offense'],
+                ['defense', 'Defense'],
+                ['QB', 'Quarterbacks'],
+                ['RB', 'Running backs'],
+                ['WR', 'Wide receivers'],
+                ['TE', 'Tight ends'],
+                ['OL', 'Offensive line'],
+                ['DL', 'Defensive line'],
+                ['LB', 'Linebackers'],
+                ['DB', 'Defensive backs']
+            ]
+        };
+
+        const skillOptions = [
+            ['', 'Automatic skill focus'],
+            ['speed', 'Speed'],
+            ['strength', 'Strength'],
+            ['agility', 'Agility'],
+            ['explosiveness', 'Explosiveness'],
+            ['jumping', 'Jumping'],
+            ['stamina', 'Stamina'],
+            ['playbookIQ', 'Playbook IQ'],
+            ['clutch', 'Clutch'],
+            ['consistency', 'Consistency'],
+            ['toughness', 'Toughness'],
+            ['decisionMaking', 'Decision making'],
+            ['throwingAccuracy', 'Throwing accuracy'],
+            ['throwPower', 'Throw power'],
+            ['catchingHands', 'Hands'],
+            ['carrying', 'Ball security'],
+            ['tackling', 'Tackling'],
+            ['blocking', 'Blocking'],
+            ['blockShedding', 'Block shedding'],
+            ['coverage', 'Coverage']
+        ];
+
+        const workHours = assignment =>
+            Math.max(0, Number(assignment.hours) || 0);
+
+        const getCoachHours = coachId =>
+            workPlan.assignments.reduce(
+                (sum, assignment) =>
+                    String(assignment.coachId) === String(coachId)
+                        ? sum + workHours(assignment)
+                        : sum,
+                0
+            );
+
+        const renderOptions = (options, selectedValue) =>
+            options.map(([value, label]) => `
+                <option value="${value}" ${
+                    String(value) === String(selectedValue ?? '')
+                        ? 'selected'
+                        : ''
+                }>${label}</option>
+            `).join('');
+
+        window.app_addStaffWorkAssignment = () => {
+            const gs = getGameState();
+            const currentTeam = gs?.playerTeam;
+            if (!currentTeam) return;
+
+            const plan = Game.ensureTeamStaffWorkPlan?.(currentTeam);
+            const coaches = Game.ensureTeamCoachingStaff?.(currentTeam) ||
+                currentTeam.coaches || [];
+
+            if (!plan || !Array.isArray(plan.assignments)) return;
+
+            const availableCoach = coaches.find(
+                coach => coach?.id &&
+                    getCoachHours(coach.id) < (plan.weeklyHoursPerCoach || 40)
+            );
+
+            if (!availableCoach) return;
+
+            const remainingHours = Math.max(
+                0,
+                (plan.weeklyHoursPerCoach || 40) -
+                    getCoachHours(availableCoach.id)
+            );
+
+            plan.assignments.push({
+                coachId: String(availableCoach.id),
+                task: 'scouting',
+                hours: Math.min(4, remainingHours),
+                focus: 'all',
+                maxTargets: 1
+            });
+
+            saveGameState();
+            renderStaffTab(gs);
+        };
+
+        window.app_removeStaffWorkAssignment = index => {
+            const gs = getGameState();
+            const currentTeam = gs?.playerTeam;
+            const plan = currentTeam?.staffWorkPlan;
+
+            if (!plan || !Array.isArray(plan.assignments)) return;
+            if (!Number.isInteger(index) ||
+                index < 0 ||
+                index >= plan.assignments.length) {
+                return;
+            }
+
+            plan.assignments.splice(index, 1);
+            saveGameState();
+            renderStaffTab(gs);
+        };
+
+        window.app_updateStaffWorkAssignment = (index, field, value) => {
+            const gs = getGameState();
+            const currentTeam = gs?.playerTeam;
+            const plan = currentTeam?.staffWorkPlan;
+
+            if (!plan || !Array.isArray(plan.assignments)) return;
+            if (!Number.isInteger(index) ||
+                index < 0 ||
+                index >= plan.assignments.length) {
+                return;
+            }
+
+            const assignment = plan.assignments[index];
+            const allowedFields = new Set([
+                'coachId',
+                'task',
+                'hours',
+                'focus',
+                'skill',
+                'maxTargets',
+                'opponentTeamId'
+            ]);
+
+            if (!allowedFields.has(field)) return;
+
+            if (field === 'coachId') {
+                const validCoach = currentTeam.coaches?.some(
+                    coach => String(coach.id) === String(value)
+                );
+                if (!validCoach) return;
+
+                assignment.coachId = String(value);
+            } else if (field === 'task') {
+                if (!Object.prototype.hasOwnProperty.call(taskLabels, value)) {
+                    return;
+                }
+
+                assignment.task = value;
+                assignment.focus = 'all';
+                delete assignment.skill;
+                delete assignment.opponentTeamId;
+            } else if (field === 'hours') {
+                const requestedHours = Number(value);
+
+                if (!Number.isFinite(requestedHours)) return;
+
+                const otherHours = plan.assignments.reduce(
+                    (sum, other, otherIndex) =>
+                        otherIndex !== index &&
+                        String(other.coachId) === String(assignment.coachId)
+                            ? sum + workHours(other)
+                            : sum,
+                    0
+                );
+
+                const cap = Math.min(
+                    40,
+                    Number(plan.weeklyHoursPerCoach) || 40
+                );
+
+                assignment.hours = Math.max(
+                    0,
+                    Math.min(
+                        cap - otherHours,
+                        Math.floor(requestedHours)
+                    )
+                );
+            } else if (field === 'maxTargets') {
+                const targets = Number(value);
+                if (!Number.isInteger(targets) || targets < 1 || targets > 12) {
+                    return;
+                }
+                assignment.maxTargets = targets;
+            } else if (field === 'skill') {
+                if (value && !skillOptions.some(option => option[0] === value)) {
+                    return;
+                }
+
+                if (value) assignment.skill = value;
+                else delete assignment.skill;
+            } else if (field === 'focus') {
+                const validOptions = focusOptions[assignment.task] || [];
+
+                if (!validOptions.some(option => option[0] === value)) {
+                    return;
+                }
+
+                assignment.focus = value;
+            } else if (field === 'opponentTeamId') {
+                const validOpponent = gs.teams?.some(
+                    otherTeam =>
+                        String(otherTeam.id) === String(value) &&
+                        otherTeam.id !== currentTeam.id
+                );
+
+                if (value && !validOpponent) return;
+
+                if (value) assignment.opponentTeamId = String(value);
+                else delete assignment.opponentTeamId;
+            }
+
+            // Enforce the shared 40-hour budget after coach reassignment too.
+            const cap = Math.min(
+                40,
+                Number(plan.weeklyHoursPerCoach) || 40
+            );
+            const otherHours = plan.assignments.reduce(
+                (sum, other, otherIndex) =>
+                    otherIndex !== index &&
+                    String(other.coachId) === String(assignment.coachId)
+                        ? sum + workHours(other)
+                        : sum,
+                0
+            );
+
+            assignment.hours = Math.max(
+                0,
+                Math.min(workHours(assignment), cap - otherHours)
+            );
+
+            saveGameState();
+            renderStaffTab(gs);
+        };
+
+        const totalRequestedHours = workPlan.assignments.reduce(
+            (sum, assignment) => sum + workHours(assignment),
+            0
+        );
+
+        html += `
+            <section class="mt-6 mb-6 bg-white rounded border border-slate-300 p-4 shadow-sm">
+                <div class="flex flex-col md:flex-row justify-between gap-3 mb-4">
+                    <div>
+                        <h4 class="font-black text-sm uppercase tracking-wider text-slate-900">
+                            Weekly Staff Workload
+                        </h4>
+                        <p class="text-[11px] text-slate-500 mt-1">
+                            Assign each coach up to 40 hours. Scouting, development,
+                            and preparation compete for the same time.
+                        </p>
+                    </div>
+                    <div class="text-xs font-mono bg-slate-50 border border-slate-200 rounded px-3 py-2">
+                        <b>${totalRequestedHours}</b> hours assigned across
+                        <b>${workCoaches.length}</b> coaches
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-2 mb-4">
+                    ${workCoaches.map(coach => {
+                        const assigned = getCoachHours(coach.id);
+                        const percentage = Math.min(100, assigned / 40 * 100);
+                        const overBudget = assigned > 40;
+
+                        return `
+                            <div class="rounded border ${
+                                overBudget
+                                    ? 'border-rose-300 bg-rose-50'
+                                    : 'border-slate-200 bg-slate-50'
+                            } p-2.5">
+                                <div class="flex items-center justify-between gap-2">
+                                    <span class="font-bold text-xs text-slate-800">
+                                        ${coach.name}
+                                    </span>
+                                    <span class="text-[10px] font-mono ${
+                                        overBudget ? 'text-rose-700' : 'text-slate-500'
+                                    }">${assigned}/40 hrs</span>
+                                </div>
+                                <div class="mt-2 h-1.5 rounded bg-slate-200 overflow-hidden">
+                                    <div class="h-full rounded ${
+                                        overBudget ? 'bg-rose-500' : 'bg-emerald-500'
+                                    }" style="width:${percentage}%"></div>
+                                </div>
+                                ${coach.isUserCoach
+                                    ? '<p class="mt-1 text-[9px] text-slate-500">Your coaching time</p>'
+                                    : `<p class="mt-1 text-[9px] text-slate-500">${
+                                        coach.biases?.scouting?.name || 'Staff coach'
+                                    }</p>`}
+                            </div>`;
+                    }).join('')}
+                </div>
+
+                <div class="space-y-2">
+                    ${workPlan.assignments.map((assignment, index) => {
+                        const task = taskLabels[assignment.task]
+                            ? assignment.task
+                            : 'scouting';
+
+                        const focusList = focusOptions[task] || [];
+                        const showTargets = task === 'scouting' ||
+                            task === 'training';
+
+                        const hoursOptions = Array.from(
+                            { length: 21 },
+                            (_, i) => i * 2
+                        );
+
+                        const coachOptions = workCoaches.map(coach => [
+                            String(coach.id),
+                            coach.isUserCoach
+                                ? `${coach.name} (You)`
+                                : coach.name
+                        ]);
+
+                        const opponentOptions = [
+                            ['', 'Any opponent'],
+                            ...(gameState.teams || [])
+                                .filter(other => other &&
+                                    other.id !== team.id &&
+                                    other.leagueType === team.leagueType)
+                                .map(other => [
+                                    String(other.id),
+                                    other.name
+                                ])
+                        ];
+
+                        return `
+                            <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-6 gap-2 items-end border border-slate-200 rounded p-3">
+                                <label class="block min-w-0">
+                                    <span class="block text-[9px] font-bold uppercase text-slate-500 mb-1">Coach</span>
+                                    <select class="w-full text-xs border border-slate-300 rounded p-2 bg-white"
+                                        aria-label="Assigned coach"
+                                        onchange="app_updateStaffWorkAssignment(${index}, 'coachId', this.value)">
+                                        ${renderOptions(
+                                            coachOptions,
+                                            assignment.coachId
+                                        )}
+                                    </select>
+                                </label>
+
+                                <label class="block min-w-0">
+                                    <span class="block text-[9px] font-bold uppercase text-slate-500 mb-1">Task</span>
+                                    <select class="w-full text-xs border border-slate-300 rounded p-2 bg-white"
+                                        aria-label="Staff task"
+                                        onchange="app_updateStaffWorkAssignment(${index}, 'task', this.value)">
+                                        ${renderOptions(
+                                            Object.entries(taskLabels),
+                                            task
+                                        )}
+                                    </select>
+                                </label>
+
+                                ${focusList.length > 0 ? `
+                                    <label class="block min-w-0">
+                                        <span class="block text-[9px] font-bold uppercase text-slate-500 mb-1">Focus</span>
+                                        <select class="w-full text-xs border border-slate-300 rounded p-2 bg-white"
+                                            aria-label="Task focus"
+                                            onchange="app_updateStaffWorkAssignment(${index}, 'focus', this.value)">
+                                            ${renderOptions(
+                                                focusList,
+                                                assignment.focus || 'all'
+                                            )}
+                                        </select>
+                                    </label>
+                                ` : task === 'defensePrep' ? `
+                                    <label class="block min-w-0">
+                                        <span class="block text-[9px] font-bold uppercase text-slate-500 mb-1">Opponent</span>
+                                        <select class="w-full text-xs border border-slate-300 rounded p-2 bg-white"
+                                            aria-label="Preparation opponent"
+                                            onchange="app_updateStaffWorkAssignment(${index}, 'opponentTeamId', this.value)">
+                                            ${renderOptions(
+                                                opponentOptions,
+                                                assignment.opponentTeamId || ''
+                                            )}
+                                        </select>
+                                    </label>
+                                ` : `
+                                    <div class="text-[10px] text-slate-500">
+                                        All active offensive plays
+                                    </div>
+                                `}
+
+                                ${task === 'training' ? `
+                                    <label class="block min-w-0">
+                                        <span class="block text-[9px] font-bold uppercase text-slate-500 mb-1">Skill</span>
+                                        <select class="w-full text-xs border border-slate-300 rounded p-2 bg-white"
+                                            aria-label="Training skill"
+                                            onchange="app_updateStaffWorkAssignment(${index}, 'skill', this.value)">
+                                            ${renderOptions(
+                                                skillOptions,
+                                                assignment.skill || ''
+                                            )}
+                                        </select>
+                                    </label>
+                                ` : showTargets ? `
+                                    <label class="block min-w-0">
+                                        <span class="block text-[9px] font-bold uppercase text-slate-500 mb-1">Max targets</span>
+                                        <select class="w-full text-xs border border-slate-300 rounded p-2 bg-white"
+                                            aria-label="Maximum targets"
+                                            onchange="app_updateStaffWorkAssignment(${index}, 'maxTargets', this.value)">
+                                            ${renderOptions(
+                                                [[1, '1 player'], [2, '2 players'], [3, '3 players'], [4, '4 players'], [6, '6 players'], [8, '8 players'], [12, '12 players']],
+                                                assignment.maxTargets || 1
+                                            )}
+                                        </select>
+                                    </label>
+                                ` : '<div></div>'}
+
+                                <div class="flex items-end gap-2">
+                                    <label class="block flex-1 min-w-0">
+                                        <span class="block text-[9px] font-bold uppercase text-slate-500 mb-1">Hours</span>
+                                        <select class="w-full text-xs border border-slate-300 rounded p-2 bg-white"
+                                            aria-label="Assigned hours"
+                                            onchange="app_updateStaffWorkAssignment(${index}, 'hours', this.value)">
+                                            ${renderOptions(
+                                                hoursOptions.map(hours => [
+                                                    hours,
+                                                    `${hours} hrs`
+                                                ]),
+                                                workHours(assignment)
+                                            )}
+                                        </select>
+                                    </label>
+                                    <button class="px-2 py-2 text-xs font-bold text-rose-600 border border-rose-200 rounded hover:bg-rose-50"
+                                        title="Remove assignment"
+                                        aria-label="Remove assignment"
+                                        onclick="app_removeStaffWorkAssignment(${index})">
+                                        ×
+                                    </button>
+                                </div>
+                            </div>`;
+                    }).join('')}
+                </div>
+
+                <div class="flex justify-between items-center mt-4 gap-3">
+                    <p class="text-[10px] text-slate-500">
+                        Assignments are saved immediately. Unassigned hours remain available.
+                    </p>
+                    <button class="shrink-0 px-3 py-2 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs rounded"
+                        onclick="app_addStaffWorkAssignment()">
+                        + Add Assignment
+                    </button>
+                </div>
+            </section>
+        `;
+    }
+
+    // 3. The Sideline Candidate Market (Available Hires)
     html += `
         <div class="bg-white rounded border border-slate-300 p-4 shadow-sm">
             <h4 class="font-black text-xs uppercase tracking-wider text-slate-800 border-b border-slate-200 pb-2 mb-3">

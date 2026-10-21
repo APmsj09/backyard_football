@@ -805,6 +805,151 @@ function getScoutingCandidates(team, gameState, assignment, year, week) {
     return candidates;
 }
 
+const OFFENSE_PREP_FOUNDATION_PLAYS = [
+    'Uni_InsideZone',
+    'Uni_StretchRight',
+    'Uni_QuickSlants',
+    'Uni_FourVerts'
+];
+
+const DEFENSE_PREP_FOUNDATION_PLAYS = [
+    'Cover_2_Zone_Base',
+    'Cover_1_Robber',
+    'Man_Blitz_Base',
+    'GoalLine_RunStuff'
+];
+
+const MAX_WEEKLY_PREP_POINTS = 12;
+
+function applyWeeklyGamePreparation(
+    team,
+    coach,
+    assignment,
+    allocatedHours,
+    year,
+    week
+) {
+    if (!team || !coach || !Number.isFinite(allocatedHours) || allocatedHours <= 0) {
+        return 0;
+    }
+
+    if (!team.gameplan || typeof team.gameplan !== 'object') {
+        team.gameplan = {};
+    }
+
+    const gameplan = team.gameplan;
+    const ratings = coach.ratings || {};
+    const isOffense = assignment.task === 'offensePrep';
+    const side = isOffense ? 'offense' : 'defense';
+    const skillRating = clamp(
+        Number(
+            isOffense
+                ? ratings.offSchemeMastery ?? 50
+                : ratings.defSchemeMastery ?? 50
+        ),
+        1,
+        99
+    );
+    const instinct = clamp(Number(ratings.gameplanInstinct ?? 50), 1, 99);
+    const adjustments = clamp(Number(ratings.inGameAdjustments ?? 50), 1, 99);
+
+    const effectiveness = clamp(
+        0.65 + skillRating / 250 + instinct / 500 + adjustments / 1000,
+        0.75,
+        1.25
+    );
+
+    const workWeekKey = `${year}:${week}`;
+    let preparation = gameplan.staffPreparation;
+
+    if (!preparation || preparation.workWeekKey !== workWeekKey) {
+        preparation = {
+            workWeekKey,
+            preparedForYear: year,
+            preparedForWeek: week + 1,
+            offensePoints: 0,
+            offenseHours: 0,
+            defenseByOpponent: {}
+        };
+    }
+
+    const mastery = gameplan.mastery || (gameplan.mastery = {});
+    const installedPlays = isOffense
+        ? gameplan.installedOffense || []
+        : gameplan.installedDefense || [];
+    const foundationPlays = isOffense
+        ? OFFENSE_PREP_FOUNDATION_PLAYS
+        : DEFENSE_PREP_FOUNDATION_PLAYS;
+
+    const availablePlays = new Set([
+        ...foundationPlays,
+        ...installedPlays.slice(0, 8)
+    ]);
+
+    const assignedPlayKeys = Array.isArray(assignment.playKeys)
+        ? assignment.playKeys.filter(key => availablePlays.has(key))
+        : [...availablePlays];
+
+    // Hours produce a modest preparation score, influenced by coaching skill.
+    const rawPoints = allocatedHours * 0.4 * effectiveness;
+    let pointsAdded = 0;
+
+    if (isOffense) {
+        const currentPoints = Math.max(0, Number(preparation.offensePoints) || 0);
+        pointsAdded = Math.min(
+            Math.max(0, MAX_WEEKLY_PREP_POINTS - currentPoints),
+            rawPoints
+        );
+
+        preparation.offensePoints = currentPoints + pointsAdded;
+        preparation.offenseHours = (preparation.offenseHours || 0) + allocatedHours;
+    } else {
+        const opponentId = assignment.opponentTeamId ??
+            assignment.targetOpponentId;
+        const opponentKey = opponentId == null ? '*' : String(opponentId);
+
+        const opponentPrep = preparation.defenseByOpponent[opponentKey] || {
+            points: 0,
+            hours: 0,
+            coachIds: []
+        };
+
+        pointsAdded = Math.min(
+            Math.max(0, MAX_WEEKLY_PREP_POINTS - opponentPrep.points),
+            rawPoints
+        );
+
+        opponentPrep.points += pointsAdded;
+        opponentPrep.hours += allocatedHours;
+
+        if (coach.id && !opponentPrep.coachIds.includes(coach.id)) {
+            opponentPrep.coachIds.push(coach.id);
+        }
+
+        preparation.defenseByOpponent[opponentKey] = opponentPrep;
+    }
+
+    // Familiarity directly affects offensive play selection and execution.
+    // Defensive mastery is stored as well; the next engine patch will consume
+    // the opponent-specific preparation score during defensive play-calling.
+    if (pointsAdded > 0 && assignedPlayKeys.length > 0) {
+        const masteryGain = Math.min(4, pointsAdded * 0.6);
+
+        for (const key of assignedPlayKeys) {
+            const currentMastery = Number.isFinite(mastery[key])
+                ? mastery[key]
+                : 40;
+
+            mastery[key] = Math.min(100, currentMastery + masteryGain);
+        }
+    }
+
+    preparation.lastEvaluatorId = coach.id || null;
+    gameplan.staffPreparation = preparation;
+
+    return pointsAdded;
+}
+
 /**
  * Resolves the scouting portion of a team's weekly staff work.
  *
@@ -869,7 +1014,9 @@ export function processWeeklyScoutingAssignments(
 
     if (!workAssignments.some(assignment =>
         assignment.task === 'scouting' ||
-        assignment.task === 'training'
+        assignment.task === 'training' ||
+        assignment.task === 'offensePrep' ||
+        assignment.task === 'defensePrep'
     )) {
         return { playersUpdated: 0, hoursUsed: 0 };
     }
@@ -972,6 +1119,18 @@ export function processWeeklyScoutingAssignments(
                     attributesImproved++;
                 }
             }
+
+            hoursUsed += allocatedHours;
+            continue;
+        }
+
+        team,
+                coach,
+                assignment,
+                allocatedHours,
+                year,
+                week
+            );
 
             hoursUsed += allocatedHours;
             continue;
