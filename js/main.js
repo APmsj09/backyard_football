@@ -2825,17 +2825,29 @@ function main() {
                 b.classList.remove('active', 'bg-slate-900', 'text-white', 'shadow-sm');
                 b.classList.add('text-slate-600');
             });
-            
+
             btn.classList.add('active', 'bg-slate-900', 'text-white', 'shadow-sm');
             btn.classList.remove('text-slate-600');
-            
+
             document.querySelectorAll('.fo-sub-pane').forEach(p => p.classList.add('hidden'));
             document.getElementById(`fo-pane-${btn.dataset.subTab}`)?.classList.remove('hidden');
-            
+
             if (gameState) {
-                if (btn.dataset.subTab === 'staff') UI.renderStaffTab(gameState);
-                if (btn.dataset.subTab === 'finances') window.app.renderStoreTab(gameState);
-                if (btn.dataset.subTab === 'social') renderSocialNetworkTab(gameState);
+                if (btn.dataset.subTab === 'staff') {
+                    UI.renderStaffTab(gameState);
+                }
+
+                if (btn.dataset.subTab === 'staff-market') {
+                    UI.renderStaffMarketTab?.(gameState);
+                }
+
+                if (btn.dataset.subTab === 'finances') {
+                    window.app.renderStoreTab(gameState);
+                }
+
+                if (btn.dataset.subTab === 'social') {
+                    renderSocialNetworkTab(gameState);
+                }
             }
         });
     });
