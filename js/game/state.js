@@ -774,11 +774,42 @@ export function finalizeGameResults(homeTeam, awayTeam, homeScore, awayScore) {
     });
 }
 
+function serializeActiveFaMarket(market) {
+    if (market instanceof Map) {
+        return Array.from(market.entries());
+    }
+
+    if (Array.isArray(market)) return market;
+
+    if (market && typeof market === 'object') {
+        return Object.entries(market);
+    }
+
+    return [];
+}
+
+function restoreActiveFaMarket(market) {
+    if (market instanceof Map) return market;
+
+    if (Array.isArray(market)) {
+        return new Map(
+            market.filter(entry => Array.isArray(entry) && entry.length === 2)
+        );
+    }
+
+    if (market && typeof market === 'object') {
+        return new Map(Object.entries(market));
+    }
+
+    return new Map();
+}
+
 const DEFAULT_SAVE_KEY = 'backyardFootballGameState';
 
 export function saveGameState(saveKey = DEFAULT_SAVE_KEY) {
     try {
         const dataToSave = { ...game };
+        dataToSave._activeFaMarket = serializeActiveFaMarket(game._activeFaMarket);
         delete dataToSave.relationships;
         delete dataToSave._faMarketCache;
 
@@ -852,6 +883,7 @@ export function saveGameState(saveKey = DEFAULT_SAVE_KEY) {
         try {
             // Emergency compression pass
             const dataToSave = { ...game };
+            dataToSave._activeFaMarket = serializeActiveFaMarket(game._activeFaMarket);
             delete dataToSave.relationships;
             delete dataToSave._faMarketCache;
             delete dataToSave.messages;
@@ -888,8 +920,9 @@ export function loadGameState(saveKey = DEFAULT_SAVE_KEY) {
     try {
         const saved = localStorage.getItem(saveKey);
         if (saved) {
-            const loaded = JSON.parse(saved);
+             const loaded = JSON.parse(saved);
             game = loaded;
+            game._activeFaMarket = restoreActiveFaMarket(game._activeFaMarket);
 
             playerMap.clear();
             if (Array.isArray(game.players)) {

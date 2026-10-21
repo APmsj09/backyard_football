@@ -3124,7 +3124,7 @@ function renderDepthChartSide(side, gameState) {
     benchTable.innerHTML = tableHtml;
 }
 
-window.app_openSlotModal = function (side, slotId) {
+/*window.app_openSlotModal = function (side, slotId) {
     const gs = getGameState();
     if (!gs?.playerTeam) return;
     const team = gs.playerTeam;
@@ -3225,7 +3225,9 @@ window.app_openSlotModal = function (side, slotId) {
     </div>`;
 
     showModal(`Assign Slot: ${side.toUpperCase()} ${slotId}`, modalHtml);
-};
+};*/
+
+window.app_openSlotModal = window.openSlotPicker;
 
 export function renderScheduleTab(gameState) {
     if (!elements.scheduleList || !gameState?.schedule) return;

@@ -1,7 +1,7 @@
-
 import { getTeamScoutingReport, setTeamScoutingReport } from './state.js';
 import { calculateOverall, positionOverallWeights } from './player.js';
 import { isPlayerViableForPosition } from './depth_chart.js';
+import { ensureTeamStaffWorkPlan, WEEKLY_COACH_HOURS } from './staff.js';
 
 const OFFENSE = ['QB', 'RB', 'WR', 'TE', 'OL'];
 const DEFENSE = ['DL', 'LB', 'DB'];
@@ -381,16 +381,11 @@ const STAFF_WORK_TASKS = new Set([
 ]);
 
 function getAvailableScoutingStaff(team) {
-    const members = [
-        ...(Array.isArray(team.coaches) ? team.coaches : []),
-        ...Object.values(team.staff || {}),
-        team.coach
-    ];
-
+    const coaches = Array.isArray(team.coaches) ? team.coaches : [];
     const unique = new Map();
 
-    for (const member of members) {
-        if (member?.id) unique.set(String(member.id), member);
+    for (const coach of coaches) {
+        if (coach?.id) unique.set(String(coach.id), coach);
     }
 
     return unique;
@@ -567,29 +562,10 @@ export function processWeeklyScoutingAssignments(
         return { playersUpdated: 0, hoursUsed: 0 };
     }
 
-    let plan = team.staffWorkPlan;
+    const plan = ensureTeamStaffWorkPlan(team);
 
     if (!plan || !Array.isArray(plan.assignments)) {
-        const defaultScout = team.staff?.scout ||
-            team.staff?.coach ||
-            team.coach;
-
-        if (!defaultScout?.id) {
-            return { playersUpdated: 0, hoursUsed: 0 };
-        }
-
-        plan = {
-            weeklyHoursPerCoach: 40,
-            assignments: [{
-                coachId: defaultScout.id,
-                task: 'scouting',
-                hours: 4,
-                focus: 'all',
-                maxTargets: 1
-            }]
-        };
-
-        team.staffWorkPlan = plan;
+        return { playersUpdated: 0, hoursUsed: 0 };
     }
 
     const scoutingAssignments = plan.assignments.filter(
@@ -611,8 +587,11 @@ export function processWeeklyScoutingAssignments(
 
     const staffById = getAvailableScoutingStaff(team);
     const weeklyHoursPerCoach = Number.isFinite(plan.weeklyHoursPerCoach)
-        ? Math.max(0, plan.weeklyHoursPerCoach)
-        : 40;
+        ? Math.max(0, Math.min(
+            WEEKLY_COACH_HOURS,
+            Math.floor(plan.weeklyHoursPerCoach)
+        ))
+        : WEEKLY_COACH_HOURS;
 
     const usedHoursByCoach = new Map();
     let playersUpdated = 0;

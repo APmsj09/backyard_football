@@ -88,14 +88,171 @@ export function generateStaffMember(role = 'coach', minAge = 25, maxAge = 55, fo
 
 export function initializeTeamStaff(team) {
     if (!team) return;
+
     team.staff = {
         gm: generateStaffMember('gm', 35, 60),
         coach: generateStaffMember('coach', 30, 55),
         scout: generateStaffMember('scout', 20, 50),
         trainer: generateStaffMember('trainer', 28, 55)
     };
-    Object.values(team.staff).forEach(s => { if (s) s.teamId = team.id; });
+
+    Object.values(team.staff).forEach(s => {
+        if (s) s.teamId = team.id;
+    });
+
     team.coach = team.staff.coach;
+
+    ensureTeamCoachingStaff(team);
+    ensureTeamStaffWorkPlan(team);
+}
+
+export const WEEKLY_COACH_HOURS = 40;
+
+export const STAFF_WORK_TASKS = Object.freeze({
+    SCOUTING: 'scouting',
+    TRAINING: 'training',
+    OFFENSE_PREP: 'offensePrep',
+    DEFENSE_PREP: 'defensePrep'
+});
+
+/**
+ * Creates the flexible coaching group while preserving legacy staff references.
+ *
+ * Main teams receive three staff coaches. The player-controlled team also
+ * receives a user-coach profile, representing the player's coaching time.
+ */
+export function ensureTeamCoachingStaff(team) {
+    if (!team) return [];
+
+    const candidates = [
+        ...(Array.isArray(team.coaches) ? team.coaches : []),
+        team.staff?.coach,
+        team.staff?.scout,
+        team.staff?.trainer,
+        team.coach
+    ];
+
+    const npcCoaches = [];
+    const seenIds = new Set();
+
+    for (const candidate of candidates) {
+        if (
+            !candidate?.id ||
+            candidate.isUserCoach ||
+            seenIds.has(String(candidate.id))
+        ) {
+            continue;
+        }
+
+        seenIds.add(String(candidate.id));
+        npcCoaches.push(candidate);
+
+        if (npcCoaches.length >= 3) break;
+    }
+
+    while (npcCoaches.length < 3) {
+        const coach = generateStaffMember('coach', 30, 55);
+        coach.teamId = team.id;
+        npcCoaches.push(coach);
+    }
+
+    npcCoaches.forEach(coach => {
+        coach.teamId = team.id;
+    });
+
+    if (!team.isPlayerControlled) {
+        team.coaches = npcCoaches;
+        return team.coaches;
+    }
+
+    const existingUserCoach =
+        (Array.isArray(team.coaches)
+            ? team.coaches.find(coach => coach?.isUserCoach)
+            : null) ||
+        team.userCoachProfile ||
+        {};
+
+    const userCoach = {
+        ...existingUserCoach,
+        id: existingUserCoach.id || `user-coach-${team.id}`,
+        name: existingUserCoach.name || 'You',
+        role: 'user-coach',
+        isUserCoach: true,
+        teamId: team.id,
+        ratings: {
+            evalPhysicals: 50,
+            evalTechnique: 50,
+            evalCharacter: 50,
+            offSchemeMastery: 50,
+            defSchemeMastery: 50,
+            gameplanInstinct: 50,
+            inGameAdjustments: 50,
+            teaching: 50,
+            practiceDiscipline: 50,
+            conditioning: 50,
+            ...(existingUserCoach.ratings || {})
+        },
+        biases: {
+            ...(existingUserCoach.biases || {}),
+            scouting: existingUserCoach.biases?.scouting ||
+                { name: 'Objective Scout' },
+            tactical: existingUserCoach.biases?.tactical ||
+                { name: 'Balanced Tactician' },
+            personality: existingUserCoach.biases?.personality ||
+                { name: 'Analytical Savant' }
+        }
+    };
+
+    team.userCoachProfile = userCoach;
+    team.coaches = [...npcCoaches, userCoach];
+
+    return team.coaches;
+}
+
+/**
+ * Creates a persisted default work plan for existing and new teams.
+ * Existing player-configured assignments are preserved.
+ */
+export function ensureTeamStaffWorkPlan(team) {
+    if (!team) return null;
+
+    const coaches = ensureTeamCoachingStaff(team);
+    let plan = team.staffWorkPlan;
+
+    if (!plan || !Array.isArray(plan.assignments)) {
+        const defaultScout = team.staff?.scout ||
+            coaches.find(coach => !coach.isUserCoach);
+
+        plan = {
+            version: 1,
+            weeklyHoursPerCoach: WEEKLY_COACH_HOURS,
+            assignments: defaultScout?.id
+                ? [{
+                    coachId: defaultScout.id,
+                    task: STAFF_WORK_TASKS.SCOUTING,
+                    hours: 4,
+                    focus: 'all',
+                    maxTargets: 1
+                }]
+                : []
+        };
+
+        team.staffWorkPlan = plan;
+    }
+
+    const configuredHours = Number(plan.weeklyHoursPerCoach);
+
+    plan.weeklyHoursPerCoach = Number.isFinite(configuredHours) &&
+        configuredHours > 0
+        ? Math.min(
+            WEEKLY_COACH_HOURS,
+            Math.floor(configuredHours)
+        )
+        : WEEKLY_COACH_HOURS;
+
+    plan.version = 1;
+
+    return plan;
 }
 
 export function generateStaffPool(count = 8) {

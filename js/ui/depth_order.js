@@ -1,123 +1,7 @@
 import * as Game from '../game.js';
-import { getGameState, saveGameState, getPlayer } from '../game/state.js';
-import { positionOverallWeights, estimateBestPosition, calculateOverall } from '../game/player.js';
-import { formatHeight } from '../utils.js';
-import { isPlayerViableForPosition } from '../game/depth_chart.js';
-
-let depthOrderSortCol = 'overall';
-let depthOrderSortDir = 'desc';
-let activeDepthOrderTab = 'QB';
-
-const OFFENSIVE_POSITION_FITS = ['QB', 'RB', 'WR', 'TE', 'OL'];
-const DEFENSIVE_POSITION_FITS = ['DL', 'LB', 'DB'];
-
-function getBestPositionFit(player, positions) {
-    if (!player) return { position: '—', ovr: 0 };
-
-    const eligiblePositions = positions.filter(position =>
-        positionOverallWeights[position] &&
-        isPlayerViableForPosition(player, position)
-    );
-
-    // Preserve a usable recommendation if no position passes the viability check.
-    const positionsToEvaluate = eligiblePositions.length > 0
-        ? eligiblePositions
-        : positions.filter(position => positionOverallWeights[position]);
-
-    const ratings = positionsToEvaluate.map(position => ({
-        position,
-        ovr: calculateOverall(player, position)
-    }));
-
-    ratings.sort((a, b) => b.ovr - a.ovr);
-
-    return ratings[0] || { position: '—', ovr: 0 };
-}
-
-function getStat(player, attrKey) {
-    if (!player || !player.attributes) return '-';
-    if (attrKey === 'height') return formatHeight(player.attributes.physical?.height);
-    if (attrKey === 'weight') return player.attributes.physical?.weight || '-';
-    // Clean fallback to strength if throwPower is not yet set
-    if (attrKey === 'throwPower') return player.attributes.technical?.throwPower ?? player.attributes.physical?.strength ?? '-';
-    if (player.attributes.physical?.[attrKey] !== undefined) return player.attributes.physical[attrKey];
-    if (player.attributes.mental?.[attrKey] !== undefined) return player.attributes.mental[attrKey];
-    if (player.attributes.technical?.[attrKey] !== undefined) return player.attributes.technical[attrKey];
-    return '-';
-}
-
-function createDepthCardHTML(player, index, groupKey, baseGroupKey = null) {
-    if (!player || !player.attributes) {
-        return { className: 'hidden', innerHTML: '' };
-    }
-
-    const calcPos = baseGroupKey || groupKey.replace(/\d/g, '');
-    const ovr = calculateOverall(player, calcPos);
-    let isStarterZone = false;
-
-    if (/\d/.test(groupKey)) {
-        if (index === 0) isStarterZone = true;
-    } else {
-        if (groupKey === 'QB' && index === 0) isStarterZone = true;
-        else if (groupKey === 'RB' && index === 0) isStarterZone = true;
-        else if (groupKey === 'WR' && index <= 2) isStarterZone = true;
-        else if (groupKey === 'OL' && index <= 2) isStarterZone = true;
-        else if (groupKey === 'TE' && index === 0) isStarterZone = true;
-        else if (groupKey === 'DL' && index <= 2) isStarterZone = true; // 8-man base front starts 3 DLs
-        else if (groupKey === 'LB' && index <= 1) isStarterZone = true; // Base starts 2 LBs
-        else if (groupKey === 'DB' && index <= 2) isStarterZone = true; // Base starts 3 DBs (up to 5 in dime)
-    }
-
-    const rankStyle = isStarterZone ? 'border-l-4 border-green-500' : 'border-l-4 border-gray-300';
-    const badge = isStarterZone ? '<span class="ml-2 text-[10px] bg-green-100 text-green-800 px-1 rounded font-bold shadow-sm border border-green-200">START</span>' : '';
-
-    let keyAttrs = [];
-    if (positionOverallWeights[calcPos]) {
-        keyAttrs = Object.entries(positionOverallWeights[calcPos])
-            .sort((a, b) => b[1] - a[1])
-            .slice(0, 3)
-            .map(entry => entry[0]);
-    }
-
-    const attrMap = {
-        throwingAccuracy: 'ACC', throwPower: 'POW', playbookIQ: 'IQ', strength: 'STR',
-        speed: 'SPD', agility: 'AGI', catchingHands: 'HND',
-        blocking: 'BLK', tackling: 'TKL', blockShedding: 'BSH',
-        stamina: 'STA', toughness: 'TGH'
-    };
-
-    const attrString = keyAttrs.map(k => {
-        const val = getStat(player, k);
-        return `<span class="mr-2"><span class="text-gray-400 font-semibold">${attrMap[k] || k.substring(0, 3).toUpperCase()}:</span> <span class="text-gray-700 font-medium">${val}</span></span>`;
-    }).join('');
-
-    return {
-        className: `depth-order-item bg-white hover:bg-amber-50 p-2 rounded border border-gray-200 shadow-sm cursor-move flex items-center justify-between relative group ${rankStyle}`,
-        innerHTML: `
-            <div class="flex items-center gap-3 flex-grow overflow-hidden">
-                <span class="text-lg font-bold text-gray-400 w-6 text-center rank-number">${index + 1}</span>
-                <div class="flex flex-col truncate">
-                    <div class="flex items-center">
-                        <span class="font-bold text-gray-800 text-sm truncate">${player.name}</span>
-                        ${badge}
-                    </div>
-                    <div class="text-[10px] flex mt-0.5">${attrString}</div>
-                </div>
-            </div>
-            <div class="flex flex-col items-end pl-2">
-                <button class="remove-depth-item text-gray-300 hover:text-red-500 font-bold text-lg leading-none mb-1 opacity-0 group-hover:opacity-100 transition-opacity" 
-                        title="Remove from depth chart"
-                        data-player-id="${player.id}" 
-                        data-group="${groupKey}">
-                    &times;
-                </button>
-                <div class="text-right">
-                    <span class="text-lg font-bold ${ovr >= 80 ? 'text-green-600' : 'text-gray-600'}">${ovr}</span>
-                    <div class="text-[9px] text-gray-400 uppercase font-bold">OVR</div>
-                </div>
-            </div>`
-    };
-}
+import { getGameState, saveGameState } from '../game/state.js';
+import { calculateOverall, estimateBestPosition } from '../game/player.js';
+import { showModal, hideModal } from '../ui.js';
 
 export function renderDepthOrderPane(gameState) {
     const pane = document.getElementById("depth-order-container");
@@ -233,52 +117,209 @@ export function renderDepthOrderPane(gameState) {
     `;
 }
 
-// Slot Selection Modal
-window.openSlotPicker = function(slot, side) {
+// Position-specific key skills to display in the swap modal
+const POSITION_KEY_SKILLS = {
+    QB: [
+        { label: 'ACC', get: p => p.attributes?.technical?.throwingAccuracy ?? 50 },
+        { label: 'POW', get: p => p.attributes?.technical?.throwPower ?? p.attributes?.physical?.strength ?? 50 },
+        { label: 'IQ',  get: p => p.attributes?.mental?.playbookIQ ?? 50 },
+        { label: 'SPD', get: p => p.attributes?.physical?.speed ?? 50 }
+    ],
+    RB: [
+        { label: 'SPD', get: p => p.attributes?.physical?.speed ?? 50 },
+        { label: 'AGI', get: p => p.attributes?.physical?.agility ?? 50 },
+        { label: 'STR', get: p => p.attributes?.physical?.strength ?? 50 },
+        { label: 'HND', get: p => p.attributes?.technical?.catchingHands ?? 50 }
+    ],
+    WR: [
+        { label: 'SPD', get: p => p.attributes?.physical?.speed ?? 50 },
+        { label: 'HND', get: p => p.attributes?.technical?.catchingHands ?? 50 },
+        { label: 'AGI', get: p => p.attributes?.physical?.agility ?? 50 },
+        { label: 'IQ',  get: p => p.attributes?.mental?.playbookIQ ?? 50 }
+    ],
+    TE: [
+        { label: 'HND', get: p => p.attributes?.technical?.catchingHands ?? 50 },
+        { label: 'BLK', get: p => p.attributes?.technical?.blocking ?? 50 },
+        { label: 'STR', get: p => p.attributes?.physical?.strength ?? 50 },
+        { label: 'SPD', get: p => p.attributes?.physical?.speed ?? 50 }
+    ],
+    OL: [
+        { label: 'STR', get: p => p.attributes?.physical?.strength ?? 50 },
+        { label: 'BLK', get: p => p.attributes?.technical?.blocking ?? 50 },
+        { label: 'WGT', get: p => `${p.attributes?.physical?.weight ?? 180}#` },
+        { label: 'IQ',  get: p => p.attributes?.mental?.playbookIQ ?? 50 }
+    ],
+    DL: [
+        { label: 'STR', get: p => p.attributes?.physical?.strength ?? 50 },
+        { label: 'BSH', get: p => p.attributes?.technical?.blockShedding ?? 50 },
+        { label: 'TKL', get: p => p.attributes?.technical?.tackling ?? 50 },
+        { label: 'SPD', get: p => p.attributes?.physical?.speed ?? 50 }
+    ],
+    LB: [
+        { label: 'TKL', get: p => p.attributes?.technical?.tackling ?? 50 },
+        { label: 'SPD', get: p => p.attributes?.physical?.speed ?? 50 },
+        { label: 'IQ',  get: p => p.attributes?.mental?.playbookIQ ?? 50 },
+        { label: 'STR', get: p => p.attributes?.physical?.strength ?? 50 }
+    ],
+    DB: [
+        { label: 'SPD', get: p => p.attributes?.physical?.speed ?? 50 },
+        { label: 'COV', get: p => (p.attributes?.technical?.coverage || p.attributes?.technical?.passCoverage) ?? 50 },
+        { label: 'TKL', get: p => p.attributes?.technical?.tackling ?? 50 },
+        { label: 'HND', get: p => p.attributes?.technical?.catchingHands ?? 50 }
+    ]
+};
+
+window.openSlotPicker = function(arg1, arg2) {
+    // 1. Normalize arguments so order doesn't matter: (side, slot) or (slot, side)
+    const isFirstSide = (arg1 === 'offense' || arg1 === 'defense');
+    const side = isFirstSide ? arg1 : arg2;
+    const slot = isFirstSide ? arg2 : arg1;
+
     const gs = getGameState();
     const team = gs?.playerTeam;
-    if (!team) return;
+    if (!team || !side || !slot) return;
 
     const roster = Game.getRosterObjects(team);
     const posKey = slot.replace(/\d/g, '');
     const activeChart = side === 'offense' ? team.depthChart.offense : team.depthChart.defense;
+    const otherSide = side === 'offense' ? 'defense' : 'offense';
+    const otherChart = team.depthChart[otherSide] || {};
+    
     const currentStarterId = activeChart[slot];
+    const currentStarter = roster.find(p => p.id === currentStarterId);
+    const currentStarterOvr = currentStarter ? calculateOverall(currentStarter, posKey) : null;
 
-    // Rank candidates by their suitability for this specific position
-    const candidates = roster.map(p => ({
-        player: p,
-        ovr: calculateOverall(p, posKey),
-        isCurrentStarter: p.id === currentStarterId,
-        alreadyActiveOnThisSide: Object.values(activeChart).includes(p.id) && p.id !== currentStarterId
-    })).sort((a, b) => b.ovr - a.ovr);
+    const skillConfigs = POSITION_KEY_SKILLS[posKey] || POSITION_KEY_SKILLS['WR'];
+
+    // Rank all players by suitability for this position
+    const candidates = roster.map(p => {
+        const ovr = calculateOverall(p, posKey);
+        const isCurrentStarter = p.id === currentStarterId;
+        const existingSlotThisSide = Object.entries(activeChart).find(([s, id]) => id === p.id && s !== slot)?.[0] || null;
+        const startsOnOtherSide = Object.entries(otherChart).find(([_, id]) => id === p.id)?.[0] || null;
+
+        return {
+            player: p,
+            ovr,
+            isCurrentStarter,
+            existingSlotThisSide,
+            startsOnOtherSide,
+            delta: currentStarterOvr !== null && !isCurrentStarter ? (ovr - currentStarterOvr) : 0
+        };
+    }).sort((a, b) => b.ovr - a.ovr);
 
     const modalHtml = `
-        <div class="space-y-2 max-h-[60vh] overflow-y-auto text-xs">
-            <p class="text-slate-600 mb-2">Select a player to start at <b>${slot}</b> (${posKey}). Players already starting elsewhere on ${side} are flagged.</p>
-            ${candidates.map(({ player, ovr, isCurrentStarter, alreadyActiveOnThisSide }) => `
-                <div class="flex justify-between items-center p-2 rounded border ${isCurrentStarter ? 'bg-amber-50 border-amber-300' : 'bg-white border-slate-200 hover:bg-slate-50'} transition">
-                    <div>
-                        <div class="flex items-center gap-2">
-                            <span class="font-bold text-slate-900">${player.name}</span>
-                            ${isCurrentStarter ? '<span class="text-[9px] bg-amber-200 text-amber-900 px-1 rounded font-bold">Current Starter</span>' : ''}
-                            ${alreadyActiveOnThisSide ? '<span class="text-[9px] bg-rose-100 text-rose-800 px-1 rounded font-bold">⚠️ Already Starting on ' + (side === 'offense' ? 'OFF' : 'DEF') + '</span>' : ''}
-                        </div>
-                        <span class="text-[10px] text-slate-500">Age: ${player.age} • SPD: ${player.attributes?.physical?.speed || 0} • STR: ${player.attributes?.physical?.strength || 0}</span>
+        <div class="space-y-3 text-xs text-left font-sans">
+            <!-- Modal Subheader with Position Context -->
+            <div class="bg-slate-900 text-white p-3 rounded flex justify-between items-center shadow-sm">
+                <div>
+                    <div class="flex items-center gap-2">
+                        <span class="font-black text-sm uppercase text-amber-400">${side.toUpperCase()} ${slot}</span>
+                        <span class="text-slate-400 font-mono text-[11px]">(${posKey} Position)</span>
                     </div>
-                    <div class="flex items-center gap-3">
-                        <span class="text-base font-black text-slate-800">${ovr} <span class="text-[9px] text-slate-400 font-normal">OVR</span></span>
-                        <button class="bg-slate-900 hover:bg-slate-800 text-white font-bold px-3 py-1 rounded text-xs uppercase"
-                                onclick="window.commitSlotAssignment('${player.id}', '${slot}', '${side}')">
-                            ${isCurrentStarter ? 'Keep' : (alreadyActiveOnThisSide ? 'Swap' : 'Assign')}
-                        </button>
-                    </div>
+                    <p class="text-[10px] text-slate-300 font-mono mt-0.5">
+                        Key Skills: <b class="text-white">${skillConfigs.map(s => s.label).join(' • ')}</b>
+                    </p>
                 </div>
-            `).join('')}
+                <div class="flex items-center gap-2">
+                    ${currentStarter ? `
+                    <div class="text-right border-r border-slate-700 pr-3 mr-1">
+                        <span class="text-[9px] uppercase tracking-wider text-slate-400 block">Current Starter</span>
+                        <span class="font-bold text-slate-200 text-xs">${currentStarter.name} (${currentStarterOvr})</span>
+                    </div>` : ''}
+                    <button class="bg-rose-900/60 hover:bg-rose-800 text-rose-200 border border-rose-700 text-[10px] font-bold px-2 py-1 rounded uppercase tracking-wider"
+                            onclick="window.commitSlotAssignment('', '${slot}', '${side}')">
+                        Vacate Slot
+                    </button>
+                </div>
+            </div>
+
+            <!-- Candidate Roster List -->
+            <div class="space-y-2 max-h-[60vh] overflow-y-auto pr-1">
+                ${candidates.map(({ player, ovr, isCurrentStarter, existingSlotThisSide, startsOnOtherSide, delta }) => {
+                    const natPos = player.pos || estimateBestPosition(player);
+                    const energy = Math.max(0, Math.round(100 - (player.fatigue || 0)));
+                    const energyColor = energy >= 75 ? 'bg-emerald-500' : (energy >= 50 ? 'bg-amber-500' : 'bg-rose-500');
+                    const isInjured = player.status?.duration > 0;
+
+                    // Build skill stat pills with color highlights for high ratings (>= 70)
+                    const skillPillsHtml = skillConfigs.map(cfg => {
+                        const val = cfg.get(player);
+                        const isHigh = typeof val === 'number' && val >= 70;
+                        const isMid = typeof val === 'number' && val >= 55;
+                        const valColor = isHigh ? 'text-emerald-700 font-black' : (isMid ? 'text-slate-900 font-bold' : 'text-slate-500');
+                        return `
+                            <span class="bg-slate-100 border border-slate-200 px-1.5 py-0.5 rounded text-[10px]">
+                                <span class="text-slate-400 font-normal">${cfg.label}:</span>
+                                <b class="${valColor}">${val}</b>
+                            </span>`;
+                    }).join('');
+
+                    // Delta badge (+4 / -3 OVR vs current starter)
+                    let deltaBadge = '';
+                    if (!isCurrentStarter && currentStarterOvr !== null) {
+                        if (delta > 0) deltaBadge = `<span class="text-[10px] font-mono font-bold text-emerald-600 bg-emerald-50 px-1 rounded border border-emerald-200">+${delta}</span>`;
+                        else if (delta < 0) deltaBadge = `<span class="text-[10px] font-mono text-slate-400">${delta}</span>`;
+                        else deltaBadge = `<span class="text-[10px] font-mono text-slate-400">EVEN</span>`;
+                    }
+
+                    const cardBg = isCurrentStarter
+                        ? 'bg-amber-50/70 border-amber-300'
+                        : (existingSlotThisSide ? 'bg-blue-50/30 border-blue-200 hover:border-blue-400' : 'bg-white border-slate-200 hover:border-slate-400');
+
+                    return `
+                    <div class="p-2.5 rounded border ${cardBg} shadow-sm flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 transition">
+                        <!-- Left: Identity & Status Badges -->
+                        <div class="flex-1 min-w-0">
+                            <div class="flex items-center gap-2 flex-wrap">
+                                <span class="font-bold text-slate-900 text-xs">${player.name}</span>
+                                <span class="text-[9px] bg-slate-100 text-slate-700 font-mono font-bold px-1.5 py-0.2 rounded border">#${player.number || '--'} • Nat: ${natPos}</span>
+                                ${isCurrentStarter ? '<span class="text-[8.5px] bg-amber-200 text-amber-900 font-black px-1.5 py-0.2 rounded uppercase">Current Starter</span>' : ''}
+                                ${existingSlotThisSide ? `<span class="text-[8.5px] bg-blue-100 text-blue-900 border border-blue-300 font-black px-1.5 py-0.2 rounded uppercase">⇄ Starts at ${existingSlotThisSide} (Swap)</span>` : ''}
+                                ${startsOnOtherSide ? `<span class="text-[8.5px] bg-indigo-100 text-indigo-900 border border-indigo-200 font-bold px-1.5 py-0.2 rounded">⚡ ${startsOnOtherSide} (${otherSide.substring(0,3).toUpperCase()})</span>` : ''}
+                                ${isInjured ? `<span class="text-[8.5px] bg-rose-100 text-rose-800 font-bold px-1 rounded">🩹 Out ${player.status.duration}w</span>` : ''}
+                            </div>
+
+                            <!-- Middle: Position-Specific Key Skills & Stamina -->
+                            <div class="flex flex-wrap items-center gap-1.5 mt-2 font-mono text-[10px]">
+                                <div class="flex items-center gap-1 mr-2">
+                                    <span class="text-slate-400 text-[9px] uppercase">Energy:</span>
+                                    <div class="w-10 bg-slate-200 rounded-full h-1.5 overflow-hidden">
+                                        <div class="${energyColor} h-full" style="width: ${energy}%"></div>
+                                    </div>
+                                    <span class="${energy < 60 ? 'text-rose-600 font-bold' : 'text-slate-600'} text-[10px]">${energy}%</span>
+                                </div>
+                                ${skillPillsHtml}
+                            </div>
+                        </div>
+
+                        <!-- Right: Overall Rating & Action Button -->
+                        <div class="flex items-center gap-3 shrink-0 self-end sm:self-center pl-2">
+                            <div class="text-right">
+                                <div class="flex items-baseline justify-end gap-1">
+                                    <span class="text-base font-black ${ovr >= 70 ? 'text-emerald-700' : 'text-slate-800'}">${ovr}</span>
+                                    ${deltaBadge}
+                                </div>
+                                <span class="text-[8px] text-slate-400 font-bold uppercase block -mt-1">${posKey} OVR</span>
+                            </div>
+
+                            <button class="bg-slate-900 hover:bg-slate-800 text-white font-black px-3.5 py-1.5 rounded text-xs uppercase tracking-wider shadow-sm transition"
+                                    onclick="window.commitSlotAssignment('${player.id}', '${slot}', '${side}')">
+                                ${isCurrentStarter ? 'Keep' : (existingSlotThisSide ? 'Swap' : 'Assign')}
+                            </button>
+                        </div>
+                    </div>`;
+                }).join('')}
+            </div>
         </div>
     `;
 
-    Game.showModal(`Assign Starter for ${slot}`, modalHtml);
+    // FIX: Using showModal from ui.js instead of undefined Game.showModal
+    showModal(`Assign Starter for ${side.toUpperCase()} ${slot}`, modalHtml);
 };
+
+// Safe alias for ui.js visual field circles
+window.app_openSlotModal = window.openSlotPicker;
 
 window.commitSlotAssignment = function(playerId, slot, side) {
     const gs = getGameState();
@@ -288,7 +329,10 @@ window.commitSlotAssignment = function(playerId, slot, side) {
     Game.assignPlayerToSlot(team, playerId, slot, side);
     Game.rebuildDepthChartFromOrder(team);
     saveGameState();
-    Game.hideModal();
+    
+    // FIX: Using hideModal from ui.js instead of undefined Game.hideModal
+    hideModal();
+    
     renderDepthOrderPane(gs);
     document.dispatchEvent(new CustomEvent('refresh-ui'));
 };
@@ -316,131 +360,4 @@ window.resetDepthChartOverrides = function() {
     saveGameState();
     renderDepthOrderPane(gs);
     document.dispatchEvent(new CustomEvent('refresh-ui'));
-};
-
-export function setupDepthOrderDragEvents() {
-    const pane = document.getElementById('depth-order-container');
-    if (!pane) return;
-
-    if (pane.dataset.depthOrderEventsAttached !== '1') {
-        pane.addEventListener('click', (e) => {
-            const removeBtn = e.target.closest('.remove-depth-item');
-            if (removeBtn) {
-                const pid = removeBtn.dataset.playerId;
-                const group = removeBtn.dataset.group;
-                const gs = getGameState();
-                if (gs?.playerTeam?.depthOrder?.[group]) {
-                    const order = gs.playerTeam.depthOrder[group];
-                    const index = order.indexOf(pid);
-
-                    if (index !== -1) {
-                        order.splice(index, 1);
-                        order.push(pid);
-
-                        applyDepthOrderToChart();
-                    }
-                }
-            }
-        });
-        pane.dataset.depthOrderEventsAttached = '1';
-    }
-
-    const draggables = pane.querySelectorAll('.depth-order-item, .roster-row-item');
-    const containers = pane.querySelectorAll('.depth-sortable-list');
-
-    draggables.forEach(draggable => {
-        draggable.ondragstart = (e) => {
-            e.dataTransfer.effectAllowed = 'copyMove';
-            e.dataTransfer.setData('text/plain', draggable.dataset.playerId);
-            draggable.classList.add('opacity-50');
-        };
-        draggable.ondragend = () => {
-            draggable.classList.remove('opacity-50');
-        };
-    });
-
-    containers.forEach(container => {
-        container.ondragover = (e) => {
-            e.preventDefault();
-            e.dataTransfer.dropEffect = 'move';
-        };
-
-        container.ondrop = (e) => {
-            e.preventDefault();
-
-            const playerId = e.dataTransfer.getData('text/plain');
-            const groupKey = container.dataset.group;
-
-            if (!playerId || !groupKey) return;
-
-            const gs = getGameState();
-            if (!gs?.playerTeam?.depthOrder) return;
-
-            const player = getPlayer(playerId);
-
-            if (!player || !isPlayerViableForPosition(player, groupKey)) {
-                alert(
-                    `${player?.name || 'That player'} is not eligible for the ${groupKey} depth group.`
-                );
-                return;
-            }
-
-            const targetOrder = gs.playerTeam.depthOrder[groupKey] || [];
-            const targetItem = e.target.closest('.depth-order-item');
-
-            // Dropping a player onto itself should not change their rank.
-            if (targetItem && targetItem.dataset.playerId === playerId) {
-                return;
-            }
-
-            // Default to the bottom if dropped into empty space.
-            let insertAt = targetOrder.length;
-
-            if (targetItem && container.contains(targetItem)) {
-                const targetId = targetItem.dataset.playerId;
-                const targetIndex = targetOrder.indexOf(targetId);
-
-                if (targetIndex >= 0) {
-                    const rect = targetItem.getBoundingClientRect();
-                    const dropBelowMidpoint =
-                        e.clientY > rect.top + rect.height / 2;
-
-                    insertAt = targetIndex + (dropBelowMidpoint ? 1 : 0);
-                }
-            }
-
-            // Remove any existing entry in this group before reinserting.
-            const existingIndex = targetOrder.indexOf(playerId);
-
-            if (existingIndex >= 0) {
-                targetOrder.splice(existingIndex, 1);
-
-                if (existingIndex < insertAt) {
-                    insertAt--;
-                }
-            }
-
-            insertAt = Math.max(0, Math.min(insertAt, targetOrder.length));
-            targetOrder.splice(insertAt, 0, playerId);
-
-            gs.playerTeam.depthOrder[groupKey] = targetOrder;
-
-            applyDepthOrderToChart();
-        };
-    });
-}
-
-function applyDepthOrderToChart() {
-    const gs = getGameState();
-    if (!gs?.playerTeam) return;
-    Game.rebuildDepthChartFromOrder(gs.playerTeam);
-    saveGameState();
-    renderDepthOrderPane(gs);
-    document.dispatchEvent(new CustomEvent('refresh-ui'));
-}
-
-window.app_switchDepthTab = function (pos) {
-    activeDepthOrderTab = pos;
-    const gs = getGameState();
-    if (gs) renderDepthOrderPane(gs);
 };
