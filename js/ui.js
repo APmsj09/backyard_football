@@ -2035,6 +2035,14 @@ export function renderStaffTab(gameState) {
         const staff = gameState.availableStaff.find(s => s.id === staffId);
         if (!staff) return;
 
+        Game.ensureTeamCoachingStaff?.(team);
+
+        const currentStaffCoaches = (
+            Array.isArray(team.coaches) ? team.coaches : []
+        ).filter(coach =>
+            coach?.id != null && !coach.isUserCoach
+        ).slice(0, 3);
+
         const tokensAvailable = team.socialProfile?.favorTokens || 0;
         const roleLabels = { coach: 'Head Coach', scout: 'Park Scout', trainer: 'Sideline Trainer' };
         const roleName = roleLabels[roleKey] || roleKey.toUpperCase();
@@ -2065,6 +2073,31 @@ export function renderStaffTab(gameState) {
                 <div class="bg-slate-50 border border-slate-200 p-2.5 rounded text-slate-700 italic text-[11px]">
                     "${staff.biases.tactical?.desc || staff.biases.personality.desc}"
                 </div>
+
+                ${isHeadCoach ? `
+                <div class="rounded border border-blue-200 bg-blue-50 p-3">
+                    <label
+                        for="staff-replacement-coach"
+                        class="block text-[10px] font-black uppercase tracking-wider text-blue-900 mb-1">
+                        Replace Which Coach?
+                    </label>
+
+                    <select
+                        id="staff-replacement-coach"
+                        class="w-full p-2 border border-blue-300 rounded bg-white text-xs font-bold text-slate-800">
+                        ${currentStaffCoaches.map((coach, index) => `
+                            <option value="${coach.id}">
+                                ${coach.name || `Staff Coach ${index + 1}`}
+                            </option>
+                        `).join('')}
+                    </select>
+
+                    <p class="text-[10px] text-blue-800 mt-2">
+                        The selected coach will return to the free-agent market
+                        if this candidate accepts.
+                    </p>
+                </div>
+                ` : ''}
 
                 <!-- Deep Pitch Options -->
                 <div class="space-y-2.5">
@@ -2125,8 +2158,16 @@ export function renderStaffTab(gameState) {
             const cashOffered = parseFloat(document.getElementById('staff-pitch-cash')?.value || '0');
             const schemePromise = document.getElementById('staff-scheme-promise')?.value || 'GM_CHOICE';
             const practiceFocus = document.getElementById('staff-practice-focus')?.value || 'BALANCED';
+            const replacementCoachId =
+                document.getElementById('staff-replacement-coach')?.value || '';
 
-            const pitch = { tokensOffered, cashOffered, schemePromise, practiceFocus };
+            const pitch = {
+                tokensOffered,
+                cashOffered,
+                schemePromise,
+                practiceFocus,
+                replacementCoachId
+            };
             const negotiation = Game.evaluateStaffNegotiation(staff, team, roleKey, pitch);
 
             const resultHtml = `
@@ -2152,6 +2193,36 @@ export function renderStaffTab(gameState) {
             `;
 
             if (negotiation.accepted) {
+                const activeCoaches = Array.isArray(team.coaches)
+                    ? team.coaches
+                    : [];
+
+                let replacementCoachSlot = -1;
+                let outgoingCoach = null;
+
+                if (roleKey === 'coach') {
+                    replacementCoachSlot = activeCoaches.findIndex(coach =>
+                        coach &&
+                        !coach.isUserCoach &&
+                        replacementCoachId !== '' &&
+                        String(coach.id) === String(replacementCoachId)
+                    );
+
+                    if (replacementCoachSlot < 0) {
+                        showModal(
+                            'Coach No Longer Available',
+                            'The selected coach could not be found. Close this offer and select a current staff coach.',
+                            null,
+                            null,
+                            null,
+                            'Close'
+                        );
+                        return;
+                    }
+
+                    outgoingCoach = activeCoaches[replacementCoachSlot];
+                }
+
                 if (tokensOffered > 0) {
                     team.socialProfile.favorTokens = Math.max(0, team.socialProfile.favorTokens - tokensOffered);
                 }
@@ -2159,52 +2230,13 @@ export function renderStaffTab(gameState) {
                     team.finances.balance = Math.max(0, team.finances.balance - cashOffered);
                 }
 
+
                 const oldStaff = team.staff?.[roleKey] || null;
 
-                // Ensure the new coaching group has been initialized.
-                Game.ensureTeamCoachingStaff?.(team);
-
-                if (!Array.isArray(team.coaches)) {
-                    team.coaches = [];
-                }
-
-                const currentCoaches = team.coaches;
-
-                // Keep the legacy hiring buttons working temporarily:
-                // Coach -> slot 1, Scout -> slot 2, Trainer -> slot 3.
-                const preferredSlotByRole = {
-                    coach: 0,
-                    scout: 1,
-                    trainer: 2
-                };
-
-                let coachSlot = oldStaff?.id != null
-                    ? currentCoaches.findIndex(coach =>
-                        String(coach?.id) === String(oldStaff.id)
-                    )
-                    : -1;
-
-                if (coachSlot < 0) {
-                    const preferredSlot = preferredSlotByRole[roleKey];
-
-                    if (
-                        Number.isInteger(preferredSlot) &&
-                        currentCoaches[preferredSlot] &&
-                        !currentCoaches[preferredSlot].isUserCoach
-                    ) {
-                        coachSlot = preferredSlot;
-                    }
-                }
-
-                if (coachSlot < 0) {
-                    coachSlot = currentCoaches.findIndex(
-                        coach => coach && !coach.isUserCoach
-                    );
-                }
-
-                const addToFreeAgents = outgoingStaff => {
+                const returnToMarket = outgoingStaff => {
                     if (
                         !outgoingStaff ||
+                        outgoingStaff.id == null ||
                         String(outgoingStaff.id) === String(staff.id)
                     ) {
                         return;
@@ -2212,10 +2244,13 @@ export function renderStaffTab(gameState) {
 
                     outgoingStaff.teamId = null;
 
+                    if (!Array.isArray(gameState.availableStaff)) {
+                        gameState.availableStaff = [];
+                    }
+
                     const alreadyAvailable = gameState.availableStaff.some(
                         candidate =>
-                            String(candidate.id) ===
-                            String(outgoingStaff.id)
+                            String(candidate.id) === String(outgoingStaff.id)
                     );
 
                     if (!alreadyAvailable) {
@@ -2223,19 +2258,25 @@ export function renderStaffTab(gameState) {
                     }
                 };
 
-                const outgoingCoach = coachSlot >= 0
-                    ? currentCoaches[coachSlot]
-                    : null;
+                if (roleKey === 'coach') {
+                    returnToMarket(outgoingCoach);
 
-                // Release the legacy role holder and the displaced coach,
-                // without adding duplicate candidates to the market.
-                addToFreeAgents(oldStaff);
+                    const oldStaffStillCoaching = activeCoaches.some(
+                        coach =>
+                            coach &&
+                            oldStaff?.id != null &&
+                            String(coach.id) === String(oldStaff.id)
+                    );
 
-                if (
-                    outgoingCoach &&
-                    String(outgoingCoach.id) !== String(oldStaff?.id)
-                ) {
-                    addToFreeAgents(outgoingCoach);
+                    if (
+                        oldStaff &&
+                        !oldStaffStillCoaching &&
+                        String(oldStaff.id) !== String(outgoingCoach?.id)
+                    ) {
+                        returnToMarket(oldStaff);
+                    }
+                } else {
+                    returnToMarket(oldStaff);
                 }
 
                 const idx = gameState.availableStaff.findIndex(
@@ -2249,40 +2290,71 @@ export function renderStaffTab(gameState) {
                 staff.role = roleKey;
                 staff.teamId = team.id;
 
+                staff.role = roleKey;
+                staff.teamId = team.id;
+
                 if (!team.staff) {
                     team.staff = {};
                 }
 
-                // Maintain legacy references while the migration is underway.
-                team.staff[roleKey] = staff;
-
-                // Add the hire to the flexible coaching group.
-                if (coachSlot >= 0) {
-                    currentCoaches[coachSlot] = staff;
-                } else {
-                    currentCoaches.push(staff);
-                }
-
-                // Transfer the replaced coach's workload to the new hire.
-                const assignments = team.staffWorkPlan?.assignments;
-                const replacedCoachId = outgoingCoach?.id;
+                const replacesLegacyLeadCoach =
+                    roleKey === 'coach' &&
+                    (
+                        (
+                            !team.coach?.id &&
+                            !team.staff.coach?.id
+                        ) ||
+                        (
+                            outgoingCoach?.id != null &&
+                            (
+                                String(team.coach?.id) ===
+                                    String(outgoingCoach.id) ||
+                                String(team.staff.coach?.id) ===
+                                    String(outgoingCoach.id)
+                            )
+                        )
+                    );
 
                 if (
-                    replacedCoachId != null &&
-                    Array.isArray(assignments)
+                    roleKey !== 'coach' ||
+                    replacesLegacyLeadCoach
                 ) {
-                    assignments.forEach(assignment => {
-                        if (
-                            String(assignment.coachId) ===
-                            String(replacedCoachId)
-                        ) {
-                            assignment.coachId = String(staff.id);
-                        }
-                    });
+                    team.staff[roleKey] = staff;
                 }
 
                 if (roleKey === 'coach') {
-                    team.coach = staff;
+                    activeCoaches[replacementCoachSlot] = staff;
+                    team.coaches = activeCoaches;
+
+                    // Keep legacy Scout and Trainer references aligned
+                    // with the current three-person coaching group.
+                    const staffCoaches = activeCoaches
+                        .filter(coach => coach && !coach.isUserCoach)
+                        .slice(0, 3);
+
+                    team.staff.scout = staffCoaches[1] || null;
+                    team.staff.trainer = staffCoaches[2] || null;
+
+                    if (replacesLegacyLeadCoach) {
+                        team.coach = staff;
+                        team.staff.coach = staff;
+                    }
+
+                    const assignments = team.staffWorkPlan?.assignments;
+
+                    if (
+                        Array.isArray(assignments) &&
+                        outgoingCoach?.id != null
+                    ) {
+                        assignments.forEach(assignment => {
+                            if (
+                                String(assignment.coachId) ===
+                                String(outgoingCoach.id)
+                            ) {
+                                assignment.coachId = String(staff.id);
+                            }
+                        });
+                    }
 
                     if (
                         schemePromise === 'COACH_CHOICE' &&
@@ -3199,6 +3271,83 @@ export function renderStaffMarketTab(gameState) {
                 const tactical = biases.tactical || {};
                 const scouting = biases.scouting || {};
 
+                const skillValue = value => {
+                    if (value == null || value === '') return null;
+                    const number = Number(value);
+
+                    return Number.isFinite(number)
+                        ? Math.max(0, Math.min(100, Math.round(number)))
+                        : null;
+                };
+
+                const skillAverage = (...values) => {
+                    const valid = values
+                        .map(skillValue)
+                        .filter(value => value !== null);
+
+                    return valid.length
+                        ? Math.round(
+                            valid.reduce((sum, value) => sum + value, 0) /
+                            valid.length
+                        )
+                        : null;
+                };
+
+                const candidateSkills = [
+                    {
+                        label: 'Offense Scheme',
+                        value: skillValue(ratings.offSchemeMastery),
+                        color: 'bg-emerald-500'
+                    },
+                    {
+                        label: 'Defense Scheme',
+                        value: skillValue(ratings.defSchemeMastery),
+                        color: 'bg-blue-500'
+                    },
+                    {
+                        label: 'Player Evaluation',
+                        value: skillAverage(
+                            ratings.evalPhysicals,
+                            ratings.evalTechnique,
+                            ratings.evalCharacter
+                        ),
+                        color: 'bg-violet-500'
+                    },
+                    {
+                        label: 'Teaching',
+                        value: skillValue(ratings.teaching),
+                        color: 'bg-amber-500'
+                    },
+                    {
+                        label: 'Game Planning',
+                        value: skillAverage(
+                            ratings.gameplanInstinct,
+                            ratings.inGameAdjustments
+                        ),
+                        color: 'bg-sky-500'
+                    },
+                    {
+                        label: 'Practice & Conditioning',
+                        value: skillAverage(
+                            ratings.practiceDiscipline,
+                            ratings.conditioning
+                        ),
+                        color: 'bg-rose-500'
+                    }
+                ];
+
+                const ratedSkills = candidateSkills.filter(
+                    skill => skill.value !== null
+                );
+
+                const overallRating = skillAverage(
+                    ...ratedSkills.map(skill => skill.value)
+                );
+
+                const strongestSkill = [...ratedSkills].sort(
+                    (a, b) => b.value - a.value
+                )[0];
+
                 const tend = Game.previewCoachTendencies(s, team);
 
                 return `
@@ -3226,7 +3375,50 @@ export function renderStaffMarketTab(gameState) {
                                 ${tactical.desc || scouting.desc || personality.desc || 'No scouting notes available.'}
                             </p>
 
-                            <div class="grid grid-cols-2 gap-2 mb-3">
+                            <div class="rounded-lg border border-slate-200 p-3 mb-3">
+                                <div class="flex items-center justify-between gap-2 mb-3">
+                                    <h5 class="text-[10px] font-black uppercase tracking-widest text-slate-600">
+                                        Coaching Skills
+                                    </h5>
+
+                                    <span class="text-sm font-black text-slate-900 bg-slate-100 rounded px-2 py-1">
+                                        ${overallRating ?? '—'} Avg.
+                                    </span>
+                                </div>
+
+                                ${strongestSkill ? `
+                                    <div class="rounded border border-emerald-200 bg-emerald-50 p-2 mb-3">
+                                        <span class="block text-[9px] font-bold uppercase text-emerald-800">
+                                            Strongest Area
+                                        </span>
+                                        <span class="text-xs font-black text-emerald-950">
+                                            ${strongestSkill.label} · ${strongestSkill.value}
+                                        </span>
+                                    </div>
+                                ` : ''}
+
+                                <div class="space-y-3">
+                                    ${candidateSkills.map(skill => `
+                                        <div>
+                                            <div class="flex items-center justify-between gap-2 mb-1">
+                                                <span class="text-xs font-semibold text-slate-700">
+                                                    ${skill.label}
+                                                </span>
+                                                <span class="text-sm font-black text-slate-900 tabular-nums">
+                                                    ${skill.value ?? '—'}
+                                                </span>
+                                            </div>
+
+                                            <div class="h-2.5 rounded-full bg-slate-200 overflow-hidden">
+                                                <div
+                                                    class="h-full rounded-full ${skill.color}"
+                                                    style="width:${skill.value ?? 0}%">
+                                                </div>
+                                            </div>
+                                        </div>
+                                    `).join('')}
+                                </div>
+                            </div>
                                 <div class="rounded border border-slate-200 bg-slate-50 p-2">
                                     <span class="block text-[9px] uppercase text-slate-500">
                                         Offense Tactics
@@ -3283,22 +3475,15 @@ export function renderStaffMarketTab(gameState) {
                             </div>
                         </div>
 
-                        <div class="grid grid-cols-3 gap-1.5 border-t border-slate-200 pt-3 mt-3">
+                        <div class="border-t border-slate-200 pt-3 mt-3">
                             <button
-                                class="bg-slate-900 hover:bg-slate-800 text-white font-bold py-2 rounded text-[10px]"
+                                class="w-full bg-slate-900 hover:bg-slate-800 text-white font-bold py-2.5 rounded text-xs"
                                 onclick="app_hireStaff('${s.id}', 'coach')">
-                                Hire Coach
+                                Recruit to Coaching Staff
                             </button>
-                            <button
-                                class="bg-slate-200 hover:bg-slate-300 text-slate-800 font-bold py-2 rounded text-[10px]"
-                                onclick="app_hireStaff('${s.id}', 'scout')">
-                                Hire Scout
-                            </button>
-                            <button
-                                class="bg-slate-200 hover:bg-slate-300 text-slate-800 font-bold py-2 rounded text-[10px]"
-                                onclick="app_hireStaff('${s.id}', 'trainer')">
-                                Hire Trainer
-                            </button>
+                            <p class="text-[10px] text-slate-500 text-center mt-2">
+                                Recruit based on skills, philosophy, and fit with your staff.
+                            </p>
                         </div>
                     </article>`;
             }).join('')}

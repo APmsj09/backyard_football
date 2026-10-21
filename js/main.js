@@ -325,6 +325,18 @@ function promptCoachCreation(teamId) {
         .map(k => `<option value="${k}" ${k === currentDefense ? 'selected' : ''}>${defenseFormations[k].name}</option>`)
         .join('');
 
+    const coachSkillBudget = 330;
+    const coachSkillValues = [35, 40, 45, 50, 55, 60, 65, 70, 75, 80];
+
+    const coachSkillDefinitions = [
+        { id: 'offense', label: 'Offense Scheme', keys: ['offSchemeMastery'] },
+        { id: 'defense', label: 'Defense Scheme', keys: ['defSchemeMastery'] },
+        { id: 'evaluation', label: 'Player Evaluation', keys: ['evalPhysicals', 'evalTechnique', 'evalCharacter'] },
+        { id: 'teaching', label: 'Teaching', keys: ['teaching'] },
+        { id: 'planning', label: 'Game Planning', keys: ['gameplanInstinct', 'inGameAdjustments'] },
+        { id: 'practice', label: 'Practice & Conditioning', keys: ['practiceDiscipline', 'conditioning'] }
+    ];
+
     const modalHtml = `
         <div class="space-y-5 text-left">
             <p class="text-sm text-slate-600">
@@ -378,6 +390,31 @@ function promptCoachCreation(teamId) {
                 <div id="gm-expertise-summary"
                     class="text-xs text-slate-600 mt-2 leading-relaxed"></div>
             </div>
+            <div class="border-t border-slate-200 pt-4">
+                <label class="block text-xs font-bold text-slate-800 uppercase tracking-wider mb-1">
+                    4. Coaching Skill Allocation
+                </label>
+                <p class="text-xs text-slate-600 mb-3">
+                    Build your strengths and weaknesses. Each category costs points from the same budget.
+                </p>
+
+                <div class="flex items-center justify-between bg-slate-900 text-white rounded px-3 py-2 mb-3">
+                    <span class="text-xs font-bold uppercase">Skill Budget</span>
+                    <span id="new-coach-skill-total" class="text-sm font-black tabular-nums">
+                        330 / 330
+                    </span>
+                </div>
+
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    ${coachSkillDefinitions.map(skill => `
+                        DIL0
+                    `).join('')}
+                </div>
+
+                <p class="text-[11px] text-slate-500 mt-2">
+                    Each skill ranges from 35 to 80. Lower a skill to free points before raising another.
+                </p>
+            </div>
 
             <div class="border-t border-slate-200 pt-4">
                 <label class="block text-xs font-bold text-slate-800 uppercase tracking-wider mb-1">
@@ -414,13 +451,26 @@ function promptCoachCreation(teamId) {
         const off = document.getElementById('new-coach-offense').value;
         const def = document.getElementById('new-coach-defense').value;
 
+        const skillRatings = {};
+
+        coachSkillDefinitions.forEach(skill => {
+            const value = Number(
+                document.getElementById(`new-coach-skill-$DIL1`)?.value
+            );
+
+            skill.keys.forEach(key => {
+                skillRatings[key] = value;
+            });
+        });
+
         confirmFranchiseTakeover(teamId, {
             name,
             backgroundId,
             archetypeId,
             expertiseId,
             off,
-            def
+            def,
+            skillRatings
         });
     }, "Take the Job");
 
@@ -466,12 +516,122 @@ function promptCoachCreation(teamId) {
         document.getElementById(id)?.addEventListener('change', updateChoiceSummaries);
     });
 
+    const coachSkillControls = coachSkillDefinitions
+        .map(skill =>
+            document.getElementById(`new-coach-skill-${skill.id}`)
+        )
+        .filter(Boolean);
+
+    const updateCoachSkillBudget = changedControl => {
+        let total = coachSkillControls.reduce(
+            (sum, control) => sum + Number(control.value || 0),
+            0
+        );
+
+        // Reject a change that would exceed the shared budget.
+        if (total > coachSkillBudget && changedControl) {
+            changedControl.value =
+                changedControl.dataset.lastValidValue || '55';
+
+            total = coachSkillControls.reduce(
+                (sum, control) => sum + Number(control.value || 0),
+                0
+            );
+        }
+
+        // Remember the latest valid values.
+        coachSkillControls.forEach(control => {
+            control.dataset.lastValidValue = control.value;
+        });
+
+        const totalElement = document.getElementById(
+            'new-coach-skill-total'
+        );
+
+        if (totalElement) {
+            totalElement.textContent =
+                `${total} / ${coachSkillBudget}`;
+        }
+
+        // Disable choices that would exceed the budget.
+        coachSkillControls.forEach(control => {
+            const currentValue = Number(control.value || 0);
+
+            Array.from(control.options).forEach(option => {
+                option.disabled =
+                    total - currentValue + Number(option.value) >
+                    coachSkillBudget;
+            });
+        });
+    };
+
+    coachSkillControls.forEach(control => {
+        control.dataset.lastValidValue = control.value;
+
+        control.addEventListener('change', () => {
+            updateCoachSkillBudget(control);
+        });
+    });
+
     updateChoiceSummaries();
+    updateCoachSkillBudget();
 }
 
 function confirmFranchiseTakeover(teamId, coachDetails) {
     const team = gameState.teams.find(t => t.id === teamId);
     if (!team) return;
+
+    const allowedCoachSkillValues = new Set([
+        35, 40, 45, 50, 55, 60, 65, 70, 75, 80
+    ]);
+
+    const coachSkillGroups = [
+        { source: 'offSchemeMastery', keys: ['offSchemeMastery'] },
+        { source: 'defSchemeMastery', keys: ['defSchemeMastery'] },
+        {
+            source: 'evalPhysicals',
+            keys: ['evalPhysicals', 'evalTechnique', 'evalCharacter']
+        },
+        { source: 'teaching', keys: ['teaching'] },
+        {
+            source: 'gameplanInstinct',
+            keys: ['gameplanInstinct', 'inGameAdjustments']
+        },
+        {
+            source: 'practiceDiscipline',
+            keys: ['practiceDiscipline', 'conditioning']
+        }
+    ];
+
+    const requestedSkills = coachDetails?.skillRatings || {};
+    const validatedSkillRatings = {};
+    let skillBudgetTotal = 0;
+
+    for (const group of coachSkillGroups) {
+        const value = Number(requestedSkills[group.source] ?? 55);
+
+        if (!allowedCoachSkillValues.has(value)) {
+            UI.showModal(
+                'Invalid Coach Build',
+                'Every coaching skill must be between 35 and 80 in increments of 5.'
+            );
+            return;
+        }
+
+        skillBudgetTotal += value;
+
+        group.keys.forEach(key => {
+            validatedSkillRatings[key] = value;
+        });
+    }
+
+    if (skillBudgetTotal > 330) {
+        UI.showModal(
+            'Skill Budget Exceeded',
+            `Your coach uses ${skillBudgetTotal} points. The maximum is 330. Lower one or more skills and try again.`
+        );
+        return;
+    }
 
     team.isPlayerControlled = true;
     gameState.playerTeam = team;
@@ -594,6 +754,20 @@ function confirmFranchiseTakeover(teamId, coachDetails) {
 
     // Initialize the flexible coaching group after the GM profile is saved.
     Game.ensureTeamCoachingStaff(team);
+
+    const userCoach = team.coaches?.find(
+        coach => coach?.isUserCoach
+    );
+
+    if (userCoach) {
+        userCoach.ratings = {
+            ...(userCoach.ratings || {}),
+            ...validatedSkillRatings
+        };
+
+        team.userCoachProfile = userCoach;
+    }
+
     Game.ensureTeamStaffWorkPlan(team);
 
     // Initialize Year 5 Draft and reset all tracked stats for the new season.

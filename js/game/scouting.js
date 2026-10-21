@@ -1,7 +1,11 @@
 import { getTeamScoutingReport, setTeamScoutingReport } from './state.js';
 import { calculateOverall, positionOverallWeights } from './player.js';
 import { isPlayerViableForPosition } from './depth_chart.js';
-import { ensureTeamStaffWorkPlan, WEEKLY_COACH_HOURS } from './staff.js';
+import {
+    ensureTeamStaffWorkPlan,
+    WEEKLY_COACH_HOURS,
+    getTeamCoachingSpecialist
+} from './staff.js';
 
 const OFFENSE = ['QB', 'RB', 'WR', 'TE', 'OL'];
 const DEFENSE = ['DL', 'LB', 'DB'];
@@ -1359,12 +1363,10 @@ export function initializeInheritedScoutingReports(
         return { initialized: 0, skipped: 0, byLevel: {} };
     }
 
-    const evaluator = team.staff?.scout ||
-        team.staff?.coach ||
-        team.coach ||
-        (Array.isArray(team.coaches)
-            ? team.coaches.find(coach => coach?.id)
-            : null);
+    const evaluator = getTeamCoachingSpecialist(
+        team,
+        'scouting'
+    );
 
     const priorityIds = new Set(
         (Array.isArray(team.scoutingWatchlist)

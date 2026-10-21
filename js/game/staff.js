@@ -89,18 +89,32 @@ export function generateStaffMember(role = 'coach', minAge = 25, maxAge = 55, fo
 export function initializeTeamStaff(team) {
     if (!team) return;
 
-    team.staff = {
-        gm: generateStaffMember('gm', 35, 60),
-        coach: generateStaffMember('coach', 30, 55),
-        scout: generateStaffMember('scout', 20, 50),
-        trainer: generateStaffMember('trainer', 28, 55)
-    };
+    const coaches = [
+        generateStaffMember('coach', 30, 55),
+        generateStaffMember('coach', 30, 55),
+        generateStaffMember('coach', 30, 55)
+    ];
 
-    Object.values(team.staff).forEach(s => {
-        if (s) s.teamId = team.id;
+    coaches.forEach(coach => {
+        coach.teamId = team.id;
     });
 
-    team.coach = team.staff.coach;
+    team.coaches = coaches;
+
+    // Retain legacy references temporarily so older gameplay systems
+    // continue to resolve their expected staff properties.
+    team.staff = {
+        gm: generateStaffMember('gm', 35, 60),
+        coach: coaches[0],
+        scout: coaches[1],
+        trainer: coaches[2]
+    };
+
+    Object.values(team.staff).forEach(member => {
+        if (member) member.teamId = team.id;
+    });
+
+    team.coach = coaches[0];
 
     ensureTeamCoachingStaff(team);
     ensureTeamStaffWorkPlan(team);
@@ -124,13 +138,9 @@ export const STAFF_WORK_TASKS = Object.freeze({
 export function ensureTeamCoachingStaff(team) {
     if (!team) return [];
 
-    const candidates = [
-        ...(Array.isArray(team.coaches) ? team.coaches : []),
-        team.staff?.coach,
-        team.staff?.scout,
-        team.staff?.trainer,
-        team.coach
-    ];
+    const candidates = Array.isArray(team.coaches)
+        ? team.coaches
+        : [];
 
     const npcCoaches = [];
     const seenIds = new Set();
@@ -245,15 +255,17 @@ export function ensureTeamStaffWorkPlan(team) {
     let plan = team.staffWorkPlan;
 
     if (!plan || !Array.isArray(plan.assignments)) {
-        const defaultScout = team.staff?.scout ||
-            coaches.find(coach => !coach.isUserCoach);
+        const defaultEvaluator = getTeamCoachingSpecialist(
+            team,
+            'scouting'
+        );
 
         plan = {
             version: 1,
             weeklyHoursPerCoach: WEEKLY_COACH_HOURS,
-            assignments: defaultScout?.id
+            assignments: defaultEvaluator?.id
                 ? [{
-                    coachId: defaultScout.id,
+                    coachId: defaultEvaluator.id,
                     task: STAFF_WORK_TASKS.SCOUTING,
                     hours: 4,
                     focus: 'all',
@@ -526,11 +538,12 @@ export function ensureAiStaffWorkPlan(
 }
 
 export function generateStaffPool(count = 8) {
-    const roles = ['coach', 'scout', 'trainer', 'gm'];
     const pool = [];
+
     for (let i = 0; i < count; i++) {
-        pool.push(generateStaffMember(getRandom(roles)));
+        pool.push(generateStaffMember('coach'));
     }
+
     return pool;
 }
 
@@ -550,10 +563,27 @@ export function checkRetiredPlayerToCoach(player) {
  * poaches winning assistants, and hires available candidates/retired players.
  */
 export function aiManageTeamStaff(team, gameState) {
-    if (!team || team.isPlayerControlled || !team.staff) return;
+    if (!team || team.isPlayerControlled) return;
 
-    const coach = team.staff.coach;
+    const currentCoaches = ensureTeamCoachingStaff(team);
+    if (currentCoaches.length === 0) return;
+
+    const coach =
+        currentCoaches.find(member =>
+            member?.id != null &&
+            String(member.id) === String(team.staff?.coach?.id)
+        ) || currentCoaches[0];
+
     if (!coach) return;
+
+    if (!team.staff) team.staff = {};
+
+    // Maintain the legacy reference while migration is underway.
+    team.staff.coach = coach;
+
+    const coachSlot = currentCoaches.findIndex(
+        member => String(member.id) === String(coach.id)
+    );
 
     const wins = team.wins || 0;
     const roster = getRosterObjects(team);
@@ -587,8 +617,29 @@ export function aiManageTeamStaff(team, gameState) {
     if (shouldFireCoach) {
         coach.teamId = null;
         coach.weeksUnemployed = 0;
-        if (gameState?.availableStaff) gameState.availableStaff.push(coach);
+
+        if (!Array.isArray(gameState?.availableStaff)) {
+            if (gameState) gameState.availableStaff = [];
+        }
+
+        if (
+            Array.isArray(gameState?.availableStaff) &&
+            !gameState.availableStaff.some(
+                candidate => String(candidate.id) === String(coach.id)
+            )
+        ) {
+            gameState.availableStaff.push(coach);
+        }
+
+        if (coachSlot >= 0 && Array.isArray(team.coaches)) {
+            team.coaches.splice(coachSlot, 1);
+        }
+
         team.staff.coach = null;
+
+        if (String(team.coach?.id) === String(coach.id)) {
+            team.coach = null;
+        }
 
         // HIRE REPLACEMENT: CONSTRAINED BY BUDGET, SCHEME FIT, TIER, & DIRECTIVES
         if (gameState?.availableStaff && gameState.availableStaff.length > 0) {
@@ -598,7 +649,10 @@ export function aiManageTeamStaff(team, gameState) {
 
             // Comprehensive, nuanced candidate evaluation
             const affordableCandidates = gameState.availableStaff
-                .filter(s => s.role === 'coach' || s.formerPlayerBio)
+                .filter(s =>
+                    String(s.id) !== String(coach.id) &&
+                    (s.role === 'coach' || s.formerPlayerBio)
+                )
                 .map(cand => {
                     // Reputation & Market Demand calculation
                     const rep = Math.round(((cand.ratings?.offSchemeMastery || 50) + (cand.ratings?.defSchemeMastery || 50) + (cand.ratings?.teaching || 50)) / 3);
@@ -648,31 +702,126 @@ export function aiManageTeamStaff(team, gameState) {
             if (newHire) {
                 newHire.teamId = team.id;
                 newHire.role = 'coach';
+
+                if (!Array.isArray(team.coaches)) {
+                    team.coaches = [];
+                }
+
+                const insertionIndex = coachSlot >= 0
+                    ? Math.min(coachSlot, team.coaches.length)
+                    : team.coaches.length;
+
+                team.coaches.splice(insertionIndex, 0, newHire);
+
+                // Transfer the outgoing coach's workload.
+                const assignments = team.staffWorkPlan?.assignments;
+
+                if (Array.isArray(assignments) && coach.id != null) {
+                    assignments.forEach(assignment => {
+                        if (
+                            String(assignment.coachId) ===
+                            String(coach.id)
+                        ) {
+                            assignment.coachId = String(newHire.id);
+                        }
+                    });
+                }
+
                 team.staff.coach = newHire;
                 team.coach = newHire;
             }
         }
     }
 
-    // Fill vacant Scout or Trainer slots from pool
-    ['scout', 'trainer'].forEach(role => {
-        if (!team.staff[role] && gameState?.availableStaff?.length > 0) {
-            const idx = gameState.availableStaff.findIndex(s => s.role === role);
-            if (idx > -1) {
-                const hire = gameState.availableStaff.splice(idx, 1)[0];
-                hire.teamId = team.id;
-                hire.role = role;
-                team.staff[role] = hire;
-            }
+    // Maintain the flexible coaching group instead of hiring
+    // separate legacy Scout and Trainer positions.
+    ensureTeamCoachingStaff(team);
+}
+
+export function getTeamCoachingSpecialist(team, task = 'general') {
+    if (!team) return null;
+
+    const coaches = Array.isArray(team.coaches)
+        ? team.coaches.filter(coach => coach?.id)
+        : [];
+
+    // Compatibility fallback for teams and saved games not yet migrated.
+    if (coaches.length === 0) {
+        if (task === 'scouting') {
+            return team.staff?.scout || team.staff?.coach || team.coach || null;
         }
-    });
+
+        if (task === 'training') {
+            return team.staff?.trainer || team.staff?.coach || team.coach || null;
+        }
+
+        return team.staff?.coach || team.coach || null;
+    }
+
+    const rating = (coach, key) => {
+        const value = Number(coach.ratings?.[key]);
+        return Number.isFinite(value) ? value : 50;
+    };
+
+    const score = coach => {
+        switch (task) {
+            case 'scouting':
+                return (
+                    rating(coach, 'evalPhysicals') +
+                    rating(coach, 'evalTechnique') +
+                    rating(coach, 'evalCharacter')
+                ) / 3;
+
+            case 'training':
+                return (
+                    rating(coach, 'teaching') +
+                    rating(coach, 'practiceDiscipline') +
+                    rating(coach, 'conditioning')
+                ) / 3;
+
+            case 'offensePrep':
+                return (
+                    rating(coach, 'offSchemeMastery') +
+                    rating(coach, 'gameplanInstinct') +
+                    rating(coach, 'inGameAdjustments')
+                ) / 3;
+
+            case 'defensePrep':
+                return (
+                    rating(coach, 'defSchemeMastery') +
+                    rating(coach, 'gameplanInstinct') +
+                    rating(coach, 'inGameAdjustments')
+                ) / 3;
+
+            default:
+                return (
+                    rating(coach, 'gameplanInstinct') +
+                    rating(coach, 'inGameAdjustments') +
+                    rating(coach, 'teaching')
+                ) / 3;
+        }
+    };
+
+    let bestCoach = coaches[0];
+    let bestScore = score(bestCoach);
+
+    for (let i = 1; i < coaches.length; i++) {
+        const candidateScore = score(coaches[i]);
+
+        if (candidateScore > bestScore) {
+            bestCoach = coaches[i];
+            bestScore = candidateScore;
+        }
+    }
+
+    return bestCoach;
 }
 
 export function calculateSchemeClash(team) {
     if (!team || !team.gameplan || !team.gameplan.situational) return 0;
     if (team.gameplan.situational.playcaller !== 'GM') return 0;
 
-    const coach = team.staff?.coach || team.coach;
+    const coach = getTeamCoachingSpecialist(team, 'general');
     const tactical = coach?.biases?.tactical?.name || 'Balanced Tactician';
     const sit = team.gameplan.situational;
 
@@ -780,9 +929,18 @@ export function aiBuildGameplan(team, opponent = null, gmDirective = 'COACH_AUTO
 
     aiSetSituationalGameplan(team);
 
-    const coach = team.staff?.coach;
-    const tactical = coach?.biases?.tactical?.name || 'Balanced Tactician';
-    const instinct = coach?.ratings?.gameplanInstinct || 50;
+    const offenseCoach = getTeamCoachingSpecialist(team, 'offensePrep');
+    const defenseCoach = getTeamCoachingSpecialist(team, 'defensePrep');
+
+    const offenseTactical =
+        offenseCoach?.biases?.tactical?.name || 'Balanced Tactician';
+    const defenseTactical =
+        defenseCoach?.biases?.tactical?.name || 'Balanced Tactician';
+
+    const offenseInstinct =
+        offenseCoach?.ratings?.gameplanInstinct || 50;
+    const defenseInstinct =
+        defenseCoach?.ratings?.gameplanInstinct || 50;
     const currentOffForm = team.formations?.offense || 'Balanced';
 
     const allOffKeys = Object.keys(offensivePlaybook).filter(k => k !== 'Punt_Punt' && !['Uni_InsideZone', 'Uni_QuickSlants', 'Uni_FourVerts'].includes(k));
@@ -793,10 +951,11 @@ export function aiBuildGameplan(team, opponent = null, gmDirective = 'COACH_AUTO
         const play = offensivePlaybook[key];
         let score = 50;
 
-        if (tactical === 'Air Raid Purist' && play.type === 'pass') score += 25;
-        if (tactical === 'Smashmouth Zealot' && play.type === 'run') score += 25;
-        if (play.tags?.includes('pa') || play.tags?.includes('trick')) score += (instinct > 65 ? 15 : 5);
-
+        if (offenseTactical === 'Air Raid Purist' && play.type === 'pass') score += 25;
+        if (offenseTactical === 'Smashmouth Zealot' && play.type === 'run') score += 25;
+        if (play.tags?.includes('pa') || play.tags?.includes('trick')) {
+            score += offenseInstinct > 65 ? 15 : 5;
+        }
         if (gmDirective === 'WIN_NOW' && opponent) {
             // Exploit opponent defensive style if coach has high gameplan instinct
             const oppDef = opponent.formations?.defense || '';
@@ -812,8 +971,8 @@ export function aiBuildGameplan(team, opponent = null, gmDirective = 'COACH_AUTO
         const play = defensivePlaybook[key];
         let score = 50;
 
-        if (tactical === 'Blitz Addict' && play.blitz) score += 30;
-        if (tactical === 'Conservative Turtler' && !play.blitz) score += 20;
+        if (defenseTactical === 'Blitz Addict' && play.blitz) score += 30;
+        if (defenseTactical === 'Conservative Turtler' && !play.blitz) score += 20;
 
         if (gmDirective === 'WIN_NOW' && opponent) {
             const oppOff = opponent.formations?.offense || '';
@@ -834,7 +993,7 @@ export function aiBuildGameplan(team, opponent = null, gmDirective = 'COACH_AUTO
 export function aiChooseWeeklyPractice(team, opponent = null, gmDirective = 'COACH_AUTONOMY') {
     if (!team || !team.gameplan) return 'chalk_talk';
 
-    const coach = team.staff?.coach;
+    const coach = getTeamCoachingSpecialist(team, 'training');
     const personality = coach?.biases?.personality?.name;
     const balance = team.finances?.balance || 0;
     const tokens = team.socialProfile?.favorTokens || 0;
@@ -863,7 +1022,7 @@ export function aiChooseWeeklyPractice(team, opponent = null, gmDirective = 'COA
 export function aiEvaluatePositionChanges(team, gameState) {
     if (!team || team.isPlayerControlled) return;
 
-    const coach = team.staff?.coach || team.coach;
+    const coach = getTeamCoachingSpecialist(team, 'training');
     const roster = getRosterObjects(team);
     const positions = ['QB', 'RB', 'WR', 'TE', 'OL', 'DL', 'LB', 'DB'];
     const idealCounts = { QB: 1, RB: 2, WR: 3, TE: 1, OL: 3, DL: 3, LB: 2, DB: 3 };
