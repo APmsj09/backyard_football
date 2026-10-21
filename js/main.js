@@ -2325,12 +2325,26 @@ window.app = {
                 `;
 
                 if (isInstant) {
-                    if (tokensOffered > 0) {
-                        gameState.playerTeam.socialProfile.favorTokens = Math.max(0, (gameState.playerTeam.socialProfile.favorTokens || 0) - tokensOffered);
+                    const signingResult = Game.playerSignFreeAgent(p.id, offer);
+
+                    if (signingResult?.success) {
+                        Game.saveGameState(activeSaveKey);
+                        UI.showModal("Contract Signed! 🤝", outcomeHtml, null, null, null, "Welcome to the Squad!");
+                    } else {
+                        const failureHtml = `
+                            <div class="space-y-2 text-left text-xs">
+                                <p class="font-bold text-rose-700">
+                                    The offer was accepted, but the signing could not be completed.
+                                </p>
+                                <p class="text-slate-600">
+                                    ${signingResult?.message || 'The roster move failed.'}
+                                </p>
+                                <p class="text-slate-500">
+                                    No contract was finalized by this attempt.
+                                </p>
+                            </div>`;
+                        UI.showModal("Signing Failed", failureHtml, null, null, null, "Close");
                     }
-                    Game.playerSignFreeAgent(p.id, offer);
-                    p.activePromise = Game.createPlayerPromise(p, gameState.playerTeam, offer, { promiseSeason: gameState.year, source: 'freeAgency' });
-                    UI.showModal("Contract Signed! 🤝", outcomeHtml, null, null, null, "Welcome to the Squad!");
                 } else if (evalResult.accepted) {
                     gameState.weeklyBids = gameState.weeklyBids || [];
                     gameState.weeklyBids.push({ playerId: p.id, team: gameState.playerTeam, teamId: gameState.playerTeam.id, offer });
