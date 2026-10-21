@@ -2159,25 +2159,142 @@ export function renderStaffTab(gameState) {
                     team.finances.balance = Math.max(0, team.finances.balance - cashOffered);
                 }
 
-                const oldStaff = team.staff[roleKey];
-                if (oldStaff) {
-                    oldStaff.teamId = null;
-                    gameState.availableStaff.push(oldStaff);
+                const oldStaff = team.staff?.[roleKey] || null;
+
+                // Ensure the new coaching group has been initialized.
+                Game.ensureTeamCoachingStaff?.(team);
+
+                if (!Array.isArray(team.coaches)) {
+                    team.coaches = [];
                 }
 
-                const idx = gameState.availableStaff.findIndex(s => s.id === staffId);
-                if (idx > -1) gameState.availableStaff.splice(idx, 1);
+                const currentCoaches = team.coaches;
+
+                // Keep the legacy hiring buttons working temporarily:
+                // Coach -> slot 1, Scout -> slot 2, Trainer -> slot 3.
+                const preferredSlotByRole = {
+                    coach: 0,
+                    scout: 1,
+                    trainer: 2
+                };
+
+                let coachSlot = oldStaff?.id != null
+                    ? currentCoaches.findIndex(coach =>
+                        String(coach?.id) === String(oldStaff.id)
+                    )
+                    : -1;
+
+                if (coachSlot < 0) {
+                    const preferredSlot = preferredSlotByRole[roleKey];
+
+                    if (
+                        Number.isInteger(preferredSlot) &&
+                        currentCoaches[preferredSlot] &&
+                        !currentCoaches[preferredSlot].isUserCoach
+                    ) {
+                        coachSlot = preferredSlot;
+                    }
+                }
+
+                if (coachSlot < 0) {
+                    coachSlot = currentCoaches.findIndex(
+                        coach => coach && !coach.isUserCoach
+                    );
+                }
+
+                const addToFreeAgents = outgoingStaff => {
+                    if (
+                        !outgoingStaff ||
+                        String(outgoingStaff.id) === String(staff.id)
+                    ) {
+                        return;
+                    }
+
+                    outgoingStaff.teamId = null;
+
+                    const alreadyAvailable = gameState.availableStaff.some(
+                        candidate =>
+                            String(candidate.id) ===
+                            String(outgoingStaff.id)
+                    );
+
+                    if (!alreadyAvailable) {
+                        gameState.availableStaff.push(outgoingStaff);
+                    }
+                };
+
+                const outgoingCoach = coachSlot >= 0
+                    ? currentCoaches[coachSlot]
+                    : null;
+
+                // Release the legacy role holder and the displaced coach,
+                // without adding duplicate candidates to the market.
+                addToFreeAgents(oldStaff);
+
+                if (
+                    outgoingCoach &&
+                    String(outgoingCoach.id) !== String(oldStaff?.id)
+                ) {
+                    addToFreeAgents(outgoingCoach);
+                }
+
+                const idx = gameState.availableStaff.findIndex(
+                    candidate => String(candidate.id) === String(staffId)
+                );
+
+                if (idx > -1) {
+                    gameState.availableStaff.splice(idx, 1);
+                }
 
                 staff.role = roleKey;
                 staff.teamId = team.id;
+
+                if (!team.staff) {
+                    team.staff = {};
+                }
+
+                // Maintain legacy references while the migration is underway.
                 team.staff[roleKey] = staff;
+
+                // Add the hire to the flexible coaching group.
+                if (coachSlot >= 0) {
+                    currentCoaches[coachSlot] = staff;
+                } else {
+                    currentCoaches.push(staff);
+                }
+
+                // Transfer the replaced coach's workload to the new hire.
+                const assignments = team.staffWorkPlan?.assignments;
+                const replacedCoachId = outgoingCoach?.id;
+
+                if (
+                    replacedCoachId != null &&
+                    Array.isArray(assignments)
+                ) {
+                    assignments.forEach(assignment => {
+                        if (
+                            String(assignment.coachId) ===
+                            String(replacedCoachId)
+                        ) {
+                            assignment.coachId = String(staff.id);
+                        }
+                    });
+                }
 
                 if (roleKey === 'coach') {
                     team.coach = staff;
-                    if (schemePromise === 'COACH_CHOICE' && staff.preferredOffense) {
+
+                    if (
+                        schemePromise === 'COACH_CHOICE' &&
+                        staff.preferredOffense
+                    ) {
                         team.formations.offense = staff.preferredOffense;
                     }
-                    if (schemePromise === 'COACH_CHOICE' && staff.preferredDefense) {
+
+                    if (
+                        schemePromise === 'COACH_CHOICE' &&
+                        staff.preferredDefense
+                    ) {
                         team.formations.defense = staff.preferredDefense;
                     }
                 }
@@ -2208,88 +2325,130 @@ export function renderStaffTab(gameState) {
             </div>
         </div>
 
-        <!-- 1. Current Staff Hierarchy Cards -->
-        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
+        <!-- 1. Current Coaching Group -->
     `;
 
-    roles.forEach(r => {
-        const member = team.staff[r.key];
-        if (!member) {
-            html += `
-                <div class="bg-white rounded border border-dashed border-slate-300 p-4 flex flex-col justify-between items-center text-center shadow-sm min-h-[220px]">
-                    <div>
-                        <span class="text-2xl block mb-1">🪑</span>
-                        <h4 class="font-bold text-xs uppercase text-slate-700">${r.title}</h4>
-                        <p class="text-[10px] text-slate-400 mt-1">${r.desc}</p>
-                    </div>
-                    <span class="text-xs font-black text-rose-500 bg-rose-50 border border-rose-200 px-2 py-1 rounded">VACANT</span>
-                </div>`;
-            return;
-        }
+    Game.ensureTeamCoachingStaff?.(team);
+    const currentCoaches = Array.isArray(team.coaches)
+        ? team.coaches.filter(Boolean)
+        : [];
 
-        const rt = member.ratings;
-        const b = member.biases;
-        const isUserGM = r.key === 'gm';
+    const staffSkill = value => {
+        if (value == null || value === '') return null;
+        const number = Number(value);
+        return Number.isFinite(number)
+            ? Math.max(0, Math.min(100, Math.round(number)))
+            : null;
+    };
 
-        html += `
-            <div class="bg-white rounded border border-slate-300 p-3.5 shadow-sm flex flex-col justify-between min-h-[220px]">
-                <div>
-                    <div class="flex justify-between items-start mb-1.5 border-b border-slate-100 pb-1.5">
-                        <div>
-                            <span class="text-[9px] font-black uppercase text-amber-700 block tracking-wider">${r.title}</span>
-                            <h4 class="font-bold text-sm text-slate-900 truncate">${member.name}</h4>
-                            ${member.formerPlayerBio ? `<span class="text-[9px] bg-amber-100 text-amber-900 font-bold px-1 rounded block mt-0.5" title="${member.formerPlayerBio}">🎓 Park Legend</span>` : ''}
-                        </div>
-                        <span class="text-[10px] font-mono text-slate-400">${member.age}yo</span>
-                    </div>
+    const staffAverage = (...values) => {
+        const valid = values.map(staffSkill)
+            .filter(value => value !== null);
 
-                    <!-- Traits & Biases -->
-                    <div class="space-y-1 mb-2 text-[10px]">
-                        ${b.tactical ? `<div class="bg-slate-50 border border-slate-200 p-1 rounded"><b class="text-blue-700">Scheme:</b> ${b.tactical.name}</div>` : ''}
-                        ${b.scouting ? `<div class="bg-slate-50 border border-slate-200 p-1 rounded"><b class="text-indigo-700">Eye:</b> ${b.scouting.name}</div>` : ''}
-                        ${b.personality ? `<div class="bg-slate-50 border border-slate-200 p-1 rounded"><b class="text-emerald-700">Style:</b> ${b.personality.name}</div>` : ''}
-                    </div>
+        return valid.length
+            ? Math.round(valid.reduce((sum, value) => sum + value, 0) / valid.length)
+            : null;
+    };
 
-                    <!-- Key Ratings Matrix -->
-                    <div class="grid grid-cols-2 gap-1 text-[10px] font-mono bg-slate-50 p-2 rounded border border-slate-200">
-                        <div>Tactics: <b class="text-slate-800">${Math.round((rt.offSchemeMastery + rt.defSchemeMastery) / 2)}</b></div>
-                        <div>Adjust: <b class="text-slate-800">${rt.inGameAdjustments}</b></div>
-                        <div>Scout: <b class="text-slate-800">${Math.round((rt.evalPhysicals + rt.evalTechnique) / 2)}</b></div>
-                        <div>Teach: <b class="text-slate-800">${rt.teaching}</b></div>
-                    </div>
-                    
-                    ${r.key === 'coach' ? (() => {
-                        const tend = Game.previewCoachTendencies(member, team);
-                        return `
-                        <div class="mt-2 pt-2 border-t border-slate-200">
-                            <span class="text-[9px] font-black uppercase text-slate-500 block mb-1">Playcalling DNA</span>
-                            <div class="space-y-1.5 text-[9px] font-mono text-slate-700">
-                                <div>
-                                    <div class="flex justify-between mb-0.5"><span>Run/Pass</span><span>${tend.earlyDownTendency}% Run</span></div>
-                                    <div class="w-full bg-slate-200 rounded-full h-1.5"><div class="bg-amber-500 h-1.5 rounded-full" style="width: ${tend.earlyDownTendency}%"></div></div>
+    html += `
+        <section class="mb-6">
+            <h4 class="font-black text-base uppercase text-slate-900 mb-1">
+                Coaching Staff
+            </h4>
+            <p class="text-sm text-slate-600 mb-4">
+                Compare strengths and assign weekly responsibilities below.
+            </p>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+                ${currentCoaches.map((coach, index) => {
+                    const r = coach.ratings || {};
+
+                    const skills = [
+                        ['Offense Scheme', staffSkill(r.offSchemeMastery), 'bg-emerald-500'],
+                        ['Defense Scheme', staffSkill(r.defSchemeMastery), 'bg-blue-500'],
+                        ['Player Evaluation', staffAverage(r.evalPhysicals, r.evalTechnique, r.evalCharacter), 'bg-violet-500'],
+                        ['Teaching', staffSkill(r.teaching), 'bg-amber-500'],
+                        ['Game Planning', staffAverage(r.gameplanInstinct, r.inGameAdjustments), 'bg-sky-500'],
+                        ['Practice', staffAverage(r.practiceDiscipline, r.conditioning), 'bg-rose-500']
+                    ];
+
+                    const rated = skills.filter(skill => skill[1] !== null);
+                    const overall = staffAverage(...rated.map(skill => skill[1]));
+                    const strongest = [...rated].sort(
+                        (a, b) => b[1] - a[1]
+                    )[0];
+
+                    const staffNumber = currentCoaches
+                        .slice(0, index + 1)
+                        .filter(c => !c.isUserCoach).length;
+
+                    return `
+                        <article class="bg-white rounded-lg border border-slate-300 shadow-sm overflow-hidden">
+                            <div class="bg-slate-50 border-b border-slate-200 p-4">
+                                <span class="text-[10px] font-black uppercase tracking-widest text-blue-700">
+                                    ${coach.isUserCoach ? 'Your Coaching Profile' : `Staff Coach ${staffNumber}`}
+                                </span>
+                                <div class="flex justify-between items-center gap-2 mt-1">
+                                    <h5 class="font-black text-lg text-slate-900">
+                                        ${coach.name || 'Unnamed Coach'}
+                                    </h5>
+                                    <span class="text-lg font-black text-slate-900">
+                                        ${overall ?? '—'}
+                                    </span>
                                 </div>
-                                <div>
-                                    <div class="flex justify-between mb-0.5"><span>4th Dn Bravery</span><span>${tend.fourthDownBravery}%</span></div>
-                                    <div class="w-full bg-slate-200 rounded-full h-1.5"><div class="bg-emerald-500 h-1.5 rounded-full" style="width: ${tend.fourthDownBravery}%"></div></div>
-                                </div>
-                                <div>
-                                    <div class="flex justify-between mb-0.5"><span>Defense Blitz</span><span>${tend.defenseAggressiveness}%</span></div>
-                                    <div class="w-full bg-slate-200 rounded-full h-1.5"><div class="bg-rose-500 h-1.5 rounded-full" style="width: ${tend.defenseAggressiveness}%"></div></div>
+                                <p class="text-[10px] text-slate-500">Overall skill average</p>
+
+                                ${strongest ? `
+                                    <div class="mt-3 text-xs font-bold text-emerald-900 bg-emerald-50 border border-emerald-200 rounded p-2">
+                                        Strongest: ${strongest[0]} (${strongest[1]})
+                                    </div>
+                                ` : ''}
+                            </div>
+
+                            <div class="p-4 space-y-3">
+                                ${skills.map(([label, value, color]) => `
+                                    <div>
+                                        <div class="flex justify-between items-center gap-2 mb-1">
+                                            <span class="text-xs font-semibold text-slate-700">${label}</span>
+                                            <span class="text-sm font-black text-slate-900">
+                                                ${value ?? '—'}
+                                            </span>
+                                        </div>
+                                        <div class="h-2.5 rounded-full bg-slate-200 overflow-hidden">
+                                            <div class="h-full rounded-full ${color}"
+                                                style="width:${value ?? 0}%">
+                                            </div>
+                                        </div>
+                                    </div>
+                                `).join('')}
+
+                                <div class="border-t border-slate-200 pt-3 space-y-2 text-xs">
+                                    <div>
+                                        <span class="text-slate-500">Tactical style</span>
+                                        <p class="font-bold text-slate-800">
+                                            ${coach.biases?.tactical?.name || 'Balanced'}
+                                        </p>
+                                    </div>
+                                    <div>
+                                        <span class="text-slate-500">Scouting style</span>
+                                        <p class="font-bold text-slate-800">
+                                            ${coach.biases?.scouting?.name || 'Balanced Evaluator'}
+                                        </p>
+                                    </div>
+                                    <div>
+                                        <span class="text-slate-500">Personality</span>
+                                        <p class="font-bold text-slate-800">
+                                            ${coach.biases?.personality?.name || 'Balanced'}
+                                        </p>
+                                    </div>
                                 </div>
                             </div>
-                        </div>`;
-                    })() : ''}
-                </div>
-
-                ${!isUserGM ? `
-                <div class="mt-3 pt-2 border-t border-slate-100 flex justify-end">
-                    <button class="text-rose-600 hover:text-rose-800 text-[10px] font-bold uppercase tracking-wider" onclick="app_fireStaff('${r.key}')">Fire Staff</button>
-                </div>` : '<div class="mt-2 text-center text-[9px] text-slate-400 font-bold uppercase">Franchise Controller</div>'}
+                        </article>
+                    `;
+                }).join('')}
             </div>
-        `;
-    });
-
-    html += `</div>`;
+        </section>
+    `;
 
     // 2. Weekly Staff Workload
     const workCoaches = Game.ensureTeamCoachingStaff?.(team) ||
