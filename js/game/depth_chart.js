@@ -33,49 +33,50 @@ export function normalizeFormationKey(formations, formationKey, defaultKey) {
 
 export function isPlayerViableForPosition(p, pos) {
     if (!p) return false;
+    
     const normalize = (raw) => {
         if (!raw) return null;
         if (['FB'].includes(raw)) return 'RB';
-        if (['ATH', 'K', 'P'].includes(raw)) return 'WR';
         if (['OT', 'OG', 'C'].includes(raw)) return 'OL';
         if (['DE', 'DT', 'NT'].includes(raw)) return 'DL';
         if (['CB', 'S', 'FS', 'SS'].includes(raw)) return 'DB';
         return raw;
     };
 
-    const off = normalize(p.favoriteOffensivePosition || (['QB', 'RB', 'WR', 'TE', 'OL'].includes(p.pos) ? p.pos : null));
-    const def = normalize(p.favoriteDefensivePosition || (['DL', 'LB', 'DB'].includes(p.pos) ? p.pos : null));
+    const primary = normalize(p.pos);
+    const off = normalize(p.favoriteOffensivePosition);
+    const def = normalize(p.favoriteDefensivePosition);
 
-    // Direct matches for assigned primary offense or defense
-    if (off === pos || def === pos) return true;
+    if (off === pos || def === pos || primary === pos) return true;
 
-    // Realistic Two-Way Ironman Viability for 8-Man Football
-    if (pos === 'QB') return off === 'QB';
-    if (pos === 'RB') {
-        return off === 'RB' || (def === 'LB' && (p.attributes?.physical?.speed || 0) >= 48) || (def === 'DB' && (p.attributes?.physical?.speed || 0) >= 54);
+    // True Athletes can play any skill position
+    if (primary === 'ATH') {
+        return ['QB', 'RB', 'WR', 'TE', 'DB', 'LB'].includes(pos);
     }
-    if (pos === 'WR') {
-        return off === 'WR' || def === 'DB' || (off === 'RB' && (p.attributes?.technical?.catchingHands || 0) >= 45);
+
+    // Permissive 8-Man sandbox crossover rules:
+    // Skill players (QB/RB/WR/TE/DB) can interchange across skill positions.
+    // Bigs/Linemen (OL/DL/TE/LB) can interchange across the trenches.
+    if (['QB', 'RB', 'WR'].includes(pos)) {
+        return ['QB', 'RB', 'WR', 'TE', 'DB', 'ATH'].includes(primary) || ['QB', 'RB', 'WR'].includes(off);
     }
     if (pos === 'TE') {
-        return off === 'TE' || def === 'LB' || (off === 'WR' && (p.attributes?.physical?.strength || 0) >= 48) || (off === 'OL' && (p.attributes?.physical?.speed || 0) >= 35);
+        return ['TE', 'WR', 'OL', 'LB', 'DL', 'ATH'].includes(primary) || off === 'TE' || def === 'LB';
     }
     if (pos === 'OL') {
-        return off === 'OL' || def === 'DL' || (off === 'TE' && (p.attributes?.physical?.strength || 0) >= 50);
+        return ['OL', 'DL', 'TE'].includes(primary) || off === 'OL' || def === 'DL';
     }
-
-    // Defensive Viability (supports natural two-way crossovers)
     if (pos === 'DL') {
-        return def === 'DL' || off === 'OL' || (def === 'LB' && (p.attributes?.physical?.strength || 0) >= 55);
+        return ['DL', 'OL', 'LB', 'TE'].includes(primary) || def === 'DL' || off === 'OL';
     }
     if (pos === 'LB') {
-        return def === 'LB' || off === 'TE' || (def === 'DL' && (p.attributes?.physical?.speed || 0) >= 40) || (def === 'DB' && (p.attributes?.technical?.tackling || 0) >= 45) || (off === 'RB' && (p.attributes?.technical?.tackling || 0) >= 42);
+        return ['LB', 'DL', 'TE', 'RB', 'DB', 'ATH'].includes(primary) || def === 'LB' || off === 'TE';
     }
     if (pos === 'DB') {
-        return def === 'DB' || off === 'WR' || (off === 'QB' && (p.attributes?.physical?.speed || 0) >= 55) || (def === 'LB' && (p.attributes?.physical?.speed || 0) >= 52);
+        return ['DB', 'WR', 'RB', 'QB', 'LB', 'ATH'].includes(primary) || def === 'DB' || off === 'WR';
     }
 
-    return false;
+    return true; // Never hard-lock the coach out; position overall rating handles suitability
 }
 
 export function populateNaturalDepthOrder(team) {
@@ -149,9 +150,6 @@ export function rebuildDepthChartFromOrder(team) {
     }
 
     if (!team.depthChart) team.depthChart = { offense: {}, defense: {}, special: {} };
-    if (!team.depthChart.offense) team.depthChart.offense = {};
-    if (!team.depthChart.defense) team.depthChart.defense = {};
-    if (!team.depthChart.special) team.depthChart.special = {};
     if (!team.slotOverrides) team.slotOverrides = { offense: {}, defense: {} };
     if (!team.slotOverrides.offense) team.slotOverrides.offense = {};
     if (!team.slotOverrides.defense) team.slotOverrides.defense = {};
@@ -167,35 +165,34 @@ export function rebuildDepthChartFromOrder(team) {
     team.formations.defense = defFormKey;
     const defSlots = defenseFormations[defFormKey]?.slots || [];
 
+    // CRITICAL FIX: Build brand-new depth charts so stale formation slots are wiped out completely
+    const newOffChart = {};
+    const newDefChart = {};
     const usedOffense = new Set();
     const usedDefense = new Set();
 
-    // 1. RESPECT MANUAL SLOT OVERRIDES (AND CLEARED SLOTS)
+    // 1. Process slot overrides, strictly enforcing: at most 1 slot per player per side
     offSlots.forEach(slot => {
-        if (team.slotOverrides.offense[slot] !== undefined) {
-            const pId = team.slotOverrides.offense[slot];
-            if (pId === null) {
-                team.depthChart.offense[slot] = null; // Explicitly cleared by user
-            } else if (rosterIds.has(pId)) {
-                team.depthChart.offense[slot] = pId;
-                usedOffense.add(pId);
-            } else {
-                delete team.slotOverrides.offense[slot];
-            }
+        const pId = team.slotOverrides.offense[slot];
+        if (pId === null) {
+            newOffChart[slot] = null;
+        } else if (pId && rosterIds.has(pId) && !usedOffense.has(pId)) {
+            newOffChart[slot] = pId;
+            usedOffense.add(pId);
+        } else if (pId && usedOffense.has(pId)) {
+            delete team.slotOverrides.offense[slot]; // Strip duplicate override
         }
     });
 
     defSlots.forEach(slot => {
-        if (team.slotOverrides.defense[slot] !== undefined) {
-            const pId = team.slotOverrides.defense[slot];
-            if (pId === null) {
-                team.depthChart.defense[slot] = null; // Explicitly cleared by user
-            } else if (rosterIds.has(pId)) {
-                team.depthChart.defense[slot] = pId;
-                usedDefense.add(pId);
-            } else {
-                delete team.slotOverrides.defense[slot];
-            }
+        const pId = team.slotOverrides.defense[slot];
+        if (pId === null) {
+            newDefChart[slot] = null;
+        } else if (pId && rosterIds.has(pId) && !usedDefense.has(pId)) {
+            newDefChart[slot] = pId;
+            usedDefense.add(pId);
+        } else if (pId && usedDefense.has(pId)) {
+            delete team.slotOverrides.defense[slot]; // Strip duplicate override
         }
     });
 
@@ -209,53 +206,61 @@ export function rebuildDepthChartFromOrder(team) {
                 }
             }
         }
+        // Fallback: search remaining roster if position bucket is exhausted
+        for (const pid of team.roster) {
+            if (!usedSet.has(pid)) {
+                usedSet.add(pid);
+                return pid;
+            }
+        }
         return null;
     };
 
-    // 2. AUTO-FILL REMAINING UNLOCKED SLOTS
+    // 2. Auto-fill remaining unlocked slots in priority order
     const sortedOffSlots = [...offSlots].sort((a, b) => getPriority(b) - getPriority(a));
     sortedOffSlots.forEach(slot => {
-        if (team.slotOverrides.offense[slot] !== undefined) return; // Keep locked or cleared
+        if (newOffChart[slot] !== undefined) return;
 
         let posKey = slot.replace(/\d+/g, '');
         if (['OT', 'OG', 'C'].includes(posKey)) posKey = 'OL';
         if (posKey === 'FB') posKey = 'RB';
 
-        let searchBuckets = [slot, posKey];
-        if (posKey === 'WR') searchBuckets.push('TE', 'RB');
-        if (posKey === 'RB') searchBuckets.push('WR');
-        if (posKey === 'TE') searchBuckets.push('WR', 'OL');
+        let searchBuckets = [posKey];
+        if (posKey === 'WR') searchBuckets.push('TE', 'RB', 'QB');
+        if (posKey === 'RB') searchBuckets.push('WR', 'QB', 'TE');
+        if (posKey === 'TE') searchBuckets.push('WR', 'OL', 'RB');
         if (posKey === 'OL') searchBuckets.push('DL', 'TE');
         if (posKey === 'QB') searchBuckets.push('WR', 'RB');
 
-        team.depthChart.offense[slot] = getBestAvailable(searchBuckets, usedOffense);
+        newOffChart[slot] = getBestAvailable(searchBuckets, usedOffense);
     });
 
     const sortedDefSlots = [...defSlots].sort((a, b) => getPriority(b) - getPriority(a));
     sortedDefSlots.forEach(slot => {
-        if (team.slotOverrides.defense[slot] !== undefined) return; // Keep locked or cleared
+        if (newDefChart[slot] !== undefined) return;
 
         let posKey = slot.replace(/\d+/g, '');
         if (['CB', 'S'].includes(posKey)) posKey = 'DB';
         if (['DE', 'DT'].includes(posKey)) posKey = 'DL';
 
-        let searchBuckets = [slot, posKey];
-        if (posKey === 'DB') searchBuckets.push('WR');
-        if (posKey === 'LB') searchBuckets.push('DL', 'DB');
+        let searchBuckets = [posKey];
+        if (posKey === 'DB') searchBuckets.push('WR', 'LB');
+        if (posKey === 'LB') searchBuckets.push('DL', 'DB', 'TE');
         if (posKey === 'DL') searchBuckets.push('LB', 'OL');
 
-        team.depthChart.defense[slot] = getBestAvailable(searchBuckets, usedDefense);
+        newDefChart[slot] = getBestAvailable(searchBuckets, usedDefense);
     });
+
+    // Replace the team depth chart with clean, deduplicated slot objects
+    team.depthChart.offense = newOffChart;
+    team.depthChart.defense = newDefChart;
 
     const qbBucket = team.depthOrder['QB'] || [];
     const bestPunter = qbBucket.length > 1 ? qbBucket[1] : qbBucket[0];
     if (!team.depthChart.special) team.depthChart.special = {};
-    team.depthChart.special['P'] = bestPunter || null;
-
-    if (offFormKey === 'Punt') {
-        team.depthChart.offense['QB1'] = team.depthChart.special['P'] || bestPunter || null;
-    }
+    team.depthChart.special['P'] = bestPunter || team.roster[0] || null;
 }
+
 
 export function autoResetLineup(team) {
     if (!team) return;

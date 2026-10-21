@@ -1540,8 +1540,7 @@ export function switchTab(tabId, gameState) {
             break;
         case 'depth-chart': 
             if (gameState.playerTeam) {
-                renderFormationDropdown('offense', offenseFormations, gameState.playerTeam.formations.offense);
-                renderFormationDropdown('defense', defenseFormations, gameState.playerTeam.formations.defense);
+                renderDepthChartTab(gameState);
             }
             break;
         case 'free-agents': renderFreeAgentsTab(gameState); break;
@@ -3128,41 +3127,52 @@ function renderDepthChartSide(side, gameState) {
 window.app_openSlotModal = function (side, slotId) {
     const gs = getGameState();
     if (!gs?.playerTeam) return;
-    const roster = getUIRosterObjects(gs.playerTeam);
-    const currentChart = gs.playerTeam.depthChart[side] || {};
+    const team = gs.playerTeam;
+    const roster = getUIRosterObjects(team);
+    const currentChart = team.depthChart[side] || {};
     const otherSide = side === 'offense' ? 'defense' : 'offense';
-    const otherChart = gs.playerTeam.depthChart[otherSide] || {};
+    const otherChart = team.depthChart[otherSide] || {};
     const currentId = currentChart[slotId];
 
     let posKey = slotId.replace(/\d+/g, '');
-
     if (['OT', 'OG', 'C'].includes(posKey)) posKey = 'OL';
     if (posKey === 'FB') posKey = 'RB';
     if (['DE', 'DT', 'NT'].includes(posKey)) posKey = 'DL';
     if (['CB', 'S', 'FS', 'SS'].includes(posKey)) posKey = 'DB';
 
-    // Allow any viable player on the roster to be chosen, enabling starter swaps
-    const candidates = roster.filter(p => p && (p.id === currentId || Game.isPlayerViableForPosition(p, posKey)));
+    // Show all roster players so the coach is never locked out of making a choice
+    const candidates = [...roster].filter(Boolean);
     candidates.sort((a, b) => calculateOverall(b, posKey) - calculateOverall(a, posKey));
 
     window.app_assignSlot = function (s, targetSlot, selectedPid) {
+        if (!team.slotOverrides) team.slotOverrides = { offense: {}, defense: {} };
+        if (!team.slotOverrides[s]) team.slotOverrides[s] = {};
+
         if (!selectedPid) {
-            // Clearing slot
-            gs.playerTeam.depthChart[s][targetSlot] = null;
+            // Explicitly clear slot
+            team.slotOverrides[s][targetSlot] = null;
+            team.depthChart[s][targetSlot] = null;
         } else {
-            // Check if player currently starts in another slot on THIS side (Trigger a Swap)
-            const existingSlot = Object.entries(gs.playerTeam.depthChart[s] || {})
+            // Check if player already starts in another slot on THIS side (Trigger clean swap)
+            const existingSlot = Object.entries(team.depthChart[s] || {})
                 .find(([sl, id]) => id === selectedPid && sl !== targetSlot)?.[0];
+            const displacedPid = team.depthChart[s][targetSlot] || null;
 
             if (existingSlot) {
-                // Swap the outgoing starter into the displaced player's old slot
-                const displacedPid = gs.playerTeam.depthChart[s][targetSlot] || null;
-                gs.playerTeam.depthChart[s][existingSlot] = displacedPid;
+                if (displacedPid) {
+                    team.slotOverrides[s][existingSlot] = displacedPid;
+                    team.depthChart[s][existingSlot] = displacedPid;
+                } else {
+                    delete team.slotOverrides[s][existingSlot];
+                    delete team.depthChart[s][existingSlot];
+                }
             }
 
-            assignPlayerToSlot(gs.playerTeam, selectedPid, targetSlot, s);
+            team.slotOverrides[s][targetSlot] = selectedPid;
+            team.depthChart[s][targetSlot] = selectedPid;
         }
 
+        rebuildDepthChartFromOrder(team);
         saveGameState();
         renderDepthChartTab(gs);
         hideModal();

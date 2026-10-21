@@ -123,238 +123,200 @@ export function renderDepthOrderPane(gameState) {
     const pane = document.getElementById("depth-order-container");
     if (!pane || !gameState?.playerTeam) return;
 
-    Game.rebuildDepthChartFromOrder(gameState.playerTeam);
     const team = gameState.playerTeam;
-    let roster = Game.getUIRosterObjects(team);
-    const depthOrder = team.depthOrder || {};
-    const displayOrder = ['QB', 'RB', 'WR', 'TE', 'OL', 'DL', 'LB', 'DB'];
+    Game.rebuildDepthChartFromOrder(team);
+    const roster = Game.getRosterObjects(team);
 
-    // Read active scheme formations
     const offFormKey = team.formations?.offense || 'Balanced';
     const defFormKey = team.formations?.defense || '3-2-3 Base';
     const offChart = team.depthChart?.offense || {};
     const defChart = team.depthChart?.defense || {};
 
-    // Header displaying scheme requirements
-    const schemeContextHtml = `
-        <div class="mb-3 bg-slate-900 text-white rounded p-3 border border-slate-700 flex flex-wrap justify-between items-center gap-2 text-xs shrink-0">
-            <div class="flex items-center gap-4">
-                <div>
-                    <span class="text-slate-400 text-[10px] font-bold uppercase tracking-wider block">Active Offense</span>
-                    <span class="font-black text-blue-400 text-sm">${offFormKey}</span>
+    const renderSlotCard = (slot, side) => {
+        const playerId = side === 'offense' ? offChart[slot] : defChart[slot];
+        const player = roster.find(p => p.id === playerId);
+        const posKey = slot.replace(/\d/g, '');
+        const isLocked = team.slotOverrides?.[side]?.[slot] !== undefined;
+
+        if (!player) {
+            return `
+                <div class="border-2 border-dashed border-rose-300 bg-rose-50/50 p-2.5 rounded flex justify-between items-center cursor-pointer hover:bg-rose-100 transition"
+                     onclick="window.openSlotPicker('${slot}', '${side}')">
+                    <div>
+                        <span class="font-black text-xs text-rose-800 uppercase">${slot}</span>
+                        <p class="text-[10px] text-rose-600 font-bold">⚠️ Unassigned — Click to Assign</p>
+                    </div>
+                    <span class="text-xs bg-rose-200 text-rose-800 px-2 py-1 rounded font-bold">+ Pick</span>
+                </div>`;
+        }
+
+        const ovr = calculateOverall(player, posKey);
+        const isIronman = Object.values(offChart).includes(player.id) && Object.values(defChart).includes(player.id);
+        const energy = Math.max(0, Math.round(100 - (player.fatigue || 0)));
+
+        return `
+            <div class="bg-white border ${isLocked ? 'border-amber-400 shadow-sm' : 'border-slate-200'} p-2.5 rounded flex justify-between items-center hover:border-slate-400 transition cursor-pointer"
+                 onclick="window.openSlotPicker('${slot}', '${side}')">
+                <div class="flex items-center gap-2.5 min-w-0">
+                    <div class="w-8 h-8 rounded font-black text-xs flex items-center justify-center shrink-0 ${side === 'offense' ? 'bg-blue-900 text-blue-200' : 'bg-rose-900 text-rose-200'}">
+                        ${slot}
+                    </div>
+                    <div class="min-w-0">
+                        <div class="flex items-center gap-1.5 flex-wrap">
+                            <span class="font-bold text-slate-900 text-xs truncate">${player.name}</span>
+                            ${isLocked ? '<span class="text-[9px] bg-amber-100 text-amber-800 px-1 rounded font-bold">🔒 Locked</span>' : ''}
+                            ${isIronman ? '<span class="text-[9px] bg-indigo-100 text-indigo-800 px-1 rounded font-bold">⚡ Two-Way</span>' : ''}
+                        </div>
+                        <div class="text-[10px] text-slate-500 font-mono flex gap-2">
+                            <span>Age ${player.age}</span>
+                            <span>•</span>
+                            <span class="${energy < 60 ? 'text-rose-600 font-bold' : ''}">Energy: ${energy}%</span>
+                        </div>
+                    </div>
                 </div>
-                <div class="border-l border-slate-700 pl-4">
-                    <span class="text-slate-400 text-[10px] font-bold uppercase tracking-wider block">Active Defense</span>
-                    <span class="font-black text-rose-400 text-sm">${defFormKey}</span>
+                <div class="text-right shrink-0 pl-2">
+                    <span class="text-base font-black ${ovr >= 70 ? 'text-emerald-700' : 'text-slate-800'}">${ovr}</span>
+                    <span class="text-[9px] text-slate-400 uppercase font-bold block -mt-1">OVR</span>
                 </div>
-            </div>
-            <div class="text-[11px] text-slate-300 bg-slate-800 px-2.5 py-1 rounded border border-slate-700">
-                Rankings below auto-deploy into your active schemes. Drag cards or click ✕ to demote.
-            </div>
-        </div>
-    `;
-
-    let tabsHtml = `<div class="flex flex-wrap gap-1 mb-3 pb-2 border-b border-gray-200 shrink-0">`;
-    displayOrder.forEach((pos) => {
-        const isActive = pos === activeDepthOrderTab;
-        const count = (depthOrder[pos] || []).length;
-        const colorClass = isActive
-            ? 'bg-slate-900 text-white shadow-sm'
-            : 'bg-slate-200 text-slate-700 hover:bg-slate-300';
-
-        tabsHtml += `<button class="px-3 py-1.5 rounded font-bold text-xs transition-all ${colorClass}" 
-                             onclick="window.app_switchDepthTab('${pos}')">
-                             ${pos} (${count})
-                     </button>`;
-    });
-    tabsHtml += `</div>`;
-
-    let listsHtml = ``;
-    displayOrder.forEach((groupKey) => {
-        const isHidden = groupKey !== activeDepthOrderTab ? 'hidden' : '';
-        const idList = depthOrder[groupKey] || [];
-        const players = idList.map(id => roster.find(p => p.id === id)).filter(Boolean);
-
-        listsHtml += `
-        <div id="group-${groupKey}" class="depth-group-container ${isHidden} flex flex-col pb-6">
-            <div class="bg-white border border-slate-300 rounded-sm shadow-sm overflow-hidden flex flex-col">
-                <div class="bg-slate-800 px-3 py-2 flex justify-between items-center text-white">
-                    <span class="font-black text-xs uppercase tracking-wider">${groupKey} PRIORITY HIERARCHY</span>
-                    <span class="text-[10px] text-slate-300 font-mono">Rank 1 gets first priority for open ${groupKey} slots</span>
-                </div>
-                <div class="depth-sortable-list p-2 space-y-2 min-h-[140px] max-h-[500px] overflow-y-auto" data-group="${groupKey}">
-                    ${players.map((p, i) => {
-                        const ovr = calculateOverall(p, groupKey);
-                        const offSlot = Object.entries(offChart).find(([_, id]) => id === p.id)?.[0];
-                        const defSlot = Object.entries(defChart).find(([_, id]) => id === p.id)?.[0];
-                        const isIronman = offSlot && defSlot;
-                        const energy = Math.max(0, Math.round(100 - (p.fatigue || 0)));
-
-                        let deploymentBadge = '<span class="bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded text-[9px] font-bold">🪑 Reserve</span>';
-                        if (isIronman) {
-                            deploymentBadge = `<span class="bg-amber-100 text-amber-900 border border-amber-300 px-1.5 py-0.5 rounded text-[9px] font-black">⚡ STARTS: ${offSlot} & ${defSlot}</span>`;
-                        } else if (offSlot) {
-                            deploymentBadge = `<span class="bg-blue-100 text-blue-900 border border-blue-200 px-1.5 py-0.5 rounded text-[9px] font-bold">🏈 Starts ${offSlot}</span>`;
-                        } else if (defSlot) {
-                            deploymentBadge = `<span class="bg-red-100 text-red-900 border border-red-200 px-1.5 py-0.5 rounded text-[9px] font-bold">🛡️ Starts ${defSlot}</span>`;
-                        }
-
-                        return `
-                        <div class="depth-order-item bg-white hover:bg-slate-50 p-2.5 rounded border border-slate-200 shadow-sm cursor-move flex items-center justify-between group transition-all" draggable="true" data-player-id="${p.id}">
-                            <div class="flex items-center gap-3 truncate pr-2">
-                                <span class="font-mono text-sm font-black text-slate-400 w-5 text-center">${i + 1}</span>
-                                <div class="flex flex-col truncate">
-                                    <div class="flex items-center gap-2">
-                                        <span class="font-bold text-slate-900 text-xs truncate">${p.name}</span>
-                                        ${deploymentBadge}
-                                    </div>
-                                    <div class="text-[10px] text-slate-500 font-mono mt-0.5 flex gap-2">
-                                        <span>Age: ${p.age}</span>
-                                        <span>•</span>
-                                        <span>Energy: ${energy}%</span>
-                                        <span>•</span>
-                                        <span class="text-indigo-600 font-sans font-bold">${p.personality?.clique || 'Regular'}</span>
-                                    </div>
-                                </div>
-                            </div>
-                            <div class="flex items-center gap-3 shrink-0">
-                                <div class="text-right">
-                                    <span class="text-base font-black text-slate-900">${ovr}</span>
-                                    <span class="text-[9px] text-slate-400 font-bold block uppercase -mt-1">${groupKey}</span>
-                                </div>
-                                <button class="remove-depth-item text-slate-300 hover:text-rose-600 font-bold text-base p-1" title="Demote to bottom" data-player-id="${p.id}" data-group="${groupKey}">✕</button>
-                            </div>
-                        </div>`;
-                    }).join('')}
-                    ${players.length === 0 ? `<div class="p-6 text-center text-xs text-slate-400 italic">Drag players here from the available roster on the right.</div>` : ''}
-                </div>
-            </div>
-        </div>`;
-    });
-
-    const positionFitsByPlayerId = new Map(
-        roster.map(player => [
-            player.id,
-            {
-                offense: getBestPositionFit(player, OFFENSIVE_POSITION_FITS),
-                defense: getBestPositionFit(player, DEFENSIVE_POSITION_FITS)
-            }
-        ])
-    );
-
-    const availableRoster = roster.slice().sort((a, b) => {
-        const fitsA = positionFitsByPlayerId.get(a.id);
-        const fitsB = positionFitsByPlayerId.get(b.id);
-
-        const valA = depthOrderSortCol === 'overall'
-            ? Math.max(fitsA.offense.ovr, fitsA.defense.ovr)
-            : (a[depthOrderSortCol] || 0);
-
-        const valB = depthOrderSortCol === 'overall'
-            ? Math.max(fitsB.offense.ovr, fitsB.defense.ovr)
-            : (b[depthOrderSortCol] || 0);
-
-        return depthOrderSortDir === 'asc'
-            ? valA - valB
-            : valB - valA;
-    });
+            </div>`;
+    };
 
     pane.innerHTML = `
-        ${schemeContextHtml}
-        <div class="mb-3 bg-slate-100 border border-slate-300 rounded p-2.5 flex flex-col sm:flex-row justify-between items-center gap-2 shrink-0">
-            <div>
-                <h4 class="font-bold text-xs text-slate-900 uppercase tracking-wider">Depth Hierarchy</h4>
-                <p class="text-[11px] text-slate-600">Reorder to set priority. The engine automatically deploys your highest ranked available players into active formation slots.</p>
-            </div>
-            <button id="auto-reorder-btn" class="btn bg-slate-900 text-white hover:bg-slate-800 font-bold py-1 px-3 rounded shadow-sm text-xs uppercase tracking-wider">Auto-Sort By Rating</button>
-        </div>
-        <div class="flex flex-col lg:flex-row gap-4 h-full min-h-0 overflow-hidden pb-4">
-            <div class="w-full lg:w-7/12 xl:w-3/5 flex flex-col min-h-0 h-full">
-                ${tabsHtml}
-                <div id="depth-lists-container" class="flex-grow overflow-y-auto pr-1 hide-scrollbar">
-                    ${listsHtml}
+        <!-- Scheme Header & Quick Actions -->
+        <div class="mb-4 bg-slate-900 text-white rounded p-3 flex flex-wrap justify-between items-center gap-3">
+            <div class="flex items-center gap-4">
+                <div>
+                    <span class="text-slate-400 text-[10px] font-bold uppercase block tracking-wider">Offensive Scheme</span>
+                    <span class="font-black text-blue-400 text-sm">${offFormKey} (8 Starters)</span>
+                </div>
+                <div class="border-l border-slate-700 pl-4">
+                    <span class="text-slate-400 text-[10px] font-bold uppercase block tracking-wider">Defensive Scheme</span>
+                    <span class="font-black text-rose-400 text-sm">${defFormKey} (8 Starters)</span>
                 </div>
             </div>
-            <div class="w-full lg:w-5/12 xl:w-2/5 flex flex-col border-l border-gray-200 pl-0 lg:pl-3 min-h-0 h-full">
-                <h4 class="font-bold text-gray-800 text-sm mb-1 shrink-0">Available Roster</h4>
-                <div class="flex-grow overflow-auto border border-gray-300 rounded shadow-inner bg-white hide-scrollbar">
-                    <table class="min-w-full text-xs">
-                        <thead class="bg-gray-800 text-white sticky top-0 z-10 shadow-sm">
-                            <tr>
-                                <th class="py-1.5 px-2 text-left">Name</th>
-                                <th class="py-1.5 px-1 text-center">Off Fit</th>
-                                <th class="py-1.5 px-1 text-center">Def Fit</th>
-                                <th class="py-1.5 px-1 text-center">SPD</th>
-                                <th class="py-1.5 px-1 text-center">STR</th>
-                            </tr>
-                        </thead>
-                        <tbody class="divide-y divide-gray-100">
-                            ${availableRoster.map(p => {
-                                const fits = positionFitsByPlayerId.get(p.id);
-                                const offFit = fits.offense;
-                                const defFit = fits.defense;
+            <div class="flex gap-2">
+                <button class="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-600 font-bold px-3 py-1.5 rounded text-xs uppercase tracking-wider"
+                        onclick="window.resetDepthChartOverrides()">
+                    Reset Locks
+                </button>
+                <button class="bg-amber-500 hover:bg-amber-600 text-slate-950 font-black px-3 py-1.5 rounded text-xs uppercase tracking-wider shadow"
+                        onclick="window.autoOptimizeLineup()">
+                    ⚡ Auto-Optimize Best Lineup
+                </button>
+            </div>
+        </div>
 
-                                return `
-                                <tr class="roster-row-item cursor-move hover:bg-amber-100 bg-white" draggable="true" data-player-id="${p.id}">
-                                    <td class="py-1.5 px-2 font-semibold truncate max-w-[100px]">${p.name}</td>
-                                    <td class="py-1.5 px-1 text-center whitespace-nowrap">
-                                        <span class="font-bold text-emerald-700">${offFit.position}</span>
-                                        <span class="font-black text-gray-800 ml-0.5">${offFit.ovr}</span>
-                                    </td>
-                                    <td class="py-1.5 px-1 text-center whitespace-nowrap">
-                                        <span class="font-bold text-blue-700">${defFit.position}</span>
-                                        <span class="font-black text-gray-800 ml-0.5">${defFit.ovr}</span>
-                                    </td>
-                                    <td class="py-1.5 px-1 text-center text-blue-600">${p.attributes?.physical?.speed || 0}</td>
-                                    <td class="py-1.5 px-1 text-center text-gray-600">${p.attributes?.physical?.strength || 0}</td>
-                                </tr>`;
-                            }).join('')}
-                        </tbody>
-                    </table>
+        <!-- Unified Lineup Grid -->
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <!-- Offensive Starters -->
+            <div class="bg-slate-50 border border-slate-200 rounded p-3 space-y-2">
+                <div class="flex justify-between items-center border-b border-slate-200 pb-2">
+                    <h4 class="font-black text-xs text-blue-900 uppercase tracking-wider">Starting Offense</h4>
+                    <span class="text-[10px] text-slate-500">Click a card to replace starter</span>
+                </div>
+                <div class="space-y-1.5">
+                    ${Object.keys(offChart).map(slot => renderSlotCard(slot, 'offense')).join('')}
+                </div>
+            </div>
+
+            <!-- Defensive Starters -->
+            <div class="bg-slate-50 border border-slate-200 rounded p-3 space-y-2">
+                <div class="flex justify-between items-center border-b border-slate-200 pb-2">
+                    <h4 class="font-black text-xs text-rose-900 uppercase tracking-wider">Starting Defense</h4>
+                    <span class="text-[10px] text-slate-500">Click a card to replace starter</span>
+                </div>
+                <div class="space-y-1.5">
+                    ${Object.keys(defChart).map(slot => renderSlotCard(slot, 'defense')).join('')}
                 </div>
             </div>
         </div>
     `;
-
-    const autoBtn = pane.querySelector('#auto-reorder-btn');
-
-    if (autoBtn) {
-        autoBtn.onclick = () => {
-            if (!confirm(
-                'Sort every eligible depth group by overall rating? Manual slot assignments will remain locked.'
-            )) {
-                return;
-            }
-
-            const team = gameState.playerTeam;
-
-            Object.keys(team.depthOrder || {}).forEach(pos => {
-                const ids = team.depthOrder[pos] || [];
-
-                team.depthOrder[pos] = ids
-                    .filter(id => {
-                        const player = getPlayer(id);
-
-                        return player &&
-                            isPlayerViableForPosition(player, pos);
-                    })
-                    .sort((idA, idB) => {
-                        const a = getPlayer(idA);
-                        const b = getPlayer(idB);
-
-                        return calculateOverall(b, pos) - calculateOverall(a, pos);
-                    });
-            });
-
-            Game.rebuildDepthChartFromOrder(team);
-            saveGameState();
-
-            renderDepthOrderPane(gameState);
-            document.dispatchEvent(new CustomEvent('refresh-ui'));
-        };
-    }
-    setupDepthOrderDragEvents();
 }
+
+// Slot Selection Modal
+window.openSlotPicker = function(slot, side) {
+    const gs = getGameState();
+    const team = gs?.playerTeam;
+    if (!team) return;
+
+    const roster = Game.getRosterObjects(team);
+    const posKey = slot.replace(/\d/g, '');
+    const activeChart = side === 'offense' ? team.depthChart.offense : team.depthChart.defense;
+    const currentStarterId = activeChart[slot];
+
+    // Rank candidates by their suitability for this specific position
+    const candidates = roster.map(p => ({
+        player: p,
+        ovr: calculateOverall(p, posKey),
+        isCurrentStarter: p.id === currentStarterId,
+        alreadyActiveOnThisSide: Object.values(activeChart).includes(p.id) && p.id !== currentStarterId
+    })).sort((a, b) => b.ovr - a.ovr);
+
+    const modalHtml = `
+        <div class="space-y-2 max-h-[60vh] overflow-y-auto text-xs">
+            <p class="text-slate-600 mb-2">Select a player to start at <b>${slot}</b> (${posKey}). Players already starting elsewhere on ${side} are flagged.</p>
+            ${candidates.map(({ player, ovr, isCurrentStarter, alreadyActiveOnThisSide }) => `
+                <div class="flex justify-between items-center p-2 rounded border ${isCurrentStarter ? 'bg-amber-50 border-amber-300' : 'bg-white border-slate-200 hover:bg-slate-50'} transition">
+                    <div>
+                        <div class="flex items-center gap-2">
+                            <span class="font-bold text-slate-900">${player.name}</span>
+                            ${isCurrentStarter ? '<span class="text-[9px] bg-amber-200 text-amber-900 px-1 rounded font-bold">Current Starter</span>' : ''}
+                            ${alreadyActiveOnThisSide ? '<span class="text-[9px] bg-rose-100 text-rose-800 px-1 rounded font-bold">⚠️ Already Starting on ' + (side === 'offense' ? 'OFF' : 'DEF') + '</span>' : ''}
+                        </div>
+                        <span class="text-[10px] text-slate-500">Age: ${player.age} • SPD: ${player.attributes?.physical?.speed || 0} • STR: ${player.attributes?.physical?.strength || 0}</span>
+                    </div>
+                    <div class="flex items-center gap-3">
+                        <span class="text-base font-black text-slate-800">${ovr} <span class="text-[9px] text-slate-400 font-normal">OVR</span></span>
+                        <button class="bg-slate-900 hover:bg-slate-800 text-white font-bold px-3 py-1 rounded text-xs uppercase"
+                                onclick="window.commitSlotAssignment('${player.id}', '${slot}', '${side}')">
+                            ${isCurrentStarter ? 'Keep' : (alreadyActiveOnThisSide ? 'Swap' : 'Assign')}
+                        </button>
+                    </div>
+                </div>
+            `).join('')}
+        </div>
+    `;
+
+    Game.showModal(`Assign Starter for ${slot}`, modalHtml);
+};
+
+window.commitSlotAssignment = function(playerId, slot, side) {
+    const gs = getGameState();
+    const team = gs?.playerTeam;
+    if (!team) return;
+
+    Game.assignPlayerToSlot(team, playerId, slot, side);
+    Game.rebuildDepthChartFromOrder(team);
+    saveGameState();
+    Game.hideModal();
+    renderDepthOrderPane(gs);
+    document.dispatchEvent(new CustomEvent('refresh-ui'));
+};
+
+window.autoOptimizeLineup = function() {
+    const gs = getGameState();
+    const team = gs?.playerTeam;
+    if (!team) return;
+
+    team.slotOverrides = { offense: {}, defense: {} };
+    Game.populateNaturalDepthOrder(team);
+    Game.rebuildDepthChartFromOrder(team);
+    saveGameState();
+    renderDepthOrderPane(gs);
+    document.dispatchEvent(new CustomEvent('refresh-ui'));
+};
+
+window.resetDepthChartOverrides = function() {
+    const gs = getGameState();
+    const team = gs?.playerTeam;
+    if (!team) return;
+
+    team.slotOverrides = { offense: {}, defense: {} };
+    Game.rebuildDepthChartFromOrder(team);
+    saveGameState();
+    renderDepthOrderPane(gs);
+    document.dispatchEvent(new CustomEvent('refresh-ui'));
+};
 
 export function setupDepthOrderDragEvents() {
     const pane = document.getElementById('depth-order-container');
