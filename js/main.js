@@ -592,6 +592,10 @@ function confirmFranchiseTakeover(teamId, coachDetails) {
         Game.rebuildDepthChartFromOrder(team);
     }
 
+    // Initialize the flexible coaching group after the GM profile is saved.
+    Game.ensureTeamCoachingStaff(team);
+    Game.ensureTeamStaffWorkPlan(team);
+
     // Initialize Year 5 Draft and reset all tracked stats for the new season.
     gameState.players.forEach(p => {
         p.seasonStats = {

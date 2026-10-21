@@ -1165,7 +1165,12 @@ export function processWeeklyScoutingAssignments(
             continue;
         }
 
-        team,
+        if (
+            assignment.task === 'offensePrep' ||
+            assignment.task === 'defensePrep'
+        ) {
+            applyWeeklyGamePreparation(
+                team,
                 coach,
                 assignment,
                 allocatedHours,
