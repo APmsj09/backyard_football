@@ -391,6 +391,284 @@ function getAvailableScoutingStaff(team) {
     return unique;
 }
 
+const TRAINING_POSITION_FOCI = new Set([
+    'QB', 'RB', 'WR', 'TE', 'OL', 'DL', 'LB', 'DB',
+    'offense', 'defense', 'all'
+]);
+
+const TRAINING_SKILLS_BY_POSITION = Object.freeze({
+    QB: ['throwingAccuracy', 'throwPower', 'decisionMaking', 'playbookIQ', 'consistency'],
+    RB: ['speed', 'carrying', 'agility', 'strength', 'catchingHands', 'explosiveness'],
+    WR: ['speed', 'catchingHands', 'agility', 'jumping', 'explosiveness', 'consistency'],
+    TE: ['catchingHands', 'blocking', 'strength', 'jumping', 'speed'],
+    OL: ['blocking', 'strength', 'playbookIQ', 'toughness', 'consistency'],
+    DL: ['strength', 'blockShedding', 'tackling', 'speed', 'explosiveness'],
+    LB: ['tackling', 'playbookIQ', 'speed', 'strength', 'blockShedding', 'coverage'],
+    DB: ['speed', 'coverage', 'agility', 'tackling', 'jumping', 'explosiveness']
+});
+
+const TRAINABLE_SKILLS = new Set([
+    'speed', 'strength', 'agility', 'explosiveness', 'jumping', 'stamina',
+    'playbookIQ', 'clutch', 'consistency', 'toughness', 'decisionMaking',
+    'throwingAccuracy', 'throwPower', 'catchingHands', 'carrying',
+    'tackling', 'blocking', 'blockShedding', 'coverage'
+]);
+
+const TRAINING_POINTS_PER_ATTRIBUTE = 24;
+
+function getTrainingAttribute(player, skill) {
+    for (const [category, attributes] of Object.entries(player?.attributes || {})) {
+        if (Number.isFinite(attributes?.[skill])) {
+            return {
+                category,
+                value: attributes[skill]
+            };
+        }
+    }
+
+    return null;
+}
+
+function getTrainingPositions(player, focus) {
+    if (TRAINING_SKILLS_BY_POSITION[focus]) return [focus];
+
+    const playerPositions = [
+        player.pos,
+        player.favoriteOffensivePosition,
+        player.favoriteDefensivePosition
+    ].filter(position => TRAINING_SKILLS_BY_POSITION[position]);
+
+    const uniquePositions = [...new Set(playerPositions)];
+
+    if (focus === 'offense') {
+        return uniquePositions.filter(position =>
+            OFFENSE.includes(position)
+        );
+    }
+
+    if (focus === 'defense') {
+        return uniquePositions.filter(position =>
+            DEFENSE.includes(position)
+        );
+    }
+
+    return uniquePositions;
+}
+
+function playerMatchesTrainingFocus(player, focus) {
+    if (focus === 'all' || TRAINABLE_SKILLS.has(focus)) return true;
+
+    const positions = [
+        player.pos,
+        player.favoriteOffensivePosition,
+        player.favoriteDefensivePosition
+    ];
+
+    if (focus === 'offense') {
+        return positions.some(position => OFFENSE.includes(position));
+    }
+
+    if (focus === 'defense') {
+        return positions.some(position => DEFENSE.includes(position));
+    }
+
+    return positions.includes(focus);
+}
+
+function isValidTrainingAssignment(assignment) {
+    if (assignment?.task !== 'training') return false;
+
+    const focusIsValid =
+        TRAINING_POSITION_FOCI.has(assignment.focus) ||
+        TRAINABLE_SKILLS.has(assignment.focus);
+
+    const skillIsValid = assignment.skill == null ||
+        TRAINABLE_SKILLS.has(assignment.skill);
+
+    return focusIsValid && skillIsValid;
+}
+
+function getTrainingCandidates(team, assignment, playersById, coach, year, week) {
+    const rosterIds = Array.isArray(team.roster) ? team.roster : [];
+    const targetIds = Array.isArray(assignment.targetPlayerIds)
+        ? new Set(assignment.targetPlayerIds.map(String))
+        : null;
+
+    const explicitSkill = TRAINABLE_SKILLS.has(assignment.skill)
+        ? assignment.skill
+        : TRAINABLE_SKILLS.has(assignment.focus)
+            ? assignment.focus
+            : null;
+
+    const candidates = [];
+
+    for (const id of rosterIds) {
+        const player = playersById.get(String(id));
+
+        if (
+            !player?.attributes ||
+            (player.teamId != null &&
+                String(player.teamId) !== String(team.id)) ||
+            Number(player.status?.duration) > 0 ||
+            (targetIds && !targetIds.has(String(player.id))) ||
+            !playerMatchesTrainingFocus(player, assignment.focus)
+        ) {
+            continue;
+        }
+
+        const positions = getTrainingPositions(player, assignment.focus);
+        const possibleSkills = explicitSkill
+            ? [explicitSkill]
+            : [...new Set(
+                positions.flatMap(position =>
+                    TRAINING_SKILLS_BY_POSITION[position] || []
+                )
+            )];
+
+        const availableSkills = possibleSkills.filter(skill => {
+            const attribute = getTrainingAttribute(player, skill);
+
+            return attribute && attribute.value < 99;
+        });
+
+        if (availableSkills.length === 0) continue;
+
+        // Stable for this player, coach, assignment, and week.
+        // No extra random rolls are needed when the UI rerenders.
+        const seed = [
+            team.id,
+            player.id,
+            coach.id,
+            year,
+            week,
+            assignment.focus,
+            assignment.skill || ''
+        ].join('|');
+
+        const normalizedNoise = (stableNoise(seed) + 1) / 2;
+        const skillIndex = Math.min(
+            availableSkills.length - 1,
+            Math.floor(normalizedNoise * availableSkills.length)
+        );
+
+        const skill = availableSkills[skillIndex];
+        const attribute = getTrainingAttribute(player, skill);
+
+        if (attribute) {
+            candidates.push({
+                player,
+                skill,
+                category: attribute.category
+            });
+        }
+    }
+
+    return candidates;
+}
+
+function applyTrainingHours(
+    team,
+    player,
+    coach,
+    skill,
+    category,
+    hours,
+    trainedThisWeek
+) {
+    const currentAttribute = player.attributes?.[category]?.[skill];
+
+    if (!Number.isFinite(currentAttribute) || currentAttribute >= 99) {
+        return false;
+    }
+
+    const teaching = clamp(
+        Number(coach?.ratings?.teaching ?? 50),
+        1,
+        99
+    );
+
+    const discipline = clamp(
+        Number(coach?.ratings?.practiceDiscipline ?? 50),
+        1,
+        99
+    );
+
+    const workEthic = clamp(
+        Number(player.personality?.workEthic ?? 50),
+        1,
+        99
+    );
+
+    const age = Number.isFinite(player.age) ? player.age : 16;
+    const ageFactor = age <= 14 ? 1.2 : age <= 16 ? 1.0 : 0.85;
+    const coachFactor = 0.55 + teaching / 150 + discipline / 400;
+    const ethicFactor = 0.8 + workEthic / 250;
+
+    const earnedPoints = Math.max(
+        0,
+        hours * coachFactor * ethicFactor * ageFactor
+    );
+
+    if (!team.staffTrainingProgress ||
+        typeof team.staffTrainingProgress !== 'object' ||
+        Array.isArray(team.staffTrainingProgress)) {
+        team.staffTrainingProgress = {};
+    }
+
+    const playerKey = String(player.id);
+
+    if (
+        !team.staffTrainingProgress[playerKey] ||
+        typeof team.staffTrainingProgress[playerKey] !== 'object'
+    ) {
+        team.staffTrainingProgress[playerKey] = {};
+    }
+
+    const progress = team.staffTrainingProgress[playerKey];
+    const previousPoints = Number(progress[skill]);
+    let totalPoints = (
+        Number.isFinite(previousPoints) ? Math.max(0, previousPoints) : 0
+    ) + earnedPoints;
+
+    const trainingKey = `${playerKey}:${skill}`;
+    let improved = false;
+
+    if (
+        totalPoints >= TRAINING_POINTS_PER_ATTRIBUTE &&
+        !trainedThisWeek.has(trainingKey)
+    ) {
+        const nextValue = Math.min(99, currentAttribute + 1);
+
+        if (nextValue > currentAttribute) {
+            player.attributes[category][skill] = nextValue;
+            totalPoints -= TRAINING_POINTS_PER_ATTRIBUTE;
+            trainedThisWeek.add(trainingKey);
+            improved = true;
+        }
+    }
+
+    // A skill cannot improve more than once per player per week through
+    // this system. Preserve partial progress without stockpiling extra levels.
+    if (player.attributes[category][skill] >= 99) {
+        delete progress[skill];
+    } else {
+        if (trainedThisWeek.has(trainingKey)) {
+            totalPoints = Math.min(
+                totalPoints,
+                TRAINING_POINTS_PER_ATTRIBUTE - 0.001
+            );
+        }
+
+        progress[skill] = Math.max(0, totalPoints);
+    }
+
+    if (Object.keys(progress).length === 0) {
+        delete team.staffTrainingProgress[playerKey];
+    }
+
+    return improved;
+}
+
 function getScoutingTargetIds(team, gameState, assignment) {
     if (Array.isArray(assignment.targetPlayerIds)) {
         return new Set(assignment.targetPlayerIds.map(String));
@@ -568,20 +846,40 @@ export function processWeeklyScoutingAssignments(
         return { playersUpdated: 0, hoursUsed: 0 };
     }
 
-    const scoutingAssignments = plan.assignments.filter(
-        assignment =>
-            assignment?.task === 'scouting' &&
-            Number(assignment.hours) > 0 &&
-            SCOUTING_WORK_FOCI.has(assignment.focus)
-    );
+        const workAssignments = plan.assignments.filter(assignment => {
+        if (
+            !assignment?.coachId ||
+            !STAFF_WORK_TASKS.has(assignment.task) ||
+            !Number.isFinite(Number(assignment.hours)) ||
+            Number(assignment.hours) <= 0
+        ) {
+            return false;
+        }
 
-    if (scoutingAssignments.length === 0) {
+        if (assignment.task === 'scouting') {
+            return SCOUTING_WORK_FOCI.has(assignment.focus);
+        }
+
+        if (assignment.task === 'training') {
+            return isValidTrainingAssignment(assignment);
+        }
+
+        return true;
+    });
+
+    if (!workAssignments.some(assignment =>
+        assignment.task === 'scouting' ||
+        assignment.task === 'training'
+    )) {
         return { playersUpdated: 0, hoursUsed: 0 };
     }
 
     const weekKey = `${year}:${week}`;
 
-    if (team.scoutingWorkLastResolvedKey === weekKey) {
+    if (
+        team.staffWorkLastResolvedKey === weekKey ||
+        team.scoutingWorkLastResolvedKey === weekKey
+    ) {
         return { playersUpdated: 0, hoursUsed: 0 };
     }
 
@@ -594,10 +892,19 @@ export function processWeeklyScoutingAssignments(
         : WEEKLY_COACH_HOURS;
 
     const usedHoursByCoach = new Map();
+    const playersById = new Map(
+        (Array.isArray(gameState.players) ? gameState.players : [])
+            .filter(player => player?.id != null)
+            .map(player => [String(player.id), player])
+    );
+    const trainedThisWeek = new Set();
+    const trainedPlayerIds = new Set();
+
     let playersUpdated = 0;
+    let attributesImproved = 0;
     let hoursUsed = 0;
 
-    for (const assignment of plan.assignments) {
+    for (const assignment of workAssignments) {
         if (
             !assignment?.coachId ||
             !STAFF_WORK_TASKS.has(assignment.task)
@@ -622,8 +929,53 @@ export function processWeeklyScoutingAssignments(
 
         if (allocatedHours <= 0) continue;
 
-        // All recognized tasks count against the same weekly coach budget.
+                // All recognized tasks count against the same weekly coach budget.
         usedHoursByCoach.set(coachId, alreadyUsed + allocatedHours);
+
+        if (assignment.task === 'training') {
+            const candidates = getTrainingCandidates(
+                team,
+                assignment,
+                playersById,
+                coach,
+                year,
+                week
+            );
+
+            if (candidates.length === 0) continue;
+
+            const requestedTargetCount = Number(assignment.maxTargets);
+            const targetCount = Math.min(
+                candidates.length,
+                18,
+                Number.isInteger(requestedTargetCount) &&
+                    requestedTargetCount > 0
+                    ? requestedTargetCount
+                    : candidates.length
+            );
+
+            const selected = candidates.slice(0, targetCount);
+            const hoursPerPlayer = allocatedHours / selected.length;
+
+            for (const { player, skill, category } of selected) {
+                trainedPlayerIds.add(String(player.id));
+
+                if (applyTrainingHours(
+                    team,
+                    player,
+                    coach,
+                    skill,
+                    category,
+                    hoursPerPlayer,
+                    trainedThisWeek
+                )) {
+                    attributesImproved++;
+                }
+            }
+
+            hoursUsed += allocatedHours;
+            continue;
+        }
 
         if (assignment.task !== 'scouting') continue;
 
@@ -671,9 +1023,15 @@ export function processWeeklyScoutingAssignments(
         hoursUsed += allocatedHours;
     }
 
+    team.staffWorkLastResolvedKey = weekKey;
     team.scoutingWorkLastResolvedKey = weekKey;
 
-    return { playersUpdated, hoursUsed };
+    return {
+        playersUpdated,
+        hoursUsed,
+        playersTrained: trainedPlayerIds.size,
+        attributesImproved
+    };
 }
 
 const INHERITED_SCOUTING_THRESHOLDS = [0, 4, 12, 24, 40];
