@@ -411,10 +411,27 @@ export function ensureAiStaffWorkPlan(
 
     if (coaches.length === 0) return null;
 
+    const gmDirective =
+        team.gameplan?.gmDirective || 'COACH_AUTONOMY';
+
+    const isOffseason = week === 0;
+    const hasDraftClass =
+        Array.isArray(gameState?.draftClass) &&
+        gameState.draftClass.length > 0;
+
+    const hasWatchlist =
+        Array.isArray(team.scoutingWatchlist) &&
+        team.scoutingWatchlist.length > 0;
+
+    const scoutingFocus = isOffseason
+        ? (hasDraftClass ? 'draft' : 'freeAgents')
+        : (hasWatchlist ? 'watchlist' : 'opponents');
+
     const specialties = [
         {
             task: 'scouting',
-            trainingFocus: getAiTrainingFocus(team)
+            trainingFocus: getAiTrainingFocus(team),
+            scoutingFocus
         },
         {
             task: 'offensePrep',
@@ -440,22 +457,61 @@ export function ensureAiStaffWorkPlan(
 
         const coach = availableCoaches.shift();
 
-        assignments.push({
-            coachId: coach.id,
-            task: specialty.task,
-            hours: 16,
-            ...(specialty.task === 'scouting'
-                ? { focus: 'all', maxTargets: 4 }
-                : {})
-        });
+        let specialtyHours = 16;
 
-        assignments.push({
-            coachId: coach.id,
-            task: 'training',
-            hours: 24,
-            focus: specialty.trainingFocus,
-            maxTargets: 6
-        });
+        if (isOffseason) {
+            // Use the offseason for prospect evaluation and development,
+            // rather than preparing for a game that may not be scheduled.
+            specialtyHours = specialty.task === 'scouting'
+                ? (gmDirective === 'DEVELOP_YOUTH' ? 28 : 24)
+                : 0;
+        } else if (gmDirective === 'WIN_NOW') {
+            // Prioritize immediate performance and weekly preparation.
+            specialtyHours = specialty.task === 'scouting'
+                ? 8
+                : 24;
+        } else if (gmDirective === 'DEVELOP_YOUTH') {
+            // Invest more time in evaluating and developing players.
+            specialtyHours = specialty.task === 'scouting'
+                ? 24
+                : 8;
+        } else if (gmDirective === 'HARD_CONDITIONING') {
+            // Reduce game-preparation time in favor of broad player work.
+            specialtyHours = 8;
+        }
+
+        const trainingHours =
+            WEEKLY_COACH_HOURS - specialtyHours;
+
+        if (specialtyHours > 0) {
+            assignments.push({
+                coachId: coach.id,
+                task: specialty.task,
+                hours: specialtyHours,
+                ...(specialty.task === 'scouting'
+                    ? {
+                        focus: specialty.scoutingFocus,
+                        maxTargets: isOffseason
+                            ? 4
+                            : gmDirective === 'DEVELOP_YOUTH'
+                                ? 6
+                                : 3
+                    }
+                    : {})
+            });
+        }
+
+        if (trainingHours > 0) {
+            assignments.push({
+                coachId: coach.id,
+                task: 'training',
+                hours: trainingHours,
+                focus: gmDirective === 'HARD_CONDITIONING'
+                    ? 'all'
+                    : specialty.trainingFocus,
+                maxTargets: 6
+            });
+        }
     }
 
     team.staffWorkPlan = {
