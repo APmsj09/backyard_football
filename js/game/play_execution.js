@@ -2457,8 +2457,20 @@ export function executeAssignment(pState, assignment, offenseStates, LOS, playSt
     if (pState.role === 'DB' && assignment.includes('zone_deep') && !assignment.includes('blitz')) {
         const safetyHelp = calculateSafetyHelp(pState, playState.activePlayers.filter(p => !p.isOffense), offenseStates, ballCarrierState, playState, isBallInAir);
         if (safetyHelp && safetyHelp.type === 'help') {
-            setPointIntent(pState, safetyHelp.helpX, safetyHelp.helpY, 0.5);
-            // FIX: Allow safeties breaking on the ball to use the leaping catch radius
+            const distToLanding = Math.hypot(pState.x - safetyHelp.helpX, pState.y - safetyHelp.helpY);
+
+            pState.targetX = safetyHelp.helpX;
+            pState.targetY = safetyHelp.helpY;
+
+            // If the defender beats the ball to the spot, camp and settle under the catch
+            if (isBallInAir && distToLanding < 1.5) {
+                setHoldIntent(pState, safetyHelp.helpX, safetyHelp.helpY);
+                pState.vx *= 0.35;
+                pState.vy *= 0.35;
+            } else {
+                setPointIntent(pState, safetyHelp.helpX, safetyHelp.helpY, 0.4);
+            }
+
             if (isBallInAir) pState.action = 'tracking_ball'; 
             else pState.action = 'pursuit';
             return;
