@@ -337,6 +337,38 @@ function promptCoachCreation(teamId) {
         { id: 'practice', label: 'Practice & Conditioning', keys: ['practiceDiscipline', 'conditioning'] }
     ];
 
+    const coachSkillControlsHtml =
+        '<div class="border-t border-slate-200 pt-4">' +
+        '<label class="block text-xs font-bold text-slate-800 uppercase mb-1">' +
+        '4. Coaching Skill Allocation</label>' +
+        '<p class="text-xs text-slate-600 mb-3">' +
+        'Build your strengths and weaknesses using a shared budget.' +
+        '</p>' +
+        '<div class="flex justify-between bg-slate-900 text-white rounded px-3 py-2 mb-3">' +
+        '<span class="text-xs font-bold uppercase">Skill Budget</span>' +
+        '<span id="new-coach-skill-total" class="text-sm font-black">330 / 330</span>' +
+        '</div>' +
+        '<div class="grid grid-cols-1 sm:grid-cols-2 gap-3">' +
+        coachSkillDefinitions.map(function (skill) {
+            const optionsHtml = coachSkillValues.map(function (value) {
+                return '<option value="' + value + '"' +
+                    (value === 55 ? ' selected' : '') + '>' +
+                    value + '</option>';
+            }).join('');
+
+            return '<label class="block rounded border border-slate-200 bg-slate-50 p-3">' +
+                '<span class="block text-xs font-bold text-slate-800 mb-2">' +
+                skill.label + '</span>' +
+                '<select id="new-coach-skill-' + skill.id + '"' +
+                ' class="w-full p-2 border border-slate-300 rounded bg-white text-sm font-bold">' +
+                optionsHtml +
+                '</select></label>';
+        }).join('') +
+        '</div>' +
+        '<p class="text-xs text-slate-500 mt-2">' +
+        'Skills range from 35 to 80. Lower one to free points for another.' +
+        '</p></div>';
+
     const modalHtml = `
         <div class="space-y-5 text-left">
             <p class="text-sm text-slate-600">
@@ -390,10 +422,7 @@ function promptCoachCreation(teamId) {
                 <div id="gm-expertise-summary"
                     class="text-xs text-slate-600 mt-2 leading-relaxed"></div>
             </div>
-            <div class="border-t border-slate-200 pt-4">
-                <label class="block text-xs font-bold text-slate-800 uppercase tracking-wider mb-1">
-                    4. Coaching Skill Allocation
-                </label>
+            <!-- COACH_SKILL_ALLOCATION_BLOCK -->
                 <p class="text-xs text-slate-600 mb-3">
                     Build your strengths and weaknesses. Each category costs points from the same budget.
                 </p>
@@ -442,7 +471,12 @@ function promptCoachCreation(teamId) {
         </div>
     `;
 
-    UI.showModal("Build Your Football Identity", modalHtml, () => {
+    const modalHtmlWithSkills = modalHtml.replace(
+        '<!-- COACH_SKILL_ALLOCATION_BLOCK -->',
+        coachSkillControlsHtml
+    );
+
+    UI.showModal("Build Your Football Identity", modalHtmlWithSkills, () => {
         const name = document.getElementById('new-coach-name').value.trim() || 'GM';
 
         const backgroundId = document.getElementById('new-gm-background').value;
@@ -454,9 +488,11 @@ function promptCoachCreation(teamId) {
         const skillRatings = {};
 
         coachSkillDefinitions.forEach(skill => {
-            const value = Number(
-                document.getElementById(`new-coach-skill-$DIL1`)?.value
+            const control = document.getElementById(
+                'new-coach-skill-' + skill.id
             );
+
+            const value = Number(control?.value ?? 55);
 
             skill.keys.forEach(key => {
                 skillRatings[key] = value;
@@ -518,7 +554,7 @@ function promptCoachCreation(teamId) {
 
     const coachSkillControls = coachSkillDefinitions
         .map(skill =>
-            document.getElementById(`new-coach-skill-${skill.id}`)
+            document.getElementById('new-coach-skill-' + skill.id)
         )
         .filter(Boolean);
 

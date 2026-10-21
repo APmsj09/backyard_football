@@ -18,7 +18,7 @@ import {
 import {
     initializeTeamStaff, generateStaffPool, checkRetiredPlayerToCoach,
     aiManageTeamStaff, aiBuildGameplan, aiChooseWeeklyPractice,
-    ensureAiStaffWorkPlan
+    ensureAiStaffWorkPlan, getTeamCoachingSpecialist
 } from './staff.js';
 import {
     evaluatePlayerRetention,
@@ -1369,10 +1369,11 @@ export function callFriend(playerId) {
 export function processLockerRoomCulture(team, gameLog = null) {
     if (!team || !team.roster) return;
 
-    const coach = team.staff?.coach || team.coach;
+    const coach = getTeamCoachingSpecialist(team, 'training');
     if (!coach) return;
 
-    const personality = coach.biases?.personality?.name || coach.type;
+    const personality =
+        coach.biases?.personality?.name || coach.type;
     const roster = getRosterObjects(team);
 
     roster.forEach(player => {

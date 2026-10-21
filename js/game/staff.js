@@ -299,27 +299,57 @@ function getAiStaffTaskScore(coach, task) {
         return Number.isFinite(value) ? value : 50;
     };
 
+    let score;
+
     if (task === 'scouting') {
-        return (
+        score = (
             rating('evalPhysicals') +
             rating('evalTechnique') +
             rating('evalCharacter')
         ) / 3;
-    }
-
-    if (task === 'offensePrep') {
-        return (
+    } else if (task === 'offensePrep') {
+        score = (
             rating('offSchemeMastery') +
             rating('gameplanInstinct') +
             rating('inGameAdjustments')
         ) / 3;
+    } else if (task === 'defensePrep') {
+        score = (
+            rating('defSchemeMastery') +
+            rating('gameplanInstinct') +
+            rating('inGameAdjustments')
+        ) / 3;
+    } else {
+        score = (
+            rating('teaching') +
+            rating('practiceDiscipline') +
+            rating('conditioning')
+        ) / 3;
     }
 
-    return (
-        rating('defSchemeMastery') +
-        rating('gameplanInstinct') +
-        rating('inGameAdjustments')
-    ) / 3;
+    const personality = coach?.biases?.personality?.name;
+
+    // Analytical coaches favor preparation and evaluation.
+    if (personality === 'Analytical Savant') {
+        if (task === 'offensePrep' || task === 'defensePrep') {
+            score += 10;
+        } else if (task === 'scouting') {
+            score += 4;
+        }
+    }
+
+    // Development-oriented personalities favor training time.
+    if (personality === "Players' Coach") {
+        if (task !== 'training') score -= 6;
+    } else if (personality === 'Old-School Disciplinarian') {
+        if (task === 'scouting') score -= 4;
+        if (task === 'offensePrep' || task === 'defensePrep') score -= 4;
+    } else if (personality === "Peaked in '94") {
+        if (task === 'scouting') score -= 2;
+        if (task === 'offensePrep' || task === 'defensePrep') score -= 3;
+    }
+
+    return score;
 }
 
 function getAiTrainingFocus(team) {
@@ -490,6 +520,27 @@ export function ensureAiStaffWorkPlan(
         } else if (gmDirective === 'HARD_CONDITIONING') {
             // Reduce game-preparation time in favor of broad player work.
             specialtyHours = 8;
+        }
+
+                // Personality changes the balance between specialist work
+        // and player development. Offseason allocations stay intact.
+        if (!isOffseason && specialtyHours > 0) {
+            const personality = coach.biases?.personality?.name;
+
+            if (personality === 'Analytical Savant') {
+                specialtyHours += 4;
+            } else if (
+                personality === "Players' Coach" ||
+                personality === 'Old-School Disciplinarian' ||
+                personality === "Peaked in '94"
+            ) {
+                specialtyHours -= 4;
+            }
+
+            specialtyHours = Math.max(
+                0,
+                Math.min(WEEKLY_COACH_HOURS, specialtyHours)
+            );
         }
 
         const trainingHours =
