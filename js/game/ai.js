@@ -1709,8 +1709,8 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
     if (qbState.loggedRollout) maxDecisionTimeTicks += 35;
 
     // A clean pocket gives deeper concepts more time to develop.
-    // 30 ticks = 0.72 seconds at 25 Hz.
-    if (!isPressured) maxDecisionTimeTicks += 30;
+    // 75 ticks = 3 seconds at 25 Hz.
+    if (!isPressured) maxDecisionTimeTicks += 75;
 
     const pocketTimeExpired = playState.tick >= maxDecisionTimeTicks;
     const canThrowStandard =
