@@ -1209,9 +1209,45 @@ export function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey
         return { playResult, finalBallY: ballOn, log: gameLog, visualizationFrames: [] };
     }
 
-    const audibleCheck = aiCheckAudible(offense, offensivePlayKey, defense, defensivePlayKey, gameLog);
-    const finalOffensivePlayKey = audibleCheck.didAudible ? audibleCheck.playKey : offensivePlayKey;
-    const play = JSON.parse(JSON.stringify(offensivePlaybook[finalOffensivePlayKey]));
+        const audibleCheck = aiCheckAudible(
+        offense,
+        offensivePlayKey,
+        defense,
+        defensivePlayKey,
+        gameLog
+    );
+
+    let finalOffensivePlayKey = audibleCheck.didAudible
+        ? audibleCheck.playKey
+        : offensivePlayKey;
+
+    // An audible may change the play, but it must not silently change
+    // the formation after the offense has lined up.
+    if (audibleCheck.didAudible) {
+        const currentOffenseFormation =
+            offense.formations?.offense || 'Balanced';
+
+        const audibleFormation = getOffensiveFormationForPlay(
+            offense,
+            finalOffensivePlayKey
+        );
+
+        if (audibleFormation !== currentOffenseFormation) {
+            if (gameLog) {
+                gameLog.push(
+                    `[Audible]: Formation mismatch prevented ` +
+                    `${offensivePlayKey} -> ${finalOffensivePlayKey}; ` +
+                    `keeping the original call.`
+                );
+            }
+
+            finalOffensivePlayKey = offensivePlayKey;
+        }
+    }
+
+    const play = JSON.parse(
+        JSON.stringify(offensivePlaybook[finalOffensivePlayKey])
+    );
 
     let playState = {
         playIsLive: true, tick: 0,
