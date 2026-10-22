@@ -2,6 +2,7 @@
 
 import { getDistance } from './physics.js';
 import { getPlayer, game } from './state.js';
+import { isPlayerViableForPosition } from './depth_chart.js';
 import {
     routeTree, offenseFormations, defenseFormations, defensivePlaybook
 } from '../data.js';
@@ -258,11 +259,61 @@ export function setupInitialPlayerStates(playState, offense, defense, play, assi
         });
 
         const coveredOffensiveSlots = new Set();
+        const usedDefensivePlayersThisSnap = new Set();
 
         sortedSlots.forEach(slot => {
             if (!playState.resolvedDepth) playState.resolvedDepth = resolveDepthForPlay(offense, defense);
-            const playerId = playState.resolvedDepth[side]?.[slot];
-            const player = getPlayer(playerId);
+
+            let playerId = playState.resolvedDepth[side]?.[slot];
+            let player = getPlayer(playerId);
+
+            // Validate defensive personnel against the slot they are filling.
+            // A different snap formation can contain slots missing from the
+            // team's stored depth chart, so never trust an unsuitable fallback.
+            if (!isOffense) {
+                let requiredPosition = slot.replace(/\d+/g, '');
+
+                if (['CB', 'S', 'FS', 'SS'].includes(requiredPosition)) {
+                    requiredPosition = 'DB';
+                }
+                if (['DE', 'DT', 'NT'].includes(requiredPosition)) {
+                    requiredPosition = 'DL';
+                }
+
+                const playerFitsSlot = candidate =>
+                    Boolean(
+                        candidate &&
+                        !usedDefensivePlayersThisSnap.has(candidate.id) &&
+                        isPlayerViableForPosition(candidate, requiredPosition) &&
+                        (
+                            !candidate.status ||
+                            candidate.status.duration === 0 ||
+                            candidate.status.type === 'temporary'
+                        )
+                    );
+
+                if (!playerFitsSlot(player)) {
+                    const candidateIds = [
+                        ...(team.depthOrder?.[requiredPosition] || []),
+                        ...(team.roster || [])
+                    ];
+
+                    player = candidateIds
+                        .map(id => getPlayer(id))
+                        .find(playerFitsSlot) || null;
+
+                    playerId = player?.id || null;
+
+                    if (playerId && playState.resolvedDepth[side]) {
+                        playState.resolvedDepth[side][slot] = playerId;
+                    }
+                }
+
+                if (player) {
+                    usedDefensivePlayersThisSnap.add(player.id);
+                }
+            }
+
             if (!player) return;
 
             let assignedPlayerSlot = null;
@@ -467,9 +518,13 @@ export function setupInitialPlayerStates(playState, offense, defense, play, assi
                             ? 'pass_rush'
                             : 'run_gap_A';
                     } else if (slot.startsWith('LB')) {
-                        assignment = isManConcept
-                            ? 'def_read'
-                            : 'zone_hook_curl_middle';
+                        if (defPlay.blitz && isManConcept) {
+                            assignment = 'blitz_gap';
+                        } else {
+                            assignment = isManConcept
+                                ? 'def_read'
+                                : 'zone_hook_curl_middle';
+                        }
                     } else if (slot.startsWith('DB')) {
                         assignment = isManConcept
                             ? 'def_read'
