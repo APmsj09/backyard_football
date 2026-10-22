@@ -458,7 +458,7 @@ export function setupInitialPlayerStates(playState, offense, defense, play, assi
                         }
                     }
                 }
-                        } else {
+            } else {
                 if (!assignment) {
                     const isManConcept = defPlay.concept === 'Man';
 
@@ -488,7 +488,7 @@ export function setupInitialPlayerStates(playState, offense, defense, play, assi
                     }
 
                     const targetExists = initialOffenseStates.some(o => o.slot === targetSlot);
-                                        if (!targetExists || assignment === 'def_read') {
+                    if (!targetExists || assignment === 'def_read') {
                         const offensiveThreatSlots = initialOffenseStates
                             .map(o => o.slot)
                             .filter(slot =>
@@ -535,14 +535,6 @@ export function setupInitialPlayerStates(playState, offense, defense, play, assi
                             assignment = slot.startsWith('DB')
                                 ? 'zone_deep_middle'
                                 : 'zone_hook_curl_middle';
-                        }
-                    }
-
-                        if (bestTarget) {
-                            assignment = `man_cover_${bestTarget}`;
-                            targetSlot = bestTarget;
-                        } else {
-                            assignment = slot.startsWith('DB') ? 'zone_deep_halves' : 'zone_hook_curl_middle';
                         }
                     }
 
