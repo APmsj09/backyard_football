@@ -1210,6 +1210,15 @@ export function processEndOfWeek() {
     game.teams.forEach(team => {
         if (!team) return;
 
+        if (team.id !== game.playerTeam?.id) {
+            ensureAiStaffWorkPlan(
+                team,
+                game,
+                developmentYear,
+                developmentWeek
+            );
+        }
+
         processWeeklyCoachDevelopment(
             team,
             developmentYear,
