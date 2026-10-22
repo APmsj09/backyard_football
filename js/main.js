@@ -1198,6 +1198,14 @@ async function handleLoadGame(saveKey) {
         UI.showScreen('dashboard-screen');
     } catch (error) {
         console.error("Load Error:", error);
+        UI.showModal(
+            "Load Failed",
+            `<p>Could not load saved game: ${error?.message || String(error)}</p>`,
+            null,
+            '',
+            null,
+            'Close'
+        );
     }
 }
 

@@ -877,9 +877,16 @@ export function saveGameState(saveKey = DEFAULT_SAVE_KEY) {
             dataToSave.history.seasons = dataToSave.history.seasons.slice(-12);
         }
 
-        localStorage.setItem(saveKey, JSON.stringify(dataToSave));
+        const serialized = JSON.stringify(dataToSave);
+        localStorage.setItem(saveKey, serialized);
+
+        if (localStorage.getItem(saveKey) !== serialized) {
+            throw new Error('Save verification failed: stored data did not match.');
+        }
+
+        return true;
     } catch (e) {
-        console.warn('Primary save exceeded quota. Running emergency compression...', e);
+        console.error('Primary save failed:', e);
         try {
             // Emergency compression pass
             const dataToSave = { ...game };
@@ -909,9 +916,17 @@ export function saveGameState(saveKey = DEFAULT_SAVE_KEY) {
                     return cp;
                 });
 
-            localStorage.setItem(saveKey, JSON.stringify(dataToSave));
+            const fallbackSerialized = JSON.stringify(dataToSave);
+            localStorage.setItem(saveKey, fallbackSerialized);
+
+            if (localStorage.getItem(saveKey) !== fallbackSerialized) {
+                throw new Error('Emergency save verification failed.');
+            }
+
+            return true;
         } catch (fallbackErr) {
             console.error('Critical save failure:', fallbackErr);
+            return false;
         }
     }
 }
@@ -959,6 +974,7 @@ export function loadGameState(saveKey = DEFAULT_SAVE_KEY) {
         }
     } catch (e) {
         console.error('Error loading game state:', e);
+        throw e;
     }
     return null;
 }

@@ -124,7 +124,7 @@ export function initPlayTelemetry(context, playState, offPlayKey, defPlayKey, en
     window.__ACTIVE_PLAY_TELEMETRY__ = playData;
 }
 
-export function logPlayDebug(category, message, details = null, tick = null) {
+export function logPlayDebug(category, message, details = {}, tick = null, playId = null) {
     if (!telemetryEnabled) return;
 
     if (!isDebugMode()) {
@@ -132,7 +132,12 @@ export function logPlayDebug(category, message, details = null, tick = null) {
         return;
     }
 
-    if (typeof window === 'undefined') return;
+    if (typeof window === 'undefined' || !window.__ACTIVE_PLAY_TELEMETRY__) return;
+
+    // If an active debug ID is set, ignore events from concurrent background simulations
+    if (window.__DEBUG_PLAY_ID__ && playId && playId !== window.__DEBUG_PLAY_ID__) {
+        return;
+    }
 
     const current = window.__ACTIVE_PLAY_TELEMETRY__;
     if (!current) return;

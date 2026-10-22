@@ -581,13 +581,17 @@ export function checkTackleCollisions(playState, gameLog) {
             if (inOwnEndzone) {
                 if (caughtInEndzone) { playState.touchback = true; playState.finalBallY = carrier.isOffense ? 20 : 100; }
                 else { playState.safety = true; playState.finalBallY = carrier.isOffense ? 0 : 120; }
-            } else if (carrier.role === 'QB' && carrier.y < playState.lineOfScrimmage && playState.type === 'pass') {
+            } else if (carrier.role === 'QB' && carrier.y < playState.lineOfScrimmage && playState.type === 'pass' && playState.qbIntent !== 'scramble') {
                 playState.sack = true;
                 playState.statEvents.push({ type: 'sack', playerId: defender.id, qbId: carrier.id });
                 logPlayDebug('QB_SACK', `${defender.name} sacked ${carrier.name} for loss`, {
                     lossYards: Number((playState.lineOfScrimmage - carrier.y).toFixed(1)),
                     tacklerStrength: defender.str || 50
                 });
+            } else if (carrier.role === 'QB' && playState.qbIntent === 'scramble') {
+                // If the QB tucked and ran, record it as a rush attempt rather than a completed pass
+                playState.statEvents.push({ type: 'rush_attempt', carrierId: carrier.id, yards: carrier.y - playState.lineOfScrimmage });
+                playState.isScrambleRun = true;
             }
 
             if (gameLog) {
@@ -821,17 +825,39 @@ export function resolveOngoingBlocks(playState, gameLog, offenseStates = [], def
             blockPower *= 1.10;
         }
 
-        // Natural block degradation: Blocks cannot hold indefinitely.
-        // Downfield WR blocks degrade faster (after 25 ticks / 1.0s); OL pass protection degrades after 45 ticks (1.8s).
-        const maxCleanHoldTicks = blocker.role === 'OL' ? 45 : 25;
+        // STALEMATE RESOLUTION:
+        // Downfield blocks (WR blocking DB or DB blocking WR) must break down quickly.
+        // A cornerback cannot be held at the line of scrimmage for 200 ticks.
+        const isPerimeterBlock = blocker.role !== 'OL' && defender.role !== 'DL';
+        const maxCleanHoldTicks = isPerimeterBlock ? 25 : (blocker.role === 'OL' ? 45 : 30);
+
         if (ticksInBlock > maxCleanHoldTicks) {
-            const fatiguePenalty = 1.0 - ((ticksInBlock - maxCleanHoldTicks) * 0.025);
-            blockPower *= Math.max(0.35, fatiguePenalty);
-            // Give the defender increasing shed momentum as the block breaks down
-            shedPower *= (1.0 + ((ticksInBlock - maxCleanHoldTicks) * 0.015));
+            const fatiguePenalty = 1.0 - ((ticksInBlock - maxCleanHoldTicks) * 0.04);
+            blockPower *= Math.max(0.15, fatiguePenalty);
+            // Defenders aggressively shed as time expires
+            shedPower *= (1.0 + ((ticksInBlock - maxCleanHoldTicks) * 0.035));
+
+            // Force a natural disengagement if a perimeter block exceeds 45 ticks (~1.8 seconds)
+            if (isPerimeterBlock && ticksInBlock > 45) {
+                blocker.engagedWith = null;
+                blocker.isEngaged = false;
+                blocker.reengageCooldown = 20;
+                defender.isBlocked = false;
+                defender.blockedBy = null;
+                defender.isEngaged = false;
+                defender.action = 'pursuit';
+                battle.status = 'disengaged';
+                battlesToRemove.push(index);
+                return;
+            }
         }
 
-        const isPassRush = (defender.assignment?.includes('rush') || defender.assignment?.includes('blitz')) && isPassBlock && playState.type !== 'run';
+        // Pass-rush physics (bull-rushes and edge burns) only apply while the QB actually has the ball in the pocket!
+        const ballStillInPocket = !playState.ballState?.throwTick && !playState.ballState?.inAir && !playState.handoffOccurred;
+        const isPassRush = (defender.assignment?.includes('rush') || defender.assignment?.includes('blitz')) && 
+            isPassBlock && 
+            playState.type !== 'run' && 
+            ballStillInPocket;
 
         if (isPassRush && defender.isBlocked && blocker) {
             if (typeof defender.moveCooldown === 'undefined') defender.moveCooldown = 15;

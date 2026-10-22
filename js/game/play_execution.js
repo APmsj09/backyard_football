@@ -496,19 +496,31 @@ export function setupInitialPlayerStates(playState, offense, defense, play, assi
                     const tState = initialOffenseStates.find(o => o.slot === tSlot);
 
                     if (tState) {
+                        const isRB = tSlot.startsWith('RB');
                         const isSlot = tSlot.includes('TE') || tSlot === 'WR3';
                         let xOffset = (tState.x < CENTER_X) ? (isSlot ? 1.0 : -0.5) : (isSlot ? -1.0 : 0.5);
                         let yOffset = playState.lineOfScrimmage >= 95 ? 1.0 : 2.0;
 
-                        const existingCoverers = playState.activePlayers.filter(p => p.assignment === assignment).length;
-                        if (existingCoverers === 1) {
-                            xOffset *= -2.5; yOffset += 2.0;
-                        } else if (existingCoverers >= 2) {
-                            xOffset = 0; yOffset += 5.0;
+                        // FIX: Linebackers covering backfield runners must sit at LB depth (LOS + 4.0y),
+                        // not down in the interior dirt where linemen instantly engage them!
+                        if (isRB) {
+                            const rbSide = tState.x < CENTER_X ? -1.5 : 1.5;
+                            xOffset = rbSide;
+                            yOffset = 4.5;
+                            startX = tState.x + xOffset;
+                            startY = playState.lineOfScrimmage + yOffset; // Anchored relative to LOS, not backfield Y
+                        } else {
+                            const existingCoverers = playState.activePlayers.filter(p => p.assignment === assignment).length;
+                            if (existingCoverers === 1) {
+                                xOffset *= -2.5; yOffset += 2.0;
+                            } else if (existingCoverers >= 2) {
+                                xOffset = 0; yOffset += 5.0;
+                            }
+
+                            startX = tState.x + xOffset;
+                            startY = tState.y + yOffset;
                         }
 
-                        startX = tState.x + xOffset;
-                        startY = tState.y + yOffset;
                         targetX = tState.x;
                         targetY = tState.y;
                     }
@@ -522,7 +534,6 @@ export function setupInitialPlayerStates(playState, offense, defense, play, assi
             }
 
             startX = Math.max(0.5, Math.min(53.3 - 0.5, startX));
-            // Allow players to line up inside the endzones (0.5 to 119.5) for Goal Line / Conversion plays
             startY = Math.max(0.5, Math.min(119.5, startY));
 
             if (isOffense) {
@@ -533,6 +544,21 @@ export function setupInitialPlayerStates(playState, offense, defense, play, assi
                 // Minimum 1.25 yds across LOS gives 1.45 yds gap from OL (-0.2), preventing pre-snap overlap
                 if (startY < playState.lineOfScrimmage + 1.25) {
                     startY = playState.lineOfScrimmage + 1.25;
+                }
+
+                // 8v8 EDGE CONTAINMENT FIX:
+                // If a defensive end or pass rusher is lined up inside x=30 on the right, but the offense
+                // has a Tight End or Wing out past x=29, widen the edge rusher to set the containment edge!
+                const isEdgeRusher = slot.startsWith('DL') && (assignment?.includes('rush') || assignment?.includes('run_edge'));
+                if (isEdgeRusher) {
+                    const offTightEndRight = initialOffenseStates.find(o => o.slot.startsWith('TE') && o.x > CENTER_X);
+                    if (offTightEndRight && startX > CENTER_X && startX <= offTightEndRight.x) {
+                        startX = offTightEndRight.x + 1.4; // Force DE outside the TE's hip to set the edge
+                    }
+                    const offTightEndLeft = initialOffenseStates.find(o => o.slot.startsWith('TE') && o.x < CENTER_X);
+                    if (offTightEndLeft && startX < CENTER_X && startX >= offTightEndLeft.x) {
+                        startX = offTightEndLeft.x - 1.4;
+                    }
                 }
             }
 
