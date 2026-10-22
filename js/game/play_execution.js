@@ -2279,13 +2279,37 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                 pState._pursuitLockTicks--;
             }
 
+            const hasCommittedToLiveRunner =
+                pState._hasCommittedToLiveRunner === true &&
+                ballCarrierState?.isOffense &&
+                !isBallInAir;
+
             if (ballCarrierState && !isBallInAir) {
                 if (isRunReadAtMesh) {
                     shouldPursue = true;
-                } else if (carrierPerception > 0 || isPersistingPursuit) {
+                } else if (
+                    carrierPerception > 0 ||
+                    isPersistingPursuit ||
+                    hasCommittedToLiveRunner
+                ) {
                     if (isRunRead || ballCarrierState.role !== 'QB' || qbScrambling) {
                         shouldPursue = true;
-                        pState._pursuitLockTicks = 25; // Lock pursuit memory for 1 second
+
+                        // Once a defender has committed to a live runner,
+                        // do not abandon pursuit merely because the runner
+                        // moves outside the defender's perception range.
+                        if (
+                            ballCarrierState.isOffense &&
+                            (
+                                ballCarrierState.role !== 'QB' ||
+                                qbScrambling ||
+                                isBallPastLOS
+                            )
+                        ) {
+                            pState._hasCommittedToLiveRunner = true;
+                        }
+
+                        pState._pursuitLockTicks = 25;
                     } else if (
                         assignment?.includes('blitz') ||
                         assignment?.includes('rush') ||
@@ -2459,7 +2483,7 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                     // The live carrier's position and velocity already determine
                     // the pursuit target above. Do not apply a cached play-direction
                     // read that may point away from the carrier's current path.
-                        
+
                     /*if (dirConfidence > 0.45 && !isRunReadAtMesh) {
                         const cheatAmount =
                             3.0 *

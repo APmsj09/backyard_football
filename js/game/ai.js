@@ -113,7 +113,9 @@ export function diagnosePlay(pState, tick, offenseStates, playState = null) {
     if (observedRunCarrier || qbScramble) {
         pState._diagnosedGuess = 'run';
         pState._diagnosedConfidence = 1.0;
-        pState._sawLiveRunnerTick = tick; // FIX: Remember that we saw a live runner
+        pState._sawLiveRunnerTick = tick; // Remember that we saw a live runner
+        pState._diagPassEvidenceTicks = 0;
+        pState._diagPassEvidenceLastTick = tick;
 
         if (debugEnabled && pState._lastLoggedGuess !== 'run') {
             logPlayDebug('DEF_READ', `${pState.name} (${pState.role}) committed to [RUN] (${observedRunCarrier ? 'Observed ball carrier' : 'QB scramble'})`, {
@@ -260,13 +262,59 @@ export function diagnosePlay(pState, tick, offenseStates, playState = null) {
         if (confidence > commitThreshold || tick > 35) {
             guess = finalRunScore >= finalPassScore ? 'run' : 'pass';
         }
-    } else if (currentGuess === 'run') {
-        // A confirmed run read on a designed run play is final. Do not let noise or DB bias revert it to pass.
-        const isTrickPass = playState?.playKey === 'Trick_Flea_Flicker' && playState?.fleaFlickerPhase === 'qb_pass';
+        } else if (currentGuess === 'run') {
+        const isTrickPass =
+            playState?.playKey === 'Trick_Flea_Flicker' &&
+            playState?.fleaFlickerPhase === 'qb_pass';
+
+        // Once an actual live runner has been observed, preserve the
+        // run read unless the play is in the flea-flicker pass phase.
         if (pState._sawLiveRunnerTick && !isTrickPass) {
             guess = 'run';
-        } else if (finalPassScore > finalRunScore + 25) {
-            guess = 'pass';
+            pState._diagPassEvidenceTicks = 0;
+            pState._diagPassEvidenceLastTick = tick;
+        } else {
+            // A score-margin swing alone is not enough to overturn a run read.
+            // The defender must actually perceive a settled QB and credible
+            // pass-protection evidence.
+            const hasCrediblePassEvidence = Boolean(
+                qb &&
+                qb.hasBall &&
+                qb.action === 'qb_setup' &&
+                qb.hasCompletedDropback === true &&
+                passBlocks >= 2 &&
+                passBlocks > runBlocks
+            );
+
+            const hasStrongPassRead =
+                hasCrediblePassEvidence &&
+                finalPassScore > finalRunScore + 25;
+
+            // Count consecutive simulation ticks with sustained evidence.
+            // Do not count multiple calls during the same tick as extra time.
+            if (hasStrongPassRead) {
+                if (pState._diagPassEvidenceLastTick !== tick) {
+                    pState._diagPassEvidenceTicks =
+                        (Number(pState._diagPassEvidenceTicks) || 0) + 1;
+
+                    pState._diagPassEvidenceLastTick = tick;
+                }
+            } else {
+                pState._diagPassEvidenceTicks = 0;
+                pState._diagPassEvidenceLastTick = tick;
+            }
+
+            // Smarter defenders recognize the contrary evidence faster.
+            // At 25 Hz, this gives roughly 0.16–0.32 seconds of confirmation.
+            const passConfirmationTicks = Math.max(
+                4,
+                Math.round(9 - (iq / 20))
+            );
+
+            guess =
+                pState._diagPassEvidenceTicks >= passConfirmationTicks
+                    ? 'pass'
+                    : 'run';
         }
     } else if (currentGuess === 'pass') {
         if (finalRunScore > finalPassScore + 20) {
