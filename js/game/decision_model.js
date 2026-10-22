@@ -62,10 +62,6 @@ export function getDecisionProfile(playerState, tick = null) {
     const ego = readStat(personality.ego);
     const streetCred = readStat(personality.streetCred);
 
-    const hasExplicitCareerData = 
-        playerState.experienceSeasons !== undefined || 
-        playerState.experienceSnaps !== undefined;
-
     const seasonsPlayed = Number(playerState.experienceSeasons);
     const snapsThisSeason = Number(playerState.experienceSnaps);
     const hasExplicitCareerData = Number.isFinite(seasonsPlayed) || Number.isFinite(snapsThisSeason);
