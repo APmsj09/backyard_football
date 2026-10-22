@@ -32,10 +32,15 @@ export function checkFumble(ballCarrierState, tacklerState, playState, gameLog) 
     const strength = Number(tacklerState.strength) || 50;
     const tackling = Number(tacklerState.tackling) || 50;
 
+    // In backyard football, an older/stronger kid hitting a much younger/smaller kid jars the ball loose easily
+    const carrierWeight = ballCarrierState.weight || ballCarrierState.wgt || 140;
+    const tacklerWeight = tacklerState.weight || tacklerState.wgt || 140;
+    const sizeDisparity = Math.max(-0.5, Math.min(0.8, (tacklerWeight - carrierWeight) / 100));
+
     const carrierMod = (ballSecurity / 100) * (ballCarrierState.fatigueModifier || 1);
     const tacklerMod = ((strength + tackling) / 200) * (tacklerState.fatigueModifier || 1);
 
-    let fumbleChance = FUMBLE_CHANCE_BASE * (tacklerMod / (carrierMod + 0.2));
+    let fumbleChance = FUMBLE_CHANCE_BASE * (tacklerMod / (carrierMod + 0.2)) * (1.0 + sizeDisparity * 0.6);
 
     if (ballCarrierState.role === 'QB' && ballCarrierState.action === 'qb_setup') {
         fumbleChance *= 2.5;
@@ -232,6 +237,12 @@ export function checkTackleCollisions(playState, gameLog) {
 
         if (!Number.isFinite(dist) || dist > TACKLE_RANGE) return false;
 
+        // A defender who just whiffed or got shed by this carrier cannot immediately re-tackle them
+        if (p._carrierTackleCooldownTicks && p._carrierTackleCooldownTicks > 0) {
+            p._carrierTackleCooldownTicks--;
+            return false;
+        }
+
         // DEEPER FIX: Process engaged defenders BEFORE running environmental raycasts!
         // If a defender is locked in a block, they are not pathfinding. We only check
         // if they can reach out for a weak arm tackle.
@@ -366,10 +377,13 @@ export function checkTackleCollisions(playState, gameLog) {
             continue;
         }
 
-        // Trucking is resolved as a power contest, not as a generic juke.
-        // Only free defenders reach this point; engaged defenders use the
-        // separate arm-tackle handling above.
         const isTruckAttempt = carrier.action === 'trucking';
+
+        const carrierAge = carrier.age || 15;
+        const defenderAge = defender.age || 15;
+
+        const carrierWeight = carrier.wgt || carrier.weight || (90 + (carrierAge - 12) * 17.5);
+        const defenderWeight = defender.wgt || defender.weight || (90 + (defenderAge - 12) * 17.5);
 
         const carrierDrivePower =
             ((carrier.str || carrier.strength || 50) * 0.65) +
@@ -379,32 +393,24 @@ export function checkTackleCollisions(playState, gameLog) {
             ((defender.tkl || defender.tackling || 50) * 0.65) +
             ((defender.str || defender.strength || 50) * 0.35);
 
-        const carrierWeight = carrier.wgt || carrier.weight || 200;
-        const defenderWeight = defender.wgt || defender.weight || 200;
+        const carrierSpeed = Math.hypot(carrier.vx || 0, carrier.vy || 0);
+        const defenderSpeed = Math.hypot(defender.vx || 0, defender.vy || 0);
 
-        const carrierSpeed = Math.hypot(
-            carrier.vx || 0,
-            carrier.vy || 0
-        );
+        // Mass Ratio: A 185 lb teenager hitting a 105 lb middle schooler has massive sandlot leverage
+        const weightDelta = carrierWeight - defenderWeight; // -80 to +80 lbs
+        const massAdvantage = (weightDelta / 150) * 0.25;
 
-        const defenderSpeed = Math.hypot(
-            defender.vx || 0,
-            defender.vy || 0
-        );
-
-        // Positive values favor the runner; negative values favor the tackler.
-        // Strength/technique, weight, and current momentum all contribute.
         const truckAdvantage = isTruckAttempt
             ? Math.max(
-                -0.15,
+                -0.25,
                 Math.min(
-                    0.18,
+                    0.35,
                     ((carrierDrivePower - defenderStopPower) * 0.004) +
-                    ((carrierWeight - defenderWeight) * 0.0004) +
+                    massAdvantage +
                     ((carrierSpeed - defenderSpeed) * 0.008)
                 )
             )
-            : 0;
+            : massAdvantage * 0.5; // Passive size advantage even on standard contact
 
         // A truck has its own contact resolution below. Do not replace it
         // with a random juke or stiff arm.
@@ -516,8 +522,8 @@ export function checkTackleCollisions(playState, gameLog) {
         const momRatio = tMomentum / Math.max(1, rMomentum);
         successChance += (momRatio - 1.0) * 0.2;
 
-        // Only defenders who passed the reach and obstruction checks
-        // can contribute to the gang-tackle success bonus.
+        // BACKYARD GANG-TACKLE / SWARM RULE:
+        // When the neighborhood big kid is carrying the ball, younger/smaller kids MUST swarm together to pull him down!
         const defendersInRange = defenders.filter(d =>
             d.stunnedTicks === 0 &&
             !d.isBlocked &&
@@ -525,9 +531,10 @@ export function checkTackleCollisions(playState, gameLog) {
             getDistance(d, carrier) < TACKLE_CONTACT_RANGE
         );
 
-        // Additional defenders help, but shouldn't make a tackle nearly automatic.
         if (defendersInRange.length > 1) {
-        successChance += Math.min(0.16, (defendersInRange.length - 1) * 0.08);
+            // High-school big runner vs middle-school swarm: each additional kid adds +12% tackle odds
+            const swarmStrength = (defendersInRange.length - 1) * 0.12;
+            successChance += Math.min(0.32, swarmStrength);
         }
 
         successChance += (tPower - rPower) * 0.005;
@@ -586,6 +593,10 @@ export function checkTackleCollisions(playState, gameLog) {
         } else {
             carrier.tacklesBrokenThisPlay = brokenCount + 1;
 
+            // Prevent this specific defender from attempting another tackle on the same runner
+            // for at least 0.8 seconds (20 ticks). Other defenders can still make the tackle.
+            defender._carrierTackleCooldownTicks = 20;
+
             // A failed tackle redirects the defender and disrupts his balance.
             const bounceX = defender.x - carrier.x;
             const bounceY = defender.y - carrier.y;
@@ -595,35 +606,34 @@ export function checkTackleCollisions(playState, gameLog) {
             );
             applyImpactDisruption(
                 defender,
-                isTruckAttempt ? 42 : 34,
-                (bounceX / bounceDistance) * (isTruckAttempt ? 1.9 : 1.6),
-                (bounceY / bounceDistance) * (isTruckAttempt ? 1.9 : 1.6)
+                isTruckAttempt ? 55 : 42,
+                (bounceX / bounceDistance) * (isTruckAttempt ? 2.4 : 1.8),
+                (bounceY / bounceDistance) * (isTruckAttempt ? 2.4 : 1.8)
             );
             
-            // Reduced stumble cooldown so trailing pursuers aren't completely frozen out of the play
-            defender.stunnedTicks = Math.max(defender.stunnedTicks || 0, 5);
+            // Stumble cooldown: the whiffed defender needs time to recover their footing
+            defender.stunnedTicks = Math.max(defender.stunnedTicks || 0, 10);
             
-            // PHYSICS: Running *through* a defender transfers a massive chunk of momentum based on weight ratio
+            // Breaking a tackle shouldn't turn the runner into a statue.
+            // Power runners and agile evaders maintain forward momentum.
             const baseSpeedDrain = Math.max(
-                0.15,
+                0.06,
                 Math.min(
-                    0.60,
-                    (defenderWeight / carrierWeight) * 0.40
+                    0.28,
+                    (defenderWeight / carrierWeight) * 0.20
                 )
             );
 
-            // A successful power-through loses less momentum when the
-            // carrier wins the truck contest.
             const speedDrain = isTruckAttempt
                 ? Math.max(
-                    0.12,
-                    Math.min(0.60, baseSpeedDrain - truckAdvantage)
+                    0.04,
+                    Math.min(0.22, baseSpeedDrain - (truckAdvantage * 0.5))
                 )
                 : baseSpeedDrain;
 
             carrier.vx *= (1 - speedDrain);
             carrier.vy *= (1 - speedDrain);
-            carrier.moveCooldown = 20; // Locks out immediate jukes
+            carrier.moveCooldown = 12; // Modest cooldown to prevent instant spamming without paralyzing the runner
 
             if (carrier.role === 'QB' && carrier.action === 'qb_setup' && carrier.y < playState.lineOfScrimmage) {
                 carrier.action = 'qb_scramble';
@@ -631,9 +641,12 @@ export function checkTackleCollisions(playState, gameLog) {
             }
 
             if (gameLog) {
-                const message = isTruckAttempt
-                    ? `[Tick ${playState.tick}] 💥 ${carrier.name} powers through ${defender.name}'s tackle!`
-                    : `[Tick ${playState.tick}] 💪 ${carrier.name} runs THROUGH ${defender.name}!`;
+                const isBigKidTruck = (carrierWeight - defenderWeight) > 35;
+                const message = isBigKidTruck
+                    ? `[Tick ${playState.tick}] 🚜 ${carrier.name} completely steamrolls younger ${defender.name}!`
+                    : isTruckAttempt
+                        ? `[Tick ${playState.tick}] 💥 ${carrier.name} powers right through ${defender.name}'s tackle!`
+                        : `[Tick ${playState.tick}] 💪 ${carrier.name} shrugs off ${defender.name}'s reach!`;
 
                 pushGameLog(gameLog, message, playState);
             }
@@ -749,13 +762,18 @@ export function resolveOngoingBlocks(playState, gameLog, offenseStates = [], def
 
         if (ballCarrier) {
             const distToCarrier = getDistance(defender, ballCarrier);
-            if (distToCarrier < 1.5) {
+            // Defenders must anticipate and shed blocks when the carrier enters their pursuit vicinity (3.5y)
+            if (distToCarrier < 3.5) {
                 const reactionScore = (defender.playbookIQ || 50) + (defender.blockShedding || 50);
-                if (reactionScore + getRandomInt(0, 50) > 100) {
-                    // DEEPER FIX: If defender sheds to make an immediate tackle, instantly sever the engagement
-                    blocker.engagedWith = null; blocker.isEngaged = false;
+                const shedBonus = (3.5 - distToCarrier) * 15;
+                if (reactionScore + shedBonus + getRandomInt(0, 50) > 115) {
+                    blocker.engagedWith = null; 
+                    blocker.isEngaged = false;
+                    blocker.reengageCooldown = 14;
                     applyImpactDisruption(blocker, 28, 0, 0);
-                    defender.isBlocked = false; defender.blockedBy = null; defender.isEngaged = false;
+                    defender.isBlocked = false; 
+                    defender.blockedBy = null; 
+                    defender.isEngaged = false;
                     defender.action = 'pursuit';
                     battle.status = 'disengaged';
                     battlesToRemove.push(index);
@@ -789,9 +807,14 @@ export function resolveOngoingBlocks(playState, gameLog, offenseStates = [], def
             blockPower *= 1.10;
         }
 
-        if (ticksInBlock > 60) {
-            const fatiguePenalty = 1.0 - ((ticksInBlock - 60) * 0.01);
-            blockPower *= Math.max(0.5, fatiguePenalty);
+        // Natural block degradation: Blocks cannot hold indefinitely.
+        // Downfield WR blocks degrade faster (after 25 ticks / 1.0s); OL pass protection degrades after 45 ticks (1.8s).
+        const maxCleanHoldTicks = blocker.role === 'OL' ? 45 : 25;
+        if (ticksInBlock > maxCleanHoldTicks) {
+            const fatiguePenalty = 1.0 - ((ticksInBlock - maxCleanHoldTicks) * 0.025);
+            blockPower *= Math.max(0.35, fatiguePenalty);
+            // Give the defender increasing shed momentum as the block breaks down
+            shedPower *= (1.0 + ((ticksInBlock - maxCleanHoldTicks) * 0.015));
         }
 
         const isPassRush = (defender.assignment?.includes('rush') || defender.assignment?.includes('blitz')) && isPassBlock && playState.type !== 'run';

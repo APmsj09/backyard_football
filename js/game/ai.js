@@ -46,11 +46,13 @@ function getReceiverProjectionSpeedYPS(receiver) {
 
 export function diagnosePlay(pState, tick, offenseStates, playState = null) {
     const decisionProfile = getDecisionProfile(pState, tick);
+    // Deep safeties (20-30y off LOS) need telescopic downfield vision to read the backfield mesh
+    const visionDepth = pState.role === 'DB' && pState.assignment?.includes('deep') ? 38 : 25;
     const visionContext = getPerceptionContext(
         pState,
         tick,
-        18,
-        25,
+        22,
+        visionDepth,
         3.25
     );
 
@@ -122,10 +124,11 @@ export function diagnosePlay(pState, tick, offenseStates, playState = null) {
         return { guess: 'run', confidence: 1.0, direction: pState._diagnosedDirection || 'center', dirConfidence: 1.0 };
     }
 
-    // FIX: Once a defender confirms a live runner, do not let them flip back to [PASS] for at least 15 ticks (0.6s)
-    // even if the runner briefly leaves their narrow forward gaze cone while turning.
-    if (pState._diagnosedGuess === 'run' && pState._sawLiveRunnerTick && (tick - pState._sawLiveRunnerTick < 15)) {
-        return { guess: 'run', confidence: pState._diagnosedConfidence || 1.0, direction: pState._diagnosedDirection || 'center', dirConfidence: 1.0 };
+    // Once ANY defender confirms a live runner carrying the ball on a designed run,
+    // they NEVER revert to 'pass' unless a trick play pitch/flea-flicker return occurs!
+    const isTrickPass = playState?.playKey === 'Trick_Flea_Flicker' && playState?.fleaFlickerPhase === 'qb_pass';
+    if (pState._diagnosedGuess === 'run' && pState._sawLiveRunnerTick && !isTrickPass) {
+        return { guess: 'run', confidence: 1.0, direction: pState._diagnosedDirection || 'center', dirConfidence: 1.0 };
     }
 
     /*// A defender who already committed to 'pass' on a pass play NEVER reverts to 'run'
@@ -233,8 +236,12 @@ export function diagnosePlay(pState, tick, offenseStates, playState = null) {
         pState._diagNoise = (pState._diagNoise * 0.94) + (((Math.random() - 0.5) * noiseMax) * 0.06);
     }
 
-    const rawRunScore = (runScore * timeFactor * (0.6 + iqFactor * 0.4)) + pState._diagNoise + (pState.role === 'LB' ? 12 : 0);
-    const rawPassScore = (passScore * timeFactor * (0.6 + iqFactor * 0.4)) - pState._diagNoise + (pState.role === 'DB' ? 12 : 0);
+    // DB pass bias should only apply if pass cues actually exist or if the ball has not been handed off
+    const dbPassBias = (pState.role === 'DB' && (passBlocks > 0 || qb?.action === 'qb_setup')) ? 10 : 0;
+    const lbRunBias = (pState.role === 'LB' && (runBlocks > 0 || rbs.some(r => r.action === 'run_path'))) ? 10 : 0;
+
+    const rawRunScore = (runScore * timeFactor * (0.6 + iqFactor * 0.4)) + pState._diagNoise + lbRunBias;
+    const rawPassScore = (passScore * timeFactor * (0.6 + iqFactor * 0.4)) - pState._diagNoise + dbPassBias;
 
     // Smooth the raw scores to prevent flickering when players enter/exit vision
     pState._smoothedRunScore = ((pState._smoothedRunScore || rawRunScore) * 0.8) + (rawRunScore * 0.2);
@@ -254,10 +261,11 @@ export function diagnosePlay(pState, tick, offenseStates, playState = null) {
             guess = finalRunScore >= finalPassScore ? 'run' : 'pass';
         }
     } else if (currentGuess === 'run') {
-        // FIX: If the defender saw a confirmed live ball carrier, offensive line step cues cannot revert them to PASS
-        if (pState._sawLiveRunnerTick && (tick - pState._sawLiveRunnerTick < 40)) {
+        // A confirmed run read on a designed run play is final. Do not let noise or DB bias revert it to pass.
+        const isTrickPass = playState?.playKey === 'Trick_Flea_Flicker' && playState?.fleaFlickerPhase === 'qb_pass';
+        if (pState._sawLiveRunnerTick && !isTrickPass) {
             guess = 'run';
-        } else if (finalPassScore > finalRunScore + 20) {
+        } else if (finalPassScore > finalRunScore + 25) {
             guess = 'pass';
         }
     } else if (currentGuess === 'pass') {
@@ -737,18 +745,22 @@ export function getSmartCarrierTarget(runner, defenseStates, offenseStates, fiel
         const laneStickiness =
             20 + ((decisionProfile?.assignmentDiscipline ?? 50) * 0.2); // Buffed stickiness
 
+        // HEAVY REVERSAL PENALTY: Prevent erratic zig-zagging behind the line (e.g. flipping from -3 to +3)
+        const isReversingAcrossCenter = Math.sign(offset) !== 0 && Math.sign(prevOffset) !== 0 && Math.sign(offset) !== Math.sign(prevOffset);
+        if (isReversingAcrossCenter && isBehindLine) {
+            score -= 55; // Substantial penalty to prevent vacillating back and forth behind the line
+        }
+
         if (offsetDiffFromPrev < 0.5) {
             score += laneStickiness;
         } else if (!(centerThreatDetected && lateralShift >= 3.0)) {
-            // Normally discourage unnecessary lane changes.
-            // Do not let that penalty trap the runner behind a congested middle.
             score -= offsetDiffFromPrev * (
-                4.0 + ((decisionProfile?.assignmentDiscipline ?? 50) * 0.02)
+                5.0 + ((decisionProfile?.assignmentDiscipline ?? 50) * 0.04)
             );
 
-            // Severe penalty for unnecessary zig-zags.
-            if (offsetDiffFromPrev >= 3.0) {
-                score -= 40;
+            // Severe penalty for large lateral jumps
+            if (offsetDiffFromPrev >= 2.5) {
+                score -= 50;
             }
         }
         
@@ -1834,11 +1846,16 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
             }
         }
 
-        // Give the QB one final target evaluation at the pocket deadline.
-        // Only force an emergency resolution if no throw was selected.
-        if (!decisionMade && pocketTimeExpired) {
+        // POCKET EXHAUSTION RESOLUTION:
+        // If the QB has completed their dropback, has scanned all available reads,
+        // and every single target is blanketed (negative or below threshold),
+        // do NOT stand frozen in the pocket until tick 125!
+        const allReadsBlanketed = numReadsVisible >= progression.length && 
+            (!bestTargetEval || bestTargetEval.score < (THROW_THRESHOLD - 15));
+
+        if (!decisionMade && (pocketTimeExpired || (playState.tick >= 65 && allReadsBlanketed))) {
             decisionMade = true;
-            reason = "Time Expired";
+            reason = allReadsBlanketed ? "All Reads Blanketed" : "Time Expired";
         }
 
         // NATURAL SCRAMBLE EVALUATION:

@@ -2182,11 +2182,14 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
             
             if (assignment?.startsWith('zone_') && shouldPursue && !isDL) {
                 const carrierPastLOS = ballCarrierState && ballCarrierState.y > LOS + 0.5;
-                const isConfidentRun = isRunRead && diagConfidence >= 0.65;
+                const isConfidentRun = isRunRead && diagConfidence >= 0.55;
+                const distToCarrier = ballCarrierState ? getDistance(pState, ballCarrierState) : 999;
                 
-                // DEEPER FIX: Zone defenders (DBs/LBs) hold their zone unless there's a highly confident run read
-                // or the runner has clearly crossed the line of scrimmage.
-                if (!isConfidentRun && !qbScrambling && !carrierPastLOS && !isRunReadAtMesh) {
+                // Zone defenders must break on the ball if:
+                // 1. Confirmed run read, OR
+                // 2. Ball carrier has crossed the line of scrimmage, OR
+                // 3. Ball carrier has broken into their sector (< 14 yards)
+                if (!isConfidentRun && !qbScrambling && !carrierPastLOS && !isRunReadAtMesh && distToCarrier > 14.0) {
                     shouldPursue = false;
                 }
             }
@@ -2304,12 +2307,19 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                         predY = Math.max(chaseTarget.y + 0.5, predY);
                     }
 
-                    // FIX: Prevent the "Sideline Conga Line". If a runner is breaking up the sideline,
-                    // pursuers downfield cut off the boundary lane ahead of him instead of trailing behind his heels.
-                    const isNearBoundary = chaseTarget.x < 5.0 || chaseTarget.x > (FIELD_WIDTH - 5.0);
-                    if (isNearBoundary && pState.y > chaseTarget.y + 2.0) {
-                        const boundaryPinX = chaseTarget.x < 5.0 ? 1.5 : (FIELD_WIDTH - 1.5);
-                        predX = (predX * 0.35) + (boundaryPinX * 0.65);
+                    // ANGLE OF PURSUIT FIX: Prevent defenders from trailing behind the runner's footsteps ("conga line").
+                    // Downfield defenders must cut off the runner's path towards the end zone.
+                    const isDownfield = pState.y > chaseTarget.y + 1.5;
+                    if (isDownfield) {
+                        // Meet the runner at an intersecting downhill point rather than aiming at where he currently is
+                        const yardsAhead = Math.min(6.0, (pState.y - chaseTarget.y) * 0.55);
+                        predY = Math.max(predY, chaseTarget.y + yardsAhead);
+
+                        const isNearBoundary = chaseTarget.x < 8.0 || chaseTarget.x > (FIELD_WIDTH - 8.0);
+                        if (isNearBoundary) {
+                            const boundaryPinX = chaseTarget.x < CENTER_X ? 2.0 : (FIELD_WIDTH - 2.0);
+                            predX = (predX * 0.25) + (boundaryPinX * 0.75);
+                        }
                     }
 
                     if (dirConfidence > 0.45 && !isRunReadAtMesh) {

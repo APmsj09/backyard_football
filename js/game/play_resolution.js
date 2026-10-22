@@ -2155,7 +2155,7 @@ export function simulateLivePlayStep(gameInstance, mode = 'live') {
     return result;
 }
 
-function recordTeamGamePlanningOutcome(
+export function recordTeamGamePlanningOutcome(
     team,
     opponent,
     pointsFor,

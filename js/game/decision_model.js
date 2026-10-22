@@ -62,6 +62,10 @@ export function getDecisionProfile(playerState, tick = null) {
     const ego = readStat(personality.ego);
     const streetCred = readStat(personality.streetCred);
 
+    const hasExplicitCareerData = 
+        playerState.experienceSeasons !== undefined || 
+        playerState.experienceSnaps !== undefined;
+
     const seasonsPlayed = Math.max(
         0,
         Number(playerState.experienceSeasons) || 0
@@ -72,11 +76,11 @@ export function getDecisionProfile(playerState, tick = null) {
         Number(playerState.experienceSnaps) || 0
     );
 
-    // Experience helps pattern recognition but cannot replace ability.
-    const experience = clamp(
-        (seasonsPlayed * 10) +
-        Math.min(60, Math.sqrt(snapsThisSeason) * 3)
-    );
+    // If career tracking is not present, default experience to baseline IQ so un-tracked 
+    // players are not systematically penalized with an artificial -15% awareness drop.
+    const experience = hasExplicitCareerData
+        ? clamp((seasonsPlayed * 10) + Math.min(60, Math.sqrt(snapsThisSeason) * 3))
+        : clamp(iq * 0.90, 30, 80);
 
     const awareness = clamp(
         (iq * 0.68) +

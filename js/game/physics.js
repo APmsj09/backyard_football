@@ -31,8 +31,11 @@ export function applyImpactDisruption(
 
     const agility = Math.max(20, Math.min(99, Number(pState.agility ?? pState.agi) || 50));
     const strength = Math.max(20, Math.min(99, Number(pState.strength ?? pState.str) || 50));
+    const age = Math.max(12, Math.min(18, Number(pState.age) || 15));
+    // Backyard weight curve: 12yo ~90 lbs, 15yo ~140 lbs, 18yo ~195 lbs
+    const defaultBackyardWeight = Math.round(90 + ((age - 12) * 17.5));
     const weightValue = Number(pState.weight ?? pState.wgt);
-    const weight = Number.isFinite(weightValue) ? weightValue : 200;
+    const weight = Number.isFinite(weightValue) ? weightValue : defaultBackyardWeight;
     const fatigueModifier = Number.isFinite(pState.fatigueModifier)
         ? Math.max(0.5, Math.min(1.0, pState.fatigueModifier))
         : 1.0;
@@ -52,17 +55,18 @@ export function applyImpactDisruption(
     pState.vx = vx + safeImpulseX;
     pState.vy = vy + safeImpulseY;
 
+    // Backyard weight baseline: 150 lbs median across ages 12-18
     const knockdownChance = Math.max(
         0,
         Math.min(
-            0.85,
-            ((severity - 52) * 0.012) +
-            Math.min(0.18, (speedBeforeImpact + impulseSpeed * 0.5) * 0.022) +
-            (wasOffBalance ? 0.14 : 0) +
+            0.88,
+            ((severity - 50) * 0.012) +
+            Math.min(0.20, (speedBeforeImpact + impulseSpeed * 0.5) * 0.022) +
+            (wasOffBalance ? 0.16 : 0) +
             (fatiguePenalty * 0.15) -
             ((agility - 50) * 0.0022) -
-            ((strength - 50) * 0.0012) -
-            ((weight - 220) * 0.0006)
+            ((strength - 50) * 0.0016) -
+            ((weight - 150) * 0.0015) // Lighter 12yos get knocked down easier; big 18yos stay on their feet
         )
     );
 
@@ -297,13 +301,14 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
     }
 
     // --- 3. ATTRIBUTE RETRIEVAL & NORMALIZATION ---
-    // Safe fallbacks for mapping structures
-    const weight = pState.weight || pState.wgt || 200;
+    const age = Math.max(12, Math.min(18, Number(pState.age) || 15));
+    const defaultBackyardWeight = Math.round(90 + ((age - 12) * 17.5));
+    const weight = pState.weight || pState.wgt || defaultBackyardWeight;
     const agility = pState.agility || pState.agi || 50;
     const fatigueMod = pState.fatigueModifier || 1.0;
 
-    // Ratios for physics math (225 lbs is considered the "baseline" 1.0 ratio)
-    const weightRatio = weight / 225;
+    // Median backyard sandlot weight ratio centered around 150 lbs
+    const weightRatio = Math.max(0.60, Math.min(1.50, weight / 150));
     const agiFactor = agility / 100;
 
     // --- 4. TARGETING MATH & CLEAN ARRIVAL RESOLUTION ---
@@ -505,8 +510,9 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
     let maxAccelerationYPS2 =
         getPlayerAccelerationYPS2(pState) * fatigueMod;
 
-    // Allow stronger braking than forward acceleration.
-    let maxDecelerationYPS2 = maxAccelerationYPS2 * 1.35;
+    // Athletes planting their cleats to stop or cut can brake significantly faster
+    // than they can accelerate forward from a dead stop (prevents ice-skating drift).
+    let maxDecelerationYPS2 = maxAccelerationYPS2 * 2.85;
 
     // Steering response can change independently of the physical limits.
     let accelRate = maxAccelerationYPS2;
@@ -536,11 +542,18 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
         pState.action === 'pursuit' &&
         distToTarget < pursuitStopDistance;
 
+    // Pass rushers, blitzers, and dynamic runners must NOT brake when closing in on their target!
+    const isAggressiveAttackAction = [
+        'run_path', 'run_route', 'tracking_ball', 'pursuit',
+        'pass_rush', 'blitz', 'blitz_gap', 'blitz_edge', 'run_gap_A'
+    ].includes(pState.action);
+
     const isStopping =
         isPursuitApproach ||
         (
             distToTarget < 2.5 &&
-            !['run_path', 'run_route', 'tracking_ball', 'pursuit'].includes(pState.action)
+            !isAggressiveAttackAction &&
+            pState.movementMode !== 'ROUTE'
         );
 
     let arrivalFactor = 1.0;
@@ -582,8 +595,13 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
     // --- 9. APPLY NEWTONIAN ACCELERATION WITH DISTANCE GATING ---
     // The timestep was validated once at the start of this update.
 
-    // Mathematically restrict speed so a player can NEVER jump past their target in a single tick
-    const maxSafeSpeed = (distToTarget / dt) * 0.8;
+    // Prevent players from overshooting fixed arrival points, but do NOT throttle route runners
+    // at intermediate waypoints or ball carriers bursting through dynamic lanes.
+    const isContinuousMotion = pState.movementMode === 'ROUTE' || pState.movementMode === 'LANE';
+    const maxSafeSpeed = isContinuousMotion 
+        ? effectiveMaxSpeed 
+        : (distToTarget / dt) * 0.85;
+
     const clampedTargetSpeed = Math.min(effectiveMaxSpeed * arrivalFactor, maxSafeSpeed);
 
     const safeDist = Math.max(0.001, distToTarget);
@@ -905,35 +923,44 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
     if (pState.currentSpeedYPS > 0.2) pState.angle = Math.atan2(pState.vx, pState.vy);
 }
 
+
 /**
  * Calculates friction based on nearby player density.
+ * Avoids garbage-collection array allocations and prevents unrealistic 65% slowdowns in running lanes.
  */
 function calculateGapFriction(pState, allPlayers) {
     let minFriction = 1.0;
-    const nearby = allPlayers.filter(o => o.id !== pState.id && getDistance(pState, o) < 2.0);
+    const px = pState.x;
+    const py = pState.y;
 
-    for (let i = 0; i < nearby.length; i++) {
-        for (let j = i + 1; j < nearby.length; j++) {
-            const p1 = nearby[i];
-            const p2 = nearby[j];
-            const gapWidth = getDistance(p1, p2);
+    // Fast indexed iteration without creating temporary filter arrays
+    for (let i = 0; i < allPlayers.length; i++) {
+        const p1 = allPlayers[i];
+        if (p1.id === pState.id) continue;
+        const d1 = Math.hypot(px - p1.x, py - p1.y);
+        if (d1 >= 2.0) continue;
 
-            if (gapWidth < 1.4) {
-                const midX = (p1.x + p2.x) / 2;
-                const midY = (p1.y + p2.y) / 2;
-                const distToGap = Math.hypot(pState.x - midX, pState.y - midY);
+        for (let j = i + 1; j < allPlayers.length; j++) {
+            const p2 = allPlayers[j];
+            if (p2.id === pState.id) continue;
 
-                if (distToGap < 0.8) {
-                    let friction = (gapWidth - 0.7) / (1.4 - 0.7);
+            const gapWidth = Math.hypot(p1.x - p2.x, p1.y - p2.y);
+            if (gapWidth < 1.6) {
+                const midX = (p1.x + p2.x) * 0.5;
+                const midY = (p1.y + p2.y) * 0.5;
+                const distToGap = Math.hypot(px - midX, py - midY);
+
+                if (distToGap < 0.9) {
+                    // Squeezing through a seam provides resistance, not complete paralysis
+                    let friction = 0.65 + (Math.max(0, gapWidth - 0.5) / 1.1) * 0.35;
                     
-                    // Power backs and strong linemen push through tight gaps with less friction
+                    // Powerful runners drop their pads and power through tight interior seams
                     const pStr = pState.str || pState.strength || 50;
                     const pWgt = pState.wgt || pState.weight || 200;
-                    const powerFactor = ((pStr / 100) * 0.6) + (((pWgt - 180) / 140) * 0.4); // 0.0 to ~1.0
+                    const powerFactor = ((pStr / 100) * 0.5) + (((pWgt - 180) / 140) * 0.5);
+                    friction += (powerFactor * 0.20);
                     
-                    friction += (powerFactor * 0.35); // Boost friction modifier (less slowdown)
-                    
-                    friction = Math.max(0.35, Math.min(1.0, friction));
+                    friction = Math.max(0.60, Math.min(1.0, friction));
                     if (friction < minFriction) minFriction = friction;
                 }
             }

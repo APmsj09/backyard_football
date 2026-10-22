@@ -1,6 +1,9 @@
 // js/main.js
 import * as Game from './game.js';
 import * as UI from './ui.js';
+import {
+    recordTeamGamePlanningOutcome
+} from './game/play_resolution.js';
 import { isDebugMode, setDebugMode, debugCollector } from './game.js';
 import { positionOverallWeights, estimateBestPosition, calculateOverall } from './game/player.js';
 import { gmBackgrounds, gmArchetypes, footballExpertises, offenseFormations, defenseFormations } from './data.js';
@@ -1957,8 +1960,68 @@ async function startLiveGame(playerGameMatch) {
     };
 
     UI.showScreen('game-sim-screen');
-    UI.startLiveGameLoop(liveGameParams, (finalResult) => {
-        Game.finalizeGameResults(finalResult.homeTeam, finalResult.awayTeam, finalResult.homeScore, finalResult.awayScore);
+        UI.startLiveGameLoop(liveGameParams, (finalResult) => {
+        Game.finalizeGameResults(
+            finalResult.homeTeam,
+            finalResult.awayTeam,
+            finalResult.homeScore,
+            finalResult.awayScore
+        );
+
+        const homeScore = Number(finalResult.homeScore);
+        const awayScore = Number(finalResult.awayScore);
+        const currentYear = Number(gameState?.year);
+        const currentWeek = Number(gameState?.currentWeek) + 1;
+
+        if (
+            finalResult.homeTeam &&
+            finalResult.awayTeam &&
+            Number.isFinite(homeScore) &&
+            Number.isFinite(awayScore) &&
+            Number.isInteger(currentYear) &&
+            Number.isInteger(currentWeek)
+        ) {
+            recordTeamGamePlanningOutcome(
+                finalResult.homeTeam,
+                finalResult.awayTeam,
+                homeScore,
+                awayScore,
+                'offensePrep',
+                currentYear,
+                currentWeek
+            );
+
+            recordTeamGamePlanningOutcome(
+                finalResult.homeTeam,
+                finalResult.awayTeam,
+                homeScore,
+                awayScore,
+                'defensePrep',
+                currentYear,
+                currentWeek
+            );
+
+            recordTeamGamePlanningOutcome(
+                finalResult.awayTeam,
+                finalResult.homeTeam,
+                awayScore,
+                homeScore,
+                'offensePrep',
+                currentYear,
+                currentWeek
+            );
+
+            recordTeamGamePlanningOutcome(
+                finalResult.awayTeam,
+                finalResult.homeTeam,
+                awayScore,
+                homeScore,
+                'defensePrep',
+                currentYear,
+                currentWeek
+            );
+        }
+
         const combined = [...otherResults, finalResult];
         finishWeekSimulation(combined);
     });

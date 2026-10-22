@@ -84,16 +84,21 @@ export function setHoldIntent(
     intent.isExplicit = true;
 }
 
-export function setTrackIntent(pState, entity, leadTime = 0, deadband = 0.60) {
+export function setTrackIntent(pState, entity, leadTime = 0, deadband = 0.15) {
     if (!pState._intent) initMovementIntent(pState);
     const intent = pState._intent;
 
     const rawX = entity.x + ((entity.vx || 0) * leadTime);
     const rawY = entity.y + ((entity.vy || 0) * leadTime);
 
+    const targetSpeed = Math.hypot(entity.vx || 0, entity.vy || 0);
     const modeChanged = intent.mode !== 'TRACK';
+
+    // When tracking an active, moving target (runner or QB), track continuously without lag.
+    // Only apply deadband filtering when the target is essentially stationary (< 0.2 YPS).
     const targetChanged =
         intent.targetX === undefined ||
+        targetSpeed > 0.2 ||
         Math.hypot(
             rawX - intent.targetX,
             rawY - intent.targetY

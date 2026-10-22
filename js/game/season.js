@@ -1203,6 +1203,20 @@ export function processEndOfWeek() {
     });
 
     processWeeklyPlayerGrowth();
+
+    const developmentYear = Number(game.year);
+    const developmentWeek = Number(game.currentWeek) + 1;
+
+    game.teams.forEach(team => {
+        if (!team) return;
+
+        processWeeklyCoachDevelopment(
+            team,
+            developmentYear,
+            developmentWeek
+        );
+    });
+
     endOfWeekCleanup();
 }
 
