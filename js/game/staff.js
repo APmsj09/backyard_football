@@ -795,7 +795,7 @@ export function processWeeklyCoachDevelopment(team, year, week) {
                 continue;
             }
 
-            coach.ratings[skill] = Math.min(
+                        coach.ratings[skill] = Math.min(
                 ceiling,
                 currentRating + 1
             );
@@ -803,14 +803,50 @@ export function processWeeklyCoachDevelopment(team, year, week) {
             development.progressBySkill[skill] = progress - 100;
             development.growthPointsUsed += 1;
 
-            improvements.push({
-                coachId: coach.id,
-                coachName: coach.name,
+            // Record which assignments were relevant to this improvement.
+            const contributingTasks = Object.entries(
+                COACH_DEVELOPMENT_TASK_SKILLS
+            )
+                .filter(([task, skillKeys]) =>
+                    skillKeys.includes(skill) &&
+                    (workload?.[task] || 0) > 0
+                )
+                .map(([task]) => ({
+                    task,
+                    hours: workload[task]
+                }));
+
+                        const historyEntry = {
+                year,
+                week,
                 skill,
                 previousRating: currentRating,
                 newRating: coach.ratings[skill],
-                year,
-                week
+                remainingGrowthPoints: Math.max(
+                    0,
+                    development.careerGrowthBudget -
+                    development.growthPointsUsed
+                )
+            };
+
+            if (!Array.isArray(development.history)) {
+                development.history = [];
+            }
+
+            development.history.push(historyEntry);
+
+            // Keep the most recent 50 improvements per coach.
+            if (development.history.length > 50) {
+                development.history.splice(
+                    0,
+                    development.history.length - 50
+                );
+            }
+
+            improvements.push({
+                coachId: coach.id,
+                coachName: coach.name,
+                ...historyEntry
             });
         }
 

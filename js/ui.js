@@ -2413,7 +2413,7 @@ export function renderStaffTab(gameState) {
             : null;
     };
 
-    const staffAverage = (...values) => {
+        const staffAverage = (...values) => {
         const valid = values.map(staffSkill)
             .filter(value => value !== null);
 
@@ -2422,14 +2422,226 @@ export function renderStaffTab(gameState) {
             : null;
     };
 
+    const developmentWorkPlan = Game.ensureTeamStaffWorkPlan?.(team);
+    const developmentAssignments = Array.isArray(
+        developmentWorkPlan?.assignments
+    )
+        ? developmentWorkPlan.assignments
+        : [];
+
+    const currentYear = Number(gameState.year);
+    const currentWeek = Number(gameState.currentWeek);
+
+    const developmentRows = currentCoaches.map(coach => {
+        const development = coach.development || {};
+        const history = Array.isArray(development.history)
+            ? development.history
+            : [];
+
+        const latest = [...history].sort((a, b) =>
+            (Number(b.year) - Number(a.year)) ||
+            (Number(b.week) - Number(a.week))
+        )[0] || null;
+
+        const assignedHours = developmentAssignments.reduce(
+            (sum, assignment) =>
+                String(assignment.coachId) === String(coach.id)
+                    ? sum + Math.max(0, Number(assignment.hours) || 0)
+                    : sum,
+            0
+        );
+
+        const progressBySkill = development.progressBySkill || {};
+        const skillCeilings = development.skillCeilings || {};
+        const ratings = coach.ratings || {};
+
+        const hasAccumulatedProgress = Object.entries(
+            progressBySkill
+        ).some(([skill, progress]) => {
+            const ceiling = Number(skillCeilings[skill]);
+            const rating = Number(ratings[skill]);
+
+            return Number(progress) > 0 &&
+                (
+                    !Number.isFinite(ceiling) ||
+                    !Number.isFinite(rating) ||
+                    rating < ceiling
+                );
+        });
+
+        const remainingGrowth = Number(
+            development.remainingGrowthPoints
+        );
+
+        let weeksSinceImprovement = null;
+        if (
+            latest &&
+            Number(latest.year) === currentYear &&
+            Number.isFinite(currentWeek) &&
+            Number.isFinite(Number(latest.week))
+        ) {
+            weeksSinceImprovement = Math.max(
+                0,
+                currentWeek - Number(latest.week)
+            );
+        }
+
+        let status = 'No recorded skill increase yet';
+
+        if (
+            Number.isFinite(remainingGrowth) &&
+            remainingGrowth <= 0
+        ) {
+            status = 'Career growth budget exhausted';
+        } else if (hasAccumulatedProgress) {
+            status = 'Progress accumulating';
+        }
+
+        if (
+            Number.isFinite(remainingGrowth) &&
+            remainingGrowth > 0 &&
+            latest &&
+            Number.isFinite(currentYear) &&
+            Number(latest.year) < currentYear
+        ) {
+            status = 'No increase recorded this season';
+        } else if (weeksSinceImprovement !== null) {
+            if (weeksSinceImprovement >= 6) {
+                status = `No increase in ${weeksSinceImprovement} weeks`;
+            } else if (weeksSinceImprovement <= 4) {
+                status = weeksSinceImprovement === 0
+                    ? 'Improved this week'
+                    : `Improved ${weeksSinceImprovement} week${weeksSinceImprovement === 1 ? '' : 's'} ago`;
+            } else {
+                status = 'Awaiting next increase';
+            }
+        }
+
+        return {
+            id: coach.id,
+            name: coach.name || 'Unnamed Coach',
+            improvements: history.length,
+            latest,
+            assignedHours,
+            status,
+            weeksSinceImprovement
+        };
+    });
+
+    const totalRecordedImprovements = developmentRows.reduce(
+        (sum, row) => sum + row.improvements,
+        0
+    );
+
+    const recentlyImprovedCoaches = developmentRows.filter(
+        row =>
+            row.weeksSinceImprovement !== null &&
+            row.weeksSinceImprovement <= 4
+    ).length;
+
+    const coachesWithAssignments = developmentRows.filter(
+        row => row.assignedHours > 0
+    ).length;
+
+    const developmentSummaryHtml = `
+        <section class="mb-5 rounded-lg border border-slate-300 bg-white p-4 shadow-sm">
+            <div class="mb-3">
+                <h4 class="font-black text-sm uppercase tracking-wide text-slate-900">
+                    Staff Development Overview
+                </h4>
+                <p class="text-xs text-slate-500 mt-1">
+                    Track recorded skill increases alongside the current weekly workload.
+                </p>
+            </div>
+
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-4">
+                <div class="rounded border border-slate-200 bg-slate-50 p-3">
+                    <p class="text-[10px] uppercase tracking-wide text-slate-500">
+                        Recorded Increases
+                    </p>
+                    <p class="text-2xl font-black text-slate-900">
+                        ${totalRecordedImprovements}
+                    </p>
+                    <p class="text-[10px] text-slate-500">
+                        Across the current coaching staff
+                    </p>
+                </div>
+
+                <div class="rounded border border-slate-200 bg-slate-50 p-3">
+                    <p class="text-[10px] uppercase tracking-wide text-slate-500">
+                        Recent Improvements
+                    </p>
+                    <p class="text-2xl font-black text-emerald-700">
+                        ${recentlyImprovedCoaches}/${developmentRows.length}
+                    </p>
+                    <p class="text-[10px] text-slate-500">
+                        Improved in the last four weeks
+                    </p>
+                </div>
+
+                <div class="rounded border border-slate-200 bg-slate-50 p-3">
+                    <p class="text-[10px] uppercase tracking-wide text-slate-500">
+                        Assigned Work
+                    </p>
+                    <p class="text-2xl font-black text-blue-700">
+                        ${coachesWithAssignments}/${developmentRows.length}
+                    </p>
+                    <p class="text-[10px] text-slate-500">
+                        Coaches with weekly hours assigned
+                    </p>
+                </div>
+            </div>
+
+            <div class="space-y-2">
+                ${developmentRows.map(row => `
+                    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-t border-slate-100 pt-2 first:border-t-0 first:pt-0">
+                        <div class="min-w-0">
+                            <p class="text-xs font-bold text-slate-800">
+                                ${row.name}
+                            </p>
+                            <p class="text-[10px] text-slate-500">
+                                ${row.latest
+                                    ? `Last increase: Year ${row.latest.year}, Week ${row.latest.week}`
+                                    : 'No improvement recorded yet'}
+                                · ${row.improvements} total
+                            </p>
+                        </div>
+
+                        <div class="flex flex-wrap items-center gap-2">
+                            <span class="text-[10px] font-semibold ${
+                                row.weeksSinceImprovement !== null &&
+                                row.weeksSinceImprovement >= 6
+                                    ? 'text-amber-700'
+                                    : 'text-slate-600'
+                            }">
+                                ${row.status}
+                            </span>
+                            <span class="rounded bg-slate-100 px-2 py-1 text-[10px] font-mono text-slate-700">
+                                ${row.assignedHours}/40 hrs
+                            </span>
+                        </div>
+                    </div>
+                `).join('')}
+            </div>
+
+            <p class="mt-3 text-[10px] leading-relaxed text-slate-500">
+                Weekly hours reflect current assignments, while improvements are historical.
+                They help you compare workload and outcomes but do not prove that the current
+                assignments caused a past increase.
+            </p>
+        </section>
+    `;
+
     html += `
         <section class="mb-6">
             <h4 class="font-black text-base uppercase text-slate-900 mb-1">
                 Coaching Staff
             </h4>
-            <p class="text-sm text-slate-600 mb-4">
+                        <p class="text-sm text-slate-600 mb-4">
                 Compare strengths and assign weekly responsibilities below.
             </p>
+
+            ${developmentSummaryHtml}
 
             <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
                 ${currentCoaches.map((coach, index) => {
@@ -2444,11 +2656,68 @@ export function renderStaffTab(gameState) {
                         ['Practice', staffAverage(r.practiceDiscipline, r.conditioning), 'bg-rose-500']
                     ];
 
-                    const rated = skills.filter(skill => skill[1] !== null);
+                                        const rated = skills.filter(skill => skill[1] !== null);
                     const overall = staffAverage(...rated.map(skill => skill[1]));
                     const strongest = [...rated].sort(
                         (a, b) => b[1] - a[1]
                     )[0];
+
+                    const development = coach.development || {};
+                    const recentDevelopmentHistory = Array.isArray(
+                        development.history
+                    )
+                        ? development.history.slice(-5).reverse()
+                        : [];
+                    const skillCeilings = development.skillCeilings || {};
+                    const progressBySkill = development.progressBySkill || {};
+
+                    const growthSkillLabels = {
+                        offSchemeMastery: 'Offense Scheme',
+                        defSchemeMastery: 'Defense Scheme',
+                        evalPhysicals: 'Physical Evaluation',
+                        evalTechnique: 'Technique Evaluation',
+                        evalCharacter: 'Character Evaluation',
+                        teaching: 'Teaching',
+                        gameplanInstinct: 'Game Planning',
+                        inGameAdjustments: 'In-Game Adjustments',
+                        practiceDiscipline: 'Practice Discipline',
+                        conditioning: 'Conditioning'
+                    };
+
+                    const remainingGrowth = Number(
+                        development.remainingGrowthPoints
+                    );
+
+                    const growthOutlook = !Number.isFinite(remainingGrowth)
+                        ? 'Not yet established'
+                        : remainingGrowth >= 12
+                            ? 'High development runway'
+                            : remainingGrowth >= 6
+                                ? 'Moderate development runway'
+                                : remainingGrowth > 0
+                                    ? 'Limited development runway'
+                                    : 'Career growth budget exhausted';
+
+                    const nextGrowth = Object.entries(progressBySkill)
+                        .map(([skill, progress]) => ({
+                            skill,
+                            label: growthSkillLabels[skill],
+                            progress: Math.max(0, Number(progress) || 0),
+                            rating: Number(r[skill]),
+                            ceiling: Number(skillCeilings[skill])
+                        }))
+                        .filter(item =>
+                            item.label &&
+                            Number.isFinite(item.rating) &&
+                            Number.isFinite(item.ceiling) &&
+                            item.rating < item.ceiling &&
+                            remainingGrowth > 0
+                        )
+                        .sort((a, b) => b.progress - a.progress)[0];
+
+                    const growthProgress = nextGrowth
+                        ? Math.min(100, Math.floor(nextGrowth.progress))
+                        : 0;
 
                     const staffNumber = currentCoaches
                         .slice(0, index + 1)
@@ -2478,7 +2747,7 @@ export function renderStaffTab(gameState) {
                             </div>
 
                             <div class="p-4 space-y-3">
-                                ${skills.map(([label, value, color]) => `
+                                                                ${skills.map(([label, value, color]) => `
                                     <div>
                                         <div class="flex justify-between items-center gap-2 mb-1">
                                             <span class="text-xs font-semibold text-slate-700">${label}</span>
@@ -2493,6 +2762,93 @@ export function renderStaffTab(gameState) {
                                         </div>
                                     </div>
                                 `).join('')}
+
+                                <div class="mt-4 rounded-lg border border-sky-200 bg-sky-50 p-3">
+                                    <div class="flex justify-between items-start gap-2">
+                                        <div>
+                                            <h6 class="text-[10px] font-black uppercase tracking-wide text-sky-900">
+                                                Coach Development
+                                            </h6>
+                                            <p class="text-xs font-bold text-sky-950 mt-1">
+                                                ${growthOutlook}
+                                            </p>
+                                        </div>
+                                        <span class="text-[10px] font-semibold text-sky-800">
+                                            ${development.experienceWeeks || 0} weeks
+                                        </span>
+                                    </div>
+
+                                    ${nextGrowth ? `
+                                        <div class="mt-3">
+                                            <div class="flex justify-between items-center gap-2 mb-1">
+                                                <span class="text-[11px] font-semibold text-slate-700">
+                                                    Next: ${nextGrowth.label}
+                                                </span>
+                                                <span class="text-[10px] font-bold text-sky-900">
+                                                    ${growthProgress}/100
+                                                </span>
+                                            </div>
+                                            <div class="h-2 rounded-full bg-sky-100 overflow-hidden">
+                                                <div
+                                                    class="h-full rounded-full bg-sky-500"
+                                                    style="width:${growthProgress}%">
+                                                </div>
+                                            </div>
+                                            ${growthProgress >= 100 ? `
+                                                <p class="text-[10px] text-sky-800 mt-1">
+                                                    Ready for the weekly development check.
+                                                </p>
+                                            ` : ''}
+                                        </div>
+                                    ` : `
+                                        <p class="text-[10px] text-sky-800 mt-2">
+                                            ${remainingGrowth <= 0
+                                                ? 'This coach has used their lifetime growth budget.'
+                                                : 'Skill-specific progress will appear as the coach gains experience in assigned work.'}
+                                        </p>
+                                    `                                    `}
+                                </div>
+
+                                <div class="mt-3 rounded-lg border border-slate-200 bg-white p-3">
+                                    <div class="flex items-center justify-between gap-2">
+                                        <h6 class="text-[10px] font-black uppercase tracking-wide text-slate-700">
+                                            Development History
+                                        </h6>
+                                        <span class="text-[10px] text-slate-500">
+                                            ${recentDevelopmentHistory.length} recent
+                                        </span>
+                                    </div>
+
+                                    ${recentDevelopmentHistory.length > 0 ? `
+                                        <div class="mt-3 space-y-2">
+                                            ${recentDevelopmentHistory.map(entry => `
+                                                <div class="flex items-center justify-between gap-3 border-t border-slate-100 pt-2 first:border-t-0 first:pt-0">
+                                                    <div class="min-w-0">
+                                                        <div class="text-xs font-bold text-slate-800">
+                                                            ${growthSkillLabels[entry.skill] || entry.skill}
+                                                        </div>
+                                                        <div class="text-[10px] text-slate-500">
+                                                            Year ${entry.year}, Week ${entry.week}
+                                                        </div>
+                                                    </div>
+
+                                                    <div class="shrink-0 text-right">
+                                                        <div class="text-xs font-black text-emerald-700">
+                                                            ${entry.previousRating} → ${entry.newRating}
+                                                        </div>
+                                                        <div class="text-[9px] font-semibold text-slate-500">
+                                                            Skill improved
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            `).join('')}
+                                        </div>
+                                    ` : `
+                                        <p class="mt-2 text-xs text-slate-500">
+                                            No skill improvements recorded yet.
+                                        </p>
+                                    `}
+                                </div>
 
                                 <div class="border-t border-slate-200 pt-3 space-y-2 text-xs">
                                     <div>

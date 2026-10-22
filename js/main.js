@@ -364,13 +364,13 @@ function promptCoachCreation(teamId) {
                 ' min="20" max="80" step="1" value="55"' +
                 ' class="w-full accent-amber-500 cursor-pointer">' +
                 '<span class="flex justify-between text-[10px] text-slate-500 mt-1">' +
-                '<span>35 · Developing</span>' +
+                '<span>20 · Developing</span>' +
                 '<span>80 · Elite</span>' +
                 '</span></label>';
         }).join('') +
         '</div>' +
         '<p class="text-xs text-slate-500 mt-2">' +
-        'Skills range from 35 to 80. Lower one to free points for another.' +
+        'Skills range from 20 to 80. Lower one to free points for another.' +
         '</p></div>';
 
     const modalHtml = `
@@ -561,7 +561,7 @@ function promptCoachCreation(teamId) {
         }
 
         coachSkillControls.forEach(control => {
-            const currentValue = Number(control.value || 35);
+            const currentValue = Number(control.value || 20);
 
             const otherSkillsTotal = coachSkillControls.reduce(
                 (sum, otherControl) =>

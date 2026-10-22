@@ -32,6 +32,7 @@ import { getRandom, getRandomInt } from '../utils.js';
 import { updatePlayerPosition, getDistance } from './physics.js';
 import { TICK_DURATION_SECONDS } from './simulation_config.js';
 import { calculateOverall, estimateBestPosition } from './player.js';
+import { recordCoachDevelopmentOutcome } from './staff.js';
 
 const FIELD_WIDTH = 53.3;
 const FIELD_LENGTH = 120;
@@ -2154,6 +2155,187 @@ export function simulateLivePlayStep(gameInstance, mode = 'live') {
     return result;
 }
 
+function recordTeamGamePlanningOutcome(
+    team,
+    opponent,
+    pointsFor,
+    pointsAgainst,
+    task,
+    year,
+    week
+) {
+    const skillKeys = task === 'offensePrep'
+        ? [
+            'offSchemeMastery',
+            'gameplanInstinct',
+            'inGameAdjustments'
+        ]
+        : [
+            'defSchemeMastery',
+            'gameplanInstinct',
+            'inGameAdjustments'
+        ];
+
+    const hoursByCoach = new Map();
+
+    for (const assignment of team.staffWorkPlan?.assignments || []) {
+        if (
+            assignment?.task !== task ||
+            assignment.coachId == null
+        ) {
+            continue;
+        }
+
+        const hours = Number(assignment.hours);
+
+        if (!Number.isFinite(hours) || hours <= 0) continue;
+
+        const id = String(assignment.coachId);
+
+        hoursByCoach.set(
+            id,
+            (hoursByCoach.get(id) || 0) + hours
+        );
+    }
+
+    const skillScore = coach => {
+        const ratings = coach?.ratings || {};
+
+        return skillKeys.reduce((total, key) => {
+            const value = Number(ratings[key]);
+
+            return total + (
+                Number.isFinite(value)
+                    ? Math.max(0, Math.min(100, value))
+                    : 50
+            );
+        }, 0) / skillKeys.length;
+    };
+
+    const assignedCoach = (team.coaches || [])
+        .filter(coach =>
+            coach?.id != null &&
+            (hoursByCoach.get(String(coach.id)) || 0) > 0
+        )
+        .sort((a, b) => {
+            const hoursDifference =
+                (hoursByCoach.get(String(b.id)) || 0) -
+                (hoursByCoach.get(String(a.id)) || 0);
+
+            return hoursDifference ||
+                skillScore(b) - skillScore(a);
+        })[0];
+
+    if (!assignedCoach) return;
+
+        const clamp = value => Math.max(-1, Math.min(1, value));
+    const clampExpectedPoints = value =>
+        Math.max(4, Math.min(26, value));
+
+    const offensePositions = new Set([
+        'QB', 'RB', 'WR', 'TE', 'OL'
+    ]);
+
+    const defensePositions = new Set([
+        'DL', 'LB', 'DB'
+    ]);
+
+    const getUnitRating = (targetTeam, unit) => {
+        const roster = getRosterObjects(targetTeam).filter(
+            player => player?.attributes
+        );
+
+        const validPositions = unit === 'offense'
+            ? offensePositions
+            : defensePositions;
+
+        const preferredPosition = unit === 'offense'
+            ? 'favoriteOffensivePosition'
+            : 'favoriteDefensivePosition';
+
+        const ratings = [];
+
+        for (const player of roster) {
+            const positions = [
+                ...new Set([
+                    player.pos,
+                    player[preferredPosition]
+                ].filter(position => validPositions.has(position)))
+            ];
+
+            if (positions.length === 0) continue;
+
+            const playerRatings = positions
+                .map(position => calculateOverall(player, position))
+                .filter(Number.isFinite);
+
+            if (playerRatings.length > 0) {
+                ratings.push(Math.max(...playerRatings));
+            }
+        }
+
+        // Fallback for incomplete positional data.
+        if (ratings.length === 0) {
+            for (const player of roster) {
+                const position = estimateBestPosition(player);
+                const rating = calculateOverall(player, position);
+
+                if (Number.isFinite(rating)) {
+                    ratings.push(rating);
+                }
+            }
+        }
+
+        if (ratings.length === 0) return 50;
+
+        return ratings.reduce((sum, rating) => sum + rating, 0) /
+            ratings.length;
+    };
+
+    const expectedPoints = task === 'offensePrep'
+        ? clampExpectedPoints(
+            14 + (
+                getUnitRating(team, 'offense') -
+                getUnitRating(opponent, 'defense')
+            ) * 0.18
+        )
+        : clampExpectedPoints(
+            14 + (
+                getUnitRating(opponent, 'offense') -
+                getUnitRating(team, 'defense')
+            ) * 0.18
+        );
+
+    // Offensive preparation is graded against expected points scored.
+    // Defensive preparation is graded against expected points allowed.
+    const performanceDelta = task === 'offensePrep'
+        ? pointsFor - expectedPoints
+        : expectedPoints - pointsAgainst;
+
+    const outcomeQuality = clamp(performanceDelta / 10);
+
+    // Preparation hours increase confidence in the feedback signal;
+    // they do not directly grant a skill increase.
+    const preparationConfidence = Math.min(
+        1,
+        (hoursByCoach.get(String(assignedCoach.id)) || 0) / 12
+    );
+
+    const quality = clamp(
+        outcomeQuality * preparationConfidence
+    );
+
+    recordCoachDevelopmentOutcome(
+        assignedCoach,
+        task,
+        quality,
+        `game:${team.id}:${opponent.id}`,
+        year,
+        week,
+        skillKeys
+    );
+}
+
 export function simulateMatchFast(homeTeam, awayTeam) {
     if (!homeTeam || !awayTeam) return null;
     resetGameStats(homeTeam, awayTeam);
@@ -2178,7 +2360,63 @@ export function simulateMatchFast(homeTeam, awayTeam) {
         simulateLivePlayStep(matchGame, 'fast');
     }
 
-    finalizeGameResults(homeTeam, awayTeam, matchGame.homeScore, matchGame.awayScore);
+        finalizeGameResults(
+        homeTeam,
+        awayTeam,
+        matchGame.homeScore,
+        matchGame.awayScore
+    );
+
+    // Only begin career development feedback after the user takes over.
+    // Historical seasons shouldn't accumulate unprocessed coaching progress.
+    if (
+        game?.playerTeam &&
+        Number.isInteger(game.year) &&
+        Number.isInteger(game.currentWeek)
+    ) {
+        const year = game.year;
+        const week = game.currentWeek;
+
+        recordTeamGamePlanningOutcome(
+            homeTeam,
+            awayTeam,
+            matchGame.homeScore,
+            matchGame.awayScore,
+            'offensePrep',
+            year,
+            week
+        );
+
+        recordTeamGamePlanningOutcome(
+            homeTeam,
+            awayTeam,
+            matchGame.homeScore,
+            matchGame.awayScore,
+            'defensePrep',
+            year,
+            week
+        );
+
+        recordTeamGamePlanningOutcome(
+            awayTeam,
+            homeTeam,
+            matchGame.awayScore,
+            matchGame.homeScore,
+            'offensePrep',
+            year,
+            week
+        );
+
+        recordTeamGamePlanningOutcome(
+            awayTeam,
+            homeTeam,
+            matchGame.awayScore,
+            matchGame.homeScore,
+            'defensePrep',
+            year,
+            week
+        );
+    }
 
     return {
         homeTeam: matchGame.homeTeam,
