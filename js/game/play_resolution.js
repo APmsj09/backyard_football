@@ -178,27 +178,117 @@ export function determinePuntDecision(down, yardsToGo, ballOn, offenseTeam = nul
     return false;
 }
 
+function getOffensiveFormationForPlay(offense, playKey) {
+    const play = offensivePlaybook[playKey];
+
+    if (!play || play.type === 'punt') return null;
+
+    const currentFormation = offense?.formations?.offense;
+    const preferredFormation = offense?.coach?.preferredOffense;
+
+    // An explicit formation in the play data takes priority.
+    if (
+        play.formation &&
+        play.formation !== 'Punt' &&
+        offenseFormations[play.formation]
+    ) {
+        return play.formation;
+    }
+
+    // Respect explicit formation compatibility.
+    if (
+        Array.isArray(play.compatibleFormations) &&
+        play.compatibleFormations.length > 0
+    ) {
+        const compatible = play.compatibleFormations.filter(key =>
+            key !== 'Punt' && Boolean(offenseFormations[key])
+        );
+
+        if (compatible.length === 0) return null;
+
+        if (compatible.includes(currentFormation)) {
+            return currentFormation;
+        }
+
+        if (compatible.includes(preferredFormation)) {
+            return preferredFormation;
+        }
+
+        return compatible[0];
+    }
+
+    // Legacy formation-specific play keys, such as Trips_QuickSlants.
+    const namedFormation = Object.keys(offenseFormations)
+        .filter(key =>
+            key !== 'Punt' &&
+            (playKey === key || playKey.startsWith(`${key}_`))
+        )
+        .sort((a, b) => b.length - a.length)[0];
+
+    if (namedFormation) return namedFormation;
+
+    // Universal plays use the team's preferred/current formation.
+    if (currentFormation !== 'Punt' && offenseFormations[currentFormation]) {
+        return currentFormation;
+    }
+
+    if (
+        preferredFormation !== 'Punt' &&
+        offenseFormations[preferredFormation]
+    ) {
+        return preferredFormation;
+    }
+
+    return offenseFormations.Balanced
+        ? 'Balanced'
+        : Object.keys(offenseFormations).find(key => key !== 'Punt') || null;
+}
+
 export function findAudiblePlay(offense, desiredType, desiredTag = null) {
     const offenseFormationName = offense.formations?.offense || 'Balanced';
-    const basics = ['Uni_InsideZone', 'Uni_QuickSlants', 'Uni_FourVerts'];
+
+    const basics = [
+        'Uni_InsideZone',
+        'Uni_StretchRight',
+        'Uni_QuickSlants',
+        'Uni_FourVerts'
+    ];
+
     const installed = offense.gameplan?.installedOffense || [];
     const pool = Array.from(new Set([...basics, ...installed]));
 
-    let possiblePlays = pool.filter(key => {
+    const possiblePlays = pool.filter(key => {
         const play = offensivePlaybook[key];
-        if (!play) return false;
-        const matchesType = play.type === desiredType;
-        const matchesForm = !play.compatibleFormations || play.compatibleFormations.includes(offenseFormationName);
-        return matchesType && matchesForm;
+        if (!play || play.type === 'punt') return false;
+
+        const matchesType = !desiredType || play.type === desiredType;
+        const matchesFormation =
+            getOffensiveFormationForPlay(offense, key) === offenseFormationName;
+
+        return matchesType && matchesFormation;
     });
 
     if (desiredTag && possiblePlays.length > 0) {
-        const tagged = possiblePlays.filter(key => offensivePlaybook[key]?.tags?.includes(desiredTag));
+        const tagged = possiblePlays.filter(key =>
+            offensivePlaybook[key]?.tags?.includes(desiredTag)
+        );
+
         if (tagged.length > 0) return getRandom(tagged);
     }
 
     if (possiblePlays.length > 0) return getRandom(possiblePlays);
-    return desiredType === 'pass' ? 'Uni_QuickSlants' : 'Uni_InsideZone';
+
+    const fallbackKey =
+        desiredType === 'pass' ? 'Uni_QuickSlants' : 'Uni_InsideZone';
+
+    if (
+        offensivePlaybook[fallbackKey] &&
+        getOffensiveFormationForPlay(offense, fallbackKey) === offenseFormationName
+    ) {
+        return fallbackKey;
+    }
+
+    return null;
 }
 
 export function aiCheckAudible(offense, offensivePlayKey, defense, defensivePlayKey, gameLog) {
@@ -383,15 +473,35 @@ export function determinePlayCall(offense, defense, down, yardsToGo, ballOn, sco
     const installed = (offense.gameplan?.installedOffense || []).slice(0, 8); // Max 8 custom napkin plays
     const activePlaybookKeys = Array.from(new Set([...BACKYARD_BASICS_OFF, ...installed]));
 
-    // Match active playbook against current formation
+        // Select only installed plays and standard fundamentals.
+    // The selected play's formation is resolved separately from the
+    // team's preferred formation.
     let candidateKeys = activePlaybookKeys.filter(key => {
-        const p = offensivePlaybook[key];
-        if (!p) return false;
-        if (p.compatibleFormations) return p.compatibleFormations.includes(formationName);
-        return key.startsWith(formationName) || key.startsWith('Uni_') || key.startsWith('PA_') || key.startsWith('RPO_') || key.startsWith('Trick_');
+        const play = offensivePlaybook[key];
+        if (!play || play.type === 'punt') return false;
+
+        const formationForPlay = getOffensiveFormationForPlay(offense, key);
+
+        return Boolean(
+            formationForPlay &&
+            offenseFormations[formationForPlay]
+        );
     });
 
-    if (candidateKeys.length === 0) candidateKeys = BACKYARD_BASICS_OFF;
+    if (candidateKeys.length === 0) {
+        candidateKeys = BACKYARD_BASICS_OFF.filter(key => {
+            const play = offensivePlaybook[key];
+            const formationForPlay = getOffensiveFormationForPlay(offense, key);
+
+            return Boolean(
+                play &&
+                formationForPlay &&
+                offenseFormations[formationForPlay]
+            );
+        });
+    }
+
+    if (candidateKeys.length === 0) return 'Uni_InsideZone';
     // Ensure target history array exists
     if (!offense.recentTargets) offense.recentTargets = [];
 
@@ -774,30 +884,70 @@ export function determineDefensivePlayCall(defense, offense, down, yardsToGo, ba
     const isEligibleOutsideGoalLine = key =>
         isGoalLineSituation || !/goal.?line/i.test(key);
     
+        const validDefensiveFormationKeys = Object.keys(defenseFormations)
+        .filter(key => key !== 'Punt_Return' && key !== 'Punt');
+
+    const isEligibleDefensivePlay = key => {
+        const play = defensivePlaybook[key];
+
+        return Boolean(
+            play &&
+            !play.tags?.includes('specialTeams') &&
+            isEligibleOutsideGoalLine(key)
+        );
+    };
+
+    const canAlignInSomeFormation = key => {
+        const play = defensivePlaybook[key];
+
+        return Boolean(
+            play &&
+            validDefensiveFormationKeys.some(formationKey =>
+                isPlayCompatibleWithDefense(play, formationKey)
+            )
+        );
+    };
+
+    // Prefer plays compatible with the defense's currently selected formation.
     let availablePlays = activeDefKeys.filter(key =>
-        isEligibleOutsideGoalLine(key) &&
+        isEligibleDefensivePlay(key) &&
         isPlayCompatibleWithDefense(
             defensivePlaybook[key],
             defenseFormationName
         )
     );
 
-    // Safe fallback: never fall back to a goal-line play at midfield.
+    // If the current formation cannot run any active play, select only
+    // an active-playbook call that can be aligned in another valid formation.
     if (availablePlays.length === 0) {
-        availablePlays = BACKYARD_BASICS_DEF.filter(key =>
-            isEligibleOutsideGoalLine(key) &&
-            defensivePlaybook[key]
+        availablePlays = activeDefKeys.filter(key =>
+            isEligibleDefensivePlay(key) &&
+            canAlignInSomeFormation(key)
         );
     }
 
+    // Last-resort safety fallback: use a standard defensive fundamental.
+    // Goal-line calls remain prohibited outside legal goal-line situations.
     if (availablePlays.length === 0) {
-        if (defensivePlaybook['Cover_2_Zone_Base']) {
-            return 'Cover_2_Zone_Base';
-        }
+        const emergencyKey = BACKYARD_BASICS_DEF.find(key =>
+            isEligibleDefensivePlay(key) &&
+            canAlignInSomeFormation(key)
+        );
 
-        return Object.keys(defensivePlaybook).find(key =>
-            isEligibleOutsideGoalLine(key)
-        ) || Object.keys(defensivePlaybook)[0];
+        if (emergencyKey) {
+            availablePlays = [emergencyKey];
+        } else {
+            const existingBasic = BACKYARD_BASICS_DEF.find(key =>
+                isEligibleDefensivePlay(key)
+            );
+
+            if (existingBasic) return existingBasic;
+
+            return Object.keys(defensivePlaybook).find(key =>
+                isEligibleDefensivePlay(key) &&
+                canAlignInSomeFormation(key)
+            ) || 'Cover_2_Zone_Base';
+        }
     }
     const isShort = yardsToGo <= 2;
     const isLong =
@@ -1924,6 +2074,30 @@ export function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey
     };
 }
 
+function normalizeFormationLookupKey(formationMap, value, fallbackKey) {
+    if (value && formationMap?.[value]) {
+        return value;
+    }
+
+    if (typeof value === 'string' && value) {
+        const displayMatch = Object.entries(formationMap || {}).find(
+            ([, definition]) => definition?.name === value
+        );
+
+        if (displayMatch) {
+            return displayMatch[0];
+        }
+    }
+
+    if (formationMap?.[fallbackKey]) {
+        return fallbackKey;
+    }
+
+    return Object.keys(formationMap || {}).find(
+        key => key !== 'Punt' && key !== 'Punt_Return'
+    ) || fallbackKey;
+}
+
 export function simulateLivePlayStep(gameInstance, mode = 'live') {
     const isLive = mode === 'live';
     if (!gameInstance || !gameInstance.possession || !gameInstance.homeTeam || !gameInstance.awayTeam) {
@@ -1933,11 +2107,43 @@ export function simulateLivePlayStep(gameInstance, mode = 'live') {
     const offense = gameInstance.possession;
     const defense = (offense.id === gameInstance.homeTeam.id) ? gameInstance.awayTeam : gameInstance.homeTeam;
 
-    if (!offense.formations) offense.formations = { offense: 'Balanced', defense: '3-2-3 Base' };
-    if (!defense.formations) defense.formations = { offense: 'Balanced', defense: '3-2-3 Base' };
+        if (!offense.formations) offense.formations = { offense: 'Balanced', defense: '3-2-3' };
+    if (!defense.formations) defense.formations = { offense: 'Balanced', defense: '3-2-3' };
+
+    offense.formations.offense = normalizeFormationLookupKey(
+        offenseFormations,
+        offense.formations.offense,
+        'Balanced'
+    );
+    offense.formations.defense = normalizeFormationLookupKey(
+        defenseFormations,
+        offense.formations.defense,
+        '3-2-3'
+    );
+
+    defense.formations.offense = normalizeFormationLookupKey(
+        offenseFormations,
+        defense.formations.offense,
+        'Balanced'
+    );
+    defense.formations.defense = normalizeFormationLookupKey(
+        defenseFormations,
+        defense.formations.defense,
+        '3-2-3'
+    );
+
+    if (offense._savedOffForm && offense._savedOffForm !== 'Punt') {
+        offense._savedOffForm = normalizeFormationLookupKey(
+            offenseFormations,
+            offense._savedOffForm,
+            'Balanced'
+        );
+    }
 
     let offPlayKey = '';
     let defPlayKey = '';
+    let snapOffenseFormation = null;
+    let snapDefenseFormation = null;
 
     // Remember custom user schemes before special-teams overrides
     if (!offense._savedOffForm && offense.formations.offense !== 'Punt') {
@@ -1947,11 +2153,25 @@ export function simulateLivePlayStep(gameInstance, mode = 'live') {
     if (gameInstance.isConversionAttempt) {
         gameInstance.down = 1; gameInstance.yardsToGo = 3; gameInstance.ballOn = 97;
         offPlayKey = 'Uni_QuickSlants'; defPlayKey = 'GoalLine_RunStuff';
+
+        snapOffenseFormation =
+            getOffensiveFormationForPlay(offense, offPlayKey) ||
+            offense.formations.offense ||
+            'Balanced';
+
+        snapDefenseFormation =
+            defensivePlaybook[defPlayKey]?.compatibleFormations?.find(
+                key => defenseFormations[key]
+            ) ||
+            defense.formations.defense;
     } else if (determinePuntDecision(gameInstance.down, gameInstance.yardsToGo, gameInstance.ballOn, offense, (offense.id === gameInstance.homeTeam.id ? (gameInstance.homeScore - gameInstance.awayScore) : (gameInstance.awayScore - gameInstance.homeScore)), gameInstance.clock)) {
         offense.formations.offense = 'Punt';
         defense.formations.defense = 'Punt_Return';
         offPlayKey = 'Punt_Punt';
         defPlayKey = 'PuntReturn_Classic';
+
+        snapOffenseFormation = 'Punt';
+        snapDefenseFormation = 'Punt_Return';
     } else {
         const scoreDiff = (offense.id === gameInstance.homeTeam.id)
             ? (gameInstance.homeScore - gameInstance.awayScore)
@@ -1965,22 +2185,39 @@ export function simulateLivePlayStep(gameInstance, mode = 'live') {
 
         // Restore user scheme cleanly after punt
         if (offense.formations.offense === 'Punt') {
-            offense.formations.offense = offense._savedOffForm || offense.coach?.preferredOffense || 'Balanced';
+            offense.formations.offense = normalizeFormationLookupKey(
+                offenseFormations,
+                offense._savedOffForm || offense.coach?.preferredOffense,
+                'Balanced'
+            );
         }
         if (!offense.isPlayerControlled) {
-            offense.formations.offense = offense.coach?.preferredOffense || 'Balanced';
+            offense.formations.offense = normalizeFormationLookupKey(
+                offenseFormations,
+                offense.coach?.preferredOffense,
+                'Balanced'
+            );
         }
 
         offPlayKey = determinePlayCall(offense, defense, gameInstance.down, gameInstance.yardsToGo, gameInstance.ballOn, scoreDiff, gameInstance.gameLog, drivesRemaining);
         if (!offPlayKey || !offensivePlaybook[offPlayKey]) offPlayKey = 'Uni_InsideZone';
 
+        snapOffenseFormation =
+            getOffensiveFormationForPlay(offense, offPlayKey) ||
+            offense.formations.offense ||
+            'Balanced';
+
         if (defense.formations.defense === 'Punt_Return') {
-            defense.formations.defense = defense.coach?.preferredDefense || '3-2-3';
+            defense.formations.defense = normalizeFormationLookupKey(
+                defenseFormations,
+                defense.coach?.preferredDefense,
+                '3-2-3'
+            );
         }
         if (!defense.isPlayerControlled) {
             defense.formations.defense = determineDefensiveFormation(
                 defense,
-                offense.formations.offense,
+                snapOffenseFormation,
                 gameInstance.down,
                 gameInstance.yardsToGo,
                 gameInstance.gameLog,
@@ -2015,6 +2252,29 @@ export function simulateLivePlayStep(gameInstance, mode = 'live') {
                     key => !/goal.?line/i.test(key)
                 );
         }
+        const calledDefPlay = defensivePlaybook[defPlayKey];
+        const currentDefFormation = defense.formations.defense;
+
+        if (isPlayCompatibleWithDefense(calledDefPlay, currentDefFormation)) {
+            snapDefenseFormation = currentDefFormation;
+        } else {
+            snapDefenseFormation =
+                Object.keys(defenseFormations).find(key =>
+                    isPlayCompatibleWithDefense(calledDefPlay, key)
+                ) ||
+                Object.keys(defenseFormations).find(
+                    key => key !== 'Punt_Return'
+                ) ||
+                currentDefFormation;
+        }
+    }
+
+    if (!snapOffenseFormation) {
+        snapOffenseFormation = offense.formations.offense || 'Balanced';
+    }
+
+    if (!snapDefenseFormation) {
+        snapDefenseFormation = defense.formations.defense;
     }
 
     const context = {
@@ -2037,7 +2297,30 @@ export function simulateLivePlayStep(gameInstance, mode = 'live') {
     autoMakeSubstitutions(offense, { thresholdFatigue: offThreshold, chance: 1.0 }, gameInstance.gameLog);
     autoMakeSubstitutions(defense, { thresholdFatigue: defThreshold, chance: 1.0 }, gameInstance.gameLog);
 
-    const result = resolvePlay(offense, defense, offPlayKey, defPlayKey, context, { fastSim: !isLive }, isLive);
+        const configuredOffenseFormation = offense.formations.offense;
+    const configuredDefenseFormation = defense.formations.defense;
+
+    offense.formations.offense = snapOffenseFormation;
+    defense.formations.defense = snapDefenseFormation;
+
+    let result;
+
+    try {
+        result = resolvePlay(
+            offense,
+            defense,
+            offPlayKey,
+            defPlayKey,
+            context,
+            { fastSim: !isLive },
+            isLive
+        );
+    } finally {
+        // Restore each team's stored/preferred formation after setup and execution.
+        offense.formations.offense = configuredOffenseFormation;
+        defense.formations.defense = configuredDefenseFormation;
+    }
+
     const { playResult, finalBallY } = result;
 
     if (gameInstance.isConversionAttempt) {

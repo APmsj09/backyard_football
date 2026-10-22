@@ -206,7 +206,7 @@ export async function initializeLeague(onProgress) {
             ageMax: 18,
             primaryColor: colorSet?.primary || teamColors[0].primary,
             secondaryColor: colorSet?.secondary || teamColors[0].secondary,
-            formations: { offense: offenseFormationData?.name || 'Balanced', defense: defenseFormationData?.name || '3-2-3' },
+            formations: { offense: prefOff, defense: prefDef },
             depthChart: {
                 offense: Object.fromEntries((offenseFormationData?.slots || []).map(slot => [slot, null])),
                 defense: Object.fromEntries((defenseFormationData?.slots || []).map(slot => [slot, null])),
