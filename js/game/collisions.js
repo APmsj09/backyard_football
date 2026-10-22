@@ -650,13 +650,12 @@ export function checkTackleCollisions(playState, gameLog) {
 
             if (gameLog) {
                 const weightDelta = carrierWeight - defenderWeight;
-                const ageDelta = (carrier.age || 15) - (defender.age || 15);
 
                 let message;
-                if (weightDelta > 45 || ageDelta >= 3) {
-                    message = `[Tick ${playState.tick}] 🚜 ${carrier.name} (${carrier.age}yo, ${carrierWeight} lbs) completely steamrolls ${defender.name} (${defender.age}yo, ${defenderWeight} lbs)!`;
-                } else if (weightDelta < -45 || ageDelta <= -3) {
-                    message = `[Tick ${playState.tick}] ⚡ Pure quickness! Little ${carrier.name} slips right underneath ${defender.name}'s reach!`;
+                if (weightDelta > 45) {
+                    message = `[Tick ${playState.tick}] 🚜 ${carrier.name} (${carrierWeight} lbs) completely steamrolls the much smaller ${defender.name} (${defenderWeight} lbs)!`;
+                } else if (weightDelta < -45) {
+                    message = `[Tick ${playState.tick}] ⚡ David vs Goliath! ${carrier.name} (${carrierWeight} lbs) slips right underneath the heavy-footed ${defender.name}!`;
                 } else if (isTruckAttempt) {
                     message = `[Tick ${playState.tick}] 💥 ${carrier.name} lowers his shoulder and powers right through ${defender.name}!`;
                 } else {

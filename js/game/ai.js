@@ -1864,17 +1864,19 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
         const allReadsExhausted = numReadsVisible >= progression.length && (!bestTargetEval || bestTargetEval.score < THROW_THRESHOLD);
 
         // BACKYARD QB INSTINCTS:
-        // Young QBs (12-14) or high-ego sandlot gunslingers get fidgety in the pocket early,
-        // while 17-18yo varsity pocket passers step into clean pockets with composure.
-        const qbAge = qbState.age || 15;
+        // Scrambling is driven by Poise (Decision Quality + Dependability) and Ego.
+        // A composed 12-year-old prodigy stands tall in the pocket, while an undisciplined 18-year-old panics and runs.
         const qbEgo = qbProfile?.ego ?? (qbState.personality?.ego || 50);
-        const youthExcitement = qbAge <= 14 ? 1.4 : (qbAge >= 17 ? 0.85 : 1.0);
+        const qbPoise = ((qbProfile?.decisionQuality ?? 50) * 0.6) + ((qbProfile?.assignmentDiscipline ?? 50) * 0.4);
+        
+        // Low poise multiplies the urge to flee the pocket; high poise keeps them grounded.
+        const panicFactor = 1.0 + ((100 - qbPoise) / 100); 
         const sandlotEgoBoost = qbEgo > 70 ? 1.3 : 1.0;
 
         if (!decisionMade && openLane && (isPressured || allReadsExhausted || playState.tick > 60)) {
             const qbSpeed = qbAttrs.physical?.speed || 50;
             const mobilityDesire = ((qbAgility * 0.5) + (qbSpeed * 0.5)) / 100;
-            const personalityUrgency = (qbProfile?.riskTolerance ?? 1.0) * youthExcitement * sandlotEgoBoost;
+            const personalityUrgency = (qbProfile?.riskTolerance ?? 1.0) * panicFactor * sandlotEgoBoost;
 
             let scrambleChance = mobilityDesire * 0.012 * personalityUrgency;
             if (allReadsExhausted) scrambleChance *= 2.5;

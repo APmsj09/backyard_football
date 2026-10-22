@@ -850,24 +850,24 @@ export function generatePlayer(minAge = 12, maxAge = 18, classModifiers = null) 
             "Known around the park for practicing diving catches into lawn leaf piles."
         ];
 
-        // Age-specific lore to ground the reality of the neighborhood
-        let ageLore = "";
-        if (age <= 12) {
-            ageLore = getRandom([
-                "Runs on pure sugar and adrenaline; literally never gets tired.",
-                "Doesn't care if he starts or sits, just happy his mom let him come to the park.",
-                "Small frame, but fearless against the older kids."
-            ]);
-        } else if (age >= 17) {
-            ageLore = getRandom([
-                "A playground legend who is starting to get gassed after two hard sprints.",
-                "Has his own car now; if he isn't getting the ball, he might just drive home.",
-                "A physical mismatch against the middle schoolers, but his knees are already aching."
-            ]);
+        // Personality-specific lore to ground the reality of the neighborhood
+        let personalityLore = "";
+        
+        if (attributes.physical?.stamina > 85 && weight < 140) {
+            personalityLore = "Runs on pure sugar and adrenaline; literally never gets tired.";
+        } else if (egoVal > 80 && cred > 70) {
+            personalityLore = "Acts like he owns the park; if he isn't getting the ball, he might just walk home.";
+        } else if (ethVal > 85) {
+            personalityLore = "Doesn't care if he gets the ball, just happy to be out here hitting people.";
+        } else if (attributes.mental?.toughness > 85 && weight < 130) {
+            personalityLore = "Tiny frame, but absolutely fearless going over the middle.";
+        } else if (attributes.physical?.stamina < 40 && weight > 180) {
+            personalityLore = "An absolute physical mismatch, but he's usually gassed after two hard sprints.";
+        } else if (iqVal > 85 && egoVal < 40) {
+            personalityLore = "Plays like a 10-year veteran. Never panicked, never out of position.";
         }
 
-        //const wonderkidNote = isWonderkid ? "⭐ THE NEIGHBORHOOD PHENOM. A once-in-a-generation playground prodigy who already runs circles around high school varsity athletes." : "";
-        return `${getRandom(athleticClues)} ${getRandom(mentalClues)} ${getRandom(quirks)} ${ageLore}`.trim();
+        return `${getRandom(athleticClues)} ${getRandom(mentalClues)} ${getRandom(quirks)} ${personalityLore}`.trim();
     };
 
     const bio = generateBio();

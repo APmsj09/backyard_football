@@ -66,21 +66,15 @@ export function getDecisionProfile(playerState, tick = null) {
         playerState.experienceSeasons !== undefined || 
         playerState.experienceSnaps !== undefined;
 
-    const seasonsPlayed = Math.max(
-        0,
-        Number(playerState.experienceSeasons) || 0
-    );
+    const seasonsPlayed = Number(playerState.experienceSeasons);
+    const snapsThisSeason = Number(playerState.experienceSnaps);
+    const hasExplicitCareerData = Number.isFinite(seasonsPlayed) || Number.isFinite(snapsThisSeason);
 
-    const snapsThisSeason = Math.max(
-        0,
-        Number(playerState.experienceSnaps) || 0
-    );
-
-    // If career tracking is not present, default experience to baseline IQ so un-tracked 
-    // players are not systematically penalized with an artificial -15% awareness drop.
+    // If a player doesn't have career data yet (e.g., brand new walk-on), 
+    // base their "experience" (instincts) on their raw Football IQ rather than penalizing them with 0.
     const experience = hasExplicitCareerData
-        ? clamp((seasonsPlayed * 10) + Math.min(60, Math.sqrt(snapsThisSeason) * 3))
-        : clamp(iq * 0.90, 30, 80);
+        ? clamp(((seasonsPlayed || 0) * 10) + Math.min(60, Math.sqrt(snapsThisSeason || 0) * 3))
+        : clamp(iq * 0.85);
 
     const awareness = clamp(
         (iq * 0.68) +
@@ -98,12 +92,14 @@ export function getDecisionProfile(playerState, tick = null) {
         99
     );
 
-    // Dependability and consistency encourage assignment discipline.
-    // Work ethic has a smaller influence than on-field reliability.
+    // Discipline is 100% personality-driven. A highly dependable player holds his lane 
+    // better than a lazy, undependable player.
     const assignmentDiscipline = clamp(
-        (dependability * 0.70) +
+        (dependability * 0.65) +
         (consistency * 0.20) +
-        (workEthic * 0.10)
+        (workEthic * 0.15),
+        15,
+        95
     );
 
     // Ego/street cred make players somewhat more willing to take risks;
