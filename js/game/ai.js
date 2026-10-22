@@ -1158,8 +1158,15 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
     if (qbState.isEngaged || qbState.stunnedTicks > 0) return;
     if (qbState.action === 'sacked') return;
 
-    // Once the QB commits to a scramble, don't resume passing decisions.
-    if (qbState.action === 'run_path' && playState.qbIntent === 'scramble') return;
+    // A rollout (`qb_scramble`) can still end in a throw.
+    // Once the QB commits to running, lock that decision for this play,
+    // even if another system later overwrites action or qbIntent.
+    if (playState.qbRunCommitted === true) return;
+
+    if (qbState.action === 'run_path' && playState.qbIntent === 'scramble') {
+        playState.qbRunCommitted = true;
+        return;
+    }
 
     // Do not execute passing progressions on designed run plays!
     // (Unless it's a trick pass or the QB has officially aborted the handoff to scramble)
@@ -1195,6 +1202,7 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
             } else {
                 qbState.action = 'run_path';
                 playState.qbIntent = 'scramble';
+                playState.qbRunCommitted = true;
                 if (gameLog) gameLog.push(`🏃 ${qbState.name} scrambles after crossing the line!`);
                 qbState.hasProcessedLineCrossing = true;
                 return;
@@ -1347,9 +1355,18 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
 
     const pressureDefender = unblocked[0] ?? null;
     const pressureCount = unblocked.length;
-    const isPressured = !!pressureDefender;
-    const imminentSackDefender = isPressured && getDistance(qbState, pressureDefender) < 1.2;
-    const isHotReadSituation = isPressured && getDistance(qbState, pressureDefender) < 4.5;
+    const pressureDistance = pressureDefender
+        ? getDistance(qbState, pressureDefender)
+        : Infinity;
+
+    const isPressured = pressureDistance < 4.5;
+    const imminentSackDefender =
+        isPressured && pressureDistance < 1.2;
+
+    // Ordinary pressure does not automatically create a hot-read situation.
+    // The threat must close to within 2.5 yards of the QB.
+    const isHotReadSituation =
+        isPressured && pressureDistance < 2.5;
 
     const getTargetValue = (slotOrRole) => {
         const rec = offenseStates.find(r =>
@@ -1680,6 +1697,7 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
             qbState.action = 'run_path'; // BREAK OUT OF QB_SCRAMBLE LOCK
             qbState.isBallCarrier = true;
             playState.qbIntent = 'scramble';
+            playState.qbRunCommitted = true;
 
             if (gameLog) {
                 const reason = wouldGainFirstDown ? "sees a lane for the first down" : "takes off into open green grass";
@@ -1947,8 +1965,18 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
         const sandlotEgoBoost = qbEgo > 70 ? 1.3 : 1.0;
 
         // BACKYARD ROLLOUT & SCRAMBLE TRIGGER:
-        // Mobile QBs escape the pocket proactively rather than taking sacks.
-        if (!decisionMade && (isPressured || allReadsExhausted || playState.tick > 50)) {
+        // Ordinary pressure should not cause an immediate rollout before
+        // the QB has had time to execute the dropback and read the defense.
+        // An imminent sack can still force an emergency response.
+        const rolloutEligible =
+            playState.tick >= MIN_DROPBACK_TICKS ||
+            imminentSackDefender;
+
+        if (
+            !decisionMade &&
+            rolloutEligible &&
+            (isPressured || allReadsExhausted || playState.tick > 50)
+        ) {
             const qbSpeed = qbAttrs.physical?.speed || 50;
             const mobilityDesire = ((qbAgility * 0.55) + (qbSpeed * 0.45)) / 100;
             const personalityUrgency = (qbProfile?.riskTolerance ?? 1.0) * panicFactor * sandlotEgoBoost;
@@ -1989,6 +2017,7 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
             } else {
                 qbState.action = 'run_path'; // BREAK OUT OF QB_SCRAMBLE LOCK
                 playState.qbIntent = 'scramble';
+                playState.qbRunCommitted = true;
                 qbState.isBallCarrier = true;
                 if (gameLog && !qbState.hasLoggedPanic) {
                     gameLog.push(`🏃 ${qbState.name} can't find anyone and takes off!`);
@@ -2025,8 +2054,16 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
             decisionMade = true;
         } else if (willThrowAway) {
             actionTaken = "Throw Away";
-        } else if (qbAgility > 65 && Math.random() < 0.50) {
-            // Athletic QBs try a last-ditch scramble out of the pocket
+        } else if (
+            qbAgility > 65 &&
+            (
+                imminentSackDefender ||
+                playState.tick >= MIN_DROPBACK_TICKS
+            ) &&
+            Math.random() < 0.50
+        ) {
+            // Athletic QBs can escape an imminent sack early.
+            // Otherwise, wait until the normal dropback window develops.
             qbState.action = 'qb_scramble';
             qbState.isBallCarrier = true;
             return;
