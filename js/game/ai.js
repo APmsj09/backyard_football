@@ -364,6 +364,11 @@ export function calculateSafetyHelp(safetyState, defenseStates, offenseStates, b
         }
     }
 
+    // Do not run pre-throw coverage matching after the ball is released.
+    // Before the reaction delay expires, let the normal assignment logic
+    // maintain coverage instead of switching help targets between receivers.
+    if (isBallInAir) return null;
+
     // 2. PRE-THROW ZONE MATCHING / MAN HELP
     const LOS = playState.lineOfScrimmage;
     const defensiveCall = playState.defensiveCall || {};

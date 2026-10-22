@@ -916,10 +916,13 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
     );
     // FIX: Only pass designated blockers into assignBlockerTarget.
     // Do NOT include wide receivers who transitioned to run_block to escort a live ball carrier downfield!
-    const otherBlockers = offenseStates.filter(
+        const otherBlockers = offenseStates.filter(
         p => !p.isEngaged &&
              !p.slot.startsWith('OL') &&
-             p.assignment?.includes('block') &&
+             (
+                 p.assignment?.includes('block') ||
+                 (playType === 'run' && p.assignment?.startsWith('lead_'))
+             ) &&
              (p.action === 'pass_block' || p.action === 'run_block')
     );
     const assignedThreats = new Set();
@@ -2074,13 +2077,22 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
 
                 case 'route_complete': {
                     // FIX: If a pass is caught by another teammate, turn into a downfield escort blocker
-                    if (isPassCompleted && ballCarrierState && ballCarrierState.id !== pState.id) {
+                                        if (isPassCompleted && ballCarrierState && ballCarrierState.id !== pState.id) {
                         pState.action = 'run_block';
                         pState.targetX = ballCarrierState.x + (pState.x < ballCarrierState.x ? -2.5 : 2.5);
                         // If the receiver is already ahead of the carrier, keep pushing downfield to clear the way
                         const escortDepth = ballCarrierState.y + 4.0;
                         pState.targetY = Math.max(pState.y + 2.0, escortDepth);
                         setPointIntent(pState, pState.targetX, pState.targetY, 0.5);
+                        break;
+                    }
+
+                    // On designed runs, a lead route is only the approach to the block.
+                    // Once the landmark is reached, let the blocker select a defender.
+                    if (playType === 'run' && pState.assignment?.startsWith('lead_')) {
+                        pState.action = 'run_block';
+                        pState.dynamicTargetId = null;
+                        setHoldIntent(pState, pState.x, pState.y);
                         break;
                     }
 
@@ -2444,7 +2456,11 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                         }
                     }
 
-                    if (dirConfidence > 0.45 && !isRunReadAtMesh) {
+                    // The live carrier's position and velocity already determine
+                    // the pursuit target above. Do not apply a cached play-direction
+                    // read that may point away from the carrier's current path.
+                        
+                    /*if (dirConfidence > 0.45 && !isRunReadAtMesh) {
                         const cheatAmount =
                             3.0 *
                             dirConfidence *
@@ -2453,7 +2469,7 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                             (defenderProfile?.riskTolerance ?? 1.0);
                         if (diagDirection === 'right' && predX < FIELD_WIDTH - 5) predX += cheatAmount;
                         else if (diagDirection === 'left' && predX > 5) predX -= cheatAmount;
-                    }
+                    }*/
 
                     // DEEPER FIX: Boids-like Obstacle Avoidance for blocked tackle paths
                     const isObstructed = pState._lastTackleBlockedLogTick && 

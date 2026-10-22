@@ -1577,7 +1577,7 @@ export const defensivePlaybook = {
         tags: ['zone', 'blitz', 'firezone'],
         assignments: {
             'DL1': 'pass_rush', 'DL2': 'pass_rush', 'DL3': 'zone_short_middle',
-            'LB1': 'blitz_gap',
+            'LB1': 'blitz_edge',
             'DB1': 'zone_deep_third_left', 'DB2': 'zone_deep_third_right', 'DB3': 'zone_flat_left', 'DB4': 'zone_deep_middle'
         }
     },
