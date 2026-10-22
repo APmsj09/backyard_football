@@ -659,8 +659,21 @@ export function setupInitialPlayerStates(playState, offense, defense, play, assi
 export function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrierState, playType, offensivePlayKey, offensiveAssignments, defensivePlayKey, gameLog) {
     // Reset per-tick speed modifiers so temporary contact effects do not persist.
     // The logic below reapplies any modifier required for this tick.
+    // TWO-WAY BACKYARD FATIGUE:
+    // Sustained sprints build up on-field fatigue.
+    // In player.js, 12-year-olds have +20 stamina ("never gets tired"),
+    // while 17-18 year olds have low stamina and start to gas out on long drives.
     playState.activePlayers.forEach(pState => {
         pState.contactReduction = 1.0;
+
+        const currentSpeed = Math.hypot(pState.vx || 0, pState.vy || 0);
+        if (currentSpeed > 5.5) {
+            const stamina = pState.attributes?.physical?.stamina || pState.stamina || 50;
+            // High stamina kids (12-14yo) barely fatigue; low stamina older kids feel the burn
+            const fatigueRate = Math.max(0.0002, (100 - stamina) * 0.000025);
+            pState.fatigue = Math.min(100, (pState.fatigue || 0) + fatigueRate);
+            pState.fatigueModifier = Math.max(0.70, 1.0 - ((pState.fatigue || 0) / 100) * 0.30);
+        }
     });
 
     const qbState = offenseStates.find(p => p.slot?.startsWith('QB'));

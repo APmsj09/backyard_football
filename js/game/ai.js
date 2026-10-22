@@ -1863,16 +1863,22 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
         const openLane = !defenseStates.some(d => !d.isBlocked && !d.isEngaged && Math.abs(d.x - qbState.x) < 3.5 && d.y < qbState.y + 1);
         const allReadsExhausted = numReadsVisible >= progression.length && (!bestTargetEval || bestTargetEval.score < THROW_THRESHOLD);
 
-        // A mobile QB doesn't wait for arbitrary Tick 80 if all receivers are blanketed or pressure is closing
-        if (!decisionMade && openLane && (isPressured || allReadsExhausted || playState.tick > 70)) {
-            const qbSpeed = qbAttrs.physical?.speed || 50;
-            const mobilityDesire = ((qbAgility * 0.5) + (qbSpeed * 0.5)) / 100; // 0.2 to 0.95
-            const personalityUrgency = qbProfile?.riskTolerance ?? 1.0;
+        // BACKYARD QB INSTINCTS:
+        // Young QBs (12-14) or high-ego sandlot gunslingers get fidgety in the pocket early,
+        // while 17-18yo varsity pocket passers step into clean pockets with composure.
+        const qbAge = qbState.age || 15;
+        const qbEgo = qbProfile?.ego ?? (qbState.personality?.ego || 50);
+        const youthExcitement = qbAge <= 14 ? 1.4 : (qbAge >= 17 ? 0.85 : 1.0);
+        const sandlotEgoBoost = qbEgo > 70 ? 1.3 : 1.0;
 
-            // Math Fix: Drastically reduce base chance so it scales correctly across 25 simulation ticks per second
-            let scrambleChance = mobilityDesire * 0.006 * personalityUrgency;
+        if (!decisionMade && openLane && (isPressured || allReadsExhausted || playState.tick > 60)) {
+            const qbSpeed = qbAttrs.physical?.speed || 50;
+            const mobilityDesire = ((qbAgility * 0.5) + (qbSpeed * 0.5)) / 100;
+            const personalityUrgency = (qbProfile?.riskTolerance ?? 1.0) * youthExcitement * sandlotEgoBoost;
+
+            let scrambleChance = mobilityDesire * 0.012 * personalityUrgency;
             if (allReadsExhausted) scrambleChance *= 2.5;
-            if (isPressured) scrambleChance *= 2.0;
+            if (isPressured) scrambleChance *= 2.5;
 
             if (Math.random() < scrambleChance) {
                 qbState.action = 'run_path';

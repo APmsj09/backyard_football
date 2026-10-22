@@ -382,8 +382,16 @@ export function checkTackleCollisions(playState, gameLog) {
         const carrierAge = carrier.age || 15;
         const defenderAge = defender.age || 15;
 
-        const carrierWeight = carrier.wgt || carrier.weight || (90 + (carrierAge - 12) * 17.5);
-        const defenderWeight = defender.wgt || defender.weight || (90 + (defenderAge - 12) * 17.5);
+        // Use the exact age-progress weight curve from player.js
+        const getBackyardWeight = (p) => {
+            if (p.weight || p.wgt) return p.weight || p.wgt;
+            const a = Math.max(8, Math.min(18, p.age || 14));
+            const progress = (a - 8) / 10.0;
+            return Math.round(70 + (progress * 130)); // 70 lbs at 8yo -> 200 lbs at 18yo
+        };
+
+        const carrierWeight = getBackyardWeight(carrier);
+        const defenderWeight = getBackyardWeight(defender);
 
         const carrierDrivePower =
             ((carrier.str || carrier.strength || 50) * 0.65) +
@@ -641,12 +649,19 @@ export function checkTackleCollisions(playState, gameLog) {
             }
 
             if (gameLog) {
-                const isBigKidTruck = (carrierWeight - defenderWeight) > 35;
-                const message = isBigKidTruck
-                    ? `[Tick ${playState.tick}] 🚜 ${carrier.name} completely steamrolls younger ${defender.name}!`
-                    : isTruckAttempt
-                        ? `[Tick ${playState.tick}] 💥 ${carrier.name} powers right through ${defender.name}'s tackle!`
-                        : `[Tick ${playState.tick}] 💪 ${carrier.name} shrugs off ${defender.name}'s reach!`;
+                const weightDelta = carrierWeight - defenderWeight;
+                const ageDelta = (carrier.age || 15) - (defender.age || 15);
+
+                let message;
+                if (weightDelta > 45 || ageDelta >= 3) {
+                    message = `[Tick ${playState.tick}] 🚜 ${carrier.name} (${carrier.age}yo, ${carrierWeight} lbs) completely steamrolls ${defender.name} (${defender.age}yo, ${defenderWeight} lbs)!`;
+                } else if (weightDelta < -45 || ageDelta <= -3) {
+                    message = `[Tick ${playState.tick}] ⚡ Pure quickness! Little ${carrier.name} slips right underneath ${defender.name}'s reach!`;
+                } else if (isTruckAttempt) {
+                    message = `[Tick ${playState.tick}] 💥 ${carrier.name} lowers his shoulder and powers right through ${defender.name}!`;
+                } else {
+                    message = `[Tick ${playState.tick}] 💪 ${carrier.name} breaks free from ${defender.name}'s tackle!`;
+                }
 
                 pushGameLog(gameLog, message, playState);
             }
