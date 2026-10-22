@@ -548,13 +548,11 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
     let arrivalFactor = 1.0;
 
     if (isStopping) {
-        const stoppingDistance = isPursuitApproach
-            ? pursuitStopDistance
-            : 2.5;
+        const stoppingDistance = 2.5;
 
         arrivalFactor = Math.max(
             0,
-        Math.min(1, distToTarget / stoppingDistance)
+            Math.min(1, distToTarget / stoppingDistance)
         );
 
         // WEIGHT IMPACT ON BRAKING (Inertia):
