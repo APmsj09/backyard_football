@@ -2806,7 +2806,7 @@ export function renderStaffTab(gameState) {
                                                 ? 'This coach has used their lifetime growth budget.'
                                                 : 'Skill-specific progress will appear as the coach gains experience in assigned work.'}
                                         </p>
-                                    `                                    `}
+                                    `}
                                 </div>
 
                                 <div class="mt-3 rounded-lg border border-slate-200 bg-white p-3">
