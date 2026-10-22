@@ -15,12 +15,12 @@ const HASH_RIGHT_X = 35.3;
 //const TICK_DURATION_SECONDS = 0.05;
 
 export const zoneBoundaries = {
-    'zone_flat_left': { minX: 0, maxX: HASH_LEFT_X, minY: -2, maxY: 8 },
-    'zone_flat_right': { minX: HASH_RIGHT_X, maxX: FIELD_WIDTH, minY: -2, maxY: 8 },
-    'zone_hook_curl_left': { minX: HASH_LEFT_X, maxX: CENTER_X, minY: 7, maxY: 15 },
-    'zone_hook_curl_middle': { minX: HASH_LEFT_X, maxX: HASH_RIGHT_X, minY: 8, maxY: 16 },
-    'zone_hook_curl_right': { minX: CENTER_X, maxX: HASH_RIGHT_X, minY: 7, maxY: 15 },
-    'zone_short_middle': { minX: CENTER_X - 6, maxX: CENTER_X + 6, minY: 4, maxY: 10 },
+    'zone_flat_left': { minX: 0, maxX: HASH_LEFT_X, minY: 2, maxY: 9 },
+    'zone_flat_right': { minX: HASH_RIGHT_X, maxX: FIELD_WIDTH, minY: 2, maxY: 9 },
+    'zone_hook_curl_left': { minX: HASH_LEFT_X, maxX: CENTER_X, minY: 6, maxY: 14 },
+    'zone_hook_curl_middle': { minX: HASH_LEFT_X, maxX: HASH_RIGHT_X, minY: 6, maxY: 14 },
+    'zone_hook_curl_right': { minX: CENTER_X, maxX: HASH_RIGHT_X, minY: 6, maxY: 14 },
+    'zone_short_middle': { minX: CENTER_X - 6, maxX: CENTER_X + 6, minY: 3, maxY: 8 },
     'zone_deep_half_left': { minX: 0, maxX: CENTER_X, minY: 12, maxY: 40 },
     'zone_deep_half_right': { minX: CENTER_X, maxX: FIELD_WIDTH, minY: 12, maxY: 40 },
     'zone_deep_middle': { minX: HASH_LEFT_X - 2, maxX: HASH_RIGHT_X + 2, minY: 12, maxY: 40 },

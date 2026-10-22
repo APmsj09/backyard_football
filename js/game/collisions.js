@@ -581,17 +581,17 @@ export function checkTackleCollisions(playState, gameLog) {
             if (inOwnEndzone) {
                 if (caughtInEndzone) { playState.touchback = true; playState.finalBallY = carrier.isOffense ? 20 : 100; }
                 else { playState.safety = true; playState.finalBallY = carrier.isOffense ? 0 : 120; }
-            } else if (carrier.role === 'QB' && carrier.y < playState.lineOfScrimmage && playState.type === 'pass' && playState.qbIntent !== 'scramble') {
-                playState.sack = true;
-                playState.statEvents.push({ type: 'sack', playerId: defender.id, qbId: carrier.id });
-                logPlayDebug('QB_SACK', `${defender.name} sacked ${carrier.name} for loss`, {
-                    lossYards: Number((playState.lineOfScrimmage - carrier.y).toFixed(1)),
-                    tacklerStrength: defender.str || 50
+            } else if (carrier.role === 'QB' && (playState.qbIntent === 'scramble' || playState.type === 'run')) {
+                playState.statEvents.push({ 
+                    type: 'rush_attempt', 
+                    carrierId: carrier.id, 
+                    yards: carrier.y - playState.lineOfScrimmage 
                 });
-            } else if (carrier.role === 'QB' && playState.qbIntent === 'scramble') {
-                // If the QB tucked and ran, record it as a rush attempt rather than a completed pass
-                playState.statEvents.push({ type: 'rush_attempt', carrierId: carrier.id, yards: carrier.y - playState.lineOfScrimmage });
-                playState.isScrambleRun = true;
+                if (playState.type === 'run') {
+                    playState.isRush = true;
+                } else {
+                    playState.isScrambleRun = true;
+                }
             }
 
             if (gameLog) {
@@ -1328,7 +1328,7 @@ export function handleBallArrival(playState, carrier, playResult, gameLog) {
         }
         
         if (playState.type === 'punt' && p.isOffense && ball.z > 0.5) return false;
-        if ((ball.droppedById === p.id) || (ball.lastDroppedById === p.id)) return false; // FIX: Mislabeled property
+        //if ((ball.droppedById === p.id) || (ball.lastDroppedById === p.id)) return false; // FIX: Mislabeled property
 
         if (p.isOffense && p.slot.startsWith('OL') && playState.type === 'pass' && !ball.isLoose && !ball.tipCount && !ball.isLateral) {
             return false;

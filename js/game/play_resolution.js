@@ -1820,7 +1820,7 @@ export function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey
             deadBall.isLoose = false;
         }
     } else if (playState.touchdown) {
-        playResult.outcome = 'complete';
+        playResult.outcome = playState.type === 'run' ? 'rush_td' : 'complete';
         playResult.score = 'TD';
         playResult.defensiveTD = playState.defensiveTD || false;
     } else if (playState.safety) {
@@ -1830,8 +1830,12 @@ export function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey
     } else if (playState.sack) {
         playResult.outcome = 'sack';
     } else if (!playState.playIsLive) {
-        // Ordinary tackle or another normal dead-ball event.
-        playResult.outcome = 'complete';
+        // Correctly classify runs vs passes on tackles
+        if (playState.type === 'run' || playState.isScrambleRun) {
+            playResult.outcome = 'rush';
+        } else {
+            playResult.outcome = 'complete';
+        }
     }
 
     if (playState.possessionChanged || playState.turnover || playState.type === 'punt') {

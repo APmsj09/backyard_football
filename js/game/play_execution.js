@@ -296,6 +296,17 @@ export function setupInitialPlayerStates(playState, offense, defense, play, assi
                 ? getAssignment(slot, assignments, formationMapping, true)
                 : defAssignments[slot];
 
+            // FIX: Auto-mirror inverted left/right zone assignments.
+            // If a defender is aligned on the left (x < CENTER_X - 1.5) but assigned a right-side zone
+            // (or vice versa), align the assignment to match their alignment side.
+            if (!isOffense && assignment?.startsWith('zone_')) {
+                if (startX < CENTER_X - 1.5) {
+                    assignment = assignment.replace('_right', '_left');
+                } else if (startX > CENTER_X + 1.5) {
+                    assignment = assignment.replace('_left', '_right');
+                }
+            }
+
             if (isOffense) {
                 for (const [role, mappedSlot] of Object.entries(formationMapping)) {
                     if (mappedSlot === slot || (Array.isArray(mappedSlot) && mappedSlot.includes(slot))) {
@@ -521,11 +532,17 @@ export function setupInitialPlayerStates(playState, offense, defense, play, assi
                             startY = tState.y + yOffset;
                         }
 
-                        targetX = tState.x;
-                        targetY = tState.y;
+                        // FIX: Pre-snap target must mirror their own alignment cushion,
+                        // NOT the receiver's coordinates in the offensive backfield.
+                        targetX = startX;
+                        targetY = startY;
                     }
                 } else if (assignment.startsWith('zone_')) {
-                    if (assignment.includes('deep')) startY = Math.max(startY, playState.lineOfScrimmage + 8);
+                    if (assignment.includes('deep')) {
+                        startY = Math.max(startY, playState.lineOfScrimmage + 8);
+                    }
+                    targetX = startX;
+                    targetY = startY;
                 }
 
                 if (assignment === 'punt_return') {
@@ -546,18 +563,20 @@ export function setupInitialPlayerStates(playState, offense, defense, play, assi
                     startY = playState.lineOfScrimmage + 1.25;
                 }
 
-                // 8v8 EDGE CONTAINMENT FIX:
-                // If a defensive end or pass rusher is lined up inside x=30 on the right, but the offense
-                // has a Tight End or Wing out past x=29, widen the edge rusher to set the containment edge!
-                const isEdgeRusher = slot.startsWith('DL') && (assignment?.includes('rush') || assignment?.includes('run_edge'));
+                // FIX: Support edge blitzers (LB) and spread formations (WR/TE flexes)
+                const isEdgeRusher = (slot.startsWith('DL') || slot.startsWith('LB')) &&
+                    (assignment?.includes('rush') || assignment?.includes('edge') || assignment?.includes('blitz_edge'));
+
                 if (isEdgeRusher) {
-                    const offTightEndRight = initialOffenseStates.find(o => o.slot.startsWith('TE') && o.x > CENTER_X);
-                    if (offTightEndRight && startX > CENTER_X && startX <= offTightEndRight.x) {
-                        startX = offTightEndRight.x + 1.4; // Force DE outside the TE's hip to set the edge
+                    // Check widest offensive skill player on the right
+                    const offRight = initialOffenseStates.filter(o => o.x > CENTER_X).sort((a, b) => b.x - a.x)[0];
+                    if (offRight && startX >= CENTER_X && startX <= offRight.x) {
+                        startX = Math.min(51.5, Math.max(startX, offRight.x + 1.4));
                     }
-                    const offTightEndLeft = initialOffenseStates.find(o => o.slot.startsWith('TE') && o.x < CENTER_X);
-                    if (offTightEndLeft && startX < CENTER_X && startX >= offTightEndLeft.x) {
-                        startX = offTightEndLeft.x - 1.4;
+                    // Check widest offensive skill player on the left
+                    const offLeft = initialOffenseStates.filter(o => o.x < CENTER_X).sort((a, b) => a.x - b.x)[0];
+                    if (offLeft && startX <= CENTER_X && startX >= offLeft.x) {
+                        startX = Math.max(1.8, Math.min(startX, offLeft.x - 1.4));
                     }
                 }
             }
@@ -664,8 +683,13 @@ export function setupInitialPlayerStates(playState, offense, defense, play, assi
         if (play.type === 'run' || isFleaFlicker) {
             const runner = playState.activePlayers.find(p =>
                 p.isOffense &&
-                p.assignment?.startsWith('run_') &&
-                p.id !== snapTaker.id
+                p.id !== snapTaker.id &&
+                (
+                    p.role === 'RB' ||
+                    (p.assignment?.startsWith('run_') &&
+                    !p.assignment.includes('block') &&
+                    !p.assignment.includes('gap'))
+                )
             );
 
             if (runner) {
@@ -676,7 +700,9 @@ export function setupInitialPlayerStates(playState, offense, defense, play, assi
                     playState.fleaFlickerPhase = 'qb_mesh';
                 }
             } else {
+                // If it's a designed QB run or empty backfield run, QB is the runner
                 snapTaker.isBallCarrier = true;
+                snapTaker.action = 'run_path';
             }
         }
     }
@@ -1183,8 +1209,8 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                 if (returnerHasBall) {
                     const dist = getDistance(pState, ballCarrierState);
                     const lead = dist / 15;
-                    pState.targetX = ballCarrierState.x + (ballCarrierState.velocity?.x || 0) * lead;
-                    pState.targetY = ballCarrierState.y + (ballCarrierState.velocity?.y || 0) * lead;
+                    pState.targetX = ballCarrierState.x + (ballCarrierState.vx || 0) * lead;
+                    pState.targetY = ballCarrierState.y + (ballCarrierState.vy || 0) * lead;
                 } else {
                     const ballTargetX = ballPos.targetX || ballPos.x;
                     const laneDrift = ballTargetX > pState.initialX ? 1.5 : -1.5;
@@ -2662,14 +2688,23 @@ export function executeAssignment(pState, assignment, offenseStates, LOS, playSt
         const defenderProfile = getDecisionProfile(pState, playState.tick);
         const iq = defenderProfile?.awareness ?? (pState.playbookIQ || 50);
 
-        if (ballCarrierState && ballCarrierState.isOffense) {
+        // FIX: Only flow zone drops toward the carrier if the ball has crossed the LOS
+        // or on confirmed run plays. Never drag zone drops toward a QB sitting in the pocket!
+        const isLivePastLOS = ballCarrierState && ballCarrierState.y > LOS + 0.5;
+        const isConfirmedRun = playState.type === 'run' && playState.handoffOccurred;
+
+        if (ballCarrierState && ballCarrierState.isOffense && (isLivePastLOS || isConfirmedRun)) {
             const distToCarrier = getDistance(pState, ballCarrierState);
             if (distToCarrier < 15.0) {
-                const flowIntensity = 0.2 + (iq / 200); // Higher IQ = stronger flow
+                const flowIntensity = 0.15 + (iq / 250);
                 zoneCenter.x = (zoneCenter.x * (1 - flowIntensity)) + (ballCarrierState.x * flowIntensity);
                 zoneCenter.y = (zoneCenter.y * (1 - flowIntensity)) + (ballCarrierState.y * flowIntensity);
             }
         }
+
+        // Enforce hard floor: Zone coverage drop targets MUST stay on the defensive side of the ball
+        const minZoneDepth = isDeep ? (LOS + 8.0) : (LOS + 1.8);
+        zoneCenter.y = Math.max(minZoneDepth, zoneCenter.y);
 
         // --- RED ZONE COMPRESSION ---
         // As the ball gets closer to the goal line (LOS > 90), 

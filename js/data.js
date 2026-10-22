@@ -1208,7 +1208,7 @@ export const defensivePlaybook = {
         assignments: {
             'DL1': 'pass_rush', 'DL2': 'pass_rush', 'DL3': 'pass_rush',
             'LB1': 'zone_hook_curl_left', 'LB2': 'zone_hook_curl_right',
-            'DB1': 'zone_deep_half_left', 'DB2': 'zone_deep_half_right', 'DB3': 'zone_short_middle'
+            'DB1': 'zone_flat_left', 'DB2': 'zone_deep_half_left', 'DB3': 'zone_deep_half_right'
         }
     },
     'Cover_3_Sky': {
@@ -1218,7 +1218,7 @@ export const defensivePlaybook = {
         assignments: {
             'DL1': 'pass_rush', 'DL2': 'pass_rush', 'DL3': 'pass_rush',
             'LB1': 'zone_flat_left', 'LB2': 'zone_hook_curl_right',
-            'DB1': 'zone_deep_third_left', 'DB2': 'zone_deep_third_right', 'DB3': 'zone_deep_middle'
+            'DB1': 'zone_deep_third_left', 'DB2': 'zone_deep_middle', 'DB3': 'zone_deep_third_right'
         }
     },
     'Cover_1_Robber': {
@@ -1567,8 +1567,8 @@ export const defensivePlaybook = {
         tags: ['zone', 'cover3'],
         assignments: {
             'DL1': 'pass_rush', 'DL2': 'pass_rush', 'DL3': 'pass_rush',
-            'LB1': 'zone_hook_curl_left',
-            'DB1': 'zone_deep_third_left', 'DB2': 'zone_deep_third_right', 'DB3': 'zone_hook_curl_right', 'DB4': 'zone_deep_middle'
+            'LB1': 'zone_hook_curl_middle',
+            'DB1': 'zone_deep_third_left', 'DB2': 'zone_deep_third_right', 'DB3': 'zone_hook_curl_left', 'DB4': 'zone_deep_middle'
         }
     },
     'Fire_Zone_3': {
@@ -1576,9 +1576,9 @@ export const defensivePlaybook = {
         compatibleFormations: ['3-1-4'],
         tags: ['zone', 'blitz', 'firezone'],
         assignments: {
-            'DL1': 'zone_short_middle', 'DL2': 'pass_rush', 'DL3': 'pass_rush',
-            'LB1': 'blitz_edge',
-            'DB1': 'zone_deep_third_left', 'DB2': 'zone_deep_third_right', 'DB3': 'zone_flat_right', 'DB4': 'zone_deep_middle'
+            'DL1': 'pass_rush', 'DL2': 'pass_rush', 'DL3': 'zone_short_middle',
+            'LB1': 'blitz_gap',
+            'DB1': 'zone_deep_third_left', 'DB2': 'zone_deep_third_right', 'DB3': 'zone_flat_left', 'DB4': 'zone_deep_middle'
         }
     },
     'Cover_6_Split': {
