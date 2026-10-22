@@ -19,7 +19,7 @@ import {
     initializeTeamStaff, generateStaffPool, checkRetiredPlayerToCoach,
     aiManageTeamStaff, aiBuildGameplan, aiChooseWeeklyPractice,
     ensureAiStaffWorkPlan, getTeamCoachingSpecialist,
-    processWeeklyCoachDevelopment
+    processWeeklyCoachDevelopment,ensureTeamStaffWorkPlan
 } from './staff.js';
 import {
     evaluatePlayerRetention,
