@@ -267,9 +267,9 @@ export function setupInitialPlayerStates(playState, offense, defense, play, assi
             let playerId = playState.resolvedDepth[side]?.[slot];
             let player = getPlayer(playerId);
 
-            // Validate defensive personnel against the slot they are filling.
-            // A different snap formation can contain slots missing from the
-            // team's stored depth chart, so never trust an unsuitable fallback.
+            // Validate defensive personnel against the formation slot.
+            // Stored depth charts and fallback resolution are not sufficient
+            // guarantees that a player is eligible for the current slot.
             if (!isOffense) {
                 let requiredPosition = slot.replace(/\d+/g, '');
 
@@ -304,7 +304,7 @@ export function setupInitialPlayerStates(playState, offense, defense, play, assi
 
                     playerId = player?.id || null;
 
-                    if (playerId && playState.resolvedDepth[side]) {
+                    if (playState.resolvedDepth[side]) {
                         playState.resolvedDepth[side][slot] = playerId;
                     }
                 }
@@ -346,17 +346,6 @@ export function setupInitialPlayerStates(playState, offense, defense, play, assi
             let assignment = isOffense
                 ? getAssignment(slot, assignments, formationMapping, true)
                 : defAssignments[slot];
-
-            // FIX: Auto-mirror inverted left/right zone assignments.
-            // If a defender is aligned on the left (x < CENTER_X - 1.5) but assigned a right-side zone
-            // (or vice versa), align the assignment to match their alignment side.
-            if (!isOffense && assignment?.startsWith('zone_')) {
-                if (startX < CENTER_X - 1.5) {
-                    assignment = assignment.replace('_right', '_left');
-                } else if (startX > CENTER_X + 1.5) {
-                    assignment = assignment.replace('_left', '_right');
-                }
-            }
 
             if (isOffense) {
                 for (const [role, mappedSlot] of Object.entries(formationMapping)) {
@@ -662,22 +651,8 @@ export function setupInitialPlayerStates(playState, offense, defense, play, assi
                     startY = playState.lineOfScrimmage + 1.25;
                 }
 
-                // FIX: Support edge blitzers (LB) and spread formations (WR/TE flexes)
-                const isEdgeRusher = (slot.startsWith('DL') || slot.startsWith('LB')) &&
-                    (assignment?.includes('rush') || assignment?.includes('edge') || assignment?.includes('blitz_edge'));
-
-                if (isEdgeRusher) {
-                    // Check widest offensive skill player on the right
-                    const offRight = initialOffenseStates.filter(o => o.x > CENTER_X).sort((a, b) => b.x - a.x)[0];
-                    if (offRight && startX >= CENTER_X && startX <= offRight.x) {
-                        startX = Math.min(51.5, Math.max(startX, offRight.x + 1.4));
-                    }
-                    // Check widest offensive skill player on the left
-                    const offLeft = initialOffenseStates.filter(o => o.x < CENTER_X).sort((a, b) => a.x - b.x)[0];
-                    if (offLeft && startX <= CENTER_X && startX >= offLeft.x) {
-                        startX = Math.max(1.8, Math.min(startX, offLeft.x - 1.4));
-                    }
-                }
+                // Preserve the defensive formation's authored starting coordinates.
+                // Post-snap rush paths and targets are handled by movement intent.
             }
 
             if (player.fatigue === undefined || isNaN(player.fatigue)) player.fatigue = 0;
@@ -738,6 +713,7 @@ export function setupInitialPlayerStates(playState, offense, defense, play, assi
                 experienceSeasons: player.careerStats?.seasonsPlayed || 0,
                 experienceSnaps: player.careerStats?.snapsThisSeason || 0,
                 x: startX, y: startY, initialX: startX, initialY: startY,
+                angle: isOffense ? 0 : Math.PI,
                 targetX, targetY,
                 fatigueModifier: fatigueMod,
                 spd: speed, agi: agility, str: strength, jump: jumping,
