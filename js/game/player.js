@@ -805,12 +805,14 @@ export function generatePlayer(minAge = 12, maxAge = 18, classModifiers = null) 
     const loyaltyRoll = gaussianRandom(60, 20);
 
     // --- GENERATE LORE BACKGROUND BLURB ---
+    // --- GENERATE LORE BACKGROUND BLURB ---
     const generateBio = () => {
         const speedVal = attributes.physical?.speed || 50;
         const strVal = attributes.physical?.strength || 50;
         const iqVal = attributes.mental?.playbookIQ || 50;
         const egoVal = egoRoll;
         const ethVal = workEthicRoll;
+        const cred = streetCredRoll; // FIX: Define cred here so the lore logic can read it!
 
         const athleticClues = [
             speedVal > 65
