@@ -1094,6 +1094,13 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                 target.isBlocked = true;
                 target.blockedBy = blocker;
 
+                // PHYSICS FIX: When two players collide and lock up, their forward momentum 
+                // must violently crash so they don't slide 3 yards downfield together on ice.
+                blocker.vx *= 0.15;
+                blocker.vy *= 0.15;
+                target.vx *= 0.15;
+                target.vy *= 0.15;
+
                 playState.blockBattles.push({
                     blocker, defender: target,
                     status: 'ongoing',

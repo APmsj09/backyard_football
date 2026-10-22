@@ -609,56 +609,35 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
     let steeringX = dx / safeDist;
     let steeringY = dy / safeDist;
 
-    // A free defensive linebacker should scrape around a teammate DL
-    // when the direct route to his assignment is physically obstructed.
-    // This changes the steering direction, not collision or blocking rules.
-    if (
-        pState.role === 'LB' &&
-        pState.isOffense === false &&
-        distToTarget > 1.5
-    ) {
+    // UNIVERSAL OBSTACLE AVOIDANCE:
+    // Any free player (pursuer, pulling guard, or runner) should scrape around 
+    // engaged blocks when the direct route to their target is physically obstructed.
+    if (distToTarget > 1.5 && pState.movementMode !== 'ROUTE') {
         const pathLengthSquared = distToTarget * distToTarget;
         let nearestProjection = Infinity;
         let avoidanceSide = 0;
 
         for (const other of allPlayers) {
-            if (
-                other.id === pState.id ||
-                other.isOffense !== pState.isOffense ||
-                other.role !== 'DL'
-            ) {
-                continue;
-            }
+            // Only avoid players who are actively locked up in a block
+            if (other.id === pState.id || !other.isEngaged) continue;
 
             const offsetX = other.x - pState.x;
             const offsetY = other.y - pState.y;
 
-            // Find where the DL falls along the LB's direct path.
-            const along = (
-                offsetX * dx +
-                offsetY * dy
-            ) / pathLengthSquared;
+            // Find where the engaged player falls along the direct path.
+            const along = (offsetX * dx + offsetY * dy) / pathLengthSquared;
 
-            if (
-                along <= 0.05 ||
-                along >= 0.95 ||
-                along >= nearestProjection
-            ) {
-                continue;
-            }
+            if (along <= 0.05 || along >= 0.95 || along >= nearestProjection) continue;
 
-            // Ignore linemen who are not close enough to obstruct the path.
-            const lateralDistance = Math.abs(
-                offsetX * dy - offsetY * dx
-            ) / safeDist;
-
-            if (lateralDistance >= 1.45) continue;
+            // Ignore blocks that are not close enough to obstruct the path laterally.
+            // 1.65 yards represents the approximate physical width of two engaged players.
+            const lateralDistance = Math.abs(offsetX * dy - offsetY * dx) / safeDist;
+            if (lateralDistance >= 1.65) continue; 
 
             nearestProjection = along;
 
-            // Steer away from the side of the path occupied by the DL.
+            // Steer away from the side of the path occupied by the engaged pile.
             const cross = dx * offsetY - dy * offsetX;
-
             avoidanceSide = Math.abs(cross) > (0.15 * safeDist)
                 ? (cross < 0 ? -1 : 1)
                 : (pState.x < other.x ? -1 : 1);
@@ -668,15 +647,11 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
             const directX = steeringX;
             const directY = steeringY;
 
-            // Blend forward movement with a lateral sidestep.
-            steeringX = directX + (directY * avoidanceSide * 0.75);
-            steeringY = directY - (directX * avoidanceSide * 0.75);
+            // Blend forward movement with a stronger lateral sidestep to clear the pile.
+            steeringX = directX + (directY * avoidanceSide * 1.15);
+            steeringY = directY - (directX * avoidanceSide * 1.15);
 
-            const steeringMagnitude = Math.hypot(
-                steeringX,
-                steeringY
-            );
-
+            const steeringMagnitude = Math.hypot(steeringX, steeringY);
             if (steeringMagnitude > 0.001) {
                 steeringX /= steeringMagnitude;
                 steeringY /= steeringMagnitude;

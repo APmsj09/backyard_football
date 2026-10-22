@@ -1207,10 +1207,15 @@ export function processEndOfWeek() {
     const developmentYear = Number(game.year);
     const developmentWeek = Number(game.currentWeek) + 1;
 
-    game.teams.forEach(team => {
-        if (!team) return;
+    // Coaching development begins when the user takes over in Year 5.
+    // Historical season simulation must not run the new staff system.
+    if (developmentYear >= 5) {
+        game.teams.forEach(team => {
+            if (!team) return;
 
-        if (team.id !== game.playerTeam?.id) {
+            if (team.id === game.playerTeam?.id) {
+            ensureTeamStaffWorkPlan(team);
+        } else {
             ensureAiStaffWorkPlan(
                 team,
                 game,
@@ -1224,7 +1229,8 @@ export function processEndOfWeek() {
             developmentYear,
             developmentWeek
         );
-    });
+        });
+    }
 
     endOfWeekCleanup();
 }

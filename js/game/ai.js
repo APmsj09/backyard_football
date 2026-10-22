@@ -1095,6 +1095,13 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
     // Once the QB commits to a scramble, don't resume passing decisions.
     if (qbState.action === 'run_path' && playState.qbIntent === 'scramble') return;
 
+    // Do not execute passing progressions on designed run plays!
+    // (Unless it's a trick pass or the QB has officially aborted the handoff to scramble)
+    const isTrickPass = playState.playKey === 'Trick_Flea_Flicker' && playState.fleaFlickerPhase === 'qb_pass';
+    if (playState.type === 'run' && !isTrickPass && playState.qbIntent !== 'scramble') {
+        return;
+    }
+
     const debugEnabled = isDebugMode();
 
     if (typeof qbState.ticksInPocket === 'undefined') qbState.ticksInPocket = 0;
